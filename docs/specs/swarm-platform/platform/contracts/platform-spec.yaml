@@ -5618,7 +5618,14 @@ cli_specification:
         - event_view
         - event_replay
         - event_publish
+        - logs
         - run
+        implemented_consumer_residuals:
+          logs: >
+            `swarm logs` is implemented for default-text snapshot and follow in #876 and is no longer an absent
+            command row. JSON/quiet/shared-renderer behavior remains governed by the output_contract and may be
+            implemented by the separate #794/#848/#735 output-mode/shared-renderer tail; #876 does not add
+            command-local output-mode flags or semantics.
       exception_rules:
         root_help_completion:
           commands:
@@ -5656,7 +5663,6 @@ cli_specification:
           - entities_list
           - entity_view
           - entity_aggregate
-          - logs
           - incidents
           rule: >
             Absent or blocked command rows do not receive output-mode implementation from #848. Their future
