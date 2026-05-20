@@ -57,6 +57,7 @@ type PipelineCoordinator struct {
 	timerScheduleStore      SchedulePersistence
 	eventReceiptsCapability func(context.Context) (bool, error)
 	artifactRoot            string
+	bundleFingerprint       string
 
 	testSubscribeHook   func()
 	testEntityStateHook func(entityID, state string)
@@ -71,6 +72,7 @@ type PipelineCoordinatorOptions struct {
 	TimerScheduleStore      SchedulePersistence
 	EventReceiptsCapability func(context.Context) (bool, error)
 	ArtifactRoot            string
+	BundleFingerprint       string
 }
 
 func NewPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordinatorOptions) *PipelineCoordinator {
@@ -93,6 +95,7 @@ func NewPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordin
 		timerScheduleStore:      opts.TimerScheduleStore,
 		eventReceiptsCapability: opts.EventReceiptsCapability,
 		artifactRoot:            strings.TrimSpace(opts.ArtifactRoot),
+		bundleFingerprint:       strings.TrimSpace(opts.BundleFingerprint),
 		entityLocks:             make(map[string]*sync.Mutex),
 	}
 }

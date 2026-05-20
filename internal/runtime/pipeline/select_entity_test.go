@@ -131,9 +131,35 @@ func TestRepairContractEntityTypesRepairsResolvableDefaultRows(t *testing.T) {
 	t.Cleanup(cleanup)
 
 	pc, _ := newSelectEntityTestCoordinator(t, db)
+	pc.bundleFingerprint = "sha256:current"
 	ctx := testPipelineCoordinatorRunContext(t, pc)
 	resolvableID := uuid.NewString()
 	unresolvedID := uuid.NewString()
+	oldVersionID := uuid.NewString()
+	mismatchedBundleRunID := "88888888-8888-8888-8888-888888888888"
+	mismatchedBundleID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		UPDATE runs
+		SET bundle_fingerprint = 'sha256:current'
+		WHERE run_id = $1::uuid
+	`, testPipelineRunID); err != nil {
+		t.Fatalf("seed current run bundle fingerprint: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, bundle_fingerprint)
+		VALUES ($1::uuid, 'running', 'sha256:old')
+	`, mismatchedBundleRunID); err != nil {
+		t.Fatalf("seed mismatched bundle run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
+		VALUES
+			('treasury/legacy', 'treasury', 'template', '{"workflow_version":"1.0.0"}'::jsonb, 'active', now()),
+			('treasury/legacy-old-version', 'treasury', 'template', '{"workflow_version":"0.9.0"}'::jsonb, 'active', now()),
+			('treasury/legacy-old-bundle', 'treasury', 'template', '{"workflow_version":"1.0.0"}'::jsonb, 'active', now())
+	`); err != nil {
+		t.Fatalf("seed flow_instances: %v", err)
+	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_state (
 			run_id, entity_id, flow_instance, entity_type, current_state,
@@ -142,8 +168,12 @@ func TestRepairContractEntityTypesRepairsResolvableDefaultRows(t *testing.T) {
 			($1::uuid, $2::uuid, 'treasury/legacy', 'default', 'active',
 			 '{}'::jsonb, '{"entity_type":"not-authority","vertical_id":"vertical-1"}'::jsonb, '{}'::jsonb, 1, now(), now(), now()),
 			($1::uuid, $3::uuid, 'unknown/legacy', 'default', 'active',
+			 '{}'::jsonb, '{"entity_type":"opco_budget"}'::jsonb, '{}'::jsonb, 1, now(), now(), now()),
+			($1::uuid, $4::uuid, 'treasury/legacy-old-version', 'default', 'active',
+			 '{}'::jsonb, '{"entity_type":"opco_budget"}'::jsonb, '{}'::jsonb, 1, now(), now(), now()),
+			($6::uuid, $5::uuid, 'treasury/legacy-old-bundle', 'default', 'active',
 			 '{}'::jsonb, '{"entity_type":"opco_budget"}'::jsonb, '{}'::jsonb, 1, now(), now(), now())
-	`, testPipelineRunID, resolvableID, unresolvedID); err != nil {
+	`, testPipelineRunID, resolvableID, unresolvedID, oldVersionID, mismatchedBundleID, mismatchedBundleRunID); err != nil {
 		t.Fatalf("seed default entity_state rows: %v", err)
 	}
 
@@ -156,6 +186,8 @@ func TestRepairContractEntityTypesRepairsResolvableDefaultRows(t *testing.T) {
 	}
 	assertEntityStateEntityType(t, db, resolvableID, "opco_budget")
 	assertEntityStateEntityType(t, db, unresolvedID, "default")
+	assertEntityStateEntityType(t, db, oldVersionID, "default")
+	assertEntityStateEntityTypeForRun(t, db, mismatchedBundleRunID, mismatchedBundleID, "default")
 }
 
 func TestExecuteNodeContractHandlerSelectOrCreateEntityReplayUsesSameDeclaredKey(t *testing.T) {
@@ -855,12 +887,17 @@ func assertEntityStateRowCount(t *testing.T, db *sql.DB, want int) {
 
 func assertEntityStateEntityType(t *testing.T, db *sql.DB, entityID, want string) {
 	t.Helper()
+	assertEntityStateEntityTypeForRun(t, db, testPipelineRunID, entityID, want)
+}
+
+func assertEntityStateEntityTypeForRun(t *testing.T, db *sql.DB, runID, entityID, want string) {
+	t.Helper()
 	var got string
 	if err := db.QueryRowContext(context.Background(), `
 		SELECT COALESCE(entity_type, '')
 		FROM entity_state
 		WHERE run_id = $1::uuid AND entity_id = $2::uuid
-	`, testPipelineRunID, entityID).Scan(&got); err != nil {
+	`, runID, entityID).Scan(&got); err != nil {
 		t.Fatalf("load entity_state entity_type for %s: %v", entityID, err)
 	}
 	if got != want {
