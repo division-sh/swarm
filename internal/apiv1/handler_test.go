@@ -151,12 +151,12 @@ func TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics(t *testing.T) {
 		{name: "invalid request array id", body: `{"jsonrpc":"2.0","id":[],"method":"rpc.unsubscribe","params":{"subscription_id":"sub-1"}}`, wantCode: codeInvalidRequest},
 		{name: "invalid request boolean id", body: `{"jsonrpc":"2.0","id":true,"method":"rpc.unsubscribe","params":{"subscription_id":"sub-1"}}`, wantCode: codeInvalidRequest},
 		{name: "method not found", body: `{"jsonrpc":"2.0","id":"missing","method":"missing.method","params":{}}`, wantCode: codeMethodNotFound},
-		{name: "invalid params object", body: `{"jsonrpc":"2.0","id":"bad-params-object","method":"rpc.unsubscribe","params":["sub-1"]}`, wantCode: codeInvalidParams},
-		{name: "invalid params required", body: `{"jsonrpc":"2.0","id":"bad-params-required","method":"rpc.unsubscribe","params":{}}`, wantCode: codeInvalidParams},
+		{name: "invalid params object", body: `{"jsonrpc":"2.0","id":"bad-params-object","method":"run.get","params":["run-1"]}`, wantCode: codeInvalidParams},
+		{name: "invalid params required", body: `{"jsonrpc":"2.0","id":"bad-params-required","method":"run.get","params":{}}`, wantCode: codeInvalidParams},
 		{name: "invalid integer param", body: `{"jsonrpc":"2.0","id":"bad-integer","method":"run.list","params":{"limit":1.5}}`, wantCode: codeInvalidParams},
 		{name: "known business method unavailable", body: `{"jsonrpc":"2.0","id":"known","method":"run.list","params":{}}`, wantApp: MethodUnavailableCode},
 		{name: "internal error", body: `{"jsonrpc":"2.0","id":"internal","method":"health.ping","params":{}}`, wantCode: codeInternalError},
-		{name: "unsubscribe success", body: `{"jsonrpc":"2.0","id":"ok","method":"rpc.unsubscribe","params":{"subscription_id":"sub-1"}}`, headerCID: "trace-123", wantOK: true},
+		{name: "unsubscribe wrong transport", body: `{"jsonrpc":"2.0","id":"wrong-transport","method":"rpc.unsubscribe","params":{"subscription_id":"sub-1"}}`, headerCID: "trace-123", wantCode: codeMethodNotFound},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
