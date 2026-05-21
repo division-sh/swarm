@@ -8335,12 +8335,16 @@ api_specification:
         type: object
         additionalProperties: false
         required:
+        - turn_index
         - turn_id
         - trigger_event_id
         - trigger_event_type
         - parse_ok
         - latency_ms
         properties:
+          turn_index:
+            type: integer
+            minimum: 1
           turn_id:
             $ref: '#/components/schemas/OpaqueId'
           trigger_event_id:

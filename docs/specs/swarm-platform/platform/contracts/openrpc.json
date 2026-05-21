@@ -6836,9 +6836,14 @@
           },
           "turn_id": {
             "$ref": "#/components/schemas/OpaqueId"
+          },
+          "turn_index": {
+            "minimum": 1,
+            "type": "integer"
           }
         },
         "required": [
+          "turn_index",
           "turn_id",
           "trigger_event_id",
           "trigger_event_type",

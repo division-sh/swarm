@@ -319,6 +319,7 @@ func (s stubConversations) LoadOperatorConversation(_ context.Context, sessionID
 	}
 	for _, turn := range item.Turns {
 		out.Turns = append(out.Turns, store.OperatorConversationTurn{
+			TurnIndex:              turn.TurnIndex,
 			TurnID:                 turn.TurnID,
 			AgentID:                turn.AgentID,
 			SessionID:              turn.SessionID,
@@ -1042,6 +1043,7 @@ func TestHandler_ConversationsAndAggregates(t *testing.T) {
 					UpdatedAt: now.Format(time.RFC3339),
 					Messages:  []ConversationMessage{{Role: "assistant", Content: "hi"}},
 					Turns: []ConversationTurn{{
+						TurnIndex:              1,
 						TurnID:                 "turn-1",
 						AssistantVisibleOutput: "done",
 					}},
@@ -1117,6 +1119,9 @@ func TestHandler_ConversationsAndAggregates(t *testing.T) {
 	}
 	if detail.AgentID != "agent-1" || len(detail.Messages) != 1 || len(detail.Turns) != 1 {
 		t.Fatalf("unexpected conversation detail: %+v", detail)
+	}
+	if detail.Turns[0].TurnIndex != 1 {
+		t.Fatalf("turn_index = %d, want 1", detail.Turns[0].TurnIndex)
 	}
 
 	rec = httptest.NewRecorder()
@@ -1545,6 +1550,56 @@ func TestSQLConversationReader_ListAndGet(t *testing.T) {
 		t.Fatalf("expected missing canonical summary to fail closed, got %v", err)
 	}
 
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
+func TestSQLConversationReader_ListAndGetProjectsTurnIndex(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	reader := NewSQLConversationReader(db, stubConversationCaps{caps: store.StoreSchemaCapabilities{
+		Conversations: store.ConversationSchemaCapabilities{
+			Sessions:   store.SchemaFlavorCanonical,
+			Turns:      store.SchemaFlavorCanonical,
+			TurnBlocks: true,
+		},
+	}})
+	now := time.Date(2026, 3, 17, 15, 0, 0, 0, time.UTC)
+	turnBlocksPayload := `[{"kind":"turn_summary","data":{"assistant_visible_output":"done","outcome":"complete"}}]`
+
+	mock.ExpectQuery("SELECT\\s+session_id,\\s+agent_id,\\s+kind,.*COALESCE\\(conversation, '\\[\\]'::jsonb\\).*FROM \\(").
+		WithArgs("sess-1").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"session_id", "agent_id", "kind", "scope_key", "scope", "runtime_mode", "status", "turn_count", "runtime_state", "conversation", "updated_at",
+		}).AddRow("sess-1", "agent-1", "live_session", "global", "global", "session", "active", 1, []byte(`{"summary":"brief"}`), []byte(`[]`), now))
+
+	mock.ExpectQuery("SELECT\\s+turn_id::text,.*FROM agent_turns").
+		WithArgs("agent-1", "sess-1").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"turn_id", "agent_id", "session_id", "runtime_mode", "scope_key", "entity_id", "trigger_event_id", "trigger_event_type", "task_id",
+			"available_tools", "tool_calls", "emitted_events", "mcp_servers", "mcp_tools_listed", "mcp_tools_visible",
+			"request_payload", "response_payload", "turn_blocks", "parse_ok", "latency_ms", "retry_count", "error", "created_at",
+		}).AddRow(
+			"turn-1", "agent-1", "sess-1", "session", "global", "", "evt-1", "task.started", "task-1",
+			[]byte(`[]`), []byte(`[]`), []byte(`[]`), []byte(`{}`), []byte(`[]`), []byte(`[]`),
+			[]byte(`{}`), []byte(`{}`), []byte(turnBlocksPayload), true, 7, 0, "", now,
+		))
+
+	item, ok, err := reader.Get(context.Background(), "sess-1")
+	if err != nil {
+		t.Fatalf("get conversation: %v", err)
+	}
+	if !ok || len(item.Turns) != 1 {
+		t.Fatalf("unexpected detail: %+v", item)
+	}
+	if item.Turns[0].TurnIndex != 1 {
+		t.Fatalf("turn_index = %d, want 1", item.Turns[0].TurnIndex)
+	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations: %v", err)
 	}

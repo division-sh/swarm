@@ -206,6 +206,7 @@ func conversationMessagesFromOperator(items []store.OperatorConversationMessage)
 
 func conversationTurnFromOperator(item store.OperatorConversationTurn) ConversationTurn {
 	return ConversationTurn{
+		TurnIndex:              item.TurnIndex,
 		TurnID:                 strings.TrimSpace(item.TurnID),
 		AgentID:                strings.TrimSpace(item.AgentID),
 		SessionID:              strings.TrimSpace(item.SessionID),
