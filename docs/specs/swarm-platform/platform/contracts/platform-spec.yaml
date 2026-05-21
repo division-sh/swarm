@@ -5543,9 +5543,13 @@ cli_specification:
       gates from citing the ignored review artifact as merge authority.
     under_promoted_review_features:
       universal_flags_config_env_precedence:
-        disposition: tracked_child
+        disposition: promoted_first_slice
         tracker: '#844'
-        action: Promote exact universal flag, config-file, and environment-precedence rules before implementation.
+        action: >
+          API connection/auth/config authority is promoted in
+          cli_specification.foundations.api_connection_auth_config_precedence. Output/logging, retry,
+          contract-path, and serve listener environment/config behavior remain split until later children promote
+          their own merge-bearing owners.
       exit_code_and_error_channel_normalization:
         disposition: promoted_first_slice
         tracker: '#846'
@@ -5884,6 +5888,110 @@ cli_specification:
       - stdout/stderr tests proving successful machine-readable stdout is not contaminated by diagnostics/errors
       - no direct DB/store/runtime/EventBus reads for API-backed output rendering
     auth_boundary: 'Runtime-state commands use v1 bearer auth through `SWARM_API_TOKEN`; legacy Builder/operator token fallback is invalid.'
+    api_connection_auth_config_precedence:
+      promoted_by: '#844'
+      implementation_status: authority_promoted_behavior_pending
+      canonical_owner: docs/specs/swarm-platform/platform/contracts/platform-spec.yaml#cli_specification.foundations.api_connection_auth_config_precedence
+      scope: >
+        Merge-bearing authority for CLI API base URL selection, bearer-token selection, and CLI config-file
+        discovery for API-backed commands. This first slice does not add Cobra flags, runtime behavior, OpenRPC
+        behavior, retry behavior, output rendering, or serve listener binding.
+      applies_to:
+      - Runtime-state CLI commands that call the platform JSON-RPC or WebSocket API.
+      - '`swarm version --server` when it queries the platform API.'
+      - '`swarm run --connect` only for shared API client/auth error categories; run mode and follow semantics remain #743.'
+      not_applies_to:
+      - '`swarm serve` runtime configuration such as the existing command-local `--config` runtime-config path.'
+      - '`swarm verify` contract-file validation, except for future separately promoted contract-path defaults.'
+      - Output mode, logging verbosity, retry, color, contract path, and platform-spec path resolution.
+      precedence_order:
+      - flag
+      - environment
+      - config_file
+      - built_in_default
+      api_server:
+        accepted_sources:
+          flag: --api-server <url>
+          environment: SWARM_API_SERVER
+          config_key: api_server
+          built_in_default: http://127.0.0.1:8081
+        value_model: >
+          The configured value is an API server base URL, not a direct `/v1/rpc` endpoint. It MUST include an
+          `http` or `https` scheme and host, MUST NOT include query or fragment components, and SHOULD use an
+          empty path or `/`. API clients derive `/v1/rpc` and `/v1/ws` from that base URL per the command's
+          transport needs.
+        rationale: >
+          The ignored review artifact used `http://localhost:8081`; the promoted spec uses `127.0.0.1` to
+          match serve listener loopback defaults and avoid hostname/IPv6 ambiguity. Current code that stores a
+          full `/v1/rpc` endpoint is migration evidence only until behavior consumes this owner.
+      api_token:
+        accepted_sources:
+          flag_file: --api-token-file <path>
+          environment_token: SWARM_API_TOKEN
+          environment_file: SWARM_API_TOKEN_FILE
+          config_file_key: api_token_file
+        source_order:
+        - --api-token-file
+        - SWARM_API_TOKEN
+        - SWARM_API_TOKEN_FILE
+        - config api_token_file
+        rejected_sources:
+          --api-token: >
+            Not promoted. Inline token flags leak secrets into shell history and process listings; operators
+            must use `SWARM_API_TOKEN` for ephemeral credentials or token-file sources for file-backed
+            credentials.
+          config api_token: >
+            Not promoted. The config file may point at a token file but MUST NOT store the bearer token inline.
+        token_file_rule: >
+          Token-file sources are read once during CLI command startup by the API client/auth resolver. Missing,
+          unreadable, or blank token-file contents classify through the shared CLI error/exit-code contract.
+      cli_config_file:
+        owner: docs/specs/swarm-platform/platform/contracts/platform-spec.yaml#cli_specification.foundations.api_connection_auth_config_precedence.cli_config_file
+        accepted_sources:
+          environment: SWARM_CONFIG
+          xdg_default: '${XDG_CONFIG_HOME:-$HOME/.config}/swarm/config.yaml'
+        rejected_sources:
+          --config: >
+            Not promoted as a root/global CLI config flag in this first slice. The current `swarm serve
+            --config` flag is command-local runtime configuration, so promoting root `--config` now would create
+            dual semantic ownership. If a flag override is needed later, prefer a separately gated `--cli-config`
+            or an explicit rename/migration of the serve runtime-config flag.
+        accepted_keys:
+          api_server: API server base URL consumed by API-backed commands.
+          api_token_file: Path to a file containing the bearer token.
+        rejected_keys:
+          api_token: Inline bearer tokens in config files are not promoted.
+          output_format: Split to #848 output renderer implementation.
+          no_color: Split to output/color universal flag work.
+          contracts_path: Split to contract-path resolution.
+          platform_spec_path: Split to contract-path resolution.
+          log_level: Split to logging/output work.
+          retry: Split to retry policy work.
+          serve_api_listen_addr: Split to #884/#750 serve listener implementation.
+          serve_mcp_listen_addr: Split to #884/#750 serve listener implementation.
+      serve_listener_env_config_boundary:
+        rejected_ports:
+          SWARM_API_PORT: 'Not promoted; final v2.1 listener topology uses full listen addresses.'
+          SWARM_MCP_PORT: 'Not promoted; final v2.1 listener topology uses full listen addresses.'
+        reserved_candidates:
+          SWARM_API_LISTEN_ADDR: 'Candidate environment name for a later #884/#750 listener implementation child; not accepted by this first-slice API client resolver.'
+          SWARM_MCP_LISTEN_ADDR: 'Candidate environment name for a later #884/#750 listener implementation child; not accepted by this first-slice API client resolver.'
+        rule: >
+          API client connection settings and serve listener bind settings are different concepts. This owner
+          governs where CLI clients connect; listener bind flags/env/config remain under the serve topology owner
+          until a later child promotes and implements them.
+      split_siblings:
+      - '#848 output modes/shared renderer; spec promoted, implementation pending'
+      - '#846 error-channel and exit-code classification; closed first slice'
+      - '#844 later behavior child for API config/auth resolver implementation'
+      - '#884/#750 serve listener runtime implementation and listener env/config keys'
+      - '#743 swarm run behavior and follow semantics'
+      - 'contract path/platform spec path defaults'
+      - '`--no-retry` retry policy'
+      implementation_boundaries:
+      - 'This #844 first slice is source-of-truth repair only.'
+      - 'No Cobra persistent flag, runtime/client resolver, OpenRPC, output renderer, retry, or listener behavior changes are implied by this PR.'
+      - 'Future API-backed CLI config/auth implementation MUST consume this owner rather than the ignored review artifact.'
     error_channel_and_exit_code_contract:
       implemented_by: '#846'
       scope: >
