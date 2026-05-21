@@ -196,6 +196,37 @@ func TestCLIAPISettingsFailClosed(t *testing.T) {
 			wantExit: cliExitValidation,
 			wantErr:  "must not include query or fragment",
 		},
+		{
+			name: "flag API server rejects direct RPC endpoint",
+			setup: func(t *testing.T) rootCommandOptions {
+				t.Setenv("SWARM_API_TOKEN", "env-token")
+				return rootCommandOptions{apiServer: "http://127.0.0.1:8081/v1/rpc"}
+			},
+			wantExit: cliExitValidation,
+			wantErr:  "not a direct /v1/rpc endpoint",
+		},
+		{
+			name: "environment API server rejects direct websocket endpoint",
+			setup: func(t *testing.T) rootCommandOptions {
+				t.Setenv("SWARM_API_SERVER", "http://127.0.0.1:8081/v1/ws")
+				t.Setenv("SWARM_API_TOKEN", "env-token")
+				return rootCommandOptions{}
+			},
+			wantExit: cliExitValidation,
+			wantErr:  "not a direct /v1/ws endpoint",
+		},
+		{
+			name: "config API server rejects direct RPC endpoint",
+			setup: func(t *testing.T) rootCommandOptions {
+				t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
+					"api_server": "http://127.0.0.1:8081/v1/rpc",
+				}))
+				t.Setenv("SWARM_API_TOKEN", "env-token")
+				return rootCommandOptions{}
+			},
+			wantExit: cliExitValidation,
+			wantErr:  "not a direct /v1/rpc endpoint",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -317,15 +348,85 @@ func TestCLIAPIConfigDrivesRuntimeStateCommand(t *testing.T) {
 	}
 }
 
+func TestEndpointShapedAPIServerRejectedBeforeRequest(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		args  []string
+		setup func(t *testing.T, serverURL string, tokenFile string)
+		want  string
+	}{
+		{
+			name: "flag direct RPC endpoint",
+			args: []string{"runs", "--api-server", "{server}/v1/rpc", "--api-token-file", "{token}"},
+			want: "not a direct /v1/rpc endpoint",
+		},
+		{
+			name: "environment direct websocket endpoint",
+			args: []string{"runs"},
+			setup: func(t *testing.T, serverURL string, _ string) {
+				t.Setenv("SWARM_API_SERVER", serverURL+"/v1/ws")
+				t.Setenv("SWARM_API_TOKEN", "env-token")
+			},
+			want: "not a direct /v1/ws endpoint",
+		},
+		{
+			name: "config direct RPC endpoint",
+			args: []string{"runs"},
+			setup: func(t *testing.T, serverURL string, tokenFile string) {
+				t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
+					"api_server":     serverURL + "/v1/rpc",
+					"api_token_file": tokenFile,
+				}))
+			},
+			want: "not a direct /v1/rpc endpoint",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateCLIAPIConfigEnv(t)
+			tokenFile := writeCLIAPITokenFile(t, "test-token")
+			var sawRequest bool
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				sawRequest = true
+				http.Error(w, "unexpected request", http.StatusInternalServerError)
+			}))
+			defer server.Close()
+			args := append([]string(nil), tc.args...)
+			for i, arg := range args {
+				arg = strings.ReplaceAll(arg, "{server}", server.URL)
+				arg = strings.ReplaceAll(arg, "{token}", tokenFile)
+				args[i] = arg
+			}
+			if tc.setup != nil {
+				tc.setup(t, server.URL, tokenFile)
+			}
+			opts := defaultRootCommandOptions()
+			opts.httpClient = server.Client()
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, opts)
+			if code != cliExitValidation {
+				t.Fatalf("exit = %d stderr=%q stdout=%q", code, stderr.String(), stdout.String())
+			}
+			if !strings.Contains(stderr.String(), tc.want) {
+				t.Fatalf("stderr = %q, want %q", stderr.String(), tc.want)
+			}
+			if sawRequest {
+				t.Fatal("endpoint-shaped API server value reached the HTTP server")
+			}
+		})
+	}
+}
+
 func TestAPIConnectionFlagsRejectedOnNonAPISurfaces(t *testing.T) {
 	for _, tc := range []struct {
 		args       []string
 		wantStderr string
 	}{
 		{args: []string{"--api-server", "http://127.0.0.1:9"}, wantStderr: "unknown flag: --api-server"},
+		{args: []string{"--api-server", "http://127.0.0.1:9", "runs"}, wantStderr: "unknown flag: --api-server"},
 		{args: []string{"serve", "--api-server", "http://127.0.0.1:9"}, wantStderr: "unknown flag: --api-server"},
 		{args: []string{"verify", "--api-server", "http://127.0.0.1:9"}},
 		{args: []string{"run", "--api-server", "http://127.0.0.1:9"}, wantStderr: "unknown flag: --api-server"},
+		{args: []string{"events", "--api-server", "http://127.0.0.1:9", "list"}, wantStderr: "unknown flag: --api-server"},
 	} {
 		var stdout, stderr bytes.Buffer
 		code := executeRootCommandWithOptions(context.Background(), t.TempDir(), tc.args, &stdout, &stderr, defaultRootCommandOptions())

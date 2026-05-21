@@ -29,6 +29,12 @@ func executeRootCommand(ctx context.Context, repo string, args []string, out, er
 }
 
 func executeRootCommandWithOptions(ctx context.Context, repo string, args []string, out, errOut io.Writer, opts rootCommandOptions) int {
+	if err := validateCLIAPIConnectionFlagPlacement(args); err != nil {
+		if errOut != nil {
+			fmt.Fprintln(errOut, err)
+		}
+		return cliExitValidation
+	}
 	cmd := newRootCommandWithOptions(ctx, repo, out, errOut, opts)
 	cmd.SetArgs(args)
 	if err := cmd.ExecuteContext(ctx); err != nil {
