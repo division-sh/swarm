@@ -332,6 +332,20 @@ func TestConversationCommandsMapRuntimeFailuresAndMalformedResults(t *testing.T)
 			wantStderr: "advertised_tools is required",
 		},
 		{
+			name: "turn negative retry count exits three",
+			args: []string{"conversation", "turn", "sess-1", "1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				result := validConversationTurnDetail("sess-1", 1)
+				turn := result["turn"].(map[string]any)
+				turn["retry_count"] = -1
+				writeJSONRPCResult(t, w, req.ID, result)
+			},
+			wantCode:   3,
+			wantStderr: "retry_count must be non-negative",
+		},
+		{
 			name: "turn unknown rpc exits three",
 			args: []string{"conversation", "turn", "sess-1", "1"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
