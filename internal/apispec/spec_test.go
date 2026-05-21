@@ -16,11 +16,11 @@ func TestPlatformAPISpecValidationCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Validate() error = %v", err)
 	}
-	if report.MethodCount != 42 {
-		t.Fatalf("method count = %d, want 42", report.MethodCount)
+	if report.MethodCount != 43 {
+		t.Fatalf("method count = %d, want 43", report.MethodCount)
 	}
-	if report.SchemaCount != 59 {
-		t.Fatalf("schema count = %d, want 59", report.SchemaCount)
+	if report.SchemaCount != 63 {
+		t.Fatalf("schema count = %d, want 63", report.SchemaCount)
 	}
 	if report.ErrorCodeCount != 28 {
 		t.Fatalf("error code count = %d, want 28", report.ErrorCodeCount)
@@ -64,11 +64,11 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	if err := json.Unmarshal(artifact, &doc); err != nil {
 		t.Fatalf("unmarshal openrpc artifact: %v", err)
 	}
-	if len(doc.Methods) != 42 {
-		t.Fatalf("generated OpenRPC methods = %d, want 42", len(doc.Methods))
+	if len(doc.Methods) != 43 {
+		t.Fatalf("generated OpenRPC methods = %d, want 43", len(doc.Methods))
 	}
-	if len(doc.Components.Schemas) != 59 {
-		t.Fatalf("generated OpenRPC schemas = %d, want 59", len(doc.Components.Schemas))
+	if len(doc.Components.Schemas) != 63 {
+		t.Fatalf("generated OpenRPC schemas = %d, want 63", len(doc.Components.Schemas))
 	}
 	if len(doc.Components.Errors) != 28 {
 		t.Fatalf("generated OpenRPC errors = %d, want 28", len(doc.Components.Errors))
@@ -85,6 +85,9 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	}
 	if _, ok := methods["agent.replay"]; !ok {
 		t.Fatal("generated OpenRPC missing agent.replay")
+	}
+	if _, ok := methods["agent.diagnose"]; !ok {
+		t.Fatal("generated OpenRPC missing agent.diagnose")
 	}
 	if _, ok := methods["runtime.subscribe_logs"]; !ok {
 		t.Fatal("generated OpenRPC missing runtime.subscribe_logs")

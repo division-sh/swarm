@@ -237,6 +237,7 @@ func readOnlyHTTPRuntimeMethods(t *testing.T, api *apispec.APISpecification, ope
 
 func approvedReadOnlyHTTPRuntimeMethods() []string {
 	return []string{
+		"agent.diagnose",
 		"agent.get",
 		"agent.list",
 		"conversation.current_for_agent",
@@ -263,6 +264,7 @@ func approvedReadOnlyHTTPRuntimeMethods() []string {
 
 func readOnlyHTTPRuntimeFixtures() map[string]readOnlyHTTPRuntimeFixture {
 	return map[string]readOnlyHTTPRuntimeFixture{
+		"agent.diagnose":                 {Params: map[string]any{"agent_id": "agent-1"}, ResultKeys: []string{"agent_id", "status", "queue"}},
 		"agent.get":                      {Params: map[string]any{"agent_id": "agent-1"}, ResultKeys: []string{"agent"}},
 		"agent.list":                     {Params: map[string]any{}, ResultKeys: []string{"agents"}},
 		"conversation.current_for_agent": {Params: map[string]any{"agent_id": "agent-1"}, ResultKeys: []string{"conversation", "turns"}},
@@ -289,6 +291,16 @@ func readOnlyHTTPRuntimeFixtures() map[string]readOnlyHTTPRuntimeFixture {
 
 func readOnlyHTTPRuntimeErrorProbes() []readOnlyHTTPRuntimeErrorProbe {
 	return []readOnlyHTTPRuntimeErrorProbe{
+		{
+			Method: "agent.diagnose",
+			Params: map[string]any{"agent_id": "missing"},
+			Code:   AgentNotFoundCode,
+			Options: func(t *testing.T) OperatorReadOptions {
+				opts := readOnlyRuntimeProbeOptions(t)
+				opts.AgentConversations = &fakeAgentConversationReadStore{agentDiagnosisErr: store.ErrAgentNotFound}
+				return opts
+			},
+		},
 		{
 			Method: "agent.get",
 			Params: map[string]any{"agent_id": "missing"},
@@ -508,6 +520,18 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 				SessionScope:     "global",
 				Status:           "running",
 			}},
+			agentDiagnosisResult: store.OperatorAgentDiagnosis{
+				AgentID: "agent-1",
+				Status:  "running",
+				Queue: store.OperatorAgentDiagnosisQueue{
+					PendingCount:            2,
+					OldestPendingAgeSeconds: 30,
+				},
+				DeliveryLifecycle: &store.OperatorAgentDeliveryLifecycle{
+					State:         "active",
+					BlockingLayer: "session_execution",
+				},
+			},
 			listConversationsResult: store.OperatorConversationListResult{Conversations: []store.OperatorConversationSummary{{
 				SessionID:    sessionID,
 				AgentID:      "agent-1",
@@ -631,6 +655,17 @@ func assertReadOnlyProbeSuccess(t *testing.T, methodName string, resp rpcRespons
 		}
 		if got := asMap(t, turns[0])["turn_index"]; got != float64(1) {
 			t.Fatalf("%s first turn_index = %#v, want 1", methodName, got)
+		}
+	}
+	if methodName == "agent.diagnose" {
+		queue := asMap(t, result["queue"])
+		if queue["pending_count"] != float64(2) || queue["oldest_pending_age_seconds"] != float64(30) {
+			t.Fatalf("agent.diagnose queue = %#v", queue)
+		}
+		for _, splitField := range []string{"runtime_state", "bundle_version", "active", "watchdog", "last_tool_outcome", "token_usage", "failures_recent", "dead_letters_recent"} {
+			if _, ok := result[splitField]; ok {
+				t.Fatalf("agent.diagnose exposed split field %q: %#v", splitField, result)
+			}
 		}
 	}
 }

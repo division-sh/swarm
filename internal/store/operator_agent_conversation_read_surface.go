@@ -98,6 +98,7 @@ type OperatorAgentSummary struct {
 	StartedAt           time.Time           `json:"-"`
 	DashboardStatus     string              `json:"-"`
 	DashboardState      string              `json:"-"`
+	DeliveryLifecycle   string              `json:"-"`
 	BlockingLayer       string              `json:"-"`
 	CurrentSessionRef   *OperatorSessionRef `json:"-"`
 	LastTurnRef         *OperatorTurnRef    `json:"-"`
@@ -119,6 +120,25 @@ type OperatorAgentDetail struct {
 	Agent             OperatorAgentSummary `json:"agent"`
 	CurrentSessionRef *OperatorSessionRef  `json:"current_session_ref,omitempty"`
 	LastTurnRef       *OperatorTurnRef     `json:"last_turn_ref,omitempty"`
+}
+
+type OperatorAgentDiagnosis struct {
+	AgentID           string                          `json:"agent_id"`
+	Status            string                          `json:"status"`
+	CurrentSessionRef *OperatorSessionRef             `json:"current_session_ref,omitempty"`
+	LastTurnRef       *OperatorTurnRef                `json:"last_turn_ref,omitempty"`
+	Queue             OperatorAgentDiagnosisQueue     `json:"queue"`
+	DeliveryLifecycle *OperatorAgentDeliveryLifecycle `json:"delivery_lifecycle,omitempty"`
+}
+
+type OperatorAgentDiagnosisQueue struct {
+	PendingCount            int `json:"pending_count"`
+	OldestPendingAgeSeconds int `json:"oldest_pending_age_seconds"`
+}
+
+type OperatorAgentDeliveryLifecycle struct {
+	State         string `json:"state"`
+	BlockingLayer string `json:"blocking_layer"`
 }
 
 type OperatorAgentTool struct {
@@ -415,6 +435,10 @@ func (s *PostgresStore) LoadOperatorAgent(ctx context.Context, agentID string) (
 	return NewOperatorAgentConversationReadSurface(s.DB, s, 0).LoadOperatorAgent(ctx, agentID)
 }
 
+func (s *PostgresStore) LoadOperatorAgentDiagnosis(ctx context.Context, agentID string) (OperatorAgentDiagnosis, error) {
+	return NewOperatorAgentConversationReadSurface(s.DB, s, 0).LoadOperatorAgentDiagnosis(ctx, agentID)
+}
+
 func (s *PostgresStore) ListOperatorConversations(ctx context.Context, opts OperatorConversationListOptions) (OperatorConversationListResult, error) {
 	return NewOperatorAgentConversationReadSurface(s.DB, s, 0).ListOperatorConversations(ctx, opts)
 }
@@ -485,6 +509,18 @@ func (r *OperatorAgentConversationReadSurface) LoadOperatorAgent(ctx context.Con
 		}
 	}
 	return OperatorAgentDetail{}, ErrAgentNotFound
+}
+
+func (r *OperatorAgentConversationReadSurface) LoadOperatorAgentDiagnosis(ctx context.Context, agentID string) (OperatorAgentDiagnosis, error) {
+	detail, err := r.LoadOperatorAgent(ctx, agentID)
+	if err != nil {
+		return OperatorAgentDiagnosis{}, err
+	}
+	diagnosis, err := operatorAgentDiagnosisFromDetail(detail)
+	if err != nil {
+		return OperatorAgentDiagnosis{}, err
+	}
+	return diagnosis, nil
 }
 
 func (r *OperatorAgentConversationReadSurface) ListOperatorConversations(ctx context.Context, opts OperatorConversationListOptions) (OperatorConversationListResult, error) {
@@ -1188,6 +1224,7 @@ func operatorAgentSummaryFromPersisted(row runtimemanager.PersistedAgent, projec
 		StartedAt:           row.StartedAt,
 		DashboardStatus:     strings.TrimSpace(projection.Status),
 		DashboardState:      projection.dashboardState(),
+		DeliveryLifecycle:   strings.TrimSpace(projection.LifecycleState),
 		BlockingLayer:       projection.dashboardBlockingLayer(),
 		CurrentSessionRef:   projection.currentSessionRef(),
 		LastTurnRef:         projection.LastTurnRef,
@@ -1196,6 +1233,72 @@ func operatorAgentSummaryFromPersisted(row runtimemanager.PersistedAgent, projec
 		out.NearBreaker = out.TurnCount*100 >= out.TurnLimit*85
 	}
 	return out
+}
+
+func operatorAgentDiagnosisFromDetail(detail OperatorAgentDetail) (OperatorAgentDiagnosis, error) {
+	agent := detail.Agent
+	out := OperatorAgentDiagnosis{
+		AgentID:           strings.TrimSpace(agent.AgentID),
+		Status:            strings.TrimSpace(agent.Status),
+		CurrentSessionRef: detail.CurrentSessionRef,
+		LastTurnRef:       detail.LastTurnRef,
+		Queue: OperatorAgentDiagnosisQueue{
+			PendingCount:            agent.PendingEvents,
+			OldestPendingAgeSeconds: agent.OldestPendingAgeSec,
+		},
+	}
+	if state := strings.TrimSpace(agent.DeliveryLifecycle); state != "" {
+		out.DeliveryLifecycle = &OperatorAgentDeliveryLifecycle{
+			State:         state,
+			BlockingLayer: strings.TrimSpace(agent.BlockingLayer),
+		}
+	}
+	if err := validateOperatorAgentDiagnosis(out); err != nil {
+		return OperatorAgentDiagnosis{}, err
+	}
+	return out, nil
+}
+
+func validateOperatorAgentDiagnosis(item OperatorAgentDiagnosis) error {
+	if strings.TrimSpace(item.AgentID) == "" {
+		return fmt.Errorf("agent diagnosis agent_id is required")
+	}
+	if !validOperatorAgentDiagnosisStatus(item.Status) {
+		return fmt.Errorf("agent diagnosis status %q is not valid", item.Status)
+	}
+	if item.Queue.PendingCount < 0 {
+		return fmt.Errorf("agent diagnosis queue.pending_count must be non-negative")
+	}
+	if item.Queue.OldestPendingAgeSeconds < 0 {
+		return fmt.Errorf("agent diagnosis queue.oldest_pending_age_seconds must be non-negative")
+	}
+	if item.DeliveryLifecycle != nil {
+		if !validOperatorAgentDeliveryLifecycleState(item.DeliveryLifecycle.State) {
+			return fmt.Errorf("agent diagnosis delivery_lifecycle.state %q is not valid", item.DeliveryLifecycle.State)
+		}
+		if strings.TrimSpace(item.DeliveryLifecycle.BlockingLayer) == "" {
+			return fmt.Errorf("agent diagnosis delivery_lifecycle.blocking_layer is required")
+		}
+	}
+	return nil
+}
+
+func validOperatorAgentDiagnosisStatus(status string) bool {
+	switch strings.TrimSpace(status) {
+	case "idle", "running", "paused", "failed", "terminated":
+		return true
+	default:
+		return false
+	}
+}
+
+func validOperatorAgentDeliveryLifecycleState(state string) bool {
+	switch strings.TrimSpace(state) {
+	case "queued", "launching", "active", "retrying", "exhausted":
+		return true
+	default:
+		return false
+	}
 }
 
 func (p operatorAgentProjection) currentSessionRef() *OperatorSessionRef {

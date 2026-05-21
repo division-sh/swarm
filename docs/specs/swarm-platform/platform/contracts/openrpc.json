@@ -13,6 +13,66 @@
   ],
   "methods": [
     {
+      "name": "agent.diagnose",
+      "description": "Read the first owner-backed diagnosis slice for one agent. This method is\nlimited to agent identity/status refs, pending delivery count/oldest age,\nand optional delivery lifecycle evidence. The API handler consumes the\ncanonical agent diagnosis read owner directly. It must not join\nconversation, run, trace, token, queue-detail, CLI, or dashboard owners\nlocally, and it must not expose runtime_state, run_id, bundle_version,\nactive task/entity, watchdog, last tool outcome, token usage, recent\nfailures, dead letters, pending delivery details, attempts, or cursors.\n",
+      "params": [
+        {
+          "name": "agent_id",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/AgentDiagnosis"
+        }
+      },
+      "errors": [
+        {
+          "code": -32000,
+          "message": "Application error: AGENT_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "AGENT_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "agent_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "agent_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
       "name": "agent.get",
       "description": "Read one agent's identity, current operational status, and references\nto its current session and last turn. Returns refs only — full session\nand transcript content is read via conversation.* methods. Ownership\nboundary: agent.* never returns transcripts.\n",
       "params": [
@@ -5217,6 +5277,33 @@
   ],
   "components": {
     "schemas": {
+      "AgentDeliveryLifecycle": {
+        "additionalProperties": false,
+        "properties": {
+          "blocking_layer": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/AgentDeliveryLifecycleState"
+          }
+        },
+        "required": [
+          "state",
+          "blocking_layer"
+        ],
+        "type": "object"
+      },
+      "AgentDeliveryLifecycleState": {
+        "enum": [
+          "queued",
+          "launching",
+          "active",
+          "retrying",
+          "exhausted"
+        ],
+        "type": "string"
+      },
       "AgentDetail": {
         "additionalProperties": false,
         "properties": {
@@ -5232,6 +5319,53 @@
         },
         "required": [
           "agent"
+        ],
+        "type": "object"
+      },
+      "AgentDiagnosis": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "current_session_ref": {
+            "$ref": "#/components/schemas/SessionRef"
+          },
+          "delivery_lifecycle": {
+            "$ref": "#/components/schemas/AgentDeliveryLifecycle"
+          },
+          "last_turn_ref": {
+            "$ref": "#/components/schemas/TurnRef"
+          },
+          "queue": {
+            "$ref": "#/components/schemas/AgentDiagnosisQueue"
+          },
+          "status": {
+            "$ref": "#/components/schemas/AgentStatus"
+          }
+        },
+        "required": [
+          "agent_id",
+          "status",
+          "queue"
+        ],
+        "type": "object"
+      },
+      "AgentDiagnosisQueue": {
+        "additionalProperties": false,
+        "properties": {
+          "oldest_pending_age_seconds": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "pending_count": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "pending_count",
+          "oldest_pending_age_seconds"
         ],
         "type": "object"
       },

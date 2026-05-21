@@ -17,6 +17,8 @@ type fakeAgentConversationReadStore struct {
 	listAgentsErr                 error
 	agentResult                   store.OperatorAgentDetail
 	agentErr                      error
+	agentDiagnosisResult          store.OperatorAgentDiagnosis
+	agentDiagnosisErr             error
 	listConversationsResult       store.OperatorConversationListResult
 	listConversationsErr          error
 	conversationResult            store.OperatorConversationDetail
@@ -28,6 +30,7 @@ type fakeAgentConversationReadStore struct {
 	lastAgentList                 store.OperatorAgentListOptions
 	lastConversationList          store.OperatorConversationListOptions
 	lastAgentID                   string
+	lastAgentDiagnosisID          string
 	lastConversationSessionID     string
 	lastConversationTurnSessionID string
 	lastConversationTurnIndex     int
@@ -42,6 +45,11 @@ func (s *fakeAgentConversationReadStore) ListOperatorAgents(_ context.Context, o
 func (s *fakeAgentConversationReadStore) LoadOperatorAgent(_ context.Context, agentID string) (store.OperatorAgentDetail, error) {
 	s.lastAgentID = agentID
 	return s.agentResult, s.agentErr
+}
+
+func (s *fakeAgentConversationReadStore) LoadOperatorAgentDiagnosis(_ context.Context, agentID string) (store.OperatorAgentDiagnosis, error) {
+	s.lastAgentDiagnosisID = agentID
+	return s.agentDiagnosisResult, s.agentDiagnosisErr
 }
 
 func (s *fakeAgentConversationReadStore) ListOperatorConversations(_ context.Context, opts store.OperatorConversationListOptions) (store.OperatorConversationListResult, error) {
@@ -98,6 +106,18 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 			Status:           "running",
 		}}},
 		agentResult: store.OperatorAgentDetail{Agent: store.OperatorAgentSummary{AgentID: "agent-1", Role: "researcher"}},
+		agentDiagnosisResult: store.OperatorAgentDiagnosis{
+			AgentID: "agent-1",
+			Status:  "running",
+			Queue: store.OperatorAgentDiagnosisQueue{
+				PendingCount:            2,
+				OldestPendingAgeSeconds: 45,
+			},
+			DeliveryLifecycle: &store.OperatorAgentDeliveryLifecycle{
+				State:         "active",
+				BlockingLayer: "session_execution",
+			},
+		},
 		listConversationsResult: store.OperatorConversationListResult{
 			Conversations: []store.OperatorConversationSummary{{
 				SessionID:    "sess-1",
@@ -156,6 +176,38 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 	}
 	if reads.lastAgentID != "agent-1" {
 		t.Fatalf("agent.get id = %q", reads.lastAgentID)
+	}
+	agentResult := asMap(t, getAgent.Result)
+	agent := asMap(t, agentResult["agent"])
+	for _, splitField := range []string{"queue", "delivery_lifecycle", "runtime_state", "last_tool_outcome"} {
+		if _, ok := agent[splitField]; ok {
+			t.Fatalf("agent.get unexpectedly exposed diagnosis field %q: %#v", splitField, agent)
+		}
+	}
+
+	diagnoseAgent := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"diagnose","method":"agent.diagnose","params":{"agent_id":"agent-1"}}`)
+	if diagnoseAgent.Error != nil {
+		t.Fatalf("agent.diagnose error = %#v", diagnoseAgent.Error)
+	}
+	if reads.lastAgentDiagnosisID != "agent-1" {
+		t.Fatalf("agent.diagnose id = %q", reads.lastAgentDiagnosisID)
+	}
+	diagnosis := asMap(t, diagnoseAgent.Result)
+	if diagnosis["agent_id"] != "agent-1" || diagnosis["status"] != "running" {
+		t.Fatalf("agent.diagnose identity/status = %#v", diagnosis)
+	}
+	queue := asMap(t, diagnosis["queue"])
+	if queue["pending_count"] != float64(2) || queue["oldest_pending_age_seconds"] != float64(45) {
+		t.Fatalf("agent.diagnose queue = %#v", queue)
+	}
+	lifecycle := asMap(t, diagnosis["delivery_lifecycle"])
+	if lifecycle["state"] != "active" || lifecycle["blocking_layer"] != "session_execution" {
+		t.Fatalf("agent.diagnose lifecycle = %#v", lifecycle)
+	}
+	for _, splitField := range []string{"runtime_state", "bundle_version", "active", "watchdog", "last_tool_outcome", "token_usage", "failures_recent", "dead_letters_recent"} {
+		if _, ok := diagnosis[splitField]; ok {
+			t.Fatalf("agent.diagnose exposed split field %q: %#v", splitField, diagnosis)
+		}
 	}
 
 	listConversations := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"convs","method":"conversation.list","params":{"agent_id":"agent-1","run_id":"11111111-1111-1111-1111-111111111111","limit":10,"cursor":"abc"}}`)
@@ -372,6 +424,13 @@ func TestOperatorAgentConversationHandlersTypedErrors(t *testing.T) {
 			wantApp: AgentNotFoundCode,
 		},
 		{
+			name:    "agent diagnosis missing",
+			method:  "agent.diagnose",
+			body:    `{"jsonrpc":"2.0","id":"diagnose","method":"agent.diagnose","params":{"agent_id":"missing"}}`,
+			reads:   &fakeAgentConversationReadStore{agentDiagnosisErr: store.ErrAgentNotFound},
+			wantApp: AgentNotFoundCode,
+		},
+		{
 			name:    "conversation missing",
 			method:  "conversation.get",
 			body:    `{"jsonrpc":"2.0","id":"conv","method":"conversation.get","params":{"session_id":"missing"}}`,
@@ -417,5 +476,32 @@ func TestOperatorAgentConversationHandlersTypedErrors(t *testing.T) {
 				t.Fatalf("error code = %#v, want %s", data["code"], tc.wantApp)
 			}
 		})
+	}
+}
+
+func TestOperatorAgentDiagnoseFailsClosedOnMalformedOwnerData(t *testing.T) {
+	reads := &fakeAgentConversationReadStore{
+		agentDiagnosisResult: store.OperatorAgentDiagnosis{
+			AgentID: "agent-1",
+			Status:  "working",
+			Queue:   store.OperatorAgentDiagnosisQueue{},
+		},
+	}
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			AgentConversations: reads,
+		}),
+	})
+
+	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"diagnose","method":"agent.diagnose","params":{"agent_id":"agent-1"}}`)
+	if resp.Error == nil {
+		t.Fatal("agent.diagnose returned success for malformed owner result")
+	}
+	if resp.Error.Code != codeInternalError {
+		t.Fatalf("error code = %d, want %d", resp.Error.Code, codeInternalError)
+	}
+	if !strings.Contains(fmt.Sprint(resp.Error.Message, resp.Error.Data), "agent.diagnose owner returned malformed result") {
+		t.Fatalf("error = %#v, want malformed owner result", resp.Error)
 	}
 }

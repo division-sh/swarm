@@ -8299,6 +8299,59 @@ api_specification:
             $ref: '#/components/schemas/SessionRef'
           last_turn_ref:
             $ref: '#/components/schemas/TurnRef'
+      AgentDeliveryLifecycleState:
+        type: string
+        enum:
+        - queued
+        - launching
+        - active
+        - retrying
+        - exhausted
+      AgentDiagnosisQueue:
+        type: object
+        additionalProperties: false
+        required:
+        - pending_count
+        - oldest_pending_age_seconds
+        properties:
+          pending_count:
+            type: integer
+            minimum: 0
+          oldest_pending_age_seconds:
+            type: integer
+            minimum: 0
+      AgentDeliveryLifecycle:
+        type: object
+        additionalProperties: false
+        required:
+        - state
+        - blocking_layer
+        properties:
+          state:
+            $ref: '#/components/schemas/AgentDeliveryLifecycleState'
+          blocking_layer:
+            type: string
+            minLength: 1
+      AgentDiagnosis:
+        type: object
+        additionalProperties: false
+        required:
+        - agent_id
+        - status
+        - queue
+        properties:
+          agent_id:
+            $ref: '#/components/schemas/OpaqueId'
+          status:
+            $ref: '#/components/schemas/AgentStatus'
+          current_session_ref:
+            $ref: '#/components/schemas/SessionRef'
+          last_turn_ref:
+            $ref: '#/components/schemas/TurnRef'
+          queue:
+            $ref: '#/components/schemas/AgentDiagnosisQueue'
+          delivery_lifecycle:
+            $ref: '#/components/schemas/AgentDeliveryLifecycle'
       ConversationSummary:
         type: object
         additionalProperties: false
@@ -10106,6 +10159,32 @@ api_specification:
         required: true
         schema:
           $ref: '#/components/schemas/AgentDetail'
+      errors:
+      - AGENT_NOT_FOUND
+    agent.diagnose:
+      tier: should_have
+      description: |
+        Read the first owner-backed diagnosis slice for one agent. This method is
+        limited to agent identity/status refs, pending delivery count/oldest age,
+        and optional delivery lifecycle evidence. The API handler consumes the
+        canonical agent diagnosis read owner directly. It must not join
+        conversation, run, trace, token, queue-detail, CLI, or dashboard owners
+        locally, and it must not expose runtime_state, run_id, bundle_version,
+        active task/entity, watchdog, last tool outcome, token usage, recent
+        failures, dead letters, pending delivery details, attempts, or cursors.
+      scope:
+        required:
+        - read:agents
+      params:
+      - name: agent_id
+        required: true
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      result:
+        name: result
+        required: true
+        schema:
+          $ref: '#/components/schemas/AgentDiagnosis'
       errors:
       - AGENT_NOT_FOUND
     agent.send_directive:
