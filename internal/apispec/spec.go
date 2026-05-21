@@ -15,6 +15,12 @@ const (
 	OpenRPCVersion                     = "1.2.6"
 	OpenRPCApplicationErrorCodeStart   = -32000
 	OpenRPCApplicationErrorCodeMinimum = -32099
+
+	ExamplesPolicyStatusDeferred             = "deferred"
+	ExamplesPolicyOwner                      = "api_specification.examples_policy"
+	ExamplesPolicyAppliesToAllGenerated      = "all_generated_methods"
+	ExamplesPolicyOpenRPCExamplesOmitted     = "omitted_until_explicitly_authored"
+	ExamplesPolicyRuntimeFixturesNotExamples = "not_examples_source"
 )
 
 type PlatformSpec struct {
@@ -24,9 +30,21 @@ type PlatformSpec struct {
 type APISpecification struct {
 	Description           string            `yaml:"description" json:"description,omitempty"`
 	Components            Components        `yaml:"components" json:"components"`
+	ExamplesPolicy        ExamplesPolicy    `yaml:"examples_policy" json:"examples_policy,omitempty"`
 	MethodCatalogMetadata map[string]any    `yaml:"method_catalog_metadata" json:"method_catalog_metadata,omitempty"`
 	MethodCatalog         map[string]Method `yaml:"method_catalog" json:"method_catalog"`
 	Conventions           Conventions       `yaml:"conventions" json:"conventions"`
+}
+
+type ExamplesPolicy struct {
+	Status                    string   `yaml:"status" json:"status,omitempty"`
+	Owner                     string   `yaml:"owner" json:"owner,omitempty"`
+	AppliesTo                 string   `yaml:"applies_to" json:"applies_to,omitempty"`
+	OpenRPCMethodExamples     string   `yaml:"openrpc_method_examples" json:"openrpc_method_examples,omitempty"`
+	RuntimeProbeFixtures      string   `yaml:"runtime_probe_fixtures" json:"runtime_probe_fixtures,omitempty"`
+	Reason                    string   `yaml:"reason" json:"reason,omitempty"`
+	Requirements              []string `yaml:"requirements" json:"requirements,omitempty"`
+	FutureSourceModelRequired bool     `yaml:"future_source_model_required" json:"future_source_model_required,omitempty"`
 }
 
 type Components struct {
@@ -169,6 +187,7 @@ func Validate(api *APISpecification) (ValidationReport, error) {
 	if _, ok := api.Components.Errors["description"]; ok {
 		problems = append(problems, "components.errors.description must be metadata, not an error code")
 	}
+	problems = append(problems, validateExamplesPolicy(api.ExamplesPolicy)...)
 
 	scopeCatalog := stringSet(api.Conventions.Scopes.Catalog)
 	mutatingCatalog := stringSet(api.Conventions.Idempotency.MutatingMethods)
@@ -241,6 +260,42 @@ func Validate(api *APISpecification) (ValidationReport, error) {
 		return report, fmt.Errorf("api specification validation failed:\n- %s", strings.Join(problems, "\n- "))
 	}
 	return report, nil
+}
+
+func validateExamplesPolicy(policy ExamplesPolicy) []string {
+	var problems []string
+	if strings.TrimSpace(policy.Status) == "" {
+		problems = append(problems, "api_specification.examples_policy missing status")
+	} else if policy.Status != ExamplesPolicyStatusDeferred {
+		problems = append(problems, fmt.Sprintf("api_specification.examples_policy.status = %q, want %q", policy.Status, ExamplesPolicyStatusDeferred))
+	}
+	if policy.Owner != ExamplesPolicyOwner {
+		problems = append(problems, fmt.Sprintf("api_specification.examples_policy.owner = %q, want %q", policy.Owner, ExamplesPolicyOwner))
+	}
+	if policy.AppliesTo != ExamplesPolicyAppliesToAllGenerated {
+		problems = append(problems, fmt.Sprintf("api_specification.examples_policy.applies_to = %q, want %q", policy.AppliesTo, ExamplesPolicyAppliesToAllGenerated))
+	}
+	if policy.OpenRPCMethodExamples != ExamplesPolicyOpenRPCExamplesOmitted {
+		problems = append(problems, fmt.Sprintf("api_specification.examples_policy.openrpc_method_examples = %q, want %q", policy.OpenRPCMethodExamples, ExamplesPolicyOpenRPCExamplesOmitted))
+	}
+	if policy.RuntimeProbeFixtures != ExamplesPolicyRuntimeFixturesNotExamples {
+		problems = append(problems, fmt.Sprintf("api_specification.examples_policy.runtime_probe_fixtures = %q, want %q", policy.RuntimeProbeFixtures, ExamplesPolicyRuntimeFixturesNotExamples))
+	}
+	if strings.TrimSpace(policy.Reason) == "" {
+		problems = append(problems, "api_specification.examples_policy missing reason")
+	}
+	if len(policy.Requirements) == 0 {
+		problems = append(problems, "api_specification.examples_policy must list enforcement requirements")
+	}
+	for i, requirement := range policy.Requirements {
+		if strings.TrimSpace(requirement) == "" {
+			problems = append(problems, fmt.Sprintf("api_specification.examples_policy.requirements[%d] is empty", i))
+		}
+	}
+	if !policy.FutureSourceModelRequired {
+		problems = append(problems, "api_specification.examples_policy.future_source_model_required must be true")
+	}
+	return problems
 }
 
 func validateMailboxConventions(routes []MailboxApprovalEventRoute) []string {

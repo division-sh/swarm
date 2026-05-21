@@ -9566,6 +9566,21 @@ api_specification:
         properties:
           operation_name:
             type: string
+  examples_policy:
+    status: deferred
+    owner: api_specification.examples_policy
+    applies_to: all_generated_methods
+    openrpc_method_examples: omitted_until_explicitly_authored
+    runtime_probe_fixtures: not_examples_source
+    future_source_model_required: true
+    reason: >
+      OpenRPC method examples are intentionally deferred for v1 because no authoritative
+      examples source model has been promoted. Runtime probe fixtures are proof inputs
+      and MUST NOT be reused as published examples.
+    requirements:
+    - generated openrpc.json MUST omit method examples while status is deferred
+    - compliance matrix examples rows MUST use policy_deferred proof status
+    - future authored or generated examples require a promoted api_specification source model and gate
   method_catalog_metadata:
     description: "All v1 methods. Each method declares: tier, description, scope.required,\nparams (array of contentDescriptors),\
       \ result (contentDescriptor), errors\n(array of error codes from components.errors). Mutating methods include\nidempotency.\
