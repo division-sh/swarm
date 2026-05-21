@@ -156,6 +156,78 @@ func TestSQLObservabilityReader_GetEvent_UsesCanonicalDeliveryRows(t *testing.T)
 	}
 }
 
+func TestSQLObservabilityReader_EventIdentityDoesNotPromotePayloadEntity(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	reader := NewSQLObservabilityReader(db, stubObservabilityCaps{caps: canonicalObservabilityCaps()})
+	ctx := context.Background()
+
+	runID := uuid.NewString()
+	targetEntityID := uuid.NewString()
+	payloadOnlyEventID := uuid.NewString()
+	canonicalEventID := uuid.NewString()
+	base := time.Unix(1700001200, 0).UTC()
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, runID, base); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
+		VALUES ($1::uuid, $2::uuid, 'task.payload_only', 'global',
+			jsonb_build_object('entity_id', $3::text, 'marker', 'payload-only'),
+			'agent-a', 'agent', $4)
+	`, payloadOnlyEventID, runID, targetEntityID, base); err != nil {
+		t.Fatalf("seed payload-only event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (event_id, run_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at)
+		VALUES ($1::uuid, $2::uuid, 'task.canonical_entity', $3::uuid, 'entity',
+			jsonb_build_object('entity_id', 'payload-business-value', 'marker', 'canonical'),
+			'agent-b', 'agent', $4)
+	`, canonicalEventID, runID, targetEntityID, base.Add(time.Second)); err != nil {
+		t.Fatalf("seed canonical event: %v", err)
+	}
+
+	filtered, err := reader.ListEvents(ctx, EventFilter{EntityID: targetEntityID}, 10)
+	if err != nil {
+		t.Fatalf("ListEvents entity filter: %v", err)
+	}
+	if len(filtered) != 1 || filtered[0].EventID != canonicalEventID {
+		t.Fatalf("filtered events = %#v, want only canonical event %s", filtered, canonicalEventID)
+	}
+	if filtered[0].EntityID != targetEntityID {
+		t.Fatalf("canonical dashboard entity_id = %q, want %s", filtered[0].EntityID, targetEntityID)
+	}
+
+	payloadOnly, ok, err := reader.GetEvent(ctx, payloadOnlyEventID)
+	if err != nil {
+		t.Fatalf("GetEvent payload-only: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected payload-only event to exist")
+	}
+	if payloadOnly.EntityID != "" {
+		t.Fatalf("payload-only dashboard entity_id = %q, want empty", payloadOnly.EntityID)
+	}
+	payload, _ := payloadOnly.Payload.(map[string]any)
+	if payload["entity_id"] != targetEntityID {
+		t.Fatalf("payload-only payload = %#v, want preserved payload entity_id", payload)
+	}
+
+	canonical, ok, err := reader.GetEvent(ctx, canonicalEventID)
+	if err != nil {
+		t.Fatalf("GetEvent canonical: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected canonical event to exist")
+	}
+	if canonical.EntityID != targetEntityID {
+		t.Fatalf("canonical dashboard entity_id = %q, want %s", canonical.EntityID, targetEntityID)
+	}
+	canonicalPayload, _ := canonical.Payload.(map[string]any)
+	if canonicalPayload["entity_id"] != "payload-business-value" {
+		t.Fatalf("canonical payload = %#v, want payload business value preserved", canonicalPayload)
+	}
+}
+
 func TestHandler_EventDetailIncludesDeliveryLifecycle(t *testing.T) {
 	t.Skip("legacy dashboard/Builder operator endpoint retired under #731; canonical v1 owner tests cover this behavior")
 	handler := NewHandler(Options{

@@ -210,7 +210,7 @@ func (s *PostgresStore) ListOperatorEvents(ctx context.Context, opts OperatorEve
 	}
 	if opts.Filter.EntityID != "" {
 		n := add(opts.Filter.EntityID)
-		where = append(where, fmt.Sprintf("COALESCE(e.entity_id::text, e.payload->>'entity_id', '') = $%d", n))
+		where = append(where, fmt.Sprintf("e.entity_id::text = $%d", n))
 	}
 	if opts.Filter.EventName != "" {
 		n := add(opts.Filter.EventName)
@@ -367,9 +367,6 @@ func (s *PostgresStore) LoadOperatorEvent(ctx context.Context, eventID string) (
 		return OperatorEventFull{}, fmt.Errorf("decode operator event payload: %w", err)
 	}
 	event.Payload = payload
-	if event.EntityID == "" {
-		event.EntityID = readStoreString(payload["entity_id"])
-	}
 	deliveries, err := s.loadOperatorEventDeliveries(ctx, event.EventID)
 	if err != nil {
 		return OperatorEventFull{}, err

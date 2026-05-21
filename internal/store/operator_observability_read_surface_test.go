@@ -116,6 +116,74 @@ func TestOperatorObservabilityEventOwnerFiltersDetailsAndCursor(t *testing.T) {
 	}
 }
 
+func TestOperatorObservabilityEventOwnerDoesNotPromotePayloadEntityIdentity(t *testing.T) {
+	ctx := context.Background()
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+
+	runID := uuid.NewString()
+	targetEntityID := uuid.NewString()
+	payloadOnlyEventID := uuid.NewString()
+	canonicalEventID := uuid.NewString()
+	base := time.Unix(1700001200, 0).UTC()
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, runID, base); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
+		VALUES ($1::uuid, $2::uuid, 'task.payload_only', 'global',
+			jsonb_build_object('entity_id', $3::text, 'marker', 'payload-only'),
+			'agent-a', 'agent', $4)
+	`, payloadOnlyEventID, runID, targetEntityID, base); err != nil {
+		t.Fatalf("seed payload-only event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (event_id, run_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at)
+		VALUES ($1::uuid, $2::uuid, 'task.canonical_entity', $3::uuid, 'entity',
+			jsonb_build_object('entity_id', 'payload-business-value', 'marker', 'canonical'),
+			'agent-b', 'agent', $4)
+	`, canonicalEventID, runID, targetEntityID, base.Add(time.Second)); err != nil {
+		t.Fatalf("seed canonical event: %v", err)
+	}
+
+	filtered, err := pg.ListOperatorEvents(ctx, OperatorEventListOptions{
+		Filter: OperatorEventListFilter{EntityID: targetEntityID},
+		Limit:  10,
+		Order:  "asc",
+	})
+	if err != nil {
+		t.Fatalf("ListOperatorEvents entity filter: %v", err)
+	}
+	if len(filtered.Events) != 1 || filtered.Events[0].EventID != canonicalEventID {
+		t.Fatalf("filtered events = %#v, want only canonical event %s", filtered.Events, canonicalEventID)
+	}
+	if filtered.Events[0].EntityID != targetEntityID {
+		t.Fatalf("canonical event entity_id = %q, want %s", filtered.Events[0].EntityID, targetEntityID)
+	}
+
+	payloadOnly, err := pg.LoadOperatorEvent(ctx, payloadOnlyEventID)
+	if err != nil {
+		t.Fatalf("LoadOperatorEvent payload-only: %v", err)
+	}
+	if payloadOnly.EntityID != "" {
+		t.Fatalf("payload-only top-level entity_id = %q, want empty", payloadOnly.EntityID)
+	}
+	if got := readStoreString(payloadOnly.Payload["entity_id"]); got != targetEntityID {
+		t.Fatalf("payload entity_id = %q, want preserved payload value %s", got, targetEntityID)
+	}
+
+	canonical, err := pg.LoadOperatorEvent(ctx, canonicalEventID)
+	if err != nil {
+		t.Fatalf("LoadOperatorEvent canonical: %v", err)
+	}
+	if canonical.EntityID != targetEntityID {
+		t.Fatalf("canonical top-level entity_id = %q, want %s", canonical.EntityID, targetEntityID)
+	}
+	if got := readStoreString(canonical.Payload["entity_id"]); got != "payload-business-value" {
+		t.Fatalf("canonical payload entity_id = %q, want payload-business-value", got)
+	}
+}
+
 func TestOperatorRuntimeObservabilityOwnerLogsIncidentsAndCursor(t *testing.T) {
 	ctx := context.Background()
 	_, db, _ := testutil.StartPostgres(t)

@@ -123,6 +123,67 @@ func TestOperatorObservabilityHandlersExposePersistedReadMethods(t *testing.T) {
 	}
 }
 
+func TestOperatorObservabilityHandlersKeepPayloadEntityOutOfTopLevelEventIdentity(t *testing.T) {
+	now := time.Unix(1700001200, 0).UTC()
+	payloadEntityID := "11111111-1111-4111-8111-111111111111"
+	observability := &fakeObservabilityReadStore{
+		events: map[string]store.OperatorEventFull{
+			"evt-payload-only": {
+				EventID:     "evt-payload-only",
+				EventName:   "task.payload_only",
+				RunID:       "run-1",
+				CreatedAt:   now,
+				Source:      "runtime",
+				Payload:     map[string]any{"entity_id": payloadEntityID, "marker": "payload-only"},
+				Deliveries:  []store.OperatorEventDelivery{},
+				DeadLetters: []store.OperatorDeadLetterRecord{},
+			},
+		},
+	}
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			Observability: observability,
+		}),
+	})
+
+	list := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"events","method":"event.list","params":{"limit":10}}`)
+	if list.Error != nil {
+		t.Fatalf("event.list error = %#v", list.Error)
+	}
+	events := asSlice(t, asMap(t, list.Result)["events"])
+	if len(events) != 1 {
+		t.Fatalf("event.list events = %#v, want one payload-only event", events)
+	}
+	listEvent := asMap(t, events[0])
+	if _, ok := listEvent["entity_id"]; ok {
+		t.Fatalf("event.list top-level entity_id = %#v, want absent", listEvent["entity_id"])
+	}
+	if payload := asMap(t, listEvent["payload"]); payload["entity_id"] != payloadEntityID {
+		t.Fatalf("event.list payload = %#v, want preserved entity_id", payload)
+	}
+
+	filtered := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"events-filtered","method":"event.list","params":{"filter":{"entity_id":"`+payloadEntityID+`"},"limit":10}}`)
+	if filtered.Error != nil {
+		t.Fatalf("event.list filtered error = %#v", filtered.Error)
+	}
+	if got := asSlice(t, asMap(t, filtered.Result)["events"]); len(got) != 0 {
+		t.Fatalf("event.list filtered events = %#v, want payload-only event excluded", got)
+	}
+
+	eventGet := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"event","method":"event.get","params":{"event_id":"evt-payload-only"}}`)
+	if eventGet.Error != nil {
+		t.Fatalf("event.get error = %#v", eventGet.Error)
+	}
+	detail := asMap(t, eventGet.Result)
+	if _, ok := detail["entity_id"]; ok {
+		t.Fatalf("event.get top-level entity_id = %#v, want absent", detail["entity_id"])
+	}
+	if payload := asMap(t, detail["payload"]); payload["entity_id"] != payloadEntityID {
+		t.Fatalf("event.get payload = %#v, want preserved entity_id", payload)
+	}
+}
+
 func TestOperatorObservabilityHandlersTypedErrors(t *testing.T) {
 	observability := &fakeObservabilityReadStore{
 		traceErr: store.ErrRunNotFound,
