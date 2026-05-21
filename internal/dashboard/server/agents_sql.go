@@ -81,6 +81,10 @@ type pendingAgentDeliveryFactSource interface {
 	ListPendingAgentDeliveryFacts(ctx context.Context, agentIDs []string, since time.Time) (map[string]store.PendingAgentDeliveryFacts, error)
 }
 
+type pendingAgentDeliveryDetailSource interface {
+	ListPendingAgentDeliveryDetails(ctx context.Context, opts store.PendingAgentDeliveryListOptions) (store.PendingAgentDeliveryPage, error)
+}
+
 type agentLifecycleFactSource interface {
 	ListAgentLifecycleFacts(ctx context.Context, agentIDs []string) (map[string]store.AgentLifecycleFacts, error)
 }
@@ -107,6 +111,14 @@ func (s *dashboardAgentReadSource) ListPendingAgentDeliveryFacts(ctx context.Con
 		return nil, errors.New("missing pending agent delivery fact source")
 	}
 	return source.ListPendingAgentDeliveryFacts(ctx, agentIDs, since)
+}
+
+func (s *dashboardAgentReadSource) ListPendingAgentDeliveryDetails(ctx context.Context, opts store.PendingAgentDeliveryListOptions) (store.PendingAgentDeliveryPage, error) {
+	source, ok := s.source.(pendingAgentDeliveryDetailSource)
+	if !ok || source == nil {
+		return store.PendingAgentDeliveryPage{}, errors.New("missing pending agent delivery detail source")
+	}
+	return source.ListPendingAgentDeliveryDetails(ctx, opts)
 }
 
 func (s *dashboardAgentReadSource) ListAgentLifecycleFacts(ctx context.Context, agentIDs []string) (map[string]store.AgentLifecycleFacts, error) {
