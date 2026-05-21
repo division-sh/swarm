@@ -90,6 +90,54 @@ func TestOperatorEventReplayPublishesDistinctReplayEventAuditAndIdempotency(t *t
 	}
 }
 
+func TestReplayEventFromOriginalUsesCanonicalEventEntityOnly(t *testing.T) {
+	now := time.Unix(1700001200, 0).UTC()
+	original := store.OperatorEventFull{
+		EventID:   "evt-original",
+		EventName: "scan.requested",
+		RunID:     "run-1",
+		Source:    "origin-agent",
+		Payload:   map[string]any{"entity_id": "payload-entity", "topic": "medicine"},
+	}
+
+	replay, err := replayEventFromOriginal(original, "evt-replay", now)
+	if err != nil {
+		t.Fatalf("replayEventFromOriginal: %v", err)
+	}
+	if replay.EntityID() != "" {
+		t.Fatalf("replay event entity_id = %q, want empty", replay.EntityID())
+	}
+	var replayPayload map[string]any
+	if err := json.Unmarshal(replay.Payload, &replayPayload); err != nil {
+		t.Fatalf("unmarshal replay payload: %v", err)
+	}
+	if replayPayload["entity_id"] != "payload-entity" {
+		t.Fatalf("replay payload = %#v, want payload entity_id preserved", replayPayload)
+	}
+
+	auditPayload, err := eventReplayAuditPayload(
+		Request{ActorTokenID: "actor-1"},
+		original,
+		"evt-replay",
+		"evt-audit",
+		[]string{"agent-a"},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("eventReplayAuditPayload: %v", err)
+	}
+	var audit map[string]any
+	if err := json.Unmarshal(auditPayload, &audit); err != nil {
+		t.Fatalf("unmarshal audit payload: %v", err)
+	}
+	if audit["entity_id"] == "payload-entity" {
+		t.Fatalf("audit entity_id = %#v, want canonical top-level identity only", audit["entity_id"])
+	}
+	if audit["entity_id"] != "" {
+		t.Fatalf("audit entity_id = %#v, want empty canonical identity", audit["entity_id"])
+	}
+}
+
 func TestOperatorEventReplayStoresIdempotencyBeforeAuditPublishReadiness(t *testing.T) {
 	ctx := context.Background()
 	_, db, _ := testutil.StartPostgres(t)

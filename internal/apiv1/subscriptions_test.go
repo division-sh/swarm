@@ -96,6 +96,16 @@ func TestHandlerWebSocketEventSubscribeUsesOwnerFilterAndReplay(t *testing.T) {
 				Deliveries:  []store.OperatorEventDelivery{},
 				DeadLetters: []store.OperatorDeadLetterRecord{},
 			},
+			"evt-payload-only": {
+				EventID:     "evt-payload-only",
+				EventName:   "scan.requested",
+				RunID:       "run-1",
+				CreatedAt:   base.Add(2 * time.Second),
+				Source:      "runtime",
+				Payload:     map[string]any{"entity_id": "entity-1", "marker": "payload-only"},
+				Deliveries:  []store.OperatorEventDelivery{},
+				DeadLetters: []store.OperatorDeadLetterRecord{},
+			},
 		},
 	}
 	readOpts := OperatorReadOptions{
@@ -136,6 +146,12 @@ func TestHandlerWebSocketEventSubscribeUsesOwnerFilterAndReplay(t *testing.T) {
 	}
 	if got := asMap(t, notification.Params.Result)["event_id"]; got != "evt-1" {
 		t.Fatalf("event notification result = %#v, want evt-1", notification.Params.Result)
+	}
+	conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+	_, raw, err := conn.ReadMessage()
+	conn.SetReadDeadline(time.Time{})
+	if err == nil {
+		t.Fatalf("unexpected payload-only event notification: %s", raw)
 	}
 	if observability.lastEventList.Filter.RunID != "run-1" ||
 		observability.lastEventList.Filter.EntityID != "entity-1" ||

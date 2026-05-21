@@ -50,6 +50,34 @@ func TestProjectCanonicalRunDebugReplay_UsesCanonicalEventOwnerPayload(t *testin
 	}
 }
 
+func TestProjectCanonicalRunDebugReplay_DoesNotPromotePayloadEntityToInstanceID(t *testing.T) {
+	now := time.Unix(1700001200, 0).UTC()
+	events := []store.OperatorEventFull{{
+		EventID:   "evt-payload-only",
+		EventName: "workflow.payload_only",
+		RunID:     "run-123",
+		CreatedAt: now,
+		Source:    "builder",
+		Payload:   map[string]any{"entity_id": "payload-entity", "topic": "sample"},
+	}}
+
+	replay, _ := projectCanonicalRunDebugReplay(runtimebus.RunLifecycleSnapshot{}, events, nil)
+	if len(replay) != 1 {
+		t.Fatalf("replay len = %d, want 1", len(replay))
+	}
+	if replay[0]["type"] != "event.fired" {
+		t.Fatalf("replay[0].type = %#v, want event.fired", replay[0]["type"])
+	}
+	if _, ok := replay[0]["instance_id"]; ok {
+		t.Fatalf("payload-only event instance_id = %#v, want absent", replay[0]["instance_id"])
+	}
+	payload, _ := replay[0]["payload"].(map[string]any)
+	rawPayload, _ := payload["payload"].(map[string]any)
+	if rawPayload["entity_id"] != "payload-entity" {
+		t.Fatalf("payload.payload = %#v, want payload entity_id preserved", rawPayload)
+	}
+}
+
 func TestProjectCanonicalRunDebugReplay_PreservesCanonicalRuntimeLogDetailAndTimestamp(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
 	runtimeLogs := []store.OperatorRuntimeLogEntry{{
