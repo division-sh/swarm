@@ -52,6 +52,7 @@ func newAgentDirectiveCommand(opts rootCommandOptions) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&directiveOpts.runID, "run-id", "", "Optional explicit nonterminal run target")
 	cmd.Flags().StringVar(&directiveOpts.idempotencyKey, "idempotency-key", "", "Optional v1 API idempotency key")
+	bindCLIAPIConnectionFlags(cmd, &directiveOpts.apiOptions)
 	return cmd
 }
 

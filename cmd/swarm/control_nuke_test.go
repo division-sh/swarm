@@ -258,7 +258,7 @@ func TestControlNukeTransportFailureExitsThree(t *testing.T) {
 	t.Setenv("SWARM_API_TOKEN", "test-token")
 	var stdout, stderr bytes.Buffer
 	opts := defaultRootCommandOptions()
-	opts.apiEndpoint = "http://127.0.0.1:1/v1/rpc"
+	opts.apiRPCEndpointOverride = "http://127.0.0.1:1/v1/rpc"
 	opts.httpClient = &http.Client{Transport: errRoundTripper{}}
 	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"control", "nuke", "--yes"}, &stdout, &stderr, opts)
 	if code != 3 {

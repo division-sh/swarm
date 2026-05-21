@@ -70,6 +70,7 @@ func newEventPublishCommand(opts rootCommandOptions) *cobra.Command {
 	cmd.Flags().StringVar(&publishOpts.bundleFingerprint, "bundle-fingerprint", "", "Optional expected server bundle fingerprint")
 	cmd.Flags().StringVar(&publishOpts.emitter, "emitter", "", "Optional producer identifier")
 	cmd.Flags().StringVar(&publishOpts.idempotencyKey, "idempotency-key", "", "Optional v1 API idempotency key")
+	bindCLIAPIConnectionFlags(cmd, &publishOpts.apiOptions)
 	return cmd
 }
 

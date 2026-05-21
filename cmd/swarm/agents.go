@@ -112,18 +112,22 @@ func newAgentsListCommand(opts rootCommandOptions) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&listOpts.flow, "flow", "", "Filter by canonical flow path")
 	cmd.Flags().StringVar(&listOpts.role, "role", "", "Filter by agent role")
+	bindCLIAPIConnectionFlags(cmd, &listOpts.apiOptions)
 	return cmd
 }
 
 func newAgentViewCommand(opts rootCommandOptions) *cobra.Command {
-	return &cobra.Command{
+	apiOpts := opts
+	cmd := &cobra.Command{
 		Use:   "view <agent-id>",
 		Short: "View one agent through v1 RPC.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runAgentViewCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), opts, args[0])
+			return runAgentViewCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), apiOpts, args[0])
 		},
 	}
+	bindCLIAPIConnectionFlags(cmd, &apiOpts)
+	return cmd
 }
 
 func runAgentListCommand(ctx context.Context, out, errOut io.Writer, opts agentListCommandOptions) error {

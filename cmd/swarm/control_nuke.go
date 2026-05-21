@@ -127,6 +127,7 @@ func newControlNukeCommand(opts rootCommandOptions) *cobra.Command {
 	}
 	cmd.Flags().BoolVarP(&nukeOpts.yes, "yes", "y", false, "Skip the destructive confirmation prompt")
 	cmd.Flags().BoolVar(&nukeOpts.dryRun, "dry-run", false, "Preview the destructive reset without applying it")
+	bindCLIAPIConnectionFlags(cmd, &nukeOpts.apiOptions)
 	return cmd
 }
 

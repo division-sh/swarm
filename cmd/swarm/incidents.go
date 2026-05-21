@@ -72,6 +72,7 @@ func newIncidentsCommand(opts rootCommandOptions) *cobra.Command {
 	cmd.Flags().BoolVar(&incidentOpts.mcpOnly, "mcp-only", false, "Only show incidents from MCP-prefixed components")
 	cmd.Flags().IntVar(&incidentOpts.limit, "limit", 0, "Page size, 1-500")
 	cmd.Flags().StringVar(&incidentOpts.cursor, "cursor", "", "Pagination cursor")
+	bindCLIAPIConnectionFlags(cmd, &incidentOpts.apiOptions)
 	return cmd
 }
 

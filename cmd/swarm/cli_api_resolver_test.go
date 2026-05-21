@@ -1,0 +1,413 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/spf13/cobra"
+)
+
+func TestResolveCLIAPISettingsPrecedence(t *testing.T) {
+	t.Run("flag sources beat env config and defaults", func(t *testing.T) {
+		isolateCLIAPIConfigEnv(t)
+		configToken := writeCLIAPITokenFile(t, "config-token")
+		envToken := writeCLIAPITokenFile(t, "env-file-token")
+		flagToken := writeCLIAPITokenFile(t, "flag-token")
+		configPath := writeCLIAPIConfigFile(t, map[string]string{
+			"api_server":     "http://127.0.0.1:4444",
+			"api_token_file": configToken,
+		})
+		t.Setenv("SWARM_CONFIG", configPath)
+		t.Setenv("SWARM_API_SERVER", "http://127.0.0.1:5555")
+		t.Setenv("SWARM_API_TOKEN", "env-token")
+		t.Setenv("SWARM_API_TOKEN_FILE", envToken)
+
+		client, err := newCLIAPIClient(rootCommandOptions{
+			apiServer:    "http://127.0.0.1:6666",
+			apiTokenFile: flagToken,
+		})
+		if err != nil {
+			t.Fatalf("newCLIAPIClient: %v", err)
+		}
+		if client.endpoint != "http://127.0.0.1:6666/v1/rpc" {
+			t.Fatalf("endpoint = %q", client.endpoint)
+		}
+		if client.token != "flag-token" {
+			t.Fatalf("token = %q", client.token)
+		}
+	})
+
+	t.Run("environment token beats token file and config", func(t *testing.T) {
+		isolateCLIAPIConfigEnv(t)
+		configToken := writeCLIAPITokenFile(t, "config-token")
+		envToken := writeCLIAPITokenFile(t, "env-file-token")
+		t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
+			"api_server":     "http://127.0.0.1:4444",
+			"api_token_file": configToken,
+		}))
+		t.Setenv("SWARM_API_SERVER", "http://127.0.0.1:5555")
+		t.Setenv("SWARM_API_TOKEN", "env-token")
+		t.Setenv("SWARM_API_TOKEN_FILE", envToken)
+
+		client, err := newCLIAPIClient(rootCommandOptions{})
+		if err != nil {
+			t.Fatalf("newCLIAPIClient: %v", err)
+		}
+		if client.endpoint != "http://127.0.0.1:5555/v1/rpc" {
+			t.Fatalf("endpoint = %q", client.endpoint)
+		}
+		if client.token != "env-token" {
+			t.Fatalf("token = %q", client.token)
+		}
+	})
+
+	t.Run("environment token file beats config", func(t *testing.T) {
+		isolateCLIAPIConfigEnv(t)
+		configToken := writeCLIAPITokenFile(t, "config-token")
+		envToken := writeCLIAPITokenFile(t, "env-file-token")
+		t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
+			"api_server":     "http://127.0.0.1:4444",
+			"api_token_file": configToken,
+		}))
+		t.Setenv("SWARM_API_TOKEN_FILE", envToken)
+
+		client, err := newCLIAPIClient(rootCommandOptions{})
+		if err != nil {
+			t.Fatalf("newCLIAPIClient: %v", err)
+		}
+		if client.endpoint != "http://127.0.0.1:4444/v1/rpc" {
+			t.Fatalf("endpoint = %q", client.endpoint)
+		}
+		if client.token != "env-file-token" {
+			t.Fatalf("token = %q", client.token)
+		}
+	})
+
+	t.Run("config feeds endpoint and token file", func(t *testing.T) {
+		isolateCLIAPIConfigEnv(t)
+		configToken := writeCLIAPITokenFile(t, "config-token")
+		t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
+			"api_server":     "http://127.0.0.1:4444",
+			"api_token_file": configToken,
+		}))
+
+		client, err := newCLIAPIClient(rootCommandOptions{})
+		if err != nil {
+			t.Fatalf("newCLIAPIClient: %v", err)
+		}
+		if client.endpoint != "http://127.0.0.1:4444/v1/rpc" {
+			t.Fatalf("endpoint = %q", client.endpoint)
+		}
+		if client.token != "config-token" {
+			t.Fatalf("token = %q", client.token)
+		}
+	})
+
+	t.Run("built in API server default remains loopback base", func(t *testing.T) {
+		isolateCLIAPIConfigEnv(t)
+		t.Setenv("SWARM_API_TOKEN", "env-token")
+
+		client, err := newCLIAPIClient(rootCommandOptions{})
+		if err != nil {
+			t.Fatalf("newCLIAPIClient: %v", err)
+		}
+		if client.endpoint != "http://127.0.0.1:8081/v1/rpc" {
+			t.Fatalf("endpoint = %q", client.endpoint)
+		}
+		if client.token != "env-token" {
+			t.Fatalf("token = %q", client.token)
+		}
+	})
+}
+
+func TestCLIAPISettingsFailClosed(t *testing.T) {
+	tests := []struct {
+		name     string
+		setup    func(t *testing.T) rootCommandOptions
+		wantExit int
+		wantErr  string
+	}{
+		{
+			name: "explicit missing config",
+			setup: func(t *testing.T) rootCommandOptions {
+				t.Setenv("SWARM_CONFIG", filepath.Join(t.TempDir(), "missing.yaml"))
+				t.Setenv("SWARM_API_TOKEN", "env-token")
+				return rootCommandOptions{}
+			},
+			wantExit: cliExitValidation,
+			wantErr:  "read SWARM_CONFIG",
+		},
+		{
+			name: "malformed config",
+			setup: func(t *testing.T) rootCommandOptions {
+				path := filepath.Join(t.TempDir(), "config.yaml")
+				if err := os.WriteFile(path, []byte("api_server: ["), 0o644); err != nil {
+					t.Fatalf("write config: %v", err)
+				}
+				t.Setenv("SWARM_CONFIG", path)
+				t.Setenv("SWARM_API_TOKEN", "env-token")
+				return rootCommandOptions{}
+			},
+			wantExit: cliExitValidation,
+			wantErr:  "parse CLI config",
+		},
+		{
+			name: "unsupported inline config token",
+			setup: func(t *testing.T) rootCommandOptions {
+				path := filepath.Join(t.TempDir(), "config.yaml")
+				if err := os.WriteFile(path, []byte("api_token: secret\n"), 0o644); err != nil {
+					t.Fatalf("write config: %v", err)
+				}
+				t.Setenv("SWARM_CONFIG", path)
+				return rootCommandOptions{}
+			},
+			wantExit: cliExitValidation,
+			wantErr:  `unsupported CLI config key "api_token"`,
+		},
+		{
+			name: "missing token file",
+			setup: func(t *testing.T) rootCommandOptions {
+				return rootCommandOptions{apiTokenFile: filepath.Join(t.TempDir(), "missing-token")}
+			},
+			wantExit: cliExitAuth,
+			wantErr:  "read --api-token-file",
+		},
+		{
+			name: "blank token file",
+			setup: func(t *testing.T) rootCommandOptions {
+				return rootCommandOptions{apiTokenFile: writeCLIAPITokenFile(t, "  \n")}
+			},
+			wantExit: cliExitAuth,
+			wantErr:  "--api-token-file is blank",
+		},
+		{
+			name: "invalid API server query",
+			setup: func(t *testing.T) rootCommandOptions {
+				t.Setenv("SWARM_API_TOKEN", "env-token")
+				return rootCommandOptions{apiServer: "http://127.0.0.1:8081?x=1"}
+			},
+			wantExit: cliExitValidation,
+			wantErr:  "must not include query or fragment",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateCLIAPIConfigEnv(t)
+			opts := tc.setup(t)
+			_, err := newCLIAPIClient(opts)
+			if err == nil {
+				t.Fatal("newCLIAPIClient returned nil error")
+			}
+			if got := cliAPIErrorExitCode(err, cliAPIErrorClassifier{}); got != tc.wantExit {
+				t.Fatalf("exit = %d, want %d; err=%v", got, tc.wantExit, err)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("err = %q, want %q", err.Error(), tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestCLIAPIConnectionFlagsSurfaceAndIsolation(t *testing.T) {
+	root := newRootCommandWithOptions(context.Background(), t.TempDir(), ioDiscard{}, ioDiscard{}, defaultRootCommandOptions())
+	withFlags := []string{
+		"runs", "status", "trace", "health", "logs", "incidents",
+		"events list", "events follow", "event view", "event publish", "event replay",
+		"agents list", "agent view", "agent restart", "agent replay", "agent replay-backlog", "agent directive",
+		"entities list", "entity view", "entity aggregate",
+		"mailbox list", "mailbox view", "mailbox approve", "mailbox reject", "mailbox defer",
+		"control pause", "control continue", "control stop", "control nuke",
+		"version",
+	}
+	for _, path := range withFlags {
+		cmd := mustFindCLICommand(t, root, path)
+		if cmd.Flags().Lookup("api-server") == nil {
+			t.Fatalf("%s missing --api-server", path)
+		}
+		if cmd.Flags().Lookup("api-token-file") == nil {
+			t.Fatalf("%s missing --api-token-file", path)
+		}
+	}
+
+	withoutFlags := []string{
+		"", "serve", "verify", "completion", "run",
+		"events", "event", "agents", "agent", "entities", "entity", "mailbox", "control",
+		"investigate", "investigate health", "fork",
+	}
+	for _, path := range withoutFlags {
+		cmd := mustFindCLICommand(t, root, path)
+		if cmd.Flags().Lookup("api-server") != nil || cmd.Flags().Lookup("api-token-file") != nil {
+			t.Fatalf("%s unexpectedly accepts API connection flags", path)
+		}
+	}
+}
+
+func TestAPIConnectionFlagsDriveRuntimeStateCommand(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	tokenFile := writeCLIAPITokenFile(t, "flag-token")
+	var sawRequest bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawRequest = true
+		if r.URL.Path != "/v1/rpc" {
+			t.Errorf("path = %q, want /v1/rpc", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer flag-token" {
+			t.Errorf("Authorization = %q, want bearer flag-token", got)
+		}
+		var req jsonRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.Method != "run.list" {
+			t.Errorf("method = %q, want run.list", req.Method)
+		}
+		writeJSONRPCResult(t, w, req.ID, map[string]any{"runs": []any{}})
+	}))
+	defer server.Close()
+
+	opts := defaultRootCommandOptions()
+	opts.httpClient = server.Client()
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"runs", "--api-server", server.URL, "--api-token-file", tokenFile}, &stdout, &stderr, opts)
+	if code != 0 {
+		t.Fatalf("exit = %d stderr=%q stdout=%q", code, stderr.String(), stdout.String())
+	}
+	if !sawRequest {
+		t.Fatal("server did not receive request")
+	}
+}
+
+func TestCLIAPIConfigDrivesRuntimeStateCommand(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	tokenFile := writeCLIAPITokenFile(t, "config-token")
+	var sawRequest bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawRequest = true
+		if got := r.Header.Get("Authorization"); got != "Bearer config-token" {
+			t.Errorf("Authorization = %q, want bearer config-token", got)
+		}
+		var req jsonRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		writeJSONRPCResult(t, w, req.ID, map[string]any{"runs": []any{}})
+	}))
+	defer server.Close()
+	t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
+		"api_server":     server.URL,
+		"api_token_file": tokenFile,
+	}))
+
+	opts := defaultRootCommandOptions()
+	opts.httpClient = server.Client()
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"runs"}, &stdout, &stderr, opts)
+	if code != 0 {
+		t.Fatalf("exit = %d stderr=%q stdout=%q", code, stderr.String(), stdout.String())
+	}
+	if !sawRequest {
+		t.Fatal("server did not receive request")
+	}
+}
+
+func TestAPIConnectionFlagsRejectedOnNonAPISurfaces(t *testing.T) {
+	for _, tc := range []struct {
+		args       []string
+		wantStderr string
+	}{
+		{args: []string{"--api-server", "http://127.0.0.1:9"}, wantStderr: "unknown flag: --api-server"},
+		{args: []string{"serve", "--api-server", "http://127.0.0.1:9"}, wantStderr: "unknown flag: --api-server"},
+		{args: []string{"verify", "--api-server", "http://127.0.0.1:9"}},
+		{args: []string{"run", "--api-server", "http://127.0.0.1:9"}, wantStderr: "unknown flag: --api-server"},
+	} {
+		var stdout, stderr bytes.Buffer
+		code := executeRootCommandWithOptions(context.Background(), t.TempDir(), tc.args, &stdout, &stderr, defaultRootCommandOptions())
+		if code != cliExitValidation {
+			t.Fatalf("%v exit = %d stderr=%q", tc.args, code, stderr.String())
+		}
+		if tc.wantStderr != "" && !strings.Contains(stderr.String(), tc.wantStderr) {
+			t.Fatalf("%v stderr = %q, want %q", tc.args, stderr.String(), tc.wantStderr)
+		}
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"version", "--api-server", "http://127.0.0.1:9"}, &stdout, &stderr, defaultRootCommandOptions())
+	if code != cliExitValidation {
+		t.Fatalf("version exit = %d stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "require --server") {
+		t.Fatalf("version stderr = %q, want --server requirement", stderr.String())
+	}
+}
+
+func isolateCLIAPIConfigEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("SWARM_CONFIG", "")
+	t.Setenv("SWARM_API_SERVER", "")
+	t.Setenv("SWARM_API_TOKEN", "")
+	t.Setenv("SWARM_API_TOKEN_FILE", "")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+}
+
+func writeCLIAPITokenFile(t *testing.T, token string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(path, []byte(token), 0o600); err != nil {
+		t.Fatalf("write token file: %v", err)
+	}
+	return path
+}
+
+func writeCLIAPIConfigFile(t *testing.T, values map[string]string) string {
+	t.Helper()
+	var body strings.Builder
+	for _, key := range []string{"api_server", "api_token_file"} {
+		if value, ok := values[key]; ok {
+			body.WriteString(key)
+			body.WriteString(": ")
+			body.WriteString(strconvQuoteYAML(value))
+			body.WriteString("\n")
+		}
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte(body.String()), 0o600); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+	return path
+}
+
+func strconvQuoteYAML(value string) string {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		panic(err)
+	}
+	return string(raw)
+}
+
+func mustFindCLICommand(t *testing.T, root *cobra.Command, commandPath string) *cobra.Command {
+	t.Helper()
+	if strings.TrimSpace(commandPath) == "" {
+		return root
+	}
+	cmd, _, err := root.Find(strings.Fields(commandPath))
+	if err != nil {
+		t.Fatalf("find %s: %v", commandPath, err)
+	}
+	if cmd == nil {
+		t.Fatalf("find %s returned nil", commandPath)
+	}
+	return cmd
+}
+
+type ioDiscard struct{}
+
+func (ioDiscard) Write(p []byte) (int, error) {
+	return len(p), nil
+}

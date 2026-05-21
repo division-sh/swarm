@@ -168,10 +168,14 @@ func newVersionCommand(opts rootCommandOptions) *cobra.Command {
 		Short: "Print local Swarm binary version information.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if !versionOpts.server && cliAPIConnectionFlagsChanged(cmd) {
+				return fmt.Errorf("--api-server and --api-token-file require --server")
+			}
 			return runVersionCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), versionOpts)
 		},
 	}
 	cmd.Flags().BoolVar(&versionOpts.server, "server", false, "Also query /v1/rpc health.check and print server bundle/runtime identity")
+	bindCLIAPIConnectionFlags(cmd, &versionOpts.apiOptions)
 	return cmd
 }
 

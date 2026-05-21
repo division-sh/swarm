@@ -5898,12 +5898,14 @@ cli_specification:
       `SWARM_BUILDER_AUTH_TOKEN` and `SWARM_OPERATOR_AUTH_TOKEN` fallback is invalid.
     api_connection_auth_config_precedence:
       promoted_by: '#844'
-      implementation_status: authority_promoted_behavior_pending
+      implementation_status: implemented
       canonical_owner: docs/specs/swarm-platform/platform/contracts/platform-spec.yaml#cli_specification.foundations.api_connection_auth_config_precedence
       scope: >
         Merge-bearing authority for CLI API base URL selection, bearer-token selection, and CLI config-file
-        discovery for API-backed commands. This first slice does not add Cobra flags, runtime behavior, OpenRPC
-        behavior, retry behavior, output rendering, or serve listener binding.
+        discovery for API-backed commands. API-backed command leaves consume `--api-server`, `--api-token-file`,
+        `SWARM_API_SERVER`, `SWARM_API_TOKEN`, `SWARM_API_TOKEN_FILE`, `SWARM_CONFIG`, XDG config, and built-in
+        defaults through one shared resolver. This contract does not add OpenRPC behavior, retry behavior,
+        output rendering, root/global `--config`, inline token flags, or serve listener binding.
       applies_to:
       - Runtime-state CLI commands that call the platform JSON-RPC or WebSocket API.
       - '`swarm version --server` when it queries the platform API.'
@@ -5930,8 +5932,8 @@ cli_specification:
           transport needs.
         rationale: >
           The ignored review artifact used `http://localhost:8081`; the promoted spec uses `127.0.0.1` to
-          match serve listener loopback defaults and avoid hostname/IPv6 ambiguity. Current code that stores a
-          full `/v1/rpc` endpoint is migration evidence only until behavior consumes this owner.
+          match serve listener loopback defaults and avoid hostname/IPv6 ambiguity. API-backed command users
+          configure the base URL; the client derives concrete transport endpoints from this owner.
       api_token:
         accepted_sources:
           flag_file: --api-token-file <path>
@@ -5997,9 +5999,9 @@ cli_specification:
       - 'contract path/platform spec path defaults'
       - '`--no-retry` retry policy'
       implementation_boundaries:
-      - 'This #844 first slice is source-of-truth repair only.'
-      - 'No Cobra persistent flag, runtime/client resolver, OpenRPC, output renderer, retry, or listener behavior changes are implied by this PR.'
-      - 'Future API-backed CLI config/auth implementation MUST consume this owner rather than the ignored review artifact.'
+      - 'API-backed command leaves consume one cmd/swarm resolver for this owner.'
+      - 'No root/global --config, inline --api-token, OpenRPC, output renderer, retry, or listener behavior changes are implied by this owner.'
+      - 'Future API-backed CLI commands MUST consume this owner rather than the ignored review artifact.'
     error_channel_and_exit_code_contract:
       implemented_by: '#846'
       scope: >

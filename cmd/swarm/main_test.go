@@ -367,13 +367,13 @@ func TestPlatformSpecCLIAPIConnectionAuthConfigPrecedencePromoted(t *testing.T) 
 	if strings.TrimSpace(spec.PromotedBy) != "#844" {
 		t.Fatalf("api connection/auth/config promoted_by = %q, want #844", spec.PromotedBy)
 	}
-	if strings.TrimSpace(spec.ImplementationStatus) != "authority_promoted_behavior_pending" {
-		t.Fatalf("api connection/auth/config implementation_status = %q, want authority_promoted_behavior_pending", spec.ImplementationStatus)
+	if strings.TrimSpace(spec.ImplementationStatus) != "implemented" {
+		t.Fatalf("api connection/auth/config implementation_status = %q, want implemented", spec.ImplementationStatus)
 	}
 	if !strings.Contains(spec.CanonicalOwner, "cli_specification.foundations.api_connection_auth_config_precedence") {
 		t.Fatalf("canonical owner does not point at promoted section: %s", spec.CanonicalOwner)
 	}
-	for _, want := range []string{"Cobra flags", "runtime behavior", "OpenRPC"} {
+	for _, want := range []string{"API-backed command leaves consume", "OpenRPC", "root/global `--config`"} {
 		if !strings.Contains(spec.Scope, want) {
 			t.Fatalf("scope missing boundary %q:\n%s", want, spec.Scope)
 		}
@@ -404,7 +404,7 @@ func TestPlatformSpecCLIAPIConnectionAuthConfigPrecedencePromoted(t *testing.T) 
 			t.Fatalf("api_server value model missing %q:\n%s", want, spec.APIServer.ValueModel)
 		}
 	}
-	for _, want := range []string{"migration evidence", "127.0.0.1"} {
+	for _, want := range []string{"base URL", "127.0.0.1"} {
 		if !strings.Contains(spec.APIServer.Rationale, want) {
 			t.Fatalf("api_server rationale missing %q:\n%s", want, spec.APIServer.Rationale)
 		}
@@ -467,7 +467,7 @@ func TestPlatformSpecCLIAPIConnectionAuthConfigPrecedencePromoted(t *testing.T) 
 			t.Fatalf("split siblings missing %q: %#v", want, spec.SplitSiblings)
 		}
 	}
-	for _, want := range []string{"No Cobra persistent flag", "OpenRPC", "Future API-backed CLI config/auth implementation MUST consume this owner"} {
+	for _, want := range []string{"API-backed command leaves consume", "OpenRPC", "Future API-backed CLI commands MUST consume this owner"} {
 		if !stringSliceContains(spec.ImplementationBoundaries, want) {
 			t.Fatalf("implementation boundaries missing %q: %#v", want, spec.ImplementationBoundaries)
 		}

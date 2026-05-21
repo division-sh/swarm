@@ -157,18 +157,22 @@ func newMailboxListCommand(opts rootCommandOptions) *cobra.Command {
 	cmd.Flags().StringVar(&listOpts.priority, "priority", "", "Mailbox priority: normal, high, or critical")
 	cmd.Flags().IntVar(&listOpts.limit, "limit", 0, "Page size from 1 to 200; omitted uses the API default")
 	cmd.Flags().StringVar(&listOpts.cursor, "cursor", "", "Continuation cursor")
+	bindCLIAPIConnectionFlags(cmd, &listOpts.apiOptions)
 	return cmd
 }
 
 func newMailboxViewCommand(opts rootCommandOptions) *cobra.Command {
-	return &cobra.Command{
+	apiOpts := opts
+	cmd := &cobra.Command{
 		Use:   "view <mailbox-item-id>",
 		Short: "View one mailbox item through v1 RPC.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMailboxViewCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), opts, args[0])
+			return runMailboxViewCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), apiOpts, args[0])
 		},
 	}
+	bindCLIAPIConnectionFlags(cmd, &apiOpts)
+	return cmd
 }
 
 func newMailboxApproveCommand(opts rootCommandOptions) *cobra.Command {
@@ -187,6 +191,7 @@ func newMailboxApproveCommand(opts rootCommandOptions) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&actionOpts.idempotencyKey, "idempotency-key", "", "Optional v1 API idempotency key")
 	cmd.Flags().StringVar(&actionOpts.decisionPayloadJSON, "decision-payload-json", "", "Optional JSON object attached to the approval event")
+	bindCLIAPIConnectionFlags(cmd, &actionOpts.apiOptions)
 	return cmd
 }
 
@@ -206,6 +211,7 @@ func newMailboxRejectCommand(opts rootCommandOptions) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&actionOpts.reason, "reason", "", "Required rejection reason")
 	cmd.Flags().StringVar(&actionOpts.idempotencyKey, "idempotency-key", "", "Optional v1 API idempotency key")
+	bindCLIAPIConnectionFlags(cmd, &actionOpts.apiOptions)
 	return cmd
 }
 
@@ -225,6 +231,7 @@ func newMailboxDeferCommand(opts rootCommandOptions) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&actionOpts.until, "until", "", "Required RFC3339 timestamp")
 	cmd.Flags().StringVar(&actionOpts.idempotencyKey, "idempotency-key", "", "Optional v1 API idempotency key")
+	bindCLIAPIConnectionFlags(cmd, &actionOpts.apiOptions)
 	return cmd
 }
 
