@@ -127,7 +127,7 @@ func TestEntityViewUsesEntityGetAndRendersEntityNativeDetail(t *testing.T) {
 		"slug=vertical-1 name=Vertical One",
 		`fields={"score":7}`,
 		`gates={"ready":true}`,
-		`accumulated={"notes":[{"text":"ok"}]}`,
+		`accumulated={"notes":["a"]}`,
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
@@ -389,7 +389,7 @@ func validEntityFullResult(entityID string) map[string]any {
 		"entity":      validEntitySummary(entityID),
 		"fields":      map[string]any{"score": 7},
 		"gates":       map[string]any{"ready": true},
-		"accumulated": map[string]any{"notes": []map[string]any{{"text": "ok"}}},
+		"accumulated": map[string]any{"notes": []any{"a"}},
 	}
 }
 

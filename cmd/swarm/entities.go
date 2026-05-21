@@ -74,10 +74,10 @@ type entitySummary struct {
 }
 
 type entityFull struct {
-	Entity      entitySummary               `json:"entity"`
-	Fields      map[string]any              `json:"fields"`
-	Gates       map[string]bool             `json:"gates"`
-	Accumulated map[string][]map[string]any `json:"accumulated"`
+	Entity      entitySummary   `json:"entity"`
+	Fields      map[string]any  `json:"fields"`
+	Gates       map[string]bool `json:"gates"`
+	Accumulated map[string]any  `json:"accumulated"`
 }
 
 type entityAggregateResult struct {
