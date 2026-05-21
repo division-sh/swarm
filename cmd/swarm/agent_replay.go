@@ -62,6 +62,7 @@ func newAgentReplayCommand(opts rootCommandOptions) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&replayOpts.eventID, "event-id", "", "Required event ID to replay")
 	cmd.Flags().StringVar(&replayOpts.idempotencyKey, "idempotency-key", "", "Optional v1 API idempotency key")
+	bindCLIAPIConnectionFlags(cmd, &replayOpts.apiOptions)
 	return cmd
 }
 

@@ -644,7 +644,7 @@ func newRunCommandServer(t *testing.T, opts runCommandServerOptions) (*httptest.
 func testRunCommandOptions(server *httptest.Server) rootCommandOptions {
 	opts := defaultRootCommandOptions()
 	if server != nil {
-		opts.apiEndpoint = server.URL + "/v1/rpc"
+		opts.apiRPCEndpointOverride = server.URL + "/v1/rpc"
 		opts.httpClient = server.Client()
 	}
 	opts.runReadyTimeout = time.Second

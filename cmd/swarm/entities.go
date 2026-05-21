@@ -151,6 +151,7 @@ func newEntitiesListCommand(opts rootCommandOptions) *cobra.Command {
 	cmd.Flags().StringVar(&listOpts.currentState, "current-state", "", "Filter by current entity state")
 	cmd.Flags().IntVar(&listOpts.limit, "limit", 0, "Optional page size, 1-500")
 	cmd.Flags().StringVar(&listOpts.cursor, "cursor", "", "Pagination cursor")
+	bindCLIAPIConnectionFlags(cmd, &listOpts.apiOptions)
 	return cmd
 }
 
@@ -166,6 +167,7 @@ func newEntityViewCommand(opts rootCommandOptions) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&viewOpts.runID, "run-id", "", "Disambiguate entities reused across runs")
+	bindCLIAPIConnectionFlags(cmd, &viewOpts.apiOptions)
 	return cmd
 }
 
@@ -185,6 +187,7 @@ func newEntityAggregateCommand(opts rootCommandOptions) *cobra.Command {
 	cmd.Flags().StringVar(&aggregateOpts.runID, "run-id", "", "Filter by run id")
 	cmd.Flags().StringVar(&aggregateOpts.groupBy, "group-by", "", "Group by current_state, flow, flow_instance, workflow_name, workflow_version, type, entity_type, slug, name, or fields.<path>")
 	cmd.Flags().StringVar(&aggregateOpts.typeName, "type", "", "Filter by entity type")
+	bindCLIAPIConnectionFlags(cmd, &aggregateOpts.apiOptions)
 	return cmd
 }
 

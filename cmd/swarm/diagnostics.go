@@ -124,18 +124,22 @@ func newRunsCommand(opts rootCommandOptions) *cobra.Command {
 		},
 	}
 	bindDiagnosticRunListFlags(cmd, &runOpts)
+	bindCLIAPIConnectionFlags(cmd, &runOpts.apiOptions)
 	return cmd
 }
 
 func newHealthCommand(opts rootCommandOptions) *cobra.Command {
-	return &cobra.Command{
+	apiOpts := opts
+	cmd := &cobra.Command{
 		Use:   "health",
 		Short: "Print structured operator health through v1 RPC.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDiagnosticHealthCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), opts)
+			return runDiagnosticHealthCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), apiOpts)
 		},
 	}
+	bindCLIAPIConnectionFlags(cmd, &apiOpts)
+	return cmd
 }
 
 func newStatusCommand(opts rootCommandOptions) *cobra.Command {
@@ -153,6 +157,7 @@ func newStatusCommand(opts rootCommandOptions) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&runOpts.noDiagnose, "no-diagnose", false, "Use run.get and print only the canonical run header")
+	bindCLIAPIConnectionFlags(cmd, &runOpts.apiOptions)
 	return cmd
 }
 
@@ -171,6 +176,7 @@ func newTraceCommand(opts rootCommandOptions) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&traceOpts.follow, "follow", false, "Follow live trace rows through /v1/ws run.subscribe_trace")
+	bindCLIAPIConnectionFlags(cmd, &traceOpts.apiOptions)
 	return cmd
 }
 

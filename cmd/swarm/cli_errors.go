@@ -52,6 +52,14 @@ func cliAPIErrorExitCode(err error, classifier cliAPIErrorClassifier) int {
 	if errors.Is(err, errCLIAPITokenRequired) {
 		return authExit
 	}
+	var authConfigErr *cliAPIAuthConfigError
+	if errors.As(err, &authConfigErr) {
+		return authExit
+	}
+	var validationErr *cliAPIValidationError
+	if errors.As(err, &validationErr) {
+		return cliExitValidation
+	}
 	var httpErr *cliAPIHTTPError
 	if errors.As(err, &httpErr) {
 		if httpErr.statusCode == http.StatusUnauthorized || httpErr.statusCode == http.StatusForbidden {

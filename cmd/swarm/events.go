@@ -206,6 +206,7 @@ func newEventsListCommand(opts rootCommandOptions) *cobra.Command {
 	cmd.Flags().StringVar(&listOpts.until, "until", "", "Optional RFC3339 upper created_at bound")
 	cmd.Flags().IntVar(&listOpts.limit, "limit", 0, "Optional page size, 1-1000")
 	cmd.Flags().StringVar(&listOpts.cursor, "cursor", "", "Optional pagination cursor")
+	bindCLIAPIConnectionFlags(cmd, &listOpts.apiOptions)
 	return cmd
 }
 
@@ -222,18 +223,22 @@ func newEventsFollowCommand(opts rootCommandOptions) *cobra.Command {
 	}
 	bindEventFilterFlags(cmd, &followOpts.filter)
 	cmd.Flags().StringVar(&followOpts.replaySince, "replay-since", "", "Optional RFC3339 catch-up window start")
+	bindCLIAPIConnectionFlags(cmd, &followOpts.apiOptions)
 	return cmd
 }
 
 func newEventViewCommand(opts rootCommandOptions) *cobra.Command {
-	return &cobra.Command{
+	apiOpts := opts
+	cmd := &cobra.Command{
 		Use:   "view <event-id>",
 		Short: "View one event through /v1/rpc event.get.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runEventViewCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), opts, args[0])
+			return runEventViewCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), apiOpts, args[0])
 		},
 	}
+	bindCLIAPIConnectionFlags(cmd, &apiOpts)
+	return cmd
 }
 
 func newEventReplayCommand(opts rootCommandOptions) *cobra.Command {
@@ -248,6 +253,7 @@ func newEventReplayCommand(opts rootCommandOptions) *cobra.Command {
 	}
 	cmd.Flags().StringArrayVar(&replayOpts.subscribers, "subscriber", nil, "Original agent subscriber to replay to; repeat to select a subset")
 	cmd.Flags().StringVar(&replayOpts.idempotencyKey, "idempotency-key", "", "Optional v1 API idempotency key")
+	bindCLIAPIConnectionFlags(cmd, &replayOpts.apiOptions)
 	return cmd
 }
 

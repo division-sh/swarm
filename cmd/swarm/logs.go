@@ -125,6 +125,7 @@ func newLogsCommand(opts rootCommandOptions) *cobra.Command {
 	cmd.Flags().IntVar(&logOpts.limit, "limit", 0, "Snapshot-only page size, 1-1000")
 	cmd.Flags().StringVar(&logOpts.cursor, "cursor", "", "Snapshot-only pagination cursor")
 	cmd.Flags().StringVar(&logOpts.order, "order", "", "Snapshot-only sort order: asc or desc")
+	bindCLIAPIConnectionFlags(cmd, &logOpts.apiOptions)
 	return cmd
 }
 

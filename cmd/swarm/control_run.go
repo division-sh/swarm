@@ -81,6 +81,7 @@ func newControlRunCommand(opts controlRunCommandOptions) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&cmdOpts.all, "all", false, "Apply the supported all-runs scope for this action")
+	bindCLIAPIConnectionFlags(cmd, &cmdOpts.apiOptions)
 	return cmd
 }
 

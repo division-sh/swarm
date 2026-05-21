@@ -240,9 +240,13 @@ func (o runCommandOptions) runtimeEndpoints() (rootCommandOptions, string, error
 		rpcEndpoint = "http://127.0.0.1:" + strconv.Itoa(o.apiPort) + "/v1/rpc"
 		wsEndpoint = "ws://127.0.0.1:" + strconv.Itoa(o.apiPort) + "/v1/ws"
 	} else {
-		rpcEndpoint = strings.TrimSpace(opts.apiEndpoint)
+		rpcEndpoint = strings.TrimSpace(opts.apiRPCEndpointOverride)
 		if rpcEndpoint == "" {
-			rpcEndpoint = defaultCLIAPIEndpoint
+			var err error
+			rpcEndpoint, err = cliAPIRPCEndpointFromServer(defaultCLIAPIServer, "API server")
+			if err != nil {
+				return opts, "", err
+			}
 		}
 		var err error
 		wsEndpoint, err = runCommandWebSocketEndpoint(rpcEndpoint)
@@ -250,7 +254,7 @@ func (o runCommandOptions) runtimeEndpoints() (rootCommandOptions, string, error
 			return opts, "", err
 		}
 	}
-	opts.apiEndpoint = rpcEndpoint
+	opts.apiRPCEndpointOverride = rpcEndpoint
 	return opts, wsEndpoint, nil
 }
 
@@ -285,25 +289,7 @@ func normalizeRunCommandConnectURL(raw string) (string, string, error) {
 }
 
 func runCommandWebSocketEndpoint(rpcEndpoint string) (string, error) {
-	parsed, err := url.Parse(strings.TrimSpace(rpcEndpoint))
-	if err != nil {
-		return "", fmt.Errorf("derive /v1/ws endpoint: %w", err)
-	}
-	switch parsed.Scheme {
-	case "http":
-		parsed.Scheme = "ws"
-	case "https":
-		parsed.Scheme = "wss"
-	default:
-		return "", fmt.Errorf("derive /v1/ws endpoint: unsupported API scheme %q", parsed.Scheme)
-	}
-	path := strings.TrimRight(parsed.Path, "/")
-	if strings.HasSuffix(path, "/v1/rpc") {
-		parsed.Path = strings.TrimSuffix(path, "/v1/rpc") + "/v1/ws"
-	} else {
-		return "", fmt.Errorf("derive /v1/ws endpoint: API endpoint must end in /v1/rpc")
-	}
-	return parsed.String(), nil
+	return cliAPIWebSocketEndpointFromRPC(rpcEndpoint)
 }
 
 func loadRunCommandPayload(path string) (map[string]any, error) {

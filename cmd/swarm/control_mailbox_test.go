@@ -668,7 +668,7 @@ func decisionForMailboxStatus(status string) string {
 
 func testRootCommandOptions(server *httptest.Server) rootCommandOptions {
 	opts := defaultRootCommandOptions()
-	opts.apiEndpoint = server.URL + "/v1/rpc"
+	opts.apiRPCEndpointOverride = server.URL + "/v1/rpc"
 	opts.httpClient = server.Client()
 	return opts
 }
