@@ -18,6 +18,7 @@ import (
 )
 
 const resultSchemaProbeTestName = "TestOpenRPCSuccessfulResultSchemas"
+const notificationSchemaProbeTestName = "TestOpenRPCSubscriptionNotificationSchemas"
 
 func TestOpenRPCSuccessfulResultSchemas(t *testing.T) {
 	root := repoRoot(t)
@@ -67,6 +68,27 @@ func TestOpenRPCResultSchemaPreflightRejectsUnreachableBranches(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "x-unsupported-probe") {
 		t.Fatalf("preflight error = %v, want unsupported keyword path", err)
+	}
+}
+
+func TestOpenRPCSubscriptionNotificationSchemas(t *testing.T) {
+	root := repoRoot(t)
+	api := loadComplianceAPISpec(t, root)
+	openRPC, _ := loadComplianceOpenRPC(t, filepath.Join(root, "docs", "specs", "swarm-platform", "platform", "contracts", "openrpc.json"))
+	matrix := loadComplianceMatrix(t, filepath.Join(root, "internal", "apiv1", "testdata", "openrpc_compliance_matrix.yaml"))
+
+	methods := notificationSchemaRuntimeMethods(t, api, openRPC, matrix)
+	assertStringList(t, "subscription notification-schema method set", methods, approvedNotificationSchemaRuntimeMethods())
+	assertNotificationSchemaMatrixProofRefs(t, matrix, methods)
+
+	validator := newOpenRPCResultSchemaValidator(t, openRPC)
+	validator.preflightMethodNotificationSchemas(t, methods)
+	for _, methodName := range methods {
+		methodName := methodName
+		t.Run(methodName, func(t *testing.T) {
+			result := successfulWebSocketRuntimeNotificationResult(t, methodName)
+			validator.validateMethodNotificationResult(t, methodName, result)
+		})
 	}
 }
 
@@ -123,6 +145,73 @@ func approvedResultSchemaRuntimeMethods() []string {
 	return out
 }
 
+func notificationSchemaRuntimeMethods(t *testing.T, api *apispec.APISpecification, openRPC apispec.OpenRPCDocument, matrix openRPCComplianceMatrix) []string {
+	t.Helper()
+	openRPCMethods := map[string]apispec.OpenRPCMethod{}
+	for _, method := range openRPC.Methods {
+		name := strings.TrimSpace(method.Name)
+		if name == "" {
+			t.Fatal("generated OpenRPC method missing name")
+		}
+		if _, exists := openRPCMethods[name]; exists {
+			t.Fatalf("generated OpenRPC method %s appears more than once", name)
+		}
+		openRPCMethods[name] = method
+	}
+	rows := map[string]openRPCMethodMatrix{}
+	for _, row := range matrix.Methods {
+		rows[row.Method] = row
+	}
+
+	fixtures := complianceStringSet(approvedNotificationSchemaRuntimeMethods())
+	out := make([]string, 0, len(fixtures))
+	for methodName, method := range api.MethodCatalog {
+		openRPCMethod, ok := openRPCMethods[methodName]
+		if !ok {
+			t.Fatalf("%s missing from generated OpenRPC artifact", methodName)
+		}
+		if _, ok := rows[methodName]; !ok {
+			t.Fatalf("%s missing from OpenRPC compliance matrix", methodName)
+		}
+		if method.NotificationSchema == nil {
+			if openRPCMethod.NotificationSchema != nil {
+				t.Fatalf("%s unexpectedly publishes notification_schema: %s", methodName, compactJSON(openRPCMethod.NotificationSchema))
+			}
+			continue
+		}
+		if _, ok := fixtures[methodName]; !ok {
+			t.Fatalf("%s declares notification_schema but is outside the approved notification-schema runtime set", methodName)
+		}
+		if openRPCMethod.NotificationSchema == nil {
+			t.Fatalf("%s generated OpenRPC method missing notification_schema", methodName)
+		}
+		if !jsonValueEqual(method.NotificationSchema, openRPCMethod.NotificationSchema) {
+			t.Fatalf("%s generated notification_schema = %s, want platform spec schema %s", methodName, compactJSON(openRPCMethod.NotificationSchema), compactJSON(method.NotificationSchema))
+		}
+		out = append(out, methodName)
+	}
+	for methodName := range fixtures {
+		method, ok := api.MethodCatalog[methodName]
+		if !ok {
+			t.Fatalf("%s fixture absent from platform spec method_catalog", methodName)
+		}
+		if method.NotificationSchema == nil {
+			t.Fatalf("%s fixture has no platform notification_schema", methodName)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func approvedNotificationSchemaRuntimeMethods() []string {
+	return []string{
+		"event.subscribe",
+		"health.subscribe",
+		"run.subscribe_trace",
+		"runtime.subscribe_logs",
+	}
+}
+
 func assertResultSchemaMatrixProofRefs(t *testing.T, matrix openRPCComplianceMatrix, methods []string) {
 	t.Helper()
 	methodSet := complianceStringSet(methods)
@@ -143,6 +232,31 @@ func assertResultSchemaMatrixProofRefs(t *testing.T, matrix openRPCComplianceMat
 		for _, gap := range row.GapClassification {
 			if gap == "missing_generated_result_schema_validation" {
 				t.Fatalf("%s still carries missing_generated_result_schema_validation after generated result-schema proof", row.Method)
+			}
+		}
+	}
+}
+
+func assertNotificationSchemaMatrixProofRefs(t *testing.T, matrix openRPCComplianceMatrix, methods []string) {
+	t.Helper()
+	methodSet := complianceStringSet(methods)
+	for _, row := range matrix.Methods {
+		_, inScope := methodSet[row.Method]
+		if !inScope && evidenceHasGoTest(row.NotificationSchema, notificationSchemaProbeTestName) {
+			t.Fatalf("%s has %s notification_schema proof_ref but is outside the approved notification-schema set", row.Method, notificationSchemaProbeTestName)
+		}
+		if !inScope {
+			continue
+		}
+		if row.NotificationSchema.Status != "covered" {
+			t.Fatalf("%s notification_schema status = %q, want covered", row.Method, row.NotificationSchema.Status)
+		}
+		if !evidenceHasGoTest(row.NotificationSchema, notificationSchemaProbeTestName) {
+			t.Fatalf("%s notification_schema missing go_test proof_ref %s", row.Method, notificationSchemaProbeTestName)
+		}
+		for _, gap := range row.GapClassification {
+			if gap == "notification_schema_not_emitted_in_openrpc_method" {
+				t.Fatalf("%s still carries notification_schema_not_emitted_in_openrpc_method after generated notification-schema proof", row.Method)
 			}
 		}
 	}
@@ -222,6 +336,32 @@ func successfulWebSocketRuntimeResult(t *testing.T, methodName string) any {
 	return resp.Result
 }
 
+func successfulWebSocketRuntimeNotificationResult(t *testing.T, methodName string) any {
+	t.Helper()
+	base := time.Unix(1700001400, 0).UTC()
+	handler, _ := newWebSocketRuntimeProbeHandler(t, webSocketRuntimeProbeObservability(base), time.Hour)
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	conn := dialTestWS(t, server.URL)
+	defer conn.Close()
+
+	fixture, ok := webSocketRuntimeProbeFixtures(base)[methodName]
+	if !ok {
+		t.Fatalf("%s missing websocket notification runtime fixture", methodName)
+	}
+	writeWSRequest(t, conn, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      webSocketRuntimeProbeID(methodName),
+		"method":  methodName,
+		"params":  fixture.Params,
+	})
+	resp := readWSResponse(t, conn)
+	subscriptionID := assertWebSocketRuntimeSubscribeSuccess(t, methodName, resp)
+	notification := readWSNotification(t, conn)
+	assertWebSocketRuntimeNotification(t, methodName, subscriptionID, notification)
+	return notification.Params.Result
+}
+
 func assertSuccessfulResultProbeResponse(t *testing.T, methodName string, status int, resp rpcResponse, body string) {
 	t.Helper()
 	if status != http.StatusOK {
@@ -270,6 +410,26 @@ func (v openRPCResultSchemaValidator) preflightMethodResultSchema(methodName str
 		return fmt.Errorf("%s missing generated OpenRPC result descriptor", methodName)
 	}
 	return v.preflightSchema("$."+methodName+".result", method.Result.Schema, map[string]bool{})
+}
+
+func (v openRPCResultSchemaValidator) preflightMethodNotificationSchemas(t *testing.T, methods []string) {
+	t.Helper()
+	for _, methodName := range methods {
+		if err := v.preflightMethodNotificationSchema(methodName); err != nil {
+			t.Fatalf("%s generated OpenRPC notification schema preflight failed: %v", methodName, err)
+		}
+	}
+}
+
+func (v openRPCResultSchemaValidator) preflightMethodNotificationSchema(methodName string) error {
+	method, ok := v.methods[methodName]
+	if !ok {
+		return fmt.Errorf("%s missing from generated OpenRPC methods", methodName)
+	}
+	if method.NotificationSchema == nil {
+		return fmt.Errorf("%s missing generated OpenRPC notification_schema", methodName)
+	}
+	return v.preflightSchema("$."+methodName+".notification_schema", method.NotificationSchema, map[string]bool{})
 }
 
 func (v openRPCResultSchemaValidator) preflightSchema(path string, schema any, refStack map[string]bool) error {
@@ -403,6 +563,20 @@ func (v openRPCResultSchemaValidator) validateMethodResult(t *testing.T, methodN
 	}
 	if err := v.validateValue("$."+methodName+".result", method.Result.Schema, result); err != nil {
 		t.Fatalf("%s result does not match generated OpenRPC schema: %v\nresult=%s", methodName, err, compactJSON(result))
+	}
+}
+
+func (v openRPCResultSchemaValidator) validateMethodNotificationResult(t *testing.T, methodName string, result any) {
+	t.Helper()
+	method, ok := v.methods[methodName]
+	if !ok {
+		t.Fatalf("%s missing from generated OpenRPC methods", methodName)
+	}
+	if method.NotificationSchema == nil {
+		t.Fatalf("%s missing generated OpenRPC notification_schema", methodName)
+	}
+	if err := v.validateValue("$."+methodName+".notification_schema", method.NotificationSchema, result); err != nil {
+		t.Fatalf("%s notification result does not match generated OpenRPC notification_schema: %v\nresult=%s", methodName, err, compactJSON(result))
 	}
 }
 

@@ -98,6 +98,38 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	if !methods["run.start"].Deprecated {
 		t.Fatal("generated OpenRPC run.start deprecated flag = false, want true")
 	}
+	expectedNotifications := map[string]string{
+		"event.subscribe":        "#/components/schemas/EventFull",
+		"health.subscribe":       "#/components/schemas/HealthCheckResult",
+		"run.subscribe_trace":    "#/components/schemas/RunTraceRow",
+		"runtime.subscribe_logs": "#/components/schemas/LogEntry",
+	}
+	for methodName, wantRef := range expectedNotifications {
+		if got := notificationSchemaRef(t, methodName, methods[methodName].NotificationSchema); got != wantRef {
+			t.Fatalf("%s notification_schema ref = %q, want %q", methodName, got, wantRef)
+		}
+	}
+	for methodName, method := range methods {
+		if _, ok := expectedNotifications[methodName]; ok {
+			continue
+		}
+		if method.NotificationSchema != nil {
+			t.Fatalf("%s unexpectedly publishes notification_schema: %#v", methodName, method.NotificationSchema)
+		}
+	}
+}
+
+func notificationSchemaRef(t *testing.T, methodName string, schema any) string {
+	t.Helper()
+	schemaMap, ok := schema.(map[string]any)
+	if !ok {
+		t.Fatalf("%s notification_schema = %#v, want object", methodName, schema)
+	}
+	ref, ok := schemaMap["$ref"].(string)
+	if !ok || strings.TrimSpace(ref) == "" {
+		t.Fatalf("%s notification_schema = %#v, want $ref", methodName, schema)
+	}
+	return ref
 }
 
 func TestGeneratedOpenRPCApplicationErrorCodesAreUnique(t *testing.T) {
