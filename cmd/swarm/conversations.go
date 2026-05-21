@@ -481,6 +481,9 @@ func validateConversationDeepTurn(prefix string, turn conversationDeepTurn) erro
 	if turn.ParseOK == nil {
 		return fmt.Errorf("malformed %s: parse_ok is required", prefix)
 	}
+	if turn.RetryCount < 0 {
+		return fmt.Errorf("malformed %s: retry_count must be non-negative", prefix)
+	}
 	if turn.DispatchMetadata == nil {
 		return fmt.Errorf("malformed %s: dispatch_metadata is required", prefix)
 	}
