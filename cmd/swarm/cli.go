@@ -79,6 +79,8 @@ func newRootCommandWithOptions(ctx context.Context, repo string, out, errOut io.
 		newEventCommand(opts),
 		newAgentsCommand(opts),
 		newAgentCommand(opts),
+		newEntitiesCommand(opts),
+		newEntityCommand(opts),
 		newMailboxCommand(opts),
 		newControlCommand(opts),
 		newRetiredForkCommand(),
