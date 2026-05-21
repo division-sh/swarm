@@ -40,6 +40,7 @@ type EntityReadStore interface {
 type AgentConversationReadStore interface {
 	ListOperatorAgents(context.Context, store.OperatorAgentListOptions) (store.OperatorAgentListResult, error)
 	LoadOperatorAgent(context.Context, string) (store.OperatorAgentDetail, error)
+	LoadOperatorAgentDiagnosis(context.Context, string) (store.OperatorAgentDiagnosis, error)
 	ListOperatorConversations(context.Context, store.OperatorConversationListOptions) (store.OperatorConversationListResult, error)
 	LoadOperatorConversation(context.Context, string) (store.OperatorConversationDetail, error)
 	LoadOperatorConversationTurn(context.Context, string, int) (store.OperatorConversationTurnDetail, error)
@@ -297,6 +298,27 @@ func OperatorAgentConversationHandlers(opts OperatorReadOptions) map[string]Meth
 			}
 			return result, nil
 		},
+		"agent.diagnose": func(ctx context.Context, req Request) (any, error) {
+			reads, err := requireAgentConversationReadStore(opts.AgentConversations)
+			if err != nil {
+				return nil, err
+			}
+			agentID, err := requiredStringParam(req.Params, "agent_id")
+			if err != nil {
+				return nil, err
+			}
+			result, err := reads.LoadOperatorAgentDiagnosis(ctx, agentID)
+			if errors.Is(err, store.ErrAgentNotFound) {
+				return nil, NewApplicationError(AgentNotFoundCode, false, map[string]any{"agent_id": agentID})
+			}
+			if err != nil {
+				return nil, err
+			}
+			if err := validateAgentDiagnosisResult(result); err != nil {
+				return nil, err
+			}
+			return result, nil
+		},
 		"conversation.list": func(ctx context.Context, req Request) (any, error) {
 			reads, err := requireAgentConversationReadStore(opts.AgentConversations)
 			if err != nil {
@@ -407,6 +429,48 @@ func OperatorAgentConversationHandlers(opts OperatorReadOptions) map[string]Meth
 			}
 			return result, nil
 		},
+	}
+}
+
+func validateAgentDiagnosisResult(item store.OperatorAgentDiagnosis) error {
+	if strings.TrimSpace(item.AgentID) == "" {
+		return fmt.Errorf("agent.diagnose owner returned malformed result: agent_id is required")
+	}
+	if !validAgentDiagnosisStatus(item.Status) {
+		return fmt.Errorf("agent.diagnose owner returned malformed result: status=%q is not a valid AgentStatus", item.Status)
+	}
+	if item.Queue.PendingCount < 0 {
+		return fmt.Errorf("agent.diagnose owner returned malformed result: queue.pending_count must be non-negative")
+	}
+	if item.Queue.OldestPendingAgeSeconds < 0 {
+		return fmt.Errorf("agent.diagnose owner returned malformed result: queue.oldest_pending_age_seconds must be non-negative")
+	}
+	if item.DeliveryLifecycle != nil {
+		if !validAgentDeliveryLifecycleState(item.DeliveryLifecycle.State) {
+			return fmt.Errorf("agent.diagnose owner returned malformed result: delivery_lifecycle.state=%q is not valid", item.DeliveryLifecycle.State)
+		}
+		if strings.TrimSpace(item.DeliveryLifecycle.BlockingLayer) == "" {
+			return fmt.Errorf("agent.diagnose owner returned malformed result: delivery_lifecycle.blocking_layer is required")
+		}
+	}
+	return nil
+}
+
+func validAgentDiagnosisStatus(status string) bool {
+	switch strings.TrimSpace(status) {
+	case "idle", "running", "paused", "failed", "terminated":
+		return true
+	default:
+		return false
+	}
+}
+
+func validAgentDeliveryLifecycleState(state string) bool {
+	switch strings.TrimSpace(state) {
+	case "queued", "launching", "active", "retrying", "exhausted":
+		return true
+	default:
+		return false
 	}
 }
 

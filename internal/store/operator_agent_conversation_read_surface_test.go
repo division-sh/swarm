@@ -300,6 +300,141 @@ func TestOperatorAgentReadSurfaceLoadAgentProjectsSessionAndTurnRefs(t *testing.
 	}
 }
 
+func TestOperatorAgentReadSurfaceLoadAgentDiagnosisUsesSelectedOwners(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	sessionID := "11111111-1111-1111-1111-111111111111"
+	turnID := "22222222-2222-2222-2222-222222222222"
+	sessionStartedAt := time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC)
+	turnCompletedAt := time.Date(2026, 5, 12, 9, 5, 0, 0, time.UTC)
+	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
+		caps:   canonicalAgentConversationReadCaps(),
+		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
+		pending: map[string]PendingAgentDeliveryFacts{
+			"agent-1": {PendingCount: 3, OldestPendingAgeSec: 90},
+		},
+		lifecycle: map[string]AgentLifecycleFacts{
+			"agent-1": {CurrentState: "active", BlockingLayer: "session_execution"},
+		},
+	}, 0)
+
+	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
+		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
+		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
+			AddRow("agent-1", "active", sessionID, sessionStartedAt, 2, "", nil, []byte(`{"provider_session_id":"provider-sess-1"}`), 0, 0, 0, 0, 0, turnID, "task-1", true, "", turnCompletedAt, []byte(`[]`)))
+
+	diagnosis, err := reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1")
+	if err != nil {
+		t.Fatalf("LoadOperatorAgentDiagnosis: %v", err)
+	}
+	if diagnosis.AgentID != "agent-1" || diagnosis.Status != "running" {
+		t.Fatalf("identity/status = %#v", diagnosis)
+	}
+	if diagnosis.CurrentSessionRef == nil || diagnosis.CurrentSessionRef.SessionID != sessionID || !diagnosis.CurrentSessionRef.StartedAt.Equal(sessionStartedAt) {
+		t.Fatalf("current_session_ref = %#v", diagnosis.CurrentSessionRef)
+	}
+	if diagnosis.LastTurnRef == nil || diagnosis.LastTurnRef.TurnID != turnID || !diagnosis.LastTurnRef.CompletedAt.Equal(turnCompletedAt) {
+		t.Fatalf("last_turn_ref = %#v", diagnosis.LastTurnRef)
+	}
+	if diagnosis.Queue.PendingCount != 3 || diagnosis.Queue.OldestPendingAgeSeconds != 90 {
+		t.Fatalf("queue = %#v", diagnosis.Queue)
+	}
+	if diagnosis.DeliveryLifecycle == nil || diagnosis.DeliveryLifecycle.State != "active" || diagnosis.DeliveryLifecycle.BlockingLayer != "session_execution" {
+		t.Fatalf("delivery_lifecycle = %#v", diagnosis.DeliveryLifecycle)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
+func TestOperatorAgentReadSurfaceLoadAgentDiagnosisOmitsAbsentLifecycle(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
+		caps:   canonicalAgentConversationReadCaps(),
+		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
+	}, 0)
+
+	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
+		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
+		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
+			AddRow("agent-1", "active", "", nil, 0, "", nil, []byte(`{}`), 0, 0, 0, 0, 0, "", "", false, "", nil, []byte(`[]`)))
+
+	diagnosis, err := reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1")
+	if err != nil {
+		t.Fatalf("LoadOperatorAgentDiagnosis: %v", err)
+	}
+	if diagnosis.Queue.PendingCount != 0 || diagnosis.Queue.OldestPendingAgeSeconds != 0 {
+		t.Fatalf("queue = %#v, want zero facts", diagnosis.Queue)
+	}
+	if diagnosis.DeliveryLifecycle != nil {
+		t.Fatalf("delivery_lifecycle = %#v, want nil", diagnosis.DeliveryLifecycle)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
+func TestOperatorAgentReadSurfaceLoadAgentDiagnosisFailsClosedOnMalformedLifecycle(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
+		caps:   canonicalAgentConversationReadCaps(),
+		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
+		lifecycle: map[string]AgentLifecycleFacts{
+			"agent-1": {CurrentState: "blocked", BlockingLayer: "session_execution"},
+		},
+	}, 0)
+
+	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
+		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
+		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
+			AddRow("agent-1", "active", "", nil, 0, "", nil, []byte(`{}`), 0, 0, 0, 0, 0, "", "", false, "", nil, []byte(`[]`)))
+
+	_, err = reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1")
+	if err == nil || !strings.Contains(err.Error(), "delivery_lifecycle.state") {
+		t.Fatalf("LoadOperatorAgentDiagnosis err = %v, want delivery_lifecycle.state failure", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
+func TestOperatorAgentReadSurfaceLoadAgentDiagnosisPropagatesCapabilityFailure(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	caps := canonicalAgentConversationReadCaps()
+	caps.Events.Log = SchemaFlavorLegacy
+	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
+		caps:   caps,
+		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
+	}, 0)
+
+	_, err = reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1")
+	if err == nil || !strings.Contains(err.Error(), "events schema is unsupported") {
+		t.Fatalf("LoadOperatorAgentDiagnosis err = %v, want events capability failure", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
 func TestOperatorConversationReadSurfaceCurrentForAgentUsesMostRecentActiveSessionOnly(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
