@@ -89,6 +89,8 @@ type rawOpenRPCDocument struct {
 	Methods []map[string]json.RawMessage `json:"methods"`
 }
 
+const openRPCComplianceMatrixTestName = "TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod"
+
 func TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod(t *testing.T) {
 	root := repoRoot(t)
 	api := loadComplianceAPISpec(t, root)
@@ -113,6 +115,7 @@ func TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod(t *testing.T) {
 	if len(matrix.Methods) != len(doc.Methods) {
 		t.Fatalf("matrix rows = %d, want generated method count %d", len(matrix.Methods), len(doc.Methods))
 	}
+	assertExamplesPolicyDeferred(t, api.ExamplesPolicy)
 	if problems := validateProofReferenceIntegrity(root, matrix); len(problems) > 0 {
 		t.Fatalf("compliance matrix proof-reference integrity failed:\n- %s", strings.Join(problems, "\n- "))
 	}
@@ -166,7 +169,7 @@ func TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod(t *testing.T) {
 		assertEvidence(t, methodName, "unknown_top_level_param_validation", row.UnknownTopLevelParamValidation, false)
 		assertEvidence(t, methodName, "auth", row.Auth, false)
 		assertEvidence(t, methodName, "result_schema", row.ResultSchema, true)
-		assertEvidence(t, methodName, "examples", row.Examples, true)
+		assertEvidence(t, methodName, "examples", row.Examples, false)
 		assertEvidence(t, methodName, "service_discovery_publication", row.ServiceDiscoveryPublication, false)
 
 		if len(row.GapClassification) == 0 {
@@ -192,9 +195,7 @@ func TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod(t *testing.T) {
 		} else {
 			assertEvidence(t, methodName, "notification_schema", row.NotificationSchema, true)
 		}
-		if !rawMethods[methodName].hasExamples && row.Examples.Status != "tracked_gap" {
-			t.Fatalf("%s examples status = %q, want tracked_gap while openrpc.json has no method examples", methodName, row.Examples.Status)
-		}
+		assertExamplesPolicyMatrixRow(t, methodName, rawMethods[methodName], row.Examples)
 		if row.ServiceDiscoveryPublication.Status != "published_without_discovery" {
 			t.Fatalf("%s service_discovery_publication status = %q, want published_without_discovery", methodName, row.ServiceDiscoveryPublication.Status)
 		}
@@ -281,6 +282,14 @@ func TestOpenRPCComplianceMatrixRejectsInvalidProofReferences(t *testing.T) {
 			want: "artifact proof_ref path docs/specs/missing-openrpc.json does not exist",
 		},
 		{
+			name: "policy deferred examples missing artifact proof",
+			mutate: func(matrix *openRPCComplianceMatrix) {
+				row := complianceMatrixRow(t, matrix, "agent.get")
+				row.Examples.ProofRefs = []complianceProofRef{{Kind: "go_test", Name: openRPCComplianceMatrixTestName}}
+			},
+			want: "examples status policy_deferred requires an artifact proof_ref",
+		},
+		{
 			name: "legacy proof strings",
 			mutate: func(matrix *openRPCComplianceMatrix) {
 				row := complianceMatrixRow(t, matrix, "agent.get")
@@ -356,7 +365,7 @@ func loadComplianceOpenRPC(t *testing.T, path string) (apispec.OpenRPCDocument, 
 		if err := json.Unmarshal(method["name"], &name); err != nil {
 			t.Fatalf("parse raw openrpc method name: %v", err)
 		}
-		rawMethods[name] = rawOpenRPCMethodProof{hasExamples: rawJSONHasContent(method["examples"])}
+		rawMethods[name] = rawOpenRPCMethodProof{hasExamples: rawJSONHasContent(method["examples"]) || rawJSONHasContent(method["example"])}
 	}
 	return doc, rawMethods
 }
@@ -564,6 +573,13 @@ func validateEvidenceProofRefs(root string, index complianceProofIndex, matrix o
 		if _, ok := kinds["artifact"]; !ok {
 			problems = append(problems, fmt.Sprintf("%s status published_without_discovery requires an artifact proof_ref", label))
 		}
+	case "policy_deferred":
+		if _, ok := kinds["artifact"]; !ok {
+			problems = append(problems, fmt.Sprintf("%s status policy_deferred requires an artifact proof_ref", label))
+		}
+		if _, ok := kinds["go_test"]; !ok {
+			problems = append(problems, fmt.Sprintf("%s status policy_deferred requires a go_test proof_ref", label))
+		}
 	}
 	return problems
 }
@@ -574,15 +590,13 @@ func allowedComplianceGapClasses() map[string]struct{} {
 		"missing_generated_result_schema_validation",
 		"missing_happy_path_test",
 		"missing_idempotency_test",
-		"missing_openrpc_examples",
+		"missing_rpc_discover_policy",
 		"missing_result_schema_proof",
 	})
 }
 
 func allowedCompliancePolicyGaps() map[string]struct{} {
-	return complianceStringSet([]string{
-		"openrpc_examples_absent",
-	})
+	return complianceStringSet(nil)
 }
 
 func allowedProofRefKinds(status, field string) map[string]struct{} {
@@ -597,6 +611,8 @@ func allowedProofRefKinds(status, field string) map[string]struct{} {
 		}
 		return complianceStringSet([]string{"tracker"})
 	case "published_without_discovery":
+		return complianceStringSet([]string{"artifact", "go_test"})
+	case "policy_deferred":
 		return complianceStringSet([]string{"artifact", "go_test"})
 	default:
 		return map[string]struct{}{}
@@ -860,12 +876,59 @@ func allowedEvidenceStatuses(field string) map[string]struct{} {
 	case "result_schema", "notification_schema":
 		return complianceStringSet([]string{"covered", "spot_checked"})
 	case "examples":
-		return complianceStringSet([]string{"covered"})
+		return complianceStringSet([]string{"covered", "policy_deferred"})
 	case "service_discovery_publication":
 		return complianceStringSet([]string{"published_without_discovery"})
 	default:
 		return map[string]struct{}{}
 	}
+}
+
+func assertExamplesPolicyDeferred(t *testing.T, policy apispec.ExamplesPolicy) {
+	t.Helper()
+	if policy.Status != apispec.ExamplesPolicyStatusDeferred {
+		t.Fatalf("examples_policy.status = %q, want %q", policy.Status, apispec.ExamplesPolicyStatusDeferred)
+	}
+	if policy.Owner != apispec.ExamplesPolicyOwner {
+		t.Fatalf("examples_policy.owner = %q, want %q", policy.Owner, apispec.ExamplesPolicyOwner)
+	}
+	if policy.AppliesTo != apispec.ExamplesPolicyAppliesToAllGenerated {
+		t.Fatalf("examples_policy.applies_to = %q, want %q", policy.AppliesTo, apispec.ExamplesPolicyAppliesToAllGenerated)
+	}
+	if policy.OpenRPCMethodExamples != apispec.ExamplesPolicyOpenRPCExamplesOmitted {
+		t.Fatalf("examples_policy.openrpc_method_examples = %q, want %q", policy.OpenRPCMethodExamples, apispec.ExamplesPolicyOpenRPCExamplesOmitted)
+	}
+	if policy.RuntimeProbeFixtures != apispec.ExamplesPolicyRuntimeFixturesNotExamples {
+		t.Fatalf("examples_policy.runtime_probe_fixtures = %q, want %q", policy.RuntimeProbeFixtures, apispec.ExamplesPolicyRuntimeFixturesNotExamples)
+	}
+}
+
+func assertExamplesPolicyMatrixRow(t *testing.T, methodName string, rawProof rawOpenRPCMethodProof, evidence complianceEvidence) {
+	t.Helper()
+	if rawProof.hasExamples {
+		t.Fatalf("%s publishes OpenRPC examples while examples_policy is deferred", methodName)
+	}
+	if evidence.Status != "policy_deferred" {
+		t.Fatalf("%s examples status = %q, want policy_deferred while examples_policy is deferred", methodName, evidence.Status)
+	}
+	if !evidenceHasArtifact(evidence, "docs/specs/swarm-platform/platform/contracts/platform-spec.yaml") {
+		t.Fatalf("%s examples missing platform-spec.yaml artifact proof_ref", methodName)
+	}
+	if !evidenceHasArtifact(evidence, "docs/specs/swarm-platform/platform/contracts/openrpc.json") {
+		t.Fatalf("%s examples missing openrpc.json artifact proof_ref", methodName)
+	}
+	if !evidenceHasGoTest(evidence, openRPCComplianceMatrixTestName) {
+		t.Fatalf("%s examples missing go_test proof_ref %s", methodName, openRPCComplianceMatrixTestName)
+	}
+}
+
+func evidenceHasArtifact(evidence complianceEvidence, path string) bool {
+	for _, ref := range evidence.ProofRefs {
+		if ref.Kind == "artifact" && ref.Path == path {
+			return true
+		}
+	}
+	return false
 }
 
 func assertNotApplicable(t *testing.T, methodName, field string, evidence complianceEvidence) {

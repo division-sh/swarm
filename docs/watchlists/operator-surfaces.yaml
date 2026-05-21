@@ -172,7 +172,8 @@ nodes:
       - central method transport admission can be absent, letting WS/protocol methods execute over /v1/rpc or HTTP-class methods execute over /v1/ws despite matrix transport classification
       - generated full successful-result schema validation can be absent even when runtime probes only key-smoke result payloads
       - generated notification-schema publication and runtime validation can be absent for subscription notifications even when WS probes only smoke-test envelopes
-      - OpenRPC method examples and rpc.discover publication status are not explicitly tracked
+      - OpenRPC method examples can lack a merge-bearing authoring or deferral policy across the generated method catalog
+      - rpc.discover publication status is not explicitly tracked
       - CI can pass without a direct swarm-openrpc-gen --check step
     representative_issues:
       - 835
@@ -183,6 +184,7 @@ nodes:
       - 878
       - 890
       - 898
+      - 904
     common_framing_mistakes:
       too_broad:
         - full v1 runtime conformance can be closed by one matrix PR

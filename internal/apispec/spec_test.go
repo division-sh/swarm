@@ -43,6 +43,7 @@ func TestPlatformAPISpecValidationCoverage(t *testing.T) {
 	if _, ok := api.Components.Errors["description"]; ok {
 		t.Fatal("components.errors.description must not be a concrete error code")
 	}
+	assertExamplesPolicyDeferred(t, api.ExamplesPolicy)
 }
 
 func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
@@ -73,6 +74,7 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	if len(doc.Components.Errors) != 28 {
 		t.Fatalf("generated OpenRPC errors = %d, want 28", len(doc.Components.Errors))
 	}
+	assertGeneratedMethodsOmitExamplesUnderPolicy(t, api, artifact)
 	methods := map[string]OpenRPCMethod{}
 	for _, method := range doc.Methods {
 		methods[method.Name] = method
@@ -119,6 +121,32 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsMissingExamplesPolicy(t *testing.T) {
+	api := loadRepoAPISpec(t)
+	api.ExamplesPolicy = ExamplesPolicy{}
+
+	_, err := Validate(api)
+	if err == nil {
+		t.Fatal("Validate() error = nil, want examples_policy rejection")
+	}
+	if got, want := err.Error(), "api_specification.examples_policy missing status"; !strings.Contains(got, want) {
+		t.Fatalf("Validate() error = %q, want substring %q", got, want)
+	}
+}
+
+func TestValidateRejectsUnsupportedExamplesPolicy(t *testing.T) {
+	api := loadRepoAPISpec(t)
+	api.ExamplesPolicy.Status = "authored"
+
+	_, err := Validate(api)
+	if err == nil {
+		t.Fatal("Validate() error = nil, want unsupported examples_policy status rejection")
+	}
+	if got, want := err.Error(), `api_specification.examples_policy.status = "authored", want "deferred"`; !strings.Contains(got, want) {
+		t.Fatalf("Validate() error = %q, want substring %q", got, want)
+	}
+}
+
 func notificationSchemaRef(t *testing.T, methodName string, schema any) string {
 	t.Helper()
 	schemaMap, ok := schema.(map[string]any)
@@ -130,6 +158,63 @@ func notificationSchemaRef(t *testing.T, methodName string, schema any) string {
 		t.Fatalf("%s notification_schema = %#v, want $ref", methodName, schema)
 	}
 	return ref
+}
+
+func assertExamplesPolicyDeferred(t *testing.T, policy ExamplesPolicy) {
+	t.Helper()
+	if policy.Status != ExamplesPolicyStatusDeferred {
+		t.Fatalf("examples_policy.status = %q, want %q", policy.Status, ExamplesPolicyStatusDeferred)
+	}
+	if policy.Owner != ExamplesPolicyOwner {
+		t.Fatalf("examples_policy.owner = %q, want %q", policy.Owner, ExamplesPolicyOwner)
+	}
+	if policy.AppliesTo != ExamplesPolicyAppliesToAllGenerated {
+		t.Fatalf("examples_policy.applies_to = %q, want %q", policy.AppliesTo, ExamplesPolicyAppliesToAllGenerated)
+	}
+	if policy.OpenRPCMethodExamples != ExamplesPolicyOpenRPCExamplesOmitted {
+		t.Fatalf("examples_policy.openrpc_method_examples = %q, want %q", policy.OpenRPCMethodExamples, ExamplesPolicyOpenRPCExamplesOmitted)
+	}
+	if policy.RuntimeProbeFixtures != ExamplesPolicyRuntimeFixturesNotExamples {
+		t.Fatalf("examples_policy.runtime_probe_fixtures = %q, want %q", policy.RuntimeProbeFixtures, ExamplesPolicyRuntimeFixturesNotExamples)
+	}
+	if !policy.FutureSourceModelRequired {
+		t.Fatal("examples_policy.future_source_model_required = false, want true")
+	}
+	if strings.TrimSpace(policy.Reason) == "" {
+		t.Fatal("examples_policy.reason must explain examples deferral")
+	}
+	if len(policy.Requirements) == 0 {
+		t.Fatal("examples_policy.requirements must list enforcement requirements")
+	}
+}
+
+func assertGeneratedMethodsOmitExamplesUnderPolicy(t *testing.T, api *APISpecification, artifact []byte) {
+	t.Helper()
+	assertExamplesPolicyDeferred(t, api.ExamplesPolicy)
+
+	var rawDoc struct {
+		Methods []map[string]json.RawMessage `json:"methods"`
+	}
+	if err := json.Unmarshal(artifact, &rawDoc); err != nil {
+		t.Fatalf("unmarshal raw openrpc methods: %v", err)
+	}
+	for _, method := range rawDoc.Methods {
+		var name string
+		if err := json.Unmarshal(method["name"], &name); err != nil {
+			t.Fatalf("parse raw openrpc method name: %v", err)
+		}
+		if rawJSONHasContent(method["examples"]) {
+			t.Fatalf("%s publishes OpenRPC examples while examples_policy is deferred", name)
+		}
+		if rawJSONHasContent(method["example"]) {
+			t.Fatalf("%s publishes OpenRPC example while examples_policy is deferred", name)
+		}
+	}
+}
+
+func rawJSONHasContent(raw json.RawMessage) bool {
+	trimmed := strings.TrimSpace(string(raw))
+	return trimmed != "" && trimmed != "null" && trimmed != "[]"
 }
 
 func TestGeneratedOpenRPCApplicationErrorCodesAreUnique(t *testing.T) {
