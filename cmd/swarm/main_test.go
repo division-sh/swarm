@@ -341,6 +341,29 @@ func TestPlatformSpecServeUnifiedListenerBindContractPromoted(t *testing.T) {
 
 func TestPlatformSpecCLIAPIConnectionAuthConfigPrecedencePromoted(t *testing.T) {
 	spec := loadCLIAPIConnectionAuthConfigSpec(t)
+	platformSpecData, err := os.ReadFile(filepath.Join(repoRoot(), defaultPlatformSpecPath))
+	if err != nil {
+		t.Fatalf("read platform spec: %v", err)
+	}
+	platformSpecText := string(platformSpecData)
+	for _, stale := range []string{
+		"Runtime-state commands use v1 bearer auth through `SWARM_API_TOKEN`",
+		"SWARM_API_TOKEN is the only user-facing API bearer-token source",
+		"SWARM_API_TOKEN is required.",
+	} {
+		if strings.Contains(platformSpecText, stale) {
+			t.Fatalf("platform spec still contains stale SWARM_API_TOKEN-only bearer-token authority %q", stale)
+		}
+	}
+	for _, want := range []string{
+		"User-facing API bearer-token sources are governed by",
+		"cli_specification.foundations.api_connection_auth_config_precedence",
+		"`SWARM_BUILDER_AUTH_TOKEN` and `SWARM_OPERATOR_AUTH_TOKEN` fallback is invalid",
+	} {
+		if !strings.Contains(platformSpecText, want) {
+			t.Fatalf("platform spec missing auth-boundary repair proof %q", want)
+		}
+	}
 	if strings.TrimSpace(spec.PromotedBy) != "#844" {
 		t.Fatalf("api connection/auth/config promoted_by = %q, want #844", spec.PromotedBy)
 	}
