@@ -8526,12 +8526,34 @@ api_specification:
         - active
         - retrying
         - exhausted
+      AgentPendingDelivery:
+        type: object
+        additionalProperties: false
+        required:
+        - event_id
+        - event_name
+        - enqueued_at
+        - attempts
+        properties:
+          event_id:
+            $ref: '#/components/schemas/OpaqueId'
+          event_name:
+            type: string
+            minLength: 1
+          enqueued_at:
+            $ref: '#/components/schemas/Timestamp'
+            description: Same timestamp owner as AgentDiagnosisQueue.oldest_pending_age_seconds; currently events.created_at.
+          attempts:
+            type: integer
+            minimum: 0
+            description: Canonical recorded delivery retry counter from event_deliveries.retry_count; the API must not add one or reinterpret by status.
       AgentDiagnosisQueue:
         type: object
         additionalProperties: false
         required:
         - pending_count
         - oldest_pending_age_seconds
+        - pending_deliveries
         properties:
           pending_count:
             type: integer
@@ -8539,6 +8561,12 @@ api_specification:
           oldest_pending_age_seconds:
             type: integer
             minimum: 0
+          pending_deliveries:
+            type: array
+            items:
+              $ref: '#/components/schemas/AgentPendingDelivery'
+          next_cursor:
+            $ref: '#/components/schemas/Cursor'
       AgentDeliveryLifecycle:
         type: object
         additionalProperties: false
@@ -10383,14 +10411,20 @@ api_specification:
     agent.diagnose:
       tier: should_have
       description: |
-        Read the first owner-backed diagnosis slice for one agent. This method is
-        limited to agent identity/status refs, pending delivery count/oldest age,
-        and optional delivery lifecycle evidence. The API handler consumes the
+        Read the owner-backed diagnosis slice for one agent. This method is
+        limited to agent identity/status refs, current/last conversation refs,
+        pending-delivery queue summary/detail evidence, and optional delivery
+        lifecycle evidence. Queue details are paged with queue_limit and
+        queue_cursor, ordered by events.created_at ASC then events.event_id ASC.
+        AgentPendingDelivery.enqueued_at uses the same timestamp owner as
+        oldest_pending_age_seconds. AgentPendingDelivery.attempts is the
+        canonical recorded retry counter from event_deliveries.retry_count, with
+        no API-layer +1 or status arithmetic. The API handler consumes the
         canonical agent diagnosis read owner directly. It must not join
-        conversation, run, trace, token, queue-detail, CLI, or dashboard owners
-        locally, and it must not expose runtime_state, run_id, bundle_version,
-        active task/entity, watchdog, last tool outcome, token usage, recent
-        failures, dead letters, pending delivery details, attempts, or cursors.
+        conversation, run, trace, token, CLI, or dashboard owners locally, and
+        it must not expose runtime_state, run_id, bundle_version, active
+        task/entity, watchdog, last tool outcome, token usage, recent failures,
+        or dead letters.
       scope:
         required:
         - read:agents
@@ -10399,6 +10433,19 @@ api_specification:
         required: true
         schema:
           $ref: '#/components/schemas/OpaqueId'
+      - name: queue_limit
+        required: false
+        description: Max pending-delivery detail rows to return. pending_count remains the total pending count for the selected queue, not the page length.
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 50
+      - name: queue_cursor
+        required: false
+        description: Opaque cursor returned by queue.next_cursor for the next pending-delivery detail page.
+        schema:
+          $ref: '#/components/schemas/Cursor'
       result:
         name: result
         required: true

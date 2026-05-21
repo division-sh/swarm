@@ -26,6 +26,8 @@ var ErrInvalidEntityCursor = errors.New("store: invalid entity cursor")
 
 var ErrInvalidConversationCursor = errors.New("store: invalid conversation cursor")
 
+var ErrInvalidPendingAgentDeliveryCursor = errors.New("store: invalid pending agent delivery cursor")
+
 var ErrOperatorConversationRunIDCapability = errors.New("store: operator conversation read surface run_id capability unavailable")
 
 var ErrInvalidEntityReadParam = errors.New("store: invalid entity read parameter")

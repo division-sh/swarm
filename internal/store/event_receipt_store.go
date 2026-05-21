@@ -57,10 +57,6 @@ func (s *PostgresStore) UpsertEventReceipt(ctx context.Context, eventID, agentID
 }
 
 func (s *PostgresStore) ListPendingEventsForAgent(ctx context.Context, agentID string, since time.Time, limit int) ([]events.Event, error) {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
-		return nil, err
-	}
 	if agentID == "" {
 		return nil, nil
 	}
@@ -70,10 +66,19 @@ func (s *PostgresStore) ListPendingEventsForAgent(ctx context.Context, agentID s
 	if since.IsZero() {
 		since = time.Now().Add(-30 * 24 * time.Hour)
 	}
-	if err := RequireCanonicalPendingAgentDeliveryCapabilities(caps); err != nil {
+	page, err := s.ListPendingAgentDeliveryDetails(ctx, PendingAgentDeliveryListOptions{
+		AgentID: agentID,
+		Since:   since,
+		Limit:   limit,
+	})
+	if err != nil {
 		return nil, err
 	}
-	return s.listPendingEventsForAgentSpec(ctx, agentID, since, limit)
+	out := make([]events.Event, 0, len(page.PendingDeliveries))
+	for _, detail := range page.PendingDeliveries {
+		out = append(out, detail.Event)
+	}
+	return out, nil
 }
 
 func (s *PostgresStore) ListPendingSubscribedEvents(
@@ -460,44 +465,6 @@ func (s *PostgresStore) ServeAbandonDeliveryQuiesced(ctx context.Context, eventI
 		return false, fmt.Errorf("check serve abandon delivery quiescence: %w", err)
 	}
 	return ok, nil
-}
-
-func (s *PostgresStore) listPendingEventsForAgentSpec(ctx context.Context, agentID string, since time.Time, limit int) ([]events.Event, error) {
-	rows, err := s.DB.QueryContext(ctx, `
-		SELECT
-			d.subscriber_id,
-			e.event_id::text, COALESCE(e.run_id::text, ''), e.event_name, COALESCE(e.produced_by, ''),
-			COALESCE(e.entity_id::text, ''), COALESCE(e.flow_instance, ''), COALESCE(e.scope, 'global'),
-			e.payload, e.created_at,
-			COALESCE(e.source_event_id::text, ''),
-			TRUE,
-			COALESCE(d.status, ''),
-			COALESCE(d.retry_count, 0),
-			d.created_at,
-			d.delivered_at,
-			CASE WHEN r.event_id IS NULL THEN FALSE ELSE TRUE END
-		FROM event_deliveries d
-		INNER JOIN events e ON e.event_id = d.event_id
-		LEFT JOIN event_receipts r
-			ON r.event_id = d.event_id
-			AND r.subscriber_type = 'agent'
-			AND r.subscriber_id = d.subscriber_id
-		WHERE d.subscriber_type = 'agent'
-		  AND d.subscriber_id = $1
-		  AND e.created_at >= $2
-		  AND `+canonicalPendingDeliveryPredicateSQL("d", "r")+`
-		ORDER BY e.created_at ASC
-		LIMIT $3
-	`, agentID, since, limit)
-	if err != nil {
-		return nil, fmt.Errorf("query pending events for %s: %w", agentID, err)
-	}
-	defer rows.Close()
-	records, err := scanPendingAgentDeliveryRecords(rows)
-	if err != nil {
-		return nil, err
-	}
-	return pendingEventsFromRecords(records, time.Now(), limit), nil
 }
 
 func (s *PostgresStore) listPendingSubscribedEventsSpec(ctx context.Context, agentID string, subscriptions []events.EventType, since time.Time, limit int) ([]events.Event, error) {

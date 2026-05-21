@@ -1529,9 +1529,17 @@ func TestPostgresStore_MarkRunTerminal_PersistsCanonicalLifecycle(t *testing.T) 
 	}
 }
 
-func TestPostgresStore_ListPendingEventsForAgentSpec_PreservesRunID(t *testing.T) {
+func TestPostgresStore_ListPendingEventsForAgent_PreservesRunID(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
+	pg.schemaCaps = StoreSchemaCapabilities{
+		Events: EventSchemaCapabilities{
+			Log:        SchemaFlavorCanonical,
+			Deliveries: SchemaFlavorCanonical,
+			Receipts:   SchemaFlavorCanonical,
+		},
+	}
+	pg.schemaCapsBound = true
 	ctx := context.Background()
 
 	stmts := []string{
@@ -1606,9 +1614,9 @@ func TestPostgresStore_ListPendingEventsForAgentSpec_PreservesRunID(t *testing.T
 		t.Fatalf("seed delivery: %v", err)
 	}
 
-	got, err := pg.listPendingEventsForAgentSpec(ctx, "analysis-agent", time.Now().Add(-time.Hour), 10)
+	got, err := pg.ListPendingEventsForAgent(ctx, "analysis-agent", time.Now().Add(-time.Hour), 10)
 	if err != nil {
-		t.Fatalf("listPendingEventsForAgentSpec: %v", err)
+		t.Fatalf("ListPendingEventsForAgent: %v", err)
 	}
 	if len(got) != 1 {
 		t.Fatalf("pending events = %d, want 1", len(got))
@@ -1618,7 +1626,7 @@ func TestPostgresStore_ListPendingEventsForAgentSpec_PreservesRunID(t *testing.T
 	}
 }
 
-func TestPostgresStore_ListPendingEventsForAgentSpec_UsesTypedEnvelopeMetadata(t *testing.T) {
+func TestPostgresStore_ListPendingEventsForAgent_UsesTypedEnvelopeMetadata(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()

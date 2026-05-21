@@ -526,6 +526,12 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 				Queue: store.OperatorAgentDiagnosisQueue{
 					PendingCount:            2,
 					OldestPendingAgeSeconds: 30,
+					PendingDeliveries: []store.OperatorAgentPendingDelivery{{
+						EventID:    "event-1",
+						EventName:  "task.ready",
+						EnqueuedAt: time.Date(2026, 5, 21, 10, 0, 0, 0, time.UTC),
+						Attempts:   1,
+					}},
 				},
 				DeliveryLifecycle: &store.OperatorAgentDeliveryLifecycle{
 					State:         "active",
@@ -661,6 +667,13 @@ func assertReadOnlyProbeSuccess(t *testing.T, methodName string, resp rpcRespons
 		queue := asMap(t, result["queue"])
 		if queue["pending_count"] != float64(2) || queue["oldest_pending_age_seconds"] != float64(30) {
 			t.Fatalf("agent.diagnose queue = %#v", queue)
+		}
+		deliveries, ok := queue["pending_deliveries"].([]any)
+		if !ok || len(deliveries) != 1 {
+			t.Fatalf("agent.diagnose pending_deliveries = %#v", queue["pending_deliveries"])
+		}
+		if delivery := asMap(t, deliveries[0]); delivery["event_id"] != "event-1" || delivery["event_name"] != "task.ready" || delivery["attempts"] != float64(1) {
+			t.Fatalf("agent.diagnose pending delivery = %#v", deliveries[0])
 		}
 		for _, splitField := range []string{"runtime_state", "bundle_version", "active", "watchdog", "last_tool_outcome", "token_usage", "failures_recent", "dead_letters_recent"} {
 			if _, ok := result[splitField]; ok {

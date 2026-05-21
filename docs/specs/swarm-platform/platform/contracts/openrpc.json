@@ -14,13 +14,32 @@
   "methods": [
     {
       "name": "agent.diagnose",
-      "description": "Read the first owner-backed diagnosis slice for one agent. This method is\nlimited to agent identity/status refs, pending delivery count/oldest age,\nand optional delivery lifecycle evidence. The API handler consumes the\ncanonical agent diagnosis read owner directly. It must not join\nconversation, run, trace, token, queue-detail, CLI, or dashboard owners\nlocally, and it must not expose runtime_state, run_id, bundle_version,\nactive task/entity, watchdog, last tool outcome, token usage, recent\nfailures, dead letters, pending delivery details, attempts, or cursors.\n",
+      "description": "Read the owner-backed diagnosis slice for one agent. This method is\nlimited to agent identity/status refs, current/last conversation refs,\npending-delivery queue summary/detail evidence, and optional delivery\nlifecycle evidence. Queue details are paged with queue_limit and\nqueue_cursor, ordered by events.created_at ASC then events.event_id ASC.\nAgentPendingDelivery.enqueued_at uses the same timestamp owner as\noldest_pending_age_seconds. AgentPendingDelivery.attempts is the\ncanonical recorded retry counter from event_deliveries.retry_count, with\nno API-layer +1 or status arithmetic. The API handler consumes the\ncanonical agent diagnosis read owner directly. It must not join\nconversation, run, trace, token, CLI, or dashboard owners locally, and\nit must not expose runtime_state, run_id, bundle_version, active\ntask/entity, watchdog, last tool outcome, token usage, recent failures,\nor dead letters.\n",
       "params": [
         {
           "name": "agent_id",
           "required": true,
           "schema": {
             "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "queue_limit",
+          "required": false,
+          "description": "Max pending-delivery detail rows to return. pending_count remains the total pending count for the selected queue, not the page length.",
+          "schema": {
+            "default": 50,
+            "maximum": 200,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        {
+          "name": "queue_cursor",
+          "required": false,
+          "description": "Opaque cursor returned by queue.next_cursor for the next pending-delivery detail page.",
+          "schema": {
+            "$ref": "#/components/schemas/Cursor"
           }
         }
       ],
@@ -5366,6 +5385,9 @@
       "AgentDiagnosisQueue": {
         "additionalProperties": false,
         "properties": {
+          "next_cursor": {
+            "$ref": "#/components/schemas/Cursor"
+          },
           "oldest_pending_age_seconds": {
             "minimum": 0,
             "type": "integer"
@@ -5373,11 +5395,46 @@
           "pending_count": {
             "minimum": 0,
             "type": "integer"
+          },
+          "pending_deliveries": {
+            "items": {
+              "$ref": "#/components/schemas/AgentPendingDelivery"
+            },
+            "type": "array"
           }
         },
         "required": [
           "pending_count",
-          "oldest_pending_age_seconds"
+          "oldest_pending_age_seconds",
+          "pending_deliveries"
+        ],
+        "type": "object"
+      },
+      "AgentPendingDelivery": {
+        "additionalProperties": false,
+        "properties": {
+          "attempts": {
+            "description": "Canonical recorded delivery retry counter from event_deliveries.retry_count; the API must not add one or reinterpret by status.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "enqueued_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "Same timestamp owner as AgentDiagnosisQueue.oldest_pending_age_seconds; currently events.created_at."
+          },
+          "event_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "event_name": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "event_name",
+          "enqueued_at",
+          "attempts"
         ],
         "type": "object"
       },

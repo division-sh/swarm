@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -746,6 +747,127 @@ func TestListPendingAgentDeliveryFacts_AlignsWithCanonicalPendingStates_V2(t *te
 	}
 	if facts.OldestPendingAgeSec <= 0 {
 		t.Fatalf("oldest_pending_age_sec = %d, want > 0", facts.OldestPendingAgeSec)
+	}
+}
+
+func TestListPendingAgentDeliveryDetails_PagesCanonicalQueueTruth_V2(t *testing.T) {
+	pg, cleanup := newTestPostgresStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
+
+	pendingEvt := seedEvent(t, ctx, pg, entityID, "test.pending_details.pending")
+	retryableEvt := seedEvent(t, ctx, pg, entityID, "test.pending_details.failed")
+	inProgressEvt := seedEvent(t, ctx, pg, entityID, "test.pending_details.in_progress")
+	deadEvt := seedEvent(t, ctx, pg, entityID, "test.pending_details.dead")
+	deliveredEvt := seedEvent(t, ctx, pg, entityID, "test.pending_details.delivered")
+	legacyEvt := seedEvent(t, ctx, pg, entityID, "test.pending_details.legacy_receipt_only")
+
+	for _, eventID := range []string{pendingEvt.ID, retryableEvt.ID, inProgressEvt.ID, deadEvt.ID, deliveredEvt.ID} {
+		if err := pg.InsertEventDeliveries(ctx, eventID, []string{agentID}); err != nil {
+			t.Fatalf("insert deliveries for %s: %v", eventID, err)
+		}
+	}
+
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	eventTimes := map[string]time.Time{
+		pendingEvt.ID:    now.Add(-30 * time.Minute),
+		retryableEvt.ID:  now.Add(-20 * time.Minute),
+		inProgressEvt.ID: now.Add(-10 * time.Minute),
+		deadEvt.ID:       now.Add(-5 * time.Minute),
+		deliveredEvt.ID:  now.Add(-4 * time.Minute),
+		legacyEvt.ID:     now.Add(-3 * time.Minute),
+	}
+	for eventID, createdAt := range eventTimes {
+		if _, err := pg.DB.ExecContext(ctx, `
+			UPDATE events
+			SET created_at = $2
+			WHERE event_id = $1::uuid
+		`, eventID, createdAt); err != nil {
+			t.Fatalf("set event created_at for %s: %v", eventID, err)
+		}
+	}
+
+	if err := pg.UpsertEventReceipt(ctx, retryableEvt.ID, agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+		t.Fatalf("upsert retryable receipt: %v", err)
+	}
+	rewindCanonicalDeliveryAttempt(t, ctx, pg, retryableEvt.ID, agentID, now.Add(-2*time.Minute))
+	if err := pg.MarkEventDeliveryInProgress(ctx, inProgressEvt.ID, agentID, ""); err != nil {
+		t.Fatalf("mark in progress: %v", err)
+	}
+	if err := pg.UpsertEventReceipt(ctx, deadEvt.ID, agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+		t.Fatalf("upsert dead-letter first error: %v", err)
+	}
+	if err := pg.UpsertEventReceipt(ctx, deadEvt.ID, agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+		t.Fatalf("upsert dead-letter second error: %v", err)
+	}
+	if err := pg.UpsertEventReceipt(ctx, deliveredEvt.ID, agentID, runtimemanager.ReceiptStatusProcessed, "done"); err != nil {
+		t.Fatalf("upsert delivered receipt: %v", err)
+	}
+	insertLegacyAgentReceiptState(t, ctx, pg, legacyEvt.ID, agentID, runtimemanager.ReceiptStatusError, 1, "handler_error", "boom", now.Add(-2*time.Minute))
+
+	firstPage, err := pg.ListPendingAgentDeliveryDetails(ctx, store.PendingAgentDeliveryListOptions{
+		AgentID: agentID,
+		Since:   now.Add(-2 * time.Hour),
+		Limit:   2,
+	})
+	if err != nil {
+		t.Fatalf("ListPendingAgentDeliveryDetails first page: %v", err)
+	}
+	if firstPage.PendingCount != 3 {
+		t.Fatalf("pending_count = %d, want 3", firstPage.PendingCount)
+	}
+	if firstPage.OldestPendingAgeSec <= 0 {
+		t.Fatalf("oldest_pending_age_sec = %d, want > 0", firstPage.OldestPendingAgeSec)
+	}
+	if len(firstPage.PendingDeliveries) != 2 || firstPage.NextCursor == "" {
+		t.Fatalf("first page = %+v, want 2 rows with next cursor", firstPage)
+	}
+	assertPendingDeliveryDetail(t, firstPage.PendingDeliveries[0], pendingEvt.ID, string(pendingEvt.Type), eventTimes[pendingEvt.ID], 0)
+	assertPendingDeliveryDetail(t, firstPage.PendingDeliveries[1], retryableEvt.ID, string(retryableEvt.Type), eventTimes[retryableEvt.ID], 1)
+
+	secondPage, err := pg.ListPendingAgentDeliveryDetails(ctx, store.PendingAgentDeliveryListOptions{
+		AgentID: agentID,
+		Since:   now.Add(-2 * time.Hour),
+		Limit:   2,
+		Cursor:  firstPage.NextCursor,
+	})
+	if err != nil {
+		t.Fatalf("ListPendingAgentDeliveryDetails second page: %v", err)
+	}
+	if secondPage.PendingCount != 3 || secondPage.OldestPendingAgeSec != firstPage.OldestPendingAgeSec {
+		t.Fatalf("second page summary = %+v, want stable full-count summary", secondPage)
+	}
+	if len(secondPage.PendingDeliveries) != 1 || secondPage.NextCursor != "" {
+		t.Fatalf("second page = %+v, want final single row", secondPage)
+	}
+	assertPendingDeliveryDetail(t, secondPage.PendingDeliveries[0], inProgressEvt.ID, string(inProgressEvt.Type), eventTimes[inProgressEvt.ID], 0)
+
+	runtimeEvents, err := pg.ListPendingEventsForAgent(ctx, agentID, now.Add(-2*time.Hour), 2)
+	if err != nil {
+		t.Fatalf("ListPendingEventsForAgent: %v", err)
+	}
+	if len(runtimeEvents) != 2 || runtimeEvents[0].ID != pendingEvt.ID || runtimeEvents[1].ID != retryableEvt.ID {
+		t.Fatalf("runtime pending events = %#v, want shared first detail page order", runtimeEvents)
+	}
+
+	_, err = pg.ListPendingAgentDeliveryDetails(ctx, store.PendingAgentDeliveryListOptions{
+		AgentID: agentID,
+		Cursor:  "not-a-valid-cursor",
+	})
+	if !errors.Is(err, store.ErrInvalidPendingAgentDeliveryCursor) {
+		t.Fatalf("bad cursor error = %v, want ErrInvalidPendingAgentDeliveryCursor", err)
+	}
+}
+
+func assertPendingDeliveryDetail(t *testing.T, got store.PendingAgentDeliveryDetail, eventID, eventName string, enqueuedAt time.Time, attempts int) {
+	t.Helper()
+	if got.EventID != eventID || got.EventName != eventName || !got.EnqueuedAt.Equal(enqueuedAt) || got.Attempts != attempts {
+		t.Fatalf("pending delivery detail = %+v, want event_id=%s event_name=%s enqueued_at=%s attempts=%d", got, eventID, eventName, enqueuedAt, attempts)
+	}
+	if got.Event.ID != eventID {
+		t.Fatalf("pending delivery embedded event id = %q, want %q", got.Event.ID, eventID)
 	}
 }
 
