@@ -11,11 +11,12 @@ source:
   openrpc_artifact: docs/specs/swarm-platform/platform/contracts/openrpc.json
   generated_from: api_specification.method_catalog
 policy:
-  closure_level: coverage_accounting_proof_ownership_read_only_mutating_http_and_ws_transport_runtime_probes
+  closure_level: coverage_accounting_proof_ownership_read_only_mutating_http_ws_transport_and_result_schema_runtime_validation
   runtime_behavior_changes: transport_admission_repair_approved_by_878
-  read_only_runtime_probe_policy: "#861 adds generated supported-surface runtime probes for read-only HTTP methods only; mutating, WS/protocol, examples, rpc.discover, full result-schema validation, and notification-schema validation remain tracked by #857."
-  mutating_runtime_probe_policy: "#872 adds generated supported-surface runtime probes for all 16 mutating HTTP methods only; WS/protocol, examples, rpc.discover, full result-schema validation, and notification-schema validation remain tracked by #857."
-  ws_transport_runtime_probe_policy: "#878 adds central method transport admission proof for all 42 methods and generated supported-surface WebSocket runtime probes for the five WS/protocol methods; examples, rpc.discover, full result-schema validation, and full notification-schema validation remain tracked by #857."
+  read_only_runtime_probe_policy: "#861 adds generated supported-surface runtime probes for read-only HTTP methods only; mutating, WS/protocol, examples, rpc.discover, and notification-schema validation remain tracked separately."
+  mutating_runtime_probe_policy: "#872 adds generated supported-surface runtime probes for all 16 mutating HTTP methods only; WS/protocol, examples, rpc.discover, and notification-schema validation remain tracked separately."
+  ws_transport_runtime_probe_policy: "#878 adds central method transport admission proof for all 42 methods and generated supported-surface WebSocket runtime probes for the five WS/protocol methods; examples, rpc.discover, and full notification-schema validation remain tracked by #857."
+  result_schema_runtime_validation_policy: "#890 adds generated full successful-result schema validation for all 42 methods; notification-schema validation/publication, examples, and rpc.discover remain tracked by #857."
   examples_policy: OpenRPC method examples are tracked gaps in this slice.
   service_discovery_policy: rpc.discover is not published by the v1 contract; method publication is tracked through the generated OpenRPC artifact.
 methods:
@@ -29,11 +30,11 @@ methods:
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
     declared_error_tests: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentConversationHandlersTypedErrors}]}
     idempotency: {status: not_applicable}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentConversationHandlersExposeReadOwner}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentConversationHandlersExposeReadOwner}]}
     notification_schema: {status: not_applicable}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
-    gap_classification: [missing_generated_result_schema_validation, missing_openrpc_examples]
+    gap_classification: [missing_openrpc_examples]
   - method: agent.list
     transport: http
     required_params: []
@@ -44,11 +45,11 @@ methods:
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
     declared_error_tests: {status: not_applicable}
     idempotency: {status: not_applicable}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentConversationHandlersExposeReadOwner}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentConversationHandlersExposeReadOwner}]}
     notification_schema: {status: not_applicable}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
-    gap_classification: [missing_generated_result_schema_validation, missing_openrpc_examples]
+    gap_classification: [missing_openrpc_examples]
   - method: agent.replay
     transport: http
     required_params: [event_id, agent_id]
@@ -59,11 +60,11 @@ methods:
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
     declared_error_tests: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentReplayFailClosedCases}]}
     idempotency: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentReplayProjectsSingletonEventReplayOwner}]}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentReplayProjectsSingletonEventReplayOwner}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentReplayProjectsSingletonEventReplayOwner}]}
     notification_schema: {status: not_applicable}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
-    gap_classification: [missing_generated_result_schema_validation, missing_openrpc_examples]
+    gap_classification: [missing_openrpc_examples]
   - method: agent.replay_backlog
     transport: http
     required_params: [agent_id]
@@ -74,11 +75,11 @@ methods:
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
     declared_error_tests: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentControlHandlersTypedResourceErrors}]}
     idempotency: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentControlHandlersUseCanonicalOwnerAndIdempotency}]}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentControlHandlersUseCanonicalOwnerAndIdempotency}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentControlHandlersUseCanonicalOwnerAndIdempotency}]}
     notification_schema: {status: not_applicable}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
-    gap_classification: [missing_generated_result_schema_validation, missing_openrpc_examples]
+    gap_classification: [missing_openrpc_examples]
   - method: agent.restart
     transport: http
     required_params: [agent_id]
@@ -89,11 +90,11 @@ methods:
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
     declared_error_tests: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentControlHandlersTypedResourceErrors}]}
     idempotency: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentControlHandlersUseCanonicalOwnerAndIdempotency}]}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentControlHandlersUseCanonicalOwnerAndIdempotency}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentControlHandlersUseCanonicalOwnerAndIdempotency}]}
     notification_schema: {status: not_applicable}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
-    gap_classification: [missing_generated_result_schema_validation, missing_openrpc_examples]
+    gap_classification: [missing_openrpc_examples]
   - method: agent.send_directive
     transport: http
     required_params: [agent_id, directive]
@@ -104,11 +105,11 @@ methods:
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
     declared_error_tests: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentControlHandlersTypedResourceErrors}, {kind: go_test, name: TestOperatorAgentSendDirectiveRunTargetErrors}]}
     idempotency: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentControlHandlersUseCanonicalOwnerAndIdempotency}]}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentControlHandlersUseCanonicalOwnerAndIdempotency}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentControlHandlersUseCanonicalOwnerAndIdempotency}]}
     notification_schema: {status: not_applicable}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
-    gap_classification: [missing_generated_result_schema_validation, missing_openrpc_examples]
+    gap_classification: [missing_openrpc_examples]
   - method: conversation.current_for_agent
     transport: http
     required_params: [agent_id]
@@ -119,11 +120,11 @@ methods:
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
     declared_error_tests: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentConversationHandlersTypedErrors}]}
     idempotency: {status: not_applicable}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentConversationHandlersExposeReadOwner}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentConversationHandlersExposeReadOwner}]}
     notification_schema: {status: not_applicable}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
-    gap_classification: [missing_generated_result_schema_validation, missing_openrpc_examples]
+    gap_classification: [missing_openrpc_examples]
   - method: conversation.get
     transport: http
     required_params: [session_id]
@@ -134,11 +135,11 @@ methods:
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
     declared_error_tests: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentConversationHandlersTypedErrors}]}
     idempotency: {status: not_applicable}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentConversationHandlersExposeReadOwner}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentConversationHandlersExposeReadOwner}]}
     notification_schema: {status: not_applicable}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
-    gap_classification: [missing_generated_result_schema_validation, missing_openrpc_examples]
+    gap_classification: [missing_openrpc_examples]
   - method: conversation.get_turn
     transport: http
     required_params: [session_id, turn_index]
@@ -149,11 +150,11 @@ methods:
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
     declared_error_tests: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentConversationHandlersTypedErrors}]}
     idempotency: {status: not_applicable}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentConversationHandlersExposeReadOwner}, {kind: go_test, name: TestOperatorConversationGetTurnComposesRuntimeLogOwner}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentConversationHandlersExposeReadOwner}, {kind: go_test, name: TestOperatorConversationGetTurnComposesRuntimeLogOwner}]}
     notification_schema: {status: not_applicable}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
-    gap_classification: [missing_generated_result_schema_validation, missing_openrpc_examples]
+    gap_classification: [missing_openrpc_examples]
   - method: conversation.list
     transport: http
     required_params: []
@@ -164,11 +165,11 @@ methods:
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
     declared_error_tests: {status: not_applicable}
     idempotency: {status: not_applicable}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentConversationHandlersExposeReadOwner}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentConversationHandlersExposeReadOwner}]}
     notification_schema: {status: not_applicable}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
-    gap_classification: [missing_generated_result_schema_validation, missing_openrpc_examples]
+    gap_classification: [missing_openrpc_examples]
   - method: entity.aggregate
     transport: http
     required_params: []
@@ -179,11 +180,11 @@ methods:
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
     declared_error_tests: {status: not_applicable}
     idempotency: {status: not_applicable}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorEntityHandlersExposeEntityNativeReads}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorEntityHandlersExposeEntityNativeReads}]}
     notification_schema: {status: not_applicable}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
-    gap_classification: [missing_generated_result_schema_validation, missing_openrpc_examples]
+    gap_classification: [missing_openrpc_examples]
   - method: entity.get
     transport: http
     required_params: [entity_id]
@@ -194,11 +195,11 @@ methods:
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
     declared_error_tests: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorEntityHandlersTypedErrors}]}
     idempotency: {status: not_applicable}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorEntityHandlersExposeEntityNativeReads}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorEntityHandlersExposeEntityNativeReads}]}
     notification_schema: {status: not_applicable}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
-    gap_classification: [missing_generated_result_schema_validation, missing_openrpc_examples]
+    gap_classification: [missing_openrpc_examples]
   - method: entity.list
     transport: http
     required_params: []
@@ -209,11 +210,11 @@ methods:
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
     declared_error_tests: {status: not_applicable}
     idempotency: {status: not_applicable}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorEntityHandlersExposeEntityNativeReads}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorEntityHandlersExposeEntityNativeReads}]}
     notification_schema: {status: not_applicable}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
-    gap_classification: [missing_generated_result_schema_validation, missing_openrpc_examples]
+    gap_classification: [missing_openrpc_examples]
   - method: event.get
     transport: http
     required_params: [event_id]
@@ -224,11 +225,11 @@ methods:
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
     declared_error_tests: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorObservabilityHandlersTypedErrors}]}
     idempotency: {status: not_applicable}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorObservabilityHandlersExposePersistedReadMethods}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorObservabilityHandlersExposePersistedReadMethods}]}
     notification_schema: {status: not_applicable}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
-    gap_classification: [missing_generated_result_schema_validation, missing_openrpc_examples]
+    gap_classification: [missing_openrpc_examples]
   - method: event.list
     transport: http
     required_params: []
@@ -239,11 +240,11 @@ methods:
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
     declared_error_tests: {status: not_applicable}
     idempotency: {status: not_applicable}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorObservabilityHandlersExposePersistedReadMethods}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorObservabilityHandlersExposePersistedReadMethods}]}
     notification_schema: {status: not_applicable}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
-    gap_classification: [missing_generated_result_schema_validation, missing_openrpc_examples]
+    gap_classification: [missing_openrpc_examples]
   - method: event.publish
     transport: http
     required_params: [event_name, payload]
@@ -254,11 +255,11 @@ methods:
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
     declared_error_tests: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorEventPublishHandlersFailClosedBeforePersistence}, {kind: go_test, name: TestOperatorEventPublishExplicitRunTargetRequiresExistingNonterminalRun}]}
     idempotency: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempotency}]}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempotency}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempotency}]}
     notification_schema: {status: not_applicable}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
-    gap_classification: [missing_generated_result_schema_validation, missing_openrpc_examples]
+    gap_classification: [missing_openrpc_examples]
   - method: event.replay
     transport: http
     required_params: [event_id]
@@ -269,11 +270,11 @@ methods:
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
     declared_error_tests: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorEventReplaySubsetAndFailClosedCases}]}
     idempotency: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorEventReplayPublishesDistinctReplayEventAuditAndIdempotency}]}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorEventReplayPublishesDistinctReplayEventAuditAndIdempotency}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorEventReplayPublishesDistinctReplayEventAuditAndIdempotency}]}
     notification_schema: {status: not_applicable}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
-    gap_classification: [missing_generated_result_schema_validation, missing_openrpc_examples]
+    gap_classification: [missing_openrpc_examples]
   - method: event.subscribe
     transport: ws
     required_params: []
@@ -284,11 +285,11 @@ methods:
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestHandlerWebSocketAuthAndFrameValidation}]}
     declared_error_tests: {status: not_applicable}
     idempotency: {status: not_applicable}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestHandlerWebSocketEventSubscribeUsesOwnerFilterAndReplay}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestHandlerWebSocketEventSubscribeUsesOwnerFilterAndReplay}]}
     notification_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestHandlerWebSocketEventSubscribeUsesOwnerFilterAndReplay}]}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
-    gap_classification: [notification_schema_not_emitted_in_openrpc_method, missing_generated_result_schema_validation, missing_openrpc_examples]
+    gap_classification: [notification_schema_not_emitted_in_openrpc_method, missing_openrpc_examples]
   - method: health.check
     transport: http
     required_params: []
@@ -299,11 +300,11 @@ methods:
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
     declared_error_tests: {status: not_applicable}
     idempotency: {status: not_applicable}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorReadHandlersExposeHealthAndRunReadMethods}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorReadHandlersExposeHealthAndRunReadMethods}]}
     notification_schema: {status: not_applicable}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
-    gap_classification: [missing_generated_result_schema_validation, missing_openrpc_examples]
+    gap_classification: [missing_openrpc_examples]
   - method: health.ping
     transport: http
     required_params: []
@@ -314,11 +315,11 @@ methods:
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
     declared_error_tests: {status: not_applicable}
     idempotency: {status: not_applicable}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorReadHandlersExposeHealthAndRunReadMethods}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorReadHandlersExposeHealthAndRunReadMethods}]}
     notification_schema: {status: not_applicable}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
-    gap_classification: [missing_generated_result_schema_validation, missing_openrpc_examples]
+    gap_classification: [missing_openrpc_examples]
   - method: health.subscribe
     transport: ws
     required_params: []
@@ -329,11 +330,11 @@ methods:
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestHandlerWebSocketAuthAndFrameValidation}]}
     declared_error_tests: {status: not_applicable}
     idempotency: {status: not_applicable}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestHandlerWebSocketHealthSubscribeAndUnsubscribe}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestHandlerWebSocketHealthSubscribeAndUnsubscribe}]}
     notification_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestHandlerWebSocketHealthSubscribeAndUnsubscribe}]}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
-    gap_classification: [notification_schema_not_emitted_in_openrpc_method, missing_generated_result_schema_validation, missing_openrpc_examples]
+    gap_classification: [notification_schema_not_emitted_in_openrpc_method, missing_openrpc_examples]
   - method: mailbox.approve
     transport: http
     required_params: [mailbox_id]
@@ -344,11 +345,11 @@ methods:
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
     declared_error_tests: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorMailboxHandlersSupportedRPCPath}, {kind: go_test, name: TestOperatorMailboxApprovePublishFailureLeavesItemRetryable}]}
     idempotency: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorMailboxHandlersSupportedRPCPath}]}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorMailboxHandlersSupportedRPCPath}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorMailboxHandlersSupportedRPCPath}]}
     notification_schema: {status: not_applicable}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
-    gap_classification: [missing_generated_result_schema_validation, missing_openrpc_examples]
+    gap_classification: [missing_openrpc_examples]
   - method: mailbox.defer
     transport: http
     required_params: [mailbox_id, until]
@@ -359,11 +360,11 @@ methods:
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
     declared_error_tests: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorMailboxHandlersSupportedRPCPath}]}
     idempotency: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorMailboxHandlersSupportedRPCPath}]}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorMailboxHandlersSupportedRPCPath}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorMailboxHandlersSupportedRPCPath}]}
     notification_schema: {status: not_applicable}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
-    gap_classification: [missing_generated_result_schema_validation, missing_openrpc_examples]
+    gap_classification: [missing_openrpc_examples]
   - method: mailbox.get
     transport: http
     required_params: [mailbox_id]
@@ -374,11 +375,11 @@ methods:
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
     declared_error_tests: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorMailboxHandlersSupportedRPCPath}]}
     idempotency: {status: not_applicable}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorMailboxHandlersSupportedRPCPath}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorMailboxHandlersSupportedRPCPath}]}
     notification_schema: {status: not_applicable}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
-    gap_classification: [missing_generated_result_schema_validation, missing_openrpc_examples]
+    gap_classification: [missing_openrpc_examples]
   - method: mailbox.list
     transport: http
     required_params: []
@@ -389,11 +390,11 @@ methods:
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
     declared_error_tests: {status: not_applicable}
     idempotency: {status: not_applicable}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorMailboxHandlersSupportedRPCPath}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorMailboxHandlersSupportedRPCPath}]}
     notification_schema: {status: not_applicable}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
-    gap_classification: [missing_generated_result_schema_validation, missing_openrpc_examples]
+    gap_classification: [missing_openrpc_examples]
   - method: mailbox.reject
     transport: http
     required_params: [mailbox_id, reason]
@@ -404,11 +405,11 @@ methods:
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
     declared_error_tests: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorMailboxHandlersSupportedRPCPath}]}
     idempotency: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}]}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}]}
     notification_schema: {status: not_applicable}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
-    gap_classification: [missing_generated_result_schema_validation, missing_openrpc_examples]
+    gap_classification: [missing_openrpc_examples]
   - method: rpc.unsubscribe
     transport: ws
     required_params: [subscription_id]
@@ -419,11 +420,11 @@ methods:
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestHandlerWebSocketAuthAndFrameValidation}]}
     declared_error_tests: {status: not_applicable}
     idempotency: {status: not_applicable}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestHandlerWebSocketHealthSubscribeAndUnsubscribe}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestHandlerWebSocketHealthSubscribeAndUnsubscribe}]}
     notification_schema: {status: not_applicable}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
-    gap_classification: [missing_generated_result_schema_validation, missing_openrpc_examples]
+    gap_classification: [missing_openrpc_examples]
   - method: run.continue
     transport: http
     required_params: [run_id]
@@ -434,11 +435,11 @@ methods:
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
     declared_error_tests: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorRunControlHandlersTypedResourceErrors}]}
     idempotency: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency}]}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency}]}
     notification_schema: {status: not_applicable}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
-    gap_classification: [missing_generated_result_schema_validation, missing_openrpc_examples]
+    gap_classification: [missing_openrpc_examples]
   - method: run.diagnose
     transport: http
     required_params: [run_id]
@@ -449,11 +450,11 @@ methods:
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
     declared_error_tests: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorReadHandlersRunNotFoundAndRunStartStaysUnavailable}]}
     idempotency: {status: not_applicable}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorReadHandlersExposeHealthAndRunReadMethods}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorReadHandlersExposeHealthAndRunReadMethods}]}
     notification_schema: {status: not_applicable}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
-    gap_classification: [missing_generated_result_schema_validation, missing_openrpc_examples]
+    gap_classification: [missing_openrpc_examples]
   - method: run.get
     transport: http
     required_params: [run_id]
@@ -464,11 +465,11 @@ methods:
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
     declared_error_tests: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorReadHandlersRunNotFoundAndRunStartStaysUnavailable}]}
     idempotency: {status: not_applicable}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorReadHandlersExposeHealthAndRunReadMethods}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorReadHandlersExposeHealthAndRunReadMethods}]}
     notification_schema: {status: not_applicable}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
-    gap_classification: [missing_generated_result_schema_validation, missing_openrpc_examples]
+    gap_classification: [missing_openrpc_examples]
   - method: run.list
     transport: http
     required_params: []
@@ -479,11 +480,11 @@ methods:
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
     declared_error_tests: {status: not_applicable}
     idempotency: {status: not_applicable}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorReadHandlersExposeHealthAndRunReadMethods}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorReadHandlersExposeHealthAndRunReadMethods}]}
     notification_schema: {status: not_applicable}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
-    gap_classification: [missing_generated_result_schema_validation, missing_openrpc_examples]
+    gap_classification: [missing_openrpc_examples]
   - method: run.pause
     transport: http
     required_params: [run_id]
@@ -494,11 +495,11 @@ methods:
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
     declared_error_tests: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency}, {kind: go_test, name: TestOperatorRunControlHandlersTypedResourceErrors}]}
     idempotency: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency}]}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency}]}
     notification_schema: {status: not_applicable}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
-    gap_classification: [missing_generated_result_schema_validation, missing_openrpc_examples]
+    gap_classification: [missing_openrpc_examples]
   - method: run.start
     transport: http
     required_params: [event_name, payload]
@@ -509,11 +510,11 @@ methods:
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
     declared_error_tests: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorRunStartHandlersFailClosedBeforePersistence}]}
     idempotency: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorRunStartHandlersPersistRootEventAndReplayIdempotency}]}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorRunStartHandlersPersistRootEventAndReplayIdempotency}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorRunStartHandlersPersistRootEventAndReplayIdempotency}]}
     notification_schema: {status: not_applicable}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
-    gap_classification: [missing_generated_result_schema_validation, missing_openrpc_examples]
+    gap_classification: [missing_openrpc_examples]
   - method: run.stop
     transport: http
     required_params: [run_id]
@@ -524,11 +525,11 @@ methods:
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
     declared_error_tests: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorRunControlHandlersTypedResourceErrors}]}
     idempotency: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency}]}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency}]}
     notification_schema: {status: not_applicable}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
-    gap_classification: [missing_generated_result_schema_validation, missing_openrpc_examples]
+    gap_classification: [missing_openrpc_examples]
   - method: run.subscribe_trace
     transport: ws
     required_params: [run_id]
@@ -539,11 +540,11 @@ methods:
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestHandlerWebSocketAuthAndFrameValidation}]}
     declared_error_tests: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestHandlerWebSocketRunSubscribeTraceUsesOwnerReplayAndRunNotFound}]}
     idempotency: {status: not_applicable}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestHandlerWebSocketRunSubscribeTraceUsesOwnerReplayAndRunNotFound}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestHandlerWebSocketRunSubscribeTraceUsesOwnerReplayAndRunNotFound}]}
     notification_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestHandlerWebSocketRunSubscribeTraceUsesOwnerReplayAndRunNotFound}]}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
-    gap_classification: [notification_schema_not_emitted_in_openrpc_method, missing_generated_result_schema_validation, missing_openrpc_examples]
+    gap_classification: [notification_schema_not_emitted_in_openrpc_method, missing_openrpc_examples]
   - method: run.trace
     transport: http
     required_params: [run_id]
@@ -554,11 +555,11 @@ methods:
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
     declared_error_tests: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorObservabilityHandlersTypedErrors}]}
     idempotency: {status: not_applicable}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorObservabilityHandlersExposePersistedReadMethods}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorObservabilityHandlersExposePersistedReadMethods}]}
     notification_schema: {status: not_applicable}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
-    gap_classification: [missing_generated_result_schema_validation, missing_openrpc_examples]
+    gap_classification: [missing_openrpc_examples]
   - method: runtime.incidents
     transport: http
     required_params: []
@@ -569,11 +570,11 @@ methods:
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
     declared_error_tests: {status: not_applicable}
     idempotency: {status: not_applicable}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorObservabilityHandlersExposePersistedReadMethods}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorObservabilityHandlersExposePersistedReadMethods}]}
     notification_schema: {status: not_applicable}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
-    gap_classification: [missing_generated_result_schema_validation, missing_openrpc_examples]
+    gap_classification: [missing_openrpc_examples]
   - method: runtime.logs
     transport: http
     required_params: []
@@ -584,11 +585,11 @@ methods:
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
     declared_error_tests: {status: not_applicable}
     idempotency: {status: not_applicable}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorObservabilityHandlersExposePersistedReadMethods}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorObservabilityHandlersExposePersistedReadMethods}]}
     notification_schema: {status: not_applicable}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
-    gap_classification: [missing_generated_result_schema_validation, missing_openrpc_examples]
+    gap_classification: [missing_openrpc_examples]
   - method: runtime.nuke
     transport: http
     required_params: []
@@ -599,11 +600,11 @@ methods:
     auth: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorRuntimeNukeAuthFailureDoesNotTouchResetOwners}]}
     declared_error_tests: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorRuntimeNukeApplyReportsPartialFailureAndIdempotency}, {kind: go_test, name: TestOperatorRuntimeNukeOperationInProgressFailsClosed}]}
     idempotency: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorRuntimeNukeApplyReportsPartialFailureAndIdempotency}]}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorRuntimeNukeDryRunUsesDestructiveResetOwners}, {kind: go_test, name: TestOperatorRuntimeNukeApplyReportsPartialFailureAndIdempotency}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorRuntimeNukeDryRunUsesDestructiveResetOwners}, {kind: go_test, name: TestOperatorRuntimeNukeApplyReportsPartialFailureAndIdempotency}]}
     notification_schema: {status: not_applicable}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
-    gap_classification: [missing_generated_result_schema_validation, missing_openrpc_examples]
+    gap_classification: [missing_openrpc_examples]
   - method: runtime.pause
     transport: http
     required_params: []
@@ -614,11 +615,11 @@ methods:
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
     declared_error_tests: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorRuntimeControlHandlersUseIngressOwnerAndIdempotency}]}
     idempotency: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorRuntimeControlHandlersUseIngressOwnerAndIdempotency}]}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorRuntimeControlHandlersUseIngressOwnerAndIdempotency}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorRuntimeControlHandlersUseIngressOwnerAndIdempotency}]}
     notification_schema: {status: not_applicable}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
-    gap_classification: [missing_generated_result_schema_validation, missing_openrpc_examples]
+    gap_classification: [missing_openrpc_examples]
   - method: runtime.resume
     transport: http
     required_params: []
@@ -629,11 +630,11 @@ methods:
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
     declared_error_tests: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorRuntimeControlHandlersUseIngressOwnerAndIdempotency}]}
     idempotency: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorRuntimeControlHandlersUseIngressOwnerAndIdempotency}]}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorRuntimeControlHandlersUseIngressOwnerAndIdempotency}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorRuntimeControlHandlersUseIngressOwnerAndIdempotency}]}
     notification_schema: {status: not_applicable}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
-    gap_classification: [missing_generated_result_schema_validation, missing_openrpc_examples]
+    gap_classification: [missing_openrpc_examples]
   - method: runtime.subscribe_logs
     transport: ws
     required_params: []
@@ -644,8 +645,8 @@ methods:
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestHandlerWebSocketAuthAndFrameValidation}]}
     declared_error_tests: {status: not_applicable}
     idempotency: {status: not_applicable}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestHandlerWebSocketRuntimeSubscribeLogsUsesOwnerFiltersAndReplay}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestHandlerWebSocketRuntimeSubscribeLogsUsesOwnerFiltersAndReplay}]}
     notification_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestHandlerWebSocketRuntimeSubscribeLogsUsesOwnerFiltersAndReplay}]}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
-    gap_classification: [notification_schema_not_emitted_in_openrpc_method, missing_generated_result_schema_validation, missing_openrpc_examples]
+    gap_classification: [notification_schema_not_emitted_in_openrpc_method, missing_openrpc_examples]

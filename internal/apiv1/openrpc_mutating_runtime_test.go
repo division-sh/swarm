@@ -907,10 +907,14 @@ func (s *mutatingProbeMailboxStore) DecideV1MailboxItem(ctx context.Context, dec
 			return store.APIIdempotencyCompletion{}, s.decisionErr
 		}
 		s.state.recordEffect()
+		status := "decided"
+		if strings.TrimSpace(decision.Action) == "deferred" {
+			status = "deferred"
+		}
 		result := store.MailboxV1DecisionResult{
 			OK:                true,
 			MailboxDecisionID: "decision-" + strings.TrimSpace(decision.Action),
-			Status:            strings.TrimSpace(decision.Action),
+			Status:            status,
 		}
 		if decision.Action == "approved" && strings.TrimSpace(decision.ApprovalEventType) != "" && decision.ApprovalEventTx != nil {
 			eventID := "mailbox-event-1"
