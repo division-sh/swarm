@@ -286,6 +286,10 @@ func normalizeCLIAPIServerBase(raw, source string) (*url.URL, error) {
 		return nil, &cliAPIValidationError{message: fmt.Sprintf("%s must not include query or fragment", source)}
 	}
 	parsed.Path = strings.TrimRight(parsed.Path, "/")
+	switch parsed.Path {
+	case cliAPIRPCPath, cliAPIWSPath:
+		return nil, &cliAPIValidationError{message: fmt.Sprintf("%s must be an API server base URL, not a direct %s endpoint", source, parsed.Path)}
+	}
 	return parsed, nil
 }
 
