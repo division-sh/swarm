@@ -5871,9 +5871,6 @@ cli_specification:
             machine-readable output.
         absent_command_rows:
           commands:
-          - conversations_list
-          - conversation_view
-          - conversation_turn
           - forkchat
           rule: >
             Absent or blocked command rows do not receive output-mode implementation from #848. Their future
@@ -7015,20 +7012,94 @@ cli_specification:
       - no direct DB/store/runtime/EventBus/dashboard/Builder reads or writes and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, run.start, event.replay, agent.replay, or agent.replay_backlog usage
       relation_to_run_start: '`run.start` remains usable for #743 until a separate migration changes the CLI internals to event.publish.'
     conversations_list:
-      command: swarm conversations list
+      command: swarm conversations list [--agent-id <agent-id>] [--run-id <run-id>] [--limit <n>] [--cursor <cursor>]
       tier: should_have
-      implementation_status: absent
+      implementation_status: implemented
       owner: /v1/rpc conversation.list
+      behavior: Read-only conversation summary CLI consumer. The CLI validates optional filters locally, sends exactly the corresponding params to /v1/rpc conversation.list through the shared v1 API client, and renders only server-owned ConversationSummary rows plus next_cursor.
+      flags:
+      - name: --agent-id <agent-id>
+        maps_to: agent_id
+        behavior: Optional OpaqueId filter for one agent.
+      - name: --run-id <run-id>
+        maps_to: run_id
+        behavior: Optional OpaqueId filter for one run.
+      - name: --limit <n>
+        maps_to: limit
+        behavior: Optional page size from 1 through 500.
+      - name: --cursor <cursor>
+        maps_to: cursor
+        behavior: Optional opaque pagination cursor returned by the server.
+      output:
+        success_table: SESSION_ID, AGENT, RUN, STATUS, TURNS, MESSAGES, STARTED, ENDED; followed by next_cursor=<cursor> when present.
+        empty: No conversations match the filter.
+      exit_codes:
+        success: 0
+        cli_validation: 2
+        transport_or_malformed_response: 3
+        auth_or_missing_token: 4
+      proof_expectations:
+      - exact /v1/rpc conversation.list call with agent_id, run_id, limit, and cursor params only when corresponding CLI flags are provided
+      - invalid flags, blank OpaqueId flags, out-of-range --limit, and missing SWARM_API_TOKEN make zero API calls
+      - success output renders only ConversationSummary fields and next_cursor returned by the server
+      - empty conversations array, malformed results, auth/HTTP/RPC failures, and transport failures fail closed with tested exit codes
+      - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, conversation.current_for_agent, conversation.get_turn, or forkchat usage
     conversation_view:
       command: swarm conversation view <session-id>
       tier: should_have
-      implementation_status: absent
+      implementation_status: implemented
       owner: /v1/rpc conversation.get
+      behavior: Read-only conversation detail CLI consumer. The CLI validates the required session_id locally, calls /v1/rpc conversation.get through the shared v1 API client, and renders server-owned ConversationDetail metadata and shallow Turn rows. Turn rows use the server-owned 1-based turn_index selector promoted by #877/#895.
+      output:
+        success_detail: Conversation header with session_id, agent_id, run_id, status, counts, started/ended timestamps, followed by a turn table with turn_index, turn_id, trigger_event_id, trigger_event_type, parse_ok, latency_ms, and error.
+        empty_turns: No turns recorded.
+      exit_codes:
+        success: 0
+        cli_validation: 2
+        transport_or_malformed_response: 3
+        auth_or_missing_token: 4
+        not_found: 5
+        not_found_errors:
+        - SESSION_NOT_FOUND
+      proof_expectations:
+      - exact /v1/rpc conversation.get call with session_id param only
+      - missing/blank/invalid session id and missing SWARM_API_TOKEN make zero API calls
+      - success output renders only ConversationDetail and shallow Turn fields returned by the server, including turn_index
+      - SESSION_NOT_FOUND, malformed results, auth/HTTP/RPC failures, and transport failures fail closed with tested exit codes
+      - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, conversation.current_for_agent, conversation.get_turn reconstruction, or forkchat usage
     conversation_turn:
       command: swarm conversation turn <session-id> <turn-index>
       tier: should_have
-      implementation_status: absent
+      implementation_status: implemented
       owner: /v1/rpc conversation.get_turn
+      behavior: Read-only deep turn drilldown CLI consumer. The CLI validates session_id and a 1-based integer turn_index locally, calls /v1/rpc conversation.get_turn through the shared v1 API client, omits include_logs to accept the API default of true, and renders only the server-owned ConversationTurnDetail. The CLI MUST NOT accept turn_id as an alternate selector and MUST NOT reconstruct the turn by joining conversation.get, runtime.logs, run.trace, or dashboard audit tables.
+      params:
+      - name: session_id
+        arg: <session-id>
+        required: true
+        api_param: session_id
+      - name: turn_index
+        arg: <turn-index>
+        required: true
+        api_param: turn_index
+        validation: CLI validates integer range 1 through 1000000, matching the v1 handler bound.
+      output:
+        success_detail: Conversation/turn header with session_id, turn_index, turn_id, timing, parse_ok, dispatch metadata, advertised tool summary, runtime_log_entries count, raw turn-block summary, optional assistant_visible_output, and compact runtime log lines when returned by the API.
+      exit_codes:
+        success: 0
+        cli_validation: 2
+        transport_or_malformed_response: 3
+        auth_or_missing_token: 4
+        not_found: 5
+        not_found_errors:
+        - SESSION_NOT_FOUND
+        - TURN_NOT_FOUND
+      proof_expectations:
+      - exact /v1/rpc conversation.get_turn call with session_id and turn_index params only; include_logs is omitted so the API default remains authoritative
+      - missing/blank/invalid session id, invalid turn_index, turn_id-shaped selector attempts, and missing SWARM_API_TOKEN make zero API calls
+      - success output renders only ConversationTurnDetail fields returned by the server; runtime logs are consumed from the API result, not independently queried
+      - SESSION_NOT_FOUND, TURN_NOT_FOUND, malformed results, auth/HTTP/RPC failures, and transport failures fail closed with tested exit codes
+      - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, conversation.current_for_agent, runtime.logs, run.trace, or forkchat usage
     forkchat:
       command: swarm forkchat new|resume|list|view|delete
       tier: should_have
@@ -7336,6 +7407,9 @@ cli_specification:
     - swarm entities list
     - swarm entity view
     - swarm entity aggregate
+    - swarm conversations list
+    - swarm conversation view
+    - swarm conversation turn
     implemented_legacy_or_wrong_namespace: []
     retired_or_fail_closed:
     - swarm investigate
@@ -7345,7 +7419,6 @@ cli_specification:
     - swarm investigate trace
     remaining_must_have_not_implemented: []
     remaining_should_have_not_implemented:
-    - swarm conversations list / conversation view / conversation turn
     - swarm forkchat new|resume|list|view|delete
     rule: 'Remaining commands require separate gates and must consume canonical API owners; they MUST NOT resurrect direct DB/store/runtime-state readers.'
 
