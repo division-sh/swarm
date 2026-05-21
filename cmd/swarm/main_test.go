@@ -391,9 +391,13 @@ func TestPlatformSpecCLIAPIConnectionAuthConfigPrecedencePromoted(t *testing.T) 
 			t.Fatalf("api_token accepted sources missing %q: %#v", want, spec.APIToken.AcceptedSources)
 		}
 	}
-	for _, want := range []string{"--api-token-file", "SWARM_API_TOKEN", "SWARM_API_TOKEN_FILE", "config api_token_file"} {
-		if !stringSliceContains(spec.APIToken.SourceOrder, want) {
-			t.Fatalf("api_token source order missing %q: %#v", want, spec.APIToken.SourceOrder)
+	wantTokenSourceOrder := []string{"--api-token-file", "SWARM_API_TOKEN", "SWARM_API_TOKEN_FILE", "config api_token_file"}
+	if len(spec.APIToken.SourceOrder) != len(wantTokenSourceOrder) {
+		t.Fatalf("api_token source order = %#v, want %#v", spec.APIToken.SourceOrder, wantTokenSourceOrder)
+	}
+	for i, want := range wantTokenSourceOrder {
+		if spec.APIToken.SourceOrder[i] != want {
+			t.Fatalf("api_token source_order[%d] = %q, want %q", i, spec.APIToken.SourceOrder[i], want)
 		}
 	}
 	for key, want := range map[string]string{
