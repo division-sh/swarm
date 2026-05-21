@@ -5609,9 +5609,9 @@ cli_specification:
         tracker: '#735'
         action: '`swarm conversations list`, `swarm conversation view`, and `swarm conversation turn` require separate gated children.'
       entities:
-        disposition: future_child
-        tracker: '#735'
-        action: '`swarm entities list`, `swarm entity view`, and `swarm entity aggregate` require separate gated children.'
+        disposition: promoted_first_slice
+        tracker: '#892'
+        action: '`swarm entities list`, `swarm entity view`, and `swarm entity aggregate` are promoted as one bounded read-only CLI child over /v1/rpc entity.list, entity.get, and entity.aggregate; conversations and forkchat remain split.'
       logs:
         disposition: promoted_first_slice
         tracker: '#876'
@@ -5817,6 +5817,9 @@ cli_specification:
         - event_publish
         - logs
         - incidents
+        - entities_list
+        - entity_view
+        - entity_aggregate
         - run
         implemented_consumer_residuals:
           logs: >
@@ -5829,6 +5832,11 @@ cli_specification:
             command row. JSON/quiet/shared-renderer behavior remains governed by the output_contract and may be
             implemented by the separate #794/#848/#735 output-mode/shared-renderer tail; #886 does not add
             command-local output-mode flags or semantics.
+          entities: >
+            `swarm entities list`, `swarm entity view`, and `swarm entity aggregate` are implemented for
+            default-text read-only entity discovery in #892 and are no longer absent command rows. JSON/quiet/shared-renderer
+            behavior remains governed by the output_contract and may be implemented by the separate #794/#848/#735
+            output-mode/shared-renderer tail; #892 does not add command-local output-mode flags or semantics.
       exception_rules:
         root_help_completion:
           commands:
@@ -5863,9 +5871,6 @@ cli_specification:
           - conversation_view
           - conversation_turn
           - forkchat
-          - entities_list
-          - entity_view
-          - entity_aggregate
           rule: >
             Absent or blocked command rows do not receive output-mode implementation from #848. Their future
             implementation children consume this contract only after their command/API/runtime owner is promoted.
@@ -5889,8 +5894,8 @@ cli_specification:
       scope: >
         First-slice normalization for currently implemented API-backed CLI commands. This applies to diagnostics/read
         paths, mailbox list/view/decisions, version --server, agents list/view, agent mutations, control commands, event
-        list/follow/view/replay/publish, and swarm run shared API/client failures. Future command families consume this
-        contract when their API-backed implementation is promoted.
+        list/follow/view/replay/publish, entity list/view/aggregate, and swarm run shared API/client failures. Future
+        command families consume this contract when their API-backed implementation is promoted.
       canonical_owner: cmd/swarm shared CLI API error classifier
       stdout_rule: >
         stdout is reserved for successful load-bearing command output. API/client/runtime errors, malformed API
@@ -6922,18 +6927,119 @@ cli_specification:
     entities_list:
       command: swarm entities list
       tier: should_have
-      implementation_status: absent
+      implementation_status: implemented
       owner: /v1/rpc entity.list
+      params:
+      - name: run_id
+        flag: --run-id <run-id>
+        required: false
+        api_param: run_id
+        validation: CLI validates only the OpaqueId envelope and does not assume UUID shape.
+      - name: flow
+        flag: --flow <flow-instance>
+        required: false
+        api_param: flow
+      - name: type
+        flag: --type <entity-type>
+        required: false
+        api_param: type
+      - name: current_state
+        flag: --current-state <state>
+        required: false
+        api_param: current_state
+      - name: limit
+        flag: --limit <1-500>
+        required: false
+        api_param: limit
+        rule: Omitted by the CLI when absent; server applies the entity.list default.
+      - name: cursor
+        flag: --cursor <cursor>
+        required: false
+        api_param: cursor
+      output:
+        table: ENTITY_ID / RUN_ID / FLOW / TYPE / STATE / REVISION / UPDATED / SLUG / NAME plus next_cursor when present
+        empty: No entities match the filter.
+      exit_codes:
+        success: 0
+        cli_validation: 2
+        transport_or_malformed_response: 3
+        auth_or_missing_token: 4
+      proof_expectations:
+      - exact /v1/rpc entity.list call with run_id, flow, type, current_state, limit, and cursor params only when supplied
+      - missing SWARM_API_TOKEN, blank optional flags, invalid run_id OpaqueId envelope, invalid limit, invalid args, and unsupported flags make zero API calls
+      - empty result, next_cursor rendering, auth/HTTP/RPC failures, malformed result, and malformed EntitySummary rows fail closed with tested exit-code behavior
+      - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, query_entities, search_entities, get_entity, or swarm investigate usage
     entity_view:
       command: swarm entity view <entity-id>
       tier: should_have
-      implementation_status: absent
+      implementation_status: implemented
       owner: /v1/rpc entity.get
+      params:
+      - name: entity_id
+        argument: <entity-id>
+        required: true
+        api_param: entity_id
+        validation: CLI validates only the OpaqueId envelope and does not assume UUID shape.
+      - name: run_id
+        flag: --run-id <run-id>
+        required: false
+        api_param: run_id
+        validation: CLI validates only the OpaqueId envelope and does not assume UUID shape.
+      output:
+        heading: Entity <entity-id>
+        summary_line: run_id / flow / type / state / revision / created_at / updated_at
+        optional_line: slug / name with '-' for omitted optional fields
+        structured_lines: compact JSON for server-owned fields, gates, and accumulated maps
+      exit_codes:
+        success: 0
+        cli_validation: 2
+        transport_or_malformed_response: 3
+        auth_or_missing_token: 4
+        entity_not_found: 5
+      proof_expectations:
+      - exact /v1/rpc entity.get call with required entity_id and optional run_id params only
+      - missing/blank/invalid entity id, blank or invalid --run-id, invalid args, unsupported flags, and missing SWARM_API_TOKEN make zero API calls
+      - ENTITY_NOT_FOUND maps to resource-not-found exit 5
+      - auth/HTTP/RPC failures, malformed EntityFull result, malformed nested EntitySummary, and missing fields/gates/accumulated maps fail closed with tested exit-code behavior
+      - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, query_entities, search_entities, get_entity, or swarm investigate usage
     entity_aggregate:
-      command: swarm entity aggregate --group-by <field>
+      command: swarm entity aggregate [--group-by <field>]
       tier: should_have
-      implementation_status: absent
+      implementation_status: implemented
       owner: /v1/rpc entity.aggregate
+      params:
+      - name: run_id
+        flag: --run-id <run-id>
+        required: false
+        api_param: run_id
+        validation: CLI validates only the OpaqueId envelope and does not assume UUID shape.
+      - name: group_by
+        flag: --group-by <field>
+        required: false
+        api_param: group_by
+        default: current_state
+        validation: >
+          CLI accepts current_state, flow, flow_instance, workflow_name, workflow_version, type,
+          entity_type, slug, name, or fields.<path> where path segments match [A-Za-z0-9_]+.
+          When omitted, the CLI sends no group_by and lets the server apply the API default.
+      - name: type
+        flag: --type <entity-type>
+        required: false
+        api_param: type
+      output:
+        table: GROUP / COUNT sorted by group value, with '-' for an empty group key
+        empty: No entity aggregate rows match the filter.
+      exit_codes:
+        success: 0
+        cli_validation: 2
+        transport_or_malformed_response: 3
+        auth_or_missing_token: 4
+      proof_expectations:
+      - exact /v1/rpc entity.aggregate call with run_id, group_by, and type params only when supplied
+      - missing SWARM_API_TOKEN, blank optional flags, invalid run_id OpaqueId envelope, unsupported group_by, invalid args, and unsupported flags make zero API calls
+      - omitted --group-by sends no group_by and relies on the server default current_state
+      - empty result, deterministic aggregate rendering, auth/HTTP/RPC failures, missing counts, and negative counts fail closed with tested exit-code behavior
+      - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, query_entities, search_entities, get_entity, or swarm investigate usage
     logs:
       command: swarm logs [filters] [--follow]
       tier: should_have
@@ -7116,6 +7222,9 @@ cli_specification:
     - swarm event publish
     - swarm logs
     - swarm incidents
+    - swarm entities list
+    - swarm entity view
+    - swarm entity aggregate
     implemented_legacy_or_wrong_namespace: []
     retired_or_fail_closed:
     - swarm investigate
@@ -7127,7 +7236,6 @@ cli_specification:
     remaining_should_have_not_implemented:
     - swarm conversations list / conversation view / conversation turn
     - swarm forkchat new|resume|list|view|delete
-    - swarm entities list / entity view / entity aggregate
     rule: 'Remaining commands require separate gates and must consume canonical API owners; they MUST NOT resurrect direct DB/store/runtime-state readers.'
 
 api_specification:
