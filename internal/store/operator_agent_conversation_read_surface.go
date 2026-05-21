@@ -321,6 +321,7 @@ type OperatorConversationWatchdog struct {
 }
 
 type OperatorConversationTurn struct {
+	TurnIndex        int                             `json:"turn_index"`
 	TurnID           string                          `json:"turn_id"`
 	TriggerEventID   string                          `json:"trigger_event_id"`
 	TriggerEventType string                          `json:"trigger_event_type"`
@@ -1666,6 +1667,7 @@ func (r *OperatorAgentConversationReadSurface) loadConversationTurns(ctx context
 		if err != nil {
 			return nil, err
 		}
+		item.TurnIndex = len(out) + 1
 		out = append(out, item)
 	}
 	if err := rows.Err(); err != nil {

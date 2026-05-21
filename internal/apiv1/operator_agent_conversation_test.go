@@ -112,7 +112,7 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 		},
 		conversationResult: store.OperatorConversationDetail{
 			Conversation: store.OperatorConversationSummary{SessionID: "sess-1", AgentID: "agent-1", StartedAt: now, Status: "active"},
-			Turns:        []store.OperatorConversationTurn{{TurnID: "turn-1", TriggerEventID: "evt-1", TriggerEventType: "task.started", ParseOK: true}},
+			Turns:        []store.OperatorConversationTurn{{TurnIndex: 1, TurnID: "turn-1", TriggerEventID: "evt-1", TriggerEventType: "task.started", ParseOK: true}},
 		},
 		conversationTurnResult: store.OperatorConversationTurnDetail{
 			Session: store.OperatorConversationSummary{SessionID: "sess-1", AgentID: "agent-1", StartedAt: now, Status: "active"},
@@ -132,6 +132,7 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 		},
 		currentConversationResult: &store.OperatorConversationDetail{
 			Conversation: store.OperatorConversationSummary{SessionID: "sess-current", AgentID: "agent-1", StartedAt: now, Status: "active"},
+			Turns:        []store.OperatorConversationTurn{{TurnIndex: 1, TurnID: "turn-current-1", TriggerEventID: "evt-current-1", TriggerEventType: "task.started", ParseOK: true}},
 		},
 	}
 	handler := testHandler(t, Options{
@@ -172,6 +173,10 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 	if reads.lastConversationSessionID != "sess-1" {
 		t.Fatalf("conversation.get session = %q", reads.lastConversationSessionID)
 	}
+	conversationTurns, _ := asMap(t, getConversation.Result)["turns"].([]any)
+	if len(conversationTurns) != 1 || asMap(t, conversationTurns[0])["turn_index"] != float64(1) {
+		t.Fatalf("conversation.get turns = %#v, want turn_index 1", asMap(t, getConversation.Result)["turns"])
+	}
 
 	getTurn := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"turn","method":"conversation.get_turn","params":{"session_id":"sess-1","turn_index":1,"include_logs":false}}`)
 	if getTurn.Error != nil {
@@ -187,6 +192,10 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 	}
 	if reads.lastCurrentConversationFor != "agent-1" {
 		t.Fatalf("current_for_agent id = %q", reads.lastCurrentConversationFor)
+	}
+	currentTurns, _ := asMap(t, current.Result)["turns"].([]any)
+	if len(currentTurns) != 1 || asMap(t, currentTurns[0])["turn_index"] != float64(1) {
+		t.Fatalf("conversation.current_for_agent turns = %#v, want turn_index 1", asMap(t, current.Result)["turns"])
 	}
 }
 

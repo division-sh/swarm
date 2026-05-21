@@ -377,6 +377,48 @@ func TestOperatorConversationReadSurfaceCurrentForAgentReturnsNullWithoutActiveL
 	}
 }
 
+func TestOperatorConversationReadSurfaceLoadConversationAssignsTurnIndexes(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	sessionID := "11111111-1111-1111-1111-111111111111"
+	runID := "33333333-3333-3333-3333-333333333333"
+	firstTurnID := "44444444-4444-4444-4444-444444444444"
+	secondTurnID := "55555555-5555-5555-5555-555555555555"
+	startedAt := time.Date(2026, 5, 12, 10, 0, 0, 0, time.UTC)
+	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
+		caps:   canonicalAgentConversationReadCaps(),
+		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
+	}, 0)
+
+	mock.ExpectQuery("(?s)SELECT\\s+session_id,\\s+agent_id,.*FROM \\(.*\\) conversations\\s+WHERE session_id = \\$1").
+		WithArgs(sessionID).
+		WillReturnRows(sqlmock.NewRows(operatorConversationDetailColumns()).
+			AddRow(sessionID, "agent-1", runID, "live_session", "global", "global", "session", "active", 2, 1, []byte(`{"summary":"active session"}`), []byte(`[{"role":"assistant","content":"ready"}]`), startedAt, nil, startedAt))
+	mock.ExpectQuery("(?s)SELECT\\s+turn_id::text,.*FROM agent_turns.*ORDER BY created_at ASC, turn_id ASC").
+		WithArgs("agent-1", sessionID).
+		WillReturnRows(sqlmock.NewRows(operatorConversationTurnColumns()).
+			AddRow(firstTurnID, "agent-1", sessionID, "session", "global", "", "66666666-6666-6666-6666-666666666666", "input.received", "task-1", []byte(`["emit_done"]`), []byte(`[]`), []byte(`[]`), []byte(`{}`), []byte(`[]`), []byte(`[]`), []byte(`{"turn":1}`), []byte(`{"ok":true}`), []byte(`[]`), true, 1000, 0, "", startedAt).
+			AddRow(secondTurnID, "agent-1", sessionID, "session", "global", "", "77777777-7777-7777-7777-777777777777", "input.received", "task-2", []byte(`["emit_done"]`), []byte(`[]`), []byte(`[]`), []byte(`{}`), []byte(`[]`), []byte(`[]`), []byte(`{"turn":2}`), []byte(`{"ok":true}`), []byte(`[]`), true, 1500, 0, "", startedAt.Add(time.Second)))
+
+	detail, err := reader.LoadOperatorConversation(context.Background(), sessionID)
+	if err != nil {
+		t.Fatalf("LoadOperatorConversation: %v", err)
+	}
+	if len(detail.Turns) != 2 {
+		t.Fatalf("turn count = %d, want 2", len(detail.Turns))
+	}
+	if detail.Turns[0].TurnIndex != 1 || detail.Turns[0].TurnID != firstTurnID || detail.Turns[1].TurnIndex != 2 || detail.Turns[1].TurnID != secondTurnID {
+		t.Fatalf("turn indexes = %#v", detail.Turns)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
 func TestOperatorConversationReadSurfaceLoadTurnComposesConversationOwner(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

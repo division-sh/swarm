@@ -79,6 +79,7 @@ type ConversationDetail struct {
 }
 
 type ConversationTurn struct {
+	TurnIndex              int                      `json:"turn_index,omitempty"`
 	TurnID                 string                   `json:"turn_id"`
 	AgentID                string                   `json:"agent_id,omitempty"`
 	SessionID              string                   `json:"session_id,omitempty"`

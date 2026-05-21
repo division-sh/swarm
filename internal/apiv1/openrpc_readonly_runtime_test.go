@@ -519,7 +519,7 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 			}}},
 			conversationResult: store.OperatorConversationDetail{
 				Conversation: store.OperatorConversationSummary{SessionID: sessionID, AgentID: "agent-1", RunID: runID, StartedAt: now, Status: "active"},
-				Turns:        []store.OperatorConversationTurn{{TurnID: "turn-1", TriggerEventID: eventID, TriggerEventType: "scan.requested", ParseOK: true}},
+				Turns:        []store.OperatorConversationTurn{{TurnIndex: 1, TurnID: "turn-1", TriggerEventID: eventID, TriggerEventType: "scan.requested", ParseOK: true}},
 			},
 			conversationTurnResult: store.OperatorConversationTurnDetail{
 				Session: store.OperatorConversationSummary{SessionID: sessionID, AgentID: "agent-1", RunID: runID, StartedAt: now, Status: "active"},
@@ -539,7 +539,7 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 			},
 			currentConversationResult: &store.OperatorConversationDetail{
 				Conversation: store.OperatorConversationSummary{SessionID: sessionID, AgentID: "agent-1", RunID: runID, StartedAt: now, Status: "active"},
-				Turns:        []store.OperatorConversationTurn{},
+				Turns:        []store.OperatorConversationTurn{{TurnIndex: 1, TurnID: "turn-current-1", TriggerEventID: eventID, TriggerEventType: "scan.requested", ParseOK: true}},
 			},
 		},
 		Mailbox: newReadOnlyMailboxProbeStore(now),
@@ -622,6 +622,15 @@ func assertReadOnlyProbeSuccess(t *testing.T, methodName string, resp rpcRespons
 		}
 		if len(heuristics) != 0 {
 			t.Fatalf("run.diagnose heuristics = %#v, want empty array", heuristics)
+		}
+	}
+	if methodName == "conversation.get" || methodName == "conversation.current_for_agent" {
+		turns, ok := result["turns"].([]any)
+		if !ok || len(turns) == 0 {
+			t.Fatalf("%s turns = %#v, want non-empty array", methodName, result["turns"])
+		}
+		if got := asMap(t, turns[0])["turn_index"]; got != float64(1) {
+			t.Fatalf("%s first turn_index = %#v, want 1", methodName, got)
 		}
 	}
 }
