@@ -40,7 +40,7 @@ type EntityReadStore interface {
 type AgentConversationReadStore interface {
 	ListOperatorAgents(context.Context, store.OperatorAgentListOptions) (store.OperatorAgentListResult, error)
 	LoadOperatorAgent(context.Context, string) (store.OperatorAgentDetail, error)
-	LoadOperatorAgentDiagnosis(context.Context, string) (store.OperatorAgentDiagnosis, error)
+	LoadOperatorAgentDiagnosis(context.Context, string, store.OperatorAgentDiagnosisOptions) (store.OperatorAgentDiagnosis, error)
 	ListOperatorConversations(context.Context, store.OperatorConversationListOptions) (store.OperatorConversationListResult, error)
 	LoadOperatorConversation(context.Context, string) (store.OperatorConversationDetail, error)
 	LoadOperatorConversationTurn(context.Context, string, int) (store.OperatorConversationTurnDetail, error)
@@ -307,9 +307,23 @@ func OperatorAgentConversationHandlers(opts OperatorReadOptions) map[string]Meth
 			if err != nil {
 				return nil, err
 			}
-			result, err := reads.LoadOperatorAgentDiagnosis(ctx, agentID)
+			queueLimit, err := boundedIntegerParam(req.Params, "queue_limit", 1, store.MaxAgentDiagnosisQueueLimit)
+			if err != nil {
+				return nil, err
+			}
+			queueCursor, _, err := optionalStringParam(req.Params, "queue_cursor")
+			if err != nil {
+				return nil, err
+			}
+			result, err := reads.LoadOperatorAgentDiagnosis(ctx, agentID, store.OperatorAgentDiagnosisOptions{
+				QueueLimit:  queueLimit,
+				QueueCursor: queueCursor,
+			})
 			if errors.Is(err, store.ErrAgentNotFound) {
 				return nil, NewApplicationError(AgentNotFoundCode, false, map[string]any{"agent_id": agentID})
+			}
+			if errors.Is(err, store.ErrInvalidPendingAgentDeliveryCursor) {
+				return nil, NewInvalidParamsError(map[string]any{"field": "queue_cursor", "reason": "invalid agent.diagnose queue cursor"})
 			}
 			if err != nil {
 				return nil, err
@@ -444,6 +458,23 @@ func validateAgentDiagnosisResult(item store.OperatorAgentDiagnosis) error {
 	}
 	if item.Queue.OldestPendingAgeSeconds < 0 {
 		return fmt.Errorf("agent.diagnose owner returned malformed result: queue.oldest_pending_age_seconds must be non-negative")
+	}
+	if item.Queue.PendingDeliveries == nil {
+		return fmt.Errorf("agent.diagnose owner returned malformed result: queue.pending_deliveries must be an array")
+	}
+	for i, detail := range item.Queue.PendingDeliveries {
+		if strings.TrimSpace(detail.EventID) == "" {
+			return fmt.Errorf("agent.diagnose owner returned malformed result: queue.pending_deliveries[%d].event_id is required", i)
+		}
+		if strings.TrimSpace(detail.EventName) == "" {
+			return fmt.Errorf("agent.diagnose owner returned malformed result: queue.pending_deliveries[%d].event_name is required", i)
+		}
+		if detail.EnqueuedAt.IsZero() {
+			return fmt.Errorf("agent.diagnose owner returned malformed result: queue.pending_deliveries[%d].enqueued_at is required", i)
+		}
+		if detail.Attempts < 0 {
+			return fmt.Errorf("agent.diagnose owner returned malformed result: queue.pending_deliveries[%d].attempts must be non-negative", i)
+		}
 	}
 	if item.DeliveryLifecycle != nil {
 		if !validAgentDeliveryLifecycleState(item.DeliveryLifecycle.State) {

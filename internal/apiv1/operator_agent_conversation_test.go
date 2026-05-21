@@ -31,6 +31,7 @@ type fakeAgentConversationReadStore struct {
 	lastConversationList          store.OperatorConversationListOptions
 	lastAgentID                   string
 	lastAgentDiagnosisID          string
+	lastAgentDiagnosisOptions     store.OperatorAgentDiagnosisOptions
 	lastConversationSessionID     string
 	lastConversationTurnSessionID string
 	lastConversationTurnIndex     int
@@ -47,8 +48,9 @@ func (s *fakeAgentConversationReadStore) LoadOperatorAgent(_ context.Context, ag
 	return s.agentResult, s.agentErr
 }
 
-func (s *fakeAgentConversationReadStore) LoadOperatorAgentDiagnosis(_ context.Context, agentID string) (store.OperatorAgentDiagnosis, error) {
+func (s *fakeAgentConversationReadStore) LoadOperatorAgentDiagnosis(_ context.Context, agentID string, opts store.OperatorAgentDiagnosisOptions) (store.OperatorAgentDiagnosis, error) {
 	s.lastAgentDiagnosisID = agentID
+	s.lastAgentDiagnosisOptions = opts
 	return s.agentDiagnosisResult, s.agentDiagnosisErr
 }
 
@@ -112,6 +114,13 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 			Queue: store.OperatorAgentDiagnosisQueue{
 				PendingCount:            2,
 				OldestPendingAgeSeconds: 45,
+				PendingDeliveries: []store.OperatorAgentPendingDelivery{{
+					EventID:    "event-1",
+					EventName:  "task.ready",
+					EnqueuedAt: time.Date(2026, 5, 21, 10, 0, 0, 0, time.UTC),
+					Attempts:   1,
+				}},
+				NextCursor: "cursor-2",
 			},
 			DeliveryLifecycle: &store.OperatorAgentDeliveryLifecycle{
 				State:         "active",
@@ -185,12 +194,15 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 		}
 	}
 
-	diagnoseAgent := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"diagnose","method":"agent.diagnose","params":{"agent_id":"agent-1"}}`)
+	diagnoseAgent := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"diagnose","method":"agent.diagnose","params":{"agent_id":"agent-1","queue_limit":1,"queue_cursor":"cursor-1"}}`)
 	if diagnoseAgent.Error != nil {
 		t.Fatalf("agent.diagnose error = %#v", diagnoseAgent.Error)
 	}
 	if reads.lastAgentDiagnosisID != "agent-1" {
 		t.Fatalf("agent.diagnose id = %q", reads.lastAgentDiagnosisID)
+	}
+	if reads.lastAgentDiagnosisOptions.QueueLimit != 1 || reads.lastAgentDiagnosisOptions.QueueCursor != "cursor-1" {
+		t.Fatalf("agent.diagnose options = %#v", reads.lastAgentDiagnosisOptions)
 	}
 	diagnosis := asMap(t, diagnoseAgent.Result)
 	if diagnosis["agent_id"] != "agent-1" || diagnosis["status"] != "running" {
@@ -199,6 +211,17 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 	queue := asMap(t, diagnosis["queue"])
 	if queue["pending_count"] != float64(2) || queue["oldest_pending_age_seconds"] != float64(45) {
 		t.Fatalf("agent.diagnose queue = %#v", queue)
+	}
+	deliveries, ok := queue["pending_deliveries"].([]any)
+	if !ok || len(deliveries) != 1 {
+		t.Fatalf("agent.diagnose pending_deliveries = %#v", queue["pending_deliveries"])
+	}
+	delivery := asMap(t, deliveries[0])
+	if delivery["event_id"] != "event-1" || delivery["event_name"] != "task.ready" || delivery["attempts"] != float64(1) {
+		t.Fatalf("agent.diagnose pending delivery = %#v", delivery)
+	}
+	if queue["next_cursor"] != "cursor-2" {
+		t.Fatalf("agent.diagnose next_cursor = %#v", queue["next_cursor"])
 	}
 	lifecycle := asMap(t, diagnosis["delivery_lifecycle"])
 	if lifecycle["state"] != "active" || lifecycle["blocking_layer"] != "session_execution" {
@@ -483,8 +506,13 @@ func TestOperatorAgentDiagnoseFailsClosedOnMalformedOwnerData(t *testing.T) {
 	reads := &fakeAgentConversationReadStore{
 		agentDiagnosisResult: store.OperatorAgentDiagnosis{
 			AgentID: "agent-1",
-			Status:  "working",
-			Queue:   store.OperatorAgentDiagnosisQueue{},
+			Status:  "running",
+			Queue: store.OperatorAgentDiagnosisQueue{
+				PendingDeliveries: []store.OperatorAgentPendingDelivery{{
+					EventName:  "task.ready",
+					EnqueuedAt: time.Date(2026, 5, 21, 10, 0, 0, 0, time.UTC),
+				}},
+			},
 		},
 	}
 	handler := testHandler(t, Options{
@@ -504,4 +532,34 @@ func TestOperatorAgentDiagnoseFailsClosedOnMalformedOwnerData(t *testing.T) {
 	if !strings.Contains(fmt.Sprint(resp.Error.Message, resp.Error.Data), "agent.diagnose owner returned malformed result") {
 		t.Fatalf("error = %#v, want malformed owner result", resp.Error)
 	}
+}
+
+func TestOperatorAgentDiagnoseRejectsQueueLimit(t *testing.T) {
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			AgentConversations: &fakeAgentConversationReadStore{},
+		}),
+	})
+
+	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"probe-agent-diagnose","method":"agent.diagnose","params":{"agent_id":"agent-1","queue_limit":0}}`)
+	if resp.Error == nil {
+		t.Fatal("agent.diagnose returned success for invalid queue_limit")
+	}
+	assertReadOnlyProbeInvalidParams(t, "agent.diagnose", resp, "queue_limit")
+}
+
+func TestOperatorAgentDiagnoseRejectsBadQueueCursor(t *testing.T) {
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			AgentConversations: &fakeAgentConversationReadStore{agentDiagnosisErr: store.ErrInvalidPendingAgentDeliveryCursor},
+		}),
+	})
+
+	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"probe-agent-diagnose","method":"agent.diagnose","params":{"agent_id":"agent-1","queue_cursor":"bad"}}`)
+	if resp.Error == nil {
+		t.Fatal("agent.diagnose returned success for invalid queue_cursor")
+	}
+	assertReadOnlyProbeInvalidParams(t, "agent.diagnose", resp, "queue_cursor")
 }

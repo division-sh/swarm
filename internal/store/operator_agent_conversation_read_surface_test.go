@@ -26,8 +26,10 @@ type fakeAgentConversationReadSource struct {
 	caps      StoreSchemaCapabilities
 	agents    []runtimemanager.PersistedAgent
 	pending   map[string]PendingAgentDeliveryFacts
+	details   map[string]PendingAgentDeliveryPage
 	lifecycle map[string]AgentLifecycleFacts
 	err       error
+	detailErr error
 }
 
 func (s fakeAgentConversationReadSource) ResolveSchemaCapabilities(context.Context) (StoreSchemaCapabilities, error) {
@@ -44,6 +46,20 @@ func (s fakeAgentConversationReadSource) ListPendingAgentDeliveryFacts(_ context
 		out[agentID] = s.pending[agentID]
 	}
 	return out, s.err
+}
+
+func (s fakeAgentConversationReadSource) ListPendingAgentDeliveryDetails(_ context.Context, opts PendingAgentDeliveryListOptions) (PendingAgentDeliveryPage, error) {
+	if s.detailErr != nil {
+		return PendingAgentDeliveryPage{}, s.detailErr
+	}
+	page, ok := s.details[strings.TrimSpace(opts.AgentID)]
+	if !ok {
+		return PendingAgentDeliveryPage{PendingDeliveries: []PendingAgentDeliveryDetail{}}, s.err
+	}
+	if page.PendingDeliveries == nil {
+		page.PendingDeliveries = []PendingAgentDeliveryDetail{}
+	}
+	return page, s.err
 }
 
 func (s fakeAgentConversationReadSource) ListAgentLifecycleFacts(_ context.Context, agentIDs []string) (map[string]AgentLifecycleFacts, error) {
@@ -311,11 +327,25 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisUsesSelectedOwners(t *testing
 	turnID := "22222222-2222-2222-2222-222222222222"
 	sessionStartedAt := time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC)
 	turnCompletedAt := time.Date(2026, 5, 12, 9, 5, 0, 0, time.UTC)
+	eventTime := time.Date(2026, 5, 12, 8, 55, 0, 0, time.UTC)
 	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
 		caps:   canonicalAgentConversationReadCaps(),
 		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
 		pending: map[string]PendingAgentDeliveryFacts{
-			"agent-1": {PendingCount: 3, OldestPendingAgeSec: 90},
+			"agent-1": {PendingCount: 99, OldestPendingAgeSec: 999},
+		},
+		details: map[string]PendingAgentDeliveryPage{
+			"agent-1": {
+				PendingCount:        3,
+				OldestPendingAgeSec: 90,
+				PendingDeliveries: []PendingAgentDeliveryDetail{{
+					EventID:    "event-1",
+					EventName:  "task.ready",
+					EnqueuedAt: eventTime,
+					Attempts:   1,
+				}},
+				NextCursor: "cursor-2",
+			},
 		},
 		lifecycle: map[string]AgentLifecycleFacts{
 			"agent-1": {CurrentState: "active", BlockingLayer: "session_execution"},
@@ -327,7 +357,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisUsesSelectedOwners(t *testing
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
 			AddRow("agent-1", "active", sessionID, sessionStartedAt, 2, "", nil, []byte(`{"provider_session_id":"provider-sess-1"}`), 0, 0, 0, 0, 0, turnID, "task-1", true, "", turnCompletedAt, []byte(`[]`)))
 
-	diagnosis, err := reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1")
+	diagnosis, err := reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1", OperatorAgentDiagnosisOptions{QueueLimit: 1, QueueCursor: "cursor-1"})
 	if err != nil {
 		t.Fatalf("LoadOperatorAgentDiagnosis: %v", err)
 	}
@@ -342,6 +372,15 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisUsesSelectedOwners(t *testing
 	}
 	if diagnosis.Queue.PendingCount != 3 || diagnosis.Queue.OldestPendingAgeSeconds != 90 {
 		t.Fatalf("queue = %#v", diagnosis.Queue)
+	}
+	if len(diagnosis.Queue.PendingDeliveries) != 1 {
+		t.Fatalf("pending deliveries = %#v", diagnosis.Queue.PendingDeliveries)
+	}
+	if got := diagnosis.Queue.PendingDeliveries[0]; got.EventID != "event-1" || got.EventName != "task.ready" || !got.EnqueuedAt.Equal(eventTime) || got.Attempts != 1 {
+		t.Fatalf("pending delivery = %#v", got)
+	}
+	if diagnosis.Queue.NextCursor != "cursor-2" {
+		t.Fatalf("next cursor = %q", diagnosis.Queue.NextCursor)
 	}
 	if diagnosis.DeliveryLifecycle == nil || diagnosis.DeliveryLifecycle.State != "active" || diagnosis.DeliveryLifecycle.BlockingLayer != "session_execution" {
 		t.Fatalf("delivery_lifecycle = %#v", diagnosis.DeliveryLifecycle)
@@ -368,12 +407,15 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisOmitsAbsentLifecycle(t *testi
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
 			AddRow("agent-1", "active", "", nil, 0, "", nil, []byte(`{}`), 0, 0, 0, 0, 0, "", "", false, "", nil, []byte(`[]`)))
 
-	diagnosis, err := reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1")
+	diagnosis, err := reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1", OperatorAgentDiagnosisOptions{})
 	if err != nil {
 		t.Fatalf("LoadOperatorAgentDiagnosis: %v", err)
 	}
 	if diagnosis.Queue.PendingCount != 0 || diagnosis.Queue.OldestPendingAgeSeconds != 0 {
 		t.Fatalf("queue = %#v, want zero facts", diagnosis.Queue)
+	}
+	if diagnosis.Queue.PendingDeliveries == nil || len(diagnosis.Queue.PendingDeliveries) != 0 {
+		t.Fatalf("pending_deliveries = %#v, want empty array", diagnosis.Queue.PendingDeliveries)
 	}
 	if diagnosis.DeliveryLifecycle != nil {
 		t.Fatalf("delivery_lifecycle = %#v, want nil", diagnosis.DeliveryLifecycle)
@@ -403,7 +445,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisFailsClosedOnMalformedLifecyc
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
 			AddRow("agent-1", "active", "", nil, 0, "", nil, []byte(`{}`), 0, 0, 0, 0, 0, "", "", false, "", nil, []byte(`[]`)))
 
-	_, err = reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1")
+	_, err = reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1", OperatorAgentDiagnosisOptions{})
 	if err == nil || !strings.Contains(err.Error(), "delivery_lifecycle.state") {
 		t.Fatalf("LoadOperatorAgentDiagnosis err = %v, want delivery_lifecycle.state failure", err)
 	}
@@ -426,7 +468,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisPropagatesCapabilityFailure(t
 		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
 	}, 0)
 
-	_, err = reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1")
+	_, err = reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1", OperatorAgentDiagnosisOptions{})
 	if err == nil || !strings.Contains(err.Error(), "events schema is unsupported") {
 		t.Fatalf("LoadOperatorAgentDiagnosis err = %v, want events capability failure", err)
 	}

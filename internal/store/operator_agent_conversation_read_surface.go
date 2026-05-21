@@ -22,6 +22,7 @@ type OperatorAgentConversationReadSource interface {
 	OperatorConversationReadSource
 	LoadAgents(ctx context.Context) ([]runtimemanager.PersistedAgent, error)
 	ListPendingAgentDeliveryFacts(ctx context.Context, agentIDs []string, since time.Time) (map[string]PendingAgentDeliveryFacts, error)
+	ListPendingAgentDeliveryDetails(ctx context.Context, opts PendingAgentDeliveryListOptions) (PendingAgentDeliveryPage, error)
 	ListAgentLifecycleFacts(ctx context.Context, agentIDs []string) (map[string]AgentLifecycleFacts, error)
 }
 
@@ -132,13 +133,27 @@ type OperatorAgentDiagnosis struct {
 }
 
 type OperatorAgentDiagnosisQueue struct {
-	PendingCount            int `json:"pending_count"`
-	OldestPendingAgeSeconds int `json:"oldest_pending_age_seconds"`
+	PendingCount            int                            `json:"pending_count"`
+	OldestPendingAgeSeconds int                            `json:"oldest_pending_age_seconds"`
+	PendingDeliveries       []OperatorAgentPendingDelivery `json:"pending_deliveries"`
+	NextCursor              string                         `json:"next_cursor,omitempty"`
+}
+
+type OperatorAgentPendingDelivery struct {
+	EventID    string    `json:"event_id"`
+	EventName  string    `json:"event_name"`
+	EnqueuedAt time.Time `json:"enqueued_at"`
+	Attempts   int       `json:"attempts"`
 }
 
 type OperatorAgentDeliveryLifecycle struct {
 	State         string `json:"state"`
 	BlockingLayer string `json:"blocking_layer"`
+}
+
+type OperatorAgentDiagnosisOptions struct {
+	QueueLimit  int
+	QueueCursor string
 }
 
 type OperatorAgentTool struct {
@@ -435,8 +450,8 @@ func (s *PostgresStore) LoadOperatorAgent(ctx context.Context, agentID string) (
 	return NewOperatorAgentConversationReadSurface(s.DB, s, 0).LoadOperatorAgent(ctx, agentID)
 }
 
-func (s *PostgresStore) LoadOperatorAgentDiagnosis(ctx context.Context, agentID string) (OperatorAgentDiagnosis, error) {
-	return NewOperatorAgentConversationReadSurface(s.DB, s, 0).LoadOperatorAgentDiagnosis(ctx, agentID)
+func (s *PostgresStore) LoadOperatorAgentDiagnosis(ctx context.Context, agentID string, opts OperatorAgentDiagnosisOptions) (OperatorAgentDiagnosis, error) {
+	return NewOperatorAgentConversationReadSurface(s.DB, s, 0).LoadOperatorAgentDiagnosis(ctx, agentID, opts)
 }
 
 func (s *PostgresStore) ListOperatorConversations(ctx context.Context, opts OperatorConversationListOptions) (OperatorConversationListResult, error) {
@@ -511,13 +526,25 @@ func (r *OperatorAgentConversationReadSurface) LoadOperatorAgent(ctx context.Con
 	return OperatorAgentDetail{}, ErrAgentNotFound
 }
 
-func (r *OperatorAgentConversationReadSurface) LoadOperatorAgentDiagnosis(ctx context.Context, agentID string) (OperatorAgentDiagnosis, error) {
+func (r *OperatorAgentConversationReadSurface) LoadOperatorAgentDiagnosis(ctx context.Context, agentID string, opts OperatorAgentDiagnosisOptions) (OperatorAgentDiagnosis, error) {
 	detail, err := r.LoadOperatorAgent(ctx, agentID)
 	if err != nil {
 		return OperatorAgentDiagnosis{}, err
 	}
 	diagnosis, err := operatorAgentDiagnosisFromDetail(detail)
 	if err != nil {
+		return OperatorAgentDiagnosis{}, err
+	}
+	queue, err := r.source.ListPendingAgentDeliveryDetails(ctx, PendingAgentDeliveryListOptions{
+		AgentID: strings.TrimSpace(agentID),
+		Limit:   opts.QueueLimit,
+		Cursor:  opts.QueueCursor,
+	})
+	if err != nil {
+		return OperatorAgentDiagnosis{}, err
+	}
+	diagnosis.Queue = operatorAgentDiagnosisQueueFromPendingPage(queue)
+	if err := validateOperatorAgentDiagnosis(diagnosis); err != nil {
 		return OperatorAgentDiagnosis{}, err
 	}
 	return diagnosis, nil
@@ -1245,6 +1272,7 @@ func operatorAgentDiagnosisFromDetail(detail OperatorAgentDetail) (OperatorAgent
 		Queue: OperatorAgentDiagnosisQueue{
 			PendingCount:            agent.PendingEvents,
 			OldestPendingAgeSeconds: agent.OldestPendingAgeSec,
+			PendingDeliveries:       []OperatorAgentPendingDelivery{},
 		},
 	}
 	if state := strings.TrimSpace(agent.DeliveryLifecycle); state != "" {
@@ -1259,6 +1287,24 @@ func operatorAgentDiagnosisFromDetail(detail OperatorAgentDetail) (OperatorAgent
 	return out, nil
 }
 
+func operatorAgentDiagnosisQueueFromPendingPage(page PendingAgentDeliveryPage) OperatorAgentDiagnosisQueue {
+	queue := OperatorAgentDiagnosisQueue{
+		PendingCount:            page.PendingCount,
+		OldestPendingAgeSeconds: page.OldestPendingAgeSec,
+		PendingDeliveries:       make([]OperatorAgentPendingDelivery, 0, len(page.PendingDeliveries)),
+		NextCursor:              strings.TrimSpace(page.NextCursor),
+	}
+	for _, detail := range page.PendingDeliveries {
+		queue.PendingDeliveries = append(queue.PendingDeliveries, OperatorAgentPendingDelivery{
+			EventID:    strings.TrimSpace(detail.EventID),
+			EventName:  strings.TrimSpace(detail.EventName),
+			EnqueuedAt: detail.EnqueuedAt.UTC(),
+			Attempts:   detail.Attempts,
+		})
+	}
+	return queue
+}
+
 func validateOperatorAgentDiagnosis(item OperatorAgentDiagnosis) error {
 	if strings.TrimSpace(item.AgentID) == "" {
 		return fmt.Errorf("agent diagnosis agent_id is required")
@@ -1271,6 +1317,23 @@ func validateOperatorAgentDiagnosis(item OperatorAgentDiagnosis) error {
 	}
 	if item.Queue.OldestPendingAgeSeconds < 0 {
 		return fmt.Errorf("agent diagnosis queue.oldest_pending_age_seconds must be non-negative")
+	}
+	if item.Queue.PendingDeliveries == nil {
+		return fmt.Errorf("agent diagnosis queue.pending_deliveries must be an array")
+	}
+	for i, detail := range item.Queue.PendingDeliveries {
+		if strings.TrimSpace(detail.EventID) == "" {
+			return fmt.Errorf("agent diagnosis queue.pending_deliveries[%d].event_id is required", i)
+		}
+		if strings.TrimSpace(detail.EventName) == "" {
+			return fmt.Errorf("agent diagnosis queue.pending_deliveries[%d].event_name is required", i)
+		}
+		if detail.EnqueuedAt.IsZero() {
+			return fmt.Errorf("agent diagnosis queue.pending_deliveries[%d].enqueued_at is required", i)
+		}
+		if detail.Attempts < 0 {
+			return fmt.Errorf("agent diagnosis queue.pending_deliveries[%d].attempts must be non-negative", i)
+		}
 	}
 	if item.DeliveryLifecycle != nil {
 		if !validOperatorAgentDeliveryLifecycleState(item.DeliveryLifecycle.State) {
