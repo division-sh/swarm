@@ -5569,6 +5569,16 @@ cli_specification:
           remains the current single HTTP listener bind input despite its health-specific historical name; this
           does not bless `--health-addr` as the final CLI v2 listener flag name. API/MCP split listener controls
           from the review artifact remain unpromoted until a later tracked serve-topology child accepts them.
+      serve_api_mcp_listener_topology:
+        disposition: promoted_first_slice
+        tracker: '#884'
+        action: >
+          Final CLI v2.1 `swarm serve` listener topology is promoted in
+          cli_specification.command_catalog.serve.listener_topology_v2_1. The final contract uses separate API
+          and MCP listen-address socket owners, superseding the CLI UX v2 draft's port-only serve flags and the
+          current `--health-addr` implementation name. This slice is source-of-truth repair only; Cobra flags,
+          runtime listener wiring, OpenRPC, and `swarm run` behavior remain unchanged until follow-up
+          implementation children consume the promoted owner.
       trace_filters_and_subscription_recovery:
         disposition: tracked_child
         tracker: '#855'
@@ -5653,8 +5663,16 @@ cli_specification:
           Current Swarm serves health, readiness, `/v1/rpc`, `/v1/ws`, MCP, and tool routes from one
           `swarm serve` HTTP listener. The CLI UX v2 review artifact anticipated split API/MCP listener
           controls in its primary serve flag summary; its later `--health-addr` mention describes current
-          implementation configurability, not final CLI v2 naming. Split listener controls are not authoritative
-          until promoted by a later tracked topology child.
+          implementation configurability, not final CLI v2 naming. This node remains current implementation
+          and migration evidence only; #884 promotes final CLI v2.1 split API/MCP listen-address topology under
+          cli_specification.command_catalog.serve.listener_topology_v2_1.
+      serve_v2_1_listen_address_topology:
+        classification: required_current_contract
+        reason: >
+          Platform spec intentionally refines the CLI UX v2 draft's port-only API/MCP flags into explicit
+          listen-address socket owners: `--api-listen-addr <host:port>` and `--mcp-listen-addr <host:port>`.
+          This is required because port-only flags cannot express the bind interface/IP, while a generic
+          `--bind-addr` would be ambiguous once API and MCP are independent listeners.
       event_read_stream_filters:
         classification: required_current_contract
         reason: >
@@ -5956,7 +5974,10 @@ cli_specification:
       command: swarm serve [flags]
       tier: must_have
       implementation_status: partial
-      behavior: starts current runtime and one HTTP listener for process probes, /v1/rpc, /v1/ws, MCP, and tool surfaces
+      behavior: >
+        Starts current runtime and one implemented HTTP listener for process probes, /v1/rpc, /v1/ws, MCP, and
+        tool surfaces. Final CLI v2.1 topology is the separate API/MCP listener contract below; runtime
+        implementation remains pending follow-up children.
       unified_listener_bind_contract:
         implemented_by: '#853'
         flag: --health-addr <addr>
@@ -6002,7 +6023,137 @@ cli_specification:
         sibling_boundaries: >
           Output modes remain governed by `cli_specification.foundations.output_contract`; universal config/env
           precedence remains #844; `swarm run` foreground/follow behavior remains #743; explicit split API/MCP
-          listener topology remains unpromoted backlog under #750/#794/#735 until a later gate promotes it.
+          listener implementation remains split under #884/#750/#794/#735 until follow-up children consume the
+          final v2.1 listener_topology_v2_1 owner.
+      listener_topology_v2_1:
+        promoted_by: '#884'
+        implementation_status: authority_promoted_runtime_pending
+        canonical_owner: docs/specs/swarm-platform/platform/contracts/platform-spec.yaml#cli_specification.command_catalog.serve.listener_topology_v2_1
+        summary: >
+          Final CLI v2.1 `swarm serve` topology uses two independently configurable HTTP listeners: one API
+          listener and one MCP listener. This is the merge-bearing final topology decision. The current
+          `--health-addr` unified listener remains implementation/migration evidence only until later runtime
+          children replace it.
+        listeners:
+          api:
+            enabled_by_default: true
+            enable_flag: --api
+            disable_flag: --no-api
+            bind_flag: --api-listen-addr <host:port>
+            default_listen_addr: 127.0.0.1:8081
+            routes:
+            - /healthz
+            - /readyz
+            - /v1/rpc
+            - /v1/ws
+            semantics:
+            - API, WebSocket, health, and readiness routes share the API listener.
+            - Health and readiness are not served from the MCP listener.
+            - No legacy `/api/health` compatibility route is promoted by this contract; legacy `/api/*` surfaces remain retired.
+            - Startup MUST fail closed before readiness if the API listener is enabled and cannot bind.
+          mcp:
+            enabled_by_default: true
+            enable_flag: --mcp
+            disable_flag: --no-mcp
+            bind_flag: --mcp-listen-addr <host:port>
+            default_listen_addr: 127.0.0.1:8082
+            routes:
+            - /mcp
+            - /tools/
+            semantics:
+            - MCP and tool routes share the MCP listener.
+            - MCP listener bind selection is independent from API listener bind selection.
+            - Setting `--api-listen-addr` MUST NOT change the MCP listener address.
+            - If MCP is disabled, tool execution paths requiring MCP MUST fail with `MCP_DISABLED`.
+            - Startup MUST fail closed before readiness if the MCP listener is enabled and cannot bind.
+        address_format:
+          type: host_port
+          valid_examples:
+          - 127.0.0.1:8081
+          - 0.0.0.0:8081
+          - '[::1]:8081'
+          invalid_examples:
+          - bare port without host
+          - host without port
+          - URL schemes such as http://127.0.0.1:8081
+        defaults:
+          api_listen_addr: 127.0.0.1:8081
+          mcp_listen_addr: 127.0.0.1:8082
+          rationale: >
+            Loopback defaults prevent accidental public exposure. Operators must explicitly bind to `0.0.0.0`
+            or another routable interface for remote access.
+        interaction_rules:
+          independent_bind_addresses: >
+            API and MCP listener addresses are independent. Supplying one listener address never mutates or
+            infers the other listener address.
+          api_addr_only_example:
+            command: swarm serve --api-listen-addr 0.0.0.0:9001
+            result:
+              api_listen_addr: 0.0.0.0:9001
+              mcp_listen_addr: 127.0.0.1:8082
+          enable_disable:
+          - '`--api` and `--no-api` are mutually exclusive.'
+          - '`--mcp` and `--no-mcp` are mutually exclusive.'
+          - 'Supplying `--api-listen-addr` while `--no-api` is set MUST fail closed.'
+          - 'Supplying `--mcp-listen-addr` while `--no-mcp` is set MUST fail closed.'
+          - 'Supplying `--no-api --no-mcp` MUST fail closed because serve would expose no supported listener.'
+          bind_failures:
+            exit_code: 3
+            stderr_class: listener_bind_failed
+            rule: >
+              If any enabled listener cannot bind, `swarm serve` MUST exit before runtime readiness is reported.
+        flag_disposition:
+          --health-addr:
+            disposition: retired_final_v2_1_name_current_migration_evidence
+            replacement: --api-listen-addr and --mcp-listen-addr
+            rationale: >
+              `--health-addr` is misleading because the current implementation binds API, WebSocket, MCP, tools,
+              health, and readiness routes on one listener.
+          serve --api-port:
+            disposition: not_promoted_final_v2_1
+            replacement: --api-listen-addr
+            rationale: >
+              Port-only configuration is incomplete because it cannot express the bind interface/IP.
+          serve --mcp-port:
+            disposition: not_promoted_final_v2_1
+            replacement: --mcp-listen-addr
+            rationale: >
+              Port-only configuration is incomplete because it cannot express the bind interface/IP.
+          --log-level:
+            disposition: split_to_output_logging_or_universal_flags
+            rationale: >
+              Logging level is not listener topology. It remains outside #884 runtime topology implementation
+              unless a later output/logging/universal-flag gate promotes it.
+          SWARM_API_PORT:
+            disposition: not_promoted_final_v2_1
+            replacement_candidate: SWARM_API_LISTEN_ADDR
+            owner: '#844 universal flag/config/env precedence'
+          SWARM_MCP_PORT:
+            disposition: not_promoted_final_v2_1
+            replacement_candidate: SWARM_MCP_LISTEN_ADDR
+            owner: '#844 universal flag/config/env precedence'
+        output_boundary:
+          ready_banner: >
+            Human-readable ready output SHOULD report both enabled listeners and their bound addresses once
+            runtime implementation lands; exact rendering remains governed by serve boot/output owners.
+          machine_readable_modes: >
+            If serve output modes are implemented later, machine-readable boot/readiness events MUST include
+            enabled listener names, configured listen addresses, and actual bound addresses.
+        run_command_consumer_boundary:
+          swarm_run_api_port: >
+            Current `swarm run --api-port` remains a local-start convenience consumer of the existing serve
+            startup owner. A later CLI v2.1 cleanup may replace it with `swarm run --api-listen-addr`.
+          swarm_run_mcp_port: >
+            Current `swarm run --mcp-port` MUST remain fail-closed until `swarm serve` owns MCP listener binding
+            through `--mcp-listen-addr`. If local foreground startup needs MCP listener control later, prefer
+            `--mcp-listen-addr` over port-only `--mcp-port`.
+        implementation_boundaries:
+        - 'This #884 first slice is source-of-truth repair only: no Cobra flag, runtime listener, OpenRPC, or `swarm run` behavior change is implied.'
+        - 'API listener bind implementation must be a later child consuming this owner.'
+        - 'MCP listener bind implementation and `swarm run --mcp-port` disposition must be a later child consuming this owner.'
+        - 'API/MCP enable-disable implementation may be a later child if not absorbed with listener implementation.'
+        - 'Environment/config precedence remains #844.'
+        - '`--log-level` remains output/logging or universal flag work, not listener topology.'
       boot_observability:
         implemented_by: '#802'
         flags:
@@ -6923,6 +7074,10 @@ cli_specification:
       - '#808/#811 serve active-run abandon quiescence'
       - '#825/#827 serve shutdown-grace drain budget'
       - '#830 serve dev-mode lifecycle composition and dev entity-container cleanup'
+      listener_topology_authority: >
+        #884 promotes final CLI v2.1 separate API/MCP listen-address topology as source-of-truth repair only.
+        Runtime implementation children remain required before `swarm serve` exposes `--api-listen-addr`,
+        `--mcp-listen-addr`, API/MCP enable-disable flags, or `swarm run` MCP listener consumers.
       remaining_tail: 'No promoted serve lifecycle tail remains after #830. `platform.shutdown` and persisted `interrupted_by_shutdown`
         remain unpromoted unless a later runtime lifecycle child makes them authoritative; not a direct blocker for #743 API owners.'
   parent_tail:
