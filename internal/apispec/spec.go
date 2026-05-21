@@ -104,12 +104,13 @@ type OpenRPCServer struct {
 }
 
 type OpenRPCMethod struct {
-	Name        string              `json:"name"`
-	Deprecated  bool                `json:"deprecated,omitempty"`
-	Description string              `json:"description,omitempty"`
-	Params      []ContentDescriptor `json:"params"`
-	Result      *ContentDescriptor  `json:"result,omitempty"`
-	Errors      []OpenRPCError      `json:"errors,omitempty"`
+	Name               string              `json:"name"`
+	Deprecated         bool                `json:"deprecated,omitempty"`
+	Description        string              `json:"description,omitempty"`
+	Params             []ContentDescriptor `json:"params"`
+	Result             *ContentDescriptor  `json:"result,omitempty"`
+	NotificationSchema any                 `json:"notification_schema,omitempty"`
+	Errors             []OpenRPCError      `json:"errors,omitempty"`
 }
 
 type OpenRPCError struct {
@@ -280,12 +281,13 @@ func GenerateOpenRPC(api *APISpecification) ([]byte, error) {
 			errors = append(errors, openRPCApplicationError(code, api.Components.Errors[code], errorCodes[code]))
 		}
 		methods = append(methods, OpenRPCMethod{
-			Name:        methodName,
-			Deprecated:  method.Deprecated,
-			Description: method.Description,
-			Params:      normalizeDescriptors(method.Params),
-			Result:      normalizeDescriptorPointer(method.Result),
-			Errors:      errors,
+			Name:               methodName,
+			Deprecated:         method.Deprecated,
+			Description:        method.Description,
+			Params:             normalizeDescriptors(method.Params),
+			Result:             normalizeDescriptorPointer(method.Result),
+			NotificationSchema: normalizeValue(method.NotificationSchema),
+			Errors:             errors,
 		})
 	}
 	componentErrors := make(map[string]OpenRPCError, len(api.Components.Errors))

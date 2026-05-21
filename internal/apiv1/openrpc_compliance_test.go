@@ -576,7 +576,6 @@ func allowedComplianceGapClasses() map[string]struct{} {
 		"missing_idempotency_test",
 		"missing_openrpc_examples",
 		"missing_result_schema_proof",
-		"notification_schema_not_emitted_in_openrpc_method",
 	})
 }
 
