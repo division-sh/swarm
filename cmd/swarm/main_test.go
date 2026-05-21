@@ -339,6 +339,114 @@ func TestPlatformSpecServeUnifiedListenerBindContractPromoted(t *testing.T) {
 	}
 }
 
+func TestPlatformSpecCLIAPIConnectionAuthConfigPrecedencePromoted(t *testing.T) {
+	spec := loadCLIAPIConnectionAuthConfigSpec(t)
+	if strings.TrimSpace(spec.PromotedBy) != "#844" {
+		t.Fatalf("api connection/auth/config promoted_by = %q, want #844", spec.PromotedBy)
+	}
+	if strings.TrimSpace(spec.ImplementationStatus) != "authority_promoted_behavior_pending" {
+		t.Fatalf("api connection/auth/config implementation_status = %q, want authority_promoted_behavior_pending", spec.ImplementationStatus)
+	}
+	if !strings.Contains(spec.CanonicalOwner, "cli_specification.foundations.api_connection_auth_config_precedence") {
+		t.Fatalf("canonical owner does not point at promoted section: %s", spec.CanonicalOwner)
+	}
+	for _, want := range []string{"Cobra flags", "runtime behavior", "OpenRPC"} {
+		if !strings.Contains(spec.Scope, want) {
+			t.Fatalf("scope missing boundary %q:\n%s", want, spec.Scope)
+		}
+	}
+	wantPrecedence := []string{"flag", "environment", "config_file", "built_in_default"}
+	if len(spec.PrecedenceOrder) != len(wantPrecedence) {
+		t.Fatalf("precedence order = %#v, want %#v", spec.PrecedenceOrder, wantPrecedence)
+	}
+	for i, want := range wantPrecedence {
+		if spec.PrecedenceOrder[i] != want {
+			t.Fatalf("precedence order[%d] = %q, want %q", i, spec.PrecedenceOrder[i], want)
+		}
+	}
+	if spec.APIServer.AcceptedSources.Flag != "--api-server <url>" {
+		t.Fatalf("api_server flag = %q, want --api-server <url>", spec.APIServer.AcceptedSources.Flag)
+	}
+	if spec.APIServer.AcceptedSources.Environment != "SWARM_API_SERVER" {
+		t.Fatalf("api_server environment = %q, want SWARM_API_SERVER", spec.APIServer.AcceptedSources.Environment)
+	}
+	if spec.APIServer.AcceptedSources.ConfigKey != "api_server" {
+		t.Fatalf("api_server config key = %q, want api_server", spec.APIServer.AcceptedSources.ConfigKey)
+	}
+	if spec.APIServer.AcceptedSources.BuiltInDefault != "http://127.0.0.1:8081" {
+		t.Fatalf("api_server default = %q, want http://127.0.0.1:8081", spec.APIServer.AcceptedSources.BuiltInDefault)
+	}
+	for _, want := range []string{"base URL", "`/v1/rpc`", "`/v1/ws`"} {
+		if !strings.Contains(spec.APIServer.ValueModel, want) {
+			t.Fatalf("api_server value model missing %q:\n%s", want, spec.APIServer.ValueModel)
+		}
+	}
+	for _, want := range []string{"migration evidence", "127.0.0.1"} {
+		if !strings.Contains(spec.APIServer.Rationale, want) {
+			t.Fatalf("api_server rationale missing %q:\n%s", want, spec.APIServer.Rationale)
+		}
+	}
+	for _, want := range []string{"flag_file", "environment_token", "environment_file", "config_file_key"} {
+		if strings.TrimSpace(spec.APIToken.AcceptedSources[want]) == "" {
+			t.Fatalf("api_token accepted sources missing %q: %#v", want, spec.APIToken.AcceptedSources)
+		}
+	}
+	for _, want := range []string{"--api-token-file", "SWARM_API_TOKEN", "SWARM_API_TOKEN_FILE", "config api_token_file"} {
+		if !stringSliceContains(spec.APIToken.SourceOrder, want) {
+			t.Fatalf("api_token source order missing %q: %#v", want, spec.APIToken.SourceOrder)
+		}
+	}
+	for key, want := range map[string]string{
+		"--api-token":      "shell history",
+		"config api_token": "inline",
+	} {
+		if !strings.Contains(spec.APIToken.RejectedSources[key], want) {
+			t.Fatalf("api_token rejected source %q missing %q:\n%s", key, want, spec.APIToken.RejectedSources[key])
+		}
+	}
+	for key, want := range map[string]string{
+		"environment": "SWARM_CONFIG",
+		"xdg_default": "swarm/config.yaml",
+	} {
+		if !strings.Contains(spec.CLIConfigFile.AcceptedSources[key], want) {
+			t.Fatalf("cli config accepted source %q missing %q:\n%s", key, want, spec.CLIConfigFile.AcceptedSources[key])
+		}
+	}
+	if !strings.Contains(spec.CLIConfigFile.RejectedSources["--config"], "dual semantic ownership") {
+		t.Fatalf("cli config --config rejection missing dual-ownership rule:\n%s", spec.CLIConfigFile.RejectedSources["--config"])
+	}
+	for _, key := range []string{"api_server", "api_token_file"} {
+		if strings.TrimSpace(spec.CLIConfigFile.AcceptedKeys[key]) == "" {
+			t.Fatalf("cli config accepted key %q missing: %#v", key, spec.CLIConfigFile.AcceptedKeys)
+		}
+	}
+	for _, key := range []string{"api_token", "output_format", "no_color", "contracts_path", "platform_spec_path", "log_level", "retry", "serve_api_listen_addr", "serve_mcp_listen_addr"} {
+		if strings.TrimSpace(spec.CLIConfigFile.RejectedKeys[key]) == "" {
+			t.Fatalf("cli config rejected key %q missing: %#v", key, spec.CLIConfigFile.RejectedKeys)
+		}
+	}
+	for _, key := range []string{"SWARM_API_PORT", "SWARM_MCP_PORT"} {
+		if !strings.Contains(spec.ServeListenerEnvConfigBoundary.RejectedPorts[key], "Not promoted") {
+			t.Fatalf("serve listener rejected port %q missing not-promoted rule:\n%s", key, spec.ServeListenerEnvConfigBoundary.RejectedPorts[key])
+		}
+	}
+	for _, key := range []string{"SWARM_API_LISTEN_ADDR", "SWARM_MCP_LISTEN_ADDR"} {
+		if !strings.Contains(spec.ServeListenerEnvConfigBoundary.ReservedCandidates[key], "later #884/#750") {
+			t.Fatalf("serve listener reserved candidate %q missing split rule:\n%s", key, spec.ServeListenerEnvConfigBoundary.ReservedCandidates[key])
+		}
+	}
+	for _, want := range []string{"#848", "#884/#750", "#743", "`--no-retry`"} {
+		if !stringSliceContains(spec.SplitSiblings, want) {
+			t.Fatalf("split siblings missing %q: %#v", want, spec.SplitSiblings)
+		}
+	}
+	for _, want := range []string{"No Cobra persistent flag", "OpenRPC", "Future API-backed CLI config/auth implementation MUST consume this owner"} {
+		if !stringSliceContains(spec.ImplementationBoundaries, want) {
+			t.Fatalf("implementation boundaries missing %q: %#v", want, spec.ImplementationBoundaries)
+		}
+	}
+}
+
 func TestCLI_ServeVerboseFlagConsumesServeOwner(t *testing.T) {
 	var captured serveOptions
 	opts := defaultRootCommandOptions()
@@ -3248,6 +3356,45 @@ type serveUnifiedListenerSpec struct {
 	UnpromotedReviewControls []string `yaml:"unpromoted_review_controls"`
 }
 
+type cliAPIConnectionAuthConfigSpec struct {
+	PromotedBy           string   `yaml:"promoted_by"`
+	ImplementationStatus string   `yaml:"implementation_status"`
+	CanonicalOwner       string   `yaml:"canonical_owner"`
+	Scope                string   `yaml:"scope"`
+	AppliesTo            []string `yaml:"applies_to"`
+	NotAppliesTo         []string `yaml:"not_applies_to"`
+	PrecedenceOrder      []string `yaml:"precedence_order"`
+	APIServer            struct {
+		AcceptedSources struct {
+			Flag           string `yaml:"flag"`
+			Environment    string `yaml:"environment"`
+			ConfigKey      string `yaml:"config_key"`
+			BuiltInDefault string `yaml:"built_in_default"`
+		} `yaml:"accepted_sources"`
+		ValueModel string `yaml:"value_model"`
+		Rationale  string `yaml:"rationale"`
+	} `yaml:"api_server"`
+	APIToken struct {
+		AcceptedSources map[string]string `yaml:"accepted_sources"`
+		SourceOrder     []string          `yaml:"source_order"`
+		RejectedSources map[string]string `yaml:"rejected_sources"`
+		TokenFileRule   string            `yaml:"token_file_rule"`
+	} `yaml:"api_token"`
+	CLIConfigFile struct {
+		AcceptedSources map[string]string `yaml:"accepted_sources"`
+		RejectedSources map[string]string `yaml:"rejected_sources"`
+		AcceptedKeys    map[string]string `yaml:"accepted_keys"`
+		RejectedKeys    map[string]string `yaml:"rejected_keys"`
+	} `yaml:"cli_config_file"`
+	ServeListenerEnvConfigBoundary struct {
+		RejectedPorts      map[string]string `yaml:"rejected_ports"`
+		ReservedCandidates map[string]string `yaml:"reserved_candidates"`
+		Rule               string            `yaml:"rule"`
+	} `yaml:"serve_listener_env_config_boundary"`
+	SplitSiblings            []string `yaml:"split_siblings"`
+	ImplementationBoundaries []string `yaml:"implementation_boundaries"`
+}
+
 func loadServeBootProgressSequenceFromSpec(t *testing.T) []serveBootProgressSpecStep {
 	t.Helper()
 	var spec struct {
@@ -3335,6 +3482,28 @@ func loadServeUnifiedListenerSpec(t *testing.T) serveUnifiedListenerSpec {
 		t.Fatal("platform spec missing serve unified_listener_bind_contract")
 	}
 	return spec.CLISpecification.CommandCatalog.Serve.Listener
+}
+
+func loadCLIAPIConnectionAuthConfigSpec(t *testing.T) cliAPIConnectionAuthConfigSpec {
+	t.Helper()
+	var spec struct {
+		CLISpecification struct {
+			Foundations struct {
+				APIConnectionAuthConfig cliAPIConnectionAuthConfigSpec `yaml:"api_connection_auth_config_precedence"`
+			} `yaml:"foundations"`
+		} `yaml:"cli_specification"`
+	}
+	data, err := os.ReadFile(filepath.Join(repoRoot(), defaultPlatformSpecPath))
+	if err != nil {
+		t.Fatalf("read platform spec: %v", err)
+	}
+	if err := yaml.Unmarshal(data, &spec); err != nil {
+		t.Fatalf("parse platform spec: %v", err)
+	}
+	if strings.TrimSpace(spec.CLISpecification.Foundations.APIConnectionAuthConfig.CanonicalOwner) == "" {
+		t.Fatal("platform spec missing api_connection_auth_config_precedence")
+	}
+	return spec.CLISpecification.Foundations.APIConnectionAuthConfig
 }
 
 func stringSliceContains(values []string, want string) bool {
