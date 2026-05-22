@@ -99,12 +99,24 @@ type AtomicEventRoutePersistence interface {
 	PersistEventWithDeliveryRoutesAndScope(ctx context.Context, evt events.Event, agentIDs []string, deliveryTargets map[string]events.RouteIdentity, scope runtimereplayclaim.CommittedReplayScope) error
 }
 
+type AtomicEventDeliveryRouteSetPersistence interface {
+	PersistEventWithDeliveryRouteSetAndScope(ctx context.Context, evt events.Event, deliveryRoutes []events.DeliveryRoute, scope runtimereplayclaim.CommittedReplayScope) error
+}
+
 type EventDeliveryRoutePersistence interface {
 	InsertEventDeliveriesWithTargets(ctx context.Context, eventID string, agentIDs []string, deliveryTargets map[string]events.RouteIdentity) error
 }
 
+type EventDeliveryRouteSetPersistence interface {
+	InsertEventDeliveryRoutes(ctx context.Context, eventID string, deliveryRoutes []events.DeliveryRoute) error
+}
+
 type EventDeliveryTargetReader interface {
 	ListEventDeliveryTargets(ctx context.Context, eventID string) (map[string]events.RouteIdentity, error)
+}
+
+type EventDeliveryRouteSetReader interface {
+	ListEventDeliveryRoutes(ctx context.Context, eventID string) ([]events.DeliveryRoute, error)
 }
 
 type EventReplayScopePersistence interface {
@@ -127,6 +139,10 @@ type TransactionalEventStore interface {
 
 type TransactionalEventDeliveryRoutePersistence interface {
 	InsertEventDeliveriesWithTargetsTx(ctx context.Context, tx *sql.Tx, eventID string, agentIDs []string, deliveryTargets map[string]events.RouteIdentity) error
+}
+
+type TransactionalEventDeliveryRouteSetPersistence interface {
+	InsertEventDeliveryRoutesTx(ctx context.Context, tx *sql.Tx, eventID string, deliveryRoutes []events.DeliveryRoute) error
 }
 
 type PipelineReceiptSweeperStore = runtimereplayclaim.Lister

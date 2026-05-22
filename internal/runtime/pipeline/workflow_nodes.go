@@ -528,6 +528,9 @@ func (pc *PipelineCoordinator) workflowNodeExecutors() []workflowNodeExecutor {
 func (pc *PipelineCoordinator) workflowNodeInterceptPolicy(eventType string, evt events.Event) (bool, bool) {
 	eventType = strings.TrimSpace(eventType)
 	for _, node := range pc.WorkflowNodes() {
+		if !pc.workflowNodeMatchesDeliveryTarget(strings.TrimSpace(node.ID), evt.TargetRoute()) {
+			continue
+		}
 		var (
 			policy WorkflowEventPolicy
 			ok     bool
@@ -588,7 +591,11 @@ func (pc *PipelineCoordinator) dispatchWorkflowNodeEventResult(ctx context.Conte
 	}
 	handledAny := false
 	for _, node := range pc.WorkflowNodes() {
-		handled, err := pc.executeNodeHandlerPlanResult(ctx, strings.TrimSpace(node.ID), evt)
+		nodeID := strings.TrimSpace(node.ID)
+		if !pc.workflowNodeMatchesDeliveryTarget(nodeID, evt.TargetRoute()) {
+			continue
+		}
+		handled, err := pc.executeNodeHandlerPlanResult(ctx, nodeID, evt)
 		if err != nil {
 			return handledAny || handled, err
 		}
@@ -597,6 +604,33 @@ func (pc *PipelineCoordinator) dispatchWorkflowNodeEventResult(ctx context.Conte
 		}
 	}
 	return handledAny, nil
+}
+
+func (pc *PipelineCoordinator) workflowNodeMatchesDeliveryTarget(nodeID string, target events.RouteIdentity) bool {
+	target = target.Normalized()
+	if target.Empty() {
+		return true
+	}
+	if target.FlowInstance == "" && target.FlowID == "" {
+		return true
+	}
+	source := pc.SemanticSource()
+	if source == nil {
+		return false
+	}
+	flowID := strings.TrimSpace(workflowNodeFlowID(source, nodeID))
+	if flowID == "" {
+		return false
+	}
+	if target.FlowID != "" {
+		return target.FlowID == flowID
+	}
+	flowPath := strings.Trim(strings.TrimSpace(source.FlowPath(flowID)), "/")
+	if flowPath == "" {
+		flowPath = flowID
+	}
+	targetPath := strings.Trim(strings.TrimSpace(target.FlowInstance), "/")
+	return targetPath == flowPath || strings.HasPrefix(targetPath, flowPath+"/")
 }
 
 func deriveWorkflowEventDelivery(entry runtimecontracts.EventCatalogEntry) (consume bool, visible bool) {

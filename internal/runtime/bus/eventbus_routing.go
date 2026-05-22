@@ -172,10 +172,15 @@ func (eb *EventBus) deliverToAgents(ctx context.Context, evt events.Event, agent
 }
 
 func (eb *EventBus) deliverToAgentsWithTargets(ctx context.Context, evt events.Event, agentIDs []string, deliveryTargets map[string]events.RouteIdentity) error {
-	expected := uniqueStrings(agentIDs)
+	return eb.deliverToRecipientsWithRoutes(ctx, evt, agentIDs, deliveryRoutesFromTargetMap(agentIDs, "agent", deliveryTargets))
+}
+
+func (eb *EventBus) deliverToRecipientsWithRoutes(ctx context.Context, evt events.Event, recipientIDs []string, deliveryRoutes []events.DeliveryRoute) error {
+	expected := uniqueStrings(recipientIDs)
 	if len(expected) == 0 {
 		return nil
 	}
+	targetsByRecipient := deliveryRouteTargetsByRecipient(deliveryRoutes)
 	recipients := eb.snapshotRecipientChans(expected)
 	delivered := make([]string, 0, len(recipients))
 	seen := make(map[string]struct{}, len(recipients))
@@ -190,44 +195,88 @@ func (eb *EventBus) deliverToAgentsWithTargets(ctx context.Context, evt events.E
 	}
 	timedOut := make([]string, 0, len(recipients))
 	for _, recipient := range recipients {
-		deliverEvent := evt
-		if target := deliveryTargets[strings.TrimSpace(recipient.agentID)]; !target.Empty() {
-			deliverEvent = evt.WithDeliveryTarget(target)
+		targets := targetsByRecipient[strings.TrimSpace(recipient.agentID)]
+		if len(targets) == 0 {
+			targets = []events.RouteIdentity{{}}
 		}
-		select {
-		case recipient.ch <- deliverEvent:
-			delivered = append(delivered, recipient.agentID)
-		case <-ctx.Done():
-			remaining := make([]string, 0, len(recipients)-len(delivered))
-			for _, candidate := range recipients {
-				if _, ok := seen[candidate.agentID]; ok {
-					delete(seen, candidate.agentID)
-				}
+		for _, target := range targets {
+			deliverEvent := evt
+			if !target.Empty() {
+				deliverEvent = evt.WithDeliveryTarget(target)
 			}
-			for _, recipient := range expected {
-				found := false
-				for _, sent := range delivered {
-					if sent == recipient {
-						found = true
-						break
+			select {
+			case recipient.ch <- deliverEvent:
+				delivered = append(delivered, recipient.agentID)
+			case <-ctx.Done():
+				remaining := make([]string, 0, len(recipients)-len(delivered))
+				for _, candidate := range recipients {
+					if _, ok := seen[candidate.agentID]; ok {
+						delete(seen, candidate.agentID)
 					}
 				}
-				if !found {
-					remaining = append(remaining, recipient)
+				for _, recipient := range expected {
+					found := false
+					for _, sent := range delivered {
+						if sent == recipient {
+							found = true
+							break
+						}
+					}
+					if !found {
+						remaining = append(remaining, recipient)
+					}
 				}
+				return eb.logAuthoritativeDeliveryIncomplete(ctx, evt, expected, delivered, missing, remaining, ctx.Err())
+			case <-time.After(deliverySendTimeout):
+				timedOut = append(timedOut, recipient.agentID)
+				eb.logRuntime(ctx, "warn", "Event delivery to a recipient timed out", "eventbus", "delivery_timeout", evt.ID, string(evt.Type), recipient.agentID, evt.EntityID(), "", nil, map[string]any{
+					"timeout_ms": int(deliverySendTimeout / time.Millisecond),
+				}, "", 0)
 			}
-			return eb.logAuthoritativeDeliveryIncomplete(ctx, evt, expected, delivered, missing, remaining, ctx.Err())
-		case <-time.After(deliverySendTimeout):
-			timedOut = append(timedOut, recipient.agentID)
-			eb.logRuntime(ctx, "warn", "Event delivery to a recipient timed out", "eventbus", "delivery_timeout", evt.ID, string(evt.Type), recipient.agentID, evt.EntityID(), "", nil, map[string]any{
-				"timeout_ms": int(deliverySendTimeout / time.Millisecond),
-			}, "", 0)
 		}
 	}
 	if len(missing) > 0 || len(timedOut) > 0 {
 		return eb.logAuthoritativeDeliveryIncomplete(ctx, evt, expected, delivered, missing, timedOut, nil)
 	}
 	return nil
+}
+
+func deliveryRoutesFromTargetMap(recipients []string, subscriberType string, deliveryTargets map[string]events.RouteIdentity) []events.DeliveryRoute {
+	recipients = uniqueStrings(recipients)
+	if len(recipients) == 0 {
+		return nil
+	}
+	out := make([]events.DeliveryRoute, 0, len(recipients))
+	for _, recipient := range recipients {
+		out = append(out, events.DeliveryRoute{
+			SubscriberType: subscriberType,
+			SubscriberID:   recipient,
+			Target:         deliveryTargets[strings.TrimSpace(recipient)],
+		})
+	}
+	return events.NormalizeDeliveryRoutes(out)
+}
+
+func deliveryRouteTargetsByRecipient(deliveryRoutes []events.DeliveryRoute) map[string][]events.RouteIdentity {
+	deliveryRoutes = events.NormalizeDeliveryRoutes(deliveryRoutes)
+	if len(deliveryRoutes) == 0 {
+		return nil
+	}
+	out := make(map[string][]events.RouteIdentity, len(deliveryRoutes))
+	for _, route := range deliveryRoutes {
+		recipient := strings.TrimSpace(route.SubscriberID)
+		if recipient == "" {
+			continue
+		}
+		if route.Target.Empty() {
+			continue
+		}
+		out[recipient] = append(out[recipient], route.Target.Normalized())
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 type agentRecipient struct {

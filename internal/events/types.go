@@ -31,6 +31,12 @@ type RouteIdentity struct {
 	FlowID       string `json:"flow_id,omitempty"`
 }
 
+type DeliveryRoute struct {
+	SubscriberType string        `json:"subscriber_type"`
+	SubscriberID   string        `json:"subscriber_id"`
+	Target         RouteIdentity `json:"delivery_target_route,omitempty"`
+}
+
 type Event struct {
 	ID            string          `json:"id"`
 	Type          EventType       `json:"type"`
@@ -117,9 +123,8 @@ func (e Event) WithTargetSet(routes []RouteIdentity) Event {
 	envelope := e.Envelope.Normalized()
 	envelope.Target = RouteIdentity{}
 	envelope.TargetSet = normalized
-	first := normalized[0]
-	envelope.EntityID = first.EntityID
-	envelope.FlowInstance = first.FlowInstance
+	envelope.EntityID = ""
+	envelope.FlowInstance = ""
 	envelope.Scope = inferEventScope(envelope.EntityID, envelope.FlowInstance)
 	e.Envelope = envelope.Normalized()
 	return e
@@ -240,10 +245,6 @@ func (e EventEnvelope) Normalized() EventEnvelope {
 		e.TargetSet = nil
 		e.EntityID = e.Target.EntityID
 		e.FlowInstance = e.Target.FlowInstance
-	} else if len(e.TargetSet) > 0 {
-		first := e.TargetSet[0]
-		e.EntityID = first.EntityID
-		e.FlowInstance = first.FlowInstance
 	}
 	e.Scope = normalizeEventScope(e.Scope)
 	if e.Scope == "" {
@@ -263,6 +264,42 @@ func (r RouteIdentity) Normalized() RouteIdentity {
 func (r RouteIdentity) Empty() bool {
 	r = r.Normalized()
 	return r.FlowInstance == "" && r.EntityID == "" && r.FlowID == ""
+}
+
+func (r DeliveryRoute) Normalized() DeliveryRoute {
+	return DeliveryRoute{
+		SubscriberType: strings.TrimSpace(r.SubscriberType),
+		SubscriberID:   strings.TrimSpace(r.SubscriberID),
+		Target:         r.Target.Normalized(),
+	}
+}
+
+func NormalizeDeliveryRoutes(in []DeliveryRoute) []DeliveryRoute {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]DeliveryRoute, 0, len(in))
+	seen := map[string]struct{}{}
+	for _, route := range in {
+		route = route.Normalized()
+		if route.SubscriberType == "" || route.SubscriberID == "" {
+			continue
+		}
+		target := route.Target
+		key := strings.Join([]string{
+			route.SubscriberType,
+			route.SubscriberID,
+			target.FlowID,
+			target.FlowInstance,
+			target.EntityID,
+		}, "\x00")
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, route)
+	}
+	return out
 }
 
 func normalizeRouteIdentities(in []RouteIdentity) []RouteIdentity {

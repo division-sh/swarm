@@ -39,21 +39,78 @@ func (eb *EventBus) replayRecipientsForCommittedEvent(
 	evt events.Event,
 	persisted []string,
 	scope runtimereplayclaim.CommittedReplayScope,
-) ([]string, []string, error) {
+) ([]string, []string, []events.DeliveryRoute, error) {
 	persisted = uniqueStrings(persisted)
+	persistedRoutes := eb.deliveryRoutesForEvent(ctx, evt.ID)
+	if scope == runtimereplayclaim.CommittedReplayScopeDirect && len(persistedRoutes) > 0 {
+		live := deliveryRouteRecipientIDs(persistedRoutes)
+		internal := []string(nil)
+		live = deliveryRouteRecipientIDsByType(persistedRoutes, "agent")
+		if len(live) > 0 {
+			return live, internal, persistedRoutes, nil
+		}
+	}
+	if scope == runtimereplayclaim.CommittedReplayScopeSubscribed && hasDeliveryRouteSubscriberType(persistedRoutes, "node") {
+		live := deliveryRouteRecipientIDs(persistedRoutes)
+		internal := deliveryRouteRecipientIDsByType(persistedRoutes, "node")
+		if len(live) > 0 {
+			return live, internal, persistedRoutes, nil
+		}
+	}
 	switch scope {
 	case runtimereplayclaim.CommittedReplayScopeDirect:
-		return persisted, nil, nil
+		return persisted, nil, deliveryRoutesFromTargetMap(persisted, "agent", eb.deliveryTargetsForEvent(ctx, evt.ID)), nil
 	case runtimereplayclaim.CommittedReplayScopeSubscribed:
 		internal, err := eb.currentInternalRecipientsForCommittedEvent(ctx, evt)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		live := uniqueStrings(append(append([]string(nil), persisted...), internal...))
-		return live, internal, nil
+		routes := append([]events.DeliveryRoute(nil), persistedRoutes...)
+		if len(routes) == 0 {
+			routes = deliveryRoutesFromTargetMap(persisted, "agent", eb.deliveryTargetsForEvent(ctx, evt.ID))
+		}
+		for _, recipient := range internal {
+			routes = append(routes, events.DeliveryRoute{SubscriberType: "node", SubscriberID: recipient})
+		}
+		return live, internal, events.NormalizeDeliveryRoutes(routes), nil
 	default:
-		return nil, nil, fmt.Errorf("replay recipients: unsupported scope %q", strings.TrimSpace(string(scope)))
+		return nil, nil, nil, fmt.Errorf("replay recipients: unsupported scope %q", strings.TrimSpace(string(scope)))
 	}
+}
+
+func hasDeliveryRouteSubscriberType(routes []events.DeliveryRoute, subscriberType string) bool {
+	subscriberType = strings.TrimSpace(subscriberType)
+	for _, route := range events.NormalizeDeliveryRoutes(routes) {
+		if route.SubscriberType == subscriberType {
+			return true
+		}
+	}
+	return false
+}
+
+func deliveryRouteRecipientIDs(routes []events.DeliveryRoute) []string {
+	routes = events.NormalizeDeliveryRoutes(routes)
+	out := make([]string, 0, len(routes))
+	for _, route := range routes {
+		if route.SubscriberID != "" {
+			out = append(out, route.SubscriberID)
+		}
+	}
+	return uniqueStrings(out)
+}
+
+func deliveryRouteRecipientIDsByType(routes []events.DeliveryRoute, subscriberType string) []string {
+	routes = events.NormalizeDeliveryRoutes(routes)
+	subscriberType = strings.TrimSpace(subscriberType)
+	out := make([]string, 0, len(routes))
+	for _, route := range routes {
+		if route.SubscriberType != subscriberType || route.SubscriberID == "" {
+			continue
+		}
+		out = append(out, route.SubscriberID)
+	}
+	return uniqueStrings(out)
 }
 
 func replayScopePersistenceRequired(store any) bool {

@@ -55,14 +55,14 @@ func (o engineOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.E
 		if strings.TrimSpace(string(intent.Event.Type)) == "" {
 			continue
 		}
-		recipients, deliveryTargets, internalRecipients, targetFailure, err := o.deliveryRecipientsForIntent(ctx, *intent)
+		plan, err := o.deliveryPlanForIntent(ctx, *intent)
 		if err != nil {
 			return err
 		}
 		if err := txStore.AppendEventTx(ctx, tx, intent.Event); err != nil {
 			return fmt.Errorf("persist event: %w", err)
 		}
-		if err := o.bus.insertEventDeliveriesTx(ctx, txStore, tx, intent.Event.ID, recipients, deliveryTargets); err != nil {
+		if err := o.bus.insertEventDeliveriesTx(ctx, txStore, tx, intent.Event.ID, plan.PersistedRecipients, plan.DeliveryTargets, plan.DeliveryRoutes); err != nil {
 			return fmt.Errorf("persist event deliveries: %w", err)
 		}
 		if scopeWriter, ok := o.bus.store.(TransactionalEventReplayScopePersistence); ok && scopeWriter != nil {
@@ -72,40 +72,41 @@ func (o engineOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.E
 		} else if replayScopePersistenceRequired(o.bus.store) {
 			return fmt.Errorf("persist committed replay scope: %w", runtimereplayclaim.ErrMissingCommittedReplayScope)
 		}
-		if targetFailure != "" {
-			if err := txStore.UpsertPipelineReceiptTx(ctx, tx, intent.Event.ID, "dead_letter", targetDeliveryFailureMessage(targetFailure)); err != nil {
+		if plan.TargetFailure != "" {
+			if err := txStore.UpsertPipelineReceiptTx(ctx, tx, intent.Event.ID, "dead_letter", targetDeliveryFailureMessage(plan.TargetFailure)); err != nil {
 				return fmt.Errorf("persist pipeline receipt: %w", err)
 			}
 			failedEvent := intent.Event
-			plan := eventDeliveryPlan{
+			failedPlan := eventDeliveryPlan{
 				Event:               failedEvent,
-				PersistedRecipients: recipients,
-				DeliveryTargets:     deliveryTargets,
-				TargetFailure:       targetFailure,
+				PersistedRecipients: plan.PersistedRecipients,
+				DeliveryTargets:     plan.DeliveryTargets,
+				DeliveryRoutes:      plan.DeliveryRoutes,
+				TargetFailure:       plan.TargetFailure,
 			}
 			runtimepipeline.QueuePipelinePostCommitAction(ctx, func() {
-				o.bus.recordTargetDeliveryFailure(context.WithoutCancel(ctx), failedEvent, plan)
+				o.bus.recordTargetDeliveryFailure(context.WithoutCancel(ctx), failedEvent, failedPlan)
 			})
 		}
-		o.bus.setPendingInternalRecipients(intent.Event.ID, internalRecipients)
+		o.bus.setPendingInternalDeliveryRoutes(intent.Event.ID, internalDeliveryRoutesForEventPlan(plan))
 	}
 	return nil
 }
 
-func (o engineOutbox) deliveryRecipientsForIntent(ctx context.Context, intent runtimeengine.EmitIntent) ([]string, map[string]events.RouteIdentity, []string, runtimepinrouting.TargetFailure, error) {
+func (o engineOutbox) deliveryPlanForIntent(ctx context.Context, intent runtimeengine.EmitIntent) (eventDeliveryPlan, error) {
 	if len(intent.Recipients) > 0 {
 		plan, err := o.bus.deliveryPlanner.PlanDirect(ctx, intent.Event, intent.Recipients)
 		if err != nil {
-			return nil, nil, nil, "", err
+			return eventDeliveryPlan{}, err
 		}
-		return plan.PersistedRecipients, plan.DeliveryTargets, nil, plan.TargetFailure, nil
+		return plan, nil
 	}
 	plan, err := o.bus.deliveryPlanner.Plan(ctx, intent.Event)
 	if err != nil {
-		return nil, nil, nil, "", err
+		return eventDeliveryPlan{}, err
 	}
 	o.bus.recordPublishDiagnostic(ctx, intent.Event, plan)
-	return plan.PersistedRecipients, plan.DeliveryTargets, filterOutAgentIDs(plan.Recipients, plan.PersistedRecipients), plan.TargetFailure, nil
+	return plan, nil
 }
 
 func (d engineDispatcher) DispatchPostCommit(ctx context.Context, intents []runtimeengine.EmitIntent) error {
@@ -162,10 +163,19 @@ func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengi
 		}
 		return false, err
 	}
-	internalRecipients := d.bus.pendingInternalRecipients(intent.Event.ID)
+	deliveryRoutes := d.bus.deliveryRoutesForEvent(ctx, intent.Event.ID)
+	pendingInternalRoutes := d.bus.pendingInternalDeliveryRoutes(intent.Event.ID)
+	deliveryRoutes = events.NormalizeDeliveryRoutes(append(deliveryRoutes, pendingInternalRoutes...))
+	if len(recipients) > 0 {
+		deliveryRoutes = events.NormalizeDeliveryRoutes(append(deliveryRoutes, deliveryRoutesFromTargetMap(recipients, "agent", d.bus.deliveryTargetsForEvent(ctx, intent.Event.ID))...))
+	}
+	internalRecipients := deliveryRouteRecipientIDsByType(deliveryRoutes, "node")
 	liveRecipients := uniqueStrings(append(append([]string(nil), recipients...), internalRecipients...))
+	if len(deliveryRoutes) > 0 {
+		liveRecipients = uniqueStrings(append(deliveryRouteRecipientIDs(deliveryRoutes), recipients...))
+	}
 	if len(liveRecipients) == 0 {
-		d.bus.clearPendingInternalRecipients(intent.Event.ID)
+		d.bus.clearPendingInternalDeliveryRoutes(intent.Event.ID)
 		if intent.Event.HasTargetRoute() {
 			plan := eventDeliveryPlan{Event: intent.Event, TargetFailure: runtimepinrouting.FailureTargetNotSubscribed}
 			d.bus.recordTargetDeliveryFailure(ctx, intent.Event, plan)
@@ -174,11 +184,13 @@ func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengi
 		}
 		return false, nil
 	}
-	deliveryTargets := d.bus.deliveryTargetsForEvent(ctx, intent.Event.ID)
-	if err := d.bus.deliverToAgentsWithTargets(ctx, intent.Event, liveRecipients, deliveryTargets); err != nil {
+	if len(deliveryRoutes) == 0 {
+		deliveryRoutes = deliveryRoutesFromTargetMap(recipients, "agent", d.bus.deliveryTargetsForEvent(ctx, intent.Event.ID))
+	}
+	if err := d.bus.deliverToRecipientsWithRoutes(ctx, intent.Event, liveRecipients, deliveryRoutes); err != nil {
 		return false, err
 	}
-	d.bus.clearPendingInternalRecipients(intent.Event.ID)
+	d.bus.clearPendingInternalDeliveryRoutes(intent.Event.ID)
 	d.bus.logRuntime(ctx, "debug", "Persisted event intent was delivered", "eventbus", "delivered", intent.Event.ID, string(intent.Event.Type), "", intent.Event.EntityID(), "", nil, map[string]any{
 		"direct":                     true,
 		"delivery_manifest_owner":    "event_deliveries+in_memory_internal",
@@ -197,7 +209,7 @@ func (d engineDispatcher) dispatchExplicitDirectIntent(ctx context.Context, inte
 	if err != nil {
 		return err
 	}
-	if err := d.bus.deliverToAgentsWithTargets(ctx, intent.Event, plan.Recipients, plan.DeliveryTargets); err != nil {
+	if err := d.bus.deliverToRecipientsWithRoutes(ctx, intent.Event, plan.Recipients, plan.DeliveryRoutes); err != nil {
 		return err
 	}
 	detail := map[string]any{
@@ -229,22 +241,50 @@ func replayScopeForEmitIntent(intent runtimeengine.EmitIntent) runtimereplayclai
 	return runtimereplayclaim.CommittedReplayScopeSubscribed
 }
 
-func (eb *EventBus) setPendingInternalRecipients(eventID string, recipients []string) {
+func internalDeliveryRoutesForEventPlan(plan eventDeliveryPlan) []events.DeliveryRoute {
+	internalRecipients := filterOutAgentIDs(plan.Recipients, plan.PersistedRecipients)
+	if len(internalRecipients) == 0 {
+		return nil
+	}
+	known := events.NormalizeDeliveryRoutes(plan.DeliveryRoutes)
+	out := make([]events.DeliveryRoute, 0, len(known))
+	internalSet := make(map[string]struct{}, len(internalRecipients))
+	for _, recipient := range internalRecipients {
+		internalSet[strings.TrimSpace(recipient)] = struct{}{}
+	}
+	for _, route := range known {
+		if _, ok := internalSet[strings.TrimSpace(route.SubscriberID)]; !ok {
+			continue
+		}
+		out = append(out, route)
+	}
+	if len(out) == 0 {
+		for _, recipient := range internalRecipients {
+			out = append(out, events.DeliveryRoute{
+				SubscriberType: "node",
+				SubscriberID:   recipient,
+			})
+		}
+	}
+	return events.NormalizeDeliveryRoutes(out)
+}
+
+func (eb *EventBus) setPendingInternalDeliveryRoutes(eventID string, deliveryRoutes []events.DeliveryRoute) {
 	if eb == nil {
 		return
 	}
 	eventID = strings.TrimSpace(eventID)
-	recipients = uniqueStrings(recipients)
+	deliveryRoutes = events.NormalizeDeliveryRoutes(deliveryRoutes)
 	eb.mu.Lock()
 	defer eb.mu.Unlock()
-	if eventID == "" || len(recipients) == 0 {
+	if eventID == "" || len(deliveryRoutes) == 0 {
 		delete(eb.pendingInternalByID, eventID)
 		return
 	}
-	eb.pendingInternalByID[eventID] = append([]string(nil), recipients...)
+	eb.pendingInternalByID[eventID] = append([]events.DeliveryRoute(nil), deliveryRoutes...)
 }
 
-func (eb *EventBus) pendingInternalRecipients(eventID string) []string {
+func (eb *EventBus) pendingInternalDeliveryRoutes(eventID string) []events.DeliveryRoute {
 	if eb == nil {
 		return nil
 	}
@@ -254,10 +294,10 @@ func (eb *EventBus) pendingInternalRecipients(eventID string) []string {
 	}
 	eb.mu.RLock()
 	defer eb.mu.RUnlock()
-	return append([]string(nil), eb.pendingInternalByID[eventID]...)
+	return append([]events.DeliveryRoute(nil), eb.pendingInternalByID[eventID]...)
 }
 
-func (eb *EventBus) clearPendingInternalRecipients(eventID string) {
+func (eb *EventBus) clearPendingInternalDeliveryRoutes(eventID string) {
 	if eb == nil {
 		return
 	}
