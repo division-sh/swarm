@@ -6042,15 +6042,15 @@ cli_specification:
       - no direct DB/store/runtime/EventBus reads for API-backed output rendering
     cli_logging_policy:
       promoted_by: '#936'
-      implementation_status: authority_promoted_behavior_pending
+      implementation_status: implemented for current shared-output first-slice consumers only
       canonical_owner: docs/specs/swarm-platform/platform/contracts/platform-spec.yaml#cli_specification.foundations.cli_logging_policy
       future_runtime_owner: cmd/swarm shared CLI diagnostic logging policy resolver
       scope: >
         Merge-bearing CLI v2 authority for CLI process diagnostic logging controls. This owner governs
         `--log-level` source disposition, allowed levels, command applicability, stdout/stderr separation, and
         boundaries with successful output rendering, serve boot observability, runtime log filters, and persisted
-        runtime log payloads. This contract is source-of-truth repair only until a later child implements a shared
-        `cmd/swarm` resolver that consumes it.
+        runtime log payloads. Behavior is implemented only for the current shared-output first-slice consumers
+        listed below; all other command rows remain pending or split until a later child consumes this owner.
       accepted_sources:
         flag: --log-level <debug|info|warn|error>
       source_precedence:
@@ -6105,6 +6105,27 @@ cli_specification:
         json: '`--json` controls successful stdout rendering only; diagnostics remain stderr-only.'
         quiet: '`--quiet` controls successful stdout rendering only; diagnostics remain stderr-only and may still be filtered by logging level.'
         no_color: '`--no-color` and `NO_COLOR` are color controls, not logging filters. They do not change diagnostic level selection.'
+      implemented_logging_policy_first_slice:
+        implemented_by: '#944'
+        failure_class: runtime.cli.v2.logging_resolver_for_current_shared_output_consumers
+        owner: cmd/swarm shared CLI diagnostic logging policy resolver
+        status: implemented
+        rule: >
+          These consumers accept `--log-level` through one shared CLI diagnostic logging policy resolver. The
+          resolver accepts only `debug`, `info`, `warn`, and `error`, defaults to `info`, rejects invalid levels
+          with CLI validation exit 2 before local/API/runtime side effects, and does not accept environment or
+          config-file logging sources. This first slice closes resolver parsing, validation, defaulting,
+          applicability, and stdout/stderr separation for the listed consumers only; it does not claim new
+          diagnostic emission content.
+        consumers:
+        - version
+        - verify
+        - health
+        - runs
+        - status
+        - conversations_list
+        - conversation_view
+        - conversation_turn
       split_siblings:
       - '#844 config-file log_level precedence'
       - '#844 universal/repeatable --verbose/-v outside serve boot observability'
@@ -6116,8 +6137,9 @@ cli_specification:
       - persisted runtime `log_level` payloads and runtime/daemon logging configuration
       implementation_boundaries:
       - 'This #936 first slice is source-of-truth repair only: no Cobra flags, config/env parsing, runtime logging, or command behavior change is implied.'
-      - 'Future implementation MUST introduce or consume one shared cmd/swarm diagnostic logging policy resolver before accepting `--log-level` anywhere.'
-      - 'Future implementation MUST prove stdout/stderr separation for JSON, quiet, default text, and diagnostics.'
+      - 'The #944 behavior slice implements only the current shared-output first-slice consumers listed above.'
+      - 'Future implementation MUST consume the shared cmd/swarm diagnostic logging policy resolver before accepting `--log-level` on any additional command row.'
+      - 'Implementation MUST prove stdout/stderr separation for JSON, quiet, default text, and diagnostics.'
       - 'Future implementation MUST keep runtime log filters and serve boot verbosity classified as separate owners unless a later spec PR deliberately changes that boundary.'
     auth_boundary: >
       Runtime-state commands use v1 bearer auth through token sources governed by

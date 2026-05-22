@@ -21,6 +21,7 @@ const (
 type conversationListCommandOptions struct {
 	apiOptions rootCommandOptions
 	output     cliOutputOptions
+	logging    cliLoggingOptions
 
 	agentID string
 	runID   string
@@ -36,11 +37,13 @@ type conversationListCommandOptions struct {
 type conversationViewCommandOptions struct {
 	apiOptions rootCommandOptions
 	output     cliOutputOptions
+	logging    cliLoggingOptions
 }
 
 type conversationTurnCommandOptions struct {
 	apiOptions rootCommandOptions
 	output     cliOutputOptions
+	logging    cliLoggingOptions
 }
 
 type conversationListResult struct {
@@ -169,6 +172,9 @@ func newConversationsListCommand(opts rootCommandOptions) *cobra.Command {
 			listOpts.runIDSet = cmd.Flags().Changed("run-id")
 			listOpts.limitSet = cmd.Flags().Changed("limit")
 			listOpts.cursorSet = cmd.Flags().Changed("cursor")
+			if err := listOpts.logging.validate(); err != nil {
+				return returnCLIValidationError(cmd.ErrOrStderr(), err)
+			}
 			if err := listOpts.output.validate(); err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
@@ -180,6 +186,7 @@ func newConversationsListCommand(opts rootCommandOptions) *cobra.Command {
 	cmd.Flags().IntVar(&listOpts.limit, "limit", 0, "Optional page size, 1-500")
 	cmd.Flags().StringVar(&listOpts.cursor, "cursor", "", "Pagination cursor")
 	bindCLIOutputFlags(cmd, &listOpts.output)
+	bindCLILoggingFlags(cmd, &listOpts.logging)
 	return cmd
 }
 
@@ -190,6 +197,9 @@ func newConversationViewCommand(opts rootCommandOptions) *cobra.Command {
 		Short: "View one conversation through /v1/rpc conversation.get.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := viewOpts.logging.validate(); err != nil {
+				return returnCLIValidationError(cmd.ErrOrStderr(), err)
+			}
 			if err := viewOpts.output.validate(); err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
@@ -197,6 +207,7 @@ func newConversationViewCommand(opts rootCommandOptions) *cobra.Command {
 		},
 	}
 	bindCLIOutputFlags(cmd, &viewOpts.output)
+	bindCLILoggingFlags(cmd, &viewOpts.logging)
 	return cmd
 }
 
@@ -207,6 +218,9 @@ func newConversationTurnCommand(opts rootCommandOptions) *cobra.Command {
 		Short: "View one conversation turn through /v1/rpc conversation.get_turn.",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := turnOpts.logging.validate(); err != nil {
+				return returnCLIValidationError(cmd.ErrOrStderr(), err)
+			}
 			if err := turnOpts.output.validate(); err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
@@ -214,6 +228,7 @@ func newConversationTurnCommand(opts rootCommandOptions) *cobra.Command {
 		},
 	}
 	bindCLIOutputFlags(cmd, &turnOpts.output)
+	bindCLILoggingFlags(cmd, &turnOpts.logging)
 	return cmd
 }
 
