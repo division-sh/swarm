@@ -255,6 +255,16 @@ func TestOpenRPCComplianceMatrixRejectsInvalidProofReferences(t *testing.T) {
 			want: "unknown gap_classification",
 		},
 		{
+			name: "tracked gap missing classification",
+			mutate: func(matrix *openRPCComplianceMatrix) {
+				row := complianceMatrixRow(t, matrix, "agent.get")
+				row.HappyPath.Status = "tracked_gap"
+				row.HappyPath.ProofRefs = nil
+				row.GapClassification = nil
+			},
+			want: "agent.get tracked_gap evidence requires gap_classification",
+		},
+		{
 			name: "unsupported status proof kind",
 			mutate: func(matrix *openRPCComplianceMatrix) {
 				row := complianceMatrixRow(t, matrix, "agent.get")
@@ -454,6 +464,9 @@ func validateProofReferenceIntegrity(root string, matrix openRPCComplianceMatrix
 				problems = append(problems, fmt.Sprintf("%s unknown gap_classification %q", row.Method, gapClass))
 			}
 		}
+		if rowHasTrackedGap(row) && len(row.GapClassification) == 0 {
+			problems = append(problems, fmt.Sprintf("%s tracked_gap evidence requires gap_classification", row.Method))
+		}
 		for _, evidence := range complianceEvidenceFields(row) {
 			problems = append(problems, validateEvidenceProofRefs(root, index, matrix, row.Method, evidence.field, evidence.evidence)...)
 		}
@@ -524,6 +537,15 @@ func complianceEvidenceFields(row openRPCMethodMatrix) []namedComplianceEvidence
 		{field: "examples", evidence: row.Examples},
 		{field: "service_discovery_publication", evidence: row.ServiceDiscoveryPublication},
 	}
+}
+
+func rowHasTrackedGap(row openRPCMethodMatrix) bool {
+	for _, evidence := range complianceEvidenceFields(row) {
+		if strings.TrimSpace(evidence.evidence.Status) == "tracked_gap" {
+			return true
+		}
+	}
+	return false
 }
 
 func validateEvidenceProofRefs(root string, index complianceProofIndex, matrix openRPCComplianceMatrix, methodName, field string, evidence complianceEvidence) []string {
