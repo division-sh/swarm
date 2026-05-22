@@ -5584,9 +5584,16 @@ cli_specification:
           runtime listener wiring, OpenRPC, and `swarm run` behavior remain unchanged until follow-up
           implementation children consume the promoted owner.
       trace_filters_and_subscription_recovery:
-        disposition: tracked_child
+        disposition: promoted_first_slice
         tracker: '#855'
-        action: Promote rich trace filters, follow semantics, and recovery rules before implementation.
+        action: >
+          The bounded snapshot trace filter contract is promoted in
+          api_specification.method_catalog.run.trace and
+          cli_specification.command_catalog.trace.promoted_trace_filter_contract. The promoted API owner accepts
+          `limit`, `cursor`, and `since`; `since` filters by the canonical RunTraceRow materialization watermark
+          used by the run-debug trace owner. Review-artifact `until`, event-name, subscriber, entity-id,
+          delivery-status, `--include-payload`, `-f`, subscription retry/`--no-retry`, and multi-run `--all`
+          remain explicitly unpromoted split tails until later gated children promote their own canonical owners.
       mailbox_decision_sheet_and_result_ux:
         disposition: tracked_child
         tracker: '#856'
@@ -6541,6 +6548,31 @@ cli_specification:
       owners: /v1/rpc run.trace for snapshot; /v1/ws run.subscribe_trace for --follow
       defaulting: If run-id is omitted, resolve the target through run.list with active-run preference.
       behavior: Run trace rendering over API-owned RunTraceRow facts only; no CLI reconstruction from tables.
+      promoted_trace_filter_contract:
+        status: api_owner_promoted_cli_pending
+        snapshot_owner: /v1/rpc run.trace
+        promoted_params:
+        - run_id
+        - limit
+        - cursor
+        - since
+        since_semantics: >
+          `since` is an RFC3339/RFC3339Nano timestamp watermark. The server returns trace rows whose canonical
+          materialization watermark is strictly after `since`, where that watermark is the greatest available
+          timestamp across the joined event, delivery, session, and turn fields owned by RunTraceRow.
+        current_cli_consumer_status: >
+          The current implemented CLI command remains `swarm trace [<run-id>] [--follow]`; CLI flags that consume
+          the promoted snapshot filter contract require a later implementation child and MUST use this API owner.
+        split_tail:
+          until: Not promoted; the current run-debug trace owner has no upper-bound watermark contract.
+          event_name: Not promoted; event-name filtering requires a typed RunTraceFilter owner before CLI use.
+          subscriber: Not promoted; subscriber filtering requires a typed RunTraceFilter owner before CLI use.
+          entity_id: Not promoted; entity filtering requires a typed RunTraceFilter owner before CLI use.
+          delivery_status: Not promoted; delivery-status filtering requires a typed RunTraceFilter owner before CLI use.
+          include_payload: Not promoted; RunTraceRow has no payload field and output/schema ownership is split.
+          shorthand_follow: Not promoted in this source-of-truth repair; `-f` is CLI UX only and must be gated separately.
+          subscription_retry: Not promoted; retry/`--no-retry` affects shared run.subscribe_trace consumers and is split.
+          all_runs: Not promoted; multi-run trace needs a canonical multi-run owner or explicit run.list + run.trace composition contract.
     mailbox_list:
       command: swarm mailbox list
       tier: must_have
@@ -10001,6 +10033,13 @@ api_specification:
         required: false
         schema:
           $ref: '#/components/schemas/Cursor'
+      - name: since
+        required: false
+        description: >
+          Optional RFC3339/RFC3339Nano materialization watermark. Returns rows whose canonical trace
+          materialization watermark is strictly after this timestamp.
+        schema:
+          $ref: '#/components/schemas/Timestamp'
       result:
         name: result
         required: true

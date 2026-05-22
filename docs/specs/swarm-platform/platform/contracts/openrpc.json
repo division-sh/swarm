@@ -4635,6 +4635,14 @@
           "schema": {
             "$ref": "#/components/schemas/Cursor"
           }
+        },
+        {
+          "name": "since",
+          "required": false,
+          "description": "Optional RFC3339/RFC3339Nano materialization watermark. Returns rows whose canonical trace materialization watermark is strictly after this timestamp.\n",
+          "schema": {
+            "$ref": "#/components/schemas/Timestamp"
+          }
         }
       ],
       "result": {

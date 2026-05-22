@@ -66,12 +66,20 @@ func TestOperatorObservabilityHandlersExposePersistedReadMethods(t *testing.T) {
 		}),
 	})
 
-	trace := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"trace","method":"run.trace","params":{"run_id":"run-1","limit":1}}`)
+	trace := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"trace","method":"run.trace","params":{"run_id":"run-1","limit":1,"since":"2023-11-14T22:12:00Z"}}`)
 	if trace.Error != nil {
 		t.Fatalf("run.trace error = %#v", trace.Error)
 	}
 	if rows, _ := asMap(t, trace.Result)["trace"].([]any); len(rows) != 1 {
 		t.Fatalf("run.trace rows = %#v", asMap(t, trace.Result)["trace"])
+	}
+	if observability.lastTrace.Since == nil || observability.lastTrace.Limit != 1 {
+		t.Fatalf("run.trace options = %#v", observability.lastTrace)
+	}
+
+	invalidTraceSince := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"trace-since","method":"run.trace","params":{"run_id":"run-1","since":"not-a-time"}}`)
+	if invalidTraceSince.Error == nil || invalidTraceSince.Error.Code != codeInvalidParams {
+		t.Fatalf("run.trace invalid since error = %#v, want invalid params", invalidTraceSince.Error)
 	}
 
 	list := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"events","method":"event.list","params":{"filter":{"run_id":"run-1","event_name":"scan.requested","has_dead_letter":false},"limit":10}}`)
