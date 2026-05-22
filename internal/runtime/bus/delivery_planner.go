@@ -53,6 +53,7 @@ type deliveryRecipientManifest struct {
 	Recipients          []string
 	PersistedRecipients []string
 	DeliveryTargets     map[string]events.RouteIdentity
+	DeliveryRoutes      []events.DeliveryRoute
 	TargetFailure       runtimepinrouting.TargetFailure
 }
 
@@ -70,6 +71,7 @@ func (p deliveryRecipientPolicy) Evaluate(ctx context.Context, evt events.Event,
 			Recipients:          deliveryRecipientIDs(recipients),
 			PersistedRecipients: persistedDeliveryRecipientIDs(recipients),
 			DeliveryTargets:     deliveryTargetsForManifest(evt, persistedDeliveryRecipientIDs(recipients), nil),
+			DeliveryRoutes:      agentDeliveryRoutesForRecipients(persistedDeliveryRecipientIDs(recipients), deliveryTargetsForManifest(evt, persistedDeliveryRecipientIDs(recipients), nil)),
 		}, nil
 	}
 	return filterDeliveryRecipientCandidates(evt, recipients, descriptors), nil
@@ -100,6 +102,9 @@ func (p deliveryPlanner) Plan(ctx context.Context, evt events.Event) (eventDeliv
 	plan.Recipients = manifest.Recipients
 	plan.PersistedRecipients = manifest.PersistedRecipients
 	plan.DeliveryTargets = manifest.DeliveryTargets
+	plan.DeliveryRoutes = append([]events.DeliveryRoute(nil), manifest.DeliveryRoutes...)
+	plan.DeliveryRoutes = append(plan.DeliveryRoutes, internalDeliveryRoutesForPlan(evt, plan.Recipients, plan.PersistedRecipients, routing.RoutedRecipients)...)
+	plan.DeliveryRoutes = events.NormalizeDeliveryRoutes(plan.DeliveryRoutes)
 	plan.TargetFailure = manifest.TargetFailure
 	if plan.TargetFailure != "" && hasInternalRoutedSubscriberForTarget(evt, routing.RoutedRecipients) {
 		plan.TargetFailure = ""
@@ -126,6 +131,7 @@ func (p deliveryPlanner) PlanDirect(ctx context.Context, evt events.Event, recip
 	plan.Recipients = manifest.Recipients
 	plan.PersistedRecipients = manifest.PersistedRecipients
 	plan.DeliveryTargets = manifest.DeliveryTargets
+	plan.DeliveryRoutes = append([]events.DeliveryRoute(nil), manifest.DeliveryRoutes...)
 	plan.TargetFailure = manifest.TargetFailure
 	plan.ExtraDetail = map[string]any{
 		"direct":                     true,
@@ -267,6 +273,7 @@ func filterDeliveryRecipientCandidates(evt events.Event, recipients []deliveryRe
 	allowed := make([]string, 0, len(recipients))
 	persisted := make([]string, 0, len(recipients))
 	deliveryTargets := map[string]events.RouteIdentity{}
+	deliveryRoutes := make([]events.DeliveryRoute, 0, len(recipients))
 	for _, recipient := range recipients {
 		if !recipient.PersistAsDelivery {
 			allowed = append(allowed, recipient.ID)
@@ -292,16 +299,102 @@ func filterDeliveryRecipientCandidates(evt events.Event, recipients []deliveryRe
 		if !target.Empty() {
 			deliveryTargets[recipient.ID] = target
 		}
+		deliveryRoutes = append(deliveryRoutes, events.DeliveryRoute{
+			SubscriberType: "agent",
+			SubscriberID:   recipient.ID,
+			Target:         target,
+		})
 	}
+	persisted = uniqueStrings(persisted)
 	manifest := deliveryRecipientManifest{
 		Recipients:          uniqueStrings(allowed),
-		PersistedRecipients: uniqueStrings(persisted),
-		DeliveryTargets:     deliveryTargetsForManifest(evt, uniqueStrings(persisted), deliveryTargets),
+		PersistedRecipients: persisted,
+		DeliveryTargets:     deliveryTargetsForManifest(evt, persisted, deliveryTargets),
+		DeliveryRoutes:      events.NormalizeDeliveryRoutes(deliveryRoutes),
 	}
 	if len(targets) > 0 && len(manifest.Recipients) == 0 {
 		manifest.TargetFailure = targetDeliveryFailure(evt, descriptors)
 	}
 	return manifest
+}
+
+func agentDeliveryRoutesForRecipients(recipients []string, deliveryTargets map[string]events.RouteIdentity) []events.DeliveryRoute {
+	recipients = uniqueStrings(recipients)
+	if len(recipients) == 0 {
+		return nil
+	}
+	out := make([]events.DeliveryRoute, 0, len(recipients))
+	for _, recipient := range recipients {
+		out = append(out, events.DeliveryRoute{
+			SubscriberType: "agent",
+			SubscriberID:   recipient,
+			Target:         deliveryTargets[strings.TrimSpace(recipient)],
+		})
+	}
+	return events.NormalizeDeliveryRoutes(out)
+}
+
+func internalDeliveryRoutesForPlan(evt events.Event, recipients, persisted []string, routed []Subscriber) []events.DeliveryRoute {
+	internalRecipients := filterOutAgentIDs(recipients, persisted)
+	if len(internalRecipients) == 0 {
+		return nil
+	}
+	targets := matchedInternalDeliveryTargets(evt, routed)
+	if len(targets) == 0 {
+		return nil
+	}
+	out := make([]events.DeliveryRoute, 0, len(internalRecipients)*len(targets))
+	for _, recipient := range internalRecipients {
+		for _, target := range targets {
+			out = append(out, events.DeliveryRoute{
+				SubscriberType: "node",
+				SubscriberID:   recipient,
+				Target:         target,
+			})
+		}
+	}
+	return events.NormalizeDeliveryRoutes(out)
+}
+
+func matchedInternalDeliveryTargets(evt events.Event, subscribers []Subscriber) []events.RouteIdentity {
+	targets := eventDeliveryTargetRoutes(evt)
+	if len(targets) == 0 {
+		return nil
+	}
+	out := make([]events.RouteIdentity, 0, len(targets))
+	for _, target := range targets {
+		for _, subscriber := range subscribers {
+			if strings.TrimSpace(subscriber.ID) == "" || strings.TrimSpace(subscriber.Type) == "agent" {
+				continue
+			}
+			if routeMatchesInternalSubscriber(target, subscriber) {
+				out = append(out, target.Normalized())
+				break
+			}
+		}
+	}
+	return uniqueRouteIdentities(out)
+}
+
+func uniqueRouteIdentities(in []events.RouteIdentity) []events.RouteIdentity {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]events.RouteIdentity, 0, len(in))
+	seen := map[string]struct{}{}
+	for _, route := range in {
+		route = route.Normalized()
+		if route.Empty() {
+			continue
+		}
+		key := strings.Join([]string{route.FlowID, route.FlowInstance, route.EntityID}, "\x00")
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, route)
+	}
+	return out
 }
 
 func hasInternalRoutedSubscriberForTarget(evt events.Event, subscribers []Subscriber) bool {

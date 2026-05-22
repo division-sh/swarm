@@ -1,0 +1,159 @@
+package bus
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"swarm/internal/events"
+	"swarm/internal/runtime/replayclaim"
+)
+
+type targetRouteMemoryStore struct {
+	events map[string]events.Event
+	routes map[string][]events.DeliveryRoute
+	scopes map[string]replayclaim.CommittedReplayScope
+}
+
+func newTargetRouteMemoryStore() *targetRouteMemoryStore {
+	return &targetRouteMemoryStore{
+		events: map[string]events.Event{},
+		routes: map[string][]events.DeliveryRoute{},
+		scopes: map[string]replayclaim.CommittedReplayScope{},
+	}
+}
+
+func (s *targetRouteMemoryStore) AppendEvent(_ context.Context, evt events.Event) error {
+	s.events[evt.ID] = evt
+	return nil
+}
+
+func (s *targetRouteMemoryStore) InsertEventDeliveries(_ context.Context, _ string, _ []string) error {
+	return nil
+}
+
+func (s *targetRouteMemoryStore) ListEventDeliveryRecipients(_ context.Context, eventID string) ([]string, error) {
+	var out []string
+	for _, route := range s.routes[eventID] {
+		if route.SubscriberType == "agent" {
+			out = append(out, route.SubscriberID)
+		}
+	}
+	return uniqueStrings(out), nil
+}
+
+func (s *targetRouteMemoryStore) SupportsPersistedReplay() bool { return true }
+
+func (s *targetRouteMemoryStore) PersistEventWithDeliveryRouteSetAndScope(_ context.Context, evt events.Event, deliveryRoutes []events.DeliveryRoute, scope replayclaim.CommittedReplayScope) error {
+	s.events[evt.ID] = evt
+	s.routes[evt.ID] = events.NormalizeDeliveryRoutes(deliveryRoutes)
+	s.scopes[evt.ID] = scope
+	return nil
+}
+
+func (s *targetRouteMemoryStore) ListEventDeliveryRoutes(_ context.Context, eventID string) ([]events.DeliveryRoute, error) {
+	return append([]events.DeliveryRoute(nil), s.routes[eventID]...), nil
+}
+
+func (s *targetRouteMemoryStore) LoadCommittedReplayScope(_ context.Context, eventID string) (replayclaim.CommittedReplayScope, error) {
+	scope := s.scopes[eventID]
+	if scope == "" {
+		return "", replayclaim.ErrMissingCommittedReplayScope
+	}
+	return scope, nil
+}
+
+func TestEventBusPublish_TargetSetInternalDeliveryUsesPerTargetRoutes(t *testing.T) {
+	store := newTargetRouteMemoryStore()
+	eb, err := NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	eb.deliveryPlanner = newDeliveryPlanner(
+		deliveryRouteResolver{
+			resolveRoutedSubscribers: func(string) []Subscriber {
+				return []Subscriber{
+					{ID: "child-a-listener", Type: "node", Path: "child-a/inst-1"},
+					{ID: "child-b-listener", Type: "node", Path: "child-b/inst-1"},
+				}
+			},
+			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
+				return []deliveryRecipientCandidate{{ID: "workflow-runtime", PersistAsDelivery: false}}
+			},
+			describeSubscribersForEvent: func(string, []Subscriber) []PublishDiagnosticRecipient {
+				return nil
+			},
+		},
+		deliveryRecipientPolicy{
+			loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
+				return map[string]ActiveAgentDescriptor{}, true, nil
+			},
+		},
+	)
+
+	ch := eb.SubscribeInternal("workflow-runtime", events.EventType("child/output.done"))
+	evt := (events.Event{
+		ID:        uuid.NewString(),
+		Type:      events.EventType("child/output.done"),
+		Payload:   []byte(`{}`),
+		CreatedAt: time.Now().UTC(),
+	}).WithTargetSet([]events.RouteIdentity{
+		{FlowInstance: "child-a/inst-1", EntityID: "ent-a"},
+		{FlowInstance: "child-b/inst-1", EntityID: "ent-b"},
+	})
+
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	assertTargetRouteDeliveries(t, ch, "ent-a", "ent-b")
+
+	persisted := store.events[evt.ID]
+	if got := persisted.EntityID(); got != "" {
+		t.Fatalf("persisted EntityID() = %q, want empty target_set projection", got)
+	}
+	if got := persisted.FlowInstance(); got != "" {
+		t.Fatalf("persisted FlowInstance() = %q, want empty target_set projection", got)
+	}
+	if got := store.routes[evt.ID]; len(got) != 2 {
+		t.Fatalf("persisted delivery routes = %#v, want 2", got)
+	}
+	for _, route := range store.routes[evt.ID] {
+		if route.SubscriberType != "node" || route.SubscriberID != "workflow-runtime" {
+			t.Fatalf("delivery route = %#v, want node/workflow-runtime", route)
+		}
+		if route.Target.Empty() {
+			t.Fatalf("delivery route target is empty: %#v", route)
+		}
+	}
+
+	if err := eb.PublishPersistedRecipients(context.Background(), evt, nil); err != nil {
+		t.Fatalf("PublishPersistedRecipients: %v", err)
+	}
+	assertTargetRouteDeliveries(t, ch, "ent-a", "ent-b")
+}
+
+func assertTargetRouteDeliveries(t *testing.T, ch <-chan events.Event, wantEntityIDs ...string) {
+	t.Helper()
+	seen := map[string]struct{}{}
+	for range wantEntityIDs {
+		select {
+		case got := <-ch:
+			if len(got.TargetRoutes()) != 0 {
+				t.Fatalf("delivered event target_set = %#v, want singular delivery target", got.TargetRoutes())
+			}
+			target := got.TargetRoute()
+			if target.Empty() {
+				t.Fatalf("delivered target route is empty: %#v", got)
+			}
+			seen[target.EntityID] = struct{}{}
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for target route delivery; saw %#v", seen)
+		}
+	}
+	for _, want := range wantEntityIDs {
+		if _, ok := seen[want]; !ok {
+			t.Fatalf("missing target delivery for %q; saw %#v", want, seen)
+		}
+	}
+}

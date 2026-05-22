@@ -312,8 +312,8 @@ func (eb *EventBus) PublishTx(ctx context.Context, tx *sql.Tx, evt events.Event)
 		return err
 	}
 	eb.recordPublishDiagnostic(txctx, evt, inboundPlan)
-	if len(inboundPlan.PersistedRecipients) > 0 {
-		if err := eb.insertEventDeliveriesTx(txctx, txStore, tx, evt.ID, inboundPlan.PersistedRecipients, inboundPlan.DeliveryTargets); err != nil {
+	if len(inboundPlan.PersistedRecipients) > 0 || len(inboundPlan.DeliveryRoutes) > 0 {
+		if err := eb.insertEventDeliveriesTx(txctx, txStore, tx, evt.ID, inboundPlan.PersistedRecipients, inboundPlan.DeliveryTargets, inboundPlan.DeliveryRoutes); err != nil {
 			return fmt.Errorf("persist event deliveries: %w", err)
 		}
 	}
@@ -431,8 +431,8 @@ func (eb *EventBus) publishTransactional(
 		return err
 	}
 	eb.recordPublishDiagnostic(txctx, evt, inboundPlan)
-	if len(inboundPlan.PersistedRecipients) > 0 {
-		if err := eb.insertEventDeliveriesTx(txctx, txStore, tx, evt.ID, inboundPlan.PersistedRecipients, inboundPlan.DeliveryTargets); err != nil {
+	if len(inboundPlan.PersistedRecipients) > 0 || len(inboundPlan.DeliveryRoutes) > 0 {
+		if err := eb.insertEventDeliveriesTx(txctx, txStore, tx, evt.ID, inboundPlan.PersistedRecipients, inboundPlan.DeliveryTargets, inboundPlan.DeliveryRoutes); err != nil {
 			return fmt.Errorf("persist event deliveries: %w", err)
 		}
 	}
@@ -487,7 +487,7 @@ func (eb *EventBus) publishTransactional(
 	if passthrough {
 		if len(inboundPlan.Recipients) > 0 {
 			eb.logQueuedDeliveries(ctx, evt, inboundPlan.PersistedRecipients, "matched_agent_subscription", inboundPlan.ExtraDetail)
-			if err := eb.deliverToAgentsWithTargets(ctx, evt, inboundPlan.Recipients, inboundPlan.DeliveryTargets); err != nil {
+			if err := eb.deliverToRecipientsWithRoutes(ctx, evt, inboundPlan.Recipients, inboundPlan.DeliveryRoutes); err != nil {
 				return err
 			}
 			eb.logDelivery(ctx, evt, inboundPlan.Recipients, inboundPlan.ExtraDetail)
@@ -697,7 +697,7 @@ func (eb *EventBus) authorizePublishRecipientPlan(ctx context.Context, evt event
 }
 
 func (eb *EventBus) persistSubscribedPublishPlan(ctx context.Context, evt events.Event, plan eventDeliveryPlan) error {
-	if err := eb.persistEventRecord(ctx, evt, plan.PersistedRecipients, plan.DeliveryTargets, runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
+	if err := eb.persistEventRecord(ctx, evt, plan.PersistedRecipients, plan.DeliveryTargets, plan.DeliveryRoutes, runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
 		return err
 	}
 	eb.logQueuedDeliveries(ctx, evt, plan.PersistedRecipients, "matched_agent_subscription", plan.ExtraDetail)
@@ -712,7 +712,7 @@ func (eb *EventBus) deliverSubscribedPublishPlan(ctx context.Context, evt events
 		return true, nil
 	}
 	if len(plan.Recipients) > 0 {
-		if err := eb.deliverToAgentsWithTargets(ctx, evt, plan.Recipients, plan.DeliveryTargets); err != nil {
+		if err := eb.deliverToRecipientsWithRoutes(ctx, evt, plan.Recipients, plan.DeliveryRoutes); err != nil {
 			return false, err
 		}
 		eb.logDelivery(ctx, evt, plan.Recipients, plan.ExtraDetail)
@@ -733,9 +733,17 @@ func (eb *EventBus) persistEventRecord(
 	evt events.Event,
 	recipients []string,
 	deliveryTargets map[string]events.RouteIdentity,
+	deliveryRoutes []events.DeliveryRoute,
 	scope runtimereplayclaim.CommittedReplayScope,
 ) error {
 	recipients = uniqueStrings(recipients)
+	deliveryRoutes = events.NormalizeDeliveryRoutes(deliveryRoutes)
+	if atomicStore, ok := eb.store.(AtomicEventDeliveryRouteSetPersistence); ok && len(deliveryRoutes) > 0 {
+		if err := atomicStore.PersistEventWithDeliveryRouteSetAndScope(ctx, evt, deliveryRoutes, scope); err != nil {
+			return fmt.Errorf("persist event transaction: %w", err)
+		}
+		return nil
+	}
 	if atomicStore, ok := eb.store.(AtomicEventRoutePersistence); ok {
 		if err := atomicStore.PersistEventWithDeliveryRoutesAndScope(ctx, evt, recipients, deliveryTargets, scope); err != nil {
 			return fmt.Errorf("persist event transaction: %w", err)
@@ -766,8 +774,8 @@ func (eb *EventBus) persistEventRecord(
 	if err := eb.store.AppendEvent(ctx, evt); err != nil {
 		return fmt.Errorf("persist event: %w", err)
 	}
-	if len(recipients) > 0 {
-		if err := eb.insertEventDeliveries(ctx, evt.ID, recipients, deliveryTargets); err != nil {
+	if len(recipients) > 0 || len(deliveryRoutes) > 0 {
+		if err := eb.insertEventDeliveries(ctx, evt.ID, recipients, deliveryTargets, deliveryRoutes); err != nil {
 			return fmt.Errorf("persist event deliveries: %w", err)
 		}
 	}
@@ -783,7 +791,11 @@ func (eb *EventBus) persistEventRecord(
 	return nil
 }
 
-func (eb *EventBus) insertEventDeliveries(ctx context.Context, eventID string, recipients []string, deliveryTargets map[string]events.RouteIdentity) error {
+func (eb *EventBus) insertEventDeliveries(ctx context.Context, eventID string, recipients []string, deliveryTargets map[string]events.RouteIdentity, deliveryRoutes []events.DeliveryRoute) error {
+	deliveryRoutes = events.NormalizeDeliveryRoutes(deliveryRoutes)
+	if store, ok := eb.store.(EventDeliveryRouteSetPersistence); ok && store != nil && len(deliveryRoutes) > 0 {
+		return store.InsertEventDeliveryRoutes(ctx, eventID, deliveryRoutes)
+	}
 	if store, ok := eb.store.(EventDeliveryRoutePersistence); ok && store != nil {
 		return store.InsertEventDeliveriesWithTargets(ctx, eventID, recipients, deliveryTargets)
 	}
@@ -797,7 +809,12 @@ func (eb *EventBus) insertEventDeliveriesTx(
 	eventID string,
 	recipients []string,
 	deliveryTargets map[string]events.RouteIdentity,
+	deliveryRoutes []events.DeliveryRoute,
 ) error {
+	deliveryRoutes = events.NormalizeDeliveryRoutes(deliveryRoutes)
+	if store, ok := txStore.(TransactionalEventDeliveryRouteSetPersistence); ok && store != nil && len(deliveryRoutes) > 0 {
+		return store.InsertEventDeliveryRoutesTx(ctx, tx, eventID, deliveryRoutes)
+	}
 	if store, ok := txStore.(TransactionalEventDeliveryRoutePersistence); ok && store != nil {
 		return store.InsertEventDeliveriesWithTargetsTx(ctx, tx, eventID, recipients, deliveryTargets)
 	}
@@ -1000,7 +1017,7 @@ func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipie
 	if err != nil {
 		return err
 	}
-	if err := eb.persistEventRecord(ctx, evt, plan.PersistedRecipients, plan.DeliveryTargets, runtimereplayclaim.CommittedReplayScopeDirect); err != nil {
+	if err := eb.persistEventRecord(ctx, evt, plan.PersistedRecipients, plan.DeliveryTargets, plan.DeliveryRoutes, runtimereplayclaim.CommittedReplayScopeDirect); err != nil {
 		return err
 	}
 	persisted = true
@@ -1018,7 +1035,7 @@ func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipie
 		eb.logDispatchQueued(ctx, reason, evt, len(plan.Recipients), true, false)
 		return nil
 	}
-	if err := eb.deliverToAgentsWithTargets(ctx, evt, plan.Recipients, plan.DeliveryTargets); err != nil {
+	if err := eb.deliverToRecipientsWithRoutes(ctx, evt, plan.Recipients, plan.DeliveryRoutes); err != nil {
 		return err
 	}
 	detail := map[string]any{
@@ -1128,13 +1145,12 @@ func (eb *EventBus) publishPersistedRecipients(ctx context.Context, evt events.E
 		runtimepipeline.FlushPipelinePostCommitActions(postCommitActions)
 		runtimepipeline.FlushDeferredPipelineTransitions(ctx, deferredTransitions)
 	}
-	liveRecipients, internalRecipients, err := eb.replayRecipientsForCommittedEvent(ctx, evt, recipients, scope)
+	liveRecipients, internalRecipients, deliveryRoutes, err := eb.replayRecipientsForCommittedEvent(ctx, evt, recipients, scope)
 	if err != nil {
 		return err
 	}
-	deliveryTargets := eb.deliveryTargetsForEvent(ctx, evt.ID)
 	if passthrough && len(liveRecipients) > 0 {
-		if err := eb.deliverToAgentsWithTargets(ctx, evt, liveRecipients, deliveryTargets); err != nil {
+		if err := eb.deliverToRecipientsWithRoutes(ctx, evt, liveRecipients, deliveryRoutes); err != nil {
 			return err
 		}
 	}
@@ -1174,6 +1190,25 @@ func (eb *EventBus) deliveryTargetsForEvent(ctx context.Context, eventID string)
 		return nil
 	}
 	return targets
+}
+
+func (eb *EventBus) deliveryRoutesForEvent(ctx context.Context, eventID string) []events.DeliveryRoute {
+	reader, ok := eb.store.(EventDeliveryRouteSetReader)
+	if ok && reader != nil {
+		routes, err := reader.ListEventDeliveryRoutes(ctx, eventID)
+		if err == nil && len(routes) > 0 {
+			return events.NormalizeDeliveryRoutes(routes)
+		}
+	}
+	targets := eb.deliveryTargetsForEvent(ctx, eventID)
+	if len(targets) == 0 {
+		return nil
+	}
+	recipients := make([]string, 0, len(targets))
+	for recipient := range targets {
+		recipients = append(recipients, recipient)
+	}
+	return deliveryRoutesFromTargetMap(recipients, "agent", targets)
 }
 
 func (eb *EventBus) recordTargetDeliveryFailure(ctx context.Context, evt events.Event, plan eventDeliveryPlan) {

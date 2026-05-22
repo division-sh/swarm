@@ -139,6 +139,28 @@ func (s *PostgresStore) PersistEventWithDeliveryRoutesAndScope(
 	return nil
 }
 
+func (s *PostgresStore) PersistEventWithDeliveryRouteSetAndScope(
+	ctx context.Context,
+	evt events.Event,
+	deliveryRoutes []events.DeliveryRoute,
+	scope runtimereplayclaim.CommittedReplayScope,
+) error {
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return err
+	}
+	evt = s.enrichEventCorrelation(ctx, caps, chooseRowQueryer(s.DB, nil), evt)
+	switch {
+	case caps.Events.Log == SchemaFlavorCanonical && caps.Events.Deliveries == SchemaFlavorCanonical:
+		return s.persistEventWithDeliveryRouteSetAndScopeSpec(ctx, caps, evt, deliveryRoutes, scope)
+	case caps.Events.Log != SchemaFlavorCanonical:
+		return unsupportedSchemaCapability("events", caps.Events.Log)
+	case caps.Events.Deliveries != SchemaFlavorCanonical:
+		return unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
+	}
+	return nil
+}
+
 func (s *PostgresStore) enrichEventCorrelation(ctx context.Context, caps StoreSchemaCapabilities, q rowQueryer, evt events.Event) events.Event {
 	if strings.TrimSpace(evt.RunID) == "" {
 		if lineage, ok := runtimecorrelation.RuntimeLineageFromContext(ctx); ok {
@@ -476,6 +498,52 @@ func (s *PostgresStore) ListEventDeliveryTargets(ctx context.Context, eventID st
 	return out, nil
 }
 
+func (s *PostgresStore) ListEventDeliveryRoutes(ctx context.Context, eventID string) ([]events.DeliveryRoute, error) {
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return nil, err
+	}
+	eventID = strings.TrimSpace(eventID)
+	if eventID == "" {
+		return nil, nil
+	}
+	if caps.Events.Deliveries != SchemaFlavorCanonical {
+		return nil, unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
+	}
+	routeSelect := `'{}'::jsonb`
+	if caps.Events.DeliveryTargetRoute {
+		routeSelect = `COALESCE(delivery_target_route, '{}'::jsonb)`
+	}
+	rows, err := s.DB.QueryContext(ctx, fmt.Sprintf(`
+		SELECT subscriber_type, subscriber_id, %s
+		FROM event_deliveries
+		WHERE event_id = $1::uuid
+		  AND NOT (subscriber_type = $2 AND subscriber_id = $3)
+		ORDER BY created_at ASC, delivery_id ASC
+	`, routeSelect), eventID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID)
+	if err != nil {
+		return nil, fmt.Errorf("list event delivery routes: %w", err)
+	}
+	defer rows.Close()
+	out := make([]events.DeliveryRoute, 0, 8)
+	for rows.Next() {
+		var subscriberType, subscriberID string
+		var raw json.RawMessage
+		if err := rows.Scan(&subscriberType, &subscriberID, &raw); err != nil {
+			return nil, fmt.Errorf("scan event delivery route: %w", err)
+		}
+		out = append(out, events.DeliveryRoute{
+			SubscriberType: subscriberType,
+			SubscriberID:   subscriberID,
+			Target:         decodeRouteIdentityJSON(raw),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read event delivery routes: %w", err)
+	}
+	return events.NormalizeDeliveryRoutes(out), nil
+}
+
 func (s *PostgresStore) LoadCommittedReplayScope(
 	ctx context.Context,
 	eventID string,
@@ -692,6 +760,35 @@ func (s *PostgresStore) persistEventWithDeliveryRoutesAndScopeSpec(
 	})
 }
 
+func (s *PostgresStore) persistEventWithDeliveryRouteSetAndScopeSpec(
+	ctx context.Context,
+	caps StoreSchemaCapabilities,
+	evt events.Event,
+	deliveryRoutes []events.DeliveryRoute,
+	scope runtimereplayclaim.CommittedReplayScope,
+) error {
+	return withEventStoreRetry(ctx, nil, func() error {
+		tx, err := s.DB.BeginTx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("begin event tx: %w", err)
+		}
+		defer func() { _ = tx.Rollback() }()
+		if err := s.appendEventSpec(ctx, caps, tx, evt); err != nil {
+			return err
+		}
+		if err := s.insertEventDeliveryRoutesSpec(ctx, caps, tx, evt.ID, deliveryRoutes); err != nil {
+			return err
+		}
+		if err := s.upsertCommittedReplayScopeSpec(ctx, caps, tx, evt.ID, scope); err != nil {
+			return err
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit event tx: %w", err)
+		}
+		return nil
+	})
+}
+
 func withEventStoreRetry(ctx context.Context, tx *sql.Tx, fn func() error) error {
 	if fn == nil {
 		return nil
@@ -754,6 +851,92 @@ func (s *PostgresStore) InsertEventDeliveriesWithTargetsTx(ctx context.Context, 
 		return s.insertEventDeliveriesWithTargetsSpec(ctx, caps, tx, eventID, agentIDs, deliveryTargets)
 	default:
 		return unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
+	}
+}
+
+func (s *PostgresStore) InsertEventDeliveryRoutes(ctx context.Context, eventID string, deliveryRoutes []events.DeliveryRoute) error {
+	return s.InsertEventDeliveryRoutesTx(ctx, nil, eventID, deliveryRoutes)
+}
+
+func (s *PostgresStore) InsertEventDeliveryRoutesTx(ctx context.Context, tx *sql.Tx, eventID string, deliveryRoutes []events.DeliveryRoute) error {
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return err
+	}
+	switch caps.Events.Deliveries {
+	case SchemaFlavorCanonical:
+		return s.insertEventDeliveryRoutesSpec(ctx, caps, tx, eventID, deliveryRoutes)
+	default:
+		return unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
+	}
+}
+
+func (s *PostgresStore) insertEventDeliveryRoutesSpec(ctx context.Context, caps StoreSchemaCapabilities, tx *sql.Tx, eventID string, deliveryRoutes []events.DeliveryRoute) error {
+	deliveryRoutes = events.NormalizeDeliveryRoutes(deliveryRoutes)
+	if len(deliveryRoutes) == 0 {
+		return nil
+	}
+	execFn := s.DB.ExecContext
+	if tx != nil {
+		execFn = tx.ExecContext
+	}
+	withTarget := caps.Events.DeliveryTargetRoute
+	q := `
+		INSERT INTO event_deliveries (event_id, subscriber_type, subscriber_id, reason_code, created_at)
+		VALUES ($1::uuid, $2, $3, $4, now())
+		ON CONFLICT DO NOTHING
+	`
+	if withTarget {
+		q = `
+			INSERT INTO event_deliveries (event_id, subscriber_type, subscriber_id, reason_code, delivery_target_route, created_at)
+			VALUES ($1::uuid, $2, $3, $4, $5::jsonb, now())
+			ON CONFLICT DO NOTHING
+		`
+	}
+	if caps.Events.DeliveryRunID {
+		q = `
+			INSERT INTO event_deliveries (run_id, event_id, subscriber_type, subscriber_id, reason_code, created_at)
+			SELECT e.run_id, e.event_id, $2, $3, $4, now()
+			FROM events e
+			WHERE e.event_id = $1::uuid
+			ON CONFLICT DO NOTHING
+		`
+		if withTarget {
+			q = `
+				INSERT INTO event_deliveries (run_id, event_id, subscriber_type, subscriber_id, reason_code, delivery_target_route, created_at)
+				SELECT e.run_id, e.event_id, $2, $3, $4, $5::jsonb, now()
+				FROM events e
+				WHERE e.event_id = $1::uuid
+				ON CONFLICT DO NOTHING
+			`
+		}
+	}
+	for _, route := range deliveryRoutes {
+		route = route.Normalized()
+		if route.SubscriberType == "" || route.SubscriberID == "" {
+			continue
+		}
+		args := []any{eventID, route.SubscriberType, route.SubscriberID, deliveryRouteReasonCode(route)}
+		if withTarget {
+			args = append(args, string(routeIdentityJSON(route.Target)))
+		} else if !route.Target.Empty() {
+			return fmt.Errorf("event_deliveries.delivery_target_route required for target-routed delivery")
+		}
+		if _, err := execFn(ctx, q, args...); err != nil {
+			return fmt.Errorf("insert event delivery (%s=%s): %w", route.SubscriberType, route.SubscriberID, err)
+		}
+	}
+	return nil
+}
+
+func deliveryRouteReasonCode(route events.DeliveryRoute) string {
+	switch strings.TrimSpace(route.SubscriberType) {
+	case "agent":
+		return "matched_agent_subscription"
+	case "node":
+		return "matched_node_subscription"
+	default:
+		return "matched_subscription"
 	}
 }
 

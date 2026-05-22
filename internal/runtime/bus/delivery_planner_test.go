@@ -266,6 +266,57 @@ func TestDeliveryPlanner_PreservesTargetFailureWhenRoutedNodeDoesNotMatchTarget(
 	}
 }
 
+func TestDeliveryPlanner_ExpandsTargetSetForInternalWorkflowRecipient(t *testing.T) {
+	planner := newDeliveryPlanner(
+		deliveryRouteResolver{
+			resolveRoutedSubscribers: func(string) []Subscriber {
+				return []Subscriber{
+					{ID: "child-a-listener", Type: "node", Path: "child-a/inst-1"},
+					{ID: "child-b-listener", Type: "node", Path: "child-b/inst-1"},
+				}
+			},
+			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
+				return []deliveryRecipientCandidate{{ID: "workflow-runtime", PersistAsDelivery: false}}
+			},
+			describeSubscribersForEvent: func(string, []Subscriber) []PublishDiagnosticRecipient {
+				return nil
+			},
+		},
+		deliveryRecipientPolicy{
+			loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
+				return map[string]ActiveAgentDescriptor{}, true, nil
+			},
+		},
+	)
+
+	plan, err := planner.Plan(context.Background(), (events.Event{
+		Type: "child/output.done",
+	}).WithTargetSet([]events.RouteIdentity{
+		{FlowInstance: "child-a/inst-1", EntityID: "ent-a"},
+		{FlowInstance: "child-b/inst-1", EntityID: "ent-b"},
+	}))
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if plan.TargetFailure != "" {
+		t.Fatalf("target failure = %q, want none for target-routed workflow nodes", plan.TargetFailure)
+	}
+	if got := plan.Recipients; len(got) != 1 || got[0] != "workflow-runtime" {
+		t.Fatalf("recipients = %#v, want [workflow-runtime]", got)
+	}
+	if got := plan.DeliveryRoutes; len(got) != 2 {
+		t.Fatalf("delivery routes = %#v, want 2 target routes", got)
+	}
+	for _, route := range plan.DeliveryRoutes {
+		if route.SubscriberType != "node" || route.SubscriberID != "workflow-runtime" {
+			t.Fatalf("delivery route = %#v, want node/workflow-runtime", route)
+		}
+		if route.Target.Empty() {
+			t.Fatalf("delivery route target is empty: %#v", route)
+		}
+	}
+}
+
 func TestDeliveryPlanner_FailsClosedOnPolicyError(t *testing.T) {
 	planner := newDeliveryPlanner(
 		deliveryRouteResolver{
