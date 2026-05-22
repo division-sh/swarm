@@ -86,14 +86,16 @@ type mailboxListCommandOptions struct {
 }
 
 type mailboxDecisionCommandOptions struct {
-	apiOptions          rootCommandOptions
-	action              string
-	method              string
-	reason              string
-	until               string
-	idempotencyKey      string
-	decisionPayloadJSON string
-	decisionPayloadFile string
+	apiOptions             rootCommandOptions
+	action                 string
+	method                 string
+	reason                 string
+	until                  string
+	idempotencyKey         string
+	decisionPayloadJSON    string
+	decisionPayloadJSONSet bool
+	decisionPayloadFile    string
+	decisionPayloadFileSet bool
 }
 
 func newControlCommand(opts rootCommandOptions) *cobra.Command {
@@ -208,7 +210,10 @@ func newMailboxApproveCommand(opts rootCommandOptions) *cobra.Command {
 		Short: "Approve a pending mailbox item through v1 RPC.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMailboxDecisionCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), actionOpts, args[0])
+			runOpts := actionOpts
+			runOpts.decisionPayloadFileSet = cmd.Flags().Changed("decision-payload")
+			runOpts.decisionPayloadJSONSet = cmd.Flags().Changed("decision-payload-json")
+			return runMailboxDecisionCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), runOpts, args[0])
 		},
 	}
 	cmd.Flags().StringVar(&actionOpts.idempotencyKey, "idempotency-key", "", "Optional v1 API idempotency key")
@@ -525,7 +530,7 @@ func (o mailboxDecisionCommandOptions) params(mailboxID string) (map[string]any,
 	}
 	switch o.action {
 	case "approve":
-		payload, ok, err := parseOptionalDecisionPayload(o.decisionPayloadJSON, o.decisionPayloadFile)
+		payload, ok, err := parseOptionalDecisionPayload(o.decisionPayloadJSON, o.decisionPayloadJSONSet, o.decisionPayloadFile, o.decisionPayloadFileSet)
 		if err != nil {
 			return nil, err
 		}
@@ -554,13 +559,16 @@ func (o mailboxDecisionCommandOptions) params(mailboxID string) (map[string]any,
 	return params, nil
 }
 
-func parseOptionalDecisionPayload(inlineJSON, filePath string) (map[string]any, bool, error) {
+func parseOptionalDecisionPayload(inlineJSON string, inlineSet bool, filePath string, fileSet bool) (map[string]any, bool, error) {
 	inlineJSON = strings.TrimSpace(inlineJSON)
 	filePath = strings.TrimSpace(filePath)
-	if inlineJSON != "" && filePath != "" {
+	if inlineSet && fileSet {
 		return nil, false, fmt.Errorf("--decision-payload and --decision-payload-json are mutually exclusive")
 	}
-	if filePath != "" {
+	if fileSet {
+		if filePath == "" {
+			return nil, false, fmt.Errorf("--decision-payload requires a file path")
+		}
 		content, err := os.ReadFile(filePath)
 		if err != nil {
 			return nil, false, fmt.Errorf("--decision-payload could not be read: %w", err)
@@ -571,7 +579,7 @@ func parseOptionalDecisionPayload(inlineJSON, filePath string) (map[string]any, 
 		}
 		return payload, true, nil
 	}
-	if inlineJSON == "" {
+	if !inlineSet {
 		return nil, false, nil
 	}
 	payload, err := parseDecisionPayloadObject("--decision-payload-json", inlineJSON)
