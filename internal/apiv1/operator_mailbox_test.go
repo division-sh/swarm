@@ -178,6 +178,38 @@ func TestOperatorMailboxHandlersSupportedRPCPath(t *testing.T) {
 	if len(replaySubscribers) != 2 || replaySubscribers[0] != "approval-agent" || replaySubscribers[1] != "review-agent" {
 		t.Fatalf("mailbox.approve replay downstream_subscribers = %#v", replaySubscribers)
 	}
+	legacyReplayResponse, err := json.Marshal(map[string]any{
+		"ok":                  true,
+		"mailbox_decision_id": approvedResult["mailbox_decision_id"],
+		"downstream_event_id": downstreamID,
+		"status":              "decided",
+	})
+	if err != nil {
+		t.Fatalf("marshal legacy replay response: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		UPDATE api_idempotency
+		SET response = $1::jsonb
+		WHERE method = 'mailbox.approve'
+		  AND idempotency_key = 'idem-approve'
+	`, string(legacyReplayResponse)); err != nil {
+		t.Fatalf("rewrite legacy idempotency response: %v", err)
+	}
+	legacyReplay := rpcCall(t, handler, approveBody)
+	if legacyReplay.Error != nil {
+		t.Fatalf("mailbox.approve legacy replay error = %#v", legacyReplay.Error)
+	}
+	legacyReplayResult := asMap(t, legacyReplay.Result)
+	if legacyReplayResult["idempotency_replayed"] != true ||
+		legacyReplayResult["downstream_event_id"] != downstreamID ||
+		legacyReplayResult["downstream_event_name"] != "mailbox.item_decided" ||
+		legacyReplayResult["downstream_subscriber_source"] != "unavailable" {
+		t.Fatalf("mailbox.approve legacy replay result = %#v", legacyReplayResult)
+	}
+	legacyReplaySubscribers := legacyReplayResult["downstream_subscribers"].([]any)
+	if len(legacyReplaySubscribers) != 0 {
+		t.Fatalf("mailbox.approve legacy replay downstream_subscribers = %#v, want empty", legacyReplaySubscribers)
+	}
 	if count := countEventsByName(t, db, "mailbox.item_decided"); count != 1 {
 		t.Fatalf("mailbox.item_decided event count = %d, want 1", count)
 	}
