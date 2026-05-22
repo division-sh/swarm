@@ -93,7 +93,8 @@ func TestWorkflowInstanceStore_UpsertTracksFieldsGatesAndAccumulatorInMutationLo
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "queued",
 		Metadata: map[string]any{
-			"status": "open",
+			"status":          "open",
+			"business_status": "pending",
 			"gates": map[string]any{
 				"g_ready": true,
 			},
@@ -112,7 +113,8 @@ func TestWorkflowInstanceStore_UpsertTracksFieldsGatesAndAccumulatorInMutationLo
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "done",
 		Metadata: map[string]any{
-			"status": "closed",
+			"status":          "closed",
+			"business_status": "approved",
 			"gates": map[string]any{
 				"g_done": true,
 			},
@@ -128,7 +130,7 @@ func TestWorkflowInstanceStore_UpsertTracksFieldsGatesAndAccumulatorInMutationLo
 	fields := mutationFieldsForEntity(t, db, entityID)
 	for _, want := range []string{
 		"current_state",
-		"status",
+		"business_status",
 		"gates.g_ready",
 		"gates.g_done",
 		"accumulator.evidence",
@@ -137,6 +139,9 @@ func TestWorkflowInstanceStore_UpsertTracksFieldsGatesAndAccumulatorInMutationLo
 		if !containsMutationField(fields, want) {
 			t.Fatalf("mutation fields missing %q: %v", want, fields)
 		}
+	}
+	if containsMutationField(fields, "status") {
+		t.Fatalf("mutation fields leaked control status as entity field: %v", fields)
 	}
 
 	if err := trackedMutationStateMatchesEntityState(t, db, entityID); err != nil {

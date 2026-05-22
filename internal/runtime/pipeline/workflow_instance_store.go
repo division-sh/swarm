@@ -1025,7 +1025,7 @@ func workflowInstancePersistedProjectionFromInstance(instance WorkflowInstance, 
 	for _, key := range []string{
 		"slug", "name", "entity_type", "parent_entity_id",
 		"instance_id", "storage_ref", "flow_path", "instance_kind",
-		"template_version", "workflow_version", "transition_history",
+		"template_version", "workflow_version", "transition_history", "status",
 	} {
 		delete(metadata, key)
 	}

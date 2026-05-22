@@ -248,6 +248,96 @@ func (s stubInstances) AggregateOperatorEntities(_ context.Context, opts store.O
 	return store.OperatorEntityAggregateResult{Counts: counts}, nil
 }
 
+func TestHandler_InstanceHandlersReturnCanonicalEntityProjection(t *testing.T) {
+	entityID := runtimeflowidentity.EntityID("wf-1")
+	lastAggregate := &store.OperatorEntityAggregateOptions{}
+	h := &Handler{
+		entities: stubInstances{
+			rows: []store.OperatorEntitySummary{{
+				EntityID:     entityID,
+				RunID:        "run-1",
+				FlowInstance: "order/wf-1",
+				EntityType:   "order",
+				CurrentState: "reviewing",
+			}},
+			byID: map[string]store.OperatorEntityFull{
+				entityID: {
+					Entity: store.OperatorEntitySummary{
+						EntityID:     entityID,
+						RunID:        "run-1",
+						FlowInstance: "order/wf-1",
+						EntityType:   "order",
+						CurrentState: "reviewing",
+					},
+					Fields:      map[string]any{"business_status": "approved"},
+					Gates:       map[string]bool{"review_gate": true},
+					Accumulated: map[string]any{"score": float64(9)},
+				},
+			},
+			lastAggregate: lastAggregate,
+		},
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/instances?current_state=reviewing&type=order&limit=1", nil)
+	h.handleInstances(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("handleInstances status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var listPayload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &listPayload); err != nil {
+		t.Fatalf("unmarshal instances: %v", err)
+	}
+	rows, ok := listPayload["instances"].([]any)
+	if !ok || len(rows) != 1 {
+		t.Fatalf("instances payload = %#v", listPayload)
+	}
+	row := rows[0].(map[string]any)
+	if row["current_state"] != "reviewing" {
+		t.Fatalf("instances current_state = %#v, want reviewing", row["current_state"])
+	}
+	if _, ok := row["state"]; ok {
+		t.Fatalf("instances leaked legacy state field: %#v", row)
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/instances/wf-1?run_id=run-1", nil)
+	req.SetPathValue("id", "wf-1")
+	h.handleInstanceDetail(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("handleInstanceDetail status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var detail store.OperatorEntityFull
+	if err := json.Unmarshal(rec.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("unmarshal instance detail: %v", err)
+	}
+	if detail.Entity.CurrentState != "reviewing" || detail.Fields["business_status"] != "approved" || !detail.Gates["review_gate"] || detail.Accumulated["score"] != float64(9) {
+		t.Fatalf("detail payload = %#v", detail)
+	}
+	if _, ok := detail.Fields["status"]; ok {
+		t.Fatalf("detail leaked control status field: %#v", detail.Fields)
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/instances/aggregate?group_by=current_state&type=order", nil)
+	h.handleInstanceAggregate(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("handleInstanceAggregate status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var aggregate map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &aggregate); err != nil {
+		t.Fatalf("unmarshal aggregate: %v", err)
+	}
+	groups, _ := aggregate["groups"].([]any)
+	if lastAggregate.GroupBy != "current_state" || len(groups) != 1 {
+		t.Fatalf("aggregate = %#v opts=%#v, want current_state reviewing=1", aggregate, *lastAggregate)
+	}
+	group, _ := groups[0].(map[string]any)
+	if group["key"] != "reviewing" || group["count"] != float64(1) {
+		t.Fatalf("aggregate group = %#v, want reviewing=1", group)
+	}
+}
+
 type stubConversations struct {
 	list      []ConversationSummary
 	bySession map[string]ConversationDetail
@@ -3357,28 +3447,23 @@ func TestHandler_BuilderRPC(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &entityResp); err != nil {
 		t.Fatalf("unmarshal entity response: %v", err)
 	}
-	result, ok = entityResp.Result.(map[string]any)
-	if !ok {
-		t.Fatalf("unexpected entity result: %#v", entityResp.Result)
+	rawEntity, err := json.Marshal(entityResp.Result)
+	if err != nil {
+		t.Fatalf("marshal entity result: %v", err)
 	}
-	entity, ok := result["entity"].(map[string]any)
-	if !ok {
-		t.Fatalf("unexpected entity payload: %#v", result)
+	var builderEntity store.OperatorEntityFull
+	if err := json.Unmarshal(rawEntity, &builderEntity); err != nil {
+		t.Fatalf("unmarshal canonical entity result: %v", err)
 	}
-	if entity["state"] != "active" || entity["score"] != 3.7 {
-		t.Fatalf("unexpected entity payload: %#v", entity)
+	if builderEntity.Entity.CurrentState != "active" || builderEntity.Fields["score"] != float64(3.7) {
+		t.Fatalf("unexpected canonical entity payload: %#v", builderEntity)
 	}
-	gates, ok := result["gates"].(map[string]any)
-	if !ok || gates["review_gate"] != true {
-		t.Fatalf("unexpected gates payload: %#v", result["gates"])
+	if !builderEntity.Gates["review_gate"] {
+		t.Fatalf("unexpected gates payload: %#v", builderEntity.Gates)
 	}
-	accumulated, ok := result["accumulated"].(map[string]any)
-	if !ok {
-		t.Fatalf("unexpected accumulated payload: %#v", result["accumulated"])
-	}
-	accBucket, ok := accumulated["accumulator"].(map[string]any)
+	accBucket, ok := builderEntity.Accumulated["accumulator"].(map[string]any)
 	if !ok || accBucket["count"] != float64(2) {
-		t.Fatalf("unexpected accumulated payload: %#v", accumulated)
+		t.Fatalf("unexpected accumulated payload: %#v", builderEntity.Accumulated)
 	}
 
 	rec = httptest.NewRecorder()
