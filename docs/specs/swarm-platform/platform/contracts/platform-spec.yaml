@@ -5609,9 +5609,15 @@ cli_specification:
           recovery, and multi-run `--all` remain explicitly unpromoted split tails until later gated children promote
           their own canonical owners.
       mailbox_decision_sheet_and_result_ux:
-        disposition: tracked_child
+        disposition: promoted_first_slice
         tracker: '#856'
-        action: Promote rich decision-sheet, downstream preview, file-backed decision payload, and result rendering rules before implementation.
+        action: >
+          Rich mailbox decision-sheet ownership is promoted on /v1/rpc mailbox.get:
+          the server/API owns entity context and downstream preview fields consumed by
+          `swarm mailbox view`. File-backed decision payload, richer mutation result
+          rendering, priority enum/prose repair, shared output/payload policy, and
+          broader trace/run/mailbox UX remain split until separate gated children promote
+          their own canonical owners.
       control_idempotency_and_stop_all_confirmation:
         disposition: tracked_child
         tracker: '#859'
@@ -6866,8 +6872,20 @@ cli_specification:
       tier: must_have
       implementation_status: implemented
       owner: /v1/rpc mailbox.get
-      behavior: Primary mailbox item detail view through canonical API owner; no direct DB/store/dashboard REST/mailbox reads.
-      split_tail: Richer entity/downstream composition remains under #735.
+      behavior: >
+        Primary mailbox item detail view through canonical API owner; no direct
+        DB/store/dashboard REST/mailbox reads. The API-owned detail result includes
+        a required decision_sheet with server-owned entity_context and
+        downstream_preview for operator decision review.
+      proof_expectations:
+      - mailbox view renders decision_sheet from mailbox.get without local entity/downstream reconstruction
+      - missing or malformed decision_sheet fails closed as a malformed RPC result
+      - invalid args and missing SWARM_API_TOKEN make zero API calls
+      - static no-bypass proof for no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy transports
+      split_tail: >
+        File-backed decision payload, richer approve/reject/defer mutation result
+        rendering, priority enum/prose repair, and shared output/payload policy remain
+        split under #856/#735/#794.
     mailbox_approve:
       command: swarm mailbox approve <mailbox-item-id>
       tier: must_have
@@ -8789,6 +8807,7 @@ api_specification:
         - item
         - payload
         - history
+        - decision_sheet
         properties:
           item:
             $ref: '#/components/schemas/MailboxItem'
@@ -8799,6 +8818,67 @@ api_specification:
             type: array
             items:
               $ref: '#/components/schemas/MailboxHistoryEntry'
+          decision_sheet:
+            $ref: '#/components/schemas/MailboxDecisionSheet'
+      MailboxDecisionSheet:
+        type: object
+        additionalProperties: false
+        required:
+        - entity_context
+        - downstream_preview
+        properties:
+          entity_context:
+            $ref: '#/components/schemas/MailboxEntityContext'
+          downstream_preview:
+            $ref: '#/components/schemas/MailboxDownstreamPreview'
+      MailboxEntityContext:
+        type: object
+        additionalProperties: false
+        required:
+        - available
+        properties:
+          available:
+            type: boolean
+          reason:
+            type: string
+            enum:
+            - no_source_entity
+            - entity_reader_unavailable
+            - entity_not_found
+            - ambiguous_run_id
+            - invalid_entity_ref
+            description: Present when available is false.
+          entity:
+            $ref: '#/components/schemas/EntityFull'
+            description: Present when available is true.
+      MailboxDownstreamPreview:
+        type: object
+        additionalProperties: false
+        required:
+        - available
+        - subscribers
+        - subscriber_source
+        properties:
+          available:
+            type: boolean
+          reason:
+            type: string
+            enum:
+            - no_approval_route
+            description: Present when available is false.
+          event_name:
+            type: string
+            description: Approval event name when a downstream route exists.
+          subscribers:
+            type: array
+            items:
+              type: string
+          subscriber_source:
+            type: string
+            enum:
+            - event_catalog
+            - unavailable
+            - none
       MailboxDecisionResult:
         type: object
         additionalProperties: false
@@ -10763,7 +10843,9 @@ api_specification:
       errors: []
     mailbox.get:
       tier: must_have
-      description: Read one mailbox item with full payload and decision history.
+      description: >
+        Read one mailbox item with full payload, decision history, and the
+        server-owned decision sheet used by CLI/operator review surfaces.
       scope:
         required:
         - read:mailbox

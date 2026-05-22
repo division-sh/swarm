@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"sort"
 	"strings"
 	"time"
 
@@ -73,6 +74,10 @@ func OperatorMailboxHandlers(opts OperatorReadOptions) map[string]MethodHandler 
 			if err != nil {
 				return nil, err
 			}
+			detail.DecisionSheet, err = mailboxDecisionSheet(ctx, detail.Item, opts)
+			if err != nil {
+				return nil, err
+			}
 			return detail, nil
 		},
 		"mailbox.approve": func(ctx context.Context, req Request) (any, error) {
@@ -112,6 +117,92 @@ func OperatorMailboxHandlers(opts OperatorReadOptions) map[string]MethodHandler 
 			})
 		},
 	}
+}
+
+func mailboxDecisionSheet(ctx context.Context, item store.MailboxV1Item, opts OperatorReadOptions) (*store.MailboxV1DecisionSheet, error) {
+	entityContext, err := mailboxEntityContext(ctx, item, opts.Entities)
+	if err != nil {
+		return nil, err
+	}
+	return &store.MailboxV1DecisionSheet{
+		EntityContext:     entityContext,
+		DownstreamPreview: mailboxDownstreamPreview(item, opts),
+	}, nil
+}
+
+func mailboxEntityContext(ctx context.Context, item store.MailboxV1Item, entities EntityReadStore) (store.MailboxV1EntityContext, error) {
+	entityID := strings.TrimSpace(item.SourceEntityID)
+	if entityID == "" {
+		return store.MailboxV1EntityContext{Available: false, Reason: "no_source_entity"}, nil
+	}
+	if entities == nil {
+		return store.MailboxV1EntityContext{Available: false, Reason: "entity_reader_unavailable"}, nil
+	}
+	entity, err := entities.LoadOperatorEntity(ctx, entityID, strings.TrimSpace(item.SourceRunID))
+	if err == nil {
+		return store.MailboxV1EntityContext{Available: true, Entity: &entity}, nil
+	}
+	switch {
+	case errors.Is(err, store.ErrEntityNotFound):
+		return store.MailboxV1EntityContext{Available: false, Reason: "entity_not_found"}, nil
+	case errors.Is(err, store.ErrAmbiguousEntityRunID):
+		return store.MailboxV1EntityContext{Available: false, Reason: "ambiguous_run_id"}, nil
+	}
+	if paramErr := entityReadParamError(err); paramErr != nil {
+		return store.MailboxV1EntityContext{Available: false, Reason: "invalid_entity_ref"}, nil
+	}
+	return store.MailboxV1EntityContext{}, err
+}
+
+func mailboxDownstreamPreview(item store.MailboxV1Item, opts OperatorReadOptions) store.MailboxV1DownstreamPreview {
+	eventName := strings.TrimSpace(opts.MailboxApprovalRoutes[strings.TrimSpace(item.Type)])
+	if eventName == "" {
+		return store.MailboxV1DownstreamPreview{
+			Available:        false,
+			Reason:           "no_approval_route",
+			Subscribers:      []string{},
+			SubscriberSource: "none",
+		}
+	}
+	subscribers, subscriberSource := mailboxDownstreamSubscribers(eventName, opts)
+	return store.MailboxV1DownstreamPreview{
+		Available:        true,
+		EventName:        eventName,
+		Subscribers:      subscribers,
+		SubscriberSource: subscriberSource,
+	}
+}
+
+func mailboxDownstreamSubscribers(eventName string, opts OperatorReadOptions) ([]string, string) {
+	if opts.Source == nil {
+		return []string{}, "unavailable"
+	}
+	entry, ok := opts.Source.EventEntry(eventName)
+	if !ok {
+		return []string{}, "unavailable"
+	}
+	subscribers := append([]string(nil), entry.SwarmConsumer()...)
+	subscribers = append(subscribers, entry.Consumer...)
+	subscribers = uniqueNonEmptyStrings(subscribers)
+	sort.Strings(subscribers)
+	return subscribers, "event_catalog"
+}
+
+func uniqueNonEmptyStrings(values []string) []string {
+	seen := map[string]struct{}{}
+	out := []string{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 func executeMailboxDecision(ctx context.Context, req Request, opts OperatorReadOptions, decision store.MailboxV1DecisionRequest) (any, error) {

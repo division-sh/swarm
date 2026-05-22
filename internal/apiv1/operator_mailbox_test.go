@@ -15,6 +15,7 @@ import (
 	runtimeactors "swarm/internal/runtime/core/actors"
 	runtimeingress "swarm/internal/runtime/ingress"
 	runtimemanager "swarm/internal/runtime/manager"
+	"swarm/internal/runtime/semanticview"
 	runtimetools "swarm/internal/runtime/tools"
 	"swarm/internal/store"
 	"swarm/internal/testutil"
@@ -31,6 +32,23 @@ func TestOperatorMailboxHandlersSupportedRPCPath(t *testing.T) {
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
 	sourceEventID := uuid.NewString()
+	base := time.Date(2026, 5, 10, 11, 0, 0, 0, time.UTC)
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, runID, base); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO entity_state (
+			run_id, entity_id, flow_instance, entity_type, slug, name,
+			current_state, gates, fields, accumulator, revision,
+			entered_state_at, created_at, updated_at
+		) VALUES (
+			$1::uuid, $2::uuid, 'empire/review', 'review_case', 'review-case-1', 'Review Case 1',
+			'awaiting_decision', '{"ready":true}'::jsonb, '{"score":9}'::jsonb, '{"notes":["needs approval"]}'::jsonb, 7,
+			$3, $3, $3
+		)
+	`, runID, entityID, base); err != nil {
+		t.Fatalf("seed entity_state: %v", err)
+	}
 	if err := pg.AppendEvent(ctx, events.Event{
 		ID:      sourceEventID,
 		Type:    "review.requested",
@@ -54,6 +72,11 @@ func TestOperatorMailboxHandlersSupportedRPCPath(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `UPDATE mailbox SET flow_instance = 'empire/review' WHERE item_id = $1::uuid`, mailboxID); err != nil {
 		t.Fatalf("set flow instance: %v", err)
 	}
+	bundle := runStartTestBundle("mailbox.item_decided")
+	bundle.Events["mailbox.item_decided"] = runtimecontracts.EventCatalogEntry{
+		Consumer: []string{"approval-agent", "review-agent"},
+	}
+	source := semanticview.Wrap(bundle)
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: OperatorReadHandlers(OperatorReadOptions{
@@ -62,9 +85,11 @@ func TestOperatorMailboxHandlersSupportedRPCPath(t *testing.T) {
 				return true
 			},
 			Database:    fakePinger{},
+			Entities:    pg,
 			Mailbox:     pg,
 			Idempotency: pg,
 			Events:      bus,
+			Source:      source,
 			MailboxApprovalRoutes: map[string]string{
 				"review_request": "mailbox.item_decided",
 			},
@@ -98,6 +123,27 @@ func TestOperatorMailboxHandlersSupportedRPCPath(t *testing.T) {
 	}
 	if history := asMap(t, get.Result)["history"].([]any); len(history) != 1 {
 		t.Fatalf("mailbox.get history = %#v", history)
+	}
+	decisionSheet := asMap(t, asMap(t, get.Result)["decision_sheet"])
+	entityContext := asMap(t, decisionSheet["entity_context"])
+	if entityContext["available"] != true {
+		t.Fatalf("mailbox.get entity_context = %#v", entityContext)
+	}
+	entityFull := asMap(t, entityContext["entity"])
+	entity := asMap(t, entityFull["entity"])
+	if entity["entity_id"] != entityID || entity["run_id"] != runID || entity["current_state"] != "awaiting_decision" {
+		t.Fatalf("mailbox.get decision_sheet entity = %#v", entityFull)
+	}
+	if fields := asMap(t, entityFull["fields"]); fields["score"] != float64(9) {
+		t.Fatalf("mailbox.get decision_sheet fields = %#v", fields)
+	}
+	downstream := asMap(t, decisionSheet["downstream_preview"])
+	if downstream["available"] != true || downstream["event_name"] != "mailbox.item_decided" || downstream["subscriber_source"] != "event_catalog" {
+		t.Fatalf("mailbox.get downstream_preview = %#v", downstream)
+	}
+	subscribers := downstream["subscribers"].([]any)
+	if len(subscribers) != 2 || subscribers[0] != "approval-agent" || subscribers[1] != "review-agent" {
+		t.Fatalf("mailbox.get downstream subscribers = %#v", subscribers)
 	}
 
 	approveBody := `{"jsonrpc":"2.0","id":"approve","method":"mailbox.approve","params":{"mailbox_id":"` + mailboxID + `","decision_payload":{"approved":true},"idempotency_key":"idem-approve"}}`

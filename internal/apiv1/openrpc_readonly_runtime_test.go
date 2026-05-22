@@ -278,7 +278,7 @@ func readOnlyHTTPRuntimeFixtures() map[string]readOnlyHTTPRuntimeFixture {
 		"event.list":                     {Params: map[string]any{}, ResultKeys: []string{"events"}},
 		"health.check":                   {Params: map[string]any{}, ResultKeys: []string{"alive", "ready", "db_ok", "runtime_ok", "bundle"}},
 		"health.ping":                    {Params: map[string]any{}, ResultKeys: []string{"ok", "ts"}},
-		"mailbox.get":                    {Params: map[string]any{"mailbox_id": "mailbox-1"}, ResultKeys: []string{"item", "payload", "history"}},
+		"mailbox.get":                    {Params: map[string]any{"mailbox_id": "mailbox-1"}, ResultKeys: []string{"item", "payload", "history", "decision_sheet"}},
 		"mailbox.list":                   {Params: map[string]any{}, ResultKeys: []string{"items"}},
 		"run.diagnose":                   {Params: map[string]any{"run_id": "run-1"}, ResultKeys: []string{"run", "operational_state", "blocking_layer", "blocking_reason", "heuristics"}},
 		"run.get":                        {Params: map[string]any{"run_id": "run-1"}, ResultKeys: []string{"run"}},
@@ -708,6 +708,20 @@ func assertReadOnlyProbeSuccess(t *testing.T, methodName string, resp rpcRespons
 		for _, splitField := range []string{"bundle_version", "watchdog", "last_tool_outcome", "token_usage", "failures_recent", "dead_letters_recent"} {
 			if _, ok := result[splitField]; ok {
 				t.Fatalf("agent.diagnose exposed split field %q: %#v", splitField, result)
+			}
+		}
+		if methodName == "mailbox.get" {
+			sheet := asMap(t, result["decision_sheet"])
+			entityContext := asMap(t, sheet["entity_context"])
+			if entityContext["available"] != false || entityContext["reason"] != "no_source_entity" {
+				t.Fatalf("mailbox.get decision_sheet.entity_context = %#v", entityContext)
+			}
+			downstream := asMap(t, sheet["downstream_preview"])
+			if downstream["available"] != false || downstream["reason"] != "no_approval_route" || downstream["subscriber_source"] != "none" {
+				t.Fatalf("mailbox.get decision_sheet.downstream_preview = %#v", downstream)
+			}
+			if subscribers, ok := downstream["subscribers"].([]any); !ok || len(subscribers) != 0 {
+				t.Fatalf("mailbox.get decision_sheet.downstream_preview.subscribers = %#v", downstream["subscribers"])
 			}
 		}
 	}

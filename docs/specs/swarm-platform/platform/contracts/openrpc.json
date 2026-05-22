@@ -3152,7 +3152,7 @@
     },
     {
       "name": "mailbox.get",
-      "description": "Read one mailbox item with full payload and decision history.",
+      "description": "Read one mailbox item with full payload, decision history, and the server-owned decision sheet used by CLI/operator review surfaces.\n",
       "params": [
         {
           "name": "mailbox_id",
@@ -6516,6 +6516,88 @@
         ],
         "type": "object"
       },
+      "MailboxDecisionSheet": {
+        "additionalProperties": false,
+        "properties": {
+          "downstream_preview": {
+            "$ref": "#/components/schemas/MailboxDownstreamPreview"
+          },
+          "entity_context": {
+            "$ref": "#/components/schemas/MailboxEntityContext"
+          }
+        },
+        "required": [
+          "entity_context",
+          "downstream_preview"
+        ],
+        "type": "object"
+      },
+      "MailboxDownstreamPreview": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "event_name": {
+            "description": "Approval event name when a downstream route exists.",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Present when available is false.",
+            "enum": [
+              "no_approval_route"
+            ],
+            "type": "string"
+          },
+          "subscriber_source": {
+            "enum": [
+              "event_catalog",
+              "unavailable",
+              "none"
+            ],
+            "type": "string"
+          },
+          "subscribers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "available",
+          "subscribers",
+          "subscriber_source"
+        ],
+        "type": "object"
+      },
+      "MailboxEntityContext": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "entity": {
+            "$ref": "#/components/schemas/EntityFull",
+            "description": "Present when available is true."
+          },
+          "reason": {
+            "description": "Present when available is false.",
+            "enum": [
+              "no_source_entity",
+              "entity_reader_unavailable",
+              "entity_not_found",
+              "ambiguous_run_id",
+              "invalid_entity_ref"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "available"
+        ],
+        "type": "object"
+      },
       "MailboxHistoryEntry": {
         "additionalProperties": false,
         "properties": {
@@ -6608,6 +6690,9 @@
       "MailboxItemDetail": {
         "additionalProperties": false,
         "properties": {
+          "decision_sheet": {
+            "$ref": "#/components/schemas/MailboxDecisionSheet"
+          },
           "history": {
             "items": {
               "$ref": "#/components/schemas/MailboxHistoryEntry"
@@ -6625,7 +6710,8 @@
         "required": [
           "item",
           "payload",
-          "history"
+          "history",
+          "decision_sheet"
         ],
         "type": "object"
       },
