@@ -390,7 +390,7 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, args []string,
 		}
 		return 2
 	}
-	if err := loggingOpts.validate(); err != nil {
+	if err := applyCLILoggingFlagSetArgs(args, &loggingOpts); err != nil {
 		if errOut != nil {
 			fmt.Fprintf(errOut, "verify failed: %v\n", err)
 		}

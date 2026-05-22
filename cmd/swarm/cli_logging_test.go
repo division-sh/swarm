@@ -217,6 +217,22 @@ func TestCLILoggingInvalidLevelFailsBeforeSideEffects(t *testing.T) {
 	if strings.TrimSpace(stdout.String()) != "" {
 		t.Fatalf("verify stdout = %q, want empty", stdout.String())
 	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = executeRootCommand(context.Background(), repoRoot(), []string{"verify", "positional", "--log-level", "fatal"}, &stdout, &stderr)
+	if code != cliExitValidation {
+		t.Fatalf("verify positional invalid log-level code = %d, want %d stdout=%s stderr=%s", code, cliExitValidation, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "--log-level must be one of debug, info, warn, error") {
+		t.Fatalf("verify positional stderr = %q, want log-level validation", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "resolve contracts") || strings.Contains(stderr.String(), "load Swarm contracts") {
+		t.Fatalf("verify positional stderr = %q, local verification path ran before log-level validation", stderr.String())
+	}
+	if strings.TrimSpace(stdout.String()) != "" {
+		t.Fatalf("verify positional stdout = %q, want empty", stdout.String())
+	}
 }
 
 func TestCLILoggingUnsupportedSurfacesFailClosedBeforeSideEffects(t *testing.T) {
