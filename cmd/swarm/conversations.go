@@ -20,6 +20,7 @@ const (
 
 type conversationListCommandOptions struct {
 	apiOptions rootCommandOptions
+	output     cliOutputOptions
 
 	agentID string
 	runID   string
@@ -30,6 +31,16 @@ type conversationListCommandOptions struct {
 	runIDSet   bool
 	limitSet   bool
 	cursorSet  bool
+}
+
+type conversationViewCommandOptions struct {
+	apiOptions rootCommandOptions
+	output     cliOutputOptions
+}
+
+type conversationTurnCommandOptions struct {
+	apiOptions rootCommandOptions
+	output     cliOutputOptions
 }
 
 type conversationListResult struct {
@@ -158,6 +169,9 @@ func newConversationsListCommand(opts rootCommandOptions) *cobra.Command {
 			listOpts.runIDSet = cmd.Flags().Changed("run-id")
 			listOpts.limitSet = cmd.Flags().Changed("limit")
 			listOpts.cursorSet = cmd.Flags().Changed("cursor")
+			if err := listOpts.output.validate(); err != nil {
+				return returnCLIValidationError(cmd.ErrOrStderr(), err)
+			}
 			return runConversationsListCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), listOpts)
 		},
 	}
@@ -165,29 +179,42 @@ func newConversationsListCommand(opts rootCommandOptions) *cobra.Command {
 	cmd.Flags().StringVar(&listOpts.runID, "run-id", "", "Filter by run id")
 	cmd.Flags().IntVar(&listOpts.limit, "limit", 0, "Optional page size, 1-500")
 	cmd.Flags().StringVar(&listOpts.cursor, "cursor", "", "Pagination cursor")
+	bindCLIOutputFlags(cmd, &listOpts.output)
 	return cmd
 }
 
 func newConversationViewCommand(opts rootCommandOptions) *cobra.Command {
-	return &cobra.Command{
+	viewOpts := conversationViewCommandOptions{apiOptions: opts}
+	cmd := &cobra.Command{
 		Use:   "view <session-id>",
 		Short: "View one conversation through /v1/rpc conversation.get.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runConversationViewCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), opts, args[0])
+			if err := viewOpts.output.validate(); err != nil {
+				return returnCLIValidationError(cmd.ErrOrStderr(), err)
+			}
+			return runConversationViewCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), viewOpts, args[0])
 		},
 	}
+	bindCLIOutputFlags(cmd, &viewOpts.output)
+	return cmd
 }
 
 func newConversationTurnCommand(opts rootCommandOptions) *cobra.Command {
-	return &cobra.Command{
+	turnOpts := conversationTurnCommandOptions{apiOptions: opts}
+	cmd := &cobra.Command{
 		Use:   "turn <session-id> <turn-index>",
 		Short: "View one conversation turn through /v1/rpc conversation.get_turn.",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runConversationTurnCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), opts, args[0], args[1])
+			if err := turnOpts.output.validate(); err != nil {
+				return returnCLIValidationError(cmd.ErrOrStderr(), err)
+			}
+			return runConversationTurnCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), turnOpts, args[0], args[1])
 		},
 	}
+	bindCLIOutputFlags(cmd, &turnOpts.output)
+	return cmd
 }
 
 func runConversationsListCommand(ctx context.Context, out, errOut io.Writer, opts conversationListCommandOptions) error {
@@ -206,16 +233,19 @@ func runConversationsListCommand(ctx context.Context, out, errOut io.Writer, opt
 	if err := validateConversationListResult(result); err != nil {
 		return returnCLIAPIError(errOut, err, conversationListAPIErrorClassifier())
 	}
-	writeConversationListResult(out, result)
-	return nil
+	return renderCLIOutput(out, errOut, opts.output, result, func(w io.Writer) {
+		writeConversationListResult(w, result)
+	}, func() ([]string, error) {
+		return quietConversationList(result), nil
+	})
 }
 
-func runConversationViewCommand(ctx context.Context, out, errOut io.Writer, opts rootCommandOptions, sessionID string) error {
+func runConversationViewCommand(ctx context.Context, out, errOut io.Writer, opts conversationViewCommandOptions, sessionID string) error {
 	sessionID = strings.TrimSpace(sessionID)
 	if err := validateConversationOpaqueIDArg("session id", sessionID); err != nil {
 		return returnCLIValidationError(errOut, err)
 	}
-	client, err := newCLIAPIClient(opts)
+	client, err := newCLIAPIClient(opts.apiOptions)
 	if err != nil {
 		return returnCLIAPIError(errOut, err, conversationViewAPIErrorClassifier())
 	}
@@ -226,11 +256,14 @@ func runConversationViewCommand(ctx context.Context, out, errOut io.Writer, opts
 	if err := validateConversationDetailResult("conversation.get result", result); err != nil {
 		return returnCLIAPIError(errOut, err, conversationViewAPIErrorClassifier())
 	}
-	writeConversationDetailResult(out, result)
-	return nil
+	return renderCLIOutput(out, errOut, opts.output, result, func(w io.Writer) {
+		writeConversationDetailResult(w, result)
+	}, func() ([]string, error) {
+		return []string{result.Conversation.SessionID}, nil
+	})
 }
 
-func runConversationTurnCommand(ctx context.Context, out, errOut io.Writer, opts rootCommandOptions, sessionID, turnIndexRaw string) error {
+func runConversationTurnCommand(ctx context.Context, out, errOut io.Writer, opts conversationTurnCommandOptions, sessionID, turnIndexRaw string) error {
 	sessionID = strings.TrimSpace(sessionID)
 	if err := validateConversationOpaqueIDArg("session id", sessionID); err != nil {
 		return returnCLIValidationError(errOut, err)
@@ -239,7 +272,7 @@ func runConversationTurnCommand(ctx context.Context, out, errOut io.Writer, opts
 	if err != nil {
 		return returnCLIValidationError(errOut, err)
 	}
-	client, err := newCLIAPIClient(opts)
+	client, err := newCLIAPIClient(opts.apiOptions)
 	if err != nil {
 		return returnCLIAPIError(errOut, err, conversationTurnAPIErrorClassifier())
 	}
@@ -251,8 +284,19 @@ func runConversationTurnCommand(ctx context.Context, out, errOut io.Writer, opts
 	if err := validateConversationTurnDetailResult(result); err != nil {
 		return returnCLIAPIError(errOut, err, conversationTurnAPIErrorClassifier())
 	}
-	writeConversationTurnDetailResult(out, result)
-	return nil
+	return renderCLIOutput(out, errOut, opts.output, result, func(w io.Writer) {
+		writeConversationTurnDetailResult(w, result)
+	}, func() ([]string, error) {
+		return []string{fmt.Sprintf("%s %d %s", result.Session.SessionID, result.Turn.TurnIndex, firstNonEmpty(result.Turn.Outcome, result.Session.Status))}, nil
+	})
+}
+
+func quietConversationList(result conversationListResult) []string {
+	out := make([]string, 0, len(result.Conversations))
+	for _, conversation := range result.Conversations {
+		out = append(out, conversation.SessionID)
+	}
+	return out
 }
 
 func (opts conversationListCommandOptions) params() (map[string]any, error) {

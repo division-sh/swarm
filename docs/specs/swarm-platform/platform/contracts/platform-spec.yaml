@@ -5831,7 +5831,63 @@ cli_specification:
         - entities_list
         - entity_view
         - entity_aggregate
+        - conversations_list
+        - conversation_view
+        - conversation_turn
         - run
+        implemented_output_mode_first_slice:
+          implemented_by: '#920'
+          failure_class: runtime.cli.v2.output_mode_renderer_first_slice_diagnostic_local_conversation_read_consumers
+          owner: cmd/swarm shared output-mode renderer
+          status: implemented
+          rule: >
+            These currently implemented consumers accept `--json` and `--quiet` through the shared output-mode
+            owner. `--json` renders exactly one JSON document plus newline using canonical local/API result structs.
+            `--quiet` renders only the declared load-bearing values below. `--json --quiet` fails with CLI validation
+            exit 2 before local contract verification, API calls, runtime boot, or other side effects.
+          consumers:
+            version:
+              fact_owner: local binary metadata; /v1/rpc health.check when --server is supplied
+              json_shape: local binary metadata object; with --server includes a server health.check object
+              quiet_values:
+              - binary_version
+              - server_bundle_fingerprint when --server is supplied
+            verify:
+              fact_owner: local contract verification
+              json_shape: object with ok, contracts, warnings, and lint_evidence
+              quiet_values:
+              - ok
+            health:
+              fact_owner: /v1/rpc health.check
+              json_shape: health.check result object
+              quiet_values:
+              - healthy when alive, ready, db_ok, and runtime_ok are all true; unhealthy otherwise
+            runs:
+              fact_owner: /v1/rpc run.list
+              json_shape: run.list result object
+              quiet_values:
+              - run_id, one per returned run, in API result order
+            status:
+              fact_owner: /v1/rpc run.diagnose; /v1/rpc run.get when --no-diagnose is supplied
+              json_shape: run.diagnose result object, or run.get result object for --no-diagnose
+              quiet_values:
+              - run_id and operational_state for diagnose mode
+              - run_id and run status for --no-diagnose mode
+            conversations_list:
+              fact_owner: /v1/rpc conversation.list
+              json_shape: conversation.list result object
+              quiet_values:
+              - session_id, one per returned conversation, in API result order
+            conversation_view:
+              fact_owner: /v1/rpc conversation.get
+              json_shape: conversation.get result object
+              quiet_values:
+              - session_id
+            conversation_turn:
+              fact_owner: /v1/rpc conversation.get_turn
+              json_shape: conversation.get_turn result object
+              quiet_values:
+              - session_id, turn_index, and outcome/status summary
         implemented_consumer_residuals:
           logs: >
             `swarm logs` is implemented for default-text snapshot and follow in #876 and is no longer an absent

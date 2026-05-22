@@ -708,8 +708,11 @@ func TestCLI_VerifyPreservesLocalContractCarveOut(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("verify code = %d, want 1 stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "verify failed: resolve contracts") {
-		t.Fatalf("verify output = %q, want local contract resolution failure", stdout.String())
+	if strings.TrimSpace(stdout.String()) != "" {
+		t.Fatalf("verify stdout = %q, want empty on error", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "verify failed: resolve contracts") {
+		t.Fatalf("verify stderr = %q, want local contract resolution failure", stderr.String())
 	}
 }
 

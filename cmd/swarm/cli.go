@@ -155,7 +155,7 @@ func newVerifyCommand(ctx context.Context, repo string) *cobra.Command {
 		Short:              "Validate local Swarm contract files.",
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			code := runVerifyCommand(ctx, repo, args, cmd.OutOrStdout())
+			code := runVerifyCommandWithOutput(ctx, repo, args, cmd.OutOrStdout(), cmd.ErrOrStderr())
 			if code != 0 {
 				return commandExitError{code: code}
 			}
@@ -166,7 +166,18 @@ func newVerifyCommand(ctx context.Context, repo string) *cobra.Command {
 
 type versionCommandOptions struct {
 	apiOptions rootCommandOptions
+	output     cliOutputOptions
 	server     bool
+}
+
+type versionOutputResult struct {
+	BinaryVersion string                       `json:"binary_version"`
+	Commit        string                       `json:"commit"`
+	Built         string                       `json:"built"`
+	GoVersion     string                       `json:"go_version"`
+	GOOS          string                       `json:"goos"`
+	GOARCH        string                       `json:"goarch"`
+	Server        *diagnosticHealthCheckResult `json:"server,omitempty"`
 }
 
 func newVersionCommand(opts rootCommandOptions) *cobra.Command {
@@ -179,26 +190,45 @@ func newVersionCommand(opts rootCommandOptions) *cobra.Command {
 			if !versionOpts.server && cliAPIConnectionFlagsChanged(cmd) {
 				return fmt.Errorf("--api-server and --api-token-file require --server")
 			}
+			if err := versionOpts.output.validate(); err != nil {
+				return returnCLIValidationError(cmd.ErrOrStderr(), err)
+			}
 			return runVersionCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), versionOpts)
 		},
 	}
 	cmd.Flags().BoolVar(&versionOpts.server, "server", false, "Also query /v1/rpc health.check and print server bundle/runtime identity")
+	bindCLIOutputFlags(cmd, &versionOpts.output)
 	bindCLIAPIConnectionFlags(cmd, &versionOpts.apiOptions)
 	return cmd
 }
 
 func runVersionCommand(ctx context.Context, out, errOut io.Writer, opts versionCommandOptions) error {
-	if !opts.server {
-		writeLocalVersion(out)
-		return nil
+	result := versionOutputResult{
+		BinaryVersion: binaryVersion,
+		Commit:        binaryCommit,
+		Built:         binaryDate,
+		GoVersion:     goruntime.Version(),
+		GOOS:          goruntime.GOOS,
+		GOARCH:        goruntime.GOARCH,
 	}
-	result, err := fetchDiagnosticHealthCheck(ctx, opts.apiOptions)
+	if !opts.server {
+		return renderCLIOutput(out, errOut, opts.output, result, func(w io.Writer) {
+			writeLocalVersion(w)
+		}, func() ([]string, error) {
+			return []string{binaryVersion}, nil
+		})
+	}
+	health, err := fetchDiagnosticHealthCheck(ctx, opts.apiOptions)
 	if err != nil {
 		return returnCLIAPIError(errOut, err, cliAPIErrorClassifier{})
 	}
-	writeLocalVersion(out)
-	writeVersionServerIdentity(out, result)
-	return nil
+	result.Server = &health
+	return renderCLIOutput(out, errOut, opts.output, result, func(w io.Writer) {
+		writeLocalVersion(w)
+		writeVersionServerIdentity(w, health)
+	}, func() ([]string, error) {
+		return []string{binaryVersion, health.Bundle.Fingerprint}, nil
+	})
 }
 
 func writeLocalVersion(out io.Writer) {
