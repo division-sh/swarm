@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 	runtimecredentials "swarm/internal/runtime/credentials"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/store"
@@ -16,8 +17,12 @@ import (
 const testBuilderAuthToken = "builder-test-token"
 
 type pagedEntityReader struct {
-	pages []store.OperatorEntityListResult
-	calls int
+	pages        []store.OperatorEntityListResult
+	calls        int
+	getResult    store.OperatorEntityFull
+	getErr       error
+	lastEntityID string
+	lastRunID    string
 }
 
 func (r *pagedEntityReader) ListOperatorEntities(_ context.Context, opts store.OperatorEntityListOptions) (store.OperatorEntityListResult, error) {
@@ -29,8 +34,16 @@ func (r *pagedEntityReader) ListOperatorEntities(_ context.Context, opts store.O
 	return page, nil
 }
 
-func (r *pagedEntityReader) LoadOperatorEntity(context.Context, string, string) (store.OperatorEntityFull, error) {
-	return store.OperatorEntityFull{}, store.ErrEntityNotFound
+func (r *pagedEntityReader) LoadOperatorEntity(_ context.Context, entityID, runID string) (store.OperatorEntityFull, error) {
+	r.lastEntityID = entityID
+	r.lastRunID = runID
+	if r.getErr != nil {
+		return store.OperatorEntityFull{}, r.getErr
+	}
+	if r.getResult.Entity.EntityID == "" {
+		return store.OperatorEntityFull{}, store.ErrEntityNotFound
+	}
+	return r.getResult, nil
 }
 
 func TestHandler_CredentialsListSetDelete(t *testing.T) {
@@ -142,6 +155,72 @@ func TestHandler_StateListInstancesDrainsCanonicalEntityPages(t *testing.T) {
 	}
 	if reader.calls != 2 {
 		t.Fatalf("ListOperatorEntities calls = %d, want 2", reader.calls)
+	}
+}
+
+func TestHandler_StateGetEntityReturnsCanonicalEntityFull(t *testing.T) {
+	reader := &pagedEntityReader{
+		getResult: store.OperatorEntityFull{
+			Entity: store.OperatorEntitySummary{
+				EntityID:     runtimeflowidentity.EntityID("wf-1"),
+				RunID:        "run-1",
+				FlowInstance: "order/wf-1",
+				EntityType:   "order",
+				CurrentState: "reviewing",
+				Slug:         "order-1",
+				Name:         "Order 1",
+			},
+			Fields:      map[string]any{"priority": "high"},
+			Gates:       map[string]bool{"review_gate": true},
+			Accumulated: map[string]any{"score": float64(3)},
+		},
+	}
+	handler := NewHandler(Options{
+		AuthToken: testBuilderAuthToken,
+		Entities:  reader,
+	})
+
+	resp := callBuilderRPC(t, handler, Request{
+		JSONRPC: "2.0",
+		ID:      "1",
+		Method:  "state.get_entity",
+		Params: map[string]any{
+			"instance_id": "wf-1",
+			"run_id":      "run-1",
+		},
+	})
+	full, ok := resp.Result.(store.OperatorEntityFull)
+	if !ok {
+		t.Fatalf("state.get_entity result type = %T, want OperatorEntityFull", resp.Result)
+	}
+	if reader.lastEntityID != runtimeflowidentity.EntityID("wf-1") || reader.lastRunID != "run-1" {
+		t.Fatalf("LoadOperatorEntity args = entity_id=%q run_id=%q", reader.lastEntityID, reader.lastRunID)
+	}
+	if full.Entity.CurrentState != "reviewing" || full.Fields["priority"] != "high" || !full.Gates["review_gate"] || full.Accumulated["score"] != float64(3) {
+		t.Fatalf("state.get_entity canonical result = %#v", full)
+	}
+
+	raw, err := json.Marshal(resp.Result)
+	if err != nil {
+		t.Fatalf("marshal state.get_entity result: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("unmarshal state.get_entity result: %v", err)
+	}
+	if _, ok := payload["state"]; ok {
+		t.Fatalf("state.get_entity leaked legacy top-level state payload: %#v", payload)
+	}
+	entity := payload["entity"].(map[string]any)
+	if entity["current_state"] != "reviewing" {
+		t.Fatalf("entity.current_state = %#v, want reviewing", entity["current_state"])
+	}
+	if _, ok := entity["state"]; ok {
+		t.Fatalf("state.get_entity leaked legacy entity.state payload: %#v", entity)
+	}
+	fields := payload["fields"].(map[string]any)
+	if fields["priority"] != "high" {
+		t.Fatalf("fields = %#v, want priority", fields)
 	}
 }
 

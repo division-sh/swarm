@@ -210,11 +210,7 @@ func (h *handler) dispatchRPC(ctx context.Context, method string, params map[str
 		if err != nil {
 			return nil, internalError(err)
 		}
-		return map[string]any{
-			"entity":      legacyBuilderEntityPayload(entity),
-			"gates":       entity.Gates,
-			"accumulated": entity.Accumulated,
-		}, nil
+		return entity, nil
 	case "credentials.list":
 		if h.credentials == nil {
 			return nil, methodUnavailable("credential store is not configured")

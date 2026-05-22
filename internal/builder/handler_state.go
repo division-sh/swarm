@@ -88,27 +88,6 @@ func (h *handler) runFullValidation(_ context.Context) ValidationResult {
 	return result
 }
 
-func legacyBuilderEntityPayload(full store.OperatorEntityFull) map[string]any {
-	entity := map[string]any{"state": strings.TrimSpace(full.Entity.CurrentState)}
-	for key, value := range full.Fields {
-		key = strings.TrimSpace(key)
-		if key == "" || key == "gates" {
-			continue
-		}
-		entity[key] = value
-	}
-	if full.Entity.Slug != "" {
-		entity["slug"] = full.Entity.Slug
-	}
-	if full.Entity.Name != "" {
-		entity["name"] = full.Entity.Name
-	}
-	if full.Entity.EntityType != "" {
-		entity["entity_type"] = full.Entity.EntityType
-	}
-	return entity
-}
-
 func (h *handler) legacyBuilderListEntities(ctx context.Context) ([]store.OperatorEntitySummary, error) {
 	if h == nil || h.entities == nil {
 		return nil, fmt.Errorf("entity reader is not configured")

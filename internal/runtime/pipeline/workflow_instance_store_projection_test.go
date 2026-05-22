@@ -130,6 +130,74 @@ func TestWorkflowInstanceStoreProjection_RoundTripPreservesCanonicalState(t *tes
 	}
 }
 
+func TestWorkflowInstanceStoreProjection_DoesNotExposeControlStatusAsEntityField(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	workflowStore := NewWorkflowInstanceStore(db)
+	storageRef := uuid.NewString()
+	ctx := testWorkflowStoreRunContext(t, workflowStore)
+	instance := WorkflowInstance{
+		InstanceID:      "inst-1",
+		StorageRef:      storageRef,
+		WorkflowName:    "projection-flow",
+		WorkflowVersion: "1.0.0",
+		CurrentState:    "reviewing",
+		EnteredStageAt:  time.Now().UTC().Round(time.Microsecond),
+		Metadata: map[string]any{
+			"status":          "waiting",
+			"business_status": "approved",
+			"entity_type":     "workflow_subject",
+			"slug":            "projection",
+			"name":            "Projection Flow",
+		},
+		StateBuckets: map[string]any{
+			"score": float64(9),
+		},
+	}
+
+	if err := workflowStore.Upsert(ctx, instance); err != nil {
+		t.Fatalf("upsert workflow instance: %v", err)
+	}
+
+	loaded, ok, err := workflowStore.Load(ctx, storageRef)
+	if err != nil {
+		t.Fatalf("load workflow instance: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected workflow instance to persist")
+	}
+	if got := loaded.CurrentState; got != "reviewing" {
+		t.Fatalf("CurrentState = %q, want reviewing", got)
+	}
+	if got := strings.TrimSpace(asString(loaded.Metadata["status"])); got != "waiting" {
+		t.Fatalf("Metadata status = %#v, want waiting", loaded.Metadata["status"])
+	}
+
+	var currentState string
+	var fieldsRaw []byte
+	if err := db.QueryRowContext(ctx, `
+		SELECT current_state, fields
+		FROM entity_state
+		WHERE run_id = $1::uuid AND entity_id = $2::uuid
+	`, testPipelineRunID, workflowInstanceRowID(storageRef)).Scan(&currentState, &fieldsRaw); err != nil {
+		t.Fatalf("query entity_state projection: %v", err)
+	}
+	if got := strings.TrimSpace(currentState); got != "reviewing" {
+		t.Fatalf("entity_state.current_state = %q, want reviewing", got)
+	}
+	fields, err := decodeWorkflowInstanceJSONMap("entity_state.fields", fieldsRaw)
+	if err != nil {
+		t.Fatalf("decode entity_state.fields: %v", err)
+	}
+	if _, ok := fields["status"]; ok {
+		t.Fatalf("entity_state.fields leaked control status: %#v", fields)
+	}
+	if got := fields["business_status"]; got != "approved" {
+		t.Fatalf("entity_state.fields business_status = %#v, want approved", got)
+	}
+}
+
 func TestWorkflowInstanceStoreProjection_StaticRowsDoNotGainMaterializedFlowPathOnRoundTrip(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
