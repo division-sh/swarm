@@ -2,12 +2,20 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
+)
+
+const (
+	traceFollowMaxReconnects    = 3
+	traceFollowInitialBackoff   = 250 * time.Millisecond
+	traceFollowMaximumBackoff   = time.Second
+	traceFollowRetryableReadErr = "read run.subscribe_trace notification:"
 )
 
 type diagnosticRunListOptions struct {
@@ -23,6 +31,7 @@ type diagnosticRunListOptions struct {
 type diagnosticTraceOptions struct {
 	apiOptions rootCommandOptions
 	follow     bool
+	noRetry    bool
 	since      string
 	limit      int
 	cursor     string
@@ -200,6 +209,7 @@ func newTraceCommand(opts rootCommandOptions) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&traceOpts.follow, "follow", false, "Follow live trace rows through /v1/ws run.subscribe_trace")
+	cmd.Flags().BoolVar(&traceOpts.noRetry, "no-retry", false, "Disable trace follow reconnect/recovery retries")
 	cmd.Flags().StringVar(&traceOpts.since, "since", "", "Snapshot-only RFC3339 trace materialization watermark")
 	cmd.Flags().IntVar(&traceOpts.limit, "limit", 0, "Snapshot-only page size, 1-2000")
 	cmd.Flags().StringVar(&traceOpts.cursor, "cursor", "", "Snapshot-only pagination cursor")
@@ -404,7 +414,7 @@ func runDiagnosticTraceCommand(ctx context.Context, out, errOut io.Writer, opts 
 		}
 	}
 	if opts.follow {
-		return followDiagnosticTraceCommand(ctx, out, errOut, client, runID)
+		return followDiagnosticTraceCommand(ctx, out, errOut, client, runID, opts)
 	}
 	snapshotParams["run_id"] = runID
 	var result diagnosticRunTraceResult
@@ -458,7 +468,7 @@ func (o diagnosticTraceOptions) snapshotParams() (map[string]any, error) {
 	return params, nil
 }
 
-func followDiagnosticTraceCommand(ctx context.Context, out, errOut io.Writer, client *cliAPIClient, runID string) error {
+func followDiagnosticTraceCommand(ctx context.Context, out, errOut io.Writer, client *cliAPIClient, runID string, opts diagnosticTraceOptions) error {
 	wsEndpoint, err := runCommandWebSocketEndpoint(client.endpoint)
 	if err != nil {
 		if errOut != nil {
@@ -466,45 +476,169 @@ func followDiagnosticTraceCommand(ctx context.Context, out, errOut io.Writer, cl
 		}
 		return commandExitError{code: runCommandErrorExitCode(err)}
 	}
-	sub, err := subscribeRunTrace(ctx, wsEndpoint, client.token, runID, nil)
-	if err != nil {
-		if errOut != nil {
-			fmt.Fprintln(errOut, err)
-		}
-		return commandExitError{code: runCommandErrorExitCode(err)}
+	reconnectsRemaining := traceFollowMaxReconnects
+	if opts.noRetry {
+		reconnectsRemaining = 0
 	}
-	defer sub.close()
+	retryAttempt := 0
+	var replaySince *time.Time
 	for {
-		select {
-		case <-ctx.Done():
-			if errOut != nil {
-				fmt.Fprintln(errOut, "detached from run trace")
+		sub, err := subscribeRunTrace(ctx, wsEndpoint, client.token, runID, replaySince)
+		if err != nil {
+			if ctx.Err() != nil {
+				return traceFollowDetached(errOut)
 			}
-			return commandExitError{code: 130}
-		case row, ok := <-sub.rows:
-			if !ok {
-				select {
-				case err := <-sub.errs:
-					if err != nil {
-						if errOut != nil {
-							fmt.Fprintln(errOut, err)
-						}
-						return commandExitError{code: runCommandErrorExitCode(err)}
-					}
-				default:
-				}
-				return nil
-			}
-			writeRunCommandTraceRow(out, row)
-		case err := <-sub.errs:
-			if err != nil {
+			if reconnectsRemaining == 0 || !traceFollowRetryableSubscribeError(err) {
 				if errOut != nil {
 					fmt.Fprintln(errOut, err)
 				}
 				return commandExitError{code: runCommandErrorExitCode(err)}
 			}
+			reconnectsRemaining--
+			retryAttempt++
+			if err := waitTraceFollowReconnect(ctx, errOut, retryAttempt); err != nil {
+				return err
+			}
+			continue
+		}
+		streamErr, interrupted := consumeDiagnosticTraceSubscription(ctx, out, sub, &replaySince)
+		sub.close()
+		if interrupted {
+			return traceFollowDetached(errOut)
+		}
+		if streamErr == nil {
+			if reconnectsRemaining == 0 {
+				return nil
+			}
+			reconnectsRemaining--
+			retryAttempt++
+			if err := waitTraceFollowReconnect(ctx, errOut, retryAttempt); err != nil {
+				return err
+			}
+			continue
+		}
+		if reconnectsRemaining == 0 || !traceFollowRetryableStreamError(streamErr) {
+			if errOut != nil {
+				fmt.Fprintln(errOut, streamErr)
+			}
+			return commandExitError{code: runCommandErrorExitCode(streamErr)}
+		}
+		reconnectsRemaining--
+		retryAttempt++
+		if err := waitTraceFollowReconnect(ctx, errOut, retryAttempt); err != nil {
+			return err
 		}
 	}
+}
+
+func consumeDiagnosticTraceSubscription(ctx context.Context, out io.Writer, sub *runTraceSubscription, replaySince **time.Time) (error, bool) {
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, true
+		case row, ok := <-sub.rows:
+			if !ok {
+				select {
+				case err := <-sub.errs:
+					if err != nil {
+						return err, false
+					}
+				default:
+				}
+				return nil, false
+			}
+			nextReplaySince, err := time.Parse(time.RFC3339Nano, row.EventCreatedAt)
+			if err != nil {
+				return fmt.Errorf("malformed run.subscribe_trace notification: event_created_at is not RFC3339: %w", err), false
+			}
+			writeRunCommandTraceRow(out, row)
+			nextReplaySince = nextReplaySince.UTC()
+			*replaySince = &nextReplaySince
+		case err := <-sub.errs:
+			if err != nil {
+				return err, false
+			}
+		}
+	}
+}
+
+func waitTraceFollowReconnect(ctx context.Context, errOut io.Writer, retryAttempt int) error {
+	timer := time.NewTimer(traceFollowBackoff(retryAttempt))
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return traceFollowDetached(errOut)
+	case <-timer.C:
+		return nil
+	}
+}
+
+func traceFollowBackoff(retryAttempt int) time.Duration {
+	if retryAttempt <= 1 {
+		return traceFollowInitialBackoff
+	}
+	backoff := traceFollowInitialBackoff
+	for i := 1; i < retryAttempt; i++ {
+		backoff *= 2
+		if backoff >= traceFollowMaximumBackoff {
+			return traceFollowMaximumBackoff
+		}
+	}
+	return backoff
+}
+
+func traceFollowDetached(errOut io.Writer) error {
+	if errOut != nil {
+		fmt.Fprintln(errOut, "detached from run trace")
+	}
+	return commandExitError{code: 130}
+}
+
+func traceFollowRetryableSubscribeError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var rpcErr *jsonRPCError
+	if errors.As(err, &rpcErr) {
+		return false
+	}
+	msg := err.Error()
+	if strings.HasPrefix(msg, "v1 WS dial failed:") || strings.HasPrefix(msg, "write run.subscribe_trace request:") {
+		return true
+	}
+	if strings.HasPrefix(msg, "read run.subscribe_trace response:") {
+		return traceFollowTransportErrorText(msg)
+	}
+	return false
+}
+
+func traceFollowRetryableStreamError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	if !strings.HasPrefix(msg, traceFollowRetryableReadErr) {
+		return false
+	}
+	return traceFollowTransportErrorText(msg)
+}
+
+func traceFollowTransportErrorText(msg string) bool {
+	msg = strings.ToLower(msg)
+	for _, fragment := range []string{
+		"websocket: close",
+		"unexpected eof",
+		"connection reset",
+		"connection refused",
+		"broken pipe",
+		"i/o timeout",
+		"use of closed network connection",
+	} {
+		if strings.Contains(msg, fragment) {
+			return true
+		}
+	}
+	return false
 }
 
 func runDiagnosticHealthCommand(ctx context.Context, out, errOut io.Writer, opts rootCommandOptions, output cliOutputOptions) error {

@@ -6600,7 +6600,7 @@ cli_specification:
       defaulting: If run-id is omitted, resolve the target through run.list with active-run preference.
       behavior: Run-scoped operational status projection. This is the v2 replacement for `swarm investigate run`.
     trace:
-      command: swarm trace [<run-id>] [--since <timestamp>] [--limit <n>] [--cursor <cursor>] [--follow]
+      command: swarm trace [<run-id>] [--since <timestamp>] [--limit <n>] [--cursor <cursor>] [--follow] [--no-retry]
       tier: must_have
       implementation_status: implemented
       owners: /v1/rpc run.trace for snapshot; /v1/ws run.subscribe_trace for --follow
@@ -6628,6 +6628,53 @@ cli_specification:
         - invalid --since, out-of-range --limit, blank --cursor, and --follow plus snapshot filters fail before API/WS calls
         - missing token fails before API calls through the shared CLI API client
         - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api, /rpc, /ws, or fallback token paths
+      promoted_trace_follow_recovery_contract:
+        status: api_owner_promoted_cli_implemented
+        implemented_by: '#928'
+        follow_owner: /v1/ws run.subscribe_trace
+        scope: >
+          Applies only to `swarm trace --follow`. `swarm run` foreground follow, connected follow, and reattach keep their
+          existing lifecycle policy and may continue to use the shared one-shot `subscribeRunTrace` helper without inheriting
+          this trace-specific reconnect policy.
+        retry_policy: >
+          By default, `swarm trace --follow` may reconnect after at most three retryable subscription interruptions after the
+          initial subscription attempt. The retry backoff is bounded exponential delay of 250ms, 500ms, then 1s. If a clean
+          subscription close exhausts the reconnect budget, the command exits successfully after rendering all received rows.
+          If a retryable transport error exhausts the budget, the command exits with the CLI runtime/transport error code.
+        retryable_classes:
+        - websocket dial failure
+        - websocket request write failure
+        - websocket subscription-response read failure caused by transport close/reset/timeout
+        - websocket notification read failure caused by transport close/reset/timeout
+        terminal_classes:
+        - JSON-RPC application errors such as RUN_NOT_FOUND
+        - malformed subscription responses or malformed result envelopes
+        - malformed subscription notifications, schema validation failures, or subscription mismatches
+        - notification queue overflow
+        - CLI validation failures, missing token, and snapshot flags combined with --follow
+        - operator interrupt / context cancellation
+        replay_watermark: >
+          Initial `run.subscribe_trace` requests omit `replay_since`. Recovered subscriptions set `replay_since` to the
+          RFC3339Nano `event_created_at` timestamp of the last successfully rendered RunTraceRow. If no row has been
+          rendered, recovered requests also omit `replay_since`. The CLI does not deduplicate rows; recovery is at-least-once
+          and the server/API owner remains responsible for trace ordering and retention semantics.
+        no_retry_flag: >
+          `--no-retry` disables this recovery loop for `swarm trace --follow` only. With `--no-retry`, the command performs
+          exactly one `run.subscribe_trace` request, never sends `replay_since`, exits 0 on a clean close, and fails closed on
+          the first subscription or notification error.
+        invalid_combinations:
+        - --since with --follow
+        - --limit with --follow
+        - --cursor with --follow
+        - direct --replay-since flag; replay_since is an internal recovery parameter, not a user-facing trace flag
+        proof_expectations:
+        - initial and recovered WebSocket request-shape tests prove exact run.subscribe_trace params and replay_since handling
+        - omitted-run follow resolves through /v1/rpc run.list once before recovered subscriptions for the resolved run id
+        - --no-retry proves one-shot close behavior and no replay_since
+        - malformed subscription responses and notifications fail closed without retrying indefinitely
+        - Ctrl-C detaches with exit 130 and does not call run.stop
+        - '`swarm run` foreground/follow and reattach regression proof remains unchanged'
+        - static no-bypass proof for no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy transports
         split_tail:
           until: Not promoted; the current run-debug trace owner has no upper-bound watermark contract.
           event_name: Not promoted; event-name filtering requires a typed RunTraceFilter owner before CLI use.
@@ -6636,7 +6683,7 @@ cli_specification:
           delivery_status: Not promoted; delivery-status filtering requires a typed RunTraceFilter owner before CLI use.
           include_payload: Not promoted; RunTraceRow has no payload field and output/schema ownership is split.
           shorthand_follow: Not promoted in this source-of-truth repair; `-f` is CLI UX only and must be gated separately.
-          subscription_retry: Not promoted; retry/`--no-retry` affects shared run.subscribe_trace consumers and is split.
+          shared_run_follow_recovery: Not promoted; `swarm run` follow and reattach have distinct lifecycle semantics and remain split.
           all_runs: Not promoted; multi-run trace needs a canonical multi-run owner or explicit run.list + run.trace composition contract.
     mailbox_list:
       command: swarm mailbox list
