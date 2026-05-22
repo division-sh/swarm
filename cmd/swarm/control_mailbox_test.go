@@ -345,6 +345,8 @@ func TestMailboxRejectsInvalidInputBeforeRequest(t *testing.T) {
 		{name: "approve unsupported flag", args: []string{"mailbox", "approve", "mailbox-1", "--unknown"}, wantStderr: "unknown flag", wantNoCalls: true},
 		{name: "approve malformed payload", args: []string{"mailbox", "approve", "mailbox-1", "--decision-payload-json", "{"}, wantStderr: "--decision-payload-json must be a JSON object", wantNoCalls: true},
 		{name: "approve non-object payload", args: []string{"mailbox", "approve", "mailbox-1", "--decision-payload-json", "[]"}, wantStderr: "--decision-payload-json must be a JSON object", wantNoCalls: true},
+		{name: "approve blank inline payload", args: []string{"mailbox", "approve", "mailbox-1", "--decision-payload-json", ""}, wantStderr: "--decision-payload-json must be a JSON object", wantNoCalls: true},
+		{name: "approve blank payload file path", args: []string{"mailbox", "approve", "mailbox-1", "--decision-payload", ""}, wantStderr: "--decision-payload requires a file path", wantNoCalls: true},
 		{name: "approve missing payload file", args: []string{"mailbox", "approve", "mailbox-1", "--decision-payload", filepath.Join(t.TempDir(), "missing.json")}, wantStderr: "--decision-payload could not be read", wantNoCalls: true},
 		{
 			name: "approve malformed payload file",
@@ -390,6 +392,18 @@ func TestMailboxRejectsInvalidInputBeforeRequest(t *testing.T) {
 					t.Fatalf("write payload file: %v", err)
 				}
 				return []string{"mailbox", "approve", "mailbox-1", "--decision-payload", path, "--decision-payload-json", `{"approved":true}`}
+			},
+			wantStderr:  "--decision-payload and --decision-payload-json are mutually exclusive",
+			wantNoCalls: true,
+		},
+		{
+			name: "approve conflicting payload flags with blank inline",
+			prepare: func(t *testing.T) []string {
+				path := filepath.Join(t.TempDir(), "payload.json")
+				if err := os.WriteFile(path, []byte(`{"approved":true}`), 0o600); err != nil {
+					t.Fatalf("write payload file: %v", err)
+				}
+				return []string{"mailbox", "approve", "mailbox-1", "--decision-payload", path, "--decision-payload-json", ""}
 			},
 			wantStderr:  "--decision-payload and --decision-payload-json are mutually exclusive",
 			wantNoCalls: true,

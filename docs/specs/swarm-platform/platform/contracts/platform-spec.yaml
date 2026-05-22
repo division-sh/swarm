@@ -7256,8 +7256,9 @@ cli_specification:
         behavior: Optional v1 API idempotency key for this mutating approval request.
       validation:
       - '`--decision-payload` and `--decision-payload-json` are mutually exclusive.'
-      - '`--decision-payload` file content and `--decision-payload-json` values MUST parse as JSON objects; malformed, null, and non-object values fail before any API call.'
-      - 'Missing/unreadable `--decision-payload` files fail before any API call.'
+      - 'Flag presence is semantic: explicitly supplied blank payload flags are invalid rather than treated as absent.'
+      - '`--decision-payload` file content and `--decision-payload-json` values MUST parse as JSON objects; blank, malformed, null, and non-object values fail before any API call.'
+      - 'Blank, missing, or unreadable `--decision-payload` file paths fail before any API call.'
       output:
         success_detail: Existing `MailboxDecisionResult` summary rendering remains authoritative; richer mutation-result rendering is split under #856/#794.
       exit_codes:
@@ -7269,7 +7270,7 @@ cli_specification:
         decision_conflict_or_rejected: 6
       proof_expectations:
       - exact /v1/rpc mailbox.approve call with mailbox_id, optional decision_payload, and optional idempotency_key params only
-      - invalid args, conflicting payload flags, missing/unreadable payload files, malformed/null/non-object payload JSON, and missing SWARM_API_TOKEN make zero API calls
+      - invalid args, conflicting payload flags including explicitly blank conflicting values, blank/missing/unreadable payload files, blank/malformed/null/non-object payload JSON, and missing SWARM_API_TOKEN make zero API calls
       - file-backed and inline payload inputs share the same canonical object validation and param construction
       - no direct DB/store/runtime/EventBus/dashboard/Builder reads or writes and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, or retired swarm control mailbox path usage
       split_tail: >
