@@ -296,7 +296,7 @@ func TestOperatorAgentReadSurfaceLoadAgentProjectsSessionAndTurnRefs(t *testing.
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
-			AddRow("agent-1", "active", sessionID, sessionStartedAt, 2, "", nil, []byte(`{"provider_session_id":"provider-sess-1"}`), 0, 0, 0, 0, turnID, "task-1", "entity-1", false, "model error", turnCompletedAt, []byte(`[]`)))
+			AddRow("agent-1", "active", sessionID, sessionStartedAt, 2, "lease-owner", time.Now().Add(time.Minute), []byte(`{"provider_session_id":"provider-sess-1"}`), 0, 0, 0, 0, turnID, "task-1", "entity-1", false, "model error", turnCompletedAt, []byte(`[]`)))
 
 	detail, err := reader.LoadOperatorAgent(context.Background(), "agent-1")
 	if err != nil {
@@ -308,8 +308,65 @@ func TestOperatorAgentReadSurfaceLoadAgentProjectsSessionAndTurnRefs(t *testing.
 	if detail.LastTurnRef == nil || detail.LastTurnRef.TurnID != turnID || !detail.LastTurnRef.CompletedAt.Equal(turnCompletedAt) || detail.LastTurnRef.ParseOK || detail.LastTurnRef.Error != "model error" {
 		t.Fatalf("last_turn_ref = %#v", detail.LastTurnRef)
 	}
+	if detail.Agent.Status != "idle" {
+		t.Fatalf("agent.status = %q, want idle from empty canonical lifecycle facts", detail.Agent.Status)
+	}
+	if detail.Agent.DashboardState != "idle" {
+		t.Fatalf("dashboard state = %q, want idle from empty canonical lifecycle facts", detail.Agent.DashboardState)
+	}
+	if detail.Agent.BlockingLayer != "" {
+		t.Fatalf("blocking_layer = %q, want empty without canonical lifecycle blocker", detail.Agent.BlockingLayer)
+	}
 	if detail.Agent.CurrentSessionRef == nil || detail.Agent.LastTurnRef == nil {
 		t.Fatalf("agent summary refs not populated: %+v", detail.Agent)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
+func TestOperatorAgentReadSurfaceListAgentsDoesNotDeriveStatusFromActiveLease(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
+		caps:   canonicalAgentConversationReadCaps(),
+		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
+		pending: map[string]PendingAgentDeliveryFacts{
+			"agent-1": {},
+		},
+		lifecycle: map[string]AgentLifecycleFacts{
+			"agent-1": {},
+		},
+	}, 0)
+
+	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
+		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
+		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
+			AddRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 2, "lease-owner", time.Now().Add(time.Minute), []byte(`{}`), 0, 0, 0, 0, "", "", "", false, "", nil, []byte(`[]`)))
+
+	result, err := reader.ListOperatorAgents(context.Background(), OperatorAgentListOptions{})
+	if err != nil {
+		t.Fatalf("ListOperatorAgents: %v", err)
+	}
+	if len(result.Agents) != 1 {
+		t.Fatalf("agent count = %d, want 1", len(result.Agents))
+	}
+	agent := result.Agents[0]
+	if agent.Status != "idle" {
+		t.Fatalf("status = %q, want idle from empty canonical lifecycle facts", agent.Status)
+	}
+	if agent.DashboardState != "idle" {
+		t.Fatalf("dashboard state = %q, want idle from empty canonical lifecycle facts", agent.DashboardState)
+	}
+	if agent.BlockingLayer != "" {
+		t.Fatalf("blocking_layer = %q, want empty without canonical lifecycle blocker", agent.BlockingLayer)
+	}
+	if agent.LockOwner != "lease-owner" || agent.LockExpiresAt.IsZero() {
+		t.Fatalf("raw lease metadata not preserved as debug data: %+v", agent)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations: %v", err)
@@ -443,6 +500,41 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisOmitsAbsentLifecycle(t *testi
 	}
 	if diagnosis.Active != nil {
 		t.Fatalf("active = %#v, want nil without selected active-session latest turn", diagnosis.Active)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
+func TestOperatorAgentReadSurfaceLoadAgentDiagnosisDoesNotDeriveStatusFromActiveLease(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
+		caps:   canonicalAgentConversationReadCaps(),
+		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
+		lifecycle: map[string]AgentLifecycleFacts{
+			"agent-1": {},
+		},
+	}, 0)
+
+	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
+		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
+		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
+			AddRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 0, "lease-owner", time.Now().Add(time.Minute), []byte(`{}`), 0, 0, 0, 0, "", "", "", false, "", nil, []byte(`[]`)))
+
+	diagnosis, err := reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1", OperatorAgentDiagnosisOptions{})
+	if err != nil {
+		t.Fatalf("LoadOperatorAgentDiagnosis: %v", err)
+	}
+	if diagnosis.Status != "idle" {
+		t.Fatalf("status = %q, want idle from empty canonical lifecycle facts", diagnosis.Status)
+	}
+	if diagnosis.DeliveryLifecycle != nil {
+		t.Fatalf("delivery_lifecycle = %#v, want nil", diagnosis.DeliveryLifecycle)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations: %v", err)
