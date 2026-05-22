@@ -144,12 +144,14 @@ func TestWorkflowInstanceStoreProjection_DoesNotExposeControlStatusAsEntityField
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "reviewing",
 		EnteredStageAt:  time.Now().UTC().Round(time.Microsecond),
+		Config: map[string]any{
+			"status": "waiting",
+		},
 		Metadata: map[string]any{
-			"status":          "waiting",
-			"business_status": "approved",
-			"entity_type":     "workflow_subject",
-			"slug":            "projection",
-			"name":            "Projection Flow",
+			"status":      "entity-open",
+			"entity_type": "workflow_subject",
+			"slug":        "projection",
+			"name":        "Projection Flow",
 		},
 		StateBuckets: map[string]any{
 			"score": float64(9),
@@ -170,17 +172,19 @@ func TestWorkflowInstanceStoreProjection_DoesNotExposeControlStatusAsEntityField
 	if got := loaded.CurrentState; got != "reviewing" {
 		t.Fatalf("CurrentState = %q, want reviewing", got)
 	}
-	if got := strings.TrimSpace(asString(loaded.Metadata["status"])); got != "waiting" {
-		t.Fatalf("Metadata status = %#v, want waiting", loaded.Metadata["status"])
+	if got := strings.TrimSpace(asString(loaded.Metadata["status"])); got != "entity-open" {
+		t.Fatalf("Metadata status = %#v, want entity-open", loaded.Metadata["status"])
 	}
 
 	var currentState string
 	var fieldsRaw []byte
+	var controlStatus string
 	if err := db.QueryRowContext(ctx, `
-		SELECT current_state, fields
-		FROM entity_state
-		WHERE run_id = $1::uuid AND entity_id = $2::uuid
-	`, testPipelineRunID, workflowInstanceRowID(storageRef)).Scan(&currentState, &fieldsRaw); err != nil {
+		SELECT es.current_state, es.fields, COALESCE(fi.config->>'status', '')
+		FROM entity_state es
+		JOIN flow_instances fi ON fi.instance_id = es.flow_instance
+		WHERE es.run_id = $1::uuid AND es.entity_id = $2::uuid
+	`, testPipelineRunID, workflowInstanceRowID(storageRef)).Scan(&currentState, &fieldsRaw, &controlStatus); err != nil {
 		t.Fatalf("query entity_state projection: %v", err)
 	}
 	if got := strings.TrimSpace(currentState); got != "reviewing" {
@@ -190,11 +194,11 @@ func TestWorkflowInstanceStoreProjection_DoesNotExposeControlStatusAsEntityField
 	if err != nil {
 		t.Fatalf("decode entity_state.fields: %v", err)
 	}
-	if _, ok := fields["status"]; ok {
-		t.Fatalf("entity_state.fields leaked control status: %#v", fields)
+	if got := fields["status"]; got != "entity-open" {
+		t.Fatalf("entity_state.fields status = %#v, want entity-open", got)
 	}
-	if got := fields["business_status"]; got != "approved" {
-		t.Fatalf("entity_state.fields business_status = %#v, want approved", got)
+	if got := controlStatus; got != "waiting" {
+		t.Fatalf("flow_instances.config status = %q, want waiting", got)
 	}
 }
 

@@ -467,13 +467,6 @@ func (s *WorkflowInstanceStore) selectActiveByFieldsSpec(ctx context.Context, sc
 		if err != nil {
 			return nil, fmt.Errorf("marshal workflow instance selector %s: %w", selector.Field, err)
 		}
-		if workflowInstanceControlStatusSelector(segments) {
-			args = append(args, string(valueJSON))
-			where.WriteString(fmt.Sprintf(`
-		  AND COALESCE(fi.config, '{}'::jsonb) #> '{status}' = $%d::jsonb
-		`, len(args)))
-			continue
-		}
 		args = append(args, pq.Array(segments), string(valueJSON))
 		where.WriteString(fmt.Sprintf(`
 		  AND es.fields #> $%d::text[] = $%d::jsonb
@@ -639,10 +632,6 @@ func workflowInstanceFieldSelectorPath(field string) []string {
 		out = append(out, part)
 	}
 	return out
-}
-
-func workflowInstanceControlStatusSelector(segments []string) bool {
-	return len(segments) == 1 && segments[0] == "status"
 }
 
 func (s *WorkflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRef string, instance WorkflowInstance) error {
@@ -1026,7 +1015,7 @@ func workflowInstancePersistedProjectionFromInstance(instance WorkflowInstance, 
 		InstanceKind:      strings.TrimSpace(asString(instance.Metadata["instance_kind"])),
 		TemplateVersion:   strings.TrimSpace(asString(instance.Metadata["template_version"])),
 		LastSourceEvent:   strings.TrimSpace(asString(instance.Metadata["last_source_event"])),
-		Status:            strings.TrimSpace(asString(instance.Metadata["status"])),
+		Status:            strings.TrimSpace(asString(instance.Config["status"])),
 		ParentEntityID:    strings.TrimSpace(asString(instance.Metadata["parent_entity_id"])),
 		TransitionHistory: append([]WorkflowTransitionRecord{}, instance.TransitionHistory...),
 	}
@@ -1036,7 +1025,7 @@ func workflowInstancePersistedProjectionFromInstance(instance WorkflowInstance, 
 	for _, key := range []string{
 		"slug", "name", "entity_type", "parent_entity_id",
 		"instance_id", "storage_ref", "flow_path", "instance_kind",
-		"template_version", "workflow_version", "transition_history", "status",
+		"template_version", "workflow_version", "transition_history",
 	} {
 		delete(metadata, key)
 	}
@@ -1083,9 +1072,6 @@ func (p workflowInstancePersistedProjection) Metadata() map[string]any {
 	}
 	if strings.TrimSpace(p.Control.LastSourceEvent) != "" {
 		metadata["last_source_event"] = strings.TrimSpace(p.Control.LastSourceEvent)
-	}
-	if strings.TrimSpace(p.Control.Status) != "" {
-		metadata["status"] = strings.TrimSpace(p.Control.Status)
 	}
 	if strings.TrimSpace(p.Control.ParentEntityID) != "" {
 		metadata["parent_entity_id"] = strings.TrimSpace(p.Control.ParentEntityID)
@@ -1223,7 +1209,6 @@ func decodeWorkflowInstanceConfigPayload(raw []byte, control workflowInstancePer
 	delete(config, "instance_kind")
 	delete(config, "template_version")
 	delete(config, "last_source_event")
-	delete(config, "status")
 	delete(config, "parent_entity_id")
 	delete(config, "transition_history")
 	control.InstanceID = strings.TrimSpace(instanceID)

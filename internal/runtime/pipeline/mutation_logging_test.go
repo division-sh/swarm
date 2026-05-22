@@ -130,6 +130,7 @@ func TestWorkflowInstanceStore_UpsertTracksFieldsGatesAndAccumulatorInMutationLo
 	fields := mutationFieldsForEntity(t, db, entityID)
 	for _, want := range []string{
 		"current_state",
+		"status",
 		"business_status",
 		"gates.g_ready",
 		"gates.g_done",
@@ -139,9 +140,6 @@ func TestWorkflowInstanceStore_UpsertTracksFieldsGatesAndAccumulatorInMutationLo
 		if !containsMutationField(fields, want) {
 			t.Fatalf("mutation fields missing %q: %v", want, fields)
 		}
-	}
-	if containsMutationField(fields, "status") {
-		t.Fatalf("mutation fields leaked control status as entity field: %v", fields)
 	}
 
 	if err := trackedMutationStateMatchesEntityState(t, db, entityID); err != nil {

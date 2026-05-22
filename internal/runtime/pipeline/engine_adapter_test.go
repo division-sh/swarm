@@ -745,6 +745,10 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitMaterializesLocalGitRef(t 
 	if got := strings.TrimSpace(asString(instance.Metadata["repo_url"])); got != "swarm-artifact://repos/"+initial["repo_id"].(string) {
 		t.Fatalf("repo_url = %q", got)
 	}
+	if got := strings.TrimSpace(asString(instance.Metadata["status"])); got != "committed" {
+		t.Fatalf("artifact entity status = %q, want committed", got)
+	}
+	assertEntityStateField(t, db, entityID, "status", "committed")
 	ref := strings.TrimSpace(asString(instance.Metadata["current_ref"]))
 	if len(ref) != 40 {
 		t.Fatalf("current_ref length = %d ref=%q", len(ref), ref)

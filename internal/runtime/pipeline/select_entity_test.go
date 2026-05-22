@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -91,7 +92,7 @@ func TestExecuteNodeContractHandlerSelectEntityReplayUsesSameTargetEntity(t *tes
 	}
 }
 
-func TestExecuteNodeContractHandlerSelectEntityMatchesControlStatus(t *testing.T) {
+func TestExecuteNodeContractHandlerSelectEntityMatchesTypedStatusField(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
@@ -102,9 +103,8 @@ func TestExecuteNodeContractHandlerSelectEntityMatchesControlStatus(t *testing.T
 		"status":           "pending",
 		"business_status":  "approved",
 		"spent_usd":        0,
-		"control_status":   "not-a-selector",
 		"domain_status_id": "status-field-regression",
-	})
+	}, map[string]any{"status": "waiting"})
 
 	result, err := pc.executeNodeContractHandler(ctx, "treasury-orchestrator", runtimecontracts.SystemNodeEventHandler{
 		SelectEntity: &runtimecontracts.SelectEntitySpec{
@@ -156,9 +156,10 @@ func TestExecuteNodeContractHandlerSelectEntityMatchesControlStatus(t *testing.T
 		t.Fatalf("spent_usd = %#v, want 42", got)
 	}
 	if got := strings.TrimSpace(asString(instance.Metadata["status"])); got != "pending" {
-		t.Fatalf("control status metadata = %q, want pending", got)
+		t.Fatalf("typed status metadata = %q, want pending", got)
 	}
-	assertEntityStateFieldMissing(t, db, budgetEntityID, "status")
+	assertEntityStateField(t, db, budgetEntityID, "status", "pending")
+	assertFlowInstanceControlConfig(t, db, instance.StorageRef, "status", "waiting")
 }
 
 func TestExecuteNodeContractHandlerSelectOrCreateEntityCreatesTargetOwnedEntity(t *testing.T) {
@@ -919,21 +920,22 @@ func seedSelectEntityBudgetWithState(t *testing.T, store *WorkflowInstanceStore,
 	return seedSelectEntityBudgetWithMetadataAndState(t, store, ctx, source, instanceID, map[string]any{
 		"vertical_id": verticalID,
 		"spent_usd":   spent,
-	}, currentState)
+	}, nil, currentState)
 }
 
-func seedSelectEntityBudgetWithMetadata(t *testing.T, store *WorkflowInstanceStore, ctx context.Context, source semanticview.Source, instanceID string, metadata map[string]any) string {
+func seedSelectEntityBudgetWithMetadata(t *testing.T, store *WorkflowInstanceStore, ctx context.Context, source semanticview.Source, instanceID string, metadata map[string]any, config map[string]any) string {
 	t.Helper()
-	return seedSelectEntityBudgetWithMetadataAndState(t, store, ctx, source, instanceID, metadata, "active")
+	return seedSelectEntityBudgetWithMetadataAndState(t, store, ctx, source, instanceID, metadata, config, "active")
 }
 
-func seedSelectEntityBudgetWithMetadataAndState(t *testing.T, store *WorkflowInstanceStore, ctx context.Context, source semanticview.Source, instanceID string, metadata map[string]any, currentState string) string {
+func seedSelectEntityBudgetWithMetadataAndState(t *testing.T, store *WorkflowInstanceStore, ctx context.Context, source semanticview.Source, instanceID string, metadata map[string]any, config map[string]any, currentState string) string {
 	t.Helper()
 	identity := DeriveFlowInstanceIdentity(source, "treasury", instanceID)
 	metadata = cloneStringAnyMap(metadata)
 	if metadata == nil {
 		metadata = map[string]any{}
 	}
+	config = cloneStringAnyMap(config)
 	metadata["flow_path"] = identity.InstancePath
 	metadata["instance_id"] = identity.InstanceID
 	metadata["storage_ref"] = identity.InstancePath
@@ -944,6 +946,7 @@ func seedSelectEntityBudgetWithMetadataAndState(t *testing.T, store *WorkflowIns
 		WorkflowName:    "treasury",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    strings.TrimSpace(currentState),
+		Config:          config,
 		Metadata:        metadata,
 	}
 	if err := store.Upsert(ctx, instance); err != nil {
@@ -970,18 +973,41 @@ func assertSelectEntityReceiptRow(t *testing.T, db *sql.DB, eventID, nodeID stri
 	}
 }
 
-func assertEntityStateFieldMissing(t *testing.T, db *sql.DB, entityID, field string) {
+func assertEntityStateField(t *testing.T, db *sql.DB, entityID, field string, want any) {
 	t.Helper()
-	var exists bool
+	var gotRaw []byte
 	if err := db.QueryRowContext(context.Background(), `
-		SELECT fields ? $3
+		SELECT fields -> $3
 		FROM entity_state
 		WHERE run_id = $1::uuid AND entity_id = $2::uuid
-	`, testPipelineRunID, entityID, field).Scan(&exists); err != nil {
+	`, testPipelineRunID, entityID, field).Scan(&gotRaw); err != nil {
 		t.Fatalf("load entity_state fields for %s: %v", entityID, err)
 	}
-	if exists {
-		t.Fatalf("entity_state.fields unexpectedly contains %q", field)
+	wantRaw, err := json.Marshal(want)
+	if err != nil {
+		t.Fatalf("marshal wanted entity_state field %s: %v", field, err)
+	}
+	if string(gotRaw) != string(wantRaw) {
+		t.Fatalf("entity_state.fields[%q] = %s, want %s", field, gotRaw, wantRaw)
+	}
+}
+
+func assertFlowInstanceControlConfig(t *testing.T, db *sql.DB, storageRef, field string, want any) {
+	t.Helper()
+	var gotRaw []byte
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT config -> $2
+		FROM flow_instances
+		WHERE instance_id = $1
+	`, storageRef, field).Scan(&gotRaw); err != nil {
+		t.Fatalf("load flow_instances config for %s: %v", storageRef, err)
+	}
+	wantRaw, err := json.Marshal(want)
+	if err != nil {
+		t.Fatalf("marshal wanted flow instance config %s: %v", field, err)
+	}
+	if string(gotRaw) != string(wantRaw) {
+		t.Fatalf("flow_instances.config[%q] = %s, want %s", field, gotRaw, wantRaw)
 	}
 }
 
