@@ -21,6 +21,13 @@ const (
 	ExamplesPolicyAppliesToAllGenerated      = "all_generated_methods"
 	ExamplesPolicyOpenRPCExamplesOmitted     = "omitted_until_explicitly_authored"
 	ExamplesPolicyRuntimeFixturesNotExamples = "not_examples_source"
+
+	ServiceDiscoveryPolicyStatusNotPublished            = "not_published"
+	ServiceDiscoveryPolicyOwner                         = "api_specification.service_discovery_policy"
+	ServiceDiscoveryPolicyAppliesToGeneratedCatalog     = "generated_v1_method_catalog"
+	ServiceDiscoveryPolicyRPCDiscoverOmitted            = "omitted"
+	ServiceDiscoveryPolicyPublicationArtifactOpenRPC    = "generated_openrpc_json"
+	ServiceDiscoveryPolicyRuntimeBehaviorMethodNotFound = "out_of_catalog_method_not_found"
 )
 
 type PlatformSpec struct {
@@ -28,12 +35,13 @@ type PlatformSpec struct {
 }
 
 type APISpecification struct {
-	Description           string            `yaml:"description" json:"description,omitempty"`
-	Components            Components        `yaml:"components" json:"components"`
-	ExamplesPolicy        ExamplesPolicy    `yaml:"examples_policy" json:"examples_policy,omitempty"`
-	MethodCatalogMetadata map[string]any    `yaml:"method_catalog_metadata" json:"method_catalog_metadata,omitempty"`
-	MethodCatalog         map[string]Method `yaml:"method_catalog" json:"method_catalog"`
-	Conventions           Conventions       `yaml:"conventions" json:"conventions"`
+	Description            string                 `yaml:"description" json:"description,omitempty"`
+	Components             Components             `yaml:"components" json:"components"`
+	ExamplesPolicy         ExamplesPolicy         `yaml:"examples_policy" json:"examples_policy,omitempty"`
+	ServiceDiscoveryPolicy ServiceDiscoveryPolicy `yaml:"service_discovery_policy" json:"service_discovery_policy,omitempty"`
+	MethodCatalogMetadata  map[string]any         `yaml:"method_catalog_metadata" json:"method_catalog_metadata,omitempty"`
+	MethodCatalog          map[string]Method      `yaml:"method_catalog" json:"method_catalog"`
+	Conventions            Conventions            `yaml:"conventions" json:"conventions"`
 }
 
 type ExamplesPolicy struct {
@@ -45,6 +53,17 @@ type ExamplesPolicy struct {
 	Reason                    string   `yaml:"reason" json:"reason,omitempty"`
 	Requirements              []string `yaml:"requirements" json:"requirements,omitempty"`
 	FutureSourceModelRequired bool     `yaml:"future_source_model_required" json:"future_source_model_required,omitempty"`
+}
+
+type ServiceDiscoveryPolicy struct {
+	Status              string   `yaml:"status" json:"status,omitempty"`
+	Owner               string   `yaml:"owner" json:"owner,omitempty"`
+	AppliesTo           string   `yaml:"applies_to" json:"applies_to,omitempty"`
+	RPCDiscover         string   `yaml:"rpc_discover" json:"rpc_discover,omitempty"`
+	PublicationArtifact string   `yaml:"publication_artifact" json:"publication_artifact,omitempty"`
+	RuntimeBehavior     string   `yaml:"runtime_behavior" json:"runtime_behavior,omitempty"`
+	Reason              string   `yaml:"reason" json:"reason,omitempty"`
+	Requirements        []string `yaml:"requirements" json:"requirements,omitempty"`
 }
 
 type Components struct {
@@ -188,6 +207,12 @@ func Validate(api *APISpecification) (ValidationReport, error) {
 		problems = append(problems, "components.errors.description must be metadata, not an error code")
 	}
 	problems = append(problems, validateExamplesPolicy(api.ExamplesPolicy)...)
+	problems = append(problems, validateServiceDiscoveryPolicy(api.ServiceDiscoveryPolicy)...)
+	if api.ServiceDiscoveryPolicy.Status == ServiceDiscoveryPolicyStatusNotPublished {
+		if _, ok := api.MethodCatalog["rpc.discover"]; ok {
+			problems = append(problems, "method_catalog must not include rpc.discover while api_specification.service_discovery_policy.status is not_published")
+		}
+	}
 
 	scopeCatalog := stringSet(api.Conventions.Scopes.Catalog)
 	mutatingCatalog := stringSet(api.Conventions.Idempotency.MutatingMethods)
@@ -294,6 +319,42 @@ func validateExamplesPolicy(policy ExamplesPolicy) []string {
 	}
 	if !policy.FutureSourceModelRequired {
 		problems = append(problems, "api_specification.examples_policy.future_source_model_required must be true")
+	}
+	return problems
+}
+
+func validateServiceDiscoveryPolicy(policy ServiceDiscoveryPolicy) []string {
+	var problems []string
+	if strings.TrimSpace(policy.Status) == "" {
+		problems = append(problems, "api_specification.service_discovery_policy missing status")
+	} else if policy.Status != ServiceDiscoveryPolicyStatusNotPublished {
+		problems = append(problems, fmt.Sprintf("api_specification.service_discovery_policy.status = %q, want %q", policy.Status, ServiceDiscoveryPolicyStatusNotPublished))
+	}
+	if policy.Owner != ServiceDiscoveryPolicyOwner {
+		problems = append(problems, fmt.Sprintf("api_specification.service_discovery_policy.owner = %q, want %q", policy.Owner, ServiceDiscoveryPolicyOwner))
+	}
+	if policy.AppliesTo != ServiceDiscoveryPolicyAppliesToGeneratedCatalog {
+		problems = append(problems, fmt.Sprintf("api_specification.service_discovery_policy.applies_to = %q, want %q", policy.AppliesTo, ServiceDiscoveryPolicyAppliesToGeneratedCatalog))
+	}
+	if policy.RPCDiscover != ServiceDiscoveryPolicyRPCDiscoverOmitted {
+		problems = append(problems, fmt.Sprintf("api_specification.service_discovery_policy.rpc_discover = %q, want %q", policy.RPCDiscover, ServiceDiscoveryPolicyRPCDiscoverOmitted))
+	}
+	if policy.PublicationArtifact != ServiceDiscoveryPolicyPublicationArtifactOpenRPC {
+		problems = append(problems, fmt.Sprintf("api_specification.service_discovery_policy.publication_artifact = %q, want %q", policy.PublicationArtifact, ServiceDiscoveryPolicyPublicationArtifactOpenRPC))
+	}
+	if policy.RuntimeBehavior != ServiceDiscoveryPolicyRuntimeBehaviorMethodNotFound {
+		problems = append(problems, fmt.Sprintf("api_specification.service_discovery_policy.runtime_behavior = %q, want %q", policy.RuntimeBehavior, ServiceDiscoveryPolicyRuntimeBehaviorMethodNotFound))
+	}
+	if strings.TrimSpace(policy.Reason) == "" {
+		problems = append(problems, "api_specification.service_discovery_policy missing reason")
+	}
+	if len(policy.Requirements) == 0 {
+		problems = append(problems, "api_specification.service_discovery_policy must list enforcement requirements")
+	}
+	for i, requirement := range policy.Requirements {
+		if strings.TrimSpace(requirement) == "" {
+			problems = append(problems, fmt.Sprintf("api_specification.service_discovery_policy.requirements[%d] is empty", i))
+		}
 	}
 	return problems
 }
