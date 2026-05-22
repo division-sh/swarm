@@ -101,7 +101,7 @@ func (p deliveryPlanner) Plan(ctx context.Context, evt events.Event) (eventDeliv
 	plan.PersistedRecipients = manifest.PersistedRecipients
 	plan.DeliveryTargets = manifest.DeliveryTargets
 	plan.TargetFailure = manifest.TargetFailure
-	if plan.TargetFailure != "" && hasInternalRoutedSubscriber(routing.RoutedRecipients) {
+	if plan.TargetFailure != "" && hasInternalRoutedSubscriberForTarget(evt, routing.RoutedRecipients) {
 		plan.TargetFailure = ""
 	}
 	plan.RoutedRecipients = routing.RoutedRecipients
@@ -304,16 +304,37 @@ func filterDeliveryRecipientCandidates(evt events.Event, recipients []deliveryRe
 	return manifest
 }
 
-func hasInternalRoutedSubscriber(subscribers []Subscriber) bool {
+func hasInternalRoutedSubscriberForTarget(evt events.Event, subscribers []Subscriber) bool {
+	targets := eventDeliveryTargetRoutes(evt)
 	for _, subscriber := range subscribers {
 		if strings.TrimSpace(subscriber.ID) == "" {
 			continue
 		}
-		if strings.TrimSpace(subscriber.Type) != "agent" {
+		if strings.TrimSpace(subscriber.Type) == "agent" {
+			continue
+		}
+		if len(targets) == 0 {
 			return true
+		}
+		for _, target := range targets {
+			if routeMatchesInternalSubscriber(target, subscriber) {
+				return true
+			}
 		}
 	}
 	return false
+}
+
+func routeMatchesInternalSubscriber(route events.RouteIdentity, subscriber Subscriber) bool {
+	route = route.Normalized()
+	if route.Empty() {
+		return false
+	}
+	path := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
+	if path == "" {
+		return route.FlowInstance == "" && route.FlowID == "" && route.EntityID != ""
+	}
+	return route.FlowInstance != "" && route.FlowInstance == path
 }
 
 func targetDeliveryFailure(evt events.Event, descriptors map[string]ActiveAgentDescriptor) runtimepinrouting.TargetFailure {

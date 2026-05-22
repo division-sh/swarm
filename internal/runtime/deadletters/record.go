@@ -27,10 +27,25 @@ type Record struct {
 	Timestamp           string
 }
 
+type execer interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
 func Insert(ctx context.Context, db *sql.DB, rec Record) error {
 	if db == nil {
 		return fmt.Errorf("dead letter db is required")
 	}
+	return insert(ctx, db, rec)
+}
+
+func InsertTx(ctx context.Context, tx *sql.Tx, rec Record) error {
+	if tx == nil {
+		return fmt.Errorf("dead letter tx is required")
+	}
+	return insert(ctx, tx, rec)
+}
+
+func insert(ctx context.Context, db execer, rec Record) error {
 	rec.OriginalEventID = strings.TrimSpace(rec.OriginalEventID)
 	rec.OriginalEvent = strings.TrimSpace(rec.OriginalEvent)
 	rec.EntityID = strings.TrimSpace(rec.EntityID)

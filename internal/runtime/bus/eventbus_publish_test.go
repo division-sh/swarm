@@ -933,6 +933,52 @@ func TestEventBusPublishTransactional_PersistsInboundEventBeforeInterceptorsRun(
 	}
 }
 
+func TestEventBusPublishTransactional_RecordsTargetFailureDeadLetter(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	eb, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	ctx := context.Background()
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	eventID := uuid.NewString()
+	targetEntityID := uuid.NewString()
+	err = eb.PublishTx(ctx, tx, (events.Event{
+		ID:        eventID,
+		Type:      events.EventType("child/output.done"),
+		CreatedAt: time.Now().UTC(),
+		Payload:   []byte(`{}`),
+	}).WithTargetRoute(events.RouteIdentity{EntityID: targetEntityID, FlowInstance: "missing-flow"}))
+	if err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("PublishTx: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	var reason, targetContext string
+	if err := db.QueryRowContext(ctx, `
+		SELECT target_failure_reason, target_context::text
+		FROM dead_letters
+		WHERE original_event_id = $1::uuid
+		  AND failure_type = 'target_resolution_failed'
+		  AND handler_node = 'pin_routing'
+	`, eventID).Scan(&reason, &targetContext); err != nil {
+		t.Fatalf("query dead_letters: %v", err)
+	}
+	if reason != "target_unreachable_terminated" {
+		t.Fatalf("target failure reason = %q, want target_unreachable_terminated", reason)
+	}
+	if !strings.Contains(targetContext, "missing-flow") {
+		t.Fatalf("target context = %s, want missing-flow", targetContext)
+	}
+}
+
 func TestEventBusPublish_PersistsBootBundleFingerprintThroughRunLifecycleOwner(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}

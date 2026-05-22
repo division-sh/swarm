@@ -228,12 +228,41 @@ func TestDeliveryPlanner_DoesNotDeadLetterTargetedWorkflowNodeSubscriber(t *test
 
 	plan, err := planner.Plan(context.Background(), (events.Event{
 		Type: "child/output.done",
-	}).WithTargetRoute(events.RouteIdentity{EntityID: "ent-1", FlowInstance: "root"}))
+	}).WithTargetRoute(events.RouteIdentity{EntityID: "ent-1"}))
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
 	}
 	if plan.TargetFailure != "" {
 		t.Fatalf("target failure = %q, want none for routed workflow node subscriber", plan.TargetFailure)
+	}
+}
+
+func TestDeliveryPlanner_PreservesTargetFailureWhenRoutedNodeDoesNotMatchTarget(t *testing.T) {
+	planner := newDeliveryPlanner(
+		deliveryRouteResolver{
+			resolveRoutedSubscribers: func(string) []Subscriber {
+				return []Subscriber{{ID: "unrelated-listener", Type: "node", Path: "other-flow"}}
+			},
+			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate { return nil },
+			describeSubscribersForEvent: func(string, []Subscriber) []PublishDiagnosticRecipient {
+				return []PublishDiagnosticRecipient{{ID: "unrelated-listener", Type: "node"}}
+			},
+		},
+		deliveryRecipientPolicy{
+			loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
+				return map[string]ActiveAgentDescriptor{}, true, nil
+			},
+		},
+	)
+
+	plan, err := planner.Plan(context.Background(), (events.Event{
+		Type: "child/output.done",
+	}).WithTargetRoute(events.RouteIdentity{EntityID: "ent-1", FlowInstance: "target-flow"}))
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if plan.TargetFailure != runtimepinrouting.FailureTargetUnreachableTerminated {
+		t.Fatalf("target failure = %q, want %q", plan.TargetFailure, runtimepinrouting.FailureTargetUnreachableTerminated)
 	}
 }
 
