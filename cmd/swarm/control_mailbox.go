@@ -13,10 +13,14 @@ import (
 )
 
 type mailboxDecisionResult struct {
-	OK                bool   `json:"ok"`
-	MailboxDecisionID string `json:"mailbox_decision_id"`
-	DownstreamEventID string `json:"downstream_event_id,omitempty"`
-	Status            string `json:"status"`
+	OK                         bool      `json:"ok"`
+	MailboxDecisionID          string    `json:"mailbox_decision_id"`
+	DownstreamEventID          string    `json:"downstream_event_id,omitempty"`
+	DownstreamEventName        string    `json:"downstream_event_name,omitempty"`
+	DownstreamSubscribers      *[]string `json:"downstream_subscribers,omitempty"`
+	DownstreamSubscriberSource string    `json:"downstream_subscriber_source,omitempty"`
+	Status                     string    `json:"status"`
+	IdempotencyReplayed        *bool     `json:"idempotency_replayed"`
 }
 
 type mailboxItem struct {
@@ -445,6 +449,9 @@ func validateMailboxDecisionResult(action string, result mailboxDecisionResult) 
 	if strings.TrimSpace(result.Status) == "" {
 		return fmt.Errorf("malformed mailbox decision result: status is required")
 	}
+	if result.IdempotencyReplayed == nil {
+		return fmt.Errorf("malformed mailbox decision result: idempotency_replayed is required")
+	}
 	expectedStatus, err := expectedMailboxDecisionStatus(action)
 	if err != nil {
 		return err
@@ -452,7 +459,29 @@ func validateMailboxDecisionResult(action string, result mailboxDecisionResult) 
 	if result.Status != expectedStatus {
 		return fmt.Errorf("malformed mailbox decision result: status=%q, want %q for mailbox %s", result.Status, expectedStatus, action)
 	}
+	if result.DownstreamEventID != "" {
+		if strings.TrimSpace(result.DownstreamEventName) == "" {
+			return fmt.Errorf("malformed mailbox decision result: downstream_event_name is required when downstream_event_id is present")
+		}
+		if result.DownstreamSubscribers == nil {
+			return fmt.Errorf("malformed mailbox decision result: downstream_subscribers is required when downstream_event_id is present")
+		}
+		if !validMailboxSubscriberSource(result.DownstreamSubscriberSource) {
+			return fmt.Errorf("malformed mailbox decision result: downstream_subscriber_source must be event_catalog, unavailable, or none")
+		}
+	} else if strings.TrimSpace(result.DownstreamEventName) != "" || result.DownstreamSubscribers != nil || strings.TrimSpace(result.DownstreamSubscriberSource) != "" {
+		return fmt.Errorf("malformed mailbox decision result: downstream_event_id is required when downstream detail is present")
+	}
 	return nil
+}
+
+func validMailboxSubscriberSource(value string) bool {
+	switch strings.TrimSpace(value) {
+	case "event_catalog", "unavailable", "none":
+		return true
+	default:
+		return false
+	}
 }
 
 func expectedMailboxDecisionStatus(action string) (string, error) {
@@ -697,8 +726,14 @@ func writeMailboxDecisionResult(out io.Writer, action, mailboxID string, result 
 		return
 	}
 	fmt.Fprintf(out, "mailbox %s ok: mailbox_id=%s status=%s decision_id=%s", action, mailboxID, result.Status, result.MailboxDecisionID)
+	if result.IdempotencyReplayed != nil {
+		fmt.Fprintf(out, " idempotency_replayed=%t", *result.IdempotencyReplayed)
+	}
 	if result.DownstreamEventID != "" {
 		fmt.Fprintf(out, " downstream_event_id=%s", result.DownstreamEventID)
+		fmt.Fprintf(out, " downstream_event_name=%s", result.DownstreamEventName)
+		fmt.Fprintf(out, " downstream_subscribers=%s", mailboxStringList(*result.DownstreamSubscribers))
+		fmt.Fprintf(out, " downstream_subscriber_source=%s", result.DownstreamSubscriberSource)
 	}
 	fmt.Fprintln(out)
 }

@@ -156,12 +156,27 @@ func TestOperatorMailboxHandlersSupportedRPCPath(t *testing.T) {
 	if downstreamID == "" || approvedResult["status"] != "decided" {
 		t.Fatalf("mailbox.approve result = %#v", approvedResult)
 	}
+	if approvedResult["idempotency_replayed"] != false || approvedResult["downstream_event_name"] != "mailbox.item_decided" || approvedResult["downstream_subscriber_source"] != "event_catalog" {
+		t.Fatalf("mailbox.approve promoted result fields = %#v", approvedResult)
+	}
+	approvedSubscribers := approvedResult["downstream_subscribers"].([]any)
+	if len(approvedSubscribers) != 2 || approvedSubscribers[0] != "approval-agent" || approvedSubscribers[1] != "review-agent" {
+		t.Fatalf("mailbox.approve downstream_subscribers = %#v", approvedSubscribers)
+	}
 	replay := rpcCall(t, handler, approveBody)
 	if replay.Error != nil {
 		t.Fatalf("mailbox.approve replay error = %#v", replay.Error)
 	}
-	if got := asMap(t, replay.Result)["downstream_event_id"]; got != downstreamID {
+	replayResult := asMap(t, replay.Result)
+	if got := replayResult["downstream_event_id"]; got != downstreamID {
 		t.Fatalf("idempotency replay downstream_event_id = %v, want %s", got, downstreamID)
+	}
+	if replayResult["idempotency_replayed"] != true || replayResult["downstream_event_name"] != "mailbox.item_decided" || replayResult["downstream_subscriber_source"] != "event_catalog" {
+		t.Fatalf("mailbox.approve replay promoted result fields = %#v", replayResult)
+	}
+	replaySubscribers := replayResult["downstream_subscribers"].([]any)
+	if len(replaySubscribers) != 2 || replaySubscribers[0] != "approval-agent" || replaySubscribers[1] != "review-agent" {
+		t.Fatalf("mailbox.approve replay downstream_subscribers = %#v", replaySubscribers)
 	}
 	if count := countEventsByName(t, db, "mailbox.item_decided"); count != 1 {
 		t.Fatalf("mailbox.item_decided event count = %d, want 1", count)
@@ -202,8 +217,12 @@ func TestOperatorMailboxHandlersSupportedRPCPath(t *testing.T) {
 	if deferred.Error != nil {
 		t.Fatalf("mailbox.defer error = %#v", deferred.Error)
 	}
-	if status := asMap(t, deferred.Result)["status"]; status != "deferred" {
+	deferredResult := asMap(t, deferred.Result)
+	if status := deferredResult["status"]; status != "deferred" {
 		t.Fatalf("mailbox.defer status = %v, want deferred", status)
+	}
+	if deferredResult["idempotency_replayed"] != false {
+		t.Fatalf("mailbox.defer idempotency_replayed = %v, want false", deferredResult["idempotency_replayed"])
 	}
 	laterHandler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
@@ -230,8 +249,38 @@ func TestOperatorMailboxHandlersSupportedRPCPath(t *testing.T) {
 	if deferReplay.Error != nil {
 		t.Fatalf("mailbox.defer replay after until passed error = %#v", deferReplay.Error)
 	}
-	if status := asMap(t, deferReplay.Result)["status"]; status != "deferred" {
+	deferReplayResult := asMap(t, deferReplay.Result)
+	if status := deferReplayResult["status"]; status != "deferred" {
 		t.Fatalf("mailbox.defer replay status = %v, want deferred", status)
+	}
+	if deferReplayResult["idempotency_replayed"] != true {
+		t.Fatalf("mailbox.defer replay idempotency_replayed = %v, want true", deferReplayResult["idempotency_replayed"])
+	}
+
+	rejectID, err := pg.InsertMailboxItem(ctx, runtimetools.MailboxItem{
+		Type:    "approval",
+		Summary: "reject me",
+		Context: []byte(`{"title":"reject"}`),
+	})
+	if err != nil {
+		t.Fatalf("insert reject mailbox: %v", err)
+	}
+	rejectBody := `{"jsonrpc":"2.0","id":"reject-fresh","method":"mailbox.reject","params":{"mailbox_id":"` + rejectID + `","reason":"not enough evidence","idempotency_key":"idem-reject"}}`
+	rejected := rpcCall(t, handler, rejectBody)
+	if rejected.Error != nil {
+		t.Fatalf("mailbox.reject error = %#v", rejected.Error)
+	}
+	rejectedResult := asMap(t, rejected.Result)
+	if rejectedResult["status"] != "decided" || rejectedResult["idempotency_replayed"] != false {
+		t.Fatalf("mailbox.reject result = %#v", rejectedResult)
+	}
+	rejectReplay := rpcCall(t, handler, rejectBody)
+	if rejectReplay.Error != nil {
+		t.Fatalf("mailbox.reject replay error = %#v", rejectReplay.Error)
+	}
+	rejectReplayResult := asMap(t, rejectReplay.Result)
+	if rejectReplayResult["status"] != "decided" || rejectReplayResult["idempotency_replayed"] != true {
+		t.Fatalf("mailbox.reject replay result = %#v", rejectReplayResult)
 	}
 
 	empty := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"empty","method":"mailbox.list","params":{"status":"pending","type":"review_request"}}`)

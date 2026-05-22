@@ -7282,7 +7282,11 @@ cli_specification:
       - '`--decision-payload` file content and `--decision-payload-json` values MUST parse as JSON objects; blank, malformed, null, and non-object values fail before any API call.'
       - 'Blank, missing, or unreadable `--decision-payload` file paths fail before any API call.'
       output:
-        success_detail: Existing `MailboxDecisionResult` summary rendering remains authoritative; richer mutation-result rendering is split under #856/#794.
+        success_detail: >
+          Renders the API-owned `MailboxDecisionResult` summary, including required
+          `idempotency_replayed`. When `downstream_event_id` is present, the result
+          also renders the server-owned downstream event name, subscriber list, and
+          subscriber source from the same `MailboxDecisionResult` owner.
       exit_codes:
         success: 0
         cli_validation: 2
@@ -7292,11 +7296,13 @@ cli_specification:
         decision_conflict_or_rejected: 6
       proof_expectations:
       - exact /v1/rpc mailbox.approve call with mailbox_id, optional decision_payload, and optional idempotency_key params only
+      - success rendering consumes only MailboxDecisionResult fields from /v1/rpc mailbox.approve, including idempotency_replayed and downstream event detail
+      - malformed response proof for missing idempotency_replayed and incomplete or invalid downstream detail
       - invalid args, conflicting payload flags including explicitly blank conflicting values, blank/missing/unreadable payload files, blank/malformed/null/non-object payload JSON, and missing SWARM_API_TOKEN make zero API calls
       - file-backed and inline payload inputs share the same canonical object validation and param construction
       - no direct DB/store/runtime/EventBus/dashboard/Builder reads or writes and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, or retired swarm control mailbox path usage
       split_tail: >
-        Richer approve/reject/defer mutation-result rendering, priority enum/prose repair,
+        Reject reason echo, defer-until echo, run impact/status, priority enum/prose repair,
         shared output/payload policy, trace/run work, and forkchat remain split under #856/#735/#794.
     mailbox_reject:
       command: swarm mailbox reject <mailbox-item-id>
@@ -7304,12 +7310,24 @@ cli_specification:
       implementation_status: implemented
       owner: /v1/rpc mailbox.reject
       behavior: Mailbox rejection action through canonical API owner; no direct DB/store/mailbox writes.
+      output:
+        success_detail: Renders API-owned `MailboxDecisionResult` common fields including required `idempotency_replayed`; reject reason echo remains split.
+      proof_expectations:
+      - exact /v1/rpc mailbox.reject call with mailbox_id, reason, and optional idempotency_key params only
+      - success rendering consumes only MailboxDecisionResult fields from /v1/rpc mailbox.reject
+      - invalid args and missing SWARM_API_TOKEN make zero API calls
     mailbox_defer:
       command: swarm mailbox defer <mailbox-item-id>
       tier: must_have
       implementation_status: implemented
       owner: /v1/rpc mailbox.defer
       behavior: Mailbox defer action through canonical API owner; no direct DB/store/mailbox writes.
+      output:
+        success_detail: Renders API-owned `MailboxDecisionResult` common fields including required `idempotency_replayed`; defer-until echo remains split.
+      proof_expectations:
+      - exact /v1/rpc mailbox.defer call with mailbox_id, until, and optional idempotency_key params only
+      - success rendering consumes only MailboxDecisionResult fields from /v1/rpc mailbox.defer
+      - invalid args and missing SWARM_API_TOKEN make zero API calls
     health:
       command: swarm health
       tier: must_have
@@ -9292,6 +9310,7 @@ api_specification:
         - ok
         - mailbox_decision_id
         - status
+        - idempotency_replayed
         properties:
           ok:
             type: boolean
@@ -9301,8 +9320,26 @@ api_specification:
           downstream_event_id:
             $ref: '#/components/schemas/OpaqueId'
             description: Present only when the decision triggered an event emission (typically on approve).
+          downstream_event_name:
+            type: string
+            description: Present with downstream_event_id when the decision triggered an event emission.
+          downstream_subscribers:
+            type: array
+            items:
+              type: string
+            description: Present with downstream_event_id; empty array is valid when no subscribers are known.
+          downstream_subscriber_source:
+            type: string
+            enum:
+            - event_catalog
+            - unavailable
+            - none
+            description: Present with downstream_event_id and uses the same vocabulary as MailboxDownstreamPreview.subscriber_source.
           status:
             $ref: '#/components/schemas/MailboxStatus'
+          idempotency_replayed:
+            type: boolean
+            description: False for first execution; true when returned from the API idempotency replay path.
       ConversationMode:
         type: string
         enum:
