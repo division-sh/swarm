@@ -6,4 +6,6 @@ parent-node:
   event_handlers:
     review.requested:
       advances_to: done
-      emit: review.done
+      emit:
+        event: review.done
+        broadcast: true

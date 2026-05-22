@@ -13,4 +13,6 @@ processor:
           - target_field: counter
             expression: entity.counter + 1
       advances_to: processing
-      emit: process.done
+      emit:
+        event: process.done
+        broadcast: true

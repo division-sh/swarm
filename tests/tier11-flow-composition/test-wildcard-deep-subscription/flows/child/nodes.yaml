@@ -16,4 +16,6 @@ listener:
   event_handlers:
     grandchild/task.done:
       advances_to: completed
-      emit: work.finished
+      emit:
+        event: work.finished
+        broadcast: true

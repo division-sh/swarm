@@ -7,4 +7,6 @@ task-handler:
     work.assign:
       create_entity: true
       advances_to: working
-      emit: work.done
+      emit:
+        event: work.done
+        broadcast: true

@@ -19,4 +19,6 @@ validator:
             check: "entity.item_count < policy.max_items"
         on_fail: discard
       advances_to: accepted
-      emit: check.passed
+      emit:
+        event: check.passed
+        broadcast: true

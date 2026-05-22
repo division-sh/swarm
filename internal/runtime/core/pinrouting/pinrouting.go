@@ -1,0 +1,357 @@
+package pinrouting
+
+import (
+	"fmt"
+	"sort"
+	"strings"
+
+	"swarm/internal/events"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/runtime/core/eventidentity"
+	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
+	"swarm/internal/runtime/semanticview"
+)
+
+type TargetFailure string
+
+const (
+	FailureTargetRequiredMissing          TargetFailure = "target_required_missing"
+	FailureTargetInvalidSyntax            TargetFailure = "target_invalid_syntax"
+	FailureTargetMalformed                TargetFailure = FailureTargetInvalidSyntax
+	FailureTargetUnreachableNoSub         TargetFailure = "target_unreachable_no_subscriber"
+	FailureTargetNotSubscribed            TargetFailure = "target_not_subscribed"
+	FailureTargetUnreachableTerminated    TargetFailure = "target_unreachable_terminated"
+	FailureParentRouteIncomplete          TargetFailure = "parent_route_incomplete"
+	FailureTargetAmbiguous                TargetFailure = "target_ambiguous"
+	FailureTargetUnknownFlow              TargetFailure = "target_unknown_flow"
+	FailureTargetSenderNoInboundRuntime   TargetFailure = "target_sender_no_inbound_runtime"
+	FailureTargetSenderEmptySourceRuntime TargetFailure = "target_sender_empty_source_runtime"
+)
+
+type AuthoredTarget struct {
+	Spec      runtimecontracts.EmitTargetSpec
+	Broadcast bool
+}
+
+type Descriptor struct {
+	ID           string
+	EntityID     string
+	FlowInstance string
+}
+
+type ResolutionInput struct {
+	Source       semanticview.Source
+	FlowID       string
+	EventType    string
+	Emit         runtimecontracts.EmitSpec
+	SourceRoute  events.RouteIdentity
+	Inbound      events.Event
+	ParentRoute  events.RouteIdentity
+	MatchValues  map[string]string
+	Descriptors  []Descriptor
+	AllowMissing bool
+}
+
+type Resolution struct {
+	Event     events.Event
+	Target    events.RouteIdentity
+	TargetSet []events.RouteIdentity
+	Broadcast bool
+	Failure   TargetFailure
+}
+
+func PinDeclaredOutput(source semanticview.Source, flowID, eventType string) bool {
+	flowID = strings.TrimSpace(flowID)
+	eventType = eventidentity.Normalize(eventType)
+	if source == nil || flowID == "" || eventType == "" {
+		return false
+	}
+	if source.FlowHasOutputEvent(flowID, eventType) {
+		return true
+	}
+	leaf := eventidentity.LeafName(eventType)
+	if leaf != "" && source.FlowHasOutputEvent(flowID, leaf) {
+		return true
+	}
+	resolved := eventidentity.Normalize(source.ResolveFlowEventReference(flowID, eventType))
+	if resolved != "" && source.FlowHasOutputEvent(flowID, resolved) {
+		return true
+	}
+	for _, output := range source.FlowOutputEvents(flowID) {
+		output = eventidentity.Normalize(output)
+		if output == eventType || output == resolved || output == leaf {
+			return true
+		}
+	}
+	return false
+}
+
+func Resolve(input ResolutionInput, evt events.Event) Resolution {
+	input.FlowID = strings.TrimSpace(input.FlowID)
+	input.EventType = strings.TrimSpace(input.EventType)
+	input.SourceRoute = input.SourceRoute.Normalized()
+	if input.SourceRoute.Empty() {
+		input.SourceRoute = routeFromEvent(input.Inbound)
+	}
+	if !input.SourceRoute.Empty() {
+		evt = evt.WithSourceRoute(input.SourceRoute)
+	}
+	if !PinDeclaredOutput(input.Source, input.FlowID, input.EventType) {
+		return Resolution{Event: evt}
+	}
+	if input.Emit.Broadcast {
+		return Resolution{Event: evt.WithoutTargetRoute(), Broadcast: true}
+	}
+	target := input.Emit.Target.Normalized()
+	if target.Empty() {
+		parentRoute := input.ParentRoute.Normalized()
+		if !parentRoute.Empty() {
+			return Resolution{Event: evt.WithTargetRoute(parentRoute), Target: parentRoute}
+		}
+		return Resolution{Event: evt, Failure: FailureTargetRequiredMissing}
+	}
+	switch target.Kind {
+	case runtimecontracts.EmitTargetKindSender:
+		route := input.Inbound.SourceRoute()
+		if route.Empty() {
+			route = routeFromEvent(input.Inbound)
+		}
+		if route.Empty() {
+			if strings.TrimSpace(input.Inbound.ID) == "" && strings.TrimSpace(string(input.Inbound.Type)) == "" {
+				return Resolution{Event: evt, Failure: FailureTargetSenderNoInboundRuntime}
+			}
+			return Resolution{Event: evt, Failure: FailureTargetSenderEmptySourceRuntime}
+		}
+		return Resolution{Event: evt.WithTargetRoute(route), Target: route}
+	case runtimecontracts.EmitTargetKindInstanceID:
+		instanceID := strings.TrimSpace(target.InstanceID)
+		if instanceID == "" {
+			return Resolution{Event: evt, Failure: FailureTargetMalformed}
+		}
+		flowID := strings.TrimSpace(target.Flow)
+		if flowID == "" {
+			flowID = input.FlowID
+		}
+		route := routeForInstance(input.Source, flowID, instanceID)
+		return Resolution{Event: evt.WithTargetRoute(route), Target: route}
+	case runtimecontracts.EmitTargetKindFlowMatch:
+		routes, failure := resolveFlowMatch(input, target)
+		if failure != "" {
+			return Resolution{Event: evt, Failure: failure}
+		}
+		if len(routes) == 1 {
+			return Resolution{Event: evt.WithTargetRoute(routes[0]), Target: routes[0]}
+		}
+		return Resolution{Event: evt.WithTargetSet(routes), TargetSet: routes}
+	default:
+		return Resolution{Event: evt, Failure: FailureTargetMalformed}
+	}
+}
+
+func TargetMechanismPresent(spec runtimecontracts.EmitSpec, structuralParentRouteEligible bool) bool {
+	return spec.Broadcast || spec.HasTarget() || structuralParentRouteEligible
+}
+
+func ValidateTargetSpec(source semanticview.Source, flowID string, spec runtimecontracts.EmitSpec, structuralParentRouteEligible bool) TargetFailure {
+	if !TargetMechanismPresent(spec, structuralParentRouteEligible) {
+		return FailureTargetRequiredMissing
+	}
+	if spec.Broadcast {
+		if spec.HasTarget() {
+			return FailureTargetMalformed
+		}
+		return ""
+	}
+	target := spec.Target.Normalized()
+	if target.Empty() {
+		return ""
+	}
+	switch target.Kind {
+	case runtimecontracts.EmitTargetKindSender:
+		return ""
+	case runtimecontracts.EmitTargetKindInstanceID:
+		if strings.TrimSpace(target.InstanceID) == "" {
+			return FailureTargetMalformed
+		}
+		return ""
+	case runtimecontracts.EmitTargetKindFlowMatch:
+		if strings.TrimSpace(target.Flow) == "" || len(target.Match) == 0 {
+			return FailureTargetMalformed
+		}
+		if source != nil {
+			if _, ok := source.FlowScopeByID(strings.TrimSpace(target.Flow)); !ok {
+				return FailureTargetUnknownFlow
+			}
+		}
+		return ""
+	default:
+		return FailureTargetMalformed
+	}
+}
+
+func routeFromEvent(evt events.Event) events.RouteIdentity {
+	source := evt.SourceRoute()
+	if !source.Empty() {
+		return source
+	}
+	target := evt.TargetRoute()
+	if !target.Empty() {
+		return target
+	}
+	return events.RouteIdentity{
+		FlowInstance: evt.FlowInstance(),
+		EntityID:     evt.EntityID(),
+	}.Normalized()
+}
+
+func routeForInstance(source semanticview.Source, flowID, instanceID string) events.RouteIdentity {
+	instanceID = strings.TrimSpace(instanceID)
+	flowID = strings.TrimSpace(flowID)
+	flowInstance := strings.Trim(strings.TrimSpace(runtimeflowidentity.InstancePath(source, flowID, instanceID)), "/")
+	return events.RouteIdentity{
+		FlowID:       flowID,
+		FlowInstance: flowInstance,
+		EntityID:     runtimeflowidentity.EntityID(flowInstance),
+	}.Normalized()
+}
+
+func resolveFlowMatch(input ResolutionInput, target runtimecontracts.EmitTargetSpec) ([]events.RouteIdentity, TargetFailure) {
+	flowID := strings.TrimSpace(target.Flow)
+	if flowID == "" {
+		return nil, FailureTargetMalformed
+	}
+	if input.Source != nil {
+		if _, ok := input.Source.FlowScopeByID(flowID); !ok {
+			return nil, FailureTargetUnknownFlow
+		}
+	}
+	matches := make([]events.RouteIdentity, 0, len(input.Descriptors))
+	for _, descriptor := range input.Descriptors {
+		route := descriptorRoute(input.Source, flowID, descriptor)
+		if route.Empty() {
+			continue
+		}
+		if flowID != "" && route.FlowID != "" && route.FlowID != flowID {
+			continue
+		}
+		if flowID != "" && route.FlowID == "" && !routeMatchesFlow(input.Source, flowID, route.FlowInstance) {
+			continue
+		}
+		if !descriptorMatches(target.Match, input.MatchValues, descriptor, route) {
+			continue
+		}
+		matches = append(matches, route)
+	}
+	if len(matches) == 0 {
+		return nil, FailureTargetUnreachableNoSub
+	}
+	matches = uniqueRoutes(matches)
+	if len(matches) > 1 && !target.AllowFanout {
+		return nil, FailureTargetAmbiguous
+	}
+	return matches, ""
+}
+
+func descriptorRoute(source semanticview.Source, flowID string, descriptor Descriptor) events.RouteIdentity {
+	flowInstance := strings.Trim(strings.TrimSpace(descriptor.FlowInstance), "/")
+	entityID := strings.TrimSpace(descriptor.EntityID)
+	if flowInstance == "" && entityID == "" {
+		return events.RouteIdentity{}
+	}
+	if entityID == "" && flowInstance != "" {
+		entityID = runtimeflowidentity.EntityID(flowInstance)
+	}
+	return events.RouteIdentity{
+		FlowID:       strings.TrimSpace(flowIDForInstance(source, flowID, flowInstance)),
+		FlowInstance: flowInstance,
+		EntityID:     entityID,
+	}.Normalized()
+}
+
+func flowIDForInstance(source semanticview.Source, fallbackFlowID, flowInstance string) string {
+	fallbackFlowID = strings.TrimSpace(fallbackFlowID)
+	flowInstance = strings.Trim(strings.TrimSpace(flowInstance), "/")
+	if source == nil || flowInstance == "" {
+		return fallbackFlowID
+	}
+	for _, scope := range source.FlowScopes() {
+		scopePath := strings.Trim(strings.TrimSpace(scope.Path), "/")
+		if scopePath == "" {
+			continue
+		}
+		if flowInstance == scopePath || strings.HasPrefix(flowInstance, scopePath+"/") {
+			return strings.TrimSpace(scope.ID)
+		}
+	}
+	return fallbackFlowID
+}
+
+func routeMatchesFlow(source semanticview.Source, flowID, flowInstance string) bool {
+	if source == nil {
+		return true
+	}
+	scope := strings.Trim(strings.TrimSpace(source.FlowPath(flowID)), "/")
+	flowInstance = strings.Trim(strings.TrimSpace(flowInstance), "/")
+	return scope == "" || flowInstance == scope || strings.HasPrefix(flowInstance, scope+"/")
+}
+
+func descriptorMatches(match map[string]runtimecontracts.ExpressionValue, values map[string]string, descriptor Descriptor, route events.RouteIdentity) bool {
+	if len(match) == 0 {
+		return false
+	}
+	for key := range match {
+		key = strings.TrimSpace(key)
+		want := strings.TrimSpace(values[key])
+		if want == "" {
+			return false
+		}
+		switch key {
+		case "entity_id":
+			if strings.TrimSpace(descriptor.EntityID) != want && route.EntityID != want {
+				return false
+			}
+		case "flow_instance":
+			if strings.Trim(strings.TrimSpace(descriptor.FlowInstance), "/") != strings.Trim(want, "/") && route.FlowInstance != strings.Trim(want, "/") {
+				return false
+			}
+		case "instance_id":
+			if runtimeflowidentity.LogicalInstanceID(route.FlowInstance) != want {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func uniqueRoutes(in []events.RouteIdentity) []events.RouteIdentity {
+	out := make([]events.RouteIdentity, 0, len(in))
+	seen := map[string]struct{}{}
+	for _, route := range in {
+		route = route.Normalized()
+		if route.Empty() {
+			continue
+		}
+		key := route.FlowID + "\x00" + route.FlowInstance + "\x00" + route.EntityID
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, route)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].FlowInstance == out[j].FlowInstance {
+			return out[i].EntityID < out[j].EntityID
+		}
+		return out[i].FlowInstance < out[j].FlowInstance
+	})
+	return out
+}
+
+func FailureError(failure TargetFailure) error {
+	if failure == "" {
+		return nil
+	}
+	return fmt.Errorf("pin routing target resolution failed: %s", string(failure))
+}

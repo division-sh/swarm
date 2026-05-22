@@ -5,6 +5,7 @@ import (
 
 	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/runtime/core/identity"
+	runtimepinrouting "swarm/internal/runtime/core/pinrouting"
 	runtimeregistry "swarm/internal/runtime/core/registry"
 	"swarm/internal/runtime/semanticview"
 )
@@ -103,6 +104,8 @@ type PayloadShaper interface {
 	ShapeEmitPayload(ctx context.Context, req ExecutionRequest, eventType string, payload map[string]any) (map[string]any, error)
 }
 
+type TargetDescriptorLoader func(context.Context) ([]runtimepinrouting.Descriptor, error)
+
 type TransitionValidator interface {
 	ValidateTransition(currentState, nextState string) error
 }
@@ -121,6 +124,7 @@ type RuntimeDependencies struct {
 	ActionRegistry      ActionRegistry
 	ActionRunner        ActionRunner
 	PayloadShaper       PayloadShaper
+	TargetDescriptors   TargetDescriptorLoader
 	TransitionValidator TransitionValidator
 	MaxChainDepth       int
 }

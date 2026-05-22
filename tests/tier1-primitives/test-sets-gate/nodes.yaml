@@ -6,4 +6,6 @@ test-node:
   event_handlers:
     gate.requested:
       sets_gate: g1_check
-      emit: gate.set
+      emit:
+        event: gate.set
+        broadcast: true

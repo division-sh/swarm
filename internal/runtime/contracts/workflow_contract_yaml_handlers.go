@@ -73,13 +73,15 @@ func (e *EmitSpec) UnmarshalYAML(node *yaml.Node) error {
 		for i := 0; i+1 < len(node.Content); i += 2 {
 			key := strings.TrimSpace(node.Content[i].Value)
 			switch key {
-			case "", "event", "fields":
+			case "", "event", "fields", "target", "broadcast":
 			default:
 				return fmt.Errorf("UNDEFINED-FIELD: emit field %q not in platform spec", key)
 			}
 		}
 		var event string
 		fields := map[string]ExpressionValue{}
+		var target EmitTargetSpec
+		var broadcast bool
 		for i := 0; i+1 < len(node.Content); i += 2 {
 			key := strings.TrimSpace(node.Content[i].Value)
 			value := node.Content[i+1]
@@ -94,18 +96,100 @@ func (e *EmitSpec) UnmarshalYAML(node *yaml.Node) error {
 					return err
 				}
 				fields = decoded
+			case "target":
+				decoded, err := decodeEmitTargetNode(value)
+				if err != nil {
+					return err
+				}
+				target = decoded
+			case "broadcast":
+				if err := value.Decode(&broadcast); err != nil {
+					return err
+				}
 			}
 		}
 		*e = EmitSpec{
-			Event:  strings.TrimSpace(event),
-			Fields: fields,
+			Event:     strings.TrimSpace(event),
+			Fields:    fields,
+			Target:    target.Normalized(),
+			Broadcast: broadcast,
 		}
 		if e.EventType() == "" && len(e.Fields) > 0 {
 			return fmt.Errorf("INVALID-EMIT: emit.event is required when emit.fields is present")
 		}
+		if e.Broadcast && e.HasTarget() {
+			return fmt.Errorf("INVALID-EMIT: emit.target and emit.broadcast:true are mutually exclusive")
+		}
 		return nil
 	default:
 		return fmt.Errorf("unsupported emit yaml node kind %d", node.Kind)
+	}
+}
+
+func decodeEmitTargetNode(node *yaml.Node) (EmitTargetSpec, error) {
+	if node == nil || strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") {
+		return EmitTargetSpec{}, nil
+	}
+	switch node.Kind {
+	case yaml.ScalarNode:
+		value := strings.TrimSpace(node.Value)
+		if value == "" {
+			return EmitTargetSpec{}, nil
+		}
+		if value != string(EmitTargetKindSender) {
+			return EmitTargetSpec{}, fmt.Errorf("INVALID-EMIT: emit.target scalar must be %q", EmitTargetKindSender)
+		}
+		return EmitTargetSpec{Kind: EmitTargetKindSender}, nil
+	case yaml.MappingNode:
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			key := strings.TrimSpace(node.Content[i].Value)
+			switch key {
+			case "", "instance_id", "flow", "match", "allow_fanout":
+			default:
+				return EmitTargetSpec{}, fmt.Errorf("UNDEFINED-FIELD: emit.target field %q not in platform spec", key)
+			}
+		}
+		var out EmitTargetSpec
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			key := strings.TrimSpace(node.Content[i].Value)
+			value := node.Content[i+1]
+			switch key {
+			case "instance_id":
+				if err := value.Decode(&out.InstanceID); err != nil {
+					return EmitTargetSpec{}, err
+				}
+			case "flow":
+				if err := value.Decode(&out.Flow); err != nil {
+					return EmitTargetSpec{}, err
+				}
+			case "match":
+				match, err := decodeEmitFieldsNode(value)
+				if err != nil {
+					return EmitTargetSpec{}, fmt.Errorf("INVALID-EMIT: emit.target.match must be a mapping: %w", err)
+				}
+				out.Match = match
+			case "allow_fanout":
+				if err := value.Decode(&out.AllowFanout); err != nil {
+					return EmitTargetSpec{}, err
+				}
+			}
+		}
+		out = out.Normalized()
+		switch {
+		case out.InstanceID != "" && (out.Flow != "" || len(out.Match) > 0 || out.AllowFanout):
+			return EmitTargetSpec{}, fmt.Errorf("INVALID-EMIT: emit.target.instance_id cannot be combined with flow/match/allow_fanout")
+		case out.InstanceID != "":
+			out.Kind = EmitTargetKindInstanceID
+		case out.Flow != "" && len(out.Match) > 0:
+			out.Kind = EmitTargetKindFlowMatch
+		case out.AllowFanout:
+			return EmitTargetSpec{}, fmt.Errorf("INVALID-EMIT: emit.target.allow_fanout requires flow and match")
+		default:
+			return EmitTargetSpec{}, fmt.Errorf("INVALID-EMIT: emit.target requires sender, instance_id, or flow+match")
+		}
+		return out, nil
+	default:
+		return EmitTargetSpec{}, fmt.Errorf("unsupported emit.target yaml node kind %d", node.Kind)
 	}
 }
 

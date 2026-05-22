@@ -25,4 +25,6 @@ phase-two:
         check: "entity.batch_id != \"\""
         on_fail: reject
       advances_to: done
-      emit: task.done
+      emit:
+        event: task.done
+        broadcast: true

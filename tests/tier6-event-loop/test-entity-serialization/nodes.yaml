@@ -6,10 +6,14 @@ test-node:
   event_handlers:
     step.first:
       advances_to: processing
-      emit: step.first_done
+      emit:
+        event: step.first_done
+        broadcast: true
     step.second:
       guard:
         id: state_check
         check: "entity.current_state == 'processing'"
       advances_to: complete
-      emit: step.second_done
+      emit:
+        event: step.second_done
+        broadcast: true

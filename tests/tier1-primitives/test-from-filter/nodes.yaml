@@ -7,4 +7,6 @@ test-node:
     task.completed:
       from: "flow-a/agent-1"
       advances_to: done
-      emit: task.acknowledged
+      emit:
+        event: task.acknowledged
+        broadcast: true

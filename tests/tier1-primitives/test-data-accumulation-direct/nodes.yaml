@@ -12,7 +12,9 @@ test-node:
           - score
         source_event: item.received
       advances_to: done
-      emit: item.stored
+      emit:
+        event: item.stored
+        broadcast: true
   state_schema:
     fields:
       item_name: string

@@ -9,5 +9,7 @@ reduce-node:
         items_from: payload.values
         operation: min
         store_as: entity.minimum
-      emit: values.reduced
+      emit:
+        event: values.reduced
+        broadcast: true
       advances_to: done

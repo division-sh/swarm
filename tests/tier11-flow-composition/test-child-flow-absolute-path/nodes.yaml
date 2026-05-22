@@ -15,4 +15,6 @@ listener:
   event_handlers:
     child/task.done:
       advances_to: done
-      emit: work.finished
+      emit:
+        event: work.finished
+        broadcast: true

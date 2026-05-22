@@ -6,4 +6,6 @@ test-node:
   event_handlers:
     gates.clear_requested:
       clear_gates: true
-      emit: gates.cleared
+      emit:
+        event: gates.cleared
+        broadcast: true

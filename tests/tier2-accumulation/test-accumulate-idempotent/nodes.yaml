@@ -10,7 +10,9 @@ test-node:
         completion: all
         dedup_by: payload.item_id
       advances_to: complete
-      emit: collection.done
+      emit:
+        event: collection.done
+        broadcast: true
   state_schema:
     fields:
       expected_count: integer

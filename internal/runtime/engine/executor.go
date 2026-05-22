@@ -13,8 +13,10 @@ import (
 	"swarm/internal/events"
 	"swarm/internal/runtime/accprojection"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 	"swarm/internal/runtime/core/identity"
 	"swarm/internal/runtime/core/paths"
+	runtimepinrouting "swarm/internal/runtime/core/pinrouting"
 	"swarm/internal/runtime/core/timeridentity"
 	"swarm/internal/runtime/core/values"
 	"swarm/internal/runtime/entityruntime"
@@ -952,7 +954,7 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		if _, err := e.queueEmitIntent(frame, eventType, shaped); err != nil {
+		if _, err := e.queueEmitIntentForSpec(frame, spec.Emit, eventType, shaped); err != nil {
 			return false, err
 		}
 	}
@@ -1317,7 +1319,7 @@ func (e *Executor) stepEmits(frame *executionFrame) error {
 	if err != nil {
 		return err
 	}
-	_, err = e.queueEmitIntent(frame, eventType, shaped)
+	_, err = e.queueEmitIntentForSpec(frame, emitSpec, eventType, shaped)
 	return err
 }
 
@@ -1928,7 +1930,7 @@ func (e *Executor) shapeEmitPayloadWithContext(ctx context.Context, frame *execu
 	return e.deps.PayloadShaper.ShapeEmitPayload(ctx, req, strings.TrimSpace(eventType), cloned)
 }
 
-func (e *Executor) newEmitIntent(frame *executionFrame, eventType string, payload map[string]any, chainDepth int) (EmitIntent, error) {
+func (e *Executor) newEmitIntent(frame *executionFrame, spec runtimecontracts.EmitSpec, eventType string, payload map[string]any, chainDepth int) (EmitIntent, error) {
 	encoded, err := encodePayload(payload)
 	if err != nil {
 		return EmitIntent{}, err
@@ -1959,6 +1961,19 @@ func (e *Executor) newEmitIntent(frame *executionFrame, eventType string, payloa
 	if flowInstance != "" {
 		evt = evt.WithFlowInstance(flowInstance)
 	}
+	sourceRoute := events.RouteIdentity{
+		FlowID:       strings.TrimSpace(frame.req.FlowID.String()),
+		FlowInstance: flowInstance,
+		EntityID:     entityID,
+	}.Normalized()
+	if !sourceRoute.Empty() {
+		evt = evt.WithSourceRoute(sourceRoute)
+	}
+	resolution, err := e.resolveEmitRoute(frame, spec, eventType, evt)
+	if err != nil {
+		return EmitIntent{}, err
+	}
+	evt = resolution.Event
 	evt.ParentEventID = strings.TrimSpace(frame.req.Event.ID)
 	if evt.TaskID == "" {
 		evt.TaskID = strings.TrimSpace(frame.req.Event.TaskID)
@@ -1970,17 +1985,100 @@ func (e *Executor) newEmitIntent(frame *executionFrame, eventType string, payloa
 	}, nil
 }
 
+func (e *Executor) resolveEmitRoute(frame *executionFrame, spec runtimecontracts.EmitSpec, eventType string, evt events.Event) (runtimepinrouting.Resolution, error) {
+	if spec.EventType() == "" {
+		spec.Event = strings.TrimSpace(eventType)
+	}
+	input := runtimepinrouting.ResolutionInput{
+		Source:      e.deps.Source,
+		FlowID:      strings.TrimSpace(frame.req.FlowID.String()),
+		EventType:   strings.TrimSpace(eventType),
+		Emit:        spec,
+		SourceRoute: evt.SourceRoute(),
+		Inbound:     frame.req.Event,
+		ParentRoute: parentRouteFromState(frame.state.State.StateCarrier.Metadata),
+	}
+	if spec.Target.Kind == runtimecontracts.EmitTargetKindFlowMatch && len(spec.Target.Match) > 0 {
+		values, err := e.resolveEmitTargetMatchValues(frame, spec.Target.Match)
+		if err != nil {
+			return runtimepinrouting.Resolution{}, err
+		}
+		input.MatchValues = values
+	}
+	if e.deps.TargetDescriptors != nil {
+		descriptors, err := e.deps.TargetDescriptors(frame.tx.Context())
+		if err != nil {
+			return runtimepinrouting.Resolution{}, err
+		}
+		input.Descriptors = descriptors
+	}
+	resolution := runtimepinrouting.Resolve(input, evt)
+	if err := runtimepinrouting.FailureError(resolution.Failure); err != nil {
+		return runtimepinrouting.Resolution{}, err
+	}
+	return resolution, nil
+}
+
+func (e *Executor) resolveEmitTargetMatchValues(frame *executionFrame, match map[string]runtimecontracts.ExpressionValue) (map[string]string, error) {
+	if len(match) == 0 {
+		return nil, nil
+	}
+	values := make(map[string]string, len(match))
+	base := e.currentContext(frame)
+	for key, expr := range match {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		value, ok, err := evalExpressionValue(base, frame.state, expr, workflowexpr.ValueExpressionOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("emit target.match.%s: %w", key, err)
+		}
+		if !ok {
+			continue
+		}
+		values[key] = strings.TrimSpace(asString(value))
+		if values[key] == "" {
+			values[key] = strings.TrimSpace(fmt.Sprint(value))
+		}
+	}
+	return values, nil
+}
+
+func parentRouteFromState(metadata map[string]any) events.RouteIdentity {
+	if len(metadata) == 0 {
+		return events.RouteIdentity{}
+	}
+	flowInstance := firstNonEmpty(
+		asString(metadata["parent_flow_instance"]),
+		asString(metadata["parent_flow_path"]),
+	)
+	entityID := firstNonEmpty(
+		asString(metadata["parent_entity_id"]),
+		runtimeflowidentity.EntityID(flowInstance),
+	)
+	return events.RouteIdentity{
+		FlowID:       asString(metadata["parent_flow_id"]),
+		FlowInstance: flowInstance,
+		EntityID:     entityID,
+	}.Normalized()
+}
+
 func normalizedFlowInstanceCandidate(value string) string {
 	return strings.Trim(strings.TrimSpace(value), "/")
 }
 
 func (e *Executor) queueEmitIntent(frame *executionFrame, eventType string, payload map[string]any) (bool, error) {
+	return e.queueEmitIntentForSpec(frame, runtimecontracts.EmitSpec{Event: strings.TrimSpace(eventType)}, eventType, payload)
+}
+
+func (e *Executor) queueEmitIntentForSpec(frame *executionFrame, spec runtimecontracts.EmitSpec, eventType string, payload map[string]any) (bool, error) {
 	nextDepth, err := nextChainDepth(frame.req.ChainDepth, e.MaxChainDepth())
 	if err != nil {
 		if err != ErrChainDepthExceeded {
 			return false, err
 		}
-		intent, intentErr := e.newEmitIntent(frame, eventType, payload, nextDepth)
+		intent, intentErr := e.newEmitIntent(frame, spec, eventType, payload, nextDepth)
 		if intentErr != nil {
 			return false, intentErr
 		}
@@ -1988,7 +2086,7 @@ func (e *Executor) queueEmitIntent(frame *executionFrame, eventType string, payl
 		frame.result.DeadLetterIntents = append(frame.result.DeadLetterIntents, intent)
 		return false, nil
 	}
-	intent, err := e.newEmitIntent(frame, eventType, payload, nextDepth)
+	intent, err := e.newEmitIntent(frame, spec, eventType, payload, nextDepth)
 	if err != nil {
 		return false, err
 	}

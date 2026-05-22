@@ -12,10 +12,16 @@ scorer:
       on_complete:
         - condition: "payload.value >= 75"
           advances_to: high
-          emit: result.high
+          emit:
+            event: result.high
+            broadcast: true
         - condition: "payload.value >= 50"
           advances_to: mid
-          emit: result.mid
+          emit:
+            event: result.mid
+            broadcast: true
         - condition: "else"
           advances_to: low
-          emit: result.low
+          emit:
+            event: result.low
+            broadcast: true

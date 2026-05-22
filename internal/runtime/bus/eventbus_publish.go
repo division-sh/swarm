@@ -3,6 +3,7 @@ package bus
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -11,7 +12,9 @@ import (
 	"github.com/google/uuid"
 	"swarm/internal/events"
 	"swarm/internal/runtime/core/eventidentity"
+	runtimepinrouting "swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "swarm/internal/runtime/correlation"
+	runtimedeadletters "swarm/internal/runtime/deadletters"
 	runtimedelivery "swarm/internal/runtime/deliverylifecycle"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	runtimereplayclaim "swarm/internal/runtime/replayclaim"
@@ -19,6 +22,10 @@ import (
 
 type pipelineTransitionSchemaCapabilityProvider interface {
 	CanonicalEventReceiptsCapability(context.Context) (bool, error)
+}
+
+type targetFailureDeadLetterRecorder interface {
+	RecordDeadLetter(context.Context, runtimedeadletters.Record) error
 }
 
 func shouldPersistPipelineReceipt(persisted bool, publishErr error) bool {
@@ -36,6 +43,22 @@ func pipelineReceiptStatus(ctx context.Context, publishErr error) (string, strin
 		return overrideStatus, overrideErr
 	}
 	return "processed", ""
+}
+
+func applyTargetDeliveryFailureReceipt(override *runtimepipeline.PipelineReceiptOverride, failure runtimepinrouting.TargetFailure) {
+	if override == nil || failure == "" {
+		return
+	}
+	override.Status = "dead_letter"
+	override.ErrText = targetDeliveryFailureMessage(failure)
+}
+
+func targetDeliveryFailureMessage(failure runtimepinrouting.TargetFailure) string {
+	failure = runtimepinrouting.TargetFailure(strings.TrimSpace(string(failure)))
+	if failure == "" {
+		return ""
+	}
+	return fmt.Sprintf("pin routing target delivery failed: %s", failure)
 }
 
 var ErrRuntimeIngressPaused = errors.New("runtime ingress is paused")
@@ -195,6 +218,12 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 		return err
 	}
 	persisted = true
+	if plan.TargetFailure != "" {
+		applyTargetDeliveryFailureReceipt(receiptOverride, plan.TargetFailure)
+		eb.recordTargetDeliveryFailure(ictx, evt, plan)
+		eb.logPublished(ictx, evt, int(time.Since(start)/time.Microsecond))
+		return eb.convergeStandaloneRuntimePlatformRun(ictx, evt)
+	}
 	if reason, err := eb.dispatchQueueReason(ictx, evt); err != nil {
 		return err
 	} else if reason != "" {
@@ -280,7 +309,7 @@ func (eb *EventBus) PublishTx(ctx context.Context, tx *sql.Tx, evt events.Event)
 	}
 	eb.recordPublishDiagnostic(txctx, evt, inboundPlan)
 	if len(inboundPlan.PersistedRecipients) > 0 {
-		if err := txStore.InsertEventDeliveriesTx(txctx, tx, evt.ID, inboundPlan.PersistedRecipients); err != nil {
+		if err := eb.insertEventDeliveriesTx(txctx, txStore, tx, evt.ID, inboundPlan.PersistedRecipients, inboundPlan.DeliveryTargets); err != nil {
 			return fmt.Errorf("persist event deliveries: %w", err)
 		}
 	}
@@ -290,6 +319,17 @@ func (eb *EventBus) PublishTx(ctx context.Context, tx *sql.Tx, evt events.Event)
 		}
 	} else if replayScopePersistenceRequired(eb.store) {
 		return fmt.Errorf("persist committed replay scope: %w", runtimereplayclaim.ErrMissingCommittedReplayScope)
+	}
+	if inboundPlan.TargetFailure != "" {
+		if err := txStore.UpsertPipelineReceiptTx(txctx, tx, evt.ID, "dead_letter", targetDeliveryFailureMessage(inboundPlan.TargetFailure)); err != nil {
+			return fmt.Errorf("persist pipeline receipt: %w", err)
+		}
+		eb.logRuntime(txctx, "warn", "Pin routing target delivery failed", "eventbus", "target_resolution_failed", evt.ID, string(evt.Type), evt.SourceAgent, evt.EntityID(), "", nil, map[string]any{
+			"target_failure_reason": string(inboundPlan.TargetFailure),
+			"target":                evt.TargetRoute(),
+			"target_set":            evt.TargetRoutes(),
+		}, targetDeliveryFailureMessage(inboundPlan.TargetFailure), 0)
+		return nil
 	}
 	if reason, err := eb.dispatchQueueReason(txctx, evt); err != nil {
 		return err
@@ -392,7 +432,7 @@ func (eb *EventBus) publishTransactional(
 	}
 	eb.recordPublishDiagnostic(txctx, evt, inboundPlan)
 	if len(inboundPlan.PersistedRecipients) > 0 {
-		if err := txStore.InsertEventDeliveriesTx(txctx, tx, evt.ID, inboundPlan.PersistedRecipients); err != nil {
+		if err := eb.insertEventDeliveriesTx(txctx, txStore, tx, evt.ID, inboundPlan.PersistedRecipients, inboundPlan.DeliveryTargets); err != nil {
 			return fmt.Errorf("persist event deliveries: %w", err)
 		}
 	}
@@ -402,6 +442,21 @@ func (eb *EventBus) publishTransactional(
 		}
 	} else if replayScopePersistenceRequired(eb.store) {
 		return fmt.Errorf("persist committed replay scope: %w", runtimereplayclaim.ErrMissingCommittedReplayScope)
+	}
+	if inboundPlan.TargetFailure != "" {
+		applyTargetDeliveryFailureReceipt(receiptOverride, inboundPlan.TargetFailure)
+		status, errText := pipelineReceiptStatus(txctx, nil)
+		if err := txStore.UpsertPipelineReceiptTx(txctx, tx, evt.ID, status, errText); err != nil {
+			return fmt.Errorf("persist pipeline receipt: %w", err)
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit publish tx: %w", err)
+		}
+		committed = true
+		runtimepipeline.FlushPipelinePostCommitActions(postCommitActions)
+		eb.recordTargetDeliveryFailure(ctx, evt, inboundPlan)
+		eb.logPublished(ctx, evt, int(time.Since(start)/time.Microsecond))
+		return nil
 	}
 
 	if reason, err := eb.dispatchQueueReason(txctx, evt); err != nil {
@@ -432,7 +487,7 @@ func (eb *EventBus) publishTransactional(
 	if passthrough {
 		if len(inboundPlan.Recipients) > 0 {
 			eb.logQueuedDeliveries(ctx, evt, inboundPlan.PersistedRecipients, "matched_agent_subscription", inboundPlan.ExtraDetail)
-			if err := eb.deliverToAgents(ctx, evt, inboundPlan.Recipients); err != nil {
+			if err := eb.deliverToAgentsWithTargets(ctx, evt, inboundPlan.Recipients, inboundPlan.DeliveryTargets); err != nil {
 				return err
 			}
 			eb.logDelivery(ctx, evt, inboundPlan.Recipients, inboundPlan.ExtraDetail)
@@ -554,6 +609,12 @@ func (eb *EventBus) publishDeferred(ctx context.Context, evt events.Event) (err 
 		return err
 	}
 	persisted = true
+	if plan.TargetFailure != "" {
+		applyTargetDeliveryFailureReceipt(receiptOverride, plan.TargetFailure)
+		eb.recordTargetDeliveryFailure(ctx, evt, plan)
+		eb.logPublished(ctx, evt, 0)
+		return nil
+	}
 	if reason, err := eb.dispatchQueueReason(ctx, evt); err != nil {
 		return err
 	} else if reason != "" {
@@ -636,7 +697,7 @@ func (eb *EventBus) authorizePublishRecipientPlan(ctx context.Context, evt event
 }
 
 func (eb *EventBus) persistSubscribedPublishPlan(ctx context.Context, evt events.Event, plan eventDeliveryPlan) error {
-	if err := eb.persistEventRecord(ctx, evt, plan.PersistedRecipients, runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
+	if err := eb.persistEventRecord(ctx, evt, plan.PersistedRecipients, plan.DeliveryTargets, runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
 		return err
 	}
 	eb.logQueuedDeliveries(ctx, evt, plan.PersistedRecipients, "matched_agent_subscription", plan.ExtraDetail)
@@ -651,7 +712,7 @@ func (eb *EventBus) deliverSubscribedPublishPlan(ctx context.Context, evt events
 		return true, nil
 	}
 	if len(plan.Recipients) > 0 {
-		if err := eb.deliverToAgents(ctx, evt, plan.Recipients); err != nil {
+		if err := eb.deliverToAgentsWithTargets(ctx, evt, plan.Recipients, plan.DeliveryTargets); err != nil {
 			return false, err
 		}
 		eb.logDelivery(ctx, evt, plan.Recipients, plan.ExtraDetail)
@@ -671,9 +732,16 @@ func (eb *EventBus) persistEventRecord(
 	ctx context.Context,
 	evt events.Event,
 	recipients []string,
+	deliveryTargets map[string]events.RouteIdentity,
 	scope runtimereplayclaim.CommittedReplayScope,
 ) error {
 	recipients = uniqueStrings(recipients)
+	if atomicStore, ok := eb.store.(AtomicEventRoutePersistence); ok {
+		if err := atomicStore.PersistEventWithDeliveryRoutesAndScope(ctx, evt, recipients, deliveryTargets, scope); err != nil {
+			return fmt.Errorf("persist event transaction: %w", err)
+		}
+		return nil
+	}
 	if atomicStore, ok := eb.store.(AtomicEventReplayScopePersistence); ok {
 		if err := atomicStore.PersistEventWithDeliveriesAndScope(ctx, evt, recipients, scope); err != nil {
 			return fmt.Errorf("persist event transaction: %w", err)
@@ -699,7 +767,7 @@ func (eb *EventBus) persistEventRecord(
 		return fmt.Errorf("persist event: %w", err)
 	}
 	if len(recipients) > 0 {
-		if err := eb.store.InsertEventDeliveries(ctx, evt.ID, recipients); err != nil {
+		if err := eb.insertEventDeliveries(ctx, evt.ID, recipients, deliveryTargets); err != nil {
 			return fmt.Errorf("persist event deliveries: %w", err)
 		}
 	}
@@ -713,6 +781,27 @@ func (eb *EventBus) persistEventRecord(
 		return fmt.Errorf("persist committed replay scope: %w", runtimereplayclaim.ErrMissingCommittedReplayScope)
 	}
 	return nil
+}
+
+func (eb *EventBus) insertEventDeliveries(ctx context.Context, eventID string, recipients []string, deliveryTargets map[string]events.RouteIdentity) error {
+	if store, ok := eb.store.(EventDeliveryRoutePersistence); ok && store != nil {
+		return store.InsertEventDeliveriesWithTargets(ctx, eventID, recipients, deliveryTargets)
+	}
+	return eb.store.InsertEventDeliveries(ctx, eventID, recipients)
+}
+
+func (eb *EventBus) insertEventDeliveriesTx(
+	ctx context.Context,
+	txStore TransactionalEventStore,
+	tx *sql.Tx,
+	eventID string,
+	recipients []string,
+	deliveryTargets map[string]events.RouteIdentity,
+) error {
+	if store, ok := txStore.(TransactionalEventDeliveryRoutePersistence); ok && store != nil {
+		return store.InsertEventDeliveriesWithTargetsTx(ctx, tx, eventID, recipients, deliveryTargets)
+	}
+	return txStore.InsertEventDeliveriesTx(ctx, tx, eventID, recipients)
 }
 
 func (eb *EventBus) logDelivery(ctx context.Context, evt events.Event, recipients []string, extra map[string]any) {
@@ -874,6 +963,8 @@ func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipie
 	if err := ensurePublishEpoch(ctx); err != nil {
 		return err
 	}
+	receiptOverride := &runtimepipeline.PipelineReceiptOverride{}
+	ctx = runtimepipeline.WithPipelineReceiptOverride(ctx, receiptOverride)
 	start := time.Now()
 	persisted := false
 	queued := false
@@ -909,10 +1000,16 @@ func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipie
 	if err != nil {
 		return err
 	}
-	if err := eb.persistEventRecord(ctx, evt, plan.PersistedRecipients, runtimereplayclaim.CommittedReplayScopeDirect); err != nil {
+	if err := eb.persistEventRecord(ctx, evt, plan.PersistedRecipients, plan.DeliveryTargets, runtimereplayclaim.CommittedReplayScopeDirect); err != nil {
 		return err
 	}
 	persisted = true
+	if plan.TargetFailure != "" {
+		applyTargetDeliveryFailureReceipt(receiptOverride, plan.TargetFailure)
+		eb.recordTargetDeliveryFailure(ctx, evt, plan)
+		eb.logPublished(ctx, evt, int(time.Since(start)/time.Microsecond))
+		return nil
+	}
 	eb.logQueuedDeliveries(ctx, evt, plan.PersistedRecipients, "direct_publish", plan.ExtraDetail)
 	if reason, err := eb.dispatchQueueReason(ctx, evt); err != nil {
 		return err
@@ -921,7 +1018,7 @@ func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipie
 		eb.logDispatchQueued(ctx, reason, evt, len(plan.Recipients), true, false)
 		return nil
 	}
-	if err := eb.deliverToAgents(ctx, evt, plan.Recipients); err != nil {
+	if err := eb.deliverToAgentsWithTargets(ctx, evt, plan.Recipients, plan.DeliveryTargets); err != nil {
 		return err
 	}
 	detail := map[string]any{
@@ -1035,8 +1132,9 @@ func (eb *EventBus) publishPersistedRecipients(ctx context.Context, evt events.E
 	if err != nil {
 		return err
 	}
+	deliveryTargets := eb.deliveryTargetsForEvent(ctx, evt.ID)
 	if passthrough && len(liveRecipients) > 0 {
-		if err := eb.deliverToAgents(ctx, evt, liveRecipients); err != nil {
+		if err := eb.deliverToAgentsWithTargets(ctx, evt, liveRecipients, deliveryTargets); err != nil {
 			return err
 		}
 	}
@@ -1064,4 +1162,92 @@ func (eb *EventBus) publishPersistedRecipients(ctx context.Context, evt events.E
 		"replay_scope":               string(scope),
 	}, "", 0)
 	return nil
+}
+
+func (eb *EventBus) deliveryTargetsForEvent(ctx context.Context, eventID string) map[string]events.RouteIdentity {
+	reader, ok := eb.store.(EventDeliveryTargetReader)
+	if !ok || reader == nil {
+		return nil
+	}
+	targets, err := reader.ListEventDeliveryTargets(ctx, eventID)
+	if err != nil {
+		return nil
+	}
+	return targets
+}
+
+func (eb *EventBus) recordTargetDeliveryFailure(ctx context.Context, evt events.Event, plan eventDeliveryPlan) {
+	failure := runtimepinrouting.TargetFailure(strings.TrimSpace(string(plan.TargetFailure)))
+	if failure == "" {
+		return
+	}
+	message := targetDeliveryFailureMessage(failure)
+	target := evt.TargetRoute()
+	targetSet := evt.TargetRoutes()
+	detail := map[string]any{
+		"target_failure_reason": string(failure),
+		"source":                evt.SourceRoute(),
+		"target":                target,
+		"target_set":            targetSet,
+		"recipients":            append([]string(nil), plan.Recipients...),
+		"persisted_recipients":  append([]string(nil), plan.PersistedRecipients...),
+		"delivery_targets":      cloneRouteTargetMap(plan.DeliveryTargets),
+	}
+	eb.logRuntime(ctx, "warn", "Pin routing target delivery failed", "eventbus", "target_resolution_failed", evt.ID, string(evt.Type), evt.SourceAgent, evt.EntityID(), "", nil, detail, message, 0)
+
+	recorder, ok := eb.store.(targetFailureDeadLetterRecorder)
+	if !ok || recorder == nil {
+		return
+	}
+	targetContext, _ := json.Marshal(detail)
+	deadLetterRoute := target
+	if deadLetterRoute.Empty() && len(targetSet) > 0 {
+		deadLetterRoute = targetSet[0]
+	}
+	if deadLetterRoute.Empty() {
+		deadLetterRoute = evt.SourceRoute()
+	}
+	if err := recorder.RecordDeadLetter(ctx, runtimedeadletters.Record{
+		OriginalEventID:     strings.TrimSpace(evt.ID),
+		OriginalEvent:       strings.TrimSpace(string(evt.Type)),
+		OriginalPayload:     evt.Payload,
+		EntityID:            firstNonEmptyString(deadLetterRoute.EntityID, evt.EntityID()),
+		FlowInstance:        firstNonEmptyString(deadLetterRoute.FlowInstance, evt.FlowInstance(), "runtime"),
+		FailureType:         "target_resolution_failed",
+		TargetFailureReason: string(failure),
+		TargetContext:       json.RawMessage(targetContext),
+		ErrorMessage:        message,
+		RetryCount:          0,
+		ChainDepth:          evt.ChainDepth,
+		HandlerNode:         "pin_routing",
+	}); err != nil {
+		eb.logRuntime(ctx, "warn", "Pin routing target failure dead-letter record failed", "eventbus", "target_resolution_failed_dead_letter_failed", evt.ID, string(evt.Type), evt.SourceAgent, evt.EntityID(), "", nil, detail, err.Error(), 0)
+	}
+}
+
+func cloneRouteTargetMap(in map[string]events.RouteIdentity) map[string]events.RouteIdentity {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]events.RouteIdentity, len(in))
+	for recipient, target := range in {
+		recipient = strings.TrimSpace(recipient)
+		if recipient == "" {
+			continue
+		}
+		out[recipient] = target.Normalized()
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func firstNonEmptyString(vals ...string) string {
+	for _, val := range vals {
+		if trimmed := strings.TrimSpace(val); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }

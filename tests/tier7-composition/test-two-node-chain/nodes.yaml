@@ -16,4 +16,6 @@ node-b:
   event_handlers:
     task.progressed:
       advances_to: complete
-      emit: task.finished
+      emit:
+        event: task.finished
+        broadcast: true

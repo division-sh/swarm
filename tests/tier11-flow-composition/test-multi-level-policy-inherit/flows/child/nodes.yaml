@@ -7,4 +7,6 @@ child-node:
     child.check:
       create_entity: true
       advances_to: done
-      emit: child.done
+      emit:
+        event: child.done
+        broadcast: true

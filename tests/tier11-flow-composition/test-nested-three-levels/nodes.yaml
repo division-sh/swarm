@@ -15,4 +15,6 @@ root-collector:
   event_handlers:
     child/grandchild/micro.done:
       advances_to: done
-      emit: pipeline.complete
+      emit:
+        event: pipeline.complete
+        broadcast: true

@@ -281,6 +281,78 @@ func TestHandleEmitTool_KeepsFlowOutputPinAtParentScope(t *testing.T) {
 	}
 }
 
+func TestHandleEmitTool_TargetsParentRouteForChildPinOutput(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"analysis.done": {
+				Payload: runtimecontracts.EventPayloadSpec{Type: "object"},
+			},
+		},
+	}
+	analyzerFlow := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{
+			ID:   "analyzer-flow",
+			Flow: "analyzer-flow",
+		},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{
+				Outputs: runtimecontracts.FlowOutputPins{
+					Events: []string{"analysis.done"},
+				},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"analysis.done": {},
+		},
+		Path: "analyzer-flow",
+	}
+	bundle.FlowTree = flowmodel.Tree[runtimecontracts.FlowContractView]{
+		Root: &runtimecontracts.FlowContractView{
+			Children: []runtimecontracts.FlowContractView{analyzerFlow},
+		},
+		ByID: map[string]*runtimecontracts.FlowContractView{
+			"analyzer-flow": &analyzerFlow,
+		},
+	}
+	source := semanticview.Wrap(bundle)
+	emitRegistry := NewEmitRegistry(source, nil)
+
+	bus := &publishBusCapture{}
+	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
+	actor := models.AgentConfig{
+		ID:         "analyzer",
+		Role:       "analyzer",
+		Mode:       "analyzer-flow",
+		FlowPath:   "analyzer-flow",
+		EmitEvents: []string{"analyzer-flow/analysis.done"},
+	}
+	parentRoute := events.RouteIdentity{
+		FlowID:       "root",
+		FlowInstance: "root",
+		EntityID:     "11111111-1111-1111-1111-111111111111",
+	}
+	childRoute := events.RouteIdentity{
+		FlowID:       "analyzer-flow",
+		FlowInstance: "analyzer-flow",
+		EntityID:     "22222222-2222-2222-2222-222222222222",
+	}
+	inbound := (events.Event{
+		Type: events.EventType("analyzer-flow/analysis.requested"),
+	}).WithSourceRoute(parentRoute).WithTargetRoute(childRoute)
+	ctx := runtimebus.WithInboundEvent(context.Background(), inbound)
+
+	_, err := exec.handleEmitTool(ctx, actor, "emit_analysis_done", map[string]any{})
+	if err != nil {
+		t.Fatalf("handleEmitTool: %v", err)
+	}
+	if got := bus.event.TargetRoute(); got != parentRoute {
+		t.Fatalf("target route = %#v, want parent route %#v", got, parentRoute)
+	}
+	if got := bus.event.SourceRoute(); got.Empty() || got.FlowID != "analyzer-flow" {
+		t.Fatalf("source route = %#v, want analyzer-flow source", got)
+	}
+}
+
 func TestHandleEmitTool_FailsClosedOnUndeclaredPayloadField(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Events: map[string]runtimecontracts.EventCatalogEntry{

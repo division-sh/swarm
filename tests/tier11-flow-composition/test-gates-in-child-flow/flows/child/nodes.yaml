@@ -9,4 +9,6 @@ validator:
       create_entity: true
       advances_to: done
       sets_gate: g_validated
-      emit: validation.done
+      emit:
+        event: validation.done
+        broadcast: true

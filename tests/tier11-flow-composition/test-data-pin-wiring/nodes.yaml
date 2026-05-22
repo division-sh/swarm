@@ -22,4 +22,6 @@ result-listener:
   event_handlers:
     processor/process.done:
       advances_to: done
-      emit: job.complete
+      emit:
+        event: job.complete
+        broadcast: true

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"swarm/internal/events"
+	runtimepinrouting "swarm/internal/runtime/core/pinrouting"
 )
 
 func TestDeliveryRouteResolver_SeparatesRouteResolutionAndDiagnostics(t *testing.T) {
@@ -120,6 +121,52 @@ func TestDeliveryRecipientPolicy_KeepsInternalSubscribersLiveOnlyUnderDescriptor
 	}
 }
 
+func TestDeliveryRecipientPolicy_TargetedEventFailsWhenTargetInstanceIsGone(t *testing.T) {
+	policy := deliveryRecipientPolicy{
+		loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
+			return map[string]ActiveAgentDescriptor{
+				"agent-a": {AgentID: "agent-a", EntityID: "ent-1", FlowInstance: "flow/active"},
+			}, true, nil
+		},
+	}
+
+	manifest, err := policy.Evaluate(context.Background(), (events.Event{
+		Type: "task.completed",
+	}).WithTargetRoute(events.RouteIdentity{EntityID: "ent-2", FlowInstance: "flow/missing"}), agentDeliveryRecipientCandidates([]string{"agent-a"}))
+	if err != nil {
+		t.Fatalf("Evaluate: %v", err)
+	}
+	if manifest.TargetFailure != runtimepinrouting.FailureTargetUnreachableTerminated {
+		t.Fatalf("target failure = %q, want %q", manifest.TargetFailure, runtimepinrouting.FailureTargetUnreachableTerminated)
+	}
+	if len(manifest.PersistedRecipients) != 0 {
+		t.Fatalf("persisted recipients = %#v, want none", manifest.PersistedRecipients)
+	}
+}
+
+func TestDeliveryRecipientPolicy_TargetedEventFailsWhenTargetDoesNotSubscribe(t *testing.T) {
+	policy := deliveryRecipientPolicy{
+		loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
+			return map[string]ActiveAgentDescriptor{
+				"target-agent": {AgentID: "target-agent", EntityID: "ent-1", FlowInstance: "flow/target"},
+			}, true, nil
+		},
+	}
+
+	manifest, err := policy.Evaluate(context.Background(), (events.Event{
+		Type: "task.completed",
+	}).WithTargetRoute(events.RouteIdentity{EntityID: "ent-1", FlowInstance: "flow/target"}), agentDeliveryRecipientCandidates([]string{"other-agent"}))
+	if err != nil {
+		t.Fatalf("Evaluate: %v", err)
+	}
+	if manifest.TargetFailure != runtimepinrouting.FailureTargetNotSubscribed {
+		t.Fatalf("target failure = %q, want %q", manifest.TargetFailure, runtimepinrouting.FailureTargetNotSubscribed)
+	}
+	if len(manifest.PersistedRecipients) != 0 {
+		t.Fatalf("persisted recipients = %#v, want none", manifest.PersistedRecipients)
+	}
+}
+
 func TestDeliveryPlanner_ComposesRoutingPolicyAndManifest(t *testing.T) {
 	planner := newDeliveryPlanner(
 		deliveryRouteResolver{
@@ -158,6 +205,35 @@ func TestDeliveryPlanner_ComposesRoutingPolicyAndManifest(t *testing.T) {
 	}
 	if got := plan.ExtraDetail["routed_recipients_count"]; got != 1 {
 		t.Fatalf("routed_recipients_count = %#v, want 1", got)
+	}
+}
+
+func TestDeliveryPlanner_DoesNotDeadLetterTargetedWorkflowNodeSubscriber(t *testing.T) {
+	planner := newDeliveryPlanner(
+		deliveryRouteResolver{
+			resolveRoutedSubscribers: func(string) []Subscriber {
+				return []Subscriber{{ID: "parent-listener", Type: "node"}}
+			},
+			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate { return nil },
+			describeSubscribersForEvent: func(string, []Subscriber) []PublishDiagnosticRecipient {
+				return []PublishDiagnosticRecipient{{ID: "parent-listener", Type: "node"}}
+			},
+		},
+		deliveryRecipientPolicy{
+			loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
+				return map[string]ActiveAgentDescriptor{}, true, nil
+			},
+		},
+	)
+
+	plan, err := planner.Plan(context.Background(), (events.Event{
+		Type: "child/output.done",
+	}).WithTargetRoute(events.RouteIdentity{EntityID: "ent-1", FlowInstance: "root"}))
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if plan.TargetFailure != "" {
+		t.Fatalf("target failure = %q, want none for routed workflow node subscriber", plan.TargetFailure)
 	}
 }
 

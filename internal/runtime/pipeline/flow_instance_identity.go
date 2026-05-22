@@ -26,7 +26,7 @@ func StoredFlowInstance(source semanticview.Source, instance WorkflowInstance) r
 	if entityID == "" && materializedPath == "" {
 		entityID = strings.TrimSpace(instance.InstanceID)
 	}
-	return runtimeflowidentity.Stored(
+	stored := runtimeflowidentity.Stored(
 		source,
 		strings.TrimSpace(instance.WorkflowName),
 		materializedPath,
@@ -34,6 +34,12 @@ func StoredFlowInstance(source semanticview.Source, instance WorkflowInstance) r
 		entityID,
 		strings.TrimSpace(asString(instance.Metadata["parent_entity_id"])),
 	)
+	stored.ParentRoute = runtimeflowidentity.ParentRoute{
+		FlowID:       strings.TrimSpace(asString(instance.Metadata["parent_flow_id"])),
+		FlowInstance: strings.Trim(strings.TrimSpace(asString(instance.Metadata["parent_flow_instance"])), "/"),
+		EntityID:     strings.TrimSpace(asString(instance.Metadata["parent_entity_id"])),
+	}
+	return stored
 }
 
 func workflowInstanceIdentity(source semanticview.Source, instance WorkflowInstance) runtimeflowidentity.Instance {
@@ -50,7 +56,7 @@ func workflowInstancePersistedIdentity(source semanticview.Source, instance Work
 	if entityID == "" && flowPath == "" {
 		entityID = strings.TrimSpace(firstNonEmptyString(instance.StorageRef, asString(instance.Metadata["storage_ref"]), instance.InstanceID))
 	}
-	return runtimeflowidentity.StoredPersisted(
+	persisted, err := runtimeflowidentity.StoredPersisted(
 		source,
 		strings.TrimSpace(instance.WorkflowName),
 		strings.TrimSpace(firstNonEmptyString(instance.StorageRef, asString(instance.Metadata["storage_ref"]))),
@@ -59,6 +65,15 @@ func workflowInstancePersistedIdentity(source semanticview.Source, instance Work
 		entityID,
 		asString(instance.Metadata["parent_entity_id"]),
 	)
+	if err != nil {
+		return runtimeflowidentity.Persisted{}, err
+	}
+	persisted.ParentRoute = runtimeflowidentity.ParentRoute{
+		FlowID:       strings.TrimSpace(asString(instance.Metadata["parent_flow_id"])),
+		FlowInstance: strings.Trim(strings.TrimSpace(asString(instance.Metadata["parent_flow_instance"])), "/"),
+		EntityID:     strings.TrimSpace(asString(instance.Metadata["parent_entity_id"])),
+	}
+	return persisted, nil
 }
 
 func workflowInstanceScopeKey(source semanticview.Source, instance WorkflowInstance) string {
@@ -70,7 +85,7 @@ func workflowInstancePath(source semanticview.Source, instance WorkflowInstance)
 }
 
 func workflowStateIdentity(source semanticview.Source, flowID string, state WorkflowState) runtimeflowidentity.Instance {
-	return runtimeflowidentity.Stored(
+	instance := runtimeflowidentity.Stored(
 		source,
 		strings.TrimSpace(flowID),
 		asString(state.Metadata["flow_path"]),
@@ -78,6 +93,12 @@ func workflowStateIdentity(source semanticview.Source, flowID string, state Work
 		strings.TrimSpace(state.EntityID),
 		asString(state.Metadata["parent_entity_id"]),
 	)
+	instance.ParentRoute = runtimeflowidentity.ParentRoute{
+		FlowID:       strings.TrimSpace(asString(state.Metadata["parent_flow_id"])),
+		FlowInstance: strings.Trim(strings.TrimSpace(asString(state.Metadata["parent_flow_instance"])), "/"),
+		EntityID:     strings.TrimSpace(asString(state.Metadata["parent_entity_id"])),
+	}
+	return instance
 }
 
 func isDescendantFlowInstance(scopeKey, instancePath string) bool {

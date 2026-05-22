@@ -6,4 +6,6 @@ test-node:
   event_handlers:
     task.submitted:
       advances_to: done
-      emit: task.accepted
+      emit:
+        event: task.accepted
+        broadcast: true

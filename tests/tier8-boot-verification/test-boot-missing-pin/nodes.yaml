@@ -8,4 +8,6 @@ dispatcher:
       emit: child/task.assigned
     child/task.result:
       advances_to: done
-      emit: task.completed
+      emit:
+        event: task.completed
+        broadcast: true

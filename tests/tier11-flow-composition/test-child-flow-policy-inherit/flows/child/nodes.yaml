@@ -10,4 +10,6 @@ child-checker:
         id: threshold_check
         check: "payload.score >= policy.threshold"
       advances_to: approved
-      emit: check.passed
+      emit:
+        event: check.passed
+        broadcast: true

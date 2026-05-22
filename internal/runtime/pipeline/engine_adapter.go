@@ -14,6 +14,7 @@ import (
 	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 	"swarm/internal/runtime/core/identity"
 	"swarm/internal/runtime/core/paths"
+	runtimepinrouting "swarm/internal/runtime/core/pinrouting"
 	runtimeregistry "swarm/internal/runtime/core/registry"
 	runtimecurrentstate "swarm/internal/runtime/currentstate"
 	runtimeengine "swarm/internal/runtime/engine"
@@ -514,9 +515,25 @@ func coordinatorEngineDependencies(pc *PipelineCoordinator) runtimeengine.Runtim
 		ActionRegistry:      pipelineEngineActionRegistry{registry: pc.ActionRegistry()},
 		ActionRunner:        pipelineEngineActionRunner{coordinator: pc},
 		PayloadShaper:       pipelineEnginePayloadShaper{coordinator: pc},
+		TargetDescriptors:   pipelineEngineTargetDescriptorLoader(pc),
 		TransitionValidator: pipelineEngineTransitionValidator{coordinator: pc},
 		MaxChainDepth:       workflowMaxChainDepthPolicy(source),
 	}
+}
+
+type pinRoutingDescriptorSource interface {
+	PinRoutingDescriptors(context.Context) ([]runtimepinrouting.Descriptor, error)
+}
+
+func pipelineEngineTargetDescriptorLoader(pc *PipelineCoordinator) runtimeengine.TargetDescriptorLoader {
+	if pc == nil || pc.bus == nil {
+		return nil
+	}
+	source, ok := pc.bus.(pinRoutingDescriptorSource)
+	if !ok || source == nil {
+		return nil
+	}
+	return source.PinRoutingDescriptors
 }
 
 func workflowMetadataValue(metadata map[string]any, target string) (any, bool) {

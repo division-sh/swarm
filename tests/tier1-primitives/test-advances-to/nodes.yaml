@@ -6,4 +6,6 @@ test-node:
   event_handlers:
     task.started:
       advances_to: processing
-      emit: task.progressed
+      emit:
+        event: task.progressed
+        broadcast: true

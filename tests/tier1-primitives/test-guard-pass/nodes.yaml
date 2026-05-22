@@ -10,4 +10,6 @@ test-node:
         id: score_check
         check: payload.score >= policy.threshold
       advances_to: done
-      emit: check.passed
+      emit:
+        event: check.passed
+        broadcast: true

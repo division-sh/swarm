@@ -8,5 +8,7 @@ test-node:
       action: create_flow_instance
       template: worker-flow
       instance_id_from: payload.instance_id
-      emit: flow.spawned
+      emit:
+        event: flow.spawned
+        broadcast: true
       advances_to: spawned

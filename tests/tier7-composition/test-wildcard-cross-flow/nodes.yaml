@@ -6,4 +6,6 @@ audit-node:
   event_handlers:
     "*/job.*":
       advances_to: done
-      emit: audit.logged
+      emit:
+        event: audit.logged
+        broadcast: true

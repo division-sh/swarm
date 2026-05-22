@@ -162,6 +162,64 @@ func (s *PostgresStore) ensureSchemaCompatibilityColumns(ctx context.Context) er
 			return err
 		}
 	}
+	if catalog.hasTable("events") {
+		for _, stmt := range []struct {
+			column string
+			sql    string
+		}{
+			{"source_route", `ALTER TABLE events ADD COLUMN IF NOT EXISTS source_route JSONB NOT NULL DEFAULT '{}'::jsonb`},
+			{"target_route", `ALTER TABLE events ADD COLUMN IF NOT EXISTS target_route JSONB NOT NULL DEFAULT '{}'::jsonb`},
+			{"target_set", `ALTER TABLE events ADD COLUMN IF NOT EXISTS target_set JSONB NOT NULL DEFAULT '[]'::jsonb`},
+		} {
+			if !catalog.hasColumns("events", stmt.column) {
+				if _, err := s.DB.ExecContext(ctx, stmt.sql); err != nil {
+					return fmt.Errorf("ensure events.%s column: %w", stmt.column, err)
+				}
+			}
+		}
+	}
+	if catalog.hasTable("event_deliveries") && !catalog.hasColumns("event_deliveries", "delivery_target_route") {
+		if _, err := s.DB.ExecContext(ctx, `ALTER TABLE event_deliveries ADD COLUMN IF NOT EXISTS delivery_target_route JSONB NOT NULL DEFAULT '{}'::jsonb`); err != nil {
+			return fmt.Errorf("ensure event_deliveries.delivery_target_route column: %w", err)
+		}
+	}
+	if catalog.hasTable("dead_letters") {
+		for _, stmt := range []struct {
+			column string
+			sql    string
+		}{
+			{"target_failure_reason", `ALTER TABLE dead_letters ADD COLUMN IF NOT EXISTS target_failure_reason TEXT`},
+			{"target_context", `ALTER TABLE dead_letters ADD COLUMN IF NOT EXISTS target_context JSONB NOT NULL DEFAULT '{}'::jsonb`},
+		} {
+			if !catalog.hasColumns("dead_letters", stmt.column) {
+				if _, err := s.DB.ExecContext(ctx, stmt.sql); err != nil {
+					return fmt.Errorf("ensure dead_letters.%s column: %w", stmt.column, err)
+				}
+			}
+		}
+		if _, err := s.DB.ExecContext(ctx, `
+			DO $$
+			DECLARE check_name TEXT;
+			BEGIN
+				SELECT c.conname
+				INTO check_name
+				FROM pg_constraint c
+				WHERE c.conrelid = 'dead_letters'::regclass
+				  AND c.contype = 'c'
+				  AND pg_get_constraintdef(c.oid) LIKE '%failure_type%'
+				LIMIT 1;
+				IF check_name IS NOT NULL THEN
+					EXECUTE format('ALTER TABLE dead_letters DROP CONSTRAINT %I', check_name);
+				END IF;
+				ALTER TABLE dead_letters
+					ADD CONSTRAINT dead_letters_failure_type_check
+					CHECK (failure_type IN ('handler_error', 'target_resolution_failed', 'chain_depth_exceeded', 'retry_exhausted'));
+			END
+			$$;
+		`); err != nil {
+			return fmt.Errorf("ensure dead_letters failure_type constraint: %w", err)
+		}
+	}
 	if !catalog.hasTable("entity_state") {
 		return nil
 	}

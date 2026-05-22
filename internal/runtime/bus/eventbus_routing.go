@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"swarm/internal/events"
+	runtimepinrouting "swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "swarm/internal/runtime/correlation"
 	"swarm/internal/runtime/diaglog"
 	runtimepipeline "swarm/internal/runtime/pipeline"
@@ -40,6 +41,26 @@ func (eb *EventBus) activeAgentDescriptors(ctx context.Context) (map[string]Acti
 		set[id] = descriptor
 	}
 	return set, true, nil
+}
+
+func (eb *EventBus) PinRoutingDescriptors(ctx context.Context) ([]runtimepinrouting.Descriptor, error) {
+	descriptors, _, err := eb.activeAgentDescriptors(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]runtimepinrouting.Descriptor, 0, len(descriptors))
+	for _, descriptor := range descriptors {
+		descriptor = descriptor.Normalized()
+		if descriptor.AgentID == "" {
+			continue
+		}
+		out = append(out, runtimepinrouting.Descriptor{
+			ID:           descriptor.AgentID,
+			EntityID:     descriptor.EntityID,
+			FlowInstance: descriptor.FlowInstance,
+		})
+	}
+	return out, nil
 }
 
 // RegisterRuntimeActiveAgentDescriptor adds in-memory active-agent metadata for
@@ -147,6 +168,10 @@ func (eb *EventBus) resolveRoutedRecipients(eventType string) []string {
 }
 
 func (eb *EventBus) deliverToAgents(ctx context.Context, evt events.Event, agentIDs []string) error {
+	return eb.deliverToAgentsWithTargets(ctx, evt, agentIDs, nil)
+}
+
+func (eb *EventBus) deliverToAgentsWithTargets(ctx context.Context, evt events.Event, agentIDs []string, deliveryTargets map[string]events.RouteIdentity) error {
 	expected := uniqueStrings(agentIDs)
 	if len(expected) == 0 {
 		return nil
@@ -165,8 +190,12 @@ func (eb *EventBus) deliverToAgents(ctx context.Context, evt events.Event, agent
 	}
 	timedOut := make([]string, 0, len(recipients))
 	for _, recipient := range recipients {
+		deliverEvent := evt
+		if target := deliveryTargets[strings.TrimSpace(recipient.agentID)]; !target.Empty() {
+			deliverEvent = evt.WithDeliveryTarget(target)
+		}
 		select {
-		case recipient.ch <- evt:
+		case recipient.ch <- deliverEvent:
 			delivered = append(delivered, recipient.agentID)
 		case <-ctx.Done():
 			remaining := make([]string, 0, len(recipients)-len(delivered))

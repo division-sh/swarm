@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"swarm/internal/events"
+	runtimepinrouting "swarm/internal/runtime/core/pinrouting"
 	runtimeengine "swarm/internal/runtime/engine"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	runtimereplayclaim "swarm/internal/runtime/replayclaim"
@@ -54,14 +55,14 @@ func (o engineOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.E
 		if strings.TrimSpace(string(intent.Event.Type)) == "" {
 			continue
 		}
-		recipients, internalRecipients, err := o.deliveryRecipientsForIntent(ctx, *intent)
+		recipients, deliveryTargets, internalRecipients, targetFailure, err := o.deliveryRecipientsForIntent(ctx, *intent)
 		if err != nil {
 			return err
 		}
 		if err := txStore.AppendEventTx(ctx, tx, intent.Event); err != nil {
 			return fmt.Errorf("persist event: %w", err)
 		}
-		if err := txStore.InsertEventDeliveriesTx(ctx, tx, intent.Event.ID, recipients); err != nil {
+		if err := o.bus.insertEventDeliveriesTx(ctx, txStore, tx, intent.Event.ID, recipients, deliveryTargets); err != nil {
 			return fmt.Errorf("persist event deliveries: %w", err)
 		}
 		if scopeWriter, ok := o.bus.store.(TransactionalEventReplayScopePersistence); ok && scopeWriter != nil {
@@ -71,25 +72,40 @@ func (o engineOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.E
 		} else if replayScopePersistenceRequired(o.bus.store) {
 			return fmt.Errorf("persist committed replay scope: %w", runtimereplayclaim.ErrMissingCommittedReplayScope)
 		}
+		if targetFailure != "" {
+			if err := txStore.UpsertPipelineReceiptTx(ctx, tx, intent.Event.ID, "dead_letter", targetDeliveryFailureMessage(targetFailure)); err != nil {
+				return fmt.Errorf("persist pipeline receipt: %w", err)
+			}
+			failedEvent := intent.Event
+			plan := eventDeliveryPlan{
+				Event:               failedEvent,
+				PersistedRecipients: recipients,
+				DeliveryTargets:     deliveryTargets,
+				TargetFailure:       targetFailure,
+			}
+			runtimepipeline.QueuePipelinePostCommitAction(ctx, func() {
+				o.bus.recordTargetDeliveryFailure(context.WithoutCancel(ctx), failedEvent, plan)
+			})
+		}
 		o.bus.setPendingInternalRecipients(intent.Event.ID, internalRecipients)
 	}
 	return nil
 }
 
-func (o engineOutbox) deliveryRecipientsForIntent(ctx context.Context, intent runtimeengine.EmitIntent) ([]string, []string, error) {
+func (o engineOutbox) deliveryRecipientsForIntent(ctx context.Context, intent runtimeengine.EmitIntent) ([]string, map[string]events.RouteIdentity, []string, runtimepinrouting.TargetFailure, error) {
 	if len(intent.Recipients) > 0 {
 		plan, err := o.bus.deliveryPlanner.PlanDirect(ctx, intent.Event, intent.Recipients)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, "", err
 		}
-		return plan.PersistedRecipients, nil, nil
+		return plan.PersistedRecipients, plan.DeliveryTargets, nil, plan.TargetFailure, nil
 	}
 	plan, err := o.bus.deliveryPlanner.Plan(ctx, intent.Event)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, "", err
 	}
 	o.bus.recordPublishDiagnostic(ctx, intent.Event, plan)
-	return plan.PersistedRecipients, filterOutAgentIDs(plan.Recipients, plan.PersistedRecipients), nil
+	return plan.PersistedRecipients, plan.DeliveryTargets, filterOutAgentIDs(plan.Recipients, plan.PersistedRecipients), plan.TargetFailure, nil
 }
 
 func (d engineDispatcher) DispatchPostCommit(ctx context.Context, intents []runtimeengine.EmitIntent) error {
@@ -150,9 +166,16 @@ func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengi
 	liveRecipients := uniqueStrings(append(append([]string(nil), recipients...), internalRecipients...))
 	if len(liveRecipients) == 0 {
 		d.bus.clearPendingInternalRecipients(intent.Event.ID)
+		if intent.Event.HasTargetRoute() {
+			plan := eventDeliveryPlan{Event: intent.Event, TargetFailure: runtimepinrouting.FailureTargetNotSubscribed}
+			d.bus.recordTargetDeliveryFailure(ctx, intent.Event, plan)
+			d.bus.markPipelineReceipt(ctx, intent.Event.ID, "dead_letter", targetDeliveryFailureMessage(plan.TargetFailure))
+			return true, nil
+		}
 		return false, nil
 	}
-	if err := d.bus.deliverToAgents(ctx, intent.Event, liveRecipients); err != nil {
+	deliveryTargets := d.bus.deliveryTargetsForEvent(ctx, intent.Event.ID)
+	if err := d.bus.deliverToAgentsWithTargets(ctx, intent.Event, liveRecipients, deliveryTargets); err != nil {
 		return false, err
 	}
 	d.bus.clearPendingInternalRecipients(intent.Event.ID)
@@ -174,7 +197,7 @@ func (d engineDispatcher) dispatchExplicitDirectIntent(ctx context.Context, inte
 	if err != nil {
 		return err
 	}
-	if err := d.bus.deliverToAgents(ctx, intent.Event, plan.Recipients); err != nil {
+	if err := d.bus.deliverToAgentsWithTargets(ctx, intent.Event, plan.Recipients, plan.DeliveryTargets); err != nil {
 		return err
 	}
 	detail := map[string]any{

@@ -5,5 +5,7 @@ test-node:
   produces: [match.found]
   event_handlers:
     "*.completed":
-      emit: match.found
+      emit:
+        event: match.found
+        broadcast: true
       advances_to: matched

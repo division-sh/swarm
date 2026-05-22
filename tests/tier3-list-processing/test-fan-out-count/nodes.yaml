@@ -8,5 +8,7 @@ fan-out-node:
       fan_out:
         items_from: payload.items
         target: fan-out-node
-        emit: task.dispatched
+        emit:
+          event: task.dispatched
+          broadcast: true
       advances_to: processing

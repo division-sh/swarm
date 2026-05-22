@@ -9,4 +9,6 @@ policy-check-node:
         id: policy_ref
         check: "payload.score >= policy.nonexistent_key"
       advances_to: done
-      emit: check.passed
+      emit:
+        event: check.passed
+        broadcast: true

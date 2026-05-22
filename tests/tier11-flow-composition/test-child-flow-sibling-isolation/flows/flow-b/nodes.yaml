@@ -7,4 +7,6 @@ beta-worker:
     beta.start:
       create_entity: true
       advances_to: finished
-      emit: beta.complete
+      emit:
+        event: beta.complete
+        broadcast: true

@@ -7,4 +7,6 @@ flow-b-node:
     order.submitted:
       create_entity: true
       advances_to: done
-      emit: order.completed
+      emit:
+        event: order.completed
+        broadcast: true

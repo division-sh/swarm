@@ -22,7 +22,9 @@ test-node:
                 weight: 0.3
               - dimensions: [c]
                 weight: 0.2
-          emit: scores.aggregated
+          emit:
+            event: scores.aggregated
+            broadcast: true
       advances_to: complete
   state_schema:
     fields:

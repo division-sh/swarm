@@ -7,4 +7,6 @@ worker:
     task.start:
       create_entity: true
       advances_to: finished
-      emit: task.done
+      emit:
+        event: task.done
+        broadcast: true

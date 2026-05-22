@@ -843,8 +843,10 @@ func (e EventEmission) Empty() bool {
 }
 
 type EmitSpec struct {
-	Event  string                     `yaml:"event"`
-	Fields map[string]ExpressionValue `yaml:"fields"`
+	Event     string                     `yaml:"event"`
+	Fields    map[string]ExpressionValue `yaml:"fields"`
+	Target    EmitTargetSpec             `yaml:"target"`
+	Broadcast bool                       `yaml:"broadcast"`
 }
 
 func (e EmitSpec) EventType() string {
@@ -857,6 +859,56 @@ func (e EmitSpec) Empty() bool {
 
 func (e EmitSpec) HasFields() bool {
 	return len(e.Fields) > 0
+}
+
+func (e EmitSpec) HasTarget() bool {
+	return !e.Target.Empty()
+}
+
+type EmitTargetKind string
+
+const (
+	EmitTargetKindSender     EmitTargetKind = "sender"
+	EmitTargetKindInstanceID EmitTargetKind = "instance_id"
+	EmitTargetKindFlowMatch  EmitTargetKind = "flow_match"
+)
+
+type EmitTargetSpec struct {
+	Kind        EmitTargetKind             `yaml:"-"`
+	InstanceID  string                     `yaml:"instance_id,omitempty"`
+	Flow        string                     `yaml:"flow,omitempty"`
+	Match       map[string]ExpressionValue `yaml:"match,omitempty"`
+	AllowFanout bool                       `yaml:"allow_fanout,omitempty"`
+}
+
+func (t EmitTargetSpec) Empty() bool {
+	t = t.Normalized()
+	return t.Kind == "" && t.InstanceID == "" && t.Flow == "" && len(t.Match) == 0 && !t.AllowFanout
+}
+
+func (t EmitTargetSpec) Normalized() EmitTargetSpec {
+	t.Kind = EmitTargetKind(strings.TrimSpace(string(t.Kind)))
+	t.InstanceID = strings.TrimSpace(t.InstanceID)
+	t.Flow = strings.TrimSpace(t.Flow)
+	if len(t.Match) > 0 {
+		out := make(map[string]ExpressionValue, len(t.Match))
+		for key, value := range t.Match {
+			key = strings.TrimSpace(key)
+			if key == "" {
+				continue
+			}
+			value.hydrate()
+			out[key] = value
+		}
+		t.Match = out
+	}
+	switch {
+	case t.Kind == "" && t.InstanceID != "":
+		t.Kind = EmitTargetKindInstanceID
+	case t.Kind == "" && (t.Flow != "" || len(t.Match) > 0):
+		t.Kind = EmitTargetKindFlowMatch
+	}
+	return t
 }
 
 func cloneExpressionValueMap(in map[string]ExpressionValue) map[string]ExpressionValue {
@@ -872,9 +924,23 @@ func cloneExpressionValueMap(in map[string]ExpressionValue) map[string]Expressio
 }
 
 func cloneEmitSpec(spec EmitSpec) EmitSpec {
+	target := spec.Target.Normalized()
 	return EmitSpec{
-		Event:  strings.TrimSpace(spec.Event),
-		Fields: cloneExpressionValueMap(spec.Fields),
+		Event:     strings.TrimSpace(spec.Event),
+		Fields:    cloneExpressionValueMap(spec.Fields),
+		Target:    cloneEmitTargetSpec(target),
+		Broadcast: spec.Broadcast,
+	}
+}
+
+func cloneEmitTargetSpec(spec EmitTargetSpec) EmitTargetSpec {
+	spec = spec.Normalized()
+	return EmitTargetSpec{
+		Kind:        spec.Kind,
+		InstanceID:  strings.TrimSpace(spec.InstanceID),
+		Flow:        strings.TrimSpace(spec.Flow),
+		Match:       cloneExpressionValueMap(spec.Match),
+		AllowFanout: spec.AllowFanout,
 	}
 }
 

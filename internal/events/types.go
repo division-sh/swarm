@@ -17,9 +17,18 @@ const (
 )
 
 type EventEnvelope struct {
-	EntityID     string     `json:"-"`
-	FlowInstance string     `json:"-"`
-	Scope        EventScope `json:"-"`
+	EntityID     string          `json:"-"`
+	FlowInstance string          `json:"-"`
+	Scope        EventScope      `json:"-"`
+	Source       RouteIdentity   `json:"-"`
+	Target       RouteIdentity   `json:"-"`
+	TargetSet    []RouteIdentity `json:"-"`
+}
+
+type RouteIdentity struct {
+	FlowInstance string `json:"flow_instance,omitempty"`
+	EntityID     string `json:"entity_id,omitempty"`
+	FlowID       string `json:"flow_id,omitempty"`
 }
 
 type Event struct {
@@ -69,6 +78,68 @@ func (e Event) WithFlowInstance(flowInstance string) Event {
 	return e
 }
 
+func (e Event) WithSourceRoute(route RouteIdentity) Event {
+	route = route.Normalized()
+	if route.Empty() {
+		return e
+	}
+	envelope := e.Envelope.Normalized()
+	envelope.Source = route
+	if envelope.EntityID == "" && envelope.FlowInstance == "" && envelope.Target.Empty() && len(envelope.TargetSet) == 0 {
+		envelope.EntityID = route.EntityID
+		envelope.FlowInstance = route.FlowInstance
+	}
+	envelope.Scope = inferEventScope(envelope.EntityID, envelope.FlowInstance)
+	e.Envelope = envelope.Normalized()
+	return e
+}
+
+func (e Event) WithTargetRoute(route RouteIdentity) Event {
+	route = route.Normalized()
+	if route.Empty() {
+		return e
+	}
+	envelope := e.Envelope.Normalized()
+	envelope.Target = route
+	envelope.TargetSet = nil
+	envelope.EntityID = route.EntityID
+	envelope.FlowInstance = route.FlowInstance
+	envelope.Scope = inferEventScope(envelope.EntityID, envelope.FlowInstance)
+	e.Envelope = envelope.Normalized()
+	return e
+}
+
+func (e Event) WithTargetSet(routes []RouteIdentity) Event {
+	normalized := normalizeRouteIdentities(routes)
+	if len(normalized) == 0 {
+		return e
+	}
+	envelope := e.Envelope.Normalized()
+	envelope.Target = RouteIdentity{}
+	envelope.TargetSet = normalized
+	first := normalized[0]
+	envelope.EntityID = first.EntityID
+	envelope.FlowInstance = first.FlowInstance
+	envelope.Scope = inferEventScope(envelope.EntityID, envelope.FlowInstance)
+	e.Envelope = envelope.Normalized()
+	return e
+}
+
+func (e Event) WithoutTargetRoute() Event {
+	envelope := e.Envelope.Normalized()
+	envelope.Target = RouteIdentity{}
+	envelope.TargetSet = nil
+	envelope.EntityID = strings.TrimSpace(envelope.Source.EntityID)
+	envelope.FlowInstance = strings.Trim(strings.TrimSpace(envelope.Source.FlowInstance), "/")
+	envelope.Scope = inferEventScope(envelope.EntityID, envelope.FlowInstance)
+	e.Envelope = envelope.Normalized()
+	return e
+}
+
+func (e Event) WithDeliveryTarget(route RouteIdentity) Event {
+	return e.WithTargetRoute(route)
+}
+
 func (e Event) ContextMap(currentState string) map[string]any {
 	out := map[string]any{}
 	if id := strings.TrimSpace(e.ID); id != "" {
@@ -93,6 +164,23 @@ func (e Event) ContextMap(currentState string) map[string]any {
 	}
 	if envelope.Scope != "" {
 		out["scope"] = string(envelope.Scope)
+	}
+	if source := routeIdentityMap(envelope.Source); source != nil {
+		out["source"] = source
+	}
+	if target := routeIdentityMap(envelope.Target); target != nil {
+		out["target"] = target
+	}
+	if len(envelope.TargetSet) > 0 {
+		items := make([]map[string]any, 0, len(envelope.TargetSet))
+		for _, route := range envelope.TargetSet {
+			if item := routeIdentityMap(route); item != nil {
+				items = append(items, item)
+			}
+		}
+		if len(items) > 0 {
+			out["target_set"] = items
+		}
 	}
 	if currentState = strings.TrimSpace(currentState); currentState != "" {
 		out["current_state"] = currentState
@@ -125,14 +213,98 @@ func (e Event) NormalizedEnvelope() EventEnvelope {
 	return e.Envelope.Normalized()
 }
 
+func (e Event) SourceRoute() RouteIdentity {
+	return e.Envelope.Normalized().Source
+}
+
+func (e Event) TargetRoute() RouteIdentity {
+	return e.Envelope.Normalized().Target
+}
+
+func (e Event) TargetRoutes() []RouteIdentity {
+	return append([]RouteIdentity{}, e.Envelope.Normalized().TargetSet...)
+}
+
+func (e Event) HasTargetRoute() bool {
+	envelope := e.Envelope.Normalized()
+	return !envelope.Target.Empty() || len(envelope.TargetSet) > 0
+}
+
 func (e EventEnvelope) Normalized() EventEnvelope {
 	e.EntityID = strings.TrimSpace(e.EntityID)
 	e.FlowInstance = strings.Trim(strings.TrimSpace(e.FlowInstance), "/")
+	e.Source = e.Source.Normalized()
+	e.Target = e.Target.Normalized()
+	e.TargetSet = normalizeRouteIdentities(e.TargetSet)
+	if !e.Target.Empty() {
+		e.TargetSet = nil
+		e.EntityID = e.Target.EntityID
+		e.FlowInstance = e.Target.FlowInstance
+	} else if len(e.TargetSet) > 0 {
+		first := e.TargetSet[0]
+		e.EntityID = first.EntityID
+		e.FlowInstance = first.FlowInstance
+	}
 	e.Scope = normalizeEventScope(e.Scope)
 	if e.Scope == "" {
 		e.Scope = inferEventScope(e.EntityID, e.FlowInstance)
 	}
 	return e
+}
+
+func (r RouteIdentity) Normalized() RouteIdentity {
+	return RouteIdentity{
+		FlowInstance: strings.Trim(strings.TrimSpace(r.FlowInstance), "/"),
+		EntityID:     strings.TrimSpace(r.EntityID),
+		FlowID:       strings.TrimSpace(r.FlowID),
+	}
+}
+
+func (r RouteIdentity) Empty() bool {
+	r = r.Normalized()
+	return r.FlowInstance == "" && r.EntityID == "" && r.FlowID == ""
+}
+
+func normalizeRouteIdentities(in []RouteIdentity) []RouteIdentity {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]RouteIdentity, 0, len(in))
+	seen := map[string]struct{}{}
+	for _, route := range in {
+		route = route.Normalized()
+		if route.Empty() {
+			continue
+		}
+		key := route.FlowID + "\x00" + route.FlowInstance + "\x00" + route.EntityID
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, route)
+	}
+	return out
+}
+
+func routeIdentityMap(route RouteIdentity) map[string]any {
+	route = route.Normalized()
+	if route.Empty() {
+		return nil
+	}
+	out := map[string]any{}
+	if route.FlowInstance != "" {
+		out["flow_instance"] = route.FlowInstance
+	}
+	if route.EntityID != "" {
+		out["entity_id"] = route.EntityID
+	}
+	if route.FlowID != "" {
+		out["flow_id"] = route.FlowID
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func inferEventScope(entityID, flowInstance string) EventScope {

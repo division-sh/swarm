@@ -11,6 +11,7 @@ import (
 	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
+	runtimepinrouting "swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "swarm/internal/runtime/correlation"
 	"swarm/internal/runtime/semanticview"
 )
@@ -98,9 +99,11 @@ type eventDeliveryPlan struct {
 	Event                events.Event
 	Recipients           []string
 	PersistedRecipients  []string
+	DeliveryTargets      map[string]events.RouteIdentity
 	RoutedRecipients     []Subscriber
 	SubscribedRecipients []string
 	ExtraDetail          map[string]any
+	TargetFailure        runtimepinrouting.TargetFailure
 	ContradictionReason  string
 	BlockedByCycle       bool
 	CycleEscalation      *events.Event

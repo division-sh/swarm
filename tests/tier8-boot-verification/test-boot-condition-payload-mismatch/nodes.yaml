@@ -9,4 +9,6 @@ test-node:
         id: payload_mismatch_guard
         check: "payload.nonexistent_field >= 50"
       advances_to: done
-      emit: check.passed
+      emit:
+        event: check.passed
+        broadcast: true

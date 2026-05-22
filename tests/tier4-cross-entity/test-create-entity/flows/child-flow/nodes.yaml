@@ -6,4 +6,6 @@ child-node:
   event_handlers:
     child.start:
       advances_to: completed
-      emit: child.done
+      emit:
+        event: child.done
+        broadcast: true

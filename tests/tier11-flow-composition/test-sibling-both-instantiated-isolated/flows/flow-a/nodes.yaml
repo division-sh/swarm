@@ -17,4 +17,6 @@ alpha-processor:
   event_handlers:
     internal.step2:
       advances_to: processed
-      emit: alpha.done
+      emit:
+        event: alpha.done
+        broadcast: true

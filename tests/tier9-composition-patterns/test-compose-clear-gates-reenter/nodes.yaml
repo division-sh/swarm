@@ -7,8 +7,12 @@ reviewer:
     review.done:
       sets_gate: g_reviewed
       advances_to: approved
-      emit: review.approved
+      emit:
+        event: review.approved
+        broadcast: true
     review.insufficient:
       clear_gates: true
       advances_to: reviewing
-      emit: review.restarted
+      emit:
+        event: review.restarted
+        broadcast: true

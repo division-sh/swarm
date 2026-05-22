@@ -7,4 +7,6 @@ string-guard-node:
     check.requested:
       guard: "payload.score > 50"
       advances_to: done
-      emit: check.passed
+      emit:
+        event: check.passed
+        broadcast: true

@@ -18,7 +18,14 @@ type Instance struct {
 	InstancePath   string
 	EntityID       string
 	ParentEntityID string
+	ParentRoute    ParentRoute
 	HasStoredPath  bool
+}
+
+type ParentRoute struct {
+	FlowInstance string
+	EntityID     string
+	FlowID       string
 }
 
 type Persisted struct {
@@ -211,7 +218,10 @@ func Stored(
 		InstancePath:   instancePath,
 		EntityID:       strings.TrimSpace(entityID),
 		ParentEntityID: strings.TrimSpace(parentEntityID),
-		HasStoredPath:  materializedPath != "",
+		ParentRoute: ParentRoute{
+			EntityID: strings.TrimSpace(parentEntityID),
+		},
+		HasStoredPath: materializedPath != "",
 	}
 }
 

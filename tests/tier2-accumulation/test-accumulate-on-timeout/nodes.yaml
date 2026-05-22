@@ -11,10 +11,14 @@ test-node:
         on_complete:
           - condition: else
             advances_to: complete
-            emit: collection.done
+            emit:
+              event: collection.done
+              broadcast: true
         on_timeout:
           advances_to: partial
-          emit: collection.partial
+          emit:
+            event: collection.partial
+            broadcast: true
   state_schema:
     fields:
       expected_count: integer

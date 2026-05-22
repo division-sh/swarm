@@ -7,4 +7,6 @@ score-handler:
     score.requested:
       create_entity: true
       advances_to: scored
-      emit: score.done
+      emit:
+        event: score.done
+        broadcast: true

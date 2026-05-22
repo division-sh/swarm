@@ -14,4 +14,6 @@ router:
         id: check_child_gate
         check: entity.gates['child/g_validated'] == true
       advances_to: done
-      emit: validate.passed
+      emit:
+        event: validate.passed
+        broadcast: true

@@ -8,8 +8,11 @@ import (
 	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimebus "swarm/internal/runtime/bus"
+	runtimecontracts "swarm/internal/runtime/contracts"
 	models "swarm/internal/runtime/core/actors"
 	"swarm/internal/runtime/core/eventidentity"
+	runtimepinrouting "swarm/internal/runtime/core/pinrouting"
+	"swarm/internal/runtime/semanticview"
 )
 
 func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig, toolName string, input any) (any, error) {
@@ -94,6 +97,41 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 	if flowInstance != "" {
 		emitted = emitted.WithFlowInstance(flowInstance)
 	}
+	flowID := emitActorFlowID(e.workflowSource, actor, flowInstance)
+	sourceRoute := events.RouteIdentity{
+		FlowID:       flowID,
+		FlowInstance: flowInstance,
+		EntityID:     entityID,
+	}
+	if !sourceRoute.Empty() {
+		emitted = emitted.WithSourceRoute(sourceRoute)
+	}
+	if runtimepinrouting.PinDeclaredOutput(e.workflowSource, flowID, eventType) {
+		spec := runtimecontracts.EmitSpec{Event: eventType}
+		resolution := runtimepinrouting.Resolve(runtimepinrouting.ResolutionInput{
+			Source:      e.workflowSource,
+			FlowID:      flowID,
+			EventType:   eventType,
+			Emit:        spec,
+			SourceRoute: sourceRoute,
+			Inbound:     inbound,
+			ParentRoute: emitParentRouteForActorEvent(inbound, flowInstance),
+		}, emitted)
+		if resolution.Failure != "" {
+			wrapped := NewRuntimeError(
+				string(resolution.Failure),
+				"tool-executor",
+				"handle_emit_tool.pin_target_resolution",
+				false,
+				"emit tool %s attempted pin-declared output %s without supported target mechanism",
+				toolName,
+				eventType,
+			)
+			e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, emitted, "pin_target_resolution_failed", "publish", "pin_target_resolution", wrapped)
+			return nil, wrapped
+		}
+		emitted = resolution.Event
+	}
 	emitted.TaskID = strings.TrimSpace(inbound.TaskID)
 	if emitted.TaskID == "" {
 		emitted.TaskID = strings.TrimSpace(asString(payloadMap["task_id"]))
@@ -124,6 +162,18 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 	}, nil
 }
 
+func emitParentRouteForActorEvent(inbound events.Event, flowInstance string) events.RouteIdentity {
+	parent := inbound.SourceRoute()
+	if parent.Empty() {
+		return events.RouteIdentity{}
+	}
+	flowInstance = strings.Trim(strings.TrimSpace(flowInstance), "/")
+	if flowInstance != "" && strings.Trim(strings.TrimSpace(parent.FlowInstance), "/") == flowInstance {
+		return events.RouteIdentity{}
+	}
+	return parent
+}
+
 func emitFlowInstanceForActorEvent(actor models.AgentConfig, inbound events.Event) string {
 	actorFlow := strings.Trim(strings.TrimSpace(actor.CanonicalFlowPath()), "/")
 	inboundFlow := strings.Trim(strings.TrimSpace(inbound.FlowInstance()), "/")
@@ -131,6 +181,31 @@ func emitFlowInstanceForActorEvent(actor models.AgentConfig, inbound events.Even
 		return inboundFlow
 	}
 	return actorFlow
+}
+
+func emitActorFlowID(source semanticview.Source, actor models.AgentConfig, flowInstance string) string {
+	if source == nil {
+		return ""
+	}
+	if agentSource, ok := source.AgentContractSource(actor.ID); ok {
+		if flowID := strings.TrimSpace(agentSource.FlowID); flowID != "" {
+			return flowID
+		}
+	}
+	actorFlow := strings.Trim(strings.TrimSpace(actor.CanonicalFlowPath()), "/")
+	if actorFlow == "" {
+		actorFlow = strings.Trim(strings.TrimSpace(flowInstance), "/")
+	}
+	for _, scope := range source.FlowScopes() {
+		path := strings.Trim(strings.TrimSpace(scope.Path), "/")
+		if path == "" {
+			continue
+		}
+		if actorFlow == path || strings.HasPrefix(actorFlow, path+"/") {
+			return strings.TrimSpace(scope.ID)
+		}
+	}
+	return ""
 }
 
 func flowWithinActorScope(actorFlow, inboundFlow string) bool {

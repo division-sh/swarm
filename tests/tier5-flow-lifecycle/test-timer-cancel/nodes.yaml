@@ -23,4 +23,6 @@ cancel-node:
   event_handlers:
     timer.cancel_requested:
       advances_to: cancelled
-      emit: timer.cancelled
+      emit:
+        event: timer.cancelled
+        broadcast: true

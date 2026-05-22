@@ -29,6 +29,8 @@ type EventSchemaCapabilities struct {
 	LogRunID             bool
 	DeliveryRunID        bool
 	LogIdempotencyKey    bool
+	LogRouteIdentity     bool
+	DeliveryTargetRoute  bool
 }
 
 type ConversationSchemaCapabilities struct {
@@ -182,6 +184,8 @@ func detectStoreSchemaCapabilities(catalog schemaColumnCatalog) StoreSchemaCapab
 		LogRunID:             catalog.hasColumns("events", "run_id"),
 		DeliveryRunID:        catalog.hasColumns("event_deliveries", "run_id"),
 		LogIdempotencyKey:    catalog.hasColumns("events", "idempotency_key"),
+		LogRouteIdentity:     catalog.hasColumns("events", "source_route", "target_route", "target_set"),
+		DeliveryTargetRoute:  catalog.hasColumns("event_deliveries", "delivery_target_route"),
 	}
 
 	caps.Conversations = ConversationSchemaCapabilities{

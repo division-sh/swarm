@@ -15,4 +15,6 @@ parent-listener:
   event_handlers:
     analyzer-flow/analysis.done:
       advances_to: done
-      emit: request.complete
+      emit:
+        event: request.complete
+        broadcast: true

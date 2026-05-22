@@ -7,4 +7,6 @@ test-node:
     task.requested:
       logic: custom
       advances_to: done
-      emit: task.completed
+      emit:
+        event: task.completed
+        broadcast: true

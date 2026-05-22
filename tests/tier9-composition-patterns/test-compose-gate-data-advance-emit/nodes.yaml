@@ -11,7 +11,9 @@ pipeline:
           - source_field: result
             target_field: stage_one_result
       advances_to: stage_two
-      emit: stage.two_start
+      emit:
+        event: stage.two_start
+        broadcast: true
     stage.two_done:
       sets_gate: g_stage_two
       data_accumulation:
@@ -19,4 +21,6 @@ pipeline:
           - source_field: result
             target_field: stage_two_result
       advances_to: complete
-      emit: stage.complete
+      emit:
+        event: stage.complete
+        broadcast: true

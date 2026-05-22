@@ -60,4 +60,6 @@ node-7:
   produces: [chain.e7]
   event_handlers:
     chain.e6:
-      emit: chain.e7
+      emit:
+        event: chain.e7
+        broadcast: true

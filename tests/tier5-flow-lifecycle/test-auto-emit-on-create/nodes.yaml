@@ -6,4 +6,6 @@ test-node:
   event_handlers:
     auto.started:
       advances_to: started
-      emit: auto.processed
+      emit:
+        event: auto.processed
+        broadcast: true

@@ -19,4 +19,6 @@ pipeline:
         check: "entity.gates.g_b == true"
       sets_gate: g_c
       advances_to: released
-      emit: release.ready
+      emit:
+        event: release.ready
+        broadcast: true

@@ -8,7 +8,11 @@ test-node:
       rules:
         type_a:
           condition: "payload.kind == 'a'"
-          emit: routed.a
+          emit:
+            event: routed.a
+            broadcast: true
         unknown:
           condition: "else"
-          emit: routed.unknown
+          emit:
+            event: routed.unknown
+            broadcast: true

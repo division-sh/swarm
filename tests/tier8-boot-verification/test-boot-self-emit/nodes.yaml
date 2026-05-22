@@ -6,4 +6,6 @@ test-node:
   event_handlers:
     loop.event:
       advances_to: done
-      emit: loop.event
+      emit:
+        event: loop.event
+        broadcast: true
