@@ -2,7 +2,10 @@ version: 1
 kind: openrpc_compliance_matrix
 issue: 835
 issue_role: provenance
-active_trackers: []
+active_trackers:
+  - kind: github_issue
+    issue: 857
+    watchlist: operator_surfaces.v1_openrpc_api_conformance
 source:
   platform_spec: docs/specs/swarm-platform/platform/contracts/platform-spec.yaml
   openrpc_artifact: docs/specs/swarm-platform/platform/contracts/openrpc.json
@@ -17,6 +20,7 @@ policy:
   notification_schema_runtime_validation_policy: "#898 adds generated notification-schema publication and supported-surface runtime validation for all four subscription methods; examples and rpc.discover were tracked by later #857 children."
   examples_policy: "#904 adds merge-bearing catalog-wide OpenRPC examples deferral policy; method examples are intentionally omitted until a future approved source model exists."
   service_discovery_policy: "#915 adds merge-bearing catalog-wide rpc.discover non-publication policy; method publication remains the generated OpenRPC artifact."
+  entity_accumulated_schema_hardening_policy: "#896 leaves EntityFull.accumulated deep schema hardening tracked under #857; #915 does not close that parent residual."
 methods:
   - method: agent.diagnose
     transport: http
