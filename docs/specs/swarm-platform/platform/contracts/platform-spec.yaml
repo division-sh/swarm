@@ -6551,7 +6551,7 @@ cli_specification:
       defaulting: If run-id is omitted, resolve the target through run.list with active-run preference.
       behavior: Run trace rendering over API-owned RunTraceRow facts only; no CLI reconstruction from tables.
       promoted_trace_filter_contract:
-        status: api_owner_promoted_cli_pending
+        status: api_owner_promoted_cli_implemented
         snapshot_owner: /v1/rpc run.trace
         promoted_params:
         - run_id
