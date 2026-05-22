@@ -357,20 +357,47 @@ func closeServeRuntime(ctx context.Context, supervisor *runtimeProjectSupervisor
 	return errors.Join(shutdownErr, cleanupErr)
 }
 
+type verifyCommandResult struct {
+	OK           bool                  `json:"ok"`
+	Contracts    string                `json:"contracts"`
+	Warnings     []verifyFindingOutput `json:"warnings"`
+	LintEvidence []verifyFindingOutput `json:"lint_evidence"`
+}
+
+type verifyFindingOutput struct {
+	CheckID  string `json:"check_id"`
+	Severity string `json:"severity"`
+	Location string `json:"location"`
+	Message  string `json:"message"`
+}
+
 func runVerifyCommand(ctx context.Context, repo string, args []string, out io.Writer) int {
+	return runVerifyCommandWithOutput(ctx, repo, args, out, out)
+}
+
+func runVerifyCommandWithOutput(ctx context.Context, repo string, args []string, out, errOut io.Writer) int {
 	fs := flag.NewFlagSet("verify", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	contractsPath := fs.String("contracts", "", "Path to Swarm contract bundle root")
 	platformSpecPath := fs.String("platform-spec", defaultPlatformSpecPath, "Path to platform spec yaml")
+	outputOpts := cliOutputOptions{}
+	fs.BoolVar(&outputOpts.asJSON, "json", false, "Render successful output as one JSON document")
+	fs.BoolVar(&outputOpts.quiet, "quiet", false, "Render only declared load-bearing value(s)")
 	if err := fs.Parse(args); err != nil {
-		if out != nil {
-			fmt.Fprintf(out, "verify failed: %v\n", err)
+		if errOut != nil {
+			fmt.Fprintf(errOut, "verify failed: %v\n", err)
+		}
+		return 2
+	}
+	if err := outputOpts.validate(); err != nil {
+		if errOut != nil {
+			fmt.Fprintf(errOut, "verify failed: %v\n", err)
 		}
 		return 2
 	}
 	if err := loadRepoDotEnv(repo); err != nil {
-		if out != nil {
-			fmt.Fprintf(out, "verify failed: load .env: %v\n", err)
+		if errOut != nil {
+			fmt.Fprintf(errOut, "verify failed: load .env: %v\n", err)
 		}
 		return 1
 	}
@@ -378,31 +405,56 @@ func runVerifyCommand(ctx context.Context, repo string, args []string, out io.Wr
 	resolvedPlatformSpecPath := resolvePath(repo, *platformSpecPath)
 	contractsRoot, err := normalizeContractsRoot(resolvedContractsPath)
 	if err != nil {
-		if out != nil {
-			fmt.Fprintf(out, "verify failed: resolve contracts: %v\n", err)
+		if errOut != nil {
+			fmt.Fprintf(errOut, "verify failed: resolve contracts: %v\n", err)
 		}
 		return 1
 	}
 	if _, bundle, err := newSwarmWorkflowModule(repo, contractsRoot, resolvedPlatformSpecPath); err != nil {
-		if out != nil {
-			fmt.Fprintf(out, "verify failed: load Swarm contracts: %v\n", err)
+		if errOut != nil {
+			fmt.Fprintf(errOut, "verify failed: load Swarm contracts: %v\n", err)
 		}
 		return 1
 	} else {
 		result, err := verifyBundleResult(ctx, semanticview.Wrap(bundle))
 		if err != nil {
-			if out != nil {
-				fmt.Fprintf(out, "verify failed: %v\n", err)
+			if errOut != nil {
+				fmt.Fprintf(errOut, "verify failed: %v\n", err)
 			}
 			return 1
 		}
-		if out != nil {
-			writeVerifyFindings(out, "warning", result.BootReport.Warnings())
-			writeVerifyFindings(out, "lint_evidence", result.BootReport.LintEvidence())
-			fmt.Fprintf(out, "verify ok: contracts=%s\n", contractsRoot)
+		output := verifyCommandResult{
+			OK:           true,
+			Contracts:    contractsRoot,
+			Warnings:     verifyFindingOutputs(result.BootReport.Warnings()),
+			LintEvidence: verifyFindingOutputs(result.BootReport.LintEvidence()),
+		}
+		if err := renderCLIOutput(out, errOut, outputOpts, output, func(w io.Writer) {
+			writeVerifyFindings(w, "warning", result.BootReport.Warnings())
+			writeVerifyFindings(w, "lint_evidence", result.BootReport.LintEvidence())
+			if w != nil {
+				fmt.Fprintf(w, "verify ok: contracts=%s\n", contractsRoot)
+			}
+		}, func() ([]string, error) {
+			return []string{"ok"}, nil
+		}); err != nil {
+			return 2
 		}
 	}
 	return 0
+}
+
+func verifyFindingOutputs(findings []runtimebootverify.Finding) []verifyFindingOutput {
+	out := make([]verifyFindingOutput, 0, len(findings))
+	for _, finding := range findings {
+		out = append(out, verifyFindingOutput{
+			CheckID:  strings.TrimSpace(finding.CheckID),
+			Severity: strings.TrimSpace(finding.Severity),
+			Location: strings.TrimSpace(finding.Location),
+			Message:  strings.TrimSpace(finding.Message),
+		})
+	}
+	return out
 }
 
 type runStatusReport struct {

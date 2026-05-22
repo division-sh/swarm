@@ -12,6 +12,7 @@ import (
 
 type diagnosticRunListOptions struct {
 	apiOptions rootCommandOptions
+	output     cliOutputOptions
 	status     string
 	since      string
 	until      string
@@ -26,6 +27,7 @@ type diagnosticTraceOptions struct {
 
 type diagnosticRunOptions struct {
 	apiOptions rootCommandOptions
+	output     cliOutputOptions
 	noDiagnose bool
 }
 
@@ -120,24 +122,33 @@ func newRunsCommand(opts rootCommandOptions) *cobra.Command {
 			if cmd.Flags().Changed("limit") && runOpts.limit == 0 {
 				return fmt.Errorf("--limit must be between 1 and 500")
 			}
+			if err := runOpts.output.validate(); err != nil {
+				return returnCLIValidationError(cmd.ErrOrStderr(), err)
+			}
 			return runDiagnosticRunListCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), runOpts)
 		},
 	}
 	bindDiagnosticRunListFlags(cmd, &runOpts)
+	bindCLIOutputFlags(cmd, &runOpts.output)
 	bindCLIAPIConnectionFlags(cmd, &runOpts.apiOptions)
 	return cmd
 }
 
 func newHealthCommand(opts rootCommandOptions) *cobra.Command {
 	apiOpts := opts
+	outputOpts := cliOutputOptions{}
 	cmd := &cobra.Command{
 		Use:   "health",
 		Short: "Print structured operator health through v1 RPC.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDiagnosticHealthCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), apiOpts)
+			if err := outputOpts.validate(); err != nil {
+				return returnCLIValidationError(cmd.ErrOrStderr(), err)
+			}
+			return runDiagnosticHealthCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), apiOpts, outputOpts)
 		},
 	}
+	bindCLIOutputFlags(cmd, &outputOpts)
 	bindCLIAPIConnectionFlags(cmd, &apiOpts)
 	return cmd
 }
@@ -153,10 +164,14 @@ func newStatusCommand(opts rootCommandOptions) *cobra.Command {
 			if len(args) == 1 {
 				runID = args[0]
 			}
+			if err := runOpts.output.validate(); err != nil {
+				return returnCLIValidationError(cmd.ErrOrStderr(), err)
+			}
 			return runDiagnosticRunCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), runOpts, runID)
 		},
 	}
 	cmd.Flags().BoolVar(&runOpts.noDiagnose, "no-diagnose", false, "Use run.get and print only the canonical run header")
+	bindCLIOutputFlags(cmd, &runOpts.output)
 	bindCLIAPIConnectionFlags(cmd, &runOpts.apiOptions)
 	return cmd
 }
@@ -313,8 +328,11 @@ func runDiagnosticRunListCommand(ctx context.Context, out, errOut io.Writer, opt
 	if err != nil {
 		return returnCLIAPIError(errOut, err, diagnosticRunAPIErrorClassifier())
 	}
-	writeDiagnosticRunList(out, result)
-	return nil
+	return renderCLIOutput(out, errOut, opts.output, result, func(w io.Writer) {
+		writeDiagnosticRunList(w, result)
+	}, func() ([]string, error) {
+		return quietDiagnosticRunList(result), nil
+	})
 }
 
 func runDiagnosticRunCommand(ctx context.Context, out, errOut io.Writer, opts diagnosticRunOptions, runID string) error {
@@ -337,8 +355,11 @@ func runDiagnosticRunCommand(ctx context.Context, out, errOut io.Writer, opts di
 		if err := validateDiagnosticRunHeader("run", result.Run); err != nil {
 			return returnCLIAPIError(errOut, err, diagnosticRunAPIErrorClassifier())
 		}
-		writeDiagnosticRunHeader(out, result.Run)
-		return nil
+		return renderCLIOutput(out, errOut, opts.output, result, func(w io.Writer) {
+			writeDiagnosticRunHeader(w, result.Run)
+		}, func() ([]string, error) {
+			return []string{fmt.Sprintf("%s %s", result.Run.RunID, result.Run.Status)}, nil
+		})
 	}
 	var result diagnosticRunDiagnosisResult
 	if err := client.call(ctx, "run.diagnose", map[string]any{"run_id": runID}, &result); err != nil {
@@ -347,8 +368,11 @@ func runDiagnosticRunCommand(ctx context.Context, out, errOut io.Writer, opts di
 	if err := validateDiagnosticRunDiagnosis(result); err != nil {
 		return returnCLIAPIError(errOut, err, diagnosticRunAPIErrorClassifier())
 	}
-	writeDiagnosticRunDiagnosis(out, result)
-	return nil
+	return renderCLIOutput(out, errOut, opts.output, result, func(w io.Writer) {
+		writeDiagnosticRunDiagnosis(w, result)
+	}, func() ([]string, error) {
+		return []string{fmt.Sprintf("%s %s", result.Run.RunID, stringPointerValue(result.OperationalState))}, nil
+	})
 }
 
 func runDiagnosticTraceCommand(ctx context.Context, out, errOut io.Writer, opts diagnosticTraceOptions, runID string) error {
@@ -427,13 +451,31 @@ func followDiagnosticTraceCommand(ctx context.Context, out, errOut io.Writer, cl
 	}
 }
 
-func runDiagnosticHealthCommand(ctx context.Context, out, errOut io.Writer, opts rootCommandOptions) error {
+func runDiagnosticHealthCommand(ctx context.Context, out, errOut io.Writer, opts rootCommandOptions, output cliOutputOptions) error {
 	result, err := fetchDiagnosticHealthCheck(ctx, opts)
 	if err != nil {
 		return returnCLIAPIError(errOut, err, cliAPIErrorClassifier{})
 	}
-	writeDiagnosticHealth(out, result)
-	return nil
+	return renderCLIOutput(out, errOut, output, result, func(w io.Writer) {
+		writeDiagnosticHealth(w, result)
+	}, func() ([]string, error) {
+		return []string{quietDiagnosticHealth(result)}, nil
+	})
+}
+
+func quietDiagnosticRunList(result diagnosticRunListResult) []string {
+	out := make([]string, 0, len(result.Runs))
+	for _, run := range result.Runs {
+		out = append(out, run.RunID)
+	}
+	return out
+}
+
+func quietDiagnosticHealth(result diagnosticHealthCheckResult) string {
+	if boolPointerValue(result.Alive) && boolPointerValue(result.Ready) && boolPointerValue(result.DBOK) && boolPointerValue(result.RuntimeOK) {
+		return "healthy"
+	}
+	return "unhealthy"
 }
 
 func diagnosticRunAPIErrorClassifier() cliAPIErrorClassifier {
