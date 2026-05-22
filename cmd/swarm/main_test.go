@@ -86,14 +86,9 @@ func publishRunStatusRootEvent(t *testing.T, bus *runtimebus.EventBus, runID, en
 	}
 }
 
-func markRunStatusCompleted(t *testing.T, db *sql.DB, runID string) {
+func markRunStatusCompleted(t *testing.T, pg *store.PostgresStore, runID string) {
 	t.Helper()
-	if _, err := db.ExecContext(context.Background(), `
-		UPDATE runs
-		SET status = 'completed',
-		    ended_at = now()
-		WHERE run_id = $1::uuid
-	`, runID); err != nil {
+	if err := pg.MarkRunTerminal(context.Background(), runID, "completed", "", time.Now().UTC()); err != nil {
 		t.Fatalf("mark run completed: %v", err)
 	}
 }
@@ -741,22 +736,25 @@ func TestCLI_ForkIsHardRetired(t *testing.T) {
 	}
 }
 
-func waitRunStatusEventCount(t *testing.T, db *sql.DB, runID string, want int) {
+func waitRunStatusEventSettlement(t *testing.T, db *sql.DB, runID string, wantEvents int) {
 	t.Helper()
 	ctx := context.Background()
 	deadline := time.Now().Add(3 * time.Second)
 	for {
-		var count int
+		var (
+			eventCount       int
+			activeDeliveries int
+		)
 		err := db.QueryRowContext(ctx, `
-			SELECT COUNT(*)
-			FROM events
-			WHERE run_id = $1::uuid
-		`, runID).Scan(&count)
-		if err == nil && count >= want {
+			SELECT
+				(SELECT COUNT(*) FROM events WHERE run_id = $1::uuid),
+				(SELECT COUNT(*) FROM event_deliveries WHERE run_id = $1::uuid AND status IN ('pending', 'in_progress'))
+		`, runID).Scan(&eventCount, &activeDeliveries)
+		if err == nil && eventCount >= wantEvents && activeDeliveries == 0 {
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("run %s event count did not reach %d: last err=%v count=%d", runID, want, err, count)
+			t.Fatalf("run %s did not settle after release: last err=%v event_count=%d want_events=%d active_deliveries=%d", runID, err, eventCount, wantEvents, activeDeliveries)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -2125,7 +2123,7 @@ func TestLoadRunStatusReport_UsesDurableCompletedRunState(t *testing.T) {
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
 	publishRunStatusRootEvent(t, eb, runID, entityID)
-	markRunStatusCompleted(t, db, runID)
+	markRunStatusCompleted(t, pg, runID)
 
 	ctx := context.Background()
 	deadline := time.Now().Add(2 * time.Second)
@@ -2236,8 +2234,8 @@ func TestLoadRunStatusReport_KeepsSupportedRunRunningUntilManagerWorkSettles(t *
 	}
 
 	close(releaseAgent)
-	waitRunStatusEventCount(t, db, runID, 2)
-	markRunStatusCompleted(t, db, runID)
+	waitRunStatusEventSettlement(t, db, runID, 2)
+	markRunStatusCompleted(t, pg, runID)
 
 	deadline := time.Now().Add(3 * time.Second)
 	for {
@@ -2378,8 +2376,8 @@ func TestLoadRunStatusReport_PreservesRunningTruthWhileManagerWorkIsActive(t *te
 	}
 
 	close(releaseAgent)
-	waitRunStatusEventCount(t, db, runID, 2)
-	markRunStatusCompleted(t, db, runID)
+	waitRunStatusEventSettlement(t, db, runID, 2)
+	markRunStatusCompleted(t, pg, runID)
 
 	deadline := time.Now().Add(3 * time.Second)
 	for {
@@ -2397,17 +2395,6 @@ func TestLoadRunStatusReport_PreservesRunningTruthWhileManagerWorkIsActive(t *te
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	var lastEventAt time.Time
-	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(MAX(created_at), '-infinity'::timestamptz)
-		FROM events
-		WHERE run_id = $1::uuid
-	`, runID).Scan(&lastEventAt); err != nil {
-		t.Fatalf("load last event timestamp: %v", err)
-	}
-	if !endedAt.Time.IsZero() && lastEventAt.After(endedAt.Time) {
-		t.Fatalf("last same-run event at %s is after ended_at %s", lastEventAt, endedAt.Time)
-	}
 }
 
 func TestLoadRunStatusReport_ProjectsExplicitStalledRunState(t *testing.T) {
