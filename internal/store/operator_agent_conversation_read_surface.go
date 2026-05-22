@@ -69,40 +69,41 @@ type OperatorAgentSummary struct {
 	SessionScope     string `json:"session_scope"`
 	Status           string `json:"status"`
 
-	Mode                string              `json:"-"`
-	FlowInstance        string              `json:"-"`
-	EntityID            string              `json:"-"`
-	ParentAgentID       string              `json:"-"`
-	CoordinatorID       string              `json:"-"`
-	HiredBy             string              `json:"-"`
-	TemplateVersion     string              `json:"-"`
-	BudgetEnvelope      float64             `json:"-"`
-	Subscriptions       []string            `json:"-"`
-	Permissions         []string            `json:"-"`
-	PendingEvents       int                 `json:"-"`
-	OldestPendingAgeSec int                 `json:"-"`
-	InFlightTurn        bool                `json:"-"`
-	InFlightSeconds     int                 `json:"-"`
-	LockOwner           string              `json:"-"`
-	LockExpiresAt       time.Time           `json:"-"`
-	Failures24h         int                 `json:"-"`
-	DeadLetters24h      int                 `json:"-"`
-	TurnCount           int                 `json:"-"`
-	TurnLimit           int                 `json:"-"`
-	Turns24h            int                 `json:"-"`
-	NearBreaker         bool                `json:"-"`
-	SessionID           string              `json:"-"`
-	ProviderSessionID   string              `json:"-"`
-	CurrentTaskID       string              `json:"-"`
-	LastTool            *OperatorAgentTool  `json:"-"`
-	LiveTurn            *OperatorLiveTurn   `json:"-"`
-	StartedAt           time.Time           `json:"-"`
-	DashboardStatus     string              `json:"-"`
-	DashboardState      string              `json:"-"`
-	DeliveryLifecycle   string              `json:"-"`
-	BlockingLayer       string              `json:"-"`
-	CurrentSessionRef   *OperatorSessionRef `json:"-"`
-	LastTurnRef         *OperatorTurnRef    `json:"-"`
+	Mode                  string                              `json:"-"`
+	FlowInstance          string                              `json:"-"`
+	EntityID              string                              `json:"-"`
+	ParentAgentID         string                              `json:"-"`
+	CoordinatorID         string                              `json:"-"`
+	HiredBy               string                              `json:"-"`
+	TemplateVersion       string                              `json:"-"`
+	BudgetEnvelope        float64                             `json:"-"`
+	Subscriptions         []string                            `json:"-"`
+	Permissions           []string                            `json:"-"`
+	PendingEvents         int                                 `json:"-"`
+	OldestPendingAgeSec   int                                 `json:"-"`
+	InFlightTurn          bool                                `json:"-"`
+	InFlightSeconds       int                                 `json:"-"`
+	LockOwner             string                              `json:"-"`
+	LockExpiresAt         time.Time                           `json:"-"`
+	Failures24h           int                                 `json:"-"`
+	DeadLetters24h        int                                 `json:"-"`
+	TurnCount             int                                 `json:"-"`
+	TurnLimit             int                                 `json:"-"`
+	Turns24h              int                                 `json:"-"`
+	NearBreaker           bool                                `json:"-"`
+	SessionID             string                              `json:"-"`
+	ProviderSessionID     string                              `json:"-"`
+	CurrentTaskID         string                              `json:"-"`
+	LastTool              *OperatorAgentTool                  `json:"-"`
+	LiveTurn              *OperatorLiveTurn                   `json:"-"`
+	StartedAt             time.Time                           `json:"-"`
+	DashboardStatus       string                              `json:"-"`
+	DashboardState        string                              `json:"-"`
+	DeliveryLifecycle     string                              `json:"-"`
+	BlockingLayer         string                              `json:"-"`
+	CurrentSessionRef     *OperatorSessionRef                 `json:"-"`
+	LastTurnRef           *OperatorTurnRef                    `json:"-"`
+	DiagnosisRuntimeState *OperatorAgentDiagnosisRuntimeState `json:"-"`
 }
 
 type OperatorSessionRef struct {
@@ -124,12 +125,26 @@ type OperatorAgentDetail struct {
 }
 
 type OperatorAgentDiagnosis struct {
-	AgentID           string                          `json:"agent_id"`
-	Status            string                          `json:"status"`
-	CurrentSessionRef *OperatorSessionRef             `json:"current_session_ref,omitempty"`
-	LastTurnRef       *OperatorTurnRef                `json:"last_turn_ref,omitempty"`
-	Queue             OperatorAgentDiagnosisQueue     `json:"queue"`
-	DeliveryLifecycle *OperatorAgentDeliveryLifecycle `json:"delivery_lifecycle,omitempty"`
+	AgentID           string                              `json:"agent_id"`
+	Status            string                              `json:"status"`
+	CurrentSessionRef *OperatorSessionRef                 `json:"current_session_ref,omitempty"`
+	LastTurnRef       *OperatorTurnRef                    `json:"last_turn_ref,omitempty"`
+	Queue             OperatorAgentDiagnosisQueue         `json:"queue"`
+	DeliveryLifecycle *OperatorAgentDeliveryLifecycle     `json:"delivery_lifecycle,omitempty"`
+	RuntimeState      *OperatorAgentDiagnosisRuntimeState `json:"runtime_state,omitempty"`
+}
+
+type OperatorAgentDiagnosisRuntimeState struct {
+	Watchdog *OperatorAgentDiagnosisWatchdog `json:"watchdog"`
+}
+
+type OperatorAgentDiagnosisWatchdog struct {
+	State         string `json:"state"`
+	BlockingLayer string `json:"blocking_layer"`
+	Action        string `json:"action"`
+	Outcome       string `json:"outcome"`
+	LastOutputAt  string `json:"last_output_at,omitempty"`
+	RecordedAt    string `json:"recorded_at"`
 }
 
 type OperatorAgentDiagnosisQueue struct {
@@ -430,6 +445,7 @@ type operatorAgentProjection struct {
 	LastTool            *OperatorAgentTool
 	LiveTurn            *OperatorLiveTurn
 	LastTurnRef         *OperatorTurnRef
+	Watchdog            *OperatorConversationWatchdog
 }
 
 type conversationPositionCursor struct {
@@ -1081,7 +1097,7 @@ func (r *OperatorAgentConversationReadSurface) loadAgentOperatorProjections(ctx 
 			WHERE agent_id = a.agent_id
 			  AND status = 'active'
 			  AND runtime_mode IN ($1, $2)
-			ORDER BY updated_at DESC, created_at DESC
+			ORDER BY updated_at DESC, created_at DESC, session_id ASC
 			LIMIT 1
 		) sess ON true
 		LEFT JOIN LATERAL (
@@ -1215,46 +1231,47 @@ func operatorAgentSummaryFromPersisted(row runtimemanager.PersistedAgent, projec
 		scope = runtimesessions.SessionScopeGlobal.String()
 	}
 	out := OperatorAgentSummary{
-		AgentID:             strings.TrimSpace(row.Config.ID),
-		Role:                strings.TrimSpace(row.Config.Role),
-		Type:                agentPersistedType(row.Config, agentModelTier(row.Config)),
-		ModelTier:           agentModelTier(row.Config),
-		ConversationMode:    mode,
-		SessionScope:        scope,
-		Status:              projection.v1Status(),
-		Mode:                strings.TrimSpace(row.Config.Mode),
-		FlowInstance:        strings.TrimSpace(row.Config.CanonicalFlowPath()),
-		EntityID:            strings.TrimSpace(row.Config.EffectiveEntityID()),
-		ParentAgentID:       strings.TrimSpace(row.ParentAgentID),
-		CoordinatorID:       strings.TrimSpace(row.CoordinatorID),
-		HiredBy:             strings.TrimSpace(row.HiredBy),
-		TemplateVersion:     strings.TrimSpace(row.TemplateVersion),
-		BudgetEnvelope:      row.Config.BudgetEnvelope,
-		Subscriptions:       append([]string(nil), row.Config.Subscriptions...),
-		Permissions:         append([]string(nil), row.Config.Permissions...),
-		PendingEvents:       projection.PendingEvents,
-		OldestPendingAgeSec: projection.OldestPendingAgeSec,
-		InFlightTurn:        projection.InFlightTurn,
-		InFlightSeconds:     projection.InFlightSeconds,
-		LockOwner:           strings.TrimSpace(projection.LockOwner),
-		LockExpiresAt:       projection.LockExpiresAt,
-		Failures24h:         projection.Failures24h,
-		DeadLetters24h:      projection.DeadLetters24h,
-		TurnCount:           projection.TurnCount,
-		TurnLimit:           maxStoreInt(turnLimit, 0),
-		Turns24h:            maxStoreInt(projection.Turns24h, 0),
-		SessionID:           strings.TrimSpace(projection.SessionID),
-		ProviderSessionID:   strings.TrimSpace(projection.ProviderSessionID),
-		CurrentTaskID:       strings.TrimSpace(projection.CurrentTaskID),
-		LastTool:            projection.LastTool,
-		LiveTurn:            projection.LiveTurn,
-		StartedAt:           row.StartedAt,
-		DashboardStatus:     strings.TrimSpace(projection.Status),
-		DashboardState:      projection.dashboardState(),
-		DeliveryLifecycle:   strings.TrimSpace(projection.LifecycleState),
-		BlockingLayer:       projection.dashboardBlockingLayer(),
-		CurrentSessionRef:   projection.currentSessionRef(),
-		LastTurnRef:         projection.LastTurnRef,
+		AgentID:               strings.TrimSpace(row.Config.ID),
+		Role:                  strings.TrimSpace(row.Config.Role),
+		Type:                  agentPersistedType(row.Config, agentModelTier(row.Config)),
+		ModelTier:             agentModelTier(row.Config),
+		ConversationMode:      mode,
+		SessionScope:          scope,
+		Status:                projection.v1Status(),
+		Mode:                  strings.TrimSpace(row.Config.Mode),
+		FlowInstance:          strings.TrimSpace(row.Config.CanonicalFlowPath()),
+		EntityID:              strings.TrimSpace(row.Config.EffectiveEntityID()),
+		ParentAgentID:         strings.TrimSpace(row.ParentAgentID),
+		CoordinatorID:         strings.TrimSpace(row.CoordinatorID),
+		HiredBy:               strings.TrimSpace(row.HiredBy),
+		TemplateVersion:       strings.TrimSpace(row.TemplateVersion),
+		BudgetEnvelope:        row.Config.BudgetEnvelope,
+		Subscriptions:         append([]string(nil), row.Config.Subscriptions...),
+		Permissions:           append([]string(nil), row.Config.Permissions...),
+		PendingEvents:         projection.PendingEvents,
+		OldestPendingAgeSec:   projection.OldestPendingAgeSec,
+		InFlightTurn:          projection.InFlightTurn,
+		InFlightSeconds:       projection.InFlightSeconds,
+		LockOwner:             strings.TrimSpace(projection.LockOwner),
+		LockExpiresAt:         projection.LockExpiresAt,
+		Failures24h:           projection.Failures24h,
+		DeadLetters24h:        projection.DeadLetters24h,
+		TurnCount:             projection.TurnCount,
+		TurnLimit:             maxStoreInt(turnLimit, 0),
+		Turns24h:              maxStoreInt(projection.Turns24h, 0),
+		SessionID:             strings.TrimSpace(projection.SessionID),
+		ProviderSessionID:     strings.TrimSpace(projection.ProviderSessionID),
+		CurrentTaskID:         strings.TrimSpace(projection.CurrentTaskID),
+		LastTool:              projection.LastTool,
+		LiveTurn:              projection.LiveTurn,
+		StartedAt:             row.StartedAt,
+		DashboardStatus:       strings.TrimSpace(projection.Status),
+		DashboardState:        projection.dashboardState(),
+		DeliveryLifecycle:     strings.TrimSpace(projection.LifecycleState),
+		BlockingLayer:         projection.dashboardBlockingLayer(),
+		CurrentSessionRef:     projection.currentSessionRef(),
+		LastTurnRef:           projection.LastTurnRef,
+		DiagnosisRuntimeState: operatorAgentDiagnosisRuntimeStateFromConversationWatchdog(projection.Watchdog),
 	}
 	if out.TurnLimit > 0 {
 		out.NearBreaker = out.TurnCount*100 >= out.TurnLimit*85
@@ -1274,6 +1291,7 @@ func operatorAgentDiagnosisFromDetail(detail OperatorAgentDetail) (OperatorAgent
 			OldestPendingAgeSeconds: agent.OldestPendingAgeSec,
 			PendingDeliveries:       []OperatorAgentPendingDelivery{},
 		},
+		RuntimeState: agent.DiagnosisRuntimeState,
 	}
 	if state := strings.TrimSpace(agent.DeliveryLifecycle); state != "" {
 		out.DeliveryLifecycle = &OperatorAgentDeliveryLifecycle{
@@ -1342,6 +1360,22 @@ func validateOperatorAgentDiagnosis(item OperatorAgentDiagnosis) error {
 		if strings.TrimSpace(item.DeliveryLifecycle.BlockingLayer) == "" {
 			return fmt.Errorf("agent diagnosis delivery_lifecycle.blocking_layer is required")
 		}
+	}
+	if err := validateOperatorAgentDiagnosisRuntimeState(item.RuntimeState); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateOperatorAgentDiagnosisRuntimeState(item *OperatorAgentDiagnosisRuntimeState) error {
+	if item == nil {
+		return nil
+	}
+	if item.Watchdog == nil {
+		return fmt.Errorf("agent diagnosis runtime_state.watchdog is required")
+	}
+	if err := ValidateConversationRuntimeWatchdogDescriptor(conversationWatchdogDescriptorFromAgentDiagnosis(*item.Watchdog)); err != nil {
+		return fmt.Errorf("agent diagnosis runtime_state.watchdog is invalid: %w", err)
 	}
 	return nil
 }
@@ -1423,6 +1457,7 @@ func enrichOperatorAgentProjectionFromLatestTurn(projection *operatorAgentProjec
 		return fmt.Errorf("decode latest agent session runtime_state: %w", err)
 	}
 	projection.ProviderSessionID = strings.TrimSpace(runtimeState.ProviderSessionID)
+	projection.Watchdog = operatorConversationWatchdogFromDescriptor(runtimeState.Watchdog)
 	projection.LiveTurn, err = projectOperatorLatestTurn(taskID, parseOK, turnID, turnBlocksRaw)
 	if err != nil {
 		return fmt.Errorf("decode latest agent turn live_turn: %w", err)
@@ -1926,16 +1961,7 @@ func projectOperatorConversationSummaryMetadata(p ConversationRuntimeStateDescri
 		RetryReason:          p.RetryReason,
 		RetriesFromSessionID: p.RetriesFromSessionID,
 	}
-	if p.Watchdog != nil {
-		meta.Watchdog = &OperatorConversationWatchdog{
-			State:         p.Watchdog.State,
-			BlockingLayer: p.Watchdog.BlockingLayer,
-			Action:        p.Watchdog.Action,
-			Outcome:       p.Watchdog.Outcome,
-			LastOutputAt:  p.Watchdog.LastOutputAt,
-			RecordedAt:    p.Watchdog.RecordedAt,
-		}
-	}
+	meta.Watchdog = operatorConversationWatchdogFromDescriptor(p.Watchdog)
 	return meta
 }
 
@@ -1949,17 +1975,49 @@ func projectOperatorConversationState(p ConversationRuntimeStateDescriptor) Oper
 	if p.LastTurn != nil {
 		state.LastTurn = &OperatorConversationLastTurn{TaskID: p.LastTurn.TaskID, ParseOK: p.LastTurn.ParseOK}
 	}
-	if p.Watchdog != nil {
-		state.Watchdog = &OperatorConversationWatchdog{
-			State:         p.Watchdog.State,
-			BlockingLayer: p.Watchdog.BlockingLayer,
-			Action:        p.Watchdog.Action,
-			Outcome:       p.Watchdog.Outcome,
-			LastOutputAt:  p.Watchdog.LastOutputAt,
-			RecordedAt:    p.Watchdog.RecordedAt,
-		}
-	}
+	state.Watchdog = operatorConversationWatchdogFromDescriptor(p.Watchdog)
 	return state
+}
+
+func operatorConversationWatchdogFromDescriptor(p *ConversationRuntimeWatchdogDescriptor) *OperatorConversationWatchdog {
+	if p == nil {
+		return nil
+	}
+	return &OperatorConversationWatchdog{
+		State:         p.State,
+		BlockingLayer: p.BlockingLayer,
+		Action:        p.Action,
+		Outcome:       p.Outcome,
+		LastOutputAt:  p.LastOutputAt,
+		RecordedAt:    p.RecordedAt,
+	}
+}
+
+func operatorAgentDiagnosisRuntimeStateFromConversationWatchdog(w *OperatorConversationWatchdog) *OperatorAgentDiagnosisRuntimeState {
+	if w == nil {
+		return nil
+	}
+	return &OperatorAgentDiagnosisRuntimeState{
+		Watchdog: &OperatorAgentDiagnosisWatchdog{
+			State:         strings.TrimSpace(w.State),
+			BlockingLayer: strings.TrimSpace(w.BlockingLayer),
+			Action:        strings.TrimSpace(w.Action),
+			Outcome:       strings.TrimSpace(w.Outcome),
+			LastOutputAt:  strings.TrimSpace(w.LastOutputAt),
+			RecordedAt:    strings.TrimSpace(w.RecordedAt),
+		},
+	}
+}
+
+func conversationWatchdogDescriptorFromAgentDiagnosis(w OperatorAgentDiagnosisWatchdog) ConversationRuntimeWatchdogDescriptor {
+	return ConversationRuntimeWatchdogDescriptor{
+		State:         strings.TrimSpace(w.State),
+		BlockingLayer: strings.TrimSpace(w.BlockingLayer),
+		Action:        strings.TrimSpace(w.Action),
+		Outcome:       strings.TrimSpace(w.Outcome),
+		LastOutputAt:  strings.TrimSpace(w.LastOutputAt),
+		RecordedAt:    strings.TrimSpace(w.RecordedAt),
+	}
 }
 
 func projectOperatorLatestTurn(taskID string, parseOK bool, turnID string, turnBlocksRaw []byte) (*OperatorLiveTurn, error) {

@@ -52,31 +52,31 @@ func DecodeConversationRuntimeStateDescriptor(raw []byte) (ConversationRuntimeSt
 		payload.Watchdog.Outcome = strings.TrimSpace(payload.Watchdog.Outcome)
 		payload.Watchdog.LastOutputAt = strings.TrimSpace(payload.Watchdog.LastOutputAt)
 		payload.Watchdog.RecordedAt = strings.TrimSpace(payload.Watchdog.RecordedAt)
-		if err := validateConversationRuntimeWatchdogDescriptor(*payload.Watchdog); err != nil {
+		if err := ValidateConversationRuntimeWatchdogDescriptor(*payload.Watchdog); err != nil {
 			return ConversationRuntimeStateDescriptor{}, err
 		}
 	}
 	return payload, nil
 }
 
-func validateConversationRuntimeWatchdogDescriptor(payload ConversationRuntimeWatchdogDescriptor) error {
+func ValidateConversationRuntimeWatchdogDescriptor(payload ConversationRuntimeWatchdogDescriptor) error {
 	switch payload.State {
-	case "", "healthy_long_running", "no_output":
+	case "healthy_long_running", "no_output":
 	default:
 		return fmt.Errorf("canonical runtime_state watchdog.state %q is invalid", payload.State)
 	}
 	switch payload.BlockingLayer {
-	case "", "session_execution":
+	case "session_execution":
 	default:
 		return fmt.Errorf("canonical runtime_state watchdog.blocking_layer %q is invalid", payload.BlockingLayer)
 	}
 	switch payload.Action {
-	case "", "turn_long_running", "session_no_output":
+	case "turn_long_running", "session_no_output":
 	default:
 		return fmt.Errorf("canonical runtime_state watchdog.action %q is invalid", payload.Action)
 	}
 	switch payload.Outcome {
-	case "", "observed", "warning_emitted":
+	case "observed", "warning_emitted":
 	default:
 		return fmt.Errorf("canonical runtime_state watchdog.outcome %q is invalid", payload.Outcome)
 	}
