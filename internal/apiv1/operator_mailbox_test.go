@@ -243,6 +243,32 @@ func TestOperatorMailboxHandlersSupportedRPCPath(t *testing.T) {
 	}
 }
 
+func TestOperatorMailboxGetDegradesEntityContextReadFailure(t *testing.T) {
+	now := time.Unix(1700000000, 0).UTC()
+	mailbox := newReadOnlyMailboxProbeStore(now)
+	detail := mailbox.details["mailbox-1"]
+	detail.Item.SourceEntityID = "entity-1"
+	detail.Item.SourceRunID = "run-1"
+	mailbox.details["mailbox-1"] = detail
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			Mailbox:  mailbox,
+			Entities: &fakeEntityReadStore{getErr: errors.New("entity reader temporarily unavailable")},
+		}),
+	})
+
+	get := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"get","method":"mailbox.get","params":{"mailbox_id":"mailbox-1"}}`)
+	if get.Error != nil {
+		t.Fatalf("mailbox.get error = %#v", get.Error)
+	}
+	sheet := asMap(t, asMap(t, get.Result)["decision_sheet"])
+	entityContext := asMap(t, sheet["entity_context"])
+	if entityContext["available"] != false || entityContext["reason"] != "entity_reader_unavailable" {
+		t.Fatalf("entity_context = %#v, want unavailable entity_reader_unavailable", entityContext)
+	}
+}
+
 func TestOperatorMailboxApprovePublishFailureLeavesItemRetryable(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}

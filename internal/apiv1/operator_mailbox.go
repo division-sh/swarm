@@ -74,10 +74,7 @@ func OperatorMailboxHandlers(opts OperatorReadOptions) map[string]MethodHandler 
 			if err != nil {
 				return nil, err
 			}
-			detail.DecisionSheet, err = mailboxDecisionSheet(ctx, detail.Item, opts)
-			if err != nil {
-				return nil, err
-			}
+			detail.DecisionSheet = mailboxDecisionSheet(ctx, detail.Item, opts)
 			return detail, nil
 		},
 		"mailbox.approve": func(ctx context.Context, req Request) (any, error) {
@@ -119,39 +116,36 @@ func OperatorMailboxHandlers(opts OperatorReadOptions) map[string]MethodHandler 
 	}
 }
 
-func mailboxDecisionSheet(ctx context.Context, item store.MailboxV1Item, opts OperatorReadOptions) (*store.MailboxV1DecisionSheet, error) {
-	entityContext, err := mailboxEntityContext(ctx, item, opts.Entities)
-	if err != nil {
-		return nil, err
-	}
+func mailboxDecisionSheet(ctx context.Context, item store.MailboxV1Item, opts OperatorReadOptions) *store.MailboxV1DecisionSheet {
+	entityContext := mailboxEntityContext(ctx, item, opts.Entities)
 	return &store.MailboxV1DecisionSheet{
 		EntityContext:     entityContext,
 		DownstreamPreview: mailboxDownstreamPreview(item, opts),
-	}, nil
+	}
 }
 
-func mailboxEntityContext(ctx context.Context, item store.MailboxV1Item, entities EntityReadStore) (store.MailboxV1EntityContext, error) {
+func mailboxEntityContext(ctx context.Context, item store.MailboxV1Item, entities EntityReadStore) store.MailboxV1EntityContext {
 	entityID := strings.TrimSpace(item.SourceEntityID)
 	if entityID == "" {
-		return store.MailboxV1EntityContext{Available: false, Reason: "no_source_entity"}, nil
+		return store.MailboxV1EntityContext{Available: false, Reason: "no_source_entity"}
 	}
 	if entities == nil {
-		return store.MailboxV1EntityContext{Available: false, Reason: "entity_reader_unavailable"}, nil
+		return store.MailboxV1EntityContext{Available: false, Reason: "entity_reader_unavailable"}
 	}
 	entity, err := entities.LoadOperatorEntity(ctx, entityID, strings.TrimSpace(item.SourceRunID))
 	if err == nil {
-		return store.MailboxV1EntityContext{Available: true, Entity: &entity}, nil
+		return store.MailboxV1EntityContext{Available: true, Entity: &entity}
 	}
 	switch {
 	case errors.Is(err, store.ErrEntityNotFound):
-		return store.MailboxV1EntityContext{Available: false, Reason: "entity_not_found"}, nil
+		return store.MailboxV1EntityContext{Available: false, Reason: "entity_not_found"}
 	case errors.Is(err, store.ErrAmbiguousEntityRunID):
-		return store.MailboxV1EntityContext{Available: false, Reason: "ambiguous_run_id"}, nil
+		return store.MailboxV1EntityContext{Available: false, Reason: "ambiguous_run_id"}
 	}
 	if paramErr := entityReadParamError(err); paramErr != nil {
-		return store.MailboxV1EntityContext{Available: false, Reason: "invalid_entity_ref"}, nil
+		return store.MailboxV1EntityContext{Available: false, Reason: "invalid_entity_ref"}
 	}
-	return store.MailboxV1EntityContext{}, err
+	return store.MailboxV1EntityContext{Available: false, Reason: "entity_reader_unavailable"}
 }
 
 func mailboxDownstreamPreview(item store.MailboxV1Item, opts OperatorReadOptions) store.MailboxV1DownstreamPreview {
