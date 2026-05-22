@@ -81,11 +81,10 @@ func buildRuntimeLogBlock(entry runtimebus.FlightRecorderEntry) (TurnBlock, bool
 	if message == "" && len(detailsRaw) == 0 {
 		return TurnBlock{}, false
 	}
-	title := message
-	if title == "" {
-		title = "runtime log"
+	if message == "" {
+		message = "runtime log"
 	}
-	return newRuntimeLogTurnBlock(title, TurnBlockRuntimeLogData{
+	return newRuntimeLogTurnBlock(message, TurnBlockRuntimeLogData{
 		LogLevel:   strings.TrimSpace(entry.LogLevel),
 		Message:    message,
 		Details:    detailsRaw,

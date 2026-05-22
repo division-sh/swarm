@@ -137,6 +137,37 @@ func TestBuildTurnBlocks_IncludesSpecShapedRuntimeLogFlightRecorderEntries(t *te
 	}
 }
 
+func TestBuildTurnBlocks_DefaultsRuntimeLogMessageForCanonicalValidation(t *testing.T) {
+	blocks := BuildTurnBlocks(AgentTurnRecord{
+		FlightRecorder: []runtimebus.FlightRecorderEntry{
+			{
+				Kind:     "runtime_log",
+				LogLevel: "info",
+				Details: map[string]any{
+					"component": "runtime",
+					"action":    "unknown",
+				},
+			},
+		},
+	})
+	if len(blocks) != 1 {
+		t.Fatalf("blocks = %#v", blocks)
+	}
+	if blocks[0].Title != "runtime log" {
+		t.Fatalf("title = %q, want runtime log", blocks[0].Title)
+	}
+	logs, err := DecodeCanonicalRuntimeLogTurnBlocks(blocks)
+	if err != nil {
+		t.Fatalf("DecodeCanonicalRuntimeLogTurnBlocks() error = %v", err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("runtime log count = %d, want 1", len(logs))
+	}
+	if logs[0].Message != "runtime log" {
+		t.Fatalf("message = %q, want runtime log", logs[0].Message)
+	}
+}
+
 func TestBuildTurnBlocks_AppendsCanonicalSummaryForExplicitBlocks(t *testing.T) {
 	blocks := BuildTurnBlocks(AgentTurnRecord{
 		TurnBlocks: []TurnBlock{

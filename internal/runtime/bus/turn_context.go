@@ -132,11 +132,21 @@ func (r *EmittedEventsRecorder) AppendRuntimeLog(entry diaglog.RunEntry) {
 		return
 	}
 	entry.NormalizeEntityID()
+	entry.Level = diaglog.NormalizeLevel(entry.Level.String())
+	entry.Message = strings.TrimSpace(entry.Message)
+	entry.Component = strings.TrimSpace(entry.Component)
+	if entry.Component == "" {
+		entry.Component = "runtime"
+	}
+	entry.Action = strings.TrimSpace(entry.Action)
+	if entry.Action == "" {
+		entry.Action = "unknown"
+	}
 	r.mu.Lock()
 	r.flightRecorder = append(r.flightRecorder, FlightRecorderEntry{
 		Kind:       "runtime_log",
 		LogLevel:   entry.Level.String(),
-		Message:    strings.TrimSpace(entry.Message),
+		Message:    entry.Message,
 		Details:    cloneJSONValue(runtimeLogDetails(entry)),
 		StackTrace: strings.TrimSpace(entry.StackTrace),
 	})
@@ -200,6 +210,19 @@ func cloneJSONValue(v any) any {
 
 func runtimeLogDetails(entry diaglog.RunEntry) map[string]any {
 	details := map[string]any{}
+	if entry.Detail != nil {
+		if detailMap, ok := cloneJSONValue(entry.Detail).(map[string]any); ok {
+			for k, v := range detailMap {
+				key := strings.TrimSpace(k)
+				if key == "" {
+					continue
+				}
+				details[key] = v
+			}
+		} else {
+			details["raw_detail"] = cloneJSONValue(entry.Detail)
+		}
+	}
 	if v := strings.TrimSpace(entry.Component); v != "" {
 		details["component"] = v
 	}
@@ -224,19 +247,6 @@ func runtimeLogDetails(entry diaglog.RunEntry) map[string]any {
 	}
 	if len(entry.Correlation) > 0 {
 		details["correlation"] = cloneStringMap(entry.Correlation)
-	}
-	if entry.Detail != nil {
-		if detailMap, ok := cloneJSONValue(entry.Detail).(map[string]any); ok {
-			for k, v := range detailMap {
-				key := strings.TrimSpace(k)
-				if key == "" {
-					continue
-				}
-				details[key] = v
-			}
-		} else {
-			details["raw_detail"] = cloneJSONValue(entry.Detail)
-		}
 	}
 	if v := strings.TrimSpace(entry.Error); v != "" {
 		details["error"] = v
