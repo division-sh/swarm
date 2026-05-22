@@ -320,7 +320,6 @@ type genericAgent struct {
 	Permissions         []string          `json:"permissions,omitempty"`
 	PendingEvents       int               `json:"pending_events,omitempty"`
 	OldestPendingAgeSec int               `json:"oldest_pending_age_sec,omitempty"`
-	InFlightTurn        bool              `json:"in_flight_turn,omitempty"`
 	LockOwner           string            `json:"lock_owner,omitempty"`
 	LockExpiresAt       string            `json:"lock_expires_at,omitempty"`
 	Failures24h         int               `json:"failures_24h,omitempty"`
@@ -1030,7 +1029,6 @@ func genericAgentFromOperatorSummary(row store.OperatorAgentSummary) genericAgen
 		Permissions:         append([]string(nil), row.Permissions...),
 		PendingEvents:       row.PendingEvents,
 		OldestPendingAgeSec: row.OldestPendingAgeSec,
-		InFlightTurn:        row.InFlightTurn,
 		LockOwner:           strings.TrimSpace(row.LockOwner),
 		LockExpiresAt:       formatTime(row.LockExpiresAt),
 		Failures24h:         row.Failures24h,

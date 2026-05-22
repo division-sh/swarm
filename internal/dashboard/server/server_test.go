@@ -2031,7 +2031,7 @@ func TestSQLAgentReader_GetGenericAgent_UsesCanonicalLifecycleProjection(t *test
 	}
 }
 
-func TestSQLAgentReader_ListGenericAgents_FallsBackToActiveSessionLifecycleWhenDeliveryLifecycleIsAbsent(t *testing.T) {
+func TestSQLAgentReader_ListGenericAgents_DoesNotDeriveLifecycleFromActiveLeaseWhenFactsAbsent(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock: %v", err)
@@ -2069,14 +2069,83 @@ func TestSQLAgentReader_ListGenericAgents_FallsBackToActiveSessionLifecycleWhenD
 	if len(items) != 1 {
 		t.Fatalf("expected one agent, got %+v", items)
 	}
-	if items[0].State != "active" {
-		t.Fatalf("state = %q, want active from live session fallback", items[0].State)
+	if items[0].State != "idle" {
+		t.Fatalf("state = %q, want idle from empty canonical lifecycle facts", items[0].State)
 	}
-	if items[0].BlockingLayer != "session_execution" {
-		t.Fatalf("blocking_layer = %q, want session_execution from live session fallback", items[0].BlockingLayer)
+	if items[0].BlockingLayer != "" {
+		t.Fatalf("blocking_layer = %q, want empty without canonical lifecycle blocker", items[0].BlockingLayer)
 	}
+	if items[0].LockOwner != "lease-owner" || items[0].LockExpiresAt == "" {
+		t.Fatalf("raw lock metadata not preserved as debug data: %+v", items[0])
+	}
+	assertGenericAgentJSONFieldAbsent(t, items[0], "in_flight_turn")
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations: %v", err)
+	}
+}
+
+func TestSQLAgentReader_GetGenericAgent_DoesNotDeriveLifecycleFromActiveLeaseWhenFactsAbsent(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	reader := NewSQLAgentReader(db, stubSQLAgents{
+		rows: []runtimemanager.PersistedAgent{{
+			Config: runtimeactors.AgentConfig{
+				ID:   "agent-1",
+				Role: "researcher",
+				Mode: "global",
+				Type: "managed",
+			},
+			Status: "active",
+		}},
+		caps: canonicalEventAndConversationCaps(),
+		facts: map[string]store.PendingAgentDeliveryFacts{
+			"agent-1": {},
+		},
+		lifecycleFacts: map[string]store.AgentLifecycleFacts{
+			"agent-1": {},
+		},
+	}, 12)
+
+	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
+		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
+		WillReturnRows(sqlmock.NewRows(canonicalAgentProjectionColumns()).
+			AddRow("agent-1", "active", "sess-1", time.Now(), 2, "lease-owner", time.Now().Add(time.Minute), []byte(`{}`), 0, 0, 0, 0, "", "", "", false, "", nil, []byte(`[]`)))
+
+	item, ok, err := reader.GetGenericAgent(context.Background(), "agent-1")
+	if err != nil {
+		t.Fatalf("GetGenericAgent: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected agent to exist")
+	}
+	if item.State != "idle" {
+		t.Fatalf("state = %q, want idle from empty canonical lifecycle facts", item.State)
+	}
+	if item.BlockingLayer != "" {
+		t.Fatalf("blocking_layer = %q, want empty without canonical lifecycle blocker", item.BlockingLayer)
+	}
+	assertGenericAgentJSONFieldAbsent(t, item, "in_flight_turn")
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
+func assertGenericAgentJSONFieldAbsent(t *testing.T, item genericAgent, field string) {
+	t.Helper()
+	raw, err := json.Marshal(item)
+	if err != nil {
+		t.Fatalf("marshal generic agent: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("unmarshal generic agent: %v", err)
+	}
+	if _, ok := payload[field]; ok {
+		t.Fatalf("generic agent payload exposed %q: %#v", field, payload)
 	}
 }
 

@@ -307,6 +307,58 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 	}
 }
 
+func TestOperatorAgentHandlersSerializeLifecycleStatusFromReadOwner(t *testing.T) {
+	summary := store.OperatorAgentSummary{
+		AgentID:          "agent-1",
+		Role:             "researcher",
+		Type:             "managed",
+		ModelTier:        "haiku",
+		ConversationMode: "session",
+		SessionScope:     "global",
+		Status:           "idle",
+	}
+	reads := &fakeAgentConversationReadStore{
+		listAgentsResult: store.OperatorAgentListResult{Agents: []store.OperatorAgentSummary{summary}},
+		agentResult:      store.OperatorAgentDetail{Agent: summary},
+	}
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			AgentConversations: reads,
+		}),
+	})
+
+	listAgents := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agents","method":"agent.list","params":{}}`)
+	if listAgents.Error != nil {
+		t.Fatalf("agent.list error = %#v", listAgents.Error)
+	}
+	listResult := asMap(t, listAgents.Result)
+	agents, ok := listResult["agents"].([]any)
+	if !ok || len(agents) != 1 {
+		t.Fatalf("agent.list result = %#v", listResult)
+	}
+	listAgent := asMap(t, agents[0])
+	if listAgent["status"] != "idle" {
+		t.Fatalf("agent.list status = %#v, want idle from read owner", listAgent["status"])
+	}
+	if _, ok := listAgent["in_flight_turn"]; ok {
+		t.Fatalf("agent.list exposed dashboard lifecycle field: %#v", listAgent)
+	}
+
+	getAgent := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agent","method":"agent.get","params":{"agent_id":"agent-1"}}`)
+	if getAgent.Error != nil {
+		t.Fatalf("agent.get error = %#v", getAgent.Error)
+	}
+	agentResult := asMap(t, getAgent.Result)
+	agent := asMap(t, agentResult["agent"])
+	if agent["status"] != "idle" {
+		t.Fatalf("agent.get status = %#v, want idle from read owner", agent["status"])
+	}
+	if _, ok := agent["in_flight_turn"]; ok {
+		t.Fatalf("agent.get exposed dashboard lifecycle field: %#v", agent)
+	}
+}
+
 func assertUnsupportedAgentMetricStubsAbsent(t *testing.T, payload map[string]any) {
 	t.Helper()
 	for _, key := range []string{"turns_24h", "in_flight_seconds"} {

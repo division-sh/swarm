@@ -81,7 +81,6 @@ type OperatorAgentSummary struct {
 	Permissions           []string                            `json:"-"`
 	PendingEvents         int                                 `json:"-"`
 	OldestPendingAgeSec   int                                 `json:"-"`
-	InFlightTurn          bool                                `json:"-"`
 	LockOwner             string                              `json:"-"`
 	LockExpiresAt         time.Time                           `json:"-"`
 	Failures24h           int                                 `json:"-"`
@@ -438,7 +437,6 @@ type operatorAgentProjection struct {
 	OldestPendingAgeSec int
 	LockOwner           string
 	LockExpiresAt       time.Time
-	InFlightTurn        bool
 	Failures24h         int
 	DeadLetters24h      int
 	TurnCount           int
@@ -1183,9 +1181,6 @@ func (r *OperatorAgentConversationReadSurface) loadAgentOperatorProjections(ctx 
 		}
 		if lockExpiresAt.Valid {
 			projection.LockExpiresAt = lockExpiresAt.Time
-			if lockExpiresAt.Time.After(time.Now()) && strings.TrimSpace(projection.LockOwner) != "" {
-				projection.InFlightTurn = true
-			}
 		}
 		if latestCompleted.Valid && strings.TrimSpace(latestTurnID) != "" {
 			projection.LastTurnRef = &OperatorTurnRef{
@@ -1258,7 +1253,6 @@ func operatorAgentSummaryFromPersisted(row runtimemanager.PersistedAgent, projec
 		Permissions:           append([]string(nil), row.Config.Permissions...),
 		PendingEvents:         projection.PendingEvents,
 		OldestPendingAgeSec:   projection.OldestPendingAgeSec,
-		InFlightTurn:          projection.InFlightTurn,
 		LockOwner:             strings.TrimSpace(projection.LockOwner),
 		LockExpiresAt:         projection.LockExpiresAt,
 		Failures24h:           projection.Failures24h,
@@ -1454,18 +1448,12 @@ func (p operatorAgentProjection) dashboardState() string {
 	if state := strings.TrimSpace(p.LifecycleState); state != "" {
 		return state
 	}
-	if p.InFlightTurn {
-		return "active"
-	}
 	return "idle"
 }
 
 func (p operatorAgentProjection) dashboardBlockingLayer() string {
 	if layer := strings.TrimSpace(p.BlockingLayer); layer != "" {
 		return layer
-	}
-	if p.InFlightTurn {
-		return "session_execution"
 	}
 	return ""
 }
@@ -1482,9 +1470,6 @@ func (p operatorAgentProjection) v1Status() string {
 		return "running"
 	case "exhausted":
 		return "failed"
-	}
-	if p.InFlightTurn {
-		return "running"
 	}
 	return "idle"
 }
