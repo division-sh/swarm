@@ -21,6 +21,7 @@ const (
 type diagnosticRunListOptions struct {
 	apiOptions rootCommandOptions
 	output     cliOutputOptions
+	logging    cliLoggingOptions
 	status     string
 	since      string
 	until      string
@@ -43,6 +44,7 @@ type diagnosticTraceOptions struct {
 type diagnosticRunOptions struct {
 	apiOptions rootCommandOptions
 	output     cliOutputOptions
+	logging    cliLoggingOptions
 	noDiagnose bool
 }
 
@@ -137,6 +139,9 @@ func newRunsCommand(opts rootCommandOptions) *cobra.Command {
 			if cmd.Flags().Changed("limit") && runOpts.limit == 0 {
 				return fmt.Errorf("--limit must be between 1 and 500")
 			}
+			if err := runOpts.logging.validate(); err != nil {
+				return returnCLIValidationError(cmd.ErrOrStderr(), err)
+			}
 			if err := runOpts.output.validate(); err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
@@ -145,6 +150,7 @@ func newRunsCommand(opts rootCommandOptions) *cobra.Command {
 	}
 	bindDiagnosticRunListFlags(cmd, &runOpts)
 	bindCLIOutputFlags(cmd, &runOpts.output)
+	bindCLILoggingFlags(cmd, &runOpts.logging)
 	bindCLIAPIConnectionFlags(cmd, &runOpts.apiOptions)
 	return cmd
 }
@@ -152,11 +158,15 @@ func newRunsCommand(opts rootCommandOptions) *cobra.Command {
 func newHealthCommand(opts rootCommandOptions) *cobra.Command {
 	apiOpts := opts
 	outputOpts := cliOutputOptions{}
+	loggingOpts := cliLoggingOptions{}
 	cmd := &cobra.Command{
 		Use:   "health",
 		Short: "Print structured operator health through v1 RPC.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := loggingOpts.validate(); err != nil {
+				return returnCLIValidationError(cmd.ErrOrStderr(), err)
+			}
 			if err := outputOpts.validate(); err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
@@ -164,6 +174,7 @@ func newHealthCommand(opts rootCommandOptions) *cobra.Command {
 		},
 	}
 	bindCLIOutputFlags(cmd, &outputOpts)
+	bindCLILoggingFlags(cmd, &loggingOpts)
 	bindCLIAPIConnectionFlags(cmd, &apiOpts)
 	return cmd
 }
@@ -179,6 +190,9 @@ func newStatusCommand(opts rootCommandOptions) *cobra.Command {
 			if len(args) == 1 {
 				runID = args[0]
 			}
+			if err := runOpts.logging.validate(); err != nil {
+				return returnCLIValidationError(cmd.ErrOrStderr(), err)
+			}
 			if err := runOpts.output.validate(); err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
@@ -187,6 +201,7 @@ func newStatusCommand(opts rootCommandOptions) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&runOpts.noDiagnose, "no-diagnose", false, "Use run.get and print only the canonical run header")
 	bindCLIOutputFlags(cmd, &runOpts.output)
+	bindCLILoggingFlags(cmd, &runOpts.logging)
 	bindCLIAPIConnectionFlags(cmd, &runOpts.apiOptions)
 	return cmd
 }

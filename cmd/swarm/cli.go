@@ -35,6 +35,12 @@ func executeRootCommandWithOptions(ctx context.Context, repo string, args []stri
 		}
 		return cliExitValidation
 	}
+	if err := validateCLILoggingFlagPlacement(args); err != nil {
+		if errOut != nil {
+			fmt.Fprintln(errOut, err)
+		}
+		return cliExitValidation
+	}
 	cmd := newRootCommandWithOptions(ctx, repo, out, errOut, opts)
 	cmd.SetArgs(args)
 	if err := cmd.ExecuteContext(ctx); err != nil {
@@ -167,6 +173,7 @@ func newVerifyCommand(ctx context.Context, repo string) *cobra.Command {
 type versionCommandOptions struct {
 	apiOptions rootCommandOptions
 	output     cliOutputOptions
+	logging    cliLoggingOptions
 	server     bool
 }
 
@@ -190,6 +197,9 @@ func newVersionCommand(opts rootCommandOptions) *cobra.Command {
 			if !versionOpts.server && cliAPIConnectionFlagsChanged(cmd) {
 				return fmt.Errorf("--api-server and --api-token-file require --server")
 			}
+			if err := versionOpts.logging.validate(); err != nil {
+				return returnCLIValidationError(cmd.ErrOrStderr(), err)
+			}
 			if err := versionOpts.output.validate(); err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
@@ -198,6 +208,7 @@ func newVersionCommand(opts rootCommandOptions) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&versionOpts.server, "server", false, "Also query /v1/rpc health.check and print server bundle/runtime identity")
 	bindCLIOutputFlags(cmd, &versionOpts.output)
+	bindCLILoggingFlags(cmd, &versionOpts.logging)
 	bindCLIAPIConnectionFlags(cmd, &versionOpts.apiOptions)
 	return cmd
 }

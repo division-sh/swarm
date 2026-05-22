@@ -601,7 +601,7 @@ func TestCLIOutputModeExceptionRowsFailClosedBeforeSideEffects(t *testing.T) {
 		{name: "retired investigate no-color", args: []string{"investigate", "runs", "--no-color"}, wantStderr: "retired in CLI v2"},
 		{name: "absent forkchat", args: []string{"forkchat", "--json"}, wantStderr: "unknown command"},
 		{name: "absent forkchat no-color", args: []string{"forkchat", "--no-color"}, wantStderr: "unknown command"},
-		{name: "split log-level", args: []string{"runs", "--log-level", "debug"}, wantStderr: "unknown flag"},
+		{name: "split log-level", args: []string{"logs", "--log-level", "debug"}, wantStderr: "unknown flag"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			beforeRPC := rpcCalls.Load()
