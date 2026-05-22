@@ -5547,9 +5547,10 @@ cli_specification:
         tracker: '#844'
         action: >
           API connection/auth/config authority is promoted in
-          cli_specification.foundations.api_connection_auth_config_precedence. Output/logging, retry,
-          contract-path, and serve listener environment/config behavior remain split until later children promote
-          their own merge-bearing owners.
+          cli_specification.foundations.api_connection_auth_config_precedence. Diagnostic logging authority is
+          promoted in cli_specification.foundations.cli_logging_policy. Retry, contract-path, output-renderer
+          implementation tails, and serve listener environment/config behavior remain split until later children
+          promote their own merge-bearing owners.
       exit_code_and_error_channel_normalization:
         disposition: promoted_first_slice
         tracker: '#846'
@@ -5564,6 +5565,16 @@ cli_specification:
           Exact `--json`, `--quiet`, streaming NDJSON, shared renderer ownership, exception rules,
           and implementation split-tail accounting are promoted in cli_specification.foundations.output_contract.
           CLI/runtime renderer implementation remains a future #794/#735 child and MUST consume that owner.
+      diagnostic_logging_policy:
+        disposition: promoted_first_slice
+        tracker: '#936'
+        action: >
+          CLI process diagnostic logging authority is promoted in
+          cli_specification.foundations.cli_logging_policy. This resolves the ignored CLI UX v2 review artifact's
+          ambiguous `--log-level` / `-v` / serve logging text by separating CLI diagnostics from successful output
+          rendering, serve boot observability, runtime log filters, and persisted runtime log payloads. This slice
+          is source-of-truth repair only; Cobra flags, config/env parsing, runtime logging, and command behavior
+          remain unchanged until a later implementation child consumes the promoted owner.
       serve_bind_listener_surface:
         disposition: promoted_first_slice
         tracker: '#853'
@@ -5687,6 +5698,14 @@ cli_specification:
           listen-address socket owners: `--api-listen-addr <host:port>` and `--mcp-listen-addr <host:port>`.
           This is required because port-only flags cannot express the bind interface/IP, while a generic
           `--bind-addr` would be ambiguous once API and MCP are independent listeners.
+      cli_diagnostic_logging_separation:
+        classification: required_current_contract
+        reason: >
+          The CLI UX v2 draft mixes universal verbosity, serve boot verbosity, and a daemon-conventional
+          `--log-level` alias. The promoted platform spec separates those concepts: `--log-level` is CLI process
+          diagnostic logging policy, `swarm serve --verbose/-v` remains serve boot observability, runtime
+          `logs/incidents --level` remain API result filters, and persisted runtime `log_level` payloads remain
+          runtime observability data.
       event_read_stream_filters:
         classification: required_current_contract
         reason: >
@@ -5771,8 +5790,8 @@ cli_specification:
             A config-file `no_color` key is not promoted by this first slice. Color config-file precedence remains
             split from the shared renderer flag/env owner until a later #844 child promotes it.
           log_level: >
-            `--log-level`, config-file `log_level`, and universal/repeatable verbosity are not color controls and
-            remain split logging/output work.
+            `--log-level`, config-file `log_level`, and universal/repeatable verbosity are not color controls.
+            Their source-of-truth disposition is governed by cli_specification.foundations.cli_logging_policy.
         consumers:
         - version
         - verify
@@ -6000,7 +6019,7 @@ cli_specification:
             Absent or blocked command rows do not receive output-mode implementation from #848. Their future
             implementation children consume this contract only after their command/API/runtime owner is promoted.
       split_siblings:
-      - '#844 universal flag/config/env precedence; config-file no_color and logging precedence remain split'
+      - '#844 universal flag/config/env precedence; config-file no_color and CLI logging behavior implementation remain split'
       - '#846 error-channel and exit-code classification; closed first slice'
       - '#839 retired namespace migration cleanup'
       - '#743 swarm run behavior and follow semantics; output-mode implementation may consume this contract later'
@@ -6015,6 +6034,85 @@ cli_specification:
       - tests proving unsupported exception rows fail before side effects
       - stdout/stderr tests proving successful machine-readable stdout is not contaminated by diagnostics/errors
       - no direct DB/store/runtime/EventBus reads for API-backed output rendering
+    cli_logging_policy:
+      promoted_by: '#936'
+      implementation_status: authority_promoted_behavior_pending
+      canonical_owner: docs/specs/swarm-platform/platform/contracts/platform-spec.yaml#cli_specification.foundations.cli_logging_policy
+      future_runtime_owner: cmd/swarm shared CLI diagnostic logging policy resolver
+      scope: >
+        Merge-bearing CLI v2 authority for CLI process diagnostic logging controls. This owner governs
+        `--log-level` source disposition, allowed levels, command applicability, stdout/stderr separation, and
+        boundaries with successful output rendering, serve boot observability, runtime log filters, and persisted
+        runtime log payloads. This contract is source-of-truth repair only until a later child implements a shared
+        `cmd/swarm` resolver that consumes it.
+      accepted_sources:
+        flag: --log-level <debug|info|warn|error>
+      source_precedence:
+      - flag
+      default_level: info
+      allowed_levels:
+      - debug
+      - info
+      - warn
+      - error
+      rejected_levels:
+        fatal: >
+          Not promoted for CLI process diagnostics. Runtime log payloads may carry fatal/error severity from their
+          own runtime observability owner, but the CLI diagnostic flag remains bounded to debug/info/warn/error.
+      rejected_sources:
+        environment:
+          SWARM_LOG_LEVEL: >
+            Not promoted as a CLI process diagnostic source. The ignored review artifact mentions
+            `SWARM_LOG_LEVEL=debug` as runtime-level debugging evidence, not as a CLI universal flag/env contract.
+            If runtime/daemon logging needs environment precedence, it must be promoted by a runtime logging child,
+            not by this CLI process diagnostics owner.
+        config_file:
+          log_level: >
+            Not promoted as a config-file key by #936. Config-file logging precedence remains a later #844 child
+            because the API connection/auth config owner currently rejects `log_level`, and accepting it here
+            without shared config behavior would create an inert key.
+      command_applicability:
+        eligible_scope: >
+          Future behavior may accept `--log-level` only on implemented, non-retired command rows that execute
+          through the shared CLI execution context and consume the future shared diagnostic logging resolver.
+          Command-local `--log-level` parsers are invalid.
+        unsupported_surfaces:
+        - root
+        - help
+        - completion
+        - retired namespaces
+        - blocked or absent command rows
+        - command rows that have not yet been moved to the shared logging owner
+        unsupported_rule: >
+          Unsupported surfaces MUST fail before API/runtime calls, local verification, runtime boot, active-run
+          mutation, or other side effects if `--log-level` is supplied.
+        serve_boundary: >
+          `swarm serve --verbose/-v` remains owned by serve boot observability and prints the numbered boot sequence
+          to stdout. `--log-level` is not an alias for `--verbose/-v` in the promoted spec. A later serve logging
+          child may consume this owner for process diagnostics, but it MUST NOT change the boot-progress contract
+          unless the serve boot owner is explicitly updated.
+      stdout_stderr_boundary: >
+        CLI diagnostics controlled by `--log-level` render only to stderr. They MUST NOT contaminate successful
+        stdout in default text, JSON, streaming NDJSON, or quiet modes. `--log-level` does not change exit-code
+        classification, JSON error-body policy, or successful-output shape.
+      output_interaction:
+        json: '`--json` controls successful stdout rendering only; diagnostics remain stderr-only.'
+        quiet: '`--quiet` controls successful stdout rendering only; diagnostics remain stderr-only and may still be filtered by logging level.'
+        no_color: '`--no-color` and `NO_COLOR` are color controls, not logging filters. They do not change diagnostic level selection.'
+      split_siblings:
+      - '#844 config-file log_level precedence'
+      - '#844 universal/repeatable --verbose/-v outside serve boot observability'
+      - '#848 output-mode/shared renderer implementation tails'
+      - '#931 color/no-color policy; closed first slice'
+      - '#884/#750 serve listener/runtime behavior'
+      - '#743 swarm run behavior and follow semantics'
+      - '`swarm logs --level` and `swarm incidents --level` runtime result filters'
+      - persisted runtime `log_level` payloads and runtime/daemon logging configuration
+      implementation_boundaries:
+      - 'This #936 first slice is source-of-truth repair only: no Cobra flags, config/env parsing, runtime logging, or command behavior change is implied.'
+      - 'Future implementation MUST introduce or consume one shared cmd/swarm diagnostic logging policy resolver before accepting `--log-level` anywhere.'
+      - 'Future implementation MUST prove stdout/stderr separation for JSON, quiet, default text, and diagnostics.'
+      - 'Future implementation MUST keep runtime log filters and serve boot verbosity classified as separate owners unless a later spec PR deliberately changes that boundary.'
     auth_boundary: >
       Runtime-state commands use v1 bearer auth through token sources governed by
       cli_specification.foundations.api_connection_auth_config_precedence. Legacy
@@ -6100,7 +6198,10 @@ cli_specification:
             through the shared output owner for current first-slice consumers.
           contracts_path: Split to contract-path resolution.
           platform_spec_path: Split to contract-path resolution.
-          log_level: Split to logging/output work.
+          log_level: >
+            Not promoted as a config-file key by #936. `--log-level` flag authority is promoted in
+            cli_specification.foundations.cli_logging_policy, but config-file `log_level` precedence remains a
+            later #844 child.
           retry: Split to retry policy work.
           serve_api_listen_addr: Split to #884/#750 serve listener implementation.
           serve_mcp_listen_addr: Split to #884/#750 serve listener implementation.
@@ -6363,10 +6464,12 @@ cli_specification:
             rationale: >
               Port-only configuration is incomplete because it cannot express the bind interface/IP.
           --log-level:
-            disposition: split_to_output_logging_or_universal_flags
+            disposition: governed_by_cli_logging_policy
+            owner: cli_specification.foundations.cli_logging_policy
             rationale: >
-              Logging level is not listener topology. It remains outside #884 runtime topology implementation
-              unless a later output/logging/universal-flag gate promotes it.
+              Logging level is not listener topology. Its source-of-truth owner is promoted by #936, but serve
+              runtime behavior remains outside #884 runtime topology implementation until a later implementation
+              child consumes the CLI logging policy owner.
           SWARM_API_PORT:
             disposition: not_promoted_final_v2_1
             replacement_candidate: SWARM_API_LISTEN_ADDR
@@ -6396,7 +6499,7 @@ cli_specification:
         - 'MCP listener bind implementation and `swarm run --mcp-port` disposition must be a later child consuming this owner.'
         - 'API/MCP enable-disable implementation may be a later child if not absorbed with listener implementation.'
         - 'Environment/config precedence remains #844.'
-        - '`--log-level` remains output/logging or universal flag work, not listener topology.'
+        - '`--log-level` is governed by cli_specification.foundations.cli_logging_policy, not listener topology.'
       boot_observability:
         implemented_by: '#802'
         flags:
