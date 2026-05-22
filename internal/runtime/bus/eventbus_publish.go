@@ -28,6 +28,10 @@ type targetFailureDeadLetterRecorder interface {
 	RecordDeadLetter(context.Context, runtimedeadletters.Record) error
 }
 
+type targetFailureDeadLetterTxRecorder interface {
+	RecordDeadLetterTx(context.Context, *sql.Tx, runtimedeadletters.Record) error
+}
+
 func shouldPersistPipelineReceipt(persisted bool, publishErr error) bool {
 	if !persisted {
 		return false
@@ -324,11 +328,7 @@ func (eb *EventBus) PublishTx(ctx context.Context, tx *sql.Tx, evt events.Event)
 		if err := txStore.UpsertPipelineReceiptTx(txctx, tx, evt.ID, "dead_letter", targetDeliveryFailureMessage(inboundPlan.TargetFailure)); err != nil {
 			return fmt.Errorf("persist pipeline receipt: %w", err)
 		}
-		eb.logRuntime(txctx, "warn", "Pin routing target delivery failed", "eventbus", "target_resolution_failed", evt.ID, string(evt.Type), evt.SourceAgent, evt.EntityID(), "", nil, map[string]any{
-			"target_failure_reason": string(inboundPlan.TargetFailure),
-			"target":                evt.TargetRoute(),
-			"target_set":            evt.TargetRoutes(),
-		}, targetDeliveryFailureMessage(inboundPlan.TargetFailure), 0)
+		eb.recordTargetDeliveryFailureTx(txctx, tx, evt, inboundPlan)
 		return nil
 	}
 	if reason, err := eb.dispatchQueueReason(txctx, evt); err != nil {
@@ -1181,6 +1181,36 @@ func (eb *EventBus) recordTargetDeliveryFailure(ctx context.Context, evt events.
 	if failure == "" {
 		return
 	}
+	message, detail, record := targetDeliveryFailureRecord(evt, plan, failure)
+	eb.logRuntime(ctx, "warn", "Pin routing target delivery failed", "eventbus", "target_resolution_failed", evt.ID, string(evt.Type), evt.SourceAgent, evt.EntityID(), "", nil, detail, message, 0)
+
+	recorder, ok := eb.store.(targetFailureDeadLetterRecorder)
+	if !ok || recorder == nil {
+		return
+	}
+	if err := recorder.RecordDeadLetter(ctx, record); err != nil {
+		eb.logRuntime(ctx, "warn", "Pin routing target failure dead-letter record failed", "eventbus", "target_resolution_failed_dead_letter_failed", evt.ID, string(evt.Type), evt.SourceAgent, evt.EntityID(), "", nil, detail, err.Error(), 0)
+	}
+}
+
+func (eb *EventBus) recordTargetDeliveryFailureTx(ctx context.Context, tx *sql.Tx, evt events.Event, plan eventDeliveryPlan) {
+	failure := runtimepinrouting.TargetFailure(strings.TrimSpace(string(plan.TargetFailure)))
+	if failure == "" {
+		return
+	}
+	message, detail, record := targetDeliveryFailureRecord(evt, plan, failure)
+	eb.logRuntime(ctx, "warn", "Pin routing target delivery failed", "eventbus", "target_resolution_failed", evt.ID, string(evt.Type), evt.SourceAgent, evt.EntityID(), "", nil, detail, message, 0)
+
+	recorder, ok := eb.store.(targetFailureDeadLetterTxRecorder)
+	if !ok || recorder == nil {
+		return
+	}
+	if err := recorder.RecordDeadLetterTx(ctx, tx, record); err != nil {
+		eb.logRuntime(ctx, "warn", "Pin routing target failure dead-letter record failed", "eventbus", "target_resolution_failed_dead_letter_failed", evt.ID, string(evt.Type), evt.SourceAgent, evt.EntityID(), "", nil, detail, err.Error(), 0)
+	}
+}
+
+func targetDeliveryFailureRecord(evt events.Event, plan eventDeliveryPlan, failure runtimepinrouting.TargetFailure) (string, map[string]any, runtimedeadletters.Record) {
 	message := targetDeliveryFailureMessage(failure)
 	target := evt.TargetRoute()
 	targetSet := evt.TargetRoutes()
@@ -1193,12 +1223,6 @@ func (eb *EventBus) recordTargetDeliveryFailure(ctx context.Context, evt events.
 		"persisted_recipients":  append([]string(nil), plan.PersistedRecipients...),
 		"delivery_targets":      cloneRouteTargetMap(plan.DeliveryTargets),
 	}
-	eb.logRuntime(ctx, "warn", "Pin routing target delivery failed", "eventbus", "target_resolution_failed", evt.ID, string(evt.Type), evt.SourceAgent, evt.EntityID(), "", nil, detail, message, 0)
-
-	recorder, ok := eb.store.(targetFailureDeadLetterRecorder)
-	if !ok || recorder == nil {
-		return
-	}
 	targetContext, _ := json.Marshal(detail)
 	deadLetterRoute := target
 	if deadLetterRoute.Empty() && len(targetSet) > 0 {
@@ -1207,7 +1231,7 @@ func (eb *EventBus) recordTargetDeliveryFailure(ctx context.Context, evt events.
 	if deadLetterRoute.Empty() {
 		deadLetterRoute = evt.SourceRoute()
 	}
-	if err := recorder.RecordDeadLetter(ctx, runtimedeadletters.Record{
+	return message, detail, runtimedeadletters.Record{
 		OriginalEventID:     strings.TrimSpace(evt.ID),
 		OriginalEvent:       strings.TrimSpace(string(evt.Type)),
 		OriginalPayload:     evt.Payload,
@@ -1220,8 +1244,6 @@ func (eb *EventBus) recordTargetDeliveryFailure(ctx context.Context, evt events.
 		RetryCount:          0,
 		ChainDepth:          evt.ChainDepth,
 		HandlerNode:         "pin_routing",
-	}); err != nil {
-		eb.logRuntime(ctx, "warn", "Pin routing target failure dead-letter record failed", "eventbus", "target_resolution_failed_dead_letter_failed", evt.ID, string(evt.Type), evt.SourceAgent, evt.EntityID(), "", nil, detail, err.Error(), 0)
 	}
 }
 
