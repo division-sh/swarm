@@ -734,6 +734,20 @@ func TestTraceFollowRetriesRetryableReadFailure(t *testing.T) {
 	}
 }
 
+func TestTraceFollowClassifiesPlainEOFAsRetryableTransportClose(t *testing.T) {
+	for _, msg := range []string{
+		"read run.subscribe_trace response: EOF",
+		"read run.subscribe_trace notification: EOF",
+		"EOF",
+	} {
+		t.Run(msg, func(t *testing.T) {
+			if !traceFollowTransportErrorText(msg) {
+				t.Fatalf("traceFollowTransportErrorText(%q) = false, want true", msg)
+			}
+		})
+	}
+}
+
 func TestTraceFollowCtrlCDetachesWithoutRunStop(t *testing.T) {
 	t.Setenv("SWARM_API_TOKEN", "test-token")
 	wsSubscribed := make(chan struct{})
