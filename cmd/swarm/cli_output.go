@@ -2,10 +2,18 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 
 	"github.com/spf13/cobra"
+)
+
+const (
+	cliOutputJSONFlag      = "json"
+	cliOutputJSONFlagHelp  = "Render successful output as one JSON document"
+	cliOutputQuietFlag     = "quiet"
+	cliOutputQuietFlagHelp = "Render only declared load-bearing value(s)"
 )
 
 type cliOutputOptions struct {
@@ -17,8 +25,13 @@ type cliTextRenderer func(io.Writer)
 type cliQuietRenderer func() ([]string, error)
 
 func bindCLIOutputFlags(cmd *cobra.Command, opts *cliOutputOptions) {
-	cmd.Flags().BoolVar(&opts.asJSON, "json", false, "Render successful output as one JSON document")
-	cmd.Flags().BoolVar(&opts.quiet, "quiet", false, "Render only declared load-bearing value(s)")
+	cmd.Flags().BoolVar(&opts.asJSON, cliOutputJSONFlag, false, cliOutputJSONFlagHelp)
+	cmd.Flags().BoolVar(&opts.quiet, cliOutputQuietFlag, false, cliOutputQuietFlagHelp)
+}
+
+func bindCLIOutputFlagSet(fs *flag.FlagSet, opts *cliOutputOptions) {
+	fs.BoolVar(&opts.asJSON, cliOutputJSONFlag, false, cliOutputJSONFlagHelp)
+	fs.BoolVar(&opts.quiet, cliOutputQuietFlag, false, cliOutputQuietFlagHelp)
 }
 
 func (opts cliOutputOptions) validate() error {
