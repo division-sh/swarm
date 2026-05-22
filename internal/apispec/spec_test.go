@@ -44,6 +44,7 @@ func TestPlatformAPISpecValidationCoverage(t *testing.T) {
 		t.Fatal("components.errors.description must not be a concrete error code")
 	}
 	assertExamplesPolicyDeferred(t, api.ExamplesPolicy)
+	assertServiceDiscoveryPolicyNotPublished(t, api.ServiceDiscoveryPolicy)
 }
 
 func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
@@ -75,6 +76,7 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 		t.Fatalf("generated OpenRPC errors = %d, want 28", len(doc.Components.Errors))
 	}
 	assertGeneratedMethodsOmitExamplesUnderPolicy(t, api, artifact)
+	assertGeneratedMethodsOmitRPCDiscoverUnderPolicy(t, api, doc)
 	methods := map[string]OpenRPCMethod{}
 	for _, method := range doc.Methods {
 		methods[method.Name] = method
@@ -171,6 +173,45 @@ func TestValidateRejectsUnsupportedExamplesPolicy(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsMissingServiceDiscoveryPolicy(t *testing.T) {
+	api := loadRepoAPISpec(t)
+	api.ServiceDiscoveryPolicy = ServiceDiscoveryPolicy{}
+
+	_, err := Validate(api)
+	if err == nil {
+		t.Fatal("Validate() error = nil, want service_discovery_policy rejection")
+	}
+	if got, want := err.Error(), "api_specification.service_discovery_policy missing status"; !strings.Contains(got, want) {
+		t.Fatalf("Validate() error = %q, want substring %q", got, want)
+	}
+}
+
+func TestValidateRejectsUnsupportedServiceDiscoveryPolicy(t *testing.T) {
+	api := loadRepoAPISpec(t)
+	api.ServiceDiscoveryPolicy.Status = "published"
+
+	_, err := Validate(api)
+	if err == nil {
+		t.Fatal("Validate() error = nil, want unsupported service_discovery_policy status rejection")
+	}
+	if got, want := err.Error(), `api_specification.service_discovery_policy.status = "published", want "not_published"`; !strings.Contains(got, want) {
+		t.Fatalf("Validate() error = %q, want substring %q", got, want)
+	}
+}
+
+func TestValidateRejectsRPCDiscoverUnderNonPublicationPolicy(t *testing.T) {
+	api := loadRepoAPISpec(t)
+	api.MethodCatalog["rpc.discover"] = api.MethodCatalog["rpc.unsubscribe"]
+
+	_, err := Validate(api)
+	if err == nil {
+		t.Fatal("Validate() error = nil, want rpc.discover non-publication rejection")
+	}
+	if got, want := err.Error(), "method_catalog must not include rpc.discover while api_specification.service_discovery_policy.status is not_published"; !strings.Contains(got, want) {
+		t.Fatalf("Validate() error = %q, want substring %q", got, want)
+	}
+}
+
 func notificationSchemaRef(t *testing.T, methodName string, schema any) string {
 	t.Helper()
 	schemaMap, ok := schema.(map[string]any)
@@ -212,6 +253,34 @@ func assertExamplesPolicyDeferred(t *testing.T, policy ExamplesPolicy) {
 	}
 }
 
+func assertServiceDiscoveryPolicyNotPublished(t *testing.T, policy ServiceDiscoveryPolicy) {
+	t.Helper()
+	if policy.Status != ServiceDiscoveryPolicyStatusNotPublished {
+		t.Fatalf("service_discovery_policy.status = %q, want %q", policy.Status, ServiceDiscoveryPolicyStatusNotPublished)
+	}
+	if policy.Owner != ServiceDiscoveryPolicyOwner {
+		t.Fatalf("service_discovery_policy.owner = %q, want %q", policy.Owner, ServiceDiscoveryPolicyOwner)
+	}
+	if policy.AppliesTo != ServiceDiscoveryPolicyAppliesToGeneratedCatalog {
+		t.Fatalf("service_discovery_policy.applies_to = %q, want %q", policy.AppliesTo, ServiceDiscoveryPolicyAppliesToGeneratedCatalog)
+	}
+	if policy.RPCDiscover != ServiceDiscoveryPolicyRPCDiscoverOmitted {
+		t.Fatalf("service_discovery_policy.rpc_discover = %q, want %q", policy.RPCDiscover, ServiceDiscoveryPolicyRPCDiscoverOmitted)
+	}
+	if policy.PublicationArtifact != ServiceDiscoveryPolicyPublicationArtifactOpenRPC {
+		t.Fatalf("service_discovery_policy.publication_artifact = %q, want %q", policy.PublicationArtifact, ServiceDiscoveryPolicyPublicationArtifactOpenRPC)
+	}
+	if policy.RuntimeBehavior != ServiceDiscoveryPolicyRuntimeBehaviorMethodNotFound {
+		t.Fatalf("service_discovery_policy.runtime_behavior = %q, want %q", policy.RuntimeBehavior, ServiceDiscoveryPolicyRuntimeBehaviorMethodNotFound)
+	}
+	if strings.TrimSpace(policy.Reason) == "" {
+		t.Fatal("service_discovery_policy.reason must explain rpc.discover non-publication")
+	}
+	if len(policy.Requirements) == 0 {
+		t.Fatal("service_discovery_policy.requirements must list enforcement requirements")
+	}
+}
+
 func assertGeneratedMethodsOmitExamplesUnderPolicy(t *testing.T, api *APISpecification, artifact []byte) {
 	t.Helper()
 	assertExamplesPolicyDeferred(t, api.ExamplesPolicy)
@@ -232,6 +301,19 @@ func assertGeneratedMethodsOmitExamplesUnderPolicy(t *testing.T, api *APISpecifi
 		}
 		if rawJSONHasContent(method["example"]) {
 			t.Fatalf("%s publishes OpenRPC example while examples_policy is deferred", name)
+		}
+	}
+}
+
+func assertGeneratedMethodsOmitRPCDiscoverUnderPolicy(t *testing.T, api *APISpecification, doc OpenRPCDocument) {
+	t.Helper()
+	assertServiceDiscoveryPolicyNotPublished(t, api.ServiceDiscoveryPolicy)
+	if _, ok := api.MethodCatalog["rpc.discover"]; ok {
+		t.Fatal("api_specification.method_catalog includes rpc.discover while service_discovery_policy is not_published")
+	}
+	for _, method := range doc.Methods {
+		if method.Name == "rpc.discover" {
+			t.Fatal("generated OpenRPC publishes rpc.discover while service_discovery_policy is not_published")
 		}
 	}
 }

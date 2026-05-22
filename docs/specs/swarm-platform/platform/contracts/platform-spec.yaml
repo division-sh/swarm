@@ -9684,6 +9684,22 @@ api_specification:
     - generated openrpc.json MUST omit method examples while status is deferred
     - compliance matrix examples rows MUST use policy_deferred proof status
     - future authored or generated examples require a promoted api_specification source model and gate
+  service_discovery_policy:
+    status: not_published
+    owner: api_specification.service_discovery_policy
+    applies_to: generated_v1_method_catalog
+    rpc_discover: omitted
+    publication_artifact: generated_openrpc_json
+    runtime_behavior: out_of_catalog_method_not_found
+    reason: >
+      The v1 API publishes its method catalog through generated openrpc.json.
+      rpc.discover is intentionally not part of the v1 method catalog unless a
+      future gate promotes it as an explicit method with runtime behavior and
+      schema proof.
+    requirements:
+    - generated openrpc.json MUST omit rpc.discover while status is not_published
+    - compliance matrix service_discovery_publication rows MUST use policy_not_published proof status
+    - future rpc.discover publication requires api_specification method_catalog promotion and supported-surface runtime proof
   method_catalog_metadata:
     description: "All v1 methods. Each method declares: tier, description, scope.required,\nparams (array of contentDescriptors),\
       \ result (contentDescriptor), errors\n(array of error codes from components.errors). Mutating methods include\nidempotency.\

@@ -6,6 +6,8 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -90,6 +92,7 @@ type rawOpenRPCDocument struct {
 }
 
 const openRPCComplianceMatrixTestName = "TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod"
+const serviceDiscoveryPolicyRuntimeTestName = "TestServiceDiscoveryPolicyDoesNotServeRPCDiscover"
 
 func TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod(t *testing.T) {
 	root := repoRoot(t)
@@ -116,6 +119,7 @@ func TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod(t *testing.T) {
 		t.Fatalf("matrix rows = %d, want generated method count %d", len(matrix.Methods), len(doc.Methods))
 	}
 	assertExamplesPolicyDeferred(t, api.ExamplesPolicy)
+	assertServiceDiscoveryPolicyNotPublished(t, api.ServiceDiscoveryPolicy)
 	if problems := validateProofReferenceIntegrity(root, matrix); len(problems) > 0 {
 		t.Fatalf("compliance matrix proof-reference integrity failed:\n- %s", strings.Join(problems, "\n- "))
 	}
@@ -131,9 +135,7 @@ func TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod(t *testing.T) {
 		}
 		openRPCByName[name] = method
 	}
-	if _, ok := openRPCByName["rpc.discover"]; ok {
-		t.Fatal("rpc.discover is not part of the approved #835 v1 publication boundary")
-	}
+	assertRPCDiscoverNotPublishedUnderPolicy(t, api.ServiceDiscoveryPolicy, openRPCByName)
 
 	rowsByName := map[string]openRPCMethodMatrix{}
 	for _, row := range matrix.Methods {
@@ -172,9 +174,6 @@ func TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod(t *testing.T) {
 		assertEvidence(t, methodName, "examples", row.Examples, false)
 		assertEvidence(t, methodName, "service_discovery_publication", row.ServiceDiscoveryPublication, false)
 
-		if len(row.GapClassification) == 0 {
-			t.Fatalf("%s gap_classification must classify remaining proof gaps", methodName)
-		}
 		if len(row.RequiredParams) == 0 {
 			assertNotApplicable(t, methodName, "required_param_validation", row.RequiredParamValidation)
 		} else {
@@ -196,9 +195,7 @@ func TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod(t *testing.T) {
 			assertEvidence(t, methodName, "notification_schema", row.NotificationSchema, true)
 		}
 		assertExamplesPolicyMatrixRow(t, methodName, rawMethods[methodName], row.Examples)
-		if row.ServiceDiscoveryPublication.Status != "published_without_discovery" {
-			t.Fatalf("%s service_discovery_publication status = %q, want published_without_discovery", methodName, row.ServiceDiscoveryPublication.Status)
-		}
+		assertServiceDiscoveryPolicyMatrixRow(t, methodName, api.ServiceDiscoveryPolicy, row.ServiceDiscoveryPublication)
 	}
 
 	for methodName := range rowsByName {
@@ -290,6 +287,22 @@ func TestOpenRPCComplianceMatrixRejectsInvalidProofReferences(t *testing.T) {
 			want: "examples status policy_deferred requires an artifact proof_ref",
 		},
 		{
+			name: "policy not published service discovery missing artifact proof",
+			mutate: func(matrix *openRPCComplianceMatrix) {
+				row := complianceMatrixRow(t, matrix, "agent.get")
+				row.ServiceDiscoveryPublication.ProofRefs = []complianceProofRef{{Kind: "go_test", Name: openRPCComplianceMatrixTestName}}
+			},
+			want: "service_discovery_publication status policy_not_published requires an artifact proof_ref",
+		},
+		{
+			name: "stale service discovery status",
+			mutate: func(matrix *openRPCComplianceMatrix) {
+				row := complianceMatrixRow(t, matrix, "agent.get")
+				row.ServiceDiscoveryPublication.Status = "published_without_discovery"
+			},
+			want: `service_discovery_publication status "published_without_discovery" is not allowed`,
+		},
+		{
 			name: "legacy proof strings",
 			mutate: func(matrix *openRPCComplianceMatrix) {
 				row := complianceMatrixRow(t, matrix, "agent.get")
@@ -329,6 +342,39 @@ proof_refs:
 	problems := validateProofReferenceIntegrity(root, matrix)
 	if !problemContains(problems, "agent.get happy_path uses legacy proof strings") {
 		t.Fatalf("validateProofReferenceIntegrity() problems = %v, want empty legacy proof key rejection", problems)
+	}
+}
+
+func TestServiceDiscoveryPolicyDoesNotServeRPCDiscover(t *testing.T) {
+	root := repoRoot(t)
+	api := loadComplianceAPISpec(t, root)
+	assertServiceDiscoveryPolicyNotPublished(t, api.ServiceDiscoveryPolicy)
+	if _, ok := api.MethodCatalog["rpc.discover"]; ok {
+		t.Fatal("api_specification.method_catalog includes rpc.discover while service_discovery_policy is not_published")
+	}
+	registry := testRegistry(t)
+	if _, ok := registry.Method("rpc.discover"); ok {
+		t.Fatal("runtime registry serves rpc.discover while service_discovery_policy is not_published")
+	}
+
+	handler := testHandler(t, Options{AuthTokens: []string{testToken}})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"discover","method":"rpc.discover","params":{}}`))
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("/v1/rpc status = %d, want 200 body=%s", rec.Code, rec.Body.String())
+	}
+	var resp rpcResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode rpc response: %v body=%s", err, rec.Body.String())
+	}
+	if resp.Error == nil {
+		t.Fatalf("rpc.discover response error = nil, want method not found: %#v", resp.Result)
+	}
+	if resp.Error.Code != codeMethodNotFound {
+		t.Fatalf("rpc.discover error code = %d, want %d body=%s", resp.Error.Code, codeMethodNotFound, rec.Body.String())
 	}
 }
 
@@ -387,9 +433,6 @@ func validateProofReferenceIntegrity(root string, matrix openRPCComplianceMatrix
 	index, problems := newComplianceProofIndex(root, matrix)
 	if matrix.IssueRole != "provenance" {
 		problems = append(problems, fmt.Sprintf("matrix issue_role = %q, want provenance", matrix.IssueRole))
-	}
-	if len(matrix.ActiveTrackers) == 0 {
-		problems = append(problems, "matrix active_trackers must list at least one active tracker")
 	}
 	for _, tracker := range matrix.ActiveTrackers {
 		if strings.TrimSpace(tracker.Kind) != "github_issue" {
@@ -500,6 +543,11 @@ func validateEvidenceProofRefs(root string, index complianceProofIndex, matrix o
 		problems = append(problems, fmt.Sprintf("%s status %s requires proof_refs", label, status))
 		return problems
 	}
+	if allowedStatuses := allowedEvidenceStatuses(field); len(allowedStatuses) > 0 {
+		if _, ok := allowedStatuses[status]; !ok && status != "tracked_gap" {
+			problems = append(problems, fmt.Sprintf("%s status %q is not allowed for %s", label, status, field))
+		}
+	}
 	allowedKinds := allowedProofRefKinds(status, field)
 	kinds := map[string]struct{}{}
 	for _, ref := range evidence.ProofRefs {
@@ -569,9 +617,12 @@ func validateEvidenceProofRefs(root string, index complianceProofIndex, matrix o
 		if _, ok := kinds["tracker"]; !ok {
 			problems = append(problems, fmt.Sprintf("%s status tracked_gap requires a tracker proof_ref", label))
 		}
-	case "published_without_discovery":
+	case "policy_not_published":
 		if _, ok := kinds["artifact"]; !ok {
-			problems = append(problems, fmt.Sprintf("%s status published_without_discovery requires an artifact proof_ref", label))
+			problems = append(problems, fmt.Sprintf("%s status policy_not_published requires an artifact proof_ref", label))
+		}
+		if _, ok := kinds["go_test"]; !ok {
+			problems = append(problems, fmt.Sprintf("%s status policy_not_published requires a go_test proof_ref", label))
 		}
 	case "policy_deferred":
 		if _, ok := kinds["artifact"]; !ok {
@@ -590,7 +641,6 @@ func allowedComplianceGapClasses() map[string]struct{} {
 		"missing_generated_result_schema_validation",
 		"missing_happy_path_test",
 		"missing_idempotency_test",
-		"missing_rpc_discover_policy",
 		"missing_result_schema_proof",
 	})
 }
@@ -610,7 +660,7 @@ func allowedProofRefKinds(status, field string) map[string]struct{} {
 			return complianceStringSet([]string{"tracker", "policy_gap"})
 		}
 		return complianceStringSet([]string{"tracker"})
-	case "published_without_discovery":
+	case "policy_not_published":
 		return complianceStringSet([]string{"artifact", "go_test"})
 	case "policy_deferred":
 		return complianceStringSet([]string{"artifact", "go_test"})
@@ -878,7 +928,7 @@ func allowedEvidenceStatuses(field string) map[string]struct{} {
 	case "examples":
 		return complianceStringSet([]string{"covered", "policy_deferred"})
 	case "service_discovery_publication":
-		return complianceStringSet([]string{"published_without_discovery"})
+		return complianceStringSet([]string{"policy_not_published"})
 	default:
 		return map[string]struct{}{}
 	}
@@ -903,6 +953,36 @@ func assertExamplesPolicyDeferred(t *testing.T, policy apispec.ExamplesPolicy) {
 	}
 }
 
+func assertServiceDiscoveryPolicyNotPublished(t *testing.T, policy apispec.ServiceDiscoveryPolicy) {
+	t.Helper()
+	if policy.Status != apispec.ServiceDiscoveryPolicyStatusNotPublished {
+		t.Fatalf("service_discovery_policy.status = %q, want %q", policy.Status, apispec.ServiceDiscoveryPolicyStatusNotPublished)
+	}
+	if policy.Owner != apispec.ServiceDiscoveryPolicyOwner {
+		t.Fatalf("service_discovery_policy.owner = %q, want %q", policy.Owner, apispec.ServiceDiscoveryPolicyOwner)
+	}
+	if policy.AppliesTo != apispec.ServiceDiscoveryPolicyAppliesToGeneratedCatalog {
+		t.Fatalf("service_discovery_policy.applies_to = %q, want %q", policy.AppliesTo, apispec.ServiceDiscoveryPolicyAppliesToGeneratedCatalog)
+	}
+	if policy.RPCDiscover != apispec.ServiceDiscoveryPolicyRPCDiscoverOmitted {
+		t.Fatalf("service_discovery_policy.rpc_discover = %q, want %q", policy.RPCDiscover, apispec.ServiceDiscoveryPolicyRPCDiscoverOmitted)
+	}
+	if policy.PublicationArtifact != apispec.ServiceDiscoveryPolicyPublicationArtifactOpenRPC {
+		t.Fatalf("service_discovery_policy.publication_artifact = %q, want %q", policy.PublicationArtifact, apispec.ServiceDiscoveryPolicyPublicationArtifactOpenRPC)
+	}
+	if policy.RuntimeBehavior != apispec.ServiceDiscoveryPolicyRuntimeBehaviorMethodNotFound {
+		t.Fatalf("service_discovery_policy.runtime_behavior = %q, want %q", policy.RuntimeBehavior, apispec.ServiceDiscoveryPolicyRuntimeBehaviorMethodNotFound)
+	}
+}
+
+func assertRPCDiscoverNotPublishedUnderPolicy(t *testing.T, policy apispec.ServiceDiscoveryPolicy, methods map[string]apispec.OpenRPCMethod) {
+	t.Helper()
+	assertServiceDiscoveryPolicyNotPublished(t, policy)
+	if _, ok := methods["rpc.discover"]; ok {
+		t.Fatal("generated OpenRPC publishes rpc.discover while service_discovery_policy is not_published")
+	}
+}
+
 func assertExamplesPolicyMatrixRow(t *testing.T, methodName string, rawProof rawOpenRPCMethodProof, evidence complianceEvidence) {
 	t.Helper()
 	if rawProof.hasExamples {
@@ -919,6 +999,26 @@ func assertExamplesPolicyMatrixRow(t *testing.T, methodName string, rawProof raw
 	}
 	if !evidenceHasGoTest(evidence, openRPCComplianceMatrixTestName) {
 		t.Fatalf("%s examples missing go_test proof_ref %s", methodName, openRPCComplianceMatrixTestName)
+	}
+}
+
+func assertServiceDiscoveryPolicyMatrixRow(t *testing.T, methodName string, policy apispec.ServiceDiscoveryPolicy, evidence complianceEvidence) {
+	t.Helper()
+	assertServiceDiscoveryPolicyNotPublished(t, policy)
+	if evidence.Status != "policy_not_published" {
+		t.Fatalf("%s service_discovery_publication status = %q, want policy_not_published while service_discovery_policy is not_published", methodName, evidence.Status)
+	}
+	if !evidenceHasArtifact(evidence, "docs/specs/swarm-platform/platform/contracts/platform-spec.yaml") {
+		t.Fatalf("%s service_discovery_publication missing platform-spec.yaml artifact proof_ref", methodName)
+	}
+	if !evidenceHasArtifact(evidence, "docs/specs/swarm-platform/platform/contracts/openrpc.json") {
+		t.Fatalf("%s service_discovery_publication missing openrpc.json artifact proof_ref", methodName)
+	}
+	if !evidenceHasGoTest(evidence, openRPCComplianceMatrixTestName) {
+		t.Fatalf("%s service_discovery_publication missing go_test proof_ref %s", methodName, openRPCComplianceMatrixTestName)
+	}
+	if !evidenceHasGoTest(evidence, serviceDiscoveryPolicyRuntimeTestName) {
+		t.Fatalf("%s service_discovery_publication missing go_test proof_ref %s", methodName, serviceDiscoveryPolicyRuntimeTestName)
 	}
 }
 

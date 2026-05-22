@@ -65,10 +65,6 @@ active_issues:
     title: Move builder run event streams onto canonical run-bound diagnostics
     maps_to:
       - run_scoped_operator_identity
-  - id: 857
-    title: Track residual v1 OpenRPC runtime/schema/example gaps after proof-ref integrity
-    maps_to:
-      - v1_openrpc_api_conformance
 nodes:
   - id: canonical_operator_projection_truth
     title: Canonical Operator Projection Truth
@@ -173,7 +169,7 @@ nodes:
       - generated full successful-result schema validation can be absent even when runtime probes only key-smoke result payloads
       - generated notification-schema publication and runtime validation can be absent for subscription notifications even when WS probes only smoke-test envelopes
       - OpenRPC method examples can lack a merge-bearing authoring or deferral policy across the generated method catalog
-      - rpc.discover publication status is not explicitly tracked
+      - rpc.discover/service-discovery non-publication is owned by api_specification.service_discovery_policy and enforced by internal/apispec plus the compliance matrix
       - CI can pass without a direct swarm-openrpc-gen --check step
     representative_issues:
       - 835
@@ -185,6 +181,7 @@ nodes:
       - 890
       - 898
       - 904
+      - 915
     common_framing_mistakes:
       too_broad:
         - full v1 runtime conformance can be closed by one matrix PR
