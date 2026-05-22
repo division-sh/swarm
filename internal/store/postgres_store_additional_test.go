@@ -3720,6 +3720,41 @@ func TestManagerStore_UpdateLiveSessionWatchdog_RoundTripsThroughLoadActiveConve
 	}
 }
 
+func TestManagerStore_UpdateLiveSessionWatchdogRejectsMalformedWrite(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	resetAgentSessionsSpecTable(t, ctx, pg)
+	seedSpecAgent(t, ctx, pg, "a1", "", "")
+	sessionID := acquireLiveTestSession(t, ctx, db, "a1", runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "global")
+
+	err := pg.UpdateLiveSessionWatchdog(ctx, runtimellm.ConversationWatchdogUpdate{
+		SessionID:    sessionID,
+		AgentID:      "a1",
+		SessionScope: "global",
+		ScopeKey:     "global",
+		Mode:         "session",
+		Watchdog: &runtimellm.ConversationWatchdog{
+			State:         "healthy_long_running",
+			BlockingLayer: "session_execution",
+			Action:        "turn_long_running",
+			Outcome:       "observed",
+			RecordedAt:    "2026-04-10T12:00:30Z",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "watchdog.last_output_at") {
+		t.Fatalf("UpdateLiveSessionWatchdog err = %v, want watchdog.last_output_at validation", err)
+	}
+
+	rec, ok, err := pg.LoadActiveConversation(ctx, "a1", "session", "global", "global")
+	if err != nil || !ok {
+		t.Fatalf("LoadActiveConversation ok=%v err=%v", ok, err)
+	}
+	if rec.Watchdog != nil {
+		t.Fatalf("malformed watchdog write poisoned runtime_state: %+v", rec.Watchdog)
+	}
+}
+
 func TestManagerStore_UpdateLiveSessionWatchdog_PreservesCanonicalSummary(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}

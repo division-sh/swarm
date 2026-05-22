@@ -805,13 +805,17 @@ func marshalConversationRuntimeStatePatch(summary *string, watchdog *runtimellm.
 		payload["summary"] = *summary
 	}
 	if watchdog != nil {
+		descriptor := conversationRuntimeWatchdogDescriptorFromRuntime(watchdog)
+		if err := ValidateConversationRuntimeWatchdogDescriptor(descriptor); err != nil {
+			return "", err
+		}
 		payload["watchdog"] = map[string]any{
-			"state":          strings.TrimSpace(watchdog.State),
-			"blocking_layer": strings.TrimSpace(watchdog.BlockingLayer),
-			"action":         strings.TrimSpace(watchdog.Action),
-			"outcome":        strings.TrimSpace(watchdog.Outcome),
-			"last_output_at": strings.TrimSpace(watchdog.LastOutputAt),
-			"recorded_at":    strings.TrimSpace(watchdog.RecordedAt),
+			"state":          descriptor.State,
+			"blocking_layer": descriptor.BlockingLayer,
+			"action":         descriptor.Action,
+			"outcome":        descriptor.Outcome,
+			"last_output_at": descriptor.LastOutputAt,
+			"recorded_at":    descriptor.RecordedAt,
 		}
 	}
 	raw, err := json.Marshal(payload)
@@ -819,6 +823,20 @@ func marshalConversationRuntimeStatePatch(summary *string, watchdog *runtimellm.
 		return "", err
 	}
 	return string(raw), nil
+}
+
+func conversationRuntimeWatchdogDescriptorFromRuntime(watchdog *runtimellm.ConversationWatchdog) ConversationRuntimeWatchdogDescriptor {
+	if watchdog == nil {
+		return ConversationRuntimeWatchdogDescriptor{}
+	}
+	return ConversationRuntimeWatchdogDescriptor{
+		State:         strings.TrimSpace(watchdog.State),
+		BlockingLayer: strings.TrimSpace(watchdog.BlockingLayer),
+		Action:        strings.TrimSpace(watchdog.Action),
+		Outcome:       strings.TrimSpace(watchdog.Outcome),
+		LastOutputAt:  strings.TrimSpace(watchdog.LastOutputAt),
+		RecordedAt:    strings.TrimSpace(watchdog.RecordedAt),
+	}
 }
 
 func (s *PostgresStore) LoadActiveConversation(ctx context.Context, agentID, mode, sessionScope, scopeKey string) (runtimellm.ConversationRecord, bool, error) {
