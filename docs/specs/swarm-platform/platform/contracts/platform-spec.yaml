@@ -7257,11 +7257,46 @@ cli_specification:
         rendering, priority enum/prose repair, and shared output/payload policy remain
         split under #856/#735/#794.
     mailbox_approve:
-      command: swarm mailbox approve <mailbox-item-id>
+      command: swarm mailbox approve <mailbox-item-id> [--decision-payload <file> | --decision-payload-json <json-object>] [--idempotency-key <key>]
       tier: must_have
       implementation_status: implemented
       owner: /v1/rpc mailbox.approve
-      behavior: Mailbox approval action through canonical API owner; no direct DB/store/mailbox writes.
+      behavior: >-
+        Mailbox approval action through canonical API owner. The CLI may adapt either a file-backed JSON object
+        from `--decision-payload <file>` or an inline JSON object from `--decision-payload-json` into the
+        canonical `decision_payload` param, but the server/API remains the mailbox decision semantics owner.
+        The CLI must not derive downstream events or perform direct DB/store/mailbox/runtime/EventBus writes.
+      flags:
+      - name: --decision-payload <file>
+        maps_to: decision_payload
+        behavior: Optional path to a file containing a JSON object attached to the approval event.
+      - name: --decision-payload-json <json-object>
+        maps_to: decision_payload
+        behavior: Optional inline JSON object attached to the approval event.
+      - name: --idempotency-key <key>
+        maps_to: idempotency_key
+        behavior: Optional v1 API idempotency key for this mutating approval request.
+      validation:
+      - '`--decision-payload` and `--decision-payload-json` are mutually exclusive.'
+      - '`--decision-payload` file content and `--decision-payload-json` values MUST parse as JSON objects; malformed, null, and non-object values fail before any API call.'
+      - 'Missing/unreadable `--decision-payload` files fail before any API call.'
+      output:
+        success_detail: Existing `MailboxDecisionResult` summary rendering remains authoritative; richer mutation-result rendering is split under #856/#794.
+      exit_codes:
+        success: 0
+        cli_validation: 2
+        transport_or_malformed_response: 3
+        auth_or_missing_token: 4
+        mailbox_not_found: 5
+        decision_conflict_or_rejected: 6
+      proof_expectations:
+      - exact /v1/rpc mailbox.approve call with mailbox_id, optional decision_payload, and optional idempotency_key params only
+      - invalid args, conflicting payload flags, missing/unreadable payload files, malformed/null/non-object payload JSON, and missing SWARM_API_TOKEN make zero API calls
+      - file-backed and inline payload inputs share the same canonical object validation and param construction
+      - no direct DB/store/runtime/EventBus/dashboard/Builder reads or writes and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, or retired swarm control mailbox path usage
+      split_tail: >
+        Richer approve/reject/defer mutation-result rendering, priority enum/prose repair,
+        shared output/payload policy, trace/run work, and forkchat remain split under #856/#735/#794.
     mailbox_reject:
       command: swarm mailbox reject <mailbox-item-id>
       tier: must_have
