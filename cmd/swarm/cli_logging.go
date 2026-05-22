@@ -45,6 +45,27 @@ func bindCLILoggingFlagSet(fs *flag.FlagSet, opts *cliLoggingOptions) {
 	fs.StringVar(&opts.level, cliLogLevelFlag, opts.level, cliLogLevelFlagHelp)
 }
 
+func applyCLILoggingFlagSetArgs(args []string, opts *cliLoggingOptions) error {
+	level := opts.level
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--":
+			i = len(args)
+		case arg == "--"+cliLogLevelFlag:
+			if i+1 >= len(args) {
+				return fmt.Errorf("flag needs an argument: -%s", cliLogLevelFlag)
+			}
+			level = args[i+1]
+			i++
+		case strings.HasPrefix(arg, "--"+cliLogLevelFlag+"="):
+			level = strings.TrimPrefix(arg, "--"+cliLogLevelFlag+"=")
+		}
+	}
+	opts.level = level
+	return opts.validate()
+}
+
 func validateCLILoggingFlagPlacement(args []string) error {
 	index, flag := firstCLILoggingFlagIndex(args)
 	if index < 0 || cliLoggingFlagAfterSupportedLeafCommand(args[:index]) || cliLoggingFlagUnderRetiredNamespace(args[:index]) {
