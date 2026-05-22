@@ -24,7 +24,10 @@ import (
 	"swarm/internal/testutil"
 )
 
-const catalogRuntimeRunID = "88888888-8888-8888-8888-888888888888"
+const (
+	catalogRuntimeRunID          = "88888888-8888-8888-8888-888888888888"
+	catalogRuntimePublishTimeout = 5 * time.Second
+)
 
 type catalogTriggerStep struct {
 	Event                         string         `yaml:"event"`

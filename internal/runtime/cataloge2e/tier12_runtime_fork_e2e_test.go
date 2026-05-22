@@ -395,7 +395,7 @@ func assertUnsupportedHistoricalReplayFailsClosed(t *testing.T, fixtureRoot stri
 	h := newRuntimeHarness(t, fixtureRoot, true)
 	pauseCatalogRun(t, h)
 	h.seedEntityFields(expected)
-	sourceEventID := publishCatalogTriggerAtFuture(t, h, expected.triggerSequence()[0], 5*time.Second)
+	sourceEventID := publishCatalogTriggerAtFuture(t, h, expected.triggerSequence()[0], catalogRuntimePublishTimeout)
 	plan, err := h.pg.PlanRunFork(h.ctx, store.RunForkPlanRequest{
 		SourceRunID: catalogRuntimeRunID,
 		At:          sourceEventID,
