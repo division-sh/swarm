@@ -5999,6 +5999,17 @@ cli_specification:
         disposition: promoted_first_slice
         tracker: '#886'
         action: '`swarm incidents` default-text read semantics are promoted as one bounded CLI child over runtime.incidents; richer output-mode work remains split to #848/#794.'
+      retired_namespace_legacy_spellings:
+        disposition: promoted_first_slice
+        tracker: '#839'
+        action: >
+          Retired namespace migration authority is reconciled by
+          cli_specification.retired_namespaces and cli_specification.parent_tail.retired_or_fail_closed.
+          Promoted fail-closed migration surfaces are `swarm investigate *`, `swarm control mailbox`,
+          and `swarm fork`. Review-artifact-only `swarm runtime pause|resume` and
+          `swarm control run pause|continue|stop` are explicitly unpromoted candidate/backlog
+          spellings; their current generic Cobra unknown-command behavior is intentional unless a
+          later tracked spec row promotes hidden fail-closed stubs.
       forkchat:
         disposition: blocked
         tracker: '#749'
@@ -6080,6 +6091,15 @@ cli_specification:
         reason: >
           Top-level `swarm fork` is retired and remains fail-closed only to prevent old mutating operator
           behavior from bypassing a future gated run-fork API/control surface.
+      runtime_and_control_run_legacy_spellings:
+        classification: unpromoted_candidate_backlog
+        reason: >
+          The ignored CLI UX v2 review artifact named `swarm runtime pause|resume` and
+          `swarm control run pause|continue|stop` as old spellings for the promoted
+          `swarm control pause|continue|stop` commands. This tracked spec does not promote
+          those spellings as retired migration surfaces. They intentionally remain generic
+          Cobra unknown-command behavior until a later tracked row promotes hidden fail-closed
+          stubs with exact migration text and proof.
   foundations:
     command_router:
       canonical_owner: cmd/swarm Cobra command tree
@@ -8100,6 +8120,19 @@ cli_specification:
       status: retired
       exit_code: 2
       message: "ERROR: `swarm fork` was removed in v1. Forking is a mutating control action; use a future gated run-fork API/control surface. Historical `swarm fork` remains a runtime-owner test harness only, not a supported operator command."
+    unpromoted_review_only_legacy_spellings:
+      status: unpromoted_candidate_backlog
+      commands:
+      - swarm runtime pause
+      - swarm runtime resume
+      - swarm control run pause
+      - swarm control run continue
+      - swarm control run stop
+      current_code_state: generic_cobra_unknown_command
+      rule: >
+        These spellings appear only in ignored review-artifact migration prose and are not promoted
+        retired namespaces. Do not add successful aliases, replacement behavior, or hidden fail-closed
+        stubs for them unless a later tracked spec change explicitly promotes exact rows and proof.
   blocker_state:
     '#748':
       state: stale_method_blocker
@@ -8172,6 +8205,8 @@ cli_specification:
     - swarm investigate health
     - swarm investigate run
     - swarm investigate trace
+    - swarm control mailbox
+    - swarm fork
     remaining_must_have_not_implemented: []
     remaining_should_have_not_implemented:
     - swarm forkchat new|resume|list|view|delete
