@@ -215,8 +215,9 @@ func TestMailboxViewSendsV1RPCRequestAndRendersDetail(t *testing.T) {
 		item := mailboxItemResult("mailbox-1", "pending", "high")
 		delete(item, "source_event_id")
 		writeJSONRPCResult(t, w, captured.ID, map[string]any{
-			"item":    item,
-			"payload": map[string]any{"summary": "needs review"},
+			"item":           item,
+			"payload":        map[string]any{"summary": "needs review"},
+			"decision_sheet": mailboxDecisionSheetResult(),
 			"history": []map[string]any{
 				{"action": "created", "actor_token_id": "system", "ts": "2026-05-13T12:00:00Z"},
 			},
@@ -239,6 +240,12 @@ func TestMailboxViewSendsV1RPCRequestAndRendersDetail(t *testing.T) {
 		"Mailbox mailbox-1",
 		"status=pending priority=high type=review_request",
 		"source_event_id=- source_flow=validation",
+		"decision_sheet:",
+		"entity_context: entity_id=entity-1 run_id=run-1 flow=flows/review type=vertical state=collecting revision=3",
+		`entity_fields={"score":7}`,
+		`entity_gates={"ready":true}`,
+		`entity_accumulated={"accumulator":{"count":2},"notes":["a",{"text":"probe"}],"score":3}`,
+		"downstream_preview: event_name=mailbox.item_decided subscribers=approval-agent,review-agent subscriber_source=event_catalog",
 		`payload={"summary":"needs review"}`,
 		"history:",
 		"- action=created actor=system ts=2026-05-13T12:00:00Z",
@@ -542,6 +549,21 @@ func TestMailboxReadCommandsFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 			wantStderr: "malformed mailbox.get result: payload is required",
 		},
 		{
+			name: "view malformed missing decision sheet",
+			args: []string{"mailbox", "view", "mailbox-1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				writeJSONRPCResult(t, w, req.ID, map[string]any{
+					"item":    mailboxItemResult("mailbox-1", "pending", "normal"),
+					"payload": map[string]any{"summary": "needs review"},
+					"history": []map[string]any{{"action": "created", "actor_token_id": "system", "ts": "2026-05-13T12:00:00Z"}},
+				})
+			},
+			wantCode:   3,
+			wantStderr: "malformed mailbox.get result: decision_sheet is required",
+		},
+		{
 			name: "view mailbox not found",
 			args: []string{"mailbox", "view", "missing"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
@@ -650,6 +672,21 @@ func mailboxItemResult(mailboxID, status, priority string) map[string]any {
 		"payload":          map[string]any{"summary": "needs review"},
 		"created_at":       "2026-05-13T12:00:00Z",
 		"decision":         decisionForMailboxStatus(status),
+	}
+}
+
+func mailboxDecisionSheetResult() map[string]any {
+	return map[string]any{
+		"entity_context": map[string]any{
+			"available": true,
+			"entity":    validEntityFullResult("entity-1"),
+		},
+		"downstream_preview": map[string]any{
+			"available":         true,
+			"event_name":        "mailbox.item_decided",
+			"subscribers":       []string{"approval-agent", "review-agent"},
+			"subscriber_source": "event_catalog",
+		},
 	}
 }
 

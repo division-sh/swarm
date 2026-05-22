@@ -35,6 +35,7 @@ type MailboxV1Item struct {
 	Status         string         `json:"status"`
 	Priority       string         `json:"priority"`
 	SourceEventID  string         `json:"source_event_id"`
+	SourceRunID    string         `json:"-"`
 	SourceFlow     string         `json:"source_flow"`
 	SourceEntityID string         `json:"source_entity_id,omitempty"`
 	Payload        map[string]any `json:"payload"`
@@ -52,9 +53,29 @@ type MailboxV1HistoryEntry struct {
 }
 
 type MailboxV1ItemDetail struct {
-	Item    MailboxV1Item           `json:"item"`
-	Payload map[string]any          `json:"payload"`
-	History []MailboxV1HistoryEntry `json:"history"`
+	Item          MailboxV1Item           `json:"item"`
+	Payload       map[string]any          `json:"payload"`
+	History       []MailboxV1HistoryEntry `json:"history"`
+	DecisionSheet *MailboxV1DecisionSheet `json:"decision_sheet,omitempty"`
+}
+
+type MailboxV1DecisionSheet struct {
+	EntityContext     MailboxV1EntityContext     `json:"entity_context"`
+	DownstreamPreview MailboxV1DownstreamPreview `json:"downstream_preview"`
+}
+
+type MailboxV1EntityContext struct {
+	Available bool                `json:"available"`
+	Reason    string              `json:"reason,omitempty"`
+	Entity    *OperatorEntityFull `json:"entity,omitempty"`
+}
+
+type MailboxV1DownstreamPreview struct {
+	Available        bool     `json:"available"`
+	Reason           string   `json:"reason,omitempty"`
+	EventName        string   `json:"event_name,omitempty"`
+	Subscribers      []string `json:"subscribers"`
+	SubscriberSource string   `json:"subscriber_source"`
 }
 
 type MailboxV1DecisionRequest struct {
@@ -610,6 +631,7 @@ func (r mailboxV1Row) projectItem() MailboxV1Item {
 		Status:         mailboxV1APIStatus(r.Status, r.Decision),
 		Priority:       mailboxV1PriorityForSeverity(r.Priority),
 		SourceEventID:  strings.TrimSpace(r.SourceEventID),
+		SourceRunID:    strings.TrimSpace(r.RunID),
 		SourceFlow:     mailboxV1SourceFlow(r.FlowInstance),
 		SourceEntityID: strings.TrimSpace(r.EntityID),
 		Payload:        cloneMailboxV1Payload(r.Payload),

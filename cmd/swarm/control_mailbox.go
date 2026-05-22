@@ -46,9 +46,29 @@ type mailboxListResult struct {
 }
 
 type mailboxDetailResult struct {
-	Item    mailboxItem           `json:"item"`
-	Payload map[string]any        `json:"payload"`
-	History []mailboxHistoryEntry `json:"history"`
+	Item          mailboxItem           `json:"item"`
+	Payload       map[string]any        `json:"payload"`
+	History       []mailboxHistoryEntry `json:"history"`
+	DecisionSheet *mailboxDecisionSheet `json:"decision_sheet"`
+}
+
+type mailboxDecisionSheet struct {
+	EntityContext     mailboxEntityContext     `json:"entity_context"`
+	DownstreamPreview mailboxDownstreamPreview `json:"downstream_preview"`
+}
+
+type mailboxEntityContext struct {
+	Available bool        `json:"available"`
+	Reason    string      `json:"reason,omitempty"`
+	Entity    *entityFull `json:"entity,omitempty"`
+}
+
+type mailboxDownstreamPreview struct {
+	Available        bool     `json:"available"`
+	Reason           string   `json:"reason,omitempty"`
+	EventName        string   `json:"event_name,omitempty"`
+	Subscribers      []string `json:"subscribers"`
+	SubscriberSource string   `json:"subscriber_source"`
 }
 
 type mailboxListCommandOptions struct {
@@ -336,6 +356,12 @@ func validateMailboxDetailResult(result mailboxDetailResult) error {
 	if result.History == nil {
 		return fmt.Errorf("malformed mailbox.get result: history is required")
 	}
+	if result.DecisionSheet == nil {
+		return fmt.Errorf("malformed mailbox.get result: decision_sheet is required")
+	}
+	if err := validateMailboxDecisionSheet(*result.DecisionSheet); err != nil {
+		return err
+	}
 	for i, entry := range result.History {
 		if strings.TrimSpace(entry.Action) == "" {
 			return fmt.Errorf("malformed mailbox.get result: history[%d].action is required", i)
@@ -346,6 +372,35 @@ func validateMailboxDetailResult(result mailboxDetailResult) error {
 		if strings.TrimSpace(entry.TS) == "" {
 			return fmt.Errorf("malformed mailbox.get result: history[%d].ts is required", i)
 		}
+	}
+	return nil
+}
+
+func validateMailboxDecisionSheet(sheet mailboxDecisionSheet) error {
+	entityCtx := sheet.EntityContext
+	if entityCtx.Available {
+		if entityCtx.Entity == nil {
+			return fmt.Errorf("malformed mailbox.get result: decision_sheet.entity_context.entity is required when available")
+		}
+		if err := validateEntityFullResult("mailbox.get result.decision_sheet.entity_context", *entityCtx.Entity); err != nil {
+			return err
+		}
+	} else if strings.TrimSpace(entityCtx.Reason) == "" {
+		return fmt.Errorf("malformed mailbox.get result: decision_sheet.entity_context.reason is required when unavailable")
+	}
+	preview := sheet.DownstreamPreview
+	if preview.Subscribers == nil {
+		return fmt.Errorf("malformed mailbox.get result: decision_sheet.downstream_preview.subscribers is required")
+	}
+	if strings.TrimSpace(preview.SubscriberSource) == "" {
+		return fmt.Errorf("malformed mailbox.get result: decision_sheet.downstream_preview.subscriber_source is required")
+	}
+	if preview.Available {
+		if strings.TrimSpace(preview.EventName) == "" {
+			return fmt.Errorf("malformed mailbox.get result: decision_sheet.downstream_preview.event_name is required when available")
+		}
+	} else if strings.TrimSpace(preview.Reason) == "" {
+		return fmt.Errorf("malformed mailbox.get result: decision_sheet.downstream_preview.reason is required when unavailable")
 	}
 	return nil
 }
@@ -553,6 +608,7 @@ func writeMailboxDetailResult(out io.Writer, result mailboxDetailResult) {
 	if item.Decision != "" || item.DecidedAt != "" {
 		fmt.Fprintf(out, "decision=%s decided_at=%s\n", mailboxDash(item.Decision), mailboxDash(item.DecidedAt))
 	}
+	writeMailboxDecisionSheet(out, *result.DecisionSheet)
 	writeMailboxObject(out, "payload", result.Payload)
 	if len(result.History) > 0 {
 		fmt.Fprintln(out, "history:")
@@ -568,6 +624,38 @@ func writeMailboxDetailResult(out io.Writer, result mailboxDetailResult) {
 			fmt.Fprintln(out)
 		}
 	}
+}
+
+func writeMailboxDecisionSheet(out io.Writer, sheet mailboxDecisionSheet) {
+	fmt.Fprintln(out, "decision_sheet:")
+	if sheet.EntityContext.Available && sheet.EntityContext.Entity != nil {
+		entity := sheet.EntityContext.Entity.Entity
+		fmt.Fprintf(out, "  entity_context: entity_id=%s run_id=%s flow=%s type=%s state=%s revision=%d\n",
+			entity.EntityID,
+			entity.RunID,
+			entity.FlowInstance,
+			entity.EntityType,
+			entity.CurrentState,
+			entity.Revision,
+		)
+		fmt.Fprintf(out, "  entity_fields=%s\n", entityCompactJSON(sheet.EntityContext.Entity.Fields))
+		fmt.Fprintf(out, "  entity_gates=%s\n", entityCompactJSON(sheet.EntityContext.Entity.Gates))
+		fmt.Fprintf(out, "  entity_accumulated=%s\n", entityCompactJSON(sheet.EntityContext.Entity.Accumulated))
+	} else {
+		fmt.Fprintf(out, "  entity_context: unavailable reason=%s\n", mailboxDash(sheet.EntityContext.Reason))
+	}
+	if sheet.DownstreamPreview.Available {
+		fmt.Fprintf(out, "  downstream_preview: event_name=%s subscribers=%s subscriber_source=%s\n",
+			sheet.DownstreamPreview.EventName,
+			mailboxStringList(sheet.DownstreamPreview.Subscribers),
+			mailboxDash(sheet.DownstreamPreview.SubscriberSource),
+		)
+		return
+	}
+	fmt.Fprintf(out, "  downstream_preview: unavailable reason=%s subscriber_source=%s\n",
+		mailboxDash(sheet.DownstreamPreview.Reason),
+		mailboxDash(sheet.DownstreamPreview.SubscriberSource),
+	)
 }
 
 func writeMailboxDecisionResult(out io.Writer, action, mailboxID string, result mailboxDecisionResult) {
@@ -605,4 +693,18 @@ func mailboxDash(value string) string {
 		return "-"
 	}
 	return value
+}
+
+func mailboxStringList(values []string) string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			out = append(out, value)
+		}
+	}
+	if len(out) == 0 {
+		return "-"
+	}
+	return strings.Join(out, ",")
 }
