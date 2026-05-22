@@ -87,6 +87,56 @@ func TestRuntimeLogger_Log_AppendsSpecShapedFlightRecorderEntry(t *testing.T) {
 	}
 }
 
+func TestRuntimeLogger_Log_AppendsCanonicalFlightRecorderDefaults(t *testing.T) {
+	logger := NewRuntimeLogger(nil, nil)
+	recorder := runtimebus.NewEmittedEventsRecorder()
+	ctx := runtimebus.WithEmittedEventsRecorder(context.Background(), recorder)
+
+	if err := logger.Log(ctx, RuntimeLogEntry{
+		Level:     "warning",
+		Message:   "  runtime warning  ",
+		Component: "  ",
+		Action:    "  ",
+		EventType: "diagnostic/actual",
+		Detail: map[string]any{
+			"component":  123,
+			"action":     false,
+			"event_name": "diagnostic/drifted",
+			"event_type": "diagnostic/drifted",
+		},
+	}); err != nil {
+		t.Fatalf("logger.Log() error = %v", err)
+	}
+
+	entries := recorder.SnapshotFlightRecorder()
+	if len(entries) != 1 {
+		t.Fatalf("flight recorder count = %d, want 1", len(entries))
+	}
+	entry := entries[0]
+	if entry.LogLevel != "warn" {
+		t.Fatalf("log_level = %q, want warn", entry.LogLevel)
+	}
+	if entry.Message != "runtime warning" {
+		t.Fatalf("message = %q", entry.Message)
+	}
+	details, ok := entry.Details.(map[string]any)
+	if !ok {
+		t.Fatalf("details type = %T, want map[string]any", entry.Details)
+	}
+	if details["component"] != "runtime" {
+		t.Fatalf("details.component = %#v, want runtime", details["component"])
+	}
+	if details["action"] != "unknown" {
+		t.Fatalf("details.action = %#v, want unknown", details["action"])
+	}
+	if details["event_name"] != "diagnostic/actual" {
+		t.Fatalf("details.event_name = %#v, want diagnostic/actual", details["event_name"])
+	}
+	if details["event_type"] != "diagnostic/actual" {
+		t.Fatalf("details.event_type = %#v, want diagnostic/actual", details["event_type"])
+	}
+}
+
 func TestRuntimeLogger_Log_PersistsRuntimeLogPayloadViaCapabilityOwner(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
