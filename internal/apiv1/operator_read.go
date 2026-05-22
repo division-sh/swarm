@@ -484,6 +484,30 @@ func validateAgentDiagnosisResult(item store.OperatorAgentDiagnosis) error {
 			return fmt.Errorf("agent.diagnose owner returned malformed result: delivery_lifecycle.blocking_layer is required")
 		}
 	}
+	if err := validateAgentDiagnosisRuntimeStateResult(item.RuntimeState); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateAgentDiagnosisRuntimeStateResult(item *store.OperatorAgentDiagnosisRuntimeState) error {
+	if item == nil {
+		return nil
+	}
+	if item.Watchdog == nil {
+		return fmt.Errorf("agent.diagnose owner returned malformed result: runtime_state.watchdog is required")
+	}
+	watchdog := store.ConversationRuntimeWatchdogDescriptor{
+		State:         strings.TrimSpace(item.Watchdog.State),
+		BlockingLayer: strings.TrimSpace(item.Watchdog.BlockingLayer),
+		Action:        strings.TrimSpace(item.Watchdog.Action),
+		Outcome:       strings.TrimSpace(item.Watchdog.Outcome),
+		LastOutputAt:  strings.TrimSpace(item.Watchdog.LastOutputAt),
+		RecordedAt:    strings.TrimSpace(item.Watchdog.RecordedAt),
+	}
+	if err := store.ValidateConversationRuntimeWatchdogDescriptor(watchdog); err != nil {
+		return fmt.Errorf("agent.diagnose owner returned malformed result: runtime_state.watchdog is invalid: %w", err)
+	}
 	return nil
 }
 

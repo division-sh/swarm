@@ -126,6 +126,15 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 				State:         "active",
 				BlockingLayer: "session_execution",
 			},
+			RuntimeState: &store.OperatorAgentDiagnosisRuntimeState{
+				Watchdog: &store.OperatorAgentDiagnosisWatchdog{
+					State:         "no_output",
+					BlockingLayer: "session_execution",
+					Action:        "session_no_output",
+					Outcome:       "warning_emitted",
+					RecordedAt:    "2026-05-21T10:01:00Z",
+				},
+			},
 		},
 		listConversationsResult: store.OperatorConversationListResult{
 			Conversations: []store.OperatorConversationSummary{{
@@ -227,7 +236,15 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 	if lifecycle["state"] != "active" || lifecycle["blocking_layer"] != "session_execution" {
 		t.Fatalf("agent.diagnose lifecycle = %#v", lifecycle)
 	}
-	for _, splitField := range []string{"runtime_state", "bundle_version", "active", "watchdog", "last_tool_outcome", "token_usage", "failures_recent", "dead_letters_recent"} {
+	runtimeState := asMap(t, diagnosis["runtime_state"])
+	watchdog := asMap(t, runtimeState["watchdog"])
+	if watchdog["state"] != "no_output" || watchdog["blocking_layer"] != "session_execution" || watchdog["action"] != "session_no_output" || watchdog["outcome"] != "warning_emitted" {
+		t.Fatalf("agent.diagnose runtime_state.watchdog = %#v", watchdog)
+	}
+	if watchdog["recorded_at"] != "2026-05-21T10:01:00Z" {
+		t.Fatalf("agent.diagnose runtime_state.watchdog.recorded_at = %#v", watchdog["recorded_at"])
+	}
+	for _, splitField := range []string{"bundle_version", "active", "watchdog", "last_tool_outcome", "token_usage", "failures_recent", "dead_letters_recent"} {
 		if _, ok := diagnosis[splitField]; ok {
 			t.Fatalf("agent.diagnose exposed split field %q: %#v", splitField, diagnosis)
 		}
@@ -531,6 +548,45 @@ func TestOperatorAgentDiagnoseFailsClosedOnMalformedOwnerData(t *testing.T) {
 	}
 	if !strings.Contains(fmt.Sprint(resp.Error.Message, resp.Error.Data), "agent.diagnose owner returned malformed result") {
 		t.Fatalf("error = %#v, want malformed owner result", resp.Error)
+	}
+}
+
+func TestOperatorAgentDiagnoseFailsClosedOnMalformedWatchdogOwnerData(t *testing.T) {
+	reads := &fakeAgentConversationReadStore{
+		agentDiagnosisResult: store.OperatorAgentDiagnosis{
+			AgentID: "agent-1",
+			Status:  "running",
+			Queue: store.OperatorAgentDiagnosisQueue{
+				PendingDeliveries: []store.OperatorAgentPendingDelivery{},
+			},
+			RuntimeState: &store.OperatorAgentDiagnosisRuntimeState{
+				Watchdog: &store.OperatorAgentDiagnosisWatchdog{
+					State:         "healthy_long_running",
+					BlockingLayer: "session_execution",
+					Action:        "turn_long_running",
+					Outcome:       "observed",
+					RecordedAt:    "2026-05-21T10:01:00Z",
+				},
+			},
+		},
+	}
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			AgentConversations: reads,
+		}),
+	})
+
+	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"diagnose","method":"agent.diagnose","params":{"agent_id":"agent-1"}}`)
+	if resp.Error == nil {
+		t.Fatal("agent.diagnose returned success for malformed watchdog owner result")
+	}
+	if resp.Error.Code != codeInternalError {
+		t.Fatalf("error code = %d, want %d", resp.Error.Code, codeInternalError)
+	}
+	errorText := fmt.Sprint(resp.Error.Message, resp.Error.Data)
+	if !strings.Contains(errorText, "agent.diagnose owner returned malformed result") || !strings.Contains(errorText, "runtime_state.watchdog") {
+		t.Fatalf("error = %#v, want malformed runtime_state.watchdog owner result", resp.Error)
 	}
 }
 

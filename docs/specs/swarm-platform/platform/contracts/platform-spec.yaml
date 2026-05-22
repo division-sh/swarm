@@ -8686,6 +8686,66 @@ api_specification:
           blocking_layer:
             type: string
             minLength: 1
+      AgentDiagnosisWatchdog:
+        type: object
+        additionalProperties: false
+        description: |
+          Watchdog-backed runtime evidence for agent.diagnose. This object is
+          the public projection of agent_sessions.runtime_state.watchdog after
+          DecodeConversationRuntimeStateDescriptor validation; it is not the
+          full #852 agent runtime_state enum and must not be derived from queue,
+          delivery lifecycle, dashboard state, active task, last tool, token,
+          failure, dead-letter, restart, or broad session lifecycle heuristics.
+        required:
+        - state
+        - blocking_layer
+        - action
+        - outcome
+        - recorded_at
+        properties:
+          state:
+            type: string
+            enum:
+            - healthy_long_running
+            - no_output
+          blocking_layer:
+            type: string
+            enum:
+            - session_execution
+          action:
+            type: string
+            enum:
+            - turn_long_running
+            - session_no_output
+          outcome:
+            type: string
+            enum:
+            - observed
+            - warning_emitted
+          last_output_at:
+            $ref: '#/components/schemas/Timestamp'
+            description: Required when state is healthy_long_running; omitted when no output has been observed.
+          recorded_at:
+            $ref: '#/components/schemas/Timestamp'
+      AgentDiagnosisRuntimeState:
+        type: object
+        additionalProperties: false
+        description: |
+          Narrow runtime-state container for agent.diagnose watchdog evidence.
+          The diagnosis owner reads the most-recent active agent_sessions row
+          for session/session_per_entity modes using the same active-session
+          selector as LoadOperatorAgentDiagnosis, ordered by updated_at DESC then
+          created_at DESC then session_id ASC. It ignores inactive or terminated rows, omits
+          runtime_state when there is no active live session or no watchdog
+          evidence, and fails closed on malformed runtime_state.watchdog data.
+          Multiple active sessions use that same deterministic current-session
+          selector; this schema does not promote a broader agent runtime_state
+          enum.
+        required:
+        - watchdog
+        properties:
+          watchdog:
+            $ref: '#/components/schemas/AgentDiagnosisWatchdog'
       AgentDiagnosis:
         type: object
         additionalProperties: false
@@ -8706,6 +8766,8 @@ api_specification:
             $ref: '#/components/schemas/AgentDiagnosisQueue'
           delivery_lifecycle:
             $ref: '#/components/schemas/AgentDeliveryLifecycle'
+          runtime_state:
+            $ref: '#/components/schemas/AgentDiagnosisRuntimeState'
       ConversationSummary:
         type: object
         additionalProperties: false
@@ -10543,17 +10605,22 @@ api_specification:
         Read the owner-backed diagnosis slice for one agent. This method is
         limited to agent identity/status refs, current/last conversation refs,
         pending-delivery queue summary/detail evidence, and optional delivery
-        lifecycle evidence. Queue details are paged with queue_limit and
+        lifecycle evidence. It may also return runtime_state.watchdog as a
+        narrow projection of the canonical active session watchdog descriptor.
+        runtime_state.watchdog is omitted when no active live session or no
+        active-session watchdog evidence exists, and malformed watchdog data
+        fails closed. Queue details are paged with queue_limit and
         queue_cursor, ordered by events.created_at ASC then events.event_id ASC.
         AgentPendingDelivery.enqueued_at uses the same timestamp owner as
         oldest_pending_age_seconds. AgentPendingDelivery.attempts is the
         canonical recorded retry counter from event_deliveries.retry_count, with
         no API-layer +1 or status arithmetic. The API handler consumes the
-        canonical agent diagnosis read owner directly. It must not join
-        conversation, run, trace, token, CLI, or dashboard owners locally, and
-        it must not expose runtime_state, run_id, bundle_version, active
-        task/entity, watchdog, last tool outcome, token usage, recent failures,
-        or dead letters.
+        canonical agent diagnosis read owner directly, including its
+        watchdog-backed runtime_state sub-owner. It must not join conversation,
+        run, trace, token, CLI, or dashboard owners locally, and it must not
+        expose the full runtime_state enum, top-level watchdog, run_id,
+        bundle_version, active task/entity, last tool outcome, token usage,
+        recent failures, or dead letters.
       scope:
         required:
         - read:agents

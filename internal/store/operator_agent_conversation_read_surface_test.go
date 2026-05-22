@@ -293,7 +293,7 @@ func TestOperatorAgentReadSurfaceLoadAgentProjectsSessionAndTurnRefs(t *testing.
 		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
 	}, 0)
 
-	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
+	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
 			AddRow("agent-1", "active", sessionID, sessionStartedAt, 2, "", nil, []byte(`{"provider_session_id":"provider-sess-1"}`), 0, 0, 0, 0, 0, turnID, "task-1", false, "model error", turnCompletedAt, []byte(`[]`)))
@@ -328,6 +328,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisUsesSelectedOwners(t *testing
 	sessionStartedAt := time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC)
 	turnCompletedAt := time.Date(2026, 5, 12, 9, 5, 0, 0, time.UTC)
 	eventTime := time.Date(2026, 5, 12, 8, 55, 0, 0, time.UTC)
+	runtimeState := []byte(`{"provider_session_id":"provider-sess-1","watchdog":{"state":"healthy_long_running","blocking_layer":"session_execution","action":"turn_long_running","outcome":"observed","last_output_at":"2026-05-12T09:04:00Z","recorded_at":"2026-05-12T09:05:00Z"}}`)
 	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
 		caps:   canonicalAgentConversationReadCaps(),
 		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
@@ -352,10 +353,10 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisUsesSelectedOwners(t *testing
 		},
 	}, 0)
 
-	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
+	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
-			AddRow("agent-1", "active", sessionID, sessionStartedAt, 2, "", nil, []byte(`{"provider_session_id":"provider-sess-1"}`), 0, 0, 0, 0, 0, turnID, "task-1", true, "", turnCompletedAt, []byte(`[]`)))
+			AddRow("agent-1", "active", sessionID, sessionStartedAt, 2, "", nil, runtimeState, 0, 0, 0, 0, 0, turnID, "task-1", true, "", turnCompletedAt, []byte(`[]`)))
 
 	diagnosis, err := reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1", OperatorAgentDiagnosisOptions{QueueLimit: 1, QueueCursor: "cursor-1"})
 	if err != nil {
@@ -385,6 +386,16 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisUsesSelectedOwners(t *testing
 	if diagnosis.DeliveryLifecycle == nil || diagnosis.DeliveryLifecycle.State != "active" || diagnosis.DeliveryLifecycle.BlockingLayer != "session_execution" {
 		t.Fatalf("delivery_lifecycle = %#v", diagnosis.DeliveryLifecycle)
 	}
+	if diagnosis.RuntimeState == nil || diagnosis.RuntimeState.Watchdog == nil {
+		t.Fatalf("runtime_state.watchdog = %#v", diagnosis.RuntimeState)
+	}
+	watchdog := diagnosis.RuntimeState.Watchdog
+	if watchdog.State != "healthy_long_running" || watchdog.BlockingLayer != "session_execution" || watchdog.Action != "turn_long_running" || watchdog.Outcome != "observed" {
+		t.Fatalf("runtime_state.watchdog = %#v", watchdog)
+	}
+	if watchdog.LastOutputAt != "2026-05-12T09:04:00Z" || watchdog.RecordedAt != "2026-05-12T09:05:00Z" {
+		t.Fatalf("runtime_state.watchdog timestamps = %#v", watchdog)
+	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations: %v", err)
 	}
@@ -402,7 +413,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisOmitsAbsentLifecycle(t *testi
 		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
 	}, 0)
 
-	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
+	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
 			AddRow("agent-1", "active", "", nil, 0, "", nil, []byte(`{}`), 0, 0, 0, 0, 0, "", "", false, "", nil, []byte(`[]`)))
@@ -419,6 +430,35 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisOmitsAbsentLifecycle(t *testi
 	}
 	if diagnosis.DeliveryLifecycle != nil {
 		t.Fatalf("delivery_lifecycle = %#v, want nil", diagnosis.DeliveryLifecycle)
+	}
+	if diagnosis.RuntimeState != nil {
+		t.Fatalf("runtime_state = %#v, want nil without active watchdog evidence", diagnosis.RuntimeState)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
+func TestOperatorAgentReadSurfaceLoadAgentDiagnosisFailsClosedOnMalformedRuntimeState(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
+		caps:   canonicalAgentConversationReadCaps(),
+		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
+	}, 0)
+
+	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
+		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
+		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
+			AddRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 0, "", nil, []byte(`{"watchdog":{"state":"stale","blocking_layer":"session_execution","action":"turn_long_running","outcome":"observed","recorded_at":"2026-05-12T09:05:00Z"}}`), 0, 0, 0, 0, 0, "", "", false, "", nil, []byte(`[]`)))
+
+	_, err = reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1", OperatorAgentDiagnosisOptions{})
+	if err == nil || !strings.Contains(err.Error(), "decode latest agent session runtime_state") || !strings.Contains(err.Error(), "watchdog.state") {
+		t.Fatalf("LoadOperatorAgentDiagnosis err = %v, want runtime_state watchdog validation failure", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations: %v", err)
