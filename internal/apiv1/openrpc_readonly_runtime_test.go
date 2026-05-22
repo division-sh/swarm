@@ -264,7 +264,7 @@ func approvedReadOnlyHTTPRuntimeMethods() []string {
 
 func readOnlyHTTPRuntimeFixtures() map[string]readOnlyHTTPRuntimeFixture {
 	return map[string]readOnlyHTTPRuntimeFixture{
-		"agent.diagnose":                 {Params: map[string]any{"agent_id": "agent-1"}, ResultKeys: []string{"agent_id", "status", "queue", "runtime_state"}},
+		"agent.diagnose":                 {Params: map[string]any{"agent_id": "agent-1"}, ResultKeys: []string{"agent_id", "status", "queue", "runtime_state", "active"}},
 		"agent.get":                      {Params: map[string]any{"agent_id": "agent-1"}, ResultKeys: []string{"agent"}},
 		"agent.list":                     {Params: map[string]any{}, ResultKeys: []string{"agents"}},
 		"conversation.current_for_agent": {Params: map[string]any{"agent_id": "agent-1"}, ResultKeys: []string{"conversation", "turns"}},
@@ -537,6 +537,11 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 					State:         "active",
 					BlockingLayer: "session_execution",
 				},
+				Active: &store.OperatorAgentDiagnosisActive{
+					TurnID:   "22222222-2222-2222-2222-222222222222",
+					TaskID:   "task-1",
+					EntityID: "33333333-3333-3333-3333-333333333333",
+				},
 				RuntimeState: &store.OperatorAgentDiagnosisRuntimeState{
 					Watchdog: &store.OperatorAgentDiagnosisWatchdog{
 						State:         "no_output",
@@ -684,6 +689,10 @@ func assertReadOnlyProbeSuccess(t *testing.T, methodName string, resp rpcRespons
 		if delivery := asMap(t, deliveries[0]); delivery["event_id"] != "event-1" || delivery["event_name"] != "task.ready" || delivery["attempts"] != float64(1) {
 			t.Fatalf("agent.diagnose pending delivery = %#v", deliveries[0])
 		}
+		active := asMap(t, result["active"])
+		if active["turn_id"] != "22222222-2222-2222-2222-222222222222" || active["task_id"] != "task-1" || active["entity_id"] != "33333333-3333-3333-3333-333333333333" {
+			t.Fatalf("agent.diagnose active = %#v", active)
+		}
 		runtimeState := asMap(t, result["runtime_state"])
 		watchdog := asMap(t, runtimeState["watchdog"])
 		if watchdog["state"] != "no_output" || watchdog["blocking_layer"] != "session_execution" || watchdog["action"] != "session_no_output" || watchdog["outcome"] != "warning_emitted" {
@@ -692,7 +701,7 @@ func assertReadOnlyProbeSuccess(t *testing.T, methodName string, resp rpcRespons
 		if watchdog["recorded_at"] != "2026-05-21T10:01:00Z" {
 			t.Fatalf("agent.diagnose runtime_state.watchdog.recorded_at = %#v", watchdog["recorded_at"])
 		}
-		for _, splitField := range []string{"bundle_version", "active", "watchdog", "last_tool_outcome", "token_usage", "failures_recent", "dead_letters_recent"} {
+		for _, splitField := range []string{"bundle_version", "watchdog", "last_tool_outcome", "token_usage", "failures_recent", "dead_letters_recent"} {
 			if _, ok := result[splitField]; ok {
 				t.Fatalf("agent.diagnose exposed split field %q: %#v", splitField, result)
 			}

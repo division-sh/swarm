@@ -94,6 +94,7 @@ type OperatorAgentSummary struct {
 	CurrentTaskID         string                              `json:"-"`
 	LastTool              *OperatorAgentTool                  `json:"-"`
 	LiveTurn              *OperatorLiveTurn                   `json:"-"`
+	DiagnosisActive       *OperatorAgentDiagnosisActive       `json:"-"`
 	StartedAt             time.Time                           `json:"-"`
 	DashboardStatus       string                              `json:"-"`
 	DashboardState        string                              `json:"-"`
@@ -130,6 +131,13 @@ type OperatorAgentDiagnosis struct {
 	Queue             OperatorAgentDiagnosisQueue         `json:"queue"`
 	DeliveryLifecycle *OperatorAgentDeliveryLifecycle     `json:"delivery_lifecycle,omitempty"`
 	RuntimeState      *OperatorAgentDiagnosisRuntimeState `json:"runtime_state,omitempty"`
+	Active            *OperatorAgentDiagnosisActive       `json:"active,omitempty"`
+}
+
+type OperatorAgentDiagnosisActive struct {
+	TurnID   string `json:"turn_id"`
+	TaskID   string `json:"task_id,omitempty"`
+	EntityID string `json:"entity_id,omitempty"`
 }
 
 type OperatorAgentDiagnosisRuntimeState struct {
@@ -440,6 +448,7 @@ type operatorAgentProjection struct {
 	CurrentTaskID       string
 	LastTool            *OperatorAgentTool
 	LiveTurn            *OperatorLiveTurn
+	DiagnosisActive     *OperatorAgentDiagnosisActive
 	LastTurnRef         *OperatorTurnRef
 	Watchdog            *OperatorConversationWatchdog
 }
@@ -1075,6 +1084,7 @@ func (r *OperatorAgentConversationReadSurface) loadAgentOperatorProjections(ctx 
 			COALESCE(f.dead_letters_24h, 0),
 			COALESCE(latest_turn.turn_id, ''),
 			COALESCE(latest_turn.task_id, ''),
+			COALESCE(latest_turn.entity_id::text, ''),
 			COALESCE(latest_turn.parse_ok, false),
 			COALESCE(latest_turn.error, ''),
 			latest_turn.created_at,
@@ -1099,6 +1109,7 @@ func (r *OperatorAgentConversationReadSurface) loadAgentOperatorProjections(ctx 
 			SELECT
 				turn_id::text AS turn_id,
 				COALESCE(task_id, '') AS task_id,
+				entity_id,
 				parse_ok,
 				COALESCE(error, '') AS error,
 				created_at,
@@ -1138,6 +1149,7 @@ func (r *OperatorAgentConversationReadSurface) loadAgentOperatorProjections(ctx 
 			runtimeStateRaw  []byte
 			latestTurnID     string
 			latestTaskID     string
+			latestEntityID   string
 			latestParseOK    bool
 			latestError      string
 			latestCompleted  sql.NullTime
@@ -1158,6 +1170,7 @@ func (r *OperatorAgentConversationReadSurface) loadAgentOperatorProjections(ctx 
 			&projection.DeadLetters24h,
 			&latestTurnID,
 			&latestTaskID,
+			&latestEntityID,
 			&latestParseOK,
 			&latestError,
 			&latestCompleted,
@@ -1185,6 +1198,7 @@ func (r *OperatorAgentConversationReadSurface) loadAgentOperatorProjections(ctx 
 		if err := enrichOperatorAgentProjectionFromLatestTurn(&projection, runtimeStateRaw, latestTurnID, latestTaskID, latestParseOK, latestTurnRaw); err != nil {
 			return nil, err
 		}
+		projection.DiagnosisActive = operatorAgentDiagnosisActiveFromLatestTurn(latestTurnID, latestTaskID, latestEntityID)
 		id = strings.TrimSpace(id)
 		out[id] = projection
 		agentIDs = append(agentIDs, id)
@@ -1256,6 +1270,7 @@ func operatorAgentSummaryFromPersisted(row runtimemanager.PersistedAgent, projec
 		CurrentTaskID:         strings.TrimSpace(projection.CurrentTaskID),
 		LastTool:              projection.LastTool,
 		LiveTurn:              projection.LiveTurn,
+		DiagnosisActive:       cloneOperatorAgentDiagnosisActive(projection.DiagnosisActive),
 		StartedAt:             row.StartedAt,
 		DashboardStatus:       strings.TrimSpace(projection.Status),
 		DashboardState:        projection.dashboardState(),
@@ -1284,6 +1299,7 @@ func operatorAgentDiagnosisFromDetail(detail OperatorAgentDetail) (OperatorAgent
 			PendingDeliveries:       []OperatorAgentPendingDelivery{},
 		},
 		RuntimeState: agent.DiagnosisRuntimeState,
+		Active:       cloneOperatorAgentDiagnosisActive(agent.DiagnosisActive),
 	}
 	if state := strings.TrimSpace(agent.DeliveryLifecycle); state != "" {
 		out.DeliveryLifecycle = &OperatorAgentDeliveryLifecycle{
@@ -1353,8 +1369,21 @@ func validateOperatorAgentDiagnosis(item OperatorAgentDiagnosis) error {
 			return fmt.Errorf("agent diagnosis delivery_lifecycle.blocking_layer is required")
 		}
 	}
+	if err := validateOperatorAgentDiagnosisActive(item.Active); err != nil {
+		return err
+	}
 	if err := validateOperatorAgentDiagnosisRuntimeState(item.RuntimeState); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateOperatorAgentDiagnosisActive(item *OperatorAgentDiagnosisActive) error {
+	if item == nil {
+		return nil
+	}
+	if strings.TrimSpace(item.TurnID) == "" {
+		return fmt.Errorf("agent diagnosis active.turn_id is required")
 	}
 	return nil
 }
@@ -1370,6 +1399,26 @@ func validateOperatorAgentDiagnosisRuntimeState(item *OperatorAgentDiagnosisRunt
 		return fmt.Errorf("agent diagnosis runtime_state.watchdog is invalid: %w", err)
 	}
 	return nil
+}
+
+func operatorAgentDiagnosisActiveFromLatestTurn(turnID, taskID, entityID string) *OperatorAgentDiagnosisActive {
+	turnID = strings.TrimSpace(turnID)
+	if turnID == "" {
+		return nil
+	}
+	return &OperatorAgentDiagnosisActive{
+		TurnID:   turnID,
+		TaskID:   strings.TrimSpace(taskID),
+		EntityID: strings.TrimSpace(entityID),
+	}
+}
+
+func cloneOperatorAgentDiagnosisActive(in *OperatorAgentDiagnosisActive) *OperatorAgentDiagnosisActive {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	return &out
 }
 
 func validOperatorAgentDiagnosisStatus(status string) bool {

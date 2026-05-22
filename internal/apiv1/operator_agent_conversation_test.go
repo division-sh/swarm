@@ -126,6 +126,11 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 				State:         "active",
 				BlockingLayer: "session_execution",
 			},
+			Active: &store.OperatorAgentDiagnosisActive{
+				TurnID:   "22222222-2222-2222-2222-222222222222",
+				TaskID:   "task-1",
+				EntityID: "33333333-3333-3333-3333-333333333333",
+			},
 			RuntimeState: &store.OperatorAgentDiagnosisRuntimeState{
 				Watchdog: &store.OperatorAgentDiagnosisWatchdog{
 					State:         "no_output",
@@ -243,6 +248,10 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 	if lifecycle["state"] != "active" || lifecycle["blocking_layer"] != "session_execution" {
 		t.Fatalf("agent.diagnose lifecycle = %#v", lifecycle)
 	}
+	active := asMap(t, diagnosis["active"])
+	if active["turn_id"] != "22222222-2222-2222-2222-222222222222" || active["task_id"] != "task-1" || active["entity_id"] != "33333333-3333-3333-3333-333333333333" {
+		t.Fatalf("agent.diagnose active = %#v", active)
+	}
 	runtimeState := asMap(t, diagnosis["runtime_state"])
 	watchdog := asMap(t, runtimeState["watchdog"])
 	if watchdog["state"] != "no_output" || watchdog["blocking_layer"] != "session_execution" || watchdog["action"] != "session_no_output" || watchdog["outcome"] != "warning_emitted" {
@@ -251,7 +260,7 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 	if watchdog["recorded_at"] != "2026-05-21T10:01:00Z" {
 		t.Fatalf("agent.diagnose runtime_state.watchdog.recorded_at = %#v", watchdog["recorded_at"])
 	}
-	for _, splitField := range []string{"bundle_version", "active", "watchdog", "last_tool_outcome", "token_usage", "failures_recent", "dead_letters_recent"} {
+	for _, splitField := range []string{"bundle_version", "watchdog", "last_tool_outcome", "token_usage", "failures_recent", "dead_letters_recent"} {
 		if _, ok := diagnosis[splitField]; ok {
 			t.Fatalf("agent.diagnose exposed split field %q: %#v", splitField, diagnosis)
 		}
@@ -603,6 +612,39 @@ func TestOperatorAgentDiagnoseFailsClosedOnMalformedWatchdogOwnerData(t *testing
 	errorText := fmt.Sprint(resp.Error.Message, resp.Error.Data)
 	if !strings.Contains(errorText, "agent.diagnose owner returned malformed result") || !strings.Contains(errorText, "runtime_state.watchdog") {
 		t.Fatalf("error = %#v, want malformed runtime_state.watchdog owner result", resp.Error)
+	}
+}
+
+func TestOperatorAgentDiagnoseFailsClosedOnMalformedActiveOwnerData(t *testing.T) {
+	reads := &fakeAgentConversationReadStore{
+		agentDiagnosisResult: store.OperatorAgentDiagnosis{
+			AgentID: "agent-1",
+			Status:  "running",
+			Queue: store.OperatorAgentDiagnosisQueue{
+				PendingDeliveries: []store.OperatorAgentPendingDelivery{},
+			},
+			Active: &store.OperatorAgentDiagnosisActive{
+				TaskID: "task-1",
+			},
+		},
+	}
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			AgentConversations: reads,
+		}),
+	})
+
+	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"diagnose","method":"agent.diagnose","params":{"agent_id":"agent-1"}}`)
+	if resp.Error == nil {
+		t.Fatal("agent.diagnose returned success for malformed active owner result")
+	}
+	if resp.Error.Code != codeInternalError {
+		t.Fatalf("error code = %d, want %d", resp.Error.Code, codeInternalError)
+	}
+	errorText := fmt.Sprint(resp.Error.Message, resp.Error.Data)
+	if !strings.Contains(errorText, "agent.diagnose owner returned malformed result") || !strings.Contains(errorText, "active.turn_id") {
+		t.Fatalf("error = %#v, want malformed active owner result", resp.Error)
 	}
 }
 

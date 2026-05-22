@@ -484,8 +484,21 @@ func validateAgentDiagnosisResult(item store.OperatorAgentDiagnosis) error {
 			return fmt.Errorf("agent.diagnose owner returned malformed result: delivery_lifecycle.blocking_layer is required")
 		}
 	}
+	if err := validateAgentDiagnosisActiveResult(item.Active); err != nil {
+		return err
+	}
 	if err := validateAgentDiagnosisRuntimeStateResult(item.RuntimeState); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateAgentDiagnosisActiveResult(item *store.OperatorAgentDiagnosisActive) error {
+	if item == nil {
+		return nil
+	}
+	if strings.TrimSpace(item.TurnID) == "" {
+		return fmt.Errorf("agent.diagnose owner returned malformed result: active.turn_id is required")
 	}
 	return nil
 }
