@@ -6042,13 +6042,8 @@
         "description": "Entity-native shape: typed fields, gates, accumulator state. This\nis the destination shape entity.get returns. v1 implementation\nmay need to translate from the existing instance-shaped readers\nin internal/dashboard/server/server.go (which return flat\nWorkflowInstance structs without the typed-fields/gates/\naccumulated decomposition). The spec commits to the entity-native\nshape; implementations are responsible for providing it. A real\nentity-read owner may need to land before entity.* methods can\nhonor this shape, which is why the entity.* methods are\nshould_have rather than must_have for v1.\n",
         "properties": {
           "accumulated": {
-            "additionalProperties": {
-              "items": {
-                "type": "object"
-              },
-              "type": "array"
-            },
-            "description": "Per-handler accumulator buckets. Map of bucket_key → array of typed items.",
+            "additionalProperties": true,
+            "description": "Accumulator state. Map of accumulator key → JSON value; values may be scalars, objects, or arrays depending on accumulate, data_accumulation, compute, or projection writers.",
             "type": "object"
           },
           "entity": {

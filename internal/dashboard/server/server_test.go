@@ -269,9 +269,13 @@ func TestHandler_InstanceHandlersReturnCanonicalEntityProjection(t *testing.T) {
 						EntityType:   "order",
 						CurrentState: "reviewing",
 					},
-					Fields:      map[string]any{"business_status": "approved"},
-					Gates:       map[string]bool{"review_gate": true},
-					Accumulated: map[string]any{"score": float64(9)},
+					Fields: map[string]any{"business_status": "approved"},
+					Gates:  map[string]bool{"review_gate": true},
+					Accumulated: map[string]any{
+						"score":       float64(9),
+						"accumulator": map[string]any{"count": float64(2)},
+						"notes":       []any{"a", map[string]any{"text": "probe"}},
+					},
 				},
 			},
 			lastAggregate: lastAggregate,
@@ -313,6 +317,9 @@ func TestHandler_InstanceHandlersReturnCanonicalEntityProjection(t *testing.T) {
 	}
 	if detail.Entity.CurrentState != "reviewing" || detail.Fields["business_status"] != "approved" || !detail.Gates["review_gate"] || detail.Accumulated["score"] != float64(9) {
 		t.Fatalf("detail payload = %#v", detail)
+	}
+	if bucket, ok := detail.Accumulated["accumulator"].(map[string]any); !ok || bucket["count"] != float64(2) {
+		t.Fatalf("detail accumulated bucket = %#v, want count", detail.Accumulated["accumulator"])
 	}
 	if _, ok := detail.Fields["status"]; ok {
 		t.Fatalf("detail leaked control status field: %#v", detail.Fields)

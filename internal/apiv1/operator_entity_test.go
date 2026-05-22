@@ -55,10 +55,14 @@ func TestOperatorEntityHandlersExposeEntityNativeReads(t *testing.T) {
 			NextCursor: "next",
 		},
 		getResult: store.OperatorEntityFull{
-			Entity:      store.OperatorEntitySummary{EntityID: "entity-1", RunID: "run-1", EntityType: "mvp_spec", CurrentState: "collecting"},
-			Fields:      map[string]any{"priority": "high"},
-			Gates:       map[string]bool{"approved": true},
-			Accumulated: map[string]any{"notes": []any{"a"}},
+			Entity: store.OperatorEntitySummary{EntityID: "entity-1", RunID: "run-1", EntityType: "mvp_spec", CurrentState: "collecting"},
+			Fields: map[string]any{"priority": "high"},
+			Gates:  map[string]bool{"approved": true},
+			Accumulated: map[string]any{
+				"score":       float64(3),
+				"accumulator": map[string]any{"count": float64(2)},
+				"notes":       []any{"a", map[string]any{"text": "probe"}},
+			},
 		},
 		aggregate: store.OperatorEntityAggregateResult{Counts: map[string]int{"collecting": 1}},
 	}
@@ -88,6 +92,13 @@ func TestOperatorEntityHandlersExposeEntityNativeReads(t *testing.T) {
 	getResult := asMap(t, get.Result)
 	if fields := asMap(t, getResult["fields"]); fields["priority"] != "high" {
 		t.Fatalf("entity.get result = %#v", get.Result)
+	}
+	accumulated := asMap(t, getResult["accumulated"])
+	if accumulated["score"] != float64(3) {
+		t.Fatalf("entity.get accumulated = %#v, want score", accumulated)
+	}
+	if bucket := asMap(t, accumulated["accumulator"]); bucket["count"] != float64(2) {
+		t.Fatalf("entity.get accumulated bucket = %#v, want count", accumulated["accumulator"])
 	}
 	if got := asMap(t, getResult["entity"])["entity_type"]; got != "mvp_spec" {
 		t.Fatalf("entity.get entity_type = %#v, want mvp_spec", got)

@@ -44,7 +44,7 @@ func TestOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 			t.Fatalf("seed entity %s/%s: %v", runID, entityID, err)
 		}
 	}
-	seedEntity(runA, entityA, "review/primary", "mvp_spec", "collecting", `{"priority":"high","score":3}`, `{"approved":true}`, `{"notes":["a"]}`, base.Add(time.Minute))
+	seedEntity(runA, entityA, "review/primary", "mvp_spec", "collecting", `{"priority":"high","score":3}`, `{"approved":true}`, `{"score":3,"accumulator":{"count":2},"notes":["a",{"text":"probe"}]}`, base.Add(time.Minute))
 	seedEntity(runA, entityB, "review/secondary", "mvp_spec", "done", `{"priority":"low"}`, `{}`, `{}`, base)
 	seedEntity(runA, sharedEntity, "triage", "ticket", "collecting", `{"priority":"high"}`, `{}`, `{}`, base.Add(-time.Minute))
 	seedEntity(runB, sharedEntity, "triage", "ticket", "done", `{"priority":"low"}`, `{}`, `{}`, base.Add(-2*time.Minute))
@@ -96,6 +96,15 @@ func TestOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 	}
 	if full.Entity.EntityType != "mvp_spec" {
 		t.Fatalf("full entity_type = %q, want mvp_spec", full.Entity.EntityType)
+	}
+	if full.Accumulated["score"] != float64(3) {
+		t.Fatalf("full accumulated = %#v, want score", full.Accumulated)
+	}
+	if bucket, ok := full.Accumulated["accumulator"].(map[string]any); !ok || bucket["count"] != float64(2) {
+		t.Fatalf("full accumulated bucket = %#v, want count", full.Accumulated["accumulator"])
+	}
+	if notes, ok := full.Accumulated["notes"].([]any); !ok || len(notes) != 2 {
+		t.Fatalf("full accumulated notes = %#v, want two entries", full.Accumulated["notes"])
 	}
 	if _, err := pg.LoadOperatorEntity(ctx, sharedEntity, ""); !errors.Is(err, ErrAmbiguousEntityRunID) {
 		t.Fatalf("LoadOperatorEntity ambiguous = %v, want ErrAmbiguousEntityRunID", err)

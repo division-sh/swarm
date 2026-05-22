@@ -71,6 +71,33 @@ func TestOpenRPCResultSchemaPreflightRejectsUnreachableBranches(t *testing.T) {
 	}
 }
 
+func TestOpenRPCEntityFullAccumulatedSchemaMatchesRuntimeOwner(t *testing.T) {
+	root := repoRoot(t)
+	openRPC, _ := loadComplianceOpenRPC(t, filepath.Join(root, "docs", "specs", "swarm-platform", "platform", "contracts", "openrpc.json"))
+	validator := newOpenRPCResultSchemaValidator(t, openRPC)
+
+	result := map[string]any{
+		"entity": map[string]any{
+			"entity_id":     "entity-1",
+			"run_id":        "run-1",
+			"flow_instance": "review/primary",
+			"entity_type":   "mvp_spec",
+			"current_state": "collecting",
+			"revision":      float64(2),
+			"created_at":    "2026-05-20T01:00:00Z",
+			"updated_at":    "2026-05-20T01:05:00Z",
+		},
+		"fields": map[string]any{"priority": "high"},
+		"gates":  map[string]any{"approved": true},
+		"accumulated": map[string]any{
+			"score":       float64(3),
+			"accumulator": map[string]any{"count": float64(2)},
+			"notes":       []any{"a", map[string]any{"text": "probe"}},
+		},
+	}
+	validator.validateMethodResult(t, "entity.get", result)
+}
+
 func TestOpenRPCSubscriptionNotificationSchemas(t *testing.T) {
 	root := repoRoot(t)
 	api := loadComplianceAPISpec(t, root)

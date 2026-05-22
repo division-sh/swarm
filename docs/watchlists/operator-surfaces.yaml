@@ -174,7 +174,7 @@ nodes:
       - generated notification-schema publication and runtime validation can be absent for subscription notifications even when WS probes only smoke-test envelopes
       - OpenRPC method examples can lack a merge-bearing authoring or deferral policy across the generated method catalog
       - rpc.discover/service-discovery non-publication is owned by api_specification.service_discovery_policy and enforced by internal/apispec plus the compliance matrix
-      - EntityFull.accumulated deep schema hardening remains tracked under #857 after #896
+      - EntityFull.accumulated schema/runtime owner alignment is closed by #930 across /v1/rpc entity.get, builder, dashboard, CLI, store, OpenRPC proof, and matrix accounting; future entity-read field drift remains under this node
       - CI can pass without a direct swarm-openrpc-gen --check step
     representative_issues:
       - 835
