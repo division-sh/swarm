@@ -208,7 +208,7 @@ func TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod(t *testing.T) {
 func TestOpenRPCComplianceMatrixRejectsInvalidProofReferences(t *testing.T) {
 	root := repoRoot(t)
 	matrixPath := filepath.Join(root, "internal", "apiv1", "testdata", "openrpc_compliance_matrix.yaml")
-	trackerRef := complianceProofRef{Kind: "tracker", Issue: 857, Watchlist: "operator_surfaces.v1_openrpc_api_conformance"}
+	trackerRef := complianceProofRef{Kind: "tracker", Issue: 999999, Watchlist: "operator_surfaces.v1_openrpc_api_conformance"}
 	tests := []struct {
 		name   string
 		mutate func(*openRPCComplianceMatrix)
@@ -245,6 +245,17 @@ func TestOpenRPCComplianceMatrixRejectsInvalidProofReferences(t *testing.T) {
 				row.HappyPath.ProofRefs = []complianceProofRef{{Kind: "tracker", Issue: 999999, Watchlist: "operator_surfaces.v1_openrpc_api_conformance"}}
 			},
 			want: "tracker proof_ref issue #999999 watchlist \"operator_surfaces.v1_openrpc_api_conformance\" is not in active_trackers",
+		},
+		{
+			name: "orphan active tracker",
+			mutate: func(matrix *openRPCComplianceMatrix) {
+				matrix.ActiveTrackers = append(matrix.ActiveTrackers, complianceActiveTracker{
+					Kind:      "github_issue",
+					Issue:     129,
+					Watchlist: "operator_surfaces.canonical_operator_projection_truth",
+				})
+			},
+			want: "active tracker issue #129 watchlist \"operator_surfaces.canonical_operator_projection_truth\" has no tracker proof_ref consumer",
 		},
 		{
 			name: "unknown gap class",
@@ -441,6 +452,7 @@ func loadComplianceMatrix(t *testing.T, path string) openRPCComplianceMatrix {
 
 func validateProofReferenceIntegrity(root string, matrix openRPCComplianceMatrix) []string {
 	index, problems := newComplianceProofIndex(root, matrix)
+	trackerConsumers := trackerProofRefConsumers(matrix)
 	if matrix.IssueRole != "provenance" {
 		problems = append(problems, fmt.Sprintf("matrix issue_role = %q, want provenance", matrix.IssueRole))
 	}
@@ -456,6 +468,10 @@ func validateProofReferenceIntegrity(root string, matrix openRPCComplianceMatrix
 		}
 		if strings.TrimSpace(tracker.Watchlist) == "" {
 			problems = append(problems, fmt.Sprintf("active tracker issue #%d missing watchlist", tracker.Issue))
+		}
+		key := trackerKey(tracker.Issue, tracker.Watchlist)
+		if tracker.Issue != 0 && strings.TrimSpace(tracker.Watchlist) != "" && trackerConsumers[key] == 0 {
+			problems = append(problems, fmt.Sprintf("active tracker issue #%d watchlist %q has no tracker proof_ref consumer", tracker.Issue, tracker.Watchlist))
 		}
 	}
 	for _, row := range matrix.Methods {
@@ -473,6 +489,20 @@ func validateProofReferenceIntegrity(root string, matrix openRPCComplianceMatrix
 	}
 	sort.Strings(problems)
 	return problems
+}
+
+func trackerProofRefConsumers(matrix openRPCComplianceMatrix) map[string]int {
+	consumers := map[string]int{}
+	for _, row := range matrix.Methods {
+		for _, evidence := range complianceEvidenceFields(row) {
+			for _, ref := range evidence.evidence.ProofRefs {
+				if ref.Kind == "tracker" {
+					consumers[trackerKey(ref.Issue, ref.Watchlist)]++
+				}
+			}
+		}
+	}
+	return consumers
 }
 
 type complianceProofIndex struct {

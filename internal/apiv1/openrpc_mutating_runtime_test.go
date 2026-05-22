@@ -45,7 +45,7 @@ func TestOpenRPCMutatingHTTPRuntimeProbes(t *testing.T) {
 		mutating := complianceStringSet(methods)
 		for _, sibling := range []string{"agent.get", "event.subscribe", "rpc.unsubscribe", "health.check"} {
 			if _, ok := mutating[sibling]; ok {
-				t.Fatalf("%s classified into mutating HTTP runtime probes; sibling methods must stay under #857", sibling)
+				t.Fatalf("%s classified into mutating HTTP runtime probes; sibling methods belong to their approved probe class", sibling)
 			}
 		}
 	})

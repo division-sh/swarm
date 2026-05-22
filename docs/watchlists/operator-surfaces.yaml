@@ -65,10 +65,6 @@ active_issues:
     title: Move builder run event streams onto canonical run-bound diagnostics
     maps_to:
       - run_scoped_operator_identity
-  - id: 857
-    title: Track residual v1 OpenRPC runtime/schema/example gaps after proof-ref integrity
-    maps_to:
-      - v1_openrpc_api_conformance
 nodes:
   - id: canonical_operator_projection_truth
     title: Canonical Operator Projection Truth
@@ -163,23 +159,16 @@ nodes:
       - internal/apiv1
       - .github/workflows/ci.yml
     why_this_node_exists: v1 API compliance drifts when method coverage, OpenRPC generation, CI checks, and runtime proof accounting are inferred from scattered tests instead of a method-keyed canonical matrix
-    known_manifestations:
-      - no checked-in 42-method matrix keyed by generated OpenRPC method name
-      - required params, unknown params, auth, declared errors, idempotency, result schema, and notification schema proof status can drift silently
-      - stale or free-form proof references in the checked-in compliance matrix can drift silently from their test/helper/artifact/tracker owners
-      - generated supported-surface runtime probes can be absent for read-only HTTP methods even when proof-accounting rows resolve
-      - generated supported-surface runtime probes can be absent for mutating HTTP methods, leaving side-effect and idempotency behavior inferred from scattered handler-family tests
-      - central method transport admission can be absent, letting WS/protocol methods execute over /v1/rpc or HTTP-class methods execute over /v1/ws despite matrix transport classification
-      - generated full successful-result schema validation can be absent even when runtime probes only key-smoke result payloads
-      - generated notification-schema publication and runtime validation can be absent for subscription notifications even when WS probes only smoke-test envelopes
-      - OpenRPC method examples can lack a merge-bearing authoring or deferral policy across the generated method catalog
+    closed_manifestations:
+      - checked-in generated-method matrix, proof-reference integrity, runtime probes, result/notification schema validation, examples policy, service-discovery policy, EntityFull.accumulated schema ownership, and direct CI OpenRPC generation check have merge-bearing proof
       - rpc.discover/service-discovery non-publication is owned by api_specification.service_discovery_policy and enforced by internal/apispec plus the compliance matrix
-      - EntityFull.accumulated schema/runtime owner alignment is closed by #930 across /v1/rpc entity.get, builder, dashboard, CLI, store, OpenRPC proof, and matrix accounting; future entity-read field drift remains under this node
-      - CI can pass without a direct swarm-openrpc-gen --check step
+      - EntityFull.accumulated schema/runtime owner alignment is closed by #930 across /v1/rpc entity.get, builder, dashboard, CLI, store, OpenRPC proof, and matrix accounting
+    residual_watchpoints:
+      - future method-catalog additions must update the compliance matrix, generated OpenRPC artifact, runtime/schema proof owners, and CI/accounting checks in the same PR
+      - future OpenRPC examples publication or rpc.discover publication requires a new promoted api_specification policy and independent gate
     representative_issues:
       - 835
       - 847
-      - 857
       - 861
       - 872
       - 878
@@ -187,6 +176,8 @@ nodes:
       - 898
       - 904
       - 915
+      - 930
+      - 943
     common_framing_mistakes:
       too_broad:
         - full v1 runtime conformance can be closed by one matrix PR
@@ -194,7 +185,7 @@ nodes:
       too_narrow:
         - one handler test is enough API compliance accounting
         - generated OpenRPC drift is only an internal/apispec concern
-    current_action_pressure: active
+    current_action_pressure: watchlist_only
 reserve_backlog:
   - ordinal: 17
     title: Separate live session state from conversation/turn audit state
