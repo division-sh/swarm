@@ -355,6 +355,14 @@ contract_formats:
       Wave 1 type catalog. Runtime validators MUST NOT pass unresolved
       contract type names such as named types, scalar aliases, or enums
       to the primitive JSON schema validator as literal schema types.
+      Validation ownership is layered, not competing: supported emit
+      surfaces validate producer-authored payloads before publish, while
+      canonical event-store admission validates every event payload that
+      reaches persistence. Event-store admission is the primary owner for
+      ingress/direct/store append paths without a more specific producer
+      surface owner, and is only a final guard for supported emit surfaces
+      that already validated before publish. Event-store admission MUST NOT
+      interpret routing, delivery, source, target, or recipient semantics.
     format:
       event_name: |
         swarm:
@@ -1931,8 +1939,10 @@ engine:
         external API.'
     - step: 2
       name: validate_payload
-      action: Validate event payload against the schema in events.yaml. Reject if schema mismatch. Log and discard invalid
-        events.
+      action: Validate event payload against the schema in events.yaml before persistence. Supported producer emit surfaces
+        perform their own fail-closed validation before publish; this event-loop admission check remains the canonical final
+        guard for all events that reach the event store and the primary owner for ingress/direct/store append paths without
+        a more specific producer surface owner. Reject if schema mismatch. Log and discard invalid events.
     - step: 3
       name: persist_event
       action: 'Write event to the event store (write-ahead). The event is durable before any processing begins. Crash after

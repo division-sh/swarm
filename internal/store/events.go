@@ -43,6 +43,9 @@ func (s *PostgresStore) SetEventPayloadValidator(validator func(eventType string
 	s.eventPayloadValidator = EventPayloadValidator(validator)
 }
 
+// validateEventPayload is the store-side canonical admission guard for append
+// paths that may not pass through an emit-surface owner immediately before
+// persistence.
 func (s *PostgresStore) validateEventPayload(eventType string, payload []byte) error {
 	if s == nil || s.eventPayloadValidator == nil {
 		return nil
