@@ -37,7 +37,7 @@ func TestOpenRPCReadOnlyHTTPRuntimeProbes(t *testing.T) {
 		readOnly := complianceStringSet(methods)
 		for _, sibling := range []string{"event.publish", "mailbox.reject", "event.subscribe", "rpc.unsubscribe"} {
 			if _, ok := readOnly[sibling]; ok {
-				t.Fatalf("%s classified into read-only HTTP runtime probes; sibling methods must stay under #857", sibling)
+				t.Fatalf("%s classified into read-only HTTP runtime probes; sibling methods belong to their approved probe class", sibling)
 			}
 		}
 	})
