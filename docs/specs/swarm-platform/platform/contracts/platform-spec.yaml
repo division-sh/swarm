@@ -375,11 +375,61 @@ contract_formats:
         No nested `payload:` block. Missing declared fields and
         undeclared emitted fields are contract violations.
       envelope_split: |
-        Envelope fields such as entity_id, trigger_event_type,
-        current_state, source_event_id, and emitted_at are
-        platform-populated and are not author-declared in event
-        schemas. Consumers access them via the event.* namespace, not
-        payload.*.
+        Envelope fields are runtime-owned and are not author-declared
+        in event schemas. Consumers access them through event.*,
+        not payload.*.
+
+        Pin-routed events use two route identities:
+        - event.source: the emitter route identity. For platform-originated
+          emits this is always set from the emitter's flow_instance and
+          entity_id at emit time. Source lineage is never overwritten by
+          receiver selection, replay, or target resolution.
+        - event.target: the singular recipient route identity. It is set by
+          explicit producer target, by structural child-to-parent binding, or
+          by receiver-side late binding when resolution yields exactly one
+          recipient.
+        - event.target_set: a concrete list of recipient route identities for
+          explicit fan-out targeting. It is produced only by
+          `target: { flow, match, allow_fanout: true }` after publish-time
+          resolution. It is not a selector and it is not broadcast.
+
+        Legacy top-level event.entity_id and event.flow_instance references
+        are receiver-context projections only. They must resolve from
+        event.target when present, then from the current delivery target
+        materialized from event.target_set, then from
+        select_entity/select_or_create_entity late binding when present, then
+        from event.source. They are not a source-of-truth envelope model for
+        pin routing.
+
+        Other envelope fields such as trigger_event_type, current_state,
+        source_event_id, emitted_at, run_id, and scope remain
+        platform-populated.
+      envelope_identity:
+        source:
+          fields:
+          - flow_instance
+          - entity_id
+          rule: Platform-originated emits MUST set source from the emitter context before payload validation or delivery.
+          lineage: Source persists unchanged through replay, retry, recovery, diagnostics, and dead-letter records.
+        target:
+          fields:
+          - flow_instance
+          - entity_id
+          rule: Pin-declared output emits MUST either resolve a singular target, resolve target_set, use a structural ParentRoute target, or explicitly opt out with broadcast:true.
+          absent_means: event.target is absent when event.target_set is present, when broadcast:true is used, or when uncontrolled external ingress has not yet been receiver-bound.
+          mutual_exclusion: event.target and event.target_set MUST NOT both be populated on the persisted event.
+        target_set:
+          fields:
+          - flow_instance
+          - entity_id
+          rule: Explicit flow/match fan-out MUST materialize a concrete ordered list of recipient route identities at publish time.
+          not_a_selector: The persisted event.target_set stores resolved route identities, not the authored flow/match selector.
+          delivery_rule: Each persisted delivery row MUST carry one target_set member as its delivery target. Dispatch exposes that per-recipient target as event.target for the receiver context.
+        receiver_context_order:
+        - event.target
+        - current_delivery_target_from_event.target_set
+        - select_entity_or_select_or_create_entity_late_binding
+        - event.source
       retired:
       - Nested `payload:` wrapper blocks
       - Inline `type: object` without declared inner shape
@@ -864,7 +914,7 @@ handler_specification:
       purpose: Resolve exactly one existing entity owned by the receiving flow before any other handler processing. This is
         the service-owned acquisition primitive for stateful typed input-pin handlers where the incoming cross-flow request
         addresses an existing target-flow resource by declared business key, not by source-provided entity identity.
-      default: absent — handler operates on the inbound event entity context unless create_entity is declared
+      default: absent — handler operates on the resolved inbound event entity context unless create_entity is declared
       when_to_use: When an event arriving from outside the flow represents a request against an already-existing service
         entity owned by the receiving flow. Example — OpCo emits a typed spend event with vertical_id, and Treasury selects
         its own budget entity whose vertical_id matches the payload. The source flow must not provide the target entity_id,
@@ -881,6 +931,15 @@ handler_specification:
           closed. More than one match fails closed. Missing payload refs fail closed.
         selected_context: The selected entity_id and flow_instance become the handler entity context for state, guard,
           data_accumulation, emit.fields, and state transition processing.
+      pin_routing_interaction:
+        receiver_context_order: 'For pin-routed events, handler entity context resolves in this order: event.target when set;
+          otherwise select_entity late binding when declared; otherwise event.source.'
+        canonical_uses: External webhook ingress, events declared with swarm.source beginning with external, and rare mixed-provenance
+          event types where in-topology producers set event.target but external producers arrive without target.
+        non_canonical_use: In-topology receivers for pin-declared events whose producers are also in the pin topology. Pin routing
+          already supplies event.target; select_entity is redundant and should be removed by the contract migration.
+        boot_verify: Redundant in-topology select_entity is a warning. Missing select_entity on external/no-target stateful
+          handlers is an error because the handler would otherwise run against the wrong entity context.
       restrictions:
         lifecycle_scope: Valid only on stateful static-flow input-pin handlers. Stateless flows do not have stateful entity
           acquisition. Template flows acquire entities through create_flow_instance.
@@ -904,7 +963,7 @@ handler_specification:
       purpose: Resolve one existing entity owned by the receiving flow by declared business key, or deterministically mint
         that receiving-flow entity when no active match exists. This is the replay-safe service-owned acquisition primitive
         for typed input-pin handlers whose target service must own the entity identity.
-      default: absent — handler operates on the inbound event entity context unless create_entity or select_entity is declared
+      default: absent — handler operates on the resolved inbound event entity context unless create_entity or select_entity is declared
       when_to_use: When an event arriving from outside the flow represents a request against a receiving-flow service entity
         that may not exist yet, and the receiving service can define the entity by stable payload keys. Example — a spec-repo
         service receives a typed repo request keyed by source validation case and artifact type, then resolves or creates
@@ -925,6 +984,12 @@ handler_specification:
           the canonical declared key. Contracts do not call a generic UUID helper and source flows do not provide target IDs.
         selected_context: The selected or created entity_id and flow_instance become the handler entity context for state,
           guard, data_accumulation, emit.fields, action, and state transition processing.
+      pin_routing_interaction:
+        receiver_context_order: 'For pin-routed events, handler entity context resolves in this order: event.target when set;
+          otherwise select_or_create_entity late binding when declared; otherwise event.source.'
+        canonical_uses: External or mixed-provenance events where the receiving service owns the entity identity and may need
+          to mint the entity on zero-match.
+        non_canonical_use: In-topology pin routing where the producer or structural binding already supplies event.target.
       restrictions:
         lifecycle_scope: Valid only on stateful static-flow input-pin handlers. Stateless flows do not have stateful entity
           acquisition. Template flows acquire entities through create_flow_instance.
@@ -1138,7 +1203,7 @@ handler_specification:
         \               # optional"
     emit:
       field: emit
-      type: 'scalar event name OR object: {event, fields}'
+      type: 'scalar event name OR object: {event, fields, target, broadcast}'
       purpose: Publish the selected follow-up event for this emit site. Handler top-level emit is allowed only when the handler
         has no nested emit sites. Nested emit sites are branch-local on_complete emit, rules emit, accumulate.on_timeout emit,
         and fan_out emit.
@@ -1147,6 +1212,30 @@ handler_specification:
         fields: map of output_field_name → CEL expression evaluated against handler context. Optional. If omitted, the emitted
           payload contains no business fields. Runtime-owned envelope context is attached on the event carrier and is accessed
           through event.* rather than payload.*.
+        target: optional controlled pin-routing target spec. Valid forms are sender, {instance_id}, {flow, match}, and {flow, match, allow_fanout}.
+          This field is not payload and is the only producer-authored path that may ask the platform to populate event.target.
+        broadcast: optional boolean. Only true is meaningful. For a pin-declared output, broadcast:true is an explicit opt-out
+          from target-required pin routing and leaves event.target absent.
+      pin_routing_activation:
+        rule: Pin routing activates if and only if the emitted event is declared in the emitter flow's schema.yaml pins.outputs.events.
+        ad_hoc_emits: Emits not declared in pins.outputs.events are ordinary event-loop emits and do not require target or broadcast.
+        target_requirement: A pin-declared output emit MUST resolve an explicit target, use structural child-to-parent ParentRoute
+          binding, or declare broadcast:true. No silent fallback to event-type broadcast is allowed.
+        explicit_target_precedence: Producer target wins over structural binding. Structural binding writes event.target only
+          when the emit site has no explicit target and broadcast:true is absent.
+      target_forms:
+        sender: Copy inbound event.source into the new event.target. Sender is the immediate inbound sender, not a chain ancestor.
+        instance_id: Resolve a target instance in the addressed child/template scope using the instance_id known to the producer.
+        flow_match: Resolve exactly one target instance in target.flow whose declared entity fields match the target.match expressions.
+        flow_match_allow_fanout: Permit more than one match for the specified flow/match selector. Publish-time resolution
+          MUST materialize event.target_set as the complete concrete recipient route list, leave singular event.target absent
+          on the persisted event, and persist one delivery target per recipient route. It must not silently collapse to one target.
+      target_failures:
+        target_required_missing: Pin-declared output has no target, no structural ParentRoute, and no broadcast:true.
+        target_invalid_syntax: Target form is malformed or has invalid literal fields.
+        target_unknown_flow: target.flow names a flow outside the loaded registry.
+        target_sender_no_inbound: target:sender is used where no inbound event source can exist.
+        target_sender_empty_source: target:sender is used where inbound source is statically external or empty.
       single_emit_handler_rule: 'A handler top-level emit is valid only when the handler has exactly one possible emit site.
         If the handler also declares rules, on_complete, accumulate.on_timeout, or fan_out emit, boot fails with ambiguity.
         Payload ownership must move to the active emit site.'
@@ -1503,6 +1592,12 @@ engine:
         Format: {flow_id}/{local_name}. Examples: scoring/vertical.shortlisted, validation/research.completed.'
       root_name: 'Events emitted at root level (no flow scope). Same as local_name — no prefix.
         Examples: scan.requested, vertical.resumed, system.started.'
+      source_route: 'The emitter route identity on the envelope: source.flow_instance plus source.entity_id.
+        This is lineage and audit identity, not delivery identity.'
+      target_route: 'The resolved delivery route identity on the envelope: target.flow_instance plus target.entity_id.
+        This is receiver context and publish-time narrowing identity.'
+      target_routes: 'The resolved fan-out delivery route identities on the envelope: target_set[].flow_instance plus
+        target_set[].entity_id. This is the concrete multi-recipient target representation for allow_fanout:true.'
     resolution_rules:
       contracts_always_local: 'Node subscribes_to, handler keys, agent subscriptions within a flow,
         and event definitions in events.yaml always use local names. No flow prefixes in contract
@@ -1516,44 +1611,162 @@ engine:
         applies to both pin-auto-wired events and explicit scoped subscription escape hatches.
         Example: scoring/vertical.shortlisted → vertical.shortlisted when delivered to a validation
         node that declares vertical.shortlisted in any of those surfaces.'
-      root_events_are_global: 'Events emitted at root level have no flow prefix. They are routable
-        to any flow that declares them as input pins or has agents/nodes subscribing by local name.'
+      root_events_are_global: 'Events emitted at root level have no flow prefix. They can be routed
+        to flows that declare them as input pins or have agents/nodes subscribing by local name, but pin-declared root emits
+        still obey the target/broadcast rules in engine.cross_flow_routing.'
     canonical_resolver: 'The platform MUST provide a single resolver module used by all subsystems:
       Localize(flowID, eventName) → local name. Externalize(flowID, eventName) → external name.
       Match(pattern, eventName) → bool. ResolveInputAlias(flowID, eventName) → local handler key.
       No subsystem may implement its own name resolution logic.'
   cross_flow_routing:
-    description: 'Pin-based auto-wiring is the default cross-flow routing model. Contracts express
-      local names and interface pins. The platform derives cross-flow routes at boot.'
+    description: 'Pin declarations are the canonical cross-flow routing surface. For pin-declared
+      outputs, the platform routes by source/target identity, not by unconstrained event-type broadcast.'
+    activation:
+      rule: Pin routing activates if and only if the emitter flow declares the emitted event in schema.yaml pins.outputs.events.
+      no_separate_flag: The output pin declaration is the activation switch.
+      ad_hoc_emits: Events not declared in the emitter flow's output pins remain ordinary event-loop emits.
+      aggressive_day_one: Pin routing is the default for pin-declared outputs; implicit event-type broadcast is not a compatibility mode.
     auto_wiring:
-      description: 'At boot, the platform resolves cross-flow routes from declared pins:
-        1. For each flow, collect pins.outputs.events (events this flow emits to the outside).
-        2. For each flow, collect pins.inputs.events (events this flow receives from outside).
-        3. For each input pin event name, find all flows that declare the same name as an output pin.
-        4. Create a route: source flow output → target flow input.
-        5. The handler key in the target flow uses the local name (no prefix).'
+      description: 'At boot, the platform validates pin topology and derives route candidates from declared pins:
+        1. For each flow, collect pins.outputs.events.
+        2. For each flow, collect pins.inputs.events.
+        3. Match local event names across output and input pins to establish allowed producer-consumer topology.
+        4. Preserve local handler lookup by local event name in the target flow.
+        5. Do not treat the topology match as permission to broadcast to every instance; publish-time target resolution still applies.'
       ambiguity: 'If an input pin event name matches output pins from multiple flows, boot MUST fail
-        unless the contract disambiguates explicitly (via a scoped subscription as escape hatch).'
-      root_events: 'Events emitted at root level (no flow scope) are automatically routable to any
-        flow that declares them as input pins. No ambiguity — root events have no flow prefix.'
+        unless the contract disambiguates explicitly through a scoped subscription or explicit target semantics.'
+      static_pairs: Static-to-static pairs may resolve to a single instance pair at boot.
+      template_pairs: Template or dynamic-instance pairs require target resolution at emit/publish time unless structural binding supplies ParentRoute.
+    target_resolution:
+      precedence:
+      - explicit emit target
+      - structural ParentRoute for child-to-parent pin outputs
+      - receiver-side select_entity/select_or_create_entity late binding for external or mixed-provenance no-target events
+      - source fallback for explicit broadcast or legacy external paths
+      explicit_target_wins: Producer target wins over structural binding.
+      fail_closed: A pin-declared output that has no explicit target, no structural ParentRoute, and no broadcast:true is invalid.
+      no_silent_broadcast_fallback: Missing, malformed, ambiguous, or unreachable targets must fail with a typed reason.
+    target_forms:
+      sender: |
+        `target: sender` copies the inbound event.source route identity into the new event.target.
+        Sender is the immediate inbound sender. In a multi-hop chain A -> B -> C, C's target:sender resolves to B, not A.
+      instance_id: |
+        `target: { instance_id }` targets a specific child/template instance known to the producer. Parent-to-child routing
+        is explicit because a parent can have many children of the same flow type.
+      flow_match: |
+        `target: { flow, match }` resolves target.flow plus declared entity-field matches to exactly one target instance.
+        Zero matches and more than one match fail closed at publish time.
+      flow_match_allow_fanout: |
+        `target: { flow, match, allow_fanout: true }` is the explicit fan-out form for flow/match targeting. It permits more
+        than one matched recipient. Publish-time resolution materializes event.target_set as the concrete ordered recipient
+        route list, leaves singular event.target absent on the persisted event, and persists one delivery target per recipient.
+        The authored flow/match selector is not the persisted routing authority after resolution.
+      broadcast: |
+        `broadcast: true` is the explicit opt-out for pin-declared output routing. It leaves event.target absent and uses the
+        ordinary no-target event-type delivery path. Broadcast intent must be authored per emit site.
+    structural_binding:
+      child_to_parent: A child flow instance has exactly one parent in v1. Child pin-declared outputs without explicit target
+        route to the recorded ParentRoute of the instance that created the child.
+      parent_to_child: Parent-to-child routing is never inferred structurally in v1. The parent must use target:{instance_id}
+        or another explicit target form.
+      grandchildren: A grandchild's structural pin output routes to its immediate parent only. Multi-level retargeting is v2.
+      multiple_parents: Per-child multi-parent routing is v2. A parent that needs multi-consumer fan-out consumes first and
+        re-emits with explicit target forms.
+    parent_route:
+      description: Full parent route identity recorded at create_flow_instance time.
+      fields:
+        parent_flow_instance: canonical parent flow instance path
+        parent_entity_id: parent entity id
+        parent_flow_id: parent flow id, defensive and derivable from path
+      exposed_type: 'ParentRoute { FlowInstance, EntityID, FlowID }'
+      read_rule: Child pin-output emit reads ParentRoute from local instance metadata and writes event.target when no explicit target exists.
+      stale_instance_policy: Pre-existing children with only parent_entity_id and no complete ParentRoute fail closed with parent_route_incomplete.
+    delivery_filter:
+      rule: Filter once at publish-time recipient construction, persist the narrowed recipient list, and make all downstream
+        delivery paths inherit that persisted list.
+      applies_to:
+      - routed delivery
+      - subscribed publish
+      - transactional publish
+      - direct publish
+      - outbox redelivery
+      - sweeper retry
+      - recovery replay
+      singular_target: When event.target is set, routing-execution subscribers are narrowed to target.flow_instance.
+      fanout_target_set: When event.target_set is non-empty, routing-execution subscribers are narrowed to the concrete
+        target_set flow_instances. The publish plan MUST persist one delivery row per target route/recipient pair. Dispatch
+        MUST expose the delivery row's target route as the receiver's singular event.target view.
+      target_absent: When event.target and event.target_set are both absent, no target filter applies. This is the explicit
+        broadcast/external path.
+      internal_observation_hooks: Audit logging, debug streams, metric taps, and test-only live observers are not routing-execution
+        subscribers and may observe all events regardless of target.
+      match_count_behavior:
+        zero_target_set: Dead-letter target_unreachable_no_subscriber or target_not_subscribed depending on whether the target instance exists.
+        one_target_set: Normal delivery.
+        many_target_set: Dead-letter target_ambiguous unless the emit used allow_fanout:true; with allow_fanout:true, persist event.target_set and per-recipient delivery targets.
+        no_target: Existing no-target event-type fan-out semantics.
+    target_resolution_failure_taxonomy:
+      boot_verify:
+        target_required_missing: Pin-declared output emit with no target, no structural binding, and no broadcast:true.
+        target_invalid_syntax: Literal target spec is malformed or incomplete.
+        target_unknown_flow: target.flow does not exist in the loaded flow registry.
+        target_sender_no_inbound: target:sender appears on a handler whose only triggers cannot supply inbound source.
+        target_sender_empty_source: target:sender appears on a handler subscribed only to external-sourced events with empty source.
+      publish_time_dead_letter:
+        target_unreachable_no_subscriber: Target resolution finds no recipient for the requested target.
+        target_unreachable_terminated: Target or ParentRoute referred to an instance that no longer exists.
+        parent_route_incomplete: Structural child-to-parent routing needs ParentRoute but instance metadata only has incomplete legacy parent data.
+        target_ambiguous: flow/match resolution finds more than one target without allow_fanout:true.
+        target_not_subscribed: Target instance exists but does not subscribe to the emitted event type.
+      emit_time_tool_error:
+        target_sender_no_inbound_runtime: target:sender reached a mixed path with no inbound event source.
+        target_sender_empty_source_runtime: target:sender reached an inbound event whose source is empty.
+    boot_verify_scope:
+      proves:
+      - contract well-formedness
+      - static pin topology
+      - statically detectable target misuse patterns
+      cannot_prove:
+      - instance lifecycle at runtime
+      - payload values
+      - mixed-trigger execution paths that are not statically singular
+      - secondary-field uniqueness without declared unique indexes
+      bridge: Runtime publish-time and emit-time checks cover the cases boot verification cannot prove. No silent failure category is allowed.
+      v2_non_blockers:
+      - entity-field unique indexes for boot-provable match cardinality
+      - deeper trigger reachability analysis for mixed target:sender paths
+      - dedicated route-inspection CLI
+    select_entity_coexistence:
+      canonical: External webhook ingress, events declared with swarm.source beginning with external, and mixed-provenance no-target events.
+      non_canonical: In-topology pin routing. Receivers should not depend on select_entity to repair broadcast to the right entity.
+      receiver_context_order:
+      - event.target
+      - select_entity_or_select_or_create_entity
+      - event.source
+      boot_verify: Redundant in-topology select_entity is a warning. Missing select_entity on external/no-target stateful handlers is an error.
+    auth_boundary:
+      v1_rule: Existing emit authorization plus pin topology are the v1 authorization boundary.
+      no_separate_acl: No separate per-target ACL layer exists in v1.
+      emit_auth: The actor must already be allowed to emit the event type.
+      pin_topology: Boot verification rejects target forms outside the loaded pin topology.
+      dynamic_misses: Publish-time target failures produce typed dead letters, not authorization fallbacks.
+      v2_non_blockers:
+      - per-target ACLs for multi-tenant deployments
+      - cross-topology grants for third-party flow contributions
     escape_hatch:
-      description: 'For cases where auto-wiring is insufficient, contracts may use explicit scoped
-        subscriptions in node subscribes_to. Example: scoring/vertical.shortlisted as a subscription
-        bypasses auto-wiring and creates a direct route. This is an escape hatch, not the default
-        authoring model.'
+      description: Explicit scoped subscriptions remain an escape hatch for non-pin or disambiguated subscription cases, but
+        they are not a replacement source of truth for pin-declared output routing.
       when_needed:
-      - 'Ambiguous pin names: two flows both output the same event name, and the target flow needs
-        only one.'
-      - 'Non-pin events: subscribing to an internal event from another flow that is not declared as
-        an output pin.'
+      - Ambiguous local names where the contract intentionally selects one qualified producer.
+      - Non-pin events from another flow that are not part of the pin-routed interface.
     contract_authoring_rules:
       handler_keys: Always local names. Never flow-prefixed.
       subscribes_to: Local names by default. Flow-prefixed only as escape hatch.
       emit_events: Always local names. The platform externalizes at emission time.
       events_yaml: Always local names. Flow-scoped at load time.
-      pins: Always local names. The platform matches across flows by name.
+      pins: Always local names. The platform matches pins by name for topology, then target rules choose instance recipients.
     wildcards:
-      description: Pattern matching for subscriptions across flow instances.
+      description: Pattern matching for subscriptions across flow instances. Wildcards do not override target filtering when event.target or event.target_set is set.
       patterns:
         '*/order.completed': Any direct child flow's order.completed event
         '**/item.processed': Any flow at any depth
@@ -1620,8 +1833,19 @@ engine:
       - 6. Platform registers new nodes, agents, events in runtime registry
       - 7. Platform expands wildcard subscriptions to include new instance
       - 8. Platform resolves local subscriptions for new instance
-      - 9. Platform creates entity record at initial_state from schema.yaml
-      - 10. New instance nodes and agents start
+      - 9. Platform records the full ParentRoute from the calling handler context on the child instance metadata
+      - 10. Platform creates entity record at initial_state from schema.yaml
+      - 11. New instance nodes and agents start
+      parent_route:
+        description: Full structural route from the child instance back to the creating parent.
+        metadata_fields:
+          parent_flow_instance: Parent flow instance path from the calling handler context.
+          parent_entity_id: Parent entity id from the calling handler context.
+          parent_flow_id: Parent flow id, defensively recorded even when derivable from parent_flow_instance.
+        required_for: Child-to-parent pin-declared output emits when the emit site has no explicit target and no broadcast:true.
+        incomplete_policy: A child instance with incomplete ParentRoute metadata MUST fail closed with parent_route_incomplete
+          before emitting a structurally routed pin output.
+        single_parent_v1: Each child has exactly one ParentRoute in v1. Multiple parents are v2.
       auto_emit: Flow schemas may declare auto_emit_on_create. When the platform creates an instance, it automatically emits
         the declared event after the instance is fully started. This bootstraps the flow without requiring an external trigger.
     addressing:
@@ -1667,8 +1891,9 @@ engine:
         as absolute from root. Wildcards expand to matching paths.
     - step: 7
       name: validate_pins
-      action: 'For each flow: required input event pins must be wired (some other flow emits them). No two flows may write
-        the same entity field (write conflict = boot error).'
+      action: 'For each flow: required input event pins must be wired (some other flow emits them), pin-declared output emits
+        must have a target mechanism or broadcast:true, target specs must be well formed, and no two flows may write the same
+        entity field (write conflict = boot error).'
     - step: 8
       name: validate_required_agents
       action: Every flow's required_agents roles must be fulfilled by agents in that flow's agents.yaml.
@@ -1715,7 +1940,11 @@ engine:
     - step: 4
       name: resolve_subscribers
       action: 'Look up subscribers by event path. Two kinds: system nodes (from nodes.yaml subscribes_to) and agents (from
-        agents.yaml subscriptions). Wildcard subscriptions are pre-expanded at boot and updated on dynamic instance creation.'
+        agents.yaml subscriptions). Wildcard subscriptions are pre-expanded at boot and updated on dynamic instance creation.
+        If event.target is set, narrow routing-execution subscribers to target.flow_instance before persisting event deliveries.
+        If event.target_set is non-empty, persist one delivery row per target_set route/recipient pair and dispatch each
+        recipient with that delivery target as its singular event.target view. If both event.target and event.target_set
+        are absent, use the explicit broadcast/external no-target path.'
     - step: 5
       name: node_handling
       action: 'For each subscribing system node: acquire entity lock, execute the dependency-graph handler within an atomic
@@ -2285,11 +2514,17 @@ engine:
       fields:
         original_event: string — the event name that failed
         original_payload: object — full payload of the failed event
-        entity_id: string — entity the event was targeting
-        flow_instance: string — flow instance path
+        source: object — original event.source route identity, preserving emitter lineage
+        target: object — original singular event.target route identity when one was resolved
+        target_set: list — original event.target_set route identities when fan-out targeting was resolved
+        delivered_to: list — routing-execution recipients selected before failure, including each recipient delivery target when applicable
+        entity_id: string — receiver-context projection for compatibility with older dead-letter readers
+        flow_instance: string — receiver flow instance projection for compatibility with older dead-letter readers
         failure_type: 'string — handler_error (non-retryable failure: validation error, business logic error, guard-escalated
-          error — goes to dead letter immediately without retry) | chain_depth_exceeded (emission intercepted at depth limit)
-          | retry_exhausted (retried max_retries times, all failed)'
+          error — goes to dead letter immediately without retry) | target_resolution_failed (pin-routing target failed with
+          target_failure_reason) | chain_depth_exceeded (emission intercepted at depth limit) | retry_exhausted (retried max_retries times, all failed)'
+        target_failure_reason: optional typed reason from engine.cross_flow_routing.target_resolution_failure_taxonomy
+        target_context: optional diagnostic object for target resolution failures
         error_message: string — human-readable error description
         retry_count: integer — number of retries attempted before dead-lettering
         chain_depth: integer — current chain depth (for chain_depth_exceeded)
@@ -2510,6 +2745,26 @@ engine:
         path on the static verify surface. The warning checks only sibling flow output pins, root agent emit_events, root
         node handler emit sites, exact platform_events catalog matches, swarm.source values starting with external, and same-flow
         timer declarations. It does not use produces or swarm.status: planned as input-pin proof.'
+      when: boot-only
+    - id: pin_target_resolution
+      severity: error
+      scope: per-emit-site
+      trigger: A pin-declared output emit lacks an explicit target, structural ParentRoute eligibility, or broadcast:true; has
+        malformed target syntax; references an unknown target.flow; uses target:sender where no inbound source can exist; or
+        uses target:sender only on external-sourced inputs with empty source.
+      when: boot-only
+    - id: redundant_in_topology_select_entity
+      severity: warning
+      scope: per-handler
+      trigger: A handler declares select_entity or select_or_create_entity for an event whose only producers are in-topology
+        pin-routed producers that set event.target. The receiver-side acquisition is redundant and should be removed unless
+        the event is external or mixed-provenance.
+      when: boot-only
+    - id: missing_external_select_entity
+      severity: error
+      scope: per-handler
+      trigger: A stateful handler consumes an external/no-target event and declares no select_entity or select_or_create_entity,
+        so it would run against event.source instead of a receiving-flow-owned entity.
       when: boot-only
     - id: semantic_drift_dead_event_schema
       severity: warning
@@ -3090,7 +3345,8 @@ flow_model:
       description: Events the flow subscribes to. Required pins must be wired (some other flow emits them) or boot warns.
       required: true
     output_event_pins:
-      description: Events the flow emits. Optional — subscribers consume them if present, otherwise events are logged only.
+      description: Events the flow emits across its public interface. Optional, but when an emit site emits one of these
+        events, pin routing is active and the emit must provide a target mechanism, structural ParentRoute, or broadcast:true.
       required: false
     input_data_pins:
       description: Entity fields the flow reads. Required pins must be written by a prior flow or initial data.
@@ -3102,6 +3358,9 @@ flow_model:
       a flow (e.g., spec.requested between two agents in the same flow) exist in events.yaml but are NOT listed in schema
       pins. They are implementation details, not part of the flow's public contract. Only events that cross flow boundaries
       or trigger/complete the flow appear in pins.
+    routing_authority: Output event pins are the activation switch for source/target pin routing. Input event pins define
+      the allowed receiving interface. Runtime implementation and flow migration must consume engine.cross_flow_routing as
+      the authoritative source for target semantics.
   required_agents:
     description: 'Each flow schema declares required_agents — agent role sockets that the root flow must fill. Each entry
       specifies: role name, events the agent subscribes to, events it emits, and a description. The platform validates at
@@ -5206,6 +5465,95 @@ static_analyzer:
         rule: A timer declared within the consuming flow fires the same event.
     rule: Emit warning when none of the accepted producer-path forms are found. The finding message must say no producer path
       was found in the authored bundle and list the checked producer-path forms.
+  slice_3a_pin_target_resolution:
+    id: pin_target_resolution
+    domain: semantic_validity
+    authority: hard_invalidity
+    severity: error
+    canonical_owner: internal/runtime/bootverify
+    supported_surface: cmd/swarm verify
+    spec_basis:
+    - engine.cross_flow_routing
+    - handler_specification.handler_fields.emit
+    - contract_formats.event_schema.strict_payload_contract.envelope_identity
+    scope:
+      description: For every system-node emit site whose emitted event is declared in the emitter flow's pins.outputs.events,
+        verify that the authored contract supplies a valid target mechanism or explicit broadcast opt-out.
+      applies_to:
+      - handler top-level single-emit
+      - rules entries
+      - on_complete branches
+      - accumulate.on_timeout
+      - fan_out per-item emit
+      excludes:
+      - runtime instance liveness
+      - payload-dependent target.match cardinality
+      - mixed-trigger path disambiguation beyond statically singular handlers
+      - runtime delivery correctness after a target has been resolved
+    accepted_target_mechanisms:
+      explicit_target:
+        forms:
+        - sender
+        - instance_id
+        - flow_match
+        - flow_match_allow_fanout
+      rule: Target form must be syntactically valid and reference loaded flow topology where statically known.
+      fanout_representation:
+        rule: flow_match_allow_fanout resolves to event.target_set, not singular event.target. The runtime must persist concrete
+          target_set route identities and one delivery target per recipient; it must not persist only the authored selector.
+      structural_parent_route:
+        rule: Child-to-parent structural binding is valid only for child/template instances that will record full ParentRoute
+          at create_flow_instance time.
+      explicit_broadcast:
+        rule: broadcast:true is a deliberate opt-out and is the only no-target form accepted for a pin-declared output.
+    static_failure_reasons:
+      target_required_missing: No explicit target, no structural ParentRoute eligibility, and no broadcast:true.
+      target_invalid_syntax: Literal target spec is malformed or incomplete.
+      target_unknown_flow: target.flow is not present in the loaded flow registry.
+      target_sender_no_inbound: target:sender is used from a handler whose only triggers cannot supply inbound event.source.
+      target_sender_empty_source: target:sender is used only from external-sourced event types with empty source.
+    runtime_failure_reasons:
+      publish_time_dead_letter:
+      - target_unreachable_no_subscriber
+      - target_unreachable_terminated
+      - parent_route_incomplete
+      - target_ambiguous
+      - target_not_subscribed
+      emit_time_tool_error:
+      - target_sender_no_inbound_runtime
+      - target_sender_empty_source_runtime
+    rule: Emit hard invalidity for every statically detectable missing or malformed pin target mechanism. Runtime failure reasons
+      cover the cases boot verification cannot prove; no case may silently fall back to broadcast.
+  slice_3b_select_entity_pin_coexistence:
+    id: select_entity_pin_coexistence
+    domain: semantic_drift
+    authority: semantic_drift_warning
+    severity: warning
+    canonical_owner: internal/runtime/bootverify
+    supported_surface: cmd/swarm verify
+    spec_basis:
+    - engine.cross_flow_routing.select_entity_coexistence
+    - handler_specification.handler_fields.select_entity
+    - handler_specification.handler_fields.select_or_create_entity
+    scope:
+      description: Classify receiver-side entity acquisition on pin-routed events so select_entity remains a fallback for
+        external or mixed provenance, not a second in-topology routing owner.
+      applies_to:
+      - select_entity handlers
+      - select_or_create_entity handlers
+      excludes:
+      - in-tree contract migration edits
+      - runtime target resolution
+    verdicts:
+      redundant_in_topology:
+        severity: warning
+        rule: select_entity/select_or_create_entity on an event whose only producers are in-topology pin-routed producers is redundant.
+      external_or_mixed_provenance:
+        severity: ok
+        rule: External or mixed-provenance events may use receiver-side acquisition as late binding when event.target is absent.
+      missing_external_binding:
+        severity: error
+        rule: A stateful external/no-target handler with no acquisition mechanism is invalid because it would run against source fallback.
   slice_4_state_machine_reachability:
     id: semantic_drift_unreachable_state
     domain: semantic_drift
