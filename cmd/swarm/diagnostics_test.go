@@ -4,12 +4,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 func TestRunsUseRunListV1RPC(t *testing.T) {
@@ -458,7 +463,7 @@ func TestTraceFollowUsesRunSubscribeTrace(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"trace", "run-follow", "--follow"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"trace", "run-follow", "--follow", "--no-retry"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -490,7 +495,7 @@ func TestTraceFollowOmittedRunReusesActivePreferenceResolver(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"trace", "--follow"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"trace", "--follow", "--no-retry"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -498,6 +503,142 @@ func TestTraceFollowOmittedRunReusesActivePreferenceResolver(t *testing.T) {
 	assertRunCommandTraceSubscription(t, wsRequests, "active-run", false)
 	if !strings.Contains(stdout.String(), "trace event_id=evt-active") {
 		t.Fatalf("stdout = %q, want trace row", stdout.String())
+	}
+}
+
+func TestTraceHelpPromotesNoRetryWithoutReplaySince(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	opts := defaultRootCommandOptions()
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"trace", "--help"}, &stdout, &stderr, opts)
+	if code != 0 {
+		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "--no-retry") {
+		t.Fatalf("help missing --no-retry:\n%s", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "--replay-since") {
+		t.Fatalf("help exposed unpromoted --replay-since:\n%s", stdout.String())
+	}
+}
+
+func TestTraceFollowRecoversWithReplaySinceAfterClose(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	var mu sync.Mutex
+	rpcRequests := []jsonRPCRequest{}
+	wsRequests := []jsonRPCRequest{}
+	secondRowSent := make(chan struct{})
+	var signalSecondRow sync.Once
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/rpc":
+			if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
+				t.Errorf("Authorization = %q, want bearer token", got)
+			}
+			var req jsonRPCRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Errorf("decode request: %v", err)
+				return
+			}
+			mu.Lock()
+			rpcRequests = append(rpcRequests, req)
+			mu.Unlock()
+			if req.Method != "run.list" {
+				t.Errorf("method = %q, want run.list", req.Method)
+			}
+			writeJSONRPCResult(t, w, req.ID, map[string]any{"runs": []any{validDiagnosticRunHeaderWithStatus("active-run", "running")}})
+		case "/v1/ws":
+			if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
+				t.Errorf("WS Authorization = %q, want bearer token", got)
+			}
+			conn, err := upgrader.Upgrade(w, r, nil)
+			if err != nil {
+				t.Errorf("upgrade websocket: %v", err)
+				return
+			}
+			defer conn.Close()
+			var req jsonRPCRequest
+			if err := conn.ReadJSON(&req); err != nil {
+				t.Errorf("read ws request: %v", err)
+				return
+			}
+			mu.Lock()
+			wsRequests = append(wsRequests, req)
+			callIndex := len(wsRequests)
+			mu.Unlock()
+			if req.Method != "run.subscribe_trace" {
+				t.Errorf("ws method = %q, want run.subscribe_trace", req.Method)
+			}
+			subscriptionID := fmt.Sprintf("sub-%d", callIndex)
+			if err := conn.WriteJSON(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      req.ID,
+				"result":  map[string]any{"subscription_id": subscriptionID},
+			}); err != nil {
+				t.Errorf("write ws subscription response: %v", err)
+				return
+			}
+			row := validRunCommandTraceRow(fmt.Sprintf("evt-%d", callIndex))
+			row["event_created_at"] = fmt.Sprintf("2026-05-13T10:00:0%dZ", callIndex)
+			if err := conn.WriteJSON(map[string]any{
+				"jsonrpc": "2.0",
+				"method":  "rpc.subscription",
+				"params": map[string]any{
+					"subscription": subscriptionID,
+					"result":       row,
+				},
+			}); err != nil {
+				return
+			}
+			if callIndex == 1 {
+				_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+				return
+			}
+			time.Sleep(20 * time.Millisecond)
+			signalSecondRow.Do(func() { close(secondRowSent) })
+			<-r.Context().Done()
+		default:
+			t.Errorf("path = %q, want /v1/rpc or /v1/ws", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-secondRowSent
+		cancel()
+	}()
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(ctx, t.TempDir(), []string{"trace", "--follow"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 130 {
+		t.Fatalf("code = %d, want 130 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	assertRunCommandMethods(t, &rpcRequests, []string{"run.list"})
+	if len(wsRequests) != 2 {
+		t.Fatalf("ws requests = %#v, want initial subscribe and one recovery subscribe", wsRequests)
+	}
+	for i, req := range wsRequests {
+		if req.Method != "run.subscribe_trace" {
+			t.Fatalf("ws method[%d] = %q, want run.subscribe_trace", i, req.Method)
+		}
+		if got := req.Params["run_id"]; got != "active-run" {
+			t.Fatalf("ws run_id[%d] = %#v, want active-run", i, got)
+		}
+	}
+	if _, ok := wsRequests[0].Params["replay_since"]; ok {
+		t.Fatalf("initial replay_since = %#v, want omitted", wsRequests[0].Params["replay_since"])
+	}
+	if got := wsRequests[1].Params["replay_since"]; got != "2026-05-13T10:00:01Z" {
+		t.Fatalf("recovery replay_since = %#v, want first row timestamp", got)
+	}
+	for _, want := range []string{"trace event_id=evt-1", "trace event_id=evt-2"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
+		}
+	}
+	if !strings.Contains(stderr.String(), "detached from run trace") {
+		t.Fatalf("stderr = %q, want detach message", stderr.String())
 	}
 }
 
@@ -660,6 +801,7 @@ func TestDiagnosticsRejectInvalidInputBeforeRequest(t *testing.T) {
 		{name: "trace follow rejects limit", args: []string{"trace", "run-1", "--follow", "--limit", "5"}, wantStderr: "--limit is not supported with --follow"},
 		{name: "trace follow rejects cursor", args: []string{"trace", "run-1", "--follow", "--cursor", "cur"}, wantStderr: "--cursor is not supported with --follow"},
 		{name: "trace follow rejects since", args: []string{"trace", "run-1", "--follow", "--since", "2026-05-13T10:00:00Z"}, wantStderr: "--since is not supported with --follow"},
+		{name: "trace follow direct replay since remains unpromoted", args: []string{"trace", "run-1", "--follow", "--replay-since", "2026-05-13T10:00:00Z"}, wantStderr: "unknown flag"},
 		{name: "trace richer filter still unpromoted", args: []string{"trace", "run-1", "--event-name", "scan.requested"}, wantStderr: "unknown flag"},
 		{name: "status extra arg", args: []string{"status", "run-1", "extra"}, wantStderr: "accepts at most 1 arg(s)"},
 	} {
@@ -689,6 +831,7 @@ func TestDiagnosticsRequireAPITokenBeforeRequest(t *testing.T) {
 		{"trace", "run-1"},
 		{"trace", "run-1", "--limit", "2", "--cursor", "cur", "--since", "2026-05-13T10:00:00Z"},
 		{"trace", "run-1", "--follow"},
+		{"trace", "run-1", "--follow", "--no-retry"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			t.Setenv("SWARM_API_TOKEN", "")
