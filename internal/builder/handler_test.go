@@ -170,9 +170,13 @@ func TestHandler_StateGetEntityReturnsCanonicalEntityFull(t *testing.T) {
 				Slug:         "order-1",
 				Name:         "Order 1",
 			},
-			Fields:      map[string]any{"priority": "high"},
-			Gates:       map[string]bool{"review_gate": true},
-			Accumulated: map[string]any{"score": float64(3)},
+			Fields: map[string]any{"priority": "high"},
+			Gates:  map[string]bool{"review_gate": true},
+			Accumulated: map[string]any{
+				"score":       float64(3),
+				"accumulator": map[string]any{"count": float64(2)},
+				"notes":       []any{"a", map[string]any{"text": "probe"}},
+			},
 		},
 	}
 	handler := NewHandler(Options{
@@ -198,6 +202,9 @@ func TestHandler_StateGetEntityReturnsCanonicalEntityFull(t *testing.T) {
 	}
 	if full.Entity.CurrentState != "reviewing" || full.Fields["priority"] != "high" || !full.Gates["review_gate"] || full.Accumulated["score"] != float64(3) {
 		t.Fatalf("state.get_entity canonical result = %#v", full)
+	}
+	if bucket, ok := full.Accumulated["accumulator"].(map[string]any); !ok || bucket["count"] != float64(2) {
+		t.Fatalf("state.get_entity accumulated bucket = %#v, want count", full.Accumulated["accumulator"])
 	}
 
 	raw, err := json.Marshal(resp.Result)

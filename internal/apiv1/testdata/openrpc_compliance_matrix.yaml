@@ -20,7 +20,7 @@ policy:
   notification_schema_runtime_validation_policy: "#898 adds generated notification-schema publication and supported-surface runtime validation for all four subscription methods; examples and rpc.discover were tracked by later #857 children."
   examples_policy: "#904 adds merge-bearing catalog-wide OpenRPC examples deferral policy; method examples are intentionally omitted until a future approved source model exists."
   service_discovery_policy: "#915 adds merge-bearing catalog-wide rpc.discover non-publication policy; method publication remains the generated OpenRPC artifact."
-  entity_accumulated_schema_hardening_policy: "#896 leaves EntityFull.accumulated deep schema hardening tracked under #857; #915 does not close that parent residual."
+  entity_accumulated_schema_hardening_policy: "#930 aligns EntityFull.accumulated schema ownership to the runtime accumulator-state owner across /v1/rpc entity.get, builder state.get_entity, dashboard /api/instances/{id}, CLI, store, generated OpenRPC proof, and matrix accounting."
 methods:
   - method: agent.diagnose
     transport: http
@@ -212,7 +212,7 @@ methods:
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
     declared_error_tests: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorEntityHandlersTypedErrors}]}
     idempotency: {status: not_applicable}
-    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorEntityHandlersExposeEntityNativeReads}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCEntityFullAccumulatedSchemaMatchesRuntimeOwner}, {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorEntityHandlersExposeEntityNativeReads}]}
     notification_schema: {status: not_applicable}
     examples: {status: policy_deferred, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/platform-spec.yaml}, {kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}]}
     service_discovery_publication: {status: policy_not_published, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/platform-spec.yaml}, {kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}, {kind: go_test, name: TestServiceDiscoveryPolicyDoesNotServeRPCDiscover}]}

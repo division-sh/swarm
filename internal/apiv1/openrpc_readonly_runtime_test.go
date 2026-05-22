@@ -494,10 +494,14 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 				UpdatedAt:    now,
 			}}},
 			getResult: store.OperatorEntityFull{
-				Entity:      store.OperatorEntitySummary{EntityID: "entity-1", RunID: runID, CurrentState: "collecting"},
-				Fields:      map[string]any{"priority": "high"},
-				Gates:       map[string]bool{"approved": true},
-				Accumulated: map[string]any{"notes": []any{map[string]any{"text": "probe"}}},
+				Entity: store.OperatorEntitySummary{EntityID: "entity-1", RunID: runID, CurrentState: "collecting"},
+				Fields: map[string]any{"priority": "high"},
+				Gates:  map[string]bool{"approved": true},
+				Accumulated: map[string]any{
+					"score":       float64(3),
+					"accumulator": map[string]any{"count": float64(2)},
+					"notes":       []any{"a", map[string]any{"text": "probe"}},
+				},
 			},
 			aggregate: store.OperatorEntityAggregateResult{Counts: map[string]int{"collecting": 1}},
 		},

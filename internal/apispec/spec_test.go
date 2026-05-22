@@ -157,6 +157,66 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	}
 }
 
+func TestEntityFullAccumulatedSchemaPublishesRuntimeAccumulatorState(t *testing.T) {
+	api := loadRepoAPISpec(t)
+	entityFull, ok := api.Components.Schemas["EntityFull"].(map[string]any)
+	if !ok {
+		t.Fatalf("EntityFull schema = %#v, want object", api.Components.Schemas["EntityFull"])
+	}
+	properties, ok := entityFull["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("EntityFull.properties = %#v, want object", entityFull["properties"])
+	}
+	accumulated, ok := properties["accumulated"].(map[string]any)
+	if !ok {
+		t.Fatalf("EntityFull.accumulated = %#v, want object schema", properties["accumulated"])
+	}
+	if got, want := accumulated["type"], "object"; got != want {
+		t.Fatalf("EntityFull.accumulated.type = %#v, want %q", got, want)
+	}
+	if got, ok := accumulated["additionalProperties"].(bool); !ok || !got {
+		t.Fatalf("EntityFull.accumulated.additionalProperties = %#v, want true", accumulated["additionalProperties"])
+	}
+	if _, ok := accumulated["items"]; ok {
+		t.Fatalf("EntityFull.accumulated must not use array items at the map boundary: %#v", accumulated)
+	}
+	method := api.MethodCatalog["entity.get"]
+	if method.Result == nil {
+		t.Fatal("entity.get missing result descriptor")
+	}
+	resultSchema, ok := method.Result.Schema.(map[string]any)
+	if !ok {
+		t.Fatalf("entity.get result schema = %#v, want object", method.Result.Schema)
+	}
+	if got, want := resultSchema["$ref"], "#/components/schemas/EntityFull"; got != want {
+		t.Fatalf("entity.get result ref = %#v, want %q", got, want)
+	}
+
+	generated, err := GenerateOpenRPC(api)
+	if err != nil {
+		t.Fatalf("GenerateOpenRPC() error = %v", err)
+	}
+	var doc OpenRPCDocument
+	if err := json.Unmarshal(generated, &doc); err != nil {
+		t.Fatalf("unmarshal generated openrpc: %v", err)
+	}
+	generatedEntityFull, ok := doc.Components.Schemas["EntityFull"].(map[string]any)
+	if !ok {
+		t.Fatalf("generated EntityFull schema = %#v, want object", doc.Components.Schemas["EntityFull"])
+	}
+	generatedProperties, ok := generatedEntityFull["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("generated EntityFull.properties = %#v, want object", generatedEntityFull["properties"])
+	}
+	generatedAccumulated, ok := generatedProperties["accumulated"].(map[string]any)
+	if !ok {
+		t.Fatalf("generated EntityFull.accumulated = %#v, want object schema", generatedProperties["accumulated"])
+	}
+	if got, ok := generatedAccumulated["additionalProperties"].(bool); !ok || !got {
+		t.Fatalf("generated EntityFull.accumulated.additionalProperties = %#v, want true", generatedAccumulated["additionalProperties"])
+	}
+}
+
 func TestValidateRejectsMissingExamplesPolicy(t *testing.T) {
 	api := loadRepoAPISpec(t)
 	api.ExamplesPolicy = ExamplesPolicy{}

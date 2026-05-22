@@ -8342,11 +8342,9 @@ api_specification:
               type: boolean
           accumulated:
             type: object
-            description: "Per-handler accumulator buckets. Map of bucket_key \u2192 array of typed items."
-            additionalProperties:
-              type: array
-              items:
-                type: object
+            description: "Accumulator state. Map of accumulator key \u2192 JSON value; values may be scalars, objects, or\
+              \ arrays depending on accumulate, data_accumulation, compute, or projection writers."
+            additionalProperties: true
       EntityAggregateResult:
         type: object
         additionalProperties: false
