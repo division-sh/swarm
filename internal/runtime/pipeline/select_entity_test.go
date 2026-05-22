@@ -91,6 +91,76 @@ func TestExecuteNodeContractHandlerSelectEntityReplayUsesSameTargetEntity(t *tes
 	}
 }
 
+func TestExecuteNodeContractHandlerSelectEntityMatchesControlStatus(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	pc, source := newSelectEntityTestCoordinator(t, db)
+	ctx := testPipelineCoordinatorRunContext(t, pc)
+	budgetEntityID := seedSelectEntityBudgetWithMetadata(t, pc.workflowStore, ctx, source, "budget-1", map[string]any{
+		"vertical_id":      "vertical-1",
+		"status":           "pending",
+		"business_status":  "approved",
+		"spent_usd":        0,
+		"control_status":   "not-a-selector",
+		"domain_status_id": "status-field-regression",
+	})
+
+	result, err := pc.executeNodeContractHandler(ctx, "treasury-orchestrator", runtimecontracts.SystemNodeEventHandler{
+		SelectEntity: &runtimecontracts.SelectEntitySpec{
+			By: map[string]string{
+				"vertical_id": "payload.vertical_id",
+				"status":      "payload.status",
+			},
+			Bindings: []runtimecontracts.SelectEntityKeyBinding{
+				{
+					Field:   "vertical_id",
+					Ref:     "payload.vertical_id",
+					RefPath: runtimecontracts.RefExpression("payload.vertical_id").RefPath,
+				},
+				{
+					Field:   "status",
+					Ref:     "payload.status",
+					RefPath: runtimecontracts.RefExpression("payload.status").RefPath,
+				},
+			},
+		},
+		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+			Writes: []runtimecontracts.WorkflowDataWrite{{
+				SourceField: "amount_usd",
+				TargetField: "spent_usd",
+			}},
+		},
+	}, workflowTriggerContext{
+		Event: events.Event{
+			Type:    events.EventType("opco.spend_recorded"),
+			Payload: mustJSON(map[string]any{"vertical_id": "vertical-1", "status": "pending", "amount_usd": 42}),
+		}.WithEntityID("22222222-2222-2222-2222-222222222222"),
+		State: WorkflowState{},
+	}, false)
+	if err != nil {
+		t.Fatalf("executeNodeContractHandler: %v", err)
+	}
+	if !result.Handled {
+		t.Fatal("expected selected handler to run")
+	}
+
+	instance, ok, err := pc.workflowStore.Load(ctx, budgetEntityID)
+	if err != nil {
+		t.Fatalf("workflowStore.Load: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected budget entity to exist")
+	}
+	if got := instance.Metadata["spent_usd"]; got != float64(42) && got != 42 {
+		t.Fatalf("spent_usd = %#v, want 42", got)
+	}
+	if got := strings.TrimSpace(asString(instance.Metadata["status"])); got != "pending" {
+		t.Fatalf("control status metadata = %q, want pending", got)
+	}
+	assertEntityStateFieldMissing(t, db, budgetEntityID, "status")
+}
+
 func TestExecuteNodeContractHandlerSelectOrCreateEntityCreatesTargetOwnedEntity(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
@@ -846,21 +916,35 @@ func seedSelectEntityBudgetWithInstance(t *testing.T, store *WorkflowInstanceSto
 
 func seedSelectEntityBudgetWithState(t *testing.T, store *WorkflowInstanceStore, ctx context.Context, source semanticview.Source, instanceID, verticalID string, spent any, currentState string) string {
 	t.Helper()
+	return seedSelectEntityBudgetWithMetadataAndState(t, store, ctx, source, instanceID, map[string]any{
+		"vertical_id": verticalID,
+		"spent_usd":   spent,
+	}, currentState)
+}
+
+func seedSelectEntityBudgetWithMetadata(t *testing.T, store *WorkflowInstanceStore, ctx context.Context, source semanticview.Source, instanceID string, metadata map[string]any) string {
+	t.Helper()
+	return seedSelectEntityBudgetWithMetadataAndState(t, store, ctx, source, instanceID, metadata, "active")
+}
+
+func seedSelectEntityBudgetWithMetadataAndState(t *testing.T, store *WorkflowInstanceStore, ctx context.Context, source semanticview.Source, instanceID string, metadata map[string]any, currentState string) string {
+	t.Helper()
 	identity := DeriveFlowInstanceIdentity(source, "treasury", instanceID)
+	metadata = cloneStringAnyMap(metadata)
+	if metadata == nil {
+		metadata = map[string]any{}
+	}
+	metadata["flow_path"] = identity.InstancePath
+	metadata["instance_id"] = identity.InstanceID
+	metadata["storage_ref"] = identity.InstancePath
+	metadata["entity_type"] = "opco_budget"
 	instance := WorkflowInstance{
 		InstanceID:      identity.EntityID,
 		StorageRef:      identity.InstancePath,
 		WorkflowName:    "treasury",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    strings.TrimSpace(currentState),
-		Metadata: map[string]any{
-			"flow_path":   identity.InstancePath,
-			"instance_id": identity.InstanceID,
-			"vertical_id": verticalID,
-			"spent_usd":   spent,
-			"storage_ref": identity.InstancePath,
-			"entity_type": "opco_budget",
-		},
+		Metadata:        metadata,
 	}
 	if err := store.Upsert(ctx, instance); err != nil {
 		t.Fatalf("seed budget entity: %v", err)
@@ -883,6 +967,21 @@ func assertSelectEntityReceiptRow(t *testing.T, db *sql.DB, eventID, nodeID stri
 	}
 	if count != 1 {
 		t.Fatalf("select_entity event_receipts rows = %d, want 1", count)
+	}
+}
+
+func assertEntityStateFieldMissing(t *testing.T, db *sql.DB, entityID, field string) {
+	t.Helper()
+	var exists bool
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT fields ? $3
+		FROM entity_state
+		WHERE run_id = $1::uuid AND entity_id = $2::uuid
+	`, testPipelineRunID, entityID, field).Scan(&exists); err != nil {
+		t.Fatalf("load entity_state fields for %s: %v", entityID, err)
+	}
+	if exists {
+		t.Fatalf("entity_state.fields unexpectedly contains %q", field)
 	}
 }
 

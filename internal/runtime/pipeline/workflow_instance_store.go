@@ -467,6 +467,13 @@ func (s *WorkflowInstanceStore) selectActiveByFieldsSpec(ctx context.Context, sc
 		if err != nil {
 			return nil, fmt.Errorf("marshal workflow instance selector %s: %w", selector.Field, err)
 		}
+		if workflowInstanceControlStatusSelector(segments) {
+			args = append(args, string(valueJSON))
+			where.WriteString(fmt.Sprintf(`
+		  AND COALESCE(fi.config, '{}'::jsonb) #> '{status}' = $%d::jsonb
+		`, len(args)))
+			continue
+		}
 		args = append(args, pq.Array(segments), string(valueJSON))
 		where.WriteString(fmt.Sprintf(`
 		  AND es.fields #> $%d::text[] = $%d::jsonb
@@ -632,6 +639,10 @@ func workflowInstanceFieldSelectorPath(field string) []string {
 		out = append(out, part)
 	}
 	return out
+}
+
+func workflowInstanceControlStatusSelector(segments []string) bool {
+	return len(segments) == 1 && segments[0] == "status"
 }
 
 func (s *WorkflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRef string, instance WorkflowInstance) error {
