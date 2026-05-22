@@ -642,6 +642,98 @@ func TestTraceFollowRecoversWithReplaySinceAfterClose(t *testing.T) {
 	}
 }
 
+func TestTraceFollowRetriesRetryableReadFailure(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	var mu sync.Mutex
+	wsRequests := []jsonRPCRequest{}
+	recoveredRowSent := make(chan struct{})
+	var signalRecoveredRow sync.Once
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/ws" {
+			t.Errorf("path = %q, want only /v1/ws", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
+			t.Errorf("WS Authorization = %q, want bearer token", got)
+		}
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Errorf("upgrade websocket: %v", err)
+			return
+		}
+		defer conn.Close()
+		var req jsonRPCRequest
+		if err := conn.ReadJSON(&req); err != nil {
+			t.Errorf("read ws request: %v", err)
+			return
+		}
+		mu.Lock()
+		wsRequests = append(wsRequests, req)
+		callIndex := len(wsRequests)
+		mu.Unlock()
+		if req.Method != "run.subscribe_trace" {
+			t.Errorf("ws method = %q, want run.subscribe_trace", req.Method)
+		}
+		subscriptionID := fmt.Sprintf("sub-retry-%d", callIndex)
+		if err := conn.WriteJSON(map[string]any{
+			"jsonrpc": "2.0",
+			"id":      req.ID,
+			"result":  map[string]any{"subscription_id": subscriptionID},
+		}); err != nil {
+			t.Errorf("write ws subscription response: %v", err)
+			return
+		}
+		if callIndex == 1 {
+			_ = conn.UnderlyingConn().Close()
+			return
+		}
+		if err := conn.WriteJSON(map[string]any{
+			"jsonrpc": "2.0",
+			"method":  "rpc.subscription",
+			"params": map[string]any{
+				"subscription": subscriptionID,
+				"result":       validRunCommandTraceRow("evt-recovered"),
+			},
+		}); err != nil {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+		signalRecoveredRow.Do(func() { close(recoveredRowSent) })
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-recoveredRowSent
+		cancel()
+	}()
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(ctx, t.TempDir(), []string{"trace", "run-retry", "--follow"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 130 {
+		t.Fatalf("code = %d, want 130 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if len(wsRequests) != 2 {
+		t.Fatalf("ws requests = %#v, want retry after read failure", wsRequests)
+	}
+	for i, req := range wsRequests {
+		if got := req.Params["run_id"]; got != "run-retry" {
+			t.Fatalf("ws run_id[%d] = %#v, want run-retry", i, got)
+		}
+		if _, ok := req.Params["replay_since"]; ok {
+			t.Fatalf("ws replay_since[%d] = %#v, want omitted because no row was rendered before retry", i, req.Params["replay_since"])
+		}
+	}
+	if !strings.Contains(stdout.String(), "trace event_id=evt-recovered") {
+		t.Fatalf("stdout = %q, want recovered row", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "detached from run trace") {
+		t.Fatalf("stderr = %q, want detach message", stderr.String())
+	}
+}
+
 func TestTraceFollowCtrlCDetachesWithoutRunStop(t *testing.T) {
 	t.Setenv("SWARM_API_TOKEN", "test-token")
 	wsSubscribed := make(chan struct{})
