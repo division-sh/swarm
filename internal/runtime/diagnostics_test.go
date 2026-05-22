@@ -27,7 +27,34 @@ func (s runtimeLogCapabilityStub) CanonicalRuntimeLogCapability(context.Context)
 }
 
 func TestRuntimeLogger_Log_AppendsSpecShapedFlightRecorderEntry(t *testing.T) {
-	logger := NewRuntimeLogger(nil, nil)
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectExec(`INSERT INTO events`).
+		WithArgs(runtimeLogPayloadArg{
+			level:      "warn",
+			message:    "Tool execution was denied for save_entity_field",
+			component:  "tool-executor",
+			action:     "tool_execution_denied",
+			eventID:    "evt-1",
+			eventType:  "validation/requested",
+			agentID:    "agent-1",
+			entityID:   "entity-1",
+			sessionID:  "session-1",
+			errorText:  "runtime_error code=cross_flow_write_forbidden",
+			durationUS: 1200,
+			detail: map[string]any{
+				"tool_name":     "save_entity_field",
+				"denial_layer":  "executor",
+				"denial_reason": "cross_flow_write_forbidden",
+			},
+		}, "").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	logger := NewRuntimeLogger(db, runtimeLogCapabilityStub{enabled: true})
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx := runtimebus.WithEmittedEventsRecorder(context.Background(), recorder)
 
@@ -85,10 +112,29 @@ func TestRuntimeLogger_Log_AppendsSpecShapedFlightRecorderEntry(t *testing.T) {
 	if details["error"] != "runtime_error code=cross_flow_write_forbidden" {
 		t.Fatalf("details.error = %#v", details["error"])
 	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("ExpectationsWereMet() error = %v", err)
+	}
 }
 
 func TestRuntimeLogger_Log_AppendsCanonicalFlightRecorderDefaults(t *testing.T) {
-	logger := NewRuntimeLogger(nil, nil)
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectExec(`INSERT INTO events`).
+		WithArgs(runtimeLogPayloadArg{
+			level:     "warn",
+			message:   "runtime warning",
+			component: "runtime",
+			action:    "unknown",
+			eventType: "diagnostic/actual",
+		}, "").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	logger := NewRuntimeLogger(db, runtimeLogCapabilityStub{enabled: true})
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx := runtimebus.WithEmittedEventsRecorder(context.Background(), recorder)
 
@@ -135,6 +181,9 @@ func TestRuntimeLogger_Log_AppendsCanonicalFlightRecorderDefaults(t *testing.T) 
 	if details["event_type"] != "diagnostic/actual" {
 		t.Fatalf("details.event_type = %#v, want diagnostic/actual", details["event_type"])
 	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("ExpectationsWereMet() error = %v", err)
+	}
 }
 
 func TestRuntimeLogger_Log_PersistsRuntimeLogPayloadViaCapabilityOwner(t *testing.T) {
@@ -145,7 +194,7 @@ func TestRuntimeLogger_Log_PersistsRuntimeLogPayloadViaCapabilityOwner(t *testin
 	defer db.Close()
 
 	mock.ExpectExec(`INSERT INTO events`).
-		WithArgs("", runtimeLogPayloadArg{
+		WithArgs(runtimeLogPayloadArg{
 			level:      "warn",
 			message:    "Tool execution was denied for save_entity_field",
 			component:  "tool-executor",
@@ -165,7 +214,7 @@ func TestRuntimeLogger_Log_PersistsRuntimeLogPayloadViaCapabilityOwner(t *testin
 		}, "").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
-	logger := NewRuntimeLogger(db, runtimeLogCapabilityStub{enabled: true, hasRunID: true})
+	logger := NewRuntimeLogger(db, runtimeLogCapabilityStub{enabled: true})
 	if err := logger.Log(context.Background(), RuntimeLogEntry{
 		Level:      "warn",
 		Message:    "Tool execution was denied for save_entity_field",
@@ -199,8 +248,11 @@ func TestRuntimeLogger_Log_EnsuresRunRowBeforePersistingRunScopedEntry(t *testin
 	defer db.Close()
 
 	const runID = "8d4891f8-0f8e-4c85-b34b-9e0e7f4327dd"
-	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	recorder := runtimebus.NewEmittedEventsRecorder()
+	ctx := runtimebus.WithEmittedEventsRecorder(context.Background(), recorder)
+	ctx = runtimecorrelation.WithRunID(ctx, runID)
 
+	mock.ExpectBegin()
 	mock.ExpectExec(`INSERT INTO runs`).
 		WithArgs(runID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -210,6 +262,7 @@ func TestRuntimeLogger_Log_EnsuresRunRowBeforePersistingRunScopedEntry(t *testin
 	mock.ExpectExec(`UPDATE runs`).
 		WithArgs(runID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
 
 	logger := NewRuntimeLogger(db, runtimeLogCapabilityStub{enabled: true, hasRunID: true})
 	if err := logger.Log(ctx, RuntimeLogEntry{
@@ -223,6 +276,17 @@ func TestRuntimeLogger_Log_EnsuresRunRowBeforePersistingRunScopedEntry(t *testin
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("ExpectationsWereMet() error = %v", err)
 	}
+	entries := recorder.SnapshotFlightRecorder()
+	if len(entries) != 1 {
+		t.Fatalf("flight recorder count = %d, want 1", len(entries))
+	}
+	details, ok := entries[0].Details.(map[string]any)
+	if !ok {
+		t.Fatalf("details type = %T, want map[string]any", entries[0].Details)
+	}
+	if got := strings.TrimSpace(asString(details["run_id"])); got != runID {
+		t.Fatalf("details.run_id = %q, want %q", got, runID)
+	}
 }
 
 func TestRuntimeLogger_Log_ReturnsPersistenceFailure(t *testing.T) {
@@ -234,11 +298,13 @@ func TestRuntimeLogger_Log_ReturnsPersistenceFailure(t *testing.T) {
 
 	writeErr := errors.New("insert failed")
 	mock.ExpectExec(`INSERT INTO events`).
-		WithArgs("", sqlmock.AnyArg(), "").
+		WithArgs(sqlmock.AnyArg(), "").
 		WillReturnError(writeErr)
 
-	logger := NewRuntimeLogger(db, runtimeLogCapabilityStub{enabled: true, hasRunID: true})
-	err = logger.Log(context.Background(), RuntimeLogEntry{
+	recorder := runtimebus.NewEmittedEventsRecorder()
+	ctx := runtimebus.WithEmittedEventsRecorder(context.Background(), recorder)
+	logger := NewRuntimeLogger(db, runtimeLogCapabilityStub{enabled: true})
+	err = logger.Log(ctx, RuntimeLogEntry{
 		Level:     "error",
 		Message:   "Persisting the pipeline receipt failed",
 		Component: "eventbus",
@@ -250,6 +316,9 @@ func TestRuntimeLogger_Log_ReturnsPersistenceFailure(t *testing.T) {
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("ExpectationsWereMet() error = %v", err)
 	}
+	if entries := recorder.SnapshotFlightRecorder(); len(entries) != 0 {
+		t.Fatalf("flight recorder count = %d, want 0", len(entries))
+	}
 }
 
 func TestRuntimeLogger_Log_AllowsEmptyCanonicalMessageWhenDetailsExist(t *testing.T) {
@@ -260,7 +329,7 @@ func TestRuntimeLogger_Log_AllowsEmptyCanonicalMessageWhenDetailsExist(t *testin
 	defer db.Close()
 
 	mock.ExpectExec(`INSERT INTO events`).
-		WithArgs("", runtimeLogPayloadArg{
+		WithArgs(runtimeLogPayloadArg{
 			level:     "info",
 			message:   "",
 			component: "agent-manager",
@@ -278,7 +347,7 @@ func TestRuntimeLogger_Log_AllowsEmptyCanonicalMessageWhenDetailsExist(t *testin
 		}, "").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
-	logger := NewRuntimeLogger(db, runtimeLogCapabilityStub{enabled: true, hasRunID: true})
+	logger := NewRuntimeLogger(db, runtimeLogCapabilityStub{enabled: true})
 	if err := logger.Log(context.Background(), RuntimeLogEntry{
 		Level:     "debug",
 		Message:   "",
@@ -313,20 +382,194 @@ func TestDecodeCanonicalRuntimeLogPayload_FailsClosedOnMissingMessageField(t *te
 }
 
 func TestRuntimeLogger_Log_FailsClosedWithoutCanonicalCapability(t *testing.T) {
+	capabilityErr := errors.New("capability unavailable")
+	tests := []struct {
+		name         string
+		db           bool
+		capabilities runtimeLogCapabilityResolver
+	}{
+		{name: "missing database", capabilities: runtimeLogCapabilityStub{enabled: true}},
+		{name: "missing resolver", db: true},
+		{name: "disabled", db: true, capabilities: runtimeLogCapabilityStub{}},
+		{name: "resolver error", db: true, capabilities: runtimeLogCapabilityStub{err: capabilityErr}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var (
+				db   *sql.DB
+				mock sqlmock.Sqlmock
+				err  error
+			)
+			if tt.db {
+				db, mock, err = sqlmock.New()
+				if err != nil {
+					t.Fatalf("sqlmock: %v", err)
+				}
+				defer db.Close()
+			}
+
+			recorder := runtimebus.NewEmittedEventsRecorder()
+			ctx := runtimebus.WithEmittedEventsRecorder(context.Background(), recorder)
+			logger := NewRuntimeLogger(db, tt.capabilities)
+			if err := logger.Log(ctx, RuntimeLogEntry{
+				Level:   "info",
+				Message: "runtime log",
+			}); err != nil {
+				t.Fatalf("logger.Log() error = %v", err)
+			}
+
+			if entries := recorder.SnapshotFlightRecorder(); len(entries) != 0 {
+				t.Fatalf("flight recorder count = %d, want 0", len(entries))
+			}
+			if mock != nil {
+				if err := mock.ExpectationsWereMet(); err != nil {
+					t.Fatalf("expectations: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestRuntimeLogger_Log_DoesNotAppendFlightRecorderOnPayloadValidationFailure(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock: %v", err)
 	}
 	defer db.Close()
 
-	logger := NewRuntimeLogger(db, runtimeLogCapabilityStub{})
-	if err := logger.Log(context.Background(), RuntimeLogEntry{
-		Level:   "info",
-		Message: "runtime log",
-	}); err != nil {
-		t.Fatalf("logger.Log() error = %v", err)
+	recorder := runtimebus.NewEmittedEventsRecorder()
+	ctx := runtimebus.WithEmittedEventsRecorder(context.Background(), recorder)
+	logger := NewRuntimeLogger(db, runtimeLogCapabilityStub{enabled: true})
+	err = logger.Log(ctx, RuntimeLogEntry{
+		Level:     "warn",
+		Message:   "runtime log",
+		Component: "diagnostics",
+		Action:    "payload_validation",
+		Detail: map[string]any{
+			"correlation": []any{"not-a-string-map"},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "details.correlation") {
+		t.Fatalf("logger.Log() error = %v, want correlation validation failure", err)
 	}
+	if entries := recorder.SnapshotFlightRecorder(); len(entries) != 0 {
+		t.Fatalf("flight recorder count = %d, want 0", len(entries))
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
 
+func TestRuntimeLogger_Log_DoesNotAppendFlightRecorderOnLineageLookupFailure(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	runID := uuid.NewString()
+	subjectEventID := uuid.NewString()
+	lineageErr := errors.New("lineage lookup failed")
+	mock.ExpectQuery(`SELECT EXISTS`).
+		WithArgs(runID, subjectEventID).
+		WillReturnError(lineageErr)
+
+	recorder := runtimebus.NewEmittedEventsRecorder()
+	ctx := runtimebus.WithEmittedEventsRecorder(context.Background(), recorder)
+	ctx = runtimecorrelation.WithRunID(ctx, runID)
+	logger := NewRuntimeLogger(db, runtimeLogCapabilityStub{enabled: true, hasRunID: true})
+	err = logger.Log(ctx, RuntimeLogEntry{
+		Level:     "warn",
+		Message:   "runtime log",
+		Component: "eventbus",
+		Action:    "lineage_lookup",
+		EventID:   subjectEventID,
+	})
+	if !errors.Is(err, lineageErr) {
+		t.Fatalf("logger.Log() error = %v, want %v", err, lineageErr)
+	}
+	if entries := recorder.SnapshotFlightRecorder(); len(entries) != 0 {
+		t.Fatalf("flight recorder count = %d, want 0", len(entries))
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
+func TestRuntimeLogger_Log_DoesNotAppendFlightRecorderOnRunRowFailure(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	runID := uuid.NewString()
+	runRowErr := errors.New("run row failed")
+	mock.ExpectBegin()
+	mock.ExpectExec(`INSERT INTO runs`).
+		WithArgs(runID).
+		WillReturnError(runRowErr)
+	mock.ExpectRollback()
+
+	recorder := runtimebus.NewEmittedEventsRecorder()
+	ctx := runtimebus.WithEmittedEventsRecorder(context.Background(), recorder)
+	ctx = runtimecorrelation.WithRunID(ctx, runID)
+	logger := NewRuntimeLogger(db, runtimeLogCapabilityStub{enabled: true, hasRunID: true})
+	err = logger.Log(ctx, RuntimeLogEntry{
+		Level:     "error",
+		Message:   "runtime log",
+		Component: "workflow-runtime",
+		Action:    "handler_error",
+	})
+	if !errors.Is(err, runRowErr) {
+		t.Fatalf("logger.Log() error = %v, want %v", err, runRowErr)
+	}
+	if entries := recorder.SnapshotFlightRecorder(); len(entries) != 0 {
+		t.Fatalf("flight recorder count = %d, want 0", len(entries))
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
+func TestRuntimeLogger_Log_DoesNotAppendFlightRecorderOnSyncCountsFailure(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	runID := uuid.NewString()
+	syncErr := errors.New("sync failed")
+	mock.ExpectBegin()
+	mock.ExpectExec(`INSERT INTO runs`).
+		WithArgs(runID).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`INSERT INTO events`).
+		WithArgs(runID, sqlmock.AnyArg(), "").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`UPDATE runs`).
+		WithArgs(runID).
+		WillReturnError(syncErr)
+	mock.ExpectRollback()
+
+	recorder := runtimebus.NewEmittedEventsRecorder()
+	ctx := runtimebus.WithEmittedEventsRecorder(context.Background(), recorder)
+	ctx = runtimecorrelation.WithRunID(ctx, runID)
+	logger := NewRuntimeLogger(db, runtimeLogCapabilityStub{enabled: true, hasRunID: true})
+	err = logger.Log(ctx, RuntimeLogEntry{
+		Level:     "error",
+		Message:   "runtime log",
+		Component: "workflow-runtime",
+		Action:    "handler_error",
+	})
+	if !errors.Is(err, syncErr) {
+		t.Fatalf("logger.Log() error = %v, want %v", err, syncErr)
+	}
+	if entries := recorder.SnapshotFlightRecorder(); len(entries) != 0 {
+		t.Fatalf("flight recorder count = %d, want 0", len(entries))
+	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations: %v", err)
 	}
