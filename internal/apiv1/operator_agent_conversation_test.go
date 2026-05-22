@@ -187,6 +187,12 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 	if reads.lastAgentList.Flow != "flow/a" || reads.lastAgentList.Role != "researcher" {
 		t.Fatalf("agent.list options = %#v", reads.lastAgentList)
 	}
+	listResult := asMap(t, listAgents.Result)
+	agents, ok := listResult["agents"].([]any)
+	if !ok || len(agents) != 1 {
+		t.Fatalf("agent.list result = %#v", listResult)
+	}
+	assertUnsupportedAgentMetricStubsAbsent(t, asMap(t, agents[0]))
 
 	getAgent := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agent","method":"agent.get","params":{"agent_id":"agent-1"}}`)
 	if getAgent.Error != nil {
@@ -197,6 +203,7 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 	}
 	agentResult := asMap(t, getAgent.Result)
 	agent := asMap(t, agentResult["agent"])
+	assertUnsupportedAgentMetricStubsAbsent(t, agent)
 	for _, splitField := range []string{"queue", "delivery_lifecycle", "runtime_state", "last_tool_outcome"} {
 		if _, ok := agent[splitField]; ok {
 			t.Fatalf("agent.get unexpectedly exposed diagnosis field %q: %#v", splitField, agent)
@@ -288,6 +295,15 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 	currentTurns, _ := asMap(t, current.Result)["turns"].([]any)
 	if len(currentTurns) != 1 || asMap(t, currentTurns[0])["turn_index"] != float64(1) {
 		t.Fatalf("conversation.current_for_agent turns = %#v, want turn_index 1", asMap(t, current.Result)["turns"])
+	}
+}
+
+func assertUnsupportedAgentMetricStubsAbsent(t *testing.T, payload map[string]any) {
+	t.Helper()
+	for _, key := range []string{"turns_24h", "in_flight_seconds"} {
+		if _, ok := payload[key]; ok {
+			t.Fatalf("agent read exposed unsupported metric stub %q: %#v", key, payload)
+		}
 	}
 }
 

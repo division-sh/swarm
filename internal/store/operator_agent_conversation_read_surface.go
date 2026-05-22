@@ -82,14 +82,12 @@ type OperatorAgentSummary struct {
 	PendingEvents         int                                 `json:"-"`
 	OldestPendingAgeSec   int                                 `json:"-"`
 	InFlightTurn          bool                                `json:"-"`
-	InFlightSeconds       int                                 `json:"-"`
 	LockOwner             string                              `json:"-"`
 	LockExpiresAt         time.Time                           `json:"-"`
 	Failures24h           int                                 `json:"-"`
 	DeadLetters24h        int                                 `json:"-"`
 	TurnCount             int                                 `json:"-"`
 	TurnLimit             int                                 `json:"-"`
-	Turns24h              int                                 `json:"-"`
 	NearBreaker           bool                                `json:"-"`
 	SessionID             string                              `json:"-"`
 	ProviderSessionID     string                              `json:"-"`
@@ -433,11 +431,9 @@ type operatorAgentProjection struct {
 	LockOwner           string
 	LockExpiresAt       time.Time
 	InFlightTurn        bool
-	InFlightSeconds     int
 	Failures24h         int
 	DeadLetters24h      int
 	TurnCount           int
-	Turns24h            int
 	SessionID           string
 	SessionStartedAt    time.Time
 	ProviderSessionID   string
@@ -1077,7 +1073,6 @@ func (r *OperatorAgentConversationReadSurface) loadAgentOperatorProjections(ctx 
 			0,
 			COALESCE(f.failures_24h, 0),
 			COALESCE(f.dead_letters_24h, 0),
-			0,
 			COALESCE(latest_turn.turn_id, ''),
 			COALESCE(latest_turn.task_id, ''),
 			COALESCE(latest_turn.parse_ok, false),
@@ -1161,7 +1156,6 @@ func (r *OperatorAgentConversationReadSurface) loadAgentOperatorProjections(ctx 
 			&projection.OldestPendingAgeSec,
 			&projection.Failures24h,
 			&projection.DeadLetters24h,
-			&projection.Turns24h,
 			&latestTurnID,
 			&latestTaskID,
 			&latestParseOK,
@@ -1251,14 +1245,12 @@ func operatorAgentSummaryFromPersisted(row runtimemanager.PersistedAgent, projec
 		PendingEvents:         projection.PendingEvents,
 		OldestPendingAgeSec:   projection.OldestPendingAgeSec,
 		InFlightTurn:          projection.InFlightTurn,
-		InFlightSeconds:       projection.InFlightSeconds,
 		LockOwner:             strings.TrimSpace(projection.LockOwner),
 		LockExpiresAt:         projection.LockExpiresAt,
 		Failures24h:           projection.Failures24h,
 		DeadLetters24h:        projection.DeadLetters24h,
 		TurnCount:             projection.TurnCount,
 		TurnLimit:             maxStoreInt(turnLimit, 0),
-		Turns24h:              maxStoreInt(projection.Turns24h, 0),
 		SessionID:             strings.TrimSpace(projection.SessionID),
 		ProviderSessionID:     strings.TrimSpace(projection.ProviderSessionID),
 		CurrentTaskID:         strings.TrimSpace(projection.CurrentTaskID),
