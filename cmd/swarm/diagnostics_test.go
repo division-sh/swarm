@@ -352,7 +352,12 @@ func TestTraceUsesRunTraceSnapshot(t *testing.T) {
 		if req.Method != "run.trace" {
 			t.Fatalf("method = %q, want run.trace", req.Method)
 		}
-		wantParams := map[string]any{"run_id": "run-1"}
+		wantParams := map[string]any{
+			"run_id": "run-1",
+			"limit":  float64(2),
+			"cursor": "trace-cur",
+			"since":  "2026-05-13T10:00:00Z",
+		}
 		if !reflect.DeepEqual(req.Params, wantParams) {
 			t.Fatalf("params = %#v, want %#v", req.Params, wantParams)
 		}
@@ -373,7 +378,7 @@ func TestTraceUsesRunTraceSnapshot(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"trace", "run-1"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"trace", "run-1", "--limit", "2", "--cursor", "trace-cur", "--since", "2026-05-13T10:00:00Z"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -384,6 +389,60 @@ func TestTraceUsesRunTraceSnapshot(t *testing.T) {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
 		}
+	}
+	if strings.TrimSpace(stderr.String()) != "" {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestTraceSnapshotFiltersUseOmittedRunResolver(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	server, requests := newDiagnosticSuccessServer(t, func(req jsonRPCRequest, callIndex int) map[string]any {
+		switch callIndex {
+		case 0:
+			if req.Method != "run.list" {
+				t.Fatalf("method[%d] = %q, want run.list", callIndex, req.Method)
+			}
+			wantParams := map[string]any{"status": "running", "limit": float64(1)}
+			if !reflect.DeepEqual(req.Params, wantParams) {
+				t.Fatalf("params[%d] = %#v, want %#v", callIndex, req.Params, wantParams)
+			}
+			return map[string]any{"runs": []any{validDiagnosticRunHeaderWithStatus("active-run", "running")}}
+		case 1:
+			if req.Method != "run.trace" {
+				t.Fatalf("method[%d] = %q, want run.trace", callIndex, req.Method)
+			}
+			wantParams := map[string]any{
+				"run_id": "active-run",
+				"limit":  float64(3),
+				"cursor": "trace-cur",
+				"since":  "2026-05-13T10:00:00Z",
+			}
+			if !reflect.DeepEqual(req.Params, wantParams) {
+				t.Fatalf("params[%d] = %#v, want %#v", callIndex, req.Params, wantParams)
+			}
+			return map[string]any{"trace": []any{map[string]any{
+				"event_id":         "event-active",
+				"event_name":       "scan.requested",
+				"event_created_at": "2026-05-13T10:00:01Z",
+			}}}
+		default:
+			t.Fatalf("unexpected request[%d]: %#v", callIndex, req)
+		}
+		return nil
+	})
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"trace", "--limit", "3", "--cursor", "trace-cur", "--since", "2026-05-13T10:00:00Z"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if len(*requests) != 2 {
+		t.Fatalf("requests = %d, want run.list then run.trace", len(*requests))
+	}
+	if !strings.Contains(stdout.String(), "run trace: run_id=active-run") {
+		t.Fatalf("stdout = %q, want resolved run trace header", stdout.String())
 	}
 	if strings.TrimSpace(stderr.String()) != "" {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
@@ -594,7 +653,14 @@ func TestDiagnosticsRejectInvalidInputBeforeRequest(t *testing.T) {
 		{name: "runs invalid limit", args: []string{"runs", "--limit", "0"}, wantStderr: "--limit must be between 1 and 500"},
 		{name: "runs invalid since", args: []string{"runs", "--since", "yesterday"}, wantStderr: "--since must be an RFC3339 timestamp"},
 		{name: "trace extra arg", args: []string{"trace", "run-1", "extra"}, wantStderr: "accepts at most 1 arg(s)"},
-		{name: "trace unknown legacy flag", args: []string{"trace", "run-1", "--limit", "5"}, wantStderr: "unknown flag"},
+		{name: "trace invalid limit low", args: []string{"trace", "run-1", "--limit", "0"}, wantStderr: "--limit must be between 1 and 2000"},
+		{name: "trace invalid limit high", args: []string{"trace", "run-1", "--limit", "2001"}, wantStderr: "--limit must be between 1 and 2000"},
+		{name: "trace invalid since", args: []string{"trace", "run-1", "--since", "yesterday"}, wantStderr: "--since must be an RFC3339 timestamp"},
+		{name: "trace blank cursor", args: []string{"trace", "run-1", "--cursor", " "}, wantStderr: "--cursor must not be empty"},
+		{name: "trace follow rejects limit", args: []string{"trace", "run-1", "--follow", "--limit", "5"}, wantStderr: "--limit is not supported with --follow"},
+		{name: "trace follow rejects cursor", args: []string{"trace", "run-1", "--follow", "--cursor", "cur"}, wantStderr: "--cursor is not supported with --follow"},
+		{name: "trace follow rejects since", args: []string{"trace", "run-1", "--follow", "--since", "2026-05-13T10:00:00Z"}, wantStderr: "--since is not supported with --follow"},
+		{name: "trace richer filter still unpromoted", args: []string{"trace", "run-1", "--event-name", "scan.requested"}, wantStderr: "unknown flag"},
 		{name: "status extra arg", args: []string{"status", "run-1", "extra"}, wantStderr: "accepts at most 1 arg(s)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -621,6 +687,7 @@ func TestDiagnosticsRequireAPITokenBeforeRequest(t *testing.T) {
 	for _, args := range [][]string{
 		{"runs"},
 		{"trace", "run-1"},
+		{"trace", "run-1", "--limit", "2", "--cursor", "cur", "--since", "2026-05-13T10:00:00Z"},
 		{"trace", "run-1", "--follow"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
