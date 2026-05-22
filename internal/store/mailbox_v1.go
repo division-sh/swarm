@@ -306,6 +306,9 @@ func (s *PostgresStore) DecideV1MailboxItem(ctx context.Context, input MailboxV1
 			if err := json.Unmarshal(existing.Response, &result); err != nil {
 				return MailboxV1DecisionOutcome{}, fmt.Errorf("decode api idempotency mailbox response: %w", err)
 			}
+			if err := normalizeMailboxV1DecisionReplayResult(ctx, tx, &result); err != nil {
+				return MailboxV1DecisionOutcome{}, err
+			}
 			if err := tx.Commit(); err != nil {
 				return MailboxV1DecisionOutcome{}, fmt.Errorf("commit v1 mailbox idempotency replay tx: %w", err)
 			}
@@ -448,6 +451,47 @@ func prepareMailboxV1IdempotencyRequest(input MailboxV1DecisionRequest) (APIIdem
 	}
 	req.Now = req.Now.UTC()
 	return req, true, nil
+}
+
+func normalizeMailboxV1DecisionReplayResult(ctx context.Context, q execQueryer, result *MailboxV1DecisionResult) error {
+	if result == nil || strings.TrimSpace(result.DownstreamEventID) == "" {
+		return nil
+	}
+	if strings.TrimSpace(result.DownstreamEventName) == "" {
+		eventName, err := loadMailboxV1DecisionReplayEventName(ctx, q, result.DownstreamEventID)
+		if err != nil {
+			return err
+		}
+		result.DownstreamEventName = eventName
+	}
+	if result.DownstreamSubscribers == nil {
+		subscribers := []string{}
+		result.DownstreamSubscribers = &subscribers
+	}
+	if strings.TrimSpace(result.DownstreamSubscriberSource) == "" {
+		result.DownstreamSubscriberSource = "unavailable"
+	}
+	return nil
+}
+
+func loadMailboxV1DecisionReplayEventName(ctx context.Context, q execQueryer, eventID string) (string, error) {
+	var eventName string
+	err := q.QueryRowContext(ctx, `
+		SELECT event_name
+		FROM events
+		WHERE event_id = $1::uuid
+	`, strings.TrimSpace(eventID)).Scan(&eventName)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return "", fmt.Errorf("load mailbox idempotency replay event name: event %s not found", strings.TrimSpace(eventID))
+	case err != nil:
+		return "", fmt.Errorf("load mailbox idempotency replay event name: %w", err)
+	}
+	eventName = strings.TrimSpace(eventName)
+	if eventName == "" {
+		return "", fmt.Errorf("load mailbox idempotency replay event name: event %s has empty event_name", strings.TrimSpace(eventID))
+	}
+	return eventName, nil
 }
 
 func (s *PostgresStore) appendMailboxV1ApprovalEventTx(ctx context.Context, tx *sql.Tx, evt events.Event) error {
