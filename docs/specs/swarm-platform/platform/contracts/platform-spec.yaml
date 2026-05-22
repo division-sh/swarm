@@ -5722,12 +5722,12 @@ cli_specification:
     output_contract:
       promoted_by: '#848'
       canonical_owner: docs/specs/swarm-platform/platform/contracts/platform-spec.yaml#cli_specification.foundations.output_contract
-      future_runtime_owner: cmd/swarm shared output-mode renderer
+      future_runtime_owner: cmd/swarm shared output-mode/color policy renderer
       scope: >
         Merge-bearing CLI v2 authority for successful command output mode selection and shared rendering.
-        This contract covers default text, `--json`, streaming NDJSON, `--quiet`, stdout/stderr separation,
-        command exceptions, and downstream implementation obligations. It does not implement CLI flags or
-        renderer code by itself.
+        This contract covers default text, `--json`, streaming NDJSON, `--quiet`, successful-output color
+        control, stdout/stderr separation, command exceptions, and downstream implementation obligations. It does
+        not implement CLI flags or renderer code by itself.
       mode_selection:
         default_mode: default_text
         explicit_modes:
@@ -5742,6 +5742,46 @@ cli_specification:
           A command MUST NOT accept an output-mode flag unless that invocation renders through the shared
           output-mode owner or is explicitly listed as an exception that fails before side effects. Adding flags
           that silently fall back to text output is invalid.
+      color_control:
+        promoted_by: '#931'
+        implementation_status: implemented for current shared-renderer first-slice consumers only
+        canonical_owner: cmd/swarm shared output-mode/color policy renderer
+        accepted_sources:
+          flag: --no-color
+          environment: NO_COLOR
+        precedence_rule: >
+          `--no-color` and any non-empty `NO_COLOR` value disable ANSI color in human-readable default text for
+          command invocations that consume the shared output owner. They are orthogonal controls, not output modes,
+          and they MUST NOT change `--json`, streaming JSON/NDJSON, `--quiet`, error exit-code classification, or
+          stderr diagnostics.
+        default_text_rule: >
+          Shared-renderer consumers route default text through the color policy owner. If color is disabled, ANSI
+          escape sequences are removed by the shared owner before stdout emission. Current first-slice default text
+          is ANSI-free by default, and that invariant is tested through the same shared owner.
+        machine_output_rule: >
+          JSON and quiet output are machine-readable and MUST remain ANSI-free by command contract. The color policy
+          MUST NOT post-process or reshape machine output; `--no-color --json` and `--no-color --quiet` are valid
+          and produce the same successful output as their machine mode without `--no-color`.
+        unsupported_surface_rule: >
+          `--no-color` is not a root/global flag and is not accepted by command surfaces that do not consume the
+          shared output owner. Root/help/completion, `swarm serve`, retired namespaces, blocked/absent command rows,
+          and split sibling command families MUST fail before side effects if `--no-color` is supplied there.
+        split_sources:
+          config_no_color: >
+            A config-file `no_color` key is not promoted by this first slice. Color config-file precedence remains
+            split from the shared renderer flag/env owner until a later #844 child promotes it.
+          log_level: >
+            `--log-level`, config-file `log_level`, and universal/repeatable verbosity are not color controls and
+            remain split logging/output work.
+        consumers:
+        - version
+        - verify
+        - health
+        - runs
+        - status
+        - conversations_list
+        - conversation_view
+        - conversation_turn
       stdout_stderr_boundary: >
         Successful load-bearing output renders only to stdout. Errors, warnings, retired-namespace migration text,
         validation failures, auth failures, transport/API failures, and diagnostics render to stderr under
@@ -5891,6 +5931,24 @@ cli_specification:
               json_shape: conversation.get_turn result object
               quiet_values:
               - session_id, turn_index, and outcome/status summary
+        implemented_color_policy_first_slice:
+          implemented_by: '#931'
+          failure_class: runtime.cli.v2.output_color_precedence_for_shared_renderer_consumers
+          owner: cmd/swarm shared output-mode/color policy renderer
+          status: implemented
+          rule: >
+            These consumers accept `--no-color` and consume non-empty `NO_COLOR` through the shared renderer owner.
+            The policy applies only to default human text. Machine-readable JSON/quiet output and error rendering
+            are not rewritten by the color policy. Unsupported surfaces remain fail-closed before side effects.
+          consumers:
+          - version
+          - verify
+          - health
+          - runs
+          - status
+          - conversations_list
+          - conversation_view
+          - conversation_turn
         implemented_consumer_residuals:
           logs: >
             `swarm logs` is implemented for default-text snapshot and follow in #876 and is no longer an absent
@@ -5942,7 +6000,7 @@ cli_specification:
             Absent or blocked command rows do not receive output-mode implementation from #848. Their future
             implementation children consume this contract only after their command/API/runtime owner is promoted.
       split_siblings:
-      - '#844 universal flag/config/env precedence'
+      - '#844 universal flag/config/env precedence; config-file no_color and logging precedence remain split'
       - '#846 error-channel and exit-code classification; closed first slice'
       - '#839 retired namespace migration cleanup'
       - '#743 swarm run behavior and follow semantics; output-mode implementation may consume this contract later'
@@ -5950,8 +6008,10 @@ cli_specification:
       - API/runtime method semantics
       - JSON error-body or rich structured-error output unless a later tracked child promotes it
       implementation_proof_requirements:
-      - grep proof that implemented output-mode behavior consumes one shared cmd/swarm output-mode owner
+      - grep proof that implemented output-mode/color behavior consumes one shared cmd/swarm output owner
       - tests proving default text, JSON/NDJSON, and quiet behavior for every command row in the approved slice
+      - tests proving `--no-color` and `NO_COLOR` consume the shared owner, strip ANSI from default text, and do not
+        reshape JSON/quiet output
       - tests proving unsupported exception rows fail before side effects
       - stdout/stderr tests proving successful machine-readable stdout is not contaminated by diagnostics/errors
       - no direct DB/store/runtime/EventBus reads for API-backed output rendering
@@ -6035,7 +6095,9 @@ cli_specification:
         rejected_keys:
           api_token: Inline bearer tokens in config files are not promoted.
           output_format: Split to #848 output renderer implementation.
-          no_color: Split to output/color universal flag work.
+          no_color: >
+            Not promoted as a config-file key by #931. #931 accepts only `--no-color` and non-empty `NO_COLOR`
+            through the shared output owner for current first-slice consumers.
           contracts_path: Split to contract-path resolution.
           platform_spec_path: Split to contract-path resolution.
           log_level: Split to logging/output work.
