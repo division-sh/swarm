@@ -6544,7 +6544,7 @@ cli_specification:
       defaulting: If run-id is omitted, resolve the target through run.list with active-run preference.
       behavior: Run-scoped operational status projection. This is the v2 replacement for `swarm investigate run`.
     trace:
-      command: swarm trace [<run-id>] [--follow]
+      command: swarm trace [<run-id>] [--since <timestamp>] [--limit <n>] [--cursor <cursor>] [--follow]
       tier: must_have
       implementation_status: implemented
       owners: /v1/rpc run.trace for snapshot; /v1/ws run.subscribe_trace for --follow
@@ -6562,9 +6562,16 @@ cli_specification:
           `since` is an RFC3339/RFC3339Nano timestamp watermark. The server returns trace rows whose canonical
           materialization watermark is strictly after `since`, where that watermark is the greatest available
           timestamp across the joined event, delivery, session, and turn fields owned by RunTraceRow.
-        current_cli_consumer_status: >
-          The current implemented CLI command remains `swarm trace [<run-id>] [--follow]`; CLI flags that consume
-          the promoted snapshot filter contract require a later implementation child and MUST use this API owner.
+        current_cli_consumer_status: implemented_by_918
+        cli_consumer_behavior: >
+          Snapshot `swarm trace` consumes `--since`, `--limit`, and `--cursor` by sending the exact promoted params
+          to `/v1/rpc run.trace`. These snapshot flags are invalid with `--follow` and must fail before any API or
+          WebSocket request; follow mode remains the base `/v1/ws run.subscribe_trace` consumer.
+        proof_expectations:
+        - exact /v1/rpc run.trace params for explicit run ids and omitted-run resolution through run.list
+        - invalid --since, out-of-range --limit, blank --cursor, and --follow plus snapshot filters fail before API/WS calls
+        - missing token fails before API calls through the shared CLI API client
+        - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api, /rpc, /ws, or fallback token paths
         split_tail:
           until: Not promoted; the current run-debug trace owner has no upper-bound watermark contract.
           event_name: Not promoted; event-name filtering requires a typed RunTraceFilter owner before CLI use.

@@ -22,6 +22,12 @@ type diagnosticRunListOptions struct {
 type diagnosticTraceOptions struct {
 	apiOptions rootCommandOptions
 	follow     bool
+	since      string
+	limit      int
+	cursor     string
+	sinceSet   bool
+	limitSet   bool
+	cursorSet  bool
 }
 
 type diagnosticRunOptions struct {
@@ -168,6 +174,9 @@ func newTraceCommand(opts rootCommandOptions) *cobra.Command {
 		Short: "Print or follow a run trace through v1 API owners.",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			traceOpts.sinceSet = cmd.Flags().Changed("since")
+			traceOpts.limitSet = cmd.Flags().Changed("limit")
+			traceOpts.cursorSet = cmd.Flags().Changed("cursor")
 			runID := ""
 			if len(args) == 1 {
 				runID = args[0]
@@ -176,6 +185,9 @@ func newTraceCommand(opts rootCommandOptions) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&traceOpts.follow, "follow", false, "Follow live trace rows through /v1/ws run.subscribe_trace")
+	cmd.Flags().StringVar(&traceOpts.since, "since", "", "Snapshot-only RFC3339 trace materialization watermark")
+	cmd.Flags().IntVar(&traceOpts.limit, "limit", 0, "Snapshot-only page size, 1-2000")
+	cmd.Flags().StringVar(&traceOpts.cursor, "cursor", "", "Snapshot-only pagination cursor")
 	bindCLIAPIConnectionFlags(cmd, &traceOpts.apiOptions)
 	return cmd
 }
@@ -352,6 +364,10 @@ func runDiagnosticRunCommand(ctx context.Context, out, errOut io.Writer, opts di
 }
 
 func runDiagnosticTraceCommand(ctx context.Context, out, errOut io.Writer, opts diagnosticTraceOptions, runID string) error {
+	snapshotParams, err := opts.snapshotParams()
+	if err != nil {
+		return err
+	}
 	client, err := newCLIAPIClient(opts.apiOptions)
 	if err != nil {
 		return returnCLIAPIError(errOut, err, diagnosticRunAPIErrorClassifier())
@@ -366,9 +382,9 @@ func runDiagnosticTraceCommand(ctx context.Context, out, errOut io.Writer, opts 
 	if opts.follow {
 		return followDiagnosticTraceCommand(ctx, out, errOut, client, runID)
 	}
-	params := map[string]any{"run_id": runID}
+	snapshotParams["run_id"] = runID
 	var result diagnosticRunTraceResult
-	if err := client.call(ctx, "run.trace", params, &result); err != nil {
+	if err := client.call(ctx, "run.trace", snapshotParams, &result); err != nil {
 		return returnCLIAPIError(errOut, err, diagnosticRunAPIErrorClassifier())
 	}
 	if err := validateDiagnosticRunTraceResult(result); err != nil {
@@ -376,6 +392,46 @@ func runDiagnosticTraceCommand(ctx context.Context, out, errOut io.Writer, opts 
 	}
 	writeDiagnosticRunTrace(out, runID, result)
 	return nil
+}
+
+func (o diagnosticTraceOptions) snapshotParams() (map[string]any, error) {
+	if o.follow {
+		for _, flag := range []struct {
+			name string
+			set  bool
+		}{
+			{name: "--since", set: o.sinceSet},
+			{name: "--limit", set: o.limitSet},
+			{name: "--cursor", set: o.cursorSet},
+		} {
+			if flag.set {
+				return nil, fmt.Errorf("%s is not supported with --follow", flag.name)
+			}
+		}
+		return map[string]any{}, nil
+	}
+	params := map[string]any{}
+	if o.limitSet {
+		if o.limit < 1 || o.limit > 2000 {
+			return nil, fmt.Errorf("--limit must be between 1 and 2000")
+		}
+		params["limit"] = o.limit
+	}
+	if o.cursorSet {
+		cursor := strings.TrimSpace(o.cursor)
+		if cursor == "" {
+			return nil, fmt.Errorf("--cursor must not be empty")
+		}
+		params["cursor"] = cursor
+	}
+	if o.sinceSet {
+		since := strings.TrimSpace(o.since)
+		if err := validateRFC3339Flag("--since", since); err != nil {
+			return nil, err
+		}
+		params["since"] = since
+	}
+	return params, nil
 }
 
 func followDiagnosticTraceCommand(ctx context.Context, out, errOut io.Writer, client *cliAPIClient, runID string) error {
