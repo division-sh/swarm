@@ -28,6 +28,10 @@ func newRuntimeEventBus(store runtimebus.EventStore, logger *RuntimeLogger, sour
 	})
 }
 
+// newRuntimePayloadValidator owns canonical event-store admission validation.
+// Supported emit surfaces validate producer-authored payloads before publish;
+// this validator is the final pre-persistence guard for every event and the
+// primary guard for ingress/direct/store paths without a producer-surface owner.
 func newRuntimePayloadValidator(logger *RuntimeLogger, schemas map[string]runtimecontracts.EventSchema) runtimebus.PayloadValidator {
 	return func(eventType string, payload []byte) error {
 		eventType = strings.TrimSpace(eventType)
@@ -62,6 +66,9 @@ func newRuntimePayloadValidator(logger *RuntimeLogger, schemas map[string]runtim
 	}
 }
 
+// payloadForCanonicalEventValidation validates only the event payload contract.
+// Runtime-owned canonical context is envelope/admission metadata unless the
+// target event schema explicitly declares the same field as payload.
 func payloadForCanonicalEventValidation(payload map[string]any, schema map[string]any) map[string]any {
 	if len(payload) == 0 || schema == nil {
 		return payload

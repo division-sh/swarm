@@ -548,6 +548,31 @@ func TestEventBusPublishDirect_PayloadValidatorFailureAbortsPublish(t *testing.T
 	}
 }
 
+func TestEventBusCheckDirectRecipients_PayloadValidatorFailureAbortsBeforeRecipientPlanning(t *testing.T) {
+	eb, err := runtimebus.NewEventBusWithOptions(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{
+		PayloadValidator: func(string, []byte) error {
+			return context.DeadlineExceeded
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+
+	status, err := eb.CheckDirectRecipients(context.Background(), events.Event{
+		Type:    "task.completed",
+		Payload: []byte(`{}`),
+	}, []string{"agent-a"})
+	if err == nil || !errors.Is(err, runtimebus.ErrPayloadValidation) {
+		t.Fatalf("expected payload validator failure, got %v", err)
+	}
+	if !slices.Equal(status.Requested, []string{"agent-a"}) {
+		t.Fatalf("requested recipients = %#v, want agent-a", status.Requested)
+	}
+	if len(status.Recipients) != 0 || len(status.Filtered) != 0 || len(status.Missing) != 0 {
+		t.Fatalf("recipient status after validation failure = %#v, want no planning result", status)
+	}
+}
+
 func TestEventBusPublishDirect_PersistsButDoesNotMarkDeliveredBeforeRealFanOut(t *testing.T) {
 	store := &descriptorAwareEventStore{
 		descriptors: []runtimebus.ActiveAgentDescriptor{

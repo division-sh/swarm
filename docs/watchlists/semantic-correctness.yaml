@@ -386,8 +386,11 @@ nodes:
         - dead contract/type residue for PayloadTransformSpec after retired authored surfaces stopped being accepted on supported handler/rule/fan_out paths
         - stale verify/report wording and dead-event audit text that still described payload_transform-era proof surfaces
         - supported proof-harness allowlists and active prose/reference surfaces that still described payload_transform, fan_out.emit_per_item, or implicit passthrough as current behavior
-      - adjacent split retained after this node:
-        - generic post-publish canonical-event validation cleanup remains outside this migration class unless later promoted
+      - adjacent split promoted by #472:
+        - canonical event-store admission validation remains intentionally separate from supported emit-surface validation;
+          emit surfaces own producer-authored payload proof before publish, while runtime/store admission validates all events
+          before persistence and residual ingress/store append paths; routing, delivery, source/target, and recipient semantics
+          stay split to #926
       - adjacent supporting migration tracked by #605:
         - canonical event-level swarm metadata now owns non-derivable external/lifecycle topology proof so flat event payload fields and verifier metadata no longer share ambiguous underscore ownership
     representative_issues:
@@ -399,6 +402,7 @@ nodes:
       - 466
       - 468
       - 470
+      - 472
       - 605
     common_framing_mistakes:
       too_broad:
