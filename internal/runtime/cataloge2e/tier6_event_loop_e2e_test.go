@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strings"
 	"testing"
-	"time"
 )
 
 var tier6EventLoopFixtures = []string{
@@ -36,10 +35,10 @@ func TestTier6EventLoopCatalogFixtures_RealRuntime(t *testing.T) {
 			h := newRuntimeHarness(t, fixtureRoot, false)
 			h.seedEntityFields(expected)
 			if len(expected.Trigger.Concurrent) > 0 {
-				h.publishConcurrentAndWait(expected.Trigger.Concurrent, 2*time.Second)
+				h.publishConcurrentAndWait(expected.Trigger.Concurrent, catalogRuntimePublishTimeout)
 			} else {
 				for _, step := range expected.triggerSequence() {
-					h.publishAndWait(step, 2*time.Second)
+					h.publishAndWait(step, catalogRuntimePublishTimeout)
 				}
 			}
 			assertCatalogRuntimeOutcome(t, h, expected)

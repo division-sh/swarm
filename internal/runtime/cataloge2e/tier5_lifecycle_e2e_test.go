@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strings"
 	"testing"
-	"time"
 )
 
 type catalogExcludedFixture struct {
@@ -48,9 +47,9 @@ func TestTier5LifecycleCatalogFixtures_RealRuntime(t *testing.T) {
 				return
 			}
 			for _, step := range expected.triggerSequence() {
-				h.publishAndWait(step, 2*time.Second)
+				h.publishAndWait(step, catalogRuntimePublishTimeout)
 			}
-			h.waitForExpectedEmittedEvents(expected, 2*time.Second)
+			h.waitForExpectedEmittedEvents(expected, catalogRuntimePublishTimeout)
 			assertCatalogRuntimeOutcome(t, h, expected)
 		})
 	}

@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strings"
 	"testing"
-	"time"
 )
 
 var tier3ListProcessingFixtures = []string{
@@ -39,7 +38,7 @@ func TestTier3ListProcessingCatalogFixtures_RealRuntime(t *testing.T) {
 			h := newRuntimeHarness(t, fixtureRoot, false)
 			h.seedEntityFields(expected)
 			for _, step := range expected.triggerSequence() {
-				h.publishAndWait(step, 2*time.Second)
+				h.publishAndWait(step, catalogRuntimePublishTimeout)
 			}
 			assertCatalogRuntimeOutcome(t, h, expected)
 		})

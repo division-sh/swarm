@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strings"
 	"testing"
-	"time"
 )
 
 var tier11FlowCompositionFixtures = []string{
@@ -55,7 +54,7 @@ func TestTier11FlowCompositionCatalogFixtures_RealRuntime(t *testing.T) {
 			h := newRuntimeHarness(t, fixtureRoot, startRuntime)
 			h.seedEntityFields(expected)
 			for _, step := range expected.triggerSequence() {
-				h.publishAndWait(step, 5*time.Second)
+				h.publishAndWait(step, catalogRuntimePublishTimeout)
 			}
 			assertCatalogRuntimeOutcome(t, h, expected)
 		})
