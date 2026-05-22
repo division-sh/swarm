@@ -904,6 +904,7 @@ func TestDiagnosticsRejectInvalidInputBeforeRequest(t *testing.T) {
 		{name: "trace invalid limit high", args: []string{"trace", "run-1", "--limit", "2001"}, wantStderr: "--limit must be between 1 and 2000"},
 		{name: "trace invalid since", args: []string{"trace", "run-1", "--since", "yesterday"}, wantStderr: "--since must be an RFC3339 timestamp"},
 		{name: "trace blank cursor", args: []string{"trace", "run-1", "--cursor", " "}, wantStderr: "--cursor must not be empty"},
+		{name: "trace no retry requires follow", args: []string{"trace", "run-1", "--no-retry"}, wantStderr: "--no-retry requires --follow"},
 		{name: "trace follow rejects limit", args: []string{"trace", "run-1", "--follow", "--limit", "5"}, wantStderr: "--limit is not supported with --follow"},
 		{name: "trace follow rejects cursor", args: []string{"trace", "run-1", "--follow", "--cursor", "cur"}, wantStderr: "--cursor is not supported with --follow"},
 		{name: "trace follow rejects since", args: []string{"trace", "run-1", "--follow", "--since", "2026-05-13T10:00:00Z"}, wantStderr: "--since is not supported with --follow"},

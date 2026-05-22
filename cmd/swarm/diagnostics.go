@@ -444,6 +444,9 @@ func (o diagnosticTraceOptions) snapshotParams() (map[string]any, error) {
 		}
 		return map[string]any{}, nil
 	}
+	if o.noRetry {
+		return nil, fmt.Errorf("--no-retry requires --follow")
+	}
 	params := map[string]any{}
 	if o.limitSet {
 		if o.limit < 1 || o.limit > 2000 {

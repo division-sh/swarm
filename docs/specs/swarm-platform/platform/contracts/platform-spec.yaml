@@ -5591,9 +5591,12 @@ cli_specification:
           api_specification.method_catalog.run.trace and
           cli_specification.command_catalog.trace.promoted_trace_filter_contract. The promoted API owner accepts
           `limit`, `cursor`, and `since`; `since` filters by the canonical RunTraceRow materialization watermark
-          used by the run-debug trace owner. Review-artifact `until`, event-name, subscriber, entity-id,
-          delivery-status, `--include-payload`, `-f`, subscription retry/`--no-retry`, and multi-run `--all`
-          remain explicitly unpromoted split tails until later gated children promote their own canonical owners.
+          used by the run-debug trace owner. Trace-specific `swarm trace --follow` subscription recovery and
+          `--no-retry` are promoted in
+          cli_specification.command_catalog.trace.promoted_trace_follow_recovery_contract by #928. Review-artifact
+          `until`, event-name, subscriber, entity-id, delivery-status, `--include-payload`, `-f`, shared `swarm run`
+          recovery, and multi-run `--all` remain explicitly unpromoted split tails until later gated children promote
+          their own canonical owners.
       mailbox_decision_sheet_and_result_ux:
         disposition: tracked_child
         tracker: '#856'
@@ -6666,6 +6669,7 @@ cli_specification:
         - --since with --follow
         - --limit with --follow
         - --cursor with --follow
+        - --no-retry without --follow
         - direct --replay-since flag; replay_since is an internal recovery parameter, not a user-facing trace flag
         proof_expectations:
         - initial and recovered WebSocket request-shape tests prove exact run.subscribe_trace params and replay_since handling
