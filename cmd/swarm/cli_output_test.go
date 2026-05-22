@@ -325,10 +325,203 @@ func TestCLIOutputModesForConversationConsumers(t *testing.T) {
 	}
 }
 
+func TestCLIOutputNoColorStripsDefaultText(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		opts cliOutputOptions
+		env  string
+		want string
+	}{
+		{name: "default preserves ansi", want: "\x1b[32mok\x1b[0m\n"},
+		{name: "flag strips ansi", opts: cliOutputOptions{noColor: true}, want: "ok\n"},
+		{name: "environment strips ansi", env: "1", want: "ok\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("NO_COLOR", tc.env)
+
+			var stdout, stderr bytes.Buffer
+			err := renderCLIOutput(&stdout, &stderr, tc.opts, map[string]string{"status": "ok"}, func(w io.Writer) {
+				_, _ = io.WriteString(w, "\x1b[32mok\x1b[0m\n")
+			}, nil)
+			if err != nil {
+				t.Fatalf("renderCLIOutput returned error: %v", err)
+			}
+			if got := stdout.String(); got != tc.want {
+				t.Fatalf("stdout = %q, want %q", got, tc.want)
+			}
+			assertEmptyStderr(t, stderr.String())
+		})
+	}
+}
+
+func TestCLIOutputNoColorForSharedRendererConsumers(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		args   func(*testing.T) []string
+		repo   func(*testing.T) string
+		method string
+		result map[string]any
+	}{
+		{
+			name: "version local",
+			args: func(*testing.T) []string { return []string{"version"} },
+			repo: func(*testing.T) string { return repoRoot() },
+		},
+		{
+			name:   "version server",
+			args:   func(*testing.T) []string { return []string{"version", "--server"} },
+			method: "health.check",
+			result: validVersionHealthResult(),
+		},
+		{
+			name: "verify",
+			args: func(t *testing.T) []string {
+				return []string{"verify", "--contracts", outputModeVerifyFixture(t)}
+			},
+			repo: func(*testing.T) string { return repoRoot() },
+		},
+		{
+			name:   "health",
+			args:   func(*testing.T) []string { return []string{"health"} },
+			method: "health.check",
+			result: validVersionHealthResult(),
+		},
+		{
+			name:   "runs",
+			args:   func(*testing.T) []string { return []string{"runs"} },
+			method: "run.list",
+			result: map[string]any{"runs": []any{validDiagnosticRunHeader("run-1"), validDiagnosticRunHeader("run-2")}},
+		},
+		{
+			name:   "status",
+			args:   func(*testing.T) []string { return []string{"status", "run-1"} },
+			method: "run.diagnose",
+			result: map[string]any{
+				"run":               validDiagnosticRunHeader("run-1"),
+				"operational_state": "stalled",
+				"blocking_layer":    "delivery_lifecycle",
+				"blocking_reason":   "no_active_deliveries",
+				"heuristics":        []any{"dead letters exist for this run"},
+			},
+		},
+		{
+			name:   "conversations list",
+			args:   func(*testing.T) []string { return []string{"conversations", "list"} },
+			method: conversationListMethod,
+			result: map[string]any{"conversations": []map[string]any{validConversationSummary("sess-1")}},
+		},
+		{
+			name:   "conversation view",
+			args:   func(*testing.T) []string { return []string{"conversation", "view", "sess-1"} },
+			method: conversationGetMethod,
+			result: validConversationDetail("sess-1"),
+		},
+		{
+			name:   "conversation turn",
+			args:   func(*testing.T) []string { return []string{"conversation", "turn", "sess-1", "2"} },
+			method: conversationGetTurnMethod,
+			result: validConversationTurnDetail("sess-1", 2),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, mode := range []struct {
+				name       string
+				outputMode string
+				env        string
+				flag       bool
+			}{
+				{name: "default"},
+				{name: "flag", flag: true},
+				{name: "environment", env: "1"},
+				{name: "json flag", outputMode: "--json", flag: true},
+				{name: "json environment", outputMode: "--json", env: "1"},
+				{name: "quiet flag", outputMode: "--quiet", flag: true},
+				{name: "quiet environment", outputMode: "--quiet", env: "1"},
+			} {
+				t.Run(mode.name, func(t *testing.T) {
+					t.Setenv("SWARM_API_TOKEN", "test-token")
+					t.Setenv("NO_COLOR", mode.env)
+
+					args := append([]string{}, tc.args(t)...)
+					if mode.outputMode != "" {
+						args = append(args, mode.outputMode)
+					}
+					if mode.flag {
+						args = append(args, "--no-color")
+					}
+					repo := t.TempDir()
+					if tc.repo != nil {
+						repo = tc.repo(t)
+					}
+					opts := defaultRootCommandOptions()
+					var calls *atomic.Int32
+					if tc.method != "" {
+						server, rpcCalls := newCLIOutputColorPolicyRPCServer(t, tc.method, tc.result)
+						defer server.Close()
+						opts = testRootCommandOptions(server)
+						calls = rpcCalls
+					}
+
+					var stdout, stderr bytes.Buffer
+					code := executeRootCommandWithOptions(context.Background(), repo, args, &stdout, &stderr, opts)
+					if code != 0 {
+						t.Fatalf("%s code = %d stdout=%s stderr=%s", strings.Join(args, " "), code, stdout.String(), stderr.String())
+					}
+					if strings.TrimSpace(stdout.String()) == "" {
+						t.Fatalf("%s stdout is empty, want successful output", strings.Join(args, " "))
+					}
+					assertNoANSI(t, stdout.String())
+					if mode.outputMode == "--json" {
+						decodeOutputJSON[map[string]any](t, stdout.String())
+					}
+					assertEmptyStderr(t, stderr.String())
+					if calls != nil && calls.Load() != 1 {
+						t.Fatalf("%s RPC calls = %d, want 1", strings.Join(args, " "), calls.Load())
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestCLIOutputNoColorDoesNotRewriteMachineModes(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+		env  string
+	}{
+		{name: "json flag", args: []string{"version", "--json", "--no-color"}},
+		{name: "json environment", args: []string{"version", "--json"}, env: "1"},
+		{name: "quiet flag", args: []string{"version", "--quiet", "--no-color"}},
+		{name: "quiet environment", args: []string{"version", "--quiet"}, env: "1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("NO_COLOR", tc.env)
+
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), repoRoot(), tc.args, &stdout, &stderr, defaultRootCommandOptions())
+			if code != 0 {
+				t.Fatalf("%s code = %d stdout=%s stderr=%s", strings.Join(tc.args, " "), code, stdout.String(), stderr.String())
+			}
+			assertNoANSI(t, stdout.String())
+			assertEmptyStderr(t, stderr.String())
+			if stringSliceContains(tc.args, "--json") {
+				result := decodeOutputJSON[versionOutputResult](t, stdout.String())
+				if result.BinaryVersion != binaryVersion {
+					t.Fatalf("version json = %#v, want binary version %q", result, binaryVersion)
+				}
+			} else if got := stdout.String(); got != binaryVersion+"\n" {
+				t.Fatalf("version quiet stdout = %q, want binary version", got)
+			}
+		})
+	}
+}
+
 func TestCLIOutputModeCollisionFailsBeforeSideEffects(t *testing.T) {
 	t.Setenv("SWARM_API_TOKEN", "test-token")
 
 	for _, args := range [][]string{
+		{"version", "--json", "--quiet", "--no-color"},
 		{"version", "--server", "--json", "--quiet"},
 		{"health", "--json", "--quiet"},
 		{"runs", "--json", "--quiet"},
@@ -398,10 +591,17 @@ func TestCLIOutputModeExceptionRowsFailClosedBeforeSideEffects(t *testing.T) {
 		wantStderr string
 	}{
 		{name: "root", args: []string{"--json", "runs"}, wantStderr: "unknown flag: --json"},
+		{name: "root no-color", args: []string{"--no-color", "runs"}, wantStderr: "unknown flag: --no-color"},
 		{name: "completion", args: []string{"completion", "bash", "--json"}, wantStderr: "unknown flag"},
+		{name: "completion no-color", args: []string{"completion", "bash", "--no-color"}, wantStderr: "unknown flag"},
 		{name: "serve", args: []string{"serve", "--json"}, wantStderr: "unknown flag"},
+		{name: "serve no-color", args: []string{"serve", "--no-color"}, wantStderr: "unknown flag"},
+		{name: "serve log-level", args: []string{"serve", "--log-level", "debug"}, wantStderr: "unknown flag"},
 		{name: "retired investigate", args: []string{"investigate", "runs", "--json"}, wantStderr: "retired in CLI v2"},
+		{name: "retired investigate no-color", args: []string{"investigate", "runs", "--no-color"}, wantStderr: "retired in CLI v2"},
 		{name: "absent forkchat", args: []string{"forkchat", "--json"}, wantStderr: "unknown command"},
+		{name: "absent forkchat no-color", args: []string{"forkchat", "--no-color"}, wantStderr: "unknown command"},
+		{name: "split log-level", args: []string{"runs", "--log-level", "debug"}, wantStderr: "unknown flag"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			beforeRPC := rpcCalls.Load()
@@ -446,6 +646,30 @@ func assertEmptyStderr(t *testing.T, raw string) {
 	if strings.TrimSpace(raw) != "" {
 		t.Fatalf("stderr = %q, want empty", raw)
 	}
+}
+
+func assertNoANSI(t *testing.T, raw string) {
+	t.Helper()
+	if cliANSISequencePattern.MatchString(raw) {
+		t.Fatalf("output contains ANSI escape sequence: %q", raw)
+	}
+}
+
+func newCLIOutputColorPolicyRPCServer(t *testing.T, wantMethod string, result map[string]any) (*httptest.Server, *atomic.Int32) {
+	t.Helper()
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		var req jsonRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		if req.Method != wantMethod {
+			t.Errorf("method = %q, want %s", req.Method, wantMethod)
+		}
+		writeJSONRPCResult(t, w, req.ID, result)
+	}))
+	return server, &calls
 }
 
 func outputModeVerifyFixture(t *testing.T) string {
