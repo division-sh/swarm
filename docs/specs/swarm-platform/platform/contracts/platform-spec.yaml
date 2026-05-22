@@ -5968,7 +5968,8 @@ cli_specification:
           used by the run-debug trace owner. Trace-specific `swarm trace --follow` subscription recovery and
           `--no-retry` are promoted in
           cli_specification.command_catalog.trace.promoted_trace_follow_recovery_contract by #928. Review-artifact
-          `until`, event-name, subscriber, entity-id, delivery-status, `--include-payload`, `-f`, shared `swarm run`
+          `-f` shorthand is promoted in the trace command row as a CLI-only alias for `--follow`. Review-artifact
+          `until`, event-name, subscriber, entity-id, delivery-status, `--include-payload`, shared `swarm run`
           recovery, and multi-run `--all` remain explicitly unpromoted split tails until later gated children promote
           their own canonical owners.
       mailbox_decision_sheet_and_result_ux:
@@ -7179,10 +7180,10 @@ cli_specification:
       defaulting: If run-id is omitted, resolve the target through run.list with active-run preference.
       behavior: Run-scoped operational status projection. This is the v2 replacement for `swarm investigate run`.
     trace:
-      command: swarm trace [<run-id>] [--since <timestamp>] [--limit <n>] [--cursor <cursor>] [--follow] [--no-retry]
+      command: swarm trace [<run-id>] [--since <timestamp>] [--limit <n>] [--cursor <cursor>] [--follow|-f] [--no-retry]
       tier: must_have
       implementation_status: implemented
-      owners: /v1/rpc run.trace for snapshot; /v1/ws run.subscribe_trace for --follow
+      owners: /v1/rpc run.trace for snapshot; /v1/ws run.subscribe_trace for --follow/-f
       defaulting: If run-id is omitted, resolve the target through run.list with active-run preference.
       behavior: Run trace rendering over API-owned RunTraceRow facts only; no CLI reconstruction from tables.
       promoted_trace_filter_contract:
@@ -7211,8 +7212,17 @@ cli_specification:
         status: api_owner_promoted_cli_implemented
         implemented_by: '#928'
         follow_owner: /v1/ws run.subscribe_trace
+        follow_shorthand:
+          implemented_by: '#855'
+          shorthand: -f
+          expands_to: --follow
+          behavior: >
+            `-f` is an exact CLI-only shorthand for `--follow`. It selects the same `/v1/ws run.subscribe_trace`
+            follow path, accepts the same `--no-retry` modifier, rejects the same snapshot-only flags before any
+            API or WebSocket call, and does not introduce new API params, runtime semantics, output behavior, or
+            `swarm run` follow behavior.
         scope: >
-          Applies only to `swarm trace --follow`. `swarm run` foreground follow, connected follow, and reattach keep their
+          Applies only to `swarm trace --follow` / `swarm trace -f`. `swarm run` foreground follow, connected follow, and reattach keep their
           existing lifecycle policy and may continue to use the shared one-shot `subscribeRunTrace` helper without inheriting
           this trace-specific reconnect policy.
         retry_policy: >
@@ -7238,17 +7248,18 @@ cli_specification:
           rendered, recovered requests also omit `replay_since`. The CLI does not deduplicate rows; recovery is at-least-once
           and the server/API owner remains responsible for trace ordering and retention semantics.
         no_retry_flag: >
-          `--no-retry` disables this recovery loop for `swarm trace --follow` only. With `--no-retry`, the command performs
+          `--no-retry` disables this recovery loop for `swarm trace --follow` / `swarm trace -f` only. With `--no-retry`, the command performs
           exactly one `run.subscribe_trace` request, never sends `replay_since`, exits 0 on a clean close, and fails closed on
           the first subscription or notification error.
         invalid_combinations:
-        - --since with --follow
-        - --limit with --follow
-        - --cursor with --follow
-        - --no-retry without --follow
+        - --since with --follow/-f
+        - --limit with --follow/-f
+        - --cursor with --follow/-f
+        - --no-retry without --follow/-f
         - direct --replay-since flag; replay_since is an internal recovery parameter, not a user-facing trace flag
         proof_expectations:
         - initial and recovered WebSocket request-shape tests prove exact run.subscribe_trace params and replay_since handling
+        - '`-f` help/discoverability and execution tests prove exact aliasing to --follow with no distinct API or runtime path'
         - omitted-run follow resolves through /v1/rpc run.list once before recovered subscriptions for the resolved run id
         - --no-retry proves one-shot close behavior and no replay_since
         - malformed subscription responses and notifications fail closed without retrying indefinitely
@@ -7262,7 +7273,6 @@ cli_specification:
           entity_id: Not promoted; entity filtering requires a typed RunTraceFilter owner before CLI use.
           delivery_status: Not promoted; delivery-status filtering requires a typed RunTraceFilter owner before CLI use.
           include_payload: Not promoted; RunTraceRow has no payload field and output/schema ownership is split.
-          shorthand_follow: Not promoted in this source-of-truth repair; `-f` is CLI UX only and must be gated separately.
           shared_run_follow_recovery: Not promoted; `swarm run` follow and reattach have distinct lifecycle semantics and remain split.
           all_runs: Not promoted; multi-run trace needs a canonical multi-run owner or explicit run.list + run.trace composition contract.
     mailbox_list:
