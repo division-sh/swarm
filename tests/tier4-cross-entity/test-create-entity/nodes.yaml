@@ -8,5 +8,7 @@ test-node:
       action: create_flow_instance
       template: child-flow
       instance_id_from: payload.child_id
-      emit: entity.created
+      emit:
+        event: entity.created
+        broadcast: true
       advances_to: creating

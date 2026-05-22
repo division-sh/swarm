@@ -9,5 +9,7 @@ reduce-node:
         items_from: entity.scores
         operation: pick_or_average
         store_as: entity.result
-      emit: scores.resolved
+      emit:
+        event: scores.resolved
+        broadcast: true
       advances_to: done

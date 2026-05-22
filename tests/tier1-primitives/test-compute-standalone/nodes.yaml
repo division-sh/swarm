@@ -17,7 +17,9 @@ test-node:
             weight: 0.4
         store_as: entity.composite
       advances_to: done
-      emit: scores.computed
+      emit:
+        event: scores.computed
+        broadcast: true
   state_schema:
     fields:
       composite: float

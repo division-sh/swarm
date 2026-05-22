@@ -15,4 +15,6 @@ parent-listener:
   event_handlers:
     child/work.completed:
       advances_to: done
-      emit: job.done
+      emit:
+        event: job.done
+        broadcast: true

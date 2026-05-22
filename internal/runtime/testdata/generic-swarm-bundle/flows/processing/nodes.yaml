@@ -18,9 +18,13 @@ processing-node:
       branch:
         - condition: payload.priority == 'urgent'
           then:
-            emit: item.completed
+            emit:
+              event: item.completed
+              broadcast: true
           else:
-            emit: item.rejected
+            emit:
+              event: item.rejected
+              broadcast: true
       compute:
         operation: pick_or_average
         store_as: score
@@ -35,11 +39,15 @@ processing-node:
         approve:
           condition: payload.score >= 80
           advances_to: approved
-          emit: item.completed
+          emit:
+            event: item.completed
+            broadcast: true
         reject:
           condition: else
           advances_to: rejected
-          emit: item.rejected
+          emit:
+            event: item.rejected
+            broadcast: true
       sets_gate: score_ready
       clear_gates:
         - intake_open

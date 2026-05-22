@@ -16,4 +16,6 @@ complete-node:
   event_handlers:
     task.completed:
       advances_to: done
-      emit: task.finalized
+      emit:
+        event: task.finalized
+        broadcast: true

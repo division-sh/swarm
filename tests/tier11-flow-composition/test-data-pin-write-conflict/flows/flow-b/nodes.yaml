@@ -12,4 +12,6 @@ b-node:
             value:
               source: flow-b
       advances_to: done
-      emit: b.done
+      emit:
+        event: b.done
+        broadcast: true

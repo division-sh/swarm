@@ -9,5 +9,7 @@ test-node:
         entities: items
         group_by: state
         count: true
-      emit: digest.compiled
+      emit:
+        event: digest.compiled
+        broadcast: true
       advances_to: compiled

@@ -10,7 +10,9 @@ test-node:
         completion: all
         from: "scoring/analysis-agent"
       advances_to: complete
-      emit: scores.collected
+      emit:
+        event: scores.collected
+        broadcast: true
   state_schema:
     fields:
       expected_count: integer

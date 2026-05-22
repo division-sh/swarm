@@ -17,4 +17,6 @@ alpha-finisher:
   event_handlers:
     internal.done:
       advances_to: processed
-      emit: alpha.complete
+      emit:
+        event: alpha.complete
+        broadcast: true

@@ -22,4 +22,6 @@ lifecycle:
         id: must_be_winding
         check: "entity.current_state == 'winding_down'"
       advances_to: closed
-      emit: lifecycle.complete
+      emit:
+        event: lifecycle.complete
+        broadcast: true

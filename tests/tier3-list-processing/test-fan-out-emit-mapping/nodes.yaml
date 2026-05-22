@@ -9,6 +9,7 @@ routing-node:
         items_from: payload.items
         emit:
           event: routed.a
+          broadcast: true
           fields:
             item: item
       advances_to: routing

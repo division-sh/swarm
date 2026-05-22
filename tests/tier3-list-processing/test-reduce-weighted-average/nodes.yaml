@@ -9,5 +9,7 @@ reduce-node:
         items_from: entity.scores
         operation: weighted_average
         store_as: entity.composite
-      emit: scores.aggregated
+      emit:
+        event: scores.aggregated
+        broadcast: true
       advances_to: done

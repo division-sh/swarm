@@ -9,4 +9,6 @@ test-node:
         id: region_check
         check: "payload.region == policy.allowed_region"
       advances_to: done
-      emit: check.passed
+      emit:
+        event: check.passed
+        broadcast: true

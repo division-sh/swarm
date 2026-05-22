@@ -6,4 +6,6 @@ task-runner:
   event_handlers:
     task.assign:
       advances_to: done
-      emit: task.done
+      emit:
+        event: task.done
+        broadcast: true

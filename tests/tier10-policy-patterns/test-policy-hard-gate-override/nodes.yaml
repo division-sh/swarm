@@ -12,10 +12,16 @@ evaluator:
       on_complete:
         - condition: "payload.main_score >= policy.high_mark AND payload.secondary_score >= policy.hard_floor"
           advances_to: promoted
-          emit: result.promoted
+          emit:
+            event: result.promoted
+            broadcast: true
         - condition: "payload.main_score >= policy.low_mark"
           advances_to: demoted
-          emit: result.demoted
+          emit:
+            event: result.demoted
+            broadcast: true
         - condition: "else"
           advances_to: rejected
-          emit: result.rejected
+          emit:
+            event: result.rejected
+            broadcast: true

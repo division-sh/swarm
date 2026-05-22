@@ -59,6 +59,11 @@ func (pc *PipelineCoordinator) createFlowInstance(ctx context.Context, triggerCt
 	sourceEntityID := strings.TrimSpace(entityID)
 	instance := runtimeflowidentity.Derive(pc.SemanticSource(), templateID, instanceID)
 	instance.ParentEntityID = sourceEntityID
+	instance.ParentRoute = runtimeflowidentity.ParentRoute{
+		FlowID:       strings.TrimSpace(pipelineFlowScope(ctx)),
+		FlowInstance: strings.Trim(strings.TrimSpace(triggerCtx.Event.FlowInstance()), "/"),
+		EntityID:     sourceEntityID,
+	}
 	req := FlowInstanceActivationRequest{
 		ContractBundle: pc.SemanticSource(),
 		Instance:       instance,

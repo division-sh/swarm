@@ -2553,6 +2553,7 @@ scoring-node:
           - id: complete
             emit:
               event: vertical.scored
+              broadcast: true
               fields:
                 scores: entity.scores
   state_schema:

@@ -7,4 +7,6 @@ intake-handler:
     work.assigned:
       create_entity: true
       advances_to: processed
-      emit: item.processed
+      emit:
+        event: item.processed
+        broadcast: true

@@ -8,5 +8,7 @@ test-node:
       clear:
         targets:
           - accumulator_state
-      emit: state.cleared
+      emit:
+        event: state.cleared
+        broadcast: true
       advances_to: cleared

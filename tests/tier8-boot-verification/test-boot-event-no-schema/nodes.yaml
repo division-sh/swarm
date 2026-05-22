@@ -6,4 +6,6 @@ test-node:
   event_handlers:
     task.requested:
       advances_to: done
-      emit: orphan.event
+      emit:
+        event: orphan.event
+        broadcast: true

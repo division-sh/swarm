@@ -7,4 +7,6 @@ child-node:
     child.task:
       create_entity: true
       advances_to: done
-      emit: child.result
+      emit:
+        event: child.result
+        broadcast: true

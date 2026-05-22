@@ -10,7 +10,9 @@ test-node:
         completion: timeout
         timeout_ms: 5000
       advances_to: complete
-      emit: collection.done
+      emit:
+        event: collection.done
+        broadcast: true
   state_schema:
     fields:
       expected_count: integer

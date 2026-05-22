@@ -7,4 +7,6 @@ test-node:
     evidence.submitted:
       action: record_evidence
       evidence_target: evidence.items
-      emit: evidence.recorded
+      emit:
+        event: evidence.recorded
+        broadcast: true

@@ -15,4 +15,6 @@ collector:
   event_handlers:
     "**/task.done":
       advances_to: done
-      emit: pipeline.complete
+      emit:
+        event: pipeline.complete
+        broadcast: true

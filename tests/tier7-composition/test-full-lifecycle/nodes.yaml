@@ -23,4 +23,6 @@ completion-node:
         id: gate_check
         check: "entity.gates.validation_passed == true"
       advances_to: complete
-      emit: order.finalized
+      emit:
+        event: order.finalized
+        broadcast: true

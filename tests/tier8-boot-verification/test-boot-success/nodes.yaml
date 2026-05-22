@@ -6,4 +6,6 @@ complete-task:
   event_handlers:
     task.requested:
       advances_to: done
-      emit: task.completed
+      emit:
+        event: task.completed
+        broadcast: true

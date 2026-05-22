@@ -6,5 +6,7 @@ recorder:
   event_handlers:
     task.record:
       create_entity: true
-      emit: task.recorded
+      emit:
+        event: task.recorded
+        broadcast: true
       advances_to: recorded

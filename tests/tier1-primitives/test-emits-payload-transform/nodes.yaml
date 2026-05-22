@@ -8,5 +8,6 @@ test-node:
       advances_to: done
       emit:
         event: item.scored
+        broadcast: true
         fields:
           score: "payload.raw_score * 2"

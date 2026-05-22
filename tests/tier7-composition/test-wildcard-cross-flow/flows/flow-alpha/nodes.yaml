@@ -7,4 +7,6 @@ alpha-node:
     trigger.alpha:
       create_entity: true
       advances_to: done
-      emit: job.alpha_done
+      emit:
+        event: job.alpha_done
+        broadcast: true

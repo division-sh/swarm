@@ -8,4 +8,6 @@ root-node:
       emit: child/child.start
     child/child.done:
       advances_to: done
-      emit: task.done
+      emit:
+        event: task.done
+        broadcast: true

@@ -6,7 +6,11 @@ test-node:
   event_handlers:
     cycle.ping:
       advances_to: processing
-      emit: cycle.pong
+      emit:
+        event: cycle.pong
+        broadcast: true
     cycle.pong:
       advances_to: done
-      emit: cycle.ping
+      emit:
+        event: cycle.ping
+        broadcast: true

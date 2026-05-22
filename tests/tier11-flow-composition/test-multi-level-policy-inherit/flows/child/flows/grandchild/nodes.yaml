@@ -10,4 +10,6 @@ grandchild-node:
         id: policy_merge_check
         check: "policy.threshold >= 60 AND policy.mode == 'relaxed'"
       advances_to: approved
-      emit: grandchild.passed
+      emit:
+        event: grandchild.passed
+        broadcast: true

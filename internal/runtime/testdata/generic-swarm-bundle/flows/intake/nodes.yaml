@@ -17,13 +17,19 @@ intake-router:
       fan_out:
         items_from: payload.items
         target: worker-a
-        emit: item.processed
+        emit:
+          event: item.processed
+          broadcast: true
       branch:
         - condition: payload.priority == 'urgent'
           then:
-            emit: item.processed
+            emit:
+              event: item.processed
+              broadcast: true
           else:
-            emit: item.processed
+            emit:
+              event: item.processed
+              broadcast: true
     item.processed:
       accumulate:
         expected_from: payload.expected_workers
@@ -32,7 +38,9 @@ intake-router:
           id: ready_for_review
           condition: else
           advances_to: ready
-          emit: item.review_requested
+          emit:
+            event: item.review_requested
+            broadcast: true
       sets_gate: intake_ready
       clear_gates:
         - needs_revision

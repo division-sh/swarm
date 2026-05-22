@@ -7,4 +7,6 @@ child-worker:
     work.requested:
       create_entity: true
       advances_to: completed
-      emit: work.completed
+      emit:
+        event: work.completed
+        broadcast: true

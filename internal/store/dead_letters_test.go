@@ -106,3 +106,53 @@ func TestRecordDeadLetter_AllowsNonUUIDEntityIDViaSourceEventPayload(t *testing.
 		t.Fatalf("dead_letters entity_id present, want NULL for non-UUID entity id")
 	}
 }
+
+func TestRecordDeadLetter_PersistsTargetResolutionFailureContext(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	evt := (events.Event{
+		ID:          uuid.NewString(),
+		Type:        "pin.output",
+		SourceAgent: "runtime",
+		Payload:     []byte(`{"x":1}`),
+		CreatedAt:   time.Now().UTC(),
+	}).WithTargetRoute(events.RouteIdentity{EntityID: uuid.NewString(), FlowInstance: "flow/target"})
+	if err := pg.AppendEvent(ctx, evt); err != nil {
+		t.Fatalf("AppendEvent: %v", err)
+	}
+	rec := runtimedeadletters.Record{
+		OriginalEventID:     evt.ID,
+		FailureType:         "target_resolution_failed",
+		TargetFailureReason: "target_not_subscribed",
+		TargetContext:       []byte(`{"target":{"flow_instance":"flow/target"}}`),
+		ErrorMessage:        "pin routing target delivery failed: target_not_subscribed",
+		HandlerNode:         "pin_routing",
+	}
+	if err := pg.RecordDeadLetter(ctx, rec); err != nil {
+		t.Fatalf("RecordDeadLetter: %v", err)
+	}
+
+	var (
+		failureType string
+		reason      sql.NullString
+		contextJSON string
+	)
+	if err := db.QueryRowContext(ctx, `
+		SELECT failure_type, target_failure_reason, target_context::text
+		FROM dead_letters
+		WHERE original_event_id = $1::uuid
+	`, evt.ID).Scan(&failureType, &reason, &contextJSON); err != nil {
+		t.Fatalf("query dead_letters: %v", err)
+	}
+	if failureType != "target_resolution_failed" {
+		t.Fatalf("failure_type = %q, want target_resolution_failed", failureType)
+	}
+	if !reason.Valid || reason.String != "target_not_subscribed" {
+		t.Fatalf("target_failure_reason = %#v, want target_not_subscribed", reason)
+	}
+	if contextJSON == "" || contextJSON == "{}" {
+		t.Fatalf("target_context = %q, want populated JSON", contextJSON)
+	}
+}

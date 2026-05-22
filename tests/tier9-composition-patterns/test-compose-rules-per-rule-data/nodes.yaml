@@ -15,7 +15,9 @@ resolver:
               - target_field: resolution_method
                 value: "first"
           advances_to: resolved
-          emit: conflict.resolved
+          emit:
+            event: conflict.resolved
+            broadcast: true
         - id: keep_best
           condition: "payload.strategy == 'keep_best'"
           data_accumulation:
@@ -25,7 +27,9 @@ resolver:
               - target_field: resolution_method
                 value: "best"
           advances_to: resolved
-          emit: conflict.resolved
+          emit:
+            event: conflict.resolved
+            broadcast: true
         - id: merge
           condition: "payload.strategy == 'merge'"
           data_accumulation:
@@ -37,4 +41,6 @@ resolver:
               - target_field: resolution_method
                 value: "merged"
           advances_to: resolved
-          emit: conflict.resolved
+          emit:
+            event: conflict.resolved
+            broadcast: true

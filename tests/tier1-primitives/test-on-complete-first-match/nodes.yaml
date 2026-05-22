@@ -7,8 +7,12 @@ test-node:
     item.evaluated:
       on_complete:
         - condition: "payload.score >= 70"
-          emit: item.passed
+          emit:
+            event: item.passed
+            broadcast: true
           advances_to: passed
         - condition: "else"
-          emit: item.failed
+          emit:
+            event: item.failed
+            broadcast: true
           advances_to: failed

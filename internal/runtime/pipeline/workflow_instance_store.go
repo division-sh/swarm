@@ -209,6 +209,12 @@ func (s *WorkflowInstanceStore) Upsert(ctx context.Context, instance WorkflowIns
 	} else {
 		delete(instance.Metadata, "flow_path")
 	}
+	if identity.ParentRoute.FlowID != "" {
+		instance.Metadata["parent_flow_id"] = identity.ParentRoute.FlowID
+	}
+	if identity.ParentRoute.FlowInstance != "" {
+		instance.Metadata["parent_flow_instance"] = identity.ParentRoute.FlowInstance
+	}
 	return s.upsertSpec(ctx, identity.RowID(), identity.StorageRef, instance)
 }
 

@@ -3557,18 +3557,21 @@ platform_tables:
   tables:
     events:
       description: 'Append-only event store. Every event persisted before delivery. Three scopes: entity (entity_id + flow_instance
-        set), flow (flow_instance set, entity_id NULL), global (both NULL — system bootstrap, runtime recovery, admin commands).
-        idempotency_key for external dedup. source_event_id for causal chain tracing. run_id links every event to its
-        execution context for observability and fork/replay.'
+        projection set), flow (flow_instance projection set, entity_id NULL), global (both NULL — system bootstrap,
+        runtime recovery, admin commands). source_route, target_route, and target_set are the canonical pin-routing
+        identities; legacy entity_id and flow_instance are receiver-context projections. idempotency_key for external
+        dedup. source_event_id for causal chain tracing. run_id links every event to its execution context for observability
+        and fork/replay.'
       ddl: "CREATE TABLE events (\n    event_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    run_id            UUID\
         \ REFERENCES runs(run_id),\n    event_name        TEXT NOT NULL,\n    entity_id         UUID,\n    flow_instance\
-        \     TEXT,\n    scope             TEXT NOT NULL DEFAULT 'entity' CHECK (scope IN ('entity', 'flow', 'global')),\n\
+        \     TEXT,\n    source_route      JSONB NOT NULL DEFAULT '{}',\n    target_route      JSONB NOT NULL DEFAULT '{}',\n\
+        \    target_set        JSONB NOT NULL DEFAULT '[]',\n    scope             TEXT NOT NULL DEFAULT 'entity' CHECK (scope IN ('entity', 'flow', 'global')),\n\
         \    payload           JSONB NOT NULL DEFAULT '{}',\n    chain_depth       INTEGER NOT NULL DEFAULT 0,\n\
         \    produced_by       TEXT,\n    produced_by_type  TEXT CHECK (produced_by_type IN ('node', 'agent',\
         \ 'platform', 'external')),\n    handler_node      TEXT,\n    idempotency_key   TEXT,\n    source_event_id   UUID,\n\
         \    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX idx_events_run (run_id, created_at) WHERE\
         \ run_id IS NOT NULL,\n    INDEX idx_events_entity (entity_id, created_at) WHERE entity_id IS NOT NULL,\n    INDEX\
-        \ idx_events_flow (flow_instance, event_name) WHERE flow_instance IS NOT NULL,\n    INDEX idx_events_global (event_name,\
+        \ idx_events_flow (flow_instance, event_name) WHERE flow_instance IS NOT NULL,\n    INDEX idx_events_source_route ((source_route->>'flow_instance'), (source_route->>'entity_id')) WHERE source_route <> '{}'::jsonb,\n    INDEX idx_events_target_route ((target_route->>'flow_instance'), (target_route->>'entity_id')) WHERE target_route <> '{}'::jsonb,\n    INDEX idx_events_global (event_name,\
         \ created_at) WHERE scope = 'global',\n    INDEX idx_events_idempotency (idempotency_key) WHERE idempotency_key\
         \ IS NOT NULL,\n    INDEX idx_events_source (source_event_id) WHERE source_event_id IS NOT NULL\n);"
     run_fork_selected_contract_bindings:
@@ -3604,11 +3607,12 @@ platform_tables:
       ddl: "CREATE TABLE run_fork_selected_contract_route_recoveries (\n    recovery_id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    fork_run_id                    UUID NOT NULL REFERENCES runs(run_id),\n    source_run_id                  UUID NOT NULL REFERENCES runs(run_id),\n    fork_event_id                  UUID NOT NULL REFERENCES events(event_id),\n    owner                          TEXT NOT NULL,\n    runtime_recovery_owner         TEXT NOT NULL,\n    mode                           TEXT NOT NULL CHECK (mode IN ('selected_contracts')),\n    contracts_root                 TEXT NOT NULL,\n    workflow_name                  TEXT NOT NULL,\n    workflow_version               TEXT NOT NULL,\n    route_topology_owner           TEXT NOT NULL,\n    dynamic_topology_owner         TEXT,\n    recipient_planning_owner       TEXT NOT NULL,\n    frontier_evidence_fingerprint  TEXT NOT NULL,\n    route_topology_fingerprint     TEXT NOT NULL,\n    recipient_planning_fingerprint TEXT NOT NULL,\n    static_route_event_count       INTEGER NOT NULL DEFAULT 0,\n    dynamic_topology_proof_count   INTEGER NOT NULL DEFAULT 0,\n    recipient_plan_event_count     INTEGER NOT NULL DEFAULT 0,\n    route_topology                 JSONB NOT NULL,\n    recipient_planning             JSONB NOT NULL,\n    created_at                     TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    UNIQUE (fork_run_id),\n    INDEX idx_run_fork_selected_contract_route_recoveries_source (source_run_id, fork_event_id),\n    INDEX idx_run_fork_selected_contract_route_recoveries_owner (owner, runtime_recovery_owner)\n);"
     event_deliveries:
       description: Tracks delivery of events to subscribers (nodes and agents). One row per event × subscriber. run_id
-        inherited from the parent event for run-scoped queries.
+        inherited from the parent event for run-scoped queries. delivery_target_route stores the concrete target_set
+        member assigned to this subscriber when fan-out routing materializes multiple target identities.
       ddl: "CREATE TABLE event_deliveries (\n    delivery_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    run_id\
         \            UUID REFERENCES runs(run_id),\n    event_id          UUID NOT NULL REFERENCES events(event_id),\n\
         \    subscriber_type   TEXT NOT NULL CHECK (subscriber_type IN ('node', 'agent')),\n    subscriber_id     TEXT NOT\
-        \ NULL,\n    status            TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'in_progress', 'delivered',\
+        \ NULL,\n    delivery_target_route JSONB NOT NULL DEFAULT '{}',\n    status            TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'in_progress', 'delivered',\
         \ 'failed', 'dead_letter')),\n    retry_count       INTEGER NOT NULL DEFAULT 0,\n    reason_code       TEXT,\n\
         \    last_error        TEXT,\n    active_session_id UUID,\n    started_at        TIMESTAMPTZ,\n    delivered_at\
         \      TIMESTAMPTZ,\n    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX idx_deliveries_run (run_id,\
@@ -3878,12 +3882,13 @@ platform_tables:
         flow_scoped: entity_id NULL, flow_instance NOT NULL, run_id set for runtime-owned flow timers. Tied to flow instance
           inside run_id. Cancelled when flow instance terminates.
     dead_letters:
-      description: Failed events after retry exhaustion or chain depth overflow.
+      description: Failed events after target resolution failure, retry exhaustion, or chain depth overflow.
       ddl: "CREATE TABLE dead_letters (\n    dead_letter_id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    original_event_id\
         \ UUID REFERENCES events(event_id),\n    original_event    TEXT NOT NULL,\n    original_payload  JSONB NOT NULL DEFAULT\
         \ '{}',\n    entity_id         UUID,\n    flow_instance     TEXT NOT NULL,\n    failure_type      TEXT NOT NULL CHECK\
-        \ (failure_type IN ('handler_error', 'chain_depth_exceeded', 'retry_exhausted')),\n    error_message     TEXT,\n \
-        \   retry_count       INTEGER NOT NULL DEFAULT 0,\n    chain_depth       INTEGER NOT NULL DEFAULT 0,\n    handler_node\
+        \ (failure_type IN ('handler_error', 'target_resolution_failed', 'chain_depth_exceeded', 'retry_exhausted')),\n   \
+        \ target_failure_reason TEXT,\n    target_context  JSONB NOT NULL DEFAULT '{}',\n    error_message     TEXT,\n   \
+        \ retry_count       INTEGER NOT NULL DEFAULT 0,\n    chain_depth       INTEGER NOT NULL DEFAULT 0,\n    handler_node\
         \      TEXT,\n    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX idx_dead_letters_flow (flow_instance,\
         \ created_at),\n    INDEX idx_dead_letters_type (failure_type)\n);"
     runs:

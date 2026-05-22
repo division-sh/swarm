@@ -17,4 +17,6 @@ child-processor:
   event_handlers:
     child.internal:
       advances_to: processed
-      emit: child.done
+      emit:
+        event: child.done
+        broadcast: true

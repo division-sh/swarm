@@ -7,4 +7,6 @@ beta-node:
     trigger.beta:
       create_entity: true
       advances_to: done
-      emit: job.beta_done
+      emit:
+        event: job.beta_done
+        broadcast: true

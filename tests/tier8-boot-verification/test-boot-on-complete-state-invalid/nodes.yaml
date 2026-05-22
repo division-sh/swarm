@@ -8,4 +8,6 @@ test-node:
       on_complete:
         - condition: "payload.score >= 70"
           advances_to: nonexistent
-          emit: task.completed
+          emit:
+            event: task.completed
+            broadcast: true

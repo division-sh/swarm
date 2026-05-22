@@ -11,5 +11,7 @@ test-node:
       config_from:
         max_retries: payload.config.max_retries
         timeout_ms: payload.config.timeout_ms
-      emit: flow.spawned
+      emit:
+        event: flow.spawned
+        broadcast: true
       advances_to: spawned

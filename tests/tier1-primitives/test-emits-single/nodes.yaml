@@ -6,4 +6,6 @@ test-node:
   event_handlers:
     item.received:
       advances_to: done
-      emit: item.processed
+      emit:
+        event: item.processed
+        broadcast: true

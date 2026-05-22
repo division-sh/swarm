@@ -15,7 +15,9 @@ dispatcher:
               - target_field: dispatch_count
                 expression: fan_out.count
           advances_to: dispatched
-          emit: batch.dispatched
+          emit:
+            event: batch.dispatched
+            broadcast: true
         - id: sequential
           condition: "payload.mode == 'sequential'"
           data_accumulation:
@@ -23,7 +25,9 @@ dispatcher:
               - target_field: dispatch_count
                 value: 1
           advances_to: dispatched
-          emit: batch.dispatched
+          emit:
+            event: batch.dispatched
+            broadcast: true
         - id: fallback
           condition: "else"
           data_accumulation:
@@ -31,4 +35,6 @@ dispatcher:
               - target_field: dispatch_count
                 value: 0
           advances_to: dispatched
-          emit: batch.dispatched
+          emit:
+            event: batch.dispatched
+            broadcast: true

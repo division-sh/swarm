@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"swarm/internal/events"
+	runtimepinrouting "swarm/internal/runtime/core/pinrouting"
 )
 
 type deliveryRoutingResult struct {
@@ -51,6 +52,8 @@ func (r deliveryRouteResolver) Resolve(evt events.Event) deliveryRoutingResult {
 type deliveryRecipientManifest struct {
 	Recipients          []string
 	PersistedRecipients []string
+	DeliveryTargets     map[string]events.RouteIdentity
+	TargetFailure       runtimepinrouting.TargetFailure
 }
 
 type deliveryRecipientPolicy struct {
@@ -66,6 +69,7 @@ func (p deliveryRecipientPolicy) Evaluate(ctx context.Context, evt events.Event,
 		return deliveryRecipientManifest{
 			Recipients:          deliveryRecipientIDs(recipients),
 			PersistedRecipients: persistedDeliveryRecipientIDs(recipients),
+			DeliveryTargets:     deliveryTargetsForManifest(evt, persistedDeliveryRecipientIDs(recipients), nil),
 		}, nil
 	}
 	return filterDeliveryRecipientCandidates(evt, recipients, descriptors), nil
@@ -95,6 +99,11 @@ func (p deliveryPlanner) Plan(ctx context.Context, evt events.Event) (eventDeliv
 	}
 	plan.Recipients = manifest.Recipients
 	plan.PersistedRecipients = manifest.PersistedRecipients
+	plan.DeliveryTargets = manifest.DeliveryTargets
+	plan.TargetFailure = manifest.TargetFailure
+	if plan.TargetFailure != "" && hasInternalRoutedSubscriber(routing.RoutedRecipients) {
+		plan.TargetFailure = ""
+	}
 	plan.RoutedRecipients = routing.RoutedRecipients
 	plan.SubscribedRecipients = routing.SubscribedRecipients
 	plan.ExtraDetail = routing.ExtraDetail
@@ -116,6 +125,8 @@ func (p deliveryPlanner) PlanDirect(ctx context.Context, evt events.Event, recip
 	}
 	plan.Recipients = manifest.Recipients
 	plan.PersistedRecipients = manifest.PersistedRecipients
+	plan.DeliveryTargets = manifest.DeliveryTargets
+	plan.TargetFailure = manifest.TargetFailure
 	plan.ExtraDetail = map[string]any{
 		"direct":                     true,
 		"requested_recipients":       append([]string(nil), requested...),
@@ -245,12 +256,17 @@ func persistedDeliveryRecipientIDs(in []deliveryRecipientCandidate) []string {
 
 func filterDeliveryRecipientCandidates(evt events.Event, recipients []deliveryRecipientCandidate, descriptors map[string]ActiveAgentDescriptor) deliveryRecipientManifest {
 	recipients = normalizeDeliveryRecipientCandidates(recipients)
-	if len(recipients) == 0 {
-		return deliveryRecipientManifest{}
-	}
 	eventEntityID := strings.TrimSpace(evt.EntityID())
+	targets := eventDeliveryTargetRoutes(evt)
+	if len(recipients) == 0 {
+		return deliveryRecipientManifest{
+			TargetFailure: targetDeliveryFailure(evt, descriptors),
+		}
+	}
+	singularTarget := evt.TargetRoute()
 	allowed := make([]string, 0, len(recipients))
 	persisted := make([]string, 0, len(recipients))
+	deliveryTargets := map[string]events.RouteIdentity{}
 	for _, recipient := range recipients {
 		if !recipient.PersistAsDelivery {
 			allowed = append(allowed, recipient.ID)
@@ -262,14 +278,130 @@ func filterDeliveryRecipientCandidates(evt events.Event, recipients []deliveryRe
 		}
 		if descriptor.EntityID != "" {
 			if eventEntityID == "" || descriptor.EntityID != eventEntityID {
-				continue
+				if len(targets) == 0 {
+					continue
+				}
 			}
+		}
+		target, targetOK := deliveryTargetForDescriptor(descriptor, singularTarget, targets)
+		if len(targets) > 0 && !targetOK {
+			continue
 		}
 		allowed = append(allowed, recipient.ID)
 		persisted = append(persisted, recipient.ID)
+		if !target.Empty() {
+			deliveryTargets[recipient.ID] = target
+		}
 	}
-	return deliveryRecipientManifest{
+	manifest := deliveryRecipientManifest{
 		Recipients:          uniqueStrings(allowed),
 		PersistedRecipients: uniqueStrings(persisted),
+		DeliveryTargets:     deliveryTargetsForManifest(evt, uniqueStrings(persisted), deliveryTargets),
 	}
+	if len(targets) > 0 && len(manifest.Recipients) == 0 {
+		manifest.TargetFailure = targetDeliveryFailure(evt, descriptors)
+	}
+	return manifest
+}
+
+func hasInternalRoutedSubscriber(subscribers []Subscriber) bool {
+	for _, subscriber := range subscribers {
+		if strings.TrimSpace(subscriber.ID) == "" {
+			continue
+		}
+		if strings.TrimSpace(subscriber.Type) != "agent" {
+			return true
+		}
+	}
+	return false
+}
+
+func targetDeliveryFailure(evt events.Event, descriptors map[string]ActiveAgentDescriptor) runtimepinrouting.TargetFailure {
+	targets := eventDeliveryTargetRoutes(evt)
+	if len(targets) == 0 {
+		return ""
+	}
+	if !allTargetsHaveLiveDescriptor(targets, descriptors) {
+		return runtimepinrouting.FailureTargetUnreachableTerminated
+	}
+	return runtimepinrouting.FailureTargetNotSubscribed
+}
+
+func eventDeliveryTargetRoutes(evt events.Event) []events.RouteIdentity {
+	if singular := evt.TargetRoute(); !singular.Empty() {
+		return []events.RouteIdentity{singular}
+	}
+	return evt.TargetRoutes()
+}
+
+func allTargetsHaveLiveDescriptor(targets []events.RouteIdentity, descriptors map[string]ActiveAgentDescriptor) bool {
+	if len(targets) == 0 {
+		return true
+	}
+	if len(descriptors) == 0 {
+		return false
+	}
+	for _, target := range targets {
+		found := false
+		for _, descriptor := range descriptors {
+			if routeMatchesDescriptor(target, descriptor) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+func deliveryTargetForDescriptor(descriptor ActiveAgentDescriptor, singular events.RouteIdentity, targets []events.RouteIdentity) (events.RouteIdentity, bool) {
+	descriptor = descriptor.Normalized()
+	if !singular.Empty() {
+		return singular, routeMatchesDescriptor(singular, descriptor)
+	}
+	if len(targets) == 0 {
+		return events.RouteIdentity{}, true
+	}
+	for _, target := range targets {
+		if routeMatchesDescriptor(target, descriptor) {
+			return target.Normalized(), true
+		}
+	}
+	return events.RouteIdentity{}, false
+}
+
+func routeMatchesDescriptor(route events.RouteIdentity, descriptor ActiveAgentDescriptor) bool {
+	route = route.Normalized()
+	descriptor = descriptor.Normalized()
+	if route.EntityID != "" && descriptor.EntityID != "" && route.EntityID != descriptor.EntityID {
+		return false
+	}
+	if route.FlowInstance != "" && descriptor.FlowInstance != "" && route.FlowInstance != descriptor.FlowInstance {
+		return false
+	}
+	return route.EntityID != "" || route.FlowInstance != ""
+}
+
+func deliveryTargetsForManifest(evt events.Event, recipients []string, existing map[string]events.RouteIdentity) map[string]events.RouteIdentity {
+	out := map[string]events.RouteIdentity{}
+	for recipient, target := range existing {
+		if target = target.Normalized(); !target.Empty() {
+			out[strings.TrimSpace(recipient)] = target
+		}
+	}
+	if singular := evt.TargetRoute(); !singular.Empty() {
+		for _, recipient := range recipients {
+			recipient = strings.TrimSpace(recipient)
+			if recipient == "" {
+				continue
+			}
+			out[recipient] = singular
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }

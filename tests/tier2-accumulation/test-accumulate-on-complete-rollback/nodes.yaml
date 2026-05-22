@@ -25,4 +25,6 @@ verifier:
         check: "entity.current_state == \"scored\""
         on_fail: reject
       advances_to: verified
-      emit: scores.verified
+      emit:
+        event: scores.verified
+        broadcast: true

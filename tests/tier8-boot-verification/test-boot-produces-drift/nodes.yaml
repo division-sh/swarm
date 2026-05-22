@@ -6,4 +6,6 @@ test-node:
   event_handlers:
     item.requested:
       advances_to: done
-      emit: item.surprise
+      emit:
+        event: item.surprise
+        broadcast: true

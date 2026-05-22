@@ -7,4 +7,6 @@ flow-a-node:
     flow-b/order.completed:
       create_entity: true
       advances_to: done
-      emit: invoice.created
+      emit:
+        event: invoice.created
+        broadcast: true

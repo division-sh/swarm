@@ -9,4 +9,6 @@ test-node:
         branch_a:
           condition: "payload.score >= 70"
           advances_to: done
-          emit: task.completed
+          emit:
+            event: task.completed
+            broadcast: true

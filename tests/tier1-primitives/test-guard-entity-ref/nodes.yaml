@@ -9,4 +9,6 @@ test-node:
         id: state_check
         check: "entity.level >= 3"
       advances_to: done
-      emit: check.passed
+      emit:
+        event: check.passed
+        broadcast: true

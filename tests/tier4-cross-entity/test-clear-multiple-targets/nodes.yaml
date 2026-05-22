@@ -10,5 +10,7 @@ test-node:
           - accumulator_state
           - cycle_counters
           - pending_dedup
-      emit: state.reset_completed
+      emit:
+        event: state.reset_completed
+        broadcast: true
       advances_to: cleared

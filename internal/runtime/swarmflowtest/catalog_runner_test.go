@@ -1586,12 +1586,12 @@ func catalogEmitEventStrings(value any) []string {
 	if value == nil {
 		return nil
 	}
-	if text := catalogBootText(value); text != "" {
-		return []string{text}
-	}
 	mapping := catalogMap(value)
 	if event := catalogBootText(mapping["event"]); event != "" {
 		return []string{event}
+	}
+	if text := catalogBootText(value); text != "" {
+		return []string{text}
 	}
 	return nil
 }

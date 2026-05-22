@@ -13,4 +13,6 @@ processor:
         writes:
           - target_field: attempt_count
             expression: entity.attempt_count + 1
-      emit: attempt.processed
+      emit:
+        event: attempt.processed
+        broadcast: true

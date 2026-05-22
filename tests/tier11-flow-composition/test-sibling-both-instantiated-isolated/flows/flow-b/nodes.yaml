@@ -7,4 +7,6 @@ beta-intake:
     work.begin:
       create_entity: true
       advances_to: active
-      emit: beta.done
+      emit:
+        event: beta.done
+        broadcast: true
