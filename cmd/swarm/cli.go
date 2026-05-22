@@ -156,18 +156,32 @@ func newServeCommand(ctx context.Context, repo string, runServe func(context.Con
 }
 
 func newVerifyCommand(ctx context.Context, repo string) *cobra.Command {
-	return &cobra.Command{
-		Use:                "verify",
-		Short:              "Validate local Swarm contract files.",
-		DisableFlagParsing: true,
+	opts := defaultVerifyCommandOptions()
+	cmd := &cobra.Command{
+		Use:   "verify",
+		Short: "Validate local Swarm contract files.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			code := runVerifyCommandWithOutput(ctx, repo, args, cmd.OutOrStdout(), cmd.ErrOrStderr())
+			if err := opts.logging.validate(); err != nil {
+				return returnCLIValidationError(cmd.ErrOrStderr(), err)
+			}
+			if err := opts.output.validate(); err != nil {
+				return returnCLIValidationError(cmd.ErrOrStderr(), err)
+			}
+			if len(args) > 0 {
+				return returnCLIValidationError(cmd.ErrOrStderr(), fmt.Errorf("unexpected argument %q", args[0]))
+			}
+			code := runVerifyCommandWithOutput(ctx, repo, opts, cmd.OutOrStdout(), cmd.ErrOrStderr())
 			if code != 0 {
 				return commandExitError{code: code}
 			}
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&opts.contractsPath, "contracts", opts.contractsPath, "Path to Swarm contract bundle root")
+	cmd.Flags().StringVar(&opts.platformSpecPath, "platform-spec", opts.platformSpecPath, "Path to platform spec yaml")
+	bindCLIOutputFlags(cmd, &opts.output)
+	bindCLILoggingFlags(cmd, &opts.logging)
+	return cmd
 }
 
 type versionCommandOptions struct {
@@ -287,6 +301,7 @@ func newRetiredForkCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:                "fork",
 		Short:              "Removed v1 command; use future swarm control run fork.",
+		Hidden:             true,
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			writeForkRetiredMessage(cmd.ErrOrStderr())
