@@ -625,6 +625,9 @@ func traceFollowRetryableStreamError(err error) bool {
 
 func traceFollowTransportErrorText(msg string) bool {
 	msg = strings.ToLower(msg)
+	if msg == "eof" || strings.HasSuffix(msg, ": eof") {
+		return true
+	}
 	for _, fragment := range []string{
 		"websocket: close",
 		"unexpected eof",
