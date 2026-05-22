@@ -85,24 +85,6 @@ func (l *RuntimeLogger) Log(ctx context.Context, e RuntimeLogEntry) error {
 		action = "unknown"
 	}
 	e.NormalizeEntityID()
-	if recorder, ok := runtimebus.EmittedEventsRecorderFromContext(ctx); ok && recorder != nil {
-		recorder.AppendRuntimeLog(diaglog.RunEntry{
-			Level:       e.Level,
-			Message:     e.Message,
-			Component:   e.Component,
-			Action:      e.Action,
-			EventID:     e.EventID,
-			EventType:   e.EventType,
-			AgentID:     e.AgentID,
-			EntityID:    e.EntityID,
-			SessionID:   e.SessionID,
-			Correlation: e.Correlation,
-			Detail:      e.Detail,
-			Error:       e.Error,
-			StackTrace:  e.StackTrace,
-			DurationUS:  e.DurationUS,
-		})
-	}
 	if l.db == nil {
 		return nil
 	}
@@ -115,8 +97,12 @@ func (l *RuntimeLogger) Log(ctx context.Context, e RuntimeLogEntry) error {
 	}
 
 	detail := marshalJSONOrEmpty(e.Detail)
-	if err := logRuntimeEventSpec(withoutSQLTxContext(ctx), l.db, hasRunID, level.String(), component, action, e, detail); err != nil {
+	payload, err := logRuntimeEventSpec(withoutSQLTxContext(ctx), l.db, hasRunID, level.String(), component, action, e, detail)
+	if err != nil {
 		return err
+	}
+	if recorder, ok := runtimebus.EmittedEventsRecorderFromContext(ctx); ok && recorder != nil {
+		recorder.AppendRuntimeLog(runtimeLogRecorderEntry(payload))
 	}
 	return nil
 }
@@ -215,9 +201,9 @@ func sanitizeStringMap(in map[string]string) map[string]string {
 	return out
 }
 
-func logRuntimeEventSpec(ctx context.Context, db *sql.DB, hasRunID bool, level, component, action string, e RuntimeLogEntry, detail []byte) error {
+func logRuntimeEventSpec(ctx context.Context, db *sql.DB, hasRunID bool, level, component, action string, e RuntimeLogEntry, detail []byte) (CanonicalRuntimeLogPayload, error) {
 	if db == nil {
-		return nil
+		return CanonicalRuntimeLogPayload{}, nil
 	}
 	detailMap := map[string]any{}
 	_ = json.Unmarshal(detail, &detailMap)
@@ -244,7 +230,7 @@ func logRuntimeEventSpec(ctx context.Context, db *sql.DB, hasRunID bool, level, 
 	}
 	parentEventID, err := runtimeLogLineageParentEventID(ctx, db, lineageRunID, explicitParentEventID, subjectEventID)
 	if err != nil {
-		return err
+		return CanonicalRuntimeLogPayload{}, err
 	}
 	handlerID := strings.TrimSpace(runtimecorrelation.HandlerIDFromContext(ctx))
 	if handlerID == "" {
@@ -253,29 +239,17 @@ func logRuntimeEventSpec(ctx context.Context, db *sql.DB, hasRunID bool, level, 
 	payload := runtimeLogPayload(level, component, action, e, detailMap, runID, parentEventID, handlerID)
 	encoded, err := json.Marshal(payload)
 	if err != nil {
-		return err
+		return CanonicalRuntimeLogPayload{}, err
 	}
-	if _, err := DecodeCanonicalRuntimeLogPayload(encoded); err != nil {
-		return err
+	canonicalPayload, err := DecodeCanonicalRuntimeLogPayload(encoded)
+	if err != nil {
+		return CanonicalRuntimeLogPayload{}, err
 	}
 	if hasRunID {
-		if err := ensureRuntimeLogRunRow(ctx, db, runID); err != nil {
-			return err
+		if err := persistRunScopedRuntimeLog(ctx, db, runID, string(encoded), parentEventID); err != nil {
+			return CanonicalRuntimeLogPayload{}, err
 		}
-		_, err = db.ExecContext(ctx, `
-			INSERT INTO events (
-				run_id, event_id, event_name, entity_id, flow_instance, scope, payload,
-				chain_depth, produced_by, produced_by_type, source_event_id, created_at
-			)
-			VALUES (
-				NULLIF($1,'')::uuid, gen_random_uuid(), 'platform.runtime_log', NULL, NULL, 'global', $2::jsonb,
-				0, 'runtime', 'platform', NULLIF($3,'')::uuid, now()
-			)
-		`, runID, string(encoded), parentEventID)
-		if err != nil {
-			return err
-		}
-		return storerunlifecycle.SyncCounts(ctx, db, runID)
+		return canonicalPayload, nil
 	}
 	_, err = db.ExecContext(ctx, `
 		INSERT INTO events (
@@ -288,9 +262,64 @@ func logRuntimeEventSpec(ctx context.Context, db *sql.DB, hasRunID bool, level, 
 		)
 	`, string(encoded), parentEventID)
 	if err != nil {
+		return CanonicalRuntimeLogPayload{}, err
+	}
+	return canonicalPayload, nil
+}
+
+func persistRunScopedRuntimeLog(ctx context.Context, db *sql.DB, runID, encodedPayload, parentEventID string) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
 		return err
 	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	if err := ensureRuntimeLogRunRow(ctx, tx, runID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, entity_id, flow_instance, scope, payload,
+			chain_depth, produced_by, produced_by_type, source_event_id, created_at
+		)
+		VALUES (
+			NULLIF($1,'')::uuid, gen_random_uuid(), 'platform.runtime_log', NULL, NULL, 'global', $2::jsonb,
+			0, 'runtime', 'platform', NULLIF($3,'')::uuid, now()
+		)
+	`, runID, encodedPayload, parentEventID); err != nil {
+		return err
+	}
+	if err := storerunlifecycle.SyncCounts(ctx, tx, runID); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	committed = true
 	return nil
+}
+
+func runtimeLogRecorderEntry(payload CanonicalRuntimeLogPayload) diaglog.RunEntry {
+	return diaglog.RunEntry{
+		Level:       diaglog.NormalizeLevel(payload.LogLevel),
+		Message:     payload.Message,
+		Component:   payload.Component,
+		Action:      payload.Action,
+		EventID:     payload.EventID,
+		EventType:   payload.EventType,
+		AgentID:     payload.AgentID,
+		EntityID:    payload.EntityID,
+		SessionID:   payload.SessionID,
+		Correlation: payload.Correlation,
+		Detail:      payload.Detail,
+		Error:       payload.Error,
+		StackTrace:  payload.StackTrace,
+		DurationUS:  payload.DurationUS,
+	}
 }
 
 func runtimeLogLineageForEntry(lineage runtimecorrelation.RuntimeLineage, e RuntimeLogEntry) runtimecorrelation.RuntimeLineage {
@@ -377,7 +406,7 @@ func runtimeLogLineageParentEventID(ctx context.Context, db *sql.DB, runID, expl
 	return subjectEventID, nil
 }
 
-func ensureRuntimeLogRunRow(ctx context.Context, db *sql.DB, runID string) error {
+func ensureRuntimeLogRunRow(ctx context.Context, db storerunlifecycle.DBTX, runID string) error {
 	if db == nil {
 		return nil
 	}
