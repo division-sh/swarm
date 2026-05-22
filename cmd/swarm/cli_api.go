@@ -286,11 +286,25 @@ func normalizeCLIAPIServerBase(raw, source string) (*url.URL, error) {
 		return nil, &cliAPIValidationError{message: fmt.Sprintf("%s must not include query or fragment", source)}
 	}
 	parsed.Path = strings.TrimRight(parsed.Path, "/")
-	switch parsed.Path {
-	case cliAPIRPCPath, cliAPIWSPath:
-		return nil, &cliAPIValidationError{message: fmt.Sprintf("%s must be an API server base URL, not a direct %s endpoint", source, parsed.Path)}
+	if endpointPath := cliAPIEndpointShapedPath(parsed.Path); endpointPath != "" {
+		return nil, &cliAPIValidationError{message: fmt.Sprintf("%s must be an API server base URL, not a direct %s endpoint", source, endpointPath)}
 	}
 	return parsed, nil
+}
+
+func cliAPIEndpointShapedPath(rawPath string) string {
+	trimmed := strings.TrimRight(rawPath, "/")
+	if trimmed == "" || trimmed == "/" {
+		return ""
+	}
+	switch {
+	case trimmed == cliAPIRPCPath || strings.HasSuffix(trimmed, cliAPIRPCPath):
+		return cliAPIRPCPath
+	case trimmed == cliAPIWSPath || strings.HasSuffix(trimmed, cliAPIWSPath):
+		return cliAPIWSPath
+	default:
+		return ""
+	}
 }
 
 func joinURLPath(basePath, suffix string) string {
