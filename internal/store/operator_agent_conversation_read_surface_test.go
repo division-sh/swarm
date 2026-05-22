@@ -89,7 +89,7 @@ func canonicalAgentConversationReadCaps() StoreSchemaCapabilities {
 func operatorAgentProjectionColumns() []string {
 	return []string{
 		"agent_id", "status", "session_id", "session_started_at", "turn_count", "lease_holder", "lease_expires_at", "runtime_state", "pending_count", "oldest_pending_age_sec",
-		"failures_24h", "dead_letters_24h", "turns_24h", "turn_id", "task_id", "parse_ok", "error", "turn_created_at", "turn_blocks",
+		"failures_24h", "dead_letters_24h", "turn_id", "task_id", "parse_ok", "error", "turn_created_at", "turn_blocks",
 	}
 }
 
@@ -296,7 +296,7 @@ func TestOperatorAgentReadSurfaceLoadAgentProjectsSessionAndTurnRefs(t *testing.
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
-			AddRow("agent-1", "active", sessionID, sessionStartedAt, 2, "", nil, []byte(`{"provider_session_id":"provider-sess-1"}`), 0, 0, 0, 0, 0, turnID, "task-1", false, "model error", turnCompletedAt, []byte(`[]`)))
+			AddRow("agent-1", "active", sessionID, sessionStartedAt, 2, "", nil, []byte(`{"provider_session_id":"provider-sess-1"}`), 0, 0, 0, 0, turnID, "task-1", false, "model error", turnCompletedAt, []byte(`[]`)))
 
 	detail, err := reader.LoadOperatorAgent(context.Background(), "agent-1")
 	if err != nil {
@@ -356,7 +356,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisUsesSelectedOwners(t *testing
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
-			AddRow("agent-1", "active", sessionID, sessionStartedAt, 2, "", nil, runtimeState, 0, 0, 0, 0, 0, turnID, "task-1", true, "", turnCompletedAt, []byte(`[]`)))
+			AddRow("agent-1", "active", sessionID, sessionStartedAt, 2, "", nil, runtimeState, 0, 0, 0, 0, turnID, "task-1", true, "", turnCompletedAt, []byte(`[]`)))
 
 	diagnosis, err := reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1", OperatorAgentDiagnosisOptions{QueueLimit: 1, QueueCursor: "cursor-1"})
 	if err != nil {
@@ -416,7 +416,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisOmitsAbsentLifecycle(t *testi
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
-			AddRow("agent-1", "active", "", nil, 0, "", nil, []byte(`{}`), 0, 0, 0, 0, 0, "", "", false, "", nil, []byte(`[]`)))
+			AddRow("agent-1", "active", "", nil, 0, "", nil, []byte(`{}`), 0, 0, 0, 0, "", "", false, "", nil, []byte(`[]`)))
 
 	diagnosis, err := reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1", OperatorAgentDiagnosisOptions{})
 	if err != nil {
@@ -454,7 +454,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisFailsClosedOnMalformedRuntime
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
-			AddRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 0, "", nil, []byte(`{"watchdog":{"state":"stale","blocking_layer":"session_execution","action":"turn_long_running","outcome":"observed","recorded_at":"2026-05-12T09:05:00Z"}}`), 0, 0, 0, 0, 0, "", "", false, "", nil, []byte(`[]`)))
+			AddRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 0, "", nil, []byte(`{"watchdog":{"state":"stale","blocking_layer":"session_execution","action":"turn_long_running","outcome":"observed","recorded_at":"2026-05-12T09:05:00Z"}}`), 0, 0, 0, 0, "", "", false, "", nil, []byte(`[]`)))
 
 	_, err = reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1", OperatorAgentDiagnosisOptions{})
 	if err == nil || !strings.Contains(err.Error(), "decode latest agent session runtime_state") || !strings.Contains(err.Error(), "watchdog.state") {
@@ -483,7 +483,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisFailsClosedOnMalformedLifecyc
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
-			AddRow("agent-1", "active", "", nil, 0, "", nil, []byte(`{}`), 0, 0, 0, 0, 0, "", "", false, "", nil, []byte(`[]`)))
+			AddRow("agent-1", "active", "", nil, 0, "", nil, []byte(`{}`), 0, 0, 0, 0, "", "", false, "", nil, []byte(`[]`)))
 
 	_, err = reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1", OperatorAgentDiagnosisOptions{})
 	if err == nil || !strings.Contains(err.Error(), "delivery_lifecycle.state") {
@@ -535,7 +535,7 @@ func TestOperatorConversationReadSurfaceCurrentForAgentUsesMostRecentActiveSessi
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
-			AddRow("agent-1", "active", sessionID, now.Add(-time.Hour), 2, "", nil, []byte(`{}`), 0, 0, 0, 0, 0, "", "", false, "", nil, []byte(`[]`)))
+			AddRow("agent-1", "active", sessionID, now.Add(-time.Hour), 2, "", nil, []byte(`{}`), 0, 0, 0, 0, "", "", false, "", nil, []byte(`[]`)))
 	mock.ExpectQuery("(?s)SELECT\\s+session_id::text,\\s+agent_id,.*FROM agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
 		WithArgs("agent-1", runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorConversationDetailColumns()).
@@ -577,7 +577,7 @@ func TestOperatorConversationReadSurfaceCurrentForAgentReturnsNullWithoutActiveL
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
-			AddRow("agent-1", "active", "", nil, 0, "", nil, []byte(`{}`), 0, 0, 0, 0, 0, "", "", false, "", nil, []byte(`[]`)))
+			AddRow("agent-1", "active", "", nil, 0, "", nil, []byte(`{}`), 0, 0, 0, 0, "", "", false, "", nil, []byte(`[]`)))
 	mock.ExpectQuery("(?s)SELECT\\s+session_id::text,\\s+agent_id,.*FROM agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
 		WithArgs("agent-1", runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorConversationDetailColumns()))

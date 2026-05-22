@@ -321,14 +321,12 @@ type genericAgent struct {
 	PendingEvents       int               `json:"pending_events,omitempty"`
 	OldestPendingAgeSec int               `json:"oldest_pending_age_sec,omitempty"`
 	InFlightTurn        bool              `json:"in_flight_turn,omitempty"`
-	InFlightSeconds     int               `json:"in_flight_seconds,omitempty"`
 	LockOwner           string            `json:"lock_owner,omitempty"`
 	LockExpiresAt       string            `json:"lock_expires_at,omitempty"`
 	Failures24h         int               `json:"failures_24h,omitempty"`
 	DeadLetters24h      int               `json:"dead_letters_24h,omitempty"`
 	TurnCount           int               `json:"turn_count,omitempty"`
 	TurnLimit           int               `json:"turn_limit,omitempty"`
-	Turns24h            int               `json:"turns_24h,omitempty"`
 	TotalTokens24h      int               `json:"total_tokens_24h,omitempty"`
 	NearBreaker         bool              `json:"near_breaker,omitempty"`
 	SessionID           string            `json:"session_id,omitempty"`
@@ -1033,14 +1031,12 @@ func genericAgentFromOperatorSummary(row store.OperatorAgentSummary) genericAgen
 		PendingEvents:       row.PendingEvents,
 		OldestPendingAgeSec: row.OldestPendingAgeSec,
 		InFlightTurn:        row.InFlightTurn,
-		InFlightSeconds:     row.InFlightSeconds,
 		LockOwner:           strings.TrimSpace(row.LockOwner),
 		LockExpiresAt:       formatTime(row.LockExpiresAt),
 		Failures24h:         row.Failures24h,
 		DeadLetters24h:      row.DeadLetters24h,
 		TurnCount:           row.TurnCount,
 		TurnLimit:           row.TurnLimit,
-		Turns24h:            row.Turns24h,
 		NearBreaker:         row.NearBreaker,
 		SessionID:           strings.TrimSpace(row.SessionID),
 		ProviderSessionID:   strings.TrimSpace(row.ProviderSessionID),
