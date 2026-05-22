@@ -206,9 +206,28 @@ func TestCLIAPISettingsFailClosed(t *testing.T) {
 			wantErr:  "not a direct /v1/rpc endpoint",
 		},
 		{
+			name: "flag API server rejects prefixed RPC endpoint",
+			setup: func(t *testing.T) rootCommandOptions {
+				t.Setenv("SWARM_API_TOKEN", "env-token")
+				return rootCommandOptions{apiServer: "http://127.0.0.1:8081/proxy/v1/rpc"}
+			},
+			wantExit: cliExitValidation,
+			wantErr:  "not a direct /v1/rpc endpoint",
+		},
+		{
 			name: "environment API server rejects direct websocket endpoint",
 			setup: func(t *testing.T) rootCommandOptions {
 				t.Setenv("SWARM_API_SERVER", "http://127.0.0.1:8081/v1/ws")
+				t.Setenv("SWARM_API_TOKEN", "env-token")
+				return rootCommandOptions{}
+			},
+			wantExit: cliExitValidation,
+			wantErr:  "not a direct /v1/ws endpoint",
+		},
+		{
+			name: "environment API server rejects prefixed websocket endpoint",
+			setup: func(t *testing.T) rootCommandOptions {
+				t.Setenv("SWARM_API_SERVER", "http://127.0.0.1:8081/proxy/v1/ws")
 				t.Setenv("SWARM_API_TOKEN", "env-token")
 				return rootCommandOptions{}
 			},
@@ -220,6 +239,18 @@ func TestCLIAPISettingsFailClosed(t *testing.T) {
 			setup: func(t *testing.T) rootCommandOptions {
 				t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
 					"api_server": "http://127.0.0.1:8081/v1/rpc",
+				}))
+				t.Setenv("SWARM_API_TOKEN", "env-token")
+				return rootCommandOptions{}
+			},
+			wantExit: cliExitValidation,
+			wantErr:  "not a direct /v1/rpc endpoint",
+		},
+		{
+			name: "config API server rejects prefixed RPC endpoint",
+			setup: func(t *testing.T) rootCommandOptions {
+				t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
+					"api_server": "http://127.0.0.1:8081/proxy/v1/rpc",
 				}))
 				t.Setenv("SWARM_API_TOKEN", "env-token")
 				return rootCommandOptions{}
@@ -315,6 +346,41 @@ func TestAPIConnectionFlagsDriveRuntimeStateCommand(t *testing.T) {
 	}
 }
 
+func TestAPIConnectionFlagsPreserveServerBasePathPrefix(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	tokenFile := writeCLIAPITokenFile(t, "flag-token")
+	var sawRequest bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawRequest = true
+		if r.URL.Path != "/proxy/v1/rpc" {
+			t.Errorf("path = %q, want /proxy/v1/rpc", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer flag-token" {
+			t.Errorf("Authorization = %q, want bearer flag-token", got)
+		}
+		var req jsonRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.Method != "run.list" {
+			t.Errorf("method = %q, want run.list", req.Method)
+		}
+		writeJSONRPCResult(t, w, req.ID, map[string]any{"runs": []any{}})
+	}))
+	defer server.Close()
+
+	opts := defaultRootCommandOptions()
+	opts.httpClient = server.Client()
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"runs", "--api-server", server.URL + "/proxy", "--api-token-file", tokenFile}, &stdout, &stderr, opts)
+	if code != 0 {
+		t.Fatalf("exit = %d stderr=%q stdout=%q", code, stderr.String(), stdout.String())
+	}
+	if !sawRequest {
+		t.Fatal("server did not receive request")
+	}
+}
+
 func TestCLIAPIConfigDrivesRuntimeStateCommand(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	tokenFile := writeCLIAPITokenFile(t, "config-token")
@@ -361,6 +427,16 @@ func TestEndpointShapedAPIServerRejectedBeforeRequest(t *testing.T) {
 			want: "not a direct /v1/rpc endpoint",
 		},
 		{
+			name: "flag prefixed RPC endpoint",
+			args: []string{"runs", "--api-server", "{server}/proxy/v1/rpc", "--api-token-file", "{token}"},
+			want: "not a direct /v1/rpc endpoint",
+		},
+		{
+			name: "flag prefixed websocket endpoint",
+			args: []string{"runs", "--api-server", "{server}/proxy/v1/ws", "--api-token-file", "{token}"},
+			want: "not a direct /v1/ws endpoint",
+		},
+		{
 			name: "environment direct websocket endpoint",
 			args: []string{"runs"},
 			setup: func(t *testing.T, serverURL string, _ string) {
@@ -370,11 +446,31 @@ func TestEndpointShapedAPIServerRejectedBeforeRequest(t *testing.T) {
 			want: "not a direct /v1/ws endpoint",
 		},
 		{
+			name: "environment prefixed RPC endpoint",
+			args: []string{"runs"},
+			setup: func(t *testing.T, serverURL string, _ string) {
+				t.Setenv("SWARM_API_SERVER", serverURL+"/proxy/v1/rpc")
+				t.Setenv("SWARM_API_TOKEN", "env-token")
+			},
+			want: "not a direct /v1/rpc endpoint",
+		},
+		{
 			name: "config direct RPC endpoint",
 			args: []string{"runs"},
 			setup: func(t *testing.T, serverURL string, tokenFile string) {
 				t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
 					"api_server":     serverURL + "/v1/rpc",
+					"api_token_file": tokenFile,
+				}))
+			},
+			want: "not a direct /v1/rpc endpoint",
+		},
+		{
+			name: "config prefixed RPC endpoint",
+			args: []string{"runs"},
+			setup: func(t *testing.T, serverURL string, tokenFile string) {
+				t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
+					"api_server":     serverURL + "/proxy/v1/rpc",
 					"api_token_file": tokenFile,
 				}))
 			},
