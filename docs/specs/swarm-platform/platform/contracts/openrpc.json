@@ -6498,6 +6498,30 @@
             "$ref": "#/components/schemas/OpaqueId",
             "description": "Present only when the decision triggered an event emission (typically on approve)."
           },
+          "downstream_event_name": {
+            "description": "Present with downstream_event_id when the decision triggered an event emission.",
+            "type": "string"
+          },
+          "downstream_subscriber_source": {
+            "description": "Present with downstream_event_id and uses the same vocabulary as MailboxDownstreamPreview.subscriber_source.",
+            "enum": [
+              "event_catalog",
+              "unavailable",
+              "none"
+            ],
+            "type": "string"
+          },
+          "downstream_subscribers": {
+            "description": "Present with downstream_event_id; empty array is valid when no subscribers are known.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "idempotency_replayed": {
+            "description": "False for first execution; true when returned from the API idempotency replay path.",
+            "type": "boolean"
+          },
           "mailbox_decision_id": {
             "$ref": "#/components/schemas/OpaqueId"
           },
@@ -6512,7 +6536,8 @@
         "required": [
           "ok",
           "mailbox_decision_id",
-          "status"
+          "status",
+          "idempotency_replayed"
         ],
         "type": "object"
       },

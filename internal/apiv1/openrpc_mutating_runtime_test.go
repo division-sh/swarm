@@ -285,19 +285,19 @@ func mutatingHTTPRuntimeFixtures() map[string]mutatingHTTPRuntimeFixture {
 		"mailbox.approve": {
 			Params:         map[string]any{"mailbox_id": "mailbox-1", "decision_payload": map[string]any{"approved": true}},
 			ConflictParams: map[string]any{"mailbox_id": "mailbox-1", "decision_payload": map[string]any{"approved": false}},
-			ResultKeys:     []string{"ok", "mailbox_decision_id", "status", "downstream_event_id"},
+			ResultKeys:     []string{"ok", "mailbox_decision_id", "status", "idempotency_replayed", "downstream_event_id", "downstream_event_name", "downstream_subscribers", "downstream_subscriber_source"},
 			SuccessEffects: 2,
 		},
 		"mailbox.defer": {
 			Params:         map[string]any{"mailbox_id": "mailbox-1", "until": until},
 			ConflictParams: map[string]any{"mailbox_id": "mailbox-1", "until": later},
-			ResultKeys:     []string{"ok", "mailbox_decision_id", "status"},
+			ResultKeys:     []string{"ok", "mailbox_decision_id", "status", "idempotency_replayed"},
 			SuccessEffects: 1,
 		},
 		"mailbox.reject": {
 			Params:         map[string]any{"mailbox_id": "mailbox-1", "reason": "not enough evidence"},
 			ConflictParams: map[string]any{"mailbox_id": "mailbox-1", "reason": "duplicate request"},
-			ResultKeys:     []string{"ok", "mailbox_decision_id", "status"},
+			ResultKeys:     []string{"ok", "mailbox_decision_id", "status", "idempotency_replayed"},
 			SuccessEffects: 1,
 		},
 		"run.continue": {
@@ -919,6 +919,13 @@ func (s *mutatingProbeMailboxStore) DecideV1MailboxItem(ctx context.Context, dec
 		if decision.Action == "approved" && strings.TrimSpace(decision.ApprovalEventType) != "" && decision.ApprovalEventTx != nil {
 			eventID := "mailbox-event-1"
 			result.DownstreamEventID = eventID
+			result.DownstreamEventName = strings.TrimSpace(decision.ApprovalEventType)
+			subscribers := append([]string(nil), decision.ApprovalEventSubscribers...)
+			if subscribers == nil {
+				subscribers = []string{}
+			}
+			result.DownstreamSubscribers = &subscribers
+			result.DownstreamSubscriberSource = strings.TrimSpace(decision.ApprovalEventSubscriberSource)
 			if err := decision.ApprovalEventTx(ctx, nil, events.Event{
 				ID:          eventID,
 				Type:        events.EventType(decision.ApprovalEventType),

@@ -79,23 +79,29 @@ type MailboxV1DownstreamPreview struct {
 }
 
 type MailboxV1DecisionRequest struct {
-	MailboxID         string
-	Action            string
-	ActorTokenID      string
-	Reason            string
-	DecisionPayload   json.RawMessage
-	DeferUntil        time.Time
-	Now               time.Time
-	ApprovalEventType string
-	ApprovalEventTx   func(context.Context, *sql.Tx, events.Event) error
-	Idempotency       *APIIdempotencyRequest
+	MailboxID                     string
+	Action                        string
+	ActorTokenID                  string
+	Reason                        string
+	DecisionPayload               json.RawMessage
+	DeferUntil                    time.Time
+	Now                           time.Time
+	ApprovalEventType             string
+	ApprovalEventSubscribers      []string
+	ApprovalEventSubscriberSource string
+	ApprovalEventTx               func(context.Context, *sql.Tx, events.Event) error
+	Idempotency                   *APIIdempotencyRequest
 }
 
 type MailboxV1DecisionResult struct {
-	OK                bool   `json:"ok"`
-	MailboxDecisionID string `json:"mailbox_decision_id"`
-	DownstreamEventID string `json:"downstream_event_id,omitempty"`
-	Status            string `json:"status"`
+	OK                         bool      `json:"ok"`
+	MailboxDecisionID          string    `json:"mailbox_decision_id"`
+	DownstreamEventID          string    `json:"downstream_event_id,omitempty"`
+	DownstreamEventName        string    `json:"downstream_event_name,omitempty"`
+	DownstreamSubscribers      *[]string `json:"downstream_subscribers,omitempty"`
+	DownstreamSubscriberSource string    `json:"downstream_subscriber_source,omitempty"`
+	Status                     string    `json:"status"`
+	IdempotencyReplayed        bool      `json:"idempotency_replayed"`
 }
 
 type MailboxV1DecisionOutcome struct {
@@ -348,7 +354,18 @@ func (s *PostgresStore) DecideV1MailboxItem(ctx context.Context, input MailboxV1
 		if err != nil {
 			return MailboxV1DecisionOutcome{}, err
 		}
+		subscribers := append([]string(nil), input.ApprovalEventSubscribers...)
+		if subscribers == nil {
+			subscribers = []string{}
+		}
+		subscriberSource := strings.TrimSpace(input.ApprovalEventSubscriberSource)
+		if subscriberSource == "" {
+			subscriberSource = "unavailable"
+		}
 		outcome.Result.DownstreamEventID = eventID
+		outcome.Result.DownstreamEventName = strings.TrimSpace(input.ApprovalEventType)
+		outcome.Result.DownstreamSubscribers = &subscribers
+		outcome.Result.DownstreamSubscriberSource = subscriberSource
 		outcome.ApprovalEvent = &evt
 	}
 	res, err := tx.ExecContext(ctx, `

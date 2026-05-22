@@ -31,7 +31,7 @@ func TestMailboxCommandsSendV1RPCRequests(t *testing.T) {
 				"idempotency_key":  "idem-approve",
 				"decision_payload": map[string]any{"approved": true},
 			},
-			wantOutput: []string{"mailbox approve ok:", "mailbox_id=mailbox-1", "status=decided", "decision_id=decision-1", "downstream_event_id=event-1"},
+			wantOutput: []string{"mailbox approve ok:", "mailbox_id=mailbox-1", "status=decided", "decision_id=decision-1", "idempotency_replayed=false", "downstream_event_id=event-1", "downstream_event_name=mailbox.item_decided", "downstream_subscribers=approval-agent,review-agent", "downstream_subscriber_source=event_catalog"},
 		},
 		{
 			name:       "reject",
@@ -42,7 +42,7 @@ func TestMailboxCommandsSendV1RPCRequests(t *testing.T) {
 				"reason":          "not enough evidence",
 				"idempotency_key": "idem-reject",
 			},
-			wantOutput: []string{"mailbox reject ok:", "mailbox_id=mailbox-2", "status=decided", "decision_id=decision-1"},
+			wantOutput: []string{"mailbox reject ok:", "mailbox_id=mailbox-2", "status=decided", "decision_id=decision-1", "idempotency_replayed=false"},
 		},
 		{
 			name:       "defer",
@@ -53,7 +53,7 @@ func TestMailboxCommandsSendV1RPCRequests(t *testing.T) {
 				"until":           "2026-05-13T12:30:00Z",
 				"idempotency_key": "idem-defer",
 			},
-			wantOutput: []string{"mailbox defer ok:", "mailbox_id=mailbox-3", "status=deferred", "decision_id=decision-1"},
+			wantOutput: []string{"mailbox defer ok:", "mailbox_id=mailbox-3", "status=deferred", "decision_id=decision-1", "idempotency_replayed=false"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -77,12 +77,19 @@ func TestMailboxCommandsSendV1RPCRequests(t *testing.T) {
 				if tc.name == "approve" {
 					downstream = "event-1"
 				}
-				writeJSONRPCResult(t, w, captured.ID, map[string]any{
-					"ok":                  true,
-					"mailbox_decision_id": "decision-1",
-					"downstream_event_id": downstream,
-					"status":              status,
-				})
+				result := map[string]any{
+					"ok":                   true,
+					"mailbox_decision_id":  "decision-1",
+					"downstream_event_id":  downstream,
+					"status":               status,
+					"idempotency_replayed": false,
+				}
+				if tc.name == "approve" {
+					result["downstream_event_name"] = "mailbox.item_decided"
+					result["downstream_subscribers"] = []string{"approval-agent", "review-agent"}
+					result["downstream_subscriber_source"] = "event_catalog"
+				}
+				writeJSONRPCResult(t, w, captured.ID, result)
 			}))
 			defer server.Close()
 
@@ -128,10 +135,14 @@ func TestMailboxApproveDecisionPayloadFileSendsV1RPCRequest(t *testing.T) {
 			t.Errorf("decode request: %v", err)
 		}
 		writeJSONRPCResult(t, w, captured.ID, map[string]any{
-			"ok":                  true,
-			"mailbox_decision_id": "decision-1",
-			"downstream_event_id": "event-1",
-			"status":              "decided",
+			"ok":                           true,
+			"mailbox_decision_id":          "decision-1",
+			"downstream_event_id":          "event-1",
+			"downstream_event_name":        "mailbox.item_decided",
+			"downstream_subscribers":       []string{"approval-agent", "review-agent"},
+			"downstream_subscriber_source": "event_catalog",
+			"status":                       "decided",
+			"idempotency_replayed":         false,
 		})
 	}))
 	defer server.Close()
@@ -153,7 +164,7 @@ func TestMailboxApproveDecisionPayloadFileSendsV1RPCRequest(t *testing.T) {
 	if !reflect.DeepEqual(captured.Params, wantParams) {
 		t.Fatalf("params = %#v, want %#v", captured.Params, wantParams)
 	}
-	for _, want := range []string{"mailbox approve ok:", "mailbox_id=mailbox-1", "status=decided", "decision_id=decision-1", "downstream_event_id=event-1"} {
+	for _, want := range []string{"mailbox approve ok:", "mailbox_id=mailbox-1", "status=decided", "decision_id=decision-1", "idempotency_replayed=false", "downstream_event_id=event-1", "downstream_event_name=mailbox.item_decided", "downstream_subscribers=approval-agent,review-agent", "downstream_subscriber_source=event_catalog"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
 		}
@@ -714,6 +725,60 @@ func TestMailboxReadCommandsFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 			wantCode:   5,
 			wantStderr: "MAILBOX_NOT_FOUND",
 		},
+		{
+			name: "approve malformed missing idempotency replayed",
+			args: []string{"mailbox", "approve", "mailbox-1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				writeJSONRPCResult(t, w, req.ID, map[string]any{
+					"ok":                  true,
+					"mailbox_decision_id": "decision-1",
+					"status":              "decided",
+				})
+			},
+			wantCode:   3,
+			wantStderr: "malformed mailbox decision result: idempotency_replayed is required",
+		},
+		{
+			name: "approve malformed missing downstream subscribers",
+			args: []string{"mailbox", "approve", "mailbox-1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				writeJSONRPCResult(t, w, req.ID, map[string]any{
+					"ok":                           true,
+					"mailbox_decision_id":          "decision-1",
+					"status":                       "decided",
+					"idempotency_replayed":         false,
+					"downstream_event_id":          "event-1",
+					"downstream_event_name":        "mailbox.item_decided",
+					"downstream_subscriber_source": "event_catalog",
+				})
+			},
+			wantCode:   3,
+			wantStderr: "malformed mailbox decision result: downstream_subscribers is required when downstream_event_id is present",
+		},
+		{
+			name: "approve malformed invalid downstream source",
+			args: []string{"mailbox", "approve", "mailbox-1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				writeJSONRPCResult(t, w, req.ID, map[string]any{
+					"ok":                           true,
+					"mailbox_decision_id":          "decision-1",
+					"status":                       "decided",
+					"idempotency_replayed":         false,
+					"downstream_event_id":          "event-1",
+					"downstream_event_name":        "mailbox.item_decided",
+					"downstream_subscribers":       []string{"approval-agent"},
+					"downstream_subscriber_source": "local_guess",
+				})
+			},
+			wantCode:   3,
+			wantStderr: "malformed mailbox decision result: downstream_subscriber_source must be event_catalog, unavailable, or none",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("SWARM_API_TOKEN", "test-token")
@@ -767,9 +832,10 @@ func TestMailboxRejectsMalformedStatusByAction(t *testing.T) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)
 				writeJSONRPCResult(t, w, req.ID, map[string]any{
-					"ok":                  true,
-					"mailbox_decision_id": "decision-1",
-					"status":              tc.status,
+					"ok":                   true,
+					"mailbox_decision_id":  "decision-1",
+					"status":               tc.status,
+					"idempotency_replayed": false,
 				})
 			}))
 			defer server.Close()

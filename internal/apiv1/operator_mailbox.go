@@ -82,13 +82,16 @@ func OperatorMailboxHandlers(opts OperatorReadOptions) map[string]MethodHandler 
 			if err != nil {
 				return nil, err
 			}
+			eventName, subscribers, subscriberSource := mailboxApprovalEventEffect(opts.MailboxApprovalRoutes, stringParam(req.Params, "mailbox_id"), opts.Mailbox, ctx, opts)
 			return executeMailboxDecision(ctx, req, opts, store.MailboxV1DecisionRequest{
-				MailboxID:         stringParam(req.Params, "mailbox_id"),
-				Action:            "approved",
-				ActorTokenID:      req.ActorTokenID,
-				DecisionPayload:   payload,
-				Now:               now().UTC(),
-				ApprovalEventType: mailboxApprovalEventType(opts.MailboxApprovalRoutes, stringParam(req.Params, "mailbox_id"), opts.Mailbox, ctx),
+				MailboxID:                     stringParam(req.Params, "mailbox_id"),
+				Action:                        "approved",
+				ActorTokenID:                  req.ActorTokenID,
+				DecisionPayload:               payload,
+				Now:                           now().UTC(),
+				ApprovalEventType:             eventName,
+				ApprovalEventSubscribers:      subscribers,
+				ApprovalEventSubscriberSource: subscriberSource,
 			})
 		},
 		"mailbox.reject": func(ctx context.Context, req Request) (any, error) {
@@ -235,6 +238,7 @@ func executeMailboxDecision(ctx context.Context, req Request, opts OperatorReadO
 		}
 		return nil, mailboxDecisionError(decision.MailboxID, err)
 	}
+	outcome.Result.IdempotencyReplayed = outcome.Replayed
 	return outcome.Result, nil
 }
 
@@ -340,13 +344,18 @@ func requiredTimestampParam(params map[string]any, name string) (time.Time, erro
 	return parsed.UTC(), nil
 }
 
-func mailboxApprovalEventType(routes map[string]string, mailboxID string, mailbox MailboxAPIStore, ctx context.Context) string {
+func mailboxApprovalEventEffect(routes map[string]string, mailboxID string, mailbox MailboxAPIStore, ctx context.Context, opts OperatorReadOptions) (string, []string, string) {
 	if len(routes) == 0 || mailbox == nil {
-		return ""
+		return "", nil, ""
 	}
 	detail, err := mailbox.GetV1MailboxItem(ctx, mailboxID)
 	if err != nil {
-		return ""
+		return "", nil, ""
 	}
-	return strings.TrimSpace(routes[detail.Item.Type])
+	eventName := strings.TrimSpace(routes[detail.Item.Type])
+	if eventName == "" {
+		return "", nil, ""
+	}
+	subscribers, subscriberSource := mailboxDownstreamSubscribers(eventName, opts)
+	return eventName, subscribers, subscriberSource
 }
