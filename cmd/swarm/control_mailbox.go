@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -92,6 +93,7 @@ type mailboxDecisionCommandOptions struct {
 	until               string
 	idempotencyKey      string
 	decisionPayloadJSON string
+	decisionPayloadFile string
 }
 
 func newControlCommand(opts rootCommandOptions) *cobra.Command {
@@ -210,6 +212,7 @@ func newMailboxApproveCommand(opts rootCommandOptions) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&actionOpts.idempotencyKey, "idempotency-key", "", "Optional v1 API idempotency key")
+	cmd.Flags().StringVar(&actionOpts.decisionPayloadFile, "decision-payload", "", "Read optional approval event JSON object from file")
 	cmd.Flags().StringVar(&actionOpts.decisionPayloadJSON, "decision-payload-json", "", "Optional JSON object attached to the approval event")
 	bindCLIAPIConnectionFlags(cmd, &actionOpts.apiOptions)
 	return cmd
@@ -522,7 +525,7 @@ func (o mailboxDecisionCommandOptions) params(mailboxID string) (map[string]any,
 	}
 	switch o.action {
 	case "approve":
-		payload, ok, err := parseOptionalDecisionPayload(o.decisionPayloadJSON)
+		payload, ok, err := parseOptionalDecisionPayload(o.decisionPayloadJSON, o.decisionPayloadFile)
 		if err != nil {
 			return nil, err
 		}
@@ -551,19 +554,42 @@ func (o mailboxDecisionCommandOptions) params(mailboxID string) (map[string]any,
 	return params, nil
 }
 
-func parseOptionalDecisionPayload(raw string) (map[string]any, bool, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
+func parseOptionalDecisionPayload(inlineJSON, filePath string) (map[string]any, bool, error) {
+	inlineJSON = strings.TrimSpace(inlineJSON)
+	filePath = strings.TrimSpace(filePath)
+	if inlineJSON != "" && filePath != "" {
+		return nil, false, fmt.Errorf("--decision-payload and --decision-payload-json are mutually exclusive")
+	}
+	if filePath != "" {
+		content, err := os.ReadFile(filePath)
+		if err != nil {
+			return nil, false, fmt.Errorf("--decision-payload could not be read: %w", err)
+		}
+		payload, err := parseDecisionPayloadObject("--decision-payload", string(content))
+		if err != nil {
+			return nil, false, err
+		}
+		return payload, true, nil
+	}
+	if inlineJSON == "" {
 		return nil, false, nil
 	}
-	var payload map[string]any
-	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
-		return nil, false, fmt.Errorf("--decision-payload-json must be a JSON object: %w", err)
-	}
-	if payload == nil {
-		return nil, false, fmt.Errorf("--decision-payload-json must be a JSON object")
+	payload, err := parseDecisionPayloadObject("--decision-payload-json", inlineJSON)
+	if err != nil {
+		return nil, false, err
 	}
 	return payload, true, nil
+}
+
+func parseDecisionPayloadObject(flagName, raw string) (map[string]any, error) {
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return nil, fmt.Errorf("%s must be a JSON object: %w", flagName, err)
+	}
+	if payload == nil {
+		return nil, fmt.Errorf("%s must be a JSON object", flagName)
+	}
+	return payload, nil
 }
 
 func writeMailboxListResult(out io.Writer, result mailboxListResult) {

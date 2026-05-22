@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync/atomic"
@@ -104,6 +106,60 @@ func TestMailboxCommandsSendV1RPCRequests(t *testing.T) {
 				t.Fatalf("stderr = %q, want empty", stderr.String())
 			}
 		})
+	}
+}
+
+func TestMailboxApproveDecisionPayloadFileSendsV1RPCRequest(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	payloadPath := filepath.Join(t.TempDir(), "decision-payload.json")
+	if err := os.WriteFile(payloadPath, []byte(`{"approved":true,"source":"file"}`), 0o600); err != nil {
+		t.Fatalf("write payload file: %v", err)
+	}
+
+	var captured jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/rpc" {
+			t.Errorf("path = %q, want /v1/rpc", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
+			t.Errorf("Authorization = %q, want bearer token", got)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		writeJSONRPCResult(t, w, captured.ID, map[string]any{
+			"ok":                  true,
+			"mailbox_decision_id": "decision-1",
+			"downstream_event_id": "event-1",
+			"status":              "decided",
+		})
+	}))
+	defer server.Close()
+
+	args := []string{"mailbox", "approve", "mailbox-1", "--idempotency-key", "idem-file", "--decision-payload", payloadPath}
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	wantParams := map[string]any{
+		"mailbox_id":       "mailbox-1",
+		"idempotency_key":  "idem-file",
+		"decision_payload": map[string]any{"approved": true, "source": "file"},
+	}
+	if captured.JSONRPC != "2.0" || captured.Method != "mailbox.approve" {
+		t.Fatalf("request jsonrpc/method = %s/%s, want 2.0/mailbox.approve", captured.JSONRPC, captured.Method)
+	}
+	if !reflect.DeepEqual(captured.Params, wantParams) {
+		t.Fatalf("params = %#v, want %#v", captured.Params, wantParams)
+	}
+	for _, want := range []string{"mailbox approve ok:", "mailbox_id=mailbox-1", "status=decided", "decision_id=decision-1", "downstream_event_id=event-1"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
+		}
+	}
+	if strings.TrimSpace(stderr.String()) != "" {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
 	}
 }
 
@@ -271,6 +327,7 @@ func TestMailboxRejectsInvalidInputBeforeRequest(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
 		args        []string
+		prepare     func(t *testing.T) []string
 		wantStderr  string
 		wantNoCalls bool
 	}{
@@ -288,15 +345,68 @@ func TestMailboxRejectsInvalidInputBeforeRequest(t *testing.T) {
 		{name: "approve unsupported flag", args: []string{"mailbox", "approve", "mailbox-1", "--unknown"}, wantStderr: "unknown flag", wantNoCalls: true},
 		{name: "approve malformed payload", args: []string{"mailbox", "approve", "mailbox-1", "--decision-payload-json", "{"}, wantStderr: "--decision-payload-json must be a JSON object", wantNoCalls: true},
 		{name: "approve non-object payload", args: []string{"mailbox", "approve", "mailbox-1", "--decision-payload-json", "[]"}, wantStderr: "--decision-payload-json must be a JSON object", wantNoCalls: true},
+		{name: "approve missing payload file", args: []string{"mailbox", "approve", "mailbox-1", "--decision-payload", filepath.Join(t.TempDir(), "missing.json")}, wantStderr: "--decision-payload could not be read", wantNoCalls: true},
+		{
+			name: "approve malformed payload file",
+			prepare: func(t *testing.T) []string {
+				path := filepath.Join(t.TempDir(), "payload.json")
+				if err := os.WriteFile(path, []byte("{"), 0o600); err != nil {
+					t.Fatalf("write payload file: %v", err)
+				}
+				return []string{"mailbox", "approve", "mailbox-1", "--decision-payload", path}
+			},
+			wantStderr:  "--decision-payload must be a JSON object",
+			wantNoCalls: true,
+		},
+		{
+			name: "approve non-object payload file",
+			prepare: func(t *testing.T) []string {
+				path := filepath.Join(t.TempDir(), "payload.json")
+				if err := os.WriteFile(path, []byte("[]"), 0o600); err != nil {
+					t.Fatalf("write payload file: %v", err)
+				}
+				return []string{"mailbox", "approve", "mailbox-1", "--decision-payload", path}
+			},
+			wantStderr:  "--decision-payload must be a JSON object",
+			wantNoCalls: true,
+		},
+		{
+			name: "approve null payload file",
+			prepare: func(t *testing.T) []string {
+				path := filepath.Join(t.TempDir(), "payload.json")
+				if err := os.WriteFile(path, []byte("null"), 0o600); err != nil {
+					t.Fatalf("write payload file: %v", err)
+				}
+				return []string{"mailbox", "approve", "mailbox-1", "--decision-payload", path}
+			},
+			wantStderr:  "--decision-payload must be a JSON object",
+			wantNoCalls: true,
+		},
+		{
+			name: "approve conflicting payload flags",
+			prepare: func(t *testing.T) []string {
+				path := filepath.Join(t.TempDir(), "payload.json")
+				if err := os.WriteFile(path, []byte(`{"approved":true}`), 0o600); err != nil {
+					t.Fatalf("write payload file: %v", err)
+				}
+				return []string{"mailbox", "approve", "mailbox-1", "--decision-payload", path, "--decision-payload-json", `{"approved":true}`}
+			},
+			wantStderr:  "--decision-payload and --decision-payload-json are mutually exclusive",
+			wantNoCalls: true,
+		},
 		{name: "reject missing reason", args: []string{"mailbox", "reject", "mailbox-1"}, wantStderr: "--reason is required", wantNoCalls: true},
 		{name: "reject blank reason", args: []string{"mailbox", "reject", "mailbox-1", "--reason", "  "}, wantStderr: "--reason is required", wantNoCalls: true},
 		{name: "defer missing until", args: []string{"mailbox", "defer", "mailbox-1"}, wantStderr: "--until is required", wantNoCalls: true},
 		{name: "defer invalid until", args: []string{"mailbox", "defer", "mailbox-1", "--until", "tomorrow"}, wantStderr: "--until must be an RFC3339 timestamp", wantNoCalls: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			args := tc.args
+			if tc.prepare != nil {
+				args = tc.prepare(t)
+			}
 			before := calls.Load()
 			var stdout, stderr bytes.Buffer
-			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), tc.args, &stdout, &stderr, testRootCommandOptions(server))
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, testRootCommandOptions(server))
 			if code != 2 {
 				t.Fatalf("code = %d, want 2 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 			}
@@ -320,11 +430,16 @@ func TestMailboxRequiresAPITokenBeforeRequest(t *testing.T) {
 		writeJSONRPCResult(t, w, "unexpected", map[string]any{"ok": true})
 	}))
 	defer server.Close()
+	payloadPath := filepath.Join(t.TempDir(), "decision-payload.json")
+	if err := os.WriteFile(payloadPath, []byte(`{"approved":true}`), 0o600); err != nil {
+		t.Fatalf("write payload file: %v", err)
+	}
 
 	for _, args := range [][]string{
 		{"mailbox", "list"},
 		{"mailbox", "view", "mailbox-1"},
 		{"mailbox", "approve", "mailbox-1"},
+		{"mailbox", "approve", "mailbox-1", "--decision-payload", payloadPath},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			t.Setenv("SWARM_API_TOKEN", "")
