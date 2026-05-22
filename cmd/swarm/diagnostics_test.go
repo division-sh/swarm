@@ -455,25 +455,35 @@ func TestTraceSnapshotFiltersUseOmittedRunResolver(t *testing.T) {
 }
 
 func TestTraceFollowUsesRunSubscribeTrace(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
-	server, calls, wsRequests := newRunCommandServer(t, runCommandServerOptions{
-		wsRows:           []map[string]any{validRunCommandTraceRow("evt-follow")},
-		wsCloseAfterRows: true,
-	})
-	defer server.Close()
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{name: "long follow", args: []string{"trace", "run-follow", "--follow", "--no-retry"}},
+		{name: "shorthand follow", args: []string{"trace", "run-follow", "-f", "--no-retry"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("SWARM_API_TOKEN", "test-token")
+			server, calls, wsRequests := newRunCommandServer(t, runCommandServerOptions{
+				wsRows:           []map[string]any{validRunCommandTraceRow("evt-follow")},
+				wsCloseAfterRows: true,
+			})
+			defer server.Close()
 
-	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"trace", "run-follow", "--follow", "--no-retry"}, &stdout, &stderr, testRootCommandOptions(server))
-	if code != 0 {
-		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
-	}
-	assertRunCommandMethods(t, calls, nil)
-	assertRunCommandTraceSubscription(t, wsRequests, "run-follow", false)
-	if !strings.Contains(stdout.String(), "trace event_id=evt-follow") {
-		t.Fatalf("stdout = %q, want trace row", stdout.String())
-	}
-	if strings.TrimSpace(stderr.String()) != "" {
-		t.Fatalf("stderr = %q, want empty", stderr.String())
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), tc.args, &stdout, &stderr, testRootCommandOptions(server))
+			if code != 0 {
+				t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+			}
+			assertRunCommandMethods(t, calls, nil)
+			assertRunCommandTraceSubscription(t, wsRequests, "run-follow", false)
+			if !strings.Contains(stdout.String(), "trace event_id=evt-follow") {
+				t.Fatalf("stdout = %q, want trace row", stdout.String())
+			}
+			if strings.TrimSpace(stderr.String()) != "" {
+				t.Fatalf("stderr = %q, want empty", stderr.String())
+			}
+		})
 	}
 }
 
@@ -515,6 +525,9 @@ func TestTraceHelpPromotesNoRetryWithoutReplaySince(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "--no-retry") {
 		t.Fatalf("help missing --no-retry:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "-f, --follow") {
+		t.Fatalf("help missing -f shorthand:\n%s", stdout.String())
 	}
 	if strings.Contains(stdout.String(), "--replay-since") {
 		t.Fatalf("help exposed unpromoted --replay-since:\n%s", stdout.String())
@@ -908,6 +921,9 @@ func TestDiagnosticsRejectInvalidInputBeforeRequest(t *testing.T) {
 		{name: "trace follow rejects limit", args: []string{"trace", "run-1", "--follow", "--limit", "5"}, wantStderr: "--limit is not supported with --follow"},
 		{name: "trace follow rejects cursor", args: []string{"trace", "run-1", "--follow", "--cursor", "cur"}, wantStderr: "--cursor is not supported with --follow"},
 		{name: "trace follow rejects since", args: []string{"trace", "run-1", "--follow", "--since", "2026-05-13T10:00:00Z"}, wantStderr: "--since is not supported with --follow"},
+		{name: "trace shorthand follow rejects limit", args: []string{"trace", "run-1", "-f", "--limit", "5"}, wantStderr: "--limit is not supported with --follow"},
+		{name: "trace shorthand follow rejects cursor", args: []string{"trace", "run-1", "-f", "--cursor", "cur"}, wantStderr: "--cursor is not supported with --follow"},
+		{name: "trace shorthand follow rejects since", args: []string{"trace", "run-1", "-f", "--since", "2026-05-13T10:00:00Z"}, wantStderr: "--since is not supported with --follow"},
 		{name: "trace follow direct replay since remains unpromoted", args: []string{"trace", "run-1", "--follow", "--replay-since", "2026-05-13T10:00:00Z"}, wantStderr: "unknown flag"},
 		{name: "trace richer filter still unpromoted", args: []string{"trace", "run-1", "--event-name", "scan.requested"}, wantStderr: "unknown flag"},
 		{name: "status extra arg", args: []string{"status", "run-1", "extra"}, wantStderr: "accepts at most 1 arg(s)"},
@@ -938,6 +954,7 @@ func TestDiagnosticsRequireAPITokenBeforeRequest(t *testing.T) {
 		{"trace", "run-1"},
 		{"trace", "run-1", "--limit", "2", "--cursor", "cur", "--since", "2026-05-13T10:00:00Z"},
 		{"trace", "run-1", "--follow"},
+		{"trace", "run-1", "-f"},
 		{"trace", "run-1", "--follow", "--no-retry"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
