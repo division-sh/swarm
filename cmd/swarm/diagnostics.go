@@ -234,9 +234,10 @@ func newTraceCommand(opts rootCommandOptions) *cobra.Command {
 
 func newInvestigateCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "investigate",
-		Short: "Retired legacy namespace; use swarm runs/status/trace/health.",
-		Args:  cobra.NoArgs,
+		Use:                "investigate",
+		Short:              "Retired legacy namespace; use swarm runs/status/trace/health.",
+		Hidden:             true,
+		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			writeInvestigateRetiredMessage(cmd.ErrOrStderr())
 			return commandExitError{code: 2}
@@ -255,6 +256,7 @@ func newInvestigateRunsCommand(opts rootCommandOptions) *cobra.Command {
 	return &cobra.Command{
 		Use:                "runs",
 		Short:              "Retired legacy command; use swarm runs.",
+		Hidden:             true,
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			writeInvestigateRunsRetiredMessage(cmd.ErrOrStderr())
@@ -267,6 +269,7 @@ func newInvestigateRunCommand(opts rootCommandOptions) *cobra.Command {
 	return &cobra.Command{
 		Use:                "run [run-id]",
 		Short:              "Retired legacy command; use swarm status.",
+		Hidden:             true,
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			writeInvestigateRunRetiredMessage(cmd.ErrOrStderr())
@@ -279,6 +282,7 @@ func newInvestigateTraceCommand(opts rootCommandOptions) *cobra.Command {
 	return &cobra.Command{
 		Use:                "trace [run-id]",
 		Short:              "Retired legacy command; use swarm trace.",
+		Hidden:             true,
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			writeInvestigateTraceRetiredMessage(cmd.ErrOrStderr())
@@ -291,6 +295,7 @@ func newInvestigateHealthCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:                "health",
 		Short:              "Retired legacy command; use swarm health.",
+		Hidden:             true,
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			writeInvestigateHealthRetiredMessage(cmd.ErrOrStderr())

@@ -371,32 +371,32 @@ type verifyFindingOutput struct {
 	Message  string `json:"message"`
 }
 
-func runVerifyCommand(ctx context.Context, repo string, args []string, out io.Writer) int {
-	return runVerifyCommandWithOutput(ctx, repo, args, out, out)
+type verifyCommandOptions struct {
+	contractsPath    string
+	platformSpecPath string
+	output           cliOutputOptions
+	logging          cliLoggingOptions
 }
 
-func runVerifyCommandWithOutput(ctx context.Context, repo string, args []string, out, errOut io.Writer) int {
-	fs := flag.NewFlagSet("verify", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	contractsPath := fs.String("contracts", "", "Path to Swarm contract bundle root")
-	platformSpecPath := fs.String("platform-spec", defaultPlatformSpecPath, "Path to platform spec yaml")
-	outputOpts := cliOutputOptions{}
-	loggingOpts := cliLoggingOptions{}
-	bindCLIOutputFlagSet(fs, &outputOpts)
-	bindCLILoggingFlagSet(fs, &loggingOpts)
-	if err := fs.Parse(args); err != nil {
+func defaultVerifyCommandOptions() verifyCommandOptions {
+	return verifyCommandOptions{
+		platformSpecPath: defaultPlatformSpecPath,
+		logging:          defaultCLILoggingOptions(),
+	}
+}
+
+func runVerifyCommand(ctx context.Context, repo string, opts verifyCommandOptions, out io.Writer) int {
+	return runVerifyCommandWithOutput(ctx, repo, opts, out, out)
+}
+
+func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCommandOptions, out, errOut io.Writer) int {
+	if err := opts.logging.validate(); err != nil {
 		if errOut != nil {
 			fmt.Fprintf(errOut, "verify failed: %v\n", err)
 		}
 		return 2
 	}
-	if err := applyCLILoggingFlagSetArgs(args, &loggingOpts); err != nil {
-		if errOut != nil {
-			fmt.Fprintf(errOut, "verify failed: %v\n", err)
-		}
-		return 2
-	}
-	if err := outputOpts.validate(); err != nil {
+	if err := opts.output.validate(); err != nil {
 		if errOut != nil {
 			fmt.Fprintf(errOut, "verify failed: %v\n", err)
 		}
@@ -408,8 +408,8 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, args []string,
 		}
 		return 1
 	}
-	resolvedContractsPath := resolveContractsPath(repo, *contractsPath)
-	resolvedPlatformSpecPath := resolvePath(repo, *platformSpecPath)
+	resolvedContractsPath := resolveContractsPath(repo, opts.contractsPath)
+	resolvedPlatformSpecPath := resolvePath(repo, opts.platformSpecPath)
 	contractsRoot, err := normalizeContractsRoot(resolvedContractsPath)
 	if err != nil {
 		if errOut != nil {
@@ -436,7 +436,7 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, args []string,
 			Warnings:     verifyFindingOutputs(result.BootReport.Warnings()),
 			LintEvidence: verifyFindingOutputs(result.BootReport.LintEvidence()),
 		}
-		if err := renderCLIOutput(out, errOut, outputOpts, output, func(w io.Writer) {
+		if err := renderCLIOutput(out, errOut, opts.output, output, func(w io.Writer) {
 			writeVerifyFindings(w, "warning", result.BootReport.Warnings())
 			writeVerifyFindings(w, "lint_evidence", result.BootReport.LintEvidence())
 			if w != nil {

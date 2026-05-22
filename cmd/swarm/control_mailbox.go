@@ -140,6 +140,7 @@ func newRetiredControlMailboxCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:                "mailbox",
 		Short:              "Removed v2 command; use swarm mailbox.",
+		Hidden:             true,
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			writeControlMailboxRetiredMessage(cmd.ErrOrStderr())

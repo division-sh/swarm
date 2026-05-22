@@ -104,6 +104,11 @@ func TestCLI_RootNoArgsPrintsHelpAndDoesNotStartRuntime(t *testing.T) {
 			t.Fatalf("root help missing %q:\n%s", want, stdout.String())
 		}
 	}
+	for _, retired := range []string{"fork", "investigate"} {
+		if strings.Contains(stdout.String(), "\n  "+retired) {
+			t.Fatalf("root help advertises retired command %q:\n%s", retired, stdout.String())
+		}
+	}
 	if strings.TrimSpace(stderr.String()) != "" {
 		t.Fatalf("root stderr = %q, want empty", stderr.String())
 	}
@@ -132,6 +137,126 @@ func TestCLI_CompletionCommandSupportsCobraShells(t *testing.T) {
 				t.Fatalf("completion %s output missing swarm command:\n%s", shell, got)
 			}
 		})
+	}
+}
+
+func TestCLI_VerifyHelpAndCompletionOwnedByCobra(t *testing.T) {
+	for _, args := range [][]string{
+		{"verify", "--help"},
+		{"verify", "-h"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommand(context.Background(), t.TempDir(), args, &stdout, &stderr)
+			if code != 0 {
+				t.Fatalf("%s code = %d stderr=%s stdout=%s", strings.Join(args, " "), code, stderr.String(), stdout.String())
+			}
+			for _, want := range []string{"Usage:", "--contracts", "--platform-spec", "--json", "--quiet", "--no-color", "--log-level"} {
+				if !strings.Contains(stdout.String(), want) {
+					t.Fatalf("%s help missing %q:\n%s", strings.Join(args, " "), want, stdout.String())
+				}
+			}
+			if strings.Contains(stdout.String(), "flag_parsing_disabled") || strings.Contains(stderr.String(), "flag: help requested") {
+				t.Fatalf("%s leaked old flag parser state stdout=%q stderr=%q", strings.Join(args, " "), stdout.String(), stderr.String())
+			}
+		})
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommand(context.Background(), t.TempDir(), []string{"completion", "bash"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("completion bash code = %d stderr=%s", code, stderr.String())
+	}
+	verifySectionStart := strings.Index(stdout.String(), "_swarm_verify()")
+	if verifySectionStart < 0 {
+		t.Fatalf("completion output missing _swarm_verify section")
+	}
+	verifySection := stdout.String()[verifySectionStart:]
+	if verifySectionEnd := strings.Index(verifySection[len("_swarm_verify()"):], "\n_swarm_"); verifySectionEnd >= 0 {
+		verifySection = verifySection[:len("_swarm_verify()")+verifySectionEnd]
+	}
+	for _, want := range []string{"--contracts", "--platform-spec", "--json", "--quiet", "--no-color", "--log-level"} {
+		if !strings.Contains(verifySection, want) {
+			t.Fatalf("_swarm_verify completion missing %q:\n%s", want, verifySection)
+		}
+	}
+	if strings.Contains(verifySection, "flag_parsing_disabled") {
+		t.Fatalf("_swarm_verify completion still disables Cobra flag parsing:\n%s", verifySection)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = executeRootCommand(context.Background(), t.TempDir(), []string{"__complete", "verify", "--"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("__complete verify -- code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	for _, want := range []string{"--contracts", "--platform-spec", "--json", "--quiet", "--no-color", "--log-level"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("__complete verify -- missing %q:\n%s", want, stdout.String())
+		}
+	}
+}
+
+func TestCLI_RetiredCommandsHiddenFromHelpAndCompletion(t *testing.T) {
+	for _, args := range [][]string{
+		nil,
+		{"help"},
+	} {
+		t.Run("root "+strings.Join(args, " "), func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommand(context.Background(), t.TempDir(), args, &stdout, &stderr)
+			if code != 0 {
+				t.Fatalf("root help code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+			}
+			for _, retired := range []string{"fork", "investigate"} {
+				if strings.Contains(stdout.String(), "\n  "+retired) {
+					t.Fatalf("root help advertises retired command %q:\n%s", retired, stdout.String())
+				}
+			}
+		})
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommand(context.Background(), t.TempDir(), []string{"__complete", ""}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("__complete root code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	for _, retired := range []string{"fork\t", "investigate\t"} {
+		if strings.Contains(stdout.String(), retired) {
+			t.Fatalf("__complete root advertises retired command %q:\n%s", retired, stdout.String())
+		}
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = executeRootCommand(context.Background(), t.TempDir(), []string{"control", "--help"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("control help code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if strings.Contains(stdout.String(), "\n  mailbox") {
+		t.Fatalf("control help advertises retired mailbox command:\n%s", stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = executeRootCommand(context.Background(), t.TempDir(), []string{"__complete", "control", ""}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("__complete control code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if strings.Contains(stdout.String(), "mailbox\t") {
+		t.Fatalf("__complete control advertises retired mailbox command:\n%s", stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = executeRootCommand(context.Background(), t.TempDir(), []string{"__complete", "investigate", ""}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("__complete investigate code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	for _, retired := range []string{"runs\t", "run\t", "trace\t", "health\t"} {
+		if strings.Contains(stdout.String(), retired) {
+			t.Fatalf("__complete investigate advertises retired subcommand %q:\n%s", retired, stdout.String())
+		}
 	}
 }
 
@@ -2540,11 +2665,15 @@ func TestLoadDotEnvFileRejectsMalformedLine(t *testing.T) {
 	}
 }
 
+func runVerifyCommandWithContractsForTest(ctx context.Context, repo, contractsPath string, out *bytes.Buffer) int {
+	opts := defaultVerifyCommandOptions()
+	opts.contractsPath = contractsPath
+	return runVerifyCommand(ctx, repo, opts, out)
+}
+
 func TestRunVerifyCommand_BadContractsPath(t *testing.T) {
 	var buf bytes.Buffer
-	code := runVerifyCommand(context.Background(), repoRoot(), []string{
-		"-contracts", filepath.Join(t.TempDir(), "missing"),
-	}, &buf)
+	code := runVerifyCommandWithContractsForTest(context.Background(), repoRoot(), filepath.Join(t.TempDir(), "missing"), &buf)
 	if code == 0 {
 		t.Fatal("expected non-zero exit code")
 	}
@@ -2613,9 +2742,7 @@ reader:
 `)
 
 	var buf bytes.Buffer
-	code := runVerifyCommand(context.Background(), repoRoot(), []string{
-		"-contracts", root,
-	}, &buf)
+	code := runVerifyCommandWithContractsForTest(context.Background(), repoRoot(), root, &buf)
 	if code != 0 {
 		t.Fatalf("runVerifyCommand exit code = %d, output = %q", code, buf.String())
 	}
@@ -2682,9 +2809,7 @@ Use save_entity_field for `+"`business_brief`"+`.
 `)
 
 	var buf bytes.Buffer
-	code := runVerifyCommand(context.Background(), repoRoot(), []string{
-		"-contracts", root,
-	}, &buf)
+	code := runVerifyCommandWithContractsForTest(context.Background(), repoRoot(), root, &buf)
 	if code == 0 {
 		t.Fatalf("expected non-zero exit code, output = %q", buf.String())
 	}
@@ -2719,9 +2844,7 @@ accumulator:
 `)
 
 	var buf bytes.Buffer
-	code := runVerifyCommand(context.Background(), repoRoot(), []string{
-		"-contracts", root,
-	}, &buf)
+	code := runVerifyCommandWithContractsForTest(context.Background(), repoRoot(), root, &buf)
 	if code == 0 {
 		t.Fatalf("expected non-zero exit code, output = %q", buf.String())
 	}
@@ -2776,9 +2899,7 @@ accumulator:
 `)
 
 	var buf bytes.Buffer
-	code := runVerifyCommand(context.Background(), repoRoot(), []string{
-		"-contracts", root,
-	}, &buf)
+	code := runVerifyCommandWithContractsForTest(context.Background(), repoRoot(), root, &buf)
 	if code != 0 {
 		t.Fatalf("runVerifyCommand exit code = %d, output = %q", code, buf.String())
 	}
@@ -2861,9 +2982,7 @@ scorer:
 `)
 
 	var buf bytes.Buffer
-	code := runVerifyCommand(context.Background(), repoRoot(), []string{
-		"-contracts", root,
-	}, &buf)
+	code := runVerifyCommandWithContractsForTest(context.Background(), repoRoot(), root, &buf)
 	if code != 0 {
 		t.Fatalf("runVerifyCommand exit code = %d, output = %q", code, buf.String())
 	}
