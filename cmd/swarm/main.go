@@ -381,8 +381,7 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, args []string,
 	contractsPath := fs.String("contracts", "", "Path to Swarm contract bundle root")
 	platformSpecPath := fs.String("platform-spec", defaultPlatformSpecPath, "Path to platform spec yaml")
 	outputOpts := cliOutputOptions{}
-	fs.BoolVar(&outputOpts.asJSON, "json", false, "Render successful output as one JSON document")
-	fs.BoolVar(&outputOpts.quiet, "quiet", false, "Render only declared load-bearing value(s)")
+	bindCLIOutputFlagSet(fs, &outputOpts)
 	if err := fs.Parse(args); err != nil {
 		if errOut != nil {
 			fmt.Fprintf(errOut, "verify failed: %v\n", err)
