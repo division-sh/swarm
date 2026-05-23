@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -32,6 +34,7 @@ type controlRunCommandOptions struct {
 	runMethod         string
 	allMethod         string
 	all               bool
+	yes               bool
 	idempotencyKey    string
 	idempotencyKeySet bool
 }
@@ -84,6 +87,9 @@ func newControlRunCommand(opts controlRunCommandOptions) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&cmdOpts.all, "all", false, "Apply the supported all-runs scope for this action")
+	if opts.action == "stop" {
+		cmd.Flags().BoolVar(&cmdOpts.yes, "yes", false, "Skip the stop-all confirmation prompt")
+	}
 	cmd.Flags().StringVar(&cmdOpts.idempotencyKey, "idempotency-key", "", "Optional v1 API idempotency key")
 	bindCLIAPIConnectionFlags(cmd, &cmdOpts.apiOptions)
 	return cmd
@@ -110,6 +116,15 @@ func runControlRunCommand(ctx context.Context, out, errOut io.Writer, args []str
 	if opts.all && opts.action == "stop" && idempotencyKey != "" {
 		fmt.Fprintln(errOut, "--idempotency-key is not supported with control stop --all")
 		return commandExitError{code: controlCommandExitCodeValidation}
+	}
+	if opts.action == "stop" && opts.yes && !opts.all {
+		fmt.Fprintln(errOut, "--yes is only supported with control stop --all")
+		return commandExitError{code: controlCommandExitCodeValidation}
+	}
+	if opts.all && opts.action == "stop" {
+		if err := requireControlStopAllConfirmation(opts.apiOptions, opts.yes, errOut); err != nil {
+			return err
+		}
 	}
 	client, err := newCLIAPIClient(opts.apiOptions)
 	if err != nil {
@@ -202,6 +217,47 @@ func runControlStopAllCommand(ctx context.Context, out, errOut io.Writer, client
 		return commandExitError{code: controlStopAllExitCode(failures)}
 	}
 	return nil
+}
+
+func requireControlStopAllConfirmation(opts rootCommandOptions, yes bool, errOut io.Writer) error {
+	if yes {
+		return nil
+	}
+	if !controlStdinIsTerminal(opts) {
+		fmt.Fprintln(errOut, "ERROR: `swarm control stop --all` stops every running or paused run; pass --yes for non-TTY invocations.")
+		return commandExitError{code: controlCommandExitCodeValidation}
+	}
+	confirmed, err := confirmControlStopAll(opts.input, errOut)
+	if err != nil {
+		fmt.Fprintf(errOut, "read confirmation: %v\n", err)
+		return commandExitError{code: controlCommandExitCodeValidation}
+	}
+	if !confirmed {
+		fmt.Fprintln(errOut, "Aborted; no runs stopped.")
+		return commandExitError{code: controlCommandExitCodeValidation}
+	}
+	return nil
+}
+
+func controlStdinIsTerminal(opts rootCommandOptions) bool {
+	if opts.stdinIsTerminal == nil {
+		return false
+	}
+	return opts.stdinIsTerminal()
+}
+
+func confirmControlStopAll(input io.Reader, errOut io.Writer) (bool, error) {
+	if input == nil {
+		input = strings.NewReader("")
+	}
+	fmt.Fprintln(errOut, "WARNING: `swarm control stop --all` will stop every running or paused run.")
+	fmt.Fprint(errOut, "Continue? [y/N] ")
+	line, err := bufio.NewReader(input).ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return false, err
+	}
+	answer := strings.ToLower(strings.TrimSpace(line))
+	return answer == "y" || answer == "yes", nil
 }
 
 func listControlStopAllRunIDs(ctx context.Context, client *cliAPIClient) ([]string, error) {

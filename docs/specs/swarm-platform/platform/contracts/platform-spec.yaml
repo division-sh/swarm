@@ -5991,8 +5991,9 @@ cli_specification:
           `swarm control pause|continue` and single-run `swarm control stop` idempotency-key pass-through are
           promoted as the first #859 slice. `swarm control stop --all --idempotency-key` fails before any API
           request because no per-target key derivation policy is promoted. `stop --all --yes` confirmation/non-TTY
-          behavior and `swarm control nuke --idempotency-key` remain split tails under #859 unless later gates
-          promote them.
+          behavior is promoted as the second #859 slice: stop-all requires TTY confirmation before API client
+          construction/request unless --yes is supplied, and --yes is valid only with stop --all. `swarm control
+          nuke --idempotency-key` remains a split tail under #859 unless a later gate promotes it.
       rich_agent_operator_ux:
         disposition: tracked_child
         tracker: '#860'
@@ -7533,7 +7534,7 @@ cli_specification:
       - no direct DB/store/runtime/EventBus reads or writes
       - no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, Builder/operator token fallback, runtime.nuke, or runtime.stop
     control_stop:
-      command: swarm control stop <run-id> [--idempotency-key <key>] | --all
+      command: swarm control stop <run-id> [--idempotency-key <key>] | --all [--yes]
       tier: should_have
       implementation_status: implemented
       owners:
@@ -7541,7 +7542,7 @@ cli_specification:
         all_discovery: /v1/rpc run.list
         all_stop: /v1/rpc run.stop
       targeting:
-        rule: 'Exactly one target is required: either one <run-id> or --all. Supplying both, supplying neither, blank run IDs, extra args, unsupported flags, explicitly blank idempotency keys, or --all with --idempotency-key fails before any API request with exit 2.'
+        rule: 'Exactly one target is required: either one <run-id> or --all. Supplying both, supplying neither, blank run IDs, extra args, unsupported flags, explicitly blank idempotency keys, --yes without --all, or --all with --idempotency-key fails before any API request with exit 2.'
         all_scope_semantics: >
           `--all` is an API-only CLI composite, not an atomic runtime-wide stop owner. The CLI lists active runs with status=running
           and status=paused, follows next_cursor pagination to exhaustion with limit=500, deduplicates run IDs, and calls run.stop once
@@ -7550,6 +7551,18 @@ cli_specification:
       idempotency:
         single_run: '`--idempotency-key <key>` is optional for `swarm control stop <run-id>`. When supplied, the CLI trims and passes the value as `idempotency_key` to run.stop; an explicitly blank key fails before any API request with exit 2.'
         all_scope_split: '`swarm control stop --all --idempotency-key <key>` fails before any API request because no promoted per-target idempotency-key derivation policy exists. The CLI MUST NOT generate or derive keys for the composite stop-all flow.'
+      confirmation:
+        rule: >
+          `swarm control stop --all` is a bulk destructive control action. Unless --yes is supplied, the CLI MUST
+          complete confirmation before constructing the API client or sending any API request. Non-TTY invocation
+          without --yes fails before any API request with exit 2. TTY invocation prompts on stderr before any API
+          request and proceeds only when the trimmed, case-insensitive answer is `y` or `yes`; empty input and every
+          other answer abort before any API request with exit 2. `--yes` bypasses the prompt and is valid only with
+          `swarm control stop --all`.
+        non_tty_error: 'ERROR: `swarm control stop --all` stops every running or paused run; pass --yes for non-TTY invocations.'
+        warning: 'WARNING: `swarm control stop --all` will stop every running or paused run.'
+        prompt: 'Continue? [y/N] '
+        abort: 'Aborted; no runs stopped.'
       output:
         single_run_success: 'control stop ok: scope=run run_id=<run-id>'
         all_success: 'control stop ok: scope=all matched=<n> stopped=<n> failed=0'
@@ -7568,6 +7581,10 @@ cli_specification:
       - exact /v1/rpc run.list status=running/status=paused paginated discovery for --all
       - exact /v1/rpc run.stop calls for unique discovered run IDs and explicit partial-failure reporting
       - explicit blank --idempotency-key and --all with --idempotency-key fail before any API request with exit 2
+      - stop --all without --yes prompts on TTY before API client construction/request and accepts only y/yes confirmation
+      - stop --all without --yes fails in non-TTY before API client construction/request with the promoted non_tty_error text
+      - stop --all --yes bypasses the prompt and preserves the existing run.list plus per-run run.stop behavior
+      - --yes without --all fails before any API request with exit 2
       - no direct DB/store/runtime/EventBus reads or writes
       - no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, Builder/operator token fallback, runtime.nuke, or runtime.stop
     control_nuke:
