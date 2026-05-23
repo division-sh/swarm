@@ -204,7 +204,7 @@ func TestControlStopAllListsActiveRunsAndStopsUniqueTargets(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"control", "stop", "--all"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"control", "stop", "--all", "--yes"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -250,6 +250,8 @@ func TestControlRunRejectsInvalidTargetsBeforeRequest(t *testing.T) {
 		{name: "blank idempotency key continue all", args: []string{"control", "continue", "--all", "--idempotency-key", "  "}, wantStderr: "--idempotency-key must be non-empty"},
 		{name: "blank idempotency key stop run", args: []string{"control", "stop", "run-1", "--idempotency-key", "  "}, wantStderr: "--idempotency-key must be non-empty"},
 		{name: "stop all rejects idempotency key", args: []string{"control", "stop", "--all", "--idempotency-key", "idem-1"}, wantStderr: "--idempotency-key is not supported with control stop --all"},
+		{name: "stop all rejects idempotency key with yes", args: []string{"control", "stop", "--all", "--yes", "--idempotency-key", "idem-1"}, wantStderr: "--idempotency-key is not supported with control stop --all"},
+		{name: "yes without all", args: []string{"control", "stop", "run-1", "--yes"}, wantStderr: "--yes is only supported with control stop --all"},
 		{name: "unsupported flag", args: []string{"control", "stop", "run-1", "--unknown"}, wantStderr: "unknown flag"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -283,7 +285,7 @@ func TestControlRunRequiresAPITokenBeforeRequest(t *testing.T) {
 	for _, args := range [][]string{
 		{"control", "pause", "run-1"},
 		{"control", "continue", "--all"},
-		{"control", "stop", "--all"},
+		{"control", "stop", "--all", "--yes"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			t.Setenv("SWARM_API_TOKEN", "")
@@ -375,6 +377,159 @@ func TestControlRunFailsClosedOnTransportRPCAndMalformedResponses(t *testing.T) 
 	}
 }
 
+func TestControlStopAllConfirmationAndNoCallPaths(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+
+	for _, tc := range []struct {
+		name          string
+		args          []string
+		input         string
+		stdinTerminal bool
+		wantCode      int
+		wantCalls     int
+		wantStderr    []string
+	}{
+		{
+			name:          "tty confirmation proceeds with y",
+			args:          []string{"control", "stop", "--all"},
+			input:         "y\n",
+			stdinTerminal: true,
+			wantCalls:     2,
+			wantStderr:    []string{"WARNING: `swarm control stop --all` will stop every running or paused run.", "Continue? [y/N]"},
+		},
+		{
+			name:          "tty confirmation proceeds with yes case insensitive",
+			args:          []string{"control", "stop", "--all"},
+			input:         "YES\n",
+			stdinTerminal: true,
+			wantCalls:     2,
+			wantStderr:    []string{"Continue? [y/N]"},
+		},
+		{
+			name:          "tty abort makes no request",
+			args:          []string{"control", "stop", "--all"},
+			input:         "n\n",
+			stdinTerminal: true,
+			wantCode:      2,
+			wantStderr:    []string{"Aborted; no runs stopped."},
+		},
+		{
+			name:          "tty empty answer makes no request",
+			args:          []string{"control", "stop", "--all"},
+			input:         "\n",
+			stdinTerminal: true,
+			wantCode:      2,
+			wantStderr:    []string{"Aborted; no runs stopped."},
+		},
+		{
+			name:       "non tty without yes makes no request",
+			args:       []string{"control", "stop", "--all"},
+			wantCode:   2,
+			wantStderr: []string{"ERROR: `swarm control stop --all` stops every running or paused run; pass --yes for non-TTY invocations."},
+		},
+		{
+			name:      "yes bypasses prompt",
+			args:      []string{"control", "stop", "--all", "--yes"},
+			wantCalls: 2,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var captured []jsonRPCRequest
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+					t.Errorf("decode request: %v", err)
+				}
+				captured = append(captured, req)
+				writeJSONRPCResult(t, w, req.ID, map[string]any{"runs": []any{}})
+			}))
+			defer server.Close()
+
+			var stdout, stderr bytes.Buffer
+			opts := testRootCommandOptions(server)
+			opts.input = strings.NewReader(tc.input)
+			opts.stdinIsTerminal = func() bool { return tc.stdinTerminal }
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), tc.args, &stdout, &stderr, opts)
+			if code != tc.wantCode {
+				t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, tc.wantCode, stdout.String(), stderr.String())
+			}
+			if len(captured) != tc.wantCalls {
+				t.Fatalf("server calls = %d, want %d", len(captured), tc.wantCalls)
+			}
+			for _, want := range tc.wantStderr {
+				if !strings.Contains(stderr.String(), want) {
+					t.Fatalf("stderr missing %q:\n%s", want, stderr.String())
+				}
+			}
+			if tc.wantCalls > 0 {
+				assertControlRequest(t, captured[0], controlCommandRunListMethod, map[string]any{"status": "running", "limit": float64(controlCommandStopAllPageLimit)})
+				assertControlRequest(t, captured[1], controlCommandRunListMethod, map[string]any{"status": "paused", "limit": float64(controlCommandStopAllPageLimit)})
+				if !strings.Contains(stdout.String(), "control stop ok: scope=all matched=0 stopped=0 failed=0") {
+					t.Fatalf("stdout = %q, want empty stop-all success", stdout.String())
+				}
+			}
+			if tc.name == "yes bypasses prompt" && strings.Contains(stderr.String(), "Continue?") {
+				t.Fatalf("stderr = %q, want no prompt", stderr.String())
+			}
+		})
+	}
+}
+
+func TestControlStopAllConfirmationPrecedesAPIClientConstruction(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		input         string
+		stdinTerminal bool
+		wantCode      int
+		wantStderr    string
+	}{
+		{
+			name:       "non tty without yes fails before missing token",
+			wantCode:   2,
+			wantStderr: "pass --yes for non-TTY",
+		},
+		{
+			name:          "tty abort fails before missing token",
+			input:         "n\n",
+			stdinTerminal: true,
+			wantCode:      2,
+			wantStderr:    "Aborted; no runs stopped.",
+		},
+		{
+			name:          "tty confirmation then checks token",
+			input:         "y\n",
+			stdinTerminal: true,
+			wantCode:      4,
+			wantStderr:    "SWARM_API_TOKEN is required",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("SWARM_API_TOKEN", "")
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				writeJSONRPCResult(t, w, "unexpected", map[string]any{"runs": []any{}})
+			}))
+			defer server.Close()
+
+			var stdout, stderr bytes.Buffer
+			opts := testRootCommandOptions(server)
+			opts.input = strings.NewReader(tc.input)
+			opts.stdinIsTerminal = func() bool { return tc.stdinTerminal }
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"control", "stop", "--all"}, &stdout, &stderr, opts)
+			if code != tc.wantCode {
+				t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, tc.wantCode, stdout.String(), stderr.String())
+			}
+			if calls.Load() != 0 {
+				t.Fatalf("server calls = %d, want 0", calls.Load())
+			}
+			if !strings.Contains(stderr.String(), tc.wantStderr) {
+				t.Fatalf("stderr = %q, want substring %q", stderr.String(), tc.wantStderr)
+			}
+		})
+	}
+}
+
 func TestControlStopAllReportsPartialFailures(t *testing.T) {
 	t.Setenv("SWARM_API_TOKEN", "test-token")
 	var captured []jsonRPCRequest
@@ -403,7 +558,7 @@ func TestControlStopAllReportsPartialFailures(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"control", "stop", "--all"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"control", "stop", "--all", "--yes"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 3 {
 		t.Fatalf("code = %d, want 3 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}

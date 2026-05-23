@@ -133,7 +133,7 @@ func newControlNukeCommand(opts rootCommandOptions) *cobra.Command {
 
 func runControlNukeCommand(ctx context.Context, out, errOut io.Writer, opts runtimeNukeCommandOptions) error {
 	if !opts.dryRun && !opts.yes {
-		if !runtimeNukeStdinIsTerminal(opts.apiOptions) {
+		if !controlStdinIsTerminal(opts.apiOptions) {
 			fmt.Fprintln(errOut, "ERROR: `swarm control nuke` is destructive; pass --yes for non-TTY invocations.")
 			return commandExitError{code: 2}
 		}
@@ -169,13 +169,6 @@ func runControlNukeCommand(ctx context.Context, out, errOut io.Writer, opts runt
 		return commandExitError{code: 3}
 	}
 	return nil
-}
-
-func runtimeNukeStdinIsTerminal(opts rootCommandOptions) bool {
-	if opts.stdinIsTerminal == nil {
-		return false
-	}
-	return opts.stdinIsTerminal()
 }
 
 func confirmRuntimeNuke(input io.Reader, errOut io.Writer) (bool, error) {
