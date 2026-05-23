@@ -422,6 +422,16 @@ func TestTraceUsesRunTraceSnapshot(t *testing.T) {
 	}
 }
 
+func wantFullTraceFilterParams() map[string]any {
+	return map[string]any{
+		"event_name":      []any{"scan.requested", "scan.completed"},
+		"entity_id":       []any{"entity-1", "entity-2"},
+		"delivery_status": []any{"delivered", "failed"},
+		"subscriber_id":   []any{"agent-1", "node-2"},
+		"subscriber_type": []any{"agent", "node"},
+	}
+}
+
 func TestTraceSnapshotFiltersUseOmittedRunResolver(t *testing.T) {
 	t.Setenv("SWARM_API_TOKEN", "test-token")
 	server, requests := newDiagnosticSuccessServer(t, func(req jsonRPCRequest, callIndex int) map[string]any {
@@ -479,11 +489,20 @@ func TestTraceSnapshotFiltersUseOmittedRunResolver(t *testing.T) {
 
 func TestTraceFollowUsesRunSubscribeTrace(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		args []string
+		name       string
+		args       []string
+		wantFilter map[string]any
 	}{
-		{name: "long follow", args: []string{"trace", "run-follow", "--follow", "--no-retry"}},
-		{name: "shorthand follow", args: []string{"trace", "run-follow", "-f", "--no-retry"}},
+		{
+			name:       "long follow",
+			args:       []string{"trace", "run-follow", "--follow", "--no-retry", "--event-name", "scan.requested", "--event-name", "scan.completed", "--entity-id", "entity-1", "--entity-id", "entity-2", "--delivery-status", "delivered", "--delivery-status", "failed", "--subscriber-id", "agent-1", "--subscriber-id", "node-2", "--subscriber-type", "agent", "--subscriber-type", "node"},
+			wantFilter: wantFullTraceFilterParams(),
+		},
+		{
+			name:       "shorthand follow",
+			args:       []string{"trace", "run-follow", "-f", "--no-retry", "--event-name", "scan.requested"},
+			wantFilter: map[string]any{"event_name": []any{"scan.requested"}},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("SWARM_API_TOKEN", "test-token")
@@ -499,7 +518,7 @@ func TestTraceFollowUsesRunSubscribeTrace(t *testing.T) {
 				t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 			}
 			assertRunCommandMethods(t, calls, nil)
-			assertRunCommandTraceSubscription(t, wsRequests, "run-follow", false)
+			assertRunCommandTraceSubscriptionWithFilter(t, wsRequests, "run-follow", false, tc.wantFilter)
 			if !strings.Contains(stdout.String(), "trace event_id=evt-follow") {
 				t.Fatalf("stdout = %q, want trace row", stdout.String())
 			}
@@ -528,12 +547,15 @@ func TestTraceFollowOmittedRunReusesActivePreferenceResolver(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"trace", "--follow", "--no-retry"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"trace", "--follow", "--no-retry", "--event-name", "scan.requested", "--subscriber-id", "agent-1"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
 	assertRunCommandMethods(t, calls, []string{"run.list"})
-	assertRunCommandTraceSubscription(t, wsRequests, "active-run", false)
+	assertRunCommandTraceSubscriptionWithFilter(t, wsRequests, "active-run", false, map[string]any{
+		"event_name":    []any{"scan.requested"},
+		"subscriber_id": []any{"agent-1"},
+	})
 	if !strings.Contains(stdout.String(), "trace event_id=evt-active") {
 		t.Fatalf("stdout = %q, want trace row", stdout.String())
 	}
@@ -646,7 +668,8 @@ func TestTraceFollowRecoversWithReplaySinceAfterClose(t *testing.T) {
 		cancel()
 	}()
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(ctx, t.TempDir(), []string{"trace", "--follow"}, &stdout, &stderr, testRootCommandOptions(server))
+	wantFilter := wantFullTraceFilterParams()
+	code := executeRootCommandWithOptions(ctx, t.TempDir(), []string{"trace", "--follow", "--event-name", "scan.requested", "--event-name", "scan.completed", "--entity-id", "entity-1", "--entity-id", "entity-2", "--delivery-status", "delivered", "--delivery-status", "failed", "--subscriber-id", "agent-1", "--subscriber-id", "node-2", "--subscriber-type", "agent", "--subscriber-type", "node"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 130 {
 		t.Fatalf("code = %d, want 130 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -660,6 +683,9 @@ func TestTraceFollowRecoversWithReplaySinceAfterClose(t *testing.T) {
 		}
 		if got := req.Params["run_id"]; got != "active-run" {
 			t.Fatalf("ws run_id[%d] = %#v, want active-run", i, got)
+		}
+		if got := req.Params["filter"]; !reflect.DeepEqual(got, wantFilter) {
+			t.Fatalf("ws filter[%d] = %#v, want %#v", i, got, wantFilter)
 		}
 	}
 	if _, ok := wsRequests[0].Params["replay_since"]; ok {
@@ -747,7 +773,8 @@ func TestTraceFollowRetriesRetryableReadFailure(t *testing.T) {
 		cancel()
 	}()
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(ctx, t.TempDir(), []string{"trace", "run-retry", "--follow"}, &stdout, &stderr, testRootCommandOptions(server))
+	wantFilter := map[string]any{"delivery_status": []any{"delivered"}, "subscriber_type": []any{"agent"}}
+	code := executeRootCommandWithOptions(ctx, t.TempDir(), []string{"trace", "run-retry", "--follow", "--delivery-status", "delivered", "--subscriber-type", "agent"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 130 {
 		t.Fatalf("code = %d, want 130 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -760,6 +787,9 @@ func TestTraceFollowRetriesRetryableReadFailure(t *testing.T) {
 		}
 		if _, ok := req.Params["replay_since"]; ok {
 			t.Fatalf("ws replay_since[%d] = %#v, want omitted because no row was rendered before retry", i, req.Params["replay_since"])
+		}
+		if got := req.Params["filter"]; !reflect.DeepEqual(got, wantFilter) {
+			t.Fatalf("ws filter[%d] = %#v, want %#v", i, got, wantFilter)
 		}
 	}
 	if !strings.Contains(stdout.String(), "trace event_id=evt-recovered") {
@@ -947,17 +977,17 @@ func TestDiagnosticsRejectInvalidInputBeforeRequest(t *testing.T) {
 		{name: "trace shorthand follow rejects limit", args: []string{"trace", "run-1", "-f", "--limit", "5"}, wantStderr: "--limit is not supported with --follow"},
 		{name: "trace shorthand follow rejects cursor", args: []string{"trace", "run-1", "-f", "--cursor", "cur"}, wantStderr: "--cursor is not supported with --follow"},
 		{name: "trace shorthand follow rejects since", args: []string{"trace", "run-1", "-f", "--since", "2026-05-13T10:00:00Z"}, wantStderr: "--since is not supported with --follow"},
-		{name: "trace follow rejects typed filters", args: []string{"trace", "run-1", "--follow", "--event-name", "scan.requested"}, wantStderr: "--event-name is not supported with --follow"},
-		{name: "trace follow rejects entity filter", args: []string{"trace", "run-1", "--follow", "--entity-id", "entity-1"}, wantStderr: "--entity-id is not supported with --follow"},
-		{name: "trace follow rejects delivery status filter", args: []string{"trace", "run-1", "--follow", "--delivery-status", "delivered"}, wantStderr: "--delivery-status is not supported with --follow"},
-		{name: "trace follow rejects subscriber id filter", args: []string{"trace", "run-1", "--follow", "--subscriber-id", "agent-1"}, wantStderr: "--subscriber-id is not supported with --follow"},
-		{name: "trace follow rejects subscriber type filter", args: []string{"trace", "run-1", "--follow", "--subscriber-type", "agent"}, wantStderr: "--subscriber-type is not supported with --follow"},
 		{name: "trace follow direct replay since remains unpromoted", args: []string{"trace", "run-1", "--follow", "--replay-since", "2026-05-13T10:00:00Z"}, wantStderr: "unknown flag"},
 		{name: "trace blank event name", args: []string{"trace", "run-1", "--event-name", " "}, wantStderr: "--event-name must not be empty"},
 		{name: "trace blank subscriber id", args: []string{"trace", "run-1", "--subscriber-id", " "}, wantStderr: "--subscriber-id must not be empty"},
 		{name: "trace invalid entity id", args: []string{"trace", "run-1", "--entity-id", "bad id!"}, wantStderr: "--entity-id must match OpaqueId pattern"},
 		{name: "trace invalid delivery status", args: []string{"trace", "run-1", "--delivery-status", "done"}, wantStderr: "--delivery-status must be one of"},
 		{name: "trace invalid subscriber type", args: []string{"trace", "run-1", "--subscriber-type", "platform"}, wantStderr: "--subscriber-type must be one of"},
+		{name: "trace follow blank event name", args: []string{"trace", "run-1", "--follow", "--event-name", " "}, wantStderr: "--event-name must not be empty"},
+		{name: "trace follow invalid entity id", args: []string{"trace", "run-1", "--follow", "--entity-id", "bad id!"}, wantStderr: "--entity-id must match OpaqueId pattern"},
+		{name: "trace follow invalid delivery status", args: []string{"trace", "run-1", "--follow", "--delivery-status", "done"}, wantStderr: "--delivery-status must be one of"},
+		{name: "trace follow blank subscriber id", args: []string{"trace", "run-1", "--follow", "--subscriber-id", " "}, wantStderr: "--subscriber-id must not be empty"},
+		{name: "trace follow invalid subscriber type", args: []string{"trace", "run-1", "--follow", "--subscriber-type", "platform"}, wantStderr: "--subscriber-type must be one of"},
 		{name: "status extra arg", args: []string{"status", "run-1", "extra"}, wantStderr: "accepts at most 1 arg(s)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -989,6 +1019,7 @@ func TestDiagnosticsRequireAPITokenBeforeRequest(t *testing.T) {
 		{"trace", "run-1", "--follow"},
 		{"trace", "run-1", "-f"},
 		{"trace", "run-1", "--follow", "--no-retry"},
+		{"trace", "run-1", "--follow", "--event-name", "scan.requested", "--entity-id", "entity-1", "--delivery-status", "delivered", "--subscriber-id", "agent-1", "--subscriber-type", "agent"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			t.Setenv("SWARM_API_TOKEN", "")

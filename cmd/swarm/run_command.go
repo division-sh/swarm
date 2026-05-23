@@ -455,7 +455,7 @@ func runReattachCommand(ctx context.Context, out, errOut io.Writer, opts runComm
 }
 
 func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPIClient, opts runCommandOptions, wsEndpoint, runID string, replaySince *time.Time, stopOnInterrupt bool) error {
-	sub, err := subscribeRunTrace(ctx, wsEndpoint, client.token, runID, replaySince)
+	sub, err := subscribeRunTrace(ctx, wsEndpoint, client.token, runID, replaySince, nil)
 	if err != nil {
 		fmt.Fprintln(errOut, err)
 		return commandExitError{code: runCommandErrorExitCode(err)}
@@ -508,7 +508,7 @@ func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPI
 	}
 }
 
-func subscribeRunTrace(ctx context.Context, wsEndpoint, token, runID string, replaySince *time.Time) (*runTraceSubscription, error) {
+func subscribeRunTrace(ctx context.Context, wsEndpoint, token, runID string, replaySince *time.Time, extraParams map[string]any) (*runTraceSubscription, error) {
 	header := http.Header{"Authorization": []string{"Bearer " + token}}
 	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsEndpoint, header)
 	if err != nil {
@@ -516,6 +516,9 @@ func subscribeRunTrace(ctx context.Context, wsEndpoint, token, runID string, rep
 	}
 	requestID := "swarm-cli:" + runCommandMethodSubscribeTrace
 	params := map[string]any{"run_id": runID}
+	for name, value := range extraParams {
+		params[name] = value
+	}
 	if replaySince != nil {
 		params["replay_since"] = replaySince.UTC().Format(time.RFC3339Nano)
 	}

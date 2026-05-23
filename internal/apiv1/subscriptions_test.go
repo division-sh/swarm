@@ -356,6 +356,13 @@ func TestHandlerWebSocketRunSubscribeTraceUsesOwnerReplayAndRunNotFound(t *testi
 		"params": map[string]any{
 			"run_id":       "run-1",
 			"replay_since": base.Format(time.RFC3339Nano),
+			"filter": map[string]any{
+				"event_name":      []any{"scan.requested"},
+				"entity_id":       []any{"entity-1"},
+				"delivery_status": []any{"delivered"},
+				"subscriber_id":   []any{"agent-1"},
+				"subscriber_type": []any{"agent"},
+			},
 		},
 	})
 	subscribe := readWSResponse(t, conn)
@@ -368,6 +375,50 @@ func TestHandlerWebSocketRunSubscribeTraceUsesOwnerReplayAndRunNotFound(t *testi
 	}
 	if observability.lastTrace.Since == nil || !observability.lastTrace.Since.Equal(base) {
 		t.Fatalf("run.subscribe_trace since = %#v, want %s", observability.lastTrace.Since, base)
+	}
+	if got := observability.lastTrace.Filter; len(got.EventNames) != 1 || got.EventNames[0] != "scan.requested" || len(got.EntityIDs) != 1 || got.EntityIDs[0] != "entity-1" || len(got.DeliveryStatuses) != 1 || got.DeliveryStatuses[0] != "delivered" || len(got.SubscriberIDs) != 1 || got.SubscriberIDs[0] != "agent-1" || len(got.SubscriberTypes) != 1 || got.SubscriberTypes[0] != "agent" {
+		t.Fatalf("run.subscribe_trace filter = %#v", got)
+	}
+}
+
+func TestRunSubscribeTraceFilterValidation(t *testing.T) {
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Subscriptions: OperatorSubscriptions(OperatorReadOptions{
+			Observability: &fakeObservabilityReadStore{},
+		}, SubscriptionRuntimeOptions{PollInterval: time.Hour, QueueSize: 4}),
+	})
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	for _, tc := range []struct {
+		name      string
+		params    map[string]any
+		wantField string
+	}{
+		{name: "unknown top-level limit", params: map[string]any{"run_id": "run-1", "limit": 1}, wantField: "limit"},
+		{name: "unknown filter field", params: map[string]any{"run_id": "run-1", "filter": map[string]any{"event_nmae": []any{"scan.requested"}}}, wantField: "filter.event_nmae"},
+		{name: "invalid delivery status", params: map[string]any{"run_id": "run-1", "filter": map[string]any{"delivery_status": []any{"done"}}}, wantField: "filter.delivery_status"},
+		{name: "invalid subscriber type", params: map[string]any{"run_id": "run-1", "filter": map[string]any{"subscriber_type": []any{"system"}}}, wantField: "filter.subscriber_type"},
+		{name: "invalid entity id", params: map[string]any{"run_id": "run-1", "filter": map[string]any{"entity_id": []any{"bad id!"}}}, wantField: "filter.entity_id"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			conn := dialTestWS(t, server.URL)
+			defer conn.Close()
+			writeWSRequest(t, conn, map[string]any{
+				"jsonrpc": "2.0",
+				"id":      "bad-run-trace",
+				"method":  "run.subscribe_trace",
+				"params":  tc.params,
+			})
+			resp := readWSResponse(t, conn)
+			if resp.Error == nil || resp.Error.Code != codeInvalidParams {
+				t.Fatalf("run.subscribe_trace response = %#v, want invalid params", resp)
+			}
+			if details := asMap(t, asMap(t, resp.Error.Data)["details"]); details["field"] != tc.wantField {
+				t.Fatalf("run.subscribe_trace details = %#v, want field %q", details, tc.wantField)
+			}
+		})
 	}
 }
 
