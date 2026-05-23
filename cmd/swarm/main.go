@@ -115,7 +115,6 @@ type serveOptions struct {
 
 func defaultServeOptions() serveOptions {
 	return serveOptions{
-		PlatformSpecPath:   defaultPlatformSpecPath,
 		StoreMode:          "postgres",
 		HealthAddr:         defaultHealthAddr,
 		ShutdownGrace:      runtime.DefaultShutdownGrace,
@@ -129,13 +128,22 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	reporter := newServeBootReporter(opts.Verbose, opts.Output)
 	reporter.emit(1, "process_start", "ok", "")
 	resolvedConfigPath := resolvePath(repo, opts.ConfigPath)
-	resolvedContractsPath := resolveContractsPath(repo, opts.ContractsPath)
-	resolvedPlatformSpecPath := resolvePath(repo, opts.PlatformSpecPath)
 	if err := loadRepoDotEnv(repo); err != nil {
 		reporter.emit(2, "config_load", "FAILED", err.Error())
 		log.Printf("load .env: %v", err)
 		return 1
 	}
+	resolvedPaths, err := resolveCLIContractPlatformSpecPaths(repo, cliContractPlatformSpecPathOptions{
+		ContractsPath:    opts.ContractsPath,
+		PlatformSpecPath: opts.PlatformSpecPath,
+	})
+	if err != nil {
+		reporter.emit(2, "config_load", "FAILED", err.Error())
+		log.Printf("resolve CLI path config: %v", err)
+		return 1
+	}
+	resolvedContractsPath := resolvedPaths.ContractsPath
+	resolvedPlatformSpecPath := resolvedPaths.PlatformSpecPath
 
 	cfg, err := loadRuntimeConfig(resolvedConfigPath)
 	if err != nil {
@@ -380,8 +388,7 @@ type verifyCommandOptions struct {
 
 func defaultVerifyCommandOptions() verifyCommandOptions {
 	return verifyCommandOptions{
-		platformSpecPath: defaultPlatformSpecPath,
-		logging:          defaultCLILoggingOptions(),
+		logging: defaultCLILoggingOptions(),
 	}
 }
 
@@ -408,8 +415,18 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 		}
 		return 1
 	}
-	resolvedContractsPath := resolveContractsPath(repo, opts.contractsPath)
-	resolvedPlatformSpecPath := resolvePath(repo, opts.platformSpecPath)
+	resolvedPaths, err := resolveCLIContractPlatformSpecPaths(repo, cliContractPlatformSpecPathOptions{
+		ContractsPath:    opts.contractsPath,
+		PlatformSpecPath: opts.platformSpecPath,
+	})
+	if err != nil {
+		if errOut != nil {
+			fmt.Fprintf(errOut, "verify failed: resolve path config: %v\n", err)
+		}
+		return cliAPIErrorExitCode(err, cliAPIErrorClassifier{})
+	}
+	resolvedContractsPath := resolvedPaths.ContractsPath
+	resolvedPlatformSpecPath := resolvedPaths.PlatformSpecPath
 	contractsRoot, err := normalizeContractsRoot(resolvedContractsPath)
 	if err != nil {
 		if errOut != nil {
@@ -1478,16 +1495,6 @@ func asString(v any) string {
 	default:
 		return ""
 	}
-}
-
-func resolveContractsPath(repoRoot, raw string) string {
-	if resolved := resolvePath(repoRoot, raw); strings.TrimSpace(resolved) != "" {
-		return resolved
-	}
-	if discovered := strings.TrimSpace(runtimecontracts.DefaultWorkflowContractsDir(repoRoot)); discovered != "" {
-		return discovered
-	}
-	return ""
 }
 
 func resolvePath(repoRoot, path string) string {

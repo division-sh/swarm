@@ -5911,7 +5911,8 @@ cli_specification:
         action: >
           API connection/auth/config authority is promoted in
           cli_specification.foundations.api_connection_auth_config_precedence. Diagnostic logging authority is
-          promoted in cli_specification.foundations.cli_logging_policy. Retry, contract-path, output-renderer
+          promoted in cli_specification.foundations.cli_logging_policy. Contract/platform-spec path resolution is
+          promoted in cli_specification.foundations.contract_platform_spec_path_resolution. Retry, output-renderer
           implementation tails, and serve listener environment/config behavior remain split until later children
           promote their own merge-bearing owners.
       exit_code_and_error_channel_normalization:
@@ -6545,8 +6546,9 @@ cli_specification:
       - '`swarm run --connect` only for shared API client/auth error categories; run mode and follow semantics remain #743.'
       not_applies_to:
       - '`swarm serve` runtime configuration such as the existing command-local `--config` runtime-config path.'
-      - '`swarm verify` contract-file validation, except for future separately promoted contract-path defaults.'
-      - Output mode, logging verbosity, retry, color, contract path, and platform-spec path resolution.
+      - '`swarm verify` contract-file validation, except for contract/platform-spec path resolution governed by
+        cli_specification.foundations.contract_platform_spec_path_resolution.'
+      - Output mode, logging verbosity, retry, and color.
       precedence_order:
       - flag
       - environment
@@ -6602,14 +6604,21 @@ cli_specification:
         accepted_keys:
           api_server: API server base URL consumed by API-backed commands.
           api_token_file: Path to a file containing the bearer token.
+        shared_non_api_keys:
+          contracts_path: >
+            Accepted by the shared CLI config parser for
+            cli_specification.foundations.contract_platform_spec_path_resolution; ignored by the API connection
+            and auth resolver.
+          platform_spec_path: >
+            Accepted by the shared CLI config parser for
+            cli_specification.foundations.contract_platform_spec_path_resolution; ignored by the API connection
+            and auth resolver.
         rejected_keys:
           api_token: Inline bearer tokens in config files are not promoted.
           output_format: Split to #848 output renderer implementation.
           no_color: >
             Not promoted as a config-file key by #931. #931 accepts only `--no-color` and non-empty `NO_COLOR`
             through the shared output owner for current first-slice consumers.
-          contracts_path: Split to contract-path resolution.
-          platform_spec_path: Split to contract-path resolution.
           log_level: >
             Not promoted as a config-file key by #936. `--log-level` flag authority is promoted in
             cli_specification.foundations.cli_logging_policy, but config-file `log_level` precedence remains a
@@ -6634,12 +6643,87 @@ cli_specification:
       - '#844 later behavior child for API config/auth resolver implementation'
       - '#884/#750 serve listener runtime implementation and listener env/config keys'
       - '#743 swarm run behavior and follow semantics'
-      - 'contract path/platform spec path defaults'
       - '`--no-retry` retry policy'
       implementation_boundaries:
       - 'API-backed command leaves consume one cmd/swarm resolver for this owner.'
       - 'No root/global --config, inline --api-token, OpenRPC, output renderer, retry, or listener behavior changes are implied by this owner.'
       - 'Future API-backed CLI commands MUST consume this owner rather than the ignored review artifact.'
+    contract_platform_spec_path_resolution:
+      promoted_by: '#844'
+      implementation_status: implemented
+      canonical_owner: docs/specs/swarm-platform/platform/contracts/platform-spec.yaml#cli_specification.foundations.contract_platform_spec_path_resolution
+      scope: >
+        Merge-bearing CLI v2 authority for selecting the local workflow contract bundle path and the platform
+        spec YAML path. This owner covers the currently implemented local file-contract surfaces only: `swarm
+        verify`, `swarm serve`, and local foreground `swarm run` before it starts the serve owner. It does not add
+        API connection behavior, OpenRPC methods, root/global config flags, serve listener binding, retry/follow
+        policy, output rendering, or absent command families.
+      applies_to:
+      - '`swarm verify` local contract-file validation.'
+      - '`swarm serve` runtime boot bundle loading.'
+      - 'local foreground `swarm run` as a consumer of serve startup.'
+      not_applies_to:
+      - '`swarm run --connect` because connected run consumes an existing server and MUST NOT accept local
+        contract/platform-spec path overrides.'
+      - '`swarm run --reattach` because reattach consumes existing run/server state and MUST NOT accept local
+        contract/platform-spec path overrides.'
+      - 'root/global `--config`; the shared CLI config file remains discovered through `SWARM_CONFIG` or XDG only.'
+      - 'inline `--api-token`, API auth/config resolver behavior, output/color/logging, retry/follow, and serve
+        listener/runtime binding.'
+      contracts_path:
+        accepted_sources:
+          flag: --contracts <path>
+          environment: SWARM_CONTRACTS_PATH
+          config_key: contracts_path
+          discovered_default: repo-local contracts/package.yaml when present
+        source_order:
+        - --contracts
+        - SWARM_CONTRACTS_PATH
+        - config contracts_path
+        - repo contracts/package.yaml
+        rejected_sources:
+          SWARM_CONTRACTS_DIR: >
+            Not a CLI source. This legacy internal runtime contracts helper environment name MUST NOT compete with
+            the promoted CLI resolver. If it remains for non-CLI internals, supported CLI surfaces must bypass it.
+        missing_source_rule: >
+          If no source yields a contracts root and repo discovery does not find `contracts/package.yaml`, the
+          command fails closed during local contract resolution with the promoted missing-contracts-source error.
+          There is no implicit contracts root default without a discovered package file.
+      platform_spec_path:
+        accepted_sources:
+          flag: --platform-spec <path>
+          config_key: platform_spec_path
+          built_in_default: docs/specs/swarm-platform/platform/contracts/platform-spec.yaml
+        source_order:
+        - --platform-spec
+        - config platform_spec_path
+        - built-in tracked platform spec
+        rejected_sources:
+          SWARM_PLATFORM_SPEC_PATH: >
+            Not promoted. Platform spec path selection is intentionally flag/config/default only; adding an env
+            source would create untracked source precedence and must be separately gated.
+        default_rule: >
+          The built-in default is the tracked platform spec path relative to the current repo root. Relative
+          explicit/config values are resolved against the repo root; absolute values are preserved.
+      cli_config_file:
+        shared_parser: >
+          `SWARM_CONFIG` and the XDG default config path are shared with
+          cli_specification.foundations.api_connection_auth_config_precedence. The parser accepts this owner's
+          path keys plus API connection/auth keys, while each semantic resolver consumes only its own keys.
+        accepted_keys:
+          contracts_path: Consumed only by this contract path resolver.
+          platform_spec_path: Consumed only by this platform spec path resolver.
+        rejected_keys:
+          SWARM_CONTRACTS_DIR: Environment variable, not config-file key, and not a CLI source.
+          SWARM_PLATFORM_SPEC_PATH: Environment variable, not config-file key, and not promoted.
+      implementation_boundaries:
+      - 'verify consumes this resolver before local contract bundle loading.'
+      - 'serve consumes this resolver before runtime boot bundle loading.'
+      - 'local foreground run consumes this resolver before starting the serve owner.'
+      - 'connected run and run --reattach reject local contract/platform-spec path flags and do not consume this owner.'
+      - 'The API auth/config resolver may share config parsing but must ignore contracts_path and platform_spec_path.'
+      - 'Unsupported config keys still fail closed; accepting this owner’s path keys must not silently accept output, logging, retry, serve listener, or inline token keys.'
+      - 'SWARM_CONTRACTS_DIR may remain only for non-CLI internals and must not affect supported CLI surfaces.'
     error_channel_and_exit_code_contract:
       implemented_by: '#846'
       scope: >

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -50,9 +51,10 @@ func TestRunCommandLocalForegroundConsumesServeOwnerAndV1API(t *testing.T) {
 	var serveCalled atomic.Int32
 	serveCanceled := make(chan struct{})
 	opts := testRunCommandOptions(server)
+	repo := t.TempDir()
 	opts.runServe = func(ctx context.Context, repo string, serveOpts serveOptions) int {
 		serveCalled.Add(1)
-		if serveOpts.ContractsPath != "contracts" || serveOpts.PlatformSpecPath != "platform.yaml" {
+		if serveOpts.ContractsPath != filepath.Join(repo, "contracts") || serveOpts.PlatformSpecPath != filepath.Join(repo, "platform.yaml") {
 			t.Errorf("serve opts = %#v", serveOpts)
 		}
 		<-ctx.Done()
@@ -61,7 +63,7 @@ func TestRunCommandLocalForegroundConsumesServeOwnerAndV1API(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "--event", "scan.requested", "--payload", payloadPath, "--contracts", "contracts", "--platform-spec", "platform.yaml"}, &stdout, &stderr, opts)
+	code := executeRootCommandWithOptions(context.Background(), repo, []string{"run", "--event", "scan.requested", "--payload", payloadPath, "--contracts", "contracts", "--platform-spec", "platform.yaml"}, &stdout, &stderr, opts)
 	if code != 0 {
 		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -82,6 +84,48 @@ func TestRunCommandLocalForegroundConsumesServeOwnerAndV1API(t *testing.T) {
 	}
 	if strings.TrimSpace(stderr.String()) != "" {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestStartLocalRunServeConsumesContractPathConfigResolver(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	repo := t.TempDir()
+	configContracts := filepath.Join(t.TempDir(), "config-contracts")
+	configPlatform := filepath.Join(t.TempDir(), "config-platform.yaml")
+	t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
+		"contracts_path":     configContracts,
+		"platform_spec_path": configPlatform,
+	}))
+	server, _, _ := newRunCommandServer(t, runCommandServerOptions{
+		rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
+			if req.Method != "health.check" {
+				t.Fatalf("unexpected method = %q", req.Method)
+			}
+			return runCommandHealthResult()
+		},
+	})
+	defer server.Close()
+
+	opts := runCommandOptions{apiOptions: testRunCommandOptions(server)}
+	serveStarted := make(chan serveOptions, 1)
+	opts.apiOptions.runServe = func(ctx context.Context, repo string, serveOpts serveOptions) int {
+		serveStarted <- serveOpts
+		<-ctx.Done()
+		return 0
+	}
+
+	stop, err := startLocalRunServe(context.Background(), repo, opts)
+	if err != nil {
+		t.Fatalf("startLocalRunServe: %v", err)
+	}
+	stop()
+	serveOpts := <-serveStarted
+	if serveOpts.ContractsPath != configContracts {
+		t.Fatalf("contracts path = %q, want %q", serveOpts.ContractsPath, configContracts)
+	}
+	if serveOpts.PlatformSpecPath != configPlatform {
+		t.Fatalf("platform spec path = %q, want %q", serveOpts.PlatformSpecPath, configPlatform)
 	}
 }
 

@@ -95,7 +95,7 @@ func newRunCommand(repo string, rootOpts rootCommandOptions) *cobra.Command {
 	cmd.Flags().StringVar(&opts.reattachRunID, "reattach", "", "Existing run id to reattach to")
 	cmd.Flags().StringVar(&opts.bundleFingerprint, "bundle-fingerprint", "", "Expected server bundle fingerprint")
 	cmd.Flags().StringVar(&opts.contractsPath, "contracts", "", "Path to Swarm contract bundle root for local foreground startup")
-	cmd.Flags().StringVar(&opts.platformSpecPath, "platform-spec", defaultPlatformSpecPath, "Path to platform spec yaml for local foreground startup")
+	cmd.Flags().StringVar(&opts.platformSpecPath, "platform-spec", "", "Path to platform spec yaml for local foreground startup")
 	cmd.Flags().StringVar(&opts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for run.start")
 	cmd.Flags().StringVar(&opts.runID, "run-id", "", "Optional caller-provided run id for run.start")
 	cmd.Flags().IntVar(&opts.apiPort, "api-port", 0, "Local API/health port for local foreground startup")
@@ -312,9 +312,16 @@ func startLocalRunServe(ctx context.Context, repo string, opts runCommandOptions
 	if runServe == nil {
 		runServe = runServeRuntime
 	}
+	resolvedPaths, err := resolveCLIContractPlatformSpecPaths(repo, cliContractPlatformSpecPathOptions{
+		ContractsPath:    opts.contractsPath,
+		PlatformSpecPath: opts.platformSpecPath,
+	})
+	if err != nil {
+		return nil, err
+	}
 	serveOpts := defaultServeOptions()
-	serveOpts.ContractsPath = opts.contractsPath
-	serveOpts.PlatformSpecPath = opts.platformSpecPath
+	serveOpts.ContractsPath = resolvedPaths.ContractsPath
+	serveOpts.PlatformSpecPath = resolvedPaths.PlatformSpecPath
 	if opts.apiPort > 0 {
 		serveOpts.HealthAddr = ":" + strconv.Itoa(opts.apiPort)
 	}
