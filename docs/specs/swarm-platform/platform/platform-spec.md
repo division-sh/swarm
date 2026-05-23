@@ -1118,6 +1118,7 @@ timers:
 - `id`: event_consumer_exists; `severity`: warning
 - `id`: event_producer_exists; `severity`: warning
 - `id`: payload_field_coverage; `severity`: error
+- `id`: entity_write_target_compliance; `severity`: error
 - `id`: condition_payload_alignment; `severity`: error
 - `id`: condition_policy_alignment; `severity`: warning
 - `id`: state_machine_coherence; `severity`: error

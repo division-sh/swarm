@@ -1261,20 +1261,133 @@ func TestRun_AllowsNestedConditionPayloadReferenceWithinEventPayloadSchema(t *te
 	}
 }
 
-func TestRun_MapsPayloadCoverageMismatchToNamedError(t *testing.T) {
-	source := loadTier8Fixture(t, "test-boot-payload-mismatch")
+func TestRun_MapsDataAccumulationSourcePayloadMismatchToNamedError(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"item.received": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"score": {Type: "integer"},
+					},
+				},
+			},
+		},
+		RootEntities: runtimecontracts.EntityContractsDocument{
+			"subject": {
+				Fields: map[string]runtimecontracts.EntityFieldDecl{
+					"score": {Type: "integer"},
+				},
+			},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"node-1": {
+				ID: "node-1",
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"item.received": {
+						DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+							Writes: []runtimecontracts.WorkflowDataWrite{{
+								SourceField: "missing_score",
+								TargetField: "score",
+							}},
+						},
+					},
+				},
+			},
+		},
+	})
 
 	report := Run(context.Background(), source, Options{})
 
 	if !report.HasErrors() {
 		t.Fatalf("expected error report, got %#v", report.Findings)
 	}
-	if !reportContains(report.Errors(), "payload_field_coverage", `writes "foo" missing`) {
+	if !reportContains(report.Errors(), "payload_field_coverage", `source field "missing_score"`) {
 		t.Fatalf("expected payload_field_coverage error, got %#v", report.Errors())
 	}
 }
 
-func TestRun_MapsUndeclaredNestedEntityWriteTargetToPayloadCoverageError(t *testing.T) {
+func TestRun_MapsEmptyDataAccumulationSourcePayloadSchemaToNamedError(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"item.received": {},
+		},
+		RootEntities: runtimecontracts.EntityContractsDocument{
+			"subject": {
+				Fields: map[string]runtimecontracts.EntityFieldDecl{
+					"score": {Type: "integer"},
+				},
+			},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"node-1": {
+				ID: "node-1",
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"item.received": {
+						DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+							Writes: []runtimecontracts.WorkflowDataWrite{{
+								SourceField: "foo",
+								TargetField: "score",
+							}},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	report := Run(context.Background(), source, Options{})
+
+	if !report.HasErrors() {
+		t.Fatalf("expected error report, got %#v", report.Findings)
+	}
+	if !reportContains(report.Errors(), "payload_field_coverage", `source field "foo"`) {
+		t.Fatalf("expected empty payload schema payload_field_coverage error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_AllowsDeclaredDataAccumulationSourcePayloadField(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"item.received": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"score": {Type: "integer"},
+					},
+				},
+			},
+		},
+		RootEntities: runtimecontracts.EntityContractsDocument{
+			"subject": {
+				Fields: map[string]runtimecontracts.EntityFieldDecl{
+					"score": {Type: "integer"},
+				},
+			},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"node-1": {
+				ID: "node-1",
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"item.received": {
+						DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+							Writes: []runtimecontracts.WorkflowDataWrite{{
+								SourceField: "score",
+								TargetField: "score",
+							}},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	report := Run(context.Background(), source, Options{})
+
+	if reportContains(report.Errors(), "payload_field_coverage", "score") {
+		t.Fatalf("unexpected payload_field_coverage error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_MapsUndeclaredNestedEntityWriteTargetToEntityWriteTargetComplianceError(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		RootTypes: runtimecontracts.TypeCatalogDocument{
 			Types: map[string]runtimecontracts.NamedTypeDecl{
@@ -1312,8 +1425,8 @@ func TestRun_MapsUndeclaredNestedEntityWriteTargetToPayloadCoverageError(t *test
 	if !report.HasErrors() {
 		t.Fatalf("expected error report, got %#v", report.Findings)
 	}
-	if !reportContains(report.Errors(), "payload_field_coverage", `entity.analysis.missing`) {
-		t.Fatalf("expected nested payload_field_coverage error, got %#v", report.Errors())
+	if !reportContains(report.Errors(), "entity_write_target_compliance", `entity.analysis.missing`) {
+		t.Fatalf("expected nested entity_write_target_compliance error, got %#v", report.Errors())
 	}
 }
 
@@ -3925,8 +4038,8 @@ func TestRun_ReportsMissingRuntimeExecutorForOwnedRuntimeEvent(t *testing.T) {
 }
 
 func TestBootCheckRegistry_HasSpecCheckCount(t *testing.T) {
-	if got := len(bootCheckRegistry); got != 53 {
-		t.Fatalf("bootCheckRegistry count = %d, want 53", got)
+	if got := len(bootCheckRegistry); got != 54 {
+		t.Fatalf("bootCheckRegistry count = %d, want 54", got)
 	}
 	if got := len(supplementalChecks); got != 3 {
 		t.Fatalf("supplementalChecks count = %d, want 3", got)

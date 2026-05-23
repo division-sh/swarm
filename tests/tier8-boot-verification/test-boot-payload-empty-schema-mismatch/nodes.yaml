@@ -1,0 +1,17 @@
+test-node:
+  id: test-node
+  execution_type: system_node
+  subscribes_to: [item.received]
+  produces: [item.stored]
+  event_handlers:
+    item.received:
+      data_accumulation:
+        writes: [foo]
+        source_event: item.received
+      advances_to: done
+      emit:
+        event: item.stored
+        broadcast: true
+  state_schema:
+    fields:
+      foo: string

@@ -1,0 +1,9 @@
+name: test-boot-payload-empty-schema-mismatch
+version: 1.0.0
+description: >
+  Boot verification: data_accumulation reads field 'foo' from an existing
+  source event with no payload fields. Platform must catch payload_field_coverage.
+platform_version: ">=1.1.0"
+flows: []
+trigger:
+  boot: true

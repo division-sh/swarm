@@ -2575,8 +2575,14 @@ engine:
     - id: payload_field_coverage
       severity: error
       scope: per-flow
-      trigger: A handler references a payload field (in guard, data_accumulation, rules condition) that does not exist in the
-        triggering event's payload schema in events.yaml.
+      trigger: A handler data_accumulation write reads a source payload field (direct write, source_field, or CEL payload reference)
+        that does not exist in the configured source_event or triggering event payload schema in events.yaml.
+      when: boot-only
+    - id: entity_write_target_compliance
+      severity: error
+      scope: per-flow
+      trigger: A handler-side entity write target names an envelope field, undeclared or unresolved entity field path, or appears
+        in a flow with no declared Wave 1 entity contract.
       when: boot-only
     - id: condition_payload_alignment
       severity: error
@@ -5763,7 +5769,7 @@ static_analyzer:
     rule: Emit hard invalidity when an entity read path is undeclared, unresolved through the named-type chain, or used as a
       non-scalar/non-enum filter leaf.
   slice_8_entity_write_target_compliance:
-    id: payload_field_coverage
+    id: entity_write_target_compliance
     domain: semantic_validity
     authority: hard_invalidity
     severity: error
@@ -5774,7 +5780,7 @@ static_analyzer:
     - runtime_enforcement.create_entity
     - runtime_enforcement.save_entity_field
     scope:
-      description: Verify that handler-side entity write targets name declared top-level entity fields on the active Wave 1
+      description: Verify that handler-side entity write targets resolve against declared fields on the active Wave 1 entity
         contract.
       applies_to:
       - handler data_accumulation writes
@@ -5782,10 +5788,9 @@ static_analyzer:
       - handler query store targets
       - handler clear targets
       excludes:
-      - nested write primitives beyond Wave 1
       - runtime tool delivery/schema generation
-    rule: Emit hard invalidity when a handler write target is nested, targets an envelope field, targets an undeclared entity
-      field, or appears in a flow with no declared Wave 1 entity contract.
+    rule: Emit hard invalidity when a handler write target targets an envelope field, targets an undeclared entity field, contains
+      an unresolved nested named-type path, or appears in a flow with no declared Wave 1 entity contract.
   slice_9_entity_reader_coverage:
     id: entity_reader_coverage
     domain: semantic_validity

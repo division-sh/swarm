@@ -629,12 +629,13 @@ The engine handles failures at each layer:
 
 ### Boot Verification
 
-The engine runs 19 contract verification checks at boot, after loading all contracts and before starting any nodes or agents. If any check with `error` severity fails, boot aborts. Checks with `warning` severity log a finding but allow boot to continue.
+The engine runs contract verification checks at boot, after loading all contracts and before starting any nodes or agents. If any check with `error` severity fails, boot aborts. Checks with `warning` severity log a finding but allow boot to continue.
 
 The most important checks to recognize:
 
 - `event_chain_integrity`, `event_consumer_exists`, `event_producer_exists` — verify events have both producers and consumers.
-- `payload_field_coverage`, `condition_payload_alignment` — verify handlers reference fields that actually exist.
+- `payload_field_coverage`, `condition_payload_alignment` — verify handlers read payload fields that actually exist.
+- `entity_write_target_compliance` — verify handler entity write targets resolve to declared entity fields.
 - `state_machine_coherence` — verify state transitions make sense.
 - `required_agents_match` — verify agent roles are fulfilled.
 - `handler_field_compliance` — verify handlers use only valid field names and shapes.

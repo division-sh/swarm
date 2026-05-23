@@ -82,6 +82,9 @@ type checkerContext struct {
 	payloadCoverageLoaded   bool
 	payloadCoverageFindings []Finding
 
+	entityWriteTargetComplianceLoaded   bool
+	entityWriteTargetComplianceFindings []Finding
+
 	payloadCompletenessLoaded   bool
 	payloadCompletenessFindings []Finding
 
@@ -198,6 +201,7 @@ var bootCheckRegistry = []Check{
 	{ID: "semantic_drift_dead_event_schema", Severity: "warning", Run: checkSemanticDriftDeadEventSchema},
 	{ID: "entity_writer_coverage", Severity: SeverityHardInvalidity, Run: checkEntityWriterCoverage},
 	{ID: "payload_field_coverage", Severity: "error", Run: checkPayloadFieldCoverage},
+	{ID: "entity_write_target_compliance", Severity: SeverityHardInvalidity, Run: checkEntityWriteTargetCompliance},
 	{ID: "semantic_drift_payload_completeness", Severity: "error", Run: checkSemanticDriftPayloadCompleteness},
 	{ID: "condition_payload_alignment", Severity: "error", Run: checkConditionPayloadAlignment},
 	{ID: "condition_policy_alignment", Severity: "warning", Run: checkConditionPolicyAlignment},
@@ -626,70 +630,6 @@ func sortedSetKeysLocal[T any](m map[string]T) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-func (c *checkerContext) payloadFieldCoverage() []Finding {
-	if c.payloadCoverageLoaded {
-		return c.payloadCoverageFindings
-	}
-	c.payloadCoverageLoaded = true
-	seen := map[string]struct{}{}
-	for _, target := range wave1AllEntityWriteTargets(c.source) {
-		if !target.Entity || strings.TrimSpace(target.Field) == "" {
-			continue
-		}
-		key := strings.Join([]string{target.FlowID, target.NodeID, target.EventType, target.Kind, target.Target}, "|")
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-
-		if target.Kind == "handler.clear" && wave1SpecialClearTarget(target.Field) {
-			continue
-		}
-		resolved, ownerFlowID, rootField, err := wave1ResolveWriteTargetPath(c.source, target)
-		if err != nil {
-			c.payloadCoverageFindings = append(c.payloadCoverageFindings, Finding{
-				CheckID:  "payload_field_coverage",
-				Severity: SeverityHardInvalidity,
-				Message:  fmt.Sprintf("flow %s node %s handler %s %s target %q is invalid: %v", defaultFlowLabel(target.FlowID), target.NodeID, target.EventType, target.Kind, target.Target, err),
-				Location: target.NodeID,
-			})
-			continue
-		}
-		_ = resolved
-		if wave1EntityEnvelopeField(rootField) {
-			c.payloadCoverageFindings = append(c.payloadCoverageFindings, Finding{
-				CheckID:  "payload_field_coverage",
-				Severity: SeverityHardInvalidity,
-				Message:  fmt.Sprintf("flow %s node %s handler %s %s targets envelope field %q; envelope fields are platform-owned", defaultFlowLabel(target.FlowID), target.NodeID, target.EventType, target.Kind, rootField),
-				Location: target.NodeID,
-			})
-			continue
-		}
-		contract, ok := wave1WriteTargetContract(c.source, target)
-		if !ok {
-			c.payloadCoverageFindings = append(c.payloadCoverageFindings, Finding{
-				CheckID:  "payload_field_coverage",
-				Severity: SeverityHardInvalidity,
-				Message:  fmt.Sprintf("flow %s node %s handler %s %s writes %q missing from declared Wave 1 entity contract", defaultFlowLabel(target.FlowID), target.NodeID, target.EventType, target.Kind, target.Field),
-				Location: target.NodeID,
-			})
-			continue
-		}
-		if ownerFlowID != "" {
-			contract.FlowID = ownerFlowID
-		}
-		if _, ok := contract.Contract.Fields[rootField]; !ok {
-			c.payloadCoverageFindings = append(c.payloadCoverageFindings, Finding{
-				CheckID:  "payload_field_coverage",
-				Severity: SeverityHardInvalidity,
-				Message:  fmt.Sprintf("flow %s node %s handler %s %s writes undeclared entity field %q on entity_type %s", defaultFlowLabel(target.FlowID), target.NodeID, target.EventType, target.Kind, rootField, contract.EntityType),
-				Location: target.NodeID,
-			})
-		}
-	}
-	return c.payloadCoverageFindings
 }
 
 func (c *checkerContext) dialectCompliance() []Finding {

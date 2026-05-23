@@ -1194,17 +1194,18 @@ func catalogCollectBootIssues(bundle catalogBootBundle) []catalogBootIssue {
 				payloadFields := catalogEventPayloadFields(catalogMap(bundle.AllEvents[eventType]))
 				if dataAccumulation := catalogMap(handler["data_accumulation"]); len(dataAccumulation) > 0 {
 					sourceEvent := catalogFirstNonEmptyString(catalogBootText(dataAccumulation["source_event"]), eventType)
-					sourceFields := catalogEventPayloadFields(catalogMap(bundle.AllEvents[sourceEvent]))
+					sourceEventSchema, sourceEventExists := bundle.AllEvents[sourceEvent]
+					sourceFields := catalogEventPayloadFields(catalogMap(sourceEventSchema))
 					for _, rawWrite := range catalogAnySlice(dataAccumulation["writes"]) {
 						switch typed := rawWrite.(type) {
 						case string:
-							if len(sourceFields) > 0 && !catalogPayloadFieldExists(sourceFields, strings.TrimSpace(typed)) {
-								issues = append(issues, catalogBootIssue{Severity: "error", Category: "PAYLOAD-MISMATCH", Message: fmt.Sprintf("%s: writes '%s' but %s payload has %v", loc, strings.TrimSpace(typed), sourceEvent, catalogSortedSetKeys(sourceFields))})
+							if sourceEventExists && !catalogPayloadFieldExists(sourceFields, strings.TrimSpace(typed)) {
+								issues = append(issues, catalogBootIssue{Severity: "error", Category: "payload_field_coverage", Message: fmt.Sprintf("%s: writes '%s' but %s payload has %v", loc, strings.TrimSpace(typed), sourceEvent, catalogSortedSetKeys(sourceFields))})
 							}
 						case map[string]any:
 							sourceField := catalogBootText(typed["source_field"])
-							if sourceField != "" && len(sourceFields) > 0 && !catalogPayloadFieldExists(sourceFields, sourceField) {
-								issues = append(issues, catalogBootIssue{Severity: "error", Category: "PAYLOAD-MISMATCH", Message: fmt.Sprintf("%s: source_field '%s' not in %s payload", loc, sourceField, sourceEvent)})
+							if sourceField != "" && sourceEventExists && !catalogPayloadFieldExists(sourceFields, sourceField) {
+								issues = append(issues, catalogBootIssue{Severity: "error", Category: "payload_field_coverage", Message: fmt.Sprintf("%s: source_field '%s' not in %s payload", loc, sourceField, sourceEvent)})
 							}
 						}
 					}

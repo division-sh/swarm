@@ -50,6 +50,7 @@ var tier8SupportedFixtures = []string{
 	"test-boot-on-complete-and-rules-mutual-exclusion",
 	"test-boot-on-complete-state-invalid",
 	"test-boot-on-complete-dict",
+	"test-boot-payload-empty-schema-mismatch",
 	"test-boot-payload-mismatch",
 	"test-boot-permission-tool-mismatch",
 	"test-boot-policy-conflict",
