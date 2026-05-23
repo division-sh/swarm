@@ -83,6 +83,75 @@ func TestControlNukeYesAppliesThroughV1RPC(t *testing.T) {
 	}
 }
 
+func TestControlNukeSendsIdempotencyKey(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	for _, tc := range []struct {
+		name          string
+		args          []string
+		input         string
+		stdinTerminal bool
+		wantParams    map[string]any
+		wantPrompt    bool
+	}{
+		{
+			name:       "dry run",
+			args:       []string{"control", "nuke", "--dry-run", "--idempotency-key", "idem-dry"},
+			wantParams: map[string]any{"dry_run": true, "idempotency_key": "idem-dry"},
+		},
+		{
+			name:       "yes apply",
+			args:       []string{"control", "nuke", "--yes", "--idempotency-key", "idem-apply"},
+			wantParams: map[string]any{"dry_run": false, "idempotency_key": "idem-apply"},
+		},
+		{
+			name:       "yes apply preserves caller key",
+			args:       []string{"control", "nuke", "--yes", "--idempotency-key", "  idem-spaced  "},
+			wantParams: map[string]any{"dry_run": false, "idempotency_key": "  idem-spaced  "},
+		},
+		{
+			name:          "tty confirmed apply",
+			args:          []string{"control", "nuke", "--idempotency-key", "idem-tty"},
+			input:         "y\n",
+			stdinTerminal: true,
+			wantParams:    map[string]any{"dry_run": false, "idempotency_key": "idem-tty"},
+			wantPrompt:    true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var captured jsonRPCRequest
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+					t.Errorf("decode request: %v", err)
+				}
+				status := runtimeNukeStatusDone
+				if tc.wantParams["dry_run"] == true {
+					status = runtimeNukeStatusDryRun
+				}
+				writeJSONRPCResult(t, w, captured.ID, runtimeNukeTestResult(status))
+			}))
+			defer server.Close()
+
+			var stdout, stderr bytes.Buffer
+			opts := testRootCommandOptions(server)
+			opts.input = strings.NewReader(tc.input)
+			opts.stdinIsTerminal = func() bool { return tc.stdinTerminal }
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), tc.args, &stdout, &stderr, opts)
+			if code != 0 {
+				t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+			}
+			if captured.Method != "runtime.nuke" {
+				t.Fatalf("method = %q, want runtime.nuke", captured.Method)
+			}
+			if !reflect.DeepEqual(captured.Params, tc.wantParams) {
+				t.Fatalf("params = %#v, want %#v", captured.Params, tc.wantParams)
+			}
+			if gotPrompt := strings.Contains(stderr.String(), "Continue? [y/N]"); gotPrompt != tc.wantPrompt {
+				t.Fatalf("prompt present = %v, want %v stderr=%q", gotPrompt, tc.wantPrompt, stderr.String())
+			}
+		})
+	}
+}
+
 func TestControlNukeNoOpResultExitsZero(t *testing.T) {
 	t.Setenv("SWARM_API_TOKEN", "test-token")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -128,6 +197,8 @@ func TestControlNukeConfirmationAndNoCallPaths(t *testing.T) {
 		{name: "tty confirmation proceeds", args: []string{"control", "nuke"}, input: "y\n", stdinTerminal: true, wantCode: 0, wantCalls: 1, wantStderr: "Continue? [y/N]"},
 		{name: "tty abort makes no request", args: []string{"control", "nuke"}, input: "n\n", stdinTerminal: true, wantCode: 2, wantCalls: 0, wantStderr: "Aborted; no destruction performed."},
 		{name: "non tty apply without yes makes no request", args: []string{"control", "nuke"}, stdinTerminal: false, wantCode: 2, wantCalls: 0, wantStderr: "pass --yes for non-TTY"},
+		{name: "tty abort with key makes no request", args: []string{"control", "nuke", "--idempotency-key", "idem-abort"}, input: "n\n", stdinTerminal: true, wantCode: 2, wantCalls: 0, wantStderr: "Aborted; no destruction performed."},
+		{name: "non tty apply with key without yes makes no request", args: []string{"control", "nuke", "--idempotency-key", "idem-ntty"}, stdinTerminal: false, wantCode: 2, wantCalls: 0, wantStderr: "pass --yes for non-TTY"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			calls.Store(0)
@@ -149,7 +220,7 @@ func TestControlNukeConfirmationAndNoCallPaths(t *testing.T) {
 	}
 }
 
-func TestControlNukeRejectsIdempotencyKeyBeforeRequest(t *testing.T) {
+func TestControlNukeRejectsBlankIdempotencyKeyBeforePromptOrRequest(t *testing.T) {
 	t.Setenv("SWARM_API_TOKEN", "test-token")
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -158,16 +229,35 @@ func TestControlNukeRejectsIdempotencyKeyBeforeRequest(t *testing.T) {
 	}))
 	defer server.Close()
 
-	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"control", "nuke", "--idempotency-key", "idem-1"}, &stdout, &stderr, testRootCommandOptions(server))
-	if code != 2 {
-		t.Fatalf("code = %d, want 2 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
-	}
-	if calls.Load() != 0 {
-		t.Fatalf("server calls = %d, want 0", calls.Load())
-	}
-	if !strings.Contains(stderr.String(), "unknown flag: --idempotency-key") {
-		t.Fatalf("stderr = %q, want unknown flag", stderr.String())
+	for _, tc := range []struct {
+		name          string
+		args          []string
+		stdinTerminal bool
+	}{
+		{name: "dry run", args: []string{"control", "nuke", "--dry-run", "--idempotency-key", "   "}},
+		{name: "yes apply", args: []string{"control", "nuke", "--yes", "--idempotency-key", "   "}},
+		{name: "prompt path", args: []string{"control", "nuke", "--idempotency-key", "   "}, stdinTerminal: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls.Store(0)
+			var stdout, stderr bytes.Buffer
+			opts := testRootCommandOptions(server)
+			opts.input = strings.NewReader("y\n")
+			opts.stdinIsTerminal = func() bool { return tc.stdinTerminal }
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), tc.args, &stdout, &stderr, opts)
+			if code != 2 {
+				t.Fatalf("code = %d, want 2 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+			}
+			if calls.Load() != 0 {
+				t.Fatalf("server calls = %d, want 0", calls.Load())
+			}
+			if !strings.Contains(stderr.String(), "--idempotency-key must be non-empty") {
+				t.Fatalf("stderr = %q, want blank key validation", stderr.String())
+			}
+			if strings.Contains(stderr.String(), "Continue? [y/N]") {
+				t.Fatalf("stderr = %q, want no confirmation prompt", stderr.String())
+			}
+		})
 	}
 }
 

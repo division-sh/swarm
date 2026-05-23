@@ -19,9 +19,11 @@ const (
 )
 
 type runtimeNukeCommandOptions struct {
-	apiOptions rootCommandOptions
-	yes        bool
-	dryRun     bool
+	apiOptions        rootCommandOptions
+	yes               bool
+	dryRun            bool
+	idempotencyKey    string
+	idempotencyKeySet bool
 }
 
 type runtimeNukeResult struct {
@@ -122,16 +124,24 @@ func newControlNukeCommand(opts rootCommandOptions) *cobra.Command {
 		Short: "Destructively reset Swarm runtime state through v1 RPC.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runControlNukeCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), nukeOpts)
+			opts := nukeOpts
+			opts.idempotencyKeySet = cmd.Flags().Changed("idempotency-key")
+			return runControlNukeCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), opts)
 		},
 	}
 	cmd.Flags().BoolVarP(&nukeOpts.yes, "yes", "y", false, "Skip the destructive confirmation prompt")
 	cmd.Flags().BoolVar(&nukeOpts.dryRun, "dry-run", false, "Preview the destructive reset without applying it")
+	cmd.Flags().StringVar(&nukeOpts.idempotencyKey, "idempotency-key", "", "Optional v1 API idempotency key")
 	bindCLIAPIConnectionFlags(cmd, &nukeOpts.apiOptions)
 	return cmd
 }
 
 func runControlNukeCommand(ctx context.Context, out, errOut io.Writer, opts runtimeNukeCommandOptions) error {
+	idempotencyKey, err := optionalNonBlankNukeFlag("--idempotency-key", opts.idempotencyKey, opts.idempotencyKeySet)
+	if err != nil {
+		fmt.Fprintln(errOut, err)
+		return commandExitError{code: 2}
+	}
 	if !opts.dryRun && !opts.yes {
 		if !controlStdinIsTerminal(opts.apiOptions) {
 			fmt.Fprintln(errOut, "ERROR: `swarm control nuke` is destructive; pass --yes for non-TTY invocations.")
@@ -154,6 +164,9 @@ func runControlNukeCommand(ctx context.Context, out, errOut io.Writer, opts runt
 		return commandExitError{code: runtimeNukeErrorExitCode(err)}
 	}
 	params := map[string]any{"dry_run": opts.dryRun}
+	if idempotencyKey != "" {
+		params["idempotency_key"] = idempotencyKey
+	}
 	var result runtimeNukeResult
 	if err := client.call(ctx, runtimeNukeMethod, params, &result); err != nil {
 		fmt.Fprintln(errOut, err)
@@ -169,6 +182,13 @@ func runControlNukeCommand(ctx context.Context, out, errOut io.Writer, opts runt
 		return commandExitError{code: 3}
 	}
 	return nil
+}
+
+func optionalNonBlankNukeFlag(name, value string, changed bool) (string, error) {
+	if changed && strings.TrimSpace(value) == "" {
+		return "", fmt.Errorf("%s must be non-empty", name)
+	}
+	return value, nil
 }
 
 func confirmRuntimeNuke(input io.Reader, errOut io.Writer) (bool, error) {
