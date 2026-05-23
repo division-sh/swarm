@@ -9739,6 +9739,47 @@ api_specification:
             minLength: 1
           entity_id:
             $ref: '#/components/schemas/OpaqueId'
+      AgentDiagnosisLastToolOutcome:
+        type: object
+        additionalProperties: false
+        description: |
+          Compact selected-turn last-tool evidence for agent.diagnose. This
+          object is present only when the diagnosis owner selects an active
+          live agent_sessions row for session/session_per_entity modes, that
+          selected session has a latest agent_turns row, and that turn has a
+          canonical turn_summary.tool_results entry. turn_id is the same
+          selected latest turn used by AgentDiagnosisActive. tool_name,
+          optional tool_use_id, and optional result come from the last
+          canonical tool_results entry. ok is the selected latest
+          agent_turns.parse_ok value; it is not a per-tool execution status.
+          The owner must omit last_tool_outcome when no selected active live
+          session, latest turn, canonical summary, or canonical tool result
+          exists, and must fail closed on malformed canonical summary or tool
+          result data. It must not fall back to raw response_payload, raw
+          transcript text, dashboard projections, conversation API composition,
+          runtime executor telemetry, event/dead-letter data, stale/inactive
+          sessions, or richer per-tool status/latency/completion/error
+          diagnostics.
+        required:
+        - turn_id
+        - tool_name
+        - ok
+        properties:
+          turn_id:
+            $ref: '#/components/schemas/OpaqueId'
+          tool_name:
+            type: string
+            minLength: 1
+          tool_use_id:
+            type: string
+            minLength: 1
+          ok:
+            type: boolean
+            description: Selected latest agent_turns.parse_ok; not a per-tool execution status.
+          result:
+            type: object
+            additionalProperties: true
+            description: Optional validated JSON object from the selected canonical tool_results entry.
       AgentDiagnosis:
         type: object
         additionalProperties: false
@@ -9763,6 +9804,8 @@ api_specification:
             $ref: '#/components/schemas/AgentDiagnosisRuntimeState'
           active:
             $ref: '#/components/schemas/AgentDiagnosisActive'
+          last_tool_outcome:
+            $ref: '#/components/schemas/AgentDiagnosisLastToolOutcome'
       ConversationSummary:
         type: object
         additionalProperties: false
@@ -11662,14 +11705,22 @@ api_specification:
         pending-delivery queue summary/detail evidence, and optional delivery
         lifecycle evidence. It may also return runtime_state.watchdog as a
         narrow projection of the canonical active session watchdog descriptor,
-        and active as selected active-session latest-turn refs. active is
-        omitted when no active live session is selected or the selected session
-        has no latest turn. active.turn_id is required when active is present;
-        active.task_id and active.entity_id are omitted when empty or absent.
-        active.entity_id is the latest selected agent_turns.entity_id dispatch
-        entity and must not fall back to the agent configured/effective entity,
-        task target entity, role-scoped current-entity tool context, dashboard
-        projection, conversation API response, or stale session evidence.
+        active as selected active-session latest-turn refs, and
+        last_tool_outcome as compact selected active-session latest-turn
+        canonical tool-result evidence. active is omitted when no active live
+        session is selected or the selected session has no latest turn.
+        active.turn_id is required when active is present; active.task_id and
+        active.entity_id are omitted when empty or absent. active.entity_id is
+        the latest selected agent_turns.entity_id dispatch entity and must not
+        fall back to the agent configured/effective entity, task target entity,
+        role-scoped current-entity tool context, dashboard projection,
+        conversation API response, or stale session evidence.
+        last_tool_outcome is omitted when no active live session is selected,
+        no latest turn exists, no canonical turn summary exists, or the
+        canonical summary has no tool result. last_tool_outcome.ok is the
+        selected turn parse_ok value and is not a per-tool execution status;
+        richer per-tool status, latency, completed_at, and error diagnostics
+        remain split.
         runtime_state.watchdog is omitted when no active live session or no
         active-session watchdog evidence exists, and malformed watchdog data
         fails closed. Queue details are paged with queue_limit and
@@ -11679,13 +11730,14 @@ api_specification:
         canonical recorded retry counter from event_deliveries.retry_count, with
         no API-layer +1 or status arithmetic. The API handler consumes the
         canonical agent diagnosis read owner directly, including its
-        watchdog-backed runtime_state sub-owner and selected-turn active
-        sub-owner. It must not join conversation, run, trace, token, CLI, or
-        dashboard owners locally, and it must not expose the full runtime_state
+        watchdog-backed runtime_state sub-owner, selected-turn active sub-owner,
+        and selected-turn last_tool_outcome sub-owner. It must not locally join
+        conversation, run, trace, token, CLI, or dashboard owners, and it must
+        not expose the full runtime_state
         enum, top-level watchdog, run_id, bundle_version, actual in-flight
         active work, configured/effective current entity, task target entity,
-        role-scoped current entity, last tool outcome, token usage, recent
-        failures, or dead letters.
+        role-scoped current entity, token usage, recent failures, or dead
+        letters.
       scope:
         required:
         - read:agents

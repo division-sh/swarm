@@ -264,7 +264,7 @@ func approvedReadOnlyHTTPRuntimeMethods() []string {
 
 func readOnlyHTTPRuntimeFixtures() map[string]readOnlyHTTPRuntimeFixture {
 	return map[string]readOnlyHTTPRuntimeFixture{
-		"agent.diagnose":                 {Params: map[string]any{"agent_id": "agent-1"}, ResultKeys: []string{"agent_id", "status", "queue", "runtime_state", "active"}},
+		"agent.diagnose":                 {Params: map[string]any{"agent_id": "agent-1"}, ResultKeys: []string{"agent_id", "status", "queue", "runtime_state", "active", "last_tool_outcome"}},
 		"agent.get":                      {Params: map[string]any{"agent_id": "agent-1"}, ResultKeys: []string{"agent"}},
 		"agent.list":                     {Params: map[string]any{}, ResultKeys: []string{"agents"}},
 		"conversation.current_for_agent": {Params: map[string]any{"agent_id": "agent-1"}, ResultKeys: []string{"conversation", "turns"}},
@@ -546,6 +546,13 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 					TaskID:   "task-1",
 					EntityID: "33333333-3333-3333-3333-333333333333",
 				},
+				LastToolOutcome: &store.OperatorAgentLastToolOutcome{
+					TurnID:    "22222222-2222-2222-2222-222222222222",
+					ToolName:  "selected_tool",
+					ToolUseID: "toolu-selected",
+					OK:        true,
+					Result:    []byte(`{"status":"selected"}`),
+				},
 				RuntimeState: &store.OperatorAgentDiagnosisRuntimeState{
 					Watchdog: &store.OperatorAgentDiagnosisWatchdog{
 						State:         "no_output",
@@ -705,7 +712,15 @@ func assertReadOnlyProbeSuccess(t *testing.T, methodName string, resp rpcRespons
 		if watchdog["recorded_at"] != "2026-05-21T10:01:00Z" {
 			t.Fatalf("agent.diagnose runtime_state.watchdog.recorded_at = %#v", watchdog["recorded_at"])
 		}
-		for _, splitField := range []string{"bundle_version", "watchdog", "last_tool_outcome", "token_usage", "failures_recent", "dead_letters_recent"} {
+		lastTool := asMap(t, result["last_tool_outcome"])
+		if lastTool["turn_id"] != "22222222-2222-2222-2222-222222222222" || lastTool["tool_name"] != "selected_tool" || lastTool["tool_use_id"] != "toolu-selected" || lastTool["ok"] != true {
+			t.Fatalf("agent.diagnose last_tool_outcome = %#v", lastTool)
+		}
+		lastToolResult := asMap(t, lastTool["result"])
+		if lastToolResult["status"] != "selected" {
+			t.Fatalf("agent.diagnose last_tool_outcome.result = %#v", lastToolResult)
+		}
+		for _, splitField := range []string{"bundle_version", "watchdog", "token_usage", "failures_recent", "dead_letters_recent"} {
 			if _, ok := result[splitField]; ok {
 				t.Fatalf("agent.diagnose exposed split field %q: %#v", splitField, result)
 			}

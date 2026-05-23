@@ -1,7 +1,9 @@
 package apiv1
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -490,6 +492,19 @@ func validateAgentDiagnosisResult(item store.OperatorAgentDiagnosis) error {
 	if err := validateAgentDiagnosisRuntimeStateResult(item.RuntimeState); err != nil {
 		return err
 	}
+	if err := validateAgentDiagnosisLastToolOutcomeResult(item.LastToolOutcome); err != nil {
+		return err
+	}
+	if item.LastToolOutcome != nil {
+		if item.Active == nil {
+			return fmt.Errorf("agent.diagnose owner returned malformed result: last_tool_outcome requires active selected-turn evidence")
+		}
+		activeTurnID := strings.TrimSpace(item.Active.TurnID)
+		lastToolTurnID := strings.TrimSpace(item.LastToolOutcome.TurnID)
+		if activeTurnID != lastToolTurnID {
+			return fmt.Errorf("agent.diagnose owner returned malformed result: last_tool_outcome.turn_id %q must match active.turn_id %q", lastToolTurnID, activeTurnID)
+		}
+	}
 	return nil
 }
 
@@ -520,6 +535,32 @@ func validateAgentDiagnosisRuntimeStateResult(item *store.OperatorAgentDiagnosis
 	}
 	if err := store.ValidateConversationRuntimeWatchdogDescriptor(watchdog); err != nil {
 		return fmt.Errorf("agent.diagnose owner returned malformed result: runtime_state.watchdog is invalid: %w", err)
+	}
+	return nil
+}
+
+func validateAgentDiagnosisLastToolOutcomeResult(item *store.OperatorAgentLastToolOutcome) error {
+	if item == nil {
+		return nil
+	}
+	if strings.TrimSpace(item.TurnID) == "" {
+		return fmt.Errorf("agent.diagnose owner returned malformed result: last_tool_outcome.turn_id is required")
+	}
+	if strings.TrimSpace(item.ToolName) == "" {
+		return fmt.Errorf("agent.diagnose owner returned malformed result: last_tool_outcome.tool_name is required")
+	}
+	if item.Result != nil {
+		trimmed := bytes.TrimSpace(item.Result)
+		if len(trimmed) == 0 {
+			return fmt.Errorf("agent.diagnose owner returned malformed result: last_tool_outcome.result is empty")
+		}
+		var obj map[string]any
+		if err := json.Unmarshal(trimmed, &obj); err != nil {
+			return fmt.Errorf("agent.diagnose owner returned malformed result: last_tool_outcome.result must be a JSON object: %w", err)
+		}
+		if obj == nil {
+			return fmt.Errorf("agent.diagnose owner returned malformed result: last_tool_outcome.result must be a JSON object")
+		}
 	}
 	return nil
 }

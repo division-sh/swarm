@@ -131,12 +131,21 @@ type OperatorAgentDiagnosis struct {
 	DeliveryLifecycle *OperatorAgentDeliveryLifecycle     `json:"delivery_lifecycle,omitempty"`
 	RuntimeState      *OperatorAgentDiagnosisRuntimeState `json:"runtime_state,omitempty"`
 	Active            *OperatorAgentDiagnosisActive       `json:"active,omitempty"`
+	LastToolOutcome   *OperatorAgentLastToolOutcome       `json:"last_tool_outcome,omitempty"`
 }
 
 type OperatorAgentDiagnosisActive struct {
 	TurnID   string `json:"turn_id"`
 	TaskID   string `json:"task_id,omitempty"`
 	EntityID string `json:"entity_id,omitempty"`
+}
+
+type OperatorAgentLastToolOutcome struct {
+	TurnID    string          `json:"turn_id"`
+	ToolName  string          `json:"tool_name"`
+	ToolUseID string          `json:"tool_use_id,omitempty"`
+	OK        bool            `json:"ok"`
+	Result    json.RawMessage `json:"result,omitempty"`
 }
 
 type OperatorAgentDiagnosisRuntimeState struct {
@@ -1295,6 +1304,11 @@ func operatorAgentDiagnosisFromDetail(detail OperatorAgentDetail) (OperatorAgent
 		RuntimeState: agent.DiagnosisRuntimeState,
 		Active:       cloneOperatorAgentDiagnosisActive(agent.DiagnosisActive),
 	}
+	lastToolOutcome, err := operatorAgentDiagnosisLastToolOutcomeFromAgent(agent)
+	if err != nil {
+		return OperatorAgentDiagnosis{}, err
+	}
+	out.LastToolOutcome = lastToolOutcome
 	if state := strings.TrimSpace(agent.DeliveryLifecycle); state != "" {
 		out.DeliveryLifecycle = &OperatorAgentDeliveryLifecycle{
 			State:         state,
@@ -1369,6 +1383,19 @@ func validateOperatorAgentDiagnosis(item OperatorAgentDiagnosis) error {
 	if err := validateOperatorAgentDiagnosisRuntimeState(item.RuntimeState); err != nil {
 		return err
 	}
+	if err := validateOperatorAgentDiagnosisLastToolOutcome(item.LastToolOutcome); err != nil {
+		return err
+	}
+	if item.LastToolOutcome != nil {
+		if item.Active == nil {
+			return fmt.Errorf("agent diagnosis last_tool_outcome requires active selected-turn evidence")
+		}
+		activeTurnID := strings.TrimSpace(item.Active.TurnID)
+		lastToolTurnID := strings.TrimSpace(item.LastToolOutcome.TurnID)
+		if activeTurnID != lastToolTurnID {
+			return fmt.Errorf("agent diagnosis last_tool_outcome.turn_id %q must match active.turn_id %q", lastToolTurnID, activeTurnID)
+		}
+	}
 	return nil
 }
 
@@ -1413,6 +1440,73 @@ func cloneOperatorAgentDiagnosisActive(in *OperatorAgentDiagnosisActive) *Operat
 	}
 	out := *in
 	return &out
+}
+
+func operatorAgentDiagnosisLastToolOutcomeFromAgent(agent OperatorAgentSummary) (*OperatorAgentLastToolOutcome, error) {
+	if agent.DiagnosisActive == nil {
+		return nil, nil
+	}
+	turnID := strings.TrimSpace(agent.DiagnosisActive.TurnID)
+	if turnID == "" {
+		return nil, nil
+	}
+	if agent.LiveTurn == nil || agent.LiveTurn.LastTool == nil {
+		return nil, nil
+	}
+	if liveTurnID := strings.TrimSpace(agent.LiveTurn.TurnID); liveTurnID != "" && liveTurnID != turnID {
+		return nil, fmt.Errorf("agent diagnosis last_tool_outcome turn_id %q does not match active turn_id %q", liveTurnID, turnID)
+	}
+	last := agent.LiveTurn.LastTool
+	out := &OperatorAgentLastToolOutcome{
+		TurnID:    turnID,
+		ToolName:  strings.TrimSpace(last.Name),
+		ToolUseID: strings.TrimSpace(last.ToolUseID),
+		OK:        last.OK,
+	}
+	if last.Result != nil {
+		trimmed := bytes.TrimSpace(last.Result)
+		if len(trimmed) == 0 {
+			return nil, fmt.Errorf("agent diagnosis last_tool_outcome.result is empty")
+		}
+		var obj map[string]any
+		if err := json.Unmarshal(trimmed, &obj); err != nil {
+			return nil, fmt.Errorf("agent diagnosis last_tool_outcome.result must be a JSON object: %w", err)
+		}
+		if obj == nil {
+			return nil, fmt.Errorf("agent diagnosis last_tool_outcome.result must be a JSON object")
+		}
+		out.Result = append(json.RawMessage(nil), trimmed...)
+	}
+	if err := validateOperatorAgentDiagnosisLastToolOutcome(out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func validateOperatorAgentDiagnosisLastToolOutcome(item *OperatorAgentLastToolOutcome) error {
+	if item == nil {
+		return nil
+	}
+	if strings.TrimSpace(item.TurnID) == "" {
+		return fmt.Errorf("agent diagnosis last_tool_outcome.turn_id is required")
+	}
+	if strings.TrimSpace(item.ToolName) == "" {
+		return fmt.Errorf("agent diagnosis last_tool_outcome.tool_name is required")
+	}
+	if item.Result != nil {
+		trimmed := bytes.TrimSpace(item.Result)
+		if len(trimmed) == 0 {
+			return fmt.Errorf("agent diagnosis last_tool_outcome.result is empty")
+		}
+		var obj map[string]any
+		if err := json.Unmarshal(trimmed, &obj); err != nil {
+			return fmt.Errorf("agent diagnosis last_tool_outcome.result must be a JSON object: %w", err)
+		}
+		if obj == nil {
+			return fmt.Errorf("agent diagnosis last_tool_outcome.result must be a JSON object")
+		}
+	}
+	return nil
 }
 
 func validOperatorAgentDiagnosisStatus(status string) bool {

@@ -14,7 +14,7 @@
   "methods": [
     {
       "name": "agent.diagnose",
-      "description": "Read the owner-backed diagnosis slice for one agent. This method is\nlimited to agent identity/status refs, current/last conversation refs,\npending-delivery queue summary/detail evidence, and optional delivery\nlifecycle evidence. It may also return runtime_state.watchdog as a\nnarrow projection of the canonical active session watchdog descriptor,\nand active as selected active-session latest-turn refs. active is\nomitted when no active live session is selected or the selected session\nhas no latest turn. active.turn_id is required when active is present;\nactive.task_id and active.entity_id are omitted when empty or absent.\nactive.entity_id is the latest selected agent_turns.entity_id dispatch\nentity and must not fall back to the agent configured/effective entity,\ntask target entity, role-scoped current-entity tool context, dashboard\nprojection, conversation API response, or stale session evidence.\nruntime_state.watchdog is omitted when no active live session or no\nactive-session watchdog evidence exists, and malformed watchdog data\nfails closed. Queue details are paged with queue_limit and\nqueue_cursor, ordered by events.created_at ASC then events.event_id ASC.\nAgentPendingDelivery.enqueued_at uses the same timestamp owner as\noldest_pending_age_seconds. AgentPendingDelivery.attempts is the\ncanonical recorded retry counter from event_deliveries.retry_count, with\nno API-layer +1 or status arithmetic. The API handler consumes the\ncanonical agent diagnosis read owner directly, including its\nwatchdog-backed runtime_state sub-owner and selected-turn active\nsub-owner. It must not join conversation, run, trace, token, CLI, or\ndashboard owners locally, and it must not expose the full runtime_state\nenum, top-level watchdog, run_id, bundle_version, actual in-flight\nactive work, configured/effective current entity, task target entity,\nrole-scoped current entity, last tool outcome, token usage, recent\nfailures, or dead letters.\n",
+      "description": "Read the owner-backed diagnosis slice for one agent. This method is\nlimited to agent identity/status refs, current/last conversation refs,\npending-delivery queue summary/detail evidence, and optional delivery\nlifecycle evidence. It may also return runtime_state.watchdog as a\nnarrow projection of the canonical active session watchdog descriptor,\nactive as selected active-session latest-turn refs, and\nlast_tool_outcome as compact selected active-session latest-turn\ncanonical tool-result evidence. active is omitted when no active live\nsession is selected or the selected session has no latest turn.\nactive.turn_id is required when active is present; active.task_id and\nactive.entity_id are omitted when empty or absent. active.entity_id is\nthe latest selected agent_turns.entity_id dispatch entity and must not\nfall back to the agent configured/effective entity, task target entity,\nrole-scoped current-entity tool context, dashboard projection,\nconversation API response, or stale session evidence.\nlast_tool_outcome is omitted when no active live session is selected,\nno latest turn exists, no canonical turn summary exists, or the\ncanonical summary has no tool result. last_tool_outcome.ok is the\nselected turn parse_ok value and is not a per-tool execution status;\nricher per-tool status, latency, completed_at, and error diagnostics\nremain split.\nruntime_state.watchdog is omitted when no active live session or no\nactive-session watchdog evidence exists, and malformed watchdog data\nfails closed. Queue details are paged with queue_limit and\nqueue_cursor, ordered by events.created_at ASC then events.event_id ASC.\nAgentPendingDelivery.enqueued_at uses the same timestamp owner as\noldest_pending_age_seconds. AgentPendingDelivery.attempts is the\ncanonical recorded retry counter from event_deliveries.retry_count, with\nno API-layer +1 or status arithmetic. The API handler consumes the\ncanonical agent diagnosis read owner directly, including its\nwatchdog-backed runtime_state sub-owner, selected-turn active sub-owner,\nand selected-turn last_tool_outcome sub-owner. It must not locally join\nconversation, run, trace, token, CLI, or dashboard owners, and it must\nnot expose the full runtime_state\nenum, top-level watchdog, run_id, bundle_version, actual in-flight\nactive work, configured/effective current entity, task target entity,\nrole-scoped current entity, token usage, recent failures, or dead\nletters.\n",
       "params": [
         {
           "name": "agent_id",
@@ -5384,6 +5384,9 @@
           "delivery_lifecycle": {
             "$ref": "#/components/schemas/AgentDeliveryLifecycle"
           },
+          "last_tool_outcome": {
+            "$ref": "#/components/schemas/AgentDiagnosisLastToolOutcome"
+          },
           "last_turn_ref": {
             "$ref": "#/components/schemas/TurnRef"
           },
@@ -5421,6 +5424,38 @@
         },
         "required": [
           "turn_id"
+        ],
+        "type": "object"
+      },
+      "AgentDiagnosisLastToolOutcome": {
+        "additionalProperties": false,
+        "description": "Compact selected-turn last-tool evidence for agent.diagnose. This\nobject is present only when the diagnosis owner selects an active\nlive agent_sessions row for session/session_per_entity modes, that\nselected session has a latest agent_turns row, and that turn has a\ncanonical turn_summary.tool_results entry. turn_id is the same\nselected latest turn used by AgentDiagnosisActive. tool_name,\noptional tool_use_id, and optional result come from the last\ncanonical tool_results entry. ok is the selected latest\nagent_turns.parse_ok value; it is not a per-tool execution status.\nThe owner must omit last_tool_outcome when no selected active live\nsession, latest turn, canonical summary, or canonical tool result\nexists, and must fail closed on malformed canonical summary or tool\nresult data. It must not fall back to raw response_payload, raw\ntranscript text, dashboard projections, conversation API composition,\nruntime executor telemetry, event/dead-letter data, stale/inactive\nsessions, or richer per-tool status/latency/completion/error\ndiagnostics.\n",
+        "properties": {
+          "ok": {
+            "description": "Selected latest agent_turns.parse_ok; not a per-tool execution status.",
+            "type": "boolean"
+          },
+          "result": {
+            "additionalProperties": true,
+            "description": "Optional validated JSON object from the selected canonical tool_results entry.",
+            "type": "object"
+          },
+          "tool_name": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "tool_use_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "turn_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        "required": [
+          "turn_id",
+          "tool_name",
+          "ok"
         ],
         "type": "object"
       },
