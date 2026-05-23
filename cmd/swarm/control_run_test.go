@@ -60,6 +60,39 @@ func TestControlRunSingleCommandsSendV1RPCRequests(t *testing.T) {
 	}
 }
 
+func TestControlRunSingleCommandsSendIdempotencyKeys(t *testing.T) {
+	for _, tc := range []struct {
+		action     string
+		wantMethod string
+	}{
+		{action: "pause", wantMethod: controlCommandRunPauseMethod},
+		{action: "continue", wantMethod: controlCommandRunContinueMethod},
+		{action: "stop", wantMethod: controlCommandRunStopMethod},
+	} {
+		t.Run(tc.action, func(t *testing.T) {
+			t.Setenv("SWARM_API_TOKEN", "test-token")
+			var captured jsonRPCRequest
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+					t.Errorf("decode request: %v", err)
+				}
+				writeJSONRPCResult(t, w, captured.ID, map[string]any{"ok": true})
+			}))
+			defer server.Close()
+
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"control", tc.action, "run-1", "--idempotency-key", "idem-1"}, &stdout, &stderr, testRootCommandOptions(server))
+			if code != 0 {
+				t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+			}
+			assertControlRequest(t, captured, tc.wantMethod, map[string]any{"run_id": "run-1", "idempotency_key": "idem-1"})
+			if strings.TrimSpace(stderr.String()) != "" {
+				t.Fatalf("stderr = %q, want empty", stderr.String())
+			}
+		})
+	}
+}
+
 func TestControlRunAllPauseContinueSendRuntimeRPCRequests(t *testing.T) {
 	for _, tc := range []struct {
 		action     string
@@ -94,6 +127,38 @@ func TestControlRunAllPauseContinueSendRuntimeRPCRequests(t *testing.T) {
 			if !strings.Contains(stdout.String(), tc.wantOutput) {
 				t.Fatalf("stdout = %q, want substring %q", stdout.String(), tc.wantOutput)
 			}
+			if strings.TrimSpace(stderr.String()) != "" {
+				t.Fatalf("stderr = %q, want empty", stderr.String())
+			}
+		})
+	}
+}
+
+func TestControlRunAllPauseContinueSendIdempotencyKeys(t *testing.T) {
+	for _, tc := range []struct {
+		action     string
+		wantMethod string
+	}{
+		{action: "pause", wantMethod: controlCommandRuntimePauseMethod},
+		{action: "continue", wantMethod: controlCommandRuntimeResumeMethod},
+	} {
+		t.Run(tc.action, func(t *testing.T) {
+			t.Setenv("SWARM_API_TOKEN", "test-token")
+			var captured jsonRPCRequest
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+					t.Errorf("decode request: %v", err)
+				}
+				writeJSONRPCResult(t, w, captured.ID, map[string]any{"ok": true})
+			}))
+			defer server.Close()
+
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"control", tc.action, "--all", "--idempotency-key", "idem-1"}, &stdout, &stderr, testRootCommandOptions(server))
+			if code != 0 {
+				t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+			}
+			assertControlRequest(t, captured, tc.wantMethod, map[string]any{"idempotency_key": "idem-1"})
 			if strings.TrimSpace(stderr.String()) != "" {
 				t.Fatalf("stderr = %q, want empty", stderr.String())
 			}
@@ -179,6 +244,12 @@ func TestControlRunRejectsInvalidTargetsBeforeRequest(t *testing.T) {
 		{name: "all with run id", args: []string{"control", "pause", "run-1", "--all"}, wantStderr: "--all cannot be combined with a run id"},
 		{name: "extra target", args: []string{"control", "continue", "run-1", "run-2"}, wantStderr: "accepts at most 1 arg"},
 		{name: "blank run id", args: []string{"control", "stop", "  "}, wantStderr: "run id is required"},
+		{name: "blank idempotency key pause run", args: []string{"control", "pause", "run-1", "--idempotency-key", "  "}, wantStderr: "--idempotency-key must be non-empty"},
+		{name: "blank idempotency key pause all", args: []string{"control", "pause", "--all", "--idempotency-key", "  "}, wantStderr: "--idempotency-key must be non-empty"},
+		{name: "blank idempotency key continue run", args: []string{"control", "continue", "run-1", "--idempotency-key", "  "}, wantStderr: "--idempotency-key must be non-empty"},
+		{name: "blank idempotency key continue all", args: []string{"control", "continue", "--all", "--idempotency-key", "  "}, wantStderr: "--idempotency-key must be non-empty"},
+		{name: "blank idempotency key stop run", args: []string{"control", "stop", "run-1", "--idempotency-key", "  "}, wantStderr: "--idempotency-key must be non-empty"},
+		{name: "stop all rejects idempotency key", args: []string{"control", "stop", "--all", "--idempotency-key", "idem-1"}, wantStderr: "--idempotency-key is not supported with control stop --all"},
 		{name: "unsupported flag", args: []string{"control", "stop", "run-1", "--unknown"}, wantStderr: "unknown flag"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

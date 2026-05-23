@@ -149,6 +149,28 @@ func TestControlNukeConfirmationAndNoCallPaths(t *testing.T) {
 	}
 }
 
+func TestControlNukeRejectsIdempotencyKeyBeforeRequest(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		writeJSONRPCResult(t, w, "unexpected", runtimeNukeTestResult(runtimeNukeStatusDone))
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"control", "nuke", "--idempotency-key", "idem-1"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 2 {
+		t.Fatalf("code = %d, want 2 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("server calls = %d, want 0", calls.Load())
+	}
+	if !strings.Contains(stderr.String(), "unknown flag: --idempotency-key") {
+		t.Fatalf("stderr = %q, want unknown flag", stderr.String())
+	}
+}
+
 func TestControlNukeMapsFailureExitCodes(t *testing.T) {
 	for _, tc := range []struct {
 		name       string

@@ -27,11 +27,13 @@ const (
 )
 
 type controlRunCommandOptions struct {
-	apiOptions rootCommandOptions
-	action     string
-	runMethod  string
-	allMethod  string
-	all        bool
+	apiOptions        rootCommandOptions
+	action            string
+	runMethod         string
+	allMethod         string
+	all               bool
+	idempotencyKey    string
+	idempotencyKeySet bool
 }
 
 type controlCommandOKResult struct {
@@ -77,10 +79,12 @@ func newControlRunCommand(opts controlRunCommandOptions) *cobra.Command {
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			runOpts := cmdOpts
+			runOpts.idempotencyKeySet = cmd.Flags().Changed("idempotency-key")
 			return runControlRunCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), args, runOpts)
 		},
 	}
 	cmd.Flags().BoolVar(&cmdOpts.all, "all", false, "Apply the supported all-runs scope for this action")
+	cmd.Flags().StringVar(&cmdOpts.idempotencyKey, "idempotency-key", "", "Optional v1 API idempotency key")
 	bindCLIAPIConnectionFlags(cmd, &cmdOpts.apiOptions)
 	return cmd
 }
@@ -98,6 +102,15 @@ func runControlRunCommand(ctx context.Context, out, errOut io.Writer, args []str
 		fmt.Fprintln(errOut, err)
 		return commandExitError{code: controlCommandExitCodeValidation}
 	}
+	idempotencyKey, err := optionalNonEmptyFlag("--idempotency-key", opts.idempotencyKey, opts.idempotencyKeySet)
+	if err != nil {
+		fmt.Fprintln(errOut, err)
+		return commandExitError{code: controlCommandExitCodeValidation}
+	}
+	if opts.all && opts.action == "stop" && idempotencyKey != "" {
+		fmt.Fprintln(errOut, "--idempotency-key is not supported with control stop --all")
+		return commandExitError{code: controlCommandExitCodeValidation}
+	}
 	client, err := newCLIAPIClient(opts.apiOptions)
 	if err != nil {
 		fmt.Fprintln(errOut, err)
@@ -112,7 +125,7 @@ func runControlRunCommand(ctx context.Context, out, errOut io.Writer, args []str
 			fmt.Fprintf(errOut, "unsupported all-runs control action %q\n", opts.action)
 			return commandExitError{code: controlCommandExitCodeRuntimeError}
 		}
-		if err := callControlOK(ctx, client, opts.allMethod, map[string]any{}); err != nil {
+		if err := callControlOK(ctx, client, opts.allMethod, controlRunParams("", idempotencyKey)); err != nil {
 			fmt.Fprintln(errOut, err)
 			return commandExitError{code: controlCommandErrorExitCode(err)}
 		}
@@ -120,7 +133,7 @@ func runControlRunCommand(ctx context.Context, out, errOut io.Writer, args []str
 		return nil
 	}
 
-	if err := callControlOK(ctx, client, opts.runMethod, map[string]any{"run_id": runID}); err != nil {
+	if err := callControlOK(ctx, client, opts.runMethod, controlRunParams(runID, idempotencyKey)); err != nil {
 		fmt.Fprintln(errOut, err)
 		return commandExitError{code: controlCommandErrorExitCode(err)}
 	}
@@ -143,6 +156,17 @@ func validateControlRunTarget(args []string, all bool) (string, error) {
 		return "", fmt.Errorf("run id is required")
 	}
 	return runID, nil
+}
+
+func controlRunParams(runID, idempotencyKey string) map[string]any {
+	params := map[string]any{}
+	if runID != "" {
+		params["run_id"] = runID
+	}
+	if idempotencyKey != "" {
+		params["idempotency_key"] = idempotencyKey
+	}
+	return params
 }
 
 func callControlOK(ctx context.Context, client *cliAPIClient, method string, params map[string]any) error {
