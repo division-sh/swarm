@@ -419,3 +419,79 @@ func TestRunDebugTracePageCursorAndRunNotFound(t *testing.T) {
 		t.Fatalf("missing run error = %v, want ErrRunNotFound", err)
 	}
 }
+
+func TestRunDebugTracePageTypedFilters(t *testing.T) {
+	ctx := context.Background()
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+
+	runID := uuid.NewString()
+	entityOne := uuid.NewString()
+	entityTwo := uuid.NewString()
+	firstEvent := uuid.NewString()
+	secondEvent := uuid.NewString()
+	firstDelivery := uuid.NewString()
+	secondDelivery := uuid.NewString()
+	base := time.Unix(1700000400, 0).UTC()
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, runID, base); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (event_id, run_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at)
+		VALUES
+			($1::uuid, $2::uuid, 'first.event', $3::uuid, 'entity', '{}'::jsonb, 'runtime', 'platform', $4),
+			($5::uuid, $2::uuid, 'second.event', $6::uuid, 'entity', '{}'::jsonb, 'runtime', 'platform', $7)
+	`, firstEvent, runID, entityOne, base, secondEvent, entityTwo, base.Add(time.Second)); err != nil {
+		t.Fatalf("seed trace events: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, reason_code, created_at)
+		VALUES
+			($1::uuid, $2::uuid, $3::uuid, 'node', 'node-1', 'pending', '', $4),
+			($5::uuid, $2::uuid, $6::uuid, 'agent', 'agent-2', 'dead_letter', 'handler_error', $7)
+	`, firstDelivery, runID, firstEvent, base, secondDelivery, secondEvent, base.Add(time.Second)); err != nil {
+		t.Fatalf("seed trace deliveries: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name string
+		opts RunDebugTraceQueryOptions
+		want string
+	}{
+		{
+			name: "event name multi-value",
+			opts: RunDebugTraceQueryOptions{Limit: 10, Filter: RunDebugTraceFilter{EventNames: []string{"missing.event", "second.event"}}},
+			want: secondEvent,
+		},
+		{
+			name: "entity id",
+			opts: RunDebugTraceQueryOptions{Limit: 10, Filter: RunDebugTraceFilter{EntityIDs: []string{entityOne}}},
+			want: firstEvent,
+		},
+		{
+			name: "delivery status",
+			opts: RunDebugTraceQueryOptions{Limit: 10, Filter: RunDebugTraceFilter{DeliveryStatuses: []string{"dead_letter"}}},
+			want: secondEvent,
+		},
+		{
+			name: "subscriber identity",
+			opts: RunDebugTraceQueryOptions{Limit: 10, Filter: RunDebugTraceFilter{SubscriberIDs: []string{"agent-2"}, SubscriberTypes: []string{"agent"}}},
+			want: secondEvent,
+		},
+		{
+			name: "and composition",
+			opts: RunDebugTraceQueryOptions{Limit: 10, Filter: RunDebugTraceFilter{EventNames: []string{"first.event", "second.event"}, EntityIDs: []string{entityTwo}, DeliveryStatuses: []string{"dead_letter"}, SubscriberIDs: []string{"agent-2"}, SubscriberTypes: []string{"agent"}}},
+			want: secondEvent,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rows, _, err := pg.LoadRunDebugTracePage(ctx, runID, tc.opts)
+			if err != nil {
+				t.Fatalf("LoadRunDebugTracePage: %v", err)
+			}
+			if len(rows) != 1 || rows[0].EventID != tc.want {
+				t.Fatalf("trace rows = %#v, want only %s", rows, tc.want)
+			}
+		})
+	}
+}

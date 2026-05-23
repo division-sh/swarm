@@ -30,15 +30,20 @@ type diagnosticRunListOptions struct {
 }
 
 type diagnosticTraceOptions struct {
-	apiOptions rootCommandOptions
-	follow     bool
-	noRetry    bool
-	since      string
-	limit      int
-	cursor     string
-	sinceSet   bool
-	limitSet   bool
-	cursorSet  bool
+	apiOptions       rootCommandOptions
+	follow           bool
+	noRetry          bool
+	since            string
+	limit            int
+	cursor           string
+	eventNames       []string
+	entityIDs        []string
+	deliveryStatuses []string
+	subscriberIDs    []string
+	subscriberTypes  []string
+	sinceSet         bool
+	limitSet         bool
+	cursorSet        bool
 }
 
 type diagnosticRunOptions struct {
@@ -228,6 +233,11 @@ func newTraceCommand(opts rootCommandOptions) *cobra.Command {
 	cmd.Flags().StringVar(&traceOpts.since, "since", "", "Snapshot-only RFC3339 trace materialization watermark")
 	cmd.Flags().IntVar(&traceOpts.limit, "limit", 0, "Snapshot-only page size, 1-2000")
 	cmd.Flags().StringVar(&traceOpts.cursor, "cursor", "", "Snapshot-only pagination cursor")
+	cmd.Flags().StringArrayVar(&traceOpts.eventNames, "event-name", nil, "Snapshot-only event name filter; repeat to match any")
+	cmd.Flags().StringArrayVar(&traceOpts.entityIDs, "entity-id", nil, "Snapshot-only entity id filter; repeat to match any")
+	cmd.Flags().StringArrayVar(&traceOpts.deliveryStatuses, "delivery-status", nil, "Snapshot-only delivery status filter; repeat to match any")
+	cmd.Flags().StringArrayVar(&traceOpts.subscriberIDs, "subscriber-id", nil, "Snapshot-only subscriber id filter; repeat to match any")
+	cmd.Flags().StringArrayVar(&traceOpts.subscriberTypes, "subscriber-type", nil, "Snapshot-only subscriber type filter: node or agent; repeat to match any")
 	bindCLIAPIConnectionFlags(cmd, &traceOpts.apiOptions)
 	return cmd
 }
@@ -457,6 +467,11 @@ func (o diagnosticTraceOptions) snapshotParams() (map[string]any, error) {
 			{name: "--since", set: o.sinceSet},
 			{name: "--limit", set: o.limitSet},
 			{name: "--cursor", set: o.cursorSet},
+			{name: "--event-name", set: len(o.eventNames) > 0},
+			{name: "--entity-id", set: len(o.entityIDs) > 0},
+			{name: "--delivery-status", set: len(o.deliveryStatuses) > 0},
+			{name: "--subscriber-id", set: len(o.subscriberIDs) > 0},
+			{name: "--subscriber-type", set: len(o.subscriberTypes) > 0},
 		} {
 			if flag.set {
 				return nil, fmt.Errorf("%s is not supported with --follow", flag.name)
@@ -488,7 +503,104 @@ func (o diagnosticTraceOptions) snapshotParams() (map[string]any, error) {
 		}
 		params["since"] = since
 	}
+	filter, err := o.snapshotFilter()
+	if err != nil {
+		return nil, err
+	}
+	if len(filter) > 0 {
+		params["filter"] = filter
+	}
 	return params, nil
+}
+
+func (o diagnosticTraceOptions) snapshotFilter() (map[string]any, error) {
+	filter := map[string]any{}
+	addStringList := func(name, flag string, values []string) error {
+		values, err := snapshotTraceStringList(flag, values)
+		if err != nil {
+			return err
+		}
+		if len(values) > 0 {
+			filter[name] = values
+		}
+		return nil
+	}
+	if err := addStringList("event_name", "--event-name", o.eventNames); err != nil {
+		return nil, err
+	}
+	entityIDs, err := snapshotTraceStringList("--entity-id", o.entityIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, entityID := range entityIDs {
+		if err := validateEntityOpaqueIDArg("--entity-id", entityID); err != nil {
+			return nil, err
+		}
+	}
+	if len(entityIDs) > 0 {
+		filter["entity_id"] = entityIDs
+	}
+	deliveryStatuses, err := snapshotTraceEnumList("--delivery-status", o.deliveryStatuses, eventObservationValidDeliveryStatuses, "pending, in_progress, delivered, failed, dead_letter")
+	if err != nil {
+		return nil, err
+	}
+	if len(deliveryStatuses) > 0 {
+		filter["delivery_status"] = deliveryStatuses
+	}
+	if err := addStringList("subscriber_id", "--subscriber-id", o.subscriberIDs); err != nil {
+		return nil, err
+	}
+	subscriberTypes, err := snapshotTraceEnumList("--subscriber-type", o.subscriberTypes, eventObservationValidSubscriberTypes, "node, agent")
+	if err != nil {
+		return nil, err
+	}
+	if len(subscriberTypes) > 0 {
+		filter["subscriber_type"] = subscriberTypes
+	}
+	return filter, nil
+}
+
+func snapshotTraceStringList(flag string, values []string) ([]string, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	out := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return nil, fmt.Errorf("%s must not be empty", flag)
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out, nil
+}
+
+func snapshotTraceEnumList(flag string, values []string, valid map[string]struct{}, allowed string) ([]string, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	out := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		normalized := strings.ToLower(strings.TrimSpace(value))
+		if normalized == "" {
+			return nil, fmt.Errorf("%s must not be empty", flag)
+		}
+		if _, ok := valid[normalized]; !ok {
+			return nil, fmt.Errorf("%s must be one of %s", flag, allowed)
+		}
+		if _, ok := seen[normalized]; ok {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		out = append(out, normalized)
+	}
+	return out, nil
 }
 
 func followDiagnosticTraceCommand(ctx context.Context, out, errOut io.Writer, client *cliAPIClient, runID string, opts diagnosticTraceOptions) error {

@@ -131,6 +131,15 @@ type RunDebugTraceQueryOptions struct {
 	Limit  int
 	Cursor string
 	Since  *time.Time
+	Filter RunDebugTraceFilter
+}
+
+type RunDebugTraceFilter struct {
+	EventNames       []string
+	EntityIDs        []string
+	DeliveryStatuses []string
+	SubscriberIDs    []string
+	SubscriberTypes  []string
 }
 
 type RunDebugTraceRow struct {
@@ -193,7 +202,32 @@ func defaultRunDebugTraceQueryOptions(opts RunDebugTraceQueryOptions) RunDebugTr
 	if opts.Limit > 2000 {
 		opts.Limit = 2000
 	}
+	opts.Filter.EventNames = normalizedUniqueStrings(opts.Filter.EventNames)
+	opts.Filter.EntityIDs = normalizedUniqueStrings(opts.Filter.EntityIDs)
+	opts.Filter.DeliveryStatuses = normalizedUniqueStrings(opts.Filter.DeliveryStatuses)
+	opts.Filter.SubscriberIDs = normalizedUniqueStrings(opts.Filter.SubscriberIDs)
+	opts.Filter.SubscriberTypes = normalizedUniqueStrings(opts.Filter.SubscriberTypes)
 	return opts
+}
+
+func normalizedUniqueStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 func RequireCanonicalRunDebugCapabilities(caps StoreSchemaCapabilities, catalog schemaColumnCatalog) error {
@@ -654,15 +688,29 @@ func (s *PostgresStore) LoadRunDebugTracePage(ctx context.Context, runID string,
 	if opts.Since != nil {
 		args = append(args, opts.Since.UTC())
 		sinceWhere = fmt.Sprintf(`
-		  AND GREATEST(
-			e.created_at,
+			  AND GREATEST(
+				e.created_at,
 			COALESCE(d.created_at, '-infinity'::timestamptz),
 			COALESCE(d.started_at, '-infinity'::timestamptz),
 			COALESCE(d.delivered_at, '-infinity'::timestamptz),
 			COALESCE(sess.updated_at, '-infinity'::timestamptz),
-			COALESCE(t.created_at, '-infinity'::timestamptz)
-		  ) > $%d::timestamptz`, len(args))
+				COALESCE(t.created_at, '-infinity'::timestamptz)
+			  ) > $%d::timestamptz`, len(args))
 	}
+	filterWhere := ""
+	addTextArrayFilter := func(values []string, expression string) {
+		if len(values) == 0 {
+			return
+		}
+		args = append(args, pq.Array(values))
+		filterWhere += fmt.Sprintf(`
+			  AND %s = ANY($%d::text[])`, expression, len(args))
+	}
+	addTextArrayFilter(opts.Filter.EventNames, "e.event_name")
+	addTextArrayFilter(opts.Filter.EntityIDs, "e.entity_id::text")
+	addTextArrayFilter(opts.Filter.DeliveryStatuses, "d.status")
+	addTextArrayFilter(opts.Filter.SubscriberIDs, "d.subscriber_id")
+	addTextArrayFilter(opts.Filter.SubscriberTypes, "d.subscriber_type")
 	args = append(args, opts.Limit+1)
 	limitArg := len(args)
 	rows, err := s.DB.QueryContext(ctx, fmt.Sprintf(`
@@ -722,18 +770,19 @@ func (s *PostgresStore) LoadRunDebugTracePage(ctx context.Context, runID string,
 				sess.run_id = e.run_id
 				OR sess.run_id IS NULL
 		   )
-		WHERE e.run_id = $1::uuid
-		%s
-		%s
-		ORDER BY
-			e.created_at ASC,
-			e.event_id ASC,
+			WHERE e.run_id = $1::uuid
+			%s
+			%s
+			%s
+			ORDER BY
+				e.created_at ASC,
+				e.event_id ASC,
 			d.created_at ASC NULLS FIRST,
 			d.delivery_id ASC NULLS FIRST,
 			t.created_at ASC NULLS FIRST,
 			t.turn_id ASC NULLS FIRST
 		LIMIT $%d
-	`, sessionSources, cursorWhere, sinceWhere, limitArg), args...)
+		`, sessionSources, cursorWhere, sinceWhere, filterWhere, limitArg), args...)
 	if err != nil {
 		return nil, "", fmt.Errorf("load run debug trace: %w", err)
 	}
