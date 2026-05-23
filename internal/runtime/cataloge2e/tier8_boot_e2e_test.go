@@ -34,6 +34,8 @@ var tier8SupportedFixtures = []string{
 	"test-boot-advances-to-list",
 	"test-boot-bare-condition",
 	"test-boot-cel-parse-error",
+	"test-boot-condition-payload-empty-schema-mismatch",
+	"test-boot-condition-payload-empty-schema-rule-list-mismatch",
 	"test-boot-condition-payload-mismatch",
 	"test-boot-condition-policy",
 	"test-boot-create-entity-plus-accumulate",

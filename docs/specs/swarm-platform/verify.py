@@ -287,6 +287,18 @@ def get_all_handler_conditions(h):
         conds.extend(b.get('condition', '') for b in items if isinstance(b, dict))
     return [c for c in conds if c]
 
+def iter_rule_entries(rules):
+    """Yield (rule_name, rule) for supported rule encodings."""
+    if isinstance(rules, dict):
+        for rule_name, rule in rules.items():
+            if isinstance(rule, dict):
+                yield rule_name, rule
+    elif isinstance(rules, list):
+        for idx, rule in enumerate(rules):
+            if isinstance(rule, dict):
+                rule_name = rule.get('id') or str(idx)
+                yield rule_name, rule
+
 # ============================================================
 # Collect global emitter/subscriber sets
 # ============================================================
@@ -409,20 +421,17 @@ for flow, nodes in iter_flows_with_nodes():
         if not isinstance(node, dict): continue
         for ev, h in node.get('event_handlers', {}).items():
             if not isinstance(h, dict): continue
-            event_payload = all_events.get(ev, {})
+            if ev not in all_events: continue
+            event_payload = all_events[ev]
             payload_fields = event_payload_fields(event_payload)
-            if not payload_fields: continue
             loc = "%s/%s/%s" % (flow, nid, ev)
 
-            rules = h.get('rules', {})
-            if isinstance(rules, dict):
-                for rule_name, rule in rules.items():
-                    if not isinstance(rule, dict): continue
-                    cond = rule.get('condition', '')
-                    if cond == 'else': continue
-                    for ref in extract_payload_refs(cond):
-                        if not payload_field_exists(payload_fields, ref):
-                            error("condition_payload_alignment", "rule '%s': payload.%s not in event payload" % (rule_name, ref), loc)
+            for rule_name, rule in iter_rule_entries(h.get('rules', {})):
+                cond = rule.get('condition', '')
+                if cond == 'else': continue
+                for ref in extract_payload_refs(cond):
+                    if not payload_field_exists(payload_fields, ref):
+                        error("condition_payload_alignment", "rule '%s': payload.%s not in event payload" % (rule_name, ref), loc)
 
             guard = h.get('guard', {})
             if isinstance(guard, dict):
