@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -388,6 +389,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisUsesSelectedOwners(t *testing
 	turnCompletedAt := time.Date(2026, 5, 12, 9, 5, 0, 0, time.UTC)
 	eventTime := time.Date(2026, 5, 12, 8, 55, 0, 0, time.UTC)
 	runtimeState := []byte(`{"provider_session_id":"provider-sess-1","watchdog":{"state":"healthy_long_running","blocking_layer":"session_execution","action":"turn_long_running","outcome":"observed","last_output_at":"2026-05-12T09:04:00Z","recorded_at":"2026-05-12T09:05:00Z"}}`)
+	turnBlocks := []byte(`[{"kind":"turn_summary","data":{"assistant_visible_output":"working","tool_results":[{"tool_name":"older_tool","tool_use_id":"toolu-old","output":{"status":"old"}},{"tool_name":"selected_tool","tool_use_id":"toolu-selected","output":{"status":"selected"}}]}}]`)
 	agent := testOperatorAgent("agent-1")
 	agent.Config.EntityID = configuredEntityID
 	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
@@ -417,7 +419,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisUsesSelectedOwners(t *testing
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
-			AddRow("agent-1", "active", sessionID, sessionStartedAt, 2, "", nil, runtimeState, 0, 0, 0, 0, turnID, "task-1", turnEntityID, true, "", turnCompletedAt, []byte(`[]`)))
+			AddRow("agent-1", "active", sessionID, sessionStartedAt, 2, "", nil, runtimeState, 0, 0, 0, 0, turnID, "task-1", turnEntityID, true, "", turnCompletedAt, turnBlocks))
 
 	diagnosis, err := reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1", OperatorAgentDiagnosisOptions{QueueLimit: 1, QueueCursor: "cursor-1"})
 	if err != nil {
@@ -460,6 +462,20 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisUsesSelectedOwners(t *testing
 	if watchdog.LastOutputAt != "2026-05-12T09:04:00Z" || watchdog.RecordedAt != "2026-05-12T09:05:00Z" {
 		t.Fatalf("runtime_state.watchdog timestamps = %#v", watchdog)
 	}
+	if diagnosis.LastToolOutcome == nil {
+		t.Fatalf("last_tool_outcome = nil, want selected latest tool")
+	}
+	lastTool := diagnosis.LastToolOutcome
+	if lastTool.TurnID != turnID || lastTool.ToolName != "selected_tool" || lastTool.ToolUseID != "toolu-selected" || !lastTool.OK {
+		t.Fatalf("last_tool_outcome = %#v", lastTool)
+	}
+	var lastToolResult map[string]any
+	if err := json.Unmarshal(lastTool.Result, &lastToolResult); err != nil {
+		t.Fatalf("decode last_tool_outcome.result: %v", err)
+	}
+	if lastToolResult["status"] != "selected" {
+		t.Fatalf("last_tool_outcome.result = %#v", lastToolResult)
+	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations: %v", err)
 	}
@@ -501,8 +517,99 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisOmitsAbsentLifecycle(t *testi
 	if diagnosis.Active != nil {
 		t.Fatalf("active = %#v, want nil without selected active-session latest turn", diagnosis.Active)
 	}
+	if diagnosis.LastToolOutcome != nil {
+		t.Fatalf("last_tool_outcome = %#v, want nil without selected active-session latest turn", diagnosis.LastToolOutcome)
+	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations: %v", err)
+	}
+}
+
+func TestOperatorAgentReadSurfaceLoadAgentDiagnosisLastToolOutcomeUsesParseOK(t *testing.T) {
+	turnID := "22222222-2222-2222-2222-222222222222"
+	diagnosis, err := loadAgentDiagnosisWithLatestTurn(t, turnID, "task-1", "", false, []byte(`[{"kind":"turn_summary","data":{"tool_results":[{"tool_name":"read_file","tool_use_id":"toolu-1","output":{"ok":true}}]}}]`))
+	if err != nil {
+		t.Fatalf("LoadOperatorAgentDiagnosis: %v", err)
+	}
+	if diagnosis.LastToolOutcome == nil {
+		t.Fatalf("last_tool_outcome = nil")
+	}
+	if diagnosis.LastToolOutcome.TurnID != turnID || diagnosis.LastToolOutcome.ToolName != "read_file" || diagnosis.LastToolOutcome.OK {
+		t.Fatalf("last_tool_outcome = %#v, want parse_ok=false reflected as ok=false", diagnosis.LastToolOutcome)
+	}
+}
+
+func TestOperatorAgentReadSurfaceLoadAgentDiagnosisOmitsLastToolOutcomeWithoutToolResult(t *testing.T) {
+	turnID := "22222222-2222-2222-2222-222222222222"
+	for _, tc := range []struct {
+		name       string
+		turnBlocks []byte
+	}{
+		{name: "no summary", turnBlocks: []byte(`[]`)},
+		{name: "summary without tool results", turnBlocks: []byte(`[{"kind":"turn_summary","data":{"assistant_visible_output":"done"}}]`)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			diagnosis, err := loadAgentDiagnosisWithLatestTurn(t, turnID, "task-1", "", true, tc.turnBlocks)
+			if err != nil {
+				t.Fatalf("LoadOperatorAgentDiagnosis: %v", err)
+			}
+			if diagnosis.Active == nil || diagnosis.Active.TurnID != turnID {
+				t.Fatalf("active = %#v, want selected turn", diagnosis.Active)
+			}
+			if diagnosis.LastToolOutcome != nil {
+				t.Fatalf("last_tool_outcome = %#v, want nil", diagnosis.LastToolOutcome)
+			}
+		})
+	}
+}
+
+func TestOperatorAgentReadSurfaceLoadAgentDiagnosisFailsClosedOnMalformedLastToolOutcome(t *testing.T) {
+	turnID := "22222222-2222-2222-2222-222222222222"
+	for _, tc := range []struct {
+		name       string
+		turnBlocks []byte
+		want       string
+	}{
+		{
+			name:       "missing tool name",
+			turnBlocks: []byte(`[{"kind":"turn_summary","data":{"tool_results":[{"tool_use_id":"toolu-1","output":{"status":"ok"}}]}}]`),
+			want:       "latest canonical tool_result is missing tool_name",
+		},
+		{
+			name:       "non object result",
+			turnBlocks: []byte(`[{"kind":"turn_summary","data":{"tool_results":[{"tool_name":"read_file","tool_use_id":"toolu-1","output":"ok"}]}}]`),
+			want:       "last_tool_outcome.result must be a JSON object",
+		},
+		{
+			name:       "null result",
+			turnBlocks: []byte(`[{"kind":"turn_summary","data":{"tool_results":[{"tool_name":"read_file","tool_use_id":"toolu-1","output":null}]}}]`),
+			want:       "last_tool_outcome.result must be a JSON object",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := loadAgentDiagnosisWithLatestTurn(t, turnID, "task-1", "", true, tc.turnBlocks)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("LoadOperatorAgentDiagnosis err = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestOperatorAgentDiagnosisValidationFailsClosedOnLastToolOutcomeWithoutActive(t *testing.T) {
+	err := validateOperatorAgentDiagnosis(OperatorAgentDiagnosis{
+		AgentID: "agent-1",
+		Status:  "running",
+		Queue: OperatorAgentDiagnosisQueue{
+			PendingDeliveries: []OperatorAgentPendingDelivery{},
+		},
+		LastToolOutcome: &OperatorAgentLastToolOutcome{
+			TurnID:   "turn-1",
+			ToolName: "read_file",
+			OK:       true,
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "last_tool_outcome requires active") {
+		t.Fatalf("validateOperatorAgentDiagnosis err = %v, want last_tool_outcome active requirement", err)
 	}
 }
 
@@ -564,6 +671,9 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisOmitsActiveWithoutLatestTurn(
 	}
 	if diagnosis.Active != nil {
 		t.Fatalf("active = %#v, want nil for active session without latest turn", diagnosis.Active)
+	}
+	if diagnosis.LastToolOutcome != nil {
+		t.Fatalf("last_tool_outcome = %#v, want nil for active session without latest turn", diagnosis.LastToolOutcome)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations: %v", err)
@@ -702,6 +812,35 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisFailsClosedWithoutCanonicalTu
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations: %v", err)
 	}
+}
+
+func loadAgentDiagnosisWithLatestTurn(t *testing.T, turnID, taskID, entityID string, parseOK bool, turnBlocks []byte) (OperatorAgentDiagnosis, error) {
+	t.Helper()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
+		caps:   canonicalAgentConversationReadCaps(),
+		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
+	}, 0)
+
+	var turnCompletedAt any
+	if strings.TrimSpace(turnID) != "" {
+		turnCompletedAt = time.Date(2026, 5, 12, 9, 5, 0, 0, time.UTC)
+	}
+	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
+		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
+		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
+			AddRow("agent-1", "active", "11111111-1111-1111-1111-111111111111", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 1, "", nil, []byte(`{}`), 0, 0, 0, 0, turnID, taskID, entityID, parseOK, "", turnCompletedAt, turnBlocks))
+
+	diagnosis, err := reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1", OperatorAgentDiagnosisOptions{})
+	if expectationsErr := mock.ExpectationsWereMet(); expectationsErr != nil {
+		t.Fatalf("expectations: %v", expectationsErr)
+	}
+	return diagnosis, err
 }
 
 func TestOperatorConversationReadSurfaceCurrentForAgentUsesMostRecentActiveSessionOnly(t *testing.T) {

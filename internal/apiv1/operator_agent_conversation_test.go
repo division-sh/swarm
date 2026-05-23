@@ -131,6 +131,13 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 				TaskID:   "task-1",
 				EntityID: "33333333-3333-3333-3333-333333333333",
 			},
+			LastToolOutcome: &store.OperatorAgentLastToolOutcome{
+				TurnID:    "22222222-2222-2222-2222-222222222222",
+				ToolName:  "selected_tool",
+				ToolUseID: "toolu-selected",
+				OK:        true,
+				Result:    []byte(`{"status":"selected"}`),
+			},
 			RuntimeState: &store.OperatorAgentDiagnosisRuntimeState{
 				Watchdog: &store.OperatorAgentDiagnosisWatchdog{
 					State:         "no_output",
@@ -260,7 +267,15 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 	if watchdog["recorded_at"] != "2026-05-21T10:01:00Z" {
 		t.Fatalf("agent.diagnose runtime_state.watchdog.recorded_at = %#v", watchdog["recorded_at"])
 	}
-	for _, splitField := range []string{"bundle_version", "watchdog", "last_tool_outcome", "token_usage", "failures_recent", "dead_letters_recent"} {
+	lastTool := asMap(t, diagnosis["last_tool_outcome"])
+	if lastTool["turn_id"] != "22222222-2222-2222-2222-222222222222" || lastTool["tool_name"] != "selected_tool" || lastTool["tool_use_id"] != "toolu-selected" || lastTool["ok"] != true {
+		t.Fatalf("agent.diagnose last_tool_outcome = %#v", lastTool)
+	}
+	lastToolResult := asMap(t, lastTool["result"])
+	if lastToolResult["status"] != "selected" {
+		t.Fatalf("agent.diagnose last_tool_outcome.result = %#v", lastToolResult)
+	}
+	for _, splitField := range []string{"bundle_version", "watchdog", "token_usage", "failures_recent", "dead_letters_recent"} {
 		if _, ok := diagnosis[splitField]; ok {
 			t.Fatalf("agent.diagnose exposed split field %q: %#v", splitField, diagnosis)
 		}
@@ -697,6 +712,79 @@ func TestOperatorAgentDiagnoseFailsClosedOnMalformedActiveOwnerData(t *testing.T
 	errorText := fmt.Sprint(resp.Error.Message, resp.Error.Data)
 	if !strings.Contains(errorText, "agent.diagnose owner returned malformed result") || !strings.Contains(errorText, "active.turn_id") {
 		t.Fatalf("error = %#v, want malformed active owner result", resp.Error)
+	}
+}
+
+func TestOperatorAgentDiagnoseFailsClosedOnMalformedLastToolOutcomeOwnerData(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		active *store.OperatorAgentDiagnosisActive
+		item   *store.OperatorAgentLastToolOutcome
+		want   string
+	}{
+		{
+			name: "missing turn id",
+			item: &store.OperatorAgentLastToolOutcome{ToolName: "read_file", OK: true},
+			want: "last_tool_outcome.turn_id",
+		},
+		{
+			name: "missing tool name",
+			item: &store.OperatorAgentLastToolOutcome{TurnID: "turn-1", OK: true},
+			want: "last_tool_outcome.tool_name",
+		},
+		{
+			name: "non object result",
+			item: &store.OperatorAgentLastToolOutcome{TurnID: "turn-1", ToolName: "read_file", OK: true, Result: []byte(`"ok"`)},
+			want: "last_tool_outcome.result must be a JSON object",
+		},
+		{
+			name: "null result",
+			item: &store.OperatorAgentLastToolOutcome{TurnID: "turn-1", ToolName: "read_file", OK: true, Result: []byte(`null`)},
+			want: "last_tool_outcome.result must be a JSON object",
+		},
+		{
+			name: "without active selected turn",
+			item: &store.OperatorAgentLastToolOutcome{TurnID: "turn-1", ToolName: "read_file", OK: true},
+			want: "last_tool_outcome requires active",
+		},
+		{
+			name:   "turn id does not match active turn id",
+			active: &store.OperatorAgentDiagnosisActive{TurnID: "turn-2"},
+			item:   &store.OperatorAgentLastToolOutcome{TurnID: "turn-1", ToolName: "read_file", OK: true},
+			want:   "last_tool_outcome.turn_id",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reads := &fakeAgentConversationReadStore{
+				agentDiagnosisResult: store.OperatorAgentDiagnosis{
+					AgentID: "agent-1",
+					Status:  "running",
+					Queue: store.OperatorAgentDiagnosisQueue{
+						PendingDeliveries: []store.OperatorAgentPendingDelivery{},
+					},
+					Active:          tc.active,
+					LastToolOutcome: tc.item,
+				},
+			}
+			handler := testHandler(t, Options{
+				AuthTokens: []string{testToken},
+				Handlers: OperatorReadHandlers(OperatorReadOptions{
+					AgentConversations: reads,
+				}),
+			})
+
+			resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"diagnose","method":"agent.diagnose","params":{"agent_id":"agent-1"}}`)
+			if resp.Error == nil {
+				t.Fatal("agent.diagnose returned success for malformed last_tool_outcome owner result")
+			}
+			if resp.Error.Code != codeInternalError {
+				t.Fatalf("error code = %d, want %d", resp.Error.Code, codeInternalError)
+			}
+			errorText := fmt.Sprint(resp.Error.Message, resp.Error.Data)
+			if !strings.Contains(errorText, "agent.diagnose owner returned malformed result") || !strings.Contains(errorText, tc.want) {
+				t.Fatalf("error = %#v, want malformed last_tool_outcome owner result containing %q", resp.Error, tc.want)
+			}
+		})
 	}
 }
 

@@ -19,8 +19,8 @@ func TestPlatformAPISpecValidationCoverage(t *testing.T) {
 	if report.MethodCount != 43 {
 		t.Fatalf("method count = %d, want 43", report.MethodCount)
 	}
-	if report.SchemaCount != 70 {
-		t.Fatalf("schema count = %d, want 70", report.SchemaCount)
+	if report.SchemaCount != 71 {
+		t.Fatalf("schema count = %d, want 71", report.SchemaCount)
 	}
 	if report.ErrorCodeCount != 28 {
 		t.Fatalf("error code count = %d, want 28", report.ErrorCodeCount)
@@ -69,8 +69,8 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	if len(doc.Methods) != 43 {
 		t.Fatalf("generated OpenRPC methods = %d, want 43", len(doc.Methods))
 	}
-	if len(doc.Components.Schemas) != 70 {
-		t.Fatalf("generated OpenRPC schemas = %d, want 70", len(doc.Components.Schemas))
+	if len(doc.Components.Schemas) != 71 {
+		t.Fatalf("generated OpenRPC schemas = %d, want 71", len(doc.Components.Schemas))
 	}
 	if len(doc.Components.Errors) != 28 {
 		t.Fatalf("generated OpenRPC errors = %d, want 28", len(doc.Components.Errors))
@@ -105,6 +105,9 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	if _, ok := doc.Components.Schemas["AgentDiagnosisActive"]; !ok {
 		t.Fatal("generated OpenRPC missing AgentDiagnosisActive")
 	}
+	if _, ok := doc.Components.Schemas["AgentDiagnosisLastToolOutcome"]; !ok {
+		t.Fatal("generated OpenRPC missing AgentDiagnosisLastToolOutcome")
+	}
 	for _, schemaName := range []string{"MailboxDecisionSheet", "MailboxEntityContext", "MailboxDownstreamPreview"} {
 		if _, ok := doc.Components.Schemas[schemaName]; !ok {
 			t.Fatalf("generated OpenRPC missing %s", schemaName)
@@ -131,6 +134,13 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	}
 	if got, want := activeSchema["$ref"], "#/components/schemas/AgentDiagnosisActive"; got != want {
 		t.Fatalf("generated AgentDiagnosis.active ref = %#v, want %q", got, want)
+	}
+	lastToolOutcomeSchema, ok := agentDiagnosisProperties["last_tool_outcome"].(map[string]any)
+	if !ok {
+		t.Fatalf("generated AgentDiagnosis.last_tool_outcome = %#v, want object", agentDiagnosisProperties["last_tool_outcome"])
+	}
+	if got, want := lastToolOutcomeSchema["$ref"], "#/components/schemas/AgentDiagnosisLastToolOutcome"; got != want {
+		t.Fatalf("generated AgentDiagnosis.last_tool_outcome ref = %#v, want %q", got, want)
 	}
 	if _, ok := methods["runtime.subscribe_logs"]; !ok {
 		t.Fatal("generated OpenRPC missing runtime.subscribe_logs")
