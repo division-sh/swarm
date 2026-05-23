@@ -637,7 +637,11 @@ func OperatorObservabilityHandlers(opts OperatorReadOptions) map[string]MethodHa
 			if err != nil {
 				return nil, err
 			}
-			rows, nextCursor, err := reads.LoadRunDebugTracePage(ctx, runID, store.RunDebugTraceQueryOptions{Limit: limit, Cursor: cursor, Since: since})
+			filter, err := runTraceFilterParam(req.Params)
+			if err != nil {
+				return nil, err
+			}
+			rows, nextCursor, err := reads.LoadRunDebugTracePage(ctx, runID, store.RunDebugTraceQueryOptions{Limit: limit, Cursor: cursor, Since: since, Filter: filter})
 			if errors.Is(err, store.ErrRunNotFound) {
 				return nil, NewApplicationError(RunNotFoundCode, false, map[string]any{"run_id": runID})
 			}
@@ -901,6 +905,66 @@ func eventListFilterParam(params map[string]any) (store.OperatorEventListFilter,
 	return out, nil
 }
 
+func runTraceFilterParam(params map[string]any) (store.RunDebugTraceFilter, error) {
+	raw, ok := params["filter"]
+	if !ok || isEmptyParam(raw) {
+		return store.RunDebugTraceFilter{}, nil
+	}
+	filter, ok := raw.(map[string]any)
+	if !ok {
+		return store.RunDebugTraceFilter{}, NewInvalidParamsError(map[string]any{"field": "filter", "reason": "must be an object"})
+	}
+	for name := range filter {
+		if _, ok := runTraceFilterFields[name]; !ok {
+			return store.RunDebugTraceFilter{}, NewInvalidParamsError(map[string]any{"field": "filter." + name, "reason": "unknown parameter"})
+		}
+	}
+	out := store.RunDebugTraceFilter{}
+	var err error
+	if out.EventNames, err = requiredRunTraceStringListFilter(filter, "event_name"); err != nil {
+		return store.RunDebugTraceFilter{}, err
+	}
+	if out.EntityIDs, err = requiredRunTraceStringListFilter(filter, "entity_id"); err != nil {
+		return store.RunDebugTraceFilter{}, err
+	}
+	for _, entityID := range out.EntityIDs {
+		if !opaqueIDPattern.MatchString(entityID) {
+			return store.RunDebugTraceFilter{}, NewInvalidParamsError(map[string]any{"field": "filter.entity_id", "reason": "must contain only OpaqueId values"})
+		}
+	}
+	if out.DeliveryStatuses, err = requiredRunTraceStringListFilter(filter, "delivery_status"); err != nil {
+		return store.RunDebugTraceFilter{}, err
+	}
+	for _, status := range out.DeliveryStatuses {
+		if _, ok := eventListDeliveryStatuses[status]; !ok {
+			return store.RunDebugTraceFilter{}, NewInvalidParamsError(map[string]any{"field": "filter.delivery_status", "reason": "must contain only valid DeliveryStatus values"})
+		}
+	}
+	if out.SubscriberIDs, err = requiredRunTraceStringListFilter(filter, "subscriber_id"); err != nil {
+		return store.RunDebugTraceFilter{}, err
+	}
+	if out.SubscriberTypes, err = requiredRunTraceStringListFilter(filter, "subscriber_type"); err != nil {
+		return store.RunDebugTraceFilter{}, err
+	}
+	for _, subscriberType := range out.SubscriberTypes {
+		if _, ok := eventListSubscriberTypes[subscriberType]; !ok {
+			return store.RunDebugTraceFilter{}, NewInvalidParamsError(map[string]any{"field": "filter.subscriber_type", "reason": "must contain only valid SubscriberType values"})
+		}
+	}
+	return out, nil
+}
+
+func requiredRunTraceStringListFilter(filter map[string]any, name string) ([]string, error) {
+	values, present, err := optionalStringListParam(filter, name)
+	if err != nil {
+		return nil, NewInvalidParamsError(map[string]any{"field": "filter." + name, "reason": "must be a non-empty array of strings"})
+	}
+	if present && len(values) == 0 {
+		return nil, NewInvalidParamsError(map[string]any{"field": "filter." + name, "reason": "must be a non-empty array of strings"})
+	}
+	return values, nil
+}
+
 var eventListFilterFields = map[string]struct{}{
 	"run_id":          {},
 	"entity_id":       {},
@@ -910,6 +974,14 @@ var eventListFilterFields = map[string]struct{}{
 	"subscriber_type": {},
 	"reason_code":     {},
 	"has_dead_letter": {},
+}
+
+var runTraceFilterFields = map[string]struct{}{
+	"event_name":      {},
+	"entity_id":       {},
+	"delivery_status": {},
+	"subscriber_id":   {},
+	"subscriber_type": {},
 }
 
 var eventListDeliveryStatuses = map[string]struct{}{

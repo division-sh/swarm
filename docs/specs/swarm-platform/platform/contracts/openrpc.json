@@ -4643,6 +4643,14 @@
           "schema": {
             "$ref": "#/components/schemas/Timestamp"
           }
+        },
+        {
+          "name": "filter",
+          "required": false,
+          "description": "Snapshot-only typed predicates over canonical RunTraceRow facts. Present fields are OR-lists within the field and AND-composed across fields.",
+          "schema": {
+            "$ref": "#/components/schemas/RunTraceFilter"
+          }
         }
       ],
       "result": {
@@ -6919,6 +6927,55 @@
           "forked"
         ],
         "type": "string"
+      },
+      "RunTraceFilter": {
+        "additionalProperties": false,
+        "description": "Snapshot-only typed predicates for the canonical composed RunTraceRow owner. Each present field is an OR-list for that field; different fields compose with AND. This schema is consumed by /v1/rpc run.trace only. /v1/ws run.subscribe_trace does not accept it until a separate follow-filter contract is promoted.",
+        "properties": {
+          "delivery_status": {
+            "items": {
+              "$ref": "#/components/schemas/DeliveryStatus"
+            },
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "entity_id": {
+            "items": {
+              "$ref": "#/components/schemas/OpaqueId"
+            },
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "event_name": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "subscriber_id": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "subscriber_type": {
+            "items": {
+              "$ref": "#/components/schemas/SubscriberType"
+            },
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          }
+        },
+        "type": "object"
       },
       "RunTraceListResult": {
         "additionalProperties": false,

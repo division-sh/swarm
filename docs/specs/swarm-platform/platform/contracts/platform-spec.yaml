@@ -5969,10 +5969,11 @@ cli_specification:
           used by the run-debug trace owner. Trace-specific `swarm trace --follow` subscription recovery and
           `--no-retry` are promoted in
           cli_specification.command_catalog.trace.promoted_trace_follow_recovery_contract by #928. Review-artifact
-          `-f` shorthand is promoted in the trace command row as a CLI-only alias for `--follow`. Review-artifact
-          `until`, event-name, subscriber, entity-id, delivery-status, `--include-payload`, shared `swarm run`
-          recovery, and multi-run `--all` remain explicitly unpromoted split tails until later gated children promote
-          their own canonical owners.
+          `-f` shorthand is promoted in the trace command row as a CLI-only alias for `--follow`. Snapshot-only typed
+          RunTraceFilter fields for event-name, subscriber identity, entity-id, and delivery-status are promoted on
+          `/v1/rpc run.trace` and consumed by `swarm trace`. Review-artifact `until`, follow-capable typed filters,
+          `--include-payload`, shared `swarm run` recovery, and multi-run `--all` remain explicitly unpromoted split
+          tails until later gated children promote their own canonical owners.
       mailbox_decision_sheet_and_result_ux:
         disposition: promoted_first_slice
         tracker: '#856'
@@ -7264,7 +7265,7 @@ cli_specification:
       defaulting: If run-id is omitted, resolve the target through run.list with active-run preference.
       behavior: Run-scoped operational status projection. This is the v2 replacement for `swarm investigate run`.
     trace:
-      command: swarm trace [<run-id>] [--since <timestamp>] [--limit <n>] [--cursor <cursor>] [--follow|-f] [--no-retry]
+      command: swarm trace [<run-id>] [--since <timestamp>] [--limit <n>] [--cursor <cursor>] [--event-name <name> ...] [--entity-id <entity-id> ...] [--delivery-status <pending|in_progress|delivered|failed|dead_letter> ...] [--subscriber-id <id> ...] [--subscriber-type <node|agent> ...] [--follow|-f] [--no-retry]
       tier: must_have
       implementation_status: implemented
       owners: /v1/rpc run.trace for snapshot; /v1/ws run.subscribe_trace for --follow/-f
@@ -7278,18 +7279,28 @@ cli_specification:
         - limit
         - cursor
         - since
+        - filter
+        filter_schema: RunTraceFilter
+        filter_fields:
+          event_name: Snapshot-only repeatable event-name predicate. The CLI sends an array of non-empty names as `filter.event_name` and the server matches any value against RunTraceRow.event_name.
+          entity_id: Snapshot-only repeatable entity-id predicate. The CLI sends an array of OpaqueId values as `filter.entity_id` and the server matches any value against RunTraceRow.entity_id.
+          delivery_status: Snapshot-only repeatable delivery-status predicate. The CLI sends an array of DeliveryStatus enum values as `filter.delivery_status` and the server matches any value against RunTraceRow.delivery_status.
+          subscriber_id: Snapshot-only repeatable subscriber identity predicate. The CLI sends an array of non-empty subscriber ids as `filter.subscriber_id` and the server matches any value against RunTraceRow.subscriber_id.
+          subscriber_type: Snapshot-only repeatable subscriber type predicate. The CLI sends an array of SubscriberType enum values as `filter.subscriber_type` and the server matches any value against RunTraceRow.subscriber_type.
         since_semantics: >
           `since` is an RFC3339/RFC3339Nano timestamp watermark. The server returns trace rows whose canonical
           materialization watermark is strictly after `since`, where that watermark is the greatest available
           timestamp across the joined event, delivery, session, and turn fields owned by RunTraceRow.
-        current_cli_consumer_status: implemented_by_918
+        current_cli_consumer_status: implemented_by_918_and_855
         cli_consumer_behavior: >
-          Snapshot `swarm trace` consumes `--since`, `--limit`, and `--cursor` by sending the exact promoted params
-          to `/v1/rpc run.trace`. These snapshot flags are invalid with `--follow` and must fail before any API or
+          Snapshot `swarm trace` consumes `--since`, `--limit`, `--cursor`, `--event-name`, `--entity-id`,
+          `--delivery-status`, `--subscriber-id`, and `--subscriber-type` by sending the exact promoted params to
+          `/v1/rpc run.trace`. These snapshot flags are invalid with `--follow`/`-f` and must fail before any API or
           WebSocket request; follow mode remains the base `/v1/ws run.subscribe_trace` consumer.
         proof_expectations:
         - exact /v1/rpc run.trace params for explicit run ids and omitted-run resolution through run.list
-        - invalid --since, out-of-range --limit, blank --cursor, and --follow plus snapshot filters fail before API/WS calls
+        - repeatable filter flags serialize as RunTraceFilter arrays under the single `filter` param and compose with since/limit/cursor
+        - invalid --since, out-of-range --limit, blank --cursor, blank/invalid typed filters, and --follow plus snapshot filters fail before API/WS calls
         - missing token fails before API calls through the shared CLI API client
         - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api, /rpc, /ws, or fallback token paths
       promoted_trace_follow_recovery_contract:
@@ -7352,10 +7363,7 @@ cli_specification:
         - static no-bypass proof for no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy transports
         split_tail:
           until: Not promoted; the current run-debug trace owner has no upper-bound watermark contract.
-          event_name: Not promoted; event-name filtering requires a typed RunTraceFilter owner before CLI use.
-          subscriber: Not promoted; subscriber filtering requires a typed RunTraceFilter owner before CLI use.
-          entity_id: Not promoted; entity filtering requires a typed RunTraceFilter owner before CLI use.
-          delivery_status: Not promoted; delivery-status filtering requires a typed RunTraceFilter owner before CLI use.
+          follow_capable_typed_filters: Not promoted; /v1/ws run.subscribe_trace currently has no RunTraceFilter param and remains split because it has distinct recovery semantics and shared `swarm run` coupling.
           include_payload: Not promoted; RunTraceRow has no payload field and output/schema ownership is split.
           shared_run_follow_recovery: Not promoted; `swarm run` follow and reattach have distinct lifecycle semantics and remain split.
           all_runs: Not promoted; multi-run trace needs a canonical multi-run owner or explicit run.list + run.trace composition contract.
@@ -10140,6 +10148,43 @@ api_specification:
               $ref: '#/components/schemas/RunTraceRow'
           next_cursor:
             $ref: '#/components/schemas/Cursor'
+      RunTraceFilter:
+        description: Snapshot-only typed predicates for the canonical composed RunTraceRow owner. Each present field is an OR-list for that field; different fields compose with AND. This schema is consumed by /v1/rpc run.trace only. /v1/ws run.subscribe_trace does not accept it until a separate follow-filter contract is promoted.
+        type: object
+        additionalProperties: false
+        properties:
+          event_name:
+            type: array
+            minItems: 1
+            uniqueItems: true
+            items:
+              type: string
+              minLength: 1
+          entity_id:
+            type: array
+            minItems: 1
+            uniqueItems: true
+            items:
+              $ref: '#/components/schemas/OpaqueId'
+          delivery_status:
+            type: array
+            minItems: 1
+            uniqueItems: true
+            items:
+              $ref: '#/components/schemas/DeliveryStatus'
+          subscriber_id:
+            type: array
+            minItems: 1
+            uniqueItems: true
+            items:
+              type: string
+              minLength: 1
+          subscriber_type:
+            type: array
+            minItems: 1
+            uniqueItems: true
+            items:
+              $ref: '#/components/schemas/SubscriberType'
       VerifyError:
         type: object
         additionalProperties: false
@@ -11107,6 +11152,11 @@ api_specification:
           materialization watermark is strictly after this timestamp.
         schema:
           $ref: '#/components/schemas/Timestamp'
+      - name: filter
+        required: false
+        description: Snapshot-only typed predicates over canonical RunTraceRow facts. Present fields are OR-lists within the field and AND-composed across fields.
+        schema:
+          $ref: '#/components/schemas/RunTraceFilter'
       result:
         name: result
         required: true
