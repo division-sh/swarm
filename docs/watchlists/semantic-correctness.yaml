@@ -134,6 +134,10 @@ active_issues:
     title: Reconcile payload_field_coverage ownership across bootverify and catalog harness
     maps_to:
       - boot_check_definition_drift
+  - id: 974
+    title: Fail closed condition payload alignment for empty event payload schemas
+    maps_to:
+      - boot_check_definition_drift
 nodes:
   - id: boot_check_definition_drift
     title: Boot Check Definition Drift
@@ -146,8 +150,10 @@ nodes:
       - one check id reused for event-payload source-field coverage and entity write-target compliance
       - catalog or legacy verifier surfaces interpreting a boot check id independently from Go bootverify
       - reference docs and fixture prose preserving stale check meanings after the supported surface moved
+      - condition payload-reference validation treats existing empty event payload schemas as open schemas
     representative_issues:
       - 448
+      - 974
     common_framing_mistakes:
       too_broad:
         - all bootverify drift

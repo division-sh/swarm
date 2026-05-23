@@ -61,10 +61,13 @@ func (c *checkerContext) conditionPayloadAlignment() []Finding {
 	for nodeID, node := range c.source.NodeEntries() {
 		for eventType, handler := range node.EventHandlers {
 			eventType = strings.TrimSpace(eventType)
-			payloadFields := eventPayloadFields(c.source, eventType)
+			payloadFields, eventExists := eventPayloadFieldsForExistingEvent(c.source, eventType)
+			if !eventExists {
+				continue
+			}
 			for _, cond := range handlerConditions(handler) {
 				for _, ref := range payloadReferences(cond.Expression) {
-					if len(payloadFields) > 0 && !payloadFieldExists(payloadFields, ref) {
+					if !payloadFieldExists(payloadFields, ref) {
 						c.conditionPayloadFindings = append(c.conditionPayloadFindings, Finding{
 							CheckID:  "condition_payload_alignment",
 							Severity: "error",

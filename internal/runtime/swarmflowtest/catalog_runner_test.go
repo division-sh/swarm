@@ -1191,7 +1191,8 @@ func catalogCollectBootIssues(bundle catalogBootBundle) []catalogBootIssue {
 				if condition := catalogGuardCheckString(handler["guard"]); condition != "" && !catalogConditionHasPrefix(condition) {
 					issues = append(issues, catalogBootIssue{Severity: "error", Category: "DIALECT-BARE-COND", Message: fmt.Sprintf("%s: condition '%s' missing prefix", loc, condition)})
 				}
-				payloadFields := catalogEventPayloadFields(catalogMap(bundle.AllEvents[eventType]))
+				eventSchema, eventExists := bundle.AllEvents[eventType]
+				payloadFields := catalogEventPayloadFields(catalogMap(eventSchema))
 				if dataAccumulation := catalogMap(handler["data_accumulation"]); len(dataAccumulation) > 0 {
 					sourceEvent := catalogFirstNonEmptyString(catalogBootText(dataAccumulation["source_event"]), eventType)
 					sourceEventSchema, sourceEventExists := bundle.AllEvents[sourceEvent]
@@ -1211,7 +1212,7 @@ func catalogCollectBootIssues(bundle catalogBootBundle) []catalogBootIssue {
 					}
 				}
 				for _, ref := range catalogExtractRefs(`payload\.([a-zA-Z_][a-zA-Z0-9_.]*)`, catalogGuardCheckString(handler["guard"])) {
-					if len(payloadFields) > 0 && !catalogPayloadFieldExists(payloadFields, ref) {
+					if eventExists && !catalogPayloadFieldExists(payloadFields, ref) {
 						issues = append(issues, catalogBootIssue{Severity: "error", Category: "CONDITION-PAYLOAD", Message: fmt.Sprintf("%s guard: payload.%s not in event payload %v", loc, ref, catalogSortedSetKeys(payloadFields))})
 					}
 				}
@@ -1229,7 +1230,7 @@ func catalogCollectBootIssues(bundle catalogBootBundle) []catalogBootIssue {
 						issues = append(issues, catalogBootIssue{Severity: "error", Category: "CEL-PARSE", Message: fmt.Sprintf("%s: invalid condition %q", loc, condition)})
 					}
 					for _, ref := range catalogExtractRefs(`payload\.([a-zA-Z_][a-zA-Z0-9_.]*)`, condition) {
-						if len(payloadFields) > 0 && !catalogPayloadFieldExists(payloadFields, ref) {
+						if eventExists && !catalogPayloadFieldExists(payloadFields, ref) {
 							issues = append(issues, catalogBootIssue{Severity: "error", Category: "CONDITION-PAYLOAD", Message: fmt.Sprintf("%s rule: payload.%s not in event payload %v", loc, ref, catalogSortedSetKeys(payloadFields))})
 						}
 					}
@@ -1248,7 +1249,7 @@ func catalogCollectBootIssues(bundle catalogBootBundle) []catalogBootIssue {
 						issues = append(issues, catalogBootIssue{Severity: "error", Category: "CEL-PARSE", Message: fmt.Sprintf("%s: invalid condition %q", loc, condition)})
 					}
 					for _, ref := range catalogExtractRefs(`payload\.([a-zA-Z_][a-zA-Z0-9_.]*)`, condition) {
-						if len(payloadFields) > 0 && !catalogPayloadFieldExists(payloadFields, ref) {
+						if eventExists && !catalogPayloadFieldExists(payloadFields, ref) {
 							issues = append(issues, catalogBootIssue{Severity: "error", Category: "CONDITION-PAYLOAD", Message: fmt.Sprintf("%s on_complete: payload.%s not in event payload", loc, ref)})
 						}
 					}
@@ -1624,14 +1625,26 @@ func catalogCollectHandlerEmits(handler map[string]any) []string {
 }
 
 func catalogRuleEntries(value any) []map[string]any {
-	entries := catalogMap(value)
-	out := make([]map[string]any, 0, len(entries))
-	for _, key := range catalogSortedKeys(entries) {
-		if entry := catalogMap(entries[key]); len(entry) > 0 {
-			out = append(out, entry)
+	switch typed := value.(type) {
+	case map[string]any:
+		out := make([]map[string]any, 0, len(typed))
+		for _, key := range catalogSortedKeys(typed) {
+			if entry := catalogMap(typed[key]); len(entry) > 0 {
+				out = append(out, entry)
+			}
 		}
+		return out
+	case []any:
+		out := make([]map[string]any, 0, len(typed))
+		for _, raw := range typed {
+			if entry := catalogMap(raw); len(entry) > 0 {
+				out = append(out, entry)
+			}
+		}
+		return out
+	default:
+		return nil
 	}
-	return out
 }
 
 func catalogBranchEntries(value any) []map[string]any {

@@ -1238,6 +1238,155 @@ func TestRun_MapsConditionPayloadMismatchToNamedError(t *testing.T) {
 	}
 }
 
+func TestRun_MapsEmptyEventPayloadSchemaConditionRefsToNamedError(t *testing.T) {
+	cases := []struct {
+		name    string
+		handler runtimecontracts.SystemNodeEventHandler
+	}{
+		{
+			name: "guard check",
+			handler: runtimecontracts.SystemNodeEventHandler{
+				Guard: &runtimecontracts.GuardSpec{Check: `payload.missing == "x"`},
+			},
+		},
+		{
+			name: "guard checks",
+			handler: runtimecontracts.SystemNodeEventHandler{
+				Guard: &runtimecontracts.GuardSpec{Checks: []runtimecontracts.GuardCheck{{
+					ID:    "missing",
+					Check: `payload.missing == "x"`,
+				}}},
+			},
+		},
+		{
+			name: "rule",
+			handler: runtimecontracts.SystemNodeEventHandler{
+				Rules: []runtimecontracts.HandlerRuleEntry{{
+					ID:        "missing",
+					Condition: `payload.missing == "x"`,
+				}},
+			},
+		},
+		{
+			name: "on complete",
+			handler: runtimecontracts.SystemNodeEventHandler{
+				OnComplete: []runtimecontracts.HandlerRuleEntry{{
+					Condition: `payload.missing == "x"`,
+				}},
+			},
+		},
+		{
+			name: "accumulate on complete",
+			handler: runtimecontracts.SystemNodeEventHandler{
+				Accumulate: &runtimecontracts.AccumulateSpec{
+					OnComplete: []runtimecontracts.HandlerRuleEntry{{
+						Condition: `payload.missing == "x"`,
+					}},
+				},
+			},
+		},
+		{
+			name: "filter",
+			handler: runtimecontracts.SystemNodeEventHandler{
+				Filter: &runtimecontracts.FilterSpec{Condition: `payload.missing == "x"`},
+			},
+		},
+		{
+			name: "count",
+			handler: runtimecontracts.SystemNodeEventHandler{
+				Count: &runtimecontracts.CountSpec{Condition: `payload.missing == "x"`},
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			handler := tc.handler
+			handler.AdvancesTo = "done"
+			handler.Emit = runtimecontracts.EmitSpec{Event: "task.completed", Broadcast: true}
+			bundle := &runtimecontracts.WorkflowContractBundle{
+				Events: map[string]runtimecontracts.EventCatalogEntry{
+					"task.requested": {},
+					"task.completed": {
+						Payload: runtimecontracts.EventPayloadSpec{
+							Properties: map[string]runtimecontracts.EventFieldSpec{
+								"entity_id": {Type: "string"},
+							},
+						},
+					},
+				},
+				Nodes: map[string]runtimecontracts.SystemNodeContract{
+					"complete-task": {
+						ID:            "complete-task",
+						ExecutionType: "system_node",
+						SubscribesTo:  []string{"task.requested"},
+						Produces:      []string{"task.completed"},
+						EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+							"task.requested": handler,
+						},
+					},
+				},
+				RootSchema: &runtimecontracts.FlowSchemaDocument{
+					InitialState:   "pending",
+					TerminalStates: []string{"done"},
+					States:         []string{"pending", "done"},
+				},
+			}
+			bundle.Platform.Platform.Name = "swarm"
+			bundle.Platform.Platform.Version = "test"
+			source := semanticview.Wrap(bundle)
+
+			report := Run(context.Background(), source, Options{})
+
+			if !reportContains(report.Errors(), "condition_payload_alignment", "payload.missing") {
+				t.Fatalf("expected empty payload schema condition_payload_alignment error, got %#v", report.Errors())
+			}
+		})
+	}
+}
+
+func TestRun_DoesNotMapMissingEventSchemaToConditionPayloadAlignment(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"task.completed": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"entity_id": {Type: "string"},
+					},
+				},
+			},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"complete-task": {
+				ID:            "complete-task",
+				ExecutionType: "system_node",
+				SubscribesTo:  []string{"task.requested"},
+				Produces:      []string{"task.completed"},
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"task.requested": {
+						Guard:      &runtimecontracts.GuardSpec{Check: `payload.missing == "x"`},
+						AdvancesTo: "done",
+						Emit:       runtimecontracts.EmitSpec{Event: "task.completed", Broadcast: true},
+					},
+				},
+			},
+		},
+		RootSchema: &runtimecontracts.FlowSchemaDocument{
+			InitialState:   "pending",
+			TerminalStates: []string{"done"},
+			States:         []string{"pending", "done"},
+		},
+	}
+	bundle.Platform.Platform.Name = "swarm"
+	bundle.Platform.Platform.Version = "test"
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Errors(), "condition_payload_alignment", "payload.missing") {
+		t.Fatalf("missing event schema should stay outside condition_payload_alignment, got %#v", report.Errors())
+	}
+}
+
 func TestRun_AllowsNestedConditionPayloadReferenceWithinEventPayloadSchema(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-success")
 	nodeID, eventType, handler, ok := firstBundleHandler(bundle)
