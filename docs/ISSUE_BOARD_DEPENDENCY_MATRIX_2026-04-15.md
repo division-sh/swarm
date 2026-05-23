@@ -49,7 +49,7 @@ Current high-signal board changes since the original snapshot:
 - `#397` is now gated, ready, and assigned to `a`
 - stale child `#399` is now closed as superseded by replacement child `#446`
 - `#442` and `#443` are closed as stale/superseded PRs
-- `#126` declaration-drift child was already implemented earlier in commit `ae87cf0`; next honest remaining child is now extracted as `#447`
+- `#126` declaration-drift child was already implemented earlier in commit `ae87cf0`; the state/schema tail split into `#447` gate-schema validation and `#448` payload-field/check-definition drift
 - `#125` no longer advertises stale parent-level `status:ready`
 - `#182` is now closed after current-head verification confirmed its extracted children `#389` and `#391` both landed and no further concrete child remains
 - `#157` is now closed after current-head verification confirmed its extracted children `#403` and `#411` both landed and no further concrete child remains
@@ -91,8 +91,9 @@ Current high-signal board changes since the original snapshot:
 | `#368` | `CLOSED / SUPERSEDED` | `-` | superseded by `#444`; fallback-era CLI helper parity child is no longer the right lane |
 | `#364` | `CLOSED` | `-` | implemented earlier in merged PR `#420`; stale ready state was local-board drift |
 | `#170` | `OPEN / NEEDS-SCOPE` | `pre-audit + gate required before assignment` | issue body itself says the first dependency-object slice still must be chosen in pre-audit; stale ready metadata repaired |
-| `#126` | `TRACKER / NEEDS-SCOPE PARENT` | `work through extracted children; next remaining child is #447` | not deprecated: merged slices already cover `#294`, `#299`, `#301`, `#309`, `#320`, `#327`, and declaration drift in `ae87cf0`; remaining tail still includes handler/runtime contract-compliance and platform/tooling/environment groups after `#447` |
-| `#447` | `OPEN / NEEDS-SCOPE` | `pre-audit + gate required before assignment` | new `#126` child for state/schema target coverage, centered on `payload_field_coverage` + `gate_schema_validation` |
+| `#126` | `TRACKER / NEEDS-SCOPE PARENT` | `work through extracted children; current state/schema tail split through #447 and #448` | not deprecated: merged slices already cover `#294`, `#299`, `#301`, `#309`, `#320`, `#327`, and declaration drift in `ae87cf0`; remaining tail still includes handler/runtime contract-compliance and platform/tooling/environment groups after the extracted children |
+| `#447` | `OPEN / SPLIT CHILD` | `gate-schema lane only` | `gate_schema_validation` was split from the payload-field/check-definition drift class |
+| `#448` | `OPEN / GATED FIRST SLICE` | `implementation may proceed under approved first-slice gate` | `payload_field_coverage` check-definition drift across spec, Go bootverify, catalog harness, verifier, tests, and docs |
 | `#125` | `TRACKER / NEEDS-SCOPE PARENT` | `work through extracted children; live residuals remain in #397 / #446` | not deprecated: `#387`, `#388`, and `#398` are closed; `#399` was superseded by `#446`, and the parent still tracks the remaining residual children without being directly assignable |
 | `#375` | `WATCHPOINT / NOT DIRECT` | `needs explicit child extraction or deliberate assignment` | parked backlog, not a clean direct lane |
 | `#374` | `WATCHPOINT / NOT DIRECT` | `needs explicit child extraction or deliberate assignment` | parked backlog, not a clean direct lane |
@@ -131,7 +132,7 @@ What actually blocks throughput right now:
   - `#417` stays blocked until runtime/spec/authored owners move
 - parallel issue families with no clean child yet:
   - `#125` still has no second clean coding child ready after `#397`; `#446` still needs pre-audit/gate
-  - `#126` remains a parent tracker, but its next honest remaining child is now `#447`
+  - `#126` remains a parent tracker; the state/schema tail is split through `#447` and `#448`
   - `#455` is a cross-cutting architecture parent and should move only through extracted children; `#459` is now the active next implementation child
 
 What is directly assignable right now:

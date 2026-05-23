@@ -4,8 +4,8 @@ Swarm Platform Specification Verifier
 Reference implementation for platform boot_verification checks.
 Uses canonical check IDs from platform-spec.yaml §engine.boot_verification.
 
-24 checks defined in spec. This script implements the subset that can run
-without the Go runtime (no CEL parsing, no MCP connectivity, no credential store).
+This script implements the subset that can run without the Go runtime
+(no CEL parsing, no MCP connectivity, no credential store).
 
 Usage: python3 verify.py [contracts_dir]
 """
@@ -112,6 +112,31 @@ def flatten_payload(payload, prefix='', skip_root_swarm=False):
         if isinstance(v, dict) and not any(t in str(v) for t in ['string','integer','number','boolean','array','object','text','timestamp','uuid','numeric']):
             fields.update(flatten_payload(v, full))
     return fields
+
+def event_payload_fields(event_schema):
+    if not isinstance(event_schema, dict): return set()
+    payload = event_schema.get('payload', {})
+    if isinstance(payload, dict) and payload:
+        return flatten_payload(payload)
+    flat = {}
+    metadata_keys = {
+        'description', 'emitter', 'emitter_type', 'producer', 'alternate_emitters',
+        'consumer', 'consumer_type', 'intercepted', 'passthrough', 'runtime_handling',
+        'owning_node', 'delivery_channel', 'required',
+    }
+    for key, value in event_schema.items():
+        if not key or str(key).startswith('_') or key in metadata_keys:
+            continue
+        flat[key] = value
+    return flatten_payload(flat)
+
+def payload_field_exists(fields, ref):
+    ref = str(ref or '').strip()
+    if not ref: return False
+    for candidate in fields:
+        if ref == candidate or ref.startswith(candidate + '.') or candidate.startswith(ref + '.'):
+            return True
+    return False
 
 def extract_payload_refs(s):
     return re.findall(r'payload\.([a-zA-Z_][a-zA-Z0-9_.]*)', str(s))
@@ -364,15 +389,16 @@ for flow, nodes in iter_flows_with_nodes():
             da = h.get('data_accumulation')
             if not isinstance(da, dict): continue
             source_ev = da.get('source_event', ev)
-            event_schema = all_events.get(source_ev, {})
-            payload_fields = flatten_payload(event_schema.get('payload', {})) if isinstance(event_schema, dict) else set()
+            if source_ev not in all_events: continue
+            event_schema = all_events[source_ev]
+            payload_fields = event_payload_fields(event_schema)
             for w in da.get('writes', []):
                 if isinstance(w, str):
-                    if payload_fields and w not in payload_fields:
+                    if not payload_field_exists(payload_fields, w):
                         error("payload_field_coverage", "writes '%s' but %s payload has %s" % (w, source_ev, sorted(payload_fields)), "%s/%s/%s" % (flow, nid, ev))
                 elif isinstance(w, dict):
                     sf = w.get('source_field', '')
-                    if sf and payload_fields and sf not in payload_fields:
+                    if sf and not payload_field_exists(payload_fields, sf):
                         error("payload_field_coverage", "source_field '%s' not in %s payload" % (sf, source_ev), "%s/%s/%s" % (flow, nid, ev))
 
 # ============================================================
@@ -384,7 +410,7 @@ for flow, nodes in iter_flows_with_nodes():
         for ev, h in node.get('event_handlers', {}).items():
             if not isinstance(h, dict): continue
             event_payload = all_events.get(ev, {})
-            payload_fields = flatten_payload(event_payload.get('payload', {})) if isinstance(event_payload, dict) else set()
+            payload_fields = event_payload_fields(event_payload)
             if not payload_fields: continue
             loc = "%s/%s/%s" % (flow, nid, ev)
 
@@ -395,7 +421,7 @@ for flow, nodes in iter_flows_with_nodes():
                     cond = rule.get('condition', '')
                     if cond == 'else': continue
                     for ref in extract_payload_refs(cond):
-                        if not any(ref == pf or ref.startswith(pf + '.') or pf.startswith(ref + '.') for pf in payload_fields):
+                        if not payload_field_exists(payload_fields, ref):
                             error("condition_payload_alignment", "rule '%s': payload.%s not in event payload" % (rule_name, ref), loc)
 
             guard = h.get('guard', {})
@@ -405,7 +431,7 @@ for flow, nodes in iter_flows_with_nodes():
                 for check in checks:
                     if not isinstance(check, dict): continue
                     for ref in extract_payload_refs(check.get('check', '')):
-                        if not any(ref == pf or ref.startswith(pf + '.') or pf.startswith(ref + '.') for pf in payload_fields):
+                        if not payload_field_exists(payload_fields, ref):
                             error("condition_payload_alignment", "guard: payload.%s not in event payload" % ref, loc)
 
             oc = h.get('on_complete')
@@ -414,7 +440,7 @@ for flow, nodes in iter_flows_with_nodes():
                 for branch in items:
                     if isinstance(branch, dict):
                         for ref in extract_payload_refs(branch.get('condition', '')):
-                            if not any(ref == pf or ref.startswith(pf + '.') or pf.startswith(ref + '.') for pf in payload_fields):
+                            if not payload_field_exists(payload_fields, ref):
                                 error("condition_payload_alignment", "on_complete: payload.%s not in event payload" % ref, loc)
 
 # ============================================================
@@ -805,10 +831,7 @@ t = sum(1 for v in all_tools.values() if isinstance(v, dict))
 if deferred_count:
     print("\n[INFO]  %d prompts marked DEFERRED" % deferred_count)
 
-# Checks coverage summary
-spec_checks = 24
-implemented = 20  # All except credential_key_exists, mcp_server_reachable, and 2 that need CEL parsing
-print("\n[INFO]  %d/%d spec checks implemented (%d require Go runtime)" % (implemented, spec_checks, spec_checks - implemented))
+print("\n[INFO]  structural verifier subset; Go runtime owns CEL, MCP, credential, and entity-write-target checks")
 
 print("\n" + "=" * 70)
 print("SUMMARY: %d errors, %d warnings" % (len(errors_list), len(warnings_list)))

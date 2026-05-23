@@ -18,6 +18,14 @@ func checkConfigFromPayloadAlignment(c *checkerContext) []Finding {
 	return c.configFromPayloadAlignment()
 }
 
+type payloadFieldCoverageSite struct {
+	FlowID       string
+	NodeID       string
+	EventType    string
+	Scope        string
+	Accumulation runtimecontracts.WorkflowDataAccumulation
+}
+
 func (c *checkerContext) conditionPolicyAlignment() []Finding {
 	if c.conditionPolicyLoaded {
 		return c.conditionPolicyFindings
@@ -92,6 +100,146 @@ func (c *checkerContext) configFromPayloadAlignment() []Finding {
 		})
 	}
 	return c.configPayloadFindings
+}
+
+func (c *checkerContext) payloadFieldCoverage() []Finding {
+	if c.payloadCoverageLoaded {
+		return c.payloadCoverageFindings
+	}
+	c.payloadCoverageLoaded = true
+	for _, site := range payloadFieldCoverageSites(c.source) {
+		sourceEvent := strings.TrimSpace(site.Accumulation.SourceEvent)
+		if sourceEvent == "" {
+			sourceEvent = strings.TrimSpace(site.EventType)
+		}
+		if sourceEvent == "" || derivedAccumulationSource(sourceEvent) {
+			continue
+		}
+		sourceFields, sourceEventExists := eventPayloadFieldsForExistingEvent(c.source, sourceEvent)
+		if !sourceEventExists {
+			continue
+		}
+		for _, write := range site.Accumulation.Writes {
+			for _, ref := range dataAccumulationPayloadSourceRefs(write) {
+				if payloadFieldExists(sourceFields, ref.Field) {
+					continue
+				}
+				c.payloadCoverageFindings = append(c.payloadCoverageFindings, Finding{
+					CheckID:  "payload_field_coverage",
+					Severity: "error",
+					Message:  fmt.Sprintf("flow %s node %s handler %s %s %s missing from source event %s payload schema", defaultFlowLabel(site.FlowID), site.NodeID, site.EventType, site.Scope, ref.Description, sourceEvent),
+					Location: strings.TrimSpace(site.NodeID),
+				})
+			}
+		}
+	}
+	return c.payloadCoverageFindings
+}
+
+func payloadFieldCoverageSites(source semanticview.Source) []payloadFieldCoverageSite {
+	if source == nil {
+		return nil
+	}
+	out := make([]payloadFieldCoverageSite, 0)
+	for _, nodeID := range sortedNodeIDs(source) {
+		node, ok := source.NodeEntries()[nodeID]
+		if !ok {
+			continue
+		}
+		flowID := ""
+		if sourceRef, ok := source.NodeContractSource(nodeID); ok {
+			flowID = strings.TrimSpace(sourceRef.FlowID)
+		}
+		for eventType, handler := range node.EventHandlers {
+			eventType = strings.TrimSpace(eventType)
+			add := func(scope string, accumulation runtimecontracts.WorkflowDataAccumulation) {
+				if !accumulation.HasWrites() {
+					return
+				}
+				out = append(out, payloadFieldCoverageSite{
+					FlowID:       flowID,
+					NodeID:       strings.TrimSpace(nodeID),
+					EventType:    eventType,
+					Scope:        strings.TrimSpace(scope),
+					Accumulation: accumulation,
+				})
+			}
+			add("handler.data_accumulation", handler.DataAccumulation)
+			for idx, rule := range handler.Rules {
+				add(ruleScope("handler.rules", idx, rule.ID)+".data_accumulation", rule.DataAccumulation)
+			}
+			for idx, rule := range handler.OnComplete {
+				add(ruleScope("handler.on_complete", idx, rule.ID)+".data_accumulation", rule.DataAccumulation)
+			}
+			if handler.Accumulate != nil {
+				for idx, rule := range handler.Accumulate.OnComplete {
+					add(ruleScope("handler.accumulate.on_complete", idx, rule.ID)+".data_accumulation", rule.DataAccumulation)
+				}
+				if handler.Accumulate.OnTimeout != nil {
+					add(ruleScope("handler.accumulate.on_timeout", 0, handler.Accumulate.OnTimeout.ID)+".data_accumulation", handler.Accumulate.OnTimeout.DataAccumulation)
+				}
+			}
+			for idx, branch := range handler.Branch {
+				if branch.Then != nil {
+					add(ruleScope("handler.branch.then", idx, branch.Then.ID)+".data_accumulation", branch.Then.DataAccumulation)
+				}
+				if branch.Else != nil {
+					add(ruleScope("handler.branch.else", idx, branch.Else.ID)+".data_accumulation", branch.Else.DataAccumulation)
+				}
+			}
+		}
+	}
+	return out
+}
+
+func ruleScope(prefix string, idx int, id string) string {
+	if id = strings.TrimSpace(id); id != "" {
+		return prefix + "[" + id + "]"
+	}
+	return fmt.Sprintf("%s[%d]", prefix, idx)
+}
+
+type dataAccumulationPayloadSourceRef struct {
+	Field       string
+	Description string
+}
+
+func dataAccumulationPayloadSourceRefs(write runtimecontracts.WorkflowDataWrite) []dataAccumulationPayloadSourceRef {
+	if write.Value.HasLiteralValue() {
+		return nil
+	}
+	if cel := strings.TrimSpace(write.Value.CEL); cel != "" {
+		refs := payloadReferences(cel)
+		out := make([]dataAccumulationPayloadSourceRef, 0, len(refs))
+		for _, ref := range refs {
+			out = append(out, dataAccumulationPayloadSourceRef{
+				Field:       ref,
+				Description: "payload." + ref,
+			})
+		}
+		return out
+	}
+	if ref := strings.TrimSpace(write.Value.Ref); strings.HasPrefix(ref, "payload.") {
+		field := strings.TrimPrefix(ref, "payload.")
+		return []dataAccumulationPayloadSourceRef{{
+			Field:       field,
+			Description: ref,
+		}}
+	}
+	if !write.Value.IsZero() {
+		return nil
+	}
+	if source := strings.TrimSpace(write.Source()); source != "" {
+		description := fmt.Sprintf("source field %q", source)
+		if strings.TrimSpace(write.Field) != "" && strings.TrimSpace(write.SourceField) == "" {
+			description = fmt.Sprintf("writes '%s'", source)
+		}
+		return []dataAccumulationPayloadSourceRef{{
+			Field:       source,
+			Description: description,
+		}}
+	}
+	return nil
 }
 
 func policyValueMap(policy runtimecontracts.PolicyDocument) map[string]any {
@@ -186,16 +334,24 @@ func lookupPolicyValue(policy map[string]any, ref string) (any, bool) {
 }
 
 func eventPayloadFields(source semanticview.Source, eventType string) map[string]struct{} {
-	if source == nil {
-		return nil
-	}
-	entry, ok := source.EventEntry(strings.TrimSpace(eventType))
+	fields, ok := eventPayloadFieldsForExistingEvent(source, eventType)
 	if !ok {
 		return nil
 	}
+	return fields
+}
+
+func eventPayloadFieldsForExistingEvent(source semanticview.Source, eventType string) (map[string]struct{}, bool) {
+	if source == nil {
+		return nil, false
+	}
+	entry, ok := source.EventEntry(strings.TrimSpace(eventType))
+	if !ok {
+		return nil, false
+	}
 	out := map[string]struct{}{}
 	collectPayloadFields("", entry.Payload.Properties, out)
-	return out
+	return out, true
 }
 
 func collectPayloadFields(prefix string, fields map[string]runtimecontracts.EventFieldSpec, out map[string]struct{}) {

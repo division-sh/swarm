@@ -62,6 +62,9 @@ func wave1WriteTargetContract(source semanticview.Source, target wave1WriteTarge
 }
 
 func checkEntityWriterCoverage(c *checkerContext) []Finding { return c.entityWriterCoverage() }
+func checkEntityWriteTargetCompliance(c *checkerContext) []Finding {
+	return c.entityWriteTargetCompliance()
+}
 func checkEntityReaderCoverage(c *checkerContext) []Finding { return c.entityReaderCoverage() }
 
 func (c *checkerContext) entityWriterCoverage() []Finding {
@@ -99,6 +102,70 @@ func (c *checkerContext) entityWriterCoverage() []Finding {
 	}
 	c.entityWriterCoverageFindings = append(c.entityWriterCoverageFindings, wave1PromptEntityWriteAuthorizationFindings(c.source)...)
 	return c.entityWriterCoverageFindings
+}
+
+func (c *checkerContext) entityWriteTargetCompliance() []Finding {
+	if c.entityWriteTargetComplianceLoaded {
+		return c.entityWriteTargetComplianceFindings
+	}
+	c.entityWriteTargetComplianceLoaded = true
+	seen := map[string]struct{}{}
+	for _, target := range wave1AllEntityWriteTargets(c.source) {
+		if !target.Entity || strings.TrimSpace(target.Field) == "" {
+			continue
+		}
+		key := strings.Join([]string{target.FlowID, target.NodeID, target.EventType, target.Kind, target.Target}, "|")
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+
+		if target.Kind == "handler.clear" && wave1SpecialClearTarget(target.Field) {
+			continue
+		}
+		resolved, ownerFlowID, rootField, err := wave1ResolveWriteTargetPath(c.source, target)
+		if err != nil {
+			c.entityWriteTargetComplianceFindings = append(c.entityWriteTargetComplianceFindings, Finding{
+				CheckID:  "entity_write_target_compliance",
+				Severity: SeverityHardInvalidity,
+				Message:  fmt.Sprintf("flow %s node %s handler %s %s target %q is invalid: %v", defaultFlowLabel(target.FlowID), target.NodeID, target.EventType, target.Kind, target.Target, err),
+				Location: target.NodeID,
+			})
+			continue
+		}
+		_ = resolved
+		if wave1EntityEnvelopeField(rootField) {
+			c.entityWriteTargetComplianceFindings = append(c.entityWriteTargetComplianceFindings, Finding{
+				CheckID:  "entity_write_target_compliance",
+				Severity: SeverityHardInvalidity,
+				Message:  fmt.Sprintf("flow %s node %s handler %s %s targets envelope field %q; envelope fields are platform-owned", defaultFlowLabel(target.FlowID), target.NodeID, target.EventType, target.Kind, rootField),
+				Location: target.NodeID,
+			})
+			continue
+		}
+		contract, ok := wave1WriteTargetContract(c.source, target)
+		if !ok {
+			c.entityWriteTargetComplianceFindings = append(c.entityWriteTargetComplianceFindings, Finding{
+				CheckID:  "entity_write_target_compliance",
+				Severity: SeverityHardInvalidity,
+				Message:  fmt.Sprintf("flow %s node %s handler %s %s writes %q missing from declared Wave 1 entity contract", defaultFlowLabel(target.FlowID), target.NodeID, target.EventType, target.Kind, target.Field),
+				Location: target.NodeID,
+			})
+			continue
+		}
+		if ownerFlowID != "" {
+			contract.FlowID = ownerFlowID
+		}
+		if _, ok := contract.Contract.Fields[rootField]; !ok {
+			c.entityWriteTargetComplianceFindings = append(c.entityWriteTargetComplianceFindings, Finding{
+				CheckID:  "entity_write_target_compliance",
+				Severity: SeverityHardInvalidity,
+				Message:  fmt.Sprintf("flow %s node %s handler %s %s writes undeclared entity field %q on entity_type %s", defaultFlowLabel(target.FlowID), target.NodeID, target.EventType, target.Kind, rootField, contract.EntityType),
+				Location: target.NodeID,
+			})
+		}
+	}
+	return c.entityWriteTargetComplianceFindings
 }
 
 func (c *checkerContext) entityReaderCoverage() []Finding {
