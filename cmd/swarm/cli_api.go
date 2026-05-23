@@ -80,8 +80,10 @@ type cliAPISettings struct {
 }
 
 type cliAPIConfigFile struct {
-	APIServer    string `yaml:"api_server"`
-	APITokenFile string `yaml:"api_token_file"`
+	APIServer        string `yaml:"api_server"`
+	APITokenFile     string `yaml:"api_token_file"`
+	ContractsPath    string `yaml:"contracts_path"`
+	PlatformSpecPath string `yaml:"platform_spec_path"`
 }
 
 type cliAPIValidationError struct {
@@ -203,7 +205,7 @@ func parseCLIAPIConfigFile(configPath string, raw []byte) (cliAPIConfigFile, err
 	}
 	for key, value := range decoded {
 		switch key {
-		case "api_server", "api_token_file":
+		case "api_server", "api_token_file", "contracts_path", "platform_spec_path":
 			if value == nil {
 				continue
 			}

@@ -567,9 +567,14 @@ func TestPlatformSpecCLIAPIConnectionAuthConfigPrecedencePromoted(t *testing.T) 
 			t.Fatalf("cli config accepted key %q missing: %#v", key, spec.CLIConfigFile.AcceptedKeys)
 		}
 	}
-	for _, key := range []string{"api_token", "output_format", "no_color", "contracts_path", "platform_spec_path", "log_level", "retry", "serve_api_listen_addr", "serve_mcp_listen_addr"} {
+	for _, key := range []string{"api_token", "output_format", "no_color", "log_level", "retry", "serve_api_listen_addr", "serve_mcp_listen_addr"} {
 		if strings.TrimSpace(spec.CLIConfigFile.RejectedKeys[key]) == "" {
 			t.Fatalf("cli config rejected key %q missing: %#v", key, spec.CLIConfigFile.RejectedKeys)
+		}
+	}
+	for _, key := range []string{"contracts_path", "platform_spec_path"} {
+		if !strings.Contains(spec.CLIConfigFile.SharedNonAPIKeys[key], "contract_platform_spec_path_resolution") {
+			t.Fatalf("cli config shared non-API key %q missing contract path owner: %#v", key, spec.CLIConfigFile.SharedNonAPIKeys)
 		}
 	}
 	for _, key := range []string{"SWARM_API_PORT", "SWARM_MCP_PORT"} {
@@ -588,6 +593,76 @@ func TestPlatformSpecCLIAPIConnectionAuthConfigPrecedencePromoted(t *testing.T) 
 		}
 	}
 	for _, want := range []string{"API-backed command leaves consume", "OpenRPC", "Future API-backed CLI commands MUST consume this owner"} {
+		if !stringSliceContains(spec.ImplementationBoundaries, want) {
+			t.Fatalf("implementation boundaries missing %q: %#v", want, spec.ImplementationBoundaries)
+		}
+	}
+}
+
+func TestPlatformSpecContractPlatformSpecPathResolutionPromoted(t *testing.T) {
+	spec := loadCLIContractPlatformSpecPathResolutionSpec(t)
+	if strings.TrimSpace(spec.PromotedBy) != "#844" {
+		t.Fatalf("contract path promoted_by = %q, want #844", spec.PromotedBy)
+	}
+	if strings.TrimSpace(spec.ImplementationStatus) != "implemented" {
+		t.Fatalf("contract path implementation_status = %q, want implemented", spec.ImplementationStatus)
+	}
+	if !strings.Contains(spec.CanonicalOwner, "cli_specification.foundations.contract_platform_spec_path_resolution") {
+		t.Fatalf("canonical owner does not point at promoted section: %s", spec.CanonicalOwner)
+	}
+	for _, want := range []string{"swarm verify", "swarm serve", "local foreground `swarm run`"} {
+		if !stringSliceContains(spec.AppliesTo, want) {
+			t.Fatalf("applies_to missing %q: %#v", want, spec.AppliesTo)
+		}
+	}
+	for _, want := range []string{"swarm run --connect", "swarm run --reattach", "root/global `--config`"} {
+		if !stringSliceContains(spec.NotAppliesTo, want) {
+			t.Fatalf("not_applies_to missing %q: %#v", want, spec.NotAppliesTo)
+		}
+	}
+	wantContractsOrder := []string{"--contracts", "SWARM_CONTRACTS_PATH", "config contracts_path", "repo contracts/package.yaml"}
+	if len(spec.ContractsPath.SourceOrder) != len(wantContractsOrder) {
+		t.Fatalf("contracts source order = %#v, want %#v", spec.ContractsPath.SourceOrder, wantContractsOrder)
+	}
+	for i, want := range wantContractsOrder {
+		if spec.ContractsPath.SourceOrder[i] != want {
+			t.Fatalf("contracts source order[%d] = %q, want %q", i, spec.ContractsPath.SourceOrder[i], want)
+		}
+	}
+	if spec.ContractsPath.AcceptedSources.Flag != "--contracts <path>" {
+		t.Fatalf("contracts flag = %q", spec.ContractsPath.AcceptedSources.Flag)
+	}
+	if spec.ContractsPath.AcceptedSources.Environment != "SWARM_CONTRACTS_PATH" {
+		t.Fatalf("contracts env = %q", spec.ContractsPath.AcceptedSources.Environment)
+	}
+	if spec.ContractsPath.AcceptedSources.ConfigKey != "contracts_path" {
+		t.Fatalf("contracts config key = %q", spec.ContractsPath.AcceptedSources.ConfigKey)
+	}
+	if !strings.Contains(spec.ContractsPath.RejectedSources["SWARM_CONTRACTS_DIR"], "Not a CLI source") {
+		t.Fatalf("SWARM_CONTRACTS_DIR rejection missing CLI-source rule:\n%s", spec.ContractsPath.RejectedSources["SWARM_CONTRACTS_DIR"])
+	}
+	wantPlatformOrder := []string{"--platform-spec", "config platform_spec_path", "built-in tracked platform spec"}
+	if len(spec.PlatformSpecPath.SourceOrder) != len(wantPlatformOrder) {
+		t.Fatalf("platform source order = %#v, want %#v", spec.PlatformSpecPath.SourceOrder, wantPlatformOrder)
+	}
+	for i, want := range wantPlatformOrder {
+		if spec.PlatformSpecPath.SourceOrder[i] != want {
+			t.Fatalf("platform source order[%d] = %q, want %q", i, spec.PlatformSpecPath.SourceOrder[i], want)
+		}
+	}
+	if spec.PlatformSpecPath.AcceptedSources.Flag != "--platform-spec <path>" {
+		t.Fatalf("platform flag = %q", spec.PlatformSpecPath.AcceptedSources.Flag)
+	}
+	if spec.PlatformSpecPath.AcceptedSources.ConfigKey != "platform_spec_path" {
+		t.Fatalf("platform config key = %q", spec.PlatformSpecPath.AcceptedSources.ConfigKey)
+	}
+	if spec.PlatformSpecPath.AcceptedSources.BuiltInDefault != defaultPlatformSpecPath {
+		t.Fatalf("platform default = %q, want %q", spec.PlatformSpecPath.AcceptedSources.BuiltInDefault, defaultPlatformSpecPath)
+	}
+	if !strings.Contains(spec.PlatformSpecPath.RejectedSources["SWARM_PLATFORM_SPEC_PATH"], "Not promoted") {
+		t.Fatalf("SWARM_PLATFORM_SPEC_PATH rejection missing not-promoted rule:\n%s", spec.PlatformSpecPath.RejectedSources["SWARM_PLATFORM_SPEC_PATH"])
+	}
+	for _, want := range []string{"verify", "serve", "local foreground run", "API auth/config", "connected run"} {
 		if !stringSliceContains(spec.ImplementationBoundaries, want) {
 			t.Fatalf("implementation boundaries missing %q: %#v", want, spec.ImplementationBoundaries)
 		}
@@ -3517,10 +3592,11 @@ type cliAPIConnectionAuthConfigSpec struct {
 		TokenFileRule   string            `yaml:"token_file_rule"`
 	} `yaml:"api_token"`
 	CLIConfigFile struct {
-		AcceptedSources map[string]string `yaml:"accepted_sources"`
-		RejectedSources map[string]string `yaml:"rejected_sources"`
-		AcceptedKeys    map[string]string `yaml:"accepted_keys"`
-		RejectedKeys    map[string]string `yaml:"rejected_keys"`
+		AcceptedSources  map[string]string `yaml:"accepted_sources"`
+		RejectedSources  map[string]string `yaml:"rejected_sources"`
+		AcceptedKeys     map[string]string `yaml:"accepted_keys"`
+		SharedNonAPIKeys map[string]string `yaml:"shared_non_api_keys"`
+		RejectedKeys     map[string]string `yaml:"rejected_keys"`
 	} `yaml:"cli_config_file"`
 	ServeListenerEnvConfigBoundary struct {
 		RejectedPorts      map[string]string `yaml:"rejected_ports"`
@@ -3528,6 +3604,36 @@ type cliAPIConnectionAuthConfigSpec struct {
 		Rule               string            `yaml:"rule"`
 	} `yaml:"serve_listener_env_config_boundary"`
 	SplitSiblings            []string `yaml:"split_siblings"`
+	ImplementationBoundaries []string `yaml:"implementation_boundaries"`
+}
+
+type cliContractPlatformSpecPathResolutionSpec struct {
+	PromotedBy           string   `yaml:"promoted_by"`
+	ImplementationStatus string   `yaml:"implementation_status"`
+	CanonicalOwner       string   `yaml:"canonical_owner"`
+	Scope                string   `yaml:"scope"`
+	AppliesTo            []string `yaml:"applies_to"`
+	NotAppliesTo         []string `yaml:"not_applies_to"`
+	ContractsPath        struct {
+		AcceptedSources struct {
+			Flag              string `yaml:"flag"`
+			Environment       string `yaml:"environment"`
+			ConfigKey         string `yaml:"config_key"`
+			DiscoveredDefault string `yaml:"discovered_default"`
+		} `yaml:"accepted_sources"`
+		SourceOrder     []string          `yaml:"source_order"`
+		RejectedSources map[string]string `yaml:"rejected_sources"`
+		MissingSource   string            `yaml:"missing_source_rule"`
+	} `yaml:"contracts_path"`
+	PlatformSpecPath struct {
+		AcceptedSources struct {
+			Flag           string `yaml:"flag"`
+			ConfigKey      string `yaml:"config_key"`
+			BuiltInDefault string `yaml:"built_in_default"`
+		} `yaml:"accepted_sources"`
+		SourceOrder     []string          `yaml:"source_order"`
+		RejectedSources map[string]string `yaml:"rejected_sources"`
+	} `yaml:"platform_spec_path"`
 	ImplementationBoundaries []string `yaml:"implementation_boundaries"`
 }
 
@@ -3640,6 +3746,28 @@ func loadCLIAPIConnectionAuthConfigSpec(t *testing.T) cliAPIConnectionAuthConfig
 		t.Fatal("platform spec missing api_connection_auth_config_precedence")
 	}
 	return spec.CLISpecification.Foundations.APIConnectionAuthConfig
+}
+
+func loadCLIContractPlatformSpecPathResolutionSpec(t *testing.T) cliContractPlatformSpecPathResolutionSpec {
+	t.Helper()
+	var spec struct {
+		CLISpecification struct {
+			Foundations struct {
+				ContractPlatformSpecPathResolution cliContractPlatformSpecPathResolutionSpec `yaml:"contract_platform_spec_path_resolution"`
+			} `yaml:"foundations"`
+		} `yaml:"cli_specification"`
+	}
+	data, err := os.ReadFile(filepath.Join(repoRoot(), defaultPlatformSpecPath))
+	if err != nil {
+		t.Fatalf("read platform spec: %v", err)
+	}
+	if err := yaml.Unmarshal(data, &spec); err != nil {
+		t.Fatalf("parse platform spec: %v", err)
+	}
+	if strings.TrimSpace(spec.CLISpecification.Foundations.ContractPlatformSpecPathResolution.CanonicalOwner) == "" {
+		t.Fatal("platform spec missing contract_platform_spec_path_resolution")
+	}
+	return spec.CLISpecification.Foundations.ContractPlatformSpecPathResolution
 }
 
 func stringSliceContains(values []string, want string) bool {
