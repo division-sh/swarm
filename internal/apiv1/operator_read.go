@@ -678,11 +678,18 @@ func OperatorObservabilityHandlers(opts OperatorReadOptions) map[string]MethodHa
 			if err != nil {
 				return nil, err
 			}
+			until, err := timestampParam(req.Params, "until")
+			if err != nil {
+				return nil, err
+			}
+			if since != nil && until != nil && since.After(*until) {
+				return nil, NewInvalidParamsError(map[string]any{"field": "until", "reason": "must be at or after since"})
+			}
 			filter, err := runTraceFilterParam(req.Params)
 			if err != nil {
 				return nil, err
 			}
-			rows, nextCursor, err := reads.LoadRunDebugTracePage(ctx, runID, store.RunDebugTraceQueryOptions{Limit: limit, Cursor: cursor, Since: since, Filter: filter})
+			rows, nextCursor, err := reads.LoadRunDebugTracePage(ctx, runID, store.RunDebugTraceQueryOptions{Limit: limit, Cursor: cursor, Since: since, Until: until, Filter: filter})
 			if errors.Is(err, store.ErrRunNotFound) {
 				return nil, NewApplicationError(RunNotFoundCode, false, map[string]any{"run_id": runID})
 			}

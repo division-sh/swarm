@@ -4653,6 +4653,14 @@
           }
         },
         {
+          "name": "until",
+          "required": false,
+          "description": "Optional snapshot-only RFC3339/RFC3339Nano materialization watermark upper bound. Returns rows whose canonical trace materialization watermark is less than or equal to this timestamp. When combined with since, the server applies the half-open window `(since, until]`; since after until is invalid.\n",
+          "schema": {
+            "$ref": "#/components/schemas/Timestamp"
+          }
+        },
+        {
           "name": "filter",
           "required": false,
           "description": "Typed predicates over canonical RunTraceRow facts. Present fields are OR-lists within the field and AND-composed across fields.",

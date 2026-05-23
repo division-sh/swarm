@@ -5970,15 +5970,16 @@ cli_specification:
           The bounded snapshot trace filter contract is promoted in
           api_specification.method_catalog.run.trace and
           cli_specification.command_catalog.trace.promoted_trace_filter_contract. The promoted API owner accepts
-          `limit`, `cursor`, and `since`; `since` filters by the canonical RunTraceRow materialization watermark
+          `limit`, `cursor`, `since`, and `until`; `since` and `until` filter by the canonical RunTraceRow materialization watermark
           used by the run-debug trace owner. Trace-specific `swarm trace --follow` subscription recovery and
           `--no-retry` are promoted in
           cli_specification.command_catalog.trace.promoted_trace_follow_recovery_contract by #928. Review-artifact
           `-f` shorthand is promoted in the trace command row as a CLI-only alias for `--follow`. Typed
           RunTraceFilter fields for event-name, subscriber identity, entity-id, and delivery-status are promoted on
           `/v1/rpc run.trace` and `/v1/ws run.subscribe_trace` and consumed by `swarm trace` snapshot and follow
-          modes. Review-artifact `until`, `--include-payload`, shared `swarm run` recovery, and multi-run `--all`
-          remain explicitly unpromoted split tails until later gated children promote their own canonical owners.
+          modes. Snapshot `until` is promoted on `/v1/rpc run.trace` only as an inclusive upper bound. Review-artifact
+          `--include-payload`, shared `swarm run` recovery, and multi-run `--all` remain explicitly unpromoted split
+          tails until later gated children promote their own canonical owners.
       mailbox_decision_sheet_and_result_ux:
         disposition: promoted_first_slice
         tracker: '#856'
@@ -7275,7 +7276,7 @@ cli_specification:
       defaulting: If run-id is omitted, resolve the target through run.list with active-run preference.
       behavior: Run-scoped operational status projection. This is the v2 replacement for `swarm investigate run`.
     trace:
-      command: swarm trace [<run-id>] [--since <timestamp>] [--limit <n>] [--cursor <cursor>] [--event-name <name> ...] [--entity-id <entity-id> ...] [--delivery-status <pending|in_progress|delivered|failed|dead_letter> ...] [--subscriber-id <id> ...] [--subscriber-type <node|agent> ...] [--follow|-f] [--no-retry]
+      command: swarm trace [<run-id>] [--since <timestamp>] [--until <timestamp>] [--limit <n>] [--cursor <cursor>] [--event-name <name> ...] [--entity-id <entity-id> ...] [--delivery-status <pending|in_progress|delivered|failed|dead_letter> ...] [--subscriber-id <id> ...] [--subscriber-type <node|agent> ...] [--follow|-f] [--no-retry]
       tier: must_have
       implementation_status: implemented
       owners: /v1/rpc run.trace for snapshot; /v1/ws run.subscribe_trace for --follow/-f
@@ -7290,6 +7291,7 @@ cli_specification:
         - limit
         - cursor
         - since
+        - until
         - filter
         filter_schema: RunTraceFilter
         filter_fields:
@@ -7302,18 +7304,24 @@ cli_specification:
           `since` is an RFC3339/RFC3339Nano timestamp watermark. The server returns trace rows whose canonical
           materialization watermark is strictly after `since`, where that watermark is the greatest available
           timestamp across the joined event, delivery, session, and turn fields owned by RunTraceRow.
+        until_semantics: >
+          `until` is a snapshot-only RFC3339/RFC3339Nano timestamp upper bound. The server returns trace rows whose
+          canonical materialization watermark is less than or equal to `until`, using the same greatest-available
+          event, delivery, session, and turn timestamp owner as `since`. Combined `since` and `until` define the
+          half-open window `(since, until]`; `since` after `until` is invalid, while equal timestamps are allowed and
+          naturally produce an empty exclusive/inclusive window.
         current_cli_consumer_status: implemented_by_918_and_855
         cli_consumer_behavior: >
-          Snapshot `swarm trace` consumes `--since`, `--limit`, `--cursor`, `--event-name`, `--entity-id`,
+          Snapshot `swarm trace` consumes `--since`, `--until`, `--limit`, `--cursor`, `--event-name`, `--entity-id`,
           `--delivery-status`, `--subscriber-id`, and `--subscriber-type` by sending the exact promoted params to
           `/v1/rpc run.trace`. Follow `swarm trace --follow` / `swarm trace -f` consumes the same typed filter flags
-          by sending `filter` to `/v1/ws run.subscribe_trace`; fixed-window snapshot controls `--since`, `--limit`,
-          and `--cursor` remain invalid with follow and must fail before any API or WebSocket request.
+          by sending `filter` to `/v1/ws run.subscribe_trace`; fixed-window snapshot controls `--since`, `--until`,
+          `--limit`, and `--cursor` remain invalid with follow and must fail before any API or WebSocket request.
         proof_expectations:
         - exact /v1/rpc run.trace params for explicit run ids and omitted-run resolution through run.list
-        - repeatable filter flags serialize as RunTraceFilter arrays under the single `filter` param and compose with since/limit/cursor
+        - repeatable filter flags serialize as RunTraceFilter arrays under the single `filter` param and compose with since/until/limit/cursor
         - follow-mode repeatable filter flags serialize as RunTraceFilter arrays under the single `filter` param and are preserved across recovery requests
-        - invalid --since, out-of-range --limit, blank --cursor, blank/invalid typed filters, and fixed-window snapshot controls combined with --follow fail before API/WS calls
+        - invalid --since, invalid --until, since-after-until, out-of-range --limit, blank --cursor, blank/invalid typed filters, and fixed-window snapshot controls combined with --follow fail before API/WS calls
         - missing token fails before API calls through the shared CLI API client
         - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api, /rpc, /ws, or fallback token paths
       promoted_trace_follow_recovery_contract:
@@ -7362,6 +7370,7 @@ cli_specification:
           0 on a clean close, and fails closed on the first subscription or notification error.
         invalid_combinations:
         - --since with --follow/-f
+        - --until with --follow/-f
         - --limit with --follow/-f
         - --cursor with --follow/-f
         - --no-retry without --follow/-f
@@ -7377,7 +7386,6 @@ cli_specification:
         - '`swarm run` foreground/follow and reattach regression proof remains unchanged'
         - static no-bypass proof for no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy transports
         split_tail:
-          until: Not promoted; the current run-debug trace owner has no upper-bound watermark contract.
           include_payload: Not promoted; RunTraceRow has no payload field and output/schema ownership is split.
           shared_run_follow_recovery: Not promoted; `swarm run` follow and reattach have distinct lifecycle semantics and remain split.
           all_runs: Not promoted; multi-run trace needs a canonical multi-run owner or explicit run.list + run.trace composition contract.
@@ -11217,6 +11225,14 @@ api_specification:
         description: >
           Optional RFC3339/RFC3339Nano materialization watermark. Returns rows whose canonical trace
           materialization watermark is strictly after this timestamp.
+        schema:
+          $ref: '#/components/schemas/Timestamp'
+      - name: until
+        required: false
+        description: >
+          Optional snapshot-only RFC3339/RFC3339Nano materialization watermark upper bound. Returns rows whose
+          canonical trace materialization watermark is less than or equal to this timestamp. When combined with
+          since, the server applies the half-open window `(since, until]`; since after until is invalid.
         schema:
           $ref: '#/components/schemas/Timestamp'
       - name: filter
