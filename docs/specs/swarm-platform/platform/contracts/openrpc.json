@@ -4539,13 +4539,21 @@
     },
     {
       "name": "run.subscribe_trace",
-      "description": "Live composed trace stream for one run. Each notification carries one\njoined trace row (the same RunTraceRow shape returned by run.trace).\nDistinct from event.subscribe because trace is a composed view (event\n+ delivery + session + turn joined by the runtime), not raw events.\n",
+      "description": "Live composed trace stream for one run. Each notification carries one\njoined trace row (the same RunTraceRow shape returned by run.trace).\nDistinct from event.subscribe because trace is a composed view (event\n+ delivery + session + turn joined by the runtime), not raw events.\nSupports the same RunTraceFilter row predicates as run.trace, composed with\nreplay_since for catch-up/recovery.\n",
       "params": [
         {
           "name": "run_id",
           "required": true,
           "schema": {
             "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "filter",
+          "required": false,
+          "description": "Typed predicates over canonical RunTraceRow facts. Present fields are OR-lists within the field and AND-composed across fields.",
+          "schema": {
+            "$ref": "#/components/schemas/RunTraceFilter"
           }
         },
         {
@@ -4647,7 +4655,7 @@
         {
           "name": "filter",
           "required": false,
-          "description": "Snapshot-only typed predicates over canonical RunTraceRow facts. Present fields are OR-lists within the field and AND-composed across fields.",
+          "description": "Typed predicates over canonical RunTraceRow facts. Present fields are OR-lists within the field and AND-composed across fields.",
           "schema": {
             "$ref": "#/components/schemas/RunTraceFilter"
           }
@@ -6965,7 +6973,7 @@
       },
       "RunTraceFilter": {
         "additionalProperties": false,
-        "description": "Snapshot-only typed predicates for the canonical composed RunTraceRow owner. Each present field is an OR-list for that field; different fields compose with AND. This schema is consumed by /v1/rpc run.trace only. /v1/ws run.subscribe_trace does not accept it until a separate follow-filter contract is promoted.",
+        "description": "Typed predicates for the canonical composed RunTraceRow owner. Each present field is an OR-list for that field; different fields compose with AND. This schema is consumed by /v1/rpc run.trace and /v1/ws run.subscribe_trace.",
         "properties": {
           "delivery_status": {
             "items": {

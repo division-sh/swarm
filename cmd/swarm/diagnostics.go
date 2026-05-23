@@ -233,11 +233,11 @@ func newTraceCommand(opts rootCommandOptions) *cobra.Command {
 	cmd.Flags().StringVar(&traceOpts.since, "since", "", "Snapshot-only RFC3339 trace materialization watermark")
 	cmd.Flags().IntVar(&traceOpts.limit, "limit", 0, "Snapshot-only page size, 1-2000")
 	cmd.Flags().StringVar(&traceOpts.cursor, "cursor", "", "Snapshot-only pagination cursor")
-	cmd.Flags().StringArrayVar(&traceOpts.eventNames, "event-name", nil, "Snapshot-only event name filter; repeat to match any")
-	cmd.Flags().StringArrayVar(&traceOpts.entityIDs, "entity-id", nil, "Snapshot-only entity id filter; repeat to match any")
-	cmd.Flags().StringArrayVar(&traceOpts.deliveryStatuses, "delivery-status", nil, "Snapshot-only delivery status filter; repeat to match any")
-	cmd.Flags().StringArrayVar(&traceOpts.subscriberIDs, "subscriber-id", nil, "Snapshot-only subscriber id filter; repeat to match any")
-	cmd.Flags().StringArrayVar(&traceOpts.subscriberTypes, "subscriber-type", nil, "Snapshot-only subscriber type filter: node or agent; repeat to match any")
+	cmd.Flags().StringArrayVar(&traceOpts.eventNames, "event-name", nil, "Event name filter; repeat to match any")
+	cmd.Flags().StringArrayVar(&traceOpts.entityIDs, "entity-id", nil, "Entity id filter; repeat to match any")
+	cmd.Flags().StringArrayVar(&traceOpts.deliveryStatuses, "delivery-status", nil, "Delivery status filter; repeat to match any")
+	cmd.Flags().StringArrayVar(&traceOpts.subscriberIDs, "subscriber-id", nil, "Subscriber id filter; repeat to match any")
+	cmd.Flags().StringArrayVar(&traceOpts.subscriberTypes, "subscriber-type", nil, "Subscriber type filter: node or agent; repeat to match any")
 	bindCLIAPIConnectionFlags(cmd, &traceOpts.apiOptions)
 	return cmd
 }
@@ -428,7 +428,7 @@ func runDiagnosticRunCommand(ctx context.Context, out, errOut io.Writer, opts di
 }
 
 func runDiagnosticTraceCommand(ctx context.Context, out, errOut io.Writer, opts diagnosticTraceOptions, runID string) error {
-	snapshotParams, err := opts.snapshotParams()
+	traceParams, err := opts.traceParams()
 	if err != nil {
 		return err
 	}
@@ -444,11 +444,11 @@ func runDiagnosticTraceCommand(ctx context.Context, out, errOut io.Writer, opts 
 		}
 	}
 	if opts.follow {
-		return followDiagnosticTraceCommand(ctx, out, errOut, client, runID, opts)
+		return followDiagnosticTraceCommand(ctx, out, errOut, client, runID, opts, traceParams)
 	}
-	snapshotParams["run_id"] = runID
+	traceParams["run_id"] = runID
 	var result diagnosticRunTraceResult
-	if err := client.call(ctx, "run.trace", snapshotParams, &result); err != nil {
+	if err := client.call(ctx, "run.trace", traceParams, &result); err != nil {
 		return returnCLIAPIError(errOut, err, diagnosticRunAPIErrorClassifier())
 	}
 	if err := validateDiagnosticRunTraceResult(result); err != nil {
@@ -458,27 +458,14 @@ func runDiagnosticTraceCommand(ctx context.Context, out, errOut io.Writer, opts 
 	return nil
 }
 
-func (o diagnosticTraceOptions) snapshotParams() (map[string]any, error) {
+func (o diagnosticTraceOptions) traceParams() (map[string]any, error) {
 	if o.follow {
-		for _, flag := range []struct {
-			name string
-			set  bool
-		}{
-			{name: "--since", set: o.sinceSet},
-			{name: "--limit", set: o.limitSet},
-			{name: "--cursor", set: o.cursorSet},
-			{name: "--event-name", set: len(o.eventNames) > 0},
-			{name: "--entity-id", set: len(o.entityIDs) > 0},
-			{name: "--delivery-status", set: len(o.deliveryStatuses) > 0},
-			{name: "--subscriber-id", set: len(o.subscriberIDs) > 0},
-			{name: "--subscriber-type", set: len(o.subscriberTypes) > 0},
-		} {
-			if flag.set {
-				return nil, fmt.Errorf("%s is not supported with --follow", flag.name)
-			}
-		}
-		return map[string]any{}, nil
+		return o.followParams()
 	}
+	return o.snapshotParams()
+}
+
+func (o diagnosticTraceOptions) snapshotParams() (map[string]any, error) {
 	if o.noRetry {
 		return nil, fmt.Errorf("--no-retry requires --follow")
 	}
@@ -503,7 +490,7 @@ func (o diagnosticTraceOptions) snapshotParams() (map[string]any, error) {
 		}
 		params["since"] = since
 	}
-	filter, err := o.snapshotFilter()
+	filter, err := o.traceFilter()
 	if err != nil {
 		return nil, err
 	}
@@ -513,10 +500,34 @@ func (o diagnosticTraceOptions) snapshotParams() (map[string]any, error) {
 	return params, nil
 }
 
-func (o diagnosticTraceOptions) snapshotFilter() (map[string]any, error) {
+func (o diagnosticTraceOptions) followParams() (map[string]any, error) {
+	for _, flag := range []struct {
+		name string
+		set  bool
+	}{
+		{name: "--since", set: o.sinceSet},
+		{name: "--limit", set: o.limitSet},
+		{name: "--cursor", set: o.cursorSet},
+	} {
+		if flag.set {
+			return nil, fmt.Errorf("%s is not supported with --follow", flag.name)
+		}
+	}
+	filter, err := o.traceFilter()
+	if err != nil {
+		return nil, err
+	}
+	params := map[string]any{}
+	if len(filter) > 0 {
+		params["filter"] = filter
+	}
+	return params, nil
+}
+
+func (o diagnosticTraceOptions) traceFilter() (map[string]any, error) {
 	filter := map[string]any{}
 	addStringList := func(name, flag string, values []string) error {
-		values, err := snapshotTraceStringList(flag, values)
+		values, err := traceStringList(flag, values)
 		if err != nil {
 			return err
 		}
@@ -528,7 +539,7 @@ func (o diagnosticTraceOptions) snapshotFilter() (map[string]any, error) {
 	if err := addStringList("event_name", "--event-name", o.eventNames); err != nil {
 		return nil, err
 	}
-	entityIDs, err := snapshotTraceStringList("--entity-id", o.entityIDs)
+	entityIDs, err := traceStringList("--entity-id", o.entityIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -540,7 +551,7 @@ func (o diagnosticTraceOptions) snapshotFilter() (map[string]any, error) {
 	if len(entityIDs) > 0 {
 		filter["entity_id"] = entityIDs
 	}
-	deliveryStatuses, err := snapshotTraceEnumList("--delivery-status", o.deliveryStatuses, eventObservationValidDeliveryStatuses, "pending, in_progress, delivered, failed, dead_letter")
+	deliveryStatuses, err := traceEnumList("--delivery-status", o.deliveryStatuses, eventObservationValidDeliveryStatuses, "pending, in_progress, delivered, failed, dead_letter")
 	if err != nil {
 		return nil, err
 	}
@@ -550,7 +561,7 @@ func (o diagnosticTraceOptions) snapshotFilter() (map[string]any, error) {
 	if err := addStringList("subscriber_id", "--subscriber-id", o.subscriberIDs); err != nil {
 		return nil, err
 	}
-	subscriberTypes, err := snapshotTraceEnumList("--subscriber-type", o.subscriberTypes, eventObservationValidSubscriberTypes, "node, agent")
+	subscriberTypes, err := traceEnumList("--subscriber-type", o.subscriberTypes, eventObservationValidSubscriberTypes, "node, agent")
 	if err != nil {
 		return nil, err
 	}
@@ -560,7 +571,7 @@ func (o diagnosticTraceOptions) snapshotFilter() (map[string]any, error) {
 	return filter, nil
 }
 
-func snapshotTraceStringList(flag string, values []string) ([]string, error) {
+func traceStringList(flag string, values []string) ([]string, error) {
 	if len(values) == 0 {
 		return nil, nil
 	}
@@ -580,7 +591,7 @@ func snapshotTraceStringList(flag string, values []string) ([]string, error) {
 	return out, nil
 }
 
-func snapshotTraceEnumList(flag string, values []string, valid map[string]struct{}, allowed string) ([]string, error) {
+func traceEnumList(flag string, values []string, valid map[string]struct{}, allowed string) ([]string, error) {
 	if len(values) == 0 {
 		return nil, nil
 	}
@@ -603,7 +614,7 @@ func snapshotTraceEnumList(flag string, values []string, valid map[string]struct
 	return out, nil
 }
 
-func followDiagnosticTraceCommand(ctx context.Context, out, errOut io.Writer, client *cliAPIClient, runID string, opts diagnosticTraceOptions) error {
+func followDiagnosticTraceCommand(ctx context.Context, out, errOut io.Writer, client *cliAPIClient, runID string, opts diagnosticTraceOptions, params map[string]any) error {
 	wsEndpoint, err := runCommandWebSocketEndpoint(client.endpoint)
 	if err != nil {
 		if errOut != nil {
@@ -618,7 +629,7 @@ func followDiagnosticTraceCommand(ctx context.Context, out, errOut io.Writer, cl
 	retryAttempt := 0
 	var replaySince *time.Time
 	for {
-		sub, err := subscribeRunTrace(ctx, wsEndpoint, client.token, runID, replaySince)
+		sub, err := subscribeRunTrace(ctx, wsEndpoint, client.token, runID, replaySince, params)
 		if err != nil {
 			if ctx.Err() != nil {
 				return traceFollowDetached(errOut)

@@ -752,11 +752,29 @@ func assertRunCommandMethods(t *testing.T, calls *[]jsonRPCRequest, want []strin
 
 func assertRunCommandTraceSubscription(t *testing.T, requests *[]jsonRPCRequest, runID string, wantReplaySince bool) {
 	t.Helper()
+	assertRunCommandTraceSubscriptionParams(t, requests, runID, wantReplaySince, nil)
+}
+
+func assertRunCommandTraceSubscriptionWithFilter(t *testing.T, requests *[]jsonRPCRequest, runID string, wantReplaySince bool, wantFilter map[string]any) {
+	t.Helper()
+	assertRunCommandTraceSubscriptionParams(t, requests, runID, wantReplaySince, wantFilter)
+}
+
+func assertRunCommandTraceSubscriptionParams(t *testing.T, requests *[]jsonRPCRequest, runID string, wantReplaySince bool, wantFilter map[string]any) {
+	t.Helper()
 	if len(*requests) != 1 || (*requests)[0].Method != runCommandMethodSubscribeTrace {
 		t.Fatalf("ws requests = %#v, want %s", *requests, runCommandMethodSubscribeTrace)
 	}
 	if got := (*requests)[0].Params["run_id"]; got != runID {
 		t.Fatalf("ws run_id = %#v, want %s", got, runID)
+	}
+	rawFilter, hasFilter := (*requests)[0].Params["filter"]
+	if wantFilter == nil {
+		if hasFilter {
+			t.Fatalf("ws filter = %#v, want omitted", rawFilter)
+		}
+	} else if !reflect.DeepEqual(rawFilter, wantFilter) {
+		t.Fatalf("ws filter = %#v, want %#v", rawFilter, wantFilter)
 	}
 	rawReplaySince, ok := (*requests)[0].Params["replay_since"]
 	if !wantReplaySince {
