@@ -34,6 +34,7 @@ type diagnosticTraceOptions struct {
 	follow           bool
 	noRetry          bool
 	since            string
+	until            string
 	limit            int
 	cursor           string
 	eventNames       []string
@@ -42,6 +43,7 @@ type diagnosticTraceOptions struct {
 	subscriberIDs    []string
 	subscriberTypes  []string
 	sinceSet         bool
+	untilSet         bool
 	limitSet         bool
 	cursorSet        bool
 }
@@ -219,6 +221,7 @@ func newTraceCommand(opts rootCommandOptions) *cobra.Command {
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			traceOpts.sinceSet = cmd.Flags().Changed("since")
+			traceOpts.untilSet = cmd.Flags().Changed("until")
 			traceOpts.limitSet = cmd.Flags().Changed("limit")
 			traceOpts.cursorSet = cmd.Flags().Changed("cursor")
 			runID := ""
@@ -231,6 +234,7 @@ func newTraceCommand(opts rootCommandOptions) *cobra.Command {
 	cmd.Flags().BoolVarP(&traceOpts.follow, "follow", "f", false, "Follow live trace rows through /v1/ws run.subscribe_trace")
 	cmd.Flags().BoolVar(&traceOpts.noRetry, "no-retry", false, "Disable trace follow reconnect/recovery retries")
 	cmd.Flags().StringVar(&traceOpts.since, "since", "", "Snapshot-only RFC3339 trace materialization watermark")
+	cmd.Flags().StringVar(&traceOpts.until, "until", "", "Snapshot-only inclusive RFC3339 trace materialization upper bound")
 	cmd.Flags().IntVar(&traceOpts.limit, "limit", 0, "Snapshot-only page size, 1-2000")
 	cmd.Flags().StringVar(&traceOpts.cursor, "cursor", "", "Snapshot-only pagination cursor")
 	cmd.Flags().StringArrayVar(&traceOpts.eventNames, "event-name", nil, "Event name filter; repeat to match any")
@@ -483,12 +487,28 @@ func (o diagnosticTraceOptions) snapshotParams() (map[string]any, error) {
 		}
 		params["cursor"] = cursor
 	}
+	var sinceTime *time.Time
 	if o.sinceSet {
 		since := strings.TrimSpace(o.since)
-		if err := validateRFC3339Flag("--since", since); err != nil {
+		parsed, err := parseRFC3339Flag("--since", since)
+		if err != nil {
 			return nil, err
 		}
+		sinceTime = &parsed
 		params["since"] = since
+	}
+	var untilTime *time.Time
+	if o.untilSet {
+		until := strings.TrimSpace(o.until)
+		parsed, err := parseRFC3339Flag("--until", until)
+		if err != nil {
+			return nil, err
+		}
+		untilTime = &parsed
+		params["until"] = until
+	}
+	if sinceTime != nil && untilTime != nil && sinceTime.After(*untilTime) {
+		return nil, fmt.Errorf("--until must be at or after --since")
 	}
 	filter, err := o.traceFilter()
 	if err != nil {
@@ -506,6 +526,7 @@ func (o diagnosticTraceOptions) followParams() (map[string]any, error) {
 		set  bool
 	}{
 		{name: "--since", set: o.sinceSet},
+		{name: "--until", set: o.untilSet},
 		{name: "--limit", set: o.limitSet},
 		{name: "--cursor", set: o.cursorSet},
 	} {
@@ -897,10 +918,16 @@ func (o diagnosticRunListOptions) params() (map[string]any, error) {
 }
 
 func validateRFC3339Flag(name, value string) error {
-	if _, err := time.Parse(time.RFC3339Nano, value); err != nil {
-		return fmt.Errorf("%s must be an RFC3339 timestamp: %w", name, err)
+	_, err := parseRFC3339Flag(name, value)
+	return err
+}
+
+func parseRFC3339Flag(name, value string) (time.Time, error) {
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("%s must be an RFC3339 timestamp: %w", name, err)
 	}
-	return nil
+	return parsed, nil
 }
 
 func validateDiagnosticRunListResult(result diagnosticRunListResult) error {

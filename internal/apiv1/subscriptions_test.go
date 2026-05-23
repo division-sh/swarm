@@ -397,6 +397,7 @@ func TestRunSubscribeTraceFilterValidation(t *testing.T) {
 		wantField string
 	}{
 		{name: "unknown top-level limit", params: map[string]any{"run_id": "run-1", "limit": 1}, wantField: "limit"},
+		{name: "unknown top-level until", params: map[string]any{"run_id": "run-1", "until": "2026-05-13T10:05:00Z"}, wantField: "until"},
 		{name: "unknown filter field", params: map[string]any{"run_id": "run-1", "filter": map[string]any{"event_nmae": []any{"scan.requested"}}}, wantField: "filter.event_nmae"},
 		{name: "invalid delivery status", params: map[string]any{"run_id": "run-1", "filter": map[string]any{"delivery_status": []any{"done"}}}, wantField: "filter.delivery_status"},
 		{name: "invalid subscriber type", params: map[string]any{"run_id": "run-1", "filter": map[string]any{"subscriber_type": []any{"system"}}}, wantField: "filter.subscriber_type"},

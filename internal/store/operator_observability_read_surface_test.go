@@ -408,12 +408,48 @@ func TestRunDebugTracePageCursorAndRunNotFound(t *testing.T) {
 	if len(page2) != 1 || page2[0].EventID != secondEvent {
 		t.Fatalf("trace page2 = %#v", page2)
 	}
+	until := base.Add(time.Second)
+	boundedPage1, boundedNext, err := pg.LoadRunDebugTracePage(ctx, runID, RunDebugTraceQueryOptions{Limit: 1, Until: &until})
+	if err != nil {
+		t.Fatalf("LoadRunDebugTracePage bounded page1: %v", err)
+	}
+	if len(boundedPage1) != 1 || boundedPage1[0].EventID != firstEvent || boundedNext == "" {
+		t.Fatalf("bounded trace page1 rows=%#v next=%q", boundedPage1, boundedNext)
+	}
+	boundedPage2, _, err := pg.LoadRunDebugTracePage(ctx, runID, RunDebugTraceQueryOptions{Limit: 1, Cursor: boundedNext, Until: &until})
+	if err != nil {
+		t.Fatalf("LoadRunDebugTracePage bounded page2: %v", err)
+	}
+	if len(boundedPage2) != 1 || boundedPage2[0].EventID != secondEvent {
+		t.Fatalf("bounded trace page2 = %#v", boundedPage2)
+	}
 	sinceRows, _, err := pg.LoadRunDebugTracePage(ctx, runID, RunDebugTraceQueryOptions{Limit: 10, Since: &base})
 	if err != nil {
 		t.Fatalf("LoadRunDebugTracePage since: %v", err)
 	}
 	if len(sinceRows) != 1 || sinceRows[0].EventID != secondEvent {
 		t.Fatalf("trace since rows = %#v, want only second event", sinceRows)
+	}
+	untilRows, _, err := pg.LoadRunDebugTracePage(ctx, runID, RunDebugTraceQueryOptions{Limit: 10, Until: &base})
+	if err != nil {
+		t.Fatalf("LoadRunDebugTracePage until: %v", err)
+	}
+	if len(untilRows) != 1 || untilRows[0].EventID != firstEvent {
+		t.Fatalf("trace until rows = %#v, want only first event", untilRows)
+	}
+	emptyWindowRows, _, err := pg.LoadRunDebugTracePage(ctx, runID, RunDebugTraceQueryOptions{Limit: 10, Since: &base, Until: &base})
+	if err != nil {
+		t.Fatalf("LoadRunDebugTracePage empty window: %v", err)
+	}
+	if len(emptyWindowRows) != 0 {
+		t.Fatalf("trace equal since/until rows = %#v, want empty exclusive/inclusive window", emptyWindowRows)
+	}
+	windowRows, _, err := pg.LoadRunDebugTracePage(ctx, runID, RunDebugTraceQueryOptions{Limit: 10, Since: &base, Until: &until})
+	if err != nil {
+		t.Fatalf("LoadRunDebugTracePage bounded window: %v", err)
+	}
+	if len(windowRows) != 1 || windowRows[0].EventID != secondEvent {
+		t.Fatalf("trace bounded window rows = %#v, want only second event", windowRows)
 	}
 	if _, _, err := pg.LoadRunDebugTracePage(ctx, uuid.NewString(), RunDebugTraceQueryOptions{}); !errors.Is(err, ErrRunNotFound) {
 		t.Fatalf("missing run error = %v, want ErrRunNotFound", err)
@@ -433,6 +469,7 @@ func TestRunDebugTracePageTypedFilters(t *testing.T) {
 	firstDelivery := uuid.NewString()
 	secondDelivery := uuid.NewString()
 	base := time.Unix(1700000400, 0).UTC()
+	until := base
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, runID, base); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -482,6 +519,11 @@ func TestRunDebugTracePageTypedFilters(t *testing.T) {
 			name: "and composition",
 			opts: RunDebugTraceQueryOptions{Limit: 10, Filter: RunDebugTraceFilter{EventNames: []string{"first.event", "second.event"}, EntityIDs: []string{entityTwo}, DeliveryStatuses: []string{"dead_letter"}, SubscriberIDs: []string{"agent-2"}, SubscriberTypes: []string{"agent"}}},
 			want: secondEvent,
+		},
+		{
+			name: "filter and until composition",
+			opts: RunDebugTraceQueryOptions{Limit: 10, Until: &until, Filter: RunDebugTraceFilter{EventNames: []string{"first.event", "second.event"}}},
+			want: firstEvent,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

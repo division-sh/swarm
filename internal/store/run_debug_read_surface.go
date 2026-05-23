@@ -131,6 +131,7 @@ type RunDebugTraceQueryOptions struct {
 	Limit  int
 	Cursor string
 	Since  *time.Time
+	Until  *time.Time
 	Filter RunDebugTraceFilter
 }
 
@@ -625,6 +626,18 @@ func (s *PostgresStore) LoadRunDebugTrace(ctx context.Context, runID string, opt
 	return rows, err
 }
 
+func runDebugTraceWatermarkWhere(operator string, argIndex int) string {
+	return fmt.Sprintf(`
+			  AND GREATEST(
+				e.created_at,
+				COALESCE(d.created_at, '-infinity'::timestamptz),
+				COALESCE(d.started_at, '-infinity'::timestamptz),
+				COALESCE(d.delivered_at, '-infinity'::timestamptz),
+				COALESCE(sess.updated_at, '-infinity'::timestamptz),
+				COALESCE(t.created_at, '-infinity'::timestamptz)
+			  ) %s $%d::timestamptz`, operator, argIndex)
+}
+
 func (s *PostgresStore) LoadRunDebugTracePage(ctx context.Context, runID string, opts RunDebugTraceQueryOptions) ([]RunDebugTraceRow, string, error) {
 	if s == nil || s.DB == nil {
 		return nil, "", fmt.Errorf("postgres store is required")
@@ -687,15 +700,12 @@ func (s *PostgresStore) LoadRunDebugTracePage(ctx context.Context, runID string,
 	sinceWhere := ""
 	if opts.Since != nil {
 		args = append(args, opts.Since.UTC())
-		sinceWhere = fmt.Sprintf(`
-			  AND GREATEST(
-				e.created_at,
-			COALESCE(d.created_at, '-infinity'::timestamptz),
-			COALESCE(d.started_at, '-infinity'::timestamptz),
-			COALESCE(d.delivered_at, '-infinity'::timestamptz),
-			COALESCE(sess.updated_at, '-infinity'::timestamptz),
-				COALESCE(t.created_at, '-infinity'::timestamptz)
-			  ) > $%d::timestamptz`, len(args))
+		sinceWhere = runDebugTraceWatermarkWhere(">", len(args))
+	}
+	untilWhere := ""
+	if opts.Until != nil {
+		args = append(args, opts.Until.UTC())
+		untilWhere = runDebugTraceWatermarkWhere("<=", len(args))
 	}
 	filterWhere := ""
 	addTextArrayFilter := func(values []string, expression string) {
@@ -774,6 +784,7 @@ func (s *PostgresStore) LoadRunDebugTracePage(ctx context.Context, runID string,
 			%s
 			%s
 			%s
+			%s
 			ORDER BY
 				e.created_at ASC,
 				e.event_id ASC,
@@ -782,7 +793,7 @@ func (s *PostgresStore) LoadRunDebugTracePage(ctx context.Context, runID string,
 			t.created_at ASC NULLS FIRST,
 			t.turn_id ASC NULLS FIRST
 		LIMIT $%d
-		`, sessionSources, cursorWhere, sinceWhere, filterWhere, limitArg), args...)
+		`, sessionSources, cursorWhere, sinceWhere, untilWhere, filterWhere, limitArg), args...)
 	if err != nil {
 		return nil, "", fmt.Errorf("load run debug trace: %w", err)
 	}

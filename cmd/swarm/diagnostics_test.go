@@ -362,6 +362,7 @@ func TestTraceUsesRunTraceSnapshot(t *testing.T) {
 			"limit":  float64(2),
 			"cursor": "trace-cur",
 			"since":  "2026-05-13T10:00:00Z",
+			"until":  "2026-05-13T10:05:00Z",
 			"filter": map[string]any{
 				"event_name":      []any{"scan.requested", "scan.completed"},
 				"entity_id":       []any{"entity-1", "entity-2"},
@@ -395,6 +396,7 @@ func TestTraceUsesRunTraceSnapshot(t *testing.T) {
 		"--limit", "2",
 		"--cursor", "trace-cur",
 		"--since", "2026-05-13T10:00:00Z",
+		"--until", "2026-05-13T10:05:00Z",
 		"--event-name", "scan.requested",
 		"--event-name", "scan.completed",
 		"--entity-id", "entity-1",
@@ -454,6 +456,7 @@ func TestTraceSnapshotFiltersUseOmittedRunResolver(t *testing.T) {
 				"limit":  float64(3),
 				"cursor": "trace-cur",
 				"since":  "2026-05-13T10:00:00Z",
+				"until":  "2026-05-13T10:05:00Z",
 				"filter": map[string]any{"event_name": []any{"scan.requested"}},
 			}
 			if !reflect.DeepEqual(req.Params, wantParams) {
@@ -472,7 +475,7 @@ func TestTraceSnapshotFiltersUseOmittedRunResolver(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"trace", "--limit", "3", "--cursor", "trace-cur", "--since", "2026-05-13T10:00:00Z", "--event-name", "scan.requested"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"trace", "--limit", "3", "--cursor", "trace-cur", "--since", "2026-05-13T10:00:00Z", "--until", "2026-05-13T10:05:00Z", "--event-name", "scan.requested"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -573,6 +576,9 @@ func TestTraceHelpPromotesNoRetryWithoutReplaySince(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "-f, --follow") {
 		t.Fatalf("help missing -f shorthand:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "--until") {
+		t.Fatalf("help missing --until:\n%s", stdout.String())
 	}
 	if strings.Contains(stdout.String(), "--replay-since") {
 		t.Fatalf("help exposed unpromoted --replay-since:\n%s", stdout.String())
@@ -969,14 +975,18 @@ func TestDiagnosticsRejectInvalidInputBeforeRequest(t *testing.T) {
 		{name: "trace invalid limit low", args: []string{"trace", "run-1", "--limit", "0"}, wantStderr: "--limit must be between 1 and 2000"},
 		{name: "trace invalid limit high", args: []string{"trace", "run-1", "--limit", "2001"}, wantStderr: "--limit must be between 1 and 2000"},
 		{name: "trace invalid since", args: []string{"trace", "run-1", "--since", "yesterday"}, wantStderr: "--since must be an RFC3339 timestamp"},
+		{name: "trace invalid until", args: []string{"trace", "run-1", "--until", "tomorrow"}, wantStderr: "--until must be an RFC3339 timestamp"},
+		{name: "trace since after until", args: []string{"trace", "run-1", "--since", "2026-05-13T10:05:00Z", "--until", "2026-05-13T10:00:00Z"}, wantStderr: "--until must be at or after --since"},
 		{name: "trace blank cursor", args: []string{"trace", "run-1", "--cursor", " "}, wantStderr: "--cursor must not be empty"},
 		{name: "trace no retry requires follow", args: []string{"trace", "run-1", "--no-retry"}, wantStderr: "--no-retry requires --follow"},
 		{name: "trace follow rejects limit", args: []string{"trace", "run-1", "--follow", "--limit", "5"}, wantStderr: "--limit is not supported with --follow"},
 		{name: "trace follow rejects cursor", args: []string{"trace", "run-1", "--follow", "--cursor", "cur"}, wantStderr: "--cursor is not supported with --follow"},
 		{name: "trace follow rejects since", args: []string{"trace", "run-1", "--follow", "--since", "2026-05-13T10:00:00Z"}, wantStderr: "--since is not supported with --follow"},
+		{name: "trace follow rejects until", args: []string{"trace", "run-1", "--follow", "--until", "2026-05-13T10:05:00Z"}, wantStderr: "--until is not supported with --follow"},
 		{name: "trace shorthand follow rejects limit", args: []string{"trace", "run-1", "-f", "--limit", "5"}, wantStderr: "--limit is not supported with --follow"},
 		{name: "trace shorthand follow rejects cursor", args: []string{"trace", "run-1", "-f", "--cursor", "cur"}, wantStderr: "--cursor is not supported with --follow"},
 		{name: "trace shorthand follow rejects since", args: []string{"trace", "run-1", "-f", "--since", "2026-05-13T10:00:00Z"}, wantStderr: "--since is not supported with --follow"},
+		{name: "trace shorthand follow rejects until", args: []string{"trace", "run-1", "-f", "--until", "2026-05-13T10:05:00Z"}, wantStderr: "--until is not supported with --follow"},
 		{name: "trace follow direct replay since remains unpromoted", args: []string{"trace", "run-1", "--follow", "--replay-since", "2026-05-13T10:00:00Z"}, wantStderr: "unknown flag"},
 		{name: "trace blank event name", args: []string{"trace", "run-1", "--event-name", " "}, wantStderr: "--event-name must not be empty"},
 		{name: "trace blank subscriber id", args: []string{"trace", "run-1", "--subscriber-id", " "}, wantStderr: "--subscriber-id must not be empty"},
@@ -1014,7 +1024,7 @@ func TestDiagnosticsRequireAPITokenBeforeRequest(t *testing.T) {
 	for _, args := range [][]string{
 		{"runs"},
 		{"trace", "run-1"},
-		{"trace", "run-1", "--limit", "2", "--cursor", "cur", "--since", "2026-05-13T10:00:00Z"},
+		{"trace", "run-1", "--limit", "2", "--cursor", "cur", "--since", "2026-05-13T10:00:00Z", "--until", "2026-05-13T10:05:00Z"},
 		{"trace", "run-1", "--event-name", "scan.requested", "--entity-id", "entity-1", "--delivery-status", "delivered", "--subscriber-id", "agent-1", "--subscriber-type", "agent"},
 		{"trace", "run-1", "--follow"},
 		{"trace", "run-1", "-f"},
