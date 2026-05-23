@@ -5998,7 +5998,10 @@ cli_specification:
           request because no per-target key derivation policy is promoted. `stop --all --yes` confirmation/non-TTY
           behavior is promoted as the second #859 slice: stop-all requires TTY confirmation before API client
           construction/request unless --yes is supplied, and --yes is valid only with stop --all. `swarm control
-          nuke --idempotency-key` remains a split tail under #859 unless a later gate promotes it.
+          nuke --idempotency-key` is promoted as the final #859 slice: the CLI accepts a caller-supplied key,
+          rejects explicit blank keys before prompt/client/request, and passes non-blank keys through unchanged to
+          `/v1/rpc runtime.nuke` for dry-run, --yes apply, and TTY-confirmed apply without generating,
+          deriving, hashing, persisting, or locally interpreting idempotency ownership.
       rich_agent_operator_ux:
         disposition: tracked_child
         tracker: '#860'
@@ -7597,11 +7600,32 @@ cli_specification:
       - no direct DB/store/runtime/EventBus reads or writes
       - no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, Builder/operator token fallback, runtime.nuke, or runtime.stop
     control_nuke:
-      command: swarm control nuke [--yes|-y] [--dry-run]
+      command: swarm control nuke [--yes|-y] [--dry-run] [--idempotency-key <key>]
       tier: should_have
       implementation_status: implemented
       owner: /v1/rpc runtime.nuke
       behavior: Destructive reset CLI consumer over the public runtime.nuke owner. The CLI MUST NOT call raw Docker, SQL, store cleanup, runtime manager reset, or internal destructive-reset helpers directly.
+      idempotency:
+        rule: >
+          `--idempotency-key <key>` is optional. When supplied, the CLI passes the non-blank key through unchanged as
+          `idempotency_key` to runtime.nuke for dry-run, --yes apply, and TTY-confirmed apply. An explicitly
+          blank key fails before confirmation prompt, API client construction, or API request with exit 2. The
+          CLI MUST NOT generate, persist, derive, hash, or locally interpret idempotency keys.
+      confirmation:
+        rule: >
+          `swarm control nuke` apply remains destructive. `--dry-run` does not require confirmation. Apply
+          without --yes requires TTY confirmation before API client construction or request. Non-TTY apply
+          without --yes fails before API client construction or request. A supplied idempotency key does not
+          bypass confirmation; an explicitly blank idempotency key fails before prompt/client/request.
+      proof_expectations:
+      - exact /v1/rpc runtime.nuke call with dry_run=true and idempotency_key when supplied for --dry-run
+      - exact /v1/rpc runtime.nuke call with dry_run=false and idempotency_key when supplied for --yes or confirmed apply
+      - no-key dry-run/apply requests continue to send only dry_run
+      - explicit blank --idempotency-key fails before confirmation prompt, API client construction, or API request with exit 2
+      - non-TTY apply and user abort with idempotency key make no API request
+      - no direct DB/store/runtime/EventBus reads or writes
+      - no raw Docker, SQL, store cleanup, runtime manager reset, or internal destructive-reset helper calls
+      - no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, Builder/operator token fallback
     agents_list:
       command: swarm agents list
       tier: should_have
