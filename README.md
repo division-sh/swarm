@@ -238,6 +238,7 @@ The trajectory points at running whole company divisions as autonomous flows. Th
 | [`platform-spec.md`](docs/specs/swarm-platform/platform/platform-spec.md) | You need the authoritative specification. |
 | [`BUILDER-API.md`](docs/specs/swarm-platform/platform/BUILDER-API.md) | You're integrating with the Builder surface. |
 | [`FLIGHT-RECORDER.md`](docs/specs/swarm-platform/platform/FLIGHT-RECORDER.md) | You're debugging a run from its trace. |
+| [`SECURITY.md`](SECURITY.md) | You need to report a suspected vulnerability privately. |
 
 ---
 
