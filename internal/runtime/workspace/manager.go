@@ -18,7 +18,6 @@ import (
 	models "swarm/internal/runtime/core/actors"
 	runtimecurrentstate "swarm/internal/runtime/currentstate"
 	runtimedestructivereset "swarm/internal/runtime/destructivereset"
-	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 )
 
@@ -76,15 +75,14 @@ type DockerConfig struct {
 }
 
 func DefaultDockerConfig() DockerConfig {
-	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	return DockerConfig{
 		DockerBin:             EnvOrDefault("SWARM_DOCKER_BIN", "docker"),
 		WorkspaceImage:        EnvOrDefault("SWARM_WORKSPACE_IMAGE", "swarm-workspace:latest"),
 		WorkspaceNetwork:      EnvOrDefault("SWARM_WORKSPACE_NETWORK", "mas_default"),
 		WorkspaceVolumesFrom:  EnvOrDefault("SWARM_WORKSPACE_VOLUMES_FROM", ""),
-		SharedDataSource:      EnvOrDefault("SWARM_WORKSPACE_DATA_SOURCE", filepath.Join(repoRoot, "data")),
+		SharedDataSource:      EnvOrDefault("SWARM_WORKSPACE_DATA_SOURCE", ""),
 		DataMountPoint:        EnvOrDefault("SWARM_WORKSPACE_DATA_MOUNT", "/data"),
-		ContractsSource:       EnvOrDefault("SWARM_WORKSPACE_CONTRACTS_SOURCE", runtimecontracts.DefaultWorkflowContractsDir(repoRoot)),
+		ContractsSource:       EnvOrDefault("SWARM_WORKSPACE_CONTRACTS_SOURCE", ""),
 		ContractsMountPoint:   EnvOrDefault("SWARM_WORKSPACE_CONTRACTS_MOUNT", "/opt/swarm/contracts"),
 		ScaffoldContainer:     EnvOrDefault("SWARM_SCAFFOLD_CONTAINER", "swarm-scaffold"),
 		ScaffoldWorkdir:       EnvOrDefault("SWARM_SCAFFOLD_WORKDIR", "/opt/swarm/scaffold"),
@@ -671,16 +669,8 @@ func (m *DockerManager) ensureWorkspaceImage(ctx context.Context) error {
 	if image == "" {
 		return fmt.Errorf("workspace prerequisite failed: workspace image is required")
 	}
-	if _, err := m.RunDocker(ctx, "image", "inspect", image); err == nil {
-		return nil
-	}
-	repoRoot := runtimepipeline.WorkflowRepoRoot()
-	dockerfile := filepath.Join(repoRoot, "Dockerfile.workspace")
-	if _, statErr := os.Stat(dockerfile); statErr != nil {
-		return fmt.Errorf("workspace prerequisite failed: inspect image %s and Dockerfile.workspace is unavailable: %w", image, statErr)
-	}
-	if _, err := m.RunDocker(ctx, "build", "-t", image, "-f", dockerfile, repoRoot); err != nil {
-		return fmt.Errorf("workspace prerequisite failed: build image %s: %w", image, err)
+	if _, err := m.RunDocker(ctx, "image", "inspect", image); err != nil {
+		return fmt.Errorf("workspace prerequisite failed: workspace image %s is not available; build or pull the image before startup, or set SWARM_WORKSPACE_IMAGE to an available image: %w", image, err)
 	}
 	return nil
 }

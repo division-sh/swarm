@@ -290,7 +290,35 @@ func TestResolveWorkspace_FailsClosedWithoutInjectedSourceForWorkspaceClassScope
 	}
 }
 
-func TestEnsurePrereqs_CreatesMissingNetworkAndBuildsMissingImage(t *testing.T) {
+func TestDefaultDockerConfigDoesNotDeriveSourceRootMounts(t *testing.T) {
+	t.Setenv("SWARM_WORKSPACE_DATA_SOURCE", "")
+	t.Setenv("SWARM_WORKSPACE_CONTRACTS_SOURCE", "")
+
+	cfg := DefaultDockerConfig()
+	if cfg.SharedDataSource != "" {
+		t.Fatalf("SharedDataSource = %q, want no source-root default", cfg.SharedDataSource)
+	}
+	if cfg.ContractsSource != "" {
+		t.Fatalf("ContractsSource = %q, want no source-root default", cfg.ContractsSource)
+	}
+}
+
+func TestDefaultDockerConfigConsumesExplicitWorkspaceMountEnv(t *testing.T) {
+	dataDir := t.TempDir()
+	contractsDir := t.TempDir()
+	t.Setenv("SWARM_WORKSPACE_DATA_SOURCE", dataDir)
+	t.Setenv("SWARM_WORKSPACE_CONTRACTS_SOURCE", contractsDir)
+
+	cfg := DefaultDockerConfig()
+	if cfg.SharedDataSource != dataDir {
+		t.Fatalf("SharedDataSource = %q, want %q", cfg.SharedDataSource, dataDir)
+	}
+	if cfg.ContractsSource != contractsDir {
+		t.Fatalf("ContractsSource = %q, want %q", cfg.ContractsSource, contractsDir)
+	}
+}
+
+func TestEnsurePrereqs_CreatesMissingNetworkAndFailsClosedForMissingImage(t *testing.T) {
 	manager := NewDockerManager(nil)
 	cfg := DefaultDockerConfig()
 	cfg.WorkspaceNetwork = "test-network"
@@ -316,8 +344,15 @@ func TestEnsurePrereqs_CreatesMissingNetworkAndBuildsMissingImage(t *testing.T) 
 		}
 	})
 
-	if err := manager.EnsurePrereqs(context.Background()); err != nil {
-		t.Fatalf("EnsurePrereqs: %v", err)
+	err := manager.EnsurePrereqs(context.Background())
+	if err == nil {
+		t.Fatal("EnsurePrereqs unexpectedly succeeded with missing workspace image")
+	}
+	if !strings.Contains(err.Error(), "workspace image test-image:latest is not available") {
+		t.Fatalf("EnsurePrereqs error = %v, want missing image diagnostic", err)
+	}
+	if !strings.Contains(err.Error(), "set SWARM_WORKSPACE_IMAGE") {
+		t.Fatalf("EnsurePrereqs error = %v, want configured image remediation", err)
 	}
 
 	joined := flattenDockerCalls(calls)
@@ -326,12 +361,13 @@ func TestEnsurePrereqs_CreatesMissingNetworkAndBuildsMissingImage(t *testing.T) 
 		"network inspect test-network",
 		"network create test-network",
 		"image inspect test-image:latest",
-		"build -t test-image:latest",
-		"Dockerfile.workspace",
 	} {
 		if !strings.Contains(joined, expected) {
 			t.Fatalf("EnsurePrereqs calls missing %q: %s", expected, joined)
 		}
+	}
+	if strings.Contains(joined, "build ") || strings.Contains(joined, "Dockerfile.workspace") {
+		t.Fatalf("EnsurePrereqs still attempted source-root image build:\n%s", joined)
 	}
 }
 

@@ -2091,8 +2091,8 @@ func buildCredentialStore() (runtimecredentials.Store, error) {
 func configuredWorkspaceLifecycle(db *sql.DB, repoRoot, contractsRoot string, source semanticview.Source) *workspace.DockerManager {
 	manager := workspace.NewDockerManager(db)
 	cfg := workspace.DefaultDockerConfig()
-	if dataDir := strings.TrimSpace(filepath.Join(repoRoot, "data")); dataDir != "" {
-		cfg.SharedDataSource = dataDir
+	if root := strings.TrimSpace(repoRoot); root != "" {
+		cfg.SharedDataSource = filepath.Join(root, "data")
 	}
 	if contractsDir := strings.TrimSpace(contractsRoot); contractsDir != "" {
 		cfg.ContractsSource = contractsDir

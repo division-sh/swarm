@@ -862,21 +862,65 @@ platform: ">=1.6.0"
 	}
 }
 
+func TestConfiguredWorkspaceLifecycleDoesNotInventSourceRootDataSource(t *testing.T) {
+	t.Setenv("SWARM_WORKSPACE_DATA_SOURCE", "")
+	t.Setenv("SWARM_WORKSPACE_CONTRACTS_SOURCE", "")
+	contractsDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
+		t.Fatalf("write package.yaml: %v", err)
+	}
+
+	manager := configuredWorkspaceLifecycle(nil, "", contractsDir, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}))
+	err := manager.ValidateSource(context.Background(), semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}))
+	if err == nil || !strings.Contains(err.Error(), "/data source is not configured") {
+		t.Fatalf("ValidateSource error = %v, want explicit /data source requirement", err)
+	}
+}
+
+func TestConfiguredWorkspaceLifecycleUsesExplicitRepoAndContractsSources(t *testing.T) {
+	t.Setenv("SWARM_WORKSPACE_DATA_SOURCE", "")
+	t.Setenv("SWARM_WORKSPACE_CONTRACTS_SOURCE", "")
+	repoRoot := t.TempDir()
+	if err := os.Mkdir(filepath.Join(repoRoot, "data"), 0o755); err != nil {
+		t.Fatalf("mkdir data: %v", err)
+	}
+	contractsDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
+		t.Fatalf("write package.yaml: %v", err)
+	}
+
+	manager := configuredWorkspaceLifecycle(nil, repoRoot, contractsDir, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}))
+	if err := manager.ValidateSource(context.Background(), semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})); err != nil {
+		t.Fatalf("ValidateSource: %v", err)
+	}
+}
+
 func TestPlatformSpecInstalledBinaryPortabilityPromoted(t *testing.T) {
 	var spec struct {
 		CLISpecification struct {
 			Foundations struct {
 				InstalledBinaryPortability struct {
-					PromotedBy           string            `yaml:"promoted_by"`
-					ImplementationStatus string            `yaml:"implementation_status"`
-					CanonicalOwner       string            `yaml:"canonical_owner"`
-					Scope                string            `yaml:"scope"`
-					Rule                 string            `yaml:"rule"`
-					EmbeddedAssets       map[string]string `yaml:"embedded_assets"`
-					SplitTail            []string          `yaml:"split_tail"`
+					PromotedBy             string            `yaml:"promoted_by"`
+					ImplementationStatus   string            `yaml:"implementation_status"`
+					CanonicalOwner         string            `yaml:"canonical_owner"`
+					Scope                  string            `yaml:"scope"`
+					Rule                   string            `yaml:"rule"`
+					EmbeddedAssets         map[string]string `yaml:"embedded_assets"`
+					RuntimeWorkspaceAssets map[string]string `yaml:"runtime_workspace_assets"`
+					SplitTail              []string          `yaml:"split_tail"`
 				} `yaml:"installed_binary_portability"`
 			} `yaml:"foundations"`
 		} `yaml:"cli_specification"`
+		WorkspaceModel struct {
+			RuntimeImagePackaging struct {
+				PromotedBy           string `yaml:"promoted_by"`
+				ImplementationStatus string `yaml:"implementation_status"`
+				CanonicalOwner       string `yaml:"canonical_owner"`
+				Rule                 string `yaml:"rule"`
+				MountSourceRule      string `yaml:"mount_source_rule"`
+				SplitScope           string `yaml:"split_scope"`
+			} `yaml:"runtime_image_packaging"`
+		} `yaml:"workspace_model"`
 	}
 	data, err := os.ReadFile(filepath.Join(repoRoot(), defaultPlatformSpecPath))
 	if err != nil {
@@ -895,7 +939,7 @@ func TestPlatformSpecInstalledBinaryPortabilityPromoted(t *testing.T) {
 	if !strings.Contains(portability.CanonicalOwner, "cli_specification.foundations.installed_binary_portability") {
 		t.Fatalf("canonical owner does not point at installed_binary_portability: %s", portability.CanonicalOwner)
 	}
-	for _, want := range []string{"help", "completion", "local `swarm version`", "contract_platform_spec_path_resolution"} {
+	for _, want := range []string{"help", "completion", "local `swarm version`", "contract_platform_spec_path_resolution", "workspace_model.runtime_image_packaging"} {
 		if !strings.Contains(portability.Scope, want) {
 			t.Fatalf("installed binary portability scope missing %q:\n%s", want, portability.Scope)
 		}
@@ -908,9 +952,40 @@ func TestPlatformSpecInstalledBinaryPortabilityPromoted(t *testing.T) {
 	if !strings.Contains(portability.EmbeddedAssets["platform_spec"], defaultPlatformSpecPath) {
 		t.Fatalf("platform_spec embedded asset missing tracked path:\n%s", portability.EmbeddedAssets["platform_spec"])
 	}
-	for _, want := range []string{"Dockerfile.workspace", "#996 Docker Compose", "#997 local cli_test"} {
+	if !strings.Contains(portability.RuntimeWorkspaceAssets["workspace_image"], "MUST NOT use") || !strings.Contains(portability.RuntimeWorkspaceAssets["workspace_image"], "Dockerfile.workspace") {
+		t.Fatalf("workspace_image embedded portability rule missing source-root prohibition:\n%s", portability.RuntimeWorkspaceAssets["workspace_image"])
+	}
+	if stringSliceContains(portability.SplitTail, "Dockerfile.workspace") {
+		t.Fatalf("installed binary portability still lists Dockerfile.workspace as split tail: %#v", portability.SplitTail)
+	}
+	for _, want := range []string{"#996 Docker Compose", "#997 local cli_test"} {
 		if !stringSliceContains(portability.SplitTail, want) {
 			t.Fatalf("installed binary portability split_tail missing %q: %#v", want, portability.SplitTail)
+		}
+	}
+	packaging := spec.WorkspaceModel.RuntimeImagePackaging
+	if strings.TrimSpace(packaging.PromotedBy) != "#1002" {
+		t.Fatalf("runtime image packaging promoted_by = %q, want #1002", packaging.PromotedBy)
+	}
+	if strings.TrimSpace(packaging.ImplementationStatus) != "implemented" {
+		t.Fatalf("runtime image packaging implementation_status = %q, want implemented", packaging.ImplementationStatus)
+	}
+	if !strings.Contains(packaging.CanonicalOwner, "workspace_model.runtime_image_packaging") {
+		t.Fatalf("runtime image packaging canonical owner = %q, want workspace_model.runtime_image_packaging", packaging.CanonicalOwner)
+	}
+	for _, want := range []string{"prebuilt runtime dependency", "fail closed", "MUST NOT build", "Dockerfile.workspace", "runtime.Caller"} {
+		if !strings.Contains(packaging.Rule, want) {
+			t.Fatalf("runtime image packaging rule missing %q:\n%s", want, packaging.Rule)
+		}
+	}
+	for _, want := range []string{"/data", "/opt/swarm/contracts", "MUST NOT derive"} {
+		if !strings.Contains(packaging.MountSourceRule, want) {
+			t.Fatalf("runtime image packaging mount source rule missing %q:\n%s", want, packaging.MountSourceRule)
+		}
+	}
+	for _, want := range []string{"#996", "#997"} {
+		if !strings.Contains(packaging.SplitScope, want) {
+			t.Fatalf("runtime image packaging split scope missing %q:\n%s", want, packaging.SplitScope)
 		}
 	}
 }
