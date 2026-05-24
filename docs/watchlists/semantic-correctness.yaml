@@ -51,6 +51,10 @@ active_issues:
     title: Persist canonical normal run completion/quiescence owner
     maps_to:
       - persisted_normal_run_completion_quiescence_owner
+  - id: 1030
+    title: Reconcile event_receipts typed subscriber identity key
+    maps_to:
+      - event_receipts_typed_subscriber_identity_owner
   - id: 132
     title: Make CEL validation lifecycle-aware for entity-field availability
     maps_to:
@@ -165,6 +169,29 @@ nodes:
         - run.get read-side terminal inference
         - run.diagnose projection-only repair
     current_action_pressure: active first-slice closure under issue 994
+  - id: event_receipts_typed_subscriber_identity_owner
+    title: Event Receipts Typed Subscriber Identity Owner
+    parent_class: runtime delivery/receipt identity ownership drift across schema, writers, typed readers, replay/fork planning, and diagnostics
+    canonical_owners:
+      - docs/specs/swarm-platform/platform/contracts/platform-spec.yaml platform_tables.event_receipts DDL
+      - internal/store/postgres.go event_receipts typed identity migration and fail-closed capability binding
+      - internal/store/events.go, internal/store/event_receipt_store.go, internal/runtime/pipeline/node_system_runner.go, internal/runtime/pipeline/workflow_transitions.go, and internal/store/active_run_quiescence.go receipt writers
+    why_this_node_exists: event receipt readers already interpret subscriber identity as event_id plus subscriber_type plus subscriber_id, while the old physical key and writer conflict targets used only event_id plus subscriber_id and forced local string namespacing.
+    known_manifestations:
+      - a system node named pipeline can collide with the platform pipeline receipt unless subscriber_type participates in the physical identity key
+      - agent, node, and platform receipt writers can overwrite same-event same-subscriber_id rows across types under the old conflict target
+      - replay/fork planning, pending delivery reads, run completion, and diagnostics consume typed receipt identity and can drift if writers preserve untyped uniqueness or local namespacing
+      - existing node:pipeline rows from the local #1007 workaround require one-way normalization under the typed identity owner
+    representative_issues:
+      - 1030
+    common_framing_mistakes:
+      too_broad:
+        - all runtime delivery/replay lifecycle semantics
+      too_narrow:
+        - one node named pipeline workaround
+        - centralized subscriber-id namespacing without DDL and writer migration
+        - changing one ON CONFLICT target while leaving other receipt writers on the old key
+    current_action_pressure: active implementation under issue 1030
   - id: boot_check_definition_drift
     title: Boot Check Definition Drift
     parent_class: semantic correctness drift between authoritative boot-check definitions and enforcement/proof surfaces

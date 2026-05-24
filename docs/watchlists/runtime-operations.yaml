@@ -252,6 +252,10 @@ active_issues:
     title: Aggressively retire legacy universal entity tools from agent catalogs
     maps_to:
       - transport_policy_and_surface_parity
+  - id: 1030
+    title: Reconcile event_receipts typed subscriber identity key
+    maps_to:
+      - delivery_and_replay_ownership
 nodes:
   - id: transport_policy_and_surface_parity
     title: Transport Policy And Surface Parity
@@ -322,6 +326,7 @@ nodes:
       - selected-contract fork-local runtime container is owned by runtime.run_fork.selected_contract_execution.fork_local_runtime_container; it consumes selected recipient planning, authoritative agent delivery materialization, fork-local agent runtime materializer/executor proof, selected route recovery, EventBus recipient guards/descriptors, runtime/platform lineage policy, typed runtime lineage, activation lineage inputs, cleanup, and quiescence for the live selected-fork execution path, while keeping source rows/outcomes, live subscriptions, normal AgentManager current state, readiness/operator output, restart recovery, current-state snapshots, sessions/turns/audits, non-agent replay, retry/idempotency/follow-up policy, and operator consumers split or invalid
       - selected-contract fork-local typed runtime lineage is owned by runtime.run_fork.selected_contract_execution.fork_local_runtime_typed_lineage; selected-fork EventBus, AgentManager, RuntimeLogger, LLM/runtime diagnostic producers, selected-execution tool-executor diagnostics, and MCP turn-context bridges carry fork run ID, subject event ID/type, causal parent event ID, row category, selected-fork owner context, and source/fork/operator classification before persisting canonical ParentEventID/source_event_id truth, while action/reason strings, produced_by_type alone, descriptors, source platform facts, operator state, restart recovery, current-state snapshots, sessions/turns/audits, non-agent replay, and retry/follow-up policy remain invalid or split
       - selected-contract fork-local runtime/platform control event lineage is owned by runtime.run_fork.selected_contract_execution.fork_local_runtime_platform_event_lineage_policy; fresh fork-run platform/control outputs and platform.runtime_log diagnostics from the selected-fork runtime container are admissible only when causally parented to selected execution under the fork run_id, with runtime-log lineage persisted through source_event_id from an explicit parent_event_id or verified same-run subject event rather than action/reason strings, while unrelated fork platform events, source platform facts, produced_by_type alone, and operator surfaces remain invalid selected-fork truth
+      - event_receipts typed subscriber identity is owned by the platform DDL and store migration/capability boundary; platform, node, and agent receipt writers must conflict on event_id, subscriber_type, and subscriber_id together rather than preserving local subscriber-id namespacing
     representative_issues:
       - 112
       - 144
@@ -344,6 +349,7 @@ nodes:
       - 690
       - 709
       - 722
+      - 1030
     common_framing_mistakes:
       too_broad:
         - delivery is flaky

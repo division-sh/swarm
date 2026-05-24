@@ -208,6 +208,40 @@ func TestPlatformSpecRunsOwnsBundleFingerprint(t *testing.T) {
 	}
 }
 
+func TestPlatformSpecEventReceiptsUsesTypedSubscriberIdentity(t *testing.T) {
+	_, file, _, _ := stdruntime.Caller(0)
+	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+	raw, err := os.ReadFile(runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("read platform spec: %v", err)
+	}
+	var spec runtimecontracts.PlatformSpecDocument
+	if err := yaml.Unmarshal(raw, &spec); err != nil {
+		t.Fatalf("unmarshal platform spec: %v", err)
+	}
+	plans, err := GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
+	}
+	var receipts SchemaTableDDL
+	for _, plan := range plans {
+		if plan.TableName == "event_receipts" {
+			receipts = plan
+			break
+		}
+	}
+	if receipts.TableName == "" {
+		t.Fatal("event_receipts ddl plan missing")
+	}
+	joined := strings.Join(receipts.Statements, "\n")
+	if !strings.Contains(joined, "UNIQUE (event_id, subscriber_type, subscriber_id)") {
+		t.Fatalf("event_receipts ddl missing typed subscriber identity:\n%s", joined)
+	}
+	if strings.Contains(joined, "UNIQUE (event_id, subscriber_id)") {
+		t.Fatalf("event_receipts ddl kept untyped subscriber identity:\n%s", joined)
+	}
+}
+
 func TestGeneratePlatformTableDDLs_StripsDeprecatedEntitySubjectDDL(t *testing.T) {
 	var spec runtimecontracts.PlatformSpecDocument
 	spec.PlatformTables.Tables = map[string]struct {

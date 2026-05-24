@@ -64,8 +64,8 @@ func TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces(t *testin
 
 	eventID := triggerEventIDForRun(t, db, runID)
 	assertPipelineReceiptSucceeded(t, db, eventID)
-	assertSystemNodeReceiptPersisted(t, db, eventID, "terminal-node")
-	assertSystemNodeDeliverySettled(t, db, eventID, "terminal-node")
+	assertSystemNodeReceiptPersisted(t, db, eventID, "pipeline")
+	assertSystemNodeDeliverySettled(t, db, eventID, "pipeline")
 	assertRunEntityTerminal(t, db, runID, "done")
 
 	diagnose := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"diagnose","method":"run.diagnose","params":{"run_id":%q}}`, runID))
@@ -300,8 +300,8 @@ flow.started:
     - entity_id
 `)
 	writeRunCompletionFixtureFile(t, filepath.Join(root, "flows", "discovery", "nodes.yaml"), `
-terminal-node:
-  id: terminal-node
+pipeline:
+  id: pipeline
   execution_type: system_node
   subscribes_to:
     - flow.started

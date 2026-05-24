@@ -75,6 +75,7 @@ func TestPostgresStore_BindSchemaCapabilities_CanonicalOptionalVariants(t *testi
 	)
 
 	mock.ExpectQuery("FROM information_schema.columns").WillReturnRows(rows)
+	expectEventReceiptsTypedIdentityKey(mock, true)
 
 	pg := &PostgresStore{DB: db}
 	caps, err := pg.BindSchemaCapabilities(context.Background())
@@ -89,6 +90,9 @@ func TestPostgresStore_BindSchemaCapabilities_CanonicalOptionalVariants(t *testi
 	}
 	if caps.Events.Deliveries != SchemaFlavorCanonical || !caps.Events.DeliveryRunID {
 		t.Fatalf("delivery caps = %+v", caps.Events)
+	}
+	if caps.Events.Receipts != SchemaFlavorCanonical || !caps.Events.ReceiptTypedIdentity {
+		t.Fatalf("receipt caps = %+v", caps.Events)
 	}
 	if caps.EntityState != SchemaFlavorCanonical || !caps.EntityRunID {
 		t.Fatalf("entity_state caps = %+v run_id=%v", caps.EntityState, caps.EntityRunID)
@@ -267,6 +271,7 @@ func TestPostgresStore_CanonicalCapabilityReaders(t *testing.T) {
 		AddRow("event_receipts", "idempotency_key").
 		AddRow("event_receipts", "processed_at")
 	mock.ExpectQuery("FROM information_schema.columns").WillReturnRows(rows)
+	expectEventReceiptsTypedIdentityKey(mock, true)
 
 	pg := &PostgresStore{DB: db}
 	logEnabled, logRunID, err := pg.CanonicalRuntimeLogCapability(context.Background())
@@ -318,6 +323,7 @@ func TestPostgresStore_CanonicalEventReceiptsCapability_FailsClosedWithoutCanoni
 		AddRow("event_receipts", "idempotency_key").
 		AddRow("event_receipts", "processed_at")
 	mock.ExpectQuery("FROM information_schema.columns").WillReturnRows(rows)
+	expectEventReceiptsTypedIdentityKey(mock, true)
 
 	pg := &PostgresStore{DB: db}
 	receiptsEnabled, err := pg.CanonicalEventReceiptsCapability(context.Background())
@@ -330,4 +336,66 @@ func TestPostgresStore_CanonicalEventReceiptsCapability_FailsClosedWithoutCanoni
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations: %v", err)
 	}
+}
+
+func TestPostgresStore_CanonicalEventReceiptsCapability_FailsClosedWithoutTypedIdentityKey(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	rows := sqlmock.NewRows([]string{"table_name", "column_name"}).
+		AddRow("events", "event_id").
+		AddRow("events", "run_id").
+		AddRow("events", "event_name").
+		AddRow("events", "entity_id").
+		AddRow("events", "flow_instance").
+		AddRow("events", "scope").
+		AddRow("events", "payload").
+		AddRow("events", "chain_depth").
+		AddRow("events", "produced_by").
+		AddRow("events", "produced_by_type").
+		AddRow("events", "source_event_id").
+		AddRow("events", "created_at").
+		AddRow("event_receipts", "receipt_id").
+		AddRow("event_receipts", "event_id").
+		AddRow("event_receipts", "subscriber_type").
+		AddRow("event_receipts", "subscriber_id").
+		AddRow("event_receipts", "entity_id").
+		AddRow("event_receipts", "flow_instance").
+		AddRow("event_receipts", "outcome").
+		AddRow("event_receipts", "reason_code").
+		AddRow("event_receipts", "state_before").
+		AddRow("event_receipts", "state_after").
+		AddRow("event_receipts", "side_effects").
+		AddRow("event_receipts", "duration_ms").
+		AddRow("event_receipts", "idempotency_key").
+		AddRow("event_receipts", "processed_at")
+	mock.ExpectQuery("FROM information_schema.columns").WillReturnRows(rows)
+	expectEventReceiptsTypedIdentityKey(mock, false)
+
+	pg := &PostgresStore{DB: db}
+	caps, err := pg.BindSchemaCapabilities(context.Background())
+	if err != nil {
+		t.Fatalf("BindSchemaCapabilities: %v", err)
+	}
+	if caps.Events.Receipts != SchemaFlavorUnsupported || caps.Events.ReceiptTypedIdentity {
+		t.Fatalf("event_receipts caps = %+v, want unsupported without typed identity key", caps.Events)
+	}
+	receiptsEnabled, err := pg.CanonicalEventReceiptsCapability(context.Background())
+	if err != nil {
+		t.Fatalf("CanonicalEventReceiptsCapability: %v", err)
+	}
+	if receiptsEnabled {
+		t.Fatal("CanonicalEventReceiptsCapability = true, want false without typed identity key")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
+func expectEventReceiptsTypedIdentityKey(mock sqlmock.Sqlmock, exists bool) {
+	mock.ExpectQuery("FROM pg_index").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(exists))
 }

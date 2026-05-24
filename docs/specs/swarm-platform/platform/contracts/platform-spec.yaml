@@ -3653,7 +3653,7 @@ platform_tables:
         \     TEXT,\n    outcome           TEXT NOT NULL CHECK (outcome IN ('success', 'reject', 'discard', 'kill', 'escalate',\
         \ 'dead_letter', 'terminal_reject', 'waiting', 'fanned_out', 'no_op')),\n    reason_code       TEXT,\n    state_before      TEXT,\n    state_after       TEXT,\n    side_effects      JSONB\
         \ NOT NULL DEFAULT '{}',\n    duration_ms       INTEGER,\n    idempotency_key   TEXT,\n    processed_at      TIMESTAMPTZ\
-        \ NOT NULL DEFAULT NOW(),\n    UNIQUE (event_id, subscriber_id),\n    INDEX idx_receipts_entity (entity_id) WHERE\
+        \ NOT NULL DEFAULT NOW(),\n    UNIQUE (event_id, subscriber_type, subscriber_id),\n    INDEX idx_receipts_entity (entity_id) WHERE\
         \ entity_id IS NOT NULL,\n    INDEX idx_receipts_subscriber (subscriber_id, processed_at),\n    INDEX idx_receipts_idempotency\
         \ (idempotency_key) WHERE idempotency_key IS NOT NULL\n);"
     entity_state:

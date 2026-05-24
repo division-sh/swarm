@@ -312,7 +312,7 @@ func (n *systemNodeRunner) isProcessed(ctx context.Context, evt events.Event) bo
 			  AND subscriber_id = $1
 			  AND idempotency_key = $2
 		)
-	`, systemNodeReceiptSubscriberID(n.nodeID), SystemNodeReceiptIdempotencyKey(n.nodeID, eventID)).Scan(&ok)
+	`, strings.TrimSpace(n.nodeID), SystemNodeReceiptIdempotencyKey(n.nodeID, eventID)).Scan(&ok)
 	return err == nil && ok
 }
 
@@ -358,16 +358,6 @@ func systemNodeProcessedReceiptSideEffects(nodeID, eventID string) string {
 	return string(sideEffects)
 }
 
-func systemNodeReceiptSubscriberID(nodeID string) string {
-	nodeID = strings.TrimSpace(nodeID)
-	if nodeID == "pipeline" {
-		// event_receipts is unique on event_id + subscriber_id, so avoid colliding
-		// with the platform pipeline receipt for workflows that name a node "pipeline".
-		return "node:pipeline"
-	}
-	return nodeID
-}
-
 func persistSystemNodeProcessedReceiptAndSettleDelivery(ctx context.Context, db *sql.DB, nodeID, eventID, sideEffects string) error {
 	if db == nil {
 		return nil
@@ -404,7 +394,6 @@ func persistSystemNodeProcessedReceiptAndSettleDeliveryTx(ctx context.Context, t
 	if tx == nil {
 		return nil
 	}
-	receiptSubscriberID := systemNodeReceiptSubscriberID(nodeID)
 	res, err := tx.ExecContext(ctx, `
 		INSERT INTO event_receipts (
 			event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
@@ -415,7 +404,7 @@ func persistSystemNodeProcessedReceiptAndSettleDeliveryTx(ctx context.Context, t
 			'no_op', 'idempotent_no_op', $3::jsonb, $4, now()
 		FROM events e
 		WHERE e.event_id = $1::uuid
-		ON CONFLICT (event_id, subscriber_id) DO UPDATE SET
+		ON CONFLICT (event_id, subscriber_type, subscriber_id) DO UPDATE SET
 			entity_id = EXCLUDED.entity_id,
 			flow_instance = EXCLUDED.flow_instance,
 			outcome = EXCLUDED.outcome,
@@ -423,7 +412,7 @@ func persistSystemNodeProcessedReceiptAndSettleDeliveryTx(ctx context.Context, t
 			side_effects = EXCLUDED.side_effects,
 			idempotency_key = EXCLUDED.idempotency_key,
 			processed_at = now()
-	`, eventID, receiptSubscriberID, sideEffects, SystemNodeReceiptIdempotencyKey(nodeID, eventID))
+	`, eventID, nodeID, sideEffects, SystemNodeReceiptIdempotencyKey(nodeID, eventID))
 	if err != nil {
 		return fmt.Errorf("upsert system node receipt: %w", err)
 	}

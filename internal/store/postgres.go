@@ -219,6 +219,11 @@ func (s *PostgresStore) ensureSchemaCompatibilityColumns(ctx context.Context) er
 			return fmt.Errorf("ensure event_deliveries.delivery_target_route column: %w", err)
 		}
 	}
+	if catalog.hasTable("event_receipts") && catalog.hasColumns("event_receipts", "event_id", "subscriber_type", "subscriber_id") {
+		if err := s.ensureEventReceiptsTypedSubscriberIdentity(ctx); err != nil {
+			return err
+		}
+	}
 	if catalog.hasTable("dead_letters") {
 		for _, stmt := range []struct {
 			column string
@@ -348,6 +353,142 @@ func (s *PostgresStore) ensureSchemaCompatibilityColumns(ctx context.Context) er
 	}
 	_, err = s.BindSchemaCapabilities(ctx)
 	return err
+}
+
+func (s *PostgresStore) ensureEventReceiptsTypedSubscriberIdentity(ctx context.Context) error {
+	if s == nil || s.DB == nil {
+		return nil
+	}
+	var duplicateTypedRows int
+	if err := s.DB.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM (
+			SELECT event_id, subscriber_type, subscriber_id
+			FROM event_receipts
+			GROUP BY event_id, subscriber_type, subscriber_id
+			HAVING COUNT(*) > 1
+		) dup
+	`).Scan(&duplicateTypedRows); err != nil {
+		return fmt.Errorf("inspect event_receipts typed identity duplicates: %w", err)
+	}
+	if duplicateTypedRows > 0 {
+		return fmt.Errorf("event_receipts typed subscriber identity migration found %d duplicate typed identities", duplicateTypedRows)
+	}
+
+	var nodePipelineConflicts int
+	if err := s.DB.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_receipts legacy
+		WHERE legacy.subscriber_type = 'node'
+		  AND legacy.subscriber_id = 'node:pipeline'
+		  AND EXISTS (
+			SELECT 1
+			FROM event_receipts canonical
+			WHERE canonical.event_id = legacy.event_id
+			  AND canonical.subscriber_type = 'node'
+			  AND canonical.subscriber_id = 'pipeline'
+		  )
+	`).Scan(&nodePipelineConflicts); err != nil {
+		return fmt.Errorf("inspect event_receipts node:pipeline migration conflicts: %w", err)
+	}
+	if nodePipelineConflicts > 0 {
+		return fmt.Errorf("event_receipts typed subscriber identity migration found %d node:pipeline rows colliding with canonical node pipeline receipts", nodePipelineConflicts)
+	}
+
+	for _, stmt := range []struct {
+		name string
+		sql  string
+	}{
+		{
+			name: "drop legacy event_receipts untyped unique constraints",
+			sql: `
+				DO $$
+				DECLARE rec RECORD;
+				BEGIN
+					FOR rec IN
+						SELECT c.conname
+						FROM pg_constraint c
+						JOIN pg_class tbl ON tbl.oid = c.conrelid
+						JOIN pg_namespace ns ON ns.oid = tbl.relnamespace
+						WHERE ns.nspname = 'public'
+						  AND tbl.relname = 'event_receipts'
+						  AND c.contype = 'u'
+						  AND replace(pg_get_constraintdef(c.oid), '"', '') = 'UNIQUE (event_id, subscriber_id)'
+					LOOP
+						EXECUTE format('ALTER TABLE %I.%I DROP CONSTRAINT %I', 'public', 'event_receipts', rec.conname);
+					END LOOP;
+				END
+				$$;
+			`,
+		},
+		{
+			name: "drop legacy event_receipts untyped unique indexes",
+			sql: `
+				DO $$
+				DECLARE rec RECORD;
+				BEGIN
+					FOR rec IN
+						SELECT idx.relname AS index_name
+						FROM pg_index i
+						JOIN pg_class tbl ON tbl.oid = i.indrelid
+						JOIN pg_namespace ns ON ns.oid = tbl.relnamespace
+						JOIN pg_class idx ON idx.oid = i.indexrelid
+						LEFT JOIN pg_constraint c ON c.conindid = i.indexrelid
+						WHERE ns.nspname = 'public'
+						  AND tbl.relname = 'event_receipts'
+						  AND i.indisunique
+						  AND c.oid IS NULL
+						  AND replace(pg_get_indexdef(i.indexrelid), '"', '') LIKE '% USING btree (event_id, subscriber_id)%'
+					LOOP
+						EXECUTE format('DROP INDEX IF EXISTS %I.%I', 'public', rec.index_name);
+					END LOOP;
+				END
+				$$;
+			`,
+		},
+		{
+			name: "normalize event_receipts node:pipeline subscriber ids",
+			sql: `
+				UPDATE event_receipts
+				SET subscriber_id = 'pipeline'
+				WHERE subscriber_type = 'node'
+				  AND subscriber_id = 'node:pipeline'
+			`,
+		},
+	} {
+		if _, err := s.DB.ExecContext(ctx, stmt.sql); err != nil {
+			return fmt.Errorf("%s: %w", stmt.name, err)
+		}
+	}
+
+	var postMigrationDuplicates int
+	if err := s.DB.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM (
+			SELECT event_id, subscriber_type, subscriber_id
+			FROM event_receipts
+			GROUP BY event_id, subscriber_type, subscriber_id
+			HAVING COUNT(*) > 1
+		) dup
+	`).Scan(&postMigrationDuplicates); err != nil {
+		return fmt.Errorf("inspect event_receipts typed identity duplicates after migration: %w", err)
+	}
+	if postMigrationDuplicates > 0 {
+		return fmt.Errorf("event_receipts typed subscriber identity migration left %d duplicate typed identities", postMigrationDuplicates)
+	}
+	hasTypedIdentity, err := eventReceiptsTypedSubscriberIdentityKeyExists(ctx, s.DB)
+	if err != nil {
+		return err
+	}
+	if !hasTypedIdentity {
+		if _, err := s.DB.ExecContext(ctx, `
+			CREATE UNIQUE INDEX event_receipts_event_subscriber_identity_unique
+			ON event_receipts (event_id, subscriber_type, subscriber_id)
+		`); err != nil {
+			return fmt.Errorf("ensure event_receipts typed subscriber identity unique index: %w", err)
+		}
+	}
+	return nil
 }
 
 func (s *PostgresStore) ensureAgentSessionTerminationMetadata(ctx context.Context) error {
