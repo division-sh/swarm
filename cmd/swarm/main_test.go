@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -279,15 +280,91 @@ func TestCLI_ServeOwnsRuntimeStartupFlags(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("serve help code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	for _, want := range []string{"Start the Swarm runtime", "--contracts", "--health-addr", "unified serve listener", "MCP, and tools routes", "--platform-spec", "--store", "--self-check", "--dev", "--require-bundle-match", "--no-require-bundle-match", "--abandon-active-runs", "--shutdown-grace", "--verbose"} {
+	for _, want := range []string{"Start the Swarm runtime", "--contracts", "--api-listen-addr", "API, WebSocket, health, and readiness routes", "--mcp-listen-addr", "MCP and tools routes", "--platform-spec", "--store", "--self-check", "--dev", "--require-bundle-match", "--no-require-bundle-match", "--abandon-active-runs", "--shutdown-grace", "--verbose"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("serve help missing %q:\n%s", want, stdout.String())
 		}
 	}
-	for _, notWant := range []string{"--api-port", "--mcp-port", "--api ", "--no-api", "--mcp ", "--no-mcp", "--log-level"} {
+	for _, notWant := range []string{"--health-addr", "unified serve listener", "--api-port", "--mcp-port", "--api ", "--no-api", "--mcp ", "--no-mcp", "--log-level"} {
 		if strings.Contains(stdout.String(), notWant) {
 			t.Fatalf("serve help exposed unpromoted listener/topology flag %q:\n%s", notWant, stdout.String())
 		}
+	}
+}
+
+func TestCLI_ServeRetiresHealthAddrAndValidatesListenAddresses(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		wantStderr string
+	}{
+		{
+			name:       "health addr retired",
+			args:       []string{"serve", "--health-addr", "127.0.0.1:0"},
+			wantStderr: "unknown flag: --health-addr",
+		},
+		{
+			name:       "api bare port rejected",
+			args:       []string{"serve", "--api-listen-addr", "8081"},
+			wantStderr: "--api-listen-addr must be a host:port listen address",
+		},
+		{
+			name:       "mcp host without port rejected",
+			args:       []string{"serve", "--mcp-listen-addr", "127.0.0.1"},
+			wantStderr: "--mcp-listen-addr must be a host:port listen address",
+		},
+		{
+			name:       "api url rejected",
+			args:       []string{"serve", "--api-listen-addr", "http://127.0.0.1:8081"},
+			wantStderr: "--api-listen-addr must be a host:port listen address, not a URL",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommand(context.Background(), t.TempDir(), tt.args, &stdout, &stderr)
+			if code != 2 {
+				t.Fatalf("serve code = %d, want 2\nstdout=%s\nstderr=%s", code, stdout.String(), stderr.String())
+			}
+			if !strings.Contains(stderr.String(), tt.wantStderr) {
+				t.Fatalf("serve stderr missing %q:\n%s", tt.wantStderr, stderr.String())
+			}
+		})
+	}
+}
+
+func TestCLI_ServeListenAddrFlagsConsumeIndependentOwners(t *testing.T) {
+	var captured serveOptions
+	opts := defaultRootCommandOptions()
+	opts.runServe = func(_ context.Context, _ string, serveOpts serveOptions) int {
+		captured = serveOpts
+		return 0
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", "--api-listen-addr", "0.0.0.0:9001"}, &stdout, &stderr, opts)
+	if code != 0 {
+		t.Fatalf("serve code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if captured.APIListenAddr != "0.0.0.0:9001" {
+		t.Fatalf("api listen addr = %q, want override", captured.APIListenAddr)
+	}
+	if captured.MCPListenAddr != defaultMCPListenAddr {
+		t.Fatalf("mcp listen addr = %q, want default %q", captured.MCPListenAddr, defaultMCPListenAddr)
+	}
+
+	captured = serveOptions{}
+	stdout.Reset()
+	stderr.Reset()
+	code = executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", "--mcp-listen-addr", "127.0.0.1:9002"}, &stdout, &stderr, opts)
+	if code != 0 {
+		t.Fatalf("serve code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if captured.APIListenAddr != defaultAPIListenAddr {
+		t.Fatalf("api listen addr = %q, want default %q", captured.APIListenAddr, defaultAPIListenAddr)
+	}
+	if captured.MCPListenAddr != "127.0.0.1:9002" {
+		t.Fatalf("mcp listen addr = %q, want override", captured.MCPListenAddr)
 	}
 }
 
@@ -419,10 +496,13 @@ func TestPlatformSpecServeUnifiedListenerBindContractPromoted(t *testing.T) {
 	if strings.TrimSpace(spec.ImplementedBy) != "#853" {
 		t.Fatalf("listener contract implemented_by = %q, want #853", spec.ImplementedBy)
 	}
+	if !strings.Contains(spec.SupersededBy, "#992") {
+		t.Fatalf("listener contract superseded_by = %q, want #992", spec.SupersededBy)
+	}
 	if strings.TrimSpace(spec.Flag) != "--health-addr <addr>" {
 		t.Fatalf("listener contract flag = %q, want --health-addr <addr>", spec.Flag)
 	}
-	for _, want := range []string{"single HTTP listener", "health-specific name", "not declare `--health-addr` to be the final CLI v2 listener", "API", "MCP"} {
+	for _, want := range []string{"historical", "single HTTP listener", "health-specific name", "superseded by `listener_topology_v2_1`", "MUST NOT be accepted"} {
 		if !strings.Contains(spec.Semantics, want) {
 			t.Fatalf("listener semantics missing %q:\n%s", want, spec.Semantics)
 		}
@@ -447,7 +527,7 @@ func TestPlatformSpecServeUnifiedListenerBindContractPromoted(t *testing.T) {
 			t.Fatalf("api-port boundary missing %q:\n%s", want, spec.ConsumerBoundaries.SwarmRunAPIPort)
 		}
 	}
-	for _, want := range []string{"swarm run --mcp-port", "fail before API/WS calls", "explicit MCP bind ownership"} {
+	for _, want := range []string{"swarm run --mcp-port", "fail before API/WS calls", "local foreground MCP listener control"} {
 		if !strings.Contains(spec.ConsumerBoundaries.SwarmRunMCPPort, want) {
 			t.Fatalf("mcp-port boundary missing %q:\n%s", want, spec.ConsumerBoundaries.SwarmRunMCPPort)
 		}
@@ -455,6 +535,46 @@ func TestPlatformSpecServeUnifiedListenerBindContractPromoted(t *testing.T) {
 	for _, want := range []string{"--api/--no-api", "--mcp/--no-mcp", "serve --api-port", "serve --mcp-port", "--log-level"} {
 		if !stringSliceContains(spec.UnpromotedReviewControls, want) {
 			t.Fatalf("unpromoted review controls missing %q: %#v", want, spec.UnpromotedReviewControls)
+		}
+	}
+}
+
+func TestPlatformSpecServeListenerTopologyRuntimeBindingPromoted(t *testing.T) {
+	spec := loadServeListenerTopologySpec(t)
+	if strings.TrimSpace(spec.PromotedBy) != "#884" {
+		t.Fatalf("listener topology promoted_by = %q, want #884", spec.PromotedBy)
+	}
+	if strings.TrimSpace(spec.RuntimeBindImplementedBy) != "#992" {
+		t.Fatalf("listener topology runtime_bind_implemented_by = %q, want #992", spec.RuntimeBindImplementedBy)
+	}
+	if strings.TrimSpace(spec.ImplementationStatus) != "runtime_bind_implemented_enable_disable_env_pending" {
+		t.Fatalf("listener topology status = %q", spec.ImplementationStatus)
+	}
+	if spec.Listeners.API.BindFlag != "--api-listen-addr <host:port>" {
+		t.Fatalf("api bind flag = %q", spec.Listeners.API.BindFlag)
+	}
+	if spec.Listeners.MCP.BindFlag != "--mcp-listen-addr <host:port>" {
+		t.Fatalf("mcp bind flag = %q", spec.Listeners.MCP.BindFlag)
+	}
+	if spec.Defaults.APIListenAddr != defaultAPIListenAddr || spec.Listeners.API.DefaultListenAddr != defaultAPIListenAddr {
+		t.Fatalf("api default = defaults:%q listener:%q want %q", spec.Defaults.APIListenAddr, spec.Listeners.API.DefaultListenAddr, defaultAPIListenAddr)
+	}
+	if spec.Defaults.MCPListenAddr != defaultMCPListenAddr || spec.Listeners.MCP.DefaultListenAddr != defaultMCPListenAddr {
+		t.Fatalf("mcp default = defaults:%q listener:%q want %q", spec.Defaults.MCPListenAddr, spec.Listeners.MCP.DefaultListenAddr, defaultMCPListenAddr)
+	}
+	for _, want := range []string{"/healthz", "/readyz", "/v1/rpc", "/v1/ws"} {
+		if !stringSliceContains(spec.Listeners.API.Routes, want) {
+			t.Fatalf("api routes missing %q: %#v", want, spec.Listeners.API.Routes)
+		}
+	}
+	for _, want := range []string{"/mcp", "/tools/"} {
+		if !stringSliceContains(spec.Listeners.MCP.Routes, want) {
+			t.Fatalf("mcp routes missing %q: %#v", want, spec.Listeners.MCP.Routes)
+		}
+	}
+	for _, want := range []string{"#992 implements", "`--health-addr` retirement", "`swarm run --mcp-port` remains fail-closed", "Environment/config precedence remains #844"} {
+		if !stringSliceContains(spec.ImplementationBoundaries, want) {
+			t.Fatalf("implementation boundaries missing %q: %#v", want, spec.ImplementationBoundaries)
 		}
 	}
 }
@@ -960,7 +1080,7 @@ func waitRunStatusEventSettlement(t *testing.T, db *sql.DB, runID string, wantEv
 	}
 }
 
-func TestNewHealthServerPreservesProcessProbesAndMountsV1API(t *testing.T) {
+func TestServeListenerServersPartitionAPIAndMCPRoutes(t *testing.T) {
 	var ready atomic.Bool
 	var apiHit atomic.Bool
 	apiHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -972,29 +1092,29 @@ func TestNewHealthServerPreservesProcessProbesAndMountsV1API(t *testing.T) {
 		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":"test","result":{"ok":true}}`))
 	})
 	toolGateway := runtimemcp.NewGateway(nil, "", runtimemcp.GatewayHooks{})
-	server := newHealthServer(":0", &ready, toolGateway, apiHandler)
-	handler := server.Handler
+	apiHandlerMux := newAPIServer(&ready, apiHandler).Handler
+	mcpHandlerMux := newMCPServer(toolGateway).Handler
 
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	apiHandlerMux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
 	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != "ok" {
 		t.Fatalf("/healthz status/body = %d/%q, want 200 ok", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	apiHandlerMux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("/readyz before ready status = %d, want 503", rec.Code)
 	}
 	ready.Store(true)
 	rec = httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	apiHandlerMux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
 	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != "ready" {
 		t.Fatalf("/readyz ready status/body = %d/%q, want 200 ready", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"test","method":"rpc.unsubscribe","params":{"subscription_id":"sub"}}`)))
+	apiHandlerMux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"test","method":"rpc.unsubscribe","params":{"subscription_id":"sub"}}`)))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("/v1/rpc status = %d, want 200 body=%s", rec.Code, rec.Body.String())
 	}
@@ -1003,26 +1123,45 @@ func TestNewHealthServerPreservesProcessProbesAndMountsV1API(t *testing.T) {
 	}
 
 	rec = httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/ws", strings.NewReader(`{"jsonrpc":"2.0","id":"test","method":"rpc.unsubscribe","params":{"subscription_id":"sub"}}`)))
+	apiHandlerMux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/ws", strings.NewReader(`{"jsonrpc":"2.0","id":"test","method":"rpc.unsubscribe","params":{"subscription_id":"sub"}}`)))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("/v1/ws status = %d, want 200 body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/mcp", nil))
+	apiHandlerMux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/mcp", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("api listener /mcp status = %d, want 404", rec.Code)
+	}
+	rec = httptest.NewRecorder()
+	apiHandlerMux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/tools/query_entities", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("api listener /tools/ status = %d, want 404", rec.Code)
+	}
+
+	rec = httptest.NewRecorder()
+	mcpHandlerMux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/mcp", nil))
 	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != "ok" {
 		t.Fatalf("/mcp status/body = %d/%q, want 200 ok", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/tools/query_entities", nil))
+	mcpHandlerMux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/tools/query_entities", nil))
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("/tools/ route status = %d, want mounted gateway 405", rec.Code)
 	}
 
+	for _, path := range []string{"/healthz", "/readyz", "/v1/rpc", "/v1/ws"} {
+		rec = httptest.NewRecorder()
+		mcpHandlerMux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("mcp listener %s status = %d, want 404", path, rec.Code)
+		}
+	}
+
 	for _, path := range []string{"/api", "/api/healthz", "/api/rpc", "/rpc", "/api/ws", "/ws"} {
 		rec = httptest.NewRecorder()
-		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		apiHandlerMux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 		if rec.Code != http.StatusNotFound {
 			t.Fatalf("%s status = %d, want 404", path, rec.Code)
 		}
@@ -3340,7 +3479,8 @@ func TestRunServeRuntimeVerboseEmitsPlatformSpecBootSequence(t *testing.T) {
 			ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
 			PlatformSpecPath:   defaultPlatformSpecPath,
 			StoreMode:          "postgres",
-			HealthAddr:         "127.0.0.1:0",
+			APIListenAddr:      "127.0.0.1:0",
+			MCPListenAddr:      "127.0.0.1:0",
 			SelfCheck:          true,
 			RequireBundleMatch: true,
 			Verbose:            true,
@@ -3367,13 +3507,153 @@ func TestRunServeRuntimeVerboseEmitsPlatformSpecBootSequence(t *testing.T) {
 	if strings.Contains(out.String(), "health_endpoints_respond       ok  (/healthz /readyz /v1/rpc /v1/ws)") {
 		t.Fatalf("serve verbose output still claims unproven v1 endpoint response:\n%s", out.String())
 	}
-	for _, want := range []string{"http_listener_bind", "listener=", "routes=" + serveUnifiedRoutes, "health_endpoints_respond", serveReadinessRoutes} {
+	for _, want := range []string{"http_listener_bind", "api_listener=", "api_routes=" + serveAPIRoutes, "mcp_listener=", "mcp_routes=" + serveMCPRoutes, "health_endpoints_respond", serveReadinessRoutes} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("serve verbose output missing %q:\n%s", want, out.String())
 		}
 	}
 	if strings.Contains(out.String(), "health=127.") {
 		t.Fatalf("serve verbose output still labels the unified listener as health-only:\n%s", out.String())
+	}
+}
+
+func TestRunServeRuntimeListenerBindFailuresExitBeforeReadiness(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		occupyAPI bool
+	}{
+		{name: "api listener", occupyAPI: true},
+		{name: "mcp listener", occupyAPI: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
+			t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "")
+			oldBuildStores := buildStoresForServe
+			oldWorkspaceLifecycle := configuredWorkspaceLifecycleForServe
+			dsn, _, cleanup := testutil.StartPostgres(t)
+			t.Cleanup(cleanup)
+			runtimePG, err := store.NewPostgresStore(dsn)
+			if err != nil {
+				t.Fatalf("NewPostgresStore: %v", err)
+			}
+			buildStoresForServe = func(ctx context.Context, _ string, cfg *config.Config) (storeBundle, error) {
+				if _, err := runtimePG.BindSchemaCapabilities(ctx); err != nil {
+					return storeBundle{}, err
+				}
+				return storeBundle{
+					Postgres:          runtimePG,
+					SQLDB:             runtimePG.DB,
+					EventStore:        runtimePG,
+					SessionRegistry:   sessions.NewPostgresRegistry(runtimePG.DB, cfg.LLM.Session.LockTTL),
+					ConversationStore: runtimePG,
+					ManagerStore:      runtimePG,
+					ScheduleStore:     runtimePG,
+					TurnStore:         runtimePG,
+				}, nil
+			}
+			configuredWorkspaceLifecycleForServe = func(*sql.DB, string, string, semanticview.Source) serveWorkspaceLifecycle {
+				return serveRuntimeWorkspaceStub{}
+			}
+			t.Cleanup(func() {
+				buildStoresForServe = oldBuildStores
+				configuredWorkspaceLifecycleForServe = oldWorkspaceLifecycle
+			})
+
+			occupied, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatalf("occupy listener: %v", err)
+			}
+			defer occupied.Close()
+			apiAddr := "127.0.0.1:0"
+			mcpAddr := "127.0.0.1:0"
+			if tt.occupyAPI {
+				apiAddr = occupied.Addr().String()
+			} else {
+				mcpAddr = occupied.Addr().String()
+			}
+
+			var out lockedBuffer
+			code := runServeRuntime(context.Background(), repoRoot(), serveOptions{
+				ConfigPath:         writeServeRuntimeTestConfig(t),
+				ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+				PlatformSpecPath:   defaultPlatformSpecPath,
+				StoreMode:          "postgres",
+				APIListenAddr:      apiAddr,
+				MCPListenAddr:      mcpAddr,
+				SelfCheck:          true,
+				RequireBundleMatch: true,
+				Verbose:            true,
+				Output:             &out,
+			})
+			if code != 3 {
+				t.Fatalf("runServeRuntime code = %d, want 3\noutput:\n%s", code, out.String())
+			}
+			if !strings.Contains(out.String(), "http_listener_bind") || !strings.Contains(out.String(), "FAILED") {
+				t.Fatalf("serve output missing bind failure proof:\n%s", out.String())
+			}
+			if strings.Contains(out.String(), "ready                      ok") {
+				t.Fatalf("serve reported readiness after listener bind failure:\n%s", out.String())
+			}
+		})
+	}
+}
+
+func TestConfigureServeMCPGatewayEnvAlignsToMCPListener(t *testing.T) {
+	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
+	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "")
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen mcp: %v", err)
+	}
+	defer listener.Close()
+	_, port, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil {
+		t.Fatalf("split listener addr: %v", err)
+	}
+
+	restore, err := configureServeMCPGatewayEnv(listener.Addr())
+	if err != nil {
+		t.Fatalf("configure gateway env: %v", err)
+	}
+	if got, want := os.Getenv("SWARM_TOOL_GATEWAY_URL"), "http://127.0.0.1:"+port; got != want {
+		t.Fatalf("SWARM_TOOL_GATEWAY_URL = %q, want %q", got, want)
+	}
+	if got, want := os.Getenv("SWARM_TOOL_GATEWAY_CONTAINER_URL"), "http://host.docker.internal:"+port; got != want {
+		t.Fatalf("SWARM_TOOL_GATEWAY_CONTAINER_URL = %q, want %q", got, want)
+	}
+	restore()
+	if got := os.Getenv("SWARM_TOOL_GATEWAY_URL"); got != "" {
+		t.Fatalf("SWARM_TOOL_GATEWAY_URL after restore = %q, want empty", got)
+	}
+	if got := os.Getenv("SWARM_TOOL_GATEWAY_CONTAINER_URL"); got != "" {
+		t.Fatalf("SWARM_TOOL_GATEWAY_CONTAINER_URL after restore = %q, want empty", got)
+	}
+}
+
+func TestConfigureServeMCPGatewayEnvRejectsOldUnifiedPort(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen mcp: %v", err)
+	}
+	defer listener.Close()
+	_, mcpPort, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil {
+		t.Fatalf("split listener addr: %v", err)
+	}
+	oldUnifiedPort := "8081"
+	if mcpPort == oldUnifiedPort {
+		oldUnifiedPort = "8080"
+	}
+	t.Setenv("SWARM_TOOL_GATEWAY_URL", "http://127.0.0.1:"+oldUnifiedPort)
+	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "http://host.docker.internal:"+oldUnifiedPort)
+
+	restore, err := configureServeMCPGatewayEnv(listener.Addr())
+	if err == nil {
+		restore()
+		t.Fatalf("configure gateway env unexpectedly accepted old unified API port")
+	}
+	if !strings.Contains(err.Error(), "must target the MCP listener port") {
+		t.Fatalf("error = %v, want MCP listener port mismatch", err)
 	}
 }
 
@@ -3449,7 +3729,8 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 			ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
 			PlatformSpecPath:   defaultPlatformSpecPath,
 			StoreMode:          "postgres",
-			HealthAddr:         "127.0.0.1:0",
+			APIListenAddr:      "127.0.0.1:0",
+			MCPListenAddr:      "127.0.0.1:0",
 			SelfCheck:          true,
 			RequireBundleMatch: true,
 			AbandonActiveRuns:  true,
@@ -3551,6 +3832,7 @@ type serveDevModeSpec struct {
 
 type serveUnifiedListenerSpec struct {
 	ImplementedBy string `yaml:"implemented_by"`
+	SupersededBy  string `yaml:"superseded_by"`
 	Flag          string `yaml:"flag"`
 	Owner         string `yaml:"owner"`
 	Semantics     string `yaml:"semantics"`
@@ -3565,6 +3847,31 @@ type serveUnifiedListenerSpec struct {
 		SwarmRunMCPPort string `yaml:"swarm_run_mcp_port"`
 	} `yaml:"consumer_boundaries"`
 	UnpromotedReviewControls []string `yaml:"unpromoted_review_controls"`
+}
+
+type serveListenerTopologySpec struct {
+	PromotedBy               string `yaml:"promoted_by"`
+	RuntimeBindImplementedBy string `yaml:"runtime_bind_implemented_by"`
+	ImplementationStatus     string `yaml:"implementation_status"`
+	CanonicalOwner           string `yaml:"canonical_owner"`
+	Summary                  string `yaml:"summary"`
+	Listeners                struct {
+		API struct {
+			BindFlag          string   `yaml:"bind_flag"`
+			DefaultListenAddr string   `yaml:"default_listen_addr"`
+			Routes            []string `yaml:"routes"`
+		} `yaml:"api"`
+		MCP struct {
+			BindFlag          string   `yaml:"bind_flag"`
+			DefaultListenAddr string   `yaml:"default_listen_addr"`
+			Routes            []string `yaml:"routes"`
+		} `yaml:"mcp"`
+	} `yaml:"listeners"`
+	Defaults struct {
+		APIListenAddr string `yaml:"api_listen_addr"`
+		MCPListenAddr string `yaml:"mcp_listen_addr"`
+	} `yaml:"defaults"`
+	ImplementationBoundaries []string `yaml:"implementation_boundaries"`
 }
 
 type cliAPIConnectionAuthConfigSpec struct {
@@ -3724,6 +4031,30 @@ func loadServeUnifiedListenerSpec(t *testing.T) serveUnifiedListenerSpec {
 		t.Fatal("platform spec missing serve unified_listener_bind_contract")
 	}
 	return spec.CLISpecification.CommandCatalog.Serve.Listener
+}
+
+func loadServeListenerTopologySpec(t *testing.T) serveListenerTopologySpec {
+	t.Helper()
+	var spec struct {
+		CLISpecification struct {
+			CommandCatalog struct {
+				Serve struct {
+					ListenerTopology serveListenerTopologySpec `yaml:"listener_topology_v2_1"`
+				} `yaml:"serve"`
+			} `yaml:"command_catalog"`
+		} `yaml:"cli_specification"`
+	}
+	data, err := os.ReadFile(filepath.Join(repoRoot(), defaultPlatformSpecPath))
+	if err != nil {
+		t.Fatalf("read platform spec: %v", err)
+	}
+	if err := yaml.Unmarshal(data, &spec); err != nil {
+		t.Fatalf("parse platform spec: %v", err)
+	}
+	if strings.TrimSpace(spec.CLISpecification.CommandCatalog.Serve.ListenerTopology.CanonicalOwner) == "" {
+		t.Fatal("platform spec missing serve listener_topology_v2_1")
+	}
+	return spec.CLISpecification.CommandCatalog.Serve.ListenerTopology
 }
 
 func loadCLIAPIConnectionAuthConfigSpec(t *testing.T) cliAPIConnectionAuthConfigSpec {
