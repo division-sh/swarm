@@ -108,6 +108,29 @@ func TestWriteReceiptConvergesNormalRunCompletionAfterReceiptPersists(t *testing
 	}
 }
 
+func TestWriteReceiptConvergesNormalRunCompletionAfterReceiptRetryPersists(t *testing.T) {
+	bus := &recordingCompletionReceiptBus{}
+	store := &receiptReaderStub{
+		receipt: EventReceipt{
+			EventID: "event-1",
+			AgentID: "agent-1",
+			Status:  ReceiptStatusProcessed,
+		},
+		found:      true,
+		upsertErrs: []error{context.Canceled, nil},
+	}
+	am := NewAgentManagerWithOptions(bus, nil, AgentManagerOptions{}, store)
+
+	am.writeReceipt(context.Background(), "event-1", "agent-1", ReceiptStatusProcessed, "")
+
+	if store.upsertCalls != 2 {
+		t.Fatalf("receipt upsert calls = %d, want 2", store.upsertCalls)
+	}
+	if len(bus.normalCompletionEvents) != 1 || bus.normalCompletionEvents[0] != "event-1" {
+		t.Fatalf("normal completion events = %#v, want event-1", bus.normalCompletionEvents)
+	}
+}
+
 type traceRecordingAgent struct{ parent string }
 
 func (a *traceRecordingAgent) ID() string                        { return "trace-agent" }
