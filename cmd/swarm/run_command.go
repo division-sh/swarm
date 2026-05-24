@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -98,7 +99,7 @@ func newRunCommand(repo string, rootOpts rootCommandOptions) *cobra.Command {
 	cmd.Flags().StringVar(&opts.platformSpecPath, "platform-spec", "", "Path to platform spec yaml for local foreground startup")
 	cmd.Flags().StringVar(&opts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for run.start")
 	cmd.Flags().StringVar(&opts.runID, "run-id", "", "Optional caller-provided run id for run.start")
-	cmd.Flags().IntVar(&opts.apiPort, "api-port", 0, "Local API/health port for local foreground startup")
+	cmd.Flags().IntVar(&opts.apiPort, "api-port", 0, "Local API listener port for local foreground startup")
 	cmd.Flags().IntVar(&opts.mcpPort, "mcp-port", 0, "Reserved local MCP port for local foreground startup")
 	cmd.Flags().BoolVar(&opts.detach, "detach", false, "Unsupported in CLI v2; use --connect with --no-follow")
 	return cmd
@@ -323,7 +324,7 @@ func startLocalRunServe(ctx context.Context, repo string, opts runCommandOptions
 	serveOpts.ContractsPath = resolvedPaths.ContractsPath
 	serveOpts.PlatformSpecPath = resolvedPaths.PlatformSpecPath
 	if opts.apiPort > 0 {
-		serveOpts.HealthAddr = ":" + strconv.Itoa(opts.apiPort)
+		serveOpts.APIListenAddr = net.JoinHostPort("127.0.0.1", strconv.Itoa(opts.apiPort))
 	}
 	serveCtx, cancel := context.WithCancel(ctx)
 	done := make(chan int, 1)

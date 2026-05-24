@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -46,8 +47,10 @@ import (
 
 const (
 	defaultPlatformSpecPath = "docs/specs/swarm-platform/platform/contracts/platform-spec.yaml"
-	defaultHealthAddr       = ":8081"
-	serveUnifiedRoutes      = "/healthz /readyz /v1/rpc /v1/ws /mcp /tools/"
+	defaultAPIListenAddr    = "127.0.0.1:8081"
+	defaultMCPListenAddr    = "127.0.0.1:8082"
+	serveAPIRoutes          = "/healthz /readyz /v1/rpc /v1/ws"
+	serveMCPRoutes          = "/mcp /tools/"
 	serveReadinessRoutes    = "/healthz /readyz"
 )
 
@@ -63,6 +66,11 @@ type serveWorkspaceLifecycle interface {
 	workspace.DevEntityContainerCleaner
 	runtimedestructivereset.ManagedContainerInventoryReader
 	runtimedestructivereset.ManagedContainerRuntime
+}
+
+type previousEnv struct {
+	value string
+	set   bool
 }
 
 type storeBundle struct {
@@ -102,7 +110,8 @@ type serveOptions struct {
 	ContractsPath        string
 	PlatformSpecPath     string
 	StoreMode            string
-	HealthAddr           string
+	APIListenAddr        string
+	MCPListenAddr        string
 	ShutdownGrace        time.Duration
 	Dev                  bool
 	SelfCheck            bool
@@ -116,7 +125,8 @@ type serveOptions struct {
 func defaultServeOptions() serveOptions {
 	return serveOptions{
 		StoreMode:          "postgres",
-		HealthAddr:         defaultHealthAddr,
+		APIListenAddr:      defaultAPIListenAddr,
+		MCPListenAddr:      defaultMCPListenAddr,
 		ShutdownGrace:      runtime.DefaultShutdownGrace,
 		SelfCheck:          true,
 		RequireBundleMatch: true,
@@ -237,6 +247,31 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		return 1
 	}
 
+	apiListener, err := listenServeHTTPListener("api", opts.APIListenAddr)
+	if err != nil {
+		reporter.emit(20, "http_listener_bind", "FAILED", err.Error())
+		log.Printf("bind api listener: %v", err)
+		return 3
+	}
+	defer apiListener.Close()
+	mcpListener, err := listenServeHTTPListener("mcp", opts.MCPListenAddr)
+	if err != nil {
+		_ = apiListener.Close()
+		reporter.emit(20, "http_listener_bind", "FAILED", err.Error())
+		log.Printf("bind mcp listener: %v", err)
+		return 3
+	}
+	defer mcpListener.Close()
+	restoreGatewayEnv, err := configureServeMCPGatewayEnv(mcpListener.Addr())
+	if err != nil {
+		_ = mcpListener.Close()
+		_ = apiListener.Close()
+		reporter.emit(20, "http_listener_bind", "FAILED", err.Error())
+		log.Printf("configure mcp gateway env: %v", err)
+		return 3
+	}
+	defer restoreGatewayEnv()
+
 	rt, err := runtime.NewRuntime(ctx, cfg, stores.runtimeStores(), runtime.RuntimeOptions{
 		SelfCheck:          opts.SelfCheck,
 		WorkflowModule:     module,
@@ -314,31 +349,28 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		log.Printf("init v1 api: %v", err)
 		return 1
 	}
-	healthServer := newHealthServer(opts.HealthAddr, &ready, rt.ToolGateway, apiV1Handler)
-	healthListener, err := listenHealthServer(healthServer)
-	if err != nil {
-		reporter.emit(20, "http_listener_bind", "FAILED", err.Error())
-		log.Printf("bind health server: %v", err)
-		return 1
-	}
-	go serveHealth(healthServer, healthListener)
-	defer shutdownHealthServer(healthServer)
+	apiServer := newAPIServer(&ready, apiV1Handler)
+	mcpServer := newMCPServer(rt.ToolGateway)
+	go serveHTTPServer("api", apiServer, apiListener)
+	go serveHTTPServer("mcp", mcpServer, mcpListener)
+	defer shutdownHTTPServer("mcp", mcpServer)
+	defer shutdownHTTPServer("api", apiServer)
 	logBootWarnings(bootReport)
 	if err := rt.Start(ctx); err != nil {
 		reporter.emit(22, "ready", "FAILED", err.Error())
 		log.Printf("start runtime: %v", err)
 		return 1
 	}
-	reporter.emit(20, "http_listener_bind", "ok", fmt.Sprintf("listener=%s routes=%s", healthListener.Addr(), serveUnifiedRoutes))
+	reporter.emit(20, "http_listener_bind", "ok", fmt.Sprintf("api_listener=%s api_routes=%s mcp_listener=%s mcp_routes=%s", apiListener.Addr(), serveAPIRoutes, mcpListener.Addr(), serveMCPRoutes))
 	ready.Store(true)
-	if err := waitForServeHealthEndpoints(ctx, healthListener.Addr()); err != nil {
+	if err := waitForServeHealthEndpoints(ctx, apiListener.Addr()); err != nil {
 		reporter.emit(21, "health_endpoints_respond", "FAILED", err.Error())
 		log.Printf("health endpoint verification failed: %v", err)
 		return 1
 	}
 	reporter.emit(21, "health_endpoints_respond", "ok", serveReadinessRoutes)
 	reporter.emit(22, "ready", "ok", fmt.Sprintf("total=%s state_stores=%s", time.Since(bootStartedAt).Round(time.Millisecond), strings.TrimSpace(stateStoreSummary)))
-	logReadySummary(source, contractsRoot, opts.HealthAddr)
+	logReadySummary(source, contractsRoot, apiListener.Addr(), mcpListener.Addr())
 
 	<-ctx.Done()
 	ready.Store(false)
@@ -1717,7 +1749,7 @@ func systemWorkspaceContainers(lifecycle workspace.Lifecycle) []string {
 	return lister.SystemWorkspaceContainers()
 }
 
-func newHealthServer(addr string, ready *atomic.Bool, toolGateway *runtimemcp.Gateway, apiV1Handler http.Handler) *http.Server {
+func newAPIServer(ready *atomic.Bool, apiV1Handler http.Handler) *http.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -1731,39 +1763,74 @@ func newHealthServer(addr string, ready *atomic.Bool, toolGateway *runtimemcp.Ga
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ready\n"))
 	})
-	if toolGateway != nil {
-		gatewayHandler := toolGateway.Handler()
-		mux.Handle("/mcp", gatewayHandler)
-		mux.Handle("/tools/", gatewayHandler)
-	}
 	if apiV1Handler != nil {
 		mux.Handle("/v1/rpc", apiV1Handler)
 		mux.Handle("/v1/ws", apiV1Handler)
 	}
 	return &http.Server{
-		Addr:              strings.TrimSpace(addr),
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 }
 
-func listenHealthServer(server *http.Server) (net.Listener, error) {
-	if server == nil {
-		return nil, errors.New("health server is not configured")
+func newMCPServer(toolGateway *runtimemcp.Gateway) *http.Server {
+	mux := http.NewServeMux()
+	if toolGateway != nil {
+		gatewayHandler := toolGateway.Handler()
+		mux.Handle("/mcp", gatewayHandler)
+		mux.Handle("/tools/", gatewayHandler)
 	}
-	addr := strings.TrimSpace(server.Addr)
-	if addr == "" {
-		addr = defaultHealthAddr
+	return &http.Server{
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
 	}
-	return net.Listen("tcp", addr)
 }
 
-func serveHealth(server *http.Server, listener net.Listener) {
+func validateServeListenAddr(flagName, addr string) error {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return fmt.Errorf("%s must be a host:port listen address", flagName)
+	}
+	if strings.Contains(addr, "://") {
+		return fmt.Errorf("%s must be a host:port listen address, not a URL", flagName)
+	}
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("%s must be a host:port listen address: %w", flagName, err)
+	}
+	host = strings.TrimSpace(strings.Trim(host, "[]"))
+	port = strings.TrimSpace(port)
+	if host == "" {
+		return fmt.Errorf("%s must include an explicit host", flagName)
+	}
+	if port == "" {
+		return fmt.Errorf("%s must include an explicit port", flagName)
+	}
+	numericPort, err := strconv.Atoi(port)
+	if err != nil || numericPort < 0 || numericPort > 65535 {
+		return fmt.Errorf("%s port must be between 0 and 65535", flagName)
+	}
+	return nil
+}
+
+func listenServeHTTPListener(name, addr string) (net.Listener, error) {
+	addr = strings.TrimSpace(addr)
+	if err := validateServeListenAddr("--"+name+"-listen-addr", addr); err != nil {
+		return nil, err
+	}
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return nil, fmt.Errorf("%s listener bind failed: %w", name, err)
+	}
+	return listener, nil
+}
+
+func serveHTTPServer(name string, server *http.Server, listener net.Listener) {
 	if server == nil || listener == nil {
 		return
 	}
 	if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Printf("health server stopped: %v", err)
+		log.Printf("%s server stopped: %v", name, err)
 	}
 }
 
@@ -1825,24 +1892,183 @@ func probeServeHealthEndpoint(ctx context.Context, client *http.Client, endpoint
 	return nil
 }
 
-func shutdownHealthServer(server *http.Server) {
+func shutdownHTTPServer(name string, server *http.Server) {
+	if server == nil {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := server.Shutdown(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Printf("health server shutdown failed: %v", err)
+		log.Printf("%s server shutdown failed: %v", name, err)
 	}
 }
 
-func logReadySummary(source semanticview.Source, contractsRoot, healthAddr string) {
+func logReadySummary(source semanticview.Source, contractsRoot string, apiAddr, mcpAddr net.Addr) {
 	log.Printf(
-		"swarm runtime ready contracts=%s flows=%d nodes=%d agents=%d events=%d listener=%s",
+		"swarm runtime ready contracts=%s flows=%d nodes=%d agents=%d events=%d api_listener=%s mcp_listener=%s",
 		contractsRoot,
 		len(source.FlowSchemaEntries()),
 		len(source.NodeEntries()),
 		len(source.AgentEntries()),
 		len(source.ResolvedEventCatalog()),
-		healthAddr,
+		addrString(apiAddr),
+		addrString(mcpAddr),
 	)
+}
+
+func addrString(addr net.Addr) string {
+	if addr == nil {
+		return ""
+	}
+	return addr.String()
+}
+
+func configureServeMCPGatewayEnv(mcpAddr net.Addr) (func(), error) {
+	if mcpAddr == nil {
+		return func() {}, errors.New("mcp listener address is unavailable")
+	}
+	mcpHostURL, err := serveListenerHTTPURL(mcpAddr, "127.0.0.1")
+	if err != nil {
+		return func() {}, err
+	}
+	mcpContainerURL, err := serveMCPContainerGatewayURL(mcpAddr)
+	if err != nil {
+		return func() {}, err
+	}
+	if err := validateExistingServeGatewayURL("SWARM_TOOL_GATEWAY_URL", os.Getenv("SWARM_TOOL_GATEWAY_URL"), mcpAddr); err != nil {
+		return func() {}, err
+	}
+	if err := validateExistingServeGatewayURL("SWARM_TOOL_GATEWAY_CONTAINER_URL", os.Getenv("SWARM_TOOL_GATEWAY_CONTAINER_URL"), mcpAddr); err != nil {
+		return func() {}, err
+	}
+	return setServeGatewayEnv(map[string]string{
+		"SWARM_TOOL_GATEWAY_URL":           mcpHostURL,
+		"SWARM_TOOL_GATEWAY_CONTAINER_URL": mcpContainerURL,
+	})
+}
+
+func validateExistingServeGatewayURL(name, raw string, mcpAddr net.Addr) error {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	_, mcpPort, err := splitListenerHostPort(mcpAddr)
+	if err != nil {
+		return err
+	}
+	parsed, err := httpURLHostPort(raw)
+	if err != nil {
+		return fmt.Errorf("%s must be a valid http(s) URL for the MCP listener: %w", name, err)
+	}
+	if parsed.port != mcpPort {
+		return fmt.Errorf("%s must target the MCP listener port %s, got %s", name, mcpPort, parsed.port)
+	}
+	return nil
+}
+
+func setServeGatewayEnv(values map[string]string) (func(), error) {
+	previous := make(map[string]previousEnv, len(values))
+	for name, value := range values {
+		prevValue, prevSet := os.LookupEnv(name)
+		previous[name] = previousEnv{value: prevValue, set: prevSet}
+		if err := os.Setenv(name, value); err != nil {
+			restoreServeGatewayEnv(previous)
+			return func() {}, err
+		}
+	}
+	return func() {
+		restoreServeGatewayEnv(previous)
+	}, nil
+}
+
+func restoreServeGatewayEnv(previous map[string]previousEnv) {
+	for name, prev := range previous {
+		if prev.set {
+			_ = os.Setenv(name, prev.value)
+		} else {
+			_ = os.Unsetenv(name)
+		}
+	}
+}
+
+type parsedHTTPHostPort struct {
+	host string
+	port string
+}
+
+func httpURLHostPort(raw string) (parsedHTTPHostPort, error) {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return parsedHTTPHostPort{}, err
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return parsedHTTPHostPort{}, fmt.Errorf("scheme must be http or https")
+	}
+	host := strings.TrimSpace(parsed.Hostname())
+	port := strings.TrimSpace(parsed.Port())
+	if host == "" || port == "" {
+		return parsedHTTPHostPort{}, fmt.Errorf("host and port are required")
+	}
+	return parsedHTTPHostPort{host: host, port: port}, nil
+}
+
+func serveMCPContainerGatewayURL(addr net.Addr) (string, error) {
+	host, _, err := splitListenerHostPort(addr)
+	if err != nil {
+		return "", err
+	}
+	containerHost := host
+	if isLocalListenerHost(host) {
+		containerHost = "host.docker.internal"
+	}
+	return serveListenerHTTPURLWithHost(addr, containerHost)
+}
+
+func serveListenerHTTPURL(addr net.Addr, localHost string) (string, error) {
+	host, _, err := splitListenerHostPort(addr)
+	if err != nil {
+		return "", err
+	}
+	if isLocalListenerHost(host) {
+		host = strings.TrimSpace(localHost)
+		if host == "" {
+			host = "127.0.0.1"
+		}
+	}
+	return serveListenerHTTPURLWithHost(addr, host)
+}
+
+func serveListenerHTTPURLWithHost(addr net.Addr, host string) (string, error) {
+	_, port, err := splitListenerHostPort(addr)
+	if err != nil {
+		return "", err
+	}
+	host = strings.TrimSpace(strings.Trim(host, "[]"))
+	if host == "" {
+		return "", errors.New("listener host is unavailable")
+	}
+	return "http://" + net.JoinHostPort(host, port), nil
+}
+
+func splitListenerHostPort(addr net.Addr) (string, string, error) {
+	if addr == nil {
+		return "", "", errors.New("listener address is unavailable")
+	}
+	host, port, err := net.SplitHostPort(addr.String())
+	if err != nil {
+		return "", "", fmt.Errorf("parse listener address: %w", err)
+	}
+	host = strings.TrimSpace(strings.Trim(host, "[]"))
+	port = strings.TrimSpace(port)
+	if host == "" || port == "" {
+		return "", "", fmt.Errorf("listener address %q must include host and port", addr.String())
+	}
+	return host, port, nil
+}
+
+func isLocalListenerHost(host string) bool {
+	host = strings.TrimSpace(strings.Trim(host, "[]"))
+	return host == "" || host == "::" || host == "0.0.0.0" || host == "127.0.0.1" || host == "::1" || strings.EqualFold(host, "localhost")
 }
 
 func buildCredentialStore() (runtimecredentials.Store, error) {

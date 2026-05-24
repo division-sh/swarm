@@ -175,7 +175,8 @@ func TestRunServeRuntimeConsumesContractPathResolverBeforeBundleLoad(t *testing.
 	var out bytes.Buffer
 	code := runServeRuntime(context.Background(), repo, serveOptions{
 		StoreMode:          "postgres",
-		HealthAddr:         defaultHealthAddr,
+		APIListenAddr:      defaultAPIListenAddr,
+		MCPListenAddr:      defaultMCPListenAddr,
 		ShutdownGrace:      runtime.DefaultShutdownGrace,
 		SelfCheck:          true,
 		RequireBundleMatch: true,

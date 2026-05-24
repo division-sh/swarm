@@ -107,7 +107,7 @@ func TestStartLocalRunServeConsumesContractPathConfigResolver(t *testing.T) {
 	})
 	defer server.Close()
 
-	opts := runCommandOptions{apiOptions: testRunCommandOptions(server)}
+	opts := runCommandOptions{apiOptions: testRunCommandOptions(server), apiPort: 19001}
 	serveStarted := make(chan serveOptions, 1)
 	opts.apiOptions.runServe = func(ctx context.Context, repo string, serveOpts serveOptions) int {
 		serveStarted <- serveOpts
@@ -126,6 +126,12 @@ func TestStartLocalRunServeConsumesContractPathConfigResolver(t *testing.T) {
 	}
 	if serveOpts.PlatformSpecPath != configPlatform {
 		t.Fatalf("platform spec path = %q, want %q", serveOpts.PlatformSpecPath, configPlatform)
+	}
+	if serveOpts.APIListenAddr != "127.0.0.1:19001" {
+		t.Fatalf("api listen addr = %q, want API listener owner from --api-port", serveOpts.APIListenAddr)
+	}
+	if serveOpts.MCPListenAddr != defaultMCPListenAddr {
+		t.Fatalf("mcp listen addr = %q, want unchanged default %q", serveOpts.MCPListenAddr, defaultMCPListenAddr)
 	}
 }
 
