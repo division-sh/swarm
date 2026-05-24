@@ -19,7 +19,7 @@ services:
       context: .
       dockerfile: Dockerfile.orchestrator
     container_name: swarm-orchestrator
-    restart: unless-stopped
+    restart: "no"
     depends_on:
       - postgres
     environment:
