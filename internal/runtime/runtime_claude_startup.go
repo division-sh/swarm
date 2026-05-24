@@ -17,15 +17,41 @@ import (
 	llm "swarm/internal/runtime/llm"
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimemcp "swarm/internal/runtime/mcp"
+	"swarm/internal/runtime/semanticview"
 	workspace "swarm/internal/runtime/workspace"
 )
 
-func validateClaudeStartupConfig(cfg *config.Config, opts RuntimeOptions) error {
-	if err := llm.ValidateClaudeCLIRuntimeConfig(cfg); err != nil {
-		return err
-	}
+func validateClaudeStartupConfig(cfg *config.Config, opts RuntimeOptions, source semanticview.Source) error {
 	if cfg == nil || strings.TrimSpace(cfg.LLM.RuntimeMode) != "cli_test" {
 		return nil
+	}
+	hasAgents, err := workflowSourceDeclaresAgents(source)
+	if err != nil {
+		return err
+	}
+	if !hasAgents {
+		return nil
+	}
+	return validateClaudeStartupRequirements(cfg, opts)
+}
+
+func validateClaudeStartupConfigForActiveAgents(cfg *config.Config, opts RuntimeOptions, source semanticview.Source, manager *runtimemanager.AgentManager) error {
+	if cfg == nil || strings.TrimSpace(cfg.LLM.RuntimeMode) != "cli_test" {
+		return nil
+	}
+	hasAgents, err := workflowSourceOrManagerDeclaresAgents(source, manager)
+	if err != nil {
+		return err
+	}
+	if !hasAgents {
+		return nil
+	}
+	return validateClaudeStartupRequirements(cfg, opts)
+}
+
+func validateClaudeStartupRequirements(cfg *config.Config, opts RuntimeOptions) error {
+	if err := llm.ValidateClaudeCLIRuntimeConfig(cfg); err != nil {
+		return err
 	}
 	if opts.WorkspaceLifecycle == nil {
 		return fmt.Errorf("workspace lifecycle is required for claude cli runtime")
@@ -39,8 +65,36 @@ func validateClaudeStartupConfig(cfg *config.Config, opts RuntimeOptions) error 
 	return nil
 }
 
-func validateClaudeManagedAgentWorkspaces(ctx context.Context, cfg *config.Config, workspaces workspace.Lifecycle, manager *runtimemanager.AgentManager) error {
+func workflowSourceDeclaresAgents(source semanticview.Source) (bool, error) {
+	if source == nil {
+		return false, fmt.Errorf("semantic source is required for claude cli runtime")
+	}
+	return len(source.AgentEntries()) > 0, nil
+}
+
+func workflowSourceOrManagerDeclaresAgents(source semanticview.Source, manager *runtimemanager.AgentManager) (bool, error) {
+	hasAgents, err := workflowSourceDeclaresAgents(source)
+	if err != nil {
+		return false, err
+	}
+	if hasAgents {
+		return true, nil
+	}
+	if manager == nil {
+		return false, nil
+	}
+	return len(manager.ListAgentConfigs()) > 0, nil
+}
+
+func validateClaudeManagedAgentWorkspaces(ctx context.Context, cfg *config.Config, source semanticview.Source, workspaces workspace.Lifecycle, manager *runtimemanager.AgentManager) error {
 	if cfg == nil || strings.TrimSpace(cfg.LLM.RuntimeMode) != "cli_test" {
+		return nil
+	}
+	hasAgents, err := workflowSourceOrManagerDeclaresAgents(source, manager)
+	if err != nil {
+		return err
+	}
+	if !hasAgents {
 		return nil
 	}
 	if workspaces == nil {
@@ -71,8 +125,15 @@ type claudeStartupContextAwareToolSource interface {
 	ToolCapabilitiesForActorInContext(context.Context, runtimeactors.AgentConfig, []string, map[string]struct{}) toolcapabilities.Set
 }
 
-func validateClaudeMCPToolsForManagedAgents(ctx context.Context, cfg *config.Config, startupProbe llm.StartupVisibleToolSurfaceProber, turnStore llm.MCPTurnContextStore, tools claudeStartupToolSource, manager *runtimemanager.AgentManager) error {
+func validateClaudeMCPToolsForManagedAgents(ctx context.Context, cfg *config.Config, source semanticview.Source, startupProbe llm.StartupVisibleToolSurfaceProber, turnStore llm.MCPTurnContextStore, tools claudeStartupToolSource, manager *runtimemanager.AgentManager) error {
 	if cfg == nil || strings.TrimSpace(cfg.LLM.RuntimeMode) != "cli_test" {
+		return nil
+	}
+	hasAgents, err := workflowSourceOrManagerDeclaresAgents(source, manager)
+	if err != nil {
+		return err
+	}
+	if !hasAgents {
 		return nil
 	}
 	if turnStore == nil {

@@ -1,0 +1,144 @@
+package runtime
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"swarm/internal/config"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimeactors "swarm/internal/runtime/core/actors"
+	runtimepipeline "swarm/internal/runtime/pipeline"
+	"swarm/internal/runtime/semanticview"
+	workspace "swarm/internal/runtime/workspace"
+)
+
+func TestRuntimeStart_AgentFreeCLITestDoesNotRequireClaudeStartupEnv(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.LLM.RuntimeMode = "cli_test"
+	t.Setenv("SWARM_CLAUDE_USE_MCP", "")
+	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
+	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "")
+	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
+	module := loadAgentFreeRuntimeWorkflowModule(t)
+	if got := len(module.SemanticSource().AgentEntries()); got != 0 {
+		t.Fatalf("agent-free fixture has %d semantic agents", got)
+	}
+
+	rt, err := NewRuntime(context.Background(), cfg, Stores{}, RuntimeOptions{
+		SelfCheck:      false,
+		WorkflowModule: module,
+		LLMRuntime:     noopLLMRuntime{},
+	})
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Shutdown() })
+
+	if err := rt.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+}
+
+func TestNewRuntime_AgentPresentCLITestStillRequiresClaudeStartupEnv(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.LLM.RuntimeMode = "cli_test"
+	t.Setenv("SWARM_CLAUDE_USE_MCP", "")
+	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
+	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "")
+	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
+	module := semanticOnlyWorkflowRuntime{source: loadPackageBackedRuntimeSessionScopeSource(t)}
+	if got := len(module.SemanticSource().AgentEntries()); got == 0 {
+		t.Fatal("agent-present fixture unexpectedly has zero semantic agents")
+	}
+
+	_, err := NewRuntime(context.Background(), cfg, Stores{}, RuntimeOptions{
+		SelfCheck:      false,
+		WorkflowModule: module,
+		LLMRuntime:     noopLLMRuntime{},
+	})
+	if err == nil {
+		t.Fatal("expected agent-present cli_test runtime to require Claude startup env")
+	}
+	if !strings.Contains(err.Error(), "claude runtime startup validation failed") {
+		t.Fatalf("NewRuntime error = %v, want claude startup validation failure", err)
+	}
+}
+
+func TestRuntimeStart_ActiveManagerAgentRequiresFullClaudeStartupEnv(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.LLM.RuntimeMode = "cli_test"
+	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
+	t.Setenv("SWARM_TOOL_GATEWAY_URL", "http://127.0.0.1:8081")
+	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "")
+	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "gateway-token")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
+
+	rt, err := NewRuntime(context.Background(), cfg, Stores{}, RuntimeOptions{
+		SelfCheck:      false,
+		WorkflowModule: loadAgentFreeRuntimeWorkflowModule(t),
+		LLMRuntime:     noopLLMRuntime{},
+		WorkspaceLifecycle: claudeStartupWorkspaceStub{
+			target: &workspace.Target{Container: "swarm-agent-recovered-agent", Workdir: "/workspace"},
+		},
+		EnableToolGateway: true,
+		ToolGatewayToken:  "gateway-token",
+	})
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Shutdown() })
+	if err := rt.Manager.SpawnAgent(runtimeactors.AgentConfig{ID: "recovered-agent", Role: "recovered", Config: json.RawMessage(`{"system_prompt":"Recovered agent"}`)}); err != nil {
+		t.Fatalf("SpawnAgent: %v", err)
+	}
+
+	err = rt.Start(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "claude runtime startup validation failed") || !strings.Contains(err.Error(), "SWARM_TOOL_GATEWAY_CONTAINER_URL") {
+		t.Fatalf("Start error = %v, want startup validation failure for missing container gateway URL", err)
+	}
+}
+
+func loadAgentFreeRuntimeWorkflowModule(t *testing.T) semanticOnlyWorkflowRuntime {
+	t.Helper()
+	repoRoot := runtimepipeline.WorkflowRepoRoot()
+	root := t.TempDir()
+	writeAgentFreeRuntimeFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: agent-free-runtime
+version: "1.0.0"
+platform_version: ">=1.0.0"
+flows: []
+`)
+	writeAgentFreeRuntimeFixtureFile(t, filepath.Join(root, "schema.yaml"), `
+name: agent-free-runtime
+initial_state: idle
+states:
+  - idle
+terminal_states:
+  - idle
+`)
+	writeAgentFreeRuntimeFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
+	writeAgentFreeRuntimeFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+	writeAgentFreeRuntimeFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeAgentFreeRuntimeFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return semanticOnlyWorkflowRuntime{source: semanticview.Wrap(bundle)}
+}
+
+func writeAgentFreeRuntimeFixtureFile(t *testing.T, path, contents string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(strings.TrimLeft(contents, "\n")), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
