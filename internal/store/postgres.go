@@ -102,6 +102,9 @@ func (s *PostgresStore) EnsureSchemaTables(ctx context.Context, plans []SchemaTa
 				continue
 			}
 			if _, err := tx.ExecContext(ctx, statement); err != nil {
+				if schemaErr := s.outdatedSchemaErrorForPlan(ctx, plan, err); schemaErr != nil {
+					return schemaErr
+				}
 				return fmt.Errorf("ensure %s table %s: %w", strings.TrimSpace(plan.SchemaKind), strings.TrimSpace(plan.TableName), err)
 			}
 		}
@@ -116,6 +119,39 @@ func (s *PostgresStore) EnsureSchemaTables(ctx context.Context, plans []SchemaTa
 		}
 	}
 	return nil
+}
+
+func (s *PostgresStore) outdatedSchemaErrorForPlan(ctx context.Context, plan SchemaTableDDL, cause error) error {
+	if s == nil || s.DB == nil {
+		return nil
+	}
+	tableName := strings.TrimSpace(plan.TableName)
+	if tableName == "" {
+		return nil
+	}
+	expectedColumns := schemaDDLPlanColumnNames(plan)
+	if len(expectedColumns) == 0 {
+		return nil
+	}
+	catalog, err := loadSchemaColumnCatalog(ctx, s.DB)
+	if err != nil || !catalog.hasTable(tableName) {
+		return nil
+	}
+	missingColumns := make([]string, 0)
+	for _, columnName := range expectedColumns {
+		if !catalog.hasColumns(tableName, columnName) {
+			missingColumns = append(missingColumns, columnName)
+		}
+	}
+	if len(missingColumns) == 0 {
+		return nil
+	}
+	return &OutdatedSchemaError{
+		SchemaKind:     strings.TrimSpace(plan.SchemaKind),
+		TableName:      tableName,
+		MissingColumns: missingColumns,
+		Cause:          cause,
+	}
 }
 
 func schemaDDLIncludesPlatformTables(plans []SchemaTableDDL) bool {
