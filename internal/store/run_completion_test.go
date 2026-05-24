@@ -171,6 +171,45 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhileDeliveryActiv
 	assertRunCompletionStatus(t, db, fixture.RunID, "completed", true)
 }
 
+func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedUntilNodeDeliverySettled(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	fixture := seedNormalRunCompletionFixture(t, db, "done", "", "")
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			run_id, event_id, subscriber_type, subscriber_id, status, reason_code, created_at
+		) VALUES (
+			$1::uuid, $2::uuid, 'node', 'terminal-node', 'pending', 'matched_node_subscription', now()
+		)
+	`, fixture.RunID, fixture.EventID); err != nil {
+		t.Fatalf("seed active node delivery: %v", err)
+	}
+	if err := pg.UpsertPipelineReceipt(ctx, fixture.EventID, "processed", ""); err != nil {
+		t.Fatalf("UpsertPipelineReceipt: %v", err)
+	}
+	if err := pg.ConvergeNormalRunCompletion(ctx, fixture.EventID, []string{"done"}, normalRunCompletionRootFlowTerminals()); err != nil {
+		t.Fatalf("ConvergeNormalRunCompletion active node: %v", err)
+	}
+	assertRunCompletionStatus(t, db, fixture.RunID, "running", false)
+
+	if _, err := db.ExecContext(ctx, `
+		UPDATE event_deliveries
+		SET status = 'delivered',
+		    reason_code = 'node_processed',
+		    delivered_at = now()
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'node'
+		  AND subscriber_id = 'terminal-node'
+	`, fixture.EventID); err != nil {
+		t.Fatalf("settle node delivery: %v", err)
+	}
+	if err := pg.ConvergeNormalRunCompletion(ctx, fixture.EventID, []string{"done"}, normalRunCompletionRootFlowTerminals()); err != nil {
+		t.Fatalf("ConvergeNormalRunCompletion settled node: %v", err)
+	}
+	assertRunCompletionStatus(t, db, fixture.RunID, "completed", true)
+}
+
 func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhileTimerActiveThenCompletesAfterTimerSettled(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}

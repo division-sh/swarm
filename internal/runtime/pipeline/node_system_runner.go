@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -24,6 +25,10 @@ type systemNodeBus interface {
 
 type systemNodeRuntimeLogger interface {
 	LogRuntime(context.Context, RuntimeLogEntry) error
+}
+
+type systemNodeNormalRunCompletionConverger interface {
+	ConvergeNormalRunCompletionForEvent(context.Context, string) error
 }
 
 type systemNodeRunner struct {
@@ -325,7 +330,37 @@ func (n *systemNodeRunner) markProcessed(ctx context.Context, evt events.Event) 
 	sideEffects, _ := json.Marshal(map[string]any{
 		"idempotency_key": SystemNodeReceiptIdempotencyKey(n.nodeID, eventID),
 	})
-	if _, err := n.db.ExecContext(ctx, `
+	if err := n.persistProcessedReceiptAndSettleDelivery(ctx, eventID, string(sideEffects)); err != nil {
+		slog.Error("system node mark processed failed", "node_id", n.nodeID, "event_id", eventID, "error", err)
+		if logger, ok := n.bus.(systemNodeRuntimeLogger); ok && logger != nil {
+			logger.LogRuntime(ctx, RuntimeLogEntry{
+				Level:     "error",
+				Message:   "Marking the system node event as processed failed",
+				Component: n.nodeID,
+				Action:    "mark_processed_failed",
+				EventID:   eventID,
+				EventType: strings.TrimSpace(string(evt.Type)),
+				EntityID:  workflowEventEntityID(evt),
+				Error:     strings.TrimSpace(err.Error()),
+			})
+		}
+		return
+	}
+	n.convergeNormalRunCompletion(ctx, evt)
+}
+
+func (n *systemNodeRunner) persistProcessedReceiptAndSettleDelivery(ctx context.Context, eventID, sideEffects string) error {
+	tx, err := n.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin system node processed receipt tx: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	res, err := tx.ExecContext(ctx, `
 		INSERT INTO event_receipts (
 			event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
 			outcome, reason_code, side_effects, idempotency_key, processed_at
@@ -335,15 +370,68 @@ func (n *systemNodeRunner) markProcessed(ctx context.Context, evt events.Event) 
 			'no_op', 'idempotent_no_op', $3::jsonb, $4, now()
 		FROM events e
 		WHERE e.event_id = $1::uuid
-		ON CONFLICT (event_id, subscriber_id) DO NOTHING
-	`, eventID, n.nodeID, string(sideEffects), SystemNodeReceiptIdempotencyKey(n.nodeID, eventID)); err != nil {
-		slog.Error("system node mark processed failed", "node_id", n.nodeID, "event_id", eventID, "error", err)
+		ON CONFLICT (event_id, subscriber_id) DO UPDATE SET
+			entity_id = EXCLUDED.entity_id,
+			flow_instance = EXCLUDED.flow_instance,
+			outcome = EXCLUDED.outcome,
+			reason_code = EXCLUDED.reason_code,
+			side_effects = EXCLUDED.side_effects,
+			idempotency_key = EXCLUDED.idempotency_key,
+			processed_at = now()
+	`, eventID, n.nodeID, sideEffects, SystemNodeReceiptIdempotencyKey(n.nodeID, eventID))
+	if err != nil {
+		return fmt.Errorf("upsert system node receipt: %w", err)
+	}
+	if rows, err := res.RowsAffected(); err == nil && rows == 0 {
+		return fmt.Errorf("upsert system node receipt: event %s not found", eventID)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE event_deliveries
+		SET
+			status = 'delivered',
+			retry_count = COALESCE(retry_count, 0),
+			reason_code = 'node_processed',
+			last_error = NULL,
+			active_session_id = NULL,
+			started_at = COALESCE(started_at, created_at),
+			delivered_at = now()
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'node'
+		  AND subscriber_id = $2
+		  AND (
+			status IN ('pending', 'in_progress')
+			OR (status = 'failed' AND COALESCE(retry_count, 0) < 2)
+		  )
+	`, eventID, n.nodeID); err != nil {
+		return fmt.Errorf("settle system node delivery: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit system node processed receipt tx: %w", err)
+	}
+	committed = true
+	return nil
+}
+
+func (n *systemNodeRunner) convergeNormalRunCompletion(ctx context.Context, evt events.Event) {
+	if n == nil || n.bus == nil {
+		return
+	}
+	eventID := strings.TrimSpace(evt.ID)
+	if eventID == "" {
+		return
+	}
+	converger, ok := n.bus.(systemNodeNormalRunCompletionConverger)
+	if !ok || converger == nil {
+		return
+	}
+	if err := converger.ConvergeNormalRunCompletionForEvent(ctx, eventID); err != nil {
+		slog.Error("system node normal run completion convergence failed", "node_id", n.nodeID, "event_id", eventID, "error", err)
 		if logger, ok := n.bus.(systemNodeRuntimeLogger); ok && logger != nil {
 			logger.LogRuntime(ctx, RuntimeLogEntry{
 				Level:     "error",
-				Message:   "Marking the system node event as processed failed",
+				Message:   "Converging normal run completion after system node receipt failed",
 				Component: n.nodeID,
-				Action:    "mark_processed_failed",
+				Action:    "normal_run_completion_failed",
 				EventID:   eventID,
 				EventType: strings.TrimSpace(string(evt.Type)),
 				EntityID:  workflowEventEntityID(evt),
