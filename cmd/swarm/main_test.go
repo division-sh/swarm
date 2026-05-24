@@ -719,6 +719,118 @@ func TestPlatformSpecCLIAPIConnectionAuthConfigPrecedencePromoted(t *testing.T) 
 	}
 }
 
+func TestRootNoAssetCommandsDoNotRequireRepoRoot(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "bare root help", args: nil, want: "Usage:"},
+		{name: "root help", args: []string{"--help"}, want: "Usage:"},
+		{name: "version", args: []string{"version"}, want: "Swarm dev"},
+		{name: "completion", args: []string{"completion", "bash"}, want: "swarm"},
+		{name: "serve help", args: []string{"serve", "--help"}, want: "Start the Swarm runtime"},
+		{name: "verify help", args: []string{"verify", "--help"}, want: "Validate local Swarm contract files"},
+		{name: "run help", args: []string{"run", "--help"}, want: "Start or reattach to a Swarm run"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateCLIAPIConfigEnv(t)
+			t.Chdir(t.TempDir())
+
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommand(context.Background(), "", tc.args, &stdout, &stderr)
+			if code != 0 {
+				t.Fatalf("code = %d stderr=%q stdout=%q", code, stderr.String(), stdout.String())
+			}
+			if !strings.Contains(stdout.String(), tc.want) {
+				t.Fatalf("stdout missing %q:\n%s", tc.want, stdout.String())
+			}
+			if strings.Contains(stderr.String(), "locate repo root") {
+				t.Fatalf("stderr leaked repo root discovery failure: %q", stderr.String())
+			}
+		})
+	}
+}
+
+func TestRunVerifyCommandUsesEmbeddedPlatformSpecWithoutRepoRoot(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	t.Chdir(t.TempDir())
+	root := t.TempDir()
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: embedded-platform-spec
+version: "1.0.0"
+platform: ">=1.6.0"
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: embedded-platform-spec\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+
+	var buf bytes.Buffer
+	code := runVerifyCommandWithContractsForTest(context.Background(), "", root, &buf)
+	if code != 0 {
+		t.Fatalf("runVerifyCommand exit code = %d, output = %q", code, buf.String())
+	}
+	if !strings.Contains(buf.String(), "verify ok: contracts=") {
+		t.Fatalf("verify output missing success marker:\n%s", buf.String())
+	}
+}
+
+func TestPlatformSpecInstalledBinaryPortabilityPromoted(t *testing.T) {
+	var spec struct {
+		CLISpecification struct {
+			Foundations struct {
+				InstalledBinaryPortability struct {
+					PromotedBy           string            `yaml:"promoted_by"`
+					ImplementationStatus string            `yaml:"implementation_status"`
+					CanonicalOwner       string            `yaml:"canonical_owner"`
+					Scope                string            `yaml:"scope"`
+					Rule                 string            `yaml:"rule"`
+					EmbeddedAssets       map[string]string `yaml:"embedded_assets"`
+					SplitTail            []string          `yaml:"split_tail"`
+				} `yaml:"installed_binary_portability"`
+			} `yaml:"foundations"`
+		} `yaml:"cli_specification"`
+	}
+	data, err := os.ReadFile(filepath.Join(repoRoot(), defaultPlatformSpecPath))
+	if err != nil {
+		t.Fatalf("read platform spec: %v", err)
+	}
+	if err := yaml.Unmarshal(data, &spec); err != nil {
+		t.Fatalf("parse platform spec: %v", err)
+	}
+	portability := spec.CLISpecification.Foundations.InstalledBinaryPortability
+	if strings.TrimSpace(portability.PromotedBy) != "#1002" {
+		t.Fatalf("installed binary portability promoted_by = %q, want #1002", portability.PromotedBy)
+	}
+	if strings.TrimSpace(portability.ImplementationStatus) != "implemented" {
+		t.Fatalf("installed binary portability implementation_status = %q, want implemented", portability.ImplementationStatus)
+	}
+	if !strings.Contains(portability.CanonicalOwner, "cli_specification.foundations.installed_binary_portability") {
+		t.Fatalf("canonical owner does not point at installed_binary_portability: %s", portability.CanonicalOwner)
+	}
+	for _, want := range []string{"help", "completion", "local `swarm version`", "contract_platform_spec_path_resolution"} {
+		if !strings.Contains(portability.Scope, want) {
+			t.Fatalf("installed binary portability scope missing %q:\n%s", want, portability.Scope)
+		}
+	}
+	for _, want := range []string{"without a source checkout", "go.mod", "MUST NOT block help"} {
+		if !strings.Contains(portability.Rule, want) {
+			t.Fatalf("installed binary portability rule missing %q:\n%s", want, portability.Rule)
+		}
+	}
+	if !strings.Contains(portability.EmbeddedAssets["platform_spec"], defaultPlatformSpecPath) {
+		t.Fatalf("platform_spec embedded asset missing tracked path:\n%s", portability.EmbeddedAssets["platform_spec"])
+	}
+	for _, want := range []string{"Dockerfile.workspace", "#996 Docker Compose", "#997 local cli_test"} {
+		if !stringSliceContains(portability.SplitTail, want) {
+			t.Fatalf("installed binary portability split_tail missing %q: %#v", want, portability.SplitTail)
+		}
+	}
+}
+
 func TestPlatformSpecContractPlatformSpecPathResolutionPromoted(t *testing.T) {
 	spec := loadCLIContractPlatformSpecPathResolutionSpec(t)
 	if strings.TrimSpace(spec.PromotedBy) != "#844" {
@@ -761,7 +873,7 @@ func TestPlatformSpecContractPlatformSpecPathResolutionPromoted(t *testing.T) {
 	if !strings.Contains(spec.ContractsPath.RejectedSources["SWARM_CONTRACTS_DIR"], "Not a CLI source") {
 		t.Fatalf("SWARM_CONTRACTS_DIR rejection missing CLI-source rule:\n%s", spec.ContractsPath.RejectedSources["SWARM_CONTRACTS_DIR"])
 	}
-	wantPlatformOrder := []string{"--platform-spec", "config platform_spec_path", "built-in tracked platform spec"}
+	wantPlatformOrder := []string{"--platform-spec", "config platform_spec_path", "embedded tracked platform spec"}
 	if len(spec.PlatformSpecPath.SourceOrder) != len(wantPlatformOrder) {
 		t.Fatalf("platform source order = %#v, want %#v", spec.PlatformSpecPath.SourceOrder, wantPlatformOrder)
 	}
@@ -781,6 +893,9 @@ func TestPlatformSpecContractPlatformSpecPathResolutionPromoted(t *testing.T) {
 	}
 	if !strings.Contains(spec.PlatformSpecPath.RejectedSources["SWARM_PLATFORM_SPEC_PATH"], "Not promoted") {
 		t.Fatalf("SWARM_PLATFORM_SPEC_PATH rejection missing not-promoted rule:\n%s", spec.PlatformSpecPath.RejectedSources["SWARM_PLATFORM_SPEC_PATH"])
+	}
+	if !strings.Contains(spec.PlatformSpecPath.DefaultRule, "embedded") || !strings.Contains(spec.PlatformSpecPath.DefaultRule, "MUST NOT require source checkout") {
+		t.Fatalf("platform default rule missing embedded portability semantics:\n%s", spec.PlatformSpecPath.DefaultRule)
 	}
 	for _, want := range []string{"verify", "serve", "local foreground run", "API auth/config", "connected run"} {
 		if !stringSliceContains(spec.ImplementationBoundaries, want) {
@@ -3940,6 +4055,7 @@ type cliContractPlatformSpecPathResolutionSpec struct {
 		} `yaml:"accepted_sources"`
 		SourceOrder     []string          `yaml:"source_order"`
 		RejectedSources map[string]string `yaml:"rejected_sources"`
+		DefaultRule     string            `yaml:"default_rule"`
 	} `yaml:"platform_spec_path"`
 	ImplementationBoundaries []string `yaml:"implementation_boundaries"`
 }

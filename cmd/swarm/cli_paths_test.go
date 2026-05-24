@@ -82,7 +82,7 @@ func TestResolveCLIContractPlatformSpecPathsPrecedenceAndDiscovery(t *testing.T)
 		}
 	})
 
-	t.Run("discovers repo contracts and built in platform spec last", func(t *testing.T) {
+	t.Run("discovers repo contracts and embedded platform spec last", func(t *testing.T) {
 		isolateCLIAPIConfigEnv(t)
 
 		got, err := resolveCLIContractPlatformSpecPaths(repo, cliContractPlatformSpecPathOptions{})
@@ -92,10 +92,46 @@ func TestResolveCLIContractPlatformSpecPathsPrecedenceAndDiscovery(t *testing.T)
 		if got.ContractsPath != discoveredContracts {
 			t.Fatalf("contracts path = %q, want %q", got.ContractsPath, discoveredContracts)
 		}
-		if want := filepath.Join(repo, defaultPlatformSpecPath); got.PlatformSpecPath != want {
+		want, err := embeddedPlatformSpecPath()
+		if err != nil {
+			t.Fatalf("embedded platform spec path: %v", err)
+		}
+		if got.PlatformSpecPath != want {
 			t.Fatalf("platform spec path = %q, want %q", got.PlatformSpecPath, want)
 		}
 	})
+}
+
+func TestResolveCLIContractPlatformSpecPathsEmbeddedDefaultDoesNotRequireRepoRoot(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	outsideRepo := t.TempDir()
+	contractsRoot := filepath.Join(t.TempDir(), "contracts")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(contractsRoot, "package.yaml"), `name: external`)
+	t.Chdir(outsideRepo)
+
+	got, err := resolveCLIContractPlatformSpecPaths("", cliContractPlatformSpecPathOptions{
+		ContractsPath: contractsRoot,
+	})
+	if err != nil {
+		t.Fatalf("resolve paths: %v", err)
+	}
+	if got.ContractsPath != contractsRoot {
+		t.Fatalf("contracts path = %q, want %q", got.ContractsPath, contractsRoot)
+	}
+	want, err := embeddedPlatformSpecPath()
+	if err != nil {
+		t.Fatalf("embedded platform spec path: %v", err)
+	}
+	if got.PlatformSpecPath != want {
+		t.Fatalf("platform spec path = %q, want %q", got.PlatformSpecPath, want)
+	}
+	data, err := os.ReadFile(got.PlatformSpecPath)
+	if err != nil {
+		t.Fatalf("read embedded platform spec materialization: %v", err)
+	}
+	if !bytes.Contains(data, []byte("cli_specification:")) {
+		t.Fatalf("materialized platform spec missing cli_specification")
+	}
 }
 
 func TestCLIContractPathResolutionIgnoresLegacyContractsDir(t *testing.T) {
