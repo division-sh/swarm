@@ -382,11 +382,12 @@ func (eb *EventBus) convergeStandaloneRuntimePlatformRun(ctx context.Context, ev
 	if eb == nil || eb.store == nil {
 		return nil
 	}
-	converger, ok := eb.store.(StandaloneRuntimePlatformRunConvergencePersistence)
-	if !ok || converger == nil {
-		return nil
+	if converger, ok := eb.store.(StandaloneRuntimePlatformRunConvergencePersistence); ok && converger != nil {
+		if err := converger.ConvergeStandaloneRuntimePlatformRun(ctx, evt); err != nil {
+			return err
+		}
 	}
-	return converger.ConvergeStandaloneRuntimePlatformRun(ctx, evt)
+	return eb.ConvergeNormalRunCompletionForEvent(ctx, evt.ID)
 }
 
 func (eb *EventBus) publishTransactional(

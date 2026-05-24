@@ -71,6 +71,10 @@ type StandaloneRuntimePlatformRunConvergencePersistence interface {
 	ConvergeStandaloneRuntimePlatformRun(ctx context.Context, evt events.Event) error
 }
 
+type NormalRunCompletionConvergencePersistence interface {
+	ConvergeNormalRunCompletion(ctx context.Context, eventID string, workflowTerminalStates []string, flowTerminalStates map[string][]string) error
+}
+
 type RunLifecycleSnapshot struct {
 	RunID        string
 	Status       string

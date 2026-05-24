@@ -1,0 +1,282 @@
+package store
+
+import (
+	"context"
+	"database/sql"
+	"testing"
+
+	"github.com/google/uuid"
+	runtimemanager "swarm/internal/runtime/manager"
+	"swarm/internal/testutil"
+)
+
+type normalRunCompletionFixture struct {
+	RunID    string
+	EventID  string
+	EntityID string
+}
+
+func seedNormalRunCompletionFixture(t *testing.T, db *sql.DB, state, flowInstance, flowTemplate string) normalRunCompletionFixture {
+	t.Helper()
+	ctx := context.Background()
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	entityID := uuid.NewString()
+	if flowInstance == "" {
+		flowInstance = "example"
+	}
+	if flowTemplate == "" {
+		flowTemplate = "example"
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, started_at)
+		VALUES ($1::uuid, 'running', now())
+	`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			event_id, run_id, event_name, entity_id, flow_instance, scope, payload,
+			chain_depth, produced_by, produced_by_type, created_at
+		) VALUES (
+			$1::uuid, $2::uuid, 'example.started', $3::uuid, NULLIF($4,''), 'entity', '{}'::jsonb,
+			0, 'test', 'external', now()
+		)
+	`, eventID, runID, entityID, flowInstance); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		UPDATE runs
+		SET trigger_event_id = $2::uuid,
+		    trigger_event_type = 'example.started'
+		WHERE run_id = $1::uuid
+	`, runID, eventID); err != nil {
+		t.Fatalf("seed run trigger: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+			INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
+			VALUES ($1, $2, 'static', '{}'::jsonb, 'active', now())
+			ON CONFLICT (instance_id) DO UPDATE SET flow_template = EXCLUDED.flow_template
+		`, flowInstance, flowTemplate); err != nil {
+		t.Fatalf("seed flow instance: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO entity_state (
+			run_id, entity_id, flow_instance, entity_type, slug, name, current_state,
+			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
+		) VALUES (
+			$1::uuid, $2::uuid, NULLIF($3,''), 'default', 'example', 'Example', $4,
+			'{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, now(), now(), now()
+		)
+	`, runID, entityID, flowInstance, state); err != nil {
+		t.Fatalf("seed entity state: %v", err)
+	}
+	return normalRunCompletionFixture{RunID: runID, EventID: eventID, EntityID: entityID}
+}
+
+func normalRunCompletionRootFlowTerminals() map[string][]string {
+	return map[string][]string{"example": []string{"done"}}
+}
+
+func assertRunCompletionStatus(t *testing.T, db *sql.DB, runID, want string, wantEnded bool) {
+	t.Helper()
+	var (
+		status  string
+		endedAt sql.NullTime
+	)
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT COALESCE(status, ''), ended_at
+		FROM runs
+		WHERE run_id = $1::uuid
+	`, runID).Scan(&status, &endedAt); err != nil {
+		t.Fatalf("load run status: %v", err)
+	}
+	if status != want {
+		t.Fatalf("run status = %q, want %q", status, want)
+	}
+	if endedAt.Valid != wantEnded {
+		t.Fatalf("ended_at valid = %v, want %v", endedAt.Valid, wantEnded)
+	}
+}
+
+func TestPostgresStore_ConvergeNormalRunCompletion_MarksCompletedWhenTerminalAndIdle(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	fixture := seedNormalRunCompletionFixture(t, db, "done", "review/inst-1", "review")
+	if err := pg.UpsertPipelineReceipt(ctx, fixture.EventID, "processed", ""); err != nil {
+		t.Fatalf("UpsertPipelineReceipt: %v", err)
+	}
+	if err := pg.ConvergeNormalRunCompletion(ctx, fixture.EventID, []string{"done"}, map[string][]string{"review": []string{"done"}}); err != nil {
+		t.Fatalf("ConvergeNormalRunCompletion: %v", err)
+	}
+	assertRunCompletionStatus(t, db, fixture.RunID, "completed", true)
+
+	header, err := pg.LoadRunHeader(ctx, fixture.RunID)
+	if err != nil {
+		t.Fatalf("LoadRunHeader: %v", err)
+	}
+	if header.Status != "completed" || header.EndedAt == nil {
+		t.Fatalf("run header = status:%q ended:%v, want completed with ended_at", header.Status, header.EndedAt)
+	}
+	report, err := pg.LoadRunDebugReport(ctx, fixture.RunID, RunDebugQueryOptions{})
+	if err != nil {
+		t.Fatalf("LoadRunDebugReport: %v", err)
+	}
+	if got := ProjectRunOperationalStatus(report).State; got != "completed" {
+		t.Fatalf("run operational state = %q, want completed", got)
+	}
+}
+
+func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWithMissingPipelineReceipt(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	fixture := seedNormalRunCompletionFixture(t, db, "done", "", "")
+	if err := pg.ConvergeNormalRunCompletion(ctx, fixture.EventID, []string{"done"}, normalRunCompletionRootFlowTerminals()); err != nil {
+		t.Fatalf("ConvergeNormalRunCompletion: %v", err)
+	}
+	assertRunCompletionStatus(t, db, fixture.RunID, "running", false)
+}
+
+func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhileDeliveryActive(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	fixture := seedNormalRunCompletionFixture(t, db, "done", "", "")
+	sessionID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			run_id, event_id, subscriber_type, subscriber_id, status, active_session_id, created_at
+		) VALUES (
+			$1::uuid, $2::uuid, 'agent', 'agent-1', 'in_progress', $3::uuid, now()
+		)
+	`, fixture.RunID, fixture.EventID, sessionID); err != nil {
+		t.Fatalf("seed active delivery: %v", err)
+	}
+	if err := pg.UpsertPipelineReceipt(ctx, fixture.EventID, "processed", ""); err != nil {
+		t.Fatalf("UpsertPipelineReceipt: %v", err)
+	}
+	if err := pg.ConvergeNormalRunCompletion(ctx, fixture.EventID, []string{"done"}, normalRunCompletionRootFlowTerminals()); err != nil {
+		t.Fatalf("ConvergeNormalRunCompletion active: %v", err)
+	}
+	assertRunCompletionStatus(t, db, fixture.RunID, "running", false)
+
+	if err := pg.UpsertEventReceipt(ctx, fixture.EventID, "agent-1", runtimemanager.ReceiptStatusProcessed, ""); err != nil {
+		t.Fatalf("UpsertEventReceipt: %v", err)
+	}
+	if err := pg.ConvergeNormalRunCompletion(ctx, fixture.EventID, []string{"done"}, normalRunCompletionRootFlowTerminals()); err != nil {
+		t.Fatalf("ConvergeNormalRunCompletion settled: %v", err)
+	}
+	assertRunCompletionStatus(t, db, fixture.RunID, "completed", true)
+}
+
+func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhileTimerActiveThenCompletesAfterTimerSettled(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	fixture := seedNormalRunCompletionFixture(t, db, "done", "", "")
+	if err := pg.UpsertPipelineReceipt(ctx, fixture.EventID, "processed", ""); err != nil {
+		t.Fatalf("UpsertPipelineReceipt: %v", err)
+	}
+	timerID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO timers (
+			timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
+			fire_at, owner_agent, task_type, status, created_at
+		) VALUES (
+			$1::uuid, $2::uuid, 'wait', $3::uuid, '', 'example.timeout', '{}'::jsonb,
+			now() + interval '1 minute', 'timer-agent', 'timer', 'active', now()
+		)
+	`, timerID, fixture.RunID, fixture.EntityID); err != nil {
+		t.Fatalf("seed active timer: %v", err)
+	}
+	if err := pg.ConvergeNormalRunCompletion(ctx, fixture.EventID, []string{"done"}, normalRunCompletionRootFlowTerminals()); err != nil {
+		t.Fatalf("ConvergeNormalRunCompletion active timer: %v", err)
+	}
+	assertRunCompletionStatus(t, db, fixture.RunID, "running", false)
+
+	if _, err := db.ExecContext(ctx, `UPDATE timers SET status = 'fired', fired_at = now() WHERE timer_id = $1::uuid`, timerID); err != nil {
+		t.Fatalf("settle timer: %v", err)
+	}
+	if err := pg.ConvergeNormalRunCompletion(ctx, fixture.EventID, []string{"done"}, normalRunCompletionRootFlowTerminals()); err != nil {
+		t.Fatalf("ConvergeNormalRunCompletion settled timer: %v", err)
+	}
+	assertRunCompletionStatus(t, db, fixture.RunID, "completed", true)
+}
+
+func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhileSessionLeaseActive(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	fixture := seedNormalRunCompletionFixture(t, db, "done", "", "")
+	if err := pg.UpsertPipelineReceipt(ctx, fixture.EventID, "processed", ""); err != nil {
+		t.Fatalf("UpsertPipelineReceipt: %v", err)
+	}
+	sessionID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agents (
+			agent_id, role, model_tier, llm_backend, conversation_mode,
+			config, subscriptions, emit_events, tools, permissions, runtime_descriptor,
+			status, turn_count, last_active_at, created_at
+		) VALUES (
+			'agent-1', 'worker', 'standard', 'mock', 'session_per_entity',
+			'{}'::jsonb, '[]'::jsonb, '[]'::jsonb, '[]'::jsonb, '{}'::jsonb, '{}'::jsonb,
+			'active', 0, now(), now()
+		)
+	`); err != nil {
+		t.Fatalf("seed agent: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agent_sessions (
+			session_id, run_id, agent_id, entity_id, flow_instance, scope_key, scope,
+			conversation, turn_count, runtime_mode, runtime_state,
+			lease_holder, lease_expires_at, status, created_at, updated_at
+		) VALUES (
+			$1::uuid, $2::uuid, 'agent-1', $3::uuid, '', $3::text, 'entity',
+			'[]'::jsonb, 0, 'session_per_entity', '{}'::jsonb,
+			'worker-1', now() + interval '1 minute', 'active', now(), now()
+		)
+	`, sessionID, fixture.RunID, fixture.EntityID); err != nil {
+		t.Fatalf("seed active session lease: %v", err)
+	}
+	if err := pg.ConvergeNormalRunCompletion(ctx, fixture.EventID, []string{"done"}, normalRunCompletionRootFlowTerminals()); err != nil {
+		t.Fatalf("ConvergeNormalRunCompletion active session: %v", err)
+	}
+	assertRunCompletionStatus(t, db, fixture.RunID, "running", false)
+
+	if _, err := db.ExecContext(ctx, `
+		UPDATE agent_sessions
+		SET lease_holder = NULL,
+		    lease_expires_at = NULL
+		WHERE session_id = $1::uuid
+	`, sessionID); err != nil {
+		t.Fatalf("release session lease: %v", err)
+	}
+	if err := pg.ConvergeNormalRunCompletion(ctx, fixture.EventID, []string{"done"}, normalRunCompletionRootFlowTerminals()); err != nil {
+		t.Fatalf("ConvergeNormalRunCompletion released session: %v", err)
+	}
+	assertRunCompletionStatus(t, db, fixture.RunID, "completed", true)
+}
+
+func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhenEntityNotTerminal(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	fixture := seedNormalRunCompletionFixture(t, db, "working", "", "")
+	if err := pg.UpsertPipelineReceipt(ctx, fixture.EventID, "processed", ""); err != nil {
+		t.Fatalf("UpsertPipelineReceipt: %v", err)
+	}
+	if err := pg.ConvergeNormalRunCompletion(ctx, fixture.EventID, []string{"done"}, normalRunCompletionRootFlowTerminals()); err != nil {
+		t.Fatalf("ConvergeNormalRunCompletion: %v", err)
+	}
+	assertRunCompletionStatus(t, db, fixture.RunID, "running", false)
+
+	if _, err := db.ExecContext(ctx, `UPDATE entity_state SET current_state = 'done' WHERE run_id = $1::uuid`, fixture.RunID); err != nil {
+		t.Fatalf("advance entity terminal: %v", err)
+	}
+	if err := pg.ConvergeNormalRunCompletion(ctx, fixture.EventID, []string{"done"}, normalRunCompletionRootFlowTerminals()); err != nil {
+		t.Fatalf("ConvergeNormalRunCompletion terminal: %v", err)
+	}
+	assertRunCompletionStatus(t, db, fixture.RunID, "completed", true)
+}
