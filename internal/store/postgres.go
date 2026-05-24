@@ -381,6 +381,7 @@ func (s *PostgresStore) ensureEventReceiptsTypedSubscriberIdentity(ctx context.C
 		FROM event_receipts legacy
 		WHERE legacy.subscriber_type = 'node'
 		  AND legacy.subscriber_id = 'node:pipeline'
+		  AND COALESCE(legacy.idempotency_key, '') = 'pipeline:' || legacy.event_id::text
 		  AND EXISTS (
 			SELECT 1
 			FROM event_receipts canonical
@@ -393,6 +394,22 @@ func (s *PostgresStore) ensureEventReceiptsTypedSubscriberIdentity(ctx context.C
 	}
 	if nodePipelineConflicts > 0 {
 		return fmt.Errorf("event_receipts typed subscriber identity migration found %d node:pipeline rows colliding with canonical node pipeline receipts", nodePipelineConflicts)
+	}
+	var ambiguousNodePipelineRows int
+	if err := s.DB.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_receipts
+		WHERE subscriber_type = 'node'
+		  AND subscriber_id = 'node:pipeline'
+		  AND COALESCE(idempotency_key, '') NOT IN (
+			'pipeline:' || event_id::text,
+			'node:pipeline:' || event_id::text
+		  )
+	`).Scan(&ambiguousNodePipelineRows); err != nil {
+		return fmt.Errorf("inspect ambiguous event_receipts node:pipeline rows: %w", err)
+	}
+	if ambiguousNodePipelineRows > 0 {
+		return fmt.Errorf("event_receipts typed subscriber identity migration found %d ambiguous node:pipeline rows without canonical system-node idempotency proof", ambiguousNodePipelineRows)
 	}
 
 	for _, stmt := range []struct {
@@ -453,6 +470,7 @@ func (s *PostgresStore) ensureEventReceiptsTypedSubscriberIdentity(ctx context.C
 				SET subscriber_id = 'pipeline'
 				WHERE subscriber_type = 'node'
 				  AND subscriber_id = 'node:pipeline'
+				  AND COALESCE(idempotency_key, '') = 'pipeline:' || event_id::text
 			`,
 		},
 	} {
