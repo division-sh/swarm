@@ -524,3 +524,56 @@ func schemaDDLColumnCount(statements []string) int {
 	}
 	return 0
 }
+
+func schemaDDLPlanColumnNames(plan SchemaTableDDL) []string {
+	for _, statement := range plan.Statements {
+		if schemaDDLExtractTableName(statement) == "" {
+			continue
+		}
+		return schemaDDLCreateTableColumnNames(statement)
+	}
+	return nil
+}
+
+func schemaDDLCreateTableColumnNames(statement string) []string {
+	start := strings.Index(statement, "(")
+	end := strings.LastIndex(statement, ")")
+	if start < 0 || end <= start {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	out := make([]string, 0)
+	for _, line := range strings.Split(statement[start+1:end], "\n") {
+		line = strings.TrimSpace(strings.TrimSuffix(line, ","))
+		if line == "" || schemaDDLCreateTableLineIsConstraint(line) {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		columnName := strings.Trim(fields[0], `"`)
+		if columnName == "" {
+			continue
+		}
+		if _, exists := seen[columnName]; exists {
+			continue
+		}
+		seen[columnName] = struct{}{}
+		out = append(out, columnName)
+	}
+	return out
+}
+
+func schemaDDLCreateTableLineIsConstraint(line string) bool {
+	fields := strings.Fields(strings.ToUpper(strings.TrimSpace(line)))
+	if len(fields) == 0 {
+		return false
+	}
+	switch fields[0] {
+	case "PRIMARY", "FOREIGN", "UNIQUE", "CHECK", "CONSTRAINT", "EXCLUDE":
+		return true
+	default:
+		return false
+	}
+}

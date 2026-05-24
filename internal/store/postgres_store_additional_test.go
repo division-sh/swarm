@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -550,6 +551,106 @@ func TestPostgresStore_EnsureSchemaTables_PhasesAgentSessionCompatibilityBeforeD
 	}
 	if indexName != "idx_sessions_terminated_reason" {
 		t.Fatalf("idx_sessions_terminated_reason regclass = %q, want idx_sessions_terminated_reason", indexName)
+	}
+}
+
+func TestPostgresStore_EnsureSchemaTables_ReportsOutdatedSchemaForLegacyTimers(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	if _, err := db.ExecContext(ctx, `DROP TABLE IF EXISTS timers CASCADE`); err != nil {
+		t.Fatalf("drop timers: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE timers (
+			timer_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			timer_name TEXT NOT NULL,
+			entity_id UUID,
+			flow_instance TEXT,
+			fire_event TEXT NOT NULL,
+			fire_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+			fire_at TIMESTAMPTZ NOT NULL,
+			status TEXT NOT NULL DEFAULT 'active',
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)
+	`); err != nil {
+		t.Fatalf("create legacy timers: %v", err)
+	}
+
+	err := pg.EnsureSchemaTables(ctx, []SchemaTableDDL{legacyTimerDiagnosticPlan()})
+	if err == nil {
+		t.Fatal("EnsureSchemaTables error = nil, want outdated schema diagnostic")
+	}
+	var outdated *OutdatedSchemaError
+	if !errors.As(err, &outdated) {
+		t.Fatalf("EnsureSchemaTables error = %T %[1]v, want OutdatedSchemaError", err)
+	}
+	if outdated.TableName != "timers" {
+		t.Fatalf("outdated table = %q, want timers", outdated.TableName)
+	}
+	if !containsString(outdated.MissingColumns, "run_id") {
+		t.Fatalf("missing columns = %#v, want run_id", outdated.MissingColumns)
+	}
+	got := err.Error()
+	for _, want := range []string{
+		"database schema is out of date",
+		"platform_spec table timers",
+		"run_id",
+		"use a fresh database or run an approved schema migration",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("error = %q, want substring %q", got, want)
+		}
+	}
+	for _, disallowed := range []string{"pq:", "42703"} {
+		if strings.Contains(got, disallowed) {
+			t.Fatalf("error = %q, want no raw Postgres detail %q", got, disallowed)
+		}
+	}
+}
+
+func TestPostgresStore_EnsureSchemaTables_AllowsCurrentTimerSchema(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	if err := pg.EnsureSchemaTables(ctx, []SchemaTableDDL{legacyTimerDiagnosticPlan()}); err != nil {
+		t.Fatalf("EnsureSchemaTables current timers: %v", err)
+	}
+}
+
+func legacyTimerDiagnosticPlan() SchemaTableDDL {
+	return SchemaTableDDL{
+		TableName:   "timers",
+		SchemaKind:  "platform_spec",
+		ColumnCount: 21,
+		Statements: []string{
+			`CREATE TABLE IF NOT EXISTS timers (
+    timer_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    timer_name TEXT NOT NULL,
+    run_id UUID REFERENCES runs(run_id),
+    source_timer_id UUID REFERENCES timers(timer_id),
+    forked_from_run_id UUID REFERENCES runs(run_id),
+    forked_from_event_id UUID REFERENCES events(event_id),
+    reconstruction_owner TEXT,
+    entity_id UUID,
+    flow_instance TEXT,
+    fire_event TEXT NOT NULL,
+    fire_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+    fire_at TIMESTAMPTZ NOT NULL,
+    recurring BOOLEAN NOT NULL DEFAULT FALSE,
+    recurrence_cron TEXT,
+    recurrence_interval TEXT,
+    owner_node TEXT,
+    owner_agent TEXT,
+    task_type TEXT NOT NULL DEFAULT 'timer' CHECK (task_type IN ('timer', 'scheduled_task', 'deadline', 'global_recurring')),
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'fired', 'cancelled', 'expired')),
+    fired_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+)`,
+			`CREATE INDEX IF NOT EXISTS idx_timers_run ON timers(run_id, status, fire_at) WHERE run_id IS NOT NULL`,
+		},
 	}
 }
 
