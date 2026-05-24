@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,6 +20,10 @@ type cliContractPlatformSpecPaths struct {
 }
 
 func resolveCLIContractPlatformSpecPaths(repoRoot string, opts cliContractPlatformSpecPathOptions) (cliContractPlatformSpecPaths, error) {
+	repoRoot = strings.TrimSpace(repoRoot)
+	if repoRoot == "" {
+		repoRoot = discoverRepoRoot()
+	}
 	cfg, err := loadCLIAPIConfigFile()
 	if err != nil {
 		return cliContractPlatformSpecPaths{}, err
@@ -29,11 +34,18 @@ func resolveCLIContractPlatformSpecPaths(repoRoot string, opts cliContractPlatfo
 		cfg.ContractsPath,
 		discoverRepoContractsPath(repoRoot),
 	)
+	configPlatformSpecPath := strings.TrimSpace(cfg.PlatformSpecPath)
 	platformSpecPath := firstNonEmpty(
 		opts.PlatformSpecPath,
-		cfg.PlatformSpecPath,
-		defaultPlatformSpecPath,
+		configPlatformSpecPath,
 	)
+	if platformSpecPath == "" {
+		embedded, err := embeddedPlatformSpecPath()
+		if err != nil {
+			return cliContractPlatformSpecPaths{}, fmt.Errorf("resolve embedded platform spec: %w", err)
+		}
+		platformSpecPath = embedded
+	}
 	return cliContractPlatformSpecPaths{
 		ContractsPath:    resolvePath(repoRoot, contractsPath),
 		PlatformSpecPath: resolvePath(repoRoot, platformSpecPath),
@@ -41,6 +53,10 @@ func resolveCLIContractPlatformSpecPaths(repoRoot string, opts cliContractPlatfo
 }
 
 func discoverRepoContractsPath(repoRoot string) string {
+	repoRoot = strings.TrimSpace(repoRoot)
+	if repoRoot == "" {
+		return ""
+	}
 	candidate := filepath.Join(repoRoot, "contracts")
 	if regularFileExists(filepath.Join(candidate, "package.yaml")) {
 		return candidate

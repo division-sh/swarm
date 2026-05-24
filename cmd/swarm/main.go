@@ -24,6 +24,7 @@ import (
 	"syscall"
 	"time"
 
+	platformcontracts "swarm/docs/specs/swarm-platform/platform/contracts"
 	apiv1 "swarm/internal/apiv1"
 	"swarm/internal/config"
 	"swarm/internal/runtime"
@@ -102,7 +103,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	os.Exit(executeRootCommand(ctx, repoRoot(), os.Args[1:], os.Stdout, os.Stderr))
+	os.Exit(executeRootCommand(ctx, "", os.Args[1:], os.Stdout, os.Stderr))
 }
 
 type serveOptions struct {
@@ -2102,9 +2103,22 @@ func configuredWorkspaceLifecycle(db *sql.DB, repoRoot, contractsRoot string, so
 }
 
 func repoRoot() string {
+	root := discoverRepoRoot()
+	if root != "" {
+		return root
+	}
 	dir, err := os.Getwd()
 	if err != nil {
 		log.Fatalf("resolve cwd: %v", err)
+	}
+	log.Fatalf("locate repo root from %s", dir)
+	return ""
+}
+
+func discoverRepoRoot() string {
+	dir, err := os.Getwd()
+	if err != nil {
+		return ""
 	}
 	for {
 		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
@@ -2112,10 +2126,14 @@ func repoRoot() string {
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			log.Fatalf("locate repo root from %s", dir)
+			return ""
 		}
 		dir = parent
 	}
+}
+
+func embeddedPlatformSpecPath() (string, error) {
+	return platformcontracts.MaterializePlatformSpecFile()
 }
 
 func closeDB(db *sql.DB) {
