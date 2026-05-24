@@ -1674,22 +1674,26 @@ func TestPostgresStore_EnsureSchemaTables_MigratesEventReceiptsTypedSubscriberId
 	downgradeEventReceiptsToUntypedSubscriberIdentity(t, ctx, db)
 
 	eventID := uuid.NewString()
+	literalNodeEventID := uuid.NewString()
 	entityID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO events (
 			event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
-		) VALUES (
-			$1::uuid, 'test.receipts.migration', $2::uuid, 'flow-1', 'entity', '{}'::jsonb, 'test', 'platform', now()
-		)
-	`, eventID, entityID); err != nil {
+		) VALUES
+			($1::uuid, 'test.receipts.migration', $3::uuid, 'flow-1', 'entity', '{}'::jsonb, 'test', 'platform', now()),
+			($2::uuid, 'test.receipts.literal_node_pipeline', $3::uuid, 'flow-1', 'entity', '{}'::jsonb, 'test', 'platform', now())
+	`, eventID, literalNodeEventID, entityID); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_receipts (event_id, subscriber_type, subscriber_id, outcome, side_effects)
+		INSERT INTO event_receipts (event_id, subscriber_type, subscriber_id, outcome, side_effects, idempotency_key)
 		VALUES
-			($1::uuid, 'platform', 'pipeline', 'success', '{}'::jsonb),
-			($1::uuid, 'node', 'node:pipeline', 'no_op', '{}'::jsonb)
-	`, eventID); err != nil {
+			($1::uuid, 'platform', 'pipeline', 'success', '{}'::jsonb, NULL),
+			($1::uuid, 'node', 'node:pipeline', 'no_op', '{}'::jsonb, $3),
+			($2::uuid, 'node', 'node:pipeline', 'no_op', '{}'::jsonb, $4)
+	`, eventID, literalNodeEventID,
+		runtimepipeline.SystemNodeReceiptIdempotencyKey("pipeline", eventID),
+		runtimepipeline.SystemNodeReceiptIdempotencyKey("node:pipeline", literalNodeEventID)); err != nil {
 		t.Fatalf("seed legacy receipts: %v", err)
 	}
 
@@ -1730,6 +1734,20 @@ func TestPostgresStore_EnsureSchemaTables_MigratesEventReceiptsTypedSubscriberId
 	if legacyRows != 0 {
 		t.Fatalf("legacy node:pipeline receipt rows = %d, want 0", legacyRows)
 	}
+	var literalRows int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_receipts
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'node'
+		  AND subscriber_id = 'node:pipeline'
+		  AND idempotency_key = $2
+	`, literalNodeEventID, runtimepipeline.SystemNodeReceiptIdempotencyKey("node:pipeline", literalNodeEventID)).Scan(&literalRows); err != nil {
+		t.Fatalf("count literal node:pipeline receipts: %v", err)
+	}
+	if literalRows != 1 {
+		t.Fatalf("literal node:pipeline receipt rows = %d, want 1", literalRows)
+	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_receipts (event_id, subscriber_type, subscriber_id, outcome, side_effects)
 		VALUES ($1::uuid, 'node', 'pipeline', 'success', '{}'::jsonb)
@@ -1752,11 +1770,13 @@ func TestPostgresStore_EnsureSchemaTables_FailsClosedOnNodePipelineMigrationConf
 		t.Fatalf("seed event: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_receipts (event_id, subscriber_type, subscriber_id, outcome, side_effects)
+		INSERT INTO event_receipts (event_id, subscriber_type, subscriber_id, outcome, side_effects, idempotency_key)
 		VALUES
-			($1::uuid, 'node', 'pipeline', 'success', '{}'::jsonb),
-			($1::uuid, 'node', 'node:pipeline', 'no_op', '{}'::jsonb)
-	`, eventID); err != nil {
+			($1::uuid, 'node', 'pipeline', 'success', '{}'::jsonb, $2),
+			($1::uuid, 'node', 'node:pipeline', 'no_op', '{}'::jsonb, $3)
+	`, eventID,
+		runtimepipeline.SystemNodeReceiptIdempotencyKey("pipeline", eventID),
+		runtimepipeline.SystemNodeReceiptIdempotencyKey("pipeline", eventID)); err != nil {
 		t.Fatalf("seed conflicting legacy receipts: %v", err)
 	}
 
@@ -1766,6 +1786,35 @@ func TestPostgresStore_EnsureSchemaTables_FailsClosedOnNodePipelineMigrationConf
 	}
 	if !strings.Contains(err.Error(), "node:pipeline") {
 		t.Fatalf("EnsureSchemaTables error = %v, want node:pipeline conflict", err)
+	}
+}
+
+func TestPostgresStore_EnsureSchemaTables_FailsClosedOnAmbiguousNodePipelineRows(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	downgradeEventReceiptsToUntypedSubscriberIdentity(t, ctx, db)
+
+	eventID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (event_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
+		VALUES ($1::uuid, 'test.receipts.ambiguous_node_pipeline', 'global', '{}'::jsonb, 'test', 'platform', now())
+	`, eventID); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_receipts (event_id, subscriber_type, subscriber_id, outcome, side_effects, idempotency_key)
+		VALUES ($1::uuid, 'node', 'node:pipeline', 'no_op', '{}'::jsonb, NULL)
+	`, eventID); err != nil {
+		t.Fatalf("seed ambiguous legacy receipt: %v", err)
+	}
+
+	err := pg.EnsureSchemaTables(ctx, eventReceiptsTypedIdentityPlans(t))
+	if err == nil {
+		t.Fatal("EnsureSchemaTables error = nil, want ambiguous node:pipeline fail-closed migration error")
+	}
+	if !strings.Contains(err.Error(), "ambiguous node:pipeline") {
+		t.Fatalf("EnsureSchemaTables error = %v, want ambiguous node:pipeline", err)
 	}
 }
 
