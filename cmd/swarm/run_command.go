@@ -194,6 +194,15 @@ func (o runCommandOptions) validate() error {
 	if o.changedFlags["mcp-port"] {
 		return fmt.Errorf("--mcp-port is not supported until the serve owner can bind MCP explicitly")
 	}
+	if o.changedFlags["api-port"] {
+		_, defaultMCPPort, err := net.SplitHostPort(defaultMCPListenAddr)
+		if err != nil {
+			return fmt.Errorf("default MCP listener address %q is invalid: %w", defaultMCPListenAddr, err)
+		}
+		if strconv.Itoa(o.apiPort) == defaultMCPPort {
+			return fmt.Errorf("--api-port %d conflicts with default MCP listener %s", o.apiPort, defaultMCPListenAddr)
+		}
+	}
 	if o.noFollow && strings.TrimSpace(o.connectURL) == "" {
 		return fmt.Errorf("--no-follow requires --connect")
 	}
