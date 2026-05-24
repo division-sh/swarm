@@ -2,19 +2,33 @@
 set -euo pipefail
 
 CONTRACTS_ROOT="${CONTRACTS_ROOT:-/Users/youmew/swarm/empire/contracts}"
-HEALTH_ADDR="${HEALTH_ADDR:-0.0.0.0:8081}"
-HEALTH_PORT="${HEALTH_ADDR##*:}"
-HEALTH_HOST="${HEALTH_ADDR%:*}"
-if [[ "${HEALTH_HOST}" == "${HEALTH_ADDR}" ]]; then
-  HEALTH_HOST="127.0.0.1"
-fi
-if [[ -z "${HEALTH_HOST}" || "${HEALTH_HOST}" == "0.0.0.0" || "${HEALTH_HOST}" == "::" ]]; then
-  HEALTH_HOST="127.0.0.1"
-fi
-HOST_HTTP_ADDR="${HEALTH_HOST}:${HEALTH_PORT}"
-HEALTH_URL="http://${HOST_HTTP_ADDR}/healthz"
-READY_URL="http://${HOST_HTTP_ADDR}/readyz"
-API_RPC_URL="http://${HOST_HTTP_ADDR}/v1/rpc"
+API_LISTEN_ADDR="${API_LISTEN_ADDR:-0.0.0.0:8081}"
+MCP_LISTEN_ADDR="${MCP_LISTEN_ADDR:-0.0.0.0:8082}"
+
+listen_host() {
+  local addr="$1"
+  local host="${addr%:*}"
+  if [[ "${host}" == "${addr}" ]]; then
+    host="127.0.0.1"
+  fi
+  if [[ -z "${host}" || "${host}" == "0.0.0.0" || "${host}" == "::" ]]; then
+    host="127.0.0.1"
+  fi
+  printf '%s' "${host}"
+}
+
+listen_port() {
+  local addr="$1"
+  printf '%s' "${addr##*:}"
+}
+
+API_PORT="$(listen_port "${API_LISTEN_ADDR}")"
+MCP_PORT="$(listen_port "${MCP_LISTEN_ADDR}")"
+API_HTTP_ADDR="$(listen_host "${API_LISTEN_ADDR}"):${API_PORT}"
+MCP_HTTP_ADDR="$(listen_host "${MCP_LISTEN_ADDR}"):${MCP_PORT}"
+HEALTH_URL="http://${API_HTTP_ADDR}/healthz"
+READY_URL="http://${API_HTTP_ADDR}/readyz"
+API_RPC_URL="http://${API_HTTP_ADDR}/v1/rpc"
 
 MODE="${1:-run-clear}"
 LOG_FILE="${LOG_FILE:-/tmp/swarm-empire.log}"
@@ -35,8 +49,8 @@ if [[ -n "${SWARM_TOOL_GATEWAY_URL:-}" && -n "${SWARM_TOOL_GATEWAY_CONTAINER_URL
   SWARM_TOOL_GATEWAY_URL="${SWARM_TOOL_GATEWAY_URL}"
   SWARM_TOOL_GATEWAY_CONTAINER_URL="${SWARM_TOOL_GATEWAY_CONTAINER_URL}"
 else
-  SWARM_TOOL_GATEWAY_URL="http://${HOST_HTTP_ADDR}"
-  SWARM_TOOL_GATEWAY_CONTAINER_URL="http://host.docker.internal:${HEALTH_PORT}"
+  SWARM_TOOL_GATEWAY_URL="http://${MCP_HTTP_ADDR}"
+  SWARM_TOOL_GATEWAY_CONTAINER_URL="http://host.docker.internal:${MCP_PORT}"
 fi
 
 export SWARM_TOOL_GATEWAY_URL
@@ -84,7 +98,8 @@ kill_swarm_processes() {
   pids+=" $(pgrep -f '/Library/Caches/go-build/.*/swarm' 2>/dev/null || true)"
   pids+=" $(pgrep -x 'swarm' 2>/dev/null || true)"
   pids+=" $(pgrep -f '(^|[ /])swarm([[:space:]]|$)' 2>/dev/null || true)"
-  pids+=" $(lsof -tiTCP:${HEALTH_PORT} -sTCP:LISTEN 2>/dev/null || true)"
+  pids+=" $(lsof -tiTCP:${API_PORT} -sTCP:LISTEN 2>/dev/null || true)"
+  pids+=" $(lsof -tiTCP:${MCP_PORT} -sTCP:LISTEN 2>/dev/null || true)"
   if [[ -f "${PID_FILE}" ]]; then
     pids+=" $(cat "${PID_FILE}" 2>/dev/null || true)"
     rm -f "${PID_FILE}"
@@ -189,7 +204,7 @@ wait_for_api_reachable() {
     exit 1
   fi
 
-  echo "Swarm API reachable at http://${HOST_HTTP_ADDR}"
+  echo "Swarm API reachable at http://${API_HTTP_ADDR}"
 }
 
 wait_for_ready() {
@@ -225,12 +240,12 @@ wait_for_ready() {
     exit 1
   fi
 
-  serving_pid="$(lsof -tiTCP:${HEALTH_PORT} -sTCP:LISTEN 2>/dev/null | head -n 1 || true)"
+  serving_pid="$(lsof -tiTCP:${API_PORT} -sTCP:LISTEN 2>/dev/null | head -n 1 || true)"
   if [[ -n "${serving_pid}" ]]; then
     echo "${serving_pid}" > "${PID_FILE}"
   fi
 
-  echo "Swarm ready at http://${HOST_HTTP_ADDR}"
+  echo "Swarm ready at http://${API_HTTP_ADDR}"
 }
 
 reset_runtime_with_nuke() {
@@ -266,18 +281,19 @@ reset_dev() {
   echo "Starting Swarm with contracts ${CONTRACTS_ROOT}..."
   : > "${LOG_FILE}"
   launcher_pid="$(
-    LOG_FILE="${LOG_FILE}" BINARY_PATH="${BINARY_PATH}" CONTRACTS_ROOT="${CONTRACTS_ROOT}" HEALTH_ADDR="${HEALTH_ADDR}" SWARM_API_TOKEN="${SWARM_API_TOKEN}" python3 - <<'PY'
+    LOG_FILE="${LOG_FILE}" BINARY_PATH="${BINARY_PATH}" CONTRACTS_ROOT="${CONTRACTS_ROOT}" API_LISTEN_ADDR="${API_LISTEN_ADDR}" MCP_LISTEN_ADDR="${MCP_LISTEN_ADDR}" SWARM_API_TOKEN="${SWARM_API_TOKEN}" python3 - <<'PY'
 import os
 import subprocess
 
 log_file = os.environ["LOG_FILE"]
 binary_path = os.environ["BINARY_PATH"]
 contracts_root = os.environ["CONTRACTS_ROOT"]
-health_addr = os.environ["HEALTH_ADDR"]
+api_listen_addr = os.environ["API_LISTEN_ADDR"]
+mcp_listen_addr = os.environ["MCP_LISTEN_ADDR"]
 
 with open(os.devnull, "rb", buffering=0) as devnull, open(log_file, "ab", buffering=0) as out:
     proc = subprocess.Popen(
-        [binary_path, "serve", "--contracts", contracts_root, "--health-addr", health_addr],
+        [binary_path, "serve", "--contracts", contracts_root, "--api-listen-addr", api_listen_addr, "--mcp-listen-addr", mcp_listen_addr],
         stdin=devnull,
         stdout=out,
         stderr=subprocess.STDOUT,

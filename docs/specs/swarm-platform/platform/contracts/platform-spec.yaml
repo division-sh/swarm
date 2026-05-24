@@ -12536,8 +12536,10 @@ api_specification:
       make_run_clear: '`reset-dev` starts a local `swarm serve` bootstrap and consumes `/v1/rpc runtime.nuke`
         for destructive reset with the unified token source governed by
         cli_specification.foundations.api_connection_auth_config_precedence and a
-        `run-clear:reset-dev:<uuid>` idempotency key. The helper MUST NOT stop broad Docker inventory or
-        truncate database tables directly. Corpus startup
+        `run-clear:reset-dev:<uuid>` idempotency key. The helper consumes the promoted
+        `listener_topology_v2_1`: health/readiness and `/v1/rpc` use the API listener, MCP/tool gateway
+        defaults use the MCP listener, and retired `--health-addr` MUST NOT be used. The helper MUST NOT
+        stop broad Docker inventory or truncate database tables directly. Corpus startup
         migrates from legacy `/api/rpc` run.start payloads with builder-token auth to `curl /v1/rpc {method: run.start,
         params: {bundle_ref?, event_name, payload, idempotency_key?}}` with the unified token. run.start is now a
         deprecated wrapper over event.publish until the helper moves to the canonical event.publish method.'
