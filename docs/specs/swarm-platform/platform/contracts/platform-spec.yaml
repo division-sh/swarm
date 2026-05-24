@@ -1544,8 +1544,8 @@ engine:
       always_required:
       - package.yaml
       - schema.yaml
-      at_least_one: agents.yaml OR flows/ with at least one child
-      boot_error: A flow with no agents.yaml and no child flows is an error.
+      at_least_one: No agent file is required for an agent-free flow; flows/ remains optional composition.
+      boot_error: Missing agents.yaml is not a boot error by itself. It is invalid only when the flow declares or depends on agents without corresponding agent entries.
     optional_files:
       nodes.yaml: System node handlers. Omit if flow only composes children via agents.
       events.yaml: Event payload schemas. Omit if flow uses only events declared by children or root.

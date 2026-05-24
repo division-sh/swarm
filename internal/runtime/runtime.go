@@ -256,13 +256,13 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 	if err := cfg.ValidateExtensions(); err != nil {
 		return nil, fmt.Errorf("runtime config validation failed: %w", err)
 	}
-	if err := validateClaudeStartupConfig(cfg, opts); err != nil {
-		return nil, fmt.Errorf("claude runtime startup validation failed: %w", err)
-	}
 	if err := ensureWorkflowBootWiring(opts); err != nil {
 		return nil, fmt.Errorf("workflow contract validation failed: %w", err)
 	}
 	source := opts.WorkflowModule.SemanticSource()
+	if err := validateClaudeStartupConfig(cfg, opts, source); err != nil {
+		return nil, fmt.Errorf("claude runtime startup validation failed: %w", err)
+	}
 	promptResolver, err := newRuntimePromptResolver(source)
 	if err != nil {
 		return nil, fmt.Errorf("build prompt resolver: %w", err)
@@ -812,13 +812,18 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	} else {
 		rt.emitBootProgress(14, "flow_required_agents", "skipped", "manager unavailable")
 	}
-	if err := validateClaudeManagedAgentWorkspaces(ctx, rt.Config, rt.Workspace, rt.Manager); err != nil {
+	source := rt.Options.WorkflowModule.SemanticSource()
+	if err := validateClaudeStartupConfigForActiveAgents(rt.Config, rt.Options, source, rt.Manager); err != nil {
+		rt.emitBootProgress(15, "workspace_validation_and_system_containers", "FAILED", err.Error())
+		return fmt.Errorf("claude runtime startup validation failed: %w", err)
+	}
+	if err := validateClaudeManagedAgentWorkspaces(ctx, rt.Config, source, rt.Workspace, rt.Manager); err != nil {
 		rt.emitBootProgress(15, "workspace_validation_and_system_containers", "FAILED", err.Error())
 		return fmt.Errorf("claude runtime workspace validation failed: %w", err)
 	}
 	rt.emitBootProgress(15, "workspace_validation_and_system_containers", "ok", fmt.Sprintf("%d system containers", len(rt.Options.SystemContainers)))
 	startupProbe, _ := rt.LLM.(llm.StartupVisibleToolSurfaceProber)
-	if err := validateClaudeMCPToolsForManagedAgents(ctx, rt.Config, startupProbe, rt.MCPTurns, rt.ToolExecutor, rt.Manager); err != nil {
+	if err := validateClaudeMCPToolsForManagedAgents(ctx, rt.Config, source, startupProbe, rt.MCPTurns, rt.ToolExecutor, rt.Manager); err != nil {
 		rt.emitBootProgress(16, "mcp_tool_validation", "FAILED", err.Error())
 		return fmt.Errorf("claude runtime mcp validation failed: %w", err)
 	}
