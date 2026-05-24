@@ -40,9 +40,9 @@ The hash input is an ordered list of canonical entries. Each entry has:
 - canonical content bytes
 
 The canonical label is independent of the local absolute filesystem path. The
-label path separator is `/`. Labels must not contain empty segments, `.`, `..`,
-NUL, or backslash. Labels are compared by raw UTF-8 byte order, with no locale
-or Unicode collation.
+label path separator is `/`. Labels must be valid UTF-8 and Unicode NFC. Labels
+must not contain empty segments, `.`, `..`, NUL, or backslash. Labels are
+compared by raw UTF-8 byte order, with no locale or Unicode collation.
 
 If two discovered inputs produce the same canonical label, canonicalization
 fails closed. Implementations must not use absolute path as a tie-breaker.
@@ -62,9 +62,13 @@ bundle/<relative path from contracts root>
 ```
 
 The relative path is cleaned, slash-normalized, and must remain inside the
-contracts root after symlink checks. The label preserves filename case. A
-bundle that relies on two paths differing only by case is non-portable and
-must fail canonicalization.
+contracts root after symlink checks. The label preserves filename case. Case
+collision detection is performed after slash normalization and NFC validation
+by applying ASCII-only fold to the full label: bytes `0x41` through `0x5a`
+are converted to `0x61` through `0x7a`; all other bytes are unchanged. If two
+labels have the same ASCII-folded byte sequence but different raw label bytes,
+canonicalization fails. Non-ASCII bytes are never locale-folded; host filesystem
+case sensitivity and locale settings are not part of the rule.
 
 ## Canonical Byte Inputs
 
@@ -113,11 +117,16 @@ or an explicit migration rule.
 
 ## Preimage Framing
 
-The SHA-256 preimage starts with this ASCII magic line:
+The SHA-256 preimage starts with exactly these 21 bytes:
 
 ```text
-swarm-bundle-hash-v1\n
+73 77 61 72 6d 2d 62 75 6e 64 6c 65 2d 68 61 73 68 2d 76 31 0a
 ```
+
+Those bytes are the ASCII string `swarm-bundle-hash-v1` followed by one LF
+byte (`0x0a`). The preimage does not include a carriage return, a literal
+backslash byte, a literal `n` byte, Markdown fence bytes, or an additional
+blank line.
 
 For each canonical entry sorted by canonical label, append:
 
@@ -167,13 +176,29 @@ resolved JSON data model is identical.
 Comments, YAML document markers, indentation, line endings, and mapping key
 order are presentation and are not content.
 
-Canonical JSON emission rules:
+Canonical JSON emission follows RFC 8785 JSON Canonicalization Scheme (JCS)
+serialization, with this v1 numeric profile:
+
+- YAML numeric scalars must resolve to JSON numbers, not strings
+- accepted numbers must be finite IEEE 754 binary64 values
+- integer-valued numbers must be within the I-JSON safe integer range
+  `-9007199254740991` through `9007199254740991`
+- negative zero is rejected, including spellings such as `-0`, `-0.0`, and
+  `-0e0`
+- non-finite values, unsupported YAML numeric forms, and values outside this
+  profile fail canonicalization before emission
+- `1`, `1.0`, and `1e0` all emit as the JCS JSON number `1`
+
+Implementations must parse numeric scalars with enough precision to enforce
+this profile before converting to the JCS number model. Host-language default
+JSON marshaling is acceptable only when it is proven to match this profile.
+
+Other canonical JSON emission rules:
 
 - UTF-8 output
 - no insignificant whitespace
 - object keys sorted by raw UTF-8 byte order
 - strings escaped with JSON escape rules
-- finite numbers emitted in the shortest round-trippable JSON number form
 - no trailing newline
 
 ## `$ref` Policy
