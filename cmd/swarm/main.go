@@ -2132,6 +2132,13 @@ func discoverRepoRoot() string {
 	}
 }
 
+func assetCommandRepoRoot(repo string) string {
+	if repo = strings.TrimSpace(repo); repo != "" {
+		return repo
+	}
+	return discoverRepoRoot()
+}
+
 func embeddedPlatformSpecPath() (string, error) {
 	return platformcontracts.MaterializePlatformSpecFile()
 }
