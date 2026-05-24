@@ -40,9 +40,15 @@ services:
       SWARM_CLAUDE_CLI_OUTPUT_FORMAT: stream-json
       SWARM_WORKSPACE_IMAGE: swarm-workspace:latest
       SWARM_WORKSPACE_VOLUMES_FROM: swarm-orchestrator
+      SWARM_CONTRACTS_HOST_DIR: ${SWARM_CONTRACTS_HOST_DIR:-}
     volumes:
       - ./docs:/app/docs
-      - ${SWARM_CONTRACTS_HOST_DIR:?SWARM_CONTRACTS_HOST_DIR must point to a contract bundle}:/opt/swarm/contracts:ro
+      - type: bind
+        source: ${SWARM_CONTRACTS_HOST_DIR:-./.docker/missing-contracts}
+        target: /opt/swarm/contracts
+        read_only: true
+        bind:
+          create_host_path: false
       - ./migrations:/app/migrations
       - ./contracts:/app/contracts
       - ./internal:/app/internal
@@ -52,17 +58,21 @@ services:
     ports:
       - "8070:8070"
       - "8090:8090"
+    entrypoint:
+      - /bin/sh
+      - -ec
     command:
-      - serve
-      - --store
-      - postgres
-      - --contracts
-      - /opt/swarm/contracts
-      - --api-listen-addr
-      - 0.0.0.0:8070
-      - --mcp-listen-addr
-      - 0.0.0.0:8090
-      - --self-check=false
+      - |
+        if [ -z "$${SWARM_CONTRACTS_HOST_DIR}" ]; then
+          echo "SWARM_CONTRACTS_HOST_DIR must point to a contract bundle for the orchestrator service." >&2
+          exit 2
+        fi
+        exec /usr/local/bin/orchestrator serve \
+          --store postgres \
+          --contracts /opt/swarm/contracts \
+          --api-listen-addr 0.0.0.0:8070 \
+          --mcp-listen-addr 0.0.0.0:8090 \
+          --self-check=false
 
   # Per-entity and privileged workspaces are created dynamically by runtime policy.
   # This image is the base for those dynamic containers.

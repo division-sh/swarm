@@ -103,6 +103,10 @@ docker compose exec orchestrator swarm run \
   --payload-json '{"order_id":"o-123","priority":"high"}'
 ```
 
+If you only need the local database, `docker compose up -d postgres` is supported
+without `SWARM_CONTRACTS_HOST_DIR`. The contracts path is required only when
+starting the `orchestrator` service.
+
 For an end-to-end walkthrough (building a flow from scratch), see [`docs/specs/swarm-platform/SWARM-DEVELOPER-GUIDE.md`](docs/specs/swarm-platform/SWARM-DEVELOPER-GUIDE.md).
 
 ---
@@ -245,6 +249,8 @@ The trajectory points at running whole company divisions as autonomous flows. Th
 ## Development
 
 Requirements: Go 1.23, Docker, Postgres 16 (provided via `docker-compose.yml`).
+Start only the database with `docker compose up -d postgres`; starting the
+orchestrator additionally requires `SWARM_CONTRACTS_HOST_DIR`.
 
 ```bash
 # build
