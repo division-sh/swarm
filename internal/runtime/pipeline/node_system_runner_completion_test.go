@@ -97,8 +97,75 @@ func TestSystemNodeRunner_MarkProcessedSettlesNodeDeliveryAndTriggersNormalRunCo
 	}
 }
 
-func seedSystemNodeCompletionRun(t *testing.T, db *sql.DB, runID, eventID, entityID string) {
+func TestSystemNodeRunner_PipelineNamedNodeDoesNotMaskPlatformReceipt(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	ctx := context.Background()
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	entityID := uuid.NewString()
+	seedSystemNodeCompletionRun(t, db, runID, eventID, entityID, "pipeline")
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_receipts (
+			event_id, subscriber_type, subscriber_id, outcome, reason_code, side_effects, processed_at
+		) VALUES (
+			$1::uuid, 'platform', 'pipeline', 'success', 'processed', '{}'::jsonb, now()
+		)
+	`, eventID); err != nil {
+		t.Fatalf("seed platform pipeline receipt: %v", err)
+	}
+
+	sideEffects := systemNodeProcessedReceiptSideEffects("pipeline", eventID)
+	if err := persistSystemNodeProcessedReceiptAndSettleDelivery(ctx, db, "pipeline", eventID, sideEffects); err != nil {
+		t.Fatalf("persistSystemNodeProcessedReceiptAndSettleDelivery: %v", err)
+	}
+
+	var platformReceipts int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_receipts
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'platform'
+		  AND subscriber_id = 'pipeline'
+	`, eventID).Scan(&platformReceipts); err != nil {
+		t.Fatalf("count platform receipt: %v", err)
+	}
+	if platformReceipts != 1 {
+		t.Fatalf("platform pipeline receipts = %d, want 1", platformReceipts)
+	}
+	var nodeReceipts int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_receipts
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'node'
+		  AND subscriber_id = 'node:pipeline'
+	`, eventID).Scan(&nodeReceipts); err != nil {
+		t.Fatalf("count node receipt: %v", err)
+	}
+	if nodeReceipts != 1 {
+		t.Fatalf("node:pipeline receipts = %d, want 1", nodeReceipts)
+	}
+	var deliveryStatus string
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(status, '')
+		FROM event_deliveries
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'node'
+		  AND subscriber_id = 'pipeline'
+	`, eventID).Scan(&deliveryStatus); err != nil {
+		t.Fatalf("load pipeline node delivery: %v", err)
+	}
+	if deliveryStatus != "delivered" {
+		t.Fatalf("pipeline node delivery status = %q, want delivered", deliveryStatus)
+	}
+}
+
+func seedSystemNodeCompletionRun(t *testing.T, db *sql.DB, runID, eventID, entityID string, nodeIDs ...string) {
 	t.Helper()
+	nodeID := "terminal-node"
+	if len(nodeIDs) > 0 && nodeIDs[0] != "" {
+		nodeID = nodeIDs[0]
+	}
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO runs (run_id, status, started_at)
@@ -140,9 +207,9 @@ func seedSystemNodeCompletionRun(t *testing.T, db *sql.DB, runID, eventID, entit
 		INSERT INTO event_deliveries (
 			run_id, event_id, subscriber_type, subscriber_id, status, reason_code, created_at
 		) VALUES (
-			$1::uuid, $2::uuid, 'node', 'terminal-node', 'pending', 'matched_node_subscription', now()
+			$1::uuid, $2::uuid, 'node', $3, 'pending', 'matched_node_subscription', now()
 		)
-	`, runID, eventID); err != nil {
+	`, runID, eventID, nodeID); err != nil {
 		t.Fatalf("seed node delivery: %v", err)
 	}
 }

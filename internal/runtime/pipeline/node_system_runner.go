@@ -312,7 +312,7 @@ func (n *systemNodeRunner) isProcessed(ctx context.Context, evt events.Event) bo
 			  AND subscriber_id = $1
 			  AND idempotency_key = $2
 		)
-	`, n.nodeID, SystemNodeReceiptIdempotencyKey(n.nodeID, eventID)).Scan(&ok)
+	`, systemNodeReceiptSubscriberID(n.nodeID), SystemNodeReceiptIdempotencyKey(n.nodeID, eventID)).Scan(&ok)
 	return err == nil && ok
 }
 
@@ -327,10 +327,8 @@ func (n *systemNodeRunner) markProcessed(ctx context.Context, evt events.Event) 
 	if !n.eventReceiptsAvailable(ctx) {
 		return
 	}
-	sideEffects, _ := json.Marshal(map[string]any{
-		"idempotency_key": SystemNodeReceiptIdempotencyKey(n.nodeID, eventID),
-	})
-	if err := n.persistProcessedReceiptAndSettleDelivery(ctx, eventID, string(sideEffects)); err != nil {
+	sideEffects := systemNodeProcessedReceiptSideEffects(n.nodeID, eventID)
+	if err := n.persistProcessedReceiptAndSettleDelivery(ctx, eventID, sideEffects); err != nil {
 		slog.Error("system node mark processed failed", "node_id", n.nodeID, "event_id", eventID, "error", err)
 		if logger, ok := n.bus.(systemNodeRuntimeLogger); ok && logger != nil {
 			logger.LogRuntime(ctx, RuntimeLogEntry{
@@ -350,7 +348,39 @@ func (n *systemNodeRunner) markProcessed(ctx context.Context, evt events.Event) 
 }
 
 func (n *systemNodeRunner) persistProcessedReceiptAndSettleDelivery(ctx context.Context, eventID, sideEffects string) error {
-	tx, err := n.db.BeginTx(ctx, nil)
+	return persistSystemNodeProcessedReceiptAndSettleDelivery(ctx, n.db, n.nodeID, eventID, sideEffects)
+}
+
+func systemNodeProcessedReceiptSideEffects(nodeID, eventID string) string {
+	sideEffects, _ := json.Marshal(map[string]any{
+		"idempotency_key": SystemNodeReceiptIdempotencyKey(nodeID, eventID),
+	})
+	return string(sideEffects)
+}
+
+func systemNodeReceiptSubscriberID(nodeID string) string {
+	nodeID = strings.TrimSpace(nodeID)
+	if nodeID == "pipeline" {
+		// event_receipts is unique on event_id + subscriber_id, so avoid colliding
+		// with the platform pipeline receipt for workflows that name a node "pipeline".
+		return "node:pipeline"
+	}
+	return nodeID
+}
+
+func persistSystemNodeProcessedReceiptAndSettleDelivery(ctx context.Context, db *sql.DB, nodeID, eventID, sideEffects string) error {
+	if db == nil {
+		return nil
+	}
+	nodeID = strings.TrimSpace(nodeID)
+	eventID = strings.TrimSpace(eventID)
+	if nodeID == "" || eventID == "" {
+		return nil
+	}
+	if tx, ok := PipelineSQLTxFromContext(ctx); ok {
+		return persistSystemNodeProcessedReceiptAndSettleDeliveryTx(ctx, tx, nodeID, eventID, sideEffects)
+	}
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin system node processed receipt tx: %w", err)
 	}
@@ -360,6 +390,21 @@ func (n *systemNodeRunner) persistProcessedReceiptAndSettleDelivery(ctx context.
 			_ = tx.Rollback()
 		}
 	}()
+	if err := persistSystemNodeProcessedReceiptAndSettleDeliveryTx(ctx, tx, nodeID, eventID, sideEffects); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit system node processed receipt tx: %w", err)
+	}
+	committed = true
+	return nil
+}
+
+func persistSystemNodeProcessedReceiptAndSettleDeliveryTx(ctx context.Context, tx *sql.Tx, nodeID, eventID, sideEffects string) error {
+	if tx == nil {
+		return nil
+	}
+	receiptSubscriberID := systemNodeReceiptSubscriberID(nodeID)
 	res, err := tx.ExecContext(ctx, `
 		INSERT INTO event_receipts (
 			event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
@@ -378,7 +423,7 @@ func (n *systemNodeRunner) persistProcessedReceiptAndSettleDelivery(ctx context.
 			side_effects = EXCLUDED.side_effects,
 			idempotency_key = EXCLUDED.idempotency_key,
 			processed_at = now()
-	`, eventID, n.nodeID, sideEffects, SystemNodeReceiptIdempotencyKey(n.nodeID, eventID))
+	`, eventID, receiptSubscriberID, sideEffects, SystemNodeReceiptIdempotencyKey(nodeID, eventID))
 	if err != nil {
 		return fmt.Errorf("upsert system node receipt: %w", err)
 	}
@@ -386,29 +431,48 @@ func (n *systemNodeRunner) persistProcessedReceiptAndSettleDelivery(ctx context.
 		return fmt.Errorf("upsert system node receipt: event %s not found", eventID)
 	}
 	if _, err := tx.ExecContext(ctx, `
-		UPDATE event_deliveries
-		SET
-			status = 'delivered',
-			retry_count = COALESCE(retry_count, 0),
-			reason_code = 'node_processed',
-			last_error = NULL,
-			active_session_id = NULL,
-			started_at = COALESCE(started_at, created_at),
-			delivered_at = now()
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'node'
-		  AND subscriber_id = $2
-		  AND (
-			status IN ('pending', 'in_progress')
-			OR (status = 'failed' AND COALESCE(retry_count, 0) < 2)
+		WITH settled AS (
+			UPDATE event_deliveries
+			SET
+				status = 'delivered',
+				retry_count = COALESCE(retry_count, 0),
+				reason_code = 'node_processed',
+				last_error = NULL,
+				active_session_id = NULL,
+				started_at = COALESCE(started_at, created_at),
+				delivered_at = now()
+			WHERE event_id = $1::uuid
+			  AND subscriber_type = 'node'
+			  AND subscriber_id = $2
+			  AND (
+				status IN ('pending', 'in_progress')
+				OR (status = 'failed' AND COALESCE(retry_count, 0) < 2)
+			  )
+			RETURNING delivery_id
+		)
+		INSERT INTO event_deliveries (
+			run_id, event_id, subscriber_type, subscriber_id, status, retry_count,
+			reason_code, last_error, active_session_id, started_at, delivered_at, created_at
+		)
+		SELECT
+			e.run_id, e.event_id, 'node', $2, 'delivered', 0,
+			'node_processed', NULL, NULL, now(), now(), now()
+		FROM events e
+		WHERE e.event_id = $1::uuid
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM settled
 		  )
-	`, eventID, n.nodeID); err != nil {
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM event_deliveries d
+			WHERE d.event_id = $1::uuid
+			  AND d.subscriber_type = 'node'
+			  AND d.subscriber_id = $2
+		  )
+	`, eventID, nodeID); err != nil {
 		return fmt.Errorf("settle system node delivery: %w", err)
 	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit system node processed receipt tx: %w", err)
-	}
-	committed = true
 	return nil
 }
 
