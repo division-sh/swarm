@@ -5251,6 +5251,22 @@ workspace_model:
   description: Defines the filesystem contract for agent sessions. The platform provides three standard mount points and a
     scoping model. Products define workspace classes that map agent roles to specific scope configurations. If a product declares
     a workspace_class on an agent, the platform MUST provide all mounts at the declared scopes.
+  runtime_image_packaging:
+    promoted_by: '#1002'
+    implementation_status: implemented
+    canonical_owner: docs/specs/swarm-platform/platform/contracts/platform-spec.yaml#workspace_model.runtime_image_packaging
+    rule: >
+      Runtime workspace startup treats the configured workspace image as a prebuilt runtime dependency. The runtime MUST inspect
+      the resolved workspace image before creating workspaces and fail closed with an actionable diagnostic when the image is
+      absent. Production runtime code MUST NOT build a missing workspace image from source-checkout `Dockerfile.workspace`, use
+      `runtime.Caller` / Go source paths as a runtime asset root, or walk for `go.mod` to recover build material.
+    mount_source_rule: >
+      Host sources for `/data` and `/opt/swarm/contracts` MUST come from explicit deployment configuration, environment,
+      config/CLI path resolution, or an already selected workflow/project root passed by the command owner. Default workspace
+      runtime configuration MUST NOT derive those mount sources from the Swarm source checkout.
+    split_scope: >
+      Docker Compose setup and workspace image contents/default agent CLI availability remain tracked separately by #996 and
+      #997 unless a future gate explicitly widens them.
   standard_mounts:
     description: Three mount points are available to every agent session. Products cannot add new mount points — they configure
       access and scope for these three via workspace class definitions.
@@ -6145,9 +6161,10 @@ cli_specification:
         Merge-bearing CLI v2 authority for source-checkout-independent startup and embedded platform-spec defaults.
         This owner covers root command construction, no-asset command surfaces (`swarm`, help, completion, local
         `swarm version`, and `swarm version --server` command construction), and the built-in platform spec default
-        consumed by `cli_specification.foundations.contract_platform_spec_path_resolution`. It does not close runtime
-        workspace image packaging, `Dockerfile.workspace` distribution, Docker Compose setup, local `cli_test` defaults,
-        multi-bundle work, or README/public-doc polish.
+        consumed by `cli_specification.foundations.contract_platform_spec_path_resolution`. It also records that
+        installed-binary runtime workspace startup consumes `workspace_model.runtime_image_packaging` instead of
+        source-checkout `Dockerfile.workspace` lookup. It does not close Docker Compose setup, local `cli_test`
+        defaults, multi-bundle work, or README/public-doc polish.
       rule: >
         An installed `swarm` binary MUST construct the Cobra command tree and run no-asset command surfaces without a
         source checkout, repo-root discovery, or `go.mod` walk. Source checkout discovery may occur only after command
@@ -6159,9 +6176,13 @@ cli_specification:
           `docs/specs/swarm-platform/platform/contracts/platform-spec.yaml`. Implementations may materialize these
           embedded bytes to an internal cache path for existing path-based readers, but that path is not a user-facing
           configuration source and MUST NOT require a source checkout.
+      runtime_workspace_assets:
+        workspace_image: >
+          Runtime workspace startup consumes `workspace_model.runtime_image_packaging`. An installed binary MUST NOT use
+          source-checkout discovery, Go caller file paths, or a `go.mod` walk to locate `Dockerfile.workspace` or derive
+          workspace mount defaults.
       split_tail:
-      - 'Runtime workspace image packaging and `Dockerfile.workspace` source-root coupling remain #1002 parent tail unless separately gated.'
-      - '#996 Docker Compose setup, #997 local cli_test defaults, #992 serve listener behavior, multi-bundle work, and README/public-doc polish remain split.'
+      - '#996 Docker Compose setup, #997 local cli_test defaults/image contents, #992 serve listener behavior, multi-bundle work, and README/public-doc polish remain split.'
     no_args_behavior: '`swarm` with no arguments prints root help and exits 0. Bare `swarm` MUST NOT start the runtime.'
     daemon_startup: '`swarm serve` owns runtime/API/health/MCP startup. `swarm run` may consume the serve startup owner for local foreground start, but MUST NOT fork a second runtime boot owner.'
     cli_consumes_api_rule: 'All CLI commands that read or mutate runtime state consume the canonical API at /v1/rpc or /v1/ws. The only local file-contract carve-out is `swarm verify`, which validates contract files on disk and does not require runtime DB/API state.'
