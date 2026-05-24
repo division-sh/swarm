@@ -17,7 +17,8 @@ type runClearConfig struct {
 	apiToken              string
 	directiveAgent        string
 	directiveMessage      string
-	healthAddr            string
+	apiListenAddr         string
+	mcpListenAddr         string
 	hostGatewayURL        string
 	containerURL          string
 	launcherMode          string
@@ -350,14 +351,17 @@ func TestRunClear_BuildsAndLaunchesBinaryDirectly(t *testing.T) {
 	if got := filepath.Base(strings.TrimSpace(result.builtBinaryPath)); got != "swarm" {
 		t.Fatalf("built binary basename = %q, want swarm", got)
 	}
-	if got := strings.TrimSpace(result.launchedHealthAddr); got != "0.0.0.0:8081" {
-		t.Fatalf("launched health addr = %q, want WLAN-reachable default bind", got)
+	if got := strings.TrimSpace(result.launchedAPIListenAddr); got != "0.0.0.0:8081" {
+		t.Fatalf("launched api listen addr = %q, want WLAN-reachable default bind", got)
 	}
-	wantCommand := strings.TrimSpace(result.builtBinaryPath) + " serve --contracts /tmp/contracts --health-addr 0.0.0.0:8081"
+	if got := strings.TrimSpace(result.launchedMCPListenAddr); got != "0.0.0.0:8082" {
+		t.Fatalf("launched mcp listen addr = %q, want WLAN-reachable default bind", got)
+	}
+	wantCommand := strings.TrimSpace(result.builtBinaryPath) + " serve --contracts /tmp/contracts --api-listen-addr 0.0.0.0:8081 --mcp-listen-addr 0.0.0.0:8082"
 	if got := strings.TrimSpace(result.launchedCommand); got != wantCommand {
 		t.Fatalf("launched command = %q, want %q", got, wantCommand)
 	}
-	if strings.Contains(result.launchedCommand, " -contracts ") || strings.Contains(result.launchedCommand, " -health-addr ") {
+	if strings.Contains(result.launchedCommand, " -contracts ") || strings.Contains(result.launchedCommand, " -api-listen-addr ") || strings.Contains(result.launchedCommand, " -mcp-listen-addr ") || strings.Contains(result.launchedCommand, " -health-addr ") {
 		t.Fatalf("launched command = %q, want Cobra serve command with long flags", result.launchedCommand)
 	}
 }
@@ -507,6 +511,12 @@ func TestRunClearMakefileDefinesSplitTargets(t *testing.T) {
 	if !strings.Contains(makefile, "RUN_CLEAR_RESET_IDEMPOTENCY_KEY") {
 		t.Fatalf("Makefile = %q, want reset-dev idempotency override surface", makefile)
 	}
+	if !strings.Contains(makefile, "API_LISTEN_ADDR") || !strings.Contains(makefile, "MCP_LISTEN_ADDR") {
+		t.Fatalf("Makefile = %q, want split serve listener override surface", makefile)
+	}
+	if strings.Contains(makefile, "HEALTH_ADDR") {
+		t.Fatalf("Makefile = %q, want no retired HEALTH_ADDR surface", makefile)
+	}
 	if strings.Contains(makefile, "SWARM_DB_HOST") || strings.Contains(makefile, "SWARM_DB_PASSWORD") {
 		t.Fatalf("Makefile = %q, want no reset-dev DB credential surface", makefile)
 	}
@@ -515,11 +525,11 @@ func TestRunClearMakefileDefinesSplitTargets(t *testing.T) {
 func TestRunClear_DerivesExplicitGatewayURLsByDefault(t *testing.T) {
 	result := runRunClear(t, runClearConfig{})
 
-	if got := strings.TrimSpace(result.hostGatewayURL); got != "http://127.0.0.1:8081" {
-		t.Fatalf("host gateway url = %q, want explicit host loopback default", got)
+	if got := strings.TrimSpace(result.hostGatewayURL); got != "http://127.0.0.1:8082" {
+		t.Fatalf("host gateway url = %q, want MCP listener host loopback default", got)
 	}
-	if got := strings.TrimSpace(result.containerGatewayURL); got != "http://host.docker.internal:8081" {
-		t.Fatalf("container gateway url = %q, want explicit container host alias default", got)
+	if got := strings.TrimSpace(result.containerGatewayURL); got != "http://host.docker.internal:8082" {
+		t.Fatalf("container gateway url = %q, want MCP listener container host alias default", got)
 	}
 }
 
@@ -542,11 +552,11 @@ func TestRunClear_IgnoresPartialGatewayOverrideAndDerivesCoherentPair(t *testing
 		hostGatewayURL: "http://host.docker.internal:18090",
 	})
 
-	if got := strings.TrimSpace(result.hostGatewayURL); got != "http://127.0.0.1:8081" {
-		t.Fatalf("host gateway url = %q, want derived local default when pair is incomplete", got)
+	if got := strings.TrimSpace(result.hostGatewayURL); got != "http://127.0.0.1:8082" {
+		t.Fatalf("host gateway url = %q, want derived MCP listener local default when pair is incomplete", got)
 	}
-	if got := strings.TrimSpace(result.containerGatewayURL); got != "http://host.docker.internal:8081" {
-		t.Fatalf("container gateway url = %q, want derived local default when pair is incomplete", got)
+	if got := strings.TrimSpace(result.containerGatewayURL); got != "http://host.docker.internal:8082" {
+		t.Fatalf("container gateway url = %q, want derived MCP listener local default when pair is incomplete", got)
 	}
 }
 
@@ -573,31 +583,32 @@ func TestRunClear_FailsFastWhenSwarmExitsBeforeReady(t *testing.T) {
 }
 
 type runClearResult struct {
-	stdout              string
-	apiToken            string
-	operatorToken       string
-	builderToken        string
-	hostGatewayURL      string
-	containerGatewayURL string
-	builtBinaryPath     string
-	launchedBinaryPath  string
-	launchedHealthAddr  string
-	launchedCommand     string
-	healthHeaders       string
-	healthBody          string
-	healthURL           string
-	resetHeaders        string
-	resetBody           string
-	resetURL            string
-	rpcHeaders          string
-	rpcBody             string
-	rpcURL              string
-	directiveHeaders    string
-	directiveBody       string
-	directiveURL        string
-	dockerCalls         string
-	psqlCalls           string
-	events              string
+	stdout                string
+	apiToken              string
+	operatorToken         string
+	builderToken          string
+	hostGatewayURL        string
+	containerGatewayURL   string
+	builtBinaryPath       string
+	launchedBinaryPath    string
+	launchedAPIListenAddr string
+	launchedMCPListenAddr string
+	launchedCommand       string
+	healthHeaders         string
+	healthBody            string
+	healthURL             string
+	resetHeaders          string
+	resetBody             string
+	resetURL              string
+	rpcHeaders            string
+	rpcBody               string
+	rpcURL                string
+	directiveHeaders      string
+	directiveBody         string
+	directiveURL          string
+	dockerCalls           string
+	psqlCalls             string
+	events                string
 }
 
 func runRunClear(t *testing.T, cfg runClearConfig) runClearResult {
@@ -624,7 +635,8 @@ func runRunClearResult(t *testing.T, cfg runClearConfig) (runClearResult, error)
 	containerGatewayURLSink := filepath.Join(t.TempDir(), "container-gateway-url.txt")
 	goBuildOutputSink := filepath.Join(t.TempDir(), "go-build-output.txt")
 	pythonBinaryPathSink := filepath.Join(t.TempDir(), "python-binary-path.txt")
-	pythonHealthAddrSink := filepath.Join(t.TempDir(), "python-health-addr.txt")
+	pythonAPIListenAddrSink := filepath.Join(t.TempDir(), "python-api-listen-addr.txt")
+	pythonMCPListenAddrSink := filepath.Join(t.TempDir(), "python-mcp-listen-addr.txt")
 	pythonCommandSink := filepath.Join(t.TempDir(), "python-command.txt")
 	psStateCountSink := filepath.Join(t.TempDir(), "ps-state-count.txt")
 	healthHeadersSink := filepath.Join(t.TempDir(), "api-health-headers.txt")
@@ -685,7 +697,7 @@ case "${PS_MODE:-}" in
         printf 'Wed Apr 15 23:54:13 2026\n'
         ;;
       command=)
-		printf '%s serve --contracts %s --health-addr %s\n' "${BINARY_PATH}" "${CONTRACTS_ROOT}" "${HEALTH_ADDR}"
+		printf '%s serve --contracts %s --api-listen-addr %s --mcp-listen-addr %s\n' "${BINARY_PATH}" "${CONTRACTS_ROOT}" "${API_LISTEN_ADDR}" "${MCP_LISTEN_ADDR}"
         ;;
       *)
         exit 1
@@ -751,10 +763,11 @@ printf '%s' "${SWARM_BUILDER_AUTH_TOKEN:-}" > "${PYTHON_ENV_SINK}"
 printf '%s' "${SWARM_TOOL_GATEWAY_URL:-}" > "${PYTHON_HOST_GATEWAY_URL_SINK}"
 printf '%s' "${SWARM_TOOL_GATEWAY_CONTAINER_URL:-}" > "${PYTHON_CONTAINER_GATEWAY_URL_SINK}"
 printf '%s' "${BINARY_PATH:-}" > "${PYTHON_BINARY_PATH_SINK}"
-printf '%s' "${HEALTH_ADDR:-}" > "${PYTHON_HEALTH_ADDR_SINK}"
-printf '%s serve --contracts %s --health-addr %s' "${BINARY_PATH:-}" "${CONTRACTS_ROOT:-}" "${HEALTH_ADDR:-}" > "${PYTHON_COMMAND_SINK}"
+printf '%s' "${API_LISTEN_ADDR:-}" > "${PYTHON_API_LISTEN_ADDR_SINK}"
+printf '%s' "${MCP_LISTEN_ADDR:-}" > "${PYTHON_MCP_LISTEN_ADDR_SINK}"
+printf '%s serve --contracts %s --api-listen-addr %s --mcp-listen-addr %s' "${BINARY_PATH:-}" "${CONTRACTS_ROOT:-}" "${API_LISTEN_ADDR:-}" "${MCP_LISTEN_ADDR:-}" > "${PYTHON_COMMAND_SINK}"
 (
-  exec "${BINARY_PATH}" serve --contracts "${CONTRACTS_ROOT}" --health-addr "${HEALTH_ADDR}" >> "${LOG_FILE}" 2>&1 < /dev/null
+  exec "${BINARY_PATH}" serve --contracts "${CONTRACTS_ROOT}" --api-listen-addr "${API_LISTEN_ADDR}" --mcp-listen-addr "${MCP_LISTEN_ADDR}" >> "${LOG_FILE}" 2>&1 < /dev/null
 ) &
 printf '%s\n' "$!"
 `)
@@ -962,7 +975,8 @@ printf '{}'
 		"PYTHON_HOST_GATEWAY_URL_SINK=" + hostGatewayURLSink,
 		"PYTHON_CONTAINER_GATEWAY_URL_SINK=" + containerGatewayURLSink,
 		"PYTHON_BINARY_PATH_SINK=" + pythonBinaryPathSink,
-		"PYTHON_HEALTH_ADDR_SINK=" + pythonHealthAddrSink,
+		"PYTHON_API_LISTEN_ADDR_SINK=" + pythonAPIListenAddrSink,
+		"PYTHON_MCP_LISTEN_ADDR_SINK=" + pythonMCPListenAddrSink,
 		"PYTHON_COMMAND_SINK=" + pythonCommandSink,
 		"GO_BUILD_OUTPUT_SINK=" + goBuildOutputSink,
 		"GO_BUILD_LAUNCHER_MODE=" + defaultString(cfg.launcherMode, "steady"),
@@ -1000,7 +1014,8 @@ printf '{}'
 		"PSQL_CALLS_SINK=" + psqlCallsSink,
 		"RUN_CLEAR_EVENTS_SINK=" + eventsSink,
 		"CONTRACTS_ROOT=/tmp/contracts",
-		"HEALTH_ADDR=" + defaultString(cfg.healthAddr, "0.0.0.0:8081"),
+		"API_LISTEN_ADDR=" + defaultString(cfg.apiListenAddr, "0.0.0.0:8081"),
+		"MCP_LISTEN_ADDR=" + defaultString(cfg.mcpListenAddr, "0.0.0.0:8082"),
 		"BINARY_PATH=" + filepath.Join(t.TempDir(), "swarm"),
 		"LOG_FILE=" + logFile,
 		"PID_FILE=" + pidFile,
@@ -1038,31 +1053,32 @@ printf '{}'
 	}
 
 	return runClearResult{
-		stdout:              string(out),
-		apiToken:            readFileTrimmedOptional(t, apiTokenSink),
-		operatorToken:       readFileTrimmedOptional(t, operatorTokenSink),
-		builderToken:        readFileTrimmedOptional(t, builderTokenSink),
-		hostGatewayURL:      readFileTrimmedOptional(t, hostGatewayURLSink),
-		containerGatewayURL: readFileTrimmedOptional(t, containerGatewayURLSink),
-		builtBinaryPath:     readFileTrimmedOptional(t, goBuildOutputSink),
-		launchedBinaryPath:  readFileTrimmedOptional(t, pythonBinaryPathSink),
-		launchedHealthAddr:  readFileTrimmedOptional(t, pythonHealthAddrSink),
-		launchedCommand:     readFileTrimmedOptional(t, pythonCommandSink),
-		healthHeaders:       readFileTrimmedOptional(t, healthHeadersSink),
-		healthBody:          readFileTrimmedOptional(t, healthBodySink),
-		healthURL:           readFileTrimmedOptional(t, healthURLSink),
-		resetHeaders:        readFileTrimmedOptional(t, resetHeadersSink),
-		resetBody:           readFileTrimmedOptional(t, resetBodySink),
-		resetURL:            readFileTrimmedOptional(t, resetURLSink),
-		rpcHeaders:          readFileTrimmedOptional(t, rpcHeadersSink),
-		rpcBody:             readFileTrimmedOptional(t, bodySink),
-		rpcURL:              readFileTrimmedOptional(t, urlSink),
-		directiveHeaders:    readFileTrimmedOptional(t, directiveHeadersSink),
-		directiveBody:       readFileTrimmedOptional(t, directiveBodySink),
-		directiveURL:        readFileTrimmedOptional(t, directiveURLSink),
-		dockerCalls:         readFileTrimmedOptional(t, dockerCallsSink),
-		psqlCalls:           readFileTrimmedOptional(t, psqlCallsSink),
-		events:              readFileTrimmedOptional(t, eventsSink),
+		stdout:                string(out),
+		apiToken:              readFileTrimmedOptional(t, apiTokenSink),
+		operatorToken:         readFileTrimmedOptional(t, operatorTokenSink),
+		builderToken:          readFileTrimmedOptional(t, builderTokenSink),
+		hostGatewayURL:        readFileTrimmedOptional(t, hostGatewayURLSink),
+		containerGatewayURL:   readFileTrimmedOptional(t, containerGatewayURLSink),
+		builtBinaryPath:       readFileTrimmedOptional(t, goBuildOutputSink),
+		launchedBinaryPath:    readFileTrimmedOptional(t, pythonBinaryPathSink),
+		launchedAPIListenAddr: readFileTrimmedOptional(t, pythonAPIListenAddrSink),
+		launchedMCPListenAddr: readFileTrimmedOptional(t, pythonMCPListenAddrSink),
+		launchedCommand:       readFileTrimmedOptional(t, pythonCommandSink),
+		healthHeaders:         readFileTrimmedOptional(t, healthHeadersSink),
+		healthBody:            readFileTrimmedOptional(t, healthBodySink),
+		healthURL:             readFileTrimmedOptional(t, healthURLSink),
+		resetHeaders:          readFileTrimmedOptional(t, resetHeadersSink),
+		resetBody:             readFileTrimmedOptional(t, resetBodySink),
+		resetURL:              readFileTrimmedOptional(t, resetURLSink),
+		rpcHeaders:            readFileTrimmedOptional(t, rpcHeadersSink),
+		rpcBody:               readFileTrimmedOptional(t, bodySink),
+		rpcURL:                readFileTrimmedOptional(t, urlSink),
+		directiveHeaders:      readFileTrimmedOptional(t, directiveHeadersSink),
+		directiveBody:         readFileTrimmedOptional(t, directiveBodySink),
+		directiveURL:          readFileTrimmedOptional(t, directiveURLSink),
+		dockerCalls:           readFileTrimmedOptional(t, dockerCallsSink),
+		psqlCalls:             readFileTrimmedOptional(t, psqlCallsSink),
+		events:                readFileTrimmedOptional(t, eventsSink),
 	}, err
 }
 

@@ -53,13 +53,16 @@ services:
       - "8070:8070"
       - "8090:8090"
     command:
-      - -store
+      - serve
+      - --store
       - postgres
-      - -contracts
+      - --contracts
       - /opt/swarm/contracts
-      - -health-addr
-      - :8070
-      - -self-check=false
+      - --api-listen-addr
+      - 0.0.0.0:8070
+      - --mcp-listen-addr
+      - 0.0.0.0:8090
+      - --self-check=false
 
   # Per-entity and privileged workspaces are created dynamically by runtime policy.
   # This image is the base for those dynamic containers.
