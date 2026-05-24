@@ -375,7 +375,7 @@ Legacy `workflow_state` section removed (superseded by `entity_state` table).
 
 ### event_receipts widened, mailbox finalized, diagnostics encoding defined
 
-**event_receipts** — `entity_id` nullable, `handler_node` replaced by generic `subscriber_type` + `subscriber_id`. Added `duration_ms`, `idempotency_key`. UNIQUE on (event_id, subscriber_id). Replaces both pipeline_receipts and system_node_ledger.
+**event_receipts** — `entity_id` nullable, `handler_node` replaced by generic `subscriber_type` + `subscriber_id`. Added `duration_ms`, `idempotency_key`. UNIQUE on (event_id, subscriber_type, subscriber_id). Replaces both pipeline_receipts and system_node_ledger.
 
 **mailbox** — payload-centric model confirmed. All human_tasks become `item_type='human_task'`. Added `from_agent`, `summary`, `decision_notes`, `notified`, `source_event_id`. Old columns (context, timeout_at, priority) replaced by payload, expires_at, severity.
 

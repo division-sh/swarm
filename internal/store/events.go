@@ -1109,7 +1109,7 @@ func (s *PostgresStore) upsertPipelineReceiptSpec(ctx context.Context, tx *sql.T
 			  AND d.status = 'dead_letter'
 			  AND d.reason_code IN ($5, $6)
 		  )
-		ON CONFLICT (event_id, subscriber_id) DO UPDATE SET
+		ON CONFLICT (event_id, subscriber_type, subscriber_id) DO UPDATE SET
 			outcome = EXCLUDED.outcome,
 			reason_code = EXCLUDED.reason_code,
 			side_effects = EXCLUDED.side_effects,

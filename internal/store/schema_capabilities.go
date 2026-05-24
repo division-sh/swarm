@@ -31,6 +31,7 @@ type EventSchemaCapabilities struct {
 	LogIdempotencyKey    bool
 	LogRouteIdentity     bool
 	DeliveryTargetRoute  bool
+	ReceiptTypedIdentity bool
 }
 
 type ConversationSchemaCapabilities struct {
@@ -109,6 +110,28 @@ func loadSchemaColumnCatalog(ctx context.Context, db *sql.DB) (schemaColumnCatal
 		return schemaColumnCatalog{}, fmt.Errorf("read store schema columns: %w", err)
 	}
 	return catalog, nil
+}
+
+func eventReceiptsTypedSubscriberIdentityKeyExists(ctx context.Context, db *sql.DB) (bool, error) {
+	if db == nil {
+		return false, fmt.Errorf("postgres store is required")
+	}
+	var exists bool
+	if err := db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM pg_index i
+			JOIN pg_class tbl ON tbl.oid = i.indrelid
+			JOIN pg_namespace ns ON ns.oid = tbl.relnamespace
+			WHERE ns.nspname = 'public'
+			  AND tbl.relname = 'event_receipts'
+			  AND i.indisunique
+			  AND replace(pg_get_indexdef(i.indexrelid), '"', '') LIKE '% USING btree (event_id, subscriber_type, subscriber_id)%'
+		)
+	`).Scan(&exists); err != nil {
+		return false, fmt.Errorf("inspect event_receipts typed subscriber identity key: %w", err)
+	}
+	return exists, nil
 }
 
 func detectSchemaFlavor(catalog schemaColumnCatalog, tableName string, canonicalColumns, legacyColumns []string) SchemaFlavor {
@@ -265,6 +288,16 @@ func (s *PostgresStore) BindSchemaCapabilities(ctx context.Context) (StoreSchema
 		return StoreSchemaCapabilities{}, err
 	}
 	caps := detectStoreSchemaCapabilities(catalog)
+	if caps.Events.Receipts == SchemaFlavorCanonical {
+		hasTypedIdentity, err := eventReceiptsTypedSubscriberIdentityKeyExists(ctx, s.DB)
+		if err != nil {
+			return StoreSchemaCapabilities{}, err
+		}
+		caps.Events.ReceiptTypedIdentity = hasTypedIdentity
+		if !hasTypedIdentity {
+			caps.Events.Receipts = SchemaFlavorUnsupported
+		}
+	}
 	s.schemaCapsMu.Lock()
 	s.schemaCaps = caps
 	s.schemaCapsBound = true

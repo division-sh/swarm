@@ -18,6 +18,7 @@ func TestRecordPipelineTransition_PersistsViaCanonicalCapabilityOwner(t *testing
 	defer db.Close()
 
 	mock.ExpectQuery("FROM information_schema.columns").WillReturnRows(canonicalTransitionSchemaRows())
+	mock.ExpectQuery("FROM pg_index").WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
 	eventID := uuid.NewString()
 	pipelineID := uuid.NewString()
 	mock.ExpectQuery(`SELECT EXISTS\(SELECT 1 FROM events WHERE event_id = \$1::uuid\)`).
@@ -50,6 +51,7 @@ func TestRecordPipelineTransition_FailsClosedOnMixedSchemaCapability(t *testing.
 	defer db.Close()
 
 	mock.ExpectQuery("FROM information_schema.columns").WillReturnRows(mixedTransitionSchemaRows())
+	mock.ExpectQuery("FROM pg_index").WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 	pg := &store.PostgresStore{DB: db}
 	err = runtimepipeline.RecordPipelineTransition(context.Background(), db, pg.CanonicalEventReceiptsCapability, runtimepipeline.PipelineTransitionInput{
 		EventID:    uuid.NewString(),

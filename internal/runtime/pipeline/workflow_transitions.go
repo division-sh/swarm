@@ -199,7 +199,7 @@ func recordPipelineTransitionReceipt(ctx context.Context, db *sql.DB, eventID, h
 			$3, NULLIF($4,''), NULLIF($5,''), NULLIF($6,''), $7::jsonb, NULLIF($8,0), now()
 		FROM events e
 		WHERE e.event_id = $1::uuid
-		ON CONFLICT (event_id, subscriber_id) DO UPDATE SET
+		ON CONFLICT (event_id, subscriber_type, subscriber_id) DO UPDATE SET
 			outcome = EXCLUDED.outcome,
 			reason_code = EXCLUDED.reason_code,
 			state_before = EXCLUDED.state_before,

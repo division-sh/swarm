@@ -348,7 +348,7 @@ func terminalizeActiveRunQuiescenceDeliveryTx(ctx context.Context, tx *sql.Tx, i
 			'dead_letter', $4, $5::jsonb, NULLIF($6, ''), $7
 		FROM events e
 		WHERE e.event_id = $1::uuid
-		ON CONFLICT (event_id, subscriber_id) DO UPDATE SET
+		ON CONFLICT (event_id, subscriber_type, subscriber_id) DO UPDATE SET
 			outcome = 'dead_letter',
 			reason_code = $4,
 			side_effects = $5::jsonb,
@@ -375,7 +375,7 @@ func upsertActiveRunQuiescencePipelineReceiptTx(ctx context.Context, tx *sql.Tx,
 			'dead_letter', $3, $4::jsonb, $5
 		FROM events e
 		WHERE e.event_id = $1::uuid
-		ON CONFLICT (event_id, subscriber_id) DO UPDATE SET
+		ON CONFLICT (event_id, subscriber_type, subscriber_id) DO UPDATE SET
 			outcome = 'dead_letter',
 			reason_code = $3,
 			side_effects = $4::jsonb,

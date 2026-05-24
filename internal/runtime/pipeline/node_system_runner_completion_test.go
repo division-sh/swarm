@@ -138,12 +138,12 @@ func TestSystemNodeRunner_PipelineNamedNodeDoesNotMaskPlatformReceipt(t *testing
 		FROM event_receipts
 		WHERE event_id = $1::uuid
 		  AND subscriber_type = 'node'
-		  AND subscriber_id = 'node:pipeline'
+		  AND subscriber_id = 'pipeline'
 	`, eventID).Scan(&nodeReceipts); err != nil {
 		t.Fatalf("count node receipt: %v", err)
 	}
 	if nodeReceipts != 1 {
-		t.Fatalf("node:pipeline receipts = %d, want 1", nodeReceipts)
+		t.Fatalf("node pipeline receipts = %d, want 1", nodeReceipts)
 	}
 	var deliveryStatus string
 	if err := db.QueryRowContext(ctx, `

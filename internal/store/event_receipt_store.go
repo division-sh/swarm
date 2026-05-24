@@ -337,7 +337,7 @@ func (s *PostgresStore) upsertAgentReceiptRowTx(ctx context.Context, tx *sql.Tx,
 			$3, NULLIF($4,''), $5::jsonb, now()
 		FROM events e
 		WHERE e.event_id = $1::uuid
-		ON CONFLICT (event_id, subscriber_id) DO UPDATE SET
+		ON CONFLICT (event_id, subscriber_type, subscriber_id) DO UPDATE SET
 			entity_id = EXCLUDED.entity_id,
 			flow_instance = EXCLUDED.flow_instance,
 			outcome = EXCLUDED.outcome,

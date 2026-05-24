@@ -1555,7 +1555,7 @@ CREATE TABLE event_receipts (
     duration_ms       INTEGER,
     idempotency_key   TEXT,
     processed_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (event_id, subscriber_id),
+    UNIQUE (event_id, subscriber_type, subscriber_id),
     INDEX idx_receipts_entity (entity_id) WHERE entity_id IS NOT NULL,
     INDEX idx_receipts_subscriber (subscriber_id, processed_at),
     INDEX idx_receipts_idempotency (idempotency_key) WHERE idempotency_key IS NOT NULL

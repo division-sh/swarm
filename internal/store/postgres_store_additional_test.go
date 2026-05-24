@@ -1562,6 +1562,260 @@ func TestPostgresStore_AppendEvent_InheritsParentRunID(t *testing.T) {
 	}
 }
 
+func TestPostgresStore_EventReceiptsTypedIdentitySeparatesReceiptWriters(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	entityID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			event_id, run_id, event_name, entity_id, flow_instance, scope,
+			payload, produced_by, produced_by_type, created_at
+		) VALUES (
+			$1::uuid, $2::uuid, 'test.receipts.typed_identity', $3::uuid, 'flow-1', 'entity',
+			'{}'::jsonb, 'test', 'platform', now()
+		)
+	`, eventID, runID, entityID); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			run_id, event_id, subscriber_type, subscriber_id, status, created_at
+		) VALUES (
+			$1::uuid, $2::uuid, 'agent', 'pipeline', 'in_progress', now()
+		)
+	`, runID, eventID); err != nil {
+		t.Fatalf("seed agent delivery: %v", err)
+	}
+	var nodeDeliveryID string
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO event_deliveries (
+			run_id, event_id, subscriber_type, subscriber_id, status, created_at
+		) VALUES (
+			$1::uuid, $2::uuid, 'node', 'pipeline', 'in_progress', now()
+		)
+		RETURNING delivery_id::text
+	`, runID, eventID).Scan(&nodeDeliveryID); err != nil {
+		t.Fatalf("seed node delivery: %v", err)
+	}
+
+	if err := pg.UpsertPipelineReceipt(ctx, eventID, "processed", ""); err != nil {
+		t.Fatalf("UpsertPipelineReceipt: %v", err)
+	}
+	if err := pg.UpsertEventReceipt(ctx, eventID, "pipeline", runtimemanager.ReceiptStatusProcessed, ""); err != nil {
+		t.Fatalf("UpsertEventReceipt: %v", err)
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin active quiescence tx: %v", err)
+	}
+	if err := terminalizeActiveRunQuiescenceDeliveryTx(ctx, tx, activeRunQuiescenceDeliveryTarget{
+		DeliveryID:     nodeDeliveryID,
+		RunID:          runID,
+		EventID:        eventID,
+		SubscriberType: "node",
+		SubscriberID:   "pipeline",
+		Status:         "in_progress",
+	}, "serve_abandon", "operator shutdown", time.Now().UTC()); err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("terminalizeActiveRunQuiescenceDeliveryTx: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit active quiescence tx: %v", err)
+	}
+
+	rows, err := db.QueryContext(ctx, `
+		SELECT subscriber_type, subscriber_id, outcome
+		FROM event_receipts
+		WHERE event_id = $1::uuid
+		  AND subscriber_id = 'pipeline'
+		ORDER BY subscriber_type
+	`, eventID)
+	if err != nil {
+		t.Fatalf("query typed receipts: %v", err)
+	}
+	defer rows.Close()
+	got := map[string]string{}
+	for rows.Next() {
+		var subscriberType, subscriberID, outcome string
+		if err := rows.Scan(&subscriberType, &subscriberID, &outcome); err != nil {
+			t.Fatalf("scan typed receipt: %v", err)
+		}
+		got[subscriberType+"|"+subscriberID] = outcome
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read typed receipts: %v", err)
+	}
+	want := map[string]string{
+		"agent|pipeline":    "success",
+		"node|pipeline":     "dead_letter",
+		"platform|pipeline": "success",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("typed receipt rows = %#v, want %#v", got, want)
+	}
+	for key, wantOutcome := range want {
+		if got[key] != wantOutcome {
+			t.Fatalf("receipt %s outcome = %q, want %q (all rows %#v)", key, got[key], wantOutcome, got)
+		}
+	}
+}
+
+func TestPostgresStore_EnsureSchemaTables_MigratesEventReceiptsTypedSubscriberIdentity(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	downgradeEventReceiptsToUntypedSubscriberIdentity(t, ctx, db)
+
+	eventID := uuid.NewString()
+	entityID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
+		) VALUES (
+			$1::uuid, 'test.receipts.migration', $2::uuid, 'flow-1', 'entity', '{}'::jsonb, 'test', 'platform', now()
+		)
+	`, eventID, entityID); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_receipts (event_id, subscriber_type, subscriber_id, outcome, side_effects)
+		VALUES
+			($1::uuid, 'platform', 'pipeline', 'success', '{}'::jsonb),
+			($1::uuid, 'node', 'node:pipeline', 'no_op', '{}'::jsonb)
+	`, eventID); err != nil {
+		t.Fatalf("seed legacy receipts: %v", err)
+	}
+
+	if err := pg.EnsureSchemaTables(ctx, eventReceiptsTypedIdentityPlans(t)); err != nil {
+		t.Fatalf("EnsureSchemaTables(event_receipts typed identity): %v", err)
+	}
+
+	hasTypedKey, err := eventReceiptsTypedSubscriberIdentityKeyExists(ctx, db)
+	if err != nil {
+		t.Fatalf("eventReceiptsTypedSubscriberIdentityKeyExists: %v", err)
+	}
+	if !hasTypedKey {
+		t.Fatal("typed event_receipts subscriber identity key missing after migration")
+	}
+	var rowsForPipeline int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_receipts
+		WHERE event_id = $1::uuid
+		  AND subscriber_id = 'pipeline'
+		  AND subscriber_type IN ('platform', 'node')
+	`, eventID).Scan(&rowsForPipeline); err != nil {
+		t.Fatalf("count migrated pipeline receipts: %v", err)
+	}
+	if rowsForPipeline != 2 {
+		t.Fatalf("pipeline typed receipt rows = %d, want 2", rowsForPipeline)
+	}
+	var legacyRows int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_receipts
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'node'
+		  AND subscriber_id = 'node:pipeline'
+	`, eventID).Scan(&legacyRows); err != nil {
+		t.Fatalf("count legacy node:pipeline receipts: %v", err)
+	}
+	if legacyRows != 0 {
+		t.Fatalf("legacy node:pipeline receipt rows = %d, want 0", legacyRows)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_receipts (event_id, subscriber_type, subscriber_id, outcome, side_effects)
+		VALUES ($1::uuid, 'node', 'pipeline', 'success', '{}'::jsonb)
+	`, eventID); err == nil {
+		t.Fatal("duplicate typed event_receipts identity insert succeeded, want unique violation")
+	}
+}
+
+func TestPostgresStore_EnsureSchemaTables_FailsClosedOnNodePipelineMigrationConflict(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	downgradeEventReceiptsToUntypedSubscriberIdentity(t, ctx, db)
+
+	eventID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (event_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
+		VALUES ($1::uuid, 'test.receipts.migration_conflict', 'global', '{}'::jsonb, 'test', 'platform', now())
+	`, eventID); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_receipts (event_id, subscriber_type, subscriber_id, outcome, side_effects)
+		VALUES
+			($1::uuid, 'node', 'pipeline', 'success', '{}'::jsonb),
+			($1::uuid, 'node', 'node:pipeline', 'no_op', '{}'::jsonb)
+	`, eventID); err != nil {
+		t.Fatalf("seed conflicting legacy receipts: %v", err)
+	}
+
+	err := pg.EnsureSchemaTables(ctx, eventReceiptsTypedIdentityPlans(t))
+	if err == nil {
+		t.Fatal("EnsureSchemaTables error = nil, want node:pipeline fail-closed migration error")
+	}
+	if !strings.Contains(err.Error(), "node:pipeline") {
+		t.Fatalf("EnsureSchemaTables error = %v, want node:pipeline conflict", err)
+	}
+}
+
+func downgradeEventReceiptsToUntypedSubscriberIdentity(t *testing.T, ctx context.Context, db *sql.DB) {
+	t.Helper()
+	if _, err := db.ExecContext(ctx, `
+		DO $$
+		DECLARE rec RECORD;
+		BEGIN
+			FOR rec IN
+				SELECT c.conname
+				FROM pg_constraint c
+				WHERE c.conrelid = 'event_receipts'::regclass
+				  AND c.contype = 'u'
+			LOOP
+				EXECUTE format('ALTER TABLE event_receipts DROP CONSTRAINT %I', rec.conname);
+			END LOOP;
+		END
+		$$;
+		DROP INDEX IF EXISTS event_receipts_event_subscriber_identity_unique;
+		ALTER TABLE event_receipts
+			ADD CONSTRAINT event_receipts_event_id_subscriber_id_key UNIQUE (event_id, subscriber_id);
+	`); err != nil {
+		t.Fatalf("downgrade event_receipts identity: %v", err)
+	}
+	pg := &PostgresStore{DB: db}
+	_, err := pg.BindSchemaCapabilities(ctx)
+	if err != nil {
+		t.Fatalf("bind downgraded schema capabilities: %v", err)
+	}
+}
+
+func eventReceiptsTypedIdentityPlans(t *testing.T) []SchemaTableDDL {
+	t.Helper()
+	var spec runtimecontracts.PlatformSpecDocument
+	spec.PlatformTables.Tables = map[string]struct {
+		Description string `yaml:"description"`
+		DDL         string `yaml:"ddl"`
+	}{
+		"event_receipts": {
+			DDL: "CREATE TABLE event_receipts (\n    receipt_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    event_id UUID NOT NULL REFERENCES events(event_id),\n    subscriber_type TEXT NOT NULL CHECK (subscriber_type IN ('node', 'agent', 'platform')),\n    subscriber_id TEXT NOT NULL,\n    entity_id UUID,\n    flow_instance TEXT,\n    outcome TEXT NOT NULL CHECK (outcome IN ('success', 'reject', 'discard', 'kill', 'escalate', 'dead_letter', 'terminal_reject', 'waiting', 'fanned_out', 'no_op')),\n    reason_code TEXT,\n    state_before TEXT,\n    state_after TEXT,\n    side_effects JSONB NOT NULL DEFAULT '{}',\n    duration_ms INTEGER,\n    idempotency_key TEXT,\n    processed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    UNIQUE (event_id, subscriber_type, subscriber_id)\n);",
+		},
+	}
+	plans, err := GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatalf("GeneratePlatformTableDDLs(event_receipts): %v", err)
+	}
+	return plans
+}
+
 func TestPostgresStore_MarkRunTerminal_PersistsCanonicalLifecycle(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
