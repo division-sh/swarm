@@ -137,6 +137,7 @@ func runRunCommand(ctx context.Context, repo string, out, errOut io.Writer, opts
 
 	var stopLocal func()
 	if strings.TrimSpace(opts.connectURL) == "" {
+		repo = assetCommandRepoRoot(repo)
 		if err := loadRepoDotEnv(repo); err != nil {
 			fmt.Fprintf(errOut, "load .env: %v\n", err)
 			return commandExitError{code: 3}

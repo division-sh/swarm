@@ -752,6 +752,90 @@ func TestRootNoAssetCommandsDoNotRequireRepoRoot(t *testing.T) {
 	}
 }
 
+func TestAssetCommandsDiscoverRepoRootAtExecution(t *testing.T) {
+	repo := t.TempDir()
+	writeWorkflowValidationFixtureFile(t, filepath.Join(repo, "go.mod"), "module testrepo\n")
+	t.Chdir(repo)
+
+	var capturedRepo string
+	opts := defaultRootCommandOptions()
+	opts.runServe = func(_ context.Context, repo string, _ serveOptions) int {
+		capturedRepo = repo
+		return 0
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), "", []string{"serve"}, &stdout, &stderr, opts)
+	if code != 0 {
+		t.Fatalf("serve code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if capturedRepo != repo {
+		t.Fatalf("serve repo = %q, want discovered repo %q", capturedRepo, repo)
+	}
+}
+
+func TestVerifyCommandLoadsRepoDotEnvAfterLazyRepoDiscovery(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	_ = os.Unsetenv("SWARM_CONTRACTS_PATH")
+	repo := t.TempDir()
+	writeWorkflowValidationFixtureFile(t, filepath.Join(repo, "go.mod"), "module testrepo\n")
+	contractsRoot := t.TempDir()
+	writeWorkflowValidationFixtureFile(t, filepath.Join(contractsRoot, "package.yaml"), `
+name: dot-env-contracts
+version: "1.0.0"
+platform: ">=1.6.0"
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(contractsRoot, "schema.yaml"), "name: dot-env-contracts\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(contractsRoot, "policy.yaml"), "{}\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(contractsRoot, "tools.yaml"), "{}\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(contractsRoot, "agents.yaml"), "{}\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(contractsRoot, "nodes.yaml"), "{}\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(contractsRoot, "events.yaml"), "{}\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(repo, ".env"), "SWARM_CONTRACTS_PATH="+contractsRoot+"\n")
+	t.Chdir(repo)
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommand(context.Background(), "", []string{"verify"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("verify code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "verify ok: contracts="+contractsRoot) {
+		t.Fatalf("verify did not consume contracts path from repo .env:\n%s", stdout.String())
+	}
+}
+
+func TestLocalRunDiscoversRepoRootBeforeDotEnvAndServe(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	_ = os.Unsetenv("SWARM_API_TOKEN")
+	repo := t.TempDir()
+	writeWorkflowValidationFixtureFile(t, filepath.Join(repo, "go.mod"), "module testrepo\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(repo, ".env"), "SWARM_API_TOKEN=test-token\n")
+	payloadPath := filepath.Join(t.TempDir(), "payload.json")
+	writeWorkflowValidationFixtureFile(t, payloadPath, "{}\n")
+	t.Chdir(repo)
+
+	var capturedRepo string
+	opts := runCommandOptions{
+		apiOptions:   defaultRootCommandOptions(),
+		eventName:    "scan.requested",
+		payloadPath:  payloadPath,
+		changedFlags: map[string]bool{},
+	}
+	opts.apiOptions.runServe = func(ctx context.Context, repo string, _ serveOptions) int {
+		capturedRepo = repo
+		<-ctx.Done()
+		return 1
+	}
+	opts.apiOptions.runReadyTimeout = time.Millisecond
+	opts.apiOptions.runReadyPoll = time.Millisecond
+
+	var stdout, stderr bytes.Buffer
+	_ = runRunCommand(context.Background(), "", &stdout, &stderr, opts)
+	if capturedRepo != repo {
+		t.Fatalf("local run serve repo = %q, want discovered repo %q; stderr=%s stdout=%s", capturedRepo, repo, stderr.String(), stdout.String())
+	}
+}
+
 func TestRunVerifyCommandUsesEmbeddedPlatformSpecWithoutRepoRoot(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	t.Chdir(t.TempDir())

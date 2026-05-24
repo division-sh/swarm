@@ -139,7 +139,7 @@ func newServeCommand(ctx context.Context, repo string, runServe func(context.Con
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts.Output = cmd.OutOrStdout()
-			code := runServe(ctx, repo, opts)
+			code := runServe(ctx, assetCommandRepoRoot(repo), opts)
 			if code != 0 {
 				return commandExitError{code: code}
 			}
@@ -177,7 +177,7 @@ func newVerifyCommand(ctx context.Context, repo string) *cobra.Command {
 			if len(args) > 0 {
 				return returnCLIValidationError(cmd.ErrOrStderr(), fmt.Errorf("unexpected argument %q", args[0]))
 			}
-			code := runVerifyCommandWithOutput(ctx, repo, opts, cmd.OutOrStdout(), cmd.ErrOrStderr())
+			code := runVerifyCommandWithOutput(ctx, assetCommandRepoRoot(repo), opts, cmd.OutOrStdout(), cmd.ErrOrStderr())
 			if code != 0 {
 				return commandExitError{code: code}
 			}
