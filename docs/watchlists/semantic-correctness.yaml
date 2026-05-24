@@ -47,8 +47,10 @@ active_issues:
     title: Add a reusable cross-boundary delivery lifecycle conformance suite
   - id: 119
     title: Persist canonical terminal lifecycle for template flow instances
-  - id: 120
-    title: Persist canonical run completion instead of inferring it from quiescence
+  - id: 994
+    title: Persist canonical normal run completion/quiescence owner
+    maps_to:
+      - persisted_normal_run_completion_quiescence_owner
   - id: 132
     title: Make CEL validation lifecycle-aware for entity-field availability
     maps_to:
@@ -139,6 +141,30 @@ active_issues:
     maps_to:
       - boot_check_definition_drift
 nodes:
+  - id: persisted_normal_run_completion_quiescence_owner
+    title: Persisted Normal Run Completion/Quiescence Owner
+    parent_class: runtime lifecycle state drift between entity/flow terminality, delivery/timer/session quiescence, and persisted runs.status
+    canonical_owners:
+      - internal/runtime/bus/run_completion.go
+      - internal/store/run_completion.go
+      - internal/store/runlifecycle/owner.go
+    why_this_node_exists: normal flow/user runs can finish semantically while persisted run lifecycle stays running when completion is inferred by readers or left to a platform-only convergence path
+    known_manifestations:
+      - swarm run follows run.get forever after a terminal entity because runs.status remains running
+      - run.get and run.diagnose report stale running/stalled state instead of the durable completed row
+      - event.publish --run-id targeting can accept a semantically finished run until runs.status is durably terminal
+      - active deliveries, active timers, and live session leases must block completion fail-closed
+    representative_issues:
+      - 994
+    common_framing_mistakes:
+      too_broad:
+        - all runtime lifecycle drift
+        - replay/deduplication and startup credential gates
+      too_narrow:
+        - CLI follow timeout
+        - run.get read-side terminal inference
+        - run.diagnose projection-only repair
+    current_action_pressure: active first-slice closure under issue 994
   - id: boot_check_definition_drift
     title: Boot Check Definition Drift
     parent_class: semantic correctness drift between authoritative boot-check definitions and enforcement/proof surfaces

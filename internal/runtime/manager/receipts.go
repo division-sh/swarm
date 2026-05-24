@@ -31,6 +31,10 @@ type activeRunDeliveryQuiescenceReader interface {
 	ActiveRunDeliveryQuiesced(ctx context.Context, eventID, subscriberType, subscriberID string) (string, bool, error)
 }
 
+type normalRunCompletionConverger interface {
+	ConvergeNormalRunCompletionForEvent(ctx context.Context, eventID string) error
+}
+
 func (am *AgentManager) processEvent(ctx context.Context, agent Agent, evt events.Event) error {
 	result := am.processEventDetailed(ctx, agent, evt)
 	return result.err
@@ -485,6 +489,18 @@ func (am *AgentManager) writeReceipt(ctx context.Context, eventID, agentID strin
 		return
 	}
 	am.logDeliveryLifecycle(writeCtx, eventID, agentID, status, errText)
+	if converger, ok := am.bus.(normalRunCompletionConverger); ok && converger != nil {
+		if err := converger.ConvergeNormalRunCompletionForEvent(writeCtx, eventID); err != nil && am.bus != nil {
+			am.bus.LogRuntime(writeCtx, runtimepipeline.RuntimeLogEntry{
+				Level:     "error",
+				Component: "agent-manager",
+				Action:    "normal_run_completion_failed",
+				EventID:   strings.TrimSpace(eventID),
+				AgentID:   strings.TrimSpace(agentID),
+				Error:     strings.TrimSpace(err.Error()),
+			})
+		}
+	}
 
 	// Spec v2.0: dead-letter events are escalated to the agent's manager. The manager
 	// decides whether to retry, skip, or escalate further.

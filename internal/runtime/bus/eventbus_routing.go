@@ -411,6 +411,10 @@ func (eb *EventBus) markPipelineReceipt(ctx context.Context, eventID, status, er
 		}, err.Error(), 0)
 		return err
 	}
+	if err := eb.ConvergeNormalRunCompletionForEvent(ctx, eventID); err != nil {
+		eb.logRuntime(ctx, "error", "Persisting normal run completion failed", "eventbus", "normal_run_completion_failed", eventID, "", "", "", "", nil, nil, err.Error(), 0)
+		return err
+	}
 	return nil
 }
 

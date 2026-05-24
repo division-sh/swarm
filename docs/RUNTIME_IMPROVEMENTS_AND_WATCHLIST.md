@@ -1825,7 +1825,7 @@ The flat backlog has been split into themed watchlists so this file can stay an 
 - `#116` Make workflow instance mutation atomic across load, mutate, and upsert.
 - `#118` Add a reusable cross-boundary delivery lifecycle conformance suite.
 - `#119` Persist canonical terminal lifecycle for template flow instances.
-- `#120` Persist canonical run completion instead of inferring it from quiescence.
+- `#994` Persist canonical normal run completion/quiescence owner.
 - `#159` Legacy compatibility removal wave.
 
 ### Notes

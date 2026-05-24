@@ -44,6 +44,16 @@ func (b *recordingReceiptBus) LogRuntime(_ context.Context, entry runtimepipelin
 	return nil
 }
 
+type recordingCompletionReceiptBus struct {
+	recordingReceiptBus
+	normalCompletionEvents []string
+}
+
+func (b *recordingCompletionReceiptBus) ConvergeNormalRunCompletionForEvent(_ context.Context, eventID string) error {
+	b.normalCompletionEvents = append(b.normalCompletionEvents, strings.TrimSpace(eventID))
+	return nil
+}
+
 type receiptReaderStub struct {
 	receipt     EventReceipt
 	found       bool
@@ -74,6 +84,28 @@ func (*receiptReaderStub) ListPendingSubscribedEvents(context.Context, string, [
 }
 func (s *receiptReaderStub) GetEventReceipt(context.Context, string, string) (EventReceipt, bool, error) {
 	return s.receipt, s.found, nil
+}
+
+func TestWriteReceiptConvergesNormalRunCompletionAfterReceiptPersists(t *testing.T) {
+	bus := &recordingCompletionReceiptBus{}
+	store := &receiptReaderStub{
+		receipt: EventReceipt{
+			EventID: "event-1",
+			AgentID: "agent-1",
+			Status:  ReceiptStatusProcessed,
+		},
+		found: true,
+	}
+	am := NewAgentManagerWithOptions(bus, nil, AgentManagerOptions{}, store)
+
+	am.writeReceipt(context.Background(), "event-1", "agent-1", ReceiptStatusProcessed, "")
+
+	if store.upsertCalls != 1 {
+		t.Fatalf("receipt upsert calls = %d, want 1", store.upsertCalls)
+	}
+	if len(bus.normalCompletionEvents) != 1 || bus.normalCompletionEvents[0] != "event-1" {
+		t.Fatalf("normal completion events = %#v, want event-1", bus.normalCompletionEvents)
+	}
 }
 
 type traceRecordingAgent struct{ parent string }
