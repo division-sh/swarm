@@ -600,10 +600,78 @@ func (pc *PipelineCoordinator) dispatchWorkflowNodeEventResult(ctx context.Conte
 			return handledAny || handled, err
 		}
 		if handled {
+			pc.markWorkflowNodeProcessed(ctx, nodeID, evt)
 			handledAny = true
 		}
 	}
 	return handledAny, nil
+}
+
+func (pc *PipelineCoordinator) markWorkflowNodeProcessed(ctx context.Context, nodeID string, evt events.Event) {
+	if pc == nil || pc.db == nil {
+		return
+	}
+	nodeID = strings.TrimSpace(nodeID)
+	eventID := strings.TrimSpace(evt.ID)
+	if nodeID == "" || eventID == "" {
+		return
+	}
+	if !pc.eventReceiptsAvailable(ctx) {
+		return
+	}
+	sideEffects := systemNodeProcessedReceiptSideEffects(nodeID, eventID)
+	if err := persistSystemNodeProcessedReceiptAndSettleDelivery(ctx, pc.db, nodeID, eventID, sideEffects); err != nil {
+		if logger, ok := pc.bus.(systemNodeRuntimeLogger); ok && logger != nil {
+			logger.LogRuntime(ctx, RuntimeLogEntry{
+				Level:     "error",
+				Message:   "Marking the workflow node event as processed failed",
+				Component: nodeID,
+				Action:    "mark_processed_failed",
+				EventID:   eventID,
+				EventType: strings.TrimSpace(string(evt.Type)),
+				EntityID:  workflowEventEntityID(evt),
+				Error:     strings.TrimSpace(err.Error()),
+			})
+		}
+		return
+	}
+	pc.convergeWorkflowNodeNormalRunCompletion(ctx, nodeID, evt)
+}
+
+func (pc *PipelineCoordinator) eventReceiptsAvailable(ctx context.Context) bool {
+	if pc == nil || pc.eventReceiptsCapability == nil {
+		return false
+	}
+	ok, err := pc.eventReceiptsCapability(ctx)
+	return err == nil && ok
+}
+
+func (pc *PipelineCoordinator) convergeWorkflowNodeNormalRunCompletion(ctx context.Context, nodeID string, evt events.Event) {
+	if pc == nil || pc.bus == nil {
+		return
+	}
+	eventID := strings.TrimSpace(evt.ID)
+	if eventID == "" {
+		return
+	}
+	converger, ok := pc.bus.(systemNodeNormalRunCompletionConverger)
+	if !ok || converger == nil {
+		return
+	}
+	if err := converger.ConvergeNormalRunCompletionForEvent(ctx, eventID); err != nil {
+		if logger, ok := pc.bus.(systemNodeRuntimeLogger); ok && logger != nil {
+			logger.LogRuntime(ctx, RuntimeLogEntry{
+				Level:     "error",
+				Message:   "Converging normal run completion after workflow node receipt failed",
+				Component: nodeID,
+				Action:    "normal_run_completion_failed",
+				EventID:   eventID,
+				EventType: strings.TrimSpace(string(evt.Type)),
+				EntityID:  workflowEventEntityID(evt),
+				Error:     strings.TrimSpace(err.Error()),
+			})
+		}
+	}
 }
 
 func (pc *PipelineCoordinator) workflowNodeMatchesDeliveryTarget(nodeID string, target events.RouteIdentity) bool {
