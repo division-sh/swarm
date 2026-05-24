@@ -456,23 +456,26 @@ func (am *AgentManager) writeReceipt(ctx context.Context, eventID, agentID strin
 	if writeCtx == nil {
 		writeCtx = context.Background()
 	}
-	if err := am.store.UpsertEventReceipt(writeCtx, eventID, agentID, status, errText); err != nil {
+	receiptCtx := writeCtx
+	var receiptCancel context.CancelFunc
+	err := am.store.UpsertEventReceipt(writeCtx, eventID, agentID, status, errText)
+	if err != nil {
 		// Agent loop contexts are canceled aggressively during teardown; receipts
 		// must still persist so pending deliveries do not get stuck indefinitely.
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			retryCtx, cancel := context.WithTimeout(context.WithoutCancel(writeCtx), receiptWriteTimeout)
 			retryErr := am.store.UpsertEventReceipt(retryCtx, eventID, agentID, status, errText)
 			if retryErr == nil {
-				am.logDeliveryLifecycle(retryCtx, eventID, agentID, status, errText)
+				receiptCtx = retryCtx
+				receiptCancel = cancel
+				err = nil
+			} else {
 				cancel()
-				if status == ReceiptStatusError {
-					am.maybeEscalateDeadLetter(context.WithoutCancel(writeCtx), eventID, agentID)
-				}
-				return
+				err = retryErr
 			}
-			cancel()
-			err = retryErr
 		}
+	}
+	if err != nil {
 		if am.bus != nil {
 			am.bus.LogRuntime(writeCtx, runtimepipeline.RuntimeLogEntry{
 				Level:     "error",
@@ -488,10 +491,13 @@ func (am *AgentManager) writeReceipt(ctx context.Context, eventID, agentID strin
 		}
 		return
 	}
-	am.logDeliveryLifecycle(writeCtx, eventID, agentID, status, errText)
+	if receiptCancel != nil {
+		defer receiptCancel()
+	}
+	am.logDeliveryLifecycle(receiptCtx, eventID, agentID, status, errText)
 	if converger, ok := am.bus.(normalRunCompletionConverger); ok && converger != nil {
-		if err := converger.ConvergeNormalRunCompletionForEvent(writeCtx, eventID); err != nil && am.bus != nil {
-			am.bus.LogRuntime(writeCtx, runtimepipeline.RuntimeLogEntry{
+		if err := converger.ConvergeNormalRunCompletionForEvent(receiptCtx, eventID); err != nil && am.bus != nil {
+			am.bus.LogRuntime(receiptCtx, runtimepipeline.RuntimeLogEntry{
 				Level:     "error",
 				Component: "agent-manager",
 				Action:    "normal_run_completion_failed",
@@ -505,7 +511,11 @@ func (am *AgentManager) writeReceipt(ctx context.Context, eventID, agentID strin
 	// Spec v2.0: dead-letter events are escalated to the agent's manager. The manager
 	// decides whether to retry, skip, or escalate further.
 	if status == ReceiptStatusError {
-		am.maybeEscalateDeadLetter(ctx, eventID, agentID)
+		escalateCtx := ctx
+		if receiptCancel != nil {
+			escalateCtx = context.WithoutCancel(writeCtx)
+		}
+		am.maybeEscalateDeadLetter(escalateCtx, eventID, agentID)
 	}
 }
 
