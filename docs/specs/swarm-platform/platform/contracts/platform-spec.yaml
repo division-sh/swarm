@@ -8944,6 +8944,42 @@ api_specification:
         event_name: mailbox.item_decided
       - item_type: operational_decision
         event_name: mailbox.item_decided
+      approval_event_payload_contract:
+        event_name: mailbox.item_decided
+        producer: /v1/rpc mailbox.approve
+        rule: >
+          Mailbox approval events are platform-produced flat event payloads and
+          MUST satisfy the active event schema before persistence. The original
+          public mailbox row payload MUST be emitted under the declared
+          `mailbox_payload` field. The operator approval context remains under
+          `decision_payload`.
+        required_fields:
+        - mailbox_id
+        - mailbox_decision_id
+        - decision
+        - decision_payload
+        - item_type
+        - mailbox_payload
+        - source_event_id
+        - source_flow
+        - source_entity_id
+        - decided_by
+        - decided_at
+        field_semantics:
+          mailbox_payload: >
+            Original public mailbox row payload produced by the mailbox row
+            materialization owner, exposed as a declared business payload field
+            for consumers of `mailbox.item_decided`.
+          decision_payload: >
+            Operator-supplied approval context from the `mailbox.approve`
+            request. It is separate from `mailbox_payload` and MUST NOT be
+            merged with the row payload.
+        forbidden_fields:
+        - payload
+        validation: >
+          The producer MUST NOT emit the retired top-level `payload` member and
+          validators MUST NOT add a special allowlist for it. Contracts that need
+          the mailbox row payload must declare and consume `mailbox_payload`.
     scopes:
       vocabulary: action-resource (read:<resource>, write:<resource>, control:<resource>, admin:<resource>, approve:<resource>,
         verify:<resource>)

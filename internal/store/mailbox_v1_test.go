@@ -123,6 +123,21 @@ func TestPostgresStore_V1MailboxReadDecisionAndIdempotencyOwners(t *testing.T) {
 	if !outcome.Result.OK || outcome.Result.Status != "decided" || outcome.Result.DownstreamEventID == "" || outcome.ApprovalEvent == nil {
 		t.Fatalf("unexpected approve outcome=%#v", outcome)
 	}
+	var approvalPayload map[string]any
+	if err := json.Unmarshal(outcome.ApprovalEvent.Payload, &approvalPayload); err != nil {
+		t.Fatalf("decode approval event payload: %v", err)
+	}
+	if _, ok := approvalPayload["payload"]; ok {
+		t.Fatalf("approval event retained retired payload field: %#v", approvalPayload)
+	}
+	mailboxPayload := approvalPayload["mailbox_payload"].(map[string]any)
+	if mailboxPayload["title"] != "check" {
+		t.Fatalf("approval event mailbox_payload = %#v, want title check", mailboxPayload)
+	}
+	decisionPayload := approvalPayload["decision_payload"].(map[string]any)
+	if decisionPayload["ok"] != true {
+		t.Fatalf("approval event decision_payload = %#v, want ok true", decisionPayload)
+	}
 	if _, err := s.DecideV1MailboxItem(ctx, MailboxV1DecisionRequest{
 		MailboxID:         firstID,
 		Action:            "approved",
