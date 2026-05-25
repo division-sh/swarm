@@ -104,6 +104,16 @@ func TestRuntimeDepsValidateOwnsRequiredBootInputs(t *testing.T) {
 			errContains: "workflow contract validation failed: workflow module is required",
 		},
 		{
+			name: "retired llm runtime mode",
+			deps: RuntimeDeps{
+				Config: &config.Config{
+					LLM: config.LLMConfig{RuntimeMode: "cli_test"},
+				},
+				Options: RuntimeOptions{WorkflowModule: validModule},
+			},
+			errContains: "llm.runtime_mode is retired",
+		},
+		{
 			name: "valid dependency graph",
 			deps: RuntimeDeps{
 				Config:  &config.Config{},

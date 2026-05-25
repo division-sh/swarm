@@ -26,7 +26,6 @@ import (
 	runtimecredentials "swarm/internal/runtime/credentials"
 	runtimeingress "swarm/internal/runtime/ingress"
 	llm "swarm/internal/runtime/llm"
-	llmselection "swarm/internal/runtime/llm/selection"
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimemcp "swarm/internal/runtime/mcp"
 	runtimepipeline "swarm/internal/runtime/pipeline"
@@ -287,6 +286,9 @@ func (deps RuntimeDeps) validated() (validatedRuntimeDeps, error) {
 	if err := cfg.ValidateExtensions(); err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("runtime config validation failed: %w", err)
 	}
+	if _, err := cfg.LLMBackendProfile(); err != nil {
+		return validatedRuntimeDeps{}, fmt.Errorf("runtime config validation failed: %w", err)
+	}
 	if err := ensureWorkflowBootWiring(opts); err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("workflow contract validation failed: %w", err)
 	}
@@ -444,7 +446,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		rt.Budget = NewBudgetTracker(stores.SQLDB, rt.Bus, cfg, stores.MailboxStore, rt.Logger, source)
 	}
 
-	backendProfile, err := llmselection.ResolveActiveBackend(cfg.LLM.Backend)
+	backendProfile, err := cfg.LLMBackendProfile()
 	if err != nil {
 		return nil, err
 	}

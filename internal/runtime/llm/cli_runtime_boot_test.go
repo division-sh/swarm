@@ -23,6 +23,15 @@ func TestValidateClaudeCLIRuntimeConfig_RequiresExplicitBridgeEnv(t *testing.T) 
 	}
 }
 
+func TestValidateClaudeCLIRuntimeConfig_RejectsRetiredRuntimeMode(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.LLM.RuntimeMode = "cli_test"
+
+	if err := ValidateClaudeCLIRuntimeConfig(cfg); err == nil || !strings.Contains(err.Error(), "llm.runtime_mode is retired") {
+		t.Fatalf("ValidateClaudeCLIRuntimeConfig error = %v, want retired runtime mode rejection", err)
+	}
+}
+
 func TestValidateClaudeCLIRuntimeConfig_RequiresMCPBridgeEnabled(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.LLM.Backend = "cli_test"

@@ -104,6 +104,17 @@ func TestRuntimeFactoryValidatesProviderContract(t *testing.T) {
 	}
 }
 
+func TestRuntimeFactoryRejectsRetiredRuntimeMode(t *testing.T) {
+	_, err := RuntimeFactory{
+		Cfg: &config.Config{
+			LLM: config.LLMConfig{RuntimeMode: "cli_test"},
+		},
+	}.Build()
+	if err == nil || !strings.Contains(err.Error(), "llm.runtime_mode is retired") {
+		t.Fatalf("Build error = %v, want retired runtime mode rejection", err)
+	}
+}
+
 func TestRuntimeFactoryRejectsContractProfileMismatch(t *testing.T) {
 	_, err := RequireProviderContractForProfile(llmselection.Profile{
 		ID:          "bad",

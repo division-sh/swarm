@@ -36,7 +36,7 @@ func (f RuntimeFactory) Build() (Runtime, error) {
 		f.LockOwner = defaultLockOwner()
 	}
 
-	profile, err := llmselection.ResolveActiveBackend(f.Cfg.LLM.Backend)
+	profile, err := f.Cfg.LLMBackendProfile()
 	if err != nil {
 		return nil, err
 	}

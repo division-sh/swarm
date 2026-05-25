@@ -14,7 +14,7 @@ func ValidateClaudeCLIRuntimeConfig(cfg *config.Config) error {
 	if cfg == nil {
 		return nil
 	}
-	profile, err := llmselection.ResolveActiveBackend(cfg.LLM.Backend)
+	profile, err := cfg.LLMBackendProfile()
 	if err != nil {
 		return err
 	}

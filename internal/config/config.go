@@ -85,14 +85,21 @@ func Load(path string) (*Config, error) {
 	return &cfg, nil
 }
 
+func (c *Config) LLMBackendProfile() (llmselection.Profile, error) {
+	if c == nil {
+		return llmselection.Profile{}, errors.New("config is required")
+	}
+	if err := llmselection.RejectRetiredConfigRuntimeMode(c.LLM.RuntimeMode); err != nil {
+		return llmselection.Profile{}, err
+	}
+	return llmselection.ResolveActiveBackend(c.LLM.Backend)
+}
+
 func (c *Config) Validate() error {
 	if err := c.ValidateOperationalControls(); err != nil {
 		return err
 	}
-	if err := llmselection.RejectRetiredConfigRuntimeMode(c.LLM.RuntimeMode); err != nil {
-		return err
-	}
-	profile, err := llmselection.ResolveActiveBackend(c.LLM.Backend)
+	profile, err := c.LLMBackendProfile()
 	if err != nil {
 		return err
 	}
