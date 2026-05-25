@@ -299,7 +299,7 @@ func TestOperatorAgentSendDirectiveUsesLegacyRunBundleSourceUntilSourceStampingO
 	if newRunID == "" {
 		t.Fatalf("new-run directive result = %#v", first.Result)
 	}
-	assertRunBundleIdentity(t, db, newRunID, "", "legacy", "")
+	assertRunBundleIdentity(t, db, newRunID, "", "legacy", bootFingerprint)
 
 	existingRunID := "00000000-0000-0000-0000-000000000755"
 	if _, err := db.Exec(`

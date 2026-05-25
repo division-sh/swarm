@@ -57,8 +57,8 @@ func TestSelectedContractExecutionMaterializationAllowsSelectedPendingNodeFronti
 	`, materialized.ForkRunID).Scan(&forkBundleHash, &forkBundleSource, &forkBundleFingerprint); err != nil {
 		t.Fatalf("load selected fork bundle identity: %v", err)
 	}
-	if forkBundleHash != "" || forkBundleSource != "legacy" || forkBundleFingerprint != "" {
-		t.Fatalf("selected fork bundle identity = hash:%q source:%q fingerprint:%q, want legacy without copied fingerprint", forkBundleHash, forkBundleSource, forkBundleFingerprint)
+	if forkBundleHash != "" || forkBundleSource != "legacy" || forkBundleFingerprint != "selected-source-fingerprint" {
+		t.Fatalf("selected fork bundle identity = hash:%q source:%q fingerprint:%q, want legacy with compatibility fingerprint", forkBundleHash, forkBundleSource, forkBundleFingerprint)
 	}
 	var replayRows int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_delivery_event_replays WHERE fork_run_id = $1::uuid`, materialized.ForkRunID).Scan(&replayRows); err != nil {

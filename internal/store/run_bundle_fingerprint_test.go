@@ -19,7 +19,7 @@ const (
 	testCanonicalBundleHash    = "bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111"
 )
 
-func TestPostgresStore_RunBundleSourceClassifiesCurrentWritersAsLegacyWithoutCopyingFingerprint(t *testing.T) {
+func TestPostgresStore_RunBundleSourceClassifiesCurrentWritersAsLegacyAndKeepsServeAdmissionFingerprint(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ctx := runtimecorrelation.WithBundleFingerprint(context.Background(), testBootBundleFingerprint)
@@ -35,7 +35,7 @@ func TestPostgresStore_RunBundleSourceClassifiesCurrentWritersAsLegacyWithoutCop
 	}); err != nil {
 		t.Fatalf("AppendEvent(first): %v", err)
 	}
-	assertRunBundleIdentity(t, db, runID, "", storerunlifecycle.BundleSourceLegacy, "")
+	assertRunBundleIdentity(t, db, runID, "", storerunlifecycle.BundleSourceLegacy, testBootBundleFingerprint)
 
 	changedCtx := runtimecorrelation.WithBundleFingerprint(context.Background(), testOtherBundleFingerprint)
 	if err := pg.AppendEvent(changedCtx, events.Event{
@@ -48,7 +48,7 @@ func TestPostgresStore_RunBundleSourceClassifiesCurrentWritersAsLegacyWithoutCop
 	}); err != nil {
 		t.Fatalf("AppendEvent(second): %v", err)
 	}
-	assertRunBundleIdentity(t, db, runID, "", storerunlifecycle.BundleSourceLegacy, "")
+	assertRunBundleIdentity(t, db, runID, "", storerunlifecycle.BundleSourceLegacy, testBootBundleFingerprint)
 }
 
 func TestPostgresStore_RunBundleSourceAllowsUnknownLegacyRows(t *testing.T) {
@@ -69,7 +69,7 @@ func TestPostgresStore_RunBundleSourceAllowsUnknownLegacyRows(t *testing.T) {
 	assertRunBundleIdentity(t, db, runID, "", storerunlifecycle.BundleSourceLegacy, "")
 }
 
-func TestPostgresStore_RunBundleSourceDoesNotPromoteLegacyFingerprintOnReopen(t *testing.T) {
+func TestPostgresStore_RunBundleSourceDoesNotPromoteLegacyFingerprintIntoBundleHashOnReopen(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
@@ -93,7 +93,7 @@ func TestPostgresStore_RunBundleSourceDoesNotPromoteLegacyFingerprintOnReopen(t 
 	}); err != nil {
 		t.Fatalf("AppendEvent(fill): %v", err)
 	}
-	assertRunBundleIdentity(t, db, runID, "", storerunlifecycle.BundleSourceLegacy, "")
+	assertRunBundleIdentity(t, db, runID, "", storerunlifecycle.BundleSourceLegacy, testBootBundleFingerprint)
 
 	changedCtx := runtimecorrelation.WithBundleFingerprint(ctx, testOtherBundleFingerprint)
 	if err := pg.AppendEvent(changedCtx, events.Event{
@@ -106,7 +106,7 @@ func TestPostgresStore_RunBundleSourceDoesNotPromoteLegacyFingerprintOnReopen(t 
 	}); err != nil {
 		t.Fatalf("AppendEvent(followup): %v", err)
 	}
-	assertRunBundleIdentity(t, db, runID, "", storerunlifecycle.BundleSourceLegacy, "")
+	assertRunBundleIdentity(t, db, runID, "", storerunlifecycle.BundleSourceLegacy, testBootBundleFingerprint)
 }
 
 func TestRunLifecycleOwnerPersistsCanonicalBundleHashWhenSupplied(t *testing.T) {

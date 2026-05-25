@@ -24,15 +24,17 @@ type Snapshot struct {
 }
 
 type EnsureActiveOptions struct {
-	ReopenCompleted    bool
-	HasStartedAtCol    bool
-	HasTriggerCols     bool
-	HasCounterCols     bool
-	HasTerminalCols    bool
-	HasBundleHashCol   bool
-	HasBundleSourceCol bool
-	BundleHash         string
-	BundleSource       string
+	ReopenCompleted         bool
+	HasStartedAtCol         bool
+	HasTriggerCols          bool
+	HasCounterCols          bool
+	HasTerminalCols         bool
+	HasBundleHashCol        bool
+	HasBundleSourceCol      bool
+	HasBundleFingerprintCol bool
+	BundleHash              string
+	BundleSource            string
+	BundleFingerprint       string
 }
 
 const (
@@ -86,6 +88,7 @@ func EnsureActive(ctx context.Context, db DBTX, runID, triggerEventID, triggerEv
 	triggerEventID = strings.TrimSpace(triggerEventID)
 	triggerEventType = strings.TrimSpace(triggerEventType)
 	bundleHash := strings.TrimSpace(opts.BundleHash)
+	bundleFingerprint := strings.TrimSpace(opts.BundleFingerprint)
 	bundleSource, err := CanonicalBundleSource(opts.BundleSource)
 	if err != nil {
 		return err
@@ -121,6 +124,9 @@ func EnsureActive(ctx context.Context, db DBTX, runID, triggerEventID, triggerEv
 	if opts.HasBundleSourceCol {
 		addParam("bundle_source", "$%d", bundleSource)
 	}
+	if opts.HasBundleFingerprintCol {
+		addParam("bundle_fingerprint", "NULLIF($%d,'')", bundleFingerprint)
+	}
 	if opts.HasStartedAtCol {
 		insertCols = append(insertCols, "started_at")
 		insertVals = append(insertVals, "now()")
@@ -142,6 +148,10 @@ func EnsureActive(ctx context.Context, db DBTX, runID, triggerEventID, triggerEv
 	if opts.HasBundleSourceCol {
 		query += `,
 			bundle_source = COALESCE(runs.bundle_source, EXCLUDED.bundle_source)`
+	}
+	if opts.HasBundleFingerprintCol {
+		query += `,
+			bundle_fingerprint = COALESCE(runs.bundle_fingerprint, EXCLUDED.bundle_fingerprint)`
 	}
 	if opts.HasTriggerCols {
 		query += `,

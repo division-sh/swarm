@@ -352,7 +352,7 @@ func assertInvalidRunStartParam(t *testing.T, resp rpcResponse, field string) {
 	}
 }
 
-func assertRunStartPersistence(t *testing.T, db *sql.DB, runID, eventName, _ string) {
+func assertRunStartPersistence(t *testing.T, db *sql.DB, runID, eventName, bundleFingerprint string) {
 	t.Helper()
 	var runStatus, triggerType, bundleHash, bundleSource, legacyFingerprint string
 	if err := db.QueryRow(`
@@ -365,8 +365,8 @@ func assertRunStartPersistence(t *testing.T, db *sql.DB, runID, eventName, _ str
 	if runStatus != "running" || triggerType != eventName {
 		t.Fatalf("run row status=%q trigger=%q, want running/%s", runStatus, triggerType, eventName)
 	}
-	if bundleHash != "" || bundleSource != "legacy" || legacyFingerprint != "" {
-		t.Fatalf("run row bundle identity = hash:%q source:%q fingerprint:%q, want legacy without copied fingerprint", bundleHash, bundleSource, legacyFingerprint)
+	if bundleHash != "" || bundleSource != "legacy" || legacyFingerprint != bundleFingerprint {
+		t.Fatalf("run row bundle identity = hash:%q source:%q fingerprint:%q, want legacy with compatibility fingerprint %q", bundleHash, bundleSource, legacyFingerprint, bundleFingerprint)
 	}
 	var entityID, producedBy string
 	var payload json.RawMessage

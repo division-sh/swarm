@@ -113,8 +113,8 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 	if forkStatus != "paused" || forkedFromRun != sourceRunID || forkedFromEvent != secondEventID {
 		t.Fatalf("fork run = status:%s from:%s event:%s", forkStatus, forkedFromRun, forkedFromEvent)
 	}
-	if forkBundleHash != "" || forkBundleSource != "legacy" || forkBundleFingerprint != "" {
-		t.Fatalf("fork bundle identity = hash:%q source:%q fingerprint:%q, want legacy without copied fingerprint", forkBundleHash, forkBundleSource, forkBundleFingerprint)
+	if forkBundleHash != "" || forkBundleSource != "legacy" || forkBundleFingerprint != "bundle-source-fingerprint" {
+		t.Fatalf("fork bundle identity = hash:%q source:%q fingerprint:%q, want legacy with compatibility fingerprint", forkBundleHash, forkBundleSource, forkBundleFingerprint)
 	}
 	var sourceStatus string
 	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, sourceRunID).Scan(&sourceStatus); err != nil {

@@ -593,8 +593,8 @@ func assertEventPublishPersistence(t *testing.T, db *sql.DB, runID, eventID, eve
 	if runStatus != "running" || triggerType != eventName || triggerID != eventID {
 		t.Fatalf("run row status=%q trigger=%q/%q, want running/%s/%s", runStatus, triggerType, triggerID, eventName, eventID)
 	}
-	if bundleHash != "" || bundleSource != "legacy" || legacyFingerprint != "" {
-		t.Fatalf("run row bundle identity = hash:%q source:%q fingerprint:%q, want legacy without copied fingerprint", bundleHash, bundleSource, legacyFingerprint)
+	if bundleHash != "" || bundleSource != "legacy" || legacyFingerprint != runStartTestFingerprint {
+		t.Fatalf("run row bundle identity = hash:%q source:%q fingerprint:%q, want legacy with compatibility fingerprint %q", bundleHash, bundleSource, legacyFingerprint, runStartTestFingerprint)
 	}
 	var entityID, gotProducedBy string
 	var payload json.RawMessage
