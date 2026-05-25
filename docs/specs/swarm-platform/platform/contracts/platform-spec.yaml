@@ -11361,6 +11361,28 @@ api_specification:
             type: array
             items:
               type: string
+      EVENT_PUBLISH_FAILED:
+        type: object
+        additionalProperties: false
+        required:
+        - event_name
+        - event_id
+        - run_id
+        - phase
+        - reason
+        properties:
+          event_name:
+            type: string
+          event_id:
+            $ref: '#/components/schemas/OpaqueId'
+          run_id:
+            $ref: '#/components/schemas/OpaqueId'
+          phase:
+            type: string
+            enum:
+            - publish
+          reason:
+            type: string
       PAYLOAD_VALIDATION_FAILED:
         type: object
         additionalProperties: false
@@ -11835,6 +11857,7 @@ api_specification:
       - BUNDLE_MISMATCH
       - UNSUPPORTED_BUNDLE_REF
       - EVENT_NOT_DECLARED
+      - EVENT_PUBLISH_FAILED
       - PAYLOAD_VALIDATION_FAILED
       - RUN_NOT_FOUND
       - EVENT_NOT_FOUND

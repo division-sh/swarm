@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -382,6 +383,7 @@ func mutatingHTTPRuntimeErrorProbes() []mutatingHTTPRuntimeErrorProbe {
 		{Method: "event.publish", Params: mergeProbeParams(validEvent, map[string]any{"bundle_ref": map[string]any{"fingerprint": badFingerprint}}), Code: BundleMismatchCode},
 		{Method: "event.publish", Params: mergeProbeParams(validEvent, map[string]any{"bundle_ref": map[string]any{"label": "latest"}}), Code: UnsupportedBundleRefCode},
 		{Method: "event.publish", Params: mergeProbeParams(validEvent, map[string]any{"event_name": "scan.missing"}), Code: EventNotDeclaredCode},
+		{Method: "event.publish", Params: validEvent, Code: EventPublishFailedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.events.publishErr = errors.New("simulated publish failure") }}},
 		{Method: "event.publish", Params: validEvent, Code: PayloadValidationFailedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.events.publishErr = runtimebus.ErrPayloadValidation }}},
 		{Method: "event.publish", Params: mergeProbeParams(validEvent, map[string]any{"run_id": missingRunID}), Code: RunNotFoundCode},
 		{Method: "event.publish", Params: mergeProbeParams(validEvent, map[string]any{"run_id": runID, "source_event_id": "00000000-0000-0000-0000-000000000998"}), Code: EventNotFoundCode},

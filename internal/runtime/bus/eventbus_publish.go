@@ -489,13 +489,15 @@ func (eb *EventBus) publishTransactional(
 		if len(inboundPlan.Recipients) > 0 {
 			eb.logQueuedDeliveries(ctx, evt, inboundPlan.PersistedRecipients, "matched_agent_subscription", inboundPlan.ExtraDetail)
 			if err := eb.deliverToRecipientsWithRoutes(ctx, evt, inboundPlan.Recipients, inboundPlan.DeliveryRoutes); err != nil {
-				return err
+				eb.recordCommittedPublishReceipt(ctx, evt, err)
+				return nil
 			}
 			eb.logDelivery(ctx, evt, inboundPlan.Recipients, inboundPlan.ExtraDetail)
 		}
 		if inboundPlan.BlockedByCycle && inboundPlan.CycleEscalation != nil {
 			if err := eb.publishDeferred(ctx, *inboundPlan.CycleEscalation); err != nil {
-				return err
+				eb.recordCommittedPublishReceipt(ctx, evt, err)
+				return nil
 			}
 		}
 		if strings.TrimSpace(inboundPlan.ContradictionReason) != "" {
@@ -506,14 +508,17 @@ func (eb *EventBus) publishTransactional(
 
 	for _, d := range deferred {
 		if err := eb.publishDeferred(ctx, d); err != nil {
-			return err
+			eb.recordCommittedPublishReceipt(ctx, evt, err)
+			return nil
 		}
 	}
-	status, errText := pipelineReceiptStatus(txctx, nil)
-	if err := txStore.UpsertPipelineReceiptTx(ctx, nil, evt.ID, status, errText); err != nil {
-		return fmt.Errorf("persist pipeline receipt: %w", err)
-	}
+	eb.recordCommittedPublishReceipt(ctx, evt, nil)
 	return nil
+}
+
+func (eb *EventBus) recordCommittedPublishReceipt(ctx context.Context, evt events.Event, publishErr error) {
+	status, errText := pipelineReceiptStatus(ctx, publishErr)
+	_ = eb.markPipelineReceipt(ctx, evt.ID, status, errText)
 }
 
 func txTableExists(ctx context.Context, tx *sql.Tx, table string) bool {

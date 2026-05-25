@@ -263,7 +263,7 @@
           }
         },
         {
-          "code": -32008,
+          "code": -32009,
           "message": "Application error: EVENT_REPLAY_NO_DELIVERY_HISTORY",
           "data": {
             "additionalProperties": false,
@@ -301,7 +301,7 @@
           }
         },
         {
-          "code": -32009,
+          "code": -32010,
           "message": "Application error: EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL",
           "data": {
             "additionalProperties": false,
@@ -356,7 +356,7 @@
           }
         },
         {
-          "code": -32010,
+          "code": -32011,
           "message": "Application error: EVENT_REPLAY_SUBSCRIBER_UNAVAILABLE",
           "data": {
             "additionalProperties": false,
@@ -416,7 +416,7 @@
           }
         },
         {
-          "code": -32007,
+          "code": -32008,
           "message": "Application error: EVENT_REPLAY_NOT_ELIGIBLE",
           "data": {
             "additionalProperties": false,
@@ -470,7 +470,7 @@
           }
         },
         {
-          "code": -32018,
+          "code": -32019,
           "message": "Application error: PAYLOAD_VALIDATION_FAILED",
           "data": {
             "additionalProperties": false,
@@ -528,7 +528,7 @@
           }
         },
         {
-          "code": -32012,
+          "code": -32013,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -669,7 +669,7 @@
           }
         },
         {
-          "code": -32012,
+          "code": -32013,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -795,7 +795,7 @@
           }
         },
         {
-          "code": -32012,
+          "code": -32013,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -1015,7 +1015,7 @@
           }
         },
         {
-          "code": -32024,
+          "code": -32025,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -1053,7 +1053,7 @@
           }
         },
         {
-          "code": -32023,
+          "code": -32024,
           "message": "Application error: RUN_ALREADY_TERMINAL",
           "data": {
             "additionalProperties": false,
@@ -1156,7 +1156,7 @@
           }
         },
         {
-          "code": -32012,
+          "code": -32013,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -1319,7 +1319,7 @@
       },
       "errors": [
         {
-          "code": -32026,
+          "code": -32027,
           "message": "Application error: SESSION_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -1357,7 +1357,7 @@
           }
         },
         {
-          "code": -32027,
+          "code": -32028,
           "message": "Application error: TURN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -1438,7 +1438,7 @@
           }
         },
         {
-          "code": -32012,
+          "code": -32013,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -1526,7 +1526,7 @@
       },
       "errors": [
         {
-          "code": -32011,
+          "code": -32012,
           "message": "Application error: FORK_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -1564,7 +1564,7 @@
           }
         },
         {
-          "code": -32012,
+          "code": -32013,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -1697,7 +1697,7 @@
       },
       "errors": [
         {
-          "code": -32011,
+          "code": -32012,
           "message": "Application error: FORK_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -1757,7 +1757,7 @@
       },
       "errors": [
         {
-          "code": -32026,
+          "code": -32027,
           "message": "Application error: SESSION_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -1834,7 +1834,7 @@
       },
       "errors": [
         {
-          "code": -32026,
+          "code": -32027,
           "message": "Application error: SESSION_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -1872,7 +1872,7 @@
           }
         },
         {
-          "code": -32027,
+          "code": -32028,
           "message": "Application error: TURN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -2388,7 +2388,7 @@
           }
         },
         {
-          "code": -32028,
+          "code": -32029,
           "message": "Application error: UNSUPPORTED_BUNDLE_REF",
           "data": {
             "additionalProperties": false,
@@ -2467,7 +2467,64 @@
           }
         },
         {
-          "code": -32018,
+          "code": -32007,
+          "message": "Application error: EVENT_PUBLISH_FAILED",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "EVENT_PUBLISH_FAILED",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "event_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "event_name": {
+                    "type": "string"
+                  },
+                  "phase": {
+                    "enum": [
+                      "publish"
+                    ],
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "run_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "event_name",
+                  "event_id",
+                  "run_id",
+                  "phase",
+                  "reason"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32019,
           "message": "Application error: PAYLOAD_VALIDATION_FAILED",
           "data": {
             "additionalProperties": false,
@@ -2525,7 +2582,7 @@
           }
         },
         {
-          "code": -32024,
+          "code": -32025,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -2601,7 +2658,7 @@
           }
         },
         {
-          "code": -32023,
+          "code": -32024,
           "message": "Application error: RUN_ALREADY_TERMINAL",
           "data": {
             "additionalProperties": false,
@@ -2643,7 +2700,7 @@
           }
         },
         {
-          "code": -32012,
+          "code": -32013,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -2780,7 +2837,7 @@
           }
         },
         {
-          "code": -32008,
+          "code": -32009,
           "message": "Application error: EVENT_REPLAY_NO_DELIVERY_HISTORY",
           "data": {
             "additionalProperties": false,
@@ -2818,7 +2875,7 @@
           }
         },
         {
-          "code": -32009,
+          "code": -32010,
           "message": "Application error: EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL",
           "data": {
             "additionalProperties": false,
@@ -2873,7 +2930,7 @@
           }
         },
         {
-          "code": -32010,
+          "code": -32011,
           "message": "Application error: EVENT_REPLAY_SUBSCRIBER_UNAVAILABLE",
           "data": {
             "additionalProperties": false,
@@ -2933,7 +2990,7 @@
           }
         },
         {
-          "code": -32007,
+          "code": -32008,
           "message": "Application error: EVENT_REPLAY_NOT_ELIGIBLE",
           "data": {
             "additionalProperties": false,
@@ -2987,7 +3044,7 @@
           }
         },
         {
-          "code": -32018,
+          "code": -32019,
           "message": "Application error: PAYLOAD_VALIDATION_FAILED",
           "data": {
             "additionalProperties": false,
@@ -3045,7 +3102,7 @@
           }
         },
         {
-          "code": -32012,
+          "code": -32013,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -3226,7 +3283,7 @@
       },
       "errors": [
         {
-          "code": -32016,
+          "code": -32017,
           "message": "Application error: MAILBOX_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -3264,7 +3321,7 @@
           }
         },
         {
-          "code": -32014,
+          "code": -32015,
           "message": "Application error: MAILBOX_ALREADY_DECIDED",
           "data": {
             "additionalProperties": false,
@@ -3316,7 +3373,7 @@
           }
         },
         {
-          "code": -32015,
+          "code": -32016,
           "message": "Application error: MAILBOX_APPROVAL_EVENT_UNCONFIGURED",
           "data": {
             "additionalProperties": false,
@@ -3358,7 +3415,7 @@
           }
         },
         {
-          "code": -32012,
+          "code": -32013,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -3453,7 +3510,7 @@
       },
       "errors": [
         {
-          "code": -32016,
+          "code": -32017,
           "message": "Application error: MAILBOX_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -3491,7 +3548,7 @@
           }
         },
         {
-          "code": -32014,
+          "code": -32015,
           "message": "Application error: MAILBOX_ALREADY_DECIDED",
           "data": {
             "additionalProperties": false,
@@ -3543,7 +3600,7 @@
           }
         },
         {
-          "code": -32013,
+          "code": -32014,
           "message": "Application error: INVALID_DEFER_UNTIL",
           "data": {
             "additionalProperties": false,
@@ -3588,7 +3645,7 @@
           }
         },
         {
-          "code": -32012,
+          "code": -32013,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -3669,7 +3726,7 @@
       },
       "errors": [
         {
-          "code": -32016,
+          "code": -32017,
           "message": "Application error: MAILBOX_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -3824,7 +3881,7 @@
       },
       "errors": [
         {
-          "code": -32016,
+          "code": -32017,
           "message": "Application error: MAILBOX_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -3862,7 +3919,7 @@
           }
         },
         {
-          "code": -32014,
+          "code": -32015,
           "message": "Application error: MAILBOX_ALREADY_DECIDED",
           "data": {
             "additionalProperties": false,
@@ -3914,7 +3971,7 @@
           }
         },
         {
-          "code": -32012,
+          "code": -32013,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -4022,7 +4079,7 @@
       },
       "errors": [
         {
-          "code": -32024,
+          "code": -32025,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -4060,7 +4117,7 @@
           }
         },
         {
-          "code": -32025,
+          "code": -32026,
           "message": "Application error: RUN_NOT_PAUSED",
           "data": {
             "additionalProperties": false,
@@ -4102,7 +4159,7 @@
           }
         },
         {
-          "code": -32012,
+          "code": -32013,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -4183,7 +4240,7 @@
       },
       "errors": [
         {
-          "code": -32024,
+          "code": -32025,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -4252,7 +4309,7 @@
       },
       "errors": [
         {
-          "code": -32024,
+          "code": -32025,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -4385,7 +4442,7 @@
       },
       "errors": [
         {
-          "code": -32024,
+          "code": -32025,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -4423,7 +4480,7 @@
           }
         },
         {
-          "code": -32023,
+          "code": -32024,
           "message": "Application error: RUN_ALREADY_TERMINAL",
           "data": {
             "additionalProperties": false,
@@ -4465,7 +4522,7 @@
           }
         },
         {
-          "code": -32022,
+          "code": -32023,
           "message": "Application error: RUN_ALREADY_PAUSED",
           "data": {
             "additionalProperties": false,
@@ -4503,7 +4560,7 @@
           }
         },
         {
-          "code": -32012,
+          "code": -32013,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -4670,7 +4727,7 @@
           }
         },
         {
-          "code": -32028,
+          "code": -32029,
           "message": "Application error: UNSUPPORTED_BUNDLE_REF",
           "data": {
             "additionalProperties": false,
@@ -4749,7 +4806,7 @@
           }
         },
         {
-          "code": -32018,
+          "code": -32019,
           "message": "Application error: PAYLOAD_VALIDATION_FAILED",
           "data": {
             "additionalProperties": false,
@@ -4807,7 +4864,7 @@
           }
         },
         {
-          "code": -32012,
+          "code": -32013,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -4895,7 +4952,7 @@
       },
       "errors": [
         {
-          "code": -32024,
+          "code": -32025,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -4933,7 +4990,7 @@
           }
         },
         {
-          "code": -32023,
+          "code": -32024,
           "message": "Application error: RUN_ALREADY_TERMINAL",
           "data": {
             "additionalProperties": false,
@@ -4975,7 +5032,7 @@
           }
         },
         {
-          "code": -32012,
+          "code": -32013,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -5075,7 +5132,7 @@
       },
       "errors": [
         {
-          "code": -32024,
+          "code": -32025,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -5176,7 +5233,7 @@
       },
       "errors": [
         {
-          "code": -32024,
+          "code": -32025,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -5440,7 +5497,7 @@
       },
       "errors": [
         {
-          "code": -32021,
+          "code": -32022,
           "message": "Application error: RUNTIME_NUKE_IN_PROGRESS",
           "data": {
             "additionalProperties": false,
@@ -5478,7 +5535,7 @@
           }
         },
         {
-          "code": -32012,
+          "code": -32013,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -5559,7 +5616,7 @@
       },
       "errors": [
         {
-          "code": -32019,
+          "code": -32020,
           "message": "Application error: RUNTIME_ALREADY_PAUSED",
           "data": {
             "additionalProperties": false,
@@ -5590,7 +5647,7 @@
           }
         },
         {
-          "code": -32012,
+          "code": -32013,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -5671,7 +5728,7 @@
       },
       "errors": [
         {
-          "code": -32020,
+          "code": -32021,
           "message": "Application error: RUNTIME_NOT_PAUSED",
           "data": {
             "additionalProperties": false,
@@ -5702,7 +5759,7 @@
           }
         },
         {
-          "code": -32012,
+          "code": -32013,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -8434,8 +8491,65 @@
           "type": "object"
         }
       },
-      "EVENT_REPLAY_NOT_ELIGIBLE": {
+      "EVENT_PUBLISH_FAILED": {
         "code": -32007,
+        "message": "Application error: EVENT_PUBLISH_FAILED",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "EVENT_PUBLISH_FAILED",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "properties": {
+                "event_id": {
+                  "$ref": "#/components/schemas/OpaqueId"
+                },
+                "event_name": {
+                  "type": "string"
+                },
+                "phase": {
+                  "enum": [
+                    "publish"
+                  ],
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "run_id": {
+                  "$ref": "#/components/schemas/OpaqueId"
+                }
+              },
+              "required": [
+                "event_name",
+                "event_id",
+                "run_id",
+                "phase",
+                "reason"
+              ],
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "EVENT_REPLAY_NOT_ELIGIBLE": {
+        "code": -32008,
         "message": "Application error: EVENT_REPLAY_NOT_ELIGIBLE",
         "data": {
           "additionalProperties": false,
@@ -8489,7 +8603,7 @@
         }
       },
       "EVENT_REPLAY_NO_DELIVERY_HISTORY": {
-        "code": -32008,
+        "code": -32009,
         "message": "Application error: EVENT_REPLAY_NO_DELIVERY_HISTORY",
         "data": {
           "additionalProperties": false,
@@ -8527,7 +8641,7 @@
         }
       },
       "EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL": {
-        "code": -32009,
+        "code": -32010,
         "message": "Application error: EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL",
         "data": {
           "additionalProperties": false,
@@ -8582,7 +8696,7 @@
         }
       },
       "EVENT_REPLAY_SUBSCRIBER_UNAVAILABLE": {
-        "code": -32010,
+        "code": -32011,
         "message": "Application error: EVENT_REPLAY_SUBSCRIBER_UNAVAILABLE",
         "data": {
           "additionalProperties": false,
@@ -8642,7 +8756,7 @@
         }
       },
       "FORK_NOT_FOUND": {
-        "code": -32011,
+        "code": -32012,
         "message": "Application error: FORK_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -8680,7 +8794,7 @@
         }
       },
       "IDEMPOTENCY_CONFLICT": {
-        "code": -32012,
+        "code": -32013,
         "message": "Application error: IDEMPOTENCY_CONFLICT",
         "data": {
           "additionalProperties": false,
@@ -8739,7 +8853,7 @@
         }
       },
       "INVALID_DEFER_UNTIL": {
-        "code": -32013,
+        "code": -32014,
         "message": "Application error: INVALID_DEFER_UNTIL",
         "data": {
           "additionalProperties": false,
@@ -8784,7 +8898,7 @@
         }
       },
       "MAILBOX_ALREADY_DECIDED": {
-        "code": -32014,
+        "code": -32015,
         "message": "Application error: MAILBOX_ALREADY_DECIDED",
         "data": {
           "additionalProperties": false,
@@ -8836,7 +8950,7 @@
         }
       },
       "MAILBOX_APPROVAL_EVENT_UNCONFIGURED": {
-        "code": -32015,
+        "code": -32016,
         "message": "Application error: MAILBOX_APPROVAL_EVENT_UNCONFIGURED",
         "data": {
           "additionalProperties": false,
@@ -8878,7 +8992,7 @@
         }
       },
       "MAILBOX_NOT_FOUND": {
-        "code": -32016,
+        "code": -32017,
         "message": "Application error: MAILBOX_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -8916,7 +9030,7 @@
         }
       },
       "METHOD_UNAVAILABLE": {
-        "code": -32017,
+        "code": -32018,
         "message": "Application error: METHOD_UNAVAILABLE",
         "data": {
           "additionalProperties": false,
@@ -8954,7 +9068,7 @@
         }
       },
       "PAYLOAD_VALIDATION_FAILED": {
-        "code": -32018,
+        "code": -32019,
         "message": "Application error: PAYLOAD_VALIDATION_FAILED",
         "data": {
           "additionalProperties": false,
@@ -9012,7 +9126,7 @@
         }
       },
       "RUNTIME_ALREADY_PAUSED": {
-        "code": -32019,
+        "code": -32020,
         "message": "Application error: RUNTIME_ALREADY_PAUSED",
         "data": {
           "additionalProperties": false,
@@ -9043,7 +9157,7 @@
         }
       },
       "RUNTIME_NOT_PAUSED": {
-        "code": -32020,
+        "code": -32021,
         "message": "Application error: RUNTIME_NOT_PAUSED",
         "data": {
           "additionalProperties": false,
@@ -9074,7 +9188,7 @@
         }
       },
       "RUNTIME_NUKE_IN_PROGRESS": {
-        "code": -32021,
+        "code": -32022,
         "message": "Application error: RUNTIME_NUKE_IN_PROGRESS",
         "data": {
           "additionalProperties": false,
@@ -9112,7 +9226,7 @@
         }
       },
       "RUN_ALREADY_PAUSED": {
-        "code": -32022,
+        "code": -32023,
         "message": "Application error: RUN_ALREADY_PAUSED",
         "data": {
           "additionalProperties": false,
@@ -9150,7 +9264,7 @@
         }
       },
       "RUN_ALREADY_TERMINAL": {
-        "code": -32023,
+        "code": -32024,
         "message": "Application error: RUN_ALREADY_TERMINAL",
         "data": {
           "additionalProperties": false,
@@ -9192,7 +9306,7 @@
         }
       },
       "RUN_NOT_FOUND": {
-        "code": -32024,
+        "code": -32025,
         "message": "Application error: RUN_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -9230,7 +9344,7 @@
         }
       },
       "RUN_NOT_PAUSED": {
-        "code": -32025,
+        "code": -32026,
         "message": "Application error: RUN_NOT_PAUSED",
         "data": {
           "additionalProperties": false,
@@ -9272,7 +9386,7 @@
         }
       },
       "SESSION_NOT_FOUND": {
-        "code": -32026,
+        "code": -32027,
         "message": "Application error: SESSION_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -9310,7 +9424,7 @@
         }
       },
       "TURN_NOT_FOUND": {
-        "code": -32027,
+        "code": -32028,
         "message": "Application error: TURN_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -9353,7 +9467,7 @@
         }
       },
       "UNSUPPORTED_BUNDLE_REF": {
-        "code": -32028,
+        "code": -32029,
         "message": "Application error: UNSUPPORTED_BUNDLE_REF",
         "data": {
           "additionalProperties": false,
