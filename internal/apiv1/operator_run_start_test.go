@@ -18,6 +18,7 @@ import (
 )
 
 const runStartTestFingerprint = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+const runStartTestBundleHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 func TestOperatorRunStartHandlersPersistRootEventAndReplayIdempotency(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
@@ -107,6 +108,24 @@ func TestOperatorRunStartHandlersPersistBootFingerprintWhenBundleRefOmitted(t *t
 	assertRunStartPersistence(t, db, runID, "scan.requested", runStartTestFingerprint)
 }
 
+func TestOperatorRunStartHandlersAcceptCanonicalBundleHash(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	handler := runStartTestHandler(t, pg, bus, source)
+	runID := uuid.NewString()
+
+	started := rpcCall(t, handler, runStartBodyWithBundleHash(runID, runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "idem-start-hash"))
+	if started.Error != nil {
+		t.Fatalf("run.start error = %#v", started.Error)
+	}
+	assertRunStartPersistence(t, db, runID, "scan.requested", runStartTestFingerprint)
+}
+
 func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 	t.Run("bundle mismatch", func(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
@@ -146,6 +165,48 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		}
 		if data := asMap(t, resp.Error.Data); data["code"] != UnsupportedBundleRefCode {
 			t.Fatalf("unsupported bundle ref data = %#v", data)
+		}
+		assertNoRunStartPersistence(t, db, runID)
+	})
+
+	t.Run("invalid canonical bundle hash", func(t *testing.T) {
+		_, db, _ := testutil.StartPostgres(t)
+		pg := &store.PostgresStore{DB: db}
+		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+		if err != nil {
+			t.Fatalf("NewEventBusWithOptions: %v", err)
+		}
+		handler := runStartTestHandler(t, pg, bus, source)
+		runID := uuid.NewString()
+
+		resp := rpcCall(t, handler, runStartBodyWithBundleHash(runID, "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "scan.requested", `{"topic":"medicine"}`, "idem-invalid-bundle-hash"))
+		if resp.Error == nil {
+			t.Fatal("run.start invalid bundle_hash error = nil")
+		}
+		if data := asMap(t, resp.Error.Data); data["code"] != UnsupportedBundleHashCode {
+			t.Fatalf("unsupported bundle hash data = %#v", data)
+		}
+		assertNoRunStartPersistence(t, db, runID)
+	})
+
+	t.Run("canonical and legacy bundle params conflict", func(t *testing.T) {
+		_, db, _ := testutil.StartPostgres(t)
+		pg := &store.PostgresStore{DB: db}
+		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+		if err != nil {
+			t.Fatalf("NewEventBusWithOptions: %v", err)
+		}
+		handler := runStartTestHandler(t, pg, bus, source)
+		runID := uuid.NewString()
+
+		resp := rpcCall(t, handler, runStartBodyWithBothBundleInputs(runID, runStartTestBundleHash, runStartTestFingerprint, "scan.requested", `{"topic":"medicine"}`, "idem-bundle-conflict"))
+		if resp.Error == nil {
+			t.Fatal("run.start bundle input conflict error = nil")
+		}
+		if data := asMap(t, resp.Error.Data); data["code"] != UnsupportedBundleHashCode {
+			t.Fatalf("bundle input conflict data = %#v", data)
 		}
 		assertNoRunStartPersistence(t, db, runID)
 	})
@@ -321,6 +382,29 @@ func runStartTestHandler(t *testing.T, pg *store.PostgresStore, bus *runtimebus.
 func runStartBody(runID, fingerprint, eventName, payload, idempotencyKey string) string {
 	return fmt.Sprintf(
 		`{"jsonrpc":"2.0","id":"start","method":"run.start","params":{"bundle_ref":{"fingerprint":%q},"event_name":%q,"payload":%s,"run_id":%q,"idempotency_key":%q}}`,
+		fingerprint,
+		eventName,
+		payload,
+		runID,
+		idempotencyKey,
+	)
+}
+
+func runStartBodyWithBundleHash(runID, bundleHash, eventName, payload, idempotencyKey string) string {
+	return fmt.Sprintf(
+		`{"jsonrpc":"2.0","id":"start","method":"run.start","params":{"bundle_hash":%q,"event_name":%q,"payload":%s,"run_id":%q,"idempotency_key":%q}}`,
+		bundleHash,
+		eventName,
+		payload,
+		runID,
+		idempotencyKey,
+	)
+}
+
+func runStartBodyWithBothBundleInputs(runID, bundleHash, fingerprint, eventName, payload, idempotencyKey string) string {
+	return fmt.Sprintf(
+		`{"jsonrpc":"2.0","id":"start","method":"run.start","params":{"bundle_hash":%q,"bundle_ref":{"fingerprint":%q},"event_name":%q,"payload":%s,"run_id":%q,"idempotency_key":%q}}`,
+		bundleHash,
 		fingerprint,
 		eventName,
 		payload,

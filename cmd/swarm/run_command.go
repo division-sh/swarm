@@ -37,6 +37,7 @@ type runCommandOptions struct {
 	connectURL        string
 	noFollow          bool
 	reattachRunID     string
+	bundleHash        string
 	bundleFingerprint string
 	contractsPath     string
 	platformSpecPath  string
@@ -94,6 +95,7 @@ func newRunCommand(repo string, rootOpts rootCommandOptions) *cobra.Command {
 	cmd.Flags().StringVar(&opts.connectURL, "connect", "", "Existing Swarm API base URL")
 	cmd.Flags().BoolVar(&opts.noFollow, "no-follow", false, "Start through a connected server and print the run id without opening a trace subscription")
 	cmd.Flags().StringVar(&opts.reattachRunID, "reattach", "", "Existing run id to reattach to")
+	cmd.Flags().StringVar(&opts.bundleHash, "bundle-hash", "", "Expected server canonical bundle hash")
 	cmd.Flags().StringVar(&opts.bundleFingerprint, "bundle-fingerprint", "", "Expected server bundle fingerprint")
 	cmd.Flags().StringVar(&opts.contractsPath, "contracts", "", "Path to Swarm contract bundle root for local foreground startup")
 	cmd.Flags().StringVar(&opts.platformSpecPath, "platform-spec", "", "Path to platform spec yaml for local foreground startup")
@@ -168,6 +170,10 @@ func runRunCommand(ctx context.Context, repo string, out, errOut io.Writer, opts
 		fmt.Fprintf(errOut, "bundle fingerprint mismatch: server=%s expected=%s\n", health.Bundle.Fingerprint, expected)
 		return commandExitError{code: 6}
 	}
+	if expected := strings.TrimSpace(opts.bundleHash); expected != "" && cliLegacyFingerprintFromBundleHash(expected) != health.Bundle.Fingerprint {
+		fmt.Fprintf(errOut, "bundle hash mismatch: server=%s expected=%s\n", health.Bundle.Fingerprint, expected)
+		return commandExitError{code: 6}
+	}
 	traceReplaySince := time.Now().UTC()
 	start, err := runCommandStart(ctx, client, health, opts, payload)
 	if err != nil {
@@ -192,6 +198,27 @@ func (o runCommandOptions) validate() error {
 	if o.mcpPort < 0 || o.mcpPort > 65535 {
 		return fmt.Errorf("--mcp-port must be between 1 and 65535")
 	}
+	if o.changedFlags["bundle-hash"] && o.changedFlags["bundle-fingerprint"] {
+		return fmt.Errorf("--bundle-hash is mutually exclusive with --bundle-fingerprint")
+	}
+	if o.changedFlags["bundle-hash"] {
+		bundleHash := strings.TrimSpace(o.bundleHash)
+		if bundleHash == "" {
+			return fmt.Errorf("--bundle-hash must be non-empty")
+		}
+		if !cliBundleHashPattern.MatchString(bundleHash) {
+			return fmt.Errorf("--bundle-hash must be bundle-v1:sha256:<64 lowercase hex>")
+		}
+	}
+	if o.changedFlags["bundle-fingerprint"] {
+		fingerprint := strings.TrimSpace(o.bundleFingerprint)
+		if fingerprint == "" {
+			return fmt.Errorf("--bundle-fingerprint must be non-empty")
+		}
+		if !cliBundleFingerprintPattern.MatchString(fingerprint) {
+			return fmt.Errorf("--bundle-fingerprint must be sha256:<64 lowercase hex>")
+		}
+	}
 	if o.changedFlags["mcp-port"] {
 		return fmt.Errorf("--mcp-port is not supported until the serve owner can bind MCP explicitly")
 	}
@@ -214,7 +241,7 @@ func (o runCommandOptions) validate() error {
 		if strings.TrimSpace(o.eventName) != "" || strings.TrimSpace(o.payloadPath) != "" || strings.TrimSpace(o.idempotencyKey) != "" || strings.TrimSpace(o.runID) != "" {
 			return fmt.Errorf("--reattach is mutually exclusive with --event, --payload, --idempotency-key, and --run-id")
 		}
-		for _, flag := range []string{"bundle-fingerprint", "contracts", "platform-spec", "api-port", "mcp-port"} {
+		for _, flag := range []string{"bundle-hash", "bundle-fingerprint", "contracts", "platform-spec", "api-port", "mcp-port"} {
 			if o.changedFlags[flag] {
 				return fmt.Errorf("--reattach is mutually exclusive with --%s", flag)
 			}
@@ -407,13 +434,15 @@ func runCommandHealth(ctx context.Context, client *cliAPIClient) (diagnosticHeal
 	return result, nil
 }
 
-func runCommandStart(ctx context.Context, client *cliAPIClient, health diagnosticHealthCheckResult, opts runCommandOptions, payload map[string]any) (runStartResult, error) {
+func runCommandStart(ctx context.Context, client *cliAPIClient, _ diagnosticHealthCheckResult, opts runCommandOptions, payload map[string]any) (runStartResult, error) {
 	params := map[string]any{
-		"bundle_ref": map[string]any{
-			"fingerprint": health.Bundle.Fingerprint,
-		},
 		"event_name": strings.TrimSpace(opts.eventName),
 		"payload":    payload,
+	}
+	if bundleHash := strings.TrimSpace(opts.bundleHash); bundleHash != "" {
+		params["bundle_hash"] = bundleHash
+	} else if fingerprint := strings.TrimSpace(opts.bundleFingerprint); fingerprint != "" {
+		params["bundle_ref"] = map[string]any{"fingerprint": fingerprint}
 	}
 	if runID := strings.TrimSpace(opts.runID); runID != "" {
 		params["run_id"] = runID
@@ -683,7 +712,7 @@ func runCommandTerminalExit(status string) error {
 func runCommandErrorExitCode(err error) int {
 	return cliAPIErrorExitCode(err, cliAPIErrorClassifier{
 		notFoundCodes: []string{"RUN_NOT_FOUND"},
-		conflictCodes: []string{"BUNDLE_MISMATCH", "UNSUPPORTED_BUNDLE_REF", "IDEMPOTENCY_CONFLICT"},
+		conflictCodes: []string{"BUNDLE_MISMATCH", "UNSUPPORTED_BUNDLE_HASH", "UNSUPPORTED_BUNDLE_REF", "IDEMPOTENCY_CONFLICT"},
 	})
 }
 

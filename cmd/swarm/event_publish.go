@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"regexp"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -20,19 +19,19 @@ const (
 	eventPublishExitRejected   = 6
 )
 
-var eventPublishBundleFingerprintPattern = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
-
 type eventPublishCommandOptions struct {
 	apiOptions           rootCommandOptions
 	payloadJSON          string
 	runID                string
 	sourceEventID        string
+	bundleHash           string
 	bundleFingerprint    string
 	emitter              string
 	idempotencyKey       string
 	payloadJSONSet       bool
 	runIDSet             bool
 	sourceEventIDSet     bool
+	bundleHashSet        bool
 	bundleFingerprintSet bool
 	emitterSet           bool
 	idempotencyKeySet    bool
@@ -63,6 +62,7 @@ func newEventPublishCommand(opts rootCommandOptions) *cobra.Command {
 			publishOpts.payloadJSONSet = cmd.Flags().Changed("payload-json")
 			publishOpts.runIDSet = cmd.Flags().Changed("run-id")
 			publishOpts.sourceEventIDSet = cmd.Flags().Changed("source-event-id")
+			publishOpts.bundleHashSet = cmd.Flags().Changed("bundle-hash")
 			publishOpts.bundleFingerprintSet = cmd.Flags().Changed("bundle-fingerprint")
 			publishOpts.emitterSet = cmd.Flags().Changed("emitter")
 			publishOpts.idempotencyKeySet = cmd.Flags().Changed("idempotency-key")
@@ -72,6 +72,7 @@ func newEventPublishCommand(opts rootCommandOptions) *cobra.Command {
 	cmd.Flags().StringVar(&publishOpts.payloadJSON, "payload-json", "", "Required JSON object payload")
 	cmd.Flags().StringVar(&publishOpts.runID, "run-id", "", "Optional existing nonterminal run id to inject into")
 	cmd.Flags().StringVar(&publishOpts.sourceEventID, "source-event-id", "", "Optional same-run parent event id for checkpoint lineage")
+	cmd.Flags().StringVar(&publishOpts.bundleHash, "bundle-hash", "", "Optional expected server canonical bundle hash")
 	cmd.Flags().StringVar(&publishOpts.bundleFingerprint, "bundle-fingerprint", "", "Optional expected server bundle fingerprint")
 	cmd.Flags().StringVar(&publishOpts.emitter, "emitter", "", "Optional producer identifier")
 	cmd.Flags().StringVar(&publishOpts.idempotencyKey, "idempotency-key", "", "Optional v1 API idempotency key")
@@ -138,10 +139,24 @@ func (opts eventPublishCommandOptions) params(args []string) (string, map[string
 		}
 		params["source_event_id"] = sourceEventID
 	}
-	if fingerprint, err := optionalNonEmptyFlag("--bundle-fingerprint", opts.bundleFingerprint, opts.bundleFingerprintSet); err != nil {
+	bundleHash, err := optionalNonEmptyFlag("--bundle-hash", opts.bundleHash, opts.bundleHashSet)
+	if err != nil {
 		return "", nil, err
+	}
+	fingerprint, err := optionalNonEmptyFlag("--bundle-fingerprint", opts.bundleFingerprint, opts.bundleFingerprintSet)
+	if err != nil {
+		return "", nil, err
+	}
+	if bundleHash != "" && fingerprint != "" {
+		return "", nil, fmt.Errorf("--bundle-hash is mutually exclusive with --bundle-fingerprint")
+	}
+	if bundleHash != "" {
+		if !cliBundleHashPattern.MatchString(bundleHash) {
+			return "", nil, fmt.Errorf("--bundle-hash must be bundle-v1:sha256:<64 lowercase hex>")
+		}
+		params["bundle_hash"] = bundleHash
 	} else if fingerprint != "" {
-		if !eventPublishBundleFingerprintPattern.MatchString(fingerprint) {
+		if !cliBundleFingerprintPattern.MatchString(fingerprint) {
 			return "", nil, fmt.Errorf("--bundle-fingerprint must be sha256:<64 lowercase hex>")
 		}
 		params["bundle_ref"] = map[string]any{"fingerprint": fingerprint}
@@ -267,6 +282,7 @@ func eventPublishErrorExitCode(err error) int {
 		notFoundCodes: []string{"RUN_NOT_FOUND", "EVENT_NOT_FOUND"},
 		conflictCodes: []string{
 			"BUNDLE_MISMATCH",
+			"UNSUPPORTED_BUNDLE_HASH",
 			"UNSUPPORTED_BUNDLE_REF",
 			"EVENT_NOT_DECLARED",
 			"PAYLOAD_VALIDATION_FAILED",

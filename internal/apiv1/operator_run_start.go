@@ -17,10 +17,18 @@ import (
 const runStartIDempotencyTTL = 24 * time.Hour
 
 var sha256FingerprintPattern = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
+var bundleHashPattern = regexp.MustCompile(`^bundle-v1:sha256:[a-f0-9]{64}$`)
+
+const bundleHashPrefix = "bundle-v1:"
 
 type runStartResult struct {
 	RunID  string `json:"run_id"`
 	Status string `json:"status"`
+}
+
+type bundleIdentityParam struct {
+	BundleHash        string
+	LegacyFingerprint string
 }
 
 func OperatorRunStartHandlers(opts OperatorReadOptions) map[string]MethodHandler {
@@ -68,11 +76,34 @@ func executeRunStart(ctx context.Context, req Request, opts OperatorReadOptions,
 	return stored, nil
 }
 
-func bundleFingerprintParam(params map[string]any) (string, error) {
+func bundleIdentityInputParam(params map[string]any) (bundleIdentityParam, error) {
 	if params == nil {
-		return "", nil
+		return bundleIdentityParam{}, nil
 	}
-	raw, ok := params["bundle_ref"]
+	rawHash, hashSet := params["bundle_hash"]
+	rawRef, refSet := params["bundle_ref"]
+	if hashSet && refSet {
+		return bundleIdentityParam{}, NewApplicationError(UnsupportedBundleHashCode, false, map[string]any{"reason": "bundle_hash cannot be combined with legacy bundle_ref"})
+	}
+	if hashSet {
+		hash, ok := rawHash.(string)
+		hash = strings.TrimSpace(hash)
+		if !ok || hash == "" {
+			return bundleIdentityParam{}, NewApplicationError(UnsupportedBundleHashCode, false, map[string]any{"reason": "bundle_hash must be bundle-v1:sha256:<64 lowercase hex>"})
+		}
+		if !bundleHashPattern.MatchString(hash) {
+			return bundleIdentityParam{}, NewApplicationError(UnsupportedBundleHashCode, false, map[string]any{"reason": "bundle_hash must be bundle-v1:sha256:<64 lowercase hex>"})
+		}
+		return bundleIdentityParam{BundleHash: hash}, nil
+	}
+	fingerprint, err := legacyBundleFingerprintParam(rawRef, refSet)
+	if err != nil {
+		return bundleIdentityParam{}, err
+	}
+	return bundleIdentityParam{LegacyFingerprint: fingerprint}, nil
+}
+
+func legacyBundleFingerprintParam(raw any, ok bool) (string, error) {
 	if !ok || isEmptyParam(raw) {
 		return "", nil
 	}
@@ -92,6 +123,28 @@ func bundleFingerprintParam(params map[string]any) (string, error) {
 		return "", NewApplicationError(UnsupportedBundleRefCode, false, map[string]any{"reason": "bundle_ref.fingerprint must be sha256:<64 lowercase hex>"})
 	}
 	return fingerprint, nil
+}
+
+func (p bundleIdentityParam) compatibilityFingerprint() string {
+	if p.LegacyFingerprint != "" {
+		return p.LegacyFingerprint
+	}
+	if p.BundleHash != "" {
+		return strings.TrimPrefix(p.BundleHash, bundleHashPrefix)
+	}
+	return ""
+}
+
+func (p bundleIdentityParam) mismatchDetails(bootFingerprint string) map[string]any {
+	details := map[string]any{
+		"boot_fingerprint": strings.TrimSpace(bootFingerprint),
+	}
+	if p.BundleHash != "" {
+		details["provided_bundle_hash"] = p.BundleHash
+		return details
+	}
+	details["provided_fingerprint"] = p.LegacyFingerprint
+	return details
 }
 
 func runStartPayloadEntityID(value any) (string, bool, error) {
