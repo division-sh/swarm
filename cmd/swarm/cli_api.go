@@ -166,27 +166,46 @@ type cliServeListenerAddressOptions struct {
 }
 
 func resolveCLIServeListenerAddresses(opts cliServeListenerAddressOptions) (string, string, error) {
+	apiAddr, apiResolved := resolveCLIServeListenerAddressHighPriority(
+		opts.APIListenAddr,
+		opts.APIListenAddrFlagSet,
+		cliServeAPIListenAddrEnv,
+	)
+	mcpAddr, mcpResolved := resolveCLIServeListenerAddressHighPriority(
+		opts.MCPListenAddr,
+		opts.MCPListenAddrFlagSet,
+		cliServeMCPListenAddrEnv,
+	)
+	if apiResolved && mcpResolved {
+		return apiAddr, mcpAddr, nil
+	}
 	cfg, err := loadCLIAPIConfigFile()
 	if err != nil {
 		return "", "", err
 	}
-	apiAddr := defaultAPIListenAddr
-	if opts.APIListenAddrFlagSet {
-		apiAddr = opts.APIListenAddr
-	} else if env := strings.TrimSpace(os.Getenv(cliServeAPIListenAddrEnv)); env != "" {
-		apiAddr = env
-	} else if config := strings.TrimSpace(cfg.ServeAPIListenAddr); config != "" {
-		apiAddr = config
+	if !apiResolved {
+		apiAddr = defaultAPIListenAddr
+		if config := strings.TrimSpace(cfg.ServeAPIListenAddr); config != "" {
+			apiAddr = config
+		}
 	}
-	mcpAddr := defaultMCPListenAddr
-	if opts.MCPListenAddrFlagSet {
-		mcpAddr = opts.MCPListenAddr
-	} else if env := strings.TrimSpace(os.Getenv(cliServeMCPListenAddrEnv)); env != "" {
-		mcpAddr = env
-	} else if config := strings.TrimSpace(cfg.ServeMCPListenAddr); config != "" {
-		mcpAddr = config
+	if !mcpResolved {
+		mcpAddr = defaultMCPListenAddr
+		if config := strings.TrimSpace(cfg.ServeMCPListenAddr); config != "" {
+			mcpAddr = config
+		}
 	}
 	return apiAddr, mcpAddr, nil
+}
+
+func resolveCLIServeListenerAddressHighPriority(flagValue string, flagSet bool, envName string) (string, bool) {
+	if flagSet {
+		return flagValue, true
+	}
+	if env := strings.TrimSpace(os.Getenv(envName)); env != "" {
+		return env, true
+	}
+	return "", false
 }
 
 func readCLIAPITokenFile(tokenFile, source string) (string, error) {

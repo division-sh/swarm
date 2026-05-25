@@ -540,6 +540,97 @@ func TestCLI_ServeRuntimeConfigDoesNotFeedListenerConfig(t *testing.T) {
 	}
 }
 
+func TestCLI_ServeListenAddrHigherPrecedenceSourcesSkipCLIConfig(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		setup     func(t *testing.T)
+		wantAPI   string
+		wantMCP   string
+		wantRan   bool
+		wantError string
+	}{
+		{
+			name: "both flags skip missing explicit cli config",
+			args: []string{"serve", "--api-listen-addr", "127.0.0.1:9401", "--mcp-listen-addr", "127.0.0.1:9402"},
+			setup: func(t *testing.T) {
+				t.Setenv("SWARM_CONFIG", filepath.Join(t.TempDir(), "missing.yaml"))
+				t.Setenv("SWARM_API_LISTEN_ADDR", "8081")
+				t.Setenv("SWARM_MCP_LISTEN_ADDR", "http://127.0.0.1:8082")
+			},
+			wantAPI: "127.0.0.1:9401",
+			wantMCP: "127.0.0.1:9402",
+			wantRan: true,
+		},
+		{
+			name: "both env vars skip malformed cli config",
+			args: []string{"serve"},
+			setup: func(t *testing.T) {
+				configPath := filepath.Join(t.TempDir(), "config.yaml")
+				if err := os.WriteFile(configPath, []byte("serve_api_listen_addr: [\n"), 0o600); err != nil {
+					t.Fatalf("write config: %v", err)
+				}
+				t.Setenv("SWARM_CONFIG", configPath)
+				t.Setenv("SWARM_API_LISTEN_ADDR", "127.0.0.1:9501")
+				t.Setenv("SWARM_MCP_LISTEN_ADDR", "127.0.0.1:9502")
+			},
+			wantAPI: "127.0.0.1:9501",
+			wantMCP: "127.0.0.1:9502",
+			wantRan: true,
+		},
+		{
+			name: "partial env still loads cli config for unresolved listener",
+			args: []string{"serve"},
+			setup: func(t *testing.T) {
+				t.Setenv("SWARM_CONFIG", filepath.Join(t.TempDir(), "missing.yaml"))
+				t.Setenv("SWARM_API_LISTEN_ADDR", "127.0.0.1:9601")
+			},
+			wantError: "read SWARM_CONFIG",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateCLIAPIConfigEnv(t)
+			tc.setup(t)
+			var captured serveOptions
+			ran := false
+			opts := defaultRootCommandOptions()
+			opts.runServe = func(_ context.Context, _ string, serveOpts serveOptions) int {
+				captured = serveOpts
+				ran = true
+				return 0
+			}
+
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), tc.args, &stdout, &stderr, opts)
+			if tc.wantError != "" {
+				if code != 2 {
+					t.Fatalf("serve code = %d, want 2\nstdout=%s\nstderr=%s", code, stdout.String(), stderr.String())
+				}
+				if !strings.Contains(stderr.String(), tc.wantError) {
+					t.Fatalf("serve stderr missing %q:\n%s", tc.wantError, stderr.String())
+				}
+				if ran {
+					t.Fatal("serve runtime started after required CLI config load failed")
+				}
+				return
+			}
+			if code != 0 {
+				t.Fatalf("serve code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+			}
+			if ran != tc.wantRan {
+				t.Fatalf("runtime ran = %v, want %v", ran, tc.wantRan)
+			}
+			if captured.APIListenAddr != tc.wantAPI {
+				t.Fatalf("api listen addr = %q, want %q", captured.APIListenAddr, tc.wantAPI)
+			}
+			if captured.MCPListenAddr != tc.wantMCP {
+				t.Fatalf("mcp listen addr = %q, want %q", captured.MCPListenAddr, tc.wantMCP)
+			}
+		})
+	}
+}
+
 func TestCLI_ServeDevFlagComposesClosedServeOwners(t *testing.T) {
 	var captured serveOptions
 	opts := defaultRootCommandOptions()
