@@ -193,6 +193,44 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	}
 }
 
+func TestGeneratedOpenRPCBundleIdentityDescriptionsPreserveConstraints(t *testing.T) {
+	artifactPath := filepath.Join(repoRoot(t), "docs", "specs", "swarm-platform", "platform", "contracts", "openrpc.json")
+	artifact, err := os.ReadFile(artifactPath)
+	if err != nil {
+		t.Fatalf("read openrpc artifact: %v", err)
+	}
+	var doc OpenRPCDocument
+	if err := json.Unmarshal(artifact, &doc); err != nil {
+		t.Fatalf("unmarshal openrpc artifact: %v", err)
+	}
+	methods := map[string]OpenRPCMethod{}
+	for _, method := range doc.Methods {
+		methods[method.Name] = method
+	}
+	for _, methodName := range []string{"event.publish", "run.start"} {
+		method, ok := methods[methodName]
+		if !ok {
+			t.Fatalf("generated OpenRPC missing %s", methodName)
+		}
+		params := map[string]ContentDescriptor{}
+		for _, param := range method.Params {
+			params[param.Name] = param
+		}
+		assertOpenRPCParamDescriptionContains(t, methodName, params, "bundle_hash",
+			"#1001",
+			"bundle-v1:sha256:<64 lowercase hex>",
+			"cannot be combined with legacy bundle_ref",
+			"UNSUPPORTED_BUNDLE_HASH",
+		)
+		assertOpenRPCParamDescriptionContains(t, methodName, params, "bundle_ref",
+			"#1001",
+			"bundle_ref.fingerprint",
+			"boot-fingerprint assertion path",
+			"cannot be combined with bundle_hash",
+		)
+	}
+}
+
 func TestMultiBundleSourceAuthorityStaysOutOfLiveOpenRPCUntilImplemented(t *testing.T) {
 	root := loadPlatformSpecYAMLNode(t)
 	multi := mustMappingValue(t, root, "multi_bundle_persistence")
@@ -893,6 +931,19 @@ func assertMethodDescriptionContains(t *testing.T, api *APISpecification, method
 	}
 	if !strings.Contains(method.Description, want) {
 		t.Fatalf("method %s description = %q, want substring %q", methodName, method.Description, want)
+	}
+}
+
+func assertOpenRPCParamDescriptionContains(t *testing.T, methodName string, params map[string]ContentDescriptor, paramName string, wants ...string) {
+	t.Helper()
+	param, ok := params[paramName]
+	if !ok {
+		t.Fatalf("generated OpenRPC %s missing param %s", methodName, paramName)
+	}
+	for _, want := range wants {
+		if !strings.Contains(param.Description, want) {
+			t.Fatalf("generated OpenRPC %s.%s description = %q, want substring %q", methodName, paramName, param.Description, want)
+		}
 	}
 }
 

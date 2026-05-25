@@ -2419,7 +2419,7 @@
         {
           "name": "bundle_hash",
           "required": false,
-          "description": "Optional canonical bundle identity assertion name reserved by",
+          "description": "Optional canonical bundle identity assertion name reserved by #1001. Must be bundle-v1:sha256:\u003c64 lowercase hex\u003e, cannot be combined with legacy bundle_ref, and currently fails closed with UNSUPPORTED_BUNDLE_HASH until canonical runtime source facts are promoted.",
           "schema": {
             "$ref": "#/components/schemas/BundleHash"
           }
@@ -2427,7 +2427,7 @@
         {
           "name": "bundle_ref",
           "required": false,
-          "description": "Deprecated transition alias during",
+          "description": "Deprecated transition alias during #1001. Carries bundle_ref.fingerprint only, remains the current operational boot-fingerprint assertion path, and cannot be combined with bundle_hash.",
           "schema": {
             "$ref": "#/components/schemas/BundleRef"
           }
@@ -4804,7 +4804,7 @@
         {
           "name": "bundle_hash",
           "required": false,
-          "description": "Optional canonical bundle identity assertion name reserved by",
+          "description": "Optional canonical bundle identity assertion name reserved by #1001. Must be bundle-v1:sha256:\u003c64 lowercase hex\u003e, cannot be combined with legacy bundle_ref, and currently fails closed with UNSUPPORTED_BUNDLE_HASH until canonical runtime source facts are promoted.",
           "schema": {
             "$ref": "#/components/schemas/BundleHash"
           }
@@ -4812,7 +4812,7 @@
         {
           "name": "bundle_ref",
           "required": false,
-          "description": "Deprecated transition alias during",
+          "description": "Deprecated transition alias during #1001. Carries bundle_ref.fingerprint only, remains the current operational boot-fingerprint assertion path, and cannot be combined with bundle_hash.",
           "schema": {
             "$ref": "#/components/schemas/BundleRef"
           }
