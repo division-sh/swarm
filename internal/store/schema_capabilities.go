@@ -25,6 +25,8 @@ type EventSchemaCapabilities struct {
 	RunTriggerColumns    bool
 	RunCounterColumns    bool
 	RunTerminalFields    bool
+	RunBundleHash        bool
+	RunBundleSource      bool
 	RunBundleFingerprint bool
 	LogRunID             bool
 	DeliveryRunID        bool
@@ -203,6 +205,8 @@ func detectStoreSchemaCapabilities(catalog schemaColumnCatalog) StoreSchemaCapab
 		RunTriggerColumns:    catalog.hasColumns("runs", "trigger_event_id", "trigger_event_type"),
 		RunCounterColumns:    catalog.hasColumns("runs", "event_count", "entity_count"),
 		RunTerminalFields:    catalog.hasColumns("runs", "error_summary", "ended_at"),
+		RunBundleHash:        catalog.hasColumns("runs", "bundle_hash"),
+		RunBundleSource:      catalog.hasColumns("runs", "bundle_source"),
 		RunBundleFingerprint: catalog.hasColumns("runs", "bundle_fingerprint"),
 		LogRunID:             catalog.hasColumns("events", "run_id"),
 		DeliveryRunID:        catalog.hasColumns("event_deliveries", "run_id"),

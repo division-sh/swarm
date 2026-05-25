@@ -264,7 +264,7 @@ func TestOperatorAgentSendDirectivePersistsDirectiveEventOnceOnReplay(t *testing
 	}
 }
 
-func TestOperatorAgentSendDirectivePersistsRunBundleFingerprint(t *testing.T) {
+func TestOperatorAgentSendDirectiveUsesLegacyRunBundleSourceUntilSourceStampingOwnerLands(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	pg := &store.PostgresStore{DB: db}
@@ -299,7 +299,7 @@ func TestOperatorAgentSendDirectivePersistsRunBundleFingerprint(t *testing.T) {
 	if newRunID == "" {
 		t.Fatalf("new-run directive result = %#v", first.Result)
 	}
-	assertRunBundleFingerprint(t, db, newRunID, bootFingerprint)
+	assertRunBundleIdentity(t, db, newRunID, "", "legacy", "")
 
 	existingRunID := "00000000-0000-0000-0000-000000000755"
 	if _, err := db.Exec(`
@@ -312,7 +312,7 @@ func TestOperatorAgentSendDirectivePersistsRunBundleFingerprint(t *testing.T) {
 	if explicit.Error != nil {
 		t.Fatalf("existing-run directive error = %#v", explicit.Error)
 	}
-	assertRunBundleFingerprint(t, db, existingRunID, existingFingerprint)
+	assertRunBundleIdentity(t, db, existingRunID, "", "legacy", existingFingerprint)
 }
 
 func TestOperatorAgentControlHandlersRestrictAgentNotRunningToSendDirective(t *testing.T) {
@@ -471,13 +471,18 @@ func countDirectiveEvents(t *testing.T, db *sql.DB) int {
 	return count
 }
 
-func assertRunBundleFingerprint(t *testing.T, db *sql.DB, runID, want string) {
+func assertRunBundleIdentity(t *testing.T, db *sql.DB, runID, wantHash, wantSource, wantLegacyFingerprint string) {
 	t.Helper()
-	var got string
-	if err := db.QueryRow(`SELECT COALESCE(bundle_fingerprint, '') FROM runs WHERE run_id = $1::uuid`, runID).Scan(&got); err != nil {
-		t.Fatalf("load run bundle fingerprint: %v", err)
+	var gotHash, gotSource, gotLegacyFingerprint string
+	if err := db.QueryRow(`
+		SELECT COALESCE(bundle_hash, ''), bundle_source, COALESCE(bundle_fingerprint, '')
+		FROM runs
+		WHERE run_id = $1::uuid
+	`, runID).Scan(&gotHash, &gotSource, &gotLegacyFingerprint); err != nil {
+		t.Fatalf("load run bundle identity: %v", err)
 	}
-	if got != want {
-		t.Fatalf("run %s bundle_fingerprint = %q, want %q", runID, got, want)
+	if gotHash != wantHash || gotSource != wantSource || gotLegacyFingerprint != wantLegacyFingerprint {
+		t.Fatalf("run %s bundle identity = hash:%q source:%q fingerprint:%q, want hash:%q source:%q fingerprint:%q",
+			runID, gotHash, gotSource, gotLegacyFingerprint, wantHash, wantSource, wantLegacyFingerprint)
 	}
 }

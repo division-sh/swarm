@@ -49,16 +49,16 @@ func TestSelectedContractExecutionMaterializationAllowsSelectedPendingNodeFronti
 	if materialized.ForkRunID == "" || materialized.SelectedContractBinding == nil || !materialized.DeliveryResumeBlocked {
 		t.Fatalf("materialization = %#v", materialized)
 	}
-	var forkBundleFingerprint string
+	var forkBundleHash, forkBundleSource, forkBundleFingerprint string
 	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(bundle_fingerprint, '')
+		SELECT COALESCE(bundle_hash, ''), bundle_source, COALESCE(bundle_fingerprint, '')
 		FROM runs
 		WHERE run_id = $1::uuid
-	`, materialized.ForkRunID).Scan(&forkBundleFingerprint); err != nil {
-		t.Fatalf("load selected fork bundle fingerprint: %v", err)
+	`, materialized.ForkRunID).Scan(&forkBundleHash, &forkBundleSource, &forkBundleFingerprint); err != nil {
+		t.Fatalf("load selected fork bundle identity: %v", err)
 	}
-	if forkBundleFingerprint != "selected-source-fingerprint" {
-		t.Fatalf("selected fork bundle_fingerprint = %q, want source fingerprint", forkBundleFingerprint)
+	if forkBundleHash != "" || forkBundleSource != "legacy" || forkBundleFingerprint != "" {
+		t.Fatalf("selected fork bundle identity = hash:%q source:%q fingerprint:%q, want legacy without copied fingerprint", forkBundleHash, forkBundleSource, forkBundleFingerprint)
 	}
 	var replayRows int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_delivery_event_replays WHERE fork_run_id = $1::uuid`, materialized.ForkRunID).Scan(&replayRows); err != nil {

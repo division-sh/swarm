@@ -5602,6 +5602,68 @@ func TestManagerStore_LoadAgentsSpec_FailsClosedWhenOpaqueConfigContainsRuntimeK
 	}
 }
 
+func TestPostgresStore_EnsureSchemaCompatibilityColumnsAddsMultiBundleRunColumnsAsLegacy(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	runID := uuid.NewString()
+
+	if _, err := db.ExecContext(ctx, `DROP TABLE IF EXISTS runs CASCADE`); err != nil {
+		t.Fatalf("drop canonical runs table: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE runs (
+			run_id UUID PRIMARY KEY,
+			status TEXT NOT NULL DEFAULT 'running',
+			bundle_fingerprint TEXT
+		)
+	`); err != nil {
+		t.Fatalf("create legacy runs table: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, bundle_fingerprint)
+		VALUES ($1::uuid, 'running', 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
+	`, runID); err != nil {
+		t.Fatalf("seed legacy run row: %v", err)
+	}
+
+	if err := pg.ensureSchemaCompatibilityColumns(ctx); err != nil {
+		t.Fatalf("ensureSchemaCompatibilityColumns: %v", err)
+	}
+
+	var bundleHash sql.NullString
+	var bundleSource string
+	if err := db.QueryRowContext(ctx, `
+		SELECT bundle_hash, bundle_source
+		FROM runs
+		WHERE run_id = $1::uuid
+	`, runID).Scan(&bundleHash, &bundleSource); err != nil {
+		t.Fatalf("load migrated run row: %v", err)
+	}
+	if bundleHash.Valid {
+		t.Fatalf("bundle_hash = %q, want NULL for legacy row", bundleHash.String)
+	}
+	if bundleSource != "legacy" {
+		t.Fatalf("bundle_source = %q, want legacy", bundleSource)
+	}
+	var fkCount int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM pg_constraint
+		WHERE conrelid = 'runs'::regclass
+		  AND contype = 'f'
+		  AND pg_get_constraintdef(oid) LIKE '%bundle_hash%'
+	`).Scan(&fkCount); err != nil {
+		t.Fatalf("inspect bundle_hash foreign keys: %v", err)
+	}
+	if fkCount != 0 {
+		t.Fatalf("runs.bundle_hash foreign keys = %d, want none", fkCount)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, bundle_source) VALUES ($1::uuid, 'running', 'unsupported')`, uuid.NewString()); err == nil {
+		t.Fatal("insert unsupported bundle_source succeeded, want check constraint failure")
+	}
+}
+
 func TestManagerStore_LoadAgents_FailsClosedWhenCanonicalModelTierMissing(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}

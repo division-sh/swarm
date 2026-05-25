@@ -21,7 +21,7 @@ func TestPostgresStore_BindSchemaCapabilities_CanonicalOptionalVariants(t *testi
 		}
 	}
 
-	addColumns("runs", "run_id", "status", "bundle_fingerprint")
+	addColumns("runs", "run_id", "status", "bundle_hash", "bundle_source", "bundle_fingerprint")
 	addColumns("agents",
 		"agent_id", "flow_instance", "role", "model_tier", "llm_backend", "conversation_mode",
 		"parent_agent_id", "entity_id", "config", "subscriptions", "emit_events", "tools",
@@ -85,7 +85,7 @@ func TestPostgresStore_BindSchemaCapabilities_CanonicalOptionalVariants(t *testi
 	if caps.Agents != SchemaFlavorCanonical {
 		t.Fatalf("agents flavor = %s", caps.Agents)
 	}
-	if caps.Events.Log != SchemaFlavorCanonical || !caps.Events.LogRunID || !caps.Events.LogIdempotencyKey || !caps.Events.RunBundleFingerprint {
+	if caps.Events.Log != SchemaFlavorCanonical || !caps.Events.LogRunID || !caps.Events.LogIdempotencyKey || !caps.Events.RunBundleHash || !caps.Events.RunBundleSource || !caps.Events.RunBundleFingerprint {
 		t.Fatalf("events caps = %+v", caps.Events)
 	}
 	if caps.Events.Deliveries != SchemaFlavorCanonical || !caps.Events.DeliveryRunID {

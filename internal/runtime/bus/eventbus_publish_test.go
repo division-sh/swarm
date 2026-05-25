@@ -1004,7 +1004,7 @@ func TestEventBusPublishTransactional_RecordsTargetFailureDeadLetter(t *testing.
 	}
 }
 
-func TestEventBusPublish_PersistsBootBundleFingerprintThroughRunLifecycleOwner(t *testing.T) {
+func TestEventBusPublish_ClassifiesRunBundleSourceThroughRunLifecycleOwner(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
 	runID := uuid.NewString()
@@ -1025,12 +1025,16 @@ func TestEventBusPublish_PersistsBootBundleFingerprintThroughRunLifecycleOwner(t
 	}); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
-	var got string
-	if err := db.QueryRowContext(context.Background(), `SELECT COALESCE(bundle_fingerprint, '') FROM runs WHERE run_id = $1::uuid`, runID).Scan(&got); err != nil {
-		t.Fatalf("load run bundle fingerprint: %v", err)
+	var bundleHash, bundleSource, legacyFingerprint string
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT COALESCE(bundle_hash, ''), bundle_source, COALESCE(bundle_fingerprint, '')
+		FROM runs
+		WHERE run_id = $1::uuid
+	`, runID).Scan(&bundleHash, &bundleSource, &legacyFingerprint); err != nil {
+		t.Fatalf("load run bundle source: %v", err)
 	}
-	if got != fingerprint {
-		t.Fatalf("bundle_fingerprint = %q, want %q", got, fingerprint)
+	if bundleHash != "" || bundleSource != "legacy" || legacyFingerprint != "" {
+		t.Fatalf("bundle identity = hash:%q source:%q fingerprint:%q, want legacy without copied fingerprint", bundleHash, bundleSource, legacyFingerprint)
 	}
 }
 

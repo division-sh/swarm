@@ -582,15 +582,19 @@ func eventPublishBodyWithSource(runID, sourceEventID, fingerprint, eventName, pa
 
 func assertEventPublishPersistence(t *testing.T, db *sql.DB, runID, eventID, eventName, producedBy string) {
 	t.Helper()
-	var runStatus, triggerType, triggerID, persistedFingerprint string
-	if err := db.QueryRow(`SELECT status, trigger_event_type, trigger_event_id::text, COALESCE(bundle_fingerprint, '') FROM runs WHERE run_id = $1::uuid`, runID).Scan(&runStatus, &triggerType, &triggerID, &persistedFingerprint); err != nil {
+	var runStatus, triggerType, triggerID, bundleHash, bundleSource, legacyFingerprint string
+	if err := db.QueryRow(`
+		SELECT status, trigger_event_type, trigger_event_id::text, COALESCE(bundle_hash, ''), bundle_source, COALESCE(bundle_fingerprint, '')
+		FROM runs
+		WHERE run_id = $1::uuid
+	`, runID).Scan(&runStatus, &triggerType, &triggerID, &bundleHash, &bundleSource, &legacyFingerprint); err != nil {
 		t.Fatalf("load event.publish run row: %v", err)
 	}
 	if runStatus != "running" || triggerType != eventName || triggerID != eventID {
 		t.Fatalf("run row status=%q trigger=%q/%q, want running/%s/%s", runStatus, triggerType, triggerID, eventName, eventID)
 	}
-	if persistedFingerprint != runStartTestFingerprint {
-		t.Fatalf("run row bundle_fingerprint=%q, want %q", persistedFingerprint, runStartTestFingerprint)
+	if bundleHash != "" || bundleSource != "legacy" || legacyFingerprint != "" {
+		t.Fatalf("run row bundle identity = hash:%q source:%q fingerprint:%q, want legacy without copied fingerprint", bundleHash, bundleSource, legacyFingerprint)
 	}
 	var entityID, gotProducedBy string
 	var payload json.RawMessage

@@ -177,7 +177,7 @@ func TestPlatformSpecEntityStateUsesRunScopedIdentity(t *testing.T) {
 	}
 }
 
-func TestPlatformSpecRunsOwnsBundleFingerprint(t *testing.T) {
+func TestPlatformSpecOwnsMultiBundleSchemaFoundation(t *testing.T) {
 	_, file, _, _ := stdruntime.Caller(0)
 	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
 	raw, err := os.ReadFile(runtimecontracts.DefaultPlatformSpecFile(repoRoot))
@@ -193,18 +193,50 @@ func TestPlatformSpecRunsOwnsBundleFingerprint(t *testing.T) {
 		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
 	}
 	var runs SchemaTableDDL
+	var bundles SchemaTableDDL
 	for _, plan := range plans {
 		if plan.TableName == "runs" {
 			runs = plan
-			break
+		}
+		if plan.TableName == "bundles" {
+			bundles = plan
+		}
+	}
+	if bundles.TableName == "" {
+		t.Fatal("bundles ddl plan missing")
+	}
+	bundleDDL := strings.Join(bundles.Statements, "\n")
+	for _, want := range []string{
+		"bundle_hash      TEXT PRIMARY KEY",
+		"content_yaml     TEXT NOT NULL",
+		"parsed_json      JSONB NOT NULL",
+		"data_blob        BYTEA",
+		"metadata         JSONB NOT NULL",
+		"ingested_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()",
+		`CREATE INDEX IF NOT EXISTS "idx_bundles_ingested_at" ON "bundles"(ingested_at)`,
+	} {
+		if !strings.Contains(bundleDDL, want) {
+			t.Fatalf("bundles ddl missing %q:\n%s", want, bundleDDL)
 		}
 	}
 	if runs.TableName == "" {
 		t.Fatal("runs ddl plan missing")
 	}
 	joined := strings.Join(runs.Statements, "\n")
-	if !strings.Contains(joined, "bundle_fingerprint TEXT") {
-		t.Fatalf("runs ddl missing bundle_fingerprint:\n%s", joined)
+	for _, want := range []string{
+		"bundle_hash        TEXT CHECK",
+		"bundle_source      TEXT NOT NULL DEFAULT 'legacy'",
+		"bundle_fingerprint TEXT",
+		`CREATE INDEX IF NOT EXISTS "idx_runs_bundle_hash" ON "runs"(bundle_hash) WHERE bundle_hash IS NOT NULL`,
+		`CREATE INDEX IF NOT EXISTS "idx_runs_bundle_source_status" ON "runs"(bundle_source, status, started_at)`,
+		`CREATE INDEX IF NOT EXISTS "idx_runs_bundle_delete_planning" ON "runs"(bundle_hash, status) WHERE bundle_hash IS NOT NULL`,
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("runs ddl missing %q:\n%s", want, joined)
+		}
+	}
+	if strings.Contains(joined, "bundle_hash TEXT REFERENCES") || strings.Contains(joined, "FOREIGN KEY (bundle_hash)") {
+		t.Fatalf("runs ddl must not create a bundle_hash foreign key:\n%s", joined)
 	}
 }
 
