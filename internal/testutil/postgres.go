@@ -525,6 +525,12 @@ func bootstrapPlatformTableOrder(name string) int {
 		return 60
 	case "agent_turns":
 		return 65
+	case "conversation_forks":
+		return 66
+	case "conversation_fork_snapshots":
+		return 67
+	case "conversation_fork_turns":
+		return 68
 	case "routing_rules":
 		return 70
 	case "event_deliveries":

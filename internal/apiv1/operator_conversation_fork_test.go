@@ -16,17 +16,21 @@ type fakeConversationForkLifecycleStore struct {
 	listErr      error
 	viewResult   store.OperatorConversationForkSession
 	viewErr      error
+	chatResult   store.ConversationForkChatResult
+	chatErr      error
 	deleteResult store.ConversationForkDeleteResult
 	deleteErr    error
 
 	createCalls int
 	listCalls   int
 	viewCalls   int
+	chatCalls   int
 	deleteCalls int
 
 	lastCreate store.ConversationForkCreateRequest
 	lastList   store.ConversationForkListOptions
 	lastViewID string
+	lastChat   store.ConversationForkChatRequest
 	lastDelete string
 	lastNow    time.Time
 
@@ -55,6 +59,18 @@ func (s *fakeConversationForkLifecycleStore) LoadOperatorConversationFork(_ cont
 	s.viewCalls++
 	s.lastViewID = forkID
 	return s.viewResult, s.viewErr
+}
+
+func (s *fakeConversationForkLifecycleStore) ChatOperatorConversationFork(_ context.Context, req store.ConversationForkChatRequest) (store.ConversationForkChatResult, error) {
+	s.chatCalls++
+	s.lastChat = req
+	if s.chatErr != nil {
+		return store.ConversationForkChatResult{}, s.chatErr
+	}
+	if s.recordEffect != nil {
+		s.recordEffect()
+	}
+	return s.chatResult, nil
 }
 
 func (s *fakeConversationForkLifecycleStore) DeleteOperatorConversationFork(_ context.Context, forkID string, now time.Time) (store.ConversationForkDeleteResult, error) {
@@ -97,6 +113,36 @@ func TestOperatorConversationForkHandlersUseCanonicalOwnerAndIdempotency(t *test
 		createResult: fork,
 		listResult:   store.ConversationForkListResult{Forks: []store.OperatorConversationForkSession{fork}, NextCursor: "cursor-2"},
 		viewResult:   fork,
+		chatResult: store.ConversationForkChatResult{
+			ForkID: forkID,
+			Turn: store.OperatorConversationTurn{
+				TurnIndex:       1,
+				TurnID:          "00000000-0000-0000-0000-000000000402",
+				RequestPayload:  []byte(`{"message":"inspect"}`),
+				ResponsePayload: []byte(`{"message":"forkchat sandbox response: inspect"}`),
+				ParseOK:         true,
+			},
+			Snapshot: store.ConversationForkSnapshot{
+				ForkID:          forkID,
+				SourceSessionID: sourceSessionID,
+				SourceRunID:     "00000000-0000-0000-0000-000000000501",
+				SourceAgentID:   "agent-1",
+				SourceTurn: store.ConversationForkSourceTurn{
+					TurnID:     turnID,
+					TurnIndex:  2,
+					SelectedAt: created,
+					CreatedAt:  created,
+				},
+				EntitySnapshot: []store.ConversationForkEntitySnapshot{},
+				SnapshotOwner:  store.ConversationForkChatSnapshotOwner,
+				CreatedAt:      now,
+			},
+			SandboxPolicy: store.ConversationForkSandboxPolicy{
+				Owner:       store.ConversationForkChatSandboxOwner,
+				ReadPolicy:  "fork_snapshot_only",
+				WritePolicy: "stub_record_only_no_live_mutation",
+			},
+		},
 		deleteResult: store.ConversationForkDeleteResult{ForkID: forkID, Deleted: true},
 	}
 	handler := testHandler(t, Options{
@@ -155,6 +201,32 @@ func TestOperatorConversationForkHandlersUseCanonicalOwnerAndIdempotency(t *test
 	}
 	if forks.viewCalls != 1 || forks.lastViewID != forkID {
 		t.Fatalf("view owner call = calls %d fork_id %s", forks.viewCalls, forks.lastViewID)
+	}
+
+	chat := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"chat","method":"conversation.fork_chat","params":{"fork_id":"`+forkID+`","message":"inspect","idempotency_key":"chat-1"}}`)
+	if chat.Error != nil {
+		t.Fatalf("conversation.fork_chat error = %#v", chat.Error)
+	}
+	chatResult := asMap(t, chat.Result)
+	if chatResult["fork_id"] != forkID || chatResult["idempotency_replayed"] != false {
+		t.Fatalf("conversation.fork_chat result = %#v", chatResult)
+	}
+	if got := asMap(t, chatResult["snapshot"])["snapshot_owner"]; got != store.ConversationForkChatSnapshotOwner {
+		t.Fatalf("conversation.fork_chat snapshot owner = %#v", got)
+	}
+	if forks.chatCalls != 1 || forks.lastChat.ForkID != forkID || forks.lastChat.Message != "inspect" || !forks.lastChat.Now.Equal(now) {
+		t.Fatalf("chat owner call = calls %d req %#v", forks.chatCalls, forks.lastChat)
+	}
+
+	chatReplay := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"chat-replay","method":"conversation.fork_chat","params":{"fork_id":"`+forkID+`","message":"inspect","idempotency_key":"chat-1"}}`)
+	if chatReplay.Error != nil {
+		t.Fatalf("conversation.fork_chat replay error = %#v", chatReplay.Error)
+	}
+	if got := asMap(t, chatReplay.Result)["idempotency_replayed"]; got != true {
+		t.Fatalf("conversation.fork_chat replay idempotency_replayed = %#v, want true", got)
+	}
+	if forks.chatCalls != 1 {
+		t.Fatalf("conversation.fork_chat owner calls after replay = %d, want 1", forks.chatCalls)
 	}
 
 	deleted := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"delete","method":"conversation.fork_delete","params":{"fork_id":"`+forkID+`","idempotency_key":"delete-1"}}`)
@@ -218,6 +290,14 @@ func TestOperatorConversationForkHandlersTypedErrors(t *testing.T) {
 			method: "conversation.fork_view",
 			body:   `{"jsonrpc":"2.0","id":"err","method":"conversation.fork_view","params":{"fork_id":"` + forkID + `"}}`,
 			mutate: func(s *fakeConversationForkLifecycleStore) { s.viewErr = store.ErrConversationForkNotFound },
+			code:   ForkNotFoundCode,
+			detail: map[string]any{"fork_id": forkID},
+		},
+		{
+			name:   "chat missing fork",
+			method: "conversation.fork_chat",
+			body:   `{"jsonrpc":"2.0","id":"err","method":"conversation.fork_chat","params":{"fork_id":"` + forkID + `","message":"hello"}}`,
+			mutate: func(s *fakeConversationForkLifecycleStore) { s.chatErr = store.ErrConversationForkNotFound },
 			code:   ForkNotFoundCode,
 			detail: map[string]any{"fork_id": forkID},
 		},

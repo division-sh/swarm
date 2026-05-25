@@ -26,6 +26,8 @@ func DefaultPlatformCleanupCatalog() []CleanupCatalogEntry {
 		{Table: "agent_turns", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "agent_turns.run_id", DeleteOrderGroup: 3},
 		{Table: "agent_conversation_audits", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteMixedRowPolicy, PredicateOwner: "agent_conversation_audits.run_id", DeleteOrderGroup: 3},
 		{Table: "agent_sessions", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "agent_sessions.run_id", DeleteOrderGroup: 3},
+		{Table: "conversation_fork_snapshots", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteMixedRowPolicy, PredicateOwner: "conversation_fork_snapshots.fork_id -> conversation_forks.source_run_id", DeleteOrderGroup: 3},
+		{Table: "conversation_fork_turns", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteMixedRowPolicy, PredicateOwner: "conversation_fork_turns.fork_id -> conversation_forks.source_run_id", DeleteOrderGroup: 3},
 		{Table: "conversation_forks", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteMixedRowPolicy, PredicateOwner: "conversation_forks.source_run_id", DeleteOrderGroup: 3},
 		{Table: "entity_mutations", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "entity_mutations.run_id", DeleteOrderGroup: 3},
 		{Table: "entity_state", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "entity_state.run_id", DeleteOrderGroup: 3},

@@ -37,14 +37,16 @@ type EventSchemaCapabilities struct {
 }
 
 type ConversationSchemaCapabilities struct {
-	Sessions     SchemaFlavor
-	Audits       SchemaFlavor
-	Turns        SchemaFlavor
-	Forks        SchemaFlavor
-	SessionRunID bool
-	AuditRunID   bool
-	TurnRunID    bool
-	TurnBlocks   bool
+	Sessions      SchemaFlavor
+	Audits        SchemaFlavor
+	Turns         SchemaFlavor
+	Forks         SchemaFlavor
+	ForkSnapshots SchemaFlavor
+	ForkTurns     SchemaFlavor
+	SessionRunID  bool
+	AuditRunID    bool
+	TurnRunID     bool
+	TurnBlocks    bool
 }
 
 type StoreSchemaCapabilities struct {
@@ -250,6 +252,22 @@ func detectStoreSchemaCapabilities(catalog schemaColumnCatalog) StoreSchemaCapab
 				"fork_point_kind", "fork_point_turn_index", "fork_point_turn_id",
 				"fork_point_event_id", "fork_point_at", "fork_point_selected_at",
 				"created_by", "created_at", "expires_at", "deleted_at",
+			},
+			nil,
+		),
+		ForkSnapshots: detectSchemaFlavor(catalog, "conversation_fork_snapshots",
+			[]string{
+				"fork_id", "source_session_id", "source_run_id", "source_agent_id",
+				"fork_point_turn_id", "fork_point_turn_index", "fork_point_selected_at",
+				"source_turn", "entity_snapshot", "snapshot_owner", "created_at",
+			},
+			nil,
+		),
+		ForkTurns: detectSchemaFlavor(catalog, "conversation_fork_turns",
+			[]string{
+				"fork_turn_id", "fork_id", "turn_index", "actor_token_id", "message",
+				"assistant_message", "request_payload", "response_payload", "tool_calls",
+				"sandbox_policy", "snapshot_owner", "created_at",
 			},
 			nil,
 		),

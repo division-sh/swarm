@@ -255,6 +255,14 @@ func (s *PostgresStore) LoadOperatorConversationFork(ctx context.Context, forkID
 	if err != nil {
 		return OperatorConversationForkSession{}, err
 	}
+	if caps.Conversations.ForkTurns != SchemaFlavorCanonical {
+		return OperatorConversationForkSession{}, fmt.Errorf("store: conversation_fork_turns schema is unavailable")
+	}
+	turns, err := loadConversationForkTurns(ctx, s.DB, item.ForkID)
+	if err != nil {
+		return OperatorConversationForkSession{}, err
+	}
+	item.Turns = turns
 	return item, nil
 }
 
