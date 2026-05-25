@@ -3,6 +3,8 @@ processor:
   execution_type: system_node
   subscribes_to: [process.requested]
   produces: [process.done]
+  gate_state:
+    g_processed: gate set when processing succeeds
   event_handlers:
     process.requested:
       guard:

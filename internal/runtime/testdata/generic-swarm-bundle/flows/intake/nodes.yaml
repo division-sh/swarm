@@ -9,6 +9,8 @@ intake-router:
   produces:
     - item.processed
     - item.review_requested
+  gate_state:
+    intake_ready: gate set when intake is ready
   event_handlers:
     item.created:
       guard:

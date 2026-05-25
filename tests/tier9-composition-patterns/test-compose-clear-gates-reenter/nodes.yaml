@@ -3,6 +3,8 @@ reviewer:
   execution_type: system_node
   subscribes_to: [review.done, review.insufficient]
   produces: [review.approved, review.restarted]
+  gate_state:
+    g_reviewed: gate set when review is approved
   event_handlers:
     review.done:
       sets_gate: g_reviewed

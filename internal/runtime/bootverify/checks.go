@@ -291,7 +291,6 @@ func checkAgentPermissionValidation(c *checkerContext) []Finding {
 	return uniqueFindings(append(c.permissions(), c.permissionWarnings()...))
 }
 func checkPlatformMetadataValidation(c *checkerContext) []Finding  { return c.platformMetadata() }
-func checkGateSchemaValidation(c *checkerContext) []Finding        { return c.gateSchemaValidation() }
 func checkDeprecatedContractAlias(c *checkerContext) []Finding     { return c.deprecatedAliases() }
 func checkPromptSchemaGuardStructural(c *checkerContext) []Finding { return c.promptSchemaGuard() }
 func checkCrossSurfaceNamedTypeUse(c *checkerContext) []Finding {
@@ -384,34 +383,6 @@ func (c *checkerContext) platformMetadata() []Finding {
 		})
 	}
 	return c.platformMetaFindings
-}
-
-func (c *checkerContext) gateSchemaValidation() []Finding {
-	if c.gateSchemaLoaded {
-		return c.gateSchemaFindings
-	}
-	c.gateSchemaLoaded = true
-	nodes := c.source.NodeEntries()
-	for _, transition := range c.source.DerivedHandlerTransitions() {
-		if gate := gateNameLocal(transition.SetsGate); gate != "" {
-			node, ok := nodes[strings.TrimSpace(transition.NodeID)]
-			if !ok {
-				continue
-			}
-			validGates := stateSchemaGateNamesLocal(node.GateState)
-			if len(validGates) > 0 {
-				if _, ok := validGates[gate]; !ok {
-					c.gateSchemaFindings = append(c.gateSchemaFindings, Finding{
-						CheckID:  "gate_schema_validation",
-						Severity: "error",
-						Message:  fmt.Sprintf("handler transition %s sets_gate %s not recognized in node %s gate_state schema", transition.ID, gate, transition.NodeID),
-						Location: strings.TrimSpace(transition.ID),
-					})
-				}
-			}
-		}
-	}
-	return c.gateSchemaFindings
 }
 
 func platformVersionAtLeast(raw string, major, minor, patch int) bool {
@@ -2150,16 +2121,6 @@ func handlerPatternMatchesLocal(pattern, eventType string) bool {
 
 func routeMatchesLocal(pattern, eventType string) bool {
 	return eventidentity.MatchPattern(pattern, eventType)
-}
-
-func stateSchemaGateNamesLocal(schema runtimecontracts.NodeGateStateSchema) map[string]struct{} {
-	gates := map[string]struct{}{}
-	for _, f := range schema.Gates {
-		if strings.TrimSpace(f.Name) != "" {
-			gates[strings.TrimSpace(f.Name)] = struct{}{}
-		}
-	}
-	return gates
 }
 
 func stringValueLocal(v any) string {

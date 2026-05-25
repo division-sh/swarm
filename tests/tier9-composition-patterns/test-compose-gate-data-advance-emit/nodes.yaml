@@ -3,6 +3,9 @@ pipeline:
   execution_type: system_node
   subscribes_to: [stage.one_done, stage.two_done]
   produces: [stage.two_start, stage.complete]
+  gate_state:
+    g_stage_one: gate set when stage one completes
+    g_stage_two: gate set when stage two completes
   event_handlers:
     stage.one_done:
       sets_gate: g_stage_one

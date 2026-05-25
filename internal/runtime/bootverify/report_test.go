@@ -1238,6 +1238,75 @@ func TestRun_MapsConditionPayloadMismatchToNamedError(t *testing.T) {
 	}
 }
 
+func TestRun_MapsUnknownSetsGateToGateSchemaValidationError(t *testing.T) {
+	bundle := gateSchemaValidationBundle(runtimecontracts.NodeGateStateSchema{
+		Gates: []runtimecontracts.NodeGateField{{Name: "approved"}},
+	}, runtimecontracts.SystemNodeEventHandler{
+		SetsGate: &runtimecontracts.GateSpec{Name: "rejected", Value: true},
+	})
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "gate_schema_validation", "sets_gate rejected") {
+		t.Fatalf("expected gate_schema_validation error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_MapsMissingOrEmptyGateStateToGateSchemaValidationError(t *testing.T) {
+	cases := []struct {
+		name      string
+		gateState runtimecontracts.NodeGateStateSchema
+	}{
+		{name: "missing gate_state"},
+		{name: "empty gate_state", gateState: runtimecontracts.NodeGateStateSchema{Gates: []runtimecontracts.NodeGateField{}}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			bundle := gateSchemaValidationBundle(tc.gateState, runtimecontracts.SystemNodeEventHandler{
+				SetsGate: &runtimecontracts.GateSpec{Name: "approved", Value: true},
+			})
+
+			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+			if !reportContains(report.Errors(), "gate_schema_validation", "sets_gate approved") {
+				t.Fatalf("expected gate_schema_validation error, got %#v", report.Errors())
+			}
+		})
+	}
+}
+
+func TestRun_AllowsDeclaredSetsGateFromScalarAndStructuredForms(t *testing.T) {
+	cases := []struct {
+		name string
+		yaml string
+	}{
+		{
+			name: "scalar",
+			yaml: "sets_gate: approved\n",
+		},
+		{
+			name: "structured",
+			yaml: "sets_gate:\n  name: approved\n  value: true\n",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			handler := decodeGateSchemaHandler(t, tc.yaml)
+			bundle := gateSchemaValidationBundle(runtimecontracts.NodeGateStateSchema{
+				Gates: []runtimecontracts.NodeGateField{{Name: "approved"}},
+			}, handler)
+
+			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+			if reportContains(report.Errors(), "gate_schema_validation", "sets_gate approved") {
+				t.Fatalf("unexpected gate_schema_validation error, got %#v", report.Errors())
+			}
+		})
+	}
+}
+
 func TestRun_MapsEmptyEventPayloadSchemaConditionRefsToNamedError(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -5264,6 +5333,48 @@ func defaultFixtureYAML(contents string) string {
 		return contents
 	}
 	return contents + "\n"
+}
+
+func gateSchemaValidationBundle(gateState runtimecontracts.NodeGateStateSchema, handler runtimecontracts.SystemNodeEventHandler) *runtimecontracts.WorkflowContractBundle {
+	const (
+		nodeID    = "validate-task"
+		eventType = "task.requested"
+	)
+	node := runtimecontracts.SystemNodeContract{
+		ID:            nodeID,
+		ExecutionType: "system_node",
+		SubscribesTo:  []string{eventType},
+		GateState:     gateState,
+		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+			eventType: handler,
+		},
+	}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			eventType: {},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			nodeID: node,
+		},
+	}
+	bundle.Platform.Platform.Name = "swarm"
+	bundle.Platform.Platform.Version = "test"
+	bundle.Semantics.HandlerTransitions = []runtimecontracts.HandlerTransitionSemantic{{
+		ID:        nodeID + ":" + eventType,
+		NodeID:    nodeID,
+		EventType: eventType,
+		SetsGate:  handler.SetsGate,
+	}}
+	return bundle
+}
+
+func decodeGateSchemaHandler(t *testing.T, raw string) runtimecontracts.SystemNodeEventHandler {
+	t.Helper()
+	var handler runtimecontracts.SystemNodeEventHandler
+	if err := yaml.Unmarshal([]byte(raw), &handler); err != nil {
+		t.Fatalf("decode gate schema handler: %v", err)
+	}
+	return handler
 }
 
 func reportContains(items []Finding, checkID, contains string) bool {

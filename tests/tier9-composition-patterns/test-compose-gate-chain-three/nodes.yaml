@@ -3,6 +3,10 @@ pipeline:
   execution_type: system_node
   subscribes_to: [step.a_done, step.b_done, step.c_done]
   produces: [release.ready]
+  gate_state:
+    g_a: first gate in the release chain
+    g_b: second gate in the release chain
+    g_c: third gate in the release chain
   event_handlers:
     step.a_done:
       sets_gate: g_a

@@ -3,6 +3,8 @@ test-node:
   execution_type: system_node
   subscribes_to: [gate.requested]
   produces: [gate.set]
+  gate_state:
+    g1_check: gate set by the handler
   event_handlers:
     gate.requested:
       sets_gate: g1_check
