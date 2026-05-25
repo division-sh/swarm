@@ -2419,7 +2419,7 @@
         {
           "name": "bundle_hash",
           "required": false,
-          "description": "Optional canonical bundle identity assertion. Must be bundle-v1:sha256:\u003c64 lowercase hex\u003e and cannot be combined with legacy bundle_ref.",
+          "description": "Optional canonical bundle identity assertion name reserved by",
           "schema": {
             "$ref": "#/components/schemas/BundleHash"
           }
@@ -2427,7 +2427,7 @@
         {
           "name": "bundle_ref",
           "required": false,
-          "description": "Deprecated legacy alias for bundle_hash during",
+          "description": "Deprecated transition alias during",
           "schema": {
             "$ref": "#/components/schemas/BundleRef"
           }
@@ -2505,9 +2505,6 @@
                 "properties": {
                   "boot_fingerprint": {
                     "$ref": "#/components/schemas/Sha256Fingerprint"
-                  },
-                  "provided_bundle_hash": {
-                    "$ref": "#/components/schemas/BundleHash"
                   },
                   "provided_fingerprint": {
                     "$ref": "#/components/schemas/Sha256Fingerprint"
@@ -4802,12 +4799,12 @@
     {
       "name": "run.start",
       "deprecated": true,
-      "description": "Deprecated wrapper over event.publish retained for older Builder/API callers. New clients should call event.publish directly.\nStart a new run by injecting an event into the runtime bus.\nOptionally declares a canonical bundle_hash assertion; v1 runtime\nrequires it to match the orchestrator's boot-time\nbundle identity (or bundle_hash to be omitted, in which case the\nboot-time bundle is used). Per-run dynamic bundle loading is\ndeferred (see deferred_namespaces.bundle_lifecycle). Legacy\nbundle_ref.fingerprint is accepted only as a deprecated #1001\ntransition alias and cannot be combined with bundle_hash.\n",
+      "description": "Deprecated wrapper over event.publish retained for older Builder/API callers. New clients should call event.publish directly.\nStart a new run by injecting an event into the runtime bus.\nOptionally declares the canonical bundle_hash input name reserved\nby #1001. Until the canonical runtime source-fact owner is promoted,\nsupplied bundle_hash fails closed with UNSUPPORTED_BUNDLE_HASH rather\nthan being compared to the legacy boot fingerprint. If bundle_hash is\nomitted, the boot-time bundle is used. Per-run dynamic bundle loading is\ndeferred (see deferred_namespaces.bundle_lifecycle). Legacy\nbundle_ref.fingerprint remains the deprecated #1001\ntransition assertion path and cannot be combined with bundle_hash.\n",
       "params": [
         {
           "name": "bundle_hash",
           "required": false,
-          "description": "Optional canonical bundle identity assertion. Must be bundle-v1:sha256:\u003c64 lowercase hex\u003e and cannot be combined with legacy bundle_ref.",
+          "description": "Optional canonical bundle identity assertion name reserved by",
           "schema": {
             "$ref": "#/components/schemas/BundleHash"
           }
@@ -4815,7 +4812,7 @@
         {
           "name": "bundle_ref",
           "required": false,
-          "description": "Deprecated legacy alias for bundle_hash during",
+          "description": "Deprecated transition alias during",
           "schema": {
             "$ref": "#/components/schemas/BundleRef"
           }
@@ -4890,9 +4887,6 @@
                 "properties": {
                   "boot_fingerprint": {
                     "$ref": "#/components/schemas/Sha256Fingerprint"
-                  },
-                  "provided_bundle_hash": {
-                    "$ref": "#/components/schemas/BundleHash"
                   },
                   "provided_fingerprint": {
                     "$ref": "#/components/schemas/Sha256Fingerprint"
@@ -6461,7 +6455,7 @@
         "type": "string"
       },
       "BundleHash": {
-        "description": "Canonical v1 bundle identity. Public input surfaces use this shape for bundle_hash; legacy sha256:\u003chex\u003e fingerprints are not accepted under the bundle_hash name.",
+        "description": "Canonical v1 bundle identity. Public input surfaces use this shape for bundle_hash; legacy sha256:\u003chex\u003e fingerprints are not accepted under the bundle_hash name. Until the canonical source-fact owner is promoted, runtime identity assertions that supply bundle_hash fail closed with UNSUPPORTED_BUNDLE_HASH.",
         "pattern": "^bundle-v1:sha256:[a-f0-9]{64}$",
         "type": "string"
       },
@@ -6488,7 +6482,7 @@
       },
       "BundleRef": {
         "additionalProperties": false,
-        "description": "Deprecated legacy bundle reference accepted during the #1001 dual-accept transition. New callers use bundle_hash with BundleHash. BundleRef carries the legacy sha256 fingerprint only and cannot be combined with bundle_hash; doing so fails closed with UNSUPPORTED_BUNDLE_HASH before runtime/store mutation.\n",
+        "description": "Deprecated legacy bundle reference accepted during the #1001 dual-accept transition. New callers use bundle_hash with BundleHash shape once canonical source facts are available. BundleRef carries the legacy sha256 fingerprint only and cannot be combined with bundle_hash; doing so fails closed with UNSUPPORTED_BUNDLE_HASH before runtime/store mutation.\n",
         "properties": {
           "fingerprint": {
             "$ref": "#/components/schemas/Sha256Fingerprint"
@@ -8778,9 +8772,6 @@
               "properties": {
                 "boot_fingerprint": {
                   "$ref": "#/components/schemas/Sha256Fingerprint"
-                },
-                "provided_bundle_hash": {
-                  "$ref": "#/components/schemas/BundleHash"
                 },
                 "provided_fingerprint": {
                   "$ref": "#/components/schemas/Sha256Fingerprint"

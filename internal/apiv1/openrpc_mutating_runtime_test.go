@@ -295,8 +295,8 @@ func mutatingHTTPRuntimeFixtures() map[string]mutatingHTTPRuntimeFixture {
 			SuccessEffects: 1,
 		},
 		"event.publish": {
-			Params:         map[string]any{"bundle_hash": runStartTestBundleHash, "event_name": "scan.requested", "payload": map[string]any{"topic": "medicine"}},
-			ConflictParams: map[string]any{"bundle_hash": runStartTestBundleHash, "event_name": "scan.requested", "payload": map[string]any{"topic": "dentistry"}},
+			Params:         map[string]any{"bundle_ref": map[string]any{"fingerprint": runStartTestFingerprint}, "event_name": "scan.requested", "payload": map[string]any{"topic": "medicine"}},
+			ConflictParams: map[string]any{"bundle_ref": map[string]any{"fingerprint": runStartTestFingerprint}, "event_name": "scan.requested", "payload": map[string]any{"topic": "dentistry"}},
 			ResultKeys:     []string{"event_id", "run_id", "new_run_created", "deliveries"},
 			SuccessEffects: 1,
 		},
@@ -337,8 +337,8 @@ func mutatingHTTPRuntimeFixtures() map[string]mutatingHTTPRuntimeFixture {
 			SuccessEffects: 1,
 		},
 		"run.start": {
-			Params:         map[string]any{"bundle_hash": runStartTestBundleHash, "event_name": "scan.requested", "payload": map[string]any{"topic": "medicine"}, "run_id": runID},
-			ConflictParams: map[string]any{"bundle_hash": runStartTestBundleHash, "event_name": "scan.requested", "payload": map[string]any{"topic": "dentistry"}, "run_id": runID},
+			Params:         map[string]any{"bundle_ref": map[string]any{"fingerprint": runStartTestFingerprint}, "event_name": "scan.requested", "payload": map[string]any{"topic": "medicine"}, "run_id": runID},
+			ConflictParams: map[string]any{"bundle_ref": map[string]any{"fingerprint": runStartTestFingerprint}, "event_name": "scan.requested", "payload": map[string]any{"topic": "dentistry"}, "run_id": runID},
 			ResultKeys:     []string{"run_id", "status"},
 			SuccessEffects: 1,
 		},
@@ -382,21 +382,22 @@ type mutatingHTTPRuntimeErrorProbe struct {
 func mutatingHTTPRuntimeErrorProbes() []mutatingHTTPRuntimeErrorProbe {
 	runID := "00000000-0000-0000-0000-000000000101"
 	missingRunID := "00000000-0000-0000-0000-000000000999"
-	badBundleHash := "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-	validEvent := map[string]any{"bundle_hash": runStartTestBundleHash, "event_name": "scan.requested", "payload": map[string]any{"topic": "medicine"}, "idempotency_key": "idem-error"}
+	badBundleFingerprint := "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	canonicalEvent := map[string]any{"bundle_hash": runStartTestBundleHash, "event_name": "scan.requested", "payload": map[string]any{"topic": "medicine"}, "idempotency_key": "idem-error"}
 	validLegacyEvent := map[string]any{"bundle_ref": map[string]any{"fingerprint": runStartTestFingerprint}, "event_name": "scan.requested", "payload": map[string]any{"topic": "medicine"}, "idempotency_key": "idem-error"}
 	sourceSessionID := "00000000-0000-0000-0000-000000000201"
 	forkID := "00000000-0000-0000-0000-000000000301"
 	return []mutatingHTTPRuntimeErrorProbe{
-		{Method: "event.publish", Params: mergeProbeParams(validEvent, map[string]any{"bundle_hash": badBundleHash}), Code: BundleMismatchCode},
-		{Method: "event.publish", Params: mergeProbeParams(validEvent, map[string]any{"bundle_ref": map[string]any{"fingerprint": runStartTestFingerprint}}), Code: UnsupportedBundleHashCode},
+		{Method: "event.publish", Params: canonicalEvent, Code: UnsupportedBundleHashCode},
+		{Method: "event.publish", Params: mergeProbeParams(validLegacyEvent, map[string]any{"bundle_hash": runStartTestBundleHash}), Code: UnsupportedBundleHashCode},
+		{Method: "event.publish", Params: mergeProbeParams(validLegacyEvent, map[string]any{"bundle_ref": map[string]any{"fingerprint": badBundleFingerprint}}), Code: BundleMismatchCode},
 		{Method: "event.publish", Params: mergeProbeParams(validLegacyEvent, map[string]any{"bundle_ref": map[string]any{"label": "latest"}}), Code: UnsupportedBundleRefCode},
-		{Method: "event.publish", Params: mergeProbeParams(validEvent, map[string]any{"event_name": "scan.missing"}), Code: EventNotDeclaredCode},
-		{Method: "event.publish", Params: validEvent, Code: EventPublishFailedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.events.publishErr = errors.New("simulated publish failure") }}},
-		{Method: "event.publish", Params: validEvent, Code: PayloadValidationFailedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.events.publishErr = runtimebus.ErrPayloadValidation }}},
-		{Method: "event.publish", Params: mergeProbeParams(validEvent, map[string]any{"run_id": missingRunID}), Code: RunNotFoundCode},
-		{Method: "event.publish", Params: mergeProbeParams(validEvent, map[string]any{"run_id": runID, "source_event_id": "00000000-0000-0000-0000-000000000998"}), Code: EventNotFoundCode},
-		{Method: "event.publish", Params: mergeProbeParams(validEvent, map[string]any{"run_id": runID}), Code: RunAlreadyTerminalCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+		{Method: "event.publish", Params: mergeProbeParams(validLegacyEvent, map[string]any{"event_name": "scan.missing"}), Code: EventNotDeclaredCode},
+		{Method: "event.publish", Params: validLegacyEvent, Code: EventPublishFailedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.events.publishErr = errors.New("simulated publish failure") }}},
+		{Method: "event.publish", Params: validLegacyEvent, Code: PayloadValidationFailedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.events.publishErr = runtimebus.ErrPayloadValidation }}},
+		{Method: "event.publish", Params: mergeProbeParams(validLegacyEvent, map[string]any{"run_id": missingRunID}), Code: RunNotFoundCode},
+		{Method: "event.publish", Params: mergeProbeParams(validLegacyEvent, map[string]any{"run_id": runID, "source_event_id": "00000000-0000-0000-0000-000000000998"}), Code: EventNotFoundCode},
+		{Method: "event.publish", Params: mergeProbeParams(validLegacyEvent, map[string]any{"run_id": runID}), Code: RunAlreadyTerminalCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
 			s.runs.headers[runID] = store.RunHeader{RunID: runID, Status: "completed"}
 		}}},
 
@@ -438,11 +439,12 @@ func mutatingHTTPRuntimeErrorProbes() []mutatingHTTPRuntimeErrorProbe {
 			s.forks.deleteErr = store.ErrConversationForkNotFound
 		}}},
 
-		{Method: "run.start", Params: mergeProbeParams(validEvent, map[string]any{"bundle_hash": badBundleHash, "run_id": runID}), Code: BundleMismatchCode},
-		{Method: "run.start", Params: mergeProbeParams(validEvent, map[string]any{"bundle_ref": map[string]any{"fingerprint": runStartTestFingerprint}, "run_id": runID}), Code: UnsupportedBundleHashCode},
+		{Method: "run.start", Params: mergeProbeParams(canonicalEvent, map[string]any{"run_id": runID}), Code: UnsupportedBundleHashCode},
+		{Method: "run.start", Params: mergeProbeParams(validLegacyEvent, map[string]any{"bundle_hash": runStartTestBundleHash, "run_id": runID}), Code: UnsupportedBundleHashCode},
+		{Method: "run.start", Params: mergeProbeParams(validLegacyEvent, map[string]any{"bundle_ref": map[string]any{"fingerprint": badBundleFingerprint}, "run_id": runID}), Code: BundleMismatchCode},
 		{Method: "run.start", Params: mergeProbeParams(validLegacyEvent, map[string]any{"bundle_ref": map[string]any{"label": "latest"}, "run_id": runID}), Code: UnsupportedBundleRefCode},
-		{Method: "run.start", Params: mergeProbeParams(validEvent, map[string]any{"event_name": "scan.missing", "run_id": runID}), Code: EventNotDeclaredCode},
-		{Method: "run.start", Params: mergeProbeParams(validEvent, map[string]any{"run_id": runID}), Code: PayloadValidationFailedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.events.publishErr = runtimebus.ErrPayloadValidation }}},
+		{Method: "run.start", Params: mergeProbeParams(validLegacyEvent, map[string]any{"event_name": "scan.missing", "run_id": runID}), Code: EventNotDeclaredCode},
+		{Method: "run.start", Params: mergeProbeParams(validLegacyEvent, map[string]any{"run_id": runID}), Code: PayloadValidationFailedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.events.publishErr = runtimebus.ErrPayloadValidation }}},
 
 		{Method: "run.stop", Params: map[string]any{"run_id": runID, "idempotency_key": "idem-error"}, Code: RunNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
 			s.runControl.errs["stop"] = &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrRunNotFound, RunID: runID}

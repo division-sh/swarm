@@ -170,10 +170,6 @@ func runRunCommand(ctx context.Context, repo string, out, errOut io.Writer, opts
 		fmt.Fprintf(errOut, "bundle fingerprint mismatch: server=%s expected=%s\n", health.Bundle.Fingerprint, expected)
 		return commandExitError{code: 6}
 	}
-	if expected := strings.TrimSpace(opts.bundleHash); expected != "" && cliLegacyFingerprintFromBundleHash(expected) != health.Bundle.Fingerprint {
-		fmt.Fprintf(errOut, "bundle hash mismatch: server=%s expected=%s\n", health.Bundle.Fingerprint, expected)
-		return commandExitError{code: 6}
-	}
 	traceReplaySince := time.Now().UTC()
 	start, err := runCommandStart(ctx, client, health, opts, payload)
 	if err != nil {

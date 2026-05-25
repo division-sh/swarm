@@ -228,60 +228,45 @@ func TestRunCommandBundleFingerprintMismatchFailsBeforeRunStart(t *testing.T) {
 	}
 }
 
-func TestRunCommandBundleHashMismatchFailsBeforeRunStart(t *testing.T) {
+func TestRunCommandBundleHashSerializesCanonicalParamAndMapsUnsupported(t *testing.T) {
 	t.Setenv("SWARM_API_TOKEN", "test-token")
 	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
-	server, calls, _ := newRunCommandServer(t, runCommandServerOptions{
-		rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
-			if req.Method != "health.check" {
-				t.Fatalf("unexpected method = %q; run.start must not be called after bundle mismatch", req.Method)
+	var calls []jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/rpc" {
+			t.Errorf("path = %q, want /v1/rpc", r.URL.Path)
+		}
+		var req jsonRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		calls = append(calls, req)
+		switch req.Method {
+		case "health.check":
+			writeJSONRPCResult(t, w, req.ID, runCommandHealthResult())
+		case "run.start":
+			if got := req.Params["bundle_hash"]; got != "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+				t.Fatalf("bundle_hash = %#v", got)
 			}
-			return runCommandHealthResult()
-		},
-	})
-	defer server.Close()
-
-	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath, "--bundle-hash", "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "--no-follow"}, &stdout, &stderr, testRunCommandOptions(server))
-	if code != 6 {
-		t.Fatalf("code = %d, want 6 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
-	}
-	assertRunCommandMethods(t, calls, []string{"health.check"})
-	if !strings.Contains(stderr.String(), "bundle hash mismatch") {
-		t.Fatalf("stderr = %q, want bundle hash mismatch", stderr.String())
-	}
-}
-
-func TestRunCommandBundleHashSerializesCanonicalParam(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
-	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
-	server, calls, _ := newRunCommandServer(t, runCommandServerOptions{
-		rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
-			switch req.Method {
-			case "health.check":
-				return runCommandHealthResult()
-			case "run.start":
-				if got := req.Params["bundle_hash"]; got != "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
-					t.Fatalf("bundle_hash = %#v", got)
-				}
-				if _, ok := req.Params["bundle_ref"]; ok {
-					t.Fatalf("bundle_ref unexpectedly present: %#v", req.Params)
-				}
-				return map[string]any{"run_id": "run-hash", "status": "running"}
-			default:
-				t.Fatalf("unexpected method = %q", req.Method)
+			if _, ok := req.Params["bundle_ref"]; ok {
+				t.Fatalf("bundle_ref unexpectedly present: %#v", req.Params)
 			}
-			return nil
-		},
-	})
+			writeRunCommandJSONRPCError(t, w, req.ID, "UNSUPPORTED_BUNDLE_HASH")
+		default:
+			t.Fatalf("unexpected method = %q", req.Method)
+		}
+	}))
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath, "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--no-follow"}, &stdout, &stderr, testRunCommandOptions(server))
-	if code != 0 {
-		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	if code != 6 {
+		t.Fatalf("code = %d, want 6 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
-	assertRunCommandMethods(t, calls, []string{"health.check", "run.start"})
+	assertRunCommandMethods(t, &calls, []string{"health.check", "run.start"})
+	if !strings.Contains(stderr.String(), "UNSUPPORTED_BUNDLE_HASH") {
+		t.Fatalf("stderr = %q, want UNSUPPORTED_BUNDLE_HASH", stderr.String())
+	}
 }
 
 func TestRunCommandBundleFingerprintSerializesLegacyBundleRef(t *testing.T) {

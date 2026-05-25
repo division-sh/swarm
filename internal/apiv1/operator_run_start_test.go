@@ -108,7 +108,7 @@ func TestOperatorRunStartHandlersPersistBootFingerprintWhenBundleRefOmitted(t *t
 	assertRunStartPersistence(t, db, runID, "scan.requested", runStartTestFingerprint)
 }
 
-func TestOperatorRunStartHandlersAcceptCanonicalBundleHash(t *testing.T) {
+func TestOperatorRunStartHandlersRejectCanonicalBundleHashUntilSourceOwner(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
@@ -119,11 +119,14 @@ func TestOperatorRunStartHandlersAcceptCanonicalBundleHash(t *testing.T) {
 	handler := runStartTestHandler(t, pg, bus, source)
 	runID := uuid.NewString()
 
-	started := rpcCall(t, handler, runStartBodyWithBundleHash(runID, runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "idem-start-hash"))
-	if started.Error != nil {
-		t.Fatalf("run.start error = %#v", started.Error)
+	resp := rpcCall(t, handler, runStartBodyWithBundleHash(runID, runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "idem-start-hash"))
+	if resp.Error == nil {
+		t.Fatal("run.start canonical bundle_hash error = nil")
 	}
-	assertRunStartPersistence(t, db, runID, "scan.requested", runStartTestFingerprint)
+	if data := asMap(t, resp.Error.Data); data["code"] != UnsupportedBundleHashCode {
+		t.Fatalf("unsupported bundle hash data = %#v", data)
+	}
+	assertNoRunStartPersistence(t, db, runID)
 }
 
 func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
