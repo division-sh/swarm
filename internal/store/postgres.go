@@ -189,9 +189,9 @@ func (s *PostgresStore) ensureSchemaCompatibilityColumns(ctx context.Context) er
 	if err := s.ensureAgentRuntimeDescriptorColumn(ctx); err != nil {
 		return err
 	}
-	if catalog.hasTable("runs") && !catalog.hasColumns("runs", "bundle_fingerprint") {
-		if _, err := s.DB.ExecContext(ctx, `ALTER TABLE runs ADD COLUMN IF NOT EXISTS bundle_fingerprint TEXT`); err != nil {
-			return fmt.Errorf("ensure runs.bundle_fingerprint column: %w", err)
+	if catalog.hasTable("runs") {
+		if err := s.ensureRunBundleSourceSchema(ctx, catalog); err != nil {
+			return err
 		}
 		catalog, err = loadSchemaColumnCatalog(ctx, s.DB)
 		if err != nil {
@@ -353,6 +353,41 @@ func (s *PostgresStore) ensureSchemaCompatibilityColumns(ctx context.Context) er
 	}
 	_, err = s.BindSchemaCapabilities(ctx)
 	return err
+}
+
+func (s *PostgresStore) ensureRunBundleSourceSchema(ctx context.Context, catalog schemaColumnCatalog) error {
+	if s == nil || s.DB == nil || !catalog.hasTable("runs") {
+		return nil
+	}
+	if !catalog.hasColumns("runs", "bundle_hash") {
+		if _, err := s.DB.ExecContext(ctx, `ALTER TABLE runs ADD COLUMN IF NOT EXISTS bundle_hash TEXT`); err != nil {
+			return fmt.Errorf("ensure runs.bundle_hash column: %w", err)
+		}
+	}
+	if !catalog.hasColumns("runs", "bundle_source") {
+		if _, err := s.DB.ExecContext(ctx, `ALTER TABLE runs ADD COLUMN IF NOT EXISTS bundle_source TEXT NOT NULL DEFAULT 'legacy'`); err != nil {
+			return fmt.Errorf("ensure runs.bundle_source column: %w", err)
+		}
+	}
+	if !catalog.hasColumns("runs", "bundle_fingerprint") {
+		if _, err := s.DB.ExecContext(ctx, `ALTER TABLE runs ADD COLUMN IF NOT EXISTS bundle_fingerprint TEXT`); err != nil {
+			return fmt.Errorf("ensure legacy runs.bundle_fingerprint compatibility column: %w", err)
+		}
+	}
+	for _, stmt := range []string{
+		`UPDATE runs SET bundle_source = 'legacy' WHERE bundle_source IS NULL OR BTRIM(bundle_source) = ''`,
+		`ALTER TABLE runs ALTER COLUMN bundle_source SET DEFAULT 'legacy'`,
+		`ALTER TABLE runs ALTER COLUMN bundle_source SET NOT NULL`,
+		`ALTER TABLE runs DROP CONSTRAINT IF EXISTS runs_bundle_hash_format_check`,
+		`ALTER TABLE runs ADD CONSTRAINT runs_bundle_hash_format_check CHECK (bundle_hash IS NULL OR bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$')`,
+		`ALTER TABLE runs DROP CONSTRAINT IF EXISTS runs_bundle_source_check`,
+		`ALTER TABLE runs ADD CONSTRAINT runs_bundle_source_check CHECK (bundle_source IN ('persisted', 'ephemeral', 'deleted', 'legacy'))`,
+	} {
+		if _, err := s.DB.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("ensure runs bundle source schema: %w", err)
+		}
+	}
+	return nil
 }
 
 func (s *PostgresStore) ensureEventReceiptsTypedSubscriberIdentity(ctx context.Context) error {

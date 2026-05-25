@@ -202,12 +202,14 @@ func TestMultiBundleSourceAuthorityStaysOutOfLiveOpenRPCUntilImplemented(t *test
 	assertScalarContains(t, mustMappingValue(t, renamePolicy, "dual_accept_transition"), "#1001")
 
 	persistence := mustMappingValue(t, multi, "persistence_model")
-	assertScalarContains(t, mustMappingValue(t, persistence, "live_schema_boundary"), "does not change live generated tables")
+	assertScalarContains(t, mustMappingValue(t, persistence, "live_schema_boundary"), "#1013 promotes the bundles table")
 	platformTables := mustMappingValue(t, mustMappingValue(t, root, "platform_tables"), "tables")
-	if mappingValue(platformTables, "bundles") != nil {
-		t.Fatal("bundles table must not enter live platform_tables before the DB migration child lands")
+	if mappingValue(platformTables, "bundles") == nil {
+		t.Fatal("bundles table must be live in platform_tables after the DB migration child lands")
 	}
 	runsDDL := mustMappingValue(t, mustMappingValue(t, platformTables, "runs"), "ddl")
+	assertScalarContains(t, runsDDL, "bundle_hash")
+	assertScalarContains(t, runsDDL, "bundle_source")
 	assertScalarContains(t, runsDDL, "bundle_fingerprint TEXT")
 
 	cliSurface := mustMappingValue(t, multi, "cli_surface")

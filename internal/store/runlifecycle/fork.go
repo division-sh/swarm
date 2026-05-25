@@ -8,8 +8,10 @@ import (
 )
 
 type InsertForkOptions struct {
-	HasBundleFingerprintCol bool
-	BundleFingerprint       string
+	HasBundleHashCol   bool
+	HasBundleSourceCol bool
+	BundleHash         string
+	BundleSource       string
 }
 
 func InsertFork(ctx context.Context, db DBTX, forkRunID, status, sourceRunID, forkEventID string, entityCount int, startedAt time.Time, opts InsertForkOptions) error {
@@ -32,6 +34,10 @@ func InsertFork(ctx context.Context, db DBTX, forkRunID, status, sourceRunID, fo
 	if forkEventID == "" {
 		return fmt.Errorf("fork event_id is required")
 	}
+	bundleSource, err := CanonicalBundleSource(opts.BundleSource)
+	if err != nil {
+		return err
+	}
 
 	cols := []string{
 		"run_id",
@@ -44,12 +50,17 @@ func InsertFork(ctx context.Context, db DBTX, forkRunID, status, sourceRunID, fo
 	}
 	values := []string{"$1::uuid", "$2", "$3::uuid", "$4::uuid", "$5", "0", "$6"}
 	args := []any{forkRunID, status, sourceRunID, forkEventID, entityCount, startedAt}
-	if opts.HasBundleFingerprintCol {
-		args = append(args, strings.TrimSpace(opts.BundleFingerprint))
-		cols = append(cols, "bundle_fingerprint")
+	if opts.HasBundleHashCol {
+		args = append(args, strings.TrimSpace(opts.BundleHash))
+		cols = append(cols, "bundle_hash")
 		values = append(values, fmt.Sprintf("NULLIF($%d, '')", len(args)))
 	}
-	_, err := db.ExecContext(ctx, `
+	if opts.HasBundleSourceCol {
+		args = append(args, bundleSource)
+		cols = append(cols, "bundle_source")
+		values = append(values, fmt.Sprintf("$%d", len(args)))
+	}
+	_, err = db.ExecContext(ctx, `
 		INSERT INTO runs (`+strings.Join(cols, ", ")+`)
 		VALUES (`+strings.Join(values, ", ")+`)
 	`, args...)

@@ -196,37 +196,11 @@ func ensureRunForkNotAlreadyMaterialized(ctx context.Context, tx *sql.Tx, forkRu
 
 func insertRunForkRun(ctx context.Context, tx *sql.Tx, catalog schemaColumnCatalog, forkRunID, sourceRunID, forkEventID string, entityCount int, startedAt time.Time) error {
 	opts := storerunlifecycle.InsertForkOptions{
-		HasBundleFingerprintCol: catalog.hasColumns("runs", "bundle_fingerprint"),
-	}
-	if catalog.hasColumns("runs", "bundle_fingerprint") {
-		fingerprint, err := runForkBundleFingerprintForInsert(ctx, tx, sourceRunID)
-		if err != nil {
-			return err
-		}
-		opts.BundleFingerprint = fingerprint
+		HasBundleHashCol:   catalog.hasColumns("runs", "bundle_hash"),
+		HasBundleSourceCol: catalog.hasColumns("runs", "bundle_source"),
+		BundleSource:       storerunlifecycle.BundleSourceLegacy,
 	}
 	return storerunlifecycle.InsertFork(ctx, tx, forkRunID, RunForkMaterializedStatus, sourceRunID, forkEventID, entityCount, startedAt, opts)
-}
-
-func runForkBundleFingerprintForInsert(ctx context.Context, tx *sql.Tx, sourceRunID string) (string, error) {
-	if fingerprint := runtimecorrelation.BundleFingerprintFromContext(ctx); fingerprint != "" {
-		return fingerprint, nil
-	}
-	var source sql.NullString
-	if err := tx.QueryRowContext(ctx, `
-		SELECT bundle_fingerprint
-		FROM runs
-		WHERE run_id = $1::uuid
-	`, sourceRunID).Scan(&source); err != nil {
-		if err == sql.ErrNoRows {
-			return "", fmt.Errorf("source run %s not found", sourceRunID)
-		}
-		return "", fmt.Errorf("load source run bundle fingerprint: %w", err)
-	}
-	if !source.Valid {
-		return "", nil
-	}
-	return strings.TrimSpace(source.String), nil
 }
 
 func loadRunForkEntityMetadata(plan RunForkPlan) (map[string]runForkEntityMetadata, error) {

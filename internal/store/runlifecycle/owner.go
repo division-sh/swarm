@@ -24,14 +24,24 @@ type Snapshot struct {
 }
 
 type EnsureActiveOptions struct {
-	ReopenCompleted         bool
-	HasStartedAtCol         bool
-	HasTriggerCols          bool
-	HasCounterCols          bool
-	HasTerminalCols         bool
-	HasBundleFingerprintCol bool
-	BundleFingerprint       string
+	ReopenCompleted    bool
+	HasStartedAtCol    bool
+	HasTriggerCols     bool
+	HasCounterCols     bool
+	HasTerminalCols    bool
+	HasBundleHashCol   bool
+	HasBundleSourceCol bool
+	BundleHash         string
+	BundleSource       string
 }
+
+const (
+	BundleSourcePersisted = "persisted"
+	BundleSourceEphemeral = "ephemeral"
+	BundleSourceDeleted   = "deleted"
+	BundleSourceLegacy    = "legacy"
+	defaultBundleSource   = BundleSourceLegacy
+)
 
 func CanonicalTerminalStatus(raw string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
@@ -48,6 +58,23 @@ func CanonicalTerminalStatus(raw string) (string, error) {
 	}
 }
 
+func CanonicalBundleSource(raw string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "":
+		return defaultBundleSource, nil
+	case BundleSourcePersisted:
+		return BundleSourcePersisted, nil
+	case BundleSourceEphemeral:
+		return BundleSourceEphemeral, nil
+	case BundleSourceDeleted:
+		return BundleSourceDeleted, nil
+	case BundleSourceLegacy:
+		return BundleSourceLegacy, nil
+	default:
+		return "", fmt.Errorf("unsupported bundle source %q", raw)
+	}
+}
+
 func EnsureActive(ctx context.Context, db DBTX, runID, triggerEventID, triggerEventType string, opts EnsureActiveOptions) error {
 	if db == nil {
 		return nil
@@ -58,7 +85,11 @@ func EnsureActive(ctx context.Context, db DBTX, runID, triggerEventID, triggerEv
 	}
 	triggerEventID = strings.TrimSpace(triggerEventID)
 	triggerEventType = strings.TrimSpace(triggerEventType)
-	bundleFingerprint := strings.TrimSpace(opts.BundleFingerprint)
+	bundleHash := strings.TrimSpace(opts.BundleHash)
+	bundleSource, err := CanonicalBundleSource(opts.BundleSource)
+	if err != nil {
+		return err
+	}
 	reopenStatus := "runs.status"
 	reopenErrorSummary := ""
 	reopenEndedAt := ""
@@ -84,8 +115,11 @@ func EnsureActive(ctx context.Context, db DBTX, runID, triggerEventID, triggerEv
 		addParam("trigger_event_id", "NULLIF($%d,'')::uuid", triggerEventID)
 		addParam("trigger_event_type", "NULLIF($%d,'')", triggerEventType)
 	}
-	if opts.HasBundleFingerprintCol {
-		addParam("bundle_fingerprint", "NULLIF($%d,'')", bundleFingerprint)
+	if opts.HasBundleHashCol {
+		addParam("bundle_hash", "NULLIF($%d,'')", bundleHash)
+	}
+	if opts.HasBundleSourceCol {
+		addParam("bundle_source", "$%d", bundleSource)
 	}
 	if opts.HasStartedAtCol {
 		insertCols = append(insertCols, "started_at")
@@ -101,16 +135,20 @@ func EnsureActive(ctx context.Context, db DBTX, runID, triggerEventID, triggerEv
 			error_summary = ` + reopenErrorSummary + `,
 			ended_at = ` + reopenEndedAt
 	}
-	if opts.HasBundleFingerprintCol {
+	if opts.HasBundleHashCol {
 		query += `,
-			bundle_fingerprint = COALESCE(runs.bundle_fingerprint, EXCLUDED.bundle_fingerprint)`
+			bundle_hash = COALESCE(runs.bundle_hash, EXCLUDED.bundle_hash)`
+	}
+	if opts.HasBundleSourceCol {
+		query += `,
+			bundle_source = COALESCE(runs.bundle_source, EXCLUDED.bundle_source)`
 	}
 	if opts.HasTriggerCols {
 		query += `,
 			trigger_event_id = COALESCE(runs.trigger_event_id, NULLIF($2,'')::uuid),
 			trigger_event_type = COALESCE(NULLIF(runs.trigger_event_type, ''), NULLIF($3, ''))`
 	}
-	_, err := db.ExecContext(ctx, query, args...)
+	_, err = db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("ensure run row: %w", err)
 	}

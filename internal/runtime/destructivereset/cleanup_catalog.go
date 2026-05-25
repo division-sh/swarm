@@ -39,6 +39,7 @@ func DefaultPlatformCleanupCatalog() []CleanupCatalogEntry {
 		{Table: "agents", TableKind: CleanupTableKindPlatform, Classification: CleanupPreserve, PredicateOwner: "agent registry/config state", PreservationProof: "must survive destructive runtime cleanup"},
 		{Table: "flow_instances", TableKind: CleanupTableKindPlatform, Classification: CleanupPreserve, PredicateOwner: "product/config state", PreservationProof: "must survive destructive runtime cleanup"},
 		{Table: "routing_rules", TableKind: CleanupTableKindPlatform, Classification: CleanupPreserve, PredicateOwner: "routing/topology config", PreservationProof: "must survive destructive runtime cleanup"},
+		{Table: "bundles", TableKind: CleanupTableKindPlatform, Classification: CleanupPreserve, PredicateOwner: "global bundle catalog state", PreservationProof: "must survive destructive runtime cleanup"},
 		{Table: "mailbox", TableKind: CleanupTableKindPlatform, Classification: CleanupSplitPreserve, PredicateOwner: "no run_id; source_event_id policy split", PreservationProof: "preserve until a mailbox cleanup owner exists"},
 		{Table: "spend_ledger", TableKind: CleanupTableKindPlatform, Classification: CleanupSplitPreserve, PredicateOwner: "no run_id; cost audit policy split", PreservationProof: "preserve until a spend cleanup owner exists"},
 	}

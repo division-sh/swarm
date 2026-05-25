@@ -102,19 +102,19 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 		)
 	}
 
-	var forkStatus, forkedFromRun, forkedFromEvent, forkBundleFingerprint string
+	var forkStatus, forkedFromRun, forkedFromEvent, forkBundleHash, forkBundleSource, forkBundleFingerprint string
 	if err := db.QueryRowContext(ctx, `
-		SELECT status, forked_from_run_id::text, forked_from_event_id::text, COALESCE(bundle_fingerprint, '')
+		SELECT status, forked_from_run_id::text, forked_from_event_id::text, COALESCE(bundle_hash, ''), bundle_source, COALESCE(bundle_fingerprint, '')
 		FROM runs
 		WHERE run_id = $1::uuid
-	`, result.ForkRunID).Scan(&forkStatus, &forkedFromRun, &forkedFromEvent, &forkBundleFingerprint); err != nil {
+	`, result.ForkRunID).Scan(&forkStatus, &forkedFromRun, &forkedFromEvent, &forkBundleHash, &forkBundleSource, &forkBundleFingerprint); err != nil {
 		t.Fatalf("load fork run: %v", err)
 	}
 	if forkStatus != "paused" || forkedFromRun != sourceRunID || forkedFromEvent != secondEventID {
 		t.Fatalf("fork run = status:%s from:%s event:%s", forkStatus, forkedFromRun, forkedFromEvent)
 	}
-	if forkBundleFingerprint != "bundle-source-fingerprint" {
-		t.Fatalf("fork bundle_fingerprint = %q, want source fingerprint", forkBundleFingerprint)
+	if forkBundleHash != "" || forkBundleSource != "legacy" || forkBundleFingerprint != "" {
+		t.Fatalf("fork bundle identity = hash:%q source:%q fingerprint:%q, want legacy without copied fingerprint", forkBundleHash, forkBundleSource, forkBundleFingerprint)
 	}
 	var sourceStatus string
 	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, sourceRunID).Scan(&sourceStatus); err != nil {

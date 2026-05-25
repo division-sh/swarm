@@ -3618,6 +3618,7 @@ platform_tables:
         - agents
         - flow_instances
         - routing_rules
+        - bundles
       split_preserve:
         - mailbox
         - spend_ledger
@@ -3625,6 +3626,13 @@ platform_tables:
         - generated node-state tables from GenerateNodeStateTableDDLs
         - contract-driven product optimization tables
   tables:
+    bundles:
+      description: 'Content-addressed bundle catalog. The primary key is the canonical bundle_hash
+        (`bundle-v1:sha256:<64 lowercase hex>`) from multi_bundle_persistence.bundle_identity.
+        Rows store durable bundle bytes and a parsed JSON projection for server-side inspection.
+        This table is global platform catalog state, not run-scoped state, and is not referenced
+        by runs through a database foreign key.'
+      ddl: "CREATE TABLE bundles (\n    bundle_hash      TEXT PRIMARY KEY CHECK (bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$'),\n    content_yaml     TEXT NOT NULL,\n    parsed_json      JSONB NOT NULL DEFAULT '{}'::jsonb,\n    data_blob        BYTEA,\n    metadata         JSONB NOT NULL DEFAULT '{}'::jsonb,\n    ingested_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX idx_bundles_ingested_at (ingested_at)\n);"
     events:
       description: 'Append-only event store. Every event persisted before delivery. Three scopes: entity (entity_id + flow_instance
         projection set), flow (flow_instance projection set, entity_id NULL), global (both NULL — system bootstrap,
@@ -3986,11 +3994,15 @@ platform_tables:
         their parent via forked_from_run_id and forked_from_event_id.'
       ddl: "CREATE TABLE runs (\n    run_id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    status            TEXT\
         \ NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'paused', 'completed', 'failed', 'cancelled', 'forked')),\n\
+        \    bundle_hash        TEXT CHECK (bundle_hash IS NULL OR bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$'),\n\
+        \    bundle_source      TEXT NOT NULL DEFAULT 'legacy' CHECK (bundle_source IN ('persisted', 'ephemeral', 'deleted', 'legacy')),\n\
         \    bundle_fingerprint TEXT,\n    trigger_event_id  UUID,\n    trigger_event_type TEXT,\n    forked_from_run_id UUID REFERENCES runs(run_id),\n\
         \    forked_from_event_id UUID,\n    entity_count      INTEGER NOT NULL DEFAULT 0,\n    event_count       INTEGER\
         \ NOT NULL DEFAULT 0,\n    error_summary     TEXT,\n    started_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n\
         \    ended_at          TIMESTAMPTZ,\n    INDEX idx_runs_status (status, started_at),\n    INDEX idx_runs_fork\
-        \ (forked_from_run_id) WHERE forked_from_run_id IS NOT NULL\n);"
+        \ (forked_from_run_id) WHERE forked_from_run_id IS NOT NULL,\n    INDEX idx_runs_bundle_hash (bundle_hash) WHERE bundle_hash IS NOT NULL,\n\
+        \    INDEX idx_runs_bundle_source_status (bundle_source, status, started_at),\n    INDEX idx_runs_bundle_delete_planning\
+        \ (bundle_hash, status) WHERE bundle_hash IS NOT NULL\n);"
       lifecycle:
         running: Active execution. Events being processed.
         paused: Execution suspended (budget threshold, admin action). Resumable.
@@ -4003,13 +4015,15 @@ platform_tables:
         When a handler emits a new event, the child event inherits run_id from the parent event.
         External events (API, webhook, admin CLI) start a new run or join an existing one
         based on the ingress configuration.'
-      bundle_fingerprint: 'Optional boot bundle fingerprint pinned when the run row is first created.
-        New v1 run.start-created rows persist the orchestrator boot fingerprint after bundle_ref
-        validation. UPSERT/reopen paths must not overwrite an existing non-NULL fingerprint, but may
-        fill an unknown NULL fingerprint when a canonical boot-owned writer supplies one. Legacy NULL
-        values mean unknown bundle and are allowed by serve bundle-match admission. This current live DDL
-        is superseded for multi-bundle source authority by multi_bundle_persistence.persistence_model,
-        but remains in platform_tables until #1001 and the database migration child replace the live runtime schema.'
+      bundle_hash: 'Nullable canonical bundle identity for the run. Values use the
+        multi_bundle_persistence.bundle_identity format and intentionally have no database foreign key
+        to bundles.bundle_hash so historical audit identity survives bundle deletion.'
+      bundle_source: 'Required bundle availability/source classifier. Existing rows are legacy; current
+        writers without a gate-approved canonical v1 source fact write legacy with bundle_hash NULL.
+        Later multi-bundle children own persisted/ephemeral/deleted source stamping.'
+      bundle_fingerprint: 'Legacy pre-multi-bundle compatibility column. It is not the canonical run
+        bundle identity after #1013 and must not be copied into bundle_hash. Remaining public/code
+        migration is tracked by #1001; reader migration is tracked by #1014.'
     entity_mutations:
       description: 'Append-only mutation log for entity_state changes. Every write to entity_state.fields,
         entity_state.current_state, entity_state.gates, or entity_state.accumulator produces a row.
@@ -5018,10 +5032,10 @@ multi_bundle_persistence:
       - hash namespace/version prefix
   persistence_model:
     live_schema_boundary: >
-      platform_tables.tables remains the current runtime DDL source. #1012 does not change live generated tables because
-      that would be runtime/schema implementation. The bundles table and runs.bundle_hash/runs.bundle_source fields below
-      are promoted source authority for the database migration child, which must update platform_tables, migrations, store
-      readers/writers, generated artifacts, and proof together.
+      platform_tables.tables is the current runtime DDL source. #1013 promotes the bundles table and
+      runs.bundle_hash/runs.bundle_source into the live schema foundation. API/runtime behavior,
+      reader migration, ingest/source stamping, and public dual-accept naming remain separately
+      gated implementation work unless a later PR explicitly promotes and proves them.
     bundles_table:
       planned_live_owner_after_migration: platform_tables.tables.bundles
       primary_key: bundle_hash
@@ -5234,6 +5248,7 @@ multi_bundle_persistence:
   explicit_splits:
     schema_foundation:
       tracker: '#1013'
+      implementation_status: live_schema_foundation_promoted
       reason: Live bundles table, runs.bundle_hash, runs.bundle_source, indexes, and no-FK migration are database/schema implementation.
     reader_migration:
       tracker: '#1014'

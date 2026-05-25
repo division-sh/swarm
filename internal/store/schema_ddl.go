@@ -311,6 +311,8 @@ func platformTableOrder(name string) int {
 	switch strings.TrimSpace(name) {
 	case "schema_version":
 		return 0
+	case "bundles":
+		return 3
 	case "runs":
 		return 5
 	case "events":
