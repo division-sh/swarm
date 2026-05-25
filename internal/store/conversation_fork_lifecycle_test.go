@@ -236,14 +236,57 @@ func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t 
 	if err != nil {
 		t.Fatalf("CreateOperatorConversationFork: %v", err)
 	}
-	result, err := s.ChatOperatorConversationFork(ctx, ConversationForkChatRequest{
+	prepared, err := s.PrepareOperatorConversationForkChat(ctx, ConversationForkChatPrepareRequest{
+		ForkID: fork.ForkID,
+		Now:    now.Add(time.Second),
+	})
+	if err != nil {
+		t.Fatalf("PrepareOperatorConversationForkChat: %v", err)
+	}
+	result, err := s.RecordOperatorConversationForkChat(ctx, ConversationForkChatRecordRequest{
 		ForkID:       fork.ForkID,
 		Message:      "inspect the fork",
 		ActorTokenID: "actor-token",
-		Now:          now.Add(time.Second),
+		Execution: ConversationForkChatExecution{
+			AssistantMessage: "snapshot says Before; requested writes were stubbed",
+			AvailableTools:   prepared.AvailableTools,
+			ToolCalls: []OperatorConversationToolCall{
+				{
+					ToolUseID: "tool-1",
+					Name:      "fork_snapshot_read_entities",
+					Arguments: json.RawMessage(`{"entity_id":"` + entityID + `"}`),
+					Result:    json.RawMessage(`{"status":"read_from_snapshot","read_policy":"fork_snapshot_only","snapshot_owner":"conversation.fork_chat.snapshot.v1","source_agent_id":"` + source.agentID + `","entity_count":1}`),
+				},
+				{
+					ToolUseID: "tool-2",
+					Name:      "save_entity_field",
+					Arguments: json.RawMessage(`{"entity_id":"` + entityID + `","field":"name","value":"Sandbox"}`),
+					Result:    json.RawMessage(`{"status":"stubbed","owner":"conversation.fork_chat.sandbox.v1","write_policy":"stub_record_only_no_live_mutation","requested_tool":"save_entity_field","live_mutation":false}`),
+				},
+				{
+					ToolUseID: "tool-3",
+					Name:      "emit_event",
+					Arguments: json.RawMessage(`{"event_name":"forkchat.note"}`),
+					Result:    json.RawMessage(`{"status":"stubbed","owner":"conversation.fork_chat.sandbox.v1","write_policy":"stub_record_only_no_live_mutation","requested_tool":"emit_event","live_mutation":false}`),
+				},
+				{
+					ToolUseID: "tool-4",
+					Name:      "mailbox_approve",
+					Arguments: json.RawMessage(`{"mailbox_id":"mb-1"}`),
+					Result:    json.RawMessage(`{"status":"stubbed","owner":"conversation.fork_chat.sandbox.v1","write_policy":"stub_record_only_no_live_mutation","requested_tool":"mailbox.approve","live_mutation":false}`),
+				},
+				{
+					ToolUseID: "tool-5",
+					Name:      "run_start",
+					Arguments: json.RawMessage(`{"event_name":"scan.requested"}`),
+					Result:    json.RawMessage(`{"status":"stubbed","owner":"conversation.fork_chat.sandbox.v1","write_policy":"stub_record_only_no_live_mutation","requested_tool":"run.start","live_mutation":false}`),
+				},
+			},
+		},
+		Now: now.Add(time.Second),
 	})
 	if err != nil {
-		t.Fatalf("ChatOperatorConversationFork: %v", err)
+		t.Fatalf("RecordOperatorConversationForkChat: %v", err)
 	}
 	if result.ForkID != fork.ForkID || result.Turn.TurnIndex != 1 || result.Turn.TurnID == "" || !result.Turn.ParseOK {
 		t.Fatalf("chat result turn = %#v", result)
@@ -258,28 +301,27 @@ func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t 
 	if entity.EntityID != entityID || entity.CurrentState != "draft" || entity.Fields["name"] != "Before" {
 		t.Fatalf("entity snapshot = %#v, want source-at-fork projection", entity)
 	}
-	readCall := requireConversationForkToolCall(t, result.Turn.ToolCalls, "fork_snapshot.read_entities")
+	readCall := requireConversationForkToolCall(t, result.Turn.ToolCalls, "fork_snapshot_read_entities")
 	readArgs := conversationForkToolCallMap(t, readCall.Arguments)
-	if readArgs["source_agent_id"] != source.agentID || readArgs["snapshot_owner"] != ConversationForkChatSnapshotOwner {
+	if readArgs["entity_id"] != entityID {
 		t.Fatalf("snapshot read tool args = %#v", readArgs)
 	}
 	readResult := conversationForkToolCallMap(t, readCall.Result)
 	if readResult["status"] != "read_from_snapshot" || readResult["snapshot_owner"] != ConversationForkChatSnapshotOwner || readResult["entity_count"] != float64(1) {
 		t.Fatalf("snapshot read tool result = %#v", readResult)
 	}
-	for _, toolName := range []string{"save_entity_field", "emit_event", "mailbox.approve", "run.start"} {
+	for _, toolName := range []string{"save_entity_field", "emit_event", "mailbox_approve", "run_start"} {
 		call := requireConversationForkToolCall(t, result.Turn.ToolCalls, toolName)
-		args := conversationForkToolCallMap(t, call.Arguments)
-		if args["source_agent_id"] != source.agentID {
-			t.Fatalf("%s args = %#v, want source_agent_id %s", toolName, args, source.agentID)
-		}
 		stub := conversationForkToolCallMap(t, call.Result)
 		if stub["status"] != "stubbed" || stub["owner"] != ConversationForkChatSandboxOwner || stub["live_mutation"] != false {
 			t.Fatalf("%s stub result = %#v", toolName, stub)
 		}
 	}
-	if len(result.Turn.ToolCalls) <= 1 {
-		t.Fatalf("tool calls = %#v, want snapshot read plus stubbed side-effect evidence", result.Turn.ToolCalls)
+	if len(result.Turn.ToolCalls) != 5 {
+		t.Fatalf("tool calls = %#v, want only requested snapshot/stub tool evidence", result.Turn.ToolCalls)
+	}
+	if call := findConversationForkToolCall(result.Turn.ToolCalls, "run_stop"); call != nil {
+		t.Fatalf("unrequested tool call persisted: %#v", *call)
 	}
 	var responsePayload struct {
 		ToolCalls []OperatorConversationToolCall `json:"tool_calls"`
@@ -348,11 +390,9 @@ func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t 
 	if _, err := s.DeleteOperatorConversationFork(ctx, fork.ForkID, now.Add(2*time.Second)); err != nil {
 		t.Fatalf("DeleteOperatorConversationFork: %v", err)
 	}
-	_, err = s.ChatOperatorConversationFork(ctx, ConversationForkChatRequest{
-		ForkID:       fork.ForkID,
-		Message:      "should fail",
-		ActorTokenID: "actor-token",
-		Now:          now.Add(3 * time.Second),
+	_, err = s.PrepareOperatorConversationForkChat(ctx, ConversationForkChatPrepareRequest{
+		ForkID: fork.ForkID,
+		Now:    now.Add(3 * time.Second),
 	})
 	var paramErr *EntityReadParamError
 	if !errors.As(err, &paramErr) || paramErr.Field != "fork_id" {
@@ -362,16 +402,23 @@ func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t 
 
 func requireConversationForkToolCall(t *testing.T, calls []OperatorConversationToolCall, name string) OperatorConversationToolCall {
 	t.Helper()
-	for _, call := range calls {
-		if call.Name == name {
-			if len(call.Result) == 0 {
-				t.Fatalf("%s tool call has no result evidence: %#v", name, call)
-			}
-			return call
+	if call := findConversationForkToolCall(calls, name); call != nil {
+		if len(call.Result) == 0 {
+			t.Fatalf("%s tool call has no result evidence: %#v", name, *call)
 		}
+		return *call
 	}
 	t.Fatalf("tool call %s missing from %#v", name, calls)
 	return OperatorConversationToolCall{}
+}
+
+func findConversationForkToolCall(calls []OperatorConversationToolCall, name string) *OperatorConversationToolCall {
+	for i := range calls {
+		if calls[i].Name == name {
+			return &calls[i]
+		}
+	}
+	return nil
 }
 
 func conversationForkToolCallMap(t *testing.T, raw json.RawMessage) map[string]any {
