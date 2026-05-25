@@ -496,7 +496,11 @@ func (r *OpenAICompatibleRuntime) sendRequest(ctx context.Context, payload []byt
 }
 
 func openAICompatibleChatCompletionsURL(baseURL string) string {
-	return strings.TrimRight(strings.TrimSpace(baseURL), "/") + "/v1/chat/completions"
+	normalized := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if strings.HasSuffix(normalized, "/v1") {
+		return normalized + "/chat/completions"
+	}
+	return normalized + "/v1/chat/completions"
 }
 
 func toOpenAICompatibleMessages(m Message) []openAICompatibleMessage {
@@ -540,11 +544,15 @@ func openAICompatibleToolResultMessages(content string) []openAICompatibleMessag
 	for _, entry := range entries {
 		id, _ := entry["tool_call_id"].(string)
 		id = strings.TrimSpace(id)
-		if id == "" {
-			continue
-		}
 		raw, err := json.Marshal(entry)
 		if err != nil {
+			continue
+		}
+		if id == "" {
+			msgs = append(msgs, openAICompatibleMessage{
+				Role:    "user",
+				Content: "Tool result:\n" + string(raw),
+			})
 			continue
 		}
 		msgs = append(msgs, openAICompatibleMessage{
