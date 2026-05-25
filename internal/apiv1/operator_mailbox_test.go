@@ -15,6 +15,7 @@ import (
 	runtimeactors "swarm/internal/runtime/core/actors"
 	runtimeingress "swarm/internal/runtime/ingress"
 	runtimemanager "swarm/internal/runtime/manager"
+	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 	runtimetools "swarm/internal/runtime/tools"
 	"swarm/internal/store"
@@ -666,6 +667,141 @@ func TestOperatorMailboxApproveQueuesTransactionalPublishWhileRuntimePaused(t *t
 	}
 	approvalPayload := loadEventPayload(t, db, downstreamID)
 	assertMailboxItemDecidedPayloadShape(t, approvalPayload, "review this", true)
+}
+
+func TestOperatorMailboxApproveRunsPublishDispatchAfterDecisionCommit(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	pg := &store.PostgresStore{DB: db}
+
+	ctx := context.Background()
+	now := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
+	runID := uuid.NewString()
+	entityID := uuid.NewString()
+	sourceEventID := uuid.NewString()
+	if err := pg.AppendEvent(ctx, events.Event{
+		ID:      sourceEventID,
+		Type:    "review.requested",
+		RunID:   runID,
+		Payload: json.RawMessage(`{"request":true}`),
+	}.WithEntityID(entityID).WithFlowInstance("empire/review")); err != nil {
+		t.Fatalf("append source event: %v", err)
+	}
+	mailboxID, err := pg.InsertMailboxItem(ctx, runtimetools.MailboxItem{
+		EventID:   sourceEventID,
+		EntityID:  entityID,
+		FromAgent: "empire-agent",
+		Type:      "review_request",
+		Priority:  "high",
+		Context:   []byte(`{"title":"review this"}`),
+		Summary:   "needs approval",
+	})
+	if err != nil {
+		t.Fatalf("insert mailbox: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE mailbox SET flow_instance = 'empire/review' WHERE item_id = $1::uuid`, mailboxID); err != nil {
+		t.Fatalf("set flow instance: %v", err)
+	}
+
+	interceptorCalls := make(chan string, 1)
+	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
+		PayloadValidator: mailboxItemDecidedPayloadValidator(t, mailboxItemDecidedStrictPayloadSchema(true)),
+		Interceptors: []runtimebus.EventInterceptor{interceptorFunc(func(interceptCtx context.Context, evt events.Event) (bool, []events.Event, error) {
+			if evt.Type != events.EventType("mailbox.item_decided") {
+				return true, nil, nil
+			}
+			if tx, ok := runtimepipeline.PipelineSQLTxFromContext(interceptCtx); ok && tx != nil {
+				t.Fatal("mailbox approval dispatch ran with mailbox decision sql tx still in context")
+			}
+			var status string
+			if err := db.QueryRowContext(interceptCtx, `SELECT status FROM mailbox WHERE item_id = $1::uuid`, mailboxID).Scan(&status); err != nil {
+				t.Fatalf("query mailbox status from interceptor: %v", err)
+			}
+			if status != "decided" {
+				t.Fatalf("mailbox status visible to interceptor = %s, want decided", status)
+			}
+			var idempotencyRows int
+			if err := db.QueryRowContext(interceptCtx, `
+				SELECT COUNT(*)
+				FROM api_idempotency
+				WHERE method = 'mailbox.approve'
+				  AND idempotency_key = 'idem-post-commit-approve'
+			`).Scan(&idempotencyRows); err != nil {
+				t.Fatalf("query idempotency from interceptor: %v", err)
+			}
+			if idempotencyRows != 1 {
+				t.Fatalf("api_idempotency rows visible to interceptor = %d, want 1", idempotencyRows)
+			}
+			select {
+			case interceptorCalls <- evt.ID:
+			default:
+			}
+			return true, nil, nil
+		})},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			Now:      func() time.Time { return now },
+			Ready:    func() bool { return true },
+			Database: fakePinger{},
+			Mailbox:  pg,
+			Events:   bus,
+			MailboxApprovalRoutes: map[string]string{
+				"review_request": "mailbox.item_decided",
+			},
+			Bundle: runtimecontracts.BundleIdentity{
+				WorkflowName:    "empire",
+				WorkflowVersion: "1.0.0",
+				Fingerprint:     "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+			},
+		}),
+	})
+
+	approveBody := `{"jsonrpc":"2.0","id":"approve","method":"mailbox.approve","params":{"mailbox_id":"` + mailboxID + `","decision_payload":{"approved":true},"idempotency_key":"idem-post-commit-approve"}}`
+	approved := rpcCall(t, handler, approveBody)
+	if approved.Error != nil {
+		t.Fatalf("mailbox.approve error = %#v", approved.Error)
+	}
+	downstreamID, _ := asMap(t, approved.Result)["downstream_event_id"].(string)
+	if downstreamID == "" {
+		t.Fatalf("mailbox.approve downstream event id = %#v", approved.Result)
+	}
+	select {
+	case got := <-interceptorCalls:
+		if got != downstreamID {
+			t.Fatalf("interceptor event id = %s, want %s", got, downstreamID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for mailbox approval post-commit dispatch")
+	}
+	if got := countEventsByName(t, db, "mailbox.item_decided"); got != 1 {
+		t.Fatalf("mailbox.item_decided event count = %d, want 1", got)
+	}
+	if got := countPipelineReceiptsForEvent(t, ctx, db, downstreamID); got != 1 {
+		t.Fatalf("mailbox approval pipeline receipts = %d, want 1", got)
+	}
+	approvalPayload := loadEventPayload(t, db, downstreamID)
+	assertMailboxItemDecidedPayloadShape(t, approvalPayload, "review this", true)
+
+	replay := rpcCall(t, handler, approveBody)
+	if replay.Error != nil {
+		t.Fatalf("mailbox.approve replay error = %#v", replay.Error)
+	}
+	if got := asMap(t, replay.Result)["downstream_event_id"]; got != downstreamID {
+		t.Fatalf("replay downstream_event_id = %v, want %s", got, downstreamID)
+	}
+	select {
+	case got := <-interceptorCalls:
+		t.Fatalf("idempotency replay re-dispatched mailbox event %s", got)
+	default:
+	}
+	if got := countEventsByName(t, db, "mailbox.item_decided"); got != 1 {
+		t.Fatalf("mailbox.item_decided event count after replay = %d, want 1", got)
+	}
 }
 
 func countEventsByName(t *testing.T, db *sql.DB, eventName string) int {

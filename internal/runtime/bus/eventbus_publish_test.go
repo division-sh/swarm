@@ -160,6 +160,32 @@ func (i eventVisibleInTxInterceptor) Intercept(ctx context.Context, _ events.Eve
 	return true, nil, nil
 }
 
+type postCommitTxAbsentInterceptor struct {
+	t       *testing.T
+	store   *store.PostgresStore
+	eventID string
+	called  chan struct{}
+}
+
+func (i postCommitTxAbsentInterceptor) Intercept(ctx context.Context, _ events.Event) (bool, []events.Event, error) {
+	i.t.Helper()
+	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		i.t.Fatal("transactional PublishTx interceptor ran with caller sql tx still in context")
+	}
+	ok, err := i.store.EventExists(ctx, i.eventID)
+	if err != nil {
+		i.t.Fatalf("EventExists(%s): %v", i.eventID, err)
+	}
+	if !ok {
+		i.t.Fatalf("expected event %s to be committed before interceptor ran", i.eventID)
+	}
+	select {
+	case i.called <- struct{}{}:
+	default:
+	}
+	return true, nil, nil
+}
+
 type deferredEventVisibleInterceptor struct {
 	t        *testing.T
 	store    *store.PostgresStore
@@ -1139,6 +1165,74 @@ func TestEventBusPublishTransactional_PersistsInboundEventBeforeInterceptorsRun(
 		Payload:   []byte(`{}`),
 	}); err != nil {
 		t.Fatalf("Publish: %v", err)
+	}
+}
+
+func TestEventBusPublishTxRunsInterceptorsAfterCallerCommit(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	ctx := eventBusTestRunContext(t, db)
+	pg := &store.PostgresStore{DB: db}
+	eventID := "11111111-1111-1111-1111-111111111112"
+	called := make(chan struct{}, 1)
+	eb, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
+		Interceptors: []runtimebus.EventInterceptor{postCommitTxAbsentInterceptor{
+			t:       t,
+			store:   pg,
+			eventID: eventID,
+			called:  called,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	postCommitActions := make([]func(), 0, 1)
+	txctx := runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommitActions)
+	if err := eb.PublishTx(txctx, tx, events.Event{
+		ID:          eventID,
+		RunID:       eventBusTestRunID,
+		Type:        events.EventType("custom.publish_tx_post_commit"),
+		SourceAgent: "api.v1",
+		Payload:     []byte(`{"entity_id":"11111111-1111-1111-1111-111111111113"}`),
+		CreatedAt:   time.Now().UTC(),
+	}.WithEntityID("11111111-1111-1111-1111-111111111113")); err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("PublishTx: %v", err)
+	}
+	select {
+	case <-called:
+		_ = tx.Rollback()
+		t.Fatal("interceptor ran before caller committed")
+	default:
+	}
+	if len(postCommitActions) != 1 {
+		_ = tx.Rollback()
+		t.Fatalf("post-commit actions = %d, want 1", len(postCommitActions))
+	}
+	ok, err := pg.EventExists(ctx, eventID)
+	if err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("EventExists before commit: %v", err)
+	}
+	if ok {
+		_ = tx.Rollback()
+		t.Fatal("event visible outside caller transaction before commit")
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	runtimepipeline.FlushPipelinePostCommitActions(postCommitActions)
+	select {
+	case <-called:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for post-commit interceptor")
+	}
+	if got := countPipelineReceiptsForEvent(t, ctx, db, eventID); got != 1 {
+		t.Fatalf("pipeline receipts = %d, want 1", got)
 	}
 }
 

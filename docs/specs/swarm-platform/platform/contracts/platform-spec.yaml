@@ -9543,6 +9543,17 @@ api_specification:
           The producer MUST NOT emit the retired top-level `payload` member and
           validators MUST NOT add a special allowlist for it. Contracts that need
           the mailbox row payload must declare and consume `mailbox_payload`.
+      approval_transaction_boundary: >
+        `mailbox.approve` owns a caller-owned transactional publish boundary:
+        the mailbox row decision, `mailbox.item_decided` event persistence,
+        event delivery/replay-scope evidence, and API idempotency completion
+        commit atomically. Downstream subscriber/interceptor/runtime work MUST
+        run only after that decision transaction commits, or be durably queued
+        while ingress is paused. Post-commit downstream failures are recorded
+        as event receipt/recovery diagnostics; they MUST NOT leave the mailbox
+        decision transaction open, block later run/event writes, duplicate the
+        approval event, or roll back already-committed mailbox/idempotency
+        evidence.
     scopes:
       vocabulary: action-resource (read:<resource>, write:<resource>, control:<resource>, admin:<resource>, approve:<resource>,
         verify:<resource>)
@@ -12613,7 +12624,16 @@ api_specification:
       - MAILBOX_NOT_FOUND
     mailbox.approve:
       tier: must_have
-      description: Approve a pending mailbox item. Triggers the downstream event configured for the item's type by api_specification.conventions.mailbox.approval_event_routes.
+      description: >
+        Approve a pending mailbox item. Triggers the downstream event configured
+        for the item's type by
+        api_specification.conventions.mailbox.approval_event_routes.
+
+        The mailbox row decision, `mailbox.item_decided` event persistence,
+        delivery/replay-scope evidence, and API idempotency completion commit
+        atomically. Downstream subscriber/interceptor/runtime work from the
+        transactional approval publish runs only after that decision transaction
+        commits, or remains queued while ingress is paused.
       scope:
         required:
         - approve:mailbox
