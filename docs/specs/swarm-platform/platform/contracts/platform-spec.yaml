@@ -5304,9 +5304,10 @@ multi_bundle_persistence:
     bundle_aware_existing_methods_planned:
       event.publish:
         rule: >
-          New-run publication uses bundle_hash after #1001. Existing-run publication validates against the run's
-          canonical bundle identity. Legacy bundle_ref/bundle_fingerprint wrappers are transition-only and must not remain
-          authoritative after the rename migration.
+          New-run publication reserves bundle_hash after #1001, but current runtime assertion with bundle_hash fails closed
+          until canonical runtime source facts are promoted. Existing-run publication will validate against the run's
+          canonical bundle identity after the separately gated source-fact/reader owners land. Legacy bundle_ref/bundle_fingerprint
+          wrappers are transition-only and must not remain authoritative after the rename migration.
       run.start:
         rule: Deprecated wrapper follows event.publish bundle_hash semantics while it remains present.
       run.list:
@@ -7962,7 +7963,7 @@ cli_specification:
         workflow_failed_or_cancelled: 7
         interrupted: 130
       proof_expectations:
-      - exact /v1/rpc calls for health.check, run.start, run.get, and run.stop; run.start carries optional canonical bundle_hash or deprecated legacy bundle_ref.fingerprint only when the corresponding bundle flag is supplied
+      - exact /v1/rpc calls for health.check, run.start, run.get, and run.stop; run.start carries optional canonical bundle_hash or deprecated legacy bundle_ref.fingerprint only when the corresponding bundle flag is supplied; bundle_hash serialization maps server UNSUPPORTED_BUNDLE_HASH until canonical source facts are promoted, while --bundle-fingerprint remains the transition boot-fingerprint assertion
       - exact /v1/ws subscription for run.subscribe_trace where follow is in scope
       - no direct DB/store/runtime/EventBus reads or writes
       - no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, or legacy token fallback
@@ -8673,7 +8674,9 @@ cli_specification:
         idempotency key, then sends exactly those params to /v1/rpc event.publish through the shared v1 API client. The server
         remains the event-publication owner:
         it validates declared event/payload/run/bundle/idempotency semantics, publishes through the runtime EventBus/store
-        owner, derives delivery rows, and returns EventPublishResult.
+        owner, derives delivery rows, and returns EventPublishResult. Until canonical runtime source facts are promoted,
+        --bundle-hash is serialized as bundle_hash but the server rejects it with UNSUPPORTED_BUNDLE_HASH; --bundle-fingerprint
+        remains the transition assertion path against the current boot fingerprint.
       flags:
       - name: --payload-json <json-object>
         required: true
@@ -8687,7 +8690,7 @@ cli_specification:
         behavior: Optional parent/source event id for explicit checkpoint lineage. Must be used with --run-id and must name an event from the same run.
       - name: --bundle-hash <bundle-v1:sha256:...>
         maps_to: bundle_hash
-        behavior: Optional canonical assertion that the server is running the expected bundle hash. Cannot be combined with --bundle-fingerprint.
+        behavior: Optional canonical assertion name. Cannot be combined with --bundle-fingerprint; currently maps to server UNSUPPORTED_BUNDLE_HASH until canonical runtime source facts are promoted.
       - name: --bundle-fingerprint <sha256:...>
         maps_to: bundle_ref.fingerprint
         behavior: Deprecated legacy alias for --bundle-hash during #1001. Optional assertion that the server is running the expected boot bundle fingerprint. Cannot be combined with --bundle-hash.
@@ -8718,7 +8721,7 @@ cli_specification:
         - RUN_ALREADY_TERMINAL
         - IDEMPOTENCY_CONFLICT
       proof_expectations:
-      - exact /v1/rpc event.publish call with event_name, required payload, optional run_id, optional source_event_id, optional canonical bundle_hash or deprecated legacy bundle_ref.fingerprint, optional emitter, and optional idempotency_key params only
+      - exact /v1/rpc event.publish call with event_name, required payload, optional run_id, optional source_event_id, optional canonical bundle_hash or deprecated legacy bundle_ref.fingerprint, optional emitter, and optional idempotency_key params only; bundle_hash serialization maps server UNSUPPORTED_BUNDLE_HASH until canonical source facts are promoted
       - missing/blank event name, invalid or non-object --payload-json, blank optional flags, malformed bundle_hash, malformed bundle fingerprint, both bundle identity flags together, invalid args, and missing SWARM_API_TOKEN make zero API calls
       - success output renders only server-owned EventPublishResult event_id, run_id, source_event_id when present, new_run_created, and delivery rows
       - RUN_NOT_FOUND, EVENT_NOT_FOUND, publish rejection errors, auth/HTTP/RPC failures, and malformed EventPublishResult values fail closed with tested exit codes
@@ -9655,11 +9658,13 @@ api_specification:
         where content is identical.
       algorithm_migration: If a future version migrates to a different hash algorithm, the prefix changes (e.g., `blake3:<hex>`).
         v1 commits to sha256 only.
-      role_in_v1: "fingerprint is the load-bearing boot/runtime identity in current v1 runtime source facts. Mutating public\
-        \ input surfaces use canonical bundle_hash (`bundle-v1:sha256:<hex>`) after #1001, with legacy BundleRef/bundle_ref.fingerprint\
-        \ accepted only as a deprecated transition alias. BundleIdentity (returned by health.check) still carries fingerprint\
-        \ + workflow_name + workflow_version until the separately gated canonical source-fact owner promotes v1 bundle_hash\
-        \ output. No API surface accepts filesystem paths.\n"
+      role_in_v1: "fingerprint is the load-bearing boot/runtime identity in current v1 runtime source facts. Public input\
+        \ surfaces reserve canonical bundle_hash (`bundle-v1:sha256:<hex>`) after #1001, but current runtime identity\
+        \ assertions with bundle_hash fail closed with UNSUPPORTED_BUNDLE_HASH until the separately gated canonical source-fact\
+        \ owner promotes real v1 bundle_hash source facts. Legacy BundleRef/bundle_ref.fingerprint remains the transition\
+        \ assertion path against the boot fingerprint. BundleIdentity (returned by health.check) still carries fingerprint\
+        \ + workflow_name + workflow_version until the source-fact owner promotes v1 bundle_hash output. No API surface accepts\
+        \ filesystem paths.\n"
   components:
     description: 'Reusable JSON Schema components. Methods reference these via $ref. The
 
@@ -9689,7 +9694,7 @@ api_specification:
       BundleHash:
         type: string
         pattern: ^bundle-v1:sha256:[a-f0-9]{64}$
-        description: Canonical v1 bundle identity. Public input surfaces use this shape for bundle_hash; legacy sha256:<hex> fingerprints are not accepted under the bundle_hash name.
+        description: Canonical v1 bundle identity. Public input surfaces use this shape for bundle_hash; legacy sha256:<hex> fingerprints are not accepted under the bundle_hash name. Until the canonical source-fact owner is promoted, runtime identity assertions that supply bundle_hash fail closed with UNSUPPORTED_BUNDLE_HASH.
       ScopeName:
         description: 'Action-resource scopes used for v1 authorization. v1 enforcement
 
@@ -9721,8 +9726,9 @@ api_specification:
         - admin:runtime
       BundleRef:
         description: "Deprecated legacy bundle reference accepted during the #1001 dual-accept transition. New callers use\
-          \ bundle_hash with BundleHash. BundleRef carries the legacy sha256 fingerprint only and cannot be combined with\
-          \ bundle_hash; doing so fails closed with UNSUPPORTED_BUNDLE_HASH before runtime/store mutation.\n"
+          \ bundle_hash with BundleHash shape once canonical source facts are available. BundleRef carries the legacy sha256\
+          \ fingerprint only and cannot be combined with bundle_hash; doing so fails closed with UNSUPPORTED_BUNDLE_HASH\
+          \ before runtime/store mutation.\n"
         type: object
         additionalProperties: false
         required:
@@ -11634,8 +11640,6 @@ api_specification:
         properties:
           provided_fingerprint:
             $ref: '#/components/schemas/Sha256Fingerprint'
-          provided_bundle_hash:
-            $ref: '#/components/schemas/BundleHash'
           boot_fingerprint:
             $ref: '#/components/schemas/Sha256Fingerprint'
       UNSUPPORTED_BUNDLE_HASH:
@@ -12118,12 +12122,12 @@ api_specification:
       params:
       - name: bundle_hash
         required: false
-        description: Optional canonical bundle identity assertion. Must be bundle-v1:sha256:<64 lowercase hex> and cannot be combined with legacy bundle_ref.
+        description: Optional canonical bundle identity assertion name reserved by #1001. Must be bundle-v1:sha256:<64 lowercase hex>, cannot be combined with legacy bundle_ref, and currently fails closed with UNSUPPORTED_BUNDLE_HASH until canonical runtime source facts are promoted.
         schema:
           $ref: '#/components/schemas/BundleHash'
       - name: bundle_ref
         required: false
-        description: Deprecated legacy alias for bundle_hash during #1001. Carries bundle_ref.fingerprint only and cannot be combined with bundle_hash.
+        description: Deprecated transition alias during #1001. Carries bundle_ref.fingerprint only, remains the current operational boot-fingerprint assertion path, and cannot be combined with bundle_hash.
         schema:
           $ref: '#/components/schemas/BundleRef'
       - name: event_name
@@ -12229,19 +12233,21 @@ api_specification:
 
         Start a new run by injecting an event into the runtime bus.
 
-        Optionally declares a canonical bundle_hash assertion; v1 runtime
+        Optionally declares the canonical bundle_hash input name reserved
 
-        requires it to match the orchestrator''s boot-time
+        by #1001. Until the canonical runtime source-fact owner is promoted,
 
-        bundle identity (or bundle_hash to be omitted, in which case the
+        supplied bundle_hash fails closed with UNSUPPORTED_BUNDLE_HASH rather
 
-        boot-time bundle is used). Per-run dynamic bundle loading is
+        than being compared to the legacy boot fingerprint. If bundle_hash is
+
+        omitted, the boot-time bundle is used. Per-run dynamic bundle loading is
 
         deferred (see deferred_namespaces.bundle_lifecycle). Legacy
 
-        bundle_ref.fingerprint is accepted only as a deprecated #1001
+        bundle_ref.fingerprint remains the deprecated #1001
 
-        transition alias and cannot be combined with bundle_hash.
+        transition assertion path and cannot be combined with bundle_hash.
 
         '
       scope:
@@ -12251,12 +12257,12 @@ api_specification:
       params:
       - name: bundle_hash
         required: false
-        description: Optional canonical bundle identity assertion. Must be bundle-v1:sha256:<64 lowercase hex> and cannot be combined with legacy bundle_ref.
+        description: Optional canonical bundle identity assertion name reserved by #1001. Must be bundle-v1:sha256:<64 lowercase hex>, cannot be combined with legacy bundle_ref, and currently fails closed with UNSUPPORTED_BUNDLE_HASH until canonical runtime source facts are promoted.
         schema:
           $ref: '#/components/schemas/BundleHash'
       - name: bundle_ref
         required: false
-        description: Deprecated legacy alias for bundle_hash during #1001. Carries bundle_ref.fingerprint only and cannot be combined with bundle_hash.
+        description: Deprecated transition alias during #1001. Carries bundle_ref.fingerprint only, remains the current operational boot-fingerprint assertion path, and cannot be combined with bundle_hash.
         schema:
           $ref: '#/components/schemas/BundleRef'
       - name: event_name

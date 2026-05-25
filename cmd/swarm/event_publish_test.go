@@ -35,7 +35,7 @@ func TestEventPublishUsesEventPublishV1RPCWithBoundParams(t *testing.T) {
 		"--payload-json", `{"topic":"sample","count":2}`,
 		"--run-id", "run-1",
 		"--source-event-id", "event-parent-1",
-		"--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"--bundle-fingerprint", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		"--emitter", "cli:test",
 		"--idempotency-key", "idem-1",
 	}, &stdout, &stderr, testRootCommandOptions(server))
@@ -53,7 +53,7 @@ func TestEventPublishUsesEventPublishV1RPCWithBoundParams(t *testing.T) {
 		},
 		"run_id":          "run-1",
 		"source_event_id": "event-parent-1",
-		"bundle_hash":     "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"bundle_ref":      map[string]any{"fingerprint": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 		"emitter":         "cli:test",
 		"idempotency_key": "idem-1",
 	}
@@ -78,6 +78,37 @@ func TestEventPublishUsesEventPublishV1RPCWithBoundParams(t *testing.T) {
 	}
 	if strings.TrimSpace(stderr.String()) != "" {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestEventPublishBundleHashSerializesCanonicalParamAndMapsUnsupported(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	var captured jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		writeEventPublishJSONRPCError(t, w, captured.ID, "UNSUPPORTED_BUNDLE_HASH")
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{
+		"event", "publish", "scan.requested",
+		"--payload-json", `{}`,
+		"--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 6 {
+		t.Fatalf("code = %d, want 6 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if got := captured.Params["bundle_hash"]; got != "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+		t.Fatalf("bundle_hash = %#v", got)
+	}
+	if _, ok := captured.Params["bundle_ref"]; ok {
+		t.Fatalf("bundle_ref unexpectedly present in canonical request: %#v", captured.Params)
+	}
+	if !strings.Contains(stderr.String(), "UNSUPPORTED_BUNDLE_HASH") {
+		t.Fatalf("stderr = %q, want UNSUPPORTED_BUNDLE_HASH", stderr.String())
 	}
 }
 

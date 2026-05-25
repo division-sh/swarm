@@ -210,7 +210,12 @@ func eventPublicationParamsFromRequest(req Request, bootFingerprint string, cfg 
 	if err != nil {
 		return eventPublicationParams{}, err
 	}
-	fingerprint := bundleIdentity.compatibilityFingerprint()
+	if bundleIdentity.BundleHash != "" {
+		return eventPublicationParams{}, NewApplicationError(UnsupportedBundleHashCode, false, map[string]any{
+			"reason": "bundle_hash runtime assertions require canonical bundle source facts; use legacy bundle_ref.fingerprint during the #1001 transition",
+		})
+	}
+	fingerprint := bundleIdentity.LegacyFingerprint
 	if fingerprint != "" && fingerprint != strings.TrimSpace(bootFingerprint) {
 		return eventPublicationParams{}, NewApplicationError(BundleMismatchCode, false, bundleIdentity.mismatchDetails(bootFingerprint))
 	}

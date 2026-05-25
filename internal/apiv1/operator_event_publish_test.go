@@ -99,7 +99,7 @@ func TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempo
 	}
 }
 
-func TestOperatorEventPublishHandlersAcceptCanonicalBundleHash(t *testing.T) {
+func TestOperatorEventPublishHandlersRejectCanonicalBundleHashUntilSourceOwner(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
@@ -109,14 +109,14 @@ func TestOperatorEventPublishHandlersAcceptCanonicalBundleHash(t *testing.T) {
 	}
 	handler := eventPublishTestHandler(t, pg, bus, source)
 
-	published := rpcCall(t, handler, eventPublishBodyWithBundleHash("", runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "", "idem-publish-hash"))
-	if published.Error != nil {
-		t.Fatalf("event.publish error = %#v", published.Error)
+	resp := rpcCall(t, handler, eventPublishBodyWithBundleHash("", runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "", "idem-publish-hash"))
+	if resp.Error == nil {
+		t.Fatal("event.publish canonical bundle_hash error = nil")
 	}
-	result := asMap(t, published.Result)
-	eventID := stringValue(t, result["event_id"], "event_id")
-	runID := stringValue(t, result["run_id"], "run_id")
-	assertEventPublishPersistence(t, db, runID, eventID, "scan.requested", "cli-publish:"+actorTokenID(testToken))
+	if data := asMap(t, resp.Error.Data); data["code"] != UnsupportedBundleHashCode {
+		t.Fatalf("unsupported bundle hash data = %#v", data)
+	}
+	assertNoEventPublishPersistence(t, db)
 }
 
 func TestOperatorEventPublishPersistsIdempotencyBeforeReadbackFailure(t *testing.T) {

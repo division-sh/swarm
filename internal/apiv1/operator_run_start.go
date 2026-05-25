@@ -19,8 +19,6 @@ const runStartIDempotencyTTL = 24 * time.Hour
 var sha256FingerprintPattern = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
 var bundleHashPattern = regexp.MustCompile(`^bundle-v1:sha256:[a-f0-9]{64}$`)
 
-const bundleHashPrefix = "bundle-v1:"
-
 type runStartResult struct {
 	RunID  string `json:"run_id"`
 	Status string `json:"status"`
@@ -125,26 +123,11 @@ func legacyBundleFingerprintParam(raw any, ok bool) (string, error) {
 	return fingerprint, nil
 }
 
-func (p bundleIdentityParam) compatibilityFingerprint() string {
-	if p.LegacyFingerprint != "" {
-		return p.LegacyFingerprint
-	}
-	if p.BundleHash != "" {
-		return strings.TrimPrefix(p.BundleHash, bundleHashPrefix)
-	}
-	return ""
-}
-
 func (p bundleIdentityParam) mismatchDetails(bootFingerprint string) map[string]any {
-	details := map[string]any{
-		"boot_fingerprint": strings.TrimSpace(bootFingerprint),
+	return map[string]any{
+		"boot_fingerprint":     strings.TrimSpace(bootFingerprint),
+		"provided_fingerprint": p.LegacyFingerprint,
 	}
-	if p.BundleHash != "" {
-		details["provided_bundle_hash"] = p.BundleHash
-		return details
-	}
-	details["provided_fingerprint"] = p.LegacyFingerprint
-	return details
 }
 
 func runStartPayloadEntityID(value any) (string, bool, error) {
