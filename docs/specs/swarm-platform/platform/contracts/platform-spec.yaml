@@ -5933,9 +5933,10 @@ cli_specification:
           API connection/auth/config authority is promoted in
           cli_specification.foundations.api_connection_auth_config_precedence. Diagnostic logging authority is
           promoted in cli_specification.foundations.cli_logging_policy. Contract/platform-spec path resolution is
-          promoted in cli_specification.foundations.contract_platform_spec_path_resolution. Retry, output-renderer
-          implementation tails, and serve listener environment/config behavior remain split until later children
-          promote their own merge-bearing owners.
+          promoted in cli_specification.foundations.contract_platform_spec_path_resolution. Serve listener
+          environment/config precedence is promoted and implemented under
+          cli_specification.command_catalog.serve.listener_topology_v2_1. Retry and output-renderer implementation
+          tails remain split until later children promote their own merge-bearing owners.
       exit_code_and_error_channel_normalization:
         disposition: promoted_first_slice
         tracker: '#846'
@@ -5976,8 +5977,9 @@ cli_specification:
           cli_specification.command_catalog.serve.listener_topology_v2_1. The final contract uses separate API
           and MCP listen-address socket owners, superseding the CLI UX v2 draft's port-only serve flags and the
           historical `--health-addr` implementation name. #992 consumes this owner for Cobra/runtime listener bind
-          wiring and `swarm run --api-port` as an API listener consumer. OpenRPC remains unchanged; #844 env/config
-          precedence, enable-disable controls, and `swarm run --mcp-port` support remain follow-up work.
+          wiring and `swarm run --api-port` as an API listener consumer. #844 consumes this owner for `swarm
+          serve` listener env/config precedence. OpenRPC remains unchanged; enable-disable controls and `swarm
+          run --mcp-port` support remain follow-up work.
       trace_filters_and_subscription_recovery:
         disposition: promoted_first_slice
         tracker: '#855'
@@ -6708,6 +6710,14 @@ cli_specification:
             Accepted by the shared CLI config parser for
             cli_specification.foundations.contract_platform_spec_path_resolution; ignored by the API connection
             and auth resolver.
+          serve_api_listen_addr: >
+            Accepted by the shared CLI config parser for
+            cli_specification.command_catalog.serve.listener_topology_v2_1.source_precedence; ignored by the API
+            connection and auth resolver.
+          serve_mcp_listen_addr: >
+            Accepted by the shared CLI config parser for
+            cli_specification.command_catalog.serve.listener_topology_v2_1.source_precedence; ignored by the API
+            connection and auth resolver.
         rejected_keys:
           api_token: Inline bearer tokens in config files are not promoted.
           output_format: Split to #848 output renderer implementation.
@@ -6719,24 +6729,22 @@ cli_specification:
             cli_specification.foundations.cli_logging_policy, but config-file `log_level` precedence remains a
             later #844 child.
           retry: Split to retry policy work.
-          serve_api_listen_addr: Split to #884/#750 serve listener implementation.
-          serve_mcp_listen_addr: Split to #884/#750 serve listener implementation.
       serve_listener_env_config_boundary:
         rejected_ports:
           SWARM_API_PORT: 'Not promoted; final v2.1 listener topology uses full listen addresses.'
           SWARM_MCP_PORT: 'Not promoted; final v2.1 listener topology uses full listen addresses.'
-        reserved_candidates:
-          SWARM_API_LISTEN_ADDR: 'Candidate environment name for a later #884/#750 listener implementation child; not accepted by this first-slice API client resolver.'
-          SWARM_MCP_LISTEN_ADDR: 'Candidate environment name for a later #884/#750 listener implementation child; not accepted by this first-slice API client resolver.'
+        accepted_listener_environment:
+          SWARM_API_LISTEN_ADDR: 'Accepted by `swarm serve` API listener source precedence in listener_topology_v2_1; ignored by the API client resolver.'
+          SWARM_MCP_LISTEN_ADDR: 'Accepted by `swarm serve` MCP listener source precedence in listener_topology_v2_1; ignored by the API client resolver.'
         rule: >
           API client connection settings and serve listener bind settings are different concepts. This owner
-          governs where CLI clients connect; listener bind flags/env/config remain under the serve topology owner
-          until a later child promotes and implements them.
+          governs where CLI clients connect; the shared config parser accepts listener keys for the serve topology
+          owner, but the API connection/auth resolver MUST ignore listener env/config keys.
       split_siblings:
       - '#848 output modes/shared renderer; spec promoted, implementation pending'
       - '#846 error-channel and exit-code classification; closed first slice'
       - '#844 later behavior child for API config/auth resolver implementation'
-      - '#884/#750 serve listener runtime implementation and listener env/config keys'
+      - '#884/#750 serve listener enable-disable controls and runtime topology siblings'
       - '#743 swarm run behavior and follow semantics'
       - '`--no-retry` retry policy'
       implementation_boundaries:
@@ -6963,19 +6971,21 @@ cli_specification:
         - --log-level
         sibling_boundaries: >
           Output modes remain governed by `cli_specification.foundations.output_contract`; universal config/env
-          precedence remains #844; `swarm run` foreground/follow behavior remains #743; explicit split API/MCP
-          listener implementation remains split under #884/#750/#794/#735 until follow-up children consume the
-          final v2.1 listener_topology_v2_1 owner.
+          precedence remains #844; `swarm run` foreground/follow behavior remains #743; final split API/MCP
+          listener runtime binding is consumed by `listener_topology_v2_1`, while enable-disable controls remain
+          future work outside this historical unified-listener evidence row.
       listener_topology_v2_1:
         promoted_by: '#884'
         runtime_bind_implemented_by: '#992'
-        implementation_status: runtime_bind_implemented_enable_disable_env_pending
+        env_config_precedence_implemented_by: '#844'
+        implementation_status: runtime_bind_and_env_config_precedence_implemented_enable_disable_pending
         canonical_owner: docs/specs/swarm-platform/platform/contracts/platform-spec.yaml#cli_specification.command_catalog.serve.listener_topology_v2_1
         summary: >
           Final CLI v2.1 `swarm serve` topology uses two independently configurable HTTP listeners: one API
-          listener and one MCP listener. This is the merge-bearing final topology decision. Runtime binding now
-          consumes `--api-listen-addr <host:port>` and `--mcp-listen-addr <host:port>`; historical `--health-addr`
-          remains migration evidence only.
+          listener and one MCP listener. This is the merge-bearing final topology decision. Runtime binding and
+          listener source precedence now consume `--api-listen-addr <host:port>`, `--mcp-listen-addr <host:port>`,
+          `SWARM_API_LISTEN_ADDR`, `SWARM_MCP_LISTEN_ADDR`, `serve_api_listen_addr`, and
+          `serve_mcp_listen_addr`; historical `--health-addr` remains migration evidence only.
         listeners:
           api:
             enabled_by_default: true
@@ -7024,6 +7034,46 @@ cli_specification:
           rationale: >
             Loopback defaults prevent accidental public exposure. Operators must explicitly bind to `0.0.0.0`
             or another routable interface for remote access.
+        source_precedence:
+          applies_to:
+          - '`swarm serve` API listener bind address.'
+          - '`swarm serve` MCP listener bind address.'
+          not_applies_to:
+          - '`swarm run` local foreground listener startup.'
+          - API client connection/auth configuration such as `--api-server`, `SWARM_API_SERVER`, and `api_server`.
+          - '`swarm serve --config`, which remains command-local runtime configuration.'
+          source_order:
+          - flag
+          - environment
+          - cli_config_file
+          - built_in_default
+          api_listen_addr:
+            flag: --api-listen-addr <host:port>
+            environment: SWARM_API_LISTEN_ADDR
+            config_key: serve_api_listen_addr
+            built_in_default: 127.0.0.1:8081
+          mcp_listen_addr:
+            flag: --mcp-listen-addr <host:port>
+            environment: SWARM_MCP_LISTEN_ADDR
+            config_key: serve_mcp_listen_addr
+            built_in_default: 127.0.0.1:8082
+          cli_config_file:
+            accepted_sources:
+            - SWARM_CONFIG
+            - '${XDG_CONFIG_HOME:-$HOME/.config}/swarm/config.yaml'
+            rejected_sources:
+            - '`swarm serve --config` runtime-config path'
+          independence_rule: >
+            API and MCP source resolution is per-listener. A source for one listener MUST NOT infer, mutate,
+            or default the other listener.
+          validation_rule: >
+            Values from flags, environment, and CLI config MUST use the host:port address_format above and
+            fail before runtime startup if invalid.
+          rejected_sources:
+            SWARM_API_PORT: 'Not promoted; port-only configuration cannot express bind interface/IP.'
+            SWARM_MCP_PORT: 'Not promoted; port-only configuration cannot express bind interface/IP.'
+            api_listen_addr: 'Not promoted as a CLI config key; use serve_api_listen_addr.'
+            mcp_listen_addr: 'Not promoted as a CLI config key; use serve_mcp_listen_addr.'
         interaction_rules:
           independent_bind_addresses: >
             API and MCP listener addresses are independent. Supplying one listener address never mutates or
@@ -7096,9 +7146,9 @@ cli_specification:
         implementation_boundaries:
         - '#884 promoted the source-of-truth repair only.'
         - '#992 implements Cobra/runtime binding for `--api-listen-addr` and `--mcp-listen-addr`, route partitioning, listener address validation, listener bind failure exit 3 before readiness, `--health-addr` retirement, MCP gateway URL alignment, and `swarm run --api-port` as an API listener consumer.'
+        - '#844 implements `swarm serve` listener source precedence for `SWARM_API_LISTEN_ADDR`, `SWARM_MCP_LISTEN_ADDR`, `serve_api_listen_addr`, and `serve_mcp_listen_addr`.'
         - '`swarm run --mcp-port` remains fail-closed until a later child explicitly promotes local foreground MCP listener control.'
         - 'API/MCP enable-disable implementation may be a later child if not absorbed with listener implementation.'
-        - 'Environment/config precedence remains #844.'
         - '`--log-level` is governed by cli_specification.foundations.cli_logging_policy, not listener topology.'
       boot_observability:
         implemented_by: '#802'
@@ -8432,8 +8482,9 @@ cli_specification:
         #884 promotes final CLI v2.1 separate API/MCP listen-address topology as source-of-truth repair only. #992
         implements the runtime bind slice for `swarm serve --api-listen-addr` and `--mcp-listen-addr`, route
         partitioning, listener bind failures, `--health-addr` retirement, MCP gateway URL alignment, and
-        `swarm run --api-port` as an API listener consumer. Remaining listener topology tail is API/MCP
-        enable-disable controls, #844 env/config precedence, and any future `swarm run` MCP listener consumer.
+        `swarm run --api-port` as an API listener consumer. #844 implements `swarm serve` listener env/config
+        precedence. Remaining listener topology tail is API/MCP enable-disable controls and any future `swarm run`
+        MCP listener consumer.
       remaining_tail: 'No promoted serve lifecycle tail remains after #830. `platform.shutdown` and persisted `interrupted_by_shutdown`
         remain unpromoted unless a later runtime lifecycle child makes them authoritative; not a direct blocker for #743 API owners.'
   parent_tail:

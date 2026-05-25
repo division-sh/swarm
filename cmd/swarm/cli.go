@@ -129,6 +129,17 @@ func newServeCommand(ctx context.Context, repo string, runServe func(context.Con
 			if opts.ShutdownGrace <= 0 {
 				return fmt.Errorf("--shutdown-grace must be a positive duration")
 			}
+			apiListenAddr, mcpListenAddr, err := resolveCLIServeListenerAddresses(cliServeListenerAddressOptions{
+				APIListenAddr:        opts.APIListenAddr,
+				MCPListenAddr:        opts.MCPListenAddr,
+				APIListenAddrFlagSet: cmd.Flags().Changed("api-listen-addr"),
+				MCPListenAddrFlagSet: cmd.Flags().Changed("mcp-listen-addr"),
+			})
+			if err != nil {
+				return err
+			}
+			opts.APIListenAddr = apiListenAddr
+			opts.MCPListenAddr = mcpListenAddr
 			if err := validateServeListenAddr("--api-listen-addr", opts.APIListenAddr); err != nil {
 				return err
 			}

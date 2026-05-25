@@ -22,6 +22,9 @@ const (
 	defaultCLIAPIServer = "http://127.0.0.1:8081"
 	cliAPIRPCPath       = "/v1/rpc"
 	cliAPIWSPath        = "/v1/ws"
+
+	cliServeAPIListenAddrEnv = "SWARM_API_LISTEN_ADDR"
+	cliServeMCPListenAddrEnv = "SWARM_MCP_LISTEN_ADDR"
 )
 
 type rootCommandOptions struct {
@@ -80,10 +83,12 @@ type cliAPISettings struct {
 }
 
 type cliAPIConfigFile struct {
-	APIServer        string `yaml:"api_server"`
-	APITokenFile     string `yaml:"api_token_file"`
-	ContractsPath    string `yaml:"contracts_path"`
-	PlatformSpecPath string `yaml:"platform_spec_path"`
+	APIServer          string `yaml:"api_server"`
+	APITokenFile       string `yaml:"api_token_file"`
+	ContractsPath      string `yaml:"contracts_path"`
+	PlatformSpecPath   string `yaml:"platform_spec_path"`
+	ServeAPIListenAddr string `yaml:"serve_api_listen_addr"`
+	ServeMCPListenAddr string `yaml:"serve_mcp_listen_addr"`
 }
 
 type cliAPIValidationError struct {
@@ -153,6 +158,37 @@ func resolveCLIAPIToken(opts rootCommandOptions, cfg cliAPIConfigFile) (string, 
 	return "", errCLIAPITokenRequired
 }
 
+type cliServeListenerAddressOptions struct {
+	APIListenAddr        string
+	MCPListenAddr        string
+	APIListenAddrFlagSet bool
+	MCPListenAddrFlagSet bool
+}
+
+func resolveCLIServeListenerAddresses(opts cliServeListenerAddressOptions) (string, string, error) {
+	cfg, err := loadCLIAPIConfigFile()
+	if err != nil {
+		return "", "", err
+	}
+	apiAddr := defaultAPIListenAddr
+	if opts.APIListenAddrFlagSet {
+		apiAddr = opts.APIListenAddr
+	} else if env := strings.TrimSpace(os.Getenv(cliServeAPIListenAddrEnv)); env != "" {
+		apiAddr = env
+	} else if config := strings.TrimSpace(cfg.ServeAPIListenAddr); config != "" {
+		apiAddr = config
+	}
+	mcpAddr := defaultMCPListenAddr
+	if opts.MCPListenAddrFlagSet {
+		mcpAddr = opts.MCPListenAddr
+	} else if env := strings.TrimSpace(os.Getenv(cliServeMCPListenAddrEnv)); env != "" {
+		mcpAddr = env
+	} else if config := strings.TrimSpace(cfg.ServeMCPListenAddr); config != "" {
+		mcpAddr = config
+	}
+	return apiAddr, mcpAddr, nil
+}
+
 func readCLIAPITokenFile(tokenFile, source string) (string, error) {
 	raw, err := os.ReadFile(tokenFile)
 	if err != nil {
@@ -205,7 +241,7 @@ func parseCLIAPIConfigFile(configPath string, raw []byte) (cliAPIConfigFile, err
 	}
 	for key, value := range decoded {
 		switch key {
-		case "api_server", "api_token_file", "contracts_path", "platform_spec_path":
+		case "api_server", "api_token_file", "contracts_path", "platform_spec_path", "serve_api_listen_addr", "serve_mcp_listen_addr":
 			if value == nil {
 				continue
 			}
