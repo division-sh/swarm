@@ -1500,7 +1500,7 @@
     },
     {
       "name": "conversation.fork_chat",
-      "description": "Execute one sandboxed forkchat turn against an active fork lifecycle session.\nThe method consumes conversation_forks for lifecycle validation,\nconversation_fork_snapshots for source-at-fork context, and\nconversation_fork_turns for fork-local transcript persistence. It does\nnot write agent_turns, events, runtime logs, mailbox rows, run commands,\nor dashboard conversation rows by default.\n",
+      "description": "Execute one sandboxed forkchat turn against an active fork lifecycle session.\nThe method consumes conversation_forks for lifecycle validation,\nconversation_fork_snapshots for source-at-fork context, and\nconversation_fork_turns for fork-local transcript persistence. It does\nenforce fork-snapshot read tools and records side-effecting tools as\nstubbed fork-local results under ConversationForkSandboxPolicy. It does\nnot write agent_turns, events, runtime logs, mailbox rows, run commands,\nor dashboard conversation rows by default.\n",
       "params": [
         {
           "name": "fork_id",
@@ -8395,6 +8395,7 @@
             "type": "object"
           },
           "tool_calls": {
+            "description": "Sandbox-observed tool calls for this fork-local turn. Entries include snapshot-read evidence and stubbed side-effect tool results; they are fork-local facts and are not live runtime side effects.",
             "items": {
               "additionalProperties": true,
               "type": "object"

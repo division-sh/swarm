@@ -326,6 +326,7 @@ func cloneConversationToolCalls(in []OperatorConversationToolCall) []OperatorCon
 	for i, item := range in {
 		out[i] = item
 		out[i].Arguments = cloneRawMessage(item.Arguments)
+		out[i].Result = cloneRawMessage(item.Result)
 	}
 	return out
 }
@@ -418,8 +419,10 @@ type OperatorConversationTurn struct {
 }
 
 type OperatorConversationToolCall struct {
+	ToolUseID string          `json:"tool_use_id,omitempty"`
 	Name      string          `json:"name"`
 	Arguments json.RawMessage `json:"arguments,omitempty"`
+	Result    json.RawMessage `json:"result,omitempty"`
 }
 
 type OperatorConversationToolResult struct {
