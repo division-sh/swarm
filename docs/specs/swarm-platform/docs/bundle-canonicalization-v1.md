@@ -140,8 +140,9 @@ delimiter-only framing.
 
 ## YAML Canonicalization
 
-YAML inputs are parsed into a JSON-compatible data model and emitted as
-canonical JSON bytes.
+YAML inputs are parsed as exactly one YAML 1.2.2 document using the v1 bundle
+YAML profile below. The parsed document is converted into a JSON-compatible
+data model and emitted as canonical JSON bytes.
 
 The allowed data model is:
 
@@ -152,9 +153,31 @@ The allowed data model is:
 - boolean
 - null
 
+The v1 bundle YAML profile is:
+
+- untagged scalars use the YAML 1.2.2 JSON schema resolver, further restricted
+  by this document
+- only lowercase `true`, `false`, and `null` resolve implicitly to boolean or
+  null
+- only JSON grammar numbers resolve implicitly to JSON numbers
+- plain scalars such as `yes`, `no`, `on`, `off`, `012`, `0x10`, `1_000`, and
+  timestamp-like values resolve as strings, not booleans, numbers, or dates
+- explicit `!!str`, `!!map`, and `!!seq` tags are allowed
+- explicit `!!bool`, `!!int`, `!!float`, and `!!null` tags are allowed only
+  when the scalar spelling would resolve to the same JSON type and value
+  without the explicit tag under this profile
+- explicit tags must not widen the accepted scalar spellings; for example
+  `!!bool yes`, `!!int 012`, and `!!float .nan` fail closed
+
+Decoded string values and mapping keys are normalized to Unicode NFC before
+duplicate-key detection, object-key sorting, and JSON emission. Escape
+sequences are decoded before NFC normalization. Raw source spelling is not a
+semantic input. If two mapping keys in the same object normalize to the same
+NFC string, canonicalization fails closed.
+
 The YAML parser must fail closed for:
 
-- duplicate mapping keys after string normalization
+- duplicate mapping keys after NFC normalization
 - non-string mapping keys
 - custom or unknown tags
 - non-finite numbers
@@ -197,7 +220,7 @@ Other canonical JSON emission rules:
 
 - UTF-8 output
 - no insignificant whitespace
-- object keys sorted by raw UTF-8 byte order
+- object keys sorted by RFC 8785 JCS property sorting over NFC-normalized keys
 - strings escaped with JSON escape rules
 - no trailing newline
 
