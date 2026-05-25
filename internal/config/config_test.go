@@ -23,7 +23,7 @@ func TestLoadAndValidate_CLI_TestMode(t *testing.T) {
 		"  sslmode: disable",
 		"  pool_size: 5",
 		"llm:",
-		"  runtime_mode: cli_test",
+		"  backend: cli_test",
 		"  session:",
 		"    lock_ttl: 10s",
 		"    rotate_after_turns: 40",
@@ -53,8 +53,8 @@ func TestLoadAndValidate_CLI_TestMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.LLM.RuntimeMode != "cli_test" {
-		t.Fatalf("unexpected runtime mode: %q", cfg.LLM.RuntimeMode)
+	if cfg.LLM.Backend != "cli_test" {
+		t.Fatalf("unexpected llm backend: %q", cfg.LLM.Backend)
 	}
 	if cfg.LLM.Session.LockTTL <= 0*time.Second {
 		t.Fatalf("expected lock ttl > 0")
@@ -79,9 +79,9 @@ func TestLoadAndValidate_CLI_TestMode(t *testing.T) {
 	}
 }
 
-func TestValidate_RejectsInvalidRuntimeMode(t *testing.T) {
+func TestValidate_RejectsInvalidBackend(t *testing.T) {
 	c := &Config{}
-	c.LLM.RuntimeMode = "bogus"
+	c.LLM.Backend = "bogus"
 	c.LLM.Session.LockTTL = 1 * time.Second
 	c.LLM.Session.RotateAfterTurns = 1
 	c.LLM.Session.RotateOnParseFailures = 1
@@ -90,9 +90,31 @@ func TestValidate_RejectsInvalidRuntimeMode(t *testing.T) {
 	}
 }
 
+func TestValidate_RejectsReservedActiveBackend(t *testing.T) {
+	c := &Config{}
+	c.LLM.Backend = "local"
+	c.LLM.Session.LockTTL = 1 * time.Second
+	c.LLM.Session.RotateAfterTurns = 1
+	c.LLM.Session.RotateOnParseFailures = 1
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "reserved") {
+		t.Fatalf("Validate error = %v, want reserved backend rejection", err)
+	}
+}
+
+func TestValidate_RejectsRetiredRuntimeMode(t *testing.T) {
+	c := &Config{}
+	c.LLM.RuntimeMode = "api"
+	c.LLM.Session.LockTTL = 1 * time.Second
+	c.LLM.Session.RotateAfterTurns = 1
+	c.LLM.Session.RotateOnParseFailures = 1
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "llm.backend") {
+		t.Fatalf("Validate error = %v, want retired runtime_mode guidance", err)
+	}
+}
+
 func TestValidate_CLI_TestRequiresCommandAndJson(t *testing.T) {
 	c := &Config{}
-	c.LLM.RuntimeMode = "cli_test"
+	c.LLM.Backend = "cli_test"
 	c.LLM.Session.LockTTL = 1 * time.Second
 	c.LLM.Session.RotateAfterTurns = 1
 	c.LLM.Session.RotateOnParseFailures = 1
@@ -107,7 +129,7 @@ func TestValidate_CLI_TestRequiresCommandAndJson(t *testing.T) {
 func TestLoad_FailsClosedOnMalformedBudgetExtension(t *testing.T) {
 	cfgText := strings.Join([]string{
 		"llm:",
-		"  runtime_mode: api",
+		"  backend: api",
 		"  session:",
 		"    lock_ttl: 10s",
 		"    rotate_after_turns: 40",
@@ -126,7 +148,7 @@ func TestLoad_FailsClosedOnMalformedBudgetExtension(t *testing.T) {
 
 func TestValidate_RejectsUnsupportedRuntimeControls(t *testing.T) {
 	c := &Config{}
-	c.LLM.RuntimeMode = "api"
+	c.LLM.Backend = "api"
 	c.LLM.Session.LockTTL = 1 * time.Second
 	c.LLM.Session.RotateAfterTurns = 1
 	c.LLM.Session.RotateOnParseFailures = 1
@@ -145,7 +167,7 @@ func TestValidate_RejectsUnsupportedRuntimeControls(t *testing.T) {
 func TestLoad_RejectsUnsupportedShardingExtension(t *testing.T) {
 	cfgText := strings.Join([]string{
 		"llm:",
-		"  runtime_mode: api",
+		"  backend: api",
 		"  session:",
 		"    lock_ttl: 10s",
 		"    rotate_after_turns: 40",

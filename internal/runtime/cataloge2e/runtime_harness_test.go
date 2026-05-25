@@ -165,7 +165,7 @@ func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHar
 	waitForCatalogHarnessDB(t, db)
 
 	cfg := testRuntimeConfig()
-	cfg.LLM.RuntimeMode = "api"
+	cfg.LLM.Backend = "api"
 	llmRuntime := newScriptedLLMRuntime()
 	loadAgentFixtures(t, fixtureRoot, llmRuntime)
 	pg := &store.PostgresStore{DB: db}

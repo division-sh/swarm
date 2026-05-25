@@ -12,6 +12,7 @@ import (
 	runtimecontracts "swarm/internal/runtime/contracts"
 	models "swarm/internal/runtime/core/actors"
 	llm "swarm/internal/runtime/llm"
+	llmselection "swarm/internal/runtime/llm/selection"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/runtime/sessions"
 	workspace "swarm/internal/runtime/workspace"
@@ -34,6 +35,7 @@ type AgentManager struct {
 	runtimeShutdownAdmissionClosed  func() bool
 	runtimeIngressSafetyPause       func(context.Context, string) error
 	runtimeMode                     string
+	llmBackend                      string
 	throttleSuppressPrefixes        []string
 	inFlightMu                      sync.Mutex
 	inFlight                        map[string]struct{}
@@ -77,6 +79,14 @@ type deadLetterEscalationSample struct {
 	errText    string
 }
 
+func normalizeManagerLLMBackend(raw string) string {
+	profile, err := llmselection.ResolvePersistedBackend(raw)
+	if err != nil {
+		return strings.TrimSpace(raw)
+	}
+	return profile.ID
+}
+
 func NewAgentManager(bus Bus, factory AgentFactory, stores ...ManagerPersistence) *AgentManager {
 	return NewAgentManagerWithOptions(bus, factory, AgentManagerOptions{}, stores...)
 }
@@ -112,6 +122,7 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 		runtimeShutdownAdmissionClosed:  opts.RuntimeShutdownAdmissionClosed,
 		runtimeIngressSafetyPause:       opts.RuntimeIngressSafetyPause,
 		throttleSuppressPrefixes:        throttleSuppressPrefixes,
+		llmBackend:                      normalizeManagerLLMBackend(opts.LLMBackend),
 		inFlight:                        make(map[string]struct{}),
 		loopCancel:                      make(map[string]context.CancelFunc),
 		poisonPanicCounts:               make(map[string]int),
@@ -247,7 +258,7 @@ func (am *AgentManager) SpawnEphemeralClone(baseAgentID, cloneAgentID string) er
 
 func (am *AgentManager) spawnAgentInternal(ctx context.Context, rec PersistedAgent, persist bool) error {
 	if strings.TrimSpace(rec.Config.LLMBackend) == "" {
-		rec.Config.LLMBackend = strings.TrimSpace(am.runtimeMode)
+		rec.Config.LLMBackend = am.llmBackend
 	}
 	a, err := am.buildAgent(rec.Config)
 	if err != nil {

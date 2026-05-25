@@ -7,10 +7,18 @@ import (
 	"strings"
 
 	"swarm/internal/config"
+	llmselection "swarm/internal/runtime/llm/selection"
 )
 
 func ValidateClaudeCLIRuntimeConfig(cfg *config.Config) error {
-	if cfg == nil || strings.TrimSpace(cfg.LLM.RuntimeMode) != "cli_test" {
+	if cfg == nil {
+		return nil
+	}
+	profile, err := llmselection.ResolveActiveBackend(cfg.LLM.Backend)
+	if err != nil {
+		return err
+	}
+	if profile.ID != llmselection.BackendCLITest {
 		return nil
 	}
 	if !shouldUseMCPBridge() {
@@ -43,8 +51,8 @@ func ValidateClaudeCLIRuntimeConfig(cfg *config.Config) error {
 	if strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_TOKEN")) == "" {
 		return fmt.Errorf("SWARM_TOOL_GATEWAY_TOKEN is required for claude cli runtime")
 	}
-	if strings.TrimSpace(os.Getenv("CLAUDE_CODE_OAUTH_TOKEN")) == "" {
-		return fmt.Errorf("CLAUDE_CODE_OAUTH_TOKEN is required for claude cli runtime")
+	if err := llmselection.RequireCredential(profile, os.LookupEnv); err != nil {
+		return err
 	}
 	return nil
 }

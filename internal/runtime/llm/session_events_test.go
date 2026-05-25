@@ -99,9 +99,9 @@ func TestAnthropicAPIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 	publisher := &eventPublisherStub{}
 	runtime := NewAnthropicAPIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, publisher)
 	ctx := runtimeactors.WithActor(sessions.WithScope(context.Background(), sessions.RuntimeModeTask.String(), "", "task-1"), runtimeactors.AgentConfig{
-		ID:       "agent-1",
-		Type:     "sonnet",
-		EntityID: "entity-1",
+		ID:        "agent-1",
+		ModelTier: "sonnet",
+		EntityID:  "entity-1",
 	})
 
 	s, err := runtime.StartSession(ctx, "agent-1", "system", nil)
@@ -146,8 +146,8 @@ func TestClaudeCLIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 	publisher := &eventPublisherStub{}
 	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil, publisher)
 	ctx := runtimeactors.WithActor(sessions.WithScope(context.Background(), sessions.RuntimeModeTask.String(), "", "task-1"), runtimeactors.AgentConfig{
-		ID:   "agent-2",
-		Type: "haiku",
+		ID:        "agent-2",
+		ModelTier: "haiku",
 	})
 
 	s, err := runtime.StartSession(ctx, "agent-2", "system", nil)
@@ -771,7 +771,7 @@ func TestAnthropicAPIRuntime_ContinueSessionReMarksInboundDeliveryForReusedSessi
 		),
 		runtimeactors.AgentConfig{
 			ID:           "agent-1",
-			Type:         "sonnet",
+			ModelTier:    "sonnet",
 			SessionScope: sessions.SessionScopeGlobal.String(),
 		},
 	)
@@ -812,7 +812,7 @@ func TestAnthropicAPIRuntime_ContinueSessionFailsClosedWhenDeliveryRestampFails(
 		),
 		runtimeactors.AgentConfig{
 			ID:           "agent-1",
-			Type:         "sonnet",
+			ModelTier:    "sonnet",
 			SessionScope: sessions.SessionScopeGlobal.String(),
 		},
 	)
@@ -846,7 +846,7 @@ func TestClaudeCLIRuntime_ContinueSessionFailsClosedWhenDeliveryRestampFails(t *
 		),
 		runtimeactors.AgentConfig{
 			ID:           "agent-1",
-			Type:         "sonnet",
+			ModelTier:    "sonnet",
 			SessionScope: sessions.SessionScopeGlobal.String(),
 		},
 	)

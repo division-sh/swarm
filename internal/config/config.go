@@ -9,6 +9,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 	runtimesharding "swarm/internal/runtime/core/sharding"
+	llmselection "swarm/internal/runtime/llm/selection"
 )
 
 // Config contains platform-generic runtime configuration.
@@ -40,6 +41,7 @@ type DatabaseConfig struct {
 }
 
 type LLMConfig struct {
+	Backend     string           `yaml:"backend"`
 	RuntimeMode string           `yaml:"runtime_mode"`
 	Session     LLMSessionConfig `yaml:"session"`
 	ClaudeAPI   ClaudeAPIConfig  `yaml:"claude_api"`
@@ -87,10 +89,14 @@ func (c *Config) Validate() error {
 	if err := c.ValidateOperationalControls(); err != nil {
 		return err
 	}
-	if c.LLM.RuntimeMode != "api" && c.LLM.RuntimeMode != "cli_test" {
-		return fmt.Errorf("invalid llm.runtime_mode: %q", c.LLM.RuntimeMode)
+	if err := llmselection.RejectRetiredConfigRuntimeMode(c.LLM.RuntimeMode); err != nil {
+		return err
 	}
-	if c.LLM.RuntimeMode == "cli_test" {
+	profile, err := llmselection.ResolveActiveBackend(c.LLM.Backend)
+	if err != nil {
+		return err
+	}
+	if profile.ID == llmselection.BackendCLITest {
 		if c.LLM.ClaudeCLI.Command == "" {
 			return errors.New("llm.claude_cli.command is required in cli_test mode")
 		}

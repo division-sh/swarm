@@ -8,6 +8,7 @@ import (
 
 	"swarm/internal/config"
 	"swarm/internal/events"
+	llmselection "swarm/internal/runtime/llm/selection"
 	"swarm/internal/runtime/sessions"
 	workspace "swarm/internal/runtime/workspace"
 )
@@ -35,18 +36,23 @@ func (f RuntimeFactory) Build() (Runtime, error) {
 		f.LockOwner = defaultLockOwner()
 	}
 
+	profile, err := llmselection.ResolveActiveBackend(f.Cfg.LLM.Backend)
+	if err != nil {
+		return nil, err
+	}
+
 	var runtime Runtime
-	switch f.Cfg.LLM.RuntimeMode {
-	case "api":
+	switch profile.ID {
+	case llmselection.BackendAPI:
 		runtime = NewAnthropicAPIRuntime(f.Cfg, f.Sessions, f.LockOwner, f.Turns, f.Conversations, f.Budget, f.Events)
-	case "cli_test":
+	case llmselection.BackendCLITest:
 		runtime = NewClaudeCLIRuntimeWithOptions(f.Cfg, f.Sessions, f.LockOwner, f.Turns, f.Budget, f.Workspaces, f.Conversations, f.Events, ClaudeCLIRuntimeOptions{
 			MCPTurnContextStore: f.MCPTurns,
 		})
 	default:
-		return nil, fmt.Errorf("unsupported llm runtime mode: %s", f.Cfg.LLM.RuntimeMode)
+		return nil, fmt.Errorf("unsupported llm backend profile: %s", profile.ID)
 	}
-	if _, err := RequireProviderContract(f.Cfg.LLM.RuntimeMode, runtime); err != nil {
+	if _, err := RequireProviderContractForProfile(profile, runtime); err != nil {
 		return nil, err
 	}
 	return runtime, nil

@@ -132,6 +132,7 @@ type AgentManagerOptions struct {
 	PromptResolver                 runtimecontracts.PromptResolver
 	WorkflowInstances              flowInstancePersistence
 	RuntimeMode                    string
+	LLMBackend                     string
 	Budget                         BudgetGuard
 	ResetRuntimeOwnedState         func()
 	RuntimeShutdownAdmissionClosed func() bool

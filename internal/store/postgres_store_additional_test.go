@@ -5485,6 +5485,32 @@ func TestManagerStore_UpsertAgent_PersistsCanonicalControlPlaneOwnership(t *test
 	}
 }
 
+func TestProjectPersistedAgentConfig_UsesCanonicalLLMBackendProfiles(t *testing.T) {
+	projection, err := projectPersistedAgentConfig(runtimeactors.AgentConfig{
+		ID:               "agent-default-backend",
+		Role:             "reviewer",
+		ModelTier:        "sonnet",
+		ConversationMode: "task",
+	}, "")
+	if err != nil {
+		t.Fatalf("projectPersistedAgentConfig: %v", err)
+	}
+	if projection.LLMBackend != "api" {
+		t.Fatalf("llm_backend = %q, want api default profile", projection.LLMBackend)
+	}
+
+	_, err = projectPersistedAgentConfig(runtimeactors.AgentConfig{
+		ID:               "agent-bad-backend",
+		Role:             "reviewer",
+		ModelTier:        "sonnet",
+		LLMBackend:       "openai",
+		ConversationMode: "task",
+	}, "")
+	if err == nil || !strings.Contains(err.Error(), "invalid llm_backend") {
+		t.Fatalf("projectPersistedAgentConfig error = %v, want invalid llm_backend", err)
+	}
+}
+
 func TestManagerStore_UpsertAgent_RejectsInvalidConversationModeAtAdmission(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}

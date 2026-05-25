@@ -26,6 +26,7 @@ import (
 	runtimecredentials "swarm/internal/runtime/credentials"
 	runtimeingress "swarm/internal/runtime/ingress"
 	llm "swarm/internal/runtime/llm"
+	llmselection "swarm/internal/runtime/llm/selection"
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimemcp "swarm/internal/runtime/mcp"
 	runtimepipeline "swarm/internal/runtime/pipeline"
@@ -443,6 +444,10 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		rt.Budget = NewBudgetTracker(stores.SQLDB, rt.Bus, cfg, stores.MailboxStore, rt.Logger, source)
 	}
 
+	backendProfile, err := llmselection.ResolveActiveBackend(cfg.LLM.Backend)
+	if err != nil {
+		return nil, err
+	}
 	modelRuntime := opts.LLMRuntime
 	if modelRuntime == nil {
 		modelRuntime, err = llm.RuntimeFactory{
@@ -528,7 +533,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		SemanticSource:    source,
 		PromptResolver:    rt.PromptResolver,
 		WorkflowInstances: workflowInstances,
-		RuntimeMode:       cfg.LLM.RuntimeMode,
+		LLMBackend:        backendProfile.ID,
 		Budget:            rt.Budget,
 		ResetRuntimeOwnedState: func() {
 			if rt.MCPTurns != nil {

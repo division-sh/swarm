@@ -15,6 +15,7 @@ import (
 	runtimeactors "swarm/internal/runtime/core/actors"
 	"swarm/internal/runtime/core/toolcapabilities"
 	llm "swarm/internal/runtime/llm"
+	llmselection "swarm/internal/runtime/llm/selection"
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimemcp "swarm/internal/runtime/mcp"
 	"swarm/internal/runtime/semanticview"
@@ -22,7 +23,7 @@ import (
 )
 
 func validateClaudeStartupConfig(cfg *config.Config, opts RuntimeOptions, source semanticview.Source) error {
-	if cfg == nil || strings.TrimSpace(cfg.LLM.RuntimeMode) != "cli_test" {
+	if !isClaudeCLIBackend(cfg) {
 		return nil
 	}
 	hasAgents, err := workflowSourceDeclaresAgents(source)
@@ -36,7 +37,7 @@ func validateClaudeStartupConfig(cfg *config.Config, opts RuntimeOptions, source
 }
 
 func validateClaudeStartupConfigForActiveAgents(cfg *config.Config, opts RuntimeOptions, source semanticview.Source, manager *runtimemanager.AgentManager) error {
-	if cfg == nil || strings.TrimSpace(cfg.LLM.RuntimeMode) != "cli_test" {
+	if !isClaudeCLIBackend(cfg) {
 		return nil
 	}
 	hasAgents, err := workflowSourceOrManagerDeclaresAgents(source, manager)
@@ -87,7 +88,7 @@ func workflowSourceOrManagerDeclaresAgents(source semanticview.Source, manager *
 }
 
 func validateClaudeManagedAgentWorkspaces(ctx context.Context, cfg *config.Config, source semanticview.Source, workspaces workspace.Lifecycle, manager *runtimemanager.AgentManager) error {
-	if cfg == nil || strings.TrimSpace(cfg.LLM.RuntimeMode) != "cli_test" {
+	if !isClaudeCLIBackend(cfg) {
 		return nil
 	}
 	hasAgents, err := workflowSourceOrManagerDeclaresAgents(source, manager)
@@ -126,7 +127,7 @@ type claudeStartupContextAwareToolSource interface {
 }
 
 func validateClaudeMCPToolsForManagedAgents(ctx context.Context, cfg *config.Config, source semanticview.Source, startupProbe llm.StartupVisibleToolSurfaceProber, turnStore llm.MCPTurnContextStore, tools claudeStartupToolSource, manager *runtimemanager.AgentManager) error {
-	if cfg == nil || strings.TrimSpace(cfg.LLM.RuntimeMode) != "cli_test" {
+	if !isClaudeCLIBackend(cfg) {
 		return nil
 	}
 	hasAgents, err := workflowSourceOrManagerDeclaresAgents(source, manager)
@@ -232,6 +233,14 @@ func validateClaudeMCPToolsForManagedAgents(ctx context.Context, cfg *config.Con
 		}
 	}
 	return nil
+}
+
+func isClaudeCLIBackend(cfg *config.Config) bool {
+	if cfg == nil {
+		return false
+	}
+	profile, err := llmselection.ResolveActiveBackend(cfg.LLM.Backend)
+	return err == nil && profile.ID == llmselection.BackendCLITest
 }
 
 func runtimeConfiguredMCPGatewayURL() string {

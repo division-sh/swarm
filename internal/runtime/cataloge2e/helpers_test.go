@@ -88,7 +88,7 @@ func testRuntimeConfig() *config.Config {
 			RecoveryOnStartup:   false,
 		},
 		LLM: config.LLMConfig{
-			RuntimeMode: "api",
+			Backend: "api",
 			Session: config.LLMSessionConfig{
 				LockTTL:               30 * time.Second,
 				RotateAfterTurns:      8,

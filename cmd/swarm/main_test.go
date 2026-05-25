@@ -3108,7 +3108,7 @@ func setPostgresEnvFromDSN(t *testing.T, dsn string) {
 }
 
 func TestDefaultRuntimeConfig_RejectsUnsupportedRuntimeControlEnv(t *testing.T) {
-	t.Setenv("SWARM_LLM_RUNTIME_MODE", "api")
+	t.Setenv("SWARM_LLM_BACKEND", "api")
 	t.Setenv("SWARM_RUNTIME_MAX_CONCURRENT_AGENTS", "4")
 	t.Setenv("SWARM_CLAUDE_DEFAULT_MODEL", "test-model")
 	cfg, err := defaultRuntimeConfig()
@@ -3120,12 +3120,46 @@ func TestDefaultRuntimeConfig_RejectsUnsupportedRuntimeControlEnv(t *testing.T) 
 	}
 }
 
+func TestDefaultRuntimeConfig_RejectsRetiredLLMRuntimeModeEnv(t *testing.T) {
+	t.Setenv("SWARM_LLM_RUNTIME_MODE", "api")
+	cfg, err := defaultRuntimeConfig()
+	if err == nil || !strings.Contains(err.Error(), "SWARM_LLM_BACKEND") {
+		t.Fatalf("defaultRuntimeConfig error = %v, want retired runtime mode env guidance", err)
+	}
+	if cfg != nil {
+		t.Fatalf("defaultRuntimeConfig cfg = %#v, want nil on retired env", cfg)
+	}
+}
+
+func TestDefaultRuntimeConfig_UsesCanonicalLLMBackendEnv(t *testing.T) {
+	t.Setenv("SWARM_LLM_BACKEND", "cli_test")
+	cfg, err := defaultRuntimeConfig()
+	if err != nil {
+		t.Fatalf("defaultRuntimeConfig: %v", err)
+	}
+	if cfg.LLM.Backend != "cli_test" {
+		t.Fatalf("llm backend = %q, want cli_test", cfg.LLM.Backend)
+	}
+}
+
+func TestDefaultRuntimeConfig_DoesNotInferLLMBackendFromCredentials(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	t.Setenv("SWARM_CLAUDE_DEFAULT_MODEL", "test-model")
+	cfg, err := defaultRuntimeConfig()
+	if err != nil {
+		t.Fatalf("defaultRuntimeConfig: %v", err)
+	}
+	if cfg.LLM.Backend != "api" {
+		t.Fatalf("llm backend = %q, want canonical default api", cfg.LLM.Backend)
+	}
+}
+
 func TestLoadRuntimeConfig_RejectsUnsupportedRuntimeControlsFromFile(t *testing.T) {
 	cfgText := strings.Join([]string{
 		"runtime:",
 		"  max_concurrent_agents: 4",
 		"llm:",
-		"  runtime_mode: api",
+		"  backend: api",
 		"  session:",
 		"    lock_ttl: 10s",
 		"    rotate_after_turns: 40",
@@ -4927,7 +4961,7 @@ func writeServeRuntimeTestConfig(t *testing.T) string {
 		"runtime:",
 		"  recovery_on_startup: false",
 		"llm:",
-		"  runtime_mode: api",
+		"  backend: api",
 		"  session:",
 		"    lock_ttl: 10s",
 		"    rotate_after_turns: 40",

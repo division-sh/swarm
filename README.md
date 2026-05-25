@@ -89,8 +89,9 @@ git clone https://github.com/<org>/swarm && cd swarm
 
 # 2. point at a contract bundle
 export SWARM_CONTRACTS_HOST_DIR=/absolute/path/to/your/contracts
+echo 'SWARM_LLM_BACKEND=cli_test' >> .env
 echo 'CLAUDE_CODE_OAUTH_TOKEN=...' >> .env   # for cli_test mode
-# or set ANTHROPIC_API_KEY=... for api mode
+# or set SWARM_LLM_BACKEND=api plus ANTHROPIC_API_KEY=... for api mode
 
 # 3. boot
 docker compose up -d postgres orchestrator

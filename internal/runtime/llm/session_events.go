@@ -11,6 +11,7 @@ import (
 	runtimeactors "swarm/internal/runtime/core/actors"
 	runtimedelivery "swarm/internal/runtime/deliverylifecycle"
 	"swarm/internal/runtime/diaglog"
+	llmselection "swarm/internal/runtime/llm/selection"
 	"swarm/internal/runtime/sessions"
 )
 
@@ -98,11 +99,5 @@ func requireInboundDeliveryActiveForSession(ctx context.Context, publisher Event
 }
 
 func sessionModelTier(actor runtimeactors.AgentConfig) string {
-	if modelTier := strings.TrimSpace(actor.ModelTier); modelTier != "" {
-		return modelTier
-	}
-	if modelTier := strings.TrimSpace(actor.Type); modelTier != "" {
-		return modelTier
-	}
-	return ""
+	return llmselection.NormalizeModelTier(actor.ModelTier)
 }

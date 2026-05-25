@@ -790,7 +790,7 @@ func TestAccumulatorCompletionOutcomeSurface_RoundTripsThroughObservabilityReade
 
 	rt, err := runtimepkg.NewRuntime(ctx, runtimepkg.RuntimeDeps{Config: &config.Config{
 		Runtime: config.RuntimeConfig{},
-		LLM:     config.LLMConfig{RuntimeMode: "api"},
+		LLM:     config.LLMConfig{Backend: "api"},
 	}, Stores: runtimepkg.Stores{
 		SQLDB:         db,
 		EventStore:    pg,
@@ -1168,7 +1168,7 @@ func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *
 			RecoveryOnStartup: false,
 		},
 		LLM: config.LLMConfig{
-			RuntimeMode: "api",
+			Backend: "api",
 		},
 	}, Stores: runtimepkg.Stores{
 		SQLDB:         db,
@@ -1255,7 +1255,7 @@ func TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWitho
 			RecoveryOnStartup: true,
 		},
 		LLM: config.LLMConfig{
-			RuntimeMode: "api",
+			Backend: "api",
 		},
 	}, Stores: runtimepkg.Stores{
 		SQLDB:        db,
@@ -1354,7 +1354,7 @@ func TestStartupTimerRecoveryAftermathSurface_RoundTripsThroughObservabilityRead
 			RecoveryOnStartup: true,
 		},
 		LLM: config.LLMConfig{
-			RuntimeMode: "api",
+			Backend: "api",
 		},
 	}, Stores: runtimepkg.Stores{
 		SQLDB:         db,
@@ -1624,7 +1624,7 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 			RecoveryOnStartup: true,
 		},
 		LLM: config.LLMConfig{
-			RuntimeMode: "api",
+			Backend: "api",
 		},
 	}, Stores: runtimepkg.Stores{
 		SQLDB:        db,

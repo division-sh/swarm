@@ -18,7 +18,7 @@ import (
 
 func TestRuntimeStart_AgentFreeCLITestDoesNotRequireClaudeStartupEnv(t *testing.T) {
 	cfg := &config.Config{}
-	cfg.LLM.RuntimeMode = "cli_test"
+	cfg.LLM.Backend = "cli_test"
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "")
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
 	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "")
@@ -47,7 +47,7 @@ func TestRuntimeStart_AgentFreeCLITestDoesNotRequireClaudeStartupEnv(t *testing.
 
 func TestNewRuntime_AgentPresentCLITestStillRequiresClaudeStartupEnv(t *testing.T) {
 	cfg := &config.Config{}
-	cfg.LLM.RuntimeMode = "cli_test"
+	cfg.LLM.Backend = "cli_test"
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "")
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
 	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "")
@@ -74,7 +74,7 @@ func TestNewRuntime_AgentPresentCLITestStillRequiresClaudeStartupEnv(t *testing.
 
 func TestRuntimeStart_ActiveManagerAgentRequiresFullClaudeStartupEnv(t *testing.T) {
 	cfg := &config.Config{}
-	cfg.LLM.RuntimeMode = "cli_test"
+	cfg.LLM.Backend = "cli_test"
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", "http://127.0.0.1:8081")
 	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "")
