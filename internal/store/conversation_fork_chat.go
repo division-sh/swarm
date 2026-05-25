@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	runtimellm "swarm/internal/runtime/llm"
 	"swarm/internal/runtime/mutationlog"
 )
 
@@ -72,6 +71,13 @@ type ConversationForkSandboxPolicy struct {
 	StubbedTools       []string `json:"stubbed_tools"`
 }
 
+type conversationForkSandboxExecution struct {
+	AssistantMessage string
+	ToolCalls        []OperatorConversationToolCall
+	ToolResults      []OperatorConversationToolResult
+	AvailableTools   []string
+}
+
 func (s *PostgresStore) ChatOperatorConversationFork(ctx context.Context, req ConversationForkChatRequest) (ConversationForkChatResult, error) {
 	if s == nil || s.DB == nil {
 		return ConversationForkChatResult{}, fmt.Errorf("postgres store is required")
@@ -125,19 +131,19 @@ func (s *PostgresStore) ChatOperatorConversationFork(ctx context.Context, req Co
 		return ConversationForkChatResult{}, err
 	}
 	policy := defaultConversationForkSandboxPolicy()
-	assistant, err := executeConversationForkSandboxTurn(ctx, fork, message)
+	execution, err := executeConversationForkSandboxTurn(ctx, fork, snapshot, policy, message)
 	if err != nil {
 		return ConversationForkChatResult{}, err
 	}
-	requestPayload, err := conversationForkChatRequestPayload(message, snapshot)
+	requestPayload, err := conversationForkChatRequestPayload(message, snapshot, execution.AvailableTools)
 	if err != nil {
 		return ConversationForkChatResult{}, err
 	}
-	responsePayload, err := conversationForkChatResponsePayload(assistant, policy)
+	responsePayload, err := conversationForkChatResponsePayload(execution, policy)
 	if err != nil {
 		return ConversationForkChatResult{}, err
 	}
-	turn, err := insertConversationForkTurn(ctx, tx, forkID, actorTokenID, message, assistant, requestPayload, responsePayload, policy, now)
+	turn, err := insertConversationForkTurn(ctx, tx, forkID, actorTokenID, message, execution, requestPayload, responsePayload, policy, now)
 	if err != nil {
 		return ConversationForkChatResult{}, err
 	}
@@ -392,7 +398,7 @@ func insertConversationForkTurn(
 	forkID string,
 	actorTokenID string,
 	message string,
-	assistant string,
+	execution conversationForkSandboxExecution,
 	requestPayload json.RawMessage,
 	responsePayload json.RawMessage,
 	policy ConversationForkSandboxPolicy,
@@ -410,6 +416,10 @@ func insertConversationForkTurn(
 	if err != nil {
 		return OperatorConversationTurn{}, err
 	}
+	toolCallsJSON, err := json.Marshal(execution.ToolCalls)
+	if err != nil {
+		return OperatorConversationTurn{}, err
+	}
 	var turn OperatorConversationTurn
 	var createdAt time.Time
 	if err := tx.QueryRowContext(ctx, `
@@ -420,28 +430,25 @@ func insertConversationForkTurn(
 		)
 		VALUES (
 			$1::uuid, $2, $3, $4, $5,
-			$6::jsonb, $7::jsonb, '[]'::jsonb, $8::jsonb,
-			$9, $10
+			$6::jsonb, $7::jsonb, $8::jsonb, $9::jsonb,
+			$10, $11
 		)
 		RETURNING fork_turn_id::text, created_at
-	`, forkID, nextIndex, actorTokenID, message, assistant,
-		string(requestPayload), string(responsePayload), string(policyJSON),
+	`, forkID, nextIndex, actorTokenID, message, execution.AssistantMessage,
+		string(requestPayload), string(responsePayload), string(toolCallsJSON), string(policyJSON),
 		ConversationForkChatSnapshotOwner, now).Scan(&turn.TurnID, &createdAt); err != nil {
 		return OperatorConversationTurn{}, fmt.Errorf("insert conversation fork turn: %w", err)
 	}
 	turn.TurnIndex = nextIndex
 	turn.RequestPayload = cloneRawMessage(requestPayload)
 	turn.ResponsePayload = cloneRawMessage(responsePayload)
-	turn.ToolCalls = []OperatorConversationToolCall{}
-	turn.TurnBlocks = []OperatorConversationTurnBlock{{
-		Kind:  "turn_summary",
-		Title: "Forkchat sandbox response",
-		Text:  assistant,
-	}}
+	turn.ToolCalls = cloneConversationToolCalls(execution.ToolCalls)
+	turn.ToolResults = cloneConversationToolResults(execution.ToolResults)
+	turn.TurnBlocks = conversationForkSandboxTurnBlocks(execution)
 	turn.ParseOK = true
 	turn.LatencyMS = 0
 	turn.CreatedAt = createdAt.UTC()
-	turn.AssistantVisibleOutput = assistant
+	turn.AssistantVisibleOutput = execution.AssistantMessage
 	return turn, nil
 }
 
@@ -478,11 +485,12 @@ func loadConversationForkTurns(ctx context.Context, db *sql.DB, forkID string) (
 		}
 		turn.RequestPayload = cloneRawMessage(requestRaw)
 		turn.ResponsePayload = cloneRawMessage(responseRaw)
-		turn.TurnBlocks = []OperatorConversationTurnBlock{{
-			Kind:  "turn_summary",
-			Title: "Forkchat sandbox response",
-			Text:  assistant,
-		}}
+		turn.ToolResults = conversationForkToolResultsFromCalls(turn.ToolCalls)
+		turn.TurnBlocks = conversationForkSandboxTurnBlocks(conversationForkSandboxExecution{
+			AssistantMessage: assistant,
+			ToolCalls:        turn.ToolCalls,
+			ToolResults:      turn.ToolResults,
+		})
 		turn.ParseOK = true
 		turn.CreatedAt = createdAt.UTC()
 		turn.AssistantVisibleOutput = assistant
@@ -516,24 +524,145 @@ func defaultConversationForkSandboxPolicy() ConversationForkSandboxPolicy {
 	}
 }
 
-func executeConversationForkSandboxTurn(ctx context.Context, fork OperatorConversationForkSession, message string) (string, error) {
-	runtime := runtimellm.NoopRuntime{}
-	session, err := runtime.StartSession(ctx, fork.SourceAgentID, "forkchat sandbox execution", nil)
-	if err != nil {
-		return "", fmt.Errorf("start forkchat sandbox session: %w", err)
+func executeConversationForkSandboxTurn(ctx context.Context, fork OperatorConversationForkSession, snapshot ConversationForkSnapshot, policy ConversationForkSandboxPolicy, message string) (conversationForkSandboxExecution, error) {
+	if err := ctx.Err(); err != nil {
+		return conversationForkSandboxExecution{}, err
 	}
-	response, err := runtime.ContinueSession(ctx, session, runtimellm.Message{Role: "user", Content: strings.TrimSpace(message)})
-	if err != nil {
-		return "", fmt.Errorf("continue forkchat sandbox session: %w", err)
+	availableTools := conversationForkSandboxAvailableTools(policy)
+	toolCalls := make([]OperatorConversationToolCall, 0, 1+len(policy.StubbedTools))
+	toolResults := make([]OperatorConversationToolResult, 0, 1+len(policy.StubbedTools))
+
+	readArgs := map[string]any{
+		"fork_id":         fork.ForkID,
+		"source_agent_id": fork.SourceAgentID,
+		"snapshot_owner":  snapshot.SnapshotOwner,
 	}
-	return strings.TrimSpace(response.Message.Content), nil
+	readResult := map[string]any{
+		"status":          "read_from_snapshot",
+		"read_policy":     policy.ReadPolicy,
+		"snapshot_owner":  snapshot.SnapshotOwner,
+		"source_agent_id": fork.SourceAgentID,
+		"entity_count":    len(snapshot.EntitySnapshot),
+		"entities":        snapshot.EntitySnapshot,
+	}
+	readCall, readToolResult, err := conversationForkSandboxToolEvidence("fork_snapshot.read_entities", "forkchat-read-1", readArgs, readResult)
+	if err != nil {
+		return conversationForkSandboxExecution{}, err
+	}
+	toolCalls = append(toolCalls, readCall)
+	toolResults = append(toolResults, readToolResult)
+
+	for idx, toolName := range policy.StubbedTools {
+		if strings.TrimSpace(toolName) == "" {
+			continue
+		}
+		toolUseID := fmt.Sprintf("forkchat-stub-%02d", idx+1)
+		args := map[string]any{
+			"fork_id":         fork.ForkID,
+			"source_agent_id": fork.SourceAgentID,
+			"requested_tool":  toolName,
+			"message":         strings.TrimSpace(message),
+		}
+		result := map[string]any{
+			"status":        "stubbed",
+			"owner":         policy.Owner,
+			"write_policy":  policy.WritePolicy,
+			"live_mutation": false,
+			"reason":        "forkchat sandbox records side-effecting tools as fork-local facts only",
+		}
+		call, toolResult, err := conversationForkSandboxToolEvidence(toolName, toolUseID, args, result)
+		if err != nil {
+			return conversationForkSandboxExecution{}, err
+		}
+		toolCalls = append(toolCalls, call)
+		toolResults = append(toolResults, toolResult)
+	}
+
+	assistant := fmt.Sprintf(
+		"Forkchat sandbox executed for source agent %s. Read %d entities from the fork snapshot and stubbed %d side-effecting tools without live mutation.",
+		fork.SourceAgentID,
+		len(snapshot.EntitySnapshot),
+		len(toolCalls)-1,
+	)
+	return conversationForkSandboxExecution{
+		AssistantMessage: assistant,
+		ToolCalls:        toolCalls,
+		ToolResults:      toolResults,
+		AvailableTools:   availableTools,
+	}, nil
 }
 
-func conversationForkChatRequestPayload(message string, snapshot ConversationForkSnapshot) (json.RawMessage, error) {
+func conversationForkSandboxAvailableTools(policy ConversationForkSandboxPolicy) []string {
+	out := []string{"fork_snapshot.read_entities"}
+	out = append(out, policy.StubbedTools...)
+	return out
+}
+
+func conversationForkSandboxToolEvidence(name, toolUseID string, args map[string]any, result map[string]any) (OperatorConversationToolCall, OperatorConversationToolResult, error) {
+	argsRaw, err := json.Marshal(args)
+	if err != nil {
+		return OperatorConversationToolCall{}, OperatorConversationToolResult{}, err
+	}
+	resultRaw, err := json.Marshal(result)
+	if err != nil {
+		return OperatorConversationToolCall{}, OperatorConversationToolResult{}, err
+	}
+	call := OperatorConversationToolCall{
+		ToolUseID: toolUseID,
+		Name:      name,
+		Arguments: argsRaw,
+		Result:    resultRaw,
+	}
+	toolResult := OperatorConversationToolResult{
+		ToolName:  name,
+		ToolUseID: toolUseID,
+		Output:    cloneRawMessage(resultRaw),
+	}
+	return call, toolResult, nil
+}
+
+func conversationForkToolResultsFromCalls(calls []OperatorConversationToolCall) []OperatorConversationToolResult {
+	if len(calls) == 0 {
+		return []OperatorConversationToolResult{}
+	}
+	out := make([]OperatorConversationToolResult, 0, len(calls))
+	for _, call := range calls {
+		if len(call.Result) == 0 {
+			continue
+		}
+		out = append(out, OperatorConversationToolResult{
+			ToolName:  call.Name,
+			ToolUseID: call.ToolUseID,
+			Output:    cloneRawMessage(call.Result),
+		})
+	}
+	return out
+}
+
+func conversationForkSandboxTurnBlocks(execution conversationForkSandboxExecution) []OperatorConversationTurnBlock {
+	blocks := []OperatorConversationTurnBlock{{
+		Kind:  "turn_summary",
+		Title: "Forkchat sandbox response",
+		Text:  execution.AssistantMessage,
+	}}
+	for _, call := range execution.ToolCalls {
+		blocks = append(blocks, OperatorConversationTurnBlock{
+			Kind:     "tool_result",
+			Title:    call.Name,
+			ToolName: call.Name,
+			Input:    cloneRawMessage(call.Arguments),
+			Output:   cloneRawMessage(call.Result),
+		})
+	}
+	return blocks
+}
+
+func conversationForkChatRequestPayload(message string, snapshot ConversationForkSnapshot, availableTools []string) (json.RawMessage, error) {
 	raw, err := json.Marshal(map[string]any{
-		"message":        message,
-		"snapshot_owner": snapshot.SnapshotOwner,
-		"snapshot":       snapshot,
+		"message":         message,
+		"snapshot_owner":  snapshot.SnapshotOwner,
+		"snapshot":        snapshot,
+		"available_tools": availableTools,
 	})
 	if err != nil {
 		return nil, err
@@ -541,11 +670,12 @@ func conversationForkChatRequestPayload(message string, snapshot ConversationFor
 	return raw, nil
 }
 
-func conversationForkChatResponsePayload(assistant string, policy ConversationForkSandboxPolicy) (json.RawMessage, error) {
+func conversationForkChatResponsePayload(execution conversationForkSandboxExecution, policy ConversationForkSandboxPolicy) (json.RawMessage, error) {
 	raw, err := json.Marshal(map[string]any{
-		"message":        assistant,
+		"message":        execution.AssistantMessage,
 		"sandbox_policy": policy,
-		"tool_calls":     []any{},
+		"tool_calls":     execution.ToolCalls,
+		"tool_results":   execution.ToolResults,
 	})
 	if err != nil {
 		return nil, err

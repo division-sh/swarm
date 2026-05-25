@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -213,6 +214,18 @@ func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t 
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM entity_mutations WHERE run_id = $1::uuid`, source.runID).Scan(&mutationsBefore); err != nil {
 		t.Fatalf("count source mutations before chat: %v", err)
 	}
+	var eventsBefore int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events`).Scan(&eventsBefore); err != nil {
+		t.Fatalf("count events before chat: %v", err)
+	}
+	var mailboxBefore int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM mailbox`).Scan(&mailboxBefore); err != nil {
+		t.Fatalf("count mailbox before chat: %v", err)
+	}
+	var runsBefore int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs`).Scan(&runsBefore); err != nil {
+		t.Fatalf("count runs before chat: %v", err)
+	}
 
 	fork, err := s.CreateOperatorConversationFork(ctx, ConversationForkCreateRequest{
 		SourceSessionID: source.sessionID,
@@ -245,6 +258,38 @@ func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t 
 	if entity.EntityID != entityID || entity.CurrentState != "draft" || entity.Fields["name"] != "Before" {
 		t.Fatalf("entity snapshot = %#v, want source-at-fork projection", entity)
 	}
+	readCall := requireConversationForkToolCall(t, result.Turn.ToolCalls, "fork_snapshot.read_entities")
+	readArgs := conversationForkToolCallMap(t, readCall.Arguments)
+	if readArgs["source_agent_id"] != source.agentID || readArgs["snapshot_owner"] != ConversationForkChatSnapshotOwner {
+		t.Fatalf("snapshot read tool args = %#v", readArgs)
+	}
+	readResult := conversationForkToolCallMap(t, readCall.Result)
+	if readResult["status"] != "read_from_snapshot" || readResult["snapshot_owner"] != ConversationForkChatSnapshotOwner || readResult["entity_count"] != float64(1) {
+		t.Fatalf("snapshot read tool result = %#v", readResult)
+	}
+	for _, toolName := range []string{"save_entity_field", "emit_event", "mailbox.approve", "run.start"} {
+		call := requireConversationForkToolCall(t, result.Turn.ToolCalls, toolName)
+		args := conversationForkToolCallMap(t, call.Arguments)
+		if args["source_agent_id"] != source.agentID {
+			t.Fatalf("%s args = %#v, want source_agent_id %s", toolName, args, source.agentID)
+		}
+		stub := conversationForkToolCallMap(t, call.Result)
+		if stub["status"] != "stubbed" || stub["owner"] != ConversationForkChatSandboxOwner || stub["live_mutation"] != false {
+			t.Fatalf("%s stub result = %#v", toolName, stub)
+		}
+	}
+	if len(result.Turn.ToolCalls) <= 1 {
+		t.Fatalf("tool calls = %#v, want snapshot read plus stubbed side-effect evidence", result.Turn.ToolCalls)
+	}
+	var responsePayload struct {
+		ToolCalls []OperatorConversationToolCall `json:"tool_calls"`
+	}
+	if err := json.Unmarshal(result.Turn.ResponsePayload, &responsePayload); err != nil {
+		t.Fatalf("decode forkchat response payload: %v", err)
+	}
+	if len(responsePayload.ToolCalls) != len(result.Turn.ToolCalls) {
+		t.Fatalf("response payload tool_calls = %d, want %d", len(responsePayload.ToolCalls), len(result.Turn.ToolCalls))
+	}
 
 	loaded, err := s.LoadOperatorConversationFork(ctx, fork.ForkID)
 	if err != nil {
@@ -253,6 +298,9 @@ func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t 
 	if len(loaded.Turns) != 1 || loaded.Turns[0].TurnID != result.Turn.TurnID {
 		t.Fatalf("fork_view turns = %#v, want fork-local chat turn", loaded.Turns)
 	}
+	if len(loaded.Turns[0].ToolCalls) != len(result.Turn.ToolCalls) {
+		t.Fatalf("fork_view tool calls = %#v, want persisted sandbox evidence", loaded.Turns[0].ToolCalls)
+	}
 
 	var mutationsAfter int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM entity_mutations WHERE run_id = $1::uuid`, source.runID).Scan(&mutationsAfter); err != nil {
@@ -260,6 +308,27 @@ func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t 
 	}
 	if mutationsAfter != mutationsBefore {
 		t.Fatalf("source mutations changed from %d to %d; forkchat must not live-mutate", mutationsBefore, mutationsAfter)
+	}
+	var eventsAfter int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events`).Scan(&eventsAfter); err != nil {
+		t.Fatalf("count events after chat: %v", err)
+	}
+	if eventsAfter != eventsBefore {
+		t.Fatalf("events changed from %d to %d; forkchat must not emit live events", eventsBefore, eventsAfter)
+	}
+	var mailboxAfter int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM mailbox`).Scan(&mailboxAfter); err != nil {
+		t.Fatalf("count mailbox after chat: %v", err)
+	}
+	if mailboxAfter != mailboxBefore {
+		t.Fatalf("mailbox changed from %d to %d; forkchat must not mutate mailbox decisions", mailboxBefore, mailboxAfter)
+	}
+	var runsAfter int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs`).Scan(&runsAfter); err != nil {
+		t.Fatalf("count runs after chat: %v", err)
+	}
+	if runsAfter != runsBefore {
+		t.Fatalf("runs changed from %d to %d; forkchat must not start or mutate live runs", runsBefore, runsAfter)
 	}
 	var normalTurns int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_turns WHERE session_id = $1::uuid`, fork.ForkID).Scan(&normalTurns); err != nil {
@@ -289,6 +358,29 @@ func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t 
 	if !errors.As(err, &paramErr) || paramErr.Field != "fork_id" {
 		t.Fatalf("deleted fork chat error = %v, want fork_id invalid params", err)
 	}
+}
+
+func requireConversationForkToolCall(t *testing.T, calls []OperatorConversationToolCall, name string) OperatorConversationToolCall {
+	t.Helper()
+	for _, call := range calls {
+		if call.Name == name {
+			if len(call.Result) == 0 {
+				t.Fatalf("%s tool call has no result evidence: %#v", name, call)
+			}
+			return call
+		}
+	}
+	t.Fatalf("tool call %s missing from %#v", name, calls)
+	return OperatorConversationToolCall{}
+}
+
+func conversationForkToolCallMap(t *testing.T, raw json.RawMessage) map[string]any {
+	t.Helper()
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("decode tool call JSON %s: %v", string(raw), err)
+	}
+	return out
 }
 
 type conversationForkSourceFixture struct {
