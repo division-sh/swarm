@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"swarm/internal/config"
+	llmselection "swarm/internal/runtime/llm/selection"
 	"swarm/internal/runtime/sessions"
 )
 
@@ -85,7 +86,7 @@ func TestRuntimeFactoryValidatesProviderContract(t *testing.T) {
 			runtime, err := RuntimeFactory{
 				Cfg: &config.Config{
 					LLM: config.LLMConfig{
-						RuntimeMode: tt.mode,
+						Backend: tt.mode,
 					},
 				},
 			}.Build()
@@ -100,6 +101,18 @@ func TestRuntimeFactoryValidatesProviderContract(t *testing.T) {
 				t.Fatalf("provider = %q, want %q", contract.Provider, tt.provider)
 			}
 		})
+	}
+}
+
+func TestRuntimeFactoryRejectsContractProfileMismatch(t *testing.T) {
+	_, err := RequireProviderContractForProfile(llmselection.Profile{
+		ID:          "bad",
+		RuntimeMode: "api",
+		Provider:    "openai",
+		Transport:   llmselection.TransportAPI,
+	}, NewAnthropicAPIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil))
+	if err == nil || !strings.Contains(err.Error(), "resolves provider") {
+		t.Fatalf("RequireProviderContractForProfile error = %v, want provider mismatch", err)
 	}
 }
 

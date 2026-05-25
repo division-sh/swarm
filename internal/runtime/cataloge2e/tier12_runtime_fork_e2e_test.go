@@ -68,7 +68,7 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 	assertSourceRunLifecycle(t, h.db, sourceRunID, "paused", false)
 
 	cfg := testRuntimeConfig()
-	cfg.LLM.RuntimeMode = "api"
+	cfg.LLM.Backend = "api"
 	result, err := runtimerunforkexecution.ExecuteSelectedContractRunFork(h.ctx, runtimerunforkexecution.SelectedContractExecutionRequest{
 		SourceRunID:       sourceRunID,
 		At:                forkAt,

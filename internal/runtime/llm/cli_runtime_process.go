@@ -15,6 +15,7 @@ import (
 
 	"swarm/internal/config"
 	runtimeactors "swarm/internal/runtime/core/actors"
+	llmselection "swarm/internal/runtime/llm/selection"
 	workspace "swarm/internal/runtime/workspace"
 )
 
@@ -27,8 +28,9 @@ func (r *ClaudeCLIRuntime) runWithInput(ctx context.Context, args []string, targ
 	if target == nil || !target.Enabled() {
 		return nil, fmt.Errorf("%w: claude sessions must run in a container workspace", ErrClaudeWorkspaceRequired)
 	}
-	if strings.TrimSpace(os.Getenv("CLAUDE_CODE_OAUTH_TOKEN")) == "" {
-		return nil, fmt.Errorf("%w: CLAUDE_CODE_OAUTH_TOKEN is missing", ErrClaudeAuthRequired)
+	profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendCLITest)
+	if err := llmselection.RequireCredential(profile, os.LookupEnv); err != nil {
+		return nil, fmt.Errorf("%w: %s is missing", ErrClaudeAuthRequired, profile.Credential.EnvVar)
 	}
 
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -279,8 +281,9 @@ func (r *ClaudeCLIRuntime) buildCommand(ctx context.Context, args []string, targ
 		if gatewayToken := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_TOKEN")); gatewayToken != "" {
 			dockerArgs = append(dockerArgs, "-e", "SWARM_TOOL_GATEWAY_TOKEN="+gatewayToken)
 		}
-		if oauthToken := strings.TrimSpace(os.Getenv("CLAUDE_CODE_OAUTH_TOKEN")); oauthToken != "" {
-			dockerArgs = append(dockerArgs, "-e", "CLAUDE_CODE_OAUTH_TOKEN="+oauthToken)
+		profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendCLITest)
+		if oauthToken := llmselection.CredentialValue(profile, os.LookupEnv); oauthToken != "" {
+			dockerArgs = append(dockerArgs, "-e", profile.Credential.EnvVar+"="+oauthToken)
 		}
 		if strings.TrimSpace(target.Workdir) != "" {
 			dockerArgs = append(dockerArgs, "-w", target.Workdir)

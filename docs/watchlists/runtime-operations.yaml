@@ -77,6 +77,10 @@ active_issues:
     title: Clean/compact LLM provider interface for arbitrary backends
     maps_to:
       - llm_provider_adjacency_contract_ownership
+  - id: 1062
+    title: Canonicalize LLM provider selection/config authority
+    maps_to:
+      - llm_provider_selection_config_authority
   - id: 175
     title: Add first-class launch, stalled-run, and long-running session observability
     maps_to:
@@ -266,13 +270,14 @@ nodes:
     parent_class: runtime LLM provider abstraction not production-ready
     canonical_owners:
       - internal/runtime/llm provider contract for runtime mode, provider identity, transport, tool schema translation, session lifecycle, response normalization, native-tool capability truth, persistence, and budget accounting
+      - internal/runtime/llm/selection backend profile resolver for provider-selection/config authority
     why_this_node_exists: LLM provider behavior drifts when a runtime implementation satisfies StartSession and ContinueSession but leaves tool schema, stream parsing, session persistence, native tools, and budget behavior implicit in adjacent files
     known_manifestations:
       - RuntimeFactory can make provider identity look like a local mode switch rather than a contract-backed provider selection boundary
       - the public Runtime interface alone does not name provider obligations for tool schemas, provider session IDs, response normalization, task-mode audit, native-tool capability truth, or budget usage
       - Anthropic API and Claude CLI encode provider-specific request, response, stream, and budget behavior separately without one named adjacency contract
       - CLI strict native-tool behavior and API fallback-aware behavior can drift if agent tool composition and boot validation read optional runtime helpers instead of the provider contract
-      - config llm.runtime_mode and persisted agents.llm_backend currently conflate provider identity, transport, and runtime mode; adding a new provider before a contract owner would freeze under-specified semantics
+      - config llm.runtime_mode and persisted agents.llm_backend used to conflate provider identity, transport, and runtime mode; this selection/config slice is tracked in llm_provider_selection_config_authority
       - README/provider-extensibility wording can overstate provider neutrality unless implementation and docs consume the same provider contract truth
     representative_issues:
       - 983
@@ -284,6 +289,32 @@ nodes:
         - add one factory switch case
         - document how to copy the Anthropic runtime
         - rename cli_test
+    current_action_pressure: active
+  - id: llm_provider_selection_config_authority
+    title: LLM Provider Selection Config Authority
+    parent_class: runtime LLM provider abstraction not production-ready
+    canonical_owners:
+      - docs/specs/swarm-platform/platform/contracts/platform-spec.yaml llm_provider_selection_config_authority
+      - internal/runtime/llm/selection backend profile resolver
+    why_this_node_exists: LLM provider selection drifts when config, CLI env defaults, runtime factories, provider credentials, persisted llm_backend, and model-tier mapping each interpret backend identity independently
+    known_manifestations:
+      - llm.backend and SWARM_LLM_BACKEND must be the only active selection inputs; retired llm.runtime_mode and SWARM_LLM_RUNTIME_MODE fail closed
+      - the backend profile id resolves provider identity, transport/protocol mode, credential source, provider-contract runtime mode, and model-tier mapping
+      - command defaults must not infer provider/backend selection from credential or model env presence
+      - RuntimeFactory, selected-fork runtime materialization, provider credential checks, AgentManager, store projection/hydration, and model selection must consume the same profile resolver
+      - agents.llm_backend stores a backend profile id; api and cli_test are active runtime profiles while mock and local are reserved persisted-only profiles
+      - first non-Anthropic provider implementation remains blocked until it consumes this authority instead of inventing config/env/model semantics locally
+    representative_issues:
+      - 983
+      - 1062
+    common_framing_mistakes:
+      too_broad:
+        - implement OpenAI, OpenRouter, Ollama, Bedrock, or another provider in the selection-authority slice
+        - rename cli_test while defining profile semantics
+      too_narrow:
+        - add one factory switch case
+        - add one env var alias while keeping runtime_mode as semantic owner
+        - validate config without moving runtime/store/model consumers
     current_action_pressure: active
   - id: transport_policy_and_surface_parity
     title: Transport Policy And Surface Parity

@@ -12,6 +12,7 @@ import (
 	models "swarm/internal/runtime/core/actors"
 	"swarm/internal/runtime/core/toolidentity"
 	runtimecorrelation "swarm/internal/runtime/correlation"
+	llmselection "swarm/internal/runtime/llm/selection"
 	"swarm/internal/runtime/sessions"
 	runtimesharedjson "swarm/internal/runtime/sharedjson"
 )
@@ -828,9 +829,8 @@ func estimateCLIUsageTokens(in Message, out *Response, actor models.AgentConfig)
 		outTokens = 200
 	}
 
-	// BudgetTracker only needs model string for tier detection. For CLI mode we use
-	// the configured model tier (e.g. "haiku" or "sonnet") from actor.Type.
-	model := strings.TrimSpace(actor.Type)
+	profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendCLITest)
+	model, _ := llmselection.ResolveModelName(profile, llmselection.ModelResolution{ModelTier: actor.ModelTier})
 
 	return UsageTokens{
 		InputTokens:  inTokens,

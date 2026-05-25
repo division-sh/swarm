@@ -36,6 +36,7 @@ import (
 	runtimecredentials "swarm/internal/runtime/credentials"
 	runtimedestructivereset "swarm/internal/runtime/destructivereset"
 	runtimellm "swarm/internal/runtime/llm"
+	llmselection "swarm/internal/runtime/llm/selection"
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimemcp "swarm/internal/runtime/mcp"
 	runtimepipeline "swarm/internal/runtime/pipeline"
@@ -1339,13 +1340,12 @@ func defaultRuntimeConfig() (*config.Config, error) {
 	if err := rejectUnsupportedRuntimeControlEnv(); err != nil {
 		return nil, err
 	}
-	mode := strings.TrimSpace(os.Getenv("SWARM_LLM_RUNTIME_MODE"))
-	if mode == "" {
-		if strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY")) != "" && strings.TrimSpace(os.Getenv("SWARM_CLAUDE_DEFAULT_MODEL")) != "" {
-			mode = "api"
-		} else {
-			mode = "cli_test"
-		}
+	if err := llmselection.RejectRetiredEnvRuntimeMode(os.LookupEnv); err != nil {
+		return nil, err
+	}
+	backend := strings.TrimSpace(os.Getenv(llmselection.EnvBackend))
+	if backend == "" {
+		backend = llmselection.DefaultBackendID()
 	}
 	cfg := &config.Config{
 		Runtime: config.RuntimeConfig{
@@ -1361,7 +1361,7 @@ func defaultRuntimeConfig() (*config.Config, error) {
 			PoolSize: envInt("SWARM_DB_POOL_SIZE", 5),
 		},
 		LLM: config.LLMConfig{
-			RuntimeMode: mode,
+			Backend: backend,
 			Session: config.LLMSessionConfig{
 				LockTTL:               envDuration("SWARM_LLM_SESSION_LOCK_TTL", 10*time.Second),
 				RotateAfterTurns:      envInt("SWARM_LLM_SESSION_ROTATE_AFTER_TURNS", 40),

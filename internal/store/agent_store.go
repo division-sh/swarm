@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	runtimeactors "swarm/internal/runtime/core/actors"
 	runtimecurrentstate "swarm/internal/runtime/currentstate"
+	llmselection "swarm/internal/runtime/llm/selection"
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimesessions "swarm/internal/runtime/sessions"
 )
@@ -246,9 +247,6 @@ func agentModelTier(cfg runtimeactors.AgentConfig) string {
 	if v := strings.TrimSpace(cfg.ModelTier); v != "" {
 		return v
 	}
-	if v := strings.TrimSpace(cfg.Type); v != "" {
-		return v
-	}
 	return "generic"
 }
 
@@ -276,11 +274,15 @@ func agentFlowInstance(cfg runtimeactors.AgentConfig) string {
 	return ""
 }
 
-func agentLLMBackend(cfg runtimeactors.AgentConfig) string {
+func agentLLMBackend(cfg runtimeactors.AgentConfig) (string, error) {
 	if v := strings.TrimSpace(cfg.LLMBackend); v != "" {
-		return v
+		profile, err := llmselection.ResolvePersistedBackend(v)
+		if err != nil {
+			return "", err
+		}
+		return profile.ID, nil
 	}
-	return "api"
+	return llmselection.DefaultBackendID(), nil
 }
 
 func agentPersistedStatus(raw string) string {

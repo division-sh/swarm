@@ -16,6 +16,7 @@ import (
 	"swarm/internal/events"
 	runtimeactors "swarm/internal/runtime/core/actors"
 	runtimecorrelation "swarm/internal/runtime/correlation"
+	llmselection "swarm/internal/runtime/llm/selection"
 	"swarm/internal/runtime/sessions"
 )
 
@@ -34,6 +35,7 @@ type AnthropicAPIRuntime struct {
 }
 
 func NewAnthropicAPIRuntime(cfg *config.Config, sessions sessions.Registry, lockOwner string, turns TurnPersistence, conversations ConversationPersistence, budget BudgetGuard, publisher EventPublisher) *AnthropicAPIRuntime {
+	profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendAPI)
 	return &AnthropicAPIRuntime{
 		cfg:           cfg,
 		sessions:      sessions,
@@ -45,7 +47,7 @@ func NewAnthropicAPIRuntime(cfg *config.Config, sessions sessions.Registry, lock
 			Timeout: 120 * time.Second,
 		},
 		apiURL: "https://api.anthropic.com/v1/messages",
-		apiKey: os.Getenv("ANTHROPIC_API_KEY"),
+		apiKey: llmselection.CredentialValue(profile, os.LookupEnv),
 		events: publisher,
 	}
 }
@@ -234,8 +236,12 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 		return nil, fmt.Errorf("mark inbound delivery active for reused api session: %w", err)
 	}
 
+	profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendAPI)
 	if strings.TrimSpace(r.apiKey) == "" {
-		return nil, errors.New("ANTHROPIC_API_KEY is required for api runtime mode")
+		r.apiKey = llmselection.CredentialValue(profile, os.LookupEnv)
+		if strings.TrimSpace(r.apiKey) == "" {
+			return nil, llmselection.RequireCredential(profile, os.LookupEnv)
+		}
 	}
 
 	reqBody, err := r.buildRequest(ctx, s, message)
@@ -394,6 +400,7 @@ func (r *AnthropicAPIRuntime) persistTurn(ctx context.Context, turn AgentTurnRec
 }
 
 func (r *AnthropicAPIRuntime) buildRequest(ctx context.Context, s *Session, input Message) (anthropicRequest, error) {
+	profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendAPI)
 	msgs := make([]anthropicMessage, 0, len(s.Messages)+1)
 	for _, m := range s.Messages {
 		am, ok := toAnthropicMessage(m)
@@ -422,24 +429,22 @@ func (r *AnthropicAPIRuntime) buildRequest(ctx context.Context, s *Session, inpu
 		tools = append(tools, tool)
 	}
 
-	model := strings.TrimSpace(r.cfg.LLM.ClaudeAPI.DefaultModel)
+	modelReq := llmselection.ModelResolution{
+		Models: llmselection.ModelMap{
+			Default: r.cfg.LLM.ClaudeAPI.DefaultModel,
+			Haiku:   r.cfg.LLM.ClaudeAPI.HaikuModel,
+		},
+	}
 	if actor, ok := runtimeactors.ActorFromContext(ctx); ok {
-		switch strings.ToLower(strings.TrimSpace(actor.Type)) {
-		case "haiku":
-			if strings.TrimSpace(r.cfg.LLM.ClaudeAPI.HaikuModel) != "" {
-				model = strings.TrimSpace(r.cfg.LLM.ClaudeAPI.HaikuModel)
-			}
-		}
+		modelReq.ModelTier = actor.ModelTier
 		actorEntityID := actor.EffectiveEntityID()
 		if r.budget != nil && r.budget.IsEntityThrottle(actorEntityID) {
-			// Degradation on throttle: force cheaper model tier when configured.
-			if strings.TrimSpace(r.cfg.LLM.ClaudeAPI.HaikuModel) != "" {
-				model = strings.TrimSpace(r.cfg.LLM.ClaudeAPI.HaikuModel)
-			}
+			modelReq.ForceLowCost = true
 		}
 	}
-	if model == "" {
-		return anthropicRequest{}, errors.New("llm.claude_api.default_model is required in api mode")
+	model, err := llmselection.ResolveModelName(profile, modelReq)
+	if err != nil {
+		return anthropicRequest{}, err
 	}
 	return anthropicRequest{
 		Model:     model,

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	llmselection "swarm/internal/runtime/llm/selection"
 )
 
 type ProviderTransport string
@@ -112,6 +114,20 @@ func RequireProviderContract(runtimeMode string, runtime Runtime) (ProviderContr
 	}
 	if want := strings.TrimSpace(runtimeMode); want != "" && contract.RuntimeMode != want {
 		return ProviderContract{}, fmt.Errorf("llm runtime mode %q exposes provider contract for %q", want, contract.RuntimeMode)
+	}
+	return contract, nil
+}
+
+func RequireProviderContractForProfile(profile llmselection.Profile, runtime Runtime) (ProviderContract, error) {
+	contract, err := RequireProviderContract(profile.RuntimeMode, runtime)
+	if err != nil {
+		return ProviderContract{}, err
+	}
+	if contract.Provider != profile.Provider {
+		return ProviderContract{}, fmt.Errorf("llm backend profile %q resolves provider %q but runtime exposes provider %q", profile.ID, profile.Provider, contract.Provider)
+	}
+	if string(contract.Transport) != profile.Transport {
+		return ProviderContract{}, fmt.Errorf("llm backend profile %q resolves transport %q but runtime exposes transport %q", profile.ID, profile.Transport, contract.Transport)
 	}
 	return contract, nil
 }

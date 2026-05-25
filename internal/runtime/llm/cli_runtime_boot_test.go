@@ -9,7 +9,7 @@ import (
 
 func TestValidateClaudeCLIRuntimeConfig_RequiresExplicitBridgeEnv(t *testing.T) {
 	cfg := &config.Config{}
-	cfg.LLM.RuntimeMode = "cli_test"
+	cfg.LLM.Backend = "cli_test"
 
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
@@ -25,7 +25,7 @@ func TestValidateClaudeCLIRuntimeConfig_RequiresExplicitBridgeEnv(t *testing.T) 
 
 func TestValidateClaudeCLIRuntimeConfig_RequiresMCPBridgeEnabled(t *testing.T) {
 	cfg := &config.Config{}
-	cfg.LLM.RuntimeMode = "cli_test"
+	cfg.LLM.Backend = "cli_test"
 
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "0")
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", "http://127.0.0.1:8081")
@@ -41,7 +41,7 @@ func TestValidateClaudeCLIRuntimeConfig_RequiresMCPBridgeEnabled(t *testing.T) {
 
 func TestValidateClaudeCLIRuntimeConfig_AcceptsExplicitConfig(t *testing.T) {
 	cfg := &config.Config{}
-	cfg.LLM.RuntimeMode = "cli_test"
+	cfg.LLM.Backend = "cli_test"
 
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", "http://127.0.0.1:8081")
@@ -56,7 +56,7 @@ func TestValidateClaudeCLIRuntimeConfig_AcceptsExplicitConfig(t *testing.T) {
 
 func TestValidateClaudeCLIRuntimeConfig_RequiresExplicitContainerGatewayEnv(t *testing.T) {
 	cfg := &config.Config{}
-	cfg.LLM.RuntimeMode = "cli_test"
+	cfg.LLM.Backend = "cli_test"
 
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", "http://127.0.0.1:8081")

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	runtimeactors "swarm/internal/runtime/core/actors"
+	llmselection "swarm/internal/runtime/llm/selection"
 	runtimesessions "swarm/internal/runtime/sessions"
 )
 
@@ -102,7 +103,10 @@ func projectPersistedAgentConfig(cfg runtimeactors.AgentConfig, parentAgentID st
 	if err != nil {
 		return persistedAgentProjection{}, fmt.Errorf("invalid conversation mode: %w", err)
 	}
-	llmBackend := agentLLMBackend(cfg)
+	llmBackend, err := agentLLMBackend(cfg)
+	if err != nil {
+		return persistedAgentProjection{}, fmt.Errorf("invalid llm_backend: %w", err)
+	}
 	configJSON, err := mergeAgentConfigJSON(cfg)
 	if err != nil {
 		return persistedAgentProjection{}, fmt.Errorf("marshal agent config: %w", err)
@@ -144,6 +148,11 @@ func hydratePersistedAgentConfig(row persistedAgentProjection) (runtimeactors.Ag
 	if llmBackend == "" {
 		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s missing llm_backend", strings.TrimSpace(row.AgentID))
 	}
+	profile, err := llmselection.ResolvePersistedBackend(llmBackend)
+	if err != nil {
+		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s invalid llm_backend %q: %w", strings.TrimSpace(row.AgentID), llmBackend, err)
+	}
+	llmBackend = profile.ID
 	conversationMode, err := runtimesessions.ParseConversationRuntimeMode(row.ConversationMode)
 	if err != nil {
 		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s invalid conversation_mode %q: %w", strings.TrimSpace(row.AgentID), strings.TrimSpace(row.ConversationMode), err)

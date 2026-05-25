@@ -2165,9 +2165,70 @@ engine:
           native_tool_policy: strict provider-native runtime
       split_boundaries:
       - Adding new provider identities such as OpenAI, Ollama, Bedrock, Azure OpenAI, Vertex, or vLLM requires a separate
-        provider-selection/config gate.
+        provider implementation/parity gate that consumes llm_provider_selection_config_authority.
       - Renaming cli_test is a separate compatibility/semantics decision.
-      - Provider-selection UI and runtime mode/env/config policy are outside this adapter-contract slice.
+      - Provider-selection UI is outside this adapter-contract slice.
+    llm_provider_selection_config_authority:
+      description: Runtime LLM backend selection is profile-based. A backend profile id is the canonical selection and
+        persisted deployment value; it resolves to provider identity, transport/protocol mode, credential source, model-tier
+        mapping, and the provider adapter runtime mode consumed by internal/runtime/llm.ProviderContract. Provider identity
+        alone (for example anthropic/openai) and transport alone (for example api/cli/local) are not valid replacements for
+        the backend profile id.
+      owner: internal/runtime/llm/selection backend profile resolver
+      canonical_selector:
+        config_key: llm.backend
+        env_var: SWARM_LLM_BACKEND
+        default_backend_profile: api
+        retired_non_authoritative_selectors:
+        - llm.runtime_mode
+        - SWARM_LLM_RUNTIME_MODE
+        rules:
+        - Config and CLI env parsing may collect selector input, but they must consume the backend profile resolver rather
+          than independently interpreting provider identity, transport, credential, or model semantics.
+        - The platform must not infer backend profile from credential or model env presence. Missing selector input resolves
+          only through the documented default backend profile.
+        - Unsupported backend profiles and retired selector fields fail closed.
+      active_backend_profiles:
+        api:
+          provider: anthropic
+          transport: api
+          provider_contract_runtime_mode: api
+          credential_source:
+            env_var: ANTHROPIC_API_KEY
+            required: true
+          model_tier_mapping:
+            default_model_config: llm.claude_api.default_model
+            low_cost_model_config: llm.claude_api.haiku_model
+            model_tier_source: agents.model_tier
+            throttle_degrade_rule: If the budget guard marks the actor entity throttled and the low-cost model is configured,
+              the API runtime uses the low-cost model for that turn.
+        cli_test:
+          provider: claude
+          transport: cli
+          provider_contract_runtime_mode: cli_test
+          credential_source:
+            env_var: CLAUDE_CODE_OAUTH_TOKEN
+            required: true
+          model_tier_mapping:
+            model_tier_source: agents.model_tier
+            accounting_model: CLI budget estimation records the configured model_tier string because the Claude CLI shipped
+              runtime does not expose exact model usage metadata in a stable non-interactive surface.
+      reserved_persisted_backend_profiles:
+        mock: Reserved persisted profile id for fixture replay. It is not a supported active runtime backend until a dedicated
+          provider/runtime owner lands.
+        local: Reserved persisted profile id for local model execution. It is not a supported active runtime backend until
+          a dedicated provider/runtime owner lands.
+      persistence_rules:
+      - agents.llm_backend stores the backend profile id, not provider identity and not transport mode.
+      - Agent/session conversation scope remains owned by agent_sessions.runtime_mode and is orthogonal to llm_backend.
+      - Runtime manager/default materialization must persist the resolved backend profile id rather than reusing config/runtime
+        mode strings.
+      - Readers must consume persisted llm_backend as a backend profile id and fail closed on unknown values.
+      split_boundaries:
+      - Implementing OpenAI, OpenRouter, Ollama, Bedrock, Azure OpenAI, Vertex, vLLM, or any other new provider remains a
+        separate provider implementation/parity gate.
+      - Renaming cli_test remains a separate compatibility/storage/spec migration.
+      - Provider UI and docs beyond the selector/config truth remain under the #983 parent tail.
     conversation_modes:
       description: How the platform manages agent session context across invocations.
       modes:
@@ -3743,8 +3804,11 @@ platform_tables:
         for runtime control semantics. flow_instance nullable for root-level agents not scoped to any flow. entity_id nullable
         — set only for agents scoped to a specific entity (rare). The contract in agents.yaml is the source of truth and
         permissions_bundle is resolved at boot into the persisted permissions array rather than being stored directly.
-        llm_backend specifies the LLM invocation backend — api (production), cli_test (test harness), mock (fixture replay).
-        This is a deployment/agent property, not a session property. agent_sessions.runtime_mode tracks conversation scope only.'
+        llm_backend stores the backend profile id owned by llm_provider_selection_config_authority. Active runtime profiles
+        are api (Anthropic API transport) and cli_test (Claude CLI transport); mock and local are reserved persisted profile
+        ids and are not active runtimes until a dedicated provider/runtime owner lands. This value is provider-selection
+        deployment truth, not provider identity alone and not transport mode alone. This is a deployment/agent property, not
+        a session property. agent_sessions.runtime_mode tracks conversation scope only.'
       ddl: "CREATE TABLE agents (\n    agent_id          TEXT PRIMARY KEY,\n    flow_instance     TEXT,\n    role        \
         \      TEXT NOT NULL,\n    model_tier        TEXT NOT NULL,\n    llm_backend       TEXT NOT NULL DEFAULT 'api' CHECK\
         \ (llm_backend IN ('api', 'cli_test', 'mock', 'local')),\n    conversation_mode TEXT NOT NULL CHECK (conversation_mode\
