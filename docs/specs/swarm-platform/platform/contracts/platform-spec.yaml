@@ -5011,6 +5011,38 @@ multi_bundle_persistence:
     cli_command: swarm bundle delete <bundle-hash> [--force] [--dry-run] [--idempotency-key <key>]
     non_force_rule: >
       Without --force, deleting a bundle with any active run using that bundle fails closed with BUNDLE_HAS_ACTIVE_RUNS.
+    phase_5_atomicity:
+      tracker: '#1009'
+      implementation_status: source_authority_only_no_runtime_behavior
+      canonical_runtime_owner: future bundle catalog store transaction/mutator
+      applies_to:
+        - '#1018 non-force bundle.delete final bundle availability mutation'
+        - '#1019 bundle.delete --force final bundle availability mutation after preservation cleanup succeeds'
+      transaction_rule: >
+        The final bundle availability mutation MUST execute in one database transaction. The transaction updates every
+        eligible referencing run from bundle_source=persisted to bundle_source=deleted before deleting the matching bundles
+        row. API handlers, CLI consumers, force-delete orchestration, and non-force delete orchestration MUST consume the
+        shared store transaction owner rather than issuing local raw SQL for this transition.
+      transaction_order:
+        - update_eligible_runs_bundle_source_to_deleted
+        - delete_matching_bundles_row
+      eligible_runs: >
+        Only runs that are already non-active for the delete operation may be marked deleted in Phase 5. Active-run refusal
+        is owned by #1018 for non-force delete, and active-run quiescence plus preservation cleanup is owned by #1019/#1008
+        for force delete before Phase 5 is reachable.
+      isolation: >
+        PostgreSQL READ COMMITTED is sufficient when both statements are inside the same transaction: concurrent readers
+        observe either the pre-delete persisted source with an existing bundle row or the post-delete deleted source with no
+        row. They must not observe a legitimate delete as bundle_source=persisted with a missing bundle row.
+      reader_invariant: >
+        Bundle availability readers MUST read runs.bundle_source before consulting bundles. Readers only look up bundles
+        when bundle_source=persisted. bundle_source in (ephemeral, deleted, legacy) returns BUNDLE_UNAVAILABLE without a
+        bundle-row lookup; bundle_source=persisted with a missing row remains BUNDLE_DATA_INTEGRITY_ERROR.
+      invalid_implementations:
+        - deleting the bundles row before marking eligible runs deleted
+        - splitting the runs update and bundle row delete across transactions
+        - implementing separate raw-SQL Phase 5 transitions in non-force and force delete paths
+        - reading bundles before runs.bundle_source when classifying bundle availability
     force_owner_chain:
       - acquire shared destructive-operation mutex/idempotency owner
       - plan affected runs and deliveries for the bundle_hash
