@@ -33,6 +33,13 @@ type conversationForkDeleteResult struct {
 	IdempotencyReplayed bool   `json:"idempotency_replayed"`
 }
 
+type conversationForkErrorDetails struct {
+	SessionID string
+	ForkID    string
+	TurnIndex int
+	EventID   string
+}
+
 func OperatorConversationForkHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 	if opts.ConversationForks == nil || opts.Idempotency == nil {
 		return nil
@@ -52,7 +59,7 @@ func OperatorConversationForkHandlers(opts OperatorReadOptions) map[string]Metho
 			}
 			result, err := opts.ConversationForks.ListOperatorConversationForks(ctx, listOpts)
 			if err != nil {
-				return nil, conversationForkError(err, "", 0)
+				return nil, conversationForkError(err, conversationForkErrorDetails{})
 			}
 			if result.Forks == nil {
 				result.Forks = []store.OperatorConversationForkSession{}
@@ -66,7 +73,7 @@ func OperatorConversationForkHandlers(opts OperatorReadOptions) map[string]Metho
 			}
 			result, err := opts.ConversationForks.LoadOperatorConversationFork(ctx, forkID)
 			if err != nil {
-				return nil, conversationForkError(err, forkID, 0)
+				return nil, conversationForkError(err, conversationForkErrorDetails{ForkID: forkID})
 			}
 			return result, nil
 		},
@@ -105,7 +112,11 @@ func executeConversationForkCreate(ctx context.Context, req Request, opts Operat
 			Now:             now,
 		})
 		if err != nil {
-			return store.APIIdempotencyCompletion{}, conversationForkError(err, "", forkPoint.TurnIndex)
+			return store.APIIdempotencyCompletion{}, conversationForkError(err, conversationForkErrorDetails{
+				SessionID: sourceSessionID,
+				TurnIndex: forkPoint.TurnIndex,
+				EventID:   forkPoint.EventID,
+			})
 		}
 		response, err := json.Marshal(conversationForkCreateResult{
 			Fork:                fork,
@@ -117,7 +128,11 @@ func executeConversationForkCreate(ctx context.Context, req Request, opts Operat
 		return store.APIIdempotencyCompletion{ResourceID: fork.ForkID, Response: response}, nil
 	})
 	if err != nil {
-		return nil, conversationForkError(err, "", forkPoint.TurnIndex)
+		return nil, conversationForkError(err, conversationForkErrorDetails{
+			SessionID: sourceSessionID,
+			TurnIndex: forkPoint.TurnIndex,
+			EventID:   forkPoint.EventID,
+		})
 	}
 	var result conversationForkCreateResult
 	if err := json.Unmarshal(completion.Response, &result); err != nil {
@@ -150,7 +165,7 @@ func executeConversationForkDelete(ctx context.Context, req Request, opts Operat
 	}, func(ctx context.Context) (store.APIIdempotencyCompletion, error) {
 		deleted, err := opts.ConversationForks.DeleteOperatorConversationFork(ctx, forkID, now)
 		if err != nil {
-			return store.APIIdempotencyCompletion{}, conversationForkError(err, forkID, 0)
+			return store.APIIdempotencyCompletion{}, conversationForkError(err, conversationForkErrorDetails{ForkID: forkID})
 		}
 		response, err := json.Marshal(conversationForkDeleteResult{
 			OK:                  true,
@@ -165,7 +180,7 @@ func executeConversationForkDelete(ctx context.Context, req Request, opts Operat
 		return store.APIIdempotencyCompletion{ResourceID: deleted.ForkID, Response: response}, nil
 	})
 	if err != nil {
-		return nil, conversationForkError(err, forkID, 0)
+		return nil, conversationForkError(err, conversationForkErrorDetails{ForkID: forkID})
 	}
 	var result conversationForkDeleteResult
 	if err := json.Unmarshal(completion.Response, &result); err != nil {
@@ -238,7 +253,7 @@ func conversationForkPointSelectorFromParams(params map[string]any) (store.Conve
 	}
 }
 
-func conversationForkError(err error, forkID string, turnIndex int) error {
+func conversationForkError(err error, details conversationForkErrorDetails) error {
 	var conflict *store.APIIdempotencyConflictError
 	if errors.As(err, &conflict) {
 		return NewApplicationError(IdempotencyConflictCode, false, map[string]any{
@@ -251,20 +266,20 @@ func conversationForkError(err error, forkID string, turnIndex int) error {
 		})
 	}
 	if errors.Is(err, store.ErrSessionNotFound) {
-		return NewApplicationError(SessionNotFoundCode, false, map[string]any{})
+		return NewApplicationError(SessionNotFoundCode, false, map[string]any{"session_id": details.SessionID})
 	}
 	if errors.Is(err, store.ErrTurnNotFound) {
-		details := map[string]any{}
-		if turnIndex > 0 {
-			details["turn_index"] = turnIndex
+		errorDetails := map[string]any{"session_id": details.SessionID}
+		if details.TurnIndex > 0 {
+			errorDetails["turn_index"] = details.TurnIndex
 		}
-		return NewApplicationError(TurnNotFoundCode, false, details)
+		return NewApplicationError(TurnNotFoundCode, false, errorDetails)
 	}
 	if errors.Is(err, store.ErrEventNotFound) {
-		return NewApplicationError(EventNotFoundCode, false, map[string]any{})
+		return NewApplicationError(EventNotFoundCode, false, map[string]any{"event_id": details.EventID})
 	}
 	if errors.Is(err, store.ErrConversationForkNotFound) {
-		return NewApplicationError(ForkNotFoundCode, false, map[string]any{"fork_id": forkID})
+		return NewApplicationError(ForkNotFoundCode, false, map[string]any{"fork_id": details.ForkID})
 	}
 	if errors.Is(err, store.ErrInvalidConversationForkCursor) {
 		return NewInvalidParamsError(map[string]any{"field": "cursor", "reason": "invalid conversation fork cursor"})
