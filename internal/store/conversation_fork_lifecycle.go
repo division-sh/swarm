@@ -277,6 +277,17 @@ func (s *PostgresStore) DeleteOperatorConversationFork(ctx context.Context, fork
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
+	res, err := s.DB.ExecContext(ctx, `UPDATE conversation_forks SET deleted_at = $2 WHERE fork_id = $1::uuid AND deleted_at IS NULL`, id, now)
+	if err != nil {
+		return ConversationForkDeleteResult{}, fmt.Errorf("delete conversation fork: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return ConversationForkDeleteResult{}, fmt.Errorf("read conversation fork delete affected rows: %w", err)
+	}
+	if affected > 0 {
+		return ConversationForkDeleteResult{ForkID: id, Deleted: true, AlreadyDeleted: false}, nil
+	}
 	var existingDeleted sql.NullTime
 	if err := s.DB.QueryRowContext(ctx, `SELECT deleted_at FROM conversation_forks WHERE fork_id = $1::uuid`, id).Scan(&existingDeleted); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -287,10 +298,7 @@ func (s *PostgresStore) DeleteOperatorConversationFork(ctx context.Context, fork
 	if existingDeleted.Valid {
 		return ConversationForkDeleteResult{ForkID: id, Deleted: false, AlreadyDeleted: true}, nil
 	}
-	if _, err := s.DB.ExecContext(ctx, `UPDATE conversation_forks SET deleted_at = $2 WHERE fork_id = $1::uuid AND deleted_at IS NULL`, id, now); err != nil {
-		return ConversationForkDeleteResult{}, fmt.Errorf("delete conversation fork: %w", err)
-	}
-	return ConversationForkDeleteResult{ForkID: id, Deleted: true, AlreadyDeleted: false}, nil
+	return ConversationForkDeleteResult{}, fmt.Errorf("conversation fork delete state changed concurrently")
 }
 
 func requireConversationForkLifecycleCapabilities(caps StoreSchemaCapabilities) error {
@@ -508,7 +516,7 @@ func (s *PostgresStore) resolveConversationForkTimePoint(ctx context.Context, se
 	var selectedAt time.Time
 	if err := row.Scan(&turnIndex, &turnID, &eventID, &selectedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return ConversationForkPointDescriptor{}, ErrTurnNotFound
+			return ConversationForkPointDescriptor{}, &EntityReadParamError{Field: "fork_point.at", Reason: "does not select a source turn"}
 		}
 		return ConversationForkPointDescriptor{}, fmt.Errorf("resolve conversation fork time point: %w", err)
 	}

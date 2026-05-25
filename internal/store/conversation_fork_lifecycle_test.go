@@ -160,6 +160,17 @@ func TestPostgresStore_ConversationForkLifecycleFailsClosedForSelectors(t *testi
 		t.Fatalf("mixed selector error = %v, want fork_point param error", err)
 	}
 
+	beforeFirstTurn := source.turn1At.Add(-time.Second)
+	_, err = s.CreateOperatorConversationFork(ctx, ConversationForkCreateRequest{
+		SourceSessionID: source.sessionID,
+		ForkPoint:       ConversationForkPointSelector{Kind: "time", At: &beforeFirstTurn},
+		CreatedBy:       "actor-token",
+		Now:             now,
+	})
+	if !errors.As(err, &paramErr) || paramErr.Field != "fork_point.at" {
+		t.Fatalf("time selector before first turn error = %v, want fork_point.at param error", err)
+	}
+
 	_, err = s.ListOperatorConversationForks(ctx, ConversationForkListOptions{Cursor: "not-a-cursor", Now: now})
 	if !errors.Is(err, ErrInvalidConversationForkCursor) {
 		t.Fatalf("invalid cursor error = %v, want ErrInvalidConversationForkCursor", err)

@@ -180,6 +180,7 @@ func TestOperatorConversationForkHandlersTypedErrors(t *testing.T) {
 		body   string
 		mutate func(*fakeConversationForkLifecycleStore)
 		code   string
+		detail map[string]any
 	}{
 		{
 			name:   "create missing source session",
@@ -187,6 +188,7 @@ func TestOperatorConversationForkHandlersTypedErrors(t *testing.T) {
 			body:   `{"jsonrpc":"2.0","id":"err","method":"conversation.fork","params":{"source_session_id":"` + sourceSessionID + `","fork_point":{"kind":"turn","turn_index":1}}}`,
 			mutate: func(s *fakeConversationForkLifecycleStore) { s.createErr = store.ErrSessionNotFound },
 			code:   SessionNotFoundCode,
+			detail: map[string]any{"session_id": sourceSessionID},
 		},
 		{
 			name:   "create missing turn",
@@ -194,6 +196,7 @@ func TestOperatorConversationForkHandlersTypedErrors(t *testing.T) {
 			body:   `{"jsonrpc":"2.0","id":"err","method":"conversation.fork","params":{"source_session_id":"` + sourceSessionID + `","fork_point":{"kind":"turn","turn_index":99}}}`,
 			mutate: func(s *fakeConversationForkLifecycleStore) { s.createErr = store.ErrTurnNotFound },
 			code:   TurnNotFoundCode,
+			detail: map[string]any{"session_id": sourceSessionID, "turn_index": float64(99)},
 		},
 		{
 			name:   "create missing event",
@@ -201,6 +204,7 @@ func TestOperatorConversationForkHandlersTypedErrors(t *testing.T) {
 			body:   `{"jsonrpc":"2.0","id":"err","method":"conversation.fork","params":{"source_session_id":"` + sourceSessionID + `","fork_point":{"kind":"event","event_id":"00000000-0000-0000-0000-000000000999"}}}`,
 			mutate: func(s *fakeConversationForkLifecycleStore) { s.createErr = store.ErrEventNotFound },
 			code:   EventNotFoundCode,
+			detail: map[string]any{"event_id": "00000000-0000-0000-0000-000000000999"},
 		},
 		{
 			name:   "list bad cursor",
@@ -215,6 +219,7 @@ func TestOperatorConversationForkHandlersTypedErrors(t *testing.T) {
 			body:   `{"jsonrpc":"2.0","id":"err","method":"conversation.fork_view","params":{"fork_id":"` + forkID + `"}}`,
 			mutate: func(s *fakeConversationForkLifecycleStore) { s.viewErr = store.ErrConversationForkNotFound },
 			code:   ForkNotFoundCode,
+			detail: map[string]any{"fork_id": forkID},
 		},
 		{
 			name:   "delete missing fork",
@@ -222,6 +227,7 @@ func TestOperatorConversationForkHandlersTypedErrors(t *testing.T) {
 			body:   `{"jsonrpc":"2.0","id":"err","method":"conversation.fork_delete","params":{"fork_id":"` + forkID + `"}}`,
 			mutate: func(s *fakeConversationForkLifecycleStore) { s.deleteErr = store.ErrConversationForkNotFound },
 			code:   ForkNotFoundCode,
+			detail: map[string]any{"fork_id": forkID},
 		},
 	}
 	for _, tt := range tests {
@@ -253,6 +259,12 @@ func TestOperatorConversationForkHandlersTypedErrors(t *testing.T) {
 			data := asMap(t, resp.Error.Data)
 			if data["code"] != tt.code {
 				t.Fatalf("%s error data = %#v, want code %s", tt.method, data, tt.code)
+			}
+			details := asMap(t, data["details"])
+			for key, want := range tt.detail {
+				if details[key] != want {
+					t.Fatalf("%s error details[%s] = %#v, want %#v in %#v", tt.method, key, details[key], want, details)
+				}
 			}
 		})
 	}
@@ -317,7 +329,7 @@ func TestOperatorConversationForkIdempotencyConflict(t *testing.T) {
 }
 
 func TestConversationForkErrorMapsParamErrors(t *testing.T) {
-	err := conversationForkError(&store.EntityReadParamError{Field: "source_session_id", Reason: "must be a UUID"}, "", 0)
+	err := conversationForkError(&store.EntityReadParamError{Field: "source_session_id", Reason: "must be a UUID"}, conversationForkErrorDetails{})
 	var invalid *InvalidParamsError
 	if !errors.As(err, &invalid) {
 		t.Fatalf("conversationForkError = %T, want InvalidParamsError", err)
