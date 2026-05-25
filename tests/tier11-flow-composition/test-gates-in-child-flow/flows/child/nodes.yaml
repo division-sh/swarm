@@ -4,6 +4,8 @@ validator:
     - validate.start
   produces:
     - validation.done
+  gate_state:
+    g_validated: gate set when validation completes
   event_handlers:
     validate.start:
       create_entity: true

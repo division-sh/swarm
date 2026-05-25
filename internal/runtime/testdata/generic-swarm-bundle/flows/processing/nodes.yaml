@@ -9,6 +9,8 @@ processing-node:
   produces:
     - item.completed
     - item.rejected
+  gate_state:
+    score_ready: gate set when score is ready
   event_handlers:
     item.review_requested:
       guard:

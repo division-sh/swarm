@@ -3,6 +3,8 @@ test-node:
   execution_type: system_node
   subscribes_to: [task.submitted]
   produces: [task.accepted]
+  gate_state:
+    approval_gate: gate set when task is accepted
   event_handlers:
     task.submitted:
       advances_to: done

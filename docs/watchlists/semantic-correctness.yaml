@@ -136,6 +136,10 @@ active_issues:
     title: Align runtime enforcement with primitive-only cross-flow model
     maps_to:
       - primitive_only_cross_flow_runtime_migration
+  - id: 447
+    title: Extract bootverify gate-schema validation check
+    maps_to:
+      - boot_check_definition_drift
   - id: 448
     title: Reconcile payload_field_coverage ownership across bootverify and catalog harness
     maps_to:
@@ -203,8 +207,10 @@ nodes:
       - one check id reused for event-payload source-field coverage and entity write-target compliance
       - catalog or legacy verifier surfaces interpreting a boot check id independently from Go bootverify
       - reference docs and fixture prose preserving stale check meanings after the supported surface moved
+      - gate schema validation treats missing or empty gate_state as an open schema for handler-level sets_gate
       - condition payload-reference validation treats existing empty event payload schemas as open schemas
     representative_issues:
+      - 447
       - 448
       - 974
     common_framing_mistakes:

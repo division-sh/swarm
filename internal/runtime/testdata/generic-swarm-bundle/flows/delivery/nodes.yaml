@@ -8,6 +8,8 @@ delivery-node:
     - timer.item.timeout
   produces:
     - item.completed
+  gate_state:
+    delivery_ready: gate set when delivery is ready
   timers:
     - id: item_timeout
       event: timer.item.timeout

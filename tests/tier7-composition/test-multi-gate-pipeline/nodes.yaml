@@ -3,6 +3,8 @@ gate-setter-1:
   execution_type: system_node
   subscribes_to: [gate.g1_set]
   produces: [gate.set]
+  gate_state:
+    g1: first gate in the approval pipeline
   event_handlers:
     gate.g1_set:
       sets_gate: g1
@@ -15,6 +17,8 @@ gate-setter-2:
   execution_type: system_node
   subscribes_to: [gate.g2_set]
   produces: [gate.set]
+  gate_state:
+    g2: second gate in the approval pipeline
   event_handlers:
     gate.g2_set:
       sets_gate: g2
@@ -27,6 +31,8 @@ gate-setter-3:
   execution_type: system_node
   subscribes_to: [gate.g3_set]
   produces: [gate.set]
+  gate_state:
+    g3: third gate in the approval pipeline
   event_handlers:
     gate.g3_set:
       sets_gate: g3

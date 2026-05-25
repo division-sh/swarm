@@ -3,6 +3,8 @@ validation-node:
   execution_type: system_node
   subscribes_to: [order.submitted]
   produces: [order.validated]
+  gate_state:
+    validation_passed: gate set when validation succeeds
   event_handlers:
     order.submitted:
       guard:
