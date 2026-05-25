@@ -15,6 +15,7 @@ import (
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimeingress "swarm/internal/runtime/ingress"
+	runtimereplayclaim "swarm/internal/runtime/replayclaim"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/store"
 	"swarm/internal/testutil"
@@ -150,6 +151,109 @@ func TestOperatorEventPublishPersistsIdempotencyBeforeReadbackFailure(t *testing
 	}
 	if got := len(asSlice(t, replayResult["deliveries"])); got != 1 {
 		t.Fatalf("replay deliveries = %d, want persisted delivery result", got)
+	}
+}
+
+func TestOperatorEventPublishPostCommitReceiptFailureReplaysWithoutDuplicate(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	failing := &failStandalonePipelineReceiptOnceStore{
+		PostgresStore: pg,
+		err:           errors.New("simulated post-commit receipt failure"),
+	}
+	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+	bus, err := runtimebus.NewEventBusWithOptions(failing, runtimebus.EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	ctx := context.Background()
+	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "scan-orchestrator")
+	ch := bus.Subscribe("scan-orchestrator", events.EventType("scan.requested"))
+	defer bus.Unsubscribe("scan-orchestrator")
+	handler := eventPublishTestHandlerWithStores(t, failing, failing, failing, bus, source)
+	body := eventPublishBody("", runStartTestFingerprint, "scan.requested", `{"topic":"medicine"}`, "", "idem-post-commit-receipt")
+
+	published := rpcCall(t, handler, body)
+	if published.Error != nil {
+		t.Fatalf("event.publish post-commit receipt failure error = %#v", published.Error)
+	}
+	result := asMap(t, published.Result)
+	eventID := stringValue(t, result["event_id"], "event_id")
+	if count := countEventsByName(t, db, "scan.requested"); count != 1 {
+		t.Fatalf("scan.requested event count after post-commit receipt failure = %d, want 1", count)
+	}
+	if got := countEventDeliveriesForEvent(t, ctx, db, eventID); got != 1 {
+		t.Fatalf("event deliveries after post-commit receipt failure = %d, want 1", got)
+	}
+	if count := countAPIIdempotencyRows(t, db); count != 1 {
+		t.Fatalf("api_idempotency rows after post-commit receipt failure = %d, want 1", count)
+	}
+	if got := countPipelineReceiptsForEvent(t, ctx, db, eventID); got != 0 {
+		t.Fatalf("pipeline receipts after injected failure = %d, want 0", got)
+	}
+	missing, err := pg.ListEventsMissingPipelineReceipt(ctx, time.Now().Add(-time.Hour), 10)
+	if err != nil {
+		t.Fatalf("ListEventsMissingPipelineReceipt: %v", err)
+	}
+	if !containsMissingPipelineReceiptEvent(missing, eventID) {
+		t.Fatalf("missing pipeline receipt events = %#v, want %s", missing, eventID)
+	}
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for event delivery after post-commit receipt failure")
+	}
+
+	replay := rpcCall(t, handler, body)
+	if replay.Error != nil {
+		t.Fatalf("event.publish replay after post-commit receipt failure error = %#v", replay.Error)
+	}
+	if replayEventID := stringValue(t, asMap(t, replay.Result)["event_id"], "event_id"); replayEventID != eventID {
+		t.Fatalf("event.publish replay event_id = %q, want original %q", replayEventID, eventID)
+	}
+	if count := countEventsByName(t, db, "scan.requested"); count != 1 {
+		t.Fatalf("scan.requested event count after replay = %d, want 1", count)
+	}
+	if count := countAPIIdempotencyRows(t, db); count != 1 {
+		t.Fatalf("api_idempotency rows after replay = %d, want 1", count)
+	}
+}
+
+func TestOperatorEventPublishPreCommitFailureFailsClosedWithDeclaredError(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	failing := &failCommittedReplayScopeStore{
+		PostgresStore: pg,
+		err:           errors.New("simulated pre-commit replay scope failure"),
+	}
+	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+	bus, err := runtimebus.NewEventBusWithOptions(failing, runtimebus.EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	ctx := context.Background()
+	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "scan-orchestrator")
+	handler := eventPublishTestHandlerWithStores(t, failing, failing, failing, bus, source)
+	body := eventPublishBody("", runStartTestFingerprint, "scan.requested", `{"topic":"medicine"}`, "", "idem-pre-commit")
+
+	published := rpcCall(t, handler, body)
+	if published.Error == nil {
+		t.Fatal("event.publish pre-commit failure error = nil")
+	}
+	data := asMap(t, published.Error.Data)
+	if data["code"] != EventPublishFailedCode {
+		t.Fatalf("event.publish pre-commit error data = %#v, want %s", data, EventPublishFailedCode)
+	}
+	details := asMap(t, data["details"])
+	if details["event_name"] != "scan.requested" || details["phase"] != "publish" || !strings.Contains(fmt.Sprint(details["reason"]), "simulated pre-commit replay scope failure") {
+		t.Fatalf("event.publish pre-commit error details = %#v", details)
+	}
+	assertNoEventPublishPersistence(t, db)
+	if got := countAllEventDeliveries(t, db); got != 0 {
+		t.Fatalf("event_deliveries rows after pre-commit failure = %d, want 0", got)
+	}
+	if _, err := db.ExecContext(ctx, `SELECT 1`); err != nil {
+		t.Fatalf("database unusable after pre-commit failure: %v", err)
 	}
 }
 
@@ -523,16 +627,21 @@ func eventPublishTestHandler(t *testing.T, pg *store.PostgresStore, bus *runtime
 
 func eventPublishTestHandlerWithObservability(t *testing.T, pg *store.PostgresStore, bus *runtimebus.EventBus, source semanticview.Source, observability ObservabilityReadStore) *Handler {
 	t.Helper()
+	return eventPublishTestHandlerWithStores(t, pg, observability, pg, bus, source)
+}
+
+func eventPublishTestHandlerWithStores(t *testing.T, runs RunReadStore, observability ObservabilityReadStore, idempotency APIIdempotencyStore, publisher EventPublisher, source semanticview.Source) *Handler {
+	t.Helper()
 	return testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: OperatorReadHandlers(OperatorReadOptions{
 			Now:           func() time.Time { return time.Now().UTC() },
 			Ready:         func() bool { return true },
 			Database:      fakePinger{},
-			Runs:          pg,
+			Runs:          runs,
 			Observability: observability,
-			Idempotency:   pg,
-			Events:        bus,
+			Idempotency:   idempotency,
+			Events:        publisher,
 			Source:        source,
 			Bundle: runtimecontracts.BundleIdentity{
 				WorkflowName:    "review",
@@ -541,6 +650,36 @@ func eventPublishTestHandlerWithObservability(t *testing.T, pg *store.PostgresSt
 			},
 		}),
 	})
+}
+
+type failStandalonePipelineReceiptOnceStore struct {
+	*store.PostgresStore
+	err error
+}
+
+func (s *failStandalonePipelineReceiptOnceStore) UpsertPipelineReceipt(ctx context.Context, eventID, status, errText string) error {
+	return s.UpsertPipelineReceiptTx(ctx, nil, eventID, status, errText)
+}
+
+func (s *failStandalonePipelineReceiptOnceStore) UpsertPipelineReceiptTx(ctx context.Context, tx *sql.Tx, eventID, status, errText string) error {
+	if tx == nil && s.err != nil {
+		err := s.err
+		s.err = nil
+		return err
+	}
+	return s.PostgresStore.UpsertPipelineReceiptTx(ctx, tx, eventID, status, errText)
+}
+
+type failCommittedReplayScopeStore struct {
+	*store.PostgresStore
+	err error
+}
+
+func (s *failCommittedReplayScopeStore) UpsertCommittedReplayScopeTx(ctx context.Context, tx *sql.Tx, eventID string, scope runtimereplayclaim.CommittedReplayScope) error {
+	if s.err != nil {
+		return s.err
+	}
+	return s.PostgresStore.UpsertCommittedReplayScopeTx(ctx, tx, eventID, scope)
 }
 
 type failOnceEventReadStore struct {
@@ -642,6 +781,24 @@ func assertNoEventPublishPersistence(t *testing.T, db *sql.DB) {
 	if count := countAPIIdempotencyRows(t, db); count != 0 {
 		t.Fatalf("api_idempotency rows = %d, want 0", count)
 	}
+}
+
+func countAllEventDeliveries(t *testing.T, db *sql.DB) int {
+	t.Helper()
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM event_deliveries`).Scan(&count); err != nil {
+		t.Fatalf("count event_deliveries rows: %v", err)
+	}
+	return count
+}
+
+func containsMissingPipelineReceiptEvent(items []events.PersistedReplayEvent, eventID string) bool {
+	for _, evt := range items {
+		if strings.TrimSpace(evt.Event.ID) == strings.TrimSpace(eventID) {
+			return true
+		}
+	}
+	return false
 }
 
 func stringValue(t *testing.T, value any, field string) string {

@@ -363,6 +363,107 @@ func countPipelineReceiptsForEvent(t *testing.T, ctx context.Context, db *sql.DB
 	return count
 }
 
+func TestEventBusPublishTransactionalPostCommitReceiptFailureIsRecoverable(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	ctx := eventBusTestRunContext(t, db)
+	pg := &store.PostgresStore{DB: db}
+	failing := &failStandalonePipelineReceiptOnceStore{
+		PostgresStore: pg,
+		err:           errors.New("simulated post-commit receipt failure"),
+	}
+	logger := &recordingLoggerHook{}
+	eb, err := runtimebus.NewEventBusWithOptions(failing, runtimebus.EventBusOptions{Logger: logger})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+
+	agentID := "agent-post-commit-receipt"
+	eventID := "21000000-0000-0000-0000-000000000011"
+	seedActiveRuntimeBusAgent(t, ctx, pg, agentID)
+	ch := eb.Subscribe(agentID, events.EventType("custom.receipt_failure"))
+	defer eb.Unsubscribe(agentID)
+
+	if err := eb.Publish(ctx, events.Event{
+		ID:          eventID,
+		RunID:       eventBusTestRunID,
+		Type:        events.EventType("custom.receipt_failure"),
+		SourceAgent: "api.v1",
+		Payload:     []byte(`{"entity_id":"21000000-0000-0000-0000-000000000012"}`),
+		CreatedAt:   time.Now().UTC(),
+	}.WithEntityID("21000000-0000-0000-0000-000000000012")); err != nil {
+		t.Fatalf("Publish with post-commit receipt failure: %v", err)
+	}
+	ok, err := pg.EventExists(ctx, eventID)
+	if err != nil {
+		t.Fatalf("EventExists: %v", err)
+	}
+	if !ok {
+		t.Fatalf("event %s was not persisted", eventID)
+	}
+	if got := countEventDeliveriesForEvent(t, ctx, db, eventID); got != 1 {
+		t.Fatalf("event deliveries = %d, want 1", got)
+	}
+	if got := countPipelineReceiptsForEvent(t, ctx, db, eventID); got != 0 {
+		t.Fatalf("pipeline receipts = %d, want 0 after injected failure", got)
+	}
+	missing, err := pg.ListEventsMissingPipelineReceipt(ctx, time.Now().Add(-time.Hour), 10)
+	if err != nil {
+		t.Fatalf("ListEventsMissingPipelineReceipt: %v", err)
+	}
+	if !containsMissingPipelineReceiptEvent(missing, eventID) {
+		t.Fatalf("missing pipeline receipt events = %#v, want %s", missing, eventID)
+	}
+	if !hasRuntimeLogAction(logger.entries, "pipeline_receipt_persist_failed") {
+		t.Fatalf("logger entries = %#v, want pipeline_receipt_persist_failed", logger.entries)
+	}
+	select {
+	case got := <-ch:
+		if got.ID != eventID {
+			t.Fatalf("delivered event = %s, want %s", got.ID, eventID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for delivered event")
+	}
+}
+
+type failStandalonePipelineReceiptOnceStore struct {
+	*store.PostgresStore
+	err error
+}
+
+func (s *failStandalonePipelineReceiptOnceStore) UpsertPipelineReceipt(ctx context.Context, eventID, status, errText string) error {
+	return s.UpsertPipelineReceiptTx(ctx, nil, eventID, status, errText)
+}
+
+func (s *failStandalonePipelineReceiptOnceStore) UpsertPipelineReceiptTx(ctx context.Context, tx *sql.Tx, eventID, status, errText string) error {
+	if tx == nil && s.err != nil {
+		err := s.err
+		s.err = nil
+		return err
+	}
+	return s.PostgresStore.UpsertPipelineReceiptTx(ctx, tx, eventID, status, errText)
+}
+
+func containsMissingPipelineReceiptEvent(items []events.PersistedReplayEvent, eventID string) bool {
+	for _, evt := range items {
+		if strings.TrimSpace(evt.Event.ID) == strings.TrimSpace(eventID) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasRuntimeLogAction(entries []recordedLogEntry, action string) bool {
+	for _, entry := range entries {
+		if entry.Action == action {
+			return true
+		}
+	}
+	return false
+}
+
 func loadAgentDeliveryForEvent(t *testing.T, ctx context.Context, db *sql.DB, eventID, agentID string) (string, string) {
 	t.Helper()
 	var status, runStatus string

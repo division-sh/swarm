@@ -16,6 +16,7 @@ const (
 	UnsupportedBundleRefCode             = "UNSUPPORTED_BUNDLE_REF"
 	EventNotDeclaredCode                 = "EVENT_NOT_DECLARED"
 	EventNotFoundCode                    = "EVENT_NOT_FOUND"
+	EventPublishFailedCode               = "EVENT_PUBLISH_FAILED"
 	EventReplayNoDeliveryHistoryCode     = "EVENT_REPLAY_NO_DELIVERY_HISTORY"
 	EventReplaySubscriberNotOriginalCode = "EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL"
 	EventReplaySubscriberUnavailableCode = "EVENT_REPLAY_SUBSCRIBER_UNAVAILABLE"

@@ -52,6 +52,7 @@ type eventPublicationConfig struct {
 	requireExistingExplicitRun     bool
 	injectRunIDEntityIDWhenMissing bool
 	injectRunIDEntityIDOnlyNewRun  bool
+	publishError                   func(eventPublicationParams, error) error
 	buildCompletion                func(context.Context, OperatorReadOptions, eventPublicationParams) (any, string, error)
 }
 
@@ -81,6 +82,7 @@ func executeEventPublish(ctx context.Context, req Request, opts OperatorReadOpti
 		requireExistingExplicitRun:     true,
 		injectRunIDEntityIDWhenMissing: true,
 		injectRunIDEntityIDOnlyNewRun:  true,
+		publishError:                   eventPublishPublishError,
 		buildCompletion: func(_ context.Context, _ OperatorReadOptions, params eventPublicationParams) (any, string, error) {
 			return eventPublishResult{
 				EventID:       params.EventID,
@@ -179,6 +181,9 @@ func executeOperatorEventPublication(
 			Payload:       params.Payload,
 			CreatedAt:     now,
 		}.WithEntityID(params.EntityID)); err != nil {
+			if cfg.publishError != nil {
+				return store.APIIdempotencyCompletion{}, cfg.publishError(params, err)
+			}
 			return store.APIIdempotencyCompletion{}, runStartPublishError(params.EventName, err)
 		}
 		result, resourceID, err := cfg.buildCompletion(ctx, opts, params)
@@ -372,6 +377,21 @@ func eventPublishSourceAgent(req Request) string {
 		actor = "anonymous"
 	}
 	return "cli-publish:" + actor
+}
+
+func eventPublishPublishError(params eventPublicationParams, err error) error {
+	mapped := runStartPublishError(params.EventName, err)
+	var appErr *ApplicationError
+	if errors.As(mapped, &appErr) {
+		return mapped
+	}
+	return NewApplicationError(EventPublishFailedCode, true, map[string]any{
+		"event_name": params.EventName,
+		"event_id":   params.EventID,
+		"run_id":     params.RunID,
+		"phase":      "publish",
+		"reason":     strings.TrimSpace(err.Error()),
+	})
 }
 
 func eventPublishDeliveries(in []store.OperatorEventDelivery) []eventPublishDelivery {

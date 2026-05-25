@@ -321,7 +321,7 @@ methods:
   - method: event.publish
     transport: http
     required_params: [event_name, payload]
-    declared_errors: [BUNDLE_MISMATCH, UNSUPPORTED_BUNDLE_REF, EVENT_NOT_DECLARED, PAYLOAD_VALIDATION_FAILED, RUN_NOT_FOUND, EVENT_NOT_FOUND, RUN_ALREADY_TERMINAL, IDEMPOTENCY_CONFLICT]
+    declared_errors: [BUNDLE_MISMATCH, UNSUPPORTED_BUNDLE_REF, EVENT_NOT_DECLARED, EVENT_PUBLISH_FAILED, PAYLOAD_VALIDATION_FAILED, RUN_NOT_FOUND, EVENT_NOT_FOUND, RUN_ALREADY_TERMINAL, IDEMPOTENCY_CONFLICT]
     happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempotency}]}
     required_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
     unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}]}
