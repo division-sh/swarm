@@ -52,6 +52,11 @@ type DevEntityContainerCleaner interface {
 }
 
 const DevEntityCleanupOperationName = "swarm.serve.dev.entity_container_cleanup"
+const defaultWorkspaceImage = "swarm-workspace:latest"
+
+func ConfiguredWorkspaceImageFromEnv() string {
+	return EnvOrDefault("SWARM_WORKSPACE_IMAGE", defaultWorkspaceImage)
+}
 
 type DockerConfig struct {
 	DockerBin             string
@@ -77,7 +82,7 @@ type DockerConfig struct {
 func DefaultDockerConfig() DockerConfig {
 	return DockerConfig{
 		DockerBin:             EnvOrDefault("SWARM_DOCKER_BIN", "docker"),
-		WorkspaceImage:        EnvOrDefault("SWARM_WORKSPACE_IMAGE", "swarm-workspace:latest"),
+		WorkspaceImage:        ConfiguredWorkspaceImageFromEnv(),
 		WorkspaceNetwork:      EnvOrDefault("SWARM_WORKSPACE_NETWORK", "mas_default"),
 		WorkspaceVolumesFrom:  EnvOrDefault("SWARM_WORKSPACE_VOLUMES_FROM", ""),
 		SharedDataSource:      EnvOrDefault("SWARM_WORKSPACE_DATA_SOURCE", ""),

@@ -173,6 +173,9 @@ func (r *ClaudeCLIRuntime) runUntilCLIStartupInit(ctx context.Context, args []st
 			if errOut == "" {
 				errOut = summarizeCLIErrorOutput(stdoutText)
 			}
+			if diag := workspaceCLIDiagnosticError(r.cfg, target, coalesce(errOut, stderrText, stdoutText)); diag != nil {
+				return nil, fmt.Errorf("claude cli startup probe failed: %w", diag)
+			}
 			if errOut != "" {
 				return nil, fmt.Errorf("claude cli startup probe failed: %w, stderr=%s", waitErr, errOut)
 			}
@@ -190,6 +193,9 @@ func (r *ClaudeCLIRuntime) runUntilCLIStartupInit(ctx context.Context, args []st
 	}
 	if waitErr != nil {
 		errOut := summarizeCLIErrorOutput(stderrText)
+		if diag := workspaceCLIDiagnosticError(r.cfg, target, coalesce(errOut, stderrText)); diag != nil {
+			return nil, fmt.Errorf("claude cli startup probe failed: %w", diag)
+		}
 		if errOut == "" {
 			return nil, fmt.Errorf("claude cli startup probe failed: %w", waitErr)
 		}

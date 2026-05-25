@@ -6215,10 +6215,45 @@ cli_specification:
         still additionally compare the provider-visible native tool list. Agent-free `cli_test`
         boot remains governed by #993 and MUST NOT require LLM/gateway startup credentials.
       split_tail:
-      - '#997 local cli_test workspace image contents/default-agent Claude CLI availability remains open.'
+      - '#997 local cli_test workspace image contents/default-agent Claude CLI availability is closed by cli_specification.foundations.local_cli_test_workspace_cli_availability.'
       - '#996 Docker Compose setup remains split.'
       - '#979/#1012 selected-contract and multi-bundle gateway materialization remains split.'
       - '#1002 runtime workspace source-root image packaging is closed by PR #1034 and is not an open tail.'
+    local_cli_test_workspace_cli_availability:
+      promoted_by: '#997'
+      implementation_status: implemented
+      canonical_owner: docs/specs/swarm-platform/platform/contracts/platform-spec.yaml#cli_specification.foundations.local_cli_test_workspace_cli_availability
+      scope: >
+        Merge-bearing CLI/runtime authority for the remaining #997 local `cli_test`
+        workspace image/default-agent Claude CLI availability and early actionable
+        startup diagnostics class. This owner applies to agent-present local
+        `swarm serve` and local foreground `swarm run` flows that consume the serve
+        startup owner. It does not reopen #1002 source-root workspace image
+        packaging, #996 Docker Compose setup, #995 schema migration diagnostics,
+        API conformance, selected-contract/multi-bundle work, or public quickstart
+        docs polish.
+      workspace_cli_rule: >
+        For agent-present `cli_test` managed agents, startup validation MUST prove
+        the resolved workspace container can execute the configured Claude CLI
+        command before readiness or event delivery. Successful Docker image
+        inspection and existing container reuse are not sufficient proof of this
+        capability. Missing, stale, or incompatible workspace image/container
+        failures MUST fail closed with an actionable startup diagnostic naming the
+        configured Claude CLI command, the resolved container, the configured
+        workspace image, and remediation to build or pull an image containing the
+        Claude CLI, remove stale workspace containers, or set SWARM_WORKSPACE_IMAGE
+        to a compatible image.
+      consumers:
+      - 'local `swarm serve` runtime startup for agent-present `cli_test` bundles'
+      - 'local foreground `swarm run` that consumes the serve startup owner'
+      - '`internal/runtime/runtime_claude_startup.go` managed-agent startup validation'
+      - '`internal/runtime/llm` Claude CLI startup probe and per-turn fallback diagnostics'
+      - '`internal/runtime/workspace` configured workspace image/container targets'
+      split_tail:
+      - '#996 Docker Compose setup remains split.'
+      - '#995 schema migration startup diagnostics remain split.'
+      - '#979/#1012 selected-contract and multi-bundle gateway materialization remains split.'
+      - '#1002 runtime workspace source-root image packaging is closed by PR #1034 and is not reopened.'
     no_args_behavior: '`swarm` with no arguments prints root help and exits 0. Bare `swarm` MUST NOT start the runtime.'
     daemon_startup: '`swarm serve` owns runtime/API/health/MCP startup. `swarm run` may consume the serve startup owner for local foreground start, but MUST NOT fork a second runtime boot owner.'
     cli_consumes_api_rule: 'All CLI commands that read or mutate runtime state consume the canonical API at /v1/rpc or /v1/ws. The only local file-contract carve-out is `swarm verify`, which validates contract files on disk and does not require runtime DB/API state.'

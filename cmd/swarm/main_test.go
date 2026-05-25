@@ -1342,6 +1342,61 @@ func TestPlatformSpecLocalCLITestGatewayStartupPromoted(t *testing.T) {
 	}
 }
 
+func TestPlatformSpecLocalCLITestWorkspaceCLIAvailabilityPromoted(t *testing.T) {
+	var spec struct {
+		CLISpecification struct {
+			Foundations struct {
+				LocalCLITestWorkspaceCLIAvailability struct {
+					PromotedBy           string   `yaml:"promoted_by"`
+					ImplementationStatus string   `yaml:"implementation_status"`
+					CanonicalOwner       string   `yaml:"canonical_owner"`
+					Scope                string   `yaml:"scope"`
+					WorkspaceCLIRule     string   `yaml:"workspace_cli_rule"`
+					Consumers            []string `yaml:"consumers"`
+					SplitTail            []string `yaml:"split_tail"`
+				} `yaml:"local_cli_test_workspace_cli_availability"`
+			} `yaml:"foundations"`
+		} `yaml:"cli_specification"`
+	}
+	data, err := os.ReadFile(filepath.Join(repoRoot(), defaultPlatformSpecPath))
+	if err != nil {
+		t.Fatalf("read platform spec: %v", err)
+	}
+	if err := yaml.Unmarshal(data, &spec); err != nil {
+		t.Fatalf("parse platform spec: %v", err)
+	}
+	availability := spec.CLISpecification.Foundations.LocalCLITestWorkspaceCLIAvailability
+	if strings.TrimSpace(availability.PromotedBy) != "#997" {
+		t.Fatalf("local cli_test workspace cli availability promoted_by = %q, want #997", availability.PromotedBy)
+	}
+	if strings.TrimSpace(availability.ImplementationStatus) != "implemented" {
+		t.Fatalf("local cli_test workspace cli availability implementation_status = %q, want implemented", availability.ImplementationStatus)
+	}
+	if !strings.Contains(availability.CanonicalOwner, "cli_specification.foundations.local_cli_test_workspace_cli_availability") {
+		t.Fatalf("canonical owner does not point at local_cli_test_workspace_cli_availability: %s", availability.CanonicalOwner)
+	}
+	for _, want := range []string{"remaining #997", "workspace image/default-agent Claude CLI availability", "local `swarm serve`", "local foreground `swarm run`"} {
+		if !strings.Contains(availability.Scope, want) {
+			t.Fatalf("local cli_test workspace cli availability scope missing %q:\n%s", want, availability.Scope)
+		}
+	}
+	for _, want := range []string{"startup validation MUST prove", "before readiness or event delivery", "Docker image inspection", "existing container reuse", "SWARM_WORKSPACE_IMAGE"} {
+		if !strings.Contains(availability.WorkspaceCLIRule, want) {
+			t.Fatalf("workspace cli rule missing %q:\n%s", want, availability.WorkspaceCLIRule)
+		}
+	}
+	for _, want := range []string{"local `swarm serve`", "local foreground `swarm run`", "managed-agent startup validation", "Claude CLI startup probe", "configured workspace image/container targets"} {
+		if !stringSliceContains(availability.Consumers, want) {
+			t.Fatalf("local cli_test workspace cli availability consumers missing %q: %#v", want, availability.Consumers)
+		}
+	}
+	for _, want := range []string{"#996 Docker Compose", "#995 schema migration", "#979/#1012", "#1002 runtime workspace source-root image packaging is closed"} {
+		if !stringSliceContains(availability.SplitTail, want) {
+			t.Fatalf("local cli_test workspace cli availability split_tail missing %q: %#v", want, availability.SplitTail)
+		}
+	}
+}
+
 func TestPlatformSpecContractPlatformSpecPathResolutionPromoted(t *testing.T) {
 	spec := loadCLIContractPlatformSpecPathResolutionSpec(t)
 	if strings.TrimSpace(spec.PromotedBy) != "#844" {
