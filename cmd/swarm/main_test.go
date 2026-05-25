@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -986,6 +987,67 @@ func TestPlatformSpecInstalledBinaryPortabilityPromoted(t *testing.T) {
 	for _, want := range []string{"#996", "#997"} {
 		if !strings.Contains(packaging.SplitScope, want) {
 			t.Fatalf("runtime image packaging split scope missing %q:\n%s", want, packaging.SplitScope)
+		}
+	}
+}
+
+func TestPlatformSpecLocalCLITestGatewayStartupPromoted(t *testing.T) {
+	var spec struct {
+		CLISpecification struct {
+			Foundations struct {
+				LocalCLITestGatewayStartup struct {
+					PromotedBy            string   `yaml:"promoted_by"`
+					ImplementationStatus  string   `yaml:"implementation_status"`
+					CanonicalOwner        string   `yaml:"canonical_owner"`
+					Scope                 string   `yaml:"scope"`
+					GatewayTokenRule      string   `yaml:"gateway_token_rule"`
+					GatewayTokenConsumers []string `yaml:"gateway_token_consumers"`
+					StartupProbeRule      string   `yaml:"startup_probe_rule"`
+					SplitTail             []string `yaml:"split_tail"`
+				} `yaml:"local_cli_test_gateway_startup"`
+			} `yaml:"foundations"`
+		} `yaml:"cli_specification"`
+	}
+	data, err := os.ReadFile(filepath.Join(repoRoot(), defaultPlatformSpecPath))
+	if err != nil {
+		t.Fatalf("read platform spec: %v", err)
+	}
+	if err := yaml.Unmarshal(data, &spec); err != nil {
+		t.Fatalf("parse platform spec: %v", err)
+	}
+	startup := spec.CLISpecification.Foundations.LocalCLITestGatewayStartup
+	if strings.TrimSpace(startup.PromotedBy) != "#997" {
+		t.Fatalf("local cli_test gateway startup promoted_by = %q, want #997", startup.PromotedBy)
+	}
+	if strings.TrimSpace(startup.ImplementationStatus) != "implemented_first_slice" {
+		t.Fatalf("local cli_test gateway startup implementation_status = %q, want implemented_first_slice", startup.ImplementationStatus)
+	}
+	if !strings.Contains(startup.CanonicalOwner, "cli_specification.foundations.local_cli_test_gateway_startup") {
+		t.Fatalf("canonical owner does not point at local_cli_test_gateway_startup: %s", startup.CanonicalOwner)
+	}
+	for _, want := range []string{"narrowed #997", "MCP gateway token derivation", "MCP-only managed-agent startup proof", "does not close full #997"} {
+		if !strings.Contains(startup.Scope, want) {
+			t.Fatalf("local cli_test gateway startup scope missing %q:\n%s", want, startup.Scope)
+		}
+	}
+	for _, want := range []string{"SWARM_TOOL_GATEWAY_TOKEN", "per-boot", "operator-provided", "Local foreground `swarm run`"} {
+		if !strings.Contains(startup.GatewayTokenRule, want) {
+			t.Fatalf("gateway token rule missing %q:\n%s", want, startup.GatewayTokenRule)
+		}
+	}
+	for _, want := range []string{"RuntimeOptions.ToolGatewayToken", "runtime MCP gateway auth", "ValidateClaudeCLIRuntimeConfig", "docker exec", "MCP HTTP binding"} {
+		if !stringSliceContains(startup.GatewayTokenConsumers, want) {
+			t.Fatalf("gateway token consumers missing %q: %#v", want, startup.GatewayTokenConsumers)
+		}
+	}
+	for _, want := range []string{"startup validation MUST execute", "every managed agent", "MCP-only", "Agent-free `cli_test`"} {
+		if !strings.Contains(startup.StartupProbeRule, want) {
+			t.Fatalf("startup probe rule missing %q:\n%s", want, startup.StartupProbeRule)
+		}
+	}
+	for _, want := range []string{"#997 local cli_test workspace image contents", "#996 Docker Compose", "#979/#1012", "#1002 runtime workspace source-root image packaging is closed"} {
+		if !stringSliceContains(startup.SplitTail, want) {
+			t.Fatalf("local cli_test gateway startup split_tail missing %q: %#v", want, startup.SplitTail)
 		}
 	}
 }
@@ -3875,6 +3937,7 @@ func TestRunServeRuntimeListenerBindFailuresExitBeforeReadiness(t *testing.T) {
 func TestConfigureServeMCPGatewayEnvAlignsToMCPListener(t *testing.T) {
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
 	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "")
+	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen mcp: %v", err)
@@ -3895,12 +3958,45 @@ func TestConfigureServeMCPGatewayEnvAlignsToMCPListener(t *testing.T) {
 	if got, want := os.Getenv("SWARM_TOOL_GATEWAY_CONTAINER_URL"), "http://host.docker.internal:"+port; got != want {
 		t.Fatalf("SWARM_TOOL_GATEWAY_CONTAINER_URL = %q, want %q", got, want)
 	}
+	gatewayToken := os.Getenv("SWARM_TOOL_GATEWAY_TOKEN")
+	if strings.TrimSpace(gatewayToken) == "" {
+		t.Fatal("SWARM_TOOL_GATEWAY_TOKEN was not generated")
+	}
+	if got, want := len(gatewayToken), base64.RawURLEncoding.EncodedLen(serveGatewayTokenBytes); got != want {
+		t.Fatalf("SWARM_TOOL_GATEWAY_TOKEN length = %d, want %d", got, want)
+	}
 	restore()
 	if got := os.Getenv("SWARM_TOOL_GATEWAY_URL"); got != "" {
 		t.Fatalf("SWARM_TOOL_GATEWAY_URL after restore = %q, want empty", got)
 	}
 	if got := os.Getenv("SWARM_TOOL_GATEWAY_CONTAINER_URL"); got != "" {
 		t.Fatalf("SWARM_TOOL_GATEWAY_CONTAINER_URL after restore = %q, want empty", got)
+	}
+	if got := os.Getenv("SWARM_TOOL_GATEWAY_TOKEN"); got != "" {
+		t.Fatalf("SWARM_TOOL_GATEWAY_TOKEN after restore = %q, want empty", got)
+	}
+}
+
+func TestConfigureServeMCPGatewayEnvPreservesExplicitGatewayToken(t *testing.T) {
+	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
+	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "")
+	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "operator-token")
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen mcp: %v", err)
+	}
+	defer listener.Close()
+
+	restore, err := configureServeMCPGatewayEnv(listener.Addr())
+	if err != nil {
+		t.Fatalf("configure gateway env: %v", err)
+	}
+	if got := os.Getenv("SWARM_TOOL_GATEWAY_TOKEN"); got != "operator-token" {
+		t.Fatalf("SWARM_TOOL_GATEWAY_TOKEN = %q, want explicit operator token", got)
+	}
+	restore()
+	if got := os.Getenv("SWARM_TOOL_GATEWAY_TOKEN"); got != "operator-token" {
+		t.Fatalf("SWARM_TOOL_GATEWAY_TOKEN after restore = %q, want explicit operator token", got)
 	}
 }
 
