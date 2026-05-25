@@ -318,7 +318,7 @@ def declared_flow_mode(flow_id):
     return ""
 
 def flow_is_template(flow_id):
-    return declared_flow_mode(flow_id) == 'template'
+    return declared_flow_mode(flow_id).lower() == 'template'
 
 def handler_action_parts(handler, flow, node_id, event_type):
     action = handler.get('action')
