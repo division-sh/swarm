@@ -1367,14 +1367,15 @@ func TestCLI_VerifyPreservesLocalContractCarveOut(t *testing.T) {
 	}
 }
 
-func TestCLI_ForkIsHardRetired(t *testing.T) {
+func TestCLI_ForkIsSpecifiedButNotImplemented(t *testing.T) {
+	const expectedForkCommand = "swarm fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]"
 	for _, tc := range []struct {
 		name string
 		args []string
 		want string
 	}{
-		{name: "fork", args: []string{"fork"}, want: "ERROR: `swarm fork` was removed in v1."},
-		{name: "fork-help", args: []string{"fork", "--help"}, want: "ERROR: `swarm fork` was removed in v1."},
+		{name: "fork", args: []string{"fork"}, want: "ERROR: `swarm fork` is specified but not implemented yet."},
+		{name: "fork-help", args: []string{"fork", "--help"}, want: expectedForkCommand},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
@@ -1387,6 +1388,12 @@ func TestCLI_ForkIsHardRetired(t *testing.T) {
 			}
 			if !strings.Contains(stderr.String(), tc.want) {
 				t.Fatalf("%s stderr = %q, want %q", tc.name, stderr.String(), tc.want)
+			}
+			if !strings.Contains(stderr.String(), expectedForkCommand) {
+				t.Fatalf("%s stderr = %q, want promoted fork command %q", tc.name, stderr.String(), expectedForkCommand)
+			}
+			if strings.Contains(stderr.String(), "swarm control run fork") || strings.Contains(stderr.String(), "was removed in v1") {
+				t.Fatalf("%s stderr preserves stale fork authority: %q", tc.name, stderr.String())
 			}
 		})
 	}

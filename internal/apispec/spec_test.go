@@ -269,6 +269,8 @@ func TestMultiBundleSourceAuthorityStaysOutOfLiveOpenRPCUntilImplemented(t *test
 	assertScalarValue(t, mustMappingValue(t, apiBoundary, "status"), "source_authority_not_method_catalog")
 
 	for _, relPath := range []string{
+		filepath.Join("cmd", "swarm", "cli.go"),
+		filepath.Join("docs", "SWARM_INVESTIGATE_COMMAND_DRAFT.md"),
 		filepath.Join("docs", "specs", "swarm-platform", "platform", "FLIGHT-RECORDER.md"),
 		filepath.Join("docs", "specs", "swarm-platform", "platform", "CHANGELOG.md"),
 	} {

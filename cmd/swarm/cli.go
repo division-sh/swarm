@@ -97,7 +97,7 @@ func newRootCommandWithOptions(ctx context.Context, repo string, out, errOut io.
 		newEntityCommand(opts),
 		newMailboxCommand(opts),
 		newControlCommand(opts),
-		newRetiredForkCommand(),
+		newPendingForkCommand(),
 	)
 	return cmd
 }
@@ -304,25 +304,25 @@ func newCompletionCommand() *cobra.Command {
 	}
 }
 
-func newRetiredForkCommand() *cobra.Command {
+func newPendingForkCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:                "fork",
-		Short:              "Removed v1 command; use future swarm control run fork.",
+		Short:              "Planned run-fork command; implementation pending.",
 		Hidden:             true,
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			writeForkRetiredMessage(cmd.ErrOrStderr())
+			writeForkPendingMessage(cmd.ErrOrStderr())
 			return commandExitError{code: 2}
 		},
 	}
 }
 
-func writeForkRetiredMessage(w io.Writer) {
+func writeForkPendingMessage(w io.Writer) {
 	if w == nil {
 		return
 	}
-	fmt.Fprintln(w, "ERROR: `swarm fork` was removed in v1.")
-	fmt.Fprintln(w, "  Forking is a mutating control action; use")
-	fmt.Fprintln(w, "  `swarm control run fork <run-id>` once that command ships.")
-	fmt.Fprintln(w, "  For v1, manual run forking goes through the API owner; see `run.start` and the API spec.")
+	fmt.Fprintln(w, "ERROR: `swarm fork` is specified but not implemented yet.")
+	fmt.Fprintln(w, "  Planned command:")
+	fmt.Fprintln(w, "  `swarm fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]`")
+	fmt.Fprintln(w, "  It will consume `/v1/rpc run.fork`; legacy harness flags such as --dry-run, --materialize-only, --activate, and --contracts are not supported operator commands.")
 }
