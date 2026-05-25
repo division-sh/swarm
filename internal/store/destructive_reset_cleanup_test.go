@@ -50,6 +50,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesRunScopedRowsAndPrese
 	assertCleanupTableResult(t, result, "event_receipts", 3, 3)
 	assertCleanupTableResult(t, result, "dead_letters", 1, 1)
 	assertCleanupTableResult(t, result, "timers", 3, 3)
+	assertCleanupTableResult(t, result, "conversation_forks", 1, 1)
 	assertCleanupTableResult(t, result, "mailbox", 0, 0)
 	assertCleanupTableResult(t, result, "generated_entity_tables", 0, 0)
 
@@ -71,6 +72,9 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesRunScopedRowsAndPrese
 		if got := countRows(t, ctx, pg, table); got != 0 {
 			t.Fatalf("%s rows after cleanup = %d, want 0", table, got)
 		}
+	}
+	if got := countRows(t, ctx, pg, "conversation_forks"); got != 1 {
+		t.Fatalf("conversation_forks rows after cleanup = %d, want 1 preserved row without source_run_id", got)
 	}
 	for _, table := range []string{"events", "event_receipts", "dead_letters", "timers"} {
 		if got := countRows(t, ctx, pg, table); got != 1 {
@@ -125,6 +129,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DryRunCountsWithoutMutation(
 	}
 	assertCleanupTableResult(t, result, "runs", 2, 0)
 	assertCleanupTableResult(t, result, "events", 4, 0)
+	assertCleanupTableResult(t, result, "conversation_forks", 1, 0)
 	assertCleanupTableResult(t, result, "mailbox", 0, 0)
 	if got := countRows(t, ctx, pg, "runs"); got != 2 {
 		t.Fatalf("runs after dry-run = %d, want 2", got)
@@ -801,6 +806,16 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 		VALUES ($1::uuid, $2::uuid, 'agent-a', 'agent-a:global', 'global', 'session', 'active')
 	`, sessionID, runA); err != nil {
 		t.Fatalf("seed agent session: %v", err)
+	}
+	if _, err := pg.DB.ExecContext(ctx, `
+		INSERT INTO conversation_forks (
+			fork_id, source_session_id, source_run_id, source_agent_id, fork_point_kind, fork_point_turn_index,
+			fork_point_turn_id, fork_point_selected_at, created_by, expires_at
+		) VALUES
+			($1::uuid, $3::uuid, $5::uuid, 'agent-a', 'turn', 0, $6::uuid, now(), 'operator-token', now() + interval '1 hour'),
+			($2::uuid, $4::uuid, NULL, 'agent-a', 'turn', 0, $7::uuid, now(), 'operator-token', now() + interval '1 hour')
+	`, uuid.NewString(), uuid.NewString(), sessionID, uuid.NewString(), runA, uuid.NewString(), uuid.NewString()); err != nil {
+		t.Fatalf("seed conversation forks: %v", err)
 	}
 	if _, err := pg.DB.ExecContext(ctx, `
 		INSERT INTO agent_turns (run_id, agent_id, session_id, runtime_mode, scope_key)

@@ -38,6 +38,7 @@ type ConversationSchemaCapabilities struct {
 	Sessions     SchemaFlavor
 	Audits       SchemaFlavor
 	Turns        SchemaFlavor
+	Forks        SchemaFlavor
 	SessionRunID bool
 	AuditRunID   bool
 	TurnRunID    bool
@@ -236,6 +237,15 @@ func detectStoreSchemaCapabilities(catalog schemaColumnCatalog) StoreSchemaCapab
 				"emitted_events", "mcp_servers", "mcp_tools_listed", "mcp_tools_visible",
 				"request_payload", "response_payload", "parse_ok", "latency_ms", "retry_count",
 				"error", "created_at",
+			},
+			nil,
+		),
+		Forks: detectSchemaFlavor(catalog, "conversation_forks",
+			[]string{
+				"fork_id", "source_session_id", "source_run_id", "source_agent_id",
+				"fork_point_kind", "fork_point_turn_index", "fork_point_turn_id",
+				"fork_point_event_id", "fork_point_at", "fork_point_selected_at",
+				"created_by", "created_at", "expires_at", "deleted_at",
 			},
 			nil,
 		),

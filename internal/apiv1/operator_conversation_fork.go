@@ -1,0 +1,276 @@
+package apiv1
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"swarm/internal/store"
+)
+
+const conversationForkIdempotencyTTL = 24 * time.Hour
+
+type ConversationForkLifecycleStore interface {
+	CreateOperatorConversationFork(context.Context, store.ConversationForkCreateRequest) (store.OperatorConversationForkSession, error)
+	ListOperatorConversationForks(context.Context, store.ConversationForkListOptions) (store.ConversationForkListResult, error)
+	LoadOperatorConversationFork(context.Context, string) (store.OperatorConversationForkSession, error)
+	DeleteOperatorConversationFork(context.Context, string, time.Time) (store.ConversationForkDeleteResult, error)
+}
+
+type conversationForkCreateResult struct {
+	Fork                store.OperatorConversationForkSession `json:"fork"`
+	IdempotencyReplayed bool                                  `json:"idempotency_replayed"`
+}
+
+type conversationForkDeleteResult struct {
+	OK                  bool   `json:"ok"`
+	ForkID              string `json:"fork_id"`
+	Deleted             bool   `json:"deleted"`
+	AlreadyDeleted      bool   `json:"already_deleted"`
+	IdempotencyReplayed bool   `json:"idempotency_replayed"`
+}
+
+func OperatorConversationForkHandlers(opts OperatorReadOptions) map[string]MethodHandler {
+	if opts.ConversationForks == nil || opts.Idempotency == nil {
+		return nil
+	}
+	now := opts.Now
+	if now == nil {
+		now = func() time.Time { return time.Now().UTC() }
+	}
+	return map[string]MethodHandler{
+		"conversation.fork": func(ctx context.Context, req Request) (any, error) {
+			return executeConversationForkCreate(ctx, req, opts, now().UTC())
+		},
+		"conversation.fork_list": func(ctx context.Context, req Request) (any, error) {
+			listOpts, err := conversationForkListOptionsFromParams(req.Params, now().UTC())
+			if err != nil {
+				return nil, err
+			}
+			result, err := opts.ConversationForks.ListOperatorConversationForks(ctx, listOpts)
+			if err != nil {
+				return nil, conversationForkError(err, "", 0)
+			}
+			if result.Forks == nil {
+				result.Forks = []store.OperatorConversationForkSession{}
+			}
+			return result, nil
+		},
+		"conversation.fork_view": func(ctx context.Context, req Request) (any, error) {
+			forkID, err := requiredStringParam(req.Params, "fork_id")
+			if err != nil {
+				return nil, err
+			}
+			result, err := opts.ConversationForks.LoadOperatorConversationFork(ctx, forkID)
+			if err != nil {
+				return nil, conversationForkError(err, forkID, 0)
+			}
+			return result, nil
+		},
+		"conversation.fork_delete": func(ctx context.Context, req Request) (any, error) {
+			return executeConversationForkDelete(ctx, req, opts, now().UTC())
+		},
+	}
+}
+
+func executeConversationForkCreate(ctx context.Context, req Request, opts OperatorReadOptions, now time.Time) (any, error) {
+	sourceSessionID, err := requiredStringParam(req.Params, "source_session_id")
+	if err != nil {
+		return nil, err
+	}
+	forkPoint, err := conversationForkPointSelectorFromParams(req.Params)
+	if err != nil {
+		return nil, err
+	}
+	idempotencyKey, _, err := optionalStringParam(req.Params, "idempotency_key")
+	if err != nil {
+		return nil, err
+	}
+	completion, replay, err := opts.Idempotency.WithAPIIdempotency(ctx, store.APIIdempotencyRequest{
+		Method:         req.Method,
+		ActorTokenID:   req.ActorTokenID,
+		IdempotencyKey: idempotencyKey,
+		RequestHash:    req.RequestHash,
+		ResourceID:     sourceSessionID,
+		TTL:            conversationForkIdempotencyTTL,
+		Now:            now,
+	}, func(ctx context.Context) (store.APIIdempotencyCompletion, error) {
+		fork, err := opts.ConversationForks.CreateOperatorConversationFork(ctx, store.ConversationForkCreateRequest{
+			SourceSessionID: sourceSessionID,
+			ForkPoint:       forkPoint,
+			CreatedBy:       req.ActorTokenID,
+			Now:             now,
+		})
+		if err != nil {
+			return store.APIIdempotencyCompletion{}, conversationForkError(err, "", forkPoint.TurnIndex)
+		}
+		response, err := json.Marshal(conversationForkCreateResult{
+			Fork:                fork,
+			IdempotencyReplayed: false,
+		})
+		if err != nil {
+			return store.APIIdempotencyCompletion{}, err
+		}
+		return store.APIIdempotencyCompletion{ResourceID: fork.ForkID, Response: response}, nil
+	})
+	if err != nil {
+		return nil, conversationForkError(err, "", forkPoint.TurnIndex)
+	}
+	var result conversationForkCreateResult
+	if err := json.Unmarshal(completion.Response, &result); err != nil {
+		if replay {
+			return nil, fmt.Errorf("decode conversation.fork idempotency response: %w", err)
+		}
+		return nil, fmt.Errorf("decode conversation.fork response: %w", err)
+	}
+	result.IdempotencyReplayed = replay
+	return result, nil
+}
+
+func executeConversationForkDelete(ctx context.Context, req Request, opts OperatorReadOptions, now time.Time) (any, error) {
+	forkID, err := requiredStringParam(req.Params, "fork_id")
+	if err != nil {
+		return nil, err
+	}
+	idempotencyKey, _, err := optionalStringParam(req.Params, "idempotency_key")
+	if err != nil {
+		return nil, err
+	}
+	completion, replay, err := opts.Idempotency.WithAPIIdempotency(ctx, store.APIIdempotencyRequest{
+		Method:         req.Method,
+		ActorTokenID:   req.ActorTokenID,
+		IdempotencyKey: idempotencyKey,
+		RequestHash:    req.RequestHash,
+		ResourceID:     forkID,
+		TTL:            conversationForkIdempotencyTTL,
+		Now:            now,
+	}, func(ctx context.Context) (store.APIIdempotencyCompletion, error) {
+		deleted, err := opts.ConversationForks.DeleteOperatorConversationFork(ctx, forkID, now)
+		if err != nil {
+			return store.APIIdempotencyCompletion{}, conversationForkError(err, forkID, 0)
+		}
+		response, err := json.Marshal(conversationForkDeleteResult{
+			OK:                  true,
+			ForkID:              deleted.ForkID,
+			Deleted:             deleted.Deleted,
+			AlreadyDeleted:      deleted.AlreadyDeleted,
+			IdempotencyReplayed: false,
+		})
+		if err != nil {
+			return store.APIIdempotencyCompletion{}, err
+		}
+		return store.APIIdempotencyCompletion{ResourceID: deleted.ForkID, Response: response}, nil
+	})
+	if err != nil {
+		return nil, conversationForkError(err, forkID, 0)
+	}
+	var result conversationForkDeleteResult
+	if err := json.Unmarshal(completion.Response, &result); err != nil {
+		if replay {
+			return nil, fmt.Errorf("decode conversation.fork_delete idempotency response: %w", err)
+		}
+		return nil, fmt.Errorf("decode conversation.fork_delete response: %w", err)
+	}
+	result.IdempotencyReplayed = replay
+	return result, nil
+}
+
+func conversationForkListOptionsFromParams(params map[string]any, now time.Time) (store.ConversationForkListOptions, error) {
+	sourceSessionID, _, err := optionalStringParam(params, "source_session_id")
+	if err != nil {
+		return store.ConversationForkListOptions{}, err
+	}
+	cursor, _, err := optionalStringParam(params, "cursor")
+	if err != nil {
+		return store.ConversationForkListOptions{}, err
+	}
+	limit, err := boundedIntegerParam(params, "limit", 1, 500)
+	if err != nil {
+		return store.ConversationForkListOptions{}, err
+	}
+	return store.ConversationForkListOptions{
+		SourceSessionID: sourceSessionID,
+		Limit:           limit,
+		Cursor:          cursor,
+		Now:             now,
+	}, nil
+}
+
+func conversationForkPointSelectorFromParams(params map[string]any) (store.ConversationForkPointSelector, error) {
+	raw, ok := params["fork_point"]
+	if !ok || isEmptyParam(raw) {
+		return store.ConversationForkPointSelector{}, NewInvalidParamsError(map[string]any{"field": "fork_point", "reason": "is required"})
+	}
+	obj, ok := raw.(map[string]any)
+	if !ok {
+		return store.ConversationForkPointSelector{}, NewInvalidParamsError(map[string]any{"field": "fork_point", "reason": "must be an object"})
+	}
+	kind, err := requiredStringParam(obj, "kind")
+	if err != nil {
+		return store.ConversationForkPointSelector{}, err
+	}
+	selector := store.ConversationForkPointSelector{Kind: strings.ToLower(strings.TrimSpace(kind))}
+	if rawTurnIndex, ok := obj["turn_index"]; ok && !isEmptyParam(rawTurnIndex) {
+		turnIndex, ok := integerParam(rawTurnIndex)
+		if !ok || turnIndex < 1 {
+			return store.ConversationForkPointSelector{}, NewInvalidParamsError(map[string]any{"field": "fork_point.turn_index", "reason": "must be an integer from 1 to 1000000"})
+		}
+		selector.TurnIndex = turnIndex
+	}
+	if eventID, present, err := optionalStringParam(obj, "event_id"); err != nil {
+		return store.ConversationForkPointSelector{}, err
+	} else if present {
+		selector.EventID = eventID
+	}
+	if at, err := timestampParam(obj, "at"); err != nil {
+		return store.ConversationForkPointSelector{}, err
+	} else if at != nil {
+		selector.At = at
+	}
+	switch selector.Kind {
+	case "turn", "event", "time":
+		return selector, nil
+	default:
+		return store.ConversationForkPointSelector{}, NewInvalidParamsError(map[string]any{"field": "fork_point.kind", "reason": "must be one of turn, event, time"})
+	}
+}
+
+func conversationForkError(err error, forkID string, turnIndex int) error {
+	var conflict *store.APIIdempotencyConflictError
+	if errors.As(err, &conflict) {
+		return NewApplicationError(IdempotencyConflictCode, false, map[string]any{
+			"original_request_hash":    conflict.OriginalRequestHash,
+			"conflicting_request_hash": conflict.ConflictingRequestHash,
+			"original_response_ref": map[string]any{
+				"method":      conflict.Method,
+				"resource_id": conflict.ResourceID,
+			},
+		})
+	}
+	if errors.Is(err, store.ErrSessionNotFound) {
+		return NewApplicationError(SessionNotFoundCode, false, map[string]any{})
+	}
+	if errors.Is(err, store.ErrTurnNotFound) {
+		details := map[string]any{}
+		if turnIndex > 0 {
+			details["turn_index"] = turnIndex
+		}
+		return NewApplicationError(TurnNotFoundCode, false, details)
+	}
+	if errors.Is(err, store.ErrEventNotFound) {
+		return NewApplicationError(EventNotFoundCode, false, map[string]any{})
+	}
+	if errors.Is(err, store.ErrConversationForkNotFound) {
+		return NewApplicationError(ForkNotFoundCode, false, map[string]any{"fork_id": forkID})
+	}
+	if errors.Is(err, store.ErrInvalidConversationForkCursor) {
+		return NewInvalidParamsError(map[string]any{"field": "cursor", "reason": "invalid conversation fork cursor"})
+	}
+	if paramErr := entityReadParamError(err); paramErr != nil {
+		return NewInvalidParamsError(map[string]any{"field": paramErr.Field, "reason": paramErr.Reason})
+	}
+	return err
+}

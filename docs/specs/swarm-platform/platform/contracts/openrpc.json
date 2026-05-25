@@ -470,7 +470,7 @@
           }
         },
         {
-          "code": -32017,
+          "code": -32018,
           "message": "Application error: PAYLOAD_VALIDATION_FAILED",
           "data": {
             "additionalProperties": false,
@@ -528,7 +528,7 @@
           }
         },
         {
-          "code": -32011,
+          "code": -32012,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -669,7 +669,7 @@
           }
         },
         {
-          "code": -32011,
+          "code": -32012,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -795,7 +795,7 @@
           }
         },
         {
-          "code": -32011,
+          "code": -32012,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -1015,7 +1015,7 @@
           }
         },
         {
-          "code": -32023,
+          "code": -32024,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -1053,7 +1053,7 @@
           }
         },
         {
-          "code": -32022,
+          "code": -32023,
           "message": "Application error: RUN_ALREADY_TERMINAL",
           "data": {
             "additionalProperties": false,
@@ -1156,7 +1156,7 @@
           }
         },
         {
-          "code": -32011,
+          "code": -32012,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -1285,6 +1285,458 @@
       ]
     },
     {
+      "name": "conversation.fork",
+      "description": "Create a forkchat lifecycle session from an existing conversation source\nsession and a validated fork point. This first slice is lifecycle-only:\nit persists source session/run/agent lineage, fork point descriptor,\ncreator token, fixed 24-hour TTL, and deletion state. It does not\nexecute a forked LLM turn, return entity snapshots, expose inherited\ntranscript counts, or write into normal conversation/event/log surfaces.\n",
+      "params": [
+        {
+          "name": "source_session_id",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "fork_point",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/ConversationForkPointSelector"
+          }
+        },
+        {
+          "name": "idempotency_key",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/ConversationForkCreateResult"
+        }
+      },
+      "errors": [
+        {
+          "code": -32026,
+          "message": "Application error: SESSION_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "SESSION_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "session_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "session_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32027,
+          "message": "Application error: TURN_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "TURN_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "session_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "turn_index": {
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "session_id",
+                  "turn_index"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32006,
+          "message": "Application error: EVENT_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "EVENT_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "event_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "event_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32012,
+          "message": "Application error: IDEMPOTENCY_CONFLICT",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "IDEMPOTENCY_CONFLICT",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "conflicting_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_response_ref": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string"
+                      },
+                      "resource_id": {
+                        "$ref": "#/components/schemas/OpaqueId"
+                      }
+                    },
+                    "required": [
+                      "method",
+                      "resource_id"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "original_request_hash",
+                  "conflicting_request_hash",
+                  "original_response_ref"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
+      "name": "conversation.fork_delete",
+      "description": "Soft-delete one forkchat lifecycle session from the isolated conversation_forks owner.",
+      "params": [
+        {
+          "name": "fork_id",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "idempotency_key",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/ConversationForkDeleteResult"
+        }
+      },
+      "errors": [
+        {
+          "code": -32011,
+          "message": "Application error: FORK_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "FORK_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "fork_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "fork_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32012,
+          "message": "Application error: IDEMPOTENCY_CONFLICT",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "IDEMPOTENCY_CONFLICT",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "conflicting_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_response_ref": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string"
+                      },
+                      "resource_id": {
+                        "$ref": "#/components/schemas/OpaqueId"
+                      }
+                    },
+                    "required": [
+                      "method",
+                      "resource_id"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "original_request_hash",
+                  "conflicting_request_hash",
+                  "original_response_ref"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
+      "name": "conversation.fork_list",
+      "description": "List active forkchat lifecycle sessions from the isolated conversation_forks owner.",
+      "params": [
+        {
+          "name": "source_session_id",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "default": 50,
+            "maximum": 500,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        {
+          "name": "cursor",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/Cursor"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "additionalProperties": false,
+          "properties": {
+            "forks": {
+              "items": {
+                "$ref": "#/components/schemas/ConversationForkSession"
+              },
+              "type": "array"
+            },
+            "next_cursor": {
+              "$ref": "#/components/schemas/Cursor"
+            }
+          },
+          "required": [
+            "forks"
+          ],
+          "type": "object"
+        }
+      }
+    },
+    {
+      "name": "conversation.fork_view",
+      "description": "Read one forkchat lifecycle session header/state. The turns array remains empty until conversation.fork_chat exists.",
+      "params": [
+        {
+          "name": "fork_id",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/ConversationForkSession"
+        }
+      },
+      "errors": [
+        {
+          "code": -32011,
+          "message": "Application error: FORK_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "FORK_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "fork_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "fork_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
       "name": "conversation.get",
       "description": "Read one conversation in full — session metadata plus all turns and turn blocks.",
       "params": [
@@ -1305,7 +1757,7 @@
       },
       "errors": [
         {
-          "code": -32025,
+          "code": -32026,
           "message": "Application error: SESSION_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -1382,7 +1834,7 @@
       },
       "errors": [
         {
-          "code": -32025,
+          "code": -32026,
           "message": "Application error: SESSION_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -1420,7 +1872,7 @@
           }
         },
         {
-          "code": -32026,
+          "code": -32027,
           "message": "Application error: TURN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -1936,7 +2388,7 @@
           }
         },
         {
-          "code": -32027,
+          "code": -32028,
           "message": "Application error: UNSUPPORTED_BUNDLE_REF",
           "data": {
             "additionalProperties": false,
@@ -2015,7 +2467,7 @@
           }
         },
         {
-          "code": -32017,
+          "code": -32018,
           "message": "Application error: PAYLOAD_VALIDATION_FAILED",
           "data": {
             "additionalProperties": false,
@@ -2073,7 +2525,7 @@
           }
         },
         {
-          "code": -32023,
+          "code": -32024,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -2149,7 +2601,7 @@
           }
         },
         {
-          "code": -32022,
+          "code": -32023,
           "message": "Application error: RUN_ALREADY_TERMINAL",
           "data": {
             "additionalProperties": false,
@@ -2191,7 +2643,7 @@
           }
         },
         {
-          "code": -32011,
+          "code": -32012,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -2535,7 +2987,7 @@
           }
         },
         {
-          "code": -32017,
+          "code": -32018,
           "message": "Application error: PAYLOAD_VALIDATION_FAILED",
           "data": {
             "additionalProperties": false,
@@ -2593,7 +3045,7 @@
           }
         },
         {
-          "code": -32011,
+          "code": -32012,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -2774,7 +3226,7 @@
       },
       "errors": [
         {
-          "code": -32015,
+          "code": -32016,
           "message": "Application error: MAILBOX_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -2812,7 +3264,7 @@
           }
         },
         {
-          "code": -32013,
+          "code": -32014,
           "message": "Application error: MAILBOX_ALREADY_DECIDED",
           "data": {
             "additionalProperties": false,
@@ -2864,7 +3316,7 @@
           }
         },
         {
-          "code": -32014,
+          "code": -32015,
           "message": "Application error: MAILBOX_APPROVAL_EVENT_UNCONFIGURED",
           "data": {
             "additionalProperties": false,
@@ -2906,7 +3358,7 @@
           }
         },
         {
-          "code": -32011,
+          "code": -32012,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -3001,7 +3453,7 @@
       },
       "errors": [
         {
-          "code": -32015,
+          "code": -32016,
           "message": "Application error: MAILBOX_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -3039,7 +3491,7 @@
           }
         },
         {
-          "code": -32013,
+          "code": -32014,
           "message": "Application error: MAILBOX_ALREADY_DECIDED",
           "data": {
             "additionalProperties": false,
@@ -3091,7 +3543,7 @@
           }
         },
         {
-          "code": -32012,
+          "code": -32013,
           "message": "Application error: INVALID_DEFER_UNTIL",
           "data": {
             "additionalProperties": false,
@@ -3136,7 +3588,7 @@
           }
         },
         {
-          "code": -32011,
+          "code": -32012,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -3217,7 +3669,7 @@
       },
       "errors": [
         {
-          "code": -32015,
+          "code": -32016,
           "message": "Application error: MAILBOX_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -3372,7 +3824,7 @@
       },
       "errors": [
         {
-          "code": -32015,
+          "code": -32016,
           "message": "Application error: MAILBOX_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -3410,7 +3862,7 @@
           }
         },
         {
-          "code": -32013,
+          "code": -32014,
           "message": "Application error: MAILBOX_ALREADY_DECIDED",
           "data": {
             "additionalProperties": false,
@@ -3462,7 +3914,7 @@
           }
         },
         {
-          "code": -32011,
+          "code": -32012,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -3570,7 +4022,7 @@
       },
       "errors": [
         {
-          "code": -32023,
+          "code": -32024,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -3608,7 +4060,7 @@
           }
         },
         {
-          "code": -32024,
+          "code": -32025,
           "message": "Application error: RUN_NOT_PAUSED",
           "data": {
             "additionalProperties": false,
@@ -3650,7 +4102,7 @@
           }
         },
         {
-          "code": -32011,
+          "code": -32012,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -3731,7 +4183,7 @@
       },
       "errors": [
         {
-          "code": -32023,
+          "code": -32024,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -3800,7 +4252,7 @@
       },
       "errors": [
         {
-          "code": -32023,
+          "code": -32024,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -3933,7 +4385,7 @@
       },
       "errors": [
         {
-          "code": -32023,
+          "code": -32024,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -3971,7 +4423,7 @@
           }
         },
         {
-          "code": -32022,
+          "code": -32023,
           "message": "Application error: RUN_ALREADY_TERMINAL",
           "data": {
             "additionalProperties": false,
@@ -4013,7 +4465,7 @@
           }
         },
         {
-          "code": -32021,
+          "code": -32022,
           "message": "Application error: RUN_ALREADY_PAUSED",
           "data": {
             "additionalProperties": false,
@@ -4051,7 +4503,7 @@
           }
         },
         {
-          "code": -32011,
+          "code": -32012,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -4218,7 +4670,7 @@
           }
         },
         {
-          "code": -32027,
+          "code": -32028,
           "message": "Application error: UNSUPPORTED_BUNDLE_REF",
           "data": {
             "additionalProperties": false,
@@ -4297,7 +4749,7 @@
           }
         },
         {
-          "code": -32017,
+          "code": -32018,
           "message": "Application error: PAYLOAD_VALIDATION_FAILED",
           "data": {
             "additionalProperties": false,
@@ -4355,7 +4807,7 @@
           }
         },
         {
-          "code": -32011,
+          "code": -32012,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -4443,7 +4895,7 @@
       },
       "errors": [
         {
-          "code": -32023,
+          "code": -32024,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -4481,7 +4933,7 @@
           }
         },
         {
-          "code": -32022,
+          "code": -32023,
           "message": "Application error: RUN_ALREADY_TERMINAL",
           "data": {
             "additionalProperties": false,
@@ -4523,7 +4975,7 @@
           }
         },
         {
-          "code": -32011,
+          "code": -32012,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -4623,7 +5075,7 @@
       },
       "errors": [
         {
-          "code": -32023,
+          "code": -32024,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -4724,7 +5176,7 @@
       },
       "errors": [
         {
-          "code": -32023,
+          "code": -32024,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -4988,7 +5440,7 @@
       },
       "errors": [
         {
-          "code": -32020,
+          "code": -32021,
           "message": "Application error: RUNTIME_NUKE_IN_PROGRESS",
           "data": {
             "additionalProperties": false,
@@ -5026,7 +5478,7 @@
           }
         },
         {
-          "code": -32011,
+          "code": -32012,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -5107,7 +5559,7 @@
       },
       "errors": [
         {
-          "code": -32018,
+          "code": -32019,
           "message": "Application error: RUNTIME_ALREADY_PAUSED",
           "data": {
             "additionalProperties": false,
@@ -5138,7 +5590,7 @@
           }
         },
         {
-          "code": -32011,
+          "code": -32012,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -5219,7 +5671,7 @@
       },
       "errors": [
         {
-          "code": -32019,
+          "code": -32020,
           "message": "Application error: RUNTIME_NOT_PAUSED",
           "data": {
             "additionalProperties": false,
@@ -5250,7 +5702,7 @@
           }
         },
         {
-          "code": -32011,
+          "code": -32012,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -5933,6 +6385,176 @@
         },
         "required": [
           "conversation",
+          "turns"
+        ],
+        "type": "object"
+      },
+      "ConversationForkCreateResult": {
+        "additionalProperties": false,
+        "properties": {
+          "fork": {
+            "$ref": "#/components/schemas/ConversationForkSession"
+          },
+          "idempotency_replayed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "fork",
+          "idempotency_replayed"
+        ],
+        "type": "object"
+      },
+      "ConversationForkDeleteResult": {
+        "additionalProperties": false,
+        "properties": {
+          "already_deleted": {
+            "type": "boolean"
+          },
+          "deleted": {
+            "type": "boolean"
+          },
+          "fork_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "idempotency_replayed": {
+            "type": "boolean"
+          },
+          "ok": {
+            "const": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "fork_id",
+          "deleted",
+          "already_deleted",
+          "idempotency_replayed"
+        ],
+        "type": "object"
+      },
+      "ConversationForkPointDescriptor": {
+        "additionalProperties": false,
+        "description": "Canonical validated fork-point descriptor persisted by the conversation fork lifecycle owner.",
+        "properties": {
+          "at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "event_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "kind": {
+            "enum": [
+              "turn",
+              "event",
+              "time"
+            ],
+            "type": "string"
+          },
+          "selected_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "turn_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "turn_index": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "turn_index",
+          "turn_id",
+          "selected_at"
+        ],
+        "type": "object"
+      },
+      "ConversationForkPointSelector": {
+        "additionalProperties": false,
+        "description": "Selector for the source conversation fork point. Exactly one selector kind is accepted. For `turn`, turn_index is the canonical 1-based conversation order used by conversation.get_turn. For `event`, event_id must be the trigger_event_id for exactly one turn in the source session. For `time`, at resolves to the latest source turn with agent_turns.created_at \u003c= at, using created_at ASC then turn_id ASC as the canonical order.",
+        "properties": {
+          "at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "event_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "kind": {
+            "enum": [
+              "turn",
+              "event",
+              "time"
+            ],
+            "type": "string"
+          },
+          "turn_index": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      },
+      "ConversationForkSession": {
+        "additionalProperties": false,
+        "description": "Forkchat lifecycle header. This first slice intentionally carries no forked chat transcript, no entity snapshot payload, and no sandbox execution result.",
+        "properties": {
+          "created_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "deleted_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "expires_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "fork_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "fork_point": {
+            "$ref": "#/components/schemas/ConversationForkPointDescriptor"
+          },
+          "source_agent_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "source_run_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "source_session_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "state": {
+            "enum": [
+              "active",
+              "expired",
+              "deleted"
+            ],
+            "type": "string"
+          },
+          "turns": {
+            "description": "Empty until a later conversation.fork_chat execution owner exists.",
+            "items": {
+              "$ref": "#/components/schemas/Turn"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "fork_id",
+          "source_session_id",
+          "source_agent_id",
+          "fork_point",
+          "created_by",
+          "created_at",
+          "expires_at",
+          "state",
           "turns"
         ],
         "type": "object"
@@ -7300,6 +7922,7 @@
           "read:agents",
           "control:agents",
           "read:conversations",
+          "write:conversations",
           "read:runtime",
           "control:runtime",
           "admin:runtime"
@@ -8018,8 +8641,46 @@
           "type": "object"
         }
       },
-      "IDEMPOTENCY_CONFLICT": {
+      "FORK_NOT_FOUND": {
         "code": -32011,
+        "message": "Application error: FORK_NOT_FOUND",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "FORK_NOT_FOUND",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "properties": {
+                "fork_id": {
+                  "$ref": "#/components/schemas/OpaqueId"
+                }
+              },
+              "required": [
+                "fork_id"
+              ],
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "IDEMPOTENCY_CONFLICT": {
+        "code": -32012,
         "message": "Application error: IDEMPOTENCY_CONFLICT",
         "data": {
           "additionalProperties": false,
@@ -8078,7 +8739,7 @@
         }
       },
       "INVALID_DEFER_UNTIL": {
-        "code": -32012,
+        "code": -32013,
         "message": "Application error: INVALID_DEFER_UNTIL",
         "data": {
           "additionalProperties": false,
@@ -8123,7 +8784,7 @@
         }
       },
       "MAILBOX_ALREADY_DECIDED": {
-        "code": -32013,
+        "code": -32014,
         "message": "Application error: MAILBOX_ALREADY_DECIDED",
         "data": {
           "additionalProperties": false,
@@ -8175,7 +8836,7 @@
         }
       },
       "MAILBOX_APPROVAL_EVENT_UNCONFIGURED": {
-        "code": -32014,
+        "code": -32015,
         "message": "Application error: MAILBOX_APPROVAL_EVENT_UNCONFIGURED",
         "data": {
           "additionalProperties": false,
@@ -8217,7 +8878,7 @@
         }
       },
       "MAILBOX_NOT_FOUND": {
-        "code": -32015,
+        "code": -32016,
         "message": "Application error: MAILBOX_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -8255,7 +8916,7 @@
         }
       },
       "METHOD_UNAVAILABLE": {
-        "code": -32016,
+        "code": -32017,
         "message": "Application error: METHOD_UNAVAILABLE",
         "data": {
           "additionalProperties": false,
@@ -8293,7 +8954,7 @@
         }
       },
       "PAYLOAD_VALIDATION_FAILED": {
-        "code": -32017,
+        "code": -32018,
         "message": "Application error: PAYLOAD_VALIDATION_FAILED",
         "data": {
           "additionalProperties": false,
@@ -8351,7 +9012,7 @@
         }
       },
       "RUNTIME_ALREADY_PAUSED": {
-        "code": -32018,
+        "code": -32019,
         "message": "Application error: RUNTIME_ALREADY_PAUSED",
         "data": {
           "additionalProperties": false,
@@ -8382,7 +9043,7 @@
         }
       },
       "RUNTIME_NOT_PAUSED": {
-        "code": -32019,
+        "code": -32020,
         "message": "Application error: RUNTIME_NOT_PAUSED",
         "data": {
           "additionalProperties": false,
@@ -8413,7 +9074,7 @@
         }
       },
       "RUNTIME_NUKE_IN_PROGRESS": {
-        "code": -32020,
+        "code": -32021,
         "message": "Application error: RUNTIME_NUKE_IN_PROGRESS",
         "data": {
           "additionalProperties": false,
@@ -8451,7 +9112,7 @@
         }
       },
       "RUN_ALREADY_PAUSED": {
-        "code": -32021,
+        "code": -32022,
         "message": "Application error: RUN_ALREADY_PAUSED",
         "data": {
           "additionalProperties": false,
@@ -8489,7 +9150,7 @@
         }
       },
       "RUN_ALREADY_TERMINAL": {
-        "code": -32022,
+        "code": -32023,
         "message": "Application error: RUN_ALREADY_TERMINAL",
         "data": {
           "additionalProperties": false,
@@ -8531,7 +9192,7 @@
         }
       },
       "RUN_NOT_FOUND": {
-        "code": -32023,
+        "code": -32024,
         "message": "Application error: RUN_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -8569,7 +9230,7 @@
         }
       },
       "RUN_NOT_PAUSED": {
-        "code": -32024,
+        "code": -32025,
         "message": "Application error: RUN_NOT_PAUSED",
         "data": {
           "additionalProperties": false,
@@ -8611,7 +9272,7 @@
         }
       },
       "SESSION_NOT_FOUND": {
-        "code": -32025,
+        "code": -32026,
         "message": "Application error: SESSION_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -8649,7 +9310,7 @@
         }
       },
       "TURN_NOT_FOUND": {
-        "code": -32026,
+        "code": -32027,
         "message": "Application error: TURN_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -8692,7 +9353,7 @@
         }
       },
       "UNSUPPORTED_BUNDLE_REF": {
-        "code": -32027,
+        "code": -32028,
         "message": "Application error: UNSUPPORTED_BUNDLE_REF",
         "data": {
           "additionalProperties": false,

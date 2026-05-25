@@ -217,6 +217,8 @@ func approvedMutatingHTTPRuntimeMethods() []string {
 		"agent.replay_backlog",
 		"agent.restart",
 		"agent.send_directive",
+		"conversation.fork",
+		"conversation.fork_delete",
 		"event.publish",
 		"event.replay",
 		"mailbox.approve",
@@ -243,6 +245,8 @@ type mutatingHTTPRuntimeFixture struct {
 func mutatingHTTPRuntimeFixtures() map[string]mutatingHTTPRuntimeFixture {
 	runID := "00000000-0000-0000-0000-000000000101"
 	otherRunID := "00000000-0000-0000-0000-000000000102"
+	sourceSessionID := "00000000-0000-0000-0000-000000000201"
+	forkID := "00000000-0000-0000-0000-000000000301"
 	until := time.Unix(1700003600, 0).UTC().Format(time.RFC3339Nano)
 	later := time.Unix(1700007200, 0).UTC().Format(time.RFC3339Nano)
 	return map[string]mutatingHTTPRuntimeFixture{
@@ -268,6 +272,18 @@ func mutatingHTTPRuntimeFixtures() map[string]mutatingHTTPRuntimeFixture {
 			Params:         map[string]any{"agent_id": "agent-a", "directive": "continue", "run_id": runID},
 			ConflictParams: map[string]any{"agent_id": "agent-a", "directive": "pause", "run_id": runID},
 			ResultKeys:     []string{"ok", "run_id", "run_id_resolution", "directive_event_id", "directive_event_type"},
+			SuccessEffects: 1,
+		},
+		"conversation.fork": {
+			Params:         map[string]any{"source_session_id": sourceSessionID, "fork_point": map[string]any{"kind": "turn", "turn_index": float64(1)}},
+			ConflictParams: map[string]any{"source_session_id": sourceSessionID, "fork_point": map[string]any{"kind": "turn", "turn_index": float64(2)}},
+			ResultKeys:     []string{"fork", "idempotency_replayed"},
+			SuccessEffects: 1,
+		},
+		"conversation.fork_delete": {
+			Params:         map[string]any{"fork_id": forkID},
+			ConflictParams: map[string]any{"fork_id": "00000000-0000-0000-0000-000000000302"},
+			ResultKeys:     []string{"ok", "fork_id", "deleted", "already_deleted", "idempotency_replayed"},
 			SuccessEffects: 1,
 		},
 		"event.publish": {
@@ -360,6 +376,8 @@ func mutatingHTTPRuntimeErrorProbes() []mutatingHTTPRuntimeErrorProbe {
 	missingRunID := "00000000-0000-0000-0000-000000000999"
 	badFingerprint := "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	validEvent := map[string]any{"bundle_ref": map[string]any{"fingerprint": runStartTestFingerprint}, "event_name": "scan.requested", "payload": map[string]any{"topic": "medicine"}, "idempotency_key": "idem-error"}
+	sourceSessionID := "00000000-0000-0000-0000-000000000201"
+	forkID := "00000000-0000-0000-0000-000000000301"
 	return []mutatingHTTPRuntimeErrorProbe{
 		{Method: "event.publish", Params: mergeProbeParams(validEvent, map[string]any{"bundle_ref": map[string]any{"fingerprint": badFingerprint}}), Code: BundleMismatchCode},
 		{Method: "event.publish", Params: mergeProbeParams(validEvent, map[string]any{"bundle_ref": map[string]any{"label": "latest"}}), Code: UnsupportedBundleRefCode},
@@ -392,6 +410,19 @@ func mutatingHTTPRuntimeErrorProbes() []mutatingHTTPRuntimeErrorProbe {
 			s.observability.events["evt-pending"] = mutatingProbeOriginalEvent("evt-pending", []string{"agent-a"}, eventReplayStatusPending)
 		}}},
 		{Method: "agent.replay", Params: map[string]any{"event_id": "evt-1", "agent_id": "agent-a", "idempotency_key": "idem-error"}, Code: PayloadValidationFailedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.events.checkErr = runtimebus.ErrPayloadValidation }}},
+
+		{Method: "conversation.fork", Params: map[string]any{"source_session_id": sourceSessionID, "fork_point": map[string]any{"kind": "turn", "turn_index": float64(1)}, "idempotency_key": "idem-error"}, Code: SessionNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.forks.createErr = store.ErrSessionNotFound
+		}}},
+		{Method: "conversation.fork", Params: map[string]any{"source_session_id": sourceSessionID, "fork_point": map[string]any{"kind": "turn", "turn_index": float64(1)}, "idempotency_key": "idem-error"}, Code: TurnNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.forks.createErr = store.ErrTurnNotFound
+		}}},
+		{Method: "conversation.fork", Params: map[string]any{"source_session_id": sourceSessionID, "fork_point": map[string]any{"kind": "event", "event_id": "00000000-0000-0000-0000-000000000901"}, "idempotency_key": "idem-error"}, Code: EventNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.forks.createErr = store.ErrEventNotFound
+		}}},
+		{Method: "conversation.fork_delete", Params: map[string]any{"fork_id": forkID, "idempotency_key": "idem-error"}, Code: ForkNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.forks.deleteErr = store.ErrConversationForkNotFound
+		}}},
 
 		{Method: "run.start", Params: mergeProbeParams(validEvent, map[string]any{"bundle_ref": map[string]any{"fingerprint": badFingerprint}, "run_id": runID}), Code: BundleMismatchCode},
 		{Method: "run.start", Params: mergeProbeParams(validEvent, map[string]any{"bundle_ref": map[string]any{"label": "latest"}, "run_id": runID}), Code: UnsupportedBundleRefCode},
@@ -570,6 +601,7 @@ type mutatingRuntimeProbeState struct {
 	agentControl   *mutatingProbeAgentControl
 	runtimeIngress *mutatingProbeRuntimeIngress
 	mailbox        *mutatingProbeMailboxStore
+	forks          *fakeConversationForkLifecycleStore
 	nuke           *recordingRuntimeNukeOwners
 	effects        int
 }
@@ -601,6 +633,27 @@ func newMutatingRuntimeProbeState(t *testing.T, methodName string) *mutatingRunt
 	state.agentControl.state = state
 	state.runtimeIngress.state = state
 	state.mailbox = newMutatingProbeMailboxStore(state)
+	state.forks = &fakeConversationForkLifecycleStore{
+		createResult: store.OperatorConversationForkSession{
+			ForkID:          "00000000-0000-0000-0000-000000000301",
+			SourceSessionID: "00000000-0000-0000-0000-000000000201",
+			SourceRunID:     runID,
+			SourceAgentID:   "agent-a",
+			ForkPoint: store.ConversationForkPointDescriptor{
+				Kind:       "turn",
+				TurnIndex:  1,
+				TurnID:     "00000000-0000-0000-0000-000000000401",
+				SelectedAt: now,
+			},
+			CreatedBy: "token",
+			CreatedAt: now,
+			ExpiresAt: now.Add(store.ConversationForkLifecycleTTL),
+			State:     "active",
+			Turns:     []store.OperatorConversationTurn{},
+		},
+		deleteResult: store.ConversationForkDeleteResult{ForkID: "00000000-0000-0000-0000-000000000301", Deleted: true},
+		recordEffect: state.recordEffect,
+	}
 	return state
 }
 
@@ -614,6 +667,7 @@ func (s *mutatingRuntimeProbeState) options(t *testing.T) OperatorReadOptions {
 		Runs:                  s.runs,
 		Observability:         s.observability,
 		AgentControl:          s.agentControl,
+		ConversationForks:     s.forks,
 		Mailbox:               s.mailbox,
 		Idempotency:           s.idempotency,
 		Events:                s.events,

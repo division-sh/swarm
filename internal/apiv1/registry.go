@@ -25,6 +25,7 @@ const (
 	AgentNotRunningCode                  = "AGENT_NOT_RUNNING"
 	SessionNotFoundCode                  = "SESSION_NOT_FOUND"
 	TurnNotFoundCode                     = "TURN_NOT_FOUND"
+	ForkNotFoundCode                     = "FORK_NOT_FOUND"
 	PayloadValidationFailedCode          = "PAYLOAD_VALIDATION_FAILED"
 	RunNotFoundCode                      = "RUN_NOT_FOUND"
 	RunAlreadyTerminalCode               = "RUN_ALREADY_TERMINAL"

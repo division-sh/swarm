@@ -397,6 +397,11 @@ func destructiveResetCleanupQuery(table, mode string, runIDs []string) (string, 
 			return fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE run_id = ANY($1::uuid[])`, quoteIdent(table)), args, nil
 		}
 		return fmt.Sprintf(`DELETE FROM %s WHERE run_id = ANY($1::uuid[])`, quoteIdent(table)), args, nil
+	case "conversation_forks":
+		if mode == "count" {
+			return `SELECT COUNT(*) FROM conversation_forks WHERE source_run_id = ANY($1::uuid[])`, args, nil
+		}
+		return `DELETE FROM conversation_forks WHERE source_run_id = ANY($1::uuid[])`, args, nil
 	case "run_fork_delivery_event_replays":
 		if mode == "count" {
 			return `
