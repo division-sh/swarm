@@ -177,6 +177,120 @@ func TestPostgresStore_ConversationForkLifecycleFailsClosedForSelectors(t *testi
 	}
 }
 
+func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	s := &PostgresStore{DB: db}
+	ctx := context.Background()
+	now := time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC)
+	source := seedConversationForkSource(t, db, now)
+	entityID := uuid.NewString()
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO entity_state (
+			run_id, entity_id, flow_instance, entity_type,
+			current_state, gates, fields, accumulator, revision,
+			entered_state_at, created_at, updated_at
+		)
+		VALUES (
+			$1::uuid, $2::uuid, 'flow/forkchat', 'default',
+			'after', '{}'::jsonb, '{"name":"After"}'::jsonb, '{}'::jsonb, 2,
+			$3, $3, $3
+		)
+	`, source.runID, entityID, source.turn1At.Add(10*time.Second)); err != nil {
+		t.Fatalf("seed source entity_state: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO entity_mutations (run_id, entity_id, field, old_value, new_value, writer_type, writer_id, created_at)
+		VALUES
+			($1::uuid, $2::uuid, 'current_state', NULL, '"draft"'::jsonb, 'platform', 'test', $3),
+			($1::uuid, $2::uuid, 'name', NULL, '"Before"'::jsonb, 'platform', 'test', $3),
+			($1::uuid, $2::uuid, 'current_state', '"draft"'::jsonb, '"after"'::jsonb, 'platform', 'test', $4),
+			($1::uuid, $2::uuid, 'name', '"Before"'::jsonb, '"After"'::jsonb, 'platform', 'test', $4)
+	`, source.runID, entityID, source.turn1At.Add(-30*time.Second), source.turn1At.Add(10*time.Second)); err != nil {
+		t.Fatalf("seed source entity mutations: %v", err)
+	}
+	var mutationsBefore int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM entity_mutations WHERE run_id = $1::uuid`, source.runID).Scan(&mutationsBefore); err != nil {
+		t.Fatalf("count source mutations before chat: %v", err)
+	}
+
+	fork, err := s.CreateOperatorConversationFork(ctx, ConversationForkCreateRequest{
+		SourceSessionID: source.sessionID,
+		ForkPoint:       ConversationForkPointSelector{Kind: "turn", TurnIndex: 1},
+		CreatedBy:       "actor-token",
+		Now:             now,
+	})
+	if err != nil {
+		t.Fatalf("CreateOperatorConversationFork: %v", err)
+	}
+	result, err := s.ChatOperatorConversationFork(ctx, ConversationForkChatRequest{
+		ForkID:       fork.ForkID,
+		Message:      "inspect the fork",
+		ActorTokenID: "actor-token",
+		Now:          now.Add(time.Second),
+	})
+	if err != nil {
+		t.Fatalf("ChatOperatorConversationFork: %v", err)
+	}
+	if result.ForkID != fork.ForkID || result.Turn.TurnIndex != 1 || result.Turn.TurnID == "" || !result.Turn.ParseOK {
+		t.Fatalf("chat result turn = %#v", result)
+	}
+	if result.Snapshot.SnapshotOwner != ConversationForkChatSnapshotOwner || result.SandboxPolicy.Owner != ConversationForkChatSandboxOwner {
+		t.Fatalf("owners = snapshot %q policy %q", result.Snapshot.SnapshotOwner, result.SandboxPolicy.Owner)
+	}
+	if len(result.Snapshot.EntitySnapshot) != 1 {
+		t.Fatalf("snapshot entities = %#v, want one reconstructed entity", result.Snapshot.EntitySnapshot)
+	}
+	entity := result.Snapshot.EntitySnapshot[0]
+	if entity.EntityID != entityID || entity.CurrentState != "draft" || entity.Fields["name"] != "Before" {
+		t.Fatalf("entity snapshot = %#v, want source-at-fork projection", entity)
+	}
+
+	loaded, err := s.LoadOperatorConversationFork(ctx, fork.ForkID)
+	if err != nil {
+		t.Fatalf("LoadOperatorConversationFork after chat: %v", err)
+	}
+	if len(loaded.Turns) != 1 || loaded.Turns[0].TurnID != result.Turn.TurnID {
+		t.Fatalf("fork_view turns = %#v, want fork-local chat turn", loaded.Turns)
+	}
+
+	var mutationsAfter int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM entity_mutations WHERE run_id = $1::uuid`, source.runID).Scan(&mutationsAfter); err != nil {
+		t.Fatalf("count source mutations after chat: %v", err)
+	}
+	if mutationsAfter != mutationsBefore {
+		t.Fatalf("source mutations changed from %d to %d; forkchat must not live-mutate", mutationsBefore, mutationsAfter)
+	}
+	var normalTurns int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_turns WHERE session_id = $1::uuid`, fork.ForkID).Scan(&normalTurns); err != nil {
+		t.Fatalf("count normal agent_turns for fork id: %v", err)
+	}
+	if normalTurns != 0 {
+		t.Fatalf("forkchat leaked into agent_turns rows = %d", normalTurns)
+	}
+	var runtimeEvents int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_name = 'platform.runtime_log' AND produced_by = $1`, fork.ForkID).Scan(&runtimeEvents); err != nil {
+		t.Fatalf("count runtime log events for fork id: %v", err)
+	}
+	if runtimeEvents != 0 {
+		t.Fatalf("forkchat leaked runtime log events = %d", runtimeEvents)
+	}
+
+	if _, err := s.DeleteOperatorConversationFork(ctx, fork.ForkID, now.Add(2*time.Second)); err != nil {
+		t.Fatalf("DeleteOperatorConversationFork: %v", err)
+	}
+	_, err = s.ChatOperatorConversationFork(ctx, ConversationForkChatRequest{
+		ForkID:       fork.ForkID,
+		Message:      "should fail",
+		ActorTokenID: "actor-token",
+		Now:          now.Add(3 * time.Second),
+	})
+	var paramErr *EntityReadParamError
+	if !errors.As(err, &paramErr) || paramErr.Field != "fork_id" {
+		t.Fatalf("deleted fork chat error = %v, want fork_id invalid params", err)
+	}
+}
+
 type conversationForkSourceFixture struct {
 	runID     string
 	agentID   string

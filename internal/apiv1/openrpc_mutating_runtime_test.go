@@ -218,6 +218,7 @@ func approvedMutatingHTTPRuntimeMethods() []string {
 		"agent.restart",
 		"agent.send_directive",
 		"conversation.fork",
+		"conversation.fork_chat",
 		"conversation.fork_delete",
 		"event.publish",
 		"event.replay",
@@ -278,6 +279,12 @@ func mutatingHTTPRuntimeFixtures() map[string]mutatingHTTPRuntimeFixture {
 			Params:         map[string]any{"source_session_id": sourceSessionID, "fork_point": map[string]any{"kind": "turn", "turn_index": float64(1)}},
 			ConflictParams: map[string]any{"source_session_id": sourceSessionID, "fork_point": map[string]any{"kind": "turn", "turn_index": float64(2)}},
 			ResultKeys:     []string{"fork", "idempotency_replayed"},
+			SuccessEffects: 1,
+		},
+		"conversation.fork_chat": {
+			Params:         map[string]any{"fork_id": forkID, "message": "inspect fork"},
+			ConflictParams: map[string]any{"fork_id": forkID, "message": "different message"},
+			ResultKeys:     []string{"fork_id", "turn", "snapshot", "sandbox_policy", "idempotency_replayed"},
 			SuccessEffects: 1,
 		},
 		"conversation.fork_delete": {
@@ -419,6 +426,9 @@ func mutatingHTTPRuntimeErrorProbes() []mutatingHTTPRuntimeErrorProbe {
 		}}},
 		{Method: "conversation.fork", Params: map[string]any{"source_session_id": sourceSessionID, "fork_point": map[string]any{"kind": "event", "event_id": "00000000-0000-0000-0000-000000000901"}, "idempotency_key": "idem-error"}, Code: EventNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
 			s.forks.createErr = store.ErrEventNotFound
+		}}},
+		{Method: "conversation.fork_chat", Params: map[string]any{"fork_id": forkID, "message": "inspect fork", "idempotency_key": "idem-error"}, Code: ForkNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.forks.chatErr = store.ErrConversationForkNotFound
 		}}},
 		{Method: "conversation.fork_delete", Params: map[string]any{"fork_id": forkID, "idempotency_key": "idem-error"}, Code: ForkNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
 			s.forks.deleteErr = store.ErrConversationForkNotFound
@@ -650,6 +660,38 @@ func newMutatingRuntimeProbeState(t *testing.T, methodName string) *mutatingRunt
 			ExpiresAt: now.Add(store.ConversationForkLifecycleTTL),
 			State:     "active",
 			Turns:     []store.OperatorConversationTurn{},
+		},
+		chatResult: store.ConversationForkChatResult{
+			ForkID: "00000000-0000-0000-0000-000000000301",
+			Turn: store.OperatorConversationTurn{
+				TurnIndex:       1,
+				TurnID:          "00000000-0000-0000-0000-000000000402",
+				RequestPayload:  []byte(`{"message":"inspect fork"}`),
+				ResponsePayload: []byte(`{"message":"forkchat sandbox response: inspect fork"}`),
+				ParseOK:         true,
+			},
+			Snapshot: store.ConversationForkSnapshot{
+				ForkID:          "00000000-0000-0000-0000-000000000301",
+				SourceSessionID: "00000000-0000-0000-0000-000000000201",
+				SourceRunID:     runID,
+				SourceAgentID:   "agent-a",
+				SourceTurn: store.ConversationForkSourceTurn{
+					TurnID:     "00000000-0000-0000-0000-000000000401",
+					TurnIndex:  1,
+					SelectedAt: now,
+					CreatedAt:  now,
+				},
+				EntitySnapshot: []store.ConversationForkEntitySnapshot{},
+				SnapshotOwner:  store.ConversationForkChatSnapshotOwner,
+				CreatedAt:      now,
+			},
+			SandboxPolicy: store.ConversationForkSandboxPolicy{
+				Owner:              store.ConversationForkChatSandboxOwner,
+				ReadPolicy:         "fork_snapshot_only",
+				WritePolicy:        "stub_record_only_no_live_mutation",
+				SideEffectingTools: []string{"save_entity_field"},
+				StubbedTools:       []string{"save_entity_field"},
+			},
 		},
 		deleteResult: store.ConversationForkDeleteResult{ForkID: "00000000-0000-0000-0000-000000000301", Deleted: true},
 		recordEffect: state.recordEffect,

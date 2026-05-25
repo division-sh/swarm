@@ -1499,6 +1499,140 @@
       ]
     },
     {
+      "name": "conversation.fork_chat",
+      "description": "Execute one sandboxed forkchat turn against an active fork lifecycle session.\nThe method consumes conversation_forks for lifecycle validation,\nconversation_fork_snapshots for source-at-fork context, and\nconversation_fork_turns for fork-local transcript persistence. It does\nnot write agent_turns, events, runtime logs, mailbox rows, run commands,\nor dashboard conversation rows by default.\n",
+      "params": [
+        {
+          "name": "fork_id",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "message",
+          "required": true,
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        {
+          "name": "idempotency_key",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/ConversationForkChatResult"
+        }
+      },
+      "errors": [
+        {
+          "code": -32011,
+          "message": "Application error: FORK_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "FORK_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "fork_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "fork_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32012,
+          "message": "Application error: IDEMPOTENCY_CONFLICT",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "IDEMPOTENCY_CONFLICT",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "conflicting_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_response_ref": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string"
+                      },
+                      "resource_id": {
+                        "$ref": "#/components/schemas/OpaqueId"
+                      }
+                    },
+                    "required": [
+                      "method",
+                      "resource_id"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "original_request_hash",
+                  "conflicting_request_hash",
+                  "original_response_ref"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
       "name": "conversation.fork_delete",
       "description": "Soft-delete one forkchat lifecycle session from the isolated conversation_forks owner.",
       "params": [
@@ -1678,7 +1812,7 @@
     },
     {
       "name": "conversation.fork_view",
-      "description": "Read one forkchat lifecycle session header/state. The turns array remains empty until conversation.fork_chat exists.",
+      "description": "Read one forkchat lifecycle session header/state and fork-local transcript turns owned by conversation_fork_turns.",
       "params": [
         {
           "name": "fork_id",
@@ -6389,6 +6523,34 @@
         ],
         "type": "object"
       },
+      "ConversationForkChatResult": {
+        "additionalProperties": false,
+        "properties": {
+          "fork_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "idempotency_replayed": {
+            "type": "boolean"
+          },
+          "sandbox_policy": {
+            "$ref": "#/components/schemas/ConversationForkSandboxPolicy"
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/ConversationForkSnapshot"
+          },
+          "turn": {
+            "$ref": "#/components/schemas/ConversationForkTurn"
+          }
+        },
+        "required": [
+          "fork_id",
+          "turn",
+          "snapshot",
+          "sandbox_policy",
+          "idempotency_replayed"
+        ],
+        "type": "object"
+      },
       "ConversationForkCreateResult": {
         "additionalProperties": false,
         "properties": {
@@ -6431,6 +6593,37 @@
           "deleted",
           "already_deleted",
           "idempotency_replayed"
+        ],
+        "type": "object"
+      },
+      "ConversationForkEntitySnapshot": {
+        "additionalProperties": false,
+        "description": "Entity projection reconstructed from source-run entity_mutations at the fork point for forkchat read-only tools.",
+        "properties": {
+          "accumulator": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "current_state": {
+            "type": "string"
+          },
+          "entered_state_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "entity_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "fields": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "gates": {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        },
+        "required": [
+          "entity_id"
         ],
         "type": "object"
       },
@@ -6499,9 +6692,47 @@
         ],
         "type": "object"
       },
+      "ConversationForkSandboxPolicy": {
+        "additionalProperties": false,
+        "description": "Sandbox policy enforced for forkchat execution. Read tools consume only the fork snapshot; side-effecting tools are stub-recorded and must not mutate live state.",
+        "properties": {
+          "owner": {
+            "const": "conversation.fork_chat.sandbox.v1",
+            "type": "string"
+          },
+          "read_policy": {
+            "const": "fork_snapshot_only",
+            "type": "string"
+          },
+          "side_effecting_tools": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "stubbed_tools": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "write_policy": {
+            "const": "stub_record_only_no_live_mutation",
+            "type": "string"
+          }
+        },
+        "required": [
+          "owner",
+          "read_policy",
+          "write_policy",
+          "side_effecting_tools",
+          "stubbed_tools"
+        ],
+        "type": "object"
+      },
       "ConversationForkSession": {
         "additionalProperties": false,
-        "description": "Forkchat lifecycle header. This first slice intentionally carries no forked chat transcript, no entity snapshot payload, and no sandbox execution result.",
+        "description": "Forkchat lifecycle header. `conversation.fork_view` consumes the fork-local transcript owner and returns fork turns when conversation.fork_chat has executed. List responses may still return empty turns for lightweight lifecycle rows.",
         "properties": {
           "created_at": {
             "$ref": "#/components/schemas/Timestamp"
@@ -6539,9 +6770,9 @@
             "type": "string"
           },
           "turns": {
-            "description": "Empty until a later conversation.fork_chat execution owner exists.",
+            "description": "Fork-local transcript turns owned by conversation_fork_turns and excluded from normal agent_turns.",
             "items": {
-              "$ref": "#/components/schemas/Turn"
+              "$ref": "#/components/schemas/ConversationForkTurn"
             },
             "type": "array"
           }
@@ -6556,6 +6787,109 @@
           "expires_at",
           "state",
           "turns"
+        ],
+        "type": "object"
+      },
+      "ConversationForkSnapshot": {
+        "additionalProperties": false,
+        "description": "Source-at-fork snapshot consumed by conversation.fork_chat sandbox execution.",
+        "properties": {
+          "created_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "entity_snapshot": {
+            "items": {
+              "$ref": "#/components/schemas/ConversationForkEntitySnapshot"
+            },
+            "type": "array"
+          },
+          "fork_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "snapshot_owner": {
+            "const": "conversation.fork_chat.snapshot.v1",
+            "type": "string"
+          },
+          "source_agent_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "source_run_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "source_session_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "source_turn": {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        },
+        "required": [
+          "fork_id",
+          "source_session_id",
+          "source_agent_id",
+          "source_turn",
+          "entity_snapshot",
+          "snapshot_owner",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "ConversationForkTurn": {
+        "additionalProperties": false,
+        "description": "Fork-local transcript turn. It intentionally is not an agent_turns row and may not have a live trigger event.",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "latency_ms": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "parse_ok": {
+            "type": "boolean"
+          },
+          "request_payload": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "response_payload": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "tool_calls": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "trigger_event_id": {
+            "type": "string"
+          },
+          "trigger_event_type": {
+            "type": "string"
+          },
+          "turn_blocks": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "turn_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "turn_index": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "turn_index",
+          "turn_id",
+          "parse_ok",
+          "latency_ms"
         ],
         "type": "object"
       },

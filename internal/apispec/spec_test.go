@@ -16,17 +16,17 @@ func TestPlatformAPISpecValidationCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Validate() error = %v", err)
 	}
-	if report.MethodCount != 47 {
-		t.Fatalf("method count = %d, want 47", report.MethodCount)
+	if report.MethodCount != 48 {
+		t.Fatalf("method count = %d, want 48", report.MethodCount)
 	}
-	if report.SchemaCount != 77 {
-		t.Fatalf("schema count = %d, want 77", report.SchemaCount)
+	if report.SchemaCount != 82 {
+		t.Fatalf("schema count = %d, want 82", report.SchemaCount)
 	}
 	if report.ErrorCodeCount != 29 {
 		t.Fatalf("error code count = %d, want 29", report.ErrorCodeCount)
 	}
-	if report.MutatingMethodCount != 18 {
-		t.Fatalf("mutating method count = %d, want 18", report.MutatingMethodCount)
+	if report.MutatingMethodCount != 19 {
+		t.Fatalf("mutating method count = %d, want 19", report.MutatingMethodCount)
 	}
 	if report.SubscriptionMethodCnt != 4 {
 		t.Fatalf("subscription method count = %d, want 4", report.SubscriptionMethodCnt)
@@ -66,11 +66,11 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	if err := json.Unmarshal(artifact, &doc); err != nil {
 		t.Fatalf("unmarshal openrpc artifact: %v", err)
 	}
-	if len(doc.Methods) != 47 {
-		t.Fatalf("generated OpenRPC methods = %d, want 47", len(doc.Methods))
+	if len(doc.Methods) != 48 {
+		t.Fatalf("generated OpenRPC methods = %d, want 48", len(doc.Methods))
 	}
-	if len(doc.Components.Schemas) != 77 {
-		t.Fatalf("generated OpenRPC schemas = %d, want 77", len(doc.Components.Schemas))
+	if len(doc.Components.Schemas) != 82 {
+		t.Fatalf("generated OpenRPC schemas = %d, want 82", len(doc.Components.Schemas))
 	}
 	if len(doc.Components.Errors) != 29 {
 		t.Fatalf("generated OpenRPC errors = %d, want 29", len(doc.Components.Errors))
@@ -93,7 +93,7 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	if _, ok := methods["agent.diagnose"]; !ok {
 		t.Fatal("generated OpenRPC missing agent.diagnose")
 	}
-	for _, methodName := range []string{"conversation.fork", "conversation.fork_list", "conversation.fork_view", "conversation.fork_delete"} {
+	for _, methodName := range []string{"conversation.fork", "conversation.fork_chat", "conversation.fork_list", "conversation.fork_view", "conversation.fork_delete"} {
 		if _, ok := methods[methodName]; !ok {
 			t.Fatalf("generated OpenRPC missing %s", methodName)
 		}
@@ -118,7 +118,18 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 			t.Fatalf("generated OpenRPC missing %s", schemaName)
 		}
 	}
-	for _, schemaName := range []string{"ConversationForkPointSelector", "ConversationForkPointDescriptor", "ConversationForkSession", "ConversationForkCreateResult", "ConversationForkDeleteResult"} {
+	for _, schemaName := range []string{
+		"ConversationForkPointSelector",
+		"ConversationForkPointDescriptor",
+		"ConversationForkSession",
+		"ConversationForkTurn",
+		"ConversationForkEntitySnapshot",
+		"ConversationForkSnapshot",
+		"ConversationForkSandboxPolicy",
+		"ConversationForkChatResult",
+		"ConversationForkCreateResult",
+		"ConversationForkDeleteResult",
+	} {
 		if _, ok := doc.Components.Schemas[schemaName]; !ok {
 			t.Fatalf("generated OpenRPC missing %s", schemaName)
 		}
