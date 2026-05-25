@@ -1137,6 +1137,8 @@ timers:
 - `id`: required_agents_match; `severity`: error
 - `id`: handler_field_compliance; `severity`: error
 - `id`: tool_resolution; `severity`: warning
+- `id`: platform_tool_usage_hints; `severity`: hard_invalidity
+- `id`: generated_tool_schema_closure; `severity`: hard_invalidity
 - `id`: prompt_exists; `severity`: warning
 - `id`: produces_drift; `severity`: warning
 - `id`: invalid_field_detection; `severity`: error
@@ -1151,8 +1153,8 @@ timers:
   - `error`: Boot aborts. System does not start.
   - `warning`: Boot continues. Warning logged with finding details.
 
-- `reference_implementation`: verify.py implements structural checks (payload fields, handler fields and supported handler action declaration shapes, state machine, tools, dialect, cycles, produces). It does NOT implement: CEL parsing, runtime executor resolution, deep artifact result-event type resolution, pin wiring, permission validation, entity schema coverage, or namespace collision detection. Those require the Go runtime loader.
-- `check_count`: 19 checks (10 error, 9 warning)
+- `reference_implementation`: verify.py implements structural checks (payload fields, handler fields and supported handler action declaration shapes, state machine, tools, dialect, cycles, produces). It does NOT implement: CEL parsing, runtime executor resolution, discovered MCP tool inventory, platform_tool_usage_hints, generated_tool_schema_closure, deep artifact result-event type resolution, pin wiring, permission validation, entity schema coverage, or namespace collision detection. Those require the Go runtime loader.
+- `check_count`: See `platform/contracts/platform-spec.yaml`; this markdown summary is not the merge-bearing boot-check catalog.
 # compliance
 
 Boot-time and runtime compliance enforcement.

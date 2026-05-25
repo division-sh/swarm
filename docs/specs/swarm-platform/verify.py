@@ -99,6 +99,24 @@ for flow in FLOWS:
 
 events_defined = set(k for k, v in all_events.items() if isinstance(v, dict))
 
+RUNTIME_BUILTIN_TOOLS = {
+    'agent_message',
+    'schedule',
+    'agent_hire',
+    'agent_fire',
+    'agent_reconfigure',
+    'get_entity',
+    'save_entity_field',
+    'create_entity',
+    'query_entities',
+    'search_entities',
+    'query_metrics',
+    'mailbox_send',
+    'human_task_request',
+    'human_task_decide',
+    'read_flow_data',
+}
+
 # ============================================================
 # Helpers
 # ============================================================
@@ -137,6 +155,23 @@ def payload_field_exists(fields, ref):
         if ref == candidate or ref.startswith(candidate + '.') or candidate.startswith(ref + '.'):
             return True
     return False
+
+def declared_mcp_prefixes():
+    prefixes = set()
+    policy = all_policy.get('mcp_servers', {})
+    if not isinstance(policy, dict): return prefixes
+    for server in policy.values():
+        if not isinstance(server, dict): continue
+        prefix = str(server.get('prefix') or '').strip()
+        if prefix:
+            prefixes.add(prefix)
+    return prefixes
+
+def tool_allowed_by_mcp_prefix(tool, prefixes):
+    tool = str(tool or '').strip()
+    if '.' not in tool: return False
+    prefix = tool.split('.', 1)[0].strip()
+    return bool(prefix and prefix in prefixes)
 
 def extract_payload_refs(s):
     return re.findall(r'payload\.([a-zA-Z_][a-zA-Z0-9_.]*)', str(s))
@@ -656,12 +691,16 @@ for flow, nodes in iter_flows_with_nodes():
 # ============================================================
 # CHECK: tool_resolution [warning, per-agent]
 # ============================================================
+runtime_tool_names = set(all_tools.keys()) | RUNTIME_BUILTIN_TOOLS
+mcp_prefixes = declared_mcp_prefixes()
 for flow, agents in iter_flows_with_agents():
     for aid, agent in agents.items():
         if not isinstance(agent, dict): continue
         for tool in agent.get('tools', agent.get('tools_tier2', [])):
-            if tool not in all_tools:
-                warn("tool_resolution", "tool '%s' not in any tools.yaml" % tool, "%s/%s" % (flow, aid))
+            tool_name = str(tool or '').strip()
+            if not tool_name: continue
+            if tool_name not in runtime_tool_names and not tool_allowed_by_mcp_prefix(tool_name, mcp_prefixes):
+                warn("tool_resolution", "tool '%s' not in the structural runtime tool registry subset" % tool_name, "%s/%s" % (flow, aid))
 
 # ============================================================
 # CHECK: prompt_exists [warning, per-agent]
@@ -957,7 +996,7 @@ t = sum(1 for v in all_tools.values() if isinstance(v, dict))
 if deferred_count:
     print("\n[INFO]  %d prompts marked DEFERRED" % deferred_count)
 
-print("\n[INFO]  structural verifier subset; Go runtime owns CEL, runtime executor resolution, deep artifact result-event typing, MCP, credential, and entity-write-target checks")
+print("\n[INFO]  structural verifier subset; Go runtime owns CEL, runtime executor resolution, discovered MCP tool inventory, platform_tool_usage_hints, generated_tool_schema_closure, deep artifact result-event typing, credential, and entity-write-target checks")
 
 print("\n" + "=" * 70)
 print("SUMMARY: %d errors, %d warnings" % (len(errors_list), len(warnings_list)))

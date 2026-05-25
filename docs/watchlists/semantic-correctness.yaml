@@ -156,6 +156,10 @@ active_issues:
     title: Reconcile handler_field_compliance owner and runtime-contract scope
     maps_to:
       - boot_check_definition_drift
+  - id: 1065
+    title: Reconcile platform tool bootverify source authority
+    maps_to:
+      - boot_check_definition_drift
 nodes:
   - id: persisted_normal_run_completion_quiescence_owner
     title: Persisted Normal Run Completion/Quiescence Owner
@@ -252,11 +256,14 @@ nodes:
       - gate schema validation treats missing or empty gate_state as an open schema for handler-level sets_gate
       - condition payload-reference validation treats existing empty event payload schemas as open schemas
       - handler_field_compliance is interpreted as handler field vocabulary only in spec/reference surfaces while Go bootverify uses it for supported handler action declarations, executable owner resolution, and runtime-handled event executor presence
+      - platform_tool_usage_hints and generated_tool_schema_closure are live runtime tool-surface checks that need authoritative boot-check definitions and shared consumer proof
+      - tool_resolution can drift when structural verifier scripts interpret only tools.yaml while Go bootverify consumes the merged runtime tool registry and MCP discovery boundary
     representative_issues:
       - 447
       - 448
       - 974
       - 1055
+      - 1065
     common_framing_mistakes:
       too_broad:
         - all bootverify drift
@@ -511,23 +518,10 @@ nodes:
       - emit grammar, loader, semantic-view, runtime selection, and boot/verify consumers that must interpret the same emit-site ownership model
     why_this_node_exists: the platform cannot make event schema the strict cross-flow contract while different emit sites still share one ambiguous handler-level payload model or while supported consumers interpret emit authorship differently.
     known_manifestations:
-      - closed child seams under this node:
-        - structured emit ownership across handler top level, rules, on_complete, accumulate.on_timeout, and fan_out
-        - strict declarative runtime emit construction and verify/boot proof parity
-        - strict agent emit parity
-        - strict action-originated emit parity
-        - strict auto_emit_on_create parity
-      - remaining compatibility-reference tail addressed by #470:
-        - dead contract/type residue for PayloadTransformSpec after retired authored surfaces stopped being accepted on supported handler/rule/fan_out paths
-        - stale verify/report wording and dead-event audit text that still described payload_transform-era proof surfaces
-        - supported proof-harness allowlists and active prose/reference surfaces that still described payload_transform, fan_out.emit_per_item, or implicit passthrough as current behavior
-      - adjacent split promoted by #472:
-        - canonical event-store admission validation remains intentionally separate from supported emit-surface validation;
-          emit surfaces own producer-authored payload proof before publish, while runtime/store admission validates all events
-          before persistence and residual ingress/store append paths; routing, delivery, source/target, and recipient semantics
-          stay split to #926
-      - adjacent supporting migration tracked by #605:
-        - canonical event-level swarm metadata now owns non-derivable external/lifecycle topology proof so flat event payload fields and verifier metadata no longer share ambiguous underscore ownership
+      - "closed child seams under this node: structured emit ownership across handler top level, rules, on_complete, accumulate.on_timeout, fan_out; strict declarative runtime emit construction and verify/boot proof parity; strict agent/action/auto_emit_on_create parity"
+      - "remaining compatibility-reference tail addressed by #470: dead PayloadTransformSpec residue, stale verify/report wording, and active prose/reference surfaces describing retired payload_transform/fan_out.emit_per_item/implicit passthrough behavior"
+      - "adjacent split promoted by #472: canonical event-store admission validation remains separate from supported emit-surface validation; routing, delivery, source/target, and recipient semantics stay split to #926"
+      - "adjacent supporting migration tracked by #605: canonical event-level swarm metadata owns non-derivable external/lifecycle topology proof so flat event payload fields and verifier metadata no longer share ambiguous underscore ownership"
     representative_issues:
       - 455
       - 457
