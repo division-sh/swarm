@@ -299,6 +299,53 @@ def iter_rule_entries(rules):
                 rule_name = rule.get('id') or str(idx)
                 yield rule_name, rule
 
+def value_present(value):
+    if value is None:
+        return False
+    if isinstance(value, (dict, list)):
+        return len(value) > 0
+    return str(value).strip() != ''
+
+def normalized_handler_action_id(raw):
+    return str(raw or '').strip().lower()
+
+def declared_flow_mode(flow_id):
+    for entry in root_package.get('flows', []):
+        if not isinstance(entry, dict):
+            continue
+        if entry.get('flow') == flow_id or entry.get('id') == flow_id:
+            return str(entry.get('mode', '')).strip()
+    return ""
+
+def flow_is_template(flow_id):
+    return declared_flow_mode(flow_id) == 'template'
+
+def handler_action_parts(handler, flow, node_id, event_type):
+    action = handler.get('action')
+    loc = "%s/%s/%s" % (flow, node_id, event_type)
+    if action is None or action == "":
+        return "", {}
+    if isinstance(action, str):
+        return normalized_handler_action_id(action), {}
+    if isinstance(action, dict):
+        allowed = {'id', 'template', 'instance_id_from', 'config_from', 'mailbox', 'artifact_repo'}
+        for field in action.keys():
+            if field in {'type', 'flow_template', 'instance_id'}:
+                error("handler_field_compliance", "deprecated action field '%s' is not supported" % field, loc)
+            elif field not in allowed:
+                error("handler_field_compliance", "action field '%s' not in platform spec" % field, loc)
+        action_id = normalized_handler_action_id(action.get('id'))
+        if not action_id:
+            error("handler_field_compliance", "action mapping missing id", loc)
+        return action_id, action
+    error("handler_field_compliance", "action declaration must be a string or mapping", loc)
+    return "", {}
+
+def handler_action_value(handler, action_map, field):
+    if isinstance(action_map, dict) and field in action_map:
+        return action_map.get(field)
+    return handler.get(field)
+
 # ============================================================
 # Collect global emitter/subscriber sets
 # ============================================================
@@ -521,20 +568,90 @@ for flow in FLOWS:
 # CHECK: handler_field_compliance [error, per-node]
 # ============================================================
 DEFINED_HANDLER_FIELDS = {
-    'description', '_note', 'guard', 'accumulate', 'compute', 'on_complete',
-    'advances_to', 'sets_gate', 'data_accumulation', 'emit', 'rules',
-    'fan_out', 'query', 'reduce', 'filter', 'count', 'clear', 'action',
+    'description', '_note', 'guard', 'accumulate', 'compute', 'completion_rule',
+    'policy_ref', 'on_complete', 'advances_to', 'sets_gate',
+    'data_accumulation', 'emit', 'rules', 'fan_out', 'query', 'group_by',
+    'reduce', 'filter', 'count', 'clear', 'action', 'select_entity',
+    'select_or_create_entity',
     'template', 'instance_id_from', 'config_from',
-    'clear_gates', 'evidence_target', 'create_entity',
+    'clear_gates', 'evidence_target', 'create_entity', 'from', 'branch',
+    'dedup_by',
+}
+DEPRECATED_HANDLER_FIELDS = {
+    'condition', 'logic', 'on_below_threshold', 'on_dedup', 'on_pass',
+}
+RETIRED_HANDLER_FIELDS = {
+    'emits': 'use emit: <event> or emit: {event, fields}',
+    'payload_transform': 'move payload ownership into emit.fields at the active emit site',
+}
+SUPPORTED_HANDLER_ACTIONS = {
+    'create_flow_instance', 'record_evidence', 'mailbox_write', 'artifact_repo_commit',
 }
 for flow, nodes in iter_flows_with_nodes():
     for nid, node in nodes.items():
         if not isinstance(node, dict): continue
         for ev, h in node.get('event_handlers', {}).items():
             if not isinstance(h, dict): continue
+            loc = "%s/%s/%s" % (flow, nid, ev)
             for field in h.keys():
-                if field not in DEFINED_HANDLER_FIELDS:
-                    error("handler_field_compliance", "handler field '%s' not in platform spec" % field, "%s/%s/%s" % (flow, nid, ev))
+                if field in RETIRED_HANDLER_FIELDS:
+                    error("handler_field_compliance", "handler field '%s' is retired; %s" % (field, RETIRED_HANDLER_FIELDS[field]), loc)
+                elif field in DEPRECATED_HANDLER_FIELDS:
+                    error("handler_field_compliance", "handler uses deprecated field '%s'" % field, loc)
+                elif field not in DEFINED_HANDLER_FIELDS:
+                    error("handler_field_compliance", "handler field '%s' not in platform spec" % field, loc)
+            action_id, action_map = handler_action_parts(h, flow, nid, ev)
+            if not action_id:
+                continue
+            if action_id not in SUPPORTED_HANDLER_ACTIONS:
+                error("handler_field_compliance", "unsupported handler action '%s'" % action_id, loc)
+                continue
+            if action_id == 'create_flow_instance':
+                template = str(handler_action_value(h, action_map, 'template') or '').strip()
+                if not template:
+                    error("handler_field_compliance", "create_flow_instance is missing template", loc)
+                elif not flow_is_template(template):
+                    error("handler_field_compliance", "create_flow_instance template %s is not mode: template" % template, loc)
+                if not str(handler_action_value(h, action_map, 'instance_id_from') or '').strip():
+                    error("handler_field_compliance", "create_flow_instance is missing instance_id_from", loc)
+                config_from = handler_action_value(h, action_map, 'config_from')
+                if not isinstance(config_from, dict) or not config_from:
+                    error("handler_field_compliance", "create_flow_instance is missing config_from", loc)
+            if action_id == 'record_evidence' and not str(h.get('evidence_target') or '').strip():
+                error("handler_field_compliance", "record_evidence is missing evidence_target", loc)
+            mailbox = action_map.get('mailbox') if isinstance(action_map, dict) else None
+            if action_id == 'mailbox_write':
+                if not isinstance(mailbox, dict):
+                    error("handler_field_compliance", "mailbox_write is missing mailbox", loc)
+                else:
+                    if not value_present(mailbox.get('item_type')):
+                        error("handler_field_compliance", "mailbox_write is missing mailbox.item_type", loc)
+                    if not value_present(mailbox.get('summary')):
+                        error("handler_field_compliance", "mailbox_write is missing mailbox.summary", loc)
+            elif mailbox is not None:
+                error("handler_field_compliance", "mailbox declaration requires action mailbox_write", loc)
+            artifact_repo = action_map.get('artifact_repo') if isinstance(action_map, dict) else None
+            if action_id == 'artifact_repo_commit':
+                if not isinstance(artifact_repo, dict):
+                    error("handler_field_compliance", "artifact_repo_commit is missing artifact_repo", loc)
+                else:
+                    if str(artifact_repo.get('provider') or '').strip() != 'local_git':
+                        error("handler_field_compliance", "artifact_repo_commit provider %s is unsupported" % str(artifact_repo.get('provider') or '').strip(), loc)
+                    for required in ('repo_id', 'request_id'):
+                        if not value_present(artifact_repo.get(required)):
+                            error("handler_field_compliance", "artifact_repo_commit is missing artifact_repo.%s" % required, loc)
+                    if not isinstance(artifact_repo.get('allowed_paths'), list) or not artifact_repo.get('allowed_paths'):
+                        error("handler_field_compliance", "artifact_repo_commit requires at least one artifact_repo.allowed_paths entry", loc)
+                    if not isinstance(artifact_repo.get('files'), list) or not artifact_repo.get('files'):
+                        error("handler_field_compliance", "artifact_repo_commit requires at least one artifact_repo.files entry", loc)
+                    output = artifact_repo.get('output')
+                    if not isinstance(output, dict):
+                        output = {}
+                    for required in ('repo_url', 'current_ref', 'file_manifest', 'status', 'failure_reason', 'last_request_id', 'last_source_event_id'):
+                        if not str(output.get(required) or '').strip():
+                            error("handler_field_compliance", "artifact_repo_commit is missing artifact_repo.output.%s" % required, loc)
+            elif artifact_repo is not None:
+                error("handler_field_compliance", "artifact_repo declaration requires action artifact_repo_commit", loc)
 
 # ============================================================
 # CHECK: tool_resolution [warning, per-agent]
@@ -840,7 +957,7 @@ t = sum(1 for v in all_tools.values() if isinstance(v, dict))
 if deferred_count:
     print("\n[INFO]  %d prompts marked DEFERRED" % deferred_count)
 
-print("\n[INFO]  structural verifier subset; Go runtime owns CEL, MCP, credential, and entity-write-target checks")
+print("\n[INFO]  structural verifier subset; Go runtime owns CEL, runtime executor resolution, deep artifact result-event typing, MCP, credential, and entity-write-target checks")
 
 print("\n" + "=" * 70)
 print("SUMMARY: %d errors, %d warnings" % (len(errors_list), len(warnings_list)))
