@@ -206,15 +206,13 @@ func eventPublicationParamsFromRequest(req Request, bootFingerprint string, cfg 
 	if eventName == "" {
 		return eventPublicationParams{}, NewInvalidParamsError(map[string]any{"field": "event_name", "reason": "required parameter is missing"})
 	}
-	fingerprint, err := bundleFingerprintParam(req.Params)
+	bundleIdentity, err := bundleIdentityInputParam(req.Params)
 	if err != nil {
 		return eventPublicationParams{}, err
 	}
+	fingerprint := bundleIdentity.compatibilityFingerprint()
 	if fingerprint != "" && fingerprint != strings.TrimSpace(bootFingerprint) {
-		return eventPublicationParams{}, NewApplicationError(BundleMismatchCode, false, map[string]any{
-			"provided_fingerprint": fingerprint,
-			"boot_fingerprint":     strings.TrimSpace(bootFingerprint),
-		})
+		return eventPublicationParams{}, NewApplicationError(BundleMismatchCode, false, bundleIdentity.mismatchDetails(bootFingerprint))
 	}
 	runID, _, err := optionalStringParam(req.Params, "run_id")
 	if err != nil {

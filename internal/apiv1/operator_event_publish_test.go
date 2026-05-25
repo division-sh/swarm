@@ -99,6 +99,26 @@ func TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempo
 	}
 }
 
+func TestOperatorEventPublishHandlersAcceptCanonicalBundleHash(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	handler := eventPublishTestHandler(t, pg, bus, source)
+
+	published := rpcCall(t, handler, eventPublishBodyWithBundleHash("", runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "", "idem-publish-hash"))
+	if published.Error != nil {
+		t.Fatalf("event.publish error = %#v", published.Error)
+	}
+	result := asMap(t, published.Result)
+	eventID := stringValue(t, result["event_id"], "event_id")
+	runID := stringValue(t, result["run_id"], "run_id")
+	assertEventPublishPersistence(t, db, runID, eventID, "scan.requested", "cli-publish:"+actorTokenID(testToken))
+}
+
 func TestOperatorEventPublishPersistsIdempotencyBeforeReadbackFailure(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
@@ -541,6 +561,46 @@ func TestOperatorEventPublishHandlersFailClosedBeforePersistence(t *testing.T) {
 		assertNoEventPublishPersistence(t, db)
 	})
 
+	t.Run("invalid canonical bundle hash", func(t *testing.T) {
+		_, db, _ := testutil.StartPostgres(t)
+		pg := &store.PostgresStore{DB: db}
+		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+		if err != nil {
+			t.Fatalf("NewEventBusWithOptions: %v", err)
+		}
+		handler := eventPublishTestHandler(t, pg, bus, source)
+
+		resp := rpcCall(t, handler, eventPublishBodyWithBundleHash("", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "scan.requested", `{"topic":"medicine"}`, "", "idem-event-invalid-bundle-hash"))
+		if resp.Error == nil {
+			t.Fatal("event.publish invalid bundle_hash error = nil")
+		}
+		if data := asMap(t, resp.Error.Data); data["code"] != UnsupportedBundleHashCode {
+			t.Fatalf("unsupported bundle hash data = %#v", data)
+		}
+		assertNoEventPublishPersistence(t, db)
+	})
+
+	t.Run("canonical and legacy bundle params conflict", func(t *testing.T) {
+		_, db, _ := testutil.StartPostgres(t)
+		pg := &store.PostgresStore{DB: db}
+		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+		if err != nil {
+			t.Fatalf("NewEventBusWithOptions: %v", err)
+		}
+		handler := eventPublishTestHandler(t, pg, bus, source)
+
+		resp := rpcCall(t, handler, eventPublishBodyWithBothBundleInputs("", runStartTestBundleHash, runStartTestFingerprint, "scan.requested", `{"topic":"medicine"}`, "", "idem-event-bundle-conflict"))
+		if resp.Error == nil {
+			t.Fatal("event.publish bundle input conflict error = nil")
+		}
+		if data := asMap(t, resp.Error.Data); data["code"] != UnsupportedBundleHashCode {
+			t.Fatalf("bundle input conflict data = %#v", data)
+		}
+		assertNoEventPublishPersistence(t, db)
+	})
+
 	t.Run("undeclared event", func(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
 		pg := &store.PostgresStore{DB: db}
@@ -766,6 +826,39 @@ func (s *failOnceEventReadStore) LoadOperatorEvent(ctx context.Context, eventID 
 
 func eventPublishBody(runID, fingerprint, eventName, payload, emitter, idempotencyKey string) string {
 	return eventPublishBodyWithSource(runID, "", fingerprint, eventName, payload, emitter, idempotencyKey)
+}
+
+func eventPublishBodyWithBundleHash(runID, bundleHash, eventName, payload, emitter, idempotencyKey string) string {
+	parts := []string{
+		fmt.Sprintf(`"bundle_hash":%q`, bundleHash),
+		fmt.Sprintf(`"event_name":%q`, eventName),
+		fmt.Sprintf(`"payload":%s`, payload),
+		fmt.Sprintf(`"idempotency_key":%q`, idempotencyKey),
+	}
+	if strings.TrimSpace(runID) != "" {
+		parts = append(parts, fmt.Sprintf(`"run_id":%q`, runID))
+	}
+	if strings.TrimSpace(emitter) != "" {
+		parts = append(parts, fmt.Sprintf(`"emitter":%q`, emitter))
+	}
+	return fmt.Sprintf(`{"jsonrpc":"2.0","id":"publish","method":"event.publish","params":{%s}}`, strings.Join(parts, ","))
+}
+
+func eventPublishBodyWithBothBundleInputs(runID, bundleHash, fingerprint, eventName, payload, emitter, idempotencyKey string) string {
+	parts := []string{
+		fmt.Sprintf(`"bundle_hash":%q`, bundleHash),
+		fmt.Sprintf(`"bundle_ref":{"fingerprint":%q}`, fingerprint),
+		fmt.Sprintf(`"event_name":%q`, eventName),
+		fmt.Sprintf(`"payload":%s`, payload),
+		fmt.Sprintf(`"idempotency_key":%q`, idempotencyKey),
+	}
+	if strings.TrimSpace(runID) != "" {
+		parts = append(parts, fmt.Sprintf(`"run_id":%q`, runID))
+	}
+	if strings.TrimSpace(emitter) != "" {
+		parts = append(parts, fmt.Sprintf(`"emitter":%q`, emitter))
+	}
+	return fmt.Sprintf(`{"jsonrpc":"2.0","id":"publish","method":"event.publish","params":{%s}}`, strings.Join(parts, ","))
 }
 
 func eventPublishBodyWithSource(runID, sourceEventID, fingerprint, eventName, payload, emitter, idempotencyKey string) string {

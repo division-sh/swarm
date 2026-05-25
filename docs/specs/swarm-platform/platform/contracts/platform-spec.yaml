@@ -7920,6 +7920,7 @@ cli_specification:
       - --connect <url>
       - --no-follow
       - --reattach <run-id>
+      - --bundle-hash <bundle-v1:sha256:...>
       - --bundle-fingerprint <sha>
       - --contracts <path>
       - --platform-spec <path>
@@ -7961,11 +7962,11 @@ cli_specification:
         workflow_failed_or_cancelled: 7
         interrupted: 130
       proof_expectations:
-      - exact /v1/rpc calls for health.check, run.start, run.get, and run.stop
+      - exact /v1/rpc calls for health.check, run.start, run.get, and run.stop; run.start carries optional canonical bundle_hash or deprecated legacy bundle_ref.fingerprint only when the corresponding bundle flag is supplied
       - exact /v1/ws subscription for run.subscribe_trace where follow is in scope
       - no direct DB/store/runtime/EventBus reads or writes
       - no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, or legacy token fallback
-      - tests for every mode, invalid flag combination, Ctrl-C behavior, exit mapping, malformed RPC/WS response, and no-call invalid paths
+      - tests for every mode, invalid bundle_hash / bundle fingerprint / combined bundle identity flags, invalid flag combination, Ctrl-C behavior, exit mapping, malformed RPC/WS response, and no-call invalid paths
       split_siblings:
       - swarm trace --follow
       - swarm control pause|continue|stop
@@ -8661,13 +8662,14 @@ cli_specification:
       - EVENT_NOT_FOUND, replay conflict errors, auth/HTTP/RPC failures, and malformed EventReplayResult values fail closed with tested exit codes
       - no direct DB/store/runtime/EventBus/dashboard/Builder reads or writes and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, run.start, event.publish, agent.replay, or agent.replay_backlog usage
     event_publish:
-      command: swarm event publish <event-name> --payload-json <json-object> [--run-id <run-id>] [--source-event-id <event-id>] [--bundle-fingerprint <sha256:...>] [--emitter <source>] [--idempotency-key <key>]
+      command: swarm event publish <event-name> --payload-json <json-object> [--run-id <run-id>] [--source-event-id <event-id>] [--bundle-hash <bundle-v1:sha256:...>] [--bundle-fingerprint <sha256:...>] [--emitter <source>] [--idempotency-key <key>]
       tier: should_have
       implementation_status: implemented
       owner: /v1/rpc event.publish
       behavior: >-
         Mutating event publication CLI consumer. The CLI validates the event name, required JSON object payload, optional run
-        target, optional same-run source event id, optional bundle fingerprint assertion, optional emitter, and optional
+        target, optional same-run source event id, optional canonical bundle_hash assertion or deprecated legacy bundle
+        fingerprint alias, optional emitter, and optional
         idempotency key, then sends exactly those params to /v1/rpc event.publish through the shared v1 API client. The server
         remains the event-publication owner:
         it validates declared event/payload/run/bundle/idempotency semantics, publishes through the runtime EventBus/store
@@ -8683,9 +8685,12 @@ cli_specification:
       - name: --source-event-id <event-id>
         maps_to: source_event_id
         behavior: Optional parent/source event id for explicit checkpoint lineage. Must be used with --run-id and must name an event from the same run.
+      - name: --bundle-hash <bundle-v1:sha256:...>
+        maps_to: bundle_hash
+        behavior: Optional canonical assertion that the server is running the expected bundle hash. Cannot be combined with --bundle-fingerprint.
       - name: --bundle-fingerprint <sha256:...>
         maps_to: bundle_ref.fingerprint
-        behavior: Optional assertion that the server is running the expected boot bundle fingerprint. v1 BundleRef supports fingerprint only.
+        behavior: Deprecated legacy alias for --bundle-hash during #1001. Optional assertion that the server is running the expected boot bundle fingerprint. Cannot be combined with --bundle-hash.
       - name: --emitter <source>
         maps_to: emitter
         behavior: Optional producer identifier. Omitted means the server default emitter applies.
@@ -8706,14 +8711,15 @@ cli_specification:
         - EVENT_NOT_FOUND
         publish_rejected_errors:
         - BUNDLE_MISMATCH
+        - UNSUPPORTED_BUNDLE_HASH
         - UNSUPPORTED_BUNDLE_REF
         - EVENT_NOT_DECLARED
         - PAYLOAD_VALIDATION_FAILED
         - RUN_ALREADY_TERMINAL
         - IDEMPOTENCY_CONFLICT
       proof_expectations:
-      - exact /v1/rpc event.publish call with event_name, required payload, optional run_id, optional source_event_id, optional bundle_ref.fingerprint, optional emitter, and optional idempotency_key params only
-      - missing/blank event name, invalid or non-object --payload-json, blank optional flags, malformed bundle fingerprint, invalid args, and missing SWARM_API_TOKEN make zero API calls
+      - exact /v1/rpc event.publish call with event_name, required payload, optional run_id, optional source_event_id, optional canonical bundle_hash or deprecated legacy bundle_ref.fingerprint, optional emitter, and optional idempotency_key params only
+      - missing/blank event name, invalid or non-object --payload-json, blank optional flags, malformed bundle_hash, malformed bundle fingerprint, both bundle identity flags together, invalid args, and missing SWARM_API_TOKEN make zero API calls
       - success output renders only server-owned EventPublishResult event_id, run_id, source_event_id when present, new_run_created, and delivery rows
       - RUN_NOT_FOUND, EVENT_NOT_FOUND, publish rejection errors, auth/HTTP/RPC failures, and malformed EventPublishResult values fail closed with tested exit codes
       - no direct DB/store/runtime/EventBus/dashboard/Builder reads or writes and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, run.start, event.replay, agent.replay, or agent.replay_backlog usage
@@ -9649,11 +9655,11 @@ api_specification:
         where content is identical.
       algorithm_migration: If a future version migrates to a different hash algorithm, the prefix changes (e.g., `blake3:<hex>`).
         v1 commits to sha256 only.
-      role_in_v1: "fingerprint is the load-bearing bundle identity in v1. BundleRef\n(passed by callers in event.publish\
-        \ or deprecated run.start) carries\
-        \ fingerprint only \u2014 no\nfilesystem paths. BundleIdentity (returned by health.check)\ncarries fingerprint + workflow_name\
-        \ + workflow_version, again\nwithout paths. This makes every API surface that touches bundle\nidentity safely callable\
-        \ by external Phase-2 consumers without\nleaking server deployment internals.\n"
+      role_in_v1: "fingerprint is the load-bearing boot/runtime identity in current v1 runtime source facts. Mutating public\
+        \ input surfaces use canonical bundle_hash (`bundle-v1:sha256:<hex>`) after #1001, with legacy BundleRef/bundle_ref.fingerprint\
+        \ accepted only as a deprecated transition alias. BundleIdentity (returned by health.check) still carries fingerprint\
+        \ + workflow_name + workflow_version until the separately gated canonical source-fact owner promotes v1 bundle_hash\
+        \ output. No API surface accepts filesystem paths.\n"
   components:
     description: 'Reusable JSON Schema components. Methods reference these via $ref. The
 
@@ -9680,6 +9686,10 @@ api_specification:
         type: string
         pattern: ^sha256:[a-f0-9]{64}$
         description: Content-hash fingerprint of a bundle. Stable across paths/worktrees where content is identical.
+      BundleHash:
+        type: string
+        pattern: ^bundle-v1:sha256:[a-f0-9]{64}$
+        description: Canonical v1 bundle identity. Public input surfaces use this shape for bundle_hash; legacy sha256:<hex> fingerprints are not accepted under the bundle_hash name.
       ScopeName:
         description: 'Action-resource scopes used for v1 authorization. v1 enforcement
 
@@ -9710,14 +9720,9 @@ api_specification:
         - control:runtime
         - admin:runtime
       BundleRef:
-        description: "Bundle reference passed by callers to assert \"I expect the server\nto be running this bundle.\" Identified\
-          \ by content fingerprint,\nNOT server-local filesystem paths \u2014 paths cannot be safely\nreferenced by external\
-          \ Phase-2 consumers, and the runtime's\nactual identity check is fingerprint comparison.\n\nv1 runtime requires\
-          \ the fingerprint to match the orchestrator's\nboot-time loaded bundle, or the call fails with BUNDLE_MISMATCH.\n\
-          Per-run dynamic bundle loading (a content-addressable bundle\nuploaded or referenced by registry coordinate) is\
-          \ part of the\ndeferred bundle_lifecycle namespace; v1 BundleRef carries\nfingerprint only.\n\nA typical caller\
-          \ flow: call health.check first to read the\nserver's current bundle.fingerprint, then pass the same\nfingerprint\
-          \ in event.publish.bundle_ref or run.start.bundle_ref to assert continuity.\n"
+        description: "Deprecated legacy bundle reference accepted during the #1001 dual-accept transition. New callers use\
+          \ bundle_hash with BundleHash. BundleRef carries the legacy sha256 fingerprint only and cannot be combined with\
+          \ bundle_hash; doing so fails closed with UNSUPPORTED_BUNDLE_HASH before runtime/store mutation.\n"
         type: object
         additionalProperties: false
         required:
@@ -11625,13 +11630,20 @@ api_specification:
         type: object
         additionalProperties: false
         required:
-        - provided_fingerprint
         - boot_fingerprint
         properties:
           provided_fingerprint:
             $ref: '#/components/schemas/Sha256Fingerprint'
+          provided_bundle_hash:
+            $ref: '#/components/schemas/BundleHash'
           boot_fingerprint:
             $ref: '#/components/schemas/Sha256Fingerprint'
+      UNSUPPORTED_BUNDLE_HASH:
+        type: object
+        additionalProperties: false
+        properties:
+          reason:
+            type: string
       UNSUPPORTED_BUNDLE_REF:
         type: object
         additionalProperties: false
@@ -12104,9 +12116,14 @@ api_specification:
         - write:runs
       idempotency: per the convention.
       params:
+      - name: bundle_hash
+        required: false
+        description: Optional canonical bundle identity assertion. Must be bundle-v1:sha256:<64 lowercase hex> and cannot be combined with legacy bundle_ref.
+        schema:
+          $ref: '#/components/schemas/BundleHash'
       - name: bundle_ref
         required: false
-        description: Optional assertion that the server is running the expected boot bundle fingerprint.
+        description: Deprecated legacy alias for bundle_hash during #1001. Carries bundle_ref.fingerprint only and cannot be combined with bundle_hash.
         schema:
           $ref: '#/components/schemas/BundleRef'
       - name: event_name
@@ -12144,6 +12161,7 @@ api_specification:
           $ref: '#/components/schemas/EventPublishResult'
       errors:
       - BUNDLE_MISMATCH
+      - UNSUPPORTED_BUNDLE_HASH
       - UNSUPPORTED_BUNDLE_REF
       - EVENT_NOT_DECLARED
       - EVENT_PUBLISH_FAILED
@@ -12211,15 +12229,19 @@ api_specification:
 
         Start a new run by injecting an event into the runtime bus.
 
-        Optionally declares a bundle_ref by fingerprint; v1 runtime
+        Optionally declares a canonical bundle_hash assertion; v1 runtime
 
-        requires the fingerprint to match the orchestrator''s boot-time
+        requires it to match the orchestrator''s boot-time
 
-        bundle (or the bundle_ref to be omitted, in which case the
+        bundle identity (or bundle_hash to be omitted, in which case the
 
         boot-time bundle is used). Per-run dynamic bundle loading is
 
-        deferred (see deferred_namespaces.bundle_lifecycle).
+        deferred (see deferred_namespaces.bundle_lifecycle). Legacy
+
+        bundle_ref.fingerprint is accepted only as a deprecated #1001
+
+        transition alias and cannot be combined with bundle_hash.
 
         '
       scope:
@@ -12227,8 +12249,14 @@ api_specification:
         - write:runs
       idempotency: per the convention.
       params:
+      - name: bundle_hash
+        required: false
+        description: Optional canonical bundle identity assertion. Must be bundle-v1:sha256:<64 lowercase hex> and cannot be combined with legacy bundle_ref.
+        schema:
+          $ref: '#/components/schemas/BundleHash'
       - name: bundle_ref
         required: false
+        description: Deprecated legacy alias for bundle_hash during #1001. Carries bundle_ref.fingerprint only and cannot be combined with bundle_hash.
         schema:
           $ref: '#/components/schemas/BundleRef'
       - name: event_name
@@ -12265,6 +12293,7 @@ api_specification:
               $ref: '#/components/schemas/RunStatus'
       errors:
       - BUNDLE_MISMATCH
+      - UNSUPPORTED_BUNDLE_HASH
       - UNSUPPORTED_BUNDLE_REF
       - EVENT_NOT_DECLARED
       - PAYLOAD_VALIDATION_FAILED
@@ -13831,7 +13860,7 @@ api_specification:
       - "project.open / project.reload / project.close \u2192 retired with the legacy Builder transport. A future bundle_lifecycle\
         \ namespace requires a new product owner and spec."
       - "run.start / run.stop / run.pause / run.continue \u2192 renamed to v1 run.* methods (same semantics, new request envelope\
-        \ under /v1/rpc, bundle_ref nesting)."
+        \ under /v1/rpc, canonical bundle_hash input with legacy bundle_ref transition alias)."
       - "run.step / run.retry / run.skip \u2192 retired with the legacy Builder transport. A future debug.* namespace requires\
         \ a new product owner and spec."
       - "state.list_instances \u2192 entity.list (consolidated with /api/instances)."
@@ -13887,7 +13916,8 @@ api_specification:
         defaults use the MCP listener, and retired `--health-addr` MUST NOT be used. The helper MUST NOT
         stop broad Docker inventory or truncate database tables directly. Corpus startup
         migrates from legacy `/api/rpc` run.start payloads with builder-token auth to `curl /v1/rpc {method: run.start,
-        params: {bundle_ref?, event_name, payload, idempotency_key?}}` with the unified token. run.start is now a
+        params: {bundle_hash?, event_name, payload, idempotency_key?}}` with the unified token. Legacy bundle_ref remains
+        a transition alias only. run.start is now a
         deprecated wrapper over event.publish until the helper moves to the canonical event.publish method.'
       cli_v2_read_commands: "Promoted CLI v2 read commands map to v1 methods:\n  swarm runs     \u2192 run.list\n  swarm\
         \ status   \u2192 run.diagnose (default), run.get for header-only mode if exposed\n  swarm trace    \u2192 run.trace,\

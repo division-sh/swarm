@@ -35,7 +35,7 @@ func TestEventPublishUsesEventPublishV1RPCWithBoundParams(t *testing.T) {
 		"--payload-json", `{"topic":"sample","count":2}`,
 		"--run-id", "run-1",
 		"--source-event-id", "event-parent-1",
-		"--bundle-fingerprint", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		"--emitter", "cli:test",
 		"--idempotency-key", "idem-1",
 	}, &stdout, &stderr, testRootCommandOptions(server))
@@ -53,9 +53,7 @@ func TestEventPublishUsesEventPublishV1RPCWithBoundParams(t *testing.T) {
 		},
 		"run_id":          "run-1",
 		"source_event_id": "event-parent-1",
-		"bundle_ref": map[string]any{
-			"fingerprint": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		},
+		"bundle_hash":     "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		"emitter":         "cli:test",
 		"idempotency_key": "idem-1",
 	}
@@ -80,6 +78,34 @@ func TestEventPublishUsesEventPublishV1RPCWithBoundParams(t *testing.T) {
 	}
 	if strings.TrimSpace(stderr.String()) != "" {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestEventPublishLegacyBundleFingerprintSerializesBundleRef(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	var captured jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		writeJSONRPCResult(t, w, captured.ID, eventPublishTestResult(false))
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{
+		"event", "publish", "scan.requested",
+		"--payload-json", `{}`,
+		"--bundle-fingerprint", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if got := captured.Params["bundle_ref"]; !reflect.DeepEqual(got, map[string]any{"fingerprint": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}) {
+		t.Fatalf("bundle_ref = %#v", got)
+	}
+	if _, ok := captured.Params["bundle_hash"]; ok {
+		t.Fatalf("bundle_hash unexpectedly present in legacy request: %#v", captured.Params)
 	}
 }
 
@@ -139,8 +165,11 @@ func TestEventPublishRejectsInvalidInputBeforeRequest(t *testing.T) {
 		{name: "blank run id", args: []string{"event", "publish", "scan.requested", "--payload-json", "{}", "--run-id", "  "}, wantStderr: "--run-id must be non-empty"},
 		{name: "blank source event id", args: []string{"event", "publish", "scan.requested", "--payload-json", "{}", "--source-event-id", "  "}, wantStderr: "--source-event-id must be non-empty"},
 		{name: "source event without run id", args: []string{"event", "publish", "scan.requested", "--payload-json", "{}", "--source-event-id", "event-parent-1"}, wantStderr: "--source-event-id requires --run-id"},
+		{name: "blank bundle hash", args: []string{"event", "publish", "scan.requested", "--payload-json", "{}", "--bundle-hash", "  "}, wantStderr: "--bundle-hash must be non-empty"},
+		{name: "invalid bundle hash", args: []string{"event", "publish", "scan.requested", "--payload-json", "{}", "--bundle-hash", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, wantStderr: "--bundle-hash must be bundle-v1:sha256:<64 lowercase hex>"},
 		{name: "blank bundle fingerprint", args: []string{"event", "publish", "scan.requested", "--payload-json", "{}", "--bundle-fingerprint", "  "}, wantStderr: "--bundle-fingerprint must be non-empty"},
 		{name: "invalid bundle fingerprint", args: []string{"event", "publish", "scan.requested", "--payload-json", "{}", "--bundle-fingerprint", "sha256:BAD"}, wantStderr: "--bundle-fingerprint must be sha256:<64 lowercase hex>"},
+		{name: "bundle hash conflicts with legacy fingerprint", args: []string{"event", "publish", "scan.requested", "--payload-json", "{}", "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--bundle-fingerprint", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, wantStderr: "--bundle-hash is mutually exclusive with --bundle-fingerprint"},
 		{name: "blank emitter", args: []string{"event", "publish", "scan.requested", "--payload-json", "{}", "--emitter", "  "}, wantStderr: "--emitter must be non-empty"},
 		{name: "blank idempotency key", args: []string{"event", "publish", "scan.requested", "--payload-json", "{}", "--idempotency-key", "  "}, wantStderr: "--idempotency-key must be non-empty"},
 	} {
@@ -224,7 +253,17 @@ func TestEventPublishMapsFailureExitCodes(t *testing.T) {
 			wantStderr: "BUNDLE_MISMATCH",
 		},
 		{
-			name: "unsupported bundle exits six",
+			name: "unsupported canonical bundle exits six",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				writeEventPublishJSONRPCError(t, w, req.ID, "UNSUPPORTED_BUNDLE_HASH")
+			},
+			wantCode:   6,
+			wantStderr: "UNSUPPORTED_BUNDLE_HASH",
+		},
+		{
+			name: "unsupported legacy bundle exits six",
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)
