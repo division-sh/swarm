@@ -155,6 +155,39 @@ func TestOpenAICompatibleRuntimeFailsClosedWhenUsageMissing(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatibleChatCompletionsURLNormalizesVersionSegment(t *testing.T) {
+	tests := []struct {
+		name string
+		base string
+		want string
+	}{
+		{name: "server root", base: "https://example.test", want: "https://example.test/v1/chat/completions"},
+		{name: "api version base", base: "https://example.test/v1", want: "https://example.test/v1/chat/completions"},
+		{name: "trim slash", base: "https://example.test/v1/", want: "https://example.test/v1/chat/completions"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := openAICompatibleChatCompletionsURL(tt.base); got != tt.want {
+				t.Fatalf("openAICompatibleChatCompletionsURL(%q) = %q, want %q", tt.base, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestOpenAICompatibleToolResultMessagesPreservesFallbackWithoutToolCallID(t *testing.T) {
+	content := `[{"name":"lookup","tool_call_id":"call_1","ok":true,"result":{"status":"ok"}},{"name":"__runtime_guardrail__","ok":false,"error":"tool output too large"}]`
+	msgs := openAICompatibleToolResultMessages(content)
+	if len(msgs) != 2 {
+		t.Fatalf("messages = %#v, want tool message plus fallback", msgs)
+	}
+	if msgs[0].Role != "tool" || msgs[0].ToolCallID != "call_1" {
+		t.Fatalf("first message = %#v, want call_1 tool result", msgs[0])
+	}
+	if msgs[1].Role != "user" || !strings.Contains(msgs[1].Content, "__runtime_guardrail__") {
+		t.Fatalf("second message = %#v, want preserved guardrail fallback", msgs[1])
+	}
+}
+
 func openAICompatibleTestConfig(baseURL string) *config.Config {
 	return &config.Config{
 		LLM: config.LLMConfig{

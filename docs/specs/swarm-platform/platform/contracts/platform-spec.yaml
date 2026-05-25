@@ -2232,7 +2232,7 @@ engine:
             config_key: llm.openai_compatible.base_url
             env_var: SWARM_OPENAI_COMPATIBLE_BASE_URL
             required: true
-            rule: This is the API base URL, not the chat completions endpoint path; the runtime appends /v1/chat/completions.
+            rule: This is the API base URL, not the chat completions endpoint path; the runtime normalizes a root or /v1 base to exactly /v1/chat/completions.
           model_tier_mapping:
             default_model_config: llm.openai_compatible.default_model
             default_model_env: SWARM_OPENAI_COMPATIBLE_DEFAULT_MODEL
