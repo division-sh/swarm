@@ -172,6 +172,114 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	}
 }
 
+func TestMultiBundleSourceAuthorityStaysOutOfLiveOpenRPCUntilImplemented(t *testing.T) {
+	root := loadPlatformSpecYAMLNode(t)
+	multi := mustMappingValue(t, root, "multi_bundle_persistence")
+	assertScalarValue(t, mustMappingValue(t, multi, "status"), "promoted_source_authority_no_runtime_behavior")
+
+	sourceEvidence := mustMappingValue(t, multi, "source_evidence")
+	assertScalarValue(t, mustMappingValue(t, sourceEvidence, "run_fork_cli_authority_absorbed_from"), "#1038")
+
+	generatedPolicy := mustMappingValue(t, multi, "generated_artifact_policy")
+	assertScalarValue(t, mustMappingValue(t, generatedPolicy, "current_openrpc_status"), "unchanged")
+	assertScalarContains(t, mustMappingValue(t, generatedPolicy, "rule"), "not added to")
+	assertScalarContains(t, mustMappingValue(t, generatedPolicy, "rule"), "until their API/runtime handlers are implemented")
+
+	identity := mustMappingValue(t, multi, "bundle_identity")
+	assertScalarValue(t, mustMappingValue(t, identity, "canonical_name"), "bundle_hash")
+	renamePolicy := mustMappingValue(t, identity, "rename_policy")
+	assertScalarValue(t, mustMappingValue(t, renamePolicy, "bundle_hash"), "promoted_name")
+	assertScalarContains(t, mustMappingValue(t, renamePolicy, "dual_accept_transition"), "#1001")
+
+	persistence := mustMappingValue(t, multi, "persistence_model")
+	assertScalarContains(t, mustMappingValue(t, persistence, "live_schema_boundary"), "does not change live generated tables")
+	platformTables := mustMappingValue(t, mustMappingValue(t, root, "platform_tables"), "tables")
+	if mappingValue(platformTables, "bundles") != nil {
+		t.Fatal("bundles table must not enter live platform_tables before the DB migration child lands")
+	}
+	runsDDL := mustMappingValue(t, mustMappingValue(t, platformTables, "runs"), "ddl")
+	assertScalarContains(t, runsDDL, "bundle_fingerprint TEXT")
+
+	cliSurface := mustMappingValue(t, multi, "cli_surface")
+	runFork := mustMappingValue(t, cliSurface, "run_fork")
+	const runForkCommand = "swarm fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]"
+	assertScalarValue(t, mustMappingValue(t, runFork, "command"), runForkCommand)
+	if strings.Contains(runForkCommand, "--bundle ") {
+		t.Fatal("run fork command promoted legacy --bundle spelling")
+	}
+	if strings.Contains(runForkCommand, "swarm control run fork") {
+		t.Fatal("run fork command promoted control-run fork spelling")
+	}
+
+	apiSurface := mustMappingValue(t, multi, "api_surface")
+	assertScalarValue(t, mustMappingValue(t, apiSurface, "publication_status"), "source_authority_not_generated_openrpc_until_runtime_api_implementation")
+	apiRunFork := mustMappingValue(t, apiSurface, "run_fork")
+	assertScalarValue(t, mustMappingValue(t, apiRunFork, "method"), "run.fork")
+	apiRunForkParams := mustMappingValue(t, apiRunFork, "params")
+	bundleHashParam := mustMappingValue(t, apiRunForkParams, "bundle_hash")
+	assertScalarValue(t, mustMappingValue(t, bundleHashParam, "cli_flag"), "--bundle-hash <bundle_hash>")
+
+	splits := mustMappingValue(t, multi, "explicit_splits")
+	for split, tracker := range map[string]string{
+		"cross_bundle_fork":                 "#976",
+		"db_loaded_same_bundle_source":      "#1024",
+		"run_fork_api_runtime_cli":          "#989",
+		"multi_bundle_cli_inventory":        "#1023",
+		"bundle_hash_dual_accept_migration": "#1001",
+	} {
+		assertScalarValue(t, mustMappingValue(t, mustMappingValue(t, splits, split), "tracker"), tracker)
+	}
+
+	cli := mustMappingValue(t, root, "cli_specification")
+	commandCatalog := mustMappingValue(t, cli, "command_catalog")
+	assertScalarValue(t, mustMappingValue(t, mustMappingValue(t, commandCatalog, "run_fork"), "command"), runForkCommand)
+	retired := mustMappingValue(t, cli, "retired_namespaces")
+	if mappingValue(retired, "fork") != nil {
+		t.Fatal("bare top-level swarm fork must not remain classified as a retired namespace")
+	}
+	legacyHarness := mustMappingValue(t, retired, "fork_legacy_harness_forms")
+	assertScalarContains(t, mustMappingValue(t, legacyHarness, "command"), "--contracts")
+
+	parentTail := mustMappingValue(t, cli, "parent_tail")
+	retiredOrFailClosed := mustMappingValue(t, parentTail, "retired_or_fail_closed")
+	for _, item := range retiredOrFailClosed.Content {
+		if scalarValue(item) == "swarm fork" {
+			t.Fatal("bare top-level swarm fork must not remain in retired_or_fail_closed")
+		}
+	}
+	remaining := mustMappingValue(t, parentTail, "remaining_should_have_not_implemented")
+	if !sequenceContainsScalar(remaining, runForkCommand) {
+		t.Fatalf("remaining_should_have_not_implemented missing %q", runForkCommand)
+	}
+	if !sequenceContainsScalar(remaining, "swarm bundle list|show|agents|register|delete") {
+		t.Fatal("remaining_should_have_not_implemented missing swarm bundle command family")
+	}
+
+	apiBoundary := mustMappingValue(t, mustMappingValue(t, root, "api_specification"), "multi_bundle_publication_boundary")
+	assertScalarValue(t, mustMappingValue(t, apiBoundary, "status"), "source_authority_not_method_catalog")
+
+	api := loadRepoAPISpec(t)
+	for _, methodName := range []string{"run.fork", "bundle.list", "bundle.get", "bundle.agents", "bundle.register", "bundle.delete"} {
+		if _, ok := api.MethodCatalog[methodName]; ok {
+			t.Fatalf("%s must not be in live method_catalog until handler implementation lands", methodName)
+		}
+	}
+	generated, err := GenerateOpenRPC(api)
+	if err != nil {
+		t.Fatalf("GenerateOpenRPC() error = %v", err)
+	}
+	var doc OpenRPCDocument
+	if err := json.Unmarshal(generated, &doc); err != nil {
+		t.Fatalf("unmarshal generated openrpc: %v", err)
+	}
+	for _, method := range doc.Methods {
+		switch method.Name {
+		case "run.fork", "bundle.list", "bundle.get", "bundle.agents", "bundle.register", "bundle.delete":
+			t.Fatalf("%s must not be published in generated OpenRPC until implementation lands", method.Name)
+		}
+	}
+}
+
 func TestEntityFullAccumulatedSchemaPublishesRuntimeAccumulatorState(t *testing.T) {
 	api := loadRepoAPISpec(t)
 	entityFull, ok := api.Components.Schemas["EntityFull"].(map[string]any)
@@ -653,6 +761,18 @@ func mappingValue(node *yaml.Node, key string) *yaml.Node {
 
 func hasMappingKey(node *yaml.Node, key string) bool {
 	return mappingValue(node, key) != nil
+}
+
+func sequenceContainsScalar(node *yaml.Node, want string) bool {
+	if node == nil || node.Kind != yaml.SequenceNode {
+		return false
+	}
+	for _, item := range node.Content {
+		if scalarValue(item) == want {
+			return true
+		}
+	}
+	return false
 }
 
 func scalarValue(node *yaml.Node) string {

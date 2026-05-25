@@ -3935,7 +3935,9 @@ platform_tables:
         New v1 run.start-created rows persist the orchestrator boot fingerprint after bundle_ref
         validation. UPSERT/reopen paths must not overwrite an existing non-NULL fingerprint, but may
         fill an unknown NULL fingerprint when a canonical boot-owned writer supplies one. Legacy NULL
-        values mean unknown bundle and are allowed by serve bundle-match admission.'
+        values mean unknown bundle and are allowed by serve bundle-match admission. This current live DDL
+        is superseded for multi-bundle source authority by multi_bundle_persistence.persistence_model,
+        but remains in platform_tables until #1001 and the database migration child replace the live runtime schema.'
     entity_mutations:
       description: 'Append-only mutation log for entity_state changes. Every write to entity_state.fields,
         entity_state.current_state, entity_state.gates, or entity_state.accumulator produces a row.
@@ -4117,8 +4119,9 @@ run_model:
   lifecycle:
     creation: 'A run is created when: (1) system.started fires (cold start), (2) an external event arrives with
       no active run (warm start), or (3) the runtime fork owner creates a forked run. The platform inserts a row
-      in the runs table with status=running and returns the run_id. Top-level `swarm fork` is retired by cli_specification
-      and is not a supported v1 command.'
+      in the runs table with status=running and returns the run_id. Public run forking is governed by
+      multi_bundle_persistence.api_surface.run_fork and the intended CLI command
+      `swarm fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]`.'
     propagation: 'run_id propagates through the causal chain. When a handler or agent emits an event, the child
       event inherits run_id from the parent. This is set at event creation time in the bus publish path — no
       handler or agent code needs to pass run_id explicitly.'
@@ -4136,7 +4139,7 @@ run_model:
     description: 'Fork creates a new run by reconstructing full system state at a point in time, optionally
       loading new contracts, and resuming execution. The system automatically determines which events need
       to be re-delivered. The original run is frozen. The forked run gets independent execution.'
-    command: 'retired in v1 CLI; future run-fork control surface requires its own gated `swarm control run fork` / API owner'
+    command: 'planned public CLI: `swarm fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]`, consuming /v1/rpc run.fork once #989 implements the API/runtime/CLI owner'
     dry_run_command: 'retired in v1 CLI; historical `swarm fork --dry-run` is not a supported operator command'
     materialize_only_command: 'retired in v1 CLI; historical `swarm fork --materialize-only` is not a supported operator command'
     activation_command: 'retired in v1 CLI; historical `swarm fork --activate` is not a supported operator command'
@@ -4454,9 +4457,11 @@ run_model:
       source rows, suppress fork-local execution with source outcomes, own current-state/entity
       materialization, reconstruct sessions/turns/audits, replay timers/routes/non-agent work, or claim restart
       recovery.'
-    selected_contract_supported_execution: 'The historical selected-contract timestamp-fork execution surface was
-      swarm fork --contracts; top-level swarm fork is now retired by cli_specification and any future operator command
-      requires a separate gated control/API surface. The runtime behavior is owned by runtime.run_fork.selected_contract_execution, not by CLI, route helpers,
+    selected_contract_supported_execution: 'The historical selected-contract timestamp-fork execution harness was
+      swarm fork --contracts; that legacy harness flag remains rejected unless a later source-authority PR promotes it.
+      The intended public command is now the top-level `swarm fork <source-run-id> ...` command defined by
+      multi_bundle_persistence.cli_surface.run_fork and blocked on #989 API/runtime/CLI implementation. The runtime
+      behavior is owned by runtime.run_fork.selected_contract_execution, not by CLI, route helpers,
       delivery-row helpers, or source-row replay. The owner consumes store.run_fork.selected_contract_binding,
       selected_contract_execution_admission, selected_contract_route_topology, selected_contract_dynamic_route_topology,
       runtime.run_fork.selected_contract_recipient_planning, and
@@ -4899,6 +4904,256 @@ run_model:
     run_pause: 'POST /runs/:run_id/pause — pause a running run.'
     run_resume: 'POST /runs/:run_id/resume — resume a paused run.'
     run_cancel: 'POST /runs/:run_id/cancel — cancel a running run. Drains in-flight events.'
+multi_bundle_persistence:
+  status: promoted_source_authority_no_runtime_behavior
+  promoted_by: '#1012'
+  source_evidence:
+    draft: docs/MULTI_BUNDLE_PERSISTENCE_DRAFT.md
+    canonical_hash_first_slice: '#979 / PR #1033'
+    bundle_hash_naming: '#1001'
+    run_fork_cli_authority_absorbed_from: '#1038'
+  authority_rule: >
+    This section is the merge-bearing source authority for multi-bundle persistence, bundle identity, bundle-aware
+    resume/delete/fork semantics, planned bundle API methods, and planned CLI command shape. The draft is now evidence
+    only. Runtime, API handler, CLI implementation, database migration, and generated OpenRPC publication remain separately
+    gated implementation work unless a later PR explicitly promotes and proves them.
+  generated_artifact_policy:
+    current_openrpc_status: unchanged
+    rule: >
+      Generated openrpc.json is derived from api_specification.method_catalog and must continue to match the currently
+      registered /v1/rpc handler set. Multi-bundle methods described here are source authority but are not added to
+      method_catalog/OpenRPC until their API/runtime handlers are implemented and registered in the same gated PR.
+    proof_expectation: >
+      Source-authority promotion proof must verify that run.fork and bundle.* are not silently published in generated
+      OpenRPC without implementation, and that future implementation PRs promote matching method_catalog entries and
+      generated artifacts together.
+  bundle_identity:
+    canonical_name: bundle_hash
+    format: 'bundle-v1:sha256:<64 lowercase hex>'
+    hash_rule_owner: '#979 / PR #1033 canonical bundle hash v1 design-doc authority'
+    rename_policy:
+      bundle_hash: promoted_name
+      bundle_fingerprint: legacy_pre_multi_bundle_name
+      bundle_ref: legacy_pre_multi_bundle_api_wrapper
+      dual_accept_transition: '#1001 only; old and new names must fail closed if both are supplied and disagree'
+    canonical_inputs_required_for_hash_rule:
+      - exact contract file byte inputs after the canonical bundle hash v1 path and YAML normalization rules
+      - deterministic path ordering and cross-platform separator handling
+      - explicit YAML scalar/key normalization and duplicate-key rejection
+      - explicit schema $ref expansion/non-expansion policy
+      - deterministic data/ blob inclusion and exclusion rules
+      - fail-closed symlink, ignored-file, and out-of-tree path policy
+      - hash namespace/version prefix
+  persistence_model:
+    live_schema_boundary: >
+      platform_tables.tables remains the current runtime DDL source. #1012 does not change live generated tables because
+      that would be runtime/schema implementation. The bundles table and runs.bundle_hash/runs.bundle_source fields below
+      are promoted source authority for the database migration child, which must update platform_tables, migrations, store
+      readers/writers, generated artifacts, and proof together.
+    bundles_table:
+      planned_live_owner_after_migration: platform_tables.tables.bundles
+      primary_key: bundle_hash
+      required_columns:
+        - bundle_hash
+        - content_yaml
+        - parsed_json
+        - ingested_at
+      optional_columns:
+        - data_blob
+        - metadata
+      stores:
+        - uploaded or registered contract YAML bytes
+        - data/ bundle blob bytes when included by the canonical hash rule
+        - parsed JSON projection for safe server-side inspection
+      does_not_store:
+        - external code
+        - host filesystem dependencies
+        - credentials
+        - generated runtime state
+    runs_table:
+      planned_live_owner_after_migration: platform_tables.tables.runs
+      promoted_fields:
+        bundle_hash: nullable canonical bundle identity for the run
+        bundle_source: "persisted | ephemeral | deleted | legacy"
+      foreign_key_policy: >
+        runs.bundle_hash intentionally has no database foreign key to bundles.bundle_hash. Deleting a bundle row must not
+        cascade into historical run rows; resume/fork admission consumes bundle_source and current bundle row presence.
+      migration_policy: >
+        Existing rows start as bundle_source=legacy with bundle_hash NULL unless a separately gated migration can prove a
+        persisted bundle hash. Migration must be aggressive and fail closed for unknown owners rather than inventing hashes
+        from stale filesystem paths.
+  resume_and_recovery:
+    resume_eligibility:
+      persisted_bundle_present:
+        condition: 'runs.bundle_source=persisted and bundles row exists for runs.bundle_hash'
+        result: resume_allowed
+      persisted_bundle_missing:
+        condition: 'runs.bundle_source=persisted and no bundles row exists for runs.bundle_hash'
+        result_error: BUNDLE_DATA_INTEGRITY_ERROR
+        rationale: A persisted source promised durable bytes; a missing row is data corruption, not normal unavailability.
+      ephemeral_deleted_or_legacy:
+        condition: 'runs.bundle_source in (ephemeral, deleted, legacy)'
+        result_error: BUNDLE_UNAVAILABLE
+        rationale: The server lacks authoritative bundle bytes for resume/fork after restart or deletion.
+    active_restart_recovery:
+      persisted_bundle_present: restart_may_resume_or_recover_the_run_under_runtime_recovery_owners
+      persisted_bundle_missing: fail_serve_with_BUNDLE_DATA_INTEGRITY_ERROR_until_operator_repairs_data
+      ephemeral_deleted_or_legacy: >
+        Active mid-flight runs cannot be resumed after process restart. Runtime recovery must orphan/terminalize them
+        through the active-run and delivery cleanup owner chain instead of pretending their filesystem bundle is still
+        authoritative.
+    completed_run_fork_after_bundle_delete:
+      rule: >
+        Completed runs whose source bundle row has been deleted are not forkable from bundle bytes. Same-bundle fork
+        admission returns BUNDLE_UNAVAILABLE unless another promoted owner proves an authoritative source bundle.
+  bundle_delete:
+    api_method: bundle.delete
+    cli_command: swarm bundle delete <bundle-hash> [--force] [--dry-run] [--idempotency-key <key>]
+    non_force_rule: >
+      Without --force, deleting a bundle with any active run using that bundle fails closed with BUNDLE_HAS_ACTIVE_RUNS.
+    force_owner_chain:
+      - acquire shared destructive-operation mutex/idempotency owner
+      - plan affected runs and deliveries for the bundle_hash
+      - quiesce and terminalize active runs under run-control/runtime recovery owners
+      - cancel or drain retryable deliveries and pending queues under delivery owners
+      - stop/clean runtime containers and process-owned resources for the affected runs
+      - delete or mark bundle rows only after cleanup succeeds
+    errors:
+      - BUNDLE_NOT_FOUND
+      - BUNDLE_HAS_ACTIVE_RUNS
+      - BUNDLE_DELETE_IN_PROGRESS
+      - RUNTIME_NUKE_IN_PROGRESS
+      - IDEMPOTENCY_CONFLICT
+    result_shape:
+      name: BundleDeleteResult
+      required_fields:
+        - bundle_hash
+        - deleted
+        - active_runs_stopped
+        - deliveries_cancelled
+        - containers_stopped
+        - dry_run
+  api_surface:
+    publication_status: source_authority_not_generated_openrpc_until_runtime_api_implementation
+    command_transport_owner: api_specification
+    bundle_methods_planned:
+      bundle.list:
+        kind: read
+        result: BundleSummary page, optionally cursor-paginated
+      bundle.get:
+        kind: read
+        params: bundle_hash
+        result: BundleDetail
+      bundle.agents:
+        kind: read
+        params: bundle_hash
+        result: Agent definitions from the persisted bundle bytes
+      bundle.register:
+        kind: mutate
+        params: content_yaml, data_blob?, idempotency_key?
+        result: BundleRegistrationResult with bundle_hash
+      bundle.delete:
+        kind: destructive_mutate
+        params: bundle_hash, force?, dry_run?, idempotency_key?
+        result: BundleDeleteResult
+    bundle_aware_existing_methods_planned:
+      event.publish:
+        rule: >
+          New-run publication uses bundle_hash after #1001. Existing-run publication validates against the run's
+          canonical bundle identity. Legacy bundle_ref/bundle_fingerprint wrappers are transition-only and must not remain
+          authoritative after the rename migration.
+      run.start:
+        rule: Deprecated wrapper follows event.publish bundle_hash semantics while it remains present.
+      run.list:
+        rule: May accept optional bundle_hash filter.
+      runtime.logs:
+        rule: May accept optional bundle_hash filter.
+      runtime.incidents:
+        rule: May accept optional bundle_hash filter.
+      agent.list:
+        rule: Future bundle-aware listing must disambiguate run-scoped loaded agents from persisted bundle agent catalog.
+      event.list:
+        rule: Future multi-bundle event listing must avoid ambient bundle assumptions; run_id remains the primary run-scoped owner.
+      event.subscribe:
+        rule: Future multi-bundle subscription filters must avoid ambient bundle assumptions; run_id remains the primary run-scoped owner.
+    run_fork:
+      method: run.fork
+      params:
+        source_run_id:
+          required: true
+          meaning: Run to fork from.
+        fork_event_id:
+          required: false
+          cli_flag: --at-event <event-id>
+          meaning: Explicit event selector for the fork point; no ambient current-event heuristic is allowed.
+        bundle_hash:
+          required: false
+          cli_flag: --bundle-hash <bundle_hash>
+          meaning: Optional target/source bundle selector under the promoted bundle_hash naming rule.
+        idempotency_key:
+          required: false
+          cli_flag: --idempotency-key <key>
+      same_bundle_rule: >
+        If bundle_hash is omitted or equals the source run bundle_hash, same-bundle fork admission consumes the source
+        bundle row when available. Disk-loaded selected_contracts execution remains existing runtime ownership; DB-loaded
+        same-bundle source bytes remain blocked by #1024.
+      cross_bundle_rule: >
+        If bundle_hash differs from the source run bundle_hash, admission returns UNSUPPORTED_BUNDLE_HASH_FORK until #976
+        promotes and implements cross-bundle selected-contract routing.
+      unavailable_rule: >
+        Source runs with bundle_source ephemeral, deleted, or legacy return BUNDLE_UNAVAILABLE for fork admission because
+        the server lacks authoritative persisted bundle bytes.
+  cli_surface:
+    publication_status: source_authority_not_implemented_until_cli_api_runtime_children
+    bundle_commands_planned:
+      - swarm bundle list
+      - swarm bundle show <bundle-hash>
+      - swarm bundle agents <bundle-hash>
+      - swarm bundle register <path-or-archive>
+      - swarm bundle delete <bundle-hash> [--force] [--dry-run] [--idempotency-key <key>]
+    modified_commands_planned:
+      - swarm serve --bundle-hash <bundle_hash>
+      - swarm serve --dev
+      - swarm agents list --run-id <run-id>
+      - swarm event publish <event-name> --bundle-hash <bundle_hash>
+      - swarm run --bundle-hash <bundle_hash>
+    run_fork:
+      command: swarm fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]
+      public_status: intended_public_command
+      api_owner: /v1/rpc run.fork
+      rules:
+        - Top-level swarm fork is the intended public command for run.fork and is no longer classified as a retired namespace.
+        - The bundle selector flag is --bundle-hash, not draft --bundle.
+        - --at-event selects the fork event only and never means ambient current-run or current-event.
+        - The CLI must not call internal runtime/store/fork harnesses directly.
+        - Historical harness flags --dry-run, --materialize-only, --activate, and --contracts remain rejected unless a later source-authority PR promotes them.
+  explicit_splits:
+    cross_bundle_fork:
+      tracker: '#976'
+      reason: Different target bundle_hash selected for run.fork requires selected-contract routing and admission work beyond source authority.
+    db_loaded_same_bundle_source:
+      tracker: '#1024'
+      reason: Same-bundle fork from persisted DB bundle bytes needs a sibling source loader separate from current disk-rooted selected_contracts execution.
+    run_fork_api_runtime_cli:
+      tracker: '#989'
+      reason: run.fork method publication, handler behavior, runtime execution, and CLI command implementation remain blocked until source authority lands.
+    multi_bundle_cli_inventory:
+      tracker: '#1023'
+      reason: Bundle CLI inventory and command implementation remain blocked until source authority and API owners land.
+    bundle_hash_dual_accept_migration:
+      tracker: '#1001'
+      reason: Old bundle_fingerprint/bundle_ref names must be reconciled in code and generated artifacts under the locked bundle_hash naming decision.
+    runtime_context_isolation:
+      tracker: '#981'
+      reason: Hosting multiple bundles in one runtime process requires explicit per-run/bundle context isolation and dispatcher/store filtering proof.
+    lifecycle_cleanup:
+      trackers:
+        - '#987'
+        - '#988'
+        - '#998'
+        - '#1008'
+        - '#1009'
+      reason: Delete/restart/ephemeral-run cleanup must consume existing lifecycle owners rather than invent bundle-local shortcuts.
 platform_events:
   description: Events emitted by the platform engine itself. These are NOT product events — they are operational signals from
     the engine. All platform events use the platform.* namespace. Products MUST NOT define events with reserved prefixes.
@@ -6056,7 +6311,9 @@ cli_specification:
           Retired namespace migration authority is reconciled by
           cli_specification.retired_namespaces and cli_specification.parent_tail.retired_or_fail_closed.
           Promoted fail-closed migration surfaces are `swarm investigate *`, `swarm control mailbox`,
-          and `swarm fork`. Review-artifact-only `swarm runtime pause|resume` and
+          and legacy `swarm fork --dry-run|--materialize-only|--activate|--contracts` harness forms only.
+          #1012 restores top-level `swarm fork <source-run-id> ...` as planned public source authority.
+          Review-artifact-only `swarm runtime pause|resume` and
           `swarm control run pause|continue|stop` are explicitly unpromoted candidate/backlog
           spellings; their current generic Cobra unknown-command behavior is intentional unless a
           later tracked spec row promotes hidden fail-closed stubs.
@@ -6137,10 +6394,12 @@ cli_specification:
           `swarm control mailbox approve|reject|defer` is retired in favor of `swarm mailbox
           approve|reject|defer`.
       fork_fail_closed_stub:
-        classification: legacy_migration_behavior
+        classification: superseded_by_multi_bundle_source_authority
         reason: >
-          Top-level `swarm fork` is retired and remains fail-closed only to prevent old mutating operator
-          behavior from bypassing a future gated run-fork API/control surface.
+          Previous tracked prose treated top-level `swarm fork` as retired. #1012 promotes the multi-bundle
+          source authority and restores top-level `swarm fork <source-run-id> ...` as the intended future public command
+          over /v1/rpc run.fork. Historical harness flags remain rejected; the bare public command remains absent until
+          #989 implements API/runtime/CLI behavior.
       runtime_and_control_run_legacy_spellings:
         classification: unpromoted_candidate_backlog
         reason: >
@@ -8265,6 +8524,51 @@ cli_specification:
       - success output renders only ConversationTurnDetail fields returned by the server; runtime logs are consumed from the API result, not independently queried
       - SESSION_NOT_FOUND, TURN_NOT_FOUND, malformed results, auth/HTTP/RPC failures, and transport failures fail closed with tested exit codes
       - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, conversation.current_for_agent, runtime.logs, run.trace, or forkchat usage
+    bundle:
+      command: swarm bundle list|show|agents|register|delete
+      tier: should_have
+      implementation_status: absent
+      blocker_state: '#1023; bundle CLI inventory and mutation commands require API/OpenRPC/runtime owners from #1012 follow-on implementation children.'
+      owners:
+      - multi_bundle_persistence.cli_surface.bundle_commands_planned
+      - multi_bundle_persistence.api_surface.bundle_methods_planned
+      behavior: >
+        Planned public CLI family for persisted bundle inventory, registration, agent catalog inspection, and deletion.
+        The command family must consume /v1/rpc bundle.* methods once they are promoted into method_catalog/OpenRPC and
+        implemented. Until then it must not call internal store/runtime helpers or infer bundle state from local files.
+      proof_expectations:
+      - no generated OpenRPC bundle.* publication without registered API handlers
+      - no direct DB/store/runtime bundle reads or writes from CLI
+      - bundle.delete consumes the bundle-delete owner chain, not a raw row delete
+    run_fork:
+      command: swarm fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]
+      tier: should_have
+      implementation_status: absent
+      blocker_state: '#989; run.fork API/OpenRPC/runtime/CLI implementation remains blocked until this source authority lands.'
+      owner: multi_bundle_persistence.cli_surface.run_fork
+      api_owner: /v1/rpc run.fork
+      behavior: >
+        Planned public run-fork CLI. Top-level `swarm fork` is the intended public command. The bundle selector flag is
+        `--bundle-hash`; draft `--bundle` is superseded by #1001. `--at-event` is an explicit fork-event selector only.
+        The CLI must validate arguments locally, call /v1/rpc run.fork exactly once, and render only server-owned fork
+        results after the API/runtime owner exists.
+      split_blockers:
+        cross_bundle_fork: '#976'
+        db_loaded_same_bundle_source: '#1024'
+        api_runtime_cli_owner: '#989'
+        cli_inventory_gate: '#1023'
+      rejected_legacy_flags:
+      - --dry-run
+      - --materialize-only
+      - --activate
+      - --contracts
+      proof_expectations:
+      - top-level swarm fork is no longer classified as a retired namespace
+      - no `swarm control run fork` command shape is promoted
+      - no draft `--bundle` flag is promoted
+      - no direct DB/store/runtime/fork harness access from CLI
+      - cross-bundle targets fail closed as #976 until that child lands
+      - DB-loaded same-bundle source loading remains #1024 until that child lands
     forkchat:
       command: swarm forkchat new|resume|list|view|delete
       tier: should_have
@@ -8505,11 +8809,11 @@ cli_specification:
     status_v1_retirement_message:
       status: superseded
       rule: 'The old v1 retirement of top-level `swarm status` is no longer authoritative; v2 restores top-level `swarm status`.'
-    fork:
-      command: swarm fork
-      status: retired
+    fork_legacy_harness_forms:
+      command: swarm fork --dry-run|--materialize-only|--activate|--contracts
+      status: retired_legacy_harness_forms
       exit_code: 2
-      message: "ERROR: `swarm fork` was removed in v1. Forking is a mutating control action; use a future gated run-fork API/control surface. Historical `swarm fork` remains a runtime-owner test harness only, not a supported operator command."
+      message: "ERROR: legacy `swarm fork` harness flags are not supported operator commands. The intended public command is `swarm fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]` after #989 implements /v1/rpc run.fork."
     unpromoted_review_only_legacy_spellings:
       status: unpromoted_candidate_backlog
       commands:
@@ -8599,9 +8903,10 @@ cli_specification:
     - swarm investigate run
     - swarm investigate trace
     - swarm control mailbox
-    - swarm fork
     remaining_must_have_not_implemented: []
     remaining_should_have_not_implemented:
+    - swarm bundle list|show|agents|register|delete
+    - swarm fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]
     - swarm forkchat new|resume|list|view|delete
     rule: 'Remaining commands require separate gates and must consume canonical API owners; they MUST NOT resurrect direct DB/store/runtime-state readers.'
 
@@ -8636,6 +8941,20 @@ api_specification:
       is candidate intent. It must be promoted into this section with matching
       generated/implementation proof, split to a tracked child, or explicitly
       downgraded to backlog before it can be used as implementation authority.
+  multi_bundle_publication_boundary:
+    owner: multi_bundle_persistence.api_surface
+    status: source_authority_not_method_catalog
+    rule: >
+      #1012 promotes the multi-bundle API contract as source authority, including bundle.* methods, run.fork, bundle_hash
+      filters, and bundle_hash create-new-work params. These methods and shapes are not in method_catalog/OpenRPC until
+      a later gated API/runtime implementation PR registers handlers and regenerates openrpc.json/proof artifacts in the
+      same PR. Consumers must not treat docs/MULTI_BUNDLE_PERSISTENCE_DRAFT.md or #1038 prose as API authority after #1012.
+    blocked_children:
+      run_fork_api_runtime_cli: '#989'
+      multi_bundle_cli_inventory: '#1023'
+      cross_bundle_fork: '#976'
+      db_loaded_same_bundle_source: '#1024'
+      bundle_hash_dual_accept_migration: '#1001'
   foundations:
     transport:
       json_rpc_over_http:
@@ -12688,11 +13007,12 @@ api_specification:
       - bundle.open
       - bundle.reload
       - bundle.close
-      rationale: "Per-run dynamic bundle loading is deferred. v1 runtime uses\nboot-time bundle configuration; event.publish\
-        \ and deprecated run.start may\ncarry a bundle_ref whose fingerprint must match the boot-time fingerprint,\nor the\
-        \ bundle_ref may be omitted entirely.\
-        \ When dynamic loading lands,\nBundleRef likely gains content-addressable forms (registry\ncoordinate, uploaded content\
-        \ hash) \u2014 additive change to the\nBundleRef schema, not a breaking one.\n"
+      rationale: >
+        Legacy dynamic bundle.open/reload/close remains deferred and is not the multi-bundle public API. #1012 promotes the
+        authoritative multi-bundle source model under multi_bundle_persistence, with planned bundle.list/get/agents/register/delete,
+        run.fork, and bundle_hash create-new-work semantics. Those planned methods are intentionally not added to
+        method_catalog/OpenRPC until their gated API/runtime implementation lands. Existing bundle_ref/bundle_fingerprint
+        language is migration evidence only after the #1001 bundle_hash decision.
     verify:
       methods:
       - verify.full
