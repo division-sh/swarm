@@ -111,6 +111,7 @@ func TestEventViewUsesEventGetV1RPC(t *testing.T) {
 	for _, want := range []string{
 		"Event event-1",
 		"event_name=scan.requested",
+		"source_event_id=source-event-1",
 		"payload={\"priority\":\"high\"}",
 		"delivery_id=delivery-1",
 		"dead_letter_id=dead-1",
@@ -717,12 +718,13 @@ func newEventObservationWSServer(t *testing.T, opts eventObservationWSServerOpti
 
 func validEventObservationEvent(eventID string) map[string]any {
 	return map[string]any{
-		"event_id":   eventID,
-		"event_name": "scan.requested",
-		"created_at": "2026-05-13T10:00:01Z",
-		"run_id":     "run-1",
-		"entity_id":  "entity-1",
-		"source":     "external",
+		"event_id":        eventID,
+		"event_name":      "scan.requested",
+		"created_at":      "2026-05-13T10:00:01Z",
+		"run_id":          "run-1",
+		"entity_id":       "entity-1",
+		"source_event_id": "source-event-1",
+		"source":          "external",
 		"payload": map[string]any{
 			"priority": "high",
 		},

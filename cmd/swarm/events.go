@@ -68,15 +68,16 @@ type eventListResult struct {
 }
 
 type eventFull struct {
-	EventID     string            `json:"event_id"`
-	EventName   string            `json:"event_name"`
-	CreatedAt   string            `json:"created_at"`
-	RunID       string            `json:"run_id,omitempty"`
-	EntityID    string            `json:"entity_id,omitempty"`
-	Source      string            `json:"source"`
-	Payload     map[string]any    `json:"payload"`
-	Deliveries  []eventDelivery   `json:"deliveries"`
-	DeadLetters []eventDeadLetter `json:"dead_letters"`
+	EventID       string            `json:"event_id"`
+	EventName     string            `json:"event_name"`
+	CreatedAt     string            `json:"created_at"`
+	RunID         string            `json:"run_id,omitempty"`
+	EntityID      string            `json:"entity_id,omitempty"`
+	SourceEventID string            `json:"source_event_id,omitempty"`
+	Source        string            `json:"source"`
+	Payload       map[string]any    `json:"payload"`
+	Deliveries    []eventDelivery   `json:"deliveries"`
+	DeadLetters   []eventDeadLetter `json:"dead_letters"`
 }
 
 type eventDelivery struct {
@@ -827,12 +828,13 @@ func writeEventDetailResult(out io.Writer, event eventFull) {
 		return
 	}
 	fmt.Fprintf(out, "Event %s\n", event.EventID)
-	fmt.Fprintf(out, "event_name=%s created_at=%s source=%s run_id=%s entity_id=%s\n",
+	fmt.Fprintf(out, "event_name=%s created_at=%s source=%s run_id=%s entity_id=%s source_event_id=%s\n",
 		event.EventName,
 		event.CreatedAt,
 		event.Source,
 		eventObservationDash(event.RunID),
 		eventObservationDash(event.EntityID),
+		eventObservationDash(event.SourceEventID),
 	)
 	fmt.Fprintf(out, "payload=%s\n", eventObservationCompactJSON(event.Payload))
 	if len(event.Deliveries) == 0 {
@@ -884,6 +886,9 @@ func writeEventFollowEvent(out io.Writer, event eventFull) {
 	}
 	if event.EntityID != "" {
 		fields = append(fields, "entity_id="+event.EntityID)
+	}
+	if event.SourceEventID != "" {
+		fields = append(fields, "source_event_id="+event.SourceEventID)
 	}
 	fields = append(fields,
 		fmt.Sprintf("deliveries=%d", len(event.Deliveries)),

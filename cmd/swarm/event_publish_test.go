@@ -34,6 +34,7 @@ func TestEventPublishUsesEventPublishV1RPCWithBoundParams(t *testing.T) {
 		"event", "publish", "scan.requested",
 		"--payload-json", `{"topic":"sample","count":2}`,
 		"--run-id", "run-1",
+		"--source-event-id", "event-parent-1",
 		"--bundle-fingerprint", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		"--emitter", "cli:test",
 		"--idempotency-key", "idem-1",
@@ -50,7 +51,8 @@ func TestEventPublishUsesEventPublishV1RPCWithBoundParams(t *testing.T) {
 			"topic": "sample",
 			"count": float64(2),
 		},
-		"run_id": "run-1",
+		"run_id":          "run-1",
+		"source_event_id": "event-parent-1",
 		"bundle_ref": map[string]any{
 			"fingerprint": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		},
@@ -70,6 +72,7 @@ func TestEventPublishUsesEventPublishV1RPCWithBoundParams(t *testing.T) {
 		"delivery subscriber_id=agent-1",
 		"session_id=session-1",
 		"attempt=2",
+		"source_event_id=event-parent-1",
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
@@ -134,6 +137,8 @@ func TestEventPublishRejectsInvalidInputBeforeRequest(t *testing.T) {
 		{name: "null payload", args: []string{"event", "publish", "scan.requested", "--payload-json", "null"}, wantStderr: "JSON object"},
 		{name: "trailing json", args: []string{"event", "publish", "scan.requested", "--payload-json", `{} {}`}, wantStderr: "exactly one JSON object"},
 		{name: "blank run id", args: []string{"event", "publish", "scan.requested", "--payload-json", "{}", "--run-id", "  "}, wantStderr: "--run-id must be non-empty"},
+		{name: "blank source event id", args: []string{"event", "publish", "scan.requested", "--payload-json", "{}", "--source-event-id", "  "}, wantStderr: "--source-event-id must be non-empty"},
+		{name: "source event without run id", args: []string{"event", "publish", "scan.requested", "--payload-json", "{}", "--source-event-id", "event-parent-1"}, wantStderr: "--source-event-id requires --run-id"},
 		{name: "blank bundle fingerprint", args: []string{"event", "publish", "scan.requested", "--payload-json", "{}", "--bundle-fingerprint", "  "}, wantStderr: "--bundle-fingerprint must be non-empty"},
 		{name: "invalid bundle fingerprint", args: []string{"event", "publish", "scan.requested", "--payload-json", "{}", "--bundle-fingerprint", "sha256:BAD"}, wantStderr: "--bundle-fingerprint must be sha256:<64 lowercase hex>"},
 		{name: "blank emitter", args: []string{"event", "publish", "scan.requested", "--payload-json", "{}", "--emitter", "  "}, wantStderr: "--emitter must be non-empty"},
@@ -197,6 +202,16 @@ func TestEventPublishMapsFailureExitCodes(t *testing.T) {
 			},
 			wantCode:   5,
 			wantStderr: "RUN_NOT_FOUND",
+		},
+		{
+			name: "source event not found exits five",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				writeEventPublishJSONRPCError(t, w, req.ID, "EVENT_NOT_FOUND")
+			},
+			wantCode:   5,
+			wantStderr: "EVENT_NOT_FOUND",
 		},
 		{
 			name: "bundle mismatch exits six",
@@ -396,6 +411,7 @@ func eventPublishTestResult(newRunCreated bool) map[string]any {
 	return map[string]any{
 		"event_id":        "event-1",
 		"run_id":          "run-1",
+		"source_event_id": "event-parent-1",
 		"new_run_created": newRunCreated,
 		"deliveries": []any{
 			map[string]any{

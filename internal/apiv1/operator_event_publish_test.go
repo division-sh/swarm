@@ -206,6 +206,157 @@ func TestOperatorEventPublishExplicitRunTargetRequiresExistingNonterminalRun(t *
 	}
 }
 
+func TestOperatorEventPublishSourceEventIDValidatesSameRunLineage(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	handler := eventPublishTestHandler(t, pg, bus, source)
+
+	parent := rpcCall(t, handler, eventPublishBody("", runStartTestFingerprint, "scan.requested", `{"topic":"medicine"}`, "", "idem-source-parent"))
+	if parent.Error != nil {
+		t.Fatalf("parent event.publish error = %#v", parent.Error)
+	}
+	parentResult := asMap(t, parent.Result)
+	parentEventID := stringValue(t, parentResult["event_id"], "event_id")
+	parentRunID := stringValue(t, parentResult["run_id"], "run_id")
+
+	child := rpcCall(t, handler, eventPublishBodyWithSource(parentRunID, parentEventID, runStartTestFingerprint, "scan.requested", `{"topic":"checkpoint"}`, "operator-test", "idem-source-child"))
+	if child.Error != nil {
+		t.Fatalf("child event.publish error = %#v", child.Error)
+	}
+	childResult := asMap(t, child.Result)
+	childEventID := stringValue(t, childResult["event_id"], "event_id")
+	if childResult["run_id"] != parentRunID || childResult["new_run_created"] != false {
+		t.Fatalf("child result = %#v, want existing run", childResult)
+	}
+	if childResult["source_event_id"] != parentEventID {
+		t.Fatalf("child source_event_id = %#v, want %s", childResult["source_event_id"], parentEventID)
+	}
+	assertEventSourceEventID(t, db, childEventID, parentEventID)
+	if count := countEventsByName(t, db, "scan.requested"); count != 2 {
+		t.Fatalf("scan.requested events after sourced publish = %d, want 2", count)
+	}
+	if count := countAPIIdempotencyRows(t, db); count != 2 {
+		t.Fatalf("api_idempotency rows after sourced publish = %d, want 2", count)
+	}
+}
+
+func TestOperatorEventPublishSourceEventIDRejectsInvalidLineageBeforePersistence(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	handler := eventPublishTestHandler(t, pg, bus, source)
+
+	first := rpcCall(t, handler, eventPublishBody("", runStartTestFingerprint, "scan.requested", `{"topic":"first"}`, "", "idem-source-first"))
+	if first.Error != nil {
+		t.Fatalf("first event.publish error = %#v", first.Error)
+	}
+	firstRunID := stringValue(t, asMap(t, first.Result)["run_id"], "run_id")
+	firstEventID := stringValue(t, asMap(t, first.Result)["event_id"], "event_id")
+
+	second := rpcCall(t, handler, eventPublishBody("", runStartTestFingerprint, "scan.requested", `{"topic":"second"}`, "", "idem-source-second"))
+	if second.Error != nil {
+		t.Fatalf("second event.publish error = %#v", second.Error)
+	}
+	secondEventID := stringValue(t, asMap(t, second.Result)["event_id"], "event_id")
+
+	cases := []struct {
+		name          string
+		body          string
+		wantJSONCode  int
+		wantAppCode   string
+		wantField     string
+		mutateBefore  func()
+		wantEventRows int
+		wantIDEMRows  int
+	}{
+		{
+			name:          "source without explicit run",
+			body:          eventPublishBodyWithSource("", firstEventID, runStartTestFingerprint, "scan.requested", `{"topic":"no-run"}`, "", "idem-source-no-run"),
+			wantJSONCode:  codeInvalidParams,
+			wantField:     "run_id",
+			wantEventRows: 2,
+			wantIDEMRows:  2,
+		},
+		{
+			name:          "invalid source uuid",
+			body:          eventPublishBodyWithSource(firstRunID, "not-a-uuid", runStartTestFingerprint, "scan.requested", `{"topic":"bad-source"}`, "", "idem-source-invalid"),
+			wantJSONCode:  codeInvalidParams,
+			wantField:     "source_event_id",
+			wantEventRows: 2,
+			wantIDEMRows:  2,
+		},
+		{
+			name:          "missing source event",
+			body:          eventPublishBodyWithSource(firstRunID, uuid.NewString(), runStartTestFingerprint, "scan.requested", `{"topic":"missing-source"}`, "", "idem-source-missing"),
+			wantAppCode:   EventNotFoundCode,
+			wantEventRows: 2,
+			wantIDEMRows:  2,
+		},
+		{
+			name:          "missing target run with source event",
+			body:          eventPublishBodyWithSource(uuid.NewString(), firstEventID, runStartTestFingerprint, "scan.requested", `{"topic":"missing-run-source"}`, "", "idem-source-missing-run"),
+			wantAppCode:   RunNotFoundCode,
+			wantEventRows: 2,
+			wantIDEMRows:  2,
+		},
+		{
+			name:          "cross run source event",
+			body:          eventPublishBodyWithSource(firstRunID, secondEventID, runStartTestFingerprint, "scan.requested", `{"topic":"cross-run"}`, "", "idem-source-cross-run"),
+			wantJSONCode:  codeInvalidParams,
+			wantField:     "source_event_id",
+			wantEventRows: 2,
+			wantIDEMRows:  2,
+		},
+		{
+			name: "terminal run with source",
+			body: eventPublishBodyWithSource(firstRunID, firstEventID, runStartTestFingerprint, "scan.requested", `{"topic":"terminal"}`, "", "idem-source-terminal"),
+			mutateBefore: func() {
+				if _, err := db.Exec(`UPDATE runs SET status = 'completed', ended_at = now() WHERE run_id = $1::uuid`, firstRunID); err != nil {
+					t.Fatalf("mark run terminal: %v", err)
+				}
+			},
+			wantAppCode:   RunAlreadyTerminalCode,
+			wantEventRows: 2,
+			wantIDEMRows:  2,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.mutateBefore != nil {
+				tc.mutateBefore()
+			}
+			resp := rpcCall(t, handler, tc.body)
+			if resp.Error == nil {
+				t.Fatal("event.publish source_event_id error = nil")
+			}
+			if tc.wantAppCode != "" {
+				if data := asMap(t, resp.Error.Data); data["code"] != tc.wantAppCode {
+					t.Fatalf("application error data = %#v, want %s", data, tc.wantAppCode)
+				}
+			} else if resp.Error.Code != tc.wantJSONCode {
+				t.Fatalf("json-rpc error code = %d, want %d", resp.Error.Code, tc.wantJSONCode)
+			} else if details := asMap(t, asMap(t, resp.Error.Data)["details"]); details["field"] != tc.wantField {
+				t.Fatalf("invalid params details = %#v, want field %s", details, tc.wantField)
+			}
+			if count := countEventsByName(t, db, "scan.requested"); count != tc.wantEventRows {
+				t.Fatalf("scan.requested event rows = %d, want %d", count, tc.wantEventRows)
+			}
+			if count := countAPIIdempotencyRows(t, db); count != tc.wantIDEMRows {
+				t.Fatalf("api_idempotency rows = %d, want %d", count, tc.wantIDEMRows)
+			}
+		})
+	}
+}
+
 func TestOperatorEventPublishHandlersFailClosedBeforePersistence(t *testing.T) {
 	t.Run("bundle mismatch", func(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
@@ -407,6 +558,10 @@ func (s *failOnceEventReadStore) LoadOperatorEvent(ctx context.Context, eventID 
 }
 
 func eventPublishBody(runID, fingerprint, eventName, payload, emitter, idempotencyKey string) string {
+	return eventPublishBodyWithSource(runID, "", fingerprint, eventName, payload, emitter, idempotencyKey)
+}
+
+func eventPublishBodyWithSource(runID, sourceEventID, fingerprint, eventName, payload, emitter, idempotencyKey string) string {
 	parts := []string{
 		fmt.Sprintf(`"bundle_ref":{"fingerprint":%q}`, fingerprint),
 		fmt.Sprintf(`"event_name":%q`, eventName),
@@ -415,6 +570,9 @@ func eventPublishBody(runID, fingerprint, eventName, payload, emitter, idempoten
 	}
 	if strings.TrimSpace(runID) != "" {
 		parts = append(parts, fmt.Sprintf(`"run_id":%q`, runID))
+	}
+	if strings.TrimSpace(sourceEventID) != "" {
+		parts = append(parts, fmt.Sprintf(`"source_event_id":%q`, sourceEventID))
 	}
 	if strings.TrimSpace(emitter) != "" {
 		parts = append(parts, fmt.Sprintf(`"emitter":%q`, emitter))
@@ -455,6 +613,17 @@ func assertEventPublishPersistence(t *testing.T, db *sql.DB, runID, eventID, eve
 	}
 	if decoded["entity_id"] != runID || decoded["topic"] != "medicine" {
 		t.Fatalf("event.publish payload = %#v", decoded)
+	}
+}
+
+func assertEventSourceEventID(t *testing.T, db *sql.DB, eventID, wantSourceEventID string) {
+	t.Helper()
+	var got string
+	if err := db.QueryRow(`SELECT COALESCE(source_event_id::text, '') FROM events WHERE event_id = $1::uuid`, eventID).Scan(&got); err != nil {
+		t.Fatalf("load event source_event_id: %v", err)
+	}
+	if got != wantSourceEventID {
+		t.Fatalf("event source_event_id = %q, want %q", got, wantSourceEventID)
 	}
 }
 

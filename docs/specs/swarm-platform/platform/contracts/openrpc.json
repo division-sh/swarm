@@ -1828,7 +1828,7 @@
     },
     {
       "name": "event.publish",
-      "description": "Canonical low-level event publication and workflow-creation primitive.\nPublishes one declared event into the runtime bus. If run_id is omitted,\nthe server allocates a new run_id, persists the event as that run's\ntrigger, and returns new_run_created=true. If run_id is provided,\nit must identify an existing nonterminal run; missing or terminal\nruns fail closed with RUN_NOT_FOUND or RUN_ALREADY_TERMINAL.\n\nThe method consumes the same canonical EventBus/store event-publication\nowner used by runtime dispatch. Delivery results are read back from the\npersisted event_deliveries owner; the API layer must not re-plan\nsubscribers. This is the canonical primitive; run.start remains only\nas a deprecated wrapper for older callers.\n",
+      "description": "Canonical low-level event publication and workflow-creation primitive.\nPublishes one declared event into the runtime bus. If run_id is omitted,\nthe server allocates a new run_id, persists the event as that run's\ntrigger, and returns new_run_created=true. If run_id is provided,\nit must identify an existing nonterminal run; missing or terminal\nruns fail closed with RUN_NOT_FOUND or RUN_ALREADY_TERMINAL.\n\nCheckpoint/source-authority policy: callers that need causal proof\nMUST provide source_event_id together with run_id. The source event\nmust exist in the same run_id and the server persists it as\nevents.source_event_id / ParentEventID. Omitted source_event_id\nmeans the published event is unparented; it is valid low-level\ningress but MUST NOT be presented as proof that an internal\napproval/checkpoint path occurred. source_event_id without run_id,\nmalformed source_event_id, or a source event from another run fails\nclosed before event or idempotency completion persistence. A missing\nsource event fails closed with EVENT_NOT_FOUND.\n\nThe method consumes the same canonical EventBus/store event-publication\nowner used by runtime dispatch. Delivery results are read back from the\npersisted event_deliveries owner; the API layer must not re-plan\nsubscribers. This is the canonical primitive; run.start remains only\nas a deprecated wrapper for older callers.\n",
       "params": [
         {
           "name": "bundle_ref",
@@ -1857,6 +1857,14 @@
           "name": "run_id",
           "required": false,
           "description": "Existing nonterminal run to inject into; if omitted, runtime allocates and starts a new run.",
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "source_event_id",
+          "required": false,
+          "description": "Optional parent/source event id for explicit checkpoint lineage. Requires run_id and must identify an event in the same run.",
           "schema": {
             "$ref": "#/components/schemas/OpaqueId"
           }
@@ -2086,6 +2094,44 @@
                 },
                 "required": [
                   "run_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32006,
+          "message": "Application error: EVENT_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "EVENT_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "event_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "event_id"
                 ],
                 "type": "object"
               },
@@ -6246,6 +6292,10 @@
           "source": {
             "description": "Producer identifier (node_id, agent_id, or \"external\").",
             "type": "string"
+          },
+          "source_event_id": {
+            "$ref": "#/components/schemas/OpaqueId",
+            "description": "Persisted causal parent/source event id. Omitted for root or unparented events."
           }
         },
         "required": [
@@ -6331,6 +6381,10 @@
           },
           "run_id": {
             "$ref": "#/components/schemas/OpaqueId"
+          },
+          "source_event_id": {
+            "$ref": "#/components/schemas/OpaqueId",
+            "description": "Verified parent/source event lineage for this publication when supplied. Omitted means the event is unparented and must not be treated as causal checkpoint proof."
           }
         },
         "required": [
