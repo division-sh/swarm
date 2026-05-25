@@ -7815,6 +7815,33 @@ cli_specification:
       - AGENT_NOT_FOUND and malformed AgentDetail responses fail closed
       - invalid args/flags make zero API calls
       - output remains refs-only; no conversation.current_for_agent, conversation.get, transcript, direct DB/store/runtime/EventBus/agentcontrol, or legacy endpoint usage
+    agent_diagnose:
+      command: swarm agent diagnose <agent-id> [--queue-limit <n>] [--queue-cursor <cursor>] [--json]
+      tier: should_have
+      implementation_status: implemented
+      owner: /v1/rpc agent.diagnose
+      behavior: Read-only single-agent diagnosis CLI consumer. The CLI sends only agent_id and explicitly provided queue_limit/queue_cursor to /v1/rpc agent.diagnose, renders only owner-backed AgentDiagnosis fields, and MUST NOT synthesize diagnosis from agent.get/list, conversation, run, trace, token, dashboard/Builder REST, DB/store, runtime, EventBus, or agentcontrol owners.
+      output:
+        header: Agent <agent-id>
+        summary_line: status=<status>
+        queue_line: pending_count=<pending_count> oldest_pending_age_seconds=<seconds> next_cursor=<cursor-or-dash>
+        optional_refs: optional current_session_ref, last_turn_ref, delivery_lifecycle, runtime_state.watchdog, active, and last_tool_outcome lines when present
+        json: --json emits the AgentDiagnosis result shape exactly, with no CLI wrapper
+      exit_codes:
+        success: 0
+        cli_validation: 2
+        transport_or_malformed_response: 3
+        auth_or_missing_token: 4
+        not_found: 5
+        not_found_errors:
+        - AGENT_NOT_FOUND
+      proof_expectations:
+      - exact /v1/rpc agent.diagnose call with agent_id plus queue_limit/queue_cursor only when explicitly provided
+      - --queue-limit fails before API request unless it is in the API-owned 1..200 range
+      - --queue-cursor fails before API request when explicitly blank
+      - --json preserves the AgentDiagnosis result shape without adding token usage, failures, dead letters, full runtime_state enum, top-level watchdog, run_id, bundle_version, dashboard state, or richer per-tool diagnostics
+      - AGENT_NOT_FOUND, invalid params, HTTP failures, and malformed AgentDiagnosis responses fail closed with tested exit codes
+      - no direct DB/store/runtime/EventBus/agentcontrol/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, conversation, run, trace, agent.get, or agent.list method usage
     agent_restart:
       command: swarm agent restart <agent-id> [--idempotency-key <key>]
       tier: should_have
