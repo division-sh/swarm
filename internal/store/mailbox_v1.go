@@ -765,7 +765,7 @@ func (r mailboxV1Row) approvalEvent(eventID, decisionID, eventType, actorTokenID
 		"decision":            "approved",
 		"decision_payload":    payloadMap,
 		"item_type":           strings.TrimSpace(r.Type),
-		"payload":             cloneMailboxV1Payload(r.Payload),
+		"mailbox_payload":     cloneMailboxV1Payload(r.Payload),
 		"source_event_id":     strings.TrimSpace(r.SourceEventID),
 		"source_flow":         mailboxV1SourceFlow(r.FlowInstance),
 		"source_entity_id":    strings.TrimSpace(r.EntityID),
