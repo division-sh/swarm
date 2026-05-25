@@ -152,6 +152,10 @@ active_issues:
     title: Fail closed condition payload alignment for empty event payload schemas
     maps_to:
       - boot_check_definition_drift
+  - id: 1055
+    title: Reconcile handler_field_compliance owner and runtime-contract scope
+    maps_to:
+      - boot_check_definition_drift
 nodes:
   - id: persisted_normal_run_completion_quiescence_owner
     title: Persisted Normal Run Completion/Quiescence Owner
@@ -247,10 +251,12 @@ nodes:
       - reference docs and fixture prose preserving stale check meanings after the supported surface moved
       - gate schema validation treats missing or empty gate_state as an open schema for handler-level sets_gate
       - condition payload-reference validation treats existing empty event payload schemas as open schemas
+      - handler_field_compliance is interpreted as handler field vocabulary only in spec/reference surfaces while Go bootverify uses it for supported handler action declarations, executable owner resolution, and runtime-handled event executor presence
     representative_issues:
       - 447
       - 448
       - 974
+      - 1055
     common_framing_mistakes:
       too_broad:
         - all bootverify drift

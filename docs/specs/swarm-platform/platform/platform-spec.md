@@ -1139,7 +1139,7 @@ timers:
   - `error`: Boot aborts. System does not start.
   - `warning`: Boot continues. Warning logged with finding details.
 
-- `reference_implementation`: verify.py implements structural checks (payload fields, handler fields, state machine, tools, dialect, cycles, produces). It does NOT implement: CEL parsing, pin wiring, permission validation, entity schema coverage, or namespace collision detection. Those require the Go runtime loader.
+- `reference_implementation`: verify.py implements structural checks (payload fields, handler fields and supported handler action declaration shapes, state machine, tools, dialect, cycles, produces). It does NOT implement: CEL parsing, runtime executor resolution, deep artifact result-event type resolution, pin wiring, permission validation, entity schema coverage, or namespace collision detection. Those require the Go runtime loader.
 - `check_count`: 19 checks (10 error, 9 warning)
 # compliance
 

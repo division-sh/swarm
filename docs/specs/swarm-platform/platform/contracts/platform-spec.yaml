@@ -2659,10 +2659,11 @@ engine:
       when: boot-only
     - id: handler_field_compliance
       severity: error
-      scope: per-flow
-      trigger: A handler uses a field name not in the defined handler_fields set (create_entity, select_entity,
-        select_or_create_entity, guard, accumulate, fan_out, filter, reduce, count, compute, on_complete, rules, advances_to,
-        sets_gate, data_accumulation, emit, action, clear_gates, clear, query, description, evidence_target).
+      scope: per-node
+      trigger: A handler or handler action declaration violates the platform handler contract. This includes unknown or retired
+        handler/action fields, unsupported platform action identifiers, missing required declaration fields for supported actions,
+        unresolved executable action or guard owners, runtime-handled events without a system-node executor, and invalid typed
+        action declarations or result payload shapes.
       when: boot-only
     - id: tool_resolution
       severity: warning

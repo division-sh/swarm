@@ -638,7 +638,7 @@ The most important checks to recognize:
 - `entity_write_target_compliance` — verify handler entity write targets resolve to declared entity fields.
 - `state_machine_coherence` — verify state transitions make sense.
 - `required_agents_match` — verify agent roles are fulfilled.
-- `handler_field_compliance` — verify handlers use only valid field names and shapes.
+- `handler_field_compliance` — verify handler fields and supported handler action declarations match the platform handler contract.
 - `single_node_per_event` — verify each event is handled by at most one system node.
 - `event_cycle_detection` — verify no infinite event loops.
 
