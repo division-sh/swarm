@@ -3,7 +3,9 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -53,6 +55,7 @@ const (
 	serveAPIRoutes          = "/healthz /readyz /v1/rpc /v1/ws"
 	serveMCPRoutes          = "/mcp /tools/"
 	serveReadinessRoutes    = "/healthz /readyz"
+	serveGatewayTokenBytes  = 32
 )
 
 var (
@@ -1942,10 +1945,26 @@ func configureServeMCPGatewayEnv(mcpAddr net.Addr) (func(), error) {
 	if err := validateExistingServeGatewayURL("SWARM_TOOL_GATEWAY_CONTAINER_URL", os.Getenv("SWARM_TOOL_GATEWAY_CONTAINER_URL"), mcpAddr); err != nil {
 		return func() {}, err
 	}
+	gatewayToken := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_TOKEN"))
+	if gatewayToken == "" {
+		gatewayToken, err = generateServeMCPGatewayToken()
+		if err != nil {
+			return func() {}, err
+		}
+	}
 	return setServeGatewayEnv(map[string]string{
 		"SWARM_TOOL_GATEWAY_URL":           mcpHostURL,
 		"SWARM_TOOL_GATEWAY_CONTAINER_URL": mcpContainerURL,
+		"SWARM_TOOL_GATEWAY_TOKEN":         gatewayToken,
 	})
+}
+
+func generateServeMCPGatewayToken() (string, error) {
+	raw := make([]byte, serveGatewayTokenBytes)
+	if _, err := rand.Read(raw); err != nil {
+		return "", fmt.Errorf("generate mcp gateway token: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(raw), nil
 }
 
 func validateExistingServeGatewayURL(name, raw string, mcpAddr net.Addr) error {

@@ -163,15 +163,15 @@ func validateClaudeMCPToolsForManagedAgents(ctx context.Context, cfg *config.Con
 		if len(sessionTools) == 0 {
 			return fmt.Errorf("managed-agent startup probe found no declared tools for agent %s", agentID)
 		}
+		if startupProbe == nil {
+			return fmt.Errorf("claude cli startup probe is required for agent %s", agentID)
+		}
+		probeResp, err := startupProbe.ProbeStartupVisibleToolSurface(ctx, agentCfg, runtimemanager.ExtractSystemPromptFromConfig(agentCfg.Config), sessionTools)
+		if err != nil {
+			return fmt.Errorf("claude cli startup probe failed for agent %s: %w", agentID, err)
+		}
 		surface := llm.AgentVisibleToolSurfaceForActor(agentCfg, sessionTools)
 		if len(surface.NativeBuiltinTools) > 0 {
-			if startupProbe == nil {
-				return fmt.Errorf("provider-native startup probe is required for agent %s", agentID)
-			}
-			probeResp, err := startupProbe.ProbeStartupVisibleToolSurface(ctx, agentCfg, runtimemanager.ExtractSystemPromptFromConfig(agentCfg.Config), sessionTools)
-			if err != nil {
-				return fmt.Errorf("provider-native startup probe failed for agent %s: %w", agentID, err)
-			}
 			expectedVisible := llm.PlannedProviderNativeVisibleToolsForActor(agentCfg, sessionTools)
 			actualVisible := llm.ObservedProviderNativeVisibleToolsForActor(agentCfg, sessionTools, probeResp)
 			if !equalSortedStrings(actualVisible, expectedVisible) {

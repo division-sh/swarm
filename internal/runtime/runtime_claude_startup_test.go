@@ -413,12 +413,72 @@ func TestValidateClaudeMCPToolsForManagedAgents_UsesRealFilteredTransport(t *tes
 		caps: startupProbeCaps(),
 	}
 	turns := setupStartupProbeTransport(t, manager, exec, "gateway-token")
+	probe := &startupVisibleSurfaceProbeStub{}
 
-	if err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), nil, turns, exec, manager); err != nil {
+	if err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), probe, turns, exec, manager); err != nil {
 		t.Fatalf("validateClaudeMCPToolsForManagedAgents: %v", err)
+	}
+	if !slices.Equal(probe.calls, []string{"campaign-coordinator"}) {
+		t.Fatalf("probe calls = %#v, want CLI startup proof before MCP runtime proof", probe.calls)
 	}
 	if !slices.Equal(exec.executed, []string{"health_check"}) {
 		t.Fatalf("executed = %#v, want health_check tools/call smoke", exec.executed)
+	}
+}
+
+func TestValidateClaudeMCPToolsForManagedAgents_RequiresCLIStartupProbeForMCPOnlySurface(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.LLM.RuntimeMode = "cli_test"
+	manager := runtimemanager.NewAgentManager(nil, nil)
+	if err := manager.SpawnAgent(runtimeactors.AgentConfig{
+		ID:     "campaign-coordinator",
+		Role:   "campaign_coordinator",
+		Config: json.RawMessage(`{}`),
+	}); err != nil {
+		t.Fatalf("SpawnAgent: %v", err)
+	}
+	exec := &startupProbeToolExecutor{
+		defs: startupProbeDefs(),
+		caps: startupProbeCaps(),
+	}
+	turns := setupStartupProbeTransport(t, manager, exec, "gateway-token")
+
+	err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), nil, turns, exec, manager)
+	if err == nil || !strings.Contains(err.Error(), "claude cli startup probe is required") {
+		t.Fatalf("expected required CLI startup probe error, got %v", err)
+	}
+	if len(exec.executed) != 0 {
+		t.Fatalf("executed = %#v, want no MCP tools/call before CLI startup proof", exec.executed)
+	}
+}
+
+func TestValidateClaudeMCPToolsForManagedAgents_FailsClosedWhenMCPOnlyCLIStartupProbeFails(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.LLM.RuntimeMode = "cli_test"
+	manager := runtimemanager.NewAgentManager(nil, nil)
+	if err := manager.SpawnAgent(runtimeactors.AgentConfig{
+		ID:     "campaign-coordinator",
+		Role:   "campaign_coordinator",
+		Config: json.RawMessage(`{}`),
+	}); err != nil {
+		t.Fatalf("SpawnAgent: %v", err)
+	}
+	exec := &startupProbeToolExecutor{
+		defs: startupProbeDefs(),
+		caps: startupProbeCaps(),
+	}
+	turns := setupStartupProbeTransport(t, manager, exec, "gateway-token")
+	probe := &startupVisibleSurfaceProbeStub{err: errors.New("claude: command not found")}
+
+	err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), probe, turns, exec, manager)
+	if err == nil || !strings.Contains(err.Error(), "claude cli startup probe failed") || !strings.Contains(err.Error(), "claude: command not found") {
+		t.Fatalf("expected CLI startup probe failure, got %v", err)
+	}
+	if !slices.Equal(probe.calls, []string{"campaign-coordinator"}) {
+		t.Fatalf("probe calls = %#v, want CLI startup probe for MCP-only surface", probe.calls)
+	}
+	if len(exec.executed) != 0 {
+		t.Fatalf("executed = %#v, want no MCP tools/call after CLI startup proof failure", exec.executed)
 	}
 }
 
@@ -454,9 +514,13 @@ func TestValidateClaudeMCPToolsForManagedAgents_SeparatesStaticInventoryFromNoCu
 		},
 	}
 	turns := setupStartupProbeTransport(t, manager, exec, "gateway-token")
+	probe := &startupVisibleSurfaceProbeStub{}
 
-	if err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), nil, turns, exec, manager); err != nil {
+	if err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), probe, turns, exec, manager); err != nil {
 		t.Fatalf("validateClaudeMCPToolsForManagedAgents: %v", err)
+	}
+	if !slices.Equal(probe.calls, []string{"analysis-agent"}) {
+		t.Fatalf("probe calls = %#v, want CLI startup proof before MCP visibility proof", probe.calls)
 	}
 	if exec.contextDefCalls == 0 || exec.contextCapsCalls == 0 {
 		t.Fatalf("expected startup MCP proof to consume context-aware surface, defCalls=%d capCalls=%d", exec.contextDefCalls, exec.contextCapsCalls)
@@ -491,9 +555,13 @@ func TestValidateClaudeMCPToolsForManagedAgents_AllowsEmptyConcreteSurfaceWhenSt
 		contextCaps: map[string]toolcapabilities.Capability{},
 	}
 	turns := setupStartupProbeTransport(t, manager, exec, "gateway-token")
+	probe := &startupVisibleSurfaceProbeStub{}
 
-	if err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), nil, turns, exec, manager); err != nil {
+	if err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), probe, turns, exec, manager); err != nil {
 		t.Fatalf("validateClaudeMCPToolsForManagedAgents: %v", err)
+	}
+	if !slices.Equal(probe.calls, []string{"validation-agent"}) {
+		t.Fatalf("probe calls = %#v, want CLI startup proof for empty concrete MCP surface", probe.calls)
 	}
 	if len(exec.executed) != 0 {
 		t.Fatalf("executed = %#v, want no callable startup probe for empty concrete surface", exec.executed)
@@ -519,9 +587,13 @@ func TestValidateClaudeMCPToolsForManagedAgents_AcceptsExplicitValidationOnlyPro
 		},
 	}
 	turns := setupStartupProbeTransport(t, manager, exec, "gateway-token")
+	probe := &startupVisibleSurfaceProbeStub{}
 
-	if err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), nil, turns, exec, manager); err != nil {
+	if err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), probe, turns, exec, manager); err != nil {
 		t.Fatalf("validateClaudeMCPToolsForManagedAgents: %v", err)
+	}
+	if !slices.Equal(probe.calls, []string{"campaign-coordinator"}) {
+		t.Fatalf("probe calls = %#v, want CLI startup proof before validation-only MCP call", probe.calls)
 	}
 	if !slices.Equal(exec.executed, []string{"health_check"}) {
 		t.Fatalf("executed = %#v, want health_check tools/call smoke", exec.executed)
@@ -544,10 +616,14 @@ func TestValidateClaudeMCPToolsForManagedAgents_FailsClosedOnConfiguredGatewayTo
 	}
 	turns := setupStartupProbeTransport(t, manager, exec, "gateway-token")
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "wrong-token")
+	probe := &startupVisibleSurfaceProbeStub{}
 
-	err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), nil, turns, exec, manager)
+	err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), probe, turns, exec, manager)
 	if err == nil || !strings.Contains(err.Error(), "invalid token") {
 		t.Fatalf("expected invalid token error, got %v", err)
+	}
+	if !slices.Equal(probe.calls, []string{"market-research-agent"}) {
+		t.Fatalf("probe calls = %#v, want CLI startup proof before MCP auth proof", probe.calls)
 	}
 }
 
@@ -573,10 +649,14 @@ func TestValidateClaudeMCPToolsForManagedAgents_FailsOnEmptyVisibleToolSurface(t
 		},
 	}
 	turns := setupStartupProbeTransport(t, manager, exec, "gateway-token")
+	probe := &startupVisibleSurfaceProbeStub{}
 
-	err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), nil, turns, exec, manager)
+	err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), probe, turns, exec, manager)
 	if err == nil || !strings.Contains(err.Error(), "found no visible tools") {
 		t.Fatalf("expected empty visible tools error, got %v", err)
+	}
+	if !slices.Equal(probe.calls, []string{"campaign-coordinator"}) {
+		t.Fatalf("probe calls = %#v, want CLI startup proof before empty visible-surface failure", probe.calls)
 	}
 }
 
@@ -784,9 +864,13 @@ func TestValidateClaudeMCPToolsForManagedAgents_UsesVisibilityOnlyWhenNoExplicit
 				},
 			}
 			turns := setupStartupProbeTransport(t, manager, exec, "gateway-token")
+			probe := &startupVisibleSurfaceProbeStub{}
 
-			if err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), nil, turns, exec, manager); err != nil {
+			if err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), probe, turns, exec, manager); err != nil {
 				t.Fatalf("validateClaudeMCPToolsForManagedAgents: %v", err)
+			}
+			if !slices.Equal(probe.calls, []string{"campaign-coordinator"}) {
+				t.Fatalf("probe calls = %#v, want CLI startup proof before MCP visibility-only proof", probe.calls)
 			}
 			if len(exec.executed) != 0 {
 				t.Fatalf("executed = %#v, want visibility-only startup proof for required-input-only surface", exec.executed)
@@ -820,9 +904,13 @@ func TestValidateClaudeMCPToolsForManagedAgents_DoesNotCallSchemaOnlyEmptyObject
 		},
 	}
 	turns := setupStartupProbeTransport(t, manager, exec, "gateway-token")
+	probe := &startupVisibleSurfaceProbeStub{}
 
-	if err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), nil, turns, exec, manager); err != nil {
+	if err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), probe, turns, exec, manager); err != nil {
 		t.Fatalf("validateClaudeMCPToolsForManagedAgents: %v", err)
+	}
+	if !slices.Equal(probe.calls, []string{"lifecycle-coordinator"}) {
+		t.Fatalf("probe calls = %#v, want CLI startup proof before schema-only MCP proof", probe.calls)
 	}
 	if len(exec.executed) != 0 {
 		t.Fatalf("executed = %#v, want query_entities visibility-only despite empty-object schema", exec.executed)
@@ -852,9 +940,13 @@ func TestValidateClaudeMCPToolsForManagedAgents_UsesVisibilityOnlyWhenVisibleToo
 		},
 	}
 	turns := setupStartupProbeTransport(t, manager, exec, "gateway-token")
+	probe := &startupVisibleSurfaceProbeStub{}
 
-	if err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), nil, turns, exec, manager); err != nil {
+	if err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), probe, turns, exec, manager); err != nil {
 		t.Fatalf("validateClaudeMCPToolsForManagedAgents: %v", err)
+	}
+	if !slices.Equal(probe.calls, []string{"campaign-coordinator"}) {
+		t.Fatalf("probe calls = %#v, want CLI startup proof before emit-only MCP proof", probe.calls)
 	}
 	if len(exec.executed) != 0 {
 		t.Fatalf("executed = %#v, want visibility-only startup proof for emit-only surface", exec.executed)
@@ -883,10 +975,14 @@ func TestValidateClaudeMCPToolsForManagedAgents_FailsClosedWhenExplicitProbeSafe
 		},
 	}
 	turns := setupStartupProbeTransport(t, manager, exec, "gateway-token")
+	probe := &startupVisibleSurfaceProbeStub{}
 
-	err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), nil, turns, exec, manager)
+	err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), probe, turns, exec, manager)
 	if err == nil || !strings.Contains(err.Error(), "call_empty_object") {
 		t.Fatalf("expected explicit probe-safe schema mismatch error, got %v", err)
+	}
+	if !slices.Equal(probe.calls, []string{"campaign-coordinator"}) {
+		t.Fatalf("probe calls = %#v, want CLI startup proof before explicit startup probe policy failure", probe.calls)
 	}
 	if len(exec.executed) != 0 {
 		t.Fatalf("executed = %#v, want no tools/call smoke for invalid explicit startup probe policy", exec.executed)
@@ -908,10 +1004,14 @@ func TestValidateClaudeMCPToolsForManagedAgents_FailsClosedOnUnexpectedCallableP
 		},
 	}
 	turns := setupStartupProbeTransport(t, manager, exec, "gateway-token")
+	probe := &startupVisibleSurfaceProbeStub{}
 
-	err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), nil, turns, exec, manager)
+	err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), probe, turns, exec, manager)
 	if err == nil || !strings.Contains(err.Error(), "unexpected tool failure") {
 		t.Fatalf("expected unexpected callable probe error, got %v", err)
+	}
+	if !slices.Equal(probe.calls, []string{"campaign-coordinator"}) {
+		t.Fatalf("probe calls = %#v, want CLI startup proof before callable probe failure", probe.calls)
 	}
 }
 
@@ -930,9 +1030,13 @@ func TestValidateClaudeMCPToolsForManagedAgents_FailsClosedOnGenericPhraseNonVal
 		},
 	}
 	turns := setupStartupProbeTransport(t, manager, exec, "gateway-token")
+	probe := &startupVisibleSurfaceProbeStub{}
 
-	err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), nil, turns, exec, manager)
+	err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), probe, turns, exec, manager)
 	if err == nil || !strings.Contains(err.Error(), "execution path must be enabled before use") {
 		t.Fatalf("expected generic phrase non-validation probe error, got %v", err)
+	}
+	if !slices.Equal(probe.calls, []string{"campaign-coordinator"}) {
+		t.Fatalf("probe calls = %#v, want CLI startup proof before generic callable probe failure", probe.calls)
 	}
 }

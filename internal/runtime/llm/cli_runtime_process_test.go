@@ -79,6 +79,9 @@ func TestClaudeCLIRuntimeBuildCommand_UsesContainerReachableMCPGatewayURL(t *tes
 	if !strings.Contains(got, "SWARM_TOOL_GATEWAY_URL=http://host.docker.internal:8081/mcp") {
 		t.Fatalf("docker args = %q, want explicit container MCP gateway URL", got)
 	}
+	if !strings.Contains(got, "SWARM_TOOL_GATEWAY_TOKEN=gateway-token") {
+		t.Fatalf("docker args = %q, want MCP gateway token propagated into cli_test container exec", got)
+	}
 }
 
 func TestClaudeCLIRuntimePersistOversizedToolResultRelay_WritesWorkspaceVisibleFile(t *testing.T) {
