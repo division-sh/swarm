@@ -149,6 +149,28 @@ func TestCLIAPIResolverToleratesContractPathConfigKeys(t *testing.T) {
 	}
 }
 
+func TestCLIAPIResolverIgnoresServeListenerConfigKeys(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	tokenFile := writeCLIAPITokenFile(t, "config-token")
+	t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
+		"api_server":            "http://127.0.0.1:4444",
+		"api_token_file":        tokenFile,
+		"serve_api_listen_addr": "not-a-listen-address",
+		"serve_mcp_listen_addr": "http://127.0.0.1:9002",
+	}))
+
+	client, err := newCLIAPIClient(rootCommandOptions{})
+	if err != nil {
+		t.Fatalf("newCLIAPIClient: %v", err)
+	}
+	if client.endpoint != "http://127.0.0.1:4444/v1/rpc" {
+		t.Fatalf("endpoint = %q", client.endpoint)
+	}
+	if client.token != "config-token" {
+		t.Fatalf("token = %q", client.token)
+	}
+}
+
 func TestCLIAPISettingsFailClosed(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -572,6 +594,8 @@ func isolateCLIAPIConfigEnv(t *testing.T) {
 	t.Setenv("SWARM_API_SERVER", "")
 	t.Setenv("SWARM_API_TOKEN", "")
 	t.Setenv("SWARM_API_TOKEN_FILE", "")
+	t.Setenv("SWARM_API_LISTEN_ADDR", "")
+	t.Setenv("SWARM_MCP_LISTEN_ADDR", "")
 	t.Setenv("SWARM_CONTRACTS_PATH", "")
 	t.Setenv("SWARM_CONTRACTS_DIR", "")
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
@@ -589,7 +613,7 @@ func writeCLIAPITokenFile(t *testing.T, token string) string {
 func writeCLIAPIConfigFile(t *testing.T, values map[string]string) string {
 	t.Helper()
 	var body strings.Builder
-	for _, key := range []string{"api_server", "api_token_file", "contracts_path", "platform_spec_path"} {
+	for _, key := range []string{"api_server", "api_token_file", "contracts_path", "platform_spec_path", "serve_api_listen_addr", "serve_mcp_listen_addr"} {
 		if value, ok := values[key]; ok {
 			body.WriteString(key)
 			body.WriteString(": ")
