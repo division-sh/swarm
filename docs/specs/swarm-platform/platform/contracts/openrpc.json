@@ -1534,7 +1534,7 @@
       },
       "errors": [
         {
-          "code": -32011,
+          "code": -32012,
           "message": "Application error: FORK_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -1572,7 +1572,7 @@
           }
         },
         {
-          "code": -32012,
+          "code": -32013,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
