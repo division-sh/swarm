@@ -93,10 +93,6 @@ func ConversationModeString(mode ConversationMode) string {
 	}
 }
 
-type conversationSnapshotPersister interface {
-	PersistConversationSnapshot(ctx context.Context, s *Session) error
-}
-
 func NewConversation(agentID, taskID, systemPrompt string, tools []ToolDefinition, mode ConversationMode, maxTurns int, runtime Runtime) *Conversation {
 	if maxTurns <= 0 {
 		maxTurns = 25
@@ -596,9 +592,7 @@ func (c *Conversation) appendMessage(ctx context.Context, msg Message) error {
 	if c.Session != nil {
 		c.Session.Messages = append(c.Session.Messages, msg)
 	}
-	if p, ok := c.runtime.(conversationSnapshotPersister); ok && c.Session != nil {
-		_ = p.PersistConversationSnapshot(ctx, c.Session)
-	}
+	_ = PersistConversationSnapshotForRuntime(ctx, c.runtime, c.Session)
 	return nil
 }
 

@@ -73,6 +73,10 @@ active_issues:
     title: Introduce an explicit runtime dependency graph object for boot wiring
     maps_to:
       - boot_wiring_dependency_ownership
+  - id: 983
+    title: Clean/compact LLM provider interface for arbitrary backends
+    maps_to:
+      - llm_provider_adjacency_contract_ownership
   - id: 175
     title: Add first-class launch, stalled-run, and long-running session observability
     maps_to:
@@ -257,6 +261,30 @@ active_issues:
     maps_to:
       - delivery_and_replay_ownership
 nodes:
+  - id: llm_provider_adjacency_contract_ownership
+    title: LLM Provider Adjacency Contract Ownership
+    parent_class: runtime LLM provider abstraction not production-ready
+    canonical_owners:
+      - internal/runtime/llm provider contract for runtime mode, provider identity, transport, tool schema translation, session lifecycle, response normalization, native-tool capability truth, persistence, and budget accounting
+    why_this_node_exists: LLM provider behavior drifts when a runtime implementation satisfies StartSession and ContinueSession but leaves tool schema, stream parsing, session persistence, native tools, and budget behavior implicit in adjacent files
+    known_manifestations:
+      - RuntimeFactory can make provider identity look like a local mode switch rather than a contract-backed provider selection boundary
+      - the public Runtime interface alone does not name provider obligations for tool schemas, provider session IDs, response normalization, task-mode audit, native-tool capability truth, or budget usage
+      - Anthropic API and Claude CLI encode provider-specific request, response, stream, and budget behavior separately without one named adjacency contract
+      - CLI strict native-tool behavior and API fallback-aware behavior can drift if agent tool composition and boot validation read optional runtime helpers instead of the provider contract
+      - config llm.runtime_mode and persisted agents.llm_backend currently conflate provider identity, transport, and runtime mode; adding a new provider before a contract owner would freeze under-specified semantics
+      - README/provider-extensibility wording can overstate provider neutrality unless implementation and docs consume the same provider contract truth
+    representative_issues:
+      - 983
+    common_framing_mistakes:
+      too_broad:
+        - add all providers
+        - make Swarm model-neutral
+      too_narrow:
+        - add one factory switch case
+        - document how to copy the Anthropic runtime
+        - rename cli_test
+    current_action_pressure: active
   - id: transport_policy_and_surface_parity
     title: Transport Policy And Surface Parity
     parent_class: runtime execution-boundary policy drift

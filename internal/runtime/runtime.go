@@ -882,7 +882,7 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		return fmt.Errorf("claude runtime workspace validation failed: %w", err)
 	}
 	rt.emitBootProgress(15, "workspace_validation_and_system_containers", "ok", fmt.Sprintf("%d system containers", len(rt.Options.SystemContainers)))
-	startupProbe, _ := rt.LLM.(llm.StartupVisibleToolSurfaceProber)
+	startupProbe, _ := llm.StartupVisibleToolSurfaceProberForRuntime(rt.LLM)
 	if err := validateClaudeMCPToolsForManagedAgents(ctx, rt.Config, source, startupProbe, rt.MCPTurns, rt.ToolExecutor, rt.Manager); err != nil {
 		rt.emitBootProgress(16, "mcp_tool_validation", "FAILED", err.Error())
 		return fmt.Errorf("claude runtime mcp validation failed: %w", err)

@@ -1041,8 +1041,12 @@ type nativeCapabilityRuntimeStub struct {
 	caps llm.NativeToolCapabilities
 }
 
-func (s nativeCapabilityRuntimeStub) NativeToolCapabilities() llm.NativeToolCapabilities {
-	return s.caps
+func (s nativeCapabilityRuntimeStub) ProviderContract() llm.ProviderContract {
+	contract := llm.AnthropicAPIProviderContract()
+	contract.RuntimeMode = "stub"
+	contract.Provider = "stub"
+	contract.NativeTools.Capabilities = s.caps
+	return contract
 }
 
 func TestNewLLMAgent_InjectsNativeFallbackToolsWhenProviderLacksSupport(t *testing.T) {

@@ -618,10 +618,7 @@ func extractNativeToolConfig(cfg models.AgentConfig) map[string]bool {
 }
 
 func supportedNativeToolCapabilities(runtime llm.Runtime) llm.NativeToolCapabilities {
-	if provider, ok := runtime.(llm.NativeToolCapabilityProvider); ok && provider != nil {
-		return provider.NativeToolCapabilities()
-	}
-	return llm.NativeToolCapabilities{}
+	return llm.NativeToolCapabilitiesForRuntime(runtime)
 }
 
 func nativeFallbackToolDefinitions(cfg models.AgentConfig, modelRuntime llm.Runtime) []llm.ToolDefinition {

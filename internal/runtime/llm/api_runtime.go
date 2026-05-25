@@ -50,8 +50,46 @@ func NewAnthropicAPIRuntime(cfg *config.Config, sessions sessions.Registry, lock
 	}
 }
 
-func (r *AnthropicAPIRuntime) NativeToolCapabilities() NativeToolCapabilities {
-	return NativeToolCapabilities{}
+func (r *AnthropicAPIRuntime) ProviderContract() ProviderContract {
+	return AnthropicAPIProviderContract()
+}
+
+func AnthropicAPIProviderContract() ProviderContract {
+	return ProviderContract{
+		RuntimeMode: "api",
+		Provider:    "anthropic",
+		Transport:   ProviderTransportAPI,
+		ToolSchema: ProviderToolSchemaContract{
+			ValidatesInputSchemas: true,
+			TranslatesTools:       true,
+			ReturnsToolResults:    true,
+		},
+		SessionLifecycle: ProviderSessionLifecycleContract{
+			StartsSessions:            true,
+			ContinuesSessions:         true,
+			SupportsConversationModes: true,
+			ProviderSessionIDStrategy: "platform_managed",
+			RotatesSessions:           true,
+			PreservesRetryLineage:     true,
+		},
+		Response: ProviderResponseContract{
+			NormalizesMessages:   true,
+			NormalizesToolCalls:  true,
+			PreservesRawResponse: true,
+			StreamingParser:      "anthropic_messages_json",
+		},
+		NativeTools: ProviderNativeToolContract{
+			FallbackToolsAllowed: true,
+		},
+		Persistence: ProviderPersistenceContract{
+			PersistsTurns:                 true,
+			PersistsConversationSnapshots: true,
+			PersistsTaskModeAudit:         true,
+		},
+		Budget: ProviderBudgetContract{
+			UsageAccounting: BudgetUsageExact,
+		},
+	}
 }
 
 func (r *AnthropicAPIRuntime) PersistConversationSnapshot(ctx context.Context, s *Session) error {
