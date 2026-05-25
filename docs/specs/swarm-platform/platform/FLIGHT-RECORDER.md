@@ -21,11 +21,13 @@ reverse-engineering it from the current state.
 
 ## Fork Semantics — Approach Comparison
 
-> Historical note: this document predates the v1 CLI contract. Top-level
-> `swarm fork` examples below are historical design records, not supported v1
-> CLI commands. `platform-spec.yaml` `cli_specification` retires top-level
-> `swarm fork`; any future fork control surface requires a separate gated
-> `swarm control run fork` / API owner.
+> Historical note: this document predates the promoted multi-bundle CLI/API
+> authority. Examples below using `swarm fork --run`, `--at`, or `--contracts`
+> are historical design records, not current public CLI authority. Current
+> authority lives in `platform-spec.yaml#multi_bundle_persistence` and promotes
+> the future public command `swarm fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]` over the future
+> `/v1/rpc run.fork` owner. Legacy harness flags remain rejected unless a later
+> source-authority PR promotes them.
 
 We evaluated three approaches to fork. This comparison captures the
 trade-offs that led to the chosen design.
@@ -314,7 +316,7 @@ the reconstructed state; only mutations after it are undone.
 | Turn creation | Stamp run_id |
 | `runs` table | New table, created at boot |
 | `entity_mutations` table | New table, created at boot |
-| `swarm fork` command | New CLI command |
+| `swarm fork` command | Historical design row; current public command authority is `platform-spec.yaml#multi_bundle_persistence.cli_surface.run_fork` |
 
 #### No changes
 
@@ -338,8 +340,8 @@ the reconstructed state; only mutations after it are undone.
 3. **Ship flight recorder queries** — immediate debugging value from
    run reconstruction and entity timeline queries.
 
-4. **Ship `swarm fork`** — state reconstruction + pending detection +
-   re-delivery under new run.
+4. **Ship fork execution** — consume the promoted `run.fork` API/CLI authority,
+   state reconstruction, pending detection, and re-delivery under a new run.
 
 5. **Ship drift detection** — `swarm verify --run <id>` validates
    entity_state against mutation log.

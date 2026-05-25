@@ -5128,6 +5128,36 @@ multi_bundle_persistence:
         - The CLI must not call internal runtime/store/fork harnesses directly.
         - Historical harness flags --dry-run, --materialize-only, --activate, and --contracts remain rejected unless a later source-authority PR promotes them.
   explicit_splits:
+    schema_foundation:
+      tracker: '#1013'
+      reason: Live bundles table, runs.bundle_hash, runs.bundle_source, indexes, and no-FK migration are database/schema implementation.
+    reader_migration:
+      tracker: '#1014'
+      reason: Production readers must migrate from bundle_fingerprint/null-collapse behavior to bundle_source availability semantics.
+    bundle_ingest_and_run_stamping:
+      tracker: '#1015'
+      reason: serve --contracts / --dev ingest, canonical hashing, bundle row writes, and persisted/ephemeral run stamping are runtime boot implementation.
+    startup_recovery_unavailable_bundle:
+      tracker: '#1016'
+      reason: Restart recovery for active persisted/ephemeral/deleted/legacy bundle-source runs is lifecycle implementation.
+    bundle_api_catalog:
+      tracker: '#1017'
+      reason: bundle.list/get/agents/register method publication, store owners, OpenRPC artifacts, and handler tests are API implementation.
+    bundle_delete_non_force:
+      tracker: '#1018'
+      reason: Non-force bundle.delete active-run refusal and non-active deleted marking are API/store lifecycle implementation.
+    bundle_delete_force:
+      tracker: '#1019'
+      reason: Forced bundle.delete preservation cleanup, mutex, quiescence, delivery/session/timer/container cleanup, and result projection are destructive-runtime implementation.
+    serve_db_loaded_bundle:
+      tracker: '#1020'
+      reason: swarm serve --bundle-hash DB-loaded YAML/data runtime boot mode is serve/runtime implementation and may depend on #981.
+    bundle_safe_list_read_scoping:
+      tracker: '#1021'
+      reason: agent/event/run/log/incident read/list method scoping and generated OpenRPC shape are API read-model implementation.
+    create_new_work_bundle_hash:
+      tracker: '#1022'
+      reason: event.publish/run.start create-new-work admission with required bundle_hash when run_id is absent is API/runtime routing implementation.
     cross_bundle_fork:
       tracker: '#976'
       reason: Different target bundle_hash selected for run.fork requires selected-contract routing and admission work beyond source authority.

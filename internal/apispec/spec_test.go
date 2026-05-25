@@ -221,11 +221,21 @@ func TestMultiBundleSourceAuthorityStaysOutOfLiveOpenRPCUntilImplemented(t *test
 
 	splits := mustMappingValue(t, multi, "explicit_splits")
 	for split, tracker := range map[string]string{
-		"cross_bundle_fork":                 "#976",
-		"db_loaded_same_bundle_source":      "#1024",
-		"run_fork_api_runtime_cli":          "#989",
-		"multi_bundle_cli_inventory":        "#1023",
-		"bundle_hash_dual_accept_migration": "#1001",
+		"schema_foundation":                   "#1013",
+		"reader_migration":                    "#1014",
+		"bundle_ingest_and_run_stamping":      "#1015",
+		"startup_recovery_unavailable_bundle": "#1016",
+		"bundle_api_catalog":                  "#1017",
+		"bundle_delete_non_force":             "#1018",
+		"bundle_delete_force":                 "#1019",
+		"serve_db_loaded_bundle":              "#1020",
+		"bundle_safe_list_read_scoping":       "#1021",
+		"create_new_work_bundle_hash":         "#1022",
+		"cross_bundle_fork":                   "#976",
+		"db_loaded_same_bundle_source":        "#1024",
+		"run_fork_api_runtime_cli":            "#989",
+		"multi_bundle_cli_inventory":          "#1023",
+		"bundle_hash_dual_accept_migration":   "#1001",
 	} {
 		assertScalarValue(t, mustMappingValue(t, mustMappingValue(t, splits, split), "tracker"), tracker)
 	}
@@ -257,6 +267,26 @@ func TestMultiBundleSourceAuthorityStaysOutOfLiveOpenRPCUntilImplemented(t *test
 
 	apiBoundary := mustMappingValue(t, mustMappingValue(t, root, "api_specification"), "multi_bundle_publication_boundary")
 	assertScalarValue(t, mustMappingValue(t, apiBoundary, "status"), "source_authority_not_method_catalog")
+
+	for _, relPath := range []string{
+		filepath.Join("docs", "specs", "swarm-platform", "platform", "FLIGHT-RECORDER.md"),
+		filepath.Join("docs", "specs", "swarm-platform", "platform", "CHANGELOG.md"),
+	} {
+		raw, err := os.ReadFile(filepath.Join(repoRoot(t), relPath))
+		if err != nil {
+			t.Fatalf("read %s: %v", relPath, err)
+		}
+		content := string(raw)
+		if strings.Contains(content, "swarm control run fork") {
+			t.Fatalf("%s still promotes stale swarm control run fork authority", relPath)
+		}
+		if strings.Contains(content, "retires top-level `swarm fork`") || strings.Contains(content, "top-level `swarm fork` is retired") {
+			t.Fatalf("%s still says top-level swarm fork is retired", relPath)
+		}
+		if !strings.Contains(content, runForkCommand) {
+			t.Fatalf("%s missing promoted run fork command shape", relPath)
+		}
+	}
 
 	api := loadRepoAPISpec(t)
 	for _, methodName := range []string{"run.fork", "bundle.list", "bundle.get", "bundle.agents", "bundle.register", "bundle.delete"} {
