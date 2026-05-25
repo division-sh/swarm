@@ -45,6 +45,21 @@ func TestRuntimeStart_AgentFreeCLITestDoesNotRequireClaudeStartupEnv(t *testing.
 	}
 }
 
+func TestNewRuntimeRejectsRetiredLLMRuntimeMode(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.LLM.RuntimeMode = "cli_test"
+
+	_, err := NewRuntime(context.Background(), RuntimeDeps{Config: cfg, Stores: Stores{}, Options: RuntimeOptions{
+		SelfCheck:      false,
+		WorkflowModule: loadAgentFreeRuntimeWorkflowModule(t),
+		LLMRuntime:     noopLLMRuntime{},
+	}})
+
+	if err == nil || !strings.Contains(err.Error(), "llm.runtime_mode is retired") {
+		t.Fatalf("NewRuntime error = %v, want retired runtime mode rejection", err)
+	}
+}
+
 func TestNewRuntime_AgentPresentCLITestStillRequiresClaudeStartupEnv(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.LLM.Backend = "cli_test"

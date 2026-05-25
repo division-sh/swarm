@@ -21,7 +21,6 @@ import (
 	runtimeactors "swarm/internal/runtime/core/actors"
 	runtimecredentials "swarm/internal/runtime/credentials"
 	runtimellm "swarm/internal/runtime/llm"
-	llmselection "swarm/internal/runtime/llm/selection"
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimemcp "swarm/internal/runtime/mcp"
 	runtimepipeline "swarm/internal/runtime/pipeline"
@@ -232,7 +231,7 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 		managerOptions.Workspaces = options.Workspace
 	}
 	if options.Config != nil && strings.TrimSpace(managerOptions.LLMBackend) == "" {
-		profile, err := llmselection.ResolveActiveBackend(options.Config.LLM.Backend)
+		profile, err := options.Config.LLMBackendProfile()
 		if err != nil {
 			return selectedContractAgentRuntimeFactory{}, err
 		}
