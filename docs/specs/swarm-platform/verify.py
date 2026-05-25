@@ -158,7 +158,7 @@ def payload_field_exists(fields, ref):
 
 def declared_mcp_prefixes():
     prefixes = set()
-    policy = all_policy.get('mcp_servers', {})
+    policy = root_policy.get('mcp_servers', {})
     if not isinstance(policy, dict): return prefixes
     for server in policy.values():
         if not isinstance(server, dict): continue
