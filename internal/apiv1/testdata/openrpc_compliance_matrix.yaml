@@ -188,7 +188,7 @@ methods:
     required_params: [source_session_id, fork_point]
     declared_errors: [SESSION_NOT_FOUND, TURN_NOT_FOUND, EVENT_NOT_FOUND, IDEMPOTENCY_CONFLICT]
     happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorConversationForkHandlersUseCanonicalOwnerAndIdempotency}]}
-    required_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}, {kind: go_test, name: TestOperatorConversationForkRejectsUnsupportedForkPointKindBeforeOwner}]}
+    required_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}, {kind: go_test, name: TestOperatorConversationForkRejectsInvalidForkPointBeforeOwner}]}
     unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}]}
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
     declared_error_tests: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorConversationForkHandlersTypedErrors}]}

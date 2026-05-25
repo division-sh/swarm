@@ -223,6 +223,13 @@ func conversationForkPointSelectorFromParams(params map[string]any) (store.Conve
 	if !ok {
 		return store.ConversationForkPointSelector{}, NewInvalidParamsError(map[string]any{"field": "fork_point", "reason": "must be an object"})
 	}
+	for key := range obj {
+		switch key {
+		case "kind", "turn_index", "event_id", "at":
+		default:
+			return store.ConversationForkPointSelector{}, NewInvalidParamsError(map[string]any{"field": "fork_point." + key, "reason": "unknown field"})
+		}
+	}
 	kind, err := requiredStringParam(obj, "kind")
 	if err != nil {
 		return store.ConversationForkPointSelector{}, err

@@ -270,23 +270,52 @@ func TestOperatorConversationForkHandlersTypedErrors(t *testing.T) {
 	}
 }
 
-func TestOperatorConversationForkRejectsUnsupportedForkPointKindBeforeOwner(t *testing.T) {
+func TestOperatorConversationForkRejectsInvalidForkPointBeforeOwner(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
-	forks := &fakeConversationForkLifecycleStore{}
-	handler := testHandler(t, Options{
-		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
-			Now:               func() time.Time { return now },
-			ConversationForks: forks,
-			Idempotency:       newMutatingProbeIdempotencyStore(),
-		}),
-	})
-	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"bad","method":"conversation.fork","params":{"source_session_id":"00000000-0000-0000-0000-000000000201","fork_point":{"kind":"bogus"}}}`)
-	if resp.Error == nil || resp.Error.Code != codeInvalidParams {
-		t.Fatalf("conversation.fork malformed fork_point error = %#v, want invalid params", resp.Error)
+	tests := []struct {
+		name      string
+		forkPoint string
+		wantField string
+	}{
+		{
+			name:      "unsupported kind",
+			forkPoint: `{"kind":"bogus"}`,
+			wantField: "fork_point.kind",
+		},
+		{
+			name:      "unknown entity snapshot",
+			forkPoint: `{"kind":"turn","turn_index":1,"entity_snapshot":{}}`,
+			wantField: "fork_point.entity_snapshot",
+		},
+		{
+			name:      "unknown include original",
+			forkPoint: `{"kind":"turn","turn_index":1,"include_original":true}`,
+			wantField: "fork_point.include_original",
+		},
 	}
-	if forks.createCalls != 0 {
-		t.Fatalf("create owner calls = %d, want 0 for malformed fork_point", forks.createCalls)
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			forks := &fakeConversationForkLifecycleStore{}
+			handler := testHandler(t, Options{
+				AuthTokens: []string{testToken},
+				Handlers: OperatorReadHandlers(OperatorReadOptions{
+					Now:               func() time.Time { return now },
+					ConversationForks: forks,
+					Idempotency:       newMutatingProbeIdempotencyStore(),
+				}),
+			})
+			resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"bad","method":"conversation.fork","params":{"source_session_id":"00000000-0000-0000-0000-000000000201","fork_point":`+tt.forkPoint+`}}`)
+			if resp.Error == nil || resp.Error.Code != codeInvalidParams {
+				t.Fatalf("conversation.fork malformed fork_point error = %#v, want invalid params", resp.Error)
+			}
+			if got := asMap(t, asMap(t, resp.Error.Data)["details"])["field"]; got != tt.wantField {
+				t.Fatalf("conversation.fork invalid field = %#v, want %s", got, tt.wantField)
+			}
+			if forks.createCalls != 0 {
+				t.Fatalf("create owner calls = %d, want 0 for malformed fork_point", forks.createCalls)
+			}
+		})
 	}
 }
 
