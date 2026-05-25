@@ -2164,9 +2164,15 @@ engine:
           transport: cli
           budget_usage_accounting: estimated
           native_tool_policy: strict provider-native runtime
+        openai_compatible:
+          provider: openai_compatible
+          transport: api
+          budget_usage_accounting: exact
+          native_tool_policy: fallback-aware non-strict runtime
+          protocol: chat_completions_compatible_json
       split_boundaries:
-      - Adding new provider identities such as OpenAI, Ollama, Bedrock, Azure OpenAI, Vertex, or vLLM requires a separate
-        provider implementation/parity gate that consumes llm_provider_selection_config_authority.
+      - Adding additional provider identities or protocol families such as OpenAI Responses, OpenRouter, Ollama, Bedrock,
+        Azure OpenAI, Vertex, or vLLM requires a separate provider implementation/parity gate that consumes llm_provider_selection_config_authority.
       - Renaming cli_test is a separate compatibility/semantics decision.
       - Provider-selection UI is outside this adapter-contract slice.
     llm_provider_selection_config_authority:
@@ -2214,6 +2220,30 @@ engine:
             model_tier_source: agents.model_tier
             accounting_model: CLI budget estimation records the configured model_tier string because the Claude CLI shipped
               runtime does not expose exact model usage metadata in a stable non-interactive surface.
+        openai_compatible:
+          provider: openai_compatible
+          transport: api
+          provider_contract_runtime_mode: openai_compatible
+          protocol: Chat Completions-compatible HTTP JSON at /v1/chat/completions relative to the configured base URL.
+          credential_source:
+            env_var: OPENAI_COMPATIBLE_API_KEY
+            required: true
+          endpoint_source:
+            config_key: llm.openai_compatible.base_url
+            env_var: SWARM_OPENAI_COMPATIBLE_BASE_URL
+            required: true
+            rule: This is the API base URL, not the chat completions endpoint path; the runtime appends /v1/chat/completions.
+          model_tier_mapping:
+            default_model_config: llm.openai_compatible.default_model
+            default_model_env: SWARM_OPENAI_COMPATIBLE_DEFAULT_MODEL
+            low_cost_model_config: llm.openai_compatible.low_cost_model
+            low_cost_model_env: SWARM_OPENAI_COMPATIBLE_LOW_COST_MODEL
+            model_tier_source: agents.model_tier
+            throttle_degrade_rule: If the budget guard marks the actor entity throttled and the low-cost model is configured,
+              the OpenAI-compatible runtime uses the low-cost model for that turn.
+          proof_boundary: This profile proves one non-Anthropic Chat Completions-compatible HTTP provider path. It is not
+            an OpenAI Responses API provider, not an official-OpenAI-only provider identity, not OpenRouter/Ollama/Bedrock/Azure/Vertex/vLLM
+            closure, and not a provider matrix.
       reserved_persisted_backend_profiles:
         mock: Reserved persisted profile id for fixture replay. It is not a supported active runtime backend until a dedicated
           provider/runtime owner lands.
@@ -2226,8 +2256,8 @@ engine:
         mode strings.
       - Readers must consume persisted llm_backend as a backend profile id and fail closed on unknown values.
       split_boundaries:
-      - Implementing OpenAI, OpenRouter, Ollama, Bedrock, Azure OpenAI, Vertex, vLLM, or any other new provider remains a
-        separate provider implementation/parity gate.
+      - Implementing OpenAI Responses, OpenRouter, Ollama, Bedrock, Azure OpenAI, Vertex, vLLM, or any other additional
+        provider remains a separate provider implementation/parity gate.
       - Renaming cli_test remains a separate compatibility/storage/spec migration.
       - Provider UI and docs beyond the selector/config truth remain under the #983 parent tail.
     conversation_modes:
@@ -3825,13 +3855,13 @@ platform_tables:
         — set only for agents scoped to a specific entity (rare). The contract in agents.yaml is the source of truth and
         permissions_bundle is resolved at boot into the persisted permissions array rather than being stored directly.
         llm_backend stores the backend profile id owned by llm_provider_selection_config_authority. Active runtime profiles
-        are api (Anthropic API transport) and cli_test (Claude CLI transport); mock and local are reserved persisted profile
-        ids and are not active runtimes until a dedicated provider/runtime owner lands. This value is provider-selection
+        are api (Anthropic API transport), cli_test (Claude CLI transport), and openai_compatible (Chat Completions-compatible
+        HTTP transport); mock and local are reserved persisted profile ids and are not active runtimes until a dedicated provider/runtime owner lands. This value is provider-selection
         deployment truth, not provider identity alone and not transport mode alone. This is a deployment/agent property, not
         a session property. agent_sessions.runtime_mode tracks conversation scope only.'
       ddl: "CREATE TABLE agents (\n    agent_id          TEXT PRIMARY KEY,\n    flow_instance     TEXT,\n    role        \
         \      TEXT NOT NULL,\n    model_tier        TEXT NOT NULL,\n    llm_backend       TEXT NOT NULL DEFAULT 'api' CHECK\
-        \ (llm_backend IN ('api', 'cli_test', 'mock', 'local')),\n    conversation_mode TEXT NOT NULL CHECK (conversation_mode\
+        \ (llm_backend IN ('api', 'cli_test', 'openai_compatible', 'mock', 'local')),\n    conversation_mode TEXT NOT NULL CHECK (conversation_mode\
         \ IN ('task', 'session', 'session_per_entity')),\n    parent_agent_id   TEXT,\n    entity_id         UUID,\n    config\
         \            JSONB NOT NULL DEFAULT '{}',\n    subscriptions     JSONB NOT NULL DEFAULT '[]',\n    emit_events   \
         \    JSONB NOT NULL DEFAULT '[]',\n    tools             JSONB NOT NULL DEFAULT '[]',\n    permissions       JSONB\

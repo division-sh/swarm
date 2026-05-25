@@ -1381,6 +1381,11 @@ func defaultRuntimeConfig() (*config.Config, error) {
 				NoSessionPersistence: envBool("SWARM_CLAUDE_CLI_NO_SESSION_PERSISTENCE", false),
 				UseTMux:              envBool("SWARM_CLAUDE_CLI_USE_TMUX", false),
 			},
+			OpenAICompatible: config.OpenAICompatibleConfig{
+				BaseURL:      envOrDefault(llmselection.OpenAICompatibleBaseURLEnv, ""),
+				DefaultModel: envOrDefault(llmselection.OpenAICompatibleDefaultModelEnv, ""),
+				LowCostModel: envOrDefault(llmselection.OpenAICompatibleLowCostModelEnv, ""),
+			},
 		},
 	}
 	if err := cfg.Validate(); err != nil {

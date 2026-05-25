@@ -101,6 +101,25 @@ func TestValidate_RejectsReservedActiveBackend(t *testing.T) {
 	}
 }
 
+func TestValidate_OpenAICompatibleRequiresProfileOwnedConfig(t *testing.T) {
+	c := &Config{}
+	c.LLM.Backend = "openai_compatible"
+	c.LLM.Session.LockTTL = 1 * time.Second
+	c.LLM.Session.RotateAfterTurns = 1
+	c.LLM.Session.RotateOnParseFailures = 1
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "llm.openai_compatible.base_url") {
+		t.Fatalf("Validate error = %v, want openai-compatible base url requirement", err)
+	}
+	c.LLM.OpenAICompatible.BaseURL = "https://example.test/v1"
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "llm.openai_compatible.default_model") {
+		t.Fatalf("Validate error = %v, want openai-compatible model requirement", err)
+	}
+	c.LLM.OpenAICompatible.DefaultModel = "gpt-compatible"
+	if err := c.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+}
+
 func TestValidate_RejectsRetiredRuntimeMode(t *testing.T) {
 	c := &Config{}
 	c.LLM.RuntimeMode = "api"

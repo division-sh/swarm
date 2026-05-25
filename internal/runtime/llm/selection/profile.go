@@ -6,15 +6,17 @@ import (
 )
 
 const (
-	BackendAPI     = "api"
-	BackendCLITest = "cli_test"
-	BackendMock    = "mock"
-	BackendLocal   = "local"
+	BackendAPI              = "api"
+	BackendCLITest          = "cli_test"
+	BackendOpenAICompatible = "openai_compatible"
+	BackendMock             = "mock"
+	BackendLocal            = "local"
 
-	ProviderAnthropic = "anthropic"
-	ProviderClaude    = "claude"
-	ProviderMock      = "mock"
-	ProviderLocal     = "local"
+	ProviderAnthropic        = "anthropic"
+	ProviderClaude           = "claude"
+	ProviderOpenAICompatible = "openai_compatible"
+	ProviderMock             = "mock"
+	ProviderLocal            = "local"
 
 	TransportAPI   = "api"
 	TransportCLI   = "cli"
@@ -28,6 +30,14 @@ const (
 
 	ConfigBackendField            = "llm.backend"
 	RetiredConfigRuntimeModeField = "llm.runtime_mode"
+
+	OpenAICompatibleCredentialEnv      = "OPENAI_COMPATIBLE_API_KEY"
+	OpenAICompatibleBaseURLEnv         = "SWARM_OPENAI_COMPATIBLE_BASE_URL"
+	OpenAICompatibleDefaultModelEnv    = "SWARM_OPENAI_COMPATIBLE_DEFAULT_MODEL"
+	OpenAICompatibleLowCostModelEnv    = "SWARM_OPENAI_COMPATIBLE_LOW_COST_MODEL"
+	OpenAICompatibleBaseURLConfigField = "llm.openai_compatible.base_url"
+	OpenAICompatibleDefaultModelConfig = "llm.openai_compatible.default_model"
+	OpenAICompatibleLowCostModelConfig = "llm.openai_compatible.low_cost_model"
 )
 
 type CredentialSource struct {
@@ -36,9 +46,16 @@ type CredentialSource struct {
 	Purpose  string
 }
 
+type BaseURLSource struct {
+	ConfigKey string
+	EnvVar    string
+	Required  bool
+	Purpose   string
+}
+
 type ModelMap struct {
 	Default string
-	Haiku   string
+	LowCost string
 }
 
 type Profile struct {
@@ -47,6 +64,7 @@ type Profile struct {
 	Transport    string
 	RuntimeMode  string
 	Credential   CredentialSource
+	BaseURL      BaseURLSource
 	Active       bool
 	ReservedNote string
 }
@@ -81,6 +99,24 @@ var profiles = map[string]Profile{
 			EnvVar:   "CLAUDE_CODE_OAUTH_TOKEN",
 			Required: true,
 			Purpose:  "claude cli runtime",
+		},
+		Active: true,
+	},
+	BackendOpenAICompatible: {
+		ID:          BackendOpenAICompatible,
+		Provider:    ProviderOpenAICompatible,
+		Transport:   TransportAPI,
+		RuntimeMode: BackendOpenAICompatible,
+		Credential: CredentialSource{
+			EnvVar:   OpenAICompatibleCredentialEnv,
+			Required: true,
+			Purpose:  "openai-compatible http runtime",
+		},
+		BaseURL: BaseURLSource{
+			ConfigKey: OpenAICompatibleBaseURLConfigField,
+			EnvVar:    OpenAICompatibleBaseURLEnv,
+			Required:  true,
+			Purpose:   "openai-compatible chat completions endpoint base url",
 		},
 		Active: true,
 	},
@@ -156,6 +192,28 @@ func CredentialValue(profile Profile, lookup EnvLookup) string {
 	return strings.TrimSpace(value)
 }
 
+func ResolveBaseURL(profile Profile, raw string) (string, error) {
+	baseURL := strings.TrimSpace(raw)
+	if baseURL == "" {
+		if profile.BaseURL.Required {
+			field := strings.TrimSpace(profile.BaseURL.ConfigKey)
+			if field == "" {
+				field = "llm backend base_url"
+			}
+			env := strings.TrimSpace(profile.BaseURL.EnvVar)
+			if env != "" {
+				return "", fmt.Errorf("%s is required for backend %q; set %s or %s", field, profile.ID, field, env)
+			}
+			return "", fmt.Errorf("%s is required for backend %q", field, profile.ID)
+		}
+		return "", nil
+	}
+	if !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") {
+		return "", fmt.Errorf("%s must be an http(s) URL for backend %q", profile.BaseURL.ConfigKey, profile.ID)
+	}
+	return strings.TrimRight(baseURL, "/"), nil
+}
+
 func RequireCredential(profile Profile, lookup EnvLookup) error {
 	if !profile.Credential.Required {
 		return nil
@@ -172,8 +230,8 @@ func ResolveModelName(profile Profile, req ModelResolution) (string, error) {
 	case BackendAPI:
 		model := strings.TrimSpace(req.Models.Default)
 		if req.ForceLowCost || tier == "haiku" {
-			if haiku := strings.TrimSpace(req.Models.Haiku); haiku != "" {
-				model = haiku
+			if lowCost := strings.TrimSpace(req.Models.LowCost); lowCost != "" {
+				model = lowCost
 			}
 		}
 		if model == "" {
@@ -182,6 +240,17 @@ func ResolveModelName(profile Profile, req ModelResolution) (string, error) {
 		return model, nil
 	case BackendCLITest:
 		return tier, nil
+	case BackendOpenAICompatible:
+		model := strings.TrimSpace(req.Models.Default)
+		if req.ForceLowCost || tier == "low_cost" || tier == "haiku" {
+			if lowCost := strings.TrimSpace(req.Models.LowCost); lowCost != "" {
+				model = lowCost
+			}
+		}
+		if model == "" {
+			return "", fmt.Errorf("%s is required for backend %q", OpenAICompatibleDefaultModelConfig, profile.ID)
+		}
+		return model, nil
 	default:
 		return "", fmt.Errorf("llm backend profile %q does not support model resolution", profile.ID)
 	}

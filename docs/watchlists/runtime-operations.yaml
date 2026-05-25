@@ -302,11 +302,12 @@ nodes:
       - the backend profile id resolves provider identity, transport/protocol mode, credential source, provider-contract runtime mode, and model-tier mapping
       - command defaults must not infer provider/backend selection from credential or model env presence
       - RuntimeFactory, selected-fork runtime materialization, provider credential checks, AgentManager, store projection/hydration, and model selection must consume the same profile resolver
-      - agents.llm_backend stores a backend profile id; api and cli_test are active runtime profiles while mock and local are reserved persisted-only profiles
-      - first non-Anthropic provider implementation remains blocked until it consumes this authority instead of inventing config/env/model semantics locally
+      - agents.llm_backend stores a backend profile id; api, cli_test, and openai_compatible are active runtime profiles while mock and local are reserved persisted-only profiles
+      - openai_compatible closes the first non-Anthropic Chat Completions-compatible HTTP proof only; OpenAI Responses, OpenRouter, Ollama, Bedrock, Azure, Vertex, vLLM, provider docs/sample config, and cli_test rename remain split tails
     representative_issues:
       - 983
       - 1062
+      - 1070
     common_framing_mistakes:
       too_broad:
         - implement OpenAI, OpenRouter, Ollama, Bedrock, or another provider in the selection-authority slice

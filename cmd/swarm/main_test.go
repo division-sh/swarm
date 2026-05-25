@@ -3154,6 +3154,29 @@ func TestDefaultRuntimeConfig_DoesNotInferLLMBackendFromCredentials(t *testing.T
 	}
 }
 
+func TestDefaultRuntimeConfig_OpenAICompatibleConsumesCanonicalProfileEnv(t *testing.T) {
+	t.Setenv("SWARM_LLM_BACKEND", "openai_compatible")
+	t.Setenv("SWARM_OPENAI_COMPATIBLE_BASE_URL", "https://example.test/v1")
+	t.Setenv("SWARM_OPENAI_COMPATIBLE_DEFAULT_MODEL", "gpt-compatible")
+	t.Setenv("SWARM_OPENAI_COMPATIBLE_LOW_COST_MODEL", "gpt-compatible-mini")
+	cfg, err := defaultRuntimeConfig()
+	if err != nil {
+		t.Fatalf("defaultRuntimeConfig: %v", err)
+	}
+	if cfg.LLM.Backend != "openai_compatible" {
+		t.Fatalf("llm backend = %q, want openai_compatible", cfg.LLM.Backend)
+	}
+	if cfg.LLM.OpenAICompatible.BaseURL != "https://example.test/v1" {
+		t.Fatalf("openai compatible base url = %q", cfg.LLM.OpenAICompatible.BaseURL)
+	}
+	if cfg.LLM.OpenAICompatible.DefaultModel != "gpt-compatible" {
+		t.Fatalf("openai compatible default model = %q", cfg.LLM.OpenAICompatible.DefaultModel)
+	}
+	if cfg.LLM.OpenAICompatible.LowCostModel != "gpt-compatible-mini" {
+		t.Fatalf("openai compatible low cost model = %q", cfg.LLM.OpenAICompatible.LowCostModel)
+	}
+}
+
 func TestLoadRuntimeConfig_RejectsUnsupportedRuntimeControlsFromFile(t *testing.T) {
 	cfgText := strings.Join([]string{
 		"runtime:",
