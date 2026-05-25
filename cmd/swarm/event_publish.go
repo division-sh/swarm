@@ -26,11 +26,13 @@ type eventPublishCommandOptions struct {
 	apiOptions           rootCommandOptions
 	payloadJSON          string
 	runID                string
+	sourceEventID        string
 	bundleFingerprint    string
 	emitter              string
 	idempotencyKey       string
 	payloadJSONSet       bool
 	runIDSet             bool
+	sourceEventIDSet     bool
 	bundleFingerprintSet bool
 	emitterSet           bool
 	idempotencyKeySet    bool
@@ -39,6 +41,7 @@ type eventPublishCommandOptions struct {
 type eventPublishResult struct {
 	EventID       string                 `json:"event_id"`
 	RunID         string                 `json:"run_id"`
+	SourceEventID string                 `json:"source_event_id,omitempty"`
 	NewRunCreated *bool                  `json:"new_run_created"`
 	Deliveries    []eventPublishDelivery `json:"deliveries"`
 }
@@ -59,6 +62,7 @@ func newEventPublishCommand(opts rootCommandOptions) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			publishOpts.payloadJSONSet = cmd.Flags().Changed("payload-json")
 			publishOpts.runIDSet = cmd.Flags().Changed("run-id")
+			publishOpts.sourceEventIDSet = cmd.Flags().Changed("source-event-id")
 			publishOpts.bundleFingerprintSet = cmd.Flags().Changed("bundle-fingerprint")
 			publishOpts.emitterSet = cmd.Flags().Changed("emitter")
 			publishOpts.idempotencyKeySet = cmd.Flags().Changed("idempotency-key")
@@ -67,6 +71,7 @@ func newEventPublishCommand(opts rootCommandOptions) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&publishOpts.payloadJSON, "payload-json", "", "Required JSON object payload")
 	cmd.Flags().StringVar(&publishOpts.runID, "run-id", "", "Optional existing nonterminal run id to inject into")
+	cmd.Flags().StringVar(&publishOpts.sourceEventID, "source-event-id", "", "Optional same-run parent event id for checkpoint lineage")
 	cmd.Flags().StringVar(&publishOpts.bundleFingerprint, "bundle-fingerprint", "", "Optional expected server bundle fingerprint")
 	cmd.Flags().StringVar(&publishOpts.emitter, "emitter", "", "Optional producer identifier")
 	cmd.Flags().StringVar(&publishOpts.idempotencyKey, "idempotency-key", "", "Optional v1 API idempotency key")
@@ -116,10 +121,22 @@ func (opts eventPublishCommandOptions) params(args []string) (string, map[string
 		"event_name": eventName,
 		"payload":    payload,
 	}
-	if runID, err := optionalNonEmptyFlag("--run-id", opts.runID, opts.runIDSet); err != nil {
+	runID, err := optionalNonEmptyFlag("--run-id", opts.runID, opts.runIDSet)
+	if err != nil {
 		return "", nil, err
-	} else if runID != "" {
+	}
+	if runID != "" {
 		params["run_id"] = runID
+	}
+	sourceEventID, err := optionalNonEmptyFlag("--source-event-id", opts.sourceEventID, opts.sourceEventIDSet)
+	if err != nil {
+		return "", nil, err
+	}
+	if sourceEventID != "" {
+		if runID == "" {
+			return "", nil, fmt.Errorf("--source-event-id requires --run-id")
+		}
+		params["source_event_id"] = sourceEventID
 	}
 	if fingerprint, err := optionalNonEmptyFlag("--bundle-fingerprint", opts.bundleFingerprint, opts.bundleFingerprintSet); err != nil {
 		return "", nil, err
@@ -236,6 +253,9 @@ func writeEventPublishResult(out io.Writer, eventName string, result eventPublis
 			delivery.Attempt,
 		)
 	}
+	if sourceEventID := strings.TrimSpace(result.SourceEventID); sourceEventID != "" {
+		fmt.Fprintf(out, "source_event_id=%s\n", sourceEventID)
+	}
 }
 
 func eventPublishErrorExitCode(err error) int {
@@ -244,7 +264,7 @@ func eventPublishErrorExitCode(err error) int {
 		authExit:      eventPublishExitAuth,
 		notFoundExit:  eventPublishExitNotFound,
 		conflictExit:  eventPublishExitRejected,
-		notFoundCodes: []string{"RUN_NOT_FOUND"},
+		notFoundCodes: []string{"RUN_NOT_FOUND", "EVENT_NOT_FOUND"},
 		conflictCodes: []string{
 			"BUNDLE_MISMATCH",
 			"UNSUPPORTED_BUNDLE_REF",

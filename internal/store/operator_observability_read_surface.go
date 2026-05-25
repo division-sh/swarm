@@ -43,15 +43,16 @@ type OperatorEventListResult struct {
 }
 
 type OperatorEventFull struct {
-	EventID     string                     `json:"event_id"`
-	EventName   string                     `json:"event_name"`
-	EntityID    string                     `json:"entity_id,omitempty"`
-	RunID       string                     `json:"run_id,omitempty"`
-	CreatedAt   time.Time                  `json:"created_at"`
-	Source      string                     `json:"source"`
-	Payload     map[string]any             `json:"payload"`
-	Deliveries  []OperatorEventDelivery    `json:"deliveries"`
-	DeadLetters []OperatorDeadLetterRecord `json:"dead_letters"`
+	EventID       string                     `json:"event_id"`
+	EventName     string                     `json:"event_name"`
+	EntityID      string                     `json:"entity_id,omitempty"`
+	RunID         string                     `json:"run_id,omitempty"`
+	SourceEventID string                     `json:"source_event_id,omitempty"`
+	CreatedAt     time.Time                  `json:"created_at"`
+	Source        string                     `json:"source"`
+	Payload       map[string]any             `json:"payload"`
+	Deliveries    []OperatorEventDelivery    `json:"deliveries"`
+	DeadLetters   []OperatorDeadLetterRecord `json:"dead_letters"`
 }
 
 type OperatorEventDelivery struct {
@@ -343,6 +344,7 @@ func (s *PostgresStore) LoadOperatorEvent(ctx context.Context, eventID string) (
 			COALESCE(e.event_name, ''),
 			COALESCE(e.entity_id::text, ''),
 			COALESCE(e.run_id::text, ''),
+			COALESCE(e.source_event_id::text, ''),
 			e.created_at,
 			COALESCE(e.produced_by, ''),
 			COALESCE(e.produced_by_type, ''),
@@ -356,7 +358,7 @@ func (s *PostgresStore) LoadOperatorEvent(ctx context.Context, eventID string) (
 		producedByType string
 		payloadRaw     []byte
 	)
-	if err := row.Scan(&event.EventID, &event.EventName, &event.EntityID, &event.RunID, &event.CreatedAt, &producedBy, &producedByType, &payloadRaw); err == sql.ErrNoRows {
+	if err := row.Scan(&event.EventID, &event.EventName, &event.EntityID, &event.RunID, &event.SourceEventID, &event.CreatedAt, &producedBy, &producedByType, &payloadRaw); err == sql.ErrNoRows {
 		return OperatorEventFull{}, ErrEventNotFound
 	} else if err != nil {
 		return OperatorEventFull{}, fmt.Errorf("load operator event: %w", err)

@@ -366,6 +366,7 @@ func mutatingHTTPRuntimeErrorProbes() []mutatingHTTPRuntimeErrorProbe {
 		{Method: "event.publish", Params: mergeProbeParams(validEvent, map[string]any{"event_name": "scan.missing"}), Code: EventNotDeclaredCode},
 		{Method: "event.publish", Params: validEvent, Code: PayloadValidationFailedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.events.publishErr = runtimebus.ErrPayloadValidation }}},
 		{Method: "event.publish", Params: mergeProbeParams(validEvent, map[string]any{"run_id": missingRunID}), Code: RunNotFoundCode},
+		{Method: "event.publish", Params: mergeProbeParams(validEvent, map[string]any{"run_id": runID, "source_event_id": "00000000-0000-0000-0000-000000000998"}), Code: EventNotFoundCode},
 		{Method: "event.publish", Params: mergeProbeParams(validEvent, map[string]any{"run_id": runID}), Code: RunAlreadyTerminalCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
 			s.runs.headers[runID] = store.RunHeader{RunID: runID, Status: "completed"}
 		}}},
@@ -748,14 +749,15 @@ func (s *mutatingRuntimeProbeState) storeEvent(evt events.Event, deliveries []st
 		_ = json.Unmarshal(evt.Payload, &payload)
 	}
 	s.observability.events[evt.ID] = store.OperatorEventFull{
-		EventID:    evt.ID,
-		EventName:  strings.TrimSpace(string(evt.Type)),
-		EntityID:   evt.EntityID(),
-		RunID:      evt.RunID,
-		CreatedAt:  evt.CreatedAt.UTC(),
-		Source:     evt.SourceAgent,
-		Payload:    payload,
-		Deliveries: deliveries,
+		EventID:       evt.ID,
+		EventName:     strings.TrimSpace(string(evt.Type)),
+		EntityID:      evt.EntityID(),
+		RunID:         evt.RunID,
+		SourceEventID: strings.TrimSpace(evt.ParentEventID),
+		CreatedAt:     evt.CreatedAt.UTC(),
+		Source:        evt.SourceAgent,
+		Payload:       payload,
+		Deliveries:    deliveries,
 	}
 }
 

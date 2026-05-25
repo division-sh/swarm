@@ -20,6 +20,7 @@ import (
 type eventPublishResult struct {
 	EventID       string                 `json:"event_id"`
 	RunID         string                 `json:"run_id"`
+	SourceEventID string                 `json:"source_event_id,omitempty"`
 	NewRunCreated bool                   `json:"new_run_created"`
 	Deliveries    []eventPublishDelivery `json:"deliveries"`
 }
@@ -38,6 +39,7 @@ type eventPublicationParams struct {
 	Payload           json.RawMessage
 	EntityID          string
 	RunID             string
+	SourceEventID     string
 	IdempotencyKey    string
 	Emitter           string
 	NewRunCreated     bool
@@ -83,6 +85,7 @@ func executeEventPublish(ctx context.Context, req Request, opts OperatorReadOpti
 			return eventPublishResult{
 				EventID:       params.EventID,
 				RunID:         params.RunID,
+				SourceEventID: params.SourceEventID,
 				NewRunCreated: params.NewRunCreated,
 				Deliveries:    []eventPublishDelivery{},
 			}, params.EventID, nil
@@ -133,6 +136,7 @@ func eventPublishResultFromStore(ctx context.Context, opts OperatorReadOptions, 
 	return eventPublishResult{
 		EventID:       strings.TrimSpace(event.EventID),
 		RunID:         runID,
+		SourceEventID: strings.TrimSpace(event.SourceEventID),
 		NewRunCreated: stored.NewRunCreated,
 		Deliveries:    eventPublishDeliveries(event.Deliveries),
 	}, nil
@@ -167,12 +171,13 @@ func executeOperatorEventPublication(
 			return store.APIIdempotencyCompletion{}, err
 		}
 		if err := opts.Events.Publish(ctx, events.Event{
-			ID:          params.EventID,
-			RunID:       params.RunID,
-			Type:        events.EventType(params.EventName),
-			SourceAgent: params.Emitter,
-			Payload:     params.Payload,
-			CreatedAt:   now,
+			ID:            params.EventID,
+			RunID:         params.RunID,
+			ParentEventID: params.SourceEventID,
+			Type:          events.EventType(params.EventName),
+			SourceAgent:   params.Emitter,
+			Payload:       params.Payload,
+			CreatedAt:     now,
 		}.WithEntityID(params.EntityID)); err != nil {
 			return store.APIIdempotencyCompletion{}, runStartPublishError(params.EventName, err)
 		}
@@ -210,6 +215,23 @@ func eventPublicationParamsFromRequest(req Request, bootFingerprint string, cfg 
 	if err != nil {
 		return eventPublicationParams{}, err
 	}
+	sourceEventID, sourceEventIDSet, err := optionalStringParam(req.Params, "source_event_id")
+	if err != nil {
+		return eventPublicationParams{}, err
+	}
+	if sourceEventIDSet {
+		if sourceEventID == "" {
+			return eventPublicationParams{}, NewInvalidParamsError(map[string]any{"field": "source_event_id", "reason": "must be a UUID"})
+		}
+		parsed, err := uuid.Parse(sourceEventID)
+		if err != nil {
+			return eventPublicationParams{}, NewInvalidParamsError(map[string]any{"field": "source_event_id", "reason": "must be a UUID"})
+		}
+		sourceEventID = parsed.String()
+	}
+	if sourceEventID != "" && runID == "" {
+		return eventPublicationParams{}, NewInvalidParamsError(map[string]any{"field": "run_id", "reason": "is required when source_event_id is provided"})
+	}
 	newRun := false
 	if runID == "" {
 		runID = uuid.NewString()
@@ -245,6 +267,7 @@ func eventPublicationParamsFromRequest(req Request, bootFingerprint string, cfg 
 		Payload:           payload,
 		EntityID:          entityID,
 		RunID:             runID,
+		SourceEventID:     sourceEventID,
 		IdempotencyKey:    idempotencyKey,
 		Emitter:           emitter,
 		NewRunCreated:     newRun,
@@ -319,6 +342,24 @@ func validateEventPublication(ctx context.Context, opts OperatorReadOptions, par
 			return NewApplicationError(RunAlreadyTerminalCode, false, map[string]any{
 				"run_id":         params.RunID,
 				"current_status": status,
+			})
+		}
+	}
+	if params.SourceEventID != "" {
+		sourceEvent, err := opts.Observability.LoadOperatorEvent(ctx, params.SourceEventID)
+		if errors.Is(err, store.ErrEventNotFound) {
+			return NewApplicationError(EventNotFoundCode, false, map[string]any{"event_id": params.SourceEventID})
+		}
+		if err != nil {
+			return err
+		}
+		if strings.TrimSpace(sourceEvent.RunID) != params.RunID {
+			return NewInvalidParamsError(map[string]any{
+				"field":           "source_event_id",
+				"reason":          "must belong to run_id",
+				"source_event_id": params.SourceEventID,
+				"run_id":          params.RunID,
+				"source_run_id":   strings.TrimSpace(sourceEvent.RunID),
 			})
 		}
 	}
