@@ -3607,6 +3607,7 @@ platform_tables:
       delete_mixed_row_policy:
         - event_deliveries
         - agent_conversation_audits
+        - conversation_forks
         - timers
       delete_all:
         - runs
@@ -3884,6 +3885,24 @@ platform_tables:
         \    response          JSONB NOT NULL,\n    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    expires_at\
         \        TIMESTAMPTZ NOT NULL,\n    PRIMARY KEY (method, actor_token_id, idempotency_key),\n    INDEX idx_api_idempotency_expires\
         \ (expires_at)\n);"
+    conversation_forks:
+      description: 'Canonical forkchat lifecycle store for conversation.fork, conversation.fork_list, conversation.fork_view,
+        and conversation.fork_delete. Rows are lifecycle metadata only: they record source session/run/agent lineage, the
+        validated fork-point descriptor, creator token, fixed first-slice TTL, and soft-deletion state. This table is isolated
+        from agent_sessions, agent_turns, events, runtime logs, and dashboard conversation readers; fork chat execution,
+        sandbox tools, entity snapshot reads, and cross-surface include/exclude behavior are separate owners.'
+      ddl: "CREATE TABLE conversation_forks (\n    fork_id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n\
+        \    source_session_id      UUID NOT NULL,\n    source_run_id          UUID,\n    source_agent_id        TEXT NOT\
+        \ NULL,\n    fork_point_kind       TEXT NOT NULL CHECK (fork_point_kind IN ('turn', 'event', 'time')),\n    fork_point_turn_index\
+        \ INTEGER,\n    fork_point_turn_id UUID,\n    fork_point_event_id UUID,\n    fork_point_at         TIMESTAMPTZ,\n\
+        \    fork_point_selected_at TIMESTAMPTZ NOT NULL,\n    created_by            TEXT NOT NULL,\n    created_at   \
+        \         TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    expires_at            TIMESTAMPTZ NOT NULL,\n    deleted_at\
+        \            TIMESTAMPTZ,\n    CHECK ((fork_point_kind = 'turn' AND fork_point_turn_index IS NOT NULL AND fork_point_turn_id\
+        \ IS NOT NULL AND fork_point_event_id IS NULL AND fork_point_at IS NULL) OR (fork_point_kind = 'event' AND fork_point_turn_index\
+        \ IS NOT NULL AND fork_point_turn_id IS NOT NULL AND fork_point_event_id IS NOT NULL AND fork_point_at IS NULL) OR\
+        \ (fork_point_kind = 'time' AND fork_point_turn_index IS NOT NULL AND fork_point_turn_id IS NOT NULL AND fork_point_at\
+        \ IS NOT NULL)),\n    INDEX idx_conversation_forks_source (source_session_id, created_at DESC),\n    INDEX idx_conversation_forks_created\
+        \ (created_at DESC, fork_id),\n    INDEX idx_conversation_forks_active (expires_at) WHERE deleted_at IS NULL\n);"
     runtime_ingress_state:
       description: 'Durable singleton runtime ingress state owned by the canonical runtime ingress controller. It records whether
         queueable event-producing ingress is running or paused, the last transition reason/actor, and the platform event emitted
@@ -6435,7 +6454,9 @@ cli_specification:
       forkchat:
         disposition: blocked
         tracker: '#749'
-        action: Forkchat remains blocked until `conversation.fork*` API/runtime contract exists.
+        action: Forkchat CLI remains blocked until `conversation.fork_chat` execution, sandbox/snapshot owners, and CLI consumer
+          contracts exist. Lifecycle-only `conversation.fork|fork_list|fork_view|fork_delete` is source authority, not CLI
+          usability.
     platform_spec_refinements_not_cleanly_present_in_review_artifact:
       agent_replay_backlog:
         classification: required_current_contract
@@ -8693,7 +8714,8 @@ cli_specification:
       command: swarm forkchat new|resume|list|view|delete
       tier: should_have
       implementation_status: absent
-      blocker_state: '#749; conversation.fork* API methods and runtime subsystem are not present in current OpenRPC.'
+      blocker_state: '#749; lifecycle-only conversation.fork|fork_list|fork_view|fork_delete exists, but conversation.fork_chat,
+        sandbox/snapshot owners, and swarm forkchat CLI consumer are not present.'
       owners: conversation.fork, conversation.fork_chat, conversation.fork_list, conversation.fork_view, conversation.fork_delete
     entities_list:
       command: swarm entities list
@@ -8954,7 +8976,7 @@ cli_specification:
       remaining_role: 'Track deprecations/ratification cleanup only if kept open; do not block those CLI commands solely on method existence.'
     '#749':
       state: active_blocker
-      reason: 'conversation.fork, conversation.fork_chat, conversation.fork_list, conversation.fork_view, and conversation.fork_delete are absent.'
+      reason: 'Lifecycle-only conversation.fork, conversation.fork_list, conversation.fork_view, and conversation.fork_delete are present. conversation.fork_chat, sandbox/snapshot owners, and swarm forkchat CLI remain absent.'
     '#750':
       state: parent_runtime_tail
       closed_slices:
@@ -9372,6 +9394,8 @@ api_specification:
       - runtime.pause
       - runtime.resume
       - runtime.nuke
+      - conversation.fork
+      - conversation.fork_delete
     mailbox:
       status_storage_model: 'The storage table keeps terminal defer decisions as status = decided and decision = deferred.
         v1 read projections expose that row as MailboxStatus deferred. Approval/reject terminal rows remain status = decided
@@ -9434,6 +9458,7 @@ api_specification:
       - read:agents
       - control:agents
       - read:conversations
+      - write:conversations
       - read:runtime
       - control:runtime
       - admin:runtime
@@ -9525,6 +9550,7 @@ api_specification:
         - read:agents
         - control:agents
         - read:conversations
+        - write:conversations
         - read:runtime
         - control:runtime
         - admin:runtime
@@ -10784,6 +10810,133 @@ api_specification:
             type: array
             items:
               $ref: '#/components/schemas/Turn'
+      ConversationForkPointSelector:
+        description: "Selector for the source conversation fork point. Exactly one selector kind is accepted. For `turn`,\
+          \ turn_index is the canonical 1-based conversation order used by conversation.get_turn. For `event`, event_id must\
+          \ be the trigger_event_id for exactly one turn in the source session. For `time`, at resolves to the latest source\
+          \ turn with agent_turns.created_at <= at, using created_at ASC then turn_id ASC as the canonical order."
+        type: object
+        additionalProperties: false
+        required:
+        - kind
+        properties:
+          kind:
+            type: string
+            enum:
+            - turn
+            - event
+            - time
+          turn_index:
+            type: integer
+            minimum: 1
+          event_id:
+            $ref: '#/components/schemas/OpaqueId'
+          at:
+            $ref: '#/components/schemas/Timestamp'
+      ConversationForkPointDescriptor:
+        description: Canonical validated fork-point descriptor persisted by the conversation fork lifecycle owner.
+        type: object
+        additionalProperties: false
+        required:
+        - kind
+        - turn_index
+        - turn_id
+        - selected_at
+        properties:
+          kind:
+            type: string
+            enum:
+            - turn
+            - event
+            - time
+          turn_index:
+            type: integer
+            minimum: 1
+          turn_id:
+            $ref: '#/components/schemas/OpaqueId'
+          event_id:
+            $ref: '#/components/schemas/OpaqueId'
+          at:
+            $ref: '#/components/schemas/Timestamp'
+          selected_at:
+            $ref: '#/components/schemas/Timestamp'
+      ConversationForkSession:
+        description: "Forkchat lifecycle header. This first slice intentionally carries no forked chat transcript, no entity\
+          \ snapshot payload, and no sandbox execution result."
+        type: object
+        additionalProperties: false
+        required:
+        - fork_id
+        - source_session_id
+        - source_agent_id
+        - fork_point
+        - created_by
+        - created_at
+        - expires_at
+        - state
+        - turns
+        properties:
+          fork_id:
+            $ref: '#/components/schemas/OpaqueId'
+          source_session_id:
+            $ref: '#/components/schemas/OpaqueId'
+          source_run_id:
+            $ref: '#/components/schemas/OpaqueId'
+          source_agent_id:
+            $ref: '#/components/schemas/OpaqueId'
+          fork_point:
+            $ref: '#/components/schemas/ConversationForkPointDescriptor'
+          created_by:
+            type: string
+          created_at:
+            $ref: '#/components/schemas/Timestamp'
+          expires_at:
+            $ref: '#/components/schemas/Timestamp'
+          deleted_at:
+            $ref: '#/components/schemas/Timestamp'
+          state:
+            type: string
+            enum:
+            - active
+            - expired
+            - deleted
+          turns:
+            type: array
+            description: Empty until a later conversation.fork_chat execution owner exists.
+            items:
+              $ref: '#/components/schemas/Turn'
+      ConversationForkCreateResult:
+        type: object
+        additionalProperties: false
+        required:
+        - fork
+        - idempotency_replayed
+        properties:
+          fork:
+            $ref: '#/components/schemas/ConversationForkSession'
+          idempotency_replayed:
+            type: boolean
+      ConversationForkDeleteResult:
+        type: object
+        additionalProperties: false
+        required:
+        - ok
+        - fork_id
+        - deleted
+        - already_deleted
+        - idempotency_replayed
+        properties:
+          ok:
+            type: boolean
+            const: true
+          fork_id:
+            $ref: '#/components/schemas/OpaqueId'
+          deleted:
+            type: boolean
+          already_deleted:
+            type: boolean
+          idempotency_replayed:
+            type: boolean
       LogLevel:
         type: string
         enum:
@@ -11463,6 +11616,14 @@ api_specification:
           turn_index:
             type: integer
             minimum: 1
+      FORK_NOT_FOUND:
+        type: object
+        additionalProperties: false
+        required:
+        - fork_id
+        properties:
+          fork_id:
+            $ref: '#/components/schemas/OpaqueId'
       RUNTIME_ALREADY_PAUSED:
         type: object
         additionalProperties: false
@@ -12824,6 +12985,123 @@ api_specification:
           - type: 'null'
       errors:
       - AGENT_NOT_FOUND
+    conversation.fork:
+      tier: should_have
+      description: |
+        Create a forkchat lifecycle session from an existing conversation source
+        session and a validated fork point. This first slice is lifecycle-only:
+        it persists source session/run/agent lineage, fork point descriptor,
+        creator token, fixed 24-hour TTL, and deletion state. It does not
+        execute a forked LLM turn, return entity snapshots, expose inherited
+        transcript counts, or write into normal conversation/event/log surfaces.
+      scope:
+        required:
+        - write:conversations
+        - read:conversations
+      idempotency: per the convention.
+      params:
+      - name: source_session_id
+        required: true
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      - name: fork_point
+        required: true
+        schema:
+          $ref: '#/components/schemas/ConversationForkPointSelector'
+      - name: idempotency_key
+        required: false
+        schema:
+          type: string
+      result:
+        name: result
+        required: true
+        schema:
+          $ref: '#/components/schemas/ConversationForkCreateResult'
+      errors:
+      - SESSION_NOT_FOUND
+      - TURN_NOT_FOUND
+      - EVENT_NOT_FOUND
+      - IDEMPOTENCY_CONFLICT
+    conversation.fork_list:
+      tier: should_have
+      description: List active forkchat lifecycle sessions from the isolated conversation_forks owner.
+      scope:
+        required:
+        - read:conversations
+      params:
+      - name: source_session_id
+        required: false
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      - name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 500
+          default: 50
+      - name: cursor
+        required: false
+        schema:
+          $ref: '#/components/schemas/Cursor'
+      result:
+        name: result
+        required: true
+        schema:
+          type: object
+          additionalProperties: false
+          required:
+          - forks
+          properties:
+            forks:
+              type: array
+              items:
+                $ref: '#/components/schemas/ConversationForkSession'
+            next_cursor:
+              $ref: '#/components/schemas/Cursor'
+      errors: []
+    conversation.fork_view:
+      tier: should_have
+      description: Read one forkchat lifecycle session header/state. The turns array remains empty until conversation.fork_chat exists.
+      scope:
+        required:
+        - read:conversations
+      params:
+      - name: fork_id
+        required: true
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      result:
+        name: result
+        required: true
+        schema:
+          $ref: '#/components/schemas/ConversationForkSession'
+      errors:
+      - FORK_NOT_FOUND
+    conversation.fork_delete:
+      tier: should_have
+      description: Soft-delete one forkchat lifecycle session from the isolated conversation_forks owner.
+      scope:
+        required:
+        - write:conversations
+      idempotency: per the convention.
+      params:
+      - name: fork_id
+        required: true
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      - name: idempotency_key
+        required: false
+        schema:
+          type: string
+      result:
+        name: result
+        required: true
+        schema:
+          $ref: '#/components/schemas/ConversationForkDeleteResult'
+      errors:
+      - FORK_NOT_FOUND
+      - IDEMPOTENCY_CONFLICT
     runtime.logs:
       tier: should_have
       description: Filtered structured runtime log query.

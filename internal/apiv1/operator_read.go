@@ -57,6 +57,7 @@ type OperatorReadOptions struct {
 	Observability         ObservabilityReadStore
 	Entities              EntityReadStore
 	AgentConversations    AgentConversationReadStore
+	ConversationForks     ConversationForkLifecycleStore
 	AgentControl          AgentControlController
 	Mailbox               MailboxAPIStore
 	Idempotency           APIIdempotencyStore
@@ -226,6 +227,9 @@ func OperatorReadHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 		handlers[name] = handler
 	}
 	for name, handler := range OperatorAgentConversationHandlers(opts) {
+		handlers[name] = handler
+	}
+	for name, handler := range OperatorConversationForkHandlers(opts) {
 		handlers[name] = handler
 	}
 	for name, handler := range OperatorAgentControlHandlers(opts) {

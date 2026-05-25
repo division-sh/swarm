@@ -335,6 +335,8 @@ func platformTableOrder(name string) int {
 		return 60
 	case "agent_turns":
 		return 65
+	case "conversation_forks":
+		return 66
 	case "routing_rules":
 		return 70
 	case "event_deliveries":

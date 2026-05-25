@@ -331,6 +331,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		Observability:      stores.Postgres,
 		Entities:           apiEntities,
 		AgentConversations: apiAgentConversations,
+		ConversationForks:  stores.Postgres,
 		AgentControl:       dashboardDynamicAgentControl{supervisor: supervisor},
 		Mailbox:            stores.Postgres,
 		Idempotency:        stores.Postgres,

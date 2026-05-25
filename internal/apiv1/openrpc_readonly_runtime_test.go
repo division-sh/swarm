@@ -241,6 +241,8 @@ func approvedReadOnlyHTTPRuntimeMethods() []string {
 		"agent.get",
 		"agent.list",
 		"conversation.current_for_agent",
+		"conversation.fork_list",
+		"conversation.fork_view",
 		"conversation.get",
 		"conversation.get_turn",
 		"conversation.list",
@@ -268,6 +270,8 @@ func readOnlyHTTPRuntimeFixtures() map[string]readOnlyHTTPRuntimeFixture {
 		"agent.get":                      {Params: map[string]any{"agent_id": "agent-1"}, ResultKeys: []string{"agent"}},
 		"agent.list":                     {Params: map[string]any{}, ResultKeys: []string{"agents"}},
 		"conversation.current_for_agent": {Params: map[string]any{"agent_id": "agent-1"}, ResultKeys: []string{"conversation", "turns"}},
+		"conversation.fork_list":         {Params: map[string]any{}, ResultKeys: []string{"forks"}},
+		"conversation.fork_view":         {Params: map[string]any{"fork_id": "00000000-0000-0000-0000-000000000301"}, ResultKeys: []string{"fork_id", "source_session_id", "source_agent_id", "fork_point", "created_by", "created_at", "expires_at", "state", "turns"}},
 		"conversation.get":               {Params: map[string]any{"session_id": "sess-1"}, ResultKeys: []string{"conversation", "turns"}},
 		"conversation.get_turn":          {Params: map[string]any{"session_id": "sess-1", "turn_index": 1}, ResultKeys: []string{"session", "turn"}},
 		"conversation.list":              {Params: map[string]any{}, ResultKeys: []string{"conversations"}},
@@ -352,6 +356,16 @@ func readOnlyHTTPRuntimeErrorProbes() []readOnlyHTTPRuntimeErrorProbe {
 			},
 		},
 		{
+			Method: "conversation.fork_view",
+			Params: map[string]any{"fork_id": "00000000-0000-0000-0000-000000000999"},
+			Code:   ForkNotFoundCode,
+			Options: func(t *testing.T) OperatorReadOptions {
+				opts := readOnlyRuntimeProbeOptions(t)
+				opts.ConversationForks = &fakeConversationForkLifecycleStore{viewErr: store.ErrConversationForkNotFound}
+				return opts
+			},
+		},
+		{
 			Method: "entity.get",
 			Params: map[string]any{"entity_id": "missing"},
 			Code:   EntityNotFoundCode,
@@ -412,6 +426,26 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 	runID := "run-1"
 	eventID := "evt-1"
 	sessionID := "sess-1"
+	forkID := "00000000-0000-0000-0000-000000000301"
+	forkSessionID := "00000000-0000-0000-0000-000000000201"
+	forkTurnID := "00000000-0000-0000-0000-000000000401"
+	fork := store.OperatorConversationForkSession{
+		ForkID:          forkID,
+		SourceSessionID: forkSessionID,
+		SourceRunID:     "00000000-0000-0000-0000-000000000501",
+		SourceAgentID:   "agent-1",
+		ForkPoint: store.ConversationForkPointDescriptor{
+			Kind:       "turn",
+			TurnIndex:  1,
+			TurnID:     forkTurnID,
+			SelectedAt: now,
+		},
+		CreatedBy: "token",
+		CreatedAt: now,
+		ExpiresAt: now.Add(store.ConversationForkLifecycleTTL),
+		State:     "active",
+		Turns:     []store.OperatorConversationTurn{},
+	}
 	return OperatorReadOptions{
 		Now:      func() time.Time { return now },
 		Ready:    func() bool { return true },
@@ -597,7 +631,12 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 				Turns:        []store.OperatorConversationTurn{{TurnIndex: 1, TurnID: "turn-current-1", TriggerEventID: eventID, TriggerEventType: "scan.requested", ParseOK: true}},
 			},
 		},
-		Mailbox: newReadOnlyMailboxProbeStore(now),
+		ConversationForks: &fakeConversationForkLifecycleStore{
+			listResult: store.ConversationForkListResult{Forks: []store.OperatorConversationForkSession{fork}},
+			viewResult: fork,
+		},
+		Idempotency: newMutatingProbeIdempotencyStore(),
+		Mailbox:     newReadOnlyMailboxProbeStore(now),
 		Bundle: runtimecontracts.BundleIdentity{
 			WorkflowName:    "review",
 			WorkflowVersion: "1.0.0",

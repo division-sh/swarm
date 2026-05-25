@@ -20,6 +20,10 @@ var ErrSessionNotFound = errors.New("store: session not found")
 
 var ErrTurnNotFound = errors.New("store: turn not found")
 
+var ErrConversationForkNotFound = errors.New("store: conversation fork not found")
+
+var ErrInvalidConversationForkCursor = errors.New("store: invalid conversation fork cursor")
+
 var ErrAmbiguousEntityRunID = errors.New("store: ambiguous entity run_id")
 
 var ErrInvalidEntityCursor = errors.New("store: invalid entity cursor")
