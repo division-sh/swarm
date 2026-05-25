@@ -168,10 +168,11 @@ func newTier8Runtime(t testing.TB, bundle *runtimecontracts.WorkflowContractBund
 	if err != nil {
 		return nil, err
 	}
-	return runtime.NewRuntime(context.Background(), testRuntimeConfig(), runtime.Stores{}, runtime.RuntimeOptions{
+	return runtime.NewRuntime(context.Background(), runtime.RuntimeDeps{Config: testRuntimeConfig(), Stores: runtime.Stores{}, Options: runtime.RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,
-	})
+	}})
+
 }
 
 func assertTier8RuntimeBootMatchesAuthoritativeStartupTruth(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle, expected tier8ExpectedDocument) {

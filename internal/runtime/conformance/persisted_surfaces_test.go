@@ -788,19 +788,20 @@ func TestAccumulatorCompletionOutcomeSurface_RoundTripsThroughObservabilityReade
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 
-	rt, err := runtimepkg.NewRuntime(ctx, &config.Config{
+	rt, err := runtimepkg.NewRuntime(ctx, runtimepkg.RuntimeDeps{Config: &config.Config{
 		Runtime: config.RuntimeConfig{},
 		LLM:     config.LLMConfig{RuntimeMode: "api"},
-	}, runtimepkg.Stores{
+	}, Stores: runtimepkg.Stores{
 		SQLDB:         db,
 		EventStore:    pg,
 		ManagerStore:  pg,
 		ScheduleStore: pg,
-	}, runtimepkg.RuntimeOptions{
+	}, Options: runtimepkg.RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,
 		LLMRuntime:     conformanceNoopLLMRuntime{},
-	})
+	}})
+
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
@@ -1162,23 +1163,24 @@ func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *
 		t.Fatalf("UpsertSchedule: %v", err)
 	}
 
-	rt, err := runtimepkg.NewRuntime(ctx, &config.Config{
+	rt, err := runtimepkg.NewRuntime(ctx, runtimepkg.RuntimeDeps{Config: &config.Config{
 		Runtime: config.RuntimeConfig{
 			RecoveryOnStartup: false,
 		},
 		LLM: config.LLMConfig{
 			RuntimeMode: "api",
 		},
-	}, runtimepkg.Stores{
+	}, Stores: runtimepkg.Stores{
 		SQLDB:         db,
 		EventStore:    pg,
 		ManagerStore:  pg,
 		ScheduleStore: pg,
-	}, runtimepkg.RuntimeOptions{
+	}, Options: runtimepkg.RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: loadConformanceRuntimeWorkflowModule(t),
 		LLMRuntime:     conformanceNoopLLMRuntime{},
-	})
+	}})
+
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
@@ -1248,22 +1250,23 @@ func TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWitho
 		claimErr: errors.New("claim failed"),
 	}
 
-	rt, err := runtimepkg.NewRuntime(ctx, &config.Config{
+	rt, err := runtimepkg.NewRuntime(ctx, runtimepkg.RuntimeDeps{Config: &config.Config{
 		Runtime: config.RuntimeConfig{
 			RecoveryOnStartup: true,
 		},
 		LLM: config.LLMConfig{
 			RuntimeMode: "api",
 		},
-	}, runtimepkg.Stores{
+	}, Stores: runtimepkg.Stores{
 		SQLDB:        db,
 		EventStore:   eventStore,
 		ManagerStore: &conformanceManagerReplayStore{},
-	}, runtimepkg.RuntimeOptions{
+	}, Options: runtimepkg.RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,
 		LLMRuntime:     conformanceNoopLLMRuntime{},
-	})
+	}})
+
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
@@ -1346,23 +1349,24 @@ func TestStartupTimerRecoveryAftermathSurface_RoundTripsThroughObservabilityRead
 		},
 	}
 
-	rt, err := runtimepkg.NewRuntime(ctx, &config.Config{
+	rt, err := runtimepkg.NewRuntime(ctx, runtimepkg.RuntimeDeps{Config: &config.Config{
 		Runtime: config.RuntimeConfig{
 			RecoveryOnStartup: true,
 		},
 		LLM: config.LLMConfig{
 			RuntimeMode: "api",
 		},
-	}, runtimepkg.Stores{
+	}, Stores: runtimepkg.Stores{
 		SQLDB:         db,
 		EventStore:    conformanceTimerRecoveryEventStore{},
 		ManagerStore:  pg,
 		ScheduleStore: scheduleStore,
-	}, runtimepkg.RuntimeOptions{
+	}, Options: runtimepkg.RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: loadConformanceRuntimeWorkflowModule(t),
 		LLMRuntime:     conformanceNoopLLMRuntime{},
-	})
+	}})
+
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
@@ -1615,22 +1619,23 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 		},
 	}
 
-	rt, err := runtimepkg.NewRuntime(ctx, &config.Config{
+	rt, err := runtimepkg.NewRuntime(ctx, runtimepkg.RuntimeDeps{Config: &config.Config{
 		Runtime: config.RuntimeConfig{
 			RecoveryOnStartup: true,
 		},
 		LLM: config.LLMConfig{
 			RuntimeMode: "api",
 		},
-	}, runtimepkg.Stores{
+	}, Stores: runtimepkg.Stores{
 		SQLDB:        db,
 		EventStore:   conformanceTimerRecoveryEventStore{},
 		ManagerStore: managerStore,
-	}, runtimepkg.RuntimeOptions{
+	}, Options: runtimepkg.RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,
 		LLMRuntime:     conformanceNoopLLMRuntime{},
-	})
+	}})
+
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}

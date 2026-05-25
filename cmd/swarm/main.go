@@ -276,18 +276,23 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	}
 	defer restoreGatewayEnv()
 
-	rt, err := runtime.NewRuntime(ctx, cfg, stores.runtimeStores(), runtime.RuntimeOptions{
-		SelfCheck:          opts.SelfCheck,
-		WorkflowModule:     module,
-		WorkspaceLifecycle: workspaces,
-		EnableToolGateway:  true,
-		ToolGatewayToken:   strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_TOKEN")),
-		BundleFingerprint:  bootBundleIdentity.Fingerprint,
-		Credentials:        credentialStore,
-		BootStartedAt:      bootStartedAt,
-		BootProgress:       reporter.runtimeSink(),
-		SystemContainers:   systemContainers,
+	rt, err := runtime.NewRuntime(ctx, runtime.RuntimeDeps{
+		Config: cfg,
+		Stores: stores.runtimeStores(),
+		Options: runtime.RuntimeOptions{
+			SelfCheck:          opts.SelfCheck,
+			WorkflowModule:     module,
+			WorkspaceLifecycle: workspaces,
+			EnableToolGateway:  true,
+			ToolGatewayToken:   strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_TOKEN")),
+			BundleFingerprint:  bootBundleIdentity.Fingerprint,
+			Credentials:        credentialStore,
+			BootStartedAt:      bootStartedAt,
+			BootProgress:       reporter.runtimeSink(),
+			SystemContainers:   systemContainers,
+		},
 	})
+
 	if err != nil {
 		log.Printf("init runtime: %v", err)
 		return 1

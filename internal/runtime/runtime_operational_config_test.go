@@ -101,13 +101,14 @@ func TestNewRuntimeRejectsInvalidArtifactRootEnv(t *testing.T) {
 	defer cleanup()
 	module := loadRuntimeOwnershipWorkflowModule(t)
 
-	_, err := NewRuntime(context.Background(), testOperationalRuntimeConfig(), Stores{
+	_, err := NewRuntime(context.Background(), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
 		SQLDB:      db,
 		EventStore: &minimalRuntimeEventStore{},
-	}, RuntimeOptions{
+	}, Options: RuntimeOptions{
 		WorkflowModule: module,
 		LLMRuntime:     noopLLMRuntime{},
-	})
+	}})
+
 	if err == nil || !strings.Contains(err.Error(), "artifact repo root validation failed") || !strings.Contains(err.Error(), "agent-visible mount /data") {
 		t.Fatalf("NewRuntime error = %v, want invalid artifact root", err)
 	}
@@ -124,11 +125,12 @@ func TestRuntimeStart_FailsWhenRecoveryDisabledAndActiveSchedulesExist(t *testin
 			TaskID:    "recover-me",
 		}},
 	}
-	rt, err := NewRuntime(context.Background(), testOperationalRuntimeConfig(), Stores{ScheduleStore: store}, RuntimeOptions{
+	rt, err := NewRuntime(context.Background(), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{ScheduleStore: store}, Options: RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,
 		LLMRuntime:     noopLLMRuntime{},
-	})
+	}})
+
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
@@ -156,14 +158,15 @@ func TestRuntimeStart_AllowsRecoveryDisabledWithManagerSnapshotWork(t *testing.T
 			Config: runtimeactors.AgentConfig{ID: "persisted-agent"},
 		}},
 	}
-	rt, err := NewRuntime(context.Background(), testOperationalRuntimeConfig(), Stores{
+	rt, err := NewRuntime(context.Background(), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
 		EventStore:   eventStore,
 		ManagerStore: managerStore,
-	}, RuntimeOptions{
+	}, Options: RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,
 		LLMRuntime:     noopLLMRuntime{},
-	})
+	}})
+
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
@@ -177,15 +180,16 @@ func TestRuntimeStart_AllowsRecoveryDisabledWithManagerSnapshotWork(t *testing.T
 
 func TestRuntimeStart_AllowsRecoveryDisabledWhenNoRecoverableWorkExists(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
-	rt, err := NewRuntime(context.Background(), testOperationalRuntimeConfig(), Stores{
+	rt, err := NewRuntime(context.Background(), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
 		ScheduleStore: &recordingRuntimeScheduleStore{},
 		EventStore:    &recoveryGuardEventStore{},
 		ManagerStore:  &recoveryGuardManagerStore{},
-	}, RuntimeOptions{
+	}, Options: RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,
 		LLMRuntime:     noopLLMRuntime{},
-	})
+	}})
+
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
@@ -199,15 +203,16 @@ func TestRuntimeStart_AllowsRecoveryDisabledWhenNoRecoverableWorkExists(t *testi
 
 func TestRuntimeStart_AllowsRecoveryDisabledWithNonReplayEventStore(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
-	rt, err := NewRuntime(context.Background(), testOperationalRuntimeConfig(), Stores{
+	rt, err := NewRuntime(context.Background(), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
 		EventStore:    &minimalRuntimeEventStore{},
 		ScheduleStore: &recordingRuntimeScheduleStore{},
 		ManagerStore:  &recoveryGuardManagerStore{},
-	}, RuntimeOptions{
+	}, Options: RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,
 		LLMRuntime:     noopLLMRuntime{},
-	})
+	}})
+
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
@@ -221,7 +226,7 @@ func TestRuntimeStart_AllowsRecoveryDisabledWithNonReplayEventStore(t *testing.T
 
 func TestNewRuntime_FailsClosedOnMalformedExtensionConfig(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
-	rt, err := NewRuntime(context.Background(), &config.Config{
+	rt, err := NewRuntime(context.Background(), RuntimeDeps{Config: &config.Config{
 		Runtime: config.RuntimeConfig{RecoveryOnStartup: false},
 		LLM:     config.LLMConfig{RuntimeMode: "api"},
 		Extensions: map[string]any{
@@ -229,13 +234,14 @@ func TestNewRuntime_FailsClosedOnMalformedExtensionConfig(t *testing.T) {
 				"human_tasks": "oops",
 			},
 		},
-	}, Stores{
+	}, Stores: Stores{
 		EventStore: runtimebus.InMemoryEventStore{},
-	}, RuntimeOptions{
+	}, Options: RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,
 		LLMRuntime:     noopLLMRuntime{},
-	})
+	}})
+
 	if err == nil || !strings.Contains(err.Error(), "runtime config validation failed") || !strings.Contains(err.Error(), "decode extensions") {
 		t.Fatalf("NewRuntime error = %v, want explicit extension validation failure", err)
 	}

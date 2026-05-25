@@ -180,7 +180,7 @@ func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHar
 		t.Fatalf("seed catalog runtime run: %v", err)
 	}
 
-	rt, err := runtime.NewRuntime(ctx, cfg, runtime.Stores{
+	rt, err := runtime.NewRuntime(ctx, runtime.RuntimeDeps{Config: cfg, Stores: runtime.Stores{
 		SQLDB:               db,
 		EventStore:          pg,
 		SessionRegistry:     sessions.NewPostgresRegistry(db, cfg.LLM.Session.LockTTL),
@@ -191,11 +191,12 @@ func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHar
 		RuntimeIngressStore: pg,
 		ConversationStore:   nil,
 		TurnStore:           nil,
-	}, runtime.RuntimeOptions{
+	}, Options: runtime.RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,
 		LLMRuntime:     llmRuntime,
-	})
+	}})
+
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"swarm/internal/config"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
@@ -79,6 +80,86 @@ func TestEnsureWorkflowBootWiring_RejectsTouchedValidationDriftThroughSharedPath
 				t.Fatalf("ensureWorkflowBootWiring error = %v, want nil", err)
 			}
 		})
+	}
+}
+
+func TestRuntimeDepsValidateOwnsRequiredBootInputs(t *testing.T) {
+	t.Setenv("SWARM_EMIT_SCHEMA_STRICT", "true")
+	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
+	validModule := semanticOnlyWorkflowRuntime{source: semanticview.Wrap(testRuntimeWorkflowValidationBundle())}
+
+	cases := []struct {
+		name        string
+		deps        RuntimeDeps
+		errContains string
+	}{
+		{
+			name:        "nil config",
+			deps:        RuntimeDeps{Options: RuntimeOptions{WorkflowModule: validModule}},
+			errContains: "runtime config is required",
+		},
+		{
+			name:        "missing workflow module",
+			deps:        RuntimeDeps{Config: &config.Config{}},
+			errContains: "workflow contract validation failed: workflow module is required",
+		},
+		{
+			name: "valid dependency graph",
+			deps: RuntimeDeps{
+				Config:  &config.Config{},
+				Options: RuntimeOptions{WorkflowModule: validModule},
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.deps.Validate()
+			if tc.errContains != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.errContains) {
+					t.Fatalf("RuntimeDeps.Validate error = %v, want substring %q", err, tc.errContains)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("RuntimeDeps.Validate: %v", err)
+			}
+		})
+	}
+}
+
+func TestRuntimeDepsValidatedDerivesCanonicalBootGraph(t *testing.T) {
+	t.Setenv("SWARM_EMIT_SCHEMA_STRICT", "true")
+	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
+	module := semanticOnlyWorkflowRuntime{source: semanticview.Wrap(testRuntimeWorkflowValidationBundle())}
+
+	boot, err := (RuntimeDeps{
+		Config: &config.Config{},
+		Options: RuntimeOptions{
+			WorkflowModule:    module,
+			BundleFingerprint: "  fingerprint-1  ",
+		},
+	}).validated()
+	if err != nil {
+		t.Fatalf("RuntimeDeps.validated: %v", err)
+	}
+	if boot.Source == nil {
+		t.Fatal("validated RuntimeDeps Source = nil")
+	}
+	if boot.PromptResolver == nil {
+		t.Fatal("validated RuntimeDeps PromptResolver = nil")
+	}
+	if boot.Credentials == nil {
+		t.Fatal("validated RuntimeDeps Credentials = nil")
+	}
+	if boot.Authority == nil {
+		t.Fatal("validated RuntimeDeps Authority = nil")
+	}
+	if boot.EmitRegistry == nil {
+		t.Fatal("validated RuntimeDeps EmitRegistry = nil")
+	}
+	if boot.TrimmedBundleFingerprint != "fingerprint-1" {
+		t.Fatalf("TrimmedBundleFingerprint = %q, want fingerprint-1", boot.TrimmedBundleFingerprint)
 	}
 }
 

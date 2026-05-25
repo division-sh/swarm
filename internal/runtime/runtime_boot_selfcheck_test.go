@@ -59,13 +59,14 @@ func TestRuntimeStart_SelfCheckUsesInternalSubscriberVisibility(t *testing.T) {
 	store := &bootSelfCheckDescriptorStore{
 		descriptors: []runtimebus.ActiveAgentDescriptor{{AgentID: "agent-a"}},
 	}
-	rt, err := NewRuntime(context.Background(), testOperationalRuntimeConfig(), Stores{
+	rt, err := NewRuntime(context.Background(), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
 		EventStore: store,
-	}, RuntimeOptions{
+	}, Options: RuntimeOptions{
 		SelfCheck:      true,
 		WorkflowModule: module,
 		LLMRuntime:     noopLLMRuntime{},
-	})
+	}})
+
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
@@ -86,9 +87,9 @@ func TestRuntimeStart_PlatformBootPayloadCarriesBootDecisionSummary(t *testing.T
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	store := &bootSelfCheckDescriptorStore{}
 	progress := []BootProgressEvent{}
-	rt, err := NewRuntime(context.Background(), testOperationalRuntimeConfig(), Stores{
+	rt, err := NewRuntime(context.Background(), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
 		EventStore: store,
-	}, RuntimeOptions{
+	}, Options: RuntimeOptions{
 		SelfCheck:         true,
 		WorkflowModule:    module,
 		LLMRuntime:        noopLLMRuntime{},
@@ -98,7 +99,8 @@ func TestRuntimeStart_PlatformBootPayloadCarriesBootDecisionSummary(t *testing.T
 		BootProgress: func(evt BootProgressEvent) {
 			progress = append(progress, evt)
 		},
-	})
+	}})
+
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
