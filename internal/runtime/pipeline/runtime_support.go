@@ -311,6 +311,10 @@ func withoutSQLTxContext(ctx context.Context) context.Context {
 	return context.WithValue(ctx, sqlTxContextKey{}, (*sql.Tx)(nil))
 }
 
+func WithoutPipelineSQLTxContext(ctx context.Context) context.Context {
+	return withoutSQLTxContext(ctx)
+}
+
 func withPipelinePostCommitActions(ctx context.Context, actions *[]func()) context.Context {
 	if actions == nil {
 		return ctx

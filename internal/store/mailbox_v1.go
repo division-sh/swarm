@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"swarm/internal/events"
+	runtimepipeline "swarm/internal/runtime/pipeline"
 	runtimereplayclaim "swarm/internal/runtime/replayclaim"
 )
 
@@ -271,6 +272,8 @@ func (s *PostgresStore) DecideV1MailboxItem(ctx context.Context, input MailboxV1
 	if err != nil {
 		return MailboxV1DecisionOutcome{}, fmt.Errorf("begin v1 mailbox decision tx: %w", err)
 	}
+	postCommitActions := make([]func(), 0, 4)
+	txctx := runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommitActions)
 	committed := false
 	defer func() {
 		if !committed {
@@ -401,7 +404,7 @@ func (s *PostgresStore) DecideV1MailboxItem(ctx context.Context, input MailboxV1
 		if publishTx == nil {
 			publishTx = s.appendMailboxV1ApprovalEventTx
 		}
-		if err := publishTx(ctx, tx, *outcome.ApprovalEvent); err != nil {
+		if err := publishTx(txctx, tx, *outcome.ApprovalEvent); err != nil {
 			return MailboxV1DecisionOutcome{}, fmt.Errorf("publish v1 mailbox approval event: %w", err)
 		}
 	}
@@ -421,6 +424,7 @@ func (s *PostgresStore) DecideV1MailboxItem(ctx context.Context, input MailboxV1
 		return MailboxV1DecisionOutcome{}, fmt.Errorf("commit v1 mailbox decision tx: %w", err)
 	}
 	committed = true
+	runtimepipeline.FlushPipelinePostCommitActions(postCommitActions)
 	return outcome, nil
 }
 

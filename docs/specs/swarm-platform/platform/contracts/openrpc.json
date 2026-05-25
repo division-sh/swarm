@@ -3248,7 +3248,7 @@
     },
     {
       "name": "mailbox.approve",
-      "description": "Approve a pending mailbox item. Triggers the downstream event configured for the item's type by api_specification.conventions.mailbox.approval_event_routes.",
+      "description": "Approve a pending mailbox item. Triggers the downstream event configured for the item's type by api_specification.conventions.mailbox.approval_event_routes.\nThe mailbox row decision, `mailbox.item_decided` event persistence, delivery/replay-scope evidence, and API idempotency completion commit atomically. Downstream subscriber/interceptor/runtime work from the transactional approval publish runs only after that decision transaction commits, or remains queued while ingress is paused.\n",
       "params": [
         {
           "name": "mailbox_id",

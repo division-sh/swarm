@@ -338,21 +338,62 @@ func (eb *EventBus) PublishTx(ctx context.Context, tx *sql.Tx, evt events.Event)
 		eb.logDispatchQueued(txctx, reason, evt, len(inboundPlan.Recipients), false, true)
 		return nil
 	}
-	passthrough, deferred, err := eb.runInterceptors(txctx, evt)
-	if err != nil {
-		return err
-	}
-	if !passthrough {
-		return errors.New("transactional publish interceptors cannot consume v1 API events")
-	}
-	if len(deferred) > 0 {
-		return errors.New("transactional publish interceptors cannot defer v1 API events")
-	}
-	status, errText := pipelineReceiptStatus(txctx, nil)
-	if err := txStore.UpsertPipelineReceiptTx(txctx, tx, evt.ID, status, errText); err != nil {
-		return fmt.Errorf("persist pipeline receipt: %w", err)
+	if !runtimepipeline.QueuePipelinePostCommitAction(txctx, func() {
+		eb.completePublishTxDispatch(runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(txctx)), evt, inboundPlan)
+	}) {
+		return errors.New("transactional publish post-commit actions are required")
 	}
 	return nil
+}
+
+func (eb *EventBus) completePublishTxDispatch(ctx context.Context, evt events.Event, inboundPlan eventDeliveryPlan) {
+	deferredTransitions := make([]runtimepipeline.DeferredPipelineTransition, 0, 8)
+	postCommitActions := make([]func(), 0, 8)
+	afterPublishActions := make([]func(), 0, 4)
+	receiptOverride := &runtimepipeline.PipelineReceiptOverride{}
+	ctx = runtimepipeline.WithPipelineTransitionCollector(ctx, &deferredTransitions, eb.pipelineTransitionCapability())
+	ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommitActions)
+	ctx = runtimepipeline.WithPipelineAfterPublishActions(ctx, &afterPublishActions)
+	ctx = runtimepipeline.WithPipelineReceiptOverride(ctx, receiptOverride)
+	defer runtimepipeline.FlushPipelineAfterPublishActions(afterPublishActions)
+
+	passthrough, deferred, err := eb.runInterceptors(ctx, evt)
+	if err != nil {
+		eb.recordCommittedPublishReceipt(ctx, evt, err)
+		return
+	}
+	runtimepipeline.FlushPipelinePostCommitActions(postCommitActions)
+	runtimepipeline.FlushDeferredPipelineTransitions(ctx, deferredTransitions)
+
+	if passthrough {
+		if len(inboundPlan.Recipients) > 0 {
+			eb.logQueuedDeliveries(ctx, evt, inboundPlan.PersistedRecipients, "matched_agent_subscription", inboundPlan.ExtraDetail)
+			if err := eb.deliverToRecipientsWithRoutes(ctx, evt, inboundPlan.Recipients, inboundPlan.DeliveryRoutes); err != nil {
+				eb.recordCommittedPublishReceipt(ctx, evt, err)
+				return
+			}
+			eb.logDelivery(ctx, evt, inboundPlan.Recipients, inboundPlan.ExtraDetail)
+		}
+		if inboundPlan.BlockedByCycle && inboundPlan.CycleEscalation != nil {
+			if err := eb.publishDeferred(ctx, *inboundPlan.CycleEscalation); err != nil {
+				eb.recordCommittedPublishReceipt(ctx, evt, err)
+				return
+			}
+		}
+		if strings.TrimSpace(inboundPlan.ContradictionReason) != "" {
+			_ = eb.emitContradiction(ctx, evt, inboundPlan.ContradictionReason)
+		}
+	}
+	eb.logPublished(ctx, evt, 0)
+
+	for _, d := range deferred {
+		if err := eb.publishDeferred(ctx, d); err != nil {
+			eb.recordCommittedPublishReceipt(ctx, evt, err)
+			return
+		}
+	}
+	eb.recordCommittedPublishReceipt(ctx, evt, nil)
+	eb.recordCommittedPublishConvergence(ctx, evt)
 }
 
 func (eb *EventBus) withBundleFingerprint(ctx context.Context) context.Context {
