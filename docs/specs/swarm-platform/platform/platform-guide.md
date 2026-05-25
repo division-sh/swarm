@@ -643,6 +643,7 @@ The most important checks to recognize:
 - `state_machine_coherence` — verify state transitions make sense.
 - `required_agents_match` — verify agent roles are fulfilled.
 - `handler_field_compliance` — verify handler fields and supported handler action declarations match the platform handler contract.
+- `tool_resolution`, `platform_tool_usage_hints`, `generated_tool_schema_closure` — verify agent tool references resolve through the merged runtime registry and that platform-owned/generated tool surfaces have provider-facing usage guidance and closed schemas.
 - `single_node_per_event` — verify each event is handled by at most one system node.
 - `event_cycle_detection` — verify no infinite event loops.
 

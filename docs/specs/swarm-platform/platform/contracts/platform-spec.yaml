@@ -120,9 +120,10 @@ spec_authority:
       authority_language_risk: false
       disposition: Candidate design context only unless exact timer typing semantics are promoted here.
     - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.tool-usage-hints.yaml
-      classification: promote_commit_needed
+      classification: already_promoted
       authority_language_risk: true
-      disposition: Tool-usage hint semantics are not merge-bearing until promoted into this file with matching implementation.
+      disposition: Tool-usage hint semantics are promoted into engine.boot_verification.checks and engine.agent_tool_filtering;
+        the review draft is evidence only.
     - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.user-facing-rpc-api.yaml
       classification: stale_header_repair
       authority_language_risk: true
@@ -2729,8 +2730,21 @@ engine:
     - id: tool_resolution
       severity: warning
       scope: per-agent
-      trigger: An agent's tools list references a tool name that does not exist in the merged tool registry (tools.yaml +
-        MCP server catalogs).
+      trigger: An agent's tools list references a tool name that does not exist in the merged runtime tool registry
+        (platform builtin tools, authored tools.yaml/http tools, and MCP server catalogs).
+      when: boot-only
+    - id: platform_tool_usage_hints
+      severity: hard_invalidity
+      scope: per-tool
+      trigger: A platform-owned delivered tool or generated emit tool lacks the shared provider-facing usage hint, the
+        generated emit usage hint instructs CEL/expression arguments instead of concrete payload values, or a delivered
+        tool usage hint exceeds the provider-facing lint limit.
+      when: boot-only
+    - id: generated_tool_schema_closure
+      severity: hard_invalidity
+      scope: per-tool
+      trigger: A generated platform-owned emit/entity tool schema is not provider-closed, omits declared required properties,
+        requires undeclared properties, declares an empty enum, or cannot be lowered to the provider JSON Schema contract.
       when: boot-only
     - id: prompt_exists
       severity: warning
@@ -3228,6 +3242,12 @@ tool_model:
     rule: When constructing an agent session, the platform resolves tools entries against the merged tool registry
       (platform_builtin + mcp + http). Only resolved tools are included in the LLM tool definitions. Unresolvable entries
       log a warning per the tool_resolution boot check.
+    usage_hints: Provider-facing tool definitions for platform-owned delivered tools and generated emit tools MUST include
+      the shared platform usage guidance. Generated emit tool usage guidance MUST describe concrete JSON payload arguments,
+      not CEL or workflow expression arguments. Boot verification reports this through platform_tool_usage_hints.
+    generated_schema_closure: Generated platform-owned emit/entity tool schemas MUST be recursively closed, require every
+      declared property, reject undeclared required properties, and declare non-empty enums. Boot verification and workflow
+      validation report this through generated_tool_schema_closure and consume the shared runtime tool-schema owner.
     universal_tools: 'The following tools are included in every agent session without listing in tools: agent_message
       and mailbox_send. Emit tools (emit_{event_name}) are auto-generated from emit_events. Neither universal communication
       tools nor emit tools require explicit tools entry.'

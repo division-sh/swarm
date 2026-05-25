@@ -176,6 +176,43 @@ func TestRun_MapsMissingContractMCPToolToToolResolutionWarning(t *testing.T) {
 	}
 }
 
+func TestRun_MapsPlatformToolUsageHintCoverageToBootCheck(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{
+			"custom_platform_tool": {HandlerType: "platform_builtin"},
+		},
+	})
+
+	report := Run(context.Background(), source, Options{})
+
+	if !reportContains(report.Errors(), "platform_tool_usage_hints", "custom_platform_tool") {
+		t.Fatalf("expected platform_tool_usage_hints hard invalidity, got %#v", report.Errors())
+	}
+}
+
+func TestRun_MapsGeneratedToolSchemaClosureToBootCheck(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"agent-1": {ID: "agent-1", Role: "agent", EmitEvents: []string{"ready.event"}},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"ready.event": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"unsupported": {Type: "NotDeclared"},
+					},
+				},
+			},
+		},
+	})
+
+	report := Run(context.Background(), source, Options{})
+
+	if !reportContains(report.Errors(), "generated_tool_schema_closure", "NotDeclared") {
+		t.Fatalf("expected generated_tool_schema_closure hard invalidity, got %#v", report.Errors())
+	}
+}
+
 func TestRun_MapsEventNoSchemaToEventChainIntegrityWarning(t *testing.T) {
 	source := loadTier8Fixture(t, "test-boot-event-no-schema")
 
