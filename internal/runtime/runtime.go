@@ -73,6 +73,27 @@ type RuntimeOptions struct {
 	SystemContainers   []string
 }
 
+// RuntimeDeps is the canonical dependency graph for NewRuntime boot wiring.
+type RuntimeDeps struct {
+	Config  *config.Config
+	Stores  Stores
+	Options RuntimeOptions
+}
+
+type validatedRuntimeDeps struct {
+	Config                   *config.Config
+	Stores                   Stores
+	Options                  RuntimeOptions
+	Source                   semanticview.Source
+	PromptResolver           runtimecontracts.PromptResolver
+	Credentials              runtimecredentials.Store
+	Authority                runtimeauthority.Provider
+	EmitRegistry             *runtimetools.EmitRegistry
+	RuntimeLogCapabilities   runtimeLogCapabilityResolver
+	EventReceiptCapability   func(context.Context) (bool, error)
+	TrimmedBundleFingerprint string
+}
+
 const BootProgressTotalSteps = 22
 const DefaultShutdownGrace = runtimemanager.DefaultShutdownGrace
 
@@ -249,27 +270,80 @@ func newRuntimePromptResolver(source semanticview.Source) (runtimecontracts.Prom
 	return runtimecontracts.NewBundlePromptResolver(bundle), nil
 }
 
-func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts RuntimeOptions) (*Runtime, error) {
+// Validate checks the NewRuntime boot dependency graph without constructing a runtime.
+func (deps RuntimeDeps) Validate() error {
+	_, err := deps.validated()
+	return err
+}
+
+func (deps RuntimeDeps) validated() (validatedRuntimeDeps, error) {
+	cfg := deps.Config
+	stores := deps.Stores
+	opts := deps.Options
 	if cfg == nil {
-		return nil, fmt.Errorf("runtime config is required")
+		return validatedRuntimeDeps{}, fmt.Errorf("runtime config is required")
 	}
 	if err := cfg.ValidateExtensions(); err != nil {
-		return nil, fmt.Errorf("runtime config validation failed: %w", err)
+		return validatedRuntimeDeps{}, fmt.Errorf("runtime config validation failed: %w", err)
 	}
 	if err := ensureWorkflowBootWiring(opts); err != nil {
-		return nil, fmt.Errorf("workflow contract validation failed: %w", err)
+		return validatedRuntimeDeps{}, fmt.Errorf("workflow contract validation failed: %w", err)
 	}
 	source := opts.WorkflowModule.SemanticSource()
 	if err := validateClaudeStartupConfig(cfg, opts, source); err != nil {
-		return nil, fmt.Errorf("claude runtime startup validation failed: %w", err)
+		return validatedRuntimeDeps{}, fmt.Errorf("claude runtime startup validation failed: %w", err)
 	}
 	promptResolver, err := newRuntimePromptResolver(source)
 	if err != nil {
-		return nil, fmt.Errorf("build prompt resolver: %w", err)
+		return validatedRuntimeDeps{}, fmt.Errorf("build prompt resolver: %w", err)
 	}
-	mcpTurns := runtimemcp.NewTurnContextRegistry(runtimeactors.ActorFromContext)
 	authorityProvider := runtimeauthority.NewSourceProvider(source)
 	emitRegistry := runtimetools.NewEmitRegistry(source, authorityProvider)
+	credentials := opts.Credentials
+	if credentials == nil {
+		credentials = runtimecredentials.NewEnvStore()
+	}
+	return validatedRuntimeDeps{
+		Config:                   cfg,
+		Stores:                   stores,
+		Options:                  opts,
+		Source:                   source,
+		PromptResolver:           promptResolver,
+		Credentials:              credentials,
+		Authority:                authorityProvider,
+		EmitRegistry:             emitRegistry,
+		RuntimeLogCapabilities:   runtimeLogSchemaCapabilities(stores),
+		EventReceiptCapability:   canonicalEventReceiptCapabilities(stores),
+		TrimmedBundleFingerprint: strings.TrimSpace(opts.BundleFingerprint),
+	}, nil
+}
+
+func (deps validatedRuntimeDeps) payloadValidator(logger *RuntimeLogger) runtimebus.PayloadValidator {
+	return newRuntimePayloadValidator(logger, deps.EmitRegistry.EventSchemaSnapshot())
+}
+
+func (deps validatedRuntimeDeps) bindPayloadValidator(payloadValidator runtimebus.PayloadValidator) {
+	type eventPayloadValidationBinder interface {
+		SetEventPayloadValidator(func(eventType string, payload []byte) error)
+	}
+	if binder, ok := deps.Stores.EventStore.(eventPayloadValidationBinder); ok && binder != nil {
+		binder.SetEventPayloadValidator(payloadValidator)
+	}
+	if binder, ok := deps.Stores.InboundStore.(eventPayloadValidationBinder); ok && binder != nil {
+		binder.SetEventPayloadValidator(payloadValidator)
+	}
+}
+
+func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
+	boot, err := deps.validated()
+	if err != nil {
+		return nil, err
+	}
+	cfg := boot.Config
+	stores := boot.Stores
+	opts := boot.Options
+	source := boot.Source
+	mcpTurns := runtimemcp.NewTurnContextRegistry(runtimeactors.ActorFromContext)
 	rt := &Runtime{
 		ownerID:        newRuntimeOwnerID(),
 		Config:         cfg,
@@ -277,32 +351,18 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 		Options:        opts,
 		Workspace:      opts.WorkspaceLifecycle,
 		MCPTurns:       mcpTurns,
-		Authority:      authorityProvider,
-		EmitRegistry:   emitRegistry,
-		PromptResolver: promptResolver,
-	}
-	logCaps := runtimeLogSchemaCapabilities(stores)
-	receiptCaps := canonicalEventReceiptCapabilities(stores)
-	if opts.Credentials != nil {
-		rt.Credentials = opts.Credentials
-	} else {
-		rt.Credentials = runtimecredentials.NewEnvStore()
+		Authority:      boot.Authority,
+		EmitRegistry:   boot.EmitRegistry,
+		PromptResolver: boot.PromptResolver,
+		Credentials:    boot.Credentials,
 	}
 
 	if stores.SQLDB != nil {
-		rt.Logger = NewRuntimeLogger(stores.SQLDB, logCaps)
+		rt.Logger = NewRuntimeLogger(stores.SQLDB, boot.RuntimeLogCapabilities)
 	}
-	payloadValidator := newRuntimePayloadValidator(rt.Logger, emitRegistry.EventSchemaSnapshot())
-	type eventPayloadValidationBinder interface {
-		SetEventPayloadValidator(func(eventType string, payload []byte) error)
-	}
-	if binder, ok := stores.EventStore.(eventPayloadValidationBinder); ok && binder != nil {
-		binder.SetEventPayloadValidator(payloadValidator)
-	}
-	if binder, ok := stores.InboundStore.(eventPayloadValidationBinder); ok && binder != nil {
-		binder.SetEventPayloadValidator(payloadValidator)
-	}
-	bus, err := newRuntimeEventBus(stores.EventStore, rt.Logger, source, strings.TrimSpace(opts.BundleFingerprint), func() []runtimebus.EventInterceptor {
+	payloadValidator := boot.payloadValidator(rt.Logger)
+	boot.bindPayloadValidator(payloadValidator)
+	bus, err := newRuntimeEventBus(stores.EventStore, rt.Logger, source, boot.TrimmedBundleFingerprint, func() []runtimebus.EventInterceptor {
 		if rt.Pipeline == nil {
 			return nil
 		}
@@ -370,7 +430,7 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 			},
 			TimerScheduler:          rt.Scheduler,
 			TimerScheduleStore:      stores.ScheduleStore,
-			EventReceiptsCapability: receiptCaps,
+			EventReceiptsCapability: boot.EventReceiptCapability,
 			ArtifactRoot:            artifactRoot,
 			BundleFingerprint:       opts.BundleFingerprint,
 		})

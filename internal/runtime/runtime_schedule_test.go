@@ -259,14 +259,15 @@ func TestNewRuntime_SchedulerMarksSchedulesFiredThroughCanonicalTerminalHelper(t
 		t.Fatalf("load bundle: %v", err)
 	}
 	store := &recordingRuntimeScheduleStore{fired: make(chan runtimepipeline.Schedule, 1)}
-	rt, err := NewRuntime(context.Background(), &config.Config{
+	rt, err := NewRuntime(context.Background(), RuntimeDeps{Config: &config.Config{
 		Runtime: config.RuntimeConfig{RecoveryOnStartup: true},
 		LLM:     config.LLMConfig{RuntimeMode: "api"},
-	}, Stores{ScheduleStore: store}, RuntimeOptions{
+	}, Stores: Stores{ScheduleStore: store}, Options: RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: semanticOnlyWorkflowRuntime{source: semanticview.Wrap(bundle)},
 		LLMRuntime:     noopLLMRuntime{},
-	})
+	}})
+
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
@@ -333,14 +334,15 @@ func TestRuntime_StartRestoresExactSchedulesDistinctByFlowInstance(t *testing.T)
 		},
 		fired: make(chan runtimepipeline.Schedule, 2),
 	}
-	rt, err := NewRuntime(context.Background(), &config.Config{
+	rt, err := NewRuntime(context.Background(), RuntimeDeps{Config: &config.Config{
 		Runtime: config.RuntimeConfig{RecoveryOnStartup: true},
 		LLM:     config.LLMConfig{RuntimeMode: "api"},
-	}, Stores{ScheduleStore: store}, RuntimeOptions{
+	}, Stores: Stores{ScheduleStore: store}, Options: RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: semanticOnlyWorkflowRuntime{source: semanticview.Wrap(bundle)},
 		LLMRuntime:     noopLLMRuntime{},
-	})
+	}})
+
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}

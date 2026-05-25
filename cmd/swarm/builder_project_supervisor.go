@@ -32,7 +32,7 @@ type runtimeProjectSupervisor struct {
 	validateSource   func(context.Context, semanticview.Source) error
 	initStateStores  func(context.Context, storeBundle, *runtimecontracts.WorkflowContractBundle) (string, error)
 	newWorkspaces    func(storeBundle, string, string, semanticview.Source) workspace.Lifecycle
-	createRuntime    func(context.Context, *config.Config, runtime.Stores, runtime.RuntimeOptions) (*runtime.Runtime, error)
+	createRuntime    func(context.Context, runtime.RuntimeDeps) (*runtime.Runtime, error)
 
 	mu            sync.RWMutex
 	currentRoot   string
@@ -74,8 +74,8 @@ func newRuntimeProjectSupervisor(
 		newWorkspaces: func(stores storeBundle, repoRoot, contractsRoot string, source semanticview.Source) workspace.Lifecycle {
 			return configuredWorkspaceLifecycle(stores.SQLDB, repoRoot, contractsRoot, source)
 		},
-		createRuntime: func(ctx context.Context, cfg *config.Config, stores runtime.Stores, opts runtime.RuntimeOptions) (*runtime.Runtime, error) {
-			return runtime.NewRuntime(ctx, cfg, stores, opts)
+		createRuntime: func(ctx context.Context, deps runtime.RuntimeDeps) (*runtime.Runtime, error) {
+			return runtime.NewRuntime(ctx, deps)
 		},
 		currentRoot:   strings.TrimSpace(initialRoot),
 		currentSource: initialSource,
@@ -166,11 +166,15 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 		return builderpkg.ProjectStatus{}, err
 	}
 
-	newRT, err := s.createRuntime(ctx, s.cfg, s.stores.runtimeStores(), runtime.RuntimeOptions{
-		SelfCheck:          false,
-		WorkflowModule:     module,
-		WorkspaceLifecycle: workspaces,
-		BundleFingerprint:  bundleIdentity.Fingerprint,
+	newRT, err := s.createRuntime(ctx, runtime.RuntimeDeps{
+		Config: s.cfg,
+		Stores: s.stores.runtimeStores(),
+		Options: runtime.RuntimeOptions{
+			SelfCheck:          false,
+			WorkflowModule:     module,
+			WorkspaceLifecycle: workspaces,
+			BundleFingerprint:  bundleIdentity.Fingerprint,
+		},
 	})
 	if err != nil {
 		return builderpkg.ProjectStatus{}, err

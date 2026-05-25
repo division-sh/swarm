@@ -364,16 +364,17 @@ func TestRuntimeStart_RecoveryDisabledEmitsDeniedDecisionForActiveSchedules(t *t
 		}},
 	}
 
-	rt, err := NewRuntime(ctx, testRecoveryDiagnosticsConfig(false), Stores{
+	rt, err := NewRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(false), Stores: Stores{
 		SQLDB:         db,
 		EventStore:    startupRecoveryCapabilityEventStore{},
 		ManagerStore:  &recoveryGuardManagerStore{},
 		ScheduleStore: scheduleStore,
-	}, RuntimeOptions{
+	}, Options: RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,
 		LLMRuntime:     noopLLMRuntime{},
-	})
+	}})
+
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
@@ -421,15 +422,16 @@ func TestRuntimeStart_RecoveryDisabledAllowsAndLogsManagerSnapshotWork(t *testin
 		}},
 	}
 
-	rt, err := NewRuntime(ctx, testRecoveryDiagnosticsConfig(false), Stores{
+	rt, err := NewRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(false), Stores: Stores{
 		SQLDB:        db,
 		EventStore:   eventStore,
 		ManagerStore: managerStore,
-	}, RuntimeOptions{
+	}, Options: RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,
 		LLMRuntime:     noopLLMRuntime{},
-	})
+	}})
+
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
@@ -495,16 +497,17 @@ func TestRuntimeStart_RecoveryEnabledEmitsAllowedDecisionSummary(t *testing.T) {
 		}},
 	}
 
-	rt, err := NewRuntime(ctx, testRecoveryDiagnosticsConfig(true), Stores{
+	rt, err := NewRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
 		SQLDB:         db,
 		EventStore:    startupRecoveryCapabilityEventStore{},
 		ManagerStore:  &recoveryGuardManagerStore{},
 		ScheduleStore: scheduleStore,
-	}, RuntimeOptions{
+	}, Options: RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,
 		LLMRuntime:     noopLLMRuntime{},
-	})
+	}})
+
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
@@ -581,16 +584,17 @@ func TestRuntimeStart_RecoveryEnabledEmitsTimerRecoveryAftermathAndSummary(t *te
 		},
 	}
 
-	rt, err := NewRuntime(ctx, testRecoveryDiagnosticsConfig(true), Stores{
+	rt, err := NewRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
 		SQLDB:         db,
 		EventStore:    startupRecoveryCapabilityEventStore{},
 		ManagerStore:  &recoveryGuardManagerStore{},
 		ScheduleStore: scheduleStore,
-	}, RuntimeOptions{
+	}, Options: RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,
 		LLMRuntime:     noopLLMRuntime{},
-	})
+	}})
+
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
@@ -705,15 +709,16 @@ func TestRuntimeStart_RecoveryEnabledEmitsManagerReplayAftermathAndSummary(t *te
 		},
 	}
 
-	rt, err := NewRuntime(ctx, testRecoveryDiagnosticsConfig(true), Stores{
+	rt, err := NewRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
 		SQLDB:        db,
 		EventStore:   startupRecoveryCapabilityEventStore{},
 		ManagerStore: managerStore,
-	}, RuntimeOptions{
+	}, Options: RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,
 		LLMRuntime:     noopLLMRuntime{},
-	})
+	}})
+
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
@@ -803,15 +808,16 @@ func TestRuntimeStart_RecoveryFailureEmitsDegradedDecisionSummary(t *testing.T) 
 		claimErr: errors.New("claim failed"),
 	}
 
-	rt, err := NewRuntime(ctx, testRecoveryDiagnosticsConfig(true), Stores{
+	rt, err := NewRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
 		SQLDB:        db,
 		EventStore:   eventStore,
 		ManagerStore: &recoveryGuardManagerStore{},
-	}, RuntimeOptions{
+	}, Options: RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,
 		LLMRuntime:     noopLLMRuntime{},
-	})
+	}})
+
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
@@ -852,15 +858,16 @@ func TestRuntimeStart_RecoveryInspectionFailureDoesNotBlockRecoveryEnabledStartu
 	defer cleanup()
 	module := loadRuntimeOwnershipWorkflowModule(t)
 
-	rt, err := NewRuntime(ctx, testRecoveryDiagnosticsConfig(true), Stores{
+	rt, err := NewRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
 		SQLDB:        db,
 		EventStore:   startupRecoveryCapabilityEventStore{},
 		ManagerStore: startupRecoveryManagerStore{loadErr: errors.New("load agents failed")},
-	}, RuntimeOptions{
+	}, Options: RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,
 		LLMRuntime:     noopLLMRuntime{},
-	})
+	}})
+
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
@@ -929,16 +936,17 @@ func TestRuntimeStart_InspectionFailurePreservesDecisionErrorAcrossTimerSkipAndD
 		loadErr:           errors.New("load agents failed"),
 	}
 
-	rt, err := NewRuntime(ctx, testRecoveryDiagnosticsConfig(true), Stores{
+	rt, err := NewRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
 		SQLDB:         db,
 		EventStore:    startupRecoveryCapabilityEventStore{},
 		ManagerStore:  managerStore,
 		ScheduleStore: scheduleStore,
-	}, RuntimeOptions{
+	}, Options: RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,
 		LLMRuntime:     noopLLMRuntime{},
-	})
+	}})
+
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}

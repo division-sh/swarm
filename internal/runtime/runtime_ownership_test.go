@@ -37,17 +37,18 @@ func (f *fakeRuntimeStartupOwnershipLease) Release(context.Context) error {
 func TestRuntimeStart_FailsWhenSharedStoreOwnershipAlreadyHeld(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
 
-	rt1, err := NewRuntime(context.Background(), &config.Config{}, Stores{
+	rt1, err := NewRuntime(context.Background(), RuntimeDeps{Config: &config.Config{}, Stores: Stores{
 		StartupOwnership: fakeRuntimeStartupOwnershipStore{
 			acquire: func(context.Context, string) (runtimestartupownership.Lease, error) {
 				return &fakeRuntimeStartupOwnershipLease{}, nil
 			},
 		},
-	}, RuntimeOptions{
+	}, Options: RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,
 		LLMRuntime:     noopLLMRuntime{},
-	})
+	}})
+
 	if err != nil {
 		t.Fatalf("NewRuntime(rt1): %v", err)
 	}
@@ -56,17 +57,18 @@ func TestRuntimeStart_FailsWhenSharedStoreOwnershipAlreadyHeld(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = rt1.Shutdown() })
 
-	rt2, err := NewRuntime(context.Background(), &config.Config{}, Stores{
+	rt2, err := NewRuntime(context.Background(), RuntimeDeps{Config: &config.Config{}, Stores: Stores{
 		StartupOwnership: fakeRuntimeStartupOwnershipStore{
 			acquire: func(context.Context, string) (runtimestartupownership.Lease, error) {
 				return nil, fmt.Errorf("shared runtime store already owned by another runtime instance")
 			},
 		},
-	}, RuntimeOptions{
+	}, Options: RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,
 		LLMRuntime:     noopLLMRuntime{},
-	})
+	}})
+
 	if err != nil {
 		t.Fatalf("NewRuntime(rt2): %v", err)
 	}
@@ -83,17 +85,18 @@ func TestRuntimeShutdown_ReleasesSharedStoreOwnership(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	lease := &fakeRuntimeStartupOwnershipLease{}
 
-	rt1, err := NewRuntime(context.Background(), &config.Config{}, Stores{
+	rt1, err := NewRuntime(context.Background(), RuntimeDeps{Config: &config.Config{}, Stores: Stores{
 		StartupOwnership: fakeRuntimeStartupOwnershipStore{
 			acquire: func(context.Context, string) (runtimestartupownership.Lease, error) {
 				return lease, nil
 			},
 		},
-	}, RuntimeOptions{
+	}, Options: RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,
 		LLMRuntime:     noopLLMRuntime{},
-	})
+	}})
+
 	if err != nil {
 		t.Fatalf("NewRuntime(rt1): %v", err)
 	}
@@ -107,17 +110,18 @@ func TestRuntimeShutdown_ReleasesSharedStoreOwnership(t *testing.T) {
 		t.Fatalf("startup ownership lease release count = %d, want 1", got)
 	}
 
-	rt2, err := NewRuntime(context.Background(), &config.Config{}, Stores{
+	rt2, err := NewRuntime(context.Background(), RuntimeDeps{Config: &config.Config{}, Stores: Stores{
 		StartupOwnership: fakeRuntimeStartupOwnershipStore{
 			acquire: func(context.Context, string) (runtimestartupownership.Lease, error) {
 				return &fakeRuntimeStartupOwnershipLease{}, nil
 			},
 		},
-	}, RuntimeOptions{
+	}, Options: RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,
 		LLMRuntime:     noopLLMRuntime{},
-	})
+	}})
+
 	if err != nil {
 		t.Fatalf("NewRuntime(rt2): %v", err)
 	}

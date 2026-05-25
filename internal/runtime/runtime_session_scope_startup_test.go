@@ -25,11 +25,12 @@ func TestRuntimeStart_SoleParentFlowPackageAgentsCarryCanonicalFlowPath(t *testi
 
 func assertRuntimeStartCarriesFlowPath(t *testing.T, source semanticview.Source) {
 	t.Helper()
-	rt, err := NewRuntime(context.Background(), &config.Config{}, Stores{}, RuntimeOptions{
+	rt, err := NewRuntime(context.Background(), RuntimeDeps{Config: &config.Config{}, Stores: Stores{}, Options: RuntimeOptions{
 		SelfCheck:      false,
 		LLMRuntime:     noopLLMRuntime{},
 		WorkflowModule: semanticOnlyWorkflowRuntime{source: source},
-	})
+	}})
+
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}

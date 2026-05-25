@@ -29,11 +29,12 @@ func TestRuntimeStart_AgentFreeCLITestDoesNotRequireClaudeStartupEnv(t *testing.
 		t.Fatalf("agent-free fixture has %d semantic agents", got)
 	}
 
-	rt, err := NewRuntime(context.Background(), cfg, Stores{}, RuntimeOptions{
+	rt, err := NewRuntime(context.Background(), RuntimeDeps{Config: cfg, Stores: Stores{}, Options: RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,
 		LLMRuntime:     noopLLMRuntime{},
-	})
+	}})
+
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
@@ -57,11 +58,12 @@ func TestNewRuntime_AgentPresentCLITestStillRequiresClaudeStartupEnv(t *testing.
 		t.Fatal("agent-present fixture unexpectedly has zero semantic agents")
 	}
 
-	_, err := NewRuntime(context.Background(), cfg, Stores{}, RuntimeOptions{
+	_, err := NewRuntime(context.Background(), RuntimeDeps{Config: cfg, Stores: Stores{}, Options: RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,
 		LLMRuntime:     noopLLMRuntime{},
-	})
+	}})
+
 	if err == nil {
 		t.Fatal("expected agent-present cli_test runtime to require Claude startup env")
 	}
@@ -79,7 +81,7 @@ func TestRuntimeStart_ActiveManagerAgentRequiresFullClaudeStartupEnv(t *testing.
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "gateway-token")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 
-	rt, err := NewRuntime(context.Background(), cfg, Stores{}, RuntimeOptions{
+	rt, err := NewRuntime(context.Background(), RuntimeDeps{Config: cfg, Stores: Stores{}, Options: RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: loadAgentFreeRuntimeWorkflowModule(t),
 		LLMRuntime:     noopLLMRuntime{},
@@ -88,7 +90,8 @@ func TestRuntimeStart_ActiveManagerAgentRequiresFullClaudeStartupEnv(t *testing.
 		},
 		EnableToolGateway: true,
 		ToolGatewayToken:  "gateway-token",
-	})
+	}})
+
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}

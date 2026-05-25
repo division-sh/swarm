@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"swarm/internal/config"
 	"swarm/internal/events"
 	runtimepkg "swarm/internal/runtime"
 	runtimeagentcontrol "swarm/internal/runtime/agentcontrol"
@@ -195,7 +194,7 @@ func newSupervisorForLoadProjectFailureTest(
 	t *testing.T,
 	projectRoot string,
 	lifecycle workspace.Lifecycle,
-	createRuntime func(context.Context, *config.Config, runtimepkg.Stores, runtimepkg.RuntimeOptions) (*runtimepkg.Runtime, error),
+	createRuntime func(context.Context, runtimepkg.RuntimeDeps) (*runtimepkg.Runtime, error),
 ) *runtimeProjectSupervisor {
 	t.Helper()
 	bundle := testBuilderSupervisorBundle(t)
@@ -247,7 +246,7 @@ func TestRuntimeProjectSupervisorLoadProject_PropagatesWorkspaceAdmissionFailure
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			supervisor := newSupervisorForLoadProjectFailureTest(t, projectRoot, tc.lifecycle, func(context.Context, *config.Config, runtimepkg.Stores, runtimepkg.RuntimeOptions) (*runtimepkg.Runtime, error) {
+			supervisor := newSupervisorForLoadProjectFailureTest(t, projectRoot, tc.lifecycle, func(context.Context, runtimepkg.RuntimeDeps) (*runtimepkg.Runtime, error) {
 				t.Fatal("createRuntime should not be called when workspace admission fails")
 				return nil, nil
 			})
@@ -270,7 +269,7 @@ func TestRuntimeProjectSupervisorLoadProject_PropagatesRuntimeStartFailure(t *te
 	projectRoot := writeProjectRoot(t)
 	var ready atomic.Bool
 	oldRT := &runtimepkg.Runtime{}
-	supervisor := newSupervisorForLoadProjectFailureTest(t, projectRoot, stubWorkspaceLifecycle{}, func(context.Context, *config.Config, runtimepkg.Stores, runtimepkg.RuntimeOptions) (*runtimepkg.Runtime, error) {
+	supervisor := newSupervisorForLoadProjectFailureTest(t, projectRoot, stubWorkspaceLifecycle{}, func(context.Context, runtimepkg.RuntimeDeps) (*runtimepkg.Runtime, error) {
 		return &runtimepkg.Runtime{}, nil
 	})
 	supervisor.ready = &ready
@@ -307,8 +306,8 @@ func TestRuntimeProjectSupervisorLoadProject_PassesBundleFingerprintToRuntime(t 
 	}
 
 	var gotFingerprint string
-	supervisor := newSupervisorForLoadProjectFailureTest(t, projectRoot, stubWorkspaceLifecycle{}, func(_ context.Context, _ *config.Config, _ runtimepkg.Stores, opts runtimepkg.RuntimeOptions) (*runtimepkg.Runtime, error) {
-		gotFingerprint = opts.BundleFingerprint
+	supervisor := newSupervisorForLoadProjectFailureTest(t, projectRoot, stubWorkspaceLifecycle{}, func(_ context.Context, deps runtimepkg.RuntimeDeps) (*runtimepkg.Runtime, error) {
+		gotFingerprint = deps.Options.BundleFingerprint
 		return &runtimepkg.Runtime{}, nil
 	})
 	supervisor.startRuntime = func(context.Context, *runtimepkg.Runtime) error { return nil }
