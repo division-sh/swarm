@@ -428,6 +428,65 @@ func TestEventBusPublishTransactionalPostCommitReceiptFailureIsRecoverable(t *te
 	}
 }
 
+func TestEventBusPublishTransactionalPostCommitCompletionFailureIsRecoverable(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	ctx := eventBusTestRunContext(t, db)
+	pg := &store.PostgresStore{DB: db}
+	failing := &failNormalRunCompletionStore{
+		PostgresStore: pg,
+		err:           errors.New("simulated normal-run completion failure"),
+	}
+	logger := &recordingLoggerHook{}
+	eb, err := runtimebus.NewEventBusWithOptions(failing, runtimebus.EventBusOptions{Logger: logger})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+
+	agentID := "agent-post-commit-completion"
+	eventID := "21000000-0000-0000-0000-000000000021"
+	seedActiveRuntimeBusAgent(t, ctx, pg, agentID)
+	ch := eb.Subscribe(agentID, events.EventType("custom.completion_failure"))
+	defer eb.Unsubscribe(agentID)
+
+	if err := eb.Publish(ctx, events.Event{
+		ID:          eventID,
+		RunID:       eventBusTestRunID,
+		Type:        events.EventType("custom.completion_failure"),
+		SourceAgent: "api.v1",
+		Payload:     []byte(`{"entity_id":"21000000-0000-0000-0000-000000000022"}`),
+		CreatedAt:   time.Now().UTC(),
+	}.WithEntityID("21000000-0000-0000-0000-000000000022")); err != nil {
+		t.Fatalf("Publish with post-commit completion failure: %v", err)
+	}
+	ok, err := pg.EventExists(ctx, eventID)
+	if err != nil {
+		t.Fatalf("EventExists: %v", err)
+	}
+	if !ok {
+		t.Fatalf("event %s was not persisted", eventID)
+	}
+	if got := countEventDeliveriesForEvent(t, ctx, db, eventID); got != 1 {
+		t.Fatalf("event deliveries = %d, want 1", got)
+	}
+	outcome, errText := loadPipelineReceiptOutcomeAndError(t, ctx, db, eventID)
+	if outcome != "dead_letter" || !strings.Contains(errText, "simulated normal-run completion failure") {
+		t.Fatalf("pipeline receipt outcome=%q error=%q, want dead_letter with completion failure", outcome, errText)
+	}
+	if !hasRuntimeLogAction(logger.entries, "publish_post_commit_convergence_failed") {
+		t.Fatalf("logger entries = %#v, want publish_post_commit_convergence_failed", logger.entries)
+	}
+	select {
+	case got := <-ch:
+		if got.ID != eventID {
+			t.Fatalf("delivered event = %s, want %s", got.ID, eventID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for delivered event")
+	}
+}
+
 type failStandalonePipelineReceiptOnceStore struct {
 	*store.PostgresStore
 	err error
@@ -444,6 +503,30 @@ func (s *failStandalonePipelineReceiptOnceStore) UpsertPipelineReceiptTx(ctx con
 		return err
 	}
 	return s.PostgresStore.UpsertPipelineReceiptTx(ctx, tx, eventID, status, errText)
+}
+
+type failNormalRunCompletionStore struct {
+	*store.PostgresStore
+	err error
+}
+
+func (s *failNormalRunCompletionStore) ConvergeNormalRunCompletion(context.Context, string, []string, map[string][]string) error {
+	return s.err
+}
+
+func loadPipelineReceiptOutcomeAndError(t *testing.T, ctx context.Context, db *sql.DB, eventID string) (string, string) {
+	t.Helper()
+	var outcome, errText string
+	if err := db.QueryRowContext(ctx, `
+		SELECT outcome, COALESCE(side_effects->>'error', '')
+		FROM event_receipts
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'platform'
+		  AND subscriber_id = 'pipeline'
+	`, eventID).Scan(&outcome, &errText); err != nil {
+		t.Fatalf("load pipeline receipt for %s: %v", eventID, err)
+	}
+	return outcome, errText
 }
 
 func containsMissingPipelineReceiptEvent(items []events.PersistedReplayEvent, eventID string) bool {

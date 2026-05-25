@@ -219,6 +219,65 @@ func TestOperatorEventPublishPostCommitReceiptFailureReplaysWithoutDuplicate(t *
 	}
 }
 
+func TestOperatorEventPublishPostCommitCompletionFailureReplaysWithoutDuplicate(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	failing := &failNormalRunCompletionStore{
+		PostgresStore: pg,
+		err:           errors.New("simulated normal-run completion failure"),
+	}
+	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+	bus, err := runtimebus.NewEventBusWithOptions(failing, runtimebus.EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	ctx := context.Background()
+	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "scan-orchestrator")
+	ch := bus.Subscribe("scan-orchestrator", events.EventType("scan.requested"))
+	defer bus.Unsubscribe("scan-orchestrator")
+	handler := eventPublishTestHandlerWithStores(t, failing, failing, failing, bus, source)
+	body := eventPublishBody("", runStartTestFingerprint, "scan.requested", `{"topic":"medicine"}`, "", "idem-post-commit-completion")
+
+	published := rpcCall(t, handler, body)
+	if published.Error != nil {
+		t.Fatalf("event.publish post-commit completion failure error = %#v", published.Error)
+	}
+	result := asMap(t, published.Result)
+	eventID := stringValue(t, result["event_id"], "event_id")
+	if count := countEventsByName(t, db, "scan.requested"); count != 1 {
+		t.Fatalf("scan.requested event count after post-commit completion failure = %d, want 1", count)
+	}
+	if got := countEventDeliveriesForEvent(t, ctx, db, eventID); got != 1 {
+		t.Fatalf("event deliveries after post-commit completion failure = %d, want 1", got)
+	}
+	if count := countAPIIdempotencyRows(t, db); count != 1 {
+		t.Fatalf("api_idempotency rows after post-commit completion failure = %d, want 1", count)
+	}
+	outcome, errText := loadPipelineReceiptOutcomeAndError(t, ctx, db, eventID)
+	if outcome != "dead_letter" || !strings.Contains(errText, "simulated normal-run completion failure") {
+		t.Fatalf("pipeline receipt outcome=%q error=%q, want dead_letter with completion failure", outcome, errText)
+	}
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for event delivery after post-commit completion failure")
+	}
+
+	replay := rpcCall(t, handler, body)
+	if replay.Error != nil {
+		t.Fatalf("event.publish replay after post-commit completion failure error = %#v", replay.Error)
+	}
+	if replayEventID := stringValue(t, asMap(t, replay.Result)["event_id"], "event_id"); replayEventID != eventID {
+		t.Fatalf("event.publish replay event_id = %q, want original %q", replayEventID, eventID)
+	}
+	if count := countEventsByName(t, db, "scan.requested"); count != 1 {
+		t.Fatalf("scan.requested event count after replay = %d, want 1", count)
+	}
+	if count := countAPIIdempotencyRows(t, db); count != 1 {
+		t.Fatalf("api_idempotency rows after replay = %d, want 1", count)
+	}
+}
+
 func TestOperatorEventPublishPreCommitFailureFailsClosedWithDeclaredError(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
@@ -682,6 +741,15 @@ func (s *failCommittedReplayScopeStore) UpsertCommittedReplayScopeTx(ctx context
 	return s.PostgresStore.UpsertCommittedReplayScopeTx(ctx, tx, eventID, scope)
 }
 
+type failNormalRunCompletionStore struct {
+	*store.PostgresStore
+	err error
+}
+
+func (s *failNormalRunCompletionStore) ConvergeNormalRunCompletion(context.Context, string, []string, map[string][]string) error {
+	return s.err
+}
+
 type failOnceEventReadStore struct {
 	ObservabilityReadStore
 	err error
@@ -790,6 +858,21 @@ func countAllEventDeliveries(t *testing.T, db *sql.DB) int {
 		t.Fatalf("count event_deliveries rows: %v", err)
 	}
 	return count
+}
+
+func loadPipelineReceiptOutcomeAndError(t *testing.T, ctx context.Context, db *sql.DB, eventID string) (string, string) {
+	t.Helper()
+	var outcome, errText string
+	if err := db.QueryRowContext(ctx, `
+		SELECT outcome, COALESCE(side_effects->>'error', '')
+		FROM event_receipts
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'platform'
+		  AND subscriber_id = 'pipeline'
+	`, eventID).Scan(&outcome, &errText); err != nil {
+		t.Fatalf("load pipeline receipt for %s: %v", eventID, err)
+	}
+	return outcome, errText
 }
 
 func containsMissingPipelineReceiptEvent(items []events.PersistedReplayEvent, eventID string) bool {
