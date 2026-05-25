@@ -51,7 +51,7 @@ A **guard** is a boolean check evaluated before handler execution. Guards use CE
 - `kill` — move the entity to a terminal state
 - `escalate:{event}` — emit a named escalation event
 
-An **action** is a platform-provided operation that runs as the final step of a handler. Only two valid actions exist: `create_flow_instance` and `record_evidence`. There are no product-specific actions.
+An **action** is a platform-provided operation that runs as the final step of a handler. Valid actions are `create_flow_instance`, `record_evidence`, `mailbox_write`, and `artifact_repo_commit`. There are no product-specific actions.
 
 A **timer** is a time-based trigger attached to a stage. When its delay elapses, the platform emits the timer's configured event, which enters the normal event loop like any other event. Timers are declared with these required fields: `id`, `state`, `event`, `owner`. Optional fields include `delay_seconds`, `delay_minutes`, `delay_hours`, `delay_days`, `cancellation`, and `recurring`.
 
@@ -398,17 +398,21 @@ Most handlers use a small core subset. The spec draws this distinction explicitl
 | `filter` | Keep only items matching a condition. |
 | `count` | Count items matching a condition. |
 | `clear` | Reset accumulator or state buckets after everything else. |
-| `action` | Invoke a platform action (`create_flow_instance` or `record_evidence`). |
+| `action` | Invoke a platform action (`create_flow_instance`, `record_evidence`, `mailbox_write`, or `artifact_repo_commit`). |
 | `clear_gates` | Reset all entity gates to `false`. |
 | `evidence_target` | Required when `action` is `record_evidence`. |
 
-### The Only Valid Actions
+### Valid Handler Actions
 
-The platform has exactly two valid handler actions:
+The platform has four valid handler actions:
 
 **`create_flow_instance`** creates a new dynamic flow instance from a template. It requires three sibling fields: `template` (the template flow ID), `instance_id_from` (the payload field containing the unique instance ID), and `config_from` (maps instance variable names to payload field paths).
 
 **`record_evidence`** appends event payload data to the target accumulator. It requires `evidence_target`.
+
+**`mailbox_write`** materializes an authored mailbox request event into `public.mailbox`. It requires `action.id: mailbox_write` and an `action.mailbox` declaration with at least `item_type` and `summary`.
+
+**`artifact_repo_commit`** commits allowlisted service-owned artifact files to a local git repository and exposes runtime-owned result fields/events. It requires `action.id: artifact_repo_commit` and an `action.artifact_repo` declaration.
 
 ### Canonical `data_accumulation`
 
@@ -702,6 +706,8 @@ The platform-builtin tools are:
 
 - `create_flow_instance` — create a new dynamic flow instance from a template (**handler action only**, not directly callable by agents)
 - `record_evidence` — append payload to entity accumulator (also handler action only)
+- `mailbox_write` — materialize authored mailbox request events into public.mailbox (handler action only)
+- `artifact_repo_commit` — commit allowlisted service-owned artifact files to a local git repository (handler action only)
 - `create_entity` — create a new entity row (legacy/operator/system compatibility, not exposed to fully opted-in role-scoped agents)
 - `get_entity` — read an entity by ID (legacy/operator/system compatibility, replaced by generated `read_*` tools for opted-in actors)
 - `query_entities` — query entities by state, fields, or aggregation (legacy/operator/system compatibility)
@@ -976,9 +982,11 @@ This checklist is derived from the boot verification list, flow coherence rules,
 - `on_complete` and `rules` are not used together in the same handler.
 - `data_accumulation.source_event` uses the canonical name `source_event`, not `source`.
 - `clear_gates` is understood as all-or-nothing entity gate reset.
-- `action` is only `create_flow_instance` or `record_evidence`.
+- `action` is only `create_flow_instance`, `record_evidence`, `mailbox_write`, or `artifact_repo_commit`.
 - `evidence_target` is present when `action` is `record_evidence`.
 - `template`, `instance_id_from`, and `config_from` are present when `action` is `create_flow_instance`.
+- `action.mailbox` is present and shaped correctly when `action.id` is `mailbox_write`.
+- `action.artifact_repo` is present and shaped correctly when `action.id` is `artifact_repo_commit`.
 
 ### Agents
 

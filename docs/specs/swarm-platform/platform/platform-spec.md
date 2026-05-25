@@ -22,7 +22,7 @@ This section defines the platform vocabulary for `state_change`, `guard`, `actio
 
 ## action
 
-- `description`: A platform-provided operation executed as the final step of a handler. Valid actions are create_flow_instance, record_evidence, and mailbox_write. Product-specific actions are not supported.
+- `description`: A platform-provided operation executed as the final step of a handler. Valid actions are create_flow_instance, record_evidence, mailbox_write, and artifact_repo_commit. Product-specific actions are not supported.
 ## timer
 
 - `description`: A time-based trigger attached to a stage. When the delay elapses, the platform emits the timer's event, which can trigger a transition.
@@ -544,7 +544,7 @@ data_accumulation:
 
 - `field`: action
 - `type`: string or object
-- `purpose`: Names a platform-provided action. Valid values: create_flow_instance, record_evidence, mailbox_write. The platform executes the named action. NOT for platform actions — all behavior must be declarative.
+- `purpose`: Names a platform-provided action. Valid values: create_flow_instance, record_evidence, mailbox_write, artifact_repo_commit. The platform executes the named action. NOT for platform actions — all behavior must be declarative.
 #### valid_values
 
 ##### create_flow_instance
@@ -575,6 +575,18 @@ data_accumulation:
   - `flow_instance`: optional expression value. Defaults to the triggering event flow_instance when present.
   - `payload`: optional mapping of payload/context fields to expression values. Only explicitly declared fields are copied; no implicit event payload pass-through occurs.
 - `behavior`: Inserts a pending public.mailbox row inside the system-node handler transaction. source_event_id is the triggering event id. from_agent is the deterministic system node identity. item_id is deterministic for source_event_id and materializer node so duplicate/replayed node delivery does not create duplicate mailbox rows.
+
+##### artifact_repo_commit
+
+- `description`: Deterministically materialize service-owned typed file artifacts into a local git repository and expose an opaque artifact URL plus immutable git ref on the owning entity.
+- `required_mapping`:
+  - `action.id`: artifact_repo_commit
+  - `action.artifact_repo`: object — typed artifact repository commit declaration.
+- `provider`:
+  - `v1`: local_git only. Unsupported providers fail closed at decode/verify/runtime.
+- `required_fields`: provider, repo_id, request_id, allowed_paths, files, output.
+- `result_payload_rules`: success_payload and failure_payload are strict. Declared fields must resolve, validate against the target event payload schema, and must not override runtime-owned result fields.
+- `behavior`: The runtime normalizes, validates, and commits only allowlisted files under the service-owned repo root, then persists declared output fields and any declared result event in the handler transaction.
 
 ### clear_gates
 
@@ -1301,6 +1313,7 @@ The platform owns ALL tool schema serving. It reads tool definition YAML, genera
   - `create_flow_instance`: Create a new dynamic flow instance from a template. Handler action only.
   - `record_evidence`: Append payload to entity accumulator. Requires evidence_target field on the handler specifying which accumulator key to write to.
   - `mailbox_write`: Deterministically materialize authored mailbox request events into public.mailbox. Handler action only.
+  - `artifact_repo_commit`: Deterministically commit allowlisted service-owned artifact files to a local git repository and expose opaque artifact URLs plus immutable git refs. Handler action only.
   - `create_entity`: Create a new entity row in entity_state. Legacy/operator/system compatibility surface; removed from fully opted-in role-scoped agent surfaces.
   - `get_entity`: Read an entity by ID. Legacy/operator/system compatibility surface; removed from fully opted-in role-scoped agent surfaces in favor of generated `read_{entity_type}` tools.
   - `query_entities`: Query entities by state, fields, or aggregation. Legacy/operator/system compatibility surface; removed from fully opted-in role-scoped agent surfaces.
@@ -1310,7 +1323,7 @@ The platform owns ALL tool schema serving. It reads tool definition YAML, genera
   - `agent_message`: Send a message to another agent (auto-granted to all agents).
   - `mailbox_send`: Send an item to the human mailbox (auto-granted to all agents).
 
-- `note`: create_flow_instance, record_evidence, and mailbox_write are handler ACTION field values, not tools agents can call.
+- `note`: create_flow_instance, record_evidence, mailbox_write, and artifact_repo_commit are handler ACTION field values, not tools agents can call.
 - `handler_registration`: At bootstrap, the workflow module registers handlers for its tools. The platform provides the MCP gateway and schema validation. One tools file per workflow contains all tool schemas for the actor's visible surface: universal communication tools, generated emit tools, generated role-scoped entity tools for opted-in actors, and explicitly configured workflow-specific tools.
 - `default_deny`: If an agent calls a tool that is not in its `tools` list, not a universal communication tool, not an emit tool, not a generated role-scoped entity tool for an opted-in actor, and not an authorized `native_tools` capability, the call is rejected.
 ## custom_tool_schema
