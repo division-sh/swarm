@@ -326,7 +326,7 @@ func TestCLIAPIConnectionFlagsSurfaceAndIsolation(t *testing.T) {
 	withFlags := []string{
 		"runs", "status", "trace", "health", "logs", "incidents",
 		"events list", "events follow", "event view", "event publish", "event replay",
-		"agents list", "agent view", "agent restart", "agent replay", "agent replay-backlog", "agent directive",
+		"agents list", "agent view", "agent diagnose", "agent restart", "agent replay", "agent replay-backlog", "agent directive",
 		"entities list", "entity view", "entity aggregate",
 		"mailbox list", "mailbox view", "mailbox approve", "mailbox reject", "mailbox defer",
 		"control pause", "control continue", "control stop", "control nuke",

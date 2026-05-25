@@ -131,6 +131,7 @@ func TestCLIRuntimeStateCommandsRequireSharedAPITokenBeforeRequest(t *testing.T)
 		{name: "incidents", args: []string{"incidents"}},
 		{name: "agents list", args: []string{"agents", "list"}},
 		{name: "agent view", args: []string{"agent", "view", "agent-1"}},
+		{name: "agent diagnose", args: []string{"agent", "diagnose", "agent-1"}},
 		{name: "agent restart", args: []string{"agent", "restart", "agent-1"}},
 		{name: "agent replay", args: []string{"agent", "replay", "agent-1", "--event-id", "event-1"}},
 		{name: "agent replay backlog", args: []string{"agent", "replay-backlog", "agent-1"}},
