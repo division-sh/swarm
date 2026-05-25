@@ -211,6 +211,26 @@ func TestAgentDiagnoseFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 			wantStderr: "malformed agent.diagnose result: last_tool_outcome.ok is required",
 		},
 		{
+			name: "healthy watchdog missing last output",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				result := validAgentDiagnosisResult()
+				result["runtime_state"] = map[string]any{
+					"watchdog": map[string]any{
+						"state":          "healthy_long_running",
+						"blocking_layer": "session_execution",
+						"action":         "turn_long_running",
+						"outcome":        "observed",
+						"recorded_at":    "2026-05-18T03:02:00Z",
+					},
+				}
+				writeJSONRPCResult(t, w, req.ID, result)
+			},
+			wantCode:   cliExitRuntime,
+			wantStderr: "malformed agent.diagnose result: runtime_state.watchdog.last_output_at is required for healthy_long_running state",
+		},
+		{
 			name: "malformed last tool result",
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest

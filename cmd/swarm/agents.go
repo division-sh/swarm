@@ -494,6 +494,9 @@ func validateAgentDiagnosisRuntimeState(state *agentDiagnosisRuntimeState) error
 	if _, ok := agentDiagnosisWatchdogOutcomes[strings.TrimSpace(watchdog.Outcome)]; !ok {
 		return fmt.Errorf("malformed agent.diagnose result: runtime_state.watchdog.outcome=%q is not valid", watchdog.Outcome)
 	}
+	if strings.TrimSpace(watchdog.State) == "healthy_long_running" && watchdog.LastOutputAt == nil {
+		return fmt.Errorf("malformed agent.diagnose result: runtime_state.watchdog.last_output_at is required for healthy_long_running state")
+	}
 	if watchdog.LastOutputAt != nil {
 		if err := validateAgentDiagnosisTimestamp("runtime_state.watchdog.last_output_at", *watchdog.LastOutputAt); err != nil {
 			return err
