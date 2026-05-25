@@ -41,11 +41,12 @@ type DatabaseConfig struct {
 }
 
 type LLMConfig struct {
-	Backend     string           `yaml:"backend"`
-	RuntimeMode string           `yaml:"runtime_mode"`
-	Session     LLMSessionConfig `yaml:"session"`
-	ClaudeAPI   ClaudeAPIConfig  `yaml:"claude_api"`
-	ClaudeCLI   ClaudeCLIConfig  `yaml:"claude_cli"`
+	Backend          string                 `yaml:"backend"`
+	RuntimeMode      string                 `yaml:"runtime_mode"`
+	Session          LLMSessionConfig       `yaml:"session"`
+	ClaudeAPI        ClaudeAPIConfig        `yaml:"claude_api"`
+	ClaudeCLI        ClaudeCLIConfig        `yaml:"claude_cli"`
+	OpenAICompatible OpenAICompatibleConfig `yaml:"openai_compatible"`
 }
 
 type LLMSessionConfig struct {
@@ -68,6 +69,12 @@ type ClaudeCLIConfig struct {
 	Retries              int           `yaml:"retries"`
 	NoSessionPersistence bool          `yaml:"no_session_persistence"`
 	UseTMux              bool          `yaml:"use_tmux"`
+}
+
+type OpenAICompatibleConfig struct {
+	BaseURL      string `yaml:"base_url"`
+	DefaultModel string `yaml:"default_model"`
+	LowCostModel string `yaml:"low_cost_model"`
 }
 
 func Load(path string) (*Config, error) {
@@ -114,6 +121,19 @@ func (c *Config) Validate() error {
 		}
 		if c.LLM.ClaudeCLI.NoSessionPersistence {
 			return errors.New("llm.claude_cli.no_session_persistence must be false for continuity")
+		}
+	}
+	if profile.ID == llmselection.BackendOpenAICompatible {
+		if _, err := llmselection.ResolveBaseURL(profile, c.LLM.OpenAICompatible.BaseURL); err != nil {
+			return err
+		}
+		if _, err := llmselection.ResolveModelName(profile, llmselection.ModelResolution{
+			Models: llmselection.ModelMap{
+				Default: c.LLM.OpenAICompatible.DefaultModel,
+				LowCost: c.LLM.OpenAICompatible.LowCostModel,
+			},
+		}); err != nil {
+			return err
 		}
 	}
 	if c.LLM.Session.LockTTL <= 0 {

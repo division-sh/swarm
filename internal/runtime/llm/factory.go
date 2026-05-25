@@ -49,6 +49,8 @@ func (f RuntimeFactory) Build() (Runtime, error) {
 		runtime = NewClaudeCLIRuntimeWithOptions(f.Cfg, f.Sessions, f.LockOwner, f.Turns, f.Budget, f.Workspaces, f.Conversations, f.Events, ClaudeCLIRuntimeOptions{
 			MCPTurnContextStore: f.MCPTurns,
 		})
+	case llmselection.BackendOpenAICompatible:
+		runtime = NewOpenAICompatibleRuntime(f.Cfg, f.Sessions, f.LockOwner, f.Turns, f.Conversations, f.Budget, f.Events)
 	default:
 		return nil, fmt.Errorf("unsupported llm backend profile: %s", profile.ID)
 	}

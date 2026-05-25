@@ -5499,6 +5499,20 @@ func TestProjectPersistedAgentConfig_UsesCanonicalLLMBackendProfiles(t *testing.
 		t.Fatalf("llm_backend = %q, want api default profile", projection.LLMBackend)
 	}
 
+	projection, err = projectPersistedAgentConfig(runtimeactors.AgentConfig{
+		ID:               "agent-openai-compatible-backend",
+		Role:             "reviewer",
+		ModelTier:        "sonnet",
+		LLMBackend:       "openai_compatible",
+		ConversationMode: "task",
+	}, "")
+	if err != nil {
+		t.Fatalf("projectPersistedAgentConfig openai_compatible: %v", err)
+	}
+	if projection.LLMBackend != "openai_compatible" {
+		t.Fatalf("llm_backend = %q, want openai_compatible", projection.LLMBackend)
+	}
+
 	_, err = projectPersistedAgentConfig(runtimeactors.AgentConfig{
 		ID:               "agent-bad-backend",
 		Role:             "reviewer",

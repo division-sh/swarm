@@ -35,11 +35,13 @@ func DescriptionWithUsage(description, usage string) string {
 }
 
 type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role      string     `json:"role"`
+	Content   string     `json:"content"`
+	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
 }
 
 type ToolCall struct {
+	ID        string `json:"id,omitempty"`
 	Name      string `json:"name"`
 	Arguments any    `json:"arguments,omitempty"`
 }

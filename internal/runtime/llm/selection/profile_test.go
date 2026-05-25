@@ -15,6 +15,7 @@ func TestResolveActiveBackendProfiles(t *testing.T) {
 		{raw: "", wantID: BackendAPI, provider: ProviderAnthropic, transport: TransportAPI},
 		{raw: BackendAPI, wantID: BackendAPI, provider: ProviderAnthropic, transport: TransportAPI},
 		{raw: BackendCLITest, wantID: BackendCLITest, provider: ProviderClaude, transport: TransportCLI},
+		{raw: BackendOpenAICompatible, wantID: BackendOpenAICompatible, provider: ProviderOpenAICompatible, transport: TransportAPI},
 	}
 	for _, tt := range tests {
 		t.Run(tt.raw, func(t *testing.T) {
@@ -40,7 +41,7 @@ func TestResolveActiveBackendRejectsReservedAndUnknown(t *testing.T) {
 }
 
 func TestResolvePersistedBackendAllowsReservedProfiles(t *testing.T) {
-	for _, raw := range []string{BackendAPI, BackendCLITest, BackendMock, BackendLocal} {
+	for _, raw := range []string{BackendAPI, BackendCLITest, BackendOpenAICompatible, BackendMock, BackendLocal} {
 		t.Run(raw, func(t *testing.T) {
 			profile, err := ResolvePersistedBackend(raw)
 			if err != nil {
@@ -93,7 +94,7 @@ func TestResolveModelNameUsesModelTier(t *testing.T) {
 	}
 	req := ModelResolution{
 		ModelTier: "haiku",
-		Models:    ModelMap{Default: "claude-sonnet", Haiku: "claude-haiku"},
+		Models:    ModelMap{Default: "claude-sonnet", LowCost: "claude-haiku"},
 	}
 	if got, err := ResolveModelName(profile, req); err != nil || got != "claude-haiku" {
 		t.Fatalf("ResolveModelName = %q, %v; want claude-haiku", got, err)
@@ -105,6 +106,39 @@ func TestResolveModelNameUsesModelTier(t *testing.T) {
 	req.ForceLowCost = true
 	if got, err := ResolveModelName(profile, req); err != nil || got != "claude-haiku" {
 		t.Fatalf("ResolveModelName forced low cost = %q, %v; want claude-haiku", got, err)
+	}
+}
+
+func TestResolveOpenAICompatibleProfileAuthority(t *testing.T) {
+	profile, err := ResolveActiveBackend(BackendOpenAICompatible)
+	if err != nil {
+		t.Fatalf("ResolveActiveBackend: %v", err)
+	}
+	if profile.Credential.EnvVar != OpenAICompatibleCredentialEnv {
+		t.Fatalf("credential env = %q, want %q", profile.Credential.EnvVar, OpenAICompatibleCredentialEnv)
+	}
+	if _, err := ResolveBaseURL(profile, ""); err == nil || !strings.Contains(err.Error(), OpenAICompatibleBaseURLConfigField) {
+		t.Fatalf("ResolveBaseURL missing error = %v, want %s", err, OpenAICompatibleBaseURLConfigField)
+	}
+	if _, err := ResolveBaseURL(profile, "localhost:11434/v1"); err == nil || !strings.Contains(err.Error(), "http(s)") {
+		t.Fatalf("ResolveBaseURL invalid error = %v, want http(s)", err)
+	}
+	if got, err := ResolveBaseURL(profile, " https://example.test/v1/ "); err != nil || got != "https://example.test/v1" {
+		t.Fatalf("ResolveBaseURL = %q, %v; want normalized base url", got, err)
+	}
+	req := ModelResolution{
+		ModelTier: "low_cost",
+		Models:    ModelMap{Default: "gpt-main", LowCost: "gpt-mini"},
+	}
+	if got, err := ResolveModelName(profile, req); err != nil || got != "gpt-mini" {
+		t.Fatalf("ResolveModelName low cost = %q, %v; want gpt-mini", got, err)
+	}
+	req.ModelTier = "general"
+	if got, err := ResolveModelName(profile, req); err != nil || got != "gpt-main" {
+		t.Fatalf("ResolveModelName default = %q, %v; want gpt-main", got, err)
+	}
+	if _, err := ResolveModelName(profile, ModelResolution{}); err == nil || !strings.Contains(err.Error(), OpenAICompatibleDefaultModelConfig) {
+		t.Fatalf("ResolveModelName missing error = %v, want %s", err, OpenAICompatibleDefaultModelConfig)
 	}
 }
 

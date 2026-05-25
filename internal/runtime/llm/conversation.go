@@ -229,6 +229,9 @@ func (c *Conversation) executeToolCalls(ctx context.Context, calls []ToolCall) (
 		entry := map[string]any{
 			"name": tc.Name,
 		}
+		if id := strings.TrimSpace(tc.ID); id != "" {
+			entry["tool_call_id"] = id
+		}
 		if err == nil {
 			projected, projectErr := c.projectToolResult(ctx, tc.Name, tc.Arguments, out)
 			if projectErr != nil {

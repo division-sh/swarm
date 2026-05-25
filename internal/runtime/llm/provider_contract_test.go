@@ -44,6 +44,14 @@ func TestProviderContractsValidateShippedRuntimes(t *testing.T) {
 				FileIO:    true,
 			},
 		},
+		{
+			name:            "openai compatible",
+			mode:            "openai_compatible",
+			runtime:         NewOpenAICompatibleRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil),
+			provider:        "openai_compatible",
+			transport:       ProviderTransportAPI,
+			usageAccounting: BudgetUsageExact,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -80,15 +88,21 @@ func TestRuntimeFactoryValidatesProviderContract(t *testing.T) {
 	}{
 		{mode: "api", provider: "anthropic"},
 		{mode: "cli_test", provider: "claude"},
+		{mode: "openai_compatible", provider: "openai_compatible"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.mode, func(t *testing.T) {
-			runtime, err := RuntimeFactory{
-				Cfg: &config.Config{
-					LLM: config.LLMConfig{
-						Backend: tt.mode,
-					},
+			cfg := &config.Config{
+				LLM: config.LLMConfig{
+					Backend: tt.mode,
 				},
+			}
+			if tt.mode == "openai_compatible" {
+				cfg.LLM.OpenAICompatible.BaseURL = "https://example.test/v1"
+				cfg.LLM.OpenAICompatible.DefaultModel = "gpt-compatible"
+			}
+			runtime, err := RuntimeFactory{
+				Cfg: cfg,
 			}.Build()
 			if err != nil {
 				t.Fatalf("Build: %v", err)

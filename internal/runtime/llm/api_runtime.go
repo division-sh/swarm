@@ -432,7 +432,7 @@ func (r *AnthropicAPIRuntime) buildRequest(ctx context.Context, s *Session, inpu
 	modelReq := llmselection.ModelResolution{
 		Models: llmselection.ModelMap{
 			Default: r.cfg.LLM.ClaudeAPI.DefaultModel,
-			Haiku:   r.cfg.LLM.ClaudeAPI.HaikuModel,
+			LowCost: r.cfg.LLM.ClaudeAPI.HaikuModel,
 		},
 	}
 	if actor, ok := runtimeactors.ActorFromContext(ctx); ok {
@@ -563,6 +563,7 @@ func convertAnthropicResponse(parsed anthropicResponse) Response {
 		}
 	}
 	resp.Message.Content = strings.TrimSpace(strings.Join(textParts, "\n"))
+	resp.Message.ToolCalls = append([]ToolCall(nil), resp.ToolCalls...)
 	return resp
 }
 
