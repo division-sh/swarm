@@ -213,6 +213,40 @@ func TestMultiBundleSourceAuthorityStaysOutOfLiveOpenRPCUntilImplemented(t *test
 
 	apiSurface := mustMappingValue(t, multi, "api_surface")
 	assertScalarValue(t, mustMappingValue(t, apiSurface, "publication_status"), "source_authority_not_generated_openrpc_until_runtime_api_implementation")
+
+	bundleDelete := mustMappingValue(t, multi, "bundle_delete")
+	phaseFive := mustMappingValue(t, bundleDelete, "phase_5_atomicity")
+	assertScalarValue(t, mustMappingValue(t, phaseFive, "tracker"), "#1009")
+	assertScalarValue(t, mustMappingValue(t, phaseFive, "implementation_status"), "source_authority_only_no_runtime_behavior")
+	assertScalarValue(t, mustMappingValue(t, phaseFive, "canonical_runtime_owner"), "future bundle catalog store transaction/mutator")
+	appliesTo := mustMappingValue(t, phaseFive, "applies_to")
+	if !sequenceContainsScalar(appliesTo, "#1018 non-force bundle.delete final bundle availability mutation") {
+		t.Fatal("phase_5_atomicity must bind non-force bundle.delete")
+	}
+	if !sequenceContainsScalar(appliesTo, "#1019 bundle.delete --force final bundle availability mutation after preservation cleanup succeeds") {
+		t.Fatal("phase_5_atomicity must bind force bundle.delete")
+	}
+	assertScalarContains(t, mustMappingValue(t, phaseFive, "transaction_rule"), "one database transaction")
+	assertScalarContains(t, mustMappingValue(t, phaseFive, "transaction_rule"), "before deleting the matching bundles")
+	assertScalarContains(t, mustMappingValue(t, phaseFive, "transaction_rule"), "shared store transaction owner")
+	order := mustMappingValue(t, phaseFive, "transaction_order")
+	if len(order.Content) != 2 {
+		t.Fatalf("phase_5_atomicity transaction_order has %d items, want 2", len(order.Content))
+	}
+	if got := scalarValue(order.Content[0]); got != "update_eligible_runs_bundle_source_to_deleted" {
+		t.Fatalf("phase_5_atomicity transaction_order[0] = %q, want update first", got)
+	}
+	if got := scalarValue(order.Content[1]); got != "delete_matching_bundles_row" {
+		t.Fatalf("phase_5_atomicity transaction_order[1] = %q, want delete second", got)
+	}
+	assertScalarContains(t, mustMappingValue(t, phaseFive, "reader_invariant"), "read runs.bundle_source before consulting bundles")
+	assertScalarContains(t, mustMappingValue(t, phaseFive, "reader_invariant"), "BUNDLE_UNAVAILABLE")
+	assertScalarContains(t, mustMappingValue(t, phaseFive, "reader_invariant"), "BUNDLE_DATA_INTEGRITY_ERROR")
+	invalid := mustMappingValue(t, phaseFive, "invalid_implementations")
+	if !sequenceContainsScalar(invalid, "deleting the bundles row before marking eligible runs deleted") {
+		t.Fatal("phase_5_atomicity must reject delete-before-update implementations")
+	}
+
 	apiRunFork := mustMappingValue(t, apiSurface, "run_fork")
 	assertScalarValue(t, mustMappingValue(t, apiRunFork, "method"), "run.fork")
 	apiRunForkParams := mustMappingValue(t, apiRunFork, "params")
