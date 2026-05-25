@@ -3,6 +3,8 @@ package llm
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -81,6 +83,60 @@ func TestClaudeCLIRuntimeBuildCommand_UsesContainerReachableMCPGatewayURL(t *tes
 	}
 	if !strings.Contains(got, "SWARM_TOOL_GATEWAY_TOKEN=gateway-token") {
 		t.Fatalf("docker args = %q, want MCP gateway token propagated into cli_test container exec", got)
+	}
+}
+
+func TestClaudeCLIRuntimeRunWithInput_MissingWorkspaceCLIUsesActionableDiagnostic(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
+	t.Setenv("SWARM_WORKSPACE_IMAGE", "swarm-workspace:test")
+
+	tempDir := t.TempDir()
+	scriptPath := filepath.Join(tempDir, "fake-docker.sh")
+	script := `#!/bin/sh
+set -eu
+cat >/dev/null
+printf '%s\n' 'OCI runtime exec failed: exec failed: unable to start container process: exec: "claude": executable file not found in $PATH: unknown' >&2
+exit 127
+`
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake docker script: %v", err)
+	}
+	t.Setenv("SWARM_DOCKER_BIN", scriptPath)
+
+	cfg := &config.Config{}
+	cfg.LLM.ClaudeCLI.Command = "claude"
+	cfg.LLM.ClaudeCLI.OutputFormat = "json"
+	runtime := NewClaudeCLIRuntime(cfg, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil, nil)
+
+	_, err := runtime.runWithInput(context.Background(), nil, &workspace.Target{Container: "swarm-agent-market-research", Workdir: "/workspace"}, "hello", MonitorTurnMeta{})
+	if !errors.Is(err, ErrClaudeWorkspaceCLIUnavailable) {
+		t.Fatalf("runWithInput error = %v, want ErrClaudeWorkspaceCLIUnavailable", err)
+	}
+	for _, want := range []string{
+		"local cli_test workspace cannot execute configured Claude CLI command",
+		`"swarm-agent-market-research"`,
+		`"swarm-workspace:test"`,
+		"build or pull a workspace image",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("runWithInput error missing %q:\n%v", want, err)
+		}
+	}
+}
+
+func TestWorkspaceCLIDiagnosticError_MatchesAbsolutePathNoSuchFile(t *testing.T) {
+	t.Setenv("SWARM_WORKSPACE_IMAGE", "swarm-workspace:absolute")
+	cfg := &config.Config{}
+	cfg.LLM.ClaudeCLI.Command = "/usr/local/bin/claude"
+
+	err := workspaceCLIDiagnosticError(cfg, &workspace.Target{Container: "swarm-agent-market-research"}, `OCI runtime exec failed: exec failed: unable to start container process: exec: "/usr/local/bin/claude": stat /usr/local/bin/claude: no such file or directory: unknown`)
+	if !errors.Is(err, ErrClaudeWorkspaceCLIUnavailable) {
+		t.Fatalf("workspaceCLIDiagnosticError error = %v, want ErrClaudeWorkspaceCLIUnavailable", err)
+	}
+	for _, want := range []string{`"/usr/local/bin/claude"`, `"swarm-agent-market-research"`, `"swarm-workspace:absolute"`, "set SWARM_WORKSPACE_IMAGE"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("workspaceCLIDiagnosticError error missing %q:\n%v", want, err)
+		}
 	}
 }
 

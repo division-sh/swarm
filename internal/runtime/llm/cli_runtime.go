@@ -31,6 +31,7 @@ type ClaudeCLIRuntime struct {
 
 var ErrClaudeAuthRequired = errors.New("claude auth required")
 var ErrClaudeWorkspaceRequired = errors.New("claude workspace target required")
+var ErrClaudeWorkspaceCLIUnavailable = errors.New("claude workspace cli unavailable")
 
 type promptTransportFallback struct {
 	Attempted bool

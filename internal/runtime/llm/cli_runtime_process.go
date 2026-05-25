@@ -36,7 +36,7 @@ func (r *ClaudeCLIRuntime) runWithInput(ctx context.Context, args []string, targ
 
 	cmd := r.buildCommand(runCtx, args, target)
 	if configuredCLIOutputFormat(r.cfg) == "stream-json" {
-		return r.runStreaming(runCtx, cmd, timeout, input, meta)
+		return r.runStreaming(runCtx, cmd, target, timeout, input, meta)
 	}
 
 	var stdout bytes.Buffer
@@ -74,6 +74,9 @@ func (r *ClaudeCLIRuntime) runWithInput(ctx context.Context, args []string, targ
 		if errOut == "" {
 			errOut = summarizeCLIErrorOutput(stdoutText)
 		}
+		if diag := workspaceCLIDiagnosticError(r.cfg, target, coalesce(errOut, stderrText, stdoutText)); diag != nil {
+			return nil, diag
+		}
 		if errOut == "" {
 			return nil, fmt.Errorf("claude cli run failed: %w", err)
 		}
@@ -86,7 +89,7 @@ func (r *ClaudeCLIRuntime) runWithInput(ctx context.Context, args []string, targ
 	return resp, nil
 }
 
-func (r *ClaudeCLIRuntime) runStreaming(ctx context.Context, cmd *exec.Cmd, timeout time.Duration, input string, meta MonitorTurnMeta) (*Response, error) {
+func (r *ClaudeCLIRuntime) runStreaming(ctx context.Context, cmd *exec.Cmd, target *workspace.Target, timeout time.Duration, input string, meta MonitorTurnMeta) (*Response, error) {
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, fmt.Errorf("create claude stdout pipe: %w", err)
@@ -148,6 +151,9 @@ func (r *ClaudeCLIRuntime) runStreaming(ctx context.Context, cmd *exec.Cmd, time
 		errOut := summarizeCLIErrorOutput(stderrText)
 		if errOut == "" {
 			errOut = summarizeCLIErrorOutput(stdoutText)
+		}
+		if diag := workspaceCLIDiagnosticError(r.cfg, target, coalesce(errOut, stderrText, stdoutText)); diag != nil {
+			return nil, diag
 		}
 		if errOut == "" {
 			return nil, fmt.Errorf("claude cli run failed: %w", waitErr)
