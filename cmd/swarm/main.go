@@ -138,6 +138,18 @@ func defaultServeOptions() serveOptions {
 	}
 }
 
+func buildForkChatSandboxLLMRuntime(cfg *config.Config, workspaces workspace.Resolver) (runtimellm.Runtime, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("runtime config is required")
+	}
+	return runtimellm.RuntimeFactory{
+		Cfg:        cfg,
+		Sessions:   sessions.NewInMemoryRegistry(cfg.LLM.Session.LockTTL),
+		LockOwner:  "forkchat-sandbox",
+		Workspaces: workspaces,
+	}.Build()
+}
+
 func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	bootStartedAt := time.Now().UTC()
 	reporter := newServeBootReporter(opts.Verbose, opts.Output)
@@ -298,6 +310,11 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		log.Printf("init runtime: %v", err)
 		return 1
 	}
+	forkChatLLM, err := buildForkChatSandboxLLMRuntime(cfg, workspaces)
+	if err != nil {
+		log.Printf("init forkchat sandbox runtime: %v", err)
+		return 1
+	}
 
 	var ready atomic.Bool
 	supervisor := newRuntimeProjectSupervisor(repo, resolvedPlatformSpecPath, cfg, stores, &ready, contractsRoot, bundle, source, rt)
@@ -333,6 +350,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		Entities:           apiEntities,
 		AgentConversations: apiAgentConversations,
 		ConversationForks:  stores.Postgres,
+		ForkChatExecutor:   apiv1.NewLLMForkChatExecutor(forkChatLLM),
 		AgentControl:       dashboardDynamicAgentControl{supervisor: supervisor},
 		Mailbox:            stores.Postgres,
 		Idempotency:        stores.Postgres,

@@ -10789,9 +10789,9 @@ api_specification:
             additionalProperties: true
           tool_calls:
             type: array
-            description: Sandbox-observed tool calls for this fork-local turn. Entries include snapshot-read
-              evidence and stubbed side-effect tool results; they are fork-local facts and are not live runtime
-              side effects.
+            description: Sandbox-observed tool calls requested during this fork-local turn. Entries may include
+              snapshot-read evidence and requested side-effect tool results stubbed as fork-local facts; they are
+              not synthesized for unrequested tools and are not live runtime side effects.
             items:
               type: object
               additionalProperties: true
@@ -13422,10 +13422,12 @@ api_specification:
         The method consumes conversation_forks for lifecycle validation,
         conversation_fork_snapshots for source-at-fork context, and
         conversation_fork_turns for fork-local transcript persistence. It does
-        enforce fork-snapshot read tools and records side-effecting tools as
-        stubbed fork-local results under ConversationForkSandboxPolicy. It does
-        not write agent_turns, events, runtime logs, mailbox rows, run commands,
-        or dashboard conversation rows by default.
+        execute the source agent through the forkchat sandbox executor, provides
+        fork-snapshot read tools, and records only sandbox-observed requested
+        side-effecting tools as stubbed fork-local results under
+        ConversationForkSandboxPolicy. It does not write agent_turns, events,
+        runtime logs, mailbox rows, run commands, or dashboard conversation rows
+        by default.
       scope:
         required:
         - write:conversations

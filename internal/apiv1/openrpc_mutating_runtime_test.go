@@ -430,7 +430,7 @@ func mutatingHTTPRuntimeErrorProbes() []mutatingHTTPRuntimeErrorProbe {
 			s.forks.createErr = store.ErrEventNotFound
 		}}},
 		{Method: "conversation.fork_chat", Params: map[string]any{"fork_id": forkID, "message": "inspect fork", "idempotency_key": "idem-error"}, Code: ForkNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.forks.chatErr = store.ErrConversationForkNotFound
+			s.forks.prepareErr = store.ErrConversationForkNotFound
 		}}},
 		{Method: "conversation.fork_delete", Params: map[string]any{"fork_id": forkID, "idempotency_key": "idem-error"}, Code: ForkNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
 			s.forks.deleteErr = store.ErrConversationForkNotFound
@@ -663,7 +663,49 @@ func newMutatingRuntimeProbeState(t *testing.T, methodName string) *mutatingRunt
 			State:     "active",
 			Turns:     []store.OperatorConversationTurn{},
 		},
-		chatResult: store.ConversationForkChatResult{
+		prepareResult: store.ConversationForkChatPrepared{
+			Fork: store.OperatorConversationForkSession{
+				ForkID:          "00000000-0000-0000-0000-000000000301",
+				SourceSessionID: "00000000-0000-0000-0000-000000000201",
+				SourceRunID:     runID,
+				SourceAgentID:   "agent-a",
+				ForkPoint: store.ConversationForkPointDescriptor{
+					Kind:       "turn",
+					TurnIndex:  1,
+					TurnID:     "00000000-0000-0000-0000-000000000401",
+					SelectedAt: now,
+				},
+				CreatedBy: "token",
+				CreatedAt: now,
+				ExpiresAt: now.Add(store.ConversationForkLifecycleTTL),
+				State:     "active",
+				Turns:     []store.OperatorConversationTurn{},
+			},
+			Snapshot: store.ConversationForkSnapshot{
+				ForkID:          "00000000-0000-0000-0000-000000000301",
+				SourceSessionID: "00000000-0000-0000-0000-000000000201",
+				SourceRunID:     runID,
+				SourceAgentID:   "agent-a",
+				SourceTurn: store.ConversationForkSourceTurn{
+					TurnID:     "00000000-0000-0000-0000-000000000401",
+					TurnIndex:  1,
+					SelectedAt: now,
+					CreatedAt:  now,
+				},
+				EntitySnapshot: []store.ConversationForkEntitySnapshot{},
+				SnapshotOwner:  store.ConversationForkChatSnapshotOwner,
+				CreatedAt:      now,
+			},
+			SandboxPolicy: store.ConversationForkSandboxPolicy{
+				Owner:              store.ConversationForkChatSandboxOwner,
+				ReadPolicy:         "fork_snapshot_only",
+				WritePolicy:        "stub_record_only_no_live_mutation",
+				SideEffectingTools: []string{"save_entity_field"},
+				StubbedTools:       []string{"save_entity_field"},
+			},
+			AvailableTools: []string{"fork_snapshot_read_entities", "save_entity_field"},
+		},
+		recordResult: store.ConversationForkChatResult{
 			ForkID: "00000000-0000-0000-0000-000000000301",
 			Turn: store.OperatorConversationTurn{
 				TurnIndex:       1,
@@ -705,13 +747,16 @@ func (s *mutatingRuntimeProbeState) options(t *testing.T) OperatorReadOptions {
 	t.Helper()
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 	return OperatorReadOptions{
-		Now:                   func() time.Time { return s.now },
-		Ready:                 func() bool { return true },
-		Database:              fakePinger{},
-		Runs:                  s.runs,
-		Observability:         s.observability,
-		AgentControl:          s.agentControl,
-		ConversationForks:     s.forks,
+		Now:               func() time.Time { return s.now },
+		Ready:             func() bool { return true },
+		Database:          fakePinger{},
+		Runs:              s.runs,
+		Observability:     s.observability,
+		AgentControl:      s.agentControl,
+		ConversationForks: s.forks,
+		ForkChatExecutor: &fakeForkChatExecutor{result: store.ConversationForkChatExecution{
+			AssistantMessage: "forkchat sandbox response: inspect fork",
+		}},
 		Mailbox:               s.mailbox,
 		Idempotency:           s.idempotency,
 		Events:                s.events,

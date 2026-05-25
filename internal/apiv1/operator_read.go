@@ -58,6 +58,7 @@ type OperatorReadOptions struct {
 	Entities              EntityReadStore
 	AgentConversations    AgentConversationReadStore
 	ConversationForks     ConversationForkLifecycleStore
+	ForkChatExecutor      ForkChatExecutor
 	AgentControl          AgentControlController
 	Mailbox               MailboxAPIStore
 	Idempotency           APIIdempotencyStore

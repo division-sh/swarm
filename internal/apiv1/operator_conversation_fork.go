@@ -17,8 +17,13 @@ type ConversationForkLifecycleStore interface {
 	CreateOperatorConversationFork(context.Context, store.ConversationForkCreateRequest) (store.OperatorConversationForkSession, error)
 	ListOperatorConversationForks(context.Context, store.ConversationForkListOptions) (store.ConversationForkListResult, error)
 	LoadOperatorConversationFork(context.Context, string) (store.OperatorConversationForkSession, error)
-	ChatOperatorConversationFork(context.Context, store.ConversationForkChatRequest) (store.ConversationForkChatResult, error)
+	PrepareOperatorConversationForkChat(context.Context, store.ConversationForkChatPrepareRequest) (store.ConversationForkChatPrepared, error)
+	RecordOperatorConversationForkChat(context.Context, store.ConversationForkChatRecordRequest) (store.ConversationForkChatResult, error)
 	DeleteOperatorConversationFork(context.Context, string, time.Time) (store.ConversationForkDeleteResult, error)
+}
+
+type ForkChatExecutor interface {
+	ExecuteForkChat(context.Context, store.ConversationForkChatPrepared, string) (store.ConversationForkChatExecution, error)
 }
 
 type conversationForkCreateResult struct {
@@ -171,10 +176,25 @@ func executeConversationForkChat(ctx context.Context, req Request, opts Operator
 		TTL:            conversationForkIdempotencyTTL,
 		Now:            now,
 	}, func(ctx context.Context) (store.APIIdempotencyCompletion, error) {
-		result, err := opts.ConversationForks.ChatOperatorConversationFork(ctx, store.ConversationForkChatRequest{
+		if opts.ForkChatExecutor == nil {
+			return store.APIIdempotencyCompletion{}, fmt.Errorf("conversation fork chat executor is required")
+		}
+		prepared, err := opts.ConversationForks.PrepareOperatorConversationForkChat(ctx, store.ConversationForkChatPrepareRequest{
+			ForkID: forkID,
+			Now:    now,
+		})
+		if err != nil {
+			return store.APIIdempotencyCompletion{}, conversationForkError(err, conversationForkErrorDetails{ForkID: forkID})
+		}
+		execution, err := opts.ForkChatExecutor.ExecuteForkChat(ctx, prepared, message)
+		if err != nil {
+			return store.APIIdempotencyCompletion{}, err
+		}
+		result, err := opts.ConversationForks.RecordOperatorConversationForkChat(ctx, store.ConversationForkChatRecordRequest{
 			ForkID:       forkID,
 			Message:      message,
 			ActorTokenID: req.ActorTokenID,
+			Execution:    execution,
 			Now:          now,
 		})
 		if err != nil {

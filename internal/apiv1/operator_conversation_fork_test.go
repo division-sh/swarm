@@ -2,37 +2,44 @@ package apiv1
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
+	runtimellm "swarm/internal/runtime/llm"
 	"swarm/internal/store"
 )
 
 type fakeConversationForkLifecycleStore struct {
-	createResult store.OperatorConversationForkSession
-	createErr    error
-	listResult   store.ConversationForkListResult
-	listErr      error
-	viewResult   store.OperatorConversationForkSession
-	viewErr      error
-	chatResult   store.ConversationForkChatResult
-	chatErr      error
-	deleteResult store.ConversationForkDeleteResult
-	deleteErr    error
+	createResult  store.OperatorConversationForkSession
+	createErr     error
+	listResult    store.ConversationForkListResult
+	listErr       error
+	viewResult    store.OperatorConversationForkSession
+	viewErr       error
+	prepareResult store.ConversationForkChatPrepared
+	prepareErr    error
+	recordResult  store.ConversationForkChatResult
+	recordErr     error
+	deleteResult  store.ConversationForkDeleteResult
+	deleteErr     error
 
-	createCalls int
-	listCalls   int
-	viewCalls   int
-	chatCalls   int
-	deleteCalls int
+	createCalls  int
+	listCalls    int
+	viewCalls    int
+	prepareCalls int
+	recordCalls  int
+	deleteCalls  int
 
-	lastCreate store.ConversationForkCreateRequest
-	lastList   store.ConversationForkListOptions
-	lastViewID string
-	lastChat   store.ConversationForkChatRequest
-	lastDelete string
-	lastNow    time.Time
+	lastCreate  store.ConversationForkCreateRequest
+	lastList    store.ConversationForkListOptions
+	lastViewID  string
+	lastPrepare store.ConversationForkChatPrepareRequest
+	lastRecord  store.ConversationForkChatRecordRequest
+	lastDelete  string
+	lastNow     time.Time
 
 	recordEffect func()
 }
@@ -61,16 +68,25 @@ func (s *fakeConversationForkLifecycleStore) LoadOperatorConversationFork(_ cont
 	return s.viewResult, s.viewErr
 }
 
-func (s *fakeConversationForkLifecycleStore) ChatOperatorConversationFork(_ context.Context, req store.ConversationForkChatRequest) (store.ConversationForkChatResult, error) {
-	s.chatCalls++
-	s.lastChat = req
-	if s.chatErr != nil {
-		return store.ConversationForkChatResult{}, s.chatErr
+func (s *fakeConversationForkLifecycleStore) PrepareOperatorConversationForkChat(_ context.Context, req store.ConversationForkChatPrepareRequest) (store.ConversationForkChatPrepared, error) {
+	s.prepareCalls++
+	s.lastPrepare = req
+	if s.prepareErr != nil {
+		return store.ConversationForkChatPrepared{}, s.prepareErr
+	}
+	return s.prepareResult, nil
+}
+
+func (s *fakeConversationForkLifecycleStore) RecordOperatorConversationForkChat(_ context.Context, req store.ConversationForkChatRecordRequest) (store.ConversationForkChatResult, error) {
+	s.recordCalls++
+	s.lastRecord = req
+	if s.recordErr != nil {
+		return store.ConversationForkChatResult{}, s.recordErr
 	}
 	if s.recordEffect != nil {
 		s.recordEffect()
 	}
-	return s.chatResult, nil
+	return s.recordResult, nil
 }
 
 func (s *fakeConversationForkLifecycleStore) DeleteOperatorConversationFork(_ context.Context, forkID string, now time.Time) (store.ConversationForkDeleteResult, error) {
@@ -84,6 +100,24 @@ func (s *fakeConversationForkLifecycleStore) DeleteOperatorConversationFork(_ co
 		s.recordEffect()
 	}
 	return s.deleteResult, nil
+}
+
+type fakeForkChatExecutor struct {
+	result       store.ConversationForkChatExecution
+	err          error
+	calls        int
+	lastPrepared store.ConversationForkChatPrepared
+	lastMessage  string
+}
+
+func (f *fakeForkChatExecutor) ExecuteForkChat(_ context.Context, prepared store.ConversationForkChatPrepared, message string) (store.ConversationForkChatExecution, error) {
+	f.calls++
+	f.lastPrepared = prepared
+	f.lastMessage = message
+	if f.err != nil {
+		return store.ConversationForkChatExecution{}, f.err
+	}
+	return f.result, nil
 }
 
 func TestOperatorConversationForkHandlersUseCanonicalOwnerAndIdempotency(t *testing.T) {
@@ -113,7 +147,31 @@ func TestOperatorConversationForkHandlersUseCanonicalOwnerAndIdempotency(t *test
 		createResult: fork,
 		listResult:   store.ConversationForkListResult{Forks: []store.OperatorConversationForkSession{fork}, NextCursor: "cursor-2"},
 		viewResult:   fork,
-		chatResult: store.ConversationForkChatResult{
+		prepareResult: store.ConversationForkChatPrepared{
+			Fork: fork,
+			Snapshot: store.ConversationForkSnapshot{
+				ForkID:          forkID,
+				SourceSessionID: sourceSessionID,
+				SourceRunID:     "00000000-0000-0000-0000-000000000501",
+				SourceAgentID:   "agent-1",
+				SourceTurn: store.ConversationForkSourceTurn{
+					TurnID:     turnID,
+					TurnIndex:  2,
+					SelectedAt: created,
+					CreatedAt:  created,
+				},
+				EntitySnapshot: []store.ConversationForkEntitySnapshot{},
+				SnapshotOwner:  store.ConversationForkChatSnapshotOwner,
+				CreatedAt:      now,
+			},
+			SandboxPolicy: store.ConversationForkSandboxPolicy{
+				Owner:       store.ConversationForkChatSandboxOwner,
+				ReadPolicy:  "fork_snapshot_only",
+				WritePolicy: "stub_record_only_no_live_mutation",
+			},
+			AvailableTools: []string{"fork_snapshot_read_entities"},
+		},
+		recordResult: store.ConversationForkChatResult{
 			ForkID: forkID,
 			Turn: store.OperatorConversationTurn{
 				TurnIndex:       1,
@@ -145,11 +203,22 @@ func TestOperatorConversationForkHandlersUseCanonicalOwnerAndIdempotency(t *test
 		},
 		deleteResult: store.ConversationForkDeleteResult{ForkID: forkID, Deleted: true},
 	}
+	executor := &fakeForkChatExecutor{result: store.ConversationForkChatExecution{
+		AssistantMessage: "forkchat sandbox response: inspect",
+		ToolCalls: []store.OperatorConversationToolCall{{
+			ToolUseID: "tool-1",
+			Name:      "fork_snapshot_read_entities",
+			Arguments: json.RawMessage(`{"entity_id":"entity-1"}`),
+			Result:    json.RawMessage(`{"status":"read_from_snapshot"}`),
+		}},
+		AvailableTools: []string{"fork_snapshot_read_entities"},
+	}}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: OperatorReadHandlers(OperatorReadOptions{
 			Now:               func() time.Time { return now },
 			ConversationForks: forks,
+			ForkChatExecutor:  executor,
 			Idempotency:       newMutatingProbeIdempotencyStore(),
 		}),
 	})
@@ -214,8 +283,17 @@ func TestOperatorConversationForkHandlersUseCanonicalOwnerAndIdempotency(t *test
 	if got := asMap(t, chatResult["snapshot"])["snapshot_owner"]; got != store.ConversationForkChatSnapshotOwner {
 		t.Fatalf("conversation.fork_chat snapshot owner = %#v", got)
 	}
-	if forks.chatCalls != 1 || forks.lastChat.ForkID != forkID || forks.lastChat.Message != "inspect" || !forks.lastChat.Now.Equal(now) {
-		t.Fatalf("chat owner call = calls %d req %#v", forks.chatCalls, forks.lastChat)
+	if forks.prepareCalls != 1 || forks.lastPrepare.ForkID != forkID || !forks.lastPrepare.Now.Equal(now) {
+		t.Fatalf("chat prepare owner call = calls %d req %#v", forks.prepareCalls, forks.lastPrepare)
+	}
+	if executor.calls != 1 || executor.lastPrepared.Fork.ForkID != forkID || executor.lastMessage != "inspect" {
+		t.Fatalf("chat executor call = calls %d prepared %#v message %q", executor.calls, executor.lastPrepared, executor.lastMessage)
+	}
+	if forks.recordCalls != 1 || forks.lastRecord.ForkID != forkID || forks.lastRecord.Message != "inspect" || !forks.lastRecord.Now.Equal(now) {
+		t.Fatalf("chat record owner call = calls %d req %#v", forks.recordCalls, forks.lastRecord)
+	}
+	if got := forks.lastRecord.Execution.ToolCalls; len(got) != 1 || got[0].Name != "fork_snapshot_read_entities" {
+		t.Fatalf("chat record execution tool calls = %#v", got)
 	}
 
 	chatReplay := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"chat-replay","method":"conversation.fork_chat","params":{"fork_id":"`+forkID+`","message":"inspect","idempotency_key":"chat-1"}}`)
@@ -225,8 +303,8 @@ func TestOperatorConversationForkHandlersUseCanonicalOwnerAndIdempotency(t *test
 	if got := asMap(t, chatReplay.Result)["idempotency_replayed"]; got != true {
 		t.Fatalf("conversation.fork_chat replay idempotency_replayed = %#v, want true", got)
 	}
-	if forks.chatCalls != 1 {
-		t.Fatalf("conversation.fork_chat owner calls after replay = %d, want 1", forks.chatCalls)
+	if forks.prepareCalls != 1 || executor.calls != 1 || forks.recordCalls != 1 {
+		t.Fatalf("conversation.fork_chat calls after replay = prepare %d executor %d record %d, want 1 each", forks.prepareCalls, executor.calls, forks.recordCalls)
 	}
 
 	deleted := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"delete","method":"conversation.fork_delete","params":{"fork_id":"`+forkID+`","idempotency_key":"delete-1"}}`)
@@ -297,7 +375,7 @@ func TestOperatorConversationForkHandlersTypedErrors(t *testing.T) {
 			name:   "chat missing fork",
 			method: "conversation.fork_chat",
 			body:   `{"jsonrpc":"2.0","id":"err","method":"conversation.fork_chat","params":{"fork_id":"` + forkID + `","message":"hello"}}`,
-			mutate: func(s *fakeConversationForkLifecycleStore) { s.chatErr = store.ErrConversationForkNotFound },
+			mutate: func(s *fakeConversationForkLifecycleStore) { s.prepareErr = store.ErrConversationForkNotFound },
 			code:   ForkNotFoundCode,
 			detail: map[string]any{"fork_id": forkID},
 		},
@@ -323,7 +401,10 @@ func TestOperatorConversationForkHandlersTypedErrors(t *testing.T) {
 				Handlers: OperatorReadHandlers(OperatorReadOptions{
 					Now:               func() time.Time { return now },
 					ConversationForks: forks,
-					Idempotency:       newMutatingProbeIdempotencyStore(),
+					ForkChatExecutor: &fakeForkChatExecutor{result: store.ConversationForkChatExecution{
+						AssistantMessage: "ok",
+					}},
+					Idempotency: newMutatingProbeIdempotencyStore(),
 				}),
 			})
 			resp := rpcCall(t, handler, tt.body)
@@ -348,6 +429,172 @@ func TestOperatorConversationForkHandlersTypedErrors(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestLLMForkChatExecutorUsesRuntimeRequestedToolsOnly(t *testing.T) {
+	prepared := store.ConversationForkChatPrepared{
+		Fork: store.OperatorConversationForkSession{
+			ForkID:        "fork-1",
+			SourceRunID:   "run-1",
+			SourceAgentID: "agent-source",
+		},
+		Snapshot: store.ConversationForkSnapshot{
+			SnapshotOwner: store.ConversationForkChatSnapshotOwner,
+			EntitySnapshot: []store.ConversationForkEntitySnapshot{{
+				EntityID:     "entity-1",
+				CurrentState: "draft",
+				Fields:       map[string]any{"name": "Before"},
+			}},
+		},
+		SandboxPolicy: store.ConversationForkSandboxPolicy{
+			Owner:        store.ConversationForkChatSandboxOwner,
+			ReadPolicy:   "fork_snapshot_only",
+			WritePolicy:  "stub_record_only_no_live_mutation",
+			StubbedTools: []string{"save_entity_field", "emit_event", "mailbox.approve", "run.start", "run.stop"},
+		},
+		AvailableTools: []string{"fork_snapshot_read_entities", "save_entity_field", "emit_event", "mailbox_approve", "run_start", "run_stop"},
+	}
+	rt := &forkChatScriptedRuntime{
+		responses: []*runtimellm.Response{
+			{
+				Message: runtimellm.Message{Role: "assistant", Content: "checking tools"},
+				ToolCalls: []runtimellm.ToolCall{
+					{Name: "fork_snapshot_read_entities", Arguments: map[string]any{"entity_id": "entity-1"}},
+					{Name: "save_entity_field", Arguments: map[string]any{"entity_id": "entity-1", "field": "name", "value": "Sandbox"}},
+					{Name: "emit_event", Arguments: map[string]any{"event_name": "forkchat.note"}},
+					{Name: "mailbox_approve", Arguments: map[string]any{"mailbox_id": "mb-1"}},
+					{Name: "run_start", Arguments: map[string]any{"event_name": "scan.requested"}},
+				},
+			},
+			{Message: runtimellm.Message{Role: "assistant", Content: "snapshot says Before; writes were stubbed"}},
+		},
+	}
+	execution, err := NewLLMForkChatExecutor(rt).ExecuteForkChat(context.Background(), prepared, "inspect and try sandbox writes")
+	if err != nil {
+		t.Fatalf("ExecuteForkChat: %v", err)
+	}
+	if rt.startAgentID != "agent-source" {
+		t.Fatalf("StartSession agentID = %q, want source agent", rt.startAgentID)
+	}
+	if !strings.Contains(rt.systemPrompt, "isolated forensic sandbox") || !strings.Contains(rt.systemPrompt, store.ConversationForkChatSnapshotOwner) {
+		t.Fatalf("system prompt = %q, want forkchat sandbox/snapshot context", rt.systemPrompt)
+	}
+	if got := forkChatToolNames(rt.tools); !stringSetContainsAll(got, "fork_snapshot_read_entities", "save_entity_field", "emit_event", "mailbox_approve", "run_start") {
+		t.Fatalf("runtime tools = %v", got)
+	}
+	if len(rt.messages) != 2 || rt.messages[0].Role != "user" || rt.messages[1].Role != "tool" {
+		t.Fatalf("runtime messages = %#v, want user then tool result follow-up", rt.messages)
+	}
+	if execution.AssistantMessage != "snapshot says Before; writes were stubbed" {
+		t.Fatalf("assistant message = %q", execution.AssistantMessage)
+	}
+	if len(execution.ToolCalls) != 5 {
+		t.Fatalf("tool calls = %#v, want only five runtime-requested calls", execution.ToolCalls)
+	}
+	if findConversationForkToolCall(execution.ToolCalls, "run_stop") != nil {
+		t.Fatalf("unrequested run_stop was persisted: %#v", execution.ToolCalls)
+	}
+	read := requireAPIForkToolCall(t, execution.ToolCalls, "fork_snapshot_read_entities")
+	readResult := decodeJSONMap(t, read.Result)
+	if readResult["status"] != "read_from_snapshot" || readResult["snapshot_owner"] != store.ConversationForkChatSnapshotOwner || readResult["entity_count"] != float64(1) {
+		t.Fatalf("snapshot read result = %#v", readResult)
+	}
+	for _, name := range []string{"save_entity_field", "emit_event", "mailbox_approve", "run_start"} {
+		call := requireAPIForkToolCall(t, execution.ToolCalls, name)
+		result := decodeJSONMap(t, call.Result)
+		if result["status"] != "stubbed" || result["owner"] != store.ConversationForkChatSandboxOwner || result["live_mutation"] != false {
+			t.Fatalf("%s result = %#v, want stubbed no-live-mutation", name, result)
+		}
+	}
+	toolResults := decodeJSONArray(t, rt.messages[1].Content)
+	if len(toolResults) != 5 {
+		t.Fatalf("tool result payload = %#v, want five results", toolResults)
+	}
+}
+
+type forkChatScriptedRuntime struct {
+	responses    []*runtimellm.Response
+	startAgentID string
+	systemPrompt string
+	tools        []runtimellm.ToolDefinition
+	messages     []runtimellm.Message
+}
+
+func (r *forkChatScriptedRuntime) StartSession(_ context.Context, agentID, systemPrompt string, tools []runtimellm.ToolDefinition) (*runtimellm.Session, error) {
+	r.startAgentID = agentID
+	r.systemPrompt = systemPrompt
+	r.tools = append([]runtimellm.ToolDefinition(nil), tools...)
+	return &runtimellm.Session{ID: "forkchat-runtime-session", AgentID: agentID, RuntimeMode: "task"}, nil
+}
+
+func (r *forkChatScriptedRuntime) ContinueSession(_ context.Context, _ *runtimellm.Session, message runtimellm.Message) (*runtimellm.Response, error) {
+	r.messages = append(r.messages, message)
+	if len(r.responses) == 0 {
+		return &runtimellm.Response{Message: runtimellm.Message{Role: "assistant", Content: "done"}}, nil
+	}
+	resp := r.responses[0]
+	r.responses = r.responses[1:]
+	return resp, nil
+}
+
+func forkChatToolNames(tools []runtimellm.ToolDefinition) []string {
+	out := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		out = append(out, tool.Name)
+	}
+	return out
+}
+
+func stringSetContainsAll(values []string, wants ...string) bool {
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		seen[value] = struct{}{}
+	}
+	for _, want := range wants {
+		if _, ok := seen[want]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func requireAPIForkToolCall(t *testing.T, calls []store.OperatorConversationToolCall, name string) store.OperatorConversationToolCall {
+	t.Helper()
+	if call := findConversationForkToolCall(calls, name); call != nil {
+		if len(call.Result) == 0 {
+			t.Fatalf("%s tool call missing result: %#v", name, *call)
+		}
+		return *call
+	}
+	t.Fatalf("tool call %s missing from %#v", name, calls)
+	return store.OperatorConversationToolCall{}
+}
+
+func findConversationForkToolCall(calls []store.OperatorConversationToolCall, name string) *store.OperatorConversationToolCall {
+	for i := range calls {
+		if calls[i].Name == name {
+			return &calls[i]
+		}
+	}
+	return nil
+}
+
+func decodeJSONMap(t *testing.T, raw json.RawMessage) map[string]any {
+	t.Helper()
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("decode JSON map %s: %v", string(raw), err)
+	}
+	return out
+}
+
+func decodeJSONArray(t *testing.T, raw string) []map[string]any {
+	t.Helper()
+	var out []map[string]any
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		t.Fatalf("decode JSON array %s: %v", raw, err)
+	}
+	return out
 }
 
 func TestOperatorConversationForkRejectsInvalidForkPointBeforeOwner(t *testing.T) {
