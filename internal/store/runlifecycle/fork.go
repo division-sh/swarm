@@ -8,10 +8,12 @@ import (
 )
 
 type InsertForkOptions struct {
-	HasBundleHashCol   bool
-	HasBundleSourceCol bool
-	BundleHash         string
-	BundleSource       string
+	HasBundleHashCol        bool
+	HasBundleSourceCol      bool
+	HasBundleFingerprintCol bool
+	BundleHash              string
+	BundleSource            string
+	BundleFingerprint       string
 }
 
 func InsertFork(ctx context.Context, db DBTX, forkRunID, status, sourceRunID, forkEventID string, entityCount int, startedAt time.Time, opts InsertForkOptions) error {
@@ -59,6 +61,11 @@ func InsertFork(ctx context.Context, db DBTX, forkRunID, status, sourceRunID, fo
 		args = append(args, bundleSource)
 		cols = append(cols, "bundle_source")
 		values = append(values, fmt.Sprintf("$%d", len(args)))
+	}
+	if opts.HasBundleFingerprintCol {
+		args = append(args, strings.TrimSpace(opts.BundleFingerprint))
+		cols = append(cols, "bundle_fingerprint")
+		values = append(values, fmt.Sprintf("NULLIF($%d, '')", len(args)))
 	}
 	_, err = db.ExecContext(ctx, `
 		INSERT INTO runs (`+strings.Join(cols, ", ")+`)

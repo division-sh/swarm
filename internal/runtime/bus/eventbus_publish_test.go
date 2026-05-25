@@ -1033,8 +1033,8 @@ func TestEventBusPublish_ClassifiesRunBundleSourceThroughRunLifecycleOwner(t *te
 	`, runID).Scan(&bundleHash, &bundleSource, &legacyFingerprint); err != nil {
 		t.Fatalf("load run bundle source: %v", err)
 	}
-	if bundleHash != "" || bundleSource != "legacy" || legacyFingerprint != "" {
-		t.Fatalf("bundle identity = hash:%q source:%q fingerprint:%q, want legacy without copied fingerprint", bundleHash, bundleSource, legacyFingerprint)
+	if bundleHash != "" || bundleSource != "legacy" || legacyFingerprint != fingerprint {
+		t.Fatalf("bundle identity = hash:%q source:%q fingerprint:%q, want legacy with compatibility fingerprint", bundleHash, bundleSource, legacyFingerprint)
 	}
 }
 
