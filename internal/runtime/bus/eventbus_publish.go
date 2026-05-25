@@ -196,7 +196,8 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 		if err := eb.publishTransactional(ictx, evt, start, &deferredTransitions, txStore); err != nil {
 			return err
 		}
-		return eb.convergeStandaloneRuntimePlatformRun(ictx, evt)
+		eb.recordCommittedPublishConvergence(ictx, evt)
+		return nil
 	}
 
 	persisted := false
@@ -519,6 +520,15 @@ func (eb *EventBus) publishTransactional(
 func (eb *EventBus) recordCommittedPublishReceipt(ctx context.Context, evt events.Event, publishErr error) {
 	status, errText := pipelineReceiptStatus(ctx, publishErr)
 	_ = eb.markPipelineReceipt(ctx, evt.ID, status, errText)
+}
+
+func (eb *EventBus) recordCommittedPublishConvergence(ctx context.Context, evt events.Event) {
+	if err := eb.convergeStandaloneRuntimePlatformRun(ctx, evt); err != nil {
+		eb.recordCommittedPublishReceipt(ctx, evt, err)
+		eb.logRuntime(ctx, "error", "Post-commit publish convergence failed", "eventbus", "publish_post_commit_convergence_failed", evt.ID, string(evt.Type), evt.SourceAgent, evt.EntityID(), "", nil, map[string]any{
+			"error": err.Error(),
+		}, err.Error(), 0)
+	}
 }
 
 func txTableExists(ctx context.Context, tx *sql.Tx, table string) bool {
