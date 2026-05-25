@@ -85,16 +85,53 @@ func NewClaudeCLIRuntimeWithOptions(
 	}
 }
 
-func (r *ClaudeCLIRuntime) NativeToolCapabilities() NativeToolCapabilities {
-	return NativeToolCapabilities{
-		Bash:      true,
-		WebSearch: true,
-		FileIO:    true,
-	}
+func (r *ClaudeCLIRuntime) ProviderContract() ProviderContract {
+	return ClaudeCLIProviderContract()
 }
 
-func (r *ClaudeCLIRuntime) EnforceProviderNativeToolSupport() bool {
-	return true
+func ClaudeCLIProviderContract() ProviderContract {
+	return ProviderContract{
+		RuntimeMode: "cli_test",
+		Provider:    "claude",
+		Transport:   ProviderTransportCLI,
+		ToolSchema: ProviderToolSchemaContract{
+			ValidatesInputSchemas: true,
+			TranslatesTools:       true,
+			ReturnsToolResults:    true,
+		},
+		SessionLifecycle: ProviderSessionLifecycleContract{
+			StartsSessions:            true,
+			ContinuesSessions:         true,
+			SupportsConversationModes: true,
+			ProviderSessionIDStrategy: "provider_adopted",
+			RotatesSessions:           true,
+			PreservesRetryLineage:     true,
+		},
+		Response: ProviderResponseContract{
+			NormalizesMessages:     true,
+			NormalizesToolCalls:    true,
+			PreservesRawResponse:   true,
+			NormalizesVisibleTools: true,
+			StreamingParser:        "claude_cli_stream_json",
+		},
+		NativeTools: ProviderNativeToolContract{
+			Capabilities: NativeToolCapabilities{
+				Bash:      true,
+				WebSearch: true,
+				FileIO:    true,
+			},
+			StrictProviderNativeSupport: true,
+			StartupVisibleSurfaceProbe:  true,
+		},
+		Persistence: ProviderPersistenceContract{
+			PersistsTurns:                 true,
+			PersistsConversationSnapshots: true,
+			PersistsTaskModeAudit:         true,
+		},
+		Budget: ProviderBudgetContract{
+			UsageAccounting: BudgetUsageEstimated,
+		},
+	}
 }
 
 func (r *ClaudeCLIRuntime) PersistConversationSnapshot(ctx context.Context, s *Session) error {

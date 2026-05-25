@@ -22,11 +22,7 @@ func ValidateNativeToolBootConfig(ctx context.Context, source semanticview.Sourc
 	if !runtimeEnforcesProviderNativeTools(runtime) {
 		return validateFallbackNativeToolBootConfig(ctx, source, store, runtime)
 	}
-	provider, ok := runtime.(llm.NativeToolCapabilityProvider)
-	if !ok || provider == nil {
-		return nil, fmt.Errorf("native tools are enabled but runtime does not expose native tool capabilities")
-	}
-	caps := provider.NativeToolCapabilities()
+	caps := llm.NativeToolCapabilitiesForRuntime(runtime)
 	unsupported := make([]string, 0, len(enabled))
 	for _, capability := range enabled {
 		if nativeToolCapabilitySupported(caps, capability) {
@@ -46,18 +42,14 @@ func ValidateNativeToolBootConfig(ctx context.Context, source semanticview.Sourc
 }
 
 func runtimeEnforcesProviderNativeTools(runtime llm.Runtime) bool {
-	strict, ok := runtime.(llm.NativeToolStrictProvider)
-	return ok && strict != nil && strict.EnforceProviderNativeToolSupport()
+	return llm.RuntimeEnforcesProviderNativeTools(runtime)
 }
 
 func validateFallbackNativeToolBootConfig(ctx context.Context, source semanticview.Source, store runtimecredentials.Store, runtime llm.Runtime) ([]error, error) {
 	if !nativeToolCapabilityEnabled(source, "web_search") {
 		return nil, nil
 	}
-	caps := llm.NativeToolCapabilities{}
-	if provider, ok := runtime.(llm.NativeToolCapabilityProvider); ok && provider != nil {
-		caps = provider.NativeToolCapabilities()
-	}
+	caps := llm.NativeToolCapabilitiesForRuntime(runtime)
 	if caps.WebSearch {
 		return nil, nil
 	}

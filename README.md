@@ -10,7 +10,7 @@ Less an agent library, more a distributed operating system for LLMs. It assumes 
 
 **Long-term direction:** Support entire divisions (engineering, support, operations) running as autonomous Swarm flows. Humans in the loop where judgment is required; agents and deterministic system nodes everywhere else.
 
-Single Go binary, Postgres for persistence. Two LLM runtimes ship today: an Anthropic API mode and a CLI-driven mode wrapping the Claude CLI as a subprocess. The runtime factory is provider-agnostic and more providers will follow.
+Single Go binary, Postgres for persistence. Two LLM runtimes ship today: an Anthropic API mode and a CLI-driven mode wrapping the Claude CLI as a subprocess. Both consume the shared LLM provider adapter contract; adding another provider is separate gated runtime/config work.
 
 ---
 
@@ -81,7 +81,7 @@ Guard failures have explicit semantics: `reject` (default), `discard`, `kill`, o
 
 ## Quickstart
 
-Requires Docker, a contract bundle, and credentials for whichever LLM you plan to use.
+Requires Docker, a contract bundle, and credentials for the configured shipped LLM runtime.
 
 ```bash
 # 1. clone
@@ -89,7 +89,8 @@ git clone https://github.com/<org>/swarm && cd swarm
 
 # 2. point at a contract bundle
 export SWARM_CONTRACTS_HOST_DIR=/absolute/path/to/your/contracts
-echo 'CLAUDE_CODE_OAUTH_TOKEN=...' >> .env   # or your provider of choice
+echo 'CLAUDE_CODE_OAUTH_TOKEN=...' >> .env   # for cli_test mode
+# or set ANTHROPIC_API_KEY=... for api mode
 
 # 3. boot
 docker compose up -d postgres orchestrator

@@ -25,6 +25,9 @@ type RuntimeFactory struct {
 }
 
 func (f RuntimeFactory) Build() (Runtime, error) {
+	if f.Cfg == nil {
+		return nil, fmt.Errorf("llm runtime config is required")
+	}
 	if f.Sessions == nil {
 		f.Sessions = sessions.NewInMemoryRegistry(f.Cfg.LLM.Session.LockTTL)
 	}
@@ -32,16 +35,21 @@ func (f RuntimeFactory) Build() (Runtime, error) {
 		f.LockOwner = defaultLockOwner()
 	}
 
+	var runtime Runtime
 	switch f.Cfg.LLM.RuntimeMode {
 	case "api":
-		return NewAnthropicAPIRuntime(f.Cfg, f.Sessions, f.LockOwner, f.Turns, f.Conversations, f.Budget, f.Events), nil
+		runtime = NewAnthropicAPIRuntime(f.Cfg, f.Sessions, f.LockOwner, f.Turns, f.Conversations, f.Budget, f.Events)
 	case "cli_test":
-		return NewClaudeCLIRuntimeWithOptions(f.Cfg, f.Sessions, f.LockOwner, f.Turns, f.Budget, f.Workspaces, f.Conversations, f.Events, ClaudeCLIRuntimeOptions{
+		runtime = NewClaudeCLIRuntimeWithOptions(f.Cfg, f.Sessions, f.LockOwner, f.Turns, f.Budget, f.Workspaces, f.Conversations, f.Events, ClaudeCLIRuntimeOptions{
 			MCPTurnContextStore: f.MCPTurns,
-		}), nil
+		})
 	default:
 		return nil, fmt.Errorf("unsupported llm runtime mode: %s", f.Cfg.LLM.RuntimeMode)
 	}
+	if _, err := RequireProviderContract(f.Cfg.LLM.RuntimeMode, runtime); err != nil {
+		return nil, err
+	}
+	return runtime, nil
 }
 
 // NoopRuntime is useful in early bootstrap phases and tests.

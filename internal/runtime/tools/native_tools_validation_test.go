@@ -16,12 +16,14 @@ type nativeCapabilityRuntimeStub struct {
 	strict bool
 }
 
-func (s nativeCapabilityRuntimeStub) NativeToolCapabilities() llm.NativeToolCapabilities {
-	return s.caps
-}
-
-func (s nativeCapabilityRuntimeStub) EnforceProviderNativeToolSupport() bool {
-	return s.strict
+func (s nativeCapabilityRuntimeStub) ProviderContract() llm.ProviderContract {
+	contract := llm.AnthropicAPIProviderContract()
+	contract.RuntimeMode = "stub"
+	contract.Provider = "stub"
+	contract.NativeTools.Capabilities = s.caps
+	contract.NativeTools.StrictProviderNativeSupport = s.strict
+	contract.NativeTools.FallbackToolsAllowed = !s.strict
+	return contract
 }
 
 func TestValidateNativeToolBootConfig_FailsClosedWhenRuntimeLacksNativeCapability(t *testing.T) {

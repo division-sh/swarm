@@ -2115,6 +2115,59 @@ engine:
     agent_invocation: 'Agents are invoked via claude -p (CLI) or equivalent LLM API call. The platform constructs the invocation:
       system prompt + event context + tool schemas. Agents are short-lived and task-scoped. No persistent memory between sessions.
       Context from previous interactions is provided via event payload and entity state.'
+    llm_provider_adapter_contract:
+      description: Runtime LLM provider adapters are the canonical boundary between platform agent execution and provider-specific
+        API or CLI transports. A provider adapter is production-ready only when it declares and satisfies the full adjacency
+        contract for tool-schema translation, session lifecycle, response normalization, native-tool capability truth, turn/audit
+        persistence, and budget usage accounting. A runtime mode switch or StartSession/ContinueSession implementation alone
+        is not sufficient provider ownership.
+      owner: internal/runtime/llm provider contract
+      required_contract_dimensions:
+        tool_schema:
+          rules:
+          - Platform tool definitions must be translated to the provider-facing schema format before invocation.
+          - Provider-facing input schemas must be validated before execution reaches the provider.
+          - Platform tool results must be returned through the provider adapter in a normalized message form.
+        session_lifecycle:
+          rules:
+          - The adapter must preserve task, session, and session_per_entity conversation modes.
+          - Platform session IDs remain platform-owned; external provider session IDs, when present, are stored only as provider
+            implementation details.
+          - Session rotation and retry lineage must be accounted for by the adapter contract.
+        response_normalization:
+          rules:
+          - Provider responses must normalize assistant messages and tool calls into the platform response model.
+          - Raw provider responses must be preserved for turn/audit persistence.
+          - Provider-specific stream parsers are implementation details behind the adapter contract, not generic platform truth.
+        native_tools:
+          rules:
+          - The adapter must declare whether it is strict provider-native for native_tools and which native capabilities are callable.
+          - Strict provider-native adapters must fail closed rather than satisfying native_tools through fallback paths.
+          - Persisted turn visible-tool facts must reflect callable truth for the adapter's turn.
+        persistence:
+          rules:
+          - Agent turns and task-mode audits must be persisted consistently across adapters.
+          - Conversation snapshots for reusable session modes must be explicit adapter behavior.
+        budget:
+          rules:
+          - The adapter must declare whether usage accounting is exact provider-reported usage or an estimate.
+          - Budget records must include enough runtime/provider metadata for audit and cost attribution.
+      current_runtime_modes:
+        api:
+          provider: anthropic
+          transport: api
+          budget_usage_accounting: exact
+          native_tool_policy: fallback-aware non-strict runtime
+        cli_test:
+          provider: claude
+          transport: cli
+          budget_usage_accounting: estimated
+          native_tool_policy: strict provider-native runtime
+      split_boundaries:
+      - Adding new provider identities such as OpenAI, Ollama, Bedrock, Azure OpenAI, Vertex, or vLLM requires a separate
+        provider-selection/config gate.
+      - Renaming cli_test is a separate compatibility/semantics decision.
+      - Provider-selection UI and runtime mode/env/config policy are outside this adapter-contract slice.
     conversation_modes:
       description: How the platform manages agent session context across invocations.
       modes:

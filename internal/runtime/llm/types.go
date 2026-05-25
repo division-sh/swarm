@@ -112,14 +112,6 @@ type NativeToolCapabilities struct {
 	FileIO    bool
 }
 
-type NativeToolCapabilityProvider interface {
-	NativeToolCapabilities() NativeToolCapabilities
-}
-
-type NativeToolStrictProvider interface {
-	EnforceProviderNativeToolSupport() bool
-}
-
 type StartupVisibleToolSurfaceProber interface {
 	ProbeStartupVisibleToolSurface(ctx context.Context, actor models.AgentConfig, systemPrompt string, tools []ToolDefinition) (*Response, error)
 }
