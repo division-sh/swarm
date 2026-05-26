@@ -283,14 +283,15 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 	}, registry, "worker-1", nil, pg, nil, bus)
 
 	newTurnContext := func(evt events.Event) context.Context {
-		base := runtimesessions.WithScope(context.Background(), runtimesessions.RuntimeModeSession.String(), runtimesessions.SessionScopeGlobal.String(), "global")
+		base := runtimesessions.WithScope(context.Background(), runtimesessions.RuntimeModeSession.String(), runtimesessions.SessionScopeFlow.String(), "support/inst-1")
 		base = runtimecorrelation.WithRunID(base, runID)
 		base = runtimebus.WithInboundEvent(base, evt)
 		return runtimeactors.WithActor(base, runtimeactors.AgentConfig{
 			ID:               "agent-1",
 			Type:             "stub",
-			SessionScope:     runtimesessions.SessionScopeGlobal.String(),
+			SessionScope:     runtimesessions.SessionScopeFlow.String(),
 			ConversationMode: runtimesessions.RuntimeModeSession.String(),
+			FlowPath:         "support/inst-1",
 		})
 	}
 
@@ -346,14 +347,14 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 	if sessionStatus != "active" {
 		t.Fatalf("session status = %q, want active", sessionStatus)
 	}
-	if sessionScopeKey != "global" {
-		t.Fatalf("session scope_key = %q, want global", sessionScopeKey)
+	if sessionScopeKey != "support/inst-1" {
+		t.Fatalf("session scope_key = %q, want support/inst-1", sessionScopeKey)
 	}
 	if err := db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM agent_sessions
 		WHERE agent_id = 'agent-1'
-		  AND scope_key = 'global'
+		  AND scope_key = 'support/inst-1'
 		  AND runtime_mode = 'session'
 		  AND status = 'active'
 	`).Scan(&liveSessionCount); err != nil {
@@ -449,14 +450,15 @@ printf '{"result":"ok"}'
 	}, pg, bus)
 
 	newTurnContext := func(evt events.Event) context.Context {
-		base := runtimesessions.WithScope(context.Background(), runtimesessions.RuntimeModeSession.String(), runtimesessions.SessionScopeGlobal.String(), "global")
+		base := runtimesessions.WithScope(context.Background(), runtimesessions.RuntimeModeSession.String(), runtimesessions.SessionScopeFlow.String(), "support/inst-1")
 		base = runtimecorrelation.WithRunID(base, runID)
 		base = runtimebus.WithInboundEvent(base, evt)
 		return runtimeactors.WithActor(base, runtimeactors.AgentConfig{
 			ID:               "agent-1",
 			Type:             "stub",
-			SessionScope:     runtimesessions.SessionScopeGlobal.String(),
+			SessionScope:     runtimesessions.SessionScopeFlow.String(),
 			ConversationMode: runtimesessions.RuntimeModeSession.String(),
+			FlowPath:         "support/inst-1",
 		})
 	}
 

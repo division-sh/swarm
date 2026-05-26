@@ -193,6 +193,9 @@ func hydratePersistedAgentConfig(row persistedAgentProjection) (runtimeactors.Ag
 	}
 	cfg.NormalizeEntityID()
 	cfg.NormalizeRuntimeDescriptor()
+	if _, err := runtimesessions.ValidateAgentSessionScopeConfig(cfg); err != nil {
+		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s invalid session scope: %w", strings.TrimSpace(row.AgentID), err)
+	}
 	return cfg, nil
 }
 

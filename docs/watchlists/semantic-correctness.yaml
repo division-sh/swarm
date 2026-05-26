@@ -79,6 +79,10 @@ active_issues:
       - boot_verification_false_negative_validation
       - loader_tree_identity_loss_before_boot_validation
       - flow_owned_session_scope_proof_across_supported_consumers
+  - id: 557
+    title: Deprecate authored business-agent session_scope global
+    maps_to:
+      - authored_global_session_scope_retirement
   - id: 255
     title: Allow self-target entity updates in expression field reference validation
     maps_to:
@@ -335,6 +339,29 @@ nodes:
         - one bootverify rejection
         - one loader/tree field is blank
     current_action_pressure: active
+  - id: authored_global_session_scope_retirement
+    title: Authored Global Session-Scope Retirement
+    parent_class: product-authored business authority can bypass flow ownership by selecting platform-global reusable session scope
+    canonical_owners:
+      - docs/specs/swarm-platform/platform/contracts/platform-spec.yaml conversation_modes and session_scope_intent
+      - internal/runtime/sessions/scope.go authored session-scope validation and runtime resolution
+    why_this_node_exists: session_scope global is valid persisted/internal runtime state, but product-authored normal agents must not acquire platform-wide reusable conversation authority by declaring a string field.
+    known_manifestations:
+      - bootverify can accept root authored agents with conversation_mode session and session_scope global
+      - NewLLMAgent, static materialization, recovery, agent_hire, and agent_reconfigure can admit the same authored global session config if they bypass the shared owner
+      - session acquisition and conversation persistence can resolve global scope for normal actor contexts unless they consume the authored-boundary rule
+      - persisted/operator read surfaces must still display historical/internal global rows without becoming producers of authored global sessions
+    representative_issues:
+      - 557
+    common_framing_mistakes:
+      too_broad:
+        - all typed tool-surface architecture
+        - deleting global from the persisted session enum
+      too_narrow:
+        - one lifecycle-coordinator fixture
+        - one bootverify rejection site
+        - preserving global via type, role, mode, tools, or opaque config heuristics
+    current_action_pressure: active implementation under issue 557
   - id: lifecycle_aware_entity_field_availability_validation
     title: Lifecycle-Aware Entity-Field Availability Validation
     parent_class: lifecycle proof drift across handler planning, validation, and execution

@@ -260,6 +260,9 @@ func (am *AgentManager) spawnAgentInternal(ctx context.Context, rec PersistedAge
 	if strings.TrimSpace(rec.Config.LLMBackend) == "" {
 		rec.Config.LLMBackend = am.llmBackend
 	}
+	if _, err := sessions.ValidateAgentSessionScopeConfig(rec.Config); err != nil {
+		return fmt.Errorf("invalid agent session scope: %w", err)
+	}
 	a, err := am.buildAgent(rec.Config)
 	if err != nil {
 		return err
@@ -358,6 +361,9 @@ func (am *AgentManager) ReconfigureAgent(agentID string, cfg models.AgentConfig)
 	}
 	if updated.ID != agentID {
 		return fmt.Errorf("agent id mismatch: target=%s config.id=%s", agentID, updated.ID)
+	}
+	if _, err := sessions.ValidateAgentSessionScopeConfig(updated); err != nil {
+		return fmt.Errorf("invalid agent session scope: %w", err)
 	}
 
 	newAgent, err := am.buildAgent(updated)

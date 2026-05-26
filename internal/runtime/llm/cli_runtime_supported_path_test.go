@@ -136,15 +136,16 @@ func TestConversationStep_ClaudeCLIFirstTurnPreservesSupportedReadFileSurface(t 
 	ctx := runtimebus.WithEmittedEventsRecorder(
 		sessions.WithScope(
 			runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{
-				ID: "market-research-agent",
+				ID:       "market-research-agent",
+				FlowPath: "market/inst-1",
 				NativeTools: runtimeactors.NativeToolConfig{
 					FileIO: true,
 				},
-				SessionScope: sessions.SessionScopeGlobal.String(),
+				SessionScope: sessions.SessionScopeFlow.String(),
 			}),
 			sessions.RuntimeModeSession.String(),
-			sessions.SessionScopeGlobal.String(),
-			"global",
+			sessions.SessionScopeFlow.String(),
+			"market/inst-1",
 		),
 		recorder,
 	)
