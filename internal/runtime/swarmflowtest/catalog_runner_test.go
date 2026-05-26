@@ -1502,11 +1502,11 @@ func catalogPromptSemanticSourceAndMode(bundle *runtimecontracts.WorkflowContrac
 			FlowID:     semanticFlowID,
 			Layer:      "flow",
 		}
-		if semanticMode := strings.TrimSpace(flow.Schema.Mode); semanticMode != "" {
-			mode = semanticMode
-		}
 		if pathMode := strings.TrimSpace(flow.Paths.Mode); pathMode != "" {
 			mode = pathMode
+		}
+		if semanticMode := strings.TrimSpace(flow.Schema.Mode); semanticMode != "" {
+			mode = semanticMode
 		}
 	}
 	return source, mode
