@@ -142,3 +142,28 @@ func TestCatalogToolRequiredPermission_AcceptsPermissionAlias(t *testing.T) {
 		t.Fatalf("required permission = %q, want %q", got, want)
 	}
 }
+
+func TestCatalogRequiredAgentIssuesRequireMapKeyIdentity(t *testing.T) {
+	issues := catalogRequiredAgentIssues(catalogBootScope{
+		Name: "analysis",
+		Agents: map[string]any{
+			"worker-alias": map[string]any{
+				"id":            "worker",
+				"role":          "worker",
+				"subscriptions": []any{"analysis.requested"},
+				"emit_events":   []any{"analysis.done"},
+			},
+		},
+		Schema: map[string]any{
+			"required_agents": []any{map[string]any{
+				"role":          "worker",
+				"subscribes_to": []any{"analysis.requested"},
+				"emits":         []any{"analysis.done"},
+			}},
+		},
+	})
+
+	if len(issues) != 1 || issues[0].Category != "REQUIRED-AGENT" {
+		t.Fatalf("issues = %#v, want REQUIRED-AGENT", issues)
+	}
+}

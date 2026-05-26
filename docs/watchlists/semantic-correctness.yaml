@@ -258,12 +258,14 @@ nodes:
       - handler_field_compliance is interpreted as handler field vocabulary only in spec/reference surfaces while Go bootverify uses it for supported handler action declarations, executable owner resolution, and runtime-handled event executor presence
       - platform_tool_usage_hints and generated_tool_schema_closure are live runtime tool-surface checks that need authoritative boot-check definitions and shared consumer proof
       - tool_resolution can drift when structural verifier scripts interpret only tools.yaml while Go bootverify consumes the merged runtime tool registry and MCP discovery boundary
+      - required_agents_match can drift when spec, bootverify, runtime startup, verifier scripts, and catalog harness disagree on map-key role identity or required subscribes_to / emits coverage
     representative_issues:
       - 447
       - 448
       - 974
       - 1055
       - 1065
+      - 1072
     common_framing_mistakes:
       too_broad:
         - all bootverify drift

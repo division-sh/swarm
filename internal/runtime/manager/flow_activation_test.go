@@ -875,6 +875,25 @@ func TestEnsureStaticFlowRequiredAgentsRegistersStaticFlowSubscriptions(t *testi
 	}
 }
 
+func TestStaticRequiredAgentsForScopeRejectsRoleFallbackWithoutMapKey(t *testing.T) {
+	records, err := staticRequiredAgentsForScope(nil, "analysis", "analysis", map[string]runtimecontracts.AgentRegistryEntry{
+		"worker-alias": {
+			ID:            "worker",
+			Role:          "worker",
+			Subscriptions: []string{"analysis.requested"},
+			EmitEvents:    []string{"analysis.done"},
+		},
+	}, []runtimecontracts.FlowRequiredAgent{{
+		Role:         "worker",
+		SubscribesTo: []string{"analysis.requested"},
+		Emits:        []string{"analysis.done"},
+	}})
+
+	if err == nil || !strings.Contains(err.Error(), `required agent "worker"`) {
+		t.Fatalf("expected required-agent map-key error, records=%#v err=%v", records, err)
+	}
+}
+
 func TestEnsureStaticAgentsForScopeRegistersRootAndFlowSubscriptions(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	am := newFlowActivationManager(bus, &flowActivationTestInstanceStore{})

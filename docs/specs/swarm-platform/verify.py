@@ -65,6 +65,7 @@ root_nodes = load_if_exists(os.path.join(EC, 'nodes.yaml'))
 root_events = load_if_exists(os.path.join(EC, 'events.yaml'))
 root_tools = load_if_exists(os.path.join(EC, 'tools.yaml'))
 root_policy = load_if_exists(os.path.join(EC, 'policy.yaml'))
+root_schema = load_if_exists(os.path.join(EC, 'schema.yaml'))
 
 flow_data = {}
 for flow in FLOWS:
@@ -583,21 +584,31 @@ for flow in FLOWS:
 # ============================================================
 # CHECK: required_agents_match [error, per-flow]
 # ============================================================
-for flow in FLOWS:
-    if flow not in flow_data: continue
-    schema = flow_data[flow]['schema']
-    agents = flow_data[flow]['agents']
+def check_required_agents_match(scope, schema, agents):
     for ra in schema.get('required_agents', []):
         role = ra.get('role', '')
+        if not role:
+            error("required_agents_match", "required_agents entry missing role", scope)
+            continue
         agent = agents.get(role)
         if not isinstance(agent, dict):
-            error("required_agents_match", "required role '%s' not in agents.yaml" % role, flow)
+            error("required_agents_match", "required role '%s' not in agents.yaml" % role, scope)
             continue
+        schema_subscriptions = set(ra.get('subscribes_to', []))
+        agent_subscriptions = set(agent.get('subscribes_to', []) + agent.get('subscriptions', []) + agent.get('subscriptions_bootstrap', []))
+        sub_diff = schema_subscriptions - agent_subscriptions
+        if sub_diff:
+            error("required_agents_match", "role '%s' schema says subscribes_to %s but agent doesn't" % (role, sub_diff), scope)
         schema_emits = set(ra.get('emits', []))
         agent_emits = set(agent.get('emit_events', []))
         diff = schema_emits - agent_emits
         if diff:
-            error("required_agents_match", "role '%s' schema says emits %s but agent doesn't" % (role, diff), flow)
+            error("required_agents_match", "role '%s' schema says emits %s but agent doesn't" % (role, diff), scope)
+
+check_required_agents_match('root', root_schema, root_agents)
+for flow in FLOWS:
+    if flow not in flow_data: continue
+    check_required_agents_match(flow, flow_data[flow]['schema'], flow_data[flow]['agents'])
 
 # ============================================================
 # CHECK: handler_field_compliance [error, per-node]
