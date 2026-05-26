@@ -672,9 +672,8 @@ type runStatusOptions struct {
 	Component     string
 }
 
-// runForkRuntimeOwnerHarness preserves runtime/store fork owner coverage without
-// exposing or routing a top-level CLI command. v1 top-level `swarm fork` is
-// retired by the Cobra command tree in cli.go.
+// runForkRuntimeOwnerHarness preserves internal runtime/store fork owner coverage for targeted tests.
+// The public top-level `swarm fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]` command remains pending/split to #1023 and must consume /v1/rpc run.fork rather than this harness.
 func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string, out io.Writer) int {
 	fs := flag.NewFlagSet("fork", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
