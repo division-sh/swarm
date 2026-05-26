@@ -1343,18 +1343,7 @@ func catalogCollectBootIssues(bundle catalogBootBundle) []catalogBootIssue {
 					issues = append(issues, catalogBootIssue{Severity: "warning", Category: "PERMISSION-MISMATCH", Message: fmt.Sprintf("%s/%s: tool '%s' missing permission '%s'", scopeLabel, agentID, tool, requiredPermission)})
 				}
 			}
-			promptPath := filepath.Join(scope.Dir, "prompts", agentID+".md")
-			content, err := os.ReadFile(promptPath)
-			if err != nil {
-				if os.IsNotExist(err) {
-					issues = append(issues, catalogBootIssue{Severity: "warning", Category: "PROMPT-MISSING", Message: fmt.Sprintf("%s/%s: no prompt file", scopeLabel, agentID)})
-				}
-				continue
-			}
-			text := string(content)
-			if strings.Contains(text, "<!-- TODO") && !strings.Contains(text, "<!-- DEFERRED") {
-				issues = append(issues, catalogBootIssue{Severity: "warning", Category: "PROMPT-STUB", Message: fmt.Sprintf("%s/%s: prompt contains TODO", scopeLabel, agentID)})
-			}
+			issues = append(issues, catalogPromptIssues(bundle, scope, agentID, agent)...)
 			for _, deprecated := range []string{"subscriptions_bootstrap", "logic", "on_below_threshold", "on_dedup", "on_pass"} {
 				if _, ok := agent[deprecated]; ok {
 					issues = append(issues, catalogBootIssue{Severity: "error", Category: "DEPRECATED", Message: fmt.Sprintf("%s/%s: uses deprecated '%s'", scopeLabel, agentID, deprecated)})
@@ -1447,6 +1436,58 @@ func catalogBootScopeLabel(scope catalogBootScope) string {
 		return "root"
 	}
 	return strings.TrimSpace(scope.Name)
+}
+
+func catalogPromptIssues(bundle catalogBootBundle, scope catalogBootScope, agentID string, agent map[string]any) []catalogBootIssue {
+	scopeLabel := catalogBootScopeLabel(scope)
+	missing := func() catalogBootIssue {
+		return catalogBootIssue{Severity: "warning", Category: "PROMPT-MISSING", Message: fmt.Sprintf("%s/%s: no prompt file", scopeLabel, agentID)}
+	}
+	stub := func() catalogBootIssue {
+		return catalogBootIssue{Severity: "warning", Category: "PROMPT-STUB", Message: fmt.Sprintf("%s/%s: prompt contains TODO", scopeLabel, agentID)}
+	}
+
+	if semanticBundle, ok := semanticview.Bundle(bundle.Source); ok {
+		source := runtimecontracts.ContractItemSource{Layer: "project"}
+		if !scope.Root {
+			source = runtimecontracts.ContractItemSource{FlowID: strings.TrimSpace(scope.Name), Layer: "flow"}
+		}
+		resolution, found, err := runtimecontracts.ResolvePromptFileForContractAgent(semanticBundle, agentID, catalogPromptAgentEntry(agent), source, catalogBootText(scope.Schema["mode"]))
+		if err != nil || !found {
+			return []catalogBootIssue{missing()}
+		}
+		raw, err := os.ReadFile(resolution.Path)
+		if err != nil {
+			return nil
+		}
+		if strings.Contains(string(raw), "<!-- TODO") && !strings.Contains(string(raw), "<!-- DEFERRED") {
+			return []catalogBootIssue{stub()}
+		}
+		return nil
+	}
+
+	promptPath := filepath.Join(scope.Dir, "prompts", agentID+".md")
+	content, err := os.ReadFile(promptPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []catalogBootIssue{missing()}
+		}
+		return nil
+	}
+	if strings.Contains(string(content), "<!-- TODO") && !strings.Contains(string(content), "<!-- DEFERRED") {
+		return []catalogBootIssue{stub()}
+	}
+	return nil
+}
+
+func catalogPromptAgentEntry(agent map[string]any) runtimecontracts.AgentRegistryEntry {
+	return runtimecontracts.AgentRegistryEntry{
+		ID:             catalogBootText(agent["id"]),
+		Role:           catalogBootText(agent["role"]),
+		PromptRef:      catalogBootText(agent["prompt_ref"]),
+		WorkspaceClass: catalogBootText(agent["workspace_class"]),
+		EmitEvents:     catalogStringSlice(agent["emit_events"]),
+	}
 }
 
 func catalogRequiredAgentIssues(scope catalogBootScope) []catalogBootIssue {

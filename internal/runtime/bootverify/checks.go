@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"reflect"
 	"regexp"
 	"sort"
@@ -441,13 +440,20 @@ func (c *checkerContext) promptExists() []Finding {
 		return c.promptFindings
 	}
 	c.promptLoaded = true
+	bundle, hasBundle := semanticview.Bundle(c.source)
 	for _, scope := range c.source.ProjectScopes() {
 		scopeLabel := projectScopeLabel(scope.Key, scope.Manifest.Name)
-		c.promptFindings = append(c.promptFindings, promptFindingsForDir(scope.PromptsDir, scopeLabel, scope.Agents)...)
+		source := runtimecontracts.ContractItemSource{PackageKey: strings.TrimSpace(scope.Key), Layer: "project"}
+		c.promptFindings = append(c.promptFindings, promptFindingsForScope(bundle, hasBundle, scope.PromptsDir, scopeLabel, scope.Agents, source, "")...)
 	}
 	for _, scope := range c.source.FlowScopes() {
 		scopeLabel := flowScopeLabel(scope.ID, scope.Path)
-		c.promptFindings = append(c.promptFindings, promptFindingsForDir(scope.PromptsDir, scopeLabel, scope.Agents)...)
+		source := runtimecontracts.ContractItemSource{
+			PackageKey: strings.TrimSpace(scope.PackageKey),
+			FlowID:     strings.TrimSpace(scope.ID),
+			Layer:      "flow",
+		}
+		c.promptFindings = append(c.promptFindings, promptFindingsForScope(bundle, hasBundle, scope.PromptsDir, scopeLabel, scope.Agents, source, scope.Mode)...)
 	}
 	return c.promptFindings
 }
@@ -1200,7 +1206,48 @@ func (c *checkerContext) ensureMCPDiscovery() {
 	c.mcpDiscoveredTools = client.DiscoveredTools()
 }
 
-func promptFindingsForDir(promptsDir, scopeLabel string, agents map[string]runtimecontracts.AgentRegistryEntry) []Finding {
+func promptFindingsForScope(bundle *runtimecontracts.WorkflowContractBundle, hasBundle bool, promptsDir, scopeLabel string, agents map[string]runtimecontracts.AgentRegistryEntry, source runtimecontracts.ContractItemSource, mode string) []Finding {
+	out := make([]Finding, 0, len(agents))
+	for agentID := range agents {
+		agentID = strings.TrimSpace(agentID)
+		if agentID == "" {
+			continue
+		}
+		location := scopedObjectLabel(scopeLabel, agentID)
+		if hasBundle {
+			resolution, ok, err := runtimecontracts.ResolvePromptFileForContractAgent(bundle, agentID, agents[agentID], source, mode)
+			if err != nil || !ok {
+				out = append(out, Finding{
+					CheckID:  "prompt_exists",
+					Severity: "warning",
+					Message:  fmt.Sprintf("%s/%s: no prompt file", strings.TrimSpace(scopeLabel), agentID),
+					Location: location,
+				})
+				continue
+			}
+			text, err := promptTextForResolvedFile(resolution.Path)
+			if err != nil {
+				continue
+			}
+			if promptHasOpenTODO(text) {
+				out = append(out, Finding{
+					CheckID:  "prompt_exists",
+					Severity: "warning",
+					Message:  fmt.Sprintf("%s/%s: prompt contains TODO", strings.TrimSpace(scopeLabel), agentID),
+					Location: location,
+				})
+			}
+			continue
+		}
+
+		for _, finding := range promptFindingsForLegacyDir(promptsDir, scopeLabel, map[string]runtimecontracts.AgentRegistryEntry{agentID: agents[agentID]}) {
+			out = append(out, finding)
+		}
+	}
+	return out
+}
+
+func promptFindingsForLegacyDir(promptsDir, scopeLabel string, agents map[string]runtimecontracts.AgentRegistryEntry) []Finding {
 	out := make([]Finding, 0, len(agents))
 	for agentID := range agents {
 		agentID = strings.TrimSpace(agentID)
@@ -1217,21 +1264,23 @@ func promptFindingsForDir(promptsDir, scopeLabel string, agents map[string]runti
 			})
 			continue
 		}
-		path := filepath.Join(strings.TrimSpace(promptsDir), agentID+".md")
-		content, err := os.ReadFile(path)
-		if err != nil {
-			if os.IsNotExist(err) {
-				out = append(out, Finding{
-					CheckID:  "prompt_exists",
-					Severity: "warning",
-					Message:  fmt.Sprintf("%s/%s: no prompt file", strings.TrimSpace(scopeLabel), agentID),
-					Location: location,
-				})
-			}
+		resolution, ok, err := runtimecontracts.ResolvePromptFileForContractAgent(&runtimecontracts.WorkflowContractBundle{
+			Paths: runtimecontracts.ContractPaths{ProjectPromptsDir: strings.TrimSpace(promptsDir)},
+		}, agentID, agents[agentID], runtimecontracts.ContractItemSource{}, "")
+		if err != nil || !ok {
+			out = append(out, Finding{
+				CheckID:  "prompt_exists",
+				Severity: "warning",
+				Message:  fmt.Sprintf("%s/%s: no prompt file", strings.TrimSpace(scopeLabel), agentID),
+				Location: location,
+			})
 			continue
 		}
-		text := string(content)
-		if strings.Contains(text, "<!-- TODO") && !strings.Contains(text, "<!-- DEFERRED") {
+		text, err := promptTextForResolvedFile(resolution.Path)
+		if err != nil {
+			continue
+		}
+		if promptHasOpenTODO(text) {
 			out = append(out, Finding{
 				CheckID:  "prompt_exists",
 				Severity: "warning",
@@ -1241,6 +1290,18 @@ func promptFindingsForDir(promptsDir, scopeLabel string, agents map[string]runti
 		}
 	}
 	return out
+}
+
+func promptTextForResolvedFile(path string) (string, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
+}
+
+func promptHasOpenTODO(text string) bool {
+	return strings.Contains(text, "<!-- TODO") && !strings.Contains(text, "<!-- DEFERRED")
 }
 
 func projectScopeLabel(key, manifestName string) string {

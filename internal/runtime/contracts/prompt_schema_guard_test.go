@@ -22,6 +22,57 @@ func TestPromptSchemaGuard_EmitFieldListsMatchEventSchemasForBundle(t *testing.T
 	}
 }
 
+func TestDerivePromptSchemaGuards_UsesCanonicalPromptResolution(t *testing.T) {
+	repoRoot := repoRoot(t)
+	root := writePromptTestBundle(t, repoRoot)
+
+	agentsPath := filepath.Join(root, "agents.yaml")
+	agentsRaw, err := os.ReadFile(agentsPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", agentsPath, err)
+	}
+	agentsRaw = append(agentsRaw, []byte(strings.TrimLeft(`
+schema-ref-agent:
+  role: schema_ref
+  prompt_ref: shared-schema-prompt
+  emit_events:
+    - schema.prompt.created
+`, "\n"))...)
+	if err := os.WriteFile(agentsPath, agentsRaw, 0o644); err != nil {
+		t.Fatalf("write %s: %v", agentsPath, err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "events.yaml"), []byte(strings.TrimLeft(`
+schema.prompt.created:
+  item_id: string
+  required: [item_id]
+`, "\n")), 0o644); err != nil {
+		t.Fatalf("write events.yaml: %v", err)
+	}
+	prompt := strings.TrimSpace(`
+When you call emit_schema_prompt_created with:
+- item_id: the created item id
+`)
+	if err := os.WriteFile(filepath.Join(root, "prompts", "shared-schema-prompt.md"), []byte(prompt+"\n"), 0o644); err != nil {
+		t.Fatalf("write shared schema prompt: %v", err)
+	}
+
+	bundle, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	cases := DerivePromptSchemaGuards(bundle)
+	found := false
+	for _, tc := range cases {
+		if filepath.Base(tc.PromptFile) == "shared-schema-prompt.md" && tc.EmitTool == "emit_schema_prompt_created" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected prompt schema guard case for shared-schema-prompt.md, got %#v", cases)
+	}
+}
+
 func loadPromptTestBundle(t *testing.T, repoRoot string) *WorkflowContractBundle {
 	t.Helper()
 	bundleRoot := writePromptTestBundle(t, repoRoot)

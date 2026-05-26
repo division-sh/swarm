@@ -2,6 +2,8 @@ package contracts
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -64,6 +66,97 @@ func TestBundlePromptResolver_KeepsBundleStateIsolated(t *testing.T) {
 	}
 	if promptA == promptB {
 		t.Fatalf("expected isolated prompt resolution, got identical prompts %q", promptA)
+	}
+}
+
+func TestResolvePromptFileForContractAgent_UsesCanonicalCandidateSet(t *testing.T) {
+	repo := repoRoot(t)
+	root := writePromptTestBundle(t, repo)
+
+	agentsPath := filepath.Join(root, "agents.yaml")
+	agentsRaw, err := os.ReadFile(agentsPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", agentsPath, err)
+	}
+	agentsRaw = append(agentsRaw, []byte(strings.TrimLeft(`
+prompt-ref-agent:
+  role: prompt_ref_role
+  prompt_ref: shared-prompt
+entry-id-agent:
+  id: concrete-template
+  role: entry_id_role
+mode-agent:
+  role: mode_role
+workspace-role-agent:
+  role: ops_lead
+  workspace_class: factory
+parent-agent:
+  role: parent_role
+`, "\n"))...)
+	if err := os.WriteFile(agentsPath, agentsRaw, 0o644); err != nil {
+		t.Fatalf("write %s: %v", agentsPath, err)
+	}
+	promptsDir := filepath.Join(root, "prompts")
+	for name, content := range map[string]string{
+		"shared-prompt.md":     "shared prompt\n",
+		"concrete-template.md": "entry id prompt\n",
+		"mode-agent.review.md": "mode prompt\n",
+		"factory-ops-lead.md":  "workspace role prompt\n",
+		"parent-agent.md":      "parent prompt\n",
+	} {
+		if err := os.WriteFile(filepath.Join(promptsDir, name), []byte(content), 0o644); err != nil {
+			t.Fatalf("write prompt %s: %v", name, err)
+		}
+	}
+
+	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name    string
+		agentID string
+		mode    string
+		want    string
+	}{
+		{name: "prompt_ref", agentID: "prompt-ref-agent", want: "shared-prompt.md"},
+		{name: "entry_id", agentID: "entry-id-agent", want: "concrete-template.md"},
+		{name: "mode_variant", agentID: "mode-agent", mode: "review", want: "mode-agent.review.md"},
+		{name: "workspace_role", agentID: "workspace-role-agent", want: "factory-ops-lead.md"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			entry, ok := bundle.AgentEntry(tc.agentID)
+			if !ok {
+				t.Fatalf("AgentEntry(%s) missing", tc.agentID)
+			}
+			source, _ := bundle.AgentContractSource(tc.agentID)
+			resolution, found, err := ResolvePromptFileForContractAgent(bundle, tc.agentID, entry, source, tc.mode)
+			if err != nil {
+				t.Fatalf("ResolvePromptFileForContractAgent: %v", err)
+			}
+			if !found {
+				t.Fatal("expected prompt file to resolve")
+			}
+			if got := filepath.Base(resolution.Path); got != tc.want {
+				t.Fatalf("resolved prompt = %s, want %s", got, tc.want)
+			}
+		})
+	}
+
+	resolution, found, err := NewBundlePromptResolver(bundle).ResolvePromptFileForAgent(models.AgentConfig{
+		ID:          "parent-agent-shard-1",
+		ParentAgent: "parent-agent",
+		Role:        "parent_role",
+	}, "")
+	if err != nil {
+		t.Fatalf("ResolvePromptFileForAgent shard parent: %v", err)
+	}
+	if !found {
+		t.Fatal("expected shard child to resolve parent prompt")
+	}
+	if got := filepath.Base(resolution.Path); got != "parent-agent.md" {
+		t.Fatalf("shard prompt = %s, want parent-agent.md", got)
 	}
 }
 

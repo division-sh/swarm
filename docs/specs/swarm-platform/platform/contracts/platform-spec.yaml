@@ -2783,7 +2783,10 @@ engine:
     - id: prompt_exists
       severity: warning
       scope: per-agent
-      trigger: An agent has no prompt file at prompts/{agent-id}.md.
+      trigger: >-
+        An agent has no prompt file resolved by the canonical runtime prompt resolver. Resolution checks the agent's
+        prompt_ref, logical agent id, registry entry id, mode-specific variants, workspace-class/role fallback, shard-parent
+        runtime lookup, and bundle prompt-directory fallback before reporting the prompt missing.
       when: boot-only
     - id: produces_drift
       severity: warning
@@ -3439,11 +3442,14 @@ tool_model:
       endpoint: NOT a valid field. Use http.url instead.
       type: NOT a valid field. Use handler_type instead.
 prompt_templating:
-  description: Agent prompts are markdown files in the prompts/ directory. They may contain {{variable}} placeholders that
-    the platform substitutes from policy.yaml at agent session creation time. The substitution is simple string replacement
-    — no logic, no conditionals. Variables not found in policy.yaml are left as-is (fail-open for forward compatibility).
+  description: Agent prompts are markdown files selected by the canonical runtime prompt resolver. They may contain {{variable}}
+    placeholders that the platform substitutes from policy.yaml at agent session creation time. The substitution is simple
+    string replacement — no logic, no conditionals. Variables not found in policy.yaml are left as-is (fail-open for forward
+    compatibility).
   convention:
-    prompt_path: prompts/{agent-id}.md
+    prompt_path: >-
+      canonical resolver candidates: prompt_ref, logical agent id, registry entry id, optional {ref}.{mode}.md variant,
+      workspace_class-role fallback, shard-parent runtime lookup, and bundle prompt-directory fallback
     variable_syntax: '{{variable_name}}'
     variable_source: policy.yaml
   variable_resolution:
@@ -3469,10 +3475,10 @@ prompt_templating:
     description: The platform appends a short environment postamble to every agent system prompt at session creation time.
       The postamble tells the agent where it is working — workspace paths and access levels. It does NOT list available tools
       or capabilities — the LLM sees those via tool definitions in the API call, same as MCP tools and platform builtins.
-      The product prompt (from prompts/{agent-id}.md, with variables resolved) comes first. The postamble follows.
+      The product prompt (from the canonical resolved prompt file, with variables resolved) comes first. The postamble follows.
     construction:
       order:
-      - 1. Product prompt (prompts/{agent-id}.md with {{variable}} substitution)
+      - 1. Product prompt (canonical resolved prompt file with {{variable}} substitution)
       - 2. Platform postamble (auto-generated from workspace_class)
       rules:
       - Always included. Every agent gets workspace context.

@@ -164,6 +164,10 @@ active_issues:
     title: Reconcile required_agents_match owner and runtime required-agent fulfillment
     maps_to:
       - boot_check_definition_drift
+  - id: 1082
+    title: Reconcile prompt_exists with canonical prompt resolution
+    maps_to:
+      - boot_check_definition_drift
 nodes:
   - id: persisted_normal_run_completion_quiescence_owner
     title: Persisted Normal Run Completion/Quiescence Owner
@@ -263,6 +267,7 @@ nodes:
       - platform_tool_usage_hints and generated_tool_schema_closure are live runtime tool-surface checks that need authoritative boot-check definitions and shared consumer proof
       - tool_resolution can drift when structural verifier scripts interpret only tools.yaml while Go bootverify consumes the merged runtime tool registry and MCP discovery boundary
       - required_agents_match can drift when spec, bootverify, runtime startup, verifier scripts, and catalog harness disagree on map-key role identity or required subscribes_to / emits coverage
+      - prompt_exists can drift when spec, bootverify, verify.py, catalog harness, and prompt-derived checks use only prompts/{agent-id}.md while runtime resolves prompt_ref, entry id, mode variants, workspace-role, shard-parent, and bundle prompt-dir fallback
     representative_issues:
       - 447
       - 448
@@ -270,6 +275,7 @@ nodes:
       - 1055
       - 1065
       - 1072
+      - 1082
     common_framing_mistakes:
       too_broad:
         - all bootverify drift

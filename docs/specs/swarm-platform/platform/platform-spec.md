@@ -1347,11 +1347,11 @@ The platform owns ALL tool schema serving. It reads tool definition YAML, genera
 
 # prompt_templating
 
-Agent prompts are markdown files in the prompts/ directory. They may contain {{variable}} placeholders that the platform substitutes from policy.yaml at agent session creation time. The substitution is simple string replacement — no logic, no conditionals. Variables not found in policy.yaml are left as-is (fail-open for forward compatibility).
+Agent prompts are markdown files selected by the canonical runtime prompt resolver. They may contain {{variable}} placeholders that the platform substitutes from policy.yaml at agent session creation time. The substitution is simple string replacement — no logic, no conditionals. Variables not found in policy.yaml are left as-is (fail-open for forward compatibility).
 
 ## convention
 
-- `prompt_path`: prompts/{agent-id}.md
+- `prompt_path`: canonical resolver candidates: prompt_ref, logical agent id, registry entry id, optional {ref}.{mode}.md variant, workspace_class-role fallback, shard-parent runtime lookup, and bundle prompt-directory fallback
 - `variable_syntax`: {{variable_name}}
 - `variable_source`: policy.yaml
 ## variable_resolution
