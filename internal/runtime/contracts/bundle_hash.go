@@ -735,23 +735,24 @@ func formatBundleHashJSONNumber(f float64) string {
 	if f == 0 {
 		return "0"
 	}
-	s := strconv.FormatFloat(f, 'g', -1, 64)
-	if strings.ContainsAny(s, "eE") {
-		parts := strings.FieldsFunc(s, func(r rune) bool { return r == 'e' || r == 'E' })
-		mantissa := parts[0]
-		exp := parts[1]
-		sign := ""
-		if strings.HasPrefix(exp, "-") {
-			sign = "-"
-			exp = strings.TrimPrefix(exp, "-")
-		} else {
-			exp = strings.TrimPrefix(exp, "+")
-		}
-		exp = strings.TrimLeft(exp, "0")
-		if exp == "" {
-			exp = "0"
-		}
-		return mantissa + "e" + sign + exp
+	abs := math.Abs(f)
+	if abs >= 1e-6 && abs < 1e21 {
+		return strconv.FormatFloat(f, 'f', -1, 64)
 	}
-	return s
+	s := strconv.FormatFloat(f, 'e', -1, 64)
+	parts := strings.SplitN(s, "e", 2)
+	mantissa := strings.TrimRight(strings.TrimRight(parts[0], "0"), ".")
+	exp := parts[1]
+	sign := "+"
+	if strings.HasPrefix(exp, "-") {
+		sign = "-"
+		exp = strings.TrimPrefix(exp, "-")
+	} else {
+		exp = strings.TrimPrefix(exp, "+")
+	}
+	exp = strings.TrimLeft(exp, "0")
+	if exp == "" {
+		exp = "0"
+	}
+	return mantissa + "e" + sign + exp
 }
