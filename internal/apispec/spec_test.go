@@ -16,11 +16,11 @@ func TestPlatformAPISpecValidationCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Validate() error = %v", err)
 	}
-	if report.MethodCount != 48 {
-		t.Fatalf("method count = %d, want 48", report.MethodCount)
+	if report.MethodCount != 49 {
+		t.Fatalf("method count = %d, want 49", report.MethodCount)
 	}
-	if report.SchemaCount != 83 {
-		t.Fatalf("schema count = %d, want 83", report.SchemaCount)
+	if report.SchemaCount != 87 {
+		t.Fatalf("schema count = %d, want 87", report.SchemaCount)
 	}
 	if report.ErrorCodeCount != 31 {
 		t.Fatalf("error code count = %d, want 31", report.ErrorCodeCount)
@@ -66,11 +66,11 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	if err := json.Unmarshal(artifact, &doc); err != nil {
 		t.Fatalf("unmarshal openrpc artifact: %v", err)
 	}
-	if len(doc.Methods) != 48 {
-		t.Fatalf("generated OpenRPC methods = %d, want 48", len(doc.Methods))
+	if len(doc.Methods) != 49 {
+		t.Fatalf("generated OpenRPC methods = %d, want 49", len(doc.Methods))
 	}
-	if len(doc.Components.Schemas) != 83 {
-		t.Fatalf("generated OpenRPC schemas = %d, want 83", len(doc.Components.Schemas))
+	if len(doc.Components.Schemas) != 87 {
+		t.Fatalf("generated OpenRPC schemas = %d, want 87", len(doc.Components.Schemas))
 	}
 	if len(doc.Components.Errors) != 31 {
 		t.Fatalf("generated OpenRPC errors = %d, want 31", len(doc.Components.Errors))
@@ -93,6 +93,9 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	if _, ok := methods["agent.diagnose"]; !ok {
 		t.Fatal("generated OpenRPC missing agent.diagnose")
 	}
+	if _, ok := methods["agent.delivery_diagnostics"]; !ok {
+		t.Fatal("generated OpenRPC missing agent.delivery_diagnostics")
+	}
 	for _, methodName := range []string{"conversation.fork", "conversation.fork_chat", "conversation.fork_list", "conversation.fork_view", "conversation.fork_delete"} {
 		if _, ok := methods[methodName]; !ok {
 			t.Fatalf("generated OpenRPC missing %s", methodName)
@@ -112,6 +115,11 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	}
 	if _, ok := doc.Components.Schemas["AgentDiagnosisLastToolOutcome"]; !ok {
 		t.Fatal("generated OpenRPC missing AgentDiagnosisLastToolOutcome")
+	}
+	for _, schemaName := range []string{"AgentDeliveryDiagnostics", "AgentDeliveryDiagnosticsSummary", "AgentDeliveryFailure", "AgentDeadLetterDelivery"} {
+		if _, ok := doc.Components.Schemas[schemaName]; !ok {
+			t.Fatalf("generated OpenRPC missing %s", schemaName)
+		}
 	}
 	for _, schemaName := range []string{"MailboxDecisionSheet", "MailboxEntityContext", "MailboxDownstreamPreview"} {
 		if _, ok := doc.Components.Schemas[schemaName]; !ok {

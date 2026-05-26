@@ -11138,6 +11138,126 @@ api_specification:
             $ref: '#/components/schemas/AgentDiagnosisActive'
           last_tool_outcome:
             $ref: '#/components/schemas/AgentDiagnosisLastToolOutcome'
+      AgentDeliveryDiagnosticsSummary:
+        type: object
+        additionalProperties: false
+        required:
+        - failures_24h
+        - dead_letters_24h
+        properties:
+          failures_24h:
+            type: integer
+            minimum: 0
+            description: Rolling 24-hour count of failed agent delivery rows using the same occurrence watermark as AgentDeliveryFailure.occurred_at.
+          dead_letters_24h:
+            type: integer
+            minimum: 0
+            description: Rolling 24-hour count of terminal dead-letter agent delivery rows using the same occurrence watermark as AgentDeadLetterDelivery.occurred_at.
+      AgentDeliveryFailure:
+        type: object
+        additionalProperties: false
+        required:
+        - delivery_id
+        - event_id
+        - event_name
+        - status
+        - retry_count
+        - occurred_at
+        properties:
+          delivery_id:
+            $ref: '#/components/schemas/OpaqueId'
+          event_id:
+            $ref: '#/components/schemas/OpaqueId'
+          event_name:
+            type: string
+            minLength: 1
+          run_id:
+            $ref: '#/components/schemas/OpaqueId'
+          entity_id:
+            $ref: '#/components/schemas/OpaqueId'
+          status:
+            type: string
+            const: failed
+            description: Failed-delivery subfact from the canonical event_deliveries delivery status owner.
+          reason_code:
+            type: string
+          last_error:
+            type: string
+          retry_count:
+            type: integer
+            minimum: 0
+          occurred_at:
+            $ref: '#/components/schemas/Timestamp'
+            description: Canonical delivery occurrence watermark, currently COALESCE(event_deliveries.delivered_at, event_deliveries.created_at).
+      AgentDeadLetterDelivery:
+        type: object
+        additionalProperties: false
+        required:
+        - delivery_id
+        - event_id
+        - event_name
+        - status
+        - retry_count
+        - occurred_at
+        - dead_letter_records
+        properties:
+          delivery_id:
+            $ref: '#/components/schemas/OpaqueId'
+          event_id:
+            $ref: '#/components/schemas/OpaqueId'
+          event_name:
+            type: string
+            minLength: 1
+          run_id:
+            $ref: '#/components/schemas/OpaqueId'
+          entity_id:
+            $ref: '#/components/schemas/OpaqueId'
+          status:
+            type: string
+            const: dead_letter
+            description: Terminal dead-letter delivery subfact from the canonical event_deliveries delivery status owner.
+          reason_code:
+            type: string
+          last_error:
+            type: string
+          retry_count:
+            type: integer
+            minimum: 0
+          occurred_at:
+            $ref: '#/components/schemas/Timestamp'
+            description: Canonical delivery occurrence watermark, currently COALESCE(event_deliveries.delivered_at, event_deliveries.created_at).
+          dead_letter_records:
+            type: array
+            description: Event-scoped dead-letter records reconciled to this terminal agent delivery through the original event id. A terminal dead-letter delivery without at least one matching record is malformed owner data and fails closed.
+            items:
+              $ref: '#/components/schemas/DeadLetterRecord'
+      AgentDeliveryDiagnostics:
+        type: object
+        additionalProperties: false
+        required:
+        - agent_id
+        - summary
+        - failures
+        - dead_letters
+        properties:
+          agent_id:
+            $ref: '#/components/schemas/OpaqueId'
+          summary:
+            $ref: '#/components/schemas/AgentDeliveryDiagnosticsSummary'
+          failures:
+            type: array
+            description: Recent retained failed delivery rows for this agent, ordered by occurred_at DESC then delivery_id DESC.
+            items:
+              $ref: '#/components/schemas/AgentDeliveryFailure'
+          failures_next_cursor:
+            $ref: '#/components/schemas/Cursor'
+          dead_letters:
+            type: array
+            description: Recent retained terminal dead-letter delivery rows for this agent, ordered by occurred_at DESC then delivery_id DESC.
+            items:
+              $ref: '#/components/schemas/AgentDeadLetterDelivery'
+          dead_letters_next_cursor:
+            $ref: '#/components/schemas/Cursor'
       ConversationSummary:
         type: object
         additionalProperties: false
@@ -13495,6 +13615,79 @@ api_specification:
         required: true
         schema:
           $ref: '#/components/schemas/AgentDiagnosis'
+      errors:
+      - AGENT_NOT_FOUND
+    agent.delivery_diagnostics:
+      tier: should_have
+      description: |
+        Read the owner-backed per-agent delivery diagnostics slice for failed
+        deliveries and terminal dead-letter deliveries. This method is a
+        separate owner from agent.diagnose: AgentDiagnosis remains lean and must
+        not expose recent failures or dead letters. The API handler validates
+        agent_id, list bounds, cursors, and unknown params, then consumes one
+        named per-agent delivery diagnostics read owner. It must not locally
+        reconstruct the shape from run.trace, run.diagnose, event.list,
+        event.get, event_receipts, dashboard helpers, CLI state, runtime memory,
+        or EventBus data.
+
+        Failed-delivery rows are sourced from canonical agent
+        event_deliveries rows with status failed. Dead-letter rows are sourced
+        from canonical agent event_deliveries rows with status dead_letter and
+        reconciled with event-scoped dead_letters records by original event id.
+        A terminal dead-letter delivery without at least one matching
+        dead_letters record is malformed owner data and must fail closed rather
+        than silently reporting a partial fact. Dead-letter records for events
+        that do not have a terminal delivery for this agent are not attributed to
+        this agent by this owner.
+
+        Detail rows are ordered by the canonical delivery occurrence watermark
+        DESC, then delivery_id DESC. The occurrence watermark is currently
+        COALESCE(event_deliveries.delivered_at, event_deliveries.created_at).
+        failure_cursor and dead_letter_cursor are independent opaque cursors
+        over that ordering. failures_24h and dead_letters_24h are rolling
+        24-hour counts over the same occurrence watermark. Detail lists return
+        retained rows subject to store retention and explicit per-list limits.
+        Empty lists are represented as empty arrays.
+      scope:
+        required:
+        - read:agents
+        - read:events
+      params:
+      - name: agent_id
+        required: true
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      - name: failure_limit
+        required: false
+        description: Max failed-delivery detail rows to return.
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 50
+      - name: failure_cursor
+        required: false
+        description: Opaque cursor returned by failures_next_cursor for the next failed-delivery page.
+        schema:
+          $ref: '#/components/schemas/Cursor'
+      - name: dead_letter_limit
+        required: false
+        description: Max terminal dead-letter delivery detail rows to return.
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 50
+      - name: dead_letter_cursor
+        required: false
+        description: Opaque cursor returned by dead_letters_next_cursor for the next terminal dead-letter delivery page.
+        schema:
+          $ref: '#/components/schemas/Cursor'
+      result:
+        name: result
+        required: true
+        schema:
+          $ref: '#/components/schemas/AgentDeliveryDiagnostics'
       errors:
       - AGENT_NOT_FOUND
     agent.send_directive:

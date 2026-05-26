@@ -237,6 +237,7 @@ func readOnlyHTTPRuntimeMethods(t *testing.T, api *apispec.APISpecification, ope
 
 func approvedReadOnlyHTTPRuntimeMethods() []string {
 	return []string{
+		"agent.delivery_diagnostics",
 		"agent.diagnose",
 		"agent.get",
 		"agent.list",
@@ -266,6 +267,7 @@ func approvedReadOnlyHTTPRuntimeMethods() []string {
 
 func readOnlyHTTPRuntimeFixtures() map[string]readOnlyHTTPRuntimeFixture {
 	return map[string]readOnlyHTTPRuntimeFixture{
+		"agent.delivery_diagnostics":     {Params: map[string]any{"agent_id": "agent-1"}, ResultKeys: []string{"agent_id", "summary", "failures", "dead_letters"}},
 		"agent.diagnose":                 {Params: map[string]any{"agent_id": "agent-1"}, ResultKeys: []string{"agent_id", "status", "queue", "runtime_state", "active", "last_tool_outcome"}},
 		"agent.get":                      {Params: map[string]any{"agent_id": "agent-1"}, ResultKeys: []string{"agent"}},
 		"agent.list":                     {Params: map[string]any{}, ResultKeys: []string{"agents"}},
@@ -295,6 +297,16 @@ func readOnlyHTTPRuntimeFixtures() map[string]readOnlyHTTPRuntimeFixture {
 
 func readOnlyHTTPRuntimeErrorProbes() []readOnlyHTTPRuntimeErrorProbe {
 	return []readOnlyHTTPRuntimeErrorProbe{
+		{
+			Method: "agent.delivery_diagnostics",
+			Params: map[string]any{"agent_id": "missing"},
+			Code:   AgentNotFoundCode,
+			Options: func(t *testing.T) OperatorReadOptions {
+				opts := readOnlyRuntimeProbeOptions(t)
+				opts.AgentConversations = &fakeAgentConversationReadStore{agentDeliveryDiagnosticsErr: store.ErrAgentNotFound}
+				return opts
+			},
+		},
 		{
 			Method: "agent.diagnose",
 			Params: map[string]any{"agent_id": "missing"},
@@ -597,6 +609,46 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 					},
 				},
 			},
+			agentDeliveryDiagnosticsResult: store.OperatorAgentDeliveryDiagnostics{
+				AgentID: "agent-1",
+				Summary: store.OperatorAgentDeliveryDiagnosticsSummary{
+					Failures24h:    1,
+					DeadLetters24h: 1,
+				},
+				Failures: []store.OperatorAgentDeliveryFailure{{
+					DeliveryID: "delivery-failed-1",
+					EventID:    "event-failed-1",
+					EventName:  "task.failed",
+					RunID:      runID,
+					EntityID:   "entity-1",
+					Status:     "failed",
+					ReasonCode: "handler_error",
+					LastError:  "boom",
+					RetryCount: 2,
+					OccurredAt: now.Add(-time.Minute),
+				}},
+				DeadLetters: []store.OperatorAgentDeadLetterDelivery{{
+					DeliveryID: "delivery-dead-1",
+					EventID:    "event-dead-1",
+					EventName:  "task.dead",
+					RunID:      runID,
+					EntityID:   "entity-1",
+					Status:     "dead_letter",
+					ReasonCode: "retry_exhausted",
+					LastError:  "terminal",
+					RetryCount: 3,
+					OccurredAt: now.Add(-2 * time.Minute),
+					DeadLetterRecords: []store.OperatorDeadLetterRecord{{
+						DeadLetterID: "dead-letter-1",
+						FailureType:  "retry_exhausted",
+						ErrorMessage: "terminal",
+						RetryCount:   3,
+						ChainDepth:   0,
+						HandlerNode:  "agent-1",
+						CreatedAt:    now.Add(-time.Minute),
+					}},
+				}},
+			},
 			listConversationsResult: store.OperatorConversationListResult{Conversations: []store.OperatorConversationSummary{{
 				SessionID:    sessionID,
 				AgentID:      "agent-1",
@@ -725,6 +777,32 @@ func assertReadOnlyProbeSuccess(t *testing.T, methodName string, resp rpcRespons
 		}
 		if got := asMap(t, turns[0])["turn_index"]; got != float64(1) {
 			t.Fatalf("%s first turn_index = %#v, want 1", methodName, got)
+		}
+	}
+	if methodName == "agent.delivery_diagnostics" {
+		summary := asMap(t, result["summary"])
+		if summary["failures_24h"] != float64(1) || summary["dead_letters_24h"] != float64(1) {
+			t.Fatalf("agent.delivery_diagnostics summary = %#v", summary)
+		}
+		failures, ok := result["failures"].([]any)
+		if !ok || len(failures) != 1 {
+			t.Fatalf("agent.delivery_diagnostics failures = %#v", result["failures"])
+		}
+		failure := asMap(t, failures[0])
+		if failure["status"] != "failed" || failure["delivery_id"] != "delivery-failed-1" || failure["retry_count"] != float64(2) {
+			t.Fatalf("agent.delivery_diagnostics failure = %#v", failure)
+		}
+		deadLetters, ok := result["dead_letters"].([]any)
+		if !ok || len(deadLetters) != 1 {
+			t.Fatalf("agent.delivery_diagnostics dead_letters = %#v", result["dead_letters"])
+		}
+		deadLetter := asMap(t, deadLetters[0])
+		if deadLetter["status"] != "dead_letter" || deadLetter["delivery_id"] != "delivery-dead-1" || deadLetter["retry_count"] != float64(3) {
+			t.Fatalf("agent.delivery_diagnostics dead_letter = %#v", deadLetter)
+		}
+		records, ok := deadLetter["dead_letter_records"].([]any)
+		if !ok || len(records) != 1 || asMap(t, records[0])["dead_letter_id"] != "dead-letter-1" {
+			t.Fatalf("agent.delivery_diagnostics dead_letter_records = %#v", deadLetter["dead_letter_records"])
 		}
 	}
 	if methodName == "agent.diagnose" {
