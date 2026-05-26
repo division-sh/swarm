@@ -279,7 +279,7 @@ func readOnlyHTTPRuntimeFixtures() map[string]readOnlyHTTPRuntimeFixture {
 		"entity.get":                     {Params: map[string]any{"entity_id": "entity-1"}, ResultKeys: []string{"entity", "fields", "gates", "accumulated"}},
 		"entity.list":                    {Params: map[string]any{}, ResultKeys: []string{"entities"}},
 		"event.get":                      {Params: map[string]any{"event_id": "evt-1"}, ResultKeys: []string{"event_id", "event_name", "payload", "deliveries", "dead_letters"}},
-		"event.list":                     {Params: map[string]any{}, ResultKeys: []string{"events"}},
+		"event.list":                     {Params: map[string]any{"filter": map[string]any{"run_id": "run-1"}}, ResultKeys: []string{"events"}},
 		"health.check":                   {Params: map[string]any{}, ResultKeys: []string{"alive", "ready", "db_ok", "runtime_ok", "bundle"}},
 		"health.ping":                    {Params: map[string]any{}, ResultKeys: []string{"ok", "ts"}},
 		"mailbox.get":                    {Params: map[string]any{"mailbox_id": "mailbox-1"}, ResultKeys: []string{"item", "payload", "history", "decision_sheet"}},

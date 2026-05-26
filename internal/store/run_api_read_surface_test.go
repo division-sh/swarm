@@ -22,15 +22,17 @@ func TestRunAPIReadSurface_LoadAndListRunHeaders(t *testing.T) {
 	newerEvent := uuid.NewString()
 	middleEvent := uuid.NewString()
 	olderEvent := uuid.NewString()
+	bundleA := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	bundleB := "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO runs (
-			run_id, status, trigger_event_id, trigger_event_type, forked_from_run_id, entity_count, event_count, error_summary, started_at, ended_at
+			run_id, status, bundle_hash, bundle_source, trigger_event_id, trigger_event_type, forked_from_run_id, entity_count, event_count, error_summary, started_at, ended_at
 		)
 		VALUES
-			($1::uuid, 'running', $2::uuid, 'scan.requested', NULL, 3, 2, NULL, $3, NULL),
-			($4::uuid, 'completed', $5::uuid, 'scan.requested', $1::uuid, 5, 1, NULL, $6, $7),
-			($8::uuid, 'failed', $9::uuid, 'scan.failed', NULL, 1, 1, 'boom', $10, $11)
-	`, newer, newerEvent, now, middle, middleEvent, now.Add(-time.Hour), now.Add(-30*time.Minute), older, olderEvent, now.Add(-2*time.Hour), now.Add(-90*time.Minute)); err != nil {
+			($1::uuid, 'running', $2, 'persisted', $3::uuid, 'scan.requested', NULL, 3, 2, NULL, $4, NULL),
+			($5::uuid, 'completed', $6, 'persisted', $7::uuid, 'scan.requested', $1::uuid, 5, 1, NULL, $8, $9),
+			($10::uuid, 'failed', $2, 'persisted', $11::uuid, 'scan.failed', NULL, 1, 1, 'boom', $12, $13)
+	`, newer, bundleA, newerEvent, now, middle, bundleB, middleEvent, now.Add(-time.Hour), now.Add(-30*time.Minute), older, olderEvent, now.Add(-2*time.Hour), now.Add(-90*time.Minute)); err != nil {
 		t.Fatalf("seed runs: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -91,6 +93,20 @@ func TestRunAPIReadSurface_LoadAndListRunHeaders(t *testing.T) {
 	}
 	if len(recent) != 2 {
 		t.Fatalf("recent runs len = %d, want 2: %#v", len(recent), recent)
+	}
+	bundleRuns, _, err := pg.ListRunHeaders(ctx, RunHeaderListOptions{BundleHash: bundleA, Limit: 10})
+	if err != nil {
+		t.Fatalf("ListRunHeaders bundle_hash: %v", err)
+	}
+	if len(bundleRuns) != 2 || bundleRuns[0].RunID != newer || bundleRuns[1].RunID != older {
+		t.Fatalf("bundle-filtered runs = %#v, want newer and older only", bundleRuns)
+	}
+	runningBundleRuns, _, err := pg.ListRunHeaders(ctx, RunHeaderListOptions{Status: "running", BundleHash: bundleA, Limit: 10})
+	if err != nil {
+		t.Fatalf("ListRunHeaders status+bundle_hash: %v", err)
+	}
+	if len(runningBundleRuns) != 1 || runningBundleRuns[0].RunID != newer {
+		t.Fatalf("status+bundle-filtered runs = %#v, want newer only", runningBundleRuns)
 	}
 }
 

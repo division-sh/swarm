@@ -875,6 +875,9 @@ func operatorEventListOptionsFromParams(params map[string]any) (store.OperatorEv
 	if err != nil {
 		return store.OperatorEventListOptions{}, err
 	}
+	if err := requireEventListRunScope(filter); err != nil {
+		return store.OperatorEventListOptions{}, err
+	}
 	out.Filter = filter
 	limit, err := boundedIntegerParam(params, "limit", 1, 1000)
 	if err != nil {
@@ -956,6 +959,13 @@ func eventListFilterParam(params map[string]any) (store.OperatorEventListFilter,
 		out.HasDeadLetter = &value
 	}
 	return out, nil
+}
+
+func requireEventListRunScope(filter store.OperatorEventListFilter) error {
+	if strings.TrimSpace(filter.RunID) == "" {
+		return NewInvalidParamsError(map[string]any{"field": "filter.run_id", "reason": "required run scope is missing"})
+	}
+	return nil
 }
 
 func runTraceFilterParam(params map[string]any) (store.RunDebugTraceFilter, error) {
@@ -1056,6 +1066,9 @@ func operatorRuntimeLogListOptionsFromParams(params map[string]any) (store.Opera
 	if out.RunID, _, err = optionalStringParam(params, "run_id"); err != nil {
 		return store.OperatorRuntimeLogListOptions{}, err
 	}
+	if out.BundleHash, err = optionalBundleHashParam(params, "bundle_hash"); err != nil {
+		return store.OperatorRuntimeLogListOptions{}, err
+	}
 	if out.EntityID, _, err = optionalStringParam(params, "entity_id"); err != nil {
 		return store.OperatorRuntimeLogListOptions{}, err
 	}
@@ -1098,6 +1111,9 @@ func operatorRuntimeLogListOptionsFromParams(params map[string]any) (store.Opera
 func operatorRuntimeIncidentListOptionsFromParams(params map[string]any) (store.OperatorRuntimeIncidentListOptions, error) {
 	out := store.OperatorRuntimeIncidentListOptions{}
 	var err error
+	if out.BundleHash, err = optionalBundleHashParam(params, "bundle_hash"); err != nil {
+		return store.OperatorRuntimeIncidentListOptions{}, err
+	}
 	if out.Component, _, err = optionalStringParam(params, "component"); err != nil {
 		return store.OperatorRuntimeIncidentListOptions{}, err
 	}
@@ -1141,6 +1157,9 @@ func runHeaderListOptionsFromParams(params map[string]any) (store.RunHeaderListO
 		return store.RunHeaderListOptions{}, err
 	}
 	out.Cursor = cursor
+	if out.BundleHash, err = optionalBundleHashParam(params, "bundle_hash"); err != nil {
+		return store.RunHeaderListOptions{}, err
+	}
 	if raw, ok := params["limit"]; ok && !isEmptyParam(raw) {
 		limit, ok := integerParam(raw)
 		if !ok || limit < 1 || limit > 500 {
@@ -1155,6 +1174,20 @@ func runHeaderListOptionsFromParams(params map[string]any) (store.RunHeaderListO
 		return store.RunHeaderListOptions{}, err
 	}
 	return out, nil
+}
+
+func optionalBundleHashParam(params map[string]any, name string) (string, error) {
+	value, _, err := optionalStringParam(params, name)
+	if err != nil {
+		return "", err
+	}
+	if value == "" {
+		return "", nil
+	}
+	if !bundleHashPattern.MatchString(value) {
+		return "", NewInvalidParamsError(map[string]any{"field": name, "reason": "must be bundle-v1:sha256:<64 lowercase hex>"})
+	}
+	return value, nil
 }
 
 func timestampParam(params map[string]any, name string) (*time.Time, error) {

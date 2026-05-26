@@ -27,11 +27,12 @@ type RunHeader struct {
 }
 
 type RunHeaderListOptions struct {
-	Status string
-	Since  *time.Time
-	Until  *time.Time
-	Limit  int
-	Cursor string
+	Status     string
+	BundleHash string
+	Since      *time.Time
+	Until      *time.Time
+	Limit      int
+	Cursor     string
 }
 
 type runHeaderCursor struct {
@@ -41,6 +42,7 @@ type runHeaderCursor struct {
 
 func defaultRunHeaderListOptions(opts RunHeaderListOptions) RunHeaderListOptions {
 	opts.Status = strings.ToLower(strings.TrimSpace(opts.Status))
+	opts.BundleHash = strings.TrimSpace(opts.BundleHash)
 	opts.Cursor = strings.TrimSpace(opts.Cursor)
 	if opts.Limit <= 0 {
 		opts.Limit = 50
@@ -70,7 +72,7 @@ func (s *PostgresStore) requireRunHeaderCapabilities(ctx context.Context) error 
 		return err
 	}
 	required := map[string][]string{
-		"runs":   {"run_id", "status", "trigger_event_id", "trigger_event_type", "forked_from_run_id", "entity_count", "event_count", "error_summary", "started_at", "ended_at"},
+		"runs":   {"run_id", "status", "bundle_hash", "trigger_event_id", "trigger_event_type", "forked_from_run_id", "entity_count", "event_count", "error_summary", "started_at", "ended_at"},
 		"events": {"run_id", "event_id", "event_name", "created_at"},
 	}
 	for tableName, columns := range required {
@@ -125,6 +127,10 @@ func (s *PostgresStore) ListRunHeaders(ctx context.Context, opts RunHeaderListOp
 	if opts.Status != "" {
 		args = append(args, opts.Status)
 		where = append(where, fmt.Sprintf("lower(r.status) = $%d", len(args)))
+	}
+	if opts.BundleHash != "" {
+		args = append(args, opts.BundleHash)
+		where = append(where, fmt.Sprintf("r.bundle_hash = $%d", len(args)))
 	}
 	if opts.Since != nil {
 		args = append(args, opts.Since.UTC())

@@ -349,7 +349,8 @@ func TestOperatorReadHandlersExposeHealthAndRunReadMethods(t *testing.T) {
 		t.Fatalf("run.get trigger_event_id = %v, want %s", got, eventID)
 	}
 
-	list := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"list","method":"run.list","params":{"limit":1}}`)
+	bundleHash := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	list := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"list","method":"run.list","params":{"bundle_hash":"`+bundleHash+`","limit":1}}`)
 	if list.Error != nil {
 		t.Fatalf("run.list error = %#v", list.Error)
 	}
@@ -359,6 +360,9 @@ func TestOperatorReadHandlersExposeHealthAndRunReadMethods(t *testing.T) {
 	}
 	if fakeRuns.lastListOpts.Limit != 1 {
 		t.Fatalf("run.list limit = %d, want 1", fakeRuns.lastListOpts.Limit)
+	}
+	if fakeRuns.lastListOpts.BundleHash != bundleHash {
+		t.Fatalf("run.list bundle_hash = %q, want %q", fakeRuns.lastListOpts.BundleHash, bundleHash)
 	}
 
 	diagnose := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"diagnose","method":"run.diagnose","params":{"run_id":"run-1"}}`)
@@ -437,6 +441,10 @@ func TestOperatorReadHandlersRunListRejectsInvalidFilters(t *testing.T) {
 		{
 			name: "numeric until",
 			body: `{"jsonrpc":"2.0","id":"bad-until","method":"run.list","params":{"until":123}}`,
+		},
+		{
+			name: "invalid bundle hash",
+			body: `{"jsonrpc":"2.0","id":"bad-bundle","method":"run.list","params":{"bundle_hash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}`,
 		},
 	}
 	for _, tc := range tests {
