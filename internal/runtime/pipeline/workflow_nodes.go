@@ -101,6 +101,132 @@ func workflowNodeEventPolicy(nodes []WorkflowNode, nodeID, eventType string) (Wo
 	return WorkflowEventPolicy{}, false
 }
 
+func workflowNodeEventHandlerForDelivery(source semanticview.Source, nodeID string, evt events.Event) (runtimecontracts.SystemNodeEventHandler, bool) {
+	if source == nil {
+		return runtimecontracts.SystemNodeEventHandler{}, false
+	}
+	rawEventType := eventidentity.Normalize(string(evt.Type))
+	if rawEventType == "" {
+		return runtimecontracts.SystemNodeEventHandler{}, false
+	}
+	if handler, ok := source.NodeEventHandler(nodeID, rawEventType); ok {
+		return handler, true
+	}
+	localizedEventType := workflowNodeConcreteInstanceLocalEventType(source, nodeID, evt)
+	if localizedEventType == "" || localizedEventType == rawEventType {
+		return runtimecontracts.SystemNodeEventHandler{}, false
+	}
+	return source.NodeEventHandler(nodeID, localizedEventType)
+}
+
+func workflowNodeConcreteInstanceLocalEventType(source semanticview.Source, nodeID string, evt events.Event) string {
+	if source == nil {
+		return ""
+	}
+	rawEventType := eventidentity.Normalize(string(evt.Type))
+	if rawEventType == "" || !strings.Contains(rawEventType, "/") {
+		return ""
+	}
+	flowID := workflowNodeFlowID(source, nodeID)
+	if flowID == "" {
+		return ""
+	}
+	staticFlowPath := eventidentity.Normalize(source.FlowPath(flowID))
+	if staticFlowPath == "" {
+		staticFlowPath = flowID
+	}
+	if !eventTypeBelongsToNodeStaticFlow(rawEventType, staticFlowPath) {
+		return ""
+	}
+	handlerKeys := workflowNodeHandlerEventKeys(source, nodeID)
+	if len(handlerKeys) == 0 {
+		return ""
+	}
+	for _, flowInstance := range workflowNodeConcreteReceiverScopes(evt) {
+		if flowInstance == "" || !strings.HasPrefix(flowInstance, staticFlowPath+"/") {
+			continue
+		}
+		if !strings.HasPrefix(rawEventType, flowInstance+"/") {
+			continue
+		}
+		localized := eventidentity.LocalizeForFlow(flowInstance, handlerKeys, rawEventType)
+		if workflowNodeHasHandlerEventKey(handlerKeys, localized) {
+			return localized
+		}
+	}
+	remainder := strings.TrimPrefix(rawEventType, staticFlowPath+"/")
+	if !strings.Contains(remainder, "/") {
+		return ""
+	}
+	for _, key := range handlerKeys {
+		key = eventidentity.Normalize(key)
+		if key != "" && strings.HasSuffix(rawEventType, "/"+key) {
+			return key
+		}
+	}
+	return ""
+}
+
+func eventTypeBelongsToNodeStaticFlow(eventType, staticFlowPath string) bool {
+	eventType = eventidentity.Normalize(eventType)
+	staticFlowPath = eventidentity.Normalize(staticFlowPath)
+	if eventType == "" || staticFlowPath == "" {
+		return false
+	}
+	return eventType == staticFlowPath || strings.HasPrefix(eventType, staticFlowPath+"/")
+}
+
+func workflowNodeConcreteReceiverScopes(evt events.Event) []string {
+	out := make([]string, 0, 2)
+	appendScope := func(value string) {
+		value = eventidentity.Normalize(value)
+		if value == "" {
+			return
+		}
+		for _, existing := range out {
+			if existing == value {
+				return
+			}
+		}
+		out = append(out, value)
+	}
+	appendScope(evt.TargetRoute().FlowInstance)
+	appendScope(evt.FlowInstance())
+	return out
+}
+
+func workflowNodeHandlerEventKeys(source semanticview.Source, nodeID string) []string {
+	if source == nil {
+		return nil
+	}
+	handlers := source.NodeEventHandlers(nodeID)
+	if len(handlers) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(handlers))
+	for key := range handlers {
+		key = eventidentity.Normalize(key)
+		if key != "" {
+			out = append(out, key)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func workflowNodeHasHandlerEventKey(keys []string, eventType string) bool {
+	eventType = eventidentity.Normalize(eventType)
+	if eventType == "" {
+		return false
+	}
+	for _, key := range keys {
+		if key == eventType {
+			return true
+		}
+	}
+	return false
+}
+
 func LoadWorkflowNodes(source semanticview.Source) ([]WorkflowNode, error) {
 	if source == nil {
 		return nil, ErrContractBundleNil

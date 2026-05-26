@@ -317,6 +317,58 @@ func TestDeliveryPlanner_ExpandsTargetSetForInternalWorkflowRecipient(t *testing
 	}
 }
 
+func TestDeliveryPlanner_NoTargetConcreteRoutedNodeUsesInternalCarrierAndNodeRoute(t *testing.T) {
+	planner := newDeliveryPlanner(
+		deliveryRouteResolver{
+			resolveRoutedSubscribers: func(string) []Subscriber {
+				return []Subscriber{{
+					ID:   "lifecycle-orchestrator",
+					Type: "node",
+					Path: "operating/inst-1",
+				}}
+			},
+			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate { return nil },
+			resolveRoutedNodeInternalRecipients: func(events.Event, []Subscriber) []deliveryRecipientCandidate {
+				return []deliveryRecipientCandidate{{ID: "workflow-runtime", PersistAsDelivery: false}}
+			},
+			describeSubscribersForEvent: func(string, []Subscriber) []PublishDiagnosticRecipient {
+				return nil
+			},
+		},
+		deliveryRecipientPolicy{
+			loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
+				return map[string]ActiveAgentDescriptor{}, true, nil
+			},
+		},
+	)
+
+	plan, err := planner.Plan(context.Background(), (events.Event{
+		Type: "operating/inst-1/opco.product_initialization_requested",
+	}).WithEntityID("ent-operating").WithFlowInstance("operating/inst-1"))
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if got := plan.Recipients; len(got) != 1 || got[0] != "workflow-runtime" {
+		t.Fatalf("recipients = %#v, want [workflow-runtime]", got)
+	}
+	if len(plan.PersistedRecipients) != 0 {
+		t.Fatalf("persisted recipients = %#v, want none for internal carrier", plan.PersistedRecipients)
+	}
+	if got := plan.DeliveryRoutes; len(got) != 1 {
+		t.Fatalf("delivery routes = %#v, want lifecycle-orchestrator route", got)
+	}
+	route := plan.DeliveryRoutes[0]
+	if route.SubscriberType != "node" || route.SubscriberID != "lifecycle-orchestrator" {
+		t.Fatalf("delivery route = %#v, want node/lifecycle-orchestrator", route)
+	}
+	if route.Target.FlowInstance != "operating/inst-1" || route.Target.EntityID != "ent-operating" {
+		t.Fatalf("delivery target = %#v, want operating/inst-1 ent-operating", route.Target)
+	}
+	if plan.TargetFailure != "" {
+		t.Fatalf("target failure = %q, want none", plan.TargetFailure)
+	}
+}
+
 func TestDeliveryPlanner_FailsClosedOnPolicyError(t *testing.T) {
 	planner := newDeliveryPlanner(
 		deliveryRouteResolver{

@@ -164,6 +164,63 @@ func TestEventBusRemoveNestedFlowInstanceDropsDerivedRoutes(t *testing.T) {
 	}
 }
 
+func TestRouteTableConcreteTemplateInstanceNodeSubscriberResolvesBeforeDeliveryPlanning(t *testing.T) {
+	operating := runtimecontracts.FlowContractView{
+		Path:  "operating",
+		Paths: runtimecontracts.FlowContractPaths{ID: "operating", Flow: "operating"},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Mode: "template",
+			AutoEmitOnCreate: runtimecontracts.AutoEmitOnCreateContract{
+				Event: "opco.product_initialization_requested",
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"opco.product_initialization_requested": {},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"lifecycle-orchestrator": {
+				ID:            "lifecycle-orchestrator",
+				ExecutionType: "system_node",
+				SubscribesTo:  []string{"opco.product_initialization_requested"},
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"opco.product_initialization_requested": {},
+				},
+			},
+		},
+	}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{operating}}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"operating": &root.Children[0],
+			},
+		},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
+			"operating": {
+				Mode: "template",
+				AutoEmitOnCreate: runtimecontracts.AutoEmitOnCreateContract{
+					Event: "opco.product_initialization_requested",
+				},
+			},
+		},
+	}
+	rt, err := runtimebus.DeriveRouteTable(semanticview.Wrap(bundle))
+	if err != nil {
+		t.Fatalf("DeriveRouteTable: %v", err)
+	}
+	if err := rt.AddFlowInstanceRoute(runtimecontracts.SystemNodeContract{}, runtimeflowidentity.DeriveRoute("operating", "inst-1")); err != nil {
+		t.Fatalf("AddFlowInstanceRoute: %v", err)
+	}
+	got := rt.Resolve("operating/inst-1/opco.product_initialization_requested")
+	if len(got) != 1 {
+		t.Fatalf("resolved subscribers = %#v, want one lifecycle-orchestrator route", got)
+	}
+	if got[0].ID != "lifecycle-orchestrator" || got[0].Type != "node" || got[0].Path != "operating/inst-1" {
+		t.Fatalf("resolved subscriber = %#v, want node lifecycle-orchestrator at operating/inst-1", got[0])
+	}
+}
+
 func TestDeriveRouteTable_InputPinsAutoWireFromProducerOutput(t *testing.T) {
 	producer := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer"},

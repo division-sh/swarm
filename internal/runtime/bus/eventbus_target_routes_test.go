@@ -7,7 +7,11 @@ import (
 
 	"github.com/google/uuid"
 	"swarm/internal/events"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
+	"swarm/internal/runtime/flowmodel"
 	"swarm/internal/runtime/replayclaim"
+	"swarm/internal/runtime/semanticview"
 )
 
 type targetRouteMemoryStore struct {
@@ -133,6 +137,49 @@ func TestEventBusPublish_TargetSetInternalDeliveryUsesPerTargetRoutes(t *testing
 	assertTargetRouteDeliveries(t, ch, "ent-a", "ent-b")
 }
 
+func TestEventBusPublish_NoTargetConcreteRoutedNodeUsesWorkflowCarrierAndNodeDeliveryRoute(t *testing.T) {
+	store := newTargetRouteMemoryStore()
+	source := semanticview.Wrap(routedNodeTemplateBundle())
+	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	if err := eb.AddFlowInstanceRoute(runtimecontracts.SystemNodeContract{}, runtimeflowidentity.DeriveRoute("operating", "inst-1")); err != nil {
+		t.Fatalf("AddFlowInstanceRoute: %v", err)
+	}
+	ch := eb.SubscribeInternal("workflow-runtime", events.EventType("operating/opco.product_initialization_requested"))
+	evt := (events.Event{
+		ID:        uuid.NewString(),
+		Type:      events.EventType("operating/inst-1/opco.product_initialization_requested"),
+		Payload:   []byte(`{}`),
+		CreatedAt: time.Now().UTC(),
+	}).WithEntityID("ent-operating").WithFlowInstance("operating/inst-1")
+
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	select {
+	case got := <-ch:
+		if got.FlowInstance() != "operating/inst-1" {
+			t.Fatalf("delivered flow instance = %q, want operating/inst-1", got.FlowInstance())
+		}
+	case <-time.After(time.Second):
+		t.Fatal("workflow-runtime did not receive concrete routed node event")
+	}
+
+	routes := store.routes[evt.ID]
+	if len(routes) != 1 {
+		t.Fatalf("persisted delivery routes = %#v, want one semantic node route", routes)
+	}
+	route := routes[0]
+	if route.SubscriberType != "node" || route.SubscriberID != "lifecycle-orchestrator" {
+		t.Fatalf("delivery route = %#v, want node/lifecycle-orchestrator", route)
+	}
+	if route.Target.FlowInstance != "operating/inst-1" || route.Target.EntityID != "ent-operating" {
+		t.Fatalf("delivery target = %#v, want operating/inst-1 ent-operating", route.Target)
+	}
+}
+
 func assertTargetRouteDeliveries(t *testing.T, ch <-chan events.Event, wantEntityIDs ...string) {
 	t.Helper()
 	seen := map[string]struct{}{}
@@ -155,5 +202,48 @@ func assertTargetRouteDeliveries(t *testing.T, ch <-chan events.Event, wantEntit
 		if _, ok := seen[want]; !ok {
 			t.Fatalf("missing target delivery for %q; saw %#v", want, seen)
 		}
+	}
+}
+
+func routedNodeTemplateBundle() *runtimecontracts.WorkflowContractBundle {
+	operating := runtimecontracts.FlowContractView{
+		Path:  "operating",
+		Paths: runtimecontracts.FlowContractPaths{ID: "operating", Flow: "operating"},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Mode: "template",
+			AutoEmitOnCreate: runtimecontracts.AutoEmitOnCreateContract{
+				Event: "opco.product_initialization_requested",
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"opco.product_initialization_requested": {},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"lifecycle-orchestrator": {
+				ID:            "lifecycle-orchestrator",
+				ExecutionType: "system_node",
+				SubscribesTo:  []string{"opco.product_initialization_requested"},
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"opco.product_initialization_requested": {},
+				},
+			},
+		},
+	}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{operating}}
+	return &runtimecontracts.WorkflowContractBundle{
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"operating": &root.Children[0],
+			},
+		},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
+			"operating": {
+				Mode: "template",
+				AutoEmitOnCreate: runtimecontracts.AutoEmitOnCreateContract{
+					Event: "opco.product_initialization_requested",
+				},
+			},
+		},
 	}
 }
