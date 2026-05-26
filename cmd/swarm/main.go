@@ -47,6 +47,7 @@ import (
 	runtimetools "swarm/internal/runtime/tools"
 	workspace "swarm/internal/runtime/workspace"
 	"swarm/internal/store"
+	storebackend "swarm/internal/store/backendselection"
 )
 
 const (
@@ -115,6 +116,7 @@ type serveOptions struct {
 	ContractsPath        string
 	PlatformSpecPath     string
 	StoreMode            string
+	StoreModeSet         bool
 	APIListenAddr        string
 	MCPListenAddr        string
 	ShutdownGrace        time.Duration
@@ -129,7 +131,7 @@ type serveOptions struct {
 
 func defaultServeOptions() serveOptions {
 	return serveOptions{
-		StoreMode:          "postgres",
+		StoreMode:          storebackend.ActiveDefaultBackend().String(),
 		APIListenAddr:      defaultAPIListenAddr,
 		MCPListenAddr:      defaultMCPListenAddr,
 		ShutdownGrace:      runtime.DefaultShutdownGrace,
@@ -179,13 +181,19 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		return 1
 	}
 	reporter.emit(2, "config_load", "ok", fmt.Sprintf("config=%s contracts=%s", filepath.Clean(resolvedConfigPath), filepath.Clean(resolvedContractsPath)))
-	stores, err := buildStoresForServe(ctx, opts.StoreMode, cfg)
+	storeSelection, err := resolveRuntimeStoreSelection(repo, opts.StoreMode, opts.StoreModeSet, cfg)
+	if err != nil {
+		reporter.emit(3, "db_connection", "FAILED", err.Error())
+		log.Printf("resolve store backend: %v", err)
+		return 1
+	}
+	stores, err := buildStoresForServe(ctx, storeSelection, cfg)
 	if err != nil {
 		reporter.emit(3, "db_connection", "FAILED", err.Error())
 		log.Printf("init stores: %v", err)
 		return 1
 	}
-	reporter.emit(3, "db_connection", "ok", opts.StoreMode)
+	reporter.emit(3, "db_connection", "ok", storeSelection.Backend.String())
 	defer closeDB(stores.SQLDB)
 	contractsRoot, err := normalizeContractsRoot(resolvedContractsPath)
 	if err != nil {
@@ -642,7 +650,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 	configPath := fs.String("config", "", "Optional path to Swarm runtime config")
 	contractsPath := fs.String("contracts", "", "Path to selected Swarm contract bundle root for fork planning or selected-contract execution")
 	platformSpecPath := fs.String("platform-spec", defaultPlatformSpecPath, "Path to platform spec yaml")
-	storeMode := fs.String("store", "postgres", "Store mode: postgres")
+	storeMode := fs.String("store", storebackend.ActiveDefaultBackend().String(), "Runtime store backend: postgres (active default) or sqlite (recognized but unsupported until #1085-#1088)")
 	runID := fs.String("run", "", "Source run ID to plan from")
 	at := fs.String("at", "", "Fork point event UUID or RFC3339 timestamp")
 	dryRun := fs.Bool("dry-run", false, "Plan the fork without mutating runtime state")
@@ -655,6 +663,12 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 		}
 		return 2
 	}
+	storeModeSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "store" {
+			storeModeSet = true
+		}
+	})
 	modeCount := 0
 	for _, enabled := range []bool{*dryRun, *materializeOnly, *activate} {
 		if enabled {
@@ -693,7 +707,14 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 		}
 		return 1
 	}
-	stores, err := buildStores(ctx, *storeMode, cfg)
+	storeSelection, err := resolveRuntimeStoreSelection(repo, *storeMode, storeModeSet, cfg)
+	if err != nil {
+		if out != nil {
+			fmt.Fprintf(out, "fork failed: resolve store backend: %v\n", err)
+		}
+		return 1
+	}
+	stores, err := buildStores(ctx, storeSelection, cfg)
 	if err != nil {
 		if out != nil {
 			fmt.Fprintf(out, "fork failed: init stores: %v\n", err)
@@ -1412,6 +1433,25 @@ func defaultRuntimeConfig() (*config.Config, error) {
 	return cfg, nil
 }
 
+func resolveRuntimeStoreSelection(repo string, storeMode string, storeModeSet bool, cfg *config.Config) (storebackend.Selection, error) {
+	if cfg == nil {
+		return storebackend.Selection{}, errors.New("runtime config is required")
+	}
+	envBackend, envBackendSet := os.LookupEnv(storebackend.EnvStoreBackend)
+	envSQLitePath, envSQLitePathSet := os.LookupEnv(storebackend.EnvSQLitePath)
+	return storebackend.Resolve(storebackend.Input{
+		RepoRoot:         repo,
+		FlagBackend:      storeMode,
+		FlagBackendSet:   storeModeSet,
+		EnvBackend:       envBackend,
+		EnvBackendSet:    envBackendSet,
+		ConfigBackend:    cfg.Store.Backend,
+		EnvSQLitePath:    envSQLitePath,
+		EnvSQLitePathSet: envSQLitePathSet,
+		ConfigSQLitePath: cfg.Store.SQLite.Path,
+	})
+}
+
 func rejectUnsupportedRuntimeControlEnv() error {
 	unsupported := make([]string, 0, 2)
 	if _, ok := os.LookupEnv("SWARM_RUNTIME_MAX_CONCURRENT_AGENTS"); ok {
@@ -1570,9 +1610,12 @@ func resolvePath(repoRoot, path string) string {
 	return filepath.Join(repoRoot, path)
 }
 
-func buildStores(ctx context.Context, storeMode string, cfg *config.Config) (storeBundle, error) {
-	switch strings.ToLower(strings.TrimSpace(storeMode)) {
-	case "postgres":
+func buildStores(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (storeBundle, error) {
+	if cfg == nil {
+		return storeBundle{}, errors.New("runtime config is required")
+	}
+	switch selection.Backend {
+	case storebackend.BackendPostgres:
 		dsn := store.DSNFromConfig(cfg.Database)
 		pg, err := store.NewPostgresStore(dsn)
 		if err != nil {
@@ -1594,8 +1637,10 @@ func buildStores(ctx context.Context, storeMode string, cfg *config.Config) (sto
 			ScheduleStore:     pg,
 			TurnStore:         pg,
 		}, nil
+	case storebackend.BackendSQLite:
+		return storeBundle{}, storebackend.SQLiteUnsupportedRuntimeError(selection.SQLitePath)
 	default:
-		return storeBundle{}, fmt.Errorf("store mode %q is unsupported; postgres is required", strings.TrimSpace(storeMode))
+		return storeBundle{}, fmt.Errorf("store backend selection is required; supported backends: %s, %s", storebackend.BackendPostgres, storebackend.BackendSQLite)
 	}
 }
 

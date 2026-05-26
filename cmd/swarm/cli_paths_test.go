@@ -10,6 +10,7 @@ import (
 
 	"swarm/internal/config"
 	"swarm/internal/runtime"
+	storebackend "swarm/internal/store/backendselection"
 )
 
 func TestResolveCLIContractPlatformSpecPathsPrecedenceAndDiscovery(t *testing.T) {
@@ -201,7 +202,7 @@ func TestRunServeRuntimeConsumesContractPathResolverBeforeBundleLoad(t *testing.
 		"contracts_path": configContracts,
 	}))
 	originalBuildStores := buildStoresForServe
-	buildStoresForServe = func(context.Context, string, *config.Config) (storeBundle, error) {
+	buildStoresForServe = func(context.Context, storebackend.Selection, *config.Config) (storeBundle, error) {
 		return storeBundle{}, nil
 	}
 	t.Cleanup(func() {

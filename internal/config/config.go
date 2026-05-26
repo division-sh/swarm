@@ -16,6 +16,7 @@ import (
 type Config struct {
 	Runtime    RuntimeConfig  `yaml:"runtime"`
 	Database   DatabaseConfig `yaml:"database"`
+	Store      StoreConfig    `yaml:"store"`
 	LLM        LLMConfig      `yaml:"llm"`
 	Extensions map[string]any `yaml:",inline"`
 
@@ -38,6 +39,15 @@ type DatabaseConfig struct {
 	Password string `yaml:"password"`
 	SSLMode  string `yaml:"sslmode"`
 	PoolSize int    `yaml:"pool_size"`
+}
+
+type StoreConfig struct {
+	Backend string            `yaml:"backend"`
+	SQLite  StoreSQLiteConfig `yaml:"sqlite"`
+}
+
+type StoreSQLiteConfig struct {
+	Path string `yaml:"path"`
 }
 
 type LLMConfig struct {

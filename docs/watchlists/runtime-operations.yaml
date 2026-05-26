@@ -81,6 +81,34 @@ active_issues:
     title: Canonicalize LLM provider selection/config authority
     maps_to:
       - llm_provider_selection_config_authority
+  - id: 1066
+    title: Default to SQLite (Postgres as opt-in external DB) to minimize onboarding friction
+    maps_to:
+      - runtime_store_backend_default_and_sqlite_portability
+  - id: 1084
+    title: Define canonical store backend selection and local SQLite path authority
+    maps_to:
+      - runtime_store_backend_default_and_sqlite_portability
+  - id: 1085
+    title: Add SQLite dialect, schema bootstrap, and backend capability ownership
+    maps_to:
+      - runtime_store_backend_default_and_sqlite_portability
+  - id: 1086
+    title: Port core runtime persistence stores to backend-neutral SQLite/Postgres contracts
+    maps_to:
+      - runtime_store_backend_default_and_sqlite_portability
+  - id: 1087
+    title: Port session, locking, delivery, replay, and trace-stream semantics for SQLite local runtime
+    maps_to:
+      - runtime_store_backend_default_and_sqlite_portability
+  - id: 1088
+    title: Flip local/dev default to SQLite and prove zero-service swarm run plus Postgres opt-in
+    maps_to:
+      - runtime_store_backend_default_and_sqlite_portability
+  - id: 1089
+    title: Close SQLite-default rollout with docs, CI, repo-wide old-path audit, and parent proof
+    maps_to:
+      - runtime_store_backend_default_and_sqlite_portability
   - id: 175
     title: Add first-class launch, stalled-run, and long-running session observability
     maps_to:
@@ -316,6 +344,39 @@ nodes:
         - add one factory switch case
         - add one env var alias while keeping runtime_mode as semantic owner
         - validate config without moving runtime/store/model consumers
+    current_action_pressure: active
+  - id: runtime_store_backend_default_and_sqlite_portability
+    title: Runtime Store Backend Default And SQLite Portability
+    parent_class: runtime store backend default and durable SQLite local/dev portability
+    canonical_owners:
+      - docs/specs/swarm-platform/platform/contracts/platform-spec.yaml runtime_store_backend_selection
+      - internal/store/backendselection runtime store backend resolver and SQLite path resolver
+      - "future SQLite schema/store/session/delivery/trace owners tracked by #1085-#1088 before public default flip"
+    why_this_node_exists: Runtime store semantics drift when CLI defaults, env/config loading, runtime store construction, schema bootstrap, session locking, event delivery/replay, trace reads, docs, and CI each infer Postgres or SQLite support independently.
+    known_manifestations:
+      - "#1084 owns canonical backend ids postgres/sqlite, selector precedence flag > environment > runtime config > rollout default, SWARM_STORE_BACKEND, SWARM_SQLITE_PATH, store.backend, store.sqlite.path, and the staged SQLite path authority."
+      - "#1085 must own SQLite dialect, schema bootstrap, and backend capability binding before SQLite can construct runtime stores."
+      - "#1086 must port core runtime persistence stores behind backend-neutral SQLite/Postgres contracts."
+      - "#1087 must port session, locking, delivery, replay, and trace-stream semantics for the SQLite local runtime path."
+      - "#1088 must flip the active local/dev default to SQLite only after zero-service swarm run and explicit Postgres opt-in are proven together."
+      - "#1089 must close docs, CI, repo-wide stale-default audit, and parent proof before #1066 closes."
+    representative_issues:
+      - 1066
+      - 1084
+      - 1085
+      - 1086
+      - 1087
+      - 1088
+      - 1089
+    common_framing_mistakes:
+      too_broad:
+        - make SQLite production-ready in the local/dev default rollout
+        - port all persistence backends in the selector child
+      too_narrow:
+        - flip defaultServeOptions without moving the selector/path owner
+        - add --store sqlite while runtime construction still falls through or silently uses Postgres
+        - treat SWARM_DB_* or PG* variables as generic backend selectors
+        - document SQLite as supported before runtime store/session/delivery/trace proof exists
     current_action_pressure: active
   - id: transport_policy_and_surface_parity
     title: Transport Policy And Surface Parity

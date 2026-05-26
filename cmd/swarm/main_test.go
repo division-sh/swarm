@@ -38,6 +38,7 @@ import (
 	"swarm/internal/runtime/sessions"
 	runtimetools "swarm/internal/runtime/tools"
 	"swarm/internal/store"
+	storebackend "swarm/internal/store/backendselection"
 	"swarm/internal/testutil"
 )
 
@@ -4237,7 +4238,7 @@ func TestRunServeRuntimeVerboseEmitsPlatformSpecBootSequence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
-	buildStoresForServe = func(ctx context.Context, _ string, cfg *config.Config) (storeBundle, error) {
+	buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (storeBundle, error) {
 		if _, err := runtimePG.BindSchemaCapabilities(ctx); err != nil {
 			return storeBundle{}, err
 		}
@@ -4327,7 +4328,7 @@ func TestRunServeRuntimeListenerBindFailuresExitBeforeReadiness(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewPostgresStore: %v", err)
 			}
-			buildStoresForServe = func(ctx context.Context, _ string, cfg *config.Config) (storeBundle, error) {
+			buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (storeBundle, error) {
 				if _, err := runtimePG.BindSchemaCapabilities(ctx); err != nil {
 					return storeBundle{}, err
 				}
@@ -4491,7 +4492,7 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
-	buildStoresForServe = func(ctx context.Context, _ string, cfg *config.Config) (storeBundle, error) {
+	buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (storeBundle, error) {
 		if _, err := runtimePG.BindSchemaCapabilities(ctx); err != nil {
 			return storeBundle{}, err
 		}
