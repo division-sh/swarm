@@ -80,14 +80,15 @@ type previousEnv struct {
 }
 
 type storeBundle struct {
-	Postgres          *store.PostgresStore
-	SQLDB             *sql.DB
-	EventStore        runtimebus.EventStore
-	SessionRegistry   sessions.Registry
-	ConversationStore runtimellm.ConversationPersistence
-	ManagerStore      runtimemanager.ManagerPersistence
-	ScheduleStore     runtimepipeline.SchedulePersistence
-	TurnStore         runtimellm.TurnPersistence
+	Postgres           *store.PostgresStore
+	SQLDB              *sql.DB
+	SchemaBootstrapper store.SchemaBootstrapper
+	EventStore         runtimebus.EventStore
+	SessionRegistry    sessions.Registry
+	ConversationStore  runtimellm.ConversationPersistence
+	ManagerStore       runtimemanager.ManagerPersistence
+	ScheduleStore      runtimepipeline.SchedulePersistence
+	TurnStore          runtimellm.TurnPersistence
 }
 
 func (s storeBundle) runtimeStores() runtime.Stores {
@@ -1628,14 +1629,15 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 			return storeBundle{}, err
 		}
 		return storeBundle{
-			Postgres:          pg,
-			SQLDB:             pg.DB,
-			EventStore:        pg,
-			SessionRegistry:   sessions.NewPostgresRegistry(pg.DB, cfg.LLM.Session.LockTTL),
-			ConversationStore: pg,
-			ManagerStore:      pg,
-			ScheduleStore:     pg,
-			TurnStore:         pg,
+			Postgres:           pg,
+			SQLDB:              pg.DB,
+			SchemaBootstrapper: pg,
+			EventStore:         pg,
+			SessionRegistry:    sessions.NewPostgresRegistry(pg.DB, cfg.LLM.Session.LockTTL),
+			ConversationStore:  pg,
+			ManagerStore:       pg,
+			ScheduleStore:      pg,
+			TurnStore:          pg,
 		}, nil
 	case storebackend.BackendSQLite:
 		return storeBundle{}, storebackend.SQLiteUnsupportedRuntimeError(selection.SQLitePath)
@@ -1671,7 +1673,7 @@ func enforceServeBundleMatchAdmission(ctx context.Context, pg *store.PostgresSto
 }
 
 func initializeStateStores(ctx context.Context, stores storeBundle, bundle *runtimecontracts.WorkflowContractBundle) (string, error) {
-	if stores.Postgres == nil || bundle == nil {
+	if stores.SchemaBootstrapper == nil || bundle == nil {
 		return "store wiring ready", nil
 	}
 	platformPlans, err := store.GeneratePlatformTableDDLs(bundle.Platform)
@@ -1688,7 +1690,7 @@ func initializeStateStores(ctx context.Context, stores storeBundle, bundle *runt
 	}
 	plans := append(platformPlans, entityPlans...)
 	plans = append(plans, statePlans...)
-	if err := stores.Postgres.EnsureSchemaTables(ctx, plans); err != nil {
+	if err := stores.SchemaBootstrapper.EnsureSchemaTables(ctx, plans); err != nil {
 		return "", err
 	}
 	tableNames := make([]string, 0, len(plans))

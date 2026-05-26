@@ -2186,6 +2186,48 @@ engine:
     - "SQLite sessions, locking, delivery, replay, and trace-stream semantics remain split to #1087."
     - "Public local/dev default flip plus zero-service swarm run proof remains split to #1088."
     - "Docs, CI, and repo-wide stale-default closeout remains split to #1089."
+  runtime_store_schema_dialect_bootstrap:
+    promoted_by: '#1085'
+    parent_tracker: '#1066'
+    canonical_owner: internal/store schema dialect bootstrap and capability owner
+    description: >
+      Runtime store schema bootstrap is owned by one backend dialect boundary after the #1084 backend selector resolves a
+      typed backend. Platform table intent remains authored in platform_tables.tables, but executable DDL is backend
+      specific. SQLite support at this layer means deterministic file-backed schema creation and schema capability
+      detection only; it does not mean the runtime may execute all store methods on SQLite.
+    dialects:
+      postgres:
+        status: active_supported_runtime_bootstrap
+        owner: internal/store.PostgresStore.EnsureSchemaTables and Postgres schema capability binding
+        rules:
+        - Postgres remains authoritative when the canonical backend selector resolves to postgres.
+        - Postgres bootstrap may use pgcrypto, Postgres compatibility migrations, Postgres DDL execution, and Postgres
+          catalog inspection.
+      sqlite:
+        status: schema_bootstrap_only_until_runtime_portability_lands
+        owner: internal/store.SQLiteSchemaStore and SQLite dialect translation
+        rules:
+        - SQLite schema bootstrap must be file-backed and must not silently use an in-memory database.
+        - SQLite bootstrap must create parent directories for the selected path when the schema owner opens the database.
+        - SQLite DDL must cover every current platform_tables.tables entry plus generated entity and node-state tables
+          unless a gate explicitly records a named deferral.
+        - Unsupported Postgres-only constructs must fail closed with named diagnostics rather than being accepted through
+          heuristic free-form SQL rewriting.
+    covered_schema_inputs:
+    - platform_tables.tables
+    - generated entity tables from workflow entity_schema
+    - generated node-state tables from system node state_schema
+    schema_capabilities:
+      owner: backend-specific schema catalog readers feeding StoreSchemaCapabilities
+      rule: >
+        Capability detection must inspect the selected backend's catalog. Postgres may use information_schema/pg_catalog;
+        SQLite must use SQLite catalog/PRAGMA inspection. Runtime readers may consume capability results, but runtime SQL
+        portability remains split until #1086/#1087.
+    split_boundaries:
+    - "Core runtime store method portability remains split to #1086."
+    - "Session locking, event delivery/replay, and trace/read models remain split to #1087."
+    - "Public local/dev default flip plus zero-service swarm run proof remains split to #1088."
+    - "Docs, CI, and repo-wide stale-default closeout remains split to #1089."
   agent_session_management:
     description: The platform manages agent sessions — the lifecycle of an agent from receiving an event to completing its
       response.
