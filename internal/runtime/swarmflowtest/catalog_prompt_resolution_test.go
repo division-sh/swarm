@@ -45,6 +45,41 @@ func TestCatalogPromptIssues_UsesSemanticPromptScope(t *testing.T) {
 	}
 }
 
+func TestCatalogPromptIssues_PrefersSchemaModeOverFlowRefMode(t *testing.T) {
+	dir := catalogPromptResolutionFixture(t)
+	writeCatalogPromptResolutionFile(t, filepath.Join(dir, "extras", "flows", "support", "schema.yaml"), `
+name: support
+mode: schema-review
+initial_state: waiting
+states: [waiting, done]
+terminal_states: [done]
+`)
+	if err := os.Remove(filepath.Join(dir, "extras", "prompts", "shared.review.md")); err != nil {
+		t.Fatalf("remove flow-ref prompt: %v", err)
+	}
+	writeCatalogPromptResolutionFile(t, filepath.Join(dir, "extras", "prompts", "shared.schema-review.md"), "You are the schema-mode support agent.\n")
+
+	bundle := catalogLoadBootBundle(t, dir)
+	semanticBundle, ok := semanticview.Bundle(bundle.Source)
+	if !ok {
+		t.Fatal("expected semantic bundle")
+	}
+	_, mode := catalogPromptSemanticSourceAndMode(semanticBundle, catalogBootScope{Name: "support"}, "support-agent")
+	if mode != "schema-review" {
+		t.Fatalf("mode = %q, want schema-review", mode)
+	}
+
+	agent := map[string]any{
+		"id":                "support-agent",
+		"prompt_ref":        "shared",
+		"model_tier":        "sonnet",
+		"conversation_mode": "session",
+	}
+	if issues := catalogPromptIssues(bundle, catalogBootScope{Name: "support"}, "support-agent", agent); len(issues) != 0 {
+		t.Fatalf("catalogPromptIssues returned %#v, want no issues", issues)
+	}
+}
+
 func catalogPromptResolutionFixture(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
