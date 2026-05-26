@@ -549,6 +549,9 @@ const (
 func canonicalBundleHashYAMLScalar(node *yaml.Node) (any, error) {
 	explicit := node.Style&yaml.TaggedStyle != 0
 	if explicit {
+		if node.Tag != "!!str" && canonicalBundleHashYAMLQuotedScalar(node.Style) {
+			return nil, fmt.Errorf("explicit %s tag widens quoted scalar %q", node.Tag, node.Value)
+		}
 		implicitValue, implicitKind, err := canonicalBundleHashImplicitScalar(node.Value)
 		if err != nil {
 			return nil, err
@@ -580,6 +583,10 @@ func canonicalBundleHashYAMLScalar(node *yaml.Node) (any, error) {
 	}
 	value, _, err := canonicalBundleHashImplicitScalar(node.Value)
 	return value, err
+}
+
+func canonicalBundleHashYAMLQuotedScalar(style yaml.Style) bool {
+	return style&yaml.DoubleQuotedStyle != 0 || style&yaml.SingleQuotedStyle != 0
 }
 
 func canonicalBundleHashImplicitScalar(raw string) (any, canonicalYAMLScalarKind, error) {

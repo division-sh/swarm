@@ -186,6 +186,13 @@ value: 1e0
 	if bytes.Equal(refLiteral, refInlined) {
 		t.Fatal("$ref literal and inlined content canonicalized identically")
 	}
+	explicitString, err := canonicalBundleHashYAML([]byte(`text: !!str "true"`))
+	if err != nil {
+		t.Fatalf("explicit string tag on quoted scalar: %v", err)
+	}
+	if !bytes.Equal(explicitString, []byte(`{"text":"true"}`)) {
+		t.Fatalf("explicit string canonicalization = %s, want quoted string", explicitString)
+	}
 
 	cases := []struct {
 		name     string
@@ -198,6 +205,9 @@ value: 1e0
 		{name: "non finite number", yaml: "a: .nan\n", contains: "non-finite"},
 		{name: "non string key", yaml: "true: value\n", contains: "not a string"},
 		{name: "multi document", yaml: "a: 1\n---\nb: 2\n", contains: "multiple documents"},
+		{name: "explicit bool quoted", yaml: `a: !!bool "true"` + "\n", contains: "widens quoted"},
+		{name: "explicit int quoted", yaml: `a: !!int "1"` + "\n", contains: "widens quoted"},
+		{name: "explicit null quoted", yaml: `a: !!null "null"` + "\n", contains: "widens quoted"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
