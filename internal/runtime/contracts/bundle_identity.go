@@ -40,6 +40,10 @@ func BootBundleIdentity(bundle *WorkflowContractBundle) (BundleIdentity, error) 
 	}, nil
 }
 
+// BundleFingerprint is the legacy boot/runtime fingerprint used by the
+// currently split health and runtime transition paths. It is not the canonical
+// multi-bundle bundle_hash; new bundle identity source facts must use
+// BundleHash.
 func BundleFingerprint(bundle *WorkflowContractBundle) (string, error) {
 	entries, err := bundleIdentityEntries(bundle)
 	if err != nil {
