@@ -1209,6 +1209,30 @@ func TestRun_MapsRequiredAgentMismatchToNamedError(t *testing.T) {
 	}
 }
 
+func TestRun_RejectsRequiredAgentRoleFallbackWithoutMapKey(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		RootSchema: &runtimecontracts.FlowSchemaDocument{
+			RequiredAgents: []runtimecontracts.FlowRequiredAgent{{
+				Role:  "worker",
+				Emits: []string{"task.completed"},
+			}},
+		},
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"worker-alias": {
+				ID:         "worker",
+				Role:       "worker",
+				EmitEvents: []string{"task.completed"},
+			},
+		},
+	}
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "required_agents_match", "worker") {
+		t.Fatalf("expected required_agents_match missing worker error, got %#v", report.Errors())
+	}
+}
+
 func TestRun_ReportsRequiredAgentSubscriptionMismatchForTemplateFlow(t *testing.T) {
 	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier11-flow-composition", "test-child-flow-pin-wiring"))
 	schema := bundle.FlowSchemas["child"]
@@ -1220,13 +1244,20 @@ func TestRun_ReportsRequiredAgentSubscriptionMismatchForTemplateFlow(t *testing.
 	}}
 	bundle.FlowSchemas["child"] = schema
 	bundle.Semantics.FlowAgents["child"] = append([]runtimecontracts.FlowRequiredAgent(nil), schema.RequiredAgents...)
-	bundle.Agents["worker"] = runtimecontracts.AgentRegistryEntry{
+	worker := runtimecontracts.AgentRegistryEntry{
 		ID:               "worker",
 		Role:             "worker",
 		ModelTier:        "small",
 		ConversationMode: "task",
 		Subscriptions:    []string{"work.requested"},
 		EmitEvents:       []string{"work.completed"},
+	}
+	bundle.Agents["worker"] = worker
+	if view := bundle.FlowTree.ByID["child"]; view != nil {
+		if view.Agents == nil {
+			view.Agents = map[string]runtimecontracts.AgentRegistryEntry{}
+		}
+		view.Agents["worker"] = worker
 	}
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -1237,22 +1268,24 @@ func TestRun_ReportsRequiredAgentSubscriptionMismatchForTemplateFlow(t *testing.
 }
 
 func TestRun_ReportsRootRequiredAgentSubscriptionMismatch(t *testing.T) {
-	bundle := loadTier8FixtureBundle(t, "test-boot-success")
-	if bundle.RootSchema == nil {
-		bundle.RootSchema = &runtimecontracts.FlowSchemaDocument{}
-	}
-	bundle.RootSchema.RequiredAgents = []runtimecontracts.FlowRequiredAgent{{
-		Role:         "worker",
-		SubscribesTo: []string{"task.completed"},
-		Emits:        []string{"task.completed"},
-	}}
-	bundle.Agents["worker"] = runtimecontracts.AgentRegistryEntry{
-		ID:               "worker",
-		Role:             "worker",
-		ModelTier:        "small",
-		ConversationMode: "task",
-		Subscriptions:    []string{"task.requested"},
-		EmitEvents:       []string{"task.completed"},
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		RootSchema: &runtimecontracts.FlowSchemaDocument{
+			RequiredAgents: []runtimecontracts.FlowRequiredAgent{{
+				Role:         "worker",
+				SubscribesTo: []string{"task.completed"},
+				Emits:        []string{"task.completed"},
+			}},
+		},
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"worker": {
+				ID:               "worker",
+				Role:             "worker",
+				ModelTier:        "small",
+				ConversationMode: "task",
+				Subscriptions:    []string{"task.requested"},
+				EmitEvents:       []string{"task.completed"},
+			},
+		},
 	}
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})

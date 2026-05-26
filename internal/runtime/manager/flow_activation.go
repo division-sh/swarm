@@ -18,6 +18,7 @@ import (
 	runtimeeventpayload "swarm/internal/runtime/eventpayload"
 	runtimeeventschema "swarm/internal/runtime/eventschema"
 	runtimepipeline "swarm/internal/runtime/pipeline"
+	runtimerequiredagents "swarm/internal/runtime/requiredagents"
 	"swarm/internal/runtime/semanticview"
 	runtimesharedjson "swarm/internal/runtime/sharedjson"
 	runtimetools "swarm/internal/runtime/tools"
@@ -336,8 +337,8 @@ func StaticFlowRequiredAgentMaterializationRecords(source semanticview.Source) (
 		return nil, nil
 	}
 	records := []PersistedAgent{}
-	for _, scope := range source.ProjectScopes() {
-		scopeRecords, err := staticRequiredAgentsForScope(source, "", "", scope.Agents, source.RequiredAgents())
+	if rootScope, ok := runtimerequiredagents.RootScope(source); ok {
+		scopeRecords, err := staticRequiredAgentsForScope(source, "", "", rootScope.Agents, rootScope.Required)
 		if err != nil {
 			return nil, err
 		}
@@ -561,13 +562,13 @@ func staticRequiredAgentsForScope(
 ) ([]PersistedAgent, error) {
 	flowID = strings.TrimSpace(flowID)
 	flowPath = strings.Trim(strings.TrimSpace(flowPath), "/")
-	if len(required) == 0 || len(agents) == 0 {
+	if len(required) == 0 {
 		return nil, nil
 	}
 	localEvents := staticFlowLocalEventSet(agents)
 	records := make([]PersistedAgent, 0, len(required))
 	for _, requiredAgent := range required {
-		logicalID, entry, ok := resolveRequiredAgentEntry(agents, requiredAgent)
+		logicalID, entry, ok := runtimerequiredagents.ResolveAgent(agents, requiredAgent)
 		if !ok {
 			return nil, fmt.Errorf("required agent %q missing from scope %q", strings.TrimSpace(requiredAgent.Role), flowID)
 		}
@@ -722,16 +723,6 @@ func buildStaticFlowAgentConfig(
 	}
 	cfg.NormalizeRuntimeDescriptor()
 	return cfg, nil
-}
-
-func resolveRequiredAgentEntry(agents map[string]runtimecontracts.AgentRegistryEntry, required runtimecontracts.FlowRequiredAgent) (string, runtimecontracts.AgentRegistryEntry, bool) {
-	role := strings.TrimSpace(required.Role)
-	for logicalID, entry := range agents {
-		if strings.EqualFold(strings.TrimSpace(logicalID), role) || strings.EqualFold(strings.TrimSpace(entry.Role), role) || strings.EqualFold(strings.TrimSpace(entry.ID), role) {
-			return strings.TrimSpace(logicalID), entry, true
-		}
-	}
-	return "", runtimecontracts.AgentRegistryEntry{}, false
 }
 
 func normalizedFlowAgentEmitEvents(events []string, vars map[string]string, localEvents map[string]struct{}, flowPath, templateID, instanceID string) []string {

@@ -17,6 +17,7 @@ import (
 	"swarm/internal/runtime/flowdata"
 	runtimemcp "swarm/internal/runtime/mcp"
 	runtimepipeline "swarm/internal/runtime/pipeline"
+	runtimerequiredagents "swarm/internal/runtime/requiredagents"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/runtime/sessions"
 	runtimetools "swarm/internal/runtime/tools"
@@ -841,85 +842,54 @@ func (c *checkerContext) requiredAgentsMatch() []Finding {
 		return c.requiredFindings
 	}
 	c.requiredLoaded = true
-	for flowID, requiredAgents := range requiredAgentsByFlow(c.source) {
-		for _, required := range requiredAgents {
-			role := strings.TrimSpace(required.Role)
-			if role == "" {
-				c.requiredFindings = append(c.requiredFindings, Finding{
-					CheckID:  "required_agents_match",
-					Severity: "error",
-					Message:  fmt.Sprintf("flow %s required_agents entry missing role", flowID),
-					Location: strings.TrimSpace(flowID),
-				})
-				continue
-			}
-			agentID, agent, ok := requiredAgentProvider(c.source, role)
-			if !ok {
-				c.requiredFindings = append(c.requiredFindings, Finding{
-					CheckID:  "required_agents_match",
-					Severity: "error",
-					Message:  fmt.Sprintf("flow %s required agent role %s missing from merged agents", flowID, role),
-					Location: strings.TrimSpace(flowID),
-				})
-				continue
-			}
-			if diff := missingStrings(required.SubscribesTo, agentSubscriptions(agent)); diff != "" {
-				c.requiredFindings = append(c.requiredFindings, Finding{
-					CheckID:  "required_agents_match",
-					Severity: "error",
-					Message:  fmt.Sprintf("flow %s required agent %s subscriptions mismatch (%s)", flowID, agentID, diff),
-					Location: strings.TrimSpace(flowID),
-				})
-			}
-			if diff := missingStrings(required.Emits, agent.EmitEvents); diff != "" {
-				c.requiredFindings = append(c.requiredFindings, Finding{
-					CheckID:  "required_agents_match",
-					Severity: "error",
-					Message:  fmt.Sprintf("flow %s required agent %s emits mismatch (%s)", flowID, agentID, diff),
-					Location: strings.TrimSpace(flowID),
-				})
-			}
-		}
-	}
-	for _, required := range c.source.RequiredAgents() {
-		role := strings.TrimSpace(required.Role)
-		if role == "" {
-			c.requiredFindings = append(c.requiredFindings, Finding{
-				CheckID:  "required_agents_match",
-				Severity: "error",
-				Message:  "root schema required_agents entry missing role",
-				Location: "root",
-			})
-			continue
-		}
-		agentID, agent, ok := requiredAgentProvider(c.source, role)
-		if !ok {
-			c.requiredFindings = append(c.requiredFindings, Finding{
-				CheckID:  "required_agents_match",
-				Severity: "error",
-				Message:  fmt.Sprintf("root schema required agent role %s missing from merged agents", role),
-				Location: "root",
-			})
-			continue
-		}
-		if diff := missingStrings(required.SubscribesTo, agentSubscriptions(agent)); diff != "" {
-			c.requiredFindings = append(c.requiredFindings, Finding{
-				CheckID:  "required_agents_match",
-				Severity: "error",
-				Message:  fmt.Sprintf("root required agent %s subscriptions mismatch (%s)", agentID, diff),
-				Location: "root",
-			})
-		}
-		if diff := missingStrings(required.Emits, agent.EmitEvents); diff != "" {
-			c.requiredFindings = append(c.requiredFindings, Finding{
-				CheckID:  "required_agents_match",
-				Severity: "error",
-				Message:  fmt.Sprintf("root required agent %s emits mismatch (%s)", agentID, diff),
-				Location: "root",
-			})
+	for _, scope := range runtimerequiredagents.AllScopes(c.source) {
+		for _, finding := range runtimerequiredagents.CheckScope(scope) {
+			c.requiredFindings = append(c.requiredFindings, requiredAgentBootFinding(finding))
 		}
 	}
 	return c.requiredFindings
+}
+
+func requiredAgentBootFinding(finding runtimerequiredagents.Finding) Finding {
+	scopeID := strings.TrimSpace(finding.ScopeID)
+	if scopeID == "" {
+		scopeID = "root"
+	}
+	message := ""
+	switch finding.Kind {
+	case runtimerequiredagents.FindingMissingRole:
+		if scopeID == "root" {
+			message = "root schema required_agents entry missing role"
+		} else {
+			message = fmt.Sprintf("flow %s required_agents entry missing role", scopeID)
+		}
+	case runtimerequiredagents.FindingMissingAgent:
+		if scopeID == "root" {
+			message = fmt.Sprintf("root schema required agent role %s missing from agents.yaml", finding.Role)
+		} else {
+			message = fmt.Sprintf("flow %s required agent role %s missing from agents.yaml", scopeID, finding.Role)
+		}
+	case runtimerequiredagents.FindingMissingSubscriptions:
+		if scopeID == "root" {
+			message = fmt.Sprintf("root required agent %s subscriptions mismatch (%s)", finding.AgentID, runtimerequiredagents.MissingList(finding.Missing))
+		} else {
+			message = fmt.Sprintf("flow %s required agent %s subscriptions mismatch (%s)", scopeID, finding.AgentID, runtimerequiredagents.MissingList(finding.Missing))
+		}
+	case runtimerequiredagents.FindingMissingEmits:
+		if scopeID == "root" {
+			message = fmt.Sprintf("root required agent %s emits mismatch (%s)", finding.AgentID, runtimerequiredagents.MissingList(finding.Missing))
+		} else {
+			message = fmt.Sprintf("flow %s required agent %s emits mismatch (%s)", scopeID, finding.AgentID, runtimerequiredagents.MissingList(finding.Missing))
+		}
+	default:
+		message = fmt.Sprintf("%s required_agents mismatch", scopeID)
+	}
+	return Finding{
+		CheckID:  "required_agents_match",
+		Severity: "error",
+		Message:  message,
+		Location: scopeID,
+	}
 }
 
 func (c *checkerContext) stateMachineCoherence() []Finding {
@@ -1396,55 +1366,6 @@ func entitySchemaFields(source semanticview.Source) map[string]struct{} {
 	return out
 }
 
-func requiredAgentsByFlow(source semanticview.Source) map[string][]runtimecontracts.FlowRequiredAgent {
-	out := map[string][]runtimecontracts.FlowRequiredAgent{}
-	if source == nil {
-		return out
-	}
-	for flowID := range source.FlowSchemaEntries() {
-		out[strings.TrimSpace(flowID)] = source.FlowRequiredAgents(flowID)
-	}
-	return out
-}
-
-func requiredAgentProvider(source semanticview.Source, role string) (string, runtimecontracts.AgentRegistryEntry, bool) {
-	if source == nil {
-		return "", runtimecontracts.AgentRegistryEntry{}, false
-	}
-	role = strings.TrimSpace(role)
-	if role == "" {
-		return "", runtimecontracts.AgentRegistryEntry{}, false
-	}
-	requiredKey := normalizeRoleKey(role)
-	agents := source.AgentEntries()
-	for agentID, agent := range agents {
-		if normalizeRoleKey(agentID) == requiredKey {
-			return strings.TrimSpace(agentID), agent, true
-		}
-	}
-	for agentID, agent := range agents {
-		if roleMatches(agentID, agent.Role, role) {
-			return strings.TrimSpace(agentID), agent, true
-		}
-	}
-	return "", runtimecontracts.AgentRegistryEntry{}, false
-}
-
-func roleMatches(agentID, agentRole, requiredRole string) bool {
-	requiredKey := normalizeRoleKey(requiredRole)
-	if requiredKey == "" {
-		return false
-	}
-	return normalizeRoleKey(agentID) == requiredKey || normalizeRoleKey(agentRole) == requiredKey
-}
-
-func normalizeRoleKey(raw string) string {
-	raw = strings.TrimSpace(strings.ToLower(raw))
-	raw = strings.ReplaceAll(raw, "_", "-")
-	raw = strings.Join(strings.Fields(raw), "-")
-	return raw
-}
-
 func flowSchemaIsTemplate(source semanticview.Source, flowID string) bool {
 	if source == nil {
 		return false
@@ -1465,30 +1386,6 @@ func flowIsStateless(source semanticview.Source, flowID string) bool {
 		return false
 	}
 	return strings.TrimSpace(schema.InitialState) == "" && len(schema.States) == 0
-}
-
-func agentSubscriptions(agent runtimecontracts.AgentRegistryEntry) []string {
-	values := make([]string, 0, len(agent.SubscribesTo)+len(agent.Subscriptions)+len(agent.SubscriptionsBootstrap))
-	values = append(values, agent.SubscribesTo...)
-	values = append(values, agent.Subscriptions...)
-	values = append(values, agent.SubscriptionsBootstrap...)
-	return values
-}
-
-func missingStrings(expected, actual []string) string {
-	actualSet := stringSet(actual)
-	missing := make([]string, 0)
-	for _, value := range expected {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
-		if _, ok := actualSet[value]; !ok {
-			missing = append(missing, value)
-		}
-	}
-	sort.Strings(missing)
-	return strings.Join(missing, ", ")
 }
 
 func nodeFlowID(source semanticview.Source, nodeID string) string {

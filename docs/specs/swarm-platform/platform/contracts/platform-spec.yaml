@@ -2716,8 +2716,9 @@ engine:
       when: boot-only
     - id: required_agents_match
       severity: error
-      scope: per-flow
-      trigger: A flow schema declares a required_agents role that has no matching agent in agents.yaml (by map key).
+      scope: root-and-per-flow
+      trigger: A flow schema declares a required_agents role that has no matching agent in that scope's agents.yaml by
+        exact map key; or the matching agent does not cover all required subscribes_to / emits events.
       when: boot-only
     - id: handler_field_compliance
       severity: error

@@ -20,6 +20,7 @@ import (
 	"swarm/internal/runtime/core/paths"
 	"swarm/internal/runtime/core/timeridentity"
 	runtimepipeline "swarm/internal/runtime/pipeline"
+	runtimerequiredagents "swarm/internal/runtime/requiredagents"
 	"swarm/internal/runtime/semanticview"
 )
 
@@ -1325,40 +1326,7 @@ func catalogCollectBootIssues(bundle catalogBootBundle) []catalogBootIssue {
 				}
 			}
 		}
-		for _, raw := range catalogAnySlice(scope.Schema["required_agents"]) {
-			required := catalogMap(raw)
-			role := catalogBootText(required["role"])
-			if role == "" {
-				continue
-			}
-			agent := catalogMap(scope.Agents[role])
-			if len(agent) == 0 {
-				issues = append(issues, catalogBootIssue{Severity: "error", Category: "REQUIRED-AGENT", Message: fmt.Sprintf("%s: required role '%s' not in agents.yaml", scopeLabel, role)})
-				continue
-			}
-			schemaSubscriptions := catalogBootStringSet(required["subscribes_to"])
-			agentSubscriptions := catalogBootStringSet(agent["subscriptions"])
-			schemaEmits := catalogBootStringSet(required["emits"])
-			agentEmits := catalogBootStringSet(agent["emit_events"])
-			missingSubscriptions := make([]string, 0, len(schemaSubscriptions))
-			for _, ev := range catalogSortedSetKeys(schemaSubscriptions) {
-				if !catalogSetHas(agentSubscriptions, ev) {
-					missingSubscriptions = append(missingSubscriptions, ev)
-				}
-			}
-			if len(missingSubscriptions) > 0 {
-				issues = append(issues, catalogBootIssue{Severity: "error", Category: "SUBSCRIPTION-MISMATCH", Message: fmt.Sprintf("%s/%s: schema says subscribes_to %v but agent doesn't", scopeLabel, role, missingSubscriptions)})
-			}
-			missing := make([]string, 0, len(schemaEmits))
-			for _, ev := range catalogSortedSetKeys(schemaEmits) {
-				if !catalogSetHas(agentEmits, ev) {
-					missing = append(missing, ev)
-				}
-			}
-			if len(missing) > 0 {
-				issues = append(issues, catalogBootIssue{Severity: "error", Category: "EMIT-MISMATCH", Message: fmt.Sprintf("%s/%s: schema says emits %v but agent doesn't", scopeLabel, role, missing)})
-			}
-		}
+		issues = append(issues, catalogRequiredAgentIssues(scope)...)
 		for _, agentID := range catalogSortedKeys(scope.Agents) {
 			agent := catalogMap(scope.Agents[agentID])
 			for _, tool := range catalogStringSlice(agent["tools_tier2"]) {
@@ -1479,6 +1447,59 @@ func catalogBootScopeLabel(scope catalogBootScope) string {
 		return "root"
 	}
 	return strings.TrimSpace(scope.Name)
+}
+
+func catalogRequiredAgentIssues(scope catalogBootScope) []catalogBootIssue {
+	scopeLabel := catalogBootScopeLabel(scope)
+	findings := runtimerequiredagents.CheckScope(runtimerequiredagents.Scope{
+		ID:       scopeLabel,
+		Agents:   catalogRequiredAgentEntries(scope.Agents),
+		Required: catalogRequiredAgentRequirements(scope.Schema),
+	})
+	issues := make([]catalogBootIssue, 0, len(findings))
+	for _, finding := range findings {
+		switch finding.Kind {
+		case runtimerequiredagents.FindingMissingRole:
+			issues = append(issues, catalogBootIssue{Severity: "error", Category: "REQUIRED-AGENT", Message: fmt.Sprintf("%s: required_agents entry missing role", scopeLabel)})
+		case runtimerequiredagents.FindingMissingAgent:
+			issues = append(issues, catalogBootIssue{Severity: "error", Category: "REQUIRED-AGENT", Message: fmt.Sprintf("%s: required role '%s' not in agents.yaml", scopeLabel, finding.Role)})
+		case runtimerequiredagents.FindingMissingSubscriptions:
+			issues = append(issues, catalogBootIssue{Severity: "error", Category: "SUBSCRIPTION-MISMATCH", Message: fmt.Sprintf("%s/%s: schema says subscribes_to %v but agent doesn't", scopeLabel, finding.AgentID, finding.Missing)})
+		case runtimerequiredagents.FindingMissingEmits:
+			issues = append(issues, catalogBootIssue{Severity: "error", Category: "EMIT-MISMATCH", Message: fmt.Sprintf("%s/%s: schema says emits %v but agent doesn't", scopeLabel, finding.AgentID, finding.Missing)})
+		}
+	}
+	return issues
+}
+
+func catalogRequiredAgentEntries(rawAgents map[string]any) map[string]runtimecontracts.AgentRegistryEntry {
+	agents := make(map[string]runtimecontracts.AgentRegistryEntry, len(rawAgents))
+	for agentID, rawAgent := range rawAgents {
+		agent := catalogMap(rawAgent)
+		agents[agentID] = runtimecontracts.AgentRegistryEntry{
+			ID:                     catalogBootText(agent["id"]),
+			Role:                   catalogBootText(agent["role"]),
+			Subscriptions:          catalogStringSlice(agent["subscriptions"]),
+			SubscribesTo:           catalogStringSlice(agent["subscribes_to"]),
+			SubscriptionsBootstrap: catalogStringSlice(agent["subscriptions_bootstrap"]),
+			EmitEvents:             catalogStringSlice(agent["emit_events"]),
+		}
+	}
+	return agents
+}
+
+func catalogRequiredAgentRequirements(schema map[string]any) []runtimecontracts.FlowRequiredAgent {
+	rawRequired := catalogAnySlice(schema["required_agents"])
+	required := make([]runtimecontracts.FlowRequiredAgent, 0, len(rawRequired))
+	for _, raw := range rawRequired {
+		item := catalogMap(raw)
+		required = append(required, runtimecontracts.FlowRequiredAgent{
+			Role:         catalogBootText(item["role"]),
+			SubscribesTo: catalogStringSlice(item["subscribes_to"]),
+			Emits:        catalogStringSlice(item["emits"]),
+		})
+	}
+	return required
 }
 
 func catalogToolRequiredPermission(tool string, spec map[string]any) string {
