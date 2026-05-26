@@ -5345,17 +5345,19 @@ multi_bundle_persistence:
       run.start:
         rule: Deprecated wrapper follows event.publish bundle_hash semantics while it remains present.
       run.list:
-        rule: May accept optional bundle_hash filter.
+        rule: Accepts optional bundle_hash filter over canonical runs.bundle_hash.
       runtime.logs:
-        rule: May accept optional bundle_hash filter.
+        rule: Accepts optional bundle_hash filter over canonical runs.bundle_hash.
+      runtime.subscribe_logs:
+        rule: Accepts the same optional bundle_hash runtime-log source filter as runtime.logs.
       runtime.incidents:
-        rule: May accept optional bundle_hash filter.
+        rule: Accepts optional bundle_hash filter over source runtime-log rows before incident aggregation.
       agent.list:
         rule: Future bundle-aware listing must disambiguate run-scoped loaded agents from persisted bundle agent catalog.
       event.list:
-        rule: Future multi-bundle event listing must avoid ambient bundle assumptions; run_id remains the primary run-scoped owner.
+        rule: Multi-bundle-safe event listing requires explicit filter.run_id; unscoped event firehose reads are not public v1.
       event.subscribe:
-        rule: Future multi-bundle subscription filters must avoid ambient bundle assumptions; run_id remains the primary run-scoped owner.
+        rule: Multi-bundle-safe event subscriptions require explicit filter.run_id; unscoped event firehose streams are not public v1.
     run_fork:
       method: run.fork
       params:
@@ -10342,6 +10344,8 @@ api_specification:
       EventListFilter:
         type: object
         additionalProperties: false
+        required:
+        - run_id
         properties:
           run_id:
             $ref: '#/components/schemas/OpaqueId'
@@ -12542,11 +12546,17 @@ api_specification:
       - RUN_NOT_FOUND
     run.list:
       tier: must_have
-      description: List runs with optional filters. Cursor-paginated.
+      description: List runs with optional filters. Cursor-paginated. The optional bundle_hash filter is a canonical persisted
+        run-bundle selector over runs.bundle_hash; callers must not use legacy bundle fingerprints for this field.
       scope:
         required:
         - read:runs
       params:
+      - name: bundle_hash
+        required: false
+        description: Optional canonical bundle selector over runs.bundle_hash. Must be bundle-v1:sha256:<64 lowercase hex>.
+        schema:
+          $ref: '#/components/schemas/BundleHash'
       - name: status
         required: false
         schema:
@@ -12818,7 +12828,8 @@ api_specification:
 
         has_dead_letter and reason_code filters; no separate dead_letter.*
 
-        namespace in v1.
+        namespace in v1. Multi-bundle-safe reads require explicit filter.run_id;
+        unscoped event firehose reads are not a public v1 surface.
 
         '
       scope:
@@ -12826,7 +12837,7 @@ api_specification:
         - read:events
       params:
       - name: filter
-        required: false
+        required: true
         schema:
           $ref: '#/components/schemas/EventListFilter'
       - name: since
@@ -12886,13 +12897,14 @@ api_specification:
       tier: should_have
       description: "Live event stream with the same filter shape as event.list. Filter\nparity is required by the conventions\
         \ section. Pagination params\n(limit, cursor) and the time-window `until` are NOT accepted here\n\u2014 subscriptions\
-        \ deliver everything matching the filter live.\n"
+        \ deliver everything matching the filter live. Multi-bundle-safe streams require\nexplicit filter.run_id; unscoped\
+        \ event firehose subscriptions are not a public v1 surface.\n"
       scope:
         required:
         - read:events
       params:
       - name: filter
-        required: false
+        required: true
         schema:
           $ref: '#/components/schemas/EventListFilter'
       - name: replay_since
@@ -13649,11 +13661,17 @@ api_specification:
       - IDEMPOTENCY_CONFLICT
     runtime.logs:
       tier: should_have
-      description: Filtered structured runtime log query.
+      description: Filtered structured runtime log query. The optional bundle_hash filter is a canonical persisted
+        run-bundle selector over runs.bundle_hash and composes with run_id and other filters as AND.
       scope:
         required:
         - read:runtime
       params:
+      - name: bundle_hash
+        required: false
+        description: Optional canonical bundle selector over runs.bundle_hash. Must be bundle-v1:sha256:<64 lowercase hex>.
+        schema:
+          $ref: '#/components/schemas/BundleHash'
       - name: run_id
         required: false
         schema:
@@ -13735,6 +13753,11 @@ api_specification:
         required:
         - read:runtime
       params:
+      - name: bundle_hash
+        required: false
+        description: Optional canonical bundle selector over runs.bundle_hash. Must be bundle-v1:sha256:<64 lowercase hex>.
+        schema:
+          $ref: '#/components/schemas/BundleHash'
       - name: run_id
         required: false
         schema:
@@ -13780,11 +13803,17 @@ api_specification:
       errors: []
     runtime.incidents:
       tier: should_have
-      description: Aggregated runtime incidents (errors and warnings grouped by error_code/component for triage).
+      description: Aggregated runtime incidents (errors and warnings grouped by error_code/component for triage). The optional
+        bundle_hash filter is applied to source runtime-log rows before aggregation.
       scope:
         required:
         - read:runtime
       params:
+      - name: bundle_hash
+        required: false
+        description: Optional canonical bundle selector over runs.bundle_hash. Must be bundle-v1:sha256:<64 lowercase hex>.
+        schema:
+          $ref: '#/components/schemas/BundleHash'
       - name: since_hours
         required: false
         schema:

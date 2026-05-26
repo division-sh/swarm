@@ -195,6 +195,14 @@ func TestEventListFilterValidationCoversListAndSubscribe(t *testing.T) {
 		t.Fatalf("event.list enum details = %#v", details)
 	}
 
+	listMissingRun := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"list-missing-run","method":"event.list","params":{"filter":{"event_name":"scan.requested"}}}`)
+	if listMissingRun.Error == nil || listMissingRun.Error.Code != codeInvalidParams {
+		t.Fatalf("event.list missing run scope error = %#v, want invalid params", listMissingRun.Error)
+	}
+	if details := asMap(t, asMap(t, listMissingRun.Error.Data)["details"]); details["field"] != "filter.run_id" {
+		t.Fatalf("event.list missing run scope details = %#v", details)
+	}
+
 	server := httptest.NewServer(handler)
 	defer server.Close()
 	conn := dialTestWS(t, server.URL)
@@ -230,6 +238,22 @@ func TestEventListFilterValidationCoversListAndSubscribe(t *testing.T) {
 	if details := asMap(t, asMap(t, subEnum.Error.Data)["details"]); details["field"] != "filter.subscriber_type" {
 		t.Fatalf("event.subscribe enum details = %#v", details)
 	}
+
+	writeWSRequest(t, conn, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      "sub-missing-run",
+		"method":  "event.subscribe",
+		"params": map[string]any{
+			"filter": map[string]any{"event_name": "scan.requested"},
+		},
+	})
+	subMissingRun := readWSResponse(t, conn)
+	if subMissingRun.Error == nil || subMissingRun.Error.Code != codeInvalidParams {
+		t.Fatalf("event.subscribe missing run scope error = %#v, want invalid params", subMissingRun.Error)
+	}
+	if details := asMap(t, asMap(t, subMissingRun.Error.Data)["details"]); details["field"] != "filter.run_id" {
+		t.Fatalf("event.subscribe missing run scope details = %#v", details)
+	}
 }
 
 func TestHandlerWebSocketSubscriptionOwnerErrorClosesConnection(t *testing.T) {
@@ -249,7 +273,9 @@ func TestHandlerWebSocketSubscriptionOwnerErrorClosesConnection(t *testing.T) {
 		"jsonrpc": "2.0",
 		"id":      "sub-events",
 		"method":  "event.subscribe",
-		"params":  map[string]any{},
+		"params": map[string]any{
+			"filter": map[string]any{"run_id": "run-1"},
+		},
 	})
 	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 	defer conn.SetReadDeadline(time.Time{})
@@ -471,6 +497,7 @@ func TestHandlerWebSocketRuntimeSubscribeLogsUsesOwnerFiltersAndReplay(t *testin
 		"id":      "sub-runtime-logs",
 		"method":  "runtime.subscribe_logs",
 		"params": map[string]any{
+			"bundle_hash":  "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 			"run_id":       "run-1",
 			"entity_id":    "entity-1",
 			"session_id":   "sess-1",
@@ -495,6 +522,7 @@ func TestHandlerWebSocketRuntimeSubscribeLogsUsesOwnerFiltersAndReplay(t *testin
 		t.Fatalf("runtime log notification result = %#v", got)
 	}
 	if observability.lastRuntimeLogs.RunID != "run-1" ||
+		observability.lastRuntimeLogs.BundleHash != "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" ||
 		observability.lastRuntimeLogs.EntityID != "entity-1" ||
 		observability.lastRuntimeLogs.SessionID != "sess-1" ||
 		observability.lastRuntimeLogs.Component != "scheduler" ||
@@ -610,6 +638,24 @@ func TestRuntimeSubscribeLogsRejectsSnapshotControls(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("invalid bundle_hash", func(t *testing.T) {
+		conn := dialTestWS(t, server.URL)
+		defer conn.Close()
+		writeWSRequest(t, conn, map[string]any{
+			"jsonrpc": "2.0",
+			"id":      "bad-runtime-logs-bundle",
+			"method":  "runtime.subscribe_logs",
+			"params":  map[string]any{"bundle_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+		})
+		resp := readWSResponse(t, conn)
+		if resp.Error == nil || resp.Error.Code != codeInvalidParams {
+			t.Fatalf("runtime.subscribe_logs invalid bundle_hash response = %#v, want invalid params", resp)
+		}
+		if details := asMap(t, asMap(t, resp.Error.Data)["details"]); details["field"] != "bundle_hash" {
+			t.Fatalf("runtime.subscribe_logs invalid bundle_hash details = %#v", details)
+		}
+	})
 }
 
 func TestWebSocketSessionBackpressureAndUnsubscribeCancelState(t *testing.T) {

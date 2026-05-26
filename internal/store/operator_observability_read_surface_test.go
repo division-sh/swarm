@@ -373,6 +373,87 @@ func TestOperatorRuntimeLogsFilterBySessionAndTimeWindow(t *testing.T) {
 	}
 }
 
+func TestOperatorRuntimeObservabilityFiltersByBundleHash(t *testing.T) {
+	ctx := context.Background()
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+
+	bundleA := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	bundleB := "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	runA := uuid.NewString()
+	runB := uuid.NewString()
+	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
+		VALUES
+			($1::uuid, 'running', $2, 'persisted', $3),
+			($4::uuid, 'running', $5, 'persisted', $3)
+	`, runA, bundleA, base, runB, bundleB); err != nil {
+		t.Fatalf("seed runs: %v", err)
+	}
+	insertLog := func(runID, code string, createdAt time.Time) string {
+		t.Helper()
+		eventID := uuid.NewString()
+		payload := `{
+			"log_level":"error",
+			"message":"runtime failed",
+			"details":{
+				"component":"mcp-gateway",
+				"action":"request_failed",
+				"agent_id":"agent-1",
+				"error":"runtime failed",
+				"error_code":"` + code + `"
+			}
+		}`
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO events (event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
+			VALUES ($1::uuid, $2::uuid, 'platform.runtime_log', 'global', $3::jsonb, 'runtime', 'platform', $4)
+		`, eventID, runID, payload, createdAt); err != nil {
+			t.Fatalf("seed runtime log: %v", err)
+		}
+		return eventID
+	}
+	logA := insertLog(runA, "bundle_a_code", base.Add(time.Second))
+	_ = insertLog(runB, "bundle_b_code", base.Add(2*time.Second))
+
+	logs, err := pg.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{
+		BundleHash: bundleA,
+		Limit:      10,
+		Order:      "asc",
+	})
+	if err != nil {
+		t.Fatalf("ListOperatorRuntimeLogs bundle_hash: %v", err)
+	}
+	if len(logs.Logs) != 1 || logs.Logs[0].LogID != logA || logs.Logs[0].RunID != runA {
+		t.Fatalf("bundle-filtered logs = %#v, want only run A log", logs.Logs)
+	}
+
+	mismatched, err := pg.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{
+		RunID:      runB,
+		BundleHash: bundleA,
+		Limit:      10,
+		Order:      "asc",
+	})
+	if err != nil {
+		t.Fatalf("ListOperatorRuntimeLogs run_id+bundle_hash mismatch: %v", err)
+	}
+	if len(mismatched.Logs) != 0 {
+		t.Fatalf("mismatched run_id+bundle_hash logs = %#v, want none", mismatched.Logs)
+	}
+
+	incidents, err := pg.ListOperatorRuntimeIncidents(ctx, OperatorRuntimeIncidentListOptions{
+		BundleHash: bundleA,
+		SinceHours: 2,
+		Limit:      10,
+	})
+	if err != nil {
+		t.Fatalf("ListOperatorRuntimeIncidents bundle_hash: %v", err)
+	}
+	if len(incidents.Incidents) != 1 || incidents.Incidents[0].ErrorCode != "bundle_a_code" {
+		t.Fatalf("bundle-filtered incidents = %#v, want only bundle A aggregate", incidents.Incidents)
+	}
+}
+
 func TestRunDebugTracePageCursorAndRunNotFound(t *testing.T) {
 	ctx := context.Background()
 	_, db, _ := testutil.StartPostgres(t)

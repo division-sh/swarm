@@ -123,14 +123,15 @@ func TestOperatorObservabilityHandlersExposePersistedReadMethods(t *testing.T) {
 		t.Fatalf("event.get event_id = %#v", got)
 	}
 
-	logs := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"logs","method":"runtime.logs","params":{"run_id":"run-1","session_id":"sess-1","component":"scheduler","level":"warn","since":"2023-11-14T22:12:00Z","until":"2023-11-14T22:14:00Z","limit":5}}`)
+	bundleHash := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	logs := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"logs","method":"runtime.logs","params":{"bundle_hash":"`+bundleHash+`","run_id":"run-1","session_id":"sess-1","component":"scheduler","level":"warn","since":"2023-11-14T22:12:00Z","until":"2023-11-14T22:14:00Z","limit":5}}`)
 	if logs.Error != nil {
 		t.Fatalf("runtime.logs error = %#v", logs.Error)
 	}
 	if rows, _ := asMap(t, logs.Result)["logs"].([]any); len(rows) != 1 {
 		t.Fatalf("runtime.logs rows = %#v", asMap(t, logs.Result)["logs"])
 	}
-	if observability.lastRuntimeLogs.RunID != "run-1" || observability.lastRuntimeLogs.SessionID != "sess-1" || observability.lastRuntimeLogs.Component != "scheduler" {
+	if observability.lastRuntimeLogs.BundleHash != bundleHash || observability.lastRuntimeLogs.RunID != "run-1" || observability.lastRuntimeLogs.SessionID != "sess-1" || observability.lastRuntimeLogs.Component != "scheduler" {
 		t.Fatalf("runtime.logs options = %#v", observability.lastRuntimeLogs)
 	}
 	if observability.lastRuntimeLogs.Since == nil || observability.lastRuntimeLogs.Until == nil {
@@ -141,15 +142,28 @@ func TestOperatorObservabilityHandlersExposePersistedReadMethods(t *testing.T) {
 		t.Fatalf("runtime.logs invalid window error = %#v, want invalid params", invalidWindow.Error)
 	}
 
-	incidents := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"incidents","method":"runtime.incidents","params":{"since_hours":24,"component":"scheduler","limit":5}}`)
+	invalidBundleHash := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"logs-invalid-bundle","method":"runtime.logs","params":{"bundle_hash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}`)
+	if invalidBundleHash.Error == nil || invalidBundleHash.Error.Code != codeInvalidParams {
+		t.Fatalf("runtime.logs invalid bundle_hash error = %#v, want invalid params", invalidBundleHash.Error)
+	}
+
+	incidents := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"incidents","method":"runtime.incidents","params":{"bundle_hash":"`+bundleHash+`","since_hours":24,"component":"scheduler","limit":5}}`)
 	if incidents.Error != nil {
 		t.Fatalf("runtime.incidents error = %#v", incidents.Error)
 	}
 	if rows, _ := asMap(t, incidents.Result)["incidents"].([]any); len(rows) != 1 {
 		t.Fatalf("runtime.incidents rows = %#v", asMap(t, incidents.Result)["incidents"])
 	}
-	if observability.lastIncidents.Component != "scheduler" || observability.lastIncidents.SinceHours != 24 {
+	if observability.lastIncidents.BundleHash != bundleHash || observability.lastIncidents.Component != "scheduler" || observability.lastIncidents.SinceHours != 24 {
 		t.Fatalf("runtime.incidents options = %#v", observability.lastIncidents)
+	}
+
+	missingEventRun := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"events-missing-run","method":"event.list","params":{"filter":{"event_name":"scan.requested"},"limit":10}}`)
+	if missingEventRun.Error == nil || missingEventRun.Error.Code != codeInvalidParams {
+		t.Fatalf("event.list missing run scope error = %#v, want invalid params", missingEventRun.Error)
+	}
+	if details := asMap(t, asMap(t, missingEventRun.Error.Data)["details"]); details["field"] != "filter.run_id" {
+		t.Fatalf("event.list missing run scope details = %#v, want filter.run_id", details)
 	}
 }
 
@@ -177,7 +191,7 @@ func TestOperatorObservabilityHandlersKeepPayloadEntityOutOfTopLevelEventIdentit
 		}),
 	})
 
-	list := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"events","method":"event.list","params":{"limit":10}}`)
+	list := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"events","method":"event.list","params":{"filter":{"run_id":"run-1"},"limit":10}}`)
 	if list.Error != nil {
 		t.Fatalf("event.list error = %#v", list.Error)
 	}
@@ -193,7 +207,7 @@ func TestOperatorObservabilityHandlersKeepPayloadEntityOutOfTopLevelEventIdentit
 		t.Fatalf("event.list payload = %#v, want preserved entity_id", payload)
 	}
 
-	filtered := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"events-filtered","method":"event.list","params":{"filter":{"entity_id":"`+payloadEntityID+`"},"limit":10}}`)
+	filtered := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"events-filtered","method":"event.list","params":{"filter":{"run_id":"run-1","entity_id":"`+payloadEntityID+`"},"limit":10}}`)
 	if filtered.Error != nil {
 		t.Fatalf("event.list filtered error = %#v", filtered.Error)
 	}
@@ -243,7 +257,7 @@ func TestOperatorObservabilityHandlersTypedErrors(t *testing.T) {
 	}
 
 	observability.listErr = store.ErrInvalidObservabilityCursor
-	list := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"events","method":"event.list","params":{"cursor":"bad"}}`)
+	list := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"events","method":"event.list","params":{"filter":{"run_id":"run-1"},"cursor":"bad"}}`)
 	if list.Error == nil || list.Error.Code != codeInvalidParams {
 		t.Fatalf("event.list error = %#v, want invalid params", list.Error)
 	}

@@ -2348,11 +2348,11 @@
     },
     {
       "name": "event.list",
-      "description": "Canonical event store query. Folds dead-letter inspection in via the\nhas_dead_letter and reason_code filters; no separate dead_letter.*\nnamespace in v1.\n",
+      "description": "Canonical event store query. Folds dead-letter inspection in via the\nhas_dead_letter and reason_code filters; no separate dead_letter.*\nnamespace in v1. Multi-bundle-safe reads require explicit filter.run_id; unscoped event firehose reads are not a public v1 surface.\n",
       "params": [
         {
           "name": "filter",
-          "required": false,
+          "required": true,
           "schema": {
             "$ref": "#/components/schemas/EventListFilter"
           }
@@ -3349,11 +3349,11 @@
     },
     {
       "name": "event.subscribe",
-      "description": "Live event stream with the same filter shape as event.list. Filter\nparity is required by the conventions section. Pagination params\n(limit, cursor) and the time-window `until` are NOT accepted here\n— subscriptions deliver everything matching the filter live.\n",
+      "description": "Live event stream with the same filter shape as event.list. Filter\nparity is required by the conventions section. Pagination params\n(limit, cursor) and the time-window `until` are NOT accepted here\n— subscriptions deliver everything matching the filter live. Multi-bundle-safe streams require\nexplicit filter.run_id; unscoped event firehose subscriptions are not a public v1 surface.\n",
       "params": [
         {
           "name": "filter",
-          "required": false,
+          "required": true,
           "schema": {
             "$ref": "#/components/schemas/EventListFilter"
           }
@@ -4535,8 +4535,16 @@
     },
     {
       "name": "run.list",
-      "description": "List runs with optional filters. Cursor-paginated.",
+      "description": "List runs with optional filters. Cursor-paginated. The optional bundle_hash filter is a canonical persisted run-bundle selector over runs.bundle_hash; callers must not use legacy bundle fingerprints for this field.",
       "params": [
+        {
+          "name": "bundle_hash",
+          "required": false,
+          "description": "Optional canonical bundle selector over runs.bundle_hash. Must be bundle-v1:sha256:\u003c64 lowercase hex\u003e.",
+          "schema": {
+            "$ref": "#/components/schemas/BundleHash"
+          }
+        },
         {
           "name": "status",
           "required": false,
@@ -5568,8 +5576,16 @@
     },
     {
       "name": "runtime.incidents",
-      "description": "Aggregated runtime incidents (errors and warnings grouped by error_code/component for triage).",
+      "description": "Aggregated runtime incidents (errors and warnings grouped by error_code/component for triage). The optional bundle_hash filter is applied to source runtime-log rows before aggregation.",
       "params": [
+        {
+          "name": "bundle_hash",
+          "required": false,
+          "description": "Optional canonical bundle selector over runs.bundle_hash. Must be bundle-v1:sha256:\u003c64 lowercase hex\u003e.",
+          "schema": {
+            "$ref": "#/components/schemas/BundleHash"
+          }
+        },
         {
           "name": "since_hours",
           "required": false,
@@ -5644,8 +5660,16 @@
     },
     {
       "name": "runtime.logs",
-      "description": "Filtered structured runtime log query.",
+      "description": "Filtered structured runtime log query. The optional bundle_hash filter is a canonical persisted run-bundle selector over runs.bundle_hash and composes with run_id and other filters as AND.",
       "params": [
+        {
+          "name": "bundle_hash",
+          "required": false,
+          "description": "Optional canonical bundle selector over runs.bundle_hash. Must be bundle-v1:sha256:\u003c64 lowercase hex\u003e.",
+          "schema": {
+            "$ref": "#/components/schemas/BundleHash"
+          }
+        },
         {
           "name": "run_id",
           "required": false,
@@ -6117,6 +6141,14 @@
       "name": "runtime.subscribe_logs",
       "description": "Live structured runtime log stream for `runtime.logs` follow mode.\nNotifications carry one `LogEntry` row from the same persisted runtime log read owner used by `runtime.logs`.\nThe method accepts the same runtime-log identity/content filter fields as `runtime.logs`, but snapshot pagination, sort, and fixed-window controls (`limit`, `cursor`, `order`, `since`, `until`) are not accepted on the subscription. Use `replay_since` for catch-up.\n",
       "params": [
+        {
+          "name": "bundle_hash",
+          "required": false,
+          "description": "Optional canonical bundle selector over runs.bundle_hash. Must be bundle-v1:sha256:\u003c64 lowercase hex\u003e.",
+          "schema": {
+            "$ref": "#/components/schemas/BundleHash"
+          }
+        },
         {
           "name": "run_id",
           "required": false,
@@ -7515,6 +7547,9 @@
             "$ref": "#/components/schemas/SubscriberType"
           }
         },
+        "required": [
+          "run_id"
+        ],
         "type": "object"
       },
       "EventPublishDelivery": {

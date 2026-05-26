@@ -320,10 +320,10 @@ methods:
     gap_classification: []
   - method: event.list
     transport: http
-    required_params: []
+    required_params: [filter]
     declared_errors: []
     happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorObservabilityHandlersExposePersistedReadMethods}]}
-    required_param_validation: {status: not_applicable}
+    required_param_validation: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestEventListFilterValidationCoversListAndSubscribe}]}
     unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}]}
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
     declared_error_tests: {status: not_applicable}
@@ -365,10 +365,10 @@ methods:
     gap_classification: []
   - method: event.subscribe
     transport: ws
-    required_params: []
+    required_params: [filter]
     declared_errors: []
     happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestHandlerWebSocketEventSubscribeUsesOwnerFilterAndReplay}]}
-    required_param_validation: {status: not_applicable}
+    required_param_validation: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestEventListFilterValidationCoversListAndSubscribe}]}
     unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_helper, name: validateParams}]}
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestHandlerWebSocketAuthAndFrameValidation}]}
     declared_error_tests: {status: not_applicable}

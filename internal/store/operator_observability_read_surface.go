@@ -78,6 +78,7 @@ type OperatorDeadLetterRecord struct {
 
 type OperatorRuntimeLogListOptions struct {
 	RunID             string
+	BundleHash        string
 	EntityID          string
 	SessionID         string
 	Component         string
@@ -113,6 +114,7 @@ type OperatorRuntimeLogEntry struct {
 
 type OperatorRuntimeIncidentListOptions struct {
 	SinceHours int
+	BundleHash string
 	Component  string
 	Level      string
 	MCPOnly    bool
@@ -175,6 +177,9 @@ func (s *PostgresStore) requireOperatorObservabilityCapabilities(ctx context.Con
 		"events": {
 			"event_id", "run_id", "event_name", "entity_id", "scope", "payload",
 			"produced_by", "produced_by_type", "source_event_id", "created_at",
+		},
+		"runs": {
+			"run_id", "bundle_hash",
 		},
 		"event_deliveries": {
 			"delivery_id", "run_id", "event_id", "subscriber_type", "subscriber_id",
@@ -459,7 +464,7 @@ func (s *PostgresStore) ListOperatorRuntimeLogs(ctx context.Context, opts Operat
 	}
 	opts = defaultOperatorRuntimeLogListOptions(opts)
 	cursorClause := ""
-	args := []any{opts.RunID, opts.EntityID, opts.Component, opts.Level, opts.ErrorCode, opts.Source, opts.ActionOrEventType, opts.SessionID}
+	args := []any{opts.RunID, opts.EntityID, opts.Component, opts.Level, opts.ErrorCode, opts.Source, opts.ActionOrEventType, opts.SessionID, opts.BundleHash}
 	if opts.Since != nil {
 		args = append(args, opts.Since.UTC())
 		cursorClause += fmt.Sprintf(" AND e.created_at > $%d", len(args))
@@ -512,6 +517,12 @@ func (s *PostgresStore) ListOperatorRuntimeLogs(ctx context.Context, opts Operat
 		  AND ($6 = '' OR COALESCE(e.payload->'details'->>'agent_id', e.produced_by, '') = $6)
 		  AND ($7 = '' OR COALESCE(e.payload->'details'->>'action', '') = $7 OR COALESCE(e.payload->'details'->>'event_name', e.payload->'details'->>'event_type', '') = $7)
 		  AND ($8 = '' OR COALESCE(e.payload->'details'->>'session_id', '') = $8)
+		  AND ($9 = '' OR EXISTS (
+		  	SELECT 1
+		  	FROM runs r
+		  	WHERE r.run_id = e.run_id
+		  	  AND r.bundle_hash = $9
+		  ))
 		  %s
 		ORDER BY e.created_at %s, e.event_id::text %s
 		LIMIT $%d
@@ -578,8 +589,14 @@ func (s *PostgresStore) ListOperatorRuntimeIncidents(ctx context.Context, opts O
 		  AND e.created_at >= $1
 		  AND ($2 = '' OR COALESCE(e.payload->'details'->>'component', '') = $2)
 		  AND ($3 = '' OR COALESCE(e.payload->>'log_level', '') = $3)
+		  AND ($4 = '' OR EXISTS (
+		  	SELECT 1
+		  	FROM runs r
+		  	WHERE r.run_id = e.run_id
+		  	  AND r.bundle_hash = $4
+		  ))
 		ORDER BY e.created_at DESC, e.event_id::text DESC
-	`, cutoff, opts.Component, opts.Level)
+	`, cutoff, opts.Component, opts.Level, opts.BundleHash)
 	if err != nil {
 		return OperatorRuntimeIncidentListResult{}, fmt.Errorf("list operator runtime incident logs: %w", err)
 	}
@@ -757,6 +774,7 @@ func defaultOperatorEventListOptions(opts OperatorEventListOptions) OperatorEven
 
 func defaultOperatorRuntimeLogListOptions(opts OperatorRuntimeLogListOptions) OperatorRuntimeLogListOptions {
 	opts.RunID = strings.TrimSpace(opts.RunID)
+	opts.BundleHash = strings.TrimSpace(opts.BundleHash)
 	opts.EntityID = strings.TrimSpace(opts.EntityID)
 	opts.SessionID = strings.TrimSpace(opts.SessionID)
 	opts.Component = strings.TrimSpace(opts.Component)
@@ -782,6 +800,7 @@ func defaultOperatorRuntimeLogListOptions(opts OperatorRuntimeLogListOptions) Op
 }
 
 func defaultOperatorRuntimeIncidentListOptions(opts OperatorRuntimeIncidentListOptions) OperatorRuntimeIncidentListOptions {
+	opts.BundleHash = strings.TrimSpace(opts.BundleHash)
 	opts.Component = strings.TrimSpace(opts.Component)
 	opts.Level = strings.TrimSpace(opts.Level)
 	opts.Cursor = strings.TrimSpace(opts.Cursor)

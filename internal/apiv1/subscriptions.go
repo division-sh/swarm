@@ -148,6 +148,9 @@ func (r *SubscriptionRuntime) prepareEventSubscription(session *webSocketSession
 	if err != nil {
 		return subscriptionPlan{}, err
 	}
+	if err := requireEventListRunScope(filter); err != nil {
+		return subscriptionPlan{}, err
+	}
 	replaySince, err := timestampParam(req.Params, "replay_since")
 	if err != nil {
 		return subscriptionPlan{}, err
@@ -222,6 +225,7 @@ func (r *SubscriptionRuntime) prepareRuntimeLogSubscription(session *webSocketSe
 func runtimeLogSubscriptionOptionsFromParams(params map[string]any) (store.OperatorRuntimeLogListOptions, *time.Time, error) {
 	allowed := map[string]struct{}{
 		"run_id":       {},
+		"bundle_hash":  {},
 		"entity_id":    {},
 		"session_id":   {},
 		"component":    {},
@@ -238,6 +242,9 @@ func runtimeLogSubscriptionOptionsFromParams(params map[string]any) (store.Opera
 	out := store.OperatorRuntimeLogListOptions{}
 	var err error
 	if out.RunID, _, err = optionalStringParam(params, "run_id"); err != nil {
+		return store.OperatorRuntimeLogListOptions{}, nil, err
+	}
+	if out.BundleHash, err = optionalBundleHashParam(params, "bundle_hash"); err != nil {
 		return store.OperatorRuntimeLogListOptions{}, nil, err
 	}
 	if out.EntityID, _, err = optionalStringParam(params, "entity_id"); err != nil {
