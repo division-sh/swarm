@@ -1,14 +1,17 @@
 package apiv1
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"swarm/internal/events"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/runtime/flowmodel"
@@ -231,6 +234,56 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		}
 		if data := asMap(t, resp.Error.Data); data["code"] != EventNotDeclaredCode {
 			t.Fatalf("undeclared event data = %#v", data)
+		} else {
+			details := asMap(t, data["details"])
+			if details["event_name"] != "scan.missing" || details["reason"] != "not_declared_root_input" {
+				t.Fatalf("undeclared event details = %#v", details)
+			}
+			if got := stringSliceFromAny(t, details["declared_events"]); len(got) != 1 || got[0] != "scan.requested" {
+				t.Fatalf("undeclared declared_events = %#v", got)
+			}
+			if got := stringSliceFromAny(t, details["routable_events"]); len(got) != 1 || got[0] != "scan.requested" {
+				t.Fatalf("undeclared routable_events = %#v", got)
+			}
+		}
+		assertNoRunStartPersistence(t, db, runID)
+	})
+
+	t.Run("declared but unroutable root input", func(t *testing.T) {
+		_, db, _ := testutil.StartPostgres(t)
+		pg := &store.PostgresStore{DB: db}
+		const eventName = "scan.unroutable_requested"
+		bundle := runStartTestBundle(eventName)
+		bundle.FlowTree.Root.Children[0].Nodes["scan-orchestrator"] = runtimecontracts.SystemNodeContract{
+			ID:           "scan-orchestrator",
+			SubscribesTo: []string{"scan.other_requested"},
+		}
+		bundle.Nodes["scan-orchestrator"] = bundle.FlowTree.Root.Children[0].Nodes["scan-orchestrator"]
+		source := semanticview.Wrap(bundle)
+		bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+		if err != nil {
+			t.Fatalf("NewEventBusWithOptions: %v", err)
+		}
+		handler := runStartTestHandler(t, pg, bus, source)
+		runID := uuid.NewString()
+
+		resp := rpcCall(t, handler, runStartBody(runID, runStartTestFingerprint, eventName, `{"topic":"medicine"}`, "idem-unroutable-event"))
+		if resp.Error == nil {
+			t.Fatal("run.start declared unroutable event error = nil")
+		}
+		data := asMap(t, resp.Error.Data)
+		if data["code"] != EventNotDeclaredCode {
+			t.Fatalf("declared unroutable event data = %#v", data)
+		}
+		details := asMap(t, data["details"])
+		if details["event_name"] != eventName || details["reason"] != "declared_root_input_not_routable" {
+			t.Fatalf("declared unroutable event details = %#v", details)
+		}
+		if got := stringSliceFromAny(t, details["declared_events"]); len(got) != 1 || got[0] != eventName {
+			t.Fatalf("declared unroutable declared_events = %#v", got)
+		}
+		if got := stringSliceFromAny(t, details["routable_events"]); len(got) != 0 {
+			t.Fatalf("declared unroutable routable_events = %#v, want empty", got)
 		}
 		assertNoRunStartPersistence(t, db, runID)
 	})
@@ -326,6 +379,28 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		assertInvalidRunStartParam(t, resp, "payload.entity_id")
 		assertNoRunStartPersistence(t, db, runID)
 	})
+
+	t.Run("publish failure", func(t *testing.T) {
+		_, db, _ := testutil.StartPostgres(t)
+		pg := &store.PostgresStore{DB: db}
+		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		handler := runStartTestHandler(t, pg, failingRunStartPublisher{err: errors.New("simulated run.start publish failure")}, source)
+		runID := uuid.NewString()
+
+		resp := rpcCall(t, handler, runStartBody(runID, runStartTestFingerprint, "scan.requested", `{"topic":"medicine"}`, "idem-publish-failure"))
+		if resp.Error == nil {
+			t.Fatal("run.start publish failure error = nil")
+		}
+		data := asMap(t, resp.Error.Data)
+		if data["code"] != EventPublishFailedCode {
+			t.Fatalf("publish failure data = %#v", data)
+		}
+		details := asMap(t, data["details"])
+		if details["event_name"] != "scan.requested" || details["run_id"] != runID || details["phase"] != "publish" || !strings.Contains(fmt.Sprint(details["reason"]), "simulated run.start publish failure") {
+			t.Fatalf("publish failure details = %#v", details)
+		}
+		assertNoRunStartPersistence(t, db, runID)
+	})
 }
 
 func TestOperatorRunStartHandlersLeaveSplitControlMethodsUnavailable(t *testing.T) {
@@ -361,7 +436,7 @@ func TestOperatorRunStartHandlersLeaveSplitControlMethodsUnavailable(t *testing.
 	}
 }
 
-func runStartTestHandler(t *testing.T, pg *store.PostgresStore, bus *runtimebus.EventBus, source semanticview.Source) *Handler {
+func runStartTestHandler(t *testing.T, pg *store.PostgresStore, bus EventPublisher, source semanticview.Source) *Handler {
 	t.Helper()
 	return testHandler(t, Options{
 		AuthTokens: []string{testToken},
@@ -380,6 +455,14 @@ func runStartTestHandler(t *testing.T, pg *store.PostgresStore, bus *runtimebus.
 			},
 		}),
 	})
+}
+
+type failingRunStartPublisher struct {
+	err error
+}
+
+func (p failingRunStartPublisher) Publish(context.Context, events.Event) error {
+	return p.err
 }
 
 func runStartBody(runID, fingerprint, eventName, payload, idempotencyKey string) string {
@@ -436,6 +519,27 @@ func assertInvalidRunStartParam(t *testing.T, resp rpcResponse, field string) {
 	}
 	if details := asMap(t, resp.Error.Data)["details"]; asMap(t, details)["field"] != field {
 		t.Fatalf("invalid %s details = %#v", field, details)
+	}
+}
+
+func stringSliceFromAny(t *testing.T, value any) []string {
+	t.Helper()
+	switch typed := value.(type) {
+	case []any:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			text, ok := item.(string)
+			if !ok {
+				t.Fatalf("slice item = %#v, want string", item)
+			}
+			out = append(out, text)
+		}
+		return out
+	case []string:
+		return append([]string(nil), typed...)
+	default:
+		t.Fatalf("value = %#v, want string slice", value)
+		return nil
 	}
 }
 

@@ -708,7 +708,15 @@ func runCommandTerminalExit(status string) error {
 func runCommandErrorExitCode(err error) int {
 	return cliAPIErrorExitCode(err, cliAPIErrorClassifier{
 		notFoundCodes: []string{"RUN_NOT_FOUND"},
-		conflictCodes: []string{"BUNDLE_MISMATCH", "UNSUPPORTED_BUNDLE_HASH", "UNSUPPORTED_BUNDLE_REF", "IDEMPOTENCY_CONFLICT"},
+		conflictCodes: []string{
+			"BUNDLE_MISMATCH",
+			"UNSUPPORTED_BUNDLE_HASH",
+			"UNSUPPORTED_BUNDLE_REF",
+			"EVENT_NOT_DECLARED",
+			"EVENT_PUBLISH_FAILED",
+			"PAYLOAD_VALIDATION_FAILED",
+			"IDEMPOTENCY_CONFLICT",
+		},
 	})
 }
 

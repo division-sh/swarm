@@ -56,6 +56,7 @@ func executeRunStart(ctx context.Context, req Request, opts OperatorReadOptions,
 		sourceAgent:                    func(Request) string { return "api.v1" },
 		rootInputOnly:                  true,
 		injectRunIDEntityIDWhenMissing: true,
+		publishError:                   eventPublishPublishError,
 		buildCompletion: func(_ context.Context, _ OperatorReadOptions, params eventPublicationParams) (any, string, error) {
 			return runStartResult{RunID: params.RunID, Status: "running"}, params.RunID, nil
 		},

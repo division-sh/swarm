@@ -7990,11 +7990,12 @@ cli_specification:
         config_readiness_transport_or_malformed_api: 3
         auth_failure: 4
         run_not_found: 5
-        bundle_or_idempotency_conflict: 6
+        start_rejection_bundle_or_idempotency_conflict: 6
         workflow_failed_or_cancelled: 7
         interrupted: 130
       proof_expectations:
       - exact /v1/rpc calls for health.check, run.start, run.get, and run.stop; run.start carries optional canonical bundle_hash or deprecated legacy bundle_ref.fingerprint only when the corresponding bundle flag is supplied; bundle_hash serialization maps server UNSUPPORTED_BUNDLE_HASH until canonical source facts are promoted, while --bundle-fingerprint remains the transition boot-fingerprint assertion
+      - connected start failures for EVENT_NOT_DECLARED, PAYLOAD_VALIDATION_FAILED, EVENT_PUBLISH_FAILED, bundle identity rejection, and IDEMPOTENCY_CONFLICT render canonical API codes on stderr, exit 6, and do not open /v1/ws or follow work after failed run.start
       - exact /v1/ws subscription for run.subscribe_trace where follow is in scope
       - no direct DB/store/runtime/EventBus reads or writes
       - no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, or legacy token fallback
@@ -11697,6 +11698,12 @@ api_specification:
             type: array
             items:
               type: string
+          routable_events:
+            type: array
+            items:
+              type: string
+          reason:
+            type: string
       EVENT_PUBLISH_FAILED:
         type: object
         additionalProperties: false
@@ -12347,6 +12354,7 @@ api_specification:
       - UNSUPPORTED_BUNDLE_HASH
       - UNSUPPORTED_BUNDLE_REF
       - EVENT_NOT_DECLARED
+      - EVENT_PUBLISH_FAILED
       - PAYLOAD_VALIDATION_FAILED
       - IDEMPOTENCY_CONFLICT
     run.stop:

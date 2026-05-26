@@ -320,10 +320,7 @@ func validateEventPublication(ctx context.Context, opts OperatorReadOptions, par
 	if cfg.rootInputOnly {
 		set, err := runtimerunstart.ValidateInputEvents(opts.Source, []string{params.EventName})
 		if err != nil {
-			return NewApplicationError(EventNotDeclaredCode, false, map[string]any{
-				"event_name":      params.EventName,
-				"declared_events": set.Declared,
-			})
+			return runStartRootInputError(params.EventName, set, err)
 		}
 		return nil
 	}
@@ -372,6 +369,33 @@ func validateEventPublication(ctx context.Context, opts OperatorReadOptions, par
 		}
 	}
 	return nil
+}
+
+func runStartRootInputError(eventName string, set runtimerunstart.RootInputSet, err error) error {
+	declared := append([]string{}, set.Declared...)
+	routable := append([]string{}, set.Routable...)
+	details := map[string]any{
+		"event_name":      eventName,
+		"declared_events": declared,
+		"routable_events": routable,
+		"reason":          strings.TrimSpace(err.Error()),
+	}
+	if !stringSliceContains(declared, eventName) {
+		details["reason"] = "not_declared_root_input"
+	} else if !stringSliceContains(routable, eventName) {
+		details["reason"] = "declared_root_input_not_routable"
+	}
+	return NewApplicationError(EventNotDeclaredCode, false, details)
+}
+
+func stringSliceContains(values []string, target string) bool {
+	target = strings.TrimSpace(target)
+	for _, value := range values {
+		if strings.TrimSpace(value) == target {
+			return true
+		}
+	}
+	return false
 }
 
 func eventPublishSourceAgent(req Request) string {

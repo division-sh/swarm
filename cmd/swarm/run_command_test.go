@@ -269,6 +269,52 @@ func TestRunCommandBundleHashSerializesCanonicalParamAndMapsUnsupported(t *testi
 	}
 }
 
+func TestRunCommandStartApplicationErrorsExitSixAndDoNotFollow(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
+	for _, codeName := range []string{"EVENT_NOT_DECLARED", "PAYLOAD_VALIDATION_FAILED", "EVENT_PUBLISH_FAILED"} {
+		t.Run(codeName, func(t *testing.T) {
+			var calls []jsonRPCRequest
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/v1/rpc":
+					var req jsonRPCRequest
+					if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+						t.Errorf("decode request: %v", err)
+					}
+					calls = append(calls, req)
+					switch req.Method {
+					case "health.check":
+						writeJSONRPCResult(t, w, req.ID, runCommandHealthResult())
+					case "run.start":
+						writeRunCommandJSONRPCError(t, w, req.ID, codeName)
+					default:
+						t.Fatalf("unexpected method = %q", req.Method)
+					}
+				case "/v1/ws":
+					t.Fatalf("run.subscribe_trace must not be opened after failed run.start")
+				default:
+					t.Fatalf("unexpected path = %q", r.URL.Path)
+				}
+			}))
+			defer server.Close()
+
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath}, &stdout, &stderr, testRunCommandOptions(server))
+			if code != 6 {
+				t.Fatalf("code = %d, want 6 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+			}
+			assertRunCommandMethods(t, &calls, []string{"health.check", "run.start"})
+			if strings.TrimSpace(stdout.String()) != "" {
+				t.Fatalf("stdout = %q, want empty", stdout.String())
+			}
+			if !strings.Contains(stderr.String(), codeName) {
+				t.Fatalf("stderr = %q, want %s", stderr.String(), codeName)
+			}
+		})
+	}
+}
+
 func TestRunCommandBundleFingerprintSerializesLegacyBundleRef(t *testing.T) {
 	t.Setenv("SWARM_API_TOKEN", "test-token")
 	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
