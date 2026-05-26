@@ -1,0 +1,156 @@
+package backendselection
+
+import (
+	"fmt"
+	"path/filepath"
+	"strings"
+)
+
+type Backend string
+
+const (
+	BackendPostgres Backend = "postgres"
+	BackendSQLite   Backend = "sqlite"
+
+	EnvStoreBackend = "SWARM_STORE_BACKEND"
+	EnvSQLitePath   = "SWARM_SQLITE_PATH"
+
+	ConfigStoreBackendKey = "store.backend"
+	ConfigSQLitePathKey   = "store.sqlite.path"
+
+	DefaultSQLiteRelativePath = ".swarm/dev.db"
+)
+
+type Source string
+
+const (
+	SourceFlag           Source = "flag"
+	SourceEnvironment    Source = "environment"
+	SourceRuntimeConfig  Source = "runtime_config"
+	SourceRolloutDefault Source = "rollout_default"
+)
+
+type Input struct {
+	RepoRoot string
+
+	FlagBackend    string
+	FlagBackendSet bool
+
+	EnvBackend    string
+	EnvBackendSet bool
+
+	ConfigBackend string
+
+	EnvSQLitePath    string
+	EnvSQLitePathSet bool
+
+	ConfigSQLitePath string
+}
+
+type Selection struct {
+	Backend          Backend
+	BackendSource    Source
+	SQLitePath       string
+	SQLitePathSource Source
+}
+
+func (b Backend) String() string {
+	return string(b)
+}
+
+func ActiveDefaultBackend() Backend {
+	return BackendPostgres
+}
+
+func FutureDefaultBackend() Backend {
+	return BackendSQLite
+}
+
+func Resolve(in Input) (Selection, error) {
+	backend, source, err := resolveBackend(in)
+	if err != nil {
+		return Selection{}, err
+	}
+	selection := Selection{
+		Backend:       backend,
+		BackendSource: source,
+	}
+	if backend != BackendSQLite {
+		return selection, nil
+	}
+	path, pathSource, err := resolveSQLitePath(in)
+	if err != nil {
+		return Selection{}, err
+	}
+	selection.SQLitePath = path
+	selection.SQLitePathSource = pathSource
+	return selection, nil
+}
+
+func SQLiteUnsupportedRuntimeError(path string) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		path = filepath.Clean(DefaultSQLiteRelativePath)
+	}
+	return fmt.Errorf("store backend %q is recognized but SQLite runtime stores are not implemented yet; runtime support remains tracked by #1085-#1088 (sqlite_path=%s)", BackendSQLite, path)
+}
+
+func resolveBackend(in Input) (Backend, Source, error) {
+	switch {
+	case in.FlagBackendSet:
+		backend, err := parseBackend(in.FlagBackend, SourceFlag)
+		return backend, SourceFlag, err
+	case in.EnvBackendSet:
+		backend, err := parseBackend(in.EnvBackend, SourceEnvironment)
+		return backend, SourceEnvironment, err
+	case strings.TrimSpace(in.ConfigBackend) != "":
+		backend, err := parseBackend(in.ConfigBackend, SourceRuntimeConfig)
+		return backend, SourceRuntimeConfig, err
+	default:
+		return ActiveDefaultBackend(), SourceRolloutDefault, nil
+	}
+}
+
+func parseBackend(raw string, source Source) (Backend, error) {
+	value := strings.ToLower(strings.TrimSpace(raw))
+	if value == "" {
+		return "", fmt.Errorf("store backend from %s must be non-empty", source)
+	}
+	switch Backend(value) {
+	case BackendPostgres:
+		return BackendPostgres, nil
+	case BackendSQLite:
+		return BackendSQLite, nil
+	default:
+		return "", fmt.Errorf("unsupported store backend %q from %s; supported backends: %s, %s", strings.TrimSpace(raw), source, BackendPostgres, BackendSQLite)
+	}
+}
+
+func resolveSQLitePath(in Input) (string, Source, error) {
+	switch {
+	case in.EnvSQLitePathSet:
+		path, err := normalizeSQLitePath(in.RepoRoot, in.EnvSQLitePath, SourceEnvironment)
+		return path, SourceEnvironment, err
+	case strings.TrimSpace(in.ConfigSQLitePath) != "":
+		path, err := normalizeSQLitePath(in.RepoRoot, in.ConfigSQLitePath, SourceRuntimeConfig)
+		return path, SourceRuntimeConfig, err
+	default:
+		path, err := normalizeSQLitePath(in.RepoRoot, DefaultSQLiteRelativePath, SourceRolloutDefault)
+		return path, SourceRolloutDefault, err
+	}
+}
+
+func normalizeSQLitePath(repoRoot, raw string, source Source) (string, error) {
+	path := strings.TrimSpace(raw)
+	if path == "" {
+		return "", fmt.Errorf("sqlite path from %s must be non-empty", source)
+	}
+	if filepath.IsAbs(path) {
+		return filepath.Clean(path), nil
+	}
+	root := strings.TrimSpace(repoRoot)
+	if root == "" {
+		return filepath.Clean(path), nil
+	}
+	return filepath.Clean(filepath.Join(root, path)), nil
+}

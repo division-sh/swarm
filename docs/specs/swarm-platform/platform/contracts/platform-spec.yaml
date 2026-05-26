@@ -2096,6 +2096,96 @@ engine:
       replays events through the same tracking — already-received items are skipped, accumulator state is consistent.
     cleanup: After completion fires and the handler commits, the accumulator record can be archived or deleted. The entity
       has moved past the accumulation state.
+  runtime_store_backend_selection:
+    promoted_by: '#1084'
+    parent_tracker: '#1066'
+    canonical_owner: internal/store/backendselection runtime store backend resolver
+    description: >
+      Runtime store backend selection is owned by one typed resolver before runtime store construction. CLI flags,
+      environment variables, runtime config, harnesses, and local foreground startup may collect selector input, but they
+      must consume this owner rather than interpreting backend strings independently.
+    backend_ids:
+      postgres:
+        status: active_supported_runtime_backend
+        meaning: External Postgres runtime store. Postgres remains explicitly selectable for production and existing operator deployments.
+      sqlite:
+        status: staged_selector_only_until_runtime_portability_lands
+        meaning: >
+          Local/dev SQLite runtime store. #1084 may recognize this backend and resolve its path, but runtime store
+          construction must fail closed until the SQLite schema/store/session/delivery/trace children prove support.
+    selector_precedence:
+      source_order:
+      - flag
+      - environment
+      - runtime_config
+      - rollout_default
+      flag:
+        command: swarm serve
+        name: --store <backend>
+      environment:
+        backend: SWARM_STORE_BACKEND
+      runtime_config:
+        backend_key: store.backend
+      rollout_default:
+        active_no_selection_default_until_sqlite_runtime_support: postgres
+        future_local_dev_default_after_supported_surface_proof: sqlite
+        rule: >
+          No-selection must not expose a broken SQLite runtime default before #1088 proves the supported SQLite runtime
+          path and explicit Postgres opt-in path together.
+    sqlite_path:
+      canonical_owner: internal/store/backendselection SQLite path resolver
+      environment: SWARM_SQLITE_PATH
+      runtime_config_key: store.sqlite.path
+      default_repo_relative_path: .swarm/dev.db
+      source_order:
+      - environment
+      - runtime_config
+      - rollout_default
+      lifecycle:
+      - The default path is repo-relative.
+      - Runtime SQLite support must create parent directories on demand when the SQLite backend is implemented.
+      - The SQLite file is persistent until the operator deletes it.
+      - The runtime must never silently replace the local/dev SQLite store with an in-memory database.
+    postgres_connection_details:
+      env_vars:
+      - SWARM_DB_HOST
+      - SWARM_DB_PORT
+      - SWARM_DB_NAME
+      - SWARM_DB_USER
+      - SWARM_DB_PASSWORD
+      - SWARM_DB_SSLMODE
+      - SWARM_DB_POOL_SIZE
+      - PGHOST
+      - PGPORT
+      - PGDATABASE
+      - PGUSER
+      - PGPASSWORD
+      config_prefix: database.*
+      rule: >
+        Existing SWARM_DB_* / PG* variables and database.* config keys are Postgres connection details after the canonical
+        selector resolves to postgres. They are not generic backend selectors and must not imply backend selection by
+        presence alone.
+    staged_runtime_rule:
+    - Unsupported backend ids fail closed with supported backend guidance.
+    - >
+      Explicit sqlite selection is recognized as a canonical backend id but must fail closed before runtime store construction
+      until #1085-#1088 close the runtime portability tail.
+    - Explicit postgres selection must remain available through flag, environment, and runtime config and must reach the
+      existing Postgres runtime store path.
+    required_consumers:
+    - cmd/swarm defaultServeOptions
+    - cmd/swarm swarm serve --store
+    - cmd/swarm runServeRuntime and buildStoresForServe
+    - cmd/swarm buildStores
+    - cmd/swarm startLocalRunServe through inherited serve options
+    - cmd/swarm runForkRuntimeOwnerHarness
+    - runtime config loading for store.backend and store.sqlite.path
+    split_boundaries:
+    - "SQLite dialect/schema/bootstrap remains split to #1085."
+    - "Backend-neutral core runtime persistence stores remain split to #1086."
+    - "SQLite sessions, locking, delivery, replay, and trace-stream semantics remain split to #1087."
+    - "Public local/dev default flip plus zero-service swarm run proof remains split to #1088."
+    - "Docs, CI, and repo-wide stale-default closeout remains split to #1089."
   agent_session_management:
     description: The platform manages agent sessions — the lifecycle of an agent from receiving an event to completing its
       response.
