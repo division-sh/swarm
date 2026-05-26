@@ -71,6 +71,10 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScope
 	`, 1, eventID)
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'workflow-runtime'
+	`, 1, eventID)
+	assertRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM event_deliveries
 		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'lifecycle-orchestrator'
 	`, 1, eventID)
 	assertRuntimeDBCount(t, ctx, db, `

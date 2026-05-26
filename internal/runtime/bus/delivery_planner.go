@@ -109,7 +109,7 @@ func (p deliveryPlanner) Plan(ctx context.Context, evt events.Event) (eventDeliv
 	plan.PersistedRecipients = manifest.PersistedRecipients
 	plan.DeliveryTargets = manifest.DeliveryTargets
 	plan.DeliveryRoutes = append([]events.DeliveryRoute(nil), manifest.DeliveryRoutes...)
-	plan.DeliveryRoutes = append(plan.DeliveryRoutes, routedNodeDeliveryRoutesForNoTargetEvent(evt, routing.RoutedRecipients)...)
+	plan.DeliveryRoutes = append(plan.DeliveryRoutes, routedNodeDeliveryRoutesForNoTargetEvent(evt, routing.RoutedRecipients, plan.Recipients, plan.PersistedRecipients)...)
 	plan.DeliveryRoutes = append(plan.DeliveryRoutes, internalDeliveryRoutesForPlan(evt, plan.Recipients, plan.PersistedRecipients, routing.RoutedRecipients)...)
 	plan.DeliveryRoutes = events.NormalizeDeliveryRoutes(plan.DeliveryRoutes)
 	plan.TargetFailure = manifest.TargetFailure
@@ -364,8 +364,12 @@ func internalDeliveryRoutesForPlan(evt events.Event, recipients, persisted []str
 	return events.NormalizeDeliveryRoutes(out)
 }
 
-func routedNodeDeliveryRoutesForNoTargetEvent(evt events.Event, routed []Subscriber) []events.DeliveryRoute {
+func routedNodeDeliveryRoutesForNoTargetEvent(evt events.Event, routed []Subscriber, recipients, persisted []string) []events.DeliveryRoute {
 	if len(routed) == 0 || len(eventDeliveryTargetRoutes(evt)) > 0 {
+		return nil
+	}
+	internalRecipients := filterOutAgentIDs(recipients, persisted)
+	if len(internalRecipients) == 0 {
 		return nil
 	}
 	flowInstance := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/")
@@ -373,18 +377,22 @@ func routedNodeDeliveryRoutesForNoTargetEvent(evt events.Event, routed []Subscri
 		return nil
 	}
 	eventEntityID := strings.TrimSpace(evt.EntityID())
-	out := make([]events.DeliveryRoute, 0, len(routed))
+	routedNodeMatched := false
 	for _, subscriber := range routed {
 		if !routedNodeMatchesConcreteFlowInstanceEvent(evt, subscriber) {
 			continue
 		}
-		subscriberID := strings.TrimSpace(subscriber.ID)
-		if subscriberID == "" {
-			continue
-		}
+		routedNodeMatched = true
+		break
+	}
+	if !routedNodeMatched {
+		return nil
+	}
+	out := make([]events.DeliveryRoute, 0, len(internalRecipients))
+	for _, recipient := range internalRecipients {
 		out = append(out, events.DeliveryRoute{
 			SubscriberType: "node",
-			SubscriberID:   subscriberID,
+			SubscriberID:   recipient,
 			Target: events.RouteIdentity{
 				FlowInstance: flowInstance,
 				EntityID:     eventEntityID,

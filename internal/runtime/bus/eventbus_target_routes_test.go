@@ -169,14 +169,28 @@ func TestEventBusPublish_NoTargetConcreteRoutedNodeUsesWorkflowCarrierAndNodeDel
 
 	routes := store.routes[evt.ID]
 	if len(routes) != 1 {
-		t.Fatalf("persisted delivery routes = %#v, want one semantic node route", routes)
+		t.Fatalf("persisted delivery routes = %#v, want one workflow-runtime carrier route", routes)
 	}
 	route := routes[0]
-	if route.SubscriberType != "node" || route.SubscriberID != "lifecycle-orchestrator" {
-		t.Fatalf("delivery route = %#v, want node/lifecycle-orchestrator", route)
+	if route.SubscriberType != "node" || route.SubscriberID != "workflow-runtime" {
+		t.Fatalf("delivery route = %#v, want node/workflow-runtime carrier", route)
 	}
 	if route.Target.FlowInstance != "operating/inst-1" || route.Target.EntityID != "ent-operating" {
 		t.Fatalf("delivery target = %#v, want operating/inst-1 ent-operating", route.Target)
+	}
+
+	live, internal, replayRoutes, err := eb.replayRecipientsForCommittedEvent(context.Background(), evt, nil, replayclaim.CommittedReplayScopeSubscribed)
+	if err != nil {
+		t.Fatalf("replayRecipientsForCommittedEvent: %v", err)
+	}
+	if len(live) != 1 || live[0] != "workflow-runtime" {
+		t.Fatalf("replay live recipients = %#v, want workflow-runtime", live)
+	}
+	if len(internal) != 1 || internal[0] != "workflow-runtime" {
+		t.Fatalf("replay internal recipients = %#v, want workflow-runtime", internal)
+	}
+	if len(replayRoutes) != 1 || replayRoutes[0].SubscriberID != "workflow-runtime" {
+		t.Fatalf("replay routes = %#v, want workflow-runtime carrier route", replayRoutes)
 	}
 }
 
