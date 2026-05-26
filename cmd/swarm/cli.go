@@ -93,6 +93,7 @@ func newRootCommandWithOptions(ctx context.Context, repo string, out, errOut io.
 		newConversationCommand(opts),
 		newAgentsCommand(opts),
 		newAgentCommand(opts),
+		newForkChatCommand(opts),
 		newEntitiesCommand(opts),
 		newEntityCommand(opts),
 		newMailboxCommand(opts),

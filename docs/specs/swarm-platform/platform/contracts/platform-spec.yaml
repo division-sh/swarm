@@ -6625,11 +6625,13 @@ cli_specification:
           spellings; their current generic Cobra unknown-command behavior is intentional unless a
           later tracked spec row promotes hidden fail-closed stubs.
       forkchat:
-        disposition: blocked
+        disposition: promoted_first_slice
         tracker: '#749'
-        action: Forkchat CLI remains blocked until CLI consumer contracts exist over the promoted `conversation.fork_chat`
-          execution/sandbox/snapshot owners and lifecycle `conversation.fork|fork_list|fork_view|fork_delete` source
-          authority.
+        action: >
+          `swarm forkchat new|resume|list|view|delete` is promoted as a bounded CLI consumer over the
+          `conversation.fork|fork_chat|fork_list|fork_view|fork_delete` APIs. Full `--include-forks`
+          cross-surface conversation behavior, Dashboard/Builder views, sharing/ACL/pinning, and public
+          `run.fork` / `swarm fork` work remain split.
     platform_spec_refinements_not_cleanly_present_in_review_artifact:
       agent_replay_backlog:
         classification: required_current_contract
@@ -8894,10 +8896,82 @@ cli_specification:
     forkchat:
       command: swarm forkchat new|resume|list|view|delete
       tier: should_have
-      implementation_status: absent
-      blocker_state: '#749; conversation.fork_chat, sandbox/snapshot owners, and lifecycle conversation.fork|fork_list|fork_view|fork_delete
-        exist, but the swarm forkchat CLI consumer contract is not present.'
-      owners: conversation.fork, conversation.fork_chat, conversation.fork_list, conversation.fork_view, conversation.fork_delete
+      implementation_status: implemented
+      owners:
+      - /v1/rpc conversation.fork
+      - /v1/rpc conversation.fork_chat
+      - /v1/rpc conversation.fork_list
+      - /v1/rpc conversation.fork_view
+      - /v1/rpc conversation.fork_delete
+      command_contract:
+        namespace: swarm forkchat
+        subcommands:
+        - command: swarm forkchat new <source-session-id>
+          owner_call: /v1/rpc conversation.fork
+          optional_second_call: /v1/rpc conversation.fork_chat when --message is supplied
+          required_selector_rule: exactly one of --turn-index, --event-id, or --at
+          params:
+          - flag: --turn-index <1-1000000>
+            api_param: fork_point.kind=turn, fork_point.turn_index
+          - flag: --event-id <opaque-id>
+            api_param: fork_point.kind=event, fork_point.event_id
+          - flag: --at <RFC3339 timestamp>
+            api_param: fork_point.kind=time, fork_point.at
+          - flag: --message / -m <text>
+            api_param: conversation.fork_chat.message on the optional second call
+          - flag: --idempotency-key <key>
+            api_param: idempotency_key on conversation.fork and on the optional conversation.fork_chat call
+          result_owner: ConversationForkCreateResult; when --message is supplied, ConversationForkChatResult is also rendered
+        - command: swarm forkchat resume <fork-id>
+          owner_call: /v1/rpc conversation.fork_chat
+          required_flags:
+          - --message / -m <text>
+          optional_flags:
+          - --idempotency-key <key>
+          result_owner: ConversationForkChatResult
+        - command: swarm forkchat list
+          owner_call: /v1/rpc conversation.fork_list
+          optional_flags:
+          - --source-session-id <opaque-id>
+          - --limit <1-500>
+          - --cursor <cursor>
+          result_owner: conversation.fork_list result envelope
+        - command: swarm forkchat view <fork-id>
+          owner_call: /v1/rpc conversation.fork_view
+          result_owner: ConversationForkSession
+        - command: swarm forkchat delete <fork-id>
+          owner_call: /v1/rpc conversation.fork_delete
+          optional_flags:
+          - --idempotency-key <key>
+          result_owner: ConversationForkDeleteResult
+      validation:
+      - CLI validates required args, OpaqueId envelope, required selector exclusivity, --turn-index range, --at RFC3339 parsing, non-empty message/key/cursor values, and --limit range before opening an API request.
+      - Validation failures are no-call failures and exit with the standard CLI validation code.
+      output:
+        human: Renders server-owned fork lifecycle fields, fork point, turn summaries, sandbox/snapshot owners, next_cursor, and delete idempotency state.
+        json: Emits the canonical API result shape, with `new --message` wrapping the create result and chat result together.
+        quiet: Emits fork_id for new/view/delete, fork_ids for list, and turn_id for resume.
+      errors:
+        not_found: FORK_NOT_FOUND, SESSION_NOT_FOUND, TURN_NOT_FOUND, and EVENT_NOT_FOUND map to the standard not-found exit.
+        conflict: IDEMPOTENCY_CONFLICT maps to the standard conflict exit.
+        malformed_result: Missing required canonical result fields fail closed as runtime errors.
+      no_bypass_rule: >
+        The CLI must call only the shared `/v1/rpc` API client. It must not import or read internal store, runtime,
+        EventBus, dashboard, Builder, conversation_forks tables, conversation_fork_snapshots, or conversation_fork_turns.
+      split_out:
+        include_forks_cross_surface: '#749 parent tail; normal conversation/dashboard surfaces do not consume fork-local turns in this slice.'
+        dashboard_builder: '#749 parent tail.'
+        sharing_acl_pinning: '#749 parent tail; fixed TTL/delete lifecycle only.'
+        run_fork_swarm_fork: '#989/#1023/#1038 source-authority work; distinct run-fork concept.'
+        direct_storage_or_runtime_reads: forbidden for the CLI consumer.
+      proof_expectations:
+      - fake API server tests prove exact JSON-RPC method names and params for every subcommand
+      - validation no-call tests cover selector exclusivity, invalid IDs, blank values, bad timestamps, and bad pagination bounds
+      - output tests cover human, --json, and --quiet behavior
+      - typed API error tests cover not-found and idempotency conflict mappings
+      - static grep/no-bypass proof shows the CLI consumes only /v1/rpc conversation.fork* methods
+      - 'go run ./cmd/swarm-openrpc-gen --check'
+      - focused cmd/swarm forkchat tests and existing conversation.fork API/store regression tests
     entities_list:
       command: swarm entities list
       tier: should_have
@@ -9156,9 +9230,12 @@ cli_specification:
       current_openrpc_reality: 'event.publish, event.replay, agent.replay, conversation.get_turn, runtime.subscribe_logs, and runtime.nuke are present in current OpenRPC/API.'
       remaining_role: 'Track deprecations/ratification cleanup only if kept open; do not block those CLI commands solely on method existence.'
     '#749':
-      state: active_blocker
-      reason: 'conversation.fork_chat execution/sandbox/snapshot ownership and lifecycle conversation.fork, conversation.fork_list,
-        conversation.fork_view, and conversation.fork_delete are present. swarm forkchat CLI remains absent.'
+      state: cli_consumer_promoted
+      reason: >
+        conversation.fork_chat execution/sandbox/snapshot ownership and lifecycle conversation.fork,
+        conversation.fork_list, conversation.fork_view, and conversation.fork_delete are present.
+        `swarm forkchat new|resume|list|view|delete` is the promoted CLI consumer; remaining #749 tails are
+        cross-surface `--include-forks`, Dashboard/Builder, sharing/ACL/pinning, and public run-fork work.
     '#750':
       state: parent_runtime_tail
       closed_slices:
