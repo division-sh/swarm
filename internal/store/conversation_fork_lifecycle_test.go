@@ -15,7 +15,7 @@ func TestPostgresStore_ConversationForkLifecycleOwnsCreateListViewDelete(t *test
 	_, db, _ := testutil.StartPostgres(t)
 	s := &PostgresStore{DB: db}
 	ctx := context.Background()
-	now := time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC)
+	now := activeConversationForkTestClock()
 	source := seedConversationForkSource(t, db, now)
 
 	created, err := s.CreateOperatorConversationFork(ctx, ConversationForkCreateRequest{
@@ -131,6 +131,10 @@ func TestPostgresStore_ConversationForkLifecycleOwnsCreateListViewDelete(t *test
 	if normalSessionRows != 0 {
 		t.Fatalf("fork lifecycle leaked into agent_sessions rows = %d", normalSessionRows)
 	}
+}
+
+func activeConversationForkTestClock() time.Time {
+	return time.Now().UTC().Truncate(time.Second)
 }
 
 func TestPostgresStore_ConversationForkLifecycleFailsClosedForSelectors(t *testing.T) {
