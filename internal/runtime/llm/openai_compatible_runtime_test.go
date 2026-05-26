@@ -155,6 +155,29 @@ func TestOpenAICompatibleRuntimeFailsClosedWhenUsageMissing(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatibleRuntimeFailsClosedWhenCredentialMissing(t *testing.T) {
+	t.Setenv("OPENAI_COMPATIBLE_API_KEY", "")
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		requests++
+	}))
+	defer server.Close()
+
+	runtime := NewOpenAICompatibleRuntime(openAICompatibleTestConfig(server.URL), sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil, nil, nil)
+	ctx := sessions.WithScope(context.Background(), sessions.RuntimeModeTask.String(), "", "task-1")
+	session, err := runtime.StartSession(ctx, "agent-1", "system", nil)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	_, err = runtime.ContinueSession(ctx, session, Message{Role: "user", Content: "hello"})
+	if err == nil || !strings.Contains(err.Error(), "OPENAI_COMPATIBLE_API_KEY") {
+		t.Fatalf("ContinueSession error = %v, want missing OPENAI_COMPATIBLE_API_KEY", err)
+	}
+	if requests != 0 {
+		t.Fatalf("requests = %d, want fail closed before HTTP request", requests)
+	}
+}
+
 func TestOpenAICompatibleChatCompletionsURLNormalizesVersionSegment(t *testing.T) {
 	tests := []struct {
 		name string
