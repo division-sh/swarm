@@ -107,7 +107,7 @@ func TestResolveCLIContractPlatformSpecPathsEmbeddedDefaultDoesNotRequireRepoRoo
 	outsideRepo := t.TempDir()
 	contractsRoot := filepath.Join(t.TempDir(), "contracts")
 	writeWorkflowValidationFixtureFile(t, filepath.Join(contractsRoot, "package.yaml"), `name: external`)
-	t.Chdir(outsideRepo)
+	chdirForTest(t, outsideRepo)
 
 	got, err := resolveCLIContractPlatformSpecPaths("", cliContractPlatformSpecPathOptions{
 		ContractsPath: contractsRoot,

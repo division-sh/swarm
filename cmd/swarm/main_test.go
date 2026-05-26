@@ -48,6 +48,35 @@ type delayedRunStatusAgent struct {
 	release       chan struct{}
 }
 
+func chdirForTest(t *testing.T, dir string) {
+	t.Helper()
+	previous, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get current working directory: %v", err)
+	}
+	previousPWD, hadPreviousPWD := os.LookupEnv("PWD")
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir %q: %v", dir, err)
+	}
+	if err := os.Setenv("PWD", dir); err != nil {
+		t.Fatalf("set PWD for chdir %q: %v", dir, err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(previous); err != nil {
+			t.Fatalf("restore working directory %q: %v", previous, err)
+		}
+		if hadPreviousPWD {
+			if err := os.Setenv("PWD", previousPWD); err != nil {
+				t.Fatalf("restore PWD %q: %v", previousPWD, err)
+			}
+			return
+		}
+		if err := os.Unsetenv("PWD"); err != nil {
+			t.Fatalf("unset PWD after chdir: %v", err)
+		}
+	})
+}
+
 func (a delayedRunStatusAgent) ID() string { return a.id }
 func (delayedRunStatusAgent) Type() string { return "test" }
 func (a delayedRunStatusAgent) Subscriptions() []events.EventType {
@@ -1026,7 +1055,7 @@ func TestRootNoAssetCommandsDoNotRequireRepoRoot(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			isolateCLIAPIConfigEnv(t)
-			t.Chdir(t.TempDir())
+			chdirForTest(t, t.TempDir())
 
 			var stdout, stderr bytes.Buffer
 			code := executeRootCommand(context.Background(), "", tc.args, &stdout, &stderr)
@@ -1046,7 +1075,7 @@ func TestRootNoAssetCommandsDoNotRequireRepoRoot(t *testing.T) {
 func TestAssetCommandsDiscoverRepoRootAtExecution(t *testing.T) {
 	repo := t.TempDir()
 	writeWorkflowValidationFixtureFile(t, filepath.Join(repo, "go.mod"), "module testrepo\n")
-	t.Chdir(repo)
+	chdirForTest(t, repo)
 
 	var capturedRepo string
 	opts := defaultRootCommandOptions()
@@ -1083,7 +1112,7 @@ platform: ">=1.6.0"
 	writeWorkflowValidationFixtureFile(t, filepath.Join(contractsRoot, "nodes.yaml"), "{}\n")
 	writeWorkflowValidationFixtureFile(t, filepath.Join(contractsRoot, "events.yaml"), "{}\n")
 	writeWorkflowValidationFixtureFile(t, filepath.Join(repo, ".env"), "SWARM_CONTRACTS_PATH="+contractsRoot+"\n")
-	t.Chdir(repo)
+	chdirForTest(t, repo)
 
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommand(context.Background(), "", []string{"verify"}, &stdout, &stderr)
@@ -1103,7 +1132,7 @@ func TestLocalRunDiscoversRepoRootBeforeDotEnvAndServe(t *testing.T) {
 	writeWorkflowValidationFixtureFile(t, filepath.Join(repo, ".env"), "SWARM_API_TOKEN=test-token\n")
 	payloadPath := filepath.Join(t.TempDir(), "payload.json")
 	writeWorkflowValidationFixtureFile(t, payloadPath, "{}\n")
-	t.Chdir(repo)
+	chdirForTest(t, repo)
 
 	var capturedRepo string
 	opts := runCommandOptions{
@@ -1129,7 +1158,7 @@ func TestLocalRunDiscoversRepoRootBeforeDotEnvAndServe(t *testing.T) {
 
 func TestRunVerifyCommandUsesEmbeddedPlatformSpecWithoutRepoRoot(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
-	t.Chdir(t.TempDir())
+	chdirForTest(t, t.TempDir())
 	root := t.TempDir()
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: embedded-platform-spec
