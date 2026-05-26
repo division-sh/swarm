@@ -2,15 +2,15 @@
 
 # Division Swarm
 
-**Deterministic orchestration for multi-agent systems.**
+**The operating system for autonomous multi-agent systems.**
 
-Swarm is an event-driven orchestration runtime for multi-agent LLM systems. Flows are declared as contracts in YAML, passed through a static analyzer against a platform specification before boot, and executed by a deterministic engine. Every interaction (agent to agent, system node to system node, human to runtime) is a typed event with a persisted payload, routed by declared subscriptions and replayable from the log. Agents reason inside scoped sessions. The runtime handles async event delivery, state transitions, persistence, recovery, and human-in-the-loop decisions via a durable mailbox.
+Swarm runs fleets of LLM agents as a durable, stateful system. You declare it in YAML and a deterministic engine runs it, owning state, routing, isolation, cost, and recovery. The LLM never runs the system: agents reason in scoped sessions and emit events, and deterministic code, never the model, decides what each result changes.
 
-Less an agent library, more a distributed operating system for LLMs. It assumes failures will happen, humans will intervene, and costs must be controlled. Swarm ships the plumbing for those realities.
-
-**Long-term direction:** Support entire divisions (engineering, support, operations) running as autonomous Swarm flows. Humans in the loop where judgment is required; agents and deterministic system nodes everywhere else.
+A simple orchestrator decides which agent runs next. Swarm runs a state machine. Work is modeled as entities (an order, a ticket, a candidate business) moving through a lifecycle you declare, hundreds at a time, each surviving crashes, waiting days on a timer or a human, and replayable or forkable from the log. That is what an operating system does for its programs: schedule them, keep them apart, meter what they use, persist their state, and restart them after a crash. Deterministic routing is one piece of it; the rest is the operating system.
 
 Single Go binary, Postgres for persistence. Two LLM runtimes ship today: an Anthropic API mode and a CLI-driven mode wrapping the Claude CLI as a subprocess. Both consume the shared LLM provider adapter contract; adding another provider is separate gated runtime/config work.
+
+**Long-term direction:** entire divisions (engineering, support, operations) running as autonomous Swarm flows. Humans in the loop where judgment is required; agents and deterministic system nodes everywhere else.
 
 ---
 
@@ -18,6 +18,7 @@ Single Go binary, Postgres for persistence. Two LLM runtimes ship today: an Anth
 
 Swarm makes a small number of opinionated choices and sticks to them.
 
+- **Work is a durable state machine.** Every unit of work is an entity that moves through declared states by guarded transitions. The runtime tracks where each one is in Postgres, so state survives a crash and hundreds of entities advance independently without interfering.
 - **The control loop is deterministic.** No LLM decides what fires next. Routing is derived from declared subscriptions, and every event runs through a fixed handler pipeline. Conditions use [CEL](https://github.com/google/cel-spec): strongly typed, non-Turing-complete, no hallucinating router.
 - **Every transition is one transaction.** Guard, accumulate, compute, commit, emit: all-or-nothing. A crash mid-handler leaves no partial state.
 - **Flows are composable units.** A flow package declares its identity, state machine, system nodes, events, agents, tools, and policy. Typed input and output pins make composition mechanical rather than a refactor. Create your specialized flows and import them in other Swarm projects.
@@ -162,29 +163,20 @@ Generated subset of `swarm --help`. Each command targets the running orchestrato
 
 ## Architecture
 
-```
-   contract bundle  ─────boot verification─────▶  loaded into engine
-                                                       │
-                  events                               │
-   ingress  ───────────────▶  event bus  ──────▶  system nodes
-   (RPC / API / MCP)                                   │
-                                                       │   handler steps
-                                                       ▼   (atomic commit)
-                                  ┌───────────────────────────────────┐
-                                  │     Postgres                      │
-                                  │  ┌─ events                        │
-                                  │  ├─ entity state + history        │
-                                  │  ├─ transitions / gates / timers  │
-                                  │  └─ agent sessions / turns        │
-                                  └───────────────────────────────────┘
-                                                       ▲
-                  scoped sessions                      │ replay
-                                                       │
-                     agents  ─────────────────────────┘
-                  (Anthropic API · Claude CLI subprocess)
+A contract bundle is verified by the static analyzer, then loaded into the engine, which starts the event loop. From there, everything is an event. An event, whether it arrived from ingress or was emitted by a node or an agent, is validated against its schema, persisted, and routed to its subscribers by their declared subscriptions, never by an LLM. Exactly one system node owns each event: it runs a fixed handler pipeline and commits the state change, gate writes, data writes, and any emitted events in a single transaction. Agents subscribe too, but they only reason inside a scoped session and emit their results back as events; a system node decides what those results actually change. Because every event and every state mutation is persisted, any run can be replayed turn by turn or forked from the log.
+
+```mermaid
+flowchart TB
+    ING["ingress: RPC / API / MCP"] -->|events| BUS(["event bus"])
+    BUS -->|"routed by subscription"| SN["system nodes<br/>deterministic, own state"]
+    BUS -->|"routed by subscription"| AG["agents<br/>LLM, scoped sessions"]
+    SN -->|emit| BUS
+    AG -->|"emit results"| BUS
+    SN ==>|"advance state, one transaction"| PG[("Postgres: events,<br/>entity state + history,<br/>gates, timers, sessions")]
+    PG -.->|"replay / fork"| BUS
 ```
 
-Under the diagram are the primitives that make the design positions enforceable:
+Only the system node writes state, and it does so in one transaction; agents reach the store only indirectly, by emitting an event a node handles. Underneath the loop are the primitives that make the design positions enforceable:
 
 - **A static analyzer for contracts.** Before any event fires, every contract is run through 54 structural checks: state reachability, payload completeness, agent routing, timer lifecycle, CEL parse, prompt linting. A bundle that boots has passed this analysis.
 - **Two-layer event-sourced persistence.** Every event lands in Postgres; every entity state mutation lands in a separate mutation log with before/after diffs. Replay says "show me what happened"; the mutation log says "show me exactly what changed." Accumulator projections compute read-models off the streams, so handlers and external readers can query aggregated state without scanning the raw logs.
@@ -198,7 +190,7 @@ Under the diagram are the primitives that make the design positions enforceable:
 
 ## When to use Swarm
 
-Swarm is opinionated. The control loop is a contract; routing is deterministic; persistence is the substrate, not an add-on. Those choices buy reproducibility, replay, and audit. They cost YAML and a static-analyzer pass before the runtime starts. That tradeoff is the right one for some workloads and the wrong one for others.
+Swarm is opinionated. Work is a durable state machine, routing is deterministic, and persistence, isolation, and cost control are the substrate rather than add-ons. That depth buys reproducibility, crash recovery, and audit, and it costs YAML and a static-analyzer pass before the runtime starts. The tradeoff is the right one for some workloads and the wrong one for others.
 
 The static analyzer's refusal to boot on a half-finished contract is a feature in production and a friction in exploration. Plan accordingly.
 
