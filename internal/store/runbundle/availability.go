@@ -108,7 +108,7 @@ func ListActiveAvailabilities(ctx context.Context, db queryer) ([]Availability, 
 			COALESCE(bundle_fingerprint, '')
 		FROM runs
 		WHERE lower(COALESCE(status, '')) IN ('running', 'paused')
-		ORDER BY started_at ASC, run_id
+		ORDER BY run_id
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("load active run bundle availability: %w", err)
