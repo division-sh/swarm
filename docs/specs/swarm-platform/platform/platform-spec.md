@@ -1609,7 +1609,7 @@ CREATE TABLE entity_state (
 
 ### agents
 
-- `description`: Runtime agent registry. One row per agent instance. Carries the full runtime descriptor: role (from agents.yaml), parent_agent_id (managerial hierarchy), config (agent-specific configuration from contracts), subscriptions/emit_events/tools/permissions (materialized from contracts at boot for fast runtime lookup). flow_instance nullable for root-level agents not scoped to any flow. entity_id nullable — set only for agents scoped to a specific entity (rare). The contract in agents.yaml is the source of truth. This table is the runtime materialization. llm_backend specifies the LLM invocation backend — api (production), cli_test (test harness), mock (fixture replay), local (local model). This is a deployment/agent property, not a session property. agent_sessions.runtime_mode tracks conversation scope only.
+- `description`: Runtime agent registry. One row per agent instance. Carries the full runtime descriptor: role (from agents.yaml), parent_agent_id (managerial hierarchy), config (agent-specific configuration from contracts), subscriptions/emit_events/tools/permissions (materialized from contracts at boot for fast runtime lookup). flow_instance nullable for root-level agents not scoped to any flow. entity_id nullable — set only for agents scoped to a specific entity (rare). The contract in agents.yaml is the source of truth. This table is the runtime materialization. llm_backend specifies the LLM invocation backend — api (Anthropic API transport), cli_test (Claude CLI transport), openai_compatible (Chat Completions-compatible HTTP transport), mock (fixture replay), local (local model). This is a deployment/agent property, not a session property. agent_sessions.runtime_mode tracks conversation scope only.
 ### ddl
 
 ```sql
@@ -1618,7 +1618,7 @@ CREATE TABLE agents (
     flow_instance     TEXT,
     role              TEXT NOT NULL,
     model_tier        TEXT NOT NULL,
-    llm_backend       TEXT NOT NULL DEFAULT 'api' CHECK (llm_backend IN ('api', 'cli_test', 'mock', 'local')),
+    llm_backend       TEXT NOT NULL DEFAULT 'api' CHECK (llm_backend IN ('api', 'cli_test', 'openai_compatible', 'mock', 'local')),
     conversation_mode TEXT NOT NULL CHECK (conversation_mode IN ('task', 'session', 'session_per_entity')),
     parent_agent_id   TEXT,
     entity_id         UUID,
