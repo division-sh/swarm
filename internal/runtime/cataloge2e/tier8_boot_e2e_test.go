@@ -57,6 +57,8 @@ var tier8SupportedFixtures = []string{
 	"test-boot-permission-tool-mismatch",
 	"test-boot-policy-conflict",
 	"test-boot-prompt-missing",
+	"test-boot-prompt-ref",
+	"test-boot-prompt-ref-stub",
 	"test-boot-prompt-stub",
 	"test-boot-produces-drift",
 	"test-boot-required-agent-missing",

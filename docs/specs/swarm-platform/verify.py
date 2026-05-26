@@ -353,6 +353,71 @@ def declared_flow_mode(flow_id):
             return str(entry.get('mode', '')).strip()
     return ""
 
+def flow_prompt_mode(flow_id):
+    if flow_id != 'root' and flow_id in flow_data:
+        mode = str(flow_data[flow_id]['schema'].get('mode', '') or '').strip()
+        if mode:
+            return mode.lower()
+    return declared_flow_mode(flow_id).lower()
+
+def unique_strings(values):
+    out = []
+    for value in values:
+        value = str(value or '').strip()
+        if value and value not in out:
+            out.append(value)
+    return out
+
+def all_prompt_dirs():
+    dirs = [os.path.join(EC, 'prompts')]
+    for flow in FLOWS:
+        if flow in flow_data:
+            dirs.append(os.path.join(EC, 'flows', flow, 'prompts'))
+    return unique_strings(dirs)
+
+def prompt_dirs_for_flow(flow_id):
+    if flow_id == 'root':
+        source_dirs = [os.path.join(EC, 'prompts')]
+    else:
+        source_dirs = [os.path.join(EC, 'flows', flow_id, 'prompts'), os.path.join(EC, 'prompts')]
+    return unique_strings(source_dirs + all_prompt_dirs())
+
+def prompt_workspace_role_ref(agent):
+    workspace_class = str(agent.get('workspace_class') or '').strip()
+    role = str(agent.get('role') or '').strip().replace('_', '-')
+    if workspace_class and role:
+        return "%s-%s" % (workspace_class, role)
+    return ""
+
+def prompt_refs_for_agent(aid, agent):
+    return unique_strings([
+        agent.get('prompt_ref'),
+        aid,
+        agent.get('id'),
+        prompt_workspace_role_ref(agent),
+    ])
+
+def prompt_path_candidates(prompt_dir, ref, mode):
+    ref = str(ref or '').strip()
+    if not ref:
+        return []
+    if os.path.splitext(ref)[1]:
+        return [os.path.join(prompt_dir, ref)]
+    candidates = []
+    if mode:
+        candidates.append(os.path.join(prompt_dir, "%s.%s.md" % (ref, mode)))
+    candidates.append(os.path.join(prompt_dir, "%s.md" % ref))
+    return candidates
+
+def resolve_prompt_path(flow_id, aid, agent):
+    mode = flow_prompt_mode(flow_id)
+    for prompt_dir in prompt_dirs_for_flow(flow_id):
+        for ref in prompt_refs_for_agent(aid, agent):
+            for candidate in prompt_path_candidates(prompt_dir, ref, mode):
+                if os.path.exists(candidate) and not os.path.isdir(candidate):
+                    return candidate
+    return ""
+
 def flow_is_template(flow_id):
     return declared_flow_mode(flow_id).lower() == 'template'
 
@@ -718,17 +783,18 @@ for flow, agents in iter_flows_with_agents():
 # ============================================================
 deferred_count = 0
 for flow, agents in iter_flows_with_agents():
-    prompt_dir = os.path.join(EC, 'prompts') if flow == 'root' else os.path.join(EC, 'flows', flow, 'prompts')
-    for aid in agents:
-        if not isinstance(agents[aid], dict): continue
-        pp = os.path.join(prompt_dir, '%s.md' % aid)
-        if not os.path.exists(pp):
-            warn("prompt_exists", "no prompt file at prompts/%s.md" % aid, "%s/%s" % (flow, aid))
-        else:
-            with open(pp) as f:
-                content = f.read()
-            if '<!-- DEFERRED' in content:
-                deferred_count += 1
+    for aid, agent in agents.items():
+        if not isinstance(agent, dict): continue
+        pp = resolve_prompt_path(flow, aid, agent)
+        if not pp:
+            warn("prompt_exists", "no prompt file resolved by runtime prompt resolver for agent '%s'" % aid, "%s/%s" % (flow, aid))
+            continue
+        with open(pp) as f:
+            content = f.read()
+        if '<!-- DEFERRED' in content:
+            deferred_count += 1
+        elif '<!-- TODO' in content:
+            warn("prompt_exists", "prompt contains TODO", "%s/%s" % (flow, aid))
 
 # ============================================================
 # CHECK: produces_drift [warning, per-node]
@@ -1007,7 +1073,7 @@ t = sum(1 for v in all_tools.values() if isinstance(v, dict))
 if deferred_count:
     print("\n[INFO]  %d prompts marked DEFERRED" % deferred_count)
 
-print("\n[INFO]  structural verifier subset; Go runtime owns CEL, runtime executor resolution, discovered MCP tool inventory, platform_tool_usage_hints, generated_tool_schema_closure, deep artifact result-event typing, credential, and entity-write-target checks")
+print("\n[INFO]  structural verifier subset; Go runtime owns CEL, runtime executor resolution, dynamic shard-parent prompt lookup, discovered MCP tool inventory, platform_tool_usage_hints, generated_tool_schema_closure, deep artifact result-event typing, credential, and entity-write-target checks")
 
 print("\n" + "=" * 70)
 print("SUMMARY: %d errors, %d warnings" % (len(errors_list), len(warnings_list)))

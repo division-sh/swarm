@@ -724,7 +724,7 @@ Custom tool definitions in `tools.yaml` require a `description` field and option
 
 ### Prompt Templating
 
-Agent prompts live in `prompts/{agent-id}.md`. They use `{{variable_name}}` syntax for variable substitution.
+Agent prompts are selected by the runtime prompt resolver from `prompt_ref`, logical agent id, registry entry id, optional mode variants, workspace-class/role fallback, shard-parent runtime lookup, and bundle prompt-directory fallback. They use `{{variable_name}}` syntax for variable substitution.
 
 Prompt variables resolve from these sources in priority order:
 
@@ -1027,7 +1027,7 @@ This matrix summarizes which contract file is responsible for which kind of decl
 | `agents.yaml` | Agent registry | Subscriptions, `emit_events`, tools, permissions, model and conversation settings |
 | `tools.yaml` | Tool schema definitions | Custom tool descriptions, input and output schemas, handler type |
 | `policy.yaml` | Flow-scoped configuration | Policy keys, bundles, `workspace_classes` |
-| `prompts/` | Agent prompt bodies | `prompts/{agent-id}.md` files with `{{variable}}` placeholders |
+| `prompts/` | Agent prompt bodies | Runtime-resolved markdown prompt files with `{{variable}}` placeholders |
 
 ### Practical Authoring Order
 

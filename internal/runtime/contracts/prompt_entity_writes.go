@@ -64,47 +64,19 @@ func DerivePromptEntityWriteEvidence(bundle *WorkflowContractBundle) ([]PromptEn
 }
 
 func loadPromptEntityWriteText(bundle *WorkflowContractBundle, agentID string, entry AgentRegistryEntry, source ContractItemSource) (string, string, bool, error) {
-	dirs := promptEntityWritePromptDirs(bundle, source)
-	if len(dirs) == 0 {
+	mode := promptFlowPromptMode(bundle, source.FlowID)
+	resolution, ok, err := ResolvePromptFileForContractAgent(bundle, agentID, entry, source, mode)
+	if err != nil {
+		return "", "", false, err
+	}
+	if !ok {
 		return "", "", false, nil
 	}
-	mode := promptFlowMode(bundle, source.FlowID)
-	for _, dir := range dirs {
-		for _, candidate := range promptPathCandidates(dir, agentID, entry, mode) {
-			raw, err := os.ReadFile(candidate)
-			if err == nil {
-				return candidate, string(raw), true, nil
-			}
-			if !os.IsNotExist(err) {
-				return "", "", false, fmt.Errorf("read %s: %w", candidate, err)
-			}
-		}
+	raw, err := os.ReadFile(resolution.Path)
+	if err != nil {
+		return "", "", false, fmt.Errorf("read %s: %w", resolution.Path, err)
 	}
-	return "", "", false, nil
-}
-
-func promptEntityWritePromptDirs(bundle *WorkflowContractBundle, source ContractItemSource) []string {
-	if bundle == nil {
-		return nil
-	}
-	dirs := make([]string, 0, 4)
-	if flowID := strings.TrimSpace(source.FlowID); flowID != "" {
-		if flow, ok := bundle.FlowViewByID(flowID); ok && strings.TrimSpace(flow.Paths.PromptsDir) != "" {
-			dirs = append(dirs, flow.Paths.PromptsDir)
-		}
-	}
-	if pkgKey := strings.TrimSpace(source.PackageKey); pkgKey != "" {
-		for _, pkg := range bundle.ProjectViews() {
-			if strings.TrimSpace(pkg.Paths.Key) == pkgKey && strings.TrimSpace(pkg.Paths.ProjectPromptsDir) != "" {
-				dirs = append(dirs, pkg.Paths.ProjectPromptsDir)
-				break
-			}
-		}
-	}
-	if strings.TrimSpace(bundle.Paths.ProjectPromptsDir) != "" {
-		dirs = append(dirs, bundle.Paths.ProjectPromptsDir)
-	}
-	return uniqueStrings(dirs...)
+	return resolution.Path, string(raw), true, nil
 }
 
 func extractPromptEntityWriteEvidence(promptText string) (bool, bool, []string) {

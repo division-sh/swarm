@@ -1,0 +1,7 @@
+trigger:
+  boot: true
+
+expected:
+  boot_result: warning
+  error_category: PROMPT-STUB
+  error_contains: "TODO"

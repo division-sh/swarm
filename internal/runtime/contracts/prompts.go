@@ -20,6 +20,13 @@ type PromptResolver interface {
 	LoadPromptForAgent(cfg models.AgentConfig, mode string) (string, bool, error)
 }
 
+type PromptFileResolution struct {
+	AgentID string
+	Entry   AgentRegistryEntry
+	Source  ContractItemSource
+	Path    string
+}
+
 type BundlePromptResolver struct {
 	bundle            *WorkflowContractBundle
 	repoRoot          string
@@ -41,28 +48,49 @@ func NewBundlePromptResolver(bundle *WorkflowContractBundle) *BundlePromptResolv
 }
 
 func (r *BundlePromptResolver) LoadPromptForAgent(cfg models.AgentConfig, mode string) (string, bool, error) {
-	candidates, dirs := r.promptLookupPlan(cfg)
+	resolution, found, err := r.ResolvePromptFileForAgent(cfg, mode)
+	if err != nil || !found {
+		return "", found, err
+	}
+	raw, err := os.ReadFile(resolution.Path)
+	if err != nil {
+		return "", false, err
+	}
 	repoRoot := promptContractsRepoRoot()
 	if r != nil && strings.TrimSpace(r.repoRoot) != "" {
 		repoRoot = r.repoRoot
 	}
+	prompt, err := r.renderPromptWithRuntimeVariables(repoRoot, string(raw), resolution.Source, cfg)
+	if err != nil {
+		return "", false, fmt.Errorf("render prompt %s: %w", filepath.Base(resolution.Path), err)
+	}
+	return strings.TrimSpace(prompt), true, nil
+}
+
+func (r *BundlePromptResolver) ResolvePromptFileForAgent(cfg models.AgentConfig, mode string) (PromptFileResolution, bool, error) {
+	candidates, dirs := r.promptLookupPlan(cfg)
 	bundle := r.workflowBundle()
 	for _, agentID := range candidates {
 		record := bundleAgentRecord{}
 		if bundle != nil {
 			record, _ = bundleAgentRecordByLogicalID(bundle, agentID)
 		}
-		for _, dir := range dirs[agentID] {
-			prompt, found, err := r.loadPromptTemplateFromDir(repoRoot, dir, agentID, record.Entry, record.Source, cfg, mode)
-			if err != nil {
-				return "", false, err
-			}
-			if found {
-				return prompt, true, nil
-			}
+		resolution, found, err := resolvePromptFileInDirs(dirs[agentID], agentID, record.Entry, record.Source, mode)
+		if err != nil {
+			return PromptFileResolution{}, false, err
+		}
+		if found {
+			return resolution, true, nil
 		}
 	}
-	return "", false, nil
+	return PromptFileResolution{}, false, nil
+}
+
+func ResolvePromptFileForContractAgent(bundle *WorkflowContractBundle, logicalID string, entry AgentRegistryEntry, source ContractItemSource, mode string) (PromptFileResolution, bool, error) {
+	if bundle == nil {
+		return PromptFileResolution{}, false, nil
+	}
+	return resolvePromptFileInDirs(promptDirsForAgentSource(bundle, source), logicalID, entry, source, mode)
 }
 
 func (r *BundlePromptResolver) promptLookupPlan(cfg models.AgentConfig) ([]string, map[string][]string) {
@@ -258,7 +286,24 @@ func promptFlowMode(bundle *WorkflowContractBundle, flowID string) string {
 	if !ok {
 		return ""
 	}
+	if mode := strings.TrimSpace(flow.Schema.Mode); mode != "" {
+		return canonicalPromptLookupValue(mode)
+	}
 	return canonicalPromptLookupValue(flow.Paths.Mode)
+}
+
+func promptFlowPromptMode(bundle *WorkflowContractBundle, flowID string) string {
+	if bundle == nil {
+		return ""
+	}
+	flow, ok := bundle.FlowViewByID(flowID)
+	if !ok {
+		return ""
+	}
+	if mode := strings.TrimSpace(flow.Schema.Mode); mode != "" {
+		return strings.ToLower(mode)
+	}
+	return strings.ToLower(strings.TrimSpace(flow.Paths.Mode))
 }
 
 func canonicalPromptLookupValue(value string) string {
@@ -287,36 +332,44 @@ func promptContractsRepoRoot() string {
 	return filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", "..", ".."))
 }
 
-func loadPromptForAgentFromDir(repoRoot, promptsDir, agentID, mode string) (string, bool, error) {
-	return loadPromptTemplateFromDir(repoRoot, promptsDir, agentID, AgentRegistryEntry{}, ContractItemSource{}, models.AgentConfig{}, mode)
+func resolvePromptFileInDirs(dirs []string, logicalID string, entry AgentRegistryEntry, source ContractItemSource, mode string) (PromptFileResolution, bool, error) {
+	logicalID = strings.TrimSpace(logicalID)
+	if logicalID == "" {
+		return PromptFileResolution{}, false, nil
+	}
+	for _, dir := range uniqueStrings(dirs...) {
+		path, found, err := resolvePromptFileInDir(dir, logicalID, entry, mode)
+		if err != nil {
+			return PromptFileResolution{}, false, err
+		}
+		if found {
+			return PromptFileResolution{
+				AgentID: logicalID,
+				Entry:   entry,
+				Source:  source,
+				Path:    path,
+			}, true, nil
+		}
+	}
+	return PromptFileResolution{}, false, nil
 }
 
-func loadPromptTemplateFromDir(repoRoot, promptsDir, agentID string, entry AgentRegistryEntry, source ContractItemSource, cfg models.AgentConfig, mode string) (string, bool, error) {
-	return (*BundlePromptResolver)(nil).loadPromptTemplateFromDir(repoRoot, promptsDir, agentID, entry, source, cfg, mode)
-}
-
-func (r *BundlePromptResolver) loadPromptTemplateFromDir(repoRoot, promptsDir, agentID string, entry AgentRegistryEntry, source ContractItemSource, cfg models.AgentConfig, mode string) (string, bool, error) {
-	agentID = strings.TrimSpace(agentID)
-	mode = strings.TrimSpace(strings.ToLower(mode))
-	if agentID == "" || strings.TrimSpace(promptsDir) == "" {
+func resolvePromptFileInDir(promptsDir, logicalID string, entry AgentRegistryEntry, mode string) (string, bool, error) {
+	promptsDir = strings.TrimSpace(promptsDir)
+	if promptsDir == "" {
 		return "", false, nil
 	}
-
-	candidates := promptPathCandidates(promptsDir, agentID, entry, mode)
-
-	for _, candidate := range candidates {
-		raw, err := os.ReadFile(candidate)
-		if err != nil {
-			if os.IsNotExist(err) {
+	for _, candidate := range promptPathCandidates(promptsDir, logicalID, entry, strings.ToLower(strings.TrimSpace(mode))) {
+		info, err := os.Stat(candidate)
+		if err == nil {
+			if info.IsDir() {
 				continue
 			}
+			return candidate, true, nil
+		}
+		if !os.IsNotExist(err) {
 			return "", false, err
 		}
-		rendered, err := r.renderPromptWithRuntimeVariables(repoRoot, string(raw), source, cfg)
-		if err != nil {
-			return "", false, fmt.Errorf("render prompt %s: %w", filepath.Base(candidate), err)
-		}
-		return strings.TrimSpace(rendered), true, nil
 	}
 	return "", false, nil
 }
@@ -358,6 +411,39 @@ func promptWorkspaceRoleRef(entry AgentRegistryEntry) string {
 		return ""
 	}
 	return workspaceClass + "-" + role
+}
+
+func promptDirsForAgentSource(bundle *WorkflowContractBundle, source ContractItemSource) []string {
+	if bundle == nil {
+		return nil
+	}
+	dirs := promptDirsForSource(bundle, source)
+	dirs = append(dirs, promptBundlePromptDirs(bundle)...)
+	return uniqueStrings(dirs...)
+}
+
+func promptDirsForSource(bundle *WorkflowContractBundle, source ContractItemSource) []string {
+	if bundle == nil {
+		return nil
+	}
+	dirs := make([]string, 0, 4)
+	if flowID := strings.TrimSpace(source.FlowID); flowID != "" {
+		if flow, ok := bundle.FlowViewByID(flowID); ok && strings.TrimSpace(flow.Paths.PromptsDir) != "" {
+			dirs = append(dirs, flow.Paths.PromptsDir)
+		}
+	}
+	if pkgKey := strings.TrimSpace(source.PackageKey); pkgKey != "" {
+		for _, pkg := range bundle.ProjectViews() {
+			if strings.TrimSpace(pkg.Paths.Key) == pkgKey && strings.TrimSpace(pkg.Paths.ProjectPromptsDir) != "" {
+				dirs = append(dirs, pkg.Paths.ProjectPromptsDir)
+				break
+			}
+		}
+	}
+	if strings.TrimSpace(bundle.Paths.ProjectPromptsDir) != "" {
+		dirs = append(dirs, bundle.Paths.ProjectPromptsDir)
+	}
+	return uniqueStrings(dirs...)
 }
 
 func (r *BundlePromptResolver) renderPromptWithRuntimeVariables(repoRoot, promptText string, source ContractItemSource, cfg models.AgentConfig) (string, error) {

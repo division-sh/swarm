@@ -698,6 +698,16 @@ func TestRun_MapsMissingPromptToPromptExistsWarning(t *testing.T) {
 	}
 }
 
+func TestRun_PromptRefSatisfiesPromptExistsWarning(t *testing.T) {
+	source := loadTier8Fixture(t, "test-boot-prompt-ref")
+
+	report := Run(context.Background(), source, Options{})
+
+	if reportContains(report.Warnings(), "prompt_exists", "prompt-ref-agent") {
+		t.Fatalf("unexpected prompt_exists warning for prompt_ref backed agent, got %#v", report.Warnings())
+	}
+}
+
 func TestEventProducedExternallyLocal_AllowsAnnotatedSourceText(t *testing.T) {
 	t.Parallel()
 
@@ -1145,6 +1155,19 @@ func TestRun_MapsPromptStubToPromptExistsWarning(t *testing.T) {
 	}
 	if !reportContains(report.Warnings(), "prompt_exists", "TODO") {
 		t.Fatalf("expected prompt_exists warning for stub, got %#v", report.Warnings())
+	}
+}
+
+func TestRun_MapsPromptRefStubToPromptExistsWarning(t *testing.T) {
+	source := loadTier8Fixture(t, "test-boot-prompt-ref-stub")
+
+	report := Run(context.Background(), source, Options{})
+
+	if report.HasErrors() {
+		t.Fatalf("expected warning-only report, got errors: %#v", report.Errors())
+	}
+	if !reportContains(report.Warnings(), "prompt_exists", "TODO") {
+		t.Fatalf("expected prompt_exists warning for resolved prompt_ref stub, got %#v", report.Warnings())
 	}
 }
 

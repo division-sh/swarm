@@ -1,0 +1,7 @@
+name: test-boot-prompt-ref-stub
+version: 1.0.0
+description: >
+  Boot verification: TODO detection must apply to the resolved prompt_ref prompt,
+  not only prompts/{agent-id}.md.
+platform_version: ">=1.1.0"
+flows: []

@@ -1,0 +1,7 @@
+name: test-boot-prompt-ref
+version: 1.0.0
+description: >
+  Boot verification: agent prompt_ref resolves to an existing prompt, so prompt_exists
+  must not warn just because prompts/{agent-id}.md is absent.
+platform_version: ">=1.1.0"
+flows: []

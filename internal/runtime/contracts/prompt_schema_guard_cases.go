@@ -1,8 +1,6 @@
 package contracts
 
 import (
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -74,23 +72,13 @@ func resolvePromptSchemaGuardFile(bundle *WorkflowContractBundle, agentID string
 	if bundle == nil {
 		return ""
 	}
-	candidates := make([]string, 0, 4)
-	for _, candidate := range []string{agentID, entry.ID} {
-		candidate = strings.TrimSpace(candidate)
-		if candidate != "" {
-			candidates = append(candidates, candidate)
-		}
+	source, ok := bundle.AgentContractSource(agentID)
+	if !ok {
+		return ""
 	}
-	candidates = uniqueStrings(candidates...)
-	dirs := append(promptDirsForBundleAgent(bundle, agentID), promptBundlePromptDirs(bundle)...)
-	for _, dir := range uniqueStrings(dirs...) {
-		for _, candidate := range candidates {
-			path := filepath.Join(strings.TrimSpace(dir), candidate+".md")
-			info, err := os.Stat(path)
-			if err == nil && !info.IsDir() {
-				return path
-			}
-		}
+	resolution, ok, err := ResolvePromptFileForContractAgent(bundle, agentID, entry, source, promptFlowPromptMode(bundle, source.FlowID))
+	if err != nil || !ok {
+		return ""
 	}
-	return ""
+	return resolution.Path
 }

@@ -1,0 +1,9 @@
+prompt-ref-agent:
+  role: prompt_ref_agent
+  prompt_ref: shared-prompt
+  model_tier: tier2
+  conversation_mode: stateless
+  subscriptions:
+    - task.requested
+  emit_events:
+    - task.completed
