@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"swarm/internal/events"
@@ -269,6 +270,70 @@ pins:
 	}
 }
 
+func TestTemplateInstanceSystemNodeDeliveryLocalizesConcreteEventToHandlerKey(t *testing.T) {
+	source := loadWorkflowTempSource(t, map[string]string{
+		"package.yaml": `name: test
+version: 1.0.0
+flows:
+  - id: operating
+    flow: operating
+    mode: template
+`,
+		"flows/operating/schema.yaml": `name: operating
+initial_state: initializing
+terminal_states: [ready]
+states: [initializing, ready]
+auto_emit_on_create:
+  event: opco.product_initialization_requested
+`,
+		"flows/operating/events.yaml": `opco.product_initialization_requested:
+  entity_id: string
+opco.ceo_ready:
+  entity_id: string
+`,
+		"flows/operating/nodes.yaml": `lifecycle-orchestrator:
+  id: lifecycle-orchestrator
+  execution_type: system_node
+  subscribes_to: [opco.product_initialization_requested]
+  produces: [opco.ceo_ready]
+  event_handlers:
+    opco.product_initialization_requested:
+      emit: opco.ceo_ready
+`,
+	})
+	evt := (events.Event{
+		Type:    events.EventType("operating/inst-1/opco.product_initialization_requested"),
+		Payload: []byte(`{"entity_id":"ent-operating"}`),
+	}).WithEntityID("ent-operating").WithFlowInstance("operating/inst-1")
+	if _, ok := source.NodeEventHandler("lifecycle-orchestrator", string(evt.Type)); ok {
+		t.Fatal("raw bundle handler lookup unexpectedly matched concrete instance event without delivery localization")
+	}
+	if _, ok := workflowNodeEventHandlerForDelivery(source, "lifecycle-orchestrator", evt); !ok {
+		t.Fatal("expected concrete instance event to resolve to local lifecycle-orchestrator handler")
+	}
+
+	bus := &recordingPipelineBus{}
+	pc := &PipelineCoordinator{
+		bus:            bus,
+		expressionEval: newWorkflowExpressionEvaluator(),
+		entityLocks:    map[string]*sync.Mutex{},
+		module:         staticSemanticWorkflowModule{source: source},
+	}
+	handled, err := pc.executeNodeHandlerPlanResult(context.Background(), "lifecycle-orchestrator", evt)
+	if err != nil {
+		t.Fatalf("executeNodeHandlerPlanResult: %v", err)
+	}
+	if !handled {
+		t.Fatal("executeNodeHandlerPlanResult handled = false, want true")
+	}
+	if got := bus.publishedCount(); got != 1 {
+		t.Fatalf("published count = %d, want 1", got)
+	}
+	if got := string(bus.publishedEvent(0).Type); got != "operating/opco.ceo_ready" {
+		t.Fatalf("published event type = %q, want operating/opco.ceo_ready", got)
+	}
+}
+
 func loadWorkflowFixtureSource(t *testing.T, fixture string) semanticview.Source {
 	t.Helper()
 	return semanticview.Wrap(loadWorkflowFixtureBundle(t, fixture))
@@ -288,6 +353,11 @@ func loadWorkflowFixtureBundle(t *testing.T, fixture string) *runtimecontracts.W
 
 func loadWorkflowTempSource(t *testing.T, files map[string]string) semanticview.Source {
 	t.Helper()
+	return semanticview.Wrap(loadWorkflowTempBundle(t, files))
+}
+
+func loadWorkflowTempBundle(t *testing.T, files map[string]string) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
 	root := t.TempDir()
 	for rel, body := range files {
 		path := filepath.Join(root, rel)
@@ -304,7 +374,7 @@ func loadWorkflowTempSource(t *testing.T, files map[string]string) semanticview.
 	if err != nil {
 		t.Fatalf("load temp bundle: %v", err)
 	}
-	return semanticview.Wrap(bundle)
+	return bundle
 }
 
 type staticSemanticWorkflowModule struct {

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"swarm/internal/events"
+	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "swarm/internal/runtime/core/pinrouting"
 )
 
@@ -22,15 +23,20 @@ type deliveryRecipientCandidate struct {
 }
 
 type deliveryRouteResolver struct {
-	resolveRoutedSubscribers    func(string) []Subscriber
-	resolveSubscribedRecipients func(string) []deliveryRecipientCandidate
-	describeSubscribersForEvent func(string, []Subscriber) []PublishDiagnosticRecipient
+	resolveRoutedSubscribers            func(string) []Subscriber
+	resolveSubscribedRecipients         func(string) []deliveryRecipientCandidate
+	resolveRoutedNodeInternalRecipients func(events.Event, []Subscriber) []deliveryRecipientCandidate
+	describeSubscribersForEvent         func(string, []Subscriber) []PublishDiagnosticRecipient
 }
 
 func (r deliveryRouteResolver) Resolve(evt events.Event) deliveryRoutingResult {
 	routedRecipients := r.resolveRoutedSubscribers(string(evt.Type))
 	subscribedRecipients := r.resolveSubscribedRecipients(string(evt.Type))
-	recipients := normalizeDeliveryRecipientCandidates(append(routedSubscriberCandidates(routedRecipients), subscribedRecipients...))
+	routedCandidates := routedSubscriberCandidates(routedRecipients)
+	if r.resolveRoutedNodeInternalRecipients != nil {
+		routedCandidates = append(routedCandidates, r.resolveRoutedNodeInternalRecipients(evt, routedRecipients)...)
+	}
+	recipients := normalizeDeliveryRecipientCandidates(append(routedCandidates, subscribedRecipients...))
 	result := deliveryRoutingResult{
 		Recipients:           recipients,
 		RoutedRecipients:     routedRecipients,
@@ -103,6 +109,7 @@ func (p deliveryPlanner) Plan(ctx context.Context, evt events.Event) (eventDeliv
 	plan.PersistedRecipients = manifest.PersistedRecipients
 	plan.DeliveryTargets = manifest.DeliveryTargets
 	plan.DeliveryRoutes = append([]events.DeliveryRoute(nil), manifest.DeliveryRoutes...)
+	plan.DeliveryRoutes = append(plan.DeliveryRoutes, routedNodeDeliveryRoutesForNoTargetEvent(evt, routing.RoutedRecipients)...)
 	plan.DeliveryRoutes = append(plan.DeliveryRoutes, internalDeliveryRoutesForPlan(evt, plan.Recipients, plan.PersistedRecipients, routing.RoutedRecipients)...)
 	plan.DeliveryRoutes = events.NormalizeDeliveryRoutes(plan.DeliveryRoutes)
 	plan.TargetFailure = manifest.TargetFailure
@@ -166,9 +173,10 @@ func filteredRecipients(requested, allowed []string) []string {
 func (eb *EventBus) newEventBusDeliveryPlanner() deliveryPlanner {
 	return newDeliveryPlanner(
 		deliveryRouteResolver{
-			resolveRoutedSubscribers:    eb.resolveRoutedSubscribers,
-			resolveSubscribedRecipients: eb.resolveSubscribedRecipientsForPlanning,
-			describeSubscribersForEvent: eb.describeSubscribersForEvent,
+			resolveRoutedSubscribers:            eb.resolveRoutedSubscribers,
+			resolveSubscribedRecipients:         eb.resolveSubscribedRecipientsForPlanning,
+			resolveRoutedNodeInternalRecipients: eb.resolveInternalRecipientsForRoutedNodePlanning,
+			describeSubscribersForEvent:         eb.describeSubscribersForEvent,
 		},
 		deliveryRecipientPolicy{
 			loadActiveAgentDescriptors: eb.activeAgentDescriptors,
@@ -354,6 +362,76 @@ func internalDeliveryRoutesForPlan(evt events.Event, recipients, persisted []str
 		}
 	}
 	return events.NormalizeDeliveryRoutes(out)
+}
+
+func routedNodeDeliveryRoutesForNoTargetEvent(evt events.Event, routed []Subscriber) []events.DeliveryRoute {
+	if len(routed) == 0 || len(eventDeliveryTargetRoutes(evt)) > 0 {
+		return nil
+	}
+	flowInstance := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/")
+	if flowInstance == "" {
+		return nil
+	}
+	eventEntityID := strings.TrimSpace(evt.EntityID())
+	out := make([]events.DeliveryRoute, 0, len(routed))
+	for _, subscriber := range routed {
+		if !routedNodeMatchesConcreteFlowInstanceEvent(evt, subscriber) {
+			continue
+		}
+		subscriberID := strings.TrimSpace(subscriber.ID)
+		if subscriberID == "" {
+			continue
+		}
+		out = append(out, events.DeliveryRoute{
+			SubscriberType: "node",
+			SubscriberID:   subscriberID,
+			Target: events.RouteIdentity{
+				FlowInstance: flowInstance,
+				EntityID:     eventEntityID,
+			},
+		})
+	}
+	return events.NormalizeDeliveryRoutes(out)
+}
+
+func routedNodeInternalSubscriptionAliases(evt events.Event, routed []Subscriber) []string {
+	if len(routed) == 0 || len(eventDeliveryTargetRoutes(evt)) > 0 {
+		return nil
+	}
+	eventType := strings.Trim(strings.TrimSpace(string(evt.Type)), "/")
+	if eventType == "" {
+		return nil
+	}
+	out := []string{eventType}
+	for _, subscriber := range routed {
+		if !routedNodeMatchesConcreteFlowInstanceEvent(evt, subscriber) {
+			continue
+		}
+		instancePath := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
+		if instancePath == "" || !strings.HasPrefix(eventType, instancePath+"/") {
+			continue
+		}
+		localEvent := strings.TrimPrefix(eventType, instancePath+"/")
+		staticScope := runtimeflowidentity.SemanticScopeFromInstancePath(instancePath)
+		if localEvent == "" || staticScope == "" {
+			continue
+		}
+		out = append(out, staticScope+"/"+localEvent)
+	}
+	return uniqueStrings(out)
+}
+
+func routedNodeMatchesConcreteFlowInstanceEvent(evt events.Event, subscriber Subscriber) bool {
+	if strings.TrimSpace(subscriber.ID) == "" || strings.TrimSpace(subscriber.Type) == "agent" {
+		return false
+	}
+	instancePath := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
+	flowInstance := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/")
+	if instancePath == "" || flowInstance == "" || instancePath != flowInstance {
+		return false
+	}
+	eventType := strings.Trim(strings.TrimSpace(string(evt.Type)), "/")
+	return eventType != "" && strings.HasPrefix(eventType, instancePath+"/")
 }
 
 func matchedInternalDeliveryTargets(evt events.Event, subscribers []Subscriber) []events.RouteIdentity {

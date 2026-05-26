@@ -230,7 +230,7 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 	if trigger == "" {
 		return false, nil
 	}
-	handler, ok := source.NodeEventHandler(nodeID, trigger)
+	handler, ok := workflowNodeEventHandlerForDelivery(source, nodeID, evt)
 	if !ok && isAccumulationTimeoutEvent(events.EventType(trigger)) {
 		bucket, bucketOK := timeridentity.ParseAccumulatorBucketRef(parsePayloadMap(evt.Payload))
 		if bucketOK && strings.TrimSpace(bucket.NodeID) == nodeID {

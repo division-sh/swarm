@@ -335,6 +335,41 @@ func (eb *EventBus) resolveSubscribedRecipientsForPlanning(eventType string) []d
 	return normalizeDeliveryRecipientCandidates(recipients)
 }
 
+func (eb *EventBus) resolveInternalRecipientsForRoutedNodePlanning(evt events.Event, routed []Subscriber) []deliveryRecipientCandidate {
+	if eb == nil {
+		return nil
+	}
+	aliases := routedNodeInternalSubscriptionAliases(evt, routed)
+	if len(aliases) == 0 {
+		return nil
+	}
+	eb.mu.RLock()
+	defer eb.mu.RUnlock()
+	recipients := make([]deliveryRecipientCandidate, 0, len(eb.subscriptions))
+	for subscriberID, pats := range eb.subscriptions {
+		if eb.subscriptionKinds[subscriberID] != inMemorySubscriberInternal {
+			continue
+		}
+		for _, pat := range pats {
+			matched := false
+			for _, alias := range aliases {
+				if routeMatches(string(pat), alias) {
+					matched = true
+					break
+				}
+			}
+			if matched {
+				recipients = append(recipients, deliveryRecipientCandidate{
+					ID:                subscriberID,
+					PersistAsDelivery: false,
+				})
+				break
+			}
+		}
+	}
+	return normalizeDeliveryRecipientCandidates(recipients)
+}
+
 func (eb *EventBus) ResolveSubscribedRecipients(eventType string) []string {
 	return eb.resolveSubscribedRecipients(eventType)
 }
