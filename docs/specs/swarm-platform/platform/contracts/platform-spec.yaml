@@ -2211,6 +2211,9 @@ engine:
         - SQLite bootstrap must create parent directories for the selected path when the schema owner opens the database.
         - SQLite DDL must cover every current platform_tables.tables entry plus generated entity and node-state tables
           unless a gate explicitly records a named deferral.
+        - SQLite DDL must be rendered from the normalized schema plan subset. The renderer must explicitly classify each
+          supported Postgres-authored construct it accepts, including UUID defaults, timestamp defaults, JSON text storage,
+          text-array storage, partial indexes, expression indexes, and check predicates.
         - Unsupported Postgres-only constructs must fail closed with named diagnostics rather than being accepted through
           heuristic free-form SQL rewriting.
     covered_schema_inputs:
