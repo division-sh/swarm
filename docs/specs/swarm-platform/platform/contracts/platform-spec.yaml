@@ -2979,8 +2979,9 @@ engine:
     - id: credential_key_exists
       severity: warning
       scope: global
-      trigger: A tool's credentials field or an MCP server's credentials_key references a credential key that does not exist
-        in the credential store (any tier). The tool may be unconfigured in this deployment.
+      trigger: A tool's credentials field, an MCP server's credentials_key, or policy.web_search_provider.credentials_key
+        references a credential key that does not exist in the credential store (any tier). The tool may be unconfigured in
+        this deployment.
       when: boot-only
     - id: agent_permission_validation
       severity: error
@@ -3525,11 +3526,13 @@ tool_model:
       docker: Environment variables (env tier). File store optionally mounted as a volume for builder access.
       production: Environment variables for secrets, or external secrets manager (Vault, AWS Secrets Manager) via a custom
         store tier implementation. The overlay model supports additional tiers — the platform resolves top-down.
-    contract_reference: Tools and MCP servers reference credentials by key name, never by value. The key name appears in
-      tools.yaml (credentials field) and policy.yaml (mcp_servers.*.credentials_key). The platform resolves the key to the
-      secret value at call time only.
-    boot_validation: At boot, the platform checks that every credential key referenced by tools and MCP servers exists in the
-      credential store (any tier). Missing keys log a warning — the tool may be unconfigured in this deployment.
+    contract_reference: Tools, MCP servers, and native web-search provider configuration reference credentials by key name,
+      never by value. The key name appears in tools.yaml (credentials field), policy.yaml (mcp_servers.*.credentials_key),
+      and policy.yaml (web_search_provider.credentials_key). The platform resolves the key to the secret value at call time
+      only.
+    boot_validation: At boot, the platform checks that every credential key referenced by tools, MCP servers, and native
+      web-search provider configuration exists in the credential store (any tier). Missing keys log a warning — the tool may
+      be unconfigured in this deployment.
     platform_guarantee: The platform never logs, indexes, or persists credential values in the event store, dead letters, or
       any platform table. Credentials exist only in the credential store and in-flight tool requests. The builder API never
       returns credential values after write — only metadata.

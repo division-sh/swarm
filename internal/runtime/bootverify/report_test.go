@@ -3,6 +3,7 @@ package bootverify
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -173,6 +174,106 @@ func TestRun_MapsMissingContractMCPToolToToolResolutionWarning(t *testing.T) {
 
 	if !reportContains(report.Warnings(), "tool_resolution", "infra.missing") {
 		t.Fatalf("expected tool_resolution warning for undiscovered contract mcp tool, got %#v", report.Warnings())
+	}
+}
+
+func TestRun_MapsMissingRuntimeExternalCredentialsToCredentialKeyExistsWarnings(t *testing.T) {
+	source := runtimeExternalResourceSource("http://127.0.0.1:1")
+
+	report := Run(context.Background(), source, Options{Credentials: bootverifyCredentialStore{}})
+
+	if report.HasErrors() {
+		t.Fatalf("expected warning-only report, got errors: %#v", report.Errors())
+	}
+	for _, expected := range []string{
+		"credential sendgrid_api_key is missing (required by tool email_api)",
+		"credential infra_mcp_token is missing (required by mcp_server infra)",
+		"credential brave_search_api_key is missing (required by web_search_provider brave)",
+	} {
+		if !reportContains(report.Warnings(), "credential_key_exists", expected) {
+			t.Fatalf("expected credential_key_exists warning containing %q, got %#v", expected, report.Warnings())
+		}
+	}
+}
+
+func TestRun_SkipsCredentialKeyExistsWhenNoCredentialStoreIsSupplied(t *testing.T) {
+	source := runtimeExternalResourceSource("http://127.0.0.1:1")
+
+	report := Run(context.Background(), source, Options{})
+
+	if reportContains(report.Warnings(), "credential_key_exists", "credential") {
+		t.Fatalf("expected no credential_key_exists warning without credential store, got %#v", report.Warnings())
+	}
+}
+
+func TestRun_MapsCredentialStoreErrorsToCredentialKeyExistsError(t *testing.T) {
+	source := runtimeExternalResourceSource("http://127.0.0.1:1")
+
+	report := Run(context.Background(), source, Options{
+		Credentials: bootverifyCredentialStore{listErr: errors.New("credential store unavailable")},
+	})
+
+	if !reportContains(report.Errors(), "credential_key_exists", "credential store unavailable") {
+		t.Fatalf("expected credential_key_exists error for store failure, got %#v", report.Errors())
+	}
+}
+
+func TestRun_MapsMCPDiscoveryFailureToMCPServerReachableWarning(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("Decode request: %v", err)
+		}
+		switch req["method"] {
+		case "initialize":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      req["id"],
+				"result": map[string]any{
+					"protocolVersion": "2025-03-26",
+					"capabilities":    map[string]any{"tools": map[string]any{}},
+					"serverInfo":      map[string]any{"name": "infra", "version": "1.0.0"},
+				},
+			})
+		case "notifications/initialized":
+			_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "result": map[string]any{}})
+		case "tools/list":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      req["id"],
+				"error": map[string]any{
+					"code":    -32000,
+					"message": "catalog unavailable",
+				},
+			})
+		default:
+			t.Fatalf("unexpected mcp method %v", req["method"])
+		}
+	}))
+	defer server.Close()
+	source := runtimeExternalResourceSource(server.URL)
+
+	report := Run(context.Background(), source, Options{CheckMCPReachable: true})
+
+	if report.HasErrors() {
+		t.Fatalf("expected warning-only report, got errors: %#v", report.Errors())
+	}
+	if !reportContains(report.Warnings(), "mcp_server_reachable", "mcp server infra: catalog unavailable") {
+		t.Fatalf("expected mcp_server_reachable warning, got %#v", report.Warnings())
+	}
+}
+
+func TestRun_SkipsMCPServerReachableWhenReachabilityCheckDisabled(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("MCP server should not be contacted when CheckMCPReachable is false")
+	}))
+	defer server.Close()
+	source := runtimeExternalResourceSource(server.URL)
+
+	report := Run(context.Background(), source, Options{})
+
+	if reportContains(report.Warnings(), "mcp_server_reachable", "mcp server") {
+		t.Fatalf("expected no mcp_server_reachable warning with disabled reachability check, got %#v", report.Warnings())
 	}
 }
 
@@ -5487,6 +5588,74 @@ func reportContains(items []Finding, checkID, contains string) bool {
 		}
 	}
 	return false
+}
+
+type bootverifyCredentialStore struct {
+	values  map[string]string
+	listErr error
+	getErr  error
+}
+
+func (s bootverifyCredentialStore) Get(_ context.Context, key string) (string, bool, error) {
+	if s.getErr != nil {
+		return "", false, s.getErr
+	}
+	value, ok := s.values[strings.TrimSpace(key)]
+	return value, ok, nil
+}
+
+func (s bootverifyCredentialStore) Set(_ context.Context, key, value string) error {
+	if s.values == nil {
+		s.values = map[string]string{}
+	}
+	s.values[strings.TrimSpace(key)] = value
+	return nil
+}
+
+func (s bootverifyCredentialStore) List(_ context.Context) ([]string, error) {
+	if s.listErr != nil {
+		return nil, s.listErr
+	}
+	out := make([]string, 0, len(s.values))
+	for key := range s.values {
+		out = append(out, strings.TrimSpace(key))
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+func (s bootverifyCredentialStore) Delete(_ context.Context, key string) error {
+	delete(s.values, strings.TrimSpace(key))
+	return nil
+}
+
+func runtimeExternalResourceSource(mcpURL string) semanticview.Source {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{
+			"email_api": {Credentials: []string{"sendgrid_api_key"}},
+		},
+		Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
+			"mcp_servers": {
+				Value: map[string]any{
+					"infra": map[string]any{
+						"transport":       "http",
+						"url":             mcpURL,
+						"prefix":          "infra",
+						"credentials_key": "infra_mcp_token",
+					},
+				},
+			},
+			"web_search_provider": {
+				Value: map[string]any{
+					"provider":        "brave",
+					"credentials_key": "brave_search_api_key",
+				},
+			},
+		}},
+	}
+	bundle.Platform.Platform.Name = "swarm"
+	bundle.Platform.Platform.Version = "test"
+	return semanticview.Wrap(bundle)
 }
 
 func firstBundleHandler(bundle *runtimecontracts.WorkflowContractBundle) (string, string, runtimecontracts.SystemNodeEventHandler, bool) {

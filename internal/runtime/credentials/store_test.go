@@ -67,7 +67,7 @@ func TestOverlayStore_EnvOverridesFile(t *testing.T) {
 	}
 }
 
-func TestListDescriptors_IndexesToolsAndMCPServers(t *testing.T) {
+func TestListDescriptors_IndexesToolsMCPServersAndWebSearchProvider(t *testing.T) {
 	ctx := context.Background()
 	fileStore, err := NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
 	if err != nil {
@@ -90,14 +90,20 @@ func TestListDescriptors_IndexesToolsAndMCPServers(t *testing.T) {
 					},
 				},
 			},
+			"web_search_provider": {
+				Value: map[string]any{
+					"provider":        "brave",
+					"credentials_key": "brave_search_api_key",
+				},
+			},
 		}},
 	})
 	items, err := ListDescriptors(ctx, store, source)
 	if err != nil {
 		t.Fatalf("ListDescriptors: %v", err)
 	}
-	if len(items) != 2 {
-		t.Fatalf("expected 2 credential descriptors, got %d", len(items))
+	if len(items) != 3 {
+		t.Fatalf("expected 3 credential descriptors, got %d", len(items))
 	}
 	byKey := map[string]Descriptor{}
 	for _, item := range items {
@@ -108,6 +114,9 @@ func TestListDescriptors_IndexesToolsAndMCPServers(t *testing.T) {
 	}
 	if got := byKey["infra_mcp_token"]; got.Present || len(got.RequiredBy) != 1 || got.RequiredBy[0].Kind != "mcp_server" || got.RequiredBy[0].Name != "infra" {
 		t.Fatalf("infra descriptor = %+v", got)
+	}
+	if got := byKey["brave_search_api_key"]; got.Present || len(got.RequiredBy) != 1 || got.RequiredBy[0].Kind != "web_search_provider" || got.RequiredBy[0].Name != "brave" {
+		t.Fatalf("web search descriptor = %+v", got)
 	}
 }
 
