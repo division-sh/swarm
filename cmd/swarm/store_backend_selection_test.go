@@ -162,28 +162,33 @@ func TestServeHelpDocumentsStagedStoreBackends(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("serve --help code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	for _, want := range []string{"Runtime store backend", "postgres (active default)", "sqlite (recognized but unsupported until #1085-#1088)"} {
+	for _, want := range []string{"Runtime store backend", "postgres (active default)", "sqlite (selected core stores; default flip after #1088)"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("serve help missing %q:\n%s", want, stdout.String())
 		}
 	}
 }
 
-func TestBuildStoresRejectsSQLiteBeforeRuntimeSupport(t *testing.T) {
+func TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "dev.db")
-	_, err := buildStores(context.Background(), storebackend.Selection{
+	stores, err := buildStores(context.Background(), storebackend.Selection{
 		Backend:          storebackend.BackendSQLite,
 		BackendSource:    storebackend.SourceFlag,
 		SQLitePath:       path,
 		SQLitePathSource: storebackend.SourceRolloutDefault,
 	}, &config.Config{})
-	if err == nil {
-		t.Fatal("buildStores unexpectedly accepted sqlite before runtime support exists")
+	if err != nil {
+		t.Fatalf("buildStores(sqlite): %v", err)
 	}
-	for _, want := range []string{"SQLite runtime stores are not implemented yet", "#1085-#1088", path} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("error %q missing %q", err.Error(), want)
-		}
+	t.Cleanup(func() { closeDB(stores.SQLDB) })
+	if stores.SQLDB == nil || stores.SchemaBootstrapper == nil || stores.EventStore == nil || stores.ManagerStore == nil || stores.ScheduleStore == nil || stores.MailboxStore == nil || stores.RuntimeIngressStore == nil || stores.IdempotencyStore == nil {
+		t.Fatalf("sqlite store bundle missing selected core owners: %#v", stores)
+	}
+	if stores.Postgres != nil {
+		t.Fatalf("sqlite store bundle Postgres = %#v, want nil", stores.Postgres)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("sqlite runtime store did not create file-backed db at %s: %v", path, err)
 	}
 }
 
