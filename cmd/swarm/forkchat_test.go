@@ -301,6 +301,17 @@ func TestForkChatAPIErrorAndMalformedResultHandling(t *testing.T) {
 			wantCode:   3,
 			wantStderr: "forks is required",
 		},
+		{
+			name: "malformed delete ok false",
+			args: []string{"forkchat", "delete", "fork-1"},
+			handler: func(t *testing.T, w http.ResponseWriter, req jsonRPCRequest) {
+				result := validForkChatDeleteResult("fork-1", false)
+				result["ok"] = false
+				writeJSONRPCResult(t, w, req.ID, result)
+			},
+			wantCode:   3,
+			wantStderr: "ok must be true",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -316,6 +327,66 @@ func TestForkChatAPIErrorAndMalformedResultHandling(t *testing.T) {
 			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), tc.args, &stdout, &stderr, testRootCommandOptions(server))
 			if code != tc.wantCode {
 				t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, tc.wantCode, stdout.String(), stderr.String())
+			}
+			if !strings.Contains(stderr.String(), tc.wantStderr) {
+				t.Fatalf("stderr = %q, want substring %q", stderr.String(), tc.wantStderr)
+			}
+		})
+	}
+}
+
+func TestForkChatRejectsMalformedSnapshotIdentityFields(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	for _, tc := range []struct {
+		name       string
+		mutate     func(map[string]any)
+		wantStderr string
+	}{
+		{
+			name: "fork id",
+			mutate: func(result map[string]any) {
+				result["snapshot"].(map[string]any)["fork_id"] = "bad id!"
+			},
+			wantStderr: "snapshot.fork_id must match OpaqueId pattern",
+		},
+		{
+			name: "source session id",
+			mutate: func(result map[string]any) {
+				result["snapshot"].(map[string]any)["source_session_id"] = "bad id!"
+			},
+			wantStderr: "snapshot.source_session_id must match OpaqueId pattern",
+		},
+		{
+			name: "source run id",
+			mutate: func(result map[string]any) {
+				result["snapshot"].(map[string]any)["source_run_id"] = "bad id!"
+			},
+			wantStderr: "snapshot.source_run_id must match OpaqueId pattern",
+		},
+		{
+			name: "source agent id",
+			mutate: func(result map[string]any) {
+				result["snapshot"].(map[string]any)["source_agent_id"] = "bad id!"
+			},
+			wantStderr: "snapshot.source_agent_id must match OpaqueId pattern",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+					t.Errorf("decode request: %v", err)
+				}
+				result := validForkChatChatResult("fork-1", "fork-turn-1")
+				tc.mutate(result)
+				writeJSONRPCResult(t, w, req.ID, result)
+			}))
+			defer server.Close()
+
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"forkchat", "resume", "fork-1", "--message", "continue"}, &stdout, &stderr, testRootCommandOptions(server))
+			if code != 3 {
+				t.Fatalf("code = %d, want 3 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 			}
 			if !strings.Contains(stderr.String(), tc.wantStderr) {
 				t.Fatalf("stderr = %q, want substring %q", stderr.String(), tc.wantStderr)
