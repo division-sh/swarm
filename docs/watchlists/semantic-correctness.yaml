@@ -160,6 +160,10 @@ active_issues:
     title: Reconcile platform tool bootverify source authority
     maps_to:
       - boot_check_definition_drift
+  - id: 1072
+    title: Reconcile required_agents_match owner and runtime required-agent fulfillment
+    maps_to:
+      - boot_check_definition_drift
 nodes:
   - id: persisted_normal_run_completion_quiescence_owner
     title: Persisted Normal Run Completion/Quiescence Owner
