@@ -1611,62 +1611,79 @@ func TestServeBootReporterEmitsNumberedProgressOnlyWhenVerbose(t *testing.T) {
 	}
 }
 
-func TestServeBundleMatchAdmissionRejectsActiveMismatches(t *testing.T) {
+func TestServeBundleMatchAdmissionRejectsActiveAvailabilityConflicts(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
 	ctx := context.Background()
 	bootFingerprint := "sha256:1111111111111111111111111111111111111111111111111111111111111111"
-	mismatchFingerprint := "sha256:2222222222222222222222222222222222222222222222222222222222222222"
-	runID := uuid.NewString()
+	persistedMissingRunID := uuid.NewString()
+	legacyRunID := uuid.NewString()
 
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_fingerprint, started_at)
-		VALUES ($1::uuid, 'running', $2, now())
-	`, runID, mismatchFingerprint); err != nil {
-		t.Fatalf("seed active mismatched run: %v", err)
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
+		VALUES ($1::uuid, 'running', 'bundle-v1:sha256:2222222222222222222222222222222222222222222222222222222222222222', 'persisted', now())
+	`, persistedMissingRunID); err != nil {
+		t.Fatalf("seed active persisted missing run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, bundle_source, bundle_fingerprint, started_at)
+		VALUES ($1::uuid, 'paused', 'legacy', $2, now())
+	`, legacyRunID, bootFingerprint); err != nil {
+		t.Fatalf("seed active legacy run: %v", err)
 	}
 
 	err := enforceServeBundleMatchAdmission(ctx, pg, bootFingerprint, true)
 	if err == nil {
-		t.Fatal("enforceServeBundleMatchAdmission error = nil, want mismatch")
+		t.Fatal("enforceServeBundleMatchAdmission error = nil, want availability conflict")
 	}
-	if got := err.Error(); !strings.Contains(got, "active run bundle mismatch") || !strings.Contains(got, runID) || !strings.Contains(got, mismatchFingerprint) {
-		t.Fatalf("admission error = %q, want run/fingerprint detail", got)
+	got := err.Error()
+	for _, want := range []string{
+		"active run bundle availability conflict",
+		persistedMissingRunID,
+		"BUNDLE_DATA_INTEGRITY_ERROR",
+		"persisted_missing_bundle_row",
+		legacyRunID,
+		"BUNDLE_UNAVAILABLE",
+		"cause=legacy",
+		"legacy_bundle_fingerprint=" + bootFingerprint,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("admission error = %q, want detail %q", got, want)
+		}
 	}
 }
 
-func TestServeBundleMatchAdmissionAllowsMatchingNullAndDisabled(t *testing.T) {
+func TestServeBundleMatchAdmissionAllowsPersistedPresentAndDisabled(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
 	ctx := context.Background()
 	bootFingerprint := "sha256:1111111111111111111111111111111111111111111111111111111111111111"
-	mismatchFingerprint := "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+	persistedHash := "bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111"
+	missingHash := "bundle-v1:sha256:2222222222222222222222222222222222222222222222222222222222222222"
 
-	for _, seed := range []struct {
-		runID       string
-		status      string
-		fingerprint sql.NullString
-	}{
-		{runID: uuid.NewString(), status: "running", fingerprint: sql.NullString{String: bootFingerprint, Valid: true}},
-		{runID: uuid.NewString(), status: "paused", fingerprint: sql.NullString{}},
-		{runID: uuid.NewString(), status: "completed", fingerprint: sql.NullString{String: mismatchFingerprint, Valid: true}},
-	} {
-		if _, err := db.ExecContext(ctx, `
-			INSERT INTO runs (run_id, status, bundle_fingerprint, started_at)
-			VALUES ($1::uuid, $2, $3, now())
-		`, seed.runID, seed.status, seed.fingerprint); err != nil {
-			t.Fatalf("seed run %s: %v", seed.runID, err)
-		}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json)
+		VALUES ($1, 'name: serve-test', '{}'::jsonb)
+	`, persistedHash); err != nil {
+		t.Fatalf("seed bundle row: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
+		VALUES
+			($1::uuid, 'running', $2, 'persisted', now()),
+			($3::uuid, 'completed', $4, 'persisted', now())
+	`, uuid.NewString(), persistedHash, uuid.NewString(), missingHash); err != nil {
+		t.Fatalf("seed persisted-present and completed-missing runs: %v", err)
 	}
 	if err := enforceServeBundleMatchAdmission(ctx, pg, bootFingerprint, true); err != nil {
-		t.Fatalf("enforceServeBundleMatchAdmission matching/null/completed: %v", err)
+		t.Fatalf("enforceServeBundleMatchAdmission persisted-present/completed-missing: %v", err)
 	}
 
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_fingerprint, started_at)
-		VALUES ($1::uuid, 'running', $2, now())
-	`, uuid.NewString(), mismatchFingerprint); err != nil {
-		t.Fatalf("seed disabled mismatch: %v", err)
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
+		VALUES ($1::uuid, 'running', $2, 'persisted', now())
+	`, uuid.NewString(), missingHash); err != nil {
+		t.Fatalf("seed disabled persisted-missing run: %v", err)
 	}
 	if err := enforceServeBundleMatchAdmission(ctx, pg, bootFingerprint, false); err != nil {
 		t.Fatalf("enforceServeBundleMatchAdmission disabled: %v", err)
