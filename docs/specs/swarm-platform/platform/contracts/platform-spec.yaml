@@ -5453,17 +5453,18 @@ multi_bundle_persistence:
     only. Runtime, API handler, CLI implementation, database migration, and generated OpenRPC publication remain separately
     gated implementation work unless a later PR explicitly promotes and proves them.
   generated_artifact_policy:
-    current_openrpc_status: bundle_read_catalog_methods_published
+    current_openrpc_status: bundle_read_catalog_and_run_fork_methods_published
     rule: >
       Generated openrpc.json is derived from api_specification.method_catalog and must continue to match the currently
       registered /v1/rpc handler set. The read-only bundle.list, bundle.get, and bundle.agents catalog methods are now
-      published because their handlers and store owner are implemented in the same gated PR. Mutating bundle.register,
-      destructive bundle.delete, and run.fork remain source authority only until their API/runtime handlers are implemented
-      and registered in a later gated PR.
+      published because their handlers and store owner are implemented in the same gated PR. run.fork is now published
+      because its selected-contract API/runtime handler owner is implemented in the same gated PR. Mutating bundle.register
+      and destructive bundle.delete remain source authority only until their API/runtime handlers are implemented and
+      registered in a later gated PR.
     proof_expectation: >
-      Source-authority promotion proof must verify that run.fork, bundle.register, and bundle.delete are not silently
-      published in generated OpenRPC without implementation, and that future implementation PRs promote matching
-      method_catalog entries and generated artifacts together.
+      Source-authority promotion proof must verify that bundle.register and bundle.delete are not silently published in
+      generated OpenRPC without implementation, and that future implementation PRs promote matching method_catalog entries
+      and generated artifacts together.
   bundle_identity:
     canonical_name: bundle_hash
     format: 'bundle-v1:sha256:<64 lowercase hex>'
@@ -5714,7 +5715,7 @@ multi_bundle_persistence:
         - containers_stopped
         - dry_run
   api_surface:
-    publication_status: partial_read_catalog_generated_openrpc
+    publication_status: partial_bundle_read_catalog_and_run_fork_generated_openrpc
     command_transport_owner: api_specification
     bundle_methods_planned:
       bundle.list:
@@ -5768,7 +5769,7 @@ multi_bundle_persistence:
         fork_event_id:
           required: false
           cli_flag: --at-event <event-id>
-          meaning: Explicit event selector for the fork point; no ambient current-event heuristic is allowed.
+          meaning: Explicit fork-point event selector. When omitted, the run-fork store owner selects the latest persisted source-run event; no CLI/current-session ambient event is allowed.
         bundle_hash:
           required: false
           cli_flag: --bundle-hash <bundle_hash>
@@ -5848,9 +5849,9 @@ multi_bundle_persistence:
     db_loaded_same_bundle_source:
       tracker: '#1024'
       reason: Same-bundle fork from persisted DB bundle bytes needs a sibling source loader separate from current disk-rooted selected_contracts execution.
-    run_fork_api_runtime_cli:
+    run_fork_cli_consumer:
       tracker: '#989'
-      reason: run.fork method publication, handler behavior, runtime execution, and CLI command implementation remain blocked until source authority lands.
+      reason: run.fork API/runtime/spec owner is promoted in api_specification.method_catalog; downstream swarm fork CLI implementation remains split to #1023.
     multi_bundle_cli_inventory:
       tracker: '#1023'
       reason: Bundle CLI inventory and command implementation remain blocked until source authority and API owners land.
@@ -9752,16 +9753,17 @@ api_specification:
       downgraded to backlog before it can be used as implementation authority.
   multi_bundle_publication_boundary:
     owner: multi_bundle_persistence.api_surface
-    status: partial_bundle_read_catalog_method_catalog
+    status: partial_bundle_read_catalog_and_run_fork_method_catalog
     rule: >
       #1012 promotes the multi-bundle API contract as source authority, including bundle.* methods, run.fork, bundle_hash
       filters, and bundle_hash create-new-work params. The read-only bundle.list, bundle.get, and bundle.agents methods are
-      now in method_catalog/OpenRPC with matching handlers and proof. Remaining multi-bundle methods and shapes are not in
-      method_catalog/OpenRPC until a later gated API/runtime implementation PR registers handlers and regenerates
+      now in method_catalog/OpenRPC with matching handlers and proof. run.fork is also promoted into method_catalog/OpenRPC
+      with matching selected-contract API/runtime handler proof by #989. Remaining multi-bundle methods and shapes are not
+      in method_catalog/OpenRPC until a later gated API/runtime implementation PR registers handlers and regenerates
       openrpc.json/proof artifacts in the same PR. Consumers must not treat docs/MULTI_BUNDLE_PERSISTENCE_DRAFT.md or #1038
       prose as API authority after #1012.
     blocked_children:
-      run_fork_api_runtime_cli: '#989'
+      run_fork_cli_consumer: '#1023'
       multi_bundle_cli_inventory: '#1023'
       cross_bundle_fork: '#976'
       db_loaded_same_bundle_source: '#1024'
@@ -10049,6 +10051,7 @@ api_specification:
       mutating_methods:
       - event.publish
       - event.replay
+      - run.fork
       - agent.replay
       - run.start
       - run.stop
@@ -10767,6 +10770,34 @@ api_specification:
             description: Fresh delivery rows created for replay_event_id. Each row carries source_delivery_id lineage to the original delivery.
             items:
               $ref: '#/components/schemas/EventReplayDelivery'
+      RunForkResult:
+        type: object
+        additionalProperties: false
+        required:
+        - owner
+        - source_run_id
+        - fork_run_id
+        - fork_event_id
+        - fork_run_status
+        - bundle_hash
+        - executed_event_count
+        properties:
+          owner:
+            type: string
+            description: Canonical runtime/store owner that executed the selected-contract fork.
+          source_run_id:
+            $ref: '#/components/schemas/OpaqueId'
+          fork_run_id:
+            $ref: '#/components/schemas/OpaqueId'
+          fork_event_id:
+            $ref: '#/components/schemas/OpaqueId'
+          fork_run_status:
+            $ref: '#/components/schemas/RunStatus'
+          bundle_hash:
+            $ref: '#/components/schemas/BundleHash'
+          executed_event_count:
+            type: integer
+            minimum: 0
       AgentReplayResult:
         type: object
         additionalProperties: false
@@ -12506,11 +12537,59 @@ api_specification:
         properties:
           bundle_hash:
             $ref: '#/components/schemas/BundleHash'
+      BUNDLE_UNAVAILABLE:
+        type: object
+        additionalProperties: false
+        properties:
+          run_id:
+            $ref: '#/components/schemas/OpaqueId'
+          status:
+            type: string
+          bundle_hash:
+            $ref: '#/components/schemas/BundleHash'
+          bundle_source:
+            type: string
+          legacy_bundle_fingerprint:
+            $ref: '#/components/schemas/Sha256Fingerprint'
+          cause:
+            type: string
+      BUNDLE_DATA_INTEGRITY_ERROR:
+        type: object
+        additionalProperties: false
+        properties:
+          run_id:
+            $ref: '#/components/schemas/OpaqueId'
+          status:
+            type: string
+          bundle_hash:
+            $ref: '#/components/schemas/BundleHash'
+          bundle_source:
+            type: string
+          legacy_bundle_fingerprint:
+            $ref: '#/components/schemas/Sha256Fingerprint'
+          cause:
+            type: string
       UNSUPPORTED_BUNDLE_HASH:
         type: object
         additionalProperties: false
         properties:
           reason:
+            type: string
+      UNSUPPORTED_BUNDLE_HASH_FORK:
+        type: object
+        additionalProperties: false
+        properties:
+          source_run_id:
+            $ref: '#/components/schemas/OpaqueId'
+          source_bundle_hash:
+            $ref: '#/components/schemas/BundleHash'
+          requested_hash:
+            $ref: '#/components/schemas/BundleHash'
+          tracked_follow_up:
+            type: string
+          unsupported_reason:
+            type: string
+          supported_selector:
             type: string
       UNSUPPORTED_BUNDLE_REF:
         type: object
@@ -13255,6 +13334,45 @@ api_specification:
       - EVENT_NOT_DECLARED
       - EVENT_PUBLISH_FAILED
       - PAYLOAD_VALIDATION_FAILED
+      - IDEMPOTENCY_CONFLICT
+    run.fork:
+      tier: should_have
+      description: "Public selected-contract run fork mutation.\n\nCreates and executes a same-bundle selected-contract fork from a source run. The method consumes source bundle availability from runs.bundle_source / runs.bundle_hash and bundle-row presence before any fork mutation. Source runs whose canonical bundle bytes are unavailable fail closed with BUNDLE_UNAVAILABLE; persisted source rows with missing bundle data fail with BUNDLE_DATA_INTEGRITY_ERROR. The selected-contract execution path consumes the existing store/runtime run_fork selected_contracts owners and must not infer source identity from legacy bundle_fingerprint, bundle_ref, null-collapse, or local filesystem heuristics.\n\nIf bundle_hash is omitted, the source run's canonical bundle_hash is used. If bundle_hash is supplied and equals the source run bundle_hash, the same-bundle selected_contracts fork may proceed. If bundle_hash differs, the method fails closed with UNSUPPORTED_BUNDLE_HASH_FORK; cross-bundle fork routing remains split to #976. Same-bundle DB-loaded source execution remains split to #1024; this method does not promote a DB bundle source loader. swarm fork CLI implementation remains split to #1023 and must consume this method rather than runtime/store helpers.\n"
+      scope:
+        required:
+        - write:runs
+      idempotency: per the convention.
+      params:
+      - name: source_run_id
+        required: true
+        description: Source run to fork from.
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      - name: fork_event_id
+        required: false
+        description: Optional explicit fork-point event id in source_run_id. When omitted, the run-fork store owner selects the latest persisted source-run event; no CLI/current-session ambient event is allowed.
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      - name: bundle_hash
+        required: false
+        description: "Optional same-bundle selector. Must equal the source run's canonical bundle_hash; differing values fail with UNSUPPORTED_BUNDLE_HASH_FORK until #976."
+        schema:
+          $ref: '#/components/schemas/BundleHash'
+      - name: idempotency_key
+        required: false
+        schema:
+          type: string
+      result:
+        name: result
+        required: true
+        schema:
+          $ref: '#/components/schemas/RunForkResult'
+      errors:
+      - BUNDLE_UNAVAILABLE
+      - BUNDLE_DATA_INTEGRITY_ERROR
+      - UNSUPPORTED_BUNDLE_HASH_FORK
+      - RUN_NOT_FOUND
+      - EVENT_NOT_FOUND
       - IDEMPOTENCY_CONFLICT
     run.stop:
       tier: must_have
@@ -14935,9 +15053,9 @@ api_specification:
       rationale: >
         Legacy dynamic bundle.open/reload/close remains deferred and is not the multi-bundle public API. #1012 promotes the
         authoritative multi-bundle source model under multi_bundle_persistence, with planned bundle.list/get/agents/register/delete,
-        run.fork, and bundle_hash create-new-work semantics. The read-only bundle.list/get/agents catalog methods are now
-        published in method_catalog/OpenRPC with handlers; bundle.register/delete and run.fork remain withheld until their
-        gated API/runtime implementation lands. Existing bundle_ref/bundle_fingerprint
+        run.fork, and bundle_hash create-new-work semantics. The read-only bundle.list/get/agents catalog methods and
+        run.fork are now published in method_catalog/OpenRPC with handlers; bundle.register/delete remain withheld until
+        their gated API/runtime implementation lands. Existing bundle_ref/bundle_fingerprint
         language is migration evidence only after the #1001 bundle_hash decision.
     verify:
       methods:

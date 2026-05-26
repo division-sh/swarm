@@ -24,6 +24,7 @@ import (
 	runtimeruncontrol "swarm/internal/runtime/runcontrol"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/store"
+	"swarm/internal/store/runbundle"
 )
 
 const mutatingRuntimeProbeTestName = "TestOpenRPCMutatingHTTPRuntimeProbes"
@@ -227,6 +228,7 @@ func approvedMutatingHTTPRuntimeMethods() []string {
 		"mailbox.defer",
 		"mailbox.reject",
 		"run.continue",
+		"run.fork",
 		"run.pause",
 		"run.start",
 		"run.stop",
@@ -322,6 +324,12 @@ func mutatingHTTPRuntimeFixtures() map[string]mutatingHTTPRuntimeFixture {
 			Params:         map[string]any{"mailbox_id": "mailbox-1", "reason": "not enough evidence"},
 			ConflictParams: map[string]any{"mailbox_id": "mailbox-1", "reason": "duplicate request"},
 			ResultKeys:     []string{"ok", "mailbox_decision_id", "status", "idempotency_replayed"},
+			SuccessEffects: 1,
+		},
+		"run.fork": {
+			Params:         map[string]any{"source_run_id": runID, "fork_event_id": runForkTestEventID},
+			ConflictParams: map[string]any{"source_run_id": otherRunID, "fork_event_id": runForkTestEventID},
+			ResultKeys:     []string{"owner", "source_run_id", "fork_run_id", "fork_event_id", "fork_run_status", "bundle_hash", "executed_event_count"},
 			SuccessEffects: 1,
 		},
 		"run.continue": {
@@ -437,6 +445,18 @@ func mutatingHTTPRuntimeErrorProbes() []mutatingHTTPRuntimeErrorProbe {
 		}}},
 		{Method: "conversation.fork_delete", Params: map[string]any{"fork_id": forkID, "idempotency_key": "idem-error"}, Code: ForkNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
 			s.forks.deleteErr = store.ErrConversationForkNotFound
+		}}},
+
+		{Method: "run.fork", Params: map[string]any{"source_run_id": missingRunID, "fork_event_id": runForkTestEventID, "idempotency_key": "idem-error"}, Code: RunNotFoundCode},
+		{Method: "run.fork", Params: map[string]any{"source_run_id": runForkTestSourceRunID, "fork_event_id": runForkTestEventID, "idempotency_key": "idem-error"}, Code: EventNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.runFork.err = errors.New("fork point event " + runForkTestEventID + " not found in source run " + runForkTestSourceRunID)
+		}}},
+		{Method: "run.fork", Params: map[string]any{"source_run_id": runForkTestSourceRunID, "fork_event_id": runForkTestEventID, "bundle_hash": "bundle-v1:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "idempotency_key": "idem-error"}, Code: UnsupportedBundleHashForkCode},
+		{Method: "run.fork", Params: map[string]any{"source_run_id": runForkTestSourceRunID, "fork_event_id": runForkTestEventID, "idempotency_key": "idem-error"}, Code: BundleUnavailableCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.runForkAvailability.rows[runForkTestSourceRunID] = runForkUnavailable(runForkTestSourceRunID, runForkTestBundleHash, "legacy")
+		}}},
+		{Method: "run.fork", Params: map[string]any{"source_run_id": runForkTestSourceRunID, "fork_event_id": runForkTestEventID, "idempotency_key": "idem-error"}, Code: BundleDataIntegrityErrorCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.runForkAvailability.rows[runForkTestSourceRunID] = runForkDataIntegrity(runForkTestSourceRunID, runForkTestBundleHash)
 		}}},
 
 		{Method: "run.start", Params: mergeProbeParams(canonicalEvent, map[string]any{"run_id": runID}), Code: UnsupportedBundleHashCode},
@@ -609,25 +629,28 @@ func newMutatingRuntimeProbeHandler(t *testing.T, methodName string, modifiers .
 }
 
 type mutatingRuntimeProbeState struct {
-	method         string
-	now            time.Time
-	idempotency    *mutatingProbeIdempotencyStore
-	runs           *fakeRunReadStore
-	observability  *fakeObservabilityReadStore
-	events         *mutatingProbeEventPublisher
-	runControl     *mutatingProbeRunControl
-	agentControl   *mutatingProbeAgentControl
-	runtimeIngress *mutatingProbeRuntimeIngress
-	mailbox        *mutatingProbeMailboxStore
-	forks          *fakeConversationForkLifecycleStore
-	nuke           *recordingRuntimeNukeOwners
-	effects        int
+	method              string
+	now                 time.Time
+	idempotency         *mutatingProbeIdempotencyStore
+	runs                *fakeRunReadStore
+	observability       *fakeObservabilityReadStore
+	events              *mutatingProbeEventPublisher
+	runFork             *mutatingProbeRunForkExecutor
+	runForkAvailability *recordingRunForkAvailability
+	runControl          *mutatingProbeRunControl
+	agentControl        *mutatingProbeAgentControl
+	runtimeIngress      *mutatingProbeRuntimeIngress
+	mailbox             *mutatingProbeMailboxStore
+	forks               *fakeConversationForkLifecycleStore
+	nuke                *recordingRuntimeNukeOwners
+	effects             int
 }
 
 func newMutatingRuntimeProbeState(t *testing.T, methodName string) *mutatingRuntimeProbeState {
 	t.Helper()
 	now := time.Unix(1700000000, 0).UTC()
 	runID := "00000000-0000-0000-0000-000000000101"
+	otherRunID := "00000000-0000-0000-0000-000000000102"
 	state := &mutatingRuntimeProbeState{
 		method:      methodName,
 		now:         now,
@@ -647,6 +670,14 @@ func newMutatingRuntimeProbeState(t *testing.T, methodName string) *mutatingRunt
 	}
 	state.observability.events["evt-1"] = mutatingProbeOriginalEvent("evt-1", []string{"agent-a"}, eventReplayStatusDelivered)
 	state.events = &mutatingProbeEventPublisher{state: state}
+	state.runFork = &mutatingProbeRunForkExecutor{state: state}
+	state.runForkAvailability = &recordingRunForkAvailability{
+		rows: map[string]runbundle.Availability{
+			runID:                  runForkAvailable(runID, runForkTestBundleHash),
+			otherRunID:             runForkAvailable(otherRunID, runForkTestBundleHash),
+			runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, runForkTestBundleHash),
+		},
+	}
 	state.runControl.state = state
 	state.agentControl.state = state
 	state.runtimeIngress.state = state
@@ -766,6 +797,8 @@ func (s *mutatingRuntimeProbeState) options(t *testing.T) OperatorReadOptions {
 		Mailbox:               s.mailbox,
 		Idempotency:           s.idempotency,
 		Events:                s.events,
+		RunForkAvailability:   s.runForkAvailability,
+		RunFork:               s.runFork,
 		RunControl:            s.runControl,
 		RuntimeIngress:        s.runtimeIngress,
 		ResetCoordinator:      s.nuke,
@@ -890,6 +923,27 @@ func (p *mutatingProbeEventPublisher) CheckDirectRecipients(_ context.Context, _
 	}
 	status.Recipients = append([]string(nil), recipients...)
 	return status, nil
+}
+
+type mutatingProbeRunForkExecutor struct {
+	state *mutatingRuntimeProbeState
+	err   error
+}
+
+func (e *mutatingProbeRunForkExecutor) ExecuteRunFork(_ context.Context, req RunForkExecutionRequest) (RunForkExecutionResult, error) {
+	if e.err != nil {
+		return RunForkExecutionResult{}, e.err
+	}
+	e.state.recordEffect()
+	return RunForkExecutionResult{
+		Owner:              "runtime.run_fork.selected_contract_execution",
+		SourceRunID:        strings.TrimSpace(req.SourceRunID),
+		ForkRunID:          runForkTestForkRunID,
+		ForkEventID:        strings.TrimSpace(req.ForkEventID),
+		ForkRunStatus:      "running",
+		BundleHash:         strings.TrimSpace(req.BundleHash),
+		ExecutedEventCount: 1,
+	}, nil
 }
 
 func (s *mutatingRuntimeProbeState) storeEvent(evt events.Event, deliveries []store.OperatorEventDelivery) {
