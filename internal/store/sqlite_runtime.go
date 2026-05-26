@@ -356,11 +356,11 @@ func (s *SQLiteRuntimeStore) UpsertEventReceipt(context.Context, string, string,
 }
 
 func (s *SQLiteRuntimeStore) ListPendingEventsForAgent(context.Context, string, time.Time, int) ([]events.Event, error) {
-	return nil, nil
+	return nil, fmt.Errorf("sqlite event backlog replay queries are split to #1087")
 }
 
 func (s *SQLiteRuntimeStore) ListPendingSubscribedEvents(context.Context, string, []events.EventType, time.Time, int) ([]events.Event, error) {
-	return nil, nil
+	return nil, fmt.Errorf("sqlite event backlog replay queries are split to #1087")
 }
 
 func (s *SQLiteRuntimeStore) EnsureRuntimeIngressState(ctx context.Context, now time.Time) (runtimeingress.State, error) {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -231,6 +232,73 @@ func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 	})
 	if !errors.Is(err, ErrAPIIdempotencyConflict) {
 		t.Fatalf("idempotency conflict err = %v, want ErrAPIIdempotencyConflict", err)
+	}
+}
+
+func TestSQLiteRuntimeStoreReplayBacklogQueriesFailClosed(t *testing.T) {
+	ctx := context.Background()
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+
+	if _, err := store.ListPendingEventsForAgent(ctx, "agent-1", time.Now().Add(-time.Hour), 10); err == nil || !strings.Contains(err.Error(), "split to #1087") {
+		t.Fatalf("ListPendingEventsForAgent error = %v, want explicit #1087 split", err)
+	}
+	if _, err := store.ListPendingSubscribedEvents(ctx, "agent-1", []events.EventType{"test.*"}, time.Now().Add(-time.Hour), 10); err == nil || !strings.Contains(err.Error(), "split to #1087") {
+		t.Fatalf("ListPendingSubscribedEvents error = %v, want explicit #1087 split", err)
+	}
+}
+
+func TestSQLiteRuntimeStoreClaimScheduleRequiresActiveRow(t *testing.T) {
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	runID := uuid.NewString()
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	if _, err := store.DB.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, bundle_source, started_at)
+		VALUES (?, 'running', 'legacy', ?)
+	`, runID, time.Now().UTC()); err != nil {
+		t.Fatalf("seed sqlite run row: %v", err)
+	}
+	schedule := runtimepipeline.Schedule{
+		RunID:     runID,
+		AgentID:   "agent-1",
+		EventType: "timer.fired",
+		Mode:      "once",
+		At:        time.Now().UTC().Add(time.Hour),
+		TaskID:    "task-claim",
+		Payload:   json.RawMessage(`{"__schedule_task_id":"task-claim"}`),
+	}
+
+	if err := store.UpsertSchedule(ctx, schedule); err != nil {
+		t.Fatalf("UpsertSchedule: %v", err)
+	}
+	claimed, err := store.ClaimSchedule(ctx, schedule)
+	if err != nil {
+		t.Fatalf("ClaimSchedule active: %v", err)
+	}
+	if !claimed {
+		t.Fatal("ClaimSchedule active = false, want true")
+	}
+	if err := store.CancelScheduleExact(ctx, schedule); err != nil {
+		t.Fatalf("CancelScheduleExact: %v", err)
+	}
+	claimed, err = store.ClaimSchedule(ctx, schedule)
+	if err != nil {
+		t.Fatalf("ClaimSchedule cancelled: %v", err)
+	}
+	if claimed {
+		t.Fatal("ClaimSchedule cancelled = true, want false")
+	}
+	if err := store.UpsertSchedule(ctx, schedule); err != nil {
+		t.Fatalf("UpsertSchedule after cancel: %v", err)
+	}
+	if err := store.MarkScheduleFiredExact(ctx, schedule); err != nil {
+		t.Fatalf("MarkScheduleFiredExact: %v", err)
+	}
+	claimed, err = store.ClaimSchedule(ctx, schedule)
+	if err != nil {
+		t.Fatalf("ClaimSchedule fired: %v", err)
+	}
+	if claimed {
+		t.Fatal("ClaimSchedule fired = true, want false")
 	}
 }
 

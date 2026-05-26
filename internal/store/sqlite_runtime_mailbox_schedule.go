@@ -331,8 +331,29 @@ func (s *SQLiteRuntimeStore) CompleteScheduleFireExact(ctx context.Context, sc r
 	return s.MarkScheduleFiredExact(ctx, sc)
 }
 
-func (s *SQLiteRuntimeStore) ClaimSchedule(context.Context, runtimepipeline.Schedule) (bool, error) {
-	return true, nil
+func (s *SQLiteRuntimeStore) ClaimSchedule(ctx context.Context, sc runtimepipeline.Schedule) (bool, error) {
+	sc = scheduleWithContextRunID(ctx, sc)
+	sc.NormalizeRunID()
+	sc.NormalizeEntityID()
+	sc.NormalizeFlowInstance()
+	var active bool
+	err := s.DB.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM timers
+			WHERE COALESCE(run_id, '') = COALESCE(?, '')
+			  AND owner_agent = ?
+			  AND fire_event = ?
+			  AND COALESCE(entity_id, '') = COALESCE(?, '')
+			  AND COALESCE(flow_instance, '') = COALESCE(?, '')
+			  AND COALESCE(json_extract(fire_payload, '$.__schedule_task_id'), '') = ?
+			  AND status = 'active'
+		)
+	`, sqliteNullUUID(sc.RunID), sc.AgentID, sc.EventType, sqliteNullUUID(sc.EntityID), sqliteNullString(sc.FlowInstance), strings.TrimSpace(sc.TaskID)).Scan(&active)
+	if err != nil {
+		return false, fmt.Errorf("claim sqlite schedule ownership: %w", err)
+	}
+	return active, nil
 }
 
 func (s *SQLiteRuntimeStore) ReleaseSchedule(context.Context, runtimepipeline.Schedule) error {
