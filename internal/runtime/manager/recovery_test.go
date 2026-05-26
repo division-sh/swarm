@@ -368,6 +368,7 @@ func TestRecover_UsesCanonicalLoadedAgentMetadata(t *testing.T) {
 				ModelTier:        "sonnet",
 				LLMBackend:       "api",
 				ConversationMode: "session_per_entity",
+				SessionScope:     "entity",
 				Subscriptions:    []string{"review.ready"},
 				EmitEvents:       []string{"review.completed"},
 				WorkspaceClass:   "shared_flow",

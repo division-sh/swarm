@@ -766,13 +766,14 @@ func TestAnthropicAPIRuntime_ContinueSessionReMarksInboundDeliveryForReusedSessi
 
 	ctx := runtimeactors.WithActor(
 		runtimebus.WithInboundEvent(
-			sessions.WithScope(context.Background(), sessions.RuntimeModeSession.String(), sessions.SessionScopeGlobal.String(), "global"),
+			sessions.WithScope(context.Background(), sessions.RuntimeModeSession.String(), sessions.SessionScopeFlow.String(), "support/inst-1"),
 			events.Event{ID: "evt-1"},
 		),
 		runtimeactors.AgentConfig{
 			ID:           "agent-1",
 			ModelTier:    "sonnet",
-			SessionScope: sessions.SessionScopeGlobal.String(),
+			SessionScope: sessions.SessionScopeFlow.String(),
+			FlowPath:     "support/inst-1",
 		},
 	)
 
@@ -807,13 +808,14 @@ func TestAnthropicAPIRuntime_ContinueSessionFailsClosedWhenDeliveryRestampFails(
 	}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, publisher)
 	ctx := runtimeactors.WithActor(
 		runtimebus.WithInboundEvent(
-			sessions.WithScope(context.Background(), sessions.RuntimeModeSession.String(), sessions.SessionScopeGlobal.String(), "global"),
+			sessions.WithScope(context.Background(), sessions.RuntimeModeSession.String(), sessions.SessionScopeFlow.String(), "support/inst-1"),
 			events.Event{ID: "evt-1"},
 		),
 		runtimeactors.AgentConfig{
 			ID:           "agent-1",
 			ModelTier:    "sonnet",
-			SessionScope: sessions.SessionScopeGlobal.String(),
+			SessionScope: sessions.SessionScopeFlow.String(),
+			FlowPath:     "support/inst-1",
 		},
 	)
 
@@ -841,13 +843,14 @@ func TestClaudeCLIRuntime_ContinueSessionFailsClosedWhenDeliveryRestampFails(t *
 	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil, publisher)
 	ctx := runtimeactors.WithActor(
 		runtimebus.WithInboundEvent(
-			sessions.WithScope(context.Background(), sessions.RuntimeModeSession.String(), sessions.SessionScopeGlobal.String(), "global"),
+			sessions.WithScope(context.Background(), sessions.RuntimeModeSession.String(), sessions.SessionScopeFlow.String(), "support/inst-1"),
 			events.Event{ID: "evt-1"},
 		),
 		runtimeactors.AgentConfig{
 			ID:           "agent-1",
 			ModelTier:    "sonnet",
-			SessionScope: sessions.SessionScopeGlobal.String(),
+			SessionScope: sessions.SessionScopeFlow.String(),
+			FlowPath:     "support/inst-1",
 		},
 	)
 

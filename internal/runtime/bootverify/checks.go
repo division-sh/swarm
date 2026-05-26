@@ -803,7 +803,7 @@ func appendAgentSessionScopeFindings(findings []Finding, source semanticview.Sou
 	if err != nil {
 		return findings
 	}
-	sessionScope, err := sessions.ValidateSessionScopeIntent(mode, agent.SessionScope)
+	sessionScope, err := sessions.ValidateAuthoredSessionScopeIntent(mode, agent.SessionScope)
 	if err != nil {
 		return append(findings, Finding{
 			CheckID:  "invalid_field_detection",

@@ -47,15 +47,23 @@ func TestResolveScope_SessionUsesExplicitIntent(t *testing.T) {
 		t.Fatalf("unexpected flow scope: %+v", flowScope)
 	}
 
-	globalCtx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{
-		ID: "global-agent",
-	})
-	globalScope, err := ResolveScope(globalCtx, RuntimeModeSession, SessionScopeGlobal, "")
+	globalScope, err := ResolveScope(context.Background(), RuntimeModeSession, SessionScopeGlobal, "")
 	if err != nil {
-		t.Fatalf("ResolveScope(global session): %v", err)
+		t.Fatalf("ResolveScope(internal global session): %v", err)
 	}
 	if globalScope.Scope != "global" || globalScope.ScopeKey != "global" {
 		t.Fatalf("unexpected global scope: %+v", globalScope)
+	}
+}
+
+func TestResolveScope_RejectsAuthoredGlobalSessionScope(t *testing.T) {
+	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{ID: "global-agent", Role: "worker"})
+	_, err := ResolveScope(ctx, RuntimeModeSession, SessionScopeGlobal, "")
+	if err == nil {
+		t.Fatal("expected authored global session scope to fail")
+	}
+	if got := err.Error(); got != authoredGlobalSessionScopeError {
+		t.Fatalf("ResolveScope error = %q", got)
 	}
 }
 
@@ -83,6 +91,21 @@ func TestValidateAgentSessionScopeConfig_RejectsInvalidConversationMode(t *testi
 		t.Fatal("expected invalid conversation mode to fail")
 	}
 	if got := err.Error(); got != `invalid conversation mode "nonsense"` {
+		t.Fatalf("ValidateAgentSessionScopeConfig error = %q", got)
+	}
+}
+
+func TestValidateAgentSessionScopeConfig_RejectsAuthoredGlobalSessionScope(t *testing.T) {
+	_, err := ValidateAgentSessionScopeConfig(runtimeactors.AgentConfig{
+		ID:               "agent-global",
+		Role:             "worker",
+		ConversationMode: RuntimeModeSession.String(),
+		SessionScope:     SessionScopeGlobal.String(),
+	})
+	if err == nil {
+		t.Fatal("expected authored global session scope to fail")
+	}
+	if got := err.Error(); got != authoredGlobalSessionScopeError {
 		t.Fatalf("ValidateAgentSessionScopeConfig error = %q", got)
 	}
 }

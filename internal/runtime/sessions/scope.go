@@ -34,6 +34,8 @@ const (
 
 func (s SessionScope) String() string { return string(s) }
 
+const authoredGlobalSessionScopeError = "authored normal agents cannot declare session_scope global; platform-owned global sessions are internal runtime state"
+
 type ScopeContext struct {
 	ConversationMode string
 	SessionScope     string
@@ -173,7 +175,7 @@ func ValidateSessionScopeIntent(runtimeMode RuntimeMode, sessionScope string) (S
 		if scope != SessionScopeEntity {
 			switch scope {
 			case SessionScopeGlobal:
-				return "", fmt.Errorf("session_per_entity does not support global scope; use session with session_scope: global")
+				return "", fmt.Errorf("session_per_entity does not support global scope")
 			case SessionScopeFlow:
 				return "", fmt.Errorf("session_per_entity does not support flow scope; use session with session_scope: flow")
 			default:
@@ -186,6 +188,24 @@ func ValidateSessionScopeIntent(runtimeMode RuntimeMode, sessionScope string) (S
 	}
 }
 
+// ValidateAuthoredSessionScopeIntent applies the product-authored agent boundary
+// on top of the lower-level runtime scope model. The low-level model still
+// retains global sessions for internal/platform and historical persisted rows.
+func ValidateAuthoredSessionScopeIntent(runtimeMode RuntimeMode, sessionScope string) (SessionScope, error) {
+	sessionScope = strings.TrimSpace(sessionScope)
+	if runtimeMode == RuntimeModeSession && sessionScope == "" {
+		return "", fmt.Errorf("session mode requires explicit session_scope flow; session_scope global is reserved for platform-owned system services")
+	}
+	scope, err := ValidateSessionScopeIntent(runtimeMode, sessionScope)
+	if err != nil {
+		return "", err
+	}
+	if runtimeMode == RuntimeModeSession && scope == SessionScopeGlobal {
+		return "", fmt.Errorf(authoredGlobalSessionScopeError)
+	}
+	return scope, nil
+}
+
 func ValidateAgentSessionScopeConfig(actor runtimeactors.AgentConfig) (SessionScope, error) {
 	runtimeMode := RuntimeModeTask
 	if rawMode := strings.TrimSpace(actor.ConversationMode); rawMode != "" {
@@ -195,7 +215,7 @@ func ValidateAgentSessionScopeConfig(actor runtimeactors.AgentConfig) (SessionSc
 		}
 		runtimeMode = parsedMode
 	}
-	sessionScope, err := ValidateSessionScopeIntent(runtimeMode, actor.SessionScope)
+	sessionScope, err := ValidateAuthoredSessionScopeIntent(runtimeMode, actor.SessionScope)
 	if err != nil {
 		return "", err
 	}
@@ -241,12 +261,16 @@ func DeclaredScopeKey(actor runtimeactors.AgentConfig) (string, error) {
 
 func ResolveScope(ctx context.Context, runtimeMode RuntimeMode, sessionScope SessionScope, scopeKey string) (ResolvedScope, error) {
 	mode := runtimeMode
-	resolvedScope, err := ValidateSessionScopeIntent(mode, sessionScope.String())
+	actor, actorOK := runtimeactors.ActorFromContext(ctx)
+	validateIntent := ValidateSessionScopeIntent
+	if actorOK {
+		validateIntent = ValidateAuthoredSessionScopeIntent
+	}
+	resolvedScope, err := validateIntent(mode, sessionScope.String())
 	if err != nil {
 		return ResolvedScope{}, err
 	}
 	scopeKey = strings.TrimSpace(scopeKey)
-	actor, _ := runtimeactors.ActorFromContext(ctx)
 	flowPath := actor.CanonicalFlowPath()
 
 	out := ResolvedScope{
@@ -303,7 +327,7 @@ func ResolveScope(ctx context.Context, runtimeMode RuntimeMode, sessionScope Ses
 				return ResolvedScope{}, fmt.Errorf("session_scope flow requires actor flow path")
 			}
 		default:
-			return ResolvedScope{}, fmt.Errorf("session mode requires explicit session_scope (global or flow)")
+			return ResolvedScope{}, fmt.Errorf("session mode requires explicit session_scope")
 		}
 	}
 

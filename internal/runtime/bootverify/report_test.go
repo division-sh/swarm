@@ -2035,15 +2035,7 @@ entity-agent:
 }
 
 func TestRun_AcceptsExplicitSessionScopeDeclarations(t *testing.T) {
-	root := writeSessionScopeValidationFixture(t, `
-root-global:
-  id: root-global
-  model_tier: sonnet
-  conversation_mode: session
-  session_scope: global
-  subscriptions:
-    - item.created
-`, `
+	root := writeSessionScopeValidationFixture(t, "{}\n", `
 name: support
 initial_state: waiting
 states:
@@ -2072,6 +2064,24 @@ entity-agent:
 		if finding.CheckID == "invalid_field_detection" && strings.Contains(finding.Message, "session_scope") {
 			t.Fatalf("unexpected session_scope error: %#v", report.Errors())
 		}
+	}
+}
+
+func TestRun_RejectsAuthoredGlobalSessionScope(t *testing.T) {
+	root := writeSessionScopeValidationFixture(t, `
+root-global:
+  id: root-global
+  model_tier: sonnet
+  conversation_mode: session
+  session_scope: global
+  subscriptions:
+    - item.created
+`, "", "")
+
+	report := Run(context.Background(), loadSessionScopeValidationFixture(t, root), Options{})
+
+	if !reportContains(report.Errors(), "invalid_field_detection", "authored normal agents cannot declare session_scope global") {
+		t.Fatalf("expected authored global session_scope error, got %#v", report.Errors())
 	}
 }
 

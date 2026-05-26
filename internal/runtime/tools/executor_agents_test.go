@@ -10,6 +10,7 @@ import (
 	runtimecontracts "swarm/internal/runtime/contracts"
 	models "swarm/internal/runtime/core/actors"
 	"swarm/internal/runtime/semanticview"
+	runtimesessions "swarm/internal/runtime/sessions"
 )
 
 type managerStub struct {
@@ -367,6 +368,47 @@ func TestExecAgentHire_AllowsDelegablePrivileges(t *testing.T) {
 	}
 }
 
+func TestExecAgentHire_RejectsAuthoredGlobalSessionScope(t *testing.T) {
+	t.Parallel()
+
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"manager": {ID: "manager", Role: "manager"},
+			"worker":  {ID: "worker", Role: "worker", ManagerFallback: "manager"},
+		},
+	})
+	manager := &captureManagerStub{}
+	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+		Manager:           manager,
+		AuthorityProvider: runtimeauthority.NewSourceProvider(source),
+		WorkflowSource:    source,
+	})
+
+	_, err := exec.ExecAgentHireDirect(models.AgentConfig{
+		ID:          "manager-1",
+		Role:        "manager",
+		Permissions: []string{"agent_hire"},
+		FlowPath:    "review/inst-1",
+	}, map[string]any{
+		"config": map[string]any{
+			"id":                "worker-1",
+			"role":              "worker",
+			"manager_fallback":  "manager",
+			"conversation_mode": runtimesessions.RuntimeModeSession.String(),
+			"session_scope":     runtimesessions.SessionScopeGlobal.String(),
+		},
+	})
+	if err == nil {
+		t.Fatal("expected authored global session scope hire to be denied")
+	}
+	if !strings.Contains(err.Error(), "authored normal agents cannot declare session_scope global") {
+		t.Fatalf("error = %q, want authored global session scope denial", err.Error())
+	}
+	if manager.spawnCalled {
+		t.Fatal("expected denied hire to fail closed before spawning")
+	}
+}
+
 func TestExecAgentReconfigure_DeniesNativeToolEscalation(t *testing.T) {
 	t.Parallel()
 
@@ -410,6 +452,55 @@ func TestExecAgentReconfigure_DeniesNativeToolEscalation(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "delegated native_tools.bash") {
 		t.Fatalf("error = %q, want delegated native tool denial", err.Error())
+	}
+	if manager.reconfigureCalled {
+		t.Fatal("expected denied reconfigure to fail closed before persistence")
+	}
+}
+
+func TestExecAgentReconfigure_RejectsAuthoredGlobalSessionScope(t *testing.T) {
+	t.Parallel()
+
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"manager": {ID: "manager", Role: "manager"},
+			"worker":  {ID: "worker", Role: "worker", ManagerFallback: "manager"},
+		},
+	})
+	manager := &captureManagerStub{
+		agents: map[string]models.AgentConfig{
+			"worker-1": {
+				ID:               "worker-1",
+				Role:             "worker",
+				ManagerFallback:  "manager",
+				ConversationMode: runtimesessions.RuntimeModeSession.String(),
+				SessionScope:     runtimesessions.SessionScopeFlow.String(),
+				FlowPath:         "review/inst-1",
+			},
+		},
+	}
+	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+		Manager:           manager,
+		AuthorityProvider: runtimeauthority.NewSourceProvider(source),
+		WorkflowSource:    source,
+	})
+
+	_, err := exec.ExecAgentReconfigureDirect(models.AgentConfig{
+		ID:          "manager-1",
+		Role:        "manager",
+		Permissions: []string{"agent_reconfigure"},
+		FlowPath:    "review/inst-1",
+	}, map[string]any{
+		"agent_id": "worker-1",
+		"config": map[string]any{
+			"session_scope": runtimesessions.SessionScopeGlobal.String(),
+		},
+	})
+	if err == nil {
+		t.Fatal("expected authored global session scope reconfigure to be denied")
+	}
+	if !strings.Contains(err.Error(), "authored normal agents cannot declare session_scope global") {
+		t.Fatalf("error = %q, want authored global session scope denial", err.Error())
 	}
 	if manager.reconfigureCalled {
 		t.Fatal("expected denied reconfigure to fail closed before persistence")

@@ -13,6 +13,7 @@ import (
 	runtimeauthority "swarm/internal/runtime/authority"
 	models "swarm/internal/runtime/core/actors"
 	runtimecorrelation "swarm/internal/runtime/correlation"
+	runtimesessions "swarm/internal/runtime/sessions"
 )
 
 func (e *Executor) execAgentMessage(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
@@ -246,6 +247,9 @@ func (e *Executor) execAgentHire(actor models.AgentConfig, input any) (any, erro
 	if in.Config.Mode == "" {
 		in.Config.Mode = coalesce(actor.Mode, "entity")
 	}
+	if _, err := runtimesessions.ValidateAgentSessionScopeConfig(in.Config); err != nil {
+		return nil, fmt.Errorf("invalid agent session scope: %w", err)
+	}
 	if err := authorizeManage(e.authority, actor, in.Config, manager); err != nil {
 		return nil, err
 	}
@@ -313,7 +317,12 @@ func (e *Executor) execAgentReconfigure(actor models.AgentConfig, input any) (an
 	if err := authorizeManage(e.authority, actor, targetCfg, manager); err != nil {
 		return nil, err
 	}
-	if err := authorizeDelegableAgentConfig(actor, targetCfg, mergeDelegablePrivilegeConfig(targetCfg, in.Config), e.authority, e.emitRegistry); err != nil {
+	sessionCfg := mergeAgentSessionScopeConfig(targetCfg, in.Config)
+	if _, err := runtimesessions.ValidateAgentSessionScopeConfig(sessionCfg); err != nil {
+		return nil, fmt.Errorf("invalid agent session scope: %w", err)
+	}
+	updatedCfg := mergeDelegablePrivilegeConfig(targetCfg, in.Config)
+	if err := authorizeDelegableAgentConfig(actor, targetCfg, updatedCfg, e.authority, e.emitRegistry); err != nil {
 		return nil, err
 	}
 	if err := manager.ReconfigureAgent(in.AgentID, in.Config); err != nil {
@@ -326,4 +335,25 @@ func (e *Executor) execAgentReconfigure(actor models.AgentConfig, input any) (an
 		runtimeauthority.UpsertManagedAgent(e.authority, in.Config)
 	}
 	return map[string]any{"status": "reconfigured", "agent_id": in.AgentID}, nil
+}
+
+func mergeAgentSessionScopeConfig(base, patch models.AgentConfig) models.AgentConfig {
+	out := base
+	if strings.TrimSpace(patch.ConversationMode) != "" {
+		out.ConversationMode = strings.TrimSpace(patch.ConversationMode)
+		if out.ConversationMode == runtimesessions.RuntimeModeTask.String() {
+			out.SessionScope = ""
+		}
+	}
+	if strings.TrimSpace(patch.SessionScope) != "" {
+		out.SessionScope = strings.TrimSpace(patch.SessionScope)
+	}
+	if strings.TrimSpace(patch.FlowPath) != "" {
+		out.FlowPath = strings.TrimSpace(patch.FlowPath)
+	}
+	if strings.TrimSpace(patch.EntityID) != "" {
+		out.EntityID = strings.TrimSpace(patch.EntityID)
+	}
+	out.NormalizeRuntimeDescriptor()
+	return out
 }

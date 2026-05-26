@@ -2267,7 +2267,8 @@ engine:
       description: How the platform manages agent session context across invocations.
       modes:
         task: New session per event. No memory between invocations. Stateless.
-        session: Session persists across events for the agent. Requires explicit session_scope global or flow.
+        session: Session persists across events for the agent. Authored normal agents require explicit session_scope flow;
+          session_scope global is reserved for platform-owned/internal system services and historical/read-only runtime rows.
         session_per_entity: One session per entity the agent works on. Requires explicit session_scope entity. Agent retains
           context across multiple events for the same entity but has separate sessions for different entities. Useful for
           agents that need continuity (e.g., research agent building a brief over multiple turns).
@@ -2346,7 +2347,9 @@ engine:
         agent_conversation_audits (write-only). Per-turn history in agent_turns. Never reloaded.
         Each invocation starts fresh.'
       session: 'Persistent session across events. Live session row in agent_sessions. Requires explicit
-        session_scope global or flow. Conversation history maintained and reused. Agent accumulates context.'
+        session_scope flow for authored normal agents. session_scope global is reserved for platform-owned/internal
+        system services and historical/read-only runtime rows. Conversation history maintained and reused. Agent
+        accumulates context.'
       session_per_entity: 'One session per agent × entity. Live session row in agent_sessions per entity.
         Requires explicit session_scope entity. Context preserved and reused per entity.'
       stateless: Alias for task. Accepted by the loader, normalized to task internally.
@@ -2357,31 +2360,42 @@ engine:
         field: session_scope
         location: Agent declaration in agents.yaml, alongside conversation_mode.
         type: string
+        authored_normal_agent_values:
+        - flow
+        - entity
         values:
         - global
         - flow
         - entity
+        value_notes:
+          global: Reserved for platform-owned/internal system services and historical/read-only persisted runtime rows.
+            Product-authored normal agents in agents.yaml MUST NOT declare session_scope global.
       canonical_rules:
         task: 'conversation_mode task: session_scope must be absent.'
         session_global: 'conversation_mode session + session_scope global: one session per agent across
-          the system. scope_key = "global".'
+          the system. scope_key = "global". This is valid only for platform-owned/internal system-service runtime
+          state and historical/read-only rows; authored normal agents MUST NOT declare it.'
         session_flow: 'conversation_mode session + session_scope flow: one session per agent per flow
           instance. scope_key = flow_instance path.'
         session_per_entity: 'conversation_mode session_per_entity + session_scope entity: one reusable
           session per agent per entity within the same flow instance. scope_key = entity_id.'
       invalid_combinations:
         task_present: 'task + session_scope present is a boot error.'
-        session_missing: 'session + session_scope absent is a boot error.'
+        session_missing: 'session + session_scope absent is a boot error. Authored normal agents must use session_scope
+          flow.'
+        authored_session_global: 'Authored normal agents with session + session_scope global are a boot/runtime error.
+          Global reusable sessions are reserved for platform-owned/internal system-service runtime state.'
         session_entity: 'session + session_scope entity is a boot error. Use session_per_entity.'
         entity_missing: 'session_per_entity + session_scope absent is a boot error.'
-        entity_global: 'session_per_entity + session_scope global is a boot error. Use session with
-          session_scope global.'
+        entity_global: 'session_per_entity + session_scope global is a boot error.'
         entity_flow: 'session_per_entity + session_scope flow is a boot error. Use session with
           session_scope flow.'
       boot_validation:
         description: Enforced at boot, not at first runtime session acquisition.
         rules:
         - Validate conversation_mode + session_scope against the canonical combinations.
+        - Authored normal agents MUST NOT declare session_scope global. Runtime mutators such as agent_hire and
+          agent_reconfigure must enforce the same rejection as boot validation.
         - No inference. No fallback. Missing required session_scope is a boot error.
         - session_scope flow requires a flow-scoped declaration with resolvable flow-instance context.
           Root-level agents cannot declare session_scope flow.
@@ -3887,7 +3901,9 @@ platform_tables:
         conversation modes. Task mode does NOT create rows here — task-mode audit goes to
         agent_conversation_audits instead. Supports three scopes: entity (one session per agent × entity),
         flow (one session per agent × flow instance), global (one session per agent, shared across all
-        entities). scope directly reflects the declared session_scope. scope_key is the lookup key.
+        entities). For authored normal agents, scope directly reflects the declared session_scope and MUST NOT be
+        global. The global value is retained for platform-owned/internal system-service runtime state and historical/read-only
+        persisted rows. scope_key is the lookup key.
         lease_holder/lease_expires_at for distributed session locking. Termination metadata captures WHY
         a row is terminated and WHETHER it was replaced; stale session meanings are not encoded as extra
         status values.'
@@ -3909,11 +3925,14 @@ platform_tables:
         entity: entity_id NOT NULL, flow_instance NOT NULL, scope_key = entity_id. One session per agent per entity.
         flow: entity_id NULL, flow_instance NOT NULL, scope_key = flow_instance. One session per agent per flow instance.
         global: entity_id NULL, flow_instance NULL, scope_key = "global". One session per agent across the entire system.
+          Reserved for platform-owned/internal system services and historical/read-only persisted rows, not product-authored
+          normal agents.
       lookup_pattern: 'Runtime acquires sessions via (agent_id, scope_key) with explicit status filtering.
         The scope_key is derived from conversation_mode: task → no session lookup, no agent_sessions row
         (audit goes to agent_conversation_audits). session_per_entity + session_scope entity → scope_key =
         entity_id. session + session_scope flow → scope_key = flow_instance. session + session_scope global
-        → scope_key = "global". No actor-shape inference.'
+        → scope_key = "global" only for platform-owned/internal system-service runtime state and historical/read-only
+        rows. No actor-shape inference.'
       live_owner_query: 'Live session ownership MUST query status = ''active'' only.'
       resumable_owner_query: 'Resume/supersession ownership MUST query status IN (''active'', ''suspended'').'
       status_lifecycle: 'status remains active, suspended, terminated. orphaned and contaminated are

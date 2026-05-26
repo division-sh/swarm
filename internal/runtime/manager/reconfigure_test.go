@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"swarm/internal/events"
@@ -99,7 +100,7 @@ func TestReconfigureAgent_RotatesEntityScopedSession(t *testing.T) {
 
 func TestReconfigureAgent_ClearsSessionScopeWhenSwitchingToTask(t *testing.T) {
 	am := NewAgentManager(nil, func(cfg models.AgentConfig) (Agent, error) {
-		if _, err := sessions.ValidateSessionScopeIntent(sessions.NormalizeConversationRuntimeMode(cfg.ConversationMode), cfg.SessionScope); err != nil {
+		if _, err := sessions.ValidateAgentSessionScopeConfig(cfg); err != nil {
 			return nil, err
 		}
 		return reconfigureTestAgent{id: cfg.ID}, nil
@@ -108,7 +109,8 @@ func TestReconfigureAgent_ClearsSessionScopeWhenSwitchingToTask(t *testing.T) {
 	cfg := models.AgentConfig{
 		ID:               "task-switch-agent",
 		ConversationMode: sessions.RuntimeModeSession.String(),
-		SessionScope:     sessions.SessionScopeGlobal.String(),
+		SessionScope:     sessions.SessionScopeFlow.String(),
+		FlowPath:         "support/inst-1",
 	}
 	if err := am.SpawnAgent(cfg); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
@@ -124,5 +126,32 @@ func TestReconfigureAgent_ClearsSessionScopeWhenSwitchingToTask(t *testing.T) {
 	}
 	if got.SessionScope != "" {
 		t.Fatalf("SessionScope = %q, want empty", got.SessionScope)
+	}
+}
+
+func TestReconfigureAgent_RejectsAuthoredGlobalSessionScope(t *testing.T) {
+	am := NewAgentManager(nil, func(cfg models.AgentConfig) (Agent, error) {
+		if _, err := sessions.ValidateAgentSessionScopeConfig(cfg); err != nil {
+			return nil, err
+		}
+		return reconfigureTestAgent{id: cfg.ID}, nil
+	})
+
+	cfg := models.AgentConfig{
+		ID:               "global-reconfigure-agent",
+		ConversationMode: sessions.RuntimeModeSession.String(),
+		SessionScope:     sessions.SessionScopeFlow.String(),
+		FlowPath:         "support/inst-1",
+	}
+	if err := am.SpawnAgent(cfg); err != nil {
+		t.Fatalf("SpawnAgent: %v", err)
+	}
+
+	err := am.ReconfigureAgent(cfg.ID, models.AgentConfig{SessionScope: sessions.SessionScopeGlobal.String()})
+	if err == nil {
+		t.Fatal("expected authored global session scope reconfigure to fail")
+	}
+	if got := err.Error(); !strings.Contains(got, "authored normal agents cannot declare session_scope global") {
+		t.Fatalf("ReconfigureAgent error = %q", got)
 	}
 }

@@ -86,8 +86,9 @@ func TestOpenAICompatibleRuntimeConversationToolBudgetAndPersistence(t *testing.
 		ID:        "agent-1",
 		ModelTier: "low_cost",
 		EntityID:  "entity-1",
+		FlowPath:  "support/inst-1",
 	})
-	ctx = sessions.WithScope(ctx, sessions.RuntimeModeSession.String(), sessions.SessionScopeGlobal.String(), "global")
+	ctx = sessions.WithScope(ctx, sessions.RuntimeModeSession.String(), sessions.SessionScopeFlow.String(), "support/inst-1")
 	conv := NewConversation("agent-1", "task-1", "system prompt", []ToolDefinition{{
 		Name:        "lookup",
 		Description: "Lookup status",
