@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -395,7 +396,8 @@ func scanSpecMailboxItems(rows *sql.Rows) ([]runtimetools.MailboxItem, error) {
 	out := make([]runtimetools.MailboxItem, 0)
 	for rows.Next() {
 		var it runtimetools.MailboxItem
-		var timeout sql.NullTime
+		var contextRaw any
+		var timeoutRaw any
 		if err := rows.Scan(
 			&it.ID,
 			&it.EventID,
@@ -405,18 +407,21 @@ func scanSpecMailboxItems(rows *sql.Rows) ([]runtimetools.MailboxItem, error) {
 			&it.Priority,
 			&it.Status,
 			&it.Notified,
-			&it.Context,
+			&contextRaw,
 			&it.Summary,
-			&timeout,
+			&timeoutRaw,
 			&it.Decision,
 			&it.DecisionNotes,
 		); err != nil {
 			return nil, fmt.Errorf("scan mailbox item: %w", err)
 		}
+		it.Context = jsonRawMessageValue(contextRaw)
 		it.Priority = denormalizeMailboxSeverity(it.Priority)
 		it.Status = denormalizeMailboxStatus(it.Status, it.Decision)
-		if timeout.Valid {
-			it.TimeoutAt = timeout.Time
+		if timeout, ok, err := sqliteTimeValue(timeoutRaw); err != nil {
+			return nil, fmt.Errorf("scan mailbox timeout: %w", err)
+		} else if ok {
+			it.TimeoutAt = timeout
 		}
 		out = append(out, it)
 	}
@@ -424,6 +429,25 @@ func scanSpecMailboxItems(rows *sql.Rows) ([]runtimetools.MailboxItem, error) {
 		return nil, fmt.Errorf("iterate mailbox items: %w", err)
 	}
 	return out, nil
+}
+
+func jsonRawMessageValue(raw any) json.RawMessage {
+	switch v := raw.(type) {
+	case nil:
+		return nil
+	case json.RawMessage:
+		return append(json.RawMessage(nil), v...)
+	case []byte:
+		return json.RawMessage(append([]byte(nil), v...))
+	case string:
+		return json.RawMessage([]byte(v))
+	default:
+		encoded, err := json.Marshal(v)
+		if err != nil {
+			return nil
+		}
+		return encoded
+	}
 }
 
 func normalizeMailboxSeverity(priority string) string {

@@ -2109,10 +2109,11 @@ engine:
         status: active_supported_runtime_backend
         meaning: External Postgres runtime store. Postgres remains explicitly selectable for production and existing operator deployments.
       sqlite:
-        status: staged_selector_only_until_runtime_portability_lands
+        status: staged_selected_core_store_runtime_backend_until_default_flip
         meaning: >
-          Local/dev SQLite runtime store. #1084 may recognize this backend and resolve its path, but runtime store
-          construction must fail closed until the SQLite schema/store/session/delivery/trace children prove support.
+          Local/dev SQLite runtime store. Explicit sqlite selection may construct the selected core runtime store contracts
+          promoted by #1086, but SQLite remains staged until session/delivery/trace semantics and the public default flip
+          are separately proven.
     selector_precedence:
       source_order:
       - flag
@@ -2168,8 +2169,9 @@ engine:
     staged_runtime_rule:
     - Unsupported backend ids fail closed with supported backend guidance.
     - >
-      Explicit sqlite selection is recognized as a canonical backend id but must fail closed before runtime store construction
-      until #1085-#1088 close the runtime portability tail.
+      Explicit sqlite selection is recognized as a canonical backend id. After #1086 it may construct selected core runtime
+      persistence stores, but surfaces split to #1087/#1088/#1089 must still fail closed or remain unavailable until their
+      owning children land.
     - Explicit postgres selection must remain available through flag, environment, and runtime config and must reach the
       existing Postgres runtime store path.
     required_consumers:
@@ -2231,6 +2233,72 @@ engine:
     - "Session locking, event delivery/replay, and trace/read models remain split to #1087."
     - "Public local/dev default flip plus zero-service swarm run proof remains split to #1088."
     - "Docs, CI, and repo-wide stale-default closeout remains split to #1089."
+  runtime_core_persistence_store_contracts:
+    promoted_by: '#1086'
+    parent_tracker: '#1066'
+    canonical_owner: runtime.Stores selected persistence interfaces backed by internal/store.PostgresStore and internal/store.SQLiteRuntimeStore
+    description: >
+      Core runtime persistence selected for #1086 is owned by typed store contracts selected during runtime store construction.
+      CLI/runtime startup may keep raw database handles only for explicitly split surfaces, but selected core persistence
+      operations must be reachable through the runtime store bundle instead of treating Postgres-only construction as the
+      semantic owner. SQLite support at this layer is file-backed selected-store support only; it is not the public local/dev
+      default and does not promote production SQLite semantics.
+    backend_implementations:
+      postgres:
+        owner: internal/store.PostgresStore implementations consumed through selected runtime store interfaces
+        status: active_supported_runtime_backend
+      sqlite:
+        owner: internal/store.SQLiteRuntimeStore
+        status: staged_selected_core_store_backend
+        rules:
+        - Must be file-backed and use the canonical SQLite path selected by internal/store/backendselection.
+        - Must consume the #1085 SQLite schema/bootstrap capability owner before selected runtime methods execute.
+        - Must not silently replace missing unsupported sibling semantics with in-memory state.
+    selected_contracts:
+    - name: runtime_store_bundle_construction
+      owner: cmd/swarm buildStores plus storeBundle.runtimeStores consuming typed runtime store interfaces
+      consumers:
+      - swarm serve explicit --store sqlite
+      - local foreground run startup through buildStores
+      - runtime.NewRuntime store dependency graph
+    - name: event_append_and_run_lifecycle_rows
+      owner: runtimebus.EventStore
+      sqlite_owner: internal/store.SQLiteRuntimeStore.AppendEvent
+      postgres_owner: internal/store.PostgresStore.AppendEvent
+      excludes:
+      - event delivery claim/retry/replay semantics owned by #1087
+    - name: manager_agent_and_entity_schema_rows
+      owner: runtimemanager.ManagerPersistence
+      sqlite_owner: internal/store.SQLiteRuntimeStore agent/entity schema methods
+      postgres_owner: internal/store.PostgresStore manager methods
+      excludes:
+      - pending delivery replay and receipt settlement semantics owned by #1087
+    - name: schedule_timer_rows
+      owner: runtimepipeline.SchedulePersistence
+      sqlite_owner: internal/store.SQLiteRuntimeStore schedule methods
+      postgres_owner: internal/store.PostgresStore schedule methods
+      excludes:
+      - cross-process timer claim/locking semantics owned by #1087
+    - name: mailbox_rows
+      owner: runtimetools.MailboxPersistence
+      sqlite_owner: internal/store.SQLiteRuntimeStore mailbox methods
+      postgres_owner: internal/store.PostgresStore mailbox methods
+    - name: runtime_ingress_and_run_control_rows
+      owner: runtimeingress.Store and runtimeruncontrol.Store
+      sqlite_owner: internal/store.SQLiteRuntimeStore ingress/run-control methods
+      postgres_owner: internal/store.PostgresStore ingress/run-control methods
+      excludes:
+      - delivery release/abandon and replay behavior owned by #1087
+    - name: api_idempotency_rows
+      owner: internal/store API idempotency persistence contract
+      sqlite_owner: internal/store.SQLiteRuntimeStore.WithAPIIdempotency
+      postgres_owner: internal/store.PostgresStore.WithAPIIdempotency
+      excludes:
+      - broad API delivery/replay/concurrency semantics owned by #1087
+    split_boundaries:
+    - "Session registry, startup ownership locks, event delivery claims/retry/replay, trace-stream/read/subscription semantics remain split to #1087."
+    - "Public local/dev SQLite default flip and zero-service swarm run proof remain split to #1088."
+    - "Docs, CI, repo-wide stale-default closeout, and #1066 parent proof remain split to #1089."
   agent_session_management:
     description: The platform manages agent sessions — the lifecycle of an agent from receiving an event to completing its
       response.

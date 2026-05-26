@@ -152,9 +152,15 @@ type runtimeIngressStateScanner interface {
 func scanRuntimeIngressState(row runtimeIngressStateScanner) (runtimeingress.State, error) {
 	var state runtimeingress.State
 	var status string
-	if err := row.Scan(&status, &state.Reason, &state.ControlledBy, &state.TransitionEventID, &state.UpdatedAt); err != nil {
+	var updatedAt any
+	if err := row.Scan(&status, &state.Reason, &state.ControlledBy, &state.TransitionEventID, &updatedAt); err != nil {
 		return runtimeingress.State{}, err
 	}
 	state.Status = runtimeingress.Status(strings.TrimSpace(status))
+	if at, ok, err := sqliteTimeValue(updatedAt); err != nil {
+		return runtimeingress.State{}, err
+	} else if ok {
+		state.UpdatedAt = at
+	}
 	return state, nil
 }

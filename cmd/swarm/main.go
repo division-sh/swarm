@@ -35,6 +35,7 @@ import (
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimecredentials "swarm/internal/runtime/credentials"
 	runtimedestructivereset "swarm/internal/runtime/destructivereset"
+	runtimeingress "swarm/internal/runtime/ingress"
 	runtimellm "swarm/internal/runtime/llm"
 	llmselection "swarm/internal/runtime/llm/selection"
 	runtimemanager "swarm/internal/runtime/manager"
@@ -80,15 +81,18 @@ type previousEnv struct {
 }
 
 type storeBundle struct {
-	Postgres           *store.PostgresStore
-	SQLDB              *sql.DB
-	SchemaBootstrapper store.SchemaBootstrapper
-	EventStore         runtimebus.EventStore
-	SessionRegistry    sessions.Registry
-	ConversationStore  runtimellm.ConversationPersistence
-	ManagerStore       runtimemanager.ManagerPersistence
-	ScheduleStore      runtimepipeline.SchedulePersistence
-	TurnStore          runtimellm.TurnPersistence
+	Postgres            *store.PostgresStore
+	SQLDB               *sql.DB
+	SchemaBootstrapper  store.SchemaBootstrapper
+	EventStore          runtimebus.EventStore
+	SessionRegistry     sessions.Registry
+	ConversationStore   runtimellm.ConversationPersistence
+	ManagerStore        runtimemanager.ManagerPersistence
+	ScheduleStore       runtimepipeline.SchedulePersistence
+	MailboxStore        runtimetools.MailboxPersistence
+	RuntimeIngressStore runtimeingress.Store
+	IdempotencyStore    apiv1.APIIdempotencyStore
+	TurnStore           runtimellm.TurnPersistence
 }
 
 func (s storeBundle) runtimeStores() runtime.Stores {
@@ -100,7 +104,8 @@ func (s storeBundle) runtimeStores() runtime.Stores {
 		ManagerStore:        s.ManagerStore,
 		ScheduleStore:       s.ScheduleStore,
 		StartupOwnership:    s.Postgres,
-		RuntimeIngressStore: s.Postgres,
+		MailboxStore:        s.MailboxStore,
+		RuntimeIngressStore: s.RuntimeIngressStore,
 		TurnStore:           s.TurnStore,
 	}
 }
@@ -363,7 +368,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		ForkChatExecutor:   apiv1.NewLLMForkChatExecutor(forkChatLLM),
 		AgentControl:       dashboardDynamicAgentControl{supervisor: supervisor},
 		Mailbox:            stores.Postgres,
-		Idempotency:        stores.Postgres,
+		Idempotency:        stores.IdempotencyStore,
 		Events:             rt.Bus,
 		RunControl:         rt.RunControl,
 		RuntimeIngress:     rt.RuntimeIngress,
@@ -652,7 +657,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 	configPath := fs.String("config", "", "Optional path to Swarm runtime config")
 	contractsPath := fs.String("contracts", "", "Path to selected Swarm contract bundle root for fork planning or selected-contract execution")
 	platformSpecPath := fs.String("platform-spec", defaultPlatformSpecPath, "Path to platform spec yaml")
-	storeMode := fs.String("store", storebackend.ActiveDefaultBackend().String(), "Runtime store backend: postgres (active default) or sqlite (recognized but unsupported until #1085-#1088)")
+	storeMode := fs.String("store", storebackend.ActiveDefaultBackend().String(), "Runtime store backend: postgres (active default) or sqlite (selected core stores; default flip after #1088)")
 	runID := fs.String("run", "", "Source run ID to plan from")
 	at := fs.String("at", "", "Fork point event UUID or RFC3339 timestamp")
 	dryRun := fs.Bool("dry-run", false, "Plan the fork without mutating runtime state")
@@ -841,7 +846,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 				ConversationStore: stores.ConversationStore,
 				TurnStore:         stores.TurnStore,
 				ScheduleStore:     stores.ScheduleStore,
-				MailboxStore:      stores.Postgres,
+				MailboxStore:      stores.MailboxStore,
 				Workspace:         workspaces,
 				Credentials:       credentialStore,
 			},
@@ -1630,18 +1635,42 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 			return storeBundle{}, err
 		}
 		return storeBundle{
-			Postgres:           pg,
-			SQLDB:              pg.DB,
-			SchemaBootstrapper: pg,
-			EventStore:         pg,
-			SessionRegistry:    sessions.NewPostgresRegistry(pg.DB, cfg.LLM.Session.LockTTL),
-			ConversationStore:  pg,
-			ManagerStore:       pg,
-			ScheduleStore:      pg,
-			TurnStore:          pg,
+			Postgres:            pg,
+			SQLDB:               pg.DB,
+			SchemaBootstrapper:  pg,
+			EventStore:          pg,
+			SessionRegistry:     sessions.NewPostgresRegistry(pg.DB, cfg.LLM.Session.LockTTL),
+			ConversationStore:   pg,
+			ManagerStore:        pg,
+			ScheduleStore:       pg,
+			MailboxStore:        pg,
+			RuntimeIngressStore: pg,
+			IdempotencyStore:    pg,
+			TurnStore:           pg,
 		}, nil
 	case storebackend.BackendSQLite:
-		return storeBundle{}, storebackend.SQLiteUnsupportedRuntimeError(selection.SQLitePath)
+		sqliteStore, err := store.NewSQLiteRuntimeStore(selection.SQLitePath)
+		if err != nil {
+			return storeBundle{}, err
+		}
+		if err := sqliteStore.Ping(ctx); err != nil {
+			_ = sqliteStore.Close()
+			return storeBundle{}, err
+		}
+		if _, err := sqliteStore.BindSchemaCapabilities(ctx); err != nil {
+			_ = sqliteStore.Close()
+			return storeBundle{}, err
+		}
+		return storeBundle{
+			SQLDB:               sqliteStore.DB,
+			SchemaBootstrapper:  sqliteStore,
+			EventStore:          sqliteStore,
+			ManagerStore:        sqliteStore,
+			ScheduleStore:       sqliteStore,
+			MailboxStore:        sqliteStore,
+			RuntimeIngressStore: sqliteStore,
+			IdempotencyStore:    sqliteStore,
+		}, nil
 	default:
 		return storeBundle{}, fmt.Errorf("store backend selection is required; supported backends: %s, %s", storebackend.BackendPostgres, storebackend.BackendSQLite)
 	}
