@@ -97,10 +97,10 @@ func (r *OperatorAgentConversationReadSurface) LoadOperatorAgentDeliveryDiagnost
 	if agentID == "" {
 		return OperatorAgentDeliveryDiagnostics{}, ErrAgentNotFound
 	}
-	if _, err := r.LoadOperatorAgent(ctx, agentID); err != nil {
+	if err := r.requireAgentDeliveryDiagnosticsCapabilities(ctx); err != nil {
 		return OperatorAgentDeliveryDiagnostics{}, err
 	}
-	if err := r.requireAgentDeliveryDiagnosticsCapabilities(ctx); err != nil {
+	if err := r.ensureAgentDeliveryDiagnosticsAgentExists(ctx, agentID); err != nil {
 		return OperatorAgentDeliveryDiagnostics{}, err
 	}
 
@@ -164,6 +164,8 @@ func (r *OperatorAgentConversationReadSurface) requireAgentDeliveryDiagnosticsCa
 		return err
 	}
 	switch {
+	case caps.Agents != SchemaFlavorCanonical:
+		return unsupportedSchemaCapability("agents", caps.Agents)
 	case caps.Events.Log != SchemaFlavorCanonical:
 		return unsupportedSchemaCapability("events", caps.Events.Log)
 	case !caps.Events.LogRunID:
@@ -176,6 +178,9 @@ func (r *OperatorAgentConversationReadSurface) requireAgentDeliveryDiagnosticsCa
 		return err
 	}
 	required := map[string][]string{
+		"agents": {
+			"agent_id", "status",
+		},
 		"events": {
 			"event_id", "run_id", "event_name", "entity_id", "created_at",
 		},
@@ -192,6 +197,24 @@ func (r *OperatorAgentConversationReadSurface) requireAgentDeliveryDiagnosticsCa
 		if !catalog.hasColumns(table, columns...) {
 			return fmt.Errorf("agent delivery diagnostics read owner requires canonical %s columns: %s", table, strings.Join(columns, ", "))
 		}
+	}
+	return nil
+}
+
+func (r *OperatorAgentConversationReadSurface) ensureAgentDeliveryDiagnosticsAgentExists(ctx context.Context, agentID string) error {
+	var exists bool
+	if err := r.db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM agents
+			WHERE agent_id = $1
+			  AND status NOT IN ('terminated', 'ephemeral')
+		)
+	`, agentID).Scan(&exists); err != nil {
+		return fmt.Errorf("load agent delivery diagnostics agent: %w", err)
+	}
+	if !exists {
+		return ErrAgentNotFound
 	}
 	return nil
 }
