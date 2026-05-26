@@ -771,6 +771,23 @@ func validateForkChatSnapshot(snapshot forkChatSnapshot) error {
 	if snapshot.SnapshotOwner != "conversation.fork_chat.snapshot.v1" {
 		return fmt.Errorf("malformed conversation.fork_chat result.snapshot: snapshot_owner=%q is not valid", snapshot.SnapshotOwner)
 	}
+	for _, field := range []struct {
+		name  string
+		value string
+	}{
+		{name: "fork_id", value: snapshot.ForkID},
+		{name: "source_session_id", value: snapshot.SourceSessionID},
+		{name: "source_agent_id", value: snapshot.SourceAgentID},
+	} {
+		if err := validateConversationOpaqueIDArg("conversation.fork_chat result.snapshot."+field.name, field.value); err != nil {
+			return fmt.Errorf("malformed conversation.fork_chat result.snapshot: %w", err)
+		}
+	}
+	if strings.TrimSpace(snapshot.SourceRunID) != "" {
+		if err := validateConversationOpaqueIDArg("conversation.fork_chat result.snapshot.source_run_id", snapshot.SourceRunID); err != nil {
+			return fmt.Errorf("malformed conversation.fork_chat result.snapshot: %w", err)
+		}
+	}
 	if snapshot.SourceTurn == nil {
 		return fmt.Errorf("malformed conversation.fork_chat result.snapshot: source_turn is required")
 	}
@@ -816,6 +833,9 @@ func validateForkChatDeleteResult(result forkChatDeleteResult) error {
 	}
 	if result.OK == nil {
 		return fmt.Errorf("malformed conversation.fork_delete result: ok is required")
+	}
+	if !*result.OK {
+		return fmt.Errorf("malformed conversation.fork_delete result: ok must be true")
 	}
 	if result.Deleted == nil {
 		return fmt.Errorf("malformed conversation.fork_delete result: deleted is required")
