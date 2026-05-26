@@ -5336,15 +5336,17 @@ multi_bundle_persistence:
     only. Runtime, API handler, CLI implementation, database migration, and generated OpenRPC publication remain separately
     gated implementation work unless a later PR explicitly promotes and proves them.
   generated_artifact_policy:
-    current_openrpc_status: unchanged
+    current_openrpc_status: bundle_read_catalog_methods_published
     rule: >
       Generated openrpc.json is derived from api_specification.method_catalog and must continue to match the currently
-      registered /v1/rpc handler set. Multi-bundle methods described here are source authority but are not added to
-      method_catalog/OpenRPC until their API/runtime handlers are implemented and registered in the same gated PR.
+      registered /v1/rpc handler set. The read-only bundle.list, bundle.get, and bundle.agents catalog methods are now
+      published because their handlers and store owner are implemented in the same gated PR. Mutating bundle.register,
+      destructive bundle.delete, and run.fork remain source authority only until their API/runtime handlers are implemented
+      and registered in a later gated PR.
     proof_expectation: >
-      Source-authority promotion proof must verify that run.fork and bundle.* are not silently published in generated
-      OpenRPC without implementation, and that future implementation PRs promote matching method_catalog entries and
-      generated artifacts together.
+      Source-authority promotion proof must verify that run.fork, bundle.register, and bundle.delete are not silently
+      published in generated OpenRPC without implementation, and that future implementation PRs promote matching
+      method_catalog entries and generated artifacts together.
   bundle_identity:
     canonical_name: bundle_hash
     format: 'bundle-v1:sha256:<64 lowercase hex>'
@@ -5595,7 +5597,7 @@ multi_bundle_persistence:
         - containers_stopped
         - dry_run
   api_surface:
-    publication_status: source_authority_not_generated_openrpc_until_runtime_api_implementation
+    publication_status: partial_read_catalog_generated_openrpc
     command_transport_owner: api_specification
     bundle_methods_planned:
       bundle.list:
@@ -9633,12 +9635,14 @@ api_specification:
       downgraded to backlog before it can be used as implementation authority.
   multi_bundle_publication_boundary:
     owner: multi_bundle_persistence.api_surface
-    status: source_authority_not_method_catalog
+    status: partial_bundle_read_catalog_method_catalog
     rule: >
       #1012 promotes the multi-bundle API contract as source authority, including bundle.* methods, run.fork, bundle_hash
-      filters, and bundle_hash create-new-work params. These methods and shapes are not in method_catalog/OpenRPC until
-      a later gated API/runtime implementation PR registers handlers and regenerates openrpc.json/proof artifacts in the
-      same PR. Consumers must not treat docs/MULTI_BUNDLE_PERSISTENCE_DRAFT.md or #1038 prose as API authority after #1012.
+      filters, and bundle_hash create-new-work params. The read-only bundle.list, bundle.get, and bundle.agents methods are
+      now in method_catalog/OpenRPC with matching handlers and proof. Remaining multi-bundle methods and shapes are not in
+      method_catalog/OpenRPC until a later gated API/runtime implementation PR registers handlers and regenerates
+      openrpc.json/proof artifacts in the same PR. Consumers must not treat docs/MULTI_BUNDLE_PERSISTENCE_DRAFT.md or #1038
+      prose as API authority after #1012.
     blocked_children:
       run_fork_api_runtime_cli: '#989'
       multi_bundle_cli_inventory: '#1023'
@@ -10013,6 +10017,7 @@ api_specification:
       - admin:runs
       - read:entities
       - read:events
+      - read:bundles
       - read:mailbox
       - approve:mailbox
       - read:agents
@@ -10111,6 +10116,7 @@ api_specification:
         - admin:runs
         - read:entities
         - read:events
+        - read:bundles
         - read:mailbox
         - approve:mailbox
         - read:agents
@@ -10151,6 +10157,125 @@ api_specification:
             type: string
           fingerprint:
             $ref: '#/components/schemas/Sha256Fingerprint'
+      BundleSummary:
+        type: object
+        additionalProperties: false
+        required:
+        - bundle_hash
+        - agent_count
+        - has_data
+        - data_size_bytes
+        - metadata
+        - ingested_at
+        properties:
+          bundle_hash:
+            $ref: '#/components/schemas/BundleHash'
+          agent_count:
+            type: integer
+            minimum: 0
+            description: Number of definition-only agents projected from the persisted bundle row.
+          has_data:
+            type: boolean
+            description: True when the persisted bundle row carries an auxiliary data_blob.
+          data_size_bytes:
+            type: integer
+            minimum: 0
+            description: Size of data_blob in bytes, or 0 when has_data is false.
+          metadata:
+            type: object
+            additionalProperties: true
+          ingested_at:
+            $ref: '#/components/schemas/Timestamp'
+      BundleListResult:
+        type: object
+        additionalProperties: false
+        required:
+        - bundles
+        properties:
+          bundles:
+            type: array
+            items:
+              $ref: '#/components/schemas/BundleSummary'
+          next_cursor:
+            $ref: '#/components/schemas/Cursor'
+      BundleDetail:
+        type: object
+        additionalProperties: false
+        required:
+        - bundle_hash
+        - content_yaml
+        - parsed_json
+        - metadata
+        - agent_count
+        - has_data
+        - data_size_bytes
+        - ingested_at
+        properties:
+          bundle_hash:
+            $ref: '#/components/schemas/BundleHash'
+          content_yaml:
+            type: string
+            description: Persisted bundle config bytes for this catalog row.
+          parsed_json:
+            type: object
+            additionalProperties: true
+            description: Persisted parsed projection for the bundle row.
+          metadata:
+            type: object
+            additionalProperties: true
+          agent_count:
+            type: integer
+            minimum: 0
+          has_data:
+            type: boolean
+          data_size_bytes:
+            type: integer
+            minimum: 0
+          ingested_at:
+            $ref: '#/components/schemas/Timestamp'
+      BundleAgentDefinition:
+        type: object
+        additionalProperties: false
+        required:
+        - agent_id
+        properties:
+          agent_id:
+            $ref: '#/components/schemas/OpaqueId'
+          flow_instance:
+            type: string
+            description: Persisted flow instance/catalog path when the definition is nested under a flow.
+          role:
+            type: string
+          type:
+            type: string
+          model_tier:
+            type: string
+          llm_backend:
+            type: string
+          conversation_mode:
+            type: string
+          session_scope:
+            type: string
+          prompt_path:
+            type: string
+          subscriptions:
+            type: array
+            items:
+              type: string
+          tools:
+            type: array
+            items:
+              type: string
+      BundleAgentsResult:
+        type: object
+        additionalProperties: false
+        required:
+        - agents
+        properties:
+          agents:
+            type: array
+            items:
+              $ref: '#/components/schemas/BundleAgentDefinition'
       HealthCheckResult:
         type: object
         additionalProperties: false
@@ -12160,6 +12285,14 @@ api_specification:
             $ref: '#/components/schemas/Sha256Fingerprint'
           boot_fingerprint:
             $ref: '#/components/schemas/Sha256Fingerprint'
+      BUNDLE_NOT_FOUND:
+        type: object
+        additionalProperties: false
+        required:
+        - bundle_hash
+        properties:
+          bundle_hash:
+            $ref: '#/components/schemas/BundleHash'
       UNSUPPORTED_BUNDLE_HASH:
         type: object
         additionalProperties: false
@@ -12591,6 +12724,73 @@ api_specification:
         schema:
           $ref: '#/components/schemas/HealthCheckResult'
       errors: []
+    bundle.list:
+      tier: should_have
+      description: >
+        List persisted bundle catalog rows. This is a definition/catalog read over the bundles store owner, not runtime
+        state. Results are ordered by newest ingested_at then bundle_hash and may be cursor-paginated.
+      scope:
+        required:
+        - read:bundles
+      params:
+      - name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 500
+          default: 50
+      - name: cursor
+        required: false
+        schema:
+          $ref: '#/components/schemas/Cursor'
+      result:
+        name: result
+        required: true
+        schema:
+          $ref: '#/components/schemas/BundleListResult'
+      errors: []
+    bundle.get:
+      tier: should_have
+      description: >
+        Read one persisted bundle catalog row by canonical bundle_hash. The result returns stored config, parsed projection,
+        metadata, and data presence facts only; it does not expose runtime state or server-local filesystem paths.
+      scope:
+        required:
+        - read:bundles
+      params:
+      - name: bundle_hash
+        required: true
+        schema:
+          $ref: '#/components/schemas/BundleHash'
+      result:
+        name: result
+        required: true
+        schema:
+          $ref: '#/components/schemas/BundleDetail'
+      errors:
+      - BUNDLE_NOT_FOUND
+    bundle.agents:
+      tier: should_have
+      description: >
+        Return definition-only agent catalog entries projected from the persisted bundle row identified by bundle_hash. This
+        method must not read runtime agents, sessions, queues, diagnoses, active tasks, or status fields, and does not close
+        strict duplicate-slug runtime identity work.
+      scope:
+        required:
+        - read:bundles
+      params:
+      - name: bundle_hash
+        required: true
+        schema:
+          $ref: '#/components/schemas/BundleHash'
+      result:
+        name: result
+        required: true
+        schema:
+          $ref: '#/components/schemas/BundleAgentsResult'
+      errors:
+      - BUNDLE_NOT_FOUND
     health.subscribe:
       tier: should_have
       description: WebSocket heartbeat subscription. Notifications carry the same shape as health.check returns.
@@ -14475,8 +14675,9 @@ api_specification:
       rationale: >
         Legacy dynamic bundle.open/reload/close remains deferred and is not the multi-bundle public API. #1012 promotes the
         authoritative multi-bundle source model under multi_bundle_persistence, with planned bundle.list/get/agents/register/delete,
-        run.fork, and bundle_hash create-new-work semantics. Those planned methods are intentionally not added to
-        method_catalog/OpenRPC until their gated API/runtime implementation lands. Existing bundle_ref/bundle_fingerprint
+        run.fork, and bundle_hash create-new-work semantics. The read-only bundle.list/get/agents catalog methods are now
+        published in method_catalog/OpenRPC with handlers; bundle.register/delete and run.fork remain withheld until their
+        gated API/runtime implementation lands. Existing bundle_ref/bundle_fingerprint
         language is migration evidence only after the #1001 bundle_hash decision.
     verify:
       methods:

@@ -29,8 +29,8 @@ func TestRegistryMethodNamesMatchGeneratedOpenRPC(t *testing.T) {
 	if got := registry.MethodNames(); !reflect.DeepEqual(got, openRPCNames) {
 		t.Fatalf("registry method names drifted from generated OpenRPC:\nregistry=%v\nopenrpc=%v", got, openRPCNames)
 	}
-	if len(openRPCNames) != 49 {
-		t.Fatalf("method count = %d, want 49", len(openRPCNames))
+	if len(openRPCNames) != 52 {
+		t.Fatalf("method count = %d, want 52", len(openRPCNames))
 	}
 	if _, ok := registry.Method("rpc.unsubscribe"); !ok {
 		t.Fatal("rpc.unsubscribe missing from generated registry")
@@ -457,6 +457,133 @@ func TestOperatorReadHandlersRunListRejectsInvalidFilters(t *testing.T) {
 	}
 }
 
+func TestOperatorBundleCatalogHandlersExposeStoreOwner(t *testing.T) {
+	now := time.Unix(1700000100, 0).UTC()
+	bundleHash := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	catalog := &fakeBundleCatalogReadStore{
+		listResult: store.BundleCatalogListResult{
+			Bundles: []store.BundleCatalogSummary{{
+				BundleHash:    bundleHash,
+				AgentCount:    1,
+				HasData:       true,
+				DataSizeBytes: 4,
+				Metadata:      map[string]any{"source": "test"},
+				IngestedAt:    now,
+			}},
+			NextCursor: "cursor-2",
+		},
+		details: map[string]store.BundleCatalogDetail{
+			bundleHash: {
+				BundleHash:    bundleHash,
+				ContentYAML:   "name: test",
+				ParsedJSON:    map[string]any{"agents": map[string]any{}},
+				Metadata:      map[string]any{"source": "test"},
+				AgentCount:    1,
+				HasData:       true,
+				DataSizeBytes: 4,
+				IngestedAt:    now,
+			},
+		},
+		agents: map[string]store.BundleCatalogAgentsResult{
+			bundleHash: {
+				Agents: []store.BundleCatalogAgentDefinition{{
+					AgentID:          "researcher",
+					Role:             "research",
+					Type:             "managed",
+					ModelTier:        "haiku",
+					LLMBackend:       "claude",
+					ConversationMode: "session",
+					SessionScope:     "flow",
+					PromptPath:       "prompts/researcher.md",
+					Subscriptions:    []string{"scan.requested"},
+					Tools:            []string{"web_search"},
+				}},
+			},
+		},
+	}
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			Ready:         func() bool { return true },
+			Database:      fakePinger{err: nil},
+			BundleCatalog: catalog,
+		}),
+	})
+
+	list := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"list","method":"bundle.list","params":{"limit":1,"cursor":"cursor-1"}}`)
+	if list.Error != nil {
+		t.Fatalf("bundle.list error = %#v", list.Error)
+	}
+	if catalog.lastList.Limit != 1 || catalog.lastList.Cursor != "cursor-1" {
+		t.Fatalf("bundle.list opts = %#v", catalog.lastList)
+	}
+	listResult := asMap(t, list.Result)
+	if listResult["next_cursor"] != "cursor-2" {
+		t.Fatalf("bundle.list next_cursor = %#v", listResult["next_cursor"])
+	}
+	bundles, ok := listResult["bundles"].([]any)
+	if !ok || len(bundles) != 1 {
+		t.Fatalf("bundle.list bundles = %#v", listResult["bundles"])
+	}
+	if asMap(t, bundles[0])["bundle_hash"] != bundleHash {
+		t.Fatalf("bundle.list bundle row = %#v", bundles[0])
+	}
+
+	get := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"get","method":"bundle.get","params":{"bundle_hash":"`+bundleHash+`"}}`)
+	if get.Error != nil {
+		t.Fatalf("bundle.get error = %#v", get.Error)
+	}
+	if got := asMap(t, get.Result)["bundle_hash"]; got != bundleHash {
+		t.Fatalf("bundle.get bundle_hash = %#v", got)
+	}
+
+	agents := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agents","method":"bundle.agents","params":{"bundle_hash":"`+bundleHash+`"}}`)
+	if agents.Error != nil {
+		t.Fatalf("bundle.agents error = %#v", agents.Error)
+	}
+	agentRows := asMap(t, agents.Result)["agents"].([]any)
+	agent := asMap(t, agentRows[0])
+	if agent["agent_id"] != "researcher" || agent["model_tier"] != "haiku" {
+		t.Fatalf("bundle.agents row = %#v", agent)
+	}
+	for _, runtimeKey := range []string{"status", "runtime_state", "queue", "active", "session_id"} {
+		if _, ok := agent[runtimeKey]; ok {
+			t.Fatalf("bundle.agents leaked runtime key %q: %#v", runtimeKey, agent)
+		}
+	}
+}
+
+func TestOperatorBundleCatalogHandlersErrors(t *testing.T) {
+	bundleHash := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			BundleCatalog: &fakeBundleCatalogReadStore{
+				missing: map[string]bool{bundleHash: true},
+				listErr: store.ErrInvalidBundleCatalogCursor,
+			},
+		}),
+	})
+
+	badHash := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"bad","method":"bundle.get","params":{"bundle_hash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}`)
+	if badHash.Error == nil || badHash.Error.Code != codeInvalidParams {
+		t.Fatalf("bundle.get invalid hash error = %#v, want invalid params", badHash.Error)
+	}
+
+	missing := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"missing","method":"bundle.get","params":{"bundle_hash":"`+bundleHash+`"}}`)
+	if missing.Error == nil {
+		t.Fatal("bundle.get missing error = nil, want BUNDLE_NOT_FOUND")
+	}
+	if data := asMap(t, missing.Error.Data); data["code"] != BundleNotFoundCode {
+		t.Fatalf("bundle.get missing error data = %#v", data)
+	}
+
+	badCursor := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"cursor","method":"bundle.list","params":{"cursor":"bad"}}`)
+	if badCursor.Error == nil || badCursor.Error.Code != codeInvalidParams {
+		t.Fatalf("bundle.list invalid cursor error = %#v, want invalid params", badCursor.Error)
+	}
+}
+
 func rpcCall(t *testing.T, handler *Handler, body string) rpcResponse {
 	t.Helper()
 	rec := httptest.NewRecorder()
@@ -521,6 +648,47 @@ func (s *fakeRunReadStore) LoadRunDebugReport(_ context.Context, runID string, _
 	}
 	return report, nil
 }
+
+type fakeBundleCatalogReadStore struct {
+	listResult store.BundleCatalogListResult
+	listErr    error
+	lastList   store.BundleCatalogListOptions
+	details    map[string]store.BundleCatalogDetail
+	agents     map[string]store.BundleCatalogAgentsResult
+	missing    map[string]bool
+}
+
+func (s *fakeBundleCatalogReadStore) ListBundleCatalog(_ context.Context, opts store.BundleCatalogListOptions) (store.BundleCatalogListResult, error) {
+	s.lastList = opts
+	if s.listErr != nil {
+		return store.BundleCatalogListResult{}, s.listErr
+	}
+	return s.listResult, nil
+}
+
+func (s *fakeBundleCatalogReadStore) LoadBundleCatalog(_ context.Context, bundleHash string) (store.BundleCatalogDetail, error) {
+	if s.missing[bundleHash] {
+		return store.BundleCatalogDetail{}, store.ErrBundleNotFound
+	}
+	detail, ok := s.details[bundleHash]
+	if !ok {
+		return store.BundleCatalogDetail{}, store.ErrBundleNotFound
+	}
+	return detail, nil
+}
+
+func (s *fakeBundleCatalogReadStore) ListBundleCatalogAgents(_ context.Context, bundleHash string) (store.BundleCatalogAgentsResult, error) {
+	if s.missing[bundleHash] {
+		return store.BundleCatalogAgentsResult{}, store.ErrBundleNotFound
+	}
+	result, ok := s.agents[bundleHash]
+	if !ok {
+		return store.BundleCatalogAgentsResult{}, store.ErrBundleNotFound
+	}
+	return result, nil
+}
+
+var _ BundleCatalogReadStore = (*fakeBundleCatalogReadStore)(nil)
 
 func testHandler(t *testing.T, opts Options) *Handler {
 	t.Helper()

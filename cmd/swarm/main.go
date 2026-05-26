@@ -358,6 +358,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		Observability:      stores.Postgres,
 		Entities:           apiEntities,
 		AgentConversations: apiAgentConversations,
+		BundleCatalog:      stores.Postgres,
 		ConversationForks:  stores.Postgres,
 		ForkChatExecutor:   apiv1.NewLLMForkChatExecutor(forkChatLLM),
 		AgentControl:       dashboardDynamicAgentControl{supervisor: supervisor},

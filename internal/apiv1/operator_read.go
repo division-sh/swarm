@@ -50,6 +50,12 @@ type AgentConversationReadStore interface {
 	LoadCurrentOperatorConversationForAgent(context.Context, string) (*store.OperatorConversationDetail, error)
 }
 
+type BundleCatalogReadStore interface {
+	ListBundleCatalog(context.Context, store.BundleCatalogListOptions) (store.BundleCatalogListResult, error)
+	LoadBundleCatalog(context.Context, string) (store.BundleCatalogDetail, error)
+	ListBundleCatalogAgents(context.Context, string) (store.BundleCatalogAgentsResult, error)
+}
+
 type OperatorReadOptions struct {
 	Now                   func() time.Time
 	Ready                 func() bool
@@ -58,6 +64,7 @@ type OperatorReadOptions struct {
 	Observability         ObservabilityReadStore
 	Entities              EntityReadStore
 	AgentConversations    AgentConversationReadStore
+	BundleCatalog         BundleCatalogReadStore
 	ConversationForks     ConversationForkLifecycleStore
 	ForkChatExecutor      ForkChatExecutor
 	AgentControl          AgentControlController
@@ -231,6 +238,9 @@ func OperatorReadHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 	for name, handler := range OperatorAgentConversationHandlers(opts) {
 		handlers[name] = handler
 	}
+	for name, handler := range OperatorBundleCatalogHandlers(opts) {
+		handlers[name] = handler
+	}
 	for name, handler := range OperatorConversationForkHandlers(opts) {
 		handlers[name] = handler
 	}
@@ -266,6 +276,75 @@ func requireAgentConversationReadStore(reads AgentConversationReadStore) (AgentC
 		return nil, fmt.Errorf("agent/conversation read store is required")
 	}
 	return reads, nil
+}
+
+func requireBundleCatalogReadStore(reads BundleCatalogReadStore) (BundleCatalogReadStore, error) {
+	if reads == nil {
+		return nil, fmt.Errorf("bundle catalog read store is required")
+	}
+	return reads, nil
+}
+
+func OperatorBundleCatalogHandlers(opts OperatorReadOptions) map[string]MethodHandler {
+	if opts.BundleCatalog == nil {
+		return nil
+	}
+	return map[string]MethodHandler{
+		"bundle.list": func(ctx context.Context, req Request) (any, error) {
+			reads, err := requireBundleCatalogReadStore(opts.BundleCatalog)
+			if err != nil {
+				return nil, err
+			}
+			listOpts, err := bundleCatalogListOptionsFromParams(req.Params)
+			if err != nil {
+				return nil, err
+			}
+			result, err := reads.ListBundleCatalog(ctx, listOpts)
+			if errors.Is(err, store.ErrInvalidBundleCatalogCursor) {
+				return nil, NewInvalidParamsError(map[string]any{"field": "cursor", "reason": "invalid bundle catalog cursor"})
+			}
+			if err != nil {
+				return nil, err
+			}
+			return result, nil
+		},
+		"bundle.get": func(ctx context.Context, req Request) (any, error) {
+			reads, err := requireBundleCatalogReadStore(opts.BundleCatalog)
+			if err != nil {
+				return nil, err
+			}
+			bundleHash, err := requiredBundleHashParam(req.Params, "bundle_hash")
+			if err != nil {
+				return nil, err
+			}
+			result, err := reads.LoadBundleCatalog(ctx, bundleHash)
+			if errors.Is(err, store.ErrBundleNotFound) {
+				return nil, NewApplicationError(BundleNotFoundCode, false, map[string]any{"bundle_hash": bundleHash})
+			}
+			if err != nil {
+				return nil, err
+			}
+			return result, nil
+		},
+		"bundle.agents": func(ctx context.Context, req Request) (any, error) {
+			reads, err := requireBundleCatalogReadStore(opts.BundleCatalog)
+			if err != nil {
+				return nil, err
+			}
+			bundleHash, err := requiredBundleHashParam(req.Params, "bundle_hash")
+			if err != nil {
+				return nil, err
+			}
+			result, err := reads.ListBundleCatalogAgents(ctx, bundleHash)
+			if errors.Is(err, store.ErrBundleNotFound) {
+				return nil, NewApplicationError(BundleNotFoundCode, false, map[string]any{"bundle_hash": bundleHash})
+			}
+			if err != nil {
+				return nil, err
+			}
+			return result, nil
+		},
+	}
 }
 
 func OperatorAgentConversationHandlers(opts OperatorReadOptions) map[string]MethodHandler {
@@ -1321,6 +1400,29 @@ func runHeaderListOptionsFromParams(params map[string]any) (store.RunHeaderListO
 		return store.RunHeaderListOptions{}, err
 	}
 	return out, nil
+}
+
+func bundleCatalogListOptionsFromParams(params map[string]any) (store.BundleCatalogListOptions, error) {
+	out := store.BundleCatalogListOptions{}
+	var err error
+	if out.Cursor, _, err = optionalStringParam(params, "cursor"); err != nil {
+		return store.BundleCatalogListOptions{}, err
+	}
+	if out.Limit, err = boundedIntegerParam(params, "limit", 1, 500); err != nil {
+		return store.BundleCatalogListOptions{}, err
+	}
+	return out, nil
+}
+
+func requiredBundleHashParam(params map[string]any, name string) (string, error) {
+	value, err := requiredStringParam(params, name)
+	if err != nil {
+		return "", err
+	}
+	if !bundleHashPattern.MatchString(value) {
+		return "", NewInvalidParamsError(map[string]any{"field": name, "reason": "must be bundle-v1:sha256:<64 lowercase hex>"})
+	}
+	return value, nil
 }
 
 func optionalBundleHashParam(params map[string]any, name string) (string, error) {
