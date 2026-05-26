@@ -141,7 +141,7 @@ func TestPostgresStore_ConversationForkLifecycleFailsClosedForSelectors(t *testi
 	_, db, _ := testutil.StartPostgres(t)
 	s := &PostgresStore{DB: db}
 	ctx := context.Background()
-	now := time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC)
+	now := activeConversationForkTestClock()
 	source := seedConversationForkSource(t, db, now)
 
 	_, err := s.CreateOperatorConversationFork(ctx, ConversationForkCreateRequest{
@@ -186,7 +186,7 @@ func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t 
 	_, db, _ := testutil.StartPostgres(t)
 	s := &PostgresStore{DB: db}
 	ctx := context.Background()
-	now := time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC)
+	now := activeConversationForkTestClock()
 	source := seedConversationForkSource(t, db, now)
 	entityID := uuid.NewString()
 
