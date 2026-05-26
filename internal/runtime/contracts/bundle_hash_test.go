@@ -186,6 +186,16 @@ value: 1e0
 	if bytes.Equal(refLiteral, refInlined) {
 		t.Fatal("$ref literal and inlined content canonicalized identically")
 	}
+	numbers, err := canonicalBundleHashYAML([]byte("big: 1.23e6\nsmall: 1e-6\nsmaller: 1e-7\n"))
+	if err != nil {
+		t.Fatalf("number canonicalization: %v", err)
+	}
+	if !bytes.Equal(numbers, []byte(`{"big":1230000,"small":0.000001,"smaller":1e-7}`)) {
+		t.Fatalf("number canonicalization = %s, want JCS fixed/exponent thresholds", numbers)
+	}
+	if got := formatBundleHashJSONNumber(1e21); got != "1e+21" {
+		t.Fatalf("positive exponent canonicalization = %s, want JCS positive exponent sign", got)
+	}
 	explicitString, err := canonicalBundleHashYAML([]byte(`text: !!str "true"`))
 	if err != nil {
 		t.Fatalf("explicit string tag on quoted scalar: %v", err)
