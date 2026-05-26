@@ -137,6 +137,26 @@ func TestOperatorRunForkHandlersMapSourceAndEventErrors(t *testing.T) {
 		if resp.Error == nil || asMap(t, resp.Error.Data)["code"] != EventNotFoundCode {
 			t.Fatalf("run.fork missing event error = %#v, want %s", resp.Error, EventNotFoundCode)
 		}
+		details := asMap(t, asMap(t, resp.Error.Data)["details"])
+		if details["event_id"] != runForkTestEventID {
+			t.Fatalf("run.fork missing event details = %#v, want event_id %s", details, runForkTestEventID)
+		}
+	})
+
+	t.Run("default fork point missing", func(t *testing.T) {
+		executor := &recordingRunForkExecutor{err: errors.New("no source-run event exists for fork source run " + runForkTestSourceRunID)}
+		handler := runForkTestHandler(t, &recordingRunForkAvailability{rows: map[string]runbundle.Availability{runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, runForkTestBundleHash)}}, executor)
+		resp := rpcCall(t, handler, fmt.Sprintf(
+			`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"idempotency_key":"default-event-missing"}}`,
+			runForkTestSourceRunID,
+		))
+		if resp.Error == nil || resp.Error.Code != codeInvalidParams {
+			t.Fatalf("run.fork default point error = %#v, want invalid params", resp.Error)
+		}
+		details := asMap(t, asMap(t, resp.Error.Data)["details"])
+		if details["field"] != "fork_event_id" || details["source_run_id"] != runForkTestSourceRunID {
+			t.Fatalf("run.fork default point details = %#v", details)
+		}
 	})
 }
 

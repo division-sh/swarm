@@ -99,7 +99,7 @@ func executeRunFork(ctx context.Context, req Request, opts OperatorReadOptions, 
 	}
 	availability, err := opts.RunForkAvailability.LoadRunBundleAvailability(ctx, params.SourceRunID)
 	if err != nil {
-		return nil, runForkError(params.SourceRunID, err)
+		return nil, runForkError(params.SourceRunID, params.ForkEventID, err)
 	}
 	if availability.DataIntegrityError() {
 		return nil, NewApplicationError(BundleDataIntegrityErrorCode, false, runForkAvailabilityDetails(availability))
@@ -134,7 +134,7 @@ func executeRunFork(ctx context.Context, req Request, opts OperatorReadOptions, 
 			BundleHash:  params.BundleHash,
 		})
 		if err != nil {
-			return store.APIIdempotencyCompletion{}, runForkError(params.SourceRunID, err)
+			return store.APIIdempotencyCompletion{}, runForkError(params.SourceRunID, params.ForkEventID, err)
 		}
 		if result.BundleHash == "" {
 			result.BundleHash = params.BundleHash
@@ -146,7 +146,7 @@ func executeRunFork(ctx context.Context, req Request, opts OperatorReadOptions, 
 		return store.APIIdempotencyCompletion{ResourceID: result.ForkRunID, Response: response}, nil
 	})
 	if err != nil {
-		return nil, runForkError(params.SourceRunID, err)
+		return nil, runForkError(params.SourceRunID, params.ForkEventID, err)
 	}
 	var stored RunForkExecutionResult
 	if err := json.Unmarshal(completion.Response, &stored); err != nil {
@@ -236,7 +236,7 @@ func runForkAvailabilityDetails(availability runbundle.Availability) map[string]
 	return details
 }
 
-func runForkError(sourceRunID string, err error) error {
+func runForkError(sourceRunID, forkEventID string, err error) error {
 	if err == nil {
 		return nil
 	}
@@ -253,8 +253,14 @@ func runForkError(sourceRunID string, err error) error {
 	}
 	msg := err.Error()
 	switch {
-	case strings.Contains(msg, "fork point event") || strings.Contains(msg, "no source-run event"):
-		return NewApplicationError(EventNotFoundCode, false, map[string]any{"run_id": strings.TrimSpace(sourceRunID)})
+	case strings.Contains(msg, "fork point event"):
+		eventID := strings.TrimSpace(forkEventID)
+		if eventID == "" {
+			return NewInvalidParamsError(map[string]any{"field": "fork_event_id", "reason": msg})
+		}
+		return NewApplicationError(EventNotFoundCode, false, map[string]any{"event_id": eventID})
+	case strings.Contains(msg, "no source-run event"):
+		return NewInvalidParamsError(map[string]any{"field": "fork_event_id", "reason": msg, "source_run_id": strings.TrimSpace(sourceRunID)})
 	case strings.Contains(msg, "not found") && strings.Contains(msg, "run"):
 		return NewApplicationError(RunNotFoundCode, false, map[string]any{"run_id": strings.TrimSpace(sourceRunID)})
 	case strings.Contains(msg, "fork point --at"):
