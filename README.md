@@ -8,7 +8,7 @@ Swarm runs fleets of LLM agents as a durable, stateful system. You declare it in
 
 A simple orchestrator decides which agent runs next. Swarm runs a state machine. Work is modeled as entities (an order, a ticket, a candidate business) moving through a lifecycle you declare, hundreds at a time, each surviving crashes, waiting days on a timer or a human, and replayable or forkable from the log. That is what an operating system does for its programs: schedule them, keep them apart, meter what they use, persist their state, and restart them after a crash. Deterministic routing is one piece of it; the rest is the operating system.
 
-Single Go binary, Postgres for persistence. Two LLM runtimes ship today: an Anthropic API mode and a CLI-driven mode wrapping the Claude CLI as a subprocess. Both consume the shared LLM provider adapter contract; adding another provider is separate gated runtime/config work.
+Single Go binary, Postgres for persistence. Three LLM backend profiles ship today: `api` for Anthropic API, `cli_test` for the Claude CLI subprocess transport, and `openai_compatible` for Chat Completions-compatible HTTP JSON. All three consume the shared LLM provider adapter contract; native OpenAI Responses and provider-specific OpenRouter, Ollama, Bedrock, Azure OpenAI, Vertex, or vLLM support remain separate gated runtime/config work.
 
 **Long-term direction:** entire divisions (engineering, support, operations) running as autonomous Swarm flows. Humans in the loop where judgment is required; agents and deterministic system nodes everywhere else.
 
@@ -82,17 +82,15 @@ Guard failures have explicit semantics: `reject` (default), `discard`, `kill`, o
 
 ## Quickstart
 
-Requires Docker, a contract bundle, and credentials for the configured shipped LLM runtime.
+Requires Docker, a contract bundle, and credentials for the configured shipped LLM runtime. The Compose quickstart currently starts the orchestrator with the `cli_test` backend from `docker-compose.yml`; setting `SWARM_LLM_BACKEND` in `.env` does not override that Compose default.
 
 ```bash
 # 1. clone
 git clone https://github.com/<org>/swarm && cd swarm
 
-# 2. point at a contract bundle
+# 2. point at a contract bundle and provide the Compose backend credential
 export SWARM_CONTRACTS_HOST_DIR=/absolute/path/to/your/contracts
-echo 'SWARM_LLM_BACKEND=cli_test' >> .env
-echo 'CLAUDE_CODE_OAUTH_TOKEN=...' >> .env   # for cli_test mode
-# or set SWARM_LLM_BACKEND=api plus ANTHROPIC_API_KEY=... for api mode
+echo 'CLAUDE_CODE_OAUTH_TOKEN=...' >> .env
 
 # 3. boot
 docker compose up -d postgres orchestrator
@@ -109,6 +107,40 @@ docker compose exec orchestrator swarm run \
 If you only need the local database, `docker compose up -d postgres` is supported
 without `SWARM_CONTRACTS_HOST_DIR`. The contracts path is required only when
 starting the `orchestrator` service.
+
+### LLM Backend Profiles
+
+Outside the Compose quickstart, select a shipped backend with `SWARM_LLM_BACKEND`
+or the equivalent `llm.backend` config key:
+
+```bash
+# Anthropic API transport.
+export SWARM_LLM_BACKEND=api
+export ANTHROPIC_API_KEY=...
+
+# Claude CLI transport. The profile id remains cli_test until a separate
+# compatibility/storage migration renames it.
+export SWARM_LLM_BACKEND=cli_test
+export CLAUDE_CODE_OAUTH_TOKEN=...
+
+# Chat Completions-compatible HTTP JSON transport.
+export SWARM_LLM_BACKEND=openai_compatible
+export OPENAI_COMPATIBLE_API_KEY=...
+export SWARM_OPENAI_COMPATIBLE_BASE_URL=https://api.example.com
+export SWARM_OPENAI_COMPATIBLE_DEFAULT_MODEL=...
+# Optional low-cost model used when budget policy throttles the actor entity.
+export SWARM_OPENAI_COMPATIBLE_LOW_COST_MODEL=...
+```
+
+`openai_compatible` treats `SWARM_OPENAI_COMPATIBLE_BASE_URL` or
+`llm.openai_compatible.base_url` as the API base URL and normalizes it to
+`/v1/chat/completions`. Model config keys are
+`llm.openai_compatible.default_model` and
+`llm.openai_compatible.low_cost_model`. This profile is not native OpenAI
+Responses API support, not an official-OpenAI-only provider identity, and not
+provider-matrix support for OpenRouter, Ollama, Bedrock, Azure OpenAI, Vertex,
+or vLLM. `SWARM_LLM_RUNTIME_MODE` and `llm.runtime_mode` are retired; use
+`SWARM_LLM_BACKEND` or `llm.backend`.
 
 For an end-to-end walkthrough (building a flow from scratch), see [`docs/specs/swarm-platform/SWARM-DEVELOPER-GUIDE.md`](docs/specs/swarm-platform/SWARM-DEVELOPER-GUIDE.md).
 
