@@ -1,9 +1,10 @@
 # Bundle Canonicalization v1
 
-Status: source-authority design for #979. This document defines the
-canonical bundle hash rule that later platform-spec, OpenRPC, storage, and
-runtime implementation work must consume. It does not by itself change
-runtime behavior. Promotion into `platform-spec.yaml` remains owned by #1012.
+Status: historical design evidence for #979. The merge-bearing canonical bundle
+hash v1 rule now lives in
+`platform-spec.yaml#multi_bundle_persistence.bundle_identity.canonicalization_v1`.
+This document is retained as rationale and audit evidence only; when it
+conflicts with `platform-spec.yaml`, the YAML wins.
 
 ## Purpose
 
@@ -386,21 +387,23 @@ Required migration posture:
 - New multi-bundle persisted bundle rows and new run rows created after the v1
   implementation lands must write the canonical v1 hash.
 
-The platform-spec/OpenRPC promotion in #1012 must consume this rule and state
-the public schema, error behavior, and generated proof artifacts. Runtime,
-store, API, CLI, and dashboard consumers must then consume the promoted
-platform owner and the reconciled implementation owner.
+The platform-spec promotion consumes this rule in
+`multi_bundle_persistence.bundle_identity.canonicalization_v1`. Runtime, store,
+API, CLI, and dashboard consumers must consume that promoted platform owner and
+the reconciled implementation owner.
 
 ## Closure Boundaries
 
-This document closes the source-authority gap for bundle canonicalization v1.
+This document no longer closes source authority by itself. Source authority for
+bundle canonicalization v1 is closed only by the promoted `platform-spec.yaml`
+block and implementation proof.
 
 It does not close:
 
-- platform-spec/OpenRPC promotion (#1012)
-- runtime/store/API/CLI/schema implementation
-- current `bundle_identity.go` reconciliation and golden tests
+- OpenRPC publication for runtime/API methods
+- runtime/store/API/CLI/schema behavior outside hash computation
 - #1001 dual-accept rename implementation
 - multi-bundle lifecycle behavior outside bundle hash identity
 
-Those consumers remain live tracked work under #979, #1001, #1011, and #1012.
+Those consumers remain live tracked work under focused children such as #1001,
+#1011, and #1012.

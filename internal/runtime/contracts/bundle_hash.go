@@ -47,10 +47,10 @@ type canonicalJSONNumber float64
 
 // BundleHash is the canonical v1 bundle identity owner.
 //
-// It implements docs/specs/swarm-platform/docs/bundle-canonicalization-v1.md
-// and emits bundle-v1:sha256:<hex>. Legacy BundleFingerprint output is not a
-// canonical bundle_hash and remains only for the currently split health/runtime
-// transition paths.
+// It implements platform-spec.yaml#multi_bundle_persistence.bundle_identity.canonicalization_v1
+// and emits bundle-v1:sha256:<hex>. Legacy BundleFingerprint output is not
+// a canonical bundle_hash and remains only for the currently split
+// health/runtime transition paths.
 func BundleHash(bundle *WorkflowContractBundle) (string, error) {
 	entries, err := bundleHashEntries(bundle)
 	if err != nil {

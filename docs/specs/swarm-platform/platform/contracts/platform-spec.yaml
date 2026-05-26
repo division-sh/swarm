@@ -5303,20 +5303,131 @@ multi_bundle_persistence:
   bundle_identity:
     canonical_name: bundle_hash
     format: 'bundle-v1:sha256:<64 lowercase hex>'
-    hash_rule_owner: '#979 / PR #1033 canonical bundle hash v1 design-doc authority'
+    hash_rule_owner: docs/specs/swarm-platform/platform/contracts/platform-spec.yaml#multi_bundle_persistence.bundle_identity.canonicalization_v1
+    historical_design_evidence: docs/specs/swarm-platform/docs/bundle-canonicalization-v1.md
     rename_policy:
       bundle_hash: promoted_name
       bundle_fingerprint: legacy_pre_multi_bundle_name
       bundle_ref: legacy_pre_multi_bundle_api_wrapper
       dual_accept_transition: '#1001 only; old and new names must fail closed if both are supplied and disagree'
-    canonical_inputs_required_for_hash_rule:
-      - exact contract file byte inputs after the canonical bundle hash v1 path and YAML normalization rules
-      - deterministic path ordering and cross-platform separator handling
-      - explicit YAML scalar/key normalization and duplicate-key rejection
-      - explicit schema $ref expansion/non-expansion policy
-      - deterministic data/ blob inclusion and exclusion rules
-      - fail-closed symlink, ignored-file, and out-of-tree path policy
-      - hash namespace/version prefix
+    canonicalization_v1:
+      status: promoted_merge_bearing_authority
+      implementation_owner: internal/runtime/contracts.BundleHash
+      runtime_behavior_boundary: >
+        This block governs only canonical bundle_hash computation. Serve ingest, run source stamping, API routing, CLI,
+        fork, delete, runtime.nuke, health output promotion, and reader migration remain separately gated work.
+      output:
+        name: bundle_hash
+        format: 'bundle-v1:sha256:<64 lowercase hex>'
+        digest: SHA-256
+        namespace: bundle-v1
+        legacy_non_authority: >
+          `sha256:<hex>` BundleFingerprint values and bundle_ref.fingerprint are legacy boot/runtime transition
+          assertions. They are not v1 bundle_hash values and must not be compared as canonical bundle identity.
+      preimage_stream:
+        prelude: literal bytes `swarm-bundle-hash-v1` followed by LF
+        entry_order: sort by canonical label bytes after slash normalization
+        entry_encoding: >
+          For each entry, write uint64 big-endian label byte length, label UTF-8 bytes, uint64 big-endian canonical
+          content byte length, then canonical content bytes.
+      labels:
+        platform_spec_label: platform/platform-spec.yaml
+        bundle_label_prefix: bundle/
+        bundle_label_rule: >
+          Labels are `bundle/<relative path from contracts root>` after symlink checks and filepath cleaning. Path
+          separators are `/` on every host. Labels must be valid UTF-8, NFC-normalized, non-empty, contain no NUL or
+          backslash, and contain no empty, `.`, or `..` segment.
+        duplicate_rule: >
+          Duplicate canonical labels fail closed. ASCII case-colliding labels also fail closed; non-ASCII bytes are
+          never locale-folded.
+      canonical_entries:
+        required:
+          - label: platform/platform-spec.yaml
+            source: effective platform-spec.yaml used to load the bundle
+            policy: yaml
+          - label: bundle/package.yaml
+            source: root package manifest
+            policy: yaml
+        root_optional_yaml:
+          - schema.yaml
+          - types.yaml
+          - entities.yaml
+          - nodes.yaml
+          - events.yaml
+          - agents.yaml
+          - tools.yaml
+          - policy.yaml
+        root_prompts: every non-ignored regular file under root prompts/
+        project_packages: >
+          For each non-root discovered project package, include the package manifest plus nodes.yaml, events.yaml,
+          agents.yaml, tools.yaml, policy.yaml when present, and every non-ignored regular file under that package's
+          prompts/ directory.
+        flow_yaml: >
+          For each discovered flow, include schema.yaml, types.yaml, entities.yaml, nodes.yaml, events.yaml,
+          agents.yaml, tools.yaml, and policy.yaml when present.
+        flow_prompts: every non-ignored regular file under each flow prompts/
+        flow_data: every non-ignored regular file under each flow data/ as raw bytes
+        excluded_inputs:
+          - verification gates, tooling locks, generated caches, build outputs, database DDL, runtime state, and host absolute paths
+          - files outside the contracts root, except the effective platform spec under the fixed platform label
+      filesystem_policy:
+        discovery: lstat-style discovery; symlinks are not followed
+        fail_closed:
+          - required platform spec, root package manifest, and explicit input paths that are missing or unreadable
+          - any symlink encountered as an explicit input or below a recursive included directory
+          - non-regular required files and out-of-tree bundle input paths
+        skip: optional absent paths and non-regular non-symlink entries below recursive included directories
+        ignored_directories:
+          - .git
+          - .hg
+          - .svn
+          - .idea
+          - .vscode
+          - __pycache__
+          - .pytest_cache
+          - .mypy_cache
+          - .ruff_cache
+        ignored_files:
+          exact:
+            - .DS_Store
+            - Thumbs.db
+          suffixes:
+            - '~'
+            - .swp
+            - .swo
+            - .tmp
+            - .bak
+          prefixes:
+            - '.#'
+      content_policies:
+        yaml:
+          input: valid UTF-8, exactly one YAML document
+          presentation_not_content: comments, document markers, indentation, line endings, and mapping key order
+          structures: mappings, sequences, aliases, and scalar nodes only
+          mappings: keys must canonicalize to strings; duplicate keys after NFC normalization fail closed
+          aliases: aliases are resolved before JSON emission; alias cycles fail closed; anchor names are not content
+          refs: '`$ref` is literal YAML content and is not expanded, fetched, or inlined by bundle_hash v1'
+          tags: >
+            Only YAML core map, seq, str, bool, int, float, and null tags are allowed. Custom, binary, timestamp, and
+            unknown tags fail closed. Explicit non-string scalar tags are accepted only when the unquoted scalar spelling
+            would have the same implicit v1 kind; quoted explicit non-string scalar tags fail closed. Explicit string tags
+            remain strings.
+          scalars: >
+            Only `true`, `false`, and `null` are typed booleans/null by implicit spelling. JSON-number grammar scalars
+            become numbers when finite IEEE 754 binary64 values; integer-valued numbers must be within the I-JSON safe
+            integer range; negative zero, non-finite values, and unsupported numeric spellings fail closed. All other
+            scalars are NFC-normalized strings.
+          json_emission: >
+            Emit RFC 8785 JCS-compatible UTF-8 JSON with no insignificant whitespace and no trailing newline. Object keys
+            sort by UTF-16 code units after NFC normalization. Strings use JSON escaping. Numbers use JCS fixed/exponent
+            thresholds, including `+` on positive exponents.
+        prompt_text:
+          input: valid UTF-8 text
+          canonicalization: strip one UTF-8 BOM if present, normalize CRLF and CR to LF, append one final LF to non-empty files without one
+          preserves: trailing spaces, tabs, blank lines, and all non-line-ending content bytes after UTF-8 decoding
+        raw_data:
+          input: raw bytes from included flow data/ files
+          canonicalization: no byte normalization
   persistence_model:
     live_schema_boundary: >
       platform_tables.tables is the current runtime DDL source. #1013 promotes the bundles table and
