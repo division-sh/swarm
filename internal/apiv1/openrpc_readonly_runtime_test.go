@@ -19,6 +19,8 @@ import (
 )
 
 const readOnlyRuntimeProbeTestName = "TestOpenRPCReadOnlyHTTPRuntimeProbes"
+const readOnlyProbeBundleHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+const readOnlyProbeMissingBundleHash = "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
 func TestOpenRPCReadOnlyHTTPRuntimeProbes(t *testing.T) {
 	root := repoRoot(t)
@@ -241,6 +243,9 @@ func approvedReadOnlyHTTPRuntimeMethods() []string {
 		"agent.diagnose",
 		"agent.get",
 		"agent.list",
+		"bundle.agents",
+		"bundle.get",
+		"bundle.list",
 		"conversation.current_for_agent",
 		"conversation.fork_list",
 		"conversation.fork_view",
@@ -271,6 +276,9 @@ func readOnlyHTTPRuntimeFixtures() map[string]readOnlyHTTPRuntimeFixture {
 		"agent.diagnose":                 {Params: map[string]any{"agent_id": "agent-1"}, ResultKeys: []string{"agent_id", "status", "queue", "runtime_state", "active", "last_tool_outcome"}},
 		"agent.get":                      {Params: map[string]any{"agent_id": "agent-1"}, ResultKeys: []string{"agent"}},
 		"agent.list":                     {Params: map[string]any{}, ResultKeys: []string{"agents"}},
+		"bundle.agents":                  {Params: map[string]any{"bundle_hash": readOnlyProbeBundleHash}, ResultKeys: []string{"agents"}},
+		"bundle.get":                     {Params: map[string]any{"bundle_hash": readOnlyProbeBundleHash}, ResultKeys: []string{"bundle_hash", "content_yaml", "parsed_json", "metadata", "agent_count", "has_data", "data_size_bytes", "ingested_at"}},
+		"bundle.list":                    {Params: map[string]any{}, ResultKeys: []string{"bundles"}},
 		"conversation.current_for_agent": {Params: map[string]any{"agent_id": "agent-1"}, ResultKeys: []string{"conversation", "turns"}},
 		"conversation.fork_list":         {Params: map[string]any{}, ResultKeys: []string{"forks"}},
 		"conversation.fork_view":         {Params: map[string]any{"fork_id": "00000000-0000-0000-0000-000000000301"}, ResultKeys: []string{"fork_id", "source_session_id", "source_agent_id", "fork_point", "created_by", "created_at", "expires_at", "state", "turns"}},
@@ -324,6 +332,26 @@ func readOnlyHTTPRuntimeErrorProbes() []readOnlyHTTPRuntimeErrorProbe {
 			Options: func(t *testing.T) OperatorReadOptions {
 				opts := readOnlyRuntimeProbeOptions(t)
 				opts.AgentConversations = &fakeAgentConversationReadStore{agentErr: store.ErrAgentNotFound}
+				return opts
+			},
+		},
+		{
+			Method: "bundle.agents",
+			Params: map[string]any{"bundle_hash": readOnlyProbeMissingBundleHash},
+			Code:   BundleNotFoundCode,
+			Options: func(t *testing.T) OperatorReadOptions {
+				opts := readOnlyRuntimeProbeOptions(t)
+				opts.BundleCatalog = &fakeBundleCatalogReadStore{missing: map[string]bool{readOnlyProbeMissingBundleHash: true}}
+				return opts
+			},
+		},
+		{
+			Method: "bundle.get",
+			Params: map[string]any{"bundle_hash": readOnlyProbeMissingBundleHash},
+			Code:   BundleNotFoundCode,
+			Options: func(t *testing.T) OperatorReadOptions {
+				opts := readOnlyRuntimeProbeOptions(t)
+				opts.BundleCatalog = &fakeBundleCatalogReadStore{missing: map[string]bool{readOnlyProbeMissingBundleHash: true}}
 				return opts
 			},
 		},
@@ -550,6 +578,43 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 				},
 			},
 			aggregate: store.OperatorEntityAggregateResult{Counts: map[string]int{"collecting": 1}},
+		},
+		BundleCatalog: &fakeBundleCatalogReadStore{
+			listResult: store.BundleCatalogListResult{Bundles: []store.BundleCatalogSummary{{
+				BundleHash:    readOnlyProbeBundleHash,
+				AgentCount:    1,
+				HasData:       false,
+				DataSizeBytes: 0,
+				Metadata:      map[string]any{"source": "probe"},
+				IngestedAt:    now,
+			}}},
+			details: map[string]store.BundleCatalogDetail{
+				readOnlyProbeBundleHash: {
+					BundleHash:    readOnlyProbeBundleHash,
+					ContentYAML:   "name: probe",
+					ParsedJSON:    map[string]any{"agents": map[string]any{}},
+					Metadata:      map[string]any{"source": "probe"},
+					AgentCount:    1,
+					HasData:       false,
+					DataSizeBytes: 0,
+					IngestedAt:    now,
+				},
+			},
+			agents: map[string]store.BundleCatalogAgentsResult{
+				readOnlyProbeBundleHash: {
+					Agents: []store.BundleCatalogAgentDefinition{{
+						AgentID:          "researcher",
+						Role:             "research",
+						Type:             "managed",
+						ModelTier:        "haiku",
+						LLMBackend:       "claude",
+						ConversationMode: "session",
+						SessionScope:     "flow",
+						Subscriptions:    []string{"scan.requested"},
+						Tools:            []string{"web_search"},
+					}},
+				},
+			},
 		},
 		AgentConversations: &fakeAgentConversationReadStore{
 			listAgentsResult: store.OperatorAgentListResult{Agents: []store.OperatorAgentSummary{{
@@ -854,6 +919,18 @@ func assertReadOnlyProbeSuccess(t *testing.T, methodName string, resp rpcRespons
 			}
 			if subscribers, ok := downstream["subscribers"].([]any); !ok || len(subscribers) != 0 {
 				t.Fatalf("mailbox.get decision_sheet.downstream_preview.subscribers = %#v", downstream["subscribers"])
+			}
+		}
+	}
+	if methodName == "bundle.agents" {
+		agents, ok := result["agents"].([]any)
+		if !ok || len(agents) != 1 {
+			t.Fatalf("bundle.agents agents = %#v, want one definition", result["agents"])
+		}
+		agent := asMap(t, agents[0])
+		for _, runtimeKey := range []string{"status", "runtime_state", "queue", "active", "session_id"} {
+			if _, ok := agent[runtimeKey]; ok {
+				t.Fatalf("bundle.agents leaked runtime field %q: %#v", runtimeKey, agent)
 			}
 		}
 	}

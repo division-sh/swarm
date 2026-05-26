@@ -8,6 +8,10 @@ var ErrRunNotFound = errors.New("store: run not found")
 
 var ErrInvalidRunListCursor = errors.New("store: invalid run list cursor")
 
+var ErrBundleNotFound = errors.New("store: bundle not found")
+
+var ErrInvalidBundleCatalogCursor = errors.New("store: invalid bundle catalog cursor")
+
 var ErrEventNotFound = errors.New("store: event not found")
 
 var ErrInvalidObservabilityCursor = errors.New("store: invalid observability cursor")
