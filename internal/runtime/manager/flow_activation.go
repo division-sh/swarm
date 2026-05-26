@@ -25,7 +25,7 @@ import (
 )
 
 type flowInstancePersistence interface {
-	Upsert(ctx context.Context, instance runtimepipeline.WorkflowInstance) error
+	Create(ctx context.Context, instance runtimepipeline.WorkflowInstance) error
 	MarkTerminated(ctx context.Context, storageRef string, terminatedAt time.Time) error
 	Load(ctx context.Context, instanceID string) (runtimepipeline.WorkflowInstance, bool, error)
 }
@@ -79,7 +79,7 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 	if err != nil {
 		return err
 	}
-	if err := am.workflowInstances.Upsert(ctx, runtimepipeline.WorkflowInstance{
+	if err := am.workflowInstances.Create(ctx, runtimepipeline.WorkflowInstance{
 		InstanceID:      instanceID,
 		StorageRef:      flowPath,
 		WorkflowName:    templateID,
