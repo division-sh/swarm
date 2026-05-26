@@ -31,6 +31,11 @@ func TestManagerStore_LoadAgents_FailsClosedOnMalformedRuntimeDescriptor(t *test
 			runtimeDescriptor:  `{"type":1,"mode":"review"}`,
 			wantErrorSubstring: `invalid runtime_descriptor: decode runtime_descriptor: json: cannot unmarshal number into Go struct field persistedAgentRuntimeDescriptor.type of type string`,
 		},
+		{
+			name:               "unsupported session scope authority",
+			runtimeDescriptor:  `{"type":"review-worker","session_scope_authority":"authored"}`,
+			wantErrorSubstring: `invalid runtime_descriptor: unsupported session_scope_authority "authored"`,
+		},
 	}
 
 	for _, tt := range tests {

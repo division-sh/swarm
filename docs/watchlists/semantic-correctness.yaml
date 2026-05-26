@@ -350,6 +350,7 @@ nodes:
       - bootverify can accept root authored agents with conversation_mode session and session_scope global
       - NewLLMAgent, static materialization, recovery, agent_hire, and agent_reconfigure can admit the same authored global session config if they bypass the shared owner
       - session acquisition and conversation persistence can resolve global scope for normal actor contexts unless they consume the authored-boundary rule
+      - platform-owned/internal global agents require explicit runtime-only session_scope_authority and must not get it from authored YAML/tool/API payloads or role/type/mode heuristics
       - persisted/operator read surfaces must still display historical/internal global rows without becoming producers of authored global sessions
     representative_issues:
       - 557

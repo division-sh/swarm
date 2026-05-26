@@ -391,11 +391,12 @@ func TestExecAgentHire_RejectsAuthoredGlobalSessionScope(t *testing.T) {
 		FlowPath:    "review/inst-1",
 	}, map[string]any{
 		"config": map[string]any{
-			"id":                "worker-1",
-			"role":              "worker",
-			"manager_fallback":  "manager",
-			"conversation_mode": runtimesessions.RuntimeModeSession.String(),
-			"session_scope":     runtimesessions.SessionScopeGlobal.String(),
+			"id":                      "worker-1",
+			"role":                    "worker",
+			"manager_fallback":        "manager",
+			"conversation_mode":       runtimesessions.RuntimeModeSession.String(),
+			"session_scope":           runtimesessions.SessionScopeGlobal.String(),
+			"session_scope_authority": "platform_internal",
 		},
 	})
 	if err == nil {
@@ -493,7 +494,8 @@ func TestExecAgentReconfigure_RejectsAuthoredGlobalSessionScope(t *testing.T) {
 	}, map[string]any{
 		"agent_id": "worker-1",
 		"config": map[string]any{
-			"session_scope": runtimesessions.SessionScopeGlobal.String(),
+			"session_scope":           runtimesessions.SessionScopeGlobal.String(),
+			"session_scope_authority": "platform_internal",
 		},
 	})
 	if err == nil {

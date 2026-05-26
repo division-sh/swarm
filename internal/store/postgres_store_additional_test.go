@@ -5485,6 +5485,61 @@ func TestManagerStore_UpsertAgent_PersistsCanonicalControlPlaneOwnership(t *test
 	}
 }
 
+func TestManagerStore_UpsertAgent_PersistsPlatformInternalGlobalSessionAuthority(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	rec := runtimemanager.PersistedAgent{
+		Config: runtimeactors.AgentConfig{
+			ID:                    "platform-global-agent",
+			Type:                  "platform-service",
+			Role:                  "platform",
+			ModelTier:             "sonnet",
+			LLMBackend:            "api",
+			ConversationMode:      runtimesessions.RuntimeModeSession.String(),
+			SessionScope:          runtimesessions.SessionScopeGlobal.String(),
+			SessionScopeAuthority: runtimeactors.SessionScopeAuthorityPlatformInternal,
+			Config:                json.RawMessage(`{"system_prompt":"x"}`),
+		},
+		Status: "active",
+	}
+	if err := pg.UpsertAgent(ctx, rec); err != nil {
+		t.Fatalf("UpsertAgent(platform internal global): %v", err)
+	}
+
+	agents, err := pg.LoadAgents(ctx)
+	if err != nil {
+		t.Fatalf("LoadAgents: %v", err)
+	}
+	if len(agents) != 1 {
+		t.Fatalf("agent count = %d, want 1", len(agents))
+	}
+	got := agents[0].Config
+	if got.SessionScope != runtimesessions.SessionScopeGlobal.String() {
+		t.Fatalf("session_scope = %q, want global", got.SessionScope)
+	}
+	if !got.HasPlatformInternalSessionScopeAuthority() {
+		t.Fatalf("session_scope_authority = %q, want platform_internal", got.SessionScopeAuthority)
+	}
+
+	var runtimeDescriptorRaw []byte
+	if err := db.QueryRowContext(ctx, `
+		SELECT runtime_descriptor
+		FROM agents
+		WHERE agent_id = $1
+	`, rec.Config.ID).Scan(&runtimeDescriptorRaw); err != nil {
+		t.Fatalf("query persisted agent row: %v", err)
+	}
+	desc, err := decodePersistedAgentRuntimeDescriptor(runtimeDescriptorRaw)
+	if err != nil {
+		t.Fatalf("decodePersistedAgentRuntimeDescriptor: %v", err)
+	}
+	if desc.SessionScopeAuthority != runtimeactors.SessionScopeAuthorityPlatformInternal {
+		t.Fatalf("runtime_descriptor.session_scope_authority = %q, want platform_internal", desc.SessionScopeAuthority)
+	}
+}
+
 func TestProjectPersistedAgentConfig_UsesCanonicalLLMBackendProfiles(t *testing.T) {
 	projection, err := projectPersistedAgentConfig(runtimeactors.AgentConfig{
 		ID:               "agent-default-backend",

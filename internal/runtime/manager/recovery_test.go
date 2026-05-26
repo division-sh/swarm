@@ -417,6 +417,38 @@ func TestRecover_UsesCanonicalLoadedAgentMetadata(t *testing.T) {
 	}
 }
 
+func TestRecover_AllowsPlatformInternalGlobalSessionScope(t *testing.T) {
+	bus := &recoveryTestBus{}
+	store := &recoveryTestStore{
+		agents: []PersistedAgent{{
+			Config: models.AgentConfig{
+				ID:                    "platform-global-agent",
+				Type:                  "platform-service",
+				Role:                  "platform",
+				ModelTier:             "sonnet",
+				LLMBackend:            "api",
+				ConversationMode:      "session",
+				SessionScope:          "global",
+				SessionScopeAuthority: models.SessionScopeAuthorityPlatformInternal,
+				Config:                mustRecoveryJSON(t, map[string]any{"system_prompt": "x"}),
+			},
+			StartedAt: time.Now().UTC(),
+		}},
+	}
+	var hydrated models.AgentConfig
+	am := NewAgentManager(bus, func(cfg models.AgentConfig) (Agent, error) {
+		hydrated = cfg
+		return recoveryTestAgent{id: cfg.ID}, nil
+	}, store)
+
+	if err := am.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover(platform internal global): %v", err)
+	}
+	if hydrated.SessionScope != "global" || !hydrated.HasPlatformInternalSessionScopeAuthority() {
+		t.Fatalf("hydrated cfg = %+v, want platform internal global session", hydrated)
+	}
+}
+
 func TestRecover_UsesCanonicalPipelineReplayAftermathDiagnostics(t *testing.T) {
 	childID := "evt-replay"
 	parentID := "evt-parent"

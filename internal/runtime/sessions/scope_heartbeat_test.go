@@ -67,6 +67,21 @@ func TestResolveScope_RejectsAuthoredGlobalSessionScope(t *testing.T) {
 	}
 }
 
+func TestResolveScope_AllowsPlatformInternalGlobalSessionScope(t *testing.T) {
+	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{
+		ID:                    "platform-agent",
+		Role:                  "platform",
+		SessionScopeAuthority: runtimeactors.SessionScopeAuthorityPlatformInternal,
+	})
+	scope, err := ResolveScope(ctx, RuntimeModeSession, SessionScopeGlobal, "")
+	if err != nil {
+		t.Fatalf("ResolveScope(platform internal global): %v", err)
+	}
+	if scope.Scope != SessionScopeGlobal || scope.ScopeKey != SessionScopeGlobal.String() {
+		t.Fatalf("unexpected platform internal global scope: %+v", scope)
+	}
+}
+
 func TestResolveScope_InvalidSessionConfigurationsFailClosed(t *testing.T) {
 	if _, err := ResolveScope(context.Background(), RuntimeModeSession, "", ""); err == nil {
 		t.Fatal("expected session scope without declaration to fail")
@@ -107,6 +122,22 @@ func TestValidateAgentSessionScopeConfig_RejectsAuthoredGlobalSessionScope(t *te
 	}
 	if got := err.Error(); got != authoredGlobalSessionScopeError {
 		t.Fatalf("ValidateAgentSessionScopeConfig error = %q", got)
+	}
+}
+
+func TestValidateAgentSessionScopeConfig_AllowsPlatformInternalGlobalSessionScope(t *testing.T) {
+	scope, err := ValidateAgentSessionScopeConfig(runtimeactors.AgentConfig{
+		ID:                    "agent-global",
+		Role:                  "platform",
+		ConversationMode:      RuntimeModeSession.String(),
+		SessionScope:          SessionScopeGlobal.String(),
+		SessionScopeAuthority: runtimeactors.SessionScopeAuthorityPlatformInternal,
+	})
+	if err != nil {
+		t.Fatalf("ValidateAgentSessionScopeConfig(platform internal global): %v", err)
+	}
+	if scope != SessionScopeGlobal {
+		t.Fatalf("scope = %q, want %q", scope, SessionScopeGlobal)
 	}
 }
 
