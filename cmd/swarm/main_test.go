@@ -107,7 +107,7 @@ func TestCLI_RootNoArgsPrintsHelpAndDoesNotStartRuntime(t *testing.T) {
 		}
 	}
 	for _, retired := range []string{"fork", "investigate"} {
-		if strings.Contains(stdout.String(), "\n  "+retired) {
+		if strings.Contains(stdout.String(), "\n  "+retired+" ") {
 			t.Fatalf("root help advertises retired command %q:\n%s", retired, stdout.String())
 		}
 	}
@@ -211,7 +211,7 @@ func TestCLI_RetiredCommandsHiddenFromHelpAndCompletion(t *testing.T) {
 				t.Fatalf("root help code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 			}
 			for _, retired := range []string{"fork", "investigate"} {
-				if strings.Contains(stdout.String(), "\n  "+retired) {
+				if strings.Contains(stdout.String(), "\n  "+retired+" ") {
 					t.Fatalf("root help advertises retired command %q:\n%s", retired, stdout.String())
 				}
 			}

@@ -599,8 +599,8 @@ func TestCLIOutputModeExceptionRowsFailClosedBeforeSideEffects(t *testing.T) {
 		{name: "serve log-level", args: []string{"serve", "--log-level", "debug"}, wantStderr: "unknown flag"},
 		{name: "retired investigate", args: []string{"investigate", "runs", "--json"}, wantStderr: "retired in CLI v2"},
 		{name: "retired investigate no-color", args: []string{"investigate", "runs", "--no-color"}, wantStderr: "retired in CLI v2"},
-		{name: "absent forkchat", args: []string{"forkchat", "--json"}, wantStderr: "unknown command"},
-		{name: "absent forkchat no-color", args: []string{"forkchat", "--no-color"}, wantStderr: "unknown command"},
+		{name: "forkchat parent", args: []string{"forkchat", "--json"}, wantStderr: "unknown flag: --json"},
+		{name: "forkchat parent no-color", args: []string{"forkchat", "--no-color"}, wantStderr: "unknown flag: --no-color"},
 		{name: "split log-level", args: []string{"logs", "--log-level", "debug"}, wantStderr: "unknown flag"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

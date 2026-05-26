@@ -265,7 +265,7 @@ func TestCLILoggingUnsupportedSurfacesFailClosedBeforeSideEffects(t *testing.T) 
 		{name: "trace", args: []string{"trace", "--log-level", "debug"}, wantStderr: "unknown flag"},
 		{name: "run", args: []string{"run", "--log-level", "debug"}, wantStderr: "unknown flag"},
 		{name: "retired investigate", args: []string{"investigate", "runs", "--log-level", "debug"}, wantStderr: "retired in CLI v2"},
-		{name: "absent forkchat", args: []string{"forkchat", "--log-level", "debug"}, wantStderr: "unknown flag"},
+		{name: "forkchat parent", args: []string{"forkchat", "--log-level", "debug"}, wantStderr: "unknown flag"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			beforeRPC := rpcCalls.Load()

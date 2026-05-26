@@ -29,6 +29,7 @@ func TestCLIRuntimeStateAPIConsumersAreExplicitlyAccounted(t *testing.T) {
 		"entities.go":             {},
 		"event_publish.go":        {},
 		"events.go":               {},
+		"forkchat.go":             {},
 		"incidents.go":            {},
 		"logs.go":                 {},
 		"run_command.go":          {},
