@@ -4243,14 +4243,15 @@ func TestRunServeRuntimeVerboseEmitsPlatformSpecBootSequence(t *testing.T) {
 			return storeBundle{}, err
 		}
 		return storeBundle{
-			Postgres:          runtimePG,
-			SQLDB:             runtimePG.DB,
-			EventStore:        runtimePG,
-			SessionRegistry:   sessions.NewPostgresRegistry(runtimePG.DB, cfg.LLM.Session.LockTTL),
-			ConversationStore: runtimePG,
-			ManagerStore:      runtimePG,
-			ScheduleStore:     runtimePG,
-			TurnStore:         runtimePG,
+			Postgres:           runtimePG,
+			SQLDB:              runtimePG.DB,
+			SchemaBootstrapper: runtimePG,
+			EventStore:         runtimePG,
+			SessionRegistry:    sessions.NewPostgresRegistry(runtimePG.DB, cfg.LLM.Session.LockTTL),
+			ConversationStore:  runtimePG,
+			ManagerStore:       runtimePG,
+			ScheduleStore:      runtimePG,
+			TurnStore:          runtimePG,
 		}, nil
 	}
 	configuredWorkspaceLifecycleForServe = func(*sql.DB, string, string, semanticview.Source) serveWorkspaceLifecycle {
@@ -4333,14 +4334,15 @@ func TestRunServeRuntimeListenerBindFailuresExitBeforeReadiness(t *testing.T) {
 					return storeBundle{}, err
 				}
 				return storeBundle{
-					Postgres:          runtimePG,
-					SQLDB:             runtimePG.DB,
-					EventStore:        runtimePG,
-					SessionRegistry:   sessions.NewPostgresRegistry(runtimePG.DB, cfg.LLM.Session.LockTTL),
-					ConversationStore: runtimePG,
-					ManagerStore:      runtimePG,
-					ScheduleStore:     runtimePG,
-					TurnStore:         runtimePG,
+					Postgres:           runtimePG,
+					SQLDB:              runtimePG.DB,
+					SchemaBootstrapper: runtimePG,
+					EventStore:         runtimePG,
+					SessionRegistry:    sessions.NewPostgresRegistry(runtimePG.DB, cfg.LLM.Session.LockTTL),
+					ConversationStore:  runtimePG,
+					ManagerStore:       runtimePG,
+					ScheduleStore:      runtimePG,
+					TurnStore:          runtimePG,
 				}, nil
 			}
 			configuredWorkspaceLifecycleForServe = func(*sql.DB, string, string, semanticview.Source) serveWorkspaceLifecycle {
@@ -4497,14 +4499,15 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 			return storeBundle{}, err
 		}
 		return storeBundle{
-			Postgres:          runtimePG,
-			SQLDB:             runtimePG.DB,
-			EventStore:        runtimePG,
-			SessionRegistry:   sessions.NewPostgresRegistry(runtimePG.DB, cfg.LLM.Session.LockTTL),
-			ConversationStore: runtimePG,
-			ManagerStore:      runtimePG,
-			ScheduleStore:     runtimePG,
-			TurnStore:         runtimePG,
+			Postgres:           runtimePG,
+			SQLDB:              runtimePG.DB,
+			SchemaBootstrapper: runtimePG,
+			EventStore:         runtimePG,
+			SessionRegistry:    sessions.NewPostgresRegistry(runtimePG.DB, cfg.LLM.Session.LockTTL),
+			ConversationStore:  runtimePG,
+			ManagerStore:       runtimePG,
+			ScheduleStore:      runtimePG,
+			TurnStore:          runtimePG,
 		}, nil
 	}
 	configuredWorkspaceLifecycleForServe = func(*sql.DB, string, string, semanticview.Source) serveWorkspaceLifecycle {
