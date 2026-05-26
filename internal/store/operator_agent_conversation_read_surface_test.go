@@ -609,6 +609,57 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsPromotesCanonicalOw
 	}
 }
 
+func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsDoesNotRequireConversationOwners(t *testing.T) {
+	dsn, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	pg, err := NewPostgresStore(dsn)
+	if err != nil {
+		t.Fatalf("NewPostgresStore: %v", err)
+	}
+	t.Cleanup(func() { _ = pg.DB.Close() })
+
+	ctx := context.Background()
+	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+		Config: runtimeactors.AgentConfig{
+			ID:               "agent-1",
+			Role:             "researcher",
+			Type:             "managed",
+			ModelTier:        "haiku",
+			ConversationMode: runtimesessions.RuntimeModeTask.String(),
+			Config:           json.RawMessage(`{"system_prompt":"diagnose"}`),
+		},
+		Status:    "active",
+		StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("UpsertAgent: %v", err)
+	}
+
+	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
+		caps: StoreSchemaCapabilities{
+			Agents: SchemaFlavorCanonical,
+			Events: EventSchemaCapabilities{
+				Log:        SchemaFlavorCanonical,
+				LogRunID:   true,
+				Deliveries: SchemaFlavorCanonical,
+			},
+		},
+	}, 0)
+
+	result, err := reader.LoadOperatorAgentDeliveryDiagnostics(ctx, "agent-1", OperatorAgentDeliveryDiagnosticsOptions{})
+	if err != nil {
+		t.Fatalf("LoadOperatorAgentDeliveryDiagnostics: %v", err)
+	}
+	if result.AgentID != "agent-1" {
+		t.Fatalf("agent_id = %q", result.AgentID)
+	}
+	if result.Summary.Failures24h != 0 || result.Summary.DeadLetters24h != 0 {
+		t.Fatalf("summary = %#v, want zero counts", result.Summary)
+	}
+	if len(result.Failures) != 0 || len(result.DeadLetters) != 0 {
+		t.Fatalf("diagnostics = failures %#v dead_letters %#v, want empty", result.Failures, result.DeadLetters)
+	}
+}
+
 func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsFailsClosedOnDeadLetterMismatch(t *testing.T) {
 	dsn, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
