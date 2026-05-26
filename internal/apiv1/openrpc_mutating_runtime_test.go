@@ -444,6 +444,7 @@ func mutatingHTTPRuntimeErrorProbes() []mutatingHTTPRuntimeErrorProbe {
 		{Method: "run.start", Params: mergeProbeParams(validLegacyEvent, map[string]any{"bundle_ref": map[string]any{"fingerprint": badBundleFingerprint}, "run_id": runID}), Code: BundleMismatchCode},
 		{Method: "run.start", Params: mergeProbeParams(validLegacyEvent, map[string]any{"bundle_ref": map[string]any{"label": "latest"}, "run_id": runID}), Code: UnsupportedBundleRefCode},
 		{Method: "run.start", Params: mergeProbeParams(validLegacyEvent, map[string]any{"event_name": "scan.missing", "run_id": runID}), Code: EventNotDeclaredCode},
+		{Method: "run.start", Params: mergeProbeParams(validLegacyEvent, map[string]any{"run_id": runID}), Code: EventPublishFailedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.events.publishErr = errors.New("simulated publish failure") }}},
 		{Method: "run.start", Params: mergeProbeParams(validLegacyEvent, map[string]any{"run_id": runID}), Code: PayloadValidationFailedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.events.publishErr = runtimebus.ErrPayloadValidation }}},
 
 		{Method: "run.stop", Params: map[string]any{"run_id": runID, "idempotency_key": "idem-error"}, Code: RunNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {

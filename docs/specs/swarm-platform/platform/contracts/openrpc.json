@@ -2622,6 +2622,15 @@
                   },
                   "event_name": {
                     "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "routable_events": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
                   }
                 },
                 "required": [
@@ -5004,10 +5013,76 @@
                   },
                   "event_name": {
                     "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "routable_events": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
                   }
                 },
                 "required": [
                   "event_name"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32007,
+          "message": "Application error: EVENT_PUBLISH_FAILED",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "EVENT_PUBLISH_FAILED",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "event_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "event_name": {
+                    "type": "string"
+                  },
+                  "phase": {
+                    "enum": [
+                      "publish"
+                    ],
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "run_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "event_name",
+                  "event_id",
+                  "run_id",
+                  "phase",
+                  "reason"
                 ],
                 "type": "object"
               },
@@ -8857,6 +8932,15 @@
                 },
                 "event_name": {
                   "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "routable_events": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
                 }
               },
               "required": [
