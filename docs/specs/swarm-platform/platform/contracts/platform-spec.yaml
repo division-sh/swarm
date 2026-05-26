@@ -2370,6 +2370,9 @@ engine:
         value_notes:
           global: Reserved for platform-owned/internal system services and historical/read-only persisted runtime rows.
             Product-authored normal agents in agents.yaml MUST NOT declare session_scope global.
+        internal_authority_marker: 'Platform-owned/internal services that require session_scope global must carry the
+          runtime-only persisted descriptor field session_scope_authority: platform_internal. This marker is not an
+          agents.yaml/API/tool-input field and MUST NOT be inferable from authored type, role, mode, tools, or opaque config.'
       canonical_rules:
         task: 'conversation_mode task: session_scope must be absent.'
         session_global: 'conversation_mode session + session_scope global: one session per agent across
@@ -2385,6 +2388,8 @@ engine:
           flow.'
         authored_session_global: 'Authored normal agents with session + session_scope global are a boot/runtime error.
           Global reusable sessions are reserved for platform-owned/internal system-service runtime state.'
+        forged_session_scope_authority: 'Authored agents and runtime tool payloads cannot set session_scope_authority.
+          Any appearance in opaque config is invalid runtime-owned metadata.'
         session_entity: 'session + session_scope entity is a boot error. Use session_per_entity.'
         entity_missing: 'session_per_entity + session_scope absent is a boot error.'
         entity_global: 'session_per_entity + session_scope global is a boot error.'
@@ -2395,7 +2400,8 @@ engine:
         rules:
         - Validate conversation_mode + session_scope against the canonical combinations.
         - Authored normal agents MUST NOT declare session_scope global. Runtime mutators such as agent_hire and
-          agent_reconfigure must enforce the same rejection as boot validation.
+          agent_reconfigure must enforce the same rejection as boot validation and must not accept
+          session_scope_authority from tool/API/authored payloads.
         - No inference. No fallback. Missing required session_scope is a boot error.
         - session_scope flow requires a flow-scoped declaration with resolvable flow-instance context.
           Root-level agents cannot declare session_scope flow.
@@ -3875,8 +3881,10 @@ platform_tables:
       description: 'Runtime agent registry. One row per agent instance. Carries the full persisted runtime descriptor:
         role/model_tier/llm_backend/conversation_mode/parent_agent_id as typed columns, subscriptions/emit_events/tools/permissions
         as JSONB arrays, and runtime_descriptor JSONB for the remaining control-plane fields that do not already have a
-        first-class persisted column (for example type, mode, session_scope, workspace_class, manager_fallback, max_turns_per_task,
-        native_tools). config is opaque agent-specific payload only; the platform stores and passes it through but does not read config
+        first-class persisted column (for example type, mode, session_scope, session_scope_authority, workspace_class,
+        manager_fallback, max_turns_per_task, native_tools). session_scope_authority is a runtime-owned descriptor
+        whose only valid value is platform_internal and is required for platform-owned/internal agents that intentionally
+        use session_scope global. config is opaque agent-specific payload only; the platform stores and passes it through but does not read config
         for runtime control semantics. flow_instance nullable for root-level agents not scoped to any flow. entity_id nullable
         — set only for agents scoped to a specific entity (rare). The contract in agents.yaml is the source of truth and
         permissions_bundle is resolved at boot into the persisted permissions array rather than being stored directly.

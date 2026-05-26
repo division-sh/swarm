@@ -155,3 +155,30 @@ func TestReconfigureAgent_RejectsAuthoredGlobalSessionScope(t *testing.T) {
 		t.Fatalf("ReconfigureAgent error = %q", got)
 	}
 }
+
+func TestSpawnAgent_AllowsPlatformInternalGlobalSessionScope(t *testing.T) {
+	am := NewAgentManager(nil, func(cfg models.AgentConfig) (Agent, error) {
+		if _, err := sessions.ValidateAgentSessionScopeConfig(cfg); err != nil {
+			return nil, err
+		}
+		return reconfigureTestAgent{id: cfg.ID}, nil
+	})
+
+	cfg := models.AgentConfig{
+		ID:                    "platform-global-agent",
+		Role:                  "platform",
+		ConversationMode:      sessions.RuntimeModeSession.String(),
+		SessionScope:          sessions.SessionScopeGlobal.String(),
+		SessionScopeAuthority: models.SessionScopeAuthorityPlatformInternal,
+	}
+	if err := am.SpawnAgent(cfg); err != nil {
+		t.Fatalf("SpawnAgent(platform internal global): %v", err)
+	}
+	got, ok := am.GetAgentConfig(cfg.ID)
+	if !ok {
+		t.Fatalf("expected spawned platform internal agent")
+	}
+	if got.SessionScope != sessions.SessionScopeGlobal.String() || !got.HasPlatformInternalSessionScopeAuthority() {
+		t.Fatalf("spawned cfg = %+v, want platform internal global session", got)
+	}
+}

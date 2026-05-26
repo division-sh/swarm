@@ -13,13 +13,14 @@ import (
 )
 
 type persistedAgentRuntimeDescriptor struct {
-	Type            string                         `json:"type,omitempty"`
-	Mode            string                         `json:"mode,omitempty"`
-	SessionScope    string                         `json:"session_scope,omitempty"`
-	MaxTurnsPerTask int                            `json:"max_turns_per_task,omitempty"`
-	NativeTools     runtimeactors.NativeToolConfig `json:"native_tools,omitempty"`
-	WorkspaceClass  string                         `json:"workspace_class,omitempty"`
-	ManagerFallback string                         `json:"manager_fallback,omitempty"`
+	Type                  string                         `json:"type,omitempty"`
+	Mode                  string                         `json:"mode,omitempty"`
+	SessionScope          string                         `json:"session_scope,omitempty"`
+	SessionScopeAuthority string                         `json:"session_scope_authority,omitempty"`
+	MaxTurnsPerTask       int                            `json:"max_turns_per_task,omitempty"`
+	NativeTools           runtimeactors.NativeToolConfig `json:"native_tools,omitempty"`
+	WorkspaceClass        string                         `json:"workspace_class,omitempty"`
+	ManagerFallback       string                         `json:"manager_fallback,omitempty"`
 }
 
 type persistedAgentProjection struct {
@@ -40,32 +41,34 @@ type persistedAgentProjection struct {
 }
 
 var runtimeConfigKeys = map[string]struct{}{
-	"type":               {},
-	"mode":               {},
-	"model_tier":         {},
-	"llm_backend":        {},
-	"conversation_mode":  {},
-	"session_scope":      {},
-	"max_turns_per_task": {},
-	"subscriptions":      {},
-	"emit_events":        {},
-	"tools":              {},
-	"permissions":        {},
-	"native_tools":       {},
-	"workspace_class":    {},
-	"manager_fallback":   {},
-	"flow_path":          {},
-	"flow_instance":      {},
+	"type":                    {},
+	"mode":                    {},
+	"model_tier":              {},
+	"llm_backend":             {},
+	"conversation_mode":       {},
+	"session_scope":           {},
+	"session_scope_authority": {},
+	"max_turns_per_task":      {},
+	"subscriptions":           {},
+	"emit_events":             {},
+	"tools":                   {},
+	"permissions":             {},
+	"native_tools":            {},
+	"workspace_class":         {},
+	"manager_fallback":        {},
+	"flow_path":               {},
+	"flow_instance":           {},
 }
 
 var persistedAgentRuntimeDescriptorKeys = map[string]struct{}{
-	"type":               {},
-	"mode":               {},
-	"session_scope":      {},
-	"max_turns_per_task": {},
-	"native_tools":       {},
-	"workspace_class":    {},
-	"manager_fallback":   {},
+	"type":                    {},
+	"mode":                    {},
+	"session_scope":           {},
+	"session_scope_authority": {},
+	"max_turns_per_task":      {},
+	"native_tools":            {},
+	"workspace_class":         {},
+	"manager_fallback":        {},
 }
 
 func mergeAgentConfigJSON(cfg runtimeactors.AgentConfig) ([]byte, error) {
@@ -170,26 +173,27 @@ func hydratePersistedAgentConfig(row persistedAgentProjection) (runtimeactors.Ag
 	}
 
 	cfg := runtimeactors.AgentConfig{
-		ID:               strings.TrimSpace(row.AgentID),
-		Type:             desc.Type,
-		Role:             strings.TrimSpace(row.Role),
-		Mode:             desc.Mode,
-		ModelTier:        modelTier,
-		LLMBackend:       llmBackend,
-		ConversationMode: conversationMode.String(),
-		SessionScope:     sessionScope.String(),
-		MaxTurnsPerTask:  desc.MaxTurnsPerTask,
-		Subscriptions:    decodeJSONStringList(row.SubscriptionsJSON),
-		EmitEvents:       decodeJSONStringList(row.EmitEventsJSON),
-		Tools:            decodeJSONStringList(row.ToolsJSON),
-		Permissions:      decodeJSONStringList(row.PermissionsJSON),
-		NativeTools:      desc.NativeTools,
-		WorkspaceClass:   desc.WorkspaceClass,
-		ManagerFallback:  desc.ManagerFallback,
-		FlowPath:         strings.Trim(strings.TrimSpace(row.FlowInstance), "/"),
-		EntityID:         strings.TrimSpace(row.EntityID),
-		ParentAgent:      strings.TrimSpace(row.ParentAgentID),
-		Config:           append(json.RawMessage(nil), row.ConfigJSON...),
+		ID:                    strings.TrimSpace(row.AgentID),
+		Type:                  desc.Type,
+		Role:                  strings.TrimSpace(row.Role),
+		Mode:                  desc.Mode,
+		ModelTier:             modelTier,
+		LLMBackend:            llmBackend,
+		ConversationMode:      conversationMode.String(),
+		SessionScope:          sessionScope.String(),
+		SessionScopeAuthority: desc.SessionScopeAuthority,
+		MaxTurnsPerTask:       desc.MaxTurnsPerTask,
+		Subscriptions:         decodeJSONStringList(row.SubscriptionsJSON),
+		EmitEvents:            decodeJSONStringList(row.EmitEventsJSON),
+		Tools:                 decodeJSONStringList(row.ToolsJSON),
+		Permissions:           decodeJSONStringList(row.PermissionsJSON),
+		NativeTools:           desc.NativeTools,
+		WorkspaceClass:        desc.WorkspaceClass,
+		ManagerFallback:       desc.ManagerFallback,
+		FlowPath:              strings.Trim(strings.TrimSpace(row.FlowInstance), "/"),
+		EntityID:              strings.TrimSpace(row.EntityID),
+		ParentAgent:           strings.TrimSpace(row.ParentAgentID),
+		Config:                append(json.RawMessage(nil), row.ConfigJSON...),
 	}
 	cfg.NormalizeEntityID()
 	cfg.NormalizeRuntimeDescriptor()
@@ -201,13 +205,14 @@ func hydratePersistedAgentConfig(row persistedAgentProjection) (runtimeactors.Ag
 
 func marshalPersistedAgentRuntimeDescriptor(cfg runtimeactors.AgentConfig, modelTier string) ([]byte, error) {
 	desc := persistedAgentRuntimeDescriptor{
-		Type:            agentPersistedType(cfg, modelTier),
-		Mode:            strings.TrimSpace(cfg.Mode),
-		SessionScope:    strings.TrimSpace(cfg.SessionScope),
-		MaxTurnsPerTask: cfg.MaxTurnsPerTask,
-		NativeTools:     cfg.NativeTools,
-		WorkspaceClass:  strings.TrimSpace(cfg.WorkspaceClass),
-		ManagerFallback: strings.TrimSpace(cfg.ManagerFallback),
+		Type:                  agentPersistedType(cfg, modelTier),
+		Mode:                  strings.TrimSpace(cfg.Mode),
+		SessionScope:          strings.TrimSpace(cfg.SessionScope),
+		SessionScopeAuthority: strings.TrimSpace(cfg.SessionScopeAuthority),
+		MaxTurnsPerTask:       cfg.MaxTurnsPerTask,
+		NativeTools:           cfg.NativeTools,
+		WorkspaceClass:        strings.TrimSpace(cfg.WorkspaceClass),
+		ManagerFallback:       strings.TrimSpace(cfg.ManagerFallback),
 	}
 	if !desc.NativeTools.Any() {
 		desc.NativeTools = runtimeactors.NativeToolConfig{}
@@ -236,8 +241,12 @@ func decodePersistedAgentRuntimeDescriptor(raw []byte) (persistedAgentRuntimeDes
 	desc.Type = strings.TrimSpace(desc.Type)
 	desc.Mode = strings.TrimSpace(desc.Mode)
 	desc.SessionScope = strings.TrimSpace(desc.SessionScope)
+	desc.SessionScopeAuthority = strings.TrimSpace(desc.SessionScopeAuthority)
 	desc.WorkspaceClass = strings.TrimSpace(desc.WorkspaceClass)
 	desc.ManagerFallback = strings.TrimSpace(desc.ManagerFallback)
+	if desc.SessionScopeAuthority != "" && desc.SessionScopeAuthority != runtimeactors.SessionScopeAuthorityPlatformInternal {
+		return persistedAgentRuntimeDescriptor{}, fmt.Errorf("unsupported session_scope_authority %q", desc.SessionScopeAuthority)
+	}
 	if desc.Type == "" {
 		return persistedAgentRuntimeDescriptor{}, fmt.Errorf("missing type")
 	}

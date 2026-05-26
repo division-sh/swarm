@@ -215,7 +215,11 @@ func ValidateAgentSessionScopeConfig(actor runtimeactors.AgentConfig) (SessionSc
 		}
 		runtimeMode = parsedMode
 	}
-	sessionScope, err := ValidateAuthoredSessionScopeIntent(runtimeMode, actor.SessionScope)
+	validateIntent := ValidateAuthoredSessionScopeIntent
+	if actor.HasPlatformInternalSessionScopeAuthority() {
+		validateIntent = ValidateSessionScopeIntent
+	}
+	sessionScope, err := validateIntent(runtimeMode, actor.SessionScope)
 	if err != nil {
 		return "", err
 	}
@@ -263,7 +267,7 @@ func ResolveScope(ctx context.Context, runtimeMode RuntimeMode, sessionScope Ses
 	mode := runtimeMode
 	actor, actorOK := runtimeactors.ActorFromContext(ctx)
 	validateIntent := ValidateSessionScopeIntent
-	if actorOK {
+	if actorOK && !actor.HasPlatformInternalSessionScopeAuthority() {
 		validateIntent = ValidateAuthoredSessionScopeIntent
 	}
 	resolvedScope, err := validateIntent(mode, sessionScope.String())
