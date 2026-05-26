@@ -13,6 +13,104 @@
   ],
   "methods": [
     {
+      "name": "agent.delivery_diagnostics",
+      "description": "Read the owner-backed per-agent delivery diagnostics slice for failed\ndeliveries and terminal dead-letter deliveries. This method is a\nseparate owner from agent.diagnose: AgentDiagnosis remains lean and must\nnot expose recent failures or dead letters. The API handler validates\nagent_id, list bounds, cursors, and unknown params, then consumes one\nnamed per-agent delivery diagnostics read owner. It must not locally\nreconstruct the shape from run.trace, run.diagnose, event.list,\nevent.get, event_receipts, dashboard helpers, CLI state, runtime memory,\nor EventBus data.\n\nFailed-delivery rows are sourced from canonical agent\nevent_deliveries rows with status failed. Dead-letter rows are sourced\nfrom canonical agent event_deliveries rows with status dead_letter and\nreconciled with event-scoped dead_letters records by original event id.\nA terminal dead-letter delivery without at least one matching\ndead_letters record is malformed owner data and must fail closed rather\nthan silently reporting a partial fact. Dead-letter records for events\nthat do not have a terminal delivery for this agent are not attributed to\nthis agent by this owner.\n\nDetail rows are ordered by the canonical delivery occurrence watermark\nDESC, then delivery_id DESC. The occurrence watermark is currently\nCOALESCE(event_deliveries.delivered_at, event_deliveries.created_at).\nfailure_cursor and dead_letter_cursor are independent opaque cursors\nover that ordering. failures_24h and dead_letters_24h are rolling\n24-hour counts over the same occurrence watermark. Detail lists return\nretained rows subject to store retention and explicit per-list limits.\nEmpty lists are represented as empty arrays.\n",
+      "params": [
+        {
+          "name": "agent_id",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "failure_limit",
+          "required": false,
+          "description": "Max failed-delivery detail rows to return.",
+          "schema": {
+            "default": 50,
+            "maximum": 200,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        {
+          "name": "failure_cursor",
+          "required": false,
+          "description": "Opaque cursor returned by failures_next_cursor for the next failed-delivery page.",
+          "schema": {
+            "$ref": "#/components/schemas/Cursor"
+          }
+        },
+        {
+          "name": "dead_letter_limit",
+          "required": false,
+          "description": "Max terminal dead-letter delivery detail rows to return.",
+          "schema": {
+            "default": 50,
+            "maximum": 200,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        {
+          "name": "dead_letter_cursor",
+          "required": false,
+          "description": "Opaque cursor returned by dead_letters_next_cursor for the next terminal dead-letter delivery page.",
+          "schema": {
+            "$ref": "#/components/schemas/Cursor"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/AgentDeliveryDiagnostics"
+        }
+      },
+      "errors": [
+        {
+          "code": -32000,
+          "message": "Application error: AGENT_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "AGENT_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "agent_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "agent_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
       "name": "agent.diagnose",
       "description": "Read the owner-backed diagnosis slice for one agent. This method is\nlimited to agent identity/status refs, current/last conversation refs,\npending-delivery queue summary/detail evidence, and optional delivery\nlifecycle evidence. It may also return runtime_state.watchdog as a\nnarrow projection of the canonical active session watchdog descriptor,\nactive as selected active-session latest-turn refs, and\nlast_tool_outcome as compact selected active-session latest-turn\ncanonical tool-result evidence. active is omitted when no active live\nsession is selected or the selected session has no latest turn.\nactive.turn_id is required when active is present; active.task_id and\nactive.entity_id are omitted when empty or absent. active.entity_id is\nthe latest selected agent_turns.entity_id dispatch entity and must not\nfall back to the agent configured/effective entity, task target entity,\nrole-scoped current-entity tool context, dashboard projection,\nconversation API response, or stale session evidence.\nlast_tool_outcome is omitted when no active live session is selected,\nno latest turn exists, no canonical turn summary exists, or the\ncanonical summary has no tool result. last_tool_outcome.ok is the\nselected turn parse_ok value and is not a per-tool execution status;\nricher per-tool status, latency, completed_at, and error diagnostics\nremain split.\nruntime_state.watchdog is omitted when no active live session or no\nactive-session watchdog evidence exists, and malformed watchdog data\nfails closed. Queue details are paged with queue_limit and\nqueue_cursor, ordered by events.created_at ASC then events.event_id ASC.\nAgentPendingDelivery.enqueued_at uses the same timestamp owner as\noldest_pending_age_seconds. AgentPendingDelivery.attempts is the\ncanonical recorded retry counter from event_deliveries.retry_count, with\nno API-layer +1 or status arithmetic. The API handler consumes the\ncanonical agent diagnosis read owner directly, including its\nwatchdog-backed runtime_state sub-owner, selected-turn active sub-owner,\nand selected-turn last_tool_outcome sub-owner. It must not locally join\nconversation, run, trace, token, CLI, or dashboard owners, and it must\nnot expose the full runtime_state\nenum, top-level watchdog, run_id, bundle_version, actual in-flight\nactive work, configured/effective current entity, task target entity,\nrole-scoped current entity, token usage, recent failures, or dead\nletters.\n",
       "params": [
@@ -6221,6 +6319,170 @@
   ],
   "components": {
     "schemas": {
+      "AgentDeadLetterDelivery": {
+        "additionalProperties": false,
+        "properties": {
+          "dead_letter_records": {
+            "description": "Event-scoped dead-letter records reconciled to this terminal agent delivery through the original event id. A terminal dead-letter delivery without at least one matching record is malformed owner data and fails closed.",
+            "items": {
+              "$ref": "#/components/schemas/DeadLetterRecord"
+            },
+            "type": "array"
+          },
+          "delivery_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "entity_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "event_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "event_name": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "last_error": {
+            "type": "string"
+          },
+          "occurred_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "Canonical delivery occurrence watermark, currently COALESCE(event_deliveries.delivered_at, event_deliveries.created_at)."
+          },
+          "reason_code": {
+            "type": "string"
+          },
+          "retry_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "run_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "status": {
+            "const": "dead_letter",
+            "description": "Terminal dead-letter delivery subfact from the canonical event_deliveries delivery status owner.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "delivery_id",
+          "event_id",
+          "event_name",
+          "status",
+          "retry_count",
+          "occurred_at",
+          "dead_letter_records"
+        ],
+        "type": "object"
+      },
+      "AgentDeliveryDiagnostics": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "dead_letters": {
+            "description": "Recent retained terminal dead-letter delivery rows for this agent, ordered by occurred_at DESC then delivery_id DESC.",
+            "items": {
+              "$ref": "#/components/schemas/AgentDeadLetterDelivery"
+            },
+            "type": "array"
+          },
+          "dead_letters_next_cursor": {
+            "$ref": "#/components/schemas/Cursor"
+          },
+          "failures": {
+            "description": "Recent retained failed delivery rows for this agent, ordered by occurred_at DESC then delivery_id DESC.",
+            "items": {
+              "$ref": "#/components/schemas/AgentDeliveryFailure"
+            },
+            "type": "array"
+          },
+          "failures_next_cursor": {
+            "$ref": "#/components/schemas/Cursor"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/AgentDeliveryDiagnosticsSummary"
+          }
+        },
+        "required": [
+          "agent_id",
+          "summary",
+          "failures",
+          "dead_letters"
+        ],
+        "type": "object"
+      },
+      "AgentDeliveryDiagnosticsSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "dead_letters_24h": {
+            "description": "Rolling 24-hour count of terminal dead-letter agent delivery rows using the same occurrence watermark as AgentDeadLetterDelivery.occurred_at.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "failures_24h": {
+            "description": "Rolling 24-hour count of failed agent delivery rows using the same occurrence watermark as AgentDeliveryFailure.occurred_at.",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "failures_24h",
+          "dead_letters_24h"
+        ],
+        "type": "object"
+      },
+      "AgentDeliveryFailure": {
+        "additionalProperties": false,
+        "properties": {
+          "delivery_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "entity_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "event_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "event_name": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "last_error": {
+            "type": "string"
+          },
+          "occurred_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "Canonical delivery occurrence watermark, currently COALESCE(event_deliveries.delivered_at, event_deliveries.created_at)."
+          },
+          "reason_code": {
+            "type": "string"
+          },
+          "retry_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "run_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "status": {
+            "const": "failed",
+            "description": "Failed-delivery subfact from the canonical event_deliveries delivery status owner.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "delivery_id",
+          "event_id",
+          "event_name",
+          "status",
+          "retry_count",
+          "occurred_at"
+        ],
+        "type": "object"
+      },
       "AgentDeliveryLifecycle": {
         "additionalProperties": false,
         "properties": {

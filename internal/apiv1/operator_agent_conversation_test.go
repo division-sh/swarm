@@ -13,29 +13,33 @@ import (
 )
 
 type fakeAgentConversationReadStore struct {
-	listAgentsResult              store.OperatorAgentListResult
-	listAgentsErr                 error
-	agentResult                   store.OperatorAgentDetail
-	agentErr                      error
-	agentDiagnosisResult          store.OperatorAgentDiagnosis
-	agentDiagnosisErr             error
-	listConversationsResult       store.OperatorConversationListResult
-	listConversationsErr          error
-	conversationResult            store.OperatorConversationDetail
-	conversationErr               error
-	conversationTurnResult        store.OperatorConversationTurnDetail
-	conversationTurnErr           error
-	currentConversationResult     *store.OperatorConversationDetail
-	currentConversationErr        error
-	lastAgentList                 store.OperatorAgentListOptions
-	lastConversationList          store.OperatorConversationListOptions
-	lastAgentID                   string
-	lastAgentDiagnosisID          string
-	lastAgentDiagnosisOptions     store.OperatorAgentDiagnosisOptions
-	lastConversationSessionID     string
-	lastConversationTurnSessionID string
-	lastConversationTurnIndex     int
-	lastCurrentConversationFor    string
+	listAgentsResult                    store.OperatorAgentListResult
+	listAgentsErr                       error
+	agentResult                         store.OperatorAgentDetail
+	agentErr                            error
+	agentDiagnosisResult                store.OperatorAgentDiagnosis
+	agentDiagnosisErr                   error
+	agentDeliveryDiagnosticsResult      store.OperatorAgentDeliveryDiagnostics
+	agentDeliveryDiagnosticsErr         error
+	listConversationsResult             store.OperatorConversationListResult
+	listConversationsErr                error
+	conversationResult                  store.OperatorConversationDetail
+	conversationErr                     error
+	conversationTurnResult              store.OperatorConversationTurnDetail
+	conversationTurnErr                 error
+	currentConversationResult           *store.OperatorConversationDetail
+	currentConversationErr              error
+	lastAgentList                       store.OperatorAgentListOptions
+	lastConversationList                store.OperatorConversationListOptions
+	lastAgentID                         string
+	lastAgentDiagnosisID                string
+	lastAgentDiagnosisOptions           store.OperatorAgentDiagnosisOptions
+	lastAgentDeliveryDiagnosticsID      string
+	lastAgentDeliveryDiagnosticsOptions store.OperatorAgentDeliveryDiagnosticsOptions
+	lastConversationSessionID           string
+	lastConversationTurnSessionID       string
+	lastConversationTurnIndex           int
+	lastCurrentConversationFor          string
 }
 
 func (s *fakeAgentConversationReadStore) ListOperatorAgents(_ context.Context, opts store.OperatorAgentListOptions) (store.OperatorAgentListResult, error) {
@@ -52,6 +56,12 @@ func (s *fakeAgentConversationReadStore) LoadOperatorAgentDiagnosis(_ context.Co
 	s.lastAgentDiagnosisID = agentID
 	s.lastAgentDiagnosisOptions = opts
 	return s.agentDiagnosisResult, s.agentDiagnosisErr
+}
+
+func (s *fakeAgentConversationReadStore) LoadOperatorAgentDeliveryDiagnostics(_ context.Context, agentID string, opts store.OperatorAgentDeliveryDiagnosticsOptions) (store.OperatorAgentDeliveryDiagnostics, error) {
+	s.lastAgentDeliveryDiagnosticsID = agentID
+	s.lastAgentDeliveryDiagnosticsOptions = opts
+	return s.agentDeliveryDiagnosticsResult, s.agentDeliveryDiagnosticsErr
 }
 
 func (s *fakeAgentConversationReadStore) ListOperatorConversations(_ context.Context, opts store.OperatorConversationListOptions) (store.OperatorConversationListResult, error) {
@@ -147,6 +157,48 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 					RecordedAt:    "2026-05-21T10:01:00Z",
 				},
 			},
+		},
+		agentDeliveryDiagnosticsResult: store.OperatorAgentDeliveryDiagnostics{
+			AgentID: "agent-1",
+			Summary: store.OperatorAgentDeliveryDiagnosticsSummary{
+				Failures24h:    1,
+				DeadLetters24h: 1,
+			},
+			Failures: []store.OperatorAgentDeliveryFailure{{
+				DeliveryID: "delivery-failed-1",
+				EventID:    "event-failed-1",
+				EventName:  "task.failed",
+				RunID:      "run-1",
+				EntityID:   "entity-1",
+				Status:     "failed",
+				ReasonCode: "handler_error",
+				LastError:  "boom",
+				RetryCount: 2,
+				OccurredAt: now.Add(-time.Minute),
+			}},
+			FailuresNextCursor: "failure-next",
+			DeadLetters: []store.OperatorAgentDeadLetterDelivery{{
+				DeliveryID: "delivery-dead-1",
+				EventID:    "event-dead-1",
+				EventName:  "task.dead",
+				RunID:      "run-1",
+				EntityID:   "entity-1",
+				Status:     "dead_letter",
+				ReasonCode: "retry_exhausted",
+				LastError:  "terminal",
+				RetryCount: 3,
+				OccurredAt: now.Add(-2 * time.Minute),
+				DeadLetterRecords: []store.OperatorDeadLetterRecord{{
+					DeadLetterID: "dead-letter-1",
+					FailureType:  "retry_exhausted",
+					ErrorMessage: "terminal",
+					RetryCount:   3,
+					ChainDepth:   0,
+					HandlerNode:  "agent-1",
+					CreatedAt:    now.Add(-time.Minute),
+				}},
+			}},
+			DeadLettersNextCursor: "dead-letter-next",
 		},
 		listConversationsResult: store.OperatorConversationListResult{
 			Conversations: []store.OperatorConversationSummary{{
@@ -279,6 +331,49 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 		if _, ok := diagnosis[splitField]; ok {
 			t.Fatalf("agent.diagnose exposed split field %q: %#v", splitField, diagnosis)
 		}
+	}
+
+	deliveryDiagnostics := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agent-delivery-diagnostics","method":"agent.delivery_diagnostics","params":{"agent_id":"agent-1","failure_limit":1,"failure_cursor":"failure-cursor-1","dead_letter_limit":1,"dead_letter_cursor":"dead-letter-cursor-1"}}`)
+	if deliveryDiagnostics.Error != nil {
+		t.Fatalf("agent.delivery_diagnostics error = %#v", deliveryDiagnostics.Error)
+	}
+	if reads.lastAgentDeliveryDiagnosticsID != "agent-1" {
+		t.Fatalf("agent.delivery_diagnostics id = %q", reads.lastAgentDeliveryDiagnosticsID)
+	}
+	if reads.lastAgentDeliveryDiagnosticsOptions.FailureLimit != 1 || reads.lastAgentDeliveryDiagnosticsOptions.FailureCursor != "failure-cursor-1" ||
+		reads.lastAgentDeliveryDiagnosticsOptions.DeadLetterLimit != 1 || reads.lastAgentDeliveryDiagnosticsOptions.DeadLetterCursor != "dead-letter-cursor-1" {
+		t.Fatalf("agent.delivery_diagnostics options = %#v", reads.lastAgentDeliveryDiagnosticsOptions)
+	}
+	diagnostics := asMap(t, deliveryDiagnostics.Result)
+	if diagnostics["agent_id"] != "agent-1" {
+		t.Fatalf("agent.delivery_diagnostics agent_id = %#v", diagnostics["agent_id"])
+	}
+	summary := asMap(t, diagnostics["summary"])
+	if summary["failures_24h"] != float64(1) || summary["dead_letters_24h"] != float64(1) {
+		t.Fatalf("agent.delivery_diagnostics summary = %#v", summary)
+	}
+	failures, ok := diagnostics["failures"].([]any)
+	if !ok || len(failures) != 1 {
+		t.Fatalf("agent.delivery_diagnostics failures = %#v", diagnostics["failures"])
+	}
+	failure := asMap(t, failures[0])
+	if failure["delivery_id"] != "delivery-failed-1" || failure["status"] != "failed" || failure["retry_count"] != float64(2) {
+		t.Fatalf("agent.delivery_diagnostics failure = %#v", failure)
+	}
+	deadLetters, ok := diagnostics["dead_letters"].([]any)
+	if !ok || len(deadLetters) != 1 {
+		t.Fatalf("agent.delivery_diagnostics dead_letters = %#v", diagnostics["dead_letters"])
+	}
+	deadLetter := asMap(t, deadLetters[0])
+	if deadLetter["delivery_id"] != "delivery-dead-1" || deadLetter["status"] != "dead_letter" || deadLetter["retry_count"] != float64(3) {
+		t.Fatalf("agent.delivery_diagnostics dead_letter = %#v", deadLetter)
+	}
+	records, ok := deadLetter["dead_letter_records"].([]any)
+	if !ok || len(records) != 1 || asMap(t, records[0])["dead_letter_id"] != "dead-letter-1" {
+		t.Fatalf("agent.delivery_diagnostics dead_letter_records = %#v", deadLetter["dead_letter_records"])
+	}
+	if diagnostics["failures_next_cursor"] != "failure-next" || diagnostics["dead_letters_next_cursor"] != "dead-letter-next" {
+		t.Fatalf("agent.delivery_diagnostics cursors = %#v/%#v", diagnostics["failures_next_cursor"], diagnostics["dead_letters_next_cursor"])
 	}
 
 	listConversations := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"convs","method":"conversation.list","params":{"agent_id":"agent-1","run_id":"11111111-1111-1111-1111-111111111111","limit":10,"cursor":"abc"}}`)
@@ -563,6 +658,13 @@ func TestOperatorAgentConversationHandlersTypedErrors(t *testing.T) {
 			wantApp: AgentNotFoundCode,
 		},
 		{
+			name:    "agent delivery diagnostics missing",
+			method:  "agent.delivery_diagnostics",
+			body:    `{"jsonrpc":"2.0","id":"agent-delivery-diagnostics","method":"agent.delivery_diagnostics","params":{"agent_id":"missing"}}`,
+			reads:   &fakeAgentConversationReadStore{agentDeliveryDiagnosticsErr: store.ErrAgentNotFound},
+			wantApp: AgentNotFoundCode,
+		},
+		{
 			name:    "conversation missing",
 			method:  "conversation.get",
 			body:    `{"jsonrpc":"2.0","id":"conv","method":"conversation.get","params":{"session_id":"missing"}}`,
@@ -639,6 +741,52 @@ func TestOperatorAgentDiagnoseFailsClosedOnMalformedOwnerData(t *testing.T) {
 		t.Fatalf("error code = %d, want %d", resp.Error.Code, codeInternalError)
 	}
 	if !strings.Contains(fmt.Sprint(resp.Error.Message, resp.Error.Data), "agent.diagnose owner returned malformed result") {
+		t.Fatalf("error = %#v, want malformed owner result", resp.Error)
+	}
+}
+
+func TestOperatorAgentDeliveryDiagnosticsFailsClosedOnMalformedOwnerData(t *testing.T) {
+	reads := &fakeAgentConversationReadStore{
+		agentDeliveryDiagnosticsResult: store.OperatorAgentDeliveryDiagnostics{
+			AgentID: "agent-1",
+			Summary: store.OperatorAgentDeliveryDiagnosticsSummary{
+				Failures24h:    1,
+				DeadLetters24h: 1,
+			},
+			Failures: []store.OperatorAgentDeliveryFailure{{
+				DeliveryID: "delivery-failed-1",
+				EventID:    "event-failed-1",
+				EventName:  "task.failed",
+				Status:     "failed",
+				RetryCount: 1,
+				OccurredAt: time.Date(2026, 5, 21, 10, 0, 0, 0, time.UTC),
+			}},
+			DeadLetters: []store.OperatorAgentDeadLetterDelivery{{
+				DeliveryID:        "delivery-dead-1",
+				EventID:           "event-dead-1",
+				EventName:         "task.dead",
+				Status:            "dead_letter",
+				RetryCount:        2,
+				OccurredAt:        time.Date(2026, 5, 21, 10, 1, 0, 0, time.UTC),
+				DeadLetterRecords: []store.OperatorDeadLetterRecord{},
+			}},
+		},
+	}
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			AgentConversations: reads,
+		}),
+	})
+
+	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agent-delivery-diagnostics","method":"agent.delivery_diagnostics","params":{"agent_id":"agent-1"}}`)
+	if resp.Error == nil {
+		t.Fatal("agent.delivery_diagnostics returned success for malformed owner result")
+	}
+	if resp.Error.Code != codeInternalError {
+		t.Fatalf("error code = %d, want %d", resp.Error.Code, codeInternalError)
+	}
+	if !strings.Contains(fmt.Sprint(resp.Error.Message, resp.Error.Data), "agent.delivery_diagnostics owner returned malformed result") {
 		t.Fatalf("error = %#v, want malformed owner result", resp.Error)
 	}
 }
@@ -816,4 +964,40 @@ func TestOperatorAgentDiagnoseRejectsBadQueueCursor(t *testing.T) {
 		t.Fatal("agent.diagnose returned success for invalid queue_cursor")
 	}
 	assertReadOnlyProbeInvalidParams(t, "agent.diagnose", resp, "queue_cursor")
+}
+
+func TestOperatorAgentDeliveryDiagnosticsRejectsLimits(t *testing.T) {
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			AgentConversations: &fakeAgentConversationReadStore{},
+		}),
+	})
+
+	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"probe-agent-delivery_diagnostics","method":"agent.delivery_diagnostics","params":{"agent_id":"agent-1","failure_limit":0}}`)
+	if resp.Error == nil {
+		t.Fatal("agent.delivery_diagnostics returned success for invalid failure_limit")
+	}
+	assertReadOnlyProbeInvalidParams(t, "agent.delivery_diagnostics", resp, "failure_limit")
+
+	resp = rpcCall(t, handler, `{"jsonrpc":"2.0","id":"probe-agent-delivery_diagnostics","method":"agent.delivery_diagnostics","params":{"agent_id":"agent-1","dead_letter_limit":0}}`)
+	if resp.Error == nil {
+		t.Fatal("agent.delivery_diagnostics returned success for invalid dead_letter_limit")
+	}
+	assertReadOnlyProbeInvalidParams(t, "agent.delivery_diagnostics", resp, "dead_letter_limit")
+}
+
+func TestOperatorAgentDeliveryDiagnosticsRejectsBadCursor(t *testing.T) {
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			AgentConversations: &fakeAgentConversationReadStore{agentDeliveryDiagnosticsErr: store.AgentDeliveryDiagnosticsCursorError{Field: "dead_letter_cursor"}},
+		}),
+	})
+
+	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"probe-agent-delivery_diagnostics","method":"agent.delivery_diagnostics","params":{"agent_id":"agent-1","dead_letter_cursor":"bad"}}`)
+	if resp.Error == nil {
+		t.Fatal("agent.delivery_diagnostics returned success for invalid dead_letter_cursor")
+	}
+	assertReadOnlyProbeInvalidParams(t, "agent.delivery_diagnostics", resp, "dead_letter_cursor")
 }

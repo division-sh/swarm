@@ -43,6 +43,7 @@ type AgentConversationReadStore interface {
 	ListOperatorAgents(context.Context, store.OperatorAgentListOptions) (store.OperatorAgentListResult, error)
 	LoadOperatorAgent(context.Context, string) (store.OperatorAgentDetail, error)
 	LoadOperatorAgentDiagnosis(context.Context, string, store.OperatorAgentDiagnosisOptions) (store.OperatorAgentDiagnosis, error)
+	LoadOperatorAgentDeliveryDiagnostics(context.Context, string, store.OperatorAgentDeliveryDiagnosticsOptions) (store.OperatorAgentDeliveryDiagnostics, error)
 	ListOperatorConversations(context.Context, store.OperatorConversationListOptions) (store.OperatorConversationListResult, error)
 	LoadOperatorConversation(context.Context, string) (store.OperatorConversationDetail, error)
 	LoadOperatorConversationTurn(context.Context, string, int) (store.OperatorConversationTurnDetail, error)
@@ -340,6 +341,56 @@ func OperatorAgentConversationHandlers(opts OperatorReadOptions) map[string]Meth
 			}
 			return result, nil
 		},
+		"agent.delivery_diagnostics": func(ctx context.Context, req Request) (any, error) {
+			reads, err := requireAgentConversationReadStore(opts.AgentConversations)
+			if err != nil {
+				return nil, err
+			}
+			agentID, err := requiredStringParam(req.Params, "agent_id")
+			if err != nil {
+				return nil, err
+			}
+			failureLimit, err := boundedIntegerParam(req.Params, "failure_limit", 1, store.MaxAgentDeliveryDiagnosticsLimit)
+			if err != nil {
+				return nil, err
+			}
+			deadLetterLimit, err := boundedIntegerParam(req.Params, "dead_letter_limit", 1, store.MaxAgentDeliveryDiagnosticsLimit)
+			if err != nil {
+				return nil, err
+			}
+			failureCursor, _, err := optionalStringParam(req.Params, "failure_cursor")
+			if err != nil {
+				return nil, err
+			}
+			deadLetterCursor, _, err := optionalStringParam(req.Params, "dead_letter_cursor")
+			if err != nil {
+				return nil, err
+			}
+			result, err := reads.LoadOperatorAgentDeliveryDiagnostics(ctx, agentID, store.OperatorAgentDeliveryDiagnosticsOptions{
+				FailureLimit:     failureLimit,
+				FailureCursor:    failureCursor,
+				DeadLetterLimit:  deadLetterLimit,
+				DeadLetterCursor: deadLetterCursor,
+			})
+			if errors.Is(err, store.ErrAgentNotFound) {
+				return nil, NewApplicationError(AgentNotFoundCode, false, map[string]any{"agent_id": agentID})
+			}
+			var cursorErr store.AgentDeliveryDiagnosticsCursorError
+			if errors.As(err, &cursorErr) {
+				field := strings.TrimSpace(cursorErr.Field)
+				if field == "" {
+					field = "cursor"
+				}
+				return nil, NewInvalidParamsError(map[string]any{"field": field, "reason": "invalid agent.delivery_diagnostics cursor"})
+			}
+			if err != nil {
+				return nil, err
+			}
+			if err := validateAgentDeliveryDiagnosticsResult(result); err != nil {
+				return nil, err
+			}
+			return result, nil
+		},
 		"conversation.list": func(ctx context.Context, req Request) (any, error) {
 			reads, err := requireAgentConversationReadStore(opts.AgentConversations)
 			if err != nil {
@@ -508,6 +559,102 @@ func validateAgentDiagnosisResult(item store.OperatorAgentDiagnosis) error {
 		lastToolTurnID := strings.TrimSpace(item.LastToolOutcome.TurnID)
 		if activeTurnID != lastToolTurnID {
 			return fmt.Errorf("agent.diagnose owner returned malformed result: last_tool_outcome.turn_id %q must match active.turn_id %q", lastToolTurnID, activeTurnID)
+		}
+	}
+	return nil
+}
+
+func validateAgentDeliveryDiagnosticsResult(item store.OperatorAgentDeliveryDiagnostics) error {
+	if strings.TrimSpace(item.AgentID) == "" {
+		return fmt.Errorf("agent.delivery_diagnostics owner returned malformed result: agent_id is required")
+	}
+	if item.Summary.Failures24h < 0 {
+		return fmt.Errorf("agent.delivery_diagnostics owner returned malformed result: summary.failures_24h must be non-negative")
+	}
+	if item.Summary.DeadLetters24h < 0 {
+		return fmt.Errorf("agent.delivery_diagnostics owner returned malformed result: summary.dead_letters_24h must be non-negative")
+	}
+	if item.Failures == nil {
+		return fmt.Errorf("agent.delivery_diagnostics owner returned malformed result: failures must be an array")
+	}
+	for i, failure := range item.Failures {
+		if err := validateAgentDeliveryFailureResult(failure, i); err != nil {
+			return err
+		}
+	}
+	if item.DeadLetters == nil {
+		return fmt.Errorf("agent.delivery_diagnostics owner returned malformed result: dead_letters must be an array")
+	}
+	for i, deadLetter := range item.DeadLetters {
+		if err := validateAgentDeadLetterDeliveryResult(deadLetter, i); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateAgentDeliveryFailureResult(item store.OperatorAgentDeliveryFailure, index int) error {
+	prefix := fmt.Sprintf("agent.delivery_diagnostics owner returned malformed result: failures[%d]", index)
+	if strings.TrimSpace(item.DeliveryID) == "" {
+		return fmt.Errorf("%s.delivery_id is required", prefix)
+	}
+	if strings.TrimSpace(item.EventID) == "" {
+		return fmt.Errorf("%s.event_id is required", prefix)
+	}
+	if strings.TrimSpace(item.EventName) == "" {
+		return fmt.Errorf("%s.event_name is required", prefix)
+	}
+	if strings.TrimSpace(item.Status) != "failed" {
+		return fmt.Errorf("%s.status must be failed", prefix)
+	}
+	if item.RetryCount < 0 {
+		return fmt.Errorf("%s.retry_count must be non-negative", prefix)
+	}
+	if item.OccurredAt.IsZero() {
+		return fmt.Errorf("%s.occurred_at is required", prefix)
+	}
+	return nil
+}
+
+func validateAgentDeadLetterDeliveryResult(item store.OperatorAgentDeadLetterDelivery, index int) error {
+	prefix := fmt.Sprintf("agent.delivery_diagnostics owner returned malformed result: dead_letters[%d]", index)
+	if strings.TrimSpace(item.DeliveryID) == "" {
+		return fmt.Errorf("%s.delivery_id is required", prefix)
+	}
+	if strings.TrimSpace(item.EventID) == "" {
+		return fmt.Errorf("%s.event_id is required", prefix)
+	}
+	if strings.TrimSpace(item.EventName) == "" {
+		return fmt.Errorf("%s.event_name is required", prefix)
+	}
+	if strings.TrimSpace(item.Status) != "dead_letter" {
+		return fmt.Errorf("%s.status must be dead_letter", prefix)
+	}
+	if item.RetryCount < 0 {
+		return fmt.Errorf("%s.retry_count must be non-negative", prefix)
+	}
+	if item.OccurredAt.IsZero() {
+		return fmt.Errorf("%s.occurred_at is required", prefix)
+	}
+	if len(item.DeadLetterRecords) == 0 {
+		return fmt.Errorf("%s.dead_letter_records must contain at least one record", prefix)
+	}
+	for i, record := range item.DeadLetterRecords {
+		recordPrefix := fmt.Sprintf("%s.dead_letter_records[%d]", prefix, i)
+		if strings.TrimSpace(record.DeadLetterID) == "" {
+			return fmt.Errorf("%s.dead_letter_id is required", recordPrefix)
+		}
+		if strings.TrimSpace(record.FailureType) == "" {
+			return fmt.Errorf("%s.failure_type is required", recordPrefix)
+		}
+		if record.RetryCount < 0 {
+			return fmt.Errorf("%s.retry_count must be non-negative", recordPrefix)
+		}
+		if record.ChainDepth < 0 {
+			return fmt.Errorf("%s.chain_depth must be non-negative", recordPrefix)
+		}
+		if record.CreatedAt.IsZero() {
+			return fmt.Errorf("%s.created_at is required", recordPrefix)
 		}
 	}
 	return nil

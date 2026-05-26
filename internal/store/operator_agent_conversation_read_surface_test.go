@@ -9,9 +9,11 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/google/uuid"
 	runtimeactors "swarm/internal/runtime/core/actors"
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimesessions "swarm/internal/runtime/sessions"
+	"swarm/internal/testutil"
 )
 
 type fakeConversationCapabilitySource struct {
@@ -90,7 +92,7 @@ func canonicalAgentConversationReadCaps() StoreSchemaCapabilities {
 func operatorAgentProjectionColumns() []string {
 	return []string{
 		"agent_id", "status", "session_id", "session_started_at", "turn_count", "lease_holder", "lease_expires_at", "runtime_state", "pending_count", "oldest_pending_age_sec",
-		"failures_24h", "dead_letters_24h", "turn_id", "task_id", "entity_id", "parse_ok", "error", "turn_created_at", "turn_blocks",
+		"turn_id", "task_id", "entity_id", "parse_ok", "error", "turn_created_at", "turn_blocks",
 	}
 }
 
@@ -297,7 +299,7 @@ func TestOperatorAgentReadSurfaceLoadAgentProjectsSessionAndTurnRefs(t *testing.
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
-			AddRow("agent-1", "active", sessionID, sessionStartedAt, 2, "lease-owner", time.Now().Add(time.Minute), []byte(`{"provider_session_id":"provider-sess-1"}`), 0, 0, 0, 0, turnID, "task-1", "entity-1", false, "model error", turnCompletedAt, []byte(`[]`)))
+			AddRow("agent-1", "active", sessionID, sessionStartedAt, 2, "lease-owner", time.Now().Add(time.Minute), []byte(`{"provider_session_id":"provider-sess-1"}`), 0, 0, turnID, "task-1", "entity-1", false, "model error", turnCompletedAt, []byte(`[]`)))
 
 	detail, err := reader.LoadOperatorAgent(context.Background(), "agent-1")
 	if err != nil {
@@ -347,7 +349,7 @@ func TestOperatorAgentReadSurfaceListAgentsDoesNotDeriveStatusFromActiveLease(t 
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
-			AddRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 2, "lease-owner", time.Now().Add(time.Minute), []byte(`{}`), 0, 0, 0, 0, "", "", "", false, "", nil, []byte(`[]`)))
+			AddRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 2, "lease-owner", time.Now().Add(time.Minute), []byte(`{}`), 0, 0, "", "", "", false, "", nil, []byte(`[]`)))
 
 	result, err := reader.ListOperatorAgents(context.Background(), OperatorAgentListOptions{})
 	if err != nil {
@@ -419,7 +421,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisUsesSelectedOwners(t *testing
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
-			AddRow("agent-1", "active", sessionID, sessionStartedAt, 2, "", nil, runtimeState, 0, 0, 0, 0, turnID, "task-1", turnEntityID, true, "", turnCompletedAt, turnBlocks))
+			AddRow("agent-1", "active", sessionID, sessionStartedAt, 2, "", nil, runtimeState, 0, 0, turnID, "task-1", turnEntityID, true, "", turnCompletedAt, turnBlocks))
 
 	diagnosis, err := reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1", OperatorAgentDiagnosisOptions{QueueLimit: 1, QueueCursor: "cursor-1"})
 	if err != nil {
@@ -481,6 +483,187 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisUsesSelectedOwners(t *testing
 	}
 }
 
+func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsPromotesCanonicalOwner(t *testing.T) {
+	dsn, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	pg, err := NewPostgresStore(dsn)
+	if err != nil {
+		t.Fatalf("NewPostgresStore: %v", err)
+	}
+	t.Cleanup(func() { _ = pg.DB.Close() })
+
+	ctx := context.Background()
+	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+		Config: runtimeactors.AgentConfig{
+			ID:               "agent-1",
+			Role:             "researcher",
+			Type:             "managed",
+			ModelTier:        "haiku",
+			ConversationMode: runtimesessions.RuntimeModeTask.String(),
+			Config:           json.RawMessage(`{"system_prompt":"diagnose"}`),
+		},
+		Status:    "active",
+		StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("UpsertAgent: %v", err)
+	}
+
+	now := time.Now().UTC()
+	runID := uuid.NewString()
+	entityID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	failedNewEventID := uuid.NewString()
+	failedOldEventID := uuid.NewString()
+	deadEventID := uuid.NewString()
+	otherAgentEventID := uuid.NewString()
+	for _, event := range []struct {
+		id   string
+		name string
+	}{
+		{failedNewEventID, "task.failed.new"},
+		{failedOldEventID, "task.failed.old"},
+		{deadEventID, "task.dead"},
+		{otherAgentEventID, "task.other"},
+	} {
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO events (
+				event_id, run_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at
+			) VALUES (
+				$1::uuid, $2::uuid, $3, $4::uuid, 'global', '{}'::jsonb, 'runtime', 'agent', $5
+			)
+		`, event.id, runID, event.name, entityID, now.Add(-10*time.Minute)); err != nil {
+			t.Fatalf("seed event %s: %v", event.name, err)
+		}
+	}
+	failedNewDeliveryID := uuid.NewString()
+	failedOldDeliveryID := uuid.NewString()
+	deadDeliveryID := uuid.NewString()
+	otherDeliveryID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, last_error, delivered_at, created_at
+		) VALUES
+			($1::uuid, $2::uuid, $3::uuid, 'agent', 'agent-1', 'failed', 2, 'handler_error', 'new failure', $4, $8),
+			($5::uuid, $2::uuid, $6::uuid, 'agent', 'agent-1', 'failed', 1, 'handler_error', 'old failure', $7, $8),
+			($9::uuid, $2::uuid, $10::uuid, 'agent', 'agent-1', 'dead_letter', 3, 'retry_exhausted', 'terminal failure', $11, $8),
+			($12::uuid, $2::uuid, $13::uuid, 'agent', 'agent-2', 'failed', 1, 'handler_error', 'other agent', $4, $8)
+	`, failedNewDeliveryID, runID, failedNewEventID, now.Add(-1*time.Minute), failedOldDeliveryID, failedOldEventID, now.Add(-2*time.Minute), now.Add(-15*time.Minute), deadDeliveryID, deadEventID, now.Add(-3*time.Minute), otherDeliveryID, otherAgentEventID); err != nil {
+		t.Fatalf("seed deliveries: %v", err)
+	}
+	deadLetterID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO dead_letters (
+			dead_letter_id, original_event_id, original_event, original_payload, flow_instance,
+			failure_type, error_message, retry_count, chain_depth, handler_node, created_at
+		) VALUES (
+			$1::uuid, $2::uuid, 'task.dead', '{}'::jsonb, 'flow/test',
+			'retry_exhausted', 'terminal failure', 3, 0, 'agent-1', $3
+		)
+	`, deadLetterID, deadEventID, now.Add(-2*time.Minute)); err != nil {
+		t.Fatalf("seed dead letter: %v", err)
+	}
+
+	first, err := pg.LoadOperatorAgentDeliveryDiagnostics(ctx, "agent-1", OperatorAgentDeliveryDiagnosticsOptions{
+		FailureLimit:    1,
+		DeadLetterLimit: 10,
+	})
+	if err != nil {
+		t.Fatalf("LoadOperatorAgentDeliveryDiagnostics first page: %v", err)
+	}
+	if first.AgentID != "agent-1" {
+		t.Fatalf("agent_id = %q", first.AgentID)
+	}
+	if first.Summary.Failures24h != 2 || first.Summary.DeadLetters24h != 1 {
+		t.Fatalf("summary = %#v, want failures=2 dead_letters=1", first.Summary)
+	}
+	if len(first.Failures) != 1 || first.Failures[0].DeliveryID != failedNewDeliveryID || first.Failures[0].Status != "failed" {
+		t.Fatalf("first failures page = %#v", first.Failures)
+	}
+	if first.Failures[0].EventName != "task.failed.new" || first.Failures[0].RunID != runID || first.Failures[0].EntityID != entityID || first.Failures[0].RetryCount != 2 {
+		t.Fatalf("failure row = %#v", first.Failures[0])
+	}
+	if first.FailuresNextCursor == "" {
+		t.Fatal("failures_next_cursor empty, want second page")
+	}
+	if len(first.DeadLetters) != 1 || first.DeadLetters[0].DeliveryID != deadDeliveryID || first.DeadLetters[0].Status != "dead_letter" {
+		t.Fatalf("dead letters = %#v", first.DeadLetters)
+	}
+	if len(first.DeadLetters[0].DeadLetterRecords) != 1 || first.DeadLetters[0].DeadLetterRecords[0].DeadLetterID != deadLetterID {
+		t.Fatalf("dead letter records = %#v", first.DeadLetters[0].DeadLetterRecords)
+	}
+
+	second, err := pg.LoadOperatorAgentDeliveryDiagnostics(ctx, "agent-1", OperatorAgentDeliveryDiagnosticsOptions{
+		FailureLimit:  1,
+		FailureCursor: first.FailuresNextCursor,
+	})
+	if err != nil {
+		t.Fatalf("LoadOperatorAgentDeliveryDiagnostics second page: %v", err)
+	}
+	if len(second.Failures) != 1 || second.Failures[0].DeliveryID != failedOldDeliveryID {
+		t.Fatalf("second failures page = %#v", second.Failures)
+	}
+	if second.FailuresNextCursor != "" {
+		t.Fatalf("second failures_next_cursor = %q, want empty", second.FailuresNextCursor)
+	}
+}
+
+func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsFailsClosedOnDeadLetterMismatch(t *testing.T) {
+	dsn, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	pg, err := NewPostgresStore(dsn)
+	if err != nil {
+		t.Fatalf("NewPostgresStore: %v", err)
+	}
+	t.Cleanup(func() { _ = pg.DB.Close() })
+
+	ctx := context.Background()
+	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+		Config: runtimeactors.AgentConfig{
+			ID:               "agent-1",
+			Role:             "researcher",
+			Type:             "managed",
+			ModelTier:        "haiku",
+			ConversationMode: runtimesessions.RuntimeModeTask.String(),
+			Config:           json.RawMessage(`{"system_prompt":"diagnose"}`),
+		},
+		Status:    "active",
+		StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("UpsertAgent: %v", err)
+	}
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	deliveryID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
+		VALUES ($1::uuid, $2::uuid, 'task.dead', 'global', '{}'::jsonb, 'runtime', 'agent', now())
+	`, eventID, runID); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, retry_count, delivered_at, created_at
+		) VALUES (
+			$1::uuid, $2::uuid, $3::uuid, 'agent', 'agent-1', 'dead_letter', 1, now(), now()
+		)
+	`, deliveryID, runID, eventID); err != nil {
+		t.Fatalf("seed delivery: %v", err)
+	}
+
+	_, err = pg.LoadOperatorAgentDeliveryDiagnostics(ctx, "agent-1", OperatorAgentDeliveryDiagnosticsOptions{})
+	if err == nil {
+		t.Fatal("LoadOperatorAgentDeliveryDiagnostics returned success for dead_letter delivery without record")
+	}
+	if !strings.Contains(err.Error(), "without a dead_letters record") {
+		t.Fatalf("error = %v, want dead_letters reconciliation failure", err)
+	}
+}
+
 func TestOperatorAgentReadSurfaceLoadAgentDiagnosisOmitsAbsentLifecycle(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -496,7 +679,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisOmitsAbsentLifecycle(t *testi
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
-			AddRow("agent-1", "active", "", nil, 0, "", nil, []byte(`{}`), 0, 0, 0, 0, "", "", "", false, "", nil, []byte(`[]`)))
+			AddRow("agent-1", "active", "", nil, 0, "", nil, []byte(`{}`), 0, 0, "", "", "", false, "", nil, []byte(`[]`)))
 
 	diagnosis, err := reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1", OperatorAgentDiagnosisOptions{})
 	if err != nil {
@@ -631,7 +814,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisDoesNotDeriveStatusFromActive
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
-			AddRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 0, "lease-owner", time.Now().Add(time.Minute), []byte(`{}`), 0, 0, 0, 0, "", "", "", false, "", nil, []byte(`[]`)))
+			AddRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 0, "lease-owner", time.Now().Add(time.Minute), []byte(`{}`), 0, 0, "", "", "", false, "", nil, []byte(`[]`)))
 
 	diagnosis, err := reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1", OperatorAgentDiagnosisOptions{})
 	if err != nil {
@@ -663,7 +846,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisOmitsActiveWithoutLatestTurn(
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
-			AddRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 0, "", nil, []byte(`{}`), 0, 0, 0, 0, "", "", "", false, "", nil, []byte(`[]`)))
+			AddRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 0, "", nil, []byte(`{}`), 0, 0, "", "", "", false, "", nil, []byte(`[]`)))
 
 	diagnosis, err := reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1", OperatorAgentDiagnosisOptions{})
 	if err != nil {
@@ -696,7 +879,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisOmitsEmptyActiveOptionalRefs(
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
-			AddRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 0, "", nil, []byte(`{}`), 0, 0, 0, 0, turnID, "", "", true, "", time.Date(2026, 5, 12, 9, 5, 0, 0, time.UTC), []byte(`[]`)))
+			AddRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 0, "", nil, []byte(`{}`), 0, 0, turnID, "", "", true, "", time.Date(2026, 5, 12, 9, 5, 0, 0, time.UTC), []byte(`[]`)))
 
 	diagnosis, err := reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1", OperatorAgentDiagnosisOptions{})
 	if err != nil {
@@ -728,7 +911,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisFailsClosedOnMalformedRuntime
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
-			AddRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 0, "", nil, []byte(`{"watchdog":{"state":"stale","blocking_layer":"session_execution","action":"turn_long_running","outcome":"observed","recorded_at":"2026-05-12T09:05:00Z"}}`), 0, 0, 0, 0, "", "", "", false, "", nil, []byte(`[]`)))
+			AddRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 0, "", nil, []byte(`{"watchdog":{"state":"stale","blocking_layer":"session_execution","action":"turn_long_running","outcome":"observed","recorded_at":"2026-05-12T09:05:00Z"}}`), 0, 0, "", "", "", false, "", nil, []byte(`[]`)))
 
 	_, err = reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1", OperatorAgentDiagnosisOptions{})
 	if err == nil || !strings.Contains(err.Error(), "decode latest agent session runtime_state") || !strings.Contains(err.Error(), "watchdog.state") {
@@ -757,7 +940,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisFailsClosedOnMalformedLifecyc
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
-			AddRow("agent-1", "active", "", nil, 0, "", nil, []byte(`{}`), 0, 0, 0, 0, "", "", "", false, "", nil, []byte(`[]`)))
+			AddRow("agent-1", "active", "", nil, 0, "", nil, []byte(`{}`), 0, 0, "", "", "", false, "", nil, []byte(`[]`)))
 
 	_, err = reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1", OperatorAgentDiagnosisOptions{})
 	if err == nil || !strings.Contains(err.Error(), "delivery_lifecycle.state") {
@@ -834,7 +1017,7 @@ func loadAgentDiagnosisWithLatestTurn(t *testing.T, turnID, taskID, entityID str
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
-			AddRow("agent-1", "active", "11111111-1111-1111-1111-111111111111", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 1, "", nil, []byte(`{}`), 0, 0, 0, 0, turnID, taskID, entityID, parseOK, "", turnCompletedAt, turnBlocks))
+			AddRow("agent-1", "active", "11111111-1111-1111-1111-111111111111", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 1, "", nil, []byte(`{}`), 0, 0, turnID, taskID, entityID, parseOK, "", turnCompletedAt, turnBlocks))
 
 	diagnosis, err := reader.LoadOperatorAgentDiagnosis(context.Background(), "agent-1", OperatorAgentDiagnosisOptions{})
 	if expectationsErr := mock.ExpectationsWereMet(); expectationsErr != nil {
@@ -861,7 +1044,7 @@ func TestOperatorConversationReadSurfaceCurrentForAgentUsesMostRecentActiveSessi
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
-			AddRow("agent-1", "active", sessionID, now.Add(-time.Hour), 2, "", nil, []byte(`{}`), 0, 0, 0, 0, "", "", "", false, "", nil, []byte(`[]`)))
+			AddRow("agent-1", "active", sessionID, now.Add(-time.Hour), 2, "", nil, []byte(`{}`), 0, 0, "", "", "", false, "", nil, []byte(`[]`)))
 	mock.ExpectQuery("(?s)SELECT\\s+session_id::text,\\s+agent_id,.*FROM agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
 		WithArgs("agent-1", runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorConversationDetailColumns()).
@@ -903,7 +1086,7 @@ func TestOperatorConversationReadSurfaceCurrentForAgentReturnsNullWithoutActiveL
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
-			AddRow("agent-1", "active", "", nil, 0, "", nil, []byte(`{}`), 0, 0, 0, 0, "", "", "", false, "", nil, []byte(`[]`)))
+			AddRow("agent-1", "active", "", nil, 0, "", nil, []byte(`{}`), 0, 0, "", "", "", false, "", nil, []byte(`[]`)))
 	mock.ExpectQuery("(?s)SELECT\\s+session_id::text,\\s+agent_id,.*FROM agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
 		WithArgs("agent-1", runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows(operatorConversationDetailColumns()))

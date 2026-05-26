@@ -83,8 +83,6 @@ type OperatorAgentSummary struct {
 	OldestPendingAgeSec   int                                 `json:"-"`
 	LockOwner             string                              `json:"-"`
 	LockExpiresAt         time.Time                           `json:"-"`
-	Failures24h           int                                 `json:"-"`
-	DeadLetters24h        int                                 `json:"-"`
 	TurnCount             int                                 `json:"-"`
 	TurnLimit             int                                 `json:"-"`
 	NearBreaker           bool                                `json:"-"`
@@ -449,8 +447,6 @@ type operatorAgentProjection struct {
 	OldestPendingAgeSec int
 	LockOwner           string
 	LockExpiresAt       time.Time
-	Failures24h         int
-	DeadLetters24h      int
 	TurnCount           int
 	SessionID           string
 	SessionStartedAt    time.Time
@@ -1090,8 +1086,6 @@ func (r *OperatorAgentConversationReadSurface) loadAgentOperatorProjections(ctx 
 			COALESCE(sess.runtime_state, '{}'::jsonb),
 			0,
 			0,
-			COALESCE(f.failures_24h, 0),
-			COALESCE(f.dead_letters_24h, 0),
 			COALESCE(latest_turn.turn_id, ''),
 			COALESCE(latest_turn.task_id, ''),
 			COALESCE(latest_turn.entity_id::text, ''),
@@ -1131,15 +1125,6 @@ func (r *OperatorAgentConversationReadSurface) loadAgentOperatorProjections(ctx 
 			ORDER BY created_at DESC, turn_id DESC
 			LIMIT 1
 		) latest_turn ON true
-		LEFT JOIN LATERAL (
-			SELECT
-				COUNT(*) FILTER (WHERE status = 'failed')::int AS failures_24h,
-				COUNT(*) FILTER (WHERE status = 'dead_letter')::int AS dead_letters_24h
-			FROM event_deliveries
-			WHERE subscriber_type = 'agent'
-			  AND subscriber_id = a.agent_id
-			  AND COALESCE(delivered_at, created_at) >= now() - interval '24 hours'
-		) f ON true
 		WHERE a.status NOT IN ('terminated', 'ephemeral')
 		ORDER BY a.created_at ASC, a.agent_id ASC
 	`, latestTurnBlocksExpr), runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity)
@@ -1176,8 +1161,6 @@ func (r *OperatorAgentConversationReadSurface) loadAgentOperatorProjections(ctx 
 			&runtimeStateRaw,
 			&projection.PendingEvents,
 			&projection.OldestPendingAgeSec,
-			&projection.Failures24h,
-			&projection.DeadLetters24h,
 			&latestTurnID,
 			&latestTaskID,
 			&latestEntityID,
@@ -1267,8 +1250,6 @@ func operatorAgentSummaryFromPersisted(row runtimemanager.PersistedAgent, projec
 		OldestPendingAgeSec:   projection.OldestPendingAgeSec,
 		LockOwner:             strings.TrimSpace(projection.LockOwner),
 		LockExpiresAt:         projection.LockExpiresAt,
-		Failures24h:           projection.Failures24h,
-		DeadLetters24h:        projection.DeadLetters24h,
 		TurnCount:             projection.TurnCount,
 		TurnLimit:             maxStoreInt(turnLimit, 0),
 		SessionID:             strings.TrimSpace(projection.SessionID),
