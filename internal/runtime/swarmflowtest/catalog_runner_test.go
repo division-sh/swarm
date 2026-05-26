@@ -1448,11 +1448,8 @@ func catalogPromptIssues(bundle catalogBootBundle, scope catalogBootScope, agent
 	}
 
 	if semanticBundle, ok := semanticview.Bundle(bundle.Source); ok {
-		source := runtimecontracts.ContractItemSource{Layer: "project"}
-		if !scope.Root {
-			source = runtimecontracts.ContractItemSource{FlowID: strings.TrimSpace(scope.Name), Layer: "flow"}
-		}
-		resolution, found, err := runtimecontracts.ResolvePromptFileForContractAgent(semanticBundle, agentID, catalogPromptAgentEntry(agent), source, catalogBootText(scope.Schema["mode"]))
+		source, mode := catalogPromptSemanticSourceAndMode(semanticBundle, scope, agentID)
+		resolution, found, err := runtimecontracts.ResolvePromptFileForContractAgent(semanticBundle, agentID, catalogPromptAgentEntry(agent), source, mode)
 		if err != nil || !found {
 			return []catalogBootIssue{missing()}
 		}
@@ -1478,6 +1475,41 @@ func catalogPromptIssues(bundle catalogBootBundle, scope catalogBootScope, agent
 		return []catalogBootIssue{stub()}
 	}
 	return nil
+}
+
+func catalogPromptSemanticSourceAndMode(bundle *runtimecontracts.WorkflowContractBundle, scope catalogBootScope, agentID string) (runtimecontracts.ContractItemSource, string) {
+	if bundle == nil {
+		return runtimecontracts.ContractItemSource{Layer: "project"}, catalogBootText(scope.Schema["mode"])
+	}
+	if scope.Root {
+		source := runtimecontracts.ContractItemSource{Layer: "project"}
+		if resolved, ok := bundle.AgentContractSource(agentID); ok && strings.TrimSpace(resolved.FlowID) == "" {
+			source = resolved
+		}
+		return source, catalogBootText(scope.Schema["mode"])
+	}
+
+	flowID := strings.TrimSpace(scope.Name)
+	source := runtimecontracts.ContractItemSource{FlowID: flowID, Layer: "flow"}
+	mode := catalogBootText(scope.Schema["mode"])
+	if flow, ok := bundle.FlowViewByID(flowID); ok && flow != nil {
+		semanticFlowID := strings.TrimSpace(flow.Paths.ID)
+		if semanticFlowID == "" {
+			semanticFlowID = flowID
+		}
+		source = runtimecontracts.ContractItemSource{
+			PackageKey: strings.TrimSpace(flow.Paths.PackageKey),
+			FlowID:     semanticFlowID,
+			Layer:      "flow",
+		}
+		if semanticMode := strings.TrimSpace(flow.Schema.Mode); semanticMode != "" {
+			mode = semanticMode
+		}
+		if pathMode := strings.TrimSpace(flow.Paths.Mode); pathMode != "" {
+			mode = pathMode
+		}
+	}
+	return source, mode
 }
 
 func catalogPromptAgentEntry(agent map[string]any) runtimecontracts.AgentRegistryEntry {
