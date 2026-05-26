@@ -10,6 +10,7 @@ require (
 	github.com/lib/pq v1.11.2
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/cobra v1.10.1
+	golang.org/x/text v0.22.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
