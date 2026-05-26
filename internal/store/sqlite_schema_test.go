@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"regexp"
 	stdruntime "runtime"
 	"strings"
 	"testing"
@@ -119,7 +120,7 @@ func TestSQLiteStatementsForPlanRejectsUnsupportedPostgresConstructs(t *testing.
 		TableName:  "bad_regex",
 		SchemaKind: "test",
 		Statements: []string{
-			"CREATE TABLE bad_regex (\n    id TEXT CHECK (id ~ '^bad$')\n)",
+			"CREATE TABLE IF NOT EXISTS bad_regex (\n    id TEXT CHECK (id ~ '^bad$')\n)",
 		},
 	})
 	if err == nil {
@@ -127,6 +128,54 @@ func TestSQLiteStatementsForPlanRejectsUnsupportedPostgresConstructs(t *testing.
 	}
 	if !strings.Contains(err.Error(), "unsupported SQLite schema construct") || !strings.Contains(err.Error(), "Postgres regex operator") {
 		t.Fatalf("error = %v, want fail-closed unsupported regex diagnostic", err)
+	}
+}
+
+func TestSQLiteSchemaStoreRendersExplicitUUIDDefaults(t *testing.T) {
+	ctx := context.Background()
+	sqliteStore, err := NewSQLiteSchemaStore(filepath.Join(t.TempDir(), "uuid-defaults.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteSchemaStore: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := sqliteStore.Close(); err != nil {
+			t.Fatalf("close sqlite schema store: %v", err)
+		}
+	})
+	if err := sqliteStore.EnsureSchemaTables(ctx, []SchemaTableDDL{{
+		TableName:  "uuid_defaults",
+		SchemaKind: "test",
+		Statements: []string{
+			"CREATE TABLE IF NOT EXISTS uuid_defaults (\n    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n)",
+		},
+	}}); err != nil {
+		t.Fatalf("EnsureSchemaTables: %v", err)
+	}
+	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO uuid_defaults DEFAULT VALUES`); err != nil {
+		t.Fatalf("insert default row: %v", err)
+	}
+	var id string
+	if err := sqliteStore.DB.QueryRowContext(ctx, `SELECT id FROM uuid_defaults`).Scan(&id); err != nil {
+		t.Fatalf("select generated uuid: %v", err)
+	}
+	if !regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`).MatchString(id) {
+		t.Fatalf("generated id = %q, want SQLite-rendered UUID default", id)
+	}
+}
+
+func TestSQLiteStatementsForPlanRejectsUnsupportedColumnType(t *testing.T) {
+	_, err := SQLiteStatementsForPlan(SchemaTableDDL{
+		TableName:  "bad_type",
+		SchemaKind: "test",
+		Statements: []string{
+			"CREATE TABLE IF NOT EXISTS bad_type (\n    id SERIAL PRIMARY KEY\n)",
+		},
+	})
+	if err == nil {
+		t.Fatal("SQLiteStatementsForPlan accepted unsupported column type")
+	}
+	if !strings.Contains(err.Error(), "unsupported SQLite column type") {
+		t.Fatalf("error = %v, want unsupported column type diagnostic", err)
 	}
 }
 
