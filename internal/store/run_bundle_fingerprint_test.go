@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimecorrelation "swarm/internal/runtime/correlation"
+	"swarm/internal/store/runbundle"
 	storerunlifecycle "swarm/internal/store/runlifecycle"
 	"swarm/internal/testutil"
 )
@@ -126,42 +127,58 @@ func TestRunLifecycleOwnerPersistsCanonicalBundleHashWhenSupplied(t *testing.T) 
 	assertRunBundleIdentity(t, db, runID, testCanonicalBundleHash, storerunlifecycle.BundleSourcePersisted, "")
 }
 
-func TestPostgresStore_ActiveRunBundleMismatches(t *testing.T) {
+func TestPostgresStore_ActiveRunBundleAvailabilityConflicts(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
-	matchingRunID := uuid.NewString()
-	mismatchedRunID := uuid.NewString()
 	legacyRunID := uuid.NewString()
-	completedMismatchRunID := uuid.NewString()
+	persistedRunID := uuid.NewString()
+	persistedMissingRunID := uuid.NewString()
+	completedLegacyRunID := uuid.NewString()
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json)
+		VALUES ($1, 'name: test', '{}'::jsonb)
+	`, testCanonicalBundleHash); err != nil {
+		t.Fatalf("seed bundle row: %v", err)
+	}
 
 	for _, seed := range []struct {
 		runID       string
 		status      string
+		hash        sql.NullString
+		source      string
 		fingerprint sql.NullString
 	}{
-		{runID: matchingRunID, status: "running", fingerprint: sql.NullString{String: testBootBundleFingerprint, Valid: true}},
-		{runID: mismatchedRunID, status: "paused", fingerprint: sql.NullString{String: testOtherBundleFingerprint, Valid: true}},
-		{runID: legacyRunID, status: "running", fingerprint: sql.NullString{}},
-		{runID: completedMismatchRunID, status: "completed", fingerprint: sql.NullString{String: testOtherBundleFingerprint, Valid: true}},
+		{runID: persistedRunID, status: "running", hash: sql.NullString{String: testCanonicalBundleHash, Valid: true}, source: storerunlifecycle.BundleSourcePersisted},
+		{runID: persistedMissingRunID, status: "running", hash: sql.NullString{String: "bundle-v1:sha256:2222222222222222222222222222222222222222222222222222222222222222", Valid: true}, source: storerunlifecycle.BundleSourcePersisted},
+		{runID: legacyRunID, status: "paused", source: storerunlifecycle.BundleSourceLegacy, fingerprint: sql.NullString{String: testBootBundleFingerprint, Valid: true}},
+		{runID: completedLegacyRunID, status: "completed", source: storerunlifecycle.BundleSourceLegacy, fingerprint: sql.NullString{String: testOtherBundleFingerprint, Valid: true}},
 	} {
 		if _, err := db.ExecContext(ctx, `
-			INSERT INTO runs (run_id, status, bundle_fingerprint)
-			VALUES ($1::uuid, $2, $3)
-		`, seed.runID, seed.status, seed.fingerprint); err != nil {
+			INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint)
+			VALUES ($1::uuid, $2, $3, $4, $5)
+		`, seed.runID, seed.status, seed.hash, seed.source, seed.fingerprint); err != nil {
 			t.Fatalf("seed run %s: %v", seed.runID, err)
 		}
 	}
 
-	mismatches, err := pg.ActiveRunBundleMismatches(ctx, testBootBundleFingerprint)
+	conflicts, err := pg.ActiveRunBundleAvailabilityConflicts(ctx)
 	if err != nil {
-		t.Fatalf("ActiveRunBundleMismatches: %v", err)
+		t.Fatalf("ActiveRunBundleAvailabilityConflicts: %v", err)
 	}
-	if len(mismatches) != 1 {
-		t.Fatalf("mismatches = %#v, want one", mismatches)
+	if len(conflicts) != 2 {
+		t.Fatalf("conflicts = %#v, want persisted-missing and legacy active conflicts", conflicts)
 	}
-	if got := mismatches[0]; got.RunID != mismatchedRunID || got.Status != "paused" || got.BundleFingerprint != testOtherBundleFingerprint {
-		t.Fatalf("mismatch = %#v, want paused mismatched run", got)
+	byRunID := map[string]ActiveRunBundleAvailabilityConflict{}
+	for _, conflict := range conflicts {
+		byRunID[conflict.RunID] = conflict
+	}
+	if got := byRunID[persistedMissingRunID]; got.ErrorCode != runbundle.CodeBundleDataIntegrityError {
+		t.Fatalf("persisted missing conflict = %#v, want data-integrity error", got)
+	}
+	if got := byRunID[legacyRunID]; got.ErrorCode != runbundle.CodeBundleUnavailable || got.Cause != storerunlifecycle.BundleSourceLegacy {
+		t.Fatalf("legacy conflict = %#v, want bundle unavailable legacy", got)
 	}
 }
 

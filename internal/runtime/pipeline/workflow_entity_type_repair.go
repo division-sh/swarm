@@ -7,16 +7,17 @@ import (
 
 	"swarm/internal/runtime/entityruntime"
 	"swarm/internal/runtime/semanticview"
+	"swarm/internal/store/runbundle"
 )
 
 type contractEntityTypeRepair struct {
-	RunID             string
-	EntityID          string
-	FlowInstance      string
-	FlowTemplate      string
-	WorkflowVersion   string
-	BundleFingerprint string
-	EntityType        string
+	RunID              string
+	EntityID           string
+	FlowInstance       string
+	FlowTemplate       string
+	WorkflowVersion    string
+	BundleAvailability runbundle.Availability
+	EntityType         string
 }
 
 func (pc *PipelineCoordinator) RepairContractEntityTypes(ctx context.Context) (int, error) {
@@ -33,8 +34,7 @@ func (pc *PipelineCoordinator) RepairContractEntityTypes(ctx context.Context) (i
 			es.entity_id::text,
 			COALESCE(es.flow_instance, ''),
 			COALESCE(fi.flow_template, ''),
-			COALESCE(fi.config->>'workflow_version', ''),
-			COALESCE(r.bundle_fingerprint, '')
+			COALESCE(fi.config->>'workflow_version', '')
 		FROM entity_state es
 		JOIN runs r ON r.run_id = es.run_id
 		LEFT JOIN flow_instances fi ON fi.instance_id = es.flow_instance
@@ -56,7 +56,6 @@ func (pc *PipelineCoordinator) RepairContractEntityTypes(ctx context.Context) (i
 			&item.FlowInstance,
 			&item.FlowTemplate,
 			&item.WorkflowVersion,
-			&item.BundleFingerprint,
 		); err != nil {
 			return 0, fmt.Errorf("scan default entity type row: %w", err)
 		}
@@ -64,7 +63,15 @@ func (pc *PipelineCoordinator) RepairContractEntityTypes(ctx context.Context) (i
 		if !ok {
 			continue
 		}
-		if !contractEntityTypeRepairMatchesCurrentSource(source, contract, item, pc.bundleFingerprint) {
+		availability, err := runbundle.LoadAvailability(ctx, pc.db, item.RunID)
+		if err != nil {
+			return 0, err
+		}
+		if availability.DataIntegrityError() {
+			return 0, fmt.Errorf("contract entity type repair blocked by run bundle availability: %s", availability.DetailString())
+		}
+		item.BundleAvailability = availability
+		if !contractEntityTypeRepairMatchesCurrentSource(source, contract, item, "") {
 			continue
 		}
 		item.EntityType = strings.TrimSpace(contract.EntityType)
@@ -116,7 +123,7 @@ func (pc *PipelineCoordinator) RepairContractEntityTypes(ctx context.Context) (i
 	return repaired, nil
 }
 
-func contractEntityTypeRepairMatchesCurrentSource(source semanticview.Source, contract entityruntime.Contract, item contractEntityTypeRepair, currentBundleFingerprint string) bool {
+func contractEntityTypeRepairMatchesCurrentSource(source semanticview.Source, contract entityruntime.Contract, item contractEntityTypeRepair, currentBundleHash string) bool {
 	if source == nil {
 		return false
 	}
@@ -124,9 +131,11 @@ func contractEntityTypeRepairMatchesCurrentSource(source semanticview.Source, co
 	if workflowVersion == "" || workflowVersion != strings.TrimSpace(source.WorkflowVersion()) {
 		return false
 	}
-	bundleFingerprint := strings.TrimSpace(item.BundleFingerprint)
-	currentBundleFingerprint = strings.TrimSpace(currentBundleFingerprint)
-	if bundleFingerprint == "" || currentBundleFingerprint == "" || bundleFingerprint != currentBundleFingerprint {
+	if !item.BundleAvailability.Available() {
+		return false
+	}
+	currentBundleHash = strings.TrimSpace(currentBundleHash)
+	if currentBundleHash == "" || currentBundleHash != item.BundleAvailability.BundleHash {
 		return false
 	}
 	flowTemplate := strings.Trim(strings.TrimSpace(item.FlowTemplate), "/")

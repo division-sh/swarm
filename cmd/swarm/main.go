@@ -1602,7 +1602,7 @@ func buildStores(ctx context.Context, storeMode string, cfg *config.Config) (sto
 func enforceServeBundleMatchAdmission(ctx context.Context, pg *store.PostgresStore, bootFingerprint string, requireMatch bool) error {
 	bootFingerprint = strings.TrimSpace(bootFingerprint)
 	if !requireMatch {
-		log.Printf("bundle match admission disabled by --no-require-bundle-match; active run bundle fingerprints will not block startup")
+		log.Printf("bundle match admission disabled by --no-require-bundle-match; active run bundle source state will not block startup")
 		return nil
 	}
 	if bootFingerprint == "" {
@@ -1611,18 +1611,18 @@ func enforceServeBundleMatchAdmission(ctx context.Context, pg *store.PostgresSto
 	if pg == nil {
 		return nil
 	}
-	mismatches, err := pg.ActiveRunBundleMismatches(ctx, bootFingerprint)
+	conflicts, err := pg.ActiveRunBundleAvailabilityConflicts(ctx)
 	if err != nil {
 		return err
 	}
-	if len(mismatches) == 0 {
+	if len(conflicts) == 0 {
 		return nil
 	}
-	details := make([]string, 0, len(mismatches))
-	for _, mismatch := range mismatches {
-		details = append(details, fmt.Sprintf("%s status=%s bundle_fingerprint=%s", mismatch.RunID, mismatch.Status, mismatch.BundleFingerprint))
+	details := make([]string, 0, len(conflicts))
+	for _, conflict := range conflicts {
+		details = append(details, conflict.DetailString())
 	}
-	return fmt.Errorf("active run bundle mismatch: boot bundle %s does not match %d active run(s): %s", bootFingerprint, len(mismatches), strings.Join(details, "; "))
+	return fmt.Errorf("active run bundle availability conflict: boot bundle %s cannot resume %d active run(s): %s", bootFingerprint, len(conflicts), strings.Join(details, "; "))
 }
 
 func initializeStateStores(ctx context.Context, stores storeBundle, bundle *runtimecontracts.WorkflowContractBundle) (string, error) {
