@@ -22,3 +22,10 @@ func (s *PostgresStore) ActiveRunBundleAvailabilityConflicts(ctx context.Context
 	}
 	return runbundle.ListActiveConflicts(ctx, s.DB)
 }
+
+func (s *PostgresStore) LoadRunBundleAvailability(ctx context.Context, runID string) (runbundle.Availability, error) {
+	if s == nil || s.DB == nil {
+		return runbundle.Availability{}, fmt.Errorf("postgres store is required")
+	}
+	return runbundle.LoadAvailability(ctx, s.DB, runID)
+}

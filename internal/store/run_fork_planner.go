@@ -177,9 +177,6 @@ func (s *PostgresStore) PlanRunFork(ctx context.Context, req RunForkPlanRequest)
 		return RunForkPlan{}, fmt.Errorf("source run_id must be a UUID: %w", err)
 	}
 	at := strings.TrimSpace(req.At)
-	if at == "" {
-		return RunForkPlan{}, fmt.Errorf("fork point --at value is required")
-	}
 
 	plan := RunForkPlan{SourceRunID: runID}
 	if err := s.loadRunForkSourceSummary(ctx, &plan); err != nil {
@@ -260,6 +257,28 @@ func (s *PostgresStore) loadRunForkSourceSummary(ctx context.Context, plan *RunF
 }
 
 func (s *PostgresStore) resolveRunForkPoint(ctx context.Context, runID, at string) (runForkEventCursor, error) {
+	if strings.TrimSpace(at) == "" {
+		var cursor runForkEventCursor
+		if err := s.DB.QueryRowContext(ctx, `
+			SELECT
+				event_id::text,
+				event_name,
+				COALESCE(source_event_id::text, ''),
+				COALESCE(produced_by, ''),
+				COALESCE(produced_by_type, ''),
+				created_at
+			FROM events
+			WHERE run_id = $1::uuid
+			ORDER BY created_at DESC, event_id DESC
+			LIMIT 1
+		`, runID).Scan(&cursor.EventID, &cursor.EventName, &cursor.SourceEventID, &cursor.ProducedBy, &cursor.ProducedByType, &cursor.CreatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return runForkEventCursor{}, fmt.Errorf("no source-run event exists for fork source run %s", runID)
+			}
+			return runForkEventCursor{}, fmt.Errorf("resolve default fork event: %w", err)
+		}
+		return cursor, nil
+	}
 	if _, err := uuid.Parse(at); err == nil {
 		var cursor runForkEventCursor
 		if err := s.DB.QueryRowContext(ctx, `

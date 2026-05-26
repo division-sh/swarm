@@ -68,6 +68,8 @@ type OperatorReadOptions struct {
 	BundleCatalog         BundleCatalogReadStore
 	ConversationForks     ConversationForkLifecycleStore
 	ForkChatExecutor      ForkChatExecutor
+	RunForkAvailability   RunForkAvailabilityStore
+	RunFork               RunForkExecutor
 	AgentControl          AgentControlController
 	Mailbox               MailboxAPIStore
 	Idempotency           APIIdempotencyStore
@@ -219,6 +221,9 @@ func OperatorReadHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 		handlers[name] = handler
 	}
 	for name, handler := range OperatorEventReplayHandlers(opts) {
+		handlers[name] = handler
+	}
+	for name, handler := range OperatorRunForkHandlers(opts) {
 		handlers[name] = handler
 	}
 	for name, handler := range OperatorRunControlHandlers(opts) {
