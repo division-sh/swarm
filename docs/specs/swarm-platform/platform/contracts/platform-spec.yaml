@@ -1329,7 +1329,8 @@ handler_specification:
         declare authored payload fields; runtime-owned action instructions construct and validate any follow-up payload.
       valid_values:
         create_flow_instance:
-          description: Create a new dynamic flow instance.
+          description: Create a new dynamic flow instance. Duplicate resolved instance IDs fail closed; they are never updates
+            or already-exists successes.
           required_sibling_fields:
             template: 'string — flow template ID (must be mode: template)'
             instance_id_from: string — payload field containing the unique instance ID
@@ -1832,11 +1833,12 @@ engine:
         decides when to create instances based on its product logic. Same pattern as agent sharding — nodes orchestrate instance
         creation.
       instance_id: Supplied by the node (from event payload or generated). Must be unique within the template scope. If already
-        exists, creation fails with error.
+        exists, creation fails with error before mutating flow_instances, entity_state, routes, agents, or auto_emit_on_create.
       process:
       - 1. Node handler calls create_flow_instance with template ID and instance_id
       - '2. Platform validates: template exists and is mode: template'
-      - '3. Platform validates: instance_id is unique within template scope'
+      - '3. Platform validates: instance_id is unique within template scope; duplicate resolved IDs fail closed before create side
+        effects'
       - 4. Platform loads flow template contracts from flows/{template}/
       - '5. Platform constructs paths: {template_id}/{instance_id}/{local_name}'
       - 6. Platform registers new nodes, agents, events in runtime registry
@@ -1856,7 +1858,8 @@ engine:
           before emitting a structurally routed pin output.
         single_parent_v1: Each child has exactly one ParentRoute in v1. Multiple parents are v2.
       auto_emit: Flow schemas may declare auto_emit_on_create. When the platform creates an instance, it automatically emits
-        the declared event after the instance is fully started. This bootstraps the flow without requiring an external trigger.
+        the declared event after the instance is fully started. Duplicate create failures MUST NOT auto-emit. This bootstraps
+        the flow without requiring an external trigger.
     addressing:
       static_flows: '{flow_id}/{local_name} — one level, no instance segment'
       template_instances: '{template_id}/{instance_id}/{local_name} — extra segment for instance'

@@ -167,12 +167,37 @@ func (s *WorkflowInstanceStore) Upsert(ctx context.Context, instance WorkflowIns
 	if s == nil || s.db == nil {
 		return nil
 	}
+	instance, identity, ok, err := normalizeWorkflowInstanceForPersistence(instance)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
+	return s.upsertSpec(ctx, identity.RowID(), identity.StorageRef, instance)
+}
+
+func (s *WorkflowInstanceStore) Create(ctx context.Context, instance WorkflowInstance) error {
+	if s == nil || s.db == nil {
+		return nil
+	}
+	instance, identity, ok, err := normalizeWorkflowInstanceForPersistence(instance)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
+	return s.createSpec(ctx, identity.RowID(), identity.StorageRef, instance)
+}
+
+func normalizeWorkflowInstanceForPersistence(instance WorkflowInstance) (WorkflowInstance, runtimeflowidentity.Persisted, bool, error) {
 	instance.InstanceID = strings.TrimSpace(instance.InstanceID)
 	instance.WorkflowName = strings.TrimSpace(instance.WorkflowName)
 	instance.WorkflowVersion = strings.TrimSpace(instance.WorkflowVersion)
 	instance.CurrentState = strings.TrimSpace(instance.CurrentState)
 	if instance.InstanceID == "" || instance.WorkflowName == "" || instance.WorkflowVersion == "" || instance.CurrentState == "" {
-		return fmt.Errorf(
+		return WorkflowInstance{}, runtimeflowidentity.Persisted{}, false, fmt.Errorf(
 			"workflow instance requires instance_id, workflow_name, workflow_version, and current_state (id=%q workflow=%q version=%q state=%q)",
 			instance.InstanceID,
 			instance.WorkflowName,
@@ -189,13 +214,13 @@ func (s *WorkflowInstanceStore) Upsert(ctx context.Context, instance WorkflowIns
 	instance.StorageRef = strings.TrimSpace(instance.StorageRef)
 	identity, err := workflowInstancePersistedIdentity(nil, instance)
 	if err != nil {
-		return err
+		return WorkflowInstance{}, runtimeflowidentity.Persisted{}, false, err
 	}
 	if strings.TrimSpace(identity.StorageRef) == "" {
-		return nil
+		return WorkflowInstance{}, runtimeflowidentity.Persisted{}, false, nil
 	}
 	if strings.TrimSpace(identity.RowID()) == "" {
-		return nil
+		return WorkflowInstance{}, runtimeflowidentity.Persisted{}, false, nil
 	}
 	if instance.Metadata == nil {
 		instance.Metadata = map[string]any{}
@@ -215,7 +240,7 @@ func (s *WorkflowInstanceStore) Upsert(ctx context.Context, instance WorkflowIns
 	if identity.ParentRoute.FlowInstance != "" {
 		instance.Metadata["parent_flow_instance"] = identity.ParentRoute.FlowInstance
 	}
-	return s.upsertSpec(ctx, identity.RowID(), identity.StorageRef, instance)
+	return instance, identity, true, nil
 }
 
 func (s *WorkflowInstanceStore) Mutate(ctx context.Context, instanceID string, fn func(*WorkflowInstance)) error {
@@ -796,6 +821,169 @@ func (s *WorkflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRe
 		committed = true
 	}
 	return nil
+}
+
+func (s *WorkflowInstanceStore) createSpec(ctx context.Context, rowID, storageRef string, instance WorkflowInstance) error {
+	runID, err := runtimecurrentstate.RequireRunID(ctx)
+	if err != nil {
+		return err
+	}
+	tx, ownedTx, err := workflowInstanceStoreTx(ctx, s.db)
+	if err != nil {
+		return err
+	}
+	committed := !ownedTx
+	if ownedTx {
+		defer func() {
+			if !committed {
+				_ = tx.Rollback()
+			}
+		}()
+	}
+	if err := lockWorkflowInstanceMutation(ctx, tx, storageRef); err != nil {
+		return err
+	}
+	exists, err := workflowInstanceCreateTargetExists(ctx, tx, runID, rowID, storageRef)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return fmt.Errorf("flow instance already exists: %s", storageRef)
+	}
+	projection, err := workflowInstancePersistedProjectionFromInstance(instance, storageRef)
+	if err != nil {
+		return err
+	}
+	fieldsJSON, err := json.Marshal(projection.Fields)
+	if err != nil {
+		return err
+	}
+	gatesJSON, err := json.Marshal(projection.GatesAny())
+	if err != nil {
+		return err
+	}
+	config := projection.ConfigPayload(instance.WorkflowVersion)
+	configJSON, err := json.Marshal(config)
+	if err != nil {
+		return err
+	}
+	accumulatorState, err := json.Marshal(projection.Accumulator)
+	if err != nil {
+		return err
+	}
+	mode := workflowInstanceMode(storageRef)
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO flow_instances (
+			instance_id, flow_template, mode, config, status, created_at
+		)
+		VALUES (
+			$1, $2, $3, $4::jsonb, 'active', now()
+		)
+	`, storageRef, instance.WorkflowName, mode, jsonOrDefault(configJSON, "{}")); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO entity_state (
+			run_id, entity_id, flow_instance, entity_type, slug, name,
+			current_state, gates, fields, accumulator, revision,
+			entered_state_at, created_at, updated_at
+		)
+		VALUES (
+			$1::uuid, $2::uuid, $3, $4, NULLIF($5,''), NULLIF($6,''),
+			$7, $8::jsonb, $9::jsonb, $10::jsonb, 1,
+			$11, now(), now()
+		)
+	`, runID, rowID, storageRef, projection.Control.EntityType, projection.Control.Slug, projection.Control.Name, instance.CurrentState,
+		jsonOrDefault(gatesJSON, "{}"),
+		jsonOrDefault(fieldsJSON, "{}"),
+		jsonOrDefault(accumulatorState, "{}"),
+		instance.EnteredStageAt,
+	); err != nil {
+		return err
+	}
+	afterProjection := runtimemutationlog.EntityStateProjection{
+		CurrentState: strings.TrimSpace(instance.CurrentState),
+		Fields:       projection.Fields,
+		Gates:        projection.GatesAny(),
+		Accumulator:  projection.Accumulator,
+	}
+	previousForDiff := runtimemutationlog.EntityStateProjection{}
+	if createInfo, ok := workflowCreateEntityInitialValuesFromContext(ctx); ok {
+		nextPrevious, err := insertWorkflowCreateEntityInitialValueMutations(ctx, tx, rowID, previousForDiff, afterProjection, createInfo.Fields)
+		if err != nil {
+			return err
+		}
+		previousForDiff = nextPrevious
+	}
+	if err := runtimemutationlog.InsertEntityStateDiff(ctx, tx, rowID, previousForDiff, afterProjection, runtimemutationlog.Writer{
+		Type:        "platform",
+		ID:          "workflow_instance_store",
+		HandlerStep: "create",
+	}); err != nil {
+		return err
+	}
+	for _, timer := range instance.TimerState {
+		payloadJSON, err := json.Marshal(map[string]any{
+			"started_by": strings.TrimSpace(timer.StartedBy),
+			"timer_id":   strings.TrimSpace(timer.TimerID),
+		})
+		if err != nil {
+			return err
+		}
+		status := "active"
+		if timer.Cancelled {
+			status = "cancelled"
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO timers (
+				timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
+				fire_at, recurring, owner_node, task_type, status, created_at
+			)
+			VALUES (
+				$1::uuid, $2::uuid, $3, $4::uuid, $5, $6, $7::jsonb,
+				$8, $9, $10, $11, $12, $13
+			)
+		`, workflowInstanceTimerRowID(runID, strings.TrimSpace(timer.TimerID), rowID), runID, strings.TrimSpace(timer.TimerID), rowID, storageRef,
+			strings.TrimSpace(timer.EventType), jsonOrDefault(payloadJSON, "{}"), timer.FiresAt, timer.Recurring,
+			workflowInstanceTimerOwnerNode, workflowInstanceTimerTaskType(timer), status, workflowTimeOrNow(timer.CreatedAt),
+		); err != nil {
+			return err
+		}
+	}
+	if ownedTx {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		committed = true
+	}
+	return nil
+}
+
+func workflowInstanceCreateTargetExists(ctx context.Context, tx *sql.Tx, runID, rowID, storageRef string) (bool, error) {
+	var exists bool
+	if err := tx.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM flow_instances
+			WHERE instance_id = $1
+		)
+	`, storageRef).Scan(&exists); err != nil {
+		return false, err
+	}
+	if exists {
+		return true, nil
+	}
+	if err := tx.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM entity_state
+			WHERE run_id = $1::uuid
+			  AND entity_id = $2::uuid
+		)
+	`, runID, rowID).Scan(&exists); err != nil {
+		return false, err
+	}
+	return exists, nil
 }
 
 func workflowInstanceStoreTx(ctx context.Context, db *sql.DB) (*sql.Tx, bool, error) {

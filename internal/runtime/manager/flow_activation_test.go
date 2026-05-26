@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,6 +39,7 @@ type flowActivationTestRouteStore struct {
 }
 
 type flowActivationTestInstanceStore struct {
+	creates          []runtimepipeline.WorkflowInstance
 	upserts          []runtimepipeline.WorkflowInstance
 	terminatedPaths  []string
 	terminatedAtSeen []time.Time
@@ -72,6 +74,26 @@ func (s *flowActivationTestRouteStore) DeleteFlowInstanceRoute(_ context.Context
 
 func (s *flowActivationTestInstanceStore) Upsert(_ context.Context, instance runtimepipeline.WorkflowInstance) error {
 	s.upserts = append(s.upserts, instance)
+	s.storeInstance(instance)
+	return nil
+}
+
+func (s *flowActivationTestInstanceStore) Create(_ context.Context, instance runtimepipeline.WorkflowInstance) error {
+	if s.byStorageRef == nil {
+		s.byStorageRef = map[string]runtimepipeline.WorkflowInstance{}
+	}
+	ref := strings.TrimSpace(instance.StorageRef)
+	if ref != "" {
+		if _, ok := s.byStorageRef[ref]; ok {
+			return fmt.Errorf("flow instance already exists: %s", ref)
+		}
+	}
+	s.creates = append(s.creates, instance)
+	s.storeInstance(instance)
+	return nil
+}
+
+func (s *flowActivationTestInstanceStore) storeInstance(instance runtimepipeline.WorkflowInstance) {
 	if s.byStorageRef == nil {
 		s.byStorageRef = map[string]runtimepipeline.WorkflowInstance{}
 	}
@@ -81,7 +103,6 @@ func (s *flowActivationTestInstanceStore) Upsert(_ context.Context, instance run
 		stored.Status = "active"
 		s.byStorageRef[stored.StorageRef] = stored
 	}
-	return nil
 }
 
 func (s *flowActivationTestInstanceStore) MarkTerminated(_ context.Context, storageRef string, terminatedAt time.Time) error {
@@ -423,6 +444,40 @@ func TestActivateFlowInstanceQueuesAutoEmitUntilPostCommitWhenAvailable(t *testi
 	}
 }
 
+func TestActivateFlowInstanceRejectsDuplicateInstanceIDBeforeSideEffects(t *testing.T) {
+	bus := &flowActivationTestBus{}
+	instances := &flowActivationTestInstanceStore{}
+	store := &flowActivationTestStore{}
+	am := newFlowActivationManager(bus, instances, store)
+	bundle := testFlowBundle("task.started")
+	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
+
+	if err := am.ActivateFlowInstance(context.Background(), req); err != nil {
+		t.Fatalf("first ActivateFlowInstance: %v", err)
+	}
+	firstCreates := len(instances.creates)
+	firstRoutes := len(bus.addedPaths)
+	firstPublished := len(bus.published)
+	firstAgents := len(store.upserts)
+
+	err := am.ActivateFlowInstance(context.Background(), req)
+	if err == nil || !strings.Contains(err.Error(), "flow instance already exists: review/inst-1") {
+		t.Fatalf("duplicate ActivateFlowInstance error = %v, want already-exists failure", err)
+	}
+	if len(instances.creates) != firstCreates {
+		t.Fatalf("creates = %d, want unchanged %d", len(instances.creates), firstCreates)
+	}
+	if len(bus.addedPaths) != firstRoutes {
+		t.Fatalf("added paths = %#v, want unchanged route side effects", bus.addedPaths)
+	}
+	if len(bus.published) != firstPublished {
+		t.Fatalf("published events = %#v, want unchanged auto-emit side effects", bus.published)
+	}
+	if len(store.upserts) != firstAgents {
+		t.Fatalf("persisted agents = %#v, want unchanged agent side effects", store.upserts)
+	}
+}
+
 func TestActivateFlowInstanceFailsClosedOnAutoEmitMissingRequiredField(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	instances := &flowActivationTestInstanceStore{}
@@ -447,8 +502,8 @@ func TestActivateFlowInstanceFailsClosedOnAutoEmitMissingRequiredField(t *testin
 	if len(bus.runtimeLogs) != 0 {
 		t.Fatalf("runtime logs = %#v, want none", bus.runtimeLogs)
 	}
-	if len(instances.upserts) != 0 {
-		t.Fatalf("instance upserts = %#v, want none", instances.upserts)
+	if len(instances.creates) != 0 {
+		t.Fatalf("instance creates = %#v, want none", instances.creates)
 	}
 	if len(bus.addedPaths) != 0 {
 		t.Fatalf("added paths = %#v, want none", bus.addedPaths)
@@ -483,8 +538,8 @@ func TestActivateFlowInstanceQueuedAutoEmitFailsClosedOnUndeclaredConfigField(t 
 	if len(bus.runtimeLogs) != 0 {
 		t.Fatalf("runtime logs = %#v, want none", bus.runtimeLogs)
 	}
-	if len(instances.upserts) != 0 {
-		t.Fatalf("instance upserts = %#v, want none", instances.upserts)
+	if len(instances.creates) != 0 {
+		t.Fatalf("instance creates = %#v, want none", instances.creates)
 	}
 	if len(bus.addedPaths) != 0 {
 		t.Fatalf("added paths = %#v, want none", bus.addedPaths)
@@ -630,10 +685,10 @@ func TestActivateFlowInstancePersistsFlowInstanceConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
-	if len(instances.upserts) != 1 {
-		t.Fatalf("upserts = %d, want 1", len(instances.upserts))
+	if len(instances.creates) != 1 {
+		t.Fatalf("creates = %d, want 1", len(instances.creates))
 	}
-	got := instances.upserts[0]
+	got := instances.creates[0]
 	if got.StorageRef != "review/inst-1" {
 		t.Fatalf("storage_ref = %q, want review/inst-1", got.StorageRef)
 	}

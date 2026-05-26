@@ -202,6 +202,104 @@ func TestWorkflowInstanceStoreProjection_DoesNotExposeControlStatusAsEntityField
 	}
 }
 
+func TestWorkflowInstanceStoreCreateRejectsDuplicateWithoutMutatingProjection(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	store := NewWorkflowInstanceStore(db)
+	ctx := testWorkflowStoreRunContext(t, store)
+	const storageRef = "review/inst-1"
+	first := WorkflowInstance{
+		InstanceID:      "inst-1",
+		StorageRef:      storageRef,
+		WorkflowName:    "review",
+		WorkflowVersion: "1.0.0",
+		CurrentState:    "queued",
+		Config: map[string]any{
+			"name": "alpha",
+		},
+		Metadata: map[string]any{
+			"business_brief": "first",
+			"entity_type":    "workflow_subject",
+			"flow_path":      storageRef,
+			"instance_id":    "inst-1",
+		},
+		StateBuckets: map[string]any{
+			"score": map[string]any{"value": float64(1)},
+		},
+	}
+	if err := store.Create(ctx, first); err != nil {
+		t.Fatalf("create workflow instance: %v", err)
+	}
+
+	duplicate := first
+	duplicate.CurrentState = "mutated"
+	duplicate.Config = map[string]any{
+		"name": "beta",
+	}
+	duplicate.Metadata = map[string]any{
+		"business_brief": "second",
+		"entity_type":    "workflow_subject",
+		"flow_path":      storageRef,
+		"instance_id":    "inst-1",
+	}
+	duplicate.StateBuckets = map[string]any{
+		"score": map[string]any{"value": float64(99)},
+	}
+	err := store.Create(ctx, duplicate)
+	if err == nil || !strings.Contains(err.Error(), "flow instance already exists: "+storageRef) {
+		t.Fatalf("duplicate create error = %v, want already-exists failure", err)
+	}
+
+	loaded, ok, err := store.Load(ctx, storageRef)
+	if err != nil {
+		t.Fatalf("load workflow instance after duplicate create: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected original workflow instance to remain")
+	}
+	if got := loaded.CurrentState; got != "queued" {
+		t.Fatalf("CurrentState = %q, want queued", got)
+	}
+	if got := loaded.Config["name"]; got != "alpha" {
+		t.Fatalf("Config name = %#v, want alpha", got)
+	}
+	if got := loaded.Metadata["business_brief"]; got != "first" {
+		t.Fatalf("Metadata business_brief = %#v, want first", got)
+	}
+	gotScore, ok := workflowStateBucketObject(loaded, "score")
+	if !ok || gotScore["value"] != float64(1) {
+		t.Fatalf("StateBuckets score = %#v ok=%v, want 1", gotScore, ok)
+	}
+
+	var (
+		revision   int
+		configName string
+		fieldsRaw  []byte
+	)
+	if err := db.QueryRowContext(ctx, `
+		SELECT es.revision, COALESCE(fi.config->>'name', ''), es.fields
+		FROM entity_state es
+		JOIN flow_instances fi ON fi.instance_id = es.flow_instance
+		WHERE es.run_id = $1::uuid AND es.entity_id = $2::uuid
+	`, testPipelineRunID, workflowInstanceRowID(storageRef)).Scan(&revision, &configName, &fieldsRaw); err != nil {
+		t.Fatalf("query persisted projection after duplicate create: %v", err)
+	}
+	if revision != 1 {
+		t.Fatalf("entity_state.revision = %d, want 1", revision)
+	}
+	if configName != "alpha" {
+		t.Fatalf("flow_instances.config name = %q, want alpha", configName)
+	}
+	fields, err := decodeWorkflowInstanceJSONMap("entity_state.fields", fieldsRaw)
+	if err != nil {
+		t.Fatalf("decode entity_state.fields: %v", err)
+	}
+	if got := fields["business_brief"]; got != "first" {
+		t.Fatalf("entity_state.fields business_brief = %#v, want first", got)
+	}
+}
+
 func TestWorkflowInstanceStoreProjection_StaticRowsDoNotGainMaterializedFlowPathOnRoundTrip(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)

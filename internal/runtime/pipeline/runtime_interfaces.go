@@ -46,6 +46,7 @@ type WorkflowInstancePersistence interface {
 	Enabled() bool
 	Load(ctx context.Context, instanceID string) (WorkflowInstance, bool, error)
 	List(ctx context.Context) ([]WorkflowInstance, error)
+	Create(ctx context.Context, instance WorkflowInstance) error
 	Upsert(ctx context.Context, instance WorkflowInstance) error
 	MarkTerminated(ctx context.Context, instanceID string, terminatedAt time.Time) error
 	Mutate(ctx context.Context, instanceID string, fn func(*WorkflowInstance)) error
