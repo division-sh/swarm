@@ -93,6 +93,17 @@ func (s *SQLiteRuntimeStore) CanonicalEventReceiptsCapability(ctx context.Contex
 }
 
 func (s *SQLiteRuntimeStore) AppendEvent(ctx context.Context, evt events.Event) error {
+	return s.AppendEventTx(ctx, nil, evt)
+}
+
+func (s *SQLiteRuntimeStore) BeginEventTx(ctx context.Context) (*sql.Tx, error) {
+	if s == nil || s.DB == nil {
+		return nil, fmt.Errorf("sqlite runtime store is required")
+	}
+	return s.DB.BeginTx(ctx, nil)
+}
+
+func (s *SQLiteRuntimeStore) AppendEventTx(ctx context.Context, tx *sql.Tx, evt events.Event) error {
 	caps, err := s.schemaCapabilities(ctx)
 	if err != nil {
 		return err
@@ -111,13 +122,16 @@ func (s *SQLiteRuntimeStore) AppendEvent(ctx context.Context, evt events.Event) 
 	if eventHasRouteIdentity(evt) && !caps.Events.LogRouteIdentity {
 		return fmt.Errorf("events source_route/target_route/target_set columns required for routed event")
 	}
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin sqlite event tx: %w", err)
+	ownedTx := tx == nil
+	if ownedTx {
+		tx, err = s.DB.BeginTx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("begin sqlite event tx: %w", err)
+		}
 	}
 	committed := false
 	defer func() {
-		if !committed {
+		if ownedTx && !committed {
 			_ = tx.Rollback()
 		}
 	}()
@@ -137,29 +151,39 @@ func (s *SQLiteRuntimeStore) AppendEvent(ctx context.Context, evt events.Event) 
 	if err != nil {
 		return fmt.Errorf("append sqlite event: %w", err)
 	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit sqlite event tx: %w", err)
+	if ownedTx {
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit sqlite event tx: %w", err)
+		}
+		committed = true
 	}
-	committed = true
 	return nil
 }
 
 func (s *SQLiteRuntimeStore) InsertEventDeliveries(ctx context.Context, eventID string, agentIDs []string) error {
+	return s.InsertEventDeliveriesTx(ctx, nil, eventID, agentIDs)
+}
+
+func (s *SQLiteRuntimeStore) InsertEventDeliveriesTx(ctx context.Context, tx *sql.Tx, eventID string, agentIDs []string) error {
 	eventID = strings.TrimSpace(eventID)
 	if eventID == "" || len(agentIDs) == 0 {
 		return nil
 	}
 	var runID sql.NullString
-	if err := s.DB.QueryRowContext(ctx, `SELECT run_id FROM events WHERE event_id = ?`, eventID).Scan(&runID); err != nil {
+	if err := chooseRowQueryer(s.DB, tx).QueryRowContext(ctx, `SELECT run_id FROM events WHERE event_id = ?`, eventID).Scan(&runID); err != nil {
 		return fmt.Errorf("load event run for sqlite delivery manifest: %w", err)
 	}
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin sqlite delivery manifest tx: %w", err)
+	ownedTx := tx == nil
+	var err error
+	if ownedTx {
+		tx, err = s.DB.BeginTx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("begin sqlite delivery manifest tx: %w", err)
+		}
 	}
 	committed := false
 	defer func() {
-		if !committed {
+		if ownedTx && !committed {
 			_ = tx.Rollback()
 		}
 	}()
@@ -177,11 +201,17 @@ func (s *SQLiteRuntimeStore) InsertEventDeliveries(ctx context.Context, eventID 
 			return fmt.Errorf("insert sqlite event delivery: %w", err)
 		}
 	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit sqlite delivery manifest tx: %w", err)
+	if ownedTx {
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit sqlite delivery manifest tx: %w", err)
+		}
+		committed = true
 	}
-	committed = true
 	return nil
+}
+
+func (s *SQLiteRuntimeStore) UpsertPipelineReceiptTx(context.Context, *sql.Tx, string, string, string) error {
+	return fmt.Errorf("sqlite pipeline receipt persistence is split to #1087")
 }
 
 func (s *SQLiteRuntimeStore) ListEventDeliveryRecipients(ctx context.Context, eventID string) ([]string, error) {

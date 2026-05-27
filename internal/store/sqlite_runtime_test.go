@@ -247,6 +247,108 @@ func TestSQLiteRuntimeStoreReplayBacklogQueriesFailClosed(t *testing.T) {
 	}
 }
 
+func TestSQLiteRuntimeStoreV1MailboxAPISelectedOwner(t *testing.T) {
+	ctx := context.Background()
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	runID := uuid.NewString()
+	ctx = runtimecorrelation.WithRunID(ctx, runID)
+	eventID := uuid.NewString()
+	if err := store.AppendEvent(ctx, events.Event{
+		ID:          eventID,
+		RunID:       runID,
+		Type:        events.EventType("mailbox.requested"),
+		SourceAgent: "agent-1",
+		Payload:     json.RawMessage(`{"request":true}`),
+		CreatedAt:   time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("AppendEvent source: %v", err)
+	}
+	entityID := uuid.NewString()
+	itemID, err := store.InsertMailboxItem(ctx, runtimetools.MailboxItem{
+		EventID:   eventID,
+		EntityID:  entityID,
+		FromAgent: "agent-1",
+		Type:      "approval",
+		Priority:  "critical",
+		Status:    "pending",
+		Summary:   "approve test",
+		Context:   json.RawMessage(`{"thing":"test"}`),
+	})
+	if err != nil {
+		t.Fatalf("InsertMailboxItem: %v", err)
+	}
+
+	items, nextCursor, err := store.ListV1MailboxItems(ctx, MailboxV1ListOptions{Status: "pending", Limit: 10})
+	if err != nil {
+		t.Fatalf("ListV1MailboxItems: %v", err)
+	}
+	if nextCursor != "" || len(items) != 1 {
+		t.Fatalf("ListV1MailboxItems len=%d next=%q, want one item no cursor", len(items), nextCursor)
+	}
+	if items[0].MailboxID != itemID || items[0].SourceRunID != runID || items[0].Status != "pending" {
+		t.Fatalf("listed item = %+v, want pending item for run %s", items[0], runID)
+	}
+	detail, err := store.GetV1MailboxItem(ctx, itemID)
+	if err != nil {
+		t.Fatalf("GetV1MailboxItem: %v", err)
+	}
+	if detail.Item.MailboxID != itemID || detail.Payload["thing"] != "test" {
+		t.Fatalf("detail = %+v, want item payload", detail)
+	}
+
+	now := time.Now().UTC()
+	req := MailboxV1DecisionRequest{
+		MailboxID:                     itemID,
+		Action:                        "approved",
+		ActorTokenID:                  "token-1",
+		DecisionPayload:               json.RawMessage(`{"approved":true}`),
+		Now:                           now,
+		ApprovalEventType:             "mailbox.item_decided",
+		ApprovalEventSubscribers:      []string{"agent-2"},
+		ApprovalEventSubscriberSource: "test",
+		Idempotency: &APIIdempotencyRequest{
+			Method:         "mailbox.approve",
+			ActorTokenID:   "token-1",
+			IdempotencyKey: "idem-mailbox",
+			RequestHash:    "hash-1",
+			Now:            now,
+		},
+	}
+	outcome, err := store.DecideV1MailboxItem(ctx, req)
+	if err != nil {
+		t.Fatalf("DecideV1MailboxItem approve: %v", err)
+	}
+	if !outcome.Result.OK || outcome.Result.Status != "decided" || outcome.Result.DownstreamEventName != "mailbox.item_decided" {
+		t.Fatalf("approval outcome = %+v, want decided downstream event", outcome.Result)
+	}
+	var eventName string
+	if err := store.DB.QueryRowContext(ctx, `SELECT event_name FROM events WHERE event_id = ?`, outcome.Result.DownstreamEventID).Scan(&eventName); err != nil {
+		t.Fatalf("load downstream event: %v", err)
+	}
+	if eventName != "mailbox.item_decided" {
+		t.Fatalf("downstream event_name = %q, want mailbox.item_decided", eventName)
+	}
+	decided, err := store.GetV1MailboxItem(ctx, itemID)
+	if err != nil {
+		t.Fatalf("GetV1MailboxItem decided: %v", err)
+	}
+	if decided.Item.Status != "decided" || decided.Item.Decision != "approved" {
+		t.Fatalf("decided item = %+v, want approved decision", decided.Item)
+	}
+	replayed, err := store.DecideV1MailboxItem(ctx, req)
+	if err != nil {
+		t.Fatalf("DecideV1MailboxItem replay: %v", err)
+	}
+	if !replayed.Replayed || replayed.Result.DownstreamEventID != outcome.Result.DownstreamEventID {
+		t.Fatalf("replayed outcome = %+v, want idempotent replay of %s", replayed, outcome.Result.DownstreamEventID)
+	}
+	req.Idempotency.RequestHash = "hash-2"
+	_, err = store.DecideV1MailboxItem(ctx, req)
+	if !errors.Is(err, ErrAPIIdempotencyConflict) {
+		t.Fatalf("DecideV1MailboxItem conflict error = %v, want ErrAPIIdempotencyConflict", err)
+	}
+}
+
 func TestSQLiteRuntimeStoreClaimScheduleRequiresActiveRow(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	runID := uuid.NewString()

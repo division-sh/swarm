@@ -120,6 +120,17 @@ func TestRuntimeDepsValidateOwnsRequiredBootInputs(t *testing.T) {
 				Options: RuntimeOptions{WorkflowModule: validModule},
 			},
 		},
+		{
+			name: "store boundary blocker",
+			deps: RuntimeDeps{
+				Config: &config.Config{},
+				Stores: Stores{
+					ConstructionBlocker: "sqlite selected runtime persistence remains blocked",
+				},
+				Options: RuntimeOptions{WorkflowModule: validModule},
+			},
+			errContains: "runtime store boundary is not construction-ready: sqlite selected runtime persistence remains blocked",
+		},
 	}
 
 	for _, tc := range cases {
