@@ -181,11 +181,18 @@ func TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore(t *testing.T) {
 		t.Fatalf("buildStores(sqlite): %v", err)
 	}
 	t.Cleanup(func() { closeDB(stores.SQLDB) })
-	if stores.SQLDB == nil || stores.SchemaBootstrapper == nil || stores.EventStore == nil || stores.ManagerStore == nil || stores.ScheduleStore == nil || stores.MailboxStore == nil || stores.RuntimeIngressStore == nil || stores.IdempotencyStore == nil {
+	if stores.SQLDB == nil || stores.SchemaBootstrapper == nil || stores.EventStore == nil || stores.ManagerStore == nil || stores.ScheduleStore == nil || stores.MailboxStore == nil || stores.MailboxAPIStore == nil || stores.RuntimeIngressStore == nil || stores.IdempotencyStore == nil {
 		t.Fatalf("sqlite store bundle missing selected core owners: %#v", stores)
 	}
 	if stores.Postgres != nil {
 		t.Fatalf("sqlite store bundle Postgres = %#v, want nil", stores.Postgres)
+	}
+	runtimeStores := stores.runtimeStores()
+	if runtimeStores.SQLDB != nil {
+		t.Fatalf("sqlite runtimeStores SQLDB = %#v, want nil raw runtime SQL handle", runtimeStores.SQLDB)
+	}
+	if !strings.Contains(runtimeStores.ConstructionBlocker, "#1086 selected raw-SQL consumers") {
+		t.Fatalf("sqlite runtimeStores ConstructionBlocker = %q, want explicit #1086 raw-SQL split", runtimeStores.ConstructionBlocker)
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("sqlite runtime store did not create file-backed db at %s: %v", path, err)

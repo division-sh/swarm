@@ -2112,7 +2112,8 @@ engine:
         status: staged_selected_core_store_runtime_backend_until_default_flip
         meaning: >
           Local/dev SQLite runtime store. Explicit sqlite selection may construct the selected core runtime store contracts
-          promoted by #1086, but SQLite remains staged until session/delivery/trace semantics and the public default flip
+          promoted by #1086, but runtime boot must fail closed while selected-parent raw-SQL consumers still lack backend-neutral
+          owners. SQLite remains staged until session/delivery/trace semantics and the public default flip
           are separately proven.
     selector_precedence:
       source_order:
@@ -2254,6 +2255,8 @@ engine:
         - Must be file-backed and use the canonical SQLite path selected by internal/store/backendselection.
         - Must consume the #1085 SQLite schema/bootstrap capability owner before selected runtime methods execute.
         - Must not silently replace missing unsupported sibling semantics with in-memory state.
+        - Must fail closed before runtime.NewRuntime construction whenever selected-parent consumers would otherwise reach raw
+          SQL/Postgres-only paths instead of a backend-neutral store owner.
     selected_contracts:
     - name: runtime_store_bundle_construction
       owner: cmd/swarm buildStores plus storeBundle.runtimeStores consuming typed runtime store interfaces
@@ -2280,9 +2283,9 @@ engine:
       excludes:
       - cross-process timer claim/locking semantics owned by #1087
     - name: mailbox_rows
-      owner: runtimetools.MailboxPersistence
-      sqlite_owner: internal/store.SQLiteRuntimeStore mailbox methods
-      postgres_owner: internal/store.PostgresStore mailbox methods
+      owner: runtimetools.MailboxPersistence plus apiv1.MailboxAPIStore for the v1 operator mailbox surface
+      sqlite_owner: internal/store.SQLiteRuntimeStore mailbox and v1 mailbox API methods
+      postgres_owner: internal/store.PostgresStore mailbox and v1 mailbox API methods
     - name: runtime_ingress_and_run_control_rows
       owner: runtimeingress.Store and runtimeruncontrol.Store
       sqlite_owner: internal/store.SQLiteRuntimeStore ingress/run-control methods
@@ -2296,6 +2299,7 @@ engine:
       excludes:
       - broad API delivery/replay/concurrency semantics owned by #1087
     split_boundaries:
+    - "Runtime boot with explicit SQLite must remain fail-closed until raw SQL runtime consumers such as pipeline coordination, budget tracking, tool execution diagnostics, and runtime logging move to backend-neutral owners."
     - "Session registry, startup ownership locks, event delivery claims/retry/replay, trace-stream/read/subscription semantics remain split to #1087."
     - "Public local/dev SQLite default flip and zero-service swarm run proof remain split to #1088."
     - "Docs, CI, repo-wide stale-default closeout, and #1066 parent proof remain split to #1089."

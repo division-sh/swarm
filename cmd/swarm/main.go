@@ -83,6 +83,8 @@ type previousEnv struct {
 type storeBundle struct {
 	Postgres            *store.PostgresStore
 	SQLDB               *sql.DB
+	RuntimeSQLDB        *sql.DB
+	RuntimeBlocker      string
 	SchemaBootstrapper  store.SchemaBootstrapper
 	EventStore          runtimebus.EventStore
 	SessionRegistry     sessions.Registry
@@ -90,6 +92,7 @@ type storeBundle struct {
 	ManagerStore        runtimemanager.ManagerPersistence
 	ScheduleStore       runtimepipeline.SchedulePersistence
 	MailboxStore        runtimetools.MailboxPersistence
+	MailboxAPIStore     apiv1.MailboxAPIStore
 	RuntimeIngressStore runtimeingress.Store
 	IdempotencyStore    apiv1.APIIdempotencyStore
 	TurnStore           runtimellm.TurnPersistence
@@ -97,7 +100,8 @@ type storeBundle struct {
 
 func (s storeBundle) runtimeStores() runtime.Stores {
 	return runtime.Stores{
-		SQLDB:               s.SQLDB,
+		SQLDB:               s.RuntimeSQLDB,
+		ConstructionBlocker: s.RuntimeBlocker,
 		EventStore:          s.EventStore,
 		SessionRegistry:     s.SessionRegistry,
 		ConversationStore:   s.ConversationStore,
@@ -366,7 +370,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		ConversationForks:  stores.Postgres,
 		ForkChatExecutor:   apiv1.NewLLMForkChatExecutor(forkChatLLM),
 		AgentControl:       dashboardDynamicAgentControl{supervisor: supervisor},
-		Mailbox:            stores.Postgres,
+		Mailbox:            stores.MailboxAPIStore,
 		Idempotency:        stores.IdempotencyStore,
 		Events:             rt.Bus,
 		RunControl:         rt.RunControl,
@@ -1636,6 +1640,7 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 		return storeBundle{
 			Postgres:            pg,
 			SQLDB:               pg.DB,
+			RuntimeSQLDB:        pg.DB,
 			SchemaBootstrapper:  pg,
 			EventStore:          pg,
 			SessionRegistry:     sessions.NewPostgresRegistry(pg.DB, cfg.LLM.Session.LockTTL),
@@ -1643,6 +1648,7 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 			ManagerStore:        pg,
 			ScheduleStore:       pg,
 			MailboxStore:        pg,
+			MailboxAPIStore:     pg,
 			RuntimeIngressStore: pg,
 			IdempotencyStore:    pg,
 			TurnStore:           pg,
@@ -1662,11 +1668,13 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 		}
 		return storeBundle{
 			SQLDB:               sqliteStore.DB,
+			RuntimeBlocker:      "sqlite runtime construction is fail-closed until #1086 selected raw-SQL consumers (pipeline, budget, tool executor, runtime diagnostics) move to backend-neutral store owners",
 			SchemaBootstrapper:  sqliteStore,
 			EventStore:          sqliteStore,
 			ManagerStore:        sqliteStore,
 			ScheduleStore:       sqliteStore,
 			MailboxStore:        sqliteStore,
+			MailboxAPIStore:     sqliteStore,
 			RuntimeIngressStore: sqliteStore,
 			IdempotencyStore:    sqliteStore,
 		}, nil

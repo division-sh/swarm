@@ -39,6 +39,7 @@ import (
 
 type Stores struct {
 	SQLDB               *sql.DB
+	ConstructionBlocker string
 	EventStore          runtimebus.EventStore
 	SessionRegistry     sessions.Registry
 	ConversationStore   llm.ConversationPersistence
@@ -288,6 +289,9 @@ func (deps RuntimeDeps) validated() (validatedRuntimeDeps, error) {
 	}
 	if _, err := cfg.LLMBackendProfile(); err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("runtime config validation failed: %w", err)
+	}
+	if blocker := strings.TrimSpace(stores.ConstructionBlocker); blocker != "" {
+		return validatedRuntimeDeps{}, fmt.Errorf("runtime store boundary is not construction-ready: %s", blocker)
 	}
 	if err := ensureWorkflowBootWiring(opts); err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("workflow contract validation failed: %w", err)
