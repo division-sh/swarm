@@ -6,11 +6,14 @@ import (
 )
 
 const (
-	BackendAPI              = "api"
-	BackendCLITest          = "cli_test"
+	BackendAnthropic        = "anthropic"
+	BackendClaudeCLI        = "claude_cli"
 	BackendOpenAICompatible = "openai_compatible"
 	BackendMock             = "mock"
 	BackendLocal            = "local"
+
+	LegacyBackendAPI     = "api"
+	LegacyBackendCLITest = "cli_test"
 
 	ProviderAnthropic        = "anthropic"
 	ProviderClaude           = "claude"
@@ -23,7 +26,10 @@ const (
 	TransportMock  = "mock"
 	TransportLocal = "local"
 
-	DefaultBackend = BackendAPI
+	ProviderContractRuntimeModeAPI       = "api"
+	ProviderContractRuntimeModeClaudeCLI = "cli_test"
+
+	DefaultBackend = BackendAnthropic
 
 	EnvBackend            = "SWARM_LLM_BACKEND"
 	RetiredEnvRuntimeMode = "SWARM_LLM_RUNTIME_MODE"
@@ -78,11 +84,11 @@ type ModelResolution struct {
 type EnvLookup func(string) (string, bool)
 
 var profiles = map[string]Profile{
-	BackendAPI: {
-		ID:          BackendAPI,
+	BackendAnthropic: {
+		ID:          BackendAnthropic,
 		Provider:    ProviderAnthropic,
 		Transport:   TransportAPI,
-		RuntimeMode: BackendAPI,
+		RuntimeMode: ProviderContractRuntimeModeAPI,
 		Credential: CredentialSource{
 			EnvVar:   "ANTHROPIC_API_KEY",
 			Required: true,
@@ -90,11 +96,11 @@ var profiles = map[string]Profile{
 		},
 		Active: true,
 	},
-	BackendCLITest: {
-		ID:          BackendCLITest,
+	BackendClaudeCLI: {
+		ID:          BackendClaudeCLI,
 		Provider:    ProviderClaude,
 		Transport:   TransportCLI,
-		RuntimeMode: BackendCLITest,
+		RuntimeMode: ProviderContractRuntimeModeClaudeCLI,
 		Credential: CredentialSource{
 			EnvVar:   "CLAUDE_CODE_OAUTH_TOKEN",
 			Required: true,
@@ -114,7 +120,6 @@ var profiles = map[string]Profile{
 		},
 		BaseURL: BaseURLSource{
 			ConfigKey: OpenAICompatibleBaseURLConfigField,
-			EnvVar:    OpenAICompatibleBaseURLEnv,
 			Required:  true,
 			Purpose:   "openai-compatible chat completions endpoint base url",
 		},
@@ -167,6 +172,24 @@ func ResolvePersistedBackend(raw string) (Profile, error) {
 	return profile, nil
 }
 
+func MigratePersistedBackend(raw string) (Profile, bool, error) {
+	id := NormalizeBackendID(raw)
+	if id == "" {
+		id = DefaultBackend
+	}
+	switch id {
+	case LegacyBackendAPI:
+		profile, err := ResolvePersistedBackend(BackendAnthropic)
+		return profile, true, err
+	case LegacyBackendCLITest:
+		profile, err := ResolvePersistedBackend(BackendClaudeCLI)
+		return profile, true, err
+	default:
+		profile, err := ResolvePersistedBackend(id)
+		return profile, false, err
+	}
+}
+
 func RejectRetiredConfigRuntimeMode(raw string) error {
 	if strings.TrimSpace(raw) == "" {
 		return nil
@@ -174,12 +197,32 @@ func RejectRetiredConfigRuntimeMode(raw string) error {
 	return fmt.Errorf("%s is retired; use %s", RetiredConfigRuntimeModeField, ConfigBackendField)
 }
 
+func RejectRetiredEnvBackend(lookup EnvLookup) error {
+	if lookup == nil {
+		return nil
+	}
+	if _, ok := lookup(EnvBackend); ok {
+		return fmt.Errorf("%s is retired and must not select the LLM backend; use --backend or %s", EnvBackend, ConfigBackendField)
+	}
+	return nil
+}
+
 func RejectRetiredEnvRuntimeMode(lookup EnvLookup) error {
 	if lookup == nil {
 		return nil
 	}
 	if _, ok := lookup(RetiredEnvRuntimeMode); ok {
-		return fmt.Errorf("%s is retired; use %s", RetiredEnvRuntimeMode, EnvBackend)
+		return fmt.Errorf("%s is retired; use --backend or %s", RetiredEnvRuntimeMode, ConfigBackendField)
+	}
+	return nil
+}
+
+func RejectRetiredOpenAICompatibleBaseURLEnv(lookup EnvLookup) error {
+	if lookup == nil {
+		return nil
+	}
+	if _, ok := lookup(OpenAICompatibleBaseURLEnv); ok {
+		return fmt.Errorf("%s is retired; use %s", OpenAICompatibleBaseURLEnv, OpenAICompatibleBaseURLConfigField)
 	}
 	return nil
 }
@@ -227,7 +270,7 @@ func RequireCredential(profile Profile, lookup EnvLookup) error {
 func ResolveModelName(profile Profile, req ModelResolution) (string, error) {
 	tier := NormalizeModelTier(req.ModelTier)
 	switch profile.ID {
-	case BackendAPI:
+	case BackendAnthropic:
 		model := strings.TrimSpace(req.Models.Default)
 		if req.ForceLowCost || tier == "haiku" {
 			if lowCost := strings.TrimSpace(req.Models.LowCost); lowCost != "" {
@@ -238,7 +281,7 @@ func ResolveModelName(profile Profile, req ModelResolution) (string, error) {
 			return "", fmt.Errorf("llm.claude_api.default_model is required for backend %q", profile.ID)
 		}
 		return model, nil
-	case BackendCLITest:
+	case BackendClaudeCLI:
 		return tier, nil
 	case BackendOpenAICompatible:
 		model := strings.TrimSpace(req.Models.Default)

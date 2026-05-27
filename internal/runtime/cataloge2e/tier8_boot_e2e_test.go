@@ -165,6 +165,7 @@ func TestTier8BootCatalogFixtures_AreExplicitlyClassified(t *testing.T) {
 
 func newTier8Runtime(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle) (*runtime.Runtime, error) {
 	t.Helper()
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
 	strictCatalogFixtureStartupPolicy().apply(t)
 	module, err := newFixtureWorkflowModule(bundle)
 	if err != nil {

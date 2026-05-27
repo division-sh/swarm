@@ -115,6 +115,95 @@ func TestSQLiteSchemaStoreBootstrapsPlatformAndGeneratedTables(t *testing.T) {
 	}
 }
 
+func TestSQLiteSchemaStoreMigratesLegacyAgentLLMBackendProfiles(t *testing.T) {
+	ctx := context.Background()
+	spec := loadPlatformSpecForSQLiteSchemaTest(t)
+	platformPlans, err := GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
+	}
+	sqliteStore, err := NewSQLiteSchemaStore(filepath.Join(t.TempDir(), "runtime.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteSchemaStore: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := sqliteStore.Close(); err != nil {
+			t.Fatalf("close sqlite schema store: %v", err)
+		}
+	})
+	if _, err := sqliteStore.DB.ExecContext(ctx, `
+		CREATE TABLE agents (
+			agent_id TEXT PRIMARY KEY,
+			flow_instance TEXT,
+			role TEXT NOT NULL,
+			model_tier TEXT NOT NULL,
+			llm_backend TEXT NOT NULL DEFAULT 'api' CHECK (llm_backend IN ('api', 'cli_test', 'openai_compatible', 'mock', 'local')),
+			conversation_mode TEXT NOT NULL,
+			parent_agent_id TEXT,
+			entity_id TEXT,
+			config TEXT NOT NULL DEFAULT '{}',
+			subscriptions TEXT NOT NULL DEFAULT '[]',
+			emit_events TEXT NOT NULL DEFAULT '[]',
+			tools TEXT NOT NULL DEFAULT '[]',
+			permissions TEXT NOT NULL DEFAULT '[]',
+			runtime_descriptor TEXT NOT NULL DEFAULT '{}',
+			status TEXT NOT NULL DEFAULT 'active'
+		)
+	`); err != nil {
+		t.Fatalf("create legacy sqlite agents: %v", err)
+	}
+	if _, err := sqliteStore.DB.ExecContext(ctx, `
+		INSERT INTO agents (agent_id, role, model_tier, llm_backend, conversation_mode)
+		VALUES
+			('agent-api', 'worker', 'sonnet', 'api', 'task'),
+			('agent-cli', 'worker', 'sonnet', 'cli_test', 'task'),
+			('agent-openai', 'worker', 'sonnet', 'openai_compatible', 'task')
+	`); err != nil {
+		t.Fatalf("seed legacy sqlite agents: %v", err)
+	}
+	if err := sqliteStore.EnsureSchemaTables(ctx, platformPlans); err != nil {
+		t.Fatalf("EnsureSchemaTables: %v", err)
+	}
+	rows, err := sqliteStore.DB.QueryContext(ctx, `SELECT agent_id, llm_backend FROM agents ORDER BY agent_id`)
+	if err != nil {
+		t.Fatalf("query migrated sqlite agents: %v", err)
+	}
+	defer rows.Close()
+	got := map[string]string{}
+	for rows.Next() {
+		var id, backend string
+		if err := rows.Scan(&id, &backend); err != nil {
+			t.Fatalf("scan migrated sqlite agents: %v", err)
+		}
+		got[id] = backend
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read migrated sqlite agents: %v", err)
+	}
+	for id, want := range map[string]string{
+		"agent-api":    "anthropic",
+		"agent-cli":    "claude_cli",
+		"agent-openai": "openai_compatible",
+	} {
+		if got[id] != want {
+			t.Fatalf("%s llm_backend = %q, want %q (all rows %#v)", id, got[id], want, got)
+		}
+	}
+	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO agents (agent_id, role, model_tier, llm_backend, conversation_mode) VALUES ('agent-legacy', 'worker', 'sonnet', 'api', 'task')`); err == nil {
+		t.Fatal("insert legacy sqlite llm_backend api succeeded after migration")
+	}
+	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO agents (agent_id, role, model_tier, conversation_mode) VALUES ('agent-default', 'worker', 'sonnet', 'task')`); err != nil {
+		t.Fatalf("insert default sqlite llm_backend after migration: %v", err)
+	}
+	var defaultBackend string
+	if err := sqliteStore.DB.QueryRowContext(ctx, `SELECT llm_backend FROM agents WHERE agent_id = 'agent-default'`).Scan(&defaultBackend); err != nil {
+		t.Fatalf("query sqlite default backend: %v", err)
+	}
+	if defaultBackend != "anthropic" {
+		t.Fatalf("sqlite default llm_backend = %q, want anthropic", defaultBackend)
+	}
+}
+
 func TestSQLiteStatementsForPlanRejectsUnsupportedPostgresConstructs(t *testing.T) {
 	_, err := SQLiteStatementsForPlan(SchemaTableDDL{
 		TableName:  "bad_regex",

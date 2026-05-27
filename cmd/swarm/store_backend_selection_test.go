@@ -215,7 +215,7 @@ func writeStoreBackendRuntimeConfig(t *testing.T, backend string, sqlitePath str
 	}
 	lines = append(lines,
 		"llm:",
-		"  backend: api",
+		"  backend: anthropic",
 		"  session:",
 		"    lock_ttl: 10s",
 		"    rotate_after_turns: 40",

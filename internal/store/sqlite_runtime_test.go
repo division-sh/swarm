@@ -56,7 +56,7 @@ func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 			Role:             "operator",
 			Mode:             "global",
 			ModelTier:        "generic",
-			LLMBackend:       "api",
+			LLMBackend:       "anthropic",
 			ConversationMode: "task",
 			Config:           json.RawMessage(`{"system_prompt":"You are an operator.","tools":[]}`),
 		},

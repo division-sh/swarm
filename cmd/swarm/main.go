@@ -63,6 +63,7 @@ const (
 
 var (
 	buildStoresForServe                  = buildStores
+	runtimeConfigExecutablePath          = os.Executable
 	configuredWorkspaceLifecycleForServe = func(db *sql.DB, repoRoot, contractsRoot string, source semanticview.Source) serveWorkspaceLifecycle {
 		return configuredWorkspaceLifecycle(db, repoRoot, contractsRoot, source)
 	}
@@ -123,6 +124,7 @@ func main() {
 
 type serveOptions struct {
 	ConfigPath           string
+	Backend              string
 	ContractsPath        string
 	PlatformSpecPath     string
 	StoreMode            string
@@ -166,7 +168,6 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	bootStartedAt := time.Now().UTC()
 	reporter := newServeBootReporter(opts.Verbose, opts.Output)
 	reporter.emit(1, "process_start", "ok", "")
-	resolvedConfigPath := resolvePath(repo, opts.ConfigPath)
 	if err := loadRepoDotEnv(repo); err != nil {
 		reporter.emit(2, "config_load", "FAILED", err.Error())
 		log.Printf("load .env: %v", err)
@@ -184,13 +185,18 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	resolvedContractsPath := resolvedPaths.ContractsPath
 	resolvedPlatformSpecPath := resolvedPaths.PlatformSpecPath
 
-	cfg, err := loadRuntimeConfig(resolvedConfigPath)
+	cfgResult, err := loadRuntimeConfigWithOptions(runtimeConfigLoadOptions{
+		RepoRoot:        repo,
+		ExplicitPath:    opts.ConfigPath,
+		BackendOverride: opts.Backend,
+	})
 	if err != nil {
 		reporter.emit(2, "config_load", "FAILED", err.Error())
 		log.Printf("load config: %v", err)
 		return 1
 	}
-	reporter.emit(2, "config_load", "ok", fmt.Sprintf("config=%s contracts=%s", filepath.Clean(resolvedConfigPath), filepath.Clean(resolvedContractsPath)))
+	cfg := cfgResult.Config
+	reporter.emit(2, "config_load", "ok", fmt.Sprintf("config=%s contracts=%s", cfgResult.Detail(), filepath.Clean(resolvedContractsPath)))
 	storeSelection, err := resolveRuntimeStoreSelection(repo, opts.StoreMode, opts.StoreModeSet, cfg)
 	if err != nil {
 		reporter.emit(3, "db_connection", "FAILED", err.Error())
@@ -659,6 +665,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 	fs := flag.NewFlagSet("fork", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	configPath := fs.String("config", "", "Optional path to Swarm runtime config")
+	backend := fs.String("backend", "", "LLM backend profile for local runtime startup")
 	contractsPath := fs.String("contracts", "", "Path to selected Swarm contract bundle root for fork planning or selected-contract execution")
 	platformSpecPath := fs.String("platform-spec", defaultPlatformSpecPath, "Path to platform spec yaml")
 	storeMode := fs.String("store", storebackend.ActiveDefaultBackend().String(), "Runtime store backend: postgres (active default) or sqlite (selected core stores; default flip after #1088)")
@@ -711,13 +718,18 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 		}
 		return 1
 	}
-	cfg, err := loadRuntimeConfig(resolvePath(repo, *configPath))
+	cfgResult, err := loadRuntimeConfigWithOptions(runtimeConfigLoadOptions{
+		RepoRoot:        repo,
+		ExplicitPath:    *configPath,
+		BackendOverride: *backend,
+	})
 	if err != nil {
 		if out != nil {
 			fmt.Fprintf(out, "fork failed: load config: %v\n", err)
 		}
 		return 1
 	}
+	cfg := cfgResult.Config
 	storeSelection, err := resolveRuntimeStoreSelection(repo, *storeMode, storeModeSet, cfg)
 	if err != nil {
 		if out != nil {
@@ -1374,28 +1386,127 @@ func writeVerifyFindings(out io.Writer, label string, findings []runtimebootveri
 	}
 }
 
-func loadRuntimeConfig(path string) (*config.Config, error) {
-	path = strings.TrimSpace(path)
+type runtimeConfigLoadOptions struct {
+	RepoRoot        string
+	ExplicitPath    string
+	BackendOverride string
+}
+
+type runtimeConfigLoadResult struct {
+	Config *config.Config
+	Source string
+	Path   string
+}
+
+func (r runtimeConfigLoadResult) Detail() string {
+	source := strings.TrimSpace(r.Source)
+	if source == "" {
+		source = "unknown"
+	}
+	path := strings.TrimSpace(r.Path)
 	if path == "" {
-		return defaultRuntimeConfig()
+		return source
 	}
-	cfg, err := config.Load(path)
+	return fmt.Sprintf("%s:%s", source, filepath.Clean(path))
+}
+
+func loadRuntimeConfig(path string) (*config.Config, error) {
+	result, err := loadRuntimeConfigWithOptions(runtimeConfigLoadOptions{ExplicitPath: path})
 	if err != nil {
-		return nil, fmt.Errorf("load %s: %w", path, err)
+		return nil, err
 	}
-	return cfg, nil
+	return result.Config, nil
+}
+
+func loadRuntimeConfigWithOptions(opts runtimeConfigLoadOptions) (runtimeConfigLoadResult, error) {
+	if err := rejectUnsupportedRuntimeControlEnv(); err != nil {
+		return runtimeConfigLoadResult{}, err
+	}
+	if err := llmselection.RejectRetiredEnvBackend(os.LookupEnv); err != nil {
+		return runtimeConfigLoadResult{}, err
+	}
+	if err := llmselection.RejectRetiredEnvRuntimeMode(os.LookupEnv); err != nil {
+		return runtimeConfigLoadResult{}, err
+	}
+	if err := llmselection.RejectRetiredOpenAICompatibleBaseURLEnv(os.LookupEnv); err != nil {
+		return runtimeConfigLoadResult{}, err
+	}
+
+	explicitPath := strings.TrimSpace(opts.ExplicitPath)
+	var result runtimeConfigLoadResult
+	var cfg *config.Config
+	if explicitPath != "" {
+		path := resolvePath(opts.RepoRoot, explicitPath)
+		loaded, err := config.Load(path)
+		if err != nil {
+			return runtimeConfigLoadResult{}, fmt.Errorf("load %s: %w", path, err)
+		}
+		cfg = loaded
+		result.Source = "explicit"
+		result.Path = path
+	} else if path, ok, err := executableAdjacentRuntimeConfigPath(); err != nil {
+		return runtimeConfigLoadResult{}, err
+	} else if ok {
+		loaded, err := config.Load(path)
+		if err != nil {
+			return runtimeConfigLoadResult{}, fmt.Errorf("load %s: %w", path, err)
+		}
+		cfg = loaded
+		result.Source = "executable"
+		result.Path = path
+	} else {
+		loaded, err := defaultRuntimeConfig()
+		if err != nil {
+			return runtimeConfigLoadResult{}, err
+		}
+		cfg = loaded
+		result.Source = "built-in default"
+	}
+	if backend := strings.TrimSpace(opts.BackendOverride); backend != "" {
+		cfg.LLM.Backend = backend
+		if err := cfg.Validate(); err != nil {
+			return runtimeConfigLoadResult{}, err
+		}
+	}
+	result.Config = cfg
+	return result, nil
+}
+
+func executableAdjacentRuntimeConfigPath() (string, bool, error) {
+	executable, err := runtimeConfigExecutablePath()
+	if err != nil {
+		return "", false, fmt.Errorf("resolve executable config path: %w", err)
+	}
+	executable = strings.TrimSpace(executable)
+	if executable == "" {
+		return "", false, nil
+	}
+	path := filepath.Join(filepath.Dir(executable), "config.yaml")
+	info, err := os.Stat(path)
+	if err == nil {
+		if info.IsDir() {
+			return "", false, fmt.Errorf("executable-adjacent runtime config %s is a directory", path)
+		}
+		return path, true, nil
+	}
+	if os.IsNotExist(err) {
+		return "", false, nil
+	}
+	return "", false, fmt.Errorf("inspect executable-adjacent runtime config %s: %w", path, err)
 }
 
 func defaultRuntimeConfig() (*config.Config, error) {
 	if err := rejectUnsupportedRuntimeControlEnv(); err != nil {
 		return nil, err
 	}
+	if err := llmselection.RejectRetiredEnvBackend(os.LookupEnv); err != nil {
+		return nil, err
+	}
 	if err := llmselection.RejectRetiredEnvRuntimeMode(os.LookupEnv); err != nil {
 		return nil, err
 	}
-	backend := strings.TrimSpace(os.Getenv(llmselection.EnvBackend))
-	if backend == "" {
-		backend = llmselection.DefaultBackendID()
+	if err := llmselection.RejectRetiredOpenAICompatibleBaseURLEnv(os.LookupEnv); err != nil {
+		return nil, err
 	}
 	cfg := &config.Config{
 		Runtime: config.RuntimeConfig{
@@ -1411,7 +1522,7 @@ func defaultRuntimeConfig() (*config.Config, error) {
 			PoolSize: envInt("SWARM_DB_POOL_SIZE", 5),
 		},
 		LLM: config.LLMConfig{
-			Backend: backend,
+			Backend: llmselection.DefaultBackendID(),
 			Session: config.LLMSessionConfig{
 				LockTTL:               envDuration("SWARM_LLM_SESSION_LOCK_TTL", 10*time.Second),
 				RotateAfterTurns:      envInt("SWARM_LLM_SESSION_ROTATE_AFTER_TURNS", 40),
@@ -1432,7 +1543,6 @@ func defaultRuntimeConfig() (*config.Config, error) {
 				UseTMux:              envBool("SWARM_CLAUDE_CLI_USE_TMUX", false),
 			},
 			OpenAICompatible: config.OpenAICompatibleConfig{
-				BaseURL:      envOrDefault(llmselection.OpenAICompatibleBaseURLEnv, ""),
 				DefaultModel: envOrDefault(llmselection.OpenAICompatibleDefaultModelEnv, ""),
 				LowCostModel: envOrDefault(llmselection.OpenAICompatibleLowCostModelEnv, ""),
 			},

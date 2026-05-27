@@ -55,7 +55,7 @@ func TestManagerStore_LoadAgents_FailsClosedOnMalformedRuntimeDescriptor(t *test
 					parent_agent_id, entity_id, config, subscriptions, emit_events, tools, permissions,
 					runtime_descriptor, status
 				) VALUES (
-					$1, '', 'reviewer', 'sonnet', 'api', 'task',
+					$1, '', 'reviewer', 'sonnet', 'anthropic', 'task',
 					NULL, NULL, '{}'::jsonb, '["review.ready"]'::jsonb, '[]'::jsonb, '[]'::jsonb, '[]'::jsonb,
 					$2::jsonb, 'active'
 				)

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -723,6 +724,88 @@ func TestPostgresStore_EnsureSchemaTables_PhasesAgentRuntimeDescriptorCompatibil
 	}
 	if indexName != "idx_agents_runtime_descriptor" {
 		t.Fatalf("idx_agents_runtime_descriptor regclass = %q, want idx_agents_runtime_descriptor", indexName)
+	}
+}
+
+func TestPostgresStore_EnsureSchemaCompatibilityColumnsMigratesAgentLLMBackendProfiles(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	if _, err := db.ExecContext(ctx, `DROP TABLE IF EXISTS agents CASCADE`); err != nil {
+		t.Fatalf("drop agents: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE agents (
+			agent_id TEXT PRIMARY KEY,
+			flow_instance TEXT,
+			role TEXT NOT NULL,
+			model_tier TEXT NOT NULL,
+			llm_backend TEXT NOT NULL DEFAULT 'api' CHECK (llm_backend IN ('api', 'cli_test', 'openai_compatible', 'mock', 'local')),
+			conversation_mode TEXT NOT NULL,
+			parent_agent_id TEXT,
+			entity_id UUID,
+			config JSONB NOT NULL DEFAULT '{}'::jsonb,
+			subscriptions JSONB NOT NULL DEFAULT '[]'::jsonb,
+			emit_events JSONB NOT NULL DEFAULT '[]'::jsonb,
+			tools JSONB NOT NULL DEFAULT '[]'::jsonb,
+			permissions JSONB NOT NULL DEFAULT '[]'::jsonb,
+			status TEXT NOT NULL DEFAULT 'active',
+			turn_count INTEGER NOT NULL DEFAULT 0,
+			last_active_at TIMESTAMPTZ,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)
+	`); err != nil {
+		t.Fatalf("create legacy agents: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agents (agent_id, role, model_tier, llm_backend, conversation_mode)
+		VALUES
+			('agent-api', 'worker', 'sonnet', 'api', 'task'),
+			('agent-cli', 'worker', 'sonnet', 'cli_test', 'task'),
+			('agent-openai', 'worker', 'sonnet', 'openai_compatible', 'task')
+	`); err != nil {
+		t.Fatalf("seed legacy agents: %v", err)
+	}
+	if err := pg.ensureSchemaCompatibilityColumns(ctx); err != nil {
+		t.Fatalf("ensureSchemaCompatibilityColumns: %v", err)
+	}
+	rows, err := db.QueryContext(ctx, `SELECT agent_id, llm_backend FROM agents ORDER BY agent_id`)
+	if err != nil {
+		t.Fatalf("query migrated agents: %v", err)
+	}
+	defer rows.Close()
+	got := map[string]string{}
+	for rows.Next() {
+		var id, backend string
+		if err := rows.Scan(&id, &backend); err != nil {
+			t.Fatalf("scan migrated agents: %v", err)
+		}
+		got[id] = backend
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read migrated agents: %v", err)
+	}
+	want := map[string]string{
+		"agent-api":    "anthropic",
+		"agent-cli":    "claude_cli",
+		"agent-openai": "openai_compatible",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("migrated llm_backend rows = %#v, want %#v", got, want)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO agents (agent_id, role, model_tier, llm_backend, conversation_mode) VALUES ('agent-legacy', 'worker', 'sonnet', 'api', 'task')`); err == nil {
+		t.Fatal("insert legacy llm_backend api succeeded after migration")
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO agents (agent_id, role, model_tier, conversation_mode) VALUES ('agent-default', 'worker', 'sonnet', 'task')`); err != nil {
+		t.Fatalf("insert default llm_backend after migration: %v", err)
+	}
+	var defaultBackend string
+	if err := db.QueryRowContext(ctx, `SELECT llm_backend FROM agents WHERE agent_id = 'agent-default'`).Scan(&defaultBackend); err != nil {
+		t.Fatalf("query default backend: %v", err)
+	}
+	if defaultBackend != "anthropic" {
+		t.Fatalf("default llm_backend = %q, want anthropic", defaultBackend)
 	}
 }
 
@@ -5381,7 +5464,7 @@ func TestManagerStore_UpsertAgent_PersistsCanonicalControlPlaneOwnership(t *test
 			Role:             "reviewer",
 			Mode:             "review",
 			ModelTier:        "sonnet",
-			LLMBackend:       "cli_test",
+			LLMBackend:       "claude_cli",
 			ConversationMode: "session_per_entity",
 			SessionScope:     "entity",
 			MaxTurnsPerTask:  7,
@@ -5424,8 +5507,8 @@ func TestManagerStore_UpsertAgent_PersistsCanonicalControlPlaneOwnership(t *test
 	if got.ModelTier != "sonnet" {
 		t.Fatalf("model_tier = %q, want sonnet", got.ModelTier)
 	}
-	if got.LLMBackend != "cli_test" {
-		t.Fatalf("llm_backend = %q, want cli_test", got.LLMBackend)
+	if got.LLMBackend != "claude_cli" {
+		t.Fatalf("llm_backend = %q, want claude_cli", got.LLMBackend)
 	}
 	if got.ConversationMode != "session_per_entity" {
 		t.Fatalf("conversation_mode = %q, want session_per_entity", got.ConversationMode)
@@ -5496,7 +5579,7 @@ func TestManagerStore_UpsertAgent_PersistsPlatformInternalGlobalSessionAuthority
 			Type:                  "platform-service",
 			Role:                  "platform",
 			ModelTier:             "sonnet",
-			LLMBackend:            "api",
+			LLMBackend:            "anthropic",
 			ConversationMode:      runtimesessions.RuntimeModeSession.String(),
 			SessionScope:          runtimesessions.SessionScopeGlobal.String(),
 			SessionScopeAuthority: runtimeactors.SessionScopeAuthorityPlatformInternal,
@@ -5550,8 +5633,8 @@ func TestProjectPersistedAgentConfig_UsesCanonicalLLMBackendProfiles(t *testing.
 	if err != nil {
 		t.Fatalf("projectPersistedAgentConfig: %v", err)
 	}
-	if projection.LLMBackend != "api" {
-		t.Fatalf("llm_backend = %q, want api default profile", projection.LLMBackend)
+	if projection.LLMBackend != "anthropic" {
+		t.Fatalf("llm_backend = %q, want anthropic default profile", projection.LLMBackend)
 	}
 
 	projection, err = projectPersistedAgentConfig(runtimeactors.AgentConfig{
@@ -5683,7 +5766,7 @@ func TestManagerStore_LoadAgentsSpec_FailsClosedWhenOpaqueConfigContainsRuntimeK
 			parent_agent_id, entity_id, config, subscriptions, emit_events, tools, permissions,
 			runtime_descriptor, status
 		) VALUES (
-			$1, '', 'reviewer', 'sonnet', 'api', 'task',
+			$1, '', 'reviewer', 'sonnet', 'anthropic', 'task',
 			NULL, NULL, $2::jsonb, '["review.ready"]'::jsonb, '[]'::jsonb, '[]'::jsonb, '[]'::jsonb,
 			$3::jsonb, 'active'
 		)
@@ -5773,7 +5856,7 @@ func TestManagerStore_LoadAgents_FailsClosedWhenCanonicalModelTierMissing(t *tes
 			parent_agent_id, entity_id, config, subscriptions, emit_events, tools, permissions,
 			runtime_descriptor, status
 		) VALUES (
-			$1, '', 'reviewer', '', 'api', 'task',
+			$1, '', 'reviewer', '', 'anthropic', 'task',
 			NULL, NULL, '{}'::jsonb, '["review.ready"]'::jsonb, '[]'::jsonb, '[]'::jsonb, '[]'::jsonb,
 			$2::jsonb, 'active'
 		)
@@ -6035,7 +6118,7 @@ func TestPostgresStore_LoadAgents_FailsClosedOnLegacyRuntimeMetadataInConfig(t *
 			agent_id, role, model_tier, llm_backend, conversation_mode,
 			config, runtime_descriptor, status, created_at
 		) VALUES (
-			'legacy-session-agent', 'worker', 'sonnet', 'api', 'session',
+			'legacy-session-agent', 'worker', 'sonnet', 'anthropic', 'session',
 			'{"type":"sonnet","mode":"worker","session_scope":"global","system_prompt":"x"}'::jsonb,
 			'{}'::jsonb,
 			'active',
@@ -6046,6 +6129,9 @@ func TestPostgresStore_LoadAgents_FailsClosedOnLegacyRuntimeMetadataInConfig(t *
 	}
 	if err := pg.ensureAgentRuntimeDescriptorColumn(ctx); err != nil {
 		t.Fatalf("ensureAgentRuntimeDescriptorColumn: %v", err)
+	}
+	if err := pg.ensureAgentLLMBackendProfiles(ctx); err != nil {
+		t.Fatalf("ensureAgentLLMBackendProfiles: %v", err)
 	}
 
 	_, err := pg.LoadAgents(ctx)
@@ -6119,6 +6205,9 @@ func TestPostgresStore_LoadAgents_BackfillsRuntimeDescriptorTypeFromModelTierOnC
 
 	if err := pg.ensureAgentRuntimeDescriptorColumn(ctx); err != nil {
 		t.Fatalf("ensureAgentRuntimeDescriptorColumn: %v", err)
+	}
+	if err := pg.ensureAgentLLMBackendProfiles(ctx); err != nil {
+		t.Fatalf("ensureAgentLLMBackendProfiles: %v", err)
 	}
 
 	agents, err := pg.LoadAgents(ctx)

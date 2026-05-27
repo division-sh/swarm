@@ -18,7 +18,7 @@ import (
 
 func TestRuntimeStart_AgentFreeCLITestDoesNotRequireClaudeStartupEnv(t *testing.T) {
 	cfg := &config.Config{}
-	cfg.LLM.Backend = "cli_test"
+	cfg.LLM.Backend = "claude_cli"
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "")
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
 	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "")
@@ -60,9 +60,25 @@ func TestNewRuntimeRejectsRetiredLLMRuntimeMode(t *testing.T) {
 	}
 }
 
+func TestNewRuntime_AgentPresentRequiresSelectedBackendCredential(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.LLM.Backend = "anthropic"
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	module := semanticOnlyWorkflowRuntime{source: loadPackageBackedRuntimeSessionScopeSource(t)}
+
+	_, err := NewRuntime(context.Background(), RuntimeDeps{Config: cfg, Stores: Stores{}, Options: RuntimeOptions{
+		SelfCheck:      false,
+		WorkflowModule: module,
+	}})
+
+	if err == nil || !strings.Contains(err.Error(), "ANTHROPIC_API_KEY is required") {
+		t.Fatalf("NewRuntime error = %v, want selected backend credential failure", err)
+	}
+}
+
 func TestNewRuntime_AgentPresentCLITestStillRequiresClaudeStartupEnv(t *testing.T) {
 	cfg := &config.Config{}
-	cfg.LLM.Backend = "cli_test"
+	cfg.LLM.Backend = "claude_cli"
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "")
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
 	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "")
@@ -89,7 +105,7 @@ func TestNewRuntime_AgentPresentCLITestStillRequiresClaudeStartupEnv(t *testing.
 
 func TestRuntimeStart_ActiveManagerAgentRequiresFullClaudeStartupEnv(t *testing.T) {
 	cfg := &config.Config{}
-	cfg.LLM.Backend = "cli_test"
+	cfg.LLM.Backend = "claude_cli"
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", "http://127.0.0.1:8081")
 	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "")

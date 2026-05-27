@@ -297,6 +297,11 @@ func (deps RuntimeDeps) validated() (validatedRuntimeDeps, error) {
 		return validatedRuntimeDeps{}, fmt.Errorf("workflow contract validation failed: %w", err)
 	}
 	source := opts.WorkflowModule.SemanticSource()
+	if opts.LLMRuntime == nil {
+		if err := validateSelectedBackendCredentialForDeclaredAgents(cfg, source); err != nil {
+			return validatedRuntimeDeps{}, fmt.Errorf("llm backend credential validation failed: %w", err)
+		}
+	}
 	if err := validateClaudeStartupConfig(cfg, opts, source); err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("claude runtime startup validation failed: %w", err)
 	}
@@ -884,6 +889,12 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		rt.emitBootProgress(14, "flow_required_agents", "skipped", "manager unavailable")
 	}
 	source := rt.Options.WorkflowModule.SemanticSource()
+	if rt.Options.LLMRuntime == nil {
+		if err := validateSelectedBackendCredentialForActiveAgents(rt.Config, source, rt.Manager); err != nil {
+			rt.emitBootProgress(15, "workspace_validation_and_system_containers", "FAILED", err.Error())
+			return fmt.Errorf("llm backend credential validation failed: %w", err)
+		}
+	}
 	if err := validateClaudeStartupConfigForActiveAgents(rt.Config, rt.Options, source, rt.Manager); err != nil {
 		rt.emitBootProgress(15, "workspace_validation_and_system_containers", "FAILED", err.Error())
 		return fmt.Errorf("claude runtime startup validation failed: %w", err)

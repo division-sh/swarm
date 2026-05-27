@@ -349,8 +349,10 @@ nodes:
       identity or model resolution independently
     known_manifestations:
       - '#1127 promotes the target authority: --backend > runtime config llm.backend > default anthropic; env never selects backend'
-      - target backend profile ids are anthropic, claude_cli, and openai_compatible; legacy api and cli_test require explicit migration/backfill before behavior flips
+      - '#1128 lands backend selection/config discovery: --backend > runtime config llm.backend > built-in default anthropic through the shared runtime config resolver'
+      - target backend profile ids are anthropic, claude_cli, and openai_compatible; legacy api and cli_test are persisted-row migration/backfill inputs only and are not valid new operator/config inputs
       - openai_compatible intentionally remains the active profile name and is not renamed to openai until a separate provider/protocol gate promotes native OpenAI Responses or an official-only identity
+      - SWARM_LLM_BACKEND and SWARM_OPENAI_COMPATIBLE_BASE_URL are retired; provider credentials remain env-sourced, while openai_compatible base_url is runtime config only
       - authored bundles target model, not model_tier; built-in aliases are cheap, regular, and frontier with provider-scoped resolution under llm.models
       - runtime config is canonical for non-secret LLM behavior; env remains valid only for provider secrets and explicitly owned pragmatic infra/connection overrides
       - RuntimeFactory, selected-fork runtime materialization, provider credential checks, AgentManager, store projection/hydration, boot/verify, model selection, budget/session audit, and read surfaces must consume the same profile/model alias resolver after behavior migrations

@@ -189,6 +189,11 @@ func (s *PostgresStore) ensureSchemaCompatibilityColumns(ctx context.Context) er
 	if err := s.ensureAgentRuntimeDescriptorColumn(ctx); err != nil {
 		return err
 	}
+	if catalog.hasTable("agents") && catalog.hasColumns("agents", "llm_backend") {
+		if err := s.ensureAgentLLMBackendProfiles(ctx); err != nil {
+			return err
+		}
+	}
 	if catalog.hasTable("runs") {
 		if err := s.ensureRunBundleSourceSchema(ctx, catalog); err != nil {
 			return err
@@ -358,6 +363,46 @@ func (s *PostgresStore) ensureSchemaCompatibilityColumns(ctx context.Context) er
 	}
 	_, err = s.BindSchemaCapabilities(ctx)
 	return err
+}
+
+func (s *PostgresStore) ensureAgentLLMBackendProfiles(ctx context.Context) error {
+	if s == nil || s.DB == nil {
+		return nil
+	}
+	if _, err := s.DB.ExecContext(ctx, `
+		DO $$
+		DECLARE check_name TEXT;
+		BEGIN
+			FOR check_name IN
+				SELECT c.conname
+				FROM pg_constraint c
+				WHERE c.conrelid = 'agents'::regclass
+				  AND c.contype = 'c'
+				  AND pg_get_constraintdef(c.oid) LIKE '%llm_backend%'
+			LOOP
+				EXECUTE format('ALTER TABLE agents DROP CONSTRAINT %I', check_name);
+			END LOOP;
+		END
+		$$;
+	`); err != nil {
+		return fmt.Errorf("drop legacy agents.llm_backend constraint: %w", err)
+	}
+	if _, err := s.DB.ExecContext(ctx, `
+		ALTER TABLE agents ALTER COLUMN llm_backend SET DEFAULT 'anthropic';
+		UPDATE agents
+		SET llm_backend = CASE BTRIM(llm_backend)
+			WHEN 'api' THEN 'anthropic'
+			WHEN 'cli_test' THEN 'claude_cli'
+			ELSE BTRIM(llm_backend)
+		END
+		WHERE llm_backend IS NOT NULL;
+		ALTER TABLE agents
+			ADD CONSTRAINT agents_llm_backend_check
+			CHECK (llm_backend IN ('anthropic', 'claude_cli', 'openai_compatible', 'mock', 'local'));
+	`); err != nil {
+		return fmt.Errorf("migrate agents.llm_backend profiles: %w", err)
+	}
+	return nil
 }
 
 func (s *PostgresStore) ensureRunBundleSourceSchema(ctx context.Context, catalog schemaColumnCatalog) error {

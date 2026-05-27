@@ -2387,7 +2387,7 @@ engine:
       - Provider-selection UI is outside this adapter-contract slice.
     llm_provider_selection_config_authority:
       promoted_by: '#1127'
-      implementation_status: source_authority_promoted_behavior_split
+      implementation_status: backend_selection_config_discovery_implemented_model_alias_split
       description: Runtime LLM backend and authored model selection are provider-profile and model-alias based. A backend
         profile id is the canonical operator/config/persisted deployment value; it resolves to provider identity, access
         method/transport, credential source, alias-to-model resolution, and the provider adapter runtime mode consumed by
@@ -2452,7 +2452,7 @@ engine:
               config_key: llm.openai_compatible.base_url
               env_var: null
               required: true
-              rule: "This is deployment configuration, not a secret. Runtime config is canonical; behavior migration decides any explicitly allowed connection-env override under #1128."
+              rule: "This is deployment configuration, not a secret. Runtime config is canonical; SWARM_OPENAI_COMPATIBLE_BASE_URL is retired and must fail closed with config guidance."
             proof_boundary: This profile proves one non-Anthropic Chat Completions-compatible HTTP provider path. It remains
               named openai_compatible and is not a native OpenAI Responses API provider, not an official-OpenAI-only provider
               identity, not OpenRouter/Ollama/Bedrock/Azure/Vertex/vLLM closure, and not a provider matrix.
@@ -4143,13 +4143,14 @@ platform_tables:
         — set only for agents scoped to a specific entity (rare). The contract in agents.yaml is the source of truth and
         permissions_bundle is resolved at boot into the persisted permissions array rather than being stored directly.
         llm_backend stores the backend profile id owned by llm_provider_selection_config_authority. Active runtime profiles
-        are api (Anthropic API transport), cli_test (Claude CLI transport), and openai_compatible (Chat Completions-compatible
-        HTTP transport); mock and local are reserved persisted profile ids and are not active runtimes until a dedicated provider/runtime owner lands. This value is provider-selection
+        are anthropic (Anthropic API transport), claude_cli (Claude CLI transport), and openai_compatible (Chat Completions-compatible
+        HTTP transport); legacy api and cli_test persisted rows are migration/backfill inputs only and are not valid new
+        config/operator inputs. mock and local are reserved persisted profile ids and are not active runtimes until a dedicated provider/runtime owner lands. This value is provider-selection
         deployment truth, not provider identity alone and not transport mode alone. This is a deployment/agent property, not
         a session property. agent_sessions.runtime_mode tracks conversation scope only.'
       ddl: "CREATE TABLE agents (\n    agent_id          TEXT PRIMARY KEY,\n    flow_instance     TEXT,\n    role        \
-        \      TEXT NOT NULL,\n    model_tier        TEXT NOT NULL,\n    llm_backend       TEXT NOT NULL DEFAULT 'api' CHECK\
-        \ (llm_backend IN ('api', 'cli_test', 'openai_compatible', 'mock', 'local')),\n    conversation_mode TEXT NOT NULL CHECK (conversation_mode\
+        \      TEXT NOT NULL,\n    model_tier        TEXT NOT NULL,\n    llm_backend       TEXT NOT NULL DEFAULT 'anthropic' CHECK\
+        \ (llm_backend IN ('anthropic', 'claude_cli', 'openai_compatible', 'mock', 'local')),\n    conversation_mode TEXT NOT NULL CHECK (conversation_mode\
         \ IN ('task', 'session', 'session_per_entity')),\n    parent_agent_id   TEXT,\n    entity_id         UUID,\n    config\
         \            JSONB NOT NULL DEFAULT '{}',\n    subscriptions     JSONB NOT NULL DEFAULT '[]',\n    emit_events   \
         \    JSONB NOT NULL DEFAULT '[]',\n    tools             JSONB NOT NULL DEFAULT '[]',\n    permissions       JSONB\
@@ -7937,6 +7938,15 @@ cli_specification:
         Starts current runtime and implemented API/MCP HTTP listeners for process probes, /v1/rpc, /v1/ws,
         MCP, and tool surfaces. Final CLI v2.1 topology is the separate API/MCP listener contract below;
         enable-disable controls and env/config listener precedence remain pending follow-up children.
+      runtime_config_backend_selection:
+        config_flag: --config <path>
+        backend_flag: --backend <anthropic|claude_cli|openai_compatible>
+        owner: engine.agent_session_management.llm_provider_selection_config_authority
+        rule: >
+          `swarm serve` consumes the shared runtime config resolver: explicit --config first, config.yaml beside the
+          running binary second when present, built-in/default config last, then --backend overrides config llm.backend.
+          SWARM_LLM_BACKEND, SWARM_LLM_RUNTIME_MODE, llm.runtime_mode, and SWARM_OPENAI_COMPATIBLE_BASE_URL are retired
+          selector/connection-owner seams and must fail closed.
       unified_listener_bind_contract:
         implemented_by: '#853'
         superseded_by: '#992 listener_topology_v2_1 runtime bind implementation'
@@ -8362,6 +8372,8 @@ cli_specification:
       - --reattach <run-id>
       - --bundle-hash <bundle-v1:sha256:...>
       - --bundle-fingerprint <sha>
+      - --config <path>
+      - --backend <anthropic|claude_cli|openai_compatible>
       - --contracts <path>
       - --platform-spec <path>
       - --idempotency-key <key>
@@ -8372,10 +8384,11 @@ cli_specification:
         --mcp-port: 'Unsupported in #743; `swarm run` may consume the existing serve startup owner, but explicit MCP bind ownership remains split to the #750 serve-owner tail and MUST fail before API/WS calls.'
       modes:
         foreground_local_start:
-          invocation: swarm run --event <name> --payload <file> --contracts <path> --platform-spec <path>
+          invocation: swarm run --event <name> --payload <file> [--config <path>] [--backend <profile>] --contracts <path> --platform-spec <path>
           behavior: >
             Start runtime/API/MCP through the existing serve startup owner, call health.check, call run.start, subscribe
-            with run.subscribe_trace, render composed trace rows and final summary until terminal.
+            with run.subscribe_trace, render composed trace rows and final summary until terminal. Local runtime config and
+            backend selection consume the same shared resolver as `swarm serve`.
           ctrl_c: 'First Ctrl-C calls run.stop after a run_id exists, shuts down the locally started runtime, and exits 130. A second interrupt may hard-exit.'
         foreground_connected_start:
           invocation: swarm run --connect <url> --event <name> --payload <file>
