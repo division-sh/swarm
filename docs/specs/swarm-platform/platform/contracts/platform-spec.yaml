@@ -2386,90 +2386,134 @@ engine:
       - Renaming cli_test is a separate compatibility/semantics decision.
       - Provider-selection UI is outside this adapter-contract slice.
     llm_provider_selection_config_authority:
-      description: Runtime LLM backend selection is profile-based. A backend profile id is the canonical selection and
-        persisted deployment value; it resolves to provider identity, transport/protocol mode, credential source, model-tier
-        mapping, and the provider adapter runtime mode consumed by internal/runtime/llm.ProviderContract. Provider identity
-        alone (for example anthropic/openai) and transport alone (for example api/cli/local) are not valid replacements for
-        the backend profile id.
-      owner: internal/runtime/llm/selection backend profile resolver
+      promoted_by: '#1127'
+      implementation_status: source_authority_promoted_behavior_split
+      description: Runtime LLM backend and authored model selection are provider-profile and model-alias based. A backend
+        profile id is the canonical operator/config/persisted deployment value; it resolves to provider identity, access
+        method/transport, credential source, alias-to-model resolution, and the provider adapter runtime mode consumed by
+        internal/runtime/llm.ProviderContract. Authored bundles declare one provider-agnostic model alias per agent. Runtime
+        readers consume write-time resolved backend/provider/model facts and MUST NOT reconstruct them from current config.
+      owner: internal/runtime/llm/selection backend profile and model alias resolver
+      behavior_children:
+        backend_selection_config_discovery: '#1128'
+        model_alias_runtime_migration: '#1129'
+        docs_config_secrets_cleanup: '#1130'
       canonical_selector:
+        cli_flag: --backend
         config_key: llm.backend
-        env_var: SWARM_LLM_BACKEND
-        default_backend_profile: api
+        env_var: null
+        default_backend_profile: anthropic
+        source_order:
+        - --backend
+        - runtime config llm.backend
+        - built-in default anthropic
         retired_non_authoritative_selectors:
+        - SWARM_LLM_BACKEND
         - llm.runtime_mode
         - SWARM_LLM_RUNTIME_MODE
         rules:
-        - Config and CLI env parsing may collect selector input, but they must consume the backend profile resolver rather
-          than independently interpreting provider identity, transport, credential, or model semantics.
-        - The platform must not infer backend profile from credential or model env presence. Missing selector input resolves
-          only through the documented default backend profile.
+        - Runtime config is canonical for non-secret LLM behavior.
+        - Environment variables never select the backend profile. Environment variables remain valid only for provider
+          secrets and pragmatic infra/connection overrides explicitly owned by their configuration sections.
+        - Commands that need runtime/operator config discover explicit --config first, config.yaml beside the running binary
+          when present second, and built-in/default config last.
+        - The platform must not infer backend profile from credential, endpoint, model, or tool-gateway env presence.
         - Unsupported backend profiles and retired selector fields fail closed.
-      active_backend_profiles:
-        api:
-          provider: anthropic
-          transport: api
-          provider_contract_runtime_mode: api
-          credential_source:
-            env_var: ANTHROPIC_API_KEY
-            required: true
-          model_tier_mapping:
-            default_model_config: llm.claude_api.default_model
-            low_cost_model_config: llm.claude_api.haiku_model
-            model_tier_source: agents.model_tier
-            throttle_degrade_rule: If the budget guard marks the actor entity throttled and the low-cost model is configured,
-              the API runtime uses the low-cost model for that turn.
-        cli_test:
-          provider: claude
-          transport: cli
-          provider_contract_runtime_mode: cli_test
-          credential_source:
-            env_var: CLAUDE_CODE_OAUTH_TOKEN
-            required: true
-          model_tier_mapping:
-            model_tier_source: agents.model_tier
-            accounting_model: CLI budget estimation records the configured model_tier string because the Claude CLI shipped
-              runtime does not expose exact model usage metadata in a stable non-interactive surface.
-        openai_compatible:
-          provider: openai_compatible
-          transport: api
-          provider_contract_runtime_mode: openai_compatible
-          protocol: Chat Completions-compatible HTTP JSON at /v1/chat/completions relative to the configured base URL.
-          credential_source:
-            env_var: OPENAI_COMPATIBLE_API_KEY
-            required: true
-          endpoint_source:
-            config_key: llm.openai_compatible.base_url
-            env_var: SWARM_OPENAI_COMPATIBLE_BASE_URL
-            required: true
-            rule: This is the API base URL, not the chat completions endpoint path; the runtime normalizes a root or /v1 base to exactly /v1/chat/completions.
-          model_tier_mapping:
-            default_model_config: llm.openai_compatible.default_model
-            default_model_env: SWARM_OPENAI_COMPATIBLE_DEFAULT_MODEL
-            low_cost_model_config: llm.openai_compatible.low_cost_model
-            low_cost_model_env: SWARM_OPENAI_COMPATIBLE_LOW_COST_MODEL
-            model_tier_source: agents.model_tier
-            throttle_degrade_rule: If the budget guard marks the actor entity throttled and the low-cost model is configured,
-              the OpenAI-compatible runtime uses the low-cost model for that turn.
-          proof_boundary: This profile proves one non-Anthropic Chat Completions-compatible HTTP provider path. It is not
-            an OpenAI Responses API provider, not an official-OpenAI-only provider identity, not OpenRouter/Ollama/Bedrock/Azure/Vertex/vLLM
-            closure, and not a provider matrix.
-      reserved_persisted_backend_profiles:
-        mock: Reserved persisted profile id for fixture replay. It is not a supported active runtime backend until a dedicated
-          provider/runtime owner lands.
-        local: Reserved persisted profile id for local model execution. It is not a supported active runtime backend until
-          a dedicated provider/runtime owner lands.
+      backend_profile_identity:
+        active_backend_profiles:
+          anthropic:
+            provider: anthropic
+            transport: api
+            provider_contract_runtime_mode: api
+            legacy_backend_ids:
+            - api
+            credential_source:
+              env_var: ANTHROPIC_API_KEY
+              required: true
+          claude_cli:
+            provider: claude
+            transport: cli
+            provider_contract_runtime_mode: cli_test
+            legacy_backend_ids:
+            - cli_test
+            credential_source:
+              env_var: CLAUDE_CODE_OAUTH_TOKEN
+              required: true
+          openai_compatible:
+            provider: openai_compatible
+            transport: api
+            provider_contract_runtime_mode: openai_compatible
+            protocol: Chat Completions-compatible HTTP JSON at /v1/chat/completions relative to the configured base URL.
+            legacy_backend_ids: []
+            credential_source:
+              env_var: OPENAI_COMPATIBLE_API_KEY
+              required: true
+            endpoint_source:
+              config_key: llm.openai_compatible.base_url
+              env_var: null
+              required: true
+              rule: "This is deployment configuration, not a secret. Runtime config is canonical; behavior migration decides any explicitly allowed connection-env override under #1128."
+            proof_boundary: This profile proves one non-Anthropic Chat Completions-compatible HTTP provider path. It remains
+              named openai_compatible and is not a native OpenAI Responses API provider, not an official-OpenAI-only provider
+              identity, not OpenRouter/Ollama/Bedrock/Azure/Vertex/vLLM closure, and not a provider matrix.
+        reserved_persisted_backend_profiles:
+          mock: Reserved persisted profile id for fixture replay. It is not a supported active runtime backend until a
+            dedicated provider/runtime owner lands.
+          local: Reserved persisted profile id for local model execution. It is not a supported active runtime backend until
+            a dedicated provider/runtime owner lands.
+        rejected_target_names:
+          openai: Not active for this authority because the shipped non-Anthropic proof is Chat Completions-compatible and
+            may front OpenRouter or local-compatible endpoints. Native OpenAI Responses requires a separate provider/protocol gate.
+      model_alias_authority:
+        contract_field: model
+        replaces: model_tier
+        alias_config_key: llm.models
+        built_in_aliases:
+        - cheap
+        - regular
+        - frontier
+        alias_vocabulary_declaration: none; aliases are free-form strings in bundles, with well-formedness checked by verify
+          and selected-backend resolution checked at boot.
+        resolution_rule: Resolution is deterministic and provider-scoped. The canonical input is (backend profile id, authored
+          model alias); the canonical output is the concrete provider model string plus resolved backend and provider identity.
+          Per-alias runtime config overrides built-in defaults; unresolved aliases fail closed before agent turns.
+        verify_rule: swarm verify validates the authored model field is present and well formed, but does not require deployment
+          credentials or provider-specific config. Deployment alias resolution is a boot/runtime validation responsibility.
+        audit_rule: Runtime audit writes authored model alias plus resolved backend profile, provider identity, and concrete
+          model at write time. Readers consume recorded values and MUST NOT reconstruct from current config.
+      credential_and_config_policy:
+        secret_env_sources:
+        - ANTHROPIC_API_KEY
+        - CLAUDE_CODE_OAUTH_TOKEN
+        - OPENAI_COMPATIBLE_API_KEY
+        - SWARM_TOOL_GATEWAY_TOKEN
+        - SWARM_API_TOKEN
+        - database password env/store sources
+        runtime_config_canonical_for:
+        - backend selection
+        - provider endpoint/base URLs
+        - provider model alias maps
+        - tool-gateway URLs and workspace/runtime behavior
+        - Claude CLI permission, output, timeout, and session behavior
+        infra_connection_override_policy: Config remains canonical; env overrides are allowed only for pragmatic infra/connection
+          values explicitly named by their owning config sections. This does not allow env-based backend selection.
       persistence_rules:
-      - agents.llm_backend stores the backend profile id, not provider identity and not transport mode.
+      - Target agents.llm_backend stores the provider-named backend profile ids anthropic, claude_cli, and openai_compatible.
+      - "Legacy persisted backend ids api and cli_test are non-authoritative after #1128/#1129 migration and must be explicitly backfilled to anthropic and claude_cli."
+      - "Authored model aliases replace model_tier as the bundle/source selector. Store/schema migration remains in #1129."
+      - Runtime manager/default materialization must persist the resolved backend profile id and model alias rather than
+        reusing config/runtime-mode strings.
+      - Runtime audit must persist resolved backend/provider/concrete model at write time, and readers must consume persisted
+        facts rather than re-resolving against current config.
       - Agent/session conversation scope remains owned by agent_sessions.runtime_mode and is orthogonal to llm_backend.
-      - Runtime manager/default materialization must persist the resolved backend profile id rather than reusing config/runtime
-        mode strings.
-      - Readers must consume persisted llm_backend as a backend profile id and fail closed on unknown values.
       split_boundaries:
+      - '#1127 is source-authority/spec/watchlist only and MUST NOT change runtime/config/store/verify/CLI behavior.'
+      - '#1128 owns backend selection/config discovery, --backend precedence, env selector retirement, and backend id migration.'
+      - '#1129 owns model_tier to model alias migration, boot/verify alias validation, runtime model resolution, and audit writes.'
+      - '#1130 owns docs/config/secrets/model-alias cleanup after behavior lands.'
       - Implementing OpenAI Responses, OpenRouter, Ollama, Bedrock, Azure OpenAI, Vertex, vLLM, or any other additional
         provider remains a separate provider implementation/parity gate.
-      - Renaming cli_test remains a separate compatibility/storage/spec migration.
-      - Provider UI and docs beyond the selector/config truth remain under the #983 parent tail.
+      - Native multi-backend-per-run remains deferred until a separate real user need is gated.
     conversation_modes:
       description: How the platform manages agent session context across invocations.
       modes:

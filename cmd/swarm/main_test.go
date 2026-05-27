@@ -1427,6 +1427,226 @@ func TestPlatformSpecLocalCLITestWorkspaceCLIAvailabilityPromoted(t *testing.T) 
 	}
 }
 
+func TestPlatformSpecLLMProviderModelSelectionSourceAuthorityPromoted(t *testing.T) {
+	var spec struct {
+		Engine struct {
+			AgentSessionManagement struct {
+				Selection struct {
+					PromotedBy           string            `yaml:"promoted_by"`
+					ImplementationStatus string            `yaml:"implementation_status"`
+					Owner                string            `yaml:"owner"`
+					BehaviorChildren     map[string]string `yaml:"behavior_children"`
+					CanonicalSelector    struct {
+						CLIFlag                          string   `yaml:"cli_flag"`
+						ConfigKey                        string   `yaml:"config_key"`
+						EnvVar                           string   `yaml:"env_var"`
+						DefaultBackendProfile            string   `yaml:"default_backend_profile"`
+						SourceOrder                      []string `yaml:"source_order"`
+						RetiredNonAuthoritativeSelectors []string `yaml:"retired_non_authoritative_selectors"`
+						Rules                            []string `yaml:"rules"`
+					} `yaml:"canonical_selector"`
+					BackendProfileIdentity struct {
+						ActiveBackendProfiles map[string]struct {
+							Provider                    string   `yaml:"provider"`
+							Transport                   string   `yaml:"transport"`
+							ProviderContractRuntimeMode string   `yaml:"provider_contract_runtime_mode"`
+							LegacyBackendIDs            []string `yaml:"legacy_backend_ids"`
+							CredentialSource            struct {
+								EnvVar   string `yaml:"env_var"`
+								Required bool   `yaml:"required"`
+							} `yaml:"credential_source"`
+							EndpointSource struct {
+								ConfigKey string `yaml:"config_key"`
+								EnvVar    string `yaml:"env_var"`
+								Rule      string `yaml:"rule"`
+							} `yaml:"endpoint_source"`
+						} `yaml:"active_backend_profiles"`
+						RejectedTargetNames map[string]string `yaml:"rejected_target_names"`
+					} `yaml:"backend_profile_identity"`
+					ModelAliasAuthority struct {
+						ContractField              string   `yaml:"contract_field"`
+						Replaces                   string   `yaml:"replaces"`
+						AliasConfigKey             string   `yaml:"alias_config_key"`
+						BuiltInAliases             []string `yaml:"built_in_aliases"`
+						AliasVocabularyDeclaration string   `yaml:"alias_vocabulary_declaration"`
+						ResolutionRule             string   `yaml:"resolution_rule"`
+						VerifyRule                 string   `yaml:"verify_rule"`
+						AuditRule                  string   `yaml:"audit_rule"`
+					} `yaml:"model_alias_authority"`
+					CredentialAndConfigPolicy struct {
+						SecretEnvSources              []string `yaml:"secret_env_sources"`
+						RuntimeConfigCanonicalFor     []string `yaml:"runtime_config_canonical_for"`
+						InfraConnectionOverridePolicy string   `yaml:"infra_connection_override_policy"`
+					} `yaml:"credential_and_config_policy"`
+					PersistenceRules []string `yaml:"persistence_rules"`
+					SplitBoundaries  []string `yaml:"split_boundaries"`
+				} `yaml:"llm_provider_selection_config_authority"`
+			} `yaml:"agent_session_management"`
+		} `yaml:"engine"`
+	}
+	data, err := os.ReadFile(filepath.Join(repoRoot(), defaultPlatformSpecPath))
+	if err != nil {
+		t.Fatalf("read platform spec: %v", err)
+	}
+	if err := yaml.Unmarshal(data, &spec); err != nil {
+		t.Fatalf("parse platform spec: %v", err)
+	}
+	authority := spec.Engine.AgentSessionManagement.Selection
+	if strings.TrimSpace(authority.PromotedBy) != "#1127" {
+		t.Fatalf("llm provider selection promoted_by = %q, want #1127", authority.PromotedBy)
+	}
+	if strings.TrimSpace(authority.ImplementationStatus) != "source_authority_promoted_behavior_split" {
+		t.Fatalf("llm provider selection implementation_status = %q", authority.ImplementationStatus)
+	}
+	if !strings.Contains(authority.Owner, "backend profile and model alias resolver") {
+		t.Fatalf("llm provider selection owner missing alias resolver: %s", authority.Owner)
+	}
+	for _, want := range []string{"#1128", "#1129", "#1130"} {
+		if !mapValueContains(authority.BehaviorChildren, want) {
+			t.Fatalf("behavior children missing %q: %#v", want, authority.BehaviorChildren)
+		}
+	}
+	selector := authority.CanonicalSelector
+	if selector.CLIFlag != "--backend" || selector.ConfigKey != "llm.backend" || selector.EnvVar != "" || selector.DefaultBackendProfile != "anthropic" {
+		t.Fatalf("selector = %#v, want --backend > llm.backend > default anthropic with no env selector", selector)
+	}
+	for _, want := range []string{"--backend", "runtime config llm.backend", "built-in default anthropic"} {
+		if !stringSliceContains(selector.SourceOrder, want) {
+			t.Fatalf("selector source order missing %q: %#v", want, selector.SourceOrder)
+		}
+	}
+	for _, want := range []string{"SWARM_LLM_BACKEND", "llm.runtime_mode", "SWARM_LLM_RUNTIME_MODE"} {
+		if !stringSliceContains(selector.RetiredNonAuthoritativeSelectors, want) {
+			t.Fatalf("retired selectors missing %q: %#v", want, selector.RetiredNonAuthoritativeSelectors)
+		}
+	}
+	if !joinedContains(selector.Rules, "Environment variables never select the backend profile") {
+		t.Fatalf("selector rules do not retire env backend selection: %#v", selector.Rules)
+	}
+	profiles := authority.BackendProfileIdentity.ActiveBackendProfiles
+	for _, oldID := range []string{"api", "cli_test"} {
+		if _, ok := profiles[oldID]; ok {
+			t.Fatalf("old backend id %q still active in source authority profiles: %#v", oldID, profiles)
+		}
+	}
+	if got := profiles["anthropic"]; got.Provider != "anthropic" || got.ProviderContractRuntimeMode != "api" || !stringSliceContains(got.LegacyBackendIDs, "api") {
+		t.Fatalf("anthropic profile = %#v", got)
+	}
+	if got := profiles["claude_cli"]; got.Provider != "claude" || got.ProviderContractRuntimeMode != "cli_test" || !stringSliceContains(got.LegacyBackendIDs, "cli_test") {
+		t.Fatalf("claude_cli profile = %#v", got)
+	}
+	if got := profiles["openai_compatible"]; got.Provider != "openai_compatible" || got.ProviderContractRuntimeMode != "openai_compatible" || got.EndpointSource.EnvVar != "" || !strings.Contains(got.EndpointSource.Rule, "#1128") {
+		t.Fatalf("openai_compatible profile = %#v", got)
+	}
+	if !strings.Contains(strings.ToLower(authority.BackendProfileIdentity.RejectedTargetNames["openai"]), "not active") {
+		t.Fatalf("openai rejected target missing design decision: %#v", authority.BackendProfileIdentity.RejectedTargetNames)
+	}
+	models := authority.ModelAliasAuthority
+	if models.ContractField != "model" || models.Replaces != "model_tier" || models.AliasConfigKey != "llm.models" {
+		t.Fatalf("model alias authority = %#v", models)
+	}
+	for _, want := range []string{"cheap", "regular", "frontier"} {
+		if !stringSliceContains(models.BuiltInAliases, want) {
+			t.Fatalf("model aliases missing %q: %#v", want, models.BuiltInAliases)
+		}
+	}
+	for _, want := range []string{"free-form", "well-formedness", "selected-backend", "write time", "MUST NOT reconstruct"} {
+		if !strings.Contains(models.AliasVocabularyDeclaration+models.ResolutionRule+models.VerifyRule+models.AuditRule, want) {
+			t.Fatalf("model alias authority missing %q:\n%#v", want, models)
+		}
+	}
+	for _, want := range []string{"ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "OPENAI_COMPATIBLE_API_KEY"} {
+		if !stringSliceContains(authority.CredentialAndConfigPolicy.SecretEnvSources, want) {
+			t.Fatalf("secret env sources missing %q: %#v", want, authority.CredentialAndConfigPolicy.SecretEnvSources)
+		}
+	}
+	for _, want := range []string{"backend selection", "provider model alias maps"} {
+		if !stringSliceContains(authority.CredentialAndConfigPolicy.RuntimeConfigCanonicalFor, want) {
+			t.Fatalf("runtime config canonical list missing %q: %#v", want, authority.CredentialAndConfigPolicy.RuntimeConfigCanonicalFor)
+		}
+	}
+	for _, want := range []string{"anthropic", "claude_cli", "openai_compatible", "api and cli_test", "model_tier", "write time"} {
+		if !joinedContains(authority.PersistenceRules, want) {
+			t.Fatalf("persistence rules missing %q: %#v", want, authority.PersistenceRules)
+		}
+	}
+	for _, want := range []string{"#1127", "#1128", "#1129", "#1130", "MUST NOT change runtime"} {
+		if !joinedContains(authority.SplitBoundaries, want) {
+			t.Fatalf("split boundaries missing %q: %#v", want, authority.SplitBoundaries)
+		}
+	}
+}
+
+func TestRuntimeOperationsWatchlistMapsLLMProviderModelSelectionSourceAuthority(t *testing.T) {
+	var watchlist struct {
+		ActiveIssues []struct {
+			ID     int      `yaml:"id"`
+			MapsTo []string `yaml:"maps_to"`
+		} `yaml:"active_issues"`
+		Nodes []struct {
+			ID                    string   `yaml:"id"`
+			CanonicalOwners       []string `yaml:"canonical_owners"`
+			KnownManifestations   []string `yaml:"known_manifestations"`
+			RepresentativeIssues  []int    `yaml:"representative_issues"`
+			CommonFramingMistakes struct {
+				TooBroad  []string `yaml:"too_broad"`
+				TooNarrow []string `yaml:"too_narrow"`
+			} `yaml:"common_framing_mistakes"`
+		} `yaml:"nodes"`
+	}
+	data, err := os.ReadFile(filepath.Join(repoRoot(), "docs", "watchlists", "runtime-operations.yaml"))
+	if err != nil {
+		t.Fatalf("read runtime operations watchlist: %v", err)
+	}
+	if err := yaml.Unmarshal(data, &watchlist); err != nil {
+		t.Fatalf("parse runtime operations watchlist: %v", err)
+	}
+	for _, issueID := range []int{1123, 1127, 1128, 1129, 1130} {
+		if !watchlistIssueMapsTo(watchlist.ActiveIssues, issueID, "llm_provider_selection_config_authority") {
+			t.Fatalf("issue %d does not map to llm_provider_selection_config_authority: %#v", issueID, watchlist.ActiveIssues)
+		}
+	}
+	var node struct {
+		ID                    string
+		CanonicalOwners       []string
+		KnownManifestations   []string
+		RepresentativeIssues  []int
+		CommonFramingMistakes struct {
+			TooBroad  []string `yaml:"too_broad"`
+			TooNarrow []string `yaml:"too_narrow"`
+		}
+	}
+	for _, candidate := range watchlist.Nodes {
+		if candidate.ID == "llm_provider_selection_config_authority" {
+			node.ID = candidate.ID
+			node.CanonicalOwners = candidate.CanonicalOwners
+			node.KnownManifestations = candidate.KnownManifestations
+			node.RepresentativeIssues = candidate.RepresentativeIssues
+			node.CommonFramingMistakes = candidate.CommonFramingMistakes
+			break
+		}
+	}
+	if node.ID == "" {
+		t.Fatalf("llm_provider_selection_config_authority node not found")
+	}
+	if !joinedContains(node.CanonicalOwners, "model alias resolver") {
+		t.Fatalf("watchlist canonical owners missing model alias resolver: %#v", node.CanonicalOwners)
+	}
+	for _, want := range []string{"#1127", "--backend", "anthropic", "claude_cli", "model_tier", "write time", "#1128", "#1129", "#1130"} {
+		if !joinedContains(node.KnownManifestations, want) {
+			t.Fatalf("watchlist known manifestations missing %q: %#v", want, node.KnownManifestations)
+		}
+	}
+	for _, issueID := range []int{1123, 1127, 1128, 1129, 1130} {
+		if !intSliceContains(node.RepresentativeIssues, issueID) {
+			t.Fatalf("representative issues missing %d: %#v", issueID, node.RepresentativeIssues)
+		}
+	}
+	if !joinedContains(node.CommonFramingMistakes.TooBroad, "#1128") || !joinedContains(node.CommonFramingMistakes.TooNarrow, "model alongside model_tier") {
+		t.Fatalf("watchlist framing mistakes do not guard #1127 split: %#v", node.CommonFramingMistakes)
+	}
+}
+
 func TestPlatformSpecContractPlatformSpecPathResolutionPromoted(t *testing.T) {
 	spec := loadCLIContractPlatformSpecPathResolutionSpec(t)
 	if strings.TrimSpace(spec.PromotedBy) != "#844" {
@@ -4951,6 +5171,40 @@ func loadCLIContractPlatformSpecPathResolutionSpec(t *testing.T) cliContractPlat
 func stringSliceContains(values []string, want string) bool {
 	for _, value := range values {
 		if strings.Contains(value, want) {
+			return true
+		}
+	}
+	return false
+}
+
+func joinedContains(values []string, want string) bool {
+	return strings.Contains(strings.Join(values, "\n"), want)
+}
+
+func mapValueContains(values map[string]string, want string) bool {
+	for _, value := range values {
+		if strings.Contains(value, want) {
+			return true
+		}
+	}
+	return false
+}
+
+func intSliceContains(values []int, want int) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func watchlistIssueMapsTo(issues []struct {
+	ID     int      `yaml:"id"`
+	MapsTo []string `yaml:"maps_to"`
+}, issueID int, nodeID string) bool {
+	for _, issue := range issues {
+		if issue.ID == issueID && stringSliceContains(issue.MapsTo, nodeID) {
 			return true
 		}
 	}

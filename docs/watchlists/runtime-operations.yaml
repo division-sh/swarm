@@ -81,6 +81,26 @@ active_issues:
     title: Canonicalize LLM provider selection/config authority
     maps_to:
       - llm_provider_selection_config_authority
+  - id: 1123
+    title: Model aliases in flow contracts, resolved per-provider; provider-named backends; env for secrets only
+    maps_to:
+      - llm_provider_selection_config_authority
+  - id: 1127
+    title: Promote LLM backend/model selection source authority
+    maps_to:
+      - llm_provider_selection_config_authority
+  - id: 1128
+    title: Backend selection/config discovery migration
+    maps_to:
+      - llm_provider_selection_config_authority
+  - id: 1129
+    title: model_tier to provider-resolved model aliases
+    maps_to:
+      - llm_provider_selection_config_authority
+  - id: 1130
+    title: Docs/config/secrets/model-alias documentation cleanup
+    maps_to:
+      - llm_provider_selection_config_authority
   - id: 1066
     title: Default to SQLite (Postgres as opt-in external DB) to minimize onboarding friction
     maps_to:
@@ -323,27 +343,40 @@ nodes:
     parent_class: runtime LLM provider abstraction not production-ready
     canonical_owners:
       - docs/specs/swarm-platform/platform/contracts/platform-spec.yaml llm_provider_selection_config_authority
-      - internal/runtime/llm/selection backend profile resolver
-    why_this_node_exists: LLM provider selection drifts when config, CLI env defaults, runtime factories, provider credentials, persisted llm_backend, and model-tier mapping each interpret backend identity independently
+      - internal/runtime/llm/selection backend profile and model alias resolver
+    why_this_node_exists: LLM provider/model selection drifts when config, CLI flags, env defaults, runtime factories,
+      provider credentials, persisted llm_backend, authored model aliases, and turn audit records each interpret backend
+      identity or model resolution independently
     known_manifestations:
-      - llm.backend and SWARM_LLM_BACKEND must be the only active selection inputs; retired llm.runtime_mode and SWARM_LLM_RUNTIME_MODE fail closed
-      - the backend profile id resolves provider identity, transport/protocol mode, credential source, provider-contract runtime mode, and model-tier mapping
-      - command defaults must not infer provider/backend selection from credential or model env presence
-      - RuntimeFactory, selected-fork runtime materialization, provider credential checks, AgentManager, store projection/hydration, and model selection must consume the same profile resolver
-      - agents.llm_backend stores a backend profile id; api, cli_test, and openai_compatible are active runtime profiles while mock and local are reserved persisted-only profiles
-      - openai_compatible closes the first non-Anthropic Chat Completions-compatible HTTP proof only; OpenAI Responses, OpenRouter, Ollama, Bedrock, Azure, Vertex, vLLM, provider docs/sample config, and cli_test rename remain split tails
+      - '#1127 promotes the target authority: --backend > runtime config llm.backend > default anthropic; env never selects backend'
+      - target backend profile ids are anthropic, claude_cli, and openai_compatible; legacy api and cli_test require explicit migration/backfill before behavior flips
+      - openai_compatible intentionally remains the active profile name and is not renamed to openai until a separate provider/protocol gate promotes native OpenAI Responses or an official-only identity
+      - authored bundles target model, not model_tier; built-in aliases are cheap, regular, and frontier with provider-scoped resolution under llm.models
+      - runtime config is canonical for non-secret LLM behavior; env remains valid only for provider secrets and explicitly owned pragmatic infra/connection overrides
+      - RuntimeFactory, selected-fork runtime materialization, provider credential checks, AgentManager, store projection/hydration, boot/verify, model selection, budget/session audit, and read surfaces must consume the same profile/model alias resolver after behavior migrations
+      - runtime audit must write authored model alias plus resolved backend/profile/provider/concrete model at write time; readers must not reconstruct from current config
+      - '#1128 owns backend selection/config discovery migration; #1129 owns model_tier-to-model alias runtime/store/verify migration; #1130 owns docs/config/secrets cleanup after behavior lands'
+      - OpenAI Responses, OpenRouter, Ollama, Bedrock, Azure, Vertex, vLLM, and native multi-backend-per-run remain separate provider/protocol gates
     representative_issues:
       - 983
       - 1062
       - 1070
+      - 1123
+      - 1127
+      - 1128
+      - 1129
+      - 1130
     common_framing_mistakes:
       too_broad:
         - implement OpenAI, OpenRouter, Ollama, Bedrock, or another provider in the selection-authority slice
-        - rename cli_test while defining profile semantics
+        - "implement #1128 and #1129 behavior in the #1127 source-authority slice"
+        - rename openai_compatible to openai while defining source authority
       too_narrow:
         - add one factory switch case
         - add one env var alias while keeping runtime_mode as semantic owner
-        - validate config without moving runtime/store/model consumers
+        - add --backend while SWARM_LLM_BACKEND or config readers remain independent selectors
+        - add model alongside model_tier instead of replacing the selector
+        - validate config without moving runtime/store/model/audit consumers
     current_action_pressure: active
   - id: runtime_store_backend_default_and_sqlite_portability
     title: Runtime Store Backend Default And SQLite Portability
