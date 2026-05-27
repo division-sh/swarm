@@ -45,6 +45,7 @@ import (
 	runtimerunforkexecution "swarm/internal/runtime/runforkexecution"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/runtime/sessions"
+	runtimestartupownership "swarm/internal/runtime/startupownership"
 	runtimestartuprecovery "swarm/internal/runtime/startuprecovery"
 	runtimetools "swarm/internal/runtime/tools"
 	workspace "swarm/internal/runtime/workspace"
@@ -126,9 +127,11 @@ type storeBundle struct {
 	ScheduleStore       runtimepipeline.SchedulePersistence
 	MailboxStore        runtimetools.MailboxPersistence
 	MailboxAPIStore     apiv1.MailboxAPIStore
+	ObservabilityStore  apiv1.ObservabilityReadStore
 	RuntimeIngressStore runtimeingress.Store
 	IdempotencyStore    apiv1.APIIdempotencyStore
 	TurnStore           runtimellm.TurnPersistence
+	StartupOwnership    runtimestartupownership.Store
 }
 
 func (s storeBundle) runtimeStores() runtime.Stores {
@@ -140,7 +143,7 @@ func (s storeBundle) runtimeStores() runtime.Stores {
 		ConversationStore:   s.ConversationStore,
 		ManagerStore:        s.ManagerStore,
 		ScheduleStore:       s.ScheduleStore,
-		StartupOwnership:    s.Postgres,
+		StartupOwnership:    s.StartupOwnership,
 		MailboxStore:        s.MailboxStore,
 		RuntimeIngressStore: s.RuntimeIngressStore,
 		TurnStore:           s.TurnStore,
@@ -411,9 +414,11 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	}
 	var apiEntities apiv1.EntityReadStore
 	var apiAgentConversations apiv1.AgentConversationReadStore
+	apiObservability := stores.ObservabilityStore
 	if stores.Postgres != nil {
 		apiEntities = stores.Postgres
 		apiAgentConversations = stores.Postgres
+		apiObservability = stores.Postgres
 	}
 	resetPlanner := runtimedestructivereset.InventoryPlanner{
 		Reader: runtimedestructivereset.CompositeInventoryReader{
@@ -427,7 +432,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		},
 		Database:            stores.Postgres,
 		Runs:                stores.Postgres,
-		Observability:       stores.Postgres,
+		Observability:       apiObservability,
 		Entities:            apiEntities,
 		AgentConversations:  apiAgentConversations,
 		BundleCatalog:       stores.Postgres,
@@ -1837,9 +1842,11 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 			ScheduleStore:       pg,
 			MailboxStore:        pg,
 			MailboxAPIStore:     pg,
+			ObservabilityStore:  pg,
 			RuntimeIngressStore: pg,
 			IdempotencyStore:    pg,
 			TurnStore:           pg,
+			StartupOwnership:    pg,
 		}, nil
 	case storebackend.BackendSQLite:
 		sqliteStore, err := store.NewSQLiteRuntimeStore(selection.SQLitePath)
@@ -1854,17 +1861,22 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 			_ = sqliteStore.Close()
 			return storeBundle{}, err
 		}
+		sqliteStore.SetSessionLockTTL(cfg.LLM.Session.LockTTL)
 		return storeBundle{
 			SQLDB:               sqliteStore.DB,
-			RuntimeBlocker:      "sqlite runtime construction is fail-closed until #1086 selected raw-SQL consumers (pipeline, budget, tool executor, runtime diagnostics) move to backend-neutral store owners",
 			SchemaBootstrapper:  sqliteStore,
 			EventStore:          sqliteStore,
+			SessionRegistry:     sqliteStore,
+			ConversationStore:   sqliteStore,
 			ManagerStore:        sqliteStore,
 			ScheduleStore:       sqliteStore,
 			MailboxStore:        sqliteStore,
 			MailboxAPIStore:     sqliteStore,
+			ObservabilityStore:  sqliteStore,
 			RuntimeIngressStore: sqliteStore,
 			IdempotencyStore:    sqliteStore,
+			TurnStore:           sqliteStore,
+			StartupOwnership:    sqliteStore,
 		}, nil
 	default:
 		return storeBundle{}, fmt.Errorf("store backend selection is required; supported backends: %s, %s", storebackend.BackendPostgres, storebackend.BackendSQLite)

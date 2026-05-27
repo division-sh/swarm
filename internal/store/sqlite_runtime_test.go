@@ -6,7 +6,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -15,9 +14,12 @@ import (
 	runtimeactors "swarm/internal/runtime/core/actors"
 	runtimecorrelation "swarm/internal/runtime/correlation"
 	runtimeingress "swarm/internal/runtime/ingress"
+	runtimellm "swarm/internal/runtime/llm"
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimepipeline "swarm/internal/runtime/pipeline"
+	runtimereplayclaim "swarm/internal/runtime/replayclaim"
 	runtimeruncontrol "swarm/internal/runtime/runcontrol"
+	runtimesessions "swarm/internal/runtime/sessions"
 	runtimetools "swarm/internal/runtime/tools"
 )
 
@@ -235,16 +237,269 @@ func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 	}
 }
 
-func TestSQLiteRuntimeStoreReplayBacklogQueriesFailClosed(t *testing.T) {
+func TestSQLiteRuntimeStoreDeliveryReplayAndReceiptSemantics(t *testing.T) {
 	ctx := context.Background()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	runID := uuid.NewString()
+	ctx = runtimecorrelation.WithRunID(ctx, runID)
+	now := time.Now().UTC()
+	store.SetNowFnForTest(func() time.Time { return now })
 
-	if _, err := store.ListPendingEventsForAgent(ctx, "agent-1", time.Now().Add(-time.Hour), 10); err == nil || !strings.Contains(err.Error(), "split to #1087") {
-		t.Fatalf("ListPendingEventsForAgent error = %v, want explicit #1087 split", err)
+	eventID := uuid.NewString()
+	evt := events.Event{
+		ID:          eventID,
+		RunID:       runID,
+		Type:        events.EventType("test.delivery_requested"),
+		SourceAgent: "runtime",
+		Payload:     json.RawMessage(`{"delivery":true}`),
+		CreatedAt:   now,
 	}
-	if _, err := store.ListPendingSubscribedEvents(ctx, "agent-1", []events.EventType{"test.*"}, time.Now().Add(-time.Hour), 10); err == nil || !strings.Contains(err.Error(), "split to #1087") {
-		t.Fatalf("ListPendingSubscribedEvents error = %v, want explicit #1087 split", err)
+	if err := store.PersistEventWithDeliveriesAndScope(ctx, evt, []string{"agent-1"}, runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
+		t.Fatalf("PersistEventWithDeliveriesAndScope: %v", err)
 	}
+
+	scope, err := store.LoadCommittedReplayScope(ctx, eventID)
+	if err != nil {
+		t.Fatalf("LoadCommittedReplayScope: %v", err)
+	}
+	if scope != runtimereplayclaim.CommittedReplayScopeSubscribed {
+		t.Fatalf("committed replay scope = %q, want subscribed", scope)
+	}
+
+	pending, err := store.ListPendingEventsForAgent(ctx, "agent-1", now.Add(-time.Minute), 10)
+	if err != nil {
+		t.Fatalf("ListPendingEventsForAgent: %v", err)
+	}
+	if len(pending) != 1 || pending[0].ID != eventID {
+		t.Fatalf("pending events = %#v, want %s", pending, eventID)
+	}
+	if err := store.MarkEventDeliveryInProgress(ctx, eventID, "agent-1", uuid.NewString()); err != nil {
+		t.Fatalf("MarkEventDeliveryInProgress: %v", err)
+	}
+	if err := store.UpsertEventReceipt(ctx, eventID, "agent-1", runtimemanager.ReceiptStatusProcessed, ""); err != nil {
+		t.Fatalf("UpsertEventReceipt: %v", err)
+	}
+	receipt, ok, err := store.GetEventReceipt(ctx, eventID, "agent-1")
+	if err != nil {
+		t.Fatalf("GetEventReceipt: %v", err)
+	}
+	if !ok || receipt.Status != runtimemanager.ReceiptStatusProcessed {
+		t.Fatalf("receipt = %+v ok=%v, want processed", receipt, ok)
+	}
+	pending, err = store.ListPendingEventsForAgent(ctx, "agent-1", now.Add(-time.Minute), 10)
+	if err != nil {
+		t.Fatalf("ListPendingEventsForAgent after receipt: %v", err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("pending events after receipt = %#v, want none", pending)
+	}
+
+	missing, err := store.ListEventsMissingPipelineReceiptForRun(ctx, runID, now.Add(-time.Minute), 10)
+	if err != nil {
+		t.Fatalf("ListEventsMissingPipelineReceiptForRun: %v", err)
+	}
+	if len(missing) != 1 || missing[0].Event.ID != eventID {
+		t.Fatalf("missing pipeline receipts = %#v, want %s", missing, eventID)
+	}
+	lease, claimed, err := store.ClaimPipelineReplay(ctx, eventID)
+	if err != nil {
+		t.Fatalf("ClaimPipelineReplay: %v", err)
+	}
+	if !claimed || lease == nil {
+		t.Fatalf("ClaimPipelineReplay claimed=%v lease=%#v, want claim", claimed, lease)
+	}
+	if _, claimedAgain, err := store.ClaimPipelineReplay(ctx, eventID); err != nil || claimedAgain {
+		t.Fatalf("second ClaimPipelineReplay claimed=%v err=%v, want busy/no claim", claimedAgain, err)
+	}
+	if err := lease.Release(ctx); err != nil {
+		t.Fatalf("release replay claim: %v", err)
+	}
+	if err := store.UpsertPipelineReceipt(ctx, eventID, "processed", ""); err != nil {
+		t.Fatalf("UpsertPipelineReceipt: %v", err)
+	}
+	missing, err = store.ListEventsMissingPipelineReceiptForRun(ctx, runID, now.Add(-time.Minute), 10)
+	if err != nil {
+		t.Fatalf("ListEventsMissingPipelineReceiptForRun after receipt: %v", err)
+	}
+	if len(missing) != 0 {
+		t.Fatalf("missing pipeline receipts after receipt = %#v, want none", missing)
+	}
+
+	subEventID := uuid.NewString()
+	subEvt := events.Event{
+		ID:          subEventID,
+		RunID:       runID,
+		Type:        events.EventType("subscription.visible"),
+		SourceAgent: "runtime",
+		Payload:     json.RawMessage(`{"subscription":true}`),
+		CreatedAt:   now.Add(time.Second),
+	}
+	if err := store.AppendEvent(ctx, subEvt); err != nil {
+		t.Fatalf("AppendEvent subscription: %v", err)
+	}
+	subscribed, err := store.ListPendingSubscribedEvents(ctx, "agent-2", []events.EventType{"subscription.*"}, now.Add(-time.Minute), 10)
+	if err != nil {
+		t.Fatalf("ListPendingSubscribedEvents: %v", err)
+	}
+	if len(subscribed) != 1 || subscribed[0].ID != subEventID {
+		t.Fatalf("subscribed pending events = %#v, want %s", subscribed, subEventID)
+	}
+}
+
+func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testing.T) {
+	ctx := context.Background()
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	now := time.Now().UTC()
+	store.SetNowFnForTest(func() time.Time { return now })
+
+	if err := store.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+		Config: runtimeactors.AgentConfig{
+			ID:                    "agent-1",
+			Role:                  "operator",
+			Mode:                  "global",
+			ModelTier:             "generic",
+			LLMBackend:            "api",
+			ConversationMode:      "session",
+			SessionScope:          "global",
+			SessionScopeAuthority: runtimeactors.SessionScopeAuthorityPlatformInternal,
+			Config:                json.RawMessage(`{"system_prompt":"test","tools":[]}`),
+		},
+		Status:    "active",
+		StartedAt: now,
+	}); err != nil {
+		t.Fatalf("UpsertAgent: %v", err)
+	}
+
+	startupLease, err := store.AcquireRuntimeStartupOwnership(ctx, "runtime-1")
+	if err != nil {
+		t.Fatalf("AcquireRuntimeStartupOwnership first: %v", err)
+	}
+	if _, err := store.AcquireRuntimeStartupOwnership(ctx, "runtime-2"); err == nil {
+		t.Fatal("AcquireRuntimeStartupOwnership second unexpectedly succeeded")
+	}
+	if err := startupLease.Release(ctx); err != nil {
+		t.Fatalf("release startup lease: %v", err)
+	}
+	successorStartupLease, err := store.AcquireRuntimeStartupOwnership(ctx, "runtime-2")
+	if err != nil {
+		t.Fatalf("AcquireRuntimeStartupOwnership after release: %v", err)
+	}
+	if err := successorStartupLease.Release(ctx); err != nil {
+		t.Fatalf("release successor startup lease: %v", err)
+	}
+
+	lease, err := store.Acquire(ctx, "agent-1", runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "owner-1", "")
+	if err != nil {
+		t.Fatalf("Acquire session: %v", err)
+	}
+	if lease.ScopeKey != "global" {
+		t.Fatalf("session scope key = %q, want global", lease.ScopeKey)
+	}
+	if _, err := store.Acquire(ctx, "agent-1", runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "owner-2", ""); !errors.Is(err, runtimesessions.ErrSessionLeased) {
+		t.Fatalf("competing Acquire error = %v, want ErrSessionLeased", err)
+	}
+	if err := store.AdoptSessionID(ctx, "agent-1", runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "owner-1", "provider-session-1", "global"); err != nil {
+		t.Fatalf("AdoptSessionID: %v", err)
+	}
+	if err := store.IncrementTurn(ctx, "agent-1", runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, lease.SessionID, "global"); err != nil {
+		t.Fatalf("IncrementTurn: %v", err)
+	}
+	if err := store.UpsertConversation(ctx, runtimellm.ConversationRecord{
+		SessionID:    lease.SessionID,
+		AgentID:      "agent-1",
+		SessionScope: "global",
+		ScopeKey:     "global",
+		Mode:         "session",
+		Messages:     []runtimellm.Message{{Role: "user", Content: "hello"}},
+		Summary:      "greeting",
+		TurnCount:    1,
+		Status:       "active",
+	}); err != nil {
+		t.Fatalf("UpsertConversation: %v", err)
+	}
+	conversation, ok, err := store.LoadActiveConversation(ctx, "agent-1", "session", "global", "global")
+	if err != nil {
+		t.Fatalf("LoadActiveConversation: %v", err)
+	}
+	if !ok || conversation.Summary != "greeting" || len(conversation.Messages) != 1 {
+		t.Fatalf("conversation = %+v ok=%v, want persisted greeting", conversation, ok)
+	}
+
+	runID := uuid.NewString()
+	ctx = runtimecorrelation.WithRunID(ctx, runID)
+	eventID := uuid.NewString()
+	if err := store.PersistEventWithDeliveries(ctx, events.Event{
+		ID:          eventID,
+		RunID:       runID,
+		Type:        events.EventType("trace.visible"),
+		SourceAgent: "agent-1",
+		Payload:     json.RawMessage(`{"trace":true}`),
+		CreatedAt:   now,
+	}, []string{"agent-1"}); err != nil {
+		t.Fatalf("PersistEventWithDeliveries trace event: %v", err)
+	}
+	if err := store.MarkEventDeliveryInProgress(ctx, eventID, "agent-1", lease.SessionID); err != nil {
+		t.Fatalf("MarkEventDeliveryInProgress trace event: %v", err)
+	}
+	if err := store.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
+		AgentID:          "agent-1",
+		RuntimeMode:      "session",
+		SessionID:        lease.SessionID,
+		ScopeKey:         "global",
+		RunID:            runID,
+		TriggerEventID:   eventID,
+		TriggerEventType: "trace.visible",
+		RequestPayload:   []byte(`{"prompt":"hello"}`),
+		ResponseRaw:      []byte(`{"content":"ok"}`),
+		ParseOK:          true,
+	}); err != nil {
+		t.Fatalf("AppendAgentTurn: %v", err)
+	}
+	trace, _, err := store.LoadRunDebugTracePage(ctx, runID, RunDebugTraceQueryOptions{Limit: 10})
+	if err != nil {
+		t.Fatalf("LoadRunDebugTracePage: %v", err)
+	}
+	if len(trace) != 1 || trace[0].EventID != eventID || trace[0].SessionID != lease.SessionID || trace[0].TurnTriggerEventID != eventID {
+		t.Fatalf("trace = %#v, want event/session/turn visibility", trace)
+	}
+	eventsPage, err := store.ListOperatorEvents(ctx, OperatorEventListOptions{Filter: OperatorEventListFilter{RunID: runID}, Limit: 10})
+	if err != nil {
+		t.Fatalf("ListOperatorEvents: %v", err)
+	}
+	if len(eventsPage.Events) != 1 || eventsPage.Events[0].EventID != eventID || !operatorDeliveriesContain(eventsPage.Events[0].Deliveries, "agent", "agent-1") {
+		t.Fatalf("events page = %#v, want event with delivery", eventsPage)
+	}
+
+	logID := uuid.NewString()
+	if err := store.AppendEvent(ctx, events.Event{
+		ID:          logID,
+		RunID:       runID,
+		Type:        events.EventType("platform.runtime_log"),
+		SourceAgent: "runtime",
+		Payload:     json.RawMessage(`{"log_level":"warn","message":"runtime warning","details":{"component":"scheduler","session_id":"` + lease.SessionID + `"}}`),
+		CreatedAt:   now.Add(time.Second),
+	}); err != nil {
+		t.Fatalf("AppendEvent runtime log: %v", err)
+	}
+	logs, err := store.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{RunID: runID, Level: "warn", Component: "scheduler", Limit: 10})
+	if err != nil {
+		t.Fatalf("ListOperatorRuntimeLogs: %v", err)
+	}
+	if len(logs.Logs) != 1 || logs.Logs[0].LogID != logID || logs.Logs[0].SessionID != lease.SessionID {
+		t.Fatalf("runtime logs = %#v, want persisted runtime log", logs)
+	}
+	if err := store.Release(ctx, lease); err != nil {
+		t.Fatalf("Release session: %v", err)
+	}
+}
+
+func operatorDeliveriesContain(deliveries []OperatorEventDelivery, subscriberType, subscriberID string) bool {
+	for _, delivery := range deliveries {
+		if delivery.SubscriberType == subscriberType && delivery.SubscriberID == subscriberID {
+			return true
+		}
+	}
+	return false
 }
 
 func TestSQLiteRuntimeStoreV1MailboxAPISelectedOwner(t *testing.T) {
