@@ -2109,12 +2109,12 @@ engine:
         status: active_supported_runtime_backend
         meaning: External Postgres runtime store. Postgres remains explicitly selectable for production and existing operator deployments.
       sqlite:
-        status: staged_selected_core_store_runtime_backend_until_default_flip
+        status: explicit_local_runtime_backend_until_default_flip
         meaning: >
           Local/dev SQLite runtime store. Explicit sqlite selection may construct the selected core runtime store contracts
-          promoted by #1086, but runtime boot must fail closed while selected-parent raw-SQL consumers still lack backend-neutral
-          owners. SQLite remains staged until session/delivery/trace semantics and the public default flip
-          are separately proven.
+          promoted by #1086 plus the local-runtime session, startup ownership, delivery/replay, conversation/turn, and
+          observability semantics promoted by #1087. SQLite remains staged until the public default flip is separately
+          proven by #1088; it does not promote production multi-writer SQLite semantics.
     selector_precedence:
       source_order:
       - flag
@@ -2170,9 +2170,9 @@ engine:
     staged_runtime_rule:
     - Unsupported backend ids fail closed with supported backend guidance.
     - >
-      Explicit sqlite selection is recognized as a canonical backend id. After #1086 it may construct selected core runtime
-      persistence stores, but surfaces split to #1087/#1088/#1089 must still fail closed or remain unavailable until their
-      owning children land.
+      Explicit sqlite selection is recognized as a canonical backend id. After #1087 it may construct the explicit local
+      runtime through typed SQLite store owners without passing a raw runtime SQL handle into Postgres-only runtime
+      consumers. Surfaces split to #1088/#1089 must still fail closed or remain unavailable until their owning children land.
     - Explicit postgres selection must remain available through flag, environment, and runtime config and must reach the
       existing Postgres runtime store path.
     required_consumers:
@@ -2186,7 +2186,6 @@ engine:
     split_boundaries:
     - "SQLite dialect/schema/bootstrap remains split to #1085."
     - "Backend-neutral core runtime persistence stores remain split to #1086."
-    - "SQLite sessions, locking, delivery, replay, and trace-stream semantics remain split to #1087."
     - "Public local/dev default flip plus zero-service swarm run proof remains split to #1088."
     - "Docs, CI, and repo-wide stale-default closeout remains split to #1089."
   runtime_store_schema_dialect_bootstrap:
@@ -2207,7 +2206,7 @@ engine:
         - Postgres bootstrap may use pgcrypto, Postgres compatibility migrations, Postgres DDL execution, and Postgres
           catalog inspection.
       sqlite:
-        status: schema_bootstrap_only_until_runtime_portability_lands
+        status: explicit_local_runtime_schema_bootstrap
         owner: internal/store.SQLiteSchemaStore and SQLite dialect translation
         rules:
         - SQLite schema bootstrap must be file-backed and must not silently use an in-memory database.
@@ -2231,7 +2230,7 @@ engine:
         portability remains split until #1086/#1087.
     split_boundaries:
     - "Core runtime store method portability remains split to #1086."
-    - "Session locking, event delivery/replay, and trace/read models remain split to #1087."
+    - "Explicit SQLite local-runtime session locking, event delivery/replay, and trace/read model semantics are promoted by #1087."
     - "Public local/dev default flip plus zero-service swarm run proof remains split to #1088."
     - "Docs, CI, and repo-wide stale-default closeout remains split to #1089."
   runtime_core_persistence_store_contracts:
@@ -2250,13 +2249,16 @@ engine:
         status: active_supported_runtime_backend
       sqlite:
         owner: internal/store.SQLiteRuntimeStore
-        status: staged_selected_core_store_backend
+        status: explicit_local_runtime_backend
         rules:
         - Must be file-backed and use the canonical SQLite path selected by internal/store/backendselection.
-        - Must consume the #1085 SQLite schema/bootstrap capability owner before selected runtime methods execute.
+        - "Must consume the #1085 SQLite schema/bootstrap capability owner before selected runtime methods execute."
         - Must not silently replace missing unsupported sibling semantics with in-memory state.
-        - Must fail closed before runtime.NewRuntime construction whenever selected-parent consumers would otherwise reach raw
-          SQL/Postgres-only paths instead of a backend-neutral store owner.
+        - >
+          Must construct the explicit local runtime through typed SQLite store owners for the #1087 session, startup ownership,
+          delivery/replay, conversation/turn, and observability semantics.
+        - Must not pass a raw runtime SQL handle to Postgres-only runtime consumers; those consumers remain inactive or split
+          unless/until they gain backend-neutral owners for SQLite.
     selected_contracts:
     - name: runtime_store_bundle_construction
       owner: cmd/swarm buildStores plus storeBundle.runtimeStores consuming typed runtime store interfaces
@@ -2298,11 +2300,52 @@ engine:
       postgres_owner: internal/store.PostgresStore.WithAPIIdempotency
       excludes:
       - broad API delivery/replay/concurrency semantics owned by #1087
+    - name: runtime_session_registry_rows
+      owner: internal/runtime/sessions.Registry
+      sqlite_owner: internal/store.SQLiteRuntimeStore session registry methods
+      postgres_owner: internal/runtime/sessions.PostgresRegistry through internal/store.PostgresStore database
+      scope: >
+        SQLite provides persisted local-dev session leases and process-local serialization. Postgres remains authoritative
+        for production concurrency and cross-process session fencing.
+    - name: runtime_startup_ownership
+      owner: internal/runtime/startupownership.Store
+      sqlite_owner: internal/store.SQLiteRuntimeStore process-local startup ownership lease
+      postgres_owner: internal/store.PostgresStore advisory-lock startup ownership
+      scope: >
+        SQLite startup ownership prevents competing runtimes inside the local process boundary. It is not a production
+        multi-writer lock substitute.
+    - name: event_delivery_receipt_and_replay_rows
+      owner: runtimebus.EventStore, runtimebus.TransactionalEventStore, runtimemanager.ManagerPersistence, and runtimereplayclaim committed replay contracts
+      sqlite_owner: internal/store.SQLiteRuntimeStore delivery, receipt, pipeline receipt, committed replay scope, and replay-claim methods
+      postgres_owner: internal/store.PostgresStore delivery, receipt, pipeline receipt, committed replay scope, and replay-claim methods
+      scope: >
+        SQLite supports local-dev delivery, receipt settlement, pending/backlog replay, and process-local replay claims over
+        persisted rows. Postgres remains the production owner for cross-runtime claims and transaction/fencing semantics.
+    - name: llm_conversation_and_turn_rows
+      owner: internal/runtime/llm TurnPersistence and ConversationPersistence
+      sqlite_owner: internal/store.SQLiteRuntimeStore conversation and agent turn methods
+      postgres_owner: internal/store.PostgresStore conversation and agent turn methods
+      scope: SQLite persists local-runtime conversation state and turns for the selected backend.
+    - name: operator_trace_event_log_read_rows
+      owner: apiv1.ObservabilityReadStore and v1 run.trace, event.subscribe, runtime.logs/runtime.subscribe_logs surfaces
+      sqlite_owner: internal/store.SQLiteRuntimeStore observability read methods
+      postgres_owner: internal/store.PostgresStore observability read methods
+      scope: >
+        SQLite exposes persisted local-runtime event, delivery, session, turn, and log rows through the same API read owner.
+        Cursor-rich production read semantics remain Postgres-owned unless separately promoted for SQLite.
+    raw_sql_runtime_consumer_disposition_after_1087:
+      runtime_sql_handle_for_sqlite: omitted
+      rule: >
+        Explicit SQLite runtime construction must leave runtime.Stores.SQLDB nil so Postgres-only raw-SQL components are
+        not accidentally treated as SQLite owners. Pipeline coordination/background nodes, budget tracking/spend ledger,
+        tool-executor SQL diagnostics/entity helpers, and SQL runtime logging are not allowed to consume SQLite through
+        a raw *sql.DB path. Their SQLite behavior is either represented by the typed store owners above or remains inactive
+        for the explicit local-dev runtime until a future backend-neutral owner is promoted.
     split_boundaries:
-    - "Runtime boot with explicit SQLite must remain fail-closed until raw SQL runtime consumers such as pipeline coordination, budget tracking, tool execution diagnostics, and runtime logging move to backend-neutral owners."
-    - "Session registry, startup ownership locks, event delivery claims/retry/replay, trace-stream/read/subscription semantics remain split to #1087."
     - "Public local/dev SQLite default flip and zero-service swarm run proof remain split to #1088."
     - "Docs, CI, repo-wide stale-default closeout, and #1066 parent proof remain split to #1089."
+    - "Production multi-writer SQLite concurrency semantics are not promoted by #1087."
+    - "Additional raw-SQL runtime feature parity for SQLite requires a separately gated backend-neutral owner before use."
   agent_session_management:
     description: The platform manages agent sessions — the lifecycle of an agent from receiving an event to completing its
       response.

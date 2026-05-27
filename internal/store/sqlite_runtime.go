@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -22,12 +23,20 @@ import (
 )
 
 // SQLiteRuntimeStore is the file-backed SQLite implementation of the selected
-// #1086 runtime persistence contracts. Session locking, delivery replay, and
-// trace streaming stay split to #1087.
+// runtime persistence contracts. SQLite is a local-dev backend: process-local
+// mutexes provide startup/session serialization while persisted rows remain the
+// canonical state consumed by the runtime.
 type SQLiteRuntimeStore struct {
 	*SQLiteSchemaStore
 
 	eventPayloadValidator EventPayloadValidator
+	startupMu             sync.Mutex
+	sessionMu             sync.Mutex
+	replayMu              sync.Mutex
+	startupOwner          string
+	replayClaims          map[string]struct{}
+	sessionLockTTL        time.Duration
+	nowFn                 func() time.Time
 }
 
 var _ SchemaBootstrapper = (*SQLiteRuntimeStore)(nil)
@@ -44,7 +53,12 @@ func NewSQLiteRuntimeStore(path string) (*SQLiteRuntimeStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &SQLiteRuntimeStore{SQLiteSchemaStore: schemaStore}, nil
+	return &SQLiteRuntimeStore{
+		SQLiteSchemaStore: schemaStore,
+		replayClaims:      map[string]struct{}{},
+		sessionLockTTL:    120 * time.Second,
+		nowFn:             time.Now,
+	}, nil
 }
 
 func (s *SQLiteRuntimeStore) schemaCapabilities(ctx context.Context) (StoreSchemaCapabilities, error) {
@@ -54,7 +68,24 @@ func (s *SQLiteRuntimeStore) schemaCapabilities(ctx context.Context) (StoreSchem
 	return s.ResolveSchemaCapabilities(ctx)
 }
 
-func (*SQLiteRuntimeStore) SupportsPersistedReplay() bool { return false }
+func (*SQLiteRuntimeStore) SupportsPersistedReplay() bool { return true }
+
+func (s *SQLiteRuntimeStore) SetSessionLockTTL(ttl time.Duration) {
+	if s == nil {
+		return
+	}
+	if ttl <= 0 {
+		ttl = 120 * time.Second
+	}
+	s.sessionLockTTL = ttl
+}
+
+func (s *SQLiteRuntimeStore) now() time.Time {
+	if s == nil || s.nowFn == nil {
+		return time.Now().UTC()
+	}
+	return s.nowFn().UTC()
+}
 
 func (s *SQLiteRuntimeStore) SetEventPayloadValidator(validator func(eventType string, payload []byte) error) {
 	if s == nil {
@@ -208,10 +239,6 @@ func (s *SQLiteRuntimeStore) InsertEventDeliveriesTx(ctx context.Context, tx *sq
 		committed = true
 	}
 	return nil
-}
-
-func (s *SQLiteRuntimeStore) UpsertPipelineReceiptTx(context.Context, *sql.Tx, string, string, string) error {
-	return fmt.Errorf("sqlite pipeline receipt persistence is split to #1087")
 }
 
 func (s *SQLiteRuntimeStore) ListEventDeliveryRecipients(ctx context.Context, eventID string) ([]string, error) {
@@ -379,18 +406,6 @@ func (s *SQLiteRuntimeStore) EnsureEntitySchema(ctx context.Context, entityID st
 		return fmt.Errorf("lookup sqlite entity schema row: sql: no rows in result set")
 	}
 	return nil
-}
-
-func (s *SQLiteRuntimeStore) UpsertEventReceipt(context.Context, string, string, runtimemanager.ReceiptStatus, string) error {
-	return fmt.Errorf("sqlite event receipt delivery semantics are split to #1087")
-}
-
-func (s *SQLiteRuntimeStore) ListPendingEventsForAgent(context.Context, string, time.Time, int) ([]events.Event, error) {
-	return nil, fmt.Errorf("sqlite event backlog replay queries are split to #1087")
-}
-
-func (s *SQLiteRuntimeStore) ListPendingSubscribedEvents(context.Context, string, []events.EventType, time.Time, int) ([]events.Event, error) {
-	return nil, fmt.Errorf("sqlite event backlog replay queries are split to #1087")
 }
 
 func (s *SQLiteRuntimeStore) EnsureRuntimeIngressState(ctx context.Context, now time.Time) (runtimeingress.State, error) {
