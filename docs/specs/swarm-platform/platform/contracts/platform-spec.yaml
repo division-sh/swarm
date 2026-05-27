@@ -9659,6 +9659,7 @@ cli_specification:
     - swarm conversations list
     - swarm conversation view
     - swarm conversation turn
+    - swarm forkchat new|resume|list|view|delete
     implemented_legacy_or_wrong_namespace: []
     retired_or_fail_closed:
     - swarm investigate
@@ -9671,7 +9672,6 @@ cli_specification:
     remaining_should_have_not_implemented:
     - swarm bundle list|show|agents|register|delete
     - swarm fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]
-    - swarm forkchat new|resume|list|view|delete
     rule: 'Remaining commands require separate gates and must consume canonical API owners; they MUST NOT resurrect direct DB/store/runtime-state readers.'
 
 api_specification:
