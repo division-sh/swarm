@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -99,6 +100,7 @@ func (s *SQLiteSchemaStore) EnsureSchemaTables(ctx context.Context, plans []Sche
 		return fmt.Errorf("begin sqlite schema ddl tx: %w", err)
 	}
 	committed := false
+	agentStatements := []string{}
 	defer func() {
 		if !committed {
 			_ = tx.Rollback()
@@ -109,6 +111,9 @@ func (s *SQLiteSchemaStore) EnsureSchemaTables(ctx context.Context, plans []Sche
 		statements, err := SQLiteStatementsForPlan(plan)
 		if err != nil {
 			return err
+		}
+		if strings.TrimSpace(plan.TableName) == "agents" {
+			agentStatements = append(agentStatements, statements...)
 		}
 		for _, statement := range statements {
 			statement = strings.TrimSpace(statement)
@@ -124,8 +129,187 @@ func (s *SQLiteSchemaStore) EnsureSchemaTables(ctx context.Context, plans []Sche
 		return fmt.Errorf("commit sqlite schema ddl tx: %w", err)
 	}
 	committed = true
+	if len(agentStatements) > 0 {
+		if err := s.ensureSQLiteAgentLLMBackendProfiles(ctx, agentStatements); err != nil {
+			return err
+		}
+	}
 	_, err = s.BindSchemaCapabilities(ctx)
 	return err
+}
+
+func (s *SQLiteSchemaStore) ensureSQLiteAgentLLMBackendProfiles(ctx context.Context, agentStatements []string) error {
+	var sqlText string
+	err := s.DB.QueryRowContext(ctx, `SELECT sql FROM sqlite_master WHERE type='table' AND name='agents'`).Scan(&sqlText)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect sqlite agents table: %w", err)
+	}
+	if !strings.Contains(sqlText, "llm_backend") {
+		return nil
+	}
+	if sqliteAgentLLMBackendSchemaNeedsRebuild(sqlText) {
+		return s.rebuildSQLiteAgentsLLMBackendSchema(ctx, agentStatements)
+	}
+	if _, err := s.DB.ExecContext(ctx, `
+		UPDATE agents
+		SET llm_backend = CASE TRIM(llm_backend)
+			WHEN 'api' THEN 'anthropic'
+			WHEN 'cli_test' THEN 'claude_cli'
+			ELSE TRIM(llm_backend)
+		END
+		WHERE llm_backend IS NOT NULL;
+	`); err != nil {
+		return fmt.Errorf("backfill sqlite agents.llm_backend profiles: %w", err)
+	}
+	return nil
+}
+
+func sqliteAgentLLMBackendSchemaNeedsRebuild(sqlText string) bool {
+	lower := strings.ToLower(sqlText)
+	return strings.Contains(lower, "llm_backend") &&
+		(strings.Contains(lower, "'api'") || strings.Contains(lower, "'cli_test'")) &&
+		!strings.Contains(lower, "'anthropic'") &&
+		!strings.Contains(lower, "'claude_cli'")
+}
+
+func (s *SQLiteSchemaStore) rebuildSQLiteAgentsLLMBackendSchema(ctx context.Context, agentStatements []string) error {
+	createStatement := ""
+	indexStatements := []string{}
+	for _, statement := range agentStatements {
+		statement = strings.TrimSpace(statement)
+		if schemaDDLExtractTableName(statement) == "agents" {
+			createStatement = statement
+			continue
+		}
+		if strings.Contains(strings.ToLower(statement), " on agents(") || strings.Contains(strings.ToLower(statement), " on \"agents\"(") {
+			indexStatements = append(indexStatements, statement)
+		}
+	}
+	if createStatement == "" {
+		return fmt.Errorf("sqlite agents llm_backend migration missing canonical agents DDL")
+	}
+	oldColumns, err := sqliteTableColumnList(ctx, s.DB, "agents")
+	if err != nil {
+		return err
+	}
+	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin sqlite agents llm_backend migration: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	if _, err := tx.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
+		return fmt.Errorf("disable sqlite foreign keys for agents llm_backend migration: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `ALTER TABLE agents RENAME TO agents__llm_backend_migration`); err != nil {
+		return fmt.Errorf("rename legacy sqlite agents table: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, createStatement); err != nil {
+		return fmt.Errorf("create canonical sqlite agents table: %w", err)
+	}
+	newColumns, err := sqliteTableColumnListTx(ctx, tx, "agents")
+	if err != nil {
+		return err
+	}
+	copyColumns, selectExpressions := sqliteAgentLLMBackendCopyExpressions(oldColumns, newColumns)
+	if len(copyColumns) == 0 {
+		return fmt.Errorf("sqlite agents llm_backend migration found no copyable columns")
+	}
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf(
+		`INSERT INTO agents (%s) SELECT %s FROM agents__llm_backend_migration`,
+		strings.Join(copyColumns, ", "),
+		strings.Join(selectExpressions, ", "),
+	)); err != nil {
+		return fmt.Errorf("copy sqlite agents rows with canonical llm_backend: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DROP TABLE agents__llm_backend_migration`); err != nil {
+		return fmt.Errorf("drop legacy sqlite agents table: %w", err)
+	}
+	for _, statement := range indexStatements {
+		if _, err := tx.ExecContext(ctx, statement); err != nil {
+			return fmt.Errorf("create canonical sqlite agents index: %w", err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `PRAGMA foreign_keys = ON`); err != nil {
+		return fmt.Errorf("restore sqlite foreign keys after agents llm_backend migration: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit sqlite agents llm_backend migration: %w", err)
+	}
+	committed = true
+	return nil
+}
+
+func sqliteTableColumnList(ctx context.Context, db *sql.DB, tableName string) ([]string, error) {
+	rows, err := db.QueryContext(ctx, fmt.Sprintf(`PRAGMA table_info(%s)`, quoteIdent(tableName)))
+	if err != nil {
+		return nil, fmt.Errorf("inspect sqlite table %s columns: %w", tableName, err)
+	}
+	defer rows.Close()
+	return scanSQLiteTableColumns(rows, tableName)
+}
+
+func sqliteTableColumnListTx(ctx context.Context, tx *sql.Tx, tableName string) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, fmt.Sprintf(`PRAGMA table_info(%s)`, quoteIdent(tableName)))
+	if err != nil {
+		return nil, fmt.Errorf("inspect sqlite table %s columns: %w", tableName, err)
+	}
+	defer rows.Close()
+	return scanSQLiteTableColumns(rows, tableName)
+}
+
+func scanSQLiteTableColumns(rows *sql.Rows, tableName string) ([]string, error) {
+	columns := []string{}
+	for rows.Next() {
+		var cid int
+		var name string
+		var typ string
+		var notNull int
+		var defaultValue sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			return nil, fmt.Errorf("scan sqlite table %s columns: %w", tableName, err)
+		}
+		if trimmed := strings.TrimSpace(name); trimmed != "" {
+			columns = append(columns, trimmed)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("scan sqlite table %s columns: %w", tableName, err)
+	}
+	return columns, nil
+}
+
+func sqliteAgentLLMBackendCopyExpressions(oldColumns, newColumns []string) ([]string, []string) {
+	oldSet := make(map[string]struct{}, len(oldColumns))
+	for _, column := range oldColumns {
+		oldSet[strings.TrimSpace(column)] = struct{}{}
+	}
+	copyColumns := []string{}
+	selectExpressions := []string{}
+	for _, column := range newColumns {
+		column = strings.TrimSpace(column)
+		if column == "" {
+			continue
+		}
+		if _, ok := oldSet[column]; !ok {
+			continue
+		}
+		copyColumns = append(copyColumns, quoteIdent(column))
+		if column == "llm_backend" {
+			selectExpressions = append(selectExpressions, `CASE TRIM("llm_backend") WHEN 'api' THEN 'anthropic' WHEN 'cli_test' THEN 'claude_cli' ELSE TRIM("llm_backend") END`)
+			continue
+		}
+		selectExpressions = append(selectExpressions, quoteIdent(column))
+	}
+	return copyColumns, selectExpressions
 }
 
 func (s *SQLiteSchemaStore) BindSchemaCapabilities(ctx context.Context) (StoreSchemaCapabilities, error) {

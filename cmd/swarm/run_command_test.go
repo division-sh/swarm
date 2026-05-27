@@ -55,9 +55,10 @@ func TestRunCommandLocalForegroundConsumesServeOwnerAndV1API(t *testing.T) {
 	serveCanceled := make(chan struct{})
 	opts := testRunCommandOptions(server)
 	repo := t.TempDir()
+	configPath := filepath.Join(repo, "runtime.yaml")
 	opts.runServe = func(ctx context.Context, repo string, serveOpts serveOptions) int {
 		serveCalled.Add(1)
-		if serveOpts.ContractsPath != filepath.Join(repo, "contracts") || serveOpts.PlatformSpecPath != filepath.Join(repo, "platform.yaml") {
+		if serveOpts.ConfigPath != configPath || serveOpts.Backend != "claude_cli" || serveOpts.ContractsPath != filepath.Join(repo, "contracts") || serveOpts.PlatformSpecPath != filepath.Join(repo, "platform.yaml") {
 			t.Errorf("serve opts = %#v", serveOpts)
 		}
 		<-ctx.Done()
@@ -66,7 +67,7 @@ func TestRunCommandLocalForegroundConsumesServeOwnerAndV1API(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), repo, []string{"run", "--event", "scan.requested", "--payload", payloadPath, "--contracts", "contracts", "--platform-spec", "platform.yaml"}, &stdout, &stderr, opts)
+	code := executeRootCommandWithOptions(context.Background(), repo, []string{"run", "--event", "scan.requested", "--payload", payloadPath, "--config", configPath, "--backend", "claude_cli", "--contracts", "contracts", "--platform-spec", "platform.yaml"}, &stdout, &stderr, opts)
 	if code != 0 {
 		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -643,12 +644,16 @@ func TestRunCommandValidationAndAuthNoCallPaths(t *testing.T) {
 		{name: "bundle hash conflicts with legacy fingerprint", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--bundle-fingerprint", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, wantCode: 2, wantStderr: "--bundle-hash is mutually exclusive with --bundle-fingerprint"},
 		{name: "reattach rejects bundle hash", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --bundle-hash"},
 		{name: "reattach rejects bundle fingerprint", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--bundle-fingerprint", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --bundle-fingerprint"},
+		{name: "reattach rejects config flag", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--config", "swarm.yaml"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --config"},
+		{name: "reattach rejects backend flag", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--backend", "claude_cli"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --backend"},
 		{name: "reattach rejects local startup flags", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--contracts", "contracts"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --contracts"},
 		{name: "reattach rejects platform spec flag", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--platform-spec", "platform.yaml"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --platform-spec"},
 		{name: "reattach rejects api port flag", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--api-port", "8081"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --api-port"},
 		{name: "api port zero rejected when explicit", token: "test-token", args: []string{"run", "--event", "scan.requested", "--payload", payloadPath, "--api-port", "0"}, wantCode: 2, wantStderr: "--api-port must be between 1 and 65535"},
 		{name: "api port rejects default mcp listener conflict", token: "test-token", args: []string{"run", "--event", "scan.requested", "--payload", payloadPath, "--api-port", "8082"}, wantCode: 2, wantStderr: "--api-port 8082 conflicts with default MCP listener 127.0.0.1:8082"},
 		{name: "mcp port unsupported", token: "test-token", args: []string{"run", "--event", "scan.requested", "--payload", payloadPath, "--mcp-port", "9000"}, wantCode: 2, wantStderr: "--mcp-port is not supported"},
+		{name: "connect rejects config local flag", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--config", "swarm.yaml"}, wantCode: 2, wantStderr: "--config requires local foreground mode"},
+		{name: "connect rejects backend local flag", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--backend", "claude_cli"}, wantCode: 2, wantStderr: "--backend requires local foreground mode"},
 		{name: "connect rejects contracts local flag", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--contracts", "contracts"}, wantCode: 2, wantStderr: "--contracts requires local foreground mode"},
 		{name: "connect rejects platform spec local flag", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--platform-spec", "platform.yaml"}, wantCode: 2, wantStderr: "--platform-spec requires local foreground mode"},
 		{name: "connect rejects api port local flag", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--api-port", "8081"}, wantCode: 2, wantStderr: "--api-port requires local foreground mode"},

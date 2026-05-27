@@ -221,7 +221,7 @@ func testRecoveryDiagnosticsConfig(recoveryOnStartup bool) *config.Config {
 			RecoveryOnStartup: recoveryOnStartup,
 		},
 		LLM: config.LLMConfig{
-			Backend: "api",
+			Backend: "anthropic",
 		},
 	}
 }

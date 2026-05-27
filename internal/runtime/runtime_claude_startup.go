@@ -58,6 +58,39 @@ func validateClaudeStartupConfigForActiveAgents(cfg *config.Config, opts Runtime
 	return validateClaudeStartupRequirements(cfg, opts)
 }
 
+func validateSelectedBackendCredentialForDeclaredAgents(cfg *config.Config, source semanticview.Source) error {
+	hasAgents, err := workflowSourceDeclaresAgents(source)
+	if err != nil {
+		return err
+	}
+	if !hasAgents {
+		return nil
+	}
+	return validateSelectedBackendCredential(cfg)
+}
+
+func validateSelectedBackendCredentialForActiveAgents(cfg *config.Config, source semanticview.Source, manager *runtimemanager.AgentManager) error {
+	hasAgents, err := workflowSourceOrManagerDeclaresAgents(source, manager)
+	if err != nil {
+		return err
+	}
+	if !hasAgents {
+		return nil
+	}
+	return validateSelectedBackendCredential(cfg)
+}
+
+func validateSelectedBackendCredential(cfg *config.Config) error {
+	if cfg == nil {
+		return nil
+	}
+	profile, err := cfg.LLMBackendProfile()
+	if err != nil {
+		return err
+	}
+	return llmselection.RequireCredential(profile, os.LookupEnv)
+}
+
 func validateClaudeStartupRequirements(cfg *config.Config, opts RuntimeOptions) error {
 	if err := llm.ValidateClaudeCLIRuntimeConfig(cfg); err != nil {
 		return err
@@ -259,7 +292,7 @@ func isClaudeCLIBackend(cfg *config.Config) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return profile.ID == llmselection.BackendCLITest, nil
+	return profile.ID == llmselection.BackendClaudeCLI, nil
 }
 
 func runtimeConfiguredMCPGatewayURL() string {

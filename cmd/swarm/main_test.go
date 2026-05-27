@@ -311,7 +311,7 @@ func TestCLI_ServeOwnsRuntimeStartupFlags(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("serve help code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	for _, want := range []string{"Start the Swarm runtime", "--contracts", "--api-listen-addr", "API, WebSocket, health, and readiness routes", "--mcp-listen-addr", "MCP and tools routes", "--platform-spec", "--store", "--self-check", "--dev", "--require-bundle-match", "--no-require-bundle-match", "--abandon-active-runs", "--shutdown-grace", "--verbose"} {
+	for _, want := range []string{"Start the Swarm runtime", "--config", "--backend", "--contracts", "--api-listen-addr", "API, WebSocket, health, and readiness routes", "--mcp-listen-addr", "MCP and tools routes", "--platform-spec", "--store", "--self-check", "--dev", "--require-bundle-match", "--no-require-bundle-match", "--abandon-active-runs", "--shutdown-grace", "--verbose"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("serve help missing %q:\n%s", want, stdout.String())
 		}
@@ -1495,7 +1495,7 @@ func TestPlatformSpecLLMProviderModelSelectionSourceAuthorityPromoted(t *testing
 	if strings.TrimSpace(authority.PromotedBy) != "#1127" {
 		t.Fatalf("llm provider selection promoted_by = %q, want #1127", authority.PromotedBy)
 	}
-	if strings.TrimSpace(authority.ImplementationStatus) != "source_authority_promoted_behavior_split" {
+	if strings.TrimSpace(authority.ImplementationStatus) != "backend_selection_config_discovery_implemented_model_alias_split" {
 		t.Fatalf("llm provider selection implementation_status = %q", authority.ImplementationStatus)
 	}
 	if !strings.Contains(authority.Owner, "backend profile and model alias resolver") {
@@ -1535,7 +1535,7 @@ func TestPlatformSpecLLMProviderModelSelectionSourceAuthorityPromoted(t *testing
 	if got := profiles["claude_cli"]; got.Provider != "claude" || got.ProviderContractRuntimeMode != "cli_test" || !stringSliceContains(got.LegacyBackendIDs, "cli_test") {
 		t.Fatalf("claude_cli profile = %#v", got)
 	}
-	if got := profiles["openai_compatible"]; got.Provider != "openai_compatible" || got.ProviderContractRuntimeMode != "openai_compatible" || got.EndpointSource.EnvVar != "" || !strings.Contains(got.EndpointSource.Rule, "#1128") {
+	if got := profiles["openai_compatible"]; got.Provider != "openai_compatible" || got.ProviderContractRuntimeMode != "openai_compatible" || got.EndpointSource.EnvVar != "" || !strings.Contains(got.EndpointSource.Rule, "SWARM_OPENAI_COMPATIBLE_BASE_URL is retired") {
 		t.Fatalf("openai_compatible profile = %#v", got)
 	}
 	if !strings.Contains(strings.ToLower(authority.BackendProfileIdentity.RejectedTargetNames["openai"]), "not active") {
@@ -3375,7 +3375,6 @@ func setPostgresEnvFromDSN(t *testing.T, dsn string) {
 }
 
 func TestDefaultRuntimeConfig_RejectsUnsupportedRuntimeControlEnv(t *testing.T) {
-	t.Setenv("SWARM_LLM_BACKEND", "api")
 	t.Setenv("SWARM_RUNTIME_MAX_CONCURRENT_AGENTS", "4")
 	t.Setenv("SWARM_CLAUDE_DEFAULT_MODEL", "test-model")
 	cfg, err := defaultRuntimeConfig()
@@ -3390,7 +3389,7 @@ func TestDefaultRuntimeConfig_RejectsUnsupportedRuntimeControlEnv(t *testing.T) 
 func TestDefaultRuntimeConfig_RejectsRetiredLLMRuntimeModeEnv(t *testing.T) {
 	t.Setenv("SWARM_LLM_RUNTIME_MODE", "api")
 	cfg, err := defaultRuntimeConfig()
-	if err == nil || !strings.Contains(err.Error(), "SWARM_LLM_BACKEND") {
+	if err == nil || !strings.Contains(err.Error(), "--backend") || !strings.Contains(err.Error(), "llm.backend") {
 		t.Fatalf("defaultRuntimeConfig error = %v, want retired runtime mode env guidance", err)
 	}
 	if cfg != nil {
@@ -3398,14 +3397,14 @@ func TestDefaultRuntimeConfig_RejectsRetiredLLMRuntimeModeEnv(t *testing.T) {
 	}
 }
 
-func TestDefaultRuntimeConfig_UsesCanonicalLLMBackendEnv(t *testing.T) {
+func TestDefaultRuntimeConfig_RejectsRetiredLLMBackendEnv(t *testing.T) {
 	t.Setenv("SWARM_LLM_BACKEND", "cli_test")
 	cfg, err := defaultRuntimeConfig()
-	if err != nil {
-		t.Fatalf("defaultRuntimeConfig: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "SWARM_LLM_BACKEND") || !strings.Contains(err.Error(), "--backend") {
+		t.Fatalf("defaultRuntimeConfig error = %v, want retired backend env rejection", err)
 	}
-	if cfg.LLM.Backend != "cli_test" {
-		t.Fatalf("llm backend = %q, want cli_test", cfg.LLM.Backend)
+	if cfg != nil {
+		t.Fatalf("defaultRuntimeConfig cfg = %#v, want nil on retired env", cfg)
 	}
 }
 
@@ -3416,31 +3415,104 @@ func TestDefaultRuntimeConfig_DoesNotInferLLMBackendFromCredentials(t *testing.T
 	if err != nil {
 		t.Fatalf("defaultRuntimeConfig: %v", err)
 	}
-	if cfg.LLM.Backend != "api" {
-		t.Fatalf("llm backend = %q, want canonical default api", cfg.LLM.Backend)
+	if cfg.LLM.Backend != "anthropic" {
+		t.Fatalf("llm backend = %q, want canonical default anthropic", cfg.LLM.Backend)
 	}
 }
 
-func TestDefaultRuntimeConfig_OpenAICompatibleConsumesCanonicalProfileEnv(t *testing.T) {
-	t.Setenv("SWARM_LLM_BACKEND", "openai_compatible")
+func TestDefaultRuntimeConfig_RejectsRetiredOpenAICompatibleBaseURLEnv(t *testing.T) {
 	t.Setenv("SWARM_OPENAI_COMPATIBLE_BASE_URL", "https://example.test/v1")
-	t.Setenv("SWARM_OPENAI_COMPATIBLE_DEFAULT_MODEL", "gpt-compatible")
-	t.Setenv("SWARM_OPENAI_COMPATIBLE_LOW_COST_MODEL", "gpt-compatible-mini")
 	cfg, err := defaultRuntimeConfig()
+	if err == nil || !strings.Contains(err.Error(), "SWARM_OPENAI_COMPATIBLE_BASE_URL") || !strings.Contains(err.Error(), "llm.openai_compatible.base_url") {
+		t.Fatalf("defaultRuntimeConfig error = %v, want base URL env retirement", err)
+	}
+	if cfg != nil {
+		t.Fatalf("defaultRuntimeConfig cfg = %#v, want nil on retired env", cfg)
+	}
+}
+
+func TestLoadRuntimeConfigWithOptions_UsesSharedDiscoveryAndBackendPrecedence(t *testing.T) {
+	originalExecutablePath := runtimeConfigExecutablePath
+	t.Cleanup(func() { runtimeConfigExecutablePath = originalExecutablePath })
+
+	repo := t.TempDir()
+	exeDir := t.TempDir()
+	exePath := filepath.Join(exeDir, "swarm")
+	runtimeConfigExecutablePath = func() (string, error) {
+		return exePath, nil
+	}
+	writeRuntimeConfigText(t, filepath.Join(exeDir, "config.yaml"), strings.Join([]string{
+		"llm:",
+		"  backend: claude_cli",
+		"  session:",
+		"    lock_ttl: 10s",
+		"    rotate_after_turns: 40",
+		"    rotate_on_parse_failures: 3",
+		"  claude_cli:",
+		"    command: true",
+		"    timeout: 2s",
+		"    output_format: json",
+		"    retries: 1",
+		"    no_session_persistence: false",
+	}, "\n")+"\n")
+	explicitPath := filepath.Join(repo, "runtime.yaml")
+	writeRuntimeConfigText(t, explicitPath, strings.Join([]string{
+		"llm:",
+		"  backend: anthropic",
+		"  session:",
+		"    lock_ttl: 10s",
+		"    rotate_after_turns: 40",
+		"    rotate_on_parse_failures: 3",
+		"  openai_compatible:",
+		"    base_url: https://example.test/v1",
+		"    default_model: gpt-compatible",
+	}, "\n")+"\n")
+
+	result, err := loadRuntimeConfigWithOptions(runtimeConfigLoadOptions{RepoRoot: repo})
 	if err != nil {
-		t.Fatalf("defaultRuntimeConfig: %v", err)
+		t.Fatalf("load executable config: %v", err)
 	}
-	if cfg.LLM.Backend != "openai_compatible" {
-		t.Fatalf("llm backend = %q, want openai_compatible", cfg.LLM.Backend)
+	if result.Config.LLM.Backend != "claude_cli" || result.Source != "executable" {
+		t.Fatalf("executable config result = source=%s backend=%s, want executable claude_cli", result.Source, result.Config.LLM.Backend)
 	}
-	if cfg.LLM.OpenAICompatible.BaseURL != "https://example.test/v1" {
-		t.Fatalf("openai compatible base url = %q", cfg.LLM.OpenAICompatible.BaseURL)
+
+	result, err = loadRuntimeConfigWithOptions(runtimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: "runtime.yaml", BackendOverride: "openai_compatible"})
+	if err != nil {
+		t.Fatalf("load explicit config with backend override: %v", err)
 	}
-	if cfg.LLM.OpenAICompatible.DefaultModel != "gpt-compatible" {
-		t.Fatalf("openai compatible default model = %q", cfg.LLM.OpenAICompatible.DefaultModel)
+	if result.Config.LLM.Backend != "openai_compatible" || result.Source != "explicit" || filepath.Clean(result.Path) != filepath.Clean(explicitPath) {
+		t.Fatalf("explicit config result = %#v backend=%s", result, result.Config.LLM.Backend)
 	}
-	if cfg.LLM.OpenAICompatible.LowCostModel != "gpt-compatible-mini" {
-		t.Fatalf("openai compatible low cost model = %q", cfg.LLM.OpenAICompatible.LowCostModel)
+}
+
+func TestLoadRuntimeConfigWithOptions_RejectsLegacyBackendBeforeOverride(t *testing.T) {
+	repo := t.TempDir()
+	configPath := filepath.Join(repo, "runtime.yaml")
+	writeRuntimeConfigText(t, configPath, strings.Join([]string{
+		"llm:",
+		"  backend: api",
+		"  session:",
+		"    lock_ttl: 10s",
+		"    rotate_after_turns: 40",
+		"    rotate_on_parse_failures: 3",
+	}, "\n")+"\n")
+	_, err := loadRuntimeConfigWithOptions(runtimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: "runtime.yaml", BackendOverride: "claude_cli"})
+	if err == nil || !strings.Contains(err.Error(), "unsupported llm backend profile") {
+		t.Fatalf("loadRuntimeConfigWithOptions error = %v, want legacy backend rejection", err)
+	}
+}
+
+func TestDockerComposeUsesBackendFlagNotRetiredLLMBackendEnv(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join(repoRoot(), "docker-compose.yml"))
+	if err != nil {
+		t.Fatalf("read docker-compose.yml: %v", err)
+	}
+	text := string(raw)
+	if strings.Contains(text, "SWARM_LLM_BACKEND") {
+		t.Fatalf("docker-compose.yml still uses retired SWARM_LLM_BACKEND selector")
+	}
+	if !strings.Contains(text, "--backend claude_cli") {
+		t.Fatalf("docker-compose.yml missing canonical --backend claude_cli selector")
 	}
 }
 
@@ -3449,7 +3521,7 @@ func TestLoadRuntimeConfig_RejectsUnsupportedRuntimeControlsFromFile(t *testing.
 		"runtime:",
 		"  max_concurrent_agents: 4",
 		"llm:",
-		"  backend: api",
+		"  backend: anthropic",
 		"  session:",
 		"    lock_ttl: 10s",
 		"    rotate_after_turns: 40",
@@ -5288,7 +5360,7 @@ func writeServeRuntimeTestConfig(t *testing.T) string {
 		"runtime:",
 		"  recovery_on_startup: false",
 		"llm:",
-		"  backend: api",
+		"  backend: anthropic",
 		"  session:",
 		"    lock_ttl: 10s",
 		"    rotate_after_turns: 40",
@@ -5299,6 +5371,13 @@ func writeServeRuntimeTestConfig(t *testing.T) string {
 		t.Fatalf("write serve runtime config: %v", err)
 	}
 	return path
+}
+
+func writeRuntimeConfigText(t *testing.T, path, configText string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(configText), 0o644); err != nil {
+		t.Fatalf("write runtime config %s: %v", path, err)
+	}
 }
 
 func TestVerifyBundle_DoesNotWarnForFlowLocalEmittedEventsWithOwningFlowSchemas(t *testing.T) {

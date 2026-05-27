@@ -88,7 +88,7 @@ func testRuntimeConfig() *config.Config {
 			RecoveryOnStartup:   false,
 		},
 		LLM: config.LLMConfig{
-			Backend: "api",
+			Backend: "anthropic",
 			Session: config.LLMSessionConfig{
 				LockTTL:               30 * time.Second,
 				RotateAfterTurns:      8,

@@ -12,9 +12,9 @@ func TestResolveActiveBackendProfiles(t *testing.T) {
 		provider  string
 		transport string
 	}{
-		{raw: "", wantID: BackendAPI, provider: ProviderAnthropic, transport: TransportAPI},
-		{raw: BackendAPI, wantID: BackendAPI, provider: ProviderAnthropic, transport: TransportAPI},
-		{raw: BackendCLITest, wantID: BackendCLITest, provider: ProviderClaude, transport: TransportCLI},
+		{raw: "", wantID: BackendAnthropic, provider: ProviderAnthropic, transport: TransportAPI},
+		{raw: BackendAnthropic, wantID: BackendAnthropic, provider: ProviderAnthropic, transport: TransportAPI},
+		{raw: BackendClaudeCLI, wantID: BackendClaudeCLI, provider: ProviderClaude, transport: TransportCLI},
 		{raw: BackendOpenAICompatible, wantID: BackendOpenAICompatible, provider: ProviderOpenAICompatible, transport: TransportAPI},
 	}
 	for _, tt := range tests {
@@ -31,7 +31,7 @@ func TestResolveActiveBackendProfiles(t *testing.T) {
 }
 
 func TestResolveActiveBackendRejectsReservedAndUnknown(t *testing.T) {
-	for _, raw := range []string{BackendMock, BackendLocal, "openai"} {
+	for _, raw := range []string{BackendMock, BackendLocal, LegacyBackendAPI, LegacyBackendCLITest, "openai"} {
 		t.Run(raw, func(t *testing.T) {
 			if _, err := ResolveActiveBackend(raw); err == nil {
 				t.Fatal("expected error")
@@ -41,7 +41,7 @@ func TestResolveActiveBackendRejectsReservedAndUnknown(t *testing.T) {
 }
 
 func TestResolvePersistedBackendAllowsReservedProfiles(t *testing.T) {
-	for _, raw := range []string{BackendAPI, BackendCLITest, BackendOpenAICompatible, BackendMock, BackendLocal} {
+	for _, raw := range []string{BackendAnthropic, BackendClaudeCLI, BackendOpenAICompatible, BackendMock, BackendLocal} {
 		t.Run(raw, func(t *testing.T) {
 			profile, err := ResolvePersistedBackend(raw)
 			if err != nil {
@@ -54,19 +54,51 @@ func TestResolvePersistedBackendAllowsReservedProfiles(t *testing.T) {
 	}
 }
 
+func TestMigratePersistedBackendBackfillsLegacyProfiles(t *testing.T) {
+	tests := []struct {
+		raw     string
+		want    string
+		changed bool
+	}{
+		{raw: LegacyBackendAPI, want: BackendAnthropic, changed: true},
+		{raw: LegacyBackendCLITest, want: BackendClaudeCLI, changed: true},
+		{raw: BackendOpenAICompatible, want: BackendOpenAICompatible},
+		{raw: BackendMock, want: BackendMock},
+	}
+	for _, tt := range tests {
+		profile, changed, err := MigratePersistedBackend(tt.raw)
+		if err != nil {
+			t.Fatalf("MigratePersistedBackend(%q): %v", tt.raw, err)
+		}
+		if profile.ID != tt.want || changed != tt.changed {
+			t.Fatalf("MigratePersistedBackend(%q) = id=%q changed=%v, want id=%q changed=%v", tt.raw, profile.ID, changed, tt.want, tt.changed)
+		}
+	}
+}
+
 func TestRejectRetiredSelectors(t *testing.T) {
 	if err := RejectRetiredConfigRuntimeMode("api"); err == nil || !strings.Contains(err.Error(), ConfigBackendField) {
 		t.Fatalf("RejectRetiredConfigRuntimeMode error = %v, want backend guidance", err)
 	}
+	if err := RejectRetiredEnvBackend(func(key string) (string, bool) {
+		return "api", key == EnvBackend
+	}); err == nil || !strings.Contains(err.Error(), "--backend") {
+		t.Fatalf("RejectRetiredEnvBackend error = %v, want flag/config guidance", err)
+	}
 	if err := RejectRetiredEnvRuntimeMode(func(key string) (string, bool) {
 		return "api", key == RetiredEnvRuntimeMode
-	}); err == nil || !strings.Contains(err.Error(), EnvBackend) {
-		t.Fatalf("RejectRetiredEnvRuntimeMode error = %v, want backend env guidance", err)
+	}); err == nil || !strings.Contains(err.Error(), "--backend") {
+		t.Fatalf("RejectRetiredEnvRuntimeMode error = %v, want flag/config guidance", err)
+	}
+	if err := RejectRetiredOpenAICompatibleBaseURLEnv(func(key string) (string, bool) {
+		return "https://example.test/v1", key == OpenAICompatibleBaseURLEnv
+	}); err == nil || !strings.Contains(err.Error(), OpenAICompatibleBaseURLConfigField) {
+		t.Fatalf("RejectRetiredOpenAICompatibleBaseURLEnv error = %v, want config guidance", err)
 	}
 }
 
 func TestCredentialAuthority(t *testing.T) {
-	profile, err := ResolveActiveBackend(BackendAPI)
+	profile, err := ResolveActiveBackend(BackendAnthropic)
 	if err != nil {
 		t.Fatalf("ResolveActiveBackend: %v", err)
 	}
@@ -88,7 +120,7 @@ func TestCredentialAuthority(t *testing.T) {
 }
 
 func TestResolveModelNameUsesModelTier(t *testing.T) {
-	profile, err := ResolveActiveBackend(BackendAPI)
+	profile, err := ResolveActiveBackend(BackendAnthropic)
 	if err != nil {
 		t.Fatalf("ResolveActiveBackend: %v", err)
 	}
@@ -143,7 +175,7 @@ func TestResolveOpenAICompatibleProfileAuthority(t *testing.T) {
 }
 
 func TestResolveCLIModelNameUsesModelTier(t *testing.T) {
-	profile, err := ResolveActiveBackend(BackendCLITest)
+	profile, err := ResolveActiveBackend(BackendClaudeCLI)
 	if err != nil {
 		t.Fatalf("ResolveActiveBackend: %v", err)
 	}

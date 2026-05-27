@@ -43,9 +43,9 @@ func (f RuntimeFactory) Build() (Runtime, error) {
 
 	var runtime Runtime
 	switch profile.ID {
-	case llmselection.BackendAPI:
+	case llmselection.BackendAnthropic:
 		runtime = NewAnthropicAPIRuntime(f.Cfg, f.Sessions, f.LockOwner, f.Turns, f.Conversations, f.Budget, f.Events)
-	case llmselection.BackendCLITest:
+	case llmselection.BackendClaudeCLI:
 		runtime = NewClaudeCLIRuntimeWithOptions(f.Cfg, f.Sessions, f.LockOwner, f.Turns, f.Budget, f.Workspaces, f.Conversations, f.Events, ClaudeCLIRuntimeOptions{
 			MCPTurnContextStore: f.MCPTurns,
 		})

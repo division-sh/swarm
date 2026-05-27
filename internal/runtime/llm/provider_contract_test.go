@@ -83,21 +83,22 @@ func TestProviderContractsValidateShippedRuntimes(t *testing.T) {
 
 func TestRuntimeFactoryValidatesProviderContract(t *testing.T) {
 	tests := []struct {
-		mode     string
-		provider string
+		backend     string
+		runtimeMode string
+		provider    string
 	}{
-		{mode: "api", provider: "anthropic"},
-		{mode: "cli_test", provider: "claude"},
-		{mode: "openai_compatible", provider: "openai_compatible"},
+		{backend: "anthropic", runtimeMode: "api", provider: "anthropic"},
+		{backend: "claude_cli", runtimeMode: "cli_test", provider: "claude"},
+		{backend: "openai_compatible", runtimeMode: "openai_compatible", provider: "openai_compatible"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.mode, func(t *testing.T) {
+		t.Run(tt.backend, func(t *testing.T) {
 			cfg := &config.Config{
 				LLM: config.LLMConfig{
-					Backend: tt.mode,
+					Backend: tt.backend,
 				},
 			}
-			if tt.mode == "openai_compatible" {
+			if tt.backend == "openai_compatible" {
 				cfg.LLM.OpenAICompatible.BaseURL = "https://example.test/v1"
 				cfg.LLM.OpenAICompatible.DefaultModel = "gpt-compatible"
 			}
@@ -107,7 +108,7 @@ func TestRuntimeFactoryValidatesProviderContract(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Build: %v", err)
 			}
-			contract, err := RequireProviderContract(tt.mode, runtime)
+			contract, err := RequireProviderContract(tt.runtimeMode, runtime)
 			if err != nil {
 				t.Fatalf("RequireProviderContract: %v", err)
 			}

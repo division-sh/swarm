@@ -18,7 +18,7 @@ func ValidateClaudeCLIRuntimeConfig(cfg *config.Config) error {
 	if err != nil {
 		return err
 	}
-	if profile.ID != llmselection.BackendCLITest {
+	if profile.ID != llmselection.BackendClaudeCLI {
 		return nil
 	}
 	if !shouldUseMCPBridge() {

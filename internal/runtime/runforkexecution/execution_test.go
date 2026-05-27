@@ -438,7 +438,7 @@ func TestStartSelectedContractAgentRuntimeCleansGatewayOnRegistrationFailure(t *
 				Config: runtimeactors.AgentConfig{
 					ID:            "bad-agent",
 					Role:          "worker",
-					LLMBackend:    "cli_test",
+					LLMBackend:    "claude_cli",
 					ModelTier:     "standard",
 					Subscriptions: []string{"item.received"},
 				},

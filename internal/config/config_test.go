@@ -23,7 +23,7 @@ func TestLoadAndValidate_CLI_TestMode(t *testing.T) {
 		"  sslmode: disable",
 		"  pool_size: 5",
 		"llm:",
-		"  backend: cli_test",
+		"  backend: claude_cli",
 		"  session:",
 		"    lock_ttl: 10s",
 		"    rotate_after_turns: 40",
@@ -53,7 +53,7 @@ func TestLoadAndValidate_CLI_TestMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.LLM.Backend != "cli_test" {
+	if cfg.LLM.Backend != "claude_cli" {
 		t.Fatalf("unexpected llm backend: %q", cfg.LLM.Backend)
 	}
 	if cfg.LLM.Session.LockTTL <= 0*time.Second {
@@ -87,6 +87,21 @@ func TestValidate_RejectsInvalidBackend(t *testing.T) {
 	c.LLM.Session.RotateOnParseFailures = 1
 	if err := c.Validate(); err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestValidate_RejectsLegacyBackendIDsForNewConfig(t *testing.T) {
+	for _, backend := range []string{"api", "cli_test"} {
+		t.Run(backend, func(t *testing.T) {
+			c := &Config{}
+			c.LLM.Backend = backend
+			c.LLM.Session.LockTTL = time.Second
+			c.LLM.Session.RotateAfterTurns = 1
+			c.LLM.Session.RotateOnParseFailures = 1
+			if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "unsupported llm backend profile") {
+				t.Fatalf("Validate error = %v, want legacy backend rejection", err)
+			}
+		})
 	}
 }
 
@@ -133,7 +148,7 @@ func TestValidate_RejectsRetiredRuntimeMode(t *testing.T) {
 
 func TestValidate_CLI_TestRequiresCommandAndJson(t *testing.T) {
 	c := &Config{}
-	c.LLM.Backend = "cli_test"
+	c.LLM.Backend = "claude_cli"
 	c.LLM.Session.LockTTL = 1 * time.Second
 	c.LLM.Session.RotateAfterTurns = 1
 	c.LLM.Session.RotateOnParseFailures = 1
@@ -148,7 +163,7 @@ func TestValidate_CLI_TestRequiresCommandAndJson(t *testing.T) {
 func TestLoad_FailsClosedOnMalformedBudgetExtension(t *testing.T) {
 	cfgText := strings.Join([]string{
 		"llm:",
-		"  backend: api",
+		"  backend: anthropic",
 		"  session:",
 		"    lock_ttl: 10s",
 		"    rotate_after_turns: 40",
@@ -167,7 +182,7 @@ func TestLoad_FailsClosedOnMalformedBudgetExtension(t *testing.T) {
 
 func TestValidate_RejectsUnsupportedRuntimeControls(t *testing.T) {
 	c := &Config{}
-	c.LLM.Backend = "api"
+	c.LLM.Backend = "anthropic"
 	c.LLM.Session.LockTTL = 1 * time.Second
 	c.LLM.Session.RotateAfterTurns = 1
 	c.LLM.Session.RotateOnParseFailures = 1
@@ -186,7 +201,7 @@ func TestValidate_RejectsUnsupportedRuntimeControls(t *testing.T) {
 func TestLoad_RejectsUnsupportedShardingExtension(t *testing.T) {
 	cfgText := strings.Join([]string{
 		"llm:",
-		"  backend: api",
+		"  backend: anthropic",
 		"  session:",
 		"    lock_ttl: 10s",
 		"    rotate_after_turns: 40",

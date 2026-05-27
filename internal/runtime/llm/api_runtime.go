@@ -35,7 +35,7 @@ type AnthropicAPIRuntime struct {
 }
 
 func NewAnthropicAPIRuntime(cfg *config.Config, sessions sessions.Registry, lockOwner string, turns TurnPersistence, conversations ConversationPersistence, budget BudgetGuard, publisher EventPublisher) *AnthropicAPIRuntime {
-	profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendAPI)
+	profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendAnthropic)
 	return &AnthropicAPIRuntime{
 		cfg:           cfg,
 		sessions:      sessions,
@@ -58,8 +58,8 @@ func (r *AnthropicAPIRuntime) ProviderContract() ProviderContract {
 
 func AnthropicAPIProviderContract() ProviderContract {
 	return ProviderContract{
-		RuntimeMode: "api",
-		Provider:    "anthropic",
+		RuntimeMode: llmselection.ProviderContractRuntimeModeAPI,
+		Provider:    llmselection.ProviderAnthropic,
 		Transport:   ProviderTransportAPI,
 		ToolSchema: ProviderToolSchemaContract{
 			ValidatesInputSchemas: true,
@@ -236,7 +236,7 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 		return nil, fmt.Errorf("mark inbound delivery active for reused api session: %w", err)
 	}
 
-	profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendAPI)
+	profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendAnthropic)
 	if strings.TrimSpace(r.apiKey) == "" {
 		r.apiKey = llmselection.CredentialValue(profile, os.LookupEnv)
 		if strings.TrimSpace(r.apiKey) == "" {
@@ -400,7 +400,7 @@ func (r *AnthropicAPIRuntime) persistTurn(ctx context.Context, turn AgentTurnRec
 }
 
 func (r *AnthropicAPIRuntime) buildRequest(ctx context.Context, s *Session, input Message) (anthropicRequest, error) {
-	profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendAPI)
+	profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendAnthropic)
 	msgs := make([]anthropicMessage, 0, len(s.Messages)+1)
 	for _, m := range s.Messages {
 		am, ok := toAnthropicMessage(m)

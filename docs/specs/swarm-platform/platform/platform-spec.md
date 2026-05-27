@@ -1618,7 +1618,7 @@ CREATE TABLE agents (
     flow_instance     TEXT,
     role              TEXT NOT NULL,
     model_tier        TEXT NOT NULL,
-    llm_backend       TEXT NOT NULL DEFAULT 'api' CHECK (llm_backend IN ('api', 'cli_test', 'openai_compatible', 'mock', 'local')),
+    llm_backend       TEXT NOT NULL DEFAULT 'anthropic' CHECK (llm_backend IN ('anthropic', 'claude_cli', 'openai_compatible', 'mock', 'local')),
     conversation_mode TEXT NOT NULL CHECK (conversation_mode IN ('task', 'session', 'session_per_entity')),
     parent_agent_id   TEXT,
     entity_id         UUID,

@@ -90,7 +90,7 @@ func testOperationalRuntimeConfig() *config.Config {
 			RecoveryOnStartup: false,
 		},
 		LLM: config.LLMConfig{
-			Backend: "api",
+			Backend: "anthropic",
 		},
 	}
 }
@@ -228,7 +228,7 @@ func TestNewRuntime_FailsClosedOnMalformedExtensionConfig(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	rt, err := NewRuntime(context.Background(), RuntimeDeps{Config: &config.Config{
 		Runtime: config.RuntimeConfig{RecoveryOnStartup: false},
-		LLM:     config.LLMConfig{Backend: "api"},
+		LLM:     config.LLMConfig{Backend: "anthropic"},
 		Extensions: map[string]any{
 			"budget": map[string]any{
 				"human_tasks": "oops",

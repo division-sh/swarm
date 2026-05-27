@@ -28,7 +28,7 @@ func (r *ClaudeCLIRuntime) runWithInput(ctx context.Context, args []string, targ
 	if target == nil || !target.Enabled() {
 		return nil, fmt.Errorf("%w: claude sessions must run in a container workspace", ErrClaudeWorkspaceRequired)
 	}
-	profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendCLITest)
+	profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendClaudeCLI)
 	if err := llmselection.RequireCredential(profile, os.LookupEnv); err != nil {
 		return nil, fmt.Errorf("%w: %s is missing", ErrClaudeAuthRequired, profile.Credential.EnvVar)
 	}
@@ -281,7 +281,7 @@ func (r *ClaudeCLIRuntime) buildCommand(ctx context.Context, args []string, targ
 		if gatewayToken := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_TOKEN")); gatewayToken != "" {
 			dockerArgs = append(dockerArgs, "-e", "SWARM_TOOL_GATEWAY_TOKEN="+gatewayToken)
 		}
-		profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendCLITest)
+		profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendClaudeCLI)
 		if oauthToken := llmselection.CredentialValue(profile, os.LookupEnv); oauthToken != "" {
 			dockerArgs = append(dockerArgs, "-e", profile.Credential.EnvVar+"="+oauthToken)
 		}

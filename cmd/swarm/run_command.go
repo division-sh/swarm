@@ -39,6 +39,8 @@ type runCommandOptions struct {
 	reattachRunID     string
 	bundleHash        string
 	bundleFingerprint string
+	configPath        string
+	backend           string
 	contractsPath     string
 	platformSpecPath  string
 	idempotencyKey    string
@@ -97,6 +99,8 @@ func newRunCommand(repo string, rootOpts rootCommandOptions) *cobra.Command {
 	cmd.Flags().StringVar(&opts.reattachRunID, "reattach", "", "Existing run id to reattach to")
 	cmd.Flags().StringVar(&opts.bundleHash, "bundle-hash", "", "Expected server canonical bundle hash")
 	cmd.Flags().StringVar(&opts.bundleFingerprint, "bundle-fingerprint", "", "Expected server bundle fingerprint")
+	cmd.Flags().StringVar(&opts.configPath, "config", "", "Path to Swarm runtime config for local foreground startup")
+	cmd.Flags().StringVar(&opts.backend, "backend", "", "LLM backend profile for local foreground startup: anthropic, claude_cli, or openai_compatible")
 	cmd.Flags().StringVar(&opts.contractsPath, "contracts", "", "Path to Swarm contract bundle root for local foreground startup")
 	cmd.Flags().StringVar(&opts.platformSpecPath, "platform-spec", "", "Path to platform spec yaml for local foreground startup")
 	cmd.Flags().StringVar(&opts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for run.start")
@@ -237,7 +241,7 @@ func (o runCommandOptions) validate() error {
 		if strings.TrimSpace(o.eventName) != "" || strings.TrimSpace(o.payloadPath) != "" || strings.TrimSpace(o.idempotencyKey) != "" || strings.TrimSpace(o.runID) != "" {
 			return fmt.Errorf("--reattach is mutually exclusive with --event, --payload, --idempotency-key, and --run-id")
 		}
-		for _, flag := range []string{"bundle-hash", "bundle-fingerprint", "contracts", "platform-spec", "api-port", "mcp-port"} {
+		for _, flag := range []string{"bundle-hash", "bundle-fingerprint", "config", "backend", "contracts", "platform-spec", "api-port", "mcp-port"} {
 			if o.changedFlags[flag] {
 				return fmt.Errorf("--reattach is mutually exclusive with --%s", flag)
 			}
@@ -245,7 +249,7 @@ func (o runCommandOptions) validate() error {
 		return nil
 	}
 	if strings.TrimSpace(o.connectURL) != "" {
-		for _, flag := range []string{"contracts", "platform-spec", "api-port"} {
+		for _, flag := range []string{"config", "backend", "contracts", "platform-spec", "api-port"} {
 			if o.changedFlags[flag] {
 				return fmt.Errorf("--%s requires local foreground mode and cannot be used with --connect", flag)
 			}
@@ -354,6 +358,8 @@ func startLocalRunServe(ctx context.Context, repo string, opts runCommandOptions
 		return nil, err
 	}
 	serveOpts := defaultServeOptions()
+	serveOpts.ConfigPath = opts.configPath
+	serveOpts.Backend = opts.backend
 	serveOpts.ContractsPath = resolvedPaths.ContractsPath
 	serveOpts.PlatformSpecPath = resolvedPaths.PlatformSpecPath
 	if opts.apiPort > 0 {

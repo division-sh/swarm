@@ -31,7 +31,6 @@ services:
       SWARM_DB_USER: postgres
       SWARM_DB_PASSWORD: postgres
       SWARM_DB_SSLMODE: disable
-      SWARM_LLM_BACKEND: cli_test
       SWARM_CLAUDE_USE_MCP: ${SWARM_CLAUDE_USE_MCP:-true}
       SWARM_CLAUDE_PERMISSION_MODE: ${SWARM_CLAUDE_PERMISSION_MODE:-bypassPermissions}
       SWARM_CLAUDE_BYPASS_PERMISSIONS: ${SWARM_CLAUDE_BYPASS_PERMISSIONS:-true}
@@ -69,6 +68,7 @@ services:
         fi
         exec /usr/local/bin/orchestrator serve \
           --store postgres \
+          --backend claude_cli \
           --contracts /opt/swarm/contracts \
           --api-listen-addr 0.0.0.0:8070 \
           --mcp-listen-addr 0.0.0.0:8090 \
