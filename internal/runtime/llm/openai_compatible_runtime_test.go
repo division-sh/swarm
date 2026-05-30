@@ -156,6 +156,63 @@ func TestOpenAICompatibleRuntimeFailsClosedWhenUsageMissing(t *testing.T) {
 	}
 }
 
+func TestAnthropicAPIRuntimeFailsClosedWhenUsageMissingForBudgetAccounting(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("content-type", "application/json")
+		_, _ = w.Write([]byte(`{"model":"claude-3-5-sonnet","content":[{"type":"text","text":"done"}]}`))
+	}))
+	defer server.Close()
+
+	turns := &turnCapture{}
+	budget := &budgetCapture{}
+	runtime := NewAnthropicAPIRuntime(&config.Config{
+		LLM: config.LLMConfig{
+			ClaudeAPI: config.ClaudeAPIConfig{
+				DefaultModel: "claude-3-5-sonnet",
+				MaxRetries:   1,
+			},
+		},
+	}, sessions.NewInMemoryRegistry(time.Second), "worker-1", turns, nil, budget, nil)
+	runtime.apiURL = server.URL
+	runtime.apiKey = "test-key"
+
+	ctx := sessions.WithScope(context.Background(), sessions.RuntimeModeTask.String(), "", "task-1")
+	session, err := runtime.StartSession(ctx, "agent-1", "system", nil)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	_, err = runtime.ContinueSession(ctx, session, Message{Role: "user", Content: "hello"})
+	if err == nil || !strings.Contains(err.Error(), "missing usage") {
+		t.Fatalf("ContinueSession error = %v, want missing usage", err)
+	}
+	if len(turns.records) != 0 {
+		t.Fatalf("turn records = %#v, want no persisted successful turn", turns.records)
+	}
+	if budget.usage.InputTokens != 0 || budget.usage.OutputTokens != 0 {
+		t.Fatalf("budget usage = %#v, want no recorded usage", budget.usage)
+	}
+}
+
+func TestAnthropicUsageExtractionRequiresBothUsageFields(t *testing.T) {
+	usage, ok := extractUsageTokensFromJSON([]byte(`{"model":"claude-3-5-sonnet","usage":{"input_tokens":3,"output_tokens":4}}`))
+	if !ok {
+		t.Fatal("extractUsageTokensFromJSON returned ok=false for valid usage")
+	}
+	if usage.Model != "claude-3-5-sonnet" || usage.InputTokens != 3 || usage.OutputTokens != 4 {
+		t.Fatalf("usage = %#v, want model/input/output", usage)
+	}
+	for _, raw := range [][]byte{
+		nil,
+		[]byte(`{}`),
+		[]byte(`{"model":"claude","usage":{"input_tokens":1}}`),
+		[]byte(`not-json`),
+	} {
+		if got, ok := extractUsageTokensFromJSON(raw); ok {
+			t.Fatalf("extractUsageTokensFromJSON(%q) = %#v, true; want false", raw, got)
+		}
+	}
+}
+
 func TestOpenAICompatibleRuntimeFailsClosedWhenCredentialMissing(t *testing.T) {
 	t.Setenv("OPENAI_COMPATIBLE_API_KEY", "")
 	requests := 0

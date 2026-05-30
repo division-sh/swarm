@@ -609,6 +609,102 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsPromotesCanonicalOw
 	}
 }
 
+func TestOperatorAgentReadSurfaceLoadAgentUsageSplitsExactAndEstimated(t *testing.T) {
+	dsn, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	pg, err := NewPostgresStore(dsn)
+	if err != nil {
+		t.Fatalf("NewPostgresStore: %v", err)
+	}
+	t.Cleanup(func() { _ = pg.DB.Close() })
+
+	ctx := context.Background()
+	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+		Config: runtimeactors.AgentConfig{
+			ID:               "agent-1",
+			Role:             "researcher",
+			Type:             "managed",
+			ModelTier:        "haiku",
+			ConversationMode: runtimesessions.RuntimeModeTask.String(),
+			Config:           json.RawMessage(`{"system_prompt":"usage"}`),
+		},
+		Status:    "active",
+		StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("UpsertAgent agent-1: %v", err)
+	}
+	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+		Config: runtimeactors.AgentConfig{
+			ID:               "agent-2",
+			Role:             "other",
+			Type:             "managed",
+			ModelTier:        "haiku",
+			ConversationMode: runtimesessions.RuntimeModeTask.String(),
+			Config:           json.RawMessage(`{"system_prompt":"usage"}`),
+		},
+		Status:    "active",
+		StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("UpsertAgent agent-2: %v", err)
+	}
+
+	since := time.Date(2026, 5, 21, 9, 0, 0, 0, time.UTC)
+	until := time.Date(2026, 5, 21, 10, 0, 0, 0, time.UTC)
+	rows := []struct {
+		agentID         string
+		model           string
+		inputTokens     int
+		outputTokens    int
+		costUSD         string
+		invocationType  string
+		usageAccounting string
+		createdAt       time.Time
+	}{
+		{"agent-1", "claude-3-5-sonnet", 100, 25, "0.000675", "api", AgentUsageAccountingExact, since},
+		{"agent-1", "claude-cli-sonnet", 50, 10, "0.000300", "cli_test", AgentUsageAccountingEstimated, since.Add(time.Minute)},
+		{"agent-1", "claude-3-5-sonnet", 7, 3, "0.000010", "api", AgentUsageAccountingExact, until},
+		{"agent-2", "claude-3-5-sonnet", 999, 999, "1.000000", "api", AgentUsageAccountingExact, since.Add(time.Minute)},
+	}
+	for _, row := range rows {
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO spend_ledger (
+				flow_instance, agent_id, model, input_tokens, output_tokens,
+				cost_usd, invocation_type, usage_accounting, created_at
+			) VALUES (
+				'flow/a', $1, $2, $3, $4, $5::numeric, $6, $7, $8
+			)
+		`, row.agentID, row.model, row.inputTokens, row.outputTokens, row.costUSD, row.invocationType, row.usageAccounting, row.createdAt); err != nil {
+			t.Fatalf("seed spend row %+v: %v", row, err)
+		}
+	}
+
+	result, err := pg.LoadOperatorAgentUsage(ctx, "agent-1", OperatorAgentUsageOptions{Since: &since, Until: &until})
+	if err != nil {
+		t.Fatalf("LoadOperatorAgentUsage: %v", err)
+	}
+	if result.AgentID != "agent-1" {
+		t.Fatalf("agent_id = %q", result.AgentID)
+	}
+	if result.Window.Since == nil || !result.Window.Since.Equal(since) || result.Window.Until == nil || !result.Window.Until.Equal(until) {
+		t.Fatalf("window = %#v", result.Window)
+	}
+	if result.Usage.Exact.LedgerEntries != 1 || result.Usage.Exact.InputTokens != 100 || result.Usage.Exact.OutputTokens != 25 {
+		t.Fatalf("exact usage = %#v", result.Usage.Exact)
+	}
+	if result.Usage.Estimated.LedgerEntries != 1 || result.Usage.Estimated.InputTokens != 50 || result.Usage.Estimated.OutputTokens != 10 {
+		t.Fatalf("estimated usage = %#v", result.Usage.Estimated)
+	}
+	if len(result.Breakdown) != 2 {
+		t.Fatalf("breakdown = %#v, want two rows", result.Breakdown)
+	}
+	if got := result.Breakdown[0]; got.UsageAccounting != AgentUsageAccountingExact || got.InvocationType != "api" || got.Model != "claude-3-5-sonnet" {
+		t.Fatalf("first breakdown = %#v", got)
+	}
+	if got := result.Breakdown[1]; got.UsageAccounting != AgentUsageAccountingEstimated || got.InvocationType != "cli_test" || got.Model != "claude-cli-sonnet" {
+		t.Fatalf("second breakdown = %#v", got)
+	}
+}
+
 func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsDoesNotRequireConversationOwners(t *testing.T) {
 	dsn, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)

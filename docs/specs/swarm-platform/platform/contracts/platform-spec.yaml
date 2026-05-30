@@ -4380,11 +4380,12 @@ platform_tables:
         \      TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX idx_run_control_state_status (control_status, updated_at)\n\
         );"
     spend_ledger:
-      description: LLM token and API cost tracking. One row per agent invocation.
+      description: LLM token and API cost tracking. One row per agent invocation. usage_accounting is the canonical exact-vs-estimated usage owner for public read surfaces; existing rows without prior accounting evidence migrate conservatively to estimated.
       ddl: "CREATE TABLE spend_ledger (\n    ledger_id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    entity_id\
         \         UUID,\n    flow_instance     TEXT NOT NULL,\n    agent_id          TEXT NOT NULL,\n    model           \
         \  TEXT NOT NULL,\n    input_tokens      INTEGER NOT NULL DEFAULT 0,\n    output_tokens     INTEGER NOT NULL DEFAULT\
-        \ 0,\n    cost_usd          NUMERIC(10,6) NOT NULL DEFAULT 0,\n    invocation_type   TEXT NOT NULL,\n    created_at\
+        \ 0,\n    cost_usd          NUMERIC(10,6) NOT NULL DEFAULT 0,\n    invocation_type   TEXT NOT NULL,\n    usage_accounting\
+        \ TEXT NOT NULL DEFAULT 'estimated' CHECK (usage_accounting IN ('exact', 'estimated')),\n    created_at\
         \        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX idx_spend_flow (flow_instance, created_at),\n    INDEX idx_spend_agent\
         \ (agent_id, created_at)\n);"
     flow_instances:
@@ -11379,6 +11380,102 @@ api_specification:
             $ref: '#/components/schemas/AgentDiagnosisActive'
           last_tool_outcome:
             $ref: '#/components/schemas/AgentDiagnosisLastToolOutcome'
+      UsageAccounting:
+        type: string
+        enum:
+        - exact
+        - estimated
+        description: |
+          Exact means token counts came from a provider usage object. Estimated
+          means token counts were locally estimated because the runtime surface
+          did not expose provider usage. API consumers must not silently merge
+          exact and estimated buckets without preserving this field.
+      AgentUsageWindow:
+        type: object
+        additionalProperties: false
+        description: |
+          Agent usage aggregate window over spend_ledger.created_at. since is
+          inclusive when supplied; until is exclusive when supplied. If both
+          are omitted, the owner aggregates all retained spend_ledger rows for
+          the agent. This schema intentionally makes no run/session/turn or
+          last-turn claim.
+        properties:
+          since:
+            $ref: '#/components/schemas/Timestamp'
+          until:
+            $ref: '#/components/schemas/Timestamp'
+      AgentUsageTotals:
+        type: object
+        additionalProperties: false
+        required:
+        - ledger_entries
+        - input_tokens
+        - output_tokens
+        - estimated_cost_usd
+        properties:
+          ledger_entries:
+            type: integer
+            minimum: 0
+          input_tokens:
+            type: integer
+            minimum: 0
+          output_tokens:
+            type: integer
+            minimum: 0
+          estimated_cost_usd:
+            type: number
+            minimum: 0
+            description: Guardrail cost estimate from BudgetTracker pricing, not provider billing truth.
+      AgentUsageByAccounting:
+        type: object
+        additionalProperties: false
+        required:
+        - exact
+        - estimated
+        properties:
+          exact:
+            $ref: '#/components/schemas/AgentUsageTotals'
+          estimated:
+            $ref: '#/components/schemas/AgentUsageTotals'
+      AgentUsageBreakdown:
+        type: object
+        additionalProperties: false
+        required:
+        - usage_accounting
+        - invocation_type
+        - model
+        - totals
+        properties:
+          usage_accounting:
+            $ref: '#/components/schemas/UsageAccounting'
+          invocation_type:
+            type: string
+            minLength: 1
+            description: Runtime invocation type recorded by the spend ledger, such as api, cli_test, or openai_compatible.
+          model:
+            type: string
+            minLength: 1
+          totals:
+            $ref: '#/components/schemas/AgentUsageTotals'
+      AgentUsage:
+        type: object
+        additionalProperties: false
+        required:
+        - agent_id
+        - window
+        - usage
+        - breakdown
+        properties:
+          agent_id:
+            $ref: '#/components/schemas/OpaqueId'
+          window:
+            $ref: '#/components/schemas/AgentUsageWindow'
+          usage:
+            $ref: '#/components/schemas/AgentUsageByAccounting'
+          breakdown:
+            type: array
+            items:
+              $ref: '#/components/schemas/AgentUsageBreakdown'
       AgentDeliveryDiagnosticsSummary:
         type: object
         additionalProperties: false
@@ -13931,6 +14028,53 @@ api_specification:
         required: true
         schema:
           $ref: '#/components/schemas/AgentDiagnosis'
+      errors:
+      - AGENT_NOT_FOUND
+    agent.usage:
+      tier: should_have
+      description: |
+        Read the owner-backed per-agent LLM token and estimated-cost usage
+        aggregate. This is a separate owner from agent.diagnose:
+        AgentDiagnosis remains lean and must not expose token usage. The API
+        handler validates agent_id and optional created_at window params, then
+        consumes one named per-agent usage read owner over spend_ledger facts.
+        It must not locally reconstruct usage from raw request_payload,
+        response_payload, agent.diagnose, agent.delivery_diagnostics,
+        run.trace, run.diagnose, dashboard helpers, CLI state, EventBus data,
+        or runtime memory.
+
+        The owner is agent-scoped and aggregates retained spend_ledger rows by
+        spend_ledger.created_at. since is inclusive; until is exclusive. If no
+        window is supplied, all retained rows for the agent are aggregated. The
+        response separates exact and estimated usage_accounting totals and
+        provides model/runtime breakdowns so API provider usage and CLI
+        estimated usage are not silently merged. estimated_cost_usd is the
+        BudgetTracker guardrail cost estimate, not provider billing truth. This
+        method does not make run_id, session_id, turn_id, last-turn, or
+        provider-billing claims.
+      scope:
+        required:
+        - read:agents
+      params:
+      - name: agent_id
+        required: true
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      - name: since
+        required: false
+        description: Inclusive lower bound over spend_ledger.created_at.
+        schema:
+          $ref: '#/components/schemas/Timestamp'
+      - name: until
+        required: false
+        description: Exclusive upper bound over spend_ledger.created_at; must be after since when both are supplied.
+        schema:
+          $ref: '#/components/schemas/Timestamp'
+      result:
+        name: result
+        required: true
+        schema:
+          $ref: '#/components/schemas/AgentUsage'
       errors:
       - AGENT_NOT_FOUND
     agent.delivery_diagnostics:

@@ -19,6 +19,8 @@ type fakeAgentConversationReadStore struct {
 	agentErr                            error
 	agentDiagnosisResult                store.OperatorAgentDiagnosis
 	agentDiagnosisErr                   error
+	agentUsageResult                    store.OperatorAgentUsage
+	agentUsageErr                       error
 	agentDeliveryDiagnosticsResult      store.OperatorAgentDeliveryDiagnostics
 	agentDeliveryDiagnosticsErr         error
 	listConversationsResult             store.OperatorConversationListResult
@@ -34,6 +36,8 @@ type fakeAgentConversationReadStore struct {
 	lastAgentID                         string
 	lastAgentDiagnosisID                string
 	lastAgentDiagnosisOptions           store.OperatorAgentDiagnosisOptions
+	lastAgentUsageID                    string
+	lastAgentUsageOptions               store.OperatorAgentUsageOptions
 	lastAgentDeliveryDiagnosticsID      string
 	lastAgentDeliveryDiagnosticsOptions store.OperatorAgentDeliveryDiagnosticsOptions
 	lastConversationSessionID           string
@@ -56,6 +60,12 @@ func (s *fakeAgentConversationReadStore) LoadOperatorAgentDiagnosis(_ context.Co
 	s.lastAgentDiagnosisID = agentID
 	s.lastAgentDiagnosisOptions = opts
 	return s.agentDiagnosisResult, s.agentDiagnosisErr
+}
+
+func (s *fakeAgentConversationReadStore) LoadOperatorAgentUsage(_ context.Context, agentID string, opts store.OperatorAgentUsageOptions) (store.OperatorAgentUsage, error) {
+	s.lastAgentUsageID = agentID
+	s.lastAgentUsageOptions = opts
+	return s.agentUsageResult, s.agentUsageErr
 }
 
 func (s *fakeAgentConversationReadStore) LoadOperatorAgentDeliveryDiagnostics(_ context.Context, agentID string, opts store.OperatorAgentDeliveryDiagnosticsOptions) (store.OperatorAgentDeliveryDiagnostics, error) {
@@ -157,6 +167,48 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 					RecordedAt:    "2026-05-21T10:01:00Z",
 				},
 			},
+		},
+		agentUsageResult: store.OperatorAgentUsage{
+			AgentID: "agent-1",
+			Window: store.OperatorAgentUsageWindow{
+				Since: ptrTime(now.Add(-time.Hour)),
+				Until: ptrTime(now),
+			},
+			Usage: store.OperatorAgentUsageByAccounting{
+				Exact: store.OperatorAgentUsageTotals{
+					LedgerEntries:    1,
+					InputTokens:      100,
+					OutputTokens:     25,
+					EstimatedCostUSD: 0.000675,
+				},
+				Estimated: store.OperatorAgentUsageTotals{
+					LedgerEntries:    1,
+					InputTokens:      50,
+					OutputTokens:     10,
+					EstimatedCostUSD: 0.000300,
+				},
+			},
+			Breakdown: []store.OperatorAgentUsageBreakdown{{
+				UsageAccounting: store.AgentUsageAccountingExact,
+				InvocationType:  "api",
+				Model:           "claude-3-5-sonnet",
+				Totals: store.OperatorAgentUsageTotals{
+					LedgerEntries:    1,
+					InputTokens:      100,
+					OutputTokens:     25,
+					EstimatedCostUSD: 0.000675,
+				},
+			}, {
+				UsageAccounting: store.AgentUsageAccountingEstimated,
+				InvocationType:  "cli_test",
+				Model:           "claude-cli-sonnet",
+				Totals: store.OperatorAgentUsageTotals{
+					LedgerEntries:    1,
+					InputTokens:      50,
+					OutputTokens:     10,
+					EstimatedCostUSD: 0.000300,
+				},
+			}},
 		},
 		agentDeliveryDiagnosticsResult: store.OperatorAgentDeliveryDiagnostics{
 			AgentID: "agent-1",
@@ -330,6 +382,39 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 	for _, splitField := range []string{"bundle_version", "watchdog", "token_usage", "failures_recent", "dead_letters_recent"} {
 		if _, ok := diagnosis[splitField]; ok {
 			t.Fatalf("agent.diagnose exposed split field %q: %#v", splitField, diagnosis)
+		}
+	}
+
+	usageResp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agent-usage","method":"agent.usage","params":{"agent_id":"agent-1","since":"2026-05-21T09:00:00Z","until":"2026-05-21T10:00:00Z"}}`)
+	if usageResp.Error != nil {
+		t.Fatalf("agent.usage error = %#v", usageResp.Error)
+	}
+	if reads.lastAgentUsageID != "agent-1" {
+		t.Fatalf("agent.usage id = %q", reads.lastAgentUsageID)
+	}
+	if reads.lastAgentUsageOptions.Since == nil || reads.lastAgentUsageOptions.Until == nil {
+		t.Fatalf("agent.usage options missing window = %#v", reads.lastAgentUsageOptions)
+	}
+	usage := asMap(t, usageResp.Result)
+	if usage["agent_id"] != "agent-1" {
+		t.Fatalf("agent.usage agent_id = %#v", usage["agent_id"])
+	}
+	totals := asMap(t, usage["usage"])
+	exactTotals := asMap(t, totals["exact"])
+	estimatedTotals := asMap(t, totals["estimated"])
+	if exactTotals["input_tokens"] != float64(100) || estimatedTotals["input_tokens"] != float64(50) {
+		t.Fatalf("agent.usage exact/estimated totals = %#v", totals)
+	}
+	breakdown, ok := usage["breakdown"].([]any)
+	if !ok || len(breakdown) != 2 {
+		t.Fatalf("agent.usage breakdown = %#v", usage["breakdown"])
+	}
+	if first := asMap(t, breakdown[0]); first["usage_accounting"] != "exact" || first["invocation_type"] != "api" {
+		t.Fatalf("agent.usage first breakdown = %#v", first)
+	}
+	for _, forbidden := range []string{"token_usage", "run_id", "session_id", "turn_id"} {
+		if _, ok := usage[forbidden]; ok {
+			t.Fatalf("agent.usage exposed forbidden field %q: %#v", forbidden, usage)
 		}
 	}
 
@@ -658,6 +743,13 @@ func TestOperatorAgentConversationHandlersTypedErrors(t *testing.T) {
 			wantApp: AgentNotFoundCode,
 		},
 		{
+			name:    "agent usage missing",
+			method:  "agent.usage",
+			body:    `{"jsonrpc":"2.0","id":"usage","method":"agent.usage","params":{"agent_id":"missing"}}`,
+			reads:   &fakeAgentConversationReadStore{agentUsageErr: store.ErrAgentNotFound},
+			wantApp: AgentNotFoundCode,
+		},
+		{
 			name:    "agent delivery diagnostics missing",
 			method:  "agent.delivery_diagnostics",
 			body:    `{"jsonrpc":"2.0","id":"agent-delivery-diagnostics","method":"agent.delivery_diagnostics","params":{"agent_id":"missing"}}`,
@@ -710,6 +802,38 @@ func TestOperatorAgentConversationHandlersTypedErrors(t *testing.T) {
 				t.Fatalf("error code = %#v, want %s", data["code"], tc.wantApp)
 			}
 		})
+	}
+}
+
+func TestOperatorAgentUsageFailsClosedOnMalformedOwnerData(t *testing.T) {
+	reads := &fakeAgentConversationReadStore{
+		agentUsageResult: store.OperatorAgentUsage{
+			AgentID: "agent-1",
+			Usage: store.OperatorAgentUsageByAccounting{
+				Exact: store.OperatorAgentUsageTotals{},
+				Estimated: store.OperatorAgentUsageTotals{
+					LedgerEntries: -1,
+				},
+			},
+			Breakdown: []store.OperatorAgentUsageBreakdown{},
+		},
+	}
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			AgentConversations: reads,
+		}),
+	})
+
+	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agent-usage","method":"agent.usage","params":{"agent_id":"agent-1"}}`)
+	if resp.Error == nil {
+		t.Fatal("agent.usage returned success for malformed owner result")
+	}
+	if resp.Error.Code != codeInternalError {
+		t.Fatalf("error code = %d, want %d", resp.Error.Code, codeInternalError)
+	}
+	if !strings.Contains(fmt.Sprint(resp.Error.Message, resp.Error.Data), "agent.usage owner returned malformed result") {
+		t.Fatalf("error = %#v, want malformed owner result", resp.Error)
 	}
 }
 
@@ -964,6 +1088,21 @@ func TestOperatorAgentDiagnoseRejectsBadQueueCursor(t *testing.T) {
 		t.Fatal("agent.diagnose returned success for invalid queue_cursor")
 	}
 	assertReadOnlyProbeInvalidParams(t, "agent.diagnose", resp, "queue_cursor")
+}
+
+func TestOperatorAgentUsageRejectsInvalidWindow(t *testing.T) {
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			AgentConversations: &fakeAgentConversationReadStore{},
+		}),
+	})
+
+	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"probe-agent-usage","method":"agent.usage","params":{"agent_id":"agent-1","since":"2026-05-21T10:00:00Z","until":"2026-05-21T10:00:00Z"}}`)
+	if resp.Error == nil {
+		t.Fatal("agent.usage returned success for invalid window")
+	}
+	assertReadOnlyProbeInvalidParams(t, "agent.usage", resp, "until")
 }
 
 func TestOperatorAgentDeliveryDiagnosticsRejectsLimits(t *testing.T) {

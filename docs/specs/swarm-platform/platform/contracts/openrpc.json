@@ -1315,6 +1315,82 @@
       ]
     },
     {
+      "name": "agent.usage",
+      "description": "Read the owner-backed per-agent LLM token and estimated-cost usage\naggregate. This is a separate owner from agent.diagnose:\nAgentDiagnosis remains lean and must not expose token usage. The API\nhandler validates agent_id and optional created_at window params, then\nconsumes one named per-agent usage read owner over spend_ledger facts.\nIt must not locally reconstruct usage from raw request_payload,\nresponse_payload, agent.diagnose, agent.delivery_diagnostics,\nrun.trace, run.diagnose, dashboard helpers, CLI state, EventBus data,\nor runtime memory.\n\nThe owner is agent-scoped and aggregates retained spend_ledger rows by\nspend_ledger.created_at. since is inclusive; until is exclusive. If no\nwindow is supplied, all retained rows for the agent are aggregated. The\nresponse separates exact and estimated usage_accounting totals and\nprovides model/runtime breakdowns so API provider usage and CLI\nestimated usage are not silently merged. estimated_cost_usd is the\nBudgetTracker guardrail cost estimate, not provider billing truth. This\nmethod does not make run_id, session_id, turn_id, last-turn, or\nprovider-billing claims.\n",
+      "params": [
+        {
+          "name": "agent_id",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "since",
+          "required": false,
+          "description": "Inclusive lower bound over spend_ledger.created_at.",
+          "schema": {
+            "$ref": "#/components/schemas/Timestamp"
+          }
+        },
+        {
+          "name": "until",
+          "required": false,
+          "description": "Exclusive upper bound over spend_ledger.created_at; must be after since when both are supplied.",
+          "schema": {
+            "$ref": "#/components/schemas/Timestamp"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/AgentUsage"
+        }
+      },
+      "errors": [
+        {
+          "code": -32000,
+          "message": "Application error: AGENT_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "AGENT_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "agent_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "agent_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
       "name": "bundle.agents",
       "description": "Return definition-only agent catalog entries projected from the persisted bundle row identified by bundle_hash. This method must not read runtime agents, sessions, queues, diagnoses, active tasks, or status fields, and does not close strict duplicate-slug runtime identity work.\n",
       "params": [
@@ -6969,6 +7045,118 @@
         ],
         "type": "object"
       },
+      "AgentUsage": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "breakdown": {
+            "items": {
+              "$ref": "#/components/schemas/AgentUsageBreakdown"
+            },
+            "type": "array"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/AgentUsageByAccounting"
+          },
+          "window": {
+            "$ref": "#/components/schemas/AgentUsageWindow"
+          }
+        },
+        "required": [
+          "agent_id",
+          "window",
+          "usage",
+          "breakdown"
+        ],
+        "type": "object"
+      },
+      "AgentUsageBreakdown": {
+        "additionalProperties": false,
+        "properties": {
+          "invocation_type": {
+            "description": "Runtime invocation type recorded by the spend ledger, such as api, cli_test, or openai_compatible.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "model": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/AgentUsageTotals"
+          },
+          "usage_accounting": {
+            "$ref": "#/components/schemas/UsageAccounting"
+          }
+        },
+        "required": [
+          "usage_accounting",
+          "invocation_type",
+          "model",
+          "totals"
+        ],
+        "type": "object"
+      },
+      "AgentUsageByAccounting": {
+        "additionalProperties": false,
+        "properties": {
+          "estimated": {
+            "$ref": "#/components/schemas/AgentUsageTotals"
+          },
+          "exact": {
+            "$ref": "#/components/schemas/AgentUsageTotals"
+          }
+        },
+        "required": [
+          "exact",
+          "estimated"
+        ],
+        "type": "object"
+      },
+      "AgentUsageTotals": {
+        "additionalProperties": false,
+        "properties": {
+          "estimated_cost_usd": {
+            "description": "Guardrail cost estimate from BudgetTracker pricing, not provider billing truth.",
+            "minimum": 0,
+            "type": "number"
+          },
+          "input_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "ledger_entries": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "output_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ledger_entries",
+          "input_tokens",
+          "output_tokens",
+          "estimated_cost_usd"
+        ],
+        "type": "object"
+      },
+      "AgentUsageWindow": {
+        "additionalProperties": false,
+        "description": "Agent usage aggregate window over spend_ledger.created_at. since is\ninclusive when supplied; until is exclusive when supplied. If both\nare omitted, the owner aggregates all retained spend_ledger rows for\nthe agent. This schema intentionally makes no run/session/turn or\nlast-turn claim.\n",
+        "properties": {
+          "since": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "until": {
+            "$ref": "#/components/schemas/Timestamp"
+          }
+        },
+        "type": "object"
+      },
       "BlockingLayer": {
         "description": "Layer-of-the-system identifier when operational_state is \"stalled\".\nEmpty string when state is running or terminal. Source of truth:\nProjectRunOperationalStatus. Current owner emits:\n  \"\" (empty) — state is running or terminal\n  \"scoring_terminal_outcome\" — scoring entities have not reached\n    a terminal scoring outcome (shortlisted/marginal/rejected)\n  \"delivery_lifecycle\" — no active deliveries but events exist\nAdditional values may be added as the operator-state owner gains\nmore diagnostic semantics. Type stays string (not enum) for\nforward compatibility — additive owner extensions must not\nrequire a /v2/ bump.\n",
         "type": "string"
@@ -9234,6 +9422,14 @@
           "parse_ok"
         ],
         "type": "object"
+      },
+      "UsageAccounting": {
+        "description": "Exact means token counts came from a provider usage object. Estimated\nmeans token counts were locally estimated because the runtime surface\ndid not expose provider usage. API consumers must not silently merge\nexact and estimated buckets without preserving this field.\n",
+        "enum": [
+          "exact",
+          "estimated"
+        ],
+        "type": "string"
       },
       "VerifyError": {
         "additionalProperties": false,

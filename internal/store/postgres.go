@@ -224,6 +224,11 @@ func (s *PostgresStore) ensureSchemaCompatibilityColumns(ctx context.Context) er
 			return err
 		}
 	}
+	if catalog.hasTable("spend_ledger") && !catalog.hasColumns("spend_ledger", "usage_accounting") {
+		if _, err := s.DB.ExecContext(ctx, `ALTER TABLE spend_ledger ADD COLUMN IF NOT EXISTS usage_accounting TEXT NOT NULL DEFAULT 'estimated' CHECK (usage_accounting IN ('exact', 'estimated'))`); err != nil {
+			return fmt.Errorf("ensure spend_ledger.usage_accounting column: %w", err)
+		}
+	}
 	if catalog.hasTable("dead_letters") {
 		for _, stmt := range []struct {
 			column string
