@@ -245,6 +245,51 @@ func TestBundleHashV1RejectsSymlinksWhenSupported(t *testing.T) {
 	}
 }
 
+func TestBundleCatalogProjectionConsumesCanonicalBundleHashOwner(t *testing.T) {
+	root, platform := writeEquivalentBundleHashFixture(t, "\n", "name: projected\nversion: \"1.0.0\"\nflows: []\n")
+	writeBundleHashText(t, filepath.Join(root, "agents.yaml"), `
+researcher:
+  id: researcher
+  role: research
+  model_tier: tier2
+  conversation_mode: stateless
+  subscriptions:
+    - scan.requested
+`)
+	bundle, err := LoadWorkflowContractBundleWithOverrides(filepath.Dir(root), root, platform)
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	wantHash, err := BundleHash(bundle)
+	if err != nil {
+		t.Fatalf("BundleHash: %v", err)
+	}
+	projection, err := BuildBundleCatalogProjectionWithOptions(bundle, BundleCatalogProjectionOptions{
+		Source:             "bundle.register",
+		PlatformSpecSHA256: strings.Repeat("a", 64),
+	})
+	if err != nil {
+		t.Fatalf("BuildBundleCatalogProjectionWithOptions: %v", err)
+	}
+	if projection.BundleHash != wantHash {
+		t.Fatalf("projection bundle hash = %q, want %q", projection.BundleHash, wantHash)
+	}
+	if projection.Metadata["source"] != "bundle.register" || projection.Metadata["platform_spec_sha256"] != strings.Repeat("a", 64) {
+		t.Fatalf("projection metadata = %#v", projection.Metadata)
+	}
+	agents := projection.ParsedJSON["agents"].(map[string]any)
+	researcher := agents["researcher"].(map[string]any)
+	if researcher["model_tier"] != "tier2" || researcher["conversation_mode"] != "stateless" {
+		t.Fatalf("projected researcher = %#v", researcher)
+	}
+	if _, ok := researcher["status"]; ok {
+		t.Fatalf("projection leaked runtime status: %#v", researcher)
+	}
+	if !strings.Contains(projection.ContentYAML, "bundle/agents.yaml") || !strings.Contains(projection.ContentYAML, "platform/platform-spec.yaml") {
+		t.Fatalf("projection content_yaml missing canonical inputs:\n%s", projection.ContentYAML)
+	}
+}
+
 func TestBundleHashV1YAMLProfile(t *testing.T) {
 	equivalentA, err := canonicalBundleHashYAML([]byte(`
 value: &num !!int 1

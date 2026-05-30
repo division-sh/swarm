@@ -20,73 +20,114 @@ type BundleCatalogUpsert struct {
 	Metadata    map[string]any
 }
 
-func (s *PostgresStore) UpsertBundleCatalog(ctx context.Context, req BundleCatalogUpsert) (BundleCatalogDetail, error) {
+type BundleCatalogUpsertResult struct {
+	Detail     BundleCatalogDetail `json:"bundle"`
+	Registered bool                `json:"registered"`
+}
+
+type BundleCatalogConflictError struct {
+	BundleHash string
+}
+
+func (e *BundleCatalogConflictError) Error() string {
+	return "bundle catalog row already exists with different content"
+}
+
+func (e *BundleCatalogConflictError) Is(target error) bool {
+	return target == ErrBundleCatalogConflict
+}
+
+func (s *PostgresStore) UpsertBundleCatalog(ctx context.Context, req BundleCatalogUpsert) (BundleCatalogUpsertResult, error) {
 	if err := s.requireBundleCatalogCapabilities(ctx); err != nil {
-		return BundleCatalogDetail{}, err
+		return BundleCatalogUpsertResult{}, err
 	}
 	req.BundleHash = strings.TrimSpace(req.BundleHash)
 	if !canonicalBundleHashPattern.MatchString(req.BundleHash) {
-		return BundleCatalogDetail{}, fmt.Errorf("bundle catalog upsert requires canonical bundle_hash bundle-v1:sha256:<64 lowercase hex>")
+		return BundleCatalogUpsertResult{}, fmt.Errorf("bundle catalog upsert requires canonical bundle_hash bundle-v1:sha256:<64 lowercase hex>")
 	}
 	if strings.TrimSpace(req.ContentYAML) == "" {
-		return BundleCatalogDetail{}, fmt.Errorf("bundle catalog upsert requires content_yaml")
+		return BundleCatalogUpsertResult{}, fmt.Errorf("bundle catalog upsert requires content_yaml")
 	}
 	parsedRaw, err := normalizedBundleCatalogJSON(req.ParsedJSON)
 	if err != nil {
-		return BundleCatalogDetail{}, fmt.Errorf("bundle catalog parsed_json: %w", err)
+		return BundleCatalogUpsertResult{}, fmt.Errorf("bundle catalog parsed_json: %w", err)
 	}
 	metadataRaw, err := normalizedBundleCatalogJSON(req.Metadata)
 	if err != nil {
-		return BundleCatalogDetail{}, fmt.Errorf("bundle catalog metadata: %w", err)
+		return BundleCatalogUpsertResult{}, fmt.Errorf("bundle catalog metadata: %w", err)
 	}
 
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return BundleCatalogDetail{}, err
+		return BundleCatalogUpsertResult{}, err
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.ExecContext(ctx, `
+	result, err := tx.ExecContext(ctx, `
 		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json, data_blob, metadata)
 		VALUES ($1, $2, $3::jsonb, $4::bytea, $5::jsonb)
 		ON CONFLICT (bundle_hash) DO NOTHING
-	`, req.BundleHash, req.ContentYAML, parsedRaw, nullableBytes(req.DataBlob), metadataRaw); err != nil {
-		return BundleCatalogDetail{}, fmt.Errorf("upsert bundle catalog: %w", err)
+	`, req.BundleHash, req.ContentYAML, parsedRaw, nullableBytes(req.DataBlob), metadataRaw)
+	if err != nil {
+		return BundleCatalogUpsertResult{}, fmt.Errorf("upsert bundle catalog: %w", err)
+	}
+	registered := false
+	if rows, err := result.RowsAffected(); err == nil {
+		registered = rows > 0
 	}
 	if err := assertBundleCatalogUpsertIdempotent(ctx, tx, req.BundleHash, req.ContentYAML, parsedRaw, req.DataBlob, metadataRaw); err != nil {
-		return BundleCatalogDetail{}, err
+		return BundleCatalogUpsertResult{}, err
+	}
+	detail, err := loadBundleCatalogInTx(ctx, tx, req.BundleHash)
+	if err != nil {
+		return BundleCatalogUpsertResult{}, err
 	}
 	if err := tx.Commit(); err != nil {
-		return BundleCatalogDetail{}, err
+		return BundleCatalogUpsertResult{}, err
 	}
-	return s.LoadBundleCatalog(ctx, req.BundleHash)
+	return BundleCatalogUpsertResult{Detail: detail, Registered: registered}, nil
 }
 
-func assertBundleCatalogUpsertIdempotent(ctx context.Context, tx bundleCatalogTx, bundleHash, contentYAML string, parsedRaw, dataBlob, metadataRaw []byte) error {
+func assertBundleCatalogUpsertIdempotent(ctx context.Context, tx bundleCatalogTx, bundleHash, contentYAML string, parsedRaw, dataBlob, _ []byte) error {
 	var gotContent string
 	var gotParsed []byte
 	var gotData []byte
-	var gotMetadata []byte
 	if err := tx.QueryRowContext(ctx, `
-		SELECT content_yaml, COALESCE(parsed_json, '{}'::jsonb), data_blob, COALESCE(metadata, '{}'::jsonb)
+		SELECT content_yaml, COALESCE(parsed_json, '{}'::jsonb), data_blob
 		FROM bundles
 		WHERE bundle_hash = $1
 		FOR SHARE
-	`, bundleHash).Scan(&gotContent, &gotParsed, &gotData, &gotMetadata); err != nil {
+	`, bundleHash).Scan(&gotContent, &gotParsed, &gotData); err != nil {
 		return fmt.Errorf("load bundle catalog upsert result: %w", err)
 	}
 	gotParsed, err := normalizedBundleCatalogJSONBytes(gotParsed)
 	if err != nil {
 		return fmt.Errorf("stored bundle catalog parsed_json: %w", err)
 	}
-	gotMetadata, err = normalizedBundleCatalogJSONBytes(gotMetadata)
-	if err != nil {
-		return fmt.Errorf("stored bundle catalog metadata: %w", err)
-	}
-	if gotContent != contentYAML || !bytes.Equal(gotParsed, parsedRaw) || !bytes.Equal(nullableBytes(gotData), nullableBytes(dataBlob)) || !bytes.Equal(gotMetadata, metadataRaw) {
-		return fmt.Errorf("bundle catalog row for %s already exists with different content", bundleHash)
+	if gotContent != contentYAML || !bytes.Equal(gotParsed, parsedRaw) || !bytes.Equal(nullableBytes(gotData), nullableBytes(dataBlob)) {
+		return &BundleCatalogConflictError{BundleHash: strings.TrimSpace(bundleHash)}
 	}
 	return nil
+}
+
+func loadBundleCatalogInTx(ctx context.Context, tx bundleCatalogTx, bundleHash string) (BundleCatalogDetail, error) {
+	row := tx.QueryRowContext(ctx, `
+		SELECT
+			bundle_hash,
+			content_yaml,
+			COALESCE(parsed_json, '{}'::jsonb),
+			COALESCE(metadata, '{}'::jsonb),
+			data_blob IS NOT NULL,
+			COALESCE(octet_length(data_blob), 0)::bigint,
+			ingested_at
+		FROM bundles
+		WHERE bundle_hash = $1
+	`, strings.TrimSpace(bundleHash))
+	scanned, err := scanBundleCatalogRow(row)
+	if err != nil {
+		return BundleCatalogDetail{}, err
+	}
+	return scanned.toDetail()
 }
 
 type bundleCatalogTx interface {

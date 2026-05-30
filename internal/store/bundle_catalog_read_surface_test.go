@@ -152,19 +152,82 @@ func TestBundleCatalogWriteSurfaceUpsertsAndRejectsHashCollision(t *testing.T) {
 		},
 	}
 
-	detail, err := pg.UpsertBundleCatalog(ctx, req)
+	first, err := pg.UpsertBundleCatalog(ctx, req)
 	if err != nil {
 		t.Fatalf("UpsertBundleCatalog: %v", err)
 	}
+	detail := first.Detail
 	if detail.BundleHash != bundleHash || detail.AgentCount != 1 || !detail.HasData || detail.Metadata["source"] != "test" {
 		t.Fatalf("detail = %#v", detail)
 	}
+	if !first.Registered {
+		t.Fatalf("first upsert registered = false, want true")
+	}
 
-	if _, err := pg.UpsertBundleCatalog(ctx, req); err != nil {
+	duplicate, err := pg.UpsertBundleCatalog(ctx, req)
+	if err != nil {
 		t.Fatalf("UpsertBundleCatalog idempotent: %v", err)
 	}
+	if duplicate.Registered {
+		t.Fatalf("duplicate upsert registered = true, want false")
+	}
 	req.ContentYAML = "projection_version: swarm.bundle.catalog.v1\nfiles: [changed]\n"
-	if _, err := pg.UpsertBundleCatalog(ctx, req); err == nil || !strings.Contains(err.Error(), "different content") {
-		t.Fatalf("UpsertBundleCatalog collision error = %v, want different content", err)
+	if _, err := pg.UpsertBundleCatalog(ctx, req); !errors.Is(err, ErrBundleCatalogConflict) {
+		t.Fatalf("UpsertBundleCatalog collision error = %v, want ErrBundleCatalogConflict", err)
+	}
+}
+
+func TestBundleCatalogUpsertRegistersDuplicatesConflictsAndDoesNotRestoreDeletedRuns(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	bundleHash := "bundle-v1:sha256:4444444444444444444444444444444444444444444444444444444444444444"
+	req := BundleCatalogUpsert{
+		BundleHash:  bundleHash,
+		ContentYAML: "projection_version: swarm.bundle.catalog.v1\nfiles: []\ncanonical_inputs: []\n",
+		ParsedJSON:  map[string]any{"agents": map[string]any{}},
+		DataBlob:    []byte(`{"entries":[]}`),
+		Metadata:    map[string]any{"source": "bundle.register"},
+	}
+	first, err := pg.UpsertBundleCatalog(ctx, req)
+	if err != nil {
+		t.Fatalf("UpsertBundleCatalog first: %v", err)
+	}
+	if !first.Registered || first.Detail.BundleHash != bundleHash || !first.Detail.HasData {
+		t.Fatalf("first upsert = %#v", first)
+	}
+
+	req.Metadata = map[string]any{"source": "swarm serve --contracts"}
+	duplicate, err := pg.UpsertBundleCatalog(ctx, req)
+	if err != nil {
+		t.Fatalf("UpsertBundleCatalog duplicate: %v", err)
+	}
+	if duplicate.Registered || duplicate.Detail.Metadata["source"] != "bundle.register" {
+		t.Fatalf("duplicate upsert = %#v, want no-op preserving original row", duplicate)
+	}
+
+	conflict := req
+	conflict.ContentYAML = "projection_version: swarm.bundle.catalog.v1\nfiles:\n  - label: \"bundle/package.yaml\"\n    content_base64: \"e30=\"\n    size_bytes: 2\ncanonical_inputs: []\n"
+	if _, err := pg.UpsertBundleCatalog(ctx, conflict); !errors.Is(err, ErrBundleCatalogConflict) {
+		t.Fatalf("UpsertBundleCatalog conflict error = %v, want ErrBundleCatalogConflict", err)
+	}
+
+	runID := "00000000-0000-0000-0000-000000000444"
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
+		VALUES ($1::uuid, 'completed', $2, 'deleted', NOW())
+	`, runID, bundleHash); err != nil {
+		t.Fatalf("seed deleted run: %v", err)
+	}
+	if _, err := pg.UpsertBundleCatalog(ctx, req); err != nil {
+		t.Fatalf("UpsertBundleCatalog deleted re-register: %v", err)
+	}
+	var source string
+	if err := db.QueryRowContext(ctx, `SELECT bundle_source FROM runs WHERE run_id = $1::uuid`, runID).Scan(&source); err != nil {
+		t.Fatalf("load run bundle_source: %v", err)
+	}
+	if source != "deleted" {
+		t.Fatalf("bundle_source after re-register = %q, want deleted", source)
 	}
 }

@@ -198,6 +198,21 @@ methods:
     examples: {status: policy_deferred, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/platform-spec.yaml}, {kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}]}
     service_discovery_publication: {status: policy_not_published, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/platform-spec.yaml}, {kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}, {kind: go_test, name: TestServiceDiscoveryPolicyDoesNotServeRPCDiscover}]}
     gap_classification: []
+  - method: bundle.register
+    transport: http
+    required_params: [content_yaml]
+    declared_errors: [BUNDLE_REGISTER_CONFLICT, IDEMPOTENCY_CONFLICT]
+    happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorBundleRegisterHandlersMaterializeCanonicalProjectionAndIdempotency}]}
+    required_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
+    unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}]}
+    auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
+    declared_error_tests: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorBundleRegisterHandlersFailClosed}]}
+    idempotency: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorBundleRegisterHandlersMaterializeCanonicalProjectionAndIdempotency}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorBundleRegisterHandlersMaterializeCanonicalProjectionAndIdempotency}]}
+    notification_schema: {status: not_applicable}
+    examples: {status: policy_deferred, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/platform-spec.yaml}, {kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}]}
+    service_discovery_publication: {status: policy_not_published, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/platform-spec.yaml}, {kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}, {kind: go_test, name: TestServiceDiscoveryPolicyDoesNotServeRPCDiscover}]}
+    gap_classification: []
   - method: conversation.current_for_agent
     transport: http
     required_params: [agent_id]

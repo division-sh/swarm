@@ -5504,18 +5504,19 @@ multi_bundle_persistence:
     promoted implementation owners in this section. Remaining runtime, API handler, CLI, delete/fork/recovery, and
     generated OpenRPC publication work stays separately gated unless a later PR explicitly promotes and proves it.
   generated_artifact_policy:
-    current_openrpc_status: bundle_read_catalog_and_run_fork_methods_published
+    current_openrpc_status: bundle_read_catalog_register_and_run_fork_methods_published
     rule: >
       Generated openrpc.json is derived from api_specification.method_catalog and must continue to match the currently
       registered /v1/rpc handler set. The read-only bundle.list, bundle.get, and bundle.agents catalog methods are now
       published because their handlers and store owner are implemented in the same gated PR. run.fork is now published
       because its selected-contract API/runtime handler owner is implemented in the same gated PR. Mutating bundle.register
-      and destructive bundle.delete remain source authority only until their API/runtime handlers are implemented and
-      registered in a later gated PR.
+      is now published because its handler, idempotency behavior, shared bundle catalog writer, and generated artifacts are
+      implemented together. Destructive bundle.delete remains source authority only until its API/runtime handler is
+      implemented and registered in a later gated PR.
     proof_expectation: >
-      Source-authority promotion proof must verify that bundle.register and bundle.delete are not silently published in
-      generated OpenRPC without implementation, and that future implementation PRs promote matching method_catalog entries
-      and generated artifacts together.
+      Source-authority promotion proof must verify that bundle.delete is not silently published in generated OpenRPC
+      without implementation, and that future implementation PRs promote matching method_catalog entries and generated
+      artifacts together.
   bundle_identity:
     canonical_name: bundle_hash
     format: 'bundle-v1:sha256:<64 lowercase hex>'
@@ -5822,7 +5823,7 @@ multi_bundle_persistence:
         - containers_stopped
         - dry_run
   api_surface:
-    publication_status: partial_bundle_read_catalog_and_run_fork_generated_openrpc
+    publication_status: bundle_read_catalog_register_and_run_fork_generated_openrpc
     command_transport_owner: api_specification
     bundle_methods_planned:
       bundle.list:
@@ -5838,8 +5839,15 @@ multi_bundle_persistence:
         result: Agent definitions from the persisted bundle bytes
       bundle.register:
         kind: mutate
-        params: content_yaml, data_blob?, idempotency_key?
-        result: BundleRegistrationResult with bundle_hash
+        params: BundleRegistrationEnvelopeV1 content_yaml, data_blob?, idempotency_key?
+        result: BundleRegistrationResult with bundle_hash, registered, and idempotency_replayed
+        rule: >
+          Registration materializes the submitted BundleRegistrationEnvelopeV1 into a temporary contract root, consumes the
+          canonical internal/runtime/contracts.BundleHash owner, persists exactly one shared bundle catalog row through the
+          store UPSERT owner, and does not start runtime work or update runs. Re-registering the same canonical content is a
+          no-op. Existing same-hash rows with different persisted content/projection fail closed with
+          BUNDLE_REGISTER_CONFLICT. Re-registering a previously deleted hash never restores runs.bundle_source from deleted
+          to persisted.
       bundle.delete:
         kind: destructive_mutate
         params: bundle_hash, force?, dry_run?, idempotency_key?
@@ -10174,6 +10182,7 @@ api_specification:
         '
       ttl: 24 hours after first completed response stored.
       mutating_methods:
+      - bundle.register
       - event.publish
       - event.replay
       - run.fork
@@ -10263,6 +10272,7 @@ api_specification:
       - read:entities
       - read:events
       - read:bundles
+      - write:bundles
       - read:mailbox
       - approve:mailbox
       - read:agents
@@ -10362,6 +10372,7 @@ api_specification:
         - read:entities
         - read:events
         - read:bundles
+        - write:bundles
         - read:mailbox
         - approve:mailbox
         - read:agents
@@ -10521,6 +10532,59 @@ api_specification:
             type: array
             items:
               $ref: '#/components/schemas/BundleAgentDefinition'
+      BundleRegistrationEnvelopeV1:
+        type: object
+        additionalProperties: false
+        required:
+        - version
+        - files
+        properties:
+          version:
+            type: string
+            const: swarm.bundle.registration.v1
+            description: Envelope version for non-destructive bundle.register materialization.
+          files:
+            type: array
+            minItems: 1
+            items:
+              $ref: '#/components/schemas/BundleRegistrationFile'
+            description: Text contract files to materialize under the temporary bundle root. package.yaml is required.
+      BundleRegistrationFile:
+        type: object
+        additionalProperties: false
+        required:
+        - path
+        - content
+        properties:
+          path:
+            type: string
+            minLength: 1
+            description: Slash-separated path relative to the bundle root. Absolute paths, backslashes, NUL, and parent traversal are invalid.
+          content:
+            type: string
+            description: UTF-8 text content for YAML, prompt, policy, and other non-data bundle files.
+      BundleRegistrationDataBlob:
+        type: object
+        additionalProperties:
+          type: string
+          contentEncoding: base64
+        description: Optional raw data files keyed by slash-separated bundle-relative path; values are standard base64 bytes.
+      BundleRegistrationResult:
+        type: object
+        additionalProperties: false
+        required:
+        - bundle_hash
+        - registered
+        - idempotency_replayed
+        properties:
+          bundle_hash:
+            $ref: '#/components/schemas/BundleHash'
+          registered:
+            type: boolean
+            description: True only when this call inserted a new bundle catalog row; false for duplicate same-content registration.
+          idempotency_replayed:
+            type: boolean
+            description: True when the response was returned from the API idempotency owner.
       HealthCheckResult:
         type: object
         additionalProperties: false
@@ -12694,6 +12758,14 @@ api_specification:
             $ref: '#/components/schemas/Sha256Fingerprint'
           cause:
             type: string
+      BUNDLE_REGISTER_CONFLICT:
+        type: object
+        additionalProperties: false
+        required:
+        - bundle_hash
+        properties:
+          bundle_hash:
+            $ref: '#/components/schemas/BundleHash'
       UNSUPPORTED_BUNDLE_HASH:
         type: object
         additionalProperties: false
@@ -13208,6 +13280,41 @@ api_specification:
           $ref: '#/components/schemas/BundleAgentsResult'
       errors:
       - BUNDLE_NOT_FOUND
+    bundle.register:
+      tier: should_have
+      description: >
+        Register a bundle into the persisted bundle catalog without starting a runtime. The request submits a
+        BundleRegistrationEnvelopeV1 YAML document plus optional raw data files. The server materializes those files into a
+        temporary contract root, computes the canonical bundle_hash through internal/runtime/contracts.BundleHash, stores
+        canonical bundle catalog projection bytes through the shared store UPSERT owner, and returns the canonical
+        bundle_hash. This method never mutates runs and never restores rows whose bundle_source was previously marked
+        deleted.
+      scope:
+        required:
+        - write:bundles
+      idempotency: per the convention.
+      params:
+      - name: content_yaml
+        required: true
+        description: YAML-encoded BundleRegistrationEnvelopeV1. This is an upload envelope, not server-local filesystem authority.
+        schema:
+          type: string
+      - name: data_blob
+        required: false
+        schema:
+          $ref: '#/components/schemas/BundleRegistrationDataBlob'
+      - name: idempotency_key
+        required: false
+        schema:
+          type: string
+      result:
+        name: result
+        required: true
+        schema:
+          $ref: '#/components/schemas/BundleRegistrationResult'
+      errors:
+      - BUNDLE_REGISTER_CONFLICT
+      - IDEMPOTENCY_CONFLICT
     health.subscribe:
       tier: should_have
       description: WebSocket heartbeat subscription. Notifications carry the same shape as health.check returns.
@@ -15179,8 +15286,8 @@ api_specification:
         Legacy dynamic bundle.open/reload/close remains deferred and is not the multi-bundle public API. #1012 promotes the
         authoritative multi-bundle source model under multi_bundle_persistence, with planned bundle.list/get/agents/register/delete,
         run.fork, and bundle_hash create-new-work semantics. The read-only bundle.list/get/agents catalog methods and
-        run.fork are now published in method_catalog/OpenRPC with handlers; bundle.register/delete remain withheld until
-        their gated API/runtime implementation lands. Existing bundle_ref/bundle_fingerprint
+        non-destructive bundle.register and run.fork are now published in method_catalog/OpenRPC with handlers;
+        bundle.delete remains withheld until its gated API/runtime implementation lands. Existing bundle_ref/bundle_fingerprint
         language is migration evidence only after the #1001 bundle_hash decision.
     verify:
       methods:
