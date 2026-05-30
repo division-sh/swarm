@@ -276,10 +276,20 @@ func TestSQLiteRuntimeStoreDeliveryReplayAndReceiptSemantics(t *testing.T) {
 	if err := store.MarkEventDeliveryInProgress(ctx, eventID, "agent-1", uuid.NewString()); err != nil {
 		t.Fatalf("MarkEventDeliveryInProgress: %v", err)
 	}
+	if err := store.UpsertEventReceipt(ctx, eventID, "agent-1", runtimemanager.ReceiptStatusError, "boom"); err != nil {
+		t.Fatalf("UpsertEventReceipt retryable error: %v", err)
+	}
+	receipt, ok, err := store.GetEventReceipt(ctx, eventID, "agent-1")
+	if err != nil {
+		t.Fatalf("GetEventReceipt retryable error: %v", err)
+	}
+	if !ok || receipt.Status != runtimemanager.ReceiptStatusError || receipt.RetryCount != 1 || receipt.Error != "boom" {
+		t.Fatalf("retryable receipt = %+v ok=%v, want error retry_count=1 boom", receipt, ok)
+	}
 	if err := store.UpsertEventReceipt(ctx, eventID, "agent-1", runtimemanager.ReceiptStatusProcessed, ""); err != nil {
 		t.Fatalf("UpsertEventReceipt: %v", err)
 	}
-	receipt, ok, err := store.GetEventReceipt(ctx, eventID, "agent-1")
+	receipt, ok, err = store.GetEventReceipt(ctx, eventID, "agent-1")
 	if err != nil {
 		t.Fatalf("GetEventReceipt: %v", err)
 	}
@@ -325,24 +335,40 @@ func TestSQLiteRuntimeStoreDeliveryReplayAndReceiptSemantics(t *testing.T) {
 		t.Fatalf("missing pipeline receipts after receipt = %#v, want none", missing)
 	}
 
-	subEventID := uuid.NewString()
-	subEvt := events.Event{
-		ID:          subEventID,
-		RunID:       runID,
-		Type:        events.EventType("subscription.visible"),
-		SourceAgent: "runtime",
-		Payload:     json.RawMessage(`{"subscription":true}`),
-		CreatedAt:   now.Add(time.Second),
+	subSelfID := uuid.NewString()
+	subOtherID := uuid.NewString()
+	subNoDeliveryID := uuid.NewString()
+	subEvt := func(id string, offset time.Duration) events.Event {
+		return events.Event{
+			ID:          id,
+			RunID:       runID,
+			Type:        events.EventType("subscription.visible"),
+			SourceAgent: "runtime",
+			Payload:     json.RawMessage(`{"subscription":true}`),
+			CreatedAt:   now.Add(offset),
+		}
 	}
-	if err := store.AppendEvent(ctx, subEvt); err != nil {
-		t.Fatalf("AppendEvent subscription: %v", err)
+	if err := store.AppendEvent(ctx, subEvt(subSelfID, time.Second)); err != nil {
+		t.Fatalf("AppendEvent subscription self: %v", err)
+	}
+	if err := store.InsertEventDeliveries(ctx, subSelfID, []string{"agent-2"}); err != nil {
+		t.Fatalf("InsertEventDeliveries subscription self: %v", err)
+	}
+	if err := store.AppendEvent(ctx, subEvt(subOtherID, 2*time.Second)); err != nil {
+		t.Fatalf("AppendEvent subscription other: %v", err)
+	}
+	if err := store.InsertEventDeliveries(ctx, subOtherID, []string{"agent-1"}); err != nil {
+		t.Fatalf("InsertEventDeliveries subscription other: %v", err)
+	}
+	if err := store.AppendEvent(ctx, subEvt(subNoDeliveryID, 3*time.Second)); err != nil {
+		t.Fatalf("AppendEvent subscription no delivery: %v", err)
 	}
 	subscribed, err := store.ListPendingSubscribedEvents(ctx, "agent-2", []events.EventType{"subscription.*"}, now.Add(-time.Minute), 10)
 	if err != nil {
 		t.Fatalf("ListPendingSubscribedEvents: %v", err)
 	}
-	if len(subscribed) != 1 || subscribed[0].ID != subEventID {
-		t.Fatalf("subscribed pending events = %#v, want %s", subscribed, subEventID)
+	if len(subscribed) != 1 || subscribed[0].ID != subSelfID {
+		t.Fatalf("subscribed pending events = %#v, want only direct self %s", subscribed, subSelfID)
 	}
 }
 
