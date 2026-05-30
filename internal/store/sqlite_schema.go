@@ -195,7 +195,39 @@ func (s *SQLiteSchemaStore) rebuildSQLiteAgentsLLMBackendSchema(ctx context.Cont
 	if err != nil {
 		return err
 	}
-	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{})
+	conn, err := s.DB.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("reserve sqlite agents llm_backend migration connection: %w", err)
+	}
+	defer conn.Close()
+	legacyAlterTableEnabled, err := sqliteConnBoolPragma(ctx, conn, "legacy_alter_table")
+	if err != nil {
+		return err
+	}
+	restorePragmas := func() error {
+		_, legacyErr := conn.ExecContext(ctx, fmt.Sprintf(`PRAGMA legacy_alter_table = %s`, sqlitePragmaBoolValue(legacyAlterTableEnabled)))
+		_, fkErr := conn.ExecContext(ctx, `PRAGMA foreign_keys = ON`)
+		if legacyErr != nil {
+			legacyErr = fmt.Errorf("restore sqlite legacy_alter_table after agents llm_backend migration: %w", legacyErr)
+		}
+		if fkErr != nil {
+			fkErr = fmt.Errorf("restore sqlite foreign_keys after agents llm_backend migration: %w", fkErr)
+		}
+		return errors.Join(legacyErr, fkErr)
+	}
+	pragmasRestored := false
+	defer func() {
+		if !pragmasRestored {
+			_ = restorePragmas()
+		}
+	}()
+	if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
+		return fmt.Errorf("disable sqlite foreign keys for agents llm_backend migration: %w", err)
+	}
+	if _, err := conn.ExecContext(ctx, `PRAGMA legacy_alter_table = ON`); err != nil {
+		return fmt.Errorf("preserve sqlite child foreign keys during agents llm_backend migration: %w", err)
+	}
+	tx, err := conn.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
 		return fmt.Errorf("begin sqlite agents llm_backend migration: %w", err)
 	}
@@ -205,9 +237,6 @@ func (s *SQLiteSchemaStore) rebuildSQLiteAgentsLLMBackendSchema(ctx context.Cont
 			_ = tx.Rollback()
 		}
 	}()
-	if _, err := tx.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
-		return fmt.Errorf("disable sqlite foreign keys for agents llm_backend migration: %w", err)
-	}
 	if _, err := tx.ExecContext(ctx, `ALTER TABLE agents RENAME TO agents__llm_backend_migration`); err != nil {
 		return fmt.Errorf("rename legacy sqlite agents table: %w", err)
 	}
@@ -237,13 +266,60 @@ func (s *SQLiteSchemaStore) rebuildSQLiteAgentsLLMBackendSchema(ctx context.Cont
 			return fmt.Errorf("create canonical sqlite agents index: %w", err)
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `PRAGMA foreign_keys = ON`); err != nil {
-		return fmt.Errorf("restore sqlite foreign keys after agents llm_backend migration: %w", err)
-	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit sqlite agents llm_backend migration: %w", err)
 	}
 	committed = true
+	if err := restorePragmas(); err != nil {
+		return err
+	}
+	pragmasRestored = true
+	if err := sqliteForeignKeyCheck(ctx, conn); err != nil {
+		return err
+	}
+	return nil
+}
+
+func sqliteConnBoolPragma(ctx context.Context, conn *sql.Conn, name string) (bool, error) {
+	if conn == nil {
+		return false, fmt.Errorf("sqlite connection is required")
+	}
+	var value int
+	if err := conn.QueryRowContext(ctx, fmt.Sprintf(`PRAGMA %s`, name)).Scan(&value); err != nil {
+		return false, fmt.Errorf("inspect sqlite %s pragma: %w", name, err)
+	}
+	return value != 0, nil
+}
+
+func sqlitePragmaBoolValue(enabled bool) string {
+	if enabled {
+		return "ON"
+	}
+	return "OFF"
+}
+
+func sqliteForeignKeyCheck(ctx context.Context, conn *sql.Conn) error {
+	if conn == nil {
+		return fmt.Errorf("sqlite connection is required")
+	}
+	rows, err := conn.QueryContext(ctx, `PRAGMA foreign_key_check`)
+	if err != nil {
+		return fmt.Errorf("check sqlite foreign keys after agents llm_backend migration: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var table string
+		var rowid int64
+		var parent string
+		var fkid int
+		if err := rows.Scan(&table, &rowid, &parent, &fkid); err != nil {
+			return fmt.Errorf("scan sqlite foreign key check result: %w", err)
+		}
+		return fmt.Errorf("sqlite foreign_key_check failed after agents llm_backend migration: table=%s rowid=%d parent=%s fkid=%d", table, rowid, parent, fkid)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("read sqlite foreign key check result: %w", err)
+	}
 	return nil
 }
 

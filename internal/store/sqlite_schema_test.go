@@ -122,6 +122,15 @@ func TestSQLiteSchemaStoreMigratesLegacyAgentLLMBackendProfiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
 	}
+	agentPlans := []SchemaTableDDL{}
+	for _, plan := range platformPlans {
+		if plan.TableName == "agents" {
+			agentPlans = append(agentPlans, plan)
+		}
+	}
+	if len(agentPlans) != 1 {
+		t.Fatalf("agents platform plan count = %d, want 1", len(agentPlans))
+	}
 	sqliteStore, err := NewSQLiteSchemaStore(filepath.Join(t.TempDir(), "runtime.db"))
 	if err != nil {
 		t.Fatalf("NewSQLiteSchemaStore: %v", err)
@@ -153,15 +162,33 @@ func TestSQLiteSchemaStoreMigratesLegacyAgentLLMBackendProfiles(t *testing.T) {
 		t.Fatalf("create legacy sqlite agents: %v", err)
 	}
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO agents (agent_id, role, model_tier, llm_backend, conversation_mode)
-		VALUES
-			('agent-api', 'worker', 'sonnet', 'api', 'task'),
-			('agent-cli', 'worker', 'sonnet', 'cli_test', 'task'),
-			('agent-openai', 'worker', 'sonnet', 'openai_compatible', 'task')
-	`); err != nil {
+			INSERT INTO agents (agent_id, role, model_tier, llm_backend, conversation_mode)
+			VALUES
+				('agent-api', 'worker', 'sonnet', 'api', 'task'),
+				('agent-cli', 'worker', 'sonnet', 'cli_test', 'task'),
+				('agent-openai', 'worker', 'sonnet', 'openai_compatible', 'task')
+		`); err != nil {
 		t.Fatalf("seed legacy sqlite agents: %v", err)
 	}
-	if err := sqliteStore.EnsureSchemaTables(ctx, platformPlans); err != nil {
+	if _, err := sqliteStore.DB.ExecContext(ctx, `
+			CREATE TABLE agent_sessions (
+				session_id TEXT PRIMARY KEY,
+				agent_id TEXT NOT NULL REFERENCES agents(agent_id),
+				scope_key TEXT NOT NULL,
+				scope TEXT NOT NULL DEFAULT 'entity',
+				runtime_mode TEXT NOT NULL DEFAULT 'task',
+				status TEXT NOT NULL DEFAULT 'active'
+			)
+		`); err != nil {
+		t.Fatalf("create legacy sqlite agent_sessions child: %v", err)
+	}
+	if _, err := sqliteStore.DB.ExecContext(ctx, `
+			INSERT INTO agent_sessions (session_id, agent_id, scope_key)
+			VALUES ('session-api', 'agent-api', 'scope-api')
+		`); err != nil {
+		t.Fatalf("seed legacy sqlite agent_sessions child: %v", err)
+	}
+	if err := sqliteStore.EnsureSchemaTables(ctx, agentPlans); err != nil {
 		t.Fatalf("EnsureSchemaTables: %v", err)
 	}
 	rows, err := sqliteStore.DB.QueryContext(ctx, `SELECT agent_id, llm_backend FROM agents ORDER BY agent_id`)
@@ -201,6 +228,60 @@ func TestSQLiteSchemaStoreMigratesLegacyAgentLLMBackendProfiles(t *testing.T) {
 	}
 	if defaultBackend != "anthropic" {
 		t.Fatalf("sqlite default llm_backend = %q, want anthropic", defaultBackend)
+	}
+	conn, err := sqliteStore.DB.Conn(ctx)
+	if err != nil {
+		t.Fatalf("reserve sqlite validation connection: %v", err)
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys = ON`); err != nil {
+		t.Fatalf("enable sqlite foreign keys for validation: %v", err)
+	}
+	var childAgentID string
+	if err := conn.QueryRowContext(ctx, `SELECT agent_id FROM agent_sessions WHERE session_id = 'session-api'`).Scan(&childAgentID); err != nil {
+		t.Fatalf("query migrated sqlite child session: %v", err)
+	}
+	if childAgentID != "agent-api" {
+		t.Fatalf("child session agent_id = %q, want agent-api", childAgentID)
+	}
+	fkRows, err := conn.QueryContext(ctx, `PRAGMA foreign_key_list(agent_sessions)`)
+	if err != nil {
+		t.Fatalf("inspect sqlite agent_sessions foreign keys: %v", err)
+	}
+	defer fkRows.Close()
+	var referencesAgents bool
+	for fkRows.Next() {
+		var id, seq int
+		var tableName, from, to, onUpdate, onDelete, match string
+		if err := fkRows.Scan(&id, &seq, &tableName, &from, &to, &onUpdate, &onDelete, &match); err != nil {
+			t.Fatalf("scan sqlite agent_sessions foreign key: %v", err)
+		}
+		if tableName == "agents" && from == "agent_id" && to == "agent_id" {
+			referencesAgents = true
+		}
+	}
+	if err := fkRows.Err(); err != nil {
+		t.Fatalf("read sqlite agent_sessions foreign keys: %v", err)
+	}
+	if !referencesAgents {
+		t.Fatal("agent_sessions foreign key no longer references canonical agents(agent_id)")
+	}
+	checkRows, err := conn.QueryContext(ctx, `PRAGMA foreign_key_check`)
+	if err != nil {
+		t.Fatalf("run sqlite foreign_key_check: %v", err)
+	}
+	defer checkRows.Close()
+	if checkRows.Next() {
+		t.Fatal("sqlite foreign_key_check reported a violation after agents llm_backend migration")
+	}
+	if err := checkRows.Err(); err != nil {
+		t.Fatalf("read sqlite foreign_key_check: %v", err)
+	}
+	if _, err := conn.ExecContext(ctx, `
+			INSERT INTO agent_sessions (session_id, agent_id, scope_key)
+			VALUES ('session-missing', 'missing-agent', 'scope-missing')
+		`); err == nil {
+		t.Fatal("insert sqlite child session with missing agent succeeded after migration")
 	}
 }
 
