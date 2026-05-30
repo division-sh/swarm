@@ -1435,9 +1435,10 @@ func loadRuntimeConfigWithOptions(opts runtimeConfigLoadOptions) (runtimeConfigL
 	explicitPath := strings.TrimSpace(opts.ExplicitPath)
 	var result runtimeConfigLoadResult
 	var cfg *config.Config
+	backendOverride := strings.TrimSpace(opts.BackendOverride)
 	if explicitPath != "" {
 		path := resolvePath(opts.RepoRoot, explicitPath)
-		loaded, err := config.Load(path)
+		loaded, err := config.LoadWithOptions(path, config.LoadOptions{BackendOverride: backendOverride})
 		if err != nil {
 			return runtimeConfigLoadResult{}, fmt.Errorf("load %s: %w", path, err)
 		}
@@ -1447,7 +1448,7 @@ func loadRuntimeConfigWithOptions(opts runtimeConfigLoadOptions) (runtimeConfigL
 	} else if path, ok, err := executableAdjacentRuntimeConfigPath(); err != nil {
 		return runtimeConfigLoadResult{}, err
 	} else if ok {
-		loaded, err := config.Load(path)
+		loaded, err := config.LoadWithOptions(path, config.LoadOptions{BackendOverride: backendOverride})
 		if err != nil {
 			return runtimeConfigLoadResult{}, fmt.Errorf("load %s: %w", path, err)
 		}
@@ -1462,8 +1463,8 @@ func loadRuntimeConfigWithOptions(opts runtimeConfigLoadOptions) (runtimeConfigL
 		cfg = loaded
 		result.Source = "built-in default"
 	}
-	if backend := strings.TrimSpace(opts.BackendOverride); backend != "" {
-		cfg.LLM.Backend = backend
+	if backendOverride != "" && result.Source == "built-in default" {
+		cfg.LLM.Backend = backendOverride
 		if err := cfg.Validate(); err != nil {
 			return runtimeConfigLoadResult{}, err
 		}
