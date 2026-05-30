@@ -433,6 +433,8 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		},
 	}
 	apiReadOptions := apiv1.OperatorReadOptions{
+		RepoRoot:         repo,
+		PlatformSpecPath: resolvedPlatformSpecPath,
 		Ready: func() bool {
 			return ready.Load()
 		},

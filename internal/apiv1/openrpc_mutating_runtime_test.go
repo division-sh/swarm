@@ -796,6 +796,8 @@ func (s *mutatingRuntimeProbeState) options(t *testing.T) OperatorReadOptions {
 	t.Helper()
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 	return OperatorReadOptions{
+		RepoRoot:          t.TempDir(),
+		PlatformSpecPath:  testBundleRegistrationPlatformSpec(t),
 		Now:               func() time.Time { return s.now },
 		Ready:             func() bool { return true },
 		Database:          fakePinger{},

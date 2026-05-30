@@ -596,12 +596,19 @@ func TestOperatorBundleRegisterHandlersMaterializeCanonicalProjectionAndIdempote
 		details: map[string]store.BundleCatalogDetail{},
 		agents:  map[string]store.BundleCatalogAgentsResult{},
 	}
+	platformSpec := testBundleRegistrationPlatformSpec(t)
+	platformHash, err := fileSHA256Hex(platformSpec)
+	if err != nil {
+		t.Fatalf("hash platform spec: %v", err)
+	}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: OperatorReadHandlers(OperatorReadOptions{
-			Now:           func() time.Time { return time.Unix(1700000200, 0).UTC() },
-			BundleCatalog: catalog,
-			Idempotency:   newRecordingAPIIdempotencyStore(),
+			Now:              func() time.Time { return time.Unix(1700000200, 0).UTC() },
+			RepoRoot:         t.TempDir(),
+			PlatformSpecPath: platformSpec,
+			BundleCatalog:    catalog,
+			Idempotency:      newRecordingAPIIdempotencyStore(),
 		}),
 	})
 	envelope := testBundleRegistrationEnvelope()
@@ -625,7 +632,7 @@ func TestOperatorBundleRegisterHandlersMaterializeCanonicalProjectionAndIdempote
 	if upsert.BundleHash != bundleHash || !strings.Contains(upsert.ContentYAML, "bundle/package.yaml") || !strings.Contains(upsert.ContentYAML, "platform/platform-spec.yaml") {
 		t.Fatalf("bundle.register upsert = %#v", upsert)
 	}
-	if upsert.Metadata["source"] != "bundle.register" || upsert.Metadata["platform_spec_sha256"] == "" {
+	if upsert.Metadata["source"] != "bundle.register" || upsert.Metadata["platform_spec_sha256"] != platformHash {
 		t.Fatalf("bundle.register metadata = %#v", upsert.Metadata)
 	}
 	agents := asMap(t, upsert.ParsedJSON["agents"])
@@ -663,8 +670,10 @@ func TestOperatorBundleRegisterHandlersFailClosed(t *testing.T) {
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: OperatorReadHandlers(OperatorReadOptions{
-			BundleCatalog: catalog,
-			Idempotency:   newRecordingAPIIdempotencyStore(),
+			RepoRoot:         t.TempDir(),
+			PlatformSpecPath: testBundleRegistrationPlatformSpec(t),
+			BundleCatalog:    catalog,
+			Idempotency:      newRecordingAPIIdempotencyStore(),
 		}),
 	})
 
@@ -704,6 +713,19 @@ files:
         subscriptions:
           - scan.requested
 `
+}
+
+func testBundleRegistrationPlatformSpec(t *testing.T) string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	if err != nil {
+		t.Fatalf("read platform spec: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "platform-spec.yaml")
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatalf("write temp platform spec: %v", err)
+	}
+	return path
 }
 
 func rpcCall(t *testing.T, handler *Handler, body string) rpcResponse {

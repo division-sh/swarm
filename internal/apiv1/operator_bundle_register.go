@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -44,6 +43,11 @@ type bundleRegistrationFile struct {
 
 type bundleRegistrationMaterializedInput struct {
 	Label string
+}
+
+type bundleRegistrationRuntimeContext struct {
+	RepoRoot         string
+	PlatformSpecPath string
 }
 
 func OperatorBundleRegisterHandlers(opts OperatorReadOptions) map[string]MethodHandler {
@@ -85,7 +89,7 @@ func executeBundleRegister(ctx context.Context, req Request, opts OperatorReadOp
 		TTL:            bundleRegisterIdempotencyTTL,
 		Now:            now,
 	}, func(ctx context.Context) (store.APIIdempotencyCompletion, error) {
-		projection, err := buildBundleRegistrationProjection(params)
+		projection, err := buildBundleRegistrationProjection(params, bundleRegistrationRuntimeContextFromOptions(opts))
 		if err != nil {
 			return store.APIIdempotencyCompletion{}, err
 		}
@@ -173,15 +177,15 @@ func bundleRegistrationDataBlobParam(params map[string]any) (map[string][]byte, 
 	return out, nil
 }
 
-func buildBundleRegistrationProjection(params bundleRegistrationParams) (runtimecontracts.BundleCatalogProjection, error) {
+func buildBundleRegistrationProjection(params bundleRegistrationParams, runtimeCtx bundleRegistrationRuntimeContext) (runtimecontracts.BundleCatalogProjection, error) {
 	root, inputs, err := materializeBundleRegistration(params)
 	if err != nil {
 		return runtimecontracts.BundleCatalogProjection{}, err
 	}
 	defer os.RemoveAll(root)
 
-	repoRoot := defaultBundleRegistrationRepoRoot()
-	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
+	repoRoot := strings.TrimSpace(runtimeCtx.RepoRoot)
+	platformSpec := strings.TrimSpace(runtimeCtx.PlatformSpecPath)
 	platformHash, err := fileSHA256Hex(platformSpec)
 	if err != nil {
 		return runtimecontracts.BundleCatalogProjection{}, err
@@ -334,6 +338,24 @@ func bundleRegisterIdempotencyError(err error) error {
 	return err
 }
 
+func bundleRegistrationRuntimeContextFromOptions(opts OperatorReadOptions) bundleRegistrationRuntimeContext {
+	repoRoot := strings.TrimSpace(opts.RepoRoot)
+	platformSpec := strings.TrimSpace(opts.PlatformSpecPath)
+	if platformSpec == "" {
+		if repoRoot == "" {
+			repoRoot = defaultBundleRegistrationRepoRoot()
+		}
+		platformSpec = runtimecontracts.DefaultPlatformSpecFile(repoRoot)
+	}
+	if repoRoot == "" {
+		repoRoot = filepath.Dir(platformSpec)
+	}
+	return bundleRegistrationRuntimeContext{
+		RepoRoot:         repoRoot,
+		PlatformSpecPath: platformSpec,
+	}
+}
+
 func fileSHA256Hex(path string) (string, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -344,9 +366,5 @@ func fileSHA256Hex(path string) (string, error) {
 }
 
 func defaultBundleRegistrationRepoRoot() string {
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		return "."
-	}
-	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+	return "."
 }
