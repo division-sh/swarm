@@ -1,8 +1,15 @@
 package mutationlog
 
 import (
+	"context"
+	"database/sql"
 	"strings"
 	"testing"
+
+	"github.com/google/uuid"
+	runtimecorrelation "swarm/internal/runtime/correlation"
+	storerunlifecycle "swarm/internal/store/runlifecycle"
+	"swarm/internal/testutil"
 )
 
 func TestReconstructEntityStateProjection_FailsOnMalformedGateKey(t *testing.T) {
@@ -74,5 +81,40 @@ func TestReconstructEntityStateProjection_AppliesNestedFieldMutationsOverTopLeve
 	}
 	if _, ok := got.Fields["metadata.region"]; ok {
 		t.Fatalf("Fields contains literal dotted key: %#v", got.Fields)
+	}
+}
+
+func TestInsertStampsBundleSourceFactOnEnsuredRunRow(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	runID := uuid.NewString()
+	sourceFact := runtimecorrelation.BundleSourceFact{
+		BundleHash:        "bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111",
+		BundleSource:      storerunlifecycle.BundleSourcePersisted,
+		BundleFingerprint: "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+	}
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ctx = runtimecorrelation.WithBundleSourceFact(ctx, sourceFact)
+
+	if err := Insert(ctx, db, Record{
+		EntityID:   uuid.NewString(),
+		Field:      "status",
+		OldValue:   nil,
+		NewValue:   "open",
+		WriterType: "system_node",
+		WriterID:   "review",
+	}); err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+	var gotHash, gotFingerprint sql.NullString
+	var gotSource string
+	if err := db.QueryRow(`
+		SELECT bundle_hash, bundle_source, bundle_fingerprint
+		FROM runs
+		WHERE run_id = $1::uuid
+	`, runID).Scan(&gotHash, &gotSource, &gotFingerprint); err != nil {
+		t.Fatalf("load run bundle source: %v", err)
+	}
+	if !gotHash.Valid || gotHash.String != sourceFact.BundleHash || gotSource != sourceFact.BundleSource || !gotFingerprint.Valid || gotFingerprint.String != sourceFact.BundleFingerprint {
+		t.Fatalf("run bundle source = hash:%q valid:%v source:%q fingerprint:%q valid:%v, want %#v", gotHash.String, gotHash.Valid, gotSource, gotFingerprint.String, gotFingerprint.Valid, sourceFact)
 	}
 }

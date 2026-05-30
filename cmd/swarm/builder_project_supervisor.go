@@ -26,6 +26,7 @@ type runtimeProjectSupervisor struct {
 	cfg              *config.Config
 	stores           storeBundle
 	ready            *atomic.Bool
+	dev              bool
 	startRuntime     func(context.Context, *runtime.Runtime) error
 	shutdownRuntime  func(context.Context, *runtime.Runtime, runtime.ShutdownOptions) error
 	loadWorkflow     func(repoRoot, contractsRoot, platformSpecPath string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error)
@@ -51,13 +52,19 @@ func newRuntimeProjectSupervisor(
 	initialBundle *runtimecontracts.WorkflowContractBundle,
 	initialSource semanticview.Source,
 	initialRT *runtime.Runtime,
+	devMode ...bool,
 ) *runtimeProjectSupervisor {
+	dev := false
+	if len(devMode) > 0 {
+		dev = devMode[0]
+	}
 	return &runtimeProjectSupervisor{
 		repoRoot:         strings.TrimSpace(repoRoot),
 		platformSpecPath: strings.TrimSpace(platformSpecPath),
 		cfg:              cfg,
 		stores:           stores,
 		ready:            ready,
+		dev:              dev,
 		startRuntime: func(ctx context.Context, rt *runtime.Runtime) error {
 			return rt.Start(ctx)
 		},
@@ -155,6 +162,10 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 	if err != nil {
 		return builderpkg.ProjectStatus{}, fmt.Errorf("derive project bundle identity: %w", err)
 	}
+	bundleSourceFact, err := prepareServeBundleSource(ctx, s.stores, bundle, bundleIdentity.Fingerprint, s.dev)
+	if err != nil {
+		return builderpkg.ProjectStatus{}, fmt.Errorf("prepare project bundle source: %w", err)
+	}
 	workspaces := s.newWorkspaces(s.stores, s.repoRoot, resolvedRoot, source)
 	if err := workspaces.ValidateSource(ctx, source); err != nil {
 		return builderpkg.ProjectStatus{}, err
@@ -174,6 +185,7 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 			WorkflowModule:     module,
 			WorkspaceLifecycle: workspaces,
 			BundleFingerprint:  bundleIdentity.Fingerprint,
+			BundleSourceFact:   bundleSourceFact,
 		},
 	})
 	if err != nil {

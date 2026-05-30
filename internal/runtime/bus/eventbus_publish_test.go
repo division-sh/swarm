@@ -225,11 +225,14 @@ type recordedLogEntry struct {
 	Detail     any
 	Lineage    runtimecorrelation.RuntimeLineage
 	HasLineage bool
+	SourceFact runtimecorrelation.BundleSourceFact
+	HasSource  bool
 }
 
 func (h *recordingLoggerHook) Log(ctx context.Context, _ diaglog.Level, _, _, action, _, _, _, _, _ string, _ map[string]string, detail any, _ string, _ int) error {
 	lineage, ok := runtimecorrelation.RuntimeLineageFromContext(ctx)
-	h.entries = append(h.entries, recordedLogEntry{Action: action, Detail: detail, Lineage: lineage, HasLineage: ok})
+	sourceFact, hasSource := runtimecorrelation.BundleSourceFactFromContext(ctx)
+	h.entries = append(h.entries, recordedLogEntry{Action: action, Detail: detail, Lineage: lineage, HasLineage: ok, SourceFact: sourceFact, HasSource: hasSource})
 	return nil
 }
 
@@ -678,6 +681,43 @@ func TestEventBusPublish_AttachesTypedRuntimeDiagnosticLineage(t *testing.T) {
 		published.Lineage.Classification != runtimecorrelation.RuntimeLineageClassificationForkLocal {
 		t.Fatalf("published diagnostic lineage = %#v", published.Lineage)
 	}
+}
+
+func TestEventBusPublish_AttachesBundleSourceFactToRuntimeLogs(t *testing.T) {
+	logger := &recordingLoggerHook{}
+	sourceFact := runtimecorrelation.BundleSourceFact{
+		BundleHash:        "bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111",
+		BundleSource:      "persisted",
+		BundleFingerprint: "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+	}
+	bus, err := runtimebus.NewEventBusWithOptions(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{
+		Logger:           logger,
+		BundleSourceFact: sourceFact,
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	ch := bus.Subscribe("agent-1", events.EventType("task.requested"))
+	if err := bus.Publish(context.Background(), events.Event{
+		ID:        uuid.NewString(),
+		Type:      events.EventType("task.requested"),
+		RunID:     uuid.NewString(),
+		Payload:   []byte(`{"entity_id":"ent-1"}`),
+		CreatedAt: time.Now().UTC(),
+	}.WithEntityID("ent-1")); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for delivered event")
+	}
+	for _, entry := range logger.entries {
+		if entry.HasSource && entry.SourceFact == sourceFact.Normalized() {
+			return
+		}
+	}
+	t.Fatalf("bundle source fact not found in runtime logs: %#v", logger.entries)
 }
 
 func TestEventBusPublish_UsesPayloadValidator(t *testing.T) {

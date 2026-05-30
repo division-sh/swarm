@@ -7,6 +7,7 @@ import (
 
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimecorrelation "swarm/internal/runtime/correlation"
 	"swarm/internal/runtime/diaglog"
 	runtimeeventpayload "swarm/internal/runtime/eventpayload"
 	"swarm/internal/runtime/semanticview"
@@ -14,7 +15,7 @@ import (
 	runtimetools "swarm/internal/runtime/tools"
 )
 
-func newRuntimeEventBus(store runtimebus.EventStore, logger *RuntimeLogger, source semanticview.Source, bundleFingerprint string, interceptorProvider func() []runtimebus.EventInterceptor, payloadValidator runtimebus.PayloadValidator) (*runtimebus.EventBus, error) {
+func newRuntimeEventBus(store runtimebus.EventStore, logger *RuntimeLogger, source semanticview.Source, bundleFingerprint string, bundleSourceFact runtimecorrelation.BundleSourceFact, interceptorProvider func() []runtimebus.EventInterceptor, payloadValidator runtimebus.PayloadValidator) (*runtimebus.EventBus, error) {
 	var hook runtimebus.LoggerHook
 	if logger != nil {
 		hook = runtimeLoggerHook{logger: logger}
@@ -25,6 +26,7 @@ func newRuntimeEventBus(store runtimebus.EventStore, logger *RuntimeLogger, sour
 		ContractBundle:      source,
 		PayloadValidator:    payloadValidator,
 		BundleFingerprint:   bundleFingerprint,
+		BundleSourceFact:    bundleSourceFact,
 	})
 }
 

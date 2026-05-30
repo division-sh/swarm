@@ -13,6 +13,25 @@ type runIDContextKey struct{}
 type handlerIDContextKey struct{}
 type runtimeLineageContextKey struct{}
 type bundleFingerprintContextKey struct{}
+type bundleSourceFactContextKey struct{}
+
+type BundleSourceFact struct {
+	BundleHash        string
+	BundleSource      string
+	BundleFingerprint string
+}
+
+func (f BundleSourceFact) Normalized() BundleSourceFact {
+	f.BundleHash = strings.TrimSpace(f.BundleHash)
+	f.BundleSource = strings.TrimSpace(f.BundleSource)
+	f.BundleFingerprint = strings.TrimSpace(f.BundleFingerprint)
+	return f
+}
+
+func (f BundleSourceFact) Empty() bool {
+	f = f.Normalized()
+	return f.BundleHash == "" && f.BundleSource == "" && f.BundleFingerprint == ""
+}
 
 type RuntimeLineageRowCategory string
 
@@ -226,6 +245,36 @@ func BundleFingerprintFromContext(ctx context.Context) string {
 	}
 	fingerprint, _ := ctx.Value(bundleFingerprintContextKey{}).(string)
 	return strings.TrimSpace(fingerprint)
+}
+
+func WithBundleSourceFact(ctx context.Context, fact BundleSourceFact) context.Context {
+	if ctx == nil {
+		return nil
+	}
+	fact = fact.Normalized()
+	if fact.Empty() {
+		return ctx
+	}
+	ctx = context.WithValue(ctx, bundleSourceFactContextKey{}, fact)
+	if fact.BundleFingerprint != "" {
+		ctx = WithBundleFingerprint(ctx, fact.BundleFingerprint)
+	}
+	return ctx
+}
+
+func BundleSourceFactFromContext(ctx context.Context) (BundleSourceFact, bool) {
+	if ctx == nil {
+		return BundleSourceFact{}, false
+	}
+	fact, ok := ctx.Value(bundleSourceFactContextKey{}).(BundleSourceFact)
+	if !ok {
+		return BundleSourceFact{}, false
+	}
+	fact = fact.Normalized()
+	if fact.Empty() {
+		return BundleSourceFact{}, false
+	}
+	return fact, true
 }
 
 func CorrelateEvent(ctx context.Context, evt events.Event) (context.Context, events.Event) {

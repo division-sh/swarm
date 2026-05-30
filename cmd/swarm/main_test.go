@@ -2245,6 +2245,54 @@ func assertServeRuntimeUnavailableBundleRunOrphaned(t *testing.T, ctx context.Co
 	}
 }
 
+func TestPrepareServeBundleSourcePersistsCatalogForContractsServe(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	ctx := context.Background()
+	bundle := loadWorkflowValidationFixtureBundle(t, "tests/tier12-runtime-tools/test-flow-data-access")
+	identity, err := runtimecontracts.BootBundleIdentity(bundle)
+	if err != nil {
+		t.Fatalf("BootBundleIdentity: %v", err)
+	}
+
+	fact, err := prepareServeBundleSource(ctx, storeBundle{Postgres: pg}, bundle, identity.Fingerprint, false)
+	if err != nil {
+		t.Fatalf("prepareServeBundleSource: %v", err)
+	}
+	if fact.BundleSource != storerunlifecycle.BundleSourcePersisted || fact.BundleHash == "" || fact.BundleFingerprint != identity.Fingerprint {
+		t.Fatalf("source fact = %#v", fact)
+	}
+	detail, err := pg.LoadBundleCatalog(ctx, fact.BundleHash)
+	if err != nil {
+		t.Fatalf("LoadBundleCatalog(%s): %v", fact.BundleHash, err)
+	}
+	if detail.BundleHash != fact.BundleHash || detail.AgentCount == 0 || detail.ContentYAML == "" {
+		t.Fatalf("bundle catalog detail = %#v", detail)
+	}
+}
+
+func TestPrepareServeBundleSourceDevStampsEphemeralWithoutCatalogRow(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	ctx := context.Background()
+	bundle := loadWorkflowValidationFixtureBundle(t, "tests/tier12-runtime-tools/test-flow-data-access")
+	identity, err := runtimecontracts.BootBundleIdentity(bundle)
+	if err != nil {
+		t.Fatalf("BootBundleIdentity: %v", err)
+	}
+
+	fact, err := prepareServeBundleSource(ctx, storeBundle{Postgres: pg}, bundle, identity.Fingerprint, true)
+	if err != nil {
+		t.Fatalf("prepareServeBundleSource(dev): %v", err)
+	}
+	if fact.BundleSource != storerunlifecycle.BundleSourceEphemeral || fact.BundleHash == "" || fact.BundleFingerprint != identity.Fingerprint {
+		t.Fatalf("source fact = %#v", fact)
+	}
+	if _, err := pg.LoadBundleCatalog(ctx, fact.BundleHash); err != store.ErrBundleNotFound {
+		t.Fatalf("LoadBundleCatalog(dev hash) error = %v, want ErrBundleNotFound", err)
+	}
+}
+
 func TestCLI_NoArgCommandsRejectUnexpectedArgs(t *testing.T) {
 	for _, tc := range []struct {
 		name string

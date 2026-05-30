@@ -2,6 +2,8 @@ package contracts
 
 import (
 	"bytes"
+	"encoding/base64"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -91,6 +93,97 @@ func TestBundleHashV1AcceptsCurrentPlatformSpec(t *testing.T) {
 	}
 	if !regexp.MustCompile(`^bundle-v1:sha256:[a-f0-9]{64}$`).MatchString(got) {
 		t.Fatalf("BundleHash = %q, want v1 bundle hash shape", got)
+	}
+}
+
+func TestBundleCatalogProjectionUsesCanonicalInputsWithoutHostPaths(t *testing.T) {
+	root, platform := writeEquivalentBundleHashFixture(t, "\n", "name: projection\nversion: \"1.0.0\"\nflows:\n  - id: alpha\n    flow: alpha\n")
+	writeBundleHashText(t, filepath.Join(root, "flows", "alpha", "agents.yaml"), `
+agents:
+  reviewer:
+    role: review
+`)
+	writeBundleHashBytes(t, filepath.Join(root, "flows", "alpha", "data", "payload.bin"), []byte{0x01, 0x02, 0x03})
+	bundle := bundleHashTestBundle(root, platform)
+	bundle.Semantics.Name = "projection"
+	bundle.Semantics.Version = "1.0.0"
+	bundle.Agents = map[string]AgentRegistryEntry{
+		"reviewer": {
+			Role:             "review",
+			Type:             "managed",
+			ModelTier:        "haiku",
+			PromptRef:        "flows/alpha/prompts/reviewer.md",
+			Subscriptions:    []string{"scan.requested"},
+			Tools:            []string{"web_search"},
+			ConversationMode: "session",
+		},
+	}
+
+	projection, err := BuildBundleCatalogProjection(bundle)
+	if err != nil {
+		t.Fatalf("BuildBundleCatalogProjection: %v", err)
+	}
+	if !regexp.MustCompile(`^bundle-v1:sha256:[a-f0-9]{64}$`).MatchString(projection.BundleHash) {
+		t.Fatalf("BundleHash = %q, want v1 shape", projection.BundleHash)
+	}
+	if strings.Contains(projection.ContentYAML, root) || strings.Contains(projection.ContentYAML, platform) {
+		t.Fatalf("ContentYAML leaked host path:\n%s", projection.ContentYAML)
+	}
+	if !strings.Contains(projection.ContentYAML, `label: "bundle/package.yaml"`) {
+		t.Fatalf("ContentYAML missing package label:\n%s", projection.ContentYAML)
+	}
+	canonicalPackage, err := canonicalBundleHashContent(filepath.Join(root, "package.yaml"), bundleHashYAML)
+	if err != nil {
+		t.Fatalf("canonical package: %v", err)
+	}
+	if !strings.Contains(projection.ContentYAML, base64.StdEncoding.EncodeToString(canonicalPackage)) {
+		t.Fatalf("ContentYAML missing base64 package bytes:\n%s", projection.ContentYAML)
+	}
+	var data struct {
+		Entries []struct {
+			Label         string `json:"label"`
+			ContentBase64 string `json:"content_base64"`
+		} `json:"entries"`
+	}
+	if err := json.Unmarshal(projection.DataBlob, &data); err != nil {
+		t.Fatalf("decode DataBlob: %v", err)
+	}
+	if len(data.Entries) != 1 || data.Entries[0].Label != "bundle/flows/alpha/data/payload.bin" || data.Entries[0].ContentBase64 != base64.StdEncoding.EncodeToString([]byte{0x01, 0x02, 0x03}) {
+		t.Fatalf("data blob = %#v", data)
+	}
+	agents, ok := projection.ParsedJSON["agents"].(map[string]any)
+	if !ok {
+		t.Fatalf("agents projection = %#v", projection.ParsedJSON["agents"])
+	}
+	reviewer, ok := agents["reviewer"].(map[string]any)
+	if !ok {
+		t.Fatalf("reviewer projection = %#v", agents["reviewer"])
+	}
+	if _, hasRuntimeState := reviewer["runtime_state"]; hasRuntimeState {
+		t.Fatalf("agents projection contains runtime state: %#v", reviewer)
+	}
+	if projection.Metadata["projection_version"] != bundleCatalogProjectionVersion || projection.Metadata["source"] != "swarm serve --contracts" {
+		t.Fatalf("metadata = %#v", projection.Metadata)
+	}
+}
+
+func TestBundleCatalogProjectionStableForEquivalentCanonicalContent(t *testing.T) {
+	rootA, platformA := writeEquivalentBundleHashFixture(t, "\r\n", "name: equivalent\r\nversion: \"1.0.0\"\r\nflows: []\r\n")
+	rootB, platformB := writeEquivalentBundleHashFixture(t, "\n", "flows: []\nversion: \"1.0.0\"\nname: equivalent\n")
+
+	projectionA, err := BuildBundleCatalogProjection(bundleHashTestBundle(rootA, platformA))
+	if err != nil {
+		t.Fatalf("BuildBundleCatalogProjection A: %v", err)
+	}
+	projectionB, err := BuildBundleCatalogProjection(bundleHashTestBundle(rootB, platformB))
+	if err != nil {
+		t.Fatalf("BuildBundleCatalogProjection B: %v", err)
+	}
+	if projectionA.BundleHash != projectionB.BundleHash {
+		t.Fatalf("equivalent hashes drifted: A=%s B=%s", projectionA.BundleHash, projectionB.BundleHash)
+	}
+	if projectionA.ContentYAML != projectionB.ContentYAML {
+		t.Fatalf("equivalent content_yaml projections drifted:\nA=%s\nB=%s", projectionA.ContentYAML, projectionB.ContentYAML)
 	}
 }
 

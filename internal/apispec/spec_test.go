@@ -275,7 +275,7 @@ func TestGeneratedOpenRPCBundleIdentityDescriptionsPreserveConstraints(t *testin
 func TestMultiBundleSourceAuthorityPublishesOnlyImplementedBundleReadAndRunForkMethods(t *testing.T) {
 	root := loadPlatformSpecYAMLNode(t)
 	multi := mustMappingValue(t, root, "multi_bundle_persistence")
-	assertScalarValue(t, mustMappingValue(t, multi, "status"), "promoted_source_authority_no_runtime_behavior")
+	assertScalarValue(t, mustMappingValue(t, multi, "status"), "promoted_source_authority_with_partial_runtime_behavior")
 
 	sourceEvidence := mustMappingValue(t, multi, "source_evidence")
 	assertScalarValue(t, mustMappingValue(t, sourceEvidence, "run_fork_cli_authority_absorbed_from"), "#1038")
@@ -313,6 +313,15 @@ func TestMultiBundleSourceAuthorityPublishesOnlyImplementedBundleReadAndRunForkM
 
 	persistence := mustMappingValue(t, multi, "persistence_model")
 	assertScalarContains(t, mustMappingValue(t, persistence, "live_schema_boundary"), "#1013 promotes the bundles table")
+	serveIngest := mustMappingValue(t, persistence, "serve_ingest_projection")
+	assertScalarValue(t, mustMappingValue(t, serveIngest, "status"), "implemented_for_local_postgres_serve_contracts")
+	assertScalarValue(t, mustMappingValue(t, serveIngest, "projection_owner"), "internal/runtime/contracts.BuildBundleCatalogProjection")
+	assertScalarValue(t, mustMappingValue(t, serveIngest, "store_owner"), "internal/store.PostgresStore.UpsertBundleCatalog")
+	assertScalarValue(t, mustMappingValue(t, serveIngest, "source_fact_owner"), "cmd/swarm.prepareServeBundleSource")
+	assertScalarContains(t, mustMappingValue(t, serveIngest, "content_yaml"), "canonical content bytes as base64")
+	assertScalarContains(t, mustMappingValue(t, serveIngest, "data_blob"), "raw bytes as base64")
+	assertScalarContains(t, mustMappingValue(t, serveIngest, "parsed_json"), "Runtime-owned fields")
+	assertScalarContains(t, mustMappingValue(t, serveIngest, "idempotency"), "fails closed before runtime construction")
 	platformTables := mustMappingValue(t, mustMappingValue(t, root, "platform_tables"), "tables")
 	if mappingValue(platformTables, "bundles") == nil {
 		t.Fatal("bundles table must be live in platform_tables after the DB migration child lands")

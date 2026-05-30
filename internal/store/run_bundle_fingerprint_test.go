@@ -52,6 +52,48 @@ func TestPostgresStore_RunBundleSourceClassifiesCurrentWritersAsLegacyAndKeepsSe
 	assertRunBundleIdentity(t, db, runID, "", storerunlifecycle.BundleSourceLegacy, testBootBundleFingerprint)
 }
 
+func TestPostgresStore_RunBundleSourceConsumesCanonicalSourceFact(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	runID := uuid.NewString()
+	ctx := runtimecorrelation.WithBundleSourceFact(context.Background(), runtimecorrelation.BundleSourceFact{
+		BundleHash:        testCanonicalBundleHash,
+		BundleSource:      storerunlifecycle.BundleSourcePersisted,
+		BundleFingerprint: testBootBundleFingerprint,
+	})
+
+	if err := pg.AppendEvent(ctx, events.Event{
+		ID:          uuid.NewString(),
+		RunID:       runID,
+		Type:        "scan.requested",
+		SourceAgent: "test",
+		Payload:     []byte(`{}`),
+		CreatedAt:   time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("AppendEvent(persisted): %v", err)
+	}
+	assertRunBundleIdentity(t, db, runID, testCanonicalBundleHash, storerunlifecycle.BundleSourcePersisted, testBootBundleFingerprint)
+
+	ephemeralRunID := uuid.NewString()
+	ephemeralHash := "bundle-v1:sha256:3333333333333333333333333333333333333333333333333333333333333333"
+	ephemeralCtx := runtimecorrelation.WithBundleSourceFact(context.Background(), runtimecorrelation.BundleSourceFact{
+		BundleHash:        ephemeralHash,
+		BundleSource:      storerunlifecycle.BundleSourceEphemeral,
+		BundleFingerprint: testOtherBundleFingerprint,
+	})
+	if err := pg.AppendEvent(ephemeralCtx, events.Event{
+		ID:          uuid.NewString(),
+		RunID:       ephemeralRunID,
+		Type:        "scan.dev",
+		SourceAgent: "test",
+		Payload:     []byte(`{}`),
+		CreatedAt:   time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("AppendEvent(ephemeral): %v", err)
+	}
+	assertRunBundleIdentity(t, db, ephemeralRunID, ephemeralHash, storerunlifecycle.BundleSourceEphemeral, testOtherBundleFingerprint)
+}
+
 func TestPostgresStore_RunBundleSourceAllowsUnknownLegacyRows(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
@@ -125,6 +167,18 @@ func TestRunLifecycleOwnerPersistsCanonicalBundleHashWhenSupplied(t *testing.T) 
 		t.Fatalf("EnsureActive: %v", err)
 	}
 	assertRunBundleIdentity(t, db, runID, testCanonicalBundleHash, storerunlifecycle.BundleSourcePersisted, "")
+}
+
+func TestRunLifecycleOwnerRejectsNonLegacySourceWithoutBundleHash(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	err := storerunlifecycle.EnsureActive(context.Background(), db, uuid.NewString(), "", "", storerunlifecycle.EnsureActiveOptions{
+		HasBundleHashCol:   true,
+		HasBundleSourceCol: true,
+		BundleSource:       storerunlifecycle.BundleSourcePersisted,
+	})
+	if err == nil {
+		t.Fatal("EnsureActive error = nil, want missing bundle_hash rejection")
+	}
 }
 
 func TestPostgresStore_ActiveRunBundleAvailabilityConflicts(t *testing.T) {

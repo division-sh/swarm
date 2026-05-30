@@ -130,3 +130,41 @@ func TestBundleCatalogReadSurfaceMissingCursorAndMalformedProjection(t *testing.
 		t.Fatalf("ListBundleCatalogAgents malformed error = %v, want runtime field rejection", err)
 	}
 }
+
+func TestBundleCatalogWriteSurfaceUpsertsAndRejectsHashCollision(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	bundleHash := "bundle-v1:sha256:5555555555555555555555555555555555555555555555555555555555555555"
+	req := BundleCatalogUpsert{
+		BundleHash:  bundleHash,
+		ContentYAML: "projection_version: swarm.bundle.catalog.v1\nfiles: []\n",
+		ParsedJSON: map[string]any{
+			"agents": map[string]any{
+				"researcher": map[string]any{
+					"role": "research",
+				},
+			},
+		},
+		DataBlob: []byte(`{"projection_version":"swarm.bundle.catalog.v1","entries":[]}`),
+		Metadata: map[string]any{
+			"source": "test",
+		},
+	}
+
+	detail, err := pg.UpsertBundleCatalog(ctx, req)
+	if err != nil {
+		t.Fatalf("UpsertBundleCatalog: %v", err)
+	}
+	if detail.BundleHash != bundleHash || detail.AgentCount != 1 || !detail.HasData || detail.Metadata["source"] != "test" {
+		t.Fatalf("detail = %#v", detail)
+	}
+
+	if _, err := pg.UpsertBundleCatalog(ctx, req); err != nil {
+		t.Fatalf("UpsertBundleCatalog idempotent: %v", err)
+	}
+	req.ContentYAML = "projection_version: swarm.bundle.catalog.v1\nfiles: [changed]\n"
+	if _, err := pg.UpsertBundleCatalog(ctx, req); err == nil || !strings.Contains(err.Error(), "different content") {
+		t.Fatalf("UpsertBundleCatalog collision error = %v, want different content", err)
+	}
+}
