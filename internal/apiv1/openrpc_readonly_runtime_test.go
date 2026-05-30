@@ -243,6 +243,7 @@ func approvedReadOnlyHTTPRuntimeMethods() []string {
 		"agent.diagnose",
 		"agent.get",
 		"agent.list",
+		"agent.usage",
 		"bundle.agents",
 		"bundle.get",
 		"bundle.list",
@@ -276,6 +277,7 @@ func readOnlyHTTPRuntimeFixtures() map[string]readOnlyHTTPRuntimeFixture {
 		"agent.diagnose":                 {Params: map[string]any{"agent_id": "agent-1"}, ResultKeys: []string{"agent_id", "status", "queue", "runtime_state", "active", "last_tool_outcome"}},
 		"agent.get":                      {Params: map[string]any{"agent_id": "agent-1"}, ResultKeys: []string{"agent"}},
 		"agent.list":                     {Params: map[string]any{}, ResultKeys: []string{"agents"}},
+		"agent.usage":                    {Params: map[string]any{"agent_id": "agent-1", "since": "2026-05-21T09:00:00Z", "until": "2026-05-21T10:00:00Z"}, ResultKeys: []string{"agent_id", "window", "usage", "breakdown"}},
 		"bundle.agents":                  {Params: map[string]any{"bundle_hash": readOnlyProbeBundleHash}, ResultKeys: []string{"agents"}},
 		"bundle.get":                     {Params: map[string]any{"bundle_hash": readOnlyProbeBundleHash}, ResultKeys: []string{"bundle_hash", "content_yaml", "parsed_json", "metadata", "agent_count", "has_data", "data_size_bytes", "ingested_at"}},
 		"bundle.list":                    {Params: map[string]any{}, ResultKeys: []string{"bundles"}},
@@ -322,6 +324,16 @@ func readOnlyHTTPRuntimeErrorProbes() []readOnlyHTTPRuntimeErrorProbe {
 			Options: func(t *testing.T) OperatorReadOptions {
 				opts := readOnlyRuntimeProbeOptions(t)
 				opts.AgentConversations = &fakeAgentConversationReadStore{agentDiagnosisErr: store.ErrAgentNotFound}
+				return opts
+			},
+		},
+		{
+			Method: "agent.usage",
+			Params: map[string]any{"agent_id": "missing"},
+			Code:   AgentNotFoundCode,
+			Options: func(t *testing.T) OperatorReadOptions {
+				opts := readOnlyRuntimeProbeOptions(t)
+				opts.AgentConversations = &fakeAgentConversationReadStore{agentUsageErr: store.ErrAgentNotFound}
 				return opts
 			},
 		},
@@ -674,6 +686,48 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 					},
 				},
 			},
+			agentUsageResult: store.OperatorAgentUsage{
+				AgentID: "agent-1",
+				Window: store.OperatorAgentUsageWindow{
+					Since: ptrTime(now.Add(-time.Hour)),
+					Until: ptrTime(now),
+				},
+				Usage: store.OperatorAgentUsageByAccounting{
+					Exact: store.OperatorAgentUsageTotals{
+						LedgerEntries:    1,
+						InputTokens:      100,
+						OutputTokens:     25,
+						EstimatedCostUSD: 0.000675,
+					},
+					Estimated: store.OperatorAgentUsageTotals{
+						LedgerEntries:    1,
+						InputTokens:      50,
+						OutputTokens:     10,
+						EstimatedCostUSD: 0.000300,
+					},
+				},
+				Breakdown: []store.OperatorAgentUsageBreakdown{{
+					UsageAccounting: store.AgentUsageAccountingExact,
+					InvocationType:  "api",
+					Model:           "claude-3-5-sonnet",
+					Totals: store.OperatorAgentUsageTotals{
+						LedgerEntries:    1,
+						InputTokens:      100,
+						OutputTokens:     25,
+						EstimatedCostUSD: 0.000675,
+					},
+				}, {
+					UsageAccounting: store.AgentUsageAccountingEstimated,
+					InvocationType:  "cli_test",
+					Model:           "claude-cli-sonnet",
+					Totals: store.OperatorAgentUsageTotals{
+						LedgerEntries:    1,
+						InputTokens:      50,
+						OutputTokens:     10,
+						EstimatedCostUSD: 0.000300,
+					},
+				}},
+			},
 			agentDeliveryDiagnosticsResult: store.OperatorAgentDeliveryDiagnostics{
 				AgentID: "agent-1",
 				Summary: store.OperatorAgentDeliveryDiagnosticsSummary{
@@ -919,6 +973,27 @@ func assertReadOnlyProbeSuccess(t *testing.T, methodName string, resp rpcRespons
 			}
 			if subscribers, ok := downstream["subscribers"].([]any); !ok || len(subscribers) != 0 {
 				t.Fatalf("mailbox.get decision_sheet.downstream_preview.subscribers = %#v", downstream["subscribers"])
+			}
+		}
+	}
+	if methodName == "agent.usage" {
+		usage := asMap(t, result["usage"])
+		exact := asMap(t, usage["exact"])
+		estimated := asMap(t, usage["estimated"])
+		if exact["input_tokens"] != float64(100) || estimated["input_tokens"] != float64(50) {
+			t.Fatalf("agent.usage exact/estimated totals = %#v", usage)
+		}
+		breakdown, ok := result["breakdown"].([]any)
+		if !ok || len(breakdown) != 2 {
+			t.Fatalf("agent.usage breakdown = %#v", result["breakdown"])
+		}
+		first := asMap(t, breakdown[0])
+		if first["usage_accounting"] != "exact" || first["invocation_type"] != "api" {
+			t.Fatalf("agent.usage first breakdown = %#v", first)
+		}
+		for _, forbidden := range []string{"token_usage", "run_id", "session_id", "turn_id"} {
+			if _, ok := result[forbidden]; ok {
+				t.Fatalf("agent.usage exposed forbidden field %q: %#v", forbidden, result)
 			}
 		}
 	}

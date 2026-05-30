@@ -210,15 +210,16 @@ func (t *BudgetTracker) TerminalInstanceStates() []string {
 }
 
 type SpendRecord struct {
-	EntityID       string
-	FlowInstance   string
-	AgentID        string
-	Model          string
-	InputTokens    int
-	OutputTokens   int
-	CostUSD        float64
-	InvocationType string
-	RecordedAt     time.Time
+	EntityID        string
+	FlowInstance    string
+	AgentID         string
+	Model           string
+	InputTokens     int
+	OutputTokens    int
+	CostUSD         float64
+	InvocationType  string
+	UsageAccounting string
+	RecordedAt      time.Time
 }
 
 func (r SpendRecord) EffectiveEntityID() string {
@@ -245,6 +246,7 @@ func (t *BudgetTracker) RecordSpend(ctx context.Context, rec SpendRecord) error 
 	rec.AgentID = strings.TrimSpace(rec.AgentID)
 	rec.Model = strings.TrimSpace(rec.Model)
 	rec.InvocationType = strings.TrimSpace(strings.ToLower(rec.InvocationType))
+	rec.UsageAccounting = strings.TrimSpace(strings.ToLower(rec.UsageAccounting))
 	if rec.FlowInstance == "" {
 		return fmt.Errorf("spend flow_instance is required")
 	}
@@ -256,6 +258,11 @@ func (t *BudgetTracker) RecordSpend(ctx context.Context, rec SpendRecord) error 
 	}
 	if rec.InvocationType == "" {
 		return fmt.Errorf("spend invocation_type is required")
+	}
+	switch rec.UsageAccounting {
+	case string(llm.BudgetUsageExact), string(llm.BudgetUsageEstimated):
+	default:
+		return fmt.Errorf("spend usage_accounting must be exact or estimated")
 	}
 	if rec.InputTokens < 0 {
 		rec.InputTokens = 0
@@ -269,9 +276,9 @@ func (t *BudgetTracker) RecordSpend(ctx context.Context, rec SpendRecord) error 
 
 	const q = `
 		INSERT INTO spend_ledger (
-			entity_id, flow_instance, agent_id, model, input_tokens, output_tokens, cost_usd, invocation_type, created_at
+			entity_id, flow_instance, agent_id, model, input_tokens, output_tokens, cost_usd, invocation_type, usage_accounting, created_at
 		) VALUES (
-			NULLIF($1,'')::uuid, $2, $3, $4, $5, $6, $7, $8, $9
+			NULLIF($1,'')::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10
 		)
 	`
 	if _, err := t.db.ExecContext(ctx, q,
@@ -283,6 +290,7 @@ func (t *BudgetTracker) RecordSpend(ctx context.Context, rec SpendRecord) error 
 		rec.OutputTokens,
 		rec.CostUSD,
 		rec.InvocationType,
+		rec.UsageAccounting,
 		rec.RecordedAt,
 	); err != nil {
 		return fmt.Errorf("insert spend_ledger: %w", err)
@@ -322,6 +330,12 @@ func (t *BudgetTracker) RecordLLMUsage(ctx context.Context, entityID string, age
 		OutputTokens:   usage.OutputTokens,
 		CostUSD:        t.estimateLLMCostUSD(usage.Model, usage.InputTokens, usage.OutputTokens),
 		InvocationType: runtimeMode,
+		UsageAccounting: func() string {
+			if exact {
+				return string(llm.BudgetUsageExact)
+			}
+			return string(llm.BudgetUsageEstimated)
+		}(),
 	})
 }
 

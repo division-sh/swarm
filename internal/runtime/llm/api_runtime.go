@@ -312,6 +312,15 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 
 	resp := convertAnthropicResponse(parsed)
 	resp.Raw = rawResp
+	var usage UsageTokens
+	if r.budget != nil {
+		var ok bool
+		usage, ok = extractUsageTokensFromJSON(rawResp)
+		if !ok {
+			return nil, fmt.Errorf("anthropic response missing usage")
+		}
+		usage.Model = strings.TrimSpace(coalesce(usage.Model, reqBody.Model))
+	}
 
 	s.Messages = append(s.Messages, message, resp.Message)
 	s.TurnCount++
@@ -336,10 +345,9 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 
 	// Spend ledger: exact usage for API runtime when usage fields are present.
 	if r.budget != nil {
-		usage := extractUsageTokensFromJSON(rawResp)
-		usage.Model = strings.TrimSpace(coalesce(usage.Model, reqBody.Model))
 		if err := r.budget.RecordEntityLLMUsage(ctx, entityID, s.AgentID, "api", usage, true, map[string]any{
-			"session_id": s.ID,
+			"session_id":       s.ID,
+			"usage_accounting": string(BudgetUsageExact),
 		}); err != nil {
 			logPublisherRuntime(ctx, r.events, "warn", "record_api_llm_usage_failed", "Recording API LLM usage failed", s.AgentID, s.ID, entityID, nil, err)
 		}
@@ -604,23 +612,26 @@ type anthropicResponse struct {
 	} `json:"error"`
 }
 
-func extractUsageTokensFromJSON(raw []byte) UsageTokens {
+func extractUsageTokensFromJSON(raw []byte) (UsageTokens, bool) {
 	if len(raw) == 0 {
-		return UsageTokens{}
+		return UsageTokens{}, false
 	}
 	var obj struct {
 		Model string `json:"model"`
 		Usage struct {
-			InputTokens  int `json:"input_tokens"`
-			OutputTokens int `json:"output_tokens"`
+			InputTokens  *int `json:"input_tokens"`
+			OutputTokens *int `json:"output_tokens"`
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal(raw, &obj); err != nil {
-		return UsageTokens{}
+		return UsageTokens{}, false
+	}
+	if obj.Usage.InputTokens == nil || obj.Usage.OutputTokens == nil {
+		return UsageTokens{}, false
 	}
 	return UsageTokens{
-		InputTokens:  obj.Usage.InputTokens,
-		OutputTokens: obj.Usage.OutputTokens,
+		InputTokens:  *obj.Usage.InputTokens,
+		OutputTokens: *obj.Usage.OutputTokens,
 		Model:        obj.Model,
-	}
+	}, true
 }

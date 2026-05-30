@@ -43,6 +43,7 @@ type AgentConversationReadStore interface {
 	ListOperatorAgents(context.Context, store.OperatorAgentListOptions) (store.OperatorAgentListResult, error)
 	LoadOperatorAgent(context.Context, string) (store.OperatorAgentDetail, error)
 	LoadOperatorAgentDiagnosis(context.Context, string, store.OperatorAgentDiagnosisOptions) (store.OperatorAgentDiagnosis, error)
+	LoadOperatorAgentUsage(context.Context, string, store.OperatorAgentUsageOptions) (store.OperatorAgentUsage, error)
 	LoadOperatorAgentDeliveryDiagnostics(context.Context, string, store.OperatorAgentDeliveryDiagnosticsOptions) (store.OperatorAgentDeliveryDiagnostics, error)
 	ListOperatorConversations(context.Context, store.OperatorConversationListOptions) (store.OperatorConversationListResult, error)
 	LoadOperatorConversation(context.Context, string) (store.OperatorConversationDetail, error)
@@ -420,6 +421,31 @@ func OperatorAgentConversationHandlers(opts OperatorReadOptions) map[string]Meth
 			}
 			return result, nil
 		},
+		"agent.usage": func(ctx context.Context, req Request) (any, error) {
+			reads, err := requireAgentConversationReadStore(opts.AgentConversations)
+			if err != nil {
+				return nil, err
+			}
+			agentID, err := requiredStringParam(req.Params, "agent_id")
+			if err != nil {
+				return nil, err
+			}
+			usageOpts, err := operatorAgentUsageOptionsFromParams(req.Params)
+			if err != nil {
+				return nil, err
+			}
+			result, err := reads.LoadOperatorAgentUsage(ctx, agentID, usageOpts)
+			if errors.Is(err, store.ErrAgentNotFound) {
+				return nil, NewApplicationError(AgentNotFoundCode, false, map[string]any{"agent_id": agentID})
+			}
+			if err != nil {
+				return nil, err
+			}
+			if err := validateAgentUsageResult(result); err != nil {
+				return nil, err
+			}
+			return result, nil
+		},
 		"agent.delivery_diagnostics": func(ctx context.Context, req Request) (any, error) {
 			reads, err := requireAgentConversationReadStore(opts.AgentConversations)
 			if err != nil {
@@ -668,6 +694,58 @@ func validateAgentDeliveryDiagnosticsResult(item store.OperatorAgentDeliveryDiag
 		if err := validateAgentDeadLetterDeliveryResult(deadLetter, i); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func validateAgentUsageResult(item store.OperatorAgentUsage) error {
+	if strings.TrimSpace(item.AgentID) == "" {
+		return fmt.Errorf("agent.usage owner returned malformed result: agent_id is required")
+	}
+	if item.Window.Since != nil && item.Window.Until != nil && !item.Window.Since.Before(*item.Window.Until) {
+		return fmt.Errorf("agent.usage owner returned malformed result: window.until must be after window.since")
+	}
+	if err := validateAgentUsageTotals("usage.exact", item.Usage.Exact); err != nil {
+		return err
+	}
+	if err := validateAgentUsageTotals("usage.estimated", item.Usage.Estimated); err != nil {
+		return err
+	}
+	if item.Breakdown == nil {
+		return fmt.Errorf("agent.usage owner returned malformed result: breakdown must be an array")
+	}
+	for i, row := range item.Breakdown {
+		prefix := fmt.Sprintf("breakdown[%d]", i)
+		switch row.UsageAccounting {
+		case store.AgentUsageAccountingExact, store.AgentUsageAccountingEstimated:
+		default:
+			return fmt.Errorf("agent.usage owner returned malformed result: %s.usage_accounting=%q is invalid", prefix, row.UsageAccounting)
+		}
+		if strings.TrimSpace(row.InvocationType) == "" {
+			return fmt.Errorf("agent.usage owner returned malformed result: %s.invocation_type is required", prefix)
+		}
+		if strings.TrimSpace(row.Model) == "" {
+			return fmt.Errorf("agent.usage owner returned malformed result: %s.model is required", prefix)
+		}
+		if err := validateAgentUsageTotals(prefix+".totals", row.Totals); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateAgentUsageTotals(path string, totals store.OperatorAgentUsageTotals) error {
+	if totals.LedgerEntries < 0 {
+		return fmt.Errorf("agent.usage owner returned malformed result: %s.ledger_entries must be non-negative", path)
+	}
+	if totals.InputTokens < 0 {
+		return fmt.Errorf("agent.usage owner returned malformed result: %s.input_tokens must be non-negative", path)
+	}
+	if totals.OutputTokens < 0 {
+		return fmt.Errorf("agent.usage owner returned malformed result: %s.output_tokens must be non-negative", path)
+	}
+	if totals.EstimatedCostUSD < 0 {
+		return fmt.Errorf("agent.usage owner returned malformed result: %s.estimated_cost_usd must be non-negative", path)
 	}
 	return nil
 }
@@ -1058,6 +1136,21 @@ func operatorAgentListOptionsFromParams(params map[string]any) (store.OperatorAg
 	}
 	if out.Role, _, err = optionalStringParam(params, "role"); err != nil {
 		return store.OperatorAgentListOptions{}, err
+	}
+	return out, nil
+}
+
+func operatorAgentUsageOptionsFromParams(params map[string]any) (store.OperatorAgentUsageOptions, error) {
+	out := store.OperatorAgentUsageOptions{}
+	var err error
+	if out.Since, err = timestampParam(params, "since"); err != nil {
+		return store.OperatorAgentUsageOptions{}, err
+	}
+	if out.Until, err = timestampParam(params, "until"); err != nil {
+		return store.OperatorAgentUsageOptions{}, err
+	}
+	if out.Since != nil && out.Until != nil && !out.Since.Before(*out.Until) {
+		return store.OperatorAgentUsageOptions{}, NewInvalidParamsError(map[string]any{"field": "until", "reason": "must be after since"})
 	}
 	return out, nil
 }
