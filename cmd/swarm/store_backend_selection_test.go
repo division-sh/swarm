@@ -9,15 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"gopkg.in/yaml.v3"
-	platformcontracts "swarm/docs/specs/swarm-platform/platform/contracts"
 	"swarm/internal/config"
 	"swarm/internal/runtime"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	runtimellm "swarm/internal/runtime/llm"
-	runtimepipeline "swarm/internal/runtime/pipeline"
-	"swarm/internal/runtime/semanticview"
-	"swarm/internal/store"
 	storebackend "swarm/internal/store/backendselection"
 )
 
@@ -198,15 +191,15 @@ func TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore(t *testing.T) {
 	if runtimeStores.SQLDB != nil {
 		t.Fatalf("sqlite runtimeStores SQLDB = %#v, want nil raw runtime SQL handle", runtimeStores.SQLDB)
 	}
-	if runtimeStores.ConstructionBlocker != "" {
-		t.Fatalf("sqlite runtimeStores ConstructionBlocker = %q, want construction-ready typed SQLite owners", runtimeStores.ConstructionBlocker)
+	if !strings.Contains(runtimeStores.ConstructionBlocker, "#1087 gate-promoted raw-SQL consumers") {
+		t.Fatalf("sqlite runtimeStores ConstructionBlocker = %q, want #1087 raw-SQL consumer fail-closed blocker", runtimeStores.ConstructionBlocker)
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("sqlite runtime store did not create file-backed db at %s: %v", path, err)
 	}
 }
 
-func TestBuildStoresSQLiteRuntimeStartsThroughTypedStoreOwners(t *testing.T) {
+func TestBuildStoresSQLiteRuntimeFailsClosedUntilRawSQLConsumersSplit(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "dev.db")
 	stores, err := buildStores(ctx, storebackend.Selection{
@@ -219,55 +212,17 @@ func TestBuildStoresSQLiteRuntimeStartsThroughTypedStoreOwners(t *testing.T) {
 		t.Fatalf("buildStores(sqlite): %v", err)
 	}
 	t.Cleanup(func() { closeDB(stores.SQLDB) })
-	bundle := &runtimecontracts.WorkflowContractBundle{}
-	bundle.Platform.Platform.Name = "swarm"
-	bundle.Platform.Platform.Version = "test"
-	var platformSpec runtimecontracts.PlatformSpecDocument
-	if err := yaml.Unmarshal(platformcontracts.PlatformSpecYAML(), &platformSpec); err != nil {
-		t.Fatalf("unmarshal platform spec: %v", err)
-	}
-	plans, err := store.GeneratePlatformTableDDLs(platformSpec)
-	if err != nil {
-		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
-	}
-	if err := stores.SchemaBootstrapper.EnsureSchemaTables(ctx, plans); err != nil {
-		t.Fatalf("EnsureSchemaTables(sqlite): %v", err)
-	}
-	if _, err := stores.SchemaBootstrapper.ResolveSchemaCapabilities(ctx); err != nil {
-		t.Fatalf("ResolveSchemaCapabilities(sqlite): %v", err)
-	}
-	rt, err := runtime.NewRuntime(ctx, runtime.RuntimeDeps{
-		Config: &config.Config{},
-		Stores: stores.runtimeStores(),
-		Options: runtime.RuntimeOptions{
-			WorkflowModule: sqliteRuntimeStartupTestModule{source: semanticview.Wrap(bundle)},
-			LLMRuntime:     runtimellm.NoopRuntime{},
-			SelfCheck:      true,
-		},
+	_, err = runtime.NewRuntime(ctx, runtime.RuntimeDeps{
+		Config:  &config.Config{},
+		Stores:  stores.runtimeStores(),
+		Options: runtime.RuntimeOptions{SelfCheck: true},
 	})
-	if err != nil {
-		t.Fatalf("NewRuntime(sqlite): %v", err)
+	if err == nil {
+		t.Fatal("NewRuntime(sqlite) succeeded, want fail-closed blocker while #1087 raw-SQL consumers remain unsplit")
 	}
-	if err := rt.Start(ctx); err != nil {
-		t.Fatalf("Runtime.Start(sqlite): %v", err)
+	if !strings.Contains(err.Error(), "#1087 gate-promoted raw-SQL consumers") {
+		t.Fatalf("NewRuntime(sqlite) error = %v, want #1087 raw-SQL consumer blocker", err)
 	}
-	if err := rt.Shutdown(); err != nil {
-		t.Fatalf("Runtime.Shutdown(sqlite): %v", err)
-	}
-}
-
-type sqliteRuntimeStartupTestModule struct {
-	source semanticview.Source
-}
-
-func (s sqliteRuntimeStartupTestModule) SemanticSource() semanticview.Source { return s.source }
-func (sqliteRuntimeStartupTestModule) WorkflowDefinition() *runtimepipeline.WorkflowDefinition {
-	return nil
-}
-func (sqliteRuntimeStartupTestModule) WorkflowNodes() []runtimepipeline.WorkflowNode { return nil }
-func (sqliteRuntimeStartupTestModule) GuardRegistry() runtimepipeline.GuardRegistry  { return nil }
-func (sqliteRuntimeStartupTestModule) ActionRegistry() runtimepipeline.ActionRegistry {
-	return nil
 }
 
 func writeStoreBackendRuntimeConfig(t *testing.T, backend string, sqlitePath string) string {
