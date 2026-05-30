@@ -60,6 +60,8 @@ type BundleCatalogReadStore interface {
 type OperatorReadOptions struct {
 	Now                   func() time.Time
 	Ready                 func() bool
+	RepoRoot              string
+	PlatformSpecPath      string
 	Database              Pinger
 	Runs                  RunReadStore
 	Observability         ObservabilityReadStore
