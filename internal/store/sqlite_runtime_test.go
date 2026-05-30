@@ -384,7 +384,7 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 			Role:                  "operator",
 			Mode:                  "global",
 			ModelTier:             "generic",
-			LLMBackend:            "api",
+			LLMBackend:            "anthropic",
 			ConversationMode:      "session",
 			SessionScope:          "global",
 			SessionScopeAuthority: runtimeactors.SessionScopeAuthorityPlatformInternal,
