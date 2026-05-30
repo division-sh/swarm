@@ -32,6 +32,7 @@ import (
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimemcp "swarm/internal/runtime/mcp"
 	runtimepipeline "swarm/internal/runtime/pipeline"
+	"swarm/internal/runtime/preservationcleanup"
 	runtimerunforkexecution "swarm/internal/runtime/runforkexecution"
 	runtimerunquiescence "swarm/internal/runtime/runquiescence"
 	"swarm/internal/runtime/semanticview"
@@ -39,6 +40,7 @@ import (
 	runtimetools "swarm/internal/runtime/tools"
 	"swarm/internal/store"
 	storebackend "swarm/internal/store/backendselection"
+	storerunlifecycle "swarm/internal/store/runlifecycle"
 	"swarm/internal/testutil"
 )
 
@@ -1937,6 +1939,309 @@ func TestServeBundleMatchAdmissionAllowsPersistedPresentAndDisabled(t *testing.T
 	}
 	if err := enforceServeBundleMatchAdmission(ctx, pg, bootFingerprint, false); err != nil {
 		t.Fatalf("enforceServeBundleMatchAdmission disabled: %v", err)
+	}
+}
+
+func TestRunServeRuntimeUnavailableBundleStartupRecoveryFailsPersistedMissingBeforeCleanup(t *testing.T) {
+	_, db, _ := installServeRuntimePostgresTestStores(t, func() serveWorkspaceLifecycle {
+		return serveRuntimeWorkspaceStub{}
+	})
+	ctx := context.Background()
+	persistedMissingRunID := uuid.NewString()
+	legacyRunID := uuid.NewString()
+	missingHash := "bundle-v1:sha256:2222222222222222222222222222222222222222222222222222222222222222"
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
+		VALUES
+			($1::uuid, 'running', $2, 'persisted', now()),
+			($3::uuid, 'running', NULL, 'legacy', now())
+	`, persistedMissingRunID, missingHash, legacyRunID); err != nil {
+		t.Fatalf("seed mixed active runs: %v", err)
+	}
+
+	var out lockedBuffer
+	code := runServeRuntime(context.Background(), repoRoot(), serveOptions{
+		ConfigPath:         writeServeRuntimeTestConfig(t),
+		ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+		PlatformSpecPath:   defaultPlatformSpecPath,
+		StoreMode:          "postgres",
+		APIListenAddr:      "127.0.0.1:0",
+		MCPListenAddr:      "127.0.0.1:0",
+		SelfCheck:          true,
+		RequireBundleMatch: false,
+		Verbose:            true,
+		Output:             &out,
+	})
+	if code != serveExitDataIntegrity {
+		t.Fatalf("runServeRuntime code = %d, want %d\noutput:\n%s", code, serveExitDataIntegrity, out.String())
+	}
+	assertServeRuntimeRunStillActive(t, ctx, &store.PostgresStore{DB: db}, persistedMissingRunID)
+	assertServeRuntimeRunStillActive(t, ctx, &store.PostgresStore{DB: db}, legacyRunID)
+	if strings.Contains(out.String(), "ready") {
+		t.Fatalf("serve reached readiness despite persisted-missing startup recovery failure:\n%s", out.String())
+	}
+}
+
+func TestRunServeRuntimeUnavailableBundleStartupRecoveryOrphansExpectedUnavailableRuns(t *testing.T) {
+	stoppedContainers := []string{}
+	_, db, _ := installServeRuntimePostgresTestStores(t, func() serveWorkspaceLifecycle {
+		return serveRuntimeWorkspaceStub{
+			managedContainers: []runtimedestructivereset.ContainerRef{
+				{Name: "swarm-legacy-agent", RunID: serveRuntimeLegacyRunIDForTest, Kind: "agent"},
+				{Name: "swarm-unrelated-agent", RunID: uuid.NewString(), Kind: "agent"},
+			},
+			stoppedContainers: &stoppedContainers,
+		}
+	})
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agents (agent_id, role, model_tier, conversation_mode)
+		VALUES ('agent-a', 'operator', 'default', 'task')
+	`); err != nil {
+		t.Fatalf("seed agent: %v", err)
+	}
+	contractsRoot, err := normalizeContractsRoot(resolvePath(repoRoot(), filepath.Join("tests", "tier8-boot-verification", "test-boot-success")))
+	if err != nil {
+		t.Fatalf("contracts root: %v", err)
+	}
+	_, bundle, err := newSwarmWorkflowModule(repoRoot(), contractsRoot, resolvePath(repoRoot(), defaultPlatformSpecPath))
+	if err != nil {
+		t.Fatalf("load test workflow bundle: %v", err)
+	}
+	bootIdentity, err := runtimecontracts.BootBundleIdentity(bundle)
+	if err != nil {
+		t.Fatalf("boot bundle identity: %v", err)
+	}
+	persistedRunID := uuid.NewString()
+	persistedHash := "bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111"
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json)
+		VALUES ($1, 'name: serve-test', '{}'::jsonb)
+	`, persistedHash); err != nil {
+		t.Fatalf("seed bundle row: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
+		VALUES ($1::uuid, 'running', $2, 'persisted', now())
+	`, persistedRunID, persistedHash); err != nil {
+		t.Fatalf("seed persisted-present run: %v", err)
+	}
+
+	orphanTargets := []struct {
+		runID       string
+		source      string
+		cause       string
+		fingerprint string
+	}{
+		{runID: uuid.NewString(), source: storerunlifecycle.BundleSourceEphemeral, cause: preservationcleanup.BundleEphemeralOrphanedReason},
+		{runID: uuid.NewString(), source: storerunlifecycle.BundleSourceDeleted, cause: preservationcleanup.BundleDeletedOrphanedReason},
+		{runID: serveRuntimeLegacyRunIDForTest, source: storerunlifecycle.BundleSourceLegacy, cause: preservationcleanup.BundleLegacyOrphanedReason, fingerprint: bootIdentity.Fingerprint},
+	}
+	for _, target := range orphanTargets {
+		seedServeRuntimeUnavailableBundleRunState(t, ctx, db, target.runID, target.source, target.fingerprint)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var out lockedBuffer
+	done := make(chan int, 1)
+	go func() {
+		done <- runServeRuntime(ctx, repoRoot(), serveOptions{
+			ConfigPath:         writeServeRuntimeTestConfig(t),
+			ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+			PlatformSpecPath:   defaultPlatformSpecPath,
+			StoreMode:          "postgres",
+			APIListenAddr:      "127.0.0.1:0",
+			MCPListenAddr:      "127.0.0.1:0",
+			SelfCheck:          true,
+			RequireBundleMatch: true,
+			Verbose:            true,
+			Output:             &out,
+		})
+	}()
+
+	waitForServeReadyLine(t, &out, done)
+	cancel()
+	if code := <-done; code != 0 {
+		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, out.String())
+	}
+	assertServeRuntimeRunStillActive(t, context.Background(), &store.PostgresStore{DB: db}, persistedRunID)
+	for _, target := range orphanTargets {
+		assertServeRuntimeUnavailableBundleRunOrphaned(t, context.Background(), &store.PostgresStore{DB: db}, target.runID, target.cause)
+	}
+	if len(stoppedContainers) != 1 || stoppedContainers[0] != "swarm-legacy-agent" {
+		t.Fatalf("stopped containers = %#v, want only legacy run container", stoppedContainers)
+	}
+}
+
+const serveRuntimeLegacyRunIDForTest = "11111111-2222-3333-4444-555555555555"
+
+func installServeRuntimePostgresTestStores(t *testing.T, workspaceFactory func() serveWorkspaceLifecycle) (string, *sql.DB, *store.PostgresStore) {
+	t.Helper()
+	oldBuildStores := buildStoresForServe
+	oldWorkspaceLifecycle := configuredWorkspaceLifecycleForServe
+	dsn, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	runtimePG, err := store.NewPostgresStore(dsn)
+	if err != nil {
+		t.Fatalf("NewPostgresStore: %v", err)
+	}
+	t.Cleanup(func() { _ = runtimePG.DB.Close() })
+	buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (storeBundle, error) {
+		if _, err := runtimePG.BindSchemaCapabilities(ctx); err != nil {
+			return storeBundle{}, err
+		}
+		return storeBundle{
+			Postgres:           runtimePG,
+			SQLDB:              runtimePG.DB,
+			SchemaBootstrapper: runtimePG,
+			EventStore:         runtimePG,
+			SessionRegistry:    sessions.NewPostgresRegistry(runtimePG.DB, cfg.LLM.Session.LockTTL),
+			ConversationStore:  runtimePG,
+			ManagerStore:       runtimePG,
+			ScheduleStore:      runtimePG,
+			TurnStore:          runtimePG,
+		}, nil
+	}
+	configuredWorkspaceLifecycleForServe = func(*sql.DB, string, string, semanticview.Source) serveWorkspaceLifecycle {
+		return workspaceFactory()
+	}
+	t.Cleanup(func() {
+		buildStoresForServe = oldBuildStores
+		configuredWorkspaceLifecycleForServe = oldWorkspaceLifecycle
+	})
+	return dsn, db, runtimePG
+}
+
+func seedServeRuntimeUnavailableBundleRunState(t *testing.T, ctx context.Context, db *sql.DB, runID, source, fingerprint string) {
+	t.Helper()
+	sessionID := uuid.NewString()
+	timerID := uuid.NewString()
+	eventID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, bundle_source, bundle_fingerprint, started_at)
+		VALUES ($1::uuid, 'running', $2, NULLIF($3, ''), now())
+	`, runID, source, fingerprint); err != nil {
+		t.Fatalf("seed unavailable bundle run %s: %v", source, err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at
+		) VALUES (
+			$1::uuid, $2::uuid, $3, 'global', '{}'::jsonb, 'test', 'agent', now()
+		)
+	`, eventID, runID, "startup."+source+".event"); err != nil {
+		t.Fatalf("seed event %s: %v", source, err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			run_id, event_id, subscriber_type, subscriber_id, status, active_session_id, reason_code, created_at
+		) VALUES (
+			$1::uuid, $2::uuid, 'agent', 'agent-a', 'in_progress', $3::uuid, 'agent_processing', now()
+		)
+	`, runID, eventID, sessionID); err != nil {
+		t.Fatalf("seed delivery %s: %v", source, err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agent_sessions (session_id, run_id, agent_id, scope_key, scope, runtime_mode, status)
+		VALUES ($1::uuid, $2::uuid, 'agent-a', $2::text, 'flow', 'session', 'active')
+	`, sessionID, runID); err != nil {
+		t.Fatalf("seed session %s: %v", source, err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO timers (timer_id, timer_name, run_id, fire_event, fire_at, status)
+		VALUES ($1::uuid, $2, $3::uuid, 'timer.fired', now() + interval '1 hour', 'active')
+	`, timerID, "timer-"+source, runID); err != nil {
+		t.Fatalf("seed timer %s: %v", source, err)
+	}
+}
+
+func assertServeRuntimeRunStillActive(t *testing.T, ctx context.Context, pg *store.PostgresStore, runID string) {
+	t.Helper()
+	var status string
+	if err := pg.DB.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, runID).Scan(&status); err != nil {
+		t.Fatalf("load run %s: %v", runID, err)
+	}
+	if status != "running" {
+		t.Fatalf("run %s status = %s, want running", runID, status)
+	}
+	var controlRows int
+	if err := pg.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_control_state WHERE run_id = $1::uuid`, runID).Scan(&controlRows); err != nil {
+		t.Fatalf("count control rows %s: %v", runID, err)
+	}
+	if controlRows != 0 {
+		t.Fatalf("run %s control rows = %d, want none", runID, controlRows)
+	}
+}
+
+func assertServeRuntimeUnavailableBundleRunOrphaned(t *testing.T, ctx context.Context, pg *store.PostgresStore, runID, reason string) {
+	t.Helper()
+	var runStatus, errorSummary, controlStatus, controlReason string
+	if err := pg.DB.QueryRowContext(ctx, `
+		SELECT r.status, COALESCE(r.error_summary, ''), rc.control_status, COALESCE(rc.reason, '')
+		FROM runs r
+		JOIN run_control_state rc ON rc.run_id = r.run_id
+		WHERE r.run_id = $1::uuid
+	`, runID).Scan(&runStatus, &errorSummary, &controlStatus, &controlReason); err != nil {
+		t.Fatalf("load orphaned run %s: %v", runID, err)
+	}
+	if runStatus != "cancelled" || errorSummary != reason || controlStatus != "stopped" || controlReason != reason {
+		t.Fatalf("orphaned run %s = %s/%s/%s/%s, want cancelled/%s/stopped/%s", runID, runStatus, errorSummary, controlStatus, controlReason, reason, reason)
+	}
+	var deadLetters int
+	if err := pg.DB.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_deliveries
+		WHERE run_id = $1::uuid
+		  AND status = 'dead_letter'
+		  AND reason_code = $2
+		  AND active_session_id IS NULL
+	`, runID, reason).Scan(&deadLetters); err != nil {
+		t.Fatalf("count orphaned deliveries %s: %v", runID, err)
+	}
+	if deadLetters != 1 {
+		t.Fatalf("orphaned run %s dead-letter deliveries = %d, want 1", runID, deadLetters)
+	}
+	var receipts int
+	if err := pg.DB.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_receipts er
+		JOIN events e ON e.event_id = er.event_id
+		WHERE e.run_id = $1::uuid
+		  AND er.outcome = 'dead_letter'
+		  AND er.reason_code = $2
+		  AND er.subscriber_id IN ('agent-a', 'pipeline')
+	`, runID, reason).Scan(&receipts); err != nil {
+		t.Fatalf("count orphaned receipts %s: %v", runID, err)
+	}
+	if receipts != 2 {
+		t.Fatalf("orphaned run %s receipts = %d, want agent and pipeline", runID, receipts)
+	}
+	var sessions int
+	if err := pg.DB.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM agent_sessions
+		WHERE run_id = $1::uuid
+		  AND status = 'terminated'
+		  AND termination_reason = 'orphaned'
+		  AND termination_detail = $2
+	`, runID, reason).Scan(&sessions); err != nil {
+		t.Fatalf("count orphaned sessions %s: %v", runID, err)
+	}
+	if sessions != 1 {
+		t.Fatalf("orphaned run %s sessions = %d, want 1", runID, sessions)
+	}
+	var timers int
+	if err := pg.DB.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM timers
+		WHERE run_id = $1::uuid
+		  AND status = 'cancelled'
+	`, runID).Scan(&timers); err != nil {
+		t.Fatalf("count orphaned timers %s: %v", runID, err)
+	}
+	if timers != 1 {
+		t.Fatalf("orphaned run %s timers = %d, want 1", runID, timers)
 	}
 }
 
@@ -4960,7 +5265,9 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 
 type serveRuntimeWorkspaceStub struct {
 	stubWorkspaceLifecycle
-	cleanup func(context.Context) (runtimedestructivereset.ContainerResetResult, error)
+	cleanup           func(context.Context) (runtimedestructivereset.ContainerResetResult, error)
+	managedContainers []runtimedestructivereset.ContainerRef
+	stoppedContainers *[]string
 }
 
 func (s serveRuntimeWorkspaceStub) CleanupDevEntityContainers(ctx context.Context) (runtimedestructivereset.ContainerResetResult, error) {
@@ -4970,15 +5277,18 @@ func (s serveRuntimeWorkspaceStub) CleanupDevEntityContainers(ctx context.Contex
 	return runtimedestructivereset.ContainerResetResult{}, nil
 }
 
-func (serveRuntimeWorkspaceStub) ManagedResetContainerInventory(context.Context) ([]runtimedestructivereset.ContainerRef, error) {
-	return nil, nil
+func (s serveRuntimeWorkspaceStub) ManagedResetContainerInventory(context.Context) ([]runtimedestructivereset.ContainerRef, error) {
+	return append([]runtimedestructivereset.ContainerRef(nil), s.managedContainers...), nil
 }
 
 func (serveRuntimeWorkspaceStub) InspectManagedContainer(context.Context, string) (runtimedestructivereset.ManagedContainerInspection, error) {
 	return runtimedestructivereset.ManagedContainerInspection{}, nil
 }
 
-func (serveRuntimeWorkspaceStub) StopManagedContainer(context.Context, string) error {
+func (s serveRuntimeWorkspaceStub) StopManagedContainer(_ context.Context, name string) error {
+	if s.stoppedContainers != nil {
+		*s.stoppedContainers = append(*s.stoppedContainers, name)
+	}
 	return nil
 }
 

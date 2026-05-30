@@ -45,6 +45,7 @@ import (
 	runtimerunforkexecution "swarm/internal/runtime/runforkexecution"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/runtime/sessions"
+	runtimestartuprecovery "swarm/internal/runtime/startuprecovery"
 	runtimetools "swarm/internal/runtime/tools"
 	workspace "swarm/internal/runtime/workspace"
 	"swarm/internal/store"
@@ -59,6 +60,7 @@ const (
 	serveMCPRoutes          = "/mcp /tools/"
 	serveReadinessRoutes    = "/healthz /readyz"
 	serveGatewayTokenBytes  = 32
+	serveExitDataIntegrity  = 78
 )
 
 var (
@@ -74,6 +76,36 @@ type serveWorkspaceLifecycle interface {
 	workspace.DevEntityContainerCleaner
 	runtimedestructivereset.ManagedContainerInventoryReader
 	runtimedestructivereset.ManagedContainerRuntime
+}
+
+type serveStartupRecoveryContainers struct {
+	lifecycle serveWorkspaceLifecycle
+}
+
+func (s serveStartupRecoveryContainers) ManagedContainers(ctx context.Context) ([]runtimestartuprecovery.ManagedContainer, error) {
+	if s.lifecycle == nil {
+		return nil, fmt.Errorf("workspace lifecycle is not configured")
+	}
+	refs, err := s.lifecycle.ManagedResetContainerInventory(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]runtimestartuprecovery.ManagedContainer, 0, len(refs))
+	for _, ref := range refs {
+		out = append(out, runtimestartuprecovery.ManagedContainer{
+			Name:  strings.TrimSpace(ref.Name),
+			RunID: strings.TrimSpace(ref.RunID),
+			Kind:  strings.TrimSpace(ref.Kind),
+		})
+	}
+	return out, nil
+}
+
+func (s serveStartupRecoveryContainers) StopManagedContainer(ctx context.Context, name string) error {
+	if s.lifecycle == nil {
+		return fmt.Errorf("workspace lifecycle is not configured")
+	}
+	return s.lifecycle.StopManagedContainer(ctx, name)
 }
 
 type previousEnv struct {
@@ -248,14 +280,39 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		}
 		log.Printf("serve abandon active runs complete: runs=%d deliveries=%d pipeline_receipts=%d", len(result.Runs), len(result.Deliveries), result.PipelineReceiptCount)
 	}
+	workspaces := configuredWorkspaceLifecycleForServe(stores.SQLDB, repo, contractsRoot, source)
+	if workspaces == nil {
+		slog.Error("workspace lifecycle is not configured")
+		return 1
+	}
+	if stores.Postgres != nil {
+		recovery, err := runtimestartuprecovery.Recover(ctx, runtimestartuprecovery.Request{
+			AvailabilityReader: stores.Postgres,
+			CleanupStore:       stores.Postgres,
+			Containers:         serveStartupRecoveryContainers{lifecycle: workspaces},
+			RequestedAt:        time.Now().UTC(),
+		})
+		if err != nil {
+			slog.Error("unavailable bundle startup recovery failed", "error", err)
+			if runtimestartuprecovery.IsDataIntegrityError(err) {
+				return serveExitDataIntegrity
+			}
+			return 3
+		}
+		if len(recovery.OrphanTargets) > 0 || len(recovery.StoppedContainers) > 0 {
+			log.Printf("unavailable bundle startup recovery complete: orphaned_runs=%d deliveries=%d sessions=%d timers=%d containers=%d pipeline_receipts=%d",
+				len(recovery.Cleanup.Runs),
+				len(recovery.Cleanup.Deliveries),
+				len(recovery.Cleanup.Sessions),
+				len(recovery.Cleanup.Timers),
+				len(recovery.StoppedContainers),
+				recovery.Cleanup.PipelineReceiptCount,
+			)
+		}
+	}
 	if err := enforceServeBundleMatchAdmission(ctx, stores.Postgres, bootBundleIdentity.Fingerprint, opts.RequireBundleMatch); err != nil {
 		slog.Error("bundle match admission failed", "error", err)
 		return 3
-	}
-	workspaces := configuredWorkspaceLifecycleForServe(stores.SQLDB, repo, contractsRoot, source)
-	if opts.Dev && workspaces == nil {
-		slog.Error("dev entity cleanup owner unavailable", "error", "workspace lifecycle is not configured")
-		return 1
 	}
 	if err := workspaces.ValidateSource(ctx, source); err != nil {
 		slog.Error("validate workspaces", "error", err)
@@ -1817,7 +1874,7 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 func enforceServeBundleMatchAdmission(ctx context.Context, pg *store.PostgresStore, bootFingerprint string, requireMatch bool) error {
 	bootFingerprint = strings.TrimSpace(bootFingerprint)
 	if !requireMatch {
-		log.Printf("bundle match admission disabled by --no-require-bundle-match; active run bundle source state will not block startup")
+		log.Printf("legacy bundle match admission disabled by --no-require-bundle-match; startup recovery has already consumed active run bundle source state")
 		return nil
 	}
 	if bootFingerprint == "" {

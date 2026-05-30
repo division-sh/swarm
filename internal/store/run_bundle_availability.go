@@ -9,7 +9,7 @@ import (
 
 type ActiveRunBundleAvailabilityConflict = runbundle.Availability
 
-func (s *PostgresStore) ActiveRunBundleAvailabilityConflicts(ctx context.Context) ([]ActiveRunBundleAvailabilityConflict, error) {
+func (s *PostgresStore) ActiveRunBundleAvailabilities(ctx context.Context) ([]runbundle.Availability, error) {
 	if s == nil || s.DB == nil {
 		return nil, fmt.Errorf("postgres store is required")
 	}
@@ -20,7 +20,21 @@ func (s *PostgresStore) ActiveRunBundleAvailabilityConflicts(ctx context.Context
 	if !caps.Events.HasRuns || !caps.Events.RunBundleHash || !caps.Events.RunBundleSource {
 		return nil, fmt.Errorf("active run bundle availability requires runs.bundle_hash and runs.bundle_source")
 	}
-	return runbundle.ListActiveConflicts(ctx, s.DB)
+	return runbundle.ListActiveAvailabilities(ctx, s.DB)
+}
+
+func (s *PostgresStore) ActiveRunBundleAvailabilityConflicts(ctx context.Context) ([]ActiveRunBundleAvailabilityConflict, error) {
+	availabilities, err := s.ActiveRunBundleAvailabilities(ctx)
+	if err != nil {
+		return nil, err
+	}
+	conflicts := make([]runbundle.Availability, 0, len(availabilities))
+	for _, availability := range availabilities {
+		if !availability.Available() {
+			conflicts = append(conflicts, availability)
+		}
+	}
+	return conflicts, nil
 }
 
 func (s *PostgresStore) LoadRunBundleAvailability(ctx context.Context, runID string) (runbundle.Availability, error) {
