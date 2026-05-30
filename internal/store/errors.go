@@ -12,6 +12,8 @@ var ErrBundleNotFound = errors.New("store: bundle not found")
 
 var ErrInvalidBundleCatalogCursor = errors.New("store: invalid bundle catalog cursor")
 
+var ErrBundleCatalogConflict = errors.New("store: bundle catalog content conflict")
+
 var ErrEventNotFound = errors.New("store: event not found")
 
 var ErrInvalidObservabilityCursor = errors.New("store: invalid observability cursor")

@@ -19,6 +19,11 @@ type BundleCatalogProjection struct {
 	Metadata    map[string]any
 }
 
+type BundleCatalogProjectionOptions struct {
+	Source             string
+	PlatformSpecSHA256 string
+}
+
 type bundleCatalogProjectedFile struct {
 	Label     string
 	Policy    string
@@ -36,10 +41,16 @@ type bundleCatalogDataEntry struct {
 	ContentBase64 string `json:"content_base64"`
 }
 
-// BuildBundleCatalogProjection is the serve-ingest owner for persisted bundle
-// rows. It stores definition bytes and definition-only JSON; runtime state is
-// intentionally excluded.
+// BuildBundleCatalogProjection is the shared owner for persisted bundle rows.
+// It stores canonical definition bytes and definition-only JSON; runtime state
+// and server-local paths are intentionally excluded.
 func BuildBundleCatalogProjection(bundle *WorkflowContractBundle) (BundleCatalogProjection, error) {
+	return BuildBundleCatalogProjectionWithOptions(bundle, BundleCatalogProjectionOptions{
+		Source: "swarm serve --contracts",
+	})
+}
+
+func BuildBundleCatalogProjectionWithOptions(bundle *WorkflowContractBundle, opts BundleCatalogProjectionOptions) (BundleCatalogProjection, error) {
 	bundleHash, err := BundleHash(bundle)
 	if err != nil {
 		return BundleCatalogProjection{}, err
@@ -90,11 +101,14 @@ func BuildBundleCatalogProjection(bundle *WorkflowContractBundle) (BundleCatalog
 	}
 	metadata := map[string]any{
 		"projection_version": bundleCatalogProjectionVersion,
-		"source":             "swarm serve --contracts",
+		"source":             firstNonEmpty(opts.Source, "swarm serve --contracts"),
 		"workflow_name":      strings.TrimSpace(bundle.Semantics.Name),
 		"workflow_version":   strings.TrimSpace(bundle.Semantics.Version),
 		"file_count":         len(files),
 		"data_file_count":    len(dataEntries),
+	}
+	if hash := strings.TrimSpace(opts.PlatformSpecSHA256); hash != "" {
+		metadata["platform_spec_sha256"] = hash
 	}
 	return BundleCatalogProjection{
 		BundleHash:  bundleHash,

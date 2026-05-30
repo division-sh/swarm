@@ -219,6 +219,7 @@ func approvedMutatingHTTPRuntimeMethods() []string {
 		"agent.replay_backlog",
 		"agent.restart",
 		"agent.send_directive",
+		"bundle.register",
 		"conversation.fork",
 		"conversation.fork_chat",
 		"conversation.fork_delete",
@@ -294,6 +295,12 @@ func mutatingHTTPRuntimeFixtures() map[string]mutatingHTTPRuntimeFixture {
 			Params:         map[string]any{"fork_id": forkID},
 			ConflictParams: map[string]any{"fork_id": "00000000-0000-0000-0000-000000000302"},
 			ResultKeys:     []string{"ok", "fork_id", "deleted", "already_deleted", "idempotency_replayed"},
+			SuccessEffects: 1,
+		},
+		"bundle.register": {
+			Params:         map[string]any{"content_yaml": testBundleRegistrationEnvelope()},
+			ConflictParams: map[string]any{"content_yaml": strings.Replace(testBundleRegistrationEnvelope(), "name: registered", "name: registered-conflict", 1)},
+			ResultKeys:     []string{"bundle_hash", "registered", "idempotency_replayed"},
 			SuccessEffects: 1,
 		},
 		"event.publish": {
@@ -445,6 +452,9 @@ func mutatingHTTPRuntimeErrorProbes() []mutatingHTTPRuntimeErrorProbe {
 		}}},
 		{Method: "conversation.fork_delete", Params: map[string]any{"fork_id": forkID, "idempotency_key": "idem-error"}, Code: ForkNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
 			s.forks.deleteErr = store.ErrConversationForkNotFound
+		}}},
+		{Method: "bundle.register", Params: map[string]any{"content_yaml": testBundleRegistrationEnvelope(), "idempotency_key": "idem-error"}, Code: BundleRegisterConflictCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.bundleCatalog.conflict = true
 		}}},
 
 		{Method: "run.fork", Params: map[string]any{"source_run_id": missingRunID, "fork_event_id": runForkTestEventID, "idempotency_key": "idem-error"}, Code: RunNotFoundCode},
@@ -641,6 +651,7 @@ type mutatingRuntimeProbeState struct {
 	agentControl        *mutatingProbeAgentControl
 	runtimeIngress      *mutatingProbeRuntimeIngress
 	mailbox             *mutatingProbeMailboxStore
+	bundleCatalog       *mutatingProbeBundleCatalog
 	forks               *fakeConversationForkLifecycleStore
 	nuke                *recordingRuntimeNukeOwners
 	effects             int
@@ -682,6 +693,7 @@ func newMutatingRuntimeProbeState(t *testing.T, methodName string) *mutatingRunt
 	state.agentControl.state = state
 	state.runtimeIngress.state = state
 	state.mailbox = newMutatingProbeMailboxStore(state)
+	state.bundleCatalog = &mutatingProbeBundleCatalog{state: state, details: map[string]store.BundleCatalogDetail{}}
 	state.forks = &fakeConversationForkLifecycleStore{
 		createResult: store.OperatorConversationForkSession{
 			ForkID:          "00000000-0000-0000-0000-000000000301",
@@ -795,6 +807,7 @@ func (s *mutatingRuntimeProbeState) options(t *testing.T) OperatorReadOptions {
 			AssistantMessage: "forkchat sandbox response: inspect fork",
 		}},
 		Mailbox:               s.mailbox,
+		BundleCatalog:         s.bundleCatalog,
 		Idempotency:           s.idempotency,
 		Events:                s.events,
 		RunForkAvailability:   s.runForkAvailability,
@@ -870,6 +883,55 @@ func (s *mutatingProbeIdempotencyStore) WithAPIIdempotency(
 	s.hashes[key] = req.RequestHash
 	return completion, false, nil
 }
+
+type mutatingProbeBundleCatalog struct {
+	state    *mutatingRuntimeProbeState
+	details  map[string]store.BundleCatalogDetail
+	conflict bool
+}
+
+func (s *mutatingProbeBundleCatalog) ListBundleCatalog(context.Context, store.BundleCatalogListOptions) (store.BundleCatalogListResult, error) {
+	return store.BundleCatalogListResult{Bundles: []store.BundleCatalogSummary{}}, nil
+}
+
+func (s *mutatingProbeBundleCatalog) LoadBundleCatalog(_ context.Context, bundleHash string) (store.BundleCatalogDetail, error) {
+	detail, ok := s.details[strings.TrimSpace(bundleHash)]
+	if !ok {
+		return store.BundleCatalogDetail{}, store.ErrBundleNotFound
+	}
+	return detail, nil
+}
+
+func (s *mutatingProbeBundleCatalog) ListBundleCatalogAgents(context.Context, string) (store.BundleCatalogAgentsResult, error) {
+	return store.BundleCatalogAgentsResult{Agents: []store.BundleCatalogAgentDefinition{}}, nil
+}
+
+func (s *mutatingProbeBundleCatalog) UpsertBundleCatalog(_ context.Context, req store.BundleCatalogUpsert) (store.BundleCatalogUpsertResult, error) {
+	if s.conflict {
+		return store.BundleCatalogUpsertResult{}, &store.BundleCatalogConflictError{BundleHash: req.BundleHash}
+	}
+	if s.details == nil {
+		s.details = map[string]store.BundleCatalogDetail{}
+	}
+	_, exists := s.details[req.BundleHash]
+	if !exists {
+		s.state.recordEffect()
+		s.details[req.BundleHash] = store.BundleCatalogDetail{
+			BundleHash:    req.BundleHash,
+			ContentYAML:   req.ContentYAML,
+			ParsedJSON:    req.ParsedJSON,
+			Metadata:      req.Metadata,
+			AgentCount:    1,
+			HasData:       len(req.DataBlob) > 0,
+			DataSizeBytes: int64(len(req.DataBlob)),
+			IngestedAt:    s.state.now,
+		}
+	}
+	return store.BundleCatalogUpsertResult{Detail: s.details[req.BundleHash], Registered: !exists}, nil
+}
+
+var _ BundleCatalogReadStore = (*mutatingProbeBundleCatalog)(nil)
+var _ BundleCatalogRegisterStore = (*mutatingProbeBundleCatalog)(nil)
 
 type mutatingProbeEventPublisher struct {
 	state             *mutatingRuntimeProbeState

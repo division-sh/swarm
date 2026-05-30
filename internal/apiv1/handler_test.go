@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -29,11 +30,14 @@ func TestRegistryMethodNamesMatchGeneratedOpenRPC(t *testing.T) {
 	if got := registry.MethodNames(); !reflect.DeepEqual(got, openRPCNames) {
 		t.Fatalf("registry method names drifted from generated OpenRPC:\nregistry=%v\nopenrpc=%v", got, openRPCNames)
 	}
-	if len(openRPCNames) != 54 {
-		t.Fatalf("method count = %d, want 54", len(openRPCNames))
+	if len(openRPCNames) != 55 {
+		t.Fatalf("method count = %d, want 55", len(openRPCNames))
 	}
 	if _, ok := registry.Method("run.fork"); !ok {
 		t.Fatal("run.fork missing from generated registry")
+	}
+	if _, ok := registry.Method("bundle.register"); !ok {
+		t.Fatal("bundle.register missing from generated registry")
 	}
 	if _, ok := registry.Method("rpc.unsubscribe"); !ok {
 		t.Fatal("rpc.unsubscribe missing from generated registry")
@@ -587,6 +591,121 @@ func TestOperatorBundleCatalogHandlersErrors(t *testing.T) {
 	}
 }
 
+func TestOperatorBundleRegisterHandlersMaterializeCanonicalProjectionAndIdempotency(t *testing.T) {
+	catalog := &fakeBundleCatalogReadStore{
+		details: map[string]store.BundleCatalogDetail{},
+		agents:  map[string]store.BundleCatalogAgentsResult{},
+	}
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			Now:           func() time.Time { return time.Unix(1700000200, 0).UTC() },
+			BundleCatalog: catalog,
+			Idempotency:   newRecordingAPIIdempotencyStore(),
+		}),
+	})
+	envelope := testBundleRegistrationEnvelope()
+
+	first := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"register","method":"bundle.register","params":{"content_yaml":%q,"idempotency_key":"idem-register"}}`, envelope))
+	if first.Error != nil {
+		t.Fatalf("bundle.register error = %#v", first.Error)
+	}
+	result := asMap(t, first.Result)
+	bundleHash, ok := result["bundle_hash"].(string)
+	if !ok || !bundleHashPattern.MatchString(bundleHash) {
+		t.Fatalf("bundle.register bundle_hash = %#v", result["bundle_hash"])
+	}
+	if result["registered"] != true || result["idempotency_replayed"] != false {
+		t.Fatalf("bundle.register result = %#v", result)
+	}
+	if len(catalog.upserts) != 1 {
+		t.Fatalf("upserts = %d, want 1", len(catalog.upserts))
+	}
+	upsert := catalog.upserts[0]
+	if upsert.BundleHash != bundleHash || !strings.Contains(upsert.ContentYAML, "bundle/package.yaml") || !strings.Contains(upsert.ContentYAML, "platform/platform-spec.yaml") {
+		t.Fatalf("bundle.register upsert = %#v", upsert)
+	}
+	if upsert.Metadata["source"] != "bundle.register" || upsert.Metadata["platform_spec_sha256"] == "" {
+		t.Fatalf("bundle.register metadata = %#v", upsert.Metadata)
+	}
+	agents := asMap(t, upsert.ParsedJSON["agents"])
+	researcher := asMap(t, agents["researcher"])
+	if researcher["model_tier"] != "tier2" || researcher["conversation_mode"] != "stateless" {
+		t.Fatalf("projected researcher = %#v", researcher)
+	}
+
+	replay := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"replay","method":"bundle.register","params":{"content_yaml":%q,"idempotency_key":"idem-register"}}`, envelope))
+	if replay.Error != nil {
+		t.Fatalf("bundle.register replay error = %#v", replay.Error)
+	}
+	replayResult := asMap(t, replay.Result)
+	if replayResult["bundle_hash"] != bundleHash || replayResult["registered"] != true || replayResult["idempotency_replayed"] != true {
+		t.Fatalf("bundle.register replay result = %#v", replayResult)
+	}
+	if len(catalog.upserts) != 1 {
+		t.Fatalf("upserts after replay = %d, want 1", len(catalog.upserts))
+	}
+
+	duplicate := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"duplicate","method":"bundle.register","params":{"content_yaml":%q}}`, envelope))
+	if duplicate.Error != nil {
+		t.Fatalf("bundle.register duplicate error = %#v", duplicate.Error)
+	}
+	if duplicateResult := asMap(t, duplicate.Result); duplicateResult["registered"] != false || duplicateResult["idempotency_replayed"] != false {
+		t.Fatalf("bundle.register duplicate result = %#v", duplicateResult)
+	}
+}
+
+func TestOperatorBundleRegisterHandlersFailClosed(t *testing.T) {
+	catalog := &fakeBundleCatalogReadStore{
+		details: map[string]store.BundleCatalogDetail{},
+		agents:  map[string]store.BundleCatalogAgentsResult{},
+	}
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			BundleCatalog: catalog,
+			Idempotency:   newRecordingAPIIdempotencyStore(),
+		}),
+	})
+
+	unconsumed := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"unconsumed","method":"bundle.register","params":{"content_yaml":%q,"data_blob":{"unreferenced.bin":"AQI="}}}`, testBundleRegistrationEnvelope()))
+	if unconsumed.Error == nil || unconsumed.Error.Code != codeInvalidParams {
+		t.Fatalf("bundle.register unconsumed error = %#v, want invalid params", unconsumed.Error)
+	}
+	if len(catalog.upserts) != 0 {
+		t.Fatalf("upserts after invalid registration = %d, want 0", len(catalog.upserts))
+	}
+
+	catalog.conflict = true
+	conflict := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"conflict","method":"bundle.register","params":{"content_yaml":%q}}`, testBundleRegistrationEnvelope()))
+	if conflict.Error == nil {
+		t.Fatal("bundle.register conflict error = nil")
+	}
+	if data := asMap(t, conflict.Error.Data); data["code"] != BundleRegisterConflictCode {
+		t.Fatalf("bundle.register conflict data = %#v", data)
+	}
+}
+
+func testBundleRegistrationEnvelope() string {
+	return `version: swarm.bundle.registration.v1
+files:
+  - path: package.yaml
+    content: |
+      name: registered
+      version: "1.0.0"
+      flows: []
+  - path: agents.yaml
+    content: |
+      researcher:
+        id: researcher
+        role: research
+        model_tier: tier2
+        conversation_mode: stateless
+        subscriptions:
+          - scan.requested
+`
+}
+
 func rpcCall(t *testing.T, handler *Handler, body string) rpcResponse {
 	t.Helper()
 	rec := httptest.NewRecorder()
@@ -659,6 +778,8 @@ type fakeBundleCatalogReadStore struct {
 	details    map[string]store.BundleCatalogDetail
 	agents     map[string]store.BundleCatalogAgentsResult
 	missing    map[string]bool
+	upserts    []store.BundleCatalogUpsert
+	conflict   bool
 }
 
 func (s *fakeBundleCatalogReadStore) ListBundleCatalog(_ context.Context, opts store.BundleCatalogListOptions) (store.BundleCatalogListResult, error) {
@@ -691,7 +812,37 @@ func (s *fakeBundleCatalogReadStore) ListBundleCatalogAgents(_ context.Context, 
 	return result, nil
 }
 
+func (s *fakeBundleCatalogReadStore) UpsertBundleCatalog(_ context.Context, req store.BundleCatalogUpsert) (store.BundleCatalogUpsertResult, error) {
+	if s.conflict {
+		return store.BundleCatalogUpsertResult{}, &store.BundleCatalogConflictError{BundleHash: req.BundleHash}
+	}
+	if s.details == nil {
+		s.details = map[string]store.BundleCatalogDetail{}
+	}
+	if s.agents == nil {
+		s.agents = map[string]store.BundleCatalogAgentsResult{}
+	}
+	_, exists := s.details[req.BundleHash]
+	s.upserts = append(s.upserts, req)
+	detail := store.BundleCatalogDetail{
+		BundleHash:    req.BundleHash,
+		ContentYAML:   req.ContentYAML,
+		ParsedJSON:    req.ParsedJSON,
+		Metadata:      req.Metadata,
+		AgentCount:    1,
+		HasData:       len(req.DataBlob) > 0,
+		DataSizeBytes: int64(len(req.DataBlob)),
+		IngestedAt:    time.Unix(1700000200, 0).UTC(),
+	}
+	if exists {
+		detail = s.details[req.BundleHash]
+	}
+	s.details[req.BundleHash] = detail
+	return store.BundleCatalogUpsertResult{Detail: detail, Registered: !exists}, nil
+}
+
 var _ BundleCatalogReadStore = (*fakeBundleCatalogReadStore)(nil)
+var _ BundleCatalogRegisterStore = (*fakeBundleCatalogReadStore)(nil)
 
 func testHandler(t *testing.T, opts Options) *Handler {
 	t.Helper()

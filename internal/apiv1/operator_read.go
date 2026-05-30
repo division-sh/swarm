@@ -247,6 +247,9 @@ func OperatorReadHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 	for name, handler := range OperatorBundleCatalogHandlers(opts) {
 		handlers[name] = handler
 	}
+	for name, handler := range OperatorBundleRegisterHandlers(opts) {
+		handlers[name] = handler
+	}
 	for name, handler := range OperatorConversationForkHandlers(opts) {
 		handlers[name] = handler
 	}
