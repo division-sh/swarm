@@ -572,15 +572,35 @@ func (s *SQLiteRuntimeStore) GetEventReceipt(ctx context.Context, eventID, agent
 	if eventID == "" || agentID == "" {
 		return runtimemanager.EventReceipt{}, false, fmt.Errorf("event_id and agent_id are required")
 	}
-	var rec runtimemanager.EventReceipt
-	var outcome string
+	var (
+		rec          runtimemanager.EventReceipt
+		outcome      string
+		sideEffects  any
+		delivery     string
+		deliveryErr  string
+		deliverySeen int
+		retryCount   sql.NullInt64
+	)
 	err := s.DB.QueryRowContext(ctx, `
-		SELECT event_id, subscriber_id, outcome, COALESCE(reason_code, '')
-		FROM event_receipts
-		WHERE event_id = ?
-		  AND subscriber_type = 'agent'
-		  AND subscriber_id = ?
-	`, eventID, agentID).Scan(&rec.EventID, &rec.AgentID, &outcome, &rec.Error)
+		SELECT
+			r.event_id,
+			r.subscriber_id,
+			r.outcome,
+			COALESCE(r.reason_code, ''),
+			COALESCE(r.side_effects, '{}'),
+			COALESCE(d.status, ''),
+			COALESCE(d.last_error, ''),
+			d.retry_count,
+			CASE WHEN d.delivery_id IS NULL THEN 0 ELSE 1 END
+		FROM event_receipts r
+		LEFT JOIN event_deliveries d
+			ON d.event_id = r.event_id
+			AND d.subscriber_type = 'agent'
+			AND d.subscriber_id = r.subscriber_id
+		WHERE r.event_id = ?
+		  AND r.subscriber_type = 'agent'
+		  AND r.subscriber_id = ?
+	`, eventID, agentID).Scan(&rec.EventID, &rec.AgentID, &outcome, &rec.Error, &sideEffects, &delivery, &deliveryErr, &retryCount, &deliverySeen)
 	if errors.Is(err, sql.ErrNoRows) {
 		return runtimemanager.EventReceipt{}, false, nil
 	}
@@ -588,6 +608,30 @@ func (s *SQLiteRuntimeStore) GetEventReceipt(ctx context.Context, eventID, agent
 		return runtimemanager.EventReceipt{}, false, fmt.Errorf("get sqlite event receipt: %w", err)
 	}
 	rec.Status = mapOutcomeToManagerReceiptStatus(outcome)
+	if raw := sqliteJSONRawMessage(sideEffects); len(raw) > 0 {
+		payload, err := decodeAgentReceiptSideEffects(raw)
+		if err != nil {
+			return runtimemanager.EventReceipt{}, false, fmt.Errorf("decode sqlite event receipt side effects: %w", err)
+		}
+		rec.Status = payload.ManagerStatus
+		rec.RetryCount = payload.RetryCount
+		rec.Error = payload.Error
+	}
+	if deliverySeen != 0 {
+		mappedStatus, override, err := terminalManagerReceiptStatusFromDelivery(delivery)
+		if err != nil {
+			return runtimemanager.EventReceipt{}, false, fmt.Errorf("get sqlite event receipt: %w", err)
+		}
+		if override {
+			rec.Status = mappedStatus
+			if retryCount.Valid {
+				rec.RetryCount = int(retryCount.Int64)
+			}
+			if strings.TrimSpace(deliveryErr) != "" {
+				rec.Error = strings.TrimSpace(deliveryErr)
+			}
+		}
+	}
 	return rec, true, nil
 }
 
@@ -611,7 +655,8 @@ func (s *SQLiteRuntimeStore) ListPendingEventsForAgent(ctx context.Context, agen
 }
 
 func (s *SQLiteRuntimeStore) ListPendingSubscribedEvents(ctx context.Context, agentID string, subscriptions []events.EventType, since time.Time, limit int) ([]events.Event, error) {
-	if strings.TrimSpace(agentID) == "" || len(subscriptions) == 0 {
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" || len(subscriptions) == 0 {
 		return nil, nil
 	}
 	if limit <= 0 {
@@ -631,7 +676,13 @@ func (s *SQLiteRuntimeStore) ListPendingSubscribedEvents(ctx context.Context, ag
 			COALESCE(e.scope, 'global'),
 			e.payload,
 			e.created_at,
-			COALESCE(e.source_event_id, '')
+			COALESCE(e.source_event_id, ''),
+			CASE WHEN d.delivery_id IS NULL THEN 0 ELSE 1 END,
+			COALESCE(d.status, ''),
+			COALESCE(d.retry_count, 0),
+			COALESCE(d.created_at, e.created_at),
+			d.delivered_at,
+			CASE WHEN r.event_id IS NULL THEN 0 ELSE 1 END
 		FROM events e
 		LEFT JOIN event_deliveries d
 			ON d.event_id = e.event_id
@@ -642,21 +693,45 @@ func (s *SQLiteRuntimeStore) ListPendingSubscribedEvents(ctx context.Context, ag
 			AND r.subscriber_type = 'agent'
 			AND r.subscriber_id = ?
 		WHERE e.created_at >= ?
-		  AND d.delivery_id IS NULL
-		  AND r.event_id IS NULL
+		  AND EXISTS (
+				SELECT 1
+				FROM event_deliveries d_me
+				WHERE d_me.event_id = e.event_id
+				  AND d_me.subscriber_type = 'agent'
+				  AND d_me.subscriber_id = ?
+			)
 		ORDER BY e.created_at ASC, e.event_id ASC
-		LIMIT ?
-	`, strings.TrimSpace(agentID), strings.TrimSpace(agentID), since.UTC(), limit*4)
+	`, agentID, agentID, since.UTC(), agentID)
 	if err != nil {
 		return nil, fmt.Errorf("query sqlite pending subscribed events: %w", err)
 	}
 	defer rows.Close()
 	out := make([]events.Event, 0, limit)
+	now := s.now()
 	for rows.Next() {
 		var evt events.Event
 		var entityID, flowInstance, scope string
-		var payloadRaw, createdAtRaw any
-		if err := rows.Scan(&evt.ID, &evt.RunID, &evt.Type, &evt.SourceAgent, &entityID, &flowInstance, &scope, &payloadRaw, &createdAtRaw, &evt.ParentEventID); err != nil {
+		var payloadRaw, createdAtRaw, deliveryCreatedAtRaw, deliveryDeliveredAtRaw any
+		var deliveryFound, receiptFound int
+		record := pendingAgentDeliveryRecord{AgentID: agentID}
+		if err := rows.Scan(
+			&evt.ID,
+			&evt.RunID,
+			&evt.Type,
+			&evt.SourceAgent,
+			&entityID,
+			&flowInstance,
+			&scope,
+			&payloadRaw,
+			&createdAtRaw,
+			&evt.ParentEventID,
+			&deliveryFound,
+			&record.DeliveryStatus,
+			&record.DeliveryRetryCount,
+			&deliveryCreatedAtRaw,
+			&deliveryDeliveredAtRaw,
+			&receiptFound,
+		); err != nil {
 			return nil, fmt.Errorf("scan sqlite pending subscribed event: %w", err)
 		}
 		evt.Payload = sqliteJSONRawMessage(payloadRaw)
@@ -665,10 +740,26 @@ func (s *SQLiteRuntimeStore) ListPendingSubscribedEvents(ctx context.Context, ag
 		} else if ok {
 			evt.CreatedAt = createdAt
 		}
+		if deliveryCreatedAt, ok, err := sqliteTimeValue(deliveryCreatedAtRaw); err != nil {
+			return nil, fmt.Errorf("scan sqlite pending subscribed delivery created_at: %w", err)
+		} else if ok {
+			record.DeliveryCreatedAt = deliveryCreatedAt
+		}
+		if deliveryDeliveredAt, ok, err := sqliteTimeValue(deliveryDeliveredAtRaw); err != nil {
+			return nil, fmt.Errorf("scan sqlite pending subscribed delivery delivered_at: %w", err)
+		} else if ok {
+			record.DeliveryDeliveredAt = sql.NullTime{Time: deliveryDeliveredAt, Valid: true}
+		}
+		record.DeliveryFound = deliveryFound != 0
+		record.ReceiptFound = receiptFound != 0
+		record.Event = evt.WithEnvelope(events.EventEnvelope{EntityID: entityID, FlowInstance: flowInstance, Scope: events.EventScope(scope)})
+		if !record.isPending(now) {
+			continue
+		}
 		if !eventMatchesAnyPattern(evt.Type, subscriptions) {
 			continue
 		}
-		out = append(out, evt.WithEnvelope(events.EventEnvelope{EntityID: entityID, FlowInstance: flowInstance, Scope: events.EventScope(scope)}))
+		out = append(out, record.Event)
 		if len(out) >= limit {
 			break
 		}
