@@ -1864,6 +1864,7 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 		sqliteStore.SetSessionLockTTL(cfg.LLM.Session.LockTTL)
 		return storeBundle{
 			SQLDB:               sqliteStore.DB,
+			RuntimeBlocker:      "sqlite runtime construction remains fail-closed until #1087 gate-promoted raw-SQL consumers (pipeline coordination/background nodes, budget tracking/spend ledger, tool executor entity/human-task persistence and diagnostics, runtime diagnostics/logging) move to backend-neutral store owners or receive an explicit lead-approved split",
 			SchemaBootstrapper:  sqliteStore,
 			EventStore:          sqliteStore,
 			SessionRegistry:     sqliteStore,
