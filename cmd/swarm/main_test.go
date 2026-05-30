@@ -3485,6 +3485,55 @@ func TestLoadRuntimeConfigWithOptions_UsesSharedDiscoveryAndBackendPrecedence(t 
 	}
 }
 
+func TestLoadRuntimeConfigWithOptions_BackendOverrideSkipsOverriddenProfileValidation(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		body []string
+	}{
+		{
+			name: "openai-compatible-without-required-fields",
+			body: []string{
+				"llm:",
+				"  backend: openai_compatible",
+				"  session:",
+				"    lock_ttl: 10s",
+				"    rotate_after_turns: 40",
+				"    rotate_on_parse_failures: 3",
+			},
+		},
+		{
+			name: "claude-cli-without-command",
+			body: []string{
+				"llm:",
+				"  backend: claude_cli",
+				"  session:",
+				"    lock_ttl: 10s",
+				"    rotate_after_turns: 40",
+				"    rotate_on_parse_failures: 3",
+				"  claude_cli:",
+				"    output_format: json",
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := t.TempDir()
+			writeRuntimeConfigText(t, filepath.Join(repo, "runtime.yaml"), strings.Join(tt.body, "\n")+"\n")
+
+			result, err := loadRuntimeConfigWithOptions(runtimeConfigLoadOptions{
+				RepoRoot:        repo,
+				ExplicitPath:    "runtime.yaml",
+				BackendOverride: "anthropic",
+			})
+			if err != nil {
+				t.Fatalf("loadRuntimeConfigWithOptions: %v", err)
+			}
+			if result.Config.LLM.Backend != "anthropic" {
+				t.Fatalf("llm backend = %q, want anthropic override", result.Config.LLM.Backend)
+			}
+		})
+	}
+}
+
 func TestLoadRuntimeConfigWithOptions_RejectsLegacyBackendBeforeOverride(t *testing.T) {
 	repo := t.TempDir()
 	configPath := filepath.Join(repo, "runtime.yaml")

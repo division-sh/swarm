@@ -87,7 +87,15 @@ type OpenAICompatibleConfig struct {
 	LowCostModel string `yaml:"low_cost_model"`
 }
 
+type LoadOptions struct {
+	BackendOverride string
+}
+
 func Load(path string) (*Config, error) {
+	return LoadWithOptions(path, LoadOptions{})
+}
+
+func LoadWithOptions(path string, opts LoadOptions) (*Config, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
@@ -96,8 +104,12 @@ func Load(path string) (*Config, error) {
 	if err := yaml.Unmarshal(b, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
-	if err := cfg.Validate(); err != nil {
+	backendOverride := strings.TrimSpace(opts.BackendOverride)
+	if err := cfg.validate(backendOverride); err != nil {
 		return nil, err
+	}
+	if backendOverride != "" {
+		cfg.LLM.Backend = backendOverride
 	}
 	return &cfg, nil
 }
@@ -113,12 +125,22 @@ func (c *Config) LLMBackendProfile() (llmselection.Profile, error) {
 }
 
 func (c *Config) Validate() error {
+	return c.validate("")
+}
+
+func (c *Config) validate(backendOverride string) error {
 	if err := c.ValidateOperationalControls(); err != nil {
 		return err
 	}
 	profile, err := c.LLMBackendProfile()
 	if err != nil {
 		return err
+	}
+	if backendOverride = strings.TrimSpace(backendOverride); backendOverride != "" {
+		profile, err = llmselection.ResolveActiveBackend(backendOverride)
+		if err != nil {
+			return err
+		}
 	}
 	if profile.ID == llmselection.BackendClaudeCLI {
 		if c.LLM.ClaudeCLI.Command == "" {
