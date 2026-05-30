@@ -228,14 +228,14 @@ nodes:
     title: Multi-Bundle Preservation Cleanup Owner
     parent_class: multi-bundle source-authority and runtime lifecycle cleanup drift between destructive reset deletion and preservation-mode orphan/delete transitions
     canonical_owners:
-      - "issue #1012 / platform-spec.yaml multi-bundle source authority before runtime implementation"
-      - future internal/runtime/preservationcleanup owner for preserve-and-transition cleanup
+      - "platform-spec.yaml multi_bundle_persistence source authority and resume/recovery matrix"
+      - internal/runtime/preservationcleanup owner for preserve-and-transition cleanup cause/result semantics
       - internal/runtime/destructivereset remains the separate destructive reset owner for runtime.nuke only
     why_this_node_exists: multi-bundle unavailable-bundle cleanup must preserve historical run, event, delivery, session, timer, audit, and entity rows while transitioning their terminal state; reusing the existing destructive reset delete catalog would erase the audit identity the bundle lifecycle requires.
     known_manifestations:
       - "old #987 and #988 wording says to reuse destructivereset even though DefaultPlatformCleanupCatalog deletes run-scoped history rows"
-      - current master has no preservationcleanup owner and no merge-bearing platform-spec authority for bundle_source, bundles, bundle.delete, or bundle unavailable error codes
-      - "startup recovery auto-orphan (#1016) and bundle.delete --force Phase 3 (#1019) must consume one preservation cleanup owner rather than local per-consumer SQL"
+      - "source/schema/availability prerequisites are now merge-bearing; startup recovery auto-orphan (#1016) introduces the first runtime preservation cleanup owner consumer"
+      - "bundle.delete --force Phase 3 (#1019) must consume the preservation cleanup owner rather than local per-consumer SQL"
       - "bundle.delete Phase 5 atomic runs/bundles mutation is a separate #1009 sibling and must not be folded into the preservation cleanup owner"
       - "server-wide runtime.nuke bundle-catalog integration (#1027) is a separate destructive-reset/runtime-admin concern"
     representative_issues:
@@ -257,7 +257,7 @@ nodes:
         - add a destructivereset mode flag while preserving delete-path ownership
         - patch only startup auto-orphan or only bundle.delete --force instead of centralizing the shared preservation owner
         - transition one table without accounting for runs, run_control_state, deliveries, sessions, timers, events, audits, turns, entity_state, and entity_mutations
-    current_action_pressure: "source-authority and owner-boundary first slice under issue 1008; runtime implementation remains blocked until #1012 source authority lands or a later gate explicitly widens"
+    current_action_pressure: "#1016 startup-recovery child introduces the first runtime preservation cleanup owner consumer and closes the serve-startup recovery slice; parent preservation cleanup remains open/tracked by #1008/#1011 for #1019 bundle.delete --force, #1027 runtime.nuke, and explicitly split siblings"
   - id: boot_check_definition_drift
     title: Boot Check Definition Drift
     parent_class: semantic correctness drift between authoritative boot-check definitions and enforcement/proof surfaces

@@ -5643,6 +5643,25 @@ multi_bundle_persistence:
         result_error: BUNDLE_UNAVAILABLE
         rationale: The server lacks authoritative bundle bytes for resume/fork after restart or deletion.
     active_restart_recovery:
+      startup_owner:
+        implemented_by:
+          - internal/runtime/startuprecovery
+          - internal/runtime/preservationcleanup
+          - internal/store.PostgresStore.ApplyUnavailableBundleStartupPreservationCleanup
+        ordering: >
+          Serve startup runs this owner after platform schema/state-store initialization and after
+          runtime_boot.active_run_abandon_quiescence, but before legacy bundle-match admission, runtime start,
+          API readiness, or late delivery recovery.
+        persisted_missing_rule: >
+          Any active run classified as BUNDLE_DATA_INTEGRITY_ERROR by the canonical run bundle availability owner
+          fails serve before cleanup/readiness. Mixed persisted-missing and orphanable active rows must not apply
+          partial preservation cleanup.
+        orphan_cleanup_scope: >
+          Active ephemeral, deleted, and legacy runs are cancelled with the bundle orphan reason in
+          runs.error_summary, run_control_state is stopped, pending/in-progress same-run agent/node deliveries are
+          dead-lettered with receipts, active/suspended agent sessions terminate with reason orphaned and the bundle
+          cause as detail, active run-scoped timers are cancelled, and run-scoped managed containers are stopped when
+          their managed identity proves the affected run_id.
       persisted_bundle_present: restart_may_resume_or_recover_the_run_under_runtime_recovery_owners
       persisted_bundle_missing: fail_serve_with_BUNDLE_DATA_INTEGRITY_ERROR_until_operator_repairs_data
       ephemeral_deleted_or_legacy: >

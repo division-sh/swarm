@@ -11,6 +11,7 @@ import (
 	"github.com/lib/pq"
 	runtimedestructivereset "swarm/internal/runtime/destructivereset"
 	runtimepipeline "swarm/internal/runtime/pipeline"
+	"swarm/internal/runtime/preservationcleanup"
 	runtimerunquiescence "swarm/internal/runtime/runquiescence"
 	storerunlifecycle "swarm/internal/store/runlifecycle"
 )
@@ -431,8 +432,10 @@ func activeRunQuiescenceDeliveryTerminal(status, reasonCode string) bool {
 }
 
 func activeRunQuiescenceTerminalReasonCodes() []string {
-	return []string{
+	out := []string{
 		runtimedestructivereset.QuiescenceReasonCode,
 		runtimerunquiescence.ServeAbandonReasonCode,
 	}
+	out = append(out, preservationcleanup.TerminalReasonCodes()...)
+	return out
 }
