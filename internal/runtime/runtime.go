@@ -66,6 +66,7 @@ type RuntimeOptions struct {
 	EnableToolGateway  bool
 	ToolGatewayToken   string
 	BundleFingerprint  string
+	BundleSourceFact   runtimecorrelation.BundleSourceFact
 	WorkflowModule     runtimepipeline.WorkflowModule
 	LLMRuntime         llm.Runtime
 	Credentials        runtimecredentials.Store
@@ -93,6 +94,7 @@ type validatedRuntimeDeps struct {
 	RuntimeLogCapabilities   runtimeLogCapabilityResolver
 	EventReceiptCapability   func(context.Context) (bool, error)
 	TrimmedBundleFingerprint string
+	BundleSourceFact         runtimecorrelation.BundleSourceFact
 }
 
 const BootProgressTotalSteps = 22
@@ -327,6 +329,7 @@ func (deps RuntimeDeps) validated() (validatedRuntimeDeps, error) {
 		RuntimeLogCapabilities:   runtimeLogSchemaCapabilities(stores),
 		EventReceiptCapability:   canonicalEventReceiptCapabilities(stores),
 		TrimmedBundleFingerprint: strings.TrimSpace(opts.BundleFingerprint),
+		BundleSourceFact:         opts.BundleSourceFact.Normalized(),
 	}, nil
 }
 
@@ -374,7 +377,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	}
 	payloadValidator := boot.payloadValidator(rt.Logger)
 	boot.bindPayloadValidator(payloadValidator)
-	bus, err := newRuntimeEventBus(stores.EventStore, rt.Logger, source, boot.TrimmedBundleFingerprint, func() []runtimebus.EventInterceptor {
+	bus, err := newRuntimeEventBus(stores.EventStore, rt.Logger, source, boot.TrimmedBundleFingerprint, boot.BundleSourceFact, func() []runtimebus.EventInterceptor {
 		if rt.Pipeline == nil {
 			return nil
 		}

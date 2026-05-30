@@ -417,7 +417,16 @@ func ensureRuntimeLogRunRow(ctx context.Context, db storerunlifecycle.DBTX, runI
 	if _, err := uuid.Parse(runID); err != nil {
 		return err
 	}
-	return storerunlifecycle.EnsureActive(ctx, db, runID, "", "", storerunlifecycle.EnsureActiveOptions{})
+	opts := storerunlifecycle.EnsureActiveOptions{}
+	if fact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx); ok {
+		opts.HasBundleHashCol = true
+		opts.HasBundleSourceCol = true
+		opts.HasBundleFingerprintCol = true
+		opts.BundleHash = fact.BundleHash
+		opts.BundleSource = fact.BundleSource
+		opts.BundleFingerprint = fact.BundleFingerprint
+	}
+	return storerunlifecycle.EnsureActive(ctx, db, runID, "", "", opts)
 }
 
 func runtimeLogPayload(level, component, action string, e RuntimeLogEntry, detailMap map[string]any, runID, parentEventID, handlerID string) map[string]any {

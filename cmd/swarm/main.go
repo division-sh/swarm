@@ -317,6 +317,11 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		slog.Error("bundle match admission failed", "error", err)
 		return 3
 	}
+	bundleSourceFact, err := prepareServeBundleSource(ctx, stores, bundle, bootBundleIdentity.Fingerprint, opts.Dev)
+	if err != nil {
+		slog.Error("prepare bundle source", "error", err)
+		return 3
+	}
 	if err := workspaces.ValidateSource(ctx, source); err != nil {
 		slog.Error("validate workspaces", "error", err)
 		return 1
@@ -383,6 +388,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 			EnableToolGateway:  true,
 			ToolGatewayToken:   strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_TOKEN")),
 			BundleFingerprint:  bootBundleIdentity.Fingerprint,
+			BundleSourceFact:   bundleSourceFact,
 			Credentials:        credentialStore,
 			BootStartedAt:      bootStartedAt,
 			BootProgress:       reporter.runtimeSink(),
@@ -401,7 +407,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	}
 
 	var ready atomic.Bool
-	supervisor := newRuntimeProjectSupervisor(repo, resolvedPlatformSpecPath, cfg, stores, &ready, contractsRoot, bundle, source, rt)
+	supervisor := newRuntimeProjectSupervisor(repo, resolvedPlatformSpecPath, cfg, stores, &ready, contractsRoot, bundle, source, rt, opts.Dev)
 	defer func() {
 		if err := closeServeRuntime(context.Background(), supervisor, opts, workspaces); err != nil {
 			log.Printf("runtime shutdown failed: %v", err)

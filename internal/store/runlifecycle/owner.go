@@ -93,6 +93,12 @@ func EnsureActive(ctx context.Context, db DBTX, runID, triggerEventID, triggerEv
 	if err != nil {
 		return err
 	}
+	if bundleSource == BundleSourceLegacy && bundleHash != "" {
+		return fmt.Errorf("ensure run row: legacy bundle_source cannot carry canonical bundle_hash")
+	}
+	if bundleSource != BundleSourceLegacy && bundleHash == "" {
+		return fmt.Errorf("ensure run row: bundle_hash is required for bundle_source=%s", bundleSource)
+	}
 	reopenStatus := "runs.status"
 	reopenErrorSummary := ""
 	reopenEndedAt := ""

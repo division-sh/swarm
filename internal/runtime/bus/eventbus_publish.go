@@ -400,10 +400,23 @@ func (eb *EventBus) withBundleFingerprint(ctx context.Context) context.Context {
 	if ctx == nil || eb == nil {
 		return ctx
 	}
+	if _, ok := runtimecorrelation.BundleSourceFactFromContext(ctx); ok {
+		return ctx
+	}
+	eb.mu.RLock()
+	sourceFact := eb.bundleSourceFact
+	fingerprint := eb.bundleFingerprint
+	eb.mu.RUnlock()
+	if sourceFact.BundleFingerprint == "" {
+		sourceFact.BundleFingerprint = fingerprint
+	}
+	if !sourceFact.Empty() {
+		return runtimecorrelation.WithBundleSourceFact(ctx, sourceFact)
+	}
 	if runtimecorrelation.BundleFingerprintFromContext(ctx) != "" {
 		return ctx
 	}
-	return runtimecorrelation.WithBundleFingerprint(ctx, eb.bundleFingerprint)
+	return runtimecorrelation.WithBundleFingerprint(ctx, fingerprint)
 }
 
 func (eb *EventBus) WithBundleFingerprint(ctx context.Context) context.Context {

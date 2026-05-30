@@ -5490,7 +5490,7 @@ run_model:
     run_resume: 'POST /runs/:run_id/resume — resume a paused run.'
     run_cancel: 'POST /runs/:run_id/cancel — cancel a running run. Drains in-flight events.'
 multi_bundle_persistence:
-  status: promoted_source_authority_no_runtime_behavior
+  status: promoted_source_authority_with_partial_runtime_behavior
   promoted_by: '#1012'
   source_evidence:
     draft: docs/MULTI_BUNDLE_PERSISTENCE_DRAFT.md
@@ -5500,8 +5500,9 @@ multi_bundle_persistence:
   authority_rule: >
     This section is the merge-bearing source authority for multi-bundle persistence, bundle identity, bundle-aware
     resume/delete/fork semantics, planned bundle API methods, and planned CLI command shape. The draft is now evidence
-    only. Runtime, API handler, CLI implementation, database migration, and generated OpenRPC publication remain separately
-    gated implementation work unless a later PR explicitly promotes and proves them.
+    only. Database foundation, read-only bundle catalog APIs, and supported local serve ingest/source stamping now have
+    promoted implementation owners in this section. Remaining runtime, API handler, CLI, delete/fork/recovery, and
+    generated OpenRPC publication work stays separately gated unless a later PR explicitly promotes and proves it.
   generated_artifact_policy:
     current_openrpc_status: bundle_read_catalog_and_run_fork_methods_published
     rule: >
@@ -5646,9 +5647,10 @@ multi_bundle_persistence:
   persistence_model:
     live_schema_boundary: >
       platform_tables.tables is the current runtime DDL source. #1013 promotes the bundles table and
-      runs.bundle_hash/runs.bundle_source into the live schema foundation. API/runtime behavior,
-      reader migration, ingest/source stamping, and public dual-accept naming remain separately
-      gated implementation work unless a later PR explicitly promotes and proves them.
+      runs.bundle_hash/runs.bundle_source into the live schema foundation. Serve ingest/source stamping for local
+      `swarm serve --contracts` is promoted by multi_bundle_persistence.persistence_model.serve_ingest_projection.
+      Reader migration, API routing, CLI/fork behavior, delete/runtime cleanup, and public dual-accept naming remain
+      separately gated implementation work unless a later PR explicitly promotes and proves them.
     bundles_table:
       planned_live_owner_after_migration: platform_tables.tables.bundles
       primary_key: bundle_hash
@@ -5661,14 +5663,50 @@ multi_bundle_persistence:
         - data_blob
         - metadata
       stores:
-        - uploaded or registered contract YAML bytes
-        - data/ bundle blob bytes when included by the canonical hash rule
+        - deterministic serve-ingest YAML archive for non-data canonical bundle inputs
+        - data/ bundle blob archive bytes when included by the canonical hash rule
         - parsed JSON projection for safe server-side inspection
       does_not_store:
         - external code
         - host filesystem dependencies
         - credentials
         - generated runtime state
+    serve_ingest_projection:
+      status: implemented_for_local_postgres_serve_contracts
+      projection_owner: internal/runtime/contracts.BuildBundleCatalogProjection
+      store_owner: internal/store.PostgresStore.UpsertBundleCatalog
+      source_fact_owner: cmd/swarm.prepareServeBundleSource
+      runtime_context_owner: internal/runtime/correlation.BundleSourceFact
+      applies_to:
+        persisted: '`swarm serve --contracts` computes BundleHash, writes or reuses one bundles row, and stamps every new run row with bundle_hash plus bundle_source=persisted.'
+        ephemeral: '`swarm serve --contracts --dev` computes the same BundleHash, writes no bundles row, and stamps every new run row with bundle_hash plus bundle_source=ephemeral.'
+      content_yaml: >
+        Deterministic YAML archive named `swarm.bundle.catalog.v1`. The archive lists every non-data canonical bundle
+        input by canonical label and stores the bundle_hash v1 canonical content bytes as base64, plus a canonical_inputs list containing all
+        bundle_hash v1 labels, policies, and byte sizes. It never stores host absolute paths. Flow data/ raw entries are
+        excluded from content_yaml and live only in data_blob.
+      data_blob: >
+        NULL when the canonical bundle has no flow data/ raw inputs. Otherwise a deterministic JSON byte archive named
+        `swarm.bundle.catalog.v1` with entries sorted by canonical label; each entry records label, byte size, and exact
+        raw bytes as base64.
+      parsed_json: >
+        Definition-only JSON projection with projection_version, workflow name/version, canonical input labels/policies,
+        and agent definitions. Agent definitions may include agent_id, flow_instance, role, type, model_tier,
+        conversation_mode, session_scope, prompt_path, subscriptions, and tools. Runtime-owned fields such as status,
+        runtime_state, queues, active task, watchdog, last_tool_outcome, pending deliveries, and delivery lifecycle are
+        forbidden.
+      metadata: >
+        JSON object containing projection_version, source=`swarm serve --contracts`, workflow_name, workflow_version,
+        file_count, and data_file_count.
+      idempotency: >
+        Reusing an existing bundles row with the same bundle_hash is allowed only when content_yaml, parsed_json,
+        data_blob, and metadata match the computed projection. A hash collision or stale row with different stored
+        content fails closed before runtime construction.
+      split_boundaries:
+        - DB-loaded same-bundle source/fork loaders remain #1024.
+        - New-work routing and bundle_hash admission remain #1022.
+        - Bundle register/delete APIs remain #1017/#1018/#1019.
+        - SQLite runtime support remains blocked by #1087/#1088 unless separately gated.
     runs_table:
       planned_live_owner_after_migration: platform_tables.tables.runs
       promoted_fields:
@@ -5890,6 +5928,12 @@ multi_bundle_persistence:
       reason: Production readers must migrate from bundle_fingerprint/null-collapse behavior to bundle_source availability semantics.
     bundle_ingest_and_run_stamping:
       tracker: '#1015'
+      implementation_status: live_for_supported_postgres_serve_contracts
+      runtime_owners:
+        - internal/runtime/contracts.BuildBundleCatalogProjection
+        - internal/store.PostgresStore.UpsertBundleCatalog
+        - cmd/swarm.prepareServeBundleSource
+        - internal/runtime/correlation.BundleSourceFact
       reason: serve --contracts / --dev ingest, canonical hashing, bundle row writes, and persisted/ephemeral run stamping are runtime boot implementation.
     startup_recovery_unavailable_bundle:
       tracker: '#1016'

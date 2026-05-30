@@ -1,0 +1,126 @@
+package store
+
+import (
+	"bytes"
+	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"regexp"
+	"strings"
+)
+
+var canonicalBundleHashPattern = regexp.MustCompile(`^bundle-v1:sha256:[0-9a-f]{64}$`)
+
+type BundleCatalogUpsert struct {
+	BundleHash  string
+	ContentYAML string
+	ParsedJSON  map[string]any
+	DataBlob    []byte
+	Metadata    map[string]any
+}
+
+func (s *PostgresStore) UpsertBundleCatalog(ctx context.Context, req BundleCatalogUpsert) (BundleCatalogDetail, error) {
+	if err := s.requireBundleCatalogCapabilities(ctx); err != nil {
+		return BundleCatalogDetail{}, err
+	}
+	req.BundleHash = strings.TrimSpace(req.BundleHash)
+	if !canonicalBundleHashPattern.MatchString(req.BundleHash) {
+		return BundleCatalogDetail{}, fmt.Errorf("bundle catalog upsert requires canonical bundle_hash bundle-v1:sha256:<64 lowercase hex>")
+	}
+	if strings.TrimSpace(req.ContentYAML) == "" {
+		return BundleCatalogDetail{}, fmt.Errorf("bundle catalog upsert requires content_yaml")
+	}
+	parsedRaw, err := normalizedBundleCatalogJSON(req.ParsedJSON)
+	if err != nil {
+		return BundleCatalogDetail{}, fmt.Errorf("bundle catalog parsed_json: %w", err)
+	}
+	metadataRaw, err := normalizedBundleCatalogJSON(req.Metadata)
+	if err != nil {
+		return BundleCatalogDetail{}, fmt.Errorf("bundle catalog metadata: %w", err)
+	}
+
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return BundleCatalogDetail{}, err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json, data_blob, metadata)
+		VALUES ($1, $2, $3::jsonb, $4::bytea, $5::jsonb)
+		ON CONFLICT (bundle_hash) DO NOTHING
+	`, req.BundleHash, req.ContentYAML, parsedRaw, nullableBytes(req.DataBlob), metadataRaw); err != nil {
+		return BundleCatalogDetail{}, fmt.Errorf("upsert bundle catalog: %w", err)
+	}
+	if err := assertBundleCatalogUpsertIdempotent(ctx, tx, req.BundleHash, req.ContentYAML, parsedRaw, req.DataBlob, metadataRaw); err != nil {
+		return BundleCatalogDetail{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return BundleCatalogDetail{}, err
+	}
+	return s.LoadBundleCatalog(ctx, req.BundleHash)
+}
+
+func assertBundleCatalogUpsertIdempotent(ctx context.Context, tx bundleCatalogTx, bundleHash, contentYAML string, parsedRaw, dataBlob, metadataRaw []byte) error {
+	var gotContent string
+	var gotParsed []byte
+	var gotData []byte
+	var gotMetadata []byte
+	if err := tx.QueryRowContext(ctx, `
+		SELECT content_yaml, COALESCE(parsed_json, '{}'::jsonb), data_blob, COALESCE(metadata, '{}'::jsonb)
+		FROM bundles
+		WHERE bundle_hash = $1
+		FOR SHARE
+	`, bundleHash).Scan(&gotContent, &gotParsed, &gotData, &gotMetadata); err != nil {
+		return fmt.Errorf("load bundle catalog upsert result: %w", err)
+	}
+	gotParsed, err := normalizedBundleCatalogJSONBytes(gotParsed)
+	if err != nil {
+		return fmt.Errorf("stored bundle catalog parsed_json: %w", err)
+	}
+	gotMetadata, err = normalizedBundleCatalogJSONBytes(gotMetadata)
+	if err != nil {
+		return fmt.Errorf("stored bundle catalog metadata: %w", err)
+	}
+	if gotContent != contentYAML || !bytes.Equal(gotParsed, parsedRaw) || !bytes.Equal(nullableBytes(gotData), nullableBytes(dataBlob)) || !bytes.Equal(gotMetadata, metadataRaw) {
+		return fmt.Errorf("bundle catalog row for %s already exists with different content", bundleHash)
+	}
+	return nil
+}
+
+type bundleCatalogTx interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func normalizedBundleCatalogJSON(values map[string]any) ([]byte, error) {
+	if values == nil {
+		values = map[string]any{}
+	}
+	raw, err := json.Marshal(values)
+	if err != nil {
+		return nil, err
+	}
+	return normalizedBundleCatalogJSONBytes(raw)
+}
+
+func normalizedBundleCatalogJSONBytes(raw []byte) ([]byte, error) {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		raw = []byte(`{}`)
+	}
+	var decoded any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return nil, err
+	}
+	if decoded == nil {
+		decoded = map[string]any{}
+	}
+	return json.Marshal(decoded)
+}
+
+func nullableBytes(raw []byte) []byte {
+	if len(raw) == 0 {
+		return nil
+	}
+	return raw
+}

@@ -497,6 +497,7 @@ func (eb *EventBus) logRuntime(ctx context.Context, level diaglog.Level, message
 		return nil
 	}
 	ctx = runtimecorrelation.WithRuntimeDiagnosticLineage(ctx, eventID, eventType)
+	ctx = eb.withBundleFingerprint(ctx)
 	if err := logger.Log(ctx, level, message, component, action, eventID, eventType, agentID, entityID, sessionID, correlation, detail, errText, durationUS); err != nil {
 		diaglog.ProcessLog("error", "diagnostics", "runtime log persistence failed",
 			"component", strings.TrimSpace(component),

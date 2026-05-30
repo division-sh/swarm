@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecorrelation "swarm/internal/runtime/correlation"
+	storerunlifecycle "swarm/internal/store/runlifecycle"
 	"swarm/internal/testutil"
 )
 
@@ -286,6 +287,40 @@ func TestRuntimeLogger_Log_EnsuresRunRowBeforePersistingRunScopedEntry(t *testin
 	}
 	if got := strings.TrimSpace(asString(details["run_id"])); got != runID {
 		t.Fatalf("details.run_id = %q, want %q", got, runID)
+	}
+}
+
+func TestRuntimeLogger_Log_StampsBundleSourceFactOnRunRow(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	defer cleanup()
+	logger := NewRuntimeLogger(db, runtimeLogCapabilityStub{enabled: true, hasRunID: true})
+	runID := uuid.NewString()
+	sourceFact := runtimecorrelation.BundleSourceFact{
+		BundleHash:        "bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111",
+		BundleSource:      storerunlifecycle.BundleSourcePersisted,
+		BundleFingerprint: "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+	}
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ctx = runtimecorrelation.WithBundleSourceFact(ctx, sourceFact)
+
+	if err := logger.Log(ctx, RuntimeLogEntry{
+		Level:     "info",
+		Message:   "runtime log",
+		Component: "workflow-runtime",
+		Action:    "bundle_source_fact",
+	}); err != nil {
+		t.Fatalf("logger.Log: %v", err)
+	}
+	var gotHash, gotSource, gotFingerprint string
+	if err := db.QueryRow(`
+		SELECT COALESCE(bundle_hash, ''), bundle_source, COALESCE(bundle_fingerprint, '')
+		FROM runs
+		WHERE run_id = $1::uuid
+	`, runID).Scan(&gotHash, &gotSource, &gotFingerprint); err != nil {
+		t.Fatalf("load run bundle source: %v", err)
+	}
+	if gotHash != sourceFact.BundleHash || gotSource != sourceFact.BundleSource || gotFingerprint != sourceFact.BundleFingerprint {
+		t.Fatalf("run bundle source = hash:%q source:%q fingerprint:%q, want %#v", gotHash, gotSource, gotFingerprint, sourceFact)
 	}
 }
 

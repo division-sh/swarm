@@ -16,10 +16,12 @@ import (
 	runtimeagentcontrol "swarm/internal/runtime/agentcontrol"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimeactors "swarm/internal/runtime/core/actors"
+	runtimecorrelation "swarm/internal/runtime/correlation"
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 	workspace "swarm/internal/runtime/workspace"
+	storerunlifecycle "swarm/internal/store/runlifecycle"
 )
 
 func TestRuntimeProjectSupervisorReplaceCurrentRuntime_ClearsReadinessBeforeShutdown(t *testing.T) {
@@ -179,11 +181,16 @@ func writeProjectRoot(t *testing.T) string {
 func testBuilderSupervisorBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	dir := t.TempDir()
+	platformPath := filepath.Join(t.TempDir(), "platform-spec.yaml")
+	if err := os.WriteFile(platformPath, []byte("platform:\n  name: swarm\n  version: test\n"), 0o644); err != nil {
+		t.Fatalf("write platform-spec.yaml: %v", err)
+	}
 	packagePath := filepath.Join(dir, "package.yaml")
 	if err := os.WriteFile(packagePath, []byte("name: test\nversion: 1.0.0\nflows: []\n"), 0o644); err != nil {
 		t.Fatalf("write package.yaml: %v", err)
 	}
 	bundle := testWorkflowValidationBundle()
+	bundle.Paths = runtimecontracts.ResolveWorkflowContractPathsWithOverrides(filepath.Dir(dir), dir, platformPath)
 	bundle.Paths.ProjectPackageFile = packagePath
 	bundle.Semantics.Name = "test"
 	bundle.Semantics.Version = "1.0.0"
@@ -201,6 +208,7 @@ func newSupervisorForLoadProjectFailureTest(
 	source := semanticview.Wrap(bundle)
 	module := stubWorkflowModule{source: source}
 	supervisor := newRuntimeProjectSupervisor("", "", nil, storeBundle{}, new(atomic.Bool), "", nil, nil, nil)
+	supervisor.dev = true
 	supervisor.loadWorkflow = func(repoRoot, contractsRoot, platformSpecPath string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
 		if got := strings.TrimSpace(contractsRoot); got != strings.TrimSpace(projectRoot) {
 			return nil, nil, fmt.Errorf("contracts root = %q, want %q", got, projectRoot)
@@ -300,14 +308,21 @@ func TestRuntimeProjectSupervisorLoadProject_PropagatesRuntimeStartFailure(t *te
 
 func TestRuntimeProjectSupervisorLoadProject_PassesBundleFingerprintToRuntime(t *testing.T) {
 	projectRoot := writeProjectRoot(t)
-	expectedIdentity, err := runtimecontracts.BootBundleIdentity(testBuilderSupervisorBundle(t))
+	expectedBundle := testBuilderSupervisorBundle(t)
+	expectedIdentity, err := runtimecontracts.BootBundleIdentity(expectedBundle)
 	if err != nil {
 		t.Fatalf("BootBundleIdentity: %v", err)
 	}
+	expectedHash, err := runtimecontracts.BundleHash(expectedBundle)
+	if err != nil {
+		t.Fatalf("BundleHash: %v", err)
+	}
 
 	var gotFingerprint string
+	var gotSourceFact runtimecorrelation.BundleSourceFact
 	supervisor := newSupervisorForLoadProjectFailureTest(t, projectRoot, stubWorkspaceLifecycle{}, func(_ context.Context, deps runtimepkg.RuntimeDeps) (*runtimepkg.Runtime, error) {
 		gotFingerprint = deps.Options.BundleFingerprint
+		gotSourceFact = deps.Options.BundleSourceFact
 		return &runtimepkg.Runtime{}, nil
 	})
 	supervisor.startRuntime = func(context.Context, *runtimepkg.Runtime) error { return nil }
@@ -322,6 +337,9 @@ func TestRuntimeProjectSupervisorLoadProject_PassesBundleFingerprintToRuntime(t 
 	}
 	if gotFingerprint != expectedIdentity.Fingerprint {
 		t.Fatalf("BundleFingerprint = %q, want %q", gotFingerprint, expectedIdentity.Fingerprint)
+	}
+	if gotSourceFact.BundleHash != expectedHash || gotSourceFact.BundleSource != storerunlifecycle.BundleSourceEphemeral || gotSourceFact.BundleFingerprint != expectedIdentity.Fingerprint {
+		t.Fatalf("BundleSourceFact = %#v, want hash=%q source=%q fingerprint=%q", gotSourceFact, expectedHash, storerunlifecycle.BundleSourceEphemeral, expectedIdentity.Fingerprint)
 	}
 }
 

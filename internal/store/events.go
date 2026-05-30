@@ -1293,8 +1293,14 @@ func (s *PostgresStore) ensureRunRow(ctx context.Context, caps StoreSchemaCapabi
 	}
 	opts := runLifecycleOptions(caps)
 	opts.ReopenCompleted = reopenCompleted
-	opts.BundleSource = storerunlifecycle.BundleSourceLegacy
-	opts.BundleFingerprint = runtimecorrelation.BundleFingerprintFromContext(ctx)
+	if fact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx); ok {
+		opts.BundleHash = fact.BundleHash
+		opts.BundleSource = fact.BundleSource
+		opts.BundleFingerprint = fact.BundleFingerprint
+	} else {
+		opts.BundleSource = storerunlifecycle.BundleSourceLegacy
+		opts.BundleFingerprint = runtimecorrelation.BundleFingerprintFromContext(ctx)
+	}
 	return storerunlifecycle.EnsureActive(ctx, chooseExecQueryer(s.DB, tx), runID, triggerEventID, triggerEventType, opts)
 }
 
