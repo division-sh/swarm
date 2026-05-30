@@ -1356,6 +1356,44 @@ func TestEventBusPublish_ClassifiesRunBundleSourceThroughRunLifecycleOwner(t *te
 	}
 }
 
+func TestEventBusPublishDirect_StampsBundleSourceFactOnRunRow(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	runID := uuid.NewString()
+	sourceFact := runtimecorrelation.BundleSourceFact{
+		BundleHash:        "bundle-v1:sha256:4444444444444444444444444444444444444444444444444444444444444444",
+		BundleSource:      "persisted",
+		BundleFingerprint: "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+	}
+	eb, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
+		BundleSourceFact: sourceFact,
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	if err := eb.PublishDirect(context.Background(), events.Event{
+		ID:          uuid.NewString(),
+		RunID:       runID,
+		Type:        events.EventType("scan.requested"),
+		SourceAgent: "test",
+		CreatedAt:   time.Now().UTC(),
+		Payload:     []byte(`{}`),
+	}, []string{"agent-a"}); err != nil {
+		t.Fatalf("PublishDirect: %v", err)
+	}
+	var bundleHash, bundleSource, legacyFingerprint string
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT COALESCE(bundle_hash, ''), bundle_source, COALESCE(bundle_fingerprint, '')
+		FROM runs
+		WHERE run_id = $1::uuid
+	`, runID).Scan(&bundleHash, &bundleSource, &legacyFingerprint); err != nil {
+		t.Fatalf("load run bundle source: %v", err)
+	}
+	if bundleHash != sourceFact.BundleHash || bundleSource != sourceFact.BundleSource || legacyFingerprint != sourceFact.BundleFingerprint {
+		t.Fatalf("bundle identity = hash:%q source:%q fingerprint:%q, want canonical source fact %#v", bundleHash, bundleSource, legacyFingerprint, sourceFact)
+	}
+}
+
 func TestEventBusPublishDeferred_PersistsInboundEventBeforeInterceptorsRun(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}

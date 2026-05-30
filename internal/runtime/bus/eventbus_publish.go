@@ -1050,6 +1050,7 @@ func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipie
 	if err := ensurePublishEpoch(ctx); err != nil {
 		return err
 	}
+	ctx = eb.withBundleFingerprint(ctx)
 	receiptOverride := &runtimepipeline.PipelineReceiptOverride{}
 	ctx = runtimepipeline.WithPipelineReceiptOverride(ctx, receiptOverride)
 	start := time.Now()
