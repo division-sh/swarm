@@ -21,6 +21,7 @@ func TestCLIRuntimeStateAPIConsumersAreExplicitlyAccounted(t *testing.T) {
 		"agent_replay_backlog.go": {},
 		"agent_restart.go":        {},
 		"agents.go":               {},
+		"bundle.go":               {},
 		"control_mailbox.go":      {},
 		"control_nuke.go":         {},
 		"control_run.go":          {},
@@ -29,6 +30,7 @@ func TestCLIRuntimeStateAPIConsumersAreExplicitlyAccounted(t *testing.T) {
 		"entities.go":             {},
 		"event_publish.go":        {},
 		"events.go":               {},
+		"fork.go":                 {},
 		"forkchat.go":             {},
 		"incidents.go":            {},
 		"logs.go":                 {},
@@ -93,8 +95,10 @@ func TestCLILocalRuntimeHelpersRemainNonOperatorQuarantined(t *testing.T) {
 	}
 
 	retiredRoutes := [][]string{
-		{"fork"},
-		{"fork", "--help"},
+		{"fork", "--dry-run"},
+		{"fork", "--materialize-only"},
+		{"fork", "--activate"},
+		{"fork", "--contracts", "."},
 		{"investigate", "runs"},
 		{"control", "mailbox", "list"},
 	}
@@ -151,6 +155,9 @@ func TestCLIRuntimeStateCommandsRequireSharedAPITokenBeforeRequest(t *testing.T)
 		{name: "event view", args: []string{"event", "view", "event-1"}},
 		{name: "event replay", args: []string{"event", "replay", "event-1"}},
 		{name: "event publish", args: []string{"event", "publish", "scan.requested", "--payload-json", `{"topic":"sample"}`}},
+		{name: "bundle list", args: []string{"bundle", "list"}},
+		{name: "bundle show", args: []string{"bundle", "show", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},
+		{name: "bundle agents", args: []string{"bundle", "agents", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},
 		{name: "conversations list", args: []string{"conversations", "list"}},
 		{name: "conversation view", args: []string{"conversation", "view", "session-1"}},
 		{name: "conversation turn", args: []string{"conversation", "turn", "session-1", "1"}},
@@ -159,6 +166,7 @@ func TestCLIRuntimeStateCommandsRequireSharedAPITokenBeforeRequest(t *testing.T)
 		{name: "entity aggregate", args: []string{"entity", "aggregate"}},
 		{name: "run connect start", args: []string{"run", "--connect", "http://192.0.2.10:1", "--event", "scan.requested", "--payload", payloadPath, "--no-follow"}},
 		{name: "run connect reattach", args: []string{"run", "--connect", "http://192.0.2.10:1", "--reattach", "run-1"}},
+		{name: "fork", args: []string{"fork", "11111111-1111-1111-1111-111111111111"}},
 		{name: "version server", args: []string{"version", "--server"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

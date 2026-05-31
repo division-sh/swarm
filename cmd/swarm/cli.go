@@ -94,11 +94,12 @@ func newRootCommandWithOptions(ctx context.Context, repo string, out, errOut io.
 		newAgentsCommand(opts),
 		newAgentCommand(opts),
 		newForkChatCommand(opts),
+		newBundleCommand(opts),
 		newEntitiesCommand(opts),
 		newEntityCommand(opts),
 		newMailboxCommand(opts),
 		newControlCommand(opts),
-		newPendingForkCommand(),
+		newForkCommand(opts),
 	)
 	return cmd
 }
@@ -335,27 +336,4 @@ func newCompletionCommand() *cobra.Command {
 			}
 		},
 	}
-}
-
-func newPendingForkCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:                "fork",
-		Short:              "Planned run-fork command; implementation pending.",
-		Hidden:             true,
-		DisableFlagParsing: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			writeForkPendingMessage(cmd.ErrOrStderr())
-			return commandExitError{code: 2}
-		},
-	}
-}
-
-func writeForkPendingMessage(w io.Writer) {
-	if w == nil {
-		return
-	}
-	fmt.Fprintln(w, "ERROR: `swarm fork` is specified but not implemented yet.")
-	fmt.Fprintln(w, "  Planned command:")
-	fmt.Fprintln(w, "  `swarm fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]`")
-	fmt.Fprintln(w, "  It will consume `/v1/rpc run.fork`; legacy harness flags such as --dry-run, --materialize-only, --activate, and --contracts are not supported operator commands.")
 }

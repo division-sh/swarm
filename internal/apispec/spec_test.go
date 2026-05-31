@@ -399,7 +399,7 @@ func TestMultiBundleSourceAuthorityPublishesOnlyImplementedBundleReadAndRunForkM
 		"create_new_work_bundle_hash":         "#1022",
 		"cross_bundle_fork":                   "#976",
 		"db_loaded_same_bundle_source":        "#1024",
-		"run_fork_cli_consumer":               "#989",
+		"run_fork_cli_consumer":               "#1023",
 		"multi_bundle_cli_inventory":          "#1023",
 		"bundle_hash_dual_accept_migration":   "#1001",
 	} {
@@ -408,7 +408,12 @@ func TestMultiBundleSourceAuthorityPublishesOnlyImplementedBundleReadAndRunForkM
 
 	cli := mustMappingValue(t, root, "cli_specification")
 	commandCatalog := mustMappingValue(t, cli, "command_catalog")
-	assertScalarValue(t, mustMappingValue(t, mustMappingValue(t, commandCatalog, "run_fork"), "command"), runForkCommand)
+	bundleCommand := mustMappingValue(t, commandCatalog, "bundle")
+	assertScalarValue(t, mustMappingValue(t, bundleCommand, "command"), "swarm bundle list|show|agents")
+	assertScalarValue(t, mustMappingValue(t, bundleCommand, "implementation_status"), "implemented_read_only_inventory")
+	runForkCatalog := mustMappingValue(t, commandCatalog, "run_fork")
+	assertScalarValue(t, mustMappingValue(t, runForkCatalog, "command"), runForkCommand)
+	assertScalarValue(t, mustMappingValue(t, runForkCatalog, "implementation_status"), "implemented_public_cli_consumer")
 	retired := mustMappingValue(t, cli, "retired_namespaces")
 	if mappingValue(retired, "fork") != nil {
 		t.Fatal("bare top-level swarm fork must not remain classified as a retired namespace")
@@ -424,11 +429,19 @@ func TestMultiBundleSourceAuthorityPublishesOnlyImplementedBundleReadAndRunForkM
 		}
 	}
 	remaining := mustMappingValue(t, parentTail, "remaining_should_have_not_implemented")
-	if !sequenceContainsScalar(remaining, runForkCommand) {
-		t.Fatalf("remaining_should_have_not_implemented missing %q", runForkCommand)
+	if sequenceContainsScalar(remaining, runForkCommand) {
+		t.Fatalf("remaining_should_have_not_implemented still includes implemented %q", runForkCommand)
 	}
-	if !sequenceContainsScalar(remaining, "swarm bundle list|show|agents|register|delete") {
-		t.Fatal("remaining_should_have_not_implemented missing swarm bundle command family")
+	if sequenceContainsScalar(remaining, "swarm bundle list|show|agents|register|delete") {
+		t.Fatal("remaining_should_have_not_implemented still includes implemented swarm bundle inventory commands")
+	}
+	for _, want := range []string{
+		"swarm bundle register <path-or-archive>",
+		"swarm bundle delete <bundle-hash> [--force] [--dry-run] [--idempotency-key <key>]",
+	} {
+		if !sequenceContainsScalar(remaining, want) {
+			t.Fatalf("remaining_should_have_not_implemented missing %q", want)
+		}
 	}
 
 	apiBoundary := mustMappingValue(t, mustMappingValue(t, root, "api_specification"), "multi_bundle_publication_boundary")
@@ -436,7 +449,7 @@ func TestMultiBundleSourceAuthorityPublishesOnlyImplementedBundleReadAndRunForkM
 
 	for _, relPath := range []string{
 		filepath.Join("cmd", "swarm", "main.go"),
-		filepath.Join("cmd", "swarm", "cli.go"),
+		filepath.Join("cmd", "swarm", "fork.go"),
 		filepath.Join("docs", "SWARM_INVESTIGATE_COMMAND_DRAFT.md"),
 		filepath.Join("docs", "specs", "swarm-platform", "platform", "FLIGHT-RECORDER.md"),
 		filepath.Join("docs", "specs", "swarm-platform", "platform", "CHANGELOG.md"),

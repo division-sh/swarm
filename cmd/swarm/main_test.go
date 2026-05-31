@@ -139,7 +139,7 @@ func TestCLI_RootNoArgsPrintsHelpAndDoesNotStartRuntime(t *testing.T) {
 			t.Fatalf("root help missing %q:\n%s", want, stdout.String())
 		}
 	}
-	for _, retired := range []string{"fork", "investigate"} {
+	for _, retired := range []string{"investigate"} {
 		if strings.Contains(stdout.String(), "\n  "+retired+" ") {
 			t.Fatalf("root help advertises retired command %q:\n%s", retired, stdout.String())
 		}
@@ -243,7 +243,7 @@ func TestCLI_RetiredCommandsHiddenFromHelpAndCompletion(t *testing.T) {
 			if code != 0 {
 				t.Fatalf("root help code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 			}
-			for _, retired := range []string{"fork", "investigate"} {
+			for _, retired := range []string{"investigate"} {
 				if strings.Contains(stdout.String(), "\n  "+retired+" ") {
 					t.Fatalf("root help advertises retired command %q:\n%s", retired, stdout.String())
 				}
@@ -256,7 +256,7 @@ func TestCLI_RetiredCommandsHiddenFromHelpAndCompletion(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("__complete root code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	for _, retired := range []string{"fork\t", "investigate\t"} {
+	for _, retired := range []string{"investigate\t"} {
 		if strings.Contains(stdout.String(), retired) {
 			t.Fatalf("__complete root advertises retired command %q:\n%s", retired, stdout.String())
 		}
@@ -2646,38 +2646,6 @@ func TestCLI_VerifyPreservesLocalContractCarveOut(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "verify failed: resolve contracts") {
 		t.Fatalf("verify stderr = %q, want local contract resolution failure", stderr.String())
-	}
-}
-
-func TestCLI_ForkIsSpecifiedButNotImplemented(t *testing.T) {
-	const expectedForkCommand = "swarm fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]"
-	for _, tc := range []struct {
-		name string
-		args []string
-		want string
-	}{
-		{name: "fork", args: []string{"fork"}, want: "ERROR: `swarm fork` is specified but not implemented yet."},
-		{name: "fork-help", args: []string{"fork", "--help"}, want: expectedForkCommand},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			var stdout, stderr bytes.Buffer
-			code := executeRootCommand(context.Background(), t.TempDir(), tc.args, &stdout, &stderr)
-			if code != 2 {
-				t.Fatalf("%s code = %d, want 2 stdout=%s stderr=%s", tc.name, code, stdout.String(), stderr.String())
-			}
-			if strings.TrimSpace(stdout.String()) != "" {
-				t.Fatalf("%s stdout = %q, want empty", tc.name, stdout.String())
-			}
-			if !strings.Contains(stderr.String(), tc.want) {
-				t.Fatalf("%s stderr = %q, want %q", tc.name, stderr.String(), tc.want)
-			}
-			if !strings.Contains(stderr.String(), expectedForkCommand) {
-				t.Fatalf("%s stderr = %q, want promoted fork command %q", tc.name, stderr.String(), expectedForkCommand)
-			}
-			if strings.Contains(stderr.String(), "swarm control run fork") || strings.Contains(stderr.String(), "was removed in v1") {
-				t.Fatalf("%s stderr preserves stale fork authority: %q", tc.name, stderr.String())
-			}
-		})
 	}
 }
 

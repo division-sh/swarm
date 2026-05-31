@@ -4767,7 +4767,7 @@ run_model:
     description: 'Fork creates a new run by reconstructing full system state at a point in time, optionally
       loading new contracts, and resuming execution. The system automatically determines which events need
       to be re-delivered. The original run is frozen. The forked run gets independent execution.'
-    command: 'planned public CLI: `swarm fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]`, consuming /v1/rpc run.fork once #989 implements the API/runtime/CLI owner'
+    command: 'public CLI: `swarm fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]`, consuming /v1/rpc run.fork'
     dry_run_command: 'retired in v1 CLI; historical `swarm fork --dry-run` is not a supported operator command'
     materialize_only_command: 'retired in v1 CLI; historical `swarm fork --materialize-only` is not a supported operator command'
     activation_command: 'retired in v1 CLI; historical `swarm fork --activate` is not a supported operator command'
@@ -5973,11 +5973,12 @@ multi_bundle_persistence:
         Source runs with bundle_source ephemeral, deleted, or legacy return BUNDLE_UNAVAILABLE for fork admission because
         the server lacks authoritative persisted bundle bytes.
   cli_surface:
-    publication_status: partial_runtime_serve_bundle_hash_implemented_other_cli_children_pending
-    bundle_commands_planned:
+    publication_status: read_only_bundle_inventory_run_fork_and_serial_serve_bundle_hash_implemented_other_cli_children_pending
+    bundle_commands_supported:
       - swarm bundle list
       - swarm bundle show <bundle-hash>
       - swarm bundle agents <bundle-hash>
+    bundle_commands_split:
       - swarm bundle register <path-or-archive>
       - swarm bundle delete <bundle-hash> [--force] [--dry-run] [--idempotency-key <key>]
     modified_commands_planned:
@@ -5988,10 +5989,10 @@ multi_bundle_persistence:
       - swarm run --bundle-hash <bundle_hash>
     run_fork:
       command: swarm fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]
-      public_status: intended_public_command
+      public_status: implemented_public_command
       api_owner: /v1/rpc run.fork
       rules:
-        - Top-level swarm fork is the intended public command for run.fork and is no longer classified as a retired namespace.
+        - Top-level swarm fork is the public command for run.fork and is no longer classified as a retired namespace.
         - The bundle selector flag is --bundle-hash, not draft --bundle.
         - --at-event selects the fork event only and never means ambient current-run or current-event.
         - The CLI must not call internal runtime/store/fork harnesses directly.
@@ -6051,11 +6052,13 @@ multi_bundle_persistence:
       tracker: '#1024'
       reason: Same-bundle fork from persisted DB bundle bytes needs a sibling source loader separate from current disk-rooted selected_contracts execution.
     run_fork_cli_consumer:
-      tracker: '#989'
-      reason: run.fork API/runtime/spec owner is promoted in api_specification.method_catalog; downstream swarm fork CLI implementation remains split to #1023.
+      tracker: '#1023'
+      implementation_status: implemented_by_1023_first_slice
+      reason: swarm fork consumes /v1/rpc run.fork only; cross-bundle fork routing remains split to #976 and DB-loaded same-bundle source loading remains split to #1024.
     multi_bundle_cli_inventory:
       tracker: '#1023'
-      reason: Bundle CLI inventory and command implementation remain blocked until source authority and API owners land.
+      implementation_status: read_only_inventory_implemented
+      reason: swarm bundle list/show/agents consume /v1/rpc bundle.list/get/agents only; bundle.register and bundle.delete remain split until their API/runtime owners land.
     bundle_hash_dual_accept_migration:
       tracker: '#1001'
       reason: Old bundle_fingerprint/bundle_ref names must be reconciled in code and generated artifacts under the locked bundle_hash naming decision.
@@ -9507,33 +9510,37 @@ cli_specification:
       - SESSION_NOT_FOUND, TURN_NOT_FOUND, malformed results, auth/HTTP/RPC failures, and transport failures fail closed with tested exit codes
       - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, conversation.current_for_agent, runtime.logs, run.trace, or forkchat usage
     bundle:
-      command: swarm bundle list|show|agents|register|delete
+      command: swarm bundle list|show|agents
       tier: should_have
-      implementation_status: absent
-      blocker_state: '#1023; bundle CLI inventory and mutation commands require API/OpenRPC/runtime owners from #1012 follow-on implementation children.'
+      implementation_status: implemented_read_only_inventory
+      blocker_state: 'Read-only bundle list/show/agents are implemented by #1023 over /v1/rpc bundle.list/get/agents; bundle.register and bundle.delete remain split until their API/runtime owners are promoted.'
       owners:
-      - multi_bundle_persistence.cli_surface.bundle_commands_planned
+      - multi_bundle_persistence.cli_surface.bundle_commands_supported
       - multi_bundle_persistence.api_surface.bundle_methods_planned
       behavior: >
-        Planned public CLI family for persisted bundle inventory, registration, agent catalog inspection, and deletion.
-        The command family must consume /v1/rpc bundle.* methods once they are promoted into method_catalog/OpenRPC and
-        implemented. Until then it must not call internal store/runtime helpers or infer bundle state from local files.
+        Public CLI family for persisted bundle inventory and agent catalog inspection. The implemented list/show/agents
+        commands consume /v1/rpc bundle.list, bundle.get, and bundle.agents only. The CLI must not call internal
+        store/runtime helpers or infer bundle state from local files. Mutating bundle.register and bundle.delete remain
+        split until their API/runtime owners land.
       proof_expectations:
-      - no generated OpenRPC bundle.* publication without registered API handlers
+      - exact /v1/rpc bundle.list/get/agents calls with only promoted params
+      - invalid args and missing SWARM_API_TOKEN make zero API calls
+      - human and --json output render only server-owned result fields
+      - BUNDLE_NOT_FOUND, malformed responses, auth/HTTP/RPC failures, and transport failures fail closed with tested exit codes
       - no direct DB/store/runtime bundle reads or writes from CLI
-      - bundle.delete consumes the bundle-delete owner chain, not a raw row delete
+      - bundle.register, bundle.delete, and unpromoted bundle.get alias remain absent/unknown until later gates
     run_fork:
       command: swarm fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]
       tier: should_have
-      implementation_status: absent
-      blocker_state: '#989; run.fork API/OpenRPC/runtime/CLI implementation remains blocked until this source authority lands.'
+      implementation_status: implemented_public_cli_consumer
+      blocker_state: 'Implemented by #1023 over /v1/rpc run.fork after #989 promoted the API/runtime/spec owner; cross-bundle fork and DB-loaded same-bundle source loading remain split.'
       owner: multi_bundle_persistence.cli_surface.run_fork
       api_owner: /v1/rpc run.fork
       behavior: >
-        Planned public run-fork CLI. Top-level `swarm fork` is the intended public command. The bundle selector flag is
+        Public run-fork CLI. Top-level `swarm fork` is the public command. The bundle selector flag is
         `--bundle-hash`; draft `--bundle` is superseded by #1001. `--at-event` is an explicit fork-event selector only.
-        The CLI must validate arguments locally, call /v1/rpc run.fork exactly once, and render only server-owned fork
-        results after the API/runtime owner exists.
+        The CLI validates arguments locally, calls /v1/rpc run.fork exactly once, and renders only server-owned fork
+        results.
       split_blockers:
         cross_bundle_fork: '#976'
         db_loaded_same_bundle_source: '#1024'
@@ -9551,6 +9558,8 @@ cli_specification:
       - no direct DB/store/runtime/fork harness access from CLI
       - cross-bundle targets fail closed as #976 until that child lands
       - DB-loaded same-bundle source loading remains #1024 until that child lands
+      - missing SWARM_API_TOKEN, invalid args, and legacy harness flags make zero API calls
+      - RUN_NOT_FOUND, EVENT_NOT_FOUND, IDEMPOTENCY_CONFLICT, unsupported bundle fork, malformed responses, auth/HTTP/RPC failures, and transport failures fail closed with tested exit codes
     forkchat:
       command: swarm forkchat new|resume|list|view|delete
       tier: should_have
@@ -9620,7 +9629,7 @@ cli_specification:
         include_forks_cross_surface: '#749 parent tail; normal conversation/dashboard surfaces do not consume fork-local turns in this slice.'
         dashboard_builder: '#749 parent tail.'
         sharing_acl_pinning: '#749 parent tail; fixed TTL/delete lifecycle only.'
-        run_fork_swarm_fork: '#989/#1023/#1038 source-authority work; distinct run-fork concept.'
+        run_fork_swarm_fork: '#989/#1023 implemented separately as the distinct run.fork/swarm fork concept.'
         direct_storage_or_runtime_reads: forbidden for the CLI consumer.
       proof_expectations:
       - fake API server tests prove exact JSON-RPC method names and params for every subcommand
@@ -9868,7 +9877,7 @@ cli_specification:
       command: swarm fork --dry-run|--materialize-only|--activate|--contracts
       status: retired_legacy_harness_forms
       exit_code: 2
-      message: "ERROR: legacy `swarm fork` harness flags are not supported operator commands. The intended public command is `swarm fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]` after #989 implements /v1/rpc run.fork."
+      message: "ERROR: legacy `swarm fork` harness flags are not supported operator commands. The public command is `swarm fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]` over /v1/rpc run.fork."
     unpromoted_review_only_legacy_spellings:
       status: unpromoted_candidate_backlog
       commands:
@@ -9965,8 +9974,8 @@ cli_specification:
     - swarm control mailbox
     remaining_must_have_not_implemented: []
     remaining_should_have_not_implemented:
-    - swarm bundle list|show|agents|register|delete
-    - swarm fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]
+    - swarm bundle register <path-or-archive>
+    - swarm bundle delete <bundle-hash> [--force] [--dry-run] [--idempotency-key <key>]
     rule: 'Remaining commands require separate gates and must consume canonical API owners; they MUST NOT resurrect direct DB/store/runtime-state readers.'
 
 api_specification:
@@ -10007,13 +10016,12 @@ api_specification:
       #1012 promotes the multi-bundle API contract as source authority, including bundle.* methods, run.fork, bundle_hash
       filters, and bundle_hash create-new-work params. The read-only bundle.list, bundle.get, and bundle.agents methods are
       now in method_catalog/OpenRPC with matching handlers and proof. run.fork is also promoted into method_catalog/OpenRPC
-      with matching selected-contract API/runtime handler proof by #989. Remaining multi-bundle methods and shapes are not
+      with matching selected-contract API/runtime handler proof by #989. The swarm bundle list/show/agents and swarm fork
+      CLI consumers are implemented by #1023 and consume only those canonical /v1/rpc methods. Remaining multi-bundle methods and shapes are not
       in method_catalog/OpenRPC until a later gated API/runtime implementation PR registers handlers and regenerates
       openrpc.json/proof artifacts in the same PR. Consumers must not treat docs/MULTI_BUNDLE_PERSISTENCE_DRAFT.md or #1038
       prose as API authority after #1012.
     blocked_children:
-      run_fork_cli_consumer: '#1023'
-      multi_bundle_cli_inventory: '#1023'
       cross_bundle_fork: '#976'
       db_loaded_same_bundle_source: '#1024'
       bundle_hash_dual_accept_migration: '#1001'
@@ -13746,7 +13754,7 @@ api_specification:
       - IDEMPOTENCY_CONFLICT
     run.fork:
       tier: should_have
-      description: "Public selected-contract run fork mutation.\n\nCreates and executes a same-bundle selected-contract fork from a source run. The method consumes source bundle availability from runs.bundle_source / runs.bundle_hash and bundle-row presence before any fork mutation. Source runs whose canonical bundle bytes are unavailable fail closed with BUNDLE_UNAVAILABLE; persisted source rows with missing bundle data fail with BUNDLE_DATA_INTEGRITY_ERROR. The selected-contract execution path consumes the existing store/runtime run_fork selected_contracts owners and must not infer source identity from legacy bundle_fingerprint, bundle_ref, null-collapse, or local filesystem heuristics.\n\nIf bundle_hash is omitted, the source run's canonical bundle_hash is used. If bundle_hash is supplied and equals the source run bundle_hash, the same-bundle selected_contracts fork may proceed. If bundle_hash differs, the method fails closed with UNSUPPORTED_BUNDLE_HASH_FORK; cross-bundle fork routing remains split to #976. Same-bundle DB-loaded source execution remains split to #1024; this method does not promote a DB bundle source loader. swarm fork CLI implementation remains split to #1023 and must consume this method rather than runtime/store helpers.\n"
+      description: "Public selected-contract run fork mutation.\n\nCreates and executes a same-bundle selected-contract fork from a source run. The method consumes source bundle availability from runs.bundle_source / runs.bundle_hash and bundle-row presence before any fork mutation. Source runs whose canonical bundle bytes are unavailable fail closed with BUNDLE_UNAVAILABLE; persisted source rows with missing bundle data fail with BUNDLE_DATA_INTEGRITY_ERROR. The selected-contract execution path consumes the existing store/runtime run_fork selected_contracts owners and must not infer source identity from legacy bundle_fingerprint, bundle_ref, null-collapse, or local filesystem heuristics.\n\nIf bundle_hash is omitted, the source run's canonical bundle_hash is used. If bundle_hash is supplied and equals the source run bundle_hash, the same-bundle selected_contracts fork may proceed. If bundle_hash differs, the method fails closed with UNSUPPORTED_BUNDLE_HASH_FORK; cross-bundle fork routing remains split to #976. Same-bundle DB-loaded source execution remains split to #1024; this method does not promote a DB bundle source loader. The swarm fork CLI consumes this method and must not call runtime/store helpers directly.\n"
       scope:
         required:
         - write:runs
