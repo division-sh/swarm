@@ -2,6 +2,8 @@ package manager
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -31,6 +33,8 @@ type flowActivationTestBus struct {
 	removedPairs []string
 	published    []events.Event
 	runtimeLogs  []runtimepipeline.RuntimeLogEntry
+	unsubscribed []string
+	removeErr    error
 	routeStore   flowActivationRouteStore
 }
 
@@ -47,7 +51,9 @@ type flowActivationTestInstanceStore struct {
 }
 
 type flowActivationTestStore struct {
-	upserts []PersistedAgent
+	upserts      []PersistedAgent
+	terminated   []string
+	terminateErr error
 }
 
 func newFlowActivationManager(bus Bus, instances flowInstancePersistence, stores ...ManagerPersistence) *AgentManager {
@@ -133,8 +139,11 @@ func (s *flowActivationTestStore) UpsertAgent(_ context.Context, rec PersistedAg
 func (*flowActivationTestStore) LoadAgents(context.Context) ([]PersistedAgent, error) {
 	return nil, nil
 }
-func (*flowActivationTestStore) MarkAgentTerminated(context.Context, string) error { return nil }
-func (*flowActivationTestStore) EnsureEntitySchema(context.Context, string) error  { return nil }
+func (s *flowActivationTestStore) MarkAgentTerminated(_ context.Context, agentID string) error {
+	s.terminated = append(s.terminated, strings.TrimSpace(agentID))
+	return s.terminateErr
+}
+func (*flowActivationTestStore) EnsureEntitySchema(context.Context, string) error { return nil }
 func (*flowActivationTestStore) UpsertEventReceipt(context.Context, string, string, ReceiptStatus, string) error {
 	return nil
 }
@@ -159,7 +168,9 @@ func (*flowActivationTestBus) PublishPersistedRecipients(context.Context, events
 func (*flowActivationTestBus) Subscribe(string, ...events.EventType) <-chan events.Event {
 	return make(chan events.Event)
 }
-func (*flowActivationTestBus) Unsubscribe(string)           {}
+func (b *flowActivationTestBus) Unsubscribe(agentID string) {
+	b.unsubscribed = append(b.unsubscribed, agentID)
+}
 func (*flowActivationTestBus) Store() runtimebus.EventStore { return nil }
 func (*flowActivationTestBus) ResetInMemoryState() error    { return nil }
 func (b *flowActivationTestBus) LogRuntime(_ context.Context, entry runtimepipeline.RuntimeLogEntry) error {
@@ -183,6 +194,9 @@ func (b *flowActivationTestBus) AddFlowInstanceRoute(_ runtimecontracts.SystemNo
 
 func (b *flowActivationTestBus) RemoveFlowInstanceRoute(identity runtimeflowidentity.Route) error {
 	b.removedPairs = append(b.removedPairs, identity.ScopeKey+"/"+identity.InstanceID)
+	if b.removeErr != nil {
+		return b.removeErr
+	}
 	if b.routeStore != nil {
 		return b.routeStore.DeleteFlowInstanceRoute(context.Background(), identity)
 	}
@@ -794,6 +808,101 @@ func TestDeactivateFlowInstanceRemovesAgentsAndRoutes(t *testing.T) {
 	}
 }
 
+func TestDeactivateFlowInstanceQueuesTerminalSideEffectsUntilPostCommitWhenAvailable(t *testing.T) {
+	routeStore := &flowActivationTestRouteStore{}
+	bus := &flowActivationTestBus{routeStore: routeStore}
+	instances := &flowActivationTestInstanceStore{}
+	managerStore := &flowActivationTestStore{}
+	am := newFlowActivationManager(bus, instances, managerStore)
+	bundle := testFlowBundle("")
+
+	if err := am.ActivateFlowInstance(context.Background(), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")); err != nil {
+		t.Fatalf("ActivateFlowInstance: %v", err)
+	}
+	postCommit := make([]func(), 0, 1)
+	ctx := runtimepipeline.WithPipelinePostCommitActions(context.Background(), &postCommit)
+	if err := am.DeactivateFlowInstance(ctx, "review", "inst-1", "review/inst-1", "ent-1"); err != nil {
+		t.Fatalf("DeactivateFlowInstance: %v", err)
+	}
+
+	if _, ok := am.GetAgentConfig("reviewer-inst-1"); !ok {
+		t.Fatal("flow agent was torn down before post-commit flush")
+	}
+	if len(bus.unsubscribed) != 0 {
+		t.Fatalf("unsubscribed before post-commit flush = %#v, want none", bus.unsubscribed)
+	}
+	if len(managerStore.terminated) != 0 {
+		t.Fatalf("agent terminations before post-commit flush = %#v, want none", managerStore.terminated)
+	}
+	if len(bus.removedPairs) != 0 {
+		t.Fatalf("removed routes before post-commit flush = %#v, want none", bus.removedPairs)
+	}
+	if got := routeStore.statusByPath["review/inst-1"]; got != "active" {
+		t.Fatalf("route status before post-commit flush = %q, want active", got)
+	}
+	if len(instances.terminatedPaths) != 1 || instances.terminatedPaths[0] != "review/inst-1" {
+		t.Fatalf("flow instance terminal state = %#v, want committed owner entry", instances.terminatedPaths)
+	}
+	if len(postCommit) != 1 {
+		t.Fatalf("post-commit actions = %d, want 1", len(postCommit))
+	}
+
+	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
+	if _, ok := am.GetAgentConfig("reviewer-inst-1"); ok {
+		t.Fatal("expected flow agent teardown after post-commit flush")
+	}
+	if len(bus.unsubscribed) != 1 || bus.unsubscribed[0] != "reviewer-inst-1" {
+		t.Fatalf("unsubscribed after post-commit flush = %#v, want reviewer-inst-1", bus.unsubscribed)
+	}
+	if len(managerStore.terminated) != 1 || managerStore.terminated[0] != "reviewer-inst-1" {
+		t.Fatalf("agent terminations after post-commit flush = %#v, want reviewer-inst-1", managerStore.terminated)
+	}
+	if len(bus.removedPairs) != 1 || bus.removedPairs[0] != "review/inst-1" {
+		t.Fatalf("removed routes after post-commit flush = %#v, want [review/inst-1]", bus.removedPairs)
+	}
+	if got := routeStore.statusByPath["review/inst-1"]; got != "inactive" {
+		t.Fatalf("route status after post-commit flush = %q, want inactive", got)
+	}
+	if len(bus.runtimeLogs) != 0 {
+		t.Fatalf("runtime logs = %#v, want none", bus.runtimeLogs)
+	}
+}
+
+func TestDeactivateFlowInstanceLogsPostCommitTerminalSideEffectFailures(t *testing.T) {
+	bus := &flowActivationTestBus{removeErr: errors.New("route removal failed")}
+	instances := &flowActivationTestInstanceStore{}
+	managerStore := &flowActivationTestStore{terminateErr: errors.New("agent terminate failed")}
+	am := newFlowActivationManager(bus, instances, managerStore)
+	bundle := testFlowBundle("")
+
+	if err := am.ActivateFlowInstance(context.Background(), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")); err != nil {
+		t.Fatalf("ActivateFlowInstance: %v", err)
+	}
+	postCommit := make([]func(), 0, 1)
+	ctx := runtimepipeline.WithPipelinePostCommitActions(context.Background(), &postCommit)
+	if err := am.DeactivateFlowInstance(ctx, "review", "inst-1", "review/inst-1", "ent-1"); err != nil {
+		t.Fatalf("DeactivateFlowInstance returned pre-commit error: %v", err)
+	}
+
+	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
+	if len(bus.runtimeLogs) != 1 {
+		t.Fatalf("runtime logs = %#v, want one post-commit failure log", bus.runtimeLogs)
+	}
+	log := bus.runtimeLogs[0]
+	if log.Action != "terminal_flow_instance_side_effects_failed" || log.Level != "warn" {
+		t.Fatalf("runtime log = %#v, want warning terminal_flow_instance_side_effects_failed", log)
+	}
+	if !strings.Contains(log.Error, "agent terminate failed") || !strings.Contains(log.Error, "route removal failed") {
+		t.Fatalf("runtime log error = %q, want both side-effect failures", log.Error)
+	}
+	if len(bus.removedPairs) != 1 || bus.removedPairs[0] != "review/inst-1" {
+		t.Fatalf("removed routes after failure = %#v, want route attempt after agent failure", bus.removedPairs)
+	}
+	if len(instances.terminatedPaths) != 1 || instances.terminatedPaths[0] != "review/inst-1" {
+		t.Fatalf("flow terminal state = %#v, want preserved terminal transition", instances.terminatedPaths)
+	}
+}
+
 func TestDeactivateFlowInstanceUsesExactResolvedFlowPathForNestedTemplate(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	instances := &flowActivationTestInstanceStore{}
@@ -904,6 +1013,97 @@ func TestDeactivateFlowInstanceModel_PersistsTerminalStateInFlowInstances(t *tes
 	}
 	if _, ok := am.GetAgentConfig("shared-subject-agent"); !ok {
 		t.Fatal("expected unrelated flow agent to remain active")
+	}
+}
+
+func TestDeactivateFlowInstanceModel_PostCommitSideEffectsFollowTerminalCommit(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	const runID = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status)
+		VALUES ($1::uuid, 'running')
+		ON CONFLICT (run_id) DO NOTHING
+	`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	routeStore := &flowActivationTestRouteStore{}
+	bus := &flowActivationTestBus{routeStore: routeStore}
+	managerStore := &flowActivationTestStore{}
+	store := runtimepipeline.NewWorkflowInstanceStore(db)
+	am := newFlowActivationManager(bus, store, managerStore)
+	bundle := testFlowBundle("")
+	const subjectID = "22222222-2222-2222-2222-222222222222"
+	req := testActivationRequest(bundle, "review", "inst-1", subjectID, "review/inst-1")
+
+	if err := am.ActivateFlowInstance(ctx, req); err != nil {
+		t.Fatalf("ActivateFlowInstance: %v", err)
+	}
+	if err := store.RunInPipelineTransaction(ctx, func(txctx context.Context, _ *sql.Tx) error {
+		if err := store.Mutate(txctx, req.Instance.EntityID, func(instance *runtimepipeline.WorkflowInstance) {
+			instance.CurrentState = "completed"
+		}); err != nil {
+			return err
+		}
+		if err := am.DeactivateFlowInstanceModel(txctx, runtimepipeline.FlowInstanceDeactivationRequest{
+			ContractBundle: semanticview.Wrap(bundle),
+			Instance:       req.Instance,
+			FinalState:     "completed",
+		}); err != nil {
+			return err
+		}
+		if _, ok := am.GetAgentConfig("reviewer-inst-1"); !ok {
+			t.Fatal("flow agent was torn down before terminal transaction commit")
+		}
+		if len(managerStore.terminated) != 0 || len(bus.unsubscribed) != 0 || len(bus.removedPairs) != 0 {
+			t.Fatalf("side effects before commit: terminated=%#v unsubscribed=%#v routes=%#v", managerStore.terminated, bus.unsubscribed, bus.removedPairs)
+		}
+		if got := routeStore.statusByPath["review/inst-1"]; got != "active" {
+			t.Fatalf("route status before commit = %q, want active", got)
+		}
+		var externalStatus string
+		if err := db.QueryRowContext(context.Background(), `
+			SELECT status
+			FROM flow_instances
+			WHERE instance_id = $1
+		`, "review/inst-1").Scan(&externalStatus); err != nil {
+			t.Fatalf("external flow_instances status before commit: %v", err)
+		}
+		if strings.TrimSpace(externalStatus) != "active" {
+			t.Fatalf("external flow_instances status before commit = %q, want active", externalStatus)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("RunInPipelineTransaction: %v", err)
+	}
+
+	var status string
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT status
+		FROM flow_instances
+		WHERE instance_id = $1
+	`, "review/inst-1").Scan(&status); err != nil {
+		t.Fatalf("external flow_instances status after commit: %v", err)
+	}
+	if strings.TrimSpace(status) != "terminated" {
+		t.Fatalf("external flow_instances status after commit = %q, want terminated", status)
+	}
+	if _, ok := am.GetAgentConfig("reviewer-inst-1"); ok {
+		t.Fatal("expected flow agent teardown after terminal transaction commit")
+	}
+	if len(managerStore.terminated) != 1 || managerStore.terminated[0] != "reviewer-inst-1" {
+		t.Fatalf("agent terminations after commit = %#v, want reviewer-inst-1", managerStore.terminated)
+	}
+	if len(bus.unsubscribed) != 1 || bus.unsubscribed[0] != "reviewer-inst-1" {
+		t.Fatalf("unsubscribed after commit = %#v, want reviewer-inst-1", bus.unsubscribed)
+	}
+	if len(bus.removedPairs) != 1 || bus.removedPairs[0] != "review/inst-1" {
+		t.Fatalf("removed routes after commit = %#v, want review/inst-1", bus.removedPairs)
+	}
+	if got := routeStore.statusByPath["review/inst-1"]; got != "inactive" {
+		t.Fatalf("route status after commit = %q, want inactive", got)
 	}
 }
 

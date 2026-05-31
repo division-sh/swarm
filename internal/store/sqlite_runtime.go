@@ -374,15 +374,56 @@ func (s *SQLiteRuntimeStore) MarkAgentTerminated(ctx context.Context, agentID st
 	if agentID == "" {
 		return fmt.Errorf("agent_id is required")
 	}
-	_, err := s.DB.ExecContext(ctx, `
+	if s == nil || s.DB == nil {
+		return fmt.Errorf("sqlite runtime store is required")
+	}
+	s.sessionMu.Lock()
+	defer s.sessionMu.Unlock()
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin sqlite mark agent terminated tx: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	now := s.now()
+	if _, err := tx.ExecContext(ctx, `
 		UPDATE agents
 		SET status = 'terminated',
 		    last_active_at = ?
 		WHERE agent_id = ?
-	`, time.Now().UTC(), agentID)
-	if err != nil {
+	`, now, agentID); err != nil {
 		return fmt.Errorf("mark sqlite agent terminated: %w", err)
 	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE agent_sessions
+		SET status = 'terminated',
+		    termination_reason = 'cancelled',
+		    terminated_at = COALESCE(terminated_at, ?),
+		    lease_holder = NULL,
+		    lease_expires_at = NULL,
+		    updated_at = ?
+		WHERE agent_id = ?
+		  AND status IN ('active', 'suspended')
+	`, now, now, agentID); err != nil {
+		return fmt.Errorf("mark sqlite agent terminated sessions: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE agent_conversation_audits
+		SET status = 'terminated',
+		    updated_at = ?
+		WHERE agent_id = ?
+		  AND status = 'active'
+	`, now, agentID); err != nil {
+		return fmt.Errorf("mark sqlite agent terminated conversation audits: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit sqlite mark agent terminated tx: %w", err)
+	}
+	committed = true
 	return nil
 }
 
