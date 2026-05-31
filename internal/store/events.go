@@ -1321,7 +1321,6 @@ func (s *PostgresStore) ensureRunRow(ctx context.Context, caps StoreSchemaCapabi
 		opts.BundleHash = fact.BundleHash
 		opts.BundleSource = fact.BundleSource
 		opts.BundleFingerprint = fact.BundleFingerprint
-		opts.ValidateBundleAvailable = persistedBundleRunCreationValidationRequired(ctx, caps)
 	} else {
 		opts.BundleSource = storerunlifecycle.BundleSourceLegacy
 		opts.BundleFingerprint = runtimecorrelation.BundleFingerprintFromContext(ctx)

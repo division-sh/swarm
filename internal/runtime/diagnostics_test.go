@@ -300,6 +300,7 @@ func TestRuntimeLogger_Log_StampsBundleSourceFactOnRunRow(t *testing.T) {
 		BundleSource:      storerunlifecycle.BundleSourcePersisted,
 		BundleFingerprint: "sha256:1111111111111111111111111111111111111111111111111111111111111111",
 	}
+	seedRuntimeLogBundleRow(t, db, sourceFact.BundleHash)
 	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
 	ctx = runtimecorrelation.WithBundleSourceFact(ctx, sourceFact)
 
@@ -321,6 +322,38 @@ func TestRuntimeLogger_Log_StampsBundleSourceFactOnRunRow(t *testing.T) {
 	}
 	if gotHash != sourceFact.BundleHash || gotSource != sourceFact.BundleSource || gotFingerprint != sourceFact.BundleFingerprint {
 		t.Fatalf("run bundle source = hash:%q source:%q fingerprint:%q, want %#v", gotHash, gotSource, gotFingerprint, sourceFact)
+	}
+}
+
+func TestRuntimeLogger_LogRejectsDeletedPersistedBundleSourceFact(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	defer cleanup()
+	logger := NewRuntimeLogger(db, runtimeLogCapabilityStub{enabled: true, hasRunID: true})
+	runID := uuid.NewString()
+	sourceFact := runtimecorrelation.BundleSourceFact{
+		BundleHash:        "bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111",
+		BundleSource:      storerunlifecycle.BundleSourcePersisted,
+		BundleFingerprint: "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+	}
+	seedRuntimeLogBundleRow(t, db, sourceFact.BundleHash)
+	if _, err := db.ExecContext(context.Background(), `DELETE FROM bundles WHERE bundle_hash = $1`, sourceFact.BundleHash); err != nil {
+		t.Fatalf("delete bundle row: %v", err)
+	}
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ctx = runtimecorrelation.WithBundleSourceFact(ctx, sourceFact)
+
+	err := logger.Log(ctx, RuntimeLogEntry{
+		Level:     "info",
+		Message:   "runtime log",
+		Component: "workflow-runtime",
+		Action:    "bundle_source_deleted",
+	})
+	if !errors.Is(err, storerunlifecycle.ErrPersistedBundleUnavailable) {
+		t.Fatalf("logger.Log error = %v, want ErrPersistedBundleUnavailable", err)
+	}
+	assertRunRowExists(t, db, runID, false)
+	if count := countRuntimeLogRowsForRun(t, db, runID); count != 0 {
+		t.Fatalf("runtime log rows for %s = %d, want 0", runID, count)
 	}
 }
 
@@ -870,6 +903,30 @@ func assertRunRowExists(t *testing.T, db *sql.DB, runID string, want bool) {
 	if exists != want {
 		t.Fatalf("run row exists = %v for %q, want %v", exists, runID, want)
 	}
+}
+
+func seedRuntimeLogBundleRow(t *testing.T, db *sql.DB, bundleHash string) {
+	t.Helper()
+	if _, err := db.ExecContext(context.Background(), `
+		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json)
+		VALUES ($1, 'name: test', '{}'::jsonb)
+	`, bundleHash); err != nil {
+		t.Fatalf("seed bundle row: %v", err)
+	}
+}
+
+func countRuntimeLogRowsForRun(t *testing.T, db *sql.DB, runID string) int {
+	t.Helper()
+	var count int
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT COUNT(*)
+		FROM events
+		WHERE run_id = $1::uuid
+		  AND event_name = 'platform.runtime_log'
+	`, runID).Scan(&count); err != nil {
+		t.Fatalf("count runtime log rows for %s: %v", runID, err)
+	}
+	return count
 }
 
 type runtimeLogPayloadArg struct {

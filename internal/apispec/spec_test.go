@@ -388,7 +388,13 @@ func TestMultiBundleSourceAuthorityPublishesOnlyImplementedBundleReadAndRunForkM
 	if !sequenceContainsScalar(admissionConsumers, "/v1/rpc run.start") {
 		t.Fatal("post_delete_new_work_admission must bind run.start")
 	}
-	assertScalarContains(t, mustMappingValue(t, postDeleteAdmission, "rule"), "same-runtime event.publish and run.start attempts return BUNDLE_UNAVAILABLE")
+	if !sequenceContainsScalar(admissionConsumers, "internal/runtime.RuntimeLogger runtime-log run-row persistence") {
+		t.Fatal("post_delete_new_work_admission must bind runtime-log persistence")
+	}
+	if !sequenceContainsScalar(admissionConsumers, "internal/runtime/mutationlog mutation-log run-row persistence") {
+		t.Fatal("post_delete_new_work_admission must bind mutation-log persistence")
+	}
+	assertScalarContains(t, mustMappingValue(t, postDeleteAdmission, "rule"), "event.publish, run.start, runtime-log, and mutation-log attempts fail closed")
 	invalid := mustMappingValue(t, phaseFive, "invalid_implementations")
 	if !sequenceContainsScalar(invalid, "deleting the bundles row before marking eligible runs deleted") {
 		t.Fatal("phase_5_atomicity must reject delete-before-update implementations")

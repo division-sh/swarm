@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"testing"
 	"time"
 
@@ -162,6 +163,12 @@ func TestRunLifecycleOwnerPersistsCanonicalBundleHashWhenSupplied(t *testing.T) 
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := context.Background()
 	runID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json)
+		VALUES ($1, 'name: test', '{}'::jsonb)
+	`, testCanonicalBundleHash); err != nil {
+		t.Fatalf("seed canonical bundle row: %v", err)
+	}
 
 	if err := storerunlifecycle.EnsureActive(ctx, db, runID, "", "", storerunlifecycle.EnsureActiveOptions{
 		HasStartedAtCol:    true,
@@ -185,6 +192,23 @@ func TestRunLifecycleOwnerRejectsNonLegacySourceWithoutBundleHash(t *testing.T) 
 	if err == nil {
 		t.Fatal("EnsureActive error = nil, want missing bundle_hash rejection")
 	}
+}
+
+func TestRunLifecycleOwnerRejectsPersistedSourceWithoutBundleRow(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	ctx := context.Background()
+	runID := uuid.NewString()
+
+	err := storerunlifecycle.EnsureActive(ctx, db, runID, "", "", storerunlifecycle.EnsureActiveOptions{
+		HasBundleHashCol:   true,
+		HasBundleSourceCol: true,
+		BundleHash:         testCanonicalBundleHash,
+		BundleSource:       storerunlifecycle.BundleSourcePersisted,
+	})
+	if !errors.Is(err, storerunlifecycle.ErrPersistedBundleUnavailable) {
+		t.Fatalf("EnsureActive error = %v, want ErrPersistedBundleUnavailable", err)
+	}
+	assertRunRowAbsent(t, db, runID)
 }
 
 func TestPostgresStore_ActiveRunBundleAvailabilityConflicts(t *testing.T) {
@@ -269,5 +293,16 @@ func assertRunBundleIdentity(t *testing.T, db *sql.DB, runID, wantHash, wantSour
 		}
 	} else if !gotFingerprint.Valid || gotFingerprint.String != wantLegacyFingerprint {
 		t.Fatalf("bundle_fingerprint = %q valid=%v, want %q", gotFingerprint.String, gotFingerprint.Valid, wantLegacyFingerprint)
+	}
+}
+
+func assertRunRowAbsent(t *testing.T, db *sql.DB, runID string) {
+	t.Helper()
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM runs WHERE run_id = $1::uuid`, runID).Scan(&count); err != nil {
+		t.Fatalf("count run rows for %s: %v", runID, err)
+	}
+	if count != 0 {
+		t.Fatalf("run rows for %s = %d, want 0", runID, count)
 	}
 }

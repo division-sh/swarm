@@ -3,6 +3,7 @@ package mutationlog
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strings"
 	"testing"
 
@@ -92,6 +93,7 @@ func TestInsertStampsBundleSourceFactOnEnsuredRunRow(t *testing.T) {
 		BundleSource:      storerunlifecycle.BundleSourcePersisted,
 		BundleFingerprint: "sha256:1111111111111111111111111111111111111111111111111111111111111111",
 	}
+	seedMutationLogBundleRow(t, db, sourceFact.BundleHash)
 	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
 	ctx = runtimecorrelation.WithBundleSourceFact(ctx, sourceFact)
 
@@ -117,4 +119,66 @@ func TestInsertStampsBundleSourceFactOnEnsuredRunRow(t *testing.T) {
 	if !gotHash.Valid || gotHash.String != sourceFact.BundleHash || gotSource != sourceFact.BundleSource || !gotFingerprint.Valid || gotFingerprint.String != sourceFact.BundleFingerprint {
 		t.Fatalf("run bundle source = hash:%q valid:%v source:%q fingerprint:%q valid:%v, want %#v", gotHash.String, gotHash.Valid, gotSource, gotFingerprint.String, gotFingerprint.Valid, sourceFact)
 	}
+}
+
+func TestInsertRejectsDeletedPersistedBundleSourceFact(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	runID := uuid.NewString()
+	sourceFact := runtimecorrelation.BundleSourceFact{
+		BundleHash:        "bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111",
+		BundleSource:      storerunlifecycle.BundleSourcePersisted,
+		BundleFingerprint: "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+	}
+	seedMutationLogBundleRow(t, db, sourceFact.BundleHash)
+	if _, err := db.ExecContext(context.Background(), `DELETE FROM bundles WHERE bundle_hash = $1`, sourceFact.BundleHash); err != nil {
+		t.Fatalf("delete bundle row: %v", err)
+	}
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ctx = runtimecorrelation.WithBundleSourceFact(ctx, sourceFact)
+
+	err := Insert(ctx, db, Record{
+		EntityID:   uuid.NewString(),
+		Field:      "status",
+		OldValue:   nil,
+		NewValue:   "open",
+		WriterType: "system_node",
+		WriterID:   "review",
+	})
+	if !errors.Is(err, storerunlifecycle.ErrPersistedBundleUnavailable) {
+		t.Fatalf("Insert error = %v, want ErrPersistedBundleUnavailable", err)
+	}
+	if count := countMutationLogRunRows(t, db, runID); count != 0 {
+		t.Fatalf("run rows for %s = %d, want 0", runID, count)
+	}
+	if count := countMutationRowsForRun(t, db, runID); count != 0 {
+		t.Fatalf("entity_mutations rows for %s = %d, want 0", runID, count)
+	}
+}
+
+func seedMutationLogBundleRow(t *testing.T, db *sql.DB, bundleHash string) {
+	t.Helper()
+	if _, err := db.ExecContext(context.Background(), `
+		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json)
+		VALUES ($1, 'name: test', '{}'::jsonb)
+	`, bundleHash); err != nil {
+		t.Fatalf("seed bundle row: %v", err)
+	}
+}
+
+func countMutationLogRunRows(t *testing.T, db *sql.DB, runID string) int {
+	t.Helper()
+	var count int
+	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM runs WHERE run_id = $1::uuid`, runID).Scan(&count); err != nil {
+		t.Fatalf("count run rows for %s: %v", runID, err)
+	}
+	return count
+}
+
+func countMutationRowsForRun(t *testing.T, db *sql.DB, runID string) int {
+	t.Helper()
+	var count int
+	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM entity_mutations WHERE run_id = $1::uuid`, runID).Scan(&count); err != nil {
+		t.Fatalf("count entity_mutations rows for %s: %v", runID, err)
+	}
+	return count
 }
