@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"sort"
 	"strings"
@@ -339,14 +338,14 @@ func (e *Executor) roleScopedEntityToolsEligibleForCurrentTurn(ctx context.Conte
 		return false
 	}
 	e.mu.RLock()
-	db := e.sqlDB
+	store := e.entityStore
 	source := e.workflowSource
 	e.mu.RUnlock()
-	return roleScopedEntityToolsEligibleForCurrentTurn(ctx, db, source, actor)
+	return roleScopedEntityToolsEligibleForCurrentTurn(ctx, store, source, actor)
 }
 
-func roleScopedEntityToolsEligibleForCurrentTurn(ctx context.Context, db *sql.DB, source semanticview.Source, actor models.AgentConfig) bool {
-	if db == nil || source == nil {
+func roleScopedEntityToolsEligibleForCurrentTurn(ctx context.Context, store EntityPersistence, source semanticview.Source, actor models.AgentConfig) bool {
+	if store == nil || source == nil {
 		return false
 	}
 	contract, ok := entityruntime.ResolveForActor(source, actor.ID)
@@ -357,7 +356,7 @@ func roleScopedEntityToolsEligibleForCurrentTurn(ctx context.Context, db *sql.DB
 	if entityID == "" {
 		return false
 	}
-	row, found, err := loadEntityState(ctx, db, entityID)
+	row, found, err := loadEntityState(ctx, store, entityID)
 	if err != nil || !found {
 		return false
 	}
@@ -379,7 +378,7 @@ func (e *Executor) dispatchRoleScopedEntityTool(ctx context.Context, actor model
 }
 
 func (e *Executor) execRoleScopedEntityTool(ctx context.Context, actor models.AgentConfig, name string, input any) (any, error) {
-	db, source, payload, err := e.entityToolDependencies(input)
+	store, source, payload, err := e.entityToolDependencies(input)
 	if err != nil {
 		return nil, err
 	}
@@ -397,7 +396,7 @@ func (e *Executor) execRoleScopedEntityTool(ctx context.Context, actor models.Ag
 	if entityID == "" {
 		return nil, NewRuntimeError("invalid_tool_input", "tool-executor", "role_scoped_entity_tool.current_entity", false, "current turn entity_id is required for %s", strings.TrimSpace(name))
 	}
-	row, found, err := loadEntityState(ctx, db, entityID)
+	row, found, err := loadEntityState(ctx, store, entityID)
 	if err != nil {
 		return nil, WrapRuntimeError("query_failed", "tool-executor", "role_scoped_entity_tool.lookup", true, err, "load current entity %s", entityID)
 	}

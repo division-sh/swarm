@@ -2,12 +2,10 @@ package tools
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 	runtimecurrentstate "swarm/internal/runtime/currentstate"
@@ -31,10 +29,10 @@ var entityStateTopLevelFields = map[string]struct{}{
 	"updated_at":       {},
 }
 
-func (e *Executor) entityToolDependencies(input any) (*sql.DB, semanticview.Source, map[string]any, error) {
-	db, err := e.sqlDBDependency()
+func (e *Executor) entityToolDependencies(input any) (EntityPersistence, semanticview.Source, map[string]any, error) {
+	store, err := e.entityStoreDependency()
 	if err != nil {
-		return nil, nil, nil, NewRuntimeError("dependency_unavailable", "tool-executor", "entity_tool.db", true, "sql database is not configured")
+		return nil, nil, nil, NewRuntimeError("dependency_unavailable", "tool-executor", "entity_tool.store", true, "entity persistence store is not configured")
 	}
 	e.mu.RLock()
 	source := e.workflowSource
@@ -46,7 +44,7 @@ func (e *Executor) entityToolDependencies(input any) (*sql.DB, semanticview.Sour
 	if payload == nil {
 		payload = map[string]any{}
 	}
-	return db, source, payload, nil
+	return store, source, payload, nil
 }
 
 func parseEntityID(raw any) (string, error) {
@@ -60,24 +58,18 @@ func parseEntityID(raw any) (string, error) {
 	return entityID, nil
 }
 
-func loadEntityState(ctx context.Context, db *sql.DB, entityID string) (map[string]any, bool, error) {
+func loadEntityState(ctx context.Context, store EntityPersistence, entityID string) (map[string]any, bool, error) {
 	identity, err := runtimecurrentstate.RequireIdentity(ctx, entityID)
 	if err != nil {
 		return nil, false, err
 	}
-	row := db.QueryRowContext(ctx, entityStateRowQuery(" WHERE run_id = $1::uuid AND entity_id = $2::uuid"), identity.RunID, identity.EntityID)
-	var raw []byte
-	if err := row.Scan(&raw); err != nil {
-		if err == sql.ErrNoRows {
-			return nil, false, nil
-		}
-		return nil, false, err
+	if store == nil {
+		return nil, false, fmt.Errorf("entity persistence store is not configured")
 	}
-	entity, err := decodeEntityJSONMap(raw)
-	if err != nil {
-		return nil, false, err
-	}
-	return entity, true, nil
+	return store.LoadEntityState(ctx, EntityIdentity{
+		RunID:    identity.RunID,
+		EntityID: identity.EntityID,
+	})
 }
 
 func materializeEntityStateRow(source semanticview.Source, row map[string]any) (map[string]any, error) {
@@ -96,96 +88,6 @@ func materializeEntityStateRow(source semanticview.Source, row map[string]any) (
 		cloned["entity_type"] = contract.EntityType
 	}
 	return cloned, nil
-}
-
-func entityStateRowQuery(suffix string) string {
-	return `
-		SELECT row_to_json(t)
-		FROM (
-			SELECT
-				entity_id::text AS entity_id,
-				run_id::text AS run_id,
-				COALESCE(flow_instance, '') AS flow_instance,
-				COALESCE(entity_type, '') AS entity_type,
-				name,
-				current_state,
-				COALESCE(gates, '{}'::jsonb) AS gates,
-				COALESCE(fields, '{}'::jsonb) AS fields,
-				COALESCE(accumulator, '{}'::jsonb) AS accumulator,
-				revision,
-				entered_state_at,
-				created_at,
-				updated_at
-			FROM entity_state` + suffix + `
-		) AS t
-	`
-}
-
-func queryEntityStateRows(ctx context.Context, db *sql.DB, suffix string, args ...any) ([]map[string]any, error) {
-	rows, err := db.QueryContext(ctx, `
-		SELECT entity_id::text, run_id::text, COALESCE(flow_instance, ''), COALESCE(entity_type, ''), name, current_state,
-		       COALESCE(gates, '{}'::jsonb), COALESCE(fields, '{}'::jsonb), COALESCE(accumulator, '{}'::jsonb),
-		       revision, entered_state_at, created_at, updated_at
-		FROM entity_state`+suffix, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	out := make([]map[string]any, 0)
-	for rows.Next() {
-		var entityID, runID, flowInstance, entityType, currentState string
-		var name sql.NullString
-		var gatesRaw, fieldsRaw, accumulatorRaw []byte
-		var revision int
-		var enteredStateAt, createdAt, updatedAt time.Time
-		if err := rows.Scan(
-			&entityID,
-			&runID,
-			&flowInstance,
-			&entityType,
-			&name,
-			&currentState,
-			&gatesRaw,
-			&fieldsRaw,
-			&accumulatorRaw,
-			&revision,
-			&enteredStateAt,
-			&createdAt,
-			&updatedAt,
-		); err != nil {
-			return nil, err
-		}
-		gates, err := decodeEntityJSONMap(gatesRaw)
-		if err != nil {
-			return nil, err
-		}
-		fields, err := decodeEntityJSONMap(fieldsRaw)
-		if err != nil {
-			return nil, err
-		}
-		accumulator, err := decodeEntityJSONMap(accumulatorRaw)
-		if err != nil {
-			return nil, err
-		}
-		row := map[string]any{
-			"entity_id":        entityID,
-			"run_id":           runID,
-			"flow_instance":    flowInstance,
-			"entity_type":      entityType,
-			"name":             nullStringValue(name),
-			"current_state":    currentState,
-			"gates":            gates,
-			"fields":           fields,
-			"accumulator":      accumulator,
-			"revision":         revision,
-			"entered_state_at": enteredStateAt.Format(time.RFC3339Nano),
-			"created_at":       createdAt.Format(time.RFC3339Nano),
-			"updated_at":       updatedAt.Format(time.RFC3339Nano),
-		}
-		out = append(out, row)
-	}
-	return out, rows.Err()
 }
 
 func materializeEntityStateRows(source semanticview.Source, rows []map[string]any) ([]map[string]any, error) {
@@ -228,13 +130,6 @@ func orderedEntityFieldNamesFromInput(names []string) []string {
 		deduped = append(deduped, name)
 	}
 	return deduped
-}
-
-func nullStringValue(value sql.NullString) any {
-	if !value.Valid {
-		return nil
-	}
-	return strings.TrimSpace(value.String)
 }
 
 func numericEntityValue(value any) (float64, bool) {

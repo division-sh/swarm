@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -30,11 +29,12 @@ type Executor struct {
 	mu                             sync.RWMutex
 	manager                        Manager
 	managerProvider                ManagerProvider
-	sqlDB                          *sql.DB
 	bus                            EventPublisher
 	scheduler                      Scheduler
 	scheduleStore                  SchedulePersistence
 	mailboxStore                   MailboxPersistence
+	entityStore                    EntityPersistence
+	humanTaskStore                 HumanTaskPersistence
 	cfg                            *config.Config
 	credentials                    runtimecredentials.Store
 	httpClient                     *http.Client
@@ -71,7 +71,8 @@ func NewExecutorWithOptions(bus EventPublisher, scheduler Scheduler, opts Execut
 		scheduler:                      scheduler,
 		scheduleStore:                  scheduleStore,
 		mailboxStore:                   opts.MailboxStore,
-		sqlDB:                          opts.SQLDB,
+		entityStore:                    opts.EntityStore,
+		humanTaskStore:                 opts.HumanTaskStore,
 		cfg:                            opts.Config,
 		credentials:                    opts.Credentials,
 		httpClient:                     &http.Client{Timeout: 30 * time.Second},
@@ -659,14 +660,24 @@ func (e *Executor) mailboxStoreDependency() (MailboxPersistence, error) {
 	return store, nil
 }
 
-func (e *Executor) sqlDBDependency() (*sql.DB, error) {
+func (e *Executor) entityStoreDependency() (EntityPersistence, error) {
 	e.mu.RLock()
-	db := e.sqlDB
+	store := e.entityStore
 	e.mu.RUnlock()
-	if db == nil {
-		return nil, errors.New("sql db is not configured")
+	if store == nil {
+		return nil, errors.New("entity persistence store is not configured")
 	}
-	return db, nil
+	return store, nil
+}
+
+func (e *Executor) humanTaskStoreDependency() (HumanTaskPersistence, error) {
+	e.mu.RLock()
+	store := e.humanTaskStore
+	e.mu.RUnlock()
+	if store == nil {
+		return nil, errors.New("human task persistence store is not configured")
+	}
+	return store, nil
 }
 
 func (e *Executor) ValidateRuntimeToolInputForTest(name string, input any) error {

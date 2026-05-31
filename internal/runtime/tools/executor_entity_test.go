@@ -1218,7 +1218,7 @@ accounts:
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
 	exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{
-		SQLDB:                          db,
+		EntityStore:                    pg,
 		WorkflowSource:                 semanticview.Wrap(bundle),
 		AllowInternalLegacyEntityTools: true,
 	})
@@ -1323,7 +1323,7 @@ accounts:
 	}
 
 	exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{
-		SQLDB:                          db,
+		EntityStore:                    pg,
 		WorkflowSource:                 semanticview.Wrap(bundle),
 		AllowInternalLegacyEntityTools: true,
 	})
@@ -2102,8 +2102,9 @@ foreign:
 	_, db, _ := testutil.StartPostgres(t)
 	ensureEntityToolTestRun(t, db)
 	bus := &entityToolRuntimeLogBus{}
+	pg := &store.PostgresStore{DB: db}
 	exec := runtimetools.NewExecutorWithOptions(bus, nil, runtimetools.ExecutorOptions{
-		SQLDB:                          db,
+		EntityStore:                    pg,
 		WorkflowSource:                 semanticview.Wrap(bundle),
 		AllowInternalLegacyEntityTools: true,
 	})
@@ -2607,9 +2608,10 @@ func newEntityToolTestHarnessWithBundleAndLegacyAccess(t *testing.T, actor model
 	t.Helper()
 	_, db, _ := testutil.StartPostgres(t)
 	ensureEntityToolTestRun(t, db)
+	pg := &store.PostgresStore{DB: db}
 	ctx := runtimecorrelation.WithRunID(context.Background(), entityToolTestRunID)
 	exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{
-		SQLDB:                          db,
+		EntityStore:                    pg,
 		WorkflowSource:                 semanticview.Wrap(bundle),
 		AllowInternalLegacyEntityTools: allowInternalLegacy,
 	})

@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -18,7 +17,7 @@ import (
 )
 
 func (e *Executor) execSearchEntities(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
-	db, source, payload, err := e.entityToolDependencies(input)
+	store, source, payload, err := e.entityToolDependencies(input)
 	if err != nil {
 		return nil, err
 	}
@@ -26,14 +25,13 @@ func (e *Executor) execSearchEntities(ctx context.Context, actor models.AgentCon
 	if err != nil {
 		return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_search_entities.schema", false, err, "resolve entity contract")
 	}
-	filterSQL, args, err := entityStateBaseQueryForContractRun(ctx, source, schema.Contract, payload, true)
+	query, err := entityStateQueryForContractRun(ctx, source, schema.Contract, payload, true)
 	if err != nil {
 		return nil, WrapRuntimeError("query_failed", "tool-executor", "exec_search_entities.run_context", true, err, "resolve entity_state run context")
 	}
 	currentStateFilter := strings.TrimSpace(asString(payload["current_state"]))
 	if currentStateFilter != "" {
-		args = append(args, currentStateFilter)
-		filterSQL = append(filterSQL, fmt.Sprintf("current_state = $%d", len(args)))
+		query.CurrentState = currentStateFilter
 	}
 	if rawFilter, ok := payload["filter"]; ok && rawFilter != nil {
 		filterObject := map[string]any{}
@@ -51,21 +49,16 @@ func (e *Executor) execSearchEntities(ctx context.Context, actor models.AgentCon
 			if err != nil {
 				return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_search_entities.filter", false, err, "validate filter field %s", fieldName)
 			}
-			filterJSON, err := json.Marshal(value)
-			if err != nil {
-				return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_search_entities.filter", false, err, "marshal filter field %s", fieldName)
-			}
-			args = append(args, string(filterJSON))
-			filterSQL = append(filterSQL, fmt.Sprintf("%s = $%d::jsonb", entityFilterSQLPath(field.Path), len(args)))
+			query.FieldEquals = append(query.FieldEquals, EntityFieldEquals{Path: field.Path, Value: value})
 		}
 	}
-	whereClause := joinEntityStateWhere(filterSQL)
 	limit := defaultEntitySearchLimit(asInt(payload["limit"]))
 	offset := asInt(payload["offset"])
 	if offset < 0 {
 		offset = 0
 	}
-	rows, err := queryEntityStateRows(ctx, db, whereClause+" ORDER BY created_at DESC", args...)
+	query.OrderByCreatedDesc = true
+	rows, err := store.QueryEntityStates(ctx, query)
 	if err != nil {
 		return nil, WrapRuntimeError("query_failed", "tool-executor", "exec_search_entities.query", true, err, "search entity_state")
 	}
@@ -91,7 +84,7 @@ func (e *Executor) execSearchEntities(ctx context.Context, actor models.AgentCon
 }
 
 func (e *Executor) execQueryEntities(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
-	db, source, payload, err := e.entityToolDependencies(input)
+	store, source, payload, err := e.entityToolDependencies(input)
 	if err != nil {
 		return nil, err
 	}
@@ -99,12 +92,12 @@ func (e *Executor) execQueryEntities(ctx context.Context, actor models.AgentConf
 	if err != nil {
 		return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_query_entities.schema", false, err, "resolve entity contract")
 	}
-	filterSQL, args, err := entityStateBaseQueryForContractRun(ctx, source, schema.Contract, payload, true)
+	query, err := entityStateQueryForContractRun(ctx, source, schema.Contract, payload, true)
 	if err != nil {
 		return nil, WrapRuntimeError("query_failed", "tool-executor", "exec_query_entities.run_context", true, err, "resolve entity_state run context")
 	}
-	whereClause := joinEntityStateWhere(filterSQL)
-	rows, err := queryEntityStateRows(ctx, db, whereClause+" ORDER BY created_at DESC", args...)
+	query.OrderByCreatedDesc = true
+	rows, err := store.QueryEntityStates(ctx, query)
 	if err != nil {
 		return nil, WrapRuntimeError("query_failed", "tool-executor", "exec_query_entities.query", true, err, "query entity_state")
 	}
@@ -138,7 +131,7 @@ func (e *Executor) execQueryEntities(ctx context.Context, actor models.AgentConf
 }
 
 func (e *Executor) execQueryMetrics(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
-	db, source, payload, err := e.entityToolDependencies(input)
+	store, source, payload, err := e.entityToolDependencies(input)
 	if err != nil {
 		return nil, err
 	}
@@ -165,12 +158,12 @@ func (e *Executor) execQueryMetrics(ctx context.Context, actor models.AgentConfi
 			return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_query_metrics.group_by", false, err, "validate group_by")
 		}
 	}
-	filterSQL, args, err := entityStateBaseQueryForContractRun(ctx, source, schema.Contract, payload, true)
+	query, err := entityStateQueryForContractRun(ctx, source, schema.Contract, payload, true)
 	if err != nil {
 		return nil, WrapRuntimeError("query_failed", "tool-executor", "exec_query_metrics.run_context", true, err, "resolve entity_state run context")
 	}
-	whereClause := joinEntityStateWhere(filterSQL)
-	rows, err := queryEntityStateRows(ctx, db, whereClause+" ORDER BY created_at DESC", args...)
+	query.OrderByCreatedDesc = true
+	rows, err := store.QueryEntityStates(ctx, query)
 	if err != nil {
 		return nil, WrapRuntimeError("query_failed", "tool-executor", "exec_query_metrics.query", true, err, "query entity_state metrics")
 	}
@@ -197,41 +190,26 @@ func (e *Executor) execQueryMetrics(ctx context.Context, actor models.AgentConfi
 	return map[string]any{"groups": groups}, nil
 }
 
-func entityStateBaseQuery(source semanticview.Source, actor models.AgentConfig, payload map[string]any, includeFlowInstance bool) ([]string, []any) {
-	contract, _ := entityruntime.ResolveForActor(source, actor.ID)
-	return entityStateBaseQueryForContract(source, contract, payload, includeFlowInstance)
-}
-
-func entityStateBaseQueryForContract(source semanticview.Source, contract entityruntime.Contract, payload map[string]any, includeFlowInstance bool) ([]string, []any) {
-	clauses := make([]string, 0, 4)
-	args := make([]any, 0, 4)
-	flowRoot := entityReadFlowScopeRoot(source, contract)
-	if flowRoot != "" {
-		args = append(args, flowRoot, flowRoot+"/%")
-		clauses = append(clauses, fmt.Sprintf("(flow_instance = $%d OR flow_instance LIKE $%d)", len(args)-1, len(args)))
-	}
-	if includeFlowInstance {
-		clauses, args = appendEntityToolExistingFlowInstanceFilter(source, clauses, args, asString(payload["flow_instance"]))
-	}
-	return clauses, args
-}
-
-func entityStateBaseQueryForContractRun(ctx context.Context, source semanticview.Source, contract entityruntime.Contract, payload map[string]any, includeFlowInstance bool) ([]string, []any, error) {
+func entityStateQueryForContractRun(ctx context.Context, source semanticview.Source, contract entityruntime.Contract, payload map[string]any, includeFlowInstance bool) (EntityStateQuery, error) {
 	runID, err := runtimecurrentstate.RequireRunID(ctx)
 	if err != nil {
-		return nil, nil, err
+		return EntityStateQuery{}, err
 	}
-	clauses := []string{"run_id = $1::uuid"}
-	args := []any{runID}
-	flowRoot := entityReadFlowScopeRoot(source, contract)
-	if flowRoot != "" {
-		args = append(args, flowRoot, flowRoot+"/%")
-		clauses = append(clauses, fmt.Sprintf("(flow_instance = $%d OR flow_instance LIKE $%d)", len(args)-1, len(args)))
+	query := EntityStateQuery{RunID: runID}
+	if flowRoot := entityReadFlowScopeRoot(source, contract); flowRoot != "" {
+		query.FlowScope = EntityFlowScope{Root: flowRoot, IncludeDescendants: true}
 	}
 	if includeFlowInstance {
-		clauses, args = appendEntityToolExistingFlowInstanceFilter(source, clauses, args, asString(payload["flow_instance"]))
+		requested := normalizeEntityToolFlowInstance(asString(payload["flow_instance"]))
+		if requested != "" {
+			if root, ok := entityToolDeclaredFlowScopeRoot(source, requested); ok {
+				query.RequestedFlowScope = EntityFlowScope{Root: root, IncludeDescendants: true}
+			} else {
+				query.RequestedFlowExact = requested
+			}
+		}
 	}
-	return clauses, args, nil
+	return query, nil
 }
 
 func entityReadFlowScopeRoot(source semanticview.Source, contract entityruntime.Contract) string {
@@ -240,13 +218,6 @@ func entityReadFlowScopeRoot(source semanticview.Source, contract entityruntime.
 		return ""
 	}
 	return runtimeflowidentity.ScopeKey(source, flowID)
-}
-
-func joinEntityStateWhere(clauses []string) string {
-	if len(clauses) == 0 {
-		return ""
-	}
-	return " WHERE " + strings.Join(clauses, " AND ")
 }
 
 func filterEntityStateRowsCEL(expression string, rows []map[string]any, schema entityToolSchema) ([]map[string]any, error) {

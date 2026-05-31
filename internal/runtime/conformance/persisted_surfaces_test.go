@@ -2321,8 +2321,10 @@ func newEntityToolConformanceHarness(t *testing.T) (context.Context, *runtimetoo
 	`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
+	pg := &store.PostgresStore{DB: db}
 	exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{
-		SQLDB:                          db,
+		EntityStore:                    pg,
+		HumanTaskStore:                 pg,
 		AllowInternalLegacyEntityTools: true,
 		WorkflowSource: runtimesemanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 			RootEntities: runtimecontracts.EntityContractsDocument{

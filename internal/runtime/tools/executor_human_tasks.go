@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,7 +13,7 @@ import (
 )
 
 func (e *Executor) execHumanTaskRequest(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
-	db, err := e.sqlDBDependency()
+	store, err := e.humanTaskStoreDependency()
 	if err != nil {
 		return nil, err
 	}
@@ -69,24 +68,33 @@ func (e *Executor) execHumanTaskRequest(ctx context.Context, actor models.AgentC
 		in.Priority = "medium"
 	}
 
-	var deadline sql.NullTime
+	var deadline time.Time
 	if deadlineStr != "" {
 		t, err := time.Parse(time.RFC3339, deadlineStr)
 		if err != nil {
 			return nil, fmt.Errorf("invalid deadline (expected RFC3339): %w", err)
 		}
-		deadline = sql.NullTime{Time: t, Valid: true}
+		deadline = t.UTC()
 	}
 
-	talkingJSON := []byte("null")
+	talkingJSON := json.RawMessage("null")
 	if in.TalkingPoints != nil {
 		if b, err := json.Marshal(in.TalkingPoints); err == nil && len(b) > 0 {
 			talkingJSON = b
 		}
 	}
 
-	var taskID string
-	if err := insertHumanTaskMailboxSpec(ctx, db, actor.ID, in.EntityID, in.Category, in.Description, talkingJSON, in.ExpectedValue, in.Priority, deadline, &taskID); err != nil {
+	taskID, err := store.CreateHumanTask(ctx, HumanTaskCreateRecord{
+		ActorID:       actor.ID,
+		EntityID:      in.EntityID,
+		Category:      in.Category,
+		Description:   in.Description,
+		TalkingPoints: talkingJSON,
+		ExpectedValue: in.ExpectedValue,
+		Priority:      in.Priority,
+		Deadline:      deadline,
+	})
+	if err != nil {
 		return nil, err
 	}
 
@@ -97,7 +105,7 @@ func (e *Executor) execHumanTaskRequest(ctx context.Context, actor models.AgentC
 }
 
 func (e *Executor) execHumanTaskDecide(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
-	db, err := e.sqlDBDependency()
+	store, err := e.humanTaskStoreDependency()
 	if err != nil {
 		return nil, err
 	}
@@ -141,27 +149,16 @@ func (e *Executor) execHumanTaskDecide(ctx context.Context, actor models.AgentCo
 	}
 
 	if newStatus == "approved" && cfg != nil && cfg.Budget().HumanTasks.MaxTasksPerWeek > 0 {
-		var requeueCount int
-		if err := db.QueryRowContext(ctx, `
-			SELECT COALESCE((payload->>'requeue_count')::int, 0)
-			FROM mailbox
-			WHERE item_id = $1::uuid
-			  AND item_type = 'human_task'
-		`, in.TaskID).Scan(&requeueCount); err != nil {
+		requeueCount, err := store.HumanTaskRequeueCount(ctx, in.TaskID)
+		if err != nil {
 			return nil, fmt.Errorf("load human task requeue count: %w", err)
 		}
 		if requeueCount > 0 {
 			goto skipBudget
 		}
 		weekStart := WeekStartUTC(time.Now(), cfg.Budget().HumanTasks.BudgetReset)
-		var approvedThisWeek int
-		if err := db.QueryRowContext(ctx, `
-			SELECT COALESCE(count(*), 0)
-			FROM mailbox
-			WHERE item_type = 'human_task'
-			  AND decided_at >= $1
-			  AND decision IN ('approved', 'assigned', 'completed')
-		`, weekStart).Scan(&approvedThisWeek); err != nil {
+		approvedThisWeek, err := store.CountApprovedHumanTasksSince(ctx, weekStart)
+		if err != nil {
 			return nil, fmt.Errorf("count approved human tasks this week: %w", err)
 		}
 		if approvedThisWeek >= cfg.Budget().HumanTasks.MaxTasksPerWeek {
@@ -178,19 +175,15 @@ func (e *Executor) execHumanTaskDecide(ctx context.Context, actor models.AgentCo
 	}
 skipBudget:
 
-	decisionObj := map[string]any{
-		"decision":      newStatus,
-		"reason":        in.Reason,
-		"decided_by":    actor.ID,
-		"decided_at":    time.Now().UTC().Format(time.RFC3339),
-		"priority_rank": in.PriorityRank,
-	}
-	if in.RequeueDate != "" {
-		decisionObj["requeue_date"] = in.RequeueDate
-	}
-	decisionJSON, _ := json.Marshal(decisionObj)
-
-	if err := updateHumanTaskMailboxSpec(ctx, db, in.TaskID, newStatus, actor.ID, decisionJSON, nil, nil); err != nil {
+	if err := store.DecideHumanTask(ctx, HumanTaskDecisionRecord{
+		TaskID:       in.TaskID,
+		Status:       newStatus,
+		ActorID:      actor.ID,
+		Reason:       in.Reason,
+		PriorityRank: in.PriorityRank,
+		RequeueDate:  in.RequeueDate,
+		DecidedAt:    time.Now().UTC(),
+	}); err != nil {
 		return nil, err
 	}
 
@@ -198,66 +191,6 @@ skipBudget:
 		"task_id": in.TaskID,
 		"status":  newStatus,
 	}, nil
-}
-
-func insertHumanTaskMailboxSpec(ctx context.Context, db *sql.DB, actorID, entityID, category, description string, talkingJSON []byte, expectedValue, priority string, deadline sql.NullTime, taskID *string) error {
-	payload := map[string]any{
-		"category":       strings.TrimSpace(category),
-		"description":    strings.TrimSpace(description),
-		"expected_value": strings.TrimSpace(expectedValue),
-		"priority":       strings.TrimSpace(priority),
-		"requeue_count":  0,
-	}
-	if len(talkingJSON) > 0 && string(talkingJSON) != "null" {
-		var talking any
-		if json.Unmarshal(talkingJSON, &talking) == nil {
-			payload["talking_points"] = talking
-		}
-	}
-	payloadJSON, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("insert human task: marshal payload: %w", err)
-	}
-	var expiresAt any
-	if deadline.Valid {
-		expiresAt = deadline.Time
-	}
-	return db.QueryRowContext(ctx, `
-		INSERT INTO mailbox (
-			item_id, entity_id, flow_instance, scope, item_type, from_agent,
-			severity, summary, payload, status, notified, expires_at, created_at
-		)
-		VALUES (
-			gen_random_uuid(), NULLIF($1,'')::uuid, NULL,
-			CASE WHEN NULLIF($1,'') IS NULL THEN 'global' ELSE 'entity' END,
-			'human_task', $2, $3, $4, $5::jsonb, 'pending', false, $6, now()
-		)
-		RETURNING item_id::text
-	`, entityID, actorID, humanTaskSeverity(priority), description, string(payloadJSON), expiresAt).Scan(taskID)
-}
-
-func updateHumanTaskMailboxSpec(ctx context.Context, db *sql.DB, taskID, newStatus, actorID string, decisionJSON []byte, requestingAgent, entityID *string) error {
-	return db.QueryRowContext(ctx, `
-		UPDATE mailbox
-		SET status = CASE WHEN $2 = 'timed_out' THEN 'expired' ELSE 'decided' END,
-		    decision = $2,
-		    decision_notes = COALESCE(NULLIF(($3::jsonb)->>'reason', ''), decision_notes),
-		    decided_by = NULLIF($4,''),
-		    decided_at = now(),
-		    payload = CASE
-				WHEN $2 = 'deferred' THEN
-					jsonb_set(
-						COALESCE(payload, '{}'::jsonb),
-						'{requeue_count}',
-						to_jsonb(COALESCE((payload->>'requeue_count')::int, 0) + 1),
-						true
-					)
-				ELSE payload
-			END
-		WHERE item_id = $1::uuid
-		  AND item_type = 'human_task'
-		RETURNING COALESCE(from_agent, ''), COALESCE(entity_id::text, '')
-	`, taskID, newStatus, string(decisionJSON), actorID).Scan(requestingAgent, entityID)
 }
 
 func humanTaskSeverity(priority string) string {
