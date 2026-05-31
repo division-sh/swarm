@@ -69,6 +69,10 @@ active_issues:
     title: Make operational config surfaces fail closed and remove inert controls
     maps_to:
       - fail_closed_operational_config
+  - id: 1139
+    title: Make agent /data source explicit via serve flag and config
+    maps_to:
+      - fail_closed_operational_config
   - id: 170
     title: Introduce an explicit runtime dependency graph object for boot wiring
     maps_to:
@@ -838,13 +842,16 @@ nodes:
     known_manifestations:
       - inert controls left exposed
       - operational config surfaces not fail-closed
+      - '#1139 runtime /data source authority requires --data > workspace.data_source > SWARM_WORKSPACE_DATA_SOURCE > no path source and must fail closed instead of deriving repoRoot/data'
     representative_issues:
       - 147
+      - 1139
     common_framing_mistakes:
       too_broad:
         - config is confusing
       too_narrow:
         - one flag is inert
+        - repo-local data directory happens to exist, so /data source authority is already safe
     current_action_pressure: active
   - id: runtime_lifecycle_observability
     title: Runtime Lifecycle Observability

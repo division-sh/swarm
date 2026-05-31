@@ -85,7 +85,7 @@ func DefaultDockerConfig() DockerConfig {
 		WorkspaceImage:        ConfiguredWorkspaceImageFromEnv(),
 		WorkspaceNetwork:      EnvOrDefault("SWARM_WORKSPACE_NETWORK", "mas_default"),
 		WorkspaceVolumesFrom:  EnvOrDefault("SWARM_WORKSPACE_VOLUMES_FROM", ""),
-		SharedDataSource:      EnvOrDefault("SWARM_WORKSPACE_DATA_SOURCE", ""),
+		SharedDataSource:      "",
 		DataMountPoint:        EnvOrDefault("SWARM_WORKSPACE_DATA_MOUNT", "/data"),
 		ContractsSource:       EnvOrDefault("SWARM_WORKSPACE_CONTRACTS_SOURCE", ""),
 		ContractsMountPoint:   EnvOrDefault("SWARM_WORKSPACE_CONTRACTS_MOUNT", "/opt/swarm/contracts"),

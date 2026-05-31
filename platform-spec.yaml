@@ -6522,6 +6522,53 @@ workspace_model:
     split_scope: >
       Docker Compose setup and workspace image contents/default agent CLI availability remain tracked separately by #996 and
       #997 unless a future gate explicitly widens them.
+  data_source_authority:
+    promoted_by: '#1139'
+    implementation_status: implemented_first_slice
+    canonical_owner: platform-spec.yaml#workspace_model.data_source_authority
+    scope: >
+      Defines the host/source authority for the agent-visible `/data` mount for `swarm serve` and current Docker workspace
+      lifecycle consumers. Compose/Postgres onboarding (#1137), host workspace backend implementation (#1138), SQLite default,
+      and mount destination override cleanup remain split.
+    cli_flag: --data
+    config_key: workspace.data_source
+    env_var: SWARM_WORKSPACE_DATA_SOURCE
+    source_order:
+    - --data
+    - workspace.data_source
+    - SWARM_WORKSPACE_DATA_SOURCE
+    - no path source
+    default_behavior: >
+      The runtime MUST NOT synthesize a source path from the Swarm source checkout. In particular, a non-empty repo root or a
+      repo-local `data/` directory is not a valid `/data` source unless the operator selected it explicitly through the
+      authoritative source order.
+    path_resolution_rule: >
+      Non-empty relative path sources are resolved through the command path resolver with the active repo root when present;
+      absolute path sources are used as-is after cleaning. Empty explicit values are invalid.
+    failure_behavior: >
+      Missing or unreadable path sources fail closed during workspace boot validation. If no path source is selected,
+      workspace boot must still fail closed unless an explicit deployment alternate such as `SWARM_WORKSPACE_VOLUMES_FROM`
+      satisfies the invariant `/data` mount.
+    volumes_from_conflict_rule: >
+      `SWARM_WORKSPACE_VOLUMES_FROM` is an explicit deployment alternate, not a fallback path source. It MUST NOT be combined
+      with an explicit `/data` path source from `--data`, `workspace.data_source`, or `SWARM_WORKSPACE_DATA_SOURCE`; startup
+      must fail closed on that conflict.
+    read_policy: >
+      `/data` remains read-only, global, and opaque to the platform. Source authority does not permit indexing, mutating,
+      validating contents beyond mount readability, or folding runtime `/data` into workflow bundle identity.
+    consumers:
+    - swarm serve boot workspace lifecycle
+    - builder project supervisor reload workspace lifecycle
+    - selected-contract run-fork workspace lifecycle
+    - Docker workspace manager SharedDataSource mount consumer
+    retired_non_authoritative_sources:
+    - repoRoot/data derivation in cmd/swarm configuredWorkspaceLifecycle
+    - lower-level Docker default ownership of SWARM_WORKSPACE_DATA_SOURCE
+    split_scope:
+    - '#1137 Compose/Postgres onboarding and Compose ./data:/data:ro deployment shape'
+    - '#1138 host workspace backend'
+    - SQLite local default and broader local runtime onboarding
+    - mount destination override semantics such as SWARM_WORKSPACE_DATA_MOUNT
   standard_mounts:
     description: Three mount points are available to every agent session. Products cannot add new mount points — they configure
       access and scope for these three via workspace class definitions.
@@ -8253,6 +8300,21 @@ cli_specification:
           running binary second when present, built-in/default config last, then --backend overrides config llm.backend.
           SWARM_LLM_BACKEND, SWARM_LLM_RUNTIME_MODE, llm.runtime_mode, and SWARM_OPENAI_COMPATIBLE_BASE_URL are retired
           selector/connection-owner seams and must fail closed.
+      workspace_data_source_authority:
+        promoted_by: '#1139'
+        owner: workspace_model.data_source_authority
+        flag: --data <path>
+        config_key: workspace.data_source
+        env_var: SWARM_WORKSPACE_DATA_SOURCE
+        rule: >
+          `swarm serve` MUST resolve the agent-visible `/data` source through
+          `workspace_model.data_source_authority` before constructing any workspace lifecycle. The command MUST NOT
+          derive `/data` from the Swarm source checkout or from a repo-local `data/` directory unless that path was
+          explicitly selected by the operator through the promoted source order.
+        consumers:
+        - serve boot workspace lifecycle
+        - dynamic Builder project reload workspace lifecycle
+        - selected-contract run-fork workspace lifecycle
       unified_listener_bind_contract:
         implemented_by: '#853'
         superseded_by: '#992 listener_topology_v2_1 runtime bind implementation'
