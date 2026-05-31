@@ -5870,13 +5870,16 @@ multi_bundle_persistence:
         consumed_by:
           - internal/store.PostgresStore.ensureRunRow
           - internal/runtime/bus.EventBus publish paths through PostgresStore.AppendEventTx
+          - internal/runtime.RuntimeLogger runtime-log run-row persistence
+          - internal/runtime/mutationlog mutation-log run-row persistence
           - /v1/rpc event.publish
           - /v1/rpc run.start
         rule: >
-          New work stamped from a persisted runtime BundleSourceFact MUST serialize against the runs table, re-check that
-          bundles still contains the source bundle_hash in the same event transaction, and fail closed before inserting a
-          run or event when the bundle row has been deleted. A successful bundle.delete --force must therefore make later
-          same-runtime event.publish and run.start attempts return BUNDLE_UNAVAILABLE rather than recreating
+          New work or run-scoped runtime/mutation records stamped from a persisted runtime BundleSourceFact MUST serialize
+          against the runs table, re-check that bundles still contains the source bundle_hash in the same transaction as
+          the run-row creation, and fail closed before inserting a run, event, runtime-log row, or mutation-log row when
+          the bundle row has been deleted. A successful bundle.delete --force must therefore make later same-runtime
+          event.publish, run.start, runtime-log, and mutation-log attempts fail closed rather than recreating
           bundle_source=persisted with a missing bundle row.
       reader_invariant: >
         Bundle availability readers MUST read runs.bundle_source before consulting bundles. Readers only look up bundles

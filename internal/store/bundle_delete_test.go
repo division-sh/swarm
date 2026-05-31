@@ -30,7 +30,7 @@ func TestPostgresStore_BundleDeleteForceCleanupAndFinalMutation(t *testing.T) {
 
 	ctx := context.Background()
 	now := time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC)
-	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO agents (agent_id, role, model_tier, conversation_mode) VALUES ('agent-a', 'operator', 'default', 'session')`); err != nil {
+	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO agents (agent_id, role, model, conversation_mode) VALUES ('agent-a', 'operator', 'default', 'session')`); err != nil {
 		t.Fatalf("seed agent: %v", err)
 	}
 	seedBundleDeleteBundle(t, ctx, pg, bundleDeleteTestHash)

@@ -33,7 +33,6 @@ type EnsureActiveOptions struct {
 	HasBundleHashCol        bool
 	HasBundleSourceCol      bool
 	HasBundleFingerprintCol bool
-	ValidateBundleAvailable bool
 	BundleHash              string
 	BundleSource            string
 	BundleFingerprint       string
@@ -109,6 +108,10 @@ func CanonicalBundleSource(raw string) (string, error) {
 }
 
 func EnsureActive(ctx context.Context, db DBTX, runID, triggerEventID, triggerEventType string, opts EnsureActiveOptions) error {
+	return ensureActive(ctx, db, runID, triggerEventID, triggerEventType, opts, true)
+}
+
+func ensureActive(ctx context.Context, db DBTX, runID, triggerEventID, triggerEventType string, opts EnsureActiveOptions, allowTransactionWrap bool) error {
 	if db == nil {
 		return nil
 	}
@@ -130,7 +133,29 @@ func EnsureActive(ctx context.Context, db DBTX, runID, triggerEventID, triggerEv
 	if bundleSource != BundleSourceLegacy && bundleHash == "" {
 		return fmt.Errorf("ensure run row: bundle_hash is required for bundle_source=%s", bundleSource)
 	}
-	if opts.ValidateBundleAvailable && bundleSource == BundleSourcePersisted {
+	if bundleSource == BundleSourcePersisted {
+		if allowTransactionWrap {
+			if sqlDB, ok := db.(*sql.DB); ok {
+				tx, err := sqlDB.BeginTx(ctx, nil)
+				if err != nil {
+					return fmt.Errorf("ensure run row: begin persisted bundle source validation tx: %w", err)
+				}
+				committed := false
+				defer func() {
+					if !committed {
+						_ = tx.Rollback()
+					}
+				}()
+				if err := ensureActive(ctx, tx, runID, triggerEventID, triggerEventType, opts, false); err != nil {
+					return err
+				}
+				if err := tx.Commit(); err != nil {
+					return fmt.Errorf("ensure run row: commit persisted bundle source validation tx: %w", err)
+				}
+				committed = true
+				return nil
+			}
+		}
 		if err := lockRunCreation(ctx, db); err != nil {
 			return err
 		}

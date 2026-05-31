@@ -180,8 +180,8 @@ methods:
     idempotency: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorBundleDeleteForceUsesOwnerChainAndIdempotency}]}
     result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorBundleDeleteForceUsesOwnerChainAndIdempotency}]}
     notification_schema: {status: not_applicable}
-    examples: {status: policy_deferred, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/platform-spec.yaml}, {kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}]}
-    service_discovery_publication: {status: policy_not_published, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/platform-spec.yaml}, {kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}, {kind: go_test, name: TestServiceDiscoveryPolicyDoesNotServeRPCDiscover}]}
+    examples: {status: policy_deferred, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}]}
+    service_discovery_publication: {status: policy_not_published, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}, {kind: go_test, name: TestServiceDiscoveryPolicyDoesNotServeRPCDiscover}]}
     gap_classification: []
   - method: bundle.get
     transport: http
