@@ -12,9 +12,9 @@ body:
         Use this for runtime architecture improvements and refactor initiatives.
         Do not use it for operator-facing feature requests or investigation-surface requests; those should use the dedicated feature request template.
 
-        This template is intended for items derived from:
-        - [RUNTIME_IMPROVEMENTS_AND_WATCHLIST.md](https://github.com/yazzaoui/Swarm/blob/main/docs/RUNTIME_IMPROVEMENTS_AND_WATCHLIST.md)
-        - implementation plans in `docs/`
+        Public contributors should start from:
+        - [CONTRIBUTING.md](https://github.com/yazzaoui/Swarm/blob/main/CONTRIBUTING.md)
+        - [platform-spec.yaml](https://github.com/yazzaoui/Swarm/blob/main/platform-spec.yaml)
 
         Every improvement issue should define:
         - the semantic owner

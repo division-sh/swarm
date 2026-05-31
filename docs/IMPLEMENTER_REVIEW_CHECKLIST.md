@@ -2,9 +2,9 @@
 
 Use this checklist before merging any non-trivial change.
 
-This is a practical companion to [IMPLEMENTER_GUIDELINES.md](/Users/youmew/dev/swarm/docs/IMPLEMENTER_GUIDELINES.md).
+This is a practical companion to [IMPLEMENTER_GUIDELINES.md](IMPLEMENTER_GUIDELINES.md).
 
-Short copy-paste operational blocks live in [PROCESS_CHECKLIST_TEMPLATES.md](/Users/youmew/dev/swarm/docs/PROCESS_CHECKLIST_TEMPLATES.md).
+Short copy-paste operational blocks live in [PROCESS_CHECKLIST_TEMPLATES.md](PROCESS_CHECKLIST_TEMPLATES.md).
 
 If any answer below is "no", "not sure", or "this patch needs an exception", stop and review the design before merging.
 

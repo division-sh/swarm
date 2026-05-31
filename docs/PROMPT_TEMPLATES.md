@@ -4,9 +4,9 @@ These are the default prompt templates for semantic/runtime/spec-governed work.
 
 They are short operational prompts. The full rules still live in:
 
-- [IMPLEMENTER_GUIDELINES.md](/Users/youmew/dev/swarm/docs/IMPLEMENTER_GUIDELINES.md)
-- [IMPLEMENTER_REVIEW_CHECKLIST.md](/Users/youmew/dev/swarm/docs/IMPLEMENTER_REVIEW_CHECKLIST.md)
-- [SEMANTIC_DRIFT.md](/Users/youmew/dev/swarm/docs/SEMANTIC_DRIFT.md)
+- [IMPLEMENTER_GUIDELINES.md](IMPLEMENTER_GUIDELINES.md)
+- [IMPLEMENTER_REVIEW_CHECKLIST.md](IMPLEMENTER_REVIEW_CHECKLIST.md)
+- [SEMANTIC_DRIFT.md](SEMANTIC_DRIFT.md)
 
 ## Default Implementer Prompt
 

@@ -8,10 +8,10 @@ They are especially important when multiple implementers are working in parallel
 
 Operational companion:
 
-- apply [IMPLEMENTER_REVIEW_CHECKLIST.md](/Users/youmew/dev/swarm/docs/IMPLEMENTER_REVIEW_CHECKLIST.md) before merging non-trivial changes
-- apply [SEMANTIC_DRIFT.md](/Users/youmew/dev/swarm/docs/SEMANTIC_DRIFT.md) when a change touches semantic ownership, identity, validation, lifecycle, or cross-surface parity
-- use [PROMPT_TEMPLATES.md](/Users/youmew/dev/swarm/docs/PROMPT_TEMPLATES.md) for the default implementer and reviewer prompt shapes
-- use [PROCESS_CHECKLIST_TEMPLATES.md](/Users/youmew/dev/swarm/docs/PROCESS_CHECKLIST_TEMPLATES.md) when you need short copy-paste templates for pre-audits, gate decisions, follow-up decisions, or parent-state updates
+- apply [IMPLEMENTER_REVIEW_CHECKLIST.md](IMPLEMENTER_REVIEW_CHECKLIST.md) before merging non-trivial changes
+- apply [SEMANTIC_DRIFT.md](SEMANTIC_DRIFT.md) when a change touches semantic ownership, identity, validation, lifecycle, or cross-surface parity
+- use [PROMPT_TEMPLATES.md](PROMPT_TEMPLATES.md) for the default implementer and reviewer prompt shapes
+- use [PROCESS_CHECKLIST_TEMPLATES.md](PROCESS_CHECKLIST_TEMPLATES.md) when you need short copy-paste templates for pre-audits, gate decisions, follow-up decisions, or parent-state updates
 
 The default bias of this codebase should be:
 

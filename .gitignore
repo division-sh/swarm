@@ -4,6 +4,7 @@
 # Local secrets / environment
 .env
 .env.*
+!.env.example
 
 # Local AI tool state
 .claude
@@ -28,3 +29,11 @@ internal/dashboard/ui/dist
 worktrees/
 misc/
 docs/specs/swarm-platform/platform/review/
+
+# Local-only documentation drafts and generated render artifacts.
+# Do not ignore docs/ wholesale; public docs and specs stay tracked.
+docs/local/
+docs/**/*.local.md
+docs/**/*.draft.md
+docs/**/*.pdf
+docs/**/*.tar

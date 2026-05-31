@@ -11,10 +11,9 @@ body:
         Use this for runtime symptom intake and concrete failure reports.
 
         Before submitting:
-        - check [IMPLEMENTER_GUIDELINES.md](https://github.com/yazzaoui/Swarm/blob/main/docs/IMPLEMENTER_GUIDELINES.md)
-        - check [IMPLEMENTER_REVIEW_CHECKLIST.md](https://github.com/yazzaoui/Swarm/blob/main/docs/IMPLEMENTER_REVIEW_CHECKLIST.md)
+        - check [CONTRIBUTING.md](https://github.com/yazzaoui/Swarm/blob/main/CONTRIBUTING.md)
         - check [BUG_INTAKE_AND_REPRO.md](https://github.com/yazzaoui/Swarm/blob/main/docs/BUG_INTAKE_AND_REPRO.md)
-        - link the related entry in [RUNTIME_IMPROVEMENTS_AND_WATCHLIST.md](https://github.com/yazzaoui/Swarm/blob/main/docs/RUNTIME_IMPROVEMENTS_AND_WATCHLIST.md) when applicable
+        - use [SECURITY.md](https://github.com/yazzaoui/Swarm/blob/main/SECURITY.md) instead for suspected vulnerabilities
 
         This issue only needs to be good enough to start repro / identification.
 

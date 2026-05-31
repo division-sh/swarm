@@ -4,10 +4,10 @@ The canonical watchlist format is now YAML.
 
 Use these files as structured failure-class / maintenance maps:
 
-- [semantic-correctness.yaml](/Users/youmew/dev/swarm/docs/watchlists/semantic-correctness.yaml)
-- [operator-surfaces.yaml](/Users/youmew/dev/swarm/docs/watchlists/operator-surfaces.yaml)
-- [runtime-operations.yaml](/Users/youmew/dev/swarm/docs/watchlists/runtime-operations.yaml)
-- [maintenance-and-cleanup.yaml](/Users/youmew/dev/swarm/docs/watchlists/maintenance-and-cleanup.yaml)
+- [semantic-correctness.yaml](semantic-correctness.yaml)
+- [operator-surfaces.yaml](operator-surfaces.yaml)
+- [runtime-operations.yaml](runtime-operations.yaml)
+- [maintenance-and-cleanup.yaml](maintenance-and-cleanup.yaml)
 
 Why YAML:
 - better nesting for failure-class tries

@@ -51,7 +51,7 @@ discoverable, consistent, and scriptable from one place.
 
 - `go run ./cmd/swarm verify --contracts ... --platform-spec ...`
   - Best cheap compatibility gate for boot-time contract validity and verifier/runtime disagreement.
-  - Owner: [main.go](/Users/youmew/dev/swarm/cmd/swarm/main.go)
+  - Owner: [main.go](../cmd/swarm/main.go)
 
 ### Run Diagnosis
 
@@ -67,15 +67,15 @@ discoverable, consistent, and scriptable from one place.
       - blocking reason
       - heuristics
       still lives in CLI code
-  - Current CLI owner: [main.go](/Users/youmew/dev/swarm/cmd/swarm/main.go#L334)
-  - Current canonical read owner: [run_debug_read_surface.go](/Users/youmew/dev/swarm/internal/store/run_debug_read_surface.go#L337)
+  - Current CLI owner: [main.go](../cmd/swarm/main.go#L334)
+  - Current canonical read owner: [run_debug_read_surface.go](../internal/store/run_debug_read_surface.go#L337)
 
 - canonical run-debug readers
   - `ResolveLatestRunDebugRunID`
   - `ListRunDebugRuns`
   - `LoadRunDebugReport`
   - `LoadRunDebugTrace`
-  - Owner: [run_debug_read_surface.go](/Users/youmew/dev/swarm/internal/store/run_debug_read_surface.go)
+  - Owner: [run_debug_read_surface.go](../internal/store/run_debug_read_surface.go)
 
 ### Joined Trace
 
@@ -86,8 +86,8 @@ discoverable, consistent, and scriptable from one place.
     - active session / audit session
     - turn
   - Historical mapping only: retired `GET /api/runs/{runID}/trace` maps to `run.trace`.
-  - v1 API owner: [operator_read.go](/Users/youmew/dev/swarm/internal/apiv1/operator_read.go)
-  - Canonical read owner: [run_debug_read_surface.go](/Users/youmew/dev/swarm/internal/store/run_debug_read_surface.go#L578)
+  - v1 API owner: [operator_read.go](../internal/apiv1/operator_read.go)
+  - Canonical read owner: [run_debug_read_surface.go](../internal/store/run_debug_read_surface.go#L578)
 
 ### Health And Readiness
 
@@ -104,8 +104,8 @@ discoverable, consistent, and scriptable from one place.
     - Historical dashboard aliases retired by #731:
       - `GET /api/health`
       - `GET /api/healthz`
-  - Current outer probe owner: [main.go](/Users/youmew/dev/swarm/cmd/swarm/main.go#L1072)
-  - Current v1 API owner: [operator_read.go](/Users/youmew/dev/swarm/internal/apiv1/operator_read.go)
+  - Current outer probe owner: [main.go](../cmd/swarm/main.go#L1072)
+  - Current v1 API owner: [operator_read.go](../internal/apiv1/operator_read.go)
 
 ### Event And Runtime Diagnostic Surfaces
 
@@ -120,8 +120,8 @@ discoverable, consistent, and scriptable from one place.
     - `GET /api/events/{id}`
     - `GET /api/events/flow`
   - Owners:
-    - [subscriptions.go](/Users/youmew/dev/swarm/internal/apiv1/subscriptions.go)
-    - [observability_sql.go](/Users/youmew/dev/swarm/internal/dashboard/server/observability_sql.go#L163)
+    - [subscriptions.go](../internal/apiv1/subscriptions.go)
+    - [observability_sql.go](../internal/dashboard/server/observability_sql.go#L163)
 
 - `/v1/rpc` `runtime.logs`
   - Structured runtime log surface with filters:
@@ -134,15 +134,15 @@ discoverable, consistent, and scriptable from one place.
     - `order`
   - Historical dashboard alias retired by #731: `GET /api/runtime/logs`.
   - Owners:
-    - [operator_read.go](/Users/youmew/dev/swarm/internal/apiv1/operator_read.go)
-    - [observability_sql.go](/Users/youmew/dev/swarm/internal/dashboard/server/observability_sql.go#L353)
+    - [operator_read.go](../internal/apiv1/operator_read.go)
+    - [observability_sql.go](../internal/dashboard/server/observability_sql.go#L353)
 
 - `/v1/rpc` `runtime.incidents`
   - Aggregated incident surface over canonical runtime logs.
   - Historical dashboard alias retired by #731: `GET /api/runtime/incidents`.
   - Owners:
-    - [operator_read.go](/Users/youmew/dev/swarm/internal/apiv1/operator_read.go)
-    - [observability_sql.go](/Users/youmew/dev/swarm/internal/dashboard/server/observability_sql.go#L417)
+    - [operator_read.go](../internal/apiv1/operator_read.go)
+    - [observability_sql.go](../internal/dashboard/server/observability_sql.go#L417)
 
 These are already credible current-head operator surfaces:
 
@@ -331,7 +331,7 @@ Behavior:
 - if canonical run-list ownership later adds turn count, include it there rather than deriving it ad hoc in the CLI
 
 Canonical owner:
-- [run_debug_read_surface.go](/Users/youmew/dev/swarm/internal/store/run_debug_read_surface.go#L260)
+- [run_debug_read_surface.go](../internal/store/run_debug_read_surface.go#L260)
 
 ### `swarm investigate run`
 
@@ -365,10 +365,10 @@ Behavior:
   - agent turns
 
 Canonical persisted read owner:
-- [run_debug_read_surface.go](/Users/youmew/dev/swarm/internal/store/run_debug_read_surface.go#L337)
+- [run_debug_read_surface.go](../internal/store/run_debug_read_surface.go#L337)
 
 Current interpretation owner that still needs to be absorbed under the new command:
-- [main.go](/Users/youmew/dev/swarm/cmd/swarm/main.go#L406)
+- [main.go](../cmd/swarm/main.go#L406)
 - especially:
   - `projectRunOperationalStatus(...)`
   - `deriveRunStatusHeuristics(...)`
@@ -413,7 +413,7 @@ Suggested compact default fields:
 - retry count when present
 
 Canonical owner:
-- [run_debug_read_surface.go](/Users/youmew/dev/swarm/internal/store/run_debug_read_surface.go#L578)
+- [run_debug_read_surface.go](../internal/store/run_debug_read_surface.go#L578)
 
 Important current limit:
 - `trace` is a key command, but it is not complete per-turn or per-tool diagnosis
@@ -447,8 +447,8 @@ Behavior:
   - any error payloads
 
 Current owners:
-- outer probe owner in [main.go](/Users/youmew/dev/swarm/cmd/swarm/main.go#L1072)
-- dashboard/API health owner in [server.go](/Users/youmew/dev/swarm/internal/dashboard/server/server.go#L238)
+- outer probe owner in [main.go](../cmd/swarm/main.go#L1072)
+- dashboard/API health owner in [server.go](../internal/dashboard/server/server.go#L238)
 
 Intended end state:
 - one shared health/readiness owner computes:
@@ -479,7 +479,7 @@ Flags:
 - `--json`
 
 Canonical owner:
-- [observability_sql.go](/Users/youmew/dev/swarm/internal/dashboard/server/observability_sql.go#L353)
+- [observability_sql.go](../internal/dashboard/server/observability_sql.go#L353)
 
 Owner note:
 - this is already a real current-head operator surface, not a speculative addition
@@ -498,7 +498,7 @@ Flags:
 - `--json`
 
 Canonical owner:
-- [observability_sql.go](/Users/youmew/dev/swarm/internal/dashboard/server/observability_sql.go#L417)
+- [observability_sql.go](../internal/dashboard/server/observability_sql.go#L417)
 
 Owner note:
 - this is already a real current-head operator surface, not a speculative addition
@@ -513,7 +513,7 @@ Flags:
 - `--json`
 
 Canonical owner:
-- [observability_sql.go](/Users/youmew/dev/swarm/internal/dashboard/server/observability_sql.go#L264)
+- [observability_sql.go](../internal/dashboard/server/observability_sql.go#L264)
 
 ### `swarm investigate events`
 
@@ -535,8 +535,8 @@ Behavior:
 - this is especially useful for live diagnosis when persisted run summaries are too slow or too coarse
 
 Current owners:
-- event list/detail owner in [observability_sql.go](/Users/youmew/dev/swarm/internal/dashboard/server/observability_sql.go#L163)
-- flow-event stream surface in [server.go](/Users/youmew/dev/swarm/internal/dashboard/server/server.go#L668)
+- event list/detail owner in [observability_sql.go](../internal/dashboard/server/observability_sql.go#L163)
+- flow-event stream surface in [server.go](../internal/dashboard/server/server.go#L668)
 
 Owner rule:
 - valid only if it stays a thin wrapper over the existing event list and flow-stream surfaces

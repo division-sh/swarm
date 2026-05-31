@@ -114,6 +114,8 @@ token only on numeric loopback binds, with bearer auth still enabled. Set an
 explicit token before exposing the API beyond loopback; the built-in token is
 not user isolation on a shared host.
 
+See [`.env.example`](.env.example) for the public local environment template.
+
 ### LLM Backend Profiles
 
 Outside the Compose quickstart, select a shipped backend with `--backend` or
@@ -313,7 +315,9 @@ The trajectory points at running whole company divisions as autonomous flows. Th
 | [`openrpc.json`](openrpc.json) | You need the generated public API artifact. |
 | [`BUILDER-API.md`](docs/specs/swarm-platform/platform/BUILDER-API.md) | You're integrating with the Builder surface. |
 | [`FLIGHT-RECORDER.md`](docs/specs/swarm-platform/platform/FLIGHT-RECORDER.md) | You're debugging a run from its trace. |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | You want to contribute issues, docs, code, or tests. |
 | [`SECURITY.md`](SECURITY.md) | You need to report a suspected vulnerability privately. |
+| [`PUBLIC_DOCS_DISPOSITION.md`](docs/PUBLIC_DOCS_DISPOSITION.md) | You need to understand which committed docs are public, maintainer-only, historical, or removed. |
 
 ---
 
@@ -340,10 +344,13 @@ go run ./cmd/swarm run --connect http://127.0.0.1:8081 --event <event> --payload
 go run ./cmd/swarm control nuke --api-server http://127.0.0.1:8081 --yes
 ```
 
-See [`docs/IMPLEMENTER_GUIDELINES.md`](docs/IMPLEMENTER_GUIDELINES.md) and [`docs/COLLABORATION_WORKFLOW.md`](docs/COLLABORATION_WORKFLOW.md) before opening a PR.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) before opening a PR. High-risk
+semantic/runtime work must also follow
+[`docs/IMPLEMENTER_GUIDELINES.md`](docs/IMPLEMENTER_GUIDELINES.md) and
+[`docs/SEMANTIC_DRIFT.md`](docs/SEMANTIC_DRIFT.md).
 
 ---
 
 ## License
 
-Apache License 2.0. See `LICENSE`.
+Apache License 2.0. See [`LICENSE`](LICENSE).

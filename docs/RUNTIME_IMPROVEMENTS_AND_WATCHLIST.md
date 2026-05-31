@@ -21,7 +21,7 @@ Source of truth:
 
 Implementation baseline:
 
-- apply the rules in [IMPLEMENTER_GUIDELINES.md](/Users/youmew/dev/swarm/docs/IMPLEMENTER_GUIDELINES.md) when designing fixes and refactors
+- apply the rules in [IMPLEMENTER_GUIDELINES.md](IMPLEMENTER_GUIDELINES.md) when designing fixes and refactors
 - use this watchlist to record where the codebase still violates those rules or proves they matter
 
 It should be updated whenever:
@@ -131,8 +131,8 @@ Likely causes:
 
 Current mitigations:
 
-- canonical emit-event equivalence in [`emit_runtime.go`](/Users/youmew/dev/swarm/internal/runtime/tools/emit_runtime.go)
-- gateway alias normalization in [`gateway.go`](/Users/youmew/dev/swarm/internal/runtime/mcp/gateway.go)
+- canonical emit-event equivalence in [`emit_runtime.go`](../internal/runtime/tools/emit_runtime.go)
+- gateway alias normalization in [`gateway.go`](../internal/runtime/mcp/gateway.go)
 
 Still brittle because:
 

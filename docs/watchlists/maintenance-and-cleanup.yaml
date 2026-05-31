@@ -70,6 +70,10 @@ active_issues:
     maps_to:
       - dead_or_inert_paths
       - harness_reliability_and_local_smoke
+  - id: 1162
+    title: Curate committed docs and root public docs
+    maps_to:
+      - public_repo_docs_curation
 nodes:
   - id: boundary_owned_decomposition
     title: Boundary-Owned Decomposition
@@ -191,6 +195,30 @@ nodes:
         - cleanup all dead code
       too_narrow:
         - delete one function without checking whether the surrounding path still duplicates authority
+    current_action_pressure: active
+  - id: public_repo_docs_curation
+    title: Public Repo Docs Curation
+    parent_class: public repo documentation authority and file-disposition cleanup
+    canonical_owners:
+      - README.md and root public docs
+      - docs/PUBLIC_DOCS_DISPOSITION.md
+      - .github/ISSUE_TEMPLATE public intake links
+      - .gitignore targeted local docs artifact policy
+    why_this_node_exists: public docs, maintainer process docs, historical spec docs, generated artifacts, and private local process notes can drift into one committed docs tree without an explicit disposition model
+    known_manifestations:
+      - root public docs missing while README references them
+      - public issue templates link internal-only process or watchlist docs
+      - committed docs mix public specs, maintainer docs, historical docs, generated artifacts, and private local process notes
+      - future local docs artifacts need targeted ignore policy instead of a blanket docs ignore
+    representative_issues:
+      - 1162
+    common_framing_mistakes:
+      too_broad:
+        - delete or ignore all docs
+        - change runtime onboarding semantics while curating docs
+      too_narrow:
+        - add LICENSE without classifying the committed docs tree
+        - remove one private-looking file without no-reference proof
     current_action_pressure: active
 reserve_backlog:
   - ordinal: 30
