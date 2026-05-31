@@ -1,6 +1,7 @@
 package semanticview
 
 import (
+	"sort"
 	"strings"
 
 	runtimecontracts "swarm/internal/runtime/contracts"
@@ -116,6 +117,14 @@ func localizeFlowEventForProof(source Source, flowID, canonical string) string {
 	if !ok {
 		return canonical
 	}
+	localNames := flowScopeEventNamesForProof(scope)
+	if local := concreteTemplateInstanceLocalEventForProof(source, scope, canonical, localNames); local != "" {
+		return local
+	}
+	return runtimeeventidentity.LocalizeForFlow(scope.Path, localNames, canonical)
+}
+
+func flowScopeEventNamesForProof(scope FlowScope) []string {
 	localNames := make([]string, 0, len(scope.Events))
 	for name := range scope.Events {
 		name = runtimeeventidentity.Normalize(name)
@@ -124,7 +133,62 @@ func localizeFlowEventForProof(source Source, flowID, canonical string) string {
 		}
 		localNames = append(localNames, name)
 	}
-	return runtimeeventidentity.LocalizeForFlow(scope.Path, localNames, canonical)
+	sort.SliceStable(localNames, func(i, j int) bool {
+		if len(localNames[i]) != len(localNames[j]) {
+			return len(localNames[i]) > len(localNames[j])
+		}
+		return localNames[i] < localNames[j]
+	})
+	return localNames
+}
+
+func concreteTemplateInstanceLocalEventForProof(source Source, scope FlowScope, canonical string, localNames []string) string {
+	if !strings.EqualFold(strings.TrimSpace(scope.Mode), "template") {
+		return ""
+	}
+	scopePath := runtimeeventidentity.Normalize(scope.Path)
+	canonical = runtimeeventidentity.Normalize(canonical)
+	if scopePath == "" || canonical == "" || !strings.HasPrefix(canonical, scopePath+"/") {
+		return ""
+	}
+	remainder := strings.TrimPrefix(canonical, scopePath+"/")
+	if remainder == "" || !strings.Contains(remainder, "/") {
+		return ""
+	}
+	if eventProofRemainderTargetsDescendantScope(source, scopePath, remainder) {
+		return ""
+	}
+	for _, local := range localNames {
+		if local == "" {
+			continue
+		}
+		if remainder == local || strings.HasSuffix(remainder, "/"+local) {
+			return local
+		}
+	}
+	return ""
+}
+
+func eventProofRemainderTargetsDescendantScope(source Source, scopePath, remainder string) bool {
+	if source == nil {
+		return false
+	}
+	scopePath = runtimeeventidentity.Normalize(scopePath)
+	remainder = runtimeeventidentity.Normalize(remainder)
+	if scopePath == "" || remainder == "" {
+		return false
+	}
+	for _, descendant := range source.FlowScopes() {
+		descendantPath := runtimeeventidentity.Normalize(descendant.Path)
+		if descendantPath == "" || descendantPath == scopePath || !strings.HasPrefix(descendantPath, scopePath+"/") {
+			continue
+		}
+		relativePath := strings.TrimPrefix(descendantPath, scopePath+"/")
+		if relativePath != "" && (remainder == relativePath || strings.HasPrefix(remainder, relativePath+"/")) {
+			return true
+		}
+	}
+	return false
 }
 
 func uniqueNormalizedProofCandidates(values ...string) []string {

@@ -2187,6 +2187,53 @@ func TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsOnActionSurface
 	}
 }
 
+func TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsForConcreteTemplateOutput(t *testing.T) {
+	source := loadWorkflowTempSource(t, map[string]string{
+		"package.yaml":             "name: template-output-required\nversion: 1.0.0\ndescription: Template output required-field proof.\nplatform_version: \">=1.1.0\"\nflows:\n- id: child\n  flow: child\n  mode: template\n",
+		"schema.yaml":              "initial_state: idle\nterminal_states: [done]\nstates: [idle, done]\npins:\n  inputs:\n    events: [parent.trigger]\n",
+		"events.yaml":              "parent.trigger:\n  entity_id: string\n",
+		"flows/child/package.yaml": "name: child\nversion: 1.0.0\ndescription: child flow\nplatform_version: \">=1.1.0\"\nflows: []\n",
+		"flows/child/schema.yaml":  "name: child\nmode: template\ninitial_state: waiting\nterminal_states: [processed]\nstates: [waiting, processed]\npins:\n  inputs:\n    events: [child.start]\n  outputs:\n    events: [child.done]\n",
+		"flows/child/events.yaml":  "child.start:\n  entity_id: string\nchild.done:\n  step: string\n  required: [step]\n",
+	})
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		t.Fatal("expected workflow fixture bundle")
+	}
+	shaper := pipelineEnginePayloadShaper{
+		coordinator: &PipelineCoordinator{
+			module: &previewWorkflowModule{
+				bundle: bundle,
+			},
+		},
+	}
+
+	req := runtimeengine.ExecutionRequest{
+		EntityID: identity.NormalizeEntityID("ent-child"),
+		FlowID:   identity.NormalizeFlowID("child"),
+		Event: events.Event{
+			Type:    events.EventType("child/child.start"),
+			Payload: json.RawMessage(`{"entity_id":"ent-child"}`),
+		}.WithEntityID("ent-child"),
+		State: runtimeengine.StateSnapshot{
+			EntityID:     identity.NormalizeEntityID("ent-child"),
+			StateCarrier: runtimeengine.NewStateCarrier(map[string]any{"flow_path": "child/inst-1", "subject_id": "ent-parent", "parent_entity_id": "ent-parent"}, nil, nil),
+		},
+	}
+
+	_, err := shaper.ShapeEmitPayload(context.Background(), req, "child/inst-1/child.done", map[string]any{})
+	if err == nil {
+		t.Fatal("expected concrete template output missing required field to fail closed")
+	}
+	if !errors.Is(err, runtimeengine.ErrEmitPayloadContractViolation) {
+		t.Fatalf("ShapeEmitPayload concrete template output error = %v, want %v", err, runtimeengine.ErrEmitPayloadContractViolation)
+	}
+
+	if _, err := shaper.ShapeEmitPayload(context.Background(), req, "child/inst-1/child.done", map[string]any{"step": "done"}); err != nil {
+		t.Fatalf("ShapeEmitPayload concrete template output with required field: %v", err)
+	}
+}
+
 func TestPipelineEnginePayloadShaper_RejectsEnvelopeOnlyRequiredFieldOnActionSurface(t *testing.T) {
 	source := loadWorkflowTempSource(t, map[string]string{
 		"package.yaml":             "name: action-emit-envelope-required\nversion: 1.0.0\ndescription: Action emit envelope-required proof.\nplatform_version: \">=1.1.0\"\nflows:\n- id: child\n  flow: child\n  mode: static\n",
