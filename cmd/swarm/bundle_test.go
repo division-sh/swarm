@@ -53,7 +53,7 @@ func TestBundleCommandsUseCanonicalRPCAndRender(t *testing.T) {
 	}{
 		{args: []string{"bundle", "list", "--limit", "2", "--cursor", "bundle-cursor-1"}, wantStdout: []string{"bundle " + bundleHash, "agents=2", "next_cursor=bundle-cursor-2"}},
 		{args: []string{"bundle", "show", bundleHash}, wantStdout: []string{"Bundle " + bundleHash, "content_yaml:", "agents:"}},
-		{args: []string{"bundle", "agents", bundleHash}, wantStdout: []string{"agent agent-alpha", "role=researcher", "subscriptions=scan.requested"}},
+		{args: []string{"bundle", "agents", bundleHash}, wantStdout: []string{"agent agent-alpha", "role=researcher", "model=regular", "subscriptions=scan.requested"}},
 	}
 	for _, command := range commands {
 		var stdout, stderr bytes.Buffer
@@ -68,6 +68,9 @@ func TestBundleCommandsUseCanonicalRPCAndRender(t *testing.T) {
 		}
 		if strings.TrimSpace(stderr.String()) != "" {
 			t.Fatalf("%v stderr = %q, want empty", command.args, stderr.String())
+		}
+		if strings.Contains(stdout.String(), "model_tier") {
+			t.Fatalf("%v stdout contains retired model_tier field:\n%s", command.args, stdout.String())
 		}
 	}
 
@@ -111,6 +114,46 @@ func TestBundleCommandsJSONPreserveAPIShape(t *testing.T) {
 		if _, ok := decoded[wrapper]; ok {
 			t.Fatalf("json output contains CLI wrapper %q: %#v", wrapper, decoded)
 		}
+	}
+}
+
+func TestBundleAgentsJSONUsesCanonicalModelField(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	bundleHash := validBundleHash("d")
+	var captured jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		writeJSONRPCResult(t, w, captured.ID, map[string]any{
+			"agents": []map[string]any{validBundleAgent("agent-alpha")},
+		})
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"bundle", "agents", bundleHash, "--json"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	assertBundleRequest(t, captured, bundleAgentsMethod, map[string]any{"bundle_hash": bundleHash})
+	var decoded map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatalf("decode stdout json: %v\n%s", err, stdout.String())
+	}
+	agents, ok := decoded["agents"].([]any)
+	if !ok || len(agents) != 1 {
+		t.Fatalf("json agents = %#v, want one agent", decoded["agents"])
+	}
+	agent, ok := agents[0].(map[string]any)
+	if !ok {
+		t.Fatalf("json agent = %#v, want object", agents[0])
+	}
+	if agent["model"] != "regular" {
+		t.Fatalf("json agent model = %#v, want regular; agent=%#v", agent["model"], agent)
+	}
+	if _, ok := agent["model_tier"]; ok {
+		t.Fatalf("json agent contains retired model_tier field: %#v", agent)
 	}
 }
 
@@ -266,7 +309,7 @@ func validBundleAgent(agentID string) map[string]any {
 		"flow_instance":     "default",
 		"role":              "researcher",
 		"type":              "business",
-		"model_tier":        "standard",
+		"model":             "regular",
 		"llm_backend":       "openai_compatible",
 		"conversation_mode": "task",
 		"session_scope":     "run",
