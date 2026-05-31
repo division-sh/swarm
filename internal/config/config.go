@@ -53,6 +53,30 @@ type StoreSQLiteConfig struct {
 
 type WorkspaceConfig struct {
 	DataSource string `yaml:"data_source"`
+
+	dataSourceSet bool
+}
+
+func (w *WorkspaceConfig) UnmarshalYAML(value *yaml.Node) error {
+	type raw WorkspaceConfig
+	var decoded raw
+	if err := value.Decode(&decoded); err != nil {
+		return err
+	}
+	*w = WorkspaceConfig(decoded)
+	if value.Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(value.Content); i += 2 {
+			if value.Content[i].Value == "data_source" {
+				w.dataSourceSet = true
+				break
+			}
+		}
+	}
+	return nil
+}
+
+func (w WorkspaceConfig) DataSourceConfigured() bool {
+	return w.dataSourceSet || strings.TrimSpace(w.DataSource) != ""
 }
 
 type LLMConfig struct {

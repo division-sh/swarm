@@ -64,6 +64,9 @@ func TestLoadAndValidate_CLI_TestMode(t *testing.T) {
 	if cfg.Workspace.DataSource != "./reference-data" {
 		t.Fatalf("workspace.data_source = %q, want ./reference-data", cfg.Workspace.DataSource)
 	}
+	if !cfg.Workspace.DataSourceConfigured() {
+		t.Fatal("workspace.data_source presence was not preserved")
+	}
 
 	var ext ExtensionsConfig
 	if err := cfg.DecodeExtensions(&ext); err != nil {
@@ -81,6 +84,35 @@ func TestLoadAndValidate_CLI_TestMode(t *testing.T) {
 	}
 	if ext.Sharding.Stages["default"].TargetItemsPerShard != 10 {
 		t.Fatalf("expected default sharding.stages.default.target_items_per_shard=10, got %d", ext.Sharding.Stages["default"].TargetItemsPerShard)
+	}
+}
+
+func TestLoad_PreservesEmptyWorkspaceDataSourcePresence(t *testing.T) {
+	cfgText := strings.Join([]string{
+		"runtime:",
+		"  recovery_on_startup: false",
+		"workspace:",
+		"  data_source: \"   \"",
+		"llm:",
+		"  backend: anthropic",
+		"  session:",
+		"    lock_ttl: 10s",
+		"    rotate_after_turns: 40",
+		"    rotate_on_parse_failures: 3",
+	}, "\n") + "\n"
+	p := filepath.Join(t.TempDir(), "swarm.yaml")
+	if err := os.WriteFile(p, []byte(cfgText), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.Workspace.DataSourceConfigured() {
+		t.Fatal("empty workspace.data_source presence was not preserved")
+	}
+	if cfg.Workspace.DataSource != "   " {
+		t.Fatalf("workspace.data_source = %q, want preserved whitespace", cfg.Workspace.DataSource)
 	}
 }
 
