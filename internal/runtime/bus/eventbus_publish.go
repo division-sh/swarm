@@ -540,7 +540,7 @@ func (eb *EventBus) publishTransactional(
 	passthrough, deferred, err := eb.runInterceptors(dispatchCtx, evt)
 	if err != nil {
 		eb.recordCommittedPublishReceipt(dispatchCtx, evt, err)
-		return nil
+		return err
 	}
 	runtimepipeline.FlushPipelinePostCommitActions(postCommitActions)
 	if deferredTransitions != nil {

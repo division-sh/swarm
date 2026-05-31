@@ -202,6 +202,28 @@ func (i postCommitTxAbsentInterceptor) Intercept(ctx context.Context, _ events.E
 	return true, nil, nil
 }
 
+type postCommitErrorInterceptor struct {
+	t       *testing.T
+	store   *store.PostgresStore
+	eventID string
+	err     error
+}
+
+func (i postCommitErrorInterceptor) Intercept(ctx context.Context, _ events.Event) (bool, []events.Event, error) {
+	i.t.Helper()
+	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		i.t.Fatal("post-commit error interceptor ran with sql tx still in context")
+	}
+	ok, err := i.store.EventExists(ctx, i.eventID)
+	if err != nil {
+		i.t.Fatalf("EventExists(%s): %v", i.eventID, err)
+	}
+	if !ok {
+		i.t.Fatalf("expected event %s to be committed before interceptor error", i.eventID)
+	}
+	return false, nil, i.err
+}
+
 type deferredEventVisibleInterceptor struct {
 	t        *testing.T
 	store    *store.PostgresStore
@@ -1270,6 +1292,49 @@ func TestEventBusPublishTransactional_RunsInterceptorsAfterCommit(t *testing.T) 
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for post-commit delivery")
+	}
+}
+
+func TestEventBusPublishTransactional_ReturnsPostCommitInterceptorErrorAndRecordsReceipt(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	ctx := eventBusTestRunContext(t, db)
+	pg := &store.PostgresStore{DB: db}
+	eventID := "11111111-1111-1111-1111-111111111112"
+	wantErr := errors.New("post-commit interceptor failure")
+	eb, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
+		Interceptors: []runtimebus.EventInterceptor{postCommitErrorInterceptor{
+			t:       t,
+			store:   pg,
+			eventID: eventID,
+			err:     wantErr,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	err = eb.Publish(ctx, events.Event{
+		ID:        eventID,
+		RunID:     eventBusTestRunID,
+		Type:      events.EventType("task.failed"),
+		CreatedAt: time.Now().UTC(),
+		Payload:   []byte(`{"entity_id":"11111111-1111-1111-1111-111111111114"}`),
+	}.WithEntityID("11111111-1111-1111-1111-111111111114"))
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("Publish error = %v, want %v", err, wantErr)
+	}
+	var outcome, reasonCode, receiptError string
+	if err := db.QueryRowContext(ctx, `
+		SELECT outcome, COALESCE(reason_code, ''), COALESCE(side_effects->>'error', '')
+		FROM event_receipts
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'platform'
+		  AND subscriber_id = 'pipeline'
+	`, eventID).Scan(&outcome, &reasonCode, &receiptError); err != nil {
+		t.Fatalf("load pipeline receipt: %v", err)
+	}
+	if outcome != "dead_letter" || reasonCode != "pipeline_error" || receiptError != wantErr.Error() {
+		t.Fatalf("pipeline receipt = outcome:%q reason:%q error:%q, want dead_letter/pipeline_error/%q", outcome, reasonCode, receiptError, wantErr.Error())
 	}
 }
 
