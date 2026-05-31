@@ -1879,7 +1879,7 @@ engine:
     steps:
     - step: 1
       name: load_platform_spec
-      action: Read platform/contracts/platform-spec.yaml. Verify platform version.
+      action: Read platform-spec.yaml. Verify platform version.
     - step: 2
       name: walk_flow_tree
       action: Starting from root package.yaml, recursively discover all flows. Build flat list of FlowEntry records. Max depth

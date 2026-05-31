@@ -829,7 +829,7 @@ Specification for the platform engine — how it loads, validates, and executes 
 - `description`: Ordered steps from platform start to ready. If any validation step fails, boot aborts with a clear error. No partial startup.
 ### steps
 
-1. `step`: 1; `name`: load_platform_spec; `action`: Read platform/contracts/platform-spec.yaml. Verify platform version.
+1. `step`: 1; `name`: load_platform_spec; `action`: Read platform-spec.yaml. Verify platform version.
 2. `step`: 2; `name`: walk_flow_tree; `action`: Starting from root package.yaml, recursively discover all flows. Build flat list of FlowEntry records. Max depth 99.
 3. `step`: 3; `name`: construct_paths; `action`: For each flow, construct hierarchical paths for its nodes, agents, and events. Local names become absolute paths: {flow_instance_path}/{local_name}.
 4. `step`: 4; `name`: register_templates; `action`: For flows declared as mode: template, register the template but create no instances. The template is available for runtime create_flow_instance calls.
@@ -1154,7 +1154,7 @@ timers:
   - `warning`: Boot continues. Warning logged with finding details.
 
 - `reference_implementation`: verify.py implements structural checks (payload fields, handler fields and supported handler action declaration shapes, state machine, tools, dialect, cycles, produces). It does NOT implement: CEL parsing, runtime executor resolution, discovered MCP tool inventory, platform_tool_usage_hints, generated_tool_schema_closure, deep artifact result-event type resolution, pin wiring, permission validation, entity schema coverage, or namespace collision detection. Those require the Go runtime loader.
-- `check_count`: See `platform/contracts/platform-spec.yaml`; this markdown summary is not the merge-bearing boot-check catalog.
+- `check_count`: See root `platform-spec.yaml`; this markdown summary is not the merge-bearing boot-check catalog.
 # compliance
 
 Boot-time and runtime compliance enforcement.
