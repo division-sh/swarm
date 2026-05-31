@@ -71,6 +71,26 @@ func TestDefaultPlatformCleanupCatalogMatchesPlatformSpecPolicy(t *testing.T) {
 	}
 }
 
+func TestCleanupCatalogPolicyMapsRequestScopedBundles(t *testing.T) {
+	includeCatalog := CleanupCatalogByTableForPolicy(CleanupPolicy{IncludeBundles: true})
+	includeEntry, ok := includeCatalog["bundles"]
+	if !ok {
+		t.Fatal("include_bundles=true catalog missing bundles")
+	}
+	if includeEntry.Classification != CleanupDeleteAll || includeEntry.DeleteOrderGroup == 0 || includeEntry.PreservationProof != "" {
+		t.Fatalf("include_bundles=true bundles entry = %#v, want delete_all without preservation proof", includeEntry)
+	}
+
+	preserveCatalog := CleanupCatalogByTableForPolicy(CleanupPolicy{IncludeBundles: false})
+	preserveEntry, ok := preserveCatalog["bundles"]
+	if !ok {
+		t.Fatal("include_bundles=false catalog missing bundles")
+	}
+	if preserveEntry.Classification != CleanupPreserve || preserveEntry.DeleteOrderGroup != 0 || preserveEntry.PreservationProof == "" {
+		t.Fatalf("include_bundles=false bundles entry = %#v, want preserve with proof", preserveEntry)
+	}
+}
+
 func loadPlatformTableNamesForCleanupCatalogTest(t *testing.T) map[string]struct{} {
 	t.Helper()
 	repo := cleanupCatalogTestRepoRoot(t)

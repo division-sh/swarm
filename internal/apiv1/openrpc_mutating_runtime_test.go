@@ -375,7 +375,7 @@ func mutatingHTTPRuntimeFixtures() map[string]mutatingHTTPRuntimeFixture {
 		"runtime.nuke": {
 			Params:         map[string]any{"dry_run": false},
 			ConflictParams: map[string]any{"dry_run": true},
-			ResultKeys:     []string{"ok", "status", "operation_name", "plan", "quiescence", "cleanup", "containers"},
+			ResultKeys:     []string{"ok", "status", "dry_run", "include_bundles", "operation_name", "plan", "quiescence", "cleanup", "containers"},
 			SuccessEffects: 4,
 		},
 		"runtime.pause": {

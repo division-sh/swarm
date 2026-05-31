@@ -4090,6 +4090,7 @@ platform_tables:
       - Runtime-owned persisted facts that describe running or historical execution must carry an exact run_id, event lineage, or fork/source run lineage before destructive reset may delete them.
       - Generated product/entity/node-state tables remain split-preserved until a separate owner gives them exact run-scoped identity.
       - Schema, auth/idempotency-like, operator/system, product config, topology, global timers, mailbox, and spend/cost audit state must survive this internal cleanup slice unless a later gate defines an exact run-scoped owner.
+      - "The bundle catalog is request-scoped by `runtime.nuke.include_bundles`: `false` preserves `bundles`; `true` deletes `bundles` only inside the destructive-reset cleanup transaction after serializing persisted run creation and failing closed if any persisted bundle-source run remains outside the cleanup plan."
       - Apply executes in one database transaction, reports per-table dry-run/apply counts, rolls back on any SQL/FK/order error, and produces no successful result unless the transaction commits.
     classifications:
       delete_by_event_join:
@@ -4124,6 +4125,7 @@ platform_tables:
         - agents
         - flow_instances
         - routing_rules
+      request_scoped_bundle_catalog:
         - bundles
       split_preserve:
         - mailbox
@@ -12922,6 +12924,7 @@ api_specification:
         - ok
         - status
         - dry_run
+        - include_bundles
         - operation_name
         - plan
         - quiescence
@@ -12941,6 +12944,9 @@ api_specification:
             - partial_failure
           dry_run:
             type: boolean
+          include_bundles:
+            type: boolean
+            description: Echoes whether this runtime.nuke request includes server-wide bundle catalog deletion; defaults true.
           operation_name:
             type: string
           plan:
@@ -15633,7 +15639,9 @@ api_specification:
         \ reset seams in this method implementation.\n\n`dry_run=true` returns the same top-level shape with side-effect-free\
         \ previews from each owner. Apply mode sequences plan -> quiescence -> cleanup -> managed-container stop. Managed-container\
         \ stop failures are represented as `status=partial_failure`, `ok=false`, and explicit `errors`; they must not masquerade\
-        \ as complete success. Public final-response idempotency follows the v1 API idempotency convention.\n"
+        \ as complete success. `include_bundles` defaults true and is the only runtime.nuke control for whether server-wide\
+        \ bundle catalog state is deleted with the cleanup owner; false preserves bundle catalog rows. Public final-response\
+        \ idempotency follows the v1 API idempotency convention.\n"
       scope:
         required:
         - control:runtime
@@ -15644,6 +15652,11 @@ api_specification:
         schema:
           type: boolean
           default: false
+      - name: include_bundles
+        required: false
+        schema:
+          type: boolean
+          default: true
       - name: idempotency_key
         required: false
         schema:

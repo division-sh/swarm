@@ -3,11 +3,13 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"swarm/internal/runtime/destructivereset"
+	storerunlifecycle "swarm/internal/store/runlifecycle"
 	"swarm/internal/testutil"
 )
 
@@ -142,6 +144,170 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DryRunCountsWithoutMutation(
 	}
 }
 
+func TestPostgresStore_ApplyDestructiveResetCleanup_IncludeBundlesDeletesBundleCatalog(t *testing.T) {
+	dsn, _, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	pg, err := NewPostgresStore(dsn)
+	if err != nil {
+		t.Fatalf("NewPostgresStore: %v", err)
+	}
+	t.Cleanup(func() { _ = pg.DB.Close() })
+	ctx := context.Background()
+	seed := seedDestructiveResetCleanupRows(t, ctx, pg)
+	seedDestructiveResetBundleRows(t, ctx, pg)
+
+	now := time.Date(2026, 5, 16, 18, 37, 0, 0, time.UTC)
+	result, err := pg.ApplyDestructiveResetCleanup(ctx, destructivereset.CleanupRequest{
+		ActorTokenID: "operator-token",
+		RequestedAt:  now,
+		Result: destructivereset.Result{
+			OperationName:  destructivereset.DefaultOperationName,
+			IncludeBundles: true,
+			PlannedAt:      now.Add(-time.Minute),
+			Plan:           cleanupPlanForRunIDsIncludingBundles(seed.RunA, seed.RunB),
+		},
+		Quiescence: destructivereset.QuiescenceResult{
+			OperationName: destructivereset.DefaultOperationName,
+			AppliedAt:     now.Add(-30 * time.Second),
+		},
+	})
+	if err != nil {
+		t.Fatalf("ApplyDestructiveResetCleanup include_bundles=true: %v", err)
+	}
+	if !result.IncludeBundles {
+		t.Fatalf("cleanup IncludeBundles = false, want true")
+	}
+	assertCleanupTableResult(t, result, "bundles", 2, 2)
+	if got := countRows(t, ctx, pg, "bundles"); got != 0 {
+		t.Fatalf("bundles after include_bundles=true cleanup = %d, want 0", got)
+	}
+	if got := countRows(t, ctx, pg, "runs"); got != 0 {
+		t.Fatalf("runs after include_bundles=true cleanup = %d, want existing cleanup still applied", got)
+	}
+}
+
+func TestPostgresStore_ApplyDestructiveResetCleanup_ExcludeBundlesPreservesBundleCatalog(t *testing.T) {
+	dsn, _, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	pg, err := NewPostgresStore(dsn)
+	if err != nil {
+		t.Fatalf("NewPostgresStore: %v", err)
+	}
+	t.Cleanup(func() { _ = pg.DB.Close() })
+	ctx := context.Background()
+	seed := seedDestructiveResetCleanupRows(t, ctx, pg)
+	seedDestructiveResetBundleRows(t, ctx, pg)
+
+	now := time.Date(2026, 5, 16, 18, 38, 0, 0, time.UTC)
+	result, err := pg.ApplyDestructiveResetCleanup(ctx, destructivereset.CleanupRequest{
+		ActorTokenID: "operator-token",
+		RequestedAt:  now,
+		Result: destructivereset.Result{
+			OperationName:  destructivereset.DefaultOperationName,
+			IncludeBundles: false,
+			PlannedAt:      now.Add(-time.Minute),
+			Plan:           cleanupPlanForRunIDs(seed.RunA, seed.RunB),
+		},
+		Quiescence: destructivereset.QuiescenceResult{
+			OperationName: destructivereset.DefaultOperationName,
+			AppliedAt:     now.Add(-30 * time.Second),
+		},
+	})
+	if err != nil {
+		t.Fatalf("ApplyDestructiveResetCleanup include_bundles=false: %v", err)
+	}
+	if result.IncludeBundles {
+		t.Fatalf("cleanup IncludeBundles = true, want false")
+	}
+	assertCleanupTablePreserved(t, result, "bundles", 2)
+	if got := countRows(t, ctx, pg, "bundles"); got != 2 {
+		t.Fatalf("bundles after include_bundles=false cleanup = %d, want preserved", got)
+	}
+	if got := countRows(t, ctx, pg, "runs"); got != 0 {
+		t.Fatalf("runs after include_bundles=false cleanup = %d, want existing cleanup still applied", got)
+	}
+}
+
+func TestPostgresStore_ApplyDestructiveResetCleanup_DryRunIncludeBundlesCountsWithoutMutation(t *testing.T) {
+	dsn, _, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	pg, err := NewPostgresStore(dsn)
+	if err != nil {
+		t.Fatalf("NewPostgresStore: %v", err)
+	}
+	t.Cleanup(func() { _ = pg.DB.Close() })
+	ctx := context.Background()
+	seed := seedDestructiveResetCleanupRows(t, ctx, pg)
+	seedDestructiveResetBundleRows(t, ctx, pg)
+
+	now := time.Date(2026, 5, 16, 18, 39, 0, 0, time.UTC)
+	result, err := pg.ApplyDestructiveResetCleanup(ctx, destructivereset.CleanupRequest{
+		ActorTokenID: "operator-token",
+		RequestedAt:  now,
+		Result: destructivereset.Result{
+			OperationName:  destructivereset.DefaultOperationName,
+			DryRun:         true,
+			IncludeBundles: true,
+			PlannedAt:      now.Add(-time.Minute),
+			Plan:           cleanupPlanForRunIDsIncludingBundles(seed.RunA, seed.RunB),
+		},
+	})
+	if err != nil {
+		t.Fatalf("ApplyDestructiveResetCleanup dry-run include_bundles=true: %v", err)
+	}
+	assertCleanupTableResult(t, result, "bundles", 2, 0)
+	if got := countRows(t, ctx, pg, "bundles"); got != 2 {
+		t.Fatalf("bundles after dry-run include_bundles=true = %d, want preserved", got)
+	}
+	if got := countRows(t, ctx, pg, "runs"); got != 2 {
+		t.Fatalf("runs after dry-run include_bundles=true = %d, want preserved", got)
+	}
+}
+
+func TestPostgresStore_ApplyDestructiveResetCleanup_IncludeBundlesRejectsOutOfPlanPersistedRun(t *testing.T) {
+	dsn, _, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	pg, err := NewPostgresStore(dsn)
+	if err != nil {
+		t.Fatalf("NewPostgresStore: %v", err)
+	}
+	t.Cleanup(func() { _ = pg.DB.Close() })
+	ctx := context.Background()
+	seedDestructiveResetBundleRows(t, ctx, pg)
+	outOfPlanRun := uuid.NewString()
+	if _, err := pg.DB.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
+		VALUES ($1::uuid, 'completed', $2, $3, now())
+	`, outOfPlanRun, destructiveResetCleanupBundleHashA, storerunlifecycle.BundleSourcePersisted); err != nil {
+		t.Fatalf("seed out-of-plan persisted run: %v", err)
+	}
+
+	now := time.Date(2026, 5, 16, 18, 40, 0, 0, time.UTC)
+	_, err = pg.ApplyDestructiveResetCleanup(ctx, destructivereset.CleanupRequest{
+		ActorTokenID: "operator-token",
+		RequestedAt:  now,
+		Result: destructivereset.Result{
+			OperationName:  destructivereset.DefaultOperationName,
+			IncludeBundles: true,
+			PlannedAt:      now.Add(-time.Minute),
+			Plan:           cleanupPlanForRunIDsIncludingBundles(),
+		},
+		Quiescence: destructivereset.QuiescenceResult{
+			OperationName: destructivereset.DefaultOperationName,
+			AppliedAt:     now.Add(-30 * time.Second),
+		},
+	})
+	if !errors.Is(err, destructivereset.ErrInvalidRequest) {
+		t.Fatalf("include_bundles=true out-of-plan error = %v, want ErrInvalidRequest", err)
+	}
+	if got := countRows(t, ctx, pg, "bundles"); got != 2 {
+		t.Fatalf("bundles after rejected include_bundles=true cleanup = %d, want rollback/preserved", got)
+	}
+	if got := countRowsWhere(t, ctx, pg, "runs", `run_id = $1::uuid`, outOfPlanRun); got != 1 {
+		t.Fatalf("out-of-plan run rows after rejected cleanup = %d, want preserved", got)
+	}
+}
+
 func TestPostgresStore_ApplyDestructiveResetCleanup_DoesNotDeleteRunsCreatedAfterPlan(t *testing.T) {
 	dsn, _, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
@@ -152,7 +318,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DoesNotDeleteRunsCreatedAfte
 	t.Cleanup(func() { _ = pg.DB.Close() })
 	ctx := context.Background()
 	seedDestructiveResetCleanupRows(t, ctx, pg)
-	plan, err := (destructivereset.InventoryPlanner{Reader: pg}).BuildPlan(ctx, destructivereset.Request{ActorTokenID: "operator-token"})
+	plan, err := (destructivereset.InventoryPlanner{Reader: pg}).BuildPlan(ctx, destructivereset.Request{ActorTokenID: "operator-token", IncludeBundles: false, IncludeBundlesSet: true})
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
@@ -220,7 +386,7 @@ func TestPostgresStore_DestructiveResetPlanCapturesManagedContainersBeforeCleanu
 	plan, err := (destructivereset.InventoryPlanner{Reader: destructivereset.CompositeInventoryReader{
 		Reader:     pg,
 		Containers: managedContainerInventoryFunc(func(context.Context) ([]destructivereset.ContainerRef, error) { return containerRefs, nil }),
-	}}).BuildPlan(ctx, destructivereset.Request{ActorTokenID: "operator-token"})
+	}}).BuildPlan(ctx, destructivereset.Request{ActorTokenID: "operator-token", IncludeBundles: false, IncludeBundlesSet: true})
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
@@ -683,10 +849,31 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_RequiresPlannedCleanupRunSet
 	}
 }
 
+func TestValidateDestructiveResetCleanupRequestRejectsIncludeBundlesPlanMismatch(t *testing.T) {
+	now := time.Date(2026, 5, 16, 19, 2, 0, 0, time.UTC)
+	_, err := validateDestructiveResetCleanupRequest(destructivereset.CleanupRequest{
+		ActorTokenID: "operator-token",
+		Result: destructivereset.Result{
+			DryRun:         true,
+			IncludeBundles: true,
+			PlannedAt:      now.Add(-time.Minute),
+			Plan:           cleanupPlanForRunIDs(uuid.NewString()),
+		},
+	}, now)
+	if !errors.Is(err, destructivereset.ErrInvalidRequest) {
+		t.Fatalf("include_bundles plan mismatch error = %v, want ErrInvalidRequest", err)
+	}
+}
+
 type destructiveResetCleanupSeed struct {
 	RunA string
 	RunB string
 }
+
+const (
+	destructiveResetCleanupBundleHashA = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	destructiveResetCleanupBundleHashB = "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+)
 
 type managedContainerInventoryFunc func(context.Context) ([]destructivereset.ContainerRef, error)
 
@@ -700,6 +887,12 @@ func cleanupPlanForRunIDs(runIDs ...string) destructivereset.Plan {
 		runs = append(runs, destructivereset.RunRef{RunID: runID})
 	}
 	return destructivereset.Plan{CleanupRuns: runs, CleanupRunSetKnown: true}
+}
+
+func cleanupPlanForRunIDsIncludingBundles(runIDs ...string) destructivereset.Plan {
+	plan := cleanupPlanForRunIDs(runIDs...)
+	plan.IncludeBundles = true
+	return plan
 }
 
 func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *PostgresStore) destructiveResetCleanupSeed {
@@ -899,12 +1092,36 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 	return destructiveResetCleanupSeed{RunA: runA, RunB: runB}
 }
 
+func seedDestructiveResetBundleRows(t *testing.T, ctx context.Context, pg *PostgresStore) {
+	t.Helper()
+	if _, err := pg.DB.ExecContext(ctx, `
+		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json, metadata) VALUES
+			($1, 'name: bundle-a', '{}'::jsonb, '{}'::jsonb),
+			($2, 'name: bundle-b', '{}'::jsonb, '{}'::jsonb)
+	`, destructiveResetCleanupBundleHashA, destructiveResetCleanupBundleHashB); err != nil {
+		t.Fatalf("seed bundles: %v", err)
+	}
+}
+
 func assertCleanupTableResult(t *testing.T, result destructivereset.CleanupResult, table string, matched, deleted int64) {
 	t.Helper()
 	for _, row := range result.Tables {
 		if row.Table == table {
 			if row.MatchedRows != matched || row.DeletedRows != deleted {
 				t.Fatalf("cleanup table %s result = matched %d deleted %d, want %d/%d", table, row.MatchedRows, row.DeletedRows, matched, deleted)
+			}
+			return
+		}
+	}
+	t.Fatalf("cleanup result missing table %s: %#v", table, result.Tables)
+}
+
+func assertCleanupTablePreserved(t *testing.T, result destructivereset.CleanupResult, table string, preserved int64) {
+	t.Helper()
+	for _, row := range result.Tables {
+		if row.Table == table {
+			if row.PreservedRows != preserved || row.MatchedRows != 0 || row.DeletedRows != 0 {
+				t.Fatalf("cleanup table %s result = preserved %d matched %d deleted %d, want preserved %d only", table, row.PreservedRows, row.MatchedRows, row.DeletedRows, preserved)
 			}
 			return
 		}

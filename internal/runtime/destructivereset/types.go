@@ -35,18 +35,21 @@ var (
 )
 
 type Request struct {
-	ActorTokenID   string
-	IdempotencyKey string
-	RequestHash    string
-	DryRun         bool
-	RequestedAt    time.Time
+	ActorTokenID      string
+	IdempotencyKey    string
+	RequestHash       string
+	DryRun            bool
+	IncludeBundles    bool
+	IncludeBundlesSet bool
+	RequestedAt       time.Time
 }
 
 type Result struct {
-	OperationName string    `json:"operation_name"`
-	DryRun        bool      `json:"dry_run"`
-	PlannedAt     time.Time `json:"planned_at"`
-	Plan          Plan      `json:"plan"`
+	OperationName  string    `json:"operation_name"`
+	DryRun         bool      `json:"dry_run"`
+	IncludeBundles bool      `json:"include_bundles"`
+	PlannedAt      time.Time `json:"planned_at"`
+	Plan           Plan      `json:"plan"`
 }
 
 type QuiescenceRequest struct {
@@ -74,11 +77,12 @@ type CleanupRequest struct {
 }
 
 type CleanupResult struct {
-	OperationName string               `json:"operation_name"`
-	DryRun        bool                 `json:"dry_run"`
-	AppliedAt     time.Time            `json:"applied_at"`
-	RunIDs        []string             `json:"run_ids"`
-	Tables        []CleanupTableResult `json:"tables"`
+	OperationName  string               `json:"operation_name"`
+	DryRun         bool                 `json:"dry_run"`
+	IncludeBundles bool                 `json:"include_bundles"`
+	AppliedAt      time.Time            `json:"applied_at"`
+	RunIDs         []string             `json:"run_ids"`
+	Tables         []CleanupTableResult `json:"tables"`
 }
 
 type CleanupTableResult struct {
@@ -151,6 +155,7 @@ type Plan struct {
 	ActiveRuns          []RunRef             `json:"active_runs"`
 	CleanupRuns         []RunRef             `json:"cleanup_runs"`
 	CleanupRunSetKnown  bool                 `json:"cleanup_run_set_known"`
+	IncludeBundles      bool                 `json:"include_bundles"`
 	ActiveDeliveries    []DeliveryRef        `json:"active_deliveries"`
 	RunScopedTables     []TableRef           `json:"run_scoped_tables"`
 	EntityContainers    []ContainerRef       `json:"entity_containers"`
@@ -309,6 +314,10 @@ func (r Request) normalize(now time.Time) (Request, error) {
 	r.ActorTokenID = strings.TrimSpace(r.ActorTokenID)
 	r.IdempotencyKey = strings.TrimSpace(r.IdempotencyKey)
 	r.RequestHash = strings.TrimSpace(r.RequestHash)
+	if !r.IncludeBundlesSet {
+		r.IncludeBundles = true
+		r.IncludeBundlesSet = true
+	}
 	if r.ActorTokenID == "" {
 		return Request{}, fmt.Errorf("%w: actor token id is required", ErrInvalidRequest)
 	}
@@ -320,6 +329,13 @@ func (r Request) normalize(now time.Time) (Request, error) {
 	}
 	r.RequestedAt = r.RequestedAt.UTC()
 	return r, nil
+}
+
+func (r Request) includeBundles() bool {
+	if !r.IncludeBundlesSet {
+		return true
+	}
+	return r.IncludeBundles
 }
 
 func (k IdempotencyKey) normalized() IdempotencyKey {

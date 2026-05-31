@@ -83,10 +83,11 @@ func (c *Coordinator) BuildPlanWithLock(ctx context.Context, req Request, apply 
 		return Result{}, false, err
 	}
 	result := Result{
-		OperationName: operation,
-		DryRun:        req.DryRun,
-		PlannedAt:     req.RequestedAt,
-		Plan:          plan,
+		OperationName:  operation,
+		DryRun:         req.DryRun,
+		IncludeBundles: req.IncludeBundles,
+		PlannedAt:      req.RequestedAt,
+		Plan:           plan,
 	}
 	if apply != nil {
 		if err := apply(ctx, copyResult(result)); err != nil {

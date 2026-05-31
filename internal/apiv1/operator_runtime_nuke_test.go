@@ -35,7 +35,7 @@ func TestOperatorRuntimeNukeDryRunUsesDestructiveResetOwners(t *testing.T) {
 		t.Fatalf("runtime.nuke dry-run error = %#v", resp.Error)
 	}
 	result := asMap(t, resp.Result)
-	if result["ok"] != true || result["status"] != "dry_run" || result["dry_run"] != true || result["partial_failure"] != false {
+	if result["ok"] != true || result["status"] != "dry_run" || result["dry_run"] != true || result["include_bundles"] != true || result["partial_failure"] != false {
 		t.Fatalf("runtime.nuke dry-run result = %#v", result)
 	}
 	if got, want := strings.Join(owners.calls, ","), "plan,quiescence,cleanup,containers"; got != want {
@@ -45,6 +45,9 @@ func TestOperatorRuntimeNukeDryRunUsesDestructiveResetOwners(t *testing.T) {
 	assertRuntimeNukeContractStatus(t, result, destructivereset.ContractLegacyResetMigration, "split")
 	if owners.lastPlan.DryRun != true || owners.lastQuiescence.Result.DryRun != true || owners.lastCleanup.Result.DryRun != true || owners.lastContainers.Result.DryRun != true {
 		t.Fatalf("dry-run flag not propagated through owners: plan=%v quiescence=%v cleanup=%v containers=%v", owners.lastPlan.DryRun, owners.lastQuiescence.Result.DryRun, owners.lastCleanup.Result.DryRun, owners.lastContainers.Result.DryRun)
+	}
+	if !owners.lastPlan.IncludeBundles || !owners.lastPlan.IncludeBundlesSet || !owners.lastQuiescence.Result.IncludeBundles || !owners.lastCleanup.Result.IncludeBundles || !owners.lastContainers.Result.IncludeBundles {
+		t.Fatalf("include_bundles default not propagated through owners: plan=%#v quiescence=%v cleanup=%v containers=%v", owners.lastPlan, owners.lastQuiescence.Result.IncludeBundles, owners.lastCleanup.Result.IncludeBundles, owners.lastContainers.Result.IncludeBundles)
 	}
 }
 
@@ -66,15 +69,18 @@ func TestOperatorRuntimeNukeApplyReportsPartialFailureAndIdempotency(t *testing.
 			ResetContainers:  recordingRuntimeNukeContainerStopper{owners},
 		}),
 	})
-	body := `{"jsonrpc":"2.0","id":"nuke","method":"runtime.nuke","params":{"idempotency_key":"apply"}}`
+	body := `{"jsonrpc":"2.0","id":"nuke","method":"runtime.nuke","params":{"include_bundles":false,"idempotency_key":"apply"}}`
 
 	resp := rpcCall(t, handler, body)
 	if resp.Error != nil {
 		t.Fatalf("runtime.nuke apply error = %#v", resp.Error)
 	}
 	result := asMap(t, resp.Result)
-	if result["ok"] != false || result["status"] != "partial_failure" || result["partial_failure"] != true {
+	if result["ok"] != false || result["status"] != "partial_failure" || result["include_bundles"] != false || result["partial_failure"] != true {
 		t.Fatalf("runtime.nuke partial result = %#v", result)
+	}
+	if owners.lastPlan.IncludeBundles || !owners.lastPlan.IncludeBundlesSet || owners.lastCleanup.Result.IncludeBundles || owners.lastContainers.Result.IncludeBundles {
+		t.Fatalf("include_bundles=false not propagated through owners: plan=%#v cleanup=%v containers=%v", owners.lastPlan, owners.lastCleanup.Result.IncludeBundles, owners.lastContainers.Result.IncludeBundles)
 	}
 	if len(owners.calls) != 4 {
 		t.Fatalf("owner call count = %d, want 4", len(owners.calls))
@@ -88,7 +94,7 @@ func TestOperatorRuntimeNukeApplyReportsPartialFailureAndIdempotency(t *testing.
 		t.Fatalf("owner calls after replay = %d, want unchanged 4", len(owners.calls))
 	}
 
-	conflict := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"nuke","method":"runtime.nuke","params":{"dry_run":true,"idempotency_key":"apply"}}`)
+	conflict := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"nuke","method":"runtime.nuke","params":{"include_bundles":true,"idempotency_key":"apply"}}`)
 	if conflict.Error == nil {
 		t.Fatal("runtime.nuke idempotency conflict error = nil")
 	}
@@ -177,11 +183,13 @@ func (o *recordingRuntimeNukeOwners) BuildPlan(_ context.Context, req destructiv
 		return destructivereset.Result{}, false, o.planErr
 	}
 	return destructivereset.Result{
-		OperationName: destructivereset.DefaultOperationName,
-		DryRun:        req.DryRun,
-		PlannedAt:     req.RequestedAt,
+		OperationName:  destructivereset.DefaultOperationName,
+		DryRun:         req.DryRun,
+		IncludeBundles: req.IncludeBundles,
+		PlannedAt:      req.RequestedAt,
 		Plan: destructivereset.Plan{
-			ActiveRuns: []destructivereset.RunRef{{RunID: "00000000-0000-0000-0000-000000000001", Status: "running"}},
+			IncludeBundles: req.IncludeBundles,
+			ActiveRuns:     []destructivereset.RunRef{{RunID: "00000000-0000-0000-0000-000000000001", Status: "running"}},
 			EntityContainers: []destructivereset.ContainerRef{{
 				Name:          "swarm-agent-1",
 				Kind:          "agent",
@@ -229,10 +237,11 @@ func (q recordingRuntimeNukeQuiescer) Apply(ctx context.Context, req destructive
 
 func (o *recordingRuntimeNukeOwners) ApplyCleanup(req destructivereset.CleanupRequest) destructivereset.CleanupResult {
 	return destructivereset.CleanupResult{
-		OperationName: req.Result.OperationName,
-		DryRun:        req.Result.DryRun,
-		AppliedAt:     req.RequestedAt,
-		RunIDs:        []string{"00000000-0000-0000-0000-000000000001"},
+		OperationName:  req.Result.OperationName,
+		DryRun:         req.Result.DryRun,
+		IncludeBundles: req.Result.IncludeBundles,
+		AppliedAt:      req.RequestedAt,
+		RunIDs:         []string{"00000000-0000-0000-0000-000000000001"},
 	}
 }
 

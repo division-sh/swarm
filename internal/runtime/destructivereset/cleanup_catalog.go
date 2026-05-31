@@ -11,7 +11,12 @@ const (
 	CleanupDeleteMixedRowPolicy = "delete_mixed_row_policy"
 	CleanupPreserve             = "preserve"
 	CleanupSplitPreserve        = "split_preserve"
+	CleanupRequestScopedBundles = "request_scoped_bundle_catalog"
 )
+
+type CleanupPolicy struct {
+	IncludeBundles bool
+}
 
 func DefaultPlatformCleanupCatalog() []CleanupCatalogEntry {
 	return []CleanupCatalogEntry{
@@ -41,10 +46,18 @@ func DefaultPlatformCleanupCatalog() []CleanupCatalogEntry {
 		{Table: "agents", TableKind: CleanupTableKindPlatform, Classification: CleanupPreserve, PredicateOwner: "agent registry/config state", PreservationProof: "must survive destructive runtime cleanup"},
 		{Table: "flow_instances", TableKind: CleanupTableKindPlatform, Classification: CleanupPreserve, PredicateOwner: "product/config state", PreservationProof: "must survive destructive runtime cleanup"},
 		{Table: "routing_rules", TableKind: CleanupTableKindPlatform, Classification: CleanupPreserve, PredicateOwner: "routing/topology config", PreservationProof: "must survive destructive runtime cleanup"},
-		{Table: "bundles", TableKind: CleanupTableKindPlatform, Classification: CleanupPreserve, PredicateOwner: "global bundle catalog state", PreservationProof: "must survive destructive runtime cleanup"},
+		{Table: "bundles", TableKind: CleanupTableKindPlatform, Classification: CleanupRequestScopedBundles, PredicateOwner: "runtime.nuke include_bundles request policy", PreservationProof: "include_bundles=false preserves bundle catalog state; include_bundles=true deletes it as part of server-wide runtime.nuke"},
 		{Table: "mailbox", TableKind: CleanupTableKindPlatform, Classification: CleanupSplitPreserve, PredicateOwner: "no run_id; source_event_id policy split", PreservationProof: "preserve until a mailbox cleanup owner exists"},
 		{Table: "spend_ledger", TableKind: CleanupTableKindPlatform, Classification: CleanupSplitPreserve, PredicateOwner: "no run_id; cost audit policy split", PreservationProof: "preserve until a spend cleanup owner exists"},
 	}
+}
+
+func PlatformCleanupCatalogForPolicy(policy CleanupPolicy) []CleanupCatalogEntry {
+	catalog := DefaultPlatformCleanupCatalog()
+	for i := range catalog {
+		catalog[i] = CleanupEntryForPolicy(catalog[i], policy)
+	}
+	return catalog
 }
 
 func DefaultGeneratedCleanupCatalog() []CleanupCatalogEntry {
@@ -61,10 +74,42 @@ func DefaultCleanupCatalog() []CleanupCatalogEntry {
 	return out
 }
 
+func CleanupCatalogForPolicy(policy CleanupPolicy) []CleanupCatalogEntry {
+	out := PlatformCleanupCatalogForPolicy(policy)
+	out = append(out, DefaultGeneratedCleanupCatalog()...)
+	return out
+}
+
 func CleanupCatalogByTable() map[string]CleanupCatalogEntry {
 	out := map[string]CleanupCatalogEntry{}
 	for _, entry := range DefaultPlatformCleanupCatalog() {
 		out[entry.Table] = entry
 	}
 	return out
+}
+
+func CleanupCatalogByTableForPolicy(policy CleanupPolicy) map[string]CleanupCatalogEntry {
+	out := map[string]CleanupCatalogEntry{}
+	for _, entry := range PlatformCleanupCatalogForPolicy(policy) {
+		out[entry.Table] = entry
+	}
+	return out
+}
+
+func CleanupEntryForPolicy(entry CleanupCatalogEntry, policy CleanupPolicy) CleanupCatalogEntry {
+	if entry.Table != "bundles" || entry.Classification != CleanupRequestScopedBundles {
+		return entry
+	}
+	if policy.IncludeBundles {
+		entry.Classification = CleanupDeleteAll
+		entry.PredicateOwner = "runtime.nuke include_bundles=true server-wide bundle catalog deletion"
+		entry.DeleteOrderGroup = 6
+		entry.PreservationProof = ""
+		return entry
+	}
+	entry.Classification = CleanupPreserve
+	entry.PredicateOwner = "runtime.nuke include_bundles=false bundle catalog preservation"
+	entry.DeleteOrderGroup = 0
+	entry.PreservationProof = "bundle catalog rows must survive runtime.nuke when include_bundles=false"
+	return entry
 }
