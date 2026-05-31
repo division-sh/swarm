@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"swarm/internal/store"
 	"swarm/internal/store/runbundle"
 	storerunlifecycle "swarm/internal/store/runlifecycle"
 )
@@ -211,7 +212,7 @@ func (s *recordingRunForkAvailability) LoadRunBundleAvailability(_ context.Conte
 	}
 	availability, ok := s.rows[strings.TrimSpace(runID)]
 	if !ok {
-		return runbundle.Availability{}, fmt.Errorf("run %s not found", strings.TrimSpace(runID))
+		return runbundle.Availability{}, fmt.Errorf("run %s not found: %w", strings.TrimSpace(runID), store.ErrRunNotFound)
 	}
 	return availability, nil
 }

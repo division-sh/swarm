@@ -80,6 +80,7 @@ func TestVersionServerUsesHealthCheck(t *testing.T) {
 		"Server:",
 		"alive=true ready=false db_ok=true runtime_ok=false",
 		"bundle fingerprint=sha256:server workflow_name=workflow workflow_version=v1",
+		"bundle_hash=bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
@@ -265,6 +266,7 @@ func validVersionHealthResult() map[string]any {
 		"runtime_ok": false,
 		"bundle": map[string]any{
 			"fingerprint":      "sha256:server",
+			"bundle_hash":      "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 			"workflow_name":    "workflow",
 			"workflow_version": "v1",
 		},

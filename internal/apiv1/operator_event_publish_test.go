@@ -18,6 +18,7 @@ import (
 	runtimereplayclaim "swarm/internal/runtime/replayclaim"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/store"
+	storerunlifecycle "swarm/internal/store/runlifecycle"
 	"swarm/internal/testutil"
 )
 
@@ -25,7 +26,7 @@ func TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempo
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+	bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -99,22 +100,22 @@ func TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempo
 	}
 }
 
-func TestOperatorEventPublishHandlersRejectCanonicalBundleHashUntilSourceOwner(t *testing.T) {
+func TestOperatorEventPublishHandlersRequireCanonicalBundleHashForCreateNewWork(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+	bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	handler := eventPublishTestHandler(t, pg, bus, source)
 
-	resp := rpcCall(t, handler, eventPublishBodyWithBundleHash("", runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "", "idem-publish-hash"))
+	resp := rpcCall(t, handler, eventPublishBodyWithLegacyFingerprint("", runStartTestFingerprint, "scan.requested", `{"topic":"medicine"}`, "", "idem-publish-legacy"))
 	if resp.Error == nil {
-		t.Fatal("event.publish canonical bundle_hash error = nil")
+		t.Fatal("event.publish missing canonical bundle_hash error = nil")
 	}
-	if data := asMap(t, resp.Error.Data); data["code"] != UnsupportedBundleHashCode {
-		t.Fatalf("unsupported bundle hash data = %#v", data)
+	if data := asMap(t, resp.Error.Data); data["code"] != BundleScopeRequiredCode {
+		t.Fatalf("bundle scope required data = %#v", data)
 	}
 	assertNoEventPublishPersistence(t, db)
 }
@@ -123,7 +124,7 @@ func TestOperatorEventPublishPersistsIdempotencyBeforeReadbackFailure(t *testing
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+	bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -182,7 +183,7 @@ func TestOperatorEventPublishPostCommitReceiptFailureReplaysWithoutDuplicate(t *
 		err:           errors.New("simulated post-commit receipt failure"),
 	}
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-	bus, err := runtimebus.NewEventBusWithOptions(failing, runtimebus.EventBusOptions{ContractBundle: source})
+	bus, err := runtimebus.NewEventBusWithOptions(failing, runStartTestEventBusOptions(source))
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -247,7 +248,7 @@ func TestOperatorEventPublishPostCommitCompletionFailureReplaysWithoutDuplicate(
 		err:           errors.New("simulated normal-run completion failure"),
 	}
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-	bus, err := runtimebus.NewEventBusWithOptions(failing, runtimebus.EventBusOptions{ContractBundle: source})
+	bus, err := runtimebus.NewEventBusWithOptions(failing, runStartTestEventBusOptions(source))
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -306,7 +307,7 @@ func TestOperatorEventPublishPreCommitFailureFailsClosedWithDeclaredError(t *tes
 		err:           errors.New("simulated pre-commit replay scope failure"),
 	}
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-	bus, err := runtimebus.NewEventBusWithOptions(failing, runtimebus.EventBusOptions{ContractBundle: source})
+	bus, err := runtimebus.NewEventBusWithOptions(failing, runStartTestEventBusOptions(source))
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -340,7 +341,7 @@ func TestOperatorEventPublishExplicitRunTargetRequiresExistingNonterminalRun(t *
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+	bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -363,6 +364,17 @@ func TestOperatorEventPublishExplicitRunTargetRequiresExistingNonterminalRun(t *
 	}
 	if count := countEventsByName(t, db, "scan.requested"); count != 2 {
 		t.Fatalf("scan.requested events after targeted publish = %d, want 2", count)
+	}
+
+	mismatch := rpcCall(t, handler, eventPublishBody(runID, "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "scan.requested", `{"topic":"mismatch"}`, "", "idem-existing-run-mismatch"))
+	if mismatch.Error == nil {
+		t.Fatal("mismatched run bundle event.publish error = nil")
+	}
+	if data := asMap(t, mismatch.Error.Data); data["code"] != BundleMismatchCode {
+		t.Fatalf("mismatched run bundle data = %#v, want %s", data, BundleMismatchCode)
+	}
+	if count := countEventsByName(t, db, "scan.requested"); count != 2 {
+		t.Fatalf("scan.requested events after mismatched target = %d, want 2", count)
 	}
 
 	missingRunID := uuid.NewString()
@@ -393,7 +405,7 @@ func TestOperatorEventPublishSourceEventIDValidatesSameRunLineage(t *testing.T) 
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+	bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -432,7 +444,7 @@ func TestOperatorEventPublishSourceEventIDRejectsInvalidLineageBeforePersistence
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+	bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -541,11 +553,11 @@ func TestOperatorEventPublishSourceEventIDRejectsInvalidLineageBeforePersistence
 }
 
 func TestOperatorEventPublishHandlersFailClosedBeforePersistence(t *testing.T) {
-	t.Run("bundle mismatch", func(t *testing.T) {
+	t.Run("non-routable bundle hash", func(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
 		pg := &store.PostgresStore{DB: db}
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-		bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+		bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatalf("NewEventBusWithOptions: %v", err)
 		}
@@ -553,10 +565,10 @@ func TestOperatorEventPublishHandlersFailClosedBeforePersistence(t *testing.T) {
 
 		resp := rpcCall(t, handler, eventPublishBody("", "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "scan.requested", `{"topic":"medicine"}`, "", "idem-event-mismatch"))
 		if resp.Error == nil {
-			t.Fatal("event.publish bundle mismatch error = nil")
+			t.Fatal("event.publish non-routable bundle error = nil")
 		}
-		if data := asMap(t, resp.Error.Data); data["code"] != BundleMismatchCode {
-			t.Fatalf("bundle mismatch data = %#v", data)
+		if data := asMap(t, resp.Error.Data); data["code"] != BundleUnavailableCode {
+			t.Fatalf("bundle unavailable data = %#v", data)
 		}
 		assertNoEventPublishPersistence(t, db)
 	})
@@ -565,7 +577,7 @@ func TestOperatorEventPublishHandlersFailClosedBeforePersistence(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
 		pg := &store.PostgresStore{DB: db}
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-		bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+		bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatalf("NewEventBusWithOptions: %v", err)
 		}
@@ -585,7 +597,7 @@ func TestOperatorEventPublishHandlersFailClosedBeforePersistence(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
 		pg := &store.PostgresStore{DB: db}
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-		bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+		bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatalf("NewEventBusWithOptions: %v", err)
 		}
@@ -605,7 +617,7 @@ func TestOperatorEventPublishHandlersFailClosedBeforePersistence(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
 		pg := &store.PostgresStore{DB: db}
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-		bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+		bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatalf("NewEventBusWithOptions: %v", err)
 		}
@@ -626,7 +638,8 @@ func TestOperatorEventPublishHandlersFailClosedBeforePersistence(t *testing.T) {
 		pg := &store.PostgresStore{DB: db}
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
-			ContractBundle: source,
+			ContractBundle:   source,
+			BundleSourceFact: runStartTestBundleSourceFact(),
 			PayloadValidator: func(eventType string, payload []byte) error {
 				if eventType != "scan.requested" {
 					return fmt.Errorf("unexpected event type %q", eventType)
@@ -653,7 +666,7 @@ func TestOperatorEventPublishHandlersFailClosedBeforePersistence(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
 		pg := &store.PostgresStore{DB: db}
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-		bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+		bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatalf("NewEventBusWithOptions: %v", err)
 		}
@@ -672,7 +685,7 @@ func TestOperatorEventPublishQueuesWhileRuntimePaused(t *testing.T) {
 	t.Cleanup(cleanup)
 	pg := &store.PostgresStore{DB: db}
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+	bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -751,17 +764,19 @@ func eventPublishTestHandlerWithObservability(t *testing.T, pg *store.PostgresSt
 
 func eventPublishTestHandlerWithStores(t *testing.T, runs RunReadStore, observability ObservabilityReadStore, idempotency APIIdempotencyStore, publisher EventPublisher, source semanticview.Source) *Handler {
 	t.Helper()
+	runBundleContext, _ := runs.(RunBundleContextStore)
 	return testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: OperatorReadHandlers(OperatorReadOptions{
-			Now:           func() time.Time { return time.Now().UTC() },
-			Ready:         func() bool { return true },
-			Database:      fakePinger{},
-			Runs:          runs,
-			Observability: observability,
-			Idempotency:   idempotency,
-			Events:        publisher,
-			Source:        source,
+			Now:              func() time.Time { return time.Now().UTC() },
+			Ready:            func() bool { return true },
+			Database:         fakePinger{},
+			Runs:             runs,
+			Observability:    observability,
+			Idempotency:      idempotency,
+			Events:           publisher,
+			Source:           source,
+			RunBundleContext: runBundleContext,
 			Bundle: runtimecontracts.BundleIdentity{
 				WorkflowName:    "review",
 				WorkflowVersion: "1.0.0",
@@ -863,7 +878,7 @@ func eventPublishBodyWithBothBundleInputs(runID, bundleHash, fingerprint, eventN
 
 func eventPublishBodyWithSource(runID, sourceEventID, fingerprint, eventName, payload, emitter, idempotencyKey string) string {
 	parts := []string{
-		fmt.Sprintf(`"bundle_ref":{"fingerprint":%q}`, fingerprint),
+		fmt.Sprintf(`"bundle_hash":%q`, runStartTestBundleHashForFingerprint(fingerprint)),
 		fmt.Sprintf(`"event_name":%q`, eventName),
 		fmt.Sprintf(`"payload":%s`, payload),
 		fmt.Sprintf(`"idempotency_key":%q`, idempotencyKey),
@@ -873,6 +888,22 @@ func eventPublishBodyWithSource(runID, sourceEventID, fingerprint, eventName, pa
 	}
 	if strings.TrimSpace(sourceEventID) != "" {
 		parts = append(parts, fmt.Sprintf(`"source_event_id":%q`, sourceEventID))
+	}
+	if strings.TrimSpace(emitter) != "" {
+		parts = append(parts, fmt.Sprintf(`"emitter":%q`, emitter))
+	}
+	return fmt.Sprintf(`{"jsonrpc":"2.0","id":"publish","method":"event.publish","params":{%s}}`, strings.Join(parts, ","))
+}
+
+func eventPublishBodyWithLegacyFingerprint(runID, fingerprint, eventName, payload, emitter, idempotencyKey string) string {
+	parts := []string{
+		fmt.Sprintf(`"bundle_ref":{"fingerprint":%q}`, fingerprint),
+		fmt.Sprintf(`"event_name":%q`, eventName),
+		fmt.Sprintf(`"payload":%s`, payload),
+		fmt.Sprintf(`"idempotency_key":%q`, idempotencyKey),
+	}
+	if strings.TrimSpace(runID) != "" {
+		parts = append(parts, fmt.Sprintf(`"run_id":%q`, runID))
 	}
 	if strings.TrimSpace(emitter) != "" {
 		parts = append(parts, fmt.Sprintf(`"emitter":%q`, emitter))
@@ -893,8 +924,8 @@ func assertEventPublishPersistence(t *testing.T, db *sql.DB, runID, eventID, eve
 	if runStatus != "running" || triggerType != eventName || triggerID != eventID {
 		t.Fatalf("run row status=%q trigger=%q/%q, want running/%s/%s", runStatus, triggerType, triggerID, eventName, eventID)
 	}
-	if bundleHash != "" || bundleSource != "legacy" || legacyFingerprint != runStartTestFingerprint {
-		t.Fatalf("run row bundle identity = hash:%q source:%q fingerprint:%q, want legacy with compatibility fingerprint %q", bundleHash, bundleSource, legacyFingerprint, runStartTestFingerprint)
+	if bundleHash != runStartTestBundleHash || bundleSource != storerunlifecycle.BundleSourceEphemeral || legacyFingerprint != runStartTestFingerprint {
+		t.Fatalf("run row bundle identity = hash:%q source:%q fingerprint:%q, want %s/%s/%s", bundleHash, bundleSource, legacyFingerprint, runStartTestBundleHash, storerunlifecycle.BundleSourceEphemeral, runStartTestFingerprint)
 	}
 	var entityID, gotProducedBy string
 	var payload json.RawMessage

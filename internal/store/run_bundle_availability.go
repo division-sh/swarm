@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"swarm/internal/store/runbundle"
@@ -41,5 +42,9 @@ func (s *PostgresStore) LoadRunBundleAvailability(ctx context.Context, runID str
 	if s == nil || s.DB == nil {
 		return runbundle.Availability{}, fmt.Errorf("postgres store is required")
 	}
-	return runbundle.LoadAvailability(ctx, s.DB, runID)
+	availability, err := runbundle.LoadAvailability(ctx, s.DB, runID)
+	if errors.Is(err, runbundle.ErrRunNotFound) {
+		return runbundle.Availability{}, ErrRunNotFound
+	}
+	return availability, err
 }

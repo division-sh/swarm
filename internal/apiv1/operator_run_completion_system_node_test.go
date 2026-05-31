@@ -27,8 +27,8 @@ func TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces(t *testin
 	source := semanticview.Wrap(bundle)
 	var coordinator *runtimepipeline.PipelineCoordinator
 	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
-		ContractBundle:    source,
-		BundleFingerprint: runStartTestFingerprint,
+		ContractBundle:   source,
+		BundleSourceFact: runStartTestBundleSourceFact(),
 		InterceptorProvider: func() []runtimebus.EventInterceptor {
 			if coordinator == nil {
 				return nil

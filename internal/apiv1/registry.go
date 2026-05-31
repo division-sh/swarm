@@ -13,6 +13,7 @@ import (
 const (
 	MethodUnavailableCode                = "METHOD_UNAVAILABLE"
 	BundleMismatchCode                   = "BUNDLE_MISMATCH"
+	BundleScopeRequiredCode              = "BUNDLE_SCOPE_REQUIRED"
 	BundleNotFoundCode                   = "BUNDLE_NOT_FOUND"
 	BundleUnavailableCode                = "BUNDLE_UNAVAILABLE"
 	BundleDataIntegrityErrorCode         = "BUNDLE_DATA_INTEGRITY_ERROR"

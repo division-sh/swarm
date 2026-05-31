@@ -284,6 +284,36 @@ func TestEventPublishMapsFailureExitCodes(t *testing.T) {
 			wantStderr: "BUNDLE_MISMATCH",
 		},
 		{
+			name: "bundle scope required exits six",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				writeEventPublishJSONRPCError(t, w, req.ID, "BUNDLE_SCOPE_REQUIRED")
+			},
+			wantCode:   6,
+			wantStderr: "BUNDLE_SCOPE_REQUIRED",
+		},
+		{
+			name: "bundle unavailable exits six",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				writeEventPublishJSONRPCError(t, w, req.ID, "BUNDLE_UNAVAILABLE")
+			},
+			wantCode:   6,
+			wantStderr: "BUNDLE_UNAVAILABLE",
+		},
+		{
+			name: "bundle data integrity exits six",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				writeEventPublishJSONRPCError(t, w, req.ID, "BUNDLE_DATA_INTEGRITY_ERROR")
+			},
+			wantCode:   6,
+			wantStderr: "BUNDLE_DATA_INTEGRITY_ERROR",
+		},
+		{
 			name: "unsupported canonical bundle exits six",
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
