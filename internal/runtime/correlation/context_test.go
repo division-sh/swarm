@@ -47,6 +47,20 @@ func TestCorrelateEvent_GeneratesRunWithoutGeneratingTrace(t *testing.T) {
 	}
 }
 
+func TestCorrelateEvent_PreservesExplicitEventRunID(t *testing.T) {
+	ctx, evt := CorrelateEvent(context.Background(), events.Event{
+		ID:    "evt-child",
+		Type:  events.EventType("task.started"),
+		RunID: "run-explicit",
+	})
+	if got := evt.RunID; got != "run-explicit" {
+		t.Fatalf("event run_id = %q, want run-explicit", got)
+	}
+	if got := RunIDFromContext(ctx); got != "run-explicit" {
+		t.Fatalf("context run_id = %q, want run-explicit", got)
+	}
+}
+
 func TestCorrelateEvent_UsesTypedRuntimeLineageParent(t *testing.T) {
 	ctx := WithRuntimeLineage(context.Background(), RuntimeLineage{
 		Owner:               "runtime.run_fork.selected_contract_execution.fork_local_runtime_typed_lineage",

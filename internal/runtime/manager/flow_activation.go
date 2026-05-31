@@ -15,6 +15,7 @@ import (
 	models "swarm/internal/runtime/core/actors"
 	"swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
+	runtimecorrelation "swarm/internal/runtime/correlation"
 	runtimeeventpayload "swarm/internal/runtime/eventpayload"
 	runtimeeventschema "swarm/internal/runtime/eventschema"
 	runtimepipeline "swarm/internal/runtime/pipeline"
@@ -78,6 +79,11 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 	autoEmitEvent, autoEmitName, err := buildAutoEmitOnCreateEvent(req.ContractBundle, schema, templateID, flowPath, instanceID, flowEntityID, parentEntityID, req.Config)
 	if err != nil {
 		return err
+	}
+	if strings.TrimSpace(autoEmitName) != "" {
+		if runID := runtimecorrelation.RunIDFromContext(ctx); runID != "" {
+			autoEmitEvent.RunID = runID
+		}
 	}
 	if err := am.workflowInstances.Create(ctx, runtimepipeline.WorkflowInstance{
 		InstanceID:      instanceID,

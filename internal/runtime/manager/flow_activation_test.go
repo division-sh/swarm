@@ -397,8 +397,10 @@ func TestActivateFlowInstancePublishesAutoEmitEvent(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	am := newFlowActivationManager(bus, &flowActivationTestInstanceStore{})
 	bundle := testFlowBundle("task.started")
+	const runID = "11111111-1111-1111-1111-111111111115"
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
 
-	err := am.ActivateFlowInstance(context.Background(), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1"))
+	err := am.ActivateFlowInstance(ctx, testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1"))
 	if err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
@@ -415,14 +417,19 @@ func TestActivateFlowInstancePublishesAutoEmitEvent(t *testing.T) {
 	if got := autoEmit.EntityID(); got != runtimepipeline.FlowInstanceEntityID("review/inst-1") {
 		t.Fatalf("published entity_id = %q, want %q", got, runtimepipeline.FlowInstanceEntityID("review/inst-1"))
 	}
+	if got := strings.TrimSpace(autoEmit.RunID); got != runID {
+		t.Fatalf("published run_id = %q, want active run %q", got, runID)
+	}
 }
 
 func TestActivateFlowInstanceQueuesAutoEmitUntilPostCommitWhenAvailable(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	am := newFlowActivationManager(bus, &flowActivationTestInstanceStore{})
 	bundle := testFlowBundle("task.started")
+	const runID = "22222222-2222-2222-2222-222222222215"
 	postCommit := make([]func(), 0, 1)
-	ctx := runtimepipeline.WithPipelinePostCommitActions(context.Background(), &postCommit)
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommit)
 
 	err := am.ActivateFlowInstance(ctx, testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1"))
 	if err != nil {
@@ -441,6 +448,9 @@ func TestActivateFlowInstanceQueuesAutoEmitUntilPostCommitWhenAvailable(t *testi
 	}
 	if got := string(bus.published[0].Type); got != "review/inst-1/task.started" {
 		t.Fatalf("auto-emitted type = %q, want review/inst-1/task.started", got)
+	}
+	if got := strings.TrimSpace(bus.published[0].RunID); got != runID {
+		t.Fatalf("auto-emitted run_id = %q, want active run %q", got, runID)
 	}
 }
 
