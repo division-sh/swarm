@@ -1445,10 +1445,11 @@ func TestResolveWorkspaceMountSourcesPrecedence(t *testing.T) {
 	}
 
 	result, err = resolveWorkspaceMountSourcesFromInput(workspaceDataSourceInput{
-		RepoRoot:         repoRoot,
-		ConfigDataSource: "config-data",
-		EnvDataSource:    "env-data",
-		EnvDataSourceSet: true,
+		RepoRoot:            repoRoot,
+		ConfigDataSource:    "config-data",
+		ConfigDataSourceSet: true,
+		EnvDataSource:       "env-data",
+		EnvDataSourceSet:    true,
 	})
 	if err != nil {
 		t.Fatalf("resolve config workspace mount source: %v", err)
@@ -1469,6 +1470,24 @@ func TestResolveWorkspaceMountSourcesPrecedence(t *testing.T) {
 	}
 	if result.DataSource != envDir || result.DataSourceSource != envWorkspaceDataSource {
 		t.Fatalf("env precedence result = %#v, want source %q from %s", result, envDir, envWorkspaceDataSource)
+	}
+}
+
+func TestResolveWorkspaceMountSourcesRejectsEmptyConfigBeforeEnvFallback(t *testing.T) {
+	repoRoot := t.TempDir()
+	envDir := t.TempDir()
+	result, err := resolveWorkspaceMountSourcesFromInput(workspaceDataSourceInput{
+		RepoRoot:            repoRoot,
+		ConfigDataSource:    " \t ",
+		ConfigDataSourceSet: true,
+		EnvDataSource:       envDir,
+		EnvDataSourceSet:    true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "workspace.data_source") || !strings.Contains(err.Error(), "must be non-empty") {
+		t.Fatalf("resolve workspace mount sources error = %v, want empty workspace.data_source rejection", err)
+	}
+	if result.DataSource != "" || result.DataSourceSource != "workspace.data_source" {
+		t.Fatalf("workspace mount sources = %#v, want no env fallback and workspace.data_source source label", result)
 	}
 }
 
@@ -1508,6 +1527,31 @@ func TestResolveWorkspaceMountSourcesReadsRuntimeConfigAndEnvFallback(t *testing
 	}
 	if result.DataSource != envDir || result.DataSourceSource != envWorkspaceDataSource {
 		t.Fatalf("env-backed workspace mount sources = %#v, want %q from %s", result, envDir, envWorkspaceDataSource)
+	}
+
+	configPath := filepath.Join(t.TempDir(), "swarm.yaml")
+	writeRuntimeConfigText(t, configPath, strings.Join([]string{
+		"runtime:",
+		"  recovery_on_startup: false",
+		"workspace:",
+		"  data_source: \"   \"",
+		"llm:",
+		"  backend: anthropic",
+		"  session:",
+		"    lock_ttl: 10s",
+		"    rotate_after_turns: 40",
+		"    rotate_on_parse_failures: 3",
+	}, "\n")+"\n")
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatalf("load config with empty workspace.data_source: %v", err)
+	}
+	result, err = resolveWorkspaceMountSources(repoRoot, "", cfg)
+	if err == nil || !strings.Contains(err.Error(), "workspace.data_source") || !strings.Contains(err.Error(), "must be non-empty") {
+		t.Fatalf("resolve empty configured workspace source error = %v, want fail-closed config rejection before env fallback", err)
+	}
+	if result.DataSource != "" || result.DataSourceSource != "workspace.data_source" {
+		t.Fatalf("empty configured workspace source result = %#v, want no env fallback", result)
 	}
 }
 
