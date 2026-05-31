@@ -9539,8 +9539,8 @@ cli_specification:
       behavior: >
         Public run-fork CLI. Top-level `swarm fork` is the public command. The bundle selector flag is
         `--bundle-hash`; draft `--bundle` is superseded by #1001. `--at-event` is an explicit fork-event selector only.
-        The CLI validates arguments locally, calls /v1/rpc run.fork exactly once, and renders only server-owned fork
-        results.
+        The CLI validates source_run_id and fork_event_id as currently UUID-shaped runtime IDs before calling the
+        handler, calls /v1/rpc run.fork exactly once, and renders only server-owned fork results.
       split_blockers:
         cross_bundle_fork: '#976'
         db_loaded_same_bundle_source: '#1024'
