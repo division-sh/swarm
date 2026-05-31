@@ -2083,6 +2083,7 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 		sqliteStore.SetSessionLockTTL(cfg.LLM.Session.LockTTL)
 		return storeBundle{
 			SQLDB:               sqliteStore.DB,
+			RuntimeBlocker:      "sqlite runtime construction remains fail-closed until #1087 mailbox_write materialization moves off the raw pipeline SQL database or receives explicit lead-approved split/tracker repair",
 			RuntimeLogStore:     sqliteStore,
 			SchemaBootstrapper:  sqliteStore,
 			EventStore:          sqliteStore,
