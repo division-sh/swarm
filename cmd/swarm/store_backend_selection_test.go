@@ -194,8 +194,11 @@ func TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore(t *testing.T) {
 	if runtimeStores.RuntimeLogStore == nil {
 		t.Fatal("sqlite runtimeStores RuntimeLogStore missing backend-neutral runtime diagnostics owner")
 	}
-	if runtimeStores.ConstructionBlocker != "" {
-		t.Fatalf("sqlite runtimeStores ConstructionBlocker = %q, want no #1150 diagnostics blocker", runtimeStores.ConstructionBlocker)
+	if strings.Contains(runtimeStores.ConstructionBlocker, "#1150 runtime diagnostics/logging") {
+		t.Fatalf("sqlite runtimeStores ConstructionBlocker = %q, want #1150 diagnostics blocker removed", runtimeStores.ConstructionBlocker)
+	}
+	if !strings.Contains(runtimeStores.ConstructionBlocker, "#1087 mailbox_write materialization") {
+		t.Fatalf("sqlite runtimeStores ConstructionBlocker = %q, want residual #1087 mailbox_write blocker", runtimeStores.ConstructionBlocker)
 	}
 	if strings.Contains(runtimeStores.ConstructionBlocker, "pipeline coordination/background nodes") {
 		t.Fatalf("sqlite runtimeStores ConstructionBlocker = %q, want #1147 pipeline/background owner removed from residual blocker", runtimeStores.ConstructionBlocker)
@@ -240,8 +243,11 @@ func TestBuildStoresSQLiteRuntimeNoLongerFailsClosedOnDiagnosticsOwner(t *testin
 	if runtimeStores.RuntimeLogStore == nil {
 		t.Fatal("sqlite runtimeStores RuntimeLogStore missing backend-neutral runtime diagnostics owner")
 	}
-	if runtimeStores.ConstructionBlocker != "" {
-		t.Fatalf("sqlite runtimeStores ConstructionBlocker = %q, want empty after #1150 owner", runtimeStores.ConstructionBlocker)
+	if strings.Contains(runtimeStores.ConstructionBlocker, "#1150 runtime diagnostics/logging") {
+		t.Fatalf("sqlite runtimeStores ConstructionBlocker = %q, want #1150 diagnostics blocker removed", runtimeStores.ConstructionBlocker)
+	}
+	if !strings.Contains(runtimeStores.ConstructionBlocker, "#1087 mailbox_write materialization") {
+		t.Fatalf("sqlite runtimeStores ConstructionBlocker = %q, want residual #1087 mailbox_write blocker", runtimeStores.ConstructionBlocker)
 	}
 	_, err = runtime.NewRuntime(ctx, runtime.RuntimeDeps{
 		Config:  &config.Config{},
@@ -249,13 +255,13 @@ func TestBuildStoresSQLiteRuntimeNoLongerFailsClosedOnDiagnosticsOwner(t *testin
 		Options: runtime.RuntimeOptions{SelfCheck: true},
 	})
 	if err == nil {
-		t.Fatal("NewRuntime(sqlite) succeeded without workflow module, want boot validation error")
+		t.Fatal("NewRuntime(sqlite) succeeded, want residual #1087 mailbox_write blocker")
 	}
 	if strings.Contains(err.Error(), "#1150 runtime diagnostics/logging") {
 		t.Fatalf("NewRuntime(sqlite) error = %v, want #1150 diagnostics blocker removed", err)
 	}
-	if !strings.Contains(err.Error(), "workflow module is required") {
-		t.Fatalf("NewRuntime(sqlite) error = %v, want later workflow-module validation after #1150 owner", err)
+	if !strings.Contains(err.Error(), "#1087 mailbox_write materialization") {
+		t.Fatalf("NewRuntime(sqlite) error = %v, want residual #1087 mailbox_write blocker after #1150 owner", err)
 	}
 }
 
