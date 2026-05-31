@@ -123,6 +123,7 @@ type storeBundle struct {
 	Postgres            *store.PostgresStore
 	SQLDB               *sql.DB
 	RuntimeSQLDB        *sql.DB
+	RuntimeLogStore     runtime.RuntimeLogPersistence
 	RuntimeBlocker      string
 	SchemaBootstrapper  store.SchemaBootstrapper
 	EventStore          runtimebus.EventStore
@@ -148,6 +149,7 @@ func (s storeBundle) runtimeStores() runtime.Stores {
 		SQLDB:               s.RuntimeSQLDB,
 		ConstructionBlocker: s.RuntimeBlocker,
 		EventStore:          s.EventStore,
+		RuntimeLogStore:     s.RuntimeLogStore,
 		PipelineStore:       s.PipelineStore,
 		SessionRegistry:     s.SessionRegistry,
 		ConversationStore:   s.ConversationStore,
@@ -2046,6 +2048,7 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 			Postgres:            pg,
 			SQLDB:               pg.DB,
 			RuntimeSQLDB:        pg.DB,
+			RuntimeLogStore:     pg,
 			SchemaBootstrapper:  pg,
 			EventStore:          pg,
 			PipelineStore:       runtimepipeline.NewWorkflowInstanceStore(pg.DB),
@@ -2080,7 +2083,7 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 		sqliteStore.SetSessionLockTTL(cfg.LLM.Session.LockTTL)
 		return storeBundle{
 			SQLDB:               sqliteStore.DB,
-			RuntimeBlocker:      "sqlite runtime construction remains fail-closed until #1150 runtime diagnostics/logging moves to a backend-neutral store owner or receives an explicit lead-approved split",
+			RuntimeLogStore:     sqliteStore,
 			SchemaBootstrapper:  sqliteStore,
 			EventStore:          sqliteStore,
 			PipelineStore:       runtimepipeline.NewSQLiteWorkflowInstanceStore(sqliteStore.DB),

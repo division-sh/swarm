@@ -681,7 +681,7 @@ func TestCanonicalRuntimeLogSurface_RoundTripsThroughObservabilityReader(t *test
 
 	entityID := uuid.NewString()
 	parentEventID := uuid.NewString()
-	logger := runtimepkg.NewRuntimeLogger(db, pg)
+	logger := runtimepkg.NewRuntimeLogger(pg)
 	if err := logger.Log(ctx, runtimepkg.RuntimeLogEntry{
 		Level:      "warn",
 		Message:    "Tool execution was denied for save_entity_field",
@@ -789,10 +789,11 @@ func TestAccumulatorCompletionOutcomeSurface_RoundTripsThroughObservabilityReade
 		Runtime: config.RuntimeConfig{},
 		LLM:     config.LLMConfig{Backend: "anthropic"},
 	}, Stores: runtimepkg.Stores{
-		SQLDB:         db,
-		EventStore:    pg,
-		ManagerStore:  pg,
-		ScheduleStore: pg,
+		SQLDB:           db,
+		EventStore:      pg,
+		RuntimeLogStore: pg,
+		ManagerStore:    pg,
+		ScheduleStore:   pg,
 	}, Options: runtimepkg.RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,
@@ -1168,10 +1169,11 @@ func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *
 			Backend: "anthropic",
 		},
 	}, Stores: runtimepkg.Stores{
-		SQLDB:         db,
-		EventStore:    pg,
-		ManagerStore:  pg,
-		ScheduleStore: pg,
+		SQLDB:           db,
+		EventStore:      pg,
+		RuntimeLogStore: pg,
+		ManagerStore:    pg,
+		ScheduleStore:   pg,
 	}, Options: runtimepkg.RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: loadConformanceRuntimeWorkflowModule(t),
@@ -1255,9 +1257,10 @@ func TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWitho
 			Backend: "anthropic",
 		},
 	}, Stores: runtimepkg.Stores{
-		SQLDB:        db,
-		EventStore:   eventStore,
-		ManagerStore: &conformanceManagerReplayStore{},
+		SQLDB:           db,
+		EventStore:      eventStore,
+		RuntimeLogStore: pg,
+		ManagerStore:    &conformanceManagerReplayStore{},
 	}, Options: runtimepkg.RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,
@@ -1354,10 +1357,11 @@ func TestStartupTimerRecoveryAftermathSurface_RoundTripsThroughObservabilityRead
 			Backend: "anthropic",
 		},
 	}, Stores: runtimepkg.Stores{
-		SQLDB:         db,
-		EventStore:    conformanceTimerRecoveryEventStore{},
-		ManagerStore:  pg,
-		ScheduleStore: scheduleStore,
+		SQLDB:           db,
+		EventStore:      conformanceTimerRecoveryEventStore{},
+		RuntimeLogStore: pg,
+		ManagerStore:    pg,
+		ScheduleStore:   scheduleStore,
 	}, Options: runtimepkg.RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: loadConformanceRuntimeWorkflowModule(t),
@@ -1472,7 +1476,7 @@ func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityRead
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
 	seedConformanceAgent(t, ctx, pg, "agent-1")
 
-	logger := runtimepkg.NewRuntimeLogger(db, pg)
+	logger := runtimepkg.NewRuntimeLogger(pg)
 	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
 		Logger: conformanceRuntimeLoggerHook{logger: logger},
 	})
@@ -1624,9 +1628,10 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 			Backend: "anthropic",
 		},
 	}, Stores: runtimepkg.Stores{
-		SQLDB:        db,
-		EventStore:   conformanceTimerRecoveryEventStore{},
-		ManagerStore: managerStore,
+		SQLDB:           db,
+		EventStore:      conformanceTimerRecoveryEventStore{},
+		RuntimeLogStore: pg,
+		ManagerStore:    managerStore,
 	}, Options: runtimepkg.RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,
@@ -1722,7 +1727,7 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
 
-	logger := runtimepkg.NewRuntimeLogger(db, pg)
+	logger := runtimepkg.NewRuntimeLogger(pg)
 	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
 		Logger: conformanceRuntimeLoggerHook{logger: logger},
 	})

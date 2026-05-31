@@ -436,7 +436,7 @@ nodes:
       - "#1084 owns canonical backend ids postgres/sqlite, selector precedence flag > environment > runtime config > rollout default, SWARM_STORE_BACKEND, SWARM_SQLITE_PATH, store.backend, store.sqlite.path, and the staged SQLite path authority."
       - "#1085 must own SQLite dialect, schema bootstrap, and backend capability binding before SQLite can construct runtime stores."
       - "#1086 must port core runtime persistence stores behind backend-neutral SQLite/Postgres contracts."
-      - "#1087 must port session, locking, delivery, replay, and trace-stream semantics for the SQLite local runtime path."
+      - "#1087 must port session, locking, delivery, replay, trace-stream, and runtime diagnostics/log semantics for the SQLite local runtime path; #1147-#1150 are the focused runtime-construction children under that parent."
       - "#1088 must flip the active local/dev default to SQLite only after zero-service swarm run and explicit Postgres opt-in are proven together."
       - "#1089 must close docs, CI, repo-wide stale-default audit, and parent proof before #1066 closes."
     representative_issues:

@@ -183,6 +183,7 @@ func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHar
 	rt, err := runtime.NewRuntime(ctx, runtime.RuntimeDeps{Config: cfg, Stores: runtime.Stores{
 		SQLDB:               db,
 		EventStore:          pg,
+		RuntimeLogStore:     pg,
 		SessionRegistry:     sessions.NewPostgresRegistry(db, cfg.LLM.Session.LockTTL),
 		ManagerStore:        pg,
 		ScheduleStore:       pg,
