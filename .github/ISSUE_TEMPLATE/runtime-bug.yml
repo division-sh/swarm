@@ -12,7 +12,6 @@ body:
 
         Before submitting:
         - check [CONTRIBUTING.md](https://github.com/yazzaoui/Swarm/blob/main/CONTRIBUTING.md)
-        - check [BUG_INTAKE_AND_REPRO.md](https://github.com/yazzaoui/Swarm/blob/main/docs/BUG_INTAKE_AND_REPRO.md)
         - use [SECURITY.md](https://github.com/yazzaoui/Swarm/blob/main/SECURITY.md) instead for suspected vulnerabilities
 
         This issue only needs to be good enough to start repro / identification.
@@ -175,13 +174,13 @@ body:
       required: true
 
   - type: textarea
-    id: watchlist_mapping
+    id: tracker_mapping
     attributes:
-      label: Watchlist Mapping
-      description: Name the existing watchlist node this issue likely belongs to, or write `unknown yet` / `needs node/refinement`.
+      label: Tracker Mapping
+      description: Name the existing parent/tracker issue this symptom likely belongs to, or write `unknown yet` / `needs node/refinement`.
       placeholder: |
         Example:
-        semantic-correctness.yaml -> flow_owned_session_scope_proof
+        parent issue #123 -> flow-owned session scope proof
     validations:
       required: false
 
@@ -289,10 +288,10 @@ body:
       required: true
 
   - type: input
-    id: watchlist_link
+    id: tracker_link
     attributes:
-      label: Watchlist Link
-      description: Link the relevant section in docs/RUNTIME_IMPROVEMENTS_AND_WATCHLIST.md or write `unknown yet` / `new entry needed`.
+      label: Tracker Link
+      description: Link the relevant parent/tracker issue, or write `unknown yet` / `new entry needed`.
       placeholder: https://github.com/...
     validations:
       required: false
@@ -307,4 +306,4 @@ body:
         - label: no new heuristic fallback is introduced
         - label: no product-specific rule is embedded into shared runtime semantics
         - label: targeted tests exist
-        - label: watchlist was updated
+        - label: tracker state was updated

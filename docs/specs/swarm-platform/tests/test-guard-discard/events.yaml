@@ -1,4 +1,0 @@
-check.requested:
-  payload:
-    entity_id: string
-    score: integer

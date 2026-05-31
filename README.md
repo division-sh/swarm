@@ -203,8 +203,6 @@ support-agent:
   emit_events: [ticket.triaged]
 ```
 
-For an end-to-end walkthrough (building a flow from scratch), see [`docs/specs/swarm-platform/SWARM-DEVELOPER-GUIDE.md`](docs/specs/swarm-platform/SWARM-DEVELOPER-GUIDE.md).
-
 ---
 
 ## Core concepts
@@ -322,17 +320,16 @@ The trajectory points at running whole company divisions as autonomous flows. Th
 
 ## Documentation
 
+Public documentation is intentionally minimal and root-level. The `docs/`
+directory is local/private maintainer space and is not part of the public
+source contract.
+
 | Document | Read this when… |
 |---|---|
-| [`SWARM-PLATFORM-BRIEF.md`](docs/specs/swarm-platform/SWARM-PLATFORM-BRIEF.md) | You want the 5-minute pitch and design rationale. |
-| [`SWARM-DEVELOPER-GUIDE.md`](docs/specs/swarm-platform/SWARM-DEVELOPER-GUIDE.md) | You want to build a flow from scratch. |
 | [`platform-spec.yaml`](platform-spec.yaml) | You need the authoritative specification. |
 | [`openrpc.json`](openrpc.json) | You need the generated public API artifact. |
-| [`BUILDER-API.md`](docs/specs/swarm-platform/platform/BUILDER-API.md) | You're integrating with the Builder surface. |
-| [`FLIGHT-RECORDER.md`](docs/specs/swarm-platform/platform/FLIGHT-RECORDER.md) | You're debugging a run from its trace. |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | You want to contribute issues, docs, code, or tests. |
 | [`SECURITY.md`](SECURITY.md) | You need to report a suspected vulnerability privately. |
-| [`PUBLIC_DOCS_DISPOSITION.md`](docs/PUBLIC_DOCS_DISPOSITION.md) | You need to understand which committed docs are public, maintainer-only, historical, or removed. |
 
 ---
 
@@ -360,9 +357,8 @@ go run ./cmd/swarm control nuke --api-server http://127.0.0.1:8081 --yes
 ```
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) before opening a PR. High-risk
-semantic/runtime work must also follow
-[`docs/IMPLEMENTER_GUIDELINES.md`](docs/IMPLEMENTER_GUIDELINES.md) and
-[`docs/SEMANTIC_DRIFT.md`](docs/SEMANTIC_DRIFT.md).
+semantic/runtime work must follow its pre-audit, source-owner, and proof-audit
+requirements.
 
 ---
 

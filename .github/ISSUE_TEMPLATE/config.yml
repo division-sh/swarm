@@ -6,6 +6,6 @@ contact_links:
   - name: Security Policy
     url: https://github.com/yazzaoui/Swarm/blob/main/SECURITY.md
     about: Report suspected vulnerabilities privately instead of in public issues.
-  - name: Documentation Map
-    url: https://github.com/yazzaoui/Swarm/blob/main/docs/PUBLIC_DOCS_DISPOSITION.md
-    about: Understand which docs are public, maintainer-only, historical, or removed.
+  - name: Public Documentation
+    url: https://github.com/yazzaoui/Swarm/blob/main/README.md
+    about: Start from the supported public docs and root spec/API artifacts.
