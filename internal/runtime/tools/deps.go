@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"database/sql"
 
 	"swarm/internal/config"
 	"swarm/internal/events"
@@ -44,8 +43,9 @@ type ExecutorOptions struct {
 	Config            *config.Config
 	Credentials       runtimecredentials.Store
 	MailboxStore      MailboxPersistence
+	EntityStore       EntityPersistence
+	HumanTaskStore    HumanTaskPersistence
 	MCPClient         *runtimemcp.Client
-	SQLDB             *sql.DB
 	WorkflowSource    semanticview.Source
 	WorkspaceResolver workspace.Resolver
 	AuthorityProvider runtimeauthority.Provider

@@ -5,7 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	models "swarm/internal/runtime/core/actors"
+	runtimecorrelation "swarm/internal/runtime/correlation"
+	"swarm/internal/runtime/entityruntime"
 )
 
 func TestOrderedEntityFieldNamesFromInput_NormalizesSortsAndDedupes(t *testing.T) {
@@ -16,27 +17,31 @@ func TestOrderedEntityFieldNamesFromInput_NormalizesSortsAndDedupes(t *testing.T
 	}
 }
 
-func TestEntityStateBaseQuery_OptionallyIncludesFlowInstance(t *testing.T) {
+func TestEntityStateQuery_OptionallyIncludesFlowInstance(t *testing.T) {
+	t.Parallel()
+
 	payload := map[string]any{
 		"flow_instance": " review/inst-1 ",
 	}
+	ctx := runtimecorrelation.WithRunID(t.Context(), "00000000-0000-0000-0000-000000000001")
 
-	clausesWithoutFlow, argsWithoutFlow := entityStateBaseQuery(nil, models.AgentConfig{}, payload, false)
-	whereWithoutFlow := joinEntityStateWhere(clausesWithoutFlow)
-	if whereWithoutFlow != "" {
-		t.Fatalf("where without flow = %q", whereWithoutFlow)
+	queryWithoutFlow, err := entityStateQueryForContractRun(ctx, nil, entityruntime.Contract{}, payload, false)
+	if err != nil {
+		t.Fatalf("query without flow: %v", err)
 	}
-	if !reflect.DeepEqual(argsWithoutFlow, []any{}) {
-		t.Fatalf("args without flow = %#v", argsWithoutFlow)
+	if queryWithoutFlow.RunID != "00000000-0000-0000-0000-000000000001" {
+		t.Fatalf("run_id without flow = %q", queryWithoutFlow.RunID)
+	}
+	if queryWithoutFlow.RequestedFlowExact != "" || queryWithoutFlow.RequestedFlowScope.Root != "" {
+		t.Fatalf("query without flow should not include requested flow: %#v", queryWithoutFlow)
 	}
 
-	clausesWithFlow, argsWithFlow := entityStateBaseQuery(nil, models.AgentConfig{}, payload, true)
-	whereWithFlow := joinEntityStateWhere(clausesWithFlow)
-	if whereWithFlow != " WHERE flow_instance = $1" {
-		t.Fatalf("where with flow = %q", whereWithFlow)
+	queryWithFlow, err := entityStateQueryForContractRun(ctx, nil, entityruntime.Contract{}, payload, true)
+	if err != nil {
+		t.Fatalf("query with flow: %v", err)
 	}
-	if !reflect.DeepEqual(argsWithFlow, []any{"review/inst-1"}) {
-		t.Fatalf("args with flow = %#v", argsWithFlow)
+	if queryWithFlow.RequestedFlowExact != "review/inst-1" {
+		t.Fatalf("requested flow exact = %q", queryWithFlow.RequestedFlowExact)
 	}
 }
 

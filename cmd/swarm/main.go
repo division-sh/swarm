@@ -131,6 +131,8 @@ type storeBundle struct {
 	ManagerStore        runtimemanager.ManagerPersistence
 	ScheduleStore       runtimepipeline.SchedulePersistence
 	MailboxStore        runtimetools.MailboxPersistence
+	ToolEntityStore     runtimetools.EntityPersistence
+	HumanTaskStore      runtimetools.HumanTaskPersistence
 	BudgetSpendStore    budgetspend.Store
 	MailboxAPIStore     apiv1.MailboxAPIStore
 	ObservabilityStore  apiv1.ObservabilityReadStore
@@ -152,6 +154,8 @@ func (s storeBundle) runtimeStores() runtime.Stores {
 		ScheduleStore:       s.ScheduleStore,
 		StartupOwnership:    s.StartupOwnership,
 		MailboxStore:        s.MailboxStore,
+		ToolEntityStore:     s.ToolEntityStore,
+		HumanTaskStore:      s.HumanTaskStore,
 		BudgetSpendStore:    s.BudgetSpendStore,
 		RuntimeIngressStore: s.RuntimeIngressStore,
 		TurnStore:           s.TurnStore,
@@ -613,7 +617,8 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 			ContractSelection: runtimerunforkadmission.SelectedContractSelection(source, contractsRoot),
 			AgentRuntime: runtimerunforkexecution.SelectedContractAgentRuntimeOptions{
 				Config:            cfg,
-				SQLDB:             stores.SQLDB,
+				EntityStore:       stores.ToolEntityStore,
+				HumanTaskStore:    stores.HumanTaskStore,
 				SessionRegistry:   stores.SessionRegistry,
 				ConversationStore: stores.ConversationStore,
 				TurnStore:         stores.TurnStore,
@@ -1110,7 +1115,8 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 			ContractSelection: runtimerunforkadmission.SelectedContractSelection(source, contractsRoot),
 			AgentRuntime: runtimerunforkexecution.SelectedContractAgentRuntimeOptions{
 				Config:            cfg,
-				SQLDB:             stores.SQLDB,
+				EntityStore:       stores.ToolEntityStore,
+				HumanTaskStore:    stores.HumanTaskStore,
 				SessionRegistry:   stores.SessionRegistry,
 				ConversationStore: stores.ConversationStore,
 				TurnStore:         stores.TurnStore,
@@ -2039,6 +2045,8 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 			ManagerStore:        pg,
 			ScheduleStore:       pg,
 			MailboxStore:        pg,
+			ToolEntityStore:     pg,
+			HumanTaskStore:      pg,
 			BudgetSpendStore:    pg,
 			MailboxAPIStore:     pg,
 			ObservabilityStore:  pg,
@@ -2063,7 +2071,7 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 		sqliteStore.SetSessionLockTTL(cfg.LLM.Session.LockTTL)
 		return storeBundle{
 			SQLDB:               sqliteStore.DB,
-			RuntimeBlocker:      "sqlite runtime construction remains fail-closed until #1087 gate-promoted raw-SQL consumers (tool executor entity/human-task persistence and diagnostics, runtime diagnostics/logging) move to backend-neutral store owners or receive an explicit lead-approved split",
+			RuntimeBlocker:      "sqlite runtime construction remains fail-closed until #1150 runtime diagnostics/logging moves to a backend-neutral store owner or receives an explicit lead-approved split",
 			SchemaBootstrapper:  sqliteStore,
 			EventStore:          sqliteStore,
 			PipelineStore:       runtimepipeline.NewSQLiteWorkflowInstanceStore(sqliteStore.DB),
@@ -2072,6 +2080,8 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 			ManagerStore:        sqliteStore,
 			ScheduleStore:       sqliteStore,
 			MailboxStore:        sqliteStore,
+			ToolEntityStore:     sqliteStore,
+			HumanTaskStore:      sqliteStore,
 			BudgetSpendStore:    sqliteStore,
 			MailboxAPIStore:     sqliteStore,
 			ObservabilityStore:  sqliteStore,

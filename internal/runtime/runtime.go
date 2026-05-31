@@ -49,6 +49,8 @@ type Stores struct {
 	ScheduleStore       runtimepipeline.SchedulePersistence
 	StartupOwnership    runtimestartupownership.Store
 	MailboxStore        runtimetools.MailboxPersistence
+	ToolEntityStore     runtimetools.EntityPersistence
+	HumanTaskStore      runtimetools.HumanTaskPersistence
 	BudgetSpendStore    budgetspend.Store
 	InboundStore        InboundPersistence
 	RuntimeIngressStore runtimeingress.Store
@@ -510,7 +512,8 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		Config:            cfg,
 		Credentials:       rt.Credentials,
 		MailboxStore:      stores.MailboxStore,
-		SQLDB:             stores.SQLDB,
+		EntityStore:       stores.ToolEntityStore,
+		HumanTaskStore:    stores.HumanTaskStore,
 		WorkflowSource:    source,
 		WorkspaceResolver: rt.Workspace,
 		AuthorityProvider: rt.Authority,

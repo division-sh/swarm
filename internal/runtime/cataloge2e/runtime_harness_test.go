@@ -188,6 +188,8 @@ func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHar
 		ScheduleStore:       pg,
 		StartupOwnership:    pg,
 		MailboxStore:        pg,
+		ToolEntityStore:     pg,
+		HumanTaskStore:      pg,
 		RuntimeIngressStore: pg,
 		ConversationStore:   nil,
 		TurnStore:           nil,

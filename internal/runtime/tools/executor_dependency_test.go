@@ -2,9 +2,9 @@ package tools
 
 import (
 	"context"
-	"database/sql"
 	"strings"
 	"testing"
+	"time"
 
 	models "swarm/internal/runtime/core/actors"
 )
@@ -54,6 +54,34 @@ func (*mailboxStoreStub) ListUnnotifiedCriticalMailboxItems(context.Context, int
 }
 func (*mailboxStoreStub) MarkMailboxItemNotified(context.Context, string) error { return nil }
 
+type entityPersistenceStub struct{}
+
+func (*entityPersistenceStub) LoadEntityState(context.Context, EntityIdentity) (map[string]any, bool, error) {
+	return nil, false, nil
+}
+func (*entityPersistenceStub) QueryEntityStates(context.Context, EntityStateQuery) ([]map[string]any, error) {
+	return nil, nil
+}
+func (*entityPersistenceStub) SaveEntityField(context.Context, EntityFieldUpdate) (int, error) {
+	return 0, nil
+}
+func (*entityPersistenceStub) CreateEntity(context.Context, EntityCreateRecord) error { return nil }
+
+type humanTaskPersistenceStub struct{}
+
+func (*humanTaskPersistenceStub) CreateHumanTask(context.Context, HumanTaskCreateRecord) (string, error) {
+	return "task-1", nil
+}
+func (*humanTaskPersistenceStub) HumanTaskRequeueCount(context.Context, string) (int, error) {
+	return 0, nil
+}
+func (*humanTaskPersistenceStub) CountApprovedHumanTasksSince(context.Context, time.Time) (int, error) {
+	return 0, nil
+}
+func (*humanTaskPersistenceStub) DecideHumanTask(context.Context, HumanTaskDecisionRecord) error {
+	return nil
+}
+
 func TestExecutorMailboxSendFailsWithoutMailboxStore(t *testing.T) {
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{AuthorityProvider: allowMailboxAuthority{}})
 
@@ -91,24 +119,46 @@ func TestExecutorMailboxSendUsesConstructorOwnedMailboxStore(t *testing.T) {
 	}
 }
 
-func TestExecutorSQLDBDependencyFailsWithoutConstructorOwnedDB(t *testing.T) {
+func TestExecutorEntityStoreDependencyFailsWithoutConstructorOwnedStore(t *testing.T) {
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{})
 
-	db, err := exec.sqlDBDependency()
-	if db != nil || err == nil || !strings.Contains(err.Error(), "sql db is not configured") {
-		t.Fatalf("sqlDBDependency = (%v, %v), want nil sql db error", db, err)
+	store, err := exec.entityStoreDependency()
+	if store != nil || err == nil || !strings.Contains(err.Error(), "entity persistence store is not configured") {
+		t.Fatalf("entityStoreDependency = (%v, %v), want nil store error", store, err)
 	}
 }
 
-func TestExecutorSQLDBDependencyUsesConstructorOwnedDB(t *testing.T) {
-	db := &sql.DB{}
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{SQLDB: db})
+func TestExecutorEntityStoreDependencyUsesConstructorOwnedStore(t *testing.T) {
+	store := &entityPersistenceStub{}
+	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{EntityStore: store})
 
-	got, err := exec.sqlDBDependency()
+	got, err := exec.entityStoreDependency()
 	if err != nil {
-		t.Fatalf("sqlDBDependency: %v", err)
+		t.Fatalf("entityStoreDependency: %v", err)
 	}
-	if got != db {
-		t.Fatalf("sqlDBDependency db = %p, want %p", got, db)
+	if got != store {
+		t.Fatalf("entityStoreDependency store = %p, want %p", got, store)
+	}
+}
+
+func TestExecutorHumanTaskStoreDependencyFailsWithoutConstructorOwnedStore(t *testing.T) {
+	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{})
+
+	store, err := exec.humanTaskStoreDependency()
+	if store != nil || err == nil || !strings.Contains(err.Error(), "human task persistence store is not configured") {
+		t.Fatalf("humanTaskStoreDependency = (%v, %v), want nil store error", store, err)
+	}
+}
+
+func TestExecutorHumanTaskStoreDependencyUsesConstructorOwnedStore(t *testing.T) {
+	store := &humanTaskPersistenceStub{}
+	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{HumanTaskStore: store})
+
+	got, err := exec.humanTaskStoreDependency()
+	if err != nil {
+		t.Fatalf("humanTaskStoreDependency: %v", err)
+	}
+	if got != store {
+		t.Fatalf("humanTaskStoreDependency store = %p, want %p", got, store)
 	}
 }

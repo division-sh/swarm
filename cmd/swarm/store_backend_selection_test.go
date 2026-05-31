@@ -191,8 +191,8 @@ func TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore(t *testing.T) {
 	if runtimeStores.SQLDB != nil {
 		t.Fatalf("sqlite runtimeStores SQLDB = %#v, want nil raw runtime SQL handle", runtimeStores.SQLDB)
 	}
-	if !strings.Contains(runtimeStores.ConstructionBlocker, "#1087 gate-promoted raw-SQL consumers") {
-		t.Fatalf("sqlite runtimeStores ConstructionBlocker = %q, want #1087 raw-SQL consumer fail-closed blocker", runtimeStores.ConstructionBlocker)
+	if !strings.Contains(runtimeStores.ConstructionBlocker, "#1150 runtime diagnostics/logging") {
+		t.Fatalf("sqlite runtimeStores ConstructionBlocker = %q, want #1150 diagnostics fail-closed blocker", runtimeStores.ConstructionBlocker)
 	}
 	if strings.Contains(runtimeStores.ConstructionBlocker, "pipeline coordination/background nodes") {
 		t.Fatalf("sqlite runtimeStores ConstructionBlocker = %q, want #1147 pipeline/background owner removed from residual blocker", runtimeStores.ConstructionBlocker)
@@ -202,6 +202,12 @@ func TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore(t *testing.T) {
 	}
 	if runtimeStores.BudgetSpendStore == nil {
 		t.Fatal("sqlite runtimeStores BudgetSpendStore missing backend-neutral budget/spend owner")
+	}
+	if runtimeStores.ToolEntityStore == nil {
+		t.Fatal("sqlite runtimeStores ToolEntityStore missing backend-neutral entity tool owner")
+	}
+	if runtimeStores.HumanTaskStore == nil {
+		t.Fatal("sqlite runtimeStores HumanTaskStore missing backend-neutral human-task owner")
 	}
 	if runtimeStores.PipelineStore == nil || !runtimeStores.PipelineStore.Enabled() {
 		t.Fatal("sqlite runtimeStores PipelineStore missing enabled backend-neutral pipeline owner")
@@ -230,10 +236,10 @@ func TestBuildStoresSQLiteRuntimeFailsClosedUntilRawSQLConsumersSplit(t *testing
 		Options: runtime.RuntimeOptions{SelfCheck: true},
 	})
 	if err == nil {
-		t.Fatal("NewRuntime(sqlite) succeeded, want fail-closed blocker while #1087 raw-SQL consumers remain unsplit")
+		t.Fatal("NewRuntime(sqlite) succeeded, want fail-closed blocker while #1150 diagnostics remains split")
 	}
-	if !strings.Contains(err.Error(), "#1087 gate-promoted raw-SQL consumers") {
-		t.Fatalf("NewRuntime(sqlite) error = %v, want #1087 raw-SQL consumer blocker", err)
+	if !strings.Contains(err.Error(), "#1150 runtime diagnostics/logging") {
+		t.Fatalf("NewRuntime(sqlite) error = %v, want #1150 diagnostics blocker", err)
 	}
 }
 

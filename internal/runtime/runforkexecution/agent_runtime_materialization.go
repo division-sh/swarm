@@ -2,7 +2,6 @@ package runforkexecution
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"net"
 	"net/http"
@@ -37,7 +36,8 @@ var selectedContractAgentRuntimeGatewayEnvMu sync.Mutex
 
 type SelectedContractAgentRuntimeOptions struct {
 	Config            *config.Config
-	SQLDB             *sql.DB
+	EntityStore       runtimetools.EntityPersistence
+	HumanTaskStore    runtimetools.HumanTaskPersistence
 	SessionRegistry   runtimesessions.Registry
 	ConversationStore runtimellm.ConversationPersistence
 	TurnStore         runtimellm.TurnPersistence
@@ -272,7 +272,8 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 		Credentials:       credentials,
 		MailboxStore:      options.MailboxStore,
 		MCPClient:         options.MCPClient,
-		SQLDB:             options.SQLDB,
+		EntityStore:       options.EntityStore,
+		HumanTaskStore:    options.HumanTaskStore,
 		WorkflowSource:    source,
 		WorkspaceResolver: options.Workspace,
 		AuthorityProvider: authority,
