@@ -494,6 +494,9 @@ func (h *runtimeHarness) waitForExpectedEmittedEvents(expected catalogExpectedDo
 	defer ticker.Stop()
 	for {
 		if h.hasExpectedEmittedEvents(ctx, entityID, expected.Expected.EmittedEvents, flowPrefix, source) {
+			if err := h.rt.WaitForQuiescence(ctx); err != nil {
+				h.t.Fatalf("WaitForQuiescence(after emitted events): %v", err)
+			}
 			return
 		}
 		select {

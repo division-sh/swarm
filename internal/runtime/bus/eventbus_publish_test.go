@@ -139,38 +139,38 @@ func (singleDeferredInterceptor) Intercept(_ context.Context, evt events.Event) 
 	}).WithEntityID(evt.EntityID())}, nil
 }
 
-type eventVisibleInTxInterceptor struct {
-	t       *testing.T
-	eventID string
+type nonTransactionalPersistedBeforeInterceptor struct {
+	t     *testing.T
+	store *recordingEventStore
 }
 
-func (i eventVisibleInTxInterceptor) Intercept(ctx context.Context, _ events.Event) (bool, []events.Event, error) {
+func (i nonTransactionalPersistedBeforeInterceptor) Intercept(ctx context.Context, evt events.Event) (bool, []events.Event, error) {
 	i.t.Helper()
-	tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx)
-	if !ok || tx == nil {
-		i.t.Fatal("expected transactional publish context to expose sql tx")
+	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		i.t.Fatal("non-transactional interceptor unexpectedly ran with sql tx")
 	}
-	var count int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_id = $1::uuid`, i.eventID).Scan(&count); err != nil {
-		i.t.Fatalf("query inbound event inside interceptor tx: %v", err)
+	for _, got := range i.store.eventTypes() {
+		if got == string(evt.Type) {
+			return true, nil, nil
+		}
 	}
-	if count != 1 {
-		i.t.Fatalf("inbound event visible inside interceptor tx count=%d, want 1", count)
-	}
+	i.t.Fatalf("event type %s was not persisted before non-transactional interceptor ran; persisted=%v", evt.Type, i.store.eventTypes())
 	return true, nil, nil
 }
 
 type postCommitTxAbsentInterceptor struct {
-	t       *testing.T
-	store   *store.PostgresStore
-	eventID string
-	called  chan struct{}
+	t              *testing.T
+	store          *store.PostgresStore
+	eventID        string
+	called         chan struct{}
+	wantRecipients []string
+	wantScope      runtimereplayclaim.CommittedReplayScope
 }
 
 func (i postCommitTxAbsentInterceptor) Intercept(ctx context.Context, _ events.Event) (bool, []events.Event, error) {
 	i.t.Helper()
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		i.t.Fatal("transactional PublishTx interceptor ran with caller sql tx still in context")
+		i.t.Fatal("post-commit interceptor ran with sql tx still in context")
 	}
 	ok, err := i.store.EventExists(ctx, i.eventID)
 	if err != nil {
@@ -178,6 +178,22 @@ func (i postCommitTxAbsentInterceptor) Intercept(ctx context.Context, _ events.E
 	}
 	if !ok {
 		i.t.Fatalf("expected event %s to be committed before interceptor ran", i.eventID)
+	}
+	if i.wantRecipients != nil {
+		got, err := i.store.ListEventDeliveryRecipients(ctx, i.eventID)
+		if err != nil {
+			i.t.Fatalf("ListEventDeliveryRecipients(%s): %v", i.eventID, err)
+		}
+		assertSortedStringsEqual(i.t, got, i.wantRecipients)
+	}
+	if i.wantScope != "" {
+		got, err := i.store.LoadCommittedReplayScope(ctx, i.eventID)
+		if err != nil {
+			i.t.Fatalf("LoadCommittedReplayScope(%s): %v", i.eventID, err)
+		}
+		if got != i.wantScope {
+			i.t.Fatalf("committed replay scope = %q, want %q", got, i.wantScope)
+		}
 	}
 	select {
 	case i.called <- struct{}{}:
@@ -205,6 +221,9 @@ func (i deferredEventVisibleInterceptor) Intercept(ctx context.Context, evt even
 	}
 	if evt.Type != i.checkFor {
 		return true, nil, nil
+	}
+	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		i.t.Fatal("deferred event interceptor ran with sql tx still in context")
 	}
 	ok, err := i.store.EventExists(ctx, i.eventID)
 	if err != nil {
@@ -1189,23 +1208,68 @@ func TestEventBusPublish_InterceptsMultiHopDeferredChains(t *testing.T) {
 	}
 }
 
-func TestEventBusPublishTransactional_PersistsInboundEventBeforeInterceptorsRun(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
-	eventID := "11111111-1111-1111-1111-111111111111"
-	eb, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
-		Interceptors: []runtimebus.EventInterceptor{eventVisibleInTxInterceptor{t: t, eventID: eventID}},
+func TestEventBusPublishNonTransactional_PersistsBeforeInterceptorsRun(t *testing.T) {
+	store := &recordingEventStore{}
+	eb, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{
+		Interceptors: []runtimebus.EventInterceptor{nonTransactionalPersistedBeforeInterceptor{t: t, store: store}},
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.Publish(context.Background(), events.Event{
-		ID:        eventID,
-		Type:      events.EventType("task.completed"),
+	if err := eb.Publish(context.Background(), (events.Event{
+		Type:      events.EventType("custom.non_transactional"),
 		CreatedAt: time.Now().UTC(),
-		Payload:   []byte(`{}`),
-	}); err != nil {
+	}).WithEntityID("ent-1")); err != nil {
 		t.Fatalf("Publish: %v", err)
+	}
+}
+
+func TestEventBusPublishTransactional_RunsInterceptorsAfterCommit(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	ctx := eventBusTestRunContext(t, db)
+	pg := &store.PostgresStore{DB: db}
+	eventID := "11111111-1111-1111-1111-111111111111"
+	agentID := "agent-post-commit-publish"
+	seedActiveRuntimeBusAgent(t, ctx, pg, agentID)
+	called := make(chan struct{}, 1)
+	eb, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
+		Interceptors: []runtimebus.EventInterceptor{postCommitTxAbsentInterceptor{
+			t:              t,
+			store:          pg,
+			eventID:        eventID,
+			called:         called,
+			wantRecipients: []string{agentID},
+			wantScope:      runtimereplayclaim.CommittedReplayScopeSubscribed,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	ch := eb.Subscribe(agentID, events.EventType("task.completed"))
+	defer eb.Unsubscribe(agentID)
+	if err := eb.Publish(ctx, events.Event{
+		ID:          eventID,
+		RunID:       eventBusTestRunID,
+		Type:        events.EventType("task.completed"),
+		SourceAgent: "api.v1",
+		CreatedAt:   time.Now().UTC(),
+		Payload:     []byte(`{"entity_id":"11111111-1111-1111-1111-111111111114"}`),
+	}.WithEntityID("11111111-1111-1111-1111-111111111114")); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	select {
+	case <-called:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for post-commit interceptor")
+	}
+	select {
+	case got := <-ch:
+		if got.ID != eventID {
+			t.Fatalf("delivered event id = %s, want %s", got.ID, eventID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for post-commit delivery")
 	}
 }
 
@@ -1401,7 +1465,7 @@ func TestEventBusPublishDirect_StampsBundleSourceFactOnRunRow(t *testing.T) {
 	}
 }
 
-func TestEventBusPublishDeferred_PersistsInboundEventBeforeInterceptorsRun(t *testing.T) {
+func TestEventBusPublishDeferred_RunsInterceptorsAfterDeferredEventCommit(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
 	eventID := "22222222-2222-2222-2222-222222222222"

@@ -136,6 +136,122 @@ func TestEngineDispatcherCollectsEmitIntentsWithChainDepth(t *testing.T) {
 	}
 }
 
+func TestEngineDispatcherQueuesWhenPipelineSQLTxActive(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectBegin()
+	mock.ExpectCommit()
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	store := &directRecipientTransactionalStore{
+		descriptors: []runtimebus.ActiveAgentDescriptor{
+			{AgentID: "agent-a", EntityID: "ent-1"},
+		},
+	}
+	eb, err := runtimebus.NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	ch := eb.Subscribe("agent-a", events.EventType("custom.emitted"))
+	defer eb.Unsubscribe("agent-a")
+
+	intent := runtimeengine.EmitIntent{
+		Event: events.Event{
+			ID:        "evt-post-commit-dispatch",
+			Type:      events.EventType("custom.emitted"),
+			Payload:   []byte(`{"entity_id":"ent-1"}`),
+			CreatedAt: time.Now().UTC(),
+		}.WithEntityID("ent-1"),
+	}
+	postCommitActions := make([]func(), 0, 1)
+	txctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
+	txctx = runtimepipeline.WithPipelinePostCommitActions(txctx, &postCommitActions)
+
+	if err := eb.EngineOutbox().WriteOutbox(txctx, []runtimeengine.EmitIntent{intent}); err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("WriteOutbox: %v", err)
+	}
+	if err := eb.EngineDispatcher().DispatchPostCommit(txctx, []runtimeengine.EmitIntent{intent}); err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("DispatchPostCommit: %v", err)
+	}
+	if len(postCommitActions) != 1 {
+		_ = tx.Rollback()
+		t.Fatalf("post-commit actions = %d, want 1", len(postCommitActions))
+	}
+	select {
+	case got := <-ch:
+		_ = tx.Rollback()
+		t.Fatalf("event delivered before post-commit flush: %#v", got)
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	runtimepipeline.FlushPipelinePostCommitActions(postCommitActions)
+	select {
+	case got := <-ch:
+		if got.ID != intent.Event.ID {
+			t.Fatalf("delivered event id = %s, want %s", got.ID, intent.Event.ID)
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("timed out waiting for post-commit outbox dispatch")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestEngineDispatcherFailsClosedWithSQLTxAndNoPostCommitQueue(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectBegin()
+	mock.ExpectRollback()
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	eb, err := runtimebus.NewEventBus(runtimebus.InMemoryEventStore{})
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
+	err = eb.EngineDispatcher().DispatchPostCommit(ctx, []runtimeengine.EmitIntent{{
+		Event: events.Event{
+			ID:        "evt-no-post-commit-queue",
+			Type:      events.EventType("custom.emitted"),
+			CreatedAt: time.Now().UTC(),
+		}.WithEntityID("ent-1"),
+	}})
+	if err == nil {
+		_ = tx.Rollback()
+		t.Fatal("expected DispatchPostCommit to fail closed without post-commit queue")
+	}
+	if !strings.Contains(err.Error(), "post-commit dispatch requires pipeline post-commit actions") {
+		_ = tx.Rollback()
+		t.Fatalf("DispatchPostCommit error = %q, want post-commit queue failure", err)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
 func TestEngineOutboxPersistsEventsAndDeliveriesInTransaction(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
