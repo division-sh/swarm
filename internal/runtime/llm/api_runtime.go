@@ -345,10 +345,11 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 
 	// Spend ledger: exact usage for API runtime when usage fields are present.
 	if r.budget != nil {
-		if err := r.budget.RecordEntityLLMUsage(ctx, entityID, s.AgentID, "api", usage, true, map[string]any{
-			"session_id":       s.ID,
-			"usage_accounting": string(BudgetUsageExact),
-		}); err != nil {
+		profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendAnthropic)
+		meta := usageMetadataForContext(ctx, profile, usage.Model)
+		meta["session_id"] = s.ID
+		meta["usage_accounting"] = string(BudgetUsageExact)
+		if err := r.budget.RecordEntityLLMUsage(ctx, entityID, s.AgentID, profile.ID, usage, true, meta); err != nil {
 			logPublisherRuntime(ctx, r.events, "warn", "record_api_llm_usage_failed", "Recording API LLM usage failed", s.AgentID, s.ID, entityID, nil, err)
 		}
 	}

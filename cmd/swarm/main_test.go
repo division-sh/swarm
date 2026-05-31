@@ -4827,6 +4827,56 @@ reader:
 	}
 }
 
+func TestRunVerifyCommand_FailsForUndefinedSelectedBackendModelAlias(t *testing.T) {
+	root := t.TempDir()
+	writeVerifyModelAliasFixture(t, root, "not_configured")
+
+	var buf bytes.Buffer
+	code := runVerifyCommandWithContractsForTest(context.Background(), repoRoot(), root, &buf)
+	if code == 0 {
+		t.Fatalf("expected non-zero exit code, output = %q", buf.String())
+	}
+	out := buf.String()
+	for _, want := range []string{"model alias resolution failed", "llm.models alias \"not_configured\" is not configured"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("verify output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestRunVerifyCommand_UsesExecutableRuntimeConfigModelAliases(t *testing.T) {
+	originalExecutablePath := runtimeConfigExecutablePath
+	t.Cleanup(func() { runtimeConfigExecutablePath = originalExecutablePath })
+
+	root := t.TempDir()
+	writeVerifyModelAliasFixture(t, root, "audit.custom")
+
+	exeDir := t.TempDir()
+	runtimeConfigExecutablePath = func() (string, error) {
+		return filepath.Join(exeDir, "swarm"), nil
+	}
+	writeRuntimeConfigText(t, filepath.Join(exeDir, "config.yaml"), strings.Join([]string{
+		"llm:",
+		"  backend: anthropic",
+		"  models:",
+		"    audit.custom:",
+		"      anthropic: claude-custom",
+		"  session:",
+		"    lock_ttl: 10s",
+		"    rotate_after_turns: 40",
+		"    rotate_on_parse_failures: 3",
+	}, "\n")+"\n")
+
+	var buf bytes.Buffer
+	code := runVerifyCommandWithContractsForTest(context.Background(), repoRoot(), root, &buf)
+	if code != 0 {
+		t.Fatalf("runVerifyCommand exit code = %d, output = %q", code, buf.String())
+	}
+	if out := buf.String(); !strings.Contains(out, "verify ok: contracts=") {
+		t.Fatalf("verify output missing success marker:\n%s", out)
+	}
+}
+
 func TestRunVerifyCommand_FailsForPromptDeclaredSaveWithoutEntityWrites(t *testing.T) {
 	root := t.TempDir()
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
@@ -4875,7 +4925,15 @@ writer:
       - research_context
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "events.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "nodes.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "nodes.yaml"), `
+closer:
+  id: closer
+  execution_type: system_node
+  subscribes_to: [task.assigned]
+  event_handlers:
+    task.assigned:
+      advances_to: done
+`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "prompts", "writer.md"), `
 Use save_entity_field for `+"`business_brief`"+`.
 `)
@@ -5101,6 +5159,58 @@ func writeWorkflowValidationFixtureFile(t *testing.T, path, contents string) {
 	if err := os.WriteFile(path, []byte(strings.TrimLeft(contents, "\n")), 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
+}
+
+func writeVerifyModelAliasFixture(t *testing.T, root, model string) {
+	t.Helper()
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: verify-model-alias
+version: "1.0.0"
+platform: ">=1.6.0"
+flows:
+  - id: child
+    flow: child
+    mode: static
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: verify-model-alias`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "schema.yaml"), `
+name: child
+initial_state: idle
+terminal_states: [done]
+states: [idle, done]
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "policy.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "agents.yaml"), fmt.Sprintf(`
+worker:
+  id: worker
+  type: factory
+  role: worker
+  prompt_ref: worker
+  model: %s
+  conversation_mode: task
+  subscriptions: [task.assigned]
+`, model))
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "events.yaml"), `
+task.assigned:
+  swarm:
+    source: external (verify model alias test)
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "nodes.yaml"), `
+closer:
+  id: closer
+  execution_type: system_node
+  subscribes_to: [task.assigned]
+  event_handlers:
+    task.assigned:
+      advances_to: done
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "prompts", "worker.md"), `Handle the task.`)
 }
 
 func writeWorkflowValidationDeadEventSchemaFixture(t *testing.T) string {

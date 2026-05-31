@@ -29,6 +29,11 @@ type SpendRecord struct {
 	FlowInstance    string
 	AgentID         string
 	Model           string
+	ModelAlias      string
+	BackendProfile  string
+	Provider        string
+	Transport       string
+	ResolvedModel   string
 	InputTokens     int
 	OutputTokens    int
 	CostUSD         float64

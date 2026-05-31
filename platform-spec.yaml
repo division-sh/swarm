@@ -2436,7 +2436,8 @@ engine:
         budget:
           rules:
           - The adapter must declare whether usage accounting is exact provider-reported usage or an estimate.
-          - Budget records must include enough runtime/provider metadata for audit and cost attribution.
+          - Budget records must persist authored model alias, backend profile id, provider identity, transport, and concrete
+            resolved model at write time for audit and cost attribution.
       current_runtime_modes:
         api:
           provider: anthropic
@@ -2564,8 +2565,9 @@ engine:
         resolution_rule: Resolution is deterministic and provider-scoped. The canonical input is (backend profile id, authored
           model alias); the canonical output is the concrete provider model string plus resolved backend and provider identity.
           Per-alias runtime config overrides built-in defaults; unresolved aliases fail closed before agent turns.
-        verify_rule: swarm verify validates the authored model field is present and well formed, but does not require deployment
-          credentials or provider-specific config. Deployment alias resolution is a boot/runtime validation responsibility.
+        verify_rule: swarm verify validates the authored model field is present and well formed. When runtime config is
+          available through the shared discovery path, verify also validates selected-backend alias resolution against built-in
+          aliases plus llm.models without requiring deployment credentials.
         audit_rule: Runtime audit writes authored model alias plus resolved backend profile, provider identity, and concrete
           model at write time. Readers consume recorded values and MUST NOT reconstruct from current config.
       credential_and_config_policy:
@@ -4471,9 +4473,12 @@ platform_tables:
       description: LLM token and API cost tracking. One row per agent invocation. usage_accounting is the canonical exact-vs-estimated usage owner for public read surfaces; existing rows without prior accounting evidence migrate conservatively to estimated.
       ddl: "CREATE TABLE spend_ledger (\n    ledger_id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    entity_id\
         \         UUID,\n    flow_instance     TEXT NOT NULL,\n    agent_id          TEXT NOT NULL,\n    model           \
-        \  TEXT NOT NULL,\n    input_tokens      INTEGER NOT NULL DEFAULT 0,\n    output_tokens     INTEGER NOT NULL DEFAULT\
-        \ 0,\n    cost_usd          NUMERIC(10,6) NOT NULL DEFAULT 0,\n    invocation_type   TEXT NOT NULL,\n    usage_accounting\
-        \ TEXT NOT NULL DEFAULT 'estimated' CHECK (usage_accounting IN ('exact', 'estimated')),\n    created_at\
+        \  TEXT NOT NULL,\n    model_alias      TEXT NOT NULL DEFAULT 'unknown',\n    backend_profile  TEXT NOT NULL DEFAULT\
+        \ 'unknown',\n    provider         TEXT NOT NULL DEFAULT 'unknown',\n    transport        TEXT NOT NULL DEFAULT\
+        \ 'unknown',\n    resolved_model   TEXT NOT NULL DEFAULT 'unknown',\n    input_tokens      INTEGER NOT NULL DEFAULT\
+        \ 0,\n    output_tokens     INTEGER NOT NULL DEFAULT 0,\n    cost_usd          NUMERIC(10,6) NOT NULL DEFAULT\
+        \ 0,\n    invocation_type   TEXT NOT NULL,\n    usage_accounting TEXT NOT NULL DEFAULT 'estimated' CHECK (usage_accounting\
+        \ IN ('exact', 'estimated')),\n    created_at\
         \        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX idx_spend_flow (flow_instance, created_at),\n    INDEX idx_spend_agent\
         \ (agent_id, created_at)\n);"
     flow_instances:
@@ -11810,6 +11815,11 @@ api_specification:
         - usage_accounting
         - invocation_type
         - model
+        - model_alias
+        - backend_profile
+        - provider
+        - transport
+        - resolved_model
         - totals
         properties:
           usage_accounting:
@@ -11817,10 +11827,31 @@ api_specification:
           invocation_type:
             type: string
             minLength: 1
-            description: Runtime invocation type recorded by the spend ledger, such as api, cli_test, or openai_compatible.
+            description: Backend profile id recorded by the spend ledger, such as anthropic, claude_cli, or openai_compatible.
           model:
             type: string
             minLength: 1
+            description: Concrete model string used for legacy grouping and guardrail cost estimation.
+          model_alias:
+            type: string
+            minLength: 1
+            description: Authored model alias from the agent contract at write time.
+          backend_profile:
+            type: string
+            minLength: 1
+            description: Selected backend profile id at write time.
+          provider:
+            type: string
+            minLength: 1
+            description: Resolved provider identity at write time.
+          transport:
+            type: string
+            minLength: 1
+            description: Resolved provider transport at write time.
+          resolved_model:
+            type: string
+            minLength: 1
+            description: Concrete provider model resolved from model_alias for backend_profile at write time.
           totals:
             $ref: '#/components/schemas/AgentUsageTotals'
       AgentUsage:
@@ -14543,8 +14574,9 @@ api_specification:
         spend_ledger.created_at. since is inclusive; until is exclusive. If no
         window is supplied, all retained rows for the agent are aggregated. The
         response separates exact and estimated usage_accounting totals and
-        provides model/runtime breakdowns so API provider usage and CLI
-        estimated usage are not silently merged. estimated_cost_usd is the
+        provides model alias, backend profile, provider, transport, and concrete
+        model breakdowns so provider usage and estimated CLI usage are not
+        silently merged. estimated_cost_usd is the
         BudgetTracker guardrail cost estimate, not provider billing truth. This
         method does not make run_id, session_id, turn_id, last-turn, or
         provider-billing claims.

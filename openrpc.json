@@ -1316,7 +1316,7 @@
     },
     {
       "name": "agent.usage",
-      "description": "Read the owner-backed per-agent LLM token and estimated-cost usage\naggregate. This is a separate owner from agent.diagnose:\nAgentDiagnosis remains lean and must not expose token usage. The API\nhandler validates agent_id and optional created_at window params, then\nconsumes one named per-agent usage read owner over spend_ledger facts.\nIt must not locally reconstruct usage from raw request_payload,\nresponse_payload, agent.diagnose, agent.delivery_diagnostics,\nrun.trace, run.diagnose, dashboard helpers, CLI state, EventBus data,\nor runtime memory.\n\nThe owner is agent-scoped and aggregates retained spend_ledger rows by\nspend_ledger.created_at. since is inclusive; until is exclusive. If no\nwindow is supplied, all retained rows for the agent are aggregated. The\nresponse separates exact and estimated usage_accounting totals and\nprovides model/runtime breakdowns so API provider usage and CLI\nestimated usage are not silently merged. estimated_cost_usd is the\nBudgetTracker guardrail cost estimate, not provider billing truth. This\nmethod does not make run_id, session_id, turn_id, last-turn, or\nprovider-billing claims.\n",
+      "description": "Read the owner-backed per-agent LLM token and estimated-cost usage\naggregate. This is a separate owner from agent.diagnose:\nAgentDiagnosis remains lean and must not expose token usage. The API\nhandler validates agent_id and optional created_at window params, then\nconsumes one named per-agent usage read owner over spend_ledger facts.\nIt must not locally reconstruct usage from raw request_payload,\nresponse_payload, agent.diagnose, agent.delivery_diagnostics,\nrun.trace, run.diagnose, dashboard helpers, CLI state, EventBus data,\nor runtime memory.\n\nThe owner is agent-scoped and aggregates retained spend_ledger rows by\nspend_ledger.created_at. since is inclusive; until is exclusive. If no\nwindow is supplied, all retained rows for the agent are aggregated. The\nresponse separates exact and estimated usage_accounting totals and\nprovides model alias, backend profile, provider, transport, and concrete\nmodel breakdowns so provider usage and estimated CLI usage are not\nsilently merged. estimated_cost_usd is the\nBudgetTracker guardrail cost estimate, not provider billing truth. This\nmethod does not make run_id, session_id, turn_id, last-turn, or\nprovider-billing claims.\n",
       "params": [
         {
           "name": "agent_id",
@@ -7540,17 +7540,43 @@
       "AgentUsageBreakdown": {
         "additionalProperties": false,
         "properties": {
+          "backend_profile": {
+            "description": "Selected backend profile id at write time.",
+            "minLength": 1,
+            "type": "string"
+          },
           "invocation_type": {
-            "description": "Runtime invocation type recorded by the spend ledger, such as api, cli_test, or openai_compatible.",
+            "description": "Backend profile id recorded by the spend ledger, such as anthropic, claude_cli, or openai_compatible.",
             "minLength": 1,
             "type": "string"
           },
           "model": {
+            "description": "Concrete model string used for legacy grouping and guardrail cost estimation.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "model_alias": {
+            "description": "Authored model alias from the agent contract at write time.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "provider": {
+            "description": "Resolved provider identity at write time.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "resolved_model": {
+            "description": "Concrete provider model resolved from model_alias for backend_profile at write time.",
             "minLength": 1,
             "type": "string"
           },
           "totals": {
             "$ref": "#/components/schemas/AgentUsageTotals"
+          },
+          "transport": {
+            "description": "Resolved provider transport at write time.",
+            "minLength": 1,
+            "type": "string"
           },
           "usage_accounting": {
             "$ref": "#/components/schemas/UsageAccounting"
@@ -7560,6 +7586,11 @@
           "usage_accounting",
           "invocation_type",
           "model",
+          "model_alias",
+          "backend_profile",
+          "provider",
+          "transport",
+          "resolved_model",
           "totals"
         ],
         "type": "object"

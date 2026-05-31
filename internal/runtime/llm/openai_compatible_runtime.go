@@ -338,13 +338,11 @@ func (r *OpenAICompatibleRuntime) ContinueSession(ctx context.Context, s *Sessio
 
 	if r.budget != nil {
 		usage.Model = strings.TrimSpace(coalesce(usage.Model, reqBody.Model))
-		if err := r.budget.RecordEntityLLMUsage(ctx, entityID, s.AgentID, llmselection.BackendOpenAICompatible, usage, true, map[string]any{
-			"session_id":       s.ID,
-			"backend_profile":  llmselection.BackendOpenAICompatible,
-			"provider":         llmselection.ProviderOpenAICompatible,
-			"transport":        llmselection.TransportAPI,
-			"usage_accounting": string(BudgetUsageExact),
-		}); err != nil {
+		profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendOpenAICompatible)
+		meta := usageMetadataForContext(ctx, profile, usage.Model)
+		meta["session_id"] = s.ID
+		meta["usage_accounting"] = string(BudgetUsageExact)
+		if err := r.budget.RecordEntityLLMUsage(ctx, entityID, s.AgentID, profile.ID, usage, true, meta); err != nil {
 			logPublisherRuntime(ctx, r.events, "warn", "record_openai_compatible_llm_usage_failed", "Recording OpenAI-compatible LLM usage failed", s.AgentID, s.ID, entityID, nil, err)
 		}
 	}

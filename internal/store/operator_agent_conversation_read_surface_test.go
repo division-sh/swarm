@@ -653,6 +653,11 @@ func TestOperatorAgentReadSurfaceLoadAgentUsageSplitsExactAndEstimated(t *testin
 	rows := []struct {
 		agentID         string
 		model           string
+		modelAlias      string
+		backendProfile  string
+		provider        string
+		transport       string
+		resolvedModel   string
 		inputTokens     int
 		outputTokens    int
 		costUSD         string
@@ -660,20 +665,20 @@ func TestOperatorAgentReadSurfaceLoadAgentUsageSplitsExactAndEstimated(t *testin
 		usageAccounting string
 		createdAt       time.Time
 	}{
-		{"agent-1", "claude-3-5-sonnet", 100, 25, "0.000675", "api", AgentUsageAccountingExact, since},
-		{"agent-1", "claude-cli-sonnet", 50, 10, "0.000300", "cli_test", AgentUsageAccountingEstimated, since.Add(time.Minute)},
-		{"agent-1", "claude-3-5-sonnet", 7, 3, "0.000010", "api", AgentUsageAccountingExact, until},
-		{"agent-2", "claude-3-5-sonnet", 999, 999, "1.000000", "api", AgentUsageAccountingExact, since.Add(time.Minute)},
+		{"agent-1", "claude-3-5-sonnet", "regular", "anthropic", "anthropic", "api", "claude-3-5-sonnet", 100, 25, "0.000675", "anthropic", AgentUsageAccountingExact, since},
+		{"agent-1", "sonnet", "regular", "claude_cli", "claude", "cli", "sonnet", 50, 10, "0.000300", "claude_cli", AgentUsageAccountingEstimated, since.Add(time.Minute)},
+		{"agent-1", "claude-3-5-sonnet", "regular", "anthropic", "anthropic", "api", "claude-3-5-sonnet", 7, 3, "0.000010", "anthropic", AgentUsageAccountingExact, until},
+		{"agent-2", "claude-3-5-sonnet", "regular", "anthropic", "anthropic", "api", "claude-3-5-sonnet", 999, 999, "1.000000", "anthropic", AgentUsageAccountingExact, since.Add(time.Minute)},
 	}
 	for _, row := range rows {
 		if _, err := db.ExecContext(ctx, `
 			INSERT INTO spend_ledger (
-				flow_instance, agent_id, model, input_tokens, output_tokens,
+				flow_instance, agent_id, model, model_alias, backend_profile, provider, transport, resolved_model, input_tokens, output_tokens,
 				cost_usd, invocation_type, usage_accounting, created_at
 			) VALUES (
-				'flow/a', $1, $2, $3, $4, $5::numeric, $6, $7, $8
+				'flow/a', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::numeric, $11, $12, $13
 			)
-		`, row.agentID, row.model, row.inputTokens, row.outputTokens, row.costUSD, row.invocationType, row.usageAccounting, row.createdAt); err != nil {
+		`, row.agentID, row.model, row.modelAlias, row.backendProfile, row.provider, row.transport, row.resolvedModel, row.inputTokens, row.outputTokens, row.costUSD, row.invocationType, row.usageAccounting, row.createdAt); err != nil {
 			t.Fatalf("seed spend row %+v: %v", row, err)
 		}
 	}
@@ -697,10 +702,10 @@ func TestOperatorAgentReadSurfaceLoadAgentUsageSplitsExactAndEstimated(t *testin
 	if len(result.Breakdown) != 2 {
 		t.Fatalf("breakdown = %#v, want two rows", result.Breakdown)
 	}
-	if got := result.Breakdown[0]; got.UsageAccounting != AgentUsageAccountingExact || got.InvocationType != "api" || got.Model != "claude-3-5-sonnet" {
+	if got := result.Breakdown[0]; got.UsageAccounting != AgentUsageAccountingExact || got.InvocationType != "anthropic" || got.Model != "claude-3-5-sonnet" || got.ModelAlias != "regular" || got.BackendProfile != "anthropic" || got.Provider != "anthropic" || got.Transport != "api" || got.ResolvedModel != "claude-3-5-sonnet" {
 		t.Fatalf("first breakdown = %#v", got)
 	}
-	if got := result.Breakdown[1]; got.UsageAccounting != AgentUsageAccountingEstimated || got.InvocationType != "cli_test" || got.Model != "claude-cli-sonnet" {
+	if got := result.Breakdown[1]; got.UsageAccounting != AgentUsageAccountingEstimated || got.InvocationType != "claude_cli" || got.Model != "sonnet" || got.ModelAlias != "regular" || got.BackendProfile != "claude_cli" || got.Provider != "claude" || got.Transport != "cli" || got.ResolvedModel != "sonnet" {
 		t.Fatalf("second breakdown = %#v", got)
 	}
 }

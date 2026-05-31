@@ -45,6 +45,11 @@ type OperatorAgentUsageBreakdown struct {
 	UsageAccounting string                   `json:"usage_accounting"`
 	InvocationType  string                   `json:"invocation_type"`
 	Model           string                   `json:"model"`
+	ModelAlias      string                   `json:"model_alias"`
+	BackendProfile  string                   `json:"backend_profile"`
+	Provider        string                   `json:"provider"`
+	Transport       string                   `json:"transport"`
+	ResolvedModel   string                   `json:"resolved_model"`
 	Totals          OperatorAgentUsageTotals `json:"totals"`
 }
 
@@ -137,7 +142,8 @@ func (r *OperatorAgentConversationReadSurface) requireAgentUsageCapabilities(ctx
 		},
 		"spend_ledger": {
 			"agent_id", "model", "input_tokens", "output_tokens", "cost_usd",
-			"invocation_type", "usage_accounting", "created_at",
+			"invocation_type", "usage_accounting", "model_alias", "backend_profile",
+			"provider", "transport", "resolved_model", "created_at",
 		},
 	}
 	for table, columns := range required {
@@ -178,19 +184,39 @@ func (r *OperatorAgentConversationReadSurface) loadAgentUsageBreakdown(ctx conte
 		windowClause.WriteString(fmt.Sprintf("\n		  AND created_at < $%d", len(args)))
 	}
 	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`
+		WITH usage_rows AS (
+			SELECT
+				usage_accounting,
+				invocation_type,
+				model,
+				COALESCE(NULLIF(BTRIM(model_alias), ''), 'unknown') AS model_alias,
+				COALESCE(NULLIF(BTRIM(backend_profile), ''), 'unknown') AS backend_profile,
+				COALESCE(NULLIF(BTRIM(provider), ''), 'unknown') AS provider,
+				COALESCE(NULLIF(BTRIM(transport), ''), 'unknown') AS transport,
+				COALESCE(NULLIF(BTRIM(resolved_model), ''), model) AS resolved_model,
+				input_tokens,
+				output_tokens,
+				cost_usd
+			FROM spend_ledger
+			WHERE agent_id = $1
+			  %s
+		)
 		SELECT
 			usage_accounting,
 			invocation_type,
 			model,
+			model_alias,
+			backend_profile,
+			provider,
+			transport,
+			resolved_model,
 			COUNT(*)::int,
 			COALESCE(SUM(input_tokens), 0)::bigint,
 			COALESCE(SUM(output_tokens), 0)::bigint,
 			COALESCE(SUM(cost_usd), 0)::float8
-		FROM spend_ledger
-		WHERE agent_id = $1
-		  %s
-		GROUP BY usage_accounting, invocation_type, model
-		ORDER BY CASE usage_accounting WHEN 'exact' THEN 0 WHEN 'estimated' THEN 1 ELSE 2 END ASC, invocation_type ASC, model ASC
+		FROM usage_rows
+		GROUP BY usage_accounting, invocation_type, model, model_alias, backend_profile, provider, transport, resolved_model
+		ORDER BY CASE usage_accounting WHEN 'exact' THEN 0 WHEN 'estimated' THEN 1 ELSE 2 END ASC, invocation_type ASC, model ASC, model_alias ASC
 	`, windowClause.String()), args...)
 	if err != nil {
 		return nil, fmt.Errorf("load agent usage breakdown: %w", err)
@@ -204,6 +230,11 @@ func (r *OperatorAgentConversationReadSurface) loadAgentUsageBreakdown(ctx conte
 			&row.UsageAccounting,
 			&row.InvocationType,
 			&row.Model,
+			&row.ModelAlias,
+			&row.BackendProfile,
+			&row.Provider,
+			&row.Transport,
+			&row.ResolvedModel,
 			&row.Totals.LedgerEntries,
 			&row.Totals.InputTokens,
 			&row.Totals.OutputTokens,
@@ -214,6 +245,11 @@ func (r *OperatorAgentConversationReadSurface) loadAgentUsageBreakdown(ctx conte
 		row.UsageAccounting = strings.TrimSpace(row.UsageAccounting)
 		row.InvocationType = strings.TrimSpace(row.InvocationType)
 		row.Model = strings.TrimSpace(row.Model)
+		row.ModelAlias = strings.TrimSpace(row.ModelAlias)
+		row.BackendProfile = strings.TrimSpace(row.BackendProfile)
+		row.Provider = strings.TrimSpace(row.Provider)
+		row.Transport = strings.TrimSpace(row.Transport)
+		row.ResolvedModel = strings.TrimSpace(row.ResolvedModel)
 		if err := validateOperatorAgentUsageBreakdown(row); err != nil {
 			return nil, err
 		}
@@ -236,6 +272,21 @@ func validateOperatorAgentUsageBreakdown(row OperatorAgentUsageBreakdown) error 
 	}
 	if row.Model == "" {
 		return fmt.Errorf("agent usage read owner returned empty model")
+	}
+	if row.ModelAlias == "" {
+		return fmt.Errorf("agent usage read owner returned empty model_alias")
+	}
+	if row.BackendProfile == "" {
+		return fmt.Errorf("agent usage read owner returned empty backend_profile")
+	}
+	if row.Provider == "" {
+		return fmt.Errorf("agent usage read owner returned empty provider")
+	}
+	if row.Transport == "" {
+		return fmt.Errorf("agent usage read owner returned empty transport")
+	}
+	if row.ResolvedModel == "" {
+		return fmt.Errorf("agent usage read owner returned empty resolved_model")
 	}
 	if row.Totals.LedgerEntries < 0 || row.Totals.InputTokens < 0 || row.Totals.OutputTokens < 0 || row.Totals.EstimatedCostUSD < 0 {
 		return fmt.Errorf("agent usage read owner returned negative totals")

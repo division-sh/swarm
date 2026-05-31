@@ -265,6 +265,45 @@ func newCheckerContext(ctx context.Context, source semanticview.Source, opts Opt
 	}
 }
 
+func (c *checkerContext) appendAgentModelAliasFindings(findings []Finding, agentLabel, model string) []Finding {
+	if c != nil && c.opts.ValidateModelResolution {
+		resolved, err := llmselection.ResolveModel(c.opts.LLMProfile, llmselection.ModelResolution{
+			Model:  model,
+			Models: c.opts.ModelAliases,
+		})
+		if err != nil {
+			backend := strings.TrimSpace(c.opts.LLMProfile.ID)
+			if backend == "" {
+				backend = "selected backend"
+			}
+			return append(findings, Finding{
+				CheckID:  "invalid_field_detection",
+				Severity: "error",
+				Message:  fmt.Sprintf("agent %s model alias resolution failed for %s: %v", agentLabel, backend, err),
+				Location: agentLabel,
+			})
+		}
+		if strings.TrimSpace(resolved.ConcreteModel) == "" {
+			return append(findings, Finding{
+				CheckID:  "invalid_field_detection",
+				Severity: "error",
+				Message:  fmt.Sprintf("agent %s model alias resolution produced an empty concrete model", agentLabel),
+				Location: agentLabel,
+			})
+		}
+		return findings
+	}
+	if _, err := llmselection.RequireModelAlias(model); err != nil {
+		return append(findings, Finding{
+			CheckID:  "invalid_field_detection",
+			Severity: "error",
+			Message:  fmt.Sprintf("agent %s invalid model alias: %v", agentLabel, err),
+			Location: agentLabel,
+		})
+	}
+	return findings
+}
+
 func checkPayloadFieldCoverage(c *checkerContext) []Finding  { return c.payloadFieldCoverage() }
 func checkStateMachineCoherence(c *checkerContext) []Finding { return c.stateMachineCoherence() }
 func checkNodeStateSchemaTypedCounterpart(c *checkerContext) []Finding {
@@ -643,14 +682,7 @@ func (c *checkerContext) invalidFieldDetection() []Finding {
 				})
 				continue
 			}
-			if _, err := llmselection.RequireModelAlias(agent.Model); err != nil {
-				c.invalidFindings = append(c.invalidFindings, Finding{
-					CheckID:  "invalid_field_detection",
-					Severity: "error",
-					Message:  fmt.Sprintf("agent %s invalid model alias: %v", agentLabel, err),
-					Location: agentLabel,
-				})
-			}
+			c.invalidFindings = c.appendAgentModelAliasFindings(c.invalidFindings, agentLabel, agent.Model)
 			if strings.TrimSpace(agent.ConversationMode) == "" {
 				c.invalidFindings = append(c.invalidFindings, Finding{
 					CheckID:  "invalid_field_detection",
@@ -757,14 +789,7 @@ func (c *checkerContext) invalidFieldDetection() []Finding {
 				})
 				continue
 			}
-			if _, err := llmselection.RequireModelAlias(agent.Model); err != nil {
-				c.invalidFindings = append(c.invalidFindings, Finding{
-					CheckID:  "invalid_field_detection",
-					Severity: "error",
-					Message:  fmt.Sprintf("agent %s invalid model alias: %v", agentLabel, err),
-					Location: agentLabel,
-				})
-			}
+			c.invalidFindings = c.appendAgentModelAliasFindings(c.invalidFindings, agentLabel, agent.Model)
 			if strings.TrimSpace(agent.ConversationMode) == "" {
 				c.invalidFindings = append(c.invalidFindings, Finding{
 					CheckID:  "invalid_field_detection",

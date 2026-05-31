@@ -737,6 +737,21 @@ func validateAgentUsageResult(item store.OperatorAgentUsage) error {
 		if strings.TrimSpace(row.Model) == "" {
 			return fmt.Errorf("agent.usage owner returned malformed result: %s.model is required", prefix)
 		}
+		if strings.TrimSpace(row.ModelAlias) == "" {
+			return fmt.Errorf("agent.usage owner returned malformed result: %s.model_alias is required", prefix)
+		}
+		if strings.TrimSpace(row.BackendProfile) == "" {
+			return fmt.Errorf("agent.usage owner returned malformed result: %s.backend_profile is required", prefix)
+		}
+		if strings.TrimSpace(row.Provider) == "" {
+			return fmt.Errorf("agent.usage owner returned malformed result: %s.provider is required", prefix)
+		}
+		if strings.TrimSpace(row.Transport) == "" {
+			return fmt.Errorf("agent.usage owner returned malformed result: %s.transport is required", prefix)
+		}
+		if strings.TrimSpace(row.ResolvedModel) == "" {
+			return fmt.Errorf("agent.usage owner returned malformed result: %s.resolved_model is required", prefix)
+		}
 		if err := validateAgentUsageTotals(prefix+".totals", row.Totals); err != nil {
 			return err
 		}

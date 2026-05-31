@@ -190,8 +190,13 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 			},
 			Breakdown: []store.OperatorAgentUsageBreakdown{{
 				UsageAccounting: store.AgentUsageAccountingExact,
-				InvocationType:  "api",
+				InvocationType:  "anthropic",
 				Model:           "claude-3-5-sonnet",
+				ModelAlias:      "regular",
+				BackendProfile:  "anthropic",
+				Provider:        "anthropic",
+				Transport:       "api",
+				ResolvedModel:   "claude-3-5-sonnet",
 				Totals: store.OperatorAgentUsageTotals{
 					LedgerEntries:    1,
 					InputTokens:      100,
@@ -200,8 +205,13 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 				},
 			}, {
 				UsageAccounting: store.AgentUsageAccountingEstimated,
-				InvocationType:  "cli_test",
-				Model:           "claude-cli-sonnet",
+				InvocationType:  "claude_cli",
+				Model:           "sonnet",
+				ModelAlias:      "regular",
+				BackendProfile:  "claude_cli",
+				Provider:        "claude",
+				Transport:       "cli",
+				ResolvedModel:   "sonnet",
 				Totals: store.OperatorAgentUsageTotals{
 					LedgerEntries:    1,
 					InputTokens:      50,
@@ -409,7 +419,7 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 	if !ok || len(breakdown) != 2 {
 		t.Fatalf("agent.usage breakdown = %#v", usage["breakdown"])
 	}
-	if first := asMap(t, breakdown[0]); first["usage_accounting"] != "exact" || first["invocation_type"] != "api" {
+	if first := asMap(t, breakdown[0]); first["usage_accounting"] != "exact" || first["invocation_type"] != "anthropic" || first["model_alias"] != "regular" || first["backend_profile"] != "anthropic" || first["provider"] != "anthropic" || first["transport"] != "api" || first["resolved_model"] != "claude-3-5-sonnet" {
 		t.Fatalf("agent.usage first breakdown = %#v", first)
 	}
 	for _, forbidden := range []string{"token_usage", "run_id", "session_id", "turn_id"} {
