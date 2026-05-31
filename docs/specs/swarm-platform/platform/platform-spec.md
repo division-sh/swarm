@@ -95,7 +95,7 @@ Canonical format for all flow contract files.
 - `description`: Fields that are optional in contract YAML because the loader derives them from context.
 - `schema_name`: Optional. If omitted, derived from the directory name of the flow package. A flow at flows/processing/ gets name "processing" automatically.
 - `schema_namespace`: Optional. If omitted, derived from the flow path relative to root. A flow at flows/processing/ gets namespace "processing". Root flow gets empty namespace.
-- `agent_id`: Optional. If omitted, the YAML map key IS the agent ID. agents.yaml uses map keys as canonical identifiers: {"instance-coordinator": {model_tier: sonnet, ...}} means agent_id = "instance-coordinator". Explicit id field overrides the map key if present, but this is discouraged.
+- `agent_id`: Optional. If omitted, the YAML map key IS the agent ID. agents.yaml uses map keys as canonical identifiers: {"instance-coordinator": {model: regular, ...}} means agent_id = "instance-coordinator". Explicit id field overrides the map key if present, but this is discouraged.
 - `agent_emit_events`: Optional. If omitted, defaults to empty list []. An agent that only observes (subscribes but never emits) may omit emit_events entirely.
 ## file_layout
 
@@ -1609,7 +1609,7 @@ CREATE TABLE entity_state (
 
 ### agents
 
-- `description`: Runtime agent registry. One row per agent instance. Carries the full runtime descriptor: role (from agents.yaml), parent_agent_id (managerial hierarchy), config (agent-specific configuration from contracts), subscriptions/emit_events/tools/permissions (materialized from contracts at boot for fast runtime lookup). flow_instance nullable for root-level agents not scoped to any flow. entity_id nullable — set only for agents scoped to a specific entity (rare). The contract in agents.yaml is the source of truth. This table is the runtime materialization. llm_backend specifies the LLM invocation backend — api (Anthropic API transport), cli_test (Claude CLI transport), openai_compatible (Chat Completions-compatible HTTP transport), mock (fixture replay), local (local model). This is a deployment/agent property, not a session property. agent_sessions.runtime_mode tracks conversation scope only.
+- `description`: Runtime agent registry. One row per agent instance. Carries the full persisted runtime descriptor: role/model/llm_backend/conversation_mode/parent_agent_id as typed columns, subscriptions/emit_events/tools/permissions as JSONB arrays, and runtime_descriptor JSONB for the remaining control-plane fields that do not already have a first-class persisted column. flow_instance nullable for root-level agents not scoped to any flow. entity_id nullable — set only for agents scoped to a specific entity (rare). The contract in agents.yaml is the source of truth. This table is the runtime materialization. llm_backend stores the backend profile id owned by llm_provider_selection_config_authority. Active runtime profiles are anthropic (Anthropic API transport), claude_cli (Claude CLI transport), and openai_compatible (Chat Completions-compatible HTTP transport); legacy api and cli_test persisted rows are migration/backfill inputs only and are not valid new config/operator inputs. mock and local are reserved persisted profile ids and are not active runtimes until a dedicated provider/runtime owner lands. This is a deployment/agent property, not a session property. agent_sessions.runtime_mode tracks conversation scope only.
 ### ddl
 
 ```sql
@@ -1617,7 +1617,7 @@ CREATE TABLE agents (
     agent_id          TEXT PRIMARY KEY,
     flow_instance     TEXT,
     role              TEXT NOT NULL,
-    model_tier        TEXT NOT NULL,
+    model             TEXT NOT NULL,
     llm_backend       TEXT NOT NULL DEFAULT 'anthropic' CHECK (llm_backend IN ('anthropic', 'claude_cli', 'openai_compatible', 'mock', 'local')),
     conversation_mode TEXT NOT NULL CHECK (conversation_mode IN ('task', 'session', 'session_per_entity')),
     parent_agent_id   TEXT,
@@ -2058,7 +2058,7 @@ Defines the filesystem contract for agent sessions. The platform provides three 
 - `/data is the SAME mount point across all workspace classes. An agent in any class sees identical /data contents.`
 - `/workspace isolation follows the workspace_scope declared by the agent's workspace class. per-agent workspaces are never visible to other agents. per-flow-instance workspaces are visible to all agents in that flow instance only.`
 - `Read-only mounts are enforced at the filesystem level (read-only bind mount, or equivalent). Agents cannot write to /data or /opt/swarm/contracts.`
-- `The runtime MUST NOT vary mount availability based on conversation_mode, model_tier, or any other agent property. Workspace class is the sole determinant of /workspace scope.`
+- `The runtime MUST NOT vary mount availability based on conversation_mode, model, or any other agent property. Workspace class is the sole determinant of /workspace scope.`
 
 ## boot_validation
 

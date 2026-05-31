@@ -158,7 +158,7 @@ Several fields are optional in contract YAML because the loader derives them fro
 
 - `schema_name` — derived from the directory name if omitted. A flow at `flows/scoring/` gets name `"scoring"`.
 - `schema_namespace` — derived from the flow path relative to root.
-- `agent_id` — derived from the YAML map key. In `agents.yaml`, `{"coordinator-agent": {model_tier: sonnet, ...}}` means `agent_id = "coordinator-agent"`. An explicit `id` field overrides the map key if present, but this is discouraged.
+- `agent_id` — derived from the YAML map key. In `agents.yaml`, `{"coordinator-agent": {model: regular, ...}}` means `agent_id = "coordinator-agent"`. An explicit `id` field overrides the map key if present, but this is discouraged.
 - `agent_emit_events` — defaults to an empty list. An agent that only observes may omit `emit_events` entirely.
 
 ### Entity Schema And Event Schema
@@ -839,7 +839,7 @@ This constraint is good for onboarding because every agent session has the same 
 
 ### Mount Guarantees
 
-The runtime guarantees that every agent session has all three standard mounts, that `/data` is identical across all workspace classes, that `/workspace` visibility follows the declared scope, that read-only mounts are enforced at the filesystem level, and that mount availability does not vary by `conversation_mode`, `model_tier`, or any other agent property.
+The runtime guarantees that every agent session has all three standard mounts, that `/data` is identical across all workspace classes, that `/workspace` visibility follows the declared scope, that read-only mounts are enforced at the filesystem level, and that mount availability does not vary by `conversation_mode`, `model`, or any other agent property.
 
 ### Deployment Mapping
 

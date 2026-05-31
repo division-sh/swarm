@@ -8,7 +8,7 @@ Swarm runs fleets of LLM agents as a durable, stateful system. You declare it in
 
 More than a simple orchestrator that decides which agent runs next, Swarm runs the system around it. Work is modeled as entities (an order, a ticket, a candidate business) moving through a state machine you declare: the runtime schedules hundreds at once, keeps them isolated, meters their spend, persists their state, and resumes them after a crash, days later if a timer or a human kept them waiting. Any run can be replayed or forked from the log. Deterministic routing is one piece; the rest is the operating system.
 
-Single Go binary, Postgres for persistence. Three LLM backend profiles ship today: `api` for Anthropic API, `cli_test` for the Claude CLI subprocess transport, and `openai_compatible` for Chat Completions-compatible HTTP JSON. All three consume the shared LLM provider adapter contract; native OpenAI Responses and provider-specific OpenRouter, Ollama, Bedrock, Azure OpenAI, Vertex, or vLLM support remain separate gated runtime/config work.
+Single Go binary, Postgres for persistence. Three LLM backend profiles ship today: `anthropic` for Anthropic API, `claude_cli` for the Claude CLI subprocess transport, and `openai_compatible` for Chat Completions-compatible HTTP JSON. All three consume the shared LLM provider adapter contract; native OpenAI Responses and provider-specific OpenRouter, Ollama, Bedrock, Azure OpenAI, Vertex, or vLLM support remain separate gated runtime/config work.
 
 **Long-term direction:** entire divisions (engineering, support, operations) running as autonomous Swarm flows. Humans in the loop where judgment is required; agents and deterministic system nodes everywhere else.
 
@@ -82,7 +82,7 @@ Guard failures have explicit semantics: `reject` (default), `discard`, `kill`, o
 
 ## Quickstart
 
-Requires Docker, a contract bundle, and credentials for the configured shipped LLM runtime. The Compose quickstart currently starts the orchestrator with the `cli_test` backend from `docker-compose.yml`; setting `SWARM_LLM_BACKEND` in `.env` does not override that Compose default.
+Requires Docker, a contract bundle, and credentials for the configured shipped LLM runtime. The Compose quickstart currently starts the orchestrator with the `claude_cli` backend from `docker-compose.yml`; `.env` supplies secrets such as `CLAUDE_CODE_OAUTH_TOKEN`, not the backend selector.
 
 ```bash
 # 1. clone
@@ -116,37 +116,69 @@ not user isolation on a shared host.
 
 ### LLM Backend Profiles
 
-Outside the Compose quickstart, select a shipped backend with `SWARM_LLM_BACKEND`
-or the equivalent `llm.backend` config key:
+Outside the Compose quickstart, select a shipped backend with `--backend` or
+the equivalent `llm.backend` config key. Selection precedence is
+`--backend > llm.backend > default anthropic`; environment variables never
+select the backend. Commands that need runtime/operator config discover an
+explicit `--config` first, `config.yaml` beside the running binary second, and
+built-in/default config last.
 
 ```bash
 # Anthropic API transport.
-export SWARM_LLM_BACKEND=api
 export ANTHROPIC_API_KEY=...
+swarm serve --backend anthropic --config ./config.yaml
 
-# Claude CLI transport. The profile id remains cli_test until a separate
-# compatibility/storage migration renames it.
-export SWARM_LLM_BACKEND=cli_test
+# Claude CLI transport.
 export CLAUDE_CODE_OAUTH_TOKEN=...
+swarm serve --backend claude_cli --config ./config.yaml
 
 # Chat Completions-compatible HTTP JSON transport.
-export SWARM_LLM_BACKEND=openai_compatible
 export OPENAI_COMPATIBLE_API_KEY=...
-export SWARM_OPENAI_COMPATIBLE_BASE_URL=https://api.example.com
-export SWARM_OPENAI_COMPATIBLE_DEFAULT_MODEL=...
-# Optional low-cost model used when budget policy throttles the actor entity.
-export SWARM_OPENAI_COMPATIBLE_LOW_COST_MODEL=...
+swarm serve --backend openai_compatible --config ./config.yaml
 ```
 
-`openai_compatible` treats `SWARM_OPENAI_COMPATIBLE_BASE_URL` or
-`llm.openai_compatible.base_url` as the API base URL and normalizes it to
-`/v1/chat/completions`. Model config keys are
-`llm.openai_compatible.default_model` and
-`llm.openai_compatible.low_cost_model`. This profile is not native OpenAI
+`openai_compatible` uses `llm.openai_compatible.base_url` as the deployment
+configuration for a Chat Completions-compatible HTTP JSON endpoint and
+normalizes it to `/v1/chat/completions`. This profile is not native OpenAI
 Responses API support, not an official-OpenAI-only provider identity, and not
 provider-matrix support for OpenRouter, Ollama, Bedrock, Azure OpenAI, Vertex,
-or vLLM. `SWARM_LLM_RUNTIME_MODE` and `llm.runtime_mode` are retired; use
-`SWARM_LLM_BACKEND` or `llm.backend`.
+or vLLM.
+
+Runtime config owns non-secret LLM behavior, including backend selection,
+provider endpoint/base URLs, and model alias maps. Environment variables remain
+for credentials and explicitly-owned infra connection values only. The selected
+backend fails fast if its required credential is missing.
+
+| Backend | Required credential env var |
+|---|---|
+| `anthropic` | `ANTHROPIC_API_KEY` |
+| `claude_cli` | `CLAUDE_CODE_OAUTH_TOKEN` |
+| `openai_compatible` | `OPENAI_COMPATIBLE_API_KEY` |
+
+```yaml
+# config.yaml
+llm:
+  backend: openai_compatible
+  openai_compatible:
+    base_url: https://api.example.com
+  models:
+    regular:
+      anthropic: claude-3-5-sonnet
+      claude_cli: sonnet
+      openai_compatible: gpt-compatible
+```
+
+Authored agents choose provider-agnostic model aliases with `model`. Built-in
+aliases are `cheap`, `regular`, and `frontier`; `llm.models` can override any
+alias per backend profile.
+
+```yaml
+# agents.yaml
+support-agent:
+  model: regular
+  subscriptions: [ticket.created]
+  emit_events: [ticket.triaged]
+```
 
 For an end-to-end walkthrough (building a flow from scratch), see [`docs/specs/swarm-platform/SWARM-DEVELOPER-GUIDE.md`](docs/specs/swarm-platform/SWARM-DEVELOPER-GUIDE.md).
 
