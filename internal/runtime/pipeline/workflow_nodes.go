@@ -556,6 +556,10 @@ func deriveWorkflowEventPolicy(source semanticview.Source, eventType string, dri
 }
 
 func (pc *PipelineCoordinator) BackgroundNodes(bus systemNodeBus, db *sql.DB) []BackgroundNode {
+	return pc.BackgroundNodesWithReceiptStore(bus, db, pc.workflowStore)
+}
+
+func (pc *PipelineCoordinator) BackgroundNodesWithReceiptStore(bus systemNodeBus, db *sql.DB, receiptStore SystemNodeReceiptPersistence) []BackgroundNode {
 	if pc == nil || bus == nil {
 		return nil
 	}
@@ -566,7 +570,7 @@ func (pc *PipelineCoordinator) BackgroundNodes(bus systemNodeBus, db *sql.DB) []
 			continue
 		}
 		if executor := pc.backgroundWorkflowExecutor(strings.TrimSpace(node.ID)); executor != nil {
-			if bg := newBackgroundWorkflowNodeWithRetryBase(executor, bus, db, pc.eventReceiptsCapability, retryBase); bg != nil {
+			if bg := newBackgroundWorkflowNodeWithReceiptStoreAndRetryBase(executor, bus, db, receiptStore, pc.eventReceiptsCapability, retryBase); bg != nil {
 				out = append(out, bg)
 			}
 		}
@@ -734,7 +738,7 @@ func (pc *PipelineCoordinator) dispatchWorkflowNodeEventResult(ctx context.Conte
 }
 
 func (pc *PipelineCoordinator) markWorkflowNodeProcessed(ctx context.Context, nodeID string, evt events.Event) {
-	if pc == nil || pc.db == nil {
+	if pc == nil || pc.workflowStore == nil {
 		return
 	}
 	nodeID = strings.TrimSpace(nodeID)
@@ -746,7 +750,7 @@ func (pc *PipelineCoordinator) markWorkflowNodeProcessed(ctx context.Context, no
 		return
 	}
 	sideEffects := systemNodeProcessedReceiptSideEffects(nodeID, eventID)
-	if err := persistSystemNodeProcessedReceiptAndSettleDelivery(ctx, pc.db, nodeID, eventID, sideEffects); err != nil {
+	if err := pc.workflowStore.MarkSystemNodeProcessedAndSettleDelivery(ctx, nodeID, eventID, sideEffects); err != nil {
 		if logger, ok := pc.bus.(systemNodeRuntimeLogger); ok && logger != nil {
 			logger.LogRuntime(ctx, RuntimeLogEntry{
 				Level:     "error",

@@ -19,11 +19,15 @@ func newBackgroundWorkflowNode(executor WorkflowNodeExecutor, bus systemNodeBus,
 }
 
 func newBackgroundWorkflowNodeWithRetryBase(executor WorkflowNodeExecutor, bus systemNodeBus, db *sql.DB, eventReceiptsCapability func(context.Context) (bool, error), retryBase time.Duration) *backgroundWorkflowNode {
+	return newBackgroundWorkflowNodeWithReceiptStoreAndRetryBase(executor, bus, db, NewWorkflowInstanceStore(db), eventReceiptsCapability, retryBase)
+}
+
+func newBackgroundWorkflowNodeWithReceiptStoreAndRetryBase(executor WorkflowNodeExecutor, bus systemNodeBus, db *sql.DB, receiptStore SystemNodeReceiptPersistence, eventReceiptsCapability func(context.Context) (bool, error), retryBase time.Duration) *backgroundWorkflowNode {
 	if executor == nil || bus == nil {
 		return nil
 	}
 	node := &backgroundWorkflowNode{executor: executor}
-	node.runner = newSystemNodeRunnerWithRetryBase(executor.NodeID(), bus, db, executor.Subscriptions, func(ctx context.Context, evt events.Event) error {
+	node.runner = newSystemNodeRunnerWithReceiptStoreAndRetryBase(executor.NodeID(), bus, db, receiptStore, executor.Subscriptions, func(ctx context.Context, evt events.Event) error {
 		if handled := executor.Handle(ctx, evt); handled {
 			return nil
 		}

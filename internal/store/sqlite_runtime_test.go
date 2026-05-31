@@ -237,6 +237,112 @@ func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 	}
 }
 
+func TestSQLiteRuntimeStorePipelineWorkflowInstanceOwner(t *testing.T) {
+	ctx := context.Background()
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	runID := uuid.NewString()
+	ctx = runtimecorrelation.WithRunID(ctx, runID)
+	owner := runtimepipeline.NewSQLiteWorkflowInstanceStore(store.DB)
+	entityID := runtimepipeline.FlowInstanceEntityID("root/acme")
+	if err := owner.Create(ctx, runtimepipeline.WorkflowInstance{
+		InstanceID:      "acme",
+		WorkflowName:    "root",
+		WorkflowVersion: "v1",
+		CurrentState:    "collecting",
+		EnteredStageAt:  time.Now().UTC(),
+		Metadata: map[string]any{
+			"flow_path":   "root/acme",
+			"slug":        "acme",
+			"name":        "Acme",
+			"entity_type": "company",
+			"score":       float64(7),
+		},
+		StateBuckets: map[string]any{"evidence": []any{"seed"}},
+	}); err != nil {
+		t.Fatalf("Create workflow instance: %v", err)
+	}
+	if err := owner.Mutate(ctx, "root/acme", func(instance *runtimepipeline.WorkflowInstance) {
+		instance.CurrentState = "qualified"
+		instance.Metadata["score"] = float64(9)
+	}); err != nil {
+		t.Fatalf("Mutate workflow instance: %v", err)
+	}
+	loaded, ok, err := owner.Load(ctx, "root/acme")
+	if err != nil {
+		t.Fatalf("Load workflow instance: %v", err)
+	}
+	if !ok || loaded.CurrentState != "qualified" || loaded.Metadata["slug"] != "acme" {
+		t.Fatalf("loaded workflow instance = %#v, want qualified acme", loaded)
+	}
+	selected, err := owner.SelectActiveByFields(ctx, "root", []runtimepipeline.WorkflowInstanceFieldSelector{{Field: "score", Value: float64(9)}}, []string{"terminal"})
+	if err != nil {
+		t.Fatalf("SelectActiveByFields: %v", err)
+	}
+	if len(selected) != 1 || selected[0].StorageRef != "root/acme" {
+		t.Fatalf("selected workflow instances = %#v, want root/acme", selected)
+	}
+	var mutationCount int
+	if err := store.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM entity_mutations WHERE run_id = ? AND entity_id = ?`, runID, entityID).Scan(&mutationCount); err != nil {
+		t.Fatalf("count sqlite entity mutations: %v", err)
+	}
+	if mutationCount == 0 {
+		t.Fatal("sqlite workflow instance owner wrote no entity mutation rows")
+	}
+}
+
+func TestSQLiteRuntimeStoreSystemNodeReceiptOwnerSettlesDelivery(t *testing.T) {
+	ctx := context.Background()
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	runID := uuid.NewString()
+	ctx = runtimecorrelation.WithRunID(ctx, runID)
+	eventID := uuid.NewString()
+	evt := events.Event{
+		ID:          eventID,
+		RunID:       runID,
+		Type:        events.EventType("company.scanned"),
+		SourceAgent: "agent-1",
+		Payload:     json.RawMessage(`{"ok":true}`),
+		CreatedAt:   time.Now().UTC(),
+	}
+	if err := store.AppendEvent(ctx, evt); err != nil {
+		t.Fatalf("AppendEvent: %v", err)
+	}
+	if err := store.InsertEventDeliveryRoutes(ctx, eventID, []events.DeliveryRoute{{SubscriberType: "node", SubscriberID: "background-node"}}); err != nil {
+		t.Fatalf("InsertEventDeliveryRoutes: %v", err)
+	}
+	owner := runtimepipeline.NewSQLiteWorkflowInstanceStore(store.DB)
+	if processed, err := owner.SystemNodeProcessed(ctx, "background-node", eventID); err != nil || processed {
+		t.Fatalf("SystemNodeProcessed before mark = %v err=%v, want false nil", processed, err)
+	}
+	if err := owner.MarkSystemNodeProcessedAndSettleDelivery(ctx, "background-node", eventID, `{"idempotency_key":"test"}`); err != nil {
+		t.Fatalf("MarkSystemNodeProcessedAndSettleDelivery: %v", err)
+	}
+	if processed, err := owner.SystemNodeProcessed(ctx, "background-node", eventID); err != nil || !processed {
+		t.Fatalf("SystemNodeProcessed after mark = %v err=%v, want true nil", processed, err)
+	}
+	var deliveryStatus, receiptOutcome string
+	if err := store.DB.QueryRowContext(ctx, `
+		SELECT status
+		FROM event_deliveries
+		WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = 'background-node'
+	`, eventID).Scan(&deliveryStatus); err != nil {
+		t.Fatalf("load sqlite node delivery: %v", err)
+	}
+	if deliveryStatus != "delivered" {
+		t.Fatalf("node delivery status = %q, want delivered", deliveryStatus)
+	}
+	if err := store.DB.QueryRowContext(ctx, `
+		SELECT outcome
+		FROM event_receipts
+		WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = 'background-node'
+	`, eventID).Scan(&receiptOutcome); err != nil {
+		t.Fatalf("load sqlite node receipt: %v", err)
+	}
+	if receiptOutcome != "no_op" {
+		t.Fatalf("node receipt outcome = %q, want no_op", receiptOutcome)
+	}
+}
+
 func TestSQLiteRuntimeStoreDeliveryReplayAndReceiptSemantics(t *testing.T) {
 	ctx := context.Background()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)

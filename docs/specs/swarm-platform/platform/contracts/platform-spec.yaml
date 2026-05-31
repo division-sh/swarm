@@ -2262,9 +2262,9 @@ engine:
           and observability semantics, but must not be treated as a construction-ready runtime backend while the #1087
           raw-SQL consumer blocker remains unresolved.
         - Must not pass a raw runtime SQL handle to Postgres-only runtime consumers.
-        - Must keep runtime construction fail-closed until pipeline coordination/background nodes, budget tracking/spend
-          ledger, tool-executor entity/human-task persistence and diagnostics, and runtime diagnostics/logging either gain
-          backend-neutral owners for SQLite or receive explicit lead-approved split/tracker repair.
+        - Must keep runtime construction fail-closed until budget tracking/spend ledger, tool-executor entity/human-task
+          persistence and diagnostics, and runtime diagnostics/logging either gain backend-neutral owners for SQLite or
+          receive explicit lead-approved split/tracker repair.
     selected_contracts:
     - name: runtime_store_bundle_construction
       owner: cmd/swarm buildStores plus storeBundle.runtimeStores consuming typed runtime store interfaces
@@ -2290,6 +2290,18 @@ engine:
       postgres_owner: internal/store.PostgresStore schedule methods
       excludes:
       - cross-process timer claim/locking semantics owned by #1087
+    - name: pipeline_coordination_workflow_instance_and_replay_rows
+      owner: runtimepipeline.WorkflowInstanceStore consumed through runtime.Stores.PipelineStore and PipelineCoordinator
+      sqlite_owner: internal/runtime/pipeline.NewSQLiteWorkflowInstanceStore over the selected SQLite runtime store
+      postgres_owner: internal/runtime/pipeline.NewWorkflowInstanceStore over PostgresStore.DB
+      scope: >
+        SQLite supports explicit local-dev pipeline coordination for workflow instance state, pipeline engine transaction/query
+        persistence, background-node receipt settlement, pipeline receipt replay, process-local replay claims, and committed
+        replay scope consumption. Postgres remains authoritative for production cross-runtime transaction and claim semantics.
+      excludes:
+      - budget/spend ledger owned by #1148
+      - tool executor entity and human-task persistence/diagnostics owned by #1149
+      - runtime diagnostics/logging owned by #1150
     - name: mailbox_rows
       owner: runtimetools.MailboxPersistence plus apiv1.MailboxAPIStore for the v1 operator mailbox surface
       sqlite_owner: internal/store.SQLiteRuntimeStore mailbox and v1 mailbox API methods
@@ -2343,10 +2355,10 @@ engine:
       runtime_sql_handle_for_sqlite: omitted
       rule: >
         Explicit SQLite store construction must leave runtime.Stores.SQLDB nil so Postgres-only raw-SQL components are not
-        accidentally treated as SQLite owners. Because pipeline coordination/background nodes, budget tracking/spend ledger,
-        tool-executor SQL diagnostics/entity helpers, and SQL runtime logging are still gate-promoted #1087 consumers,
-        runtime.NewRuntime must fail closed for SQLite until those consumers move to backend-neutral store owners or receive
-        explicit lead-approved split/tracker repair.
+        accidentally treated as SQLite owners. Because budget tracking/spend ledger, tool-executor SQL diagnostics/entity
+        helpers, and SQL runtime logging are still gate-promoted #1087 consumers, runtime.NewRuntime must fail closed for
+        SQLite until those consumers move to backend-neutral store owners or receive explicit lead-approved split/tracker
+        repair.
     split_boundaries:
     - "Public local/dev SQLite default flip and zero-service swarm run proof remain split to #1088."
     - "Docs, CI, repo-wide stale-default closeout, and #1066 parent proof remain split to #1089."

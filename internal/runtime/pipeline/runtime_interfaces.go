@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 	"time"
 
@@ -46,11 +47,24 @@ type WorkflowInstancePersistence interface {
 	Enabled() bool
 	Load(ctx context.Context, instanceID string) (WorkflowInstance, bool, error)
 	List(ctx context.Context) ([]WorkflowInstance, error)
+	SelectActiveByFields(ctx context.Context, scopeKey string, selectors []WorkflowInstanceFieldSelector, excludedStates []string) ([]WorkflowInstance, error)
 	Create(ctx context.Context, instance WorkflowInstance) error
 	Upsert(ctx context.Context, instance WorkflowInstance) error
 	MarkTerminated(ctx context.Context, instanceID string, terminatedAt time.Time) error
 	Mutate(ctx context.Context, instanceID string, fn func(*WorkflowInstance)) error
 	Delete(ctx context.Context, instanceID string) error
+}
+
+type SystemNodeReceiptPersistence interface {
+	SystemNodeProcessed(ctx context.Context, nodeID, eventID string) (bool, error)
+	SystemNodeDeliveryQuiesced(ctx context.Context, nodeID, eventID string) (bool, error)
+	MarkSystemNodeProcessedAndSettleDelivery(ctx context.Context, nodeID, eventID, sideEffects string) error
+}
+
+type Store interface {
+	WorkflowInstancePersistence
+	SystemNodeReceiptPersistence
+	RunInPipelineTransaction(ctx context.Context, fn func(context.Context, *sql.Tx) error) error
 }
 
 type TransitionEvaluator interface {
