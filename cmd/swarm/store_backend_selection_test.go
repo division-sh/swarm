@@ -181,7 +181,7 @@ func TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore(t *testing.T) {
 		t.Fatalf("buildStores(sqlite): %v", err)
 	}
 	t.Cleanup(func() { closeDB(stores.SQLDB) })
-	if stores.SQLDB == nil || stores.SchemaBootstrapper == nil || stores.EventStore == nil || stores.SessionRegistry == nil || stores.ConversationStore == nil || stores.ManagerStore == nil || stores.ScheduleStore == nil || stores.MailboxStore == nil || stores.MailboxAPIStore == nil || stores.ObservabilityStore == nil || stores.RuntimeIngressStore == nil || stores.IdempotencyStore == nil || stores.TurnStore == nil || stores.StartupOwnership == nil {
+	if stores.SQLDB == nil || stores.SchemaBootstrapper == nil || stores.EventStore == nil || stores.PipelineStore == nil || stores.SessionRegistry == nil || stores.ConversationStore == nil || stores.ManagerStore == nil || stores.ScheduleStore == nil || stores.MailboxStore == nil || stores.MailboxAPIStore == nil || stores.ObservabilityStore == nil || stores.RuntimeIngressStore == nil || stores.IdempotencyStore == nil || stores.TurnStore == nil || stores.StartupOwnership == nil {
 		t.Fatalf("sqlite store bundle missing selected core owners: %#v", stores)
 	}
 	if stores.Postgres != nil {
@@ -193,6 +193,12 @@ func TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore(t *testing.T) {
 	}
 	if !strings.Contains(runtimeStores.ConstructionBlocker, "#1087 gate-promoted raw-SQL consumers") {
 		t.Fatalf("sqlite runtimeStores ConstructionBlocker = %q, want #1087 raw-SQL consumer fail-closed blocker", runtimeStores.ConstructionBlocker)
+	}
+	if strings.Contains(runtimeStores.ConstructionBlocker, "pipeline coordination/background nodes") {
+		t.Fatalf("sqlite runtimeStores ConstructionBlocker = %q, want #1147 pipeline/background owner removed from residual blocker", runtimeStores.ConstructionBlocker)
+	}
+	if runtimeStores.PipelineStore == nil || !runtimeStores.PipelineStore.Enabled() {
+		t.Fatal("sqlite runtimeStores PipelineStore missing enabled backend-neutral pipeline owner")
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("sqlite runtime store did not create file-backed db at %s: %v", path, err)

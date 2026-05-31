@@ -13,9 +13,7 @@ import (
 	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimedeadletters "swarm/internal/runtime/deadletters"
-	runtimedestructivereset "swarm/internal/runtime/destructivereset"
 	runtimerterr "swarm/internal/runtime/rterrors"
-	runtimerunquiescence "swarm/internal/runtime/runquiescence"
 )
 
 type systemNodeBus interface {
@@ -32,9 +30,10 @@ type systemNodeNormalRunCompletionConverger interface {
 }
 
 type systemNodeRunner struct {
-	nodeID string
-	bus    systemNodeBus
-	db     *sql.DB
+	nodeID       string
+	bus          systemNodeBus
+	db           *sql.DB
+	receiptStore SystemNodeReceiptPersistence
 
 	retryLimit int
 	backoffFn  func(int) time.Duration
@@ -55,6 +54,10 @@ func newSystemNodeRunner(nodeID string, bus systemNodeBus, db *sql.DB, subscript
 }
 
 func newSystemNodeRunnerWithRetryBase(nodeID string, bus systemNodeBus, db *sql.DB, subscriptionsFn func() []events.EventType, handleFn func(context.Context, events.Event) error, retryBase time.Duration, eventReceiptsCapability ...func(context.Context) (bool, error)) *systemNodeRunner {
+	return newSystemNodeRunnerWithReceiptStoreAndRetryBase(nodeID, bus, db, NewWorkflowInstanceStore(db), subscriptionsFn, handleFn, retryBase, eventReceiptsCapability...)
+}
+
+func newSystemNodeRunnerWithReceiptStoreAndRetryBase(nodeID string, bus systemNodeBus, db *sql.DB, receiptStore SystemNodeReceiptPersistence, subscriptionsFn func() []events.EventType, handleFn func(context.Context, events.Event) error, retryBase time.Duration, eventReceiptsCapability ...func(context.Context) (bool, error)) *systemNodeRunner {
 	nodeID = strings.TrimSpace(nodeID)
 	if nodeID == "" || bus == nil || handleFn == nil {
 		return nil
@@ -70,6 +73,7 @@ func newSystemNodeRunnerWithRetryBase(nodeID string, bus systemNodeBus, db *sql.
 		nodeID:                  nodeID,
 		bus:                     bus,
 		db:                      db,
+		receiptStore:            receiptStore,
 		retryLimit:              DefaultSystemNodeRetryLimit,
 		backoffFn:               func(attempt int) time.Duration { return defaultSystemNodeBackoff(retryBase, attempt) },
 		subscriptionsFn:         subscriptionsFn,
@@ -297,28 +301,19 @@ func isNonRetryableHandlerError(err error) bool {
 
 func (n *systemNodeRunner) isProcessed(ctx context.Context, evt events.Event) bool {
 	eventID := strings.TrimSpace(evt.ID)
-	if n == nil || n.db == nil || eventID == "" {
+	if n == nil || n.receiptStore == nil || eventID == "" {
 		return false
 	}
 	if !n.eventReceiptsAvailable(ctx) {
 		return false
 	}
-	var ok bool
-	err := n.db.QueryRowContext(ctx, `
-		SELECT EXISTS(
-			SELECT 1
-			FROM event_receipts
-			WHERE subscriber_type = 'node'
-			  AND subscriber_id = $1
-			  AND idempotency_key = $2
-		)
-	`, strings.TrimSpace(n.nodeID), SystemNodeReceiptIdempotencyKey(n.nodeID, eventID)).Scan(&ok)
+	ok, err := n.receiptStore.SystemNodeProcessed(ctx, n.nodeID, eventID)
 	return err == nil && ok
 }
 
 func (n *systemNodeRunner) markProcessed(ctx context.Context, evt events.Event) {
 	eventID := strings.TrimSpace(evt.ID)
-	if n == nil || n.db == nil || eventID == "" {
+	if n == nil || n.receiptStore == nil || eventID == "" {
 		return
 	}
 	if n.isActiveRunQuiesced(ctx, evt) {
@@ -348,7 +343,10 @@ func (n *systemNodeRunner) markProcessed(ctx context.Context, evt events.Event) 
 }
 
 func (n *systemNodeRunner) persistProcessedReceiptAndSettleDelivery(ctx context.Context, eventID, sideEffects string) error {
-	return persistSystemNodeProcessedReceiptAndSettleDelivery(ctx, n.db, n.nodeID, eventID, sideEffects)
+	if n == nil || n.receiptStore == nil {
+		return nil
+	}
+	return n.receiptStore.MarkSystemNodeProcessedAndSettleDelivery(ctx, n.nodeID, eventID, sideEffects)
 }
 
 func systemNodeProcessedReceiptSideEffects(nodeID, eventID string) string {
@@ -496,24 +494,13 @@ func (n *systemNodeRunner) convergeNormalRunCompletion(ctx context.Context, evt 
 
 func (n *systemNodeRunner) isActiveRunQuiesced(ctx context.Context, evt events.Event) bool {
 	eventID := strings.TrimSpace(evt.ID)
-	if n == nil || n.db == nil || eventID == "" {
+	if n == nil || n.receiptStore == nil || eventID == "" {
 		return false
 	}
 	if _, err := uuid.Parse(eventID); err != nil {
 		return false
 	}
-	var ok bool
-	err := n.db.QueryRowContext(ctx, `
-		SELECT EXISTS (
-			SELECT 1
-			FROM event_deliveries
-			WHERE event_id = $1::uuid
-			  AND subscriber_type = 'node'
-			  AND subscriber_id = $2
-			  AND status = 'dead_letter'
-			  AND reason_code IN ($3, $4)
-		)
-	`, eventID, n.nodeID, runtimedestructivereset.QuiescenceReasonCode, runtimerunquiescence.ServeAbandonReasonCode).Scan(&ok)
+	ok, err := n.receiptStore.SystemNodeDeliveryQuiesced(ctx, n.nodeID, eventID)
 	if err != nil {
 		slog.Error("system node active run quiescence check failed", "node_id", n.nodeID, "event_id", eventID, "error", err)
 		return true
@@ -522,7 +509,7 @@ func (n *systemNodeRunner) isActiveRunQuiesced(ctx context.Context, evt events.E
 }
 
 func (n *systemNodeRunner) eventReceiptsAvailable(ctx context.Context) bool {
-	if n == nil || n.db == nil {
+	if n == nil || n.receiptStore == nil {
 		return false
 	}
 	n.receiptsMu.Lock()

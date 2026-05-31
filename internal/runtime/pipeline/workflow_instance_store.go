@@ -14,7 +14,9 @@ import (
 	"github.com/lib/pq"
 	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 	runtimecurrentstate "swarm/internal/runtime/currentstate"
+	"swarm/internal/runtime/entityruntime"
 	runtimemutationlog "swarm/internal/runtime/mutationlog"
+	"swarm/internal/runtime/semanticview"
 )
 
 type SchedulePersistence interface {
@@ -90,13 +92,23 @@ type workflowInstancePersistedControl struct {
 }
 
 type WorkflowInstanceStore struct {
-	db *sql.DB
+	db      *sql.DB
+	dialect workflowStoreDialect
 }
 
-type workflowInstanceFieldSelector struct {
+type WorkflowInstanceFieldSelector struct {
 	Field string
 	Value any
 }
+
+type workflowInstanceFieldSelector = WorkflowInstanceFieldSelector
+
+type workflowStoreDialect string
+
+const (
+	workflowStoreDialectPostgres workflowStoreDialect = "postgres"
+	workflowStoreDialectSQLite   workflowStoreDialect = "sqlite"
+)
 
 var workflowInstancePathNamespace = uuid.MustParse("5e7507c8-bd4f-46e0-a098-b016dc31df23")
 
@@ -109,7 +121,11 @@ type workflowCreateEntityInitialValues struct {
 }
 
 func NewWorkflowInstanceStore(db *sql.DB) *WorkflowInstanceStore {
-	return &WorkflowInstanceStore{db: db}
+	return &WorkflowInstanceStore{db: db, dialect: workflowStoreDialectPostgres}
+}
+
+func NewSQLiteWorkflowInstanceStore(db *sql.DB) *WorkflowInstanceStore {
+	return &WorkflowInstanceStore{db: db, dialect: workflowStoreDialectSQLite}
 }
 
 func withWorkflowCreateEntityInitialValues(ctx context.Context, fields map[string]any) context.Context {
@@ -142,6 +158,9 @@ func (s *WorkflowInstanceStore) Load(ctx context.Context, instanceID string) (Wo
 	if instanceID == "" || s == nil || s.db == nil {
 		return WorkflowInstance{}, false, nil
 	}
+	if s.isSQLite() {
+		return s.loadSQLite(ctx, instanceID)
+	}
 	keys := workflowInstanceLookupKeys(instanceID)
 	if len(keys) == 0 {
 		return WorkflowInstance{}, false, nil
@@ -153,12 +172,22 @@ func (s *WorkflowInstanceStore) List(ctx context.Context) ([]WorkflowInstance, e
 	if s == nil || s.db == nil {
 		return nil, nil
 	}
+	if s.isSQLite() {
+		return s.listSQLite(ctx)
+	}
 	return s.listSpec(ctx)
 }
 
 func (s *WorkflowInstanceStore) selectActiveByFields(ctx context.Context, scopeKey string, selectors []workflowInstanceFieldSelector, excludedStates []string) ([]WorkflowInstance, error) {
+	return s.SelectActiveByFields(ctx, scopeKey, selectors, excludedStates)
+}
+
+func (s *WorkflowInstanceStore) SelectActiveByFields(ctx context.Context, scopeKey string, selectors []WorkflowInstanceFieldSelector, excludedStates []string) ([]WorkflowInstance, error) {
 	if s == nil || s.db == nil {
 		return nil, nil
+	}
+	if s.isSQLite() {
+		return s.selectActiveByFieldsSQLite(ctx, scopeKey, selectors, excludedStates)
 	}
 	return s.selectActiveByFieldsSpec(ctx, scopeKey, selectors, excludedStates)
 }
@@ -166,6 +195,9 @@ func (s *WorkflowInstanceStore) selectActiveByFields(ctx context.Context, scopeK
 func (s *WorkflowInstanceStore) Upsert(ctx context.Context, instance WorkflowInstance) error {
 	if s == nil || s.db == nil {
 		return nil
+	}
+	if s.isSQLite() {
+		return s.upsertSQLite(ctx, instance)
 	}
 	instance, identity, ok, err := normalizeWorkflowInstanceForPersistence(instance)
 	if err != nil {
@@ -180,6 +212,9 @@ func (s *WorkflowInstanceStore) Upsert(ctx context.Context, instance WorkflowIns
 func (s *WorkflowInstanceStore) Create(ctx context.Context, instance WorkflowInstance) error {
 	if s == nil || s.db == nil {
 		return nil
+	}
+	if s.isSQLite() {
+		return s.createSQLite(ctx, instance)
 	}
 	instance, identity, ok, err := normalizeWorkflowInstanceForPersistence(instance)
 	if err != nil {
@@ -248,6 +283,9 @@ func (s *WorkflowInstanceStore) Mutate(ctx context.Context, instanceID string, f
 	if instanceID == "" || s == nil || s.db == nil || fn == nil {
 		return nil
 	}
+	if s.isSQLite() {
+		return s.mutateSQLite(ctx, instanceID, fn)
+	}
 	tx, ownedTx, err := workflowInstanceStoreTx(ctx, s.db)
 	if err != nil {
 		return err
@@ -287,6 +325,9 @@ func (s *WorkflowInstanceStore) Mutate(ctx context.Context, instanceID string, f
 func (s *WorkflowInstanceStore) MarkTerminated(ctx context.Context, storageRef string, terminatedAt time.Time) error {
 	if s == nil || s.db == nil {
 		return nil
+	}
+	if s.isSQLite() {
+		return s.markTerminatedSQLite(ctx, storageRef, terminatedAt)
 	}
 	storageRef = strings.TrimSpace(storageRef)
 	if storageRef == "" {
@@ -334,6 +375,47 @@ func (s *WorkflowInstanceStore) MarkTerminated(ctx context.Context, storageRef s
 
 func (s *WorkflowInstanceStore) Delete(context.Context, string) error {
 	return fmt.Errorf("workflow instance deletion is unsupported: entity_state writes must stay on the mutation-logged upsert path")
+}
+
+func (s *WorkflowInstanceStore) isSQLite() bool {
+	return s != nil && s.dialect == workflowStoreDialectSQLite
+}
+
+func (s *WorkflowInstanceStore) RunInPipelineTransaction(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
+	if fn == nil {
+		return nil
+	}
+	if s == nil || s.db == nil {
+		return fn(ctx, nil)
+	}
+	if tx, ok := sqlTxFromContext(ctx); ok && tx != nil {
+		return fn(ctx, tx)
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	postCommit := make([]func(), 0, 4)
+	txctx := withPipelinePostCommitActions(withSQLTxContext(ctx, tx), &postCommit)
+	if err := fn(txctx, tx); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	flushPipelinePostCommitActions(postCommit)
+	return nil
+}
+
+func (s *WorkflowInstanceStore) QueryEntityCount(ctx context.Context, runID string, source semanticview.Source, contract entityruntime.Contract, predicate workflowEntityQueryPredicate) (int, error) {
+	if s == nil || s.db == nil {
+		return 0, nil
+	}
+	if s.isSQLite() {
+		return s.queryEntityStateCountSQLite(ctx, runID, source, contract, predicate)
+	}
+	return queryEntityStateCount(runID, s.db, source, contract, predicate)
 }
 
 func (s *WorkflowInstanceStore) loadSpec(ctx context.Context, keys []string, forUpdate bool) (WorkflowInstance, bool, error) {

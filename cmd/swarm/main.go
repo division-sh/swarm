@@ -121,6 +121,7 @@ type storeBundle struct {
 	RuntimeBlocker      string
 	SchemaBootstrapper  store.SchemaBootstrapper
 	EventStore          runtimebus.EventStore
+	PipelineStore       *runtimepipeline.WorkflowInstanceStore
 	SessionRegistry     sessions.Registry
 	ConversationStore   runtimellm.ConversationPersistence
 	ManagerStore        runtimemanager.ManagerPersistence
@@ -139,6 +140,7 @@ func (s storeBundle) runtimeStores() runtime.Stores {
 		SQLDB:               s.RuntimeSQLDB,
 		ConstructionBlocker: s.RuntimeBlocker,
 		EventStore:          s.EventStore,
+		PipelineStore:       s.PipelineStore,
 		SessionRegistry:     s.SessionRegistry,
 		ConversationStore:   s.ConversationStore,
 		ManagerStore:        s.ManagerStore,
@@ -1853,6 +1855,7 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 			RuntimeSQLDB:        pg.DB,
 			SchemaBootstrapper:  pg,
 			EventStore:          pg,
+			PipelineStore:       runtimepipeline.NewWorkflowInstanceStore(pg.DB),
 			SessionRegistry:     sessions.NewPostgresRegistry(pg.DB, cfg.LLM.Session.LockTTL),
 			ConversationStore:   pg,
 			ManagerStore:        pg,
@@ -1881,9 +1884,10 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 		sqliteStore.SetSessionLockTTL(cfg.LLM.Session.LockTTL)
 		return storeBundle{
 			SQLDB:               sqliteStore.DB,
-			RuntimeBlocker:      "sqlite runtime construction remains fail-closed until #1087 gate-promoted raw-SQL consumers (pipeline coordination/background nodes, budget tracking/spend ledger, tool executor entity/human-task persistence and diagnostics, runtime diagnostics/logging) move to backend-neutral store owners or receive an explicit lead-approved split",
+			RuntimeBlocker:      "sqlite runtime construction remains fail-closed until #1087 gate-promoted raw-SQL consumers (budget tracking/spend ledger, tool executor entity/human-task persistence and diagnostics, runtime diagnostics/logging) move to backend-neutral store owners or receive an explicit lead-approved split",
 			SchemaBootstrapper:  sqliteStore,
 			EventStore:          sqliteStore,
+			PipelineStore:       runtimepipeline.NewSQLiteWorkflowInstanceStore(sqliteStore.DB),
 			SessionRegistry:     sqliteStore,
 			ConversationStore:   sqliteStore,
 			ManagerStore:        sqliteStore,

@@ -76,31 +76,16 @@ type pipelineEngineTx struct {
 func (t pipelineEngineTx) Context() context.Context { return t.ctx }
 
 type pipelineEngineTxRunner struct {
-	db *sql.DB
+	store Store
 }
 
 func (r pipelineEngineTxRunner) Run(ctx context.Context, fn func(runtimeengine.Tx) error) error {
-	if r.db == nil {
+	if r.store == nil || !r.store.Enabled() {
 		return fn(pipelineEngineTx{ctx: ctx})
 	}
-	if tx, ok := sqlTxFromContext(ctx); ok && tx != nil {
-		return fn(pipelineEngineTx{ctx: ctx, tx: tx})
-	}
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	postCommit := make([]func(), 0, 4)
-	txctx := withPipelinePostCommitActions(withSQLTxContext(ctx, tx), &postCommit)
-	if err := fn(pipelineEngineTx{ctx: txctx, tx: tx}); err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-	flushPipelinePostCommitActions(postCommit)
-	return nil
+	return r.store.RunInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		return fn(pipelineEngineTx{ctx: txctx, tx: tx})
+	})
 }
 
 type pipelineEngineLocker struct {
@@ -330,7 +315,7 @@ func newCoordinatorEngineEvaluator(pc *PipelineCoordinator) runtimeengine.Evalua
 }
 
 func (e pipelineEngineEvaluator) queryEntityCount(ctx workflowExpressionContext, predicate string) (int, error) {
-	if e.coordinator == nil || e.coordinator.db == nil {
+	if e.coordinator == nil || e.coordinator.workflowStore == nil || !e.coordinator.workflowStore.Enabled() {
 		return 0, nil
 	}
 	parsed, err := parseWorkflowEntityQueryPredicate(predicate, ctx)
@@ -347,7 +332,7 @@ func (e pipelineEngineEvaluator) queryEntityCount(ctx workflowExpressionContext,
 			return 0, err
 		}
 	}
-	return queryEntityStateCount(asString(ctx.Event["run_id"]), e.coordinator.db, e.coordinator.SemanticSource(), contract, parsed)
+	return e.coordinator.workflowStore.QueryEntityCount(context.Background(), asString(ctx.Event["run_id"]), e.coordinator.SemanticSource(), contract, parsed)
 }
 
 func queryEntityStateCount(runID string, db *sql.DB, source semanticview.Source, contract entityruntime.Contract, predicate workflowEntityQueryPredicate) (int, error) {
@@ -505,7 +490,7 @@ func coordinatorEngineDependencies(pc *PipelineCoordinator) runtimeengine.Runtim
 		Source:              source,
 		StateRepo:           pipelineEngineStateRepo{coordinator: pc},
 		EmitVerifier:        pipelineEngineStateRepo{coordinator: pc},
-		TxRunner:            pipelineEngineTxRunner{db: pc.db},
+		TxRunner:            pipelineEngineTxRunner{store: pc.workflowStore},
 		Locker:              pipelineEngineLocker{coordinator: pc},
 		Outbox:              outbox,
 		TimerApplier:        pipelineEngineTimerApplier{coordinator: pc},

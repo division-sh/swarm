@@ -66,6 +66,7 @@ type PipelineCoordinator struct {
 type PipelineCoordinatorOptions struct {
 	ShardPlanner            any
 	Module                  WorkflowModule
+	WorkflowStore           *WorkflowInstanceStore
 	InstanceActivator       FlowInstanceActivator
 	InstanceDeactivator     FlowInstanceDeactivator
 	TimerScheduler          *Scheduler
@@ -83,11 +84,15 @@ func NewPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordin
 	if module == nil {
 		panic("pipeline: workflow module is required")
 	}
+	workflowStore := opts.WorkflowStore
+	if workflowStore == nil {
+		workflowStore = NewWorkflowInstanceStore(db)
+	}
 	return &PipelineCoordinator{
 		bus:                     bus,
 		db:                      db,
 		module:                  module,
-		workflowStore:           NewWorkflowInstanceStore(db),
+		workflowStore:           workflowStore,
 		expressionEval:          newWorkflowExpressionEvaluator(),
 		instanceActivator:       opts.InstanceActivator,
 		instanceDeactivator:     opts.InstanceDeactivator,

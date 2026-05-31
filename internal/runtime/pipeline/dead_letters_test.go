@@ -27,6 +27,25 @@ func (s eventReceiptsCapabilityStub) resolve(context.Context) (bool, error) {
 	return s.enabled, s.err
 }
 
+type typedSystemNodeReceiptStore struct {
+	processed bool
+	marked    int
+}
+
+func (s *typedSystemNodeReceiptStore) SystemNodeProcessed(context.Context, string, string) (bool, error) {
+	return s.processed, nil
+}
+
+func (*typedSystemNodeReceiptStore) SystemNodeDeliveryQuiesced(context.Context, string, string) (bool, error) {
+	return false, nil
+}
+
+func (s *typedSystemNodeReceiptStore) MarkSystemNodeProcessedAndSettleDelivery(context.Context, string, string, string) error {
+	s.processed = true
+	s.marked++
+	return nil
+}
+
 func TestSystemNodeRunner_RecordsDeadLetterRow(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := testPipelineRunContext(t, db)
@@ -285,6 +304,34 @@ func TestSystemNodeRunner_UsesCanonicalEventReceiptsCapabilityForIdempotency(t *
 	}
 	if count != 1 {
 		t.Fatalf("event_receipts rows = %d, want 1", count)
+	}
+}
+
+func TestSystemNodeRunner_UsesTypedReceiptOwnerWithoutRawDB(t *testing.T) {
+	ctx := context.Background()
+	receipts := &typedSystemNodeReceiptStore{}
+	attempts := 0
+	runner := newSystemNodeRunnerWithReceiptStoreAndRetryBase("node-a", deadLetterTestBus{}, nil, receipts, func() []events.EventType {
+		return []events.EventType{"source.evt"}
+	}, func(context.Context, events.Event) error {
+		attempts++
+		return nil
+	}, 0, eventReceiptsCapabilityStub{enabled: true}.resolve)
+	evt := events.Event{
+		ID:        uuid.NewString(),
+		Type:      "source.evt",
+		Payload:   []byte(`{}`),
+		CreatedAt: time.Now().UTC(),
+	}
+
+	runner.ProcessEventForTest(ctx, evt)
+	runner.ProcessEventForTest(ctx, evt)
+
+	if attempts != 1 {
+		t.Fatalf("attempts = %d, want 1 after typed receipt owner marks processed", attempts)
+	}
+	if receipts.marked != 1 {
+		t.Fatalf("typed receipt marks = %d, want 1", receipts.marked)
 	}
 }
 
