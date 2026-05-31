@@ -142,6 +142,68 @@ func TestPostgresStore_BundleDeleteFinalMutationFailsBeforeDeletingWithActiveRun
 	assertBundleRowPresent(t, ctx, pg, bundleDeleteTestHash)
 }
 
+func TestPostgresStore_BundleDeleteFinalMutationSerializesConcurrentRunCreation(t *testing.T) {
+	dsn, _, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	pg, err := NewPostgresStore(dsn)
+	if err != nil {
+		t.Fatalf("NewPostgresStore: %v", err)
+	}
+	t.Cleanup(func() { _ = pg.DB.Close() })
+
+	ctx := context.Background()
+	seedBundleDeleteBundle(t, ctx, pg, bundleDeleteTestHash)
+
+	runCreationTx, err := pg.DB.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin run creation tx: %v", err)
+	}
+	defer func() { _ = runCreationTx.Rollback() }()
+	if _, err := runCreationTx.ExecContext(ctx, `LOCK TABLE runs IN ROW EXCLUSIVE MODE`); err != nil {
+		t.Fatalf("hold run creation lock: %v", err)
+	}
+
+	finalCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := pg.ApplyBundleDeleteFinalMutation(finalCtx, bundledelete.FinalMutationRequest{
+			OperationName: bundledelete.DefaultOperationName,
+			BundleHash:    bundleDeleteTestHash,
+			RequestedAt:   time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC),
+		})
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		t.Fatalf("final mutation completed before concurrent run creation released: %v", err)
+	case <-time.After(250 * time.Millisecond):
+	}
+
+	runID := uuid.NewString()
+	if _, err := runCreationTx.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint, started_at)
+		VALUES ($1::uuid, 'running', $2, $3, $4, now())
+	`, runID, bundleDeleteTestHash, storerunlifecycle.BundleSourcePersisted, testBootBundleFingerprint); err != nil {
+		t.Fatalf("insert concurrent run: %v", err)
+	}
+	if err := runCreationTx.Commit(); err != nil {
+		t.Fatalf("commit concurrent run: %v", err)
+	}
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, bundledelete.ErrActiveRunsRemain) {
+			t.Fatalf("final mutation concurrent error = %v, want ErrActiveRunsRemain", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("final mutation did not finish after concurrent run creation committed")
+	}
+	assertBundleDeleteRun(t, ctx, pg, runID, "running", storerunlifecycle.BundleSourcePersisted, "")
+	assertBundleRowPresent(t, ctx, pg, bundleDeleteTestHash)
+}
+
 func seedBundleDeleteBundle(t *testing.T, ctx context.Context, pg *PostgresStore, bundleHash string) {
 	t.Helper()
 	if _, err := pg.DB.ExecContext(ctx, `

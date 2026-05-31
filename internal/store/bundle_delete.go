@@ -133,6 +133,9 @@ func (s *PostgresStore) ApplyBundleDeleteFinalMutation(ctx context.Context, req 
 		return bundledelete.FinalMutationResult{}, fmt.Errorf("lock bundle delete bundle row: %w", err)
 	}
 
+	if err := lockBundleDeleteRunCreationTx(ctx, tx); err != nil {
+		return bundledelete.FinalMutationResult{}, err
+	}
 	activeRemaining, err := lockBundleDeleteReferencingRunsTx(ctx, tx, bundleHash)
 	if err != nil {
 		return bundledelete.FinalMutationResult{}, err
@@ -144,6 +147,7 @@ func (s *PostgresStore) ApplyBundleDeleteFinalMutation(ctx context.Context, req 
 		RemainingActiveRuns:  activeRemaining,
 		SourceAuthorityOwner: "store.ApplyBundleDeleteFinalMutation",
 		TransactionOrderProof: []string{
+			"lock_runs_table_against_new_persisted_bundle_references",
 			"update_eligible_runs_bundle_source_to_deleted",
 			"delete_matching_bundles_row",
 		},
@@ -308,6 +312,13 @@ func (s *PostgresStore) planBundleDeleteTimers(ctx context.Context, runIDs []str
 		return nil, fmt.Errorf("read bundle delete timers: %w", err)
 	}
 	return out, nil
+}
+
+func lockBundleDeleteRunCreationTx(ctx context.Context, tx *sql.Tx) error {
+	if _, err := tx.ExecContext(ctx, `LOCK TABLE runs IN SHARE ROW EXCLUSIVE MODE`); err != nil {
+		return fmt.Errorf("lock bundle delete run creation: %w", err)
+	}
+	return nil
 }
 
 func lockBundleDeleteReferencingRunsTx(ctx context.Context, tx *sql.Tx, bundleHash string) (int, error) {
