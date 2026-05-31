@@ -1,33 +1,43 @@
-package platformcontracts
+package platform
 
 import (
 	"bytes"
 	"crypto/sha256"
-	_ "embed"
 	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	rootartifacts "swarm"
 )
 
-//go:embed platform-spec.yaml
-var platformSpecYAML []byte
+const (
+	DefaultPlatformSpecPath = "platform-spec.yaml"
+	DefaultOpenRPCPath      = "openrpc.json"
+)
 
 const PlatformSpecDisplayPath = "embedded://swarm/platform-spec.yaml"
 
+func DefaultPlatformSpecFile(repoRoot string) string {
+	return filepath.Join(repoRoot, DefaultPlatformSpecPath)
+}
+
+func DefaultOpenRPCFile(repoRoot string) string {
+	return filepath.Join(repoRoot, DefaultOpenRPCPath)
+}
+
 func PlatformSpecYAML() []byte {
-	out := make([]byte, len(platformSpecYAML))
-	copy(out, platformSpecYAML)
-	return out
+	return rootartifacts.EmbeddedPlatformSpecYAML()
 }
 
 func MaterializePlatformSpecFile() (string, error) {
-	digest := sha256.Sum256(platformSpecYAML)
+	spec := PlatformSpecYAML()
+	digest := sha256.Sum256(spec)
 	name := "platform-spec-" + hex.EncodeToString(digest[:8]) + ".yaml"
 	var attempts []string
 	for _, base := range platformSpecCacheBases() {
-		path, err := materializePlatformSpecFile(base, name)
+		path, err := materializePlatformSpecFile(base, name, spec)
 		if err == nil {
 			return path, nil
 		}
@@ -45,12 +55,12 @@ func platformSpecCacheBases() []string {
 	return bases
 }
 
-func materializePlatformSpecFile(dir, name string) (string, error) {
+func materializePlatformSpecFile(dir, name string, spec []byte) (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
 	path := filepath.Join(dir, name)
-	if existing, err := os.ReadFile(path); err == nil && bytes.Equal(existing, platformSpecYAML) {
+	if existing, err := os.ReadFile(path); err == nil && bytes.Equal(existing, spec) {
 		return path, nil
 	}
 	tmp, err := os.CreateTemp(dir, name+".tmp-*")
@@ -59,7 +69,7 @@ func materializePlatformSpecFile(dir, name string) (string, error) {
 	}
 	tmpPath := tmp.Name()
 	defer os.Remove(tmpPath)
-	if _, err := tmp.Write(platformSpecYAML); err != nil {
+	if _, err := tmp.Write(spec); err != nil {
 		tmp.Close()
 		return "", err
 	}
@@ -71,7 +81,7 @@ func materializePlatformSpecFile(dir, name string) (string, error) {
 		return "", err
 	}
 	if err := os.Rename(tmpPath, path); err != nil {
-		if existing, readErr := os.ReadFile(path); readErr == nil && bytes.Equal(existing, platformSpecYAML) {
+		if existing, readErr := os.ReadFile(path); readErr == nil && bytes.Equal(existing, spec) {
 			return path, nil
 		}
 		return "", err

@@ -3,7 +3,7 @@
 **Version:** 0.1.0
 **Status:** Historical reference only. The Builder JSON-RPC/WebSocket transport has been retired as an operator-facing API surface.
 **Transport:** Retired; use v1 `/v1/rpc` and `/v1/ws`.
-**Authority:** Not authoritative. The canonical user-facing API contract is `docs/specs/swarm-platform/platform/contracts/platform-spec.yaml` under `api_specification`, with `docs/specs/swarm-platform/platform/contracts/openrpc.json` generated from that section. The endpoints below document historical behavior only and must not be treated as supported surfaces.
+**Authority:** Not authoritative. The canonical user-facing API contract is `platform-spec.yaml` under `api_specification`, with `openrpc.json` generated from that section. The endpoints below document historical behavior only and must not be treated as supported surfaces.
 
 ---
 

@@ -18,6 +18,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"swarm/internal/apispec"
+	"swarm/internal/platform"
 )
 
 type openRPCComplianceMatrix struct {
@@ -27,6 +28,14 @@ type openRPCComplianceMatrix struct {
 	IssueRole      string                    `yaml:"issue_role"`
 	ActiveTrackers []complianceActiveTracker `yaml:"active_trackers"`
 	Methods        []openRPCMethodMatrix     `yaml:"methods"`
+}
+
+func complianceOpenRPCPath(repoRoot string) string {
+	return platform.DefaultOpenRPCFile(repoRoot)
+}
+
+func compliancePlatformSpecPath(repoRoot string) string {
+	return platform.DefaultPlatformSpecFile(repoRoot)
 }
 
 type complianceActiveTracker struct {
@@ -97,7 +106,7 @@ const serviceDiscoveryPolicyRuntimeTestName = "TestServiceDiscoveryPolicyDoesNot
 func TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod(t *testing.T) {
 	root := repoRoot(t)
 	api := loadComplianceAPISpec(t, root)
-	doc, rawMethods := loadComplianceOpenRPC(t, filepath.Join(root, "docs", "specs", "swarm-platform", "platform", "contracts", "openrpc.json"))
+	doc, rawMethods := loadComplianceOpenRPC(t, complianceOpenRPCPath(root))
 	matrix := loadComplianceMatrix(t, filepath.Join(root, "internal", "apiv1", "testdata", "openrpc_compliance_matrix.yaml"))
 
 	if matrix.Version != 1 {
@@ -401,7 +410,7 @@ func TestServiceDiscoveryPolicyDoesNotServeRPCDiscover(t *testing.T) {
 
 func loadComplianceAPISpec(t *testing.T, root string) *apispec.APISpecification {
 	t.Helper()
-	api, err := apispec.LoadPlatformSpec(filepath.Join(root, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	api, err := apispec.LoadPlatformSpec(compliancePlatformSpecPath(root))
 	if err != nil {
 		t.Fatalf("LoadPlatformSpec() error = %v", err)
 	}
@@ -1043,10 +1052,10 @@ func assertExamplesPolicyMatrixRow(t *testing.T, methodName string, rawProof raw
 	if evidence.Status != "policy_deferred" {
 		t.Fatalf("%s examples status = %q, want policy_deferred while examples_policy is deferred", methodName, evidence.Status)
 	}
-	if !evidenceHasArtifact(evidence, "docs/specs/swarm-platform/platform/contracts/platform-spec.yaml") {
+	if !evidenceHasArtifact(evidence, "platform-spec.yaml") {
 		t.Fatalf("%s examples missing platform-spec.yaml artifact proof_ref", methodName)
 	}
-	if !evidenceHasArtifact(evidence, "docs/specs/swarm-platform/platform/contracts/openrpc.json") {
+	if !evidenceHasArtifact(evidence, "openrpc.json") {
 		t.Fatalf("%s examples missing openrpc.json artifact proof_ref", methodName)
 	}
 	if !evidenceHasGoTest(evidence, openRPCComplianceMatrixTestName) {
@@ -1060,10 +1069,10 @@ func assertServiceDiscoveryPolicyMatrixRow(t *testing.T, methodName string, poli
 	if evidence.Status != "policy_not_published" {
 		t.Fatalf("%s service_discovery_publication status = %q, want policy_not_published while service_discovery_policy is not_published", methodName, evidence.Status)
 	}
-	if !evidenceHasArtifact(evidence, "docs/specs/swarm-platform/platform/contracts/platform-spec.yaml") {
+	if !evidenceHasArtifact(evidence, "platform-spec.yaml") {
 		t.Fatalf("%s service_discovery_publication missing platform-spec.yaml artifact proof_ref", methodName)
 	}
-	if !evidenceHasArtifact(evidence, "docs/specs/swarm-platform/platform/contracts/openrpc.json") {
+	if !evidenceHasArtifact(evidence, "openrpc.json") {
 		t.Fatalf("%s service_discovery_publication missing openrpc.json artifact proof_ref", methodName)
 	}
 	if !evidenceHasGoTest(evidence, openRPCComplianceMatrixTestName) {

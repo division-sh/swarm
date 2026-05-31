@@ -16,6 +16,7 @@ import (
 	"swarm/internal/config"
 	"swarm/internal/events"
 	"swarm/internal/runtime/bus"
+	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimeactors "swarm/internal/runtime/core/actors"
 	runtimellm "swarm/internal/runtime/llm"
 	runtimemanager "swarm/internal/runtime/manager"
@@ -30,7 +31,7 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 	ctx := context.Background()
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
-	platformSpecPath := filepath.Join(repoRoot, "docs/specs/swarm-platform/platform/contracts/platform-spec.yaml")
+	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	loader := ContractBundleSourceLoader{RepoRoot: repoRoot, PlatformSpecPath: platformSpecPath}
 	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, store.RunForkContractSelection{
 		Mode:          "selected_contracts",
@@ -209,7 +210,7 @@ func TestExecuteSelectedContractRunForkFailsClosedBeforeMaterializationForAgentR
 	ctx := context.Background()
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier7-composition/test-agent-emits-to-node")
-	platformSpecPath := filepath.Join(repoRoot, "docs/specs/swarm-platform/platform/contracts/platform-spec.yaml")
+	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	loader := ContractBundleSourceLoader{RepoRoot: repoRoot, PlatformSpecPath: platformSpecPath}
 	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, store.RunForkContractSelection{
 		Mode:          "selected_contracts",
@@ -257,7 +258,7 @@ func TestExecuteSelectedContractRunForkMaterializesAndExecutesForkLocalAgentRunt
 	ctx := context.Background()
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier7-composition/test-agent-emits-to-node")
-	platformSpecPath := filepath.Join(repoRoot, "docs/specs/swarm-platform/platform/contracts/platform-spec.yaml")
+	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	loader := ContractBundleSourceLoader{RepoRoot: repoRoot, PlatformSpecPath: platformSpecPath}
 	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, store.RunForkContractSelection{
 		Mode:          "selected_contracts",
@@ -488,7 +489,7 @@ func TestExecuteSelectedContractRunForkTreatsDiagnosticPlatformOutcomeAsLineage(
 	ctx := context.Background()
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
-	platformSpecPath := filepath.Join(repoRoot, "docs/specs/swarm-platform/platform/contracts/platform-spec.yaml")
+	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	loader := ContractBundleSourceLoader{RepoRoot: repoRoot, PlatformSpecPath: platformSpecPath}
 	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, store.RunForkContractSelection{
 		Mode:          "selected_contracts",
@@ -578,7 +579,7 @@ func TestActivateSelectedContractRunForkExecutesReplayReadyContractSwapThroughSe
 	ctx := context.Background()
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
-	platformSpecPath := filepath.Join(repoRoot, "docs/specs/swarm-platform/platform/contracts/platform-spec.yaml")
+	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	loader := ContractBundleSourceLoader{RepoRoot: repoRoot, PlatformSpecPath: platformSpecPath}
 	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, store.RunForkContractSelection{
 		Mode:          "selected_contracts",
@@ -705,7 +706,7 @@ func TestActivateSelectedContractRunForkFailsBeforePublishForPostTReplayScopeMar
 	ctx := context.Background()
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
-	platformSpecPath := filepath.Join(repoRoot, "docs/specs/swarm-platform/platform/contracts/platform-spec.yaml")
+	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	loader := ContractBundleSourceLoader{RepoRoot: repoRoot, PlatformSpecPath: platformSpecPath}
 	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, store.RunForkContractSelection{
 		Mode:          "selected_contracts",
@@ -770,7 +771,7 @@ func TestExecuteSelectedContractRunForkTreatsSourceConversationHistoryAsLineage(
 	ctx := context.Background()
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
-	platformSpecPath := filepath.Join(repoRoot, "docs/specs/swarm-platform/platform/contracts/platform-spec.yaml")
+	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	loader := ContractBundleSourceLoader{RepoRoot: repoRoot, PlatformSpecPath: platformSpecPath}
 	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, store.RunForkContractSelection{
 		Mode:          "selected_contracts",
@@ -878,7 +879,7 @@ func TestExecuteSelectedContractRunForkAdmitsSameSourceActiveDeliveryForkPointEm
 	ctx := context.Background()
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
-	platformSpecPath := filepath.Join(repoRoot, "docs/specs/swarm-platform/platform/contracts/platform-spec.yaml")
+	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	loader := ContractBundleSourceLoader{RepoRoot: repoRoot, PlatformSpecPath: platformSpecPath}
 	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, store.RunForkContractSelection{
 		Mode:          "selected_contracts",
@@ -1025,7 +1026,7 @@ func TestExecuteSelectedContractRunForkTreatsPostTSourceConversationHistoryAsBra
 	ctx := context.Background()
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
-	platformSpecPath := filepath.Join(repoRoot, "docs/specs/swarm-platform/platform/contracts/platform-spec.yaml")
+	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	loader := ContractBundleSourceLoader{RepoRoot: repoRoot, PlatformSpecPath: platformSpecPath}
 	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, store.RunForkContractSelection{
 		Mode:          "selected_contracts",
@@ -1150,7 +1151,7 @@ func TestExecuteSelectedContractRunForkTreatsSourceReplayScopeMarkerAsLineage(t 
 	ctx := context.Background()
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
-	platformSpecPath := filepath.Join(repoRoot, "docs/specs/swarm-platform/platform/contracts/platform-spec.yaml")
+	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	loader := ContractBundleSourceLoader{RepoRoot: repoRoot, PlatformSpecPath: platformSpecPath}
 	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, store.RunForkContractSelection{
 		Mode:          "selected_contracts",
@@ -1225,7 +1226,7 @@ func TestExecuteSelectedContractRunForkTreatsSameEventReplayScopeMarkerWriteSkew
 	ctx := context.Background()
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
-	platformSpecPath := filepath.Join(repoRoot, "docs/specs/swarm-platform/platform/contracts/platform-spec.yaml")
+	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	loader := ContractBundleSourceLoader{RepoRoot: repoRoot, PlatformSpecPath: platformSpecPath}
 	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, store.RunForkContractSelection{
 		Mode:          "selected_contracts",
@@ -1291,7 +1292,7 @@ func TestExecuteSelectedContractRunForkRejectsUnresolvedFrontierBeforeMaterializ
 	ctx := context.Background()
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
-	platformSpecPath := filepath.Join(repoRoot, "docs/specs/swarm-platform/platform/contracts/platform-spec.yaml")
+	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	loader := ContractBundleSourceLoader{RepoRoot: repoRoot, PlatformSpecPath: platformSpecPath}
 	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, store.RunForkContractSelection{
 		Mode:          "selected_contracts",
@@ -1339,7 +1340,7 @@ func TestExecuteSelectedContractRunForkCleansUpBeforeActivationOnPublishFailure(
 	ctx := context.Background()
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
-	platformSpecPath := filepath.Join(repoRoot, "docs/specs/swarm-platform/platform/contracts/platform-spec.yaml")
+	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	loader := ContractBundleSourceLoader{RepoRoot: repoRoot, PlatformSpecPath: platformSpecPath}
 	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, store.RunForkContractSelection{
 		Mode:          "selected_contracts",
@@ -1399,7 +1400,7 @@ func TestExecuteSelectedContractRunForkBranchesWhenSourceAdvancedAfterForkPoint(
 	ctx := context.Background()
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
-	platformSpecPath := filepath.Join(repoRoot, "docs/specs/swarm-platform/platform/contracts/platform-spec.yaml")
+	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	loader := ContractBundleSourceLoader{RepoRoot: repoRoot, PlatformSpecPath: platformSpecPath}
 	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, store.RunForkContractSelection{
 		Mode:          "selected_contracts",

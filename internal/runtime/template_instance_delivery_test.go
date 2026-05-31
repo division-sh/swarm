@@ -141,7 +141,7 @@ func loadRuntimeTempBundle(t *testing.T, files map[string]string) *runtimecontra
 		}
 	}
 	repoRoot := filepath.Clean(filepath.Join("..", ".."))
-	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, platformSpec)
 	if err != nil {
 		t.Fatalf("load temp bundle: %v", err)

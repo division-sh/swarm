@@ -166,7 +166,7 @@ For an end-to-end walkthrough (building a flow from scratch), see [`docs/specs/s
 | **Timer** | A durable time-based trigger attached to a stage. Persisted across restarts. |
 | **Pin** | A typed input or output of a flow. Used at composition time to wire flows together. |
 
-Authoritative reference: [`docs/specs/swarm-platform/platform/platform-spec.md`](docs/specs/swarm-platform/platform/platform-spec.md).
+Authoritative reference: [`platform-spec.yaml`](platform-spec.yaml). The generated public API artifact is [`openrpc.json`](openrpc.json).
 
 ---
 
@@ -255,7 +255,7 @@ The static analyzer's refusal to boot on a half-finished contract is a feature i
 
 **Pre-1.0. Breaking changes expected.**
 
-- Platform specification: **v1.3.0**, complete. See [`docs/specs/swarm-platform/platform/platform-spec.md`](docs/specs/swarm-platform/platform/platform-spec.md).
+- Platform specification: **v1.6.0**, complete. See [`platform-spec.yaml`](platform-spec.yaml).
 - Engine: Go, Phase 11. Handler-first execution for the proven-safe subset; full handler-first execution in progress.
 - Conformance suite: **12 tiers, 201 distinct test contract bundles** spanning primitives, accumulation, atomic event-loop semantics, composition, boot verification, runtime fork, and policy patterns. The suite runs against a scripted LLM, so it doesn't pay an LLM bill.
 - The `swarm fork` CLI is shipping shortly. The engine plumbing is implemented and tested; only the user-facing command wrapper is pending.
@@ -271,7 +271,8 @@ The trajectory points at running whole company divisions as autonomous flows. Th
 |---|---|
 | [`SWARM-PLATFORM-BRIEF.md`](docs/specs/swarm-platform/SWARM-PLATFORM-BRIEF.md) | You want the 5-minute pitch and design rationale. |
 | [`SWARM-DEVELOPER-GUIDE.md`](docs/specs/swarm-platform/SWARM-DEVELOPER-GUIDE.md) | You want to build a flow from scratch. |
-| [`platform-spec.md`](docs/specs/swarm-platform/platform/platform-spec.md) | You need the authoritative specification. |
+| [`platform-spec.yaml`](platform-spec.yaml) | You need the authoritative specification. |
+| [`openrpc.json`](openrpc.json) | You need the generated public API artifact. |
 | [`BUILDER-API.md`](docs/specs/swarm-platform/platform/BUILDER-API.md) | You're integrating with the Builder surface. |
 | [`FLIGHT-RECORDER.md`](docs/specs/swarm-platform/platform/FLIGHT-RECORDER.md) | You're debugging a run from its trace. |
 | [`SECURITY.md`](SECURITY.md) | You need to report a suspected vulnerability privately. |

@@ -9,7 +9,7 @@ import (
 
 func TestBootBundleIdentityStableAcrossRootsAndFileOrder(t *testing.T) {
 	repo := repoRootForContractsTest(t)
-	platformSpec := filepath.Join(repo, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	platformSpec := DefaultPlatformSpecFile(repo)
 	rootA := t.TempDir()
 	rootB := t.TempDir()
 
@@ -50,7 +50,7 @@ func TestBootBundleIdentityStableAcrossRootsAndFileOrder(t *testing.T) {
 
 func TestBootBundleIdentityChangesWithLoadedContent(t *testing.T) {
 	repo := repoRootForContractsTest(t)
-	platformSpec := filepath.Join(repo, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	platformSpec := DefaultPlatformSpecFile(repo)
 	rootA := t.TempDir()
 	rootB := t.TempDir()
 

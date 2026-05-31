@@ -2,7 +2,7 @@
 
 Supersession note: this draft is historical design input. The authoritative v1
 CLI contract now lives in
-`docs/specs/swarm-platform/platform/contracts/platform-spec.yaml`
+`platform-spec.yaml`
 `cli_specification`. Runtime-state CLI commands must consume the v1 API, and
 this draft's older top-level retirement claim is stale: top-level `swarm
 status` is restored and top-level `swarm fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]` is the planned run-fork command
@@ -11,7 +11,7 @@ authority under the multi-bundle spec.
 API authority note: retired `/api/*`, `/rpc`, and `/api/rpc` references in this
 document are historical only. They are not supported operator API surfaces and
 are not competing API specs. The canonical user-facing API contract is
-`docs/specs/swarm-platform/platform/contracts/platform-spec.yaml`
+`platform-spec.yaml`
 `api_specification`, with OpenRPC generated from that section. Future
 `swarm investigate` implementation must consume that API except for the
 existing `swarm verify` local-contract carve-out.
@@ -190,7 +190,7 @@ These already provide operator-visible drill-down without querying:
 - `flow_instances`
 - `entity_state`
 
-Primary API owner: `docs/specs/swarm-platform/platform/contracts/platform-spec.yaml`
+Primary API owner: `platform-spec.yaml`
 `api_specification`, implemented by the v1 `/v1/rpc` handlers and shared
 operator read/control owners. Dashboard `server.go` routes are retired
 historical aliases, not semantic owners.

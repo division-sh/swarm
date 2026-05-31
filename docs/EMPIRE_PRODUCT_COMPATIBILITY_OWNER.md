@@ -110,7 +110,7 @@ The Empire Product Compatibility Owner is expected to produce:
 - Choose the cheapest check that can falsify the risky assumption.
 - Current verification entrypoints:
   - targeted contract verify:
-    - `go run ./cmd/swarm verify --contracts /Users/youmew/swarm/empire/contracts --platform-spec docs/specs/swarm-platform/platform/contracts/platform-spec.yaml`
+    - `go run ./cmd/swarm verify --contracts /Users/youmew/swarm/empire/contracts --platform-spec platform-spec.yaml`
   - full Empire run:
     - `swarm --contract .`
 - Do not default to the full run when targeted verify is sufficient to catch the class of failure.

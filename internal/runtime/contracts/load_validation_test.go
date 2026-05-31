@@ -130,7 +130,7 @@ func firstLoadedWorkflowHandler(bundle *WorkflowContractBundle) (string, string,
 
 func TestLoadWorkflowContractBundleRejectsTier8DialectFixtures(t *testing.T) {
 	repoRoot := contractRepoRoot(t)
-	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	platformSpec := DefaultPlatformSpecFile(repoRoot)
 	cases := []struct {
 		name     string
 		fixture  string
@@ -156,7 +156,7 @@ func TestLoadWorkflowContractBundleRejectsTier8DialectFixtures(t *testing.T) {
 func TestLoadWorkflowContractBundleAllowsSiblingFlowLocalAuthoritativeOwners(t *testing.T) {
 	repoRoot := contractRepoRoot(t)
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-sibling-both-instantiated-isolated")
-	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	platformSpec := DefaultPlatformSpecFile(repoRoot)
 
 	bundle, err := LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
 	if err != nil {
@@ -242,7 +242,7 @@ flow-b-wildcard:
     task.*:
       advances_to: done
 `)
-	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	platformSpec := DefaultPlatformSpecFile(repoRoot)
 	bundle, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, platformSpec)
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)

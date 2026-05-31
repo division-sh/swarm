@@ -26,9 +26,9 @@ import (
 	"syscall"
 	"time"
 
-	platformcontracts "swarm/docs/specs/swarm-platform/platform/contracts"
 	apiv1 "swarm/internal/apiv1"
 	"swarm/internal/config"
+	"swarm/internal/platform"
 	"swarm/internal/runtime"
 	runtimebootverify "swarm/internal/runtime/bootverify"
 	"swarm/internal/runtime/budgetspend"
@@ -58,7 +58,7 @@ import (
 )
 
 const (
-	defaultPlatformSpecPath = "docs/specs/swarm-platform/platform/contracts/platform-spec.yaml"
+	defaultPlatformSpecPath = platform.DefaultPlatformSpecPath
 	defaultAPIListenAddr    = "127.0.0.1:8081"
 	defaultMCPListenAddr    = "127.0.0.1:8082"
 	serveAPIRoutes          = "/healthz /readyz /v1/rpc /v1/ws"
@@ -2714,7 +2714,7 @@ func assetCommandRepoRoot(repo string) string {
 }
 
 func embeddedPlatformSpecPath() (string, error) {
-	return platformcontracts.MaterializePlatformSpecFile()
+	return platform.MaterializePlatformSpecFile()
 }
 
 func closeDB(db *sql.DB) {

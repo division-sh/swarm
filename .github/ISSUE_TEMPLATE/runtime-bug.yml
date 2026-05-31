@@ -241,7 +241,7 @@ body:
       description: Link the authoritative platform spec section(s), or write `no direct spec section yet`.
       placeholder: |
         Example:
-        docs/specs/swarm-platform/platform/contracts/platform-spec.yaml#L123
+        platform-spec.yaml#L123
     validations:
       required: true
 

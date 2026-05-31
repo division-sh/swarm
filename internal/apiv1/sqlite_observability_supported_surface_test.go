@@ -11,8 +11,8 @@ import (
 
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
-	platformcontracts "swarm/docs/specs/swarm-platform/platform/contracts"
 	"swarm/internal/events"
+	"swarm/internal/platform"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	storepkg "swarm/internal/store"
 )
@@ -85,7 +85,7 @@ func newSQLiteObservabilitySurfaceFixture(t *testing.T, ctx context.Context) sql
 	t.Cleanup(func() { _ = sqliteStore.Close() })
 
 	var platformSpec runtimecontracts.PlatformSpecDocument
-	if err := yaml.Unmarshal(platformcontracts.PlatformSpecYAML(), &platformSpec); err != nil {
+	if err := yaml.Unmarshal(platform.PlatformSpecYAML(), &platformSpec); err != nil {
 		t.Fatalf("unmarshal platform spec: %v", err)
 	}
 	plans, err := storepkg.GeneratePlatformTableDDLs(platformSpec)

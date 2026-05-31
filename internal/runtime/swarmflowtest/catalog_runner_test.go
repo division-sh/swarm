@@ -1105,7 +1105,7 @@ func catalogLoadBootBundle(t testing.TB, dir string) catalogBootBundle {
 		bundle.AllTools = map[string]any{}
 	}
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
-	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	semanticBundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, dir, platformSpec)
 	if err == nil {
 		bundle.Source = semanticview.Wrap(semanticBundle)

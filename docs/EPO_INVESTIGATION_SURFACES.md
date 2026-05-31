@@ -3,7 +3,7 @@
 API authority note: retired `/api/*`, `/rpc`, and `/api/rpc` references in this
 document are historical only. They are not supported operator API surfaces and
 are not competing API specs. The canonical user-facing API contract lives in
-`docs/specs/swarm-platform/platform/contracts/platform-spec.yaml`
+`platform-spec.yaml`
 `api_specification`, and `openrpc.json` is generated from that section.
 
 ## Purpose
@@ -55,7 +55,7 @@ Command:
 ```bash
 go run ./cmd/swarm verify \
   --contracts /Users/youmew/swarm/empire/contracts \
-  --platform-spec docs/specs/swarm-platform/platform/contracts/platform-spec.yaml
+  --platform-spec platform-spec.yaml
 ```
 
 Best for:

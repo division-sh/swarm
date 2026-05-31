@@ -24,7 +24,7 @@ const testToken = "test-v1-token"
 
 func TestRegistryMethodNamesMatchGeneratedOpenRPC(t *testing.T) {
 	registry := testRegistry(t)
-	openRPCNames, err := OpenRPCMethodNames(filepath.Join(repoRoot(t), "docs", "specs", "swarm-platform", "platform", "contracts", "openrpc.json"))
+	openRPCNames, err := OpenRPCMethodNames(complianceOpenRPCPath(repoRoot(t)))
 	if err != nil {
 		t.Fatalf("OpenRPCMethodNames() error = %v", err)
 	}
@@ -826,7 +826,7 @@ files:
 
 func testBundleRegistrationPlatformSpec(t *testing.T) string {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	raw, err := os.ReadFile(compliancePlatformSpecPath(repoRoot(t)))
 	if err != nil {
 		t.Fatalf("read platform spec: %v", err)
 	}
@@ -987,7 +987,7 @@ func testHandler(t *testing.T, opts Options) *Handler {
 
 func testRegistry(t *testing.T) *Registry {
 	t.Helper()
-	registry, err := LoadRegistry(filepath.Join(repoRoot(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	registry, err := LoadRegistry(compliancePlatformSpecPath(repoRoot(t)))
 	if err != nil {
 		t.Fatalf("LoadRegistry() error = %v", err)
 	}

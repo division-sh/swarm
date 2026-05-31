@@ -2,14 +2,14 @@ platform:
   name: swarm-orchestrator
   version: 1.6.0
 spec_authority:
-  merge_bearing_owner: docs/specs/swarm-platform/platform/contracts/platform-spec.yaml
+  merge_bearing_owner: platform-spec.yaml
   rule: |
     This file is the only merge-bearing platform specification. Issue gates,
     implementation PRs, tests, generated artifacts, and tracker closeouts MUST
     bind platform semantics to this tracked file or to generated/implementation
     proof that is derived from it.
   review_artifact_boundary:
-    directory: docs/specs/swarm-platform/platform/contracts/review/
+    directory: docs/specs/swarm-platform/platform/review/
     default_status: non_authoritative_review_context
     rule: |
       Files under the review directory are local design, reconciliation, or
@@ -31,7 +31,7 @@ spec_authority:
     - Leaving active tracker prose that names an ignored review artifact as the
       binding source after a tracked owner or superseding tracker note exists.
     tracked_exception:
-      path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.run-trace-surface.yaml
+      path: docs/specs/swarm-platform/platform/review/platform-spec.run-trace-surface.yaml
       status: tracked_review_draft
       disposition: |
         Tracked implementation-aligned review draft only. Its own target
@@ -41,20 +41,20 @@ spec_authority:
     status: classified_by_issue_865
     source: '#865 root-corpus read-only inventory'
     tracked_files:
-    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.run-trace-surface.yaml
+    - path: docs/specs/swarm-platform/platform/review/platform-spec.run-trace-surface.yaml
       classification: already_promoted
       authority_language_risk: false
       disposition: Tracked implementation-aligned review draft; target platform-spec sections remain authoritative.
     ignored_files:
-    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.accumulator-entity-projection.yaml
+    - path: docs/specs/swarm-platform/platform/review/platform-spec.accumulator-entity-projection.yaml
       classification: already_promoted
       authority_language_risk: true
       disposition: Accumulator projection semantics are promoted in tracked contract/type-system sections; draft is evidence only.
-    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.agent-runtime-descriptor.yaml
+    - path: docs/specs/swarm-platform/platform/review/platform-spec.agent-runtime-descriptor.yaml
       classification: already_promoted
       authority_language_risk: true
       disposition: Runtime descriptor/config ownership is promoted in tracked agent/session sections; draft is evidence only.
-    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.cli-ux-v2.yaml
+    - path: docs/specs/swarm-platform/platform/review/platform-spec.cli-ux-v2.yaml
       classification: promote_commit_needed
       authority_language_risk: true
       disposition: >
@@ -63,92 +63,92 @@ spec_authority:
         platform-spec.yaml#cli_specification with matching implementation or a
         tracked child before it becomes merge-bearing. The ignored file's local
         AUTHORITATIVE/source-of-truth header is invalid until that promotion.
-    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.cli-ux.yaml
+    - path: docs/specs/swarm-platform/platform/review/platform-spec.cli-ux.yaml
       classification: stale_header_repair
       authority_language_risk: true
       disposition: Historical v1 draft; any pointer to the ignored v2 draft as authoritative is superseded by cli_specification.
-    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.contract-type-system.yaml
+    - path: docs/specs/swarm-platform/platform/review/platform-spec.contract-type-system.yaml
       classification: design_backlog_only
       authority_language_risk: true
       disposition: Core Wave 1 semantics are promoted; residual broader E4/E5 expectations remain future promotion work tracked by #499/#500.
-    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.cross-cutting-concern-composition.yaml
+    - path: docs/specs/swarm-platform/platform/review/platform-spec.cross-cutting-concern-composition.yaml
       classification: design_backlog_only
       authority_language_risk: false
       disposition: Analysis/backlog context only unless a future PR promotes exact semantics here.
-    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.entity-schema-initial-values.yaml
+    - path: docs/specs/swarm-platform/platform/review/platform-spec.entity-schema-initial-values.yaml
       classification: already_promoted
       authority_language_risk: true
       disposition: Entity initial-value and expression/read-path semantics are promoted; draft is evidence only.
-    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.event-schema-cross-flow-contract.yaml
+    - path: docs/specs/swarm-platform/platform/review/platform-spec.event-schema-cross-flow-contract.yaml
       classification: already_promoted
       authority_language_risk: true
       disposition: Strict event-schema and emit.fields semantics are promoted; draft is evidence only.
-    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.flight-recorder-runtime-log.yaml
+    - path: docs/specs/swarm-platform/platform/review/platform-spec.flight-recorder-runtime-log.yaml
       classification: already_promoted
       authority_language_risk: true
       disposition: Runtime-log diagnostics encoding is promoted; draft is evidence only.
-    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.native-tools-cli-no-fallback.yaml
+    - path: docs/specs/swarm-platform/platform/review/platform-spec.native-tools-cli-no-fallback.yaml
       classification: already_promoted
       authority_language_risk: true
       disposition: CLI native-tool no-fallback semantics are promoted; draft is evidence only.
-    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.pipeline-stage-model.yaml
+    - path: docs/specs/swarm-platform/platform/review/platform-spec.pipeline-stage-model.yaml
       classification: already_promoted
       authority_language_risk: false
       disposition: Pipeline/stage model semantics are represented in tracked flow and event-boundary sections; draft is evidence only.
-    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.role-scoped-tool-contracts.yaml
+    - path: docs/specs/swarm-platform/platform/review/platform-spec.role-scoped-tool-contracts.yaml
       classification: already_promoted
       authority_language_risk: true
       disposition: Role-scoped entity-tool semantics are promoted; #628 remains blocked on future tracked spec updates before implementation.
-    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.session-audit-split.yaml
+    - path: docs/specs/swarm-platform/platform/review/platform-spec.session-audit-split.yaml
       classification: stale_header_repair
       authority_language_risk: true
       disposition: Full-spec-shaped historical draft; tracked platform-spec.yaml is the only merge-bearing owner.
-    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.session-scope-intent.yaml
+    - path: docs/specs/swarm-platform/platform/review/platform-spec.session-scope-intent.yaml
       classification: already_promoted
       authority_language_risk: false
       disposition: Session scope intent semantics are represented in tracked agent/session sections; draft is evidence only.
-    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.session-termination-metadata.yaml
+    - path: docs/specs/swarm-platform/platform/review/platform-spec.session-termination-metadata.yaml
       classification: already_promoted
       authority_language_risk: true
       disposition: Session termination metadata, DDL, and invariants are promoted; draft is evidence only.
-    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.template-flow-pre-instance-handlers.yaml
+    - path: docs/specs/swarm-platform/platform/review/platform-spec.template-flow-pre-instance-handlers.yaml
       classification: design_backlog_only
       authority_language_risk: false
       disposition: Candidate design context only unless exact template-flow semantics are promoted here.
-    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.timer-trigger-typing.yaml
+    - path: docs/specs/swarm-platform/platform/review/platform-spec.timer-trigger-typing.yaml
       classification: design_backlog_only
       authority_language_risk: false
       disposition: Candidate design context only unless exact timer typing semantics are promoted here.
-    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.tool-usage-hints.yaml
+    - path: docs/specs/swarm-platform/platform/review/platform-spec.tool-usage-hints.yaml
       classification: already_promoted
       authority_language_risk: true
       disposition: Tool-usage hint semantics are promoted into engine.boot_verification.checks and engine.agent_tool_filtering;
         the review draft is evidence only.
-    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.user-facing-rpc-api.yaml
+    - path: docs/specs/swarm-platform/platform/review/platform-spec.user-facing-rpc-api.yaml
       classification: stale_header_repair
       authority_language_risk: true
       disposition: Superseded by platform-spec.yaml#api_specification; local OpenRPC source-of-truth claims are invalid.
-    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.verify-analyzer-model.yaml
+    - path: docs/specs/swarm-platform/platform/review/platform-spec.verify-analyzer-model.yaml
       classification: already_promoted
       authority_language_risk: false
       disposition: Static analyzer model vocabulary is represented in tracked static_analyzer sections; draft is evidence only.
-    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.verify-analyzer-slice-1.yaml
+    - path: docs/specs/swarm-platform/platform/review/platform-spec.verify-analyzer-slice-1.yaml
       classification: already_promoted
       authority_language_risk: false
       disposition: First verify-analyzer slice is represented in tracked static_analyzer sections; draft is evidence only.
-    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.verify-analyzer-slice-2.yaml
+    - path: docs/specs/swarm-platform/platform/review/platform-spec.verify-analyzer-slice-2.yaml
       classification: already_promoted
       authority_language_risk: false
       disposition: Payload completeness analyzer semantics are represented in tracked static_analyzer sections; draft is evidence only.
-    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.verify-analyzer-slice-3.yaml
+    - path: docs/specs/swarm-platform/platform/review/platform-spec.verify-analyzer-slice-3.yaml
       classification: already_promoted
       authority_language_risk: true
       disposition: Pin producer-path analyzer semantics are represented in tracked static_analyzer sections; draft is evidence only.
-    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.verify-analyzer-slice-4.yaml
+    - path: docs/specs/swarm-platform/platform/review/platform-spec.verify-analyzer-slice-4.yaml
       classification: already_promoted
       authority_language_risk: true
       disposition: State reachability analyzer semantics are represented in tracked static_analyzer sections; draft is evidence only.
-    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.verify-analyzer-slice-5.yaml
+    - path: docs/specs/swarm-platform/platform/review/platform-spec.verify-analyzer-slice-5.yaml
       classification: already_promoted
       authority_language_risk: false
       disposition: Dead-surface analyzer semantics are represented in tracked static_analyzer sections; draft is evidence only.
@@ -5547,7 +5547,7 @@ multi_bundle_persistence:
   bundle_identity:
     canonical_name: bundle_hash
     format: 'bundle-v1:sha256:<64 lowercase hex>'
-    hash_rule_owner: docs/specs/swarm-platform/platform/contracts/platform-spec.yaml#multi_bundle_persistence.bundle_identity.canonicalization_v1
+    hash_rule_owner: platform-spec.yaml#multi_bundle_persistence.bundle_identity.canonicalization_v1
     historical_design_evidence: docs/specs/swarm-platform/docs/bundle-canonicalization-v1.md
     rename_policy:
       bundle_hash: promoted_name
@@ -6407,7 +6407,7 @@ workspace_model:
   runtime_image_packaging:
     promoted_by: '#1002'
     implementation_status: implemented
-    canonical_owner: docs/specs/swarm-platform/platform/contracts/platform-spec.yaml#workspace_model.runtime_image_packaging
+    canonical_owner: platform-spec.yaml#workspace_model.runtime_image_packaging
     rule: >
       Runtime workspace startup treats the configured workspace image as a prebuilt runtime dependency. The runtime MUST inspect
       the resolved workspace image before creating workspaces and fail closed with an actionable diagnostic when the image is
@@ -7007,14 +7007,14 @@ cli_specification:
   source_of_truth:
     status: promoted_cli_v2_catalog
     promoted_by: '#795'
-    merge_bearing_owner: docs/specs/swarm-platform/platform/contracts/platform-spec.yaml#cli_specification
+    merge_bearing_owner: platform-spec.yaml#cli_specification
     authority_rule: >
       This cli_specification block is the sole merge-bearing CLI v2 authority. CLI implementation gates, PRs,
       tests, and tracker closeouts MUST bind to this tracked section. Issue prose, local review drafts,
       ignored files, audit matrices, and unpromoted design notes are evidence only until their accepted
       behavior is promoted here.
     local_review_spec_disposition: >
-      docs/specs/swarm-platform/platform/contracts/review/platform-spec.cli-ux-v2.yaml
+      docs/specs/swarm-platform/platform/review/platform-spec.cli-ux-v2.yaml
       is ignored/untracked on origin/master and remains reconciliation input only. Any local
       "AUTHORITATIVE" or "source-of-truth" claim in that file is superseded by this tracked
       source_of_truth block. Merge-bearing behavior must be reflected here.
@@ -7024,10 +7024,10 @@ cli_specification:
       explicitly downgraded to backlog before it can be used as implementation authority.
     supersedes:
     - docs/SWARM_INVESTIGATE_COMMAND_DRAFT.md
-    - docs/specs/swarm-platform/platform/contracts/review/platform-spec.cli-ux.yaml
+    - docs/specs/swarm-platform/platform/review/platform-spec.cli-ux.yaml
     - stale v1 `swarm investigate *` command catalog entries
   catalog_accounting_model:
-    owner: docs/specs/swarm-platform/platform/contracts/platform-spec.yaml#cli_specification.command_catalog
+    owner: platform-spec.yaml#cli_specification.command_catalog
     accounting_unit: explicit_command_catalog_row
     rule: >
       CLI v2 catalog accounting counts one explicit `command_catalog` map entry as one row.
@@ -7072,7 +7072,7 @@ cli_specification:
           Event replay and event publish are separate rows. The implemented replay row MUST NOT
           be reopened or counted as closing the absent publish row.
   review_artifact_reconciliation:
-    source: docs/specs/swarm-platform/platform/contracts/review/platform-spec.cli-ux-v2.yaml
+    source: docs/specs/swarm-platform/platform/review/platform-spec.cli-ux-v2.yaml
     source_status: ignored_untracked_reconciliation_input
     rule: >
       This ledger records the current disposition of CLI UX v2 review-artifact content that is missing,
@@ -7319,7 +7319,7 @@ cli_specification:
     installed_binary_portability:
       promoted_by: '#1002'
       implementation_status: implemented
-      canonical_owner: docs/specs/swarm-platform/platform/contracts/platform-spec.yaml#cli_specification.foundations.installed_binary_portability
+      canonical_owner: platform-spec.yaml#cli_specification.foundations.installed_binary_portability
       scope: >
         Merge-bearing CLI v2 authority for source-checkout-independent startup and embedded platform-spec defaults.
         This owner covers root command construction, no-asset command surfaces (`swarm`, help, completion, local
@@ -7336,7 +7336,7 @@ cli_specification:
       embedded_assets:
         platform_spec: >
           The built-in platform spec default is compiled into the binary from the tracked
-          `docs/specs/swarm-platform/platform/contracts/platform-spec.yaml`. Implementations may materialize these
+          `platform-spec.yaml`. Implementations may materialize these
           embedded bytes to an internal cache path for existing path-based readers, but that path is not a user-facing
           configuration source and MUST NOT require a source checkout.
       runtime_workspace_assets:
@@ -7349,7 +7349,7 @@ cli_specification:
     local_cli_test_gateway_startup:
       promoted_by: '#997'
       implementation_status: implemented_first_slice
-      canonical_owner: docs/specs/swarm-platform/platform/contracts/platform-spec.yaml#cli_specification.foundations.local_cli_test_gateway_startup
+      canonical_owner: platform-spec.yaml#cli_specification.foundations.local_cli_test_gateway_startup
       scope: >
         Merge-bearing CLI/runtime authority for the narrowed #997 local `cli_test` first slice:
         local serve/run MCP gateway token derivation and MCP-only managed-agent startup proof.
@@ -7383,7 +7383,7 @@ cli_specification:
     local_cli_test_workspace_cli_availability:
       promoted_by: '#997'
       implementation_status: implemented
-      canonical_owner: docs/specs/swarm-platform/platform/contracts/platform-spec.yaml#cli_specification.foundations.local_cli_test_workspace_cli_availability
+      canonical_owner: platform-spec.yaml#cli_specification.foundations.local_cli_test_workspace_cli_availability
       scope: >
         Merge-bearing CLI/runtime authority for the remaining #997 local `cli_test`
         workspace image/default-agent Claude CLI availability and early actionable
@@ -7424,7 +7424,7 @@ cli_specification:
       `swarm investigate` is retired legacy topology and MUST NOT be extended.
     output_contract:
       promoted_by: '#848'
-      canonical_owner: docs/specs/swarm-platform/platform/contracts/platform-spec.yaml#cli_specification.foundations.output_contract
+      canonical_owner: platform-spec.yaml#cli_specification.foundations.output_contract
       future_runtime_owner: cmd/swarm shared output-mode/color policy renderer
       scope: >
         Merge-bearing CLI v2 authority for successful command output mode selection and shared rendering.
@@ -7721,7 +7721,7 @@ cli_specification:
     cli_logging_policy:
       promoted_by: '#936'
       implementation_status: implemented for current shared-output first-slice consumers only
-      canonical_owner: docs/specs/swarm-platform/platform/contracts/platform-spec.yaml#cli_specification.foundations.cli_logging_policy
+      canonical_owner: platform-spec.yaml#cli_specification.foundations.cli_logging_policy
       future_runtime_owner: cmd/swarm shared CLI diagnostic logging policy resolver
       scope: >
         Merge-bearing CLI v2 authority for CLI process diagnostic logging controls. This owner governs
@@ -7827,7 +7827,7 @@ cli_specification:
       promoted_by: '#844'
       loopback_default_implemented_by: '#1124'
       implementation_status: implemented_loopback_default
-      canonical_owner: docs/specs/swarm-platform/platform/contracts/platform-spec.yaml#cli_specification.foundations.api_connection_auth_config_precedence
+      canonical_owner: platform-spec.yaml#cli_specification.foundations.api_connection_auth_config_precedence
       scope: >
         Merge-bearing authority for CLI API base URL selection, bearer-token selection, and CLI config-file
         discovery for API-backed commands. API-backed command leaves consume `--api-server`, `--api-token-file`,
@@ -7905,7 +7905,7 @@ cli_specification:
             The default is a bearer token value, not a no-auth mode. CLI requests still send
             `Authorization: Bearer <token>` and the v1 API handler still validates the bearer value.
       cli_config_file:
-        owner: docs/specs/swarm-platform/platform/contracts/platform-spec.yaml#cli_specification.foundations.api_connection_auth_config_precedence.cli_config_file
+        owner: platform-spec.yaml#cli_specification.foundations.api_connection_auth_config_precedence.cli_config_file
         accepted_sources:
           environment: SWARM_CONFIG
           xdg_default: '${XDG_CONFIG_HOME:-$HOME/.config}/swarm/config.yaml'
@@ -7971,7 +7971,7 @@ cli_specification:
     contract_platform_spec_path_resolution:
       promoted_by: '#844'
       implementation_status: implemented
-      canonical_owner: docs/specs/swarm-platform/platform/contracts/platform-spec.yaml#cli_specification.foundations.contract_platform_spec_path_resolution
+      canonical_owner: platform-spec.yaml#cli_specification.foundations.contract_platform_spec_path_resolution
       scope: >
         Merge-bearing CLI v2 authority for selecting the local workflow contract bundle path and the platform
         spec YAML path. This owner covers the currently implemented local file-contract surfaces only: `swarm
@@ -8013,7 +8013,7 @@ cli_specification:
         accepted_sources:
           flag: --platform-spec <path>
           config_key: platform_spec_path
-          built_in_default: docs/specs/swarm-platform/platform/contracts/platform-spec.yaml
+          built_in_default: platform-spec.yaml
         source_order:
         - --platform-spec
         - config platform_spec_path
@@ -8024,7 +8024,7 @@ cli_specification:
             source would create untracked source precedence and must be separately gated.
         default_rule: >
           The built-in default is the tracked platform spec embedded into the installed `swarm` binary at compile time
-          from `docs/specs/swarm-platform/platform/contracts/platform-spec.yaml`; it MUST NOT require source checkout,
+          from `platform-spec.yaml`; it MUST NOT require source checkout,
           repo-root discovery, or a `go.mod` walk. Implementations may materialize the embedded bytes to an internal
           cache path for path-based readers, but that materialized path is not a user-facing config source. Relative
           explicit/config values are resolved against the repo root when one is available; without a repo root they use
@@ -8205,7 +8205,7 @@ cli_specification:
         runtime_bind_implemented_by: '#992'
         env_config_precedence_implemented_by: '#844'
         implementation_status: runtime_bind_and_env_config_precedence_implemented_enable_disable_pending
-        canonical_owner: docs/specs/swarm-platform/platform/contracts/platform-spec.yaml#cli_specification.command_catalog.serve.listener_topology_v2_1
+        canonical_owner: platform-spec.yaml#cli_specification.command_catalog.serve.listener_topology_v2_1
         summary: >
           Final CLI v2.1 `swarm serve` topology uses two independently configurable HTTP listeners: one API
           listener and one MCP listener. This is the merge-bearing final topology decision. Runtime binding and
@@ -9957,7 +9957,7 @@ api_specification:
     \ components.\n"
   source_of_truth:
     status: promoted_api_catalog
-    merge_bearing_owner: docs/specs/swarm-platform/platform/contracts/platform-spec.yaml#api_specification
+    merge_bearing_owner: platform-spec.yaml#api_specification
     authority_rule: |
       This api_specification block is the sole merge-bearing user-facing
       JSON-RPC/OpenRPC API contract. API implementation gates, CLI/dashboard
@@ -9967,7 +9967,7 @@ api_specification:
       ignored files, audit matrices, and unpromoted design notes are evidence
       only until their accepted behavior is promoted here.
     local_review_spec_disposition: |
-      docs/specs/swarm-platform/platform/contracts/review/platform-spec.user-facing-rpc-api.yaml
+      docs/specs/swarm-platform/platform/review/platform-spec.user-facing-rpc-api.yaml
       is ignored/untracked on origin/master and remains reconciliation input
       only. Any local "OpenRPC source-of-truth" or equivalent authority claim
       in that file is superseded by this tracked source_of_truth block.

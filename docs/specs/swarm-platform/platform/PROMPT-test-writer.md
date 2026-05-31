@@ -11,7 +11,7 @@ You are NOT the implementer. You do not write Go code. You write YAML test fixtu
 Division Swarm is an event-driven workflow orchestration platform. Flows are defined in YAML contracts (nodes, agents, events, schema). System nodes are deterministic handlers. Agents are LLM-powered. The platform executes flows by routing events through handlers that accumulate data, compute values, transition states, and emit new events.
 
 The platform spec is the source of truth:
-- `/docs/specs/swarm-platform/platform/contracts/platform-spec.yaml` — the full spec
+- `/platform-spec.yaml` — the full spec
 - `/docs/specs/swarm-platform/platform/CHANGELOG.md` — what changed recently
 - `/docs/specs/swarm-platform/platform/PROPOSAL-flow-scoped-entities.md` — flow-scoped entity model
 - `/docs/specs/swarm-platform/platform/TEST-PLAN-flow-scoped-entities.md` — existing test gap analysis
