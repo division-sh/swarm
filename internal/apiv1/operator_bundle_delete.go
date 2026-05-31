@@ -38,13 +38,6 @@ func executeBundleDelete(ctx context.Context, req Request, opts OperatorReadOpti
 	if err != nil {
 		return nil, err
 	}
-	if !force {
-		return nil, NewInvalidParamsError(map[string]any{
-			"field":      "force",
-			"reason":     "non-force bundle.delete remains split to #1018; force=true is required for #1019",
-			"tracked_by": "#1018",
-		})
-	}
 	dryRun, err := optionalBoolParam(req.Params, "dry_run", false)
 	if err != nil {
 		return nil, err
@@ -115,12 +108,29 @@ func bundleDeleteError(bundleHash string, err error) error {
 			"operation_name": bundledelete.DefaultOperationName,
 		})
 	}
+	var active *bundledelete.ActiveRunsRemainError
+	if errors.As(err, &active) {
+		return NewApplicationError(BundleHasActiveRunsCode, false, bundleDeleteActiveRunsDetails(bundleHash, active.ActiveRuns))
+	}
+	if errors.Is(err, bundledelete.ErrActiveRunsRemain) {
+		return NewApplicationError(BundleHasActiveRunsCode, false, bundleDeleteActiveRunsDetails(bundleHash, nil))
+	}
 	if errors.Is(err, bundledelete.ErrNonForceSplit) {
 		return NewInvalidParamsError(map[string]any{
-			"field":      "force",
-			"reason":     "non-force bundle.delete remains split to #1018; force=true is required for #1019",
-			"tracked_by": "#1018",
+			"field":  "force",
+			"reason": "bundle.delete mode is not supported by the configured bundle-delete owner",
 		})
 	}
 	return err
+}
+
+func bundleDeleteActiveRunsDetails(bundleHash string, activeRuns []bundledelete.RunRef) map[string]any {
+	details := map[string]any{
+		"bundle_hash":    bundleHash,
+		"active_run_ids": bundledelete.ActiveRunIDList(activeRuns),
+	}
+	if len(activeRuns) > 0 {
+		details["active_runs"] = activeRuns
+	}
+	return details
 }

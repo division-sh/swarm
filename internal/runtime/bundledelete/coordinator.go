@@ -37,20 +37,11 @@ func (c *Coordinator) Execute(ctx context.Context, req Request) (Result, error) 
 	if c.Planner == nil {
 		return Result{}, fmt.Errorf("bundle delete planner is required")
 	}
-	if c.Cleaner == nil {
-		return Result{}, fmt.Errorf("bundle delete preservation cleaner is required")
-	}
 	if c.Finalizer == nil {
 		return Result{}, fmt.Errorf("bundle delete finalizer is required")
 	}
 	if c.Locks == nil {
 		return Result{}, fmt.Errorf("bundle delete lock manager is required")
-	}
-	if c.ContainerInventory == nil {
-		return Result{}, fmt.Errorf("bundle delete managed container inventory is required")
-	}
-	if c.Containers == nil {
-		return Result{}, fmt.Errorf("bundle delete managed container stopper is required")
 	}
 
 	lease, acquired, err := c.Locks.TryAcquire(ctx, c.lockKey())
@@ -72,7 +63,6 @@ func (c *Coordinator) Execute(ctx context.Context, req Request) (Result, error) 
 		return Result{}, err
 	}
 	plan.PlannedAt = req.RequestedAt
-	containers, err := c.managedContainersForPlan(ctx, plan)
 	result := Result{
 		OK:            true,
 		Status:        "completed",
@@ -82,6 +72,19 @@ func (c *Coordinator) Execute(ctx context.Context, req Request) (Result, error) 
 		DryRun:        req.DryRun,
 		Plan:          plan,
 	}
+	if !req.Force {
+		return c.executeNonForce(ctx, req, result)
+	}
+	if c.Cleaner == nil {
+		return Result{}, fmt.Errorf("bundle delete preservation cleaner is required")
+	}
+	if c.ContainerInventory == nil {
+		return Result{}, fmt.Errorf("bundle delete managed container inventory is required")
+	}
+	if c.Containers == nil {
+		return Result{}, fmt.Errorf("bundle delete managed container stopper is required")
+	}
+	containers, err := c.managedContainersForPlan(ctx, plan)
 	if err != nil {
 		return result.withPartialFailure("managed_containers", err), nil
 	}
@@ -134,6 +137,30 @@ func (c *Coordinator) Execute(ctx context.Context, req Request) (Result, error) 
 	})
 	if err != nil {
 		return result.withPartialFailure("phase_5_bundle_delete", err), nil
+	}
+	result.FinalMutation = final
+	result.Deleted = final.Deleted
+	return result, nil
+}
+
+func (c *Coordinator) executeNonForce(ctx context.Context, req Request, result Result) (Result, error) {
+	if len(result.Plan.ActiveRuns) > 0 {
+		return Result{}, &ActiveRunsRemainError{
+			BundleHash: req.BundleHash,
+			ActiveRuns: result.Plan.ActiveRuns,
+		}
+	}
+	if req.DryRun {
+		result.Status = "dry_run"
+		return result, nil
+	}
+	final, err := c.Finalizer.ApplyBundleDeleteFinalMutation(ctx, FinalMutationRequest{
+		OperationName: c.operationName(),
+		BundleHash:    req.BundleHash,
+		RequestedAt:   req.RequestedAt,
+	})
+	if err != nil {
+		return Result{}, err
 	}
 	result.FinalMutation = final
 	result.Deleted = final.Deleted

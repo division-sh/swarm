@@ -136,7 +136,7 @@ func (s *PostgresStore) ApplyBundleDeleteFinalMutation(ctx context.Context, req 
 	if err := lockBundleDeleteRunCreationTx(ctx, tx); err != nil {
 		return bundledelete.FinalMutationResult{}, err
 	}
-	activeRemaining, err := lockBundleDeleteReferencingRunsTx(ctx, tx, bundleHash)
+	activeRemainingRuns, err := lockBundleDeleteReferencingRunsTx(ctx, tx, bundleHash)
 	if err != nil {
 		return bundledelete.FinalMutationResult{}, err
 	}
@@ -144,7 +144,7 @@ func (s *PostgresStore) ApplyBundleDeleteFinalMutation(ctx context.Context, req 
 		OperationName:        operationName,
 		BundleHash:           bundleHash,
 		AppliedAt:            now,
-		RemainingActiveRuns:  activeRemaining,
+		RemainingActiveRuns:  len(activeRemainingRuns),
 		SourceAuthorityOwner: "store.ApplyBundleDeleteFinalMutation",
 		TransactionOrderProof: []string{
 			"lock_runs_table_against_new_persisted_bundle_references",
@@ -152,8 +152,11 @@ func (s *PostgresStore) ApplyBundleDeleteFinalMutation(ctx context.Context, req 
 			"delete_matching_bundles_row",
 		},
 	}
-	if activeRemaining > 0 {
-		return result, bundledelete.ErrActiveRunsRemain
+	if len(activeRemainingRuns) > 0 {
+		return result, &bundledelete.ActiveRunsRemainError{
+			BundleHash: bundleHash,
+			ActiveRuns: activeRemainingRuns,
+		}
 	}
 	updateResult, err := tx.ExecContext(ctx, `
 		UPDATE runs
@@ -321,30 +324,37 @@ func lockBundleDeleteRunCreationTx(ctx context.Context, tx *sql.Tx) error {
 	return nil
 }
 
-func lockBundleDeleteReferencingRunsTx(ctx context.Context, tx *sql.Tx, bundleHash string) (int, error) {
+func lockBundleDeleteReferencingRunsTx(ctx context.Context, tx *sql.Tx, bundleHash string) ([]bundledelete.RunRef, error) {
 	rows, err := tx.QueryContext(ctx, `
-		SELECT COALESCE(status, '')
+		SELECT
+			run_id::text,
+			COALESCE(status, ''),
+			COALESCE(bundle_hash, ''),
+			COALESCE(bundle_source, ''),
+			COALESCE(bundle_fingerprint, '')
 		FROM runs
 		WHERE bundle_hash = $1
 		  AND bundle_source = $2
+		ORDER BY run_id::text
 		FOR UPDATE
 	`, bundleHash, storerunlifecycle.BundleSourcePersisted)
 	if err != nil {
-		return 0, fmt.Errorf("lock bundle delete referencing runs: %w", err)
+		return nil, fmt.Errorf("lock bundle delete referencing runs: %w", err)
 	}
 	defer rows.Close()
-	active := 0
+	active := []bundledelete.RunRef{}
 	for rows.Next() {
-		var status string
-		if err := rows.Scan(&status); err != nil {
-			return 0, fmt.Errorf("scan bundle delete referencing run: %w", err)
+		var run bundledelete.RunRef
+		if err := rows.Scan(&run.RunID, &run.Status, &run.BundleHash, &run.BundleSource, &run.BundleFingerprint); err != nil {
+			return nil, fmt.Errorf("scan bundle delete referencing run: %w", err)
 		}
-		if bundleDeleteRunStatusActive(status) {
-			active++
+		normalizeBundleDeleteRunRef(&run)
+		if bundleDeleteRunStatusActive(run.Status) {
+			active = append(active, run)
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return 0, fmt.Errorf("read bundle delete referencing runs: %w", err)
+		return nil, fmt.Errorf("read bundle delete referencing runs: %w", err)
 	}
 	return active, nil
 }

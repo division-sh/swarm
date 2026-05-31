@@ -23,8 +23,8 @@ func TestPlatformAPISpecValidationCoverage(t *testing.T) {
 	if report.SchemaCount != 104 {
 		t.Fatalf("schema count = %d, want 104", report.SchemaCount)
 	}
-	if report.ErrorCodeCount != 38 {
-		t.Fatalf("error code count = %d, want 38", report.ErrorCodeCount)
+	if report.ErrorCodeCount != 39 {
+		t.Fatalf("error code count = %d, want 39", report.ErrorCodeCount)
 	}
 	if report.MutatingMethodCount != 22 {
 		t.Fatalf("mutating method count = %d, want 22", report.MutatingMethodCount)
@@ -73,8 +73,8 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	if len(doc.Components.Schemas) != 104 {
 		t.Fatalf("generated OpenRPC schemas = %d, want 104", len(doc.Components.Schemas))
 	}
-	if len(doc.Components.Errors) != 38 {
-		t.Fatalf("generated OpenRPC errors = %d, want 38", len(doc.Components.Errors))
+	if len(doc.Components.Errors) != 39 {
+		t.Fatalf("generated OpenRPC errors = %d, want 39", len(doc.Components.Errors))
 	}
 	assertGeneratedMethodsOmitExamplesUnderPolicy(t, api, artifact)
 	assertGeneratedMethodsOmitRPCDiscoverUnderPolicy(t, api, doc)
@@ -282,7 +282,7 @@ func TestMultiBundleSourceAuthorityPublishesOnlyImplementedBundleReadAndRunForkM
 	assertScalarValue(t, mustMappingValue(t, sourceEvidence, "run_fork_cli_authority_absorbed_from"), "#1038")
 
 	generatedPolicy := mustMappingValue(t, multi, "generated_artifact_policy")
-	assertScalarValue(t, mustMappingValue(t, generatedPolicy, "current_openrpc_status"), "bundle_read_catalog_register_run_fork_and_force_delete_methods_published")
+	assertScalarValue(t, mustMappingValue(t, generatedPolicy, "current_openrpc_status"), "bundle_read_catalog_register_run_fork_and_delete_methods_published")
 	assertScalarContains(t, mustMappingValue(t, generatedPolicy, "rule"), "bundle.list")
 	assertScalarContains(t, mustMappingValue(t, generatedPolicy, "rule"), "run.fork")
 	assertScalarContains(t, mustMappingValue(t, generatedPolicy, "rule"), "bundle.register")
@@ -344,12 +344,12 @@ func TestMultiBundleSourceAuthorityPublishesOnlyImplementedBundleReadAndRunForkM
 	}
 
 	apiSurface := mustMappingValue(t, multi, "api_surface")
-	assertScalarValue(t, mustMappingValue(t, apiSurface, "publication_status"), "bundle_read_catalog_register_run_fork_and_force_delete_generated_openrpc")
+	assertScalarValue(t, mustMappingValue(t, apiSurface, "publication_status"), "bundle_read_catalog_register_run_fork_and_delete_generated_openrpc")
 
 	bundleDelete := mustMappingValue(t, multi, "bundle_delete")
 	phaseFive := mustMappingValue(t, bundleDelete, "phase_5_atomicity")
 	assertScalarValue(t, mustMappingValue(t, phaseFive, "tracker"), "#1009")
-	assertScalarValue(t, mustMappingValue(t, phaseFive, "implementation_status"), "implemented_for_force_delete_runtime_non_force_pending")
+	assertScalarValue(t, mustMappingValue(t, phaseFive, "implementation_status"), "implemented_for_force_and_non_force_delete_runtime")
 	assertScalarValue(t, mustMappingValue(t, phaseFive, "canonical_runtime_owner"), "internal/store.PostgresStore.ApplyBundleDeleteFinalMutation")
 	appliesTo := mustMappingValue(t, phaseFive, "applies_to")
 	if !sequenceContainsScalar(appliesTo, "#1018 non-force bundle.delete final bundle availability mutation") {
@@ -379,7 +379,7 @@ func TestMultiBundleSourceAuthorityPublishesOnlyImplementedBundleReadAndRunForkM
 	assertScalarContains(t, mustMappingValue(t, phaseFive, "reader_invariant"), "BUNDLE_UNAVAILABLE")
 	assertScalarContains(t, mustMappingValue(t, phaseFive, "reader_invariant"), "BUNDLE_DATA_INTEGRITY_ERROR")
 	postDeleteAdmission := mustMappingValue(t, phaseFive, "post_delete_new_work_admission")
-	assertScalarValue(t, mustMappingValue(t, postDeleteAdmission, "status"), "implemented_for_force_delete_runtime")
+	assertScalarValue(t, mustMappingValue(t, postDeleteAdmission, "status"), "implemented_for_force_and_non_force_delete_runtime")
 	assertScalarValue(t, mustMappingValue(t, postDeleteAdmission, "canonical_owner"), "internal/store/runlifecycle.EnsureActive")
 	admissionConsumers := mustMappingValue(t, postDeleteAdmission, "consumed_by")
 	if !sequenceContainsScalar(admissionConsumers, "/v1/rpc event.publish") {
@@ -432,8 +432,8 @@ func TestMultiBundleSourceAuthorityPublishesOnlyImplementedBundleReadAndRunForkM
 	bundleCommand := mustMappingValue(t, commandCatalog, "bundle")
 	assertScalarValue(t, mustMappingValue(t, bundleCommand, "command"), "swarm bundle list|show|agents")
 	assertScalarValue(t, mustMappingValue(t, bundleCommand, "implementation_status"), "implemented_read_only_inventory")
-	assertScalarContains(t, mustMappingValue(t, bundleCommand, "blocker_state"), "bundle.register API is live")
-	assertScalarContains(t, mustMappingValue(t, bundleCommand, "blocker_state"), "swarm bundle register CLI consumer remains split")
+	assertScalarContains(t, mustMappingValue(t, bundleCommand, "blocker_state"), "bundle.register and bundle.delete APIs are live")
+	assertScalarContains(t, mustMappingValue(t, bundleCommand, "blocker_state"), "swarm bundle register/delete CLI consumers remain split")
 	runForkCatalog := mustMappingValue(t, commandCatalog, "run_fork")
 	assertScalarValue(t, mustMappingValue(t, runForkCatalog, "command"), runForkCommand)
 	assertScalarValue(t, mustMappingValue(t, runForkCatalog, "implementation_status"), "implemented_public_cli_consumer")
@@ -468,11 +468,11 @@ func TestMultiBundleSourceAuthorityPublishesOnlyImplementedBundleReadAndRunForkM
 	}
 
 	apiBoundary := mustMappingValue(t, mustMappingValue(t, root, "api_specification"), "multi_bundle_publication_boundary")
-	assertScalarValue(t, mustMappingValue(t, apiBoundary, "status"), "partial_bundle_read_catalog_register_run_fork_and_force_delete_method_catalog")
+	assertScalarValue(t, mustMappingValue(t, apiBoundary, "status"), "partial_bundle_read_catalog_register_run_fork_and_delete_method_catalog")
 	assertScalarContains(t, mustMappingValue(t, apiBoundary, "rule"), "bundle.register is also published")
 	assertScalarContains(t, mustMappingValue(t, apiBoundary, "rule"), "does not imply a swarm bundle register CLI consumer")
-	assertScalarContains(t, mustMappingValue(t, apiBoundary, "rule"), "Force-only bundle.delete is promoted")
-	assertScalarContains(t, mustMappingValue(t, apiBoundary, "rule"), "split to #1018")
+	assertScalarContains(t, mustMappingValue(t, apiBoundary, "rule"), "bundle.delete is promoted")
+	assertScalarContains(t, mustMappingValue(t, apiBoundary, "rule"), "omitted or false force performs non-force deletion")
 
 	for _, relPath := range []string{
 		filepath.Join("cmd", "swarm", "main.go"),
