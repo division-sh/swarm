@@ -14,9 +14,26 @@ import (
 	"swarm/internal/runtime/workflowexpr"
 )
 
+type MailboxWriteMaterialization struct {
+	ItemID        string
+	EntityID      string
+	FlowInstance  string
+	Scope         string
+	ItemType      string
+	SourceEventID string
+	FromAgent     string
+	Severity      string
+	Summary       string
+	Payload       json.RawMessage
+}
+
+type MailboxWriteMaterializationStore interface {
+	MaterializeMailboxWrite(context.Context, MailboxWriteMaterialization) error
+}
+
 func (pc *PipelineCoordinator) materializeMailboxItem(ctx context.Context, action runtimecontracts.ActionSpec, execCtx runtimeengine.ExecutionContext) error {
-	if pc == nil || pc.db == nil {
-		return fmt.Errorf("mailbox_write requires pipeline database")
+	if pc == nil || pc.mailboxMaterializer == nil {
+		return fmt.Errorf("mailbox_write requires mailbox materialization store")
 	}
 	spec := action.Mailbox
 	if spec == nil {
@@ -90,19 +107,20 @@ func (pc *PipelineCoordinator) materializeMailboxItem(ctx context.Context, actio
 		scope = "flow"
 	}
 	itemID := deterministicMailboxItemID(sourceEventID, nodeID)
-	_, err = dbExecContext(ctx, pc.db, `
-		INSERT INTO mailbox (
-			item_id, entity_id, flow_instance, scope, item_type, source_event_id,
-			from_agent, severity, summary, payload, status, notified, created_at
-		)
-		VALUES (
-			$1::uuid, NULLIF($2,'')::uuid, NULLIF($3,''), $4, $5, $6::uuid,
-			$7, $8, NULLIF($9,''), $10::jsonb, 'pending', false, now()
-		)
-		ON CONFLICT (item_id) DO NOTHING
-	`, itemID, strings.TrimSpace(entityID), flowInstance, scope, normalizedType, sourceEventID, "system_node:"+nodeID, severity, summary, string(payloadJSON))
-	if err != nil {
-		return fmt.Errorf("mailbox_write insert: %w", err)
+	record := MailboxWriteMaterialization{
+		ItemID:        itemID,
+		EntityID:      strings.TrimSpace(entityID),
+		FlowInstance:  flowInstance,
+		Scope:         scope,
+		ItemType:      normalizedType,
+		SourceEventID: sourceEventID,
+		FromAgent:     "system_node:" + nodeID,
+		Severity:      severity,
+		Summary:       summary,
+		Payload:       json.RawMessage(payloadJSON),
+	}
+	if err := pc.mailboxMaterializer.MaterializeMailboxWrite(ctx, record); err != nil {
+		return fmt.Errorf("mailbox_write materialize: %w", err)
 	}
 	return nil
 }

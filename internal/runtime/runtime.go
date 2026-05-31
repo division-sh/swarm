@@ -48,6 +48,7 @@ type Stores struct {
 	ConversationStore   llm.ConversationPersistence
 	ManagerStore        runtimemanager.ManagerPersistence
 	ScheduleStore       runtimepipeline.SchedulePersistence
+	MailboxMaterializer runtimepipeline.MailboxWriteMaterializationStore
 	StartupOwnership    runtimestartupownership.Store
 	MailboxStore        runtimetools.MailboxPersistence
 	ToolEntityStore     runtimetools.EntityPersistence
@@ -453,6 +454,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 			},
 			TimerScheduler:          rt.Scheduler,
 			TimerScheduleStore:      stores.ScheduleStore,
+			MailboxMaterializer:     stores.MailboxMaterializer,
 			EventReceiptsCapability: boot.EventReceiptCapability,
 			ArtifactRoot:            artifactRoot,
 			BundleFingerprint:       opts.BundleFingerprint,

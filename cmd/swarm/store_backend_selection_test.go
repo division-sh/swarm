@@ -11,6 +11,10 @@ import (
 
 	"swarm/internal/config"
 	"swarm/internal/runtime"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimellm "swarm/internal/runtime/llm"
+	runtimepipeline "swarm/internal/runtime/pipeline"
+	"swarm/internal/runtime/semanticview"
 	storebackend "swarm/internal/store/backendselection"
 )
 
@@ -181,7 +185,7 @@ func TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore(t *testing.T) {
 		t.Fatalf("buildStores(sqlite): %v", err)
 	}
 	t.Cleanup(func() { closeDB(stores.SQLDB) })
-	if stores.SQLDB == nil || stores.RuntimeLogStore == nil || stores.SchemaBootstrapper == nil || stores.EventStore == nil || stores.PipelineStore == nil || stores.SessionRegistry == nil || stores.ConversationStore == nil || stores.ManagerStore == nil || stores.ScheduleStore == nil || stores.MailboxStore == nil || stores.BudgetSpendStore == nil || stores.MailboxAPIStore == nil || stores.ObservabilityStore == nil || stores.RuntimeIngressStore == nil || stores.IdempotencyStore == nil || stores.TurnStore == nil || stores.StartupOwnership == nil {
+	if stores.SQLDB == nil || stores.RuntimeLogStore == nil || stores.SchemaBootstrapper == nil || stores.EventStore == nil || stores.PipelineStore == nil || stores.SessionRegistry == nil || stores.ConversationStore == nil || stores.ManagerStore == nil || stores.ScheduleStore == nil || stores.MailboxMaterializer == nil || stores.MailboxStore == nil || stores.BudgetSpendStore == nil || stores.MailboxAPIStore == nil || stores.ObservabilityStore == nil || stores.RuntimeIngressStore == nil || stores.IdempotencyStore == nil || stores.TurnStore == nil || stores.StartupOwnership == nil {
 		t.Fatalf("sqlite store bundle missing selected core owners: %#v", stores)
 	}
 	if stores.Postgres != nil {
@@ -194,11 +198,11 @@ func TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore(t *testing.T) {
 	if runtimeStores.RuntimeLogStore == nil {
 		t.Fatal("sqlite runtimeStores RuntimeLogStore missing backend-neutral runtime diagnostics owner")
 	}
-	if strings.Contains(runtimeStores.ConstructionBlocker, "#1150 runtime diagnostics/logging") {
-		t.Fatalf("sqlite runtimeStores ConstructionBlocker = %q, want #1150 diagnostics blocker removed", runtimeStores.ConstructionBlocker)
+	if runtimeStores.MailboxMaterializer == nil {
+		t.Fatal("sqlite runtimeStores MailboxMaterializer missing backend-neutral mailbox_write owner")
 	}
-	if !strings.Contains(runtimeStores.ConstructionBlocker, "#1087 mailbox_write materialization") {
-		t.Fatalf("sqlite runtimeStores ConstructionBlocker = %q, want residual #1087 mailbox_write blocker", runtimeStores.ConstructionBlocker)
+	if runtimeStores.ConstructionBlocker != "" {
+		t.Fatalf("sqlite runtimeStores ConstructionBlocker = %q, want explicit sqlite construction unblocked after mailbox_write owner", runtimeStores.ConstructionBlocker)
 	}
 	if strings.Contains(runtimeStores.ConstructionBlocker, "pipeline coordination/background nodes") {
 		t.Fatalf("sqlite runtimeStores ConstructionBlocker = %q, want #1147 pipeline/background owner removed from residual blocker", runtimeStores.ConstructionBlocker)
@@ -223,7 +227,7 @@ func TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore(t *testing.T) {
 	}
 }
 
-func TestBuildStoresSQLiteRuntimeNoLongerFailsClosedOnDiagnosticsOwner(t *testing.T) {
+func TestBuildStoresSQLiteRuntimeNoLongerFailsClosedOnMailboxMaterializationOwner(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "dev.db")
 	stores, err := buildStores(ctx, storebackend.Selection{
@@ -243,25 +247,86 @@ func TestBuildStoresSQLiteRuntimeNoLongerFailsClosedOnDiagnosticsOwner(t *testin
 	if runtimeStores.RuntimeLogStore == nil {
 		t.Fatal("sqlite runtimeStores RuntimeLogStore missing backend-neutral runtime diagnostics owner")
 	}
-	if strings.Contains(runtimeStores.ConstructionBlocker, "#1150 runtime diagnostics/logging") {
-		t.Fatalf("sqlite runtimeStores ConstructionBlocker = %q, want #1150 diagnostics blocker removed", runtimeStores.ConstructionBlocker)
+	if runtimeStores.MailboxMaterializer == nil {
+		t.Fatal("sqlite runtimeStores MailboxMaterializer missing backend-neutral mailbox_write owner")
 	}
-	if !strings.Contains(runtimeStores.ConstructionBlocker, "#1087 mailbox_write materialization") {
-		t.Fatalf("sqlite runtimeStores ConstructionBlocker = %q, want residual #1087 mailbox_write blocker", runtimeStores.ConstructionBlocker)
+	if runtimeStores.ConstructionBlocker != "" {
+		t.Fatalf("sqlite runtimeStores ConstructionBlocker = %q, want construction blocker removed after mailbox_write owner", runtimeStores.ConstructionBlocker)
 	}
-	_, err = runtime.NewRuntime(ctx, runtime.RuntimeDeps{
-		Config:  &config.Config{},
-		Stores:  runtimeStores,
-		Options: runtime.RuntimeOptions{SelfCheck: true},
+	bundle := loadStoreBackendSelectionWorkflowBundle(t)
+	if _, err := initializeStateStores(ctx, stores, bundle); err != nil {
+		t.Fatalf("initializeStateStores(sqlite): %v", err)
+	}
+	rt, err := runtime.NewRuntime(ctx, runtime.RuntimeDeps{
+		Config: &config.Config{},
+		Stores: runtimeStores,
+		Options: runtime.RuntimeOptions{
+			SelfCheck:      true,
+			WorkflowModule: stubWorkflowModule{source: semanticview.Wrap(bundle)},
+			LLMRuntime:     storeBackendSelectionNoopLLMRuntime{},
+		},
 	})
-	if err == nil {
-		t.Fatal("NewRuntime(sqlite) succeeded, want residual #1087 mailbox_write blocker")
+	if err != nil {
+		t.Fatalf("NewRuntime(sqlite): %v", err)
 	}
-	if strings.Contains(err.Error(), "#1150 runtime diagnostics/logging") {
-		t.Fatalf("NewRuntime(sqlite) error = %v, want #1150 diagnostics blocker removed", err)
+	if rt.Pipeline == nil {
+		t.Fatal("NewRuntime(sqlite) Pipeline = nil, want runtime construction to consume SQLite pipeline store")
 	}
-	if !strings.Contains(err.Error(), "#1087 mailbox_write materialization") {
-		t.Fatalf("NewRuntime(sqlite) error = %v, want residual #1087 mailbox_write blocker after #1150 owner", err)
+	if rt.Stores.SQLDB != nil {
+		t.Fatalf("NewRuntime(sqlite) raw SQLDB = %#v, want nil", rt.Stores.SQLDB)
+	}
+	if rt.Stores.MailboxMaterializer == nil {
+		t.Fatal("NewRuntime(sqlite) MailboxMaterializer missing")
+	}
+}
+
+type storeBackendSelectionNoopLLMRuntime struct{}
+
+func (storeBackendSelectionNoopLLMRuntime) StartSession(context.Context, string, string, []runtimellm.ToolDefinition) (*runtimellm.Session, error) {
+	return &runtimellm.Session{}, nil
+}
+
+func (storeBackendSelectionNoopLLMRuntime) ContinueSession(context.Context, *runtimellm.Session, runtimellm.Message) (*runtimellm.Response, error) {
+	return &runtimellm.Response{}, nil
+}
+
+func loadStoreBackendSelectionWorkflowBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	root := t.TempDir()
+	writeStoreBackendSelectionFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: store-backend-selection
+version: "1.0.0"
+platform_version: ">=1.0.0"
+flows: []
+`)
+	writeStoreBackendSelectionFixtureFile(t, filepath.Join(root, "schema.yaml"), `
+name: store-backend-selection
+initial_state: idle
+states:
+  - idle
+terminal_states:
+  - idle
+`)
+	writeStoreBackendSelectionFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
+	writeStoreBackendSelectionFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+	writeStoreBackendSelectionFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeStoreBackendSelectionFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeStoreBackendSelectionFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	repoRoot := runtimepipeline.WorkflowRepoRoot()
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return bundle
+}
+
+func writeStoreBackendSelectionFixtureFile(t *testing.T, path string, contents string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(strings.TrimLeft(contents, "\n")), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
 	}
 }
 

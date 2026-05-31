@@ -132,6 +132,7 @@ type storeBundle struct {
 	ConversationStore   runtimellm.ConversationPersistence
 	ManagerStore        runtimemanager.ManagerPersistence
 	ScheduleStore       runtimepipeline.SchedulePersistence
+	MailboxMaterializer runtimepipeline.MailboxWriteMaterializationStore
 	MailboxStore        runtimetools.MailboxPersistence
 	ToolEntityStore     runtimetools.EntityPersistence
 	HumanTaskStore      runtimetools.HumanTaskPersistence
@@ -155,6 +156,7 @@ func (s storeBundle) runtimeStores() runtime.Stores {
 		ConversationStore:   s.ConversationStore,
 		ManagerStore:        s.ManagerStore,
 		ScheduleStore:       s.ScheduleStore,
+		MailboxMaterializer: s.MailboxMaterializer,
 		StartupOwnership:    s.StartupOwnership,
 		MailboxStore:        s.MailboxStore,
 		ToolEntityStore:     s.ToolEntityStore,
@@ -2080,6 +2082,7 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 			ConversationStore:   pg,
 			ManagerStore:        pg,
 			ScheduleStore:       pg,
+			MailboxMaterializer: pg,
 			MailboxStore:        pg,
 			ToolEntityStore:     pg,
 			HumanTaskStore:      pg,
@@ -2107,7 +2110,6 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 		sqliteStore.SetSessionLockTTL(cfg.LLM.Session.LockTTL)
 		return storeBundle{
 			SQLDB:               sqliteStore.DB,
-			RuntimeBlocker:      "sqlite runtime construction remains fail-closed until #1087 mailbox_write materialization moves off the raw pipeline SQL database or receives explicit lead-approved split/tracker repair",
 			RuntimeLogStore:     sqliteStore,
 			SchemaBootstrapper:  sqliteStore,
 			EventStore:          sqliteStore,
@@ -2116,6 +2118,7 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 			ConversationStore:   sqliteStore,
 			ManagerStore:        sqliteStore,
 			ScheduleStore:       sqliteStore,
+			MailboxMaterializer: sqliteStore,
 			MailboxStore:        sqliteStore,
 			ToolEntityStore:     sqliteStore,
 			HumanTaskStore:      sqliteStore,

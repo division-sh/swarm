@@ -55,6 +55,7 @@ type PipelineCoordinator struct {
 	instanceDeactivator     FlowInstanceDeactivator
 	timerScheduler          *Scheduler
 	timerScheduleStore      SchedulePersistence
+	mailboxMaterializer     MailboxWriteMaterializationStore
 	eventReceiptsCapability func(context.Context) (bool, error)
 	artifactRoot            string
 	bundleFingerprint       string
@@ -71,6 +72,7 @@ type PipelineCoordinatorOptions struct {
 	InstanceDeactivator     FlowInstanceDeactivator
 	TimerScheduler          *Scheduler
 	TimerScheduleStore      SchedulePersistence
+	MailboxMaterializer     MailboxWriteMaterializationStore
 	EventReceiptsCapability func(context.Context) (bool, error)
 	ArtifactRoot            string
 	BundleFingerprint       string
@@ -98,6 +100,7 @@ func NewPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordin
 		instanceDeactivator:     opts.InstanceDeactivator,
 		timerScheduler:          opts.TimerScheduler,
 		timerScheduleStore:      opts.TimerScheduleStore,
+		mailboxMaterializer:     opts.MailboxMaterializer,
 		eventReceiptsCapability: opts.EventReceiptsCapability,
 		artifactRoot:            strings.TrimSpace(opts.ArtifactRoot),
 		bundleFingerprint:       strings.TrimSpace(opts.BundleFingerprint),
