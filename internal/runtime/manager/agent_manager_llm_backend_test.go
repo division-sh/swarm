@@ -13,7 +13,7 @@ func TestAgentManagerDefaultsLLMBackendFromCanonicalProfile(t *testing.T) {
 		Config: models.AgentConfig{
 			ID:               "agent-1",
 			Role:             "reviewer",
-			ModelTier:        "sonnet",
+			Model:            "regular",
 			ConversationMode: "task",
 		},
 	}, false); err != nil {

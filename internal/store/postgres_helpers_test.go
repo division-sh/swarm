@@ -109,11 +109,11 @@ func TestPostgresStore_HelpersAndDescriptors(t *testing.T) {
 
 	// Active agent descriptors.
 	_ = pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{ID: "a", Role: "a", Mode: "global", Type: "stub", FlowPath: "review/inst-1", EntityID: entityID, Config: []byte(`{}`)},
+		Config: runtimeactors.AgentConfig{ID: "a", Role: "a", Mode: "global", Type: "stub", Model: "regular", FlowPath: "review/inst-1", EntityID: entityID, Config: []byte(`{}`)},
 		Status: "active", HiredBy: "test", StartedAt: time.Now().UTC(),
 	})
 	_ = pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{ID: "t", Role: "t", Mode: "global", Type: "stub", Config: []byte(`{}`)},
+		Config: runtimeactors.AgentConfig{ID: "t", Role: "t", Mode: "global", Type: "stub", Model: "regular", Config: []byte(`{}`)},
 		Status: "terminated", HiredBy: "test", StartedAt: time.Now().UTC(),
 	})
 	descriptors, err := pg.ListActiveAgentDescriptors(ctx)

@@ -353,10 +353,10 @@ nodes:
       - target backend profile ids are anthropic, claude_cli, and openai_compatible; legacy api and cli_test are persisted-row migration/backfill inputs only and are not valid new operator/config inputs
       - openai_compatible intentionally remains the active profile name and is not renamed to openai until a separate provider/protocol gate promotes native OpenAI Responses or an official-only identity
       - SWARM_LLM_BACKEND and SWARM_OPENAI_COMPATIBLE_BASE_URL are retired; provider credentials remain env-sourced, while openai_compatible base_url is runtime config only
-      - authored bundles target model, not model_tier; built-in aliases are cheap, regular, and frontier with provider-scoped resolution under llm.models
+      - '#1129 lands model_tier-to-provider-resolved-model-alias migration: authored bundles target model; built-in aliases are cheap, regular, and frontier with provider-scoped resolution under llm.models; runtime writers persist authored alias plus resolved backend/provider/concrete model facts'
       - runtime config is canonical for non-secret LLM behavior; env remains valid only for provider secrets and explicitly owned pragmatic infra/connection overrides
-      - RuntimeFactory, selected-fork runtime materialization, provider credential checks, AgentManager, store projection/hydration, boot/verify, model selection, budget/session audit, and read surfaces must consume the same profile/model alias resolver after behavior migrations
-      - runtime audit must write authored model alias plus resolved backend/profile/provider/concrete model at write time; readers must not reconstruct from current config
+      - RuntimeFactory, selected-fork runtime materialization, provider credential checks, AgentManager, store projection/hydration, boot/verify, model selection, budget/session audit, and read surfaces consume the same profile/model alias resolver after #1128 and #1129 behavior migrations
+      - runtime audit writes authored model alias plus resolved backend/profile/provider/concrete model at write time; readers must not reconstruct from current config
       - '#1128 owns backend selection/config discovery migration; #1129 owns model_tier-to-model alias runtime/store/verify migration; #1130 owns docs/config/secrets cleanup after behavior lands'
       - OpenAI Responses, OpenRouter, Ollama, Bedrock, Azure, Vertex, vLLM, and native multi-backend-per-run remain separate provider/protocol gates
     representative_issues:
@@ -379,7 +379,7 @@ nodes:
         - add --backend while SWARM_LLM_BACKEND or config readers remain independent selectors
         - add model alongside model_tier instead of replacing the selector
         - validate config without moving runtime/store/model/audit consumers
-    current_action_pressure: active
+    current_action_pressure: active_docs_and_provider_tails_only
   - id: runtime_store_backend_default_and_sqlite_portability
     title: Runtime Store Backend Default And SQLite Portability
     parent_class: runtime store backend default and durable SQLite local/dev portability

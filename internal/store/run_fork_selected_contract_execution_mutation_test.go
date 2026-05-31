@@ -1107,7 +1107,7 @@ func TestPostTSourceSessionMaterializationTreatsAsSourceAdvancedConversationHist
 	at := time.Unix(1700003605, 0).UTC()
 	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agents (agent_id, role, model_tier, llm_backend, conversation_mode, status, created_at)
+		INSERT INTO agents (agent_id, role, model, llm_backend, conversation_mode, status, created_at)
 		VALUES ('agent-a', 'worker', 'standard', 'mock', 'session_per_entity', 'active', $1)
 		ON CONFLICT (agent_id) DO NOTHING
 	`, at); err != nil {
@@ -1355,7 +1355,7 @@ func TestPostTSourceConversationHistoryActivatesAsBranchDivergence(t *testing.T)
 			at := time.Unix(1700003620, 0).UTC()
 			seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
 			if _, err := db.ExecContext(ctx, `
-				INSERT INTO agents (agent_id, role, model_tier, llm_backend, conversation_mode, status, created_at)
+				INSERT INTO agents (agent_id, role, model, llm_backend, conversation_mode, status, created_at)
 				VALUES ('agent-a', 'worker', 'standard', 'mock', 'session_per_entity', 'active', $1)
 				ON CONFLICT (agent_id) DO NOTHING
 			`, at); err != nil {
@@ -1588,7 +1588,7 @@ func TestSelectedContractActivationAllowsFreshForkConversationRows(t *testing.T)
 	forkEventID := seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
 	sessionID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agents (agent_id, role, model_tier, llm_backend, conversation_mode, status, created_at)
+		INSERT INTO agents (agent_id, role, model, llm_backend, conversation_mode, status, created_at)
 		VALUES ('agent-a', 'worker', 'standard', 'mock', 'session_per_entity', 'active', $1)
 		ON CONFLICT (agent_id) DO NOTHING
 	`, at); err != nil {
@@ -2125,7 +2125,7 @@ func seedSelectedContractSourceConversationHistory(t *testing.T, db execContextD
 	t.Helper()
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agents (agent_id, role, model_tier, llm_backend, conversation_mode, status, created_at)
+		INSERT INTO agents (agent_id, role, model, llm_backend, conversation_mode, status, created_at)
 		VALUES ('agent-a', 'worker', 'standard', 'mock', 'session_per_entity', 'active', $1)
 		ON CONFLICT (agent_id) DO NOTHING
 	`, at); err != nil {
@@ -2199,7 +2199,7 @@ func seedPostTActiveConversationCoupling(t *testing.T, db execContextDB, sourceR
 	t.Helper()
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agents (agent_id, role, model_tier, llm_backend, conversation_mode, status, created_at)
+		INSERT INTO agents (agent_id, role, model, llm_backend, conversation_mode, status, created_at)
 		VALUES ('active-agent', 'worker', 'standard', 'mock', 'session_per_entity', 'active', $1)
 		ON CONFLICT (agent_id) DO NOTHING
 	`, at); err != nil {

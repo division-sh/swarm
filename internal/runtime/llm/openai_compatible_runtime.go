@@ -436,24 +436,17 @@ func (r *OpenAICompatibleRuntime) buildRequest(ctx context.Context, s *Session, 
 	}
 
 	modelReq := llmselection.ModelResolution{
-		Models: llmselection.ModelMap{
-			Default: r.cfg.LLM.OpenAICompatible.DefaultModel,
-			LowCost: r.cfg.LLM.OpenAICompatible.LowCostModel,
-		},
+		Models: r.cfg.LLM.Models,
 	}
 	if actor, ok := runtimeactors.ActorFromContext(ctx); ok {
-		modelReq.ModelTier = actor.ModelTier
-		actorEntityID := actor.EffectiveEntityID()
-		if r.budget != nil && r.budget.IsEntityThrottle(actorEntityID) {
-			modelReq.ForceLowCost = true
-		}
+		modelReq.Model = actor.Model
 	}
-	model, err := llmselection.ResolveModelName(profile, modelReq)
+	resolvedModel, err := llmselection.ResolveModel(profile, modelReq)
 	if err != nil {
 		return openAICompatibleRequest{}, err
 	}
 	return openAICompatibleRequest{
-		Model:    model,
+		Model:    resolvedModel.ConcreteModel,
 		Messages: msgs,
 		Tools:    tools,
 	}, nil

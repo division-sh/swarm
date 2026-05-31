@@ -92,7 +92,7 @@ func TestRuntimeAndValidatorNormalizationStayAligned(t *testing.T) {
 			name: "agent_reconfigure_config_projection",
 			tool: "agent_reconfigure",
 			input: map[string]any{
-				"model_tier":         "fast",
+				"model":              "fast",
 				"system_prompt":      "be concise",
 				"max_turns_per_task": 5,
 			},

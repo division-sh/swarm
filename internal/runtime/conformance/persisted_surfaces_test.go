@@ -274,13 +274,7 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	registry := runtimesessions.NewPostgresRegistry(db, 30*time.Second)
-	runtime := runtimellm.NewAnthropicAPIRuntime(&config.Config{
-		LLM: config.LLMConfig{
-			ClaudeAPI: config.ClaudeAPIConfig{
-				DefaultModel: "claude-test",
-			},
-		},
-	}, registry, "worker-1", nil, pg, nil, bus)
+	runtime := runtimellm.NewAnthropicAPIRuntime(&config.Config{}, registry, "worker-1", nil, pg, nil, bus)
 
 	newTurnContext := func(evt events.Event) context.Context {
 		base := runtimesessions.WithScope(context.Background(), runtimesessions.RuntimeModeSession.String(), runtimesessions.SessionScopeFlow.String(), "support/inst-1")
@@ -289,6 +283,7 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 		return runtimeactors.WithActor(base, runtimeactors.AgentConfig{
 			ID:               "agent-1",
 			Type:             "stub",
+			Model:            "regular",
 			SessionScope:     runtimesessions.SessionScopeFlow.String(),
 			ConversationMode: runtimesessions.RuntimeModeSession.String(),
 			FlowPath:         "support/inst-1",
@@ -2154,6 +2149,7 @@ func seedConformanceAgent(t *testing.T, ctx context.Context, pg *store.PostgresS
 			Role:   "tester",
 			Mode:   "global",
 			Type:   "stub",
+			Model:  "regular",
 			Config: []byte(`{"system_prompt":"x"}`),
 		},
 		Status:    "active",

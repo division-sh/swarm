@@ -59,6 +59,7 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 			ID:       "control-plane",
 			Role:     "control-plane",
 			Mode:     "global",
+			Model:    "regular",
 			EntityID: "",
 			// Runtime-only JSON config; keep minimal but valid for prompt enforcement.
 			Config: json.RawMessage(`{"system_prompt":"You are the control plane.","tools":[],"subscriptions":["system.started"]}`),
@@ -81,6 +82,7 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 			ID:       ceoID,
 			Role:     "operator",
 			Mode:     "operating",
+			Model:    "regular",
 			EntityID: entityID,
 			Config:   json.RawMessage(`{"system_prompt":"You are an operator.","tools":[],"subscriptions":["review.*"]}`),
 		},

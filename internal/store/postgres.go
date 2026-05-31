@@ -186,6 +186,9 @@ func (s *PostgresStore) ensureSchemaCompatibilityColumns(ctx context.Context) er
 			return err
 		}
 	}
+	if err := s.ensureAgentModelAliasColumn(ctx); err != nil {
+		return err
+	}
 	if err := s.ensureAgentRuntimeDescriptorColumn(ctx); err != nil {
 		return err
 	}
@@ -401,6 +404,71 @@ func (s *PostgresStore) ensureAgentLLMBackendProfiles(ctx context.Context) error
 			CHECK (llm_backend IN ('anthropic', 'claude_cli', 'openai_compatible', 'mock', 'local'));
 	`); err != nil {
 		return fmt.Errorf("migrate agents.llm_backend profiles: %w", err)
+	}
+	return nil
+}
+
+func (s *PostgresStore) ensureAgentModelAliasColumn(ctx context.Context) error {
+	if s == nil || s.DB == nil {
+		return nil
+	}
+	catalog, err := loadSchemaColumnCatalog(ctx, s.DB)
+	if err != nil {
+		return err
+	}
+	if !catalog.hasTable("agents") {
+		return nil
+	}
+	if !catalog.hasColumns("agents", "model") {
+		if _, err := s.DB.ExecContext(ctx, `ALTER TABLE agents ADD COLUMN IF NOT EXISTS model TEXT`); err != nil {
+			return fmt.Errorf("ensure agents.model column: %w", err)
+		}
+	}
+	catalog, err = loadSchemaColumnCatalog(ctx, s.DB)
+	if err != nil {
+		return err
+	}
+	if catalog.hasColumns("agents", "model_tier") {
+		var unmappable int
+		if err := s.DB.QueryRowContext(ctx, `
+			SELECT COUNT(*)
+			FROM agents
+			WHERE (model IS NULL OR BTRIM(model) = '')
+			  AND model_tier IS NOT NULL
+			  AND BTRIM(model_tier) <> ''
+			  AND LOWER(BTRIM(model_tier)) NOT IN ('haiku', 'low_cost', 'sonnet', 'general', 'generic')
+		`).Scan(&unmappable); err != nil {
+			return fmt.Errorf("inspect legacy agents.model_tier: %w", err)
+		}
+		if unmappable > 0 {
+			return fmt.Errorf("agents.model migration cannot map %d legacy model_tier rows; use model alias cheap, regular, or frontier", unmappable)
+		}
+		if _, err := s.DB.ExecContext(ctx, `
+			UPDATE agents
+			SET model = CASE LOWER(BTRIM(model_tier))
+				WHEN 'haiku' THEN 'cheap'
+				WHEN 'low_cost' THEN 'cheap'
+				WHEN 'sonnet' THEN 'regular'
+				WHEN 'general' THEN 'regular'
+				WHEN 'generic' THEN 'regular'
+				ELSE NULL
+			END
+			WHERE (model IS NULL OR BTRIM(model) = '')
+			  AND model_tier IS NOT NULL
+			  AND BTRIM(model_tier) <> '';
+		`); err != nil {
+			return fmt.Errorf("backfill agents.model from legacy model_tier: %w", err)
+		}
+	}
+	var missing int
+	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM agents WHERE model IS NULL OR BTRIM(model) = ''`).Scan(&missing); err != nil {
+		return fmt.Errorf("inspect agents.model backfill: %w", err)
+	}
+	if missing > 0 {
+		return fmt.Errorf("agents.model migration requires explicit model alias for %d existing rows", missing)
+	}
+	if _, err := s.DB.ExecContext(ctx, `ALTER TABLE agents ALTER COLUMN model SET NOT NULL`); err != nil {
+		return fmt.Errorf("ensure agents.model not null: %w", err)
 	}
 	return nil
 }
@@ -845,10 +913,10 @@ func (s *PostgresStore) ensureAgentRuntimeDescriptorColumn(ctx context.Context) 
 				ELSE '{}'::jsonb
 			END,
 			'{type}',
-			to_jsonb(BTRIM(model_tier)),
+			to_jsonb(BTRIM(model)),
 			true
 		)
-		WHERE NULLIF(BTRIM(model_tier), '') IS NOT NULL
+		WHERE NULLIF(BTRIM(model), '') IS NOT NULL
 		  AND (
 			runtime_descriptor IS NULL
 			OR (
@@ -857,7 +925,7 @@ func (s *PostgresStore) ensureAgentRuntimeDescriptorColumn(ctx context.Context) 
 			)
 		  )
 	`); err != nil {
-		return fmt.Errorf("backfill agents.runtime_descriptor.type from model_tier: %w", err)
+		return fmt.Errorf("backfill agents.runtime_descriptor.type from model: %w", err)
 	}
 	_, err = s.BindSchemaCapabilities(ctx)
 	return err

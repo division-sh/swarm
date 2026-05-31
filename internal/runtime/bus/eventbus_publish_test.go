@@ -336,6 +336,7 @@ func seedActiveRuntimeBusAgent(t *testing.T, ctx context.Context, pg *store.Post
 			Role:   "observer",
 			Mode:   "global",
 			Type:   "stub",
+			Model:  "regular",
 			Config: []byte(`{}`),
 		},
 		Status:    "active",

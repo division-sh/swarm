@@ -7483,7 +7483,7 @@
           "conversation_mode": {
             "$ref": "#/components/schemas/ConversationMode"
           },
-          "model_tier": {
+          "model": {
             "type": "string"
           },
           "role": {
@@ -7503,7 +7503,7 @@
           "agent_id",
           "role",
           "type",
-          "model_tier",
+          "model",
           "conversation_mode",
           "session_scope",
           "status"
@@ -7642,7 +7642,7 @@
           "llm_backend": {
             "type": "string"
           },
-          "model_tier": {
+          "model": {
             "type": "string"
           },
           "prompt_path": {

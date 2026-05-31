@@ -122,6 +122,9 @@ func TestSessionScopeConformance(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
+			if strings.TrimSpace(tc.actor.Model) == "" {
+				tc.actor.Model = "regular"
+			}
 			assertBootVerificationBoundary(t, tc)
 			assertAgentConstructionBoundary(t, tc)
 			assertSessionAcquisitionBoundary(t, tc)
@@ -381,7 +384,7 @@ func conformanceAgentYAML(tc sessionScopeConformanceCase, subscription string) s
 	lines := []string{
 		fmt.Sprintf("%s:", tc.actor.ID),
 		fmt.Sprintf("  id: %s", tc.actor.ID),
-		"  model_tier: sonnet",
+		"  model: regular",
 		fmt.Sprintf("  conversation_mode: %s", conversationModeOrTask(tc.actor)),
 	}
 	if sessionScope := strings.TrimSpace(tc.actor.SessionScope); sessionScope != "" {

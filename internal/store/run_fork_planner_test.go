@@ -1007,7 +1007,7 @@ func TestRunForkPlanner_RunScopedActiveSessionAndTurnRemainBlockers(t *testing.T
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agents (
-			agent_id, role, model_tier, llm_backend, conversation_mode, created_at
+			agent_id, role, model, llm_backend, conversation_mode, created_at
 		)
 		VALUES ('agent-a', 'worker', 'standard', 'mock', 'session', $1)
 	`, at.Add(-time.Minute)); err != nil {
@@ -1121,7 +1121,7 @@ func TestRunForkPlanner_TerminatedSessionBeforeForkIsLineageOnly(t *testing.T) {
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agents (
-			agent_id, role, model_tier, llm_backend, conversation_mode, created_at
+			agent_id, role, model, llm_backend, conversation_mode, created_at
 		)
 		VALUES ('agent-a', 'worker', 'standard', 'mock', 'session', $1)
 	`, at.Add(-time.Minute)); err != nil {

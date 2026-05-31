@@ -36,6 +36,8 @@ type AgentManager struct {
 	runtimeIngressSafetyPause       func(context.Context, string) error
 	runtimeMode                     string
 	llmBackend                      string
+	modelAliases                    llmselection.ModelAliases
+	requireModelResolution          bool
 	throttleSuppressPrefixes        []string
 	inFlightMu                      sync.Mutex
 	inFlight                        map[string]struct{}
@@ -123,6 +125,8 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 		runtimeIngressSafetyPause:       opts.RuntimeIngressSafetyPause,
 		throttleSuppressPrefixes:        throttleSuppressPrefixes,
 		llmBackend:                      normalizeManagerLLMBackend(opts.LLMBackend),
+		modelAliases:                    llmselection.EffectiveModelAliases(opts.ModelAliases),
+		requireModelResolution:          opts.RequireModelResolution,
 		inFlight:                        make(map[string]struct{}),
 		loopCancel:                      make(map[string]context.CancelFunc),
 		poisonPanicCounts:               make(map[string]int),
@@ -260,6 +264,9 @@ func (am *AgentManager) spawnAgentInternal(ctx context.Context, rec PersistedAge
 	if strings.TrimSpace(rec.Config.LLMBackend) == "" {
 		rec.Config.LLMBackend = am.llmBackend
 	}
+	if err := am.resolveAgentModel(&rec.Config); err != nil {
+		return err
+	}
 	if _, err := sessions.ValidateAgentSessionScopeConfig(rec.Config); err != nil {
 		return fmt.Errorf("invalid agent session scope: %w", err)
 	}
@@ -301,6 +308,36 @@ func (am *AgentManager) spawnAgentInternal(ctx context.Context, rec PersistedAge
 	if isRunning {
 		am.startAgentLoop(runCtx, a)
 	}
+	return nil
+}
+
+func (am *AgentManager) resolveAgentModel(cfg *models.AgentConfig) error {
+	if cfg == nil {
+		return fmt.Errorf("agent config is required")
+	}
+	cfg.NormalizeRuntimeDescriptor()
+	if strings.TrimSpace(cfg.Model) == "" {
+		if am.requireModelResolution {
+			return fmt.Errorf("agent %s missing model", strings.TrimSpace(cfg.ID))
+		}
+		return nil
+	}
+	profile, err := llmselection.ResolveActiveBackend(cfg.LLMBackend)
+	if err != nil {
+		return fmt.Errorf("agent %s invalid llm_backend %q: %w", strings.TrimSpace(cfg.ID), strings.TrimSpace(cfg.LLMBackend), err)
+	}
+	resolved, err := llmselection.ResolveModel(profile, llmselection.ModelResolution{
+		Model:  cfg.Model,
+		Models: am.modelAliases,
+	})
+	if err != nil {
+		return fmt.Errorf("agent %s model resolution failed: %w", strings.TrimSpace(cfg.ID), err)
+	}
+	cfg.Model = resolved.ModelAlias
+	cfg.LLMBackend = resolved.Backend
+	cfg.ResolvedModel = resolved.ConcreteModel
+	cfg.ResolvedLLMProvider = resolved.Provider
+	cfg.ResolvedLLMTransport = resolved.Transport
 	return nil
 }
 

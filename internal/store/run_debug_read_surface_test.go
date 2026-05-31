@@ -21,6 +21,7 @@ func seedRunDebugAgent(t *testing.T, pg *PostgresStore, ctx context.Context, age
 			ID:       agentID,
 			Role:     agentID,
 			Mode:     "operating",
+			Model:    "regular",
 			EntityID: entityID,
 			Config:   json.RawMessage(`{"system_prompt":"You are a trace test agent.","tools":[],"subscriptions":["trace.*"]}`),
 		},

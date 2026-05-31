@@ -1124,7 +1124,7 @@ backend:
   id: backend-{vertical_id}
   type: generic
   role: backend
-  model_tier: sonnet
+  model: regular
   conversation_mode: session
   session_scope: flow
   subscriptions:
@@ -1188,7 +1188,7 @@ backend:
   id: backend-{vertical_id}
   type: generic
   role: backend
-  model_tier: sonnet
+  model: regular
   conversation_mode: session
   session_scope: flow
   subscriptions:

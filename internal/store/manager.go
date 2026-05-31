@@ -15,6 +15,10 @@ import (
 type persistedAgentRuntimeDescriptor struct {
 	Type                  string                         `json:"type,omitempty"`
 	Mode                  string                         `json:"mode,omitempty"`
+	Model                 string                         `json:"model,omitempty"`
+	ResolvedModel         string                         `json:"resolved_model,omitempty"`
+	ResolvedLLMProvider   string                         `json:"resolved_llm_provider,omitempty"`
+	ResolvedLLMTransport  string                         `json:"resolved_llm_transport,omitempty"`
 	SessionScope          string                         `json:"session_scope,omitempty"`
 	SessionScopeAuthority string                         `json:"session_scope_authority,omitempty"`
 	MaxTurnsPerTask       int                            `json:"max_turns_per_task,omitempty"`
@@ -27,7 +31,7 @@ type persistedAgentProjection struct {
 	AgentID           string
 	FlowInstance      string
 	Role              string
-	ModelTier         string
+	Model             string
 	LLMBackend        string
 	ConversationMode  string
 	ParentAgentID     string
@@ -43,8 +47,12 @@ type persistedAgentProjection struct {
 var runtimeConfigKeys = map[string]struct{}{
 	"type":                    {},
 	"mode":                    {},
+	"model":                   {},
 	"model_tier":              {},
 	"llm_backend":             {},
+	"resolved_model":          {},
+	"resolved_llm_provider":   {},
+	"resolved_llm_transport":  {},
 	"conversation_mode":       {},
 	"session_scope":           {},
 	"session_scope_authority": {},
@@ -63,6 +71,10 @@ var runtimeConfigKeys = map[string]struct{}{
 var persistedAgentRuntimeDescriptorKeys = map[string]struct{}{
 	"type":                    {},
 	"mode":                    {},
+	"model":                   {},
+	"resolved_model":          {},
+	"resolved_llm_provider":   {},
+	"resolved_llm_transport":  {},
 	"session_scope":           {},
 	"session_scope_authority": {},
 	"max_turns_per_task":      {},
@@ -101,7 +113,10 @@ func sanitizeOpaqueAgentConfig(raw json.RawMessage) ([]byte, error) {
 func projectPersistedAgentConfig(cfg runtimeactors.AgentConfig, parentAgentID string) (persistedAgentProjection, error) {
 	cfg.NormalizeEntityID()
 	cfg.NormalizeRuntimeDescriptor()
-	modelTier := agentModelTier(cfg)
+	modelAlias, err := agentModel(cfg)
+	if err != nil {
+		return persistedAgentProjection{}, err
+	}
 	conversationMode, err := agentConversationMode(cfg)
 	if err != nil {
 		return persistedAgentProjection{}, fmt.Errorf("invalid conversation mode: %w", err)
@@ -114,7 +129,7 @@ func projectPersistedAgentConfig(cfg runtimeactors.AgentConfig, parentAgentID st
 	if err != nil {
 		return persistedAgentProjection{}, fmt.Errorf("marshal agent config: %w", err)
 	}
-	runtimeDescriptorJSON, err := marshalPersistedAgentRuntimeDescriptor(cfg, modelTier)
+	runtimeDescriptorJSON, err := marshalPersistedAgentRuntimeDescriptor(cfg, modelAlias)
 	if err != nil {
 		return persistedAgentProjection{}, fmt.Errorf("marshal agent runtime descriptor: %w", err)
 	}
@@ -122,7 +137,7 @@ func projectPersistedAgentConfig(cfg runtimeactors.AgentConfig, parentAgentID st
 		AgentID:           strings.TrimSpace(cfg.ID),
 		FlowInstance:      agentFlowInstance(cfg),
 		Role:              strings.TrimSpace(cfg.Role),
-		ModelTier:         modelTier,
+		Model:             modelAlias,
 		LLMBackend:        llmBackend,
 		ConversationMode:  conversationMode.String(),
 		ParentAgentID:     nullable(strings.TrimSpace(parentAgentID), strings.TrimSpace(cfg.ParentAgent)),
@@ -143,9 +158,9 @@ func hydratePersistedAgentConfig(row persistedAgentProjection) (runtimeactors.Ag
 	if strings.TrimSpace(row.Role) == "" {
 		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s missing role", strings.TrimSpace(row.AgentID))
 	}
-	modelTier := strings.TrimSpace(row.ModelTier)
-	if modelTier == "" {
-		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s missing model_tier", strings.TrimSpace(row.AgentID))
+	modelAlias := strings.TrimSpace(row.Model)
+	if modelAlias == "" {
+		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s missing model", strings.TrimSpace(row.AgentID))
 	}
 	llmBackend := strings.TrimSpace(row.LLMBackend)
 	if llmBackend == "" {
@@ -177,8 +192,11 @@ func hydratePersistedAgentConfig(row persistedAgentProjection) (runtimeactors.Ag
 		Type:                  desc.Type,
 		Role:                  strings.TrimSpace(row.Role),
 		Mode:                  desc.Mode,
-		ModelTier:             modelTier,
+		Model:                 modelAlias,
 		LLMBackend:            llmBackend,
+		ResolvedModel:         strings.TrimSpace(desc.ResolvedModel),
+		ResolvedLLMProvider:   strings.TrimSpace(desc.ResolvedLLMProvider),
+		ResolvedLLMTransport:  strings.TrimSpace(desc.ResolvedLLMTransport),
 		ConversationMode:      conversationMode.String(),
 		SessionScope:          sessionScope.String(),
 		SessionScopeAuthority: desc.SessionScopeAuthority,
@@ -203,10 +221,14 @@ func hydratePersistedAgentConfig(row persistedAgentProjection) (runtimeactors.Ag
 	return cfg, nil
 }
 
-func marshalPersistedAgentRuntimeDescriptor(cfg runtimeactors.AgentConfig, modelTier string) ([]byte, error) {
+func marshalPersistedAgentRuntimeDescriptor(cfg runtimeactors.AgentConfig, modelAlias string) ([]byte, error) {
 	desc := persistedAgentRuntimeDescriptor{
-		Type:                  agentPersistedType(cfg, modelTier),
+		Type:                  agentPersistedType(cfg, modelAlias),
 		Mode:                  strings.TrimSpace(cfg.Mode),
+		Model:                 strings.TrimSpace(modelAlias),
+		ResolvedModel:         strings.TrimSpace(cfg.ResolvedModel),
+		ResolvedLLMProvider:   strings.TrimSpace(cfg.ResolvedLLMProvider),
+		ResolvedLLMTransport:  strings.TrimSpace(cfg.ResolvedLLMTransport),
 		SessionScope:          strings.TrimSpace(cfg.SessionScope),
 		SessionScopeAuthority: strings.TrimSpace(cfg.SessionScopeAuthority),
 		MaxTurnsPerTask:       cfg.MaxTurnsPerTask,
@@ -240,6 +262,10 @@ func decodePersistedAgentRuntimeDescriptor(raw []byte) (persistedAgentRuntimeDes
 	}
 	desc.Type = strings.TrimSpace(desc.Type)
 	desc.Mode = strings.TrimSpace(desc.Mode)
+	desc.Model = strings.TrimSpace(desc.Model)
+	desc.ResolvedModel = strings.TrimSpace(desc.ResolvedModel)
+	desc.ResolvedLLMProvider = strings.TrimSpace(desc.ResolvedLLMProvider)
+	desc.ResolvedLLMTransport = strings.TrimSpace(desc.ResolvedLLMTransport)
 	desc.SessionScope = strings.TrimSpace(desc.SessionScope)
 	desc.SessionScopeAuthority = strings.TrimSpace(desc.SessionScopeAuthority)
 	desc.WorkspaceClass = strings.TrimSpace(desc.WorkspaceClass)

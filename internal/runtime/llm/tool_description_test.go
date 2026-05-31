@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"swarm/internal/config"
+	runtimeactors "swarm/internal/runtime/core/actors"
 	"swarm/internal/runtime/sessions"
 )
 
@@ -37,9 +38,7 @@ func TestDeliveredToolDescription_DoesNotDuplicateUsageBlock(t *testing.T) {
 
 func TestAnthropicAPIRuntimeBuildRequest_DeliversUsageInToolDescription(t *testing.T) {
 	runtime := NewAnthropicAPIRuntime(&config.Config{
-		LLM: config.LLMConfig{
-			ClaudeAPI: config.ClaudeAPIConfig{DefaultModel: "claude-test"},
-		},
+		LLM: config.LLMConfig{},
 	}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil)
 	session := &Session{
 		ID: "session-1",
@@ -54,7 +53,8 @@ func TestAnthropicAPIRuntimeBuildRequest_DeliversUsageInToolDescription(t *testi
 		}},
 	}
 
-	req, err := runtime.buildRequest(context.Background(), session, Message{Role: "user", Content: "continue"})
+	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{ID: "agent-1", Model: "regular"})
+	req, err := runtime.buildRequest(ctx, session, Message{Role: "user", Content: "continue"})
 	if err != nil {
 		t.Fatalf("buildRequest: %v", err)
 	}

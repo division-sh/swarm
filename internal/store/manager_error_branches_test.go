@@ -73,7 +73,7 @@ func TestPostgresStore_Manager_ErrorBranches(t *testing.T) {
 	// UpsertEventReceipt should accept empty errText; also exercise invalid status guardrails indirectly.
 	aid := "a1"
 	_ = pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{ID: aid, Role: "r", Mode: "global", Type: "stub", Config: []byte(`{"subscriptions":["*"]}`)},
+		Config: runtimeactors.AgentConfig{ID: aid, Role: "r", Mode: "global", Type: "stub", Model: "regular", Config: []byte(`{"subscriptions":["*"]}`)},
 		Status: "active", HiredBy: "t", StartedAt: time.Now(),
 	})
 	evtID := uuid.NewString()

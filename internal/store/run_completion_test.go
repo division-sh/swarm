@@ -255,7 +255,7 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhileSessionLeaseA
 	sessionID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agents (
-			agent_id, role, model_tier, llm_backend, conversation_mode,
+			agent_id, role, model, llm_backend, conversation_mode,
 			config, subscriptions, emit_events, tools, permissions, runtime_descriptor,
 			status, turn_count, last_active_at, created_at
 		) VALUES (

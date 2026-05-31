@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	stdruntime "runtime"
 	"strings"
@@ -145,7 +146,7 @@ func TestSQLiteSchemaStoreMigratesLegacyAgentLLMBackendProfiles(t *testing.T) {
 			agent_id TEXT PRIMARY KEY,
 			flow_instance TEXT,
 			role TEXT NOT NULL,
-			model_tier TEXT NOT NULL,
+			model TEXT NOT NULL,
 			llm_backend TEXT NOT NULL DEFAULT 'api' CHECK (llm_backend IN ('api', 'cli_test', 'openai_compatible', 'mock', 'local')),
 			conversation_mode TEXT NOT NULL,
 			parent_agent_id TEXT,
@@ -162,7 +163,7 @@ func TestSQLiteSchemaStoreMigratesLegacyAgentLLMBackendProfiles(t *testing.T) {
 		t.Fatalf("create legacy sqlite agents: %v", err)
 	}
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
-			INSERT INTO agents (agent_id, role, model_tier, llm_backend, conversation_mode)
+			INSERT INTO agents (agent_id, role, model, llm_backend, conversation_mode)
 			VALUES
 				('agent-api', 'worker', 'sonnet', 'api', 'task'),
 				('agent-cli', 'worker', 'sonnet', 'cli_test', 'task'),
@@ -216,10 +217,10 @@ func TestSQLiteSchemaStoreMigratesLegacyAgentLLMBackendProfiles(t *testing.T) {
 			t.Fatalf("%s llm_backend = %q, want %q (all rows %#v)", id, got[id], want, got)
 		}
 	}
-	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO agents (agent_id, role, model_tier, llm_backend, conversation_mode) VALUES ('agent-legacy', 'worker', 'sonnet', 'api', 'task')`); err == nil {
+	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO agents (agent_id, role, model, llm_backend, conversation_mode) VALUES ('agent-legacy', 'worker', 'sonnet', 'api', 'task')`); err == nil {
 		t.Fatal("insert legacy sqlite llm_backend api succeeded after migration")
 	}
-	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO agents (agent_id, role, model_tier, conversation_mode) VALUES ('agent-default', 'worker', 'sonnet', 'task')`); err != nil {
+	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO agents (agent_id, role, model, conversation_mode) VALUES ('agent-default', 'worker', 'sonnet', 'task')`); err != nil {
 		t.Fatalf("insert default sqlite llm_backend after migration: %v", err)
 	}
 	var defaultBackend string
@@ -282,6 +283,104 @@ func TestSQLiteSchemaStoreMigratesLegacyAgentLLMBackendProfiles(t *testing.T) {
 			VALUES ('session-missing', 'missing-agent', 'scope-missing')
 		`); err == nil {
 		t.Fatal("insert sqlite child session with missing agent succeeded after migration")
+	}
+}
+
+func TestSQLiteSchemaStoreEnsureAgentModelAliasesMigratesLegacyModelTier(t *testing.T) {
+	ctx := context.Background()
+	sqliteStore, err := NewSQLiteSchemaStore(filepath.Join(t.TempDir(), "runtime.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteSchemaStore: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := sqliteStore.Close(); err != nil {
+			t.Fatalf("close sqlite schema store: %v", err)
+		}
+	})
+	if _, err := sqliteStore.DB.ExecContext(ctx, `
+		CREATE TABLE agents (
+			agent_id TEXT PRIMARY KEY,
+			role TEXT NOT NULL,
+			model_tier TEXT,
+			conversation_mode TEXT NOT NULL
+		)
+	`); err != nil {
+		t.Fatalf("create legacy sqlite agents: %v", err)
+	}
+	if _, err := sqliteStore.DB.ExecContext(ctx, `
+		INSERT INTO agents (agent_id, role, model_tier, conversation_mode)
+		VALUES
+			('agent-haiku', 'worker', 'haiku', 'task'),
+			('agent-low-cost', 'worker', 'low_cost', 'task'),
+			('agent-sonnet', 'worker', 'sonnet', 'task'),
+			('agent-general', 'worker', 'general', 'task'),
+			('agent-generic', 'worker', 'generic', 'task')
+	`); err != nil {
+		t.Fatalf("seed legacy sqlite agents: %v", err)
+	}
+
+	if err := sqliteStore.ensureSQLiteAgentModelAliases(ctx); err != nil {
+		t.Fatalf("ensureSQLiteAgentModelAliases: %v", err)
+	}
+	rows, err := sqliteStore.DB.QueryContext(ctx, `SELECT agent_id, model FROM agents ORDER BY agent_id`)
+	if err != nil {
+		t.Fatalf("query migrated sqlite agent models: %v", err)
+	}
+	defer rows.Close()
+	got := map[string]string{}
+	for rows.Next() {
+		var id, model string
+		if err := rows.Scan(&id, &model); err != nil {
+			t.Fatalf("scan migrated sqlite agent model: %v", err)
+		}
+		got[id] = model
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read migrated sqlite agent models: %v", err)
+	}
+	want := map[string]string{
+		"agent-haiku":    "cheap",
+		"agent-low-cost": "cheap",
+		"agent-sonnet":   "regular",
+		"agent-general":  "regular",
+		"agent-generic":  "regular",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("migrated sqlite models = %#v, want %#v", got, want)
+	}
+}
+
+func TestSQLiteSchemaStoreEnsureAgentModelAliasesRejectsUnmappableLegacyModelTier(t *testing.T) {
+	ctx := context.Background()
+	sqliteStore, err := NewSQLiteSchemaStore(filepath.Join(t.TempDir(), "runtime.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteSchemaStore: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := sqliteStore.Close(); err != nil {
+			t.Fatalf("close sqlite schema store: %v", err)
+		}
+	})
+	if _, err := sqliteStore.DB.ExecContext(ctx, `
+		CREATE TABLE agents (
+			agent_id TEXT PRIMARY KEY,
+			role TEXT NOT NULL,
+			model_tier TEXT,
+			conversation_mode TEXT NOT NULL
+		)
+	`); err != nil {
+		t.Fatalf("create legacy sqlite agents: %v", err)
+	}
+	if _, err := sqliteStore.DB.ExecContext(ctx, `
+		INSERT INTO agents (agent_id, role, model_tier, conversation_mode)
+		VALUES ('agent-unknown', 'worker', 'opus', 'task')
+	`); err != nil {
+		t.Fatalf("seed legacy sqlite agent: %v", err)
+	}
+
+	err = sqliteStore.ensureSQLiteAgentModelAliases(ctx)
+	if err == nil || !strings.Contains(err.Error(), "cannot map 1 legacy model_tier rows") {
+		t.Fatalf("ensureSQLiteAgentModelAliases error = %v, want unmappable legacy model_tier failure", err)
 	}
 }
 

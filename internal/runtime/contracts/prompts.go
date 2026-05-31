@@ -598,7 +598,7 @@ func promptReservedConfigKeys() map[string]bool {
 		"workspace_class":    true,
 		"flow_path":          true,
 		"manager_fallback":   true,
-		"model_tier":         true,
+		"model":              true,
 		"conversation_mode":  true,
 		"max_turns_per_task": true,
 		"constraints":        true,

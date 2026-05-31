@@ -1,6 +1,8 @@
 package contracts
 
 import (
+	"fmt"
+
 	"gopkg.in/yaml.v3"
 	"strings"
 	"swarm/internal/runtime/core/paths"
@@ -1058,7 +1060,7 @@ type AgentRegistryEntry struct {
 	WorkspaceClass         string                          `yaml:"workspace_class"`
 	ManagerFallback        string                          `yaml:"manager_fallback"`
 	NodeType               string                          `yaml:"node_type"`
-	ModelTier              string                          `yaml:"model_tier"`
+	Model                  string                          `yaml:"model"`
 	ConversationMode       string                          `yaml:"conversation_mode"`
 	SessionScope           string                          `yaml:"session_scope"`
 	MaxTurnsPerTask        int                             `yaml:"max_turns_per_task"`
@@ -1071,6 +1073,24 @@ type AgentRegistryEntry struct {
 	FlowDataAccess         []string                        `yaml:"flow_data_access" json:"flow_data_access,omitempty"`
 	EmitEvents             []string                        `yaml:"emit_events"`
 	Implementation         string                          `yaml:"implementation"`
+}
+
+type agentRegistryEntryYAML AgentRegistryEntry
+
+func (e *AgentRegistryEntry) UnmarshalYAML(value *yaml.Node) error {
+	if value != nil && value.Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(value.Content); i += 2 {
+			if strings.TrimSpace(value.Content[i].Value) == "model_tier" {
+				return fmt.Errorf("RETIRED: agent field model_tier is retired; use model")
+			}
+		}
+	}
+	var decoded agentRegistryEntryYAML
+	if err := value.Decode(&decoded); err != nil {
+		return err
+	}
+	*e = AgentRegistryEntry(decoded)
+	return nil
 }
 
 func (e AgentRegistryEntry) ConfiguredTools() []string {

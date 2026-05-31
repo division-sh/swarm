@@ -126,12 +126,12 @@ func TestValidate_OpenAICompatibleRequiresProfileOwnedConfig(t *testing.T) {
 		t.Fatalf("Validate error = %v, want openai-compatible base url requirement", err)
 	}
 	c.LLM.OpenAICompatible.BaseURL = "https://example.test/v1"
-	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "llm.openai_compatible.default_model") {
-		t.Fatalf("Validate error = %v, want openai-compatible model requirement", err)
-	}
-	c.LLM.OpenAICompatible.DefaultModel = "gpt-compatible"
 	if err := c.Validate(); err != nil {
 		t.Fatalf("Validate: %v", err)
+	}
+	c.LLM.OpenAICompatible.DefaultModel = "gpt-compatible"
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "llm.models") {
+		t.Fatalf("Validate error = %v, want retired model config guidance", err)
 	}
 }
 

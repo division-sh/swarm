@@ -11,7 +11,6 @@ import (
 	runtimeactors "swarm/internal/runtime/core/actors"
 	runtimedelivery "swarm/internal/runtime/deliverylifecycle"
 	"swarm/internal/runtime/diaglog"
-	llmselection "swarm/internal/runtime/llm/selection"
 	"swarm/internal/runtime/sessions"
 )
 
@@ -34,12 +33,16 @@ func publishAgentStarted(ctx context.Context, publisher EventPublisher, session 
 	}
 	actor, _ := runtimeactors.ActorFromContext(ctx)
 	payload := map[string]any{
-		"agent_id":          strings.TrimSpace(session.AgentID),
-		"flow_instance":     nil,
-		"conversation_mode": strings.TrimSpace(session.ConversationMode),
-		"session_scope":     strings.TrimSpace(session.SessionScope),
-		"model_tier":        sessionModelTier(actor),
-		"timestamp":         time.Now().UTC().Format(time.RFC3339Nano),
+		"agent_id":               strings.TrimSpace(session.AgentID),
+		"flow_instance":          nil,
+		"conversation_mode":      strings.TrimSpace(session.ConversationMode),
+		"session_scope":          strings.TrimSpace(session.SessionScope),
+		"model":                  strings.TrimSpace(actor.Model),
+		"llm_backend":            strings.TrimSpace(actor.LLMBackend),
+		"resolved_llm_provider":  strings.TrimSpace(actor.ResolvedLLMProvider),
+		"resolved_llm_transport": strings.TrimSpace(actor.ResolvedLLMTransport),
+		"resolved_model":         strings.TrimSpace(actor.ResolvedModel),
+		"timestamp":              time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	if flowInstance := strings.TrimSpace(actor.CanonicalFlowPath()); flowInstance != "" && strings.TrimSpace(session.SessionScope) == sessions.SessionScopeEntity.String() {
 		payload["flow_instance"] = flowInstance
@@ -96,8 +99,4 @@ func requireInboundDeliveryActiveForSession(ctx context.Context, publisher Event
 	}
 	logPublisherRuntime(ctx, publisher, level, "mark_delivery_in_progress_failed", message, session.AgentID, session.ID, entityID, detail, err)
 	return err
-}
-
-func sessionModelTier(actor runtimeactors.AgentConfig) string {
-	return llmselection.NormalizeModelTier(actor.ModelTier)
 }

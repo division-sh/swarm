@@ -59,7 +59,7 @@ type BundleCatalogAgentDefinition struct {
 	FlowInstance     string   `json:"flow_instance,omitempty"`
 	Role             string   `json:"role,omitempty"`
 	Type             string   `json:"type,omitempty"`
-	ModelTier        string   `json:"model_tier,omitempty"`
+	Model            string   `json:"model,omitempty"`
 	LLMBackend       string   `json:"llm_backend,omitempty"`
 	ConversationMode string   `json:"conversation_mode,omitempty"`
 	SessionScope     string   `json:"session_scope,omitempty"`
@@ -523,7 +523,7 @@ func projectBundleCatalogAgentDefinition(agentID, flowInstance string, def map[s
 		FlowInstance:     strings.TrimSpace(flowInstance),
 		Role:             stringFromMap(def, "role"),
 		Type:             stringFromMap(def, "type"),
-		ModelTier:        stringFromMap(def, "model_tier"),
+		Model:            stringFromMap(def, "model"),
 		LLMBackend:       stringFromMap(def, "llm_backend"),
 		ConversationMode: stringFromMap(def, "conversation_mode"),
 		SessionScope:     stringFromMap(def, "session_scope"),

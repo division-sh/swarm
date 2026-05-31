@@ -52,7 +52,7 @@ states:
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), `
 flow-agent:
   id: flow-agent
-  model_tier: sonnet
+  model: regular
   conversation_mode: session
   session_scope: flow
   subscriptions:
@@ -128,7 +128,7 @@ flows: []
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "extras", "agents.yaml"), `
 flow-agent:
   id: flow-agent
-  model_tier: sonnet
+  model: regular
   conversation_mode: session
   session_scope: flow
   subscriptions:
@@ -201,7 +201,7 @@ states:
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), `
 backend:
   id: backend-{vertical_id}
-  model_tier: sonnet
+  model: regular
   conversation_mode: session
   session_scope: flow
   subscriptions:
@@ -264,7 +264,7 @@ states:
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), `
 backend:
   id: backend-{flow_id}
-  model_tier: sonnet
+  model: regular
   conversation_mode: session
   session_scope: flow
   subscriptions:

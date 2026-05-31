@@ -83,10 +83,10 @@ func TestOpenAICompatibleRuntimeConversationToolBudgetAndPersistence(t *testing.
 	}
 
 	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{
-		ID:        "agent-1",
-		ModelTier: "low_cost",
-		EntityID:  "entity-1",
-		FlowPath:  "support/inst-1",
+		ID:       "agent-1",
+		Model:    "cheap",
+		EntityID: "entity-1",
+		FlowPath: "support/inst-1",
 	})
 	ctx = sessions.WithScope(ctx, sessions.RuntimeModeSession.String(), sessions.SessionScopeFlow.String(), "support/inst-1")
 	conv := NewConversation("agent-1", "task-1", "system prompt", []ToolDefinition{{
@@ -142,7 +142,8 @@ func TestOpenAICompatibleRuntimeFailsClosedWhenUsageMissing(t *testing.T) {
 
 	turns := &turnCapture{}
 	runtime := NewOpenAICompatibleRuntime(openAICompatibleTestConfig(server.URL), sessions.NewInMemoryRegistry(time.Second), "worker-1", turns, nil, nil, nil)
-	ctx := sessions.WithScope(context.Background(), sessions.RuntimeModeTask.String(), "", "task-1")
+	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{ID: "agent-1", Model: "regular"})
+	ctx = sessions.WithScope(ctx, sessions.RuntimeModeTask.String(), "", "task-1")
 	session, err := runtime.StartSession(ctx, "agent-1", "system", nil)
 	if err != nil {
 		t.Fatalf("StartSession: %v", err)
@@ -168,15 +169,15 @@ func TestAnthropicAPIRuntimeFailsClosedWhenUsageMissingForBudgetAccounting(t *te
 	runtime := NewAnthropicAPIRuntime(&config.Config{
 		LLM: config.LLMConfig{
 			ClaudeAPI: config.ClaudeAPIConfig{
-				DefaultModel: "claude-3-5-sonnet",
-				MaxRetries:   1,
+				MaxRetries: 1,
 			},
 		},
 	}, sessions.NewInMemoryRegistry(time.Second), "worker-1", turns, nil, budget, nil)
 	runtime.apiURL = server.URL
 	runtime.apiKey = "test-key"
 
-	ctx := sessions.WithScope(context.Background(), sessions.RuntimeModeTask.String(), "", "task-1")
+	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{ID: "agent-1", Model: "regular"})
+	ctx = sessions.WithScope(ctx, sessions.RuntimeModeTask.String(), "", "task-1")
 	session, err := runtime.StartSession(ctx, "agent-1", "system", nil)
 	if err != nil {
 		t.Fatalf("StartSession: %v", err)

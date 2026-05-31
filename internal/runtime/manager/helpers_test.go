@@ -17,7 +17,7 @@ func TestWithSystemPrompt_RejectsMalformedJSON(t *testing.T) {
 }
 
 func TestWithSystemPrompt_PreservesExistingConfigOnSuccess(t *testing.T) {
-	raw, err := WithSystemPrompt(json.RawMessage(`{"model":"haiku","tools":["a"]}`), "prompt")
+	raw, err := WithSystemPrompt(json.RawMessage(`{"model":"cheap","tools":["a"]}`), "prompt")
 	if err != nil {
 		t.Fatalf("WithSystemPrompt error = %v", err)
 	}
@@ -28,7 +28,7 @@ func TestWithSystemPrompt_PreservesExistingConfigOnSuccess(t *testing.T) {
 	if got := strings.TrimSpace(decoded["system_prompt"].(string)); got != "prompt" {
 		t.Fatalf("system_prompt = %q, want prompt", got)
 	}
-	if got := strings.TrimSpace(decoded["model"].(string)); got != "haiku" {
-		t.Fatalf("model = %q, want haiku", got)
+	if got := strings.TrimSpace(decoded["model"].(string)); got != "cheap" {
+		t.Fatalf("model = %q, want cheap", got)
 	}
 }

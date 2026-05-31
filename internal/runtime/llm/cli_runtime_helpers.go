@@ -830,7 +830,10 @@ func estimateCLIUsageTokens(in Message, out *Response, actor models.AgentConfig)
 	}
 
 	profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendClaudeCLI)
-	model, _ := llmselection.ResolveModelName(profile, llmselection.ModelResolution{ModelTier: actor.ModelTier})
+	model := strings.TrimSpace(actor.ResolvedModel)
+	if model == "" {
+		model, _ = llmselection.ResolveModelName(profile, llmselection.ModelResolution{Model: actor.Model})
+	}
 
 	return UsageTokens{
 		InputTokens:  inTokens,

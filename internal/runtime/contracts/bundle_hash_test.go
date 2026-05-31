@@ -111,7 +111,7 @@ agents:
 		"reviewer": {
 			Role:             "review",
 			Type:             "managed",
-			ModelTier:        "haiku",
+			Model:            "cheap",
 			PromptRef:        "flows/alpha/prompts/reviewer.md",
 			Subscriptions:    []string{"scan.requested"},
 			Tools:            []string{"web_search"},
@@ -345,7 +345,7 @@ func TestBundleCatalogProjectionConsumesCanonicalBundleHashOwner(t *testing.T) {
 researcher:
   id: researcher
   role: research
-  model_tier: tier2
+  model: regular
   conversation_mode: stateless
   subscriptions:
     - scan.requested
@@ -373,7 +373,7 @@ researcher:
 	}
 	agents := projection.ParsedJSON["agents"].(map[string]any)
 	researcher := agents["researcher"].(map[string]any)
-	if researcher["model_tier"] != "tier2" || researcher["conversation_mode"] != "stateless" {
+	if researcher["model"] != "regular" || researcher["conversation_mode"] != "stateless" {
 		t.Fatalf("projected researcher = %#v", researcher)
 	}
 	if _, ok := researcher["status"]; ok {

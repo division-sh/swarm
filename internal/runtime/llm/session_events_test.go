@@ -99,9 +99,9 @@ func TestAnthropicAPIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 	publisher := &eventPublisherStub{}
 	runtime := NewAnthropicAPIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, publisher)
 	ctx := runtimeactors.WithActor(sessions.WithScope(context.Background(), sessions.RuntimeModeTask.String(), "", "task-1"), runtimeactors.AgentConfig{
-		ID:        "agent-1",
-		ModelTier: "sonnet",
-		EntityID:  "entity-1",
+		ID:       "agent-1",
+		Model:    "regular",
+		EntityID: "entity-1",
 	})
 
 	s, err := runtime.StartSession(ctx, "agent-1", "system", nil)
@@ -134,8 +134,8 @@ func TestAnthropicAPIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 	if got := payload["conversation_mode"]; got != sessions.RuntimeModeTask.String() {
 		t.Fatalf("conversation_mode = %#v, want task", got)
 	}
-	if got := payload["model_tier"]; got != "sonnet" {
-		t.Fatalf("model_tier = %#v, want sonnet", got)
+	if got := payload["model"]; got != "regular" {
+		t.Fatalf("model = %#v, want regular", got)
 	}
 	if evt.EntityID() != "entity-1" {
 		t.Fatalf("entity_id = %q, want entity-1", evt.EntityID())
@@ -146,8 +146,8 @@ func TestClaudeCLIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 	publisher := &eventPublisherStub{}
 	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil, publisher)
 	ctx := runtimeactors.WithActor(sessions.WithScope(context.Background(), sessions.RuntimeModeTask.String(), "", "task-1"), runtimeactors.AgentConfig{
-		ID:        "agent-2",
-		ModelTier: "haiku",
+		ID:    "agent-2",
+		Model: "cheap",
 	})
 
 	s, err := runtime.StartSession(ctx, "agent-2", "system", nil)
@@ -177,8 +177,8 @@ func TestClaudeCLIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 	if got := payload["agent_id"]; got != "agent-2" {
 		t.Fatalf("agent_id = %#v, want agent-2", got)
 	}
-	if got := payload["model_tier"]; got != "haiku" {
-		t.Fatalf("model_tier = %#v, want haiku", got)
+	if got := payload["model"]; got != "cheap" {
+		t.Fatalf("model = %#v, want cheap", got)
 	}
 }
 
@@ -771,7 +771,7 @@ func TestAnthropicAPIRuntime_ContinueSessionReMarksInboundDeliveryForReusedSessi
 		),
 		runtimeactors.AgentConfig{
 			ID:           "agent-1",
-			ModelTier:    "sonnet",
+			Model:        "regular",
 			SessionScope: sessions.SessionScopeFlow.String(),
 			FlowPath:     "support/inst-1",
 		},
@@ -813,7 +813,7 @@ func TestAnthropicAPIRuntime_ContinueSessionFailsClosedWhenDeliveryRestampFails(
 		),
 		runtimeactors.AgentConfig{
 			ID:           "agent-1",
-			ModelTier:    "sonnet",
+			Model:        "regular",
 			SessionScope: sessions.SessionScopeFlow.String(),
 			FlowPath:     "support/inst-1",
 		},
@@ -848,7 +848,7 @@ func TestClaudeCLIRuntime_ContinueSessionFailsClosedWhenDeliveryRestampFails(t *
 		),
 		runtimeactors.AgentConfig{
 			ID:           "agent-1",
-			ModelTier:    "sonnet",
+			Model:        "regular",
 			SessionScope: sessions.SessionScopeFlow.String(),
 			FlowPath:     "support/inst-1",
 		},

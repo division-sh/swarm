@@ -59,11 +59,6 @@ type BaseURLSource struct {
 	Purpose   string
 }
 
-type ModelMap struct {
-	Default string
-	LowCost string
-}
-
 type Profile struct {
 	ID           string
 	Provider     string
@@ -75,13 +70,53 @@ type Profile struct {
 	ReservedNote string
 }
 
+type ModelAliases map[string]map[string]string
+
 type ModelResolution struct {
-	ModelTier    string
-	Models       ModelMap
-	ForceLowCost bool
+	Model  string
+	Models ModelAliases
+}
+
+type ResolvedModel struct {
+	ModelAlias    string
+	ConcreteModel string
+	Backend       string
+	Provider      string
+	Transport     string
+	RuntimeMode   string
 }
 
 type EnvLookup func(string) (string, bool)
+
+const (
+	ModelAliasCheap    = "cheap"
+	ModelAliasRegular  = "regular"
+	ModelAliasFrontier = "frontier"
+
+	ClaudeDefaultModelEnv = "SWARM_CLAUDE_DEFAULT_MODEL"
+	ClaudeHaikuModelEnv   = "SWARM_CLAUDE_HAIKU_MODEL"
+
+	ClaudeDefaultModelConfig = "llm.claude_api.default_model"
+	ClaudeHaikuModelConfig   = "llm.claude_api.haiku_model"
+)
+
+var builtInModelAliases = ModelAliases{
+	ModelAliasCheap: {
+		BackendAnthropic:        "claude-3-5-haiku",
+		BackendClaudeCLI:        "haiku",
+		BackendOpenAICompatible: "gpt-compatible-mini",
+	},
+	ModelAliasRegular: {
+		BackendAnthropic:        "claude-3-5-sonnet",
+		BackendClaudeCLI:        "sonnet",
+		BackendOpenAICompatible: "gpt-compatible",
+	},
+	ModelAliasFrontier: {
+		BackendAnthropic:        "claude-3-opus",
+		BackendClaudeCLI:        "opus",
+		BackendOpenAICompatible: "gpt-compatible-frontier",
+	},
+}
 
 var profiles = map[string]Profile{
 	BackendAnthropic: {
@@ -227,6 +262,23 @@ func RejectRetiredOpenAICompatibleBaseURLEnv(lookup EnvLookup) error {
 	return nil
 }
 
+func RejectRetiredModelEnv(lookup EnvLookup) error {
+	if lookup == nil {
+		return nil
+	}
+	for _, env := range []string{
+		ClaudeDefaultModelEnv,
+		ClaudeHaikuModelEnv,
+		OpenAICompatibleDefaultModelEnv,
+		OpenAICompatibleLowCostModelEnv,
+	} {
+		if _, ok := lookup(env); ok {
+			return fmt.Errorf("%s is retired for model selection; use %s", env, "llm.models")
+		}
+	}
+	return nil
+}
+
 func CredentialValue(profile Profile, lookup EnvLookup) string {
 	if lookup == nil || strings.TrimSpace(profile.Credential.EnvVar) == "" {
 		return ""
@@ -267,42 +319,151 @@ func RequireCredential(profile Profile, lookup EnvLookup) error {
 	return nil
 }
 
+func BuiltInModelAliases() ModelAliases {
+	return cloneModelAliases(builtInModelAliases)
+}
+
+func EffectiveModelAliases(overrides ModelAliases) ModelAliases {
+	models := BuiltInModelAliases()
+	for alias, targets := range overrides {
+		alias = NormalizeModelAlias(alias)
+		if alias == "" {
+			continue
+		}
+		if models[alias] == nil {
+			models[alias] = map[string]string{}
+		}
+		for backend, model := range targets {
+			backend = strings.TrimSpace(backend)
+			model = strings.TrimSpace(model)
+			if backend == "" || model == "" {
+				continue
+			}
+			models[alias][backend] = model
+		}
+	}
+	return models
+}
+
+func ValidateModelAliases(models ModelAliases) error {
+	for alias, targets := range models {
+		if _, err := RequireModelAlias(alias); err != nil {
+			return err
+		}
+		if len(targets) == 0 {
+			return fmt.Errorf("%s alias %q must declare at least one backend target", "llm.models", strings.TrimSpace(alias))
+		}
+		for backend, model := range targets {
+			profile, err := ResolvePersistedBackend(backend)
+			if err != nil {
+				return fmt.Errorf("%s alias %q backend %q: %w", "llm.models", strings.TrimSpace(alias), strings.TrimSpace(backend), err)
+			}
+			if !profile.Active {
+				return fmt.Errorf("%s alias %q targets reserved backend %q", "llm.models", strings.TrimSpace(alias), profile.ID)
+			}
+			if strings.TrimSpace(model) == "" {
+				return fmt.Errorf("%s alias %q backend %q model is required", "llm.models", strings.TrimSpace(alias), profile.ID)
+			}
+		}
+	}
+	return nil
+}
+
+func ResolveModel(profile Profile, req ModelResolution) (ResolvedModel, error) {
+	if !profile.Active {
+		return ResolvedModel{}, fmt.Errorf("llm backend profile %q is not active", profile.ID)
+	}
+	alias, err := RequireModelAlias(req.Model)
+	if err != nil {
+		return ResolvedModel{}, err
+	}
+	models := EffectiveModelAliases(req.Models)
+	if err := ValidateModelAliases(models); err != nil {
+		return ResolvedModel{}, err
+	}
+	targets := models[alias]
+	if len(targets) == 0 {
+		return ResolvedModel{}, fmt.Errorf("%s alias %q is not configured", "llm.models", alias)
+	}
+	concrete := strings.TrimSpace(targets[profile.ID])
+	if concrete == "" {
+		return ResolvedModel{}, fmt.Errorf("%s alias %q does not resolve for backend %q", "llm.models", alias, profile.ID)
+	}
+	return ResolvedModel{
+		ModelAlias:    alias,
+		ConcreteModel: concrete,
+		Backend:       profile.ID,
+		Provider:      profile.Provider,
+		Transport:     profile.Transport,
+		RuntimeMode:   profile.RuntimeMode,
+	}, nil
+}
+
 func ResolveModelName(profile Profile, req ModelResolution) (string, error) {
-	tier := NormalizeModelTier(req.ModelTier)
-	switch profile.ID {
-	case BackendAnthropic:
-		model := strings.TrimSpace(req.Models.Default)
-		if req.ForceLowCost || tier == "haiku" {
-			if lowCost := strings.TrimSpace(req.Models.LowCost); lowCost != "" {
-				model = lowCost
-			}
-		}
-		if model == "" {
-			return "", fmt.Errorf("llm.claude_api.default_model is required for backend %q", profile.ID)
-		}
-		return model, nil
-	case BackendClaudeCLI:
-		return tier, nil
-	case BackendOpenAICompatible:
-		model := strings.TrimSpace(req.Models.Default)
-		if req.ForceLowCost || tier == "low_cost" || tier == "haiku" {
-			if lowCost := strings.TrimSpace(req.Models.LowCost); lowCost != "" {
-				model = lowCost
-			}
-		}
-		if model == "" {
-			return "", fmt.Errorf("%s is required for backend %q", OpenAICompatibleDefaultModelConfig, profile.ID)
-		}
-		return model, nil
+	resolved, err := ResolveModel(profile, req)
+	if err != nil {
+		return "", err
+	}
+	return resolved.ConcreteModel, nil
+}
+
+func RequireModelAlias(raw string) (string, error) {
+	alias := NormalizeModelAlias(raw)
+	if alias == "" {
+		return "", fmt.Errorf("model is required; use one of %s or a configured llm.models alias", strings.Join(BuiltInModelAliasNames(), ", "))
+	}
+	if !wellFormedModelAlias(alias) {
+		return "", fmt.Errorf("model alias %q is invalid; use letters, digits, '.', '_', ':', or '-'", alias)
+	}
+	return alias, nil
+}
+
+func NormalizeModelAlias(raw string) string {
+	return strings.TrimSpace(raw)
+}
+
+func BuiltInModelAliasNames() []string {
+	return []string{ModelAliasCheap, ModelAliasRegular, ModelAliasFrontier}
+}
+
+func MigrateLegacyModelTier(raw string) (string, bool, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "":
+		return "", false, nil
+	case "haiku", "low_cost":
+		return ModelAliasCheap, true, nil
+	case "sonnet", "general", "generic":
+		return ModelAliasRegular, true, nil
 	default:
-		return "", fmt.Errorf("llm backend profile %q does not support model resolution", profile.ID)
+		return "", true, fmt.Errorf("legacy model_tier %q cannot be migrated; use model alias cheap, regular, or frontier", strings.TrimSpace(raw))
 	}
 }
 
-func NormalizeModelTier(raw string) string {
-	tier := strings.TrimSpace(raw)
-	if tier == "" {
-		return "generic"
+func cloneModelAliases(in ModelAliases) ModelAliases {
+	out := make(ModelAliases, len(in))
+	for alias, targets := range in {
+		copied := make(map[string]string, len(targets))
+		for backend, model := range targets {
+			copied[backend] = model
+		}
+		out[alias] = copied
 	}
-	return tier
+	return out
+}
+
+func wellFormedModelAlias(alias string) bool {
+	if alias == "" {
+		return false
+	}
+	for _, r := range alias {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case r >= '0' && r <= '9':
+		case r == '.', r == '_', r == ':', r == '-':
+		default:
+			return false
+		}
+	}
+	return true
 }

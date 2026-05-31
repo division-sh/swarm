@@ -464,7 +464,7 @@ func seedConversationForkSource(t *testing.T, db execQueryer, base time.Time) co
 		t.Fatalf("seed run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agents (agent_id, role, model_tier, conversation_mode)
+		INSERT INTO agents (agent_id, role, model, conversation_mode)
 		VALUES ($1, 'researcher', 'haiku', 'session')
 	`, source.agentID); err != nil {
 		t.Fatalf("seed agent: %v", err)

@@ -118,7 +118,7 @@ func TestAgentViewUsesAgentGetAndRendersRefsOnly(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Agent agent-1",
-		"role=reviewer type=worker status=running model_tier=default conversation_mode=task session_scope=global",
+		"role=reviewer type=worker status=running model=default conversation_mode=task session_scope=global",
 		"current_session_ref: session_id=session-1 started_at=2026-05-18T03:00:00Z",
 		"last_turn_ref: turn_id=turn-1 completed_at=2026-05-18T03:05:00Z parse_ok=true error=-",
 	} {
@@ -296,7 +296,7 @@ func agentSummaryResult(agentID, role, status string) map[string]any {
 		"agent_id":          agentID,
 		"role":              role,
 		"type":              "worker",
-		"model_tier":        "default",
+		"model":             "default",
 		"conversation_mode": "task",
 		"session_scope":     "global",
 		"status":            status,

@@ -523,7 +523,7 @@ func TestOperatorBundleCatalogHandlersExposeStoreOwner(t *testing.T) {
 					AgentID:          "researcher",
 					Role:             "research",
 					Type:             "managed",
-					ModelTier:        "haiku",
+					Model:            "cheap",
 					LLMBackend:       "claude",
 					ConversationMode: "session",
 					SessionScope:     "flow",
@@ -576,7 +576,7 @@ func TestOperatorBundleCatalogHandlersExposeStoreOwner(t *testing.T) {
 	}
 	agentRows := asMap(t, agents.Result)["agents"].([]any)
 	agent := asMap(t, agentRows[0])
-	if agent["agent_id"] != "researcher" || agent["model_tier"] != "haiku" {
+	if agent["agent_id"] != "researcher" || agent["model"] != "cheap" {
 		t.Fatalf("bundle.agents row = %#v", agent)
 	}
 	for _, runtimeKey := range []string{"status", "runtime_state", "queue", "active", "session_id"} {
@@ -666,7 +666,7 @@ func TestOperatorBundleRegisterHandlersMaterializeCanonicalProjectionAndIdempote
 	}
 	agents := asMap(t, upsert.ParsedJSON["agents"])
 	researcher := asMap(t, agents["researcher"])
-	if researcher["model_tier"] != "tier2" || researcher["conversation_mode"] != "stateless" {
+	if researcher["model"] != "regular" || researcher["conversation_mode"] != "stateless" {
 		t.Fatalf("projected researcher = %#v", researcher)
 	}
 
@@ -798,7 +798,7 @@ files:
       researcher:
         id: researcher
         role: research
-        model_tier: tier2
+        model: regular
         conversation_mode: stateless
         subscriptions:
           - scan.requested
