@@ -13,6 +13,7 @@ import (
 	"swarm/internal/events"
 	"swarm/internal/runtime/accprojection"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimeeventidentity "swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 	"swarm/internal/runtime/core/identity"
 	"swarm/internal/runtime/core/paths"
@@ -941,9 +942,12 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 		if eventType == "" {
 			continue
 		}
+		eventType = e.resolveDeclarativeEmitEventType(frame, eventType)
+		emitSpec := spec.Emit
+		emitSpec.Event = eventType
 		frame.state.SetFanOut("item", item)
 		payload := map[string]any{}
-		transformed, err := emitFieldsPayload(e.currentContext(frame), frame.state, spec.Emit, workflowexpr.ValueExpressionOptions{AllowBareItem: true})
+		transformed, err := emitFieldsPayload(e.currentContext(frame), frame.state, emitSpec, workflowexpr.ValueExpressionOptions{AllowBareItem: true})
 		if err != nil {
 			return false, err
 		}
@@ -954,7 +958,7 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		if _, err := e.queueEmitIntentForSpec(frame, spec.Emit, eventType, shaped); err != nil {
+		if _, err := e.queueEmitIntentForSpec(frame, emitSpec, eventType, shaped); err != nil {
 			return false, err
 		}
 	}
@@ -1311,6 +1315,8 @@ func (e *Executor) stepEmits(frame *executionFrame) error {
 	if eventType == "" {
 		return nil
 	}
+	eventType = e.resolveDeclarativeEmitEventType(frame, eventType)
+	emitSpec.Event = eventType
 	payload := map[string]any{}
 	if len(frame.state.Transformed) > 0 {
 		payload = frame.state.Transformed
@@ -1930,6 +1936,79 @@ func (e *Executor) shapeEmitPayloadWithContext(ctx context.Context, frame *execu
 	return e.deps.PayloadShaper.ShapeEmitPayload(ctx, req, strings.TrimSpace(eventType), cloned)
 }
 
+func (e *Executor) resolveDeclarativeEmitEventType(frame *executionFrame, eventType string) string {
+	eventType = runtimeeventidentity.Normalize(eventType)
+	if eventType == "" || e == nil || e.deps.Source == nil || frame == nil {
+		return eventType
+	}
+	flowID := strings.TrimSpace(frame.req.FlowID.String())
+	if flowID == "" {
+		return eventType
+	}
+	scope, ok := semanticview.FlowScopeByID(e.deps.Source, flowID)
+	if !ok {
+		return eventType
+	}
+	sourceRoute := emitSourceRoute(frame)
+	namespacePath := emitNamespaceSourcePath(scope, sourceRoute.FlowInstance)
+	localEvent := emitScopeLocalEventName(scope, namespacePath, eventType)
+	if localEvent == "" {
+		return eventType
+	}
+	if namespacePath == "" {
+		return localEvent
+	}
+	return namespacePath + "/" + localEvent
+}
+
+func emitNamespaceSourcePath(scope semanticview.FlowScope, sourcePath string) string {
+	scopePath := runtimeeventidentity.Normalize(scope.Path)
+	sourcePath = runtimeeventidentity.Normalize(sourcePath)
+	if scopePath == "" {
+		return ""
+	}
+	if !strings.EqualFold(strings.TrimSpace(scope.Mode), "template") || sourcePath == "" {
+		return scopePath
+	}
+	if sourcePath == scopePath || strings.HasPrefix(sourcePath, scopePath+"/") {
+		return sourcePath
+	}
+	return scopePath
+}
+
+func emitScopeLocalEventName(scope semanticview.FlowScope, sourcePath, eventType string) string {
+	eventType = runtimeeventidentity.Normalize(eventType)
+	if eventType == "" {
+		return ""
+	}
+	localEvents := emitScopeLocalEvents(scope)
+	if _, ok := localEvents[eventType]; ok {
+		return eventType
+	}
+	for _, prefix := range []string{sourcePath, scope.Path} {
+		prefix = runtimeeventidentity.Normalize(prefix)
+		if prefix == "" || !strings.HasPrefix(eventType, prefix+"/") {
+			continue
+		}
+		local := strings.TrimPrefix(eventType, prefix+"/")
+		if _, ok := localEvents[local]; ok {
+			return local
+		}
+	}
+	return ""
+}
+
+func emitScopeLocalEvents(scope semanticview.FlowScope) map[string]struct{} {
+	out := map[string]struct{}{}
+	for _, eventType := range scope.OutputEvents {
+		eventType = runtimeeventidentity.Normalize(eventType)
+		if eventType != "" {
+			out[eventType] = struct{}{}
+		}
+	}
+	return out
+}
+
 func (e *Executor) newEmitIntent(frame *executionFrame, spec runtimecontracts.EmitSpec, eventType string, payload map[string]any, chainDepth int) (EmitIntent, error) {
 	encoded, err := encodePayload(payload)
 	if err != nil {
@@ -1942,9 +2021,9 @@ func (e *Executor) newEmitIntent(frame *executionFrame, spec runtimecontracts.Em
 			createdAt = last.Add(time.Nanosecond)
 		}
 	}
-	entityID := strings.TrimSpace(firstNonEmpty(
-		frame.req.EntityID.String(),
-	))
+	sourceRoute := emitSourceRoute(frame)
+	entityID := sourceRoute.EntityID
+	flowInstance := sourceRoute.FlowInstance
 	evt := events.Event{
 		Type:       events.EventType(strings.TrimSpace(eventType)),
 		Payload:    encoded,
@@ -1954,18 +2033,9 @@ func (e *Executor) newEmitIntent(frame *executionFrame, spec runtimecontracts.Em
 	if entityID != "" {
 		evt = evt.WithEntityID(entityID)
 	}
-	flowInstance := firstNonEmpty(
-		normalizedFlowInstanceCandidate(asString(frame.req.State.StateCarrier.Metadata["flow_path"])),
-		normalizedFlowInstanceCandidate(frame.req.Event.FlowInstance()),
-	)
 	if flowInstance != "" {
 		evt = evt.WithFlowInstance(flowInstance)
 	}
-	sourceRoute := events.RouteIdentity{
-		FlowID:       strings.TrimSpace(frame.req.FlowID.String()),
-		FlowInstance: flowInstance,
-		EntityID:     entityID,
-	}.Normalized()
 	if !sourceRoute.Empty() {
 		evt = evt.WithSourceRoute(sourceRoute)
 	}
@@ -2061,6 +2131,21 @@ func parentRouteFromState(metadata map[string]any) events.RouteIdentity {
 		FlowID:       asString(metadata["parent_flow_id"]),
 		FlowInstance: flowInstance,
 		EntityID:     entityID,
+	}.Normalized()
+}
+
+func emitSourceRoute(frame *executionFrame) events.RouteIdentity {
+	if frame == nil {
+		return events.RouteIdentity{}
+	}
+	flowInstance := firstNonEmpty(
+		normalizedFlowInstanceCandidate(asString(frame.req.State.StateCarrier.Metadata["flow_path"])),
+		normalizedFlowInstanceCandidate(frame.req.Event.FlowInstance()),
+	)
+	return events.RouteIdentity{
+		FlowID:       strings.TrimSpace(frame.req.FlowID.String()),
+		FlowInstance: flowInstance,
+		EntityID:     strings.TrimSpace(frame.req.EntityID.String()),
 	}.Normalized()
 }
 

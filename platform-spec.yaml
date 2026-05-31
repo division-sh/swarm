@@ -6399,8 +6399,12 @@ observation_model:
     - Agent fixture emissions (agents are independent, their emissions route through the event loop separately)
     - Dead-lettered events (intercepted before delivery, recorded in dead_letters table instead)
     - Child flow auto_emit events (visible within the child, not in parent emission log)
-    naming: Events are recorded with their fully-qualified URI in the parent flow context. When a child flow node emits order.completed,
-      the parent sees child-flow-id/order.completed. Within the same flow, events use local names (no prefix).
+    naming: Events are recorded with the producer/source route as the event namespace authority. When a template child flow
+      instance emits order.completed, observers see the concrete producer instance path, for example
+      child-flow-id/child-instance-id/order.completed. When a static service flow emits a local output event targeted at a
+      template child, observers see the static producer flow path, for example service-flow/service.completed. Target routes
+      remain event.target or event.target_set delivery metadata and do not rewrite the emitted event name. Within the same
+      root flow, events use local names (no prefix).
     payload_rules:
       description: Rules for constructing emitted event payloads on supported system-node runtime emit surfaces.
       declarative_system_node_emit_surface:
