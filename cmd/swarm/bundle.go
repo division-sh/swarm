@@ -67,7 +67,7 @@ type bundleAgentDefinition struct {
 	FlowInstance     string   `json:"flow_instance,omitempty"`
 	Role             string   `json:"role,omitempty"`
 	Type             string   `json:"type,omitempty"`
-	ModelTier        string   `json:"model_tier,omitempty"`
+	Model            string   `json:"model,omitempty"`
 	LLMBackend       string   `json:"llm_backend,omitempty"`
 	ConversationMode string   `json:"conversation_mode,omitempty"`
 	SessionScope     string   `json:"session_scope,omitempty"`
@@ -383,7 +383,7 @@ func writeBundleAgentsHuman(w io.Writer, result bundleAgentsResult) {
 		appendKV("flow_instance", agent.FlowInstance)
 		appendKV("role", agent.Role)
 		appendKV("type", agent.Type)
-		appendKV("model_tier", agent.ModelTier)
+		appendKV("model", agent.Model)
 		appendKV("llm_backend", agent.LLMBackend)
 		appendKV("conversation_mode", agent.ConversationMode)
 		appendKV("session_scope", agent.SessionScope)
