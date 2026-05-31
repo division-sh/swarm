@@ -5497,10 +5497,12 @@ multi_bundle_persistence:
     canonical_hash_first_slice: '#979 / PR #1033'
     bundle_hash_naming: '#1001'
     run_fork_cli_authority_absorbed_from: '#1038'
+    serve_db_loaded_runtime_source: '#1020'
   authority_rule: >
     This section is the merge-bearing source authority for multi-bundle persistence, bundle identity, bundle-aware
     resume/delete/fork semantics, planned bundle API methods, and planned CLI command shape. The draft is now evidence
-    only. Database foundation, read-only bundle catalog APIs, and supported local serve ingest/source stamping now have
+    only. Database foundation, read-only bundle catalog APIs, supported local serve ingest/source stamping, and serial
+    Postgres-backed `swarm serve --bundle-hash` DB-loaded boot now have
     promoted implementation owners in this section. Remaining runtime, API handler, CLI, delete/fork/recovery, and
     generated OpenRPC publication work stays separately gated unless a later PR explicitly promotes and proves it.
   generated_artifact_policy:
@@ -5648,9 +5650,11 @@ multi_bundle_persistence:
     live_schema_boundary: >
       platform_tables.tables is the current runtime DDL source. #1013 promotes the bundles table and
       runs.bundle_hash/runs.bundle_source into the live schema foundation. Serve ingest/source stamping for local
-      `swarm serve --contracts` is promoted by multi_bundle_persistence.persistence_model.serve_ingest_projection.
-      Reader migration, API routing, CLI/fork behavior, delete/runtime cleanup, and public dual-accept naming remain
-      separately gated implementation work unless a later PR explicitly promotes and proves them.
+      `swarm serve --contracts` is promoted by multi_bundle_persistence.persistence_model.serve_ingest_projection;
+      serial Postgres-backed `swarm serve --bundle-hash` boot is promoted by
+      multi_bundle_persistence.persistence_model.serve_db_loaded_runtime_source. Reader migration, API routing,
+      CLI/fork behavior beyond this serve flag, delete/runtime cleanup, multi-bundle concurrency, and public
+      dual-accept naming remain separately gated implementation work unless a later PR explicitly promotes and proves them.
     bundles_table:
       planned_live_owner_after_migration: platform_tables.tables.bundles
       primary_key: bundle_hash
@@ -5707,6 +5711,29 @@ multi_bundle_persistence:
         - New-work routing and bundle_hash admission remain #1022.
         - Bundle register/delete APIs remain #1017/#1018/#1019.
         - SQLite runtime support remains blocked by #1087/#1088 unless separately gated.
+    serve_db_loaded_runtime_source:
+      status: implemented_for_serial_postgres_serve_bundle_hash
+      cli_flag: 'swarm serve --bundle-hash <bundle-v1:sha256:<64 lowercase hex>>'
+      canonical_store_owner: internal/store.PostgresStore.LoadBundleCatalogRuntimeRecord
+      runtime_source_owner: internal/runtime/contracts.LoadBundleCatalogRuntimeSource
+      serve_boot_owner: cmd/swarm.loadServeRuntimeBundleFromCatalog
+      source_fact_owner: cmd/swarm.prepareLoadedServeBundleSource
+      source_replacement_guard: cmd/swarm.runtimeProjectSupervisor.DisableSourceReplacement
+      supported_surface:
+        - Exactly one canonical bundle_hash is pinned for the process. The flag is mutually exclusive with --contracts and --dev.
+        - The mode is Postgres-only. SQLite, no-store, missing store, missing bundle row, malformed archive, missing bytes, hash mismatch, and noncanonical hash fail closed before runtime readiness.
+        - The runtime loader consumes stored bundles.content_yaml and raw bundles.data_blob bytes only; parsed_json is inspection output and is never a runtime source.
+        - The loader reconstructs platform spec, contract definition files, prompts, and flow data/ raw bytes into a process-owned temporary source, then recomputes BundleHash and requires it to equal the requested bundle_hash before runtime construction.
+        - Every run writer reachable under the booted runtime consumes BundleSourceFact with bundle_source=persisted and bundle_hash equal to the requested canonical hash.
+        - Runtime project OpenProject/ReloadProject source replacement is disabled while the process is pinned to a DB-loaded bundle source.
+        - External executable code, tools, container images, credentials, and host environment dependencies remain environment-owned and are not stored in the bundles row.
+      split_boundaries:
+        - Parallel multi-bundle runtime contexts and dispatcher/store isolation remain #981.
+        - Same-bundle selected-contract fork execution from DB bytes remains #1024.
+        - Cross-bundle fork routing remains #976.
+        - Create-new-work bundle_hash routing/admission remains #1022.
+        - Bundle CLI inventory and swarm fork consumers remain #1023/#989.
+        - Delete/runtime.nuke/lifecycle cleanup remains #987/#988/#998/#1008/#1009.
     runs_table:
       planned_live_owner_after_migration: platform_tables.tables.runs
       promoted_fields:
@@ -5895,7 +5922,7 @@ multi_bundle_persistence:
         Source runs with bundle_source ephemeral, deleted, or legacy return BUNDLE_UNAVAILABLE for fork admission because
         the server lacks authoritative persisted bundle bytes.
   cli_surface:
-    publication_status: source_authority_not_implemented_until_cli_api_runtime_children
+    publication_status: partial_runtime_serve_bundle_hash_implemented_other_cli_children_pending
     bundle_commands_planned:
       - swarm bundle list
       - swarm bundle show <bundle-hash>
@@ -5903,7 +5930,7 @@ multi_bundle_persistence:
       - swarm bundle register <path-or-archive>
       - swarm bundle delete <bundle-hash> [--force] [--dry-run] [--idempotency-key <key>]
     modified_commands_planned:
-      - swarm serve --bundle-hash <bundle_hash>
+      - swarm serve --bundle-hash <bundle_hash> (implemented serial Postgres DB-loaded process mode)
       - swarm serve --dev
       - swarm agents list --run-id <run-id>
       - swarm event publish <event-name> --bundle-hash <bundle_hash>
@@ -5949,7 +5976,17 @@ multi_bundle_persistence:
       reason: Forced bundle.delete preservation cleanup, mutex, quiescence, delivery/session/timer/container cleanup, and result projection are destructive-runtime implementation.
     serve_db_loaded_bundle:
       tracker: '#1020'
-      reason: swarm serve --bundle-hash DB-loaded YAML/data runtime boot mode is serve/runtime implementation and may depend on #981.
+      implementation_status: serial_postgres_single_bundle_process_promoted
+      runtime_owners:
+        - internal/store.PostgresStore.LoadBundleCatalogRuntimeRecord
+        - internal/runtime/contracts.LoadBundleCatalogRuntimeSource
+        - cmd/swarm.loadServeRuntimeBundleFromCatalog
+        - cmd/swarm.prepareLoadedServeBundleSource
+        - cmd/swarm.runtimeProjectSupervisor.DisableSourceReplacement
+      reason: >
+        swarm serve --bundle-hash DB-loaded YAML/data runtime boot mode is implemented for one canonical
+        Postgres-backed bundle_hash per process. Multi-bundle runtime concurrency and selected-contract fork
+        reuse remain split to #981/#1024.
     bundle_safe_list_read_scoping:
       tracker: '#1021'
       reason: agent/event/run/log/incident read/list method scoping and generated OpenRPC shape are API read-model implementation.

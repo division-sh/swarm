@@ -33,6 +33,7 @@ import (
 	runtimebootverify "swarm/internal/runtime/bootverify"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimecorrelation "swarm/internal/runtime/correlation"
 	runtimecredentials "swarm/internal/runtime/credentials"
 	runtimedestructivereset "swarm/internal/runtime/destructivereset"
 	runtimeingress "swarm/internal/runtime/ingress"
@@ -51,6 +52,8 @@ import (
 	workspace "swarm/internal/runtime/workspace"
 	"swarm/internal/store"
 	storebackend "swarm/internal/store/backendselection"
+	"swarm/internal/store/runbundle"
+	storerunlifecycle "swarm/internal/store/runlifecycle"
 )
 
 const (
@@ -161,6 +164,7 @@ type serveOptions struct {
 	ConfigPath           string
 	Backend              string
 	ContractsPath        string
+	BundleHash           string
 	PlatformSpecPath     string
 	StoreMode            string
 	StoreModeSet         bool
@@ -176,6 +180,33 @@ type serveOptions struct {
 	Output               io.Writer
 }
 
+type serveRuntimeBundle struct {
+	module           runtimepipeline.WorkflowModule
+	bundle           *runtimecontracts.WorkflowContractBundle
+	source           semanticview.Source
+	contractsRoot    string
+	platformSpecPath string
+	bootIdentity     runtimecontracts.BundleIdentity
+	bundleSourceFact runtimecorrelation.BundleSourceFact
+	dbLoaded         bool
+	cleanup          func() error
+}
+
+type dbLoadedServeRunForkAvailability struct {
+	bundleHash string
+}
+
+func (a dbLoadedServeRunForkAvailability) LoadRunBundleAvailability(_ context.Context, runID string) (runbundle.Availability, error) {
+	return runbundle.Availability{
+		RunID:            strings.TrimSpace(runID),
+		BundleHash:       strings.TrimSpace(a.bundleHash),
+		BundleSource:     storerunlifecycle.BundleSourcePersisted,
+		BundleRowPresent: true,
+		ErrorCode:        runbundle.CodeBundleUnavailable,
+		Cause:            "db_loaded_same_bundle_fork_split_to_1024",
+	}, nil
+}
+
 func defaultServeOptions() serveOptions {
 	return serveOptions{
 		StoreMode:          storebackend.ActiveDefaultBackend().String(),
@@ -185,6 +216,118 @@ func defaultServeOptions() serveOptions {
 		SelfCheck:          true,
 		RequireBundleMatch: true,
 	}
+}
+
+func (b serveRuntimeBundle) serveIdentityDetail() string {
+	if b.dbLoaded && strings.TrimSpace(b.bundleSourceFact.BundleHash) != "" {
+		return strings.TrimSpace(b.bundleSourceFact.BundleHash)
+	}
+	return strings.TrimSpace(b.bootIdentity.Fingerprint)
+}
+
+func serveConfigLoadDetail(configDetail string, resolvedPaths cliContractPlatformSpecPaths, opts serveOptions) string {
+	parts := []string{"config=" + strings.TrimSpace(configDetail)}
+	if hash := strings.TrimSpace(opts.BundleHash); hash != "" {
+		parts = append(parts, "bundle_hash="+hash)
+	} else {
+		parts = append(parts, "contracts="+filepath.Clean(resolvedPaths.ContractsPath))
+	}
+	return strings.Join(parts, " ")
+}
+
+func loadServeRuntimeBundle(ctx context.Context, repo string, stores storeBundle, resolvedPaths cliContractPlatformSpecPaths, opts serveOptions) (serveRuntimeBundle, error) {
+	if bundleHash := strings.TrimSpace(opts.BundleHash); bundleHash != "" {
+		return loadServeRuntimeBundleFromCatalog(ctx, repo, stores, bundleHash)
+	}
+	contractsRoot, err := normalizeContractsRoot(resolvedPaths.ContractsPath)
+	if err != nil {
+		return serveRuntimeBundle{}, fmt.Errorf("resolve contracts: %w", err)
+	}
+	module, bundle, err := newSwarmWorkflowModule(repo, contractsRoot, resolvedPaths.PlatformSpecPath)
+	if err != nil {
+		return serveRuntimeBundle{}, err
+	}
+	bootIdentity, err := runtimecontracts.BootBundleIdentity(bundle)
+	if err != nil {
+		return serveRuntimeBundle{}, fmt.Errorf("compute boot bundle identity: %w", err)
+	}
+	return serveRuntimeBundle{
+		module:           module,
+		bundle:           bundle,
+		source:           semanticview.Wrap(bundle),
+		contractsRoot:    contractsRoot,
+		platformSpecPath: resolvedPaths.PlatformSpecPath,
+		bootIdentity:     bootIdentity,
+	}, nil
+}
+
+func loadServeRuntimeBundleFromCatalog(ctx context.Context, repo string, stores storeBundle, bundleHash string) (serveRuntimeBundle, error) {
+	if stores.Postgres == nil {
+		return serveRuntimeBundle{}, fmt.Errorf("BUNDLE_UNAVAILABLE: swarm serve --bundle-hash requires postgres bundle catalog store")
+	}
+	if err := runtimecontracts.ValidateBundleHash(bundleHash); err != nil {
+		return serveRuntimeBundle{}, err
+	}
+	record, err := stores.Postgres.LoadBundleCatalogRuntimeRecord(ctx, bundleHash)
+	if errors.Is(err, store.ErrBundleNotFound) {
+		return serveRuntimeBundle{}, fmt.Errorf("BUNDLE_UNAVAILABLE: bundle_hash %s is not present in bundles", bundleHash)
+	}
+	if err != nil {
+		return serveRuntimeBundle{}, err
+	}
+	runtimeSource, err := runtimecontracts.LoadBundleCatalogRuntimeSource(repo, runtimecontracts.BundleCatalogRuntimeLoadRequest{
+		BundleHash:  record.BundleHash,
+		ContentYAML: record.ContentYAML,
+		DataBlob:    record.DataBlob,
+	})
+	if err != nil {
+		return serveRuntimeBundle{}, err
+	}
+	cleanupOnError := true
+	defer func() {
+		if cleanupOnError {
+			_ = runtimeSource.Cleanup()
+		}
+	}()
+	module, source, err := newSwarmWorkflowModuleForBundle(runtimeSource.Bundle)
+	if err != nil {
+		return serveRuntimeBundle{}, err
+	}
+	bootIdentity, err := runtimecontracts.BootBundleIdentity(runtimeSource.Bundle)
+	if err != nil {
+		return serveRuntimeBundle{}, fmt.Errorf("compute DB-loaded boot bundle identity: %w", err)
+	}
+	fact := runtimecorrelation.BundleSourceFact{
+		BundleHash:        runtimeSource.BundleHash,
+		BundleSource:      storerunlifecycle.BundleSourcePersisted,
+		BundleFingerprint: bootIdentity.Fingerprint,
+	}.Normalized()
+	cleanupOnError = false
+	return serveRuntimeBundle{
+		module:           module,
+		bundle:           runtimeSource.Bundle,
+		source:           source,
+		contractsRoot:    runtimeSource.ContractsRoot,
+		platformSpecPath: runtimeSource.PlatformSpecPath,
+		bootIdentity:     bootIdentity,
+		bundleSourceFact: fact,
+		dbLoaded:         true,
+		cleanup:          runtimeSource.Cleanup,
+	}, nil
+}
+
+func prepareLoadedServeBundleSource(ctx context.Context, stores storeBundle, loaded serveRuntimeBundle, dev bool) (runtimecorrelation.BundleSourceFact, error) {
+	if loaded.dbLoaded {
+		if dev {
+			return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("--bundle-hash is mutually exclusive with --dev")
+		}
+		fact := loaded.bundleSourceFact.Normalized()
+		if fact.BundleSource != storerunlifecycle.BundleSourcePersisted || strings.TrimSpace(fact.BundleHash) == "" {
+			return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("DB-loaded serve bundle source fact must be persisted with bundle_hash")
+		}
+		return fact, nil
+	}
+	return prepareServeBundleSource(ctx, stores, loaded.bundle, loaded.bootIdentity.Fingerprint, dev)
 }
 
 func buildForkChatSandboxLLMRuntime(cfg *config.Config, workspaces workspace.Resolver) (runtimellm.Runtime, error) {
@@ -217,8 +360,6 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		log.Printf("resolve CLI path config: %v", err)
 		return 1
 	}
-	resolvedContractsPath := resolvedPaths.ContractsPath
-	resolvedPlatformSpecPath := resolvedPaths.PlatformSpecPath
 
 	cfgResult, err := loadRuntimeConfigWithOptions(runtimeConfigLoadOptions{
 		RepoRoot:        repo,
@@ -231,7 +372,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		return 1
 	}
 	cfg := cfgResult.Config
-	reporter.emit(2, "config_load", "ok", fmt.Sprintf("config=%s contracts=%s", cfgResult.Detail(), filepath.Clean(resolvedContractsPath)))
+	reporter.emit(2, "config_load", "ok", serveConfigLoadDetail(cfgResult.Detail(), resolvedPaths, opts))
 	storeSelection, err := resolveRuntimeStoreSelection(repo, opts.StoreMode, opts.StoreModeSet, cfg)
 	if err != nil {
 		reporter.emit(3, "db_connection", "FAILED", err.Error())
@@ -246,26 +387,26 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	}
 	reporter.emit(3, "db_connection", "ok", storeSelection.Backend.String())
 	defer closeDB(stores.SQLDB)
-	contractsRoot, err := normalizeContractsRoot(resolvedContractsPath)
-	if err != nil {
-		reporter.emit(4, "bundle_load", "FAILED", err.Error())
-		log.Printf("resolve contracts: %v", err)
-		return 1
-	}
-	module, bundle, err := newSwarmWorkflowModule(repo, contractsRoot, resolvedPlatformSpecPath)
+	loadedBundle, err := loadServeRuntimeBundle(ctx, repo, stores, resolvedPaths, opts)
 	if err != nil {
 		reporter.emit(4, "bundle_load", "FAILED", err.Error())
 		log.Printf("load Swarm contracts: %v", err)
 		return 1
 	}
-	bootBundleIdentity, err := runtimecontracts.BootBundleIdentity(bundle)
-	if err != nil {
-		reporter.emit(4, "bundle_load", "FAILED", err.Error())
-		log.Printf("compute boot bundle identity: %v", err)
-		return 1
+	if loadedBundle.cleanup != nil {
+		defer func() {
+			if err := loadedBundle.cleanup(); err != nil {
+				log.Printf("cleanup DB-loaded bundle runtime source failed: %v", err)
+			}
+		}()
 	}
-	source := semanticview.Wrap(bundle)
-	reporter.emit(4, "bundle_load", "ok", serveBootBundleLoadDetail(bootBundleIdentity.Fingerprint, source))
+	module := loadedBundle.module
+	bundle := loadedBundle.bundle
+	source := loadedBundle.source
+	contractsRoot := loadedBundle.contractsRoot
+	resolvedPlatformSpecPath := loadedBundle.platformSpecPath
+	bootBundleIdentity := loadedBundle.bootIdentity
+	reporter.emit(4, "bundle_load", "ok", serveBootBundleLoadDetail(loadedBundle.serveIdentityDetail(), source))
 	stateStoreSummary, err := initializeStateStores(ctx, stores, bundle)
 	if err != nil {
 		slog.Error("initialize state stores", "error", err)
@@ -313,11 +454,15 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 			)
 		}
 	}
-	if err := enforceServeBundleMatchAdmission(ctx, stores.Postgres, bootBundleIdentity.Fingerprint, opts.RequireBundleMatch); err != nil {
+	pinnedBundleHash := ""
+	if loadedBundle.dbLoaded {
+		pinnedBundleHash = strings.TrimSpace(loadedBundle.bundleSourceFact.BundleHash)
+	}
+	if err := enforceServeBundleMatchAdmission(ctx, stores.Postgres, loadedBundle.serveIdentityDetail(), opts.RequireBundleMatch, pinnedBundleHash); err != nil {
 		slog.Error("bundle match admission failed", "error", err)
 		return 3
 	}
-	bundleSourceFact, err := prepareServeBundleSource(ctx, stores, bundle, bootBundleIdentity.Fingerprint, opts.Dev)
+	bundleSourceFact, err := prepareLoadedServeBundleSource(ctx, stores, loadedBundle, opts.Dev)
 	if err != nil {
 		slog.Error("prepare bundle source", "error", err)
 		return 3
@@ -408,6 +553,9 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 
 	var ready atomic.Bool
 	supervisor := newRuntimeProjectSupervisor(repo, resolvedPlatformSpecPath, cfg, stores, &ready, contractsRoot, bundle, source, rt, opts.Dev)
+	if loadedBundle.dbLoaded {
+		supervisor.DisableSourceReplacement("swarm serve --bundle-hash pins one persisted bundle for the process; dynamic project reload is split to RuntimeContextManager work")
+	}
 	defer func() {
 		if err := closeServeRuntime(context.Background(), supervisor, opts, workspaces); err != nil {
 			log.Printf("runtime shutdown failed: %v", err)
@@ -432,6 +580,10 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 			Containers: workspaces,
 		},
 	}
+	runForkAvailability := apiv1.RunForkAvailabilityStore(stores.Postgres)
+	if loadedBundle.dbLoaded {
+		runForkAvailability = dbLoadedServeRunForkAvailability{bundleHash: loadedBundle.bundleSourceFact.BundleHash}
+	}
 	apiReadOptions := apiv1.OperatorReadOptions{
 		Ready: func() bool {
 			return ready.Load()
@@ -444,7 +596,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		BundleCatalog:       stores.Postgres,
 		ConversationForks:   stores.Postgres,
 		ForkChatExecutor:    apiv1.NewLLMForkChatExecutor(forkChatLLM),
-		RunForkAvailability: stores.Postgres,
+		RunForkAvailability: runForkAvailability,
 		RunFork: apiv1.SelectedContractRunForkExecutor{
 			Store: stores.Postgres,
 			SourceLoader: runtimerunforkexecution.ContractBundleSourceLoader{
@@ -1890,30 +2042,68 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 	}
 }
 
-func enforceServeBundleMatchAdmission(ctx context.Context, pg *store.PostgresStore, bootFingerprint string, requireMatch bool) error {
-	bootFingerprint = strings.TrimSpace(bootFingerprint)
+func enforceServeBundleMatchAdmission(ctx context.Context, pg *store.PostgresStore, bootIdentity string, requireMatch bool, pinnedBundleHash string) error {
+	bootIdentity = strings.TrimSpace(bootIdentity)
+	pinnedBundleHash = strings.TrimSpace(pinnedBundleHash)
 	if !requireMatch {
 		log.Printf("legacy bundle match admission disabled by --no-require-bundle-match; startup recovery has already consumed active run bundle source state")
-		return nil
 	}
-	if bootFingerprint == "" {
-		return fmt.Errorf("boot bundle fingerprint is required")
+	enforceActiveAvailability := requireMatch || pinnedBundleHash != ""
+	if enforceActiveAvailability && bootIdentity == "" {
+		return fmt.Errorf("boot bundle identity is required")
 	}
 	if pg == nil {
 		return nil
 	}
-	conflicts, err := pg.ActiveRunBundleAvailabilityConflicts(ctx)
+	if enforceActiveAvailability {
+		conflicts, err := pg.ActiveRunBundleAvailabilityConflicts(ctx)
+		if err != nil {
+			return err
+		}
+		if len(conflicts) > 0 {
+			details := make([]string, 0, len(conflicts))
+			for _, conflict := range conflicts {
+				details = append(details, conflict.DetailString())
+			}
+			return fmt.Errorf("active run bundle availability conflict: boot bundle %s cannot resume %d active run(s): %s", bootIdentity, len(conflicts), strings.Join(details, "; "))
+		}
+	}
+	if pinnedBundleHash == "" {
+		return nil
+	}
+	mismatches, err := activeRunPinnedBundleHashConflicts(ctx, pg, pinnedBundleHash)
 	if err != nil {
 		return err
 	}
-	if len(conflicts) == 0 {
+	if len(mismatches) == 0 {
 		return nil
 	}
-	details := make([]string, 0, len(conflicts))
-	for _, conflict := range conflicts {
-		details = append(details, conflict.DetailString())
+	details := make([]string, 0, len(mismatches))
+	for _, mismatch := range mismatches {
+		details = append(details, mismatch.DetailString())
 	}
-	return fmt.Errorf("active run bundle availability conflict: boot bundle %s cannot resume %d active run(s): %s", bootFingerprint, len(conflicts), strings.Join(details, "; "))
+	return fmt.Errorf("active run pinned bundle_hash conflict: DB-loaded serve bundle_hash %s cannot resume %d active run(s) with different bundle_hash: %s", pinnedBundleHash, len(mismatches), strings.Join(details, "; "))
+}
+
+func activeRunPinnedBundleHashConflicts(ctx context.Context, pg *store.PostgresStore, pinnedBundleHash string) ([]runbundle.Availability, error) {
+	pinnedBundleHash = strings.TrimSpace(pinnedBundleHash)
+	if pinnedBundleHash == "" {
+		return nil, nil
+	}
+	availabilities, err := pg.ActiveRunBundleAvailabilities(ctx)
+	if err != nil {
+		return nil, err
+	}
+	conflicts := make([]runbundle.Availability, 0, len(availabilities))
+	for _, availability := range availabilities {
+		if !availability.Available() {
+			continue
+		}
+		if strings.TrimSpace(availability.BundleHash) != pinnedBundleHash {
+			conflicts = append(conflicts, availability)
+		}
+	}
+	return conflicts, nil
 }
 
 func initializeStateStores(ctx context.Context, stores storeBundle, bundle *runtimecontracts.WorkflowContractBundle) (string, error) {
@@ -1965,6 +2155,14 @@ func newSwarmWorkflowModule(repoRoot, contractsRoot, platformSpecPath string) (r
 	if err != nil {
 		return nil, nil, err
 	}
+	module, _, err := newSwarmWorkflowModuleForBundle(bundle)
+	if err != nil {
+		return nil, nil, err
+	}
+	return module, bundle, nil
+}
+
+func newSwarmWorkflowModuleForBundle(bundle *runtimecontracts.WorkflowContractBundle) (runtimepipeline.WorkflowModule, semanticview.Source, error) {
 	source := semanticview.Wrap(bundle)
 	workflow, err := runtimepipeline.LoadWorkflowDefinition(source)
 	if err != nil {
@@ -1981,7 +2179,7 @@ func newSwarmWorkflowModule(repoRoot, contractsRoot, platformSpecPath string) (r
 		nodes:          nodes,
 		guardRegistry:  runtimepipeline.NewContractGuardRegistry(source),
 		actionRegistry: runtimepipeline.NewContractActionRegistry(source),
-	}, bundle, nil
+	}, source, nil
 }
 
 func (m *swarmWorkflowModule) SemanticSource() semanticview.Source { return m.source }

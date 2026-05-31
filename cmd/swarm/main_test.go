@@ -313,7 +313,7 @@ func TestCLI_ServeOwnsRuntimeStartupFlags(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("serve help code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	for _, want := range []string{"Start the Swarm runtime", "--config", "--backend", "--contracts", "--api-listen-addr", "API, WebSocket, health, and readiness routes", "--mcp-listen-addr", "MCP and tools routes", "--platform-spec", "--store", "--self-check", "--dev", "--require-bundle-match", "--no-require-bundle-match", "--abandon-active-runs", "--shutdown-grace", "--verbose"} {
+	for _, want := range []string{"Start the Swarm runtime", "--config", "--backend", "--contracts", "--bundle-hash", "--api-listen-addr", "API, WebSocket, health, and readiness routes", "--mcp-listen-addr", "MCP and tools routes", "--platform-spec", "--store", "--self-check", "--dev", "--require-bundle-match", "--no-require-bundle-match", "--abandon-active-runs", "--shutdown-grace", "--verbose"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("serve help missing %q:\n%s", want, stdout.String())
 		}
@@ -322,6 +322,87 @@ func TestCLI_ServeOwnsRuntimeStartupFlags(t *testing.T) {
 		if strings.Contains(stdout.String(), notWant) {
 			t.Fatalf("serve help exposed unpromoted listener/topology flag %q:\n%s", notWant, stdout.String())
 		}
+	}
+}
+
+func TestCLI_ServeBundleHashValidationAndSerialScope(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		wantCode   int
+		wantStderr string
+		wantHash   string
+	}{
+		{
+			name:       "blank bundle hash rejected",
+			args:       []string{"serve", "--bundle-hash", "  "},
+			wantCode:   2,
+			wantStderr: "--bundle-hash must be non-empty",
+		},
+		{
+			name:       "legacy fingerprint shape rejected",
+			args:       []string{"serve", "--bundle-hash", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+			wantCode:   2,
+			wantStderr: "--bundle-hash must be bundle-v1:sha256:<64 lowercase hex>",
+		},
+		{
+			name:       "contracts conflict rejected",
+			args:       []string{"serve", "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--contracts", "contracts"},
+			wantCode:   2,
+			wantStderr: "--bundle-hash is mutually exclusive with --contracts",
+		},
+		{
+			name:       "dev conflict rejected",
+			args:       []string{"serve", "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--dev"},
+			wantCode:   2,
+			wantStderr: "--bundle-hash is mutually exclusive with --dev",
+		},
+		{
+			name:       "sqlite conflict rejected",
+			args:       []string{"serve", "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--store", "sqlite"},
+			wantCode:   2,
+			wantStderr: "--bundle-hash requires --store postgres",
+		},
+		{
+			name:     "canonical bundle hash accepted",
+			args:     []string{"serve", "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--api-listen-addr", "127.0.0.1:0", "--mcp-listen-addr", "127.0.0.1:0"},
+			wantCode: 0,
+			wantHash: "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var captured serveOptions
+			called := false
+			opts := defaultRootCommandOptions()
+			opts.runServe = func(_ context.Context, _ string, serveOpts serveOptions) int {
+				called = true
+				captured = serveOpts
+				return 0
+			}
+
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), tc.args, &stdout, &stderr, opts)
+			if code != tc.wantCode {
+				t.Fatalf("serve code = %d, want %d\nstdout=%s\nstderr=%s", code, tc.wantCode, stdout.String(), stderr.String())
+			}
+			if tc.wantStderr != "" {
+				if !strings.Contains(stderr.String(), tc.wantStderr) {
+					t.Fatalf("serve stderr missing %q:\n%s", tc.wantStderr, stderr.String())
+				}
+				if called {
+					t.Fatal("serve runtime started despite invalid bundle hash configuration")
+				}
+				return
+			}
+			if !called {
+				t.Fatal("serve runtime was not called for valid bundle hash")
+			}
+			if captured.BundleHash != tc.wantHash {
+				t.Fatalf("BundleHash = %q, want %q", captured.BundleHash, tc.wantHash)
+			}
+		})
 	}
 }
 
@@ -1884,7 +1965,7 @@ func TestServeBundleMatchAdmissionRejectsActiveAvailabilityConflicts(t *testing.
 		t.Fatalf("seed active legacy run: %v", err)
 	}
 
-	err := enforceServeBundleMatchAdmission(ctx, pg, bootFingerprint, true)
+	err := enforceServeBundleMatchAdmission(ctx, pg, bootFingerprint, true, "")
 	if err == nil {
 		t.Fatal("enforceServeBundleMatchAdmission error = nil, want availability conflict")
 	}
@@ -1902,6 +1983,12 @@ func TestServeBundleMatchAdmissionRejectsActiveAvailabilityConflicts(t *testing.
 		if !strings.Contains(got, want) {
 			t.Fatalf("admission error = %q, want detail %q", got, want)
 		}
+	}
+
+	pinnedHash := "bundle-v1:sha256:3333333333333333333333333333333333333333333333333333333333333333"
+	err = enforceServeBundleMatchAdmission(ctx, pg, pinnedHash, false, pinnedHash)
+	if err == nil || !strings.Contains(err.Error(), "active run bundle availability conflict") {
+		t.Fatalf("DB-loaded disabled legacy admission error = %v, want active availability conflict", err)
 	}
 }
 
@@ -1927,7 +2014,7 @@ func TestServeBundleMatchAdmissionAllowsPersistedPresentAndDisabled(t *testing.T
 	`, uuid.NewString(), persistedHash, uuid.NewString(), missingHash); err != nil {
 		t.Fatalf("seed persisted-present and completed-missing runs: %v", err)
 	}
-	if err := enforceServeBundleMatchAdmission(ctx, pg, bootFingerprint, true); err != nil {
+	if err := enforceServeBundleMatchAdmission(ctx, pg, bootFingerprint, true, ""); err != nil {
 		t.Fatalf("enforceServeBundleMatchAdmission persisted-present/completed-missing: %v", err)
 	}
 
@@ -1937,8 +2024,175 @@ func TestServeBundleMatchAdmissionAllowsPersistedPresentAndDisabled(t *testing.T
 	`, uuid.NewString(), missingHash); err != nil {
 		t.Fatalf("seed disabled persisted-missing run: %v", err)
 	}
-	if err := enforceServeBundleMatchAdmission(ctx, pg, bootFingerprint, false); err != nil {
+	if err := enforceServeBundleMatchAdmission(ctx, pg, bootFingerprint, false, ""); err != nil {
 		t.Fatalf("enforceServeBundleMatchAdmission disabled: %v", err)
+	}
+}
+
+func TestServeBundleMatchAdmissionRejectsDifferentPersistedActiveRunInDBLoadedMode(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	ctx := context.Background()
+	pinnedHash := "bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111"
+	otherHash := "bundle-v1:sha256:2222222222222222222222222222222222222222222222222222222222222222"
+	otherRunID := uuid.NewString()
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json)
+		VALUES
+			($1, 'name: pinned', '{}'::jsonb),
+			($2, 'name: other', '{}'::jsonb)
+	`, pinnedHash, otherHash); err != nil {
+		t.Fatalf("seed bundle rows: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, started_at)
+		VALUES
+			($1::uuid, 'running', $2, 'persisted', now()),
+			($3::uuid, 'paused', $4, 'persisted', now()),
+			($5::uuid, 'completed', $4, 'persisted', now())
+	`, uuid.NewString(), pinnedHash, otherRunID, otherHash, uuid.NewString()); err != nil {
+		t.Fatalf("seed active persisted runs: %v", err)
+	}
+
+	err := enforceServeBundleMatchAdmission(ctx, pg, pinnedHash, true, pinnedHash)
+	if err == nil {
+		t.Fatal("enforceServeBundleMatchAdmission error = nil, want pinned bundle_hash conflict")
+	}
+	got := err.Error()
+	for _, want := range []string{
+		"active run pinned bundle_hash conflict",
+		pinnedHash,
+		otherRunID,
+		otherHash,
+		"bundle_source=persisted",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("admission error = %q, want detail %q", got, want)
+		}
+	}
+
+	err = enforceServeBundleMatchAdmission(ctx, pg, pinnedHash, false, pinnedHash)
+	if err == nil || !strings.Contains(err.Error(), "active run pinned bundle_hash conflict") {
+		t.Fatalf("disabled legacy admission error = %v, want DB-loaded pinned conflict", err)
+	}
+}
+
+func TestDBLoadedServeRunForkAvailabilityFailsClosed(t *testing.T) {
+	hash := "bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111"
+	runID := uuid.NewString()
+
+	availability, err := (dbLoadedServeRunForkAvailability{bundleHash: hash}).LoadRunBundleAvailability(context.Background(), runID)
+	if err != nil {
+		t.Fatalf("LoadRunBundleAvailability: %v", err)
+	}
+	if !availability.Unavailable() {
+		t.Fatalf("availability = %#v, want unavailable", availability)
+	}
+	if availability.RunID != runID || availability.BundleHash != hash || availability.BundleSource != storerunlifecycle.BundleSourcePersisted {
+		t.Fatalf("availability = %#v, want DB-loaded persisted unavailable for %s", availability, hash)
+	}
+	if availability.Cause != "db_loaded_same_bundle_fork_split_to_1024" {
+		t.Fatalf("availability cause = %q", availability.Cause)
+	}
+}
+
+func TestLoadServeRuntimeBundleFromCatalogLoadsPersistedRuntimeSource(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	ctx := context.Background()
+	if _, err := pg.BindSchemaCapabilities(ctx); err != nil {
+		t.Fatalf("BindSchemaCapabilities: %v", err)
+	}
+	bundle := loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier12-runtime-tools", "test-flow-data-access"))
+	projection, err := runtimecontracts.BuildBundleCatalogProjection(bundle)
+	if err != nil {
+		t.Fatalf("BuildBundleCatalogProjection: %v", err)
+	}
+	if _, err := pg.UpsertBundleCatalog(ctx, store.BundleCatalogUpsert{
+		BundleHash:  projection.BundleHash,
+		ContentYAML: projection.ContentYAML,
+		ParsedJSON:  projection.ParsedJSON,
+		DataBlob:    projection.DataBlob,
+		Metadata:    projection.Metadata,
+	}); err != nil {
+		t.Fatalf("UpsertBundleCatalog: %v", err)
+	}
+	if _, err := loadServeRuntimeBundleFromCatalog(ctx, repoRoot(), storeBundle{}, projection.BundleHash); err == nil || !strings.Contains(err.Error(), "requires postgres bundle catalog store") {
+		t.Fatalf("loadServeRuntimeBundleFromCatalog without Postgres err = %v, want Postgres-only failure", err)
+	}
+
+	loaded, err := loadServeRuntimeBundleFromCatalog(ctx, repoRoot(), storeBundle{Postgres: pg}, projection.BundleHash)
+	if err != nil {
+		t.Fatalf("loadServeRuntimeBundleFromCatalog: %v", err)
+	}
+	defer func() {
+		if loaded.cleanup != nil {
+			if err := loaded.cleanup(); err != nil {
+				t.Fatalf("cleanup DB-loaded runtime source: %v", err)
+			}
+		}
+	}()
+
+	if !loaded.dbLoaded {
+		t.Fatal("dbLoaded = false, want true")
+	}
+	if loaded.serveIdentityDetail() != projection.BundleHash {
+		t.Fatalf("serve identity = %q, want bundle hash %q", loaded.serveIdentityDetail(), projection.BundleHash)
+	}
+	if loaded.bundleSourceFact.BundleHash != projection.BundleHash || loaded.bundleSourceFact.BundleSource != storerunlifecycle.BundleSourcePersisted {
+		t.Fatalf("bundle source fact = %#v, want persisted %s", loaded.bundleSourceFact, projection.BundleHash)
+	}
+	if strings.Contains(loaded.contractsRoot, filepath.Join("tests", "tier12-runtime-tools", "test-flow-data-access")) {
+		t.Fatalf("DB-loaded contracts root leaked local fixture path: %s", loaded.contractsRoot)
+	}
+	if _, err := os.Stat(filepath.Join(loaded.contractsRoot, "flows", "support", "data", "exclusions.yaml")); err != nil {
+		t.Fatalf("DB-loaded source missing reconstructed data file: %v", err)
+	}
+	prepared, err := prepareLoadedServeBundleSource(ctx, storeBundle{Postgres: pg}, loaded, false)
+	if err != nil {
+		t.Fatalf("prepareLoadedServeBundleSource: %v", err)
+	}
+	if prepared.BundleHash != projection.BundleHash || prepared.BundleSource != storerunlifecycle.BundleSourcePersisted {
+		t.Fatalf("prepared source fact = %#v, want persisted %s", prepared, projection.BundleHash)
+	}
+	if _, err := prepareLoadedServeBundleSource(ctx, storeBundle{Postgres: pg}, loaded, true); err == nil || !strings.Contains(err.Error(), "--bundle-hash is mutually exclusive with --dev") {
+		t.Fatalf("prepareLoadedServeBundleSource dev error = %v", err)
+	}
+}
+
+func TestRunServeRuntimeBundleHashMissingFailsBeforeReadiness(t *testing.T) {
+	_, _, _ = installServeRuntimePostgresTestStores(t, func() serveWorkspaceLifecycle {
+		return serveRuntimeWorkspaceStub{}
+	})
+	missingHash := "bundle-v1:sha256:2222222222222222222222222222222222222222222222222222222222222222"
+	var out lockedBuffer
+	code := runServeRuntime(context.Background(), repoRoot(), serveOptions{
+		ConfigPath:         writeServeRuntimeTestConfig(t),
+		BundleHash:         missingHash,
+		PlatformSpecPath:   defaultPlatformSpecPath,
+		StoreMode:          "postgres",
+		APIListenAddr:      "127.0.0.1:0",
+		MCPListenAddr:      "127.0.0.1:0",
+		SelfCheck:          true,
+		RequireBundleMatch: true,
+		Verbose:            true,
+		Output:             &out,
+	})
+	if code == 0 {
+		t.Fatalf("runServeRuntime code = 0, want startup failure\noutput:\n%s", out.String())
+	}
+	for _, want := range []string{
+		"bundle_hash=" + missingHash,
+		"BUNDLE_UNAVAILABLE",
+		"bundle_hash " + missingHash + " is not present in bundles",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("serve output missing %q:\n%s", want, out.String())
+		}
+	}
+	if strings.Contains(out.String(), "ready                      ok") || strings.Contains(out.String(), "[22/22]") {
+		t.Fatalf("serve reached readiness after missing DB-loaded bundle:\n%s", out.String())
 	}
 }
 
