@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
+	runtimecontracts "swarm/internal/runtime/contracts"
 )
 
 const (
@@ -40,9 +42,12 @@ type bundleRegisterCommandOptions struct {
 	output     cliOutputOptions
 
 	dataBlobPath      string
+	contractsDir      string
 	idempotencyKey    string
 	dataBlobSet       bool
+	contractsSet      bool
 	idempotencyKeySet bool
+	repoRoot          string
 }
 
 type bundleListResult struct {
@@ -95,7 +100,7 @@ type bundleAgentDefinition struct {
 	Tools            []string `json:"tools,omitempty"`
 }
 
-func newBundleCommand(opts rootCommandOptions) *cobra.Command {
+func newBundleCommand(repoRoot string, opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "bundle",
 		Short: "Inspect persisted bundle catalog entries through v1 RPC.",
@@ -108,7 +113,7 @@ func newBundleCommand(opts rootCommandOptions) *cobra.Command {
 		newBundleListCommand(opts),
 		newBundleShowCommand(opts),
 		newBundleAgentsCommand(opts),
-		newBundleRegisterCommand(opts),
+		newBundleRegisterCommand(repoRoot, opts),
 	)
 	return cmd
 }
@@ -171,22 +176,24 @@ func newBundleAgentsCommand(opts rootCommandOptions) *cobra.Command {
 	return cmd
 }
 
-func newBundleRegisterCommand(opts rootCommandOptions) *cobra.Command {
-	registerOpts := bundleRegisterCommandOptions{apiOptions: opts}
+func newBundleRegisterCommand(repoRoot string, opts rootCommandOptions) *cobra.Command {
+	registerOpts := bundleRegisterCommandOptions{apiOptions: opts, repoRoot: repoRoot}
 	cmd := &cobra.Command{
-		Use:   "register <registration-envelope-yaml>",
-		Short: "Register a prepared bundle envelope through /v1/rpc bundle.register.",
-		Args:  cobra.ExactArgs(1),
+		Use:   "register <registration-envelope-yaml> | register --contracts <contracts-directory>",
+		Short: "Register a bundle through /v1/rpc bundle.register.",
+		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			registerOpts.dataBlobSet = cmd.Flags().Changed("data-blob")
+			registerOpts.contractsSet = cmd.Flags().Changed("contracts")
 			registerOpts.idempotencyKeySet = cmd.Flags().Changed("idempotency-key")
 			if err := registerOpts.output.validate(); err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
-			return runBundleRegisterCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), registerOpts, args[0])
+			return runBundleRegisterCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), registerOpts, args)
 		},
 	}
 	cmd.Flags().StringVar(&registerOpts.dataBlobPath, "data-blob", "", "Path to a BundleRegisterDataBlobV1 JSON document")
+	cmd.Flags().StringVar(&registerOpts.contractsDir, "contracts", "", "Package a local contracts directory into BundleRegistrationEnvelopeV1 before calling bundle.register")
 	cmd.Flags().StringVar(&registerOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for bundle.register")
 	bindCLIOutputFlags(cmd, &registerOpts.output)
 	bindCLIAPIConnectionFlags(cmd, &registerOpts.apiOptions)
@@ -270,8 +277,8 @@ func runBundleAgentsCommand(ctx context.Context, out, errOut io.Writer, opts bun
 	})
 }
 
-func runBundleRegisterCommand(ctx context.Context, out, errOut io.Writer, opts bundleRegisterCommandOptions, envelopePath string) error {
-	params, err := opts.params(envelopePath)
+func runBundleRegisterCommand(ctx context.Context, out, errOut io.Writer, opts bundleRegisterCommandOptions, args []string) error {
+	params, err := opts.params(args)
 	if err != nil {
 		return returnCLIValidationError(errOut, err)
 	}
@@ -311,7 +318,17 @@ func (opts bundleListCommandOptions) params() (map[string]any, error) {
 	return params, nil
 }
 
-func (opts bundleRegisterCommandOptions) params(envelopePath string) (map[string]any, error) {
+func (opts bundleRegisterCommandOptions) params(args []string) (map[string]any, error) {
+	if opts.contractsSet {
+		return opts.contractsDirectoryParams(args)
+	}
+	if len(args) != 1 {
+		return nil, fmt.Errorf("register requires <registration-envelope-yaml> or --contracts <contracts-directory>")
+	}
+	return opts.preparedEnvelopeParams(args[0])
+}
+
+func (opts bundleRegisterCommandOptions) preparedEnvelopeParams(envelopePath string) (map[string]any, error) {
 	contentYAML, err := readBundleRegisterTextFile("registration envelope", envelopePath)
 	if err != nil {
 		return nil, err
@@ -323,6 +340,50 @@ func (opts bundleRegisterCommandOptions) params(envelopePath string) (map[string
 			return nil, err
 		}
 		params["data_blob"] = dataBlob
+	}
+	if idempotencyKey, err := optionalNonEmptyFlag("--idempotency-key", opts.idempotencyKey, opts.idempotencyKeySet); err != nil {
+		return nil, err
+	} else if idempotencyKey != "" {
+		params["idempotency_key"] = idempotencyKey
+	}
+	return params, nil
+}
+
+func (opts bundleRegisterCommandOptions) contractsDirectoryParams(args []string) (map[string]any, error) {
+	if len(args) != 0 {
+		return nil, fmt.Errorf("--contracts cannot be combined with a registration envelope argument")
+	}
+	if opts.dataBlobSet {
+		return nil, fmt.Errorf("--data-blob cannot be used with --contracts")
+	}
+	contractsDir, err := optionalNonEmptyFlag("--contracts", opts.contractsDir, opts.contractsSet)
+	if err != nil {
+		return nil, err
+	}
+	repoRoot := strings.TrimSpace(opts.repoRoot)
+	if repoRoot == "" {
+		repoRoot = discoverRepoRoot()
+	}
+	if repoRoot == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return nil, fmt.Errorf("resolve repo root: %w", err)
+		}
+		repoRoot = cwd
+	}
+	paths, err := resolveCLIContractPlatformSpecPaths(repoRoot, cliContractPlatformSpecPathOptions{
+		ContractsPath: contractsDir,
+	})
+	if err != nil {
+		return nil, err
+	}
+	upload, err := runtimecontracts.BuildBundleRegistrationDirectoryUpload(repoRoot, paths.ContractsPath, paths.PlatformSpecPath)
+	if err != nil {
+		return nil, fmt.Errorf("package contracts directory: %w", err)
+	}
+	params := map[string]any{"content_yaml": upload.ContentYAML}
+	if upload.DataBlob != nil && len(upload.DataBlob.Entries) > 0 {
+		params["data_blob"] = upload.DataBlob
 	}
 	if idempotencyKey, err := optionalNonEmptyFlag("--idempotency-key", opts.idempotencyKey, opts.idempotencyKeySet); err != nil {
 		return nil, err

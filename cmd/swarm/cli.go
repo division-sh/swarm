@@ -94,7 +94,7 @@ func newRootCommandWithOptions(ctx context.Context, repo string, out, errOut io.
 		newAgentsCommand(opts),
 		newAgentCommand(opts),
 		newForkChatCommand(opts),
-		newBundleCommand(opts),
+		newBundleCommand(repo, opts),
 		newEntitiesCommand(opts),
 		newEntityCommand(opts),
 		newMailboxCommand(opts),

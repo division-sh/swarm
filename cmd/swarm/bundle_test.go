@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestBundleCommandsUseCanonicalRPCAndRender(t *testing.T) {
@@ -159,7 +162,7 @@ func TestBundleAgentsJSONUsesCanonicalModelField(t *testing.T) {
 	}
 }
 
-func TestBundleRegisterHelpDocumentsPreparedEnvelopeBoundary(t *testing.T) {
+func TestBundleRegisterHelpDocumentsPreparedEnvelopeAndContractsBoundary(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"bundle", "register", "--help"}, &stdout, &stderr, rootCommandOptions{})
 	if code != 0 {
@@ -167,6 +170,7 @@ func TestBundleRegisterHelpDocumentsPreparedEnvelopeBoundary(t *testing.T) {
 	}
 	for _, want := range []string{
 		"register <registration-envelope-yaml>",
+		"--contracts",
 		"--data-blob",
 		"--idempotency-key",
 		"--api-server",
@@ -176,9 +180,88 @@ func TestBundleRegisterHelpDocumentsPreparedEnvelopeBoundary(t *testing.T) {
 			t.Fatalf("help missing %q:\n%s", want, stdout.String())
 		}
 	}
-	for _, notWant := range []string{"contracts-directory", "archive"} {
+	for _, notWant := range []string{"archive"} {
 		if strings.Contains(stdout.String(), notWant) {
 			t.Fatalf("help contains unapproved packaging term %q:\n%s", notWant, stdout.String())
+		}
+	}
+	if strings.TrimSpace(stderr.String()) != "" {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestBundleRegisterContractsDirectoryUsesCanonicalRPCAndRenders(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	bundleHash := validBundleHash("9")
+	contractsDir := writeBundleRegisterContractsFixture(t)
+	var captured jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/rpc" {
+			t.Errorf("path = %q, want /v1/rpc", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
+			t.Errorf("Authorization = %q, want bearer token", got)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		writeJSONRPCResult(t, w, captured.ID, validBundleRegistrationResult(bundleHash))
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{
+		"bundle", "register",
+		"--contracts", contractsDir,
+		"--idempotency-key", "idem-contracts",
+	}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if captured.Method != bundleRegisterMethod {
+		t.Fatalf("method = %q, want %q", captured.Method, bundleRegisterMethod)
+	}
+	if _, ok := captured.Params["bundle_hash"]; ok {
+		t.Fatalf("bundle_hash must not be sent by CLI: %#v", captured.Params)
+	}
+	contentYAML, ok := captured.Params["content_yaml"].(string)
+	if !ok || strings.TrimSpace(contentYAML) == "" {
+		t.Fatalf("content_yaml = %#v", captured.Params["content_yaml"])
+	}
+	var envelope bundleRegistrationEnvelopeForTest
+	if err := yaml.Unmarshal([]byte(contentYAML), &envelope); err != nil {
+		t.Fatalf("decode content_yaml: %v\n%s", err, contentYAML)
+	}
+	if envelope.APIVersion != "swarm.bundle.register.v1" {
+		t.Fatalf("content_yaml api_version = %q", envelope.APIVersion)
+	}
+	var paths []string
+	for _, file := range envelope.Files {
+		paths = append(paths, file.Path)
+		if strings.Contains(file.Text, "ignored") {
+			t.Fatalf("ignored content leaked through %s", file.Path)
+		}
+	}
+	wantPaths := []string{"flows/alpha/schema.yaml", "package.yaml", "prompts/root.md"}
+	if !reflect.DeepEqual(paths, wantPaths) {
+		t.Fatalf("content_yaml files = %#v, want %#v\n%s", paths, wantPaths, contentYAML)
+	}
+	wantDataBlob := map[string]any{
+		"api_version": "swarm.bundle.data.v1",
+		"entries": []any{map[string]any{
+			"path":        "flows/alpha/data/payload.bin",
+			"data_base64": base64.StdEncoding.EncodeToString([]byte{0x01, 0x02, 0x03}),
+		}},
+	}
+	if !reflect.DeepEqual(captured.Params["data_blob"], wantDataBlob) {
+		t.Fatalf("data_blob = %#v, want %#v", captured.Params["data_blob"], wantDataBlob)
+	}
+	if captured.Params["idempotency_key"] != "idem-contracts" {
+		t.Fatalf("idempotency_key = %#v", captured.Params["idempotency_key"])
+	}
+	for _, want := range []string{"bundle " + bundleHash, "registered=true", "has_data=true", "data_size_bytes=7"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
 		}
 	}
 	if strings.TrimSpace(stderr.String()) != "" {
@@ -274,6 +357,8 @@ func TestBundleCommandsRejectInvalidInputBeforeRequest(t *testing.T) {
 	dataBlobPath := writeBundleRegisterFixture(t, "bundle-data.json", `{"api_version":"swarm.bundle.data.v1","entries":[]}`)
 	badDataBlobPath := writeBundleRegisterFixture(t, "bad-data.json", `{bad json`)
 	multipleDataBlobPath := writeBundleRegisterFixture(t, "multi-data.json", `{"api_version":"swarm.bundle.data.v1","entries":[]}{}`)
+	contractsDir := writeBundleRegisterContractsFixture(t)
+	invalidContractsDir := t.TempDir()
 	dirPath := filepath.Join(t.TempDir(), "bundle-dir")
 	if err := os.Mkdir(dirPath, 0o700); err != nil {
 		t.Fatalf("mkdir bundle dir: %v", err)
@@ -291,7 +376,7 @@ func TestBundleCommandsRejectInvalidInputBeforeRequest(t *testing.T) {
 		{name: "show invalid hash", args: []string{"bundle", "show", "sha256:abc"}, wantStderr: "bundle hash must match bundle-v1:sha256:<64 lowercase hex>"},
 		{name: "agents invalid hash", args: []string{"bundle", "agents", "bad"}, wantStderr: "bundle hash must match bundle-v1:sha256:<64 lowercase hex>"},
 		{name: "get alias not promoted", args: []string{"bundle", "get", validBundleHash("a")}, wantStderr: "unknown command"},
-		{name: "register missing envelope", args: []string{"bundle", "register"}, wantStderr: "accepts 1 arg(s)"},
+		{name: "register missing envelope", args: []string{"bundle", "register"}, wantStderr: "register requires <registration-envelope-yaml> or --contracts <contracts-directory>"},
 		{name: "register missing file", args: []string{"bundle", "register", filepath.Join(t.TempDir(), "missing.yaml")}, wantStderr: "read registration envelope"},
 		{name: "register directory", args: []string{"bundle", "register", dirPath}, wantStderr: "registration envelope must be a file"},
 		{name: "register empty envelope", args: []string{"bundle", "register", emptyEnvelopePath}, wantStderr: "registration envelope must be non-empty"},
@@ -299,6 +384,10 @@ func TestBundleCommandsRejectInvalidInputBeforeRequest(t *testing.T) {
 		{name: "register malformed data blob", args: []string{"bundle", "register", envelopePath, "--data-blob", badDataBlobPath}, wantStderr: "--data-blob must contain one BundleRegisterDataBlobV1 JSON object"},
 		{name: "register multiple data blob documents", args: []string{"bundle", "register", envelopePath, "--data-blob", multipleDataBlobPath}, wantStderr: "--data-blob must contain one BundleRegisterDataBlobV1 JSON object"},
 		{name: "register blank idempotency", args: []string{"bundle", "register", envelopePath, "--data-blob", dataBlobPath, "--idempotency-key", " "}, wantStderr: "--idempotency-key must be non-empty"},
+		{name: "register contracts with envelope", args: []string{"bundle", "register", envelopePath, "--contracts", contractsDir}, wantStderr: "--contracts cannot be combined with a registration envelope argument"},
+		{name: "register contracts with data blob", args: []string{"bundle", "register", "--contracts", contractsDir, "--data-blob", dataBlobPath}, wantStderr: "--data-blob cannot be used with --contracts"},
+		{name: "register contracts missing package", args: []string{"bundle", "register", "--contracts", invalidContractsDir}, wantStderr: "package contracts directory"},
+		{name: "register contracts empty data", args: []string{"bundle", "register", "--contracts", writeBundleRegisterContractsFixtureWithEmptyData(t)}, wantStderr: "cannot be represented in BundleRegisterDataBlobV1"},
 		{name: "delete not promoted", args: []string{"bundle", "delete", validBundleHash("a")}, wantStderr: "unknown command"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -315,6 +404,32 @@ func TestBundleCommandsRejectInvalidInputBeforeRequest(t *testing.T) {
 				t.Fatalf("RPC calls = %d, want 0", calls.Load())
 			}
 		})
+	}
+}
+
+func TestBundleRegisterContractsDirectoryRejectsSymlinkBeforeRequest(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	contractsDir := writeBundleRegisterContractsFixture(t)
+	if err := os.Symlink(filepath.Join(contractsDir, "prompts", "root.md"), filepath.Join(contractsDir, "prompts", "link.md")); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		writeJSONRPCResult(t, w, "unexpected", map[string]any{})
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{"bundle", "register", "--contracts", contractsDir}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != cliExitValidation {
+		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitValidation, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "symlink") {
+		t.Fatalf("stderr = %q, want symlink rejection", stderr.String())
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("RPC calls = %d, want 0", calls.Load())
 	}
 }
 
@@ -458,6 +573,61 @@ func writeBundleRegisterFixture(t *testing.T, name, content string) string {
 		t.Fatalf("write %s: %v", name, err)
 	}
 	return path
+}
+
+type bundleRegistrationEnvelopeForTest struct {
+	APIVersion string                          `yaml:"api_version"`
+	Files      []bundleRegistrationFileForTest `yaml:"files"`
+}
+
+type bundleRegistrationFileForTest struct {
+	Path string `yaml:"path"`
+	Text string `yaml:"text"`
+}
+
+func writeBundleRegisterContractsFixture(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	writeBundleRegisterFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: cli-register-fixture
+version: "1.0.0"
+flows:
+  - id: alpha
+    flow: alpha
+`)
+	writeBundleRegisterFixtureFile(t, filepath.Join(root, "flows", "alpha", "schema.yaml"), `
+initial_state: start
+states:
+  - start
+  - done
+`)
+	writeBundleRegisterFixtureFile(t, filepath.Join(root, "prompts", "root.md"), "root prompt\n")
+	writeBundleRegisterFixtureBytes(t, filepath.Join(root, "flows", "alpha", "data", "payload.bin"), []byte{0x01, 0x02, 0x03})
+	writeBundleRegisterFixtureFile(t, filepath.Join(root, ".DS_Store"), "ignored\n")
+	writeBundleRegisterFixtureFile(t, filepath.Join(root, "prompts", ".#ignored.md"), "ignored\n")
+	return root
+}
+
+func writeBundleRegisterContractsFixtureWithEmptyData(t *testing.T) string {
+	t.Helper()
+	root := writeBundleRegisterContractsFixture(t)
+	writeBundleRegisterFixtureBytes(t, filepath.Join(root, "flows", "alpha", "data", "empty.bin"), nil)
+	return root
+}
+
+func writeBundleRegisterFixtureFile(t *testing.T, path, content string) {
+	t.Helper()
+	writeBundleRegisterFixtureBytes(t, path, []byte(content))
+}
+
+func writeBundleRegisterFixtureBytes(t *testing.T, path string, content []byte) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
 }
 
 func assertBundleRequest(t *testing.T, req jsonRPCRequest, wantMethod string, wantParams map[string]any) {

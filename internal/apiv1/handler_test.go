@@ -711,6 +711,34 @@ func TestOperatorBundleRegisterHandlersMaterializeCanonicalProjectionAndIdempote
 	if got := withDataResult["data_size_bytes"].(float64); got <= 0 {
 		t.Fatalf("bundle.register data_size_bytes = %v, want >0", got)
 	}
+
+	localRoot := t.TempDir()
+	writeBundleRegistrationLocalContractsFixture(t, localRoot)
+	upload, err := runtimecontracts.BuildBundleRegistrationDirectoryUpload(t.TempDir(), localRoot, platformSpec)
+	if err != nil {
+		t.Fatalf("BuildBundleRegistrationDirectoryUpload: %v", err)
+	}
+	packagedParams := map[string]any{"content_yaml": upload.ContentYAML}
+	if upload.DataBlob != nil {
+		packagedParams["data_blob"] = upload.DataBlob
+	}
+	packagedRequest, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      "packaged-directory",
+		"method":  "bundle.register",
+		"params":  packagedParams,
+	})
+	if err != nil {
+		t.Fatalf("marshal packaged directory request: %v", err)
+	}
+	packaged := rpcCall(t, handler, string(packagedRequest))
+	if packaged.Error != nil {
+		t.Fatalf("bundle.register packaged directory error = %#v\ncontent_yaml:\n%s", packaged.Error, upload.ContentYAML)
+	}
+	packagedResult := asMap(t, packaged.Result)
+	if packagedResult["registered"] != true || packagedResult["has_data"] != true {
+		t.Fatalf("bundle.register packaged directory result = %#v", packagedResult)
+	}
 }
 
 func TestOperatorBundleRegisterHandlersFailClosed(t *testing.T) {
@@ -822,6 +850,34 @@ files:
         - start
         - done
 `
+}
+
+func writeBundleRegistrationLocalContractsFixture(t *testing.T, root string) {
+	t.Helper()
+	writeBundleRegistrationLocalFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: registered-local-directory
+version: "1.0.0"
+flows:
+  - id: alpha
+    flow: alpha
+`)
+	writeBundleRegistrationLocalFixtureFile(t, filepath.Join(root, "flows", "alpha", "schema.yaml"), `
+initial_state: start
+states:
+  - start
+  - done
+`)
+	writeBundleRegistrationLocalFixtureFile(t, filepath.Join(root, "flows", "alpha", "data", "payload.bin"), "\x01\x02\x03")
+}
+
+func writeBundleRegistrationLocalFixtureFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
 }
 
 func testBundleRegistrationPlatformSpec(t *testing.T) string {
