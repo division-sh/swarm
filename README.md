@@ -159,6 +159,10 @@ backend fails fast if its required credential is missing.
 # config.yaml
 llm:
   backend: openai_compatible
+  session:
+    lock_ttl: 10s
+    rotate_after_turns: 40
+    rotate_on_parse_failures: 3
   openai_compatible:
     base_url: https://api.example.com
   models:
