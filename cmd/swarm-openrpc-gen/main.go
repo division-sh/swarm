@@ -7,11 +7,12 @@ import (
 	"path/filepath"
 
 	"swarm/internal/apispec"
+	"swarm/internal/platform"
 )
 
 func main() {
-	platformSpecPath := flag.String("platform-spec", filepath.Join("docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"), "Path to authoritative platform-spec.yaml")
-	outPath := flag.String("out", filepath.Join("docs", "specs", "swarm-platform", "platform", "contracts", "openrpc.json"), "Path to write generated OpenRPC JSON")
+	platformSpecPath := flag.String("platform-spec", platform.DefaultPlatformSpecPath, "Path to authoritative platform-spec.yaml")
+	outPath := flag.String("out", platform.DefaultOpenRPCPath, "Path to write generated OpenRPC JSON")
 	check := flag.Bool("check", false, "Validate that the generated OpenRPC JSON matches the existing output file")
 	flag.Parse()
 

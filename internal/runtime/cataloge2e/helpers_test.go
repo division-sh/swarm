@@ -25,7 +25,7 @@ func repoRootFromCatalogE2E(t testing.TB) string {
 
 func platformSpecPathFromCatalogE2E(t testing.TB) string {
 	t.Helper()
-	return filepath.Join(repoRootFromCatalogE2E(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	return runtimecontracts.DefaultPlatformSpecFile(repoRootFromCatalogE2E(t))
 }
 
 func loadFixtureBundle(t testing.TB, fixtureRoot string) *runtimecontracts.WorkflowContractBundle {
@@ -39,7 +39,7 @@ func loadFixtureBundle(t testing.TB, fixtureRoot string) *runtimecontracts.Workf
 
 func loadFixtureBundleMaybe(fixtureRoot string) (*runtimecontracts.WorkflowContractBundle, error) {
 	repoRoot := repoRootFromCatalogE2ENonFatal()
-	return runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	return runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 }
 
 func repoRootFromCatalogE2ENonFatal() string {

@@ -23,7 +23,7 @@ const notificationSchemaProbeTestName = "TestOpenRPCSubscriptionNotificationSche
 func TestOpenRPCSuccessfulResultSchemas(t *testing.T) {
 	root := repoRoot(t)
 	api := loadComplianceAPISpec(t, root)
-	openRPC, _ := loadComplianceOpenRPC(t, filepath.Join(root, "docs", "specs", "swarm-platform", "platform", "contracts", "openrpc.json"))
+	openRPC, _ := loadComplianceOpenRPC(t, complianceOpenRPCPath(root))
 	matrix := loadComplianceMatrix(t, filepath.Join(root, "internal", "apiv1", "testdata", "openrpc_compliance_matrix.yaml"))
 
 	methods := resultSchemaRuntimeMethods(t, api, openRPC, matrix)
@@ -73,7 +73,7 @@ func TestOpenRPCResultSchemaPreflightRejectsUnreachableBranches(t *testing.T) {
 
 func TestOpenRPCEntityFullAccumulatedSchemaMatchesRuntimeOwner(t *testing.T) {
 	root := repoRoot(t)
-	openRPC, _ := loadComplianceOpenRPC(t, filepath.Join(root, "docs", "specs", "swarm-platform", "platform", "contracts", "openrpc.json"))
+	openRPC, _ := loadComplianceOpenRPC(t, complianceOpenRPCPath(root))
 	validator := newOpenRPCResultSchemaValidator(t, openRPC)
 
 	result := map[string]any{
@@ -101,7 +101,7 @@ func TestOpenRPCEntityFullAccumulatedSchemaMatchesRuntimeOwner(t *testing.T) {
 func TestOpenRPCSubscriptionNotificationSchemas(t *testing.T) {
 	root := repoRoot(t)
 	api := loadComplianceAPISpec(t, root)
-	openRPC, _ := loadComplianceOpenRPC(t, filepath.Join(root, "docs", "specs", "swarm-platform", "platform", "contracts", "openrpc.json"))
+	openRPC, _ := loadComplianceOpenRPC(t, complianceOpenRPCPath(root))
 	matrix := loadComplianceMatrix(t, filepath.Join(root, "internal", "apiv1", "testdata", "openrpc_compliance_matrix.yaml"))
 
 	methods := notificationSchemaRuntimeMethods(t, api, openRPC, matrix)

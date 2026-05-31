@@ -13,7 +13,7 @@ import (
 
 func TestBundleHashV1GoldenCorpus(t *testing.T) {
 	root := t.TempDir()
-	platform := filepath.Join(t.TempDir(), "platform-spec.yaml")
+	platform := DefaultPlatformSpecFile(t.TempDir())
 	writeBundleHashText(t, platform, `
 api_specification:
   zeta: 1.0
@@ -488,7 +488,7 @@ func TestBundleHashV1LabelValidation(t *testing.T) {
 func writeEquivalentBundleHashFixture(t *testing.T, lineEnding, packageYAML string) (string, string) {
 	t.Helper()
 	root := t.TempDir()
-	platform := filepath.Join(t.TempDir(), "platform-spec.yaml")
+	platform := DefaultPlatformSpecFile(t.TempDir())
 	writeBundleHashText(t, platform, strings.ReplaceAll("api_specification:\n  alpha: true\n  number: 1\n", "\n", lineEnding))
 	writeBundleHashText(t, filepath.Join(root, "package.yaml"), packageYAML)
 	writeBundleHashText(t, filepath.Join(root, "schema.yaml"), strings.ReplaceAll("name: equivalent\nfields:\n  topic: string\n", "\n", lineEnding))

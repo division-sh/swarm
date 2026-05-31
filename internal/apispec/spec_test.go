@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"gopkg.in/yaml.v3"
+	"swarm/internal/platform"
 )
 
 func TestPlatformAPISpecValidationCoverage(t *testing.T) {
@@ -53,7 +54,7 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateOpenRPC() error = %v", err)
 	}
-	artifactPath := filepath.Join(repoRoot(t), "docs", "specs", "swarm-platform", "platform", "contracts", "openrpc.json")
+	artifactPath := platform.DefaultOpenRPCFile(repoRoot(t))
 	artifact, err := os.ReadFile(artifactPath)
 	if err != nil {
 		t.Fatalf("read openrpc artifact: %v", err)
@@ -223,7 +224,7 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 }
 
 func TestGeneratedOpenRPCBundleIdentityDescriptionsPreserveConstraints(t *testing.T) {
-	artifactPath := filepath.Join(repoRoot(t), "docs", "specs", "swarm-platform", "platform", "contracts", "openrpc.json")
+	artifactPath := platform.DefaultOpenRPCFile(repoRoot(t))
 	artifact, err := os.ReadFile(artifactPath)
 	if err != nil {
 		t.Fatalf("read openrpc artifact: %v", err)
@@ -906,7 +907,7 @@ func TestContentDescriptorsDeclareRequiredFlag(t *testing.T) {
 
 func loadRepoAPISpec(t *testing.T) *APISpecification {
 	t.Helper()
-	api, err := LoadPlatformSpec(filepath.Join(repoRoot(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	api, err := LoadPlatformSpec(platform.DefaultPlatformSpecFile(repoRoot(t)))
 	if err != nil {
 		t.Fatalf("LoadPlatformSpec() error = %v", err)
 	}
@@ -933,7 +934,7 @@ func repoRoot(t *testing.T) string {
 
 func loadPlatformSpecYAMLNode(t *testing.T) *yaml.Node {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	raw, err := os.ReadFile(platform.DefaultPlatformSpecFile(repoRoot(t)))
 	if err != nil {
 		t.Fatalf("read platform spec: %v", err)
 	}

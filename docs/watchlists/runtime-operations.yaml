@@ -342,7 +342,7 @@ nodes:
     title: LLM Provider Selection Config Authority
     parent_class: runtime LLM provider abstraction not production-ready
     canonical_owners:
-      - docs/specs/swarm-platform/platform/contracts/platform-spec.yaml llm_provider_selection_config_authority
+      - platform-spec.yaml llm_provider_selection_config_authority
       - internal/runtime/llm/selection backend profile and model alias resolver
     why_this_node_exists: LLM provider/model selection drifts when config, CLI flags, env defaults, runtime factories,
       provider credentials, persisted llm_backend, authored model aliases, and turn audit records each interpret backend
@@ -384,7 +384,7 @@ nodes:
     title: Runtime Store Backend Default And SQLite Portability
     parent_class: runtime store backend default and durable SQLite local/dev portability
     canonical_owners:
-      - docs/specs/swarm-platform/platform/contracts/platform-spec.yaml runtime_store_backend_selection
+      - platform-spec.yaml runtime_store_backend_selection
       - internal/store/backendselection runtime store backend resolver and SQLite path resolver
       - "future SQLite schema/store/session/delivery/trace owners tracked by #1085-#1088 before public default flip"
     why_this_node_exists: Runtime store semantics drift when CLI defaults, env/config loading, runtime store construction, schema bootstrap, session locking, event delivery/replay, trace reads, docs, and CI each infer Postgres or SQLite support independently.

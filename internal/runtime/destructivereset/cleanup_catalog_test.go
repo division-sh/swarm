@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"gopkg.in/yaml.v3"
+	runtimecontracts "swarm/internal/runtime/contracts"
 )
 
 func TestDefaultPlatformCleanupCatalogClassifiesEveryPlatformTable(t *testing.T) {
@@ -73,7 +74,7 @@ func TestDefaultPlatformCleanupCatalogMatchesPlatformSpecPolicy(t *testing.T) {
 func loadPlatformTableNamesForCleanupCatalogTest(t *testing.T) map[string]struct{} {
 	t.Helper()
 	repo := cleanupCatalogTestRepoRoot(t)
-	raw, err := os.ReadFile(filepath.Join(repo, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	raw, err := os.ReadFile(runtimecontracts.DefaultPlatformSpecFile(repo))
 	if err != nil {
 		t.Fatalf("read platform-spec.yaml: %v", err)
 	}
@@ -100,7 +101,7 @@ func loadPlatformTableNamesForCleanupCatalogTest(t *testing.T) map[string]struct
 func loadPlatformCleanupClassificationsForCleanupCatalogTest(t *testing.T) map[string]string {
 	t.Helper()
 	repo := cleanupCatalogTestRepoRoot(t)
-	raw, err := os.ReadFile(filepath.Join(repo, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	raw, err := os.ReadFile(runtimecontracts.DefaultPlatformSpecFile(repo))
 	if err != nil {
 		t.Fatalf("read platform-spec.yaml: %v", err)
 	}

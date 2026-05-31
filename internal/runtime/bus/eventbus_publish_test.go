@@ -1924,7 +1924,7 @@ func TestEventBusPublish_RecordsPublishDiagnosticsInTurnRecorder(t *testing.T) {
 func TestEventBusPublish_NestedDescendantCompletionDoesNotEmitChildContinuation(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-nested-three-levels")
-	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
@@ -2072,7 +2072,7 @@ func contains(items []string, want string) bool {
 func TestEventBusPublish_NestedThreeLevelChain_FromRootStartCompletesWithoutChildContinuation(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-nested-three-levels")
-	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
@@ -2200,7 +2200,7 @@ func TestEventBusPublish_NestedThreeLevelChain_FromRootStartCompletesWithoutChil
 func TestEventBusPublish_GatedChildFlowCompletionAdvancesRoot(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-gates-in-child-flow")
-	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)

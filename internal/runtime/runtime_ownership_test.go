@@ -162,7 +162,7 @@ func loadRuntimeOwnershipWorkflowModule(t *testing.T) semanticOnlyWorkflowRuntim
 	t.Helper()
 	repoRoot := filepath.Clean(filepath.Join("..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier8-boot-verification", "test-boot-success")
-	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
 	if err != nil {
 		t.Fatalf("load bundle: %v", err)

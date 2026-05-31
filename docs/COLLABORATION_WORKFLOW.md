@@ -55,7 +55,7 @@ Default rule:
 
 When a workstream requires a platform semantic change:
 
-1. Keep `docs/specs/swarm-platform/platform/contracts/platform-spec.yaml` authoritative for `master`.
+1. Keep `platform-spec.yaml` authoritative for `master`.
 2. Do not put future semantics onto `master` ahead of code.
 3. Use a review-spec draft file while the semantic change is still in design or implementation.
 4. Land the authoritative YAML update in the same issue branch/PR as the matching implementation.
@@ -64,8 +64,8 @@ Default review-spec convention:
 
 - store draft files in a dedicated local-only review directory
 - name them with a workstream-specific suffix, for example:
-  - `docs/specs/swarm-platform/platform/contracts/review/platform-spec.session-audit-split.yaml`
-  - `docs/specs/swarm-platform/platform/contracts/review/platform-spec.schema-capabilities.yaml`
+  - `docs/specs/swarm-platform/platform/review/platform-spec.session-audit-split.yaml`
+  - `docs/specs/swarm-platform/platform/review/platform-spec.schema-capabilities.yaml`
 
 Default rule:
 

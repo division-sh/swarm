@@ -240,7 +240,7 @@ The platform spec is the authoritative source for platform/runtime semantics.
 
 Primary authority:
 
-- `docs/specs/swarm-platform/platform/contracts/platform-spec.yaml`
+- `platform-spec.yaml`
 
 Supporting authority:
 
@@ -282,7 +282,7 @@ Spec-update workflow when implementation is blocked by a spec gap:
 
 - stop implementation immediately when the issue depends on semantics the current spec does not define clearly enough
 - draft the proposed semantic change first in a review-spec file under:
-  - `docs/specs/swarm-platform/platform/contracts/review/`
+  - `docs/specs/swarm-platform/platform/review/`
 - review that draft as a spec decision before resuming implementation
 - once the draft is approved, copy the approved draft into the implementer's worktree before handoff
 - the implementation PR must then do both in the same branch:
@@ -301,8 +301,8 @@ Default review-spec convention:
 
 - draft files live in a dedicated local-only review directory
 - name them with a workstream-specific suffix, for example:
-  - `docs/specs/swarm-platform/platform/contracts/review/platform-spec.session-audit-split.yaml`
-  - `docs/specs/swarm-platform/platform/contracts/review/platform-spec.expression-model.yaml`
+  - `docs/specs/swarm-platform/platform/review/platform-spec.session-audit-split.yaml`
+  - `docs/specs/swarm-platform/platform/review/platform-spec.expression-model.yaml`
 
 Rule:
 
@@ -1302,7 +1302,7 @@ Minimum spec-reference block:
 
 ```text
 Spec references:
-- docs/specs/swarm-platform/platform/contracts/platform-spec.yaml: <section/path>
+- platform-spec.yaml: <section/path>
 - governing rule: <short plain-language statement>
 
 or

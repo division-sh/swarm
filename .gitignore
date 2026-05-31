@@ -27,4 +27,4 @@ internal/dashboard/ui/dist
 # Local parallel implementer worktrees
 worktrees/
 misc/
-docs/specs/swarm-platform/platform/contracts/review/
+docs/specs/swarm-platform/platform/review/

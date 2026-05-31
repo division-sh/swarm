@@ -314,7 +314,7 @@ func TestValidateWorkflowContractSurface_RejectsCreateEntityWithAccumulate(t *te
 func loadRuntimeWorkflowValidationFixtureBundle(t *testing.T, relativeRoot string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
-	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	fixtureRoot := filepath.Join(repoRoot, relativeRoot)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
 	if err != nil {

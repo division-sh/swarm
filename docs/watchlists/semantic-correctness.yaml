@@ -205,7 +205,7 @@ nodes:
     title: Event Receipts Typed Subscriber Identity Owner
     parent_class: runtime delivery/receipt identity ownership drift across schema, writers, typed readers, replay/fork planning, and diagnostics
     canonical_owners:
-      - docs/specs/swarm-platform/platform/contracts/platform-spec.yaml platform_tables.event_receipts DDL
+      - platform-spec.yaml platform_tables.event_receipts DDL
       - internal/store/postgres.go event_receipts typed identity migration and fail-closed capability binding
       - internal/store/events.go, internal/store/event_receipt_store.go, internal/runtime/pipeline/node_system_runner.go, internal/runtime/pipeline/workflow_transitions.go, and internal/store/active_run_quiescence.go receipt writers
     why_this_node_exists: event receipt readers already interpret subscriber identity as event_id plus subscriber_type plus subscriber_id, while the old physical key and writer conflict targets used only event_id plus subscriber_id and forced local string namespacing.
@@ -262,7 +262,7 @@ nodes:
     title: Boot Check Definition Drift
     parent_class: semantic correctness drift between authoritative boot-check definitions and enforcement/proof surfaces
     canonical_owners:
-      - docs/specs/swarm-platform/platform/contracts/platform-spec.yaml
+      - platform-spec.yaml
       - internal/runtime/bootverify
     why_this_node_exists: stable boot check ids drift when the spec, Go bootverify, catalog harness, verifier scripts, fixtures, and docs assign different meanings to the same check name
     known_manifestations:
@@ -355,7 +355,7 @@ nodes:
     title: Authored Global Session-Scope Retirement
     parent_class: product-authored business authority can bypass flow ownership by selecting platform-global reusable session scope
     canonical_owners:
-      - docs/specs/swarm-platform/platform/contracts/platform-spec.yaml conversation_modes and session_scope_intent
+      - platform-spec.yaml conversation_modes and session_scope_intent
       - internal/runtime/sessions/scope.go authored session-scope validation and runtime resolution
     why_this_node_exists: session_scope global is valid persisted/internal runtime state, but product-authored normal agents must not acquire platform-wide reusable conversation authority by declaring a string field.
     known_manifestations:
@@ -459,7 +459,7 @@ nodes:
       - create_flow_instance boot/runtime sibling-field enforcement in internal/runtime/bootverify and internal/runtime/pipeline
       - runtime subject-link deprecation ownership across internal/runtime/pipeline, internal/runtime/manager, internal/runtime/tools, and supported proof surfaces
       - run/event causal lineage via events.source_event_id for debugging proof after deprecated subject-link removal
-      - canonical platform contract truth in docs/specs/swarm-platform/platform/contracts/platform-spec.yaml
+      - canonical platform contract truth in platform-spec.yaml
     why_this_node_exists: the runtime is migrating away from the older coupled cross-flow model through staged owner removal and cleanup; subject-link writer/proof ownership moved in #534/#535, #417 closed the schema/tool/operator aftermath, and #414 owns canonical spec adoption for implementation-true behavior.
     known_manifestations:
       - cross-flow agent-facing entity reads across get_entity and explicit entity_type query/search/metrics targets were previously exposed before #542/#543 and are now expected to stay fail-closed
@@ -538,7 +538,7 @@ nodes:
     title: Primitive-Only Cross-Flow Authored Contract Migration
     parent_class: authored contract migration away from legacy cross-flow coupling semantics
     canonical_owners:
-      - authoritative create_flow_instance authored shape in docs/specs/swarm-platform/platform/contracts/platform-spec.yaml
+      - authoritative create_flow_instance authored shape in platform-spec.yaml
       - repo-authored contract fixtures and examples that must encode cross-flow handoff through canonical action sibling fields and payload/config carriers
     why_this_node_exists: runtime fail-closed migration is not durable if repo-authored contracts and fixtures still depend on legacy create_flow_instance shapes or other cross-flow coupling assumptions that the migration is removing.
     known_manifestations:
@@ -560,7 +560,7 @@ nodes:
     title: Strict Event-Schema Cross-Flow Contract Migration
     parent_class: staged migration from implicit cross-flow payload inheritance to explicit emit-site event contracts
     canonical_owners:
-      - authoritative event-contract rule in docs/specs/swarm-platform/platform/contracts/platform-spec.yaml and the reviewed cross-flow contract draft
+      - authoritative event-contract rule in platform-spec.yaml and the reviewed cross-flow contract draft
       - emit grammar, loader, semantic-view, runtime selection, and boot/verify consumers that must interpret the same emit-site ownership model
     why_this_node_exists: the platform cannot make event schema the strict cross-flow contract while different emit sites still share one ambiguous handler-level payload model or while supported consumers interpret emit authorship differently.
     known_manifestations:

@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"swarm/internal/platform"
 	"swarm/internal/runtime/core/eventidentity"
 )
 
@@ -35,11 +36,8 @@ func contractSameScope(a, b ContractItemSource) bool {
 func ResolveWorkflowContractPaths(repoRoot string) ContractPaths {
 	return ResolveWorkflowContractPathsWithOverrides(repoRoot, "", "")
 }
-func DefaultPlatformContractsDir(repoRoot string) string {
-	return filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts")
-}
 func DefaultPlatformSpecFile(repoRoot string) string {
-	return filepath.Join(DefaultPlatformContractsDir(repoRoot), "platform-spec.yaml")
+	return platform.DefaultPlatformSpecFile(repoRoot)
 }
 func defaultAuxFile(repoRoot, envKey string, pathParts ...string) string {
 	if env := strings.TrimSpace(os.Getenv(envKey)); env != "" {

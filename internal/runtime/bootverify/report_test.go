@@ -358,7 +358,7 @@ func TestRun_MapsDeadDeclaredEventSchemaToNamedWarning(t *testing.T) {
 		name:       "dead-event-schema-warning",
 		rootEvents: "root.unused: {}\n",
 	})
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -605,7 +605,7 @@ pins:
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			root := writeDeadEventSchemaFixture(t, tc.opts)
-			bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+			bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -637,7 +637,7 @@ beta-node:
 			},
 		},
 	})
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -667,7 +667,7 @@ root-node:
 			},
 		},
 	})
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -681,7 +681,7 @@ func TestRun_DoesNotUsePlatformCatalogOverlapAsProofForDeadEventSchema(t *testin
 		name:       "dead-event-schema-platform-overlap",
 		rootEvents: "platform.runtime_log: {}\n",
 	})
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -1883,7 +1883,7 @@ func TestRun_AllowsFanOutDerivedAccumulationSourceEvent(t *testing.T) {
 func TestRun_ReportsCreateFlowInstanceMissingInstanceIDFrom(t *testing.T) {
 	repoRoot := repoRootForBootverifyTest(t)
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier9-composition-patterns", "test-compose-create-instance-config")
-	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	bundle := loadFixtureBundleAt(t, repoRoot, fixtureRoot, platformSpec)
 	node := bundle.Nodes["spawner"]
 	handler := node.EventHandlers["spawn.requested"]
@@ -1902,7 +1902,7 @@ func TestRun_ReportsCreateFlowInstanceMissingInstanceIDFrom(t *testing.T) {
 func TestRun_ReportsCreateFlowInstanceMissingConfigFrom(t *testing.T) {
 	repoRoot := repoRootForBootverifyTest(t)
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier9-composition-patterns", "test-compose-create-instance-config")
-	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	bundle := loadFixtureBundleAt(t, repoRoot, fixtureRoot, platformSpec)
 	node := bundle.Nodes["spawner"]
 	handler := node.EventHandlers["spawn.requested"]
@@ -1932,7 +1932,7 @@ func TestRun_MapsStateMachineMismatchToNamedError(t *testing.T) {
 
 func TestRun_WarnsWhenDeclaredStateIsUnreachable(t *testing.T) {
 	root := writeStateReachabilityFixture(t)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -1952,7 +1952,7 @@ func TestRun_WarnsWhenDeclaredStateIsUnreachable(t *testing.T) {
 
 func TestRun_DoesNotWarnWhenOnCompleteBranchReachesDeclaredState(t *testing.T) {
 	root := writeStateReachabilityFixture(t)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 	node := bundle.Nodes["support-node"]
 	handler := node.EventHandlers["ticket.closed"]
 	handler.OnComplete = []runtimecontracts.HandlerRuleEntry{{
@@ -1971,7 +1971,7 @@ func TestRun_DoesNotWarnWhenOnCompleteBranchReachesDeclaredState(t *testing.T) {
 
 func TestRun_DoesNotWarnWhenRuleBranchReachesDeclaredState(t *testing.T) {
 	root := writeStateReachabilityFixture(t)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 	node := bundle.Nodes["support-node"]
 	handler := node.EventHandlers["ticket.closed"]
 	handler.Rules = []runtimecontracts.HandlerRuleEntry{{
@@ -1990,7 +1990,7 @@ func TestRun_DoesNotWarnWhenRuleBranchReachesDeclaredState(t *testing.T) {
 
 func TestRun_DoesNotUseAccumulateOnCompleteAsReachabilityProof(t *testing.T) {
 	root := writeStateReachabilityFixture(t)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 	node := bundle.Nodes["support-node"]
 	handler := node.EventHandlers["ticket.closed"]
 	handler.Accumulate = &runtimecontracts.AccumulateSpec{
@@ -2011,7 +2011,7 @@ func TestRun_DoesNotUseAccumulateOnCompleteAsReachabilityProof(t *testing.T) {
 
 func TestRun_PreservesStateMachineCoherenceErrorWhenInvalidTargetExists(t *testing.T) {
 	root := writeStateReachabilityFixture(t)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 	node := bundle.Nodes["support-node"]
 	handler := node.EventHandlers["ticket.closed"]
 	handler.OnComplete = []runtimecontracts.HandlerRuleEntry{{
@@ -3122,7 +3122,7 @@ func TestRun_DoesNotWarnForExternalInputPinWithoutEmitter(t *testing.T) {
 
 func TestRun_ConstrainsExternalInputProducerPathToConsumingScope(t *testing.T) {
 	root := writeInputPinExternalScopeFixture(t)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -3151,7 +3151,7 @@ func TestRun_ConstrainsExternalInputProducerPathToConsumingScope(t *testing.T) {
 
 func TestRun_DoesNotWarnForSiblingFlowOutputPinInputProducerPath(t *testing.T) {
 	root := writeCrossFlowPinAmbiguityFixture(t, false)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 	bundle.Semantics.FlowOutputs["producer_b"] = nil
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -3274,7 +3274,7 @@ func TestRun_DoesNotUseProducesOrPlannedAsInputProducerPathProof(t *testing.T) {
 
 func TestRun_ReportsConflictingWritePinOwners(t *testing.T) {
 	root := writeCrossFlowPinAmbiguityFixture(t, false)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 	bundle.Semantics.FlowWrites["producer_a"] = []string{"ticket.status"}
 	bundle.Semantics.FlowWrites["producer_b"] = []string{"ticket.status"}
 	bundle.Semantics.WritePinOwners["ticket.status"] = []string{"producer_a", "producer_b"}
@@ -3288,7 +3288,7 @@ func TestRun_ReportsConflictingWritePinOwners(t *testing.T) {
 
 func TestRun_DoesNotWarnForLocalizedCrossFlowEventRouting(t *testing.T) {
 	root := writeLocalizedEventRoutingFixture(t)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -3441,7 +3441,7 @@ case:
     type: text
     _unused_reason: prompt coverage proof
 `, "")
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -3464,7 +3464,7 @@ case:
     type: text
     initial: seeded
 `, "Call create_entity using the delivered schema.\n")
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -3494,7 +3494,7 @@ case:
     type: text
     _unused_reason: prompt save auth proof
 `, "Use save_entity_field for `business_brief`.\n")
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -3529,7 +3529,7 @@ case:
     type: text
     _unused_reason: scoped auth precedence proof
 `, "Use `save_entity_field` for `business_brief`.\n")
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -3585,7 +3585,7 @@ writer:
 `)
 	}
 
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -4044,7 +4044,7 @@ treasury-node:
           - source_field: amount_usd
             target_field: spent_usd
 `)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -4072,7 +4072,7 @@ treasury-node:
           - source_field: amount_usd
             target_field: spent_usd
 `)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -4096,7 +4096,7 @@ treasury-node:
         by:
           vertical_id: payload.entity_id
 `)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -4117,7 +4117,7 @@ treasury-node:
         by:
           vertical_id: payload.entity_id
 `)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -4138,7 +4138,7 @@ treasury-node:
         by:
           entity_id: payload.vertical_id
 `)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -4159,7 +4159,7 @@ treasury-node:
         by:
           vertical_id: payload.missing_vertical_id
 `)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -4180,7 +4180,7 @@ treasury-node:
         by:
           vertical_id: payload.missing_vertical_id
 `)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -4202,7 +4202,7 @@ treasury-node:
         by:
           vertical_id: payload.vertical_id
 `)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -4224,7 +4224,7 @@ treasury-node:
         by:
           vertical_id: payload.vertical_id
 `)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -4248,7 +4248,7 @@ treasury-node:
         by:
           vertical_id: payload.vertical_id
 `)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -4286,7 +4286,7 @@ func TestRun_AllowsTemplateFlowInputPinHandlersWithoutCreateEntity(t *testing.T)
 
 func TestRun_ReportsCrossFlowPinAmbiguityWithoutEscapeHatch(t *testing.T) {
 	root := writeCrossFlowPinAmbiguityFixture(t, false)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -4297,7 +4297,7 @@ func TestRun_ReportsCrossFlowPinAmbiguityWithoutEscapeHatch(t *testing.T) {
 
 func TestRun_AllowsCrossFlowPinAmbiguityWithScopedEscapeHatch(t *testing.T) {
 	root := writeCrossFlowPinAmbiguityFixture(t, true)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -4471,7 +4471,7 @@ func TestBootCheckRegistry_HasSpecCheckCount(t *testing.T) {
 func TestRun_ReportsErrorForUnprefixedTimerStartOn(t *testing.T) {
 	root := writeTimerValidationFixture(t, "ticket.opened", "")
 	repoRoot := repoRootForBootverifyTest(t)
-	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	report := Run(context.Background(), semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, root, platformSpec)), Options{})
 	if !reportContains(report.Errors(), "timer_validation", "start_on") {
 		t.Fatalf("expected timer_validation start_on error, got %#v", report.Errors())
@@ -4481,7 +4481,7 @@ func TestRun_ReportsErrorForUnprefixedTimerStartOn(t *testing.T) {
 func TestRun_ReportsErrorForTimerCancelOnBoot(t *testing.T) {
 	root := writeTimerValidationFixture(t, "event:ticket.opened", "boot")
 	repoRoot := repoRootForBootverifyTest(t)
-	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	report := Run(context.Background(), semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, root, platformSpec)), Options{})
 	if !reportContains(report.Errors(), "timer_validation", "cancel_on") {
 		t.Fatalf("expected timer_validation cancel_on error, got %#v", report.Errors())
@@ -4491,7 +4491,7 @@ func TestRun_ReportsErrorForTimerCancelOnBoot(t *testing.T) {
 func TestRun_ReportsErrorForUnknownTimerTriggerState(t *testing.T) {
 	root := writeTimerValidationFixture(t, "state:missing_state", "")
 	repoRoot := repoRootForBootverifyTest(t)
-	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	report := Run(context.Background(), semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, root, platformSpec)), Options{})
 	if !reportContains(report.Errors(), "timer_validation", "unknown state") {
 		t.Fatalf("expected timer_validation unknown state error, got %#v", report.Errors())
@@ -4501,7 +4501,7 @@ func TestRun_ReportsErrorForUnknownTimerTriggerState(t *testing.T) {
 func TestRun_ReportsWarningForUnknownTimerTriggerEvent(t *testing.T) {
 	root := writeTimerValidationFixture(t, "event:ticket.unknown", "")
 	repoRoot := repoRootForBootverifyTest(t)
-	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	report := Run(context.Background(), semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, root, platformSpec)), Options{})
 	if !reportContains(report.Warnings(), "timer_validation", "unknown event") {
 		t.Fatalf("expected timer_validation unknown event warning, got %#v", report.Warnings())
@@ -4511,7 +4511,7 @@ func TestRun_ReportsWarningForUnknownTimerTriggerEvent(t *testing.T) {
 func TestRun_ReportsErrorForTimerMissingOwner(t *testing.T) {
 	root := writeTimerValidationFixture(t, "event:ticket.opened", "")
 	repoRoot := repoRootForBootverifyTest(t)
-	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	bundle := loadFixtureBundleAt(t, repoRoot, root, platformSpec)
 	bundle.Semantics.Timers[0].Owner = ""
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -4523,7 +4523,7 @@ func TestRun_ReportsErrorForTimerMissingOwner(t *testing.T) {
 func TestRun_ReportsErrorForTimerOwnerMissingFromParticipants(t *testing.T) {
 	root := writeTimerValidationFixture(t, "event:ticket.opened", "")
 	repoRoot := repoRootForBootverifyTest(t)
-	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	bundle := loadFixtureBundleAt(t, repoRoot, root, platformSpec)
 	bundle.Semantics.Timers[0].Owner = "missing-owner"
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -4535,7 +4535,7 @@ func TestRun_ReportsErrorForTimerOwnerMissingFromParticipants(t *testing.T) {
 func TestRun_ReportsErrorForTimerEventMissingFromCatalog(t *testing.T) {
 	root := writeTimerValidationFixture(t, "event:ticket.opened", "")
 	repoRoot := repoRootForBootverifyTest(t)
-	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	bundle := loadFixtureBundleAt(t, repoRoot, root, platformSpec)
 	bundle.Semantics.Timers[0].Event = "timer.missing"
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -4616,7 +4616,7 @@ func writeBootverifyFixtureFile(t *testing.T, path, contents string) {
 func loadSessionScopeValidationFixture(t *testing.T, fixtureRoot string) semanticview.Source {
 	t.Helper()
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
-	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	return semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, fixtureRoot, platformSpec))
 }
 
@@ -5176,7 +5176,7 @@ worker:
 func loadWave1ExpressionFixtureBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	root := writeWave1ExpressionFixture(t)
-	return loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	return loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 }
 
 func writeWave1RootReaderCoverageFixture(t *testing.T) string {
@@ -5241,7 +5241,7 @@ reader:
 func loadWave1RootReaderCoverageFixtureBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	root := writeWave1RootReaderCoverageFixture(t)
-	return loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	return loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 }
 
 func writePromptWriterCoverageFixture(t *testing.T, agentsYAML, entitiesYAML, promptText string) string {
@@ -5288,7 +5288,7 @@ func loadTier8Fixture(t *testing.T, fixture string) semanticview.Source {
 func loadTier8FixtureBundle(t *testing.T, fixture string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
-	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier8-boot-verification", fixture)
 	return loadFixtureBundleAt(t, repoRoot, fixtureRoot, platformSpec)
 }
@@ -5296,7 +5296,7 @@ func loadTier8FixtureBundle(t *testing.T, fixture string) *runtimecontracts.Work
 func loadFixtureBundle(t *testing.T, relativeRoot string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
-	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	fixtureRoot := filepath.Join(repoRoot, relativeRoot)
 	return loadFixtureBundleAt(t, repoRoot, fixtureRoot, platformSpec)
 }

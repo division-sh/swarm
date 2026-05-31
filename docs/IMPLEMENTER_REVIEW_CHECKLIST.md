@@ -394,7 +394,7 @@ Recommended PR description shape:
 ```text
 Spec references:
 
-- docs/specs/swarm-platform/platform/contracts/platform-spec.yaml: <section/path>
+- platform-spec.yaml: <section/path>
 - governing rule: <short plain-language statement>
 
 or

@@ -25,7 +25,7 @@ const readOnlyProbeMissingBundleHash = "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbb
 func TestOpenRPCReadOnlyHTTPRuntimeProbes(t *testing.T) {
 	root := repoRoot(t)
 	api := loadComplianceAPISpec(t, root)
-	openRPC, _ := loadComplianceOpenRPC(t, filepath.Join(root, "docs", "specs", "swarm-platform", "platform", "contracts", "openrpc.json"))
+	openRPC, _ := loadComplianceOpenRPC(t, complianceOpenRPCPath(root))
 	matrix := loadComplianceMatrix(t, filepath.Join(root, "internal", "apiv1", "testdata", "openrpc_compliance_matrix.yaml"))
 
 	methods := readOnlyHTTPRuntimeMethods(t, api, openRPC, matrix)

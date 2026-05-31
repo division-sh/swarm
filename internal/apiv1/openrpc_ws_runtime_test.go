@@ -23,7 +23,7 @@ const webSocketRuntimeProbeTestName = "TestOpenRPCWebSocketRuntimeProbes"
 func TestOpenRPCWebSocketRuntimeProbes(t *testing.T) {
 	root := repoRoot(t)
 	api := loadComplianceAPISpec(t, root)
-	openRPC, _ := loadComplianceOpenRPC(t, filepath.Join(root, "docs", "specs", "swarm-platform", "platform", "contracts", "openrpc.json"))
+	openRPC, _ := loadComplianceOpenRPC(t, complianceOpenRPCPath(root))
 	matrix := loadComplianceMatrix(t, filepath.Join(root, "internal", "apiv1", "testdata", "openrpc_compliance_matrix.yaml"))
 
 	wsMethods, httpMethods := transportAdmissionRuntimeMethods(t, api, openRPC, matrix)

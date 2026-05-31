@@ -153,8 +153,8 @@ nodes:
     title: V1 OpenRPC API Conformance
     parent_class: operator-facing API/spec/runtime parity and conformance proof drift
     canonical_owners:
-      - docs/specs/swarm-platform/platform/contracts/platform-spec.yaml api_specification
-      - docs/specs/swarm-platform/platform/contracts/openrpc.json
+      - platform-spec.yaml api_specification
+      - openrpc.json
       - internal/apispec
       - internal/apiv1
       - .github/workflows/ci.yml

@@ -77,7 +77,7 @@ func newTimerLifecycleCoordinator(bus Bus, db *sql.DB, module WorkflowModule, st
 func TestExecuteNodeHandlerPlan_EventTimerStartOnRegistersSchedule(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier5-flow-lifecycle", "test-timer-fire")
-	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
 	if err != nil {
 		t.Fatalf("load bundle: %v", err)
@@ -138,7 +138,7 @@ func TestExecuteNodeHandlerPlan_EventTimerStartOnRegistersSchedule(t *testing.T)
 func TestPipelineIntercept_EventTimerStartOnRegistersSchedule(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier5-flow-lifecycle", "test-timer-fire")
-	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
 	if err != nil {
 		t.Fatalf("load bundle: %v", err)
@@ -259,7 +259,7 @@ func TestPersistWorkflowTimerCancellation_StillCancelsSchedulerWhenClaimReleaseF
 func TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-child-flow-absolute-path")
-	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
 	if err != nil {
 		t.Fatalf("load bundle: %v", err)
@@ -326,7 +326,7 @@ func TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler(t *testing.T) {
 func TestExecuteNodeHandlerPlan_AccumulateTimeoutRegistersSchedule(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier2-accumulation", "test-accumulate-timeout")
-	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
 	if err != nil {
 		t.Fatalf("load bundle: %v", err)
@@ -399,7 +399,7 @@ func TestExecuteNodeHandlerPlan_AccumulateTimeoutRegistersSchedule(t *testing.T)
 func TestExecuteNodeHandlerPlan_AccumulateTimeoutCancelsScheduleOnTimeout(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier2-accumulation", "test-accumulate-timeout")
-	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
 	if err != nil {
 		t.Fatalf("load bundle: %v", err)
@@ -471,7 +471,7 @@ func TestExecuteNodeHandlerPlan_AccumulateTimeoutCancelsScheduleOnTimeout(t *tes
 func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-child-flow-pin-wiring")
-	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
 	if err != nil {
 		t.Fatalf("load bundle: %v", err)
@@ -561,7 +561,7 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 func TestPipelineIntercept_HandlesChildFlowOutputForRootListener(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-child-flow-pin-wiring")
-	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
 	if err != nil {
 		t.Fatalf("load bundle: %v", err)
@@ -612,7 +612,7 @@ func TestPipelineIntercept_HandlesChildFlowOutputForRootListener(t *testing.T) {
 func TestPipelineCoordinatorIntercept_NestedDescendantCompletionDoesNotEmitChildContinuation(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-nested-three-levels")
-	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
 	if err != nil {
 		t.Fatalf("load bundle: %v", err)
@@ -695,7 +695,7 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionDoesNotEmitChild
 func TestPipelineCoordinatorIntercept_NestedDescendantCompletionAlreadyTargetedToParentStillEmitsRootResult(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-nested-three-levels")
-	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
 	if err != nil {
 		t.Fatalf("load bundle: %v", err)
@@ -771,7 +771,7 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionAlreadyTargetedT
 func TestPipelineCoordinatorIntercept_NestedDescendantCompletionInsideOuterSQLTxStillEmitsRootResult(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-nested-three-levels")
-	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
 	if err != nil {
 		t.Fatalf("load bundle: %v", err)
