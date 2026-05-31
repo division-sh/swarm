@@ -1944,9 +1944,9 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitEnforcesProjectedRepoSize(
 	}
 
 	nextAction, nextCtx := testArtifactRepoActionAndContext(entityID, instance.Metadata, "55555555-5555-5555-5555-555555555555", "66666666-6666-6666-6666-666666666666", "name: unused\n")
-	nextAction.ArtifactRepo.AllowedPaths = append(nextAction.ArtifactRepo.AllowedPaths, "docs/extra.txt")
+	nextAction.ArtifactRepo.AllowedPaths = append(nextAction.ArtifactRepo.AllowedPaths, "artifacts/extra.txt")
 	nextAction.ArtifactRepo.Files = []runtimecontracts.ArtifactRepoFileSpec{{
-		Path:        runtimecontracts.LiteralExpression("docs/extra.txt"),
+		Path:        runtimecontracts.LiteralExpression("artifacts/extra.txt"),
 		Content:     runtimecontracts.LiteralExpression("xxxxxxxxxxxxxxxxxxxxxxxxx"),
 		ContentType: "text",
 	}}

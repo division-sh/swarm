@@ -304,9 +304,9 @@ func TestOpenRPCComplianceMatrixRejectsInvalidProofReferences(t *testing.T) {
 			name: "invalid artifact path",
 			mutate: func(matrix *openRPCComplianceMatrix) {
 				row := complianceMatrixRow(t, matrix, "agent.get")
-				row.ServiceDiscoveryPublication.ProofRefs = []complianceProofRef{{Kind: "artifact", Path: "docs/specs/missing-openrpc.json"}}
+				row.ServiceDiscoveryPublication.ProofRefs = []complianceProofRef{{Kind: "artifact", Path: "artifacts/missing-openrpc.json"}}
 			},
-			want: "artifact proof_ref path docs/specs/missing-openrpc.json does not exist",
+			want: "artifact proof_ref path artifacts/missing-openrpc.json does not exist",
 		},
 		{
 			name: "policy deferred examples missing artifact proof",
@@ -515,20 +515,16 @@ func trackerProofRefConsumers(matrix openRPCComplianceMatrix) map[string]int {
 }
 
 type complianceProofIndex struct {
-	goTests             map[string]string
-	goHelpers           map[string]string
-	activeTrackers      map[string]struct{}
-	watchlistNodes      map[string]struct{}
-	watchlistIssueLinks map[string]struct{}
+	goTests        map[string]string
+	goHelpers      map[string]string
+	activeTrackers map[string]struct{}
 }
 
 func newComplianceProofIndex(root string, matrix openRPCComplianceMatrix) (complianceProofIndex, []string) {
 	index := complianceProofIndex{
-		goTests:             map[string]string{},
-		goHelpers:           map[string]string{},
-		activeTrackers:      map[string]struct{}{},
-		watchlistNodes:      map[string]struct{}{},
-		watchlistIssueLinks: map[string]struct{}{},
+		goTests:        map[string]string{},
+		goHelpers:      map[string]string{},
+		activeTrackers: map[string]struct{}{},
 	}
 	var problems []string
 	symbols, err := loadGoFunctionSymbols(root)
@@ -538,22 +534,9 @@ func newComplianceProofIndex(root string, matrix openRPCComplianceMatrix) (compl
 		index.goTests = symbols.tests
 		index.goHelpers = symbols.helpers
 	}
-	watchlists, err := loadWatchlistProofIndex(root, complianceWatchlistIDs(matrix))
-	if err != nil {
-		problems = append(problems, err.Error())
-	} else {
-		index.watchlistNodes = watchlists.nodes
-		index.watchlistIssueLinks = watchlists.issueLinks
-	}
 	for _, tracker := range matrix.ActiveTrackers {
 		key := trackerKey(tracker.Issue, tracker.Watchlist)
 		index.activeTrackers[key] = struct{}{}
-		if _, ok := index.watchlistNodes[tracker.Watchlist]; !ok {
-			problems = append(problems, fmt.Sprintf("active tracker issue #%d watchlist %q does not resolve", tracker.Issue, tracker.Watchlist))
-		}
-		if _, ok := index.watchlistIssueLinks[key]; !ok {
-			problems = append(problems, fmt.Sprintf("active tracker issue #%d is not mapped to watchlist %q", tracker.Issue, tracker.Watchlist))
-		}
 	}
 	return index, problems
 }
@@ -775,96 +758,6 @@ func loadGoFunctionSymbols(root string) (goFunctionSymbols, error) {
 		}
 	}
 	return symbols, nil
-}
-
-type watchlistProofIndex struct {
-	nodes      map[string]struct{}
-	issueLinks map[string]struct{}
-}
-
-func complianceWatchlistIDs(matrix openRPCComplianceMatrix) map[string]struct{} {
-	ids := map[string]struct{}{}
-	add := func(watchlist string) {
-		id, _, ok := strings.Cut(strings.TrimSpace(watchlist), ".")
-		if ok && id != "" {
-			ids[id] = struct{}{}
-		}
-	}
-	for _, tracker := range matrix.ActiveTrackers {
-		add(tracker.Watchlist)
-	}
-	for _, row := range matrix.Methods {
-		for _, evidence := range complianceEvidenceFields(row) {
-			for _, ref := range evidence.evidence.ProofRefs {
-				if ref.Kind == "tracker" {
-					add(ref.Watchlist)
-				}
-			}
-		}
-	}
-	return ids
-}
-
-func loadWatchlistProofIndex(root string, ids map[string]struct{}) (watchlistProofIndex, error) {
-	index := watchlistProofIndex{
-		nodes:      map[string]struct{}{},
-		issueLinks: map[string]struct{}{},
-	}
-	paths := watchlistPaths(root, ids)
-	for _, path := range paths {
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return index, fmt.Errorf("read watchlist %s: %w", path, err)
-		}
-		var doc struct {
-			ID           string `yaml:"id"`
-			ActiveIssues []struct {
-				ID     int      `yaml:"id"`
-				MapsTo []string `yaml:"maps_to"`
-			} `yaml:"active_issues"`
-			Nodes []struct {
-				ID string `yaml:"id"`
-			} `yaml:"nodes"`
-		}
-		if err := yaml.Unmarshal(raw, &doc); err != nil {
-			return index, fmt.Errorf("parse watchlist %s: %w", path, err)
-		}
-		watchlistID := strings.TrimSpace(doc.ID)
-		for _, node := range doc.Nodes {
-			nodeID := strings.TrimSpace(node.ID)
-			if watchlistID != "" && nodeID != "" {
-				index.nodes[watchlistID+"."+nodeID] = struct{}{}
-			}
-		}
-		for _, issue := range doc.ActiveIssues {
-			for _, nodeID := range issue.MapsTo {
-				key := trackerKey(issue.ID, watchlistID+"."+strings.TrimSpace(nodeID))
-				index.issueLinks[key] = struct{}{}
-			}
-		}
-	}
-	return index, nil
-}
-
-func watchlistPaths(root string, ids map[string]struct{}) []string {
-	seen := map[string]struct{}{}
-	var paths []string
-	for id := range ids {
-		for _, candidate := range []string{
-			filepath.Join(root, "docs", "watchlists", id+".yaml"),
-			filepath.Join(root, "docs", "watchlists", strings.ReplaceAll(id, "_", "-")+".yaml"),
-		} {
-			if _, ok := seen[candidate]; ok {
-				continue
-			}
-			if _, err := os.Stat(candidate); err == nil {
-				seen[candidate] = struct{}{}
-				paths = append(paths, candidate)
-			}
-		}
-	}
-	sort.Strings(paths)
-	return paths
 }
 
 func trackerKey(issue int, watchlist string) string {

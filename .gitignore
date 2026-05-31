@@ -28,12 +28,6 @@ internal/dashboard/ui/dist
 # Local parallel implementer worktrees
 worktrees/
 misc/
-docs/specs/swarm-platform/platform/review/
 
-# Local-only documentation drafts and generated render artifacts.
-# Do not ignore docs/ wholesale; public docs and specs stay tracked.
-docs/local/
-docs/**/*.local.md
-docs/**/*.draft.md
-docs/**/*.pdf
-docs/**/*.tar
+# Local/private maintainer documentation. Public docs live at the repo root.
+docs/

@@ -31,9 +31,21 @@ same pull request as the implementation that makes it true.
 ## Issue And PR Expectations
 
 Open an issue before large semantic, runtime, API, CLI, or public-surface
-changes. High-risk work must follow the pre-audit and proof-audit process in
-[docs/IMPLEMENTER_GUIDELINES.md](docs/IMPLEMENTER_GUIDELINES.md) and the
-semantic ownership rules in [docs/SEMANTIC_DRIFT.md](docs/SEMANTIC_DRIFT.md).
+changes. High-risk work must not start coding until the issue records an
+approved pre-audit gate that names the semantic concept, canonical owner,
+failure class, sibling seams checked, and required proof.
+
+For semantic changes, bind the implementation to the authoritative owner rather
+than issue prose or private maintainer notes. Runtime/platform semantics belong
+in [platform-spec.yaml](platform-spec.yaml); public RPC shape belongs in
+[openrpc.json](openrpc.json) when generated from the spec and implementation.
+If no owner exists, split or promote one before implementing.
+
+Before review, PRs for high-risk work must include a proof audit that states the
+changed concept, touched consumers, old paths made invalid, sibling contexts
+checked, proof run, and any parent class left open. Do not preserve duplicate
+semantic interpreters, heuristic compatibility shims, or legacy behavior "just
+in case."
 
 Small documentation or test-only changes can be simpler, but they should still
 state the owner, scope, and proof clearly.

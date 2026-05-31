@@ -484,9 +484,6 @@ func TestMultiBundleSourceAuthorityPublishesOnlyImplementedBundleReadAndRunForkM
 	for _, relPath := range []string{
 		filepath.Join("cmd", "swarm", "main.go"),
 		filepath.Join("cmd", "swarm", "fork.go"),
-		filepath.Join("docs", "SWARM_INVESTIGATE_COMMAND_DRAFT.md"),
-		filepath.Join("docs", "specs", "swarm-platform", "platform", "FLIGHT-RECORDER.md"),
-		filepath.Join("docs", "specs", "swarm-platform", "platform", "CHANGELOG.md"),
 	} {
 		raw, err := os.ReadFile(filepath.Join(repoRoot(t), relPath))
 		if err != nil {

@@ -32,7 +32,7 @@ body:
     id: source_backlog_item
     attributes:
       label: Source Backlog Item
-      description: Which investigation note, repeated incident, watchlist item, or backlog source does this come from?
+      description: Which tracker, repeated incident, public operator feedback, or backlog source does this come from?
       placeholder: |
         Example:
         repeated live debugging incidents / public operator feedback
@@ -170,10 +170,10 @@ body:
       required: true
 
   - type: textarea
-    id: watchlist_mapping
+    id: tracker_mapping
     attributes:
-      label: Watchlist Mapping
-      description: Name the existing watchlist node this issue belongs to, or write `needs node/refinement`.
+      label: Tracker Mapping
+      description: Name the existing parent/tracker issue this item belongs to, or write `needs node/refinement`.
     validations:
       required: true
 
