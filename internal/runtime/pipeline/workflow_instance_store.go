@@ -77,18 +77,20 @@ type workflowInstancePersistedProjection struct {
 }
 
 type workflowInstancePersistedControl struct {
-	StorageRef        string
-	Slug              string
-	Name              string
-	EntityType        string
-	InstanceID        string
-	FlowPath          string
-	InstanceKind      string
-	TemplateVersion   string
-	LastSourceEvent   string
-	Status            string
-	ParentEntityID    string
-	TransitionHistory []WorkflowTransitionRecord
+	StorageRef         string
+	Slug               string
+	Name               string
+	EntityType         string
+	InstanceID         string
+	FlowPath           string
+	InstanceKind       string
+	TemplateVersion    string
+	LastSourceEvent    string
+	Status             string
+	ParentFlowID       string
+	ParentFlowInstance string
+	ParentEntityID     string
+	TransitionHistory  []WorkflowTransitionRecord
 }
 
 type WorkflowInstanceStore struct {
@@ -1283,23 +1285,25 @@ func workflowInstancePersistedProjectionFromInstance(instance WorkflowInstance, 
 		return workflowInstancePersistedProjection{}, fmt.Errorf("workflow instance storage_ref %q disagrees with canonical storage_ref %q", storageRef, persistedIdentity.StorageRef)
 	}
 	control := workflowInstancePersistedControl{
-		StorageRef:        strings.TrimSpace(persistedIdentity.StorageRef),
-		Slug:              strings.TrimSpace(asString(instance.Metadata["slug"])),
-		Name:              strings.TrimSpace(asString(instance.Metadata["name"])),
-		EntityType:        strings.TrimSpace(asString(instance.Metadata["entity_type"])),
-		InstanceID:        strings.TrimSpace(persistedIdentity.InstanceID),
-		InstanceKind:      strings.TrimSpace(asString(instance.Metadata["instance_kind"])),
-		TemplateVersion:   strings.TrimSpace(asString(instance.Metadata["template_version"])),
-		LastSourceEvent:   strings.TrimSpace(asString(instance.Metadata["last_source_event"])),
-		Status:            strings.TrimSpace(asString(instance.Config["status"])),
-		ParentEntityID:    strings.TrimSpace(asString(instance.Metadata["parent_entity_id"])),
-		TransitionHistory: append([]WorkflowTransitionRecord{}, instance.TransitionHistory...),
+		StorageRef:         strings.TrimSpace(persistedIdentity.StorageRef),
+		Slug:               strings.TrimSpace(asString(instance.Metadata["slug"])),
+		Name:               strings.TrimSpace(asString(instance.Metadata["name"])),
+		EntityType:         strings.TrimSpace(asString(instance.Metadata["entity_type"])),
+		InstanceID:         strings.TrimSpace(persistedIdentity.InstanceID),
+		InstanceKind:       strings.TrimSpace(asString(instance.Metadata["instance_kind"])),
+		TemplateVersion:    strings.TrimSpace(asString(instance.Metadata["template_version"])),
+		LastSourceEvent:    strings.TrimSpace(asString(instance.Metadata["last_source_event"])),
+		Status:             strings.TrimSpace(asString(instance.Config["status"])),
+		ParentFlowID:       strings.TrimSpace(persistedIdentity.ParentRoute.FlowID),
+		ParentFlowInstance: strings.Trim(strings.TrimSpace(persistedIdentity.ParentRoute.FlowInstance), "/"),
+		ParentEntityID:     strings.TrimSpace(asString(instance.Metadata["parent_entity_id"])),
+		TransitionHistory:  append([]WorkflowTransitionRecord{}, instance.TransitionHistory...),
 	}
 	if persistedIdentity.HasStoredPath {
 		control.FlowPath = strings.TrimSpace(persistedIdentity.InstancePath)
 	}
 	for _, key := range []string{
-		"slug", "name", "entity_type", "parent_entity_id",
+		"slug", "name", "entity_type", "parent_flow_id", "parent_flow_instance", "parent_entity_id",
 		"instance_id", "storage_ref", "flow_path", "instance_kind",
 		"template_version", "workflow_version", "transition_history",
 	} {
@@ -1349,6 +1353,12 @@ func (p workflowInstancePersistedProjection) Metadata() map[string]any {
 	if strings.TrimSpace(p.Control.LastSourceEvent) != "" {
 		metadata["last_source_event"] = strings.TrimSpace(p.Control.LastSourceEvent)
 	}
+	if strings.TrimSpace(p.Control.ParentFlowID) != "" {
+		metadata["parent_flow_id"] = strings.TrimSpace(p.Control.ParentFlowID)
+	}
+	if strings.TrimSpace(p.Control.ParentFlowInstance) != "" {
+		metadata["parent_flow_instance"] = strings.Trim(strings.TrimSpace(p.Control.ParentFlowInstance), "/")
+	}
 	if strings.TrimSpace(p.Control.ParentEntityID) != "" {
 		metadata["parent_entity_id"] = strings.TrimSpace(p.Control.ParentEntityID)
 	}
@@ -1380,6 +1390,12 @@ func (p workflowInstancePersistedProjection) ConfigPayload(workflowVersion strin
 	}
 	if strings.TrimSpace(p.Control.Status) != "" {
 		config["status"] = strings.TrimSpace(p.Control.Status)
+	}
+	if strings.TrimSpace(p.Control.ParentFlowID) != "" {
+		config["parent_flow_id"] = strings.TrimSpace(p.Control.ParentFlowID)
+	}
+	if strings.TrimSpace(p.Control.ParentFlowInstance) != "" {
+		config["parent_flow_instance"] = strings.Trim(strings.TrimSpace(p.Control.ParentFlowInstance), "/")
 	}
 	if strings.TrimSpace(p.Control.ParentEntityID) != "" {
 		config["parent_entity_id"] = strings.TrimSpace(p.Control.ParentEntityID)
@@ -1470,6 +1486,14 @@ func decodeWorkflowInstanceConfigPayload(raw []byte, control workflowInstancePer
 	if err != nil {
 		return nil, workflowInstancePersistedControl{}, err
 	}
+	parentFlowID, err := workflowInstanceOptionalString(config, "parent_flow_id")
+	if err != nil {
+		return nil, workflowInstancePersistedControl{}, err
+	}
+	parentFlowInstance, err := workflowInstanceOptionalString(config, "parent_flow_instance")
+	if err != nil {
+		return nil, workflowInstancePersistedControl{}, err
+	}
 	parentEntityID, err := workflowInstanceOptionalString(config, "parent_entity_id")
 	if err != nil {
 		return nil, workflowInstancePersistedControl{}, err
@@ -1485,6 +1509,8 @@ func decodeWorkflowInstanceConfigPayload(raw []byte, control workflowInstancePer
 	delete(config, "instance_kind")
 	delete(config, "template_version")
 	delete(config, "last_source_event")
+	delete(config, "parent_flow_id")
+	delete(config, "parent_flow_instance")
 	delete(config, "parent_entity_id")
 	delete(config, "transition_history")
 	control.InstanceID = strings.TrimSpace(instanceID)
@@ -1499,6 +1525,8 @@ func decodeWorkflowInstanceConfigPayload(raw []byte, control workflowInstancePer
 	control.TemplateVersion = strings.TrimSpace(templateVersion)
 	control.LastSourceEvent = strings.TrimSpace(lastSourceEvent)
 	control.Status = strings.TrimSpace(status)
+	control.ParentFlowID = strings.TrimSpace(parentFlowID)
+	control.ParentFlowInstance = strings.Trim(strings.TrimSpace(parentFlowInstance), "/")
 	control.ParentEntityID = strings.TrimSpace(parentEntityID)
 	control.TransitionHistory = transitionHistory
 	return config, control, nil

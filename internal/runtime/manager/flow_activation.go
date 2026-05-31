@@ -86,12 +86,7 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 		WorkflowVersion: strings.TrimSpace(req.ContractBundle.WorkflowVersion()),
 		CurrentState:    initialState,
 		Config:          cloneFlowConfig(req.Config),
-		Metadata: map[string]any{
-			"entity_id":        flowEntityID,
-			"instance_id":      instanceID,
-			"flow_path":        flowPath,
-			"parent_entity_id": parentEntityID,
-		},
+		Metadata:        flowInstanceActivationMetadata(instance, flowEntityID, instanceID, flowPath, parentEntityID),
 	}); err != nil {
 		return fmt.Errorf("persist flow instance %s: %w", flowPath, err)
 	}
@@ -154,6 +149,26 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 		}
 	}
 	return nil
+}
+
+func flowInstanceActivationMetadata(instance runtimeflowidentity.Instance, flowEntityID, instanceID, flowPath, parentEntityID string) map[string]any {
+	metadata := map[string]any{
+		"entity_id":        strings.TrimSpace(flowEntityID),
+		"instance_id":      strings.TrimSpace(instanceID),
+		"flow_path":        strings.Trim(strings.TrimSpace(flowPath), "/"),
+		"parent_entity_id": strings.TrimSpace(parentEntityID),
+	}
+	parentRoute := instance.ParentRoute.Normalized()
+	if strings.TrimSpace(parentRoute.FlowID) != "" {
+		metadata["parent_flow_id"] = strings.TrimSpace(parentRoute.FlowID)
+	}
+	if strings.TrimSpace(parentRoute.FlowInstance) != "" {
+		metadata["parent_flow_instance"] = strings.Trim(strings.TrimSpace(parentRoute.FlowInstance), "/")
+	}
+	if strings.TrimSpace(parentRoute.EntityID) != "" {
+		metadata["parent_entity_id"] = strings.TrimSpace(parentRoute.EntityID)
+	}
+	return metadata
 }
 
 func buildAutoEmitOnCreateEvent(source semanticview.Source, schema runtimecontracts.FlowSchemaDocument, templateID, flowPath, instanceID, flowEntityID, parentEntityID string, config map[string]any) (events.Event, string, error) {

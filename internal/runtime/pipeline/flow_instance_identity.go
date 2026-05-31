@@ -34,11 +34,7 @@ func StoredFlowInstance(source semanticview.Source, instance WorkflowInstance) r
 		entityID,
 		strings.TrimSpace(asString(instance.Metadata["parent_entity_id"])),
 	)
-	stored.ParentRoute = runtimeflowidentity.ParentRoute{
-		FlowID:       strings.TrimSpace(asString(instance.Metadata["parent_flow_id"])),
-		FlowInstance: strings.Trim(strings.TrimSpace(asString(instance.Metadata["parent_flow_instance"])), "/"),
-		EntityID:     strings.TrimSpace(asString(instance.Metadata["parent_entity_id"])),
-	}
+	stored.ParentRoute = runtimeflowidentity.ParentRouteFromMetadata(instance.Metadata)
 	return stored
 }
 
@@ -68,11 +64,7 @@ func workflowInstancePersistedIdentity(source semanticview.Source, instance Work
 	if err != nil {
 		return runtimeflowidentity.Persisted{}, err
 	}
-	persisted.ParentRoute = runtimeflowidentity.ParentRoute{
-		FlowID:       strings.TrimSpace(asString(instance.Metadata["parent_flow_id"])),
-		FlowInstance: strings.Trim(strings.TrimSpace(asString(instance.Metadata["parent_flow_instance"])), "/"),
-		EntityID:     strings.TrimSpace(asString(instance.Metadata["parent_entity_id"])),
-	}
+	persisted.ParentRoute = runtimeflowidentity.ParentRouteFromMetadata(instance.Metadata)
 	return persisted, nil
 }
 
@@ -93,11 +85,7 @@ func workflowStateIdentity(source semanticview.Source, flowID string, state Work
 		strings.TrimSpace(state.EntityID),
 		asString(state.Metadata["parent_entity_id"]),
 	)
-	instance.ParentRoute = runtimeflowidentity.ParentRoute{
-		FlowID:       strings.TrimSpace(asString(state.Metadata["parent_flow_id"])),
-		FlowInstance: strings.Trim(strings.TrimSpace(asString(state.Metadata["parent_flow_instance"])), "/"),
-		EntityID:     strings.TrimSpace(asString(state.Metadata["parent_entity_id"])),
-	}
+	instance.ParentRoute = runtimeflowidentity.ParentRouteFromMetadata(state.Metadata)
 	return instance
 }
 

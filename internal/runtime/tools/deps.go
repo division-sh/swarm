@@ -18,6 +18,11 @@ type Schedule = runtimepipeline.Schedule
 
 type SchedulePersistence = runtimepipeline.SchedulePersistence
 
+type WorkflowInstanceLoader interface {
+	Enabled() bool
+	Load(ctx context.Context, instanceID string) (runtimepipeline.WorkflowInstance, bool, error)
+}
+
 type EventPublisher interface {
 	Publish(ctx context.Context, evt events.Event) error
 	PublishDirect(ctx context.Context, evt events.Event, recipients []string) error
@@ -45,6 +50,7 @@ type ExecutorOptions struct {
 	MailboxStore      MailboxPersistence
 	EntityStore       EntityPersistence
 	HumanTaskStore    HumanTaskPersistence
+	WorkflowInstances WorkflowInstanceLoader
 	MCPClient         *runtimemcp.Client
 	WorkflowSource    semanticview.Source
 	WorkspaceResolver workspace.Resolver

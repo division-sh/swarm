@@ -2116,21 +2116,11 @@ func (e *Executor) resolveEmitTargetMatchValues(frame *executionFrame, match map
 }
 
 func parentRouteFromState(metadata map[string]any) events.RouteIdentity {
-	if len(metadata) == 0 {
-		return events.RouteIdentity{}
-	}
-	flowInstance := firstNonEmpty(
-		asString(metadata["parent_flow_instance"]),
-		asString(metadata["parent_flow_path"]),
-	)
-	entityID := firstNonEmpty(
-		asString(metadata["parent_entity_id"]),
-		runtimeflowidentity.EntityID(flowInstance),
-	)
+	route := runtimeflowidentity.ParentRouteFromMetadata(metadata).Normalized()
 	return events.RouteIdentity{
-		FlowID:       asString(metadata["parent_flow_id"]),
-		FlowInstance: flowInstance,
-		EntityID:     entityID,
+		FlowID:       route.FlowID,
+		FlowInstance: route.FlowInstance,
+		EntityID:     route.EntityID,
 	}.Normalized()
 }
 

@@ -879,6 +879,7 @@ func applyEngineStateMutation(instance *WorkflowInstance, mutation runtimeengine
 	if instance.Metadata == nil {
 		instance.Metadata = map[string]any{}
 	}
+	controlMetadata := workflowRuntimeControlMetadata(instance.Metadata)
 	if strings.TrimSpace(instance.WorkflowName) == "" {
 		defaultWorkflowName := strings.TrimSpace(flowID)
 		if defaultWorkflowName == "" && source != nil {
@@ -924,6 +925,7 @@ func applyEngineStateMutation(instance *WorkflowInstance, mutation runtimeengine
 	}
 	if mutation.StateCarrier.Metadata != nil || len(mutation.StateCarrier.Gates) > 0 {
 		instance.Metadata = mutation.StateCarrier.PersistedMetadata()
+		restoreWorkflowRuntimeControlMetadata(instance.Metadata, controlMetadata)
 	}
 	if mutation.StateCarrier.StateBuckets != nil {
 		instance.StateBuckets = mutation.StateCarrier.PersistedStateBuckets()
@@ -948,6 +950,45 @@ func applyEngineStateMutation(instance *WorkflowInstance, mutation runtimeengine
 	}
 	if len(entityProjection) > 0 {
 		workflowSetStateBucket(instance, workflowStateBucketEntityProjection, entityProjection)
+	}
+}
+
+var workflowRuntimeControlMetadataKeys = []string{
+	"storage_ref",
+	"instance_id",
+	"flow_path",
+	"entity_id",
+	"workflow_version",
+	"template_version",
+	"instance_kind",
+	"parent_flow_id",
+	"parent_flow_instance",
+	"parent_entity_id",
+}
+
+func workflowRuntimeControlMetadata(metadata map[string]any) map[string]any {
+	if len(metadata) == 0 {
+		return nil
+	}
+	control := make(map[string]any, len(workflowRuntimeControlMetadataKeys))
+	for _, key := range workflowRuntimeControlMetadataKeys {
+		value, ok := metadata[key]
+		if ok {
+			control[key] = value
+		}
+	}
+	return control
+}
+
+func restoreWorkflowRuntimeControlMetadata(metadata map[string]any, control map[string]any) {
+	if metadata == nil || len(control) == 0 {
+		return
+	}
+	for _, key := range workflowRuntimeControlMetadataKeys {
+		value, ok := control[key]
+		if ok {
+			metadata[key] = value
+		}
 	}
 }
 

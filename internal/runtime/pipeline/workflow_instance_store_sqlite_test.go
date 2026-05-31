@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"testing"
 	"time"
 
@@ -45,9 +46,58 @@ func TestSQLiteWorkflowInstanceStore_PreservesCreateEntityInitialValueMutationRo
 	assertSQLiteMutationCount(t, db, entityID, "tier", "workflow_instance_store", "create", "1", "2", 1)
 }
 
+func TestSQLiteWorkflowInstanceStore_PreservesParentRouteControlMetadata(t *testing.T) {
+	db := newSQLiteWorkflowInstanceStoreTestDB(t)
+	store := NewSQLiteWorkflowInstanceStore(db)
+	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
+	storageRef := "review/inst-1"
+
+	if err := store.Create(ctx, WorkflowInstance{
+		InstanceID:      "inst-1",
+		StorageRef:      storageRef,
+		WorkflowName:    "review",
+		WorkflowVersion: "v1",
+		CurrentState:    "created",
+		EnteredStageAt:  time.Now().UTC(),
+		Metadata: map[string]any{
+			"flow_path":            storageRef,
+			"parent_flow_id":       "operating",
+			"parent_flow_instance": "operating/root",
+			"parent_entity_id":     "parent-ent",
+		},
+	}); err != nil {
+		t.Fatalf("Create workflow instance: %v", err)
+	}
+
+	loaded, ok, err := store.Load(ctx, storageRef)
+	if err != nil {
+		t.Fatalf("Load workflow instance: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected workflow instance to persist")
+	}
+	for key, want := range map[string]string{
+		"parent_flow_id":       "operating",
+		"parent_flow_instance": "operating/root",
+		"parent_entity_id":     "parent-ent",
+	} {
+		if got := strings.TrimSpace(asString(loaded.Metadata[key])); got != want {
+			t.Fatalf("loaded.Metadata[%s] = %#v, want %q", key, loaded.Metadata[key], want)
+		}
+	}
+	identity, err := workflowInstancePersistedIdentity(nil, loaded)
+	if err != nil {
+		t.Fatalf("workflowInstancePersistedIdentity: %v", err)
+	}
+	if identity.ParentRoute.FlowID != "operating" || identity.ParentRoute.FlowInstance != "operating/root" || identity.ParentRoute.EntityID != "parent-ent" {
+		t.Fatalf("ParentRoute = %#v, want operating/operating/root/parent-ent", identity.ParentRoute)
+	}
+}
+
 func newSQLiteWorkflowInstanceStoreTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db, err := sql.Open("sqlite", ":memory:")
+	name := strings.NewReplacer("/", "_", " ", "_").Replace(t.Name())
+	db, err := sql.Open("sqlite", "file:"+name+"?mode=memory&cache=shared")
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}

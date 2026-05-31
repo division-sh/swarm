@@ -129,6 +129,52 @@ func TestApplyEngineStateMutationPreservesExistingMetadataOnGateOnlyMutation(t *
 	}
 }
 
+func TestApplyEngineStateMutationPreservesRuntimeControlMetadata(t *testing.T) {
+	instance := &WorkflowInstance{
+		Metadata: map[string]any{
+			"storage_ref":          "review/inst-1",
+			"instance_id":          "inst-1",
+			"flow_path":            "review/inst-1",
+			"entity_id":            "child-ent",
+			"workflow_version":     "v1",
+			"template_version":     "tv1",
+			"instance_kind":        "materialized",
+			"parent_flow_id":       "operating",
+			"parent_flow_instance": "operating/root",
+			"parent_entity_id":     "parent-ent",
+			"business_status":      "old",
+		},
+	}
+	mutation := testEngineStateMutation(map[string]any{
+		"parent_flow_id":       "wrong",
+		"parent_flow_instance": "wrong/root",
+		"parent_entity_id":     "wrong-parent",
+		"business_status":      "new",
+	}, nil, nil)
+
+	applyEngineStateMutation(instance, mutation, nil, nil, "")
+
+	for key, want := range map[string]any{
+		"storage_ref":          "review/inst-1",
+		"instance_id":          "inst-1",
+		"flow_path":            "review/inst-1",
+		"entity_id":            "child-ent",
+		"workflow_version":     "v1",
+		"template_version":     "tv1",
+		"instance_kind":        "materialized",
+		"parent_flow_id":       "operating",
+		"parent_flow_instance": "operating/root",
+		"parent_entity_id":     "parent-ent",
+	} {
+		if got := instance.Metadata[key]; got != want {
+			t.Fatalf("metadata[%s] = %#v, want %#v", key, got, want)
+		}
+	}
+	if got := instance.Metadata["business_status"]; got != "new" {
+		t.Fatalf("business_status = %#v, want new", got)
+	}
+}
+
 func TestMaybeDeactivateTerminalFlowInstance_IgnoresRootWorkflowEntity(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)

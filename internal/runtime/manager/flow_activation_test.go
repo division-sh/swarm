@@ -703,6 +703,36 @@ func TestActivateFlowInstancePersistsFlowInstanceConfig(t *testing.T) {
 	}
 }
 
+func TestActivateFlowInstancePersistsFullParentRouteMetadata(t *testing.T) {
+	bus := &flowActivationTestBus{}
+	instances := &flowActivationTestInstanceStore{}
+	am := newFlowActivationManager(bus, instances)
+	bundle := testFlowBundle("")
+
+	req := testActivationRequest(bundle, "review", "inst-1", "ent-legacy", "review/inst-1")
+	req.Instance.ParentRoute = runtimeflowidentity.ParentRoute{
+		FlowID:       "operating",
+		FlowInstance: "operating/root",
+		EntityID:     "parent-ent",
+	}
+	if err := am.ActivateFlowInstance(context.Background(), req); err != nil {
+		t.Fatalf("ActivateFlowInstance: %v", err)
+	}
+	if len(instances.creates) != 1 {
+		t.Fatalf("creates = %d, want 1", len(instances.creates))
+	}
+	metadata := instances.creates[0].Metadata
+	if got := metadata["parent_flow_id"]; got != "operating" {
+		t.Fatalf("parent_flow_id = %#v, want operating", got)
+	}
+	if got := metadata["parent_flow_instance"]; got != "operating/root" {
+		t.Fatalf("parent_flow_instance = %#v, want operating/root", got)
+	}
+	if got := metadata["parent_entity_id"]; got != "parent-ent" {
+		t.Fatalf("parent_entity_id = %#v, want parent-ent", got)
+	}
+}
+
 func TestActivateFlowInstanceResolvesAgentPermissions(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	am := newFlowActivationManager(bus, &flowActivationTestInstanceStore{})

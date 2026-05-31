@@ -1229,7 +1229,8 @@ handler_specification:
         rule: Pin routing activates if and only if the emitted event is declared in the emitter flow's schema.yaml pins.outputs.events.
         ad_hoc_emits: Emits not declared in pins.outputs.events are ordinary event-loop emits and do not require target or broadcast.
         target_requirement: A pin-declared output emit MUST resolve an explicit target, use structural child-to-parent ParentRoute
-          binding, or declare broadcast:true. No silent fallback to event-type broadcast is allowed.
+          binding, use the static no-instance child-flow delivery-entity route where eligible, or declare broadcast:true. No
+          silent fallback to event-type broadcast is allowed.
         explicit_target_precedence: Producer target wins over structural binding. Structural binding writes event.target only
           when the emit site has no explicit target and broadcast:true is absent.
       target_forms:
@@ -1678,6 +1679,10 @@ engine:
     structural_binding:
       child_to_parent: A child flow instance has exactly one parent in v1. Child pin-declared outputs without explicit target
         route to the recorded ParentRoute of the instance that created the child.
+      static_child_no_instance: Static child flows that are not template/dynamic instances have no persisted ParentRoute row.
+        When such a child emits a pin-declared output without explicit target or broadcast:true, the runtime may target only
+        the current delivery entity route. This exception must not read inbound event.source as structural parent authority
+        and does not satisfy ParentRoute metadata for template/dynamic instances.
       parent_to_child: Parent-to-child routing is never inferred structurally in v1. The parent must use target:{instance_id}
         or another explicit target form.
       grandchildren: A grandchild's structural pin output routes to its immediate parent only. Multi-level retargeting is v2.
@@ -6848,6 +6853,10 @@ static_analyzer:
       structural_parent_route:
         rule: Child-to-parent structural binding is valid only for child/template instances that will record full ParentRoute
           at create_flow_instance time.
+      static_child_delivery_entity:
+        rule: Static child flows without a materialized instance row may use the current delivery entity as the only implicit
+          target route for pin-declared outputs; this path is not ParentRoute metadata and must not fall back to inbound
+          event.source.
       explicit_broadcast:
         rule: broadcast:true is a deliberate opt-out and is the only no-target form accepted for a pin-declared output.
     static_failure_reasons:
