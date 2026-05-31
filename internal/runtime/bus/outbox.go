@@ -120,7 +120,7 @@ func (d engineDispatcher) DispatchPostCommit(ctx context.Context, intents []runt
 		return nil
 	}
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		queuedIntents := append([]runtimeengine.EmitIntent(nil), intents...)
+		queuedIntents := clonePostCommitEmitIntents(intents)
 		if !runtimepipeline.QueuePipelinePostCommitAction(ctx, func() {
 			postCommitActions := make([]func(), 0, 4)
 			dispatchCtx := runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(ctx))
@@ -151,6 +151,33 @@ func (d engineDispatcher) DispatchPostCommit(ctx context.Context, intents []runt
 		d.bus.markPipelineReceipt(ctx, intent.Event.ID, "processed", "")
 	}
 	return nil
+}
+
+func clonePostCommitEmitIntents(intents []runtimeengine.EmitIntent) []runtimeengine.EmitIntent {
+	if len(intents) == 0 {
+		return nil
+	}
+	cloned := make([]runtimeengine.EmitIntent, 0, len(intents))
+	for _, intent := range intents {
+		copyIntent := intent
+		copyIntent.Event = clonePostCommitEvent(intent.Event)
+		if intent.Recipients != nil {
+			copyIntent.Recipients = append([]string(nil), intent.Recipients...)
+		}
+		cloned = append(cloned, copyIntent)
+	}
+	return cloned
+}
+
+func clonePostCommitEvent(evt events.Event) events.Event {
+	cloned := evt
+	if evt.Payload != nil {
+		cloned.Payload = append([]byte(nil), evt.Payload...)
+	}
+	if evt.Envelope.TargetSet != nil {
+		cloned.Envelope.TargetSet = append([]events.RouteIdentity(nil), evt.Envelope.TargetSet...)
+	}
+	return cloned
 }
 
 func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengine.EmitIntent) (bool, error) {
