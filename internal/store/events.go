@@ -73,11 +73,35 @@ func (s *PostgresStore) AppendEventTx(ctx context.Context, tx *sql.Tx, evt event
 		evt = s.enrichEventCorrelation(ctx, caps, chooseRowQueryer(s.DB, tx), evt)
 		switch caps.Events.Log {
 		case SchemaFlavorCanonical:
+			if tx == nil && persistedBundleRunCreationValidationRequired(ctx, caps) {
+				return s.appendEventSpecWithRunCreationValidationTx(ctx, caps, evt)
+			}
 			return s.appendEventSpec(ctx, caps, tx, evt)
 		default:
 			return unsupportedSchemaCapability("events", caps.Events.Log)
 		}
 	})
+}
+
+func (s *PostgresStore) appendEventSpecWithRunCreationValidationTx(ctx context.Context, caps StoreSchemaCapabilities, evt events.Event) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin event source validation tx: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	if err := s.appendEventSpec(ctx, caps, tx, evt); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit event source validation tx: %w", err)
+	}
+	committed = true
+	return nil
 }
 
 func (s *PostgresStore) PersistEventWithDeliveries(ctx context.Context, evt events.Event, agentIDs []string) error {
@@ -1297,11 +1321,27 @@ func (s *PostgresStore) ensureRunRow(ctx context.Context, caps StoreSchemaCapabi
 		opts.BundleHash = fact.BundleHash
 		opts.BundleSource = fact.BundleSource
 		opts.BundleFingerprint = fact.BundleFingerprint
+		opts.ValidateBundleAvailable = persistedBundleRunCreationValidationRequired(ctx, caps)
 	} else {
 		opts.BundleSource = storerunlifecycle.BundleSourceLegacy
 		opts.BundleFingerprint = runtimecorrelation.BundleFingerprintFromContext(ctx)
 	}
 	return storerunlifecycle.EnsureActive(ctx, chooseExecQueryer(s.DB, tx), runID, triggerEventID, triggerEventType, opts)
+}
+
+func persistedBundleRunCreationValidationRequired(ctx context.Context, caps StoreSchemaCapabilities) bool {
+	if !caps.Events.HasRuns || !caps.Events.RunBundleHash || !caps.Events.RunBundleSource {
+		return false
+	}
+	fact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+	if !ok {
+		return false
+	}
+	source, err := storerunlifecycle.CanonicalBundleSource(fact.BundleSource)
+	if err != nil {
+		return false
+	}
+	return source == storerunlifecycle.BundleSourcePersisted && strings.TrimSpace(fact.BundleHash) != ""
 }
 
 func canonicalRunTerminalStatus(raw string) (string, error) {

@@ -5864,6 +5864,20 @@ multi_bundle_persistence:
         active-run recheck and source update. Concurrent readers observe either the pre-delete persisted source with an
         existing bundle row or the post-delete deleted source with no row. They must not observe a legitimate delete as
         bundle_source=persisted with a missing bundle row.
+      post_delete_new_work_admission:
+        status: implemented_for_force_delete_runtime
+        canonical_owner: internal/store/runlifecycle.EnsureActive
+        consumed_by:
+          - internal/store.PostgresStore.ensureRunRow
+          - internal/runtime/bus.EventBus publish paths through PostgresStore.AppendEventTx
+          - /v1/rpc event.publish
+          - /v1/rpc run.start
+        rule: >
+          New work stamped from a persisted runtime BundleSourceFact MUST serialize against the runs table, re-check that
+          bundles still contains the source bundle_hash in the same event transaction, and fail closed before inserting a
+          run or event when the bundle row has been deleted. A successful bundle.delete --force must therefore make later
+          same-runtime event.publish and run.start attempts return BUNDLE_UNAVAILABLE rather than recreating
+          bundle_source=persisted with a missing bundle row.
       reader_invariant: >
         Bundle availability readers MUST read runs.bundle_source before consulting bundles. Readers only look up bundles
         when bundle_source=persisted. bundle_source in (ephemeral, deleted, legacy) returns BUNDLE_UNAVAILABLE without a

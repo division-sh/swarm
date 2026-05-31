@@ -56,6 +56,12 @@ func TestPostgresStore_RunBundleSourceConsumesCanonicalSourceFact(t *testing.T) 
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	runID := uuid.NewString()
+	if _, err := db.ExecContext(context.Background(), `
+		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json)
+		VALUES ($1, 'name: test', '{}'::jsonb)
+	`, testCanonicalBundleHash); err != nil {
+		t.Fatalf("seed canonical bundle row: %v", err)
+	}
 	ctx := runtimecorrelation.WithBundleSourceFact(context.Background(), runtimecorrelation.BundleSourceFact{
 		BundleHash:        testCanonicalBundleHash,
 		BundleSource:      storerunlifecycle.BundleSourcePersisted,

@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	runtimebus "swarm/internal/runtime/bus"
 	"swarm/internal/store"
+	storerunlifecycle "swarm/internal/store/runlifecycle"
 )
 
 const runStartIDempotencyTTL = 24 * time.Hour
@@ -166,6 +167,16 @@ func runStartIdempotencyError(err error) error {
 }
 
 func runStartPublishError(eventName string, err error) error {
+	var bundleUnavailable *storerunlifecycle.PersistedBundleUnavailableError
+	if errors.As(err, &bundleUnavailable) || errors.Is(err, storerunlifecycle.ErrPersistedBundleUnavailable) {
+		details := map[string]any{"event_name": eventName}
+		if bundleUnavailable != nil {
+			details["bundle_hash"] = bundleUnavailable.BundleHash
+			details["bundle_source"] = bundleUnavailable.BundleSource
+			details["cause"] = bundleUnavailable.Cause
+		}
+		return NewApplicationError(BundleUnavailableCode, false, details)
+	}
 	if errors.Is(err, runtimebus.ErrPayloadValidation) || strings.Contains(err.Error(), "validate event payload") {
 		return NewApplicationError(PayloadValidationFailedCode, false, map[string]any{
 			"violations": []map[string]any{{

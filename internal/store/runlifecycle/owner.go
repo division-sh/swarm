@@ -3,6 +3,7 @@ package runlifecycle
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -32,6 +33,7 @@ type EnsureActiveOptions struct {
 	HasBundleHashCol        bool
 	HasBundleSourceCol      bool
 	HasBundleFingerprintCol bool
+	ValidateBundleAvailable bool
 	BundleHash              string
 	BundleSource            string
 	BundleFingerprint       string
@@ -44,6 +46,35 @@ const (
 	BundleSourceLegacy    = "legacy"
 	defaultBundleSource   = BundleSourceLegacy
 )
+
+var ErrPersistedBundleUnavailable = errors.New("persisted bundle source unavailable")
+
+type PersistedBundleUnavailableError struct {
+	BundleHash   string
+	BundleSource string
+	Cause        string
+}
+
+func (e *PersistedBundleUnavailableError) Error() string {
+	if e == nil {
+		return ErrPersistedBundleUnavailable.Error()
+	}
+	parts := []string{ErrPersistedBundleUnavailable.Error()}
+	if e.BundleHash != "" {
+		parts = append(parts, "bundle_hash="+strings.TrimSpace(e.BundleHash))
+	}
+	if e.BundleSource != "" {
+		parts = append(parts, "bundle_source="+strings.TrimSpace(e.BundleSource))
+	}
+	if e.Cause != "" {
+		parts = append(parts, "cause="+strings.TrimSpace(e.Cause))
+	}
+	return strings.Join(parts, " ")
+}
+
+func (e *PersistedBundleUnavailableError) Unwrap() error {
+	return ErrPersistedBundleUnavailable
+}
 
 func CanonicalTerminalStatus(raw string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
@@ -98,6 +129,22 @@ func EnsureActive(ctx context.Context, db DBTX, runID, triggerEventID, triggerEv
 	}
 	if bundleSource != BundleSourceLegacy && bundleHash == "" {
 		return fmt.Errorf("ensure run row: bundle_hash is required for bundle_source=%s", bundleSource)
+	}
+	if opts.ValidateBundleAvailable && bundleSource == BundleSourcePersisted {
+		if err := lockRunCreation(ctx, db); err != nil {
+			return err
+		}
+		exists, err := persistedBundleRowExists(ctx, db, bundleHash)
+		if err != nil {
+			return fmt.Errorf("ensure run row: validate persisted bundle source: %w", err)
+		}
+		if !exists {
+			return &PersistedBundleUnavailableError{
+				BundleHash:   bundleHash,
+				BundleSource: bundleSource,
+				Cause:        "persisted_missing_bundle_row",
+			}
+		}
 	}
 	reopenStatus := "runs.status"
 	reopenErrorSummary := ""
@@ -169,6 +216,31 @@ func EnsureActive(ctx context.Context, db DBTX, runID, triggerEventID, triggerEv
 		return fmt.Errorf("ensure run row: %w", err)
 	}
 	return nil
+}
+
+func lockRunCreation(ctx context.Context, db DBTX) error {
+	if _, err := db.ExecContext(ctx, `LOCK TABLE runs IN ROW EXCLUSIVE MODE`); err != nil {
+		return fmt.Errorf("ensure run row: lock run creation: %w", err)
+	}
+	return nil
+}
+
+func persistedBundleRowExists(ctx context.Context, db DBTX, bundleHash string) (bool, error) {
+	bundleHash = strings.TrimSpace(bundleHash)
+	if bundleHash == "" {
+		return false, nil
+	}
+	var exists bool
+	if err := db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM bundles
+			WHERE bundle_hash = $1
+		)
+	`, bundleHash).Scan(&exists); err != nil {
+		return false, err
+	}
+	return exists, nil
 }
 
 func SyncCounts(ctx context.Context, db DBTX, runID string) error {
