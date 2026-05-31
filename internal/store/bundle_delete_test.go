@@ -144,6 +144,54 @@ func TestPostgresStore_BundleDeleteFinalMutationFailsBeforeDeletingWithActiveRun
 	assertBundleRowPresent(t, ctx, pg, bundleDeleteTestHash)
 }
 
+func TestPostgresStore_BundleDeleteFinalMutationMarksOnlyNonActivePersistedRunsDeleted(t *testing.T) {
+	dsn, _, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	pg, err := NewPostgresStore(dsn)
+	if err != nil {
+		t.Fatalf("NewPostgresStore: %v", err)
+	}
+	t.Cleanup(func() { _ = pg.DB.Close() })
+
+	ctx := context.Background()
+	seedBundleDeleteBundle(t, ctx, pg, bundleDeleteTestHash)
+
+	persisted := map[string]string{
+		uuid.NewString(): "completed",
+		uuid.NewString(): "failed",
+		uuid.NewString(): "cancelled",
+		uuid.NewString(): "forked",
+	}
+	for runID, status := range persisted {
+		seedBundleDeleteRunWithSource(t, ctx, pg, runID, status, bundleDeleteTestHash, storerunlifecycle.BundleSourcePersisted)
+	}
+	ephemeralRunID := uuid.NewString()
+	deletedRunID := uuid.NewString()
+	legacyRunID := uuid.NewString()
+	seedBundleDeleteRunWithSource(t, ctx, pg, ephemeralRunID, "completed", bundleDeleteTestHash, storerunlifecycle.BundleSourceEphemeral)
+	seedBundleDeleteRunWithSource(t, ctx, pg, deletedRunID, "completed", bundleDeleteTestHash, storerunlifecycle.BundleSourceDeleted)
+	seedBundleDeleteRunWithSource(t, ctx, pg, legacyRunID, "completed", bundleDeleteTestHash, storerunlifecycle.BundleSourceLegacy)
+
+	final, err := pg.ApplyBundleDeleteFinalMutation(ctx, bundledelete.FinalMutationRequest{
+		OperationName: bundledelete.DefaultOperationName,
+		BundleHash:    bundleDeleteTestHash,
+		RequestedAt:   time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("ApplyBundleDeleteFinalMutation: %v", err)
+	}
+	if !final.Deleted || final.BundleRowsDeleted != 1 || final.RunsMarkedDeleted != len(persisted) {
+		t.Fatalf("final mutation = %#v, want deleted row and %d persisted run updates", final, len(persisted))
+	}
+	for runID, status := range persisted {
+		assertBundleDeleteRunBundle(t, ctx, pg, runID, status, storerunlifecycle.BundleSourceDeleted, bundleDeleteTestHash)
+	}
+	assertBundleDeleteRunBundle(t, ctx, pg, ephemeralRunID, "completed", storerunlifecycle.BundleSourceEphemeral, bundleDeleteTestHash)
+	assertBundleDeleteRunBundle(t, ctx, pg, deletedRunID, "completed", storerunlifecycle.BundleSourceDeleted, bundleDeleteTestHash)
+	assertBundleDeleteRunBundle(t, ctx, pg, legacyRunID, "completed", storerunlifecycle.BundleSourceLegacy, bundleDeleteTestHash)
+	assertBundleRowAbsent(t, ctx, pg, bundleDeleteTestHash)
+}
+
 func TestPostgresStore_BundleDeleteFinalMutationSerializesConcurrentRunCreation(t *testing.T) {
 	dsn, _, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
@@ -265,11 +313,31 @@ func seedBundleDeleteBundle(t *testing.T, ctx context.Context, pg *PostgresStore
 
 func seedBundleDeleteRun(t *testing.T, ctx context.Context, pg *PostgresStore, runID, status, bundleHash string) {
 	t.Helper()
+	seedBundleDeleteRunWithSource(t, ctx, pg, runID, status, bundleHash, storerunlifecycle.BundleSourcePersisted)
+}
+
+func seedBundleDeleteRunWithSource(t *testing.T, ctx context.Context, pg *PostgresStore, runID, status, bundleHash, bundleSource string) {
+	t.Helper()
 	if _, err := pg.DB.ExecContext(ctx, `
 		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint, started_at)
 		VALUES ($1::uuid, $2, $3, $4, $5, now())
-	`, runID, status, bundleHash, storerunlifecycle.BundleSourcePersisted, testBootBundleFingerprint); err != nil {
+	`, runID, status, bundleHash, bundleSource, testBootBundleFingerprint); err != nil {
 		t.Fatalf("seed bundle delete run %s: %v", runID, err)
+	}
+}
+
+func assertBundleDeleteRunBundle(t *testing.T, ctx context.Context, pg *PostgresStore, runID, wantStatus, wantSource, wantHash string) {
+	t.Helper()
+	var status, source, bundleHash string
+	if err := pg.DB.QueryRowContext(ctx, `
+		SELECT status, bundle_source, COALESCE(bundle_hash, '')
+		FROM runs
+		WHERE run_id = $1::uuid
+	`, runID).Scan(&status, &source, &bundleHash); err != nil {
+		t.Fatalf("load run bundle %s: %v", runID, err)
+	}
+	if status != wantStatus || source != wantSource || bundleHash != wantHash {
+		t.Fatalf("run bundle %s = status:%s source:%s hash:%s, want %s/%s/%s", runID, status, source, bundleHash, wantStatus, wantSource, wantHash)
 	}
 }
 

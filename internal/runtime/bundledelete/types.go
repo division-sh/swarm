@@ -24,6 +24,29 @@ var (
 	ErrNonForceSplit       = errors.New("bundle delete non-force behavior is split")
 )
 
+type ActiveRunsRemainError struct {
+	BundleHash string
+	ActiveRuns []RunRef
+}
+
+func (e *ActiveRunsRemainError) Error() string {
+	if e == nil {
+		return ErrActiveRunsRemain.Error()
+	}
+	parts := []string{ErrActiveRunsRemain.Error()}
+	if bundleHash := strings.TrimSpace(e.BundleHash); bundleHash != "" {
+		parts = append(parts, "bundle_hash="+bundleHash)
+	}
+	if ids := ActiveRunIDList(e.ActiveRuns); len(ids) > 0 {
+		parts = append(parts, "active_run_ids="+strings.Join(ids, ","))
+	}
+	return strings.Join(parts, ": ")
+}
+
+func (e *ActiveRunsRemainError) Is(target error) bool {
+	return target == ErrActiveRunsRemain
+}
+
 type Request struct {
 	ActorTokenID string
 	RequestHash  string
@@ -152,9 +175,6 @@ func NormalizeRequest(req Request, now time.Time) (Request, error) {
 	if req.BundleHash == "" {
 		return Request{}, fmt.Errorf("%w: bundle_hash is required", ErrInvalidRequest)
 	}
-	if !req.Force {
-		return Request{}, ErrNonForceSplit
-	}
 	if req.RequestedAt.IsZero() {
 		req.RequestedAt = now.UTC()
 	}
@@ -190,8 +210,12 @@ func AffectedRunIDs(plan Plan) map[string]struct{} {
 }
 
 func AffectedRunIDList(plan Plan) []string {
-	out := make([]string, 0, len(plan.AffectedRuns))
-	for _, run := range plan.AffectedRuns {
+	return ActiveRunIDList(plan.AffectedRuns)
+}
+
+func ActiveRunIDList(runs []RunRef) []string {
+	out := make([]string, 0, len(runs))
+	for _, run := range runs {
 		if runID := strings.TrimSpace(run.RunID); runID != "" {
 			out = append(out, runID)
 		}

@@ -5566,15 +5566,16 @@ multi_bundle_persistence:
     promoted implementation owners in this section. Remaining runtime, API handler, CLI, delete/fork/recovery, and
     generated OpenRPC publication work stays separately gated unless a later PR explicitly promotes and proves it.
   generated_artifact_policy:
-    current_openrpc_status: bundle_read_catalog_register_run_fork_and_force_delete_methods_published
+    current_openrpc_status: bundle_read_catalog_register_run_fork_and_delete_methods_published
     rule: >
       Generated openrpc.json is derived from api_specification.method_catalog and must continue to match the currently
       registered /v1/rpc handler set. The read-only bundle.list, bundle.get, and bundle.agents catalog methods are now
       published because their handlers and store owner are implemented in the same gated PR. run.fork is now published
       because its selected-contract API/runtime handler owner is implemented in the same gated PR. Mutating bundle.register
       is now published because its handler, idempotency behavior, shared bundle catalog writer, and generated artifacts are
-      implemented together. Force-only bundle.delete is now published because its API/runtime handler owner is implemented
-      in the same gated PR; omitted or false force remains fail-closed and split to #1018.
+      implemented together. bundle.delete is now published because its API/runtime handler owners are implemented in gated
+      PRs: omitted or false force performs the #1018 non-force delete path, while force=true performs the #1019 force-delete
+      cleanup path.
     proof_expectation: >
       Source-authority promotion proof must verify that generated OpenRPC methods are not silently published without
       implementation, and that future implementation PRs promote matching method_catalog entries and generated artifacts
@@ -5857,7 +5858,7 @@ multi_bundle_persistence:
       Without --force, deleting a bundle with any active run using that bundle fails closed with BUNDLE_HAS_ACTIVE_RUNS.
     phase_5_atomicity:
       tracker: '#1009'
-      implementation_status: implemented_for_force_delete_runtime_non_force_pending
+      implementation_status: implemented_for_force_and_non_force_delete_runtime
       canonical_runtime_owner: internal/store.PostgresStore.ApplyBundleDeleteFinalMutation
       applies_to:
         - '#1018 non-force bundle.delete final bundle availability mutation'
@@ -5882,7 +5883,7 @@ multi_bundle_persistence:
         existing bundle row or the post-delete deleted source with no row. They must not observe a legitimate delete as
         bundle_source=persisted with a missing bundle row.
       post_delete_new_work_admission:
-        status: implemented_for_force_delete_runtime
+        status: implemented_for_force_and_non_force_delete_runtime
         canonical_owner: internal/store/runlifecycle.EnsureActive
         consumed_by:
           - internal/store.PostgresStore.ensureRunRow
@@ -5895,8 +5896,8 @@ multi_bundle_persistence:
           New work or run-scoped runtime/mutation records stamped from a persisted runtime BundleSourceFact MUST serialize
           against the runs table, re-check that bundles still contains the source bundle_hash in the same transaction as
           the run-row creation, and fail closed before inserting a run, event, runtime-log row, or mutation-log row when
-          the bundle row has been deleted. A successful bundle.delete --force must therefore make later same-runtime
-          event.publish, run.start, runtime-log, and mutation-log attempts fail closed rather than recreating
+          the bundle row has been deleted. A successful bundle.delete, with or without --force, must therefore make later
+          same-runtime event.publish, run.start, runtime-log, and mutation-log attempts fail closed rather than recreating
           bundle_source=persisted with a missing bundle row.
       reader_invariant: >
         Bundle availability readers MUST read runs.bundle_source before consulting bundles. Readers only look up bundles
@@ -5930,7 +5931,7 @@ multi_bundle_persistence:
         - containers_stopped
         - dry_run
   api_surface:
-    publication_status: bundle_read_catalog_register_run_fork_and_force_delete_generated_openrpc
+    publication_status: bundle_read_catalog_register_run_fork_and_delete_generated_openrpc
     command_transport_owner: api_specification
     bundle_methods_planned:
       bundle.list:
@@ -6064,9 +6065,11 @@ multi_bundle_persistence:
       reason: bundle.list/get/agents/register method publication, store owners, OpenRPC artifacts, and handler tests are API implementation.
     bundle_delete_non_force:
       tracker: '#1018'
-      reason: Non-force bundle.delete active-run refusal and non-active deleted marking are API/store lifecycle implementation.
+      implementation_status: implemented_api_store_runtime
+      reason: Non-force bundle.delete active-run refusal and non-active deleted marking are implemented by the API handler and shared store transaction owner.
     bundle_delete_force:
       tracker: '#1019'
+      implementation_status: implemented_destructive_runtime
       reason: Forced bundle.delete preservation cleanup, mutex, quiescence, delivery/session/timer/container cleanup, and result projection are destructive-runtime implementation.
     serve_db_loaded_bundle:
       tracker: '#1020'
@@ -6107,7 +6110,7 @@ multi_bundle_persistence:
     multi_bundle_cli_inventory:
       tracker: '#1023'
       implementation_status: read_only_inventory_implemented
-      reason: swarm bundle list/show/agents consume /v1/rpc bundle.list/get/agents only; bundle.register API is live but the CLI command remains split from this read-only inventory slice, and bundle.delete remains split until its API/runtime owner lands.
+      reason: swarm bundle list/show/agents consume /v1/rpc bundle.list/get/agents only; bundle.register and bundle.delete APIs are live but their CLI commands remain split from this read-only inventory slice.
     bundle_hash_dual_accept_migration:
       tracker: '#1001'
       reason: Old bundle_fingerprint/bundle_ref names must be reconciled in code and generated artifacts under the locked bundle_hash naming decision.
@@ -9568,7 +9571,7 @@ cli_specification:
       command: swarm bundle list|show|agents
       tier: should_have
       implementation_status: implemented_read_only_inventory
-      blocker_state: 'Read-only bundle list/show/agents are implemented by #1023 over /v1/rpc bundle.list/get/agents. bundle.register API is live, but the swarm bundle register CLI consumer remains split/absent from this read-only inventory slice; bundle.delete remains split until its API/runtime owner is promoted.'
+      blocker_state: 'Read-only bundle list/show/agents are implemented by #1023 over /v1/rpc bundle.list/get/agents. bundle.register and bundle.delete APIs are live, but the swarm bundle register/delete CLI consumers remain split/absent from this read-only inventory slice.'
       owners:
       - multi_bundle_persistence.cli_surface.bundle_commands_supported
       - multi_bundle_persistence.api_surface.bundle_methods_planned
@@ -9576,8 +9579,8 @@ cli_specification:
         Public CLI family for persisted bundle inventory and agent catalog inspection. The implemented list/show/agents
         commands consume /v1/rpc bundle.list, bundle.get, and bundle.agents only. The CLI must not call internal
         store/runtime helpers or infer bundle state from local files. The live mutating /v1/rpc bundle.register API is
-        intentionally not exposed by this CLI slice; swarm bundle register remains a split CLI consumer. Destructive
-        bundle.delete remains split until its API/runtime owner lands.
+        intentionally not exposed by this CLI slice; swarm bundle register and swarm bundle delete remain split CLI consumers
+        even though the corresponding /v1/rpc APIs are live.
       proof_expectations:
       - exact /v1/rpc bundle.list/get/agents calls with only promoted params
       - invalid args and missing SWARM_API_TOKEN make zero API calls
@@ -10066,7 +10069,7 @@ api_specification:
       downgraded to backlog before it can be used as implementation authority.
   multi_bundle_publication_boundary:
     owner: multi_bundle_persistence.api_surface
-    status: partial_bundle_read_catalog_register_run_fork_and_force_delete_method_catalog
+    status: partial_bundle_read_catalog_register_run_fork_and_delete_method_catalog
     rule: >
       #1012 promotes the multi-bundle API contract as source authority, including bundle.* methods, run.fork, bundle_hash
       filters, and bundle_hash create-new-work params. The read-only bundle.list, bundle.get, and bundle.agents methods are
@@ -10075,8 +10078,8 @@ api_specification:
       bundle register CLI consumer in #1023's read-only inventory slice. run.fork is also promoted into
       method_catalog/OpenRPC with matching selected-contract API/runtime handler proof by #989. The swarm bundle
       list/show/agents and swarm fork CLI consumers are implemented by #1023 and consume only those canonical /v1/rpc
-      methods. Force-only bundle.delete is promoted into method_catalog/OpenRPC with matching API/runtime handler proof by
-      #1019; omitted or false force remains fail-closed and split to #1018. Remaining multi-bundle methods and shapes are
+      methods. bundle.delete is promoted into method_catalog/OpenRPC with matching API/runtime handler proof by #1018 and
+      #1019: omitted or false force performs non-force deletion and force=true performs force cleanup. Remaining multi-bundle methods and shapes are
       not in method_catalog/OpenRPC until a later gated API/runtime implementation PR registers handlers and regenerates
       openrpc.json/proof artifacts in the same PR. Consumers must not treat docs/MULTI_BUNDLE_PERSISTENCE_DRAFT.md or
       #1038 prose as API authority after #1012.
@@ -10836,7 +10839,6 @@ api_specification:
             $ref: '#/components/schemas/BundleHash'
           force:
             type: boolean
-            const: true
           deleted:
             type: boolean
           dry_run:
@@ -13076,6 +13078,24 @@ api_specification:
           operation_name:
             type: string
             const: bundle.delete
+      BUNDLE_HAS_ACTIVE_RUNS:
+        type: object
+        additionalProperties: false
+        required:
+        - bundle_hash
+        - active_run_ids
+        properties:
+          bundle_hash:
+            $ref: '#/components/schemas/BundleHash'
+          active_run_ids:
+            type: array
+            items:
+              $ref: '#/components/schemas/OpaqueId'
+          active_runs:
+            type: array
+            items:
+              type: object
+              additionalProperties: true
       BUNDLE_UNAVAILABLE:
         type: object
         additionalProperties: false
@@ -13670,12 +13690,14 @@ api_specification:
     bundle.delete:
       tier: should_have
       description: >
-        Force-only destructive bundle delete wrapper. The API layer owns only the v1 request/response/auth/idempotency
-        contract and MUST consume the bundle-delete owner chain for execution: shared destructive-operation mutex, bundle
-        plan, preservation cleanup for active affected runs, managed entity-container selection/stop by run identity, and
-        the #1009 source-first final store transaction. `force=false` and omitted force are intentionally fail-closed and
-        split to #1018; this method MUST NOT implement non-force deletion, CLI behavior, runtime.nuke include_bundles, or
-        broad multi-bundle lifecycle cleanup.
+        Destructive bundle delete wrapper. The API layer owns only the v1 request/response/auth/idempotency contract and
+        MUST consume the bundle-delete owner chain for execution. Omitted or false force performs the #1018 non-force path:
+        plan persisted run users, fail closed with BUNDLE_HAS_ACTIVE_RUNS when running or paused persisted users exist, and
+        otherwise consume the #1009 source-first final store transaction to mark eligible persisted runs deleted before
+        deleting the bundle row. force=true performs the #1019 force path: shared destructive-operation mutex, bundle plan,
+        preservation cleanup for active affected runs, managed entity-container selection/stop by run identity, and the same
+        final store transaction after cleanup succeeds. This method MUST NOT implement CLI behavior, runtime.nuke
+        include_bundles, or broad multi-bundle lifecycle cleanup.
       scope:
         required:
         - control:runtime
@@ -13706,6 +13728,7 @@ api_specification:
           $ref: '#/components/schemas/BundleDeleteResult'
       errors:
       - BUNDLE_NOT_FOUND
+      - BUNDLE_HAS_ACTIVE_RUNS
       - BUNDLE_DELETE_IN_PROGRESS
       - IDEMPOTENCY_CONFLICT
     health.subscribe:
@@ -15684,8 +15707,8 @@ api_specification:
         Legacy dynamic bundle.open/reload/close remains deferred and is not the multi-bundle public API. #1012 promotes the
         authoritative multi-bundle source model under multi_bundle_persistence, with planned bundle.list/get/agents/register/delete,
         run.fork, and bundle_hash create-new-work semantics. The read-only bundle.list/get/agents catalog methods and
-        non-destructive bundle.register and run.fork are now published in method_catalog/OpenRPC with handlers;
-        bundle.delete remains withheld until its gated API/runtime implementation lands. Existing bundle_ref/bundle_fingerprint
+        non-destructive bundle.register, run.fork, and destructive bundle.delete are now published in method_catalog/OpenRPC
+        with handlers. Existing bundle_ref/bundle_fingerprint
         language is migration evidence only after the #1001 bundle_hash decision.
     verify:
       methods:

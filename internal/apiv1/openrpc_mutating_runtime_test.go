@@ -568,6 +568,17 @@ func mutatingHTTPRuntimeErrorProbes() []mutatingHTTPRuntimeErrorProbe {
 		{Method: "runtime.nuke", Params: map[string]any{"dry_run": false, "idempotency_key": "idem-error"}, Code: RuntimeNukeInProgressCode, WantEffects: 1, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.nuke.planErr = destructivereset.ErrOperationInProgress }}},
 		{Method: "bundle.delete", Params: map[string]any{"bundle_hash": runStartTestBundleHash, "force": true, "idempotency_key": "idem-error"}, Code: BundleNotFoundCode, WantEffects: 1, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.bundleDelete.err = store.ErrBundleNotFound }}},
 		{Method: "bundle.delete", Params: map[string]any{"bundle_hash": runStartTestBundleHash, "force": true, "idempotency_key": "idem-error"}, Code: BundleDeleteInProgressCode, WantEffects: 1, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.bundleDelete.err = bundledelete.ErrOperationInProgress }}},
+		{Method: "bundle.delete", Params: map[string]any{"bundle_hash": runStartTestBundleHash, "idempotency_key": "idem-error"}, Code: BundleHasActiveRunsCode, WantEffects: 1, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.bundleDelete.err = &bundledelete.ActiveRunsRemainError{
+				BundleHash: runStartTestBundleHash,
+				ActiveRuns: []bundledelete.RunRef{{
+					RunID:        "00000000-0000-0000-0000-000000000101",
+					Status:       "running",
+					BundleHash:   runStartTestBundleHash,
+					BundleSource: "persisted",
+				}},
+			}
+		}}},
 	}
 }
 
@@ -880,25 +891,49 @@ func (e *recordingBundleDeleteExecutor) Execute(_ context.Context, req bundledel
 	if bundleHash == "" {
 		bundleHash = strings.TrimSpace(e.bundleHash)
 	}
+	status := "completed"
+	if req.DryRun {
+		status = "dry_run"
+	}
+	activeRunsStopped := 0
+	deliveriesCancelled := 0
+	containersStopped := 0
+	var activeRuns []bundledelete.RunRef
+	var nonActiveRuns []bundledelete.RunRef
+	if req.Force {
+		activeRunsStopped = 1
+		deliveriesCancelled = 1
+		containersStopped = 1
+		activeRuns = []bundledelete.RunRef{{
+			RunID:        "00000000-0000-0000-0000-000000000101",
+			Status:       "running",
+			BundleHash:   bundleHash,
+			BundleSource: "persisted",
+		}}
+	} else {
+		nonActiveRuns = []bundledelete.RunRef{{
+			RunID:        "00000000-0000-0000-0000-000000000102",
+			Status:       "completed",
+			BundleHash:   bundleHash,
+			BundleSource: "persisted",
+		}}
+	}
 	return bundledelete.Result{
 		OK:                  true,
-		Status:              "completed",
+		Status:              status,
 		OperationName:       bundledelete.DefaultOperationName,
 		BundleHash:          bundleHash,
 		Force:               req.Force,
-		Deleted:             true,
+		Deleted:             !req.DryRun,
 		DryRun:              req.DryRun,
-		ActiveRunsStopped:   1,
-		DeliveriesCancelled: 1,
-		ContainersStopped:   1,
+		ActiveRunsStopped:   activeRunsStopped,
+		DeliveriesCancelled: deliveriesCancelled,
+		ContainersStopped:   containersStopped,
 		Plan: bundledelete.Plan{
-			BundleHash: bundleHash,
-			ActiveRuns: []bundledelete.RunRef{{
-				RunID:        "00000000-0000-0000-0000-000000000101",
-				Status:       "running",
-				BundleHash:   bundleHash,
-				BundleSource: "persisted",
-			}},
+			BundleHash:    bundleHash,
+			ActiveRuns:    activeRuns,
+			NonActiveRuns: nonActiveRuns,
+			AffectedRuns:  append(activeRuns, nonActiveRuns...),
 		},
 	}, nil
 }
