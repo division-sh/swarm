@@ -72,8 +72,8 @@ const (
 var (
 	buildStoresForServe                  = buildStores
 	runtimeConfigExecutablePath          = os.Executable
-	configuredWorkspaceLifecycleForServe = func(db *sql.DB, repoRoot, contractsRoot string, source semanticview.Source) serveWorkspaceLifecycle {
-		return configuredWorkspaceLifecycle(db, repoRoot, contractsRoot, source)
+	configuredWorkspaceLifecycleForServe = func(db *sql.DB, contractsRoot string, source semanticview.Source, mountSources workspaceMountSources) (serveWorkspaceLifecycle, error) {
+		return configuredWorkspaceLifecycle(db, contractsRoot, source, mountSources)
 	}
 )
 
@@ -174,6 +174,7 @@ type serveOptions struct {
 	ConfigPath           string
 	Backend              string
 	ContractsPath        string
+	DataSource           string
 	BundleHash           string
 	PlatformSpecPath     string
 	StoreMode            string
@@ -377,6 +378,12 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	}
 	cfg := cfgResult.Config
 	reporter.emit(2, "config_load", "ok", serveConfigLoadDetail(cfgResult.Detail(), resolvedPaths, opts))
+	mountSources, err := resolveWorkspaceMountSources(repo, opts.DataSource, cfg)
+	if err != nil {
+		reporter.emit(2, "config_load", "FAILED", err.Error())
+		log.Printf("resolve workspace data source: %v", err)
+		return 1
+	}
 	storeSelection, err := resolveRuntimeStoreSelection(repo, opts.StoreMode, opts.StoreModeSet, cfg)
 	if err != nil {
 		reporter.emit(3, "db_connection", "FAILED", err.Error())
@@ -428,7 +435,11 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		}
 		log.Printf("serve abandon active runs complete: runs=%d deliveries=%d pipeline_receipts=%d", len(result.Runs), len(result.Deliveries), result.PipelineReceiptCount)
 	}
-	workspaces := configuredWorkspaceLifecycleForServe(stores.SQLDB, repo, contractsRoot, source)
+	workspaces, err := configuredWorkspaceLifecycleForServe(stores.SQLDB, contractsRoot, source, mountSources)
+	if err != nil {
+		slog.Error("configure workspaces", "error", err)
+		return 1
+	}
 	if workspaces == nil {
 		slog.Error("workspace lifecycle is not configured")
 		return 1
@@ -557,7 +568,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	}
 
 	var ready atomic.Bool
-	supervisor := newRuntimeProjectSupervisor(repo, resolvedPlatformSpecPath, cfg, stores, &ready, contractsRoot, bundle, source, rt, opts.Dev)
+	supervisor := newRuntimeProjectSupervisor(repo, resolvedPlatformSpecPath, cfg, stores, &ready, mountSources, contractsRoot, bundle, source, rt, opts.Dev)
 	if loadedBundle.dbLoaded {
 		supervisor.DisableSourceReplacement("swarm serve --bundle-hash pins one persisted bundle for the process; dynamic project reload is split to RuntimeContextManager work")
 	}
@@ -1112,7 +1123,20 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 			}
 			return 1
 		}
-		workspaces := configuredWorkspaceLifecycle(stores.SQLDB, repo, contractsRoot, source)
+		mountSources, err := resolveWorkspaceMountSources(repo, "", cfg)
+		if err != nil {
+			if out != nil {
+				fmt.Fprintf(out, "fork failed: resolve workspace data source: %v\n", err)
+			}
+			return 1
+		}
+		workspaces, err := configuredWorkspaceLifecycle(stores.SQLDB, contractsRoot, source, mountSources)
+		if err != nil {
+			if out != nil {
+				fmt.Fprintf(out, "fork failed: configure workspaces: %v\n", err)
+			}
+			return 1
+		}
 		result, err := runtimerunforkexecution.ExecuteSelectedContractRunFork(ctx, runtimerunforkexecution.SelectedContractExecutionRequest{
 			SourceRunID: strings.TrimSpace(*runID),
 			At:          strings.TrimSpace(*at),
@@ -2704,18 +2728,25 @@ func buildCredentialStore() (runtimecredentials.Store, error) {
 	return runtimecredentials.NewOverlayStore(runtimecredentials.NewEnvStore(), fileStore), nil
 }
 
-func configuredWorkspaceLifecycle(db *sql.DB, repoRoot, contractsRoot string, source semanticview.Source) *workspace.DockerManager {
+func configuredWorkspaceLifecycle(db *sql.DB, contractsRoot string, source semanticview.Source, mountSources workspaceMountSources) (*workspace.DockerManager, error) {
 	manager := workspace.NewDockerManager(db)
 	cfg := workspace.DefaultDockerConfig()
-	if root := strings.TrimSpace(repoRoot); root != "" {
-		cfg.SharedDataSource = filepath.Join(root, "data")
+	if dataSource := strings.TrimSpace(mountSources.DataSource); dataSource != "" {
+		if volumesFrom := strings.TrimSpace(cfg.WorkspaceVolumesFrom); volumesFrom != "" {
+			sourceLabel := strings.TrimSpace(mountSources.DataSourceSource)
+			if sourceLabel == "" {
+				sourceLabel = "explicit data source"
+			}
+			return nil, fmt.Errorf("workspace data source from %s cannot be combined with SWARM_WORKSPACE_VOLUMES_FROM=%s", sourceLabel, volumesFrom)
+		}
+		cfg.SharedDataSource = dataSource
 	}
 	if contractsDir := strings.TrimSpace(contractsRoot); contractsDir != "" {
 		cfg.ContractsSource = contractsDir
 	}
 	manager.SetConfig(cfg)
 	manager.SetSemanticSource(source)
-	return manager
+	return manager, nil
 }
 
 func repoRoot() string {

@@ -207,7 +207,7 @@ func newSupervisorForLoadProjectFailureTest(
 	bundle := testBuilderSupervisorBundle(t)
 	source := semanticview.Wrap(bundle)
 	module := stubWorkflowModule{source: source}
-	supervisor := newRuntimeProjectSupervisor("", "", nil, storeBundle{}, new(atomic.Bool), "", nil, nil, nil)
+	supervisor := newRuntimeProjectSupervisor("", "", nil, storeBundle{}, new(atomic.Bool), workspaceMountSources{}, "", nil, nil, nil)
 	supervisor.dev = true
 	supervisor.loadWorkflow = func(repoRoot, contractsRoot, platformSpecPath string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
 		if got := strings.TrimSpace(contractsRoot); got != strings.TrimSpace(projectRoot) {
@@ -219,13 +219,41 @@ func newSupervisorForLoadProjectFailureTest(
 	supervisor.initStateStores = func(context.Context, storeBundle, *runtimecontracts.WorkflowContractBundle) (string, error) {
 		return "store wiring ready", nil
 	}
-	supervisor.newWorkspaces = func(storeBundle, string, string, semanticview.Source) workspace.Lifecycle {
-		return lifecycle
+	supervisor.newWorkspaces = func(storeBundle, string, semanticview.Source, workspaceMountSources) (workspace.Lifecycle, error) {
+		return lifecycle, nil
 	}
 	if createRuntime != nil {
 		supervisor.createRuntime = createRuntime
 	}
 	return supervisor
+}
+
+func TestRuntimeProjectSupervisorLoadProjectUsesResolvedWorkspaceMountSources(t *testing.T) {
+	projectRoot := writeProjectRoot(t)
+	dataDir := t.TempDir()
+	wantMountSources := workspaceMountSources{
+		DataSource:       dataDir,
+		DataSourceSource: "--data",
+	}
+
+	var gotMountSources workspaceMountSources
+	supervisor := newSupervisorForLoadProjectFailureTest(t, projectRoot, stubWorkspaceLifecycle{}, func(context.Context, runtimepkg.RuntimeDeps) (*runtimepkg.Runtime, error) {
+		return &runtimepkg.Runtime{}, nil
+	})
+	supervisor.mountSources = wantMountSources
+	supervisor.newWorkspaces = func(_ storeBundle, _ string, _ semanticview.Source, mountSources workspaceMountSources) (workspace.Lifecycle, error) {
+		gotMountSources = mountSources
+		return stubWorkspaceLifecycle{}, nil
+	}
+	supervisor.startRuntime = func(context.Context, *runtimepkg.Runtime) error { return nil }
+	supervisor.shutdownRuntime = func(context.Context, *runtimepkg.Runtime, runtimepkg.ShutdownOptions) error { return nil }
+
+	if _, err := supervisor.OpenProject(context.Background(), projectRoot); err != nil {
+		t.Fatalf("OpenProject: %v", err)
+	}
+	if gotMountSources != wantMountSources {
+		t.Fatalf("workspace mount sources = %#v, want %#v", gotMountSources, wantMountSources)
+	}
 }
 
 func TestRuntimeProjectSupervisorLoadProject_PropagatesWorkspaceAdmissionFailures(t *testing.T) {

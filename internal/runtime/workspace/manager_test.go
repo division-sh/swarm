@@ -303,15 +303,15 @@ func TestDefaultDockerConfigDoesNotDeriveSourceRootMounts(t *testing.T) {
 	}
 }
 
-func TestDefaultDockerConfigConsumesExplicitWorkspaceMountEnv(t *testing.T) {
+func TestDefaultDockerConfigLeavesDataSourceToCommandResolver(t *testing.T) {
 	dataDir := t.TempDir()
 	contractsDir := t.TempDir()
 	t.Setenv("SWARM_WORKSPACE_DATA_SOURCE", dataDir)
 	t.Setenv("SWARM_WORKSPACE_CONTRACTS_SOURCE", contractsDir)
 
 	cfg := DefaultDockerConfig()
-	if cfg.SharedDataSource != dataDir {
-		t.Fatalf("SharedDataSource = %q, want %q", cfg.SharedDataSource, dataDir)
+	if cfg.SharedDataSource != "" {
+		t.Fatalf("SharedDataSource = %q, want command-level resolver to own SWARM_WORKSPACE_DATA_SOURCE", cfg.SharedDataSource)
 	}
 	if cfg.ContractsSource != contractsDir {
 		t.Fatalf("ContractsSource = %q, want %q", cfg.ContractsSource, contractsDir)

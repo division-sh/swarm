@@ -14,11 +14,12 @@ import (
 
 // Config contains platform-generic runtime configuration.
 type Config struct {
-	Runtime    RuntimeConfig  `yaml:"runtime"`
-	Database   DatabaseConfig `yaml:"database"`
-	Store      StoreConfig    `yaml:"store"`
-	LLM        LLMConfig      `yaml:"llm"`
-	Extensions map[string]any `yaml:",inline"`
+	Runtime    RuntimeConfig   `yaml:"runtime"`
+	Database   DatabaseConfig  `yaml:"database"`
+	Store      StoreConfig     `yaml:"store"`
+	Workspace  WorkspaceConfig `yaml:"workspace"`
+	LLM        LLMConfig       `yaml:"llm"`
+	Extensions map[string]any  `yaml:",inline"`
 
 	typedExtensions ExtensionsConfig `yaml:"-"`
 	extensionsReady bool             `yaml:"-"`
@@ -48,6 +49,10 @@ type StoreConfig struct {
 
 type StoreSQLiteConfig struct {
 	Path string `yaml:"path"`
+}
+
+type WorkspaceConfig struct {
+	DataSource string `yaml:"data_source"`
 }
 
 type LLMConfig struct {

@@ -27,12 +27,13 @@ type runtimeProjectSupervisor struct {
 	stores           storeBundle
 	ready            *atomic.Bool
 	dev              bool
+	mountSources     workspaceMountSources
 	startRuntime     func(context.Context, *runtime.Runtime) error
 	shutdownRuntime  func(context.Context, *runtime.Runtime, runtime.ShutdownOptions) error
 	loadWorkflow     func(repoRoot, contractsRoot, platformSpecPath string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error)
 	validateSource   func(context.Context, semanticview.Source) error
 	initStateStores  func(context.Context, storeBundle, *runtimecontracts.WorkflowContractBundle) (string, error)
-	newWorkspaces    func(storeBundle, string, string, semanticview.Source) workspace.Lifecycle
+	newWorkspaces    func(storeBundle, string, semanticview.Source, workspaceMountSources) (workspace.Lifecycle, error)
 	createRuntime    func(context.Context, runtime.RuntimeDeps) (*runtime.Runtime, error)
 
 	mu                              sync.RWMutex
@@ -49,6 +50,7 @@ func newRuntimeProjectSupervisor(
 	cfg *config.Config,
 	stores storeBundle,
 	ready *atomic.Bool,
+	mountSources workspaceMountSources,
 	initialRoot string,
 	initialBundle *runtimecontracts.WorkflowContractBundle,
 	initialSource semanticview.Source,
@@ -66,6 +68,7 @@ func newRuntimeProjectSupervisor(
 		stores:           stores,
 		ready:            ready,
 		dev:              dev,
+		mountSources:     mountSources,
 		startRuntime: func(ctx context.Context, rt *runtime.Runtime) error {
 			return rt.Start(ctx)
 		},
@@ -79,8 +82,8 @@ func newRuntimeProjectSupervisor(
 			return verifyBundle(ctx, source)
 		},
 		initStateStores: initializeStateStores,
-		newWorkspaces: func(stores storeBundle, repoRoot, contractsRoot string, source semanticview.Source) workspace.Lifecycle {
-			return configuredWorkspaceLifecycle(stores.SQLDB, repoRoot, contractsRoot, source)
+		newWorkspaces: func(stores storeBundle, contractsRoot string, source semanticview.Source, mountSources workspaceMountSources) (workspace.Lifecycle, error) {
+			return configuredWorkspaceLifecycle(stores.SQLDB, contractsRoot, source, mountSources)
 		},
 		createRuntime: func(ctx context.Context, deps runtime.RuntimeDeps) (*runtime.Runtime, error) {
 			return runtime.NewRuntime(ctx, deps)
@@ -176,7 +179,10 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 	if err != nil {
 		return builderpkg.ProjectStatus{}, fmt.Errorf("prepare project bundle source: %w", err)
 	}
-	workspaces := s.newWorkspaces(s.stores, s.repoRoot, resolvedRoot, source)
+	workspaces, err := s.newWorkspaces(s.stores, resolvedRoot, source, s.mountSources)
+	if err != nil {
+		return builderpkg.ProjectStatus{}, err
+	}
 	if err := workspaces.ValidateSource(ctx, source); err != nil {
 		return builderpkg.ProjectStatus{}, err
 	}

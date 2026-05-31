@@ -22,6 +22,8 @@ func TestLoadAndValidate_CLI_TestMode(t *testing.T) {
 		"  password: postgres",
 		"  sslmode: disable",
 		"  pool_size: 5",
+		"workspace:",
+		"  data_source: ./reference-data",
 		"llm:",
 		"  backend: claude_cli",
 		"  session:",
@@ -58,6 +60,9 @@ func TestLoadAndValidate_CLI_TestMode(t *testing.T) {
 	}
 	if cfg.LLM.Session.LockTTL <= 0*time.Second {
 		t.Fatalf("expected lock ttl > 0")
+	}
+	if cfg.Workspace.DataSource != "./reference-data" {
+		t.Fatalf("workspace.data_source = %q, want ./reference-data", cfg.Workspace.DataSource)
 	}
 
 	var ext ExtensionsConfig

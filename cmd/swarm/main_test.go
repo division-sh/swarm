@@ -314,7 +314,7 @@ func TestCLI_ServeOwnsRuntimeStartupFlags(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("serve help code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	for _, want := range []string{"Start the Swarm runtime", "--config", "--backend", "--contracts", "--bundle-hash", "--api-listen-addr", "API, WebSocket, health, and readiness routes", "--mcp-listen-addr", "MCP and tools routes", "--platform-spec", "--store", "--self-check", "--dev", "--require-bundle-match", "--no-require-bundle-match", "--abandon-active-runs", "--shutdown-grace", "--verbose"} {
+	for _, want := range []string{"Start the Swarm runtime", "--config", "--backend", "--contracts", "--data", "--bundle-hash", "--api-listen-addr", "API, WebSocket, health, and readiness routes", "--mcp-listen-addr", "MCP and tools routes", "--platform-spec", "--store", "--self-check", "--dev", "--require-bundle-match", "--no-require-bundle-match", "--abandon-active-runs", "--shutdown-grace", "--verbose"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("serve help missing %q:\n%s", want, stdout.String())
 		}
@@ -683,6 +683,36 @@ func TestCLI_ServeRuntimeConfigDoesNotFeedListenerConfig(t *testing.T) {
 	}
 	if captured.MCPListenAddr != defaultMCPListenAddr {
 		t.Fatalf("mcp listen addr = %q, want default %q", captured.MCPListenAddr, defaultMCPListenAddr)
+	}
+}
+
+func TestCLI_ServeDataFlagFeedsServeOptions(t *testing.T) {
+	dataDir := t.TempDir()
+	var captured serveOptions
+	opts := defaultRootCommandOptions()
+	opts.runServe = func(_ context.Context, _ string, serveOpts serveOptions) int {
+		captured = serveOpts
+		return 0
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", "--data", dataDir}, &stdout, &stderr, opts)
+	if code != 0 {
+		t.Fatalf("serve code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if captured.DataSource != dataDir {
+		t.Fatalf("data source = %q, want %q", captured.DataSource, dataDir)
+	}
+}
+
+func TestCLI_ServeDataFlagRejectsEmptySource(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", "--data", ""}, &stdout, &stderr, defaultRootCommandOptions())
+	if code == 0 {
+		t.Fatalf("serve code = 0, want failure stdout=%s stderr=%s", stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "--data must be non-empty") {
+		t.Fatalf("serve stderr = %q, want --data validation error", stderr.String())
 	}
 }
 
@@ -1325,28 +1355,236 @@ func TestConfiguredWorkspaceLifecycleDoesNotInventSourceRootDataSource(t *testin
 		t.Fatalf("write package.yaml: %v", err)
 	}
 
-	manager := configuredWorkspaceLifecycle(nil, "", contractsDir, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}))
-	err := manager.ValidateSource(context.Background(), semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}))
+	manager, err := configuredWorkspaceLifecycle(nil, contractsDir, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), workspaceMountSources{})
+	if err != nil {
+		t.Fatalf("configuredWorkspaceLifecycle: %v", err)
+	}
+	err = manager.ValidateSource(context.Background(), semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}))
 	if err == nil || !strings.Contains(err.Error(), "/data source is not configured") {
 		t.Fatalf("ValidateSource error = %v, want explicit /data source requirement", err)
 	}
 }
 
-func TestConfiguredWorkspaceLifecycleUsesExplicitRepoAndContractsSources(t *testing.T) {
+func TestConfiguredWorkspaceLifecycleUsesExplicitDataAndContractsSources(t *testing.T) {
 	t.Setenv("SWARM_WORKSPACE_DATA_SOURCE", "")
 	t.Setenv("SWARM_WORKSPACE_CONTRACTS_SOURCE", "")
-	repoRoot := t.TempDir()
-	if err := os.Mkdir(filepath.Join(repoRoot, "data"), 0o755); err != nil {
-		t.Fatalf("mkdir data: %v", err)
-	}
+	dataDir := t.TempDir()
 	contractsDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
 		t.Fatalf("write package.yaml: %v", err)
 	}
 
-	manager := configuredWorkspaceLifecycle(nil, repoRoot, contractsDir, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}))
+	manager, err := configuredWorkspaceLifecycle(nil, contractsDir, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), workspaceMountSources{
+		DataSource:       dataDir,
+		DataSourceSource: "--data",
+	})
+	if err != nil {
+		t.Fatalf("configuredWorkspaceLifecycle: %v", err)
+	}
 	if err := manager.ValidateSource(context.Background(), semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})); err != nil {
 		t.Fatalf("ValidateSource: %v", err)
+	}
+}
+
+func TestConfiguredWorkspaceLifecycleFailsClosedForUnreadableDataSource(t *testing.T) {
+	t.Setenv("SWARM_WORKSPACE_DATA_SOURCE", "")
+	t.Setenv("SWARM_WORKSPACE_CONTRACTS_SOURCE", "")
+	missingDataDir := filepath.Join(t.TempDir(), "missing-data")
+	contractsDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
+		t.Fatalf("write package.yaml: %v", err)
+	}
+
+	manager, err := configuredWorkspaceLifecycle(nil, contractsDir, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), workspaceMountSources{
+		DataSource:       missingDataDir,
+		DataSourceSource: "--data",
+	})
+	if err != nil {
+		t.Fatalf("configuredWorkspaceLifecycle: %v", err)
+	}
+	err = manager.ValidateSource(context.Background(), semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}))
+	if err == nil || !strings.Contains(err.Error(), "/data source") || !strings.Contains(err.Error(), missingDataDir) {
+		t.Fatalf("ValidateSource error = %v, want missing explicit /data source", err)
+	}
+}
+
+func TestConfiguredWorkspaceLifecycleRejectsExplicitDataSourceWithVolumesFrom(t *testing.T) {
+	t.Setenv("SWARM_WORKSPACE_VOLUMES_FROM", "swarm-orchestrator")
+	_, err := configuredWorkspaceLifecycle(nil, t.TempDir(), semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), workspaceMountSources{
+		DataSource:       t.TempDir(),
+		DataSourceSource: "workspace.data_source",
+	})
+	if err == nil || !strings.Contains(err.Error(), "cannot be combined with SWARM_WORKSPACE_VOLUMES_FROM") {
+		t.Fatalf("configuredWorkspaceLifecycle error = %v, want volumes-from conflict", err)
+	}
+}
+
+func TestResolveWorkspaceMountSourcesPrecedence(t *testing.T) {
+	repoRoot := t.TempDir()
+	flagDir := filepath.Join(repoRoot, "flag-data")
+	configDir := filepath.Join(repoRoot, "config-data")
+	envDir := filepath.Join(repoRoot, "env-data")
+	for _, dir := range []string{flagDir, configDir, envDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+
+	result, err := resolveWorkspaceMountSourcesFromInput(workspaceDataSourceInput{
+		RepoRoot:         repoRoot,
+		FlagDataSource:   "flag-data",
+		ConfigDataSource: "config-data",
+		EnvDataSource:    "env-data",
+		EnvDataSourceSet: true,
+	})
+	if err != nil {
+		t.Fatalf("resolve workspace mount sources: %v", err)
+	}
+	if result.DataSource != flagDir || result.DataSourceSource != "--data" {
+		t.Fatalf("flag precedence result = %#v, want source %q from --data", result, flagDir)
+	}
+
+	result, err = resolveWorkspaceMountSourcesFromInput(workspaceDataSourceInput{
+		RepoRoot:         repoRoot,
+		ConfigDataSource: "config-data",
+		EnvDataSource:    "env-data",
+		EnvDataSourceSet: true,
+	})
+	if err != nil {
+		t.Fatalf("resolve config workspace mount source: %v", err)
+	}
+	if result.DataSource != configDir || result.DataSourceSource != "workspace.data_source" {
+		t.Fatalf("config precedence result = %#v, want source %q from workspace.data_source", result, configDir)
+	}
+
+	result, err = resolveWorkspaceMountSourcesFromInput(workspaceDataSourceInput{
+		RepoRoot:         repoRoot,
+		EnvDataSource:    "env-data",
+		EnvDataSourceSet: true,
+		ConfigDataSource: " ",
+		FlagDataSource:   " ",
+	})
+	if err != nil {
+		t.Fatalf("resolve env workspace mount source: %v", err)
+	}
+	if result.DataSource != envDir || result.DataSourceSource != envWorkspaceDataSource {
+		t.Fatalf("env precedence result = %#v, want source %q from %s", result, envDir, envWorkspaceDataSource)
+	}
+}
+
+func TestResolveWorkspaceMountSourcesDoesNotInventRepoDataDefault(t *testing.T) {
+	repoRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(repoRoot, "data"), 0o755); err != nil {
+		t.Fatalf("mkdir repo data: %v", err)
+	}
+	result, err := resolveWorkspaceMountSourcesFromInput(workspaceDataSourceInput{RepoRoot: repoRoot})
+	if err != nil {
+		t.Fatalf("resolve workspace mount sources: %v", err)
+	}
+	if result.DataSource != "" || result.DataSourceSource != "" {
+		t.Fatalf("workspace mount sources = %#v, want no source without explicit owner", result)
+	}
+}
+
+func TestResolveWorkspaceMountSourcesReadsRuntimeConfigAndEnvFallback(t *testing.T) {
+	repoRoot := t.TempDir()
+	configDir := t.TempDir()
+	envDir := t.TempDir()
+	t.Setenv(envWorkspaceDataSource, envDir)
+
+	result, err := resolveWorkspaceMountSources(repoRoot, "", &config.Config{
+		Workspace: config.WorkspaceConfig{DataSource: configDir},
+	})
+	if err != nil {
+		t.Fatalf("resolve config workspace mount sources: %v", err)
+	}
+	if result.DataSource != configDir || result.DataSourceSource != "workspace.data_source" {
+		t.Fatalf("config-backed workspace mount sources = %#v, want %q from workspace.data_source", result, configDir)
+	}
+
+	result, err = resolveWorkspaceMountSources(repoRoot, "", &config.Config{})
+	if err != nil {
+		t.Fatalf("resolve env workspace mount sources: %v", err)
+	}
+	if result.DataSource != envDir || result.DataSourceSource != envWorkspaceDataSource {
+		t.Fatalf("env-backed workspace mount sources = %#v, want %q from %s", result, envDir, envWorkspaceDataSource)
+	}
+}
+
+func TestPlatformSpecWorkspaceDataSourceAuthorityPromoted(t *testing.T) {
+	var spec struct {
+		WorkspaceModel struct {
+			DataSourceAuthority struct {
+				PromotedBy                     string   `yaml:"promoted_by"`
+				ImplementationStatus           string   `yaml:"implementation_status"`
+				CanonicalOwner                 string   `yaml:"canonical_owner"`
+				CLIFlag                        string   `yaml:"cli_flag"`
+				ConfigKey                      string   `yaml:"config_key"`
+				EnvVar                         string   `yaml:"env_var"`
+				SourceOrder                    []string `yaml:"source_order"`
+				DefaultBehavior                string   `yaml:"default_behavior"`
+				FailureBehavior                string   `yaml:"failure_behavior"`
+				VolumesFromConflictRule        string   `yaml:"volumes_from_conflict_rule"`
+				ReadPolicy                     string   `yaml:"read_policy"`
+				RetiredNonAuthoritativeSources []string `yaml:"retired_non_authoritative_sources"`
+				SplitScope                     []string `yaml:"split_scope"`
+			} `yaml:"data_source_authority"`
+		} `yaml:"workspace_model"`
+		CLISpecification struct {
+			CommandCatalog struct {
+				Serve struct {
+					WorkspaceDataSourceAuthority struct {
+						PromotedBy string   `yaml:"promoted_by"`
+						Owner      string   `yaml:"owner"`
+						Flag       string   `yaml:"flag"`
+						ConfigKey  string   `yaml:"config_key"`
+						EnvVar     string   `yaml:"env_var"`
+						Consumers  []string `yaml:"consumers"`
+					} `yaml:"workspace_data_source_authority"`
+				} `yaml:"serve"`
+			} `yaml:"command_catalog"`
+		} `yaml:"cli_specification"`
+	}
+	data, err := os.ReadFile(filepath.Join(repoRoot(), defaultPlatformSpecPath))
+	if err != nil {
+		t.Fatalf("read platform spec: %v", err)
+	}
+	if err := yaml.Unmarshal(data, &spec); err != nil {
+		t.Fatalf("parse platform spec: %v", err)
+	}
+	authority := spec.WorkspaceModel.DataSourceAuthority
+	if strings.TrimSpace(authority.PromotedBy) != "#1139" || strings.TrimSpace(authority.ImplementationStatus) != "implemented_first_slice" {
+		t.Fatalf("workspace data source authority status = promoted_by:%q implementation_status:%q", authority.PromotedBy, authority.ImplementationStatus)
+	}
+	if !strings.Contains(authority.CanonicalOwner, "workspace_model.data_source_authority") {
+		t.Fatalf("workspace data source canonical owner = %q", authority.CanonicalOwner)
+	}
+	if authority.CLIFlag != "--data" || authority.ConfigKey != "workspace.data_source" || authority.EnvVar != envWorkspaceDataSource {
+		t.Fatalf("workspace data source selectors = %#v", authority)
+	}
+	for _, want := range []string{"--data", "workspace.data_source", envWorkspaceDataSource, "no path source"} {
+		if !stringSliceContains(authority.SourceOrder, want) {
+			t.Fatalf("workspace data source order missing %q: %#v", want, authority.SourceOrder)
+		}
+	}
+	for _, want := range []string{"repo-local `data/`", "fail closed", "SWARM_WORKSPACE_VOLUMES_FROM", "read-only", "opaque"} {
+		if !strings.Contains(authority.DefaultBehavior+authority.FailureBehavior+authority.VolumesFromConflictRule+authority.ReadPolicy+strings.Join(authority.RetiredNonAuthoritativeSources, "\n"), want) {
+			t.Fatalf("workspace data source spec missing %q:\n%#v", want, authority)
+		}
+	}
+	for _, want := range []string{"#1137", "#1138", "SWARM_WORKSPACE_DATA_MOUNT"} {
+		if !joinedContains(authority.SplitScope, want) {
+			t.Fatalf("workspace data source split scope missing %q: %#v", want, authority.SplitScope)
+		}
+	}
+	command := spec.CLISpecification.CommandCatalog.Serve.WorkspaceDataSourceAuthority
+	if command.PromotedBy != "#1139" || command.Owner != "workspace_model.data_source_authority" || command.Flag != "--data <path>" {
+		t.Fatalf("serve command data authority = %#v", command)
+	}
+	for _, want := range []string{"serve boot", "Builder project reload", "selected-contract run-fork"} {
+		if !joinedContains(command.Consumers, want) {
+			t.Fatalf("serve command data authority consumers missing %q: %#v", want, command.Consumers)
+		}
 	}
 }
 
@@ -1790,6 +2028,64 @@ func TestRuntimeOperationsWatchlistMapsLLMProviderModelSelectionSourceAuthority(
 	}
 	if !joinedContains(node.CommonFramingMistakes.TooBroad, "#1128") || !joinedContains(node.CommonFramingMistakes.TooNarrow, "model alongside model") {
 		t.Fatalf("watchlist framing mistakes do not guard #1127 split: %#v", node.CommonFramingMistakes)
+	}
+}
+
+func TestRuntimeOperationsWatchlistMapsWorkspaceDataSourceAuthority(t *testing.T) {
+	var watchlist struct {
+		ActiveIssues []struct {
+			ID     int      `yaml:"id"`
+			MapsTo []string `yaml:"maps_to"`
+		} `yaml:"active_issues"`
+		Nodes []struct {
+			ID                    string   `yaml:"id"`
+			KnownManifestations   []string `yaml:"known_manifestations"`
+			RepresentativeIssues  []int    `yaml:"representative_issues"`
+			CommonFramingMistakes struct {
+				TooNarrow []string `yaml:"too_narrow"`
+			} `yaml:"common_framing_mistakes"`
+		} `yaml:"nodes"`
+	}
+	data, err := os.ReadFile(filepath.Join(repoRoot(), "docs", "watchlists", "runtime-operations.yaml"))
+	if err != nil {
+		t.Fatalf("read runtime operations watchlist: %v", err)
+	}
+	if err := yaml.Unmarshal(data, &watchlist); err != nil {
+		t.Fatalf("parse runtime operations watchlist: %v", err)
+	}
+	if !watchlistIssueMapsTo(watchlist.ActiveIssues, 1139, "fail_closed_operational_config") {
+		t.Fatalf("issue 1139 does not map to fail_closed_operational_config: %#v", watchlist.ActiveIssues)
+	}
+	var node struct {
+		ID                    string
+		KnownManifestations   []string
+		RepresentativeIssues  []int
+		CommonFramingMistakes struct {
+			TooNarrow []string `yaml:"too_narrow"`
+		} `yaml:"common_framing_mistakes"`
+	}
+	for _, candidate := range watchlist.Nodes {
+		if candidate.ID == "fail_closed_operational_config" {
+			node.ID = candidate.ID
+			node.KnownManifestations = candidate.KnownManifestations
+			node.RepresentativeIssues = candidate.RepresentativeIssues
+			node.CommonFramingMistakes = candidate.CommonFramingMistakes
+			break
+		}
+	}
+	if node.ID == "" {
+		t.Fatalf("fail_closed_operational_config node not found")
+	}
+	for _, want := range []string{"#1139", "--data", "workspace.data_source", envWorkspaceDataSource, "repoRoot/data"} {
+		if !joinedContains(node.KnownManifestations, want) {
+			t.Fatalf("watchlist known manifestations missing %q: %#v", want, node.KnownManifestations)
+		}
+	}
+	if !intSliceContains(node.RepresentativeIssues, 1139) {
+		t.Fatalf("representative issues missing 1139: %#v", node.RepresentativeIssues)
+	}
+	if !joinedContains(node.CommonFramingMistakes.TooNarrow, "repo-local data directory") {
+		t.Fatalf("watchlist framing mistakes missing repo-local data guard: %#v", node.CommonFramingMistakes)
 	}
 }
 
@@ -2341,6 +2637,55 @@ func TestRunServeRuntimeDBLoadedRunForkSupportedSurfaceExecutesAndStampsPersiste
 	stopped = true
 }
 
+func TestRunServeRuntimePassesDataFlagToWorkspaceLifecycle(t *testing.T) {
+	dataDir := t.TempDir()
+	var capturedMountSources workspaceMountSources
+	_, _, _ = installServeRuntimePostgresTestStoresWithWorkspaceFactory(t, func(mountSources workspaceMountSources) serveWorkspaceLifecycle {
+		capturedMountSources = mountSources
+		return serveRuntimeWorkspaceStub{}
+	})
+
+	serveCtx, cancelServe := context.WithCancel(context.Background())
+	var out lockedBuffer
+	done := make(chan int, 1)
+	go func() {
+		done <- runServeRuntime(serveCtx, repoRoot(), serveOptions{
+			ConfigPath:         writeServeRuntimeTestConfig(t),
+			ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+			DataSource:         dataDir,
+			PlatformSpecPath:   defaultPlatformSpecPath,
+			StoreMode:          "postgres",
+			APIListenAddr:      "127.0.0.1:0",
+			MCPListenAddr:      "127.0.0.1:0",
+			SelfCheck:          true,
+			RequireBundleMatch: false,
+			Verbose:            true,
+			Output:             &out,
+		})
+	}()
+	stopped := false
+	t.Cleanup(func() {
+		if stopped {
+			return
+		}
+		cancelServe()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Errorf("timed out stopping runServeRuntime\noutput:\n%s", out.String())
+		}
+	})
+	waitForServeReadyLine(t, &out, done)
+	cancelServe()
+	if code := <-done; code != 0 {
+		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, out.String())
+	}
+	stopped = true
+	if capturedMountSources.DataSource != dataDir || capturedMountSources.DataSourceSource != "--data" {
+		t.Fatalf("workspace mount sources = %#v, want %q from --data", capturedMountSources, dataDir)
+	}
+}
+
 func TestRunServeRuntimeBundleHashMissingFailsBeforeReadiness(t *testing.T) {
 	_, _, _ = installServeRuntimePostgresTestStores(t, func() serveWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
@@ -2512,6 +2857,13 @@ const serveRuntimeLegacyRunIDForTest = "11111111-2222-3333-4444-555555555555"
 
 func installServeRuntimePostgresTestStores(t *testing.T, workspaceFactory func() serveWorkspaceLifecycle) (string, *sql.DB, *store.PostgresStore) {
 	t.Helper()
+	return installServeRuntimePostgresTestStoresWithWorkspaceFactory(t, func(workspaceMountSources) serveWorkspaceLifecycle {
+		return workspaceFactory()
+	})
+}
+
+func installServeRuntimePostgresTestStoresWithWorkspaceFactory(t *testing.T, workspaceFactory func(workspaceMountSources) serveWorkspaceLifecycle) (string, *sql.DB, *store.PostgresStore) {
+	t.Helper()
 	oldBuildStores := buildStoresForServe
 	oldWorkspaceLifecycle := configuredWorkspaceLifecycleForServe
 	dsn, db, cleanup := testutil.StartPostgres(t)
@@ -2544,8 +2896,8 @@ func installServeRuntimePostgresTestStores(t *testing.T, workspaceFactory func()
 			TurnStore:           runtimePG,
 		}, nil
 	}
-	configuredWorkspaceLifecycleForServe = func(*sql.DB, string, string, semanticview.Source) serveWorkspaceLifecycle {
-		return workspaceFactory()
+	configuredWorkspaceLifecycleForServe = func(_ *sql.DB, _ string, _ semanticview.Source, mountSources workspaceMountSources) (serveWorkspaceLifecycle, error) {
+		return workspaceFactory(mountSources), nil
 	}
 	t.Cleanup(func() {
 		buildStoresForServe = oldBuildStores
@@ -5529,8 +5881,8 @@ func TestRunServeRuntimeVerboseEmitsPlatformSpecBootSequence(t *testing.T) {
 			TurnStore:          runtimePG,
 		}, nil
 	}
-	configuredWorkspaceLifecycleForServe = func(*sql.DB, string, string, semanticview.Source) serveWorkspaceLifecycle {
-		return serveRuntimeWorkspaceStub{}
+	configuredWorkspaceLifecycleForServe = func(*sql.DB, string, semanticview.Source, workspaceMountSources) (serveWorkspaceLifecycle, error) {
+		return serveRuntimeWorkspaceStub{}, nil
 	}
 	t.Cleanup(func() {
 		buildStoresForServe = oldBuildStores
@@ -5620,8 +5972,8 @@ func TestRunServeRuntimeListenerBindFailuresExitBeforeReadiness(t *testing.T) {
 					TurnStore:          runtimePG,
 				}, nil
 			}
-			configuredWorkspaceLifecycleForServe = func(*sql.DB, string, string, semanticview.Source) serveWorkspaceLifecycle {
-				return serveRuntimeWorkspaceStub{}
+			configuredWorkspaceLifecycleForServe = func(*sql.DB, string, semanticview.Source, workspaceMountSources) (serveWorkspaceLifecycle, error) {
+				return serveRuntimeWorkspaceStub{}, nil
 			}
 			t.Cleanup(func() {
 				buildStoresForServe = oldBuildStores
@@ -5785,8 +6137,8 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 			TurnStore:          runtimePG,
 		}, nil
 	}
-	configuredWorkspaceLifecycleForServe = func(*sql.DB, string, string, semanticview.Source) serveWorkspaceLifecycle {
-		return serveRuntimeWorkspaceStub{}
+	configuredWorkspaceLifecycleForServe = func(*sql.DB, string, semanticview.Source, workspaceMountSources) (serveWorkspaceLifecycle, error) {
+		return serveRuntimeWorkspaceStub{}, nil
 	}
 	t.Cleanup(func() {
 		buildStoresForServe = oldBuildStores

@@ -116,6 +116,21 @@ not user isolation on a shared host.
 
 See [`.env.example`](.env.example) for the public local environment template.
 
+### Workspace Reference Data
+
+Agents see shared reference files at `/data`. For plain local `swarm serve`,
+choose that host source explicitly:
+
+```bash
+swarm serve --contracts ./my-flow --data ./reference-data
+```
+
+The source order is `--data > workspace.data_source >
+SWARM_WORKSPACE_DATA_SOURCE > no path source`. The runtime no longer treats a
+repo-local `data/` directory as the implicit source of truth. `/data` remains
+read-only and opaque to Swarm; contract-owned `flows/<flow>/data/` files are a
+separate bundled contract input.
+
 ### LLM Backend Profiles
 
 Outside the Compose quickstart, select a shipped backend with `--backend` or
