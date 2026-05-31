@@ -15,11 +15,60 @@ import (
 	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/runtime/core/identity"
 	runtimeregistry "swarm/internal/runtime/core/registry"
+	"swarm/internal/runtime/flowmodel"
 	"swarm/internal/runtime/semanticview"
 )
 
 func stubSource() semanticview.Source {
 	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
+}
+
+func sourceWithDeclarativeEmitExternalizationFlows() semanticview.Source {
+	component := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "component-scaffold", Flow: "component-scaffold", Mode: "template"},
+		Path:  "component-scaffold",
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{
+				Inputs:  runtimecontracts.FlowInputPins{Events: []string{"repo_scaffold.repo_scaffolded"}},
+				Outputs: runtimecontracts.FlowOutputPins{Events: []string{"component.scaffolded"}},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"component.scaffolded": {},
+		},
+	}
+	repo := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "repo-scaffold", Flow: "repo-scaffold"},
+		Path:  "repo-scaffold",
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{
+				Outputs: runtimecontracts.FlowOutputPins{Events: []string{"repo_scaffold.repo_scaffolded"}},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"repo_scaffold.repo_scaffolded": {},
+		},
+	}
+	operating := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "operating", Flow: "operating"},
+		Path:  "operating",
+	}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{component, repo, operating}}
+	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"component-scaffold": &root.Children[0],
+				"repo-scaffold":      &root.Children[1],
+				"operating":          &root.Children[2],
+			},
+			ByPath: map[string]*runtimecontracts.FlowContractView{
+				"component-scaffold": &root.Children[0],
+				"repo-scaffold":      &root.Children[1],
+				"operating":          &root.Children[2],
+			},
+		},
+	})
 }
 
 func sourceWithPolicy(values map[string]any) semanticview.Source {
@@ -1752,6 +1801,231 @@ func TestExecutor_EmitIntentFallsBackToInboundFlowWhenStateFlowPathNormalizesEmp
 	}
 	if got := result.EmitIntents[0].Event.FlowInstance(); got != "source/inst-1" {
 		t.Fatalf("emitted flow_instance = %q, want inbound fallback source/inst-1", got)
+	}
+}
+
+func TestExecutor_DeclarativeEmitSurfacesUseProducerSourceRouteNamespace(t *testing.T) {
+	source := sourceWithDeclarativeEmitExternalizationFlows()
+	parentRoute := events.RouteIdentity{
+		FlowID:       "operating",
+		FlowInstance: "operating/opco-1",
+		EntityID:     "opco-entity",
+	}.Normalized()
+	cases := []struct {
+		name      string
+		eventType string
+		payload   json.RawMessage
+		handler   runtimecontracts.SystemNodeEventHandler
+	}{
+		{
+			name: "top-level emit",
+			handler: runtimecontracts.SystemNodeEventHandler{
+				Emit: runtimecontracts.EmitSpec{Event: "component-scaffold/component.scaffolded"},
+			},
+		},
+		{
+			name: "rule emit",
+			handler: runtimecontracts.SystemNodeEventHandler{
+				Rules: []runtimecontracts.HandlerRuleEntry{{
+					Condition: "else",
+					Emit:      runtimecontracts.EmitSpec{Event: "component-scaffold/component.scaffolded"},
+				}},
+			},
+		},
+		{
+			name: "on-complete emit",
+			handler: runtimecontracts.SystemNodeEventHandler{
+				OnComplete: []runtimecontracts.HandlerRuleEntry{{
+					Emit: runtimecontracts.EmitSpec{Event: "component-scaffold/component.scaffolded"},
+				}},
+			},
+		},
+		{
+			name: "accumulate on-complete emit",
+			handler: runtimecontracts.SystemNodeEventHandler{
+				Accumulate: &runtimecontracts.AccumulateSpec{
+					Completion: runtimecontracts.ParseAccumulateCompletion("all"),
+					OnComplete: []runtimecontracts.HandlerRuleEntry{{
+						Emit: runtimecontracts.EmitSpec{Event: "component-scaffold/component.scaffolded"},
+					}},
+				},
+			},
+		},
+		{
+			name:      "accumulate on-timeout emit",
+			eventType: "accumulate.timeout",
+			payload: json.RawMessage(`{
+				"timer_handle": {
+					"kind": "accumulation_timeout",
+					"bucket": {
+						"node_id": "component-node",
+						"event_type": "repo-scaffold/repo_scaffold.repo_scaffolded"
+					}
+				}
+			}`),
+			handler: runtimecontracts.SystemNodeEventHandler{
+				Accumulate: &runtimecontracts.AccumulateSpec{
+					Completion: runtimecontracts.ParseAccumulateCompletion("all"),
+					OnTimeout: &runtimecontracts.HandlerRuleEntry{
+						Emit: runtimecontracts.EmitSpec{Event: "component-scaffold/component.scaffolded"},
+					},
+				},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			exec, err := NewExecutor(RuntimeDependencies{
+				Source:     source,
+				StateRepo:  stubStateRepo{},
+				TxRunner:   stubRunner{},
+				Locker:     stubLocker{},
+				Outbox:     stubOutbox{},
+				Dispatcher: stubDispatcher{},
+			}, nil)
+			if err != nil {
+				t.Fatalf("NewExecutor error: %v", err)
+			}
+			eventType := tc.eventType
+			if eventType == "" {
+				eventType = "repo-scaffold/repo_scaffold.repo_scaffolded"
+			}
+			payload := tc.payload
+			if len(payload) == 0 {
+				payload = json.RawMessage(`{}`)
+			}
+			result, err := exec.Execute(context.Background(), ExecutionRequest{
+				EntityID: "component-entity",
+				NodeID:   "component-node",
+				FlowID:   "component-scaffold",
+				Event:    events.Event{ID: "evt-1", Type: events.EventType(eventType), Payload: payload},
+				Handler:  tc.handler,
+				State: testStateSnapshot("ready", map[string]any{
+					"flow_path":            "component-scaffold/component-1",
+					"parent_flow_id":       parentRoute.FlowID,
+					"parent_flow_instance": parentRoute.FlowInstance,
+					"parent_entity_id":     parentRoute.EntityID,
+				}, nil, map[string]map[string]any{}),
+			})
+			if err != nil {
+				t.Fatalf("Execute error: %v", err)
+			}
+			if got := len(result.EmitIntents); got != 1 {
+				t.Fatalf("EmitIntents count = %d, want 1", got)
+			}
+			emitted := result.EmitIntents[0].Event
+			if got, want := string(emitted.Type), "component-scaffold/component-1/component.scaffolded"; got != want {
+				t.Fatalf("emitted type = %q, want %q", got, want)
+			}
+			if got := emitted.SourceRoute().FlowInstance; got != "component-scaffold/component-1" {
+				t.Fatalf("source flow_instance = %q, want component-scaffold/component-1", got)
+			}
+			if got := emitted.TargetRoute().FlowInstance; got != parentRoute.FlowInstance {
+				t.Fatalf("target flow_instance = %q, want %s", got, parentRoute.FlowInstance)
+			}
+		})
+	}
+}
+
+func TestExecutor_FanOutEmitUsesProducerSourceRouteNamespace(t *testing.T) {
+	source := sourceWithDeclarativeEmitExternalizationFlows()
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     source,
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "component-entity",
+		NodeID:   "component-node",
+		FlowID:   "component-scaffold",
+		Event:    events.Event{ID: "evt-1", Type: "repo-scaffold/repo_scaffold.repo_scaffolded", Payload: json.RawMessage(`{"items":[{"id":"a"},{"id":"b"}]}`)},
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			FanOut: &runtimecontracts.FanOutSpec{
+				ItemsFrom: "payload.items",
+				Emit: runtimecontracts.EmitSpec{
+					Event: "component-scaffold/component.scaffolded",
+				},
+			},
+		},
+		State: testStateSnapshot("ready", map[string]any{
+			"flow_path":            "component-scaffold/component-1",
+			"parent_flow_id":       "operating",
+			"parent_flow_instance": "operating/opco-1",
+			"parent_entity_id":     "opco-entity",
+		}, nil, map[string]map[string]any{}),
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if got := len(result.EmitIntents); got != 2 {
+		t.Fatalf("EmitIntents count = %d, want 2", got)
+	}
+	for i, intent := range result.EmitIntents {
+		if got, want := string(intent.Event.Type), "component-scaffold/component-1/component.scaffolded"; got != want {
+			t.Fatalf("emit %d type = %q, want %q", i, got, want)
+		}
+		if got := intent.Event.SourceRoute().FlowInstance; got != "component-scaffold/component-1" {
+			t.Fatalf("emit %d source flow_instance = %q, want component-scaffold/component-1", i, got)
+		}
+	}
+}
+
+func TestExecutor_StaticProducerTargetRouteDoesNotOwnEventNamespace(t *testing.T) {
+	source := sourceWithDeclarativeEmitExternalizationFlows()
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     source,
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "repo-entity",
+		NodeID:   "repo-node",
+		FlowID:   "repo-scaffold",
+		Event:    events.Event{ID: "evt-1", Type: "repo.commit_ready", Payload: json.RawMessage(`{}`)},
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			Emit: runtimecontracts.EmitSpec{
+				Event: "repo-scaffold/repo_scaffold.repo_scaffolded",
+				Target: runtimecontracts.EmitTargetSpec{
+					Kind:       runtimecontracts.EmitTargetKindInstanceID,
+					Flow:       "component-scaffold",
+					InstanceID: "component-1",
+				},
+			},
+		},
+		State: testStateSnapshot("ready", map[string]any{
+			"flow_path": "repo-scaffold",
+		}, nil, map[string]map[string]any{}),
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if got := len(result.EmitIntents); got != 1 {
+		t.Fatalf("EmitIntents count = %d, want 1", got)
+	}
+	emitted := result.EmitIntents[0].Event
+	if got, want := string(emitted.Type), "repo-scaffold/repo_scaffold.repo_scaffolded"; got != want {
+		t.Fatalf("emitted type = %q, want %q", got, want)
+	}
+	if got := emitted.SourceRoute().FlowInstance; got != "repo-scaffold" {
+		t.Fatalf("source flow_instance = %q, want repo-scaffold", got)
+	}
+	if got := emitted.TargetRoute().FlowInstance; got != "component-scaffold/component-1" {
+		t.Fatalf("target flow_instance = %q, want component-scaffold/component-1", got)
+	}
+	if got := emitted.FlowInstance(); got != "component-scaffold/component-1" {
+		t.Fatalf("legacy flow_instance projection = %q, want target component-scaffold/component-1", got)
 	}
 }
 
