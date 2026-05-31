@@ -312,6 +312,50 @@ active_issues:
     title: Reconcile event_receipts typed subscriber identity key
     maps_to:
       - delivery_and_replay_ownership
+  - id: 981
+    title: RuntimeContextManager per-bundle context isolation for concurrent multi-bundle execution
+    maps_to:
+      - runtime_context_isolation
+  - id: 1175
+    title: RuntimeContextManager pinned context dispatch and graph isolation
+    maps_to:
+      - runtime_context_isolation
+  - id: 1176
+    title: RuntimeContextManager dynamic Load/Unload lifecycle
+    maps_to:
+      - runtime_context_isolation
+  - id: 1177
+    title: Map RuntimeContextManager failure class
+    maps_to:
+      - runtime_context_isolation
+  - id: 976
+    title: Fork bundle_hash selection mode
+    maps_to:
+      - runtime_context_isolation
+  - id: 1025
+    title: Add conformance matrix for bundle lifecycle and scoped API behavior
+    maps_to:
+      - runtime_context_isolation
+  - id: 1028
+    title: Add ambient CLI bundle context commands
+    maps_to:
+      - runtime_context_isolation
+  - id: 1026
+    title: Define Option B self-contained bundle artifact capture
+    maps_to:
+      - runtime_context_isolation
+  - id: 1008
+    title: Define preservation-mode cleanup owner for multi-bundle orphan and force-delete cleanup
+    maps_to:
+      - runtime_context_isolation
+  - id: 1009
+    title: Define bundle.delete atomicity / transaction ordering
+    maps_to:
+      - runtime_context_isolation
+  - id: 1027
+    title: Add runtime.nuke include_bundles semantics for bundle catalog state
+    maps_to:
+      - runtime_context_isolation
 nodes:
   - id: llm_provider_adjacency_contract_ownership
     title: LLM Provider Adjacency Contract Ownership
@@ -681,6 +725,56 @@ nodes:
       too_narrow:
         - one parameter list is too long
     current_action_pressure: active
+  - id: runtime_context_isolation
+    title: RuntimeContextManager Runtime Context Isolation
+    parent_class: single-process multi-bundle runtime context ownership across boot, request dispatch, graph isolation, dynamic lifecycle, fork routing, CLI context, and destructive/preservation cleanup consumers
+    canonical_owners:
+      - platform-spec.yaml multi_bundle_persistence.split_trackers.runtime_context_isolation for source-authority tracking
+      - "future internal/runtime RuntimeContextManager owner for loaded BundleContext registration, lookup by canonical bundle_hash, and lookup from run_id through runs.bundle_hash/runs.bundle_source"
+      - "future internal/runtime BundleContext owner for one bundle-bound runtime graph: BundleSourceFact, EventBus, route table, pipeline/coordinator, AgentManager, subscription state, authority, prompt resolver, emit registry, tool gateway, tool executor, workspace/container identity, RuntimeIngress, and RunControl"
+      - internal/store run bundle availability owner remains separate and supplies run_id to bundle_hash/source classification for context lookup
+      - internal/runtime/correlation.BundleSourceFact remains per-context evidence and is not by itself a runtime context owner
+    why_this_node_exists: multi-bundle runtime behavior drifts when a process-global runtime graph, API bridge, supervisor, event bus, route table, manager, source-bound helpers, or workspace/container naming path interprets bundle semantics from one ambient source instead of from a selected BundleContext.
+    known_manifestations:
+      - "API dispatch/source-fact admission currently resolves requested or run-derived bundle hash, then compares it to one active runtime source fact and returns BUNDLE_UNAVAILABLE with single_active_runtime_unavailable for any other valid hash."
+      - "serve boot currently loads one serveRuntimeBundle, constructs one runtime.NewRuntime, one supervisor, and passes one EventBus, RuntimeIngress, RunControl, and Source into API handler options."
+      - "builder/dashboard runtime controls currently expose singleton CurrentSource and CurrentRuntime and can route controls to one ambient runtime/manager."
+      - "runtime graph construction currently builds one Runtime from one WorkflowModule.SemanticSource and derives one EventBus, one pipeline/coordinator, one LLM/tool executor, one AgentManager, one authority provider, one prompt resolver, and one emit registry from that source."
+      - "EventBus/routes/subscriptions currently own one semanticSource, one routeTable, one BundleSourceFact, one subscription map, and subscriber channels keyed below bundle identity."
+      - "Pipeline/coordinator currently binds one WorkflowModule and subscribes runtime workflow handling through one bus."
+      - "AgentManager state currently stores agents, configs, loop cancelers, in-flight state, poison state, and selected-contract recoveries in maps keyed below bundle identity while holding one semanticSource."
+      - "Workspace/container identity currently derives names from flow/agent scope keys or entity slug without bundle_hash disambiguation."
+      - "Pinned boot/context registry/request dispatch/graph isolation is the #1175 first slice and must include all live same-concept singleton interpreters it claims to support."
+      - "Dynamic RuntimeContextManager Load/Unload after boot is the #1176 sibling and must not be treated as closed by pinned boot work."
+      - "Cross-bundle fork routing is the #976 sibling and must consume context ownership later without widening pinned boot work silently."
+      - "Final lifecycle/scoped API conformance remains #1025."
+      - "Ambient CLI bundle context remains #1028."
+      - "Option B self-contained bundle artifact capture remains #1026."
+      - "Destructive/preservation cleanup and runtime.nuke bundle-catalog integration remain split through #1008/#1009/#1027, but must not bypass RuntimeContextManager ownership when cleanup touches loaded contexts."
+    representative_issues:
+      - 981
+      - 1011
+      - 1175
+      - 1176
+      - 1177
+      - 976
+      - 1025
+      - 1028
+      - 1026
+      - 1008
+      - 1009
+      - 1027
+    common_framing_mistakes:
+      too_broad:
+        - implement pinned boot, dynamic Load/Unload, cross-bundle fork, final matrix, ambient CLI context, Option B artifact capture, delete cleanup, and runtime.nuke as one undifferentiated rewrite
+        - absorb persistence/schema/reader/API inventory work that is already owned by adjacent multi-bundle trackers
+      too_narrow:
+        - add a RuntimeContextManager shell without making it the dispatch owner for supported mutation paths
+        - patch API admission while leaving serve boot, supervisor CurrentRuntime, EventBus, route table, pipeline, AgentManager, source-bound helpers, or workspace/container naming as live singleton interpreters
+        - treat BundleSourceFact as the context owner instead of evidence attached to a BundleContext
+        - declare multi-context execution while leaving container/workspace names derived only from flow, agent, or entity slug
+        - leave dashboard/builder runtime controls on singleton CurrentRuntime without an explicit fail-closed, split, or context-aware decision
+    current_action_pressure: "#1175 can proceed only after the independent gate records an exact pinned boot surface and binds the first slice to manager, BundleContext graph, API dispatch, singleton consumer handling, workspace/container isolation proof or fail-closed proof, and #1177 watchlist mapping. #1176/#976/#1025/#1028/#1026/#1008/#1009/#1027 remain sibling trackers."
   - id: privileged_control_plane_auth
     title: Privileged Control Plane Authentication
     parent_class: security and authorization fail-closed boundaries
