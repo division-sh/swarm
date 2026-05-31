@@ -437,9 +437,9 @@ func TestMultiBundleSourceAuthorityPublishesOnlyImplementedBundleReadAndRunForkM
 	commandCatalog := mustMappingValue(t, cli, "command_catalog")
 	bundleCommand := mustMappingValue(t, commandCatalog, "bundle")
 	assertScalarValue(t, mustMappingValue(t, bundleCommand, "command"), "swarm bundle list|show|agents|register")
-	assertScalarValue(t, mustMappingValue(t, bundleCommand, "implementation_status"), "implemented_inventory_and_prepared_envelope_register")
-	assertScalarContains(t, mustMappingValue(t, bundleCommand, "blocker_state"), "Prepared-envelope swarm bundle register is implemented")
-	assertScalarContains(t, mustMappingValue(t, bundleCommand, "blocker_state"), "Directory/archive packaging and bundle.delete CLI remain split")
+	assertScalarValue(t, mustMappingValue(t, bundleCommand, "implementation_status"), "implemented_inventory_prepared_envelope_and_directory_register")
+	assertScalarContains(t, mustMappingValue(t, bundleCommand, "blocker_state"), "local directory swarm bundle register --contracts")
+	assertScalarContains(t, mustMappingValue(t, bundleCommand, "blocker_state"), "Archive packaging and bundle.delete CLI remain split")
 	runForkCatalog := mustMappingValue(t, commandCatalog, "run_fork")
 	assertScalarValue(t, mustMappingValue(t, runForkCatalog, "command"), runForkCommand)
 	assertScalarValue(t, mustMappingValue(t, runForkCatalog, "implementation_status"), "implemented_public_cli_consumer")
@@ -465,7 +465,7 @@ func TestMultiBundleSourceAuthorityPublishesOnlyImplementedBundleReadAndRunForkM
 		t.Fatal("remaining_should_have_not_implemented still includes implemented swarm bundle inventory commands")
 	}
 	for _, want := range []string{
-		"swarm bundle register <contracts-directory-or-archive>",
+		"swarm bundle register --archive <archive-file>",
 		"swarm bundle delete <bundle-hash> [--force] [--dry-run] [--idempotency-key <key>]",
 	} {
 		if !sequenceContainsScalar(remaining, want) {
@@ -477,7 +477,8 @@ func TestMultiBundleSourceAuthorityPublishesOnlyImplementedBundleReadAndRunForkM
 	assertScalarValue(t, mustMappingValue(t, apiBoundary, "status"), "partial_bundle_read_catalog_register_run_fork_and_delete_method_catalog")
 	assertScalarContains(t, mustMappingValue(t, apiBoundary, "rule"), "bundle.register is also published")
 	assertScalarContains(t, mustMappingValue(t, apiBoundary, "rule"), "prepared-envelope swarm")
-	assertScalarContains(t, mustMappingValue(t, apiBoundary, "rule"), "contracts-directory/archive packaging remains split")
+	assertScalarContains(t, mustMappingValue(t, apiBoundary, "rule"), "local contracts-directory packaging is implemented")
+	assertScalarContains(t, mustMappingValue(t, apiBoundary, "rule"), "archive packaging remains split")
 	assertScalarContains(t, mustMappingValue(t, apiBoundary, "rule"), "bundle.delete is promoted")
 	assertScalarContains(t, mustMappingValue(t, apiBoundary, "rule"), "omitted or false force performs non-force deletion")
 
