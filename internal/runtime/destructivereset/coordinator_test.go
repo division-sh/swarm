@@ -271,8 +271,8 @@ func TestInventoryPlannerCarriesImplementedContractsAndSplitResetSeams(t *testin
 	}
 	if containsSeam(plan.ResetSeams, "dashboard_runtime_actions_reset_state") ||
 		containsSeam(plan.ResetSeams, "builder_runtime_reset_state") ||
-		containsSeam(plan.ResetSeams, "scripts_run_clear_reset_dev") {
-		t.Fatalf("reset seams = %#v, want retired dashboard/Builder and migrated run_clear reset seams omitted", plan.ResetSeams)
+		containsSeam(plan.ResetSeams, "scripts_private_reset_dev") {
+		t.Fatalf("reset seams = %#v, want retired dashboard/Builder and private reset helper seams omitted", plan.ResetSeams)
 	}
 	if !plan.Preserved.SchemaMigrations || !plan.Preserved.AuthTokens || !plan.Preserved.BundleContracts {
 		t.Fatalf("preserved resources = %#v, want schema/auth/bundle preserved", plan.Preserved)

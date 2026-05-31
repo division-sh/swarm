@@ -163,8 +163,8 @@ Likely causes:
 
 Current mitigations:
 
-- `run_clear.sh` now launches Swarm detached correctly
-- `run_clear.sh` kills aggressively before restart
+- the former private local launcher used detached process startup before it was retired
+- supported public startup now goes through `swarm serve` / `swarm run`
 
 Still brittle because:
 
@@ -192,7 +192,7 @@ Likely causes:
 
 Current mitigations:
 
-- aggressive `run-clear`
+- explicit runtime reset through `swarm control nuke`
 - startup MCP validation
 - container-only Claude execution
 
@@ -1151,7 +1151,7 @@ Likely causes:
 
 Current mitigations:
 
-- hardened `run-clear`
+- public runtime commands own startup/reset behavior
 
 Improvement items:
 
@@ -1859,7 +1859,7 @@ Fix:
 
 - normalize gateway tool name before allowlist check
 
-### `run-clear` launcher orphaning runtime children
+### Retired private launcher orphaning runtime children
 
 Root cause:
 

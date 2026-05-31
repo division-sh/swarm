@@ -65,13 +65,10 @@ active_issues:
     title: Improve local lifecycle and harness reliability so tooling stops hiding runtime semantics
     maps_to:
       - harness_reliability_and_local_smoke
-  - id: 391
-    title: Strengthen supported local startup smoke for run_clear and builder project-open
+  - id: 1161
+    title: Retire private Makefile and scripts surfaces from public repo
     maps_to:
-      - harness_reliability_and_local_smoke
-  - id: 450
-    title: run-clear can report startup failure after runtime is already ready
-    maps_to:
+      - dead_or_inert_paths
       - harness_reliability_and_local_smoke
 nodes:
   - id: boundary_owned_decomposition
@@ -164,9 +161,11 @@ nodes:
       - reset/startup smoke coverage is too weak in the touched local path
       - giant fixtures hide smaller invariant failures
       - optional infrastructure gaps are unclear during local startup
+      - private local lifecycle helpers survive after public CLI/API owners exist
     representative_issues:
       - 182
       - 391
+      - 1161
     common_framing_mistakes:
       too_broad:
         - the harness is flaky

@@ -38,7 +38,7 @@ func DefaultDownstreamContracts() []DownstreamContract {
 			ID:          ContractLegacyResetMigration,
 			Status:      "split",
 			Owner:       "future legacy reset migration owner",
-			Description: "Retire, redirect, or explicitly split remaining CLI reset seams after canonical reset ownership exists; stale dashboard/Builder reset_state plumbing is retired/fail-closed and run_clear reset-dev consumes runtime.nuke.",
+			Description: "Retire, redirect, or explicitly split remaining CLI reset seams after canonical reset ownership exists; stale dashboard/Builder reset_state plumbing is retired/fail-closed and public reset consumers use runtime.nuke.",
 		},
 	}
 }

@@ -65,30 +65,28 @@ Best for:
 - tool declaration coherence
 - boot-time semantic checks that should be caught before runtime
 
-### 3. Supported Full-Run Helper
+### 3. Supported Runtime Commands
 
 Use this when verify is green or when the suspected issue is runtime-only.
 
-Command:
+Commands:
 
 ```bash
-SWARM_TOOL_GATEWAY_URL=http://127.0.0.1:8081 \
-SWARM_TOOL_GATEWAY_CONTAINER_URL=http://host.docker.internal:8081 \
-make run-clear
+go run ./cmd/swarm serve --contracts /Users/youmew/swarm/empire/contracts
+go run ./cmd/swarm run --connect http://127.0.0.1:8081 --event <event> --payload <payload.json>
+go run ./cmd/swarm agent directive <agent-id> '<message>' --api-server http://127.0.0.1:8081
+go run ./cmd/swarm control nuke --api-server http://127.0.0.1:8081 --yes
 ```
 
-Use `make run-clear-directed DIRECTIVE_AGENT=<agent> DIRECTIVE_MESSAGE='<message>'`
-for directive-bootstrapped runs. `make run-clear` is the corpus path only;
-it no longer switches behavior based on `DIRECTIVE_*`.
-
-The reset stage starts `swarm serve`, waits for `/v1/rpc health.check`, and then
-resets through `/v1/rpc runtime.nuke` with `SWARM_API_TOKEN`. It does not stop
-Docker containers or truncate database tables directly.
+The old private Makefile/script helper has been retired from the public repo.
+Use the public CLI commands directly: `swarm serve` owns startup, `swarm run`
+owns run creation, `swarm agent directive` owns directive delivery, and
+`swarm control nuke` owns destructive reset through `/v1/rpc runtime.nuke`.
 
 Best for:
 - startup readiness
 - boot/runtime parity
-- operator/helper path failures
+- operator command path failures
 - real run initialization problems
 
 ### 4. Runtime Diagnosis Surface
