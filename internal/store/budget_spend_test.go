@@ -30,6 +30,11 @@ func TestSQLiteRuntimeStoreBudgetSpendPersistence(t *testing.T) {
 		FlowInstance:    "flow/active",
 		AgentID:         "agent-1",
 		Model:           "claude-sonnet",
+		ModelAlias:      "regular",
+		BackendProfile:  "anthropic",
+		Provider:        "anthropic",
+		Transport:       "api",
+		ResolvedModel:   "claude-sonnet",
 		InputTokens:     10,
 		OutputTokens:    4,
 		CostUSD:         1.25,
@@ -43,6 +48,11 @@ func TestSQLiteRuntimeStoreBudgetSpendPersistence(t *testing.T) {
 		FlowInstance:    "global",
 		AgentID:         "agent-global",
 		Model:           "claude-cli",
+		ModelAlias:      "regular",
+		BackendProfile:  "claude_cli",
+		Provider:        "claude",
+		Transport:       "cli",
+		ResolvedModel:   "claude-cli",
 		InputTokens:     8,
 		OutputTokens:    2,
 		CostUSD:         0.75,
@@ -110,17 +120,22 @@ func TestPostgresStoreBudgetSpendPersistenceQueries(t *testing.T) {
 	recordedAt := time.Now().UTC().Truncate(time.Second)
 
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO spend_ledger")).
-		WithArgs(entityID, "flow/1", "agent-1", "claude-sonnet", 10, 4, 1.25, "api", "exact", recordedAt).
+		WithArgs(entityID, "flow/1", "agent-1", "claude-sonnet", "regular", "anthropic", "anthropic", "api", "claude-sonnet", 10, 4, 1.25, "anthropic", "exact", recordedAt).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	if err := pg.RecordSpend(ctx, budgetspend.SpendRecord{
 		EntityID:        entityID,
 		FlowInstance:    "flow/1",
 		AgentID:         "agent-1",
 		Model:           "claude-sonnet",
+		ModelAlias:      "regular",
+		BackendProfile:  "anthropic",
+		Provider:        "anthropic",
+		Transport:       "api",
+		ResolvedModel:   "claude-sonnet",
 		InputTokens:     10,
 		OutputTokens:    4,
 		CostUSD:         1.25,
-		InvocationType:  "api",
+		InvocationType:  "anthropic",
 		UsageAccounting: "exact",
 		RecordedAt:      recordedAt,
 	}); err != nil {

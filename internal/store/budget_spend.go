@@ -24,12 +24,13 @@ func (s *PostgresStore) RecordSpend(ctx context.Context, rec budgetspend.SpendRe
 		return err
 	}
 	_, err := s.DB.ExecContext(ctx, `
-		INSERT INTO spend_ledger (
-			entity_id, flow_instance, agent_id, model, input_tokens, output_tokens, cost_usd, invocation_type, usage_accounting, created_at
-		) VALUES (
-			NULLIF($1,'')::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10
-		)
-	`, rec.EntityID, rec.FlowInstance, rec.AgentID, rec.Model, rec.InputTokens, rec.OutputTokens, rec.CostUSD, rec.InvocationType, rec.UsageAccounting, rec.RecordedAt)
+			INSERT INTO spend_ledger (
+				entity_id, flow_instance, agent_id, model, model_alias, backend_profile, provider, transport, resolved_model,
+				input_tokens, output_tokens, cost_usd, invocation_type, usage_accounting, created_at
+			) VALUES (
+				NULLIF($1,'')::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
+			)
+		`, rec.EntityID, rec.FlowInstance, rec.AgentID, rec.Model, rec.ModelAlias, rec.BackendProfile, rec.Provider, rec.Transport, rec.ResolvedModel, rec.InputTokens, rec.OutputTokens, rec.CostUSD, rec.InvocationType, rec.UsageAccounting, rec.RecordedAt)
 	if err != nil {
 		return fmt.Errorf("record postgres spend: %w", err)
 	}
@@ -127,10 +128,11 @@ func (s *SQLiteRuntimeStore) RecordSpend(ctx context.Context, rec budgetspend.Sp
 		return err
 	}
 	_, err := s.DB.ExecContext(ctx, `
-		INSERT INTO spend_ledger (
-			entity_id, flow_instance, agent_id, model, input_tokens, output_tokens, cost_usd, invocation_type, usage_accounting, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, sqliteNullUUID(rec.EntityID), rec.FlowInstance, rec.AgentID, rec.Model, rec.InputTokens, rec.OutputTokens, rec.CostUSD, rec.InvocationType, rec.UsageAccounting, rec.RecordedAt.UTC())
+			INSERT INTO spend_ledger (
+				entity_id, flow_instance, agent_id, model, model_alias, backend_profile, provider, transport, resolved_model,
+				input_tokens, output_tokens, cost_usd, invocation_type, usage_accounting, created_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, sqliteNullUUID(rec.EntityID), rec.FlowInstance, rec.AgentID, rec.Model, rec.ModelAlias, rec.BackendProfile, rec.Provider, rec.Transport, rec.ResolvedModel, rec.InputTokens, rec.OutputTokens, rec.CostUSD, rec.InvocationType, rec.UsageAccounting, rec.RecordedAt.UTC())
 	if err != nil {
 		return fmt.Errorf("record sqlite spend: %w", err)
 	}
@@ -234,6 +236,26 @@ func normalizeBudgetSpendRecord(rec budgetspend.SpendRecord) budgetspend.SpendRe
 	rec.FlowInstance = strings.TrimSpace(rec.FlowInstance)
 	rec.AgentID = strings.TrimSpace(rec.AgentID)
 	rec.Model = strings.TrimSpace(rec.Model)
+	rec.ModelAlias = strings.TrimSpace(rec.ModelAlias)
+	rec.BackendProfile = strings.TrimSpace(rec.BackendProfile)
+	rec.Provider = strings.TrimSpace(rec.Provider)
+	rec.Transport = strings.TrimSpace(rec.Transport)
+	rec.ResolvedModel = strings.TrimSpace(rec.ResolvedModel)
+	if rec.ModelAlias == "" {
+		rec.ModelAlias = "unknown"
+	}
+	if rec.BackendProfile == "" {
+		rec.BackendProfile = "unknown"
+	}
+	if rec.Provider == "" {
+		rec.Provider = "unknown"
+	}
+	if rec.Transport == "" {
+		rec.Transport = "unknown"
+	}
+	if rec.ResolvedModel == "" {
+		rec.ResolvedModel = rec.Model
+	}
 	rec.InvocationType = strings.TrimSpace(strings.ToLower(rec.InvocationType))
 	rec.UsageAccounting = strings.TrimSpace(strings.ToLower(rec.UsageAccounting))
 	if rec.RecordedAt.IsZero() {

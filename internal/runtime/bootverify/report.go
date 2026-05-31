@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	runtimecredentials "swarm/internal/runtime/credentials"
+	llmselection "swarm/internal/runtime/llm/selection"
 	"swarm/internal/runtime/semanticview"
 )
 
@@ -31,8 +32,11 @@ type Report struct {
 }
 
 type Options struct {
-	Credentials       runtimecredentials.Store
-	CheckMCPReachable bool
+	Credentials             runtimecredentials.Store
+	CheckMCPReachable       bool
+	ValidateModelResolution bool
+	LLMProfile              llmselection.Profile
+	ModelAliases            llmselection.ModelAliases
 }
 
 func Run(ctx context.Context, source semanticview.Source, opts Options) Report {

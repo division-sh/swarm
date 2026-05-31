@@ -209,6 +209,26 @@ func (t *BudgetTracker) RecordSpend(ctx context.Context, rec SpendRecord) error 
 	rec.FlowInstance = strings.TrimSpace(rec.FlowInstance)
 	rec.AgentID = strings.TrimSpace(rec.AgentID)
 	rec.Model = strings.TrimSpace(rec.Model)
+	rec.ModelAlias = strings.TrimSpace(rec.ModelAlias)
+	rec.BackendProfile = strings.TrimSpace(rec.BackendProfile)
+	rec.Provider = strings.TrimSpace(rec.Provider)
+	rec.Transport = strings.TrimSpace(rec.Transport)
+	rec.ResolvedModel = strings.TrimSpace(rec.ResolvedModel)
+	if rec.ModelAlias == "" {
+		rec.ModelAlias = "unknown"
+	}
+	if rec.BackendProfile == "" {
+		rec.BackendProfile = "unknown"
+	}
+	if rec.Provider == "" {
+		rec.Provider = "unknown"
+	}
+	if rec.Transport == "" {
+		rec.Transport = "unknown"
+	}
+	if rec.ResolvedModel == "" {
+		rec.ResolvedModel = rec.Model
+	}
 	rec.InvocationType = strings.TrimSpace(strings.ToLower(rec.InvocationType))
 	rec.UsageAccounting = strings.TrimSpace(strings.ToLower(rec.UsageAccounting))
 	if rec.FlowInstance == "" {
@@ -239,7 +259,7 @@ func (t *BudgetTracker) RecordSpend(ctx context.Context, rec SpendRecord) error 
 	}
 
 	if err := t.store.RecordSpend(ctx, rec); err != nil {
-		return fmt.Errorf("insert spend_ledger: %w", err)
+		return fmt.Errorf("record spend: %w", err)
 	}
 
 	// Best-effort guardrail evaluation.
@@ -267,11 +287,17 @@ func (t *BudgetTracker) RecordLLMUsage(ctx context.Context, entityID string, age
 	if err != nil {
 		return err
 	}
+	metadata := spendRecordMetadata(meta)
 	return t.RecordSpend(ctx, SpendRecord{
 		EntityID:       entityID,
 		FlowInstance:   flowInstance,
 		AgentID:        agentID,
 		Model:          usage.Model,
+		ModelAlias:     metadata.ModelAlias,
+		BackendProfile: metadata.BackendProfile,
+		Provider:       metadata.Provider,
+		Transport:      metadata.Transport,
+		ResolvedModel:  metadata.ResolvedModel,
 		InputTokens:    usage.InputTokens,
 		OutputTokens:   usage.OutputTokens,
 		CostUSD:        t.estimateLLMCostUSD(usage.Model, usage.InputTokens, usage.OutputTokens),
@@ -283,6 +309,28 @@ func (t *BudgetTracker) RecordLLMUsage(ctx context.Context, entityID string, age
 			return string(llm.BudgetUsageEstimated)
 		}(),
 	})
+}
+
+type spendLLMMetadata struct {
+	ModelAlias     string
+	BackendProfile string
+	Provider       string
+	Transport      string
+	ResolvedModel  string
+}
+
+func spendRecordMetadata(meta any) spendLLMMetadata {
+	values, ok := meta.(map[string]any)
+	if !ok {
+		return spendLLMMetadata{}
+	}
+	return spendLLMMetadata{
+		ModelAlias:     strings.TrimSpace(asString(values["model_alias"])),
+		BackendProfile: strings.TrimSpace(asString(values["backend_profile"])),
+		Provider:       strings.TrimSpace(asString(values["provider"])),
+		Transport:      strings.TrimSpace(asString(values["transport"])),
+		ResolvedModel:  strings.TrimSpace(asString(values["resolved_model"])),
+	}
 }
 
 func (t *BudgetTracker) resolveSpendFlowInstance(ctx context.Context, entityID string, meta any) (string, error) {

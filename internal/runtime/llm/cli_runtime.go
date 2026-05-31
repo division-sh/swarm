@@ -11,6 +11,7 @@ import (
 	"swarm/internal/events"
 	runtimeactors "swarm/internal/runtime/core/actors"
 	runtimecorrelation "swarm/internal/runtime/correlation"
+	llmselection "swarm/internal/runtime/llm/selection"
 	"swarm/internal/runtime/sessions"
 	workspace "swarm/internal/runtime/workspace"
 )
@@ -555,9 +556,10 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 	// Spend ledger: CLI runtime does not expose exact usage; estimate from payload sizes.
 	if r.budget != nil {
 		usage := estimateCLIUsageTokens(message, resp, actor)
-		if err := r.budget.RecordEntityLLMUsage(ctx, entityID, s.AgentID, "cli_test", usage, false, map[string]any{
-			"session_id": s.ID,
-		}); err != nil {
+		profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendClaudeCLI)
+		meta := usageMetadataForContext(ctx, profile, usage.Model)
+		meta["session_id"] = s.ID
+		if err := r.budget.RecordEntityLLMUsage(ctx, entityID, s.AgentID, profile.ID, usage, false, meta); err != nil {
 			logPublisherRuntime(ctx, r.events, "warn", "record_cli_llm_usage_failed", "Recording CLI LLM usage failed", s.AgentID, s.ID, entityID, nil, err)
 		}
 	}

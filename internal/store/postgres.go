@@ -237,6 +237,32 @@ func (s *PostgresStore) ensureSchemaCompatibilityColumns(ctx context.Context) er
 			return fmt.Errorf("ensure spend_ledger.usage_accounting column: %w", err)
 		}
 	}
+	if catalog.hasTable("spend_ledger") {
+		for _, stmt := range []struct {
+			column string
+			sql    string
+		}{
+			{"model_alias", `ALTER TABLE spend_ledger ADD COLUMN IF NOT EXISTS model_alias TEXT NOT NULL DEFAULT 'unknown'`},
+			{"backend_profile", `ALTER TABLE spend_ledger ADD COLUMN IF NOT EXISTS backend_profile TEXT NOT NULL DEFAULT 'unknown'`},
+			{"provider", `ALTER TABLE spend_ledger ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT 'unknown'`},
+			{"transport", `ALTER TABLE spend_ledger ADD COLUMN IF NOT EXISTS transport TEXT NOT NULL DEFAULT 'unknown'`},
+			{"resolved_model", `ALTER TABLE spend_ledger ADD COLUMN IF NOT EXISTS resolved_model TEXT NOT NULL DEFAULT 'unknown'`},
+		} {
+			if !catalog.hasColumns("spend_ledger", stmt.column) {
+				if _, err := s.DB.ExecContext(ctx, stmt.sql); err != nil {
+					return fmt.Errorf("ensure spend_ledger.%s column: %w", stmt.column, err)
+				}
+			}
+		}
+		if _, err := s.DB.ExecContext(ctx, `
+			UPDATE spend_ledger
+			SET resolved_model = model
+			WHERE BTRIM(COALESCE(resolved_model, '')) = ''
+			   OR resolved_model = 'unknown';
+		`); err != nil {
+			return fmt.Errorf("backfill spend_ledger.resolved_model: %w", err)
+		}
+	}
 	if catalog.hasTable("dead_letters") {
 		for _, stmt := range []struct {
 			column string

@@ -8,6 +8,7 @@ import (
 	runtimeauthority "swarm/internal/runtime/authority"
 	runtimebootverify "swarm/internal/runtime/bootverify"
 	runtimecredentials "swarm/internal/runtime/credentials"
+	llmselection "swarm/internal/runtime/llm/selection"
 	"swarm/internal/runtime/semanticview"
 	runtimetools "swarm/internal/runtime/tools"
 )
@@ -19,6 +20,9 @@ type WorkflowContractValidationOptions struct {
 	FatalToolImplementationWarning bool
 	FatalBootWarnings              bool
 	ExcludedFatalBootWarningChecks []string
+	ValidateLLMModelResolution     bool
+	LLMProfile                     llmselection.Profile
+	ModelAliases                   llmselection.ModelAliases
 }
 
 type WorkflowContractValidationResult struct {
@@ -49,8 +53,11 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 	}
 
 	result.BootReport = runtimebootverify.Run(ctx, source, runtimebootverify.Options{
-		Credentials:       opts.Credentials,
-		CheckMCPReachable: opts.CheckMCPReachable,
+		Credentials:             opts.Credentials,
+		CheckMCPReachable:       opts.CheckMCPReachable,
+		ValidateModelResolution: opts.ValidateLLMModelResolution,
+		LLMProfile:              opts.LLMProfile,
+		ModelAliases:            opts.ModelAliases,
 	})
 	if result.BootReport.HasErrors() {
 		return result, fmt.Errorf("boot verification failed:\n%s", formatWorkflowValidationFindings(result.BootReport.Errors()))

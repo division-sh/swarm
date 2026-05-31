@@ -41,11 +41,18 @@ func TestBudgetTracker_RecordLLMUsagePersistsUsageAccounting(t *testing.T) {
 	tracker := &BudgetTracker{store: store}
 	ctx := context.Background()
 
-	if err := tracker.RecordLLMUsage(ctx, "", "agent-1", "api", llm.UsageTokens{
+	if err := tracker.RecordLLMUsage(ctx, "", "agent-1", "anthropic", llm.UsageTokens{
 		Model:        "claude-3-5-sonnet",
 		InputTokens:  11,
 		OutputTokens: 7,
-	}, true, map[string]any{"flow_instance": "flow/1"}); err != nil {
+	}, true, map[string]any{
+		"flow_instance":   "flow/1",
+		"model_alias":     "regular",
+		"backend_profile": "anthropic",
+		"provider":        "anthropic",
+		"transport":       "api",
+		"resolved_model":  "claude-3-5-sonnet",
+	}); err != nil {
 		t.Fatalf("RecordLLMUsage exact: %v", err)
 	}
 	if len(store.records) != 1 {
@@ -55,17 +62,29 @@ func TestBudgetTracker_RecordLLMUsagePersistsUsageAccounting(t *testing.T) {
 		FlowInstance:    "flow/1",
 		AgentID:         "agent-1",
 		Model:           "claude-3-5-sonnet",
+		ModelAlias:      "regular",
+		BackendProfile:  "anthropic",
+		Provider:        "anthropic",
+		Transport:       "api",
+		ResolvedModel:   "claude-3-5-sonnet",
 		InputTokens:     11,
 		OutputTokens:    7,
-		InvocationType:  "api",
+		InvocationType:  "anthropic",
 		UsageAccounting: "exact",
 	})
 
-	if err := tracker.RecordLLMUsage(ctx, "", "agent-1", "cli_test", llm.UsageTokens{
-		Model:        "claude-cli-sonnet",
+	if err := tracker.RecordLLMUsage(ctx, "", "agent-1", "claude_cli", llm.UsageTokens{
+		Model:        "sonnet",
 		InputTokens:  13,
 		OutputTokens: 5,
-	}, false, map[string]any{"flow_instance": "flow/1"}); err != nil {
+	}, false, map[string]any{
+		"flow_instance":   "flow/1",
+		"model_alias":     "regular",
+		"backend_profile": "claude_cli",
+		"provider":        "claude",
+		"transport":       "cli",
+		"resolved_model":  "sonnet",
+	}); err != nil {
 		t.Fatalf("RecordLLMUsage estimated: %v", err)
 	}
 	if len(store.records) != 2 {
@@ -74,17 +93,22 @@ func TestBudgetTracker_RecordLLMUsagePersistsUsageAccounting(t *testing.T) {
 	assertBudgetSpendRecord(t, store.records[1], budgetspend.SpendRecord{
 		FlowInstance:    "flow/1",
 		AgentID:         "agent-1",
-		Model:           "claude-cli-sonnet",
+		Model:           "sonnet",
+		ModelAlias:      "regular",
+		BackendProfile:  "claude_cli",
+		Provider:        "claude",
+		Transport:       "cli",
+		ResolvedModel:   "sonnet",
 		InputTokens:     13,
 		OutputTokens:    5,
-		InvocationType:  "cli_test",
+		InvocationType:  "claude_cli",
 		UsageAccounting: "estimated",
 	})
 }
 
 func assertBudgetSpendRecord(t *testing.T, got budgetspend.SpendRecord, want budgetspend.SpendRecord) {
 	t.Helper()
-	if got.FlowInstance != want.FlowInstance || got.AgentID != want.AgentID || got.Model != want.Model || got.InputTokens != want.InputTokens || got.OutputTokens != want.OutputTokens || got.InvocationType != want.InvocationType || got.UsageAccounting != want.UsageAccounting {
+	if got.FlowInstance != want.FlowInstance || got.AgentID != want.AgentID || got.Model != want.Model || got.ModelAlias != want.ModelAlias || got.BackendProfile != want.BackendProfile || got.Provider != want.Provider || got.Transport != want.Transport || got.ResolvedModel != want.ResolvedModel || got.InputTokens != want.InputTokens || got.OutputTokens != want.OutputTokens || got.InvocationType != want.InvocationType || got.UsageAccounting != want.UsageAccounting {
 		t.Fatalf("spend record = %#v, want matching %#v", got, want)
 	}
 	if got.RecordedAt.IsZero() {

@@ -776,13 +776,20 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 		}
 		return 1
 	}
+	validationOpts, err := verifyWorkflowContractValidationOptions(repo)
+	if err != nil {
+		if errOut != nil {
+			fmt.Fprintf(errOut, "verify failed: configure validation: %v\n", err)
+		}
+		return 1
+	}
 	if _, bundle, err := newSwarmWorkflowModule(repo, contractsRoot, resolvedPlatformSpecPath); err != nil {
 		if errOut != nil {
 			fmt.Fprintf(errOut, "verify failed: load Swarm contracts: %v\n", err)
 		}
 		return 1
 	} else {
-		result, err := verifyBundleResult(ctx, semanticview.Wrap(bundle))
+		result, err := verifyBundleResultWithOptions(ctx, semanticview.Wrap(bundle), validationOpts)
 		if err != nil {
 			if errOut != nil {
 				fmt.Fprintf(errOut, "verify failed: %v\n", err)
@@ -1622,14 +1629,38 @@ func verifyBundle(ctx context.Context, source semanticview.Source) error {
 }
 
 func verifyBundleResult(ctx context.Context, source semanticview.Source) (runtime.WorkflowContractValidationResult, error) {
-	if source == nil {
-		return runtime.WorkflowContractValidationResult{}, errors.New("semantic source is required")
-	}
 	credentialStore, err := buildCredentialStore()
 	if err != nil {
 		return runtime.WorkflowContractValidationResult{}, fmt.Errorf("configure credentials: %w", err)
 	}
-	return runtime.ValidateWorkflowContractSurface(ctx, source, runtime.DefaultWorkflowContractValidationOptions(credentialStore))
+	return verifyBundleResultWithOptions(ctx, source, runtime.DefaultWorkflowContractValidationOptions(credentialStore))
+}
+
+func verifyBundleResultWithOptions(ctx context.Context, source semanticview.Source, opts runtime.WorkflowContractValidationOptions) (runtime.WorkflowContractValidationResult, error) {
+	if source == nil {
+		return runtime.WorkflowContractValidationResult{}, errors.New("semantic source is required")
+	}
+	return runtime.ValidateWorkflowContractSurface(ctx, source, opts)
+}
+
+func verifyWorkflowContractValidationOptions(repo string) (runtime.WorkflowContractValidationOptions, error) {
+	credentialStore, err := buildCredentialStore()
+	if err != nil {
+		return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("configure credentials: %w", err)
+	}
+	opts := runtime.DefaultWorkflowContractValidationOptions(credentialStore)
+	configResult, err := loadRuntimeConfigWithOptions(runtimeConfigLoadOptions{RepoRoot: repo})
+	if err != nil {
+		return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("load runtime config: %w", err)
+	}
+	profile, err := configResult.Config.LLMBackendProfile()
+	if err != nil {
+		return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("resolve llm backend profile: %w", err)
+	}
+	opts.ValidateLLMModelResolution = true
+	opts.LLMProfile = profile
+	opts.ModelAliases = configResult.Config.LLM.Models
+	return opts, nil
 }
 
 func writeVerifyFindings(out io.Writer, label string, findings []runtimebootverify.Finding) {
