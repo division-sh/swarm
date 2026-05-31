@@ -483,6 +483,70 @@ func TestHandleEmitTool_StaticChildPinOutputTargetsDeliveryEntity(t *testing.T) 
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"analysis.done": {},
 		},
+		Path: "root/analyzer-flow",
+	}
+	bundle.FlowTree = flowmodel.Tree[runtimecontracts.FlowContractView]{
+		Root: &runtimecontracts.FlowContractView{
+			Children: []runtimecontracts.FlowContractView{analyzerFlow},
+		},
+		ByID: map[string]*runtimecontracts.FlowContractView{
+			"analyzer-flow": &analyzerFlow,
+		},
+	}
+	source := semanticview.Wrap(bundle)
+	emitRegistry := NewEmitRegistry(source, nil)
+
+	bus := &publishBusCapture{}
+	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
+	actor := models.AgentConfig{
+		ID:         "analyzer",
+		Role:       "analyzer",
+		Mode:       "analyzer-flow",
+		FlowPath:   "root/analyzer-flow",
+		EmitEvents: []string{"analyzer-flow/analysis.done"},
+	}
+	inbound := (events.Event{
+		Type: events.EventType("analyzer-flow/analysis.requested"),
+	}).WithEntityID("11111111-1111-1111-1111-111111111111").WithSourceRoute(events.RouteIdentity{
+		FlowID:       "wrong-root",
+		FlowInstance: "wrong-root",
+		EntityID:     "33333333-3333-3333-3333-333333333333",
+	})
+	ctx := runtimebus.WithInboundEvent(context.Background(), inbound)
+
+	_, err := exec.handleEmitTool(ctx, actor, "emit_analysis_done", map[string]any{})
+	if err != nil {
+		t.Fatalf("handleEmitTool: %v", err)
+	}
+	want := events.RouteIdentity{EntityID: "11111111-1111-1111-1111-111111111111"}
+	if got := bus.event.TargetRoute(); got != want {
+		t.Fatalf("target route = %#v, want delivery entity route %#v", got, want)
+	}
+}
+
+func TestHandleEmitTool_RootStaticPinOutputStillRequiresTarget(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"analysis.done": {
+				Payload: runtimecontracts.EventPayloadSpec{Type: "object"},
+			},
+		},
+	}
+	analyzerFlow := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{
+			ID:   "analyzer-flow",
+			Flow: "analyzer-flow",
+		},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{
+				Outputs: runtimecontracts.FlowOutputPins{
+					Events: []string{"analysis.done"},
+				},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"analysis.done": {},
+		},
 		Path: "analyzer-flow",
 	}
 	bundle.FlowTree = flowmodel.Tree[runtimecontracts.FlowContractView]{
@@ -507,20 +571,18 @@ func TestHandleEmitTool_StaticChildPinOutputTargetsDeliveryEntity(t *testing.T) 
 	}
 	inbound := (events.Event{
 		Type: events.EventType("analyzer-flow/analysis.requested"),
-	}).WithEntityID("11111111-1111-1111-1111-111111111111").WithSourceRoute(events.RouteIdentity{
-		FlowID:       "wrong-root",
-		FlowInstance: "wrong-root",
-		EntityID:     "33333333-3333-3333-3333-333333333333",
-	})
+	}).WithEntityID("11111111-1111-1111-1111-111111111111")
 	ctx := runtimebus.WithInboundEvent(context.Background(), inbound)
 
 	_, err := exec.handleEmitTool(ctx, actor, "emit_analysis_done", map[string]any{})
-	if err != nil {
-		t.Fatalf("handleEmitTool: %v", err)
+	if err == nil {
+		t.Fatal("handleEmitTool error = nil, want target_required_missing")
 	}
-	want := events.RouteIdentity{EntityID: "11111111-1111-1111-1111-111111111111"}
-	if got := bus.event.TargetRoute(); got != want {
-		t.Fatalf("target route = %#v, want delivery entity route %#v", got, want)
+	if !strings.Contains(err.Error(), "target_required_missing") {
+		t.Fatalf("handleEmitTool error = %v, want target_required_missing", err)
+	}
+	if bus.count != 0 {
+		t.Fatalf("publish count = %d, want 0", bus.count)
 	}
 }
 

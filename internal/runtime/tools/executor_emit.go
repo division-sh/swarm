@@ -235,6 +235,10 @@ func (e *Executor) staticFlowEntityParentRoute(flowID string, inbound events.Eve
 	if !ok || strings.EqualFold(strings.TrimSpace(scope.Mode), "template") {
 		return events.RouteIdentity{}, false
 	}
+	path := strings.Trim(strings.TrimSpace(e.workflowSource.FlowPath(flowID)), "/")
+	if !strings.Contains(path, "/") {
+		return events.RouteIdentity{}, false
+	}
 	entityID := strings.TrimSpace(inbound.EntityID())
 	if entityID == "" {
 		return events.RouteIdentity{}, false
