@@ -572,6 +572,76 @@ func TestPipelineEngineActionRunner_RecordEvidenceReturnsMutationError(t *testin
 	}
 }
 
+func TestPipelineEngineActionRunner_CreateFlowInstanceUsesExecutionBaseContextForConfigFrom(t *testing.T) {
+	var captured FlowInstanceActivationRequest
+	pc := &PipelineCoordinator{
+		instanceActivator: func(_ context.Context, req FlowInstanceActivationRequest) error {
+			captured = req
+			return nil
+		},
+	}
+	runner := pipelineEngineActionRunner{coordinator: pc}
+	evt := (events.Event{
+		ID:            "evt-123",
+		Type:          "spawn.requested",
+		ParentEventID: "source-evt-1",
+		Payload:       []byte(`{"instance_id":"inst-42","name":"alpha"}`),
+	}).WithEnvelope(events.EventEnvelope{
+		EntityID: "ent-1",
+		Source: events.RouteIdentity{
+			FlowID:       "parent-flow",
+			FlowInstance: "parent-flow/source-1",
+			EntityID:     "ent-parent",
+		},
+	})
+	base := values.NewContext()
+	base.Event = values.Wrap(evt.ContextMap("ready"))
+	base.Payload = values.Wrap(parsePayloadMap(evt.Payload))
+	base.Entity = values.Wrap(map[string]any{"entity_id": "ent-1"})
+	action := runtimecontracts.ActionSpec{
+		ID:             "create_flow_instance",
+		Template:       "review",
+		InstanceIDFrom: "payload.instance_id",
+		ConfigFrom: &runtimecontracts.ConfigFromSpec{
+			Bindings: map[string]string{
+				"source_event_id": "event.id",
+				"event_type":      "event.type",
+				"source_flow":     "event.source.flow_id",
+				"correlation_id":  "event.source_event_id",
+				"name":            "payload.name",
+				"parent_entity":   "entity.entity_id",
+			},
+		},
+	}
+
+	ok, err := runner.ExecuteAction(context.Background(), action, runtimeregistry.ActionInstruction{Builtin: "create_flow_instance"}, runtimeengine.ExecutionContext{
+		Base: base,
+		Request: runtimeengine.ExecutionRequest{
+			EntityID: identity.NormalizeEntityID("ent-1"),
+			NodeID:   identity.NormalizeNodeID("spawner"),
+			Event:    evt,
+		},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteAction: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected create_flow_instance action to be claimed")
+	}
+	for key, want := range map[string]any{
+		"source_event_id": "evt-123",
+		"event_type":      "spawn.requested",
+		"source_flow":     "parent-flow",
+		"correlation_id":  "source-evt-1",
+		"name":            "alpha",
+		"parent_entity":   "ent-1",
+	} {
+		if got := captured.Config[key]; got != want {
+			t.Fatalf("config[%s] = %#v, want %#v", key, got, want)
+		}
+	}
+}
+
 func TestPipelineEngineActionRunner_MailboxWriteMaterializesIdempotentRow(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()

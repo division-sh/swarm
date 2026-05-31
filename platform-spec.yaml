@@ -1334,8 +1334,9 @@ handler_specification:
           required_sibling_fields:
             template: 'string — flow template ID (must be mode: template)'
             instance_id_from: string — payload field containing the unique instance ID
-            config_from: object — maps instance variable names to payload field paths. Platform reads payload values and passes
-              them as config to the new flow instance.
+            config_from: object — maps instance variable names to supported handler context refs (`payload.*`, `entity.*`,
+              and `event.*`). Platform resolves those refs from the canonical handler context and passes the values as config
+              to the new flow instance.
         record_evidence:
           description: Append event payload to entity accumulator state.
           behavior: Reads the event payload and appends it as a new entry in the entity's evidence accumulator (from state_schema).
@@ -3205,8 +3206,9 @@ engine:
     - id: config_from_payload_alignment
       severity: error
       scope: per-node
-      trigger: A create_flow_instance action's config_from references payload fields not present in the triggering event's
-        schema.
+      trigger: A create_flow_instance action's config_from payload.* refs name payload fields not present in the triggering
+        event's schema. Non-payload handler-context refs, including supported event-envelope refs through event.*, are not
+        payload schema fields and are governed by runtime config_from ref resolution.
       when: boot-only
     - id: phantom_produces
       severity: warning

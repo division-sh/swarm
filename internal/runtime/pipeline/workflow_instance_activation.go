@@ -9,6 +9,7 @@ import (
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 	"swarm/internal/runtime/core/paths"
+	"swarm/internal/runtime/core/values"
 	"swarm/internal/runtime/semanticview"
 )
 
@@ -30,7 +31,17 @@ type FlowInstanceDeactivationRequest struct {
 
 type FlowInstanceDeactivator func(context.Context, FlowInstanceDeactivationRequest) error
 
-func (pc *PipelineCoordinator) createFlowInstance(ctx context.Context, triggerCtx workflowTriggerContext, plan handlerExecutionPlan) error {
+type flowInstanceConfigRefError struct {
+	Key    string
+	Ref    string
+	Reason string
+}
+
+func (e flowInstanceConfigRefError) Error() string {
+	return fmt.Sprintf("create_flow_instance config_from %q ref %q %s", e.Key, e.Ref, e.Reason)
+}
+
+func (pc *PipelineCoordinator) createFlowInstance(ctx context.Context, triggerCtx workflowTriggerContext, plan handlerExecutionPlan, handlerContext values.Context) error {
 	if pc == nil || pc.instanceActivator == nil {
 		return fmt.Errorf("flow instance activator is not configured")
 	}
@@ -71,7 +82,11 @@ func (pc *PipelineCoordinator) createFlowInstance(ctx context.Context, triggerCt
 		Config:         map[string]any{},
 		TriggerEvent:   triggerCtx.Event,
 	}
-	req.Config = resolveFlowInstanceConfig(plan.ConfigFrom, payload, entity)
+	config, err := resolveFlowInstanceConfig(plan.ConfigFrom, handlerContext)
+	if err != nil {
+		return err
+	}
+	req.Config = config
 	if len(req.Config) == 0 {
 		return fmt.Errorf("create_flow_instance config_from resolved empty")
 	}
@@ -91,9 +106,17 @@ func hasRequiredCreateFlowInstanceSiblings(plan handlerExecutionPlan) bool {
 	return len(plan.ConfigFrom.ConfigEntries()) > 0
 }
 
-func resolveFlowInstanceConfig(spec *runtimecontracts.ConfigFromSpec, payload, entity map[string]any) map[string]any {
+func createFlowInstanceHandlerContext(triggerCtx workflowTriggerContext, payload, entity map[string]any) values.Context {
+	handlerContext := values.NewContext()
+	handlerContext.Event = values.Wrap(triggerCtx.Event.ContextMap(string(triggerCtx.State.Stage)))
+	handlerContext.Payload = values.Wrap(payload)
+	handlerContext.Entity = values.Wrap(entity)
+	return handlerContext
+}
+
+func resolveFlowInstanceConfig(spec *runtimecontracts.ConfigFromSpec, handlerContext values.Context) (map[string]any, error) {
 	if spec == nil {
-		return map[string]any{}
+		return map[string]any{}, nil
 	}
 	out := map[string]any{}
 	for _, entry := range spec.ConfigEntries() {
@@ -101,11 +124,48 @@ func resolveFlowInstanceConfig(spec *runtimecontracts.ConfigFromSpec, payload, e
 		if key == "" {
 			continue
 		}
-		if value, ok := resolveFlowInstanceValue(entry.RefPath, entry.Ref, payload, entity); ok {
-			out[key] = value
+		value, err := resolveFlowInstanceConfigValue(entry, handlerContext)
+		if err != nil {
+			return nil, err
+		}
+		out[key] = value
+	}
+	return out, nil
+}
+
+func resolveFlowInstanceConfigValue(entry runtimecontracts.ConfigBinding, handlerContext values.Context) (any, error) {
+	key := strings.TrimSpace(entry.Key)
+	ref := strings.TrimSpace(entry.Ref)
+	if ref == "" {
+		return nil, flowInstanceConfigRefError{Key: key, Ref: entry.Ref, Reason: "is empty"}
+	}
+	if entry.RefPath.HasExplicitRoot() {
+		switch entry.RefPath.Root {
+		case paths.RootPayload, paths.RootEntity, paths.RootEvent:
+			value, ok := handlerContext.Lookup(entry.RefPath)
+			if !ok {
+				return nil, flowInstanceConfigRefError{Key: key, Ref: ref, Reason: "resolved empty"}
+			}
+			return value, nil
+		default:
+			root := entry.RefPath.Root.String()
+			if root == "" {
+				root = strings.Split(ref, ".")[0]
+			}
+			return nil, flowInstanceConfigRefError{Key: key, Ref: ref, Reason: fmt.Sprintf("uses unsupported root %q", root)}
 		}
 	}
-	return out
+	segments := strings.Split(ref, ".")
+	if len(segments) == 1 {
+		if value, ok := handlerContext.Payload.Lookup(paths.Path{Root: paths.RootPayload, Segments: segments, Raw: ref}); ok {
+			return value, nil
+		}
+		if value, ok := handlerContext.Entity.Lookup(paths.Path{Root: paths.RootEntity, Segments: segments, Raw: ref}); ok {
+			return value, nil
+		}
+		return ref, nil
+	}
+	return nil, flowInstanceConfigRefError{Key: key, Ref: ref, Reason: "requires supported root payload, entity, or event"}
 }
 
 func resolveFlowInstanceID(pathSpec paths.Path, expr string, payload, entity map[string]any) string {
