@@ -11,6 +11,7 @@ import (
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	models "swarm/internal/runtime/core/actors"
+	llmselection "swarm/internal/runtime/llm/selection"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/runtime/sessions"
@@ -133,6 +134,8 @@ type AgentManagerOptions struct {
 	WorkflowInstances              flowInstancePersistence
 	RuntimeMode                    string
 	LLMBackend                     string
+	ModelAliases                   llmselection.ModelAliases
+	RequireModelResolution         bool
 	Budget                         BudgetGuard
 	ResetRuntimeOwnedState         func()
 	RuntimeShutdownAdmissionClosed func() bool

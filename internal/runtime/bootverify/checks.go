@@ -13,6 +13,7 @@ import (
 	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/runtime/core/eventidentity"
 	"swarm/internal/runtime/flowdata"
+	llmselection "swarm/internal/runtime/llm/selection"
 	runtimemcp "swarm/internal/runtime/mcp"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	runtimerequiredagents "swarm/internal/runtime/requiredagents"
@@ -642,11 +643,11 @@ func (c *checkerContext) invalidFieldDetection() []Finding {
 				})
 				continue
 			}
-			if strings.TrimSpace(agent.ModelTier) == "" {
+			if _, err := llmselection.RequireModelAlias(agent.Model); err != nil {
 				c.invalidFindings = append(c.invalidFindings, Finding{
 					CheckID:  "invalid_field_detection",
 					Severity: "error",
-					Message:  fmt.Sprintf("agent %s missing required field model_tier", agentLabel),
+					Message:  fmt.Sprintf("agent %s invalid model alias: %v", agentLabel, err),
 					Location: agentLabel,
 				})
 			}
@@ -756,11 +757,11 @@ func (c *checkerContext) invalidFieldDetection() []Finding {
 				})
 				continue
 			}
-			if strings.TrimSpace(agent.ModelTier) == "" {
+			if _, err := llmselection.RequireModelAlias(agent.Model); err != nil {
 				c.invalidFindings = append(c.invalidFindings, Finding{
 					CheckID:  "invalid_field_detection",
 					Severity: "error",
-					Message:  fmt.Sprintf("agent %s missing required field model_tier", agentLabel),
+					Message:  fmt.Sprintf("agent %s invalid model alias: %v", agentLabel, err),
 					Location: agentLabel,
 				})
 			}

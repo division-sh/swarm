@@ -1,7 +1,7 @@
 prompt-ref-stub-agent:
   role: prompt_ref_stub_agent
   prompt_ref: shared-stub-prompt
-  model_tier: tier2
+  model: regular
   conversation_mode: stateless
   subscriptions:
     - task.requested

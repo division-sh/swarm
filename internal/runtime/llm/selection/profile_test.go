@@ -95,6 +95,11 @@ func TestRejectRetiredSelectors(t *testing.T) {
 	}); err == nil || !strings.Contains(err.Error(), OpenAICompatibleBaseURLConfigField) {
 		t.Fatalf("RejectRetiredOpenAICompatibleBaseURLEnv error = %v, want config guidance", err)
 	}
+	if err := RejectRetiredModelEnv(func(key string) (string, bool) {
+		return "claude-test", key == ClaudeDefaultModelEnv
+	}); err == nil || !strings.Contains(err.Error(), "llm.models") {
+		t.Fatalf("RejectRetiredModelEnv error = %v, want llm.models guidance", err)
+	}
 }
 
 func TestCredentialAuthority(t *testing.T) {
@@ -119,25 +124,24 @@ func TestCredentialAuthority(t *testing.T) {
 	}
 }
 
-func TestResolveModelNameUsesModelTier(t *testing.T) {
+func TestResolveModelNameUsesModel(t *testing.T) {
 	profile, err := ResolveActiveBackend(BackendAnthropic)
 	if err != nil {
 		t.Fatalf("ResolveActiveBackend: %v", err)
 	}
 	req := ModelResolution{
-		ModelTier: "haiku",
-		Models:    ModelMap{Default: "claude-sonnet", LowCost: "claude-haiku"},
+		Model: ModelAliasCheap,
+		Models: ModelAliases{
+			ModelAliasCheap:   {BackendAnthropic: "claude-haiku"},
+			ModelAliasRegular: {BackendAnthropic: "claude-sonnet"},
+		},
 	}
 	if got, err := ResolveModelName(profile, req); err != nil || got != "claude-haiku" {
 		t.Fatalf("ResolveModelName = %q, %v; want claude-haiku", got, err)
 	}
-	req.ModelTier = "sonnet"
+	req.Model = ModelAliasRegular
 	if got, err := ResolveModelName(profile, req); err != nil || got != "claude-sonnet" {
 		t.Fatalf("ResolveModelName = %q, %v; want claude-sonnet", got, err)
-	}
-	req.ForceLowCost = true
-	if got, err := ResolveModelName(profile, req); err != nil || got != "claude-haiku" {
-		t.Fatalf("ResolveModelName forced low cost = %q, %v; want claude-haiku", got, err)
 	}
 }
 
@@ -159,30 +163,62 @@ func TestResolveOpenAICompatibleProfileAuthority(t *testing.T) {
 		t.Fatalf("ResolveBaseURL = %q, %v; want normalized base url", got, err)
 	}
 	req := ModelResolution{
-		ModelTier: "low_cost",
-		Models:    ModelMap{Default: "gpt-main", LowCost: "gpt-mini"},
+		Model: ModelAliasCheap,
+		Models: ModelAliases{
+			ModelAliasCheap:   {BackendOpenAICompatible: "gpt-mini"},
+			ModelAliasRegular: {BackendOpenAICompatible: "gpt-main"},
+		},
 	}
 	if got, err := ResolveModelName(profile, req); err != nil || got != "gpt-mini" {
 		t.Fatalf("ResolveModelName low cost = %q, %v; want gpt-mini", got, err)
 	}
-	req.ModelTier = "general"
+	req.Model = ModelAliasRegular
 	if got, err := ResolveModelName(profile, req); err != nil || got != "gpt-main" {
 		t.Fatalf("ResolveModelName default = %q, %v; want gpt-main", got, err)
 	}
-	if _, err := ResolveModelName(profile, ModelResolution{}); err == nil || !strings.Contains(err.Error(), OpenAICompatibleDefaultModelConfig) {
-		t.Fatalf("ResolveModelName missing error = %v, want %s", err, OpenAICompatibleDefaultModelConfig)
+	if _, err := ResolveModelName(profile, ModelResolution{}); err == nil || !strings.Contains(err.Error(), "model is required") {
+		t.Fatalf("ResolveModelName missing error = %v, want model required", err)
 	}
 }
 
-func TestResolveCLIModelNameUsesModelTier(t *testing.T) {
+func TestResolveCLIModelNameUsesModel(t *testing.T) {
 	profile, err := ResolveActiveBackend(BackendClaudeCLI)
 	if err != nil {
 		t.Fatalf("ResolveActiveBackend: %v", err)
 	}
-	if got, err := ResolveModelName(profile, ModelResolution{ModelTier: "sonnet"}); err != nil || got != "sonnet" {
+	if got, err := ResolveModelName(profile, ModelResolution{Model: ModelAliasRegular}); err != nil || got != "sonnet" {
 		t.Fatalf("ResolveModelName = %q, %v; want sonnet", got, err)
 	}
-	if got, err := ResolveModelName(profile, ModelResolution{}); err != nil || got != "generic" {
-		t.Fatalf("ResolveModelName empty = %q, %v; want generic", got, err)
+	if _, err := ResolveModelName(profile, ModelResolution{}); err == nil || !strings.Contains(err.Error(), "model is required") {
+		t.Fatalf("ResolveModelName empty error = %v, want required model", err)
+	}
+}
+
+func TestMigrateLegacyModelTier(t *testing.T) {
+	tests := []struct {
+		raw     string
+		want    string
+		changed bool
+		wantErr bool
+	}{
+		{raw: "", changed: false},
+		{raw: "haiku", want: ModelAliasCheap, changed: true},
+		{raw: "low_cost", want: ModelAliasCheap, changed: true},
+		{raw: "sonnet", want: ModelAliasRegular, changed: true},
+		{raw: "general", want: ModelAliasRegular, changed: true},
+		{raw: "generic", want: ModelAliasRegular, changed: true},
+		{raw: "opus", changed: true, wantErr: true},
+	}
+	for _, tt := range tests {
+		got, changed, err := MigrateLegacyModelTier(tt.raw)
+		if tt.wantErr {
+			if err == nil {
+				t.Fatalf("MigrateLegacyModelTier(%q) err = nil, want error", tt.raw)
+			}
+			continue
+		}
+		if err != nil || got != tt.want || changed != tt.changed {
+			t.Fatalf("MigrateLegacyModelTier(%q) = %q, %v, %v; want %q, %v, nil", tt.raw, got, changed, err, tt.want, tt.changed)
+		}
 	}
 }

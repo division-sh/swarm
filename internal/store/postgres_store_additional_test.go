@@ -668,7 +668,7 @@ func TestPostgresStore_EnsureSchemaTables_PhasesAgentRuntimeDescriptorCompatibil
 			agent_id TEXT PRIMARY KEY,
 			flow_instance TEXT,
 			role TEXT NOT NULL,
-			model_tier TEXT NOT NULL,
+			model TEXT NOT NULL,
 			llm_backend TEXT NOT NULL DEFAULT 'api',
 			conversation_mode TEXT NOT NULL,
 			parent_agent_id TEXT,
@@ -693,7 +693,7 @@ func TestPostgresStore_EnsureSchemaTables_PhasesAgentRuntimeDescriptorCompatibil
 		DDL         string `yaml:"ddl"`
 	}{
 		"agents": {
-			DDL: "CREATE TABLE IF NOT EXISTS agents (\n    agent_id TEXT PRIMARY KEY,\n    flow_instance TEXT,\n    role TEXT NOT NULL,\n    model_tier TEXT NOT NULL,\n    llm_backend TEXT NOT NULL DEFAULT 'api',\n    conversation_mode TEXT NOT NULL,\n    parent_agent_id TEXT,\n    entity_id UUID,\n    config JSONB NOT NULL DEFAULT '{}',\n    subscriptions JSONB NOT NULL DEFAULT '[]',\n    emit_events JSONB NOT NULL DEFAULT '[]',\n    tools JSONB NOT NULL DEFAULT '[]',\n    permissions JSONB NOT NULL DEFAULT '[]',\n    runtime_descriptor JSONB NOT NULL DEFAULT '{}',\n    status TEXT NOT NULL DEFAULT 'active',\n    turn_count INTEGER NOT NULL DEFAULT 0,\n    last_active_at TIMESTAMPTZ,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);\nCREATE INDEX IF NOT EXISTS idx_agents_runtime_descriptor ON agents USING GIN (runtime_descriptor);",
+			DDL: "CREATE TABLE IF NOT EXISTS agents (\n    agent_id TEXT PRIMARY KEY,\n    flow_instance TEXT,\n    role TEXT NOT NULL,\n    model TEXT NOT NULL,\n    llm_backend TEXT NOT NULL DEFAULT 'api',\n    conversation_mode TEXT NOT NULL,\n    parent_agent_id TEXT,\n    entity_id UUID,\n    config JSONB NOT NULL DEFAULT '{}',\n    subscriptions JSONB NOT NULL DEFAULT '[]',\n    emit_events JSONB NOT NULL DEFAULT '[]',\n    tools JSONB NOT NULL DEFAULT '[]',\n    permissions JSONB NOT NULL DEFAULT '[]',\n    runtime_descriptor JSONB NOT NULL DEFAULT '{}',\n    status TEXT NOT NULL DEFAULT 'active',\n    turn_count INTEGER NOT NULL DEFAULT 0,\n    last_active_at TIMESTAMPTZ,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);\nCREATE INDEX IF NOT EXISTS idx_agents_runtime_descriptor ON agents USING GIN (runtime_descriptor);",
 		},
 	}
 	plans, err := GeneratePlatformTableDDLs(spec)
@@ -740,7 +740,7 @@ func TestPostgresStore_EnsureSchemaCompatibilityColumnsMigratesAgentLLMBackendPr
 			agent_id TEXT PRIMARY KEY,
 			flow_instance TEXT,
 			role TEXT NOT NULL,
-			model_tier TEXT NOT NULL,
+			model TEXT NOT NULL,
 			llm_backend TEXT NOT NULL DEFAULT 'api' CHECK (llm_backend IN ('api', 'cli_test', 'openai_compatible', 'mock', 'local')),
 			conversation_mode TEXT NOT NULL,
 			parent_agent_id TEXT,
@@ -759,7 +759,7 @@ func TestPostgresStore_EnsureSchemaCompatibilityColumnsMigratesAgentLLMBackendPr
 		t.Fatalf("create legacy agents: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agents (agent_id, role, model_tier, llm_backend, conversation_mode)
+		INSERT INTO agents (agent_id, role, model, llm_backend, conversation_mode)
 		VALUES
 			('agent-api', 'worker', 'sonnet', 'api', 'task'),
 			('agent-cli', 'worker', 'sonnet', 'cli_test', 'task'),
@@ -794,10 +794,10 @@ func TestPostgresStore_EnsureSchemaCompatibilityColumnsMigratesAgentLLMBackendPr
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("migrated llm_backend rows = %#v, want %#v", got, want)
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO agents (agent_id, role, model_tier, llm_backend, conversation_mode) VALUES ('agent-legacy', 'worker', 'sonnet', 'api', 'task')`); err == nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO agents (agent_id, role, model, llm_backend, conversation_mode) VALUES ('agent-legacy', 'worker', 'sonnet', 'api', 'task')`); err == nil {
 		t.Fatal("insert legacy llm_backend api succeeded after migration")
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO agents (agent_id, role, model_tier, conversation_mode) VALUES ('agent-default', 'worker', 'sonnet', 'task')`); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO agents (agent_id, role, model, conversation_mode) VALUES ('agent-default', 'worker', 'sonnet', 'task')`); err != nil {
 		t.Fatalf("insert default llm_backend after migration: %v", err)
 	}
 	var defaultBackend string
@@ -806,6 +806,98 @@ func TestPostgresStore_EnsureSchemaCompatibilityColumnsMigratesAgentLLMBackendPr
 	}
 	if defaultBackend != "anthropic" {
 		t.Fatalf("default llm_backend = %q, want anthropic", defaultBackend)
+	}
+}
+
+func TestPostgresStore_EnsureAgentModelAliasColumnMigratesLegacyModelTier(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	if _, err := db.ExecContext(ctx, `DROP TABLE IF EXISTS agents CASCADE`); err != nil {
+		t.Fatalf("drop agents: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE agents (
+			agent_id TEXT PRIMARY KEY,
+			role TEXT NOT NULL,
+			model_tier TEXT,
+			conversation_mode TEXT NOT NULL
+		)
+	`); err != nil {
+		t.Fatalf("create legacy agents: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agents (agent_id, role, model_tier, conversation_mode)
+		VALUES
+			('agent-haiku', 'worker', 'haiku', 'task'),
+			('agent-low-cost', 'worker', 'low_cost', 'task'),
+			('agent-sonnet', 'worker', 'sonnet', 'task'),
+			('agent-general', 'worker', 'general', 'task'),
+			('agent-generic', 'worker', 'generic', 'task')
+	`); err != nil {
+		t.Fatalf("seed legacy agents: %v", err)
+	}
+
+	if err := pg.ensureAgentModelAliasColumn(ctx); err != nil {
+		t.Fatalf("ensureAgentModelAliasColumn: %v", err)
+	}
+	rows, err := db.QueryContext(ctx, `SELECT agent_id, model FROM agents ORDER BY agent_id`)
+	if err != nil {
+		t.Fatalf("query migrated agent models: %v", err)
+	}
+	defer rows.Close()
+	got := map[string]string{}
+	for rows.Next() {
+		var id, model string
+		if err := rows.Scan(&id, &model); err != nil {
+			t.Fatalf("scan migrated agent model: %v", err)
+		}
+		got[id] = model
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read migrated agent models: %v", err)
+	}
+	want := map[string]string{
+		"agent-haiku":    "cheap",
+		"agent-low-cost": "cheap",
+		"agent-sonnet":   "regular",
+		"agent-general":  "regular",
+		"agent-generic":  "regular",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("migrated models = %#v, want %#v", got, want)
+	}
+}
+
+func TestPostgresStore_EnsureAgentModelAliasColumnRejectsUnmappableLegacyModelTier(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	if _, err := db.ExecContext(ctx, `DROP TABLE IF EXISTS agents CASCADE`); err != nil {
+		t.Fatalf("drop agents: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE agents (
+			agent_id TEXT PRIMARY KEY,
+			role TEXT NOT NULL,
+			model_tier TEXT,
+			conversation_mode TEXT NOT NULL
+		)
+	`); err != nil {
+		t.Fatalf("create legacy agents: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agents (agent_id, role, model_tier, conversation_mode)
+		VALUES ('agent-unknown', 'worker', 'opus', 'task')
+	`); err != nil {
+		t.Fatalf("seed legacy agent: %v", err)
+	}
+
+	err := pg.ensureAgentModelAliasColumn(ctx)
+	if err == nil || !strings.Contains(err.Error(), "cannot map 1 legacy model_tier rows") {
+		t.Fatalf("ensureAgentModelAliasColumn error = %v, want unmappable legacy model_tier failure", err)
 	}
 }
 
@@ -1264,6 +1356,7 @@ func seedSpecAgent(t *testing.T, ctx context.Context, pg *PostgresStore, agentID
 		Role:          agentID,
 		Mode:          "global",
 		Type:          "stub",
+		Model:         "regular",
 		EntityID:      strings.TrimSpace(entityID),
 		Subscriptions: subscriptions,
 		Config:        []byte(`{"system_prompt":"x"}`),
@@ -5420,6 +5513,7 @@ func TestManagerStore_UpsertAgent_MergesSubscriptions(t *testing.T) {
 			Type:          "sonnet",
 			Role:          "a1",
 			Mode:          "global",
+			Model:         "regular",
 			Subscriptions: []string{"inbound.*"},
 			Config:        []byte(`{"system_prompt":"x"}`),
 		},
@@ -5463,7 +5557,7 @@ func TestManagerStore_UpsertAgent_PersistsCanonicalControlPlaneOwnership(t *test
 			Type:             "review-worker",
 			Role:             "reviewer",
 			Mode:             "review",
-			ModelTier:        "sonnet",
+			Model:            "regular",
 			LLMBackend:       "claude_cli",
 			ConversationMode: "session_per_entity",
 			SessionScope:     "entity",
@@ -5504,8 +5598,8 @@ func TestManagerStore_UpsertAgent_PersistsCanonicalControlPlaneOwnership(t *test
 	if got.Type != "review-worker" {
 		t.Fatalf("type = %q, want review-worker", got.Type)
 	}
-	if got.ModelTier != "sonnet" {
-		t.Fatalf("model_tier = %q, want sonnet", got.ModelTier)
+	if got.Model != "regular" {
+		t.Fatalf("model = %q, want regular", got.Model)
 	}
 	if got.LLMBackend != "claude_cli" {
 		t.Fatalf("llm_backend = %q, want claude_cli", got.LLMBackend)
@@ -5578,7 +5672,7 @@ func TestManagerStore_UpsertAgent_PersistsPlatformInternalGlobalSessionAuthority
 			ID:                    "platform-global-agent",
 			Type:                  "platform-service",
 			Role:                  "platform",
-			ModelTier:             "sonnet",
+			Model:                 "regular",
 			LLMBackend:            "anthropic",
 			ConversationMode:      runtimesessions.RuntimeModeSession.String(),
 			SessionScope:          runtimesessions.SessionScopeGlobal.String(),
@@ -5627,7 +5721,7 @@ func TestProjectPersistedAgentConfig_UsesCanonicalLLMBackendProfiles(t *testing.
 	projection, err := projectPersistedAgentConfig(runtimeactors.AgentConfig{
 		ID:               "agent-default-backend",
 		Role:             "reviewer",
-		ModelTier:        "sonnet",
+		Model:            "regular",
 		ConversationMode: "task",
 	}, "")
 	if err != nil {
@@ -5640,7 +5734,7 @@ func TestProjectPersistedAgentConfig_UsesCanonicalLLMBackendProfiles(t *testing.
 	projection, err = projectPersistedAgentConfig(runtimeactors.AgentConfig{
 		ID:               "agent-openai-compatible-backend",
 		Role:             "reviewer",
-		ModelTier:        "sonnet",
+		Model:            "regular",
 		LLMBackend:       "openai_compatible",
 		ConversationMode: "task",
 	}, "")
@@ -5654,7 +5748,7 @@ func TestProjectPersistedAgentConfig_UsesCanonicalLLMBackendProfiles(t *testing.
 	_, err = projectPersistedAgentConfig(runtimeactors.AgentConfig{
 		ID:               "agent-bad-backend",
 		Role:             "reviewer",
-		ModelTier:        "sonnet",
+		Model:            "regular",
 		LLMBackend:       "openai",
 		ConversationMode: "task",
 	}, "")
@@ -5727,6 +5821,7 @@ func TestManagerStore_UpsertAgent_FailsClosedWithoutHotPathSchemaRepair(t *testi
 			ID:               "legacy-agent",
 			Role:             "reviewer",
 			Type:             "review-worker",
+			Model:            "regular",
 			ConversationMode: "task",
 		},
 		Status: "active",
@@ -5762,7 +5857,7 @@ func TestManagerStore_LoadAgentsSpec_FailsClosedWhenOpaqueConfigContainsRuntimeK
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agents (
-			agent_id, flow_instance, role, model_tier, llm_backend, conversation_mode,
+			agent_id, flow_instance, role, model, llm_backend, conversation_mode,
 			parent_agent_id, entity_id, config, subscriptions, emit_events, tools, permissions,
 			runtime_descriptor, status
 		) VALUES (
@@ -5842,7 +5937,7 @@ func TestPostgresStore_EnsureSchemaCompatibilityColumnsAddsMultiBundleRunColumns
 	}
 }
 
-func TestManagerStore_LoadAgents_FailsClosedWhenCanonicalModelTierMissing(t *testing.T) {
+func TestManagerStore_LoadAgents_FailsClosedWhenCanonicalModelMissing(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
@@ -5852,7 +5947,7 @@ func TestManagerStore_LoadAgents_FailsClosedWhenCanonicalModelTierMissing(t *tes
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agents (
-			agent_id, flow_instance, role, model_tier, llm_backend, conversation_mode,
+			agent_id, flow_instance, role, model, llm_backend, conversation_mode,
 			parent_agent_id, entity_id, config, subscriptions, emit_events, tools, permissions,
 			runtime_descriptor, status
 		) VALUES (
@@ -5865,8 +5960,8 @@ func TestManagerStore_LoadAgents_FailsClosedWhenCanonicalModelTierMissing(t *tes
 	}
 
 	_, err := pg.LoadAgents(ctx)
-	if err == nil || !strings.Contains(err.Error(), "missing model_tier") {
-		t.Fatalf("LoadAgents error = %v, want missing model_tier failure", err)
+	if err == nil || !strings.Contains(err.Error(), "missing model") {
+		t.Fatalf("LoadAgents error = %v, want missing model failure", err)
 	}
 }
 
@@ -5945,6 +6040,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 			Role:     "role",
 			Mode:     "global",
 			Type:     "sonnet",
+			Model:    "regular",
 			EntityID: "",
 			Config:   json.RawMessage(`{"system_prompt":"x","subscriptions":["system.*"]}`),
 		},
@@ -5964,6 +6060,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 			Role:     "worker",
 			Mode:     "worker",
 			Type:     "sonnet",
+			Model:    "regular",
 			EntityID: "",
 			Config:   json.RawMessage(`{"system_prompt":"x","subscriptions":["review.ready"]}`),
 		},
@@ -5994,6 +6091,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 			Role:     "operator",
 			Mode:     "operating",
 			Type:     "sonnet",
+			Model:    "regular",
 			EntityID: entityID,
 			Config:   json.RawMessage(`{"system_prompt":"x","subscriptions":["review.*"]}`),
 		},
@@ -6115,7 +6213,7 @@ func TestPostgresStore_LoadAgents_FailsClosedOnLegacyRuntimeMetadataInConfig(t *
 
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agents (
-			agent_id, role, model_tier, llm_backend, conversation_mode,
+			agent_id, role, model, llm_backend, conversation_mode,
 			config, runtime_descriptor, status, created_at
 		) VALUES (
 			'legacy-session-agent', 'worker', 'sonnet', 'anthropic', 'session',
@@ -6154,11 +6252,11 @@ func TestPostgresStore_LoadAgents_FailsClosedOnLegacyRuntimeMetadataInConfig(t *
 		t.Fatalf("expected legacy session_scope to remain untouched in opaque config, got %s", configJSON)
 	}
 	if !strings.Contains(runtimeDescriptorJSON, `"type": "sonnet"`) && !strings.Contains(runtimeDescriptorJSON, `"type":"sonnet"`) {
-		t.Fatalf("expected runtime_descriptor.type backfilled from model_tier, got %s", runtimeDescriptorJSON)
+		t.Fatalf("expected runtime_descriptor.type backfilled from model, got %s", runtimeDescriptorJSON)
 	}
 }
 
-func TestPostgresStore_LoadAgents_BackfillsRuntimeDescriptorTypeFromModelTierOnColumnUpgrade(t *testing.T) {
+func TestPostgresStore_LoadAgents_BackfillsRuntimeDescriptorTypeFromModelOnColumnUpgrade(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
@@ -6171,7 +6269,7 @@ func TestPostgresStore_LoadAgents_BackfillsRuntimeDescriptorTypeFromModelTierOnC
 			agent_id TEXT PRIMARY KEY,
 			flow_instance TEXT,
 			role TEXT NOT NULL,
-			model_tier TEXT NOT NULL,
+			model TEXT NOT NULL,
 			llm_backend TEXT NOT NULL DEFAULT 'api',
 			conversation_mode TEXT NOT NULL,
 			parent_agent_id TEXT,
@@ -6191,7 +6289,7 @@ func TestPostgresStore_LoadAgents_BackfillsRuntimeDescriptorTypeFromModelTierOnC
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agents (
-			agent_id, role, model_tier, llm_backend, conversation_mode,
+			agent_id, role, model, llm_backend, conversation_mode,
 			config, status, created_at
 		) VALUES (
 			'precolumn-agent', 'worker', 'sonnet', 'api', 'task',
@@ -6223,8 +6321,8 @@ func TestPostgresStore_LoadAgents_BackfillsRuntimeDescriptorTypeFromModelTierOnC
 		if agent.Config.Type != "sonnet" {
 			t.Fatalf("Type = %q, want sonnet", agent.Config.Type)
 		}
-		if agent.Config.ModelTier != "sonnet" {
-			t.Fatalf("ModelTier = %q, want sonnet", agent.Config.ModelTier)
+		if agent.Config.Model != "sonnet" {
+			t.Fatalf("Model = %q, want sonnet", agent.Config.Model)
 		}
 	}
 	if !found {
@@ -6256,10 +6354,11 @@ func TestPostgresStore_MarkAgentTerminated_CleansRuntimeState(t *testing.T) {
 
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:   "agent-cleanup-1",
-			Role: "worker",
-			Mode: "worker",
-			Type: "sonnet",
+			ID:    "agent-cleanup-1",
+			Role:  "worker",
+			Mode:  "worker",
+			Type:  "sonnet",
+			Model: "regular",
 			Config: json.RawMessage(`{
 			"system_prompt":"x",
 			"subscriptions":["review.ready"]

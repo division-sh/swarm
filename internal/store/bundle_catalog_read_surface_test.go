@@ -34,7 +34,7 @@ agents:
 				"researcher": {
 					"role": "research",
 					"type": "managed",
-					"model_tier": "haiku",
+					"model": "cheap",
 					"llm_backend": "claude",
 					"conversation_mode": "session",
 					"session_scope": "flow",
@@ -97,7 +97,7 @@ agents:
 	if len(agents.Agents) != 2 {
 		t.Fatalf("agents = %#v, want two definitions", agents.Agents)
 	}
-	if agents.Agents[0].AgentID != "researcher" || agents.Agents[0].FlowInstance != "" || agents.Agents[0].ModelTier != "haiku" {
+	if agents.Agents[0].AgentID != "researcher" || agents.Agents[0].FlowInstance != "" || agents.Agents[0].Model != "cheap" {
 		t.Fatalf("root agent = %#v", agents.Agents[0])
 	}
 	if agents.Agents[1].AgentID != "reviewer" || agents.Agents[1].FlowInstance != "review/primary" {

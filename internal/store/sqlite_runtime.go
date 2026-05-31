@@ -294,7 +294,7 @@ func (s *SQLiteRuntimeStore) UpsertAgent(ctx context.Context, rec runtimemanager
 	}
 	_, err = s.DB.ExecContext(ctx, `
 		INSERT INTO agents (
-			agent_id, flow_instance, role, model_tier, llm_backend, conversation_mode,
+			agent_id, flow_instance, role, model, llm_backend, conversation_mode,
 			parent_agent_id, entity_id, config, subscriptions, emit_events, tools, permissions,
 			runtime_descriptor, status, turn_count, last_active_at, created_at
 		)
@@ -302,7 +302,7 @@ func (s *SQLiteRuntimeStore) UpsertAgent(ctx context.Context, rec runtimemanager
 		ON CONFLICT(agent_id) DO UPDATE SET
 			flow_instance = excluded.flow_instance,
 			role = excluded.role,
-			model_tier = excluded.model_tier,
+			model = excluded.model,
 			llm_backend = excluded.llm_backend,
 			conversation_mode = excluded.conversation_mode,
 			parent_agent_id = excluded.parent_agent_id,
@@ -315,7 +315,7 @@ func (s *SQLiteRuntimeStore) UpsertAgent(ctx context.Context, rec runtimemanager
 			runtime_descriptor = excluded.runtime_descriptor,
 			status = excluded.status,
 			last_active_at = excluded.last_active_at
-	`, projection.AgentID, sqliteNullString(projection.FlowInstance), projection.Role, projection.ModelTier, projection.LLMBackend, projection.ConversationMode,
+	`, projection.AgentID, sqliteNullString(projection.FlowInstance), projection.Role, projection.Model, projection.LLMBackend, projection.ConversationMode,
 		sqliteNullString(projection.ParentAgentID), sqliteNullUUID(projection.EntityID), string(projection.ConfigJSON), string(projection.SubscriptionsJSON),
 		string(projection.EmitEventsJSON), string(projection.ToolsJSON), string(projection.PermissionsJSON), string(projection.RuntimeDescriptor),
 		agentPersistedStatus(rec.Status), time.Now().UTC(), startedAt.UTC())
@@ -327,7 +327,7 @@ func (s *SQLiteRuntimeStore) UpsertAgent(ctx context.Context, rec runtimemanager
 
 func (s *SQLiteRuntimeStore) LoadAgents(ctx context.Context) ([]runtimemanager.PersistedAgent, error) {
 	rows, err := s.DB.QueryContext(ctx, `
-		SELECT agent_id, COALESCE(flow_instance, ''), role, model_tier, llm_backend, conversation_mode,
+		SELECT agent_id, COALESCE(flow_instance, ''), role, model, llm_backend, conversation_mode,
 		       COALESCE(parent_agent_id, ''), COALESCE(entity_id, ''), config, COALESCE(runtime_descriptor, '{}'),
 		       COALESCE(subscriptions, '[]'), COALESCE(emit_events, '[]'), COALESCE(tools, '[]'), COALESCE(permissions, '[]'),
 		       COALESCE(status, 'active'), COALESCE(created_at, CURRENT_TIMESTAMP)
@@ -344,7 +344,7 @@ func (s *SQLiteRuntimeStore) LoadAgents(ctx context.Context) ([]runtimemanager.P
 		var rec runtimemanager.PersistedAgent
 		var row persistedAgentProjection
 		var startedAt any
-		if err := rows.Scan(&row.AgentID, &row.FlowInstance, &row.Role, &row.ModelTier, &row.LLMBackend, &row.ConversationMode,
+		if err := rows.Scan(&row.AgentID, &row.FlowInstance, &row.Role, &row.Model, &row.LLMBackend, &row.ConversationMode,
 			&row.ParentAgentID, &row.EntityID, &row.ConfigJSON, &row.RuntimeDescriptor, &row.SubscriptionsJSON, &row.EmitEventsJSON,
 			&row.ToolsJSON, &row.PermissionsJSON, &rec.Status, &startedAt); err != nil {
 			return nil, fmt.Errorf("scan sqlite agent: %w", err)

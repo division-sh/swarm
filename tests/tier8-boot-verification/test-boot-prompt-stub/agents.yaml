@@ -1,5 +1,5 @@
 stub-agent:
-  model_tier: tier2
+  model: regular
   conversation_mode: stateless
   subscriptions:
     - task.requested

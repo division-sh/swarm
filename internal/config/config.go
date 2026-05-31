@@ -51,12 +51,13 @@ type StoreSQLiteConfig struct {
 }
 
 type LLMConfig struct {
-	Backend          string                 `yaml:"backend"`
-	RuntimeMode      string                 `yaml:"runtime_mode"`
-	Session          LLMSessionConfig       `yaml:"session"`
-	ClaudeAPI        ClaudeAPIConfig        `yaml:"claude_api"`
-	ClaudeCLI        ClaudeCLIConfig        `yaml:"claude_cli"`
-	OpenAICompatible OpenAICompatibleConfig `yaml:"openai_compatible"`
+	Backend          string                    `yaml:"backend"`
+	RuntimeMode      string                    `yaml:"runtime_mode"`
+	Models           llmselection.ModelAliases `yaml:"models"`
+	Session          LLMSessionConfig          `yaml:"session"`
+	ClaudeAPI        ClaudeAPIConfig           `yaml:"claude_api"`
+	ClaudeCLI        ClaudeCLIConfig           `yaml:"claude_cli"`
+	OpenAICompatible OpenAICompatibleConfig    `yaml:"openai_compatible"`
 }
 
 type LLMSessionConfig struct {
@@ -132,6 +133,12 @@ func (c *Config) validate(backendOverride string) error {
 	if err := c.ValidateOperationalControls(); err != nil {
 		return err
 	}
+	if err := c.validateRetiredLLMModelConfig(); err != nil {
+		return err
+	}
+	if err := llmselection.ValidateModelAliases(c.LLM.Models); err != nil {
+		return err
+	}
 	profile, err := c.LLMBackendProfile()
 	if err != nil {
 		return err
@@ -159,14 +166,6 @@ func (c *Config) validate(backendOverride string) error {
 		if _, err := llmselection.ResolveBaseURL(profile, c.LLM.OpenAICompatible.BaseURL); err != nil {
 			return err
 		}
-		if _, err := llmselection.ResolveModelName(profile, llmselection.ModelResolution{
-			Models: llmselection.ModelMap{
-				Default: c.LLM.OpenAICompatible.DefaultModel,
-				LowCost: c.LLM.OpenAICompatible.LowCostModel,
-			},
-		}); err != nil {
-			return err
-		}
 	}
 	if c.LLM.Session.LockTTL <= 0 {
 		return errors.New("llm.session.lock_ttl must be > 0")
@@ -176,6 +175,24 @@ func (c *Config) validate(backendOverride string) error {
 	}
 	if c.LLM.Session.RotateOnParseFailures <= 0 {
 		return errors.New("llm.session.rotate_on_parse_failures must be > 0")
+	}
+	return nil
+}
+
+func (c *Config) validateRetiredLLMModelConfig() error {
+	retired := []struct {
+		key   string
+		value string
+	}{
+		{llmselection.ClaudeDefaultModelConfig, c.LLM.ClaudeAPI.DefaultModel},
+		{llmselection.ClaudeHaikuModelConfig, c.LLM.ClaudeAPI.HaikuModel},
+		{llmselection.OpenAICompatibleDefaultModelConfig, c.LLM.OpenAICompatible.DefaultModel},
+		{llmselection.OpenAICompatibleLowCostModelConfig, c.LLM.OpenAICompatible.LowCostModel},
+	}
+	for _, item := range retired {
+		if strings.TrimSpace(item.value) != "" {
+			return fmt.Errorf("%s is retired for model selection; use llm.models", item.key)
+		}
 	}
 	return nil
 }

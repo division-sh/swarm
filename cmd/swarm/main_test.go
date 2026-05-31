@@ -1598,14 +1598,15 @@ func TestPlatformSpecLLMProviderModelSelectionSourceAuthorityPromoted(t *testing
 						RejectedTargetNames map[string]string `yaml:"rejected_target_names"`
 					} `yaml:"backend_profile_identity"`
 					ModelAliasAuthority struct {
-						ContractField              string   `yaml:"contract_field"`
-						Replaces                   string   `yaml:"replaces"`
-						AliasConfigKey             string   `yaml:"alias_config_key"`
-						BuiltInAliases             []string `yaml:"built_in_aliases"`
-						AliasVocabularyDeclaration string   `yaml:"alias_vocabulary_declaration"`
-						ResolutionRule             string   `yaml:"resolution_rule"`
-						VerifyRule                 string   `yaml:"verify_rule"`
-						AuditRule                  string   `yaml:"audit_rule"`
+						ContractField              string                       `yaml:"contract_field"`
+						Replaces                   string                       `yaml:"replaces"`
+						AliasConfigKey             string                       `yaml:"alias_config_key"`
+						BuiltInAliases             []string                     `yaml:"built_in_aliases"`
+						BuiltInModelDefaults       map[string]map[string]string `yaml:"built_in_model_defaults"`
+						AliasVocabularyDeclaration string                       `yaml:"alias_vocabulary_declaration"`
+						ResolutionRule             string                       `yaml:"resolution_rule"`
+						VerifyRule                 string                       `yaml:"verify_rule"`
+						AuditRule                  string                       `yaml:"audit_rule"`
 					} `yaml:"model_alias_authority"`
 					CredentialAndConfigPolicy struct {
 						SecretEnvSources              []string `yaml:"secret_env_sources"`
@@ -1629,7 +1630,7 @@ func TestPlatformSpecLLMProviderModelSelectionSourceAuthorityPromoted(t *testing
 	if strings.TrimSpace(authority.PromotedBy) != "#1127" {
 		t.Fatalf("llm provider selection promoted_by = %q, want #1127", authority.PromotedBy)
 	}
-	if strings.TrimSpace(authority.ImplementationStatus) != "backend_selection_config_discovery_implemented_model_alias_split" {
+	if strings.TrimSpace(authority.ImplementationStatus) != "backend_selection_and_model_alias_authority_implemented_docs_split" {
 		t.Fatalf("llm provider selection implementation_status = %q", authority.ImplementationStatus)
 	}
 	if !strings.Contains(authority.Owner, "backend profile and model alias resolver") {
@@ -1684,6 +1685,17 @@ func TestPlatformSpecLLMProviderModelSelectionSourceAuthorityPromoted(t *testing
 			t.Fatalf("model aliases missing %q: %#v", want, models.BuiltInAliases)
 		}
 	}
+	for alias, backendModels := range map[string]map[string]string{
+		"cheap":    {"anthropic": "claude-3-5-haiku", "claude_cli": "haiku", "openai_compatible": "gpt-compatible-mini"},
+		"regular":  {"anthropic": "claude-3-5-sonnet", "claude_cli": "sonnet", "openai_compatible": "gpt-compatible"},
+		"frontier": {"anthropic": "claude-3-opus", "claude_cli": "opus", "openai_compatible": "gpt-compatible-frontier"},
+	} {
+		for backend, model := range backendModels {
+			if got := strings.TrimSpace(models.BuiltInModelDefaults[alias][backend]); got != model {
+				t.Fatalf("built-in model default %s/%s = %q, want %q; all defaults=%#v", alias, backend, got, model, models.BuiltInModelDefaults)
+			}
+		}
+	}
 	for _, want := range []string{"free-form", "well-formedness", "selected-backend", "write time", "MUST NOT reconstruct"} {
 		if !strings.Contains(models.AliasVocabularyDeclaration+models.ResolutionRule+models.VerifyRule+models.AuditRule, want) {
 			t.Fatalf("model alias authority missing %q:\n%#v", want, models)
@@ -1699,7 +1711,7 @@ func TestPlatformSpecLLMProviderModelSelectionSourceAuthorityPromoted(t *testing
 			t.Fatalf("runtime config canonical list missing %q: %#v", want, authority.CredentialAndConfigPolicy.RuntimeConfigCanonicalFor)
 		}
 	}
-	for _, want := range []string{"anthropic", "claude_cli", "openai_compatible", "api and cli_test", "model_tier", "write time"} {
+	for _, want := range []string{"anthropic", "claude_cli", "openai_compatible", "api and cli_test", "model", "write time"} {
 		if !joinedContains(authority.PersistenceRules, want) {
 			t.Fatalf("persistence rules missing %q: %#v", want, authority.PersistenceRules)
 		}
@@ -1766,7 +1778,7 @@ func TestRuntimeOperationsWatchlistMapsLLMProviderModelSelectionSourceAuthority(
 	if !joinedContains(node.CanonicalOwners, "model alias resolver") {
 		t.Fatalf("watchlist canonical owners missing model alias resolver: %#v", node.CanonicalOwners)
 	}
-	for _, want := range []string{"#1127", "--backend", "anthropic", "claude_cli", "model_tier", "write time", "#1128", "#1129", "#1130"} {
+	for _, want := range []string{"#1127", "--backend", "anthropic", "claude_cli", "model", "write time", "#1128", "#1129", "#1130"} {
 		if !joinedContains(node.KnownManifestations, want) {
 			t.Fatalf("watchlist known manifestations missing %q: %#v", want, node.KnownManifestations)
 		}
@@ -1776,7 +1788,7 @@ func TestRuntimeOperationsWatchlistMapsLLMProviderModelSelectionSourceAuthority(
 			t.Fatalf("representative issues missing %d: %#v", issueID, node.RepresentativeIssues)
 		}
 	}
-	if !joinedContains(node.CommonFramingMistakes.TooBroad, "#1128") || !joinedContains(node.CommonFramingMistakes.TooNarrow, "model alongside model_tier") {
+	if !joinedContains(node.CommonFramingMistakes.TooBroad, "#1128") || !joinedContains(node.CommonFramingMistakes.TooNarrow, "model alongside model") {
 		t.Fatalf("watchlist framing mistakes do not guard #1127 split: %#v", node.CommonFramingMistakes)
 	}
 }
@@ -2300,7 +2312,7 @@ func TestRunServeRuntimeUnavailableBundleStartupRecoveryOrphansExpectedUnavailab
 	})
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agents (agent_id, role, model_tier, conversation_mode)
+		INSERT INTO agents (agent_id, role, model, conversation_mode)
 		VALUES ('agent-a', 'operator', 'default', 'task')
 	`); err != nil {
 		t.Fatalf("seed agent: %v", err)
@@ -4034,7 +4046,6 @@ func setPostgresEnvFromDSN(t *testing.T, dsn string) {
 
 func TestDefaultRuntimeConfig_RejectsUnsupportedRuntimeControlEnv(t *testing.T) {
 	t.Setenv("SWARM_RUNTIME_MAX_CONCURRENT_AGENTS", "4")
-	t.Setenv("SWARM_CLAUDE_DEFAULT_MODEL", "test-model")
 	cfg, err := defaultRuntimeConfig()
 	if err == nil || !strings.Contains(err.Error(), "SWARM_RUNTIME_MAX_CONCURRENT_AGENTS") {
 		t.Fatalf("defaultRuntimeConfig error = %v, want unsupported env rejection", err)
@@ -4068,7 +4079,6 @@ func TestDefaultRuntimeConfig_RejectsRetiredLLMBackendEnv(t *testing.T) {
 
 func TestDefaultRuntimeConfig_DoesNotInferLLMBackendFromCredentials(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "test-key")
-	t.Setenv("SWARM_CLAUDE_DEFAULT_MODEL", "test-model")
 	cfg, err := defaultRuntimeConfig()
 	if err != nil {
 		t.Fatalf("defaultRuntimeConfig: %v", err)
@@ -4123,7 +4133,6 @@ func TestLoadRuntimeConfigWithOptions_UsesSharedDiscoveryAndBackendPrecedence(t 
 		"    rotate_on_parse_failures: 3",
 		"  openai_compatible:",
 		"    base_url: https://example.test/v1",
-		"    default_model: gpt-compatible",
 	}, "\n")+"\n")
 
 	result, err := loadRuntimeConfigWithOptions(runtimeConfigLoadOptions{RepoRoot: repo})
@@ -4321,7 +4330,7 @@ func TestLoadRunStatusReport_KeepsSupportedRunRunningUntilManagerWorkSettles(t *
 		}
 		return testAgent, nil
 	}, pg)
-	if err := am.SpawnAgent(runtimeactors.AgentConfig{ID: testAgent.id}); err != nil {
+	if err := am.SpawnAgent(runtimeactors.AgentConfig{ID: testAgent.id, Model: "regular"}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	am.Run(context.Background())
@@ -4441,7 +4450,7 @@ func TestLoadRunStatusReport_PreservesRunningTruthWhileManagerWorkIsActive(t *te
 		}
 		return testAgent, nil
 	}, pg)
-	if err := am.SpawnAgent(runtimeactors.AgentConfig{ID: testAgent.id}); err != nil {
+	if err := am.SpawnAgent(runtimeactors.AgentConfig{ID: testAgent.id, Model: "regular"}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	am.Run(context.Background())
@@ -4808,7 +4817,7 @@ writer:
   type: factory
   role: writer
   prompt_ref: writer
-  model_tier: sonnet
+  model: regular
   conversation_mode: task
   subscriptions: []
   entity_writes:

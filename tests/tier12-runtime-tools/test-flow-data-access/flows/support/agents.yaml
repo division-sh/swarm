@@ -1,7 +1,7 @@
 reference-agent:
   id: reference-agent
   role: reference_reader
-  model_tier: tier2
+  model: regular
   conversation_mode: stateless
   subscriptions:
     - support.requested

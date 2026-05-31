@@ -440,7 +440,7 @@ func TestStartSelectedContractAgentRuntimeCleansGatewayOnRegistrationFailure(t *
 					ID:            "bad-agent",
 					Role:          "worker",
 					LLMBackend:    "claude_cli",
-					ModelTier:     "standard",
+					Model:         "regular",
 					Subscriptions: []string{"item.received"},
 				},
 			}},
@@ -790,7 +790,7 @@ func TestExecuteSelectedContractRunForkTreatsSourceConversationHistoryAsLineage(
 	at := time.Unix(1700002300, 0).UTC()
 	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "item.received", at)
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agents (agent_id, role, model_tier, conversation_mode, status, created_at)
+		INSERT INTO agents (agent_id, role, model, conversation_mode, status, created_at)
 		VALUES ('agent-a', 'test-agent', 'tier1', 'session_per_entity', 'active', $1)
 		ON CONFLICT (agent_id) DO NOTHING
 	`, at); err != nil {
@@ -900,7 +900,7 @@ func TestExecuteSelectedContractRunForkAdmitsSameSourceActiveDeliveryForkPointEm
 	forkAt := at.Add(30 * time.Second)
 	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "item.received", at)
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agents (agent_id, role, model_tier, conversation_mode, status, created_at)
+		INSERT INTO agents (agent_id, role, model, conversation_mode, status, created_at)
 		VALUES ('validation-coordinator', 'test-agent', 'tier1', 'session_per_entity', 'active', $1)
 		ON CONFLICT (agent_id) DO NOTHING
 	`, at); err != nil {
@@ -1046,7 +1046,7 @@ func TestExecuteSelectedContractRunForkTreatsPostTSourceConversationHistoryAsBra
 	after := at.Add(time.Minute)
 	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "item.received", at)
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agents (agent_id, role, model_tier, conversation_mode, status, created_at)
+		INSERT INTO agents (agent_id, role, model, conversation_mode, status, created_at)
 		VALUES ('agent-a', 'test-agent', 'tier1', 'session_per_entity', 'active', $1)
 		ON CONFLICT (agent_id) DO NOTHING
 	`, at); err != nil {

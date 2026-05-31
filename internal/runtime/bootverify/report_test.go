@@ -1371,7 +1371,7 @@ func TestRun_ReportsRequiredAgentSubscriptionMismatchForTemplateFlow(t *testing.
 	worker := runtimecontracts.AgentRegistryEntry{
 		ID:               "worker",
 		Role:             "worker",
-		ModelTier:        "small",
+		Model:            "small",
 		ConversationMode: "task",
 		Subscriptions:    []string{"work.requested"},
 		EmitEvents:       []string{"work.completed"},
@@ -1404,7 +1404,7 @@ func TestRun_ReportsRootRequiredAgentSubscriptionMismatch(t *testing.T) {
 			"worker": {
 				ID:               "worker",
 				Role:             "worker",
-				ModelTier:        "small",
+				Model:            "small",
 				ConversationMode: "task",
 				Subscriptions:    []string{"task.requested"},
 				EmitEvents:       []string{"task.completed"},
@@ -2101,7 +2101,7 @@ func TestRun_RejectsRootAgentFlowSessionScope(t *testing.T) {
 	root := writeSessionScopeValidationFixture(t, `
 root-flow:
   id: root-flow
-  model_tier: sonnet
+  model: regular
   conversation_mode: session
   session_scope: flow
   subscriptions:
@@ -2121,7 +2121,7 @@ name: support
 `, `
 entity-agent:
   id: entity-agent
-  model_tier: sonnet
+  model: regular
   conversation_mode: session_per_entity
   session_scope: entity
   subscriptions:
@@ -2145,14 +2145,14 @@ states:
 `, `
 flow-agent:
   id: flow-agent
-  model_tier: sonnet
+  model: regular
   conversation_mode: session
   session_scope: flow
   subscriptions:
     - support/item.created
 entity-agent:
   id: entity-agent
-  model_tier: sonnet
+  model: regular
   conversation_mode: session_per_entity
   session_scope: entity
   subscriptions:
@@ -2172,7 +2172,7 @@ func TestRun_RejectsAuthoredGlobalSessionScope(t *testing.T) {
 	root := writeSessionScopeValidationFixture(t, `
 root-global:
   id: root-global
-  model_tier: sonnet
+  model: regular
   conversation_mode: session
   session_scope: global
   subscriptions:
@@ -2196,14 +2196,14 @@ states:
 `, `
 flow-agent:
   id: flow-agent
-  model_tier: sonnet
+  model: regular
   conversation_mode: session
   session_scope: flow
   subscriptions:
     - support/item.created
 entity-agent:
   id: entity-agent
-  model_tier: sonnet
+  model: regular
   conversation_mode: session_per_entity
   session_scope: entity
   subscriptions:
@@ -2226,7 +2226,7 @@ name: support
 `, `
 entity-agent:
   id: entity-agent
-  model_tier: sonnet
+  model: regular
   conversation_mode: session_per_entity
   session_scope: entity
   subscriptions:
@@ -3510,7 +3510,7 @@ writer:
   type: factory
   role: writer
   prompt_ref: writer
-  model_tier: sonnet
+  model: regular
   conversation_mode: task
   subscriptions: []
   entity_writes:
@@ -3575,7 +3575,7 @@ writer:
   type: factory
   role: writer
   prompt_ref: writer
-  model_tier: sonnet
+  model: regular
   conversation_mode: task
   subscriptions: []
   entity_writes:

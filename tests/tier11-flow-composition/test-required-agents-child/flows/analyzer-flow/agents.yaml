@@ -1,5 +1,5 @@
 analyzer:
-  model_tier: tier2
+  model: regular
   conversation_mode: stateless
   subscriptions: [analysis.requested]
   emit_events: [analysis.done]

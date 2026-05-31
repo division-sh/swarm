@@ -217,6 +217,7 @@ func newDeliveryLifecycleFixture(t *testing.T, ctx context.Context) *deliveryLif
 			Role:          "tester",
 			Type:          "stub",
 			Mode:          "global",
+			Model:         "regular",
 			Subscriptions: []string{"review.*"},
 			Config:        []byte(`{"system_prompt":"x"}`),
 		},

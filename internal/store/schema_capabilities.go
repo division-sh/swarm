@@ -156,7 +156,7 @@ func detectStoreSchemaCapabilities(catalog schemaColumnCatalog) StoreSchemaCapab
 	caps := StoreSchemaCapabilities{}
 	caps.Agents = detectSchemaFlavor(catalog, "agents",
 		[]string{
-			"agent_id", "flow_instance", "role", "model_tier", "llm_backend", "conversation_mode",
+			"agent_id", "flow_instance", "role", "model", "llm_backend", "conversation_mode",
 			"parent_agent_id", "entity_id", "config", "subscriptions", "emit_events", "tools",
 			"permissions", "runtime_descriptor", "status", "turn_count", "last_active_at", "created_at",
 		},

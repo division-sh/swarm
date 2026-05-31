@@ -302,6 +302,9 @@ func (deps RuntimeDeps) validated() (validatedRuntimeDeps, error) {
 		return validatedRuntimeDeps{}, fmt.Errorf("workflow contract validation failed: %w", err)
 	}
 	source := opts.WorkflowModule.SemanticSource()
+	if err := validateSelectedBackendModelAliasesForDeclaredAgents(cfg, source); err != nil {
+		return validatedRuntimeDeps{}, fmt.Errorf("llm model alias validation failed: %w", err)
+	}
 	if opts.LLMRuntime == nil {
 		if err := validateSelectedBackendCredentialForDeclaredAgents(cfg, source); err != nil {
 			return validatedRuntimeDeps{}, fmt.Errorf("llm backend credential validation failed: %w", err)
@@ -550,13 +553,15 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		workflowInstances = rt.Pipeline.WorkflowInstanceStore()
 	}
 	rt.Manager = runtimemanager.NewAgentManagerWithOptions(rt.Bus, factory, runtimemanager.AgentManagerOptions{
-		Workspaces:        rt.Workspace,
-		Sessions:          stores.SessionRegistry,
-		SemanticSource:    source,
-		PromptResolver:    rt.PromptResolver,
-		WorkflowInstances: workflowInstances,
-		LLMBackend:        backendProfile.ID,
-		Budget:            rt.Budget,
+		Workspaces:             rt.Workspace,
+		Sessions:               stores.SessionRegistry,
+		SemanticSource:         source,
+		PromptResolver:         rt.PromptResolver,
+		WorkflowInstances:      workflowInstances,
+		LLMBackend:             backendProfile.ID,
+		ModelAliases:           cfg.LLM.Models,
+		RequireModelResolution: true,
+		Budget:                 rt.Budget,
 		ResetRuntimeOwnedState: func() {
 			if rt.MCPTurns != nil {
 				rt.MCPTurns.Reset()

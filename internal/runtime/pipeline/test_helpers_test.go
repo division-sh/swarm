@@ -56,7 +56,7 @@ pins:
 control-plane:
   id: control-plane
   role: control-plane
-  model_tier: sonnet
+  model: regular
   conversation_mode: task
   subscriptions:
     - item.reviewed

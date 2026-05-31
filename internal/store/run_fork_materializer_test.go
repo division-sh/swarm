@@ -1404,7 +1404,7 @@ func TestRunForkActivation_FailsClosedForForkSessionAndTurnReplayState(t *testin
 			}
 			if _, err := db.ExecContext(ctx, `
 				INSERT INTO agents (
-					agent_id, role, model_tier, llm_backend, conversation_mode, created_at
+					agent_id, role, model, llm_backend, conversation_mode, created_at
 				)
 				VALUES ('agent-a', 'worker', 'standard', 'mock', 'session', $1)
 			`, at); err != nil {

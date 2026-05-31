@@ -100,7 +100,7 @@ type agentSummary struct {
 	AgentID          string `json:"agent_id"`
 	Role             string `json:"role"`
 	Type             string `json:"type"`
-	ModelTier        string `json:"model_tier"`
+	Model            string `json:"model"`
 	ConversationMode string `json:"conversation_mode"`
 	SessionScope     string `json:"session_scope"`
 	Status           string `json:"status"`
@@ -553,7 +553,7 @@ func validateAgentSummary(agent agentSummary) error {
 		{name: "agent_id", value: agent.AgentID},
 		{name: "role", value: agent.Role},
 		{name: "type", value: agent.Type},
-		{name: "model_tier", value: agent.ModelTier},
+		{name: "model", value: agent.Model},
 		{name: "conversation_mode", value: agent.ConversationMode},
 		{name: "session_scope", value: agent.SessionScope},
 		{name: "status", value: agent.Status},
@@ -604,14 +604,14 @@ func writeAgentListResult(out io.Writer, result agentListResult) {
 		fmt.Fprintln(out, "No agents match the filter.")
 		return
 	}
-	fmt.Fprintln(out, "AGENT_ID\tROLE\tTYPE\tSTATUS\tMODEL_TIER\tMODE\tSCOPE")
+	fmt.Fprintln(out, "AGENT_ID\tROLE\tTYPE\tSTATUS\tMODEL\tMODE\tSCOPE")
 	for _, agent := range result.Agents {
 		fmt.Fprintf(out, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			agent.AgentID,
 			agent.Role,
 			agent.Type,
 			agent.Status,
-			agent.ModelTier,
+			agent.Model,
 			agent.ConversationMode,
 			agent.SessionScope,
 		)
@@ -687,11 +687,11 @@ func writeAgentDetailResult(out io.Writer, result agentDetailResult) {
 	}
 	agent := result.Agent
 	fmt.Fprintf(out, "Agent %s\n", agent.AgentID)
-	fmt.Fprintf(out, "role=%s type=%s status=%s model_tier=%s conversation_mode=%s session_scope=%s\n",
+	fmt.Fprintf(out, "role=%s type=%s status=%s model=%s conversation_mode=%s session_scope=%s\n",
 		agent.Role,
 		agent.Type,
 		agent.Status,
-		agent.ModelTier,
+		agent.Model,
 		agent.ConversationMode,
 		agent.SessionScope,
 	)

@@ -133,6 +133,9 @@ func (s *SQLiteSchemaStore) EnsureSchemaTables(ctx context.Context, plans []Sche
 		if err := s.ensureSQLiteAgentLLMBackendProfiles(ctx, agentStatements); err != nil {
 			return err
 		}
+		if err := s.ensureSQLiteAgentModelAliases(ctx); err != nil {
+			return err
+		}
 	}
 	_, err = s.BindSchemaCapabilities(ctx)
 	return err
@@ -375,10 +378,23 @@ func sqliteAgentLLMBackendCopyExpressions(oldColumns, newColumns []string) ([]st
 		if column == "" {
 			continue
 		}
-		if _, ok := oldSet[column]; !ok {
+		copyColumns = append(copyColumns, quoteIdent(column))
+		if column == "model" {
+			if _, ok := oldSet["model"]; ok {
+				selectExpressions = append(selectExpressions, quoteIdent(column))
+				continue
+			}
+			if _, ok := oldSet["model_tier"]; ok {
+				selectExpressions = append(selectExpressions, `CASE LOWER(TRIM("model_tier")) WHEN 'haiku' THEN 'cheap' WHEN 'low_cost' THEN 'cheap' WHEN 'sonnet' THEN 'regular' WHEN 'general' THEN 'regular' WHEN 'generic' THEN 'regular' ELSE NULL END`)
+				continue
+			}
+			copyColumns = copyColumns[:len(copyColumns)-1]
 			continue
 		}
-		copyColumns = append(copyColumns, quoteIdent(column))
+		if _, ok := oldSet[column]; !ok {
+			copyColumns = copyColumns[:len(copyColumns)-1]
+			continue
+		}
 		if column == "llm_backend" {
 			selectExpressions = append(selectExpressions, `CASE TRIM("llm_backend") WHEN 'api' THEN 'anthropic' WHEN 'cli_test' THEN 'claude_cli' ELSE TRIM("llm_backend") END`)
 			continue
@@ -386,6 +402,68 @@ func sqliteAgentLLMBackendCopyExpressions(oldColumns, newColumns []string) ([]st
 		selectExpressions = append(selectExpressions, quoteIdent(column))
 	}
 	return copyColumns, selectExpressions
+}
+
+func (s *SQLiteSchemaStore) ensureSQLiteAgentModelAliases(ctx context.Context) error {
+	columns, err := sqliteTableColumnList(ctx, s.DB, "agents")
+	if err != nil {
+		return err
+	}
+	hasModel := false
+	hasModelTier := false
+	for _, column := range columns {
+		switch strings.TrimSpace(column) {
+		case "model":
+			hasModel = true
+		case "model_tier":
+			hasModelTier = true
+		}
+	}
+	if !hasModel {
+		if _, err := s.DB.ExecContext(ctx, `ALTER TABLE agents ADD COLUMN model TEXT`); err != nil {
+			return fmt.Errorf("ensure sqlite agents.model column: %w", err)
+		}
+	}
+	if hasModelTier {
+		var unmappable int
+		if err := s.DB.QueryRowContext(ctx, `
+			SELECT COUNT(*)
+			FROM agents
+			WHERE (model IS NULL OR TRIM(model) = '')
+			  AND model_tier IS NOT NULL
+			  AND TRIM(model_tier) <> ''
+			  AND LOWER(TRIM(model_tier)) NOT IN ('haiku', 'low_cost', 'sonnet', 'general', 'generic');
+		`).Scan(&unmappable); err != nil {
+			return fmt.Errorf("inspect sqlite legacy agents.model_tier: %w", err)
+		}
+		if unmappable > 0 {
+			return fmt.Errorf("sqlite agents.model migration cannot map %d legacy model_tier rows; use model alias cheap, regular, or frontier", unmappable)
+		}
+		if _, err := s.DB.ExecContext(ctx, `
+			UPDATE agents
+			SET model = CASE LOWER(TRIM(model_tier))
+				WHEN 'haiku' THEN 'cheap'
+				WHEN 'low_cost' THEN 'cheap'
+				WHEN 'sonnet' THEN 'regular'
+				WHEN 'general' THEN 'regular'
+				WHEN 'generic' THEN 'regular'
+				ELSE NULL
+			END
+			WHERE (model IS NULL OR TRIM(model) = '')
+			  AND model_tier IS NOT NULL
+			  AND TRIM(model_tier) <> '';
+		`); err != nil {
+			return fmt.Errorf("backfill sqlite agents.model from legacy model_tier: %w", err)
+		}
+	}
+	var missing int
+	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM agents WHERE model IS NULL OR TRIM(model) = ''`).Scan(&missing); err != nil {
+		return fmt.Errorf("inspect sqlite agents.model backfill: %w", err)
+	}
+	if missing > 0 {
+		return fmt.Errorf("sqlite agents.model migration requires explicit model alias for %d existing rows", missing)
+	}
+	return nil
 }
 
 func (s *SQLiteSchemaStore) BindSchemaCapabilities(ctx context.Context) (StoreSchemaCapabilities, error) {

@@ -54,8 +54,11 @@ type AgentConfig struct {
 	Type                  string           `json:"type"`
 	Role                  string           `json:"role"`
 	Mode                  string           `json:"mode"`
-	ModelTier             string           `json:"model_tier,omitempty"`
+	Model                 string           `json:"model,omitempty"`
 	LLMBackend            string           `json:"llm_backend,omitempty"`
+	ResolvedModel         string           `json:"resolved_model,omitempty"`
+	ResolvedLLMProvider   string           `json:"resolved_llm_provider,omitempty"`
+	ResolvedLLMTransport  string           `json:"resolved_llm_transport,omitempty"`
 	ConversationMode      string           `json:"conversation_mode,omitempty"`
 	SessionScope          string           `json:"session_scope,omitempty"`
 	SessionScopeAuthority string           `json:"-"`
@@ -103,8 +106,11 @@ func (cfg *AgentConfig) NormalizeRuntimeDescriptor() {
 	cfg.Type = strings.TrimSpace(cfg.Type)
 	cfg.Role = strings.TrimSpace(cfg.Role)
 	cfg.Mode = strings.TrimSpace(cfg.Mode)
-	cfg.ModelTier = strings.TrimSpace(cfg.ModelTier)
+	cfg.Model = strings.TrimSpace(cfg.Model)
 	cfg.LLMBackend = strings.TrimSpace(cfg.LLMBackend)
+	cfg.ResolvedModel = strings.TrimSpace(cfg.ResolvedModel)
+	cfg.ResolvedLLMProvider = strings.TrimSpace(cfg.ResolvedLLMProvider)
+	cfg.ResolvedLLMTransport = strings.TrimSpace(cfg.ResolvedLLMTransport)
 	cfg.ConversationMode = strings.TrimSpace(cfg.ConversationMode)
 	cfg.SessionScope = strings.TrimSpace(cfg.SessionScope)
 	cfg.SessionScopeAuthority = strings.TrimSpace(cfg.SessionScopeAuthority)

@@ -1,7 +1,7 @@
 prompt-ref-agent:
   role: prompt_ref_agent
   prompt_ref: shared-prompt
-  model_tier: tier2
+  model: regular
   conversation_mode: stateless
   subscriptions:
     - task.requested

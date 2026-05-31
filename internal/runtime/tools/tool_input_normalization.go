@@ -108,8 +108,8 @@ func canonicalRuntimeToolInput(name string, input any) any {
 			if entityID := strings.TrimSpace(asString(payload["entity_id"])); entityID != "" {
 				config["entity_id"] = entityID
 			}
-			if modelTier := strings.TrimSpace(asString(payload["model_tier"])); modelTier != "" {
-				config["model_tier"] = modelTier
+			if modelTier := strings.TrimSpace(asString(payload["model"])); modelTier != "" {
+				config["model"] = modelTier
 			}
 			if conversationMode := strings.TrimSpace(asString(payload["conversation_mode"])); conversationMode != "" {
 				config["conversation_mode"] = conversationMode
@@ -151,8 +151,8 @@ func canonicalRuntimeToolInput(name string, input any) any {
 	case "agent_reconfigure":
 		if payload["config"] == nil {
 			config := map[string]any{}
-			if modelTier := strings.TrimSpace(asString(payload["model_tier"])); modelTier != "" {
-				config["model_tier"] = modelTier
+			if modelTier := strings.TrimSpace(asString(payload["model"])); modelTier != "" {
+				config["model"] = modelTier
 			}
 			if conversationMode := strings.TrimSpace(asString(payload["conversation_mode"])); conversationMode != "" {
 				config["conversation_mode"] = conversationMode

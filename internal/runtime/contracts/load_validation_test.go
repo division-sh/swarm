@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestValidateWorkflowContractBundleLoadConstraintsRejectsOnCompleteAndRules(t *testing.T) {
@@ -102,6 +104,21 @@ func TestLoadWorkflowContractBundle_PreservesEvidenceTarget(t *testing.T) {
 		}
 	}
 	t.Fatal("expected at least one record_evidence handler")
+}
+
+func TestAgentRegistryEntryRejectsRetiredModelTierField(t *testing.T) {
+	var entry AgentRegistryEntry
+	err := yaml.Unmarshal([]byte(`
+role: researcher
+type: managed
+model: regular
+model_tier: sonnet
+conversation_mode: task
+subscriptions: [scan.requested]
+`), &entry)
+	if err == nil || !strings.Contains(err.Error(), "model_tier is retired") {
+		t.Fatalf("yaml.Unmarshal error = %v, want retired model_tier rejection", err)
+	}
 }
 
 func contractRepoRoot(t *testing.T) string {

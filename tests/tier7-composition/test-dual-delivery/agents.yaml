@@ -1,6 +1,6 @@
 audit-agent:
   id: audit-agent
-  model_tier: tier2
+  model: regular
   conversation_mode: stateless
   subscriptions:
     - task.completed

@@ -270,7 +270,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesInt
 	preservedTimerID := uuid.NewString()
 	crossRunDeliveryID := uuid.NewString()
 	entityID := uuid.NewString()
-	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO agents (agent_id, role, model_tier, conversation_mode) VALUES ('agent-a', 'operator', 'default', 'session')`); err != nil {
+	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO agents (agent_id, role, model, conversation_mode) VALUES ('agent-a', 'operator', 'default', 'session')`); err != nil {
 		t.Fatalf("seed agent: %v", err)
 	}
 	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
@@ -798,7 +798,7 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 	`, runB, runA, forkEvent); err != nil {
 		t.Fatalf("seed selected route recovery: %v", err)
 	}
-	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO agents (agent_id, role, model_tier, conversation_mode) VALUES ('agent-a', 'operator', 'default', 'session')`); err != nil {
+	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO agents (agent_id, role, model, conversation_mode) VALUES ('agent-a', 'operator', 'default', 'session')`); err != nil {
 		t.Fatalf("seed agent: %v", err)
 	}
 	if _, err := pg.DB.ExecContext(ctx, `

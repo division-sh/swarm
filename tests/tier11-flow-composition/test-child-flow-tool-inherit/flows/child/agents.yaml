@@ -1,5 +1,5 @@
 child-agent:
-  model_tier: tier2
+  model: regular
   conversation_mode: stateless
   tools_tier2:
     - lookup_data

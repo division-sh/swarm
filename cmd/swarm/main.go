@@ -1764,6 +1764,9 @@ func defaultRuntimeConfig() (*config.Config, error) {
 	if err := llmselection.RejectRetiredOpenAICompatibleBaseURLEnv(os.LookupEnv); err != nil {
 		return nil, err
 	}
+	if err := llmselection.RejectRetiredModelEnv(os.LookupEnv); err != nil {
+		return nil, err
+	}
 	cfg := &config.Config{
 		Runtime: config.RuntimeConfig{
 			RecoveryOnStartup: envBool("SWARM_RUNTIME_RECOVERY_ON_STARTUP", false),
@@ -1785,8 +1788,6 @@ func defaultRuntimeConfig() (*config.Config, error) {
 				RotateOnParseFailures: envInt("SWARM_LLM_SESSION_ROTATE_ON_PARSE_FAILURES", 3),
 			},
 			ClaudeAPI: config.ClaudeAPIConfig{
-				DefaultModel: envOrDefault("SWARM_CLAUDE_DEFAULT_MODEL", ""),
-				HaikuModel:   envOrDefault("SWARM_CLAUDE_HAIKU_MODEL", ""),
 				MaxRetries:   envInt("SWARM_CLAUDE_API_MAX_RETRIES", 1),
 				RetryBackoff: envDuration("SWARM_CLAUDE_API_RETRY_BACKOFF", 2*time.Second),
 			},
@@ -1798,10 +1799,7 @@ func defaultRuntimeConfig() (*config.Config, error) {
 				NoSessionPersistence: envBool("SWARM_CLAUDE_CLI_NO_SESSION_PERSISTENCE", false),
 				UseTMux:              envBool("SWARM_CLAUDE_CLI_USE_TMUX", false),
 			},
-			OpenAICompatible: config.OpenAICompatibleConfig{
-				DefaultModel: envOrDefault(llmselection.OpenAICompatibleDefaultModelEnv, ""),
-				LowCostModel: envOrDefault(llmselection.OpenAICompatibleLowCostModelEnv, ""),
-			},
+			OpenAICompatible: config.OpenAICompatibleConfig{},
 		},
 	}
 	if err := cfg.Validate(); err != nil {

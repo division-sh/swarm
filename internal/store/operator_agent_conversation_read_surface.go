@@ -64,7 +64,7 @@ type OperatorAgentSummary struct {
 	AgentID          string `json:"agent_id"`
 	Role             string `json:"role"`
 	Type             string `json:"type"`
-	ModelTier        string `json:"model_tier"`
+	Model            string `json:"model"`
 	ConversationMode string `json:"conversation_mode"`
 	SessionScope     string `json:"session_scope"`
 	Status           string `json:"status"`
@@ -1231,8 +1231,8 @@ func operatorAgentSummaryFromPersisted(row runtimemanager.PersistedAgent, projec
 	out := OperatorAgentSummary{
 		AgentID:               strings.TrimSpace(row.Config.ID),
 		Role:                  strings.TrimSpace(row.Config.Role),
-		Type:                  agentPersistedType(row.Config, agentModelTier(row.Config)),
-		ModelTier:             agentModelTier(row.Config),
+		Type:                  agentPersistedType(row.Config, strings.TrimSpace(row.Config.Model)),
+		Model:                 strings.TrimSpace(row.Config.Model),
 		ConversationMode:      mode,
 		SessionScope:          scope,
 		Status:                projection.v1Status(),

@@ -141,8 +141,8 @@ func MergeAgentConfig(base, patch runtimeactors.AgentConfig) runtimeactors.Agent
 	if patch.LLMBackend != "" {
 		out.LLMBackend = patch.LLMBackend
 	}
-	if patch.ModelTier != "" {
-		out.ModelTier = patch.ModelTier
+	if patch.Model != "" {
+		out.Model = patch.Model
 	}
 	if patch.ConversationMode != "" {
 		out.ConversationMode = patch.ConversationMode

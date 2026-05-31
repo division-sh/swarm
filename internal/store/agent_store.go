@@ -129,7 +129,7 @@ func (s *PostgresStore) MarkAgentTerminated(ctx context.Context, agentID string)
 func (s *PostgresStore) upsertAgentSpec(ctx context.Context, rec runtimemanager.PersistedAgent, projection persistedAgentProjection, startedAt any) error {
 	const q = `
 		INSERT INTO agents (
-			agent_id, flow_instance, role, model_tier, llm_backend, conversation_mode,
+			agent_id, flow_instance, role, model, llm_backend, conversation_mode,
 			parent_agent_id, entity_id, config, subscriptions, emit_events, tools, permissions,
 			runtime_descriptor, status, turn_count, last_active_at, created_at
 		)
@@ -141,7 +141,7 @@ func (s *PostgresStore) upsertAgentSpec(ctx context.Context, rec runtimemanager.
 		ON CONFLICT (agent_id) DO UPDATE SET
 			flow_instance = EXCLUDED.flow_instance,
 			role = EXCLUDED.role,
-			model_tier = EXCLUDED.model_tier,
+			model = EXCLUDED.model,
 			llm_backend = EXCLUDED.llm_backend,
 			conversation_mode = EXCLUDED.conversation_mode,
 			parent_agent_id = EXCLUDED.parent_agent_id,
@@ -159,7 +159,7 @@ func (s *PostgresStore) upsertAgentSpec(ctx context.Context, rec runtimemanager.
 		projection.AgentID,
 		projection.FlowInstance,
 		projection.Role,
-		projection.ModelTier,
+		projection.Model,
 		projection.LLMBackend,
 		projection.ConversationMode,
 		projection.ParentAgentID,
@@ -182,7 +182,7 @@ func (s *PostgresStore) loadAgentsSpec(ctx context.Context) ([]runtimemanager.Pe
 			agent_id,
 			COALESCE(flow_instance, ''),
 			role,
-			model_tier,
+			model,
 			llm_backend,
 			conversation_mode,
 			COALESCE(parent_agent_id, ''),
@@ -213,7 +213,7 @@ func (s *PostgresStore) loadAgentsSpec(ctx context.Context) ([]runtimemanager.Pe
 			&row.AgentID,
 			&row.FlowInstance,
 			&row.Role,
-			&row.ModelTier,
+			&row.Model,
 			&row.LLMBackend,
 			&row.ConversationMode,
 			&row.ParentAgentID,
@@ -243,18 +243,19 @@ func (s *PostgresStore) loadAgentsSpec(ctx context.Context) ([]runtimemanager.Pe
 	return out, nil
 }
 
-func agentModelTier(cfg runtimeactors.AgentConfig) string {
-	if v := strings.TrimSpace(cfg.ModelTier); v != "" {
-		return v
+func agentModel(cfg runtimeactors.AgentConfig) (string, error) {
+	alias, err := llmselection.RequireModelAlias(cfg.Model)
+	if err != nil {
+		return "", err
 	}
-	return "generic"
+	return alias, nil
 }
 
-func agentPersistedType(cfg runtimeactors.AgentConfig, modelTier string) string {
+func agentPersistedType(cfg runtimeactors.AgentConfig, modelAlias string) string {
 	if v := strings.TrimSpace(cfg.Type); v != "" {
 		return v
 	}
-	if v := strings.TrimSpace(modelTier); v != "" {
+	if v := strings.TrimSpace(modelAlias); v != "" {
 		return v
 	}
 	return "generic"

@@ -1015,6 +1015,7 @@ func seedActiveAPIV1RuntimeBusAgent(t *testing.T, ctx context.Context, pg *store
 			Role:   "observer",
 			Mode:   "global",
 			Type:   "stub",
+			Model:  "regular",
 			Config: []byte(`{}`),
 		},
 		Status:    "active",

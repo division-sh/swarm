@@ -69,6 +69,28 @@ func validateSelectedBackendCredentialForDeclaredAgents(cfg *config.Config, sour
 	return validateSelectedBackendCredential(cfg)
 }
 
+func validateSelectedBackendModelAliasesForDeclaredAgents(cfg *config.Config, source semanticview.Source) error {
+	if cfg == nil {
+		return nil
+	}
+	if source == nil {
+		return fmt.Errorf("semantic source is required for llm model alias validation")
+	}
+	profile, err := cfg.LLMBackendProfile()
+	if err != nil {
+		return err
+	}
+	for agentID, agent := range source.AgentEntries() {
+		if _, err := llmselection.ResolveModel(profile, llmselection.ModelResolution{
+			Model:  agent.Model,
+			Models: cfg.LLM.Models,
+		}); err != nil {
+			return fmt.Errorf("agent %s model resolution failed: %w", strings.TrimSpace(agentID), err)
+		}
+	}
+	return nil
+}
+
 func validateSelectedBackendCredentialForActiveAgents(cfg *config.Config, source semanticview.Source, manager *runtimemanager.AgentManager) error {
 	hasAgents, err := workflowSourceOrManagerDeclaresAgents(source, manager)
 	if err != nil {

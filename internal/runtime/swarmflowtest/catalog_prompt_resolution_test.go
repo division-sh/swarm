@@ -36,7 +36,7 @@ func TestCatalogPromptIssues_UsesSemanticPromptScope(t *testing.T) {
 	agent := map[string]any{
 		"id":                "support-agent",
 		"prompt_ref":        "shared",
-		"model_tier":        "sonnet",
+		"model":             "regular",
 		"conversation_mode": "session",
 	}
 
@@ -72,7 +72,7 @@ terminal_states: [done]
 	agent := map[string]any{
 		"id":                "support-agent",
 		"prompt_ref":        "shared",
-		"model_tier":        "sonnet",
+		"model":             "regular",
 		"conversation_mode": "session",
 	}
 	if issues := catalogPromptIssues(bundle, catalogBootScope{Name: "support"}, "support-agent", agent); len(issues) != 0 {
@@ -125,7 +125,7 @@ terminal_states: [done]
 support-agent:
   id: support-agent
   prompt_ref: shared
-  model_tier: sonnet
+  model: regular
   conversation_mode: session
 `)
 	writeCatalogPromptResolutionFile(t, filepath.Join(dir, "extras", "flows", "support", "events.yaml"), "{}\n")
