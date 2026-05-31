@@ -900,6 +900,11 @@ func decisionForMailboxStatus(status string) string {
 
 func testRootCommandOptions(server *httptest.Server) rootCommandOptions {
 	opts := defaultRootCommandOptions()
+	if strings.TrimSpace(os.Getenv("SWARM_API_TOKEN")) == "" && strings.TrimSpace(os.Getenv("SWARM_API_TOKEN_FILE")) == "" {
+		// Missing-token tests now prove fail-closed behavior on non-loopback targets.
+		opts.apiRPCEndpointOverride = "http://192.0.2.10:8081/v1/rpc"
+		return opts
+	}
 	opts.apiRPCEndpointOverride = server.URL + "/v1/rpc"
 	opts.httpClient = server.Client()
 	return opts

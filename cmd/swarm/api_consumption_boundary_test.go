@@ -157,8 +157,8 @@ func TestCLIRuntimeStateCommandsRequireSharedAPITokenBeforeRequest(t *testing.T)
 		{name: "entities list", args: []string{"entities", "list"}},
 		{name: "entity view", args: []string{"entity", "view", "entity-1"}},
 		{name: "entity aggregate", args: []string{"entity", "aggregate"}},
-		{name: "run connect start", args: []string{"run", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--no-follow"}},
-		{name: "run connect reattach", args: []string{"run", "--connect", "http://127.0.0.1:1", "--reattach", "run-1"}},
+		{name: "run connect start", args: []string{"run", "--connect", "http://192.0.2.10:1", "--event", "scan.requested", "--payload", payloadPath, "--no-follow"}},
+		{name: "run connect reattach", args: []string{"run", "--connect", "http://192.0.2.10:1", "--reattach", "run-1"}},
 		{name: "version server", args: []string{"version", "--server"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

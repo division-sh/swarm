@@ -21,6 +21,7 @@ import (
 
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
+	"swarm/internal/apiv1"
 	"swarm/internal/config"
 	"swarm/internal/events"
 	runtimepkg "swarm/internal/runtime"
@@ -542,6 +543,38 @@ func TestCLI_ServeListenAddrEnvConfigValidation(t *testing.T) {
 	}
 }
 
+func TestValidateServeAPIAuthBindingDefaultTokenLoopbackBoundary(t *testing.T) {
+	defaultAuth := apiv1.AuthTokenResolution{Tokens: []string{apiv1.DefaultLoopbackAPIToken}, Source: apiv1.AuthTokenSourceBuiltInLoopbackToken}
+	explicitAuth := apiv1.AuthTokenResolution{Tokens: []string{"operator-token"}, Source: apiv1.AuthTokenSourceEnvironment, Explicit: true}
+	tests := []struct {
+		name    string
+		addr    string
+		auth    apiv1.AuthTokenResolution
+		wantErr string
+	}{
+		{name: "default token allowed on ipv4 loopback", addr: "127.0.0.1:8081", auth: defaultAuth},
+		{name: "default token allowed on ipv6 loopback", addr: "[::1]:8081", auth: defaultAuth},
+		{name: "default token rejects localhost", addr: "localhost:8081", auth: defaultAuth, wantErr: "non-loopback API bind localhost:8081 requires an explicit SWARM_API_TOKEN"},
+		{name: "default token rejects wildcard", addr: "0.0.0.0:8081", auth: defaultAuth, wantErr: "non-loopback API bind 0.0.0.0:8081 requires an explicit SWARM_API_TOKEN"},
+		{name: "default token rejects routable", addr: "192.0.2.10:8081", auth: defaultAuth, wantErr: "non-loopback API bind 192.0.2.10:8081 requires an explicit SWARM_API_TOKEN"},
+		{name: "explicit token allows wildcard", addr: "0.0.0.0:8081", auth: explicitAuth},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateServeAPIAuthBinding(tc.addr, tc.auth)
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("validateServeAPIAuthBinding: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("err = %v, want %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestCLI_ServeRuntimeConfigDoesNotFeedListenerConfig(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	runtimeConfig := filepath.Join(t.TempDir(), "runtime.yaml")
@@ -925,8 +958,8 @@ func TestPlatformSpecCLIAPIConnectionAuthConfigPrecedencePromoted(t *testing.T) 
 	if strings.TrimSpace(spec.PromotedBy) != "#844" {
 		t.Fatalf("api connection/auth/config promoted_by = %q, want #844", spec.PromotedBy)
 	}
-	if strings.TrimSpace(spec.ImplementationStatus) != "implemented" {
-		t.Fatalf("api connection/auth/config implementation_status = %q, want implemented", spec.ImplementationStatus)
+	if strings.TrimSpace(spec.ImplementationStatus) != "implemented_loopback_default" {
+		t.Fatalf("api connection/auth/config implementation_status = %q, want implemented_loopback_default", spec.ImplementationStatus)
 	}
 	if !strings.Contains(spec.CanonicalOwner, "cli_specification.foundations.api_connection_auth_config_precedence") {
 		t.Fatalf("canonical owner does not point at promoted section: %s", spec.CanonicalOwner)
@@ -972,7 +1005,7 @@ func TestPlatformSpecCLIAPIConnectionAuthConfigPrecedencePromoted(t *testing.T) 
 			t.Fatalf("api_token accepted sources missing %q: %#v", want, spec.APIToken.AcceptedSources)
 		}
 	}
-	wantTokenSourceOrder := []string{"--api-token-file", "SWARM_API_TOKEN", "SWARM_API_TOKEN_FILE", "config api_token_file"}
+	wantTokenSourceOrder := []string{"--api-token-file", "SWARM_API_TOKEN", "SWARM_API_TOKEN_FILE", "config api_token_file", "built-in loopback default"}
 	if len(spec.APIToken.SourceOrder) != len(wantTokenSourceOrder) {
 		t.Fatalf("api_token source order = %#v, want %#v", spec.APIToken.SourceOrder, wantTokenSourceOrder)
 	}
@@ -987,6 +1020,24 @@ func TestPlatformSpecCLIAPIConnectionAuthConfigPrecedencePromoted(t *testing.T) 
 	} {
 		if !strings.Contains(spec.APIToken.RejectedSources[key], want) {
 			t.Fatalf("api_token rejected source %q missing %q:\n%s", key, want, spec.APIToken.RejectedSources[key])
+		}
+	}
+	if spec.APIToken.BuiltInLoopbackDefault.TokenValue != apiv1.DefaultLoopbackAPIToken {
+		t.Fatalf("built-in default token = %q, want %q", spec.APIToken.BuiltInLoopbackDefault.TokenValue, apiv1.DefaultLoopbackAPIToken)
+	}
+	for _, want := range []string{"127.0.0.0/8", "::1"} {
+		if !stringSliceContains(spec.APIToken.BuiltInLoopbackDefault.AllowedTargetHosts, want) {
+			t.Fatalf("built-in default allowed hosts missing %q: %#v", want, spec.APIToken.BuiltInLoopbackDefault.AllowedTargetHosts)
+		}
+	}
+	for _, want := range []string{"localhost", "0.0.0.0"} {
+		if !stringSliceContains(spec.APIToken.BuiltInLoopbackDefault.RejectedWithoutExplicitToken, want) {
+			t.Fatalf("built-in default rejected hosts missing %q: %#v", want, spec.APIToken.BuiltInLoopbackDefault.RejectedWithoutExplicitToken)
+		}
+	}
+	for _, want := range []string{"no-auth", "Authorization: Bearer"} {
+		if !strings.Contains(spec.APIToken.BuiltInLoopbackDefault.NoAuthBypassRule, want) {
+			t.Fatalf("built-in default no-auth rule missing %q:\n%s", want, spec.APIToken.BuiltInLoopbackDefault.NoAuthBypassRule)
 		}
 	}
 	for key, want := range map[string]string{
@@ -3916,6 +3967,12 @@ func TestDockerComposeUsesBackendFlagNotRetiredLLMBackendEnv(t *testing.T) {
 	if !strings.Contains(text, "--backend claude_cli") {
 		t.Fatalf("docker-compose.yml missing canonical --backend claude_cli selector")
 	}
+	if !strings.Contains(text, "SWARM_API_TOKEN: ${SWARM_API_TOKEN:?") {
+		t.Fatalf("docker-compose.yml must require explicit SWARM_API_TOKEN for non-loopback orchestrator API")
+	}
+	if strings.Contains(text, "SWARM_API_TOKEN:-"+apiv1.DefaultLoopbackAPIToken) {
+		t.Fatalf("docker-compose.yml must not default the non-loopback API to the built-in token")
+	}
 }
 
 func TestLoadRuntimeConfig_RejectsUnsupportedRuntimeControlsFromFile(t *testing.T) {
@@ -5438,10 +5495,18 @@ type cliAPIConnectionAuthConfigSpec struct {
 		Rationale  string `yaml:"rationale"`
 	} `yaml:"api_server"`
 	APIToken struct {
-		AcceptedSources map[string]string `yaml:"accepted_sources"`
-		SourceOrder     []string          `yaml:"source_order"`
-		RejectedSources map[string]string `yaml:"rejected_sources"`
-		TokenFileRule   string            `yaml:"token_file_rule"`
+		AcceptedSources        map[string]string `yaml:"accepted_sources"`
+		SourceOrder            []string          `yaml:"source_order"`
+		RejectedSources        map[string]string `yaml:"rejected_sources"`
+		TokenFileRule          string            `yaml:"token_file_rule"`
+		BuiltInLoopbackDefault struct {
+			TokenValue                   string   `yaml:"token_value"`
+			Source                       string   `yaml:"source"`
+			AppliesWhen                  string   `yaml:"applies_when"`
+			AllowedTargetHosts           []string `yaml:"allowed_target_hosts"`
+			RejectedWithoutExplicitToken []string `yaml:"rejected_without_explicit_token"`
+			NoAuthBypassRule             string   `yaml:"no_auth_bypass_rule"`
+		} `yaml:"built_in_loopback_default"`
 	} `yaml:"api_token"`
 	CLIConfigFile struct {
 		AcceptedSources  map[string]string `yaml:"accepted_sources"`

@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+	"swarm/internal/apiv1"
 )
 
 func TestResolveCLIAPISettingsPrecedence(t *testing.T) {
@@ -112,7 +113,6 @@ func TestResolveCLIAPISettingsPrecedence(t *testing.T) {
 
 	t.Run("built in API server default remains loopback base", func(t *testing.T) {
 		isolateCLIAPIConfigEnv(t)
-		t.Setenv("SWARM_API_TOKEN", "env-token")
 
 		client, err := newCLIAPIClient(rootCommandOptions{})
 		if err != nil {
@@ -121,10 +121,71 @@ func TestResolveCLIAPISettingsPrecedence(t *testing.T) {
 		if client.endpoint != "http://127.0.0.1:8081/v1/rpc" {
 			t.Fatalf("endpoint = %q", client.endpoint)
 		}
-		if client.token != "env-token" {
+		if client.token != apiv1.DefaultLoopbackAPIToken {
 			t.Fatalf("token = %q", client.token)
 		}
 	})
+}
+
+func TestCLIAPISettingsDefaultTokenLoopbackBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		apiServer  string
+		wantToken  string
+		wantErr    string
+		wantSource string
+	}{
+		{
+			name:       "numeric ipv4 loopback gets default token",
+			apiServer:  "http://127.0.0.1:8081",
+			wantToken:  apiv1.DefaultLoopbackAPIToken,
+			wantSource: string(apiv1.AuthTokenSourceBuiltInLoopbackToken),
+		},
+		{
+			name:       "numeric ipv6 loopback gets default token",
+			apiServer:  "http://[::1]:8081",
+			wantToken:  apiv1.DefaultLoopbackAPIToken,
+			wantSource: string(apiv1.AuthTokenSourceBuiltInLoopbackToken),
+		},
+		{
+			name:      "localhost needs explicit token",
+			apiServer: "http://localhost:8081",
+			wantErr:   "SWARM_API_TOKEN is required",
+		},
+		{
+			name:      "wildcard needs explicit token",
+			apiServer: "http://0.0.0.0:8081",
+			wantErr:   "SWARM_API_TOKEN is required",
+		},
+		{
+			name:      "routable address needs explicit token",
+			apiServer: "http://192.0.2.10:8081",
+			wantErr:   "SWARM_API_TOKEN is required",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateCLIAPIConfigEnv(t)
+			settings, err := resolveCLIAPISettings(rootCommandOptions{apiServer: tc.apiServer})
+			if tc.wantErr != "" {
+				if err == nil {
+					t.Fatal("resolveCLIAPISettings returned nil error")
+				}
+				if !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("err = %q, want %q", err.Error(), tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("resolveCLIAPISettings: %v", err)
+			}
+			if settings.token != tc.wantToken {
+				t.Fatalf("token = %q, want %q", settings.token, tc.wantToken)
+			}
+			if settings.tokenSource != tc.wantSource || settings.tokenExplicit {
+				t.Fatalf("token source = %q explicit=%v, want source %q explicit=false", settings.tokenSource, settings.tokenExplicit, tc.wantSource)
+			}
+		})
+	}
 }
 
 func TestCLIAPIResolverToleratesContractPathConfigKeys(t *testing.T) {
@@ -382,6 +443,37 @@ func TestAPIConnectionFlagsDriveRuntimeStateCommand(t *testing.T) {
 	opts.httpClient = server.Client()
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"runs", "--api-server", server.URL, "--api-token-file", tokenFile}, &stdout, &stderr, opts)
+	if code != 0 {
+		t.Fatalf("exit = %d stderr=%q stdout=%q", code, stderr.String(), stdout.String())
+	}
+	if !sawRequest {
+		t.Fatal("server did not receive request")
+	}
+}
+
+func TestAPIConnectionDefaultLoopbackTokenDrivesRuntimeStateCommand(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	var sawRequest bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawRequest = true
+		if got := r.Header.Get("Authorization"); got != "Bearer "+apiv1.DefaultLoopbackAPIToken {
+			t.Errorf("Authorization = %q, want default loopback bearer", got)
+		}
+		var req jsonRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.Method != "run.list" {
+			t.Errorf("method = %q, want run.list", req.Method)
+		}
+		writeJSONRPCResult(t, w, req.ID, map[string]any{"runs": []any{}})
+	}))
+	defer server.Close()
+
+	opts := defaultRootCommandOptions()
+	opts.httpClient = server.Client()
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"runs", "--api-server", server.URL}, &stdout, &stderr, opts)
 	if code != 0 {
 		t.Fatalf("exit = %d stderr=%q stdout=%q", code, stderr.String(), stdout.String())
 	}

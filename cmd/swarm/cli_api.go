@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 
+	"swarm/internal/apiv1"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -78,8 +80,10 @@ func newCLIAPIClient(opts rootCommandOptions) (*cliAPIClient, error) {
 }
 
 type cliAPISettings struct {
-	rpcEndpoint string
-	token       string
+	rpcEndpoint   string
+	token         string
+	tokenSource   string
+	tokenExplicit bool
 }
 
 type cliAPIConfigFile struct {
@@ -122,11 +126,11 @@ func resolveCLIAPISettings(opts rootCommandOptions) (cliAPISettings, error) {
 	if err != nil {
 		return cliAPISettings{}, err
 	}
-	token, err := resolveCLIAPIToken(opts, cfg)
+	token, err := resolveCLIAPIToken(opts, cfg, endpoint)
 	if err != nil {
 		return cliAPISettings{}, err
 	}
-	return cliAPISettings{rpcEndpoint: endpoint, token: token}, nil
+	return cliAPISettings{rpcEndpoint: endpoint, token: token.token, tokenSource: token.source, tokenExplicit: token.explicit}, nil
 }
 
 func resolveCLIAPIRPCEndpoint(opts rootCommandOptions, cfg cliAPIConfigFile) (string, error) {
@@ -142,20 +146,32 @@ func resolveCLIAPIRPCEndpoint(opts rootCommandOptions, cfg cliAPIConfigFile) (st
 	return cliAPIRPCEndpointFromServer(server, "API server")
 }
 
-func resolveCLIAPIToken(opts rootCommandOptions, cfg cliAPIConfigFile) (string, error) {
+type cliAPITokenResolution struct {
+	token    string
+	source   string
+	explicit bool
+}
+
+func resolveCLIAPIToken(opts rootCommandOptions, cfg cliAPIConfigFile, rpcEndpoint string) (cliAPITokenResolution, error) {
 	if tokenFile := strings.TrimSpace(opts.apiTokenFile); tokenFile != "" {
-		return readCLIAPITokenFile(tokenFile, "--api-token-file")
+		return readCLIAPIExplicitTokenFile(tokenFile, "--api-token-file")
 	}
 	if token := strings.TrimSpace(os.Getenv("SWARM_API_TOKEN")); token != "" {
-		return token, nil
+		return cliAPITokenResolution{token: token, source: string(apiv1.AuthTokenSourceEnvironment), explicit: true}, nil
 	}
 	if tokenFile := strings.TrimSpace(os.Getenv("SWARM_API_TOKEN_FILE")); tokenFile != "" {
-		return readCLIAPITokenFile(tokenFile, "SWARM_API_TOKEN_FILE")
+		return readCLIAPIExplicitTokenFile(tokenFile, "SWARM_API_TOKEN_FILE")
 	}
 	if tokenFile := strings.TrimSpace(cfg.APITokenFile); tokenFile != "" {
-		return readCLIAPITokenFile(tokenFile, "config api_token_file")
+		return readCLIAPIExplicitTokenFile(tokenFile, "config api_token_file")
 	}
-	return "", errCLIAPITokenRequired
+	if cliAPIRPCEndpointAllowsDefaultToken(rpcEndpoint) {
+		return cliAPITokenResolution{
+			token:  apiv1.DefaultLoopbackAPIToken,
+			source: string(apiv1.AuthTokenSourceBuiltInLoopbackToken),
+		}, nil
+	}
+	return cliAPITokenResolution{}, errCLIAPITokenRequired
 }
 
 type cliServeListenerAddressOptions struct {
@@ -206,6 +222,22 @@ func resolveCLIServeListenerAddressHighPriority(flagValue string, flagSet bool, 
 		return env, true
 	}
 	return "", false
+}
+
+func readCLIAPIExplicitTokenFile(tokenFile, source string) (cliAPITokenResolution, error) {
+	token, err := readCLIAPITokenFile(tokenFile, source)
+	if err != nil {
+		return cliAPITokenResolution{}, err
+	}
+	return cliAPITokenResolution{token: token, source: source, explicit: true}, nil
+}
+
+func cliAPIRPCEndpointAllowsDefaultToken(endpoint string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(endpoint))
+	if err != nil {
+		return false
+	}
+	return apiv1.DefaultLoopbackAPITokenAllowedHost(parsed.Hostname())
 }
 
 func readCLIAPITokenFile(tokenFile, source string) (string, error) {

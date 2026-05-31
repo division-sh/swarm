@@ -208,6 +208,15 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		log.Printf("load .env: %v", err)
 		return 1
 	}
+	apiAuth := apiv1.ResolveAuthTokensFromEnvironment()
+	if err := validateServeAPIAuthBinding(opts.APIListenAddr, apiAuth); err != nil {
+		reporter.emit(2, "config_load", "FAILED", err.Error())
+		log.Printf("configure v1 api auth: %v", err)
+		return 1
+	}
+	if apiAuth.UsesDefaultLoopbackToken() {
+		log.Print(apiv1.DefaultLoopbackAPITokenWarning)
+	}
 	resolvedPaths, err := resolveCLIContractPlatformSpecPaths(repo, cliContractPlatformSpecPathOptions{
 		ContractsPath:    opts.ContractsPath,
 		PlatformSpecPath: opts.PlatformSpecPath,
@@ -485,7 +494,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	}
 	apiV1Handler, err := apiv1.NewHandler(apiv1.Options{
 		PlatformSpecPath: resolvedPlatformSpecPath,
-		AuthTokens:       apiv1.AuthTokensFromEnvironment(),
+		AuthTokens:       apiAuth.Tokens,
 		Handlers:         apiv1.OperatorReadHandlers(apiReadOptions),
 		Subscriptions:    apiv1.OperatorSubscriptions(apiReadOptions),
 	})
@@ -2137,6 +2146,23 @@ func validateServeListenAddr(flagName, addr string) error {
 		return fmt.Errorf("%s port must be between 0 and 65535", flagName)
 	}
 	return nil
+}
+
+func validateServeAPIAuthBinding(apiListenAddr string, auth apiv1.AuthTokenResolution) error {
+	if !auth.UsesDefaultLoopbackToken() {
+		return nil
+	}
+	if err := validateServeListenAddr("--api-listen-addr", apiListenAddr); err != nil {
+		return err
+	}
+	host, _, err := net.SplitHostPort(strings.TrimSpace(apiListenAddr))
+	if err != nil {
+		return fmt.Errorf("--api-listen-addr must be a host:port listen address: %w", err)
+	}
+	if apiv1.DefaultLoopbackAPITokenAllowedHost(host) {
+		return nil
+	}
+	return fmt.Errorf("non-loopback API bind %s requires an explicit SWARM_API_TOKEN", strings.TrimSpace(apiListenAddr))
 }
 
 func listenServeHTTPListener(name, addr string) (net.Listener, error) {

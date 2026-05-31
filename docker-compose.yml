@@ -24,6 +24,7 @@ services:
       - postgres
     environment:
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      SWARM_API_TOKEN: ${SWARM_API_TOKEN:?SWARM_API_TOKEN must be set because the orchestrator API binds to 0.0.0.0}
       SWARM_TOOL_GATEWAY_TOKEN: ${SWARM_TOOL_GATEWAY_TOKEN:-}
       SWARM_DB_HOST: postgres
       SWARM_DB_PORT: "5432"

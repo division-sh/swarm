@@ -16,12 +16,14 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"swarm/internal/apiv1"
 )
 
 func TestRunCommandLocalForegroundConsumesServeOwnerAndV1API(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	isolateCLIAPIConfigEnv(t)
 	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"entity_id": "entity-1"})
 	server, calls, wsRequests := newRunCommandServer(t, runCommandServerOptions{
+		expectedToken: apiv1.DefaultLoopbackAPIToken,
 		rpcResponder: func(req jsonRPCRequest, callIndex int) map[string]any {
 			switch req.Method {
 			case "health.check":
@@ -659,7 +661,7 @@ func TestRunCommandValidationAndAuthNoCallPaths(t *testing.T) {
 		{name: "connect rejects api port local flag", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--api-port", "8081"}, wantCode: 2, wantStderr: "--api-port requires local foreground mode"},
 		{name: "connect rejects legacy path", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1/api/rpc", "--event", "scan.requested", "--payload", payloadPath}, wantCode: 2, wantStderr: "--connect path must be empty or /v1/rpc"},
 		{name: "connect rejects unsupported scheme", token: "test-token", args: []string{"run", "--connect", "ftp://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath}, wantCode: 2, wantStderr: "--connect must use http or https"},
-		{name: "missing token exits four", args: []string{"run", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath}, wantCode: 4, wantStderr: "SWARM_API_TOKEN is required"},
+		{name: "missing explicit token for non-loopback exits four", args: []string{"run", "--connect", "http://192.0.2.10:1", "--event", "scan.requested", "--payload", payloadPath}, wantCode: 4, wantStderr: "SWARM_API_TOKEN is required"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.token == "" {
@@ -740,10 +742,15 @@ type runCommandServerOptions struct {
 	wsSubscribed         chan struct{}
 	wsSubscriptionResult map[string]any
 	wsCloseAfterRows     bool
+	expectedToken        string
 }
 
 func newRunCommandServer(t *testing.T, opts runCommandServerOptions) (*httptest.Server, *[]jsonRPCRequest, *[]jsonRPCRequest) {
 	t.Helper()
+	expectedToken := strings.TrimSpace(opts.expectedToken)
+	if expectedToken == "" {
+		expectedToken = "test-token"
+	}
 	var mu sync.Mutex
 	rpcRequests := []jsonRPCRequest{}
 	wsRequests := []jsonRPCRequest{}
@@ -751,7 +758,7 @@ func newRunCommandServer(t *testing.T, opts runCommandServerOptions) (*httptest.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1/rpc":
-			if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
+			if got := r.Header.Get("Authorization"); got != "Bearer "+expectedToken {
 				t.Errorf("Authorization = %q, want bearer token", got)
 			}
 			var req jsonRPCRequest
@@ -767,7 +774,7 @@ func newRunCommandServer(t *testing.T, opts runCommandServerOptions) (*httptest.
 			}
 			writeJSONRPCResult(t, w, req.ID, opts.rpcResponder(req, callIndex))
 		case "/v1/ws":
-			if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
+			if got := r.Header.Get("Authorization"); got != "Bearer "+expectedToken {
 				t.Errorf("WS Authorization = %q, want bearer token", got)
 			}
 			conn, err := upgrader.Upgrade(w, r, nil)

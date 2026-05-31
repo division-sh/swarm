@@ -7763,13 +7763,15 @@ cli_specification:
       `SWARM_BUILDER_AUTH_TOKEN` and `SWARM_OPERATOR_AUTH_TOKEN` fallback is invalid.
     api_connection_auth_config_precedence:
       promoted_by: '#844'
-      implementation_status: implemented
+      loopback_default_implemented_by: '#1124'
+      implementation_status: implemented_loopback_default
       canonical_owner: docs/specs/swarm-platform/platform/contracts/platform-spec.yaml#cli_specification.foundations.api_connection_auth_config_precedence
       scope: >
         Merge-bearing authority for CLI API base URL selection, bearer-token selection, and CLI config-file
         discovery for API-backed commands. API-backed command leaves consume `--api-server`, `--api-token-file`,
         `SWARM_API_SERVER`, `SWARM_API_TOKEN`, `SWARM_API_TOKEN_FILE`, `SWARM_CONFIG`, XDG config, and built-in
-        defaults through one shared resolver. This contract does not add OpenRPC behavior, retry behavior,
+        defaults through one shared resolver. When no explicit token source is configured, the shared resolver may
+        use the fixed built-in dev API token only for numeric loopback API targets. This contract does not add OpenRPC behavior, retry behavior,
         output rendering, root/global `--config`, inline token flags, or serve listener binding.
       applies_to:
       - Runtime-state CLI commands that call the platform JSON-RPC or WebSocket API.
@@ -7811,6 +7813,7 @@ cli_specification:
         - SWARM_API_TOKEN
         - SWARM_API_TOKEN_FILE
         - config api_token_file
+        - built-in loopback default
         rejected_sources:
           --api-token: >
             Not promoted. Inline token flags leak secrets into shell history and process listings; operators
@@ -7820,7 +7823,25 @@ cli_specification:
             Not promoted. The config file may point at a token file but MUST NOT store the bearer token inline.
         token_file_rule: >
           Token-file sources are read once during CLI command startup by the API client/auth resolver. Missing,
-          unreadable, or blank token-file contents classify through the shared CLI error/exit-code contract.
+          unreadable, or blank token-file contents classify through the shared CLI error/exit-code contract and
+          MUST NOT fall back to the built-in loopback default.
+        built_in_loopback_default:
+          token_value: swarm-dev-loopback-api-token
+          source: built-in-loopback-default
+          applies_when: >
+            Applies only after `--api-token-file`, `SWARM_API_TOKEN`, `SWARM_API_TOKEN_FILE`, and config
+            `api_token_file` are all absent, and only when the API target host is numeric loopback.
+          allowed_target_hosts:
+          - 127.0.0.0/8
+          - ::1
+          rejected_without_explicit_token:
+          - localhost
+          - 0.0.0.0
+          - '::'
+          - wildcard, empty, routable IP, and DNS hosts
+          no_auth_bypass_rule: >
+            The default is a bearer token value, not a no-auth mode. CLI requests still send
+            `Authorization: Bearer <token>` and the v1 API handler still validates the bearer value.
       cli_config_file:
         owner: docs/specs/swarm-platform/platform/contracts/platform-spec.yaml#cli_specification.foundations.api_connection_auth_config_precedence.cli_config_file
         accepted_sources:
@@ -8212,6 +8233,12 @@ cli_specification:
           validation_rule: >
             Values from flags, environment, and CLI config MUST use the host:port address_format above and
             fail before runtime startup if invalid.
+          api_auth_coupling_rule: >
+            If no explicit `SWARM_API_TOKEN` is configured for `swarm serve`, the API listener may start only when
+            its host is numeric loopback (`127.0.0.0/8` or `::1`). `localhost`, wildcard, empty, routable IP, and
+            DNS hosts require an explicit `SWARM_API_TOKEN`. The built-in API token is never valid for a
+            non-loopback API listener. This rule applies to the API listener only; MCP listener and tool-gateway
+            tokens remain owned by local_cli_test_gateway_startup.
           rejected_sources:
             SWARM_API_PORT: 'Not promoted; port-only configuration cannot express bind interface/IP.'
             SWARM_MCP_PORT: 'Not promoted; port-only configuration cannot express bind interface/IP.'
@@ -8237,6 +8264,11 @@ cli_specification:
             stderr_class: listener_bind_failed
             rule: >
               If any enabled listener cannot bind, `swarm serve` MUST exit before runtime readiness is reported.
+          api_default_token_exposure:
+            rule: >
+              If the API listener would use the built-in loopback default token on a non-loopback host,
+              `swarm serve` MUST fail closed before readiness with a diagnostic naming that non-loopback API binds
+              require explicit `SWARM_API_TOKEN`.
         flag_disposition:
           --health-addr:
             disposition: retired_final_v2_1_name_current_migration_evidence
@@ -8699,7 +8731,7 @@ cli_specification:
       proof_expectations:
       - mailbox view renders decision_sheet from mailbox.get without local entity/downstream reconstruction
       - missing or malformed decision_sheet fails closed as a malformed RPC result
-      - invalid args and missing SWARM_API_TOKEN make zero API calls
+      - invalid args and missing explicit token for non-loopback API targets make zero API calls
       - static no-bypass proof for no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy transports
       split_tail: >
         File-backed decision payload, richer approve/reject/defer mutation result
@@ -8747,7 +8779,7 @@ cli_specification:
       - exact /v1/rpc mailbox.approve call with mailbox_id, optional decision_payload, and optional idempotency_key params only
       - success rendering consumes only MailboxDecisionResult fields from /v1/rpc mailbox.approve, including idempotency_replayed and downstream event detail
       - malformed response proof for missing idempotency_replayed and incomplete or invalid downstream detail
-      - invalid args, conflicting payload flags including explicitly blank conflicting values, blank/missing/unreadable payload files, blank/malformed/null/non-object payload JSON, and missing SWARM_API_TOKEN make zero API calls
+      - invalid args, conflicting payload flags including explicitly blank conflicting values, blank/missing/unreadable payload files, blank/malformed/null/non-object payload JSON, and missing explicit token for non-loopback API targets make zero API calls
       - file-backed and inline payload inputs share the same canonical object validation and param construction
       - no direct DB/store/runtime/EventBus/dashboard/Builder reads or writes and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, or retired swarm control mailbox path usage
       split_tail: >
@@ -8764,7 +8796,7 @@ cli_specification:
       proof_expectations:
       - exact /v1/rpc mailbox.reject call with mailbox_id, reason, and optional idempotency_key params only
       - success rendering consumes only MailboxDecisionResult fields from /v1/rpc mailbox.reject
-      - invalid args and missing SWARM_API_TOKEN make zero API calls
+      - invalid args and missing explicit token for non-loopback API targets make zero API calls
     mailbox_defer:
       command: swarm mailbox defer <mailbox-item-id>
       tier: must_have
@@ -8776,7 +8808,7 @@ cli_specification:
       proof_expectations:
       - exact /v1/rpc mailbox.defer call with mailbox_id, until, and optional idempotency_key params only
       - success rendering consumes only MailboxDecisionResult fields from /v1/rpc mailbox.defer
-      - invalid args and missing SWARM_API_TOKEN make zero API calls
+      - invalid args and missing explicit token for non-loopback API targets make zero API calls
     health:
       command: swarm health
       tier: must_have
@@ -8936,7 +8968,7 @@ cli_specification:
         auth_or_missing_token: 4
       proof_expectations:
       - exact /v1/rpc agent.list call with flow/role params only when provided
-      - fail-closed SWARM_API_TOKEN behavior before any request
+      - fail-closed non-loopback API token behavior before any request
       - invalid args/flags make zero API calls
       - malformed agent.list responses fail closed
       - no direct DB/store/runtime/EventBus/agentcontrol reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, or token fallback
@@ -9013,7 +9045,7 @@ cli_specification:
       - exact /v1/rpc agent.restart call with agent_id param
       - --idempotency-key passes idempotency_key exactly when provided and is never generated or persisted locally
       - output renders agent_id and validates OkResult.ok is true
-      - invalid args/flags and missing SWARM_API_TOKEN make zero API calls
+      - invalid args/flags and missing explicit token for non-loopback API targets make zero API calls
       - AGENT_NOT_FOUND, IDEMPOTENCY_CONFLICT, HTTP failures, unknown RPC errors, and malformed success responses fail closed with tested exit codes
       - no direct DB/store/runtime/EventBus/agentcontrol reads or writes and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, dashboard/Builder REST, conversation owners, directive, or replay method usage
     agent_replay:
@@ -9045,7 +9077,7 @@ cli_specification:
       - --event-id is required and no event-targeted replay request is made without it
       - --idempotency-key passes idempotency_key exactly when provided and is never generated or persisted locally
       - output renders event_id, replay_event_id, audit_event_id, original_delivery.delivery_id, and new_delivery.delivery_id from AgentReplayResult.original_delivery/new_delivery
-      - invalid args/flags and missing SWARM_API_TOKEN make zero API calls
+      - invalid args/flags and missing explicit token for non-loopback API targets make zero API calls
       - EVENT_NOT_FOUND, EVENT_REPLAY_NO_DELIVERY_HISTORY, EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL, EVENT_REPLAY_SUBSCRIBER_UNAVAILABLE, EVENT_REPLAY_NOT_ELIGIBLE, PAYLOAD_VALIDATION_FAILED, IDEMPOTENCY_CONFLICT, HTTP failures, unknown RPC errors, and malformed success responses fail closed with tested exit codes
       - no agent.replay_backlog, direct DB/store/runtime/EventBus/agentcontrol, dashboard/Builder REST, legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, directive, restart, list, or view method usage
     agent_replay_backlog:
@@ -9071,7 +9103,7 @@ cli_specification:
       - exact /v1/rpc agent.replay_backlog call with agent_id param
       - --idempotency-key passes idempotency_key exactly when provided and is never generated or persisted locally
       - output renders replayed_count and validates ok is true
-      - invalid args/flags and missing SWARM_API_TOKEN make zero API calls
+      - invalid args/flags and missing explicit token for non-loopback API targets make zero API calls
       - AGENT_NOT_FOUND, IDEMPOTENCY_CONFLICT, HTTP failures, unknown RPC errors, and malformed success responses fail closed with tested exit codes
       - no agent.replay, event.replay, direct DB/store/runtime/EventBus/agentcontrol, dashboard/Builder REST, legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, directive, restart, list, or view method usage
     agent_directive:
@@ -9103,7 +9135,7 @@ cli_specification:
       - --run-id passes run_id exactly and does not trigger local run/session lookup
       - --idempotency-key passes idempotency_key exactly when provided and is never generated or persisted locally
       - output renders server-owned run_id, run_id_resolution, directive_event_id, and directive_event_type
-      - invalid args/flags and missing SWARM_API_TOKEN make zero API calls
+      - invalid args/flags and missing explicit token for non-loopback API targets make zero API calls
       - AGENT_NOT_FOUND, RUN_NOT_FOUND, AGENT_NOT_RUNNING, RUN_ALREADY_TERMINAL, AMBIGUOUS_RUN_TARGET, IDEMPOTENCY_CONFLICT, HTTP failures, and malformed success responses fail closed with tested exit codes
       - no direct DB/store/runtime/EventBus/agentcontrol reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, dashboard/Builder REST, conversation owners, restart, or replay method usage
     events_list:
@@ -9136,7 +9168,7 @@ cli_specification:
       proof_expectations:
       - exact /v1/rpc event.list call with filter, since, until, limit, and cursor params only
       - filter fields match EventListFilter and bool has_dead_letter is sent only when explicitly provided
-      - invalid flags and missing SWARM_API_TOKEN make zero API calls
+      - invalid flags and missing explicit token for non-loopback API targets make zero API calls
       - malformed event list results and HTTP/RPC failures fail closed with tested exit codes
       - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, run.trace, event.publish, event.replay, agent.replay, or agent.replay_backlog usage
     events_follow:
@@ -9170,7 +9202,7 @@ cli_specification:
       proof_expectations:
       - exact /v1/ws event.subscribe call with filter and replay_since params only
       - filter shape is identical to event.list EventListFilter; pagination and list-only until are not accepted
-      - invalid flags and missing SWARM_API_TOKEN make zero WS calls
+      - invalid flags and missing explicit token for non-loopback API targets make zero WS calls
       - malformed subscription result/notification and HTTP/RPC/WS failures fail closed with tested exit codes
       - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, run.subscribe_trace, event.publish, event.replay, agent.replay, or agent.replay_backlog usage
     event_view:
@@ -9191,7 +9223,7 @@ cli_specification:
         - EVENT_NOT_FOUND
       proof_expectations:
       - exact /v1/rpc event.get call with event_id param only
-      - missing or blank event id and missing SWARM_API_TOKEN make zero API calls
+      - missing or blank event id and missing explicit token for non-loopback API targets make zero API calls
       - EVENT_NOT_FOUND, HTTP/RPC failures, and malformed EventFull results fail closed with tested exit codes
       - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, run.trace, event.publish, event.replay, agent.replay, or agent.replay_backlog usage
     event_replay:
@@ -9232,7 +9264,7 @@ cli_specification:
         - IDEMPOTENCY_CONFLICT
       proof_expectations:
       - exact /v1/rpc event.replay call with event_id, optional subscribers, and optional idempotency_key params only
-      - missing or blank event id, blank --subscriber, invalid args, and missing SWARM_API_TOKEN make zero API calls
+      - missing or blank event id, blank --subscriber, invalid args, and missing explicit token for non-loopback API targets make zero API calls
       - success output renders server-owned replay_event_id, audit_event_id, subscribers_replayed, and original/new delivery lineage
       - EVENT_NOT_FOUND, replay conflict errors, auth/HTTP/RPC failures, and malformed EventReplayResult values fail closed with tested exit codes
       - no direct DB/store/runtime/EventBus/dashboard/Builder reads or writes and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, run.start, event.publish, agent.replay, or agent.replay_backlog usage
@@ -9296,7 +9328,7 @@ cli_specification:
         - IDEMPOTENCY_CONFLICT
       proof_expectations:
       - exact /v1/rpc event.publish call with event_name, required payload, optional run_id, optional source_event_id, optional canonical bundle_hash or deprecated legacy bundle_ref.fingerprint, optional emitter, and optional idempotency_key params only; bundle_hash serialization maps server UNSUPPORTED_BUNDLE_HASH until canonical source facts are promoted
-      - missing/blank event name, invalid or non-object --payload-json, blank optional flags, malformed bundle_hash, malformed bundle fingerprint, both bundle identity flags together, invalid args, and missing SWARM_API_TOKEN make zero API calls
+      - missing/blank event name, invalid or non-object --payload-json, blank optional flags, malformed bundle_hash, malformed bundle fingerprint, both bundle identity flags together, invalid args, and missing explicit token for non-loopback API targets make zero API calls
       - success output renders only server-owned EventPublishResult event_id, run_id, source_event_id when present, new_run_created, and delivery rows
       - RUN_NOT_FOUND, EVENT_NOT_FOUND, publish rejection errors, auth/HTTP/RPC failures, and malformed EventPublishResult values fail closed with tested exit codes
       - no direct DB/store/runtime/EventBus/dashboard/Builder reads or writes and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, run.start, event.replay, agent.replay, or agent.replay_backlog usage
@@ -9330,7 +9362,7 @@ cli_specification:
         auth_or_missing_token: 4
       proof_expectations:
       - exact /v1/rpc conversation.list call with agent_id, run_id, limit, and cursor params only when corresponding CLI flags are provided
-      - invalid flags, blank OpaqueId flags, out-of-range --limit, and missing SWARM_API_TOKEN make zero API calls
+      - invalid flags, blank OpaqueId flags, out-of-range --limit, and missing explicit token for non-loopback API targets make zero API calls
       - success output renders only ConversationSummary fields and next_cursor returned by the server
       - empty conversations array, malformed results, auth/HTTP/RPC failures, and transport failures fail closed with tested exit codes
       - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, conversation.current_for_agent, conversation.get_turn, or forkchat usage
@@ -9353,7 +9385,7 @@ cli_specification:
         - SESSION_NOT_FOUND
       proof_expectations:
       - exact /v1/rpc conversation.get call with session_id param only
-      - missing/blank/invalid session id and missing SWARM_API_TOKEN make zero API calls
+      - missing/blank/invalid session id and missing explicit token for non-loopback API targets make zero API calls
       - success output renders only ConversationDetail and shallow Turn fields returned by the server, including turn_index
       - SESSION_NOT_FOUND, malformed results, auth/HTTP/RPC failures, and transport failures fail closed with tested exit codes
       - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, conversation.current_for_agent, conversation.get_turn reconstruction, or forkchat usage
@@ -9386,7 +9418,7 @@ cli_specification:
         - TURN_NOT_FOUND
       proof_expectations:
       - exact /v1/rpc conversation.get_turn call with session_id and turn_index params only; include_logs is omitted so the API default remains authoritative
-      - missing/blank/invalid session id, invalid turn_index, turn_id-shaped selector attempts, and missing SWARM_API_TOKEN make zero API calls
+      - missing/blank/invalid session id, invalid turn_index, turn_id-shaped selector attempts, and missing explicit token for non-loopback API targets make zero API calls
       - success output renders only ConversationTurnDetail fields returned by the server; runtime logs are consumed from the API result, not independently queried
       - SESSION_NOT_FOUND, TURN_NOT_FOUND, malformed results, auth/HTTP/RPC failures, and transport failures fail closed with tested exit codes
       - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, conversation.current_for_agent, runtime.logs, run.trace, or forkchat usage
@@ -9556,7 +9588,7 @@ cli_specification:
         auth_or_missing_token: 4
       proof_expectations:
       - exact /v1/rpc entity.list call with run_id, flow, type, current_state, limit, and cursor params only when supplied
-      - missing SWARM_API_TOKEN, blank optional flags, invalid run_id OpaqueId envelope, invalid limit, invalid args, and unsupported flags make zero API calls
+      - missing explicit token for non-loopback API targets, blank optional flags, invalid run_id OpaqueId envelope, invalid limit, invalid args, and unsupported flags make zero API calls
       - empty result, next_cursor rendering, auth/HTTP/RPC failures, malformed result, and malformed EntitySummary rows fail closed with tested exit-code behavior
       - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, query_entities, search_entities, get_entity, or swarm investigate usage
     entity_view:
@@ -9588,7 +9620,7 @@ cli_specification:
         entity_not_found: 5
       proof_expectations:
       - exact /v1/rpc entity.get call with required entity_id and optional run_id params only
-      - missing/blank/invalid entity id, blank or invalid --run-id, invalid args, unsupported flags, and missing SWARM_API_TOKEN make zero API calls
+      - missing/blank/invalid entity id, blank or invalid --run-id, invalid args, unsupported flags, and missing explicit token for non-loopback API targets make zero API calls
       - ENTITY_NOT_FOUND maps to resource-not-found exit 5
       - auth/HTTP/RPC failures, malformed EntityFull result, malformed nested EntitySummary, and missing fields/gates/accumulated maps fail closed with tested exit-code behavior
       - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, query_entities, search_entities, get_entity, or swarm investigate usage
@@ -9626,7 +9658,7 @@ cli_specification:
         auth_or_missing_token: 4
       proof_expectations:
       - exact /v1/rpc entity.aggregate call with run_id, group_by, and type params only when supplied
-      - missing SWARM_API_TOKEN, blank optional flags, invalid run_id OpaqueId envelope, unsupported group_by, invalid args, and unsupported flags make zero API calls
+      - missing explicit token for non-loopback API targets, blank optional flags, invalid run_id OpaqueId envelope, unsupported group_by, invalid args, and unsupported flags make zero API calls
       - omitted --group-by sends no group_by and relies on the server default current_state
       - empty result, deterministic aggregate rendering, auth/HTTP/RPC failures, missing counts, and negative counts fail closed with tested exit-code behavior
       - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, query_entities, search_entities, get_entity, or swarm investigate usage
@@ -9678,7 +9710,7 @@ cli_specification:
       - exact /v1/rpc runtime.logs call with run_id, entity_id, session_id, component, level, error_code, source, since, until, limit, cursor, and order params only
       - exact /v1/ws runtime.subscribe_logs call with run_id, entity_id, session_id, component, level, error_code, source, and replay_since params only
       - follow rejects --since, --until, --limit, --cursor, and --order before opening the WebSocket; --replay-since is accepted only with --follow
-      - invalid flags and missing SWARM_API_TOKEN make zero API or WS calls
+      - invalid flags and missing explicit token for non-loopback API targets make zero API or WS calls
       - malformed runtime.logs results, malformed runtime.subscribe_logs subscription results/notifications, auth/HTTP/RPC/WS failures, and cancellation are tested with closed exit-code behavior
       - no direct DB/store/runtime/EventBus/dashboard/process-log/container-log reads and no legacy /api/*, /rpc, /api/rpc, /ws, or /api/ws usage
     incidents:
@@ -9725,7 +9757,7 @@ cli_specification:
         auth_or_missing_token: 4
       proof_expectations:
       - exact /v1/rpc runtime.incidents call with since_hours, component, level, mcp_only, limit, and cursor params only when supplied
-      - invalid args and missing SWARM_API_TOKEN make zero API calls
+      - invalid args and missing explicit token for non-loopback API targets make zero API calls
       - since_hours is validated as 1-720 and limit as 1-500 before API calls
       - level is validated as debug, info, warn, or error before API calls
       - empty result, next_cursor rendering, auth/HTTP/RPC failures, malformed result, and malformed Incident rows are tested with closed exit-code behavior
@@ -9962,6 +9994,14 @@ api_specification:
         HTTP request and on the WebSocket upgrade. Token presence and validity
 
         are the only check in v1; the token grants every scope in the catalog.
+
+        When no explicit API token is configured for numeric-loopback local dev,
+
+        the implementation may use the built-in loopback default token governed
+
+        by cli_specification.foundations.api_connection_auth_config_precedence.
+
+        This remains bearer-token auth and MUST NOT become a loopback no-auth bypass.
 
         '
       forward_compatibility: "Each method declares its required scope(s) in this spec (see scopes\nsection). v1 enforcement\
