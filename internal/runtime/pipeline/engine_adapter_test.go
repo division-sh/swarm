@@ -14,10 +14,13 @@ import (
 
 	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 	"swarm/internal/runtime/core/identity"
+	runtimepinrouting "swarm/internal/runtime/core/pinrouting"
 	runtimeregistry "swarm/internal/runtime/core/registry"
 	"swarm/internal/runtime/core/values"
 	runtimeengine "swarm/internal/runtime/engine"
+	"swarm/internal/runtime/flowmodel"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/testutil"
 )
@@ -173,6 +176,112 @@ func TestApplyEngineStateMutationPreservesRuntimeControlMetadata(t *testing.T) {
 	if got := instance.Metadata["business_status"]; got != "new" {
 		t.Fatalf("business_status = %#v, want new", got)
 	}
+}
+
+func TestApplyEngineStateMutationRejectsAuthoredParentRouteInsertion(t *testing.T) {
+	instance := &WorkflowInstance{
+		Metadata: map[string]any{
+			"business_status": "old",
+		},
+	}
+	mutation := testEngineStateMutation(map[string]any{
+		"business_status":      "new",
+		"parent_flow_id":       "root",
+		"parent_flow_instance": "root/inst-1",
+		"parent_entity_id":     "parent-ent",
+	}, nil, nil)
+
+	applyEngineStateMutation(instance, mutation, nil, nil, "")
+
+	for _, key := range []string{"parent_flow_id", "parent_flow_instance", "parent_entity_id"} {
+		if _, ok := instance.Metadata[key]; ok {
+			t.Fatalf("metadata[%s] = %#v, want absent", key, instance.Metadata[key])
+		}
+	}
+	if got := instance.Metadata["business_status"]; got != "new" {
+		t.Fatalf("business_status = %#v, want new", got)
+	}
+	assertMutationParentRoutePinOutputFailure(t, instance.Metadata, runtimepinrouting.FailureTargetRequiredMissing)
+}
+
+func TestApplyEngineStateMutationRejectsAuthoredParentRouteCompletion(t *testing.T) {
+	instance := &WorkflowInstance{
+		Metadata: map[string]any{
+			"parent_entity_id": "legacy-parent",
+			"business_status":  "old",
+		},
+	}
+	mutation := testEngineStateMutation(map[string]any{
+		"business_status":      "new",
+		"parent_flow_id":       "root",
+		"parent_flow_instance": "root/inst-1",
+		"parent_entity_id":     "wrong-parent",
+	}, nil, nil)
+
+	applyEngineStateMutation(instance, mutation, nil, nil, "")
+
+	if _, ok := instance.Metadata["parent_flow_id"]; ok {
+		t.Fatalf("parent_flow_id = %#v, want absent", instance.Metadata["parent_flow_id"])
+	}
+	if _, ok := instance.Metadata["parent_flow_instance"]; ok {
+		t.Fatalf("parent_flow_instance = %#v, want absent", instance.Metadata["parent_flow_instance"])
+	}
+	if got := instance.Metadata["parent_entity_id"]; got != "legacy-parent" {
+		t.Fatalf("parent_entity_id = %#v, want legacy-parent", got)
+	}
+	if got := instance.Metadata["business_status"]; got != "new" {
+		t.Fatalf("business_status = %#v, want new", got)
+	}
+	assertMutationParentRoutePinOutputFailure(t, instance.Metadata, runtimepinrouting.FailureParentRouteIncomplete)
+}
+
+func assertMutationParentRoutePinOutputFailure(t *testing.T, metadata map[string]any, want runtimepinrouting.TargetFailure) {
+	t.Helper()
+	route := runtimeflowidentity.ParentRouteFromMetadata(metadata).Normalized()
+	result := runtimepinrouting.Resolve(runtimepinrouting.ResolutionInput{
+		Source:    mutationParentRoutePinOutputSource(),
+		FlowID:    "child",
+		EventType: "child.done",
+		Emit:      runtimecontracts.EmitSpec{Event: "child.done"},
+		ParentRoute: events.RouteIdentity{
+			FlowID:       route.FlowID,
+			FlowInstance: route.FlowInstance,
+			EntityID:     route.EntityID,
+		},
+	}, events.Event{Type: events.EventType("child.done")})
+	if result.Failure != want {
+		t.Fatalf("pin output failure = %q, want %q (metadata=%#v)", result.Failure, want, metadata)
+	}
+}
+
+func mutationParentRoutePinOutputSource() semanticview.Source {
+	child := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{
+			ID:   "child",
+			Flow: "child",
+		},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{
+				Outputs: runtimecontracts.FlowOutputPins{
+					Events: []string{"child.done"},
+				},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"child.done": {},
+		},
+		Path: "child",
+	}
+	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &runtimecontracts.FlowContractView{
+				Children: []runtimecontracts.FlowContractView{child},
+			},
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"child": &child,
+			},
+		},
+	})
 }
 
 func TestMaybeDeactivateTerminalFlowInstance_IgnoresRootWorkflowEntity(t *testing.T) {
