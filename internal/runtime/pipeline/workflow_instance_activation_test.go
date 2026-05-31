@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,8 +12,17 @@ import (
 	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/runtime/core/paths"
+	"swarm/internal/runtime/core/values"
 	"swarm/internal/runtime/semanticview"
 )
+
+func testCreateFlowInstanceContext(trigger workflowTriggerContext) values.Context {
+	payload := parsePayloadMap(trigger.Event.Payload)
+	entity := map[string]any{
+		"entity_id": workflowEventEntityID(trigger.Event),
+	}
+	return createFlowInstanceHandlerContext(trigger, payload, entity)
+}
 
 func TestCreateFlowInstanceResolvesInstanceIDFromPayloadPath(t *testing.T) {
 	var captured FlowInstanceActivationRequest
@@ -26,8 +36,9 @@ func TestCreateFlowInstanceResolvesInstanceIDFromPayloadPath(t *testing.T) {
 		Type:    events.EventType("custom.triggered"),
 		Payload: []byte(`{"entity_id":"ent-1","desired_instance_id":"inst-42","name":"alpha"}`),
 	}).WithEntityID("ent-1")
+	triggerCtx := workflowTriggerContext{Event: trigger}
 
-	ok := pc.createFlowInstance(context.Background(), workflowTriggerContext{Event: trigger}, handlerExecutionPlan{
+	ok := pc.createFlowInstance(context.Background(), triggerCtx, handlerExecutionPlan{
 		Template:       "review",
 		InstanceIDFrom: "payload.desired_instance_id",
 		InstanceIDPath: paths.Parse("payload.desired_instance_id"),
@@ -36,7 +47,7 @@ func TestCreateFlowInstanceResolvesInstanceIDFromPayloadPath(t *testing.T) {
 				"name": "payload.name",
 			},
 		},
-	})
+	}, testCreateFlowInstanceContext(triggerCtx))
 	if ok != nil {
 		t.Fatalf("expected createFlowInstance to succeed: %v", ok)
 	}
@@ -63,8 +74,9 @@ func TestCreateFlowInstanceResolvesConfigFromBindings(t *testing.T) {
 		Type:    events.EventType("spawn.requested"),
 		Payload: []byte(`{"entity_id":"ent-1","instance_id":"inst-42","name":"alpha","priority":1}`),
 	}).WithEntityID("ent-1")
+	triggerCtx := workflowTriggerContext{Event: trigger}
 
-	err := pc.createFlowInstance(context.Background(), workflowTriggerContext{Event: trigger}, handlerExecutionPlan{
+	err := pc.createFlowInstance(context.Background(), triggerCtx, handlerExecutionPlan{
 		Template:       "review",
 		InstanceIDFrom: "payload.instance_id",
 		InstanceIDPath: paths.Parse("payload.instance_id"),
@@ -74,7 +86,7 @@ func TestCreateFlowInstanceResolvesConfigFromBindings(t *testing.T) {
 				"priority": "payload.priority",
 			},
 		},
-	})
+	}, testCreateFlowInstanceContext(triggerCtx))
 	if err != nil {
 		t.Fatalf("expected createFlowInstance to succeed: %v", err)
 	}
@@ -89,6 +101,160 @@ func TestCreateFlowInstanceResolvesConfigFromBindings(t *testing.T) {
 	}
 }
 
+func TestCreateFlowInstanceResolvesConfigFromHandlerEventContext(t *testing.T) {
+	var captured FlowInstanceActivationRequest
+	pc := &PipelineCoordinator{
+		instanceActivator: func(_ context.Context, req FlowInstanceActivationRequest) error {
+			captured = req
+			return nil
+		},
+	}
+	trigger := (events.Event{
+		ID:            "evt-123",
+		Type:          events.EventType("spawn.requested"),
+		ParentEventID: "source-evt-1",
+		Payload:       []byte(`{"entity_id":"ent-1","instance_id":"inst-42","name":"alpha"}`),
+	}).WithEnvelope(events.EventEnvelope{
+		EntityID: "ent-1",
+		Source: events.RouteIdentity{
+			FlowID:       "parent-flow",
+			FlowInstance: "parent-flow/source-1",
+			EntityID:     "ent-parent",
+		},
+	})
+	triggerCtx := workflowTriggerContext{Event: trigger}
+
+	err := pc.createFlowInstance(context.Background(), triggerCtx, handlerExecutionPlan{
+		Template:       "review",
+		InstanceIDFrom: "payload.instance_id",
+		InstanceIDPath: paths.Parse("payload.instance_id"),
+		ConfigFrom: &runtimecontracts.ConfigFromSpec{
+			Bindings: map[string]string{
+				"source_event_id": "event.id",
+				"event_type":      "event.type",
+				"source_flow":     "event.source.flow_id",
+				"correlation_id":  "event.source_event_id",
+				"name":            "payload.name",
+				"parent_entity":   "entity.entity_id",
+			},
+		},
+	}, testCreateFlowInstanceContext(triggerCtx))
+	if err != nil {
+		t.Fatalf("expected createFlowInstance to succeed: %v", err)
+	}
+	for key, want := range map[string]any{
+		"source_event_id": "evt-123",
+		"event_type":      "spawn.requested",
+		"source_flow":     "parent-flow",
+		"correlation_id":  "source-evt-1",
+		"name":            "alpha",
+		"parent_entity":   "ent-1",
+	} {
+		if got := captured.Config[key]; got != want {
+			t.Fatalf("config[%s] = %#v, want %#v", key, got, want)
+		}
+	}
+}
+
+func TestCreateFlowInstanceRejectsUnknownEventConfigRef(t *testing.T) {
+	pc := &PipelineCoordinator{
+		instanceActivator: func(_ context.Context, req FlowInstanceActivationRequest) error {
+			t.Fatalf("unexpected activation request: %#v", req)
+			return nil
+		},
+	}
+	trigger := (events.Event{
+		ID:      "evt-123",
+		Type:    events.EventType("spawn.requested"),
+		Payload: []byte(`{"entity_id":"ent-1","instance_id":"inst-42"}`),
+	}).WithEntityID("ent-1")
+	triggerCtx := workflowTriggerContext{Event: trigger}
+
+	err := pc.createFlowInstance(context.Background(), triggerCtx, handlerExecutionPlan{
+		Template:       "review",
+		InstanceIDFrom: "payload.instance_id",
+		InstanceIDPath: paths.Parse("payload.instance_id"),
+		ConfigFrom: &runtimecontracts.ConfigFromSpec{
+			Bindings: map[string]string{
+				"missing_event": "event.missing",
+			},
+		},
+	}, testCreateFlowInstanceContext(triggerCtx))
+	var refErr flowInstanceConfigRefError
+	if !errors.As(err, &refErr) {
+		t.Fatalf("createFlowInstance error = %T %v, want flowInstanceConfigRefError", err, err)
+	}
+	for _, want := range []string{`config_from "missing_event"`, `ref "event.missing"`, "resolved empty"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("createFlowInstance error = %v, want %q", err, want)
+		}
+	}
+}
+
+func TestCreateFlowInstanceRejectsUnsupportedConfigRefRoot(t *testing.T) {
+	pc := &PipelineCoordinator{
+		instanceActivator: func(_ context.Context, req FlowInstanceActivationRequest) error {
+			t.Fatalf("unexpected activation request: %#v", req)
+			return nil
+		},
+	}
+	trigger := (events.Event{
+		ID:      "evt-123",
+		Type:    events.EventType("spawn.requested"),
+		Payload: []byte(`{"entity_id":"ent-1","instance_id":"inst-42"}`),
+	}).WithEntityID("ent-1")
+	triggerCtx := workflowTriggerContext{Event: trigger}
+
+	err := pc.createFlowInstance(context.Background(), triggerCtx, handlerExecutionPlan{
+		Template:       "review",
+		InstanceIDFrom: "payload.instance_id",
+		InstanceIDPath: paths.Parse("payload.instance_id"),
+		ConfigFrom: &runtimecontracts.ConfigFromSpec{
+			Bindings: map[string]string{
+				"policy_value": "policy.value",
+			},
+		},
+	}, testCreateFlowInstanceContext(triggerCtx))
+	var refErr flowInstanceConfigRefError
+	if !errors.As(err, &refErr) {
+		t.Fatalf("createFlowInstance error = %T %v, want flowInstanceConfigRefError", err, err)
+	}
+	for _, want := range []string{`config_from "policy_value"`, `ref "policy.value"`, `unsupported root "policy"`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("createFlowInstance error = %v, want %q", err, want)
+		}
+	}
+}
+
+func TestCreateFlowInstanceDoesNotResolveInstanceIDFromEventRef(t *testing.T) {
+	pc := &PipelineCoordinator{
+		instanceActivator: func(_ context.Context, req FlowInstanceActivationRequest) error {
+			t.Fatalf("unexpected activation request: %#v", req)
+			return nil
+		},
+	}
+	trigger := (events.Event{
+		ID:      "evt-123",
+		Type:    events.EventType("spawn.requested"),
+		Payload: []byte(`{"entity_id":"ent-1","name":"alpha"}`),
+	}).WithEntityID("ent-1")
+	triggerCtx := workflowTriggerContext{Event: trigger}
+
+	err := pc.createFlowInstance(context.Background(), triggerCtx, handlerExecutionPlan{
+		Template:       "review",
+		InstanceIDFrom: "event.id",
+		InstanceIDPath: paths.Parse("event.id"),
+		ConfigFrom: &runtimecontracts.ConfigFromSpec{
+			Bindings: map[string]string{
+				"name": "payload.name",
+			},
+		},
+	}, testCreateFlowInstanceContext(triggerCtx))
+	if err == nil || !strings.Contains(err.Error(), "create_flow_instance instance_id_from resolved empty") {
+		t.Fatalf("createFlowInstance error = %v, want instance_id_from split behavior", err)
+	}
+}
+
 func TestCreateFlowInstanceRejectsMissingRequiredSiblingFields(t *testing.T) {
 	pc := &PipelineCoordinator{
 		instanceActivator: func(_ context.Context, req FlowInstanceActivationRequest) error {
@@ -100,10 +266,11 @@ func TestCreateFlowInstanceRejectsMissingRequiredSiblingFields(t *testing.T) {
 		Type:    events.EventType("spawn.requested"),
 		Payload: []byte(`{"entity_id":"ent-1","instance_id":"inst-42","name":"alpha"}`),
 	}).WithEntityID("ent-1")
+	triggerCtx := workflowTriggerContext{Event: trigger}
 
-	err := pc.createFlowInstance(context.Background(), workflowTriggerContext{Event: trigger}, handlerExecutionPlan{
+	err := pc.createFlowInstance(context.Background(), triggerCtx, handlerExecutionPlan{
 		Template: "review",
-	})
+	}, testCreateFlowInstanceContext(triggerCtx))
 	if err == nil || !strings.Contains(err.Error(), "requires non-empty instance_id_from and config_from") {
 		t.Fatalf("createFlowInstance error = %v, want missing required siblings", err)
 	}
@@ -120,15 +287,16 @@ func TestCreateFlowInstanceRejectsGeneratedFallbackWithoutInstanceIDFrom(t *test
 		Type:    events.EventType("spawn.requested"),
 		Payload: []byte(`{"entity_id":"ent-1","instance_id":"inst-42","name":"alpha"}`),
 	}).WithEntityID("ent-1")
+	triggerCtx := workflowTriggerContext{Event: trigger}
 
-	err := pc.createFlowInstance(context.Background(), workflowTriggerContext{Event: trigger}, handlerExecutionPlan{
+	err := pc.createFlowInstance(context.Background(), triggerCtx, handlerExecutionPlan{
 		Template: "review",
 		ConfigFrom: &runtimecontracts.ConfigFromSpec{
 			Bindings: map[string]string{
 				"name": "payload.name",
 			},
 		},
-	})
+	}, testCreateFlowInstanceContext(triggerCtx))
 	if err == nil || !strings.Contains(err.Error(), "requires non-empty instance_id_from and config_from") {
 		t.Fatalf("createFlowInstance error = %v, want missing instance_id_from failure", err)
 	}
@@ -145,15 +313,16 @@ func TestCreateFlowInstanceRejectsEmptyConfigFromBindings(t *testing.T) {
 		Type:    events.EventType("spawn.requested"),
 		Payload: []byte(`{"entity_id":"ent-1","desired_instance_id":"inst-42"}`),
 	}).WithEntityID("ent-1")
+	triggerCtx := workflowTriggerContext{Event: trigger}
 
-	err := pc.createFlowInstance(context.Background(), workflowTriggerContext{Event: trigger}, handlerExecutionPlan{
+	err := pc.createFlowInstance(context.Background(), triggerCtx, handlerExecutionPlan{
 		Template:       "review",
 		InstanceIDFrom: "payload.desired_instance_id",
 		InstanceIDPath: paths.Parse("payload.desired_instance_id"),
 		ConfigFrom: &runtimecontracts.ConfigFromSpec{
 			Bindings: map[string]string{},
 		},
-	})
+	}, testCreateFlowInstanceContext(triggerCtx))
 	if err == nil || !strings.Contains(err.Error(), "requires non-empty instance_id_from and config_from") {
 		t.Fatalf("createFlowInstance error = %v, want missing config_from failure", err)
 	}
@@ -170,8 +339,9 @@ func TestCreateFlowInstanceRejectsEmptyResolvedConfig(t *testing.T) {
 		Type:    events.EventType("spawn.requested"),
 		Payload: []byte(`{"entity_id":"ent-1","desired_instance_id":"inst-42"}`),
 	}).WithEntityID("ent-1")
+	triggerCtx := workflowTriggerContext{Event: trigger}
 
-	err := pc.createFlowInstance(context.Background(), workflowTriggerContext{Event: trigger}, handlerExecutionPlan{
+	err := pc.createFlowInstance(context.Background(), triggerCtx, handlerExecutionPlan{
 		Template:       "review",
 		InstanceIDFrom: "payload.desired_instance_id",
 		InstanceIDPath: paths.Parse("payload.desired_instance_id"),
@@ -180,9 +350,9 @@ func TestCreateFlowInstanceRejectsEmptyResolvedConfig(t *testing.T) {
 				"name": "payload.missing_name",
 			},
 		},
-	})
-	if err == nil || !strings.Contains(err.Error(), "config_from resolved empty") {
-		t.Fatalf("createFlowInstance error = %v, want empty resolved config failure", err)
+	}, testCreateFlowInstanceContext(triggerCtx))
+	if err == nil || !strings.Contains(err.Error(), `config_from "name" ref "payload.missing_name" resolved empty`) {
+		t.Fatalf("createFlowInstance error = %v, want missing config ref failure", err)
 	}
 }
 

@@ -753,7 +753,7 @@ func (r pipelineEngineActionRunner) ExecuteAction(ctx context.Context, action ru
 			InstanceIDPath: action.InstanceIDPath,
 			ConfigFrom:     action.ConfigFrom,
 		}
-		if err := pc.createFlowInstance(ctx, engineTriggerContext(execCtx.Request), plan); err != nil {
+		if err := pc.createFlowInstance(ctx, engineTriggerContext(execCtx.Request), plan, execCtx.Base); err != nil {
 			return true, err
 		}
 		return true, nil
