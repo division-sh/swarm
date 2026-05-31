@@ -46,9 +46,14 @@ func OperatorRunStartHandlers(opts OperatorReadOptions) map[string]MethodHandler
 }
 
 func runStartConfigured(opts OperatorReadOptions) bool {
+	if opts.Idempotency == nil {
+		return false
+	}
+	if runtimeContextManager(opts) != nil {
+		return true
+	}
 	return opts.Source != nil &&
 		opts.Events != nil &&
-		opts.Idempotency != nil &&
 		strings.TrimSpace(opts.Bundle.Fingerprint) != ""
 }
 

@@ -5605,11 +5605,12 @@ multi_bundle_persistence:
     bundle_hash_naming: '#1001'
     run_fork_cli_authority_absorbed_from: '#1038'
     serve_db_loaded_runtime_source: '#1020'
+    boot_pinned_runtime_context_manager: '#1175'
   authority_rule: >
     This section is the merge-bearing source authority for multi-bundle persistence, bundle identity, bundle-aware
     resume/delete/fork semantics, planned bundle API methods, and planned CLI command shape. The draft is now evidence
-    only. Database foundation, read-only bundle catalog APIs, supported local serve ingest/source stamping, and serial
-    Postgres-backed `swarm serve --bundle-hash` DB-loaded boot now have
+    only. Database foundation, read-only bundle catalog APIs, supported local serve ingest/source stamping, and boot-pinned
+    Postgres-backed `swarm serve --bundle-hash` DB-loaded boot and RuntimeContextManager dispatch now have
     promoted implementation owners in this section. Remaining runtime, API handler, CLI, delete/fork/recovery, and
     generated OpenRPC publication work stays separately gated unless a later PR explicitly promotes and proves it.
   generated_artifact_policy:
@@ -5760,9 +5761,9 @@ multi_bundle_persistence:
       platform_tables.tables is the current runtime DDL source. #1013 promotes the bundles table and
       runs.bundle_hash/runs.bundle_source into the live schema foundation. Serve ingest/source stamping for local
       `swarm serve --contracts` is promoted by multi_bundle_persistence.persistence_model.serve_ingest_projection;
-      serial Postgres-backed `swarm serve --bundle-hash` boot is promoted by
-      multi_bundle_persistence.persistence_model.serve_db_loaded_runtime_source. Reader migration, API routing,
-      CLI/fork behavior beyond this serve flag, delete/runtime cleanup, multi-bundle concurrency, and public
+      boot-pinned Postgres-backed `swarm serve --bundle-hash` runtime boot and dispatch are promoted by
+      multi_bundle_persistence.persistence_model.serve_db_loaded_runtime_source. Reader migration,
+      CLI/fork behavior beyond this serve flag, dynamic runtime Load/Unload, delete/runtime cleanup, and public
       dual-accept naming remain separately gated implementation work unless a later PR explicitly promotes and proves them.
     bundles_table:
       planned_live_owner_after_migration: platform_tables.tables.bundles
@@ -5821,26 +5822,34 @@ multi_bundle_persistence:
         - Bundle register/delete APIs remain #1017/#1018/#1019.
         - SQLite runtime support remains blocked by #1087/#1088 unless separately gated.
     serve_db_loaded_runtime_source:
-      status: implemented_for_serial_postgres_serve_bundle_hash
-      cli_flag: 'swarm serve --bundle-hash <bundle-v1:sha256:<64 lowercase hex>>'
+      status: implemented_for_boot_pinned_postgres_serve_bundle_hash_contexts
+      cli_flag: 'swarm serve --bundle-hash <bundle-v1:sha256:<64 lowercase hex>> [--bundle-hash <bundle-v1:sha256:<64 lowercase hex>> ...]'
       canonical_store_owner: internal/store.PostgresStore.LoadBundleCatalogRuntimeRecord
       runtime_source_owner: internal/runtime/contracts.LoadBundleCatalogRuntimeSource
       serve_boot_owner: cmd/swarm.loadServeRuntimeBundleFromCatalog
       source_fact_owner: cmd/swarm.prepareLoadedServeBundleSource
+      runtime_context_manager_owner: internal/runtime.RuntimeContextManager
+      bundle_context_owner: internal/runtime.BundleContext
       source_replacement_guard: cmd/swarm.runtimeProjectSupervisor.DisableSourceReplacement
       supported_surface:
-        - Exactly one canonical bundle_hash is pinned for the process. The flag is mutually exclusive with --contracts and --dev.
-        - The mode is Postgres-only. SQLite, no-store, missing store, missing bundle row, malformed archive, missing bytes, hash mismatch, and noncanonical hash fail closed before runtime readiness.
+        - One or more canonical bundle_hash values may be pinned at process boot by repeating --bundle-hash. Values must be canonical, non-empty, duplicate-free, and mutually exclusive with --contracts and --dev.
+        - The mode is Postgres-only and all-or-nothing before API readiness. SQLite, no-store, missing store, missing bundle row, malformed archive, missing bytes, hash mismatch, duplicate hash, and noncanonical hash fail closed before any runtime context is served.
         - The runtime loader consumes stored bundles.content_yaml and raw bundles.data_blob bytes only; parsed_json is inspection output and is never a runtime source.
         - The loader reconstructs platform spec, contract definition files, prompts, and flow data/ raw bytes into a process-owned temporary source, then recomputes BundleHash and requires it to equal the requested bundle_hash before runtime construction.
-        - Every run writer reachable under the booted runtime consumes BundleSourceFact with bundle_source=persisted and bundle_hash equal to the requested canonical hash.
+        - Each pinned bundle is registered as a BundleContext under RuntimeContextManager. The BundleContext owns its source, BundleSourceFact, EventBus, route table, pipeline/coordinator, agent manager, subscriptions, and source-bound runtime components.
+        - event.publish and run.start select a loaded BundleContext by explicit canonical bundle_hash for create-new work or by runs.bundle_hash/runs.bundle_source for existing-run work. Missing, deleted, legacy, or unloaded contexts fail closed rather than falling back to ambient boot state.
+        - Existing-run controls that can be resolved by run_id dispatch through the selected BundleContext. Ambiguous singleton controls such as runtime.pause/resume, mailbox approval event publication, and broad agent restart/backlog replay fail closed in multi-context mode pending dynamic lifecycle work.
+        - When more than one bundle is pinned in the same process, unscoped startup ownership, active schedule restoration, and manager pending-event recovery are disabled for every context until bundle-scoped recovery filters are promoted. Single-bundle DB-loaded serve may keep the existing startup recovery owner.
+        - Every run writer reachable under the selected runtime context consumes BundleSourceFact with bundle_source=persisted and bundle_hash equal to that context's canonical hash.
         - Runtime project OpenProject/ReloadProject source replacement is disabled while the process is pinned to a DB-loaded bundle source.
+        - Workspace/container names, volumes, and managed identity labels for executable context paths include bundle-disambiguated identity when more than one context can be loaded.
         - External executable code, tools, container images, credentials, and host environment dependencies remain environment-owned and are not stored in the bundles row.
       split_boundaries:
-        - Parallel multi-bundle runtime contexts and dispatcher/store isolation remain #981.
+        - Dynamic post-boot RuntimeContextManager Load/Unload remains #1176.
         - Same-bundle selected-contract fork execution from DB bytes consumes the persisted bundle catalog runtime source owner.
         - Cross-bundle fork routing remains #976.
-        - Create-new-work bundle_hash routing/admission remains #1022.
+        - Final lifecycle/scoped API conformance matrix remains #1025.
+        - Ambient CLI bundle context remains #1028.
         - Bundle CLI inventory and swarm fork consumers remain #1023/#989.
         - Delete/runtime.nuke/lifecycle cleanup remains #987/#988/#998/#1008/#1009.
     runs_table:
@@ -6012,10 +6021,10 @@ multi_bundle_persistence:
         rule: >
           New-run publication requires canonical bundle_hash when run_id is absent. Existing-run publication resolves bundle
           context from runs.bundle_hash/runs.bundle_source. If caller bundle_hash and existing run context disagree, the
-          method fails closed with BUNDLE_MISMATCH before mutation or idempotency completion. Until RuntimeContextManager
-          lands, the reduced supported scope routes only to the single active runtime whose BundleSourceFact bundle_hash
-          matches the resolved/requested bundle_hash; other valid hashes fail closed with BUNDLE_UNAVAILABLE rather than
-          falling back to ambient boot state. Legacy bundle_ref/bundle_fingerprint wrappers are transition-only parser inputs
+          method fails closed with BUNDLE_MISMATCH before mutation or idempotency completion. In DB-loaded pinned
+          RuntimeContextManager mode, the resolved/requested bundle_hash must select a loaded BundleContext; valid but
+          unloaded or unavailable hashes fail closed with BUNDLE_UNAVAILABLE rather than falling back to ambient boot
+          state. Legacy bundle_ref/bundle_fingerprint wrappers are transition-only parser inputs
           and are not authoritative for create-new-work scope.
       run.start:
         rule: Deprecated wrapper follows event.publish bundle_hash semantics while it remains present.
@@ -6063,7 +6072,7 @@ multi_bundle_persistence:
         Source runs with bundle_source ephemeral, deleted, or legacy return BUNDLE_UNAVAILABLE for fork admission because
         the server lacks authoritative persisted bundle bytes.
   cli_surface:
-    publication_status: bundle_inventory_register_envelope_run_fork_and_serial_serve_bundle_hash_implemented_other_cli_children_pending
+    publication_status: bundle_inventory_register_envelope_run_fork_and_boot_pinned_serve_bundle_hash_implemented_other_cli_children_pending
     bundle_commands_supported:
       - swarm bundle list
       - swarm bundle show <bundle-hash>
@@ -6073,7 +6082,7 @@ multi_bundle_persistence:
       - swarm bundle register <contracts-directory-or-archive>
       - swarm bundle delete <bundle-hash> [--force] [--dry-run] [--idempotency-key <key>]
     modified_commands_planned:
-      - swarm serve --bundle-hash <bundle_hash> (implemented serial Postgres DB-loaded process mode)
+      - swarm serve --bundle-hash <bundle_hash> [--bundle-hash <bundle_hash> ...] (implemented boot-pinned Postgres DB-loaded process mode)
       - swarm serve --dev
       - swarm agents list --run-id <run-id>
       - swarm event publish <event-name> --bundle-hash <bundle_hash>
@@ -6121,18 +6130,20 @@ multi_bundle_persistence:
       reason: Forced bundle.delete preservation cleanup, mutex, quiescence, delivery/session/timer/container cleanup, and result projection are destructive-runtime implementation.
     serve_db_loaded_bundle:
       tracker: '#1020'
-      implementation_status: serial_postgres_single_bundle_process_promoted
+      implementation_status: boot_pinned_postgres_context_process_promoted
       runtime_owners:
         - internal/store.PostgresStore.LoadBundleCatalogRuntimeRecord
         - internal/runtime/contracts.LoadBundleCatalogRuntimeSource
         - cmd/swarm.loadServeRuntimeBundleFromCatalog
         - cmd/swarm.prepareLoadedServeBundleSource
         - cmd/swarm.runtimeProjectSupervisor.DisableSourceReplacement
+        - internal/runtime.RuntimeContextManager
+        - internal/runtime.BundleContext
       reason: >
-        swarm serve --bundle-hash DB-loaded YAML/data runtime boot mode is implemented for one canonical
-        Postgres-backed bundle_hash per process. Multi-bundle runtime concurrency and selected-contract fork
-        reuse remain split to #981; same-bundle selected-contract fork source reuse consumes the persisted
-        bundle catalog runtime source owner.
+        swarm serve --bundle-hash DB-loaded YAML/data runtime boot mode is implemented for one or more canonical
+        Postgres-backed bundle_hash values pinned at process boot. RuntimeContextManager owns loaded BundleContext
+        dispatch for the boot-pinned surface. Dynamic post-boot Load/Unload remains split to #1176; same-bundle
+        selected-contract fork source reuse consumes the persisted bundle catalog runtime source owner.
     bundle_safe_list_read_scoping:
       tracker: '#1021'
       reason: agent/event/run/log/incident read/list method scoping and generated OpenRPC shape are API read-model implementation.
@@ -6164,7 +6175,12 @@ multi_bundle_persistence:
       reason: Old bundle_fingerprint/bundle_ref names must be reconciled in code and generated artifacts under the locked bundle_hash naming decision.
     runtime_context_isolation:
       tracker: '#981'
-      reason: Hosting multiple bundles in one runtime process requires explicit per-run/bundle context isolation and dispatcher/store filtering proof.
+      implementation_status: boot_pinned_first_slice_implemented_by_1175_parent_remains_open
+      runtime_owners:
+        - internal/runtime.RuntimeContextManager
+        - internal/runtime.BundleContext
+        - internal/apiv1.OperatorReadOptions.RuntimeContexts
+      reason: Boot-pinned multi-context serve now routes supported runtime mutations through loaded BundleContext ownership and disables unscoped startup recovery/restore in multi-context processes; dynamic Load/Unload, scoped recovery filters, final matrix, ambient CLI context, cross-bundle fork, and cleanup siblings remain separately gated.
     lifecycle_cleanup:
       trackers:
         - '#987'
@@ -13927,8 +13943,8 @@ api_specification:
           Required when run_id is omitted. When run_id
           identifies an existing run, optional bundle_hash must match that run's
           canonical runs.bundle_hash or the method fails closed with BUNDLE_MISMATCH.
-          Until RuntimeContextManager lands, the resolved hash must match the single
-          active runtime source fact or the method fails closed with BUNDLE_UNAVAILABLE.
+          In DB-loaded RuntimeContextManager mode, the resolved hash must select a
+          loaded BundleContext or the method fails closed with BUNDLE_UNAVAILABLE.
           cannot be combined with legacy bundle_ref; malformed or combined inputs fail
           closed with UNSUPPORTED_BUNDLE_HASH.
         schema:
@@ -14053,9 +14069,9 @@ api_specification:
         Start a run by injecting an event into the runtime bus. Create-new-work admission follows event.publish bundle_hash
         semantics: if no existing run row provides bundle context, bundle_hash is required. If run_id is supplied but no
         run row exists, the call is still create-new-work and run_id alone is not bundle scope. If caller bundle_hash and
-        existing run context disagree, the method fails closed with BUNDLE_MISMATCH. Until RuntimeContextManager lands, the
-        resolved bundle_hash must match the single active runtime source fact or the method fails closed with
-        BUNDLE_UNAVAILABLE. Legacy bundle_ref.fingerprint is deprecated transition input only and cannot be combined with
+        existing run context disagree, the method fails closed with BUNDLE_MISMATCH. In DB-loaded RuntimeContextManager mode, the
+        resolved bundle_hash must select a loaded BundleContext or the method fails closed with BUNDLE_UNAVAILABLE.
+        Legacy bundle_ref.fingerprint is deprecated transition input only and cannot be combined with
         bundle_hash.
 
         '
@@ -14071,9 +14087,9 @@ api_specification:
           Required when no existing run row supplies
           bundle context. When run_id identifies an existing run, optional bundle_hash
           must match that run's canonical runs.bundle_hash or the method fails closed
-          with BUNDLE_MISMATCH. Until RuntimeContextManager lands, the resolved hash must
-          match the single active runtime source fact or the method fails closed with
-          BUNDLE_UNAVAILABLE; cannot be combined with legacy bundle_ref; malformed or
+          with BUNDLE_MISMATCH. In DB-loaded RuntimeContextManager mode, the resolved hash must
+          select a loaded BundleContext or the method fails closed with BUNDLE_UNAVAILABLE;
+          cannot be combined with legacy bundle_ref; malformed or
           combined inputs fail closed with UNSUPPORTED_BUNDLE_HASH.
         schema:
           $ref: '#/components/schemas/BundleHash'

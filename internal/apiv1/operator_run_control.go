@@ -60,6 +60,14 @@ func executeRunControl(ctx context.Context, req Request, opts OperatorReadOption
 		TTL:            runControlIdempotencyTTL,
 		Now:            now,
 	}, func(ctx context.Context) (store.APIIdempotencyCompletion, error) {
+		selectedOpts := opts
+		if runtimeContextManager(opts) != nil {
+			var err error
+			ctx, selectedOpts, _, err = runtimeBundleContextByRun(ctx, opts, runID)
+			if err != nil {
+				return store.APIIdempotencyCompletion{}, err
+			}
+		}
 		controlReq := runtimeruncontrol.TransitionRequest{
 			RunID:        runID,
 			Reason:       "operator_request",
@@ -70,11 +78,11 @@ func executeRunControl(ctx context.Context, req Request, opts OperatorReadOption
 		var err error
 		switch action {
 		case "stop":
-			result, err = opts.RunControl.Stop(ctx, controlReq)
+			result, err = selectedOpts.RunControl.Stop(ctx, controlReq)
 		case "pause":
-			result, err = opts.RunControl.Pause(ctx, controlReq)
+			result, err = selectedOpts.RunControl.Pause(ctx, controlReq)
 		case "continue":
-			result, err = opts.RunControl.Continue(ctx, controlReq)
+			result, err = selectedOpts.RunControl.Continue(ctx, controlReq)
 		default:
 			err = fmt.Errorf("unsupported run control action %q", action)
 		}

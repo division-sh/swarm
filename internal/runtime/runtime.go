@@ -64,18 +64,19 @@ type eventReceiptSchemaCapabilityProvider interface {
 }
 
 type RuntimeOptions struct {
-	SelfCheck          bool
-	WorkspaceLifecycle workspace.Lifecycle
-	EnableToolGateway  bool
-	ToolGatewayToken   string
-	BundleFingerprint  string
-	BundleSourceFact   runtimecorrelation.BundleSourceFact
-	WorkflowModule     runtimepipeline.WorkflowModule
-	LLMRuntime         llm.Runtime
-	Credentials        runtimecredentials.Store
-	BootStartedAt      time.Time
-	BootProgress       func(BootProgressEvent)
-	SystemContainers   []string
+	SelfCheck                        bool
+	WorkspaceLifecycle               workspace.Lifecycle
+	EnableToolGateway                bool
+	ToolGatewayToken                 string
+	BundleFingerprint                string
+	BundleSourceFact                 runtimecorrelation.BundleSourceFact
+	WorkflowModule                   runtimepipeline.WorkflowModule
+	LLMRuntime                       llm.Runtime
+	Credentials                      runtimecredentials.Store
+	BootStartedAt                    time.Time
+	BootProgress                     func(BootProgressEvent)
+	SystemContainers                 []string
+	DisablePersistentStartupRecovery bool
 }
 
 // RuntimeDeps is the canonical dependency graph for NewRuntime boot wiring.
@@ -704,13 +705,23 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		rt.cleanupStartFailure()
 	}()
 
-	startupRecoverySnapshot, err := rt.inspectStartupRecoverySnapshot(ctx)
-	startupRecoveryDecision := newStartupRecoveryDecisionReport(startupRecoverySnapshot)
-	if err != nil {
-		rt.emitBootProgress(6, "recovery_snapshot_inspection", "FAILED", err.Error())
-	} else {
-		rt.emitBootProgress(6, "recovery_snapshot_inspection", "ok", startupRecoverySnapshot.summary())
+	skipPersistentStartupRecovery := rt.Options.DisablePersistentStartupRecovery
+	startupRecoverySnapshot := startupRecoverySnapshot{
+		RecoveryOnStartup:  rt != nil && rt.Config != nil && rt.Config.Runtime.RecoveryOnStartup && !skipPersistentStartupRecovery,
+		InspectionComplete: true,
 	}
+	var err error
+	if skipPersistentStartupRecovery {
+		rt.emitBootProgress(6, "recovery_snapshot_inspection", "skipped", "persistent startup recovery disabled")
+	} else {
+		startupRecoverySnapshot, err = rt.inspectStartupRecoverySnapshot(ctx)
+		if err != nil {
+			rt.emitBootProgress(6, "recovery_snapshot_inspection", "FAILED", err.Error())
+		} else {
+			rt.emitBootProgress(6, "recovery_snapshot_inspection", "ok", startupRecoverySnapshot.summary())
+		}
+	}
+	startupRecoveryDecision := newStartupRecoveryDecisionReport(startupRecoverySnapshot)
 	if err != nil && !startupRecoverySnapshot.RecoveryOnStartup {
 		return err
 	}
@@ -726,7 +737,11 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		rt.emitBootProgress(7, "recovery_decision", "FAILED", denyErr.Error())
 		return denyErr
 	}
-	rt.emitBootProgress(7, "recovery_decision", string(startupRecoveryDecision.Outcome), string(startupRecoveryDecision.ReasonCode))
+	if skipPersistentStartupRecovery {
+		rt.emitBootProgress(7, "recovery_decision", "skipped", "persistent startup recovery disabled")
+	} else {
+		rt.emitBootProgress(7, "recovery_decision", string(startupRecoveryDecision.Outcome), string(startupRecoveryDecision.ReasonCode))
+	}
 
 	if rt.Pipeline != nil {
 		if _, err := rt.Pipeline.RepairContractEntityTypes(ctx); err != nil {
@@ -746,7 +761,9 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		}
 	}
 	rt.emitBootProgress(9, "system_nodes_start", "ok", fmt.Sprintf("%d nodes started", systemNodeCount))
-	if rt.Scheduler != nil && rt.Stores.ScheduleStore != nil {
+	if skipPersistentStartupRecovery {
+		rt.emitBootProgress(10, "schedule_restoration", "skipped", "persistent startup recovery disabled")
+	} else if rt.Scheduler != nil && rt.Stores.ScheduleStore != nil {
 		schedules, err := rt.Stores.ScheduleStore.LoadActiveSchedules(ctx)
 		if err != nil {
 			rt.emitBootProgress(10, "schedule_restoration", "FAILED", err.Error())
@@ -781,7 +798,9 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	} else {
 		rt.emitBootProgress(10, "schedule_restoration", "skipped", "scheduler or schedule store unavailable")
 	}
-	if rt.Config.Runtime.RecoveryOnStartup && rt.Manager != nil {
+	if skipPersistentStartupRecovery {
+		rt.emitBootProgress(11, "manager_recovery_if_enabled", "skipped", "persistent startup recovery disabled")
+	} else if rt.Config.Runtime.RecoveryOnStartup && rt.Manager != nil {
 		startupRecoveryDecision.ManagerRecoveryAttempted = true
 		managerReplaySummary, err := rt.Manager.RecoverWithStartupReplayDiagnostics(ctx)
 		startupRecoveryDecision.ManagerReplayCount = managerReplaySummary.ReplayedCount

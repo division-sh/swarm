@@ -96,6 +96,13 @@ func OperatorRunForkHandlers(opts OperatorReadOptions) map[string]MethodHandler 
 }
 
 func executeRunFork(ctx context.Context, req Request, opts OperatorReadOptions, now time.Time) (any, error) {
+	if multiRuntimeContextMode(opts) {
+		return nil, NewApplicationError(UnsupportedBundleHashForkCode, false, map[string]any{
+			"tracked_follow_up":  "#976/#1025",
+			"unsupported_reason": "run.fork runtime dispatch in multi-context DB-loaded mode is split from the pinned RuntimeContextManager boot slice",
+			"supported_selector": "single DB-loaded runtime context or same source bundle_hash in serial mode",
+		})
+	}
 	params, err := runForkParamsFromRequest(req.Params)
 	if err != nil {
 		return nil, err

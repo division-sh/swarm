@@ -280,6 +280,7 @@ func TestMultiBundleSourceAuthorityPublishesOnlyImplementedBundleReadAndRunForkM
 
 	sourceEvidence := mustMappingValue(t, multi, "source_evidence")
 	assertScalarValue(t, mustMappingValue(t, sourceEvidence, "run_fork_cli_authority_absorbed_from"), "#1038")
+	assertScalarValue(t, mustMappingValue(t, sourceEvidence, "boot_pinned_runtime_context_manager"), "#1175")
 
 	generatedPolicy := mustMappingValue(t, multi, "generated_artifact_policy")
 	assertScalarValue(t, mustMappingValue(t, generatedPolicy, "current_openrpc_status"), "bundle_read_catalog_register_run_fork_and_delete_methods_published")
@@ -323,6 +324,11 @@ func TestMultiBundleSourceAuthorityPublishesOnlyImplementedBundleReadAndRunForkM
 	assertScalarContains(t, mustMappingValue(t, serveIngest, "data_blob"), "raw bytes as base64")
 	assertScalarContains(t, mustMappingValue(t, serveIngest, "parsed_json"), "Runtime-owned fields")
 	assertScalarContains(t, mustMappingValue(t, serveIngest, "idempotency"), "fails closed before runtime construction")
+	serveDBLoaded := mustMappingValue(t, persistence, "serve_db_loaded_runtime_source")
+	assertScalarValue(t, mustMappingValue(t, serveDBLoaded, "status"), "implemented_for_boot_pinned_postgres_serve_bundle_hash_contexts")
+	assertScalarContains(t, mustMappingValue(t, serveDBLoaded, "cli_flag"), "[--bundle-hash")
+	assertScalarValue(t, mustMappingValue(t, serveDBLoaded, "runtime_context_manager_owner"), "internal/runtime.RuntimeContextManager")
+	assertScalarValue(t, mustMappingValue(t, serveDBLoaded, "bundle_context_owner"), "internal/runtime.BundleContext")
 	platformTables := mustMappingValue(t, mustMappingValue(t, root, "platform_tables"), "tables")
 	if mappingValue(platformTables, "bundles") == nil {
 		t.Fatal("bundles table must be live in platform_tables after the DB migration child lands")

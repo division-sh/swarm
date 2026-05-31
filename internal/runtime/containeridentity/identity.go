@@ -13,6 +13,7 @@ const (
 	LabelCreationSource = "dev.swarm.creation_source"
 	LabelContainerName  = "dev.swarm.container.name"
 	LabelWorkspaceScope = "dev.swarm.workspace.scope"
+	LabelBundleHash     = "dev.swarm.bundle_hash"
 	LabelRunID          = "dev.swarm.run_id"
 	LabelEntityID       = "dev.swarm.entity_id"
 	LabelAgentID        = "dev.swarm.agent_id"
@@ -34,6 +35,7 @@ type Identity struct {
 	CreationSource string
 	ContainerName  string
 	WorkspaceScope string
+	BundleHash     string
 	RunID          string
 	EntityID       string
 	AgentID        string
@@ -46,6 +48,7 @@ func (i Identity) Normalized() Identity {
 	i.CreationSource = strings.TrimSpace(i.CreationSource)
 	i.ContainerName = strings.TrimSpace(i.ContainerName)
 	i.WorkspaceScope = strings.TrimSpace(i.WorkspaceScope)
+	i.BundleHash = strings.TrimSpace(i.BundleHash)
 	i.RunID = strings.TrimSpace(i.RunID)
 	i.EntityID = strings.TrimSpace(i.EntityID)
 	i.AgentID = strings.TrimSpace(i.AgentID)
@@ -63,6 +66,7 @@ func (i Identity) Labels() map[string]string {
 		LabelContainerName:  i.ContainerName,
 		LabelWorkspaceScope: i.WorkspaceScope,
 	}
+	addOptionalLabel(labels, LabelBundleHash, i.BundleHash)
 	addOptionalLabel(labels, LabelRunID, i.RunID)
 	addOptionalLabel(labels, LabelEntityID, i.EntityID)
 	addOptionalLabel(labels, LabelAgentID, i.AgentID)
@@ -139,6 +143,7 @@ func FromLabels(labels map[string]string) (Identity, bool, error) {
 		CreationSource: labels[LabelCreationSource],
 		ContainerName:  labels[LabelContainerName],
 		WorkspaceScope: labels[LabelWorkspaceScope],
+		BundleHash:     labels[LabelBundleHash],
 		RunID:          labels[LabelRunID],
 		EntityID:       labels[LabelEntityID],
 		AgentID:        labels[LabelAgentID],

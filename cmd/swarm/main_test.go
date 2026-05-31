@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -370,6 +371,18 @@ func TestCLI_ServeBundleHashValidationAndSerialScope(t *testing.T) {
 			wantCode: 0,
 			wantHash: "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		},
+		{
+			name:       "duplicate pinned bundle hash rejected",
+			args:       []string{"serve", "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+			wantCode:   2,
+			wantStderr: "--bundle-hash values must be unique",
+		},
+		{
+			name:     "repeated canonical bundle hashes accepted",
+			args:     []string{"serve", "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--bundle-hash", "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "--api-listen-addr", "127.0.0.1:0", "--mcp-listen-addr", "127.0.0.1:0"},
+			wantCode: 0,
+			wantHash: "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		},
 	}
 
 	for _, tc := range tests {
@@ -402,6 +415,12 @@ func TestCLI_ServeBundleHashValidationAndSerialScope(t *testing.T) {
 			}
 			if captured.BundleHash != tc.wantHash {
 				t.Fatalf("BundleHash = %q, want %q", captured.BundleHash, tc.wantHash)
+			}
+			if tc.name == "repeated canonical bundle hashes accepted" {
+				wantExtra := []string{"bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
+				if !reflect.DeepEqual(captured.BundleHashes, wantExtra) {
+					t.Fatalf("BundleHashes = %#v, want %#v", captured.BundleHashes, wantExtra)
+				}
 			}
 		})
 	}

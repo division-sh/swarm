@@ -135,6 +135,84 @@ func TestResolveWorkspace_PerAgentMountsStandardPaths(t *testing.T) {
 	}
 }
 
+func TestResolveWorkspace_BundleScopeDisambiguatesContainersVolumesAndLabels(t *testing.T) {
+	const bundleHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	dataDir := t.TempDir()
+	contractsDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
+		t.Fatalf("write package.yaml: %v", err)
+	}
+	manager := NewDockerManager(nil)
+	cfg := DefaultDockerConfig()
+	cfg.SharedDataSource = dataDir
+	cfg.ContractsSource = contractsDir
+	cfg.WorkspaceNetwork = ""
+	cfg.WorkspaceImage = "test-image"
+	manager.SetConfig(cfg)
+	manager.SetBundleScope(bundleHash)
+	manager.SetSemanticSource(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
+			"workspace_classes": {
+				Value: map[string]any{
+					"dedicated": map[string]any{"workspace_scope": "per-agent"},
+				},
+			},
+		}},
+	}))
+
+	var creates [][]string
+	manager.SetRunDockerFnForTest(func(_ context.Context, args ...string) (string, error) {
+		switch args[0] {
+		case "inspect":
+			return "", fmt.Errorf("no such object")
+		case "create":
+			creates = append(creates, append([]string{}, args...))
+			return "", nil
+		case "start":
+			return "", nil
+		default:
+			return "", nil
+		}
+	})
+	ctx := runtimecorrelation.WithRunID(context.Background(), "11111111-1111-1111-1111-111111111111")
+	target, err := manager.ResolveWorkspace(ctx, models.AgentConfig{
+		ID:             "dedicated-agent",
+		WorkspaceClass: "dedicated",
+	})
+	if err != nil {
+		t.Fatalf("ResolveWorkspace: %v", err)
+	}
+	if target == nil || target.Container != "swarm-bundle-aaaaaaaaaaaa-agent-dedicated-agent" {
+		t.Fatalf("target = %#v, want bundle-scoped agent container", target)
+	}
+	joined := flattenDockerCalls(creates)
+	for _, expected := range []string{
+		"workspaces_swarm_bundle_aaaaaaaaaaaa_agent_dedicated_agent:/workspace",
+		"--label dev.swarm.bundle_hash=" + bundleHash,
+		"--label dev.swarm.container.name=swarm-bundle-aaaaaaaaaaaa-agent-dedicated-agent",
+	} {
+		if !strings.Contains(joined, expected) {
+			t.Fatalf("bundle-scoped agent workspace create args missing %q:\n%s", expected, joined)
+		}
+	}
+
+	creates = nil
+	if err := manager.EnsureEntityWorkspace(ctx, "acme"); err != nil {
+		t.Fatalf("EnsureEntityWorkspace: %v", err)
+	}
+	joined = flattenDockerCalls(creates)
+	for _, expected := range []string{
+		"create --name swarm-bundle-aaaaaaaaaaaa-acme",
+		"entities_swarm_bundle_aaaaaaaaaaaa_entity_acme:/workspace",
+		"--label dev.swarm.bundle_hash=" + bundleHash,
+		"--label dev.swarm.container.name=swarm-bundle-aaaaaaaaaaaa-acme",
+	} {
+		if !strings.Contains(joined, expected) {
+			t.Fatalf("bundle-scoped entity workspace create args missing %q:\n%s", expected, joined)
+		}
+	}
+}
+
 func TestResolveWorkspace_PerFlowInstanceSharesByFlowPath(t *testing.T) {
 	dataDir := t.TempDir()
 	contractsDir := t.TempDir()

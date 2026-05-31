@@ -79,7 +79,20 @@ func executeAgentSendDirective(ctx context.Context, req Request, opts OperatorRe
 		TTL:            agentControlIdempotencyTTL,
 		Now:            now,
 	}, func(ctx context.Context) (store.APIIdempotencyCompletion, error) {
-		result, err := opts.AgentControl.SendDirective(ctx, runtimeagentcontrol.SendDirectiveRequest{
+		selectedOpts := opts
+		if runtimeContextManager(opts) != nil {
+			if strings.TrimSpace(runID) == "" && multiRuntimeContextMode(opts) {
+				return store.APIIdempotencyCompletion{}, runtimeContextRequiredError(req.Method, "run_id is required to select a runtime context in multi-context DB-loaded mode")
+			}
+			if strings.TrimSpace(runID) != "" {
+				var err error
+				ctx, selectedOpts, _, err = runtimeBundleContextByRun(ctx, opts, runID)
+				if err != nil {
+					return store.APIIdempotencyCompletion{}, err
+				}
+			}
+		}
+		result, err := selectedOpts.AgentControl.SendDirective(ctx, runtimeagentcontrol.SendDirectiveRequest{
 			AgentID:    agentID,
 			Directive:  directive,
 			RunID:      runID,
@@ -116,6 +129,9 @@ func executeAgentSendDirective(ctx context.Context, req Request, opts OperatorRe
 }
 
 func executeAgentRestart(ctx context.Context, req Request, opts OperatorReadOptions, now time.Time) (any, error) {
+	if multiRuntimeContextMode(opts) {
+		return nil, runtimeContextRequiredError(req.Method, "agent restart is ambiguous in multi-context DB-loaded mode; per-context agent control is split to #1176")
+	}
 	agentID, err := requiredStringParam(req.Params, "agent_id")
 	if err != nil {
 		return nil, err
@@ -157,6 +173,9 @@ func executeAgentRestart(ctx context.Context, req Request, opts OperatorReadOpti
 }
 
 func executeAgentReplayBacklog(ctx context.Context, req Request, opts OperatorReadOptions, now time.Time) (any, error) {
+	if multiRuntimeContextMode(opts) {
+		return nil, runtimeContextRequiredError(req.Method, "agent backlog replay is ambiguous in multi-context DB-loaded mode; per-context agent control is split to #1176")
+	}
 	agentID, err := requiredStringParam(req.Params, "agent_id")
 	if err != nil {
 		return nil, err
