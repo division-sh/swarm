@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"swarm/internal/runtime/bundledelete"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/store"
@@ -57,6 +58,10 @@ type BundleCatalogReadStore interface {
 	ListBundleCatalogAgents(context.Context, string) (store.BundleCatalogAgentsResult, error)
 }
 
+type BundleDeleteExecutor interface {
+	Execute(context.Context, bundledelete.Request) (bundledelete.Result, error)
+}
+
 type OperatorReadOptions struct {
 	Now                   func() time.Time
 	Ready                 func() bool
@@ -68,6 +73,7 @@ type OperatorReadOptions struct {
 	Entities              EntityReadStore
 	AgentConversations    AgentConversationReadStore
 	BundleCatalog         BundleCatalogReadStore
+	BundleDelete          BundleDeleteExecutor
 	ConversationForks     ConversationForkLifecycleStore
 	ForkChatExecutor      ForkChatExecutor
 	RunBundleContext      RunBundleContextStore
@@ -251,6 +257,9 @@ func OperatorReadHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 		handlers[name] = handler
 	}
 	for name, handler := range OperatorBundleRegisterHandlers(opts) {
+		handlers[name] = handler
+	}
+	for name, handler := range OperatorBundleDeleteHandlers(opts) {
 		handlers[name] = handler
 	}
 	for name, handler := range OperatorConversationForkHandlers(opts) {

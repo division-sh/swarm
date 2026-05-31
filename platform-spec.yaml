@@ -5549,19 +5549,19 @@ multi_bundle_persistence:
     promoted implementation owners in this section. Remaining runtime, API handler, CLI, delete/fork/recovery, and
     generated OpenRPC publication work stays separately gated unless a later PR explicitly promotes and proves it.
   generated_artifact_policy:
-    current_openrpc_status: bundle_read_catalog_register_and_run_fork_methods_published
+    current_openrpc_status: bundle_read_catalog_register_run_fork_and_force_delete_methods_published
     rule: >
       Generated openrpc.json is derived from api_specification.method_catalog and must continue to match the currently
       registered /v1/rpc handler set. The read-only bundle.list, bundle.get, and bundle.agents catalog methods are now
       published because their handlers and store owner are implemented in the same gated PR. run.fork is now published
       because its selected-contract API/runtime handler owner is implemented in the same gated PR. Mutating bundle.register
       is now published because its handler, idempotency behavior, shared bundle catalog writer, and generated artifacts are
-      implemented together. Destructive bundle.delete remains source authority only until its API/runtime handler is
-      implemented and registered in a later gated PR.
+      implemented together. Force-only bundle.delete is now published because its API/runtime handler owner is implemented
+      in the same gated PR; omitted or false force remains fail-closed and split to #1018.
     proof_expectation: >
-      Source-authority promotion proof must verify that bundle.delete is not silently published in generated OpenRPC
-      without implementation, and that future implementation PRs promote matching method_catalog entries and generated
-      artifacts together.
+      Source-authority promotion proof must verify that generated OpenRPC methods are not silently published without
+      implementation, and that future implementation PRs promote matching method_catalog entries and generated artifacts
+      together.
   bundle_identity:
     canonical_name: bundle_hash
     format: 'bundle-v1:sha256:<64 lowercase hex>'
@@ -5840,17 +5840,19 @@ multi_bundle_persistence:
       Without --force, deleting a bundle with any active run using that bundle fails closed with BUNDLE_HAS_ACTIVE_RUNS.
     phase_5_atomicity:
       tracker: '#1009'
-      implementation_status: source_authority_only_no_runtime_behavior
-      canonical_runtime_owner: future bundle catalog store transaction/mutator
+      implementation_status: implemented_for_force_delete_runtime_non_force_pending
+      canonical_runtime_owner: internal/store.PostgresStore.ApplyBundleDeleteFinalMutation
       applies_to:
         - '#1018 non-force bundle.delete final bundle availability mutation'
         - '#1019 bundle.delete --force final bundle availability mutation after preservation cleanup succeeds'
       transaction_rule: >
-        The final bundle availability mutation MUST execute in one database transaction. The transaction updates every
-        eligible referencing run from bundle_source=persisted to bundle_source=deleted before deleting the matching bundles
-        row. API handlers, CLI consumers, force-delete orchestration, and non-force delete orchestration MUST consume the
-        shared store transaction owner rather than issuing local raw SQL for this transition.
+        The final bundle availability mutation MUST execute in one database transaction. The transaction first serializes
+        run creation for the runs table, then rechecks/locks referencing persisted run rows, then updates every eligible
+        referencing run from bundle_source=persisted to bundle_source=deleted before deleting the matching bundles row. API
+        handlers, CLI consumers, force-delete orchestration, and non-force delete orchestration MUST consume the shared
+        store transaction owner rather than issuing local raw SQL for this transition.
       transaction_order:
+        - lock_runs_table_against_new_persisted_bundle_references
         - update_eligible_runs_bundle_source_to_deleted
         - delete_matching_bundles_row
       eligible_runs: >
@@ -5858,9 +5860,10 @@ multi_bundle_persistence:
         is owned by #1018 for non-force delete, and active-run quiescence plus preservation cleanup is owned by #1019/#1008
         for force delete before Phase 5 is reachable.
       isolation: >
-        PostgreSQL READ COMMITTED is sufficient when both statements are inside the same transaction: concurrent readers
-        observe either the pre-delete persisted source with an existing bundle row or the post-delete deleted source with no
-        row. They must not observe a legitimate delete as bundle_source=persisted with a missing bundle row.
+        PostgreSQL READ COMMITTED is sufficient only when the final transaction blocks concurrent run creation before the
+        active-run recheck and source update. Concurrent readers observe either the pre-delete persisted source with an
+        existing bundle row or the post-delete deleted source with no row. They must not observe a legitimate delete as
+        bundle_source=persisted with a missing bundle row.
       reader_invariant: >
         Bundle availability readers MUST read runs.bundle_source before consulting bundles. Readers only look up bundles
         when bundle_source=persisted. bundle_source in (ephemeral, deleted, legacy) returns BUNDLE_UNAVAILABLE without a
@@ -5893,7 +5896,7 @@ multi_bundle_persistence:
         - containers_stopped
         - dry_run
   api_surface:
-    publication_status: bundle_read_catalog_register_and_run_fork_generated_openrpc
+    publication_status: bundle_read_catalog_register_run_fork_and_force_delete_generated_openrpc
     command_transport_owner: api_specification
     bundle_methods_planned:
       bundle.list:
@@ -10029,7 +10032,7 @@ api_specification:
       downgraded to backlog before it can be used as implementation authority.
   multi_bundle_publication_boundary:
     owner: multi_bundle_persistence.api_surface
-    status: partial_bundle_read_catalog_register_and_run_fork_method_catalog
+    status: partial_bundle_read_catalog_register_run_fork_and_force_delete_method_catalog
     rule: >
       #1012 promotes the multi-bundle API contract as source authority, including bundle.* methods, run.fork, bundle_hash
       filters, and bundle_hash create-new-work params. The read-only bundle.list, bundle.get, and bundle.agents methods are
@@ -10038,10 +10041,11 @@ api_specification:
       bundle register CLI consumer in #1023's read-only inventory slice. run.fork is also promoted into
       method_catalog/OpenRPC with matching selected-contract API/runtime handler proof by #989. The swarm bundle
       list/show/agents and swarm fork CLI consumers are implemented by #1023 and consume only those canonical /v1/rpc
-      methods. Remaining unimplemented multi-bundle methods such as bundle.delete are not in method_catalog/OpenRPC until
-      a later gated API/runtime implementation PR registers handlers and regenerates openrpc.json/proof artifacts in the
-      same PR. Consumers must not treat docs/MULTI_BUNDLE_PERSISTENCE_DRAFT.md or #1038 prose as API authority after
-      #1012.
+      methods. Force-only bundle.delete is promoted into method_catalog/OpenRPC with matching API/runtime handler proof by
+      #1019; omitted or false force remains fail-closed and split to #1018. Remaining multi-bundle methods and shapes are
+      not in method_catalog/OpenRPC until a later gated API/runtime implementation PR registers handlers and regenerates
+      openrpc.json/proof artifacts in the same PR. Consumers must not treat docs/MULTI_BUNDLE_PERSISTENCE_DRAFT.md or
+      #1038 prose as API authority after #1012.
     blocked_children:
       cross_bundle_fork: '#976'
       bundle_hash_dual_accept_migration: '#1001'
@@ -10337,6 +10341,7 @@ api_specification:
       - bundle.register
       - event.publish
       - event.replay
+      - bundle.delete
       - run.fork
       - agent.replay
       - run.start
@@ -10760,6 +10765,88 @@ api_specification:
             type: integer
             minimum: 0
             description: Size of persisted data_blob bytes, or 0 when has_data is false.
+      BundleDeleteResult:
+        type: object
+        additionalProperties: false
+        required:
+        - ok
+        - status
+        - operation_name
+        - bundle_hash
+        - force
+        - deleted
+        - dry_run
+        - active_runs_stopped
+        - deliveries_cancelled
+        - containers_stopped
+        - partial_failure
+        - plan
+        - cleanup
+        - containers
+        - final_mutation
+        properties:
+          ok:
+            type: boolean
+            description: True for dry-run or fully completed apply; false when the operation completed with explicit partial
+              failures.
+          status:
+            type: string
+            enum:
+            - dry_run
+            - completed
+            - partial_failure
+          operation_name:
+            type: string
+            const: bundle.delete
+          bundle_hash:
+            $ref: '#/components/schemas/BundleHash'
+          force:
+            type: boolean
+            const: true
+          deleted:
+            type: boolean
+          dry_run:
+            type: boolean
+          active_runs_stopped:
+            type: integer
+            minimum: 0
+          deliveries_cancelled:
+            type: integer
+            minimum: 0
+          containers_stopped:
+            type: integer
+            minimum: 0
+          partial_failure:
+            type: boolean
+          plan:
+            type: object
+            additionalProperties: true
+            description: Exact result from the bundle-delete plan owner.
+          cleanup:
+            type: object
+            additionalProperties: true
+            description: Exact result from the preservation cleanup owner.
+          containers:
+            type: object
+            additionalProperties: true
+            description: Exact result from the managed container identity filter/stop owner.
+          final_mutation:
+            type: object
+            additionalProperties: true
+            description: Exact result from the #1009 source-first bundle delete transaction owner.
+          errors:
+            type: array
+            items:
+              type: object
+              additionalProperties: false
+              required:
+              - scope
+              - message
+              properties:
+                scope:
+                  type: string
+                message:
+                  type: string
       HealthCheckResult:
         type: object
         additionalProperties: false
@@ -12946,6 +13033,15 @@ api_specification:
         properties:
           bundle_hash:
             $ref: '#/components/schemas/BundleHash'
+      BUNDLE_DELETE_IN_PROGRESS:
+        type: object
+        additionalProperties: false
+        required:
+        - operation_name
+        properties:
+          operation_name:
+            type: string
+            const: bundle.delete
       BUNDLE_UNAVAILABLE:
         type: object
         additionalProperties: false
@@ -13536,6 +13632,47 @@ api_specification:
           $ref: '#/components/schemas/BundleRegistrationResult'
       errors:
       - BUNDLE_REGISTER_CONFLICT
+      - IDEMPOTENCY_CONFLICT
+    bundle.delete:
+      tier: should_have
+      description: >
+        Force-only destructive bundle delete wrapper. The API layer owns only the v1 request/response/auth/idempotency
+        contract and MUST consume the bundle-delete owner chain for execution: shared destructive-operation mutex, bundle
+        plan, preservation cleanup for active affected runs, managed entity-container selection/stop by run identity, and
+        the #1009 source-first final store transaction. `force=false` and omitted force are intentionally fail-closed and
+        split to #1018; this method MUST NOT implement non-force deletion, CLI behavior, runtime.nuke include_bundles, or
+        broad multi-bundle lifecycle cleanup.
+      scope:
+        required:
+        - control:runtime
+      idempotency: per the convention.
+      params:
+      - name: bundle_hash
+        required: true
+        schema:
+          $ref: '#/components/schemas/BundleHash'
+      - name: force
+        required: false
+        schema:
+          type: boolean
+          default: false
+      - name: dry_run
+        required: false
+        schema:
+          type: boolean
+          default: false
+      - name: idempotency_key
+        required: false
+        schema:
+          type: string
+      result:
+        name: result
+        required: true
+        schema:
+          $ref: '#/components/schemas/BundleDeleteResult'
+      errors:
+      - BUNDLE_NOT_FOUND
+      - BUNDLE_DELETE_IN_PROGRESS
       - IDEMPOTENCY_CONFLICT
     health.subscribe:
       tier: should_have

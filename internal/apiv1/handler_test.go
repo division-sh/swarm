@@ -31,8 +31,8 @@ func TestRegistryMethodNamesMatchGeneratedOpenRPC(t *testing.T) {
 	if got := registry.MethodNames(); !reflect.DeepEqual(got, openRPCNames) {
 		t.Fatalf("registry method names drifted from generated OpenRPC:\nregistry=%v\nopenrpc=%v", got, openRPCNames)
 	}
-	if len(openRPCNames) != 55 {
-		t.Fatalf("method count = %d, want 55", len(openRPCNames))
+	if len(openRPCNames) != 56 {
+		t.Fatalf("method count = %d, want 56", len(openRPCNames))
 	}
 	if _, ok := registry.Method("run.fork"); !ok {
 		t.Fatal("run.fork missing from generated registry")

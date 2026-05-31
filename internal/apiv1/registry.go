@@ -18,6 +18,7 @@ const (
 	BundleUnavailableCode                = "BUNDLE_UNAVAILABLE"
 	BundleDataIntegrityErrorCode         = "BUNDLE_DATA_INTEGRITY_ERROR"
 	BundleRegisterConflictCode           = "BUNDLE_REGISTER_CONFLICT"
+	BundleDeleteInProgressCode           = "BUNDLE_DELETE_IN_PROGRESS"
 	UnsupportedBundleHashCode            = "UNSUPPORTED_BUNDLE_HASH"
 	UnsupportedBundleHashForkCode        = "UNSUPPORTED_BUNDLE_HASH_FORK"
 	UnsupportedBundleRefCode             = "UNSUPPORTED_BUNDLE_REF"

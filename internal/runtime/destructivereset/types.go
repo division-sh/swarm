@@ -10,7 +10,8 @@ import (
 
 const (
 	DefaultOperationName = "runtime.destructive_reset"
-	defaultLockKey       = "swarm:runtime:destructive-reset"
+	DefaultLockKey       = "swarm:runtime:destructive-reset"
+	defaultLockKey       = DefaultLockKey
 
 	QuiescenceControlledBy = DefaultOperationName
 	QuiescenceReasonCode   = "runtime_nuke_cancelled"

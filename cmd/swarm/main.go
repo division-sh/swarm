@@ -32,6 +32,7 @@ import (
 	"swarm/internal/runtime"
 	runtimebootverify "swarm/internal/runtime/bootverify"
 	"swarm/internal/runtime/budgetspend"
+	runtimebundledelete "swarm/internal/runtime/bundledelete"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimecorrelation "swarm/internal/runtime/correlation"
@@ -597,12 +598,20 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		Ready: func() bool {
 			return ready.Load()
 		},
-		Database:            stores.Postgres,
-		Runs:                stores.Postgres,
-		Observability:       apiObservability,
-		Entities:            apiEntities,
-		AgentConversations:  apiAgentConversations,
-		BundleCatalog:       stores.Postgres,
+		Database:           stores.Postgres,
+		Runs:               stores.Postgres,
+		Observability:      apiObservability,
+		Entities:           apiEntities,
+		AgentConversations: apiAgentConversations,
+		BundleCatalog:      stores.Postgres,
+		BundleDelete: &runtimebundledelete.Coordinator{
+			Planner:            stores.Postgres,
+			Cleaner:            stores.Postgres,
+			Finalizer:          stores.Postgres,
+			Locks:              stores.Postgres,
+			ContainerInventory: workspaces,
+			Containers:         runtimedestructivereset.ManagedContainerStopper{Runtime: workspaces},
+		},
 		ConversationForks:   stores.Postgres,
 		ForkChatExecutor:    apiv1.NewLLMForkChatExecutor(forkChatLLM),
 		RunBundleContext:    stores.Postgres,

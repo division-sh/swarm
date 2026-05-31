@@ -17,6 +17,7 @@ import (
 	"swarm/internal/apispec"
 	"swarm/internal/events"
 	runtimeagentcontrol "swarm/internal/runtime/agentcontrol"
+	"swarm/internal/runtime/bundledelete"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimecorrelation "swarm/internal/runtime/correlation"
@@ -220,6 +221,7 @@ func approvedMutatingHTTPRuntimeMethods() []string {
 		"agent.replay_backlog",
 		"agent.restart",
 		"agent.send_directive",
+		"bundle.delete",
 		"bundle.register",
 		"conversation.fork",
 		"conversation.fork_chat",
@@ -278,6 +280,12 @@ func mutatingHTTPRuntimeFixtures() map[string]mutatingHTTPRuntimeFixture {
 			Params:         map[string]any{"agent_id": "agent-a", "directive": "continue", "run_id": runID},
 			ConflictParams: map[string]any{"agent_id": "agent-a", "directive": "pause", "run_id": runID},
 			ResultKeys:     []string{"ok", "run_id", "run_id_resolution", "directive_event_id", "directive_event_type"},
+			SuccessEffects: 1,
+		},
+		"bundle.delete": {
+			Params:         map[string]any{"bundle_hash": runStartTestBundleHash, "force": true, "dry_run": false},
+			ConflictParams: map[string]any{"bundle_hash": runStartTestBundleHash, "force": true, "dry_run": true},
+			ResultKeys:     []string{"ok", "status", "operation_name", "bundle_hash", "force", "deleted", "dry_run", "active_runs_stopped", "deliveries_cancelled", "containers_stopped", "plan", "cleanup", "containers", "final_mutation"},
 			SuccessEffects: 1,
 		},
 		"conversation.fork": {
@@ -558,6 +566,8 @@ func mutatingHTTPRuntimeErrorProbes() []mutatingHTTPRuntimeErrorProbe {
 			s.runtimeIngress.errs["runtime.resume"] = runtimeingress.ErrNotPaused
 		}}},
 		{Method: "runtime.nuke", Params: map[string]any{"dry_run": false, "idempotency_key": "idem-error"}, Code: RuntimeNukeInProgressCode, WantEffects: 1, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.nuke.planErr = destructivereset.ErrOperationInProgress }}},
+		{Method: "bundle.delete", Params: map[string]any{"bundle_hash": runStartTestBundleHash, "force": true, "idempotency_key": "idem-error"}, Code: BundleNotFoundCode, WantEffects: 1, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.bundleDelete.err = store.ErrBundleNotFound }}},
+		{Method: "bundle.delete", Params: map[string]any{"bundle_hash": runStartTestBundleHash, "force": true, "idempotency_key": "idem-error"}, Code: BundleDeleteInProgressCode, WantEffects: 1, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.bundleDelete.err = bundledelete.ErrOperationInProgress }}},
 	}
 }
 
@@ -665,6 +675,7 @@ type mutatingRuntimeProbeState struct {
 	bundleCatalog       *mutatingProbeBundleCatalog
 	forks               *fakeConversationForkLifecycleStore
 	nuke                *recordingRuntimeNukeOwners
+	bundleDelete        *recordingBundleDeleteExecutor
 	effects             int
 }
 
@@ -689,6 +700,9 @@ func newMutatingRuntimeProbeState(t *testing.T, methodName string) *mutatingRunt
 			errs: map[string]error{},
 		},
 		nuke: newRecordingRuntimeNukeOwners(),
+		bundleDelete: &recordingBundleDeleteExecutor{
+			bundleHash: runStartTestBundleHash,
+		},
 	}
 	state.observability.events["evt-1"] = mutatingProbeOriginalEvent("evt-1", []string{"agent-a"}, eventReplayStatusDelivered)
 	state.events = &mutatingProbeEventPublisher{state: state}
@@ -832,6 +846,7 @@ func (s *mutatingRuntimeProbeState) options(t *testing.T) OperatorReadOptions {
 		ResetQuiescer:         recordingRuntimeNukeQuiescer{s.nuke},
 		ResetCleaner:          recordingRuntimeNukeCleaner{s.nuke},
 		ResetContainers:       recordingRuntimeNukeContainerStopper{s.nuke},
+		BundleDelete:          s.bundleDelete,
 		Source:                source,
 		MailboxApprovalRoutes: map[string]string{"review_request": "mailbox.item_decided"},
 		Bundle: runtimecontracts.BundleIdentity{
@@ -847,7 +862,45 @@ func (s *mutatingRuntimeProbeState) recordEffect() {
 }
 
 func (s *mutatingRuntimeProbeState) effectCount() int {
-	return s.effects + len(s.nuke.calls)
+	return s.effects + len(s.nuke.calls) + len(s.bundleDelete.calls)
+}
+
+type recordingBundleDeleteExecutor struct {
+	calls      []bundledelete.Request
+	err        error
+	bundleHash string
+}
+
+func (e *recordingBundleDeleteExecutor) Execute(_ context.Context, req bundledelete.Request) (bundledelete.Result, error) {
+	e.calls = append(e.calls, req)
+	if e.err != nil {
+		return bundledelete.Result{}, e.err
+	}
+	bundleHash := strings.TrimSpace(req.BundleHash)
+	if bundleHash == "" {
+		bundleHash = strings.TrimSpace(e.bundleHash)
+	}
+	return bundledelete.Result{
+		OK:                  true,
+		Status:              "completed",
+		OperationName:       bundledelete.DefaultOperationName,
+		BundleHash:          bundleHash,
+		Force:               req.Force,
+		Deleted:             true,
+		DryRun:              req.DryRun,
+		ActiveRunsStopped:   1,
+		DeliveriesCancelled: 1,
+		ContainersStopped:   1,
+		Plan: bundledelete.Plan{
+			BundleHash: bundleHash,
+			ActiveRuns: []bundledelete.RunRef{{
+				RunID:        "00000000-0000-0000-0000-000000000101",
+				Status:       "running",
+				BundleHash:   bundleHash,
+				BundleSource: "persisted",
+			}},
+		},
+	}, nil
 }
 
 type mutatingProbeIdempotencyStore struct {
