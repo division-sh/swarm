@@ -119,6 +119,24 @@ func (d engineDispatcher) DispatchPostCommit(ctx context.Context, intents []runt
 	if runtimepipeline.CollectPipelineEmitIntents(ctx, intents) {
 		return nil
 	}
+	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		queuedIntents := append([]runtimeengine.EmitIntent(nil), intents...)
+		if !runtimepipeline.QueuePipelinePostCommitAction(ctx, func() {
+			postCommitActions := make([]func(), 0, 4)
+			dispatchCtx := runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(ctx))
+			dispatchCtx = runtimepipeline.WithPipelinePostCommitActions(dispatchCtx, &postCommitActions)
+			if err := d.DispatchPostCommit(dispatchCtx, queuedIntents); err != nil {
+				d.bus.logRuntime(dispatchCtx, "error", "Post-commit outbox dispatch failed", "eventbus", "post_commit_outbox_dispatch_failed", "", "", "", "", "", nil, map[string]any{
+					"error":         err.Error(),
+					"intents_count": len(queuedIntents),
+				}, err.Error(), 0)
+			}
+			runtimepipeline.FlushPipelinePostCommitActions(postCommitActions)
+		}) {
+			return errors.New("post-commit dispatch requires pipeline post-commit actions when a SQL transaction is active")
+		}
+		return nil
+	}
 	for _, intent := range intents {
 		queued, err := d.dispatchIntent(ctx, intent)
 		if err != nil {

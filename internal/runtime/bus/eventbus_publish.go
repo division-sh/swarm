@@ -460,9 +460,9 @@ func (eb *EventBus) publishTransactional(
 	if err != nil {
 		return fmt.Errorf("begin publish tx: %w", err)
 	}
-	postCommitActions := make([]func(), 0, 8)
+	txPostCommitActions := make([]func(), 0, 8)
 	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
-	txctx = runtimepipeline.WithPipelinePostCommitActions(txctx, &postCommitActions)
+	txctx = runtimepipeline.WithPipelinePostCommitActions(txctx, &txPostCommitActions)
 	receiptOverride := &runtimepipeline.PipelineReceiptOverride{}
 	txctx = runtimepipeline.WithPipelineReceiptOverride(txctx, receiptOverride)
 	committed := false
@@ -509,7 +509,7 @@ func (eb *EventBus) publishTransactional(
 			return fmt.Errorf("commit publish tx: %w", err)
 		}
 		committed = true
-		runtimepipeline.FlushPipelinePostCommitActions(postCommitActions)
+		runtimepipeline.FlushPipelinePostCommitActions(txPostCommitActions)
 		eb.recordTargetDeliveryFailure(ctx, evt, inboundPlan)
 		eb.logPublished(ctx, evt, int(time.Since(start)/time.Microsecond))
 		return nil
@@ -527,47 +527,54 @@ func (eb *EventBus) publishTransactional(
 		return nil
 	}
 
-	passthrough, deferred, err := eb.runInterceptors(txctx, evt)
-	if err != nil {
-		return err
-	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit publish tx: %w", err)
 	}
 	committed = true
+	runtimepipeline.FlushPipelinePostCommitActions(txPostCommitActions)
+
+	postCommitActions := make([]func(), 0, 8)
+	dispatchCtx := runtimepipeline.WithoutPipelineSQLTxContext(ctx)
+	dispatchCtx = runtimepipeline.WithPipelinePostCommitActions(dispatchCtx, &postCommitActions)
+	dispatchCtx = runtimepipeline.WithPipelineReceiptOverride(dispatchCtx, receiptOverride)
+	passthrough, deferred, err := eb.runInterceptors(dispatchCtx, evt)
+	if err != nil {
+		eb.recordCommittedPublishReceipt(dispatchCtx, evt, err)
+		return nil
+	}
 	runtimepipeline.FlushPipelinePostCommitActions(postCommitActions)
 	if deferredTransitions != nil {
-		runtimepipeline.FlushDeferredPipelineTransitions(ctx, *deferredTransitions)
+		runtimepipeline.FlushDeferredPipelineTransitions(dispatchCtx, *deferredTransitions)
 	}
 
 	if passthrough {
 		if len(inboundPlan.Recipients) > 0 {
-			eb.logQueuedDeliveries(ctx, evt, inboundPlan.PersistedRecipients, "matched_agent_subscription", inboundPlan.ExtraDetail)
-			if err := eb.deliverToRecipientsWithRoutes(ctx, evt, inboundPlan.Recipients, inboundPlan.DeliveryRoutes); err != nil {
-				eb.recordCommittedPublishReceipt(ctx, evt, err)
+			eb.logQueuedDeliveries(dispatchCtx, evt, inboundPlan.PersistedRecipients, "matched_agent_subscription", inboundPlan.ExtraDetail)
+			if err := eb.deliverToRecipientsWithRoutes(dispatchCtx, evt, inboundPlan.Recipients, inboundPlan.DeliveryRoutes); err != nil {
+				eb.recordCommittedPublishReceipt(dispatchCtx, evt, err)
 				return nil
 			}
-			eb.logDelivery(ctx, evt, inboundPlan.Recipients, inboundPlan.ExtraDetail)
+			eb.logDelivery(dispatchCtx, evt, inboundPlan.Recipients, inboundPlan.ExtraDetail)
 		}
 		if inboundPlan.BlockedByCycle && inboundPlan.CycleEscalation != nil {
-			if err := eb.publishDeferred(ctx, *inboundPlan.CycleEscalation); err != nil {
-				eb.recordCommittedPublishReceipt(ctx, evt, err)
+			if err := eb.publishDeferred(dispatchCtx, *inboundPlan.CycleEscalation); err != nil {
+				eb.recordCommittedPublishReceipt(dispatchCtx, evt, err)
 				return nil
 			}
 		}
 		if strings.TrimSpace(inboundPlan.ContradictionReason) != "" {
-			_ = eb.emitContradiction(ctx, evt, inboundPlan.ContradictionReason)
+			_ = eb.emitContradiction(dispatchCtx, evt, inboundPlan.ContradictionReason)
 		}
 	}
-	eb.logPublished(ctx, evt, int(time.Since(start)/time.Microsecond))
+	eb.logPublished(dispatchCtx, evt, int(time.Since(start)/time.Microsecond))
 
 	for _, d := range deferred {
-		if err := eb.publishDeferred(ctx, d); err != nil {
-			eb.recordCommittedPublishReceipt(ctx, evt, err)
+		if err := eb.publishDeferred(dispatchCtx, d); err != nil {
+			eb.recordCommittedPublishReceipt(dispatchCtx, evt, err)
 			return nil
 		}
 	}
-	eb.recordCommittedPublishReceipt(ctx, evt, nil)
+	eb.recordCommittedPublishReceipt(dispatchCtx, evt, nil)
 	return nil
 }
 
