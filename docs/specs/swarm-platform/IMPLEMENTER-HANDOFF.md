@@ -63,7 +63,7 @@ No. Treat the YAML contracts as the spec. The handoff explains the delta from v2
 
 ### Q4: Is `platform-spec.yaml` authoritative over prose and scripts?
 
-**Yes.** `platform/contracts/platform-spec.yaml` is the authoritative specification. The prose overview (`platform-spec.md`) is a summary — when they conflict, the YAML wins. The verifier script (`verify.py`) is a reference implementation of the boot verification checks.
+**Yes.** root `platform-spec.yaml` is the authoritative specification. The prose overview (`platform-spec.md`) is a summary — when they conflict, the YAML wins. The verifier script (`verify.py`) is a reference implementation of the boot verification checks.
 
 
 
@@ -270,9 +270,9 @@ Go boot sequence already implements semantic validation (CEL parsing, contract c
 
 | Priority | File | Why |
 |----------|------|-----|
-| 1 | `platform/contracts/platform-spec.yaml` → `handler_execution_order` | Dependency graph model |
-| 2 | `platform/contracts/platform-spec.yaml` → `system_node_specification` | Every handler field defined |
-| 3 | `platform/contracts/platform-spec.yaml` → `engine` | Event loop, atomicity, state management |
+| 1 | `platform-spec.yaml` → `handler_execution_order` | Dependency graph model |
+| 2 | `platform-spec.yaml` → `system_node_specification` | Every handler field defined |
+| 3 | `platform-spec.yaml` → `engine` | Event loop, atomicity, state management |
 | 4 | `<contracts-root>/flows/validation/nodes.yaml` | Your 6 deferred handlers |
 | 5 | `<contracts-root>/flows/operating/nodes.yaml` | New build-orchestrator |
 | 6 | `verify.py` | Boot verification reference implementation |

@@ -2,7 +2,7 @@
 
 This guide is the human-oriented companion to [platform-spec.md](platform-spec.md). It covers the same platform surface but organizes the material around how a reader usually learns and uses the platform, rather than around the raw contract layout.
 
-**Authority boundary.** The authoritative source of truth is always [platform-spec.yaml](contracts/platform-spec.yaml). The prose spec in [platform-spec.md](platform-spec.md) is the exact rendering of that YAML. This guide is explanatory only. If this guide and the spec ever disagree, the YAML and spec win.
+**Authority boundary.** The authoritative source of truth is always [platform-spec.yaml](../../../../platform-spec.yaml). The prose spec in [platform-spec.md](platform-spec.md) is the exact rendering of that YAML. This guide is explanatory only. If this guide and the spec ever disagree, the YAML and spec win.
 
 ---
 
@@ -873,7 +873,7 @@ This guide covers every top-level section from the reference spec, reorganized i
 
 The recommended approach for this documentation:
 
-- Keep [platform-spec.yaml](contracts/platform-spec.yaml) as the sole authority.
+- Keep [platform-spec.yaml](../../../../platform-spec.yaml) as the sole authority.
 - Keep [platform-spec.md](platform-spec.md) as the exact prose rendering of that authority.
 - Use this guide as the reader-first companion for humans.
 
