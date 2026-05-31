@@ -343,6 +343,23 @@ func TestRuntimeProjectSupervisorLoadProject_PassesBundleFingerprintToRuntime(t 
 	}
 }
 
+func TestRuntimeProjectSupervisorOpenProjectFailsClosedWhenSourceReplacementDisabled(t *testing.T) {
+	projectRoot := writeProjectRoot(t)
+	supervisor := newSupervisorForLoadProjectFailureTest(t, projectRoot, stubWorkspaceLifecycle{}, func(context.Context, runtimepkg.RuntimeDeps) (*runtimepkg.Runtime, error) {
+		t.Fatal("createRuntime should not be called when DB-loaded source replacement is disabled")
+		return nil, nil
+	})
+	supervisor.DisableSourceReplacement("DB-loaded --bundle-hash pins one catalog source for this process")
+
+	status, err := supervisor.OpenProject(context.Background(), projectRoot)
+	if err == nil || !strings.Contains(err.Error(), "project source replacement is disabled") || !strings.Contains(err.Error(), "DB-loaded --bundle-hash") {
+		t.Fatalf("OpenProject err = %v, want source replacement disabled", err)
+	}
+	if status.Loaded {
+		t.Fatalf("status.Loaded = true, want false")
+	}
+}
+
 type builderControlTestAgent struct{ id string }
 
 func (a builderControlTestAgent) ID() string                      { return a.id }

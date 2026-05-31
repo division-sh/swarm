@@ -25,9 +25,9 @@ type BundleCatalogProjectionOptions struct {
 }
 
 type bundleCatalogProjectedFile struct {
-	Label     string
-	Policy    string
-	SizeBytes int
+	Label     string `json:"label" yaml:"label"`
+	Policy    string `json:"policy" yaml:"policy"`
+	SizeBytes int    `json:"size_bytes" yaml:"size_bytes"`
 }
 
 type bundleCatalogDataArchive struct {
@@ -36,9 +36,9 @@ type bundleCatalogDataArchive struct {
 }
 
 type bundleCatalogDataEntry struct {
-	Label         string `json:"label"`
-	SizeBytes     int    `json:"size_bytes"`
-	ContentBase64 string `json:"content_base64"`
+	Label         string `json:"label" yaml:"label"`
+	SizeBytes     int    `json:"size_bytes" yaml:"size_bytes"`
+	ContentBase64 string `json:"content_base64" yaml:"content_base64"`
 }
 
 // BuildBundleCatalogProjection is the shared owner for persisted bundle rows.

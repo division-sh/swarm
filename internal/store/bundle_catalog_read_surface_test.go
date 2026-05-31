@@ -103,6 +103,22 @@ agents:
 	if agents.Agents[1].AgentID != "reviewer" || agents.Agents[1].FlowInstance != "review/primary" {
 		t.Fatalf("flow agent = %#v", agents.Agents[1])
 	}
+
+	runtimeRecord, err := pg.LoadBundleCatalogRuntimeRecord(ctx, newerHash)
+	if err != nil {
+		t.Fatalf("LoadBundleCatalogRuntimeRecord: %v", err)
+	}
+	if runtimeRecord.BundleHash != newerHash || runtimeRecord.ContentYAML != `name: newer` || string(runtimeRecord.DataBlob) != "blob" {
+		t.Fatalf("runtime record = %#v", runtimeRecord)
+	}
+
+	olderRuntimeRecord, err := pg.LoadBundleCatalogRuntimeRecord(ctx, olderHash)
+	if err != nil {
+		t.Fatalf("LoadBundleCatalogRuntimeRecord older: %v", err)
+	}
+	if olderRuntimeRecord.BundleHash != olderHash || olderRuntimeRecord.DataBlob != nil {
+		t.Fatalf("older runtime record = %#v, want nil data blob", olderRuntimeRecord)
+	}
 }
 
 func TestBundleCatalogReadSurfaceMissingCursorAndMalformedProjection(t *testing.T) {
@@ -113,6 +129,9 @@ func TestBundleCatalogReadSurfaceMissingCursorAndMalformedProjection(t *testing.
 	missingHash := "bundle-v1:sha256:9999999999999999999999999999999999999999999999999999999999999999"
 	if _, err := pg.LoadBundleCatalog(ctx, missingHash); !errors.Is(err, ErrBundleNotFound) {
 		t.Fatalf("LoadBundleCatalog missing error = %v, want ErrBundleNotFound", err)
+	}
+	if _, err := pg.LoadBundleCatalogRuntimeRecord(ctx, missingHash); !errors.Is(err, ErrBundleNotFound) {
+		t.Fatalf("LoadBundleCatalogRuntimeRecord missing error = %v, want ErrBundleNotFound", err)
 	}
 	if _, err := pg.ListBundleCatalog(ctx, BundleCatalogListOptions{Cursor: "not-a-cursor"}); !errors.Is(err, ErrInvalidBundleCatalogCursor) {
 		t.Fatalf("ListBundleCatalog invalid cursor error = %v, want ErrInvalidBundleCatalogCursor", err)

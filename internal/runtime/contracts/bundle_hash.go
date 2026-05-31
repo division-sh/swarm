@@ -27,7 +27,10 @@ const (
 	bundleHashV1Prelude = "swarm-bundle-hash-v1\n"
 )
 
-var yamlJSONNumberPattern = regexp.MustCompile(`^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$`)
+var (
+	bundleHashV1Pattern   = regexp.MustCompile(`^bundle-v1:sha256:[0-9a-f]{64}$`)
+	yamlJSONNumberPattern = regexp.MustCompile(`^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$`)
+)
 
 type bundleHashContentPolicy int
 
@@ -79,6 +82,20 @@ func BundleHash(bundle *WorkflowContractBundle) (string, error) {
 		hasher.Write(content)
 	}
 	return bundleHashV1Prefix + hex.EncodeToString(hasher.Sum(nil)), nil
+}
+
+func IsBundleHash(value string) bool {
+	return bundleHashV1Pattern.MatchString(strings.TrimSpace(value))
+}
+
+func ValidateBundleHash(value string) error {
+	if strings.TrimSpace(value) == "" {
+		return fmt.Errorf("bundle_hash must be non-empty")
+	}
+	if !IsBundleHash(value) {
+		return fmt.Errorf("bundle_hash must be bundle-v1:sha256:<64 lowercase hex>")
+	}
+	return nil
 }
 
 func bundleHashEntries(bundle *WorkflowContractBundle) ([]bundleHashEntry, error) {

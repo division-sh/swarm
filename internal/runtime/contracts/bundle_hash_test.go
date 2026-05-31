@@ -187,6 +187,100 @@ func TestBundleCatalogProjectionStableForEquivalentCanonicalContent(t *testing.T
 	}
 }
 
+func TestBundleCatalogRuntimeLoaderReconstructsConfigAndData(t *testing.T) {
+	repo := repoRootForContractsTest(t)
+	contractsRoot := filepath.Join(repo, "tests", "tier12-runtime-tools", "test-flow-data-access")
+	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, contractsRoot, DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	projection, err := BuildBundleCatalogProjection(bundle)
+	if err != nil {
+		t.Fatalf("BuildBundleCatalogProjection: %v", err)
+	}
+
+	loaded, err := LoadBundleCatalogRuntimeSource(repo, BundleCatalogRuntimeLoadRequest{
+		BundleHash:  projection.BundleHash,
+		ContentYAML: projection.ContentYAML,
+		DataBlob:    projection.DataBlob,
+	})
+	if err != nil {
+		t.Fatalf("LoadBundleCatalogRuntimeSource: %v", err)
+	}
+	defer loaded.Cleanup()
+
+	if loaded.BundleHash != projection.BundleHash {
+		t.Fatalf("loaded hash = %q, want %q", loaded.BundleHash, projection.BundleHash)
+	}
+	gotHash, err := BundleHash(loaded.Bundle)
+	if err != nil {
+		t.Fatalf("BundleHash(loaded): %v", err)
+	}
+	if gotHash != projection.BundleHash {
+		t.Fatalf("loaded BundleHash = %q, want %q", gotHash, projection.BundleHash)
+	}
+	if strings.Contains(loaded.ContractsRoot, contractsRoot) || strings.Contains(loaded.PlatformSpecPath, contractsRoot) {
+		t.Fatalf("loaded runtime source leaked original contracts path: root=%s platform=%s", loaded.ContractsRoot, loaded.PlatformSpecPath)
+	}
+	dataPath := filepath.Join(loaded.ContractsRoot, "flows", "support", "data", "exclusions.yaml")
+	data, err := os.ReadFile(dataPath)
+	if err != nil {
+		t.Fatalf("read reconstructed data file: %v", err)
+	}
+	if !bytes.Contains(data, []byte("unmanaged-host-file-reads")) {
+		t.Fatalf("reconstructed data file = %q", string(data))
+	}
+	if _, err := os.Stat(filepath.Join(loaded.ContractsRoot, "expected.yaml")); !os.IsNotExist(err) {
+		t.Fatalf("non-canonical fixture file was materialized, err=%v", err)
+	}
+	for _, check := range []struct {
+		path string
+		mode os.FileMode
+	}{
+		{path: filepath.Dir(loaded.ContractsRoot), mode: 0o755},
+		{path: loaded.ContractsRoot, mode: 0o755},
+		{path: dataPath, mode: 0o644},
+	} {
+		info, err := os.Stat(check.path)
+		if err != nil {
+			t.Fatalf("stat reconstructed source path %s: %v", check.path, err)
+		}
+		if got := info.Mode().Perm(); got != check.mode {
+			t.Fatalf("mode for %s = %o, want %o", check.path, got, check.mode)
+		}
+	}
+}
+
+func TestBundleCatalogRuntimeLoaderFailsClosedForMissingDataOrHashMismatch(t *testing.T) {
+	repo := repoRootForContractsTest(t)
+	contractsRoot := filepath.Join(repo, "tests", "tier12-runtime-tools", "test-flow-data-access")
+	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, contractsRoot, DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	projection, err := BuildBundleCatalogProjection(bundle)
+	if err != nil {
+		t.Fatalf("BuildBundleCatalogProjection: %v", err)
+	}
+
+	_, err = LoadBundleCatalogRuntimeSource(repo, BundleCatalogRuntimeLoadRequest{
+		BundleHash:  projection.BundleHash,
+		ContentYAML: projection.ContentYAML,
+	})
+	if err == nil || !strings.Contains(err.Error(), "missing canonical input") {
+		t.Fatalf("missing data_blob error = %v, want missing canonical input", err)
+	}
+
+	_, err = LoadBundleCatalogRuntimeSource(repo, BundleCatalogRuntimeLoadRequest{
+		BundleHash:  "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		ContentYAML: projection.ContentYAML,
+		DataBlob:    projection.DataBlob,
+	})
+	if err == nil || !strings.Contains(err.Error(), "hash mismatch") {
+		t.Fatalf("hash mismatch error = %v, want hash mismatch", err)
+	}
+}
+
 func TestBundleHashV1PromptPreservesTrailingWhitespace(t *testing.T) {
 	rootA, platformA := writeEquivalentBundleHashFixture(t, "\n", "name: prompt-space\nversion: \"1.0.0\"\nflows: []\n")
 	rootB, platformB := writeEquivalentBundleHashFixture(t, "\n", "name: prompt-space\nversion: \"1.0.0\"\nflows: []\n")

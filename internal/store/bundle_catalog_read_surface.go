@@ -44,6 +44,12 @@ type BundleCatalogDetail struct {
 	IngestedAt    time.Time      `json:"ingested_at"`
 }
 
+type BundleCatalogRuntimeRecord struct {
+	BundleHash  string
+	ContentYAML string
+	DataBlob    []byte
+}
+
 type BundleCatalogAgentsResult struct {
 	Agents []BundleCatalogAgentDefinition `json:"agents"`
 }
@@ -199,6 +205,39 @@ func (s *PostgresStore) LoadBundleCatalog(ctx context.Context, bundleHash string
 		return BundleCatalogDetail{}, err
 	}
 	return scanned.toDetail()
+}
+
+func (s *PostgresStore) LoadBundleCatalogRuntimeRecord(ctx context.Context, bundleHash string) (BundleCatalogRuntimeRecord, error) {
+	if err := s.requireBundleCatalogCapabilities(ctx); err != nil {
+		return BundleCatalogRuntimeRecord{}, err
+	}
+	bundleHash = strings.TrimSpace(bundleHash)
+	if bundleHash == "" {
+		return BundleCatalogRuntimeRecord{}, ErrBundleNotFound
+	}
+	var out BundleCatalogRuntimeRecord
+	var dataBlob []byte
+	var hasData bool
+	err := s.DB.QueryRowContext(ctx, `
+		SELECT
+			bundle_hash,
+			content_yaml,
+			COALESCE(data_blob, ''::bytea),
+			data_blob IS NOT NULL
+		FROM bundles
+		WHERE bundle_hash = $1
+	`, bundleHash).Scan(&out.BundleHash, &out.ContentYAML, &dataBlob, &hasData)
+	if errors.Is(err, sql.ErrNoRows) {
+		return BundleCatalogRuntimeRecord{}, ErrBundleNotFound
+	}
+	if err != nil {
+		return BundleCatalogRuntimeRecord{}, fmt.Errorf("load bundle catalog runtime record: %w", err)
+	}
+	out.BundleHash = strings.TrimSpace(out.BundleHash)
+	if hasData {
+		out.DataBlob = append([]byte(nil), dataBlob...)
+	}
+	return out, nil
 }
 
 func (s *PostgresStore) ListBundleCatalogAgents(ctx context.Context, bundleHash string) (BundleCatalogAgentsResult, error) {

@@ -35,11 +35,12 @@ type runtimeProjectSupervisor struct {
 	newWorkspaces    func(storeBundle, string, string, semanticview.Source) workspace.Lifecycle
 	createRuntime    func(context.Context, runtime.RuntimeDeps) (*runtime.Runtime, error)
 
-	mu            sync.RWMutex
-	currentRoot   string
-	currentSource semanticview.Source
-	currentBundle *runtimecontracts.WorkflowContractBundle
-	currentRT     *runtime.Runtime
+	mu                              sync.RWMutex
+	currentRoot                     string
+	currentSource                   semanticview.Source
+	currentBundle                   *runtimecontracts.WorkflowContractBundle
+	currentRT                       *runtime.Runtime
+	sourceReplacementDisabledReason string
 }
 
 func newRuntimeProjectSupervisor(
@@ -126,6 +127,12 @@ func (s *runtimeProjectSupervisor) ReloadProject(ctx context.Context, projectDir
 	return s.loadProject(ctx, projectDir)
 }
 
+func (s *runtimeProjectSupervisor) DisableSourceReplacement(reason string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sourceReplacementDisabledReason = strings.TrimSpace(reason)
+}
+
 func (s *runtimeProjectSupervisor) CloseProject(ctx context.Context) (builderpkg.ProjectStatus, error) {
 	return s.CloseProjectWithShutdownOptions(ctx, runtime.DefaultShutdownOptions())
 }
@@ -142,6 +149,9 @@ func (s *runtimeProjectSupervisor) CloseProjectWithShutdownOptions(ctx context.C
 }
 
 func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir string) (builderpkg.ProjectStatus, error) {
+	if reason := s.sourceReplacementDisabled(); reason != "" {
+		return s.CurrentProject(), fmt.Errorf("project source replacement is disabled: %s", reason)
+	}
 	resolvedRoot, err := normalizeContractsRoot(resolvePath(s.repoRoot, projectDir))
 	if err != nil {
 		return builderpkg.ProjectStatus{}, err
@@ -198,6 +208,12 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 	}
 	slog.Info("builder project loaded", "project_dir", filepath.Clean(resolvedRoot), "workflow", strings.TrimSpace(status.WorkflowName))
 	return status, nil
+}
+
+func (s *runtimeProjectSupervisor) sourceReplacementDisabled() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return strings.TrimSpace(s.sourceReplacementDisabledReason)
 }
 
 func (s *runtimeProjectSupervisor) replaceCurrentRuntime(
