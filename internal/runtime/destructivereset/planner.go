@@ -34,15 +34,17 @@ func (r CompositeInventoryReader) ReadResetInventory(ctx context.Context) (Inven
 	return inventory, nil
 }
 
-func (p InventoryPlanner) BuildPlan(ctx context.Context, _ Request) (Plan, error) {
+func (p InventoryPlanner) BuildPlan(ctx context.Context, req Request) (Plan, error) {
 	if p.Reader == nil {
 		return Plan{}, ErrPlannerNotConfigured
 	}
+	includeBundles := req.includeBundles()
 	inventory, err := p.Reader.ReadResetInventory(ctx)
 	if err != nil {
 		return Plan{}, err
 	}
 	preserved := mergePreservedResources(inventory.Preserved)
+	preserved.BundleContracts = !includeBundles
 	contracts := p.DownstreamContracts
 	if len(contracts) == 0 {
 		contracts = DefaultDownstreamContracts()
@@ -55,13 +57,37 @@ func (p InventoryPlanner) BuildPlan(ctx context.Context, _ Request) (Plan, error
 		ActiveRuns:          append([]RunRef(nil), inventory.ActiveRuns...),
 		CleanupRuns:         append([]RunRef(nil), inventory.CleanupRuns...),
 		CleanupRunSetKnown:  inventory.CleanupRunSetKnown,
+		IncludeBundles:      includeBundles,
 		ActiveDeliveries:    append([]DeliveryRef(nil), inventory.ActiveDeliveries...),
-		RunScopedTables:     append([]TableRef(nil), inventory.RunScopedTables...),
+		RunScopedTables:     resetInventoryRunScopedTables(inventory.RunScopedTables, includeBundles),
 		EntityContainers:    append([]ContainerRef(nil), inventory.EntityContainers...),
 		Preserved:           copyPreservedResources(preserved),
 		DownstreamContracts: append([]DownstreamContract(nil), contracts...),
 		ResetSeams:          append([]ResetSeam(nil), seams...),
 	}, nil
+}
+
+func resetInventoryRunScopedTables(tables []TableRef, includeBundles bool) []TableRef {
+	out := append([]TableRef(nil), tables...)
+	if !includeBundles {
+		return out
+	}
+	entry, ok := CleanupCatalogByTableForPolicy(CleanupPolicy{IncludeBundles: true})["bundles"]
+	if !ok || entry.Classification != CleanupDeleteAll {
+		return out
+	}
+	for i := range out {
+		if out[i].Name == "bundles" {
+			out[i].Owner = ContractRunScopedTruncation
+			out[i].Action = entry.Classification
+			return out
+		}
+	}
+	return append(out, TableRef{
+		Name:   "bundles",
+		Owner:  ContractRunScopedTruncation,
+		Action: entry.Classification,
+	})
 }
 
 func copyPreservedResources(p PreservedResources) PreservedResources {

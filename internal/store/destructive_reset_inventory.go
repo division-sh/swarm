@@ -32,7 +32,7 @@ func (s *PostgresStore) ReadResetInventory(ctx context.Context) (destructiverese
 	}
 	for _, entry := range destructivereset.DefaultPlatformCleanupCatalog() {
 		switch entry.Classification {
-		case destructivereset.CleanupPreserve, destructivereset.CleanupSplitPreserve:
+		case destructivereset.CleanupPreserve, destructivereset.CleanupSplitPreserve, destructivereset.CleanupRequestScopedBundles:
 			continue
 		default:
 			out.RunScopedTables = append(out.RunScopedTables, destructivereset.TableRef{

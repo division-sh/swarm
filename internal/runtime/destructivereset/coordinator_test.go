@@ -44,6 +44,9 @@ func TestCoordinatorBuildPlanStoresAndReplaysIdempotentResult(t *testing.T) {
 	if result.OperationName != DefaultOperationName || !result.DryRun || !result.PlannedAt.Equal(now) {
 		t.Fatalf("result metadata = %#v, want operation/dry-run/time", result)
 	}
+	if !result.IncludeBundles || !result.Plan.IncludeBundles {
+		t.Fatalf("include_bundles = result:%v plan:%v, want default true through result and plan", result.IncludeBundles, result.Plan.IncludeBundles)
+	}
 	if len(result.Plan.ActiveRuns) != 1 || result.Plan.ActiveRuns[0].RunID != "run-1" {
 		t.Fatalf("active runs = %#v", result.Plan.ActiveRuns)
 	}
@@ -274,8 +277,11 @@ func TestInventoryPlannerCarriesImplementedContractsAndSplitResetSeams(t *testin
 		containsSeam(plan.ResetSeams, "scripts_private_reset_dev") {
 		t.Fatalf("reset seams = %#v, want retired dashboard/Builder and private reset helper seams omitted", plan.ResetSeams)
 	}
-	if !plan.Preserved.SchemaMigrations || !plan.Preserved.AuthTokens || !plan.Preserved.BundleContracts {
-		t.Fatalf("preserved resources = %#v, want schema/auth/bundle preserved", plan.Preserved)
+	if !plan.IncludeBundles || !containsTableAction(plan.RunScopedTables, "bundles", CleanupDeleteAll) {
+		t.Fatalf("include_bundles plan = include:%v tables:%#v, want bundle catalog delete table", plan.IncludeBundles, plan.RunScopedTables)
+	}
+	if !plan.Preserved.SchemaMigrations || !plan.Preserved.AuthTokens || plan.Preserved.BundleContracts {
+		t.Fatalf("preserved resources = %#v, want schema/auth preserved and bundle contracts not preserved when include_bundles defaults true", plan.Preserved)
 	}
 	if !slices.Contains(plan.Preserved.SystemContainers, "swarm-scaffold") || !slices.Contains(plan.Preserved.SystemContainers, "swarm-system") {
 		t.Fatalf("system containers = %#v, want scaffold/system preserved", plan.Preserved.SystemContainers)
@@ -288,7 +294,7 @@ func TestInventoryPlannerMergesPreservedResourceDefaultsByField(t *testing.T) {
 			SystemContainers: []string{"custom-system"},
 		},
 	}}
-	plan, err := (InventoryPlanner{Reader: reader}).BuildPlan(context.Background(), Request{})
+	plan, err := (InventoryPlanner{Reader: reader}).BuildPlan(context.Background(), Request{IncludeBundles: false, IncludeBundlesSet: true})
 	if err != nil {
 		t.Fatalf("BuildPlan error = %v", err)
 	}
@@ -300,6 +306,9 @@ func TestInventoryPlannerMergesPreservedResourceDefaultsByField(t *testing.T) {
 	}
 	if !plan.Preserved.SchemaMigrations || !plan.Preserved.AuthTokens || !plan.Preserved.BundleContracts {
 		t.Fatalf("preserved resources = %#v, want critical defaults merged", plan.Preserved)
+	}
+	if plan.IncludeBundles || containsTableAction(plan.RunScopedTables, "bundles", CleanupDeleteAll) {
+		t.Fatalf("include_bundles=false plan = include:%v tables:%#v, want bundle catalog preserved", plan.IncludeBundles, plan.RunScopedTables)
 	}
 }
 
@@ -459,5 +468,11 @@ func containsContractStatus(contracts []DownstreamContract, id, status string) b
 func containsSeam(seams []ResetSeam, id string) bool {
 	return slices.ContainsFunc(seams, func(seam ResetSeam) bool {
 		return seam.ID == id
+	})
+}
+
+func containsTableAction(tables []TableRef, name, action string) bool {
+	return slices.ContainsFunc(tables, func(table TableRef) bool {
+		return table.Name == name && table.Action == action
 	})
 }
