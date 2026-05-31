@@ -12,11 +12,14 @@ import (
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/runforkadmission"
 	"swarm/internal/store"
+	storerunlifecycle "swarm/internal/store/runlifecycle"
 )
 
 type SelectedContractExecutionRequest struct {
 	SourceRunID       string
 	At                string
+	BundleHash        string
+	BundleSource      string
 	Store             *store.PostgresStore
 	SourceLoader      SelectedContractSourceLoader
 	ContractSelection store.RunForkContractSelection
@@ -51,13 +54,23 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	if err != nil {
 		return SelectedContractExecutionResult{}, err
 	}
-	loadedSource, err := req.SourceLoader.LoadRunForkSelectedContractSource(ctx, selection)
+	loadedSource, err := loadRunForkSelectedContractSource(ctx, req.SourceLoader, SelectedContractSourceLoadRequest{
+		SourceRunID: req.SourceRunID,
+		BundleHash:  req.BundleHash,
+		Selection:   selection,
+	})
 	if err != nil {
 		return SelectedContractExecutionResult{}, fmt.Errorf("load selected semantic source for execution: %w", err)
 	}
+	defer cleanupLoadedSelectedContractSource(loadedSource)
 	selection = loadedSource.Selection
 	if loadedSource.Module == nil {
 		return SelectedContractExecutionResult{}, fmt.Errorf("selected-contract execution requires executable selected workflow module")
+	}
+	materializationBundleHash := firstNonEmpty(req.BundleHash, loadedSource.BundleHash)
+	materializationBundleSource := strings.TrimSpace(req.BundleSource)
+	if materializationBundleSource == "" && materializationBundleHash != "" {
+		materializationBundleSource = storerunlifecycle.BundleSourcePersisted
 	}
 	plan, err := req.Store.PlanRunFork(ctx, store.RunForkPlanRequest{
 		SourceRunID: strings.TrimSpace(req.SourceRunID),
@@ -125,12 +138,16 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		SourceRunID:       plan.SourceRunID,
 		At:                plan.ForkPoint.EventID,
 		ContractSelection: selection,
+		BundleHash:        materializationBundleHash,
+		BundleSource:      materializationBundleSource,
 	})
 	if err != nil {
 		return SelectedContractExecutionResult{Owner: store.RunForkSelectedContractExecutionOwner, Materialization: materialization}, err
 	}
 	admission, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
 		ForkRunID:         materialization.ForkRunID,
+		SourceRunID:       plan.SourceRunID,
+		BundleHash:        materializationBundleHash,
 		BindingReader:     req.Store,
 		SourceLoader:      req.SourceLoader,
 		FrontierAdmission: frontier,

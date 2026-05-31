@@ -12,6 +12,7 @@ import (
 	runtimerunforkexecution "swarm/internal/runtime/runforkexecution"
 	"swarm/internal/store"
 	"swarm/internal/store/runbundle"
+	storerunlifecycle "swarm/internal/store/runlifecycle"
 )
 
 const runForkIdempotencyTTL = 24 * time.Hour
@@ -54,6 +55,8 @@ func (e SelectedContractRunForkExecutor) ExecuteRunFork(ctx context.Context, req
 	result, err := runtimerunforkexecution.ExecuteSelectedContractRunFork(ctx, runtimerunforkexecution.SelectedContractExecutionRequest{
 		SourceRunID:       strings.TrimSpace(req.SourceRunID),
 		At:                strings.TrimSpace(req.ForkEventID),
+		BundleHash:        strings.TrimSpace(req.BundleHash),
+		BundleSource:      storerunlifecycle.BundleSourcePersisted,
 		Store:             e.Store,
 		SourceLoader:      e.SourceLoader,
 		ContractSelection: e.ContractSelection,
@@ -253,6 +256,27 @@ func runForkError(sourceRunID, forkEventID string, err error) error {
 	}
 	msg := err.Error()
 	switch {
+	case strings.Contains(msg, UnsupportedBundleHashForkCode) || strings.Contains(msg, "source hash mismatch"):
+		return NewApplicationError(UnsupportedBundleHashForkCode, false, map[string]any{
+			"run_id":             strings.TrimSpace(sourceRunID),
+			"event_id":           strings.TrimSpace(forkEventID),
+			"reason":             msg,
+			"tracked_follow_up":  "#976",
+			"unsupported_reason": "cross-bundle run.fork is split to #976",
+			"supported_selector": "same source bundle_hash only",
+		})
+	case strings.Contains(msg, runbundle.CodeBundleDataIntegrityError):
+		return NewApplicationError(BundleDataIntegrityErrorCode, false, map[string]any{
+			"run_id":   strings.TrimSpace(sourceRunID),
+			"event_id": strings.TrimSpace(forkEventID),
+			"reason":   msg,
+		})
+	case strings.Contains(msg, runbundle.CodeBundleUnavailable):
+		return NewApplicationError(BundleUnavailableCode, false, map[string]any{
+			"run_id":   strings.TrimSpace(sourceRunID),
+			"event_id": strings.TrimSpace(forkEventID),
+			"reason":   msg,
+		})
 	case strings.Contains(msg, "fork point event"):
 		eventID := strings.TrimSpace(forkEventID)
 		if eventID == "" {

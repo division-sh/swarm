@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	storerunlifecycle "swarm/internal/store/runlifecycle"
 	"swarm/internal/testutil"
 )
 
@@ -66,6 +67,45 @@ func TestSelectedContractExecutionMaterializationAllowsSelectedPendingNodeFronti
 	}
 	if replayRows != 0 {
 		t.Fatalf("delivery replay rows = %d, want selected execution materialization to avoid #570 replay", replayRows)
+	}
+}
+
+func TestSelectedContractExecutionMaterializationStampsPersistedBundleIdentity(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	eventID := uuid.NewString()
+	at := time.Unix(1700002402, 0).UTC()
+	bundleHash := "bundle-v1:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
+		SourceRunID:  sourceRunID,
+		At:           eventID,
+		BundleHash:   bundleHash,
+		BundleSource: storerunlifecycle.BundleSourcePersisted,
+		ContractSelection: RunForkContractSelection{
+			Mode:            "selected_contracts",
+			ContractsRoot:   "/tmp/selected-contracts",
+			WorkflowName:    "selected-workflow",
+			WorkflowVersion: "v1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
+	}
+	var forkBundleHash, forkBundleSource, forkBundleFingerprint string
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(bundle_hash, ''), bundle_source, COALESCE(bundle_fingerprint, '')
+		FROM runs
+		WHERE run_id = $1::uuid
+	`, materialized.ForkRunID).Scan(&forkBundleHash, &forkBundleSource, &forkBundleFingerprint); err != nil {
+		t.Fatalf("load selected fork bundle identity: %v", err)
+	}
+	if forkBundleHash != bundleHash || forkBundleSource != storerunlifecycle.BundleSourcePersisted || forkBundleFingerprint != "" {
+		t.Fatalf("selected fork bundle identity = hash:%q source:%q fingerprint:%q, want persisted hash without legacy fingerprint", forkBundleHash, forkBundleSource, forkBundleFingerprint)
 	}
 }
 

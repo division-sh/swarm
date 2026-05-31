@@ -5751,7 +5751,7 @@ multi_bundle_persistence:
         data_blob, and metadata match the computed projection. A hash collision or stale row with different stored
         content fails closed before runtime construction.
       split_boundaries:
-        - DB-loaded same-bundle source/fork loaders remain #1024.
+        - DB-loaded same-bundle source/fork loaders consume the persisted bundle catalog runtime source owner.
         - New-work routing and bundle_hash admission remain #1022.
         - Bundle register/delete APIs remain #1017/#1018/#1019.
         - SQLite runtime support remains blocked by #1087/#1088 unless separately gated.
@@ -5773,7 +5773,7 @@ multi_bundle_persistence:
         - External executable code, tools, container images, credentials, and host environment dependencies remain environment-owned and are not stored in the bundles row.
       split_boundaries:
         - Parallel multi-bundle runtime contexts and dispatcher/store isolation remain #981.
-        - Same-bundle selected-contract fork execution from DB bytes remains #1024.
+        - Same-bundle selected-contract fork execution from DB bytes consumes the persisted bundle catalog runtime source owner.
         - Cross-bundle fork routing remains #976.
         - Create-new-work bundle_hash routing/admission remains #1022.
         - Bundle CLI inventory and swarm fork consumers remain #1023/#989.
@@ -5964,8 +5964,10 @@ multi_bundle_persistence:
           cli_flag: --idempotency-key <key>
       same_bundle_rule: >
         If bundle_hash is omitted or equals the source run bundle_hash, same-bundle fork admission consumes the source
-        bundle row when available. Disk-loaded selected_contracts execution remains existing runtime ownership; DB-loaded
-        same-bundle source bytes remain blocked by #1024.
+        bundle row when available. Disk-loaded selected_contracts execution consumes the existing runtime ownership.
+        DB-loaded selected_contracts execution must load source bytes from the persisted bundle catalog runtime source
+        owner for the source run bundle_hash, verify the reconstructed hash, and stamp fork-created runs with
+        bundle_source=persisted and that canonical bundle_hash.
       cross_bundle_rule: >
         If bundle_hash differs from the source run bundle_hash, admission returns UNSUPPORTED_BUNDLE_HASH_FORK until #976
         promotes and implements cross-bundle selected-contract routing.
@@ -6038,7 +6040,8 @@ multi_bundle_persistence:
       reason: >
         swarm serve --bundle-hash DB-loaded YAML/data runtime boot mode is implemented for one canonical
         Postgres-backed bundle_hash per process. Multi-bundle runtime concurrency and selected-contract fork
-        reuse remain split to #981/#1024.
+        reuse remain split to #981; same-bundle selected-contract fork source reuse consumes the persisted
+        bundle catalog runtime source owner.
     bundle_safe_list_read_scoping:
       tracker: '#1021'
       reason: agent/event/run/log/incident read/list method scoping and generated OpenRPC shape are API read-model implementation.
@@ -6050,11 +6053,17 @@ multi_bundle_persistence:
       reason: Different target bundle_hash selected for run.fork requires selected-contract routing and admission work beyond source authority.
     db_loaded_same_bundle_source:
       tracker: '#1024'
-      reason: Same-bundle fork from persisted DB bundle bytes needs a sibling source loader separate from current disk-rooted selected_contracts execution.
+      implementation_status: implemented_for_same_bundle_selected_contracts
+      runtime_owners:
+        - internal/store.PostgresStore.LoadRunBundleAvailability
+        - internal/store.PostgresStore.LoadBundleCatalogRuntimeRecord
+        - internal/runtime/contracts.LoadBundleCatalogRuntimeSource
+        - internal/runtime/runforkexecution.BundleCatalogSelectedContractSourceLoader
+      reason: Same-bundle fork from persisted DB bundle bytes uses a sibling source loader separate from disk-rooted selected_contracts execution.
     run_fork_cli_consumer:
       tracker: '#1023'
       implementation_status: implemented_by_1023_first_slice
-      reason: swarm fork consumes /v1/rpc run.fork only; cross-bundle fork routing remains split to #976 and DB-loaded same-bundle source loading remains split to #1024.
+      reason: swarm fork consumes /v1/rpc run.fork only; same-bundle DB-loaded source loading is supported by #1024, and cross-bundle fork routing remains split to #976.
     multi_bundle_cli_inventory:
       tracker: '#1023'
       implementation_status: read_only_inventory_implemented
@@ -9534,7 +9543,7 @@ cli_specification:
       command: swarm fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]
       tier: should_have
       implementation_status: implemented_public_cli_consumer
-      blocker_state: 'Implemented by #1023 over /v1/rpc run.fork after #989 promoted the API/runtime/spec owner; cross-bundle fork and DB-loaded same-bundle source loading remain split.'
+      blocker_state: 'Implemented by #1023 over /v1/rpc run.fork after #989 promoted the API/runtime/spec owner; DB-loaded same-bundle source loading is supported by #1024 and cross-bundle fork remains split to #976.'
       owner: multi_bundle_persistence.cli_surface.run_fork
       api_owner: /v1/rpc run.fork
       behavior: >
@@ -9544,7 +9553,6 @@ cli_specification:
         handler, calls /v1/rpc run.fork exactly once, and renders only server-owned fork results.
       split_blockers:
         cross_bundle_fork: '#976'
-        db_loaded_same_bundle_source: '#1024'
         api_runtime_cli_owner: '#989'
         cli_inventory_gate: '#1023'
       rejected_legacy_flags:
@@ -9558,7 +9566,7 @@ cli_specification:
       - no draft `--bundle` flag is promoted
       - no direct DB/store/runtime/fork harness access from CLI
       - cross-bundle targets fail closed as #976 until that child lands
-      - DB-loaded same-bundle source loading remains #1024 until that child lands
+      - DB-loaded same-bundle source loading is exercised through /v1/rpc run.fork, not a direct CLI runtime/store helper
       - missing SWARM_API_TOKEN, invalid args, and legacy harness flags make zero API calls
       - RUN_NOT_FOUND, EVENT_NOT_FOUND, IDEMPOTENCY_CONFLICT, unsupported bundle fork, malformed responses, auth/HTTP/RPC failures, and transport failures fail closed with tested exit codes
     forkchat:
@@ -10027,7 +10035,6 @@ api_specification:
       #1012.
     blocked_children:
       cross_bundle_fork: '#976'
-      db_loaded_same_bundle_source: '#1024'
       bundle_hash_dual_accept_migration: '#1001'
   foundations:
     transport:
@@ -13758,7 +13765,7 @@ api_specification:
       - IDEMPOTENCY_CONFLICT
     run.fork:
       tier: should_have
-      description: "Public selected-contract run fork mutation.\n\nCreates and executes a same-bundle selected-contract fork from a source run. The method consumes source bundle availability from runs.bundle_source / runs.bundle_hash and bundle-row presence before any fork mutation. Source runs whose canonical bundle bytes are unavailable fail closed with BUNDLE_UNAVAILABLE; persisted source rows with missing bundle data fail with BUNDLE_DATA_INTEGRITY_ERROR. The selected-contract execution path consumes the existing store/runtime run_fork selected_contracts owners and must not infer source identity from legacy bundle_fingerprint, bundle_ref, null-collapse, or local filesystem heuristics.\n\nIf bundle_hash is omitted, the source run's canonical bundle_hash is used. If bundle_hash is supplied and equals the source run bundle_hash, the same-bundle selected_contracts fork may proceed. If bundle_hash differs, the method fails closed with UNSUPPORTED_BUNDLE_HASH_FORK; cross-bundle fork routing remains split to #976. Same-bundle DB-loaded source execution remains split to #1024; this method does not promote a DB bundle source loader. The swarm fork CLI consumes this method and must not call runtime/store helpers directly.\n"
+      description: "Public selected-contract run fork mutation.\n\nCreates and executes a same-bundle selected-contract fork from a source run. The method consumes source bundle availability from runs.bundle_source / runs.bundle_hash and bundle-row presence before any fork mutation. Source runs whose canonical bundle bytes are unavailable fail closed with BUNDLE_UNAVAILABLE; persisted source rows with missing bundle data fail with BUNDLE_DATA_INTEGRITY_ERROR. The selected-contract execution path consumes the existing store/runtime run_fork selected_contracts owners and must not infer source identity from legacy bundle_fingerprint, bundle_ref, null-collapse, or local filesystem heuristics.\n\nIf bundle_hash is omitted, the source run's canonical bundle_hash is used. If bundle_hash is supplied and equals the source run bundle_hash, the same-bundle selected_contracts fork may proceed. Disk-loaded source execution uses the existing runtime selected-contract source loader. DB-loaded source execution must load source bytes from the persisted bundle catalog runtime source owner, verify the reconstructed bundle_hash, and stamp fork-created runs with bundle_source=persisted plus that canonical bundle_hash. If bundle_hash differs, the method fails closed with UNSUPPORTED_BUNDLE_HASH_FORK; cross-bundle fork routing remains split to #976. The swarm fork CLI consumes this method and must not call runtime/store helpers directly.\n"
       scope:
         required:
         - write:runs

@@ -197,21 +197,6 @@ type serveRuntimeBundle struct {
 	cleanup          func() error
 }
 
-type dbLoadedServeRunForkAvailability struct {
-	bundleHash string
-}
-
-func (a dbLoadedServeRunForkAvailability) LoadRunBundleAvailability(_ context.Context, runID string) (runbundle.Availability, error) {
-	return runbundle.Availability{
-		RunID:            strings.TrimSpace(runID),
-		BundleHash:       strings.TrimSpace(a.bundleHash),
-		BundleSource:     storerunlifecycle.BundleSourcePersisted,
-		BundleRowPresent: true,
-		ErrorCode:        runbundle.CodeBundleUnavailable,
-		Cause:            "db_loaded_same_bundle_fork_split_to_1024",
-	}, nil
-}
-
 func defaultServeOptions() serveOptions {
 	return serveOptions{
 		StoreMode:          storebackend.ActiveDefaultBackend().String(),
@@ -595,8 +580,15 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		},
 	}
 	runForkAvailability := apiv1.RunForkAvailabilityStore(stores.Postgres)
+	runForkSourceLoader := runtimerunforkexecution.SelectedContractSourceLoader(runtimerunforkexecution.ContractBundleSourceLoader{
+		RepoRoot:         repo,
+		PlatformSpecPath: resolvedPlatformSpecPath,
+	})
 	if loadedBundle.dbLoaded {
-		runForkAvailability = dbLoadedServeRunForkAvailability{bundleHash: loadedBundle.bundleSourceFact.BundleHash}
+		runForkSourceLoader = runtimerunforkexecution.BundleCatalogSelectedContractSourceLoader{
+			RepoRoot: repo,
+			Store:    stores.Postgres,
+		}
 	}
 	apiReadOptions := apiv1.OperatorReadOptions{
 		RepoRoot:         repo,
@@ -614,11 +606,8 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		ForkChatExecutor:    apiv1.NewLLMForkChatExecutor(forkChatLLM),
 		RunForkAvailability: runForkAvailability,
 		RunFork: apiv1.SelectedContractRunForkExecutor{
-			Store: stores.Postgres,
-			SourceLoader: runtimerunforkexecution.ContractBundleSourceLoader{
-				RepoRoot:         repo,
-				PlatformSpecPath: resolvedPlatformSpecPath,
-			},
+			Store:             stores.Postgres,
+			SourceLoader:      runForkSourceLoader,
 			ContractSelection: runtimerunforkadmission.SelectedContractSelection(source, contractsRoot),
 			AgentRuntime: runtimerunforkexecution.SelectedContractAgentRuntimeOptions{
 				Config:            cfg,

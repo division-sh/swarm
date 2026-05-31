@@ -3,6 +3,7 @@ package runforkexecution
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +13,8 @@ import (
 	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/store"
+	"swarm/internal/store/runbundle"
+	storerunlifecycle "swarm/internal/store/runlifecycle"
 )
 
 func TestBuildSelectedContractExecutionAdmissionConsumesDurableBinding(t *testing.T) {
@@ -375,6 +378,113 @@ func TestBuildSelectedContractExecutionAdmissionRejectsForgedRecipientPlanning(t
 	}
 }
 
+func TestBundleCatalogSelectedContractSourceLoaderLoadsPersistedSourceForRequest(t *testing.T) {
+	ctx := context.Background()
+	repoRoot := runForkExecutionRepoRoot(t)
+	bundle := loadRunForkExecutionFixtureBundle(t, filepath.Join("tests", "tier12-runtime-fork", "test-selected-contract-fork-execution"))
+	projection, err := runtimecontracts.BuildBundleCatalogProjection(bundle)
+	if err != nil {
+		t.Fatalf("BuildBundleCatalogProjection: %v", err)
+	}
+	sourceRunID := uuid.NewString()
+	catalogStore := &fakeBundleCatalogSelectedContractSourceStore{
+		availability: runbundle.Availability{
+			RunID:            sourceRunID,
+			Status:           "running",
+			BundleHash:       projection.BundleHash,
+			BundleSource:     storerunlifecycle.BundleSourcePersisted,
+			BundleRowPresent: true,
+		},
+		record: store.BundleCatalogRuntimeRecord{
+			BundleHash:  projection.BundleHash,
+			ContentYAML: projection.ContentYAML,
+			DataBlob:    projection.DataBlob,
+		},
+	}
+	loader := BundleCatalogSelectedContractSourceLoader{RepoRoot: repoRoot, Store: catalogStore}
+	selection := testDBLoadedContractSelection("/stale/db-loaded/source-root")
+
+	loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{
+		SourceRunID: sourceRunID,
+		BundleHash:  projection.BundleHash,
+		Selection:   selection,
+	})
+	if err != nil {
+		t.Fatalf("LoadRunForkSelectedContractSourceForRequest: %v", err)
+	}
+	defer cleanupLoadedSelectedContractSource(loaded)
+
+	if loaded.BundleHash != projection.BundleHash {
+		t.Fatalf("loaded bundle hash = %q, want %q", loaded.BundleHash, projection.BundleHash)
+	}
+	if loaded.Selection.ContractsRoot != selection.ContractsRoot ||
+		loaded.Selection.WorkflowName != "test-selected-contract-fork-execution" ||
+		loaded.Selection.WorkflowVersion != "1.0.0" {
+		t.Fatalf("loaded selection = %#v", loaded.Selection)
+	}
+	if loaded.Source == nil || loaded.Module == nil || loaded.Cleanup == nil {
+		t.Fatalf("loaded source = %#v, module = %#v, cleanup nil = %v", loaded.Source, loaded.Module, loaded.Cleanup == nil)
+	}
+	if catalogStore.requestedRunID != sourceRunID || catalogStore.requestedBundleHash != projection.BundleHash {
+		t.Fatalf("store requests = run:%q hash:%q", catalogStore.requestedRunID, catalogStore.requestedBundleHash)
+	}
+}
+
+func TestBundleCatalogSelectedContractSourceLoaderFailsClosedOnUnavailableStates(t *testing.T) {
+	ctx := context.Background()
+	sourceRunID := uuid.NewString()
+	hash := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	loader := BundleCatalogSelectedContractSourceLoader{
+		RepoRoot: runForkExecutionRepoRoot(t),
+		Store: &fakeBundleCatalogSelectedContractSourceStore{
+			availability: runbundle.Availability{
+				RunID:        sourceRunID,
+				Status:       "paused",
+				BundleHash:   hash,
+				BundleSource: storerunlifecycle.BundleSourceEphemeral,
+				ErrorCode:    runbundle.CodeBundleUnavailable,
+				Cause:        storerunlifecycle.BundleSourceEphemeral,
+			},
+		},
+	}
+
+	_, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{
+		SourceRunID: sourceRunID,
+		Selection:   testDBLoadedContractSelection("/stale/db-loaded/source-root"),
+	})
+	if err == nil || !strings.Contains(err.Error(), runbundle.CodeBundleUnavailable) {
+		t.Fatalf("error = %v, want %s", err, runbundle.CodeBundleUnavailable)
+	}
+}
+
+func TestBundleCatalogSelectedContractSourceLoaderFailsClosedOnMissingCatalogBytes(t *testing.T) {
+	ctx := context.Background()
+	sourceRunID := uuid.NewString()
+	hash := "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	loader := BundleCatalogSelectedContractSourceLoader{
+		RepoRoot: runForkExecutionRepoRoot(t),
+		Store: &fakeBundleCatalogSelectedContractSourceStore{
+			availability: runbundle.Availability{
+				RunID:            sourceRunID,
+				Status:           "running",
+				BundleHash:       hash,
+				BundleSource:     storerunlifecycle.BundleSourcePersisted,
+				BundleRowPresent: true,
+			},
+			recordErr: store.ErrBundleNotFound,
+		},
+	}
+
+	_, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{
+		SourceRunID: sourceRunID,
+		BundleHash:  hash,
+		Selection:   testDBLoadedContractSelection("/stale/db-loaded/source-root"),
+	})
+	if err == nil || !strings.Contains(err.Error(), runbundle.CodeBundleDataIntegrityError) {
+		t.Fatalf("error = %v, want %s", err, runbundle.CodeBundleDataIntegrityError)
+	}
+}
+
 type fakeSelectedContractBindingReader struct {
 	binding            store.RunForkSelectedContractBinding
 	err                error
@@ -401,6 +511,49 @@ func (r *fakeSelectedContractBindingReader) RequireRunForkSelectedContractBindin
 		return store.RunForkSelectedContractBinding{}, r.err
 	}
 	return r.binding, nil
+}
+
+type fakeBundleCatalogSelectedContractSourceStore struct {
+	availability        runbundle.Availability
+	availabilityErr     error
+	record              store.BundleCatalogRuntimeRecord
+	recordErr           error
+	requestedRunID      string
+	requestedBundleHash string
+}
+
+func (s *fakeBundleCatalogSelectedContractSourceStore) LoadRunBundleAvailability(_ context.Context, runID string) (runbundle.Availability, error) {
+	s.requestedRunID = runID
+	if s.availabilityErr != nil {
+		return runbundle.Availability{}, s.availabilityErr
+	}
+	return s.availability, nil
+}
+
+func (s *fakeBundleCatalogSelectedContractSourceStore) LoadBundleCatalogRuntimeRecord(_ context.Context, bundleHash string) (store.BundleCatalogRuntimeRecord, error) {
+	s.requestedBundleHash = bundleHash
+	if s.recordErr != nil {
+		return store.BundleCatalogRuntimeRecord{}, s.recordErr
+	}
+	return s.record, nil
+}
+
+func testDBLoadedContractSelection(contractsRoot string) store.RunForkContractSelection {
+	return store.RunForkContractSelection{
+		Mode:          "selected_contracts",
+		ContractsRoot: contractsRoot,
+	}
+}
+
+func loadRunForkExecutionFixtureBundle(t *testing.T, relativeRoot string) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	repoRoot := runForkExecutionRepoRoot(t)
+	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, filepath.Join(repoRoot, relativeRoot), platformSpecPath)
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides(%s): %v", relativeRoot, err)
+	}
+	return bundle
 }
 
 func testSelectedContractBinding(forkRunID string) store.RunForkSelectedContractBinding {
