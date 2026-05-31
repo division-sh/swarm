@@ -142,7 +142,7 @@ func resolveFlowInstanceConfigValue(entry runtimecontracts.ConfigBinding, handle
 	if entry.RefPath.HasExplicitRoot() {
 		switch entry.RefPath.Root {
 		case paths.RootPayload, paths.RootEntity, paths.RootEvent:
-			value, ok := handlerContext.Lookup(entry.RefPath)
+			value, ok := lookupFlowInstanceConfigPath(handlerContext, entry.RefPath)
 			if !ok {
 				return nil, flowInstanceConfigRefError{Key: key, Ref: ref, Reason: "resolved empty"}
 			}
@@ -157,15 +157,33 @@ func resolveFlowInstanceConfigValue(entry runtimecontracts.ConfigBinding, handle
 	}
 	segments := strings.Split(ref, ".")
 	if len(segments) == 1 {
-		if value, ok := handlerContext.Payload.Lookup(paths.Path{Root: paths.RootPayload, Segments: segments, Raw: ref}); ok {
+		if value, ok := lookupFlowInstanceConfigPath(handlerContext, paths.Path{Root: paths.RootPayload, Segments: segments, Raw: ref}); ok {
 			return value, nil
 		}
-		if value, ok := handlerContext.Entity.Lookup(paths.Path{Root: paths.RootEntity, Segments: segments, Raw: ref}); ok {
+		if value, ok := lookupFlowInstanceConfigPath(handlerContext, paths.Path{Root: paths.RootEntity, Segments: segments, Raw: ref}); ok {
 			return value, nil
 		}
 		return ref, nil
 	}
 	return nil, flowInstanceConfigRefError{Key: key, Ref: ref, Reason: "requires supported root payload, entity, or event"}
+}
+
+func lookupFlowInstanceConfigPath(handlerContext values.Context, path paths.Path) (any, bool) {
+	if path.IsZero() || !path.HasExplicitRoot() {
+		return nil, false
+	}
+	current := any(handlerContext.Bucket(path.Root).Raw())
+	for _, segment := range path.Segments {
+		object, ok := current.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		current, ok = object[strings.TrimSpace(segment)]
+		if !ok {
+			return nil, false
+		}
+	}
+	return current, true
 }
 
 func resolveFlowInstanceID(pathSpec paths.Path, expr string, payload, entity map[string]any) string {
