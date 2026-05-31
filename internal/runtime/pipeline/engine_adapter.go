@@ -966,6 +966,12 @@ var workflowRuntimeControlMetadataKeys = []string{
 	"parent_entity_id",
 }
 
+var workflowRuntimeParentRouteMetadataKeys = []string{
+	"parent_flow_id",
+	"parent_flow_instance",
+	"parent_entity_id",
+}
+
 func workflowRuntimeControlMetadata(metadata map[string]any) map[string]any {
 	if len(metadata) == 0 {
 		return nil
@@ -981,7 +987,7 @@ func workflowRuntimeControlMetadata(metadata map[string]any) map[string]any {
 }
 
 func restoreWorkflowRuntimeControlMetadata(metadata map[string]any, control map[string]any) {
-	if metadata == nil || len(control) == 0 {
+	if metadata == nil {
 		return
 	}
 	for _, key := range workflowRuntimeControlMetadataKeys {
@@ -989,6 +995,12 @@ func restoreWorkflowRuntimeControlMetadata(metadata map[string]any, control map[
 		if ok {
 			metadata[key] = value
 		}
+	}
+	for _, key := range workflowRuntimeParentRouteMetadataKeys {
+		if _, ok := control[key]; ok {
+			continue
+		}
+		delete(metadata, key)
 	}
 }
 
