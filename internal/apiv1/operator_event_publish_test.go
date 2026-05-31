@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"swarm/internal/events"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/runtime/flowmodel"
 	runtimeingress "swarm/internal/runtime/ingress"
 	runtimereplayclaim "swarm/internal/runtime/replayclaim"
 	"swarm/internal/runtime/semanticview"
@@ -98,6 +100,139 @@ func TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempo
 	if count := countEventsByName(t, db, "scan.requested"); count != 1 {
 		t.Fatalf("scan.requested event count after conflict = %d, want 1", count)
 	}
+}
+
+func TestOperatorEventPublishResolvesFlowScopedContractEventName(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	source := semanticview.Wrap(flowScopedEventPublishTestBundle())
+	canonicalEventName := "repo-scaffold/repo_scaffold.repo_commit_succeeded"
+	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
+		ContractBundle:   source,
+		BundleSourceFact: runStartTestBundleSourceFact(),
+		PayloadValidator: func(eventType string, _ []byte) error {
+			if eventType != canonicalEventName {
+				return fmt.Errorf("event type = %q, want %s", eventType, canonicalEventName)
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	ctx := context.Background()
+	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "repo-observer")
+	ch := bus.Subscribe("repo-observer", events.EventType(canonicalEventName))
+	defer bus.Unsubscribe("repo-observer")
+	handler := eventPublishTestHandler(t, pg, bus, source)
+	body := eventPublishBody("", runStartTestFingerprint, "repo-scaffold/repo_scaffold.repo_commit_succeeded", `{"topic":"medicine"}`, "", "idem-flow-scoped")
+
+	published := rpcCall(t, handler, body)
+	if published.Error != nil {
+		t.Fatalf("event.publish flow-scoped error = %#v", published.Error)
+	}
+	result := asMap(t, published.Result)
+	eventID := stringValue(t, result["event_id"], "event_id")
+	runID := stringValue(t, result["run_id"], "run_id")
+	if got := countEventsByName(t, db, canonicalEventName); got != 1 {
+		t.Fatalf("%s event count = %d, want 1", canonicalEventName, got)
+	}
+	assertEventPublishPersistence(t, db, runID, eventID, canonicalEventName, "cli-publish:"+actorTokenID(testToken))
+	deliveries := asSlice(t, result["deliveries"])
+	if len(deliveries) != 1 {
+		t.Fatalf("deliveries = %#v, want one persisted delivery", deliveries)
+	}
+	if delivery := asMap(t, deliveries[0]); delivery["subscriber_id"] != "repo-observer" {
+		t.Fatalf("delivery = %#v, want repo-observer", delivery)
+	}
+	select {
+	case got := <-ch:
+		if got.ID != eventID || string(got.Type) != canonicalEventName {
+			t.Fatalf("delivered event = %#v, want %s/%s", got, eventID, canonicalEventName)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for flow-scoped event.publish delivery")
+	}
+}
+
+func TestOperatorEventPublishRootEventNameWinsOverFlowLeafAliases(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	source := semanticview.Wrap(rootAndAmbiguousFlowScopedEventPublishTestBundle())
+	bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	handler := eventPublishTestHandler(t, pg, bus, source)
+
+	published := rpcCall(t, handler, eventPublishBody("", runStartTestFingerprint, "workflow.completed", `{"topic":"medicine"}`, "", "idem-root-collision"))
+	if published.Error != nil {
+		t.Fatalf("event.publish root collision error = %#v", published.Error)
+	}
+	result := asMap(t, published.Result)
+	eventID := stringValue(t, result["event_id"], "event_id")
+	runID := stringValue(t, result["run_id"], "run_id")
+	if got := countEventsByName(t, db, "workflow.completed"); got != 1 {
+		t.Fatalf("workflow.completed event count = %d, want 1", got)
+	}
+	for _, flowEventName := range []string{"alpha-flow/workflow.completed", "beta-flow/workflow.completed"} {
+		if got := countEventsByName(t, db, flowEventName); got != 0 {
+			t.Fatalf("%s event count = %d, want 0", flowEventName, got)
+		}
+	}
+	assertEventPublishPersistence(t, db, runID, eventID, "workflow.completed", "cli-publish:"+actorTokenID(testToken))
+}
+
+func TestOperatorEventPublishFlowScopedEventNameFailuresFailClosed(t *testing.T) {
+	t.Run("unknown flow scoped event", func(t *testing.T) {
+		_, db, _ := testutil.StartPostgres(t)
+		pg := &store.PostgresStore{DB: db}
+		source := semanticview.Wrap(flowScopedEventPublishTestBundle())
+		bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
+		if err != nil {
+			t.Fatalf("NewEventBusWithOptions: %v", err)
+		}
+		handler := eventPublishTestHandler(t, pg, bus, source)
+
+		resp := rpcCall(t, handler, eventPublishBody("", runStartTestFingerprint, "repo-scaffold/repo_scaffold.missing", `{"topic":"medicine"}`, "", "idem-flow-scoped-missing"))
+		if resp.Error == nil {
+			t.Fatal("event.publish unknown flow-scoped event error = nil")
+		}
+		data := asMap(t, resp.Error.Data)
+		if data["code"] != EventNotDeclaredCode {
+			t.Fatalf("unknown flow-scoped data = %#v, want %s", data, EventNotDeclaredCode)
+		}
+		details := asMap(t, data["details"])
+		if details["event_name"] != "repo-scaffold/repo_scaffold.missing" || details["reason"] != "unknown_flow_scoped_event" {
+			t.Fatalf("unknown flow-scoped details = %#v", details)
+		}
+		assertNoFlowScopedEventPublishPersistence(t, db)
+	})
+
+	t.Run("ambiguous unscoped leaf", func(t *testing.T) {
+		_, db, _ := testutil.StartPostgres(t)
+		pg := &store.PostgresStore{DB: db}
+		source := semanticview.Wrap(ambiguousFlowScopedEventPublishTestBundle())
+		bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
+		if err != nil {
+			t.Fatalf("NewEventBusWithOptions: %v", err)
+		}
+		handler := eventPublishTestHandler(t, pg, bus, source)
+
+		resp := rpcCall(t, handler, eventPublishBody("", runStartTestFingerprint, "workflow.completed", `{"topic":"medicine"}`, "", "idem-flow-scoped-ambiguous"))
+		if resp.Error == nil {
+			t.Fatal("event.publish ambiguous leaf error = nil")
+		}
+		data := asMap(t, resp.Error.Data)
+		if data["code"] != EventNotDeclaredCode {
+			t.Fatalf("ambiguous leaf data = %#v, want %s", data, EventNotDeclaredCode)
+		}
+		details := asMap(t, data["details"])
+		if details["event_name"] != "workflow.completed" || details["reason"] != "ambiguous_event_name" {
+			t.Fatalf("ambiguous leaf details = %#v", details)
+		}
+		assertNoFlowScopedEventPublishPersistence(t, db)
+	})
 }
 
 func TestOperatorEventPublishHandlersRequireCanonicalBundleHashForCreateNewWork(t *testing.T) {
@@ -911,6 +1046,68 @@ func eventPublishBodyWithLegacyFingerprint(runID, fingerprint, eventName, payloa
 	return fmt.Sprintf(`{"jsonrpc":"2.0","id":"publish","method":"event.publish","params":{%s}}`, strings.Join(parts, ","))
 }
 
+func flowScopedEventPublishTestBundle() *runtimecontracts.WorkflowContractBundle {
+	return flowScopedEventPublishBundle(map[string]string{
+		"repo-scaffold": "repo_scaffold.repo_commit_succeeded",
+	})
+}
+
+func ambiguousFlowScopedEventPublishTestBundle() *runtimecontracts.WorkflowContractBundle {
+	return flowScopedEventPublishBundle(map[string]string{
+		"alpha-flow": "workflow.completed",
+		"beta-flow":  "workflow.completed",
+	})
+}
+
+func rootAndAmbiguousFlowScopedEventPublishTestBundle() *runtimecontracts.WorkflowContractBundle {
+	bundle := ambiguousFlowScopedEventPublishTestBundle()
+	bundle.Events = map[string]runtimecontracts.EventCatalogEntry{
+		"workflow.completed": {},
+	}
+	return bundle
+}
+
+func flowScopedEventPublishBundle(eventsByFlow map[string]string) *runtimecontracts.WorkflowContractBundle {
+	flows := make([]runtimecontracts.FlowContractView, 0, len(eventsByFlow))
+	byID := make(map[string]*runtimecontracts.FlowContractView, len(eventsByFlow))
+	for flowID, eventName := range eventsByFlow {
+		flowID = strings.TrimSpace(flowID)
+		eventName = strings.TrimSpace(eventName)
+		nodeID := flowID + "-observer"
+		if flowID == "repo-scaffold" {
+			nodeID = "repo-observer"
+		}
+		flows = append(flows, runtimecontracts.FlowContractView{
+			Paths: runtimecontracts.FlowContractPaths{ID: flowID, Flow: flowID},
+			Path:  flowID,
+			Events: map[string]runtimecontracts.EventCatalogEntry{
+				eventName: {},
+			},
+			Nodes: map[string]runtimecontracts.SystemNodeContract{
+				nodeID: {
+					ID:           nodeID,
+					SubscribesTo: []string{eventName},
+				},
+			},
+		})
+	}
+	sort.Slice(flows, func(i, j int) bool {
+		return strings.TrimSpace(flows[i].Paths.ID) < strings.TrimSpace(flows[j].Paths.ID)
+	})
+	root := runtimecontracts.FlowContractView{Children: flows}
+	for i := range root.Children {
+		flow := &root.Children[i]
+		byID[strings.TrimSpace(flow.Paths.ID)] = flow
+	}
+	return &runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{Name: "review", Version: "1.0.0"},
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root,
+			ByID: byID,
+		},
+	}
+}
+
 func assertEventPublishPersistence(t *testing.T, db *sql.DB, runID, eventID, eventName, producedBy string) {
 	t.Helper()
 	var runStatus, triggerType, triggerID, bundleHash, bundleSource, legacyFingerprint string
@@ -975,11 +1172,33 @@ func assertNoEventPublishPersistence(t *testing.T, db *sql.DB) {
 	}
 }
 
+func assertNoFlowScopedEventPublishPersistence(t *testing.T, db *sql.DB) {
+	t.Helper()
+	if count := countAllRunRows(t, db); count != 0 {
+		t.Fatalf("run rows = %d, want 0", count)
+	}
+	if count := countAllEventRows(t, db); count != 0 {
+		t.Fatalf("event rows = %d, want 0", count)
+	}
+	if count := countAPIIdempotencyRows(t, db); count != 0 {
+		t.Fatalf("api_idempotency rows = %d, want 0", count)
+	}
+}
+
 func countAllEventDeliveries(t *testing.T, db *sql.DB) int {
 	t.Helper()
 	var count int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM event_deliveries`).Scan(&count); err != nil {
 		t.Fatalf("count event_deliveries rows: %v", err)
+	}
+	return count
+}
+
+func countAllEventRows(t *testing.T, db *sql.DB) int {
+	t.Helper()
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM events`).Scan(&count); err != nil {
+		t.Fatalf("count all event rows: %v", err)
 	}
 	return count
 }

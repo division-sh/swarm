@@ -81,6 +81,41 @@ func TestEventPublishUsesEventPublishV1RPCWithBoundParams(t *testing.T) {
 	}
 }
 
+func TestEventPublishPassesFlowScopedEventNameToV1RPC(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	var captured jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		writeJSONRPCResult(t, w, captured.ID, eventPublishTestResult(true))
+	}))
+	defer server.Close()
+
+	const eventName = "repo-scaffold/repo_scaffold.repo_commit_succeeded"
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{
+		"event", "publish", eventName,
+		"--payload-json", `{"topic":"sample"}`,
+		"--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if captured.Method != eventPublishMethod {
+		t.Fatalf("method = %s, want %s", captured.Method, eventPublishMethod)
+	}
+	if captured.Params["event_name"] != eventName {
+		t.Fatalf("event_name param = %#v, want %s", captured.Params["event_name"], eventName)
+	}
+	if !strings.Contains(stdout.String(), "event_name="+eventName) {
+		t.Fatalf("stdout = %q, want flow-scoped event name", stdout.String())
+	}
+	if strings.TrimSpace(stderr.String()) != "" {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
 func TestEventPublishBundleHashSerializesCanonicalParamAndMapsUnsupported(t *testing.T) {
 	t.Setenv("SWARM_API_TOKEN", "test-token")
 	var captured jsonRPCRequest

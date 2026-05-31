@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"swarm/internal/events"
+	runtimeeventidentity "swarm/internal/runtime/core/eventidentity"
 	runtimerunstart "swarm/internal/runtime/runstart"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/store"
@@ -172,6 +173,13 @@ func executeOperatorEventPublication(
 		ctx, params, err = resolveEventPublicationBundleScope(ctx, opts, params, bundleIdentity, cfg)
 		if err != nil {
 			return store.APIIdempotencyCompletion{}, err
+		}
+		if !cfg.rootInputOnly {
+			resolvedEventName, err := resolveEventPublicationEventName(opts.Source, params.EventName)
+			if err != nil {
+				return store.APIIdempotencyCompletion{}, err
+			}
+			params.EventName = resolvedEventName
 		}
 		if err := validateEventPublication(ctx, opts, params, cfg); err != nil {
 			return store.APIIdempotencyCompletion{}, err
@@ -438,7 +446,7 @@ func eventPublishDeliveries(in []store.OperatorEventDelivery) []eventPublishDeli
 }
 
 func eventDeclared(source semanticview.Source, eventName string) bool {
-	eventName = strings.TrimSpace(eventName)
+	eventName = runtimeeventidentity.Normalize(eventName)
 	if source == nil || eventName == "" {
 		return false
 	}
@@ -446,7 +454,12 @@ func eventDeclared(source semanticview.Source, eventName string) bool {
 		return true
 	}
 	for name := range source.ResolvedEventCatalog() {
-		if strings.TrimSpace(name) == eventName {
+		if runtimeeventidentity.Normalize(name) == eventName {
+			return true
+		}
+	}
+	for _, candidate := range eventPublicationEventNameCandidates(source, eventName) {
+		if candidate == eventName {
 			return true
 		}
 	}
@@ -459,20 +472,143 @@ func declaredEventNames(source semanticview.Source) []string {
 	}
 	seen := map[string]struct{}{}
 	for name := range source.EventEntries() {
-		name = strings.TrimSpace(name)
+		name = runtimeeventidentity.Normalize(name)
 		if name != "" {
 			seen[name] = struct{}{}
 		}
 	}
 	for name := range source.ResolvedEventCatalog() {
-		name = strings.TrimSpace(name)
+		name = runtimeeventidentity.Normalize(name)
 		if name != "" {
 			seen[name] = struct{}{}
+		}
+	}
+	for _, scope := range source.FlowScopes() {
+		for eventName := range scope.Events {
+			canonical := canonicalFlowEventName(source, scope, eventName)
+			if canonical != "" {
+				seen[canonical] = struct{}{}
+			}
 		}
 	}
 	out := make([]string, 0, len(seen))
 	for name := range seen {
 		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func resolveEventPublicationEventName(source semanticview.Source, eventName string) (string, error) {
+	eventName = runtimeeventidentity.Normalize(eventName)
+	candidates := eventPublicationEventNameCandidates(source, eventName)
+	if len(candidates) == 1 {
+		return candidates[0], nil
+	}
+	reason := "unknown_event"
+	if strings.Contains(eventName, "/") {
+		reason = "unknown_flow_scoped_event"
+	}
+	if len(candidates) > 1 {
+		reason = "ambiguous_event_name"
+	}
+	return "", NewApplicationError(EventNotDeclaredCode, false, map[string]any{
+		"event_name":      eventName,
+		"declared_events": declaredEventNames(source),
+		"reason":          reason,
+	})
+}
+
+func eventPublicationEventNameCandidates(source semanticview.Source, eventName string) []string {
+	eventName = runtimeeventidentity.Normalize(eventName)
+	if source == nil || eventName == "" {
+		return nil
+	}
+	scoped := strings.Contains(eventName, "/")
+	if !scoped {
+		if _, ok := source.EventEntry(eventName); ok {
+			return []string{eventName}
+		}
+	}
+	flowCandidates := make(map[string]struct{})
+	for _, scope := range source.FlowScopes() {
+		for localEventName := range scope.Events {
+			localEventName = runtimeeventidentity.Normalize(localEventName)
+			if localEventName == "" {
+				continue
+			}
+			canonical := canonicalFlowEventName(source, scope, localEventName)
+			if canonical == "" {
+				continue
+			}
+			if !scoped && localEventName == eventName {
+				flowCandidates[canonical] = struct{}{}
+				continue
+			}
+			if scoped && flowScopedEventNameMatches(eventName, scope, localEventName, canonical) {
+				flowCandidates[canonical] = struct{}{}
+			}
+		}
+	}
+	if len(flowCandidates) > 0 {
+		return sortedEventNameCandidates(flowCandidates)
+	}
+	if scoped {
+		return nil
+	}
+	for name := range source.ResolvedEventCatalog() {
+		if runtimeeventidentity.Normalize(name) == eventName {
+			return []string{eventName}
+		}
+	}
+	return nil
+}
+
+func canonicalFlowEventName(source semanticview.Source, scope semanticview.FlowScope, eventName string) string {
+	eventName = runtimeeventidentity.Normalize(eventName)
+	if source == nil || eventName == "" {
+		return ""
+	}
+	flowID := strings.TrimSpace(scope.ID)
+	if _, _, ok := source.ResolveFlowEventCatalogEntry(flowID, eventName); !ok {
+		return ""
+	}
+	canonical := runtimeeventidentity.Normalize(source.ResolveFlowEventReference(flowID, eventName))
+	if canonical == "" {
+		return eventName
+	}
+	return canonical
+}
+
+func flowScopedEventNameMatches(requested string, scope semanticview.FlowScope, localEventName, canonical string) bool {
+	requested = runtimeeventidentity.Normalize(requested)
+	localEventName = runtimeeventidentity.Normalize(localEventName)
+	canonical = runtimeeventidentity.Normalize(canonical)
+	if requested == "" || localEventName == "" {
+		return false
+	}
+	if requested == canonical {
+		return true
+	}
+	for _, prefix := range []string{scope.ID, scope.Path} {
+		prefix = runtimeeventidentity.Normalize(prefix)
+		if prefix == "" {
+			continue
+		}
+		if requested == prefix+"/"+localEventName {
+			return true
+		}
+	}
+	return false
+}
+
+func sortedEventNameCandidates(candidates map[string]struct{}) []string {
+	out := make([]string, 0, len(candidates))
+	for candidate := range candidates {
+		candidate = runtimeeventidentity.Normalize(candidate)
+		if candidate != "" {
+			out = append(out, candidate)
+		}
 	}
 	sort.Strings(out)
 	return out

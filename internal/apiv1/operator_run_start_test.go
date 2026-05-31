@@ -159,6 +159,32 @@ func TestOperatorRunStartHandlersAcceptCanonicalBundleHashForCreateNewWork(t *te
 	assertRunStartPersistence(t, db, runID, "scan.requested", runStartTestFingerprint)
 }
 
+func TestOperatorRunStartRejectsFlowScopedEventName(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	source := semanticview.Wrap(flowScopedEventPublishTestBundle())
+	bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	handler := runStartTestHandler(t, pg, bus, source)
+	runID := uuid.NewString()
+
+	resp := rpcCall(t, handler, runStartBody(runID, runStartTestFingerprint, "repo-scaffold/repo_scaffold.repo_commit_succeeded", `{"topic":"medicine"}`, "idem-start-flow-scoped"))
+	if resp.Error == nil {
+		t.Fatal("run.start flow-scoped event error = nil")
+	}
+	data := asMap(t, resp.Error.Data)
+	if data["code"] != EventNotDeclaredCode {
+		t.Fatalf("run.start flow-scoped data = %#v, want %s", data, EventNotDeclaredCode)
+	}
+	details := asMap(t, data["details"])
+	if details["event_name"] != "repo-scaffold/repo_scaffold.repo_commit_succeeded" || details["reason"] != "not_declared_root_input" {
+		t.Fatalf("run.start flow-scoped details = %#v", details)
+	}
+	assertNoRunStartPersistence(t, db, runID)
+}
+
 func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 	t.Run("non-routable bundle hash", func(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
