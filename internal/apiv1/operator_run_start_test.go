@@ -14,20 +14,37 @@ import (
 	"swarm/internal/events"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimecorrelation "swarm/internal/runtime/correlation"
 	"swarm/internal/runtime/flowmodel"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/store"
+	storerunlifecycle "swarm/internal/store/runlifecycle"
 	"swarm/internal/testutil"
 )
 
 const runStartTestFingerprint = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 const runStartTestBundleHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
+func runStartTestBundleSourceFact() runtimecorrelation.BundleSourceFact {
+	return runtimecorrelation.BundleSourceFact{
+		BundleHash:        runStartTestBundleHash,
+		BundleSource:      storerunlifecycle.BundleSourceEphemeral,
+		BundleFingerprint: runStartTestFingerprint,
+	}
+}
+
+func runStartTestEventBusOptions(source semanticview.Source) runtimebus.EventBusOptions {
+	return runtimebus.EventBusOptions{
+		ContractBundle:   source,
+		BundleSourceFact: runStartTestBundleSourceFact(),
+	}
+}
+
 func TestOperatorRunStartHandlersPersistRootEventAndReplayIdempotency(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+	bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -93,11 +110,11 @@ func TestOperatorRunStartHandlersPersistRootEventAndReplayIdempotency(t *testing
 	}
 }
 
-func TestOperatorRunStartHandlersPersistBootFingerprintWhenBundleRefOmitted(t *testing.T) {
+func TestOperatorRunStartHandlersRequireBundleHashForCreateNewWork(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+	bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -105,17 +122,30 @@ func TestOperatorRunStartHandlersPersistBootFingerprintWhenBundleRefOmitted(t *t
 	runID := uuid.NewString()
 
 	started := rpcCall(t, handler, runStartBodyWithoutBundle(runID, "scan.requested", `{"topic":"medicine"}`, "idem-start-no-bundle"))
-	if started.Error != nil {
-		t.Fatalf("run.start error = %#v", started.Error)
+	if started.Error == nil {
+		t.Fatal("run.start missing bundle_hash error = nil")
 	}
-	assertRunStartPersistence(t, db, runID, "scan.requested", runStartTestFingerprint)
+	if data := asMap(t, started.Error.Data); data["code"] != BundleScopeRequiredCode {
+		t.Fatalf("missing bundle scope data = %#v", data)
+	}
+	assertNoRunStartPersistence(t, db, runID)
+
+	legacyRunID := uuid.NewString()
+	legacy := rpcCall(t, handler, runStartBodyWithLegacyFingerprint(legacyRunID, runStartTestFingerprint, "scan.requested", `{"topic":"medicine"}`, "idem-start-legacy-only"))
+	if legacy.Error == nil {
+		t.Fatal("run.start legacy-only bundle_ref error = nil")
+	}
+	if data := asMap(t, legacy.Error.Data); data["code"] != BundleScopeRequiredCode {
+		t.Fatalf("legacy-only bundle scope data = %#v", data)
+	}
+	assertNoRunStartPersistence(t, db, legacyRunID)
 }
 
-func TestOperatorRunStartHandlersRejectCanonicalBundleHashUntilSourceOwner(t *testing.T) {
+func TestOperatorRunStartHandlersAcceptCanonicalBundleHashForCreateNewWork(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+	bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -123,21 +153,18 @@ func TestOperatorRunStartHandlersRejectCanonicalBundleHashUntilSourceOwner(t *te
 	runID := uuid.NewString()
 
 	resp := rpcCall(t, handler, runStartBodyWithBundleHash(runID, runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "idem-start-hash"))
-	if resp.Error == nil {
-		t.Fatal("run.start canonical bundle_hash error = nil")
+	if resp.Error != nil {
+		t.Fatalf("run.start canonical bundle_hash error = %#v", resp.Error)
 	}
-	if data := asMap(t, resp.Error.Data); data["code"] != UnsupportedBundleHashCode {
-		t.Fatalf("unsupported bundle hash data = %#v", data)
-	}
-	assertNoRunStartPersistence(t, db, runID)
+	assertRunStartPersistence(t, db, runID, "scan.requested", runStartTestFingerprint)
 }
 
 func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
-	t.Run("bundle mismatch", func(t *testing.T) {
+	t.Run("non-routable bundle hash", func(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
 		pg := &store.PostgresStore{DB: db}
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-		bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+		bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatalf("NewEventBusWithOptions: %v", err)
 		}
@@ -146,19 +173,51 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 
 		resp := rpcCall(t, handler, runStartBody(runID, "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "scan.requested", `{"topic":"medicine"}`, "idem-mismatch"))
 		if resp.Error == nil {
-			t.Fatal("run.start bundle mismatch error = nil")
+			t.Fatal("run.start non-routable bundle error = nil")
 		}
-		if data := asMap(t, resp.Error.Data); data["code"] != BundleMismatchCode {
-			t.Fatalf("bundle mismatch data = %#v", data)
+		if data := asMap(t, resp.Error.Data); data["code"] != BundleUnavailableCode {
+			t.Fatalf("bundle unavailable data = %#v", data)
 		}
 		assertNoRunStartPersistence(t, db, runID)
 	})
 
-	t.Run("invalid bundle fingerprint", func(t *testing.T) {
+	t.Run("existing run bundle mismatch", func(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
 		pg := &store.PostgresStore{DB: db}
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-		bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+		bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
+		if err != nil {
+			t.Fatalf("NewEventBusWithOptions: %v", err)
+		}
+		handler := runStartTestHandler(t, pg, bus, source)
+		runID := uuid.NewString()
+		if _, err := db.Exec(`
+			INSERT INTO runs (run_id, status, bundle_hash, bundle_source, bundle_fingerprint)
+			VALUES ($1::uuid, 'running', $2, $3, $4)
+		`, runID, runStartTestBundleHash, storerunlifecycle.BundleSourceEphemeral, runStartTestFingerprint); err != nil {
+			t.Fatalf("seed run bundle context: %v", err)
+		}
+
+		resp := rpcCall(t, handler, runStartBody(runID, "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "scan.requested", `{"topic":"medicine"}`, "idem-existing-mismatch"))
+		if resp.Error == nil {
+			t.Fatal("run.start existing-run bundle mismatch error = nil")
+		}
+		if data := asMap(t, resp.Error.Data); data["code"] != BundleMismatchCode {
+			t.Fatalf("bundle mismatch data = %#v", data)
+		}
+		if count := countEventRowsByRunID(t, db, runID); count != 0 {
+			t.Fatalf("event rows for mismatched run = %d, want 0", count)
+		}
+		if count := countAPIIdempotencyRows(t, db); count != 0 {
+			t.Fatalf("api_idempotency rows after mismatch = %d, want 0", count)
+		}
+	})
+
+	t.Run("invalid canonical bundle hash", func(t *testing.T) {
+		_, db, _ := testutil.StartPostgres(t)
+		pg := &store.PostgresStore{DB: db}
+		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatalf("NewEventBusWithOptions: %v", err)
 		}
@@ -169,8 +228,8 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		if resp.Error == nil {
 			t.Fatal("run.start invalid bundle fingerprint error = nil")
 		}
-		if data := asMap(t, resp.Error.Data); data["code"] != UnsupportedBundleRefCode {
-			t.Fatalf("unsupported bundle ref data = %#v", data)
+		if data := asMap(t, resp.Error.Data); data["code"] != UnsupportedBundleHashCode {
+			t.Fatalf("unsupported bundle hash data = %#v", data)
 		}
 		assertNoRunStartPersistence(t, db, runID)
 	})
@@ -179,7 +238,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
 		pg := &store.PostgresStore{DB: db}
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-		bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+		bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatalf("NewEventBusWithOptions: %v", err)
 		}
@@ -200,7 +259,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
 		pg := &store.PostgresStore{DB: db}
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-		bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+		bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatalf("NewEventBusWithOptions: %v", err)
 		}
@@ -221,7 +280,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
 		pg := &store.PostgresStore{DB: db}
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-		bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+		bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatalf("NewEventBusWithOptions: %v", err)
 		}
@@ -260,7 +319,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		}
 		bundle.Nodes["scan-orchestrator"] = bundle.FlowTree.Root.Children[0].Nodes["scan-orchestrator"]
 		source := semanticview.Wrap(bundle)
-		bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+		bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatalf("NewEventBusWithOptions: %v", err)
 		}
@@ -293,7 +352,8 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		pg := &store.PostgresStore{DB: db}
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
-			ContractBundle: source,
+			ContractBundle:   source,
+			BundleSourceFact: runStartTestBundleSourceFact(),
 			PayloadValidator: func(eventType string, payload []byte) error {
 				if eventType != "scan.requested" {
 					return fmt.Errorf("unexpected event type %q", eventType)
@@ -321,7 +381,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
 		pg := &store.PostgresStore{DB: db}
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-		bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+		bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatalf("NewEventBusWithOptions: %v", err)
 		}
@@ -352,7 +412,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
 		pg := &store.PostgresStore{DB: db}
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-		bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+		bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatalf("NewEventBusWithOptions: %v", err)
 		}
@@ -368,7 +428,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
 		pg := &store.PostgresStore{DB: db}
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-		bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+		bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatalf("NewEventBusWithOptions: %v", err)
 		}
@@ -407,7 +467,7 @@ func TestOperatorRunStartHandlersLeaveSplitControlMethodsUnavailable(t *testing.
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+	bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -441,13 +501,14 @@ func runStartTestHandler(t *testing.T, pg *store.PostgresStore, bus EventPublish
 	return testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: OperatorReadHandlers(OperatorReadOptions{
-			Now:         func() time.Time { return time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC) },
-			Ready:       func() bool { return true },
-			Database:    fakePinger{},
-			Runs:        pg,
-			Idempotency: pg,
-			Events:      bus,
-			Source:      source,
+			Now:              func() time.Time { return time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC) },
+			Ready:            func() bool { return true },
+			Database:         fakePinger{},
+			Runs:             pg,
+			Idempotency:      pg,
+			Events:           bus,
+			Source:           source,
+			RunBundleContext: pg,
 			Bundle: runtimecontracts.BundleIdentity{
 				WorkflowName:    "review",
 				WorkflowVersion: "1.0.0",
@@ -465,7 +526,22 @@ func (p failingRunStartPublisher) Publish(context.Context, events.Event) error {
 	return p.err
 }
 
+func (p failingRunStartPublisher) WithBundleFingerprint(ctx context.Context) context.Context {
+	return runtimecorrelation.WithBundleSourceFact(ctx, runStartTestBundleSourceFact())
+}
+
 func runStartBody(runID, fingerprint, eventName, payload, idempotencyKey string) string {
+	return fmt.Sprintf(
+		`{"jsonrpc":"2.0","id":"start","method":"run.start","params":{"bundle_hash":%q,"event_name":%q,"payload":%s,"run_id":%q,"idempotency_key":%q}}`,
+		runStartTestBundleHashForFingerprint(fingerprint),
+		eventName,
+		payload,
+		runID,
+		idempotencyKey,
+	)
+}
+
+func runStartBodyWithLegacyFingerprint(runID, fingerprint, eventName, payload, idempotencyKey string) string {
 	return fmt.Sprintf(
 		`{"jsonrpc":"2.0","id":"start","method":"run.start","params":{"bundle_ref":{"fingerprint":%q},"event_name":%q,"payload":%s,"run_id":%q,"idempotency_key":%q}}`,
 		fingerprint,
@@ -474,6 +550,14 @@ func runStartBody(runID, fingerprint, eventName, payload, idempotencyKey string)
 		runID,
 		idempotencyKey,
 	)
+}
+
+func runStartTestBundleHashForFingerprint(fingerprint string) string {
+	fingerprint = strings.TrimSpace(fingerprint)
+	if strings.HasPrefix(fingerprint, "sha256:") {
+		return "bundle-v1:" + fingerprint
+	}
+	return fingerprint
 }
 
 func runStartBodyWithBundleHash(runID, bundleHash, eventName, payload, idempotencyKey string) string {
@@ -556,8 +640,8 @@ func assertRunStartPersistence(t *testing.T, db *sql.DB, runID, eventName, bundl
 	if runStatus != "running" || triggerType != eventName {
 		t.Fatalf("run row status=%q trigger=%q, want running/%s", runStatus, triggerType, eventName)
 	}
-	if bundleHash != "" || bundleSource != "legacy" || legacyFingerprint != bundleFingerprint {
-		t.Fatalf("run row bundle identity = hash:%q source:%q fingerprint:%q, want legacy with compatibility fingerprint %q", bundleHash, bundleSource, legacyFingerprint, bundleFingerprint)
+	if bundleHash != runStartTestBundleHash || bundleSource != storerunlifecycle.BundleSourceEphemeral || legacyFingerprint != bundleFingerprint {
+		t.Fatalf("run row bundle identity = hash:%q source:%q fingerprint:%q, want %s/%s/%s", bundleHash, bundleSource, legacyFingerprint, runStartTestBundleHash, storerunlifecycle.BundleSourceEphemeral, bundleFingerprint)
 	}
 	var entityID, producedBy string
 	var payload json.RawMessage

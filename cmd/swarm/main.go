@@ -481,6 +481,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		slog.Error("prepare bundle source", "error", err)
 		return 3
 	}
+	bootBundleIdentity.BundleHash = strings.TrimSpace(bundleSourceFact.BundleHash)
 	if err := workspaces.ValidateSource(ctx, source); err != nil {
 		slog.Error("validate workspaces", "error", err)
 		return 1
@@ -612,6 +613,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		BundleCatalog:       stores.Postgres,
 		ConversationForks:   stores.Postgres,
 		ForkChatExecutor:    apiv1.NewLLMForkChatExecutor(forkChatLLM),
+		RunBundleContext:    stores.Postgres,
 		RunForkAvailability: runForkAvailability,
 		RunFork: apiv1.SelectedContractRunForkExecutor{
 			Store: stores.Postgres,

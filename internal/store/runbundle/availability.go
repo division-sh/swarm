@@ -15,6 +15,8 @@ const (
 	CodeBundleDataIntegrityError = "BUNDLE_DATA_INTEGRITY_ERROR"
 )
 
+var ErrRunNotFound = errors.New("run bundle: run not found")
+
 type Availability struct {
 	RunID             string
 	Status            string
@@ -87,7 +89,7 @@ func LoadAvailability(ctx context.Context, db queryer, runID string) (Availabili
 		WHERE run_id = $1::uuid
 	`, runID).Scan(&row.RunID, &row.Status, &row.BundleHash, &row.BundleSource, &row.BundleFingerprint)
 	if errors.Is(err, sql.ErrNoRows) {
-		return Availability{}, fmt.Errorf("run %s not found", runID)
+		return Availability{}, fmt.Errorf("run %s not found: %w", runID, ErrRunNotFound)
 	}
 	if err != nil {
 		return Availability{}, fmt.Errorf("load run bundle availability: %w", err)

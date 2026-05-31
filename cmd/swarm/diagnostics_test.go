@@ -1298,6 +1298,28 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 			wantStderr: "bundle.workflow_name is required",
 		},
 		{
+			name: "health invalid bundle hash",
+			args: []string{"health"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				writeJSONRPCResult(t, w, req.ID, map[string]any{
+					"alive":      true,
+					"ready":      true,
+					"db_ok":      true,
+					"runtime_ok": true,
+					"bundle": map[string]any{
+						"fingerprint":      "sha256:abc",
+						"bundle_hash":      "sha256:abc",
+						"workflow_name":    "workflow",
+						"workflow_version": "v1",
+					},
+				})
+			},
+			wantCode:   3,
+			wantStderr: "bundle.bundle_hash must be bundle-v1:sha256:<64 lowercase hex>",
+		},
+		{
 			name: "health missing workflow version",
 			args: []string{"health"},
 			handler: func(w http.ResponseWriter, r *http.Request) {

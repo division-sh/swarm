@@ -70,6 +70,7 @@ type OperatorReadOptions struct {
 	BundleCatalog         BundleCatalogReadStore
 	ConversationForks     ConversationForkLifecycleStore
 	ForkChatExecutor      ForkChatExecutor
+	RunBundleContext      RunBundleContextStore
 	RunForkAvailability   RunForkAvailabilityStore
 	RunFork               RunForkExecutor
 	AgentControl          AgentControlController

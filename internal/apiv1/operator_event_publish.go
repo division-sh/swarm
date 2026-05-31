@@ -11,7 +11,6 @@ import (
 
 	"github.com/google/uuid"
 	"swarm/internal/events"
-	runtimecorrelation "swarm/internal/runtime/correlation"
 	runtimerunstart "swarm/internal/runtime/runstart"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/store"
@@ -33,6 +32,8 @@ type eventPublishDelivery struct {
 }
 
 type eventPublicationParams struct {
+	BundleHash        string
+	BundleSource      string
 	BundleFingerprint string
 	EventID           string
 	EventName         string
@@ -43,6 +44,7 @@ type eventPublicationParams struct {
 	IdempotencyKey    string
 	Emitter           string
 	NewRunCreated     bool
+	RunIDProvided     bool
 }
 
 type eventPublicationConfig struct {
@@ -151,8 +153,6 @@ func executeOperatorEventPublication(
 	now time.Time,
 	cfg eventPublicationConfig,
 ) (store.APIIdempotencyCompletion, bool, error) {
-	bootFingerprint := strings.TrimSpace(opts.Bundle.Fingerprint)
-	ctx = runtimecorrelation.WithBundleFingerprint(ctx, bootFingerprint)
 	idempotencyKey, _, err := optionalStringParam(req.Params, "idempotency_key")
 	if err != nil {
 		return store.APIIdempotencyCompletion{}, false, err
@@ -165,7 +165,11 @@ func executeOperatorEventPublication(
 		TTL:            runStartIDempotencyTTL,
 		Now:            now,
 	}, func(ctx context.Context) (store.APIIdempotencyCompletion, error) {
-		params, err := eventPublicationParamsFromRequest(req, bootFingerprint, cfg)
+		params, bundleIdentity, err := eventPublicationParamsFromRequest(req, cfg)
+		if err != nil {
+			return store.APIIdempotencyCompletion{}, err
+		}
+		ctx, params, err = resolveEventPublicationBundleScope(ctx, opts, params, bundleIdentity, cfg)
 		if err != nil {
 			return store.APIIdempotencyCompletion{}, err
 		}
@@ -201,75 +205,66 @@ func executeOperatorEventPublication(
 	})
 }
 
-func eventPublicationParamsFromRequest(req Request, bootFingerprint string, cfg eventPublicationConfig) (eventPublicationParams, error) {
+func eventPublicationParamsFromRequest(req Request, cfg eventPublicationConfig) (eventPublicationParams, bundleIdentityParam, error) {
 	eventName := stringParam(req.Params, "event_name")
 	if eventName == "" {
-		return eventPublicationParams{}, NewInvalidParamsError(map[string]any{"field": "event_name", "reason": "required parameter is missing"})
+		return eventPublicationParams{}, bundleIdentityParam{}, NewInvalidParamsError(map[string]any{"field": "event_name", "reason": "required parameter is missing"})
 	}
 	bundleIdentity, err := bundleIdentityInputParam(req.Params)
 	if err != nil {
-		return eventPublicationParams{}, err
+		return eventPublicationParams{}, bundleIdentityParam{}, err
 	}
-	if bundleIdentity.BundleHash != "" {
-		return eventPublicationParams{}, NewApplicationError(UnsupportedBundleHashCode, false, map[string]any{
-			"reason": "bundle_hash runtime assertions require canonical bundle source facts; use legacy bundle_ref.fingerprint during the #1001 transition",
-		})
-	}
-	fingerprint := bundleIdentity.LegacyFingerprint
-	if fingerprint != "" && fingerprint != strings.TrimSpace(bootFingerprint) {
-		return eventPublicationParams{}, NewApplicationError(BundleMismatchCode, false, bundleIdentity.mismatchDetails(bootFingerprint))
-	}
-	runID, _, err := optionalStringParam(req.Params, "run_id")
+	runID, runIDProvided, err := optionalStringParam(req.Params, "run_id")
 	if err != nil {
-		return eventPublicationParams{}, err
+		return eventPublicationParams{}, bundleIdentityParam{}, err
 	}
 	sourceEventID, sourceEventIDSet, err := optionalStringParam(req.Params, "source_event_id")
 	if err != nil {
-		return eventPublicationParams{}, err
+		return eventPublicationParams{}, bundleIdentityParam{}, err
 	}
 	if sourceEventIDSet {
 		if sourceEventID == "" {
-			return eventPublicationParams{}, NewInvalidParamsError(map[string]any{"field": "source_event_id", "reason": "must be a UUID"})
+			return eventPublicationParams{}, bundleIdentityParam{}, NewInvalidParamsError(map[string]any{"field": "source_event_id", "reason": "must be a UUID"})
 		}
 		parsed, err := uuid.Parse(sourceEventID)
 		if err != nil {
-			return eventPublicationParams{}, NewInvalidParamsError(map[string]any{"field": "source_event_id", "reason": "must be a UUID"})
+			return eventPublicationParams{}, bundleIdentityParam{}, NewInvalidParamsError(map[string]any{"field": "source_event_id", "reason": "must be a UUID"})
 		}
 		sourceEventID = parsed.String()
 	}
 	if sourceEventID != "" && runID == "" {
-		return eventPublicationParams{}, NewInvalidParamsError(map[string]any{"field": "run_id", "reason": "is required when source_event_id is provided"})
+		return eventPublicationParams{}, bundleIdentityParam{}, NewInvalidParamsError(map[string]any{"field": "run_id", "reason": "is required when source_event_id is provided"})
 	}
 	newRun := false
 	if runID == "" {
 		runID = uuid.NewString()
 		newRun = true
 	} else if parsed, err := uuid.Parse(runID); err != nil {
-		return eventPublicationParams{}, NewInvalidParamsError(map[string]any{"field": "run_id", "reason": "must be a UUID"})
+		return eventPublicationParams{}, bundleIdentityParam{}, NewInvalidParamsError(map[string]any{"field": "run_id", "reason": "must be a UUID"})
 	} else {
 		runID = parsed.String()
 	}
 	injectEntityID := cfg.injectRunIDEntityIDWhenMissing && (!cfg.injectRunIDEntityIDOnlyNewRun || newRun)
 	payload, entityID, err := eventPublicationPayload(req.Params, runID, injectEntityID)
 	if err != nil {
-		return eventPublicationParams{}, err
+		return eventPublicationParams{}, bundleIdentityParam{}, err
 	}
 	idempotencyKey, _, err := optionalStringParam(req.Params, "idempotency_key")
 	if err != nil {
-		return eventPublicationParams{}, err
+		return eventPublicationParams{}, bundleIdentityParam{}, err
 	}
 	emitter := ""
 	if cfg.allowEmitterParam {
 		emitter, _, err = optionalStringParam(req.Params, "emitter")
 		if err != nil {
-			return eventPublicationParams{}, err
+			return eventPublicationParams{}, bundleIdentityParam{}, err
 		}
 	}
 	if emitter == "" && cfg.sourceAgent != nil {
 		emitter = cfg.sourceAgent(req)
 	}
 	return eventPublicationParams{
-		BundleFingerprint: fingerprint,
+		BundleFingerprint: bundleIdentity.LegacyFingerprint,
 		EventID:           uuid.NewString(),
 		EventName:         eventName,
 		Payload:           payload,
@@ -279,7 +274,8 @@ func eventPublicationParamsFromRequest(req Request, bootFingerprint string, cfg 
 		IdempotencyKey:    idempotencyKey,
 		Emitter:           emitter,
 		NewRunCreated:     newRun,
-	}, nil
+		RunIDProvided:     runIDProvided,
+	}, bundleIdentity, nil
 }
 
 func eventPublicationPayload(params map[string]any, runID string, injectRunIDEntityID bool) (json.RawMessage, string, error) {

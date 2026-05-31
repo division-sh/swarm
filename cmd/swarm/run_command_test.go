@@ -32,8 +32,8 @@ func TestRunCommandLocalForegroundConsumesServeOwnerAndV1API(t *testing.T) {
 				if got := req.Params["event_name"]; got != "scan.requested" {
 					t.Fatalf("event_name = %#v, want scan.requested", got)
 				}
-				if _, ok := req.Params["bundle_hash"]; ok {
-					t.Fatalf("bundle_hash unexpectedly present without bundle flag: %#v", req.Params)
+				if got := req.Params["bundle_hash"]; got != "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+					t.Fatalf("bundle_hash = %#v, want health.check bundle hash", got)
 				}
 				if _, ok := req.Params["bundle_ref"]; ok {
 					t.Fatalf("bundle_ref unexpectedly present without bundle flag: %#v", req.Params)
@@ -153,6 +153,9 @@ func TestRunCommandConnectedNoFollowUsesHealthAndRunStartOnly(t *testing.T) {
 			case "health.check":
 				return runCommandHealthResult()
 			case "run.start":
+				if got := req.Params["bundle_hash"]; got != "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+					t.Fatalf("bundle_hash = %#v, want health.check bundle hash", got)
+				}
 				return map[string]any{"run_id": "run-no-follow", "status": "running"}
 			default:
 				t.Fatalf("unexpected method = %q", req.Method)
@@ -278,7 +281,7 @@ func TestRunCommandBundleHashSerializesCanonicalParamAndMapsUnsupported(t *testi
 func TestRunCommandStartApplicationErrorsExitSixAndDoNotFollow(t *testing.T) {
 	t.Setenv("SWARM_API_TOKEN", "test-token")
 	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
-	for _, codeName := range []string{"EVENT_NOT_DECLARED", "PAYLOAD_VALIDATION_FAILED", "EVENT_PUBLISH_FAILED"} {
+	for _, codeName := range []string{"BUNDLE_SCOPE_REQUIRED", "BUNDLE_UNAVAILABLE", "BUNDLE_DATA_INTEGRITY_ERROR", "BUNDLE_MISMATCH", "EVENT_NOT_DECLARED", "PAYLOAD_VALIDATION_FAILED", "EVENT_PUBLISH_FAILED"} {
 		t.Run(codeName, func(t *testing.T) {
 			var calls []jsonRPCRequest
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -873,6 +876,7 @@ func runCommandHealthResult() map[string]any {
 			"workflow_name":    "review",
 			"workflow_version": "1.2.3",
 			"fingerprint":      "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			"bundle_hash":      "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		},
 	}
 }

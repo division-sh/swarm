@@ -23,8 +23,8 @@ func TestPlatformAPISpecValidationCoverage(t *testing.T) {
 	if report.SchemaCount != 103 {
 		t.Fatalf("schema count = %d, want 103", report.SchemaCount)
 	}
-	if report.ErrorCodeCount != 36 {
-		t.Fatalf("error code count = %d, want 36", report.ErrorCodeCount)
+	if report.ErrorCodeCount != 37 {
+		t.Fatalf("error code count = %d, want 37", report.ErrorCodeCount)
 	}
 	if report.MutatingMethodCount != 21 {
 		t.Fatalf("mutating method count = %d, want 21", report.MutatingMethodCount)
@@ -73,8 +73,8 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	if len(doc.Components.Schemas) != 103 {
 		t.Fatalf("generated OpenRPC schemas = %d, want 103", len(doc.Components.Schemas))
 	}
-	if len(doc.Components.Errors) != 36 {
-		t.Fatalf("generated OpenRPC errors = %d, want 36", len(doc.Components.Errors))
+	if len(doc.Components.Errors) != 37 {
+		t.Fatalf("generated OpenRPC errors = %d, want 37", len(doc.Components.Errors))
 	}
 	assertGeneratedMethodsOmitExamplesUnderPolicy(t, api, artifact)
 	assertGeneratedMethodsOmitRPCDiscoverUnderPolicy(t, api, doc)
@@ -255,7 +255,7 @@ func TestGeneratedOpenRPCBundleIdentityDescriptionsPreserveConstraints(t *testin
 		assertOpenRPCParamDescriptionContains(t, methodName, params, "bundle_ref",
 			"#1001",
 			"bundle_ref.fingerprint",
-			"boot-fingerprint assertion path",
+			"not authoritative for create-new-work scope or routing",
 			"cannot be combined with bundle_hash",
 		)
 	}

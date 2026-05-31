@@ -436,7 +436,7 @@ func runCommandHealth(ctx context.Context, client *cliAPIClient) (diagnosticHeal
 	return result, nil
 }
 
-func runCommandStart(ctx context.Context, client *cliAPIClient, _ diagnosticHealthCheckResult, opts runCommandOptions, payload map[string]any) (runStartResult, error) {
+func runCommandStart(ctx context.Context, client *cliAPIClient, health diagnosticHealthCheckResult, opts runCommandOptions, payload map[string]any) (runStartResult, error) {
 	params := map[string]any{
 		"event_name": strings.TrimSpace(opts.eventName),
 		"payload":    payload,
@@ -445,6 +445,8 @@ func runCommandStart(ctx context.Context, client *cliAPIClient, _ diagnosticHeal
 		params["bundle_hash"] = bundleHash
 	} else if fingerprint := strings.TrimSpace(opts.bundleFingerprint); fingerprint != "" {
 		params["bundle_ref"] = map[string]any{"fingerprint": fingerprint}
+	} else if bundleHash := strings.TrimSpace(health.Bundle.BundleHash); bundleHash != "" {
+		params["bundle_hash"] = bundleHash
 	}
 	if runID := strings.TrimSpace(opts.runID); runID != "" {
 		params["run_id"] = runID
@@ -716,6 +718,9 @@ func runCommandErrorExitCode(err error) int {
 		notFoundCodes: []string{"RUN_NOT_FOUND"},
 		conflictCodes: []string{
 			"BUNDLE_MISMATCH",
+			"BUNDLE_SCOPE_REQUIRED",
+			"BUNDLE_UNAVAILABLE",
+			"BUNDLE_DATA_INTEGRITY_ERROR",
 			"UNSUPPORTED_BUNDLE_HASH",
 			"UNSUPPORTED_BUNDLE_REF",
 			"EVENT_NOT_DECLARED",

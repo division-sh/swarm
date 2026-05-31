@@ -89,6 +89,7 @@ type diagnosticBundleIdentity struct {
 	WorkflowName    *string `json:"workflow_name"`
 	WorkflowVersion *string `json:"workflow_version"`
 	Fingerprint     string  `json:"fingerprint"`
+	BundleHash      string  `json:"bundle_hash,omitempty"`
 }
 
 type diagnosticRunHeader struct {
@@ -1002,6 +1003,9 @@ func validateDiagnosticHealthCheck(result diagnosticHealthCheckResult) error {
 	if strings.TrimSpace(result.Bundle.Fingerprint) == "" {
 		return fmt.Errorf("malformed health.check result: bundle.fingerprint is required")
 	}
+	if hash := strings.TrimSpace(result.Bundle.BundleHash); hash != "" && !cliBundleHashPattern.MatchString(hash) {
+		return fmt.Errorf("malformed health.check result: bundle.bundle_hash must be bundle-v1:sha256:<64 lowercase hex>")
+	}
 	if result.Bundle.WorkflowName == nil {
 		return fmt.Errorf("malformed health.check result: bundle.workflow_name is required")
 	}
@@ -1167,6 +1171,9 @@ func writeDiagnosticHealth(out io.Writer, result diagnosticHealthCheckResult) {
 		emptyDash(stringPointerValue(result.Bundle.WorkflowName)),
 		emptyDash(stringPointerValue(result.Bundle.WorkflowVersion)),
 	)
+	if hash := strings.TrimSpace(result.Bundle.BundleHash); hash != "" {
+		fmt.Fprintf(out, "bundle_hash=%s\n", hash)
+	}
 }
 
 func intPointerValue(value *int) int {

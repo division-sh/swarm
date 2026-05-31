@@ -282,6 +282,9 @@ func eventPublishErrorExitCode(err error) int {
 		notFoundCodes: []string{"RUN_NOT_FOUND", "EVENT_NOT_FOUND"},
 		conflictCodes: []string{
 			"BUNDLE_MISMATCH",
+			"BUNDLE_SCOPE_REQUIRED",
+			"BUNDLE_UNAVAILABLE",
+			"BUNDLE_DATA_INTEGRITY_ERROR",
 			"UNSUPPORTED_BUNDLE_HASH",
 			"UNSUPPORTED_BUNDLE_REF",
 			"EVENT_NOT_DECLARED",

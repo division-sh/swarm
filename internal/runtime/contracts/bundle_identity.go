@@ -18,6 +18,7 @@ type BundleIdentity struct {
 	WorkflowName    string `json:"workflow_name"`
 	WorkflowVersion string `json:"workflow_version"`
 	Fingerprint     string `json:"fingerprint"`
+	BundleHash      string `json:"bundle_hash,omitempty"`
 }
 
 type bundleIdentityEntry struct {
