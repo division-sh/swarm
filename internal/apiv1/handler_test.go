@@ -2,6 +2,7 @@ package apiv1
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -622,8 +623,11 @@ func TestOperatorBundleRegisterHandlersMaterializeCanonicalProjectionAndIdempote
 	if !ok || !bundleHashPattern.MatchString(bundleHash) {
 		t.Fatalf("bundle.register bundle_hash = %#v", result["bundle_hash"])
 	}
-	if result["registered"] != true || result["idempotency_replayed"] != false {
+	if result["registered"] != true || result["has_data"] != false || result["data_size_bytes"] != float64(0) {
 		t.Fatalf("bundle.register result = %#v", result)
+	}
+	if _, ok := result["idempotency_replayed"]; ok {
+		t.Fatalf("bundle.register result must not expose idempotency_replayed: %#v", result)
 	}
 	if len(catalog.upserts) != 1 {
 		t.Fatalf("upserts = %d, want 1", len(catalog.upserts))
@@ -632,7 +636,7 @@ func TestOperatorBundleRegisterHandlersMaterializeCanonicalProjectionAndIdempote
 	if upsert.BundleHash != bundleHash || !strings.Contains(upsert.ContentYAML, "bundle/package.yaml") || !strings.Contains(upsert.ContentYAML, "platform/platform-spec.yaml") {
 		t.Fatalf("bundle.register upsert = %#v", upsert)
 	}
-	if upsert.Metadata["source"] != "bundle.register" || upsert.Metadata["platform_spec_sha256"] != platformHash {
+	if upsert.Metadata["registered_by"] != "bundle.register" || upsert.Metadata["platform_spec_hash"] != "sha256:"+platformHash || upsert.Metadata["platform_spec_source"] != "server_effective" {
 		t.Fatalf("bundle.register metadata = %#v", upsert.Metadata)
 	}
 	agents := asMap(t, upsert.ParsedJSON["agents"])
@@ -646,7 +650,7 @@ func TestOperatorBundleRegisterHandlersMaterializeCanonicalProjectionAndIdempote
 		t.Fatalf("bundle.register replay error = %#v", replay.Error)
 	}
 	replayResult := asMap(t, replay.Result)
-	if replayResult["bundle_hash"] != bundleHash || replayResult["registered"] != true || replayResult["idempotency_replayed"] != true {
+	if replayResult["bundle_hash"] != bundleHash || replayResult["registered"] != true || replayResult["has_data"] != false {
 		t.Fatalf("bundle.register replay result = %#v", replayResult)
 	}
 	if len(catalog.upserts) != 1 {
@@ -657,8 +661,30 @@ func TestOperatorBundleRegisterHandlersMaterializeCanonicalProjectionAndIdempote
 	if duplicate.Error != nil {
 		t.Fatalf("bundle.register duplicate error = %#v", duplicate.Error)
 	}
-	if duplicateResult := asMap(t, duplicate.Result); duplicateResult["registered"] != false || duplicateResult["idempotency_replayed"] != false {
+	if duplicateResult := asMap(t, duplicate.Result); duplicateResult["registered"] != false || duplicateResult["has_data"] != false {
 		t.Fatalf("bundle.register duplicate result = %#v", duplicateResult)
+	}
+
+	dataBlob := map[string]any{
+		"api_version": "swarm.bundle.data.v1",
+		"entries": []any{
+			map[string]any{"path": "flows/alpha/data/payload.bin", "data_base64": base64.StdEncoding.EncodeToString([]byte{0x01, 0x02, 0x03})},
+		},
+	}
+	dataBlobRaw, err := json.Marshal(dataBlob)
+	if err != nil {
+		t.Fatalf("marshal data_blob: %v", err)
+	}
+	withData := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"data","method":"bundle.register","params":{"content_yaml":%q,"data_blob":%s}}`, testBundleRegistrationEnvelopeWithFlowData(), dataBlobRaw))
+	if withData.Error != nil {
+		t.Fatalf("bundle.register with data error = %#v", withData.Error)
+	}
+	withDataResult := asMap(t, withData.Result)
+	if withDataResult["registered"] != true || withDataResult["has_data"] != true {
+		t.Fatalf("bundle.register with data result = %#v", withDataResult)
+	}
+	if got := withDataResult["data_size_bytes"].(float64); got <= 0 {
+		t.Fatalf("bundle.register data_size_bytes = %v, want >0", got)
 	}
 }
 
@@ -677,7 +703,7 @@ func TestOperatorBundleRegisterHandlersFailClosed(t *testing.T) {
 		}),
 	})
 
-	unconsumed := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"unconsumed","method":"bundle.register","params":{"content_yaml":%q,"data_blob":{"unreferenced.bin":"AQI="}}}`, testBundleRegistrationEnvelope()))
+	unconsumed := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"unconsumed","method":"bundle.register","params":{"content_yaml":%q,"data_blob":{"api_version":"swarm.bundle.data.v1","entries":[{"path":"flows/missing/data/unreferenced.bin","data_base64":"AQI="}]}}}`, testBundleRegistrationEnvelope()))
 	if unconsumed.Error == nil || unconsumed.Error.Code != codeInvalidParams {
 		t.Fatalf("bundle.register unconsumed error = %#v, want invalid params", unconsumed.Error)
 	}
@@ -693,18 +719,57 @@ func TestOperatorBundleRegisterHandlersFailClosed(t *testing.T) {
 	if data := asMap(t, conflict.Error.Data); data["code"] != BundleRegisterConflictCode {
 		t.Fatalf("bundle.register conflict data = %#v", data)
 	}
+
+	malformed := map[string]string{
+		"legacy envelope version": `version: swarm.bundle.registration.v1
+files:
+  - path: package.yaml
+    content: "name: legacy\nversion: \"1.0.0\"\nflows: []\n"
+`,
+		"dot segment": `api_version: swarm.bundle.register.v1
+files:
+  - path: ./package.yaml
+    text: "name: bad\nversion: \"1.0.0\"\nflows: []\n"
+`,
+		"case collision": `api_version: swarm.bundle.register.v1
+files:
+  - path: package.yaml
+    text: "name: bad\nversion: \"1.0.0\"\nflows: []\n"
+  - path: Package.yaml
+    text: "name: bad\n"
+`,
+		"non nfc path": "api_version: swarm.bundle.register.v1\nfiles:\n  - path: cafe\u0301.yaml\n    text: \"name: bad\\n\"\n",
+	}
+	for name, content := range malformed {
+		t.Run(name, func(t *testing.T) {
+			got := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"bad","method":"bundle.register","params":{"content_yaml":%q}}`, content))
+			if got.Error == nil || got.Error.Code != codeInvalidParams {
+				t.Fatalf("bundle.register malformed error = %#v, want invalid params", got.Error)
+			}
+		})
+	}
+
+	badData := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"bad-data","method":"bundle.register","params":{"content_yaml":%q,"data_blob":{"flows/alpha/data/payload.bin":"AQI="}}}`, testBundleRegistrationEnvelope()))
+	if badData.Error == nil || badData.Error.Code != codeInvalidParams {
+		t.Fatalf("bundle.register bad data_blob error = %#v, want invalid params", badData.Error)
+	}
+
+	unsortedData := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"unsorted-data","method":"bundle.register","params":{"content_yaml":%q,"data_blob":{"api_version":"swarm.bundle.data.v1","entries":[{"path":"flows/beta/data/payload.bin","data_base64":"AQI="},{"path":"flows/alpha/data/payload.bin","data_base64":"AQI="}]}}}`, testBundleRegistrationEnvelope()))
+	if unsortedData.Error == nil || unsortedData.Error.Code != codeInvalidParams {
+		t.Fatalf("bundle.register unsorted data_blob error = %#v, want invalid params", unsortedData.Error)
+	}
 }
 
 func testBundleRegistrationEnvelope() string {
-	return `version: swarm.bundle.registration.v1
+	return `api_version: swarm.bundle.register.v1
 files:
   - path: package.yaml
-    content: |
+    text: |
       name: registered
       version: "1.0.0"
       flows: []
   - path: agents.yaml
-    content: |
+    text: |
       researcher:
         id: researcher
         role: research
@@ -712,6 +777,25 @@ files:
         conversation_mode: stateless
         subscriptions:
           - scan.requested
+`
+}
+
+func testBundleRegistrationEnvelopeWithFlowData() string {
+	return `api_version: swarm.bundle.register.v1
+files:
+  - path: package.yaml
+    text: |
+      name: registered-data
+      version: "1.0.0"
+      flows:
+        - id: alpha
+          flow: alpha
+  - path: flows/alpha/schema.yaml
+    text: |
+      initial_state: start
+      states:
+        - start
+        - done
 `
 }
 

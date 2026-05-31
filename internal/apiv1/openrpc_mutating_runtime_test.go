@@ -300,7 +300,7 @@ func mutatingHTTPRuntimeFixtures() map[string]mutatingHTTPRuntimeFixture {
 		"bundle.register": {
 			Params:         map[string]any{"content_yaml": testBundleRegistrationEnvelope()},
 			ConflictParams: map[string]any{"content_yaml": strings.Replace(testBundleRegistrationEnvelope(), "name: registered", "name: registered-conflict", 1)},
-			ResultKeys:     []string{"bundle_hash", "registered", "idempotency_replayed"},
+			ResultKeys:     []string{"bundle_hash", "registered", "has_data", "data_size_bytes"},
 			SuccessEffects: 1,
 		},
 		"event.publish": {
