@@ -1686,6 +1686,9 @@ func loadRuntimeConfigWithOptions(opts runtimeConfigLoadOptions) (runtimeConfigL
 	if err := llmselection.RejectRetiredOpenAICompatibleBaseURLEnv(os.LookupEnv); err != nil {
 		return runtimeConfigLoadResult{}, err
 	}
+	if err := llmselection.RejectRetiredModelEnv(os.LookupEnv); err != nil {
+		return runtimeConfigLoadResult{}, err
+	}
 
 	explicitPath := strings.TrimSpace(opts.ExplicitPath)
 	var result runtimeConfigLoadResult

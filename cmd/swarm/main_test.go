@@ -4201,6 +4201,55 @@ func TestLoadRuntimeConfigWithOptions_BackendOverrideSkipsOverriddenProfileValid
 	}
 }
 
+func TestLoadRuntimeConfigWithOptions_RejectsRetiredModelEnvForConfiguredPaths(t *testing.T) {
+	originalExecutablePath := runtimeConfigExecutablePath
+	t.Cleanup(func() { runtimeConfigExecutablePath = originalExecutablePath })
+	t.Setenv("SWARM_CLAUDE_DEFAULT_MODEL", "claude-test")
+
+	configBody := strings.Join([]string{
+		"llm:",
+		"  backend: anthropic",
+		"  session:",
+		"    lock_ttl: 10s",
+		"    rotate_after_turns: 40",
+		"    rotate_on_parse_failures: 3",
+	}, "\n") + "\n"
+
+	for _, tt := range []struct {
+		name  string
+		setup func(t *testing.T) runtimeConfigLoadOptions
+	}{
+		{
+			name: "explicit",
+			setup: func(t *testing.T) runtimeConfigLoadOptions {
+				t.Helper()
+				repo := t.TempDir()
+				writeRuntimeConfigText(t, filepath.Join(repo, "runtime.yaml"), configBody)
+				return runtimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: "runtime.yaml"}
+			},
+		},
+		{
+			name: "executable-adjacent",
+			setup: func(t *testing.T) runtimeConfigLoadOptions {
+				t.Helper()
+				exeDir := t.TempDir()
+				runtimeConfigExecutablePath = func() (string, error) {
+					return filepath.Join(exeDir, "swarm"), nil
+				}
+				writeRuntimeConfigText(t, filepath.Join(exeDir, "config.yaml"), configBody)
+				return runtimeConfigLoadOptions{RepoRoot: t.TempDir()}
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := loadRuntimeConfigWithOptions(tt.setup(t))
+			if err == nil || !strings.Contains(err.Error(), "SWARM_CLAUDE_DEFAULT_MODEL") || !strings.Contains(err.Error(), "llm.models") {
+				t.Fatalf("loadRuntimeConfigWithOptions error = %v, want retired model env guidance", err)
+			}
+		})
+	}
+}
+
 func TestLoadRuntimeConfigWithOptions_RejectsLegacyBackendBeforeOverride(t *testing.T) {
 	repo := t.TempDir()
 	configPath := filepath.Join(repo, "runtime.yaml")
