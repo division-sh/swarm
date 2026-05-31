@@ -18,6 +18,7 @@ import (
 	"swarm/internal/events"
 	runtimeagents "swarm/internal/runtime/agents"
 	runtimeauthority "swarm/internal/runtime/authority"
+	"swarm/internal/runtime/budgetspend"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimeactors "swarm/internal/runtime/core/actors"
@@ -48,6 +49,7 @@ type Stores struct {
 	ScheduleStore       runtimepipeline.SchedulePersistence
 	StartupOwnership    runtimestartupownership.Store
 	MailboxStore        runtimetools.MailboxPersistence
+	BudgetSpendStore    budgetspend.Store
 	InboundStore        InboundPersistence
 	RuntimeIngressStore runtimeingress.Store
 	TurnStore           llm.TurnPersistence
@@ -460,8 +462,8 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		}
 	}
 
-	if stores.SQLDB != nil {
-		rt.Budget = NewBudgetTracker(stores.SQLDB, rt.Bus, cfg, stores.MailboxStore, rt.Logger, source)
+	if stores.BudgetSpendStore != nil {
+		rt.Budget = NewBudgetTracker(stores.BudgetSpendStore, rt.Bus, cfg, stores.MailboxStore, rt.Logger, source)
 	}
 
 	backendProfile, err := cfg.LLMBackendProfile()

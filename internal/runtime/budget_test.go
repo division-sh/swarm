@@ -2,13 +2,18 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"reflect"
 	"testing"
+	"time"
 
-	"github.com/DATA-DOG/go-sqlmock"
+	"swarm/internal/config"
+	"swarm/internal/runtime/budgetspend"
+	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	llm "swarm/internal/runtime/llm"
 	"swarm/internal/runtime/semanticview"
+	runtimetools "swarm/internal/runtime/tools"
 )
 
 func TestBudgetTracker_KeepsTerminalStatesInstanceOwned(t *testing.T) {
@@ -32,18 +37,10 @@ func TestBudgetTracker_KeepsTerminalStatesInstanceOwned(t *testing.T) {
 }
 
 func TestBudgetTracker_RecordLLMUsagePersistsUsageAccounting(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock: %v", err)
-	}
-	defer db.Close()
-
-	tracker := &BudgetTracker{db: db}
+	store := &budgetSpendStoreCapture{}
+	tracker := &BudgetTracker{store: store}
 	ctx := context.Background()
 
-	mock.ExpectExec("INSERT INTO spend_ledger").
-		WithArgs("", "flow/1", "agent-1", "claude-3-5-sonnet", 11, 7, sqlmock.AnyArg(), "api", "exact", sqlmock.AnyArg()).
-		WillReturnResult(sqlmock.NewResult(0, 1))
 	if err := tracker.RecordLLMUsage(ctx, "", "agent-1", "api", llm.UsageTokens{
 		Model:        "claude-3-5-sonnet",
 		InputTokens:  11,
@@ -51,10 +48,19 @@ func TestBudgetTracker_RecordLLMUsagePersistsUsageAccounting(t *testing.T) {
 	}, true, map[string]any{"flow_instance": "flow/1"}); err != nil {
 		t.Fatalf("RecordLLMUsage exact: %v", err)
 	}
+	if len(store.records) != 1 {
+		t.Fatalf("records after exact = %d, want 1", len(store.records))
+	}
+	assertBudgetSpendRecord(t, store.records[0], budgetspend.SpendRecord{
+		FlowInstance:    "flow/1",
+		AgentID:         "agent-1",
+		Model:           "claude-3-5-sonnet",
+		InputTokens:     11,
+		OutputTokens:    7,
+		InvocationType:  "api",
+		UsageAccounting: "exact",
+	})
 
-	mock.ExpectExec("INSERT INTO spend_ledger").
-		WithArgs("", "flow/1", "agent-1", "claude-cli-sonnet", 13, 5, sqlmock.AnyArg(), "cli_test", "estimated", sqlmock.AnyArg()).
-		WillReturnResult(sqlmock.NewResult(0, 1))
 	if err := tracker.RecordLLMUsage(ctx, "", "agent-1", "cli_test", llm.UsageTokens{
 		Model:        "claude-cli-sonnet",
 		InputTokens:  13,
@@ -62,8 +68,186 @@ func TestBudgetTracker_RecordLLMUsagePersistsUsageAccounting(t *testing.T) {
 	}, false, map[string]any{"flow_instance": "flow/1"}); err != nil {
 		t.Fatalf("RecordLLMUsage estimated: %v", err)
 	}
-
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("unmet sql expectations: %v", err)
+	if len(store.records) != 2 {
+		t.Fatalf("records after estimated = %d, want 2", len(store.records))
 	}
+	assertBudgetSpendRecord(t, store.records[1], budgetspend.SpendRecord{
+		FlowInstance:    "flow/1",
+		AgentID:         "agent-1",
+		Model:           "claude-cli-sonnet",
+		InputTokens:     13,
+		OutputTokens:    5,
+		InvocationType:  "cli_test",
+		UsageAccounting: "estimated",
+	})
+}
+
+func assertBudgetSpendRecord(t *testing.T, got budgetspend.SpendRecord, want budgetspend.SpendRecord) {
+	t.Helper()
+	if got.FlowInstance != want.FlowInstance || got.AgentID != want.AgentID || got.Model != want.Model || got.InputTokens != want.InputTokens || got.OutputTokens != want.OutputTokens || got.InvocationType != want.InvocationType || got.UsageAccounting != want.UsageAccounting {
+		t.Fatalf("spend record = %#v, want matching %#v", got, want)
+	}
+	if got.RecordedAt.IsZero() {
+		t.Fatal("spend record RecordedAt is zero")
+	}
+}
+
+type budgetSpendStoreCapture struct {
+	records    []budgetspend.SpendRecord
+	sum        float64
+	sumQueries []budgetspend.SpendQuery
+}
+
+func (s *budgetSpendStoreCapture) RecordSpend(_ context.Context, rec budgetspend.SpendRecord) error {
+	s.records = append(s.records, rec)
+	return nil
+}
+
+func (s *budgetSpendStoreCapture) ResolveFlowInstance(context.Context, string, string) (string, error) {
+	return "", nil
+}
+
+func (s *budgetSpendStoreCapture) ListActiveEntityIDs(context.Context, string, []string) ([]string, error) {
+	return nil, nil
+}
+
+func (s *budgetSpendStoreCapture) SumSpendUSD(_ context.Context, query budgetspend.SpendQuery) (float64, error) {
+	s.sumQueries = append(s.sumQueries, query)
+	return s.sum, nil
+}
+
+func TestBudgetTracker_RecordSpendNormalizesThroughBudgetSpendOwner(t *testing.T) {
+	store := &budgetSpendStoreCapture{}
+	tracker := &BudgetTracker{store: store}
+	if err := tracker.RecordSpend(context.Background(), SpendRecord{
+		FlowInstance:    " flow/1 ",
+		AgentID:         " agent-1 ",
+		Model:           " claude ",
+		InputTokens:     -1,
+		OutputTokens:    -2,
+		CostUSD:         -3,
+		InvocationType:  " API ",
+		UsageAccounting: " EXACT ",
+		RecordedAt:      time.Time{},
+	}); err != nil {
+		t.Fatalf("RecordSpend: %v", err)
+	}
+	if len(store.records) != 1 {
+		t.Fatalf("records = %d, want 1", len(store.records))
+	}
+	got := store.records[0]
+	if got.FlowInstance != "flow/1" || got.AgentID != "agent-1" || got.Model != "claude" || got.InputTokens != 0 || got.OutputTokens != 0 || got.CostUSD != 0 || got.InvocationType != "api" || got.UsageAccounting != "exact" {
+		t.Fatalf("normalized spend record = %#v", got)
+	}
+}
+
+func TestBudgetTrackerThresholdEventAndEmergencyMailboxConsumeBudgetSpendOwner(t *testing.T) {
+	store := &budgetSpendStoreCapture{sum: 0.95}
+	eventStore := &bootSelfCheckDescriptorStore{}
+	bus, err := runtimebus.NewEventBus(eventStore)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	mailbox := &budgetMailboxCapture{}
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
+			"budget_warning_percent":   {Value: 50},
+			"budget_throttle_percent":  {Value: 75},
+			"budget_emergency_percent": {Value: 90},
+		}},
+	})
+	tracker := NewBudgetTracker(store, bus, &config.Config{Extensions: map[string]any{
+		"budget": map[string]any{"system_monthly_cap": 1},
+	}}, mailbox, nil, source)
+
+	if err := tracker.RecordSpend(context.Background(), SpendRecord{
+		FlowInstance:    "global",
+		AgentID:         "agent-1",
+		Model:           "claude",
+		InputTokens:     1,
+		OutputTokens:    1,
+		CostUSD:         0.95,
+		InvocationType:  "api",
+		UsageAccounting: "exact",
+	}); err != nil {
+		t.Fatalf("RecordSpend: %v", err)
+	}
+	events := eventStore.appendedEvents()
+	if len(events) != 1 || string(events[0].Type) != "platform.budget_threshold_crossed" {
+		t.Fatalf("events = %#v, want one platform.budget_threshold_crossed", events)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(events[0].Payload, &payload); err != nil {
+		t.Fatalf("unmarshal budget event payload: %v", err)
+	}
+	if payload["level"] != "emergency" {
+		t.Fatalf("budget event level = %#v, want emergency", payload["level"])
+	}
+	if len(mailbox.items) != 1 || mailbox.items[0].Priority != "critical" || mailbox.items[0].Type != "alert" {
+		t.Fatalf("mailbox items = %#v, want one critical alert", mailbox.items)
+	}
+	if len(store.sumQueries) != 1 || store.sumQueries[0].Scope != budgetspend.ScopeSystem {
+		t.Fatalf("sum queries = %#v, want one system aggregate", store.sumQueries)
+	}
+}
+
+func TestNewRuntimeConstructsBudgetTrackerFromBackendNeutralStore(t *testing.T) {
+	module := loadRuntimeOwnershipWorkflowModule(t)
+	store := &budgetSpendStoreCapture{}
+	rt, err := NewRuntime(context.Background(), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
+		EventStore:       &minimalRuntimeEventStore{},
+		BudgetSpendStore: store,
+	}, Options: RuntimeOptions{
+		WorkflowModule: module,
+		LLMRuntime:     noopLLMRuntime{},
+	}})
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	if rt.Budget == nil {
+		t.Fatal("Runtime Budget = nil, want backend-neutral budget tracker")
+	}
+	if rt.Budget.store != store {
+		t.Fatalf("Runtime Budget store = %#v, want backend-neutral store %#v", rt.Budget.store, store)
+	}
+	if rt.Stores.SQLDB != nil {
+		t.Fatalf("Runtime Stores.SQLDB = %#v, want nil raw SQL handle", rt.Stores.SQLDB)
+	}
+}
+
+type budgetMailboxCapture struct {
+	items []runtimetools.MailboxItem
+}
+
+func (m *budgetMailboxCapture) InsertMailboxItem(_ context.Context, item runtimetools.MailboxItem) (string, error) {
+	m.items = append(m.items, item)
+	return "mailbox-1", nil
+}
+
+func (*budgetMailboxCapture) ListMailboxItems(context.Context, string, int) ([]runtimetools.MailboxItem, error) {
+	return nil, nil
+}
+
+func (*budgetMailboxCapture) CountMailboxItems(context.Context, string) (int, error) {
+	return 0, nil
+}
+
+func (*budgetMailboxCapture) GetMailboxItem(context.Context, string) (runtimetools.MailboxItem, error) {
+	return runtimetools.MailboxItem{}, nil
+}
+
+func (*budgetMailboxCapture) DecideMailboxItem(context.Context, string, string, string, string) error {
+	return nil
+}
+
+func (*budgetMailboxCapture) ExpireMailboxItems(context.Context, int) ([]runtimetools.MailboxItem, error) {
+	return nil, nil
+}
+
+func (*budgetMailboxCapture) ListUnnotifiedCriticalMailboxItems(context.Context, int) ([]runtimetools.MailboxItem, error) {
+	return nil, nil
+}
+
+func (*budgetMailboxCapture) MarkMailboxItemNotified(context.Context, string) error {
+	return nil
 }
