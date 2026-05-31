@@ -210,6 +210,87 @@ func TestEngineDispatcherQueuesWhenPipelineSQLTxActive(t *testing.T) {
 	}
 }
 
+func TestEngineDispatcherQueuesImmutableIntentSnapshotWhenPipelineSQLTxActive(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectBegin()
+	mock.ExpectCommit()
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	eb, err := runtimebus.NewEventBus(runtimebus.InMemoryEventStore{})
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	originalCh := eb.Subscribe("agent-original", events.EventType("custom.snapshot"))
+	defer eb.Unsubscribe("agent-original")
+	mutatedCh := eb.Subscribe("agent-mutated", events.EventType("custom.snapshot"))
+	defer eb.Unsubscribe("agent-mutated")
+
+	payload := []byte(`{"value":"original"}`)
+	targetSet := []events.RouteIdentity{{FlowInstance: "flow-original", EntityID: "entity-original"}}
+	recipients := []string{"agent-original"}
+	intents := []runtimeengine.EmitIntent{{
+		Event: events.Event{
+			ID:        "evt-queued-snapshot",
+			Type:      events.EventType("custom.snapshot"),
+			Payload:   payload,
+			Envelope:  events.EventEnvelope{TargetSet: targetSet},
+			CreatedAt: time.Now().UTC(),
+		},
+		Recipients: recipients,
+	}}
+	postCommitActions := make([]func(), 0, 1)
+	txctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
+	txctx = runtimepipeline.WithPipelinePostCommitActions(txctx, &postCommitActions)
+
+	if err := eb.EngineDispatcher().DispatchPostCommit(txctx, intents); err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("DispatchPostCommit: %v", err)
+	}
+	if len(postCommitActions) != 1 {
+		_ = tx.Rollback()
+		t.Fatalf("post-commit actions = %d, want 1", len(postCommitActions))
+	}
+	copy(payload, []byte(`{"value":"mutated!"}`))
+	targetSet[0] = events.RouteIdentity{FlowInstance: "flow-mutated", EntityID: "entity-mutated"}
+	recipients[0] = "agent-mutated"
+	intents[0].Event.Payload = []byte(`{"value":"reassigned"}`)
+	intents[0].Event.Envelope.TargetSet = []events.RouteIdentity{{FlowInstance: "flow-reassigned", EntityID: "entity-reassigned"}}
+	intents[0].Recipients = []string{"agent-reassigned"}
+
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	runtimepipeline.FlushPipelinePostCommitActions(postCommitActions)
+	select {
+	case got := <-originalCh:
+		if string(got.Payload) != `{"value":"original"}` {
+			t.Fatalf("delivered payload = %s, want original snapshot", string(got.Payload))
+		}
+		routes := got.TargetRoutes()
+		if len(routes) != 1 || routes[0].FlowInstance != "flow-original" || routes[0].EntityID != "entity-original" {
+			t.Fatalf("delivered target routes = %#v, want original snapshot", routes)
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("timed out waiting for original recipient delivery")
+	}
+	select {
+	case got := <-mutatedCh:
+		t.Fatalf("unexpected delivery to mutated recipient: %#v", got)
+	case <-time.After(25 * time.Millisecond):
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
 func TestEngineDispatcherFailsClosedWithSQLTxAndNoPostCommitQueue(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
