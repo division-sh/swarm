@@ -296,9 +296,10 @@ golangci-lint run
 # tests
 go test ./...
 
-# local dev loop (reset state, then run a corpus through the runtime)
-make reset-dev
-make run-corpus
+# local runtime commands
+go run ./cmd/swarm serve --contracts ./contracts
+go run ./cmd/swarm run --connect http://127.0.0.1:8081 --event <event> --payload <payload.json>
+go run ./cmd/swarm control nuke --api-server http://127.0.0.1:8081 --yes
 ```
 
 See [`docs/IMPLEMENTER_GUIDELINES.md`](docs/IMPLEMENTER_GUIDELINES.md) and [`docs/COLLABORATION_WORKFLOW.md`](docs/COLLABORATION_WORKFLOW.md) before opening a PR.

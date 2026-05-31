@@ -34,9 +34,7 @@ Those local doc edits add a new rule:
 - when changing any derived selector/projection/read-model surface, compare it against the adjacent canonical owner
 - require a counterexample test that would catch selector drift
 
-There is also untracked junk:
-
-- [__pycache__](/Users/youmew/dev/swarm/scripts/__pycache__/)
+There was also local Python bytecode junk from the abandoned private helper flow.
 
 ## Operational Mode
 
@@ -45,10 +43,10 @@ Do not use the autonomous protocol docs/scripts as the live operating model.
 Files such as:
 
 - [AUTONOMOUS_WORK_PROTOCOL.md](/Users/youmew/dev/swarm/docs/AUTONOMOUS_WORK_PROTOCOL.md)
-- [agent_poll.py](/Users/youmew/dev/swarm/scripts/agent_poll.py)
-- [agent_control_watch.py](/Users/youmew/dev/swarm/scripts/agent_control_watch.py)
 
-exist in the repo, but the user explicitly abandoned that approach. Current expectation is manual lead orchestration.
+record a prior operating model, but the user explicitly abandoned that
+approach. Current expectation is manual lead orchestration. The private helper
+scripts from that model are no longer public repo surfaces.
 
 ## Current Open PRs
 
@@ -190,7 +188,7 @@ This matters because the recent lead pass failed specifically on steps 2, 3, and
 3. Review `#213` fully from scratch.
 4. Keep `#204` in `changes needed` until the validator truly fails closed.
 5. Decide whether to commit/push the local guideline/checklist doc updates.
-6. Clean or ignore the local `scripts/__pycache__/` junk.
+6. Clean or ignore local Python bytecode junk from the abandoned private helper flow.
 
 ## Bottom Line
 

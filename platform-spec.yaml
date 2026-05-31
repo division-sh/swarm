@@ -15419,7 +15419,7 @@ api_specification:
       description: "Public destructive runtime reset wrapper. The API layer owns only the v1 request/response/auth/idempotency\
         \ contract and MUST consume the destructive-reset owner chain for execution: plan/result/lock, active-run and delivery\
         \ quiescence, run-scoped cleanup/preservation, and managed entity-container selection/stop. It MUST NOT directly\
-        \ truncate tables, call raw Docker stop/list helpers, call AgentManager.ResetRuntimeStateWithSource, or migrate dashboard/Builder/run_clear/CLI\
+        \ truncate tables, call raw Docker stop/list helpers, call AgentManager.ResetRuntimeStateWithSource, or migrate dashboard/Builder/CLI\
         \ reset seams in this method implementation.\n\n`dry_run=true` returns the same top-level shape with side-effect-free\
         \ previews from each owner. Apply mode sequences plan -> quiescence -> cleanup -> managed-container stop. Managed-container\
         \ stop failures are represented as `status=partial_failure`, `ok=false`, and explicit `errors`; they must not masquerade\
@@ -15589,17 +15589,14 @@ api_specification:
       auth_boundary_bug_fix: "The current bug where /api/rpc and /api/ws bypass operator auth is moot under v1 \u2014 one\
         \ auth surface, one token."
     cli_consumer_migration:
-      make_run_clear: '`reset-dev` starts a local `swarm serve` bootstrap and consumes `/v1/rpc runtime.nuke`
-        for destructive reset with the unified token source governed by
-        cli_specification.foundations.api_connection_auth_config_precedence and a
-        `run-clear:reset-dev:<uuid>` idempotency key. The helper consumes the promoted
-        `listener_topology_v2_1`: health/readiness and `/v1/rpc` use the API listener, MCP/tool gateway
-        defaults use the MCP listener, and retired `--health-addr` MUST NOT be used. The helper MUST NOT
-        stop broad Docker inventory or truncate database tables directly. Corpus startup
-        migrates from legacy `/api/rpc` run.start payloads with builder-token auth to `curl /v1/rpc {method: run.start,
-        params: {bundle_hash, event_name, payload, idempotency_key?}}` for create-new-work with the unified token. Legacy bundle_ref remains
-        a transition alias only and is not bundle scope. run.start is now a
-        deprecated wrapper over event.publish until the helper moves to the canonical event.publish method.'
+      private_makefile_helper_retired: >
+        The former private Makefile/script runtime helper is not a supported
+        public surface. Public consumers use `swarm serve` for runtime startup,
+        `swarm run` for run creation, `swarm health` for readiness/identity,
+        `swarm agent directive` for directive delivery, and `swarm control
+        nuke` for destructive reset through `/v1/rpc runtime.nuke`. No
+        compatibility wrapper or alternate helper owner remains for those
+        behaviors.
       cli_v2_read_commands: "Promoted CLI v2 read commands map to v1 methods:\n  swarm runs     \u2192 run.list\n  swarm\
         \ status   \u2192 run.diagnose (default), run.get for header-only mode if exposed\n  swarm trace    \u2192 run.trace,\
         \ run.subscribe_trace (--follow)\n  swarm health   \u2192 health.check\nRetired `swarm investigate *` commands are\
@@ -15641,8 +15638,7 @@ api_specification:
     cli:
     - '`swarm runs`, `swarm status`, `swarm trace`, and `swarm health` consume /v1/rpc or /v1/ws methods, with no direct internal-package
       access (except the `swarm verify` carve-out). Retired `swarm investigate *` commands are non-authoritative legacy consumers.'
-    - '`make run-clear` migrated to /v1/rpc and unified token, including `reset-dev` consuming `runtime.nuke` instead of
-      raw Docker stop or table truncation.'
+    - Private Makefile/script runtime helpers are retired; public CLI reset, run, health, and directive consumers use the promoted v1 API owners directly.
     deprecation:
     - 'Legacy /rpc, /api/rpc, /ws, /api/ws, and dashboard /api/* endpoints are removed or fail closed. They are not aliases.'
     - SWARM_BUILDER_AUTH_TOKEN and SWARM_OPERATOR_AUTH_TOKEN are not accepted as API auth fallbacks. Runtime-state clients must use a token source governed by cli_specification.foundations.api_connection_auth_config_precedence.

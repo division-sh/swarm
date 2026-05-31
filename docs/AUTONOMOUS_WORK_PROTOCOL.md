@@ -65,12 +65,8 @@ Rules:
 - `AGENT_STATUS.md` is an operational mirror for humans
 - `CONTROL.yaml` and `RESPONSE.yaml` are the actual wake-up contract
 
-Helper scripts now exist for this bus:
-
-- agent side:
-  - `scripts/agent_control_watch.py`
-- lead side:
-  - `scripts/lead_response_watch.py`
+The private local watcher helpers are retired from the public repo. Use manual lead orchestration or GitHub issue/PR
+state as the source of truth.
 
 If GitHub and local files disagree:
 
@@ -215,12 +211,7 @@ Recommended detection:
 
 GitHub can still be polled for verification, but not as the primary interrupt signal.
 
-Default commands:
-
-```sh
-python scripts/agent_control_watch.py --watch
-python scripts/lead_response_watch.py --watch
-```
+No public repo script owns this wake-up transport.
 
 ## Lead Loop
 
@@ -369,22 +360,16 @@ If any of these are violated:
 
 ## Transition From The Old Poller
 
-The older GitHub polling scripts remain useful for inspection and debugging:
-
-- `scripts/agent_poll.py`
-- `scripts/lead_poll.py`
-
-But they should no longer be treated as the primary wake-up transport.
+The older GitHub polling scripts were private operational tooling and should
+not be treated as the primary wake-up transport.
 
 Current position:
 
 - GitHub polling scripts are debug/status tools
 - `CONTROL.yaml` and `RESPONSE.yaml` are the wake-up bus
 
-Operational rule:
-
-- any old long-running `agent_poll.py --watch` process should be stopped
-- move agents to the local-file watcher model
+Operational rule: move agents to explicit lead orchestration rather than
+private polling/watch helper processes.
 
 ## Recommended Next Step
 

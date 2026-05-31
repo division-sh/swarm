@@ -23,7 +23,6 @@ existing `swarm verify` local-contract carve-out.
 It should not introduce a new diagnostics subsystem. It should compose the canonical read
 owners and supported helper surfaces that already exist:
 
-- `make run-clear`
 - `/v1/rpc` run diagnostics and future `swarm investigate run`
 - health/readiness endpoints
 - v1 API read surfaces
@@ -46,9 +45,9 @@ discoverable, consistent, and scriptable from one place.
 
 ### Supported Startup And Repro
 
-- `make run-clear`
+- `swarm serve` plus `swarm run`
   - Best for supported-path startup, readiness, launcher failures, and real run initialization.
-  - Owner: [run_clear.sh](/Users/youmew/dev/swarm/scripts/run_clear.sh)
+  - Owners: `cmd/swarm` public CLI commands over the v1 API owners.
 
 - `go run ./cmd/swarm verify --contracts ... --platform-spec ...`
   - Best cheap compatibility gate for boot-time contract validity and verifier/runtime disagreement.
@@ -238,7 +237,7 @@ The capability exists, but it is fragmented.
 
 An operator currently has to remember some combination of:
 
-- `make run-clear`
+- `swarm serve` / `swarm run`
 - future `swarm investigate run`
 - `curl /healthz`
 - `curl /readyz`
@@ -681,7 +680,7 @@ Why:
 - no direct SQL duplication in the CLI when a canonical owner already exists
 - no attempt to absorb all dashboard capabilities into one PR
 - no new normative platform-spec contract in the first slice
-- no replacement of `make run-clear` in the first slice
+- no replacement of public `swarm serve` / `swarm run` ownership in the first slice
 - no claim that `trace` alone makes run diagnosis complete
 - no umbrella “everything diagnostic” command family built on new CLI-side read models
 - no mixed diagnosis/control umbrella; existing actions belong in a future `swarm control` family
@@ -719,8 +718,8 @@ For `run` specifically:
   - should wrap the existing event list and flow-stream surfaces
   - should not invent a second event-correlation model in the CLI
 - `investigate startup`
-  - should compose the existing helper, health/readiness, process-log, and control-plane startup surfaces
-  - should stay thin and should not replace `make run-clear` in the first slice
+  - should compose `swarm serve`, `swarm run`, health/readiness, process-log, and control-plane startup surfaces
+  - should stay thin and should not replace public startup/run owners in the first slice
 
 ### Shared Rules
 
