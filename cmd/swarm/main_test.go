@@ -2205,6 +2205,142 @@ func TestLoadServeRuntimeBundleFromCatalogLoadsPersistedRuntimeSource(t *testing
 	}
 }
 
+func TestRunServeRuntimeDBLoadedRunForkSupportedSurfaceExecutesAndStampsPersistedIdentity(t *testing.T) {
+	_, db, pg := installServeRuntimePostgresTestStores(t, func() serveWorkspaceLifecycle {
+		return serveRuntimeWorkspaceStub{}
+	})
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	ctx := context.Background()
+	bundle := loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier8-boot-verification", "test-boot-success"))
+	projection, err := runtimecontracts.BuildBundleCatalogProjection(bundle)
+	if err != nil {
+		t.Fatalf("BuildBundleCatalogProjection: %v", err)
+	}
+	if _, err := pg.UpsertBundleCatalog(ctx, store.BundleCatalogUpsert{
+		BundleHash:  projection.BundleHash,
+		ContentYAML: projection.ContentYAML,
+		ParsedJSON:  projection.ParsedJSON,
+		DataBlob:    projection.DataBlob,
+		Metadata:    projection.Metadata,
+	}); err != nil {
+		t.Fatalf("UpsertBundleCatalog: %v", err)
+	}
+
+	serveCtx, cancelServe := context.WithCancel(context.Background())
+	var out lockedBuffer
+	done := make(chan int, 1)
+	go func() {
+		done <- runServeRuntime(serveCtx, repoRoot(), serveOptions{
+			ConfigPath:         writeServeRuntimeTestConfig(t),
+			BundleHash:         projection.BundleHash,
+			PlatformSpecPath:   defaultPlatformSpecPath,
+			StoreMode:          "postgres",
+			APIListenAddr:      "127.0.0.1:0",
+			MCPListenAddr:      "127.0.0.1:0",
+			SelfCheck:          true,
+			RequireBundleMatch: true,
+			Verbose:            true,
+			Output:             &out,
+		})
+	}()
+	stopped := false
+	t.Cleanup(func() {
+		if stopped {
+			return
+		}
+		cancelServe()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Errorf("timed out stopping runServeRuntime\noutput:\n%s", out.String())
+		}
+	})
+	waitForServeReadyLine(t, &out, done)
+	apiAddr := serveRuntimeAPIListenerFromOutput(t, out.String())
+
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	sourceEventID := uuid.NewString()
+	at := time.Unix(1700000340, 0).UTC()
+	seedRunForkSelectedExecutionSourceEvent(t, db, sourceRunID, entityID, sourceEventID, "task.requested", "complete-task", "pending", "Serve DB Loaded Entity", "serve-db-loaded-test", at)
+	if _, err := db.ExecContext(ctx, `
+		UPDATE runs
+		SET bundle_hash = $2,
+		    bundle_source = $3
+		WHERE run_id = $1::uuid
+	`, sourceRunID, projection.BundleHash, storerunlifecycle.BundleSourcePersisted); err != nil {
+		t.Fatalf("stamp source run bundle identity: %v", err)
+	}
+
+	body := fmt.Sprintf(
+		`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"fork_event_id":%q,"idempotency_key":"db-loaded-serve-fork"}}`,
+		sourceRunID,
+		sourceEventID,
+	)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+apiAddr+"/v1/rpc", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("build run.fork request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /v1/rpc run.fork: %v\nserve output:\n%s", err, out.String())
+	}
+	defer resp.Body.Close()
+	var rpc struct {
+		Result apiv1.RunForkExecutionResult `json:"result"`
+		Error  *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+			Data    any    `json:"data,omitempty"`
+		} `json:"error,omitempty"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&rpc); err != nil {
+		t.Fatalf("decode run.fork response: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK || rpc.Error != nil {
+		t.Fatalf("run.fork status=%d error=%#v result=%#v\nserve output:\n%s", resp.StatusCode, rpc.Error, rpc.Result, out.String())
+	}
+	if rpc.Result.SourceRunID != sourceRunID || rpc.Result.BundleHash != projection.BundleHash || rpc.Result.ExecutedEventCount != 1 {
+		t.Fatalf("run.fork result = %#v, want source=%s bundle_hash=%s executed=1", rpc.Result, sourceRunID, projection.BundleHash)
+	}
+	if rpc.Result.ForkRunID == "" || rpc.Result.ForkEventID != sourceEventID {
+		t.Fatalf("run.fork fork identity = %#v, want fork run and source fork event %s", rpc.Result, sourceEventID)
+	}
+
+	var forkBundleHash, forkBundleSource, forkBundleFingerprint string
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(bundle_hash, ''), COALESCE(bundle_source, ''), COALESCE(bundle_fingerprint, '')
+		FROM runs
+		WHERE run_id = $1::uuid
+	`, rpc.Result.ForkRunID).Scan(&forkBundleHash, &forkBundleSource, &forkBundleFingerprint); err != nil {
+		t.Fatalf("load fork run bundle identity: %v", err)
+	}
+	if forkBundleHash != projection.BundleHash || forkBundleSource != storerunlifecycle.BundleSourcePersisted || forkBundleFingerprint != "" {
+		t.Fatalf("fork bundle identity = hash:%q source:%q fingerprint:%q, want persisted %s without legacy fingerprint", forkBundleHash, forkBundleSource, forkBundleFingerprint, projection.BundleHash)
+	}
+	var lineageRows int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM run_fork_selected_contract_executions
+		WHERE fork_run_id = $1::uuid
+		  AND source_run_id = $2::uuid
+		  AND source_event_id = $3::uuid
+	`, rpc.Result.ForkRunID, sourceRunID, sourceEventID).Scan(&lineageRows); err != nil {
+		t.Fatalf("count selected-contract execution lineage: %v", err)
+	}
+	if lineageRows != 1 {
+		t.Fatalf("selected-contract execution lineage rows = %d, want 1", lineageRows)
+	}
+
+	cancelServe()
+	if code := <-done; code != 0 {
+		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, out.String())
+	}
+	stopped = true
+}
+
 func TestRunServeRuntimeBundleHashMissingFailsBeforeReadiness(t *testing.T) {
 	_, _, _ = installServeRuntimePostgresTestStores(t, func() serveWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
@@ -2390,15 +2526,22 @@ func installServeRuntimePostgresTestStores(t *testing.T, workspaceFactory func()
 			return storeBundle{}, err
 		}
 		return storeBundle{
-			Postgres:           runtimePG,
-			SQLDB:              runtimePG.DB,
-			SchemaBootstrapper: runtimePG,
-			EventStore:         runtimePG,
-			SessionRegistry:    sessions.NewPostgresRegistry(runtimePG.DB, cfg.LLM.Session.LockTTL),
-			ConversationStore:  runtimePG,
-			ManagerStore:       runtimePG,
-			ScheduleStore:      runtimePG,
-			TurnStore:          runtimePG,
+			Postgres:            runtimePG,
+			SQLDB:               runtimePG.DB,
+			RuntimeSQLDB:        runtimePG.DB,
+			SchemaBootstrapper:  runtimePG,
+			EventStore:          runtimePG,
+			PipelineStore:       runtimepipeline.NewWorkflowInstanceStore(runtimePG.DB),
+			SessionRegistry:     sessions.NewPostgresRegistry(runtimePG.DB, cfg.LLM.Session.LockTTL),
+			ConversationStore:   runtimePG,
+			ManagerStore:        runtimePG,
+			ScheduleStore:       runtimePG,
+			MailboxStore:        runtimePG,
+			MailboxAPIStore:     runtimePG,
+			ObservabilityStore:  runtimePG,
+			RuntimeIngressStore: runtimePG,
+			IdempotencyStore:    runtimePG,
+			TurnStore:           runtimePG,
 		}, nil
 	}
 	configuredWorkspaceLifecycleForServe = func(*sql.DB, string, string, semanticview.Source) serveWorkspaceLifecycle {
@@ -3842,6 +3985,13 @@ func seedRunForkCLISelectedExecutionSource(t *testing.T, db interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }, runID, entityID, eventID string, at time.Time) {
 	t.Helper()
+	seedRunForkSelectedExecutionSourceEvent(t, db, runID, entityID, eventID, "item.received", "test-node", "pending", "CLI Selected Execution Entity", "cli-selected-execution-test", at)
+}
+
+func seedRunForkSelectedExecutionSourceEvent(t *testing.T, db interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, runID, entityID, eventID, eventName, subscriberID, currentState, entityName, writerID string, at time.Time) {
+	t.Helper()
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO runs (run_id, status, started_at)
@@ -3853,16 +4003,16 @@ func seedRunForkCLISelectedExecutionSource(t *testing.T, db interface {
 		INSERT INTO events (
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'item.received', $3::uuid, 'flow-a/1', 'entity', $4::jsonb, 'test', 'platform', $5)
-	`, runID, eventID, entityID, fmt.Sprintf(`{"entity_id":%q}`, entityID), at); err != nil {
+		VALUES ($1::uuid, $2::uuid, $3, $4::uuid, 'flow-a/1', 'entity', $5::jsonb, 'test', 'platform', $6)
+	`, runID, eventID, eventName, entityID, fmt.Sprintf(`{"entity_id":%q}`, entityID), at); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
 			run_id, event_id, subscriber_type, subscriber_id, status, reason_code, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'node', 'test-node', 'pending', 'source_pending_node_delivery', $3)
-	`, runID, eventID, at); err != nil {
+		VALUES ($1::uuid, $2::uuid, 'node', $3, 'pending', 'source_pending_node_delivery', $4)
+	`, runID, eventID, subscriberID, at); err != nil {
 		t.Fatalf("seed delivery: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -3870,9 +4020,9 @@ func seedRunForkCLISelectedExecutionSource(t *testing.T, db interface {
 			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
 		)
 		VALUES
-			($1::uuid, $2::uuid, 'current_state', 'null'::jsonb, '"pending"'::jsonb, $3::uuid, 'platform', 'cli-selected-execution-test', 'seed', $4),
-			($1::uuid, $2::uuid, 'name', 'null'::jsonb, '"CLI Selected Execution Entity"'::jsonb, $3::uuid, 'platform', 'cli-selected-execution-test', 'seed', $4)
-	`, runID, entityID, eventID, at); err != nil {
+			($1::uuid, $2::uuid, 'current_state', 'null'::jsonb, to_jsonb($5::text), $3::uuid, 'platform', $6, 'seed', $4),
+			($1::uuid, $2::uuid, 'name', 'null'::jsonb, to_jsonb($7::text), $3::uuid, 'platform', $6, 'seed', $4)
+	`, runID, entityID, eventID, at, currentState, writerID, entityName); err != nil {
 		t.Fatalf("seed mutations: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -3882,11 +4032,11 @@ func seedRunForkCLISelectedExecutionSource(t *testing.T, db interface {
 			entered_state_at, created_at, updated_at
 		)
 		VALUES (
-			$1::uuid, $2::uuid, 'flow-a/1', 'default', 'CLI Selected Execution Entity',
-			'pending', '{}'::jsonb, '{"name":"CLI Selected Execution Entity"}'::jsonb, '{}'::jsonb, 1,
+			$1::uuid, $2::uuid, 'flow-a/1', 'default', $4,
+			$5, '{}'::jsonb, jsonb_build_object('name', $4::text), '{}'::jsonb, 1,
 			$3, $3, $3
 		)
-	`, runID, entityID, at); err != nil {
+	`, runID, entityID, at, entityName, currentState); err != nil {
 		t.Fatalf("seed entity_state: %v", err)
 	}
 }
@@ -6163,6 +6313,20 @@ func waitForServeReadyLine(t *testing.T, out *lockedBuffer, done <-chan int) {
 			}
 		}
 	}
+}
+
+func serveRuntimeAPIListenerFromOutput(t *testing.T, output string) string {
+	t.Helper()
+	for _, line := range strings.Split(output, "\n") {
+		for _, field := range strings.Fields(line) {
+			field = strings.Trim(field, "(),")
+			if addr, ok := strings.CutPrefix(field, "api_listener="); ok && strings.TrimSpace(addr) != "" {
+				return addr
+			}
+		}
+	}
+	t.Fatalf("serve output missing api_listener:\n%s", output)
+	return ""
 }
 
 type serveBootProgressRow struct {

@@ -115,11 +115,11 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 	if err != nil {
 		return SelectedContractActivationGateResult{}, err
 	}
-		admission, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
-			ForkRunID:         forkRunID,
-			SourceRunID:       binding.SourceRunID,
-			BindingReader:     req.Store,
-			SourceLoader:      req.SourceLoader,
+	admission, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
+		ForkRunID:         forkRunID,
+		SourceRunID:       binding.SourceRunID,
+		BindingReader:     req.Store,
+		SourceLoader:      req.SourceLoader,
 		FrontierAdmission: frontier,
 		RouteAdmission:    routeAdmission,
 		RouteTopology:     routeTopology,
