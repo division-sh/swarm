@@ -74,7 +74,7 @@ Implement the updated platform spec for canonical event identity and pin-based c
 
 Completed:
 
-- shared event-identity module exists in [eventidentity.go](/Users/youmew/dev/swarm/internal/runtime/core/eventidentity/eventidentity.go)
+- shared event-identity module exists in [eventidentity.go](../internal/runtime/core/eventidentity/eventidentity.go)
 - centralized helpers now cover:
   - normalization
   - leaf-name extraction

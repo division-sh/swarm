@@ -4,9 +4,9 @@ Use these when a short copy-paste checklist is better than re-deriving the proce
 
 These templates are operational helpers, not replacements for:
 
-- [IMPLEMENTER_GUIDELINES.md](/Users/youmew/dev/swarm/docs/IMPLEMENTER_GUIDELINES.md)
-- [IMPLEMENTER_REVIEW_CHECKLIST.md](/Users/youmew/dev/swarm/docs/IMPLEMENTER_REVIEW_CHECKLIST.md)
-- [PROMPT_TEMPLATES.md](/Users/youmew/dev/swarm/docs/PROMPT_TEMPLATES.md)
+- [IMPLEMENTER_GUIDELINES.md](IMPLEMENTER_GUIDELINES.md)
+- [IMPLEMENTER_REVIEW_CHECKLIST.md](IMPLEMENTER_REVIEW_CHECKLIST.md)
+- [PROMPT_TEMPLATES.md](PROMPT_TEMPLATES.md)
 
 Default rule:
 

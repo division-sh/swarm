@@ -280,7 +280,7 @@ Inspect the current code and the most relevant docs/specs.
 Treat any suggested starting points as bootstrap anchors, not scope boundaries.
 Explicitly disclose what boundaries you checked and what you did not check.
 Post the result as an issue comment using the required Auditor Protocol format from:
-/Users/youmew/dev/swarm/docs/AUDITOR_PROTOCOL.md
+`docs/AUDITOR_PROTOCOL.md`
 
 Auditor name: {AUDITOR_NAME}
 Date: {CURRENT_DATE}

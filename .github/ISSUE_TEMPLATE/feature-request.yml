@@ -35,7 +35,7 @@ body:
       description: Which investigation note, repeated incident, watchlist item, or backlog source does this come from?
       placeholder: |
         Example:
-        EPO runtime investigation surfaces / repeated live debugging incidents
+        repeated live debugging incidents / public operator feedback
     validations:
       required: true
 
