@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"swarm/internal/events"
 	"swarm/internal/runtime/bundledelete"
+	runtimecorrelation "swarm/internal/runtime/correlation"
 	"swarm/internal/runtime/preservationcleanup"
 	storerunlifecycle "swarm/internal/store/runlifecycle"
 	"swarm/internal/testutil"
@@ -204,6 +206,52 @@ func TestPostgresStore_BundleDeleteFinalMutationSerializesConcurrentRunCreation(
 	assertBundleRowPresent(t, ctx, pg, bundleDeleteTestHash)
 }
 
+func TestPostgresStore_BundleDeleteFinalMutationBlocksPostDeletePersistedSourceRunCreation(t *testing.T) {
+	dsn, _, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	pg, err := NewPostgresStore(dsn)
+	if err != nil {
+		t.Fatalf("NewPostgresStore: %v", err)
+	}
+	t.Cleanup(func() { _ = pg.DB.Close() })
+
+	ctx := context.Background()
+	seedBundleDeleteBundle(t, ctx, pg, bundleDeleteTestHash)
+	final, err := pg.ApplyBundleDeleteFinalMutation(ctx, bundledelete.FinalMutationRequest{
+		OperationName: bundledelete.DefaultOperationName,
+		BundleHash:    bundleDeleteTestHash,
+		RequestedAt:   time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("ApplyBundleDeleteFinalMutation: %v", err)
+	}
+	if !final.Deleted {
+		t.Fatalf("final mutation = %#v, want deleted", final)
+	}
+
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	publishCtx := runtimecorrelation.WithBundleSourceFact(ctx, runtimecorrelation.BundleSourceFact{
+		BundleHash:        bundleDeleteTestHash,
+		BundleSource:      storerunlifecycle.BundleSourcePersisted,
+		BundleFingerprint: testBootBundleFingerprint,
+	})
+	err = pg.AppendEvent(publishCtx, events.Event{
+		ID:          eventID,
+		RunID:       runID,
+		Type:        "scan.requested",
+		SourceAgent: "api.v1",
+		Payload:     []byte(`{"topic":"medicine"}`),
+		CreatedAt:   time.Date(2026, 5, 31, 12, 1, 0, 0, time.UTC),
+	})
+	if !errors.Is(err, storerunlifecycle.ErrPersistedBundleUnavailable) {
+		t.Fatalf("AppendEvent after delete error = %v, want ErrPersistedBundleUnavailable", err)
+	}
+	assertBundleDeleteRunAbsent(t, ctx, pg, runID)
+	assertBundleDeleteEventAbsent(t, ctx, pg, eventID)
+	assertBundleRowAbsent(t, ctx, pg, bundleDeleteTestHash)
+}
+
 func seedBundleDeleteBundle(t *testing.T, ctx context.Context, pg *PostgresStore, bundleHash string) {
 	t.Helper()
 	if _, err := pg.DB.ExecContext(ctx, `
@@ -254,6 +302,28 @@ func assertBundleDeleteRun(t *testing.T, ctx context.Context, pg *PostgresStore,
 		if controlStatus != preservationcleanup.RunControlStatusStopped || reason != preservationcleanup.BundleForceDeletedReason || controlledBy != preservationcleanup.BundleForceDeleteControlledBy {
 			t.Fatalf("run control %s = %s/%s/%s, want stopped/%s/%s", runID, controlStatus, reason, controlledBy, preservationcleanup.BundleForceDeletedReason, preservationcleanup.BundleForceDeleteControlledBy)
 		}
+	}
+}
+
+func assertBundleDeleteRunAbsent(t *testing.T, ctx context.Context, pg *PostgresStore, runID string) {
+	t.Helper()
+	var count int
+	if err := pg.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE run_id = $1::uuid`, runID).Scan(&count); err != nil {
+		t.Fatalf("count run %s: %v", runID, err)
+	}
+	if count != 0 {
+		t.Fatalf("run %s count = %d, want absent", runID, count)
+	}
+}
+
+func assertBundleDeleteEventAbsent(t *testing.T, ctx context.Context, pg *PostgresStore, eventID string) {
+	t.Helper()
+	var count int
+	if err := pg.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_id = $1::uuid`, eventID).Scan(&count); err != nil {
+		t.Fatalf("count event %s: %v", eventID, err)
+	}
+	if count != 0 {
+		t.Fatalf("event %s count = %d, want absent", eventID, count)
 	}
 }
 

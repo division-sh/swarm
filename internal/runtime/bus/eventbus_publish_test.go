@@ -1366,6 +1366,12 @@ func TestEventBusPublishDirect_StampsBundleSourceFactOnRunRow(t *testing.T) {
 		BundleSource:      "persisted",
 		BundleFingerprint: "sha256:4444444444444444444444444444444444444444444444444444444444444444",
 	}
+	if _, err := db.ExecContext(context.Background(), `
+		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json)
+		VALUES ($1, 'name: test', '{}'::jsonb)
+	`, sourceFact.BundleHash); err != nil {
+		t.Fatalf("seed bundle row: %v", err)
+	}
 	eb, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
 		BundleSourceFact: sourceFact,
 	})

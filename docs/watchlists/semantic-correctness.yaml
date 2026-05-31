@@ -236,6 +236,7 @@ nodes:
       - "old #987 and #988 wording says to reuse destructivereset even though DefaultPlatformCleanupCatalog deletes run-scoped history rows"
       - "source/schema/availability prerequisites are now merge-bearing; startup recovery auto-orphan (#1016) introduces the first runtime preservation cleanup owner consumer"
       - "bundle.delete --force Phase 3 (#1019) must consume the preservation cleanup owner rather than local per-consumer SQL"
+      - "bundle.delete --force (#1019) must also close same-runtime post-delete new-work admission: event.publish and run.start must not recreate runs.bundle_source=persisted after the source bundle row is deleted"
       - "bundle.delete Phase 5 atomic runs/bundles mutation is a separate #1009 sibling and must not be folded into the preservation cleanup owner"
       - "server-wide runtime.nuke bundle-catalog integration (#1027) is a separate destructive-reset/runtime-admin concern"
     representative_issues:

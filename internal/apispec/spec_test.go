@@ -378,6 +378,17 @@ func TestMultiBundleSourceAuthorityPublishesOnlyImplementedBundleReadAndRunForkM
 	assertScalarContains(t, mustMappingValue(t, phaseFive, "reader_invariant"), "read runs.bundle_source before consulting bundles")
 	assertScalarContains(t, mustMappingValue(t, phaseFive, "reader_invariant"), "BUNDLE_UNAVAILABLE")
 	assertScalarContains(t, mustMappingValue(t, phaseFive, "reader_invariant"), "BUNDLE_DATA_INTEGRITY_ERROR")
+	postDeleteAdmission := mustMappingValue(t, phaseFive, "post_delete_new_work_admission")
+	assertScalarValue(t, mustMappingValue(t, postDeleteAdmission, "status"), "implemented_for_force_delete_runtime")
+	assertScalarValue(t, mustMappingValue(t, postDeleteAdmission, "canonical_owner"), "internal/store/runlifecycle.EnsureActive")
+	admissionConsumers := mustMappingValue(t, postDeleteAdmission, "consumed_by")
+	if !sequenceContainsScalar(admissionConsumers, "/v1/rpc event.publish") {
+		t.Fatal("post_delete_new_work_admission must bind event.publish")
+	}
+	if !sequenceContainsScalar(admissionConsumers, "/v1/rpc run.start") {
+		t.Fatal("post_delete_new_work_admission must bind run.start")
+	}
+	assertScalarContains(t, mustMappingValue(t, postDeleteAdmission, "rule"), "same-runtime event.publish and run.start attempts return BUNDLE_UNAVAILABLE")
 	invalid := mustMappingValue(t, phaseFive, "invalid_implementations")
 	if !sequenceContainsScalar(invalid, "deleting the bundles row before marking eligible runs deleted") {
 		t.Fatal("phase_5_atomicity must reject delete-before-update implementations")
