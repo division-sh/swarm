@@ -643,16 +643,10 @@ func TestPipelineEngineActionRunner_CreateFlowInstanceUsesExecutionBaseContextFo
 }
 
 func TestPipelineEngineActionRunner_MailboxWriteMaterializesIdempotentRow(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	defer cleanup()
-	pc := &PipelineCoordinator{db: db}
+	materializer := &recordingMailboxWriteMaterializer{}
+	pc := &PipelineCoordinator{mailboxMaterializer: materializer}
 	runner := pipelineEngineActionRunner{coordinator: pc}
 	ctx := context.Background()
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("BeginTx: %v", err)
-	}
-	txctx := WithPipelineSQLTxContext(ctx, tx)
 	eventID := "11111111-1111-1111-1111-111111111111"
 	entityID := "22222222-2222-2222-2222-222222222222"
 	action := runtimecontracts.ActionSpec{
@@ -690,59 +684,46 @@ func TestPipelineEngineActionRunner_MailboxWriteMaterializesIdempotentRow(t *tes
 		},
 	}
 	for i := 0; i < 2; i++ {
-		ok, err := runner.ExecuteAction(txctx, action, runtimeregistry.ActionInstruction{Builtin: "mailbox_write"}, execCtx)
+		ok, err := runner.ExecuteAction(ctx, action, runtimeregistry.ActionInstruction{Builtin: "mailbox_write"}, execCtx)
 		if err != nil {
-			_ = tx.Rollback()
 			t.Fatalf("ExecuteAction iteration %d: %v", i, err)
 		}
 		if !ok {
-			_ = tx.Rollback()
 			t.Fatalf("ExecuteAction iteration %d was not claimed", i)
 		}
 	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("Commit: %v", err)
+	if materializer.calls != 2 {
+		t.Fatalf("materializer calls = %d, want duplicate attempts to reach idempotent owner", materializer.calls)
 	}
-
-	var count int
-	var sourceEventID, gotEntityID, flowInstance, itemType, severity, summary, payloadKind, fromAgent, status string
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*),
-		       COALESCE(MAX(source_event_id::text), ''),
-		       COALESCE(MAX(entity_id::text), ''),
-		       COALESCE(MAX(flow_instance), ''),
-		       COALESCE(MAX(item_type), ''),
-		       COALESCE(MAX(severity), ''),
-		       COALESCE(MAX(summary), ''),
-		       COALESCE(MAX(payload->>'review_kind'), ''),
-		       COALESCE(MAX(from_agent), ''),
-		       COALESCE(MAX(status), '')
-		FROM mailbox
-		WHERE source_event_id = $1::uuid
-	`, eventID).Scan(&count, &sourceEventID, &gotEntityID, &flowInstance, &itemType, &severity, &summary, &payloadKind, &fromAgent, &status); err != nil {
-		t.Fatalf("query mailbox: %v", err)
+	rows := materializer.rows()
+	if len(rows) != 1 {
+		t.Fatalf("materialized rows = %d, want 1 idempotent row", len(rows))
 	}
-	if count != 1 {
-		t.Fatalf("mailbox row count = %d, want 1", count)
+	got := rows[0]
+	if got.ItemID != deterministicMailboxItemID(eventID, "mailbox-node") {
+		t.Fatalf("item_id = %q, want deterministic id", got.ItemID)
 	}
-	if sourceEventID != eventID || gotEntityID != entityID || flowInstance != "validation/case-1" {
-		t.Fatalf("mailbox identity = source %q entity %q flow %q", sourceEventID, gotEntityID, flowInstance)
+	if got.SourceEventID != eventID || got.EntityID != entityID || got.FlowInstance != "validation/case-1" || got.Scope != "entity" {
+		t.Fatalf("mailbox identity = source %q entity %q flow %q scope %q", got.SourceEventID, got.EntityID, got.FlowInstance, got.Scope)
 	}
-	if itemType != "review_request" || severity != "urgent" || summary != "Review validation package" || status != "pending" {
-		t.Fatalf("mailbox row fields type=%q severity=%q summary=%q status=%q", itemType, severity, summary, status)
+	if got.ItemType != "review_request" || got.Severity != "urgent" || got.Summary != "Review validation package" {
+		t.Fatalf("mailbox fields type=%q severity=%q summary=%q", got.ItemType, got.Severity, got.Summary)
 	}
-	if payloadKind != "validation" {
-		t.Fatalf("payload review_kind = %q", payloadKind)
+	var payload map[string]any
+	if err := json.Unmarshal(got.Payload, &payload); err != nil {
+		t.Fatalf("decode materialized payload: %v", err)
 	}
-	if fromAgent != "system_node:mailbox-node" {
-		t.Fatalf("from_agent = %q", fromAgent)
+	if payload["review_kind"] != "validation" || payload["operator_hint"] != "inspect_package" {
+		t.Fatalf("payload = %#v, want review_kind/operator_hint", payload)
+	}
+	if got.FromAgent != "system_node:mailbox-node" {
+		t.Fatalf("from_agent = %q", got.FromAgent)
 	}
 }
 
 func TestPipelineEngineActionRunner_MailboxWriteFailsClosedOnMissingRequiredExpression(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	defer cleanup()
-	runner := pipelineEngineActionRunner{coordinator: &PipelineCoordinator{db: db}}
+	materializer := &recordingMailboxWriteMaterializer{}
+	runner := pipelineEngineActionRunner{coordinator: &PipelineCoordinator{mailboxMaterializer: materializer}}
 	ctx := context.Background()
 	eventID := "33333333-3333-3333-3333-333333333333"
 	action := runtimecontracts.ActionSpec{
@@ -770,13 +751,38 @@ func TestPipelineEngineActionRunner_MailboxWriteFailsClosedOnMissingRequiredExpr
 	if err == nil || !strings.Contains(err.Error(), "mailbox.summary resolved empty") {
 		t.Fatalf("ExecuteAction error = %v, want missing summary", err)
 	}
-	var count int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM mailbox WHERE source_event_id = $1::uuid`, eventID).Scan(&count); err != nil {
-		t.Fatalf("query mailbox count: %v", err)
+	if materializer.calls != 0 {
+		t.Fatalf("materializer calls = %d, want no persistence after validation failure", materializer.calls)
 	}
-	if count != 0 {
-		t.Fatalf("mailbox row count = %d, want 0", count)
+}
+
+type recordingMailboxWriteMaterializer struct {
+	mu    sync.Mutex
+	calls int
+	byID  map[string]MailboxWriteMaterialization
+}
+
+func (m *recordingMailboxWriteMaterializer) MaterializeMailboxWrite(_ context.Context, item MailboxWriteMaterialization) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls++
+	if m.byID == nil {
+		m.byID = map[string]MailboxWriteMaterialization{}
 	}
+	if _, ok := m.byID[item.ItemID]; !ok {
+		m.byID[item.ItemID] = item
+	}
+	return nil
+}
+
+func (m *recordingMailboxWriteMaterializer) rows() []MailboxWriteMaterialization {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]MailboxWriteMaterialization, 0, len(m.byID))
+	for _, row := range m.byID {
+		out = append(out, row)
+	}
+	return out
 }
 
 func TestPipelineEngineActionRunner_ArtifactRepoCommitMaterializesLocalGitRef(t *testing.T) {

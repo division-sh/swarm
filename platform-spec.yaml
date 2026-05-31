@@ -2114,9 +2114,9 @@ engine:
         meaning: >
           Local/dev SQLite runtime store selection. Explicit sqlite selection may construct the selected typed SQLite store
           owners promoted by #1086 and staged by #1087, including backend-neutral runtime diagnostics/log persistence
-          promoted by #1150, but runtime boot remains fail-closed while mailbox_write materialization still depends on
-          the raw pipeline SQL database. SQLite remains staged until the public default flip is separately proven by
-          #1088; it does not promote production multi-writer SQLite semantics.
+          promoted by #1150 and backend-neutral mailbox_write materialization promoted by #1186, without exposing a raw
+          runtime SQL handle to Postgres-only consumers. SQLite remains staged until the public default flip is separately
+          proven by #1088; it does not promote production multi-writer SQLite semantics.
     selector_precedence:
       source_order:
       - flag
@@ -2174,8 +2174,8 @@ engine:
     - >
       Explicit sqlite selection is recognized as a canonical backend id. It may construct the selected typed SQLite store
       owners without passing a raw runtime SQL handle into Postgres-only runtime consumers. runtime.NewRuntime must
-      continue to fail closed while mailbox_write materialization still requires the raw pipeline SQL database. Surfaces
-      split to #1088/#1089 must still fail closed or remain unavailable until their owning children land.
+      consume backend-neutral owners for runtime construction, including #1186 mailbox_write materialization, while public
+      default selection and docs/CI surfaces split to #1088/#1089 remain unavailable until their owning children land.
     - Explicit postgres selection must remain available through flag, environment, and runtime config and must reach the
       existing Postgres runtime store path.
     required_consumers:
@@ -2189,7 +2189,7 @@ engine:
     split_boundaries:
     - "SQLite dialect/schema/bootstrap remains split to #1085."
     - "Backend-neutral core runtime persistence stores remain split to #1086."
-    - "SQLite runtime construction semantics remain under #1087 parent closeout; mailbox_write materialization must move off the raw pipeline SQL database or receive explicit split/tracker repair before runtime construction is unblocked."
+    - "SQLite runtime construction semantics remain under #1087 parent closeout; mailbox_write materialization is promoted by #1186 and must consume its backend-neutral owner rather than the raw pipeline SQL database."
     - "Public local/dev default flip plus zero-service swarm run proof remains split to #1088."
     - "Docs, CI, and repo-wide stale-default closeout remains split to #1089."
   runtime_store_schema_dialect_bootstrap:
@@ -2261,14 +2261,13 @@ engine:
         - >
           May expose typed SQLite store owners for the #1087 session, startup ownership, delivery/replay, conversation/turn,
           observability semantics, #1148 budget/spend rows, #1149 tool entity/human-task persistence rows, and #1150
-          runtime diagnostics/log rows, but must not be treated as construction-ready while mailbox_write materialization
-          still requires the raw pipeline SQL database.
+          runtime diagnostics/log rows, and #1186 mailbox_write materialization rows without passing raw SQLite SQL handles
+          to Postgres-only runtime consumers.
         - Must not pass a raw runtime SQL handle to Postgres-only runtime consumers.
         - >
-          Must keep explicit SQLite runtime construction fail-closed until the residual #1087 mailbox_write materialization
-          raw-SQL seam is promoted to a backend-neutral owner or explicitly split by tracker repair, and must keep public
-          default selection fail-closed until #1088 proves zero-service SQLite `swarm run` and explicit Postgres opt-in
-          together.
+          Must keep public default selection fail-closed until #1088 proves zero-service SQLite `swarm run` and explicit
+          Postgres opt-in together. Explicit SQLite construction remains local/dev selected-store support only; it does
+          not promote production multi-writer SQLite semantics.
     selected_contracts:
     - name: runtime_store_bundle_construction
       owner: cmd/swarm buildStores plus storeBundle.runtimeStores consuming typed runtime store interfaces
@@ -2353,6 +2352,23 @@ engine:
       - local/dev default flip and zero-service swarm run proof owned by #1088
       - docs/CI/repo-wide closeout owned by #1089
       - production multi-writer SQLite concurrency semantics
+    - name: mailbox_write_materialization_rows
+      owner: runtimepipeline.MailboxWriteMaterializationStore consumed by PipelineCoordinator mailbox_write actions through runtime.Stores.MailboxMaterializer
+      promoted_by: '#1186'
+      sqlite_owner: internal/store.SQLiteRuntimeStore.MaterializeMailboxWrite
+      postgres_owner: internal/store.PostgresStore.MaterializeMailboxWrite
+      scope: >
+        PipelineCoordinator owns mailbox_write expression evaluation, deterministic item_id derivation from source_event_id
+        and materializer node, source_event_id/from_agent/flow_instance/payload shaping, and handler transaction context
+        propagation. Backend-specific stores own idempotent persisted mailbox row materialization through the same typed
+        owner for explicit SQLite local/dev runtime construction and Postgres production runtime construction. SQLite must
+        keep runtime.Stores.SQLDB nil and must not receive a raw pipeline SQL handle as a mailbox_write compatibility seam.
+      excludes:
+      - broad public mailbox decision API behavior owned by api_specification.method_catalog.mailbox.*
+      - dashboard and digest mailbox read closure
+      - public local/dev default flip and zero-service swarm run proof owned by #1088
+      - docs/CI/repo-wide closeout owned by #1089
+      - production multi-writer SQLite concurrency semantics
     - name: mailbox_rows
       owner: runtimetools.MailboxPersistence plus apiv1.MailboxAPIStore for the v1 operator mailbox surface
       sqlite_owner: internal/store.SQLiteRuntimeStore mailbox and v1 mailbox API methods
@@ -2407,10 +2423,10 @@ engine:
       rule: >
         Explicit SQLite store construction must leave runtime.Stores.SQLDB nil so Postgres-only raw-SQL components are not
         accidentally treated as SQLite owners. Runtime diagnostics/logging consumes the promoted backend-neutral
-        RuntimeLogPersistence owner instead of a raw SQL handle. mailbox_write materialization remains a residual #1087
-        raw-SQL runtime consumer and must continue to block explicit SQLite runtime construction until promoted or split.
-        Any future raw-SQL runtime consumer must receive a separately gated backend-neutral owner before it can participate
-        in explicit SQLite runtime construction.
+        RuntimeLogPersistence owner instead of a raw SQL handle. mailbox_write materialization consumes the #1186
+        MailboxWriteMaterializationStore owner instead of the raw pipeline SQL database. Any future raw-SQL runtime
+        consumer must receive a separately gated backend-neutral owner before it can participate in explicit SQLite runtime
+        construction.
     split_boundaries:
     - "Public local/dev SQLite default flip and zero-service swarm run proof remain split to #1088."
     - "Docs, CI, repo-wide stale-default closeout, and #1066 parent proof remain split to #1089."
