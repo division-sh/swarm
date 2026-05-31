@@ -1542,7 +1542,7 @@
     },
     {
       "name": "bundle.register",
-      "description": "Register a bundle into the persisted bundle catalog without starting a runtime. The request submits a BundleRegistrationEnvelopeV1 YAML document plus optional raw data files. The server materializes those files into a temporary contract root, computes the canonical bundle_hash through internal/runtime/contracts.BundleHash, stores canonical bundle catalog projection bytes through the shared store UPSERT owner, and returns the canonical bundle_hash. This method never mutates runs and never restores rows whose bundle_source was previously marked deleted.\n",
+      "description": "Register a bundle into the persisted bundle catalog without starting a runtime. The request submits a BundleRegistrationEnvelopeV1 YAML document plus optional BundleRegisterDataBlobV1 entries. The server materializes those files into a temporary contract root, computes the canonical bundle_hash through internal/runtime/contracts.BundleHash, stores canonical bundle catalog projection bytes through the shared store UPSERT owner, and returns the canonical bundle_hash. This method never mutates runs and never restores rows whose bundle_source was previously marked deleted.\n",
       "params": [
         {
           "name": "content_yaml",
@@ -1556,7 +1556,7 @@
           "name": "data_blob",
           "required": false,
           "schema": {
-            "$ref": "#/components/schemas/BundleRegistrationDataBlob"
+            "$ref": "#/components/schemas/BundleRegisterDataBlobV1"
           }
         },
         {
@@ -7793,17 +7793,52 @@
         ],
         "type": "object"
       },
-      "BundleRegistrationDataBlob": {
-        "additionalProperties": {
-          "contentEncoding": "base64",
-          "type": "string"
+      "BundleRegisterDataBlobV1": {
+        "additionalProperties": false,
+        "description": "Optional structured raw data files for bundle.register; the server persists canonical projection bytes.",
+        "properties": {
+          "api_version": {
+            "const": "swarm.bundle.data.v1",
+            "type": "string"
+          },
+          "entries": {
+            "description": "Ordered data entries sorted strictly by normalized path.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "data_base64": {
+                  "contentEncoding": "base64",
+                  "type": "string"
+                },
+                "path": {
+                  "description": "Strictly sorted slash-separated path under flows/\u003cflow\u003e/data/... with the same normalization and collision rules as BundleRegistrationFile.path.",
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "data_base64"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
         },
-        "description": "Optional raw data files keyed by slash-separated bundle-relative path; values are standard base64 bytes.",
+        "required": [
+          "api_version",
+          "entries"
+        ],
         "type": "object"
       },
       "BundleRegistrationEnvelopeV1": {
         "additionalProperties": false,
         "properties": {
+          "api_version": {
+            "const": "swarm.bundle.register.v1",
+            "description": "Envelope version for non-destructive bundle.register materialization.",
+            "type": "string"
+          },
           "files": {
             "description": "Text contract files to materialize under the temporary bundle root. package.yaml is required.",
             "items": {
@@ -7811,15 +7846,10 @@
             },
             "minItems": 1,
             "type": "array"
-          },
-          "version": {
-            "const": "swarm.bundle.registration.v1",
-            "description": "Envelope version for non-destructive bundle.register materialization.",
-            "type": "string"
           }
         },
         "required": [
-          "version",
+          "api_version",
           "files"
         ],
         "type": "object"
@@ -7827,19 +7857,19 @@
       "BundleRegistrationFile": {
         "additionalProperties": false,
         "properties": {
-          "content": {
-            "description": "UTF-8 text content for YAML, prompt, policy, and other non-data bundle files.",
+          "path": {
+            "description": "Slash-separated path relative to the bundle root. Empty, dot, dot-dot, absolute, backslash, NUL, non-NFC, duplicate, and ASCII case-colliding paths are invalid.",
+            "minLength": 1,
             "type": "string"
           },
-          "path": {
-            "description": "Slash-separated path relative to the bundle root. Absolute paths, backslashes, NUL, and parent traversal are invalid.",
-            "minLength": 1,
+          "text": {
+            "description": "UTF-8 text content for YAML, prompt, policy, and other non-data bundle files.",
             "type": "string"
           }
         },
         "required": [
           "path",
-          "content"
+          "text"
         ],
         "type": "object"
       },
@@ -7849,8 +7879,13 @@
           "bundle_hash": {
             "$ref": "#/components/schemas/BundleHash"
           },
-          "idempotency_replayed": {
-            "description": "True when the response was returned from the API idempotency owner.",
+          "data_size_bytes": {
+            "description": "Size of persisted data_blob bytes, or 0 when has_data is false.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "has_data": {
+            "description": "True when the persisted bundle row carries an auxiliary data_blob.",
             "type": "boolean"
           },
           "registered": {
@@ -7861,7 +7896,8 @@
         "required": [
           "bundle_hash",
           "registered",
-          "idempotency_replayed"
+          "has_data",
+          "data_size_bytes"
         ],
         "type": "object"
       },

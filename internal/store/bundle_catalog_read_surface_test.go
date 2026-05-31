@@ -198,7 +198,12 @@ func TestBundleCatalogUpsertRegistersDuplicatesConflictsAndDoesNotRestoreDeleted
 		t.Fatalf("first upsert = %#v", first)
 	}
 
-	req.Metadata = map[string]any{"source": "swarm serve --contracts"}
+	metadataConflict := req
+	metadataConflict.Metadata = map[string]any{"source": "swarm serve --contracts"}
+	if _, err := pg.UpsertBundleCatalog(ctx, metadataConflict); !errors.Is(err, ErrBundleCatalogConflict) {
+		t.Fatalf("UpsertBundleCatalog metadata conflict error = %v, want ErrBundleCatalogConflict", err)
+	}
+
 	duplicate, err := pg.UpsertBundleCatalog(ctx, req)
 	if err != nil {
 		t.Fatalf("UpsertBundleCatalog duplicate: %v", err)

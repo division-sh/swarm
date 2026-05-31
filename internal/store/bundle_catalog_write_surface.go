@@ -88,23 +88,28 @@ func (s *PostgresStore) UpsertBundleCatalog(ctx context.Context, req BundleCatal
 	return BundleCatalogUpsertResult{Detail: detail, Registered: registered}, nil
 }
 
-func assertBundleCatalogUpsertIdempotent(ctx context.Context, tx bundleCatalogTx, bundleHash, contentYAML string, parsedRaw, dataBlob, _ []byte) error {
+func assertBundleCatalogUpsertIdempotent(ctx context.Context, tx bundleCatalogTx, bundleHash, contentYAML string, parsedRaw, dataBlob, metadataRaw []byte) error {
 	var gotContent string
 	var gotParsed []byte
 	var gotData []byte
+	var gotMetadata []byte
 	if err := tx.QueryRowContext(ctx, `
-		SELECT content_yaml, COALESCE(parsed_json, '{}'::jsonb), data_blob
-		FROM bundles
-		WHERE bundle_hash = $1
-		FOR SHARE
-	`, bundleHash).Scan(&gotContent, &gotParsed, &gotData); err != nil {
+			SELECT content_yaml, COALESCE(parsed_json, '{}'::jsonb), data_blob, COALESCE(metadata, '{}'::jsonb)
+			FROM bundles
+			WHERE bundle_hash = $1
+			FOR SHARE
+		`, bundleHash).Scan(&gotContent, &gotParsed, &gotData, &gotMetadata); err != nil {
 		return fmt.Errorf("load bundle catalog upsert result: %w", err)
 	}
 	gotParsed, err := normalizedBundleCatalogJSONBytes(gotParsed)
 	if err != nil {
 		return fmt.Errorf("stored bundle catalog parsed_json: %w", err)
 	}
-	if gotContent != contentYAML || !bytes.Equal(gotParsed, parsedRaw) || !bytes.Equal(nullableBytes(gotData), nullableBytes(dataBlob)) {
+	gotMetadata, err = normalizedBundleCatalogJSONBytes(gotMetadata)
+	if err != nil {
+		return fmt.Errorf("stored bundle catalog metadata: %w", err)
+	}
+	if gotContent != contentYAML || !bytes.Equal(gotParsed, parsedRaw) || !bytes.Equal(nullableBytes(gotData), nullableBytes(dataBlob)) || !bytes.Equal(gotMetadata, metadataRaw) {
 		return &BundleCatalogConflictError{BundleHash: strings.TrimSpace(bundleHash)}
 	}
 	return nil
