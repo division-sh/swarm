@@ -133,6 +133,10 @@ active_issues:
     title: Close SQLite-default rollout with docs, CI, repo-wide old-path audit, and parent proof
     maps_to:
       - runtime_store_backend_default_and_sqlite_portability
+  - id: 1186
+    title: Promote backend-neutral mailbox_write materialization for SQLite runtime construction
+    maps_to:
+      - runtime_store_backend_default_and_sqlite_portability
   - id: 175
     title: Add first-class launch, stalled-run, and long-running session observability
     maps_to:
@@ -434,15 +438,16 @@ nodes:
     canonical_owners:
       - platform-spec.yaml runtime_store_backend_selection
       - internal/store/backendselection runtime store backend resolver and SQLite path resolver
-      - "future SQLite schema/store/session/delivery/trace owners tracked by #1085-#1088 before public default flip"
+      - "SQLite schema/store/session/delivery/trace/mailbox materialization owners tracked by #1085-#1088 and #1186 before public default flip"
     why_this_node_exists: Runtime store semantics drift when CLI defaults, env/config loading, runtime store construction, schema bootstrap, session locking, event delivery/replay, trace reads, docs, and CI each infer Postgres or SQLite support independently.
     known_manifestations:
       - "#1084 owns canonical backend ids postgres/sqlite, selector precedence flag > environment > runtime config > rollout default, SWARM_STORE_BACKEND, SWARM_SQLITE_PATH, store.backend, store.sqlite.path, and the staged SQLite path authority."
       - "#1085 must own SQLite dialect, schema bootstrap, and backend capability binding before SQLite can construct runtime stores."
       - "#1086 must port core runtime persistence stores behind backend-neutral SQLite/Postgres contracts."
-      - "#1087 must port session, locking, delivery, replay, trace-stream, mailbox_write materialization, and runtime diagnostics/log semantics for the SQLite local runtime path; #1147-#1150 are the focused runtime-construction children under that parent and mailbox_write remains a residual construction blocker until separately gated."
+      - "#1087 must port session, locking, delivery, replay, trace-stream, and runtime diagnostics/log semantics for the SQLite local runtime path; #1147-#1150 are the focused runtime-construction children under that parent."
+      - "#1186 promotes backend-neutral mailbox_write materialization through runtimepipeline.MailboxWriteMaterializationStore and removes the residual raw-SQL runtime construction blocker for explicit SQLite selection."
       - "#1088 must flip the active local/dev default to SQLite only after zero-service swarm run and explicit Postgres opt-in are proven together."
-      - "#1089 must close docs, CI, repo-wide stale-default audit, and parent proof before #1066 closes."
+      - "#1089 must close docs, CI, repo-wide stale-default audit, and parent proof before #1066 closes; #1157 agent.usage read parity and production SQLite multi-writer semantics remain explicitly split until separately closed."
     representative_issues:
       - 1066
       - 1084
@@ -451,6 +456,7 @@ nodes:
       - 1087
       - 1088
       - 1089
+      - 1186
     common_framing_mistakes:
       too_broad:
         - make SQLite production-ready in the local/dev default rollout
