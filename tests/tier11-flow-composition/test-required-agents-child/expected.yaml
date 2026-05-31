@@ -5,7 +5,7 @@ trigger:
 
 expected:
   handler_outcome: success
-  entity_state: done
-  emitted_events:
-    - analysis.done
-    - request.complete
+  entity_state: idle
+  agent_received:
+    analyzer:
+      - analyzer-flow/analysis.requested
