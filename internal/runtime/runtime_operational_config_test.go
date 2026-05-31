@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -82,6 +83,26 @@ func (*minimalRuntimeEventStore) InsertEventDeliveries(context.Context, string, 
 }
 func (*minimalRuntimeEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
 	return nil, nil
+}
+
+type recoveryDisabledScheduleStore struct {
+	recordingRuntimeScheduleStore
+	loadCalls atomic.Int32
+}
+
+func (s *recoveryDisabledScheduleStore) LoadActiveSchedules(ctx context.Context) ([]runtimepipeline.Schedule, error) {
+	s.loadCalls.Add(1)
+	return s.recordingRuntimeScheduleStore.LoadActiveSchedules(ctx)
+}
+
+type recoveryDisabledManagerStore struct {
+	recoveryGuardManagerStore
+	loadCalls atomic.Int32
+}
+
+func (s *recoveryDisabledManagerStore) LoadAgents(ctx context.Context) ([]runtimemanager.PersistedAgent, error) {
+	s.loadCalls.Add(1)
+	return s.recoveryGuardManagerStore.LoadAgents(ctx)
 }
 
 func testOperationalRuntimeConfig() *config.Config {
@@ -218,6 +239,56 @@ func TestRuntimeStart_AllowsRecoveryDisabledWithNonReplayEventStore(t *testing.T
 	}
 	if err := rt.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
+	}
+	if err := rt.Shutdown(); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+}
+
+func TestRuntimeStart_DisablePersistentStartupRecoverySkipsUnscopedStoreReads(t *testing.T) {
+	module := loadRuntimeOwnershipWorkflowModule(t)
+	cfg := testOperationalRuntimeConfig()
+	cfg.Runtime.RecoveryOnStartup = true
+	scheduleStore := &recoveryDisabledScheduleStore{
+		recordingRuntimeScheduleStore: recordingRuntimeScheduleStore{
+			active: []runtimepipeline.Schedule{{
+				AgentID:   "runtime",
+				EventType: "timer.check",
+				Mode:      "once",
+				At:        time.Now().Add(time.Minute),
+				TaskID:    "other-bundle",
+			}},
+		},
+	}
+	managerStore := &recoveryDisabledManagerStore{
+		recoveryGuardManagerStore: recoveryGuardManagerStore{
+			agents: []runtimemanager.PersistedAgent{{
+				Config: runtimeactors.AgentConfig{ID: "persisted-agent"},
+			}},
+		},
+	}
+	rt, err := NewRuntime(context.Background(), RuntimeDeps{Config: cfg, Stores: Stores{
+		EventStore:    &recoveryGuardEventStore{},
+		ManagerStore:  managerStore,
+		ScheduleStore: scheduleStore,
+	}, Options: RuntimeOptions{
+		SelfCheck:                        false,
+		WorkflowModule:                   module,
+		LLMRuntime:                       noopLLMRuntime{},
+		DisablePersistentStartupRecovery: true,
+	}})
+
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	if err := rt.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if got := scheduleStore.loadCalls.Load(); got != 0 {
+		t.Fatalf("LoadActiveSchedules calls = %d, want 0", got)
+	}
+	if got := managerStore.loadCalls.Load(); got != 0 {
+		t.Fatalf("LoadAgents calls = %d, want 0", got)
 	}
 	if err := rt.Shutdown(); err != nil {
 		t.Fatalf("Shutdown: %v", err)

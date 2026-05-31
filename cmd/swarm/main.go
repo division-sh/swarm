@@ -178,6 +178,7 @@ type serveOptions struct {
 	ContractsPath        string
 	DataSource           string
 	BundleHash           string
+	BundleHashes         []string
 	PlatformSpecPath     string
 	StoreMode            string
 	StoreModeSet         bool
@@ -205,6 +206,32 @@ type serveRuntimeBundle struct {
 	cleanup          func() error
 }
 
+type serveRuntimeBundleContext struct {
+	loaded            serveRuntimeBundle
+	stateStoreSummary string
+	bundleSourceFact  runtimecorrelation.BundleSourceFact
+	bootIdentity      runtimecontracts.BundleIdentity
+	workspaces        serveWorkspaceLifecycle
+	validation        runtime.WorkflowContractValidationResult
+	runtime           *runtime.Runtime
+}
+
+type serveRuntimeBundleContextRequest struct {
+	Ctx                    context.Context
+	Stores                 storeBundle
+	Config                 *config.Config
+	Loaded                 serveRuntimeBundle
+	Options                serveOptions
+	MountSources           workspaceMountSources
+	Credentials            runtimecredentials.Store
+	BootStartedAt          time.Time
+	BootProgress           func(runtime.BootProgressEvent)
+	EnableToolGateway      bool
+	UseStartupOwnership    bool
+	UseStartupRecovery     bool
+	RequireBundleScopeName bool
+}
+
 func defaultServeOptions() serveOptions {
 	return serveOptions{
 		StoreMode:          storebackend.ActiveDefaultBackend().String(),
@@ -223,19 +250,127 @@ func (b serveRuntimeBundle) serveIdentityDetail() string {
 	return strings.TrimSpace(b.bootIdentity.Fingerprint)
 }
 
+func serveRuntimeBundleIdentitiesDetail(bundles []serveRuntimeBundle) string {
+	parts := make([]string, 0, len(bundles))
+	for _, bundle := range bundles {
+		if detail := bundle.serveIdentityDetail(); detail != "" {
+			parts = append(parts, detail)
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, ",")
+}
+
+func servePinnedBundleHashes(bundles []serveRuntimeBundle) []string {
+	out := []string{}
+	for _, bundle := range bundles {
+		if bundle.dbLoaded {
+			if hash := strings.TrimSpace(bundle.bundleSourceFact.BundleHash); hash != "" {
+				out = append(out, hash)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func serveRuntimeStateStoreSummary(contexts []serveRuntimeBundleContext) string {
+	seen := map[string]struct{}{}
+	parts := []string{}
+	for _, contextDef := range contexts {
+		summary := strings.TrimSpace(contextDef.stateStoreSummary)
+		if summary == "" {
+			continue
+		}
+		if _, ok := seen[summary]; ok {
+			continue
+		}
+		seen[summary] = struct{}{}
+		parts = append(parts, summary)
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, "; ")
+}
+
 func serveConfigLoadDetail(configDetail string, resolvedPaths cliContractPlatformSpecPaths, opts serveOptions) string {
 	parts := []string{"config=" + strings.TrimSpace(configDetail)}
-	if hash := strings.TrimSpace(opts.BundleHash); hash != "" {
-		parts = append(parts, "bundle_hash="+hash)
+	hashes, _ := serveBundleHashes(opts)
+	if len(hashes) == 1 {
+		parts = append(parts, "bundle_hash="+hashes[0])
+	} else if len(hashes) > 1 {
+		parts = append(parts, "bundle_hashes="+strings.Join(hashes, ","))
 	} else {
 		parts = append(parts, "contracts="+filepath.Clean(resolvedPaths.ContractsPath))
 	}
 	return strings.Join(parts, " ")
 }
 
+func serveBundleHashes(opts serveOptions) ([]string, error) {
+	candidates := []string{}
+	if hash := strings.TrimSpace(opts.BundleHash); hash != "" {
+		candidates = append(candidates, hash)
+	}
+	candidates = append(candidates, opts.BundleHashes...)
+	out := make([]string, 0, len(candidates))
+	seen := map[string]struct{}{}
+	for _, candidate := range candidates {
+		hash := strings.TrimSpace(candidate)
+		if hash == "" {
+			return nil, fmt.Errorf("--bundle-hash must be non-empty")
+		}
+		if err := runtimecontracts.ValidateBundleHash(hash); err != nil {
+			return nil, fmt.Errorf("--bundle-hash must be bundle-v1:sha256:<64 lowercase hex>")
+		}
+		if _, ok := seen[hash]; ok {
+			return nil, fmt.Errorf("--bundle-hash values must be unique")
+		}
+		seen[hash] = struct{}{}
+		out = append(out, hash)
+	}
+	return out, nil
+}
+
+func loadServeRuntimeBundles(ctx context.Context, repo string, stores storeBundle, resolvedPaths cliContractPlatformSpecPaths, opts serveOptions) ([]serveRuntimeBundle, error) {
+	hashes, err := serveBundleHashes(opts)
+	if err != nil {
+		return nil, err
+	}
+	if len(hashes) > 0 {
+		out := make([]serveRuntimeBundle, 0, len(hashes))
+		for _, hash := range hashes {
+			loaded, err := loadServeRuntimeBundleFromCatalog(ctx, repo, stores, hash)
+			if err != nil {
+				for _, prior := range out {
+					if prior.cleanup != nil {
+						_ = prior.cleanup()
+					}
+				}
+				return nil, err
+			}
+			out = append(out, loaded)
+		}
+		return out, nil
+	}
+	loaded, err := loadServeRuntimeBundle(ctx, repo, stores, resolvedPaths, opts)
+	if err != nil {
+		return nil, err
+	}
+	return []serveRuntimeBundle{loaded}, nil
+}
+
 func loadServeRuntimeBundle(ctx context.Context, repo string, stores storeBundle, resolvedPaths cliContractPlatformSpecPaths, opts serveOptions) (serveRuntimeBundle, error) {
-	if bundleHash := strings.TrimSpace(opts.BundleHash); bundleHash != "" {
-		return loadServeRuntimeBundleFromCatalog(ctx, repo, stores, bundleHash)
+	hashes, err := serveBundleHashes(opts)
+	if err != nil {
+		return serveRuntimeBundle{}, err
+	}
+	if len(hashes) > 1 {
+		return serveRuntimeBundle{}, fmt.Errorf("loadServeRuntimeBundle supports one bundle_hash; use loadServeRuntimeBundles for multi-context boot")
+	}
+	if len(hashes) == 1 {
+		return loadServeRuntimeBundleFromCatalog(ctx, repo, stores, hashes[0])
 	}
 	contractsRoot, err := normalizeContractsRoot(resolvedPaths.ContractsPath)
 	if err != nil {
@@ -328,6 +463,79 @@ func prepareLoadedServeBundleSource(ctx context.Context, stores storeBundle, loa
 	return prepareServeBundleSource(ctx, stores, loaded.bundle, loaded.bootIdentity.Fingerprint, dev)
 }
 
+func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serveRuntimeBundleContext, error) {
+	loaded := req.Loaded
+	stateStoreSummary, err := initializeStateStores(req.Ctx, req.Stores, loaded.bundle)
+	if err != nil {
+		return serveRuntimeBundleContext{}, err
+	}
+	bundleSourceFact, err := prepareLoadedServeBundleSource(req.Ctx, req.Stores, loaded, req.Options.Dev)
+	if err != nil {
+		return serveRuntimeBundleContext{}, fmt.Errorf("prepare bundle source: %w", err)
+	}
+	bootIdentity := loaded.bootIdentity
+	bootIdentity.BundleHash = strings.TrimSpace(bundleSourceFact.BundleHash)
+	workspaces, err := configuredWorkspaceLifecycleForServe(req.Stores.SQLDB, loaded.contractsRoot, loaded.source, req.MountSources)
+	if err != nil {
+		return serveRuntimeBundleContext{}, fmt.Errorf("configure workspaces: %w", err)
+	}
+	if workspaces == nil {
+		return serveRuntimeBundleContext{}, fmt.Errorf("workspace lifecycle is not configured")
+	}
+	if req.RequireBundleScopeName {
+		if scoper, ok := workspaces.(interface{ SetBundleScope(string) }); ok && scoper != nil {
+			scoper.SetBundleScope(bundleSourceFact.BundleHash)
+		}
+	}
+	if err := workspaces.ValidateSource(req.Ctx, loaded.source); err != nil {
+		return serveRuntimeBundleContext{}, fmt.Errorf("validate workspaces: %w", err)
+	}
+	if err := workspaces.EnsurePrereqs(req.Ctx); err != nil {
+		return serveRuntimeBundleContext{}, fmt.Errorf("prepare workspaces: %w", err)
+	}
+	if err := workspaces.EnsureSystemWorkspaces(req.Ctx); err != nil {
+		return serveRuntimeBundleContext{}, fmt.Errorf("ensure system workspaces: %w", err)
+	}
+	validation, err := runtime.ValidateWorkflowContractSurface(req.Ctx, loaded.source, runtime.DefaultWorkflowContractValidationOptions(req.Credentials))
+	if err != nil {
+		return serveRuntimeBundleContext{}, err
+	}
+	runtimeStores := req.Stores.runtimeStores()
+	if !req.UseStartupOwnership {
+		runtimeStores.StartupOwnership = nil
+	}
+	rt, err := runtime.NewRuntime(req.Ctx, runtime.RuntimeDeps{
+		Config: req.Config,
+		Stores: runtimeStores,
+		Options: runtime.RuntimeOptions{
+			SelfCheck:                        req.Options.SelfCheck,
+			WorkflowModule:                   loaded.module,
+			WorkspaceLifecycle:               workspaces,
+			EnableToolGateway:                req.EnableToolGateway,
+			ToolGatewayToken:                 strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_TOKEN")),
+			BundleFingerprint:                bootIdentity.Fingerprint,
+			BundleSourceFact:                 bundleSourceFact,
+			Credentials:                      req.Credentials,
+			BootStartedAt:                    req.BootStartedAt,
+			BootProgress:                     req.BootProgress,
+			SystemContainers:                 systemWorkspaceContainers(workspaces),
+			DisablePersistentStartupRecovery: !req.UseStartupRecovery,
+		},
+	})
+	if err != nil {
+		return serveRuntimeBundleContext{}, err
+	}
+	return serveRuntimeBundleContext{
+		loaded:            loaded,
+		stateStoreSummary: stateStoreSummary,
+		bundleSourceFact:  bundleSourceFact,
+		bootIdentity:      bootIdentity,
+		workspaces:        workspaces,
+		validation:        validation,
+		runtime:           rt,
+	}, nil
+}
+
 func buildForkChatSandboxLLMRuntime(cfg *config.Config, workspaces workspace.Resolver) (runtimellm.Runtime, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("runtime config is required")
@@ -400,31 +608,29 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	}
 	reporter.emit(3, "db_connection", "ok", storeSelection.Backend.String())
 	defer closeDB(stores.SQLDB)
-	loadedBundle, err := loadServeRuntimeBundle(ctx, repo, stores, resolvedPaths, opts)
+	loadedBundles, err := loadServeRuntimeBundles(ctx, repo, stores, resolvedPaths, opts)
 	if err != nil {
 		reporter.emit(4, "bundle_load", "FAILED", err.Error())
 		log.Printf("load Swarm contracts: %v", err)
 		return 1
 	}
-	if loadedBundle.cleanup != nil {
-		defer func() {
-			if err := loadedBundle.cleanup(); err != nil {
-				log.Printf("cleanup DB-loaded bundle runtime source failed: %v", err)
-			}
-		}()
-	}
-	module := loadedBundle.module
-	bundle := loadedBundle.bundle
-	source := loadedBundle.source
-	contractsRoot := loadedBundle.contractsRoot
-	resolvedPlatformSpecPath := loadedBundle.platformSpecPath
-	bootBundleIdentity := loadedBundle.bootIdentity
-	reporter.emit(4, "bundle_load", "ok", serveBootBundleLoadDetail(loadedBundle.serveIdentityDetail(), source))
-	stateStoreSummary, err := initializeStateStores(ctx, stores, bundle)
-	if err != nil {
-		slog.Error("initialize state stores", "error", err)
+	if len(loadedBundles) == 0 {
+		reporter.emit(4, "bundle_load", "FAILED", "no bundle contexts loaded")
 		return 1
 	}
+	defer func() {
+		for _, loaded := range loadedBundles {
+			if loaded.cleanup != nil {
+				if err := loaded.cleanup(); err != nil {
+					log.Printf("cleanup DB-loaded bundle runtime source failed: %v", err)
+				}
+			}
+		}
+	}()
+	loadedBundle := loadedBundles[0]
+	source := loadedBundle.source
+	resolvedPlatformSpecPath := loadedBundle.platformSpecPath
+	reporter.emit(4, "bundle_load", "ok", serveBootBundleLoadDetail(serveRuntimeBundleIdentitiesDetail(loadedBundles), source))
 	if opts.AbandonActiveRuns {
 		if stores.Postgres == nil {
 			slog.Error("abandon active runs failed", "error", "postgres store is required")
@@ -437,20 +643,20 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		}
 		log.Printf("serve abandon active runs complete: runs=%d deliveries=%d pipeline_receipts=%d", len(result.Runs), len(result.Deliveries), result.PipelineReceiptCount)
 	}
-	workspaces, err := configuredWorkspaceLifecycleForServe(stores.SQLDB, contractsRoot, source, mountSources)
-	if err != nil {
-		slog.Error("configure workspaces", "error", err)
-		return 1
-	}
-	if workspaces == nil {
-		slog.Error("workspace lifecycle is not configured")
-		return 1
-	}
 	if stores.Postgres != nil {
+		recoveryWorkspaces, err := configuredWorkspaceLifecycleForServe(stores.SQLDB, loadedBundle.contractsRoot, source, mountSources)
+		if err != nil {
+			slog.Error("configure recovery workspaces", "error", err)
+			return 1
+		}
+		if recoveryWorkspaces == nil {
+			slog.Error("workspace lifecycle is not configured")
+			return 1
+		}
 		recovery, err := runtimestartuprecovery.Recover(ctx, runtimestartuprecovery.Request{
 			AvailabilityReader: stores.Postgres,
 			CleanupStore:       stores.Postgres,
-			Containers:         serveStartupRecoveryContainers{lifecycle: workspaces},
+			Containers:         serveStartupRecoveryContainers{lifecycle: recoveryWorkspaces},
 			RequestedAt:        time.Now().UTC(),
 		})
 		if err != nil {
@@ -471,50 +677,48 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 			)
 		}
 	}
-	pinnedBundleHash := ""
-	if loadedBundle.dbLoaded {
-		pinnedBundleHash = strings.TrimSpace(loadedBundle.bundleSourceFact.BundleHash)
-	}
-	if err := enforceServeBundleMatchAdmission(ctx, stores.Postgres, loadedBundle.serveIdentityDetail(), opts.RequireBundleMatch, pinnedBundleHash); err != nil {
+	pinnedBundleHashes := servePinnedBundleHashes(loadedBundles)
+	if err := enforceServeBundleMatchAdmissionForHashes(ctx, stores.Postgres, serveRuntimeBundleIdentitiesDetail(loadedBundles), opts.RequireBundleMatch, pinnedBundleHashes); err != nil {
 		slog.Error("bundle match admission failed", "error", err)
 		return 3
 	}
-	bundleSourceFact, err := prepareLoadedServeBundleSource(ctx, stores, loadedBundle, opts.Dev)
-	if err != nil {
-		slog.Error("prepare bundle source", "error", err)
-		return 3
-	}
-	bootBundleIdentity.BundleHash = strings.TrimSpace(bundleSourceFact.BundleHash)
-	if err := workspaces.ValidateSource(ctx, source); err != nil {
-		slog.Error("validate workspaces", "error", err)
-		return 1
-	}
-	if err := workspaces.EnsurePrereqs(ctx); err != nil {
-		slog.Error("prepare workspaces", "error", err)
-		return 1
-	}
-	if err := workspaces.EnsureSystemWorkspaces(ctx); err != nil {
-		slog.Error("ensure system workspaces", "error", err)
-		return 1
-	}
-	systemContainers := systemWorkspaceContainers(workspaces)
 	credentialStore, err := buildCredentialStore()
 	if err != nil {
 		slog.Error("configure credentials", "error", err)
 		return 1
 	}
-	validation, err := runtime.ValidateWorkflowContractSurface(ctx, source, runtime.DefaultWorkflowContractValidationOptions(credentialStore))
-	bootReport := validation.BootReport
-	if err != nil {
-		if bootReport.HasErrors() {
-			for _, finding := range bootReport.Errors() {
-				slog.Error("swarm boot verification failed", "check_id", finding.CheckID, "location", finding.Location, "detail", finding.Message)
-			}
-		} else {
-			slog.Error("workflow contract validation failed", "error", err)
+	runtimeContexts := make([]serveRuntimeBundleContext, 0, len(loadedBundles))
+	for i, loaded := range loadedBundles {
+		contextDef, err := buildServeRuntimeBundleContext(serveRuntimeBundleContextRequest{
+			Ctx:                    ctx,
+			Stores:                 stores,
+			Config:                 cfg,
+			Loaded:                 loaded,
+			Options:                opts,
+			MountSources:           mountSources,
+			Credentials:            credentialStore,
+			BootStartedAt:          bootStartedAt,
+			BootProgress:           reporter.runtimeSink(),
+			EnableToolGateway:      i == 0,
+			UseStartupOwnership:    len(loadedBundles) == 1 && i == 0,
+			UseStartupRecovery:     len(loadedBundles) == 1,
+			RequireBundleScopeName: len(loadedBundles) > 1,
+		})
+		if err != nil {
+			slog.Error("build runtime context", "bundle_hash", strings.TrimSpace(loaded.bundleSourceFact.BundleHash), "error", err)
+			return 1
 		}
-		return 1
+		runtimeContexts = append(runtimeContexts, contextDef)
 	}
+	primaryContext := runtimeContexts[0]
+	source = primaryContext.loaded.source
+	bundle := primaryContext.loaded.bundle
+	contractsRoot := primaryContext.loaded.contractsRoot
+	bootBundleIdentity := primaryContext.bootIdentity
+	workspaces := primaryContext.workspaces
+	rt := primaryContext.runtime
+	bootReport := primaryContext.validation.BootReport
+	stateStoreSummary := serveRuntimeStateStoreSummary(runtimeContexts)
 
 	apiListener, err := listenServeHTTPListener("api", opts.APIListenAddr)
 	if err != nil {
@@ -541,28 +745,6 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	}
 	defer restoreGatewayEnv()
 
-	rt, err := runtime.NewRuntime(ctx, runtime.RuntimeDeps{
-		Config: cfg,
-		Stores: stores.runtimeStores(),
-		Options: runtime.RuntimeOptions{
-			SelfCheck:          opts.SelfCheck,
-			WorkflowModule:     module,
-			WorkspaceLifecycle: workspaces,
-			EnableToolGateway:  true,
-			ToolGatewayToken:   strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_TOKEN")),
-			BundleFingerprint:  bootBundleIdentity.Fingerprint,
-			BundleSourceFact:   bundleSourceFact,
-			Credentials:        credentialStore,
-			BootStartedAt:      bootStartedAt,
-			BootProgress:       reporter.runtimeSink(),
-			SystemContainers:   systemContainers,
-		},
-	})
-
-	if err != nil {
-		log.Printf("init runtime: %v", err)
-		return 1
-	}
 	forkChatLLM, err := buildForkChatSandboxLLMRuntime(cfg, workspaces)
 	if err != nil {
 		log.Printf("init forkchat sandbox runtime: %v", err)
@@ -571,10 +753,13 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 
 	var ready atomic.Bool
 	supervisor := newRuntimeProjectSupervisor(repo, resolvedPlatformSpecPath, cfg, stores, &ready, mountSources, contractsRoot, bundle, source, rt, opts.Dev)
-	if loadedBundle.dbLoaded {
-		supervisor.DisableSourceReplacement("swarm serve --bundle-hash pins one persisted bundle for the process; dynamic project reload is split to RuntimeContextManager work")
+	if len(pinnedBundleHashes) > 0 {
+		supervisor.DisableSourceReplacement("swarm serve --bundle-hash pins persisted bundle contexts for the process; dynamic project reload is split to RuntimeContextManager Load/Unload work")
 	}
 	defer func() {
+		if err := closeAdditionalServeRuntimeContexts(context.Background(), runtimeContexts[1:], opts); err != nil {
+			log.Printf("additional runtime context shutdown failed: %v", err)
+		}
 		if err := closeServeRuntime(context.Background(), supervisor, opts, workspaces); err != nil {
 			log.Printf("runtime shutdown failed: %v", err)
 		}
@@ -608,6 +793,11 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 			RepoRoot: repo,
 			Store:    stores.Postgres,
 		}
+	}
+	apiRuntimeContexts, err := serveRuntimeContextManager(stores.Postgres, runtimeContexts)
+	if err != nil {
+		log.Printf("init runtime context manager: %v", err)
+		return 1
 	}
 	apiReadOptions := apiv1.OperatorReadOptions{
 		RepoRoot:         repo,
@@ -650,12 +840,13 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 				Credentials:       credentialStore,
 			},
 		},
-		AgentControl:   dashboardDynamicAgentControl{supervisor: supervisor},
-		Mailbox:        stores.MailboxAPIStore,
-		Idempotency:    stores.IdempotencyStore,
-		Events:         rt.Bus,
-		RunControl:     rt.RunControl,
-		RuntimeIngress: rt.RuntimeIngress,
+		AgentControl:    dashboardDynamicAgentControl{supervisor: supervisor},
+		Mailbox:         stores.MailboxAPIStore,
+		Idempotency:     stores.IdempotencyStore,
+		Events:          rt.Bus,
+		RunControl:      rt.RunControl,
+		RuntimeIngress:  rt.RuntimeIngress,
+		RuntimeContexts: apiRuntimeContexts,
 		ResetCoordinator: &runtimedestructivereset.Coordinator{
 			Planner: resetPlanner,
 			Locks:   stores.Postgres,
@@ -684,7 +875,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	defer shutdownHTTPServer("mcp", mcpServer)
 	defer shutdownHTTPServer("api", apiServer)
 	logBootWarnings(bootReport)
-	if err := rt.Start(ctx); err != nil {
+	if err := startServeRuntimeContexts(ctx, runtimeContexts); err != nil {
 		reporter.emit(22, "ready", "FAILED", err.Error())
 		log.Printf("start runtime: %v", err)
 		return 1
@@ -723,6 +914,60 @@ func closeServeRuntime(ctx context.Context, supervisor *runtimeProjectSupervisor
 		}
 	}
 	return errors.Join(shutdownErr, cleanupErr)
+}
+
+func serveRuntimeContextManager(reader runtime.RunBundleAvailabilityReader, contexts []serveRuntimeBundleContext) (*runtime.RuntimeContextManager, error) {
+	hasDBLoaded := false
+	managerContexts := make([]runtime.BundleContext, 0, len(contexts))
+	for _, contextDef := range contexts {
+		if !contextDef.loaded.dbLoaded {
+			continue
+		}
+		hasDBLoaded = true
+		managerContexts = append(managerContexts, runtime.BundleContext{
+			BundleHash:       contextDef.bundleSourceFact.BundleHash,
+			BundleSourceFact: contextDef.bundleSourceFact,
+			BundleIdentity:   contextDef.bootIdentity,
+			Source:           contextDef.loaded.source,
+			ContractsRoot:    contextDef.loaded.contractsRoot,
+			PlatformSpecPath: contextDef.loaded.platformSpecPath,
+			Runtime:          contextDef.runtime,
+		})
+	}
+	if !hasDBLoaded {
+		return nil, nil
+	}
+	return runtime.NewRuntimeContextManager(reader, managerContexts...)
+}
+
+func startServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundleContext) error {
+	started := make([]*runtime.Runtime, 0, len(contexts))
+	for _, contextDef := range contexts {
+		if contextDef.runtime == nil {
+			continue
+		}
+		if err := contextDef.runtime.Start(ctx); err != nil {
+			for i := len(started) - 1; i >= 0; i-- {
+				_ = started[i].Shutdown()
+			}
+			return err
+		}
+		started = append(started, contextDef.runtime)
+	}
+	return nil
+}
+
+func closeAdditionalServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundleContext, opts serveOptions) error {
+	var shutdownErr error
+	for _, contextDef := range contexts {
+		if contextDef.runtime == nil {
+			continue
+		}
+		if err := contextDef.runtime.ShutdownWithOptions(runtime.ShutdownOptions{Grace: opts.ShutdownGrace}); err != nil {
+			shutdownErr = errors.Join(shutdownErr, err)
+		}
+	}
+	return shutdownErr
 }
 
 type verifyCommandResult struct {
@@ -2133,12 +2378,20 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 }
 
 func enforceServeBundleMatchAdmission(ctx context.Context, pg *store.PostgresStore, bootIdentity string, requireMatch bool, pinnedBundleHash string) error {
+	var pinned []string
+	if hash := strings.TrimSpace(pinnedBundleHash); hash != "" {
+		pinned = []string{hash}
+	}
+	return enforceServeBundleMatchAdmissionForHashes(ctx, pg, bootIdentity, requireMatch, pinned)
+}
+
+func enforceServeBundleMatchAdmissionForHashes(ctx context.Context, pg *store.PostgresStore, bootIdentity string, requireMatch bool, pinnedBundleHashes []string) error {
 	bootIdentity = strings.TrimSpace(bootIdentity)
-	pinnedBundleHash = strings.TrimSpace(pinnedBundleHash)
+	pinnedBundleHashes = uniqueTrimmedServeBundleHashes(pinnedBundleHashes)
 	if !requireMatch {
 		log.Printf("legacy bundle match admission disabled by --no-require-bundle-match; startup recovery has already consumed active run bundle source state")
 	}
-	enforceActiveAvailability := requireMatch || pinnedBundleHash != ""
+	enforceActiveAvailability := requireMatch || len(pinnedBundleHashes) > 0
 	if enforceActiveAvailability && bootIdentity == "" {
 		return fmt.Errorf("boot bundle identity is required")
 	}
@@ -2158,10 +2411,10 @@ func enforceServeBundleMatchAdmission(ctx context.Context, pg *store.PostgresSto
 			return fmt.Errorf("active run bundle availability conflict: boot bundle %s cannot resume %d active run(s): %s", bootIdentity, len(conflicts), strings.Join(details, "; "))
 		}
 	}
-	if pinnedBundleHash == "" {
+	if len(pinnedBundleHashes) == 0 {
 		return nil
 	}
-	mismatches, err := activeRunPinnedBundleHashConflicts(ctx, pg, pinnedBundleHash)
+	mismatches, err := activeRunPinnedBundleHashesConflicts(ctx, pg, pinnedBundleHashes)
 	if err != nil {
 		return err
 	}
@@ -2172,7 +2425,7 @@ func enforceServeBundleMatchAdmission(ctx context.Context, pg *store.PostgresSto
 	for _, mismatch := range mismatches {
 		details = append(details, mismatch.DetailString())
 	}
-	return fmt.Errorf("active run pinned bundle_hash conflict: DB-loaded serve bundle_hash %s cannot resume %d active run(s) with different bundle_hash: %s", pinnedBundleHash, len(mismatches), strings.Join(details, "; "))
+	return fmt.Errorf("active run pinned bundle_hash conflict: DB-loaded serve bundle_hash set %s cannot resume %d active run(s) with different bundle_hash: %s", strings.Join(pinnedBundleHashes, ","), len(mismatches), strings.Join(details, "; "))
 }
 
 func activeRunPinnedBundleHashConflicts(ctx context.Context, pg *store.PostgresStore, pinnedBundleHash string) ([]runbundle.Availability, error) {
@@ -2194,6 +2447,48 @@ func activeRunPinnedBundleHashConflicts(ctx context.Context, pg *store.PostgresS
 		}
 	}
 	return conflicts, nil
+}
+
+func activeRunPinnedBundleHashesConflicts(ctx context.Context, pg *store.PostgresStore, pinnedBundleHashes []string) ([]runbundle.Availability, error) {
+	allowed := map[string]struct{}{}
+	for _, hash := range uniqueTrimmedServeBundleHashes(pinnedBundleHashes) {
+		allowed[hash] = struct{}{}
+	}
+	if len(allowed) == 0 {
+		return nil, nil
+	}
+	availabilities, err := pg.ActiveRunBundleAvailabilities(ctx)
+	if err != nil {
+		return nil, err
+	}
+	conflicts := make([]runbundle.Availability, 0, len(availabilities))
+	for _, availability := range availabilities {
+		if !availability.Available() {
+			continue
+		}
+		if _, ok := allowed[strings.TrimSpace(availability.BundleHash)]; !ok {
+			conflicts = append(conflicts, availability)
+		}
+	}
+	return conflicts, nil
+}
+
+func uniqueTrimmedServeBundleHashes(values []string) []string {
+	seen := map[string]struct{}{}
+	out := []string{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func initializeStateStores(ctx context.Context, stores storeBundle, bundle *runtimecontracts.WorkflowContractBundle) (string, error) {

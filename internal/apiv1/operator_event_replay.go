@@ -12,6 +12,7 @@ import (
 	"swarm/internal/events"
 	runtimebus "swarm/internal/runtime/bus"
 	"swarm/internal/store"
+	"swarm/internal/store/runbundle"
 )
 
 const (
@@ -96,7 +97,13 @@ func OperatorEventReplayHandlers(opts OperatorReadOptions) map[string]MethodHand
 }
 
 func eventReplayConfigured(opts OperatorReadOptions) bool {
-	if opts.Observability == nil || opts.Idempotency == nil || opts.Events == nil {
+	if opts.Observability == nil || opts.Idempotency == nil {
+		return false
+	}
+	if runtimeContextManager(opts) != nil {
+		return true
+	}
+	if opts.Events == nil {
 		return false
 	}
 	_, ok := opts.Events.(eventReplayPublisher)
@@ -219,6 +226,19 @@ func performEventReplay(
 	if err != nil {
 		return eventReplayPerformed{}, err
 	}
+	if runtimeContextManager(opts) != nil {
+		var availability runbundle.Availability
+		ctx, opts, availability, err = runtimeBundleContextByRun(ctx, opts, original.RunID)
+		if err != nil {
+			return eventReplayPerformed{}, err
+		}
+		_ = availability
+		selectedPublisher, ok := opts.Events.(eventReplayPublisher)
+		if !ok || selectedPublisher == nil {
+			return eventReplayPerformed{}, errors.New("event replay publisher is required for selected runtime context")
+		}
+		publisher = selectedPublisher
+	}
 	_, selectedSubscribers, err := eventReplayTargets(original, requestedSubscribers)
 	if err != nil {
 		return eventReplayPerformed{}, err
@@ -296,6 +316,19 @@ func ensureEventReplayAudit(
 	}
 	if err != nil {
 		return err
+	}
+	if runtimeContextManager(opts) != nil {
+		var availability runbundle.Availability
+		ctx, opts, availability, err = runtimeBundleContextByRun(ctx, opts, original.RunID)
+		if err != nil {
+			return err
+		}
+		_ = availability
+		selectedPublisher, ok := opts.Events.(eventReplayPublisher)
+		if !ok || selectedPublisher == nil {
+			return errors.New("event replay publisher is required for selected runtime context")
+		}
+		publisher = selectedPublisher
 	}
 	originalDeliveries, _, err := eventReplayTargets(original, stored.SubscribersReplayed)
 	if err != nil {

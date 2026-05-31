@@ -77,6 +77,8 @@ type DockerConfig struct {
 	SystemSystemdVolume   string
 	EntityContainerPrefix string
 	EntityWorkdir         string
+	BundleHash            string
+	BundleScope           string
 }
 
 func DefaultDockerConfig() DockerConfig {
@@ -196,6 +198,24 @@ func (m *DockerManager) SystemWorkspaceContainers() []string {
 	return out
 }
 
+func (m *DockerManager) SetBundleScope(bundleHash string) {
+	if m == nil {
+		return
+	}
+	cfg := m.cfg
+	cfg.BundleHash = strings.TrimSpace(bundleHash)
+	cfg.BundleScope = bundleScopeKey(bundleHash)
+	if cfg.BundleScope != "" {
+		cfg.ScaffoldContainer = scopedRuntimeName(cfg.BundleScope, cfg.ScaffoldContainer, "scaffold")
+		cfg.SystemContainer = scopedRuntimeName(cfg.BundleScope, cfg.SystemContainer, "system")
+		cfg.ScaffoldVolume = scopedRuntimeName(cfg.BundleScope, cfg.ScaffoldVolume, "scaffold")
+		cfg.SystemEntitiesVolume = scopedRuntimeName(cfg.BundleScope, cfg.SystemEntitiesVolume, "entities")
+		cfg.SystemNginxVolume = scopedRuntimeName(cfg.BundleScope, cfg.SystemNginxVolume, "nginx")
+		cfg.SystemSystemdVolume = scopedRuntimeName(cfg.BundleScope, cfg.SystemSystemdVolume, "systemd")
+	}
+	m.cfg = cfg
+}
+
 func (m *DockerManager) ValidateSource(ctx context.Context, source semanticview.Source) error {
 	if m == nil {
 		return fmt.Errorf("workspace manager is required")
@@ -257,6 +277,9 @@ func (m *DockerManager) EnsureEntityWorkspace(ctx context.Context, entityID stri
 	}
 	container := m.EntityContainerName(slug)
 	volume := fmt.Sprintf("entities_%s", slug)
+	if strings.TrimSpace(m.cfg.BundleScope) != "" {
+		volume = "entities_" + volumeScopeKey(m.bundleScopedPrefix()+"entity_"+slug)
+	}
 	runID, err := workspaceRunID(ctx)
 	if err != nil {
 		return err
@@ -269,6 +292,7 @@ func (m *DockerManager) EnsureEntityWorkspace(ctx context.Context, entityID stri
 		CreationSource: "workspace.EnsureEntityWorkspace",
 		ContainerName:  container,
 		WorkspaceScope: "entity",
+		BundleHash:     m.bundleHashLabel(),
 		RunID:          runID,
 		EntityID:       strings.TrimSpace(entityID),
 	}, append(m.standardMountArgs(),
@@ -571,11 +595,20 @@ func (m *DockerManager) workspaceScopeForActor(actor models.AgentConfig) (string
 func (m *DockerManager) workspaceContainerAndVolume(scope, scopeKey string) (string, string) {
 	scope = strings.TrimSpace(scope)
 	scopeKey = SanitizeSlug(scopeKey)
+	if strings.TrimSpace(m.cfg.BundleScope) == "" {
+		switch scope {
+		case "per-flow-instance":
+			return "swarm-flow-" + scopeKey, "workspaces_flow_" + scopeKey
+		default:
+			return "swarm-agent-" + scopeKey, "workspaces_agent_" + scopeKey
+		}
+	}
+	containerPrefix := m.bundleScopedPrefix()
 	switch scope {
 	case "per-flow-instance":
-		return "swarm-flow-" + scopeKey, "workspaces_flow_" + scopeKey
+		return containerPrefix + "flow-" + scopeKey, "workspaces_" + volumeScopeKey(containerPrefix+"flow_"+scopeKey)
 	default:
-		return "swarm-agent-" + scopeKey, "workspaces_agent_" + scopeKey
+		return containerPrefix + "agent-" + scopeKey, "workspaces_" + volumeScopeKey(containerPrefix+"agent_"+scopeKey)
 	}
 }
 
@@ -593,6 +626,7 @@ func (m *DockerManager) systemContainerIdentity(source, kind string) runtimecont
 		CreationSource: strings.TrimSpace(source),
 		ContainerName:  name,
 		WorkspaceScope: scope,
+		BundleHash:     m.bundleHashLabel(),
 	}
 }
 
@@ -607,6 +641,7 @@ func (m *DockerManager) workspaceContainerIdentity(ctx context.Context, containe
 		CreationSource: "workspace.ResolveWorkspace",
 		ContainerName:  strings.TrimSpace(container),
 		WorkspaceScope: strings.TrimSpace(scope),
+		BundleHash:     m.bundleHashLabel(),
 		RunID:          runID,
 	}
 	switch strings.TrimSpace(scope) {
@@ -1106,7 +1141,61 @@ func (m *DockerManager) LookupEntitySlug(ctx context.Context, entityID string) (
 }
 
 func (m *DockerManager) EntityContainerName(slug string) string {
-	return m.cfg.EntityContainerPrefix + SanitizeSlug(slug)
+	slug = SanitizeSlug(slug)
+	if strings.TrimSpace(m.cfg.BundleScope) == "" {
+		return m.cfg.EntityContainerPrefix + slug
+	}
+	return m.bundleScopedPrefix() + strings.TrimPrefix(m.cfg.EntityContainerPrefix, "swarm-") + slug
+}
+
+func (m *DockerManager) bundleScopedPrefix() string {
+	if m == nil {
+		return "swarm-"
+	}
+	scope := strings.TrimSpace(m.cfg.BundleScope)
+	if scope == "" {
+		return "swarm-"
+	}
+	return "swarm-" + SanitizeSlug(scope) + "-"
+}
+
+func (m *DockerManager) bundleHashLabel() string {
+	if m == nil {
+		return ""
+	}
+	return strings.TrimSpace(m.cfg.BundleHash)
+}
+
+func bundleScopeKey(bundleHash string) string {
+	bundleHash = strings.TrimSpace(bundleHash)
+	if bundleHash == "" {
+		return ""
+	}
+	const prefix = "bundle-v1:sha256:"
+	hash := strings.TrimPrefix(bundleHash, prefix)
+	if len(hash) > 12 {
+		hash = hash[:12]
+	}
+	return "bundle-" + hash
+}
+
+func volumeScopeKey(raw string) string {
+	raw = strings.Trim(SanitizeSlug(raw), "-")
+	raw = strings.ReplaceAll(raw, "-", "_")
+	return raw
+}
+
+func scopedRuntimeName(scope, current, fallback string) string {
+	scope = SanitizeSlug(scope)
+	current = strings.TrimSpace(current)
+	if current == "" {
+		current = fallback
+	}
+	current = strings.TrimPrefix(SanitizeSlug(current), "swarm-")
+	if current == "" {
+		current = fallback
+	}
+	return "swarm-" + scope + "-" + current
 }
 
 func SanitizeSlug(raw string) string {

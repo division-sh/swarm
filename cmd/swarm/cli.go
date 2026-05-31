@@ -121,13 +121,12 @@ func newServeCommand(ctx context.Context, repo string, runServe func(context.Con
 				return fmt.Errorf("--dev cannot be combined with --require-bundle-match")
 			}
 			if cmd.Flags().Changed("bundle-hash") {
-				opts.BundleHash = strings.TrimSpace(opts.BundleHash)
-				if opts.BundleHash == "" {
-					return fmt.Errorf("--bundle-hash must be non-empty")
+				hashes, err := serveBundleHashes(opts)
+				if err != nil {
+					return err
 				}
-				if !cliBundleHashPattern.MatchString(opts.BundleHash) {
-					return fmt.Errorf("--bundle-hash must be bundle-v1:sha256:<64 lowercase hex>")
-				}
+				opts.BundleHash = hashes[0]
+				opts.BundleHashes = append([]string(nil), hashes[1:]...)
 				if cmd.Flags().Changed("contracts") {
 					return fmt.Errorf("--bundle-hash is mutually exclusive with --contracts")
 				}
@@ -188,7 +187,7 @@ func newServeCommand(ctx context.Context, repo string, runServe func(context.Con
 	cmd.Flags().StringVar(&opts.Backend, "backend", opts.Backend, "LLM backend profile for local runtime startup: anthropic, claude_cli, or openai_compatible")
 	cmd.Flags().StringVar(&opts.ContractsPath, "contracts", opts.ContractsPath, "Path to Swarm contract bundle root")
 	cmd.Flags().StringVar(&opts.DataSource, "data", opts.DataSource, "Path to agent-visible read-only /data reference directory")
-	cmd.Flags().StringVar(&opts.BundleHash, "bundle-hash", opts.BundleHash, "Load a persisted bundle catalog row by canonical bundle_hash (serial single-bundle process)")
+	cmd.Flags().StringArrayVar(&opts.BundleHashes, "bundle-hash", opts.BundleHashes, "Load a persisted bundle catalog row by canonical bundle_hash; repeat to boot multiple pinned contexts")
 	cmd.Flags().StringVar(&opts.PlatformSpecPath, "platform-spec", opts.PlatformSpecPath, "Path to platform spec yaml")
 	cmd.Flags().StringVar(&opts.StoreMode, "store", opts.StoreMode, "Runtime store backend: postgres (active default) or sqlite (selected core stores; default flip after #1088)")
 	cmd.Flags().StringVar(&opts.APIListenAddr, "api-listen-addr", opts.APIListenAddr, "HTTP bind address for API, WebSocket, health, and readiness routes")

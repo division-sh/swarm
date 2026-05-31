@@ -206,6 +206,9 @@ func executeMailboxDecision(ctx context.Context, req Request, opts OperatorReadO
 	idempotencyKey := stringParam(req.Params, "idempotency_key")
 	action := strings.ToLower(strings.TrimSpace(decision.Action))
 	if action == "approved" || action == "approve" {
+		if multiRuntimeContextMode(opts) {
+			return nil, runtimeContextRequiredError(req.Method, "mailbox approval event publishing is ambiguous in multi-context DB-loaded mode; per-context mailbox approval routing is split to #1176")
+		}
 		txPublisher, ok := opts.Events.(TransactionalEventPublisher)
 		if !ok || txPublisher == nil {
 			return nil, errors.New("transactional event publisher is required for mailbox approval")

@@ -3110,7 +3110,7 @@
         {
           "name": "bundle_hash",
           "required": false,
-          "description": "Canonical #1001 bundle identity scope. Must be bundle-v1:sha256:\u003c64 lowercase hex\u003e. Required when run_id is omitted. When run_id identifies an existing run, optional bundle_hash must match that run's canonical runs.bundle_hash or the method fails closed with BUNDLE_MISMATCH. Until RuntimeContextManager lands, the resolved hash must match the single active runtime source fact or the method fails closed with BUNDLE_UNAVAILABLE. cannot be combined with legacy bundle_ref; malformed or combined inputs fail closed with UNSUPPORTED_BUNDLE_HASH.",
+          "description": "Canonical #1001 bundle identity scope. Must be bundle-v1:sha256:\u003c64 lowercase hex\u003e. Required when run_id is omitted. When run_id identifies an existing run, optional bundle_hash must match that run's canonical runs.bundle_hash or the method fails closed with BUNDLE_MISMATCH. In DB-loaded RuntimeContextManager mode, the resolved hash must select a loaded BundleContext or the method fails closed with BUNDLE_UNAVAILABLE. cannot be combined with legacy bundle_ref; malformed or combined inputs fail closed with UNSUPPORTED_BUNDLE_HASH.",
           "schema": {
             "$ref": "#/components/schemas/BundleHash"
           }
@@ -5999,12 +5999,12 @@
     {
       "name": "run.start",
       "deprecated": true,
-      "description": "Deprecated wrapper over event.publish retained for older Builder/API callers. New clients should call event.publish directly.\nStart a run by injecting an event into the runtime bus. Create-new-work admission follows event.publish bundle_hash semantics: if no existing run row provides bundle context, bundle_hash is required. If run_id is supplied but no run row exists, the call is still create-new-work and run_id alone is not bundle scope. If caller bundle_hash and existing run context disagree, the method fails closed with BUNDLE_MISMATCH. Until RuntimeContextManager lands, the resolved bundle_hash must match the single active runtime source fact or the method fails closed with BUNDLE_UNAVAILABLE. Legacy bundle_ref.fingerprint is deprecated transition input only and cannot be combined with bundle_hash.\n",
+      "description": "Deprecated wrapper over event.publish retained for older Builder/API callers. New clients should call event.publish directly.\nStart a run by injecting an event into the runtime bus. Create-new-work admission follows event.publish bundle_hash semantics: if no existing run row provides bundle context, bundle_hash is required. If run_id is supplied but no run row exists, the call is still create-new-work and run_id alone is not bundle scope. If caller bundle_hash and existing run context disagree, the method fails closed with BUNDLE_MISMATCH. In DB-loaded RuntimeContextManager mode, the resolved bundle_hash must select a loaded BundleContext or the method fails closed with BUNDLE_UNAVAILABLE. Legacy bundle_ref.fingerprint is deprecated transition input only and cannot be combined with bundle_hash.\n",
       "params": [
         {
           "name": "bundle_hash",
           "required": false,
-          "description": "Canonical #1001 bundle identity scope. Must be bundle-v1:sha256:\u003c64 lowercase hex\u003e. Required when no existing run row supplies bundle context. When run_id identifies an existing run, optional bundle_hash must match that run's canonical runs.bundle_hash or the method fails closed with BUNDLE_MISMATCH. Until RuntimeContextManager lands, the resolved hash must match the single active runtime source fact or the method fails closed with BUNDLE_UNAVAILABLE; cannot be combined with legacy bundle_ref; malformed or combined inputs fail closed with UNSUPPORTED_BUNDLE_HASH.",
+          "description": "Canonical #1001 bundle identity scope. Must be bundle-v1:sha256:\u003c64 lowercase hex\u003e. Required when no existing run row supplies bundle context. When run_id identifies an existing run, optional bundle_hash must match that run's canonical runs.bundle_hash or the method fails closed with BUNDLE_MISMATCH. In DB-loaded RuntimeContextManager mode, the resolved hash must select a loaded BundleContext or the method fails closed with BUNDLE_UNAVAILABLE; cannot be combined with legacy bundle_ref; malformed or combined inputs fail closed with UNSUPPORTED_BUNDLE_HASH.",
           "schema": {
             "$ref": "#/components/schemas/BundleHash"
           }

@@ -170,21 +170,22 @@ func executeOperatorEventPublication(
 		if err != nil {
 			return store.APIIdempotencyCompletion{}, err
 		}
-		ctx, params, err = resolveEventPublicationBundleScope(ctx, opts, params, bundleIdentity, cfg)
+		selectedOpts := opts
+		ctx, selectedOpts, params, err = resolveEventPublicationBundleScope(ctx, opts, params, bundleIdentity, cfg)
 		if err != nil {
 			return store.APIIdempotencyCompletion{}, err
 		}
 		if !cfg.rootInputOnly {
-			resolvedEventName, err := resolveEventPublicationEventName(opts.Source, params.EventName)
+			resolvedEventName, err := resolveEventPublicationEventName(selectedOpts.Source, params.EventName)
 			if err != nil {
 				return store.APIIdempotencyCompletion{}, err
 			}
 			params.EventName = resolvedEventName
 		}
-		if err := validateEventPublication(ctx, opts, params, cfg); err != nil {
+		if err := validateEventPublication(ctx, selectedOpts, params, cfg); err != nil {
 			return store.APIIdempotencyCompletion{}, err
 		}
-		if err := opts.Events.Publish(ctx, events.Event{
+		if err := selectedOpts.Events.Publish(ctx, events.Event{
 			ID:            params.EventID,
 			RunID:         params.RunID,
 			ParentEventID: params.SourceEventID,
@@ -198,7 +199,7 @@ func executeOperatorEventPublication(
 			}
 			return store.APIIdempotencyCompletion{}, runStartPublishError(params.EventName, err)
 		}
-		result, resourceID, err := cfg.buildCompletion(ctx, opts, params)
+		result, resourceID, err := cfg.buildCompletion(ctx, selectedOpts, params)
 		if err != nil {
 			return store.APIIdempotencyCompletion{}, err
 		}

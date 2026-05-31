@@ -25,21 +25,33 @@ func resolveEventPublicationBundleScope(
 	params eventPublicationParams,
 	identity bundleIdentityParam,
 	cfg eventPublicationConfig,
-) (context.Context, eventPublicationParams, error) {
+) (context.Context, OperatorReadOptions, eventPublicationParams, error) {
 	requestedHash := strings.TrimSpace(identity.BundleHash)
-	currentFact, hasCurrentFact := eventPublicationRuntimeSourceFact(ctx, opts.Events)
 	runAvailability, hasRunContext, err := eventPublicationRunBundleContext(ctx, opts, params, cfg)
 	if err != nil {
-		return ctx, params, err
+		return ctx, opts, params, err
 	}
 
 	resolvedHash := requestedHash
 	if hasRunContext {
 		if requestedHash != "" && runAvailability.BundleHash != "" && requestedHash != runAvailability.BundleHash {
-			return ctx, params, NewApplicationError(BundleMismatchCode, false, bundleMismatchDetails(params.RunID, requestedHash, runAvailability))
+			return ctx, opts, params, NewApplicationError(BundleMismatchCode, false, bundleMismatchDetails(params.RunID, requestedHash, runAvailability))
+		}
+		if runtimeContextManager(opts) != nil {
+			var selectedOpts OperatorReadOptions
+			ctx, selectedOpts, runAvailability, err = runtimeBundleContextByRun(ctx, opts, params.RunID)
+			if err != nil {
+				return ctx, opts, params, err
+			}
+			currentFact, _ := runtimecorrelation.BundleSourceFactFromContext(ctx)
+			currentFact = currentFact.Normalized()
+			params.BundleHash = runAvailability.BundleHash
+			params.BundleSource = currentFact.BundleSource
+			params.BundleFingerprint = currentFact.BundleFingerprint
+			return ctx, selectedOpts, params, nil
 		}
 		if err := eventPublicationRunBundleAvailable(runAvailability); err != nil {
-			return ctx, params, err
+			return ctx, opts, params, err
 		}
 		resolvedHash = runAvailability.BundleHash
 		params.BundleSource = runAvailability.BundleSource
@@ -52,10 +64,32 @@ func resolveEventPublicationBundleScope(
 		if params.RunIDProvided {
 			details["run_id"] = strings.TrimSpace(params.RunID)
 		}
-		return ctx, params, NewApplicationError(BundleScopeRequiredCode, false, details)
+		return ctx, opts, params, NewApplicationError(BundleScopeRequiredCode, false, details)
 	}
+	if runtimeContextManager(opts) != nil {
+		var selectedOpts OperatorReadOptions
+		var contextDef any
+		ctx, selectedOpts, contextDef, err = runtimeBundleContextByHash(ctx, opts, resolvedHash, params.RunID)
+		if err != nil {
+			return ctx, opts, params, err
+		}
+		if contextDef == nil {
+			return ctx, opts, params, NewApplicationError(BundleUnavailableCode, false, map[string]any{
+				"bundle_hash": resolvedHash,
+				"run_id":      strings.TrimSpace(params.RunID),
+				"cause":       "runtime_context_not_loaded",
+			})
+		}
+		currentFact, _ := runtimecorrelation.BundleSourceFactFromContext(ctx)
+		currentFact = currentFact.Normalized()
+		params.BundleHash = resolvedHash
+		params.BundleSource = currentFact.BundleSource
+		params.BundleFingerprint = currentFact.BundleFingerprint
+		return ctx, selectedOpts, params, nil
+	}
+	currentFact, hasCurrentFact := eventPublicationRuntimeSourceFact(ctx, opts.Events)
 	if !hasCurrentFact || strings.TrimSpace(currentFact.BundleHash) == "" {
-		return ctx, params, NewApplicationError(BundleUnavailableCode, false, map[string]any{
+		return ctx, opts, params, NewApplicationError(BundleUnavailableCode, false, map[string]any{
 			"bundle_hash": resolvedHash,
 			"run_id":      strings.TrimSpace(params.RunID),
 			"cause":       "runtime_source_fact_missing",
@@ -63,7 +97,7 @@ func resolveEventPublicationBundleScope(
 	}
 	currentFact = currentFact.Normalized()
 	if currentFact.BundleHash != resolvedHash {
-		return ctx, params, NewApplicationError(BundleUnavailableCode, false, map[string]any{
+		return ctx, opts, params, NewApplicationError(BundleUnavailableCode, false, map[string]any{
 			"bundle_hash":        resolvedHash,
 			"run_id":             strings.TrimSpace(params.RunID),
 			"active_bundle_hash": currentFact.BundleHash,
@@ -74,7 +108,7 @@ func resolveEventPublicationBundleScope(
 	params.BundleHash = resolvedHash
 	params.BundleSource = currentFact.BundleSource
 	params.BundleFingerprint = currentFact.BundleFingerprint
-	return runtimecorrelation.WithBundleSourceFact(ctx, currentFact), params, nil
+	return runtimecorrelation.WithBundleSourceFact(ctx, currentFact), opts, params, nil
 }
 
 func eventPublicationRuntimeSourceFact(ctx context.Context, publisher EventPublisher) (runtimecorrelation.BundleSourceFact, bool) {

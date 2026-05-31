@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	swruntime "swarm/internal/runtime"
 	"swarm/internal/runtime/bundledelete"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/runtime/semanticview"
@@ -85,6 +86,7 @@ type OperatorReadOptions struct {
 	Events                EventPublisher
 	RunControl            RunControlController
 	RuntimeIngress        RuntimeIngressController
+	RuntimeContexts       *swruntime.RuntimeContextManager
 	ResetCoordinator      DestructiveResetCoordinator
 	ResetQuiescer         DestructiveResetQuiescer
 	ResetCleaner          DestructiveResetCleaner
