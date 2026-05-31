@@ -13,7 +13,9 @@ import (
 	"gopkg.in/yaml.v3"
 	"swarm/internal/events"
 	"swarm/internal/platform"
+	runtimepkg "swarm/internal/runtime"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimecorrelation "swarm/internal/runtime/correlation"
 	storepkg "swarm/internal/store"
 )
 
@@ -113,23 +115,35 @@ func newSQLiteObservabilitySurfaceFixture(t *testing.T, ctx context.Context) sql
 		t.Fatalf("MarkEventDeliveryInProgress: %v", err)
 	}
 
-	logID := uuid.NewString()
-	if err := sqliteStore.AppendEvent(ctx, events.Event{
-		ID:          logID,
-		RunID:       runID,
-		Type:        events.EventType("platform.runtime_log"),
-		SourceAgent: "runtime",
-		Payload:     json.RawMessage(`{"log_level":"warn","message":"runtime warning","details":{"component":"scheduler","session_id":"session-1"}}`),
-		CreatedAt:   now.Add(time.Second),
+	logger := runtimepkg.NewRuntimeLogger(sqliteStore)
+	logCtx := runtimecorrelation.WithRunID(ctx, runID)
+	if err := logger.Log(logCtx, runtimepkg.RuntimeLogEntry{
+		Level:     "warn",
+		Message:   "runtime warning",
+		Component: "scheduler",
+		Action:    "supported_surface",
+		SessionID: "session-1",
 	}); err != nil {
-		t.Fatalf("AppendEvent runtime log: %v", err)
+		t.Fatalf("RuntimeLogger.Log sqlite runtime log: %v", err)
+	}
+	logs, err := sqliteStore.ListOperatorRuntimeLogs(ctx, storepkg.OperatorRuntimeLogListOptions{
+		RunID:     runID,
+		Component: "scheduler",
+		Level:     "warn",
+		Limit:     10,
+	})
+	if err != nil {
+		t.Fatalf("ListOperatorRuntimeLogs after logger write: %v", err)
+	}
+	if len(logs.Logs) != 1 {
+		t.Fatalf("logger-written runtime logs = %#v, want one", logs.Logs)
 	}
 
 	return sqliteObservabilitySurfaceFixture{
 		store:   sqliteStore,
 		runID:   runID,
 		eventID: eventID,
-		logID:   logID,
+		logID:   logs.Logs[0].LogID,
 		now:     now,
 	}
 }

@@ -2529,6 +2529,7 @@ func installServeRuntimePostgresTestStores(t *testing.T, workspaceFactory func()
 			Postgres:            runtimePG,
 			SQLDB:               runtimePG.DB,
 			RuntimeSQLDB:        runtimePG.DB,
+			RuntimeLogStore:     runtimePG,
 			SchemaBootstrapper:  runtimePG,
 			EventStore:          runtimePG,
 			PipelineStore:       runtimepipeline.NewWorkflowInstanceStore(runtimePG.DB),
@@ -5520,6 +5521,8 @@ func TestRunServeRuntimeVerboseEmitsPlatformSpecBootSequence(t *testing.T) {
 		return storeBundle{
 			Postgres:           runtimePG,
 			SQLDB:              runtimePG.DB,
+			RuntimeSQLDB:       runtimePG.DB,
+			RuntimeLogStore:    runtimePG,
 			SchemaBootstrapper: runtimePG,
 			EventStore:         runtimePG,
 			SessionRegistry:    sessions.NewPostgresRegistry(runtimePG.DB, cfg.LLM.Session.LockTTL),
@@ -5611,6 +5614,8 @@ func TestRunServeRuntimeListenerBindFailuresExitBeforeReadiness(t *testing.T) {
 				return storeBundle{
 					Postgres:           runtimePG,
 					SQLDB:              runtimePG.DB,
+					RuntimeSQLDB:       runtimePG.DB,
+					RuntimeLogStore:    runtimePG,
 					SchemaBootstrapper: runtimePG,
 					EventStore:         runtimePG,
 					SessionRegistry:    sessions.NewPostgresRegistry(runtimePG.DB, cfg.LLM.Session.LockTTL),
@@ -5776,6 +5781,8 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 		return storeBundle{
 			Postgres:           runtimePG,
 			SQLDB:              runtimePG.DB,
+			RuntimeSQLDB:       runtimePG.DB,
+			RuntimeLogStore:    runtimePG,
 			SchemaBootstrapper: runtimePG,
 			EventStore:         runtimePG,
 			SessionRegistry:    sessions.NewPostgresRegistry(runtimePG.DB, cfg.LLM.Session.LockTTL),

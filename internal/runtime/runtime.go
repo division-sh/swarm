@@ -42,6 +42,7 @@ type Stores struct {
 	SQLDB               *sql.DB
 	ConstructionBlocker string
 	EventStore          runtimebus.EventStore
+	RuntimeLogStore     RuntimeLogPersistence
 	PipelineStore       *runtimepipeline.WorkflowInstanceStore
 	SessionRegistry     sessions.Registry
 	ConversationStore   llm.ConversationPersistence
@@ -55,10 +56,6 @@ type Stores struct {
 	InboundStore        InboundPersistence
 	RuntimeIngressStore runtimeingress.Store
 	TurnStore           llm.TurnPersistence
-}
-
-type runtimeLogSchemaCapabilityProvider interface {
-	CanonicalRuntimeLogCapability(context.Context) (bool, bool, error)
 }
 
 type eventReceiptSchemaCapabilityProvider interface {
@@ -96,7 +93,6 @@ type validatedRuntimeDeps struct {
 	Credentials              runtimecredentials.Store
 	Authority                runtimeauthority.Provider
 	EmitRegistry             *runtimetools.EmitRegistry
-	RuntimeLogCapabilities   runtimeLogCapabilityResolver
 	EventReceiptCapability   func(context.Context) (bool, error)
 	TrimmedBundleFingerprint string
 	BundleSourceFact         runtimecorrelation.BundleSourceFact
@@ -334,7 +330,6 @@ func (deps RuntimeDeps) validated() (validatedRuntimeDeps, error) {
 		Credentials:              credentials,
 		Authority:                authorityProvider,
 		EmitRegistry:             emitRegistry,
-		RuntimeLogCapabilities:   runtimeLogSchemaCapabilities(stores),
 		EventReceiptCapability:   canonicalEventReceiptCapabilities(stores),
 		TrimmedBundleFingerprint: strings.TrimSpace(opts.BundleFingerprint),
 		BundleSourceFact:         opts.BundleSourceFact.Normalized(),
@@ -380,8 +375,8 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		Credentials:    boot.Credentials,
 	}
 
-	if stores.SQLDB != nil {
-		rt.Logger = NewRuntimeLogger(stores.SQLDB, boot.RuntimeLogCapabilities)
+	if stores.RuntimeLogStore != nil {
+		rt.Logger = NewRuntimeLogger(stores.RuntimeLogStore)
 	}
 	payloadValidator := boot.payloadValidator(rt.Logger)
 	boot.bindPayloadValidator(payloadValidator)
@@ -597,22 +592,6 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	}
 
 	return rt, nil
-}
-
-func runtimeLogSchemaCapabilities(stores Stores) runtimeLogCapabilityResolver {
-	candidates := []any{
-		stores.EventStore,
-		stores.ManagerStore,
-		stores.ScheduleStore,
-		stores.MailboxStore,
-		stores.InboundStore,
-	}
-	for _, candidate := range candidates {
-		if provider, ok := candidate.(runtimeLogSchemaCapabilityProvider); ok && provider != nil {
-			return provider
-		}
-	}
-	return nil
 }
 
 func canonicalEventReceiptCapabilities(stores Stores) func(context.Context) (bool, error) {

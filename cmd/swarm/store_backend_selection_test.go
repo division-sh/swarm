@@ -181,7 +181,7 @@ func TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore(t *testing.T) {
 		t.Fatalf("buildStores(sqlite): %v", err)
 	}
 	t.Cleanup(func() { closeDB(stores.SQLDB) })
-	if stores.SQLDB == nil || stores.SchemaBootstrapper == nil || stores.EventStore == nil || stores.PipelineStore == nil || stores.SessionRegistry == nil || stores.ConversationStore == nil || stores.ManagerStore == nil || stores.ScheduleStore == nil || stores.MailboxStore == nil || stores.BudgetSpendStore == nil || stores.MailboxAPIStore == nil || stores.ObservabilityStore == nil || stores.RuntimeIngressStore == nil || stores.IdempotencyStore == nil || stores.TurnStore == nil || stores.StartupOwnership == nil {
+	if stores.SQLDB == nil || stores.RuntimeLogStore == nil || stores.SchemaBootstrapper == nil || stores.EventStore == nil || stores.PipelineStore == nil || stores.SessionRegistry == nil || stores.ConversationStore == nil || stores.ManagerStore == nil || stores.ScheduleStore == nil || stores.MailboxStore == nil || stores.BudgetSpendStore == nil || stores.MailboxAPIStore == nil || stores.ObservabilityStore == nil || stores.RuntimeIngressStore == nil || stores.IdempotencyStore == nil || stores.TurnStore == nil || stores.StartupOwnership == nil {
 		t.Fatalf("sqlite store bundle missing selected core owners: %#v", stores)
 	}
 	if stores.Postgres != nil {
@@ -191,8 +191,11 @@ func TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore(t *testing.T) {
 	if runtimeStores.SQLDB != nil {
 		t.Fatalf("sqlite runtimeStores SQLDB = %#v, want nil raw runtime SQL handle", runtimeStores.SQLDB)
 	}
-	if !strings.Contains(runtimeStores.ConstructionBlocker, "#1150 runtime diagnostics/logging") {
-		t.Fatalf("sqlite runtimeStores ConstructionBlocker = %q, want #1150 diagnostics fail-closed blocker", runtimeStores.ConstructionBlocker)
+	if runtimeStores.RuntimeLogStore == nil {
+		t.Fatal("sqlite runtimeStores RuntimeLogStore missing backend-neutral runtime diagnostics owner")
+	}
+	if runtimeStores.ConstructionBlocker != "" {
+		t.Fatalf("sqlite runtimeStores ConstructionBlocker = %q, want no #1150 diagnostics blocker", runtimeStores.ConstructionBlocker)
 	}
 	if strings.Contains(runtimeStores.ConstructionBlocker, "pipeline coordination/background nodes") {
 		t.Fatalf("sqlite runtimeStores ConstructionBlocker = %q, want #1147 pipeline/background owner removed from residual blocker", runtimeStores.ConstructionBlocker)
@@ -217,7 +220,7 @@ func TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore(t *testing.T) {
 	}
 }
 
-func TestBuildStoresSQLiteRuntimeFailsClosedUntilRawSQLConsumersSplit(t *testing.T) {
+func TestBuildStoresSQLiteRuntimeNoLongerFailsClosedOnDiagnosticsOwner(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "dev.db")
 	stores, err := buildStores(ctx, storebackend.Selection{
@@ -230,16 +233,29 @@ func TestBuildStoresSQLiteRuntimeFailsClosedUntilRawSQLConsumersSplit(t *testing
 		t.Fatalf("buildStores(sqlite): %v", err)
 	}
 	t.Cleanup(func() { closeDB(stores.SQLDB) })
+	runtimeStores := stores.runtimeStores()
+	if runtimeStores.SQLDB != nil {
+		t.Fatalf("sqlite runtimeStores SQLDB = %#v, want nil raw runtime SQL handle", runtimeStores.SQLDB)
+	}
+	if runtimeStores.RuntimeLogStore == nil {
+		t.Fatal("sqlite runtimeStores RuntimeLogStore missing backend-neutral runtime diagnostics owner")
+	}
+	if runtimeStores.ConstructionBlocker != "" {
+		t.Fatalf("sqlite runtimeStores ConstructionBlocker = %q, want empty after #1150 owner", runtimeStores.ConstructionBlocker)
+	}
 	_, err = runtime.NewRuntime(ctx, runtime.RuntimeDeps{
 		Config:  &config.Config{},
-		Stores:  stores.runtimeStores(),
+		Stores:  runtimeStores,
 		Options: runtime.RuntimeOptions{SelfCheck: true},
 	})
 	if err == nil {
-		t.Fatal("NewRuntime(sqlite) succeeded, want fail-closed blocker while #1150 diagnostics remains split")
+		t.Fatal("NewRuntime(sqlite) succeeded without workflow module, want boot validation error")
 	}
-	if !strings.Contains(err.Error(), "#1150 runtime diagnostics/logging") {
-		t.Fatalf("NewRuntime(sqlite) error = %v, want #1150 diagnostics blocker", err)
+	if strings.Contains(err.Error(), "#1150 runtime diagnostics/logging") {
+		t.Fatalf("NewRuntime(sqlite) error = %v, want #1150 diagnostics blocker removed", err)
+	}
+	if !strings.Contains(err.Error(), "workflow module is required") {
+		t.Fatalf("NewRuntime(sqlite) error = %v, want later workflow-module validation after #1150 owner", err)
 	}
 }
 
