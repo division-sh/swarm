@@ -22,6 +22,8 @@ type RunForkMaterializeRequest struct {
 	SourceRunID       string
 	At                string
 	ContractSelection *RunForkContractSelection
+	BundleHash        string
+	BundleSource      string
 }
 
 type RunForkMaterialization struct {
@@ -134,7 +136,10 @@ func (s *PostgresStore) MaterializeRunFork(ctx context.Context, req RunForkMater
 		return RunForkMaterialization{}, err
 	}
 	now := time.Now().UTC()
-	if err := insertRunForkRun(ctx, tx, catalog, forkRunID, plan.SourceRunID, plan.ForkPoint.EventID, len(plan.Entities), now); err != nil {
+	if err := insertRunForkRun(ctx, tx, catalog, forkRunID, plan.SourceRunID, plan.ForkPoint.EventID, len(plan.Entities), now, runForkBundleInsertIdentity{
+		BundleHash:   req.BundleHash,
+		BundleSource: req.BundleSource,
+	}); err != nil {
 		return RunForkMaterialization{}, fmt.Errorf("insert fork run: %w", err)
 	}
 
@@ -194,14 +199,31 @@ func ensureRunForkNotAlreadyMaterialized(ctx context.Context, tx *sql.Tx, forkRu
 	return fmt.Errorf("fork materialization already exists for source run %s at event %s: %s", sourceRunID, forkEventID, existing)
 }
 
-func insertRunForkRun(ctx context.Context, tx *sql.Tx, catalog schemaColumnCatalog, forkRunID, sourceRunID, forkEventID string, entityCount int, startedAt time.Time) error {
+type runForkBundleInsertIdentity struct {
+	BundleHash   string
+	BundleSource string
+}
+
+func insertRunForkRun(ctx context.Context, tx *sql.Tx, catalog schemaColumnCatalog, forkRunID, sourceRunID, forkEventID string, entityCount int, startedAt time.Time, identity runForkBundleInsertIdentity) error {
+	bundleHash := strings.TrimSpace(identity.BundleHash)
+	bundleSource, err := storerunlifecycle.CanonicalBundleSource(identity.BundleSource)
+	if err != nil {
+		return err
+	}
+	if bundleSource != storerunlifecycle.BundleSourceLegacy && bundleHash == "" {
+		return fmt.Errorf("fork run canonical bundle identity requires bundle_hash for bundle_source=%s", bundleSource)
+	}
+	if bundleSource == storerunlifecycle.BundleSourceLegacy && bundleHash != "" {
+		return fmt.Errorf("fork run legacy bundle identity cannot carry canonical bundle_hash")
+	}
 	opts := storerunlifecycle.InsertForkOptions{
 		HasBundleHashCol:        catalog.hasColumns("runs", "bundle_hash"),
 		HasBundleSourceCol:      catalog.hasColumns("runs", "bundle_source"),
 		HasBundleFingerprintCol: catalog.hasColumns("runs", "bundle_fingerprint"),
-		BundleSource:            storerunlifecycle.BundleSourceLegacy,
+		BundleHash:              bundleHash,
+		BundleSource:            bundleSource,
 	}
-	if catalog.hasColumns("runs", "bundle_fingerprint") {
+	if bundleSource == storerunlifecycle.BundleSourceLegacy && catalog.hasColumns("runs", "bundle_fingerprint") {
 		fingerprint, err := runForkBundleFingerprintForInsert(ctx, tx, sourceRunID)
 		if err != nil {
 			return err

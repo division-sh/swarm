@@ -159,6 +159,32 @@ func TestOperatorRunForkHandlersMapSourceAndEventErrors(t *testing.T) {
 			t.Fatalf("run.fork default point details = %#v", details)
 		}
 	})
+
+	t.Run("executor bundle data integrity", func(t *testing.T) {
+		executor := &recordingRunForkExecutor{err: errors.New(runbundle.CodeBundleDataIntegrityError + ": corrupt persisted bundle catalog bytes")}
+		handler := runForkTestHandler(t, &recordingRunForkAvailability{rows: map[string]runbundle.Availability{runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, runForkTestBundleHash)}}, executor)
+		resp := rpcCall(t, handler, fmt.Sprintf(
+			`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"fork_event_id":%q,"idempotency_key":"integrity-error"}}`,
+			runForkTestSourceRunID,
+			runForkTestEventID,
+		))
+		if resp.Error == nil || asMap(t, resp.Error.Data)["code"] != BundleDataIntegrityErrorCode {
+			t.Fatalf("run.fork integrity error = %#v, want %s", resp.Error, BundleDataIntegrityErrorCode)
+		}
+	})
+
+	t.Run("executor source hash mismatch", func(t *testing.T) {
+		executor := &recordingRunForkExecutor{err: errors.New("DB-loaded selected-contract source hash mismatch: request bundle-v1:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc source " + runForkTestBundleHash)}
+		handler := runForkTestHandler(t, &recordingRunForkAvailability{rows: map[string]runbundle.Availability{runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, runForkTestBundleHash)}}, executor)
+		resp := rpcCall(t, handler, fmt.Sprintf(
+			`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"fork_event_id":%q,"idempotency_key":"hash-mismatch"}}`,
+			runForkTestSourceRunID,
+			runForkTestEventID,
+		))
+		if resp.Error == nil || asMap(t, resp.Error.Data)["code"] != UnsupportedBundleHashForkCode {
+			t.Fatalf("run.fork hash mismatch error = %#v, want %s", resp.Error, UnsupportedBundleHashForkCode)
+		}
+	})
 }
 
 func runForkTestHandler(t *testing.T, availability RunForkAvailabilityStore, executor RunForkExecutor) *Handler {

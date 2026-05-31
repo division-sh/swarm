@@ -24,6 +24,8 @@ type RunForkSelectedContractExecutionMaterializeRequest struct {
 	SourceRunID       string
 	At                string
 	ContractSelection RunForkContractSelection
+	BundleHash        string
+	BundleSource      string
 }
 
 type RunForkSelectedContractExecutionActivateRequest struct {
@@ -207,7 +209,10 @@ func (s *PostgresStore) MaterializeRunForkForSelectedContractExecution(ctx conte
 		return RunForkMaterialization{}, err
 	}
 	now := time.Now().UTC()
-	if err := insertRunForkRun(ctx, tx, catalog, forkRunID, plan.SourceRunID, plan.ForkPoint.EventID, len(plan.Entities), now); err != nil {
+	if err := insertRunForkRun(ctx, tx, catalog, forkRunID, plan.SourceRunID, plan.ForkPoint.EventID, len(plan.Entities), now, runForkBundleInsertIdentity{
+		BundleHash:   req.BundleHash,
+		BundleSource: req.BundleSource,
+	}); err != nil {
 		return RunForkMaterialization{}, fmt.Errorf("insert selected-contract fork run: %w", err)
 	}
 

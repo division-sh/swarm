@@ -2,6 +2,7 @@ package runforkexecution
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/store"
+	"swarm/internal/store/runbundle"
 )
 
 type SelectedContractBindingReader interface {
@@ -22,10 +24,22 @@ type SelectedContractSourceLoader interface {
 	LoadRunForkSelectedContractSource(context.Context, store.RunForkContractSelection) (LoadedSelectedContractSource, error)
 }
 
+type SelectedContractSourceRequestLoader interface {
+	LoadRunForkSelectedContractSourceForRequest(context.Context, SelectedContractSourceLoadRequest) (LoadedSelectedContractSource, error)
+}
+
+type SelectedContractSourceLoadRequest struct {
+	SourceRunID string
+	BundleHash  string
+	Selection   store.RunForkContractSelection
+}
+
 type LoadedSelectedContractSource struct {
-	Selection store.RunForkContractSelection
-	Source    semanticview.Source
-	Module    runtimepipeline.WorkflowModule
+	Selection  store.RunForkContractSelection
+	Source     semanticview.Source
+	Module     runtimepipeline.WorkflowModule
+	BundleHash string
+	Cleanup    func() error
 }
 
 type selectedContractWorkflowModule struct {
@@ -59,6 +73,16 @@ func (m selectedContractWorkflowModule) ActionRegistry() runtimepipeline.ActionR
 type ContractBundleSourceLoader struct {
 	RepoRoot         string
 	PlatformSpecPath string
+}
+
+type BundleCatalogSelectedContractSourceStore interface {
+	LoadRunBundleAvailability(context.Context, string) (runbundle.Availability, error)
+	LoadBundleCatalogRuntimeRecord(context.Context, string) (store.BundleCatalogRuntimeRecord, error)
+}
+
+type BundleCatalogSelectedContractSourceLoader struct {
+	RepoRoot string
+	Store    BundleCatalogSelectedContractSourceStore
 }
 
 func (l ContractBundleSourceLoader) LoadRunForkSelectedContractSource(ctx context.Context, selection store.RunForkContractSelection) (LoadedSelectedContractSource, error) {
@@ -111,8 +135,113 @@ func (l ContractBundleSourceLoader) LoadRunForkSelectedContractSource(ctx contex
 	}, nil
 }
 
+func (l BundleCatalogSelectedContractSourceLoader) LoadRunForkSelectedContractSource(ctx context.Context, selection store.RunForkContractSelection) (LoadedSelectedContractSource, error) {
+	return l.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{Selection: selection})
+}
+
+func (l BundleCatalogSelectedContractSourceLoader) LoadRunForkSelectedContractSourceForRequest(ctx context.Context, req SelectedContractSourceLoadRequest) (LoadedSelectedContractSource, error) {
+	if err := ctx.Err(); err != nil {
+		return LoadedSelectedContractSource{}, err
+	}
+	selection := req.Selection
+	if err := validateSelectedSourceLoaderSelection(selection); err != nil {
+		return LoadedSelectedContractSource{}, err
+	}
+	if l.Store == nil {
+		return LoadedSelectedContractSource{}, fmt.Errorf("DB-loaded selected-contract source loader requires bundle catalog store")
+	}
+	sourceRunID := strings.TrimSpace(req.SourceRunID)
+	if sourceRunID == "" {
+		return LoadedSelectedContractSource{}, fmt.Errorf("DB-loaded selected-contract source loader requires source run_id")
+	}
+	availability, err := l.Store.LoadRunBundleAvailability(ctx, sourceRunID)
+	if err != nil {
+		return LoadedSelectedContractSource{}, err
+	}
+	if availability.DataIntegrityError() {
+		return LoadedSelectedContractSource{}, fmt.Errorf("%s: %s", runbundle.CodeBundleDataIntegrityError, availability.DetailString())
+	}
+	if !availability.Available() {
+		return LoadedSelectedContractSource{}, fmt.Errorf("%s: %s", runbundle.CodeBundleUnavailable, availability.DetailString())
+	}
+	bundleHash := strings.TrimSpace(req.BundleHash)
+	if bundleHash == "" {
+		bundleHash = strings.TrimSpace(availability.BundleHash)
+	}
+	if bundleHash == "" {
+		return LoadedSelectedContractSource{}, fmt.Errorf("%s: source run %s has no canonical bundle_hash", runbundle.CodeBundleDataIntegrityError, sourceRunID)
+	}
+	if bundleHash != strings.TrimSpace(availability.BundleHash) {
+		return LoadedSelectedContractSource{}, fmt.Errorf("DB-loaded selected-contract source hash mismatch: request %s source %s", bundleHash, availability.BundleHash)
+	}
+	record, err := l.Store.LoadBundleCatalogRuntimeRecord(ctx, bundleHash)
+	if errors.Is(err, store.ErrBundleNotFound) {
+		return LoadedSelectedContractSource{}, fmt.Errorf("%s: source run %s bundle row missing for %s", runbundle.CodeBundleDataIntegrityError, sourceRunID, bundleHash)
+	}
+	if err != nil {
+		return LoadedSelectedContractSource{}, err
+	}
+	runtimeSource, err := runtimecontracts.LoadBundleCatalogRuntimeSource(strings.TrimSpace(l.RepoRoot), runtimecontracts.BundleCatalogRuntimeLoadRequest{
+		BundleHash:  bundleHash,
+		ContentYAML: record.ContentYAML,
+		DataBlob:    record.DataBlob,
+	})
+	if err != nil {
+		return LoadedSelectedContractSource{}, fmt.Errorf("%s: load DB-backed selected-contract source %s: %w", runbundle.CodeBundleDataIntegrityError, bundleHash, err)
+	}
+	source := semanticview.Wrap(runtimeSource.Bundle)
+	if strings.TrimSpace(selection.WorkflowName) == "" {
+		selection.WorkflowName = strings.TrimSpace(source.WorkflowName())
+	}
+	if strings.TrimSpace(selection.WorkflowVersion) == "" {
+		selection.WorkflowVersion = strings.TrimSpace(source.WorkflowVersion())
+	}
+	if err := validateSelectedContractSelection("DB-loaded selected source loader", selection); err != nil {
+		_ = runtimeSource.Cleanup()
+		return LoadedSelectedContractSource{}, err
+	}
+	workflow, err := runtimepipeline.LoadWorkflowDefinition(source)
+	if err != nil {
+		_ = runtimeSource.Cleanup()
+		return LoadedSelectedContractSource{}, err
+	}
+	nodes, err := runtimepipeline.LoadWorkflowNodes(source)
+	if err != nil {
+		_ = runtimeSource.Cleanup()
+		return LoadedSelectedContractSource{}, err
+	}
+	return LoadedSelectedContractSource{
+		Selection:  selection,
+		Source:     source,
+		BundleHash: bundleHash,
+		Module: selectedContractWorkflowModule{
+			source:         source,
+			workflow:       workflow,
+			nodes:          nodes,
+			guardRegistry:  runtimepipeline.NewContractGuardRegistry(source),
+			actionRegistry: runtimepipeline.NewContractActionRegistry(source),
+		},
+		Cleanup: runtimeSource.Cleanup,
+	}, nil
+}
+
+func loadRunForkSelectedContractSource(ctx context.Context, loader SelectedContractSourceLoader, req SelectedContractSourceLoadRequest) (LoadedSelectedContractSource, error) {
+	if requestLoader, ok := loader.(SelectedContractSourceRequestLoader); ok {
+		return requestLoader.LoadRunForkSelectedContractSourceForRequest(ctx, req)
+	}
+	return loader.LoadRunForkSelectedContractSource(ctx, req.Selection)
+}
+
+func cleanupLoadedSelectedContractSource(source LoadedSelectedContractSource) {
+	if source.Cleanup != nil {
+		_ = source.Cleanup()
+	}
+}
+
 type SelectedContractExecutionAdmissionRequest struct {
 	ForkRunID         string
+	SourceRunID       string
+	BundleHash        string
 	BindingReader     SelectedContractBindingReader
 	SourceLoader      SelectedContractSourceLoader
 	FrontierAdmission store.RunForkContractFrontierAdmission
@@ -142,10 +271,15 @@ func BuildSelectedContractExecutionAdmission(ctx context.Context, req SelectedCo
 	if req.SourceLoader == nil {
 		return store.RunForkSelectedContractExecutionAdmission{}, fmt.Errorf("selected-contract execution admission requires selected source loader bound to %s", store.RunForkSelectedContractBindingOwner)
 	}
-	loadedSource, err := req.SourceLoader.LoadRunForkSelectedContractSource(ctx, binding.ContractSelection)
+	loadedSource, err := loadRunForkSelectedContractSource(ctx, req.SourceLoader, SelectedContractSourceLoadRequest{
+		SourceRunID: firstNonEmpty(req.SourceRunID, binding.SourceRunID),
+		BundleHash:  req.BundleHash,
+		Selection:   binding.ContractSelection,
+	})
 	if err != nil {
 		return store.RunForkSelectedContractExecutionAdmission{}, fmt.Errorf("load selected semantic source for execution admission: %w", err)
 	}
+	defer cleanupLoadedSelectedContractSource(loadedSource)
 	if err := validateSelectedContractExecutionSource(binding, loadedSource); err != nil {
 		return store.RunForkSelectedContractExecutionAdmission{}, err
 	}
@@ -202,6 +336,15 @@ func BuildSelectedContractExecutionAdmission(ctx context.Context, req SelectedCo
 		InvalidPaths:        append([]store.RunForkSelectedContractExecutionBoundary(nil), req.ExecutionModel.InvalidPaths...),
 		UnsupportedBlockers: unsupportedBlockers,
 	}, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 func validateSelectedContractExecutionBinding(forkRunID string, binding store.RunForkSelectedContractBinding) error {

@@ -64,10 +64,14 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		return SelectedContractActivationGateResult{}, fmt.Errorf("selected-contract activation gate requires selected source loader")
 	}
 
-	loadedSource, err := req.SourceLoader.LoadRunForkSelectedContractSource(ctx, binding.ContractSelection)
+	loadedSource, err := loadRunForkSelectedContractSource(ctx, req.SourceLoader, SelectedContractSourceLoadRequest{
+		SourceRunID: binding.SourceRunID,
+		Selection:   binding.ContractSelection,
+	})
 	if err != nil {
 		return SelectedContractActivationGateResult{}, fmt.Errorf("load selected semantic source for activation gate: %w", err)
 	}
+	defer cleanupLoadedSelectedContractSource(loadedSource)
 	plan, err := req.Store.PlanRunFork(ctx, store.RunForkPlanRequest{SourceRunID: binding.SourceRunID, At: binding.ForkEventID})
 	if err != nil {
 		return SelectedContractActivationGateResult{}, fmt.Errorf("plan selected-contract activation gate: %w", err)
@@ -111,10 +115,11 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 	if err != nil {
 		return SelectedContractActivationGateResult{}, err
 	}
-	admission, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
-		ForkRunID:         forkRunID,
-		BindingReader:     req.Store,
-		SourceLoader:      req.SourceLoader,
+		admission, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
+			ForkRunID:         forkRunID,
+			SourceRunID:       binding.SourceRunID,
+			BindingReader:     req.Store,
+			SourceLoader:      req.SourceLoader,
 		FrontierAdmission: frontier,
 		RouteAdmission:    routeAdmission,
 		RouteTopology:     routeTopology,

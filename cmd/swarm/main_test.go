@@ -2141,25 +2141,6 @@ func TestServeBundleMatchAdmissionRejectsDifferentPersistedActiveRunInDBLoadedMo
 	}
 }
 
-func TestDBLoadedServeRunForkAvailabilityFailsClosed(t *testing.T) {
-	hash := "bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111"
-	runID := uuid.NewString()
-
-	availability, err := (dbLoadedServeRunForkAvailability{bundleHash: hash}).LoadRunBundleAvailability(context.Background(), runID)
-	if err != nil {
-		t.Fatalf("LoadRunBundleAvailability: %v", err)
-	}
-	if !availability.Unavailable() {
-		t.Fatalf("availability = %#v, want unavailable", availability)
-	}
-	if availability.RunID != runID || availability.BundleHash != hash || availability.BundleSource != storerunlifecycle.BundleSourcePersisted {
-		t.Fatalf("availability = %#v, want DB-loaded persisted unavailable for %s", availability, hash)
-	}
-	if availability.Cause != "db_loaded_same_bundle_fork_split_to_1024" {
-		t.Fatalf("availability cause = %q", availability.Cause)
-	}
-}
-
 func TestLoadServeRuntimeBundleFromCatalogLoadsPersistedRuntimeSource(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}

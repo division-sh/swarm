@@ -21,7 +21,9 @@ import (
 	runtimellm "swarm/internal/runtime/llm"
 	runtimemanager "swarm/internal/runtime/manager"
 	"swarm/internal/runtime/runforkadmission"
+	"swarm/internal/runtime/semanticview"
 	"swarm/internal/store"
+	storerunlifecycle "swarm/internal/store/runlifecycle"
 	"swarm/internal/testutil"
 )
 
@@ -201,6 +203,86 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 	}
 	if sourceStatus != store.RunForkSourceFrozenStatus || forkStatus != store.RunForkActivatedStatus || forkEntityState == "" {
 		t.Fatalf("post execution = source:%s fork:%s entity:%s", sourceStatus, forkStatus, forkEntityState)
+	}
+}
+
+func TestExecuteSelectedContractRunForkLoadsDBBackedSourceAndStampsPersistedIdentity(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	ctx := context.Background()
+	repoRoot := runForkExecutionRepoRoot(t)
+	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
+	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, contractsRoot, platformSpecPath)
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	projection, err := runtimecontracts.BuildBundleCatalogProjection(bundle)
+	if err != nil {
+		t.Fatalf("BuildBundleCatalogProjection: %v", err)
+	}
+	if _, err := pg.UpsertBundleCatalog(ctx, store.BundleCatalogUpsert{
+		BundleHash:  projection.BundleHash,
+		ContentYAML: projection.ContentYAML,
+		ParsedJSON:  projection.ParsedJSON,
+		DataBlob:    projection.DataBlob,
+		Metadata:    projection.Metadata,
+	}); err != nil {
+		t.Fatalf("UpsertBundleCatalog: %v", err)
+	}
+
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	sourceEventID := uuid.NewString()
+	at := time.Unix(1700002202, 0).UTC()
+	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "item.received", at)
+	if _, err := db.ExecContext(ctx, `
+		UPDATE runs
+		SET bundle_hash = $2, bundle_source = $3
+		WHERE run_id = $1::uuid
+	`, sourceRunID, projection.BundleHash, storerunlifecycle.BundleSourcePersisted); err != nil {
+		t.Fatalf("stamp source run bundle identity: %v", err)
+	}
+
+	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+		SourceRunID:  sourceRunID,
+		At:           sourceEventID,
+		BundleHash:   projection.BundleHash,
+		BundleSource: storerunlifecycle.BundleSourcePersisted,
+		Store:        pg,
+		SourceLoader: BundleCatalogSelectedContractSourceLoader{
+			RepoRoot: repoRoot,
+			Store:    pg,
+		},
+		ContractSelection: runforkadmission.SelectedContractSelection(
+			semanticview.Wrap(bundle),
+			"/stale/db-loaded/source-root",
+		),
+	})
+	if err != nil {
+		t.Fatalf("ExecuteSelectedContractRunFork: %v", err)
+	}
+	if result.Owner != store.RunForkSelectedContractExecutionOwner || result.ExecutedEventCount != 1 || len(result.ForkEvents) != 1 {
+		t.Fatalf("result = %#v", result)
+	}
+	assertSelectedContractRuntimeContainerProof(t,
+		result.ForkLocalRuntimeContainer,
+		store.RunForkSelectedContractExecutionOwner,
+		sourceRunID,
+		result.Materialization.ForkRunID,
+		sourceEventID,
+		[]string{sourceEventID},
+	)
+	var forkBundleHash, forkBundleSource, forkBundleFingerprint string
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(bundle_hash, ''), bundle_source, COALESCE(bundle_fingerprint, '')
+		FROM runs
+		WHERE run_id = $1::uuid
+	`, result.Materialization.ForkRunID).Scan(&forkBundleHash, &forkBundleSource, &forkBundleFingerprint); err != nil {
+		t.Fatalf("load fork run bundle identity: %v", err)
+	}
+	if forkBundleHash != projection.BundleHash || forkBundleSource != storerunlifecycle.BundleSourcePersisted || forkBundleFingerprint != "" {
+		t.Fatalf("fork run bundle identity = hash:%q source:%q fingerprint:%q", forkBundleHash, forkBundleSource, forkBundleFingerprint)
 	}
 }
 
