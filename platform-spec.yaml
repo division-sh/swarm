@@ -9421,7 +9421,11 @@ cli_specification:
         owner, derives delivery rows, and returns EventPublishResult. The server requires --bundle-hash for create-new-work
         when --run-id is omitted, checks optional --bundle-hash against existing run context when --run-id is supplied, and
         rejects valid but non-routable hashes with BUNDLE_UNAVAILABLE under the single-active-runtime boundary. --bundle-fingerprint
-        remains deprecated transition input and is not authoritative for create-new-work scope or routing.
+        remains deprecated transition input and is not authoritative for create-new-work scope or routing. Flow-scoped event
+        names are server-owned contract references: the CLI sends the caller string unchanged, and /v1/rpc event.publish
+        resolves valid flow_id/local_event or flow-path/local-event references through the loaded contract catalog before
+        declaration validation, payload validation, EventBus publish, and idempotency completion persistence. Unknown
+        flow/event combinations and ambiguous unscoped leaf names fail closed with EVENT_NOT_DECLARED.
       flags:
       - name: --payload-json <json-object>
         required: true
@@ -9470,6 +9474,7 @@ cli_specification:
         - IDEMPOTENCY_CONFLICT
       proof_expectations:
       - exact /v1/rpc event.publish call with event_name, required payload, optional run_id, optional source_event_id, optional canonical bundle_hash or deprecated legacy bundle_ref.fingerprint, optional emitter, and optional idempotency_key params only; missing create-new-work bundle scope maps to server BUNDLE_SCOPE_REQUIRED and valid non-routable hashes map to BUNDLE_UNAVAILABLE
+      - flow-scoped event names are passed through exactly by the CLI and resolved only by the server-owned /v1/rpc event.publish contract-catalog resolver; unknown scoped references and ambiguous unscoped leaf names produce EVENT_NOT_DECLARED without mutation or idempotency completion
       - missing/blank event name, invalid or non-object --payload-json, blank optional flags, malformed bundle_hash, malformed bundle fingerprint, both bundle identity flags together, invalid args, and missing explicit token for non-loopback API targets make zero API calls
       - success output renders only server-owned EventPublishResult event_id, run_id, source_event_id when present, new_run_created, and delivery rows
       - RUN_NOT_FOUND, EVENT_NOT_FOUND, publish rejection errors, auth/HTTP/RPC failures, and malformed EventPublishResult values fail closed with tested exit codes
@@ -13755,7 +13760,11 @@ api_specification:
         \ fails closed with EVENT_NOT_FOUND.\n\nThe method consumes the same canonical EventBus/store event-publication\n\
         owner used by runtime dispatch. Delivery results are read back from the\npersisted event_deliveries owner; the API\
         \ layer must not re-plan\nsubscribers. This is the canonical primitive; run.start remains only\nas a deprecated wrapper\
-        \ for older callers.\n"
+        \ for older callers.\n\n`event_name` is a contract event reference. Callers may pass a root/unambiguous leaf event\
+        \ name or a flow-scoped reference such as `flow_id/local_event` or `flow-path/local-event`. The server resolves\
+        \ flow-scoped references through the loaded contract catalog before declaration validation, payload validation,\
+        \ EventBus publish, and idempotency completion persistence. Unknown flow/event combinations and ambiguous unscoped\
+        \ leaf names fail closed with EVENT_NOT_DECLARED and no mutation.\n"
       scope:
         required:
         - write:runs
@@ -13784,6 +13793,11 @@ api_specification:
           $ref: '#/components/schemas/BundleRef'
       - name: event_name
         required: true
+        description: >-
+          Contract event reference to publish. Root and unambiguous leaf names remain accepted; valid flow_id/local_event
+          or flow-path/local-event references are resolved server-side through the loaded contract catalog to the canonical
+          runtime event identity before validation and persistence. Unknown flow/event combinations and ambiguous unscoped
+          leaf names fail closed with EVENT_NOT_DECLARED.
         schema:
           type: string
       - name: payload
