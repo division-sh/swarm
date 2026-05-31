@@ -212,8 +212,8 @@ func bundleRegistrationDataBlobParam(params map[string]any) ([]bundleRegistratio
 		seen[folded] = path
 		previous = path
 		encoded, ok := entry["data_base64"].(string)
-		if !ok || strings.TrimSpace(encoded) == "" {
-			return nil, NewInvalidParamsError(map[string]any{"field": field + ".data_base64", "reason": "must be a non-empty base64 string"})
+		if !ok {
+			return nil, NewInvalidParamsError(map[string]any{"field": field + ".data_base64", "reason": "must be a base64 string"})
 		}
 		decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(encoded))
 		if err != nil {
@@ -358,10 +358,19 @@ func cleanBundleRegistrationPath(raw, field string) (string, error) {
 
 func validateBundleRegistrationDataPath(path, field string) error {
 	segments := strings.Split(path, "/")
-	if len(segments) < 4 || segments[0] != "flows" || segments[1] == "" || segments[2] != "data" {
-		return NewInvalidParamsError(map[string]any{"field": field, "reason": "data_blob entries must be under flows/<flow>/data/..."})
+	if !bundleRegistrationDataPathIsFlowData(segments) {
+		return NewInvalidParamsError(map[string]any{"field": field, "reason": "data_blob entries must be under a flow data directory (.../flows/<flow>/data/...)"})
 	}
 	return nil
+}
+
+func bundleRegistrationDataPathIsFlowData(segments []string) bool {
+	for i := 0; i+3 < len(segments); i++ {
+		if segments[i] == "flows" && segments[i+1] != "" && segments[i+2] == "data" {
+			return true
+		}
+	}
+	return false
 }
 
 func asciiFoldBundleRegistrationPath(path string) string {

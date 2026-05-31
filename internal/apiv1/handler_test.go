@@ -857,6 +857,8 @@ func writeBundleRegistrationLocalContractsFixture(t *testing.T, root string) {
 	writeBundleRegistrationLocalFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: registered-local-directory
 version: "1.0.0"
+packages:
+  - path: packages/foo
 flows:
   - id: alpha
     flow: alpha
@@ -867,7 +869,36 @@ states:
   - start
   - done
 `)
+	writeBundleRegistrationLocalFixtureFile(t, filepath.Join(root, "flows", "alpha", "package.yaml"), `
+name: nested-flow-package
+version: "1.0.0"
+flows:
+  - id: gamma
+    flow: gamma
+`)
+	writeBundleRegistrationLocalFixtureFile(t, filepath.Join(root, "flows", "alpha", "flows", "gamma", "schema.yaml"), `
+initial_state: start
+states:
+  - start
+  - done
+`)
+	writeBundleRegistrationLocalFixtureFile(t, filepath.Join(root, "packages", "foo", "package.yaml"), `
+name: child-package
+version: "1.0.0"
+flows:
+  - id: beta
+    flow: beta
+`)
+	writeBundleRegistrationLocalFixtureFile(t, filepath.Join(root, "packages", "foo", "flows", "beta", "schema.yaml"), `
+initial_state: start
+states:
+  - start
+  - done
+`)
+	writeBundleRegistrationLocalFixtureFile(t, filepath.Join(root, "flows", "alpha", "data", "empty.bin"), "")
 	writeBundleRegistrationLocalFixtureFile(t, filepath.Join(root, "flows", "alpha", "data", "payload.bin"), "\x01\x02\x03")
+	writeBundleRegistrationLocalFixtureFile(t, filepath.Join(root, "flows", "alpha", "flows", "gamma", "data", "nested.bin"), "\x09")
+	writeBundleRegistrationLocalFixtureFile(t, filepath.Join(root, "packages", "foo", "flows", "beta", "data", "child.bin"), "\x04\x05")
 }
 
 func writeBundleRegistrationLocalFixtureFile(t *testing.T, path, content string) {

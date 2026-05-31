@@ -38,8 +38,12 @@ func TestBuildBundleRegistrationDirectoryUploadPackagesTextAndData(t *testing.T)
 		}
 	}
 	wantPaths := []string{
+		"flows/alpha/flows/gamma/schema.yaml",
+		"flows/alpha/package.yaml",
 		"flows/alpha/schema.yaml",
 		"package.yaml",
+		"packages/foo/flows/beta/schema.yaml",
+		"packages/foo/package.yaml",
 		"prompts/root.md",
 	}
 	if !reflect.DeepEqual(paths, wantPaths) {
@@ -51,15 +55,17 @@ func TestBuildBundleRegistrationDirectoryUploadPackagesTextAndData(t *testing.T)
 	if upload.DataBlob.APIVersion != bundleRegistrationDataAPIVersion {
 		t.Fatalf("data api_version = %q, want %q", upload.DataBlob.APIVersion, bundleRegistrationDataAPIVersion)
 	}
-	if got, want := len(upload.DataBlob.Entries), 1; got != want {
+	if got, want := len(upload.DataBlob.Entries), 4; got != want {
 		t.Fatalf("data entries = %d, want %d", got, want)
 	}
-	entry := upload.DataBlob.Entries[0]
-	if entry.Path != "flows/alpha/data/payload.bin" {
-		t.Fatalf("data path = %q", entry.Path)
+	wantData := []BundleRegisterDataEntryV1{
+		{Path: "flows/alpha/data/empty.bin", DataBase64: ""},
+		{Path: "flows/alpha/data/payload.bin", DataBase64: base64.StdEncoding.EncodeToString([]byte{0x01, 0x02, 0x03})},
+		{Path: "flows/alpha/flows/gamma/data/nested.bin", DataBase64: base64.StdEncoding.EncodeToString([]byte{0x09})},
+		{Path: "packages/foo/flows/beta/data/child.bin", DataBase64: base64.StdEncoding.EncodeToString([]byte{0x04, 0x05})},
 	}
-	if want := base64.StdEncoding.EncodeToString([]byte{0x01, 0x02, 0x03}); entry.DataBase64 != want {
-		t.Fatalf("data_base64 = %q, want %q", entry.DataBase64, want)
+	if !reflect.DeepEqual(upload.DataBlob.Entries, wantData) {
+		t.Fatalf("data entries = %#v, want %#v", upload.DataBlob.Entries, wantData)
 	}
 }
 
@@ -100,13 +106,6 @@ func TestBuildBundleRegistrationDirectoryUploadFailsClosed(t *testing.T) {
 			},
 			wantErrSub: "not valid UTF-8",
 		},
-		{
-			name: "empty raw data",
-			mutate: func(t *testing.T, root string) {
-				writeBundleHashBytes(t, filepath.Join(root, "flows", "alpha", "data", "empty.bin"), nil)
-			},
-			wantErrSub: "cannot be represented in BundleRegisterDataBlobV1",
-		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
@@ -126,6 +125,8 @@ func writeBundleRegistrationUploadFixture(t *testing.T, root string) {
 	writeBundleHashText(t, filepath.Join(root, "package.yaml"), `
 name: upload-fixture
 version: "1.0.0"
+packages:
+  - path: packages/foo
 flows:
   - id: alpha
     flow: alpha
@@ -137,5 +138,34 @@ states:
   - done
 `)
 	writeBundleHashText(t, filepath.Join(root, "prompts", "root.md"), "root prompt\n")
+	writeBundleHashText(t, filepath.Join(root, "flows", "alpha", "package.yaml"), `
+name: nested-flow-package
+version: "1.0.0"
+flows:
+  - id: gamma
+    flow: gamma
+`)
+	writeBundleHashText(t, filepath.Join(root, "flows", "alpha", "flows", "gamma", "schema.yaml"), `
+initial_state: start
+states:
+  - start
+  - done
+`)
+	writeBundleHashText(t, filepath.Join(root, "packages", "foo", "package.yaml"), `
+name: child-package
+version: "1.0.0"
+flows:
+  - id: beta
+    flow: beta
+`)
+	writeBundleHashText(t, filepath.Join(root, "packages", "foo", "flows", "beta", "schema.yaml"), `
+initial_state: start
+states:
+  - start
+  - done
+`)
+	writeBundleHashBytes(t, filepath.Join(root, "flows", "alpha", "data", "empty.bin"), nil)
 	writeBundleHashBytes(t, filepath.Join(root, "flows", "alpha", "data", "payload.bin"), []byte{0x01, 0x02, 0x03})
+	writeBundleHashBytes(t, filepath.Join(root, "flows", "alpha", "flows", "gamma", "data", "nested.bin"), []byte{0x09})
+	writeBundleHashBytes(t, filepath.Join(root, "packages", "foo", "flows", "beta", "data", "child.bin"), []byte{0x04, 0x05})
 }

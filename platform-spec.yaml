@@ -5991,9 +5991,11 @@ multi_bundle_persistence:
         content_yaml plus optional BundleRegisterDataBlobV1 entries without computing bundle_hash, building catalog
         projection bytes, touching store/runtime writers, or sending server-local paths. It reuses canonical bundle input
         discovery for traversal, ignored file/dir, symlink, normalized-label, duplicate, and ASCII case-collision behavior,
-        emits slash-relative NFC bundle paths in deterministic order, writes text inputs to content_yaml, and writes only
-        flows/<flow>/data/... raw inputs to data_blob. Archive packaging remains split until archive format and extraction
-        safety rules are promoted.
+        emits slash-relative NFC bundle paths in deterministic order, writes text inputs to content_yaml, and writes raw
+        inputs under every discovered flow data directory to data_blob, including root flows/<flow>/data/...,
+        package flows such as packages/<package>/flows/<flow>/data/..., and nested flow packages such as
+        flows/<parent>/flows/<child>/data/.... Empty raw-data files are represented as empty base64 strings. Archive
+        packaging remains split until archive format and extraction safety rules are promoted.
     modified_commands_planned:
       - swarm serve --bundle-hash <bundle_hash> [--bundle-hash <bundle_hash> ...] (implemented boot-pinned Postgres DB-loaded process mode)
       - swarm serve --dev
@@ -9641,7 +9643,7 @@ cli_specification:
       proof_expectations:
       - exact /v1/rpc bundle.list/get/agents calls with only promoted params
       - exact /v1/rpc bundle.register call with only content_yaml, optional data_blob, and optional idempotency_key
-      - local directory packaging proves traversal/root escape, symlink fail-closed behavior, ignored file/dir policy, slash-relative NFC paths, duplicate and ASCII case-collision failure, text-vs-flows-data split, deterministic ordering, and no bundle_hash param
+      - local directory packaging proves traversal/root escape, symlink fail-closed behavior, ignored file/dir policy, slash-relative NFC paths, duplicate and ASCII case-collision failure, text-vs-every-discovered-flow-data split including empty raw data, deterministic ordering, and no bundle_hash param
       - invalid args, invalid local envelope/data blob files, invalid local contracts directories, and missing SWARM_API_TOKEN make zero API calls
       - human and --json output render only server-owned result fields
       - BUNDLE_NOT_FOUND, BUNDLE_REGISTER_CONFLICT, IDEMPOTENCY_CONFLICT, invalid params, malformed responses, auth/HTTP/RPC failures, and transport failures fail closed with tested exit codes
@@ -10836,7 +10838,7 @@ api_specification:
                 path:
                   type: string
                   minLength: 1
-                  description: Strictly sorted slash-separated path under flows/<flow>/data/... with the same normalization and collision rules as BundleRegistrationFile.path.
+                  description: Strictly sorted slash-separated path under a discovered flow data directory, such as flows/<flow>/data/..., packages/<package>/flows/<flow>/data/..., or a nested flow package path, with the same normalization and collision rules as BundleRegistrationFile.path.
                 data_base64:
                   type: string
                   contentEncoding: base64
