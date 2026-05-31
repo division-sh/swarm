@@ -67,6 +67,8 @@ func TestCLIRuntimeStateAPIConsumersAreExplicitlyAccounted(t *testing.T) {
 		"store.NewPostgresStore",
 		"SWARM_BUILDER_AUTH_TOKEN",
 		"SWARM_OPERATOR_AUTH_TOKEN",
+		"BuildBundleCatalogProjection",
+		"UpsertBundleCatalog",
 	}
 	for name := range wantAPIConsumers {
 		source := sources[name]
@@ -121,6 +123,10 @@ func TestCLIRuntimeStateCommandsRequireSharedAPITokenBeforeRequest(t *testing.T)
 	if err := os.WriteFile(payloadPath, []byte(`{"topic":"sample"}`), 0o600); err != nil {
 		t.Fatalf("write payload: %v", err)
 	}
+	envelopePath := filepath.Join(t.TempDir(), "bundle-register.yaml")
+	if err := os.WriteFile(envelopePath, []byte("api_version: swarm.bundle.register.v1\nfiles:\n  - path: package.yaml\n    text: \"name: demo\\n\"\n"), 0o600); err != nil {
+		t.Fatalf("write bundle register envelope: %v", err)
+	}
 
 	for _, tc := range []struct {
 		name string
@@ -158,6 +164,7 @@ func TestCLIRuntimeStateCommandsRequireSharedAPITokenBeforeRequest(t *testing.T)
 		{name: "bundle list", args: []string{"bundle", "list"}},
 		{name: "bundle show", args: []string{"bundle", "show", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},
 		{name: "bundle agents", args: []string{"bundle", "agents", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},
+		{name: "bundle register", args: []string{"bundle", "register", envelopePath}},
 		{name: "conversations list", args: []string{"conversations", "list"}},
 		{name: "conversation view", args: []string{"conversation", "view", "session-1"}},
 		{name: "conversation turn", args: []string{"conversation", "turn", "session-1", "1"}},

@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync/atomic"
@@ -157,6 +159,107 @@ func TestBundleAgentsJSONUsesCanonicalModelField(t *testing.T) {
 	}
 }
 
+func TestBundleRegisterHelpDocumentsPreparedEnvelopeBoundary(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"bundle", "register", "--help"}, &stdout, &stderr, rootCommandOptions{})
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	for _, want := range []string{
+		"register <registration-envelope-yaml>",
+		"--data-blob",
+		"--idempotency-key",
+		"--api-server",
+		"--json",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("help missing %q:\n%s", want, stdout.String())
+		}
+	}
+	for _, notWant := range []string{"contracts-directory", "archive"} {
+		if strings.Contains(stdout.String(), notWant) {
+			t.Fatalf("help contains unapproved packaging term %q:\n%s", notWant, stdout.String())
+		}
+	}
+	if strings.TrimSpace(stderr.String()) != "" {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestBundleRegisterPreparedEnvelopeUsesCanonicalRPCAndRenders(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	bundleHash := validBundleHash("e")
+	envelopePath := writeBundleRegisterFixture(t, "bundle-register.yaml", "api_version: swarm.bundle.register.v1\nfiles:\n  - path: package.yaml\n    text: \"name: demo\\n\"\n")
+	dataBlobPath := writeBundleRegisterFixture(t, "bundle-data.json", `{"api_version":"swarm.bundle.data.v1","entries":[{"path":"flows/alpha/data/payload.bin","data_base64":"AQI="}]}`)
+	var captured jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/rpc" {
+			t.Errorf("path = %q, want /v1/rpc", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
+			t.Errorf("Authorization = %q, want bearer token", got)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		writeJSONRPCResult(t, w, captured.ID, validBundleRegistrationResult(bundleHash))
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{
+		"bundle", "register", envelopePath,
+		"--data-blob", dataBlobPath,
+		"--idempotency-key", "idem-register",
+	}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	assertBundleRequest(t, captured, bundleRegisterMethod, map[string]any{
+		"content_yaml":    "api_version: swarm.bundle.register.v1\nfiles:\n  - path: package.yaml\n    text: \"name: demo\\n\"\n",
+		"data_blob":       map[string]any{"api_version": "swarm.bundle.data.v1", "entries": []any{map[string]any{"path": "flows/alpha/data/payload.bin", "data_base64": "AQI="}}},
+		"idempotency_key": "idem-register",
+	})
+	for _, want := range []string{"bundle " + bundleHash, "registered=true", "has_data=true", "data_size_bytes=7"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
+		}
+	}
+	if strings.TrimSpace(stderr.String()) != "" {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestBundleRegisterJSONPreservesAPIShape(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	bundleHash := validBundleHash("f")
+	envelopePath := writeBundleRegisterFixture(t, "bundle-register.yaml", "api_version: swarm.bundle.register.v1\nfiles:\n  - path: package.yaml\n    text: \"name: demo\\n\"\n")
+	var captured jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		writeJSONRPCResult(t, w, captured.ID, validBundleRegistrationResult(bundleHash))
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"bundle", "register", envelopePath, "--json"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	assertBundleRequest(t, captured, bundleRegisterMethod, map[string]any{
+		"content_yaml": "api_version: swarm.bundle.register.v1\nfiles:\n  - path: package.yaml\n    text: \"name: demo\\n\"\n",
+	})
+	var decoded map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatalf("decode stdout json: %v\n%s", err, stdout.String())
+	}
+	if decoded["bundle_hash"] != bundleHash || decoded["registered"] != true || decoded["has_data"] != true || decoded["data_size_bytes"] != float64(7) {
+		t.Fatalf("json registration result = %#v", decoded)
+	}
+}
+
 func TestBundleCommandsRejectInvalidInputBeforeRequest(t *testing.T) {
 	t.Setenv("SWARM_API_TOKEN", "test-token")
 	var calls atomic.Int32
@@ -165,6 +268,16 @@ func TestBundleCommandsRejectInvalidInputBeforeRequest(t *testing.T) {
 		writeJSONRPCResult(t, w, "unexpected", map[string]any{})
 	}))
 	defer server.Close()
+
+	envelopePath := writeBundleRegisterFixture(t, "bundle-register.yaml", "api_version: swarm.bundle.register.v1\nfiles:\n  - path: package.yaml\n    text: \"name: demo\\n\"\n")
+	emptyEnvelopePath := writeBundleRegisterFixture(t, "empty.yaml", " \n")
+	dataBlobPath := writeBundleRegisterFixture(t, "bundle-data.json", `{"api_version":"swarm.bundle.data.v1","entries":[]}`)
+	badDataBlobPath := writeBundleRegisterFixture(t, "bad-data.json", `{bad json`)
+	multipleDataBlobPath := writeBundleRegisterFixture(t, "multi-data.json", `{"api_version":"swarm.bundle.data.v1","entries":[]}{}`)
+	dirPath := filepath.Join(t.TempDir(), "bundle-dir")
+	if err := os.Mkdir(dirPath, 0o700); err != nil {
+		t.Fatalf("mkdir bundle dir: %v", err)
+	}
 
 	for _, tc := range []struct {
 		name       string
@@ -178,7 +291,14 @@ func TestBundleCommandsRejectInvalidInputBeforeRequest(t *testing.T) {
 		{name: "show invalid hash", args: []string{"bundle", "show", "sha256:abc"}, wantStderr: "bundle hash must match bundle-v1:sha256:<64 lowercase hex>"},
 		{name: "agents invalid hash", args: []string{"bundle", "agents", "bad"}, wantStderr: "bundle hash must match bundle-v1:sha256:<64 lowercase hex>"},
 		{name: "get alias not promoted", args: []string{"bundle", "get", validBundleHash("a")}, wantStderr: "unknown command"},
-		{name: "register not promoted", args: []string{"bundle", "register"}, wantStderr: "unknown command"},
+		{name: "register missing envelope", args: []string{"bundle", "register"}, wantStderr: "accepts 1 arg(s)"},
+		{name: "register missing file", args: []string{"bundle", "register", filepath.Join(t.TempDir(), "missing.yaml")}, wantStderr: "read registration envelope"},
+		{name: "register directory", args: []string{"bundle", "register", dirPath}, wantStderr: "registration envelope must be a file"},
+		{name: "register empty envelope", args: []string{"bundle", "register", emptyEnvelopePath}, wantStderr: "registration envelope must be non-empty"},
+		{name: "register missing data blob", args: []string{"bundle", "register", envelopePath, "--data-blob", filepath.Join(t.TempDir(), "missing.json")}, wantStderr: "read data blob"},
+		{name: "register malformed data blob", args: []string{"bundle", "register", envelopePath, "--data-blob", badDataBlobPath}, wantStderr: "--data-blob must contain one BundleRegisterDataBlobV1 JSON object"},
+		{name: "register multiple data blob documents", args: []string{"bundle", "register", envelopePath, "--data-blob", multipleDataBlobPath}, wantStderr: "--data-blob must contain one BundleRegisterDataBlobV1 JSON object"},
+		{name: "register blank idempotency", args: []string{"bundle", "register", envelopePath, "--data-blob", dataBlobPath, "--idempotency-key", " "}, wantStderr: "--idempotency-key must be non-empty"},
 		{name: "delete not promoted", args: []string{"bundle", "delete", validBundleHash("a")}, wantStderr: "unknown command"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -200,6 +320,7 @@ func TestBundleCommandsRejectInvalidInputBeforeRequest(t *testing.T) {
 
 func TestBundleCommandsFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 	bundleHash := validBundleHash("c")
+	envelopePath := writeBundleRegisterFixture(t, "bundle-register.yaml", "api_version: swarm.bundle.register.v1\nfiles:\n  - path: package.yaml\n    text: \"name: demo\\n\"\n")
 	for _, tc := range []struct {
 		name       string
 		args       []string
@@ -253,6 +374,65 @@ func TestBundleCommandsFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 			wantCode:   cliExitRuntime,
 			wantStderr: "malformed bundle.agents result: agents is required",
 		},
+		{
+			name: "bundle register conflict",
+			args: []string{"bundle", "register", envelopePath},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				writeBundleJSONRPCError(t, w, req.ID, "BUNDLE_REGISTER_CONFLICT")
+			},
+			wantCode:   cliExitConflict,
+			wantStderr: "BUNDLE_REGISTER_CONFLICT: Application error: BUNDLE_REGISTER_CONFLICT",
+		},
+		{
+			name: "bundle register idempotency conflict",
+			args: []string{"bundle", "register", envelopePath, "--idempotency-key", "idem-register"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				writeBundleJSONRPCError(t, w, req.ID, "IDEMPOTENCY_CONFLICT")
+			},
+			wantCode:   cliExitConflict,
+			wantStderr: "IDEMPOTENCY_CONFLICT: Application error: IDEMPOTENCY_CONFLICT",
+		},
+		{
+			name: "bundle register invalid params",
+			args: []string{"bundle", "register", envelopePath},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				writeBundleInvalidParamsJSONRPCError(t, w, req.ID, "Invalid params: content_yaml")
+			},
+			wantCode:   cliExitRuntime,
+			wantStderr: "Invalid params: content_yaml",
+		},
+		{
+			name: "malformed register missing registered",
+			args: []string{"bundle", "register", envelopePath},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				result := validBundleRegistrationResult(bundleHash)
+				delete(result, "registered")
+				writeJSONRPCResult(t, w, req.ID, result)
+			},
+			wantCode:   cliExitRuntime,
+			wantStderr: "malformed bundle.register result: registered is required",
+		},
+		{
+			name: "malformed register negative data size",
+			args: []string{"bundle", "register", envelopePath},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				result := validBundleRegistrationResult(bundleHash)
+				result["data_size_bytes"] = -1
+				writeJSONRPCResult(t, w, req.ID, result)
+			},
+			wantCode:   cliExitRuntime,
+			wantStderr: "malformed bundle.register result: data_size_bytes must be non-negative",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("SWARM_API_TOKEN", "test-token")
@@ -269,6 +449,15 @@ func TestBundleCommandsFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 			}
 		})
 	}
+}
+
+func writeBundleRegisterFixture(t *testing.T, name, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write %s: %v", name, err)
+	}
+	return path
 }
 
 func assertBundleRequest(t *testing.T, req jsonRPCRequest, wantMethod string, wantParams map[string]any) {
@@ -319,6 +508,15 @@ func validBundleAgent(agentID string) map[string]any {
 	}
 }
 
+func validBundleRegistrationResult(bundleHash string) map[string]any {
+	return map[string]any{
+		"bundle_hash":     bundleHash,
+		"registered":      true,
+		"has_data":        true,
+		"data_size_bytes": 7,
+	}
+}
+
 func writeBundleJSONRPCError(t *testing.T, w http.ResponseWriter, id string, code string) {
 	t.Helper()
 	w.Header().Set("content-type", "application/json")
@@ -334,6 +532,21 @@ func writeBundleJSONRPCError(t *testing.T, w http.ResponseWriter, id string, cod
 				"retryable":      false,
 				"correlation_id": "corr-bundle",
 			},
+		},
+	}); err != nil {
+		t.Fatalf("encode response: %v", err)
+	}
+}
+
+func writeBundleInvalidParamsJSONRPCError(t *testing.T, w http.ResponseWriter, id string, message string) {
+	t.Helper()
+	w.Header().Set("content-type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"error": map[string]any{
+			"code":    -32602,
+			"message": message,
 		},
 	}); err != nil {
 		t.Fatalf("encode response: %v", err)
