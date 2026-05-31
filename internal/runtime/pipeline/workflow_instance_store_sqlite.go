@@ -325,7 +325,15 @@ func (s *WorkflowInstanceStore) writeSQLite(ctx context.Context, rowID, storageR
 			Gates:        projection.GatesAny(),
 			Accumulator:  projection.Accumulator,
 		}
-		if err := insertSQLiteEntityStateDiff(txctx, tx, rowID, previous, afterProjection, runtimemutationlog.Writer{
+		previousForDiff := previous
+		if createInfo, ok := workflowCreateEntityInitialValuesFromContext(txctx); ok {
+			nextPrevious, err := insertSQLiteWorkflowCreateEntityInitialValueMutations(txctx, tx, rowID, previous, afterProjection, createInfo.Fields)
+			if err != nil {
+				return err
+			}
+			previousForDiff = nextPrevious
+		}
+		if err := insertSQLiteEntityStateDiff(txctx, tx, rowID, previousForDiff, afterProjection, runtimemutationlog.Writer{
 			Type:        "platform",
 			ID:          "workflow_instance_store",
 			HandlerStep: map[bool]string{true: "create", false: "upsert"}[createOnly],
@@ -514,30 +522,106 @@ func insertSQLiteEntityStateDiff(ctx context.Context, tx *sql.Tx, entityID strin
 	`, runID, time.Now().UTC()); err != nil {
 		return err
 	}
+	for _, rec := range records {
+		if err := insertSQLiteEntityMutationRecord(ctx, tx, runID, rec); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func insertSQLiteWorkflowCreateEntityInitialValueMutations(
+	ctx context.Context,
+	tx *sql.Tx,
+	entityID string,
+	before, after runtimemutationlog.EntityStateProjection,
+	initialValues map[string]any,
+) (runtimemutationlog.EntityStateProjection, error) {
+	if len(initialValues) == 0 {
+		return before, nil
+	}
+	runID, err := runtimecurrentstate.RequireRunID(ctx)
+	if err != nil {
+		return runtimemutationlog.EntityStateProjection{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT OR IGNORE INTO runs (run_id, status, started_at)
+		VALUES (?, 'running', ?)
+	`, runID, time.Now().UTC()); err != nil {
+		return runtimemutationlog.EntityStateProjection{}, err
+	}
+	adjusted := runtimemutationlog.EntityStateProjection{
+		CurrentState: before.CurrentState,
+		Fields:       cloneStringAnyMap(before.Fields),
+		Gates:        cloneStringAnyMap(before.Gates),
+		Accumulator:  cloneStringAnyMap(before.Accumulator),
+	}
+	if adjusted.Fields == nil {
+		adjusted.Fields = map[string]any{}
+	}
+	for field, declared := range initialValues {
+		field = strings.TrimSpace(field)
+		if field == "" {
+			continue
+		}
+		finalValue, ok := after.Fields[field]
+		oldValue, hadOld := adjusted.Fields[field]
+		if hadOld && workflowJSONValuesEqual(oldValue, declared) {
+			continue
+		}
+		if err := insertSQLiteEntityMutationRecord(ctx, tx, runID, runtimemutationlog.Record{
+			EntityID:    entityID,
+			Field:       field,
+			OldValue:    oldValueOrNil(oldValue, hadOld),
+			NewValue:    declared,
+			WriterType:  "platform",
+			WriterID:    "entity_initial_value",
+			HandlerStep: "create_entity",
+		}); err != nil {
+			return runtimemutationlog.EntityStateProjection{}, err
+		}
+		if ok && workflowJSONValuesEqual(finalValue, declared) {
+			adjusted.Fields[field] = declared
+			continue
+		}
+		adjusted.Fields[field] = declared
+	}
+	return adjusted, nil
+}
+
+func insertSQLiteEntityMutationRecord(ctx context.Context, tx *sql.Tx, runID string, rec runtimemutationlog.Record) error {
+	if tx == nil {
+		return runtimemutationlog.ErrInvalidMutationLogWriter("mutation log DB is required")
+	}
+	entityID := strings.TrimSpace(rec.EntityID)
+	field := strings.TrimSpace(rec.Field)
+	writerType := strings.TrimSpace(rec.WriterType)
+	writerID := strings.TrimSpace(rec.WriterID)
+	if entityID == "" || field == "" || writerType == "" || writerID == "" {
+		return runtimemutationlog.ErrInvalidMutationLogWriter("entity_id, field, writer_type, and writer_id are required")
+	}
+	oldValue, err := json.Marshal(rec.OldValue)
+	if err != nil {
+		return err
+	}
+	newValue, err := json.Marshal(rec.NewValue)
+	if err != nil {
+		return err
+	}
 	causedByEvent := ""
 	if inbound, ok := runtimecorrelation.InboundEventFromContext(ctx); ok {
 		if parsed := validSQLiteWorkflowUUID(inbound.ID); parsed != "" {
 			causedByEvent = parsed
 		}
 	}
-	for _, rec := range records {
-		oldValue, err := json.Marshal(rec.OldValue)
-		if err != nil {
-			return err
-		}
-		newValue, err := json.Marshal(rec.NewValue)
-		if err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `
+	if _, err := tx.ExecContext(ctx, `
 			INSERT INTO entity_mutations (
 				mutation_id, run_id, entity_id, field, old_value, new_value,
 				caused_by_event, writer_type, writer_id, handler_step, created_at
 			)
 			VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, NULLIF(?, ''), ?)
-		`, uuid.NewString(), runID, entityID, rec.Field, string(oldValue), string(newValue), causedByEvent, rec.WriterType, rec.WriterID, strings.TrimSpace(rec.HandlerStep), time.Now().UTC()); err != nil {
-			return err
-		}
+	`, uuid.NewString(), runID, entityID, field, string(oldValue), string(newValue), causedByEvent, writerType, writerID, strings.TrimSpace(rec.HandlerStep), time.Now().UTC()); err != nil {
+		return err
 	}
 	return nil
 }
