@@ -126,11 +126,11 @@ built-in/default config last.
 ```bash
 # Anthropic API transport.
 export ANTHROPIC_API_KEY=...
-swarm serve --backend anthropic --config ./config.yaml
+swarm serve --backend anthropic
 
 # Claude CLI transport.
 export CLAUDE_CODE_OAUTH_TOKEN=...
-swarm serve --backend claude_cli --config ./config.yaml
+swarm serve --backend claude_cli
 
 # Chat Completions-compatible HTTP JSON transport.
 export OPENAI_COMPATIBLE_API_KEY=...
@@ -154,6 +154,8 @@ backend fails fast if its required credential is missing.
 | `anthropic` | `ANTHROPIC_API_KEY` |
 | `claude_cli` | `CLAUDE_CODE_OAUTH_TOKEN` |
 | `openai_compatible` | `OPENAI_COMPATIBLE_API_KEY` |
+
+The following `config.yaml` is for the `openai_compatible` command above:
 
 ```yaml
 # config.yaml
