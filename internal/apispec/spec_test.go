@@ -411,6 +411,8 @@ func TestMultiBundleSourceAuthorityPublishesOnlyImplementedBundleReadAndRunForkM
 	bundleCommand := mustMappingValue(t, commandCatalog, "bundle")
 	assertScalarValue(t, mustMappingValue(t, bundleCommand, "command"), "swarm bundle list|show|agents")
 	assertScalarValue(t, mustMappingValue(t, bundleCommand, "implementation_status"), "implemented_read_only_inventory")
+	assertScalarContains(t, mustMappingValue(t, bundleCommand, "blocker_state"), "bundle.register API is live")
+	assertScalarContains(t, mustMappingValue(t, bundleCommand, "blocker_state"), "swarm bundle register CLI consumer remains split")
 	runForkCatalog := mustMappingValue(t, commandCatalog, "run_fork")
 	assertScalarValue(t, mustMappingValue(t, runForkCatalog, "command"), runForkCommand)
 	assertScalarValue(t, mustMappingValue(t, runForkCatalog, "implementation_status"), "implemented_public_cli_consumer")
@@ -445,7 +447,10 @@ func TestMultiBundleSourceAuthorityPublishesOnlyImplementedBundleReadAndRunForkM
 	}
 
 	apiBoundary := mustMappingValue(t, mustMappingValue(t, root, "api_specification"), "multi_bundle_publication_boundary")
-	assertScalarValue(t, mustMappingValue(t, apiBoundary, "status"), "partial_bundle_read_catalog_and_run_fork_method_catalog")
+	assertScalarValue(t, mustMappingValue(t, apiBoundary, "status"), "partial_bundle_read_catalog_register_and_run_fork_method_catalog")
+	assertScalarContains(t, mustMappingValue(t, apiBoundary, "rule"), "bundle.register is also published")
+	assertScalarContains(t, mustMappingValue(t, apiBoundary, "rule"), "does not imply a swarm bundle register CLI consumer")
+	assertScalarContains(t, mustMappingValue(t, apiBoundary, "rule"), "bundle.delete")
 
 	for _, relPath := range []string{
 		filepath.Join("cmd", "swarm", "main.go"),
