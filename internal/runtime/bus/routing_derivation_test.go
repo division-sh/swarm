@@ -221,6 +221,64 @@ func TestRouteTableConcreteTemplateInstanceNodeSubscriberResolvesBeforeDeliveryP
 	}
 }
 
+func TestRouteTableTemplateOutputPinWildcardSubscriberResolvesThroughDerivedInstance(t *testing.T) {
+	root := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "root", Flow: "root"},
+		Path:  "",
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"operating-accumulator": {
+				ID:           "operating-accumulator",
+				SubscribesTo: []string{"component-scaffold/*/component.scaffolded"},
+			},
+		},
+		Children: []runtimecontracts.FlowContractView{
+			{
+				Paths: runtimecontracts.FlowContractPaths{ID: "component-scaffold", Flow: "component-scaffold"},
+				Path:  "component-scaffold",
+				Schema: runtimecontracts.FlowSchemaDocument{
+					Mode: "template",
+					Pins: runtimecontracts.FlowPins{
+						Outputs: runtimecontracts.FlowOutputPins{Events: []string{"component.scaffolded"}},
+					},
+				},
+			},
+		},
+	}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"root":               &root,
+				"component-scaffold": &root.Children[0],
+			},
+		},
+	}
+	rt, err := runtimebus.DeriveRouteTable(semanticview.Wrap(bundle))
+	if err != nil {
+		t.Fatalf("DeriveRouteTable: %v", err)
+	}
+	identity := runtimeflowidentity.DeriveRoute("component-scaffold", "component-a")
+	if err := rt.AddFlowInstanceRoute(runtimecontracts.SystemNodeContract{}, identity); err != nil {
+		t.Fatalf("AddFlowInstanceRoute: %v", err)
+	}
+
+	got := rt.Resolve("component-scaffold/component-a/component.scaffolded")
+	if len(got) != 1 {
+		t.Fatalf("resolved subscribers = %#v, want one operating-accumulator route", got)
+	}
+	if got[0].ID != "operating-accumulator" || got[0].Type != "node" || got[0].MatchPattern != "component-scaffold/*/component.scaffolded" {
+		t.Fatalf("resolved subscriber = %#v, want operating-accumulator wildcard route", got[0])
+	}
+
+	rt.RemoveFlowInstanceRoute(identity)
+	if got := rt.Resolve("component-scaffold/component-a/component.scaffolded"); len(got) != 0 {
+		t.Fatalf("resolved subscribers after remove = %#v, want none", got)
+	}
+	if got := rt.Resolve("component-scaffold/component-b/component.scaffolded"); len(got) != 0 {
+		t.Fatalf("resolved subscribers for never-added instance = %#v, want none", got)
+	}
+}
+
 func TestDeriveRouteTable_InputPinsAutoWireFromProducerOutput(t *testing.T) {
 	producer := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer"},

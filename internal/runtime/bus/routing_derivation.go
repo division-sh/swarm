@@ -99,7 +99,23 @@ func (rt *RouteTable) Resolve(eventType string) []Subscriber {
 	}
 	rt.mu.RLock()
 	defer rt.mu.RUnlock()
-	return cloneSubscribers(rt.routes[eventType])
+	out := cloneSubscribers(rt.routes[eventType])
+	if _, active := rt.eventPath[eventType]; !active {
+		return out
+	}
+	for _, pattern := range rt.patterns {
+		eventPattern := strings.Trim(strings.TrimSpace(pattern.EventPattern), "/")
+		if eventPattern == "" || !strings.Contains(eventPattern, "*") {
+			continue
+		}
+		if !RouteMatches(eventPattern, eventType) {
+			continue
+		}
+		subscriber := pattern.Subscriber
+		subscriber.MatchPattern = eventPattern
+		out = appendUniqueSubscriber(out, subscriber)
+	}
+	return out
 }
 
 func (rt *RouteTable) AddFlowInstanceRoute(template runtimecontracts.SystemNodeContract, identity runtimeflowidentity.Route) error {
@@ -368,6 +384,13 @@ func routeProjectLocalEventSet(scope semanticview.ProjectScope) map[string]struc
 
 func routeFlowLocalEventSet(source semanticview.Source, scope semanticview.FlowScope) map[string]struct{} {
 	out := routeEventKeys(scope.Events)
+	for _, eventType := range scope.OutputEvents {
+		eventType = strings.TrimSpace(eventType)
+		if eventType == "" {
+			continue
+		}
+		out[eventType] = struct{}{}
+	}
 	for _, eventType := range scope.InputEvents {
 		eventType = strings.TrimSpace(eventType)
 		if eventType == "" || routeFlowInputHasExternalProducer(source, scope.ID, eventType) {
