@@ -11,10 +11,13 @@ import (
 const (
 	UnavailableBundleStartupOperationName = "swarm.serve.unavailable_bundle_startup_recovery"
 	UnavailableBundleStartupControlledBy  = UnavailableBundleStartupOperationName
+	BundleForceDeleteOperationName        = "bundle.delete.force"
+	BundleForceDeleteControlledBy         = "bundle.delete"
 
 	BundleEphemeralOrphanedReason = "bundle_ephemeral_orphaned"
 	BundleDeletedOrphanedReason   = "bundle_deleted_orphaned"
 	BundleLegacyOrphanedReason    = "bundle_legacy_orphaned"
+	BundleForceDeletedReason      = "bundle_force_deleted"
 
 	SessionTerminationReasonOrphaned = "orphaned"
 
@@ -151,5 +154,6 @@ func TerminalReasonCodes() []string {
 		BundleEphemeralOrphanedReason,
 		BundleDeletedOrphanedReason,
 		BundleLegacyOrphanedReason,
+		BundleForceDeletedReason,
 	}
 }

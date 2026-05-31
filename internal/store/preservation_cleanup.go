@@ -32,6 +32,14 @@ type preservationCleanupTimerTarget struct {
 }
 
 func (s *PostgresStore) ApplyUnavailableBundleStartupPreservationCleanup(ctx context.Context, req preservationcleanup.Request) (preservationcleanup.Result, error) {
+	return s.applyPreservationCleanup(ctx, req, preservationcleanup.UnavailableBundleStartupOperationName, preservationcleanup.UnavailableBundleStartupControlledBy)
+}
+
+func (s *PostgresStore) ApplyBundleForceDeletePreservationCleanup(ctx context.Context, req preservationcleanup.Request) (preservationcleanup.Result, error) {
+	return s.applyPreservationCleanup(ctx, req, preservationcleanup.BundleForceDeleteOperationName, preservationcleanup.BundleForceDeleteControlledBy)
+}
+
+func (s *PostgresStore) applyPreservationCleanup(ctx context.Context, req preservationcleanup.Request, defaultOperationName, defaultControlledBy string) (preservationcleanup.Result, error) {
 	if s == nil || s.DB == nil {
 		return preservationcleanup.Result{}, fmt.Errorf("postgres store is required")
 	}
@@ -48,11 +56,14 @@ func (s *PostgresStore) ApplyUnavailableBundleStartupPreservationCleanup(ctx con
 	}
 	operationName := strings.TrimSpace(req.OperationName)
 	if operationName == "" {
-		operationName = preservationcleanup.UnavailableBundleStartupOperationName
+		operationName = strings.TrimSpace(defaultOperationName)
 	}
 	controlledBy := strings.TrimSpace(req.ControlledBy)
 	if controlledBy == "" {
-		controlledBy = operationName
+		controlledBy = strings.TrimSpace(defaultControlledBy)
+		if controlledBy == "" {
+			controlledBy = operationName
+		}
 	}
 	targets, err := preservationcleanup.NormalizeTargets(req.Targets)
 	if err != nil {
@@ -75,7 +86,7 @@ func (s *PostgresStore) ApplyUnavailableBundleStartupPreservationCleanup(ctx con
 
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return preservationcleanup.Result{}, fmt.Errorf("begin unavailable bundle preservation cleanup tx: %w", err)
+		return preservationcleanup.Result{}, fmt.Errorf("begin preservation cleanup tx: %w", err)
 	}
 	committed := false
 	defer func() {
@@ -109,7 +120,7 @@ func (s *PostgresStore) ApplyUnavailableBundleStartupPreservationCleanup(ctx con
 	}
 	if len(activeRunIDs) == 0 {
 		if err := tx.Commit(); err != nil {
-			return preservationcleanup.Result{}, fmt.Errorf("commit empty unavailable bundle preservation cleanup tx: %w", err)
+			return preservationcleanup.Result{}, fmt.Errorf("commit empty preservation cleanup tx: %w", err)
 		}
 		committed = true
 		return out, nil
@@ -205,7 +216,7 @@ func (s *PostgresStore) ApplyUnavailableBundleStartupPreservationCleanup(ctx con
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return preservationcleanup.Result{}, fmt.Errorf("commit unavailable bundle preservation cleanup tx: %w", err)
+		return preservationcleanup.Result{}, fmt.Errorf("commit preservation cleanup tx: %w", err)
 	}
 	committed = true
 	return out, nil

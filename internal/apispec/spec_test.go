@@ -17,17 +17,17 @@ func TestPlatformAPISpecValidationCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Validate() error = %v", err)
 	}
-	if report.MethodCount != 55 {
-		t.Fatalf("method count = %d, want 55", report.MethodCount)
+	if report.MethodCount != 56 {
+		t.Fatalf("method count = %d, want 56", report.MethodCount)
 	}
-	if report.SchemaCount != 103 {
-		t.Fatalf("schema count = %d, want 103", report.SchemaCount)
+	if report.SchemaCount != 104 {
+		t.Fatalf("schema count = %d, want 104", report.SchemaCount)
 	}
 	if report.ErrorCodeCount != 37 {
 		t.Fatalf("error code count = %d, want 37", report.ErrorCodeCount)
 	}
-	if report.MutatingMethodCount != 21 {
-		t.Fatalf("mutating method count = %d, want 21", report.MutatingMethodCount)
+	if report.MutatingMethodCount != 22 {
+		t.Fatalf("mutating method count = %d, want 22", report.MutatingMethodCount)
 	}
 	if report.SubscriptionMethodCnt != 4 {
 		t.Fatalf("subscription method count = %d, want 4", report.SubscriptionMethodCnt)
@@ -67,11 +67,11 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	if err := json.Unmarshal(artifact, &doc); err != nil {
 		t.Fatalf("unmarshal openrpc artifact: %v", err)
 	}
-	if len(doc.Methods) != 55 {
-		t.Fatalf("generated OpenRPC methods = %d, want 55", len(doc.Methods))
+	if len(doc.Methods) != 56 {
+		t.Fatalf("generated OpenRPC methods = %d, want 56", len(doc.Methods))
 	}
-	if len(doc.Components.Schemas) != 103 {
-		t.Fatalf("generated OpenRPC schemas = %d, want 103", len(doc.Components.Schemas))
+	if len(doc.Components.Schemas) != 104 {
+		t.Fatalf("generated OpenRPC schemas = %d, want 104", len(doc.Components.Schemas))
 	}
 	if len(doc.Components.Errors) != 37 {
 		t.Fatalf("generated OpenRPC errors = %d, want 37", len(doc.Components.Errors))
@@ -100,12 +100,12 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	if _, ok := methods["agent.delivery_diagnostics"]; !ok {
 		t.Fatal("generated OpenRPC missing agent.delivery_diagnostics")
 	}
-	for _, methodName := range []string{"bundle.list", "bundle.get", "bundle.agents", "bundle.register"} {
+	for _, methodName := range []string{"bundle.list", "bundle.get", "bundle.agents", "bundle.register", "bundle.delete"} {
 		if _, ok := methods[methodName]; !ok {
 			t.Fatalf("generated OpenRPC missing %s", methodName)
 		}
 	}
-	for _, schemaName := range []string{"BundleSummary", "BundleListResult", "BundleDetail", "BundleAgentDefinition", "BundleAgentsResult", "BundleRegistrationEnvelopeV1", "BundleRegistrationFile", "BundleRegisterDataBlobV1", "BundleRegistrationResult"} {
+	for _, schemaName := range []string{"BundleSummary", "BundleListResult", "BundleDetail", "BundleAgentDefinition", "BundleAgentsResult", "BundleRegistrationEnvelopeV1", "BundleRegistrationFile", "BundleRegisterDataBlobV1", "BundleRegistrationResult", "BundleDeleteResult"} {
 		if _, ok := doc.Components.Schemas[schemaName]; !ok {
 			t.Fatalf("generated OpenRPC missing %s", schemaName)
 		}
@@ -282,7 +282,7 @@ func TestMultiBundleSourceAuthorityPublishesOnlyImplementedBundleReadAndRunForkM
 	assertScalarValue(t, mustMappingValue(t, sourceEvidence, "run_fork_cli_authority_absorbed_from"), "#1038")
 
 	generatedPolicy := mustMappingValue(t, multi, "generated_artifact_policy")
-	assertScalarValue(t, mustMappingValue(t, generatedPolicy, "current_openrpc_status"), "bundle_read_catalog_register_and_run_fork_methods_published")
+	assertScalarValue(t, mustMappingValue(t, generatedPolicy, "current_openrpc_status"), "bundle_read_catalog_register_run_fork_and_force_delete_methods_published")
 	assertScalarContains(t, mustMappingValue(t, generatedPolicy, "rule"), "bundle.list")
 	assertScalarContains(t, mustMappingValue(t, generatedPolicy, "rule"), "run.fork")
 	assertScalarContains(t, mustMappingValue(t, generatedPolicy, "rule"), "bundle.register")
@@ -344,13 +344,13 @@ func TestMultiBundleSourceAuthorityPublishesOnlyImplementedBundleReadAndRunForkM
 	}
 
 	apiSurface := mustMappingValue(t, multi, "api_surface")
-	assertScalarValue(t, mustMappingValue(t, apiSurface, "publication_status"), "bundle_read_catalog_register_and_run_fork_generated_openrpc")
+	assertScalarValue(t, mustMappingValue(t, apiSurface, "publication_status"), "bundle_read_catalog_register_run_fork_and_force_delete_generated_openrpc")
 
 	bundleDelete := mustMappingValue(t, multi, "bundle_delete")
 	phaseFive := mustMappingValue(t, bundleDelete, "phase_5_atomicity")
 	assertScalarValue(t, mustMappingValue(t, phaseFive, "tracker"), "#1009")
-	assertScalarValue(t, mustMappingValue(t, phaseFive, "implementation_status"), "source_authority_only_no_runtime_behavior")
-	assertScalarValue(t, mustMappingValue(t, phaseFive, "canonical_runtime_owner"), "future bundle catalog store transaction/mutator")
+	assertScalarValue(t, mustMappingValue(t, phaseFive, "implementation_status"), "implemented_for_force_delete_runtime_non_force_pending")
+	assertScalarValue(t, mustMappingValue(t, phaseFive, "canonical_runtime_owner"), "internal/store.PostgresStore.ApplyBundleDeleteFinalMutation")
 	appliesTo := mustMappingValue(t, phaseFive, "applies_to")
 	if !sequenceContainsScalar(appliesTo, "#1018 non-force bundle.delete final bundle availability mutation") {
 		t.Fatal("phase_5_atomicity must bind non-force bundle.delete")
@@ -359,17 +359,21 @@ func TestMultiBundleSourceAuthorityPublishesOnlyImplementedBundleReadAndRunForkM
 		t.Fatal("phase_5_atomicity must bind force bundle.delete")
 	}
 	assertScalarContains(t, mustMappingValue(t, phaseFive, "transaction_rule"), "one database transaction")
+	assertScalarContains(t, mustMappingValue(t, phaseFive, "transaction_rule"), "serializes run creation")
 	assertScalarContains(t, mustMappingValue(t, phaseFive, "transaction_rule"), "before deleting the matching bundles")
 	assertScalarContains(t, mustMappingValue(t, phaseFive, "transaction_rule"), "shared store transaction owner")
 	order := mustMappingValue(t, phaseFive, "transaction_order")
-	if len(order.Content) != 2 {
-		t.Fatalf("phase_5_atomicity transaction_order has %d items, want 2", len(order.Content))
+	if len(order.Content) != 3 {
+		t.Fatalf("phase_5_atomicity transaction_order has %d items, want 3", len(order.Content))
 	}
-	if got := scalarValue(order.Content[0]); got != "update_eligible_runs_bundle_source_to_deleted" {
-		t.Fatalf("phase_5_atomicity transaction_order[0] = %q, want update first", got)
+	if got := scalarValue(order.Content[0]); got != "lock_runs_table_against_new_persisted_bundle_references" {
+		t.Fatalf("phase_5_atomicity transaction_order[0] = %q, want run-creation lock first", got)
 	}
-	if got := scalarValue(order.Content[1]); got != "delete_matching_bundles_row" {
-		t.Fatalf("phase_5_atomicity transaction_order[1] = %q, want delete second", got)
+	if got := scalarValue(order.Content[1]); got != "update_eligible_runs_bundle_source_to_deleted" {
+		t.Fatalf("phase_5_atomicity transaction_order[1] = %q, want update second", got)
+	}
+	if got := scalarValue(order.Content[2]); got != "delete_matching_bundles_row" {
+		t.Fatalf("phase_5_atomicity transaction_order[2] = %q, want delete last", got)
 	}
 	assertScalarContains(t, mustMappingValue(t, phaseFive, "reader_invariant"), "read runs.bundle_source before consulting bundles")
 	assertScalarContains(t, mustMappingValue(t, phaseFive, "reader_invariant"), "BUNDLE_UNAVAILABLE")
@@ -447,10 +451,11 @@ func TestMultiBundleSourceAuthorityPublishesOnlyImplementedBundleReadAndRunForkM
 	}
 
 	apiBoundary := mustMappingValue(t, mustMappingValue(t, root, "api_specification"), "multi_bundle_publication_boundary")
-	assertScalarValue(t, mustMappingValue(t, apiBoundary, "status"), "partial_bundle_read_catalog_register_and_run_fork_method_catalog")
+	assertScalarValue(t, mustMappingValue(t, apiBoundary, "status"), "partial_bundle_read_catalog_register_run_fork_and_force_delete_method_catalog")
 	assertScalarContains(t, mustMappingValue(t, apiBoundary, "rule"), "bundle.register is also published")
 	assertScalarContains(t, mustMappingValue(t, apiBoundary, "rule"), "does not imply a swarm bundle register CLI consumer")
-	assertScalarContains(t, mustMappingValue(t, apiBoundary, "rule"), "bundle.delete")
+	assertScalarContains(t, mustMappingValue(t, apiBoundary, "rule"), "Force-only bundle.delete is promoted")
+	assertScalarContains(t, mustMappingValue(t, apiBoundary, "rule"), "split to #1018")
 
 	for _, relPath := range []string{
 		filepath.Join("cmd", "swarm", "main.go"),
@@ -479,18 +484,13 @@ func TestMultiBundleSourceAuthorityPublishesOnlyImplementedBundleReadAndRunForkM
 	}
 
 	api := loadRepoAPISpec(t)
-	for _, methodName := range []string{"bundle.list", "bundle.get", "bundle.agents", "bundle.register"} {
+	for _, methodName := range []string{"bundle.list", "bundle.get", "bundle.agents", "bundle.register", "bundle.delete"} {
 		if _, ok := api.MethodCatalog[methodName]; !ok {
 			t.Fatalf("%s must be in live method_catalog after bundle catalog implementation lands", methodName)
 		}
 	}
 	if _, ok := api.MethodCatalog["run.fork"]; !ok {
 		t.Fatal("run.fork missing from live method_catalog after API/runtime handler promotion")
-	}
-	for _, methodName := range []string{"bundle.delete"} {
-		if _, ok := api.MethodCatalog[methodName]; ok {
-			t.Fatalf("%s must not be in live method_catalog until handler implementation lands", methodName)
-		}
 	}
 	generated, err := GenerateOpenRPC(api)
 	if err != nil {
@@ -499,12 +499,6 @@ func TestMultiBundleSourceAuthorityPublishesOnlyImplementedBundleReadAndRunForkM
 	var doc OpenRPCDocument
 	if err := json.Unmarshal(generated, &doc); err != nil {
 		t.Fatalf("unmarshal generated openrpc: %v", err)
-	}
-	for _, method := range doc.Methods {
-		switch method.Name {
-		case "bundle.delete":
-			t.Fatalf("%s must not be published in generated OpenRPC until implementation lands", method.Name)
-		}
 	}
 }
 
