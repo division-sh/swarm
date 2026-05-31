@@ -174,7 +174,7 @@ func lookupFlowInstanceConfigPath(handlerContext values.Context, path paths.Path
 	}
 	current := any(handlerContext.Bucket(path.Root).Raw())
 	for _, segment := range path.Segments {
-		object, ok := current.(map[string]any)
+		object, ok := flowInstanceConfigObject(current)
 		if !ok {
 			return nil, false
 		}
@@ -184,6 +184,17 @@ func lookupFlowInstanceConfigPath(handlerContext values.Context, path paths.Path
 		}
 	}
 	return current, true
+}
+
+func flowInstanceConfigObject(value any) (map[string]any, bool) {
+	switch typed := value.(type) {
+	case map[string]any:
+		return typed, true
+	case values.Bucket:
+		return typed.Raw(), true
+	default:
+		return nil, false
+	}
 }
 
 func resolveFlowInstanceID(pathSpec paths.Path, expr string, payload, entity map[string]any) string {
