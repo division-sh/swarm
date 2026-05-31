@@ -60,7 +60,7 @@ func TestForkCommandUsesRunForkRPCAndRenders(t *testing.T) {
 
 func TestForkCommandJSONPreservesAPIShape(t *testing.T) {
 	t.Setenv("SWARM_API_TOKEN", "test-token")
-	sourceRunID := "run_opaque-1"
+	sourceRunID := "55555555-5555-5555-5555-555555555555"
 	bundleHash := validBundleHash("e")
 	var captured jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -107,12 +107,14 @@ func TestForkCommandRejectsInvalidInputBeforeRequest(t *testing.T) {
 	}{
 		{name: "missing source", args: []string{"fork"}, wantStderr: "accepts 1 arg(s)"},
 		{name: "blank source", args: []string{"fork", " "}, wantStderr: "source run id is required"},
-		{name: "invalid source", args: []string{"fork", "bad id!"}, wantStderr: "source run id must match OpaqueId pattern"},
-		{name: "invalid bundle hash", args: []string{"fork", "run-1", "--bundle-hash", "sha256:abc"}, wantStderr: "--bundle-hash must match bundle-v1:sha256:<64 lowercase hex>"},
-		{name: "blank bundle hash", args: []string{"fork", "run-1", "--bundle-hash", ""}, wantStderr: "--bundle-hash must be non-empty"},
-		{name: "invalid at event", args: []string{"fork", "run-1", "--at-event", "bad id!"}, wantStderr: "--at-event must match OpaqueId pattern"},
-		{name: "blank at event", args: []string{"fork", "run-1", "--at-event", ""}, wantStderr: "--at-event must be non-empty"},
-		{name: "blank idempotency", args: []string{"fork", "run-1", "--idempotency-key", ""}, wantStderr: "--idempotency-key must be non-empty"},
+		{name: "invalid source", args: []string{"fork", "bad id!"}, wantStderr: "source run id must be a UUID"},
+		{name: "opaque non uuid source", args: []string{"fork", "run_opaque-1"}, wantStderr: "source run id must be a UUID"},
+		{name: "invalid bundle hash", args: []string{"fork", "11111111-1111-1111-1111-111111111111", "--bundle-hash", "sha256:abc"}, wantStderr: "--bundle-hash must match bundle-v1:sha256:<64 lowercase hex>"},
+		{name: "blank bundle hash", args: []string{"fork", "11111111-1111-1111-1111-111111111111", "--bundle-hash", ""}, wantStderr: "--bundle-hash must be non-empty"},
+		{name: "invalid at event", args: []string{"fork", "11111111-1111-1111-1111-111111111111", "--at-event", "bad id!"}, wantStderr: "--at-event must be a UUID"},
+		{name: "opaque non uuid at event", args: []string{"fork", "11111111-1111-1111-1111-111111111111", "--at-event", "event_opaque-1"}, wantStderr: "--at-event must be a UUID"},
+		{name: "blank at event", args: []string{"fork", "11111111-1111-1111-1111-111111111111", "--at-event", ""}, wantStderr: "--at-event must be non-empty"},
+		{name: "blank idempotency", args: []string{"fork", "11111111-1111-1111-1111-111111111111", "--idempotency-key", ""}, wantStderr: "--idempotency-key must be non-empty"},
 		{name: "legacy dry run flag", args: []string{"fork", "run-1", "--dry-run"}, wantStderr: "unknown flag"},
 		{name: "legacy materialize flag", args: []string{"fork", "run-1", "--materialize-only"}, wantStderr: "unknown flag"},
 		{name: "legacy activate flag", args: []string{"fork", "run-1", "--activate"}, wantStderr: "unknown flag"},

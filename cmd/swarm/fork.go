@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"regexp"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
 
@@ -14,8 +14,6 @@ const (
 	runForkMethod       = "run.fork"
 	runForkCommandShape = "swarm fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]"
 )
-
-var cliOpaqueIDPattern = regexp.MustCompile(`^[A-Za-z0-9_:.-]+$`)
 
 type forkCommandOptions struct {
 	apiOptions rootCommandOptions
@@ -89,7 +87,7 @@ func runForkCommand(ctx context.Context, out, errOut io.Writer, opts forkCommand
 }
 
 func (opts forkCommandOptions) params(rawSourceRunID string) (map[string]any, error) {
-	sourceRunID, err := validateOpaqueIDFlagValue("source run id", rawSourceRunID)
+	sourceRunID, err := validateRunForkUUIDValue("source run id", rawSourceRunID)
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +109,7 @@ func (opts forkCommandOptions) params(rawSourceRunID string) (map[string]any, er
 		return nil, err
 	}
 	if forkEventID != "" {
-		parsed, err := validateOpaqueIDFlagValue("--at-event", forkEventID)
+		parsed, err := validateRunForkUUIDValue("--at-event", forkEventID)
 		if err != nil {
 			return nil, err
 		}
@@ -140,15 +138,16 @@ func runForkAPIErrorClassifier() cliAPIErrorClassifier {
 	}
 }
 
-func validateOpaqueIDFlagValue(name, raw string) (string, error) {
+func validateRunForkUUIDValue(name, raw string) (string, error) {
 	value := strings.TrimSpace(raw)
 	if value == "" {
 		return "", fmt.Errorf("%s is required", name)
 	}
-	if len(value) > 256 || !cliOpaqueIDPattern.MatchString(value) {
-		return "", fmt.Errorf("%s must match OpaqueId pattern", name)
+	parsed, err := uuid.Parse(value)
+	if err != nil {
+		return "", fmt.Errorf("%s must be a UUID", name)
 	}
-	return value, nil
+	return parsed.String(), nil
 }
 
 func validateRunForkResult(result runForkResult) error {
@@ -170,13 +169,13 @@ func validateRunForkResult(result runForkResult) error {
 	if result.ExecutedEventCount < 0 {
 		return fmt.Errorf("malformed run.fork result: executed_event_count must be non-negative")
 	}
-	if _, err := validateOpaqueIDFlagValue("source_run_id", result.SourceRunID); err != nil {
+	if _, err := validateRunForkUUIDValue("source_run_id", result.SourceRunID); err != nil {
 		return fmt.Errorf("malformed run.fork result: %w", err)
 	}
-	if _, err := validateOpaqueIDFlagValue("fork_run_id", result.ForkRunID); err != nil {
+	if _, err := validateRunForkUUIDValue("fork_run_id", result.ForkRunID); err != nil {
 		return fmt.Errorf("malformed run.fork result: %w", err)
 	}
-	if _, err := validateOpaqueIDFlagValue("fork_event_id", result.ForkEventID); err != nil {
+	if _, err := validateRunForkUUIDValue("fork_event_id", result.ForkEventID); err != nil {
 		return fmt.Errorf("malformed run.fork result: %w", err)
 	}
 	if _, err := validateBundleHashArg("bundle_hash", result.BundleHash); err != nil {
