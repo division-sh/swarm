@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -12,9 +13,10 @@ import (
 )
 
 const (
-	bundleListMethod   = "bundle.list"
-	bundleGetMethod    = "bundle.get"
-	bundleAgentsMethod = "bundle.agents"
+	bundleListMethod     = "bundle.list"
+	bundleGetMethod      = "bundle.get"
+	bundleAgentsMethod   = "bundle.agents"
+	bundleRegisterMethod = "bundle.register"
 )
 
 type bundleListCommandOptions struct {
@@ -31,6 +33,16 @@ type bundleListCommandOptions struct {
 type bundleHashCommandOptions struct {
 	apiOptions rootCommandOptions
 	output     cliOutputOptions
+}
+
+type bundleRegisterCommandOptions struct {
+	apiOptions rootCommandOptions
+	output     cliOutputOptions
+
+	dataBlobPath      string
+	idempotencyKey    string
+	dataBlobSet       bool
+	idempotencyKeySet bool
 }
 
 type bundleListResult struct {
@@ -62,6 +74,13 @@ type bundleAgentsResult struct {
 	Agents []bundleAgentDefinition `json:"agents"`
 }
 
+type bundleRegistrationResult struct {
+	BundleHash    string `json:"bundle_hash"`
+	Registered    *bool  `json:"registered"`
+	HasData       *bool  `json:"has_data"`
+	DataSizeBytes *int64 `json:"data_size_bytes"`
+}
+
 type bundleAgentDefinition struct {
 	AgentID          string   `json:"agent_id"`
 	FlowInstance     string   `json:"flow_instance,omitempty"`
@@ -89,6 +108,7 @@ func newBundleCommand(opts rootCommandOptions) *cobra.Command {
 		newBundleListCommand(opts),
 		newBundleShowCommand(opts),
 		newBundleAgentsCommand(opts),
+		newBundleRegisterCommand(opts),
 	)
 	return cmd
 }
@@ -148,6 +168,28 @@ func newBundleAgentsCommand(opts rootCommandOptions) *cobra.Command {
 	}
 	bindCLIOutputFlags(cmd, &agentsOpts.output)
 	bindCLIAPIConnectionFlags(cmd, &agentsOpts.apiOptions)
+	return cmd
+}
+
+func newBundleRegisterCommand(opts rootCommandOptions) *cobra.Command {
+	registerOpts := bundleRegisterCommandOptions{apiOptions: opts}
+	cmd := &cobra.Command{
+		Use:   "register <registration-envelope-yaml>",
+		Short: "Register a prepared bundle envelope through /v1/rpc bundle.register.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			registerOpts.dataBlobSet = cmd.Flags().Changed("data-blob")
+			registerOpts.idempotencyKeySet = cmd.Flags().Changed("idempotency-key")
+			if err := registerOpts.output.validate(); err != nil {
+				return returnCLIValidationError(cmd.ErrOrStderr(), err)
+			}
+			return runBundleRegisterCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), registerOpts, args[0])
+		},
+	}
+	cmd.Flags().StringVar(&registerOpts.dataBlobPath, "data-blob", "", "Path to a BundleRegisterDataBlobV1 JSON document")
+	cmd.Flags().StringVar(&registerOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for bundle.register")
+	bindCLIOutputFlags(cmd, &registerOpts.output)
+	bindCLIAPIConnectionFlags(cmd, &registerOpts.apiOptions)
 	return cmd
 }
 
@@ -228,6 +270,29 @@ func runBundleAgentsCommand(ctx context.Context, out, errOut io.Writer, opts bun
 	})
 }
 
+func runBundleRegisterCommand(ctx context.Context, out, errOut io.Writer, opts bundleRegisterCommandOptions, envelopePath string) error {
+	params, err := opts.params(envelopePath)
+	if err != nil {
+		return returnCLIValidationError(errOut, err)
+	}
+	client, err := newCLIAPIClient(opts.apiOptions)
+	if err != nil {
+		return returnCLIAPIError(errOut, err, bundleAPIErrorClassifier())
+	}
+	var result bundleRegistrationResult
+	if err := client.call(ctx, bundleRegisterMethod, params, &result); err != nil {
+		return returnCLIAPIError(errOut, err, bundleAPIErrorClassifier())
+	}
+	if err := validateBundleRegistrationResult(result); err != nil {
+		return returnCLIAPIError(errOut, err, bundleAPIErrorClassifier())
+	}
+	return renderCLIOutput(out, errOut, opts.output, result, func(w io.Writer) {
+		writeBundleRegistrationHuman(w, result)
+	}, func() ([]string, error) {
+		return []string{result.BundleHash}, nil
+	})
+}
+
 func (opts bundleListCommandOptions) params() (map[string]any, error) {
 	params := map[string]any{}
 	if opts.limitSet {
@@ -246,8 +311,32 @@ func (opts bundleListCommandOptions) params() (map[string]any, error) {
 	return params, nil
 }
 
+func (opts bundleRegisterCommandOptions) params(envelopePath string) (map[string]any, error) {
+	contentYAML, err := readBundleRegisterTextFile("registration envelope", envelopePath)
+	if err != nil {
+		return nil, err
+	}
+	params := map[string]any{"content_yaml": contentYAML}
+	if opts.dataBlobSet {
+		dataBlob, err := readBundleRegisterDataBlob(opts.dataBlobPath)
+		if err != nil {
+			return nil, err
+		}
+		params["data_blob"] = dataBlob
+	}
+	if idempotencyKey, err := optionalNonEmptyFlag("--idempotency-key", opts.idempotencyKey, opts.idempotencyKeySet); err != nil {
+		return nil, err
+	} else if idempotencyKey != "" {
+		params["idempotency_key"] = idempotencyKey
+	}
+	return params, nil
+}
+
 func bundleAPIErrorClassifier() cliAPIErrorClassifier {
-	return cliAPIErrorClassifier{notFoundCodes: []string{"BUNDLE_NOT_FOUND"}}
+	return cliAPIErrorClassifier{
+		notFoundCodes: []string{"BUNDLE_NOT_FOUND"},
+		conflictCodes: []string{"BUNDLE_REGISTER_CONFLICT", "IDEMPOTENCY_CONFLICT"},
+	}
 }
 
 func validateBundleHashArg(name, raw string) (string, error) {
@@ -330,6 +419,66 @@ func validateBundleAgentsResult(result bundleAgentsResult) error {
 	return nil
 }
 
+func validateBundleRegistrationResult(result bundleRegistrationResult) error {
+	if _, err := validateBundleHashArg("bundle_hash", result.BundleHash); err != nil {
+		return fmt.Errorf("malformed bundle.register result: %w", err)
+	}
+	if result.Registered == nil {
+		return fmt.Errorf("malformed bundle.register result: registered is required")
+	}
+	if result.HasData == nil {
+		return fmt.Errorf("malformed bundle.register result: has_data is required")
+	}
+	if result.DataSizeBytes == nil {
+		return fmt.Errorf("malformed bundle.register result: data_size_bytes is required")
+	}
+	if *result.DataSizeBytes < 0 {
+		return fmt.Errorf("malformed bundle.register result: data_size_bytes must be non-negative")
+	}
+	return nil
+}
+
+func readBundleRegisterTextFile(label, path string) (string, error) {
+	if strings.TrimSpace(path) == "" {
+		return "", fmt.Errorf("%s path is required", label)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", label, err)
+	}
+	if info.IsDir() {
+		return "", fmt.Errorf("%s must be a file", label)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", label, err)
+	}
+	if strings.TrimSpace(string(raw)) == "" {
+		return "", fmt.Errorf("%s must be non-empty", label)
+	}
+	return string(raw), nil
+}
+
+func readBundleRegisterDataBlob(path string) (map[string]any, error) {
+	raw, err := readBundleRegisterTextFile("data blob", path)
+	if err != nil {
+		return nil, err
+	}
+	var dataBlob map[string]any
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	if err := decoder.Decode(&dataBlob); err != nil {
+		return nil, fmt.Errorf("--data-blob must contain one BundleRegisterDataBlobV1 JSON object: %w", err)
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return nil, fmt.Errorf("--data-blob must contain one BundleRegisterDataBlobV1 JSON object")
+	}
+	if dataBlob == nil {
+		return nil, fmt.Errorf("--data-blob must contain one BundleRegisterDataBlobV1 JSON object")
+	}
+	return dataBlob, nil
+}
+
 func writeBundleListHuman(w io.Writer, result bundleListResult) {
 	if w == nil {
 		return
@@ -396,6 +545,14 @@ func writeBundleAgentsHuman(w io.Writer, result bundleAgentsResult) {
 		}
 		fmt.Fprintln(w, strings.Join(fields, " "))
 	}
+}
+
+func writeBundleRegistrationHuman(w io.Writer, result bundleRegistrationResult) {
+	if w == nil {
+		return
+	}
+	fmt.Fprintf(w, "bundle %s registered=%t has_data=%t data_size_bytes=%d\n",
+		result.BundleHash, *result.Registered, *result.HasData, *result.DataSizeBytes)
 }
 
 func compactJSONValue(value any) string {
