@@ -303,6 +303,7 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 		AuthTokens: []string{testToken},
 		Handlers: OperatorReadHandlers(OperatorReadOptions{
 			AgentConversations: reads,
+			AgentUsage:         reads,
 		}),
 	})
 
@@ -801,6 +802,7 @@ func TestOperatorAgentConversationHandlersTypedErrors(t *testing.T) {
 				AuthTokens: []string{testToken},
 				Handlers: OperatorReadHandlers(OperatorReadOptions{
 					AgentConversations: tc.reads,
+					AgentUsage:         tc.reads,
 				}),
 			})
 			resp := rpcCall(t, handler, tc.body)
@@ -832,6 +834,7 @@ func TestOperatorAgentUsageFailsClosedOnMalformedOwnerData(t *testing.T) {
 		AuthTokens: []string{testToken},
 		Handlers: OperatorReadHandlers(OperatorReadOptions{
 			AgentConversations: reads,
+			AgentUsage:         reads,
 		}),
 	})
 
@@ -1104,7 +1107,7 @@ func TestOperatorAgentUsageRejectsInvalidWindow(t *testing.T) {
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: OperatorReadHandlers(OperatorReadOptions{
-			AgentConversations: &fakeAgentConversationReadStore{},
+			AgentUsage: &fakeAgentConversationReadStore{},
 		}),
 	})
 

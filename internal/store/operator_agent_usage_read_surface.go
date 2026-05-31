@@ -12,6 +12,15 @@ const (
 	AgentUsageAccountingEstimated = "estimated"
 )
 
+// OperatorAgentUsageReadStore is the backend-neutral owner for the public
+// per-agent usage read surface over canonical spend_ledger facts.
+type OperatorAgentUsageReadStore interface {
+	LoadOperatorAgentUsage(context.Context, string, OperatorAgentUsageOptions) (OperatorAgentUsage, error)
+}
+
+var _ OperatorAgentUsageReadStore = (*PostgresStore)(nil)
+var _ OperatorAgentUsageReadStore = (*SQLiteRuntimeStore)(nil)
+
 type OperatorAgentUsageOptions struct {
 	Since *time.Time
 	Until *time.Time
@@ -54,10 +63,6 @@ type OperatorAgentUsageBreakdown struct {
 }
 
 func (s *PostgresStore) LoadOperatorAgentUsage(ctx context.Context, agentID string, opts OperatorAgentUsageOptions) (OperatorAgentUsage, error) {
-	return NewOperatorAgentConversationReadSurface(s.DB, s, 0).LoadOperatorAgentUsage(ctx, agentID, opts)
-}
-
-func (r *OperatorAgentConversationReadSurface) LoadOperatorAgentUsage(ctx context.Context, agentID string, opts OperatorAgentUsageOptions) (OperatorAgentUsage, error) {
 	agentID = strings.TrimSpace(agentID)
 	if agentID == "" {
 		return OperatorAgentUsage{}, ErrAgentNotFound
@@ -65,17 +70,41 @@ func (r *OperatorAgentConversationReadSurface) LoadOperatorAgentUsage(ctx contex
 	if err := validateOperatorAgentUsageWindow(opts); err != nil {
 		return OperatorAgentUsage{}, err
 	}
-	if err := r.requireAgentUsageCapabilities(ctx); err != nil {
+	if err := s.requireAgentUsageCapabilities(ctx); err != nil {
 		return OperatorAgentUsage{}, err
 	}
-	if err := r.ensureAgentUsageAgentExists(ctx, agentID); err != nil {
+	if err := s.ensureAgentUsageAgentExists(ctx, agentID); err != nil {
 		return OperatorAgentUsage{}, err
 	}
-
-	breakdown, err := r.loadAgentUsageBreakdown(ctx, agentID, opts)
+	breakdown, err := s.loadAgentUsageBreakdown(ctx, agentID, opts)
 	if err != nil {
 		return OperatorAgentUsage{}, err
 	}
+	return buildOperatorAgentUsage(agentID, opts, breakdown)
+}
+
+func (s *SQLiteRuntimeStore) LoadOperatorAgentUsage(ctx context.Context, agentID string, opts OperatorAgentUsageOptions) (OperatorAgentUsage, error) {
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		return OperatorAgentUsage{}, ErrAgentNotFound
+	}
+	if err := validateOperatorAgentUsageWindow(opts); err != nil {
+		return OperatorAgentUsage{}, err
+	}
+	if err := s.requireAgentUsageCapabilities(ctx); err != nil {
+		return OperatorAgentUsage{}, err
+	}
+	if err := s.ensureAgentUsageAgentExists(ctx, agentID); err != nil {
+		return OperatorAgentUsage{}, err
+	}
+	breakdown, err := s.loadAgentUsageBreakdown(ctx, agentID, opts)
+	if err != nil {
+		return OperatorAgentUsage{}, err
+	}
+	return buildOperatorAgentUsage(agentID, opts, breakdown)
+}
+
+func buildOperatorAgentUsage(agentID string, opts OperatorAgentUsageOptions, breakdown []OperatorAgentUsageBreakdown) (OperatorAgentUsage, error) {
 	result := OperatorAgentUsage{
 		AgentID:   agentID,
 		Window:    OperatorAgentUsageWindow{Since: copyTimePtr(opts.Since), Until: copyTimePtr(opts.Until)},
@@ -121,18 +150,18 @@ func addOperatorAgentUsageTotals(a, b OperatorAgentUsageTotals) OperatorAgentUsa
 	}
 }
 
-func (r *OperatorAgentConversationReadSurface) requireAgentUsageCapabilities(ctx context.Context) error {
-	if r == nil || r.db == nil {
+func (s *PostgresStore) requireAgentUsageCapabilities(ctx context.Context) error {
+	if s == nil || s.DB == nil {
 		return fmt.Errorf("operator agent usage read owner requires postgres store")
 	}
-	caps, err := r.resolveConversationCapabilities(ctx)
+	caps, err := s.ResolveSchemaCapabilities(ctx)
 	if err != nil {
 		return err
 	}
 	if caps.Agents != SchemaFlavorCanonical {
 		return unsupportedSchemaCapability("agents", caps.Agents)
 	}
-	catalog, err := loadSchemaColumnCatalog(ctx, r.db)
+	catalog, err := loadSchemaColumnCatalog(ctx, s.DB)
 	if err != nil {
 		return err
 	}
@@ -154,9 +183,42 @@ func (r *OperatorAgentConversationReadSurface) requireAgentUsageCapabilities(ctx
 	return nil
 }
 
-func (r *OperatorAgentConversationReadSurface) ensureAgentUsageAgentExists(ctx context.Context, agentID string) error {
+func (s *SQLiteRuntimeStore) requireAgentUsageCapabilities(ctx context.Context) error {
+	if s == nil || s.DB == nil {
+		return fmt.Errorf("operator agent usage read owner requires sqlite runtime store")
+	}
+	caps, err := s.ResolveSchemaCapabilities(ctx)
+	if err != nil {
+		return err
+	}
+	if caps.Agents != SchemaFlavorCanonical {
+		return unsupportedSchemaCapability("agents", caps.Agents)
+	}
+	catalog, err := loadSQLiteSchemaColumnCatalog(ctx, s.DB)
+	if err != nil {
+		return err
+	}
+	required := map[string][]string{
+		"agents": {
+			"agent_id", "status",
+		},
+		"spend_ledger": {
+			"agent_id", "model", "input_tokens", "output_tokens", "cost_usd",
+			"invocation_type", "usage_accounting", "model_alias", "backend_profile",
+			"provider", "transport", "resolved_model", "created_at",
+		},
+	}
+	for table, columns := range required {
+		if !catalog.hasColumns(table, columns...) {
+			return fmt.Errorf("agent usage read owner requires canonical %s columns: %s", table, strings.Join(columns, ", "))
+		}
+	}
+	return nil
+}
+
+func (s *PostgresStore) ensureAgentUsageAgentExists(ctx context.Context, agentID string) error {
 	var exists bool
-	if err := r.db.QueryRowContext(ctx, `
+	if err := s.DB.QueryRowContext(ctx, `
 		SELECT EXISTS (
 			SELECT 1
 			FROM agents
@@ -172,7 +234,23 @@ func (r *OperatorAgentConversationReadSurface) ensureAgentUsageAgentExists(ctx c
 	return nil
 }
 
-func (r *OperatorAgentConversationReadSurface) loadAgentUsageBreakdown(ctx context.Context, agentID string, opts OperatorAgentUsageOptions) ([]OperatorAgentUsageBreakdown, error) {
+func (s *SQLiteRuntimeStore) ensureAgentUsageAgentExists(ctx context.Context, agentID string) error {
+	var count int
+	if err := s.DB.QueryRowContext(ctx, `
+		SELECT COUNT(1)
+		FROM agents
+		WHERE agent_id = ?
+		  AND status NOT IN ('terminated', 'ephemeral')
+	`, agentID).Scan(&count); err != nil {
+		return fmt.Errorf("load agent usage agent: %w", err)
+	}
+	if count == 0 {
+		return ErrAgentNotFound
+	}
+	return nil
+}
+
+func (s *PostgresStore) loadAgentUsageBreakdown(ctx context.Context, agentID string, opts OperatorAgentUsageOptions) ([]OperatorAgentUsageBreakdown, error) {
 	args := []any{agentID}
 	windowClause := strings.Builder{}
 	if opts.Since != nil {
@@ -183,7 +261,7 @@ func (r *OperatorAgentConversationReadSurface) loadAgentUsageBreakdown(ctx conte
 		args = append(args, opts.Until.UTC())
 		windowClause.WriteString(fmt.Sprintf("\n		  AND created_at < $%d", len(args)))
 	}
-	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`
+	rows, err := s.DB.QueryContext(ctx, fmt.Sprintf(`
 		WITH usage_rows AS (
 			SELECT
 				usage_accounting,
@@ -214,6 +292,95 @@ func (r *OperatorAgentConversationReadSurface) loadAgentUsageBreakdown(ctx conte
 			COALESCE(SUM(input_tokens), 0)::bigint,
 			COALESCE(SUM(output_tokens), 0)::bigint,
 			COALESCE(SUM(cost_usd), 0)::float8
+		FROM usage_rows
+		GROUP BY usage_accounting, invocation_type, model, model_alias, backend_profile, provider, transport, resolved_model
+		ORDER BY CASE usage_accounting WHEN 'exact' THEN 0 WHEN 'estimated' THEN 1 ELSE 2 END ASC, invocation_type ASC, model ASC, model_alias ASC
+	`, windowClause.String()), args...)
+	if err != nil {
+		return nil, fmt.Errorf("load agent usage breakdown: %w", err)
+	}
+	defer rows.Close()
+
+	var out []OperatorAgentUsageBreakdown
+	for rows.Next() {
+		var row OperatorAgentUsageBreakdown
+		if err := rows.Scan(
+			&row.UsageAccounting,
+			&row.InvocationType,
+			&row.Model,
+			&row.ModelAlias,
+			&row.BackendProfile,
+			&row.Provider,
+			&row.Transport,
+			&row.ResolvedModel,
+			&row.Totals.LedgerEntries,
+			&row.Totals.InputTokens,
+			&row.Totals.OutputTokens,
+			&row.Totals.EstimatedCostUSD,
+		); err != nil {
+			return nil, fmt.Errorf("scan agent usage breakdown: %w", err)
+		}
+		row.UsageAccounting = strings.TrimSpace(row.UsageAccounting)
+		row.InvocationType = strings.TrimSpace(row.InvocationType)
+		row.Model = strings.TrimSpace(row.Model)
+		row.ModelAlias = strings.TrimSpace(row.ModelAlias)
+		row.BackendProfile = strings.TrimSpace(row.BackendProfile)
+		row.Provider = strings.TrimSpace(row.Provider)
+		row.Transport = strings.TrimSpace(row.Transport)
+		row.ResolvedModel = strings.TrimSpace(row.ResolvedModel)
+		if err := validateOperatorAgentUsageBreakdown(row); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read agent usage breakdown: %w", err)
+	}
+	return out, nil
+}
+
+func (s *SQLiteRuntimeStore) loadAgentUsageBreakdown(ctx context.Context, agentID string, opts OperatorAgentUsageOptions) ([]OperatorAgentUsageBreakdown, error) {
+	args := []any{agentID}
+	windowClause := strings.Builder{}
+	if opts.Since != nil {
+		args = append(args, opts.Since.UTC())
+		windowClause.WriteString("\n		  AND created_at >= ?")
+	}
+	if opts.Until != nil {
+		args = append(args, opts.Until.UTC())
+		windowClause.WriteString("\n		  AND created_at < ?")
+	}
+	rows, err := s.DB.QueryContext(ctx, fmt.Sprintf(`
+		WITH usage_rows AS (
+			SELECT
+				usage_accounting,
+				invocation_type,
+				model,
+				COALESCE(NULLIF(trim(model_alias), ''), 'unknown') AS model_alias,
+				COALESCE(NULLIF(trim(backend_profile), ''), 'unknown') AS backend_profile,
+				COALESCE(NULLIF(trim(provider), ''), 'unknown') AS provider,
+				COALESCE(NULLIF(trim(transport), ''), 'unknown') AS transport,
+				COALESCE(NULLIF(trim(resolved_model), ''), model) AS resolved_model,
+				input_tokens,
+				output_tokens,
+				cost_usd
+			FROM spend_ledger
+			WHERE agent_id = ?
+			  %s
+		)
+		SELECT
+			usage_accounting,
+			invocation_type,
+			model,
+			model_alias,
+			backend_profile,
+			provider,
+			transport,
+			resolved_model,
+			COUNT(*),
+			COALESCE(SUM(input_tokens), 0),
+			COALESCE(SUM(output_tokens), 0),
+			COALESCE(SUM(cost_usd), 0)
 		FROM usage_rows
 		GROUP BY usage_accounting, invocation_type, model, model_alias, backend_profile, provider, transport, resolved_model
 		ORDER BY CASE usage_accounting WHEN 'exact' THEN 0 WHEN 'estimated' THEN 1 ELSE 2 END ASC, invocation_type ASC, model ASC, model_alias ASC

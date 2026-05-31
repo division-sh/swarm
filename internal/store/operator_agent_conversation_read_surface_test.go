@@ -10,6 +10,7 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/google/uuid"
+	"swarm/internal/runtime/budgetspend"
 	runtimeactors "swarm/internal/runtime/core/actors"
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimesessions "swarm/internal/runtime/sessions"
@@ -707,6 +708,115 @@ func TestOperatorAgentReadSurfaceLoadAgentUsageSplitsExactAndEstimated(t *testin
 	}
 	if got := result.Breakdown[1]; got.UsageAccounting != AgentUsageAccountingEstimated || got.InvocationType != "claude_cli" || got.Model != "sonnet" || got.ModelAlias != "regular" || got.BackendProfile != "claude_cli" || got.Provider != "claude" || got.Transport != "cli" || got.ResolvedModel != "sonnet" {
 		t.Fatalf("second breakdown = %#v", got)
+	}
+}
+
+func TestSQLiteRuntimeStoreLoadAgentUsageSplitsExactAndEstimated(t *testing.T) {
+	ctx := context.Background()
+	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	seedOperatorAgentUsageAgent(t, ctx, sqliteStore, "agent-1", "active")
+	seedOperatorAgentUsageAgent(t, ctx, sqliteStore, "agent-2", "active")
+
+	since := time.Date(2026, 5, 21, 9, 0, 0, 0, time.UTC)
+	until := time.Date(2026, 5, 21, 10, 0, 0, 0, time.UTC)
+	records := []budgetspend.SpendRecord{
+		{FlowInstance: "flow/a", AgentID: "agent-1", Model: "claude-3-5-sonnet", ModelAlias: "regular", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api", ResolvedModel: "claude-3-5-sonnet", InputTokens: 100, OutputTokens: 25, CostUSD: 0.000675, InvocationType: "anthropic", UsageAccounting: AgentUsageAccountingExact, RecordedAt: since},
+		{FlowInstance: "flow/a", AgentID: "agent-1", Model: "sonnet", ModelAlias: "regular", BackendProfile: "claude_cli", Provider: "claude", Transport: "cli", ResolvedModel: "sonnet", InputTokens: 50, OutputTokens: 10, CostUSD: 0.000300, InvocationType: "claude_cli", UsageAccounting: AgentUsageAccountingEstimated, RecordedAt: since.Add(time.Minute)},
+		{FlowInstance: "flow/a", AgentID: "agent-1", Model: "claude-3-5-sonnet", ModelAlias: "regular", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api", ResolvedModel: "claude-3-5-sonnet", InputTokens: 7, OutputTokens: 3, CostUSD: 0.000010, InvocationType: "anthropic", UsageAccounting: AgentUsageAccountingExact, RecordedAt: until},
+		{FlowInstance: "flow/a", AgentID: "agent-2", Model: "claude-3-5-sonnet", ModelAlias: "regular", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api", ResolvedModel: "claude-3-5-sonnet", InputTokens: 999, OutputTokens: 999, CostUSD: 1.000000, InvocationType: "anthropic", UsageAccounting: AgentUsageAccountingExact, RecordedAt: since.Add(time.Minute)},
+	}
+	for _, rec := range records {
+		if err := sqliteStore.RecordSpend(ctx, rec); err != nil {
+			t.Fatalf("RecordSpend(%s/%s): %v", rec.AgentID, rec.UsageAccounting, err)
+		}
+	}
+
+	result, err := sqliteStore.LoadOperatorAgentUsage(ctx, "agent-1", OperatorAgentUsageOptions{Since: &since, Until: &until})
+	if err != nil {
+		t.Fatalf("LoadOperatorAgentUsage: %v", err)
+	}
+	if result.AgentID != "agent-1" {
+		t.Fatalf("agent_id = %q", result.AgentID)
+	}
+	if result.Window.Since == nil || !result.Window.Since.Equal(since) || result.Window.Until == nil || !result.Window.Until.Equal(until) {
+		t.Fatalf("window = %#v", result.Window)
+	}
+	if result.Usage.Exact.LedgerEntries != 1 || result.Usage.Exact.InputTokens != 100 || result.Usage.Exact.OutputTokens != 25 {
+		t.Fatalf("exact usage = %#v", result.Usage.Exact)
+	}
+	if result.Usage.Estimated.LedgerEntries != 1 || result.Usage.Estimated.InputTokens != 50 || result.Usage.Estimated.OutputTokens != 10 {
+		t.Fatalf("estimated usage = %#v", result.Usage.Estimated)
+	}
+	if len(result.Breakdown) != 2 {
+		t.Fatalf("breakdown = %#v, want two rows", result.Breakdown)
+	}
+	if got := result.Breakdown[0]; got.UsageAccounting != AgentUsageAccountingExact || got.InvocationType != "anthropic" || got.Model != "claude-3-5-sonnet" || got.ModelAlias != "regular" || got.BackendProfile != "anthropic" || got.Provider != "anthropic" || got.Transport != "api" || got.ResolvedModel != "claude-3-5-sonnet" {
+		t.Fatalf("first breakdown = %#v", got)
+	}
+	if got := result.Breakdown[1]; got.UsageAccounting != AgentUsageAccountingEstimated || got.InvocationType != "claude_cli" || got.Model != "sonnet" || got.ModelAlias != "regular" || got.BackendProfile != "claude_cli" || got.Provider != "claude" || got.Transport != "cli" || got.ResolvedModel != "sonnet" {
+		t.Fatalf("second breakdown = %#v", got)
+	}
+}
+
+func TestSQLiteRuntimeStoreLoadAgentUsageEmptyAndAgentExistence(t *testing.T) {
+	ctx := context.Background()
+	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	seedOperatorAgentUsageAgent(t, ctx, sqliteStore, "agent-empty", "active")
+	seedOperatorAgentUsageAgent(t, ctx, sqliteStore, "agent-terminated", "terminated")
+	seedOperatorAgentUsageAgent(t, ctx, sqliteStore, "agent-ephemeral", "ephemeral")
+
+	result, err := sqliteStore.LoadOperatorAgentUsage(ctx, "agent-empty", OperatorAgentUsageOptions{})
+	if err != nil {
+		t.Fatalf("LoadOperatorAgentUsage empty: %v", err)
+	}
+	if result.AgentID != "agent-empty" || result.Breakdown == nil || len(result.Breakdown) != 0 {
+		t.Fatalf("empty result = %#v", result)
+	}
+	if result.Usage.Exact.LedgerEntries != 0 || result.Usage.Estimated.LedgerEntries != 0 {
+		t.Fatalf("empty usage totals = %#v", result.Usage)
+	}
+	for _, agentID := range []string{"missing", "agent-terminated", "agent-ephemeral"} {
+		_, err := sqliteStore.LoadOperatorAgentUsage(ctx, agentID, OperatorAgentUsageOptions{})
+		if !errors.Is(err, ErrAgentNotFound) {
+			t.Fatalf("LoadOperatorAgentUsage(%s) error = %v, want ErrAgentNotFound", agentID, err)
+		}
+	}
+}
+
+func TestSQLiteRuntimeStoreLoadAgentUsageFailsClosedOnMalformedRows(t *testing.T) {
+	ctx := context.Background()
+	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	seedOperatorAgentUsageAgent(t, ctx, sqliteStore, "agent-1", "active")
+	if _, err := sqliteStore.DB.ExecContext(ctx, `
+		INSERT INTO spend_ledger (
+			flow_instance, agent_id, model, invocation_type, usage_accounting, created_at
+		) VALUES (
+			'flow/a', 'agent-1', '', 'anthropic', 'exact', ?
+		)
+	`, time.Date(2026, 5, 21, 9, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatalf("seed malformed spend row: %v", err)
+	}
+	_, err := sqliteStore.LoadOperatorAgentUsage(ctx, "agent-1", OperatorAgentUsageOptions{})
+	if err == nil || !strings.Contains(err.Error(), "empty model") {
+		t.Fatalf("LoadOperatorAgentUsage malformed error = %v, want empty model", err)
+	}
+}
+
+func seedOperatorAgentUsageAgent(t *testing.T, ctx context.Context, store *SQLiteRuntimeStore, agentID string, status string) {
+	t.Helper()
+	if err := store.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+		Config: runtimeactors.AgentConfig{
+			ID:               agentID,
+			Role:             "researcher",
+			Type:             "managed",
+			Model:            "cheap",
+			ConversationMode: runtimesessions.RuntimeModeTask.String(),
+			Config:           json.RawMessage(`{"system_prompt":"usage"}`),
+		},
+		Status:    status,
+		StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("UpsertAgent %s: %v", agentID, err)
 	}
 }
 

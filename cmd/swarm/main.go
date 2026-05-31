@@ -139,6 +139,7 @@ type storeBundle struct {
 	BudgetSpendStore    budgetspend.Store
 	MailboxAPIStore     apiv1.MailboxAPIStore
 	ObservabilityStore  apiv1.ObservabilityReadStore
+	AgentUsageStore     apiv1.AgentUsageReadStore
 	RuntimeIngressStore runtimeingress.Store
 	IdempotencyStore    apiv1.APIIdempotencyStore
 	TurnStore           runtimellm.TurnPersistence
@@ -622,6 +623,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		Observability:      apiObservability,
 		Entities:           apiEntities,
 		AgentConversations: apiAgentConversations,
+		AgentUsage:         stores.AgentUsageStore,
 		BundleCatalog:      stores.Postgres,
 		BundleDelete: &runtimebundledelete.Coordinator{
 			Planner:            stores.Postgres,
@@ -2089,6 +2091,7 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 			BudgetSpendStore:    pg,
 			MailboxAPIStore:     pg,
 			ObservabilityStore:  pg,
+			AgentUsageStore:     pg,
 			RuntimeIngressStore: pg,
 			IdempotencyStore:    pg,
 			TurnStore:           pg,
@@ -2125,6 +2128,7 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 			BudgetSpendStore:    sqliteStore,
 			MailboxAPIStore:     sqliteStore,
 			ObservabilityStore:  sqliteStore,
+			AgentUsageStore:     sqliteStore,
 			RuntimeIngressStore: sqliteStore,
 			IdempotencyStore:    sqliteStore,
 			TurnStore:           sqliteStore,

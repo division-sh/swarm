@@ -333,7 +333,7 @@ func readOnlyHTTPRuntimeErrorProbes() []readOnlyHTTPRuntimeErrorProbe {
 			Code:   AgentNotFoundCode,
 			Options: func(t *testing.T) OperatorReadOptions {
 				opts := readOnlyRuntimeProbeOptions(t)
-				opts.AgentConversations = &fakeAgentConversationReadStore{agentUsageErr: store.ErrAgentNotFound}
+				opts.AgentUsage = &fakeAgentConversationReadStore{agentUsageErr: store.ErrAgentNotFound}
 				return opts
 			},
 		},
@@ -810,6 +810,60 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 			currentConversationResult: &store.OperatorConversationDetail{
 				Conversation: store.OperatorConversationSummary{SessionID: sessionID, AgentID: "agent-1", RunID: runID, StartedAt: now, Status: "active"},
 				Turns:        []store.OperatorConversationTurn{{TurnIndex: 1, TurnID: "turn-current-1", TriggerEventID: eventID, TriggerEventType: "scan.requested", ParseOK: true}},
+			},
+		},
+		AgentUsage: &fakeAgentConversationReadStore{
+			agentUsageResult: store.OperatorAgentUsage{
+				AgentID: "agent-1",
+				Window: store.OperatorAgentUsageWindow{
+					Since: ptrTime(now.Add(-time.Hour)),
+					Until: ptrTime(now),
+				},
+				Usage: store.OperatorAgentUsageByAccounting{
+					Exact: store.OperatorAgentUsageTotals{
+						LedgerEntries:    1,
+						InputTokens:      100,
+						OutputTokens:     25,
+						EstimatedCostUSD: 0.000675,
+					},
+					Estimated: store.OperatorAgentUsageTotals{
+						LedgerEntries:    1,
+						InputTokens:      50,
+						OutputTokens:     10,
+						EstimatedCostUSD: 0.000300,
+					},
+				},
+				Breakdown: []store.OperatorAgentUsageBreakdown{{
+					UsageAccounting: store.AgentUsageAccountingExact,
+					InvocationType:  "anthropic",
+					Model:           "claude-3-5-sonnet",
+					ModelAlias:      "regular",
+					BackendProfile:  "anthropic",
+					Provider:        "anthropic",
+					Transport:       "api",
+					ResolvedModel:   "claude-3-5-sonnet",
+					Totals: store.OperatorAgentUsageTotals{
+						LedgerEntries:    1,
+						InputTokens:      100,
+						OutputTokens:     25,
+						EstimatedCostUSD: 0.000675,
+					},
+				}, {
+					UsageAccounting: store.AgentUsageAccountingEstimated,
+					InvocationType:  "claude_cli",
+					Model:           "sonnet",
+					ModelAlias:      "regular",
+					BackendProfile:  "claude_cli",
+					Provider:        "claude",
+					Transport:       "cli",
+					ResolvedModel:   "sonnet",
+					Totals: store.OperatorAgentUsageTotals{
+						LedgerEntries:    1,
+						InputTokens:      50,
+						OutputTokens:     10,
+						EstimatedCostUSD: 0.000300,
+					},
+				}},
 			},
 		},
 		ConversationForks: &fakeConversationForkLifecycleStore{

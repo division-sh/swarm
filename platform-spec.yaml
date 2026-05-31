@@ -2320,11 +2320,29 @@ engine:
         side effects through the same BudgetTracker behavior owner. Postgres remains authoritative for production runtime
         budget/spend semantics. SQLite must not substitute an in-memory spend ledger for persisted local runtime budget truth.
       excludes:
-      - public operator agent.usage reads over spend_ledger owned by #1157
+      - public operator agent.usage reads over spend_ledger owned by operator_agent_usage_read_rows
       - tool executor entity and human-task persistence owned by runtime_tool_entity_and_human_task_rows
       - runtime diagnostics/logging owned by #1150
       - local/dev default flip and zero-service swarm run proof owned by #1088
       - production multi-writer SQLite budget concurrency semantics
+    - name: operator_agent_usage_read_rows
+      owner: internal/store.OperatorAgentUsageReadStore consumed by api_specification.method_catalog.agent.usage through apiv1.OperatorReadOptions.AgentUsage
+      promoted_by: '#1157'
+      sqlite_owner: internal/store.SQLiteRuntimeStore.LoadOperatorAgentUsage over canonical agents and spend_ledger rows
+      postgres_owner: internal/store.PostgresStore.LoadOperatorAgentUsage over canonical agents and spend_ledger rows
+      scope: >
+        The public agent.usage read surface consumes one backend-neutral per-agent usage read owner over canonical
+        spend_ledger facts for exact and estimated accounting. The owner validates active agent existence, applies
+        since-inclusive and until-exclusive created_at windows, aggregates exact and estimated totals, and returns
+        model, model_alias, backend_profile, provider, transport, resolved_model, and invocation_type breakdowns for
+        both explicit SQLite local/dev runtime stores and Postgres production stores. API handlers must not reconstruct
+        usage from runtime memory, dashboard-local SQL, diagnostics, trace streams, EventBus payloads, or tests.
+      excludes:
+      - spend writes, threshold evaluation, and runtime budget side effects owned by runtime_budget_spend_rows
+      - agent.diagnose, agent.delivery_diagnostics, conversation, dashboard, trace, and runtime diagnostics surfaces
+      - local/dev default flip and zero-service swarm run proof owned by #1088
+      - docs/CI/repo-wide closeout owned by #1089
+      - production multi-writer SQLite concurrency semantics
     - name: runtime_tool_entity_and_human_task_rows
       owner: runtimetools.EntityPersistence and runtimetools.HumanTaskPersistence consumed through runtime.Stores and ExecutorOptions
       promoted_by: '#1149'
@@ -2338,7 +2356,7 @@ engine:
         not receive a raw SQLite SQL handle as a compatibility seam for these surfaces.
       excludes:
       - public operator mailbox API decisions owned by api_specification.method_catalog.mailbox.*
-      - public operator agent.usage reads over spend_ledger owned by #1157
+      - public operator agent.usage reads over spend_ledger owned by operator_agent_usage_read_rows
       - runtime diagnostics/logging owned by #1150
       - local/dev default flip and zero-service swarm run proof owned by #1088
       - production multi-writer SQLite concurrency semantics
@@ -2354,7 +2372,7 @@ engine:
         passing a raw SQLite *sql.DB into RuntimeLogger. Postgres remains authoritative for production runtime-log
         persistence, bundle-source fail-closed run creation, and run counter synchronization.
       excludes:
-      - public operator agent.usage reads over spend_ledger owned by #1157
+      - public operator agent.usage reads over spend_ledger owned by operator_agent_usage_read_rows
       - local/dev default flip and zero-service swarm run proof owned by #1088
       - docs/CI/repo-wide closeout owned by #1089
       - production multi-writer SQLite concurrency semantics
