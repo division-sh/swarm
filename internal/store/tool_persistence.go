@@ -702,8 +702,12 @@ func sqliteToolEntityWhere(query runtimetools.EntityStateQuery) (string, []any, 
 		if path == "" {
 			return "", nil, fmt.Errorf("entity field filter path is required")
 		}
-		clauses = append(clauses, "json_extract(COALESCE(fields, '{}'), ?) = ?")
-		args = append(args, sqliteToolJSONPath(path), sqliteToolJSONCompareValue(filter.Value))
+		clause, clauseArgs, err := sqliteToolEntityFieldEqualsClause(path, filter.Value)
+		if err != nil {
+			return "", nil, err
+		}
+		clauses = append(clauses, clause)
+		args = append(args, clauseArgs...)
 	}
 	return strings.Join(clauses, " AND "), args, nil
 }
@@ -742,6 +746,30 @@ func sqliteToolJSONPath(path string) string {
 		out += "." + segment
 	}
 	return out
+}
+
+func sqliteToolEntityFieldEqualsClause(path string, value any) (string, []any, error) {
+	jsonPath := sqliteToolJSONPath(path)
+	if sqliteToolStructuredJSONCompareValue(value) {
+		valueJSON, err := json.Marshal(value)
+		if err != nil {
+			return "", nil, fmt.Errorf("marshal sqlite entity field filter %s: %w", path, err)
+		}
+		return "json(json_extract(COALESCE(fields, '{}'), ?)) = json(?)", []any{jsonPath, string(valueJSON)}, nil
+	}
+	return "json_extract(COALESCE(fields, '{}'), ?) = ?", []any{jsonPath, sqliteToolJSONCompareValue(value)}, nil
+}
+
+func sqliteToolStructuredJSONCompareValue(value any) bool {
+	switch typed := value.(type) {
+	case map[string]any, []any:
+		return true
+	case json.RawMessage:
+		trimmed := strings.TrimSpace(string(typed))
+		return strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[")
+	default:
+		return false
+	}
 }
 
 func sqliteToolJSONCompareValue(value any) any {

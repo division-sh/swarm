@@ -135,6 +135,46 @@ accounts:
 	}
 }
 
+func TestSQLiteEntityPersistence_MarshalsStructuredFilterValues(t *testing.T) {
+	sqliteStore := newSQLiteRuntimeToolStoreForTest(t)
+	ensureSQLiteEntityToolTestRun(t, sqliteStore)
+	ctx := runtimecorrelation.WithRunID(context.Background(), entityToolTestRunID)
+	entityID := uuid.NewString()
+	if err := sqliteStore.CreateEntity(ctx, runtimetools.EntityCreateRecord{
+		RunID:        entityToolTestRunID,
+		EntityID:     entityID,
+		FlowInstance: "review/inst-structured",
+		EntityType:   "account",
+		CurrentState: "queued",
+		FieldsJSON: json.RawMessage(`{
+			"business_brief":{"summary":"validated"},
+			"tags":["alpha","beta"]
+		}`),
+		CreatedAt: time.Now().UTC(),
+		Writer: runtimetools.EntityMutationWriter{
+			Type:        "platform",
+			ID:          "sqlite-structured-filter-test",
+			HandlerStep: "seed",
+		},
+	}); err != nil {
+		t.Fatalf("seed sqlite structured entity: %v", err)
+	}
+
+	rows, err := sqliteStore.QueryEntityStates(ctx, runtimetools.EntityStateQuery{
+		RunID: entityToolTestRunID,
+		FieldEquals: []runtimetools.EntityFieldEquals{
+			{Path: "business_brief", Value: map[string]any{"summary": "validated"}},
+			{Path: "tags", Value: []any{"alpha", "beta"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("query sqlite structured field filters: %v", err)
+	}
+	if len(rows) != 1 || strings.TrimSpace(asString(rows[0]["entity_id"])) != entityID {
+		t.Fatalf("structured filter rows = %#v, want seeded entity %s", rows, entityID)
+	}
+}
+
 func TestRoleScopedEntityTools_SQLiteCurrentEntityPersistence(t *testing.T) {
 	actor := models.AgentConfig{ID: "validation-orchestrator", Role: "validation_orchestrator", Tools: []string{"save_entity_field"}}
 	bundle := loadRoleScopedEntityToolBundle(t, actor, true)
