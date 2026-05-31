@@ -51,6 +51,9 @@ func cliAPIConnectionFlagAfterLeafCommand(prefix []string) bool {
 		{"event", "view"},
 		{"event", "publish"},
 		{"event", "replay"},
+		{"bundle", "list"},
+		{"bundle", "show"},
+		{"bundle", "agents"},
 		{"agents", "list"},
 		{"agent", "view"},
 		{"agent", "restart"},
@@ -69,6 +72,7 @@ func cliAPIConnectionFlagAfterLeafCommand(prefix []string) bool {
 		{"control", "continue"},
 		{"control", "stop"},
 		{"control", "nuke"},
+		{"fork"},
 	}
 	for _, command := range leafCommands {
 		if argsHaveCommandPrefix(prefix, command) {
