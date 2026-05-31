@@ -446,8 +446,9 @@ nodes:
       - "#1086 must port core runtime persistence stores behind backend-neutral SQLite/Postgres contracts."
       - "#1087 must port session, locking, delivery, replay, trace-stream, and runtime diagnostics/log semantics for the SQLite local runtime path; #1147-#1150 are the focused runtime-construction children under that parent."
       - "#1186 promotes backend-neutral mailbox_write materialization through runtimepipeline.MailboxWriteMaterializationStore and removes the residual raw-SQL runtime construction blocker for explicit SQLite selection."
+      - "#1157 promotes backend-neutral public agent.usage read parity through internal/store.OperatorAgentUsageReadStore over canonical spend_ledger facts for Postgres and explicit SQLite."
       - "#1088 must flip the active local/dev default to SQLite only after zero-service swarm run and explicit Postgres opt-in are proven together."
-      - "#1089 must close docs, CI, repo-wide stale-default audit, and parent proof before #1066 closes; #1157 agent.usage read parity and production SQLite multi-writer semantics remain explicitly split until separately closed."
+      - "#1089 must close docs, CI, repo-wide stale-default audit, and parent proof before #1066 closes; production SQLite multi-writer semantics remain explicitly split until separately closed."
     representative_issues:
       - 1066
       - 1084
@@ -456,6 +457,7 @@ nodes:
       - 1087
       - 1088
       - 1089
+      - 1157
       - 1186
     common_framing_mistakes:
       too_broad:
