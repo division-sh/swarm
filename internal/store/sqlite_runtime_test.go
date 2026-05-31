@@ -667,6 +667,116 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 	}
 }
 
+func TestSQLiteRuntimeStoreMarkAgentTerminatedCleansRuntimeState(t *testing.T) {
+	ctx := context.Background()
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	now := time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC)
+	store.SetNowFnForTest(func() time.Time { return now })
+
+	if err := store.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+		Config: runtimeactors.AgentConfig{
+			ID:                    "agent-cleanup-1",
+			Role:                  "operator",
+			Mode:                  "global",
+			Model:                 "regular",
+			LLMBackend:            "anthropic",
+			ConversationMode:      "session",
+			SessionScope:          "global",
+			SessionScopeAuthority: runtimeactors.SessionScopeAuthorityPlatformInternal,
+			Config:                json.RawMessage(`{"system_prompt":"test","tools":[]}`),
+		},
+		Status:    "active",
+		StartedAt: now,
+	}); err != nil {
+		t.Fatalf("UpsertAgent: %v", err)
+	}
+	lease, err := store.Acquire(ctx, "agent-cleanup-1", runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "owner-1", "")
+	if err != nil {
+		t.Fatalf("Acquire session: %v", err)
+	}
+	if err := store.UpsertConversation(ctx, runtimellm.ConversationRecord{
+		SessionID:    lease.SessionID,
+		AgentID:      "agent-cleanup-1",
+		SessionScope: "global",
+		ScopeKey:     "global",
+		Mode:         "session",
+		Messages:     []runtimellm.Message{{Role: "user", Content: "hello"}},
+		Summary:      "session",
+		TurnCount:    1,
+		Status:       "active",
+	}); err != nil {
+		t.Fatalf("UpsertConversation(session): %v", err)
+	}
+	if _, err := store.DB.ExecContext(ctx, `
+		INSERT INTO agent_conversation_audits (
+			session_id, agent_id, scope_key, scope, conversation, turn_count,
+			runtime_mode, runtime_state, status, created_at, updated_at
+		)
+		VALUES (?, ?, ?, ?, '[]', 0, 'task', '{}', 'active', ?, ?)
+	`, uuid.NewString(), "agent-cleanup-1", "global", "global", now, now); err != nil {
+		t.Fatalf("seed task audit: %v", err)
+	}
+
+	if err := store.MarkAgentTerminated(ctx, "agent-cleanup-1"); err != nil {
+		t.Fatalf("MarkAgentTerminated: %v", err)
+	}
+
+	var (
+		agentStatus      string
+		sessionStatus    string
+		sessionReason    string
+		terminatedRaw    any
+		auditStatus      string
+		activeAuditCount int
+	)
+	if err := store.DB.QueryRowContext(ctx, `SELECT status FROM agents WHERE agent_id = ?`, "agent-cleanup-1").Scan(&agentStatus); err != nil {
+		t.Fatalf("read agent status: %v", err)
+	}
+	if err := store.DB.QueryRowContext(ctx, `
+		SELECT status, COALESCE(termination_reason, ''), terminated_at
+		FROM agent_sessions
+		WHERE agent_id = ?
+	`, "agent-cleanup-1").Scan(&sessionStatus, &sessionReason, &terminatedRaw); err != nil {
+		t.Fatalf("read session status: %v", err)
+	}
+	if err := store.DB.QueryRowContext(ctx, `
+		SELECT status
+		FROM agent_conversation_audits
+		WHERE agent_id = ?
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, "agent-cleanup-1").Scan(&auditStatus); err != nil {
+		t.Fatalf("read audit status: %v", err)
+	}
+	if err := store.DB.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM agent_conversation_audits
+		WHERE agent_id = ?
+		  AND status = 'active'
+	`, "agent-cleanup-1").Scan(&activeAuditCount); err != nil {
+		t.Fatalf("count active audits: %v", err)
+	}
+	terminatedAt, ok, err := sqliteTimeValue(terminatedRaw)
+	if err != nil {
+		t.Fatalf("scan terminated_at: %v", err)
+	}
+	if agentStatus != "terminated" {
+		t.Fatalf("agent status = %q, want terminated", agentStatus)
+	}
+	if sessionStatus != "terminated" {
+		t.Fatalf("session status = %q, want terminated", sessionStatus)
+	}
+	if sessionReason != "cancelled" {
+		t.Fatalf("session termination_reason = %q, want cancelled", sessionReason)
+	}
+	if !ok || terminatedAt.IsZero() {
+		t.Fatalf("session terminated_at = %v ok=%v, want non-zero", terminatedAt, ok)
+	}
+	if auditStatus != "terminated" || activeAuditCount != 0 {
+		t.Fatalf("audit status = %q active_count=%d, want terminated and no active audits", auditStatus, activeAuditCount)
+	}
+}
+
 func operatorDeliveriesContain(deliveries []OperatorEventDelivery, subscriberType, subscriberID string) bool {
 	for _, delivery := range deliveries {
 		if delivery.SubscriberType == subscriberType && delivery.SubscriberID == subscriberID {

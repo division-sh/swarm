@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -37,6 +38,15 @@ type flowInstanceRouteInstaller interface {
 
 type flowInstanceRouteRemover interface {
 	RemoveFlowInstanceRoute(identity runtimeflowidentity.Route) error
+}
+
+type terminalFlowInstanceSideEffectPlan struct {
+	EntityID   string
+	FlowPath   string
+	AgentIDs   []string
+	Route      runtimeflowidentity.Route
+	Remover    flowInstanceRouteRemover
+	FinalState string
 }
 
 func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
@@ -472,15 +482,61 @@ func (am *AgentManager) DeactivateFlowInstanceModel(ctx context.Context, req run
 	}
 	am.mu.RUnlock()
 	sort.Strings(agentIDs)
-	for _, agentID := range agentIDs {
+	remover, ok := am.bus.(flowInstanceRouteRemover)
+	if !ok || remover == nil {
+		return fmt.Errorf("event bus does not support derived flow-instance route removal for %s", canonicalFlowPath)
+	}
+	plan := terminalFlowInstanceSideEffectPlan{
+		EntityID:   entityID,
+		FlowPath:   canonicalFlowPath,
+		AgentIDs:   agentIDs,
+		Route:      canonicalRoute,
+		Remover:    remover,
+		FinalState: req.FinalState,
+	}
+	if runtimepipeline.QueuePipelinePostCommitAction(ctx, func() {
+		if err := am.applyTerminalFlowInstanceSideEffects(plan); err != nil {
+			am.logTerminalFlowInstanceSideEffectFailure(plan, err)
+		}
+	}) {
+		return nil
+	}
+	return am.applyTerminalFlowInstanceSideEffects(plan)
+}
+
+func (am *AgentManager) applyTerminalFlowInstanceSideEffects(plan terminalFlowInstanceSideEffectPlan) error {
+	var errs []error
+	for _, agentID := range plan.AgentIDs {
 		if err := am.TeardownAgent(agentID); err != nil && !strings.Contains(err.Error(), "not found") {
-			return err
+			errs = append(errs, fmt.Errorf("teardown flow instance agent %s: %w", agentID, err))
 		}
 	}
-	if remover, ok := am.bus.(flowInstanceRouteRemover); ok && remover != nil {
-		return remover.RemoveFlowInstanceRoute(canonicalRoute)
+	if plan.Remover == nil {
+		errs = append(errs, fmt.Errorf("event bus does not support derived flow-instance route removal for %s", plan.FlowPath))
+	} else if err := plan.Remover.RemoveFlowInstanceRoute(plan.Route); err != nil {
+		errs = append(errs, fmt.Errorf("remove flow instance route %s: %w", plan.FlowPath, err))
 	}
-	return fmt.Errorf("event bus does not support derived flow-instance route removal for %s", canonicalFlowPath)
+	return errors.Join(errs...)
+}
+
+func (am *AgentManager) logTerminalFlowInstanceSideEffectFailure(plan terminalFlowInstanceSideEffectPlan, err error) {
+	if am == nil || am.bus == nil || err == nil {
+		return
+	}
+	_ = am.bus.LogRuntime(context.Background(), runtimepipeline.RuntimeLogEntry{
+		Level:     "warn",
+		Message:   "Terminal flow instance side-effect teardown failed after commit",
+		Component: "flow_activation",
+		Action:    "terminal_flow_instance_side_effects_failed",
+		EntityID:  plan.EntityID,
+		Detail: map[string]any{
+			"flow_path":   plan.FlowPath,
+			"agent_ids":   append([]string(nil), plan.AgentIDs...),
+			"route":       plan.Route.InstancePath,
+			"final_state": plan.FinalState,
+		},
+		Error: err.Error(),
+	})
 }
 
 func buildFlowAgentConfig(
