@@ -373,7 +373,7 @@ List registered agents with status.
     {
       "agent_id": "workflow-coordinator",
       "role": "workflow_coordinator",
-      "model_tier": "sonnet",
+      "model": "regular",
       "conversation_mode": "session",
       "status": "active",
       "turn_count": 3,
@@ -593,7 +593,7 @@ List agents for a flow (or all).
       "agent_id": "workflow-coordinator",
       "type": "root",
       "role": "workflow_coordinator",
-      "model_tier": "sonnet",
+      "model": "regular",
       "subscriptions": ["..."],
       "emit_events": ["..."],
       "tools": ["..."],

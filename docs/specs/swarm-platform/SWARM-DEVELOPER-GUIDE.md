@@ -196,11 +196,15 @@ timer.ticket_sla:
 
 ### Step 6: Define the agents
 
+Agents declare provider-agnostic model aliases with `model`. The runtime ships
+with `cheap`, `regular`, and `frontier`; operators can override the concrete
+provider model for each alias through `llm.models`.
+
 ```yaml
 # agents.yaml
 classifier-agent:
   id: classifier-agent
-  model_tier: haiku
+  model: cheap
   subscriptions: [ticket.created]
   emit_events: [ticket.classified]
   tools: []
@@ -210,7 +214,7 @@ classifier-agent:
 
 resolver-agent:
   id: resolver-agent
-  model_tier: sonnet
+  model: regular
   subscriptions: [ticket.assigned]
   emit_events: [ticket.resolved, ticket.escalated]
   tools: [knowledge_base_search]
