@@ -248,10 +248,16 @@ func TestBundleRegisterContractsDirectoryUsesCanonicalRPCAndRenders(t *testing.T
 	}
 	wantDataBlob := map[string]any{
 		"api_version": "swarm.bundle.data.v1",
-		"entries": []any{map[string]any{
-			"path":        "flows/alpha/data/payload.bin",
-			"data_base64": base64.StdEncoding.EncodeToString([]byte{0x01, 0x02, 0x03}),
-		}},
+		"entries": []any{
+			map[string]any{
+				"path":        "flows/alpha/data/empty.bin",
+				"data_base64": "",
+			},
+			map[string]any{
+				"path":        "flows/alpha/data/payload.bin",
+				"data_base64": base64.StdEncoding.EncodeToString([]byte{0x01, 0x02, 0x03}),
+			},
+		},
 	}
 	if !reflect.DeepEqual(captured.Params["data_blob"], wantDataBlob) {
 		t.Fatalf("data_blob = %#v, want %#v", captured.Params["data_blob"], wantDataBlob)
@@ -387,7 +393,6 @@ func TestBundleCommandsRejectInvalidInputBeforeRequest(t *testing.T) {
 		{name: "register contracts with envelope", args: []string{"bundle", "register", envelopePath, "--contracts", contractsDir}, wantStderr: "--contracts cannot be combined with a registration envelope argument"},
 		{name: "register contracts with data blob", args: []string{"bundle", "register", "--contracts", contractsDir, "--data-blob", dataBlobPath}, wantStderr: "--data-blob cannot be used with --contracts"},
 		{name: "register contracts missing package", args: []string{"bundle", "register", "--contracts", invalidContractsDir}, wantStderr: "package contracts directory"},
-		{name: "register contracts empty data", args: []string{"bundle", "register", "--contracts", writeBundleRegisterContractsFixtureWithEmptyData(t)}, wantStderr: "cannot be represented in BundleRegisterDataBlobV1"},
 		{name: "delete not promoted", args: []string{"bundle", "delete", validBundleHash("a")}, wantStderr: "unknown command"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -602,16 +607,10 @@ states:
   - done
 `)
 	writeBundleRegisterFixtureFile(t, filepath.Join(root, "prompts", "root.md"), "root prompt\n")
+	writeBundleRegisterFixtureBytes(t, filepath.Join(root, "flows", "alpha", "data", "empty.bin"), nil)
 	writeBundleRegisterFixtureBytes(t, filepath.Join(root, "flows", "alpha", "data", "payload.bin"), []byte{0x01, 0x02, 0x03})
 	writeBundleRegisterFixtureFile(t, filepath.Join(root, ".DS_Store"), "ignored\n")
 	writeBundleRegisterFixtureFile(t, filepath.Join(root, "prompts", ".#ignored.md"), "ignored\n")
-	return root
-}
-
-func writeBundleRegisterContractsFixtureWithEmptyData(t *testing.T) string {
-	t.Helper()
-	root := writeBundleRegisterContractsFixture(t)
-	writeBundleRegisterFixtureBytes(t, filepath.Join(root, "flows", "alpha", "data", "empty.bin"), nil)
 	return root
 }
 

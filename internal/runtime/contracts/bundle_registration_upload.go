@@ -71,9 +71,6 @@ func BuildBundleRegistrationDirectoryUpload(repoRoot, contractsRoot, platformSpe
 			if err := validateBundleRegistrationUploadDataPath(rel); err != nil {
 				return BundleRegistrationUpload{}, err
 			}
-			if len(raw) == 0 {
-				return BundleRegistrationUpload{}, fmt.Errorf("raw data file %s is empty and cannot be represented in BundleRegisterDataBlobV1", rel)
-			}
 			dataEntries = append(dataEntries, BundleRegisterDataEntryV1{
 				Path:       rel,
 				DataBase64: base64.StdEncoding.EncodeToString(raw),
@@ -139,8 +136,17 @@ func encodeBundleRegistrationEnvelopeYAML(files []bundleRegistrationUploadFile) 
 
 func validateBundleRegistrationUploadDataPath(path string) error {
 	segments := strings.Split(path, "/")
-	if len(segments) < 4 || segments[0] != "flows" || segments[1] == "" || segments[2] != "data" {
-		return fmt.Errorf("raw data input %s cannot be represented in BundleRegisterDataBlobV1; data entries must be under flows/<flow>/data/...", path)
+	if !bundleRegistrationUploadDataPathIsFlowData(segments) {
+		return fmt.Errorf("raw data input %s cannot be represented in BundleRegisterDataBlobV1; data entries must be under a flow data directory (.../flows/<flow>/data/...)", path)
 	}
 	return nil
+}
+
+func bundleRegistrationUploadDataPathIsFlowData(segments []string) bool {
+	for i := 0; i+3 < len(segments); i++ {
+		if segments[i] == "flows" && segments[i+1] != "" && segments[i+2] == "data" {
+			return true
+		}
+	}
+	return false
 }

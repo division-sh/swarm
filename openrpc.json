@@ -8509,7 +8509,7 @@
                   "type": "string"
                 },
                 "path": {
-                  "description": "Strictly sorted slash-separated path under flows/\u003cflow\u003e/data/... with the same normalization and collision rules as BundleRegistrationFile.path.",
+                  "description": "Strictly sorted slash-separated path under a discovered flow data directory, such as flows/\u003cflow\u003e/data/..., packages/\u003cpackage\u003e/flows/\u003cflow\u003e/data/..., or a nested flow package path, with the same normalization and collision rules as BundleRegistrationFile.path.",
                   "minLength": 1,
                   "type": "string"
                 }
