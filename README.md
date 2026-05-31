@@ -88,9 +88,10 @@ Requires Docker, a contract bundle, and credentials for the configured shipped L
 # 1. clone
 git clone https://github.com/<org>/swarm && cd swarm
 
-# 2. point at a contract bundle and provide the Compose backend credential
+# 2. point at a contract bundle and provide Compose credentials
 export SWARM_CONTRACTS_HOST_DIR=/absolute/path/to/your/contracts
 echo 'CLAUDE_CODE_OAUTH_TOKEN=...' >> .env
+echo "SWARM_API_TOKEN=$(uuidgen | tr '[:upper:]' '[:lower:]')" >> .env
 
 # 3. boot
 docker compose up -d postgres orchestrator
@@ -106,7 +107,12 @@ docker compose exec orchestrator swarm run \
 
 If you only need the local database, `docker compose up -d postgres` is supported
 without `SWARM_CONTRACTS_HOST_DIR`. The contracts path is required only when
-starting the `orchestrator` service.
+starting the `orchestrator` service. The Compose orchestrator also requires
+`SWARM_API_TOKEN` because it binds the API inside the container on `0.0.0.0`.
+Plain local `swarm serve` and foreground `swarm run` use the built-in dev API
+token only on numeric loopback binds, with bearer auth still enabled. Set an
+explicit token before exposing the API beyond loopback; the built-in token is
+not user isolation on a shared host.
 
 ### LLM Backend Profiles
 
@@ -276,7 +282,8 @@ The trajectory points at running whole company divisions as autonomous flows. Th
 
 Requirements: Go 1.23, Docker, Postgres 16 (provided via `docker-compose.yml`).
 Start only the database with `docker compose up -d postgres`; starting the
-orchestrator additionally requires `SWARM_CONTRACTS_HOST_DIR`.
+orchestrator additionally requires `SWARM_CONTRACTS_HOST_DIR` and an explicit
+`SWARM_API_TOKEN` because the Compose API listener is non-loopback.
 
 ```bash
 # build

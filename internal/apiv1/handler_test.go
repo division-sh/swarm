@@ -75,6 +75,31 @@ func TestAuthTokensFromEnvironmentUsesOnlyUnifiedToken(t *testing.T) {
 	}
 }
 
+func TestResolveAuthTokensFromEnvironmentDefaultsToLoopbackToken(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "")
+	resolution := ResolveAuthTokensFromEnvironment()
+	if !resolution.UsesDefaultLoopbackToken() {
+		t.Fatalf("resolution = %#v, want default loopback token", resolution)
+	}
+	want := []string{DefaultLoopbackAPIToken}
+	if !reflect.DeepEqual(resolution.Tokens, want) {
+		t.Fatalf("tokens = %v, want %v", resolution.Tokens, want)
+	}
+}
+
+func TestDefaultLoopbackAPITokenAllowedHost(t *testing.T) {
+	for _, host := range []string{"127.0.0.1", "127.42.0.7", "::1", "[::1]"} {
+		if !DefaultLoopbackAPITokenAllowedHost(host) {
+			t.Fatalf("host %q rejected, want numeric loopback accepted", host)
+		}
+	}
+	for _, host := range []string{"", "localhost", "0.0.0.0", "::", "192.168.1.10", "example.test"} {
+		if DefaultLoopbackAPITokenAllowedHost(host) {
+			t.Fatalf("host %q accepted, want non-loopback/DNS rejected", host)
+		}
+	}
+}
+
 func TestLegacyEnvironmentTokensDoNotAuthorizeV1Transports(t *testing.T) {
 	t.Setenv("SWARM_API_TOKEN", "")
 	t.Setenv("SWARM_BUILDER_AUTH_TOKEN", "legacy-builder")
@@ -85,8 +110,8 @@ func TestLegacyEnvironmentTokensDoNotAuthorizeV1Transports(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"auth","method":"rpc.unsubscribe","params":{"subscription_id":"sub-1"}}`))
 	req.Header.Set("Authorization", "Bearer legacy-builder")
 	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("/v1/rpc status = %d, want 503 with no canonical token configured body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("/v1/rpc status = %d, want 401 with only the default canonical token configured body=%s", rec.Code, rec.Body.String())
 	}
 
 	server := httptest.NewServer(handler)
@@ -96,8 +121,8 @@ func TestLegacyEnvironmentTokensDoNotAuthorizeV1Transports(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected websocket auth failure")
 	}
-	if resp == nil || resp.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("/v1/ws response = %#v, want 503 with no canonical token configured", resp)
+	if resp == nil || resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("/v1/ws response = %#v, want 401 with only the default canonical token configured", resp)
 	}
 }
 
