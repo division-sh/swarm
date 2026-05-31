@@ -153,14 +153,15 @@ func TestOperatorBundleDeleteForceBlocksPostDeleteNewWorkFromPersistedRuntimeSou
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: OperatorReadHandlers(OperatorReadOptions{
-			Now:           func() time.Time { return time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC) },
-			Ready:         func() bool { return true },
-			Database:      fakePinger{},
-			Runs:          pg,
-			Observability: pg,
-			Idempotency:   pg,
-			Events:        bus,
-			Source:        source,
+			Now:              func() time.Time { return time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC) },
+			Ready:            func() bool { return true },
+			Database:         fakePinger{},
+			Runs:             pg,
+			Observability:    pg,
+			Idempotency:      pg,
+			Events:           bus,
+			Source:           source,
+			RunBundleContext: pg,
 			Bundle: runtimecontracts.BundleIdentity{
 				WorkflowName:    "review",
 				WorkflowVersion: "1.0.0",
