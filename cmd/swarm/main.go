@@ -31,6 +31,7 @@ import (
 	"swarm/internal/config"
 	"swarm/internal/runtime"
 	runtimebootverify "swarm/internal/runtime/bootverify"
+	"swarm/internal/runtime/budgetspend"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimecorrelation "swarm/internal/runtime/correlation"
@@ -130,6 +131,7 @@ type storeBundle struct {
 	ManagerStore        runtimemanager.ManagerPersistence
 	ScheduleStore       runtimepipeline.SchedulePersistence
 	MailboxStore        runtimetools.MailboxPersistence
+	BudgetSpendStore    budgetspend.Store
 	MailboxAPIStore     apiv1.MailboxAPIStore
 	ObservabilityStore  apiv1.ObservabilityReadStore
 	RuntimeIngressStore runtimeingress.Store
@@ -150,6 +152,7 @@ func (s storeBundle) runtimeStores() runtime.Stores {
 		ScheduleStore:       s.ScheduleStore,
 		StartupOwnership:    s.StartupOwnership,
 		MailboxStore:        s.MailboxStore,
+		BudgetSpendStore:    s.BudgetSpendStore,
 		RuntimeIngressStore: s.RuntimeIngressStore,
 		TurnStore:           s.TurnStore,
 	}
@@ -2013,6 +2016,7 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 			ManagerStore:        pg,
 			ScheduleStore:       pg,
 			MailboxStore:        pg,
+			BudgetSpendStore:    pg,
 			MailboxAPIStore:     pg,
 			ObservabilityStore:  pg,
 			RuntimeIngressStore: pg,
@@ -2036,7 +2040,7 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 		sqliteStore.SetSessionLockTTL(cfg.LLM.Session.LockTTL)
 		return storeBundle{
 			SQLDB:               sqliteStore.DB,
-			RuntimeBlocker:      "sqlite runtime construction remains fail-closed until #1087 gate-promoted raw-SQL consumers (budget tracking/spend ledger, tool executor entity/human-task persistence and diagnostics, runtime diagnostics/logging) move to backend-neutral store owners or receive an explicit lead-approved split",
+			RuntimeBlocker:      "sqlite runtime construction remains fail-closed until #1087 gate-promoted raw-SQL consumers (tool executor entity/human-task persistence and diagnostics, runtime diagnostics/logging) move to backend-neutral store owners or receive an explicit lead-approved split",
 			SchemaBootstrapper:  sqliteStore,
 			EventStore:          sqliteStore,
 			PipelineStore:       runtimepipeline.NewSQLiteWorkflowInstanceStore(sqliteStore.DB),
@@ -2045,6 +2049,7 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 			ManagerStore:        sqliteStore,
 			ScheduleStore:       sqliteStore,
 			MailboxStore:        sqliteStore,
+			BudgetSpendStore:    sqliteStore,
 			MailboxAPIStore:     sqliteStore,
 			ObservabilityStore:  sqliteStore,
 			RuntimeIngressStore: sqliteStore,

@@ -2,16 +2,15 @@ package runtime
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/lib/pq"
 	"swarm/internal/config"
 	"swarm/internal/events"
+	"swarm/internal/runtime/budgetspend"
 	runtimebus "swarm/internal/runtime/bus"
 	models "swarm/internal/runtime/core/actors"
 	runtimecurrentstate "swarm/internal/runtime/currentstate"
@@ -41,7 +40,7 @@ func budgetExecutionScopeKey(actor models.AgentConfig) string {
 //
 // It is not accounting-grade. The intent is runaway-spend prevention.
 type BudgetTracker struct {
-	db             *sql.DB
+	store          budgetspend.Store
 	bus            *runtimebus.EventBus
 	cfg            *config.Config
 	logger         *RuntimeLogger
@@ -55,6 +54,8 @@ type BudgetTracker struct {
 	scopeMu   sync.Map          // key(scope) => *sync.Mutex
 }
 
+type SpendRecord = budgetspend.SpendRecord
+
 type budgetThresholds struct {
 	Enabled   bool
 	Warning   float64
@@ -62,9 +63,9 @@ type budgetThresholds struct {
 	Emergency float64
 }
 
-func NewBudgetTracker(db *sql.DB, bus *runtimebus.EventBus, cfg *config.Config, mailbox runtimetools.MailboxPersistence, logger *RuntimeLogger, source semanticview.Source) *BudgetTracker {
+func NewBudgetTracker(store budgetspend.Store, bus *runtimebus.EventBus, cfg *config.Config, mailbox runtimetools.MailboxPersistence, logger *RuntimeLogger, source semanticview.Source) *BudgetTracker {
 	return &BudgetTracker{
-		db:             db,
+		store:          store,
 		bus:            bus,
 		cfg:            cfg,
 		logger:         logger,
@@ -158,7 +159,7 @@ func (t *BudgetTracker) LockExecutionScope(entityID string) func() {
 // EvaluateAll periodically re-evaluates budget state to ensure month-boundary
 // "resume" transitions are emitted even when spend is paused (spec v2.0).
 func (t *BudgetTracker) EvaluateAll(ctx context.Context) {
-	if t == nil || t.db == nil {
+	if t == nil || t.store == nil {
 		return
 	}
 	runID, err := runtimecurrentstate.RequireRunID(ctx)
@@ -175,23 +176,11 @@ func (t *BudgetTracker) EvaluateAll(ctx context.Context) {
 		}
 	}
 
-	// Evaluate each active entity with any spend/metrics.
-	rows, err := t.db.QueryContext(ctx, `
-		SELECT entity_id::text
-		FROM entity_state
-		WHERE run_id = $1::uuid
-		  AND NOT (current_state = ANY($2::text[]))
-		ORDER BY created_at ASC
-	`, runID, pq.Array(t.TerminalInstanceStates()))
+	entityIDs, err := t.store.ListActiveEntityIDs(ctx, runID, t.TerminalInstanceStates())
 	if err != nil {
 		return
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return
-		}
+	for _, id := range entityIDs {
 		if err := t.evaluateAndEmit(ctx, strings.TrimSpace(id)); err != nil {
 			if t.logger != nil {
 				handleRuntimeLogPersistenceError("budget", "evaluate_entity_failed", t.logger.Warn(ctx, "budget", "evaluate_entity_failed", map[string]any{"entity_id": strings.TrimSpace(id)}, err))
@@ -209,33 +198,8 @@ func (t *BudgetTracker) TerminalInstanceStates() []string {
 	return out
 }
 
-type SpendRecord struct {
-	EntityID        string
-	FlowInstance    string
-	AgentID         string
-	Model           string
-	InputTokens     int
-	OutputTokens    int
-	CostUSD         float64
-	InvocationType  string
-	UsageAccounting string
-	RecordedAt      time.Time
-}
-
-func (r SpendRecord) EffectiveEntityID() string {
-	return strings.TrimSpace(r.EntityID)
-}
-
-func (r *SpendRecord) NormalizeEntityID() {
-	if r == nil {
-		return
-	}
-	entityID := r.EffectiveEntityID()
-	r.EntityID = entityID
-}
-
 func (t *BudgetTracker) RecordSpend(ctx context.Context, rec SpendRecord) error {
-	if t == nil || t.db == nil {
+	if t == nil || t.store == nil {
 		return nil
 	}
 	if rec.RecordedAt.IsZero() {
@@ -274,25 +238,7 @@ func (t *BudgetTracker) RecordSpend(ctx context.Context, rec SpendRecord) error 
 		rec.CostUSD = 0
 	}
 
-	const q = `
-		INSERT INTO spend_ledger (
-			entity_id, flow_instance, agent_id, model, input_tokens, output_tokens, cost_usd, invocation_type, usage_accounting, created_at
-		) VALUES (
-			NULLIF($1,'')::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10
-		)
-	`
-	if _, err := t.db.ExecContext(ctx, q,
-		rec.EffectiveEntityID(),
-		rec.FlowInstance,
-		rec.AgentID,
-		rec.Model,
-		rec.InputTokens,
-		rec.OutputTokens,
-		rec.CostUSD,
-		rec.InvocationType,
-		rec.UsageAccounting,
-		rec.RecordedAt,
-	); err != nil {
+	if err := t.store.RecordSpend(ctx, rec); err != nil {
 		return fmt.Errorf("insert spend_ledger: %w", err)
 	}
 
@@ -306,7 +252,7 @@ func (t *BudgetTracker) RecordSpend(ctx context.Context, rec SpendRecord) error 
 }
 
 func (t *BudgetTracker) RecordLLMUsage(ctx context.Context, entityID string, agentID string, runtimeMode string, usage llm.UsageTokens, exact bool, meta any) error {
-	if t == nil || t.db == nil {
+	if t == nil || t.store == nil {
 		return nil
 	}
 	entityID = strings.TrimSpace(entityID)
@@ -353,13 +299,8 @@ func (t *BudgetTracker) resolveSpendFlowInstance(ctx context.Context, entityID s
 	if err != nil {
 		return "", err
 	}
-	var flowInstance string
-	if err := t.db.QueryRowContext(ctx, `
-		SELECT COALESCE(flow_instance, '')
-		FROM entity_state
-		WHERE run_id = $1::uuid
-		  AND entity_id = $2::uuid
-	`, identity.RunID, identity.EntityID).Scan(&flowInstance); err != nil {
+	flowInstance, err := t.store.ResolveFlowInstance(ctx, identity.RunID, identity.EntityID)
+	if err != nil {
 		return "", fmt.Errorf("resolve spend flow_instance for entity %s: %w", entityID, err)
 	}
 	flowInstance = strings.TrimSpace(flowInstance)
@@ -410,7 +351,7 @@ func modelTier(model string) string {
 }
 
 func (t *BudgetTracker) evaluateAndEmit(ctx context.Context, entityID string) error {
-	if t == nil || t.db == nil || t.bus == nil || t.cfg == nil {
+	if t == nil || t.store == nil || t.bus == nil || t.cfg == nil {
 		return nil
 	}
 	entityID = strings.TrimSpace(entityID)
@@ -445,30 +386,11 @@ func (t *BudgetTracker) evaluateScope(ctx context.Context, scope string, entityI
 	now := time.Now().UTC()
 	start := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
 
-	var spent float64
-	var err error
-	switch {
-	case scope == "system":
-		err = t.db.QueryRowContext(ctx, `
-			SELECT COALESCE(SUM(cost_usd), 0)
-			FROM spend_ledger
-			WHERE created_at >= $1
-		`, start).Scan(&spent)
-	case entityID == "":
-		err = t.db.QueryRowContext(ctx, `
-			SELECT COALESCE(SUM(cost_usd), 0)
-			FROM spend_ledger
-			WHERE entity_id IS NULL
-			  AND created_at >= $1
-		`, start).Scan(&spent)
-	default:
-		err = t.db.QueryRowContext(ctx, `
-			SELECT COALESCE(SUM(cost_usd), 0)
-			FROM spend_ledger
-			WHERE entity_id = $1::uuid
-			  AND created_at >= $2
-		`, entityID, start).Scan(&spent)
-	}
+	spent, err := t.store.SumSpendUSD(ctx, budgetspend.SpendQuery{
+		Scope:    budgetScope(scope, entityID),
+		EntityID: entityID,
+		Since:    start,
+	})
 	if err != nil {
 		return err
 	}
@@ -553,6 +475,22 @@ func (t *BudgetTracker) evaluateScope(ctx context.Context, scope string, entityI
 		}
 	}
 	return nil
+}
+
+func budgetScope(scope string, entityID string) budgetspend.Scope {
+	switch strings.TrimSpace(scope) {
+	case string(budgetspend.ScopeSystem):
+		return budgetspend.ScopeSystem
+	case string(budgetspend.ScopeEntity):
+		return budgetspend.ScopeEntity
+	case string(budgetspend.ScopeGlobal):
+		return budgetspend.ScopeGlobal
+	default:
+		if strings.TrimSpace(entityID) != "" {
+			return budgetspend.ScopeEntity
+		}
+		return budgetspend.ScopeGlobal
+	}
 }
 
 func budgetThresholdsFromSource(source semanticview.Source) budgetThresholds {
