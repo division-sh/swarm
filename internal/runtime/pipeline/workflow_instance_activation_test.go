@@ -101,6 +101,45 @@ func TestCreateFlowInstanceResolvesConfigFromBindings(t *testing.T) {
 	}
 }
 
+func TestCreateFlowInstancePreservesNullConfigFromValues(t *testing.T) {
+	var captured FlowInstanceActivationRequest
+	pc := &PipelineCoordinator{
+		instanceActivator: func(_ context.Context, req FlowInstanceActivationRequest) error {
+			captured = req
+			return nil
+		},
+	}
+	trigger := (events.Event{
+		Type:    events.EventType("spawn.requested"),
+		Payload: []byte(`{"entity_id":"ent-1","instance_id":"inst-42","optional_setting":null}`),
+	}).WithEntityID("ent-1")
+	triggerCtx := workflowTriggerContext{Event: trigger}
+
+	err := pc.createFlowInstance(context.Background(), triggerCtx, handlerExecutionPlan{
+		Template:       "review",
+		InstanceIDFrom: "payload.instance_id",
+		InstanceIDPath: paths.Parse("payload.instance_id"),
+		ConfigFrom: &runtimecontracts.ConfigFromSpec{
+			Bindings: map[string]string{
+				"optional_setting": "payload.optional_setting",
+				"bare_optional":    "optional_setting",
+			},
+		},
+	}, testCreateFlowInstanceContext(triggerCtx))
+	if err != nil {
+		t.Fatalf("expected createFlowInstance to preserve explicit null config values: %v", err)
+	}
+	for _, key := range []string{"optional_setting", "bare_optional"} {
+		value, ok := captured.Config[key]
+		if !ok {
+			t.Fatalf("config[%s] missing; want explicit nil value", key)
+		}
+		if value != nil {
+			t.Fatalf("config[%s] = %#v, want nil", key, value)
+		}
+	}
+}
+
 func TestCreateFlowInstanceResolvesConfigFromHandlerEventContext(t *testing.T) {
 	var captured FlowInstanceActivationRequest
 	pc := &PipelineCoordinator{
