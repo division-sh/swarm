@@ -19,6 +19,8 @@ func TestWorkflowInstanceStoreProjection_RoundTripPreservesCanonicalState(t *tes
 	store := NewWorkflowInstanceStore(db)
 	storageRef := uuid.NewString()
 	parentID := uuid.NewString()
+	parentFlowID := "operating"
+	parentFlowInstance := "operating/root"
 	now := time.Now().UTC().Round(time.Microsecond)
 
 	instance := WorkflowInstance{
@@ -46,17 +48,19 @@ func TestWorkflowInstanceStoreProjection_RoundTripPreservesCanonicalState(t *tes
 			},
 		},
 		Metadata: map[string]any{
-			"business_brief":    map[string]any{"title": "hello"},
-			"status":            "open",
-			"slug":              "projection",
-			"name":              "Projection Flow",
-			"entity_type":       "workflow_subject",
-			"instance_id":       "inst-1",
-			"flow_path":         "review/inst-1",
-			"instance_kind":     "materialized",
-			"template_version":  "v1",
-			"last_source_event": "review.started",
-			"parent_entity_id":  parentID,
+			"business_brief":       map[string]any{"title": "hello"},
+			"status":               "open",
+			"slug":                 "projection",
+			"name":                 "Projection Flow",
+			"entity_type":          "workflow_subject",
+			"instance_id":          "inst-1",
+			"flow_path":            "review/inst-1",
+			"instance_kind":        "materialized",
+			"template_version":     "v1",
+			"last_source_event":    "review.started",
+			"parent_flow_id":       parentFlowID,
+			"parent_flow_instance": parentFlowInstance,
+			"parent_entity_id":     parentID,
 			"gates": map[string]any{
 				"g_ready": true,
 			},
@@ -88,6 +92,15 @@ func TestWorkflowInstanceStoreProjection_RoundTripPreservesCanonicalState(t *tes
 	}
 	if got := strings.TrimSpace(asString(loaded.Metadata["flow_path"])); got != "review/inst-1" {
 		t.Fatalf("Metadata flow_path = %#v, want review/inst-1", loaded.Metadata["flow_path"])
+	}
+	if got := strings.TrimSpace(asString(loaded.Metadata["parent_flow_id"])); got != parentFlowID {
+		t.Fatalf("Metadata parent_flow_id = %#v, want %q", loaded.Metadata["parent_flow_id"], parentFlowID)
+	}
+	if got := strings.Trim(strings.TrimSpace(asString(loaded.Metadata["parent_flow_instance"])), "/"); got != parentFlowInstance {
+		t.Fatalf("Metadata parent_flow_instance = %#v, want %q", loaded.Metadata["parent_flow_instance"], parentFlowInstance)
+	}
+	if got := strings.TrimSpace(asString(loaded.Metadata["parent_entity_id"])); got != parentID {
+		t.Fatalf("Metadata parent_entity_id = %#v, want %q", loaded.Metadata["parent_entity_id"], parentID)
 	}
 	if got := strings.TrimSpace(asString(loaded.Metadata["storage_ref"])); got != storageRef {
 		t.Fatalf("Metadata storage_ref = %#v, want %q", loaded.Metadata["storage_ref"], storageRef)
@@ -127,6 +140,15 @@ func TestWorkflowInstanceStoreProjection_RoundTripPreservesCanonicalState(t *tes
 	}
 	if identity.EntityID != runtimeflowidentity.EntityID("review/inst-1") {
 		t.Fatalf("identity.EntityID = %q, want canonical id for review/inst-1", identity.EntityID)
+	}
+	if identity.ParentRoute.FlowID != parentFlowID {
+		t.Fatalf("identity.ParentRoute.FlowID = %q, want %q", identity.ParentRoute.FlowID, parentFlowID)
+	}
+	if identity.ParentRoute.FlowInstance != parentFlowInstance {
+		t.Fatalf("identity.ParentRoute.FlowInstance = %q, want %q", identity.ParentRoute.FlowInstance, parentFlowInstance)
+	}
+	if identity.ParentRoute.EntityID != parentID {
+		t.Fatalf("identity.ParentRoute.EntityID = %q, want %q", identity.ParentRoute.EntityID, parentID)
 	}
 }
 

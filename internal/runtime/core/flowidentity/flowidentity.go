@@ -28,6 +28,53 @@ type ParentRoute struct {
 	FlowID       string
 }
 
+func (r ParentRoute) Normalized() ParentRoute {
+	return ParentRoute{
+		FlowInstance: normalizeRef(r.FlowInstance),
+		EntityID:     strings.TrimSpace(r.EntityID),
+		FlowID:       strings.TrimSpace(r.FlowID),
+	}
+}
+
+func (r ParentRoute) Empty() bool {
+	r = r.Normalized()
+	return r.FlowInstance == "" && r.EntityID == "" && r.FlowID == ""
+}
+
+func (r ParentRoute) Complete() bool {
+	r = r.Normalized()
+	return r.FlowInstance != "" && r.EntityID != "" && r.FlowID != ""
+}
+
+func ParentRouteFromMetadata(metadata map[string]any) ParentRoute {
+	if len(metadata) == 0 {
+		return ParentRoute{}
+	}
+	return ParentRoute{
+		FlowID:       metadataString(metadata, "parent_flow_id"),
+		FlowInstance: metadataString(metadata, "parent_flow_instance"),
+		EntityID:     metadataString(metadata, "parent_entity_id"),
+	}.Normalized()
+}
+
+func metadataString(metadata map[string]any, key string) string {
+	if metadata == nil {
+		return ""
+	}
+	value, ok := metadata[key]
+	if !ok || value == nil {
+		return ""
+	}
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case fmt.Stringer:
+		return strings.TrimSpace(typed.String())
+	default:
+		return strings.TrimSpace(fmt.Sprint(value))
+	}
+}
+
 type Persisted struct {
 	Instance
 	StorageRef string

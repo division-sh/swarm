@@ -2029,6 +2029,91 @@ func TestExecutor_StaticProducerTargetRouteDoesNotOwnEventNamespace(t *testing.T
 	}
 }
 
+func TestExecutor_ChildPinOutputTargetsStoredParentRoute(t *testing.T) {
+	source := sourceWithChildOutputPin()
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     source,
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	parentRoute := events.RouteIdentity{
+		FlowID:       "root",
+		FlowInstance: "root/inst-1",
+		EntityID:     "parent-ent",
+	}
+	state := testStateSnapshot("running", map[string]any{
+		"flow_path":            "child/inst-1",
+		"parent_flow_id":       parentRoute.FlowID,
+		"parent_flow_instance": parentRoute.FlowInstance,
+		"parent_entity_id":     parentRoute.EntityID,
+	}, nil, map[string]map[string]any{})
+	state.EntityID = identity.NormalizeEntityID("child-ent")
+
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "child-ent",
+		NodeID:   "child-node",
+		FlowID:   "child",
+		Event: (events.Event{
+			ID:      "evt-1",
+			Type:    "child/requested",
+			Payload: json.RawMessage(`{}`),
+		}).WithEntityID("wrong-parent").WithFlowInstance("wrong/root").WithSourceRoute(events.RouteIdentity{
+			FlowID:       "wrong",
+			FlowInstance: "wrong/root",
+			EntityID:     "wrong-parent",
+		}),
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			Emit: runtimecontracts.EmitSpec{Event: "child.done"},
+		},
+		State: state,
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if got := len(result.EmitIntents); got != 1 {
+		t.Fatalf("EmitIntents count = %d, want 1", got)
+	}
+	if got := result.EmitIntents[0].Event.TargetRoute(); got != parentRoute {
+		t.Fatalf("target route = %#v, want %#v", got, parentRoute)
+	}
+}
+
+func sourceWithChildOutputPin() semanticview.Source {
+	child := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{
+			ID:   "child",
+			Flow: "child",
+		},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{
+				Outputs: runtimecontracts.FlowOutputPins{
+					Events: []string{"child.done"},
+				},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"child.done": {},
+		},
+		Path: "child",
+	}
+	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &runtimecontracts.FlowContractView{
+				Children: []runtimecontracts.FlowContractView{child},
+			},
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"child": &child,
+			},
+		},
+	})
+}
+
 func TestExecutor_DataAccumulationTargetPathWritesNestedEntityLeaf(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:     stubSourceWithRootEntityContract(),

@@ -11,6 +11,7 @@ import (
 	runtimecontracts "swarm/internal/runtime/contracts"
 	models "swarm/internal/runtime/core/actors"
 	"swarm/internal/runtime/core/eventidentity"
+	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "swarm/internal/runtime/core/pinrouting"
 	"swarm/internal/runtime/semanticview"
 )
@@ -108,14 +109,28 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 	}
 	if runtimepinrouting.PinDeclaredOutput(e.workflowSource, flowID, eventType) {
 		spec := runtimecontracts.EmitSpec{Event: eventType}
+		parentRoute, allowEntityOnlyParentRoute, err := e.emitParentRouteForActor(ctx, actor, flowID, flowInstance, inbound)
+		if err != nil {
+			wrapped := WrapRuntimeError(
+				"parent_route_lookup_failed",
+				"tool-executor",
+				"handle_emit_tool.parent_route",
+				true,
+				err,
+				"failed to resolve emit tool parent route",
+			)
+			e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, emitted, "parent_route_lookup_failed", "publish", "parent_route", wrapped)
+			return nil, wrapped
+		}
 		resolution := runtimepinrouting.Resolve(runtimepinrouting.ResolutionInput{
-			Source:      e.workflowSource,
-			FlowID:      flowID,
-			EventType:   eventType,
-			Emit:        spec,
-			SourceRoute: sourceRoute,
-			Inbound:     inbound,
-			ParentRoute: emitParentRouteForActorEvent(inbound, flowInstance),
+			Source:                     e.workflowSource,
+			FlowID:                     flowID,
+			EventType:                  eventType,
+			Emit:                       spec,
+			SourceRoute:                sourceRoute,
+			Inbound:                    inbound,
+			ParentRoute:                parentRoute,
+			AllowEntityOnlyParentRoute: allowEntityOnlyParentRoute,
 		}, emitted)
 		if resolution.Failure != "" {
 			wrapped := NewRuntimeError(
@@ -162,16 +177,69 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 	}, nil
 }
 
-func emitParentRouteForActorEvent(inbound events.Event, flowInstance string) events.RouteIdentity {
-	parent := inbound.SourceRoute()
-	if parent.Empty() {
-		return events.RouteIdentity{}
+func (e *Executor) emitParentRouteForActor(ctx context.Context, actor models.AgentConfig, flowID, flowInstance string, inbound events.Event) (events.RouteIdentity, bool, error) {
+	if e == nil {
+		return events.RouteIdentity{}, false, nil
 	}
-	flowInstance = strings.Trim(strings.TrimSpace(flowInstance), "/")
-	if flowInstance != "" && strings.Trim(strings.TrimSpace(parent.FlowInstance), "/") == flowInstance {
-		return events.RouteIdentity{}
+	if e.workflowInstances != nil && e.workflowInstances.Enabled() {
+		for _, ref := range emitWorkflowInstanceRefs(actor, flowInstance) {
+			instance, ok, err := e.workflowInstances.Load(ctx, ref)
+			if err != nil {
+				return events.RouteIdentity{}, false, err
+			}
+			if !ok {
+				continue
+			}
+			parent := runtimeflowidentity.ParentRouteFromMetadata(instance.Metadata).Normalized()
+			return events.RouteIdentity{
+				FlowID:       parent.FlowID,
+				FlowInstance: parent.FlowInstance,
+				EntityID:     parent.EntityID,
+			}.Normalized(), false, nil
+		}
 	}
-	return parent
+	if route, ok := e.staticFlowEntityParentRoute(flowID, inbound); ok {
+		return route, true, nil
+	}
+	return events.RouteIdentity{}, false, nil
+}
+
+func emitWorkflowInstanceRefs(actor models.AgentConfig, flowInstance string) []string {
+	candidates := []string{
+		actor.EffectiveEntityID(),
+		strings.Trim(strings.TrimSpace(flowInstance), "/"),
+		actor.CanonicalFlowPath(),
+	}
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		if _, ok := seen[candidate]; ok {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		out = append(out, candidate)
+	}
+	return out
+}
+
+func (e *Executor) staticFlowEntityParentRoute(flowID string, inbound events.Event) (events.RouteIdentity, bool) {
+	flowID = strings.TrimSpace(flowID)
+	if e == nil || e.workflowSource == nil || flowID == "" {
+		return events.RouteIdentity{}, false
+	}
+	scope, ok := e.workflowSource.FlowScopeByID(flowID)
+	if !ok || strings.EqualFold(strings.TrimSpace(scope.Mode), "template") {
+		return events.RouteIdentity{}, false
+	}
+	entityID := strings.TrimSpace(inbound.EntityID())
+	if entityID == "" {
+		return events.RouteIdentity{}, false
+	}
+	return events.RouteIdentity{EntityID: entityID}.Normalized(), true
 }
 
 func emitFlowInstanceForActorEvent(actor models.AgentConfig, inbound events.Event) string {

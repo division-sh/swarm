@@ -511,6 +511,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		MailboxStore:      stores.MailboxStore,
 		EntityStore:       stores.ToolEntityStore,
 		HumanTaskStore:    stores.HumanTaskStore,
+		WorkflowInstances: pipelineStore,
 		WorkflowSource:    source,
 		WorkspaceResolver: rt.Workspace,
 		AuthorityProvider: rt.Authority,

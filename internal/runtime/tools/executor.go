@@ -35,6 +35,7 @@ type Executor struct {
 	mailboxStore                   MailboxPersistence
 	entityStore                    EntityPersistence
 	humanTaskStore                 HumanTaskPersistence
+	workflowInstances              WorkflowInstanceLoader
 	cfg                            *config.Config
 	credentials                    runtimecredentials.Store
 	httpClient                     *http.Client
@@ -73,6 +74,7 @@ func NewExecutorWithOptions(bus EventPublisher, scheduler Scheduler, opts Execut
 		mailboxStore:                   opts.MailboxStore,
 		entityStore:                    opts.EntityStore,
 		humanTaskStore:                 opts.HumanTaskStore,
+		workflowInstances:              opts.WorkflowInstances,
 		cfg:                            opts.Config,
 		credentials:                    opts.Credentials,
 		httpClient:                     &http.Client{Timeout: 30 * time.Second},

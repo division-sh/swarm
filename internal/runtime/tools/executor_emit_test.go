@@ -11,6 +11,7 @@ import (
 	runtimecontracts "swarm/internal/runtime/contracts"
 	models "swarm/internal/runtime/core/actors"
 	"swarm/internal/runtime/flowmodel"
+	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 )
 
@@ -29,6 +30,21 @@ func (b *publishBusCapture) PublishDirect(_ context.Context, evt events.Event, _
 	b.event = evt
 	b.count++
 	return nil
+}
+
+type emitWorkflowInstanceLoader struct {
+	rows map[string]runtimepipeline.WorkflowInstance
+	err  error
+}
+
+func (l emitWorkflowInstanceLoader) Enabled() bool { return true }
+
+func (l emitWorkflowInstanceLoader) Load(_ context.Context, ref string) (runtimepipeline.WorkflowInstance, bool, error) {
+	if l.err != nil {
+		return runtimepipeline.WorkflowInstance{}, false, l.err
+	}
+	instance, ok := l.rows[strings.TrimSpace(ref)]
+	return instance, ok, nil
 }
 
 func TestHandleEmitTool_PreservesPayloadForFlowScopedEmit(t *testing.T) {
@@ -318,27 +334,45 @@ func TestHandleEmitTool_TargetsParentRouteForChildPinOutput(t *testing.T) {
 	emitRegistry := NewEmitRegistry(source, nil)
 
 	bus := &publishBusCapture{}
-	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
-	actor := models.AgentConfig{
-		ID:         "analyzer",
-		Role:       "analyzer",
-		Mode:       "analyzer-flow",
-		FlowPath:   "analyzer-flow",
-		EmitEvents: []string{"analyzer-flow/analysis.done"},
-	}
 	parentRoute := events.RouteIdentity{
 		FlowID:       "root",
 		FlowInstance: "root",
 		EntityID:     "11111111-1111-1111-1111-111111111111",
 	}
+	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{
+		WorkflowSource: source,
+		EmitRegistry:   emitRegistry,
+		WorkflowInstances: emitWorkflowInstanceLoader{rows: map[string]runtimepipeline.WorkflowInstance{
+			"analyzer-flow/inst-1": {
+				Metadata: map[string]any{
+					"parent_flow_id":       parentRoute.FlowID,
+					"parent_flow_instance": parentRoute.FlowInstance,
+					"parent_entity_id":     parentRoute.EntityID,
+				},
+			},
+		}},
+	})
+	actor := models.AgentConfig{
+		ID:         "analyzer",
+		Role:       "analyzer",
+		Mode:       "analyzer-flow",
+		FlowPath:   "analyzer-flow/inst-1",
+		EntityID:   "22222222-2222-2222-2222-222222222222",
+		EmitEvents: []string{"analyzer-flow/analysis.done"},
+	}
 	childRoute := events.RouteIdentity{
 		FlowID:       "analyzer-flow",
-		FlowInstance: "analyzer-flow",
+		FlowInstance: "analyzer-flow/inst-1",
 		EntityID:     "22222222-2222-2222-2222-222222222222",
+	}
+	wrongInboundParent := events.RouteIdentity{
+		FlowID:       "wrong-root",
+		FlowInstance: "wrong-root",
+		EntityID:     "33333333-3333-3333-3333-333333333333",
 	}
 	inbound := (events.Event{
 		Type: events.EventType("analyzer-flow/analysis.requested"),
-	}).WithSourceRoute(parentRoute).WithTargetRoute(childRoute)
+	}).WithSourceRoute(wrongInboundParent).WithTargetRoute(childRoute)
 	ctx := runtimebus.WithInboundEvent(context.Background(), inbound)
 
 	_, err := exec.handleEmitTool(ctx, actor, "emit_analysis_done", map[string]any{})
@@ -348,8 +382,145 @@ func TestHandleEmitTool_TargetsParentRouteForChildPinOutput(t *testing.T) {
 	if got := bus.event.TargetRoute(); got != parentRoute {
 		t.Fatalf("target route = %#v, want parent route %#v", got, parentRoute)
 	}
-	if got := bus.event.SourceRoute(); got.Empty() || got.FlowID != "analyzer-flow" {
-		t.Fatalf("source route = %#v, want analyzer-flow source", got)
+	if got := bus.event.SourceRoute(); got.Empty() || got.FlowID != "analyzer-flow" || got.FlowInstance != "analyzer-flow/inst-1" {
+		t.Fatalf("source route = %#v, want analyzer-flow/inst-1 source", got)
+	}
+}
+
+func TestHandleEmitTool_FailsClosedOnIncompleteStoredParentRoute(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"analysis.done": {
+				Payload: runtimecontracts.EventPayloadSpec{Type: "object"},
+			},
+		},
+	}
+	analyzerFlow := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{
+			ID:   "analyzer-flow",
+			Flow: "analyzer-flow",
+		},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{
+				Outputs: runtimecontracts.FlowOutputPins{
+					Events: []string{"analysis.done"},
+				},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"analysis.done": {},
+		},
+		Path: "analyzer-flow",
+	}
+	bundle.FlowTree = flowmodel.Tree[runtimecontracts.FlowContractView]{
+		Root: &runtimecontracts.FlowContractView{
+			Children: []runtimecontracts.FlowContractView{analyzerFlow},
+		},
+		ByID: map[string]*runtimecontracts.FlowContractView{
+			"analyzer-flow": &analyzerFlow,
+		},
+	}
+	source := semanticview.Wrap(bundle)
+	emitRegistry := NewEmitRegistry(source, nil)
+
+	bus := &publishBusCapture{}
+	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{
+		WorkflowSource: source,
+		EmitRegistry:   emitRegistry,
+		WorkflowInstances: emitWorkflowInstanceLoader{rows: map[string]runtimepipeline.WorkflowInstance{
+			"analyzer-flow/inst-1": {
+				Metadata: map[string]any{
+					"parent_flow_id":   "root",
+					"parent_entity_id": "11111111-1111-1111-1111-111111111111",
+				},
+			},
+		}},
+	})
+	actor := models.AgentConfig{
+		ID:         "analyzer",
+		Role:       "analyzer",
+		Mode:       "analyzer-flow",
+		FlowPath:   "analyzer-flow/inst-1",
+		EntityID:   "22222222-2222-2222-2222-222222222222",
+		EmitEvents: []string{"analyzer-flow/analysis.done"},
+	}
+	ctx := runtimebus.WithInboundEvent(context.Background(), events.Event{
+		Type: events.EventType("analyzer-flow/analysis.requested"),
+	})
+
+	_, err := exec.handleEmitTool(ctx, actor, "emit_analysis_done", map[string]any{})
+	if err == nil {
+		t.Fatal("handleEmitTool error = nil, want parent_route_incomplete")
+	}
+	if !strings.Contains(err.Error(), "parent_route_incomplete") {
+		t.Fatalf("handleEmitTool error = %v, want parent_route_incomplete", err)
+	}
+	if bus.count != 0 {
+		t.Fatalf("publish count = %d, want 0", bus.count)
+	}
+}
+
+func TestHandleEmitTool_StaticChildPinOutputTargetsDeliveryEntity(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"analysis.done": {
+				Payload: runtimecontracts.EventPayloadSpec{Type: "object"},
+			},
+		},
+	}
+	analyzerFlow := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{
+			ID:   "analyzer-flow",
+			Flow: "analyzer-flow",
+		},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{
+				Outputs: runtimecontracts.FlowOutputPins{
+					Events: []string{"analysis.done"},
+				},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"analysis.done": {},
+		},
+		Path: "analyzer-flow",
+	}
+	bundle.FlowTree = flowmodel.Tree[runtimecontracts.FlowContractView]{
+		Root: &runtimecontracts.FlowContractView{
+			Children: []runtimecontracts.FlowContractView{analyzerFlow},
+		},
+		ByID: map[string]*runtimecontracts.FlowContractView{
+			"analyzer-flow": &analyzerFlow,
+		},
+	}
+	source := semanticview.Wrap(bundle)
+	emitRegistry := NewEmitRegistry(source, nil)
+
+	bus := &publishBusCapture{}
+	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
+	actor := models.AgentConfig{
+		ID:         "analyzer",
+		Role:       "analyzer",
+		Mode:       "analyzer-flow",
+		FlowPath:   "analyzer-flow",
+		EmitEvents: []string{"analyzer-flow/analysis.done"},
+	}
+	inbound := (events.Event{
+		Type: events.EventType("analyzer-flow/analysis.requested"),
+	}).WithEntityID("11111111-1111-1111-1111-111111111111").WithSourceRoute(events.RouteIdentity{
+		FlowID:       "wrong-root",
+		FlowInstance: "wrong-root",
+		EntityID:     "33333333-3333-3333-3333-333333333333",
+	})
+	ctx := runtimebus.WithInboundEvent(context.Background(), inbound)
+
+	_, err := exec.handleEmitTool(ctx, actor, "emit_analysis_done", map[string]any{})
+	if err != nil {
+		t.Fatalf("handleEmitTool: %v", err)
+	}
+	want := events.RouteIdentity{EntityID: "11111111-1111-1111-1111-111111111111"}
+	if got := bus.event.TargetRoute(); got != want {
+		t.Fatalf("target route = %#v, want delivery entity route %#v", got, want)
 	}
 }
 

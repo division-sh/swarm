@@ -50,6 +50,10 @@ type ResolutionInput struct {
 	MatchValues  map[string]string
 	Descriptors  []Descriptor
 	AllowMissing bool
+	// Static child flows have no persisted ParentRoute row; they may route back to
+	// the current delivery entity, but template/dynamic ParentRoute metadata must
+	// remain complete and fail closed when partial.
+	AllowEntityOnlyParentRoute bool
 }
 
 type Resolution struct {
@@ -106,6 +110,12 @@ func Resolve(input ResolutionInput, evt events.Event) Resolution {
 	if target.Empty() {
 		parentRoute := input.ParentRoute.Normalized()
 		if !parentRoute.Empty() {
+			if input.AllowEntityOnlyParentRoute && parentRoute.FlowID == "" && parentRoute.FlowInstance == "" && parentRoute.EntityID != "" {
+				return Resolution{Event: evt.WithTargetRoute(parentRoute), Target: parentRoute}
+			}
+			if parentRoute.FlowID == "" || parentRoute.FlowInstance == "" || parentRoute.EntityID == "" {
+				return Resolution{Event: evt, Failure: FailureParentRouteIncomplete}
+			}
 			return Resolution{Event: evt.WithTargetRoute(parentRoute), Target: parentRoute}
 		}
 		return Resolution{Event: evt, Failure: FailureTargetRequiredMissing}
