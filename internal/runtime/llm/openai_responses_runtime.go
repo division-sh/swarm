@@ -650,7 +650,34 @@ func parseOpenAIResponsesSSE(raw []byte) (Response, error) {
 	var dataLines []string
 	var text strings.Builder
 	var calls []ToolCall
+	pendingCalls := map[string]*openAIResponsesPendingFunctionCall{}
+	var pendingCallOrder []string
 	var completed *openAIResponsesResponse
+	ensurePendingCall := func(key string) (*openAIResponsesPendingFunctionCall, error) {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			return nil, errors.New("openai-responses stream function call event missing item_id or call_id")
+		}
+		pending, ok := pendingCalls[key]
+		if !ok {
+			pending = &openAIResponsesPendingFunctionCall{ItemID: key}
+			pendingCalls[key] = pending
+			pendingCallOrder = append(pendingCallOrder, key)
+		}
+		return pending, nil
+	}
+	recordFunctionItem := func(item openAIResponsesOutputItem) error {
+		if strings.TrimSpace(item.Type) != "function_call" {
+			return nil
+		}
+		key := openAIResponsesFunctionCallStreamKey(item.ID, item.CallID)
+		pending, err := ensurePendingCall(key)
+		if err != nil {
+			return err
+		}
+		pending.mergeItem(item)
+		return nil
+	}
 	process := func() error {
 		if len(dataLines) == 0 {
 			return nil
@@ -671,30 +698,29 @@ func parseOpenAIResponsesSSE(raw []byte) (Response, error) {
 			if text.Len() == 0 {
 				text.WriteString(evt.Text)
 			}
+		case "response.output_item.added":
+			if err := recordFunctionItem(evt.Item); err != nil {
+				return err
+			}
+		case "response.function_call_arguments.delta":
+			pending, err := ensurePendingCall(openAIResponsesFunctionCallStreamKey(evt.ItemID, evt.CallID))
+			if err != nil {
+				return err
+			}
+			pending.mergeEvent(evt)
+			pending.Arguments += evt.Delta
 		case "response.function_call_arguments.done":
-			name := strings.TrimSpace(evt.Name)
-			if name != "" {
-				id := strings.TrimSpace(evt.CallID)
-				if id == "" {
-					id = strings.TrimSpace(evt.ItemID)
-				}
-				calls = append(calls, ToolCall{
-					ID:        id,
-					Name:      name,
-					Arguments: parseOpenAIResponsesToolArguments(evt.Arguments),
-				})
+			pending, err := ensurePendingCall(openAIResponsesFunctionCallStreamKey(evt.ItemID, evt.CallID))
+			if err != nil {
+				return err
+			}
+			pending.mergeEvent(evt)
+			if strings.TrimSpace(evt.Arguments) != "" {
+				pending.Arguments = evt.Arguments
 			}
 		case "response.output_item.done":
-			if strings.TrimSpace(evt.Item.Type) == "function_call" && strings.TrimSpace(evt.Item.Name) != "" {
-				id := strings.TrimSpace(evt.Item.CallID)
-				if id == "" {
-					id = strings.TrimSpace(evt.Item.ID)
-				}
-				calls = append(calls, ToolCall{
-					ID:        id,
-					Name:      strings.TrimSpace(evt.Item.Name),
-					Arguments: parseOpenAIResponsesToolArguments(evt.Item.Arguments),
-				})
+			if err := recordFunctionItem(evt.Item); err != nil {
+				return err
 			}
 		case "response.completed":
 			resp := evt.Response
@@ -727,8 +753,10 @@ func parseOpenAIResponsesSSE(raw []byte) (Response, error) {
 		return Response{}, err
 	}
 	if completed != nil && len(completed.Output) > 0 {
+		mergeOpenAIResponsesStreamCalls(completed, pendingCallOrder, pendingCalls)
 		return convertOpenAIResponsesResponse(*completed)
 	}
+	calls = append(calls, openAIResponsesPendingToolCalls(pendingCallOrder, pendingCalls)...)
 	resp := Response{
 		Message: Message{
 			Role:    "assistant",
@@ -741,6 +769,122 @@ func parseOpenAIResponsesSSE(raw []byte) (Response, error) {
 		return Response{}, errors.New("openai-responses stream missing message or function call output")
 	}
 	return resp, nil
+}
+
+func openAIResponsesFunctionCallStreamKey(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+type openAIResponsesPendingFunctionCall struct {
+	ItemID    string
+	CallID    string
+	Name      string
+	Arguments string
+}
+
+func (p *openAIResponsesPendingFunctionCall) mergeEvent(evt openAIResponsesStreamEvent) {
+	if p == nil {
+		return
+	}
+	if strings.TrimSpace(evt.ItemID) != "" {
+		p.ItemID = strings.TrimSpace(evt.ItemID)
+	}
+	if strings.TrimSpace(evt.CallID) != "" {
+		p.CallID = strings.TrimSpace(evt.CallID)
+	}
+	if strings.TrimSpace(evt.Name) != "" {
+		p.Name = strings.TrimSpace(evt.Name)
+	}
+}
+
+func (p *openAIResponsesPendingFunctionCall) mergeItem(item openAIResponsesOutputItem) {
+	if p == nil {
+		return
+	}
+	if strings.TrimSpace(item.ID) != "" {
+		p.ItemID = strings.TrimSpace(item.ID)
+	}
+	if strings.TrimSpace(item.CallID) != "" {
+		p.CallID = strings.TrimSpace(item.CallID)
+	}
+	if strings.TrimSpace(item.Name) != "" {
+		p.Name = strings.TrimSpace(item.Name)
+	}
+	if strings.TrimSpace(item.Arguments) != "" {
+		p.Arguments = item.Arguments
+	}
+}
+
+func mergeOpenAIResponsesStreamCalls(completed *openAIResponsesResponse, order []string, pending map[string]*openAIResponsesPendingFunctionCall) {
+	if completed == nil || len(pending) == 0 {
+		return
+	}
+	seen := map[string]struct{}{}
+	for i, item := range completed.Output {
+		if strings.TrimSpace(item.Type) != "function_call" {
+			continue
+		}
+		key := openAIResponsesFunctionCallStreamKey(item.ID, item.CallID)
+		if key != "" {
+			seen[key] = struct{}{}
+		}
+		if call, ok := pending[key]; ok {
+			if strings.TrimSpace(item.CallID) == "" {
+				item.CallID = call.CallID
+			}
+			if strings.TrimSpace(item.Name) == "" {
+				item.Name = call.Name
+			}
+			if strings.TrimSpace(item.Arguments) == "" {
+				item.Arguments = call.Arguments
+			}
+			completed.Output[i] = item
+		}
+	}
+	for _, key := range order {
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		call := pending[key]
+		if call == nil || strings.TrimSpace(call.Name) == "" {
+			continue
+		}
+		completed.Output = append(completed.Output, openAIResponsesOutputItem{
+			ID:        call.ItemID,
+			Type:      "function_call",
+			CallID:    call.CallID,
+			Name:      call.Name,
+			Arguments: call.Arguments,
+		})
+	}
+}
+
+func openAIResponsesPendingToolCalls(order []string, pending map[string]*openAIResponsesPendingFunctionCall) []ToolCall {
+	if len(pending) == 0 {
+		return nil
+	}
+	calls := make([]ToolCall, 0, len(pending))
+	for _, key := range order {
+		call := pending[key]
+		if call == nil || strings.TrimSpace(call.Name) == "" {
+			continue
+		}
+		id := strings.TrimSpace(call.CallID)
+		if id == "" {
+			id = strings.TrimSpace(call.ItemID)
+		}
+		calls = append(calls, ToolCall{
+			ID:        id,
+			Name:      strings.TrimSpace(call.Name),
+			Arguments: parseOpenAIResponsesToolArguments(call.Arguments),
+		})
+	}
+	return calls
 }
 
 type openAIResponsesHTTPError struct {
