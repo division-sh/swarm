@@ -282,8 +282,9 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 	if e.nodeID == "" || strings.TrimSpace(string(evt.Type)) == "" {
 		return &HandlerOutcome{Handled: false}, nil
 	}
+	source := e.coordinator.SemanticSource()
 	entityID := workflowEventEntityID(evt)
-	flowID := workflowNodeFlowID(e.coordinator.SemanticSource(), e.nodeID)
+	flowID := workflowNodeFlowID(source, e.nodeID)
 	selectedState := WorkflowState{}
 	hasSelectedState := false
 	if handler.SelectEntity != nil && !handler.SelectEntity.Empty() {
@@ -306,7 +307,7 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 		selectedState = selected.State
 		hasSelectedState = true
 	}
-	entityID, evt = ensureHandlerEntityID(e.coordinator.SemanticSource(), flowID, handler, entityID, evt)
+	entityID, evt = ensureHandlerEntityID(source, flowID, handler, entityID, evt)
 	ctx = withPipelineFlowScope(ctx, flowID)
 	currentState := e.coordinator.currentWorkflowState(ctx, entityID)
 	if hasSelectedState && strings.TrimSpace(selectedState.EntityID) != "" && strings.TrimSpace(currentState.EntityID) == "" {
@@ -330,7 +331,11 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 		exec = tmpExec
 		node = runtimeengine.NewDeclarativeNode(strings.TrimSpace(e.nodeID), exec)
 	}
-	stateSnapshot, err := handlerExecutionStateSnapshot(handler, entityID, currentState)
+	workflowVersion := ""
+	if source != nil {
+		workflowVersion = source.WorkflowVersion()
+	}
+	stateSnapshot, err := handlerExecutionStateSnapshot(handler, entityID, currentState, flowID, workflowVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -420,9 +425,11 @@ func handlerMaterializesEntity(source semanticview.Source, flowID string, handle
 	return false
 }
 
-func handlerExecutionStateSnapshot(handler SystemNodeEventHandler, entityID string, state WorkflowState) (runtimeengine.StateSnapshot, error) {
+func handlerExecutionStateSnapshot(handler SystemNodeEventHandler, entityID string, state WorkflowState, workflowName string, workflowVersion string) (runtimeengine.StateSnapshot, error) {
 	snapshot := runtimeengine.StateSnapshot{
-		EntityID: identity.NormalizeEntityID(entityID),
+		EntityID:        identity.NormalizeEntityID(entityID),
+		WorkflowName:    strings.TrimSpace(workflowName),
+		WorkflowVersion: strings.TrimSpace(workflowVersion),
 		StateCarrier: runtimeengine.NewStateCarrier(
 			nil,
 			nil,

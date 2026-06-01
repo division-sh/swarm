@@ -12,6 +12,7 @@ import (
 
 	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimecorrelation "swarm/internal/runtime/correlation"
 	runtimeengine "swarm/internal/runtime/engine"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/testutil"
@@ -1198,7 +1199,7 @@ func TestHandlerExecutionStateSnapshotCreateEntityIncludesInitialStateAndDefault
 			"revision_count": 0,
 			"is_duplicate":   false,
 		},
-	})
+	}, "validation", "v-test")
 	if err != nil {
 		t.Fatalf("handlerExecutionStateSnapshot: %v", err)
 	}
@@ -1208,6 +1209,12 @@ func TestHandlerExecutionStateSnapshotCreateEntityIncludesInitialStateAndDefault
 	}
 	if snapshot.CurrentState != "queued" {
 		t.Fatalf("snapshot current_state = %q, want queued", snapshot.CurrentState)
+	}
+	if snapshot.WorkflowName != "validation" {
+		t.Fatalf("snapshot workflow_name = %q, want validation", snapshot.WorkflowName)
+	}
+	if snapshot.WorkflowVersion != "v-test" {
+		t.Fatalf("snapshot workflow_version = %q, want v-test", snapshot.WorkflowVersion)
 	}
 	if snapshot.Metadata == nil {
 		t.Fatal("snapshot metadata = nil, want persisted metadata")
@@ -1389,6 +1396,125 @@ node-a:
 		t.Fatalf("expected initial-value mutation for revision_count, got %#v", initialMutations)
 	} else if got[2] != "create_entity" {
 		t.Fatalf("revision_count initial mutation metadata = %#v, want handler_step create_entity", got)
+	}
+}
+
+func TestExecuteNodeContractHandlerQueryEntitiesGuardUsesWorkflowContext(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	bus := &recordingPipelineBus{}
+	source := loadWorkflowTempSource(t, map[string]string{
+		"package.yaml": `
+name: runtime-test
+version: "1.0.0"
+platform_version: ">=1.0.0"
+flows:
+  - id: validation
+    flow: validation
+    mode: static
+`,
+		"schema.yaml": "name: runtime-test\n",
+		"flows/validation/schema.yaml": `
+name: validation
+mode: static
+initial_state: queued
+states: [queued]
+`,
+		"flows/validation/entities.yaml": `
+validation_request:
+  request_id: text
+`,
+		"flows/validation/nodes.yaml": `
+node-a:
+  id: node-a
+  execution_type: system_node
+`,
+	})
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		t.Fatal("expected temp workflow bundle")
+	}
+	pc := &PipelineCoordinator{
+		bus:            bus,
+		db:             db,
+		workflowStore:  NewWorkflowInstanceStore(db),
+		expressionEval: newWorkflowExpressionEvaluator(),
+		entityLocks:    map[string]*sync.Mutex{},
+		module: &previewWorkflowModule{
+			bundle: bundle,
+			workflow: NewWorkflowDefinition("validation", []WorkflowStage{
+				{Name: "queued"},
+			}, nil),
+		},
+	}
+	ctx := testPipelineCoordinatorRunContext(t, pc)
+	const otherRunID = "88888888-8888-8888-8888-888888888888"
+	if _, err := db.ExecContext(context.Background(), `
+		INSERT INTO runs (run_id, status)
+		VALUES ($1::uuid, 'running')
+		ON CONFLICT (run_id) DO NOTHING
+	`, otherRunID); err != nil {
+		t.Fatalf("seed other run: %v", err)
+	}
+	otherCtx := runtimecorrelation.WithRunID(context.Background(), otherRunID)
+	seedQueryEntitiesGuardInstance(t, pc.workflowStore, ctx, "11111111-1111-1111-1111-111111111111", "validation/existing-same", "req-existing")
+	seedQueryEntitiesGuardInstance(t, pc.workflowStore, otherCtx, "22222222-2222-2222-2222-222222222222", "validation/existing-other", "req-cross-run")
+
+	handler := runtimecontracts.SystemNodeEventHandler{
+		CreateEntity: true,
+		Guard:        &runtimecontracts.GuardSpec{Check: `query_entities(request_id == payload.request_id).count == 0`},
+		Emit: runtimecontracts.EmitSpec{
+			Event: "request.accepted",
+			Fields: map[string]runtimecontracts.ExpressionValue{
+				"request_id": runtimecontracts.RefExpression("payload.request_id"),
+			},
+		},
+	}
+	runHandler := func(entityID, requestID string) error {
+		_, err := pc.executeNodeContractHandler(ctx, "node-a", handler, workflowTriggerContext{
+			Event: events.Event{
+				ID:      "evt-" + requestID,
+				Type:    events.EventType("request.received"),
+				RunID:   testPipelineRunID,
+				Payload: mustJSON(map[string]any{"request_id": requestID}),
+			}.WithEntityID(entityID),
+			State: WorkflowState{EntityID: entityID, Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
+		}, false)
+		return err
+	}
+
+	if err := runHandler("33333333-3333-3333-3333-333333333333", "req-new"); err != nil {
+		t.Fatalf("execute handler for new request: %v", err)
+	}
+	if err := runHandler("44444444-4444-4444-4444-444444444444", "req-cross-run"); err != nil {
+		t.Fatalf("execute handler for cross-run request: %v", err)
+	}
+	if got := bus.publishedCount(); got != 2 {
+		t.Fatalf("published count after accepted requests = %d, want 2", got)
+	}
+	if err := runHandler("55555555-5555-5555-5555-555555555555", "req-existing"); err != nil {
+		t.Fatalf("execute handler for duplicate request: %v", err)
+	}
+	if got := bus.publishedCount(); got != 2 {
+		t.Fatalf("published count after duplicate request = %d, want unchanged 2", got)
+	}
+}
+
+func seedQueryEntitiesGuardInstance(t *testing.T, store *WorkflowInstanceStore, ctx context.Context, entityID, storageRef, requestID string) {
+	t.Helper()
+	if err := store.Upsert(ctx, WorkflowInstance{
+		InstanceID:      entityID,
+		StorageRef:      storageRef,
+		WorkflowName:    "validation",
+		WorkflowVersion: "1.0.0",
+		CurrentState:    "queued",
+		Metadata: map[string]any{
+			"entity_id":  entityID,
+			"request_id": requestID,
+		},
+	}); err != nil {
+		t.Fatalf("seed query_entities guard instance %s: %v", entityID, err)
 	}
 }
 

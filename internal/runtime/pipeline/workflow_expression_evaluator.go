@@ -22,13 +22,14 @@ var workflowExpressionQueryEntitiesCountPattern = regexp.MustCompile(`query_enti
 var workflowExpressionQueryPredicatePattern = regexp.MustCompile(`^\s*([a-zA-Z_][a-zA-Z0-9_.]*)\s*(==|!=|>=|<=|>|<)\s*(.+?)\s*$`)
 
 type workflowExpressionContext struct {
-	Entity           map[string]any
-	Event            map[string]any
-	Payload          map[string]any
-	Policy           map[string]any
-	Accumulated      any
-	FanOut           map[string]any
-	QueryEntityCount func(string) (int, error)
+	Entity                       map[string]any
+	Event                        map[string]any
+	Payload                      map[string]any
+	Policy                       map[string]any
+	Accumulated                  any
+	FanOut                       map[string]any
+	QueryEntityCount             func(string) (int, error)
+	AllowUnresolvedQueryOperands bool
 }
 
 type workflowExpressionEvaluator struct {
@@ -68,6 +69,9 @@ func (e *workflowExpressionEvaluator) EvalBool(expression string, ctx workflowEx
 		return false, fmt.Errorf("workflow expression evaluator is not initialized")
 	}
 	normalized, normalizedCtx, err := normalizeWorkflowExpression(expression, ctx)
+	if err != nil {
+		return false, err
+	}
 	if normalized == "" {
 		return false, fmt.Errorf("workflow expression is empty")
 	}
@@ -146,13 +150,14 @@ func normalizeWorkflowExpression(expression string, ctx workflowExpressionContex
 	expression = strings.TrimSpace(expression)
 	if expression == "" {
 		return "", workflowExpressionContext{
-			Entity:           cloneStringAnyMap(ctx.Entity),
-			Event:            cloneStringAnyMap(ctx.Event),
-			Payload:          cloneStringAnyMap(ctx.Payload),
-			Policy:           cloneStringAnyMap(ctx.Policy),
-			Accumulated:      cloneAccumulatedItems(ctx.Accumulated),
-			FanOut:           cloneStringAnyMap(ctx.FanOut),
-			QueryEntityCount: ctx.QueryEntityCount,
+			Entity:                       cloneStringAnyMap(ctx.Entity),
+			Event:                        cloneStringAnyMap(ctx.Event),
+			Payload:                      cloneStringAnyMap(ctx.Payload),
+			Policy:                       cloneStringAnyMap(ctx.Policy),
+			Accumulated:                  cloneAccumulatedItems(ctx.Accumulated),
+			FanOut:                       cloneStringAnyMap(ctx.FanOut),
+			QueryEntityCount:             ctx.QueryEntityCount,
+			AllowUnresolvedQueryOperands: ctx.AllowUnresolvedQueryOperands,
 		}, nil
 	}
 	if strings.EqualFold(expression, "else") {
@@ -177,13 +182,14 @@ func normalizeWorkflowExpression(expression string, ctx workflowExpressionContex
 	normalized = normalizeWorkflowExpressionStringLiterals(normalized)
 	normalized = rewriteWorkflowExpressionEntityNullPresenceChecks(normalized)
 	normalizedCtx := workflowExpressionContext{
-		Entity:           cloneStringAnyMap(ctx.Entity),
-		Event:            cloneStringAnyMap(ctx.Event),
-		Payload:          cloneStringAnyMap(ctx.Payload),
-		Policy:           cloneStringAnyMap(ctx.Policy),
-		Accumulated:      cloneAccumulatedItems(ctx.Accumulated),
-		FanOut:           cloneStringAnyMap(ctx.FanOut),
-		QueryEntityCount: ctx.QueryEntityCount,
+		Entity:                       cloneStringAnyMap(ctx.Entity),
+		Event:                        cloneStringAnyMap(ctx.Event),
+		Payload:                      cloneStringAnyMap(ctx.Payload),
+		Policy:                       cloneStringAnyMap(ctx.Policy),
+		Accumulated:                  cloneAccumulatedItems(ctx.Accumulated),
+		FanOut:                       cloneStringAnyMap(ctx.FanOut),
+		QueryEntityCount:             ctx.QueryEntityCount,
+		AllowUnresolvedQueryOperands: ctx.AllowUnresolvedQueryOperands,
 	}
 	normalized = workflowExpressionPolicyPlaceholder.ReplaceAllStringFunc(normalized, func(token string) string {
 		match := workflowExpressionPolicyPlaceholder.FindStringSubmatch(token)
@@ -288,7 +294,36 @@ func workflowExpressionResolveQueryOperand(raw string, ctx workflowExpressionCon
 	if parsed, err := strconv.ParseFloat(raw, 64); err == nil {
 		return parsed, nil
 	}
+	if root, scoped := workflowExpressionQueryOperandScope(raw); scoped {
+		switch root {
+		case "entity", "event", "payload", "policy", "fan_out":
+			if ctx.AllowUnresolvedQueryOperands {
+				return raw, nil
+			}
+			return nil, fmt.Errorf("query_entities operand %q is unavailable in expression context", raw)
+		default:
+			return nil, fmt.Errorf("unsupported query_entities operand scope %q in %q", root, raw)
+		}
+	}
 	return raw, nil
+}
+
+func workflowExpressionQueryOperandScope(raw string) (string, bool) {
+	root, _, ok := strings.Cut(strings.TrimSpace(raw), ".")
+	if !ok {
+		return "", false
+	}
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return "", false
+	}
+	for i, ch := range root {
+		if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_' || (i > 0 && ch >= '0' && ch <= '9') {
+			continue
+		}
+		return "", false
+	}
+	return root, true
 }
 
 func workflowExpressionLookupContextValue(ref string, ctx workflowExpressionContext) (any, bool) {
