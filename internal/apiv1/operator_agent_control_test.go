@@ -13,13 +13,13 @@ import (
 	runtimeactors "swarm/internal/runtime/core/actors"
 	runtimemanager "swarm/internal/runtime/manager"
 	"swarm/internal/store"
+	"swarm/internal/store/storetest"
 	"swarm/internal/testutil"
 )
 
 func TestOperatorAgentControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	pg := &store.PostgresStore{DB: db}
+	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
+	db := sqliteStore.DB
 	controller := &fakeAgentControlController{
 		directiveResponse: "accepted",
 		replayedCount:     7,
@@ -28,7 +28,7 @@ func TestOperatorAgentControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.
 		AuthTokens: []string{testToken},
 		Handlers: OperatorReadHandlers(OperatorReadOptions{
 			Now:          func() time.Time { return time.Date(2026, 5, 12, 12, 0, 0, 0, time.UTC) },
-			Idempotency:  pg,
+			Idempotency:  sqliteStore,
 			AgentControl: controller,
 		}),
 	})
@@ -107,13 +107,11 @@ func TestOperatorAgentControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.
 }
 
 func TestOperatorAgentControlHandlersTypedResourceErrors(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	pg := &store.PostgresStore{DB: db}
+	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: OperatorReadHandlers(OperatorReadOptions{
-			Idempotency: pg,
+			Idempotency: sqliteStore,
 			AgentControl: &fakeAgentControlController{
 				errs: map[string]error{
 					"agent.send_directive": &runtimeagentcontrol.StateError{
@@ -156,15 +154,14 @@ func TestOperatorAgentControlHandlersTypedResourceErrors(t *testing.T) {
 }
 
 func TestOperatorAgentSendDirectiveRunTargetErrors(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	pg := &store.PostgresStore{DB: db}
+	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
+	db := sqliteStore.DB
 	missingRunID := "00000000-0000-0000-0000-000000000404"
 	terminalRunID := "00000000-0000-0000-0000-000000000405"
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: OperatorReadHandlers(OperatorReadOptions{
-			Idempotency: pg,
+			Idempotency: sqliteStore,
 			AgentControl: &fakeAgentControlController{
 				errs: map[string]error{
 					"missing": &runtimeagentcontrol.StateError{
@@ -316,13 +313,11 @@ func TestOperatorAgentSendDirectiveUsesLegacyRunBundleSourceUntilSourceStampingO
 }
 
 func TestOperatorAgentControlHandlersRestrictAgentNotRunningToSendDirective(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	pg := &store.PostgresStore{DB: db}
+	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: OperatorReadHandlers(OperatorReadOptions{
-			Idempotency: pg,
+			Idempotency: sqliteStore,
 			AgentControl: &fakeAgentControlController{
 				errs: map[string]error{
 					"agent.restart": &runtimeagentcontrol.StateError{

@@ -3,18 +3,15 @@ package apiv1
 import (
 	"context"
 	"encoding/json"
-	"path/filepath"
 	"testing"
 	"time"
 
-	"gopkg.in/yaml.v3"
-	"swarm/internal/platform"
 	"swarm/internal/runtime/budgetspend"
-	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimeactors "swarm/internal/runtime/core/actors"
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimesessions "swarm/internal/runtime/sessions"
 	storepkg "swarm/internal/store"
+	"swarm/internal/store/storetest"
 )
 
 func TestSQLiteAgentUsageOwnerBacksSupportedAPISurface(t *testing.T) {
@@ -73,23 +70,7 @@ func TestSQLiteAgentUsageOwnerBacksSupportedAPISurface(t *testing.T) {
 
 func newSQLiteAgentUsageStoreFixture(t *testing.T, ctx context.Context) *storepkg.SQLiteRuntimeStore {
 	t.Helper()
-	sqliteStore, err := storepkg.NewSQLiteRuntimeStore(filepath.Join(t.TempDir(), "dev.db"))
-	if err != nil {
-		t.Fatalf("NewSQLiteRuntimeStore: %v", err)
-	}
-	t.Cleanup(func() { _ = sqliteStore.Close() })
-	var platformSpec runtimecontracts.PlatformSpecDocument
-	if err := yaml.Unmarshal(platform.PlatformSpecYAML(), &platformSpec); err != nil {
-		t.Fatalf("unmarshal platform spec: %v", err)
-	}
-	plans, err := storepkg.GeneratePlatformTableDDLs(platformSpec)
-	if err != nil {
-		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
-	}
-	if err := sqliteStore.EnsureSchemaTables(ctx, plans); err != nil {
-		t.Fatalf("EnsureSchemaTables: %v", err)
-	}
-	return sqliteStore
+	return storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 }
 
 func seedSQLiteAgentUsageAgent(t *testing.T, ctx context.Context, sqliteStore *storepkg.SQLiteRuntimeStore, agentID string) {

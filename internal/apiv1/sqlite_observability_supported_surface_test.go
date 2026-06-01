@@ -5,18 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	"gopkg.in/yaml.v3"
 	"swarm/internal/events"
-	"swarm/internal/platform"
 	runtimepkg "swarm/internal/runtime"
-	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimecorrelation "swarm/internal/runtime/correlation"
 	storepkg "swarm/internal/store"
+	"swarm/internal/store/storetest"
 )
 
 func TestSQLiteObservabilityOwnerBacksSupportedAPISurfaces(t *testing.T) {
@@ -80,23 +77,7 @@ type sqliteObservabilitySurfaceFixture struct {
 
 func newSQLiteObservabilitySurfaceFixture(t *testing.T, ctx context.Context) sqliteObservabilitySurfaceFixture {
 	t.Helper()
-	sqliteStore, err := storepkg.NewSQLiteRuntimeStore(filepath.Join(t.TempDir(), "dev.db"))
-	if err != nil {
-		t.Fatalf("NewSQLiteRuntimeStore: %v", err)
-	}
-	t.Cleanup(func() { _ = sqliteStore.Close() })
-
-	var platformSpec runtimecontracts.PlatformSpecDocument
-	if err := yaml.Unmarshal(platform.PlatformSpecYAML(), &platformSpec); err != nil {
-		t.Fatalf("unmarshal platform spec: %v", err)
-	}
-	plans, err := storepkg.GeneratePlatformTableDDLs(platformSpec)
-	if err != nil {
-		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
-	}
-	if err := sqliteStore.EnsureSchemaTables(ctx, plans); err != nil {
-		t.Fatalf("EnsureSchemaTables: %v", err)
-	}
+	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 
 	now := time.Unix(1700002000, 0).UTC()
 	runID := uuid.NewString()
