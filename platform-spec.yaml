@@ -6589,8 +6589,9 @@ workspace_model:
           rule: >
             The host workspace root is platform-managed and writable. Startup MUST create/validate required workspace roots and
             MUST reject roots that overlap the read-only `/data` source or loaded contracts source. Overlap checks MUST use
-            canonical/evaluated paths, and platform-managed workspace path creation MUST fail closed instead of following
-            symlink escapes out of the selected host workspace root.
+            canonical/evaluated paths. Every host lifecycle consumer MUST pass this validation before platform-managed
+            workspace path creation; path creation MUST fail closed instead of following symlink escapes out of the selected
+            host workspace root.
     failure_behavior:
     - Unsupported backend names fail closed before runtime construction.
     - Empty explicit backend sources from the flag, config, or environment fail closed instead of falling through.
