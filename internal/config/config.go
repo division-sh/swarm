@@ -95,6 +95,7 @@ type LLMConfig struct {
 	ClaudeAPI        ClaudeAPIConfig           `yaml:"claude_api"`
 	ClaudeCLI        ClaudeCLIConfig           `yaml:"claude_cli"`
 	OpenAICompatible OpenAICompatibleConfig    `yaml:"openai_compatible"`
+	OpenAIResponses  OpenAIResponsesConfig     `yaml:"openai_responses"`
 }
 
 type LLMSessionConfig struct {
@@ -123,6 +124,10 @@ type OpenAICompatibleConfig struct {
 	BaseURL      string `yaml:"base_url"`
 	DefaultModel string `yaml:"default_model"`
 	LowCostModel string `yaml:"low_cost_model"`
+}
+
+type OpenAIResponsesConfig struct {
+	BaseURL string `yaml:"base_url"`
 }
 
 type LoadOptions struct {
@@ -201,6 +206,11 @@ func (c *Config) validate(backendOverride string) error {
 	}
 	if profile.ID == llmselection.BackendOpenAICompatible {
 		if _, err := llmselection.ResolveBaseURL(profile, c.LLM.OpenAICompatible.BaseURL); err != nil {
+			return err
+		}
+	}
+	if profile.ID == llmselection.BackendOpenAIResponses {
+		if _, err := llmselection.ResolveBaseURL(profile, c.LLM.OpenAIResponses.BaseURL); err != nil {
 			return err
 		}
 	}

@@ -797,6 +797,9 @@ func TestPostgresStore_EnsureSchemaCompatibilityColumnsMigratesAgentLLMBackendPr
 	if _, err := db.ExecContext(ctx, `INSERT INTO agents (agent_id, role, model, llm_backend, conversation_mode) VALUES ('agent-legacy', 'worker', 'sonnet', 'api', 'task')`); err == nil {
 		t.Fatal("insert legacy llm_backend api succeeded after migration")
 	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO agents (agent_id, role, model, llm_backend, conversation_mode) VALUES ('agent-openai-responses', 'worker', 'regular', 'openai_responses', 'task')`); err != nil {
+		t.Fatalf("insert openai_responses llm_backend after migration: %v", err)
+	}
 	if _, err := db.ExecContext(ctx, `INSERT INTO agents (agent_id, role, model, conversation_mode) VALUES ('agent-default', 'worker', 'sonnet', 'task')`); err != nil {
 		t.Fatalf("insert default llm_backend after migration: %v", err)
 	}
@@ -5743,6 +5746,20 @@ func TestProjectPersistedAgentConfig_UsesCanonicalLLMBackendProfiles(t *testing.
 	}
 	if projection.LLMBackend != "openai_compatible" {
 		t.Fatalf("llm_backend = %q, want openai_compatible", projection.LLMBackend)
+	}
+
+	projection, err = projectPersistedAgentConfig(runtimeactors.AgentConfig{
+		ID:               "agent-openai-responses-backend",
+		Role:             "reviewer",
+		Model:            "regular",
+		LLMBackend:       "openai_responses",
+		ConversationMode: "task",
+	}, "")
+	if err != nil {
+		t.Fatalf("projectPersistedAgentConfig openai_responses: %v", err)
+	}
+	if projection.LLMBackend != "openai_responses" {
+		t.Fatalf("llm_backend = %q, want openai_responses", projection.LLMBackend)
 	}
 
 	_, err = projectPersistedAgentConfig(runtimeactors.AgentConfig{

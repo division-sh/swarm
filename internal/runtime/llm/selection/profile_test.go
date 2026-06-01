@@ -16,6 +16,7 @@ func TestResolveActiveBackendProfiles(t *testing.T) {
 		{raw: BackendAnthropic, wantID: BackendAnthropic, provider: ProviderAnthropic, transport: TransportAPI},
 		{raw: BackendClaudeCLI, wantID: BackendClaudeCLI, provider: ProviderClaude, transport: TransportCLI},
 		{raw: BackendOpenAICompatible, wantID: BackendOpenAICompatible, provider: ProviderOpenAICompatible, transport: TransportAPI},
+		{raw: BackendOpenAIResponses, wantID: BackendOpenAIResponses, provider: ProviderOpenAI, transport: TransportAPI},
 	}
 	for _, tt := range tests {
 		t.Run(tt.raw, func(t *testing.T) {
@@ -31,7 +32,7 @@ func TestResolveActiveBackendProfiles(t *testing.T) {
 }
 
 func TestResolveActiveBackendRejectsReservedAndUnknown(t *testing.T) {
-	for _, raw := range []string{BackendMock, BackendLocal, LegacyBackendAPI, LegacyBackendCLITest, "openai", "openai_responses"} {
+	for _, raw := range []string{BackendMock, BackendLocal, LegacyBackendAPI, LegacyBackendCLITest, "openai"} {
 		t.Run(raw, func(t *testing.T) {
 			if _, err := ResolveActiveBackend(raw); err == nil {
 				t.Fatal("expected error")
@@ -41,7 +42,7 @@ func TestResolveActiveBackendRejectsReservedAndUnknown(t *testing.T) {
 }
 
 func TestResolvePersistedBackendAllowsReservedProfiles(t *testing.T) {
-	for _, raw := range []string{BackendAnthropic, BackendClaudeCLI, BackendOpenAICompatible, BackendMock, BackendLocal} {
+	for _, raw := range []string{BackendAnthropic, BackendClaudeCLI, BackendOpenAICompatible, BackendOpenAIResponses, BackendMock, BackendLocal} {
 		t.Run(raw, func(t *testing.T) {
 			profile, err := ResolvePersistedBackend(raw)
 			if err != nil {
@@ -54,9 +55,13 @@ func TestResolvePersistedBackendAllowsReservedProfiles(t *testing.T) {
 	}
 }
 
-func TestResolvePersistedBackendRejectsSourceOnlyOpenAIResponsesProfile(t *testing.T) {
-	if _, err := ResolvePersistedBackend("openai_responses"); err == nil || !strings.Contains(err.Error(), "unsupported llm backend profile") {
-		t.Fatalf("ResolvePersistedBackend(openai_responses) error = %v, want unsupported profile", err)
+func TestResolvePersistedBackendAcceptsActivatedOpenAIResponsesProfile(t *testing.T) {
+	profile, err := ResolvePersistedBackend(BackendOpenAIResponses)
+	if err != nil {
+		t.Fatalf("ResolvePersistedBackend(openai_responses): %v", err)
+	}
+	if profile.Provider != ProviderOpenAI || profile.RuntimeMode != ProviderContractRuntimeModeOpenAIResponses {
+		t.Fatalf("openai_responses profile = %#v", profile)
 	}
 }
 
@@ -69,6 +74,7 @@ func TestMigratePersistedBackendBackfillsLegacyProfiles(t *testing.T) {
 		{raw: LegacyBackendAPI, want: BackendAnthropic, changed: true},
 		{raw: LegacyBackendCLITest, want: BackendClaudeCLI, changed: true},
 		{raw: BackendOpenAICompatible, want: BackendOpenAICompatible},
+		{raw: BackendOpenAIResponses, want: BackendOpenAIResponses},
 		{raw: BackendMock, want: BackendMock},
 	}
 	for _, tt := range tests {
@@ -184,6 +190,44 @@ func TestResolveOpenAICompatibleProfileAuthority(t *testing.T) {
 	}
 	if _, err := ResolveModelName(profile, ModelResolution{}); err == nil || !strings.Contains(err.Error(), "model is required") {
 		t.Fatalf("ResolveModelName missing error = %v, want model required", err)
+	}
+}
+
+func TestResolveOpenAIResponsesProfileAuthority(t *testing.T) {
+	profile, err := ResolveActiveBackend(BackendOpenAIResponses)
+	if err != nil {
+		t.Fatalf("ResolveActiveBackend: %v", err)
+	}
+	if profile.Provider != ProviderOpenAI || profile.RuntimeMode != ProviderContractRuntimeModeOpenAIResponses {
+		t.Fatalf("profile = %#v, want provider openai runtime openai_responses", profile)
+	}
+	if profile.Credential.EnvVar != OpenAIResponsesCredentialEnv {
+		t.Fatalf("credential env = %q, want %q", profile.Credential.EnvVar, OpenAIResponsesCredentialEnv)
+	}
+	if got, err := ResolveBaseURL(profile, ""); err != nil || got != OpenAIResponsesDefaultBaseURL {
+		t.Fatalf("ResolveBaseURL default = %q, %v; want %s", got, err, OpenAIResponsesDefaultBaseURL)
+	}
+	if got, err := ResolveBaseURL(profile, " https://proxy.test/v1/ "); err != nil || got != "https://proxy.test/v1" {
+		t.Fatalf("ResolveBaseURL override = %q, %v; want normalized base url", got, err)
+	}
+	for alias, want := range map[string]string{
+		ModelAliasCheap:    "gpt-5.4-nano",
+		ModelAliasRegular:  "gpt-5.4",
+		ModelAliasFrontier: "gpt-5.5",
+	} {
+		got, err := ResolveModelName(profile, ModelResolution{Model: alias})
+		if err != nil || got != want {
+			t.Fatalf("ResolveModelName(%s) = %q, %v; want %s", alias, got, err, want)
+		}
+	}
+	got, err := ResolveModelName(profile, ModelResolution{
+		Model: ModelAliasRegular,
+		Models: ModelAliases{
+			ModelAliasRegular: {BackendOpenAIResponses: "gpt-test"},
+		},
+	})
+	if err != nil || got != "gpt-test" {
+		t.Fatalf("ResolveModelName override = %q, %v; want gpt-test", got, err)
 	}
 }
 

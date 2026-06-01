@@ -316,7 +316,7 @@ func TestCLI_ServeOwnsRuntimeStartupFlags(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("serve help code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	for _, want := range []string{"Start the Swarm runtime", "--config", "--backend", "--contracts", "--data", "--workspace-backend", "--bundle-hash", "--api-listen-addr", "API, WebSocket, health, and readiness routes", "--mcp-listen-addr", "MCP and tools routes", "--platform-spec", "--store", "--self-check", "--dev", "--require-bundle-match", "--no-require-bundle-match", "--abandon-active-runs", "--shutdown-grace", "--verbose"} {
+	for _, want := range []string{"Start the Swarm runtime", "--config", "--backend", "openai_responses", "--contracts", "--data", "--workspace-backend", "--bundle-hash", "--api-listen-addr", "API, WebSocket, health, and readiness routes", "--mcp-listen-addr", "MCP and tools routes", "--platform-spec", "--store", "--self-check", "--dev", "--require-bundle-match", "--no-require-bundle-match", "--abandon-active-runs", "--shutdown-grace", "--verbose"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("serve help missing %q:\n%s", want, stdout.String())
 		}
@@ -2372,9 +2372,11 @@ func TestPlatformSpecLLMProviderModelSelectionSourceAuthorityPromoted(t *testing
 								Required bool   `yaml:"required"`
 							} `yaml:"credential_source"`
 							EndpointSource struct {
-								ConfigKey string `yaml:"config_key"`
-								EnvVar    string `yaml:"env_var"`
-								Rule      string `yaml:"rule"`
+								ConfigKey      string `yaml:"config_key"`
+								EnvVar         string `yaml:"env_var"`
+								Required       bool   `yaml:"required"`
+								BuiltInDefault string `yaml:"built_in_default"`
+								Rule           string `yaml:"rule"`
 							} `yaml:"endpoint_source"`
 						} `yaml:"active_backend_profiles"`
 						PendingBackendProfiles map[string]struct {
@@ -2518,33 +2520,33 @@ func TestPlatformSpecLLMProviderModelSelectionSourceAuthorityPromoted(t *testing
 	if got := profiles["openai_compatible"]; got.Provider != "openai_compatible" || got.ProviderContractRuntimeMode != "openai_compatible" || got.EndpointSource.EnvVar != "" || !strings.Contains(got.EndpointSource.Rule, "SWARM_OPENAI_COMPATIBLE_BASE_URL is retired") {
 		t.Fatalf("openai_compatible profile = %#v", got)
 	}
-	if _, ok := profiles["openai_responses"]; ok {
-		t.Fatalf("openai_responses must not be active until #1224: %#v", profiles["openai_responses"])
+	openAIResponses := profiles["openai_responses"]
+	if openAIResponses.Provider != "openai" || openAIResponses.ProviderContractRuntimeMode != "openai_responses" || openAIResponses.Transport != "api" {
+		t.Fatalf("openai_responses profile = %#v", openAIResponses)
 	}
-	pendingResponses := authority.BackendProfileIdentity.PendingBackendProfiles["openai_responses"]
-	if pendingResponses.Provider != "openai" || pendingResponses.ProviderContractRuntimeMode != "openai_responses" || pendingResponses.Status != "source_authority_only_not_selectable" {
-		t.Fatalf("pending openai_responses profile = %#v", pendingResponses)
+	if openAIResponses.CredentialSource.EnvVar != "OPENAI_API_KEY" || !openAIResponses.CredentialSource.Required {
+		t.Fatalf("openai_responses credential source = %#v", openAIResponses.CredentialSource)
 	}
-	if pendingResponses.CredentialSource.EnvVar != "OPENAI_API_KEY" || !pendingResponses.CredentialSource.Required {
-		t.Fatalf("pending openai_responses credential source = %#v", pendingResponses.CredentialSource)
+	if openAIResponses.EndpointSource.ConfigKey != "llm.openai_responses.base_url" || openAIResponses.EndpointSource.EnvVar != "" || openAIResponses.EndpointSource.Required || openAIResponses.EndpointSource.BuiltInDefault != "https://api.openai.com/v1" {
+		t.Fatalf("openai_responses endpoint source = %#v", openAIResponses.EndpointSource)
 	}
-	if pendingResponses.EndpointSource.ConfigKey != "llm.openai_responses.base_url" || pendingResponses.EndpointSource.EnvVar != "" || pendingResponses.EndpointSource.BuiltInDefault != "https://api.openai.com/v1" {
-		t.Fatalf("pending openai_responses endpoint source = %#v", pendingResponses.EndpointSource)
+	if _, ok := authority.BackendProfileIdentity.PendingBackendProfiles["openai_responses"]; ok {
+		t.Fatalf("openai_responses must not remain pending after #1224 activation: %#v", authority.BackendProfileIdentity.PendingBackendProfiles)
 	}
 	openAIRejectedTarget := authority.BackendProfileIdentity.RejectedTargetNames["openai"]
-	for _, want := range []string{"not active", "openai_responses", "#1224"} {
+	for _, want := range []string{"must not be accepted", "openai_responses", "#1224"} {
 		if !strings.Contains(strings.ToLower(openAIRejectedTarget), strings.ToLower(want)) {
 			t.Fatalf("openai rejected target missing %q: %#v", want, authority.BackendProfileIdentity.RejectedTargetNames)
 		}
 	}
-	if !strings.Contains(strings.ToLower(authority.BackendProfileIdentity.RejectedTargetNames["openai"]), "not active") {
+	if !strings.Contains(strings.ToLower(authority.BackendProfileIdentity.RejectedTargetNames["openai"]), "provider identity") {
 		t.Fatalf("openai rejected target missing design decision: %#v", authority.BackendProfileIdentity.RejectedTargetNames)
 	}
 	responses := authority.NativeOpenAIResponsesSourceAuthority
-	if responses.PromotedBy != "#1229" || responses.ImplementationStatus != "source_authority_only_runtime_split" {
+	if responses.PromotedBy != "#1229" || responses.ImplementationStatus != "runtime_adapter_activated_first_subset" {
 		t.Fatalf("native responses source authority status = %#v", responses)
 	}
-	if responses.TargetBackendProfileID != "openai_responses" || responses.ProviderIdentity != "openai" || responses.ActivationStatus != "pending_runtime_adapter_not_selectable" {
+	if responses.TargetBackendProfileID != "openai_responses" || responses.ProviderIdentity != "openai" || responses.ActivationStatus != "active_backend_profile_runtime_adapter_promoted_by_1224" {
 		t.Fatalf("native responses identity = %#v", responses)
 	}
 	for _, want := range []string{"api-reference/responses", "docs/models", "function-calling", "streaming-responses"} {
@@ -2552,7 +2554,7 @@ func TestPlatformSpecLLMProviderModelSelectionSourceAuthorityPromoted(t *testing
 			t.Fatalf("native responses authoritative refs missing %q: %#v", want, responses.AuthoritativeRefs)
 		}
 	}
-	for _, want := range []string{"MUST NOT be accepted", "openai remains a rejected", "openai_compatible remains Chat Completions-compatible"} {
+	for _, want := range []string{"openai_responses is accepted", "openai remains a rejected", "openai_compatible remains Chat Completions-compatible"} {
 		if !joinedContains(responses.ActiveSelectorPolicy, want) {
 			t.Fatalf("native responses selector policy missing %q: %#v", want, responses.ActiveSelectorPolicy)
 		}
@@ -2577,8 +2579,8 @@ func TestPlatformSpecLLMProviderModelSelectionSourceAuthorityPromoted(t *testing
 			t.Fatalf("native responses model alias %s = %q, want %q; aliases=%#v", alias, got, model, responses.ModelAliasDefaults)
 		}
 	}
-	if !strings.Contains(responses.ModelAliasRule, "not consumed by boot or verify until openai_responses is activated") {
-		t.Fatalf("native responses model alias rule does not preserve inactive boundary: %s", responses.ModelAliasRule)
+	if !strings.Contains(responses.ModelAliasRule, "consumed by") || !strings.Contains(responses.ModelAliasRule, "openai_responses") {
+		t.Fatalf("native responses model alias rule does not record active consumption: %s", responses.ModelAliasRule)
 	}
 	for _, want := range []string{"function tools", "function-call output", "raw Responses payloads", "previous_response_id", "backend profile id openai_responses", "exact provider-reported usage"} {
 		combined := strings.Join(responses.ProviderContractExpectations.ToolSchema, " ") +
@@ -2590,8 +2592,8 @@ func TestPlatformSpecLLMProviderModelSelectionSourceAuthorityPromoted(t *testing
 			t.Fatalf("native responses provider contract expectations missing %q: %#v", want, responses.ProviderContractExpectations)
 		}
 	}
-	if !strings.Contains(responses.StoreProfileImplication, "No agents.llm_backend schema/check migration is required") || !strings.Contains(responses.StoreProfileImplication, "not active") {
-		t.Fatalf("native responses store implication must preserve inactive boundary: %s", responses.StoreProfileImplication)
+	if !strings.Contains(responses.StoreProfileImplication, "schema/check admission") || !strings.Contains(responses.StoreProfileImplication, "openai_responses") {
+		t.Fatalf("native responses store implication must record active persisted admission: %s", responses.StoreProfileImplication)
 	}
 	for _, want := range []string{"#1224", "previous_response_id", "Provider matrix"} {
 		if !joinedContains(responses.SplitBoundaries, want) {
@@ -2608,9 +2610,9 @@ func TestPlatformSpecLLMProviderModelSelectionSourceAuthorityPromoted(t *testing
 		}
 	}
 	for alias, backendModels := range map[string]map[string]string{
-		"cheap":    {"anthropic": "claude-3-5-haiku", "claude_cli": "haiku", "openai_compatible": "gpt-compatible-mini"},
-		"regular":  {"anthropic": "claude-3-5-sonnet", "claude_cli": "sonnet", "openai_compatible": "gpt-compatible"},
-		"frontier": {"anthropic": "claude-3-opus", "claude_cli": "opus", "openai_compatible": "gpt-compatible-frontier"},
+		"cheap":    {"anthropic": "claude-3-5-haiku", "claude_cli": "haiku", "openai_compatible": "gpt-compatible-mini", "openai_responses": "gpt-5.4-nano"},
+		"regular":  {"anthropic": "claude-3-5-sonnet", "claude_cli": "sonnet", "openai_compatible": "gpt-compatible", "openai_responses": "gpt-5.4"},
+		"frontier": {"anthropic": "claude-3-opus", "claude_cli": "opus", "openai_compatible": "gpt-compatible-frontier", "openai_responses": "gpt-5.5"},
 	} {
 		for backend, model := range backendModels {
 			if got := strings.TrimSpace(models.BuiltInModelDefaults[alias][backend]); got != model {
@@ -2623,7 +2625,7 @@ func TestPlatformSpecLLMProviderModelSelectionSourceAuthorityPromoted(t *testing
 			t.Fatalf("model alias authority missing %q:\n%#v", want, models)
 		}
 	}
-	for _, want := range []string{"ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "OPENAI_COMPATIBLE_API_KEY"} {
+	for _, want := range []string{"ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "OPENAI_COMPATIBLE_API_KEY", "OPENAI_API_KEY"} {
 		if !stringSliceContains(authority.CredentialAndConfigPolicy.SecretEnvSources, want) {
 			t.Fatalf("secret env sources missing %q: %#v", want, authority.CredentialAndConfigPolicy.SecretEnvSources)
 		}
@@ -2633,12 +2635,12 @@ func TestPlatformSpecLLMProviderModelSelectionSourceAuthorityPromoted(t *testing
 			t.Fatalf("runtime config canonical list missing %q: %#v", want, authority.CredentialAndConfigPolicy.RuntimeConfigCanonicalFor)
 		}
 	}
-	for _, want := range []string{"anthropic", "claude_cli", "openai_compatible", "api and cli_test", "model", "write time"} {
+	for _, want := range []string{"anthropic", "claude_cli", "openai_compatible", "openai_responses", "api and cli_test", "model", "write time"} {
 		if !joinedContains(authority.PersistenceRules, want) {
 			t.Fatalf("persistence rules missing %q: %#v", want, authority.PersistenceRules)
 		}
 	}
-	for _, want := range []string{"#1127", "#1128", "#1129", "#1130", "#1229", "#1224", "MUST NOT change runtime"} {
+	for _, want := range []string{"#1127", "#1128", "#1129", "#1130", "#1229", "#1224", "active backend runtime implementation"} {
 		if !joinedContains(authority.SplitBoundaries, want) {
 			t.Fatalf("split boundaries missing %q: %#v", want, authority.SplitBoundaries)
 		}
@@ -5540,6 +5542,8 @@ func TestDefaultRuntimeConfig_RejectsRetiredLLMBackendEnv(t *testing.T) {
 
 func TestDefaultRuntimeConfig_DoesNotInferLLMBackendFromCredentials(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	t.Setenv("OPENAI_API_KEY", "openai-test-key")
+	t.Setenv("OPENAI_COMPATIBLE_API_KEY", "compatible-test-key")
 	cfg, err := defaultRuntimeConfig()
 	if err != nil {
 		t.Fatalf("defaultRuntimeConfig: %v", err)

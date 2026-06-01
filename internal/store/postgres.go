@@ -400,7 +400,7 @@ func (s *PostgresStore) ensureAgentLLMBackendProfiles(ctx context.Context) error
 		WHERE llm_backend IS NOT NULL;
 		ALTER TABLE agents
 			ADD CONSTRAINT agents_llm_backend_check
-			CHECK (llm_backend IN ('anthropic', 'claude_cli', 'openai_compatible', 'mock', 'local'));
+			CHECK (llm_backend IN ('anthropic', 'claude_cli', 'openai_compatible', 'openai_responses', 'mock', 'local'));
 	`); err != nil {
 		return fmt.Errorf("migrate agents.llm_backend profiles: %w", err)
 	}

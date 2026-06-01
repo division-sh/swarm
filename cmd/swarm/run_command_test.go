@@ -153,7 +153,7 @@ func TestRunCommandHelpShowsDataFlag(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("run --help code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	for _, want := range []string{"--data", "Path to agent-visible read-only /data reference directory"} {
+	for _, want := range []string{"--data", "Path to agent-visible read-only /data reference directory", "--backend", "openai_responses"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("run help missing %q:\n%s", want, stdout.String())
 		}

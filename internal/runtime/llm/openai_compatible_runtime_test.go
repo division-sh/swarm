@@ -329,6 +329,7 @@ type budgetCapture struct {
 	runtimeMode string
 	usage       UsageTokens
 	exact       bool
+	meta        map[string]any
 }
 
 func (b *budgetCapture) LockExecutionScope(string) func() { return func() {} }
@@ -336,10 +337,13 @@ func (b *budgetCapture) IsEntityEmergency(string) bool    { return false }
 func (b *budgetCapture) IsEntityThrottle(string) bool     { return false }
 func (b *budgetCapture) IsEmergency(string) bool          { return false }
 func (b *budgetCapture) IsThrottle(string) bool           { return false }
-func (b *budgetCapture) RecordEntityLLMUsage(_ context.Context, _ string, _ string, runtimeMode string, usage UsageTokens, exact bool, _ any) error {
+func (b *budgetCapture) RecordEntityLLMUsage(_ context.Context, _ string, _ string, runtimeMode string, usage UsageTokens, exact bool, meta any) error {
 	b.runtimeMode = runtimeMode
 	b.usage = usage
 	b.exact = exact
+	if m, ok := meta.(map[string]any); ok {
+		b.meta = m
+	}
 	return nil
 }
 func (b *budgetCapture) RecordLLMUsage(ctx context.Context, entityID string, agentID string, runtimeMode string, usage UsageTokens, exact bool, meta any) error {
