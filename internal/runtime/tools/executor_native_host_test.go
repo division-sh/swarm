@@ -2,12 +2,16 @@ package tools
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	runtimecontracts "swarm/internal/runtime/contracts"
 	models "swarm/internal/runtime/core/actors"
 	llm "swarm/internal/runtime/llm"
+	"swarm/internal/runtime/semanticview"
 	workspace "swarm/internal/runtime/workspace"
 )
 
@@ -25,13 +29,33 @@ func TestNativeWorkspaceCommandFailsClosedForHostBackend(t *testing.T) {
 	}
 }
 
-func TestNativeFileToolsFailClosedForHostBackendThroughExecutionTarget(t *testing.T) {
+func TestNativeFileToolsUseHostExecutionTargetWithoutShell(t *testing.T) {
+	workspaceDir := t.TempDir()
+	dataDir := t.TempDir()
+	contractsDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspaceDir, "input.txt"), []byte("workspace content"), 0o644); err != nil {
+		t.Fatalf("write workspace input: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, "ref.txt"), []byte("data content"), 0o644); err != nil {
+		t.Fatalf("write data ref: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("contracts content"), 0o644); err != nil {
+		t.Fatalf("write contracts package: %v", err)
+	}
 	exec := &Executor{
 		workspaces: relayWorkspaceResolverStub{
-			target: &workspace.Target{Backend: workspace.BackendHost, Workdir: t.TempDir()},
+			target: &workspace.Target{
+				Backend: workspace.BackendHost,
+				Workdir: workspaceDir,
+				Mounts: []workspace.ExecutionMount{
+					{LogicalPath: workspace.LogicalWorkspaceMount, HostPath: workspaceDir, Access: workspace.MountAccessReadWrite},
+					{LogicalPath: workspace.LogicalDataMount, HostPath: dataDir, Access: workspace.MountAccessReadOnly},
+					{LogicalPath: workspace.LogicalContractsMount, HostPath: contractsDir, Access: workspace.MountAccessReadOnly},
+				},
+			},
 		},
 		execWorkspaceFn: func(context.Context, workspace.ExecutionTarget, time.Duration, string, ...string) ([]byte, []byte, int, error) {
-			t.Fatalf("host native file tools must fail closed before workspace command execution")
+			t.Fatalf("host native file tools must not shell through workspace command execution")
 			return nil, nil, 0, nil
 		},
 	}
@@ -40,14 +64,232 @@ func TestNativeFileToolsFailClosedForHostBackendThroughExecutionTarget(t *testin
 		NativeTools: models.NativeToolConfig{FileIO: true},
 	})
 
-	_, err := exec.execNativeReadFile(ctx, models.AgentConfig{ID: "writer"}, map[string]any{"path": "/workspace/input.txt"})
-	if err == nil || !strings.Contains(err.Error(), "host workspace backend does not support native tool execution yet") {
-		t.Fatalf("execNativeReadFile error = %v, want host fail-closed diagnostic", err)
+	readWorkspace, err := exec.execNativeReadFile(ctx, models.AgentConfig{ID: "writer"}, map[string]any{"path": "/workspace/input.txt"})
+	if err != nil {
+		t.Fatalf("execNativeReadFile workspace: %v", err)
+	}
+	if got := readWorkspace.(map[string]any)["content"]; got != "workspace content" {
+		t.Fatalf("workspace read content = %#v", got)
+	}
+	readData, err := exec.execNativeReadFile(ctx, models.AgentConfig{ID: "writer"}, map[string]any{"path": "/data/ref.txt"})
+	if err != nil {
+		t.Fatalf("execNativeReadFile data: %v", err)
+	}
+	if got := readData.(map[string]any)["content"]; got != "data content" {
+		t.Fatalf("data read content = %#v", got)
+	}
+	readContracts, err := exec.execNativeReadFile(ctx, models.AgentConfig{ID: "writer"}, map[string]any{"path": "/opt/swarm/contracts/package.yaml"})
+	if err != nil {
+		t.Fatalf("execNativeReadFile contracts: %v", err)
+	}
+	if got := readContracts.(map[string]any)["content"]; got != "contracts content" {
+		t.Fatalf("contracts read content = %#v", got)
 	}
 
-	_, err = exec.execNativeWriteFile(ctx, models.AgentConfig{ID: "writer"}, map[string]any{"path": "/workspace/output.txt", "content": "hello"})
+	written, err := exec.execNativeWriteFile(ctx, models.AgentConfig{ID: "writer"}, map[string]any{"path": "/workspace/nested/output.txt", "content": "hello"})
+	if err != nil {
+		t.Fatalf("execNativeWriteFile workspace: %v", err)
+	}
+	if got := written.(map[string]any)["bytes_written"]; got != len([]byte("hello")) {
+		t.Fatalf("write bytes = %#v", got)
+	}
+	if data, err := os.ReadFile(filepath.Join(workspaceDir, "nested", "output.txt")); err != nil || string(data) != "hello" {
+		t.Fatalf("written workspace file = %q err=%v", data, err)
+	}
+
+	for _, forbidden := range []string{"/data/out.txt", "/opt/swarm/contracts/out.txt", "/tmp/out.txt", workspaceDir} {
+		_, err := exec.execNativeWriteFile(ctx, models.AgentConfig{ID: "writer"}, map[string]any{"path": forbidden, "content": "nope"})
+		if err == nil {
+			t.Fatalf("execNativeWriteFile(%q) succeeded, want fail closed", forbidden)
+		}
+		if strings.Contains(err.Error(), workspaceDir) || strings.Contains(err.Error(), dataDir) || strings.Contains(err.Error(), contractsDir) {
+			t.Fatalf("execNativeWriteFile(%q) leaked host path in error: %v", forbidden, err)
+		}
+	}
+
+	if err := os.Symlink(dataDir, filepath.Join(workspaceDir, "link")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	_, err = exec.execNativeReadFile(ctx, models.AgentConfig{ID: "writer"}, map[string]any{"path": "/workspace/link/ref.txt"})
+	if err == nil || !strings.Contains(err.Error(), "escapes /workspace") {
+		t.Fatalf("execNativeReadFile symlink error = %v, want escape rejection", err)
+	}
+}
+
+func TestExecutorHostFileToolsUseHostManagerSupportedSurfaceWithoutDocker(t *testing.T) {
+	ctx := context.Background()
+	workspaceRoot := filepath.Join(t.TempDir(), "host-workspaces")
+	dataDir := t.TempDir()
+	contractsDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dataDir, "ref.txt"), []byte("data content"), 0o644); err != nil {
+		t.Fatalf("write data ref: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("contracts content"), 0o644); err != nil {
+		t.Fatalf("write contracts package: %v", err)
+	}
+
+	manager := workspace.NewHostManager(nil)
+	manager.SetConfig(workspace.HostConfig{
+		WorkspaceRoot:       workspaceRoot,
+		SharedDataSource:    dataDir,
+		DataMountPoint:      workspace.LogicalDataMount,
+		ContractsSource:     contractsDir,
+		ContractsMountPoint: workspace.LogicalContractsMount,
+	})
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
+	if err := manager.ValidateSource(ctx, source); err != nil {
+		t.Fatalf("ValidateSource: %v", err)
+	}
+	if err := manager.EnsurePrereqs(ctx); err != nil {
+		t.Fatalf("EnsurePrereqs: %v", err)
+	}
+
+	actor := models.AgentConfig{
+		ID:          "host-file-agent",
+		NativeTools: models.NativeToolConfig{FileIO: true, Bash: true},
+	}
+	target, err := manager.ResolveWorkspace(ctx, actor)
+	if err != nil {
+		t.Fatalf("ResolveWorkspace: %v", err)
+	}
+	if target == nil || !target.HostBackend() {
+		t.Fatalf("resolved workspace target = %#v, want host backend", target)
+	}
+	if err := os.WriteFile(filepath.Join(target.Workdir, "input.txt"), []byte("workspace content"), 0o644); err != nil {
+		t.Fatalf("write workspace input: %v", err)
+	}
+
+	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkspaceResolver: manager})
+	exec.execWorkspaceFn = func(context.Context, workspace.ExecutionTarget, time.Duration, string, ...string) ([]byte, []byte, int, error) {
+		t.Fatalf("host file tools must use direct platform file operations, not workspace command execution")
+		return nil, nil, 0, nil
+	}
+	actorCtx := models.WithActor(ctx, actor)
+
+	readWorkspace, err := exec.Execute(actorCtx, "read_file", map[string]any{"path": "/workspace/input.txt"})
+	if err != nil {
+		t.Fatalf("Execute read_file workspace: %v", err)
+	}
+	if got := readWorkspace.(map[string]any)["content"]; got != "workspace content" {
+		t.Fatalf("workspace content = %#v", got)
+	}
+	readData, err := exec.Execute(actorCtx, "read_file", map[string]any{"path": "/data/ref.txt"})
+	if err != nil {
+		t.Fatalf("Execute read_file data: %v", err)
+	}
+	if got := readData.(map[string]any)["content"]; got != "data content" {
+		t.Fatalf("data content = %#v", got)
+	}
+	readContracts, err := exec.Execute(actorCtx, "read_file", map[string]any{"path": "/opt/swarm/contracts/package.yaml"})
+	if err != nil {
+		t.Fatalf("Execute read_file contracts: %v", err)
+	}
+	if got := readContracts.(map[string]any)["content"]; got != "contracts content" {
+		t.Fatalf("contracts content = %#v", got)
+	}
+	written, err := exec.Execute(actorCtx, "write_file", map[string]any{"path": "/workspace/out/result.txt", "content": "hello"})
+	if err != nil {
+		t.Fatalf("Execute write_file workspace: %v", err)
+	}
+	if got := written.(map[string]any)["bytes_written"]; got != len([]byte("hello")) {
+		t.Fatalf("bytes_written = %#v", got)
+	}
+	if data, err := os.ReadFile(filepath.Join(target.Workdir, "out", "result.txt")); err != nil || string(data) != "hello" {
+		t.Fatalf("written host workspace file = %q err=%v", data, err)
+	}
+
+	for _, forbidden := range []string{
+		"/data/out.txt",
+		"/opt/swarm/contracts/out.txt",
+		"/tmp/out.txt",
+		filepath.Join(target.Workdir, "out", "result.txt"),
+		"../escape.txt",
+	} {
+		_, err := exec.Execute(actorCtx, "write_file", map[string]any{"path": forbidden, "content": "nope"})
+		if err == nil {
+			t.Fatalf("Execute write_file(%q) succeeded, want fail closed", forbidden)
+		}
+		if strings.Contains(err.Error(), target.Workdir) || strings.Contains(err.Error(), dataDir) || strings.Contains(err.Error(), contractsDir) {
+			t.Fatalf("Execute write_file(%q) leaked host path in error: %v", forbidden, err)
+		}
+	}
+
+	if err := os.Symlink(dataDir, filepath.Join(target.Workdir, "link")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	_, err = exec.Execute(actorCtx, "read_file", map[string]any{"path": "/workspace/link/ref.txt"})
+	if err == nil || !strings.Contains(err.Error(), "escapes /workspace") {
+		t.Fatalf("Execute read_file symlink error = %v, want escape rejection", err)
+	}
+
+	_, err = exec.Execute(actorCtx, "bash", map[string]any{"command": "true"})
 	if err == nil || !strings.Contains(err.Error(), "host workspace backend does not support native tool execution yet") {
-		t.Fatalf("execNativeWriteFile error = %v, want host fail-closed diagnostic", err)
+		t.Fatalf("Execute bash error = %v, want host native command fail-closed", err)
+	}
+}
+
+func TestNativeFileToolsKeepDockerWorkspaceCommandExecution(t *testing.T) {
+	exec := &Executor{
+		workspaces: relayWorkspaceResolverStub{
+			target: &workspace.Target{
+				Backend:   workspace.BackendDocker,
+				Container: "swarm-agent",
+				Workdir:   workspace.LogicalWorkspaceMount,
+			},
+		},
+	}
+	var calls []string
+	exec.execWorkspaceFn = func(_ context.Context, execTarget workspace.ExecutionTarget, _ time.Duration, stdin string, args ...string) ([]byte, []byte, int, error) {
+		if execTarget.Mode != workspace.ExecutionModeDockerContainer {
+			t.Fatalf("exec target mode = %s, want docker_container", execTarget.Mode)
+		}
+		if execTarget.Container != "swarm-agent" {
+			t.Fatalf("exec target container = %q, want swarm-agent", execTarget.Container)
+		}
+		if len(args) != 5 || args[0] != "sh" || args[1] != "-lc" {
+			t.Fatalf("workspace command args = %#v, want shell command with argv path", args)
+		}
+		calls = append(calls, strings.Join(args, "\x00"))
+		switch args[3] {
+		case "swarm-read-file":
+			if args[4] != "/workspace/input.txt" {
+				t.Fatalf("read path = %q, want /workspace/input.txt", args[4])
+			}
+			return []byte("docker content"), nil, 0, nil
+		case "swarm-write-file":
+			if args[4] != "/workspace/out/result.txt" {
+				t.Fatalf("write path = %q, want /workspace/out/result.txt", args[4])
+			}
+			if stdin != "hello" {
+				t.Fatalf("write stdin = %q, want hello", stdin)
+			}
+			return nil, nil, 0, nil
+		default:
+			t.Fatalf("unexpected workspace command label: %#v", args)
+			return nil, nil, 1, nil
+		}
+	}
+	ctx := models.WithActor(context.Background(), models.AgentConfig{
+		ID:          "docker-file-agent",
+		NativeTools: models.NativeToolConfig{FileIO: true},
+	})
+
+	read, err := exec.execNativeReadFile(ctx, models.AgentConfig{ID: "docker-file-agent"}, map[string]any{"path": "/workspace/input.txt"})
+	if err != nil {
+		t.Fatalf("execNativeReadFile docker: %v", err)
+	}
+	if got := read.(map[string]any)["content"]; got != "docker content" {
+		t.Fatalf("docker read content = %#v", got)
+	}
+	written, err := exec.execNativeWriteFile(ctx, models.AgentConfig{ID: "docker-file-agent"}, map[string]any{"path": "out/result.txt", "content": "hello"})
+	if err != nil {
+		t.Fatalf("execNativeWriteFile docker: %v", err)
+	}
+	if got := written.(map[string]any)["bytes_written"]; got != len([]byte("hello")) {
+		t.Fatalf("docker write bytes = %#v", got)
+	}
+	if len(calls) != 2 {
+		t.Fatalf("docker command calls = %#v, want two command executions", calls)
 	}
 }
 
@@ -67,20 +309,28 @@ func TestNativeFallbackToolSurfaceConsumesWorkspaceExecutionTarget(t *testing.T)
 	}
 
 	defs := exec.ToolDefinitionsForActorInContext(context.Background(), actor)
-	for _, denied := range []string{"bash", "read_file", "write_file"} {
+	for _, denied := range []string{"bash"} {
 		if containsToolDefinition(defs, denied) {
 			t.Fatalf("context definitions contain %q for host backend: %#v", denied, defs)
 		}
 	}
-	if !containsToolDefinition(defs, "web_search") {
-		t.Fatalf("context definitions missing web_search, which is not workspace-execution backed: %#v", defs)
+	for _, allowed := range []string{"read_file", "write_file", "web_search"} {
+		if !containsToolDefinition(defs, allowed) {
+			t.Fatalf("context definitions missing %q: %#v", allowed, defs)
+		}
 	}
 
 	caps := exec.ToolCapabilitiesForActorInContext(context.Background(), actor, []string{"bash", "read_file", "write_file", "web_search"}, nil)
-	for _, denied := range []string{"bash", "read_file", "write_file"} {
+	for _, denied := range []string{"bash"} {
 		cap := caps.ByName[denied]
 		if cap.Visible || cap.Callable || !strings.Contains(cap.DenialReason, "host workspace backend does not support native tool execution yet") {
 			t.Fatalf("capability %s = %#v, want host workspace execution denial", denied, cap)
+		}
+	}
+	for _, allowed := range []string{"read_file", "write_file"} {
+		cap := caps.ByName[allowed]
+		if !cap.Visible || !cap.Callable || cap.DenialReason != "" {
+			t.Fatalf("capability %s = %#v, want visible/callable host file operation", allowed, cap)
 		}
 	}
 	web := caps.ByName["web_search"]

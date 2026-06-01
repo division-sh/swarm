@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"path/filepath"
 	"strings"
 )
 
@@ -61,6 +62,12 @@ const (
 	PathAccessWrite PathAccess = "write"
 )
 
+type ResolvedPath struct {
+	LogicalPath string
+	HostPath    string
+	Access      PathAccess
+}
+
 func (t *Target) ExecutionTarget() ExecutionTarget {
 	if t == nil {
 		return unsupportedExecutionTarget("")
@@ -116,11 +123,14 @@ func dockerExecutionTarget(container, workdir string, mounts []ExecutionMount) E
 
 func hostExecutionTarget(workdir string, mounts []ExecutionMount) ExecutionTarget {
 	return ExecutionTarget{
-		Backend:      BackendHost,
-		Mode:         ExecutionModeHostLocal,
-		Workdir:      LogicalWorkspaceMount,
-		Mounts:       executionMountsOrDefault(mounts),
-		capabilities: capabilitySet(),
+		Backend: BackendHost,
+		Mode:    ExecutionModeHostLocal,
+		Workdir: LogicalWorkspaceMount,
+		Mounts:  executionMountsOrDefault(mounts),
+		capabilities: capabilitySet(
+			ExecutionCapabilityFileRead,
+			ExecutionCapabilityFileWrite,
+		),
 	}
 }
 
@@ -206,9 +216,33 @@ func (e ExecutionTarget) UnsupportedMessage(capability ExecutionCapability) stri
 }
 
 func (e ExecutionTarget) ResolvePath(raw string, access PathAccess) (string, error) {
+	resolved, _, err := e.resolveLogicalPath(raw, access)
+	if err != nil {
+		return "", err
+	}
+	return resolved, nil
+}
+
+func (e ExecutionTarget) ResolveExecutionPath(raw string, access PathAccess) (ResolvedPath, error) {
+	clean, mount, err := e.resolveLogicalPath(raw, access)
+	if err != nil {
+		return ResolvedPath{}, err
+	}
+	resolved := ResolvedPath{LogicalPath: clean, Access: access}
+	if e.Mode == ExecutionModeHostLocal {
+		hostPath, err := resolveHostBackingPath(clean, mount)
+		if err != nil {
+			return ResolvedPath{}, err
+		}
+		resolved.HostPath = hostPath
+	}
+	return resolved, nil
+}
+
+func (e ExecutionTarget) resolveLogicalPath(raw string, access PathAccess) (string, ExecutionMount, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return "", fmt.Errorf("path is required")
+		return "", ExecutionMount{}, fmt.Errorf("path is required")
 	}
 	clean := cleanLogicalPath(raw)
 	if !strings.HasPrefix(clean, "/") {
@@ -220,14 +254,28 @@ func (e ExecutionTarget) ResolvePath(raw string, access PathAccess) (string, err
 			continue
 		}
 		if access == PathAccessWrite && mount.Access != MountAccessReadWrite {
-			return "", fmt.Errorf("write_file path %s is outside the writable workspace", raw)
+			return "", ExecutionMount{}, fmt.Errorf("write_file path %s is outside the writable workspace", clean)
 		}
-		return clean, nil
+		return clean, mount, nil
 	}
 	if access == PathAccessWrite {
-		return "", fmt.Errorf("write_file path %s is outside the writable workspace", raw)
+		return "", ExecutionMount{}, fmt.Errorf("write_file path is outside the writable workspace")
 	}
-	return "", fmt.Errorf("read_file path %s is outside the allowed workspace mounts", raw)
+	return "", ExecutionMount{}, fmt.Errorf("read_file path is outside the allowed workspace mounts")
+}
+
+func (e ExecutionTarget) ResolveHostPath(raw string, access PathAccess) (ResolvedPath, error) {
+	resolved, err := e.ResolveExecutionPath(raw, access)
+	if err != nil {
+		return ResolvedPath{}, err
+	}
+	if e.Mode != ExecutionModeHostLocal {
+		return ResolvedPath{}, fmt.Errorf("workspace target is not a host-local execution target")
+	}
+	if strings.TrimSpace(resolved.HostPath) == "" {
+		return ResolvedPath{}, fmt.Errorf("host backing path for %s is unavailable", resolved.LogicalPath)
+	}
+	return resolved, nil
 }
 
 func (e ExecutionTarget) WorkspacePath(rel string) (string, error) {
@@ -260,4 +308,37 @@ func logicalPathWithinRoot(value, root string) bool {
 		return false
 	}
 	return value == root || strings.HasPrefix(value, strings.TrimRight(root, "/")+"/")
+}
+
+func resolveHostBackingPath(logicalPath string, mount ExecutionMount) (string, error) {
+	rootRaw := strings.TrimSpace(mount.HostPath)
+	if rootRaw == "" {
+		return "", fmt.Errorf("host backing path for %s is unavailable", cleanLogicalPath(mount.LogicalPath))
+	}
+	root, err := canonicalPathForOverlap(rootRaw, "host backing path")
+	if err != nil {
+		return "", fmt.Errorf("host backing path for %s is unavailable", cleanLogicalPath(mount.LogicalPath))
+	}
+	rel := logicalPathRelativeToRoot(logicalPath, mount.LogicalPath)
+	hostPath := root
+	if rel != "" {
+		hostPath = filepath.Join(root, filepath.FromSlash(rel))
+	}
+	resolved, err := canonicalPathForOverlap(hostPath, "host execution path")
+	if err != nil {
+		return "", fmt.Errorf("host execution path %s is unavailable", cleanLogicalPath(logicalPath))
+	}
+	if !pathWithinRoot(resolved, root) {
+		return "", fmt.Errorf("host execution path %s escapes %s", cleanLogicalPath(logicalPath), cleanLogicalPath(mount.LogicalPath))
+	}
+	return resolved, nil
+}
+
+func logicalPathRelativeToRoot(value, root string) string {
+	value = cleanLogicalPath(value)
+	root = cleanLogicalPath(root)
+	if value == root {
+		return ""
+	}
+	return strings.TrimPrefix(value, strings.TrimRight(root, "/")+"/")
 }
