@@ -22,18 +22,27 @@ import (
 )
 
 type sharedPostgresState struct {
-	mu        sync.Mutex
-	lifecycle sync.Mutex
-	started   bool
-	dockerBin string
-	name      string
-	adminDSN  string
-	template  string
-	templated bool
-	nextDBID  uint64
+	mu             sync.Mutex
+	lifecycle      sync.Mutex
+	started        bool
+	dockerBin      string
+	name           string
+	adminDSN       string
+	template       string
+	templated      bool
+	cleanupStarted bool
+	nextDBID       uint64
 }
 
 var sharedPostgres sharedPostgresState
+
+func init() {
+	if os.Getenv("SWARM_TEST_POSTGRES_TEMPLATE_CLEANUP") != "1" {
+		return
+	}
+	runPostgresTemplateCleanupWatcherFromEnv()
+	os.Exit(0)
+}
 
 // StartPostgres provides an isolated database on a shared Postgres container.
 // The container is started once per test process; each call creates a fresh
@@ -289,8 +298,69 @@ func (s *sharedPostgresState) ensureTemplateDatabase(adminDB *sql.DB) error {
 		_ = dropIsolatedDatabase(adminDB, templateName)
 		return fmt.Errorf("close template database %q: %w", templateName, err)
 	}
+	if err := s.startTemplateCleanupWatcher(templateName); err != nil {
+		_ = dropIsolatedDatabase(adminDB, templateName)
+		return err
+	}
 	s.templated = true
 	return nil
+}
+
+func (s *sharedPostgresState) startTemplateCleanupWatcher(templateName string) error {
+	if s.cleanupStarted || s.dockerBin != "" {
+		return nil
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("resolve postgres template cleanup binary: %w", err)
+	}
+	cmd := exec.Command(exe)
+	cmd.Env = append(os.Environ(),
+		"SWARM_TEST_POSTGRES_TEMPLATE_CLEANUP=1",
+		"SWARM_TEST_POSTGRES_TEMPLATE_PARENT_PID="+strconv.Itoa(os.Getpid()),
+		"SWARM_TEST_POSTGRES_TEMPLATE_ADMIN_DSN="+s.adminDSN,
+		"SWARM_TEST_POSTGRES_TEMPLATE_NAME="+templateName,
+	)
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start postgres template cleanup watcher: %w", err)
+	}
+	if err := cmd.Process.Release(); err != nil {
+		return fmt.Errorf("release postgres template cleanup watcher: %w", err)
+	}
+	s.cleanupStarted = true
+	return nil
+}
+
+func runPostgresTemplateCleanupWatcherFromEnv() {
+	parentPID, err := strconv.Atoi(strings.TrimSpace(os.Getenv("SWARM_TEST_POSTGRES_TEMPLATE_PARENT_PID")))
+	if err != nil || parentPID <= 0 {
+		return
+	}
+	adminDSN := strings.TrimSpace(os.Getenv("SWARM_TEST_POSTGRES_TEMPLATE_ADMIN_DSN"))
+	templateName := strings.TrimSpace(os.Getenv("SWARM_TEST_POSTGRES_TEMPLATE_NAME"))
+	if adminDSN == "" || templateName == "" {
+		return
+	}
+	waitForProcessExit(parentPID)
+	db, err := sql.Open("postgres", adminDSN)
+	if err != nil {
+		return
+	}
+	defer db.Close()
+	_ = dropIsolatedDatabase(db, templateName)
+}
+
+func waitForProcessExit(pid int) {
+	proc, err := os.FindProcess(pid)
+	if err != nil || proc == nil {
+		return
+	}
+	for {
+		if proc.Signal(syscall.Signal(0)) != nil {
+			return
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
 }
 
 func initializeDatabase(db *sql.DB) error {
