@@ -158,13 +158,9 @@ func TestEventBusPublish_NoTargetConcreteRoutedNodeUsesWorkflowCarrierAndNodeDel
 	if err := eb.Publish(context.Background(), evt); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
-	select {
-	case got := <-ch:
-		if got.FlowInstance() != "operating/inst-1" {
-			t.Fatalf("delivered flow instance = %q, want operating/inst-1", got.FlowInstance())
-		}
-	case <-time.After(time.Second):
-		t.Fatal("workflow-runtime did not receive concrete routed node event")
+	got := requireBusEvent(t, ch, "concrete routed node event delivery")
+	if got.FlowInstance() != "operating/inst-1" {
+		t.Fatalf("delivered flow instance = %q, want operating/inst-1", got.FlowInstance())
 	}
 
 	routes := store.routes[evt.ID]
@@ -198,19 +194,15 @@ func assertTargetRouteDeliveries(t *testing.T, ch <-chan events.Event, wantEntit
 	t.Helper()
 	seen := map[string]struct{}{}
 	for range wantEntityIDs {
-		select {
-		case got := <-ch:
-			if len(got.TargetRoutes()) != 0 {
-				t.Fatalf("delivered event target_set = %#v, want singular delivery target", got.TargetRoutes())
-			}
-			target := got.TargetRoute()
-			if target.Empty() {
-				t.Fatalf("delivered target route is empty: %#v", got)
-			}
-			seen[target.EntityID] = struct{}{}
-		case <-time.After(time.Second):
-			t.Fatalf("timed out waiting for target route delivery; saw %#v", seen)
+		got := requireBusEvent(t, ch, "target route delivery")
+		if len(got.TargetRoutes()) != 0 {
+			t.Fatalf("delivered event target_set = %#v, want singular delivery target", got.TargetRoutes())
 		}
+		target := got.TargetRoute()
+		if target.Empty() {
+			t.Fatalf("delivered target route is empty: %#v", got)
+		}
+		seen[target.EntityID] = struct{}{}
 	}
 	for _, want := range wantEntityIDs {
 		if _, ok := seen[want]; !ok {

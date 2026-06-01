@@ -3,7 +3,6 @@ package bus
 import (
 	"context"
 	"testing"
-	"time"
 
 	"swarm/internal/events"
 )
@@ -149,13 +148,9 @@ func TestEventBusPublish_UsesRouteTableWildcardSubscriberResolution(t *testing.T
 	}); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
-	select {
-	case evt := <-ch:
-		if evt.Type != events.EventType(eventType) {
-			t.Fatalf("delivered event type = %q, want concrete child event", evt.Type)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for routed wildcard delivery")
+	evt := requireBusEvent(t, ch, "routed wildcard delivery")
+	if evt.Type != events.EventType(eventType) {
+		t.Fatalf("delivered event type = %q, want concrete child event", evt.Type)
 	}
 
 	diags := recorder.SnapshotPublishes()
