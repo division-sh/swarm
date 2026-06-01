@@ -12,6 +12,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -429,7 +430,11 @@ func (e *jsonRPCError) Error() string {
 		return ""
 	}
 	if code := applicationErrorCode(e.Data); code != "" {
-		return fmt.Sprintf("%s: %s", code, e.Message)
+		message := fmt.Sprintf("%s: %s", code, e.Message)
+		if details := applicationErrorDetails(e.Data); details != "" {
+			message = fmt.Sprintf("%s (details: %s)", message, details)
+		}
+		return message
 	}
 	return e.Message
 }
@@ -445,6 +450,49 @@ func applicationErrorCode(raw json.RawMessage) string {
 		return ""
 	}
 	return strings.TrimSpace(data.Code)
+}
+
+func applicationErrorDetails(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var data struct {
+		Details map[string]any `json:"details"`
+	}
+	if err := json.Unmarshal(raw, &data); err != nil || len(data.Details) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(data.Details))
+	for key := range data.Details {
+		if strings.TrimSpace(key) != "" {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if value := applicationErrorDetailValue(data.Details[key]); value != "" {
+			parts = append(parts, fmt.Sprintf("%s=%s", key, value))
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+func applicationErrorDetailValue(value any) string {
+	switch typed := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return strings.TrimSpace(typed)
+	case float64, bool:
+		return fmt.Sprint(typed)
+	default:
+		raw, err := json.Marshal(typed)
+		if err != nil || string(raw) == "null" {
+			return ""
+		}
+		return string(raw)
+	}
 }
 
 type cliAPIHTTPError struct {

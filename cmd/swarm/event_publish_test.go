@@ -287,6 +287,7 @@ func TestEventPublishMapsFailureExitCodes(t *testing.T) {
 		handler    http.HandlerFunc
 		wantCode   int
 		wantStderr string
+		wantExtra  []string
 	}{
 		{
 			name: "run not found exits five",
@@ -297,6 +298,7 @@ func TestEventPublishMapsFailureExitCodes(t *testing.T) {
 			},
 			wantCode:   5,
 			wantStderr: "RUN_NOT_FOUND",
+			wantExtra:  []string{"event_name=scan.requested"},
 		},
 		{
 			name: "source event not found exits five",
@@ -458,8 +460,10 @@ func TestEventPublishMapsFailureExitCodes(t *testing.T) {
 			if code != tc.wantCode {
 				t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, tc.wantCode, stdout.String(), stderr.String())
 			}
-			if !strings.Contains(stderr.String(), tc.wantStderr) {
-				t.Fatalf("stderr = %q, want substring %q", stderr.String(), tc.wantStderr)
+			for _, want := range append([]string{tc.wantStderr}, tc.wantExtra...) {
+				if !strings.Contains(stderr.String(), want) {
+					t.Fatalf("stderr = %q, want substring %q", stderr.String(), want)
+				}
 			}
 		})
 	}

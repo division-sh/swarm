@@ -13,10 +13,12 @@ import (
 	"net/netip"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/division-sh/swarm/internal/apispec"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
@@ -302,9 +304,89 @@ func (h *Handler) responseFromResult(req Request, result any, err error) rpcResp
 		if errors.As(err, &paramsErr) && paramsErr != nil {
 			return rpcResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: invalidParams(req.CorrelationID, paramsErr.Details)}
 		}
+		h.logInternalFallback(req, err)
 		return rpcResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: h.standardError(codeInternalError, "internal error", req.CorrelationID, map[string]any{"error": err.Error()})}
 	}
 	return rpcResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Result: result}
+}
+
+func (h *Handler) logInternalFallback(req Request, err error) {
+	if err == nil {
+		return
+	}
+	fields := []any{
+		"method", strings.TrimSpace(req.Method),
+		"correlation_id", strings.TrimSpace(req.CorrelationID),
+		"transport", strings.TrimSpace(req.Transport),
+		"request_hash", strings.TrimSpace(req.RequestHash),
+		"error", err.Error(),
+	}
+	if req.ID != nil {
+		fields = append(fields, "request_id", fmt.Sprint(req.ID))
+	}
+	fields = append(fields, safeRequestIdentifierFields(req.Params)...)
+	diaglog.ProcessLog(diaglog.LevelError, "api", "json-rpc internal error", fields...)
+}
+
+func safeRequestIdentifierFields(params map[string]any) []any {
+	if len(params) == 0 {
+		return nil
+	}
+	fields := make([]any, 0, 16)
+	for _, key := range []string{
+		"run_id",
+		"event_name",
+		"event_id",
+		"source_event_id",
+		"bundle_hash",
+		"agent_id",
+		"session_id",
+		"fork_id",
+		"conversation_id",
+		"turn_index",
+	} {
+		if value := safeRequestIdentifierValue(params[key]); value != "" {
+			fields = append(fields, key, value)
+		}
+	}
+	if bundleRef := asStringMap(params["bundle_ref"]); bundleRef != nil {
+		if fingerprint := safeRequestIdentifierValue(bundleRef["fingerprint"]); fingerprint != "" {
+			fields = append(fields, "bundle_ref_fingerprint", fingerprint)
+		}
+	}
+	if payload := asStringMap(params["payload"]); payload != nil {
+		if entityID := safeRequestIdentifierValue(payload["entity_id"]); entityID != "" {
+			fields = append(fields, "entity_id", entityID)
+		}
+	}
+	return fields
+}
+
+func safeRequestIdentifierValue(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case json.Number:
+		return strings.TrimSpace(typed.String())
+	case float64:
+		return strconv.FormatFloat(typed, 'f', -1, 64)
+	case float32:
+		return strconv.FormatFloat(float64(typed), 'f', -1, 32)
+	case int:
+		return strconv.Itoa(typed)
+	case int64:
+		return strconv.FormatInt(typed, 10)
+	case int32:
+		return strconv.FormatInt(int64(typed), 10)
+	case uint:
+		return strconv.FormatUint(uint64(typed), 10)
+	case uint64:
+		return strconv.FormatUint(typed, 10)
+	case uint32:
+		return strconv.FormatUint(uint64(typed), 10)
+	default:
+		return ""
+	}
 }
 
 type webSocketSession struct {

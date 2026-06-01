@@ -1,11 +1,13 @@
 package apiv1
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -242,6 +244,54 @@ func TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics(t *testing.T) {
 				t.Fatalf("standard error data missing correlation_id: %#v", data)
 			}
 		})
+	}
+}
+
+func TestHandlerLogsInternalFallbackErrors(t *testing.T) {
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: map[string]MethodHandler{
+			"event.publish": func(context.Context, Request) (any, error) {
+				return nil, errors.New("boom-event-publish-internal")
+			},
+		},
+	})
+
+	var resp rpcResponse
+	logOutput := captureProcessLog(t, func() {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":null,"method":"event.publish","params":{"event_name":"scan.requested","run_id":"run-log","payload":{"entity_id":"entity-log","secret":"do-not-log"}}}`))
+		req.Header.Set("Authorization", "Bearer "+testToken)
+		req.Header.Set("X-Correlation-ID", "trace-log")
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode rpc response: %v body=%s", err, rec.Body.String())
+		}
+	})
+
+	if resp.Error == nil || resp.Error.Code != codeInternalError {
+		t.Fatalf("error = %#v, want internal fallback", resp.Error)
+	}
+	for _, want := range []string{
+		"runtime.error component=api",
+		"json-rpc internal error",
+		`"method":"event.publish"`,
+		`"correlation_id":"trace-log"`,
+		`"run_id":"run-log"`,
+		`"event_name":"scan.requested"`,
+		`"entity_id":"entity-log"`,
+		"boom-event-publish-internal",
+	} {
+		if !strings.Contains(logOutput, want) {
+			t.Fatalf("log output = %q, want substring %q", logOutput, want)
+		}
+	}
+	if strings.Contains(logOutput, "do-not-log") || strings.Contains(logOutput, "secret") {
+		t.Fatalf("log output leaked payload data: %q", logOutput)
 	}
 }
 
@@ -938,6 +988,19 @@ func rpcCall(t *testing.T, handler *Handler, body string) rpcResponse {
 		t.Fatalf("decode rpc response: %v body=%s", err, rec.Body.String())
 	}
 	return resp
+}
+
+func captureProcessLog(t *testing.T, fn func()) string {
+	t.Helper()
+	var buf bytes.Buffer
+	previousWriter := log.Writer()
+	previousFlags := log.Flags()
+	log.SetOutput(&buf)
+	log.SetFlags(0)
+	defer log.SetOutput(previousWriter)
+	defer log.SetFlags(previousFlags)
+	fn()
+	return buf.String()
 }
 
 type fakePinger struct {

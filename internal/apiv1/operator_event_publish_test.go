@@ -406,9 +406,27 @@ func TestOperatorEventPublishPersistsIdempotencyBeforeReadbackFailure(t *testing
 	handler := eventPublishTestHandlerWithObservability(t, pg, bus, source, observability)
 	body := eventPublishBody("", runStartTestFingerprint, "scan.requested", `{"topic":"medicine"}`, "", "idem-readback")
 
-	first := rpcCall(t, handler, body)
+	var first rpcResponse
+	logOutput := captureProcessLog(t, func() {
+		first = rpcCall(t, handler, body)
+	})
 	if first.Error == nil || !strings.Contains(fmt.Sprintf("%#v", first.Error.Data), "transient event readback failure") {
 		t.Fatalf("first event.publish error = %#v, want transient readback failure", first.Error)
+	}
+	if first.Error.Code != codeInternalError {
+		t.Fatalf("first event.publish code = %d, want %d", first.Error.Code, codeInternalError)
+	}
+	for _, want := range []string{
+		"runtime.error component=api",
+		"json-rpc internal error",
+		`"method":"event.publish"`,
+		`"correlation_id":"publish"`,
+		`"event_name":"scan.requested"`,
+		"transient event readback failure",
+	} {
+		if !strings.Contains(logOutput, want) {
+			t.Fatalf("readback failure log = %q, want substring %q", logOutput, want)
+		}
 	}
 	if count := countEventsByName(t, db, "scan.requested"); count != 1 {
 		t.Fatalf("scan.requested event count after readback failure = %d, want 1", count)
