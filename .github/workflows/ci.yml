@@ -103,4 +103,25 @@ jobs:
         run: go test ./cmd/swarm -run TestRunServeRuntimeConsumesCanonicalStoreSelectionBeforeStoreConstruction -count=1
 
       - name: Run tests
-        run: go test ./... -count=1
+        shell: bash
+        run: |
+          mkdir -p test-results
+          set +e
+          go test ./... -count=1 -json 2>&1 | tee test-results/go-test.json
+          test_status=${PIPESTATUS[0]}
+          set -e
+          go run ./cmd/swarm-test-timing \
+            -input test-results/go-test.json \
+            -markdown test-results/go-test-timing.md
+          cat test-results/go-test-timing.md >> "$GITHUB_STEP_SUMMARY"
+          exit "$test_status"
+
+      - name: Upload test timing artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-test-timing
+          path: |
+            test-results/go-test.json
+            test-results/go-test-timing.md
+          if-no-files-found: warn
