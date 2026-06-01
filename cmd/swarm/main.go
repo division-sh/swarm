@@ -56,6 +56,8 @@ import (
 	storebackend "swarm/internal/store/backendselection"
 	"swarm/internal/store/runbundle"
 	storerunlifecycle "swarm/internal/store/runlifecycle"
+
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -238,6 +240,7 @@ type serveRuntimeBundleContextRequest struct {
 	Stores                 storeBundle
 	Config                 *config.Config
 	Loaded                 serveRuntimeBundle
+	StateStoreSummary      string
 	Options                serveOptions
 	MountSources           workspaceMountSources
 	WorkspaceBackend       workspaceBackendSelection
@@ -484,9 +487,13 @@ func prepareLoadedServeBundleSource(ctx context.Context, stores storeBundle, loa
 
 func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serveRuntimeBundleContext, error) {
 	loaded := req.Loaded
-	stateStoreSummary, err := initializeStateStores(req.Ctx, req.Stores, loaded.bundle)
-	if err != nil {
-		return serveRuntimeBundleContext{}, err
+	stateStoreSummary := strings.TrimSpace(req.StateStoreSummary)
+	if stateStoreSummary == "" {
+		var err error
+		stateStoreSummary, err = initializeStateStores(req.Ctx, req.Stores, loaded.bundle)
+		if err != nil {
+			return serveRuntimeBundleContext{}, err
+		}
 	}
 	bundleSourceFact, err := prepareLoadedServeBundleSource(req.Ctx, req.Stores, loaded, req.Options.Dev)
 	if err != nil {
@@ -633,6 +640,13 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	}
 	reporter.emit(3, "db_connection", "ok", storeSelection.Backend.String())
 	defer closeDB(stores.SQLDB)
+	if stores.Postgres != nil {
+		if _, err := initializeServePlatformStateStores(ctx, stores, resolvedPaths.PlatformSpecPath); err != nil {
+			reporter.emit(4, "bundle_load", "FAILED", err.Error())
+			log.Printf("initialize platform state stores: %v", err)
+			return 1
+		}
+	}
 	loadedBundles, err := loadServeRuntimeBundles(ctx, repo, stores, resolvedPaths, opts)
 	if err != nil {
 		reporter.emit(4, "bundle_load", "FAILED", err.Error())
@@ -656,6 +670,15 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	source := loadedBundle.source
 	resolvedPlatformSpecPath := loadedBundle.platformSpecPath
 	reporter.emit(4, "bundle_load", "ok", serveBootBundleLoadDetail(serveRuntimeBundleIdentitiesDetail(loadedBundles), source))
+	stateStoreSummaries := make([]string, len(loadedBundles))
+	if stores.Postgres != nil {
+		summaries, err := initializeLoadedServeRuntimeStateStores(ctx, stores, loadedBundles)
+		if err != nil {
+			slog.Error("initialize state stores", "error", err)
+			return 1
+		}
+		stateStoreSummaries = summaries
+	}
 	if opts.AbandonActiveRuns {
 		if stores.Postgres == nil {
 			slog.Error("abandon active runs failed", "error", "postgres store is required")
@@ -719,6 +742,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 			Stores:                 stores,
 			Config:                 cfg,
 			Loaded:                 loaded,
+			StateStoreSummary:      serveStateStoreSummaryAt(stateStoreSummaries, i),
 			Options:                opts,
 			MountSources:           mountSources,
 			WorkspaceBackend:       workspaceBackend,
@@ -2557,9 +2581,82 @@ func initializeStateStores(ctx context.Context, stores storeBundle, bundle *runt
 	}
 	plans := append(platformPlans, entityPlans...)
 	plans = append(plans, statePlans...)
-	if err := stores.SchemaBootstrapper.EnsureSchemaTables(ctx, plans); err != nil {
+	if err := ensureServeSchemaTables(ctx, stores, plans); err != nil {
 		return "", err
 	}
+	return summarizeServeSchemaPlans(plans), nil
+}
+
+func initializeServePlatformStateStores(ctx context.Context, stores storeBundle, platformSpecPath string) (string, error) {
+	if stores.SchemaBootstrapper == nil {
+		return "store wiring ready", nil
+	}
+	spec, err := loadServePlatformSpecDocument(platformSpecPath)
+	if err != nil {
+		return "", err
+	}
+	plans, err := store.GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		return "", fmt.Errorf("platform-owned tables: %w", err)
+	}
+	if err := ensureServeSchemaTables(ctx, stores, plans); err != nil {
+		return "", err
+	}
+	return summarizeServeSchemaPlans(plans), nil
+}
+
+func initializeLoadedServeRuntimeStateStores(ctx context.Context, stores storeBundle, loaded []serveRuntimeBundle) ([]string, error) {
+	summaries := make([]string, len(loaded))
+	for i, bundle := range loaded {
+		summary, err := initializeStateStores(ctx, stores, bundle.bundle)
+		if err != nil {
+			return nil, fmt.Errorf("bundle %s state stores: %w", bundle.serveIdentityDetail(), err)
+		}
+		summaries[i] = summary
+	}
+	return summaries, nil
+}
+
+func ensureServeSchemaTables(ctx context.Context, stores storeBundle, plans []store.SchemaTableDDL) error {
+	if stores.SchemaBootstrapper == nil {
+		return nil
+	}
+	if err := stores.SchemaBootstrapper.EnsureSchemaTables(ctx, plans); err != nil {
+		return err
+	}
+	if err := rebindServePostgresSchemaCapabilities(ctx, stores); err != nil {
+		return err
+	}
+	return nil
+}
+
+func rebindServePostgresSchemaCapabilities(ctx context.Context, stores storeBundle) error {
+	if stores.Postgres == nil {
+		return nil
+	}
+	if _, err := stores.Postgres.BindSchemaCapabilities(ctx); err != nil {
+		return fmt.Errorf("bind post-bootstrap schema capabilities: %w", err)
+	}
+	return nil
+}
+
+func loadServePlatformSpecDocument(platformSpecPath string) (runtimecontracts.PlatformSpecDocument, error) {
+	platformSpecPath = strings.TrimSpace(platformSpecPath)
+	if platformSpecPath == "" {
+		return runtimecontracts.PlatformSpecDocument{}, fmt.Errorf("platform spec path is required")
+	}
+	data, err := os.ReadFile(platformSpecPath)
+	if err != nil {
+		return runtimecontracts.PlatformSpecDocument{}, fmt.Errorf("read platform spec: %w", err)
+	}
+	var spec runtimecontracts.PlatformSpecDocument
+	if err := yaml.Unmarshal(data, &spec); err != nil {
+		return runtimecontracts.PlatformSpecDocument{}, fmt.Errorf("unmarshal platform spec: %w", err)
+	}
+	return spec, nil
+}
+
+func summarizeServeSchemaPlans(plans []store.SchemaTableDDL) string {
 	tableNames := make([]string, 0, len(plans))
 	totalColumns := 0
 	for _, plan := range plans {
@@ -2569,9 +2666,16 @@ func initializeStateStores(ctx context.Context, stores storeBundle, bundle *runt
 	sort.Strings(tableNames)
 	slog.Info("swarm boot state stores", "tables", len(plans), "columns", totalColumns, "detail", strings.Join(tableNames, ", "))
 	if len(tableNames) == 0 {
-		return "verified 0 generated tables", nil
+		return "verified 0 generated tables"
 	}
-	return fmt.Sprintf("verified %d generated tables (%s)", len(plans), strings.Join(tableNames, ", ")), nil
+	return fmt.Sprintf("verified %d generated tables (%s)", len(plans), strings.Join(tableNames, ", "))
+}
+
+func serveStateStoreSummaryAt(summaries []string, index int) string {
+	if index < 0 || index >= len(summaries) {
+		return ""
+	}
+	return strings.TrimSpace(summaries[index])
 }
 
 type swarmWorkflowModule struct {
