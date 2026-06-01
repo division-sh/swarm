@@ -1,0 +1,381 @@
+package apiv1
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/division-sh/swarm/internal/events"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
+	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil"
+)
+
+const mailboxWriteSupportedSurfaceFingerprint = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+const mailboxWriteSupportedSurfaceBundleHash = "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+func TestOperatorMailboxWriteSupportedSurfacePublishesAndReadsAcrossBackends(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name  string
+		setup func(*testing.T, context.Context, semanticview.Source, runtimecorrelation.BundleSourceFact) (*Handler, *sql.DB)
+	}{
+		{
+			name: "sqlite_default_no_selector",
+			setup: func(t *testing.T, ctx context.Context, source semanticview.Source, fact runtimecorrelation.BundleSourceFact) (*Handler, *sql.DB) {
+				t.Helper()
+				sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+				handler := newMailboxWriteSupportedSurfaceHandler(t, ctx, sqliteStore, sqliteStore.DB, source, fact, sqliteStore)
+				return handler, sqliteStore.DB
+			},
+		},
+		{
+			name: "postgres_explicit_opt_in",
+			setup: func(t *testing.T, _ context.Context, source semanticview.Source, fact runtimecorrelation.BundleSourceFact) (*Handler, *sql.DB) {
+				t.Helper()
+				_, db, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				pg := &store.PostgresStore{DB: db}
+				handler := newMailboxWriteSupportedSurfaceHandler(t, context.Background(), pg, db, source, fact, pg)
+				return handler, db
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bundle := mailboxWriteSupportedSurfaceBundle(t)
+			source := semanticview.Wrap(bundle)
+			fact := bundleSourceFactForTestBundle(t, bundle)
+			handler, db := tc.setup(t, ctx, source, fact)
+
+			published := rpcCall(t, handler, eventPublishBodyWithoutBundle("", "thing.created", `{"amount":250,"who":"alice"}`, "", "idem-mailbox-write-"+tc.name))
+			if published.Error != nil {
+				t.Fatalf("event.publish error = %#v", published.Error)
+			}
+			result := asMap(t, published.Result)
+			eventID := stringValue(t, result["event_id"], "event_id")
+			runID := stringValue(t, result["run_id"], "run_id")
+			deliveries := asSlice(t, result["deliveries"])
+			if len(deliveries) != 2 {
+				t.Fatalf("event.publish deliveries = %#v, want workflow-runtime and reviewer deliveries", deliveries)
+			}
+			seenWorkflowRuntime := false
+			seenReviewer := false
+			for _, rawDelivery := range deliveries {
+				delivery := asMap(t, rawDelivery)
+				switch delivery["subscriber_id"] {
+				case "workflow-runtime":
+					seenWorkflowRuntime = delivery["status"] == "pending"
+				case "reviewer":
+					seenReviewer = delivery["status"] == "delivered"
+				}
+			}
+			if !seenWorkflowRuntime || !seenReviewer {
+				t.Fatalf("event.publish deliveries = %#v, want pending workflow-runtime and delivered reviewer", deliveries)
+			}
+
+			waitForMailboxWriteSupportedSurface(t, handler, db, runID, eventID, tc.name)
+		})
+	}
+}
+
+func TestOperatorMailboxWriteSupportedSurfaceMissingMaterializerIsLoud(t *testing.T) {
+	ctx := context.Background()
+	bundle := mailboxWriteSupportedSurfaceBundle(t)
+	source := semanticview.Wrap(bundle)
+	fact := bundleSourceFactForTestBundle(t, bundle)
+	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+	handler := newMailboxWriteSupportedSurfaceHandler(t, ctx, sqliteStore, sqliteStore.DB, source, fact, nil)
+
+	published := rpcCall(t, handler, eventPublishBodyWithoutBundle("", "thing.created", `{"amount":250,"who":"alice"}`, "", "idem-mailbox-write-missing-materializer"))
+	if published.Error != nil {
+		t.Fatalf("event.publish missing materializer should return with diagnostic receipt, got %#v", published.Error)
+	}
+	outcome, reason, errText := waitForSQLitePipelineReceipt(t, sqliteStore.DB)
+	if outcome != "dead_letter" || reason != "pipeline_error" || !strings.Contains(errText, "mailbox_write requires mailbox materialization store") {
+		t.Fatalf("sqlite pipeline receipt = outcome:%q reason:%q error:%q, want loud mailbox materializer failure", outcome, reason, errText)
+	}
+}
+
+func newMailboxWriteSupportedSurfaceHandler(
+	t *testing.T,
+	_ context.Context,
+	persistence any,
+	db *sql.DB,
+	source semanticview.Source,
+	fact runtimecorrelation.BundleSourceFact,
+	materializer runtimepipeline.MailboxWriteMaterializationStore,
+) *Handler {
+	t.Helper()
+	var coordinator *runtimepipeline.PipelineCoordinator
+	bus, err := runtimebus.NewEventBusWithOptions(persistence.(runtimebus.EventStore), runtimebus.EventBusOptions{
+		ContractBundle:    source,
+		BundleFingerprint: fact.BundleFingerprint,
+		BundleSourceFact:  fact,
+		InterceptorProvider: func() []runtimebus.EventInterceptor {
+			if coordinator == nil {
+				return nil
+			}
+			return []runtimebus.EventInterceptor{coordinator}
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	module := newRunCompletionSystemNodeModule(t, source)
+	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+	if _, ok := persistence.(*store.SQLiteRuntimeStore); ok {
+		workflowStore = runtimepipeline.NewSQLiteWorkflowInstanceStore(db)
+	}
+	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+		Module:                  module,
+		WorkflowStore:           workflowStore,
+		MailboxMaterializer:     materializer,
+		EventReceiptsCapability: eventReceiptsCapability(persistence),
+		BundleFingerprint:       fact.BundleFingerprint,
+	})
+	bus.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{AgentID: "workflow-runtime"})
+	bus.Subscribe("workflow-runtime", events.EventType("thing.created"))
+	mailbox, ok := persistence.(MailboxAPIStore)
+	if !ok {
+		t.Fatal("persistence store does not implement MailboxAPIStore")
+	}
+	runs, ok := persistence.(RunReadStore)
+	if !ok {
+		t.Fatal("persistence store does not implement RunReadStore")
+	}
+	observability, ok := persistence.(ObservabilityReadStore)
+	if !ok {
+		t.Fatal("persistence store does not implement ObservabilityReadStore")
+	}
+	idempotency, ok := persistence.(APIIdempotencyStore)
+	if !ok {
+		t.Fatal("persistence store does not implement APIIdempotencyStore")
+	}
+	runBundleContext, _ := persistence.(RunBundleContextStore)
+	return testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			Now:              func() time.Time { return time.Now().UTC() },
+			Ready:            func() bool { return true },
+			Database:         fakePinger{},
+			Runs:             runs,
+			Observability:    observability,
+			Idempotency:      idempotency,
+			Events:           bus,
+			Source:           source,
+			RunBundleContext: runBundleContext,
+			Mailbox:          mailbox,
+			Bundle: runtimecontracts.BundleIdentity{
+				WorkflowName:    source.WorkflowName(),
+				WorkflowVersion: source.WorkflowVersion(),
+				Fingerprint:     fact.BundleFingerprint,
+				BundleHash:      fact.BundleHash,
+			},
+		}),
+	})
+}
+
+func eventReceiptsCapability(persistence any) func(context.Context) (bool, error) {
+	provider, ok := persistence.(interface {
+		CanonicalEventReceiptsCapability(context.Context) (bool, error)
+	})
+	if !ok || provider == nil {
+		return nil
+	}
+	return provider.CanonicalEventReceiptsCapability
+}
+
+func waitForMailboxWriteSupportedSurface(t *testing.T, handler *Handler, db *sql.DB, runID, eventID, backend string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		listed := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"mailbox-list","method":"mailbox.list","params":{"status":"pending","run_id":%q,"limit":10}}`, runID))
+		if listed.Error != nil {
+			t.Fatalf("mailbox.list error = %#v", listed.Error)
+		}
+		items := asSlice(t, asMap(t, listed.Result)["items"])
+		if len(items) == 1 {
+			item := asMap(t, items[0])
+			if err := assertMailboxWriteSupportedSurfaceItem(t, handler, item, runID, eventID); err != nil {
+				lastErr = err
+				time.Sleep(25 * time.Millisecond)
+				continue
+			}
+			assertMailboxWriteEntityState(t, db, runID, backend)
+			return
+		}
+		lastErr = fmt.Errorf("mailbox.list returned %d items", len(items))
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("mailbox_write supported surface did not converge for %s: %v", backend, lastErr)
+}
+
+func assertMailboxWriteSupportedSurfaceItem(t *testing.T, handler *Handler, item map[string]any, runID, eventID string) error {
+	t.Helper()
+	mailboxID := stringValue(t, item["mailbox_id"], "mailbox_id")
+	if item["type"] != "review_request" || item["status"] != "pending" || item["priority"] != "high" || item["source_event_id"] != eventID || item["source_entity_id"] != runID {
+		return fmt.Errorf("mailbox.list item = %#v, want review_request pending high for source event/entity", item)
+	}
+	payload := asMap(t, item["payload"])
+	if payload["who"] != "alice" || payload["amount"] != float64(250) || payload["review_kind"] != "validation" {
+		return fmt.Errorf("mailbox.list payload = %#v, want materialized handler payload", payload)
+	}
+	detail := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"mailbox-get","method":"mailbox.get","params":{"mailbox_id":%q}}`, mailboxID))
+	if detail.Error != nil {
+		return fmt.Errorf("mailbox.get error = %#v", detail.Error)
+	}
+	detailPayload := asMap(t, asMap(t, detail.Result)["payload"])
+	if detailPayload["who"] != "alice" || detailPayload["amount"] != float64(250) || detailPayload["review_kind"] != "validation" {
+		return fmt.Errorf("mailbox.get payload = %#v, want materialized handler payload", detailPayload)
+	}
+	return nil
+}
+
+func assertMailboxWriteEntityState(t *testing.T, db *sql.DB, runID, backend string) {
+	t.Helper()
+	var state string
+	var fieldsRaw []byte
+	switch backend {
+	case "sqlite_default_no_selector":
+		if err := db.QueryRow(`
+			SELECT current_state, fields
+			FROM entity_state
+			WHERE run_id = ?
+		`, runID).Scan(&state, &fieldsRaw); err != nil {
+			t.Fatalf("load sqlite entity_state: %v", err)
+		}
+	default:
+		if err := db.QueryRow(`
+			SELECT current_state, fields
+			FROM entity_state
+			WHERE run_id = $1::uuid
+		`, runID).Scan(&state, &fieldsRaw); err != nil {
+			t.Fatalf("load postgres entity_state: %v", err)
+		}
+	}
+	if state != "done" {
+		t.Fatalf("%s entity state = %q, want done", backend, state)
+	}
+	fields := decodeJSONMap(t, json.RawMessage(fieldsRaw))
+	if fields["who"] != "alice" || fields["amount"] != float64(250) {
+		t.Fatalf("%s entity fields = %#v, want accumulated payload", backend, fields)
+	}
+}
+
+func waitForSQLitePipelineReceipt(t *testing.T, db *sql.DB) (string, string, string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		var outcome, reason, errText string
+		if err := db.QueryRow(`
+			SELECT outcome, COALESCE(reason_code, ''), COALESCE(json_extract(side_effects, '$.error'), '')
+			FROM event_receipts
+			WHERE subscriber_type = 'platform' AND subscriber_id = 'pipeline'
+			ORDER BY processed_at DESC
+			LIMIT 1
+		`).Scan(&outcome, &reason, &errText); err == nil {
+			return outcome, reason, errText
+		} else {
+			lastErr = err
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("sqlite pipeline receipt did not appear: %v", lastErr)
+	return "", "", ""
+}
+
+func bundleSourceFactForTestBundle(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle) runtimecorrelation.BundleSourceFact {
+	t.Helper()
+	if bundle == nil {
+		t.Fatal("test bundle is nil")
+	}
+	return runtimecorrelation.BundleSourceFact{
+		BundleHash:        mailboxWriteSupportedSurfaceBundleHash,
+		BundleSource:      storerunlifecycle.BundleSourceEphemeral,
+		BundleFingerprint: mailboxWriteSupportedSurfaceFingerprint,
+	}
+}
+
+func mailboxWriteSupportedSurfaceBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	handler := runtimecontracts.SystemNodeEventHandler{
+		CreateEntity: true,
+		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+			Writes: []runtimecontracts.WorkflowDataWrite{
+				{TargetField: "amount", Value: runtimecontracts.RefExpression("payload.amount")},
+				{TargetField: "who", Value: runtimecontracts.RefExpression("payload.who")},
+			},
+		},
+		AdvancesTo: "done",
+		Action: runtimecontracts.ActionSpec{
+			ID: "mailbox_write",
+			Mailbox: &runtimecontracts.MailboxWriteSpec{
+				ItemType: runtimecontracts.LiteralExpression("review_request"),
+				Severity: runtimecontracts.LiteralExpression("urgent"),
+				Summary:  runtimecontracts.LiteralExpression("Review validation package"),
+				EntityID: runtimecontracts.RefExpression("event.entity_id"),
+				Payload: map[string]runtimecontracts.ExpressionValue{
+					"review_kind": runtimecontracts.LiteralExpression("validation"),
+					"who":         runtimecontracts.RefExpression("payload.who"),
+					"amount":      runtimecontracts.RefExpression("payload.amount"),
+				},
+			},
+		},
+	}
+	return &runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Name:         "mailbox-write-supported-surface",
+			Version:      "1.0.0",
+			InitialStage: "new",
+			Stages: []runtimecontracts.WorkflowStageContract{
+				{ID: "new"},
+				{ID: "done"},
+			},
+			TerminalStages: []string{"done"},
+			Transitions: []runtimecontracts.WorkflowTransitionContract{{
+				ID:      "reviewer-completes-thing",
+				From:    []string{"new"},
+				To:      "done",
+				Trigger: "thing.created",
+				Node:    "reviewer",
+			}},
+			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
+				"reviewer": {"thing.created": handler},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"thing.created": {},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"reviewer": {
+				ID:            "reviewer",
+				ExecutionType: "system_node",
+				SubscribesTo:  []string{"thing.created"},
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"thing.created": handler,
+				},
+			},
+		},
+		RootSchema: &runtimecontracts.FlowSchemaDocument{
+			Name:           "mailbox-write-supported-surface",
+			InitialState:   "new",
+			TerminalStates: []string{"done"},
+			States:         []string{"new", "done"},
+			Pins: runtimecontracts.FlowPins{
+				Inputs: runtimecontracts.FlowInputPins{Events: []string{"thing.created"}},
+			},
+		},
+	}
+}
