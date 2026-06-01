@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
-	corestate "swarm/internal/runtime/core/state"
+	corestate "github.com/division-sh/swarm/internal/runtime/core/state"
 )
 
 type MailboxItem = corestate.MailboxItem

@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"swarm/internal/events"
-	runtimebus "swarm/internal/runtime/bus"
-	storerunlifecycle "swarm/internal/store/runlifecycle"
+	"github.com/division-sh/swarm/internal/events"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 )
 
 type sqliteRunCompletionDBTX interface {

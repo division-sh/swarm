@@ -3,11 +3,11 @@ package engine
 import (
 	"context"
 
-	runtimecontracts "swarm/internal/runtime/contracts"
-	"swarm/internal/runtime/core/identity"
-	runtimepinrouting "swarm/internal/runtime/core/pinrouting"
-	runtimeregistry "swarm/internal/runtime/core/registry"
-	"swarm/internal/runtime/semanticview"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type emitSurfaceContextKey struct{}

@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"swarm/internal/runtime/core/toolidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
 )
 
 type cliStreamAccumulator struct {

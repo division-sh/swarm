@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"swarm/internal/runtime/diaglog"
-	runtimemanager "swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 )
 
 type startupRecoveryOutcome string

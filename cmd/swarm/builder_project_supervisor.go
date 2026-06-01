@@ -9,15 +9,15 @@ import (
 	"sync"
 	"sync/atomic"
 
-	builderpkg "swarm/internal/builder"
-	"swarm/internal/config"
-	"swarm/internal/runtime"
-	runtimeagentcontrol "swarm/internal/runtime/agentcontrol"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	runtimeingress "swarm/internal/runtime/ingress"
-	runtimepipeline "swarm/internal/runtime/pipeline"
-	"swarm/internal/runtime/semanticview"
-	workspace "swarm/internal/runtime/workspace"
+	builderpkg "github.com/division-sh/swarm/internal/builder"
+	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/runtime"
+	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
 type runtimeProjectSupervisor struct {

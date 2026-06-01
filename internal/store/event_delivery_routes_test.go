@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
-	"swarm/internal/events"
-	"swarm/internal/testutil"
 )
 
 func TestPostgresStore_EventDeliveryRoutesPersistNodeTargetRows(t *testing.T) {

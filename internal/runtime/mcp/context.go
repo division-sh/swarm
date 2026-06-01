@@ -6,12 +6,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/google/uuid"
-	"swarm/internal/events"
-	runtimebus "swarm/internal/runtime/bus"
-	models "swarm/internal/runtime/core/actors"
-	"swarm/internal/runtime/core/toolidentity"
-	runtimecorrelation "swarm/internal/runtime/correlation"
 )
 
 type actorResolverFn func(context.Context) (models.AgentConfig, bool)

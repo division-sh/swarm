@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/runtime"
+	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/lib/pq"
-	"swarm/internal/runtime"
-	runtimecurrentstate "swarm/internal/runtime/currentstate"
-	"swarm/internal/runtime/semanticview"
 )
 
 type Source struct {

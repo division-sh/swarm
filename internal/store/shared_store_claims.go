@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	runtimepipeline "swarm/internal/runtime/pipeline"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
 const (

@@ -8,12 +8,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	"github.com/division-sh/swarm/internal/runtime/destructivereset"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	"github.com/lib/pq"
-	"swarm/internal/events"
-	"swarm/internal/runtime/core/eventidentity"
-	"swarm/internal/runtime/destructivereset"
-	runtimemanager "swarm/internal/runtime/manager"
-	runtimerunquiescence "swarm/internal/runtime/runquiescence"
 )
 
 func (s *PostgresStore) MarkEventDeliveryInProgress(ctx context.Context, eventID, agentID, sessionID string) error {

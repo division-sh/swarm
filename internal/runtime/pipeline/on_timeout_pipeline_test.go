@@ -6,12 +6,12 @@ import (
 	"testing"
 	"time"
 
-	"swarm/internal/events"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	"swarm/internal/runtime/core/timeridentity"
-	runtimeengine "swarm/internal/runtime/engine"
-	"swarm/internal/runtime/semanticview"
-	"swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/events"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/testutil"
 )
 
 func TestExecuteAuthoritativeNodeHandler_OnTimeoutAdvancesPartial(t *testing.T) {

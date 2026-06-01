@@ -10,14 +10,14 @@ import (
 	"testing"
 	"time"
 
-	"swarm/internal/events"
-	runtimeagentcontrol "swarm/internal/runtime/agentcontrol"
-	runtimebus "swarm/internal/runtime/bus"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	models "swarm/internal/runtime/core/actors"
-	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
-	runtimeownership "swarm/internal/runtime/core/ownership"
-	runtimepipeline "swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/events"
+	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
 type recoveryTestBus struct {

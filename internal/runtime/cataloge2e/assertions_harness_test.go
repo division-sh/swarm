@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	runtimecorrelation "swarm/internal/runtime/correlation"
-	runtimepipeline "swarm/internal/runtime/pipeline"
-	"swarm/internal/runtime/semanticview"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func catalogRuntimeContext() context.Context {

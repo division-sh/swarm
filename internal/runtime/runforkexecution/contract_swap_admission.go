@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store"
 )
 
 type ContractSwapBootResumeAdmissionRequest struct {

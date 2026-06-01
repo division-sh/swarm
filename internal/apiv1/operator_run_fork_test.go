@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"swarm/internal/store"
-	"swarm/internal/store/runbundle"
-	storerunlifecycle "swarm/internal/store/runlifecycle"
+	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/runbundle"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 )
 
 const (

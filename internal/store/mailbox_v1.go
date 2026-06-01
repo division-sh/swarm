@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/google/uuid"
-	"swarm/internal/events"
-	runtimepipeline "swarm/internal/runtime/pipeline"
-	runtimereplayclaim "swarm/internal/runtime/replayclaim"
 )
 
 var ErrMailboxV1NotFound = errors.New("mailbox item not found")

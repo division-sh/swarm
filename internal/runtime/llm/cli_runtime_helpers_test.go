@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"swarm/internal/config"
+	"github.com/division-sh/swarm/internal/config"
 )
 
 func TestAppendClaudePrintModeArgs_AddsVerboseForStreamJSON(t *testing.T) {

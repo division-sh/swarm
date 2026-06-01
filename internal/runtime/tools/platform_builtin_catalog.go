@@ -4,10 +4,10 @@ import (
 	"sort"
 	"strings"
 
-	models "swarm/internal/runtime/core/actors"
-	"swarm/internal/runtime/entityruntime"
-	"swarm/internal/runtime/flowdata"
-	"swarm/internal/runtime/semanticview"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
+	"github.com/division-sh/swarm/internal/runtime/flowdata"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func builtinRegisteredTools(source semanticview.Source, actor *models.AgentConfig) map[string]RegisteredTool {

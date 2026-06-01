@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/google/uuid"
-	runtimepipeline "swarm/internal/runtime/pipeline"
 )
 
 type mailboxMaterializationExecutor interface {

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	runtimeruncontrol "swarm/internal/runtime/runcontrol"
-	storerunlifecycle "swarm/internal/store/runlifecycle"
+	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 )
 
 func (s *PostgresStore) StopRunControl(ctx context.Context, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.State, error) {

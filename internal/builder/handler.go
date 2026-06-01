@@ -4,9 +4,9 @@ import (
 	"net/http"
 	"time"
 
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/gorilla/websocket"
-	runtimecredentials "swarm/internal/runtime/credentials"
-	"swarm/internal/runtime/semanticview"
 )
 
 type handler struct {

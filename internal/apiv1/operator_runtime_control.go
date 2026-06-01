@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"time"
 
-	runtimeingress "swarm/internal/runtime/ingress"
-	"swarm/internal/store"
+	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
+	"github.com/division-sh/swarm/internal/store"
 )
 
 const runtimeControlIdempotencyTTL = 24 * time.Hour

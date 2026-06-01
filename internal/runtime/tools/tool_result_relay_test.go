@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	models "swarm/internal/runtime/core/actors"
-	workspace "swarm/internal/runtime/workspace"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
 type relayWorkspaceResolverStub struct {

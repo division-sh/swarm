@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	runtimecontracts "swarm/internal/runtime/contracts"
-	"swarm/internal/runtime/semanticview"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func checkEventChainIntegrity(c *checkerContext) []Finding {

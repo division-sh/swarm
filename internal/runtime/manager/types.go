@@ -6,16 +6,16 @@ import (
 	"strings"
 	"time"
 
-	"swarm/internal/events"
-	runtimeagentcontrol "swarm/internal/runtime/agentcontrol"
-	runtimebus "swarm/internal/runtime/bus"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	models "swarm/internal/runtime/core/actors"
-	llmselection "swarm/internal/runtime/llm/selection"
-	runtimepipeline "swarm/internal/runtime/pipeline"
-	"swarm/internal/runtime/semanticview"
-	"swarm/internal/runtime/sessions"
-	workspace "swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/events"
+	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
+	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
 type Agent interface {

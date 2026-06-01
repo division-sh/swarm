@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	runtimebus "swarm/internal/runtime/bus"
-	"swarm/internal/store"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/store"
 )
 
 func TestProjectCanonicalRunDebugReplay_UsesCanonicalEventOwnerPayload(t *testing.T) {

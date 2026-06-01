@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
-	swruntime "swarm/internal/runtime"
-	"swarm/internal/runtime/bundledelete"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	"swarm/internal/runtime/semanticview"
-	"swarm/internal/store"
+	swruntime "github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/bundledelete"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store"
 )
 
 type Pinger interface {

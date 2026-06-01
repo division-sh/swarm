@@ -5,13 +5,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/flowmodel"
+	"github.com/division-sh/swarm/internal/runtime/replayclaim"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
-	"swarm/internal/events"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
-	"swarm/internal/runtime/flowmodel"
-	"swarm/internal/runtime/replayclaim"
-	"swarm/internal/runtime/semanticview"
 )
 
 type targetRouteMemoryStore struct {

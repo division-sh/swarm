@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
-	"swarm/internal/runtime/semanticview"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func normalizeEntityToolFlowInstance(value string) string {

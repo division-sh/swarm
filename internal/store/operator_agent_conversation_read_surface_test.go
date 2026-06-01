@@ -9,12 +9,12 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/division-sh/swarm/internal/runtime/budgetspend"
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
-	"swarm/internal/runtime/budgetspend"
-	runtimeactors "swarm/internal/runtime/core/actors"
-	runtimemanager "swarm/internal/runtime/manager"
-	runtimesessions "swarm/internal/runtime/sessions"
-	"swarm/internal/testutil"
 )
 
 type fakeConversationCapabilitySource struct {

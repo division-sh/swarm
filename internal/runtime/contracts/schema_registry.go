@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	flowmodel "swarm/internal/runtime/flowmodel"
+	flowmodel "github.com/division-sh/swarm/internal/runtime/flowmodel"
 )
 
 type EventSchema struct {

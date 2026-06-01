@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	runtimebootverify "swarm/internal/runtime/bootverify"
-	"swarm/internal/runtime/semanticview"
-	"swarm/internal/store"
+	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store"
 )
 
 func (h *handler) builderVersion() string {

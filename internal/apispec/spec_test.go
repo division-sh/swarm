@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/platform"
 	"gopkg.in/yaml.v3"
-	"swarm/internal/platform"
 )
 
 func TestPlatformAPISpecValidationCoverage(t *testing.T) {
@@ -46,6 +46,19 @@ func TestPlatformAPISpecValidationCoverage(t *testing.T) {
 	}
 	assertExamplesPolicyDeferred(t, api.ExamplesPolicy)
 	assertServiceDiscoveryPolicyNotPublished(t, api.ServiceDiscoveryPolicy)
+}
+
+func TestPlatformSpecVersionOwnerMatchesRootSpec(t *testing.T) {
+	root := loadPlatformSpecYAMLNode(t)
+	platformNode := mustMappingValue(t, root, "platform")
+	want := scalarValue(mustMappingValue(t, platformNode, "version"))
+	got, err := platform.PlatformVersion()
+	if err != nil {
+		t.Fatalf("PlatformVersion() error = %v", err)
+	}
+	if got != want {
+		t.Fatalf("PlatformVersion() = %q, want root platform.version %q", got, want)
+	}
 }
 
 func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {

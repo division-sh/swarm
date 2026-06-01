@@ -8157,8 +8157,8 @@ cli_specification:
             exit 2 before local contract verification, API calls, runtime boot, or other side effects.
           consumers:
             version:
-              fact_owner: local binary metadata; /v1/rpc health.check when --server is supplied
-              json_shape: local binary metadata object; with --server includes a server health.check object
+              fact_owner: local binary metadata from injected release metadata, Go build info, and embedded platform-spec version; /v1/rpc health.check when --server is supplied
+              json_shape: local binary metadata object with binary_version, module_version, platform_version, commit, built, go_version, goos, and goarch; with --server includes a server health.check object
               quiet_values:
               - binary_version
               - server_bundle_fingerprint when --server is supplied
@@ -8677,9 +8677,9 @@ cli_specification:
       command: swarm version [--server]
       tier: must_have
       implementation_status: implemented
-      local_owner: local binary metadata
+      local_owner: local binary metadata resolver
       server_owner: /v1/rpc health.check
-      behavior: '`swarm version` prints local binary identity and performs no API call. `swarm version --server` first queries `/v1/rpc health.check`, then prints the same local binary identity followed by a `Server:` section containing v1 server bundle/runtime identity from health.check.'
+      behavior: '`swarm version` prints local binary identity and performs no API call. Local binary identity resolves injected release metadata first, Go module/VCS build info second, and deterministic dev/unknown fallbacks last. `swarm version --json` additionally exposes module_version and platform_version as separate fields; platform_version is the embedded root platform-spec.yaml platform.version. `swarm version --server` first queries `/v1/rpc health.check`, then prints the same local binary identity followed by a `Server:` section containing v1 server bundle/runtime identity from health.check.'
       output_contract:
         local:
         - Swarm <binary-version>

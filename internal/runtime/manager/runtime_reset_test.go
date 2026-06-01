@@ -5,12 +5,12 @@ import (
 	"testing"
 	"time"
 
-	"swarm/internal/events"
-	runtimebus "swarm/internal/runtime/bus"
-	runtimeactors "swarm/internal/runtime/core/actors"
-	runtimemcp "swarm/internal/runtime/mcp"
-	runtimepipeline "swarm/internal/runtime/pipeline"
-	"swarm/internal/runtime/sessions"
+	"github.com/division-sh/swarm/internal/events"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
 type resetTestBus struct {

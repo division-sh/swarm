@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
+	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
-	runtimeruncontrol "swarm/internal/runtime/runcontrol"
-	"swarm/internal/testutil"
 )
 
 func TestPostgresStore_RunControlTransitionsAndStopAbandonsPendingWork(t *testing.T) {

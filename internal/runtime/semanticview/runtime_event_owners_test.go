@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 )
 
 func TestRuntimeEventOwners_UsesScopedAuthoritativeOwners(t *testing.T) {

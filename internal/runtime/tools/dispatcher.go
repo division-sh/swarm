@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	models "swarm/internal/runtime/core/actors"
-	"swarm/internal/runtime/core/toolcapabilities"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 )
 
 type ToolHandler func(ctx context.Context, actor models.AgentConfig, input any) (any, error)

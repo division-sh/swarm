@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"swarm/internal/runtime/mutationlog"
+	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 )
 
 const (

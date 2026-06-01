@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"swarm/internal/events"
-	"swarm/internal/store"
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/store"
 )
 
 type MailboxAPIStore interface {

@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
-	"swarm/internal/events"
-	runtimetools "swarm/internal/runtime/tools"
-	"swarm/internal/testutil"
 )
 
 func TestPostgresStore_V1MailboxReadDecisionAndIdempotencyOwners(t *testing.T) {

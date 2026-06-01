@@ -7,16 +7,16 @@ import (
 	"sync"
 	"time"
 
+	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/budgetspend"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
+	llm "github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/google/uuid"
-	"swarm/internal/config"
-	"swarm/internal/events"
-	"swarm/internal/runtime/budgetspend"
-	runtimebus "swarm/internal/runtime/bus"
-	models "swarm/internal/runtime/core/actors"
-	runtimecurrentstate "swarm/internal/runtime/currentstate"
-	llm "swarm/internal/runtime/llm"
-	"swarm/internal/runtime/semanticview"
-	runtimetools "swarm/internal/runtime/tools"
 )
 
 // budgetExecutionScopeKey controls intra-process serialization for LLM budget

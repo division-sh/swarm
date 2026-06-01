@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	"gopkg.in/yaml.v3"
-	"swarm/internal/runtime/core/paths"
 )
 
 func (t *WorkflowTimerContract) UnmarshalYAML(node *yaml.Node) error {

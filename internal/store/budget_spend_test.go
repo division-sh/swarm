@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/division-sh/swarm/internal/runtime/budgetspend"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/google/uuid"
-	"swarm/internal/runtime/budgetspend"
-	runtimecorrelation "swarm/internal/runtime/correlation"
 )
 
 func TestSQLiteRuntimeStoreBudgetSpendPersistence(t *testing.T) {

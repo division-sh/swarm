@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	runtimeagentcontrol "swarm/internal/runtime/agentcontrol"
-	"swarm/internal/store"
+	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	"github.com/division-sh/swarm/internal/store"
 )
 
 const agentControlIdempotencyTTL = 24 * time.Hour

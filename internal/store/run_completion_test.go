@@ -5,9 +5,9 @@ import (
 	"database/sql"
 	"testing"
 
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
-	runtimemanager "swarm/internal/runtime/manager"
-	"swarm/internal/testutil"
 )
 
 type normalRunCompletionFixture struct {

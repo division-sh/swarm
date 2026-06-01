@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	runtimecontracts "swarm/internal/runtime/contracts"
-	runtimepinrouting "swarm/internal/runtime/core/pinrouting"
-	"swarm/internal/runtime/semanticview"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type pinEmitSite struct {

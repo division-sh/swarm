@@ -3,7 +3,7 @@ package testcases
 import (
 	"testing"
 
-	runtimepipeline "swarm/internal/runtime/pipeline"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
 func TestGenericBundle_ScoringOutcomePatterns(t *testing.T) {

@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/store"
 	"github.com/google/uuid"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	"swarm/internal/store"
 )
 
 const (

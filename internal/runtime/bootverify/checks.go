@@ -10,16 +10,16 @@ import (
 	"strconv"
 	"strings"
 
-	runtimecontracts "swarm/internal/runtime/contracts"
-	"swarm/internal/runtime/core/eventidentity"
-	"swarm/internal/runtime/flowdata"
-	llmselection "swarm/internal/runtime/llm/selection"
-	runtimemcp "swarm/internal/runtime/mcp"
-	runtimepipeline "swarm/internal/runtime/pipeline"
-	runtimerequiredagents "swarm/internal/runtime/requiredagents"
-	"swarm/internal/runtime/semanticview"
-	"swarm/internal/runtime/sessions"
-	runtimetools "swarm/internal/runtime/tools"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	"github.com/division-sh/swarm/internal/runtime/flowdata"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimerequiredagents "github.com/division-sh/swarm/internal/runtime/requiredagents"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
+	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 )
 
 type Check struct {

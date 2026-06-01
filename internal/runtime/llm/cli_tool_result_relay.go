@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"swarm/internal/runtime/core/toolidentity"
-	workspace "swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
+	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
 const workspaceToolResultRelayDir = ".swarm/tool-results"

@@ -4,9 +4,9 @@ import (
 	"context"
 	"strings"
 
-	runtimebus "swarm/internal/runtime/bus"
-	"swarm/internal/runtime/diaglog"
-	runtimepipeline "swarm/internal/runtime/pipeline"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
 type RuntimeLogSink interface {

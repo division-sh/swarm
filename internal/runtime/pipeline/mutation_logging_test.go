@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	runtimemutationlog "swarm/internal/runtime/mutationlog"
-	"swarm/internal/testutil"
 )
 
 func TestUpdateEntityState_LogsMutationRowForStateTransition(t *testing.T) {

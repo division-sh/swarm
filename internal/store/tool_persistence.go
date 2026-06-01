@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
+	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
-	runtimecorrelation "swarm/internal/runtime/correlation"
-	runtimemutationlog "swarm/internal/runtime/mutationlog"
-	runtimetools "swarm/internal/runtime/tools"
 )
 
 var _ runtimetools.EntityPersistence = (*PostgresStore)(nil)

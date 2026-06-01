@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
-	"swarm/internal/store"
-	"swarm/internal/testutil"
 )
 
 type stubObservabilityCaps struct {

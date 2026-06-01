@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store"
 )
 
 func TestOperatorObservabilityHandlersExposePersistedReadMethods(t *testing.T) {

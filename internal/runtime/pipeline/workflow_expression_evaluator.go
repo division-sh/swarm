@@ -8,10 +8,10 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
-	"swarm/internal/runtime/workflowexpr"
 )
 
 var workflowExpressionKeywordReplacer = regexp.MustCompile(`\b(AND|OR|NOT|TRUE|FALSE)\b`)

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/lib/pq"
-	"swarm/internal/events"
 )
 
 const canonicalPendingDeliveryBackoff = time.Minute

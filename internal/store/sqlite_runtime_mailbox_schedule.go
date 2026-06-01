@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
+	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/google/uuid"
-	runtimepipeline "swarm/internal/runtime/pipeline"
-	runtimeruncontrol "swarm/internal/runtime/runcontrol"
-	runtimetools "swarm/internal/runtime/tools"
 )
 
 func (s *SQLiteRuntimeStore) InsertMailboxItem(ctx context.Context, item runtimetools.MailboxItem) (string, error) {

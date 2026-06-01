@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/store"
 	"github.com/gorilla/websocket"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	"swarm/internal/store"
 )
 
 func TestHandlerWebSocketHealthSubscribeAndUnsubscribe(t *testing.T) {

@@ -9,12 +9,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/google/uuid"
-	"swarm/internal/events"
-	"swarm/internal/runtime/core/eventidentity"
-	runtimeownership "swarm/internal/runtime/core/ownership"
-	runtimemanager "swarm/internal/runtime/manager"
-	runtimereplayclaim "swarm/internal/runtime/replayclaim"
 )
 
 type sqliteReplayLease struct {

@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"strings"
 
-	runtimecontracts "swarm/internal/runtime/contracts"
-	runtimepaths "swarm/internal/runtime/core/paths"
-	runtimeengine "swarm/internal/runtime/engine"
-	runtimepipeline "swarm/internal/runtime/pipeline"
-	"swarm/internal/runtime/workflowexpr"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
 
 func checkConditionExpressionValidation(c *checkerContext) []Finding { return c.conditionExpressions() }

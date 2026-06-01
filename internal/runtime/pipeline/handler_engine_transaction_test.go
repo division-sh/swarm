@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	"swarm/internal/events"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	runtimecorrelation "swarm/internal/runtime/correlation"
-	runtimeengine "swarm/internal/runtime/engine"
-	"swarm/internal/runtime/semanticview"
-	"swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/events"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/testutil"
 )
 
 type recordingPipelineBus struct {

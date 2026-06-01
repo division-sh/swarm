@@ -7,11 +7,11 @@ import (
 	"fmt"
 	"strings"
 
-	models "swarm/internal/runtime/core/actors"
-	"swarm/internal/runtime/core/toolcapabilities"
-	"swarm/internal/runtime/core/toolidentity"
-	"swarm/internal/runtime/core/toolresultpolicy"
-	"swarm/internal/runtime/sessions"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/toolresultpolicy"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
 type cliUsableToolsContextKey struct{}

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil"
 )
 
 func TestManagerStore_LoadAgents_FailsClosedOnMalformedRuntimeDescriptor(t *testing.T) {

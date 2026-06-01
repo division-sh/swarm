@@ -9,15 +9,15 @@ import (
 	"strings"
 	"testing"
 
-	"swarm/internal/config"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	runtimeactors "swarm/internal/runtime/core/actors"
-	"swarm/internal/runtime/core/toolcapabilities"
-	llm "swarm/internal/runtime/llm"
-	runtimemanager "swarm/internal/runtime/manager"
-	runtimemcp "swarm/internal/runtime/mcp"
-	"swarm/internal/runtime/semanticview"
-	workspace "swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/config"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
+	llm "github.com/division-sh/swarm/internal/runtime/llm"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
 type claudeStartupWorkspaceStub struct {

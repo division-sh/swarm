@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/google/uuid"
-	"swarm/internal/runtime/sessions"
 )
 
 func resolvedSessionScope(ctx context.Context, mode sessions.RuntimeMode, sessionScope sessions.SessionScope, scopeKey string) (sessions.ResolvedScope, error) {

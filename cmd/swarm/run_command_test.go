@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/gorilla/websocket"
-	"swarm/internal/apiv1"
 )
 
 func TestRunCommandLocalForegroundConsumesServeOwnerAndV1API(t *testing.T) {

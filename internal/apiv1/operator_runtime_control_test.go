@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
-	runtimebus "swarm/internal/runtime/bus"
-	runtimeingress "swarm/internal/runtime/ingress"
-	"swarm/internal/store"
-	"swarm/internal/testutil"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
+	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/testutil"
 )
 
 func TestOperatorRuntimeControlHandlersUseIngressOwnerAndIdempotency(t *testing.T) {

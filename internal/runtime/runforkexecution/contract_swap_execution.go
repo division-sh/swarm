@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store"
 )
 
 type HistoricalReplayContractSwapBootResumeRequest struct {

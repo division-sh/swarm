@@ -4,8 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	models "swarm/internal/runtime/core/actors"
-	llm "swarm/internal/runtime/llm"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	llm "github.com/division-sh/swarm/internal/runtime/llm"
 )
 
 func TestNewToolInputValidator_NilDefinitionsFailClosed(t *testing.T) {

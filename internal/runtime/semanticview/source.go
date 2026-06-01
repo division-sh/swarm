@@ -1,8 +1,8 @@
 package semanticview
 
 import (
-	runtimecontracts "swarm/internal/runtime/contracts"
-	runtimeregistry "swarm/internal/runtime/core/registry"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
 )
 
 type Source interface {

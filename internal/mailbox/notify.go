@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	runtimetools "swarm/internal/runtime/tools"
+	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 )
 
 type CriticalNotifier interface {

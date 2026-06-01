@@ -5,9 +5,9 @@ import (
 	"errors"
 	"strings"
 
-	"swarm/internal/events"
-	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
-	runtimepinrouting "swarm/internal/runtime/core/pinrouting"
+	"github.com/division-sh/swarm/internal/events"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 )
 
 type deliveryRoutingResult struct {

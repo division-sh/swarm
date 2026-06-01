@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"swarm/internal/config"
-	llmselection "swarm/internal/runtime/llm/selection"
-	"swarm/internal/runtime/sessions"
+	"github.com/division-sh/swarm/internal/config"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
 func TestProviderContractsValidateShippedRuntimes(t *testing.T) {

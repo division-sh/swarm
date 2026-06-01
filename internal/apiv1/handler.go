@@ -16,9 +16,9 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/division-sh/swarm/internal/apispec"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
-	"swarm/internal/apispec"
 )
 
 const (

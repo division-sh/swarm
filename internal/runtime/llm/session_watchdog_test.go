@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"swarm/internal/runtime/sessions"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
 type noopMonitorWriter struct{}

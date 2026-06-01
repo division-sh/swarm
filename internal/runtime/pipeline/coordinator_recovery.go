@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"swarm/internal/events"
-	"swarm/internal/runtime/diaglog"
-	runtimereplayclaim "swarm/internal/runtime/replayclaim"
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 )
 
 type pipelineReceiptRecorder interface {

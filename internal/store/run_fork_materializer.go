@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/mutationlog"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
-	runtimecorrelation "swarm/internal/runtime/correlation"
-	"swarm/internal/runtime/mutationlog"
-	storerunlifecycle "swarm/internal/store/runlifecycle"
 )
 
 const (

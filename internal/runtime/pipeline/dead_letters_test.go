@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
+	runtimerterr "github.com/division-sh/swarm/internal/runtime/rterrors"
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
-	"swarm/internal/events"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	runtimedestructivereset "swarm/internal/runtime/destructivereset"
-	runtimerterr "swarm/internal/runtime/rterrors"
-	"swarm/internal/testutil"
 )
 
 type eventReceiptsCapabilityStub struct {

@@ -4,11 +4,11 @@ import (
 	"sort"
 	"strings"
 
-	runtimecontracts "swarm/internal/runtime/contracts"
-	models "swarm/internal/runtime/core/actors"
-	llm "swarm/internal/runtime/llm"
-	runtimemcp "swarm/internal/runtime/mcp"
-	"swarm/internal/runtime/semanticview"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	llm "github.com/division-sh/swarm/internal/runtime/llm"
+	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type implementationClass string

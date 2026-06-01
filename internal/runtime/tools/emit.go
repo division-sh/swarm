@@ -4,11 +4,11 @@ import (
 	"sort"
 	"strings"
 
-	runtimecontracts "swarm/internal/runtime/contracts"
-	"swarm/internal/runtime/core/eventidentity"
-	runtimeeventschema "swarm/internal/runtime/eventschema"
-	llm "swarm/internal/runtime/llm"
-	runtimesharedjson "swarm/internal/runtime/sharedjson"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
+	llm "github.com/division-sh/swarm/internal/runtime/llm"
+	runtimesharedjson "github.com/division-sh/swarm/internal/runtime/sharedjson"
 )
 
 type EmitSchema = runtimecontracts.EventSchema

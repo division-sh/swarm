@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	runtimestartupownership "swarm/internal/runtime/startupownership"
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 )
 
 const runtimeSharedStoreOwnershipLock = "swarm:runtime:shared-store-owner"

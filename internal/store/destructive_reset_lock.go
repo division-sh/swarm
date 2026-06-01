@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"swarm/internal/runtime/destructivereset"
+	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 )
 
 func (s *PostgresStore) TryAcquire(ctx context.Context, lockKey string) (destructivereset.LockLease, bool, error) {

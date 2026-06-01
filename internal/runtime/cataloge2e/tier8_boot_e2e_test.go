@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	runtime "swarm/internal/runtime"
-	runtimebootverify "swarm/internal/runtime/bootverify"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	"swarm/internal/runtime/semanticview"
+	runtime "github.com/division-sh/swarm/internal/runtime"
+	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type tier8ExpectedDocument struct {

@@ -6,7 +6,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store"
 )
 
 func TestBuildContractSwapBootResumeAdmissionConsumesCanonicalPrerequisites(t *testing.T) {

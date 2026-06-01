@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	runtimepkg "swarm/internal/runtime"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 )
 
 type OperatorEventListFilter struct {

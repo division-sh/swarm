@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
-	runtimecorrelation "swarm/internal/runtime/correlation"
-	storerunlifecycle "swarm/internal/store/runlifecycle"
-	"swarm/internal/testutil"
 )
 
 func TestReconstructEntityStateProjection_FailsOnMalformedGateKey(t *testing.T) {

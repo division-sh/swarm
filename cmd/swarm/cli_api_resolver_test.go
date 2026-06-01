@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/spf13/cobra"
-	"swarm/internal/apiv1"
 )
 
 func TestResolveCLIAPISettingsPrecedence(t *testing.T) {

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	runtimecurrentstate "swarm/internal/runtime/currentstate"
-	runtimemanager "swarm/internal/runtime/manager"
+	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 )
 
 func (s *PostgresStore) UpsertRoutingRule(ctx context.Context, rule runtimemanager.PersistedRoutingRule) error {

@@ -6,11 +6,11 @@ import (
 	"strings"
 	"testing"
 
-	runtimepkg "swarm/internal/runtime"
-	runtimebootverify "swarm/internal/runtime/bootverify"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	"swarm/internal/runtime/semanticview"
-	runtimetools "swarm/internal/runtime/tools"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 )
 
 func TestBuiltinToolParityInvariant_SupportedSurfacesShareRuntimeToolTruth_V2(t *testing.T) {

@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"gopkg.in/yaml.v3"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	"swarm/internal/runtime/semanticview"
 )
 
 func TestContractDefinitionsForSource_UsesProvidedSource(t *testing.T) {

@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
-	runtimecorrelation "swarm/internal/runtime/correlation"
-	"swarm/internal/testutil"
 )
 
 func TestWorkflowInstanceStore_RequiresRunContext(t *testing.T) {

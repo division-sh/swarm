@@ -3,9 +3,9 @@ package tools
 import (
 	"strings"
 
-	models "swarm/internal/runtime/core/actors"
-	"swarm/internal/runtime/entityruntime"
-	"swarm/internal/runtime/semanticview"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func actorOwnedReadTargetContracts(source semanticview.Source, actor *models.AgentConfig) []entityruntime.Contract {

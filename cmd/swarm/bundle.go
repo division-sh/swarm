@@ -11,7 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 )
 
 const (

@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"swarm/internal/config"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	runtimepipeline "swarm/internal/runtime/pipeline"
-	"swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/config"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func testRuntimeWorkflowValidationBundle() *runtimecontracts.WorkflowContractBundle {

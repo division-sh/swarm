@@ -5,7 +5,7 @@ import (
 	"strings"
 	"sync"
 
-	"swarm/internal/runtime/diaglog"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
 )
 
 var processWarnOnceSeen sync.Map

@@ -7,12 +7,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/google/uuid"
-	"swarm/internal/events"
-	runtimepinrouting "swarm/internal/runtime/core/pinrouting"
-	runtimeengine "swarm/internal/runtime/engine"
-	runtimepipeline "swarm/internal/runtime/pipeline"
-	runtimereplayclaim "swarm/internal/runtime/replayclaim"
 )
 
 type engineOutbox struct {

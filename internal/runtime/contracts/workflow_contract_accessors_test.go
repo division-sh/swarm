@@ -3,7 +3,7 @@ package contracts
 import (
 	"testing"
 
-	"swarm/internal/runtime/flowmodel"
+	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 )
 
 func TestResolveFlowInputAutoWire_ReturnsScopedProducerForUniquePinMatch(t *testing.T) {

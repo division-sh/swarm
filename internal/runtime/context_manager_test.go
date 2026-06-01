@@ -6,12 +6,12 @@ import (
 	"reflect"
 	"testing"
 
-	runtimebus "swarm/internal/runtime/bus"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	runtimecorrelation "swarm/internal/runtime/correlation"
-	"swarm/internal/runtime/semanticview"
-	"swarm/internal/store/runbundle"
-	storerunlifecycle "swarm/internal/store/runlifecycle"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store/runbundle"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 )
 
 const (

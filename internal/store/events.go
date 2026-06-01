@@ -9,15 +9,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/destructivereset"
+	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
-	"swarm/internal/events"
-	runtimebus "swarm/internal/runtime/bus"
-	runtimeownership "swarm/internal/runtime/core/ownership"
-	runtimecorrelation "swarm/internal/runtime/correlation"
-	"swarm/internal/runtime/destructivereset"
-	runtimereplayclaim "swarm/internal/runtime/replayclaim"
-	runtimerunquiescence "swarm/internal/runtime/runquiescence"
-	storerunlifecycle "swarm/internal/store/runlifecycle"
 )
 
 const (

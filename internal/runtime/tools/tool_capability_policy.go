@@ -3,11 +3,11 @@ package tools
 import (
 	"strings"
 
-	runtimeauthority "swarm/internal/runtime/authority"
-	models "swarm/internal/runtime/core/actors"
-	"swarm/internal/runtime/core/toolcapabilities"
-	"swarm/internal/runtime/core/toolidentity"
-	"swarm/internal/runtime/flowdata"
+	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
+	"github.com/division-sh/swarm/internal/runtime/flowdata"
 )
 
 type toolAuthorizationDecision struct {

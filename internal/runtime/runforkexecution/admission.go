@@ -9,11 +9,11 @@ import (
 
 	"github.com/google/uuid"
 
-	runtimecontracts "swarm/internal/runtime/contracts"
-	runtimepipeline "swarm/internal/runtime/pipeline"
-	"swarm/internal/runtime/semanticview"
-	"swarm/internal/store"
-	"swarm/internal/store/runbundle"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/runbundle"
 )
 
 type SelectedContractBindingReader interface {

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"swarm/internal/events"
-	runtimereplayclaim "swarm/internal/runtime/replayclaim"
+	"github.com/division-sh/swarm/internal/events"
+	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 )
 
 func (eb *EventBus) authoritativeReplayScopeForEvent(ctx context.Context, eventID string) (runtimereplayclaim.CommittedReplayScope, error) {

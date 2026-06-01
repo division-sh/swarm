@@ -1,6 +1,6 @@
 package pipeline
 
-import "swarm/internal/runtime/semanticview"
+import "github.com/division-sh/swarm/internal/runtime/semanticview"
 
 type WorkflowModule interface {
 	SemanticSource() semanticview.Source

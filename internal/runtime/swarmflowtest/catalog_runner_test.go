@@ -14,14 +14,14 @@ import (
 	"strings"
 	"testing"
 
+	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/paths"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimerequiredagents "github.com/division-sh/swarm/internal/runtime/requiredagents"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"gopkg.in/yaml.v3"
-	runtimebootverify "swarm/internal/runtime/bootverify"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	"swarm/internal/runtime/core/paths"
-	"swarm/internal/runtime/core/timeridentity"
-	runtimepipeline "swarm/internal/runtime/pipeline"
-	runtimerequiredagents "swarm/internal/runtime/requiredagents"
-	"swarm/internal/runtime/semanticview"
 )
 
 type catalogTriggerStep struct {

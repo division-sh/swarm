@@ -8,13 +8,13 @@ import (
 	"slices"
 	"strings"
 
-	"swarm/internal/config"
-	models "swarm/internal/runtime/core/actors"
-	"swarm/internal/runtime/core/toolidentity"
-	runtimecorrelation "swarm/internal/runtime/correlation"
-	llmselection "swarm/internal/runtime/llm/selection"
-	"swarm/internal/runtime/sessions"
-	runtimesharedjson "swarm/internal/runtime/sharedjson"
+	"github.com/division-sh/swarm/internal/config"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
+	runtimesharedjson "github.com/division-sh/swarm/internal/runtime/sharedjson"
 )
 
 func (r *ClaudeCLIRuntime) persistTurn(ctx context.Context, turn AgentTurnRecord) {

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"swarm/internal/config"
+	"github.com/division-sh/swarm/internal/config"
 )
 
 func TestValidateClaudeCLIRuntimeConfig_RequiresExplicitBridgeEnv(t *testing.T) {

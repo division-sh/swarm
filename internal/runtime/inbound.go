@@ -13,10 +13,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	"github.com/google/uuid"
-	"swarm/internal/events"
-	runtimebus "swarm/internal/runtime/bus"
-	runtimeingress "swarm/internal/runtime/ingress"
 )
 
 type InboundPersistence interface {

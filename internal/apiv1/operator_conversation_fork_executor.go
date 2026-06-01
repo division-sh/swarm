@@ -7,11 +7,11 @@ import (
 	"strings"
 	"sync"
 
-	runtimeactors "swarm/internal/runtime/core/actors"
-	"swarm/internal/runtime/core/toolcapabilities"
-	runtimellm "swarm/internal/runtime/llm"
-	"swarm/internal/runtime/sessions"
-	"swarm/internal/store"
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
+	"github.com/division-sh/swarm/internal/store"
 )
 
 type LLMForkChatExecutor struct {

@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
-	"swarm/internal/testutil"
 )
 
 func TestPostgresStore_ListAgentLifecycleFacts_UsesCanonicalLiveLifecycle(t *testing.T) {

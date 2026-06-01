@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	"github.com/google/uuid"
-	"swarm/internal/events"
-	runtimepkg "swarm/internal/runtime"
-	runtimebus "swarm/internal/runtime/bus"
-	"swarm/internal/runtime/diaglog"
 )
 
 func (h *runHub) handleRuntimeLog(entry runtimepkg.RuntimeLogEntry) {

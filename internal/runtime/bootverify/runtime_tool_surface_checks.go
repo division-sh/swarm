@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"strings"
 
-	runtimecontracts "swarm/internal/runtime/contracts"
-	runtimemcp "swarm/internal/runtime/mcp"
-	"swarm/internal/runtime/semanticview"
-	runtimetools "swarm/internal/runtime/tools"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 )
 
 func checkToolResolution(c *checkerContext) []Finding { return c.toolResolution() }

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"swarm/internal/config"
+	"github.com/division-sh/swarm/internal/config"
 )
 
 const (

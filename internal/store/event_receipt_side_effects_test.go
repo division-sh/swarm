@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	runtimemanager "swarm/internal/runtime/manager"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 )
 
 func TestAgentReceiptSideEffects_RoundTrip(t *testing.T) {

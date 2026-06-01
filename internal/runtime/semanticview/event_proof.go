@@ -4,8 +4,8 @@ import (
 	"sort"
 	"strings"
 
-	runtimecontracts "swarm/internal/runtime/contracts"
-	runtimeeventidentity "swarm/internal/runtime/core/eventidentity"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeeventidentity "github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 )
 
 type FlowEventProof struct {

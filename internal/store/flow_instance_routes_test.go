@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	runtimebus "swarm/internal/runtime/bus"
-	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
-	"swarm/internal/testutil"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/testutil"
 )
 
 func ensureFlowInstanceRouteTables(t *testing.T, ctx context.Context, db *sql.DB) {

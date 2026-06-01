@@ -3,8 +3,8 @@ package registry
 import (
 	"testing"
 
-	runtimecontracts "swarm/internal/runtime/contracts"
-	"swarm/internal/runtime/core/identity"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
 func TestGuardFromContract_PreservesTypedKeyAndKind(t *testing.T) {

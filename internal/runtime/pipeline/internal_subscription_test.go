@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"swarm/internal/events"
-	runtimeengine "swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/events"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 )
 
 type recordingInternalSubscriptionBus struct {

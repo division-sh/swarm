@@ -3,8 +3,8 @@ package tools
 import (
 	"testing"
 
-	runtimecontracts "swarm/internal/runtime/contracts"
-	"swarm/internal/runtime/entityruntime"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 )
 
 func TestEntityToolLeafSelectorNames_GuardsRecursiveNamedTypes(t *testing.T) {

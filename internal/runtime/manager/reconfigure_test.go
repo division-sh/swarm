@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"swarm/internal/events"
-	models "swarm/internal/runtime/core/actors"
-	"swarm/internal/runtime/sessions"
+	"github.com/division-sh/swarm/internal/events"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
 type reconfigureTestAgent struct{ id string }

@@ -7,10 +7,10 @@ import (
 	"net/http"
 	"strings"
 
-	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
-	runtimecredentials "swarm/internal/runtime/credentials"
-	runtimerunstart "swarm/internal/runtime/runstart"
-	"swarm/internal/store"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	runtimerunstart "github.com/division-sh/swarm/internal/runtime/runstart"
+	"github.com/division-sh/swarm/internal/store"
 )
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {

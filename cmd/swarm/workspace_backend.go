@@ -5,8 +5,8 @@ import (
 	"os"
 	"strings"
 
-	"swarm/internal/config"
-	workspace "swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/config"
+	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
 const (

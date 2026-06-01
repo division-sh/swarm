@@ -3,7 +3,7 @@ package tools
 import (
 	"errors"
 
-	runtimerterr "swarm/internal/runtime/rterrors"
+	runtimerterr "github.com/division-sh/swarm/internal/runtime/rterrors"
 )
 
 type RuntimeError = runtimerterr.RuntimeError

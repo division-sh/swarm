@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
-	runtimecorrelation "swarm/internal/runtime/correlation"
 )
 
 func TestSQLiteWorkflowInstanceStore_PreservesCreateEntityInitialValueMutationRows(t *testing.T) {

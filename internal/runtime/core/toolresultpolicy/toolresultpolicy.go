@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"swarm/internal/runtime/core/toolcapabilities"
-	"swarm/internal/runtime/core/toolidentity"
-	runtimerterr "swarm/internal/runtime/rterrors"
+	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
+	runtimerterr "github.com/division-sh/swarm/internal/runtime/rterrors"
 )
 
 const (

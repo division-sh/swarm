@@ -3,7 +3,7 @@ package config
 import (
 	"strings"
 
-	runtimesharding "swarm/internal/runtime/core/sharding"
+	runtimesharding "github.com/division-sh/swarm/internal/runtime/core/sharding"
 )
 
 type ExtensionsConfig struct {

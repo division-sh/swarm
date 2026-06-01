@@ -10,11 +10,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/google/uuid"
-	"swarm/internal/events"
-	"swarm/internal/runtime/core/timeridentity"
-	runtimedeadletters "swarm/internal/runtime/deadletters"
-	runtimeengine "swarm/internal/runtime/engine"
 )
 
 type pipelineEmitCollectorKey struct{}

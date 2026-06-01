@@ -4,9 +4,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	runtimecontracts "swarm/internal/runtime/contracts"
-	"swarm/internal/runtime/flowmodel"
-	"swarm/internal/runtime/semanticview"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/flowmodel"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func TestWorkflowFlowInputProducerAliases_IncludeProducerScopedAlias(t *testing.T) {

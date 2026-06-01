@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
+	runtimesharding "github.com/division-sh/swarm/internal/runtime/core/sharding"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"gopkg.in/yaml.v3"
-	runtimesharding "swarm/internal/runtime/core/sharding"
-	llmselection "swarm/internal/runtime/llm/selection"
 )
 
 // Config contains platform-generic runtime configuration.

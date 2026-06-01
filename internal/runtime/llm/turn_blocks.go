@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	runtimebus "swarm/internal/runtime/bus"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 )
 
 type TurnBlock struct {

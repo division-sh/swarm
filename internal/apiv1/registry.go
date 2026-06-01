@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"swarm/internal/apispec"
+	"github.com/division-sh/swarm/internal/apispec"
 )
 
 const (

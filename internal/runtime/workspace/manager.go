@@ -13,12 +13,12 @@ import (
 	"strings"
 	"time"
 
-	runtimecontaineridentity "swarm/internal/runtime/containeridentity"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	models "swarm/internal/runtime/core/actors"
-	runtimecurrentstate "swarm/internal/runtime/currentstate"
-	runtimedestructivereset "swarm/internal/runtime/destructivereset"
-	"swarm/internal/runtime/semanticview"
+	runtimecontaineridentity "github.com/division-sh/swarm/internal/runtime/containeridentity"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
+	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type Target struct {

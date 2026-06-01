@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	models "swarm/internal/runtime/core/actors"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 )
 
 func TestNormalizeNativeToolNameCanonicalAliases(t *testing.T) {

@@ -9,15 +9,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/google/uuid"
-	"swarm/internal/events"
-	"swarm/internal/runtime/core/eventidentity"
-	runtimepinrouting "swarm/internal/runtime/core/pinrouting"
-	runtimecorrelation "swarm/internal/runtime/correlation"
-	runtimedeadletters "swarm/internal/runtime/deadletters"
-	runtimedelivery "swarm/internal/runtime/deliverylifecycle"
-	runtimepipeline "swarm/internal/runtime/pipeline"
-	runtimereplayclaim "swarm/internal/runtime/replayclaim"
 )
 
 type pipelineTransitionSchemaCapabilityProvider interface {

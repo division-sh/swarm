@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/preservationcleanup"
 	"github.com/lib/pq"
-	"swarm/internal/runtime/preservationcleanup"
 )
 
 type preservationCleanupRunTarget struct {

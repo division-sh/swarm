@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	runtimemanager "swarm/internal/runtime/manager"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 )
 
 type agentReceiptSideEffects struct {

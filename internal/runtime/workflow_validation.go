@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"strings"
 
-	runtimeauthority "swarm/internal/runtime/authority"
-	runtimebootverify "swarm/internal/runtime/bootverify"
-	runtimecredentials "swarm/internal/runtime/credentials"
-	llmselection "swarm/internal/runtime/llm/selection"
-	"swarm/internal/runtime/semanticview"
-	runtimetools "swarm/internal/runtime/tools"
+	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
+	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 )
 
 type WorkflowContractValidationOptions struct {

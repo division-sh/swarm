@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	models "swarm/internal/runtime/core/actors"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 )
 
 var toolTemplatePattern = regexp.MustCompile(`\{\{\s*([^{}]+?)\s*\}\}`)

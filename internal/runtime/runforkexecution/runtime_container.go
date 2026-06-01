@@ -8,11 +8,11 @@ import (
 
 	"github.com/google/uuid"
 
-	runtimepkg "swarm/internal/runtime"
-	runtimebus "swarm/internal/runtime/bus"
-	runtimecorrelation "swarm/internal/runtime/correlation"
-	"swarm/internal/runtime/diaglog"
-	"swarm/internal/store"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	"github.com/division-sh/swarm/internal/store"
 )
 
 // SelectedContractForkLocalRuntimeContainer is the canonical live runtime

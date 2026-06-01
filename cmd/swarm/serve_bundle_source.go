@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	runtimecontracts "swarm/internal/runtime/contracts"
-	runtimecorrelation "swarm/internal/runtime/correlation"
-	"swarm/internal/store"
-	storerunlifecycle "swarm/internal/store/runlifecycle"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/store"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 )
 
 func prepareServeBundleSource(ctx context.Context, stores storeBundle, bundle *runtimecontracts.WorkflowContractBundle, legacyFingerprint string, dev bool) (runtimecorrelation.BundleSourceFact, error) {

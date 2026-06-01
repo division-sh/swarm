@@ -3,7 +3,7 @@ package pipeline
 import (
 	"testing"
 
-	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 )
 
 func TestWorkflowInstanceStoreIdentityUsesCanonicalFlowIdentityOwner(t *testing.T) {

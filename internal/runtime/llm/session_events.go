@@ -6,12 +6,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/google/uuid"
-	"swarm/internal/events"
-	runtimeactors "swarm/internal/runtime/core/actors"
-	runtimedelivery "swarm/internal/runtime/deliverylifecycle"
-	"swarm/internal/runtime/diaglog"
-	"swarm/internal/runtime/sessions"
 )
 
 func publishAgentStarted(ctx context.Context, publisher EventPublisher, session *Session, eventType events.EventType) {

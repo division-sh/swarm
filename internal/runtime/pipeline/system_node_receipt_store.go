@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
+	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
+	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	"github.com/google/uuid"
-	runtimedestructivereset "swarm/internal/runtime/destructivereset"
-	runtimerunquiescence "swarm/internal/runtime/runquiescence"
 )
 
 func (s *WorkflowInstanceStore) SystemNodeProcessed(ctx context.Context, nodeID, eventID string) (bool, error) {

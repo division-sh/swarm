@@ -8,10 +8,10 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"swarm/internal/config"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	"swarm/internal/runtime/semanticview"
-	runtimestartupownership "swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/config"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 )
 
 type fakeRuntimeStartupOwnershipStore struct {

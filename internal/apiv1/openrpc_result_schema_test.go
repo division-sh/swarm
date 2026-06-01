@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apispec"
 	"github.com/google/uuid"
-	"swarm/internal/apispec"
 )
 
 const resultSchemaProbeTestName = "TestOpenRPCSuccessfulResultSchemas"

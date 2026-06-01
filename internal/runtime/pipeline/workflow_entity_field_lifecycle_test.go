@@ -3,7 +3,7 @@ package pipeline
 import (
 	"testing"
 
-	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 )
 
 func TestWorkflowEntityFieldsAvailableBeforeCondition_ExcludesLaterTopLevelDataWrites(t *testing.T) {

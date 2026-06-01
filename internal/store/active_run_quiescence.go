@@ -8,12 +8,12 @@ import (
 	"strings"
 	"time"
 
+	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/preservationcleanup"
+	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/lib/pq"
-	runtimedestructivereset "swarm/internal/runtime/destructivereset"
-	runtimepipeline "swarm/internal/runtime/pipeline"
-	"swarm/internal/runtime/preservationcleanup"
-	runtimerunquiescence "swarm/internal/runtime/runquiescence"
-	storerunlifecycle "swarm/internal/store/runlifecycle"
 )
 
 const activeRunQuiescencePipelineSubscriberID = "pipeline"

@@ -4,11 +4,11 @@ import (
 	"testing"
 	"time"
 
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/flowmodel"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store"
 	"github.com/google/uuid"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	"swarm/internal/runtime/flowmodel"
-	"swarm/internal/runtime/semanticview"
-	"swarm/internal/store"
 )
 
 func TestAdmitContractFrontier_DerivesSelectedContractRecipientsWithoutMutating(t *testing.T) {

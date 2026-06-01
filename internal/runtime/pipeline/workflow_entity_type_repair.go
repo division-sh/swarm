@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"swarm/internal/runtime/entityruntime"
-	"swarm/internal/runtime/semanticview"
-	"swarm/internal/store/runbundle"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store/runbundle"
 )
 
 type contractEntityTypeRepair struct {

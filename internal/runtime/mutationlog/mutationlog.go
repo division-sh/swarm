@@ -8,10 +8,10 @@ import (
 	"sort"
 	"strings"
 
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
-	runtimecorrelation "swarm/internal/runtime/correlation"
-	runtimecurrentstate "swarm/internal/runtime/currentstate"
-	storerunlifecycle "swarm/internal/store/runlifecycle"
 )
 
 func ErrInvalidMutationLogWriter(message string) error {

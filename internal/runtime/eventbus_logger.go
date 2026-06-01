@@ -5,14 +5,14 @@ import (
 	"encoding/json"
 	"strings"
 
-	runtimebus "swarm/internal/runtime/bus"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	runtimecorrelation "swarm/internal/runtime/correlation"
-	"swarm/internal/runtime/diaglog"
-	runtimeeventpayload "swarm/internal/runtime/eventpayload"
-	"swarm/internal/runtime/semanticview"
-	runtimesharedjson "swarm/internal/runtime/sharedjson"
-	runtimetools "swarm/internal/runtime/tools"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	runtimeeventpayload "github.com/division-sh/swarm/internal/runtime/eventpayload"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimesharedjson "github.com/division-sh/swarm/internal/runtime/sharedjson"
+	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 )
 
 func newRuntimeEventBus(store runtimebus.EventStore, logger *RuntimeLogger, source semanticview.Source, bundleFingerprint string, bundleSourceFact runtimecorrelation.BundleSourceFact, interceptorProvider func() []runtimebus.EventInterceptor, payloadValidator runtimebus.PayloadValidator) (*runtimebus.EventBus, error) {

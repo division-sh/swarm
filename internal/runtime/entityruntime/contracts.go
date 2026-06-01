@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/paths"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimesharedjson "github.com/division-sh/swarm/internal/runtime/sharedjson"
 	"github.com/google/uuid"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	"swarm/internal/runtime/core/paths"
-	"swarm/internal/runtime/semanticview"
-	runtimesharedjson "swarm/internal/runtime/sharedjson"
 )
 
 type Contract struct {

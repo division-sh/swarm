@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil"
 )
 
 func TestBundleCatalogReadSurfaceListGetAgentsAndCursor(t *testing.T) {

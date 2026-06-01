@@ -7,10 +7,10 @@ import (
 	"strings"
 	"sync"
 
-	runtimecontracts "swarm/internal/runtime/contracts"
-	runtimecorrelation "swarm/internal/runtime/correlation"
-	"swarm/internal/runtime/semanticview"
-	"swarm/internal/store/runbundle"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store/runbundle"
 )
 
 // RunBundleAvailabilityReader resolves persisted run identity before a request

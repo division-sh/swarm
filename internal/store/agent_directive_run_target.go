@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"strings"
 
+	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	"github.com/google/uuid"
-	runtimeagentcontrol "swarm/internal/runtime/agentcontrol"
 )
 
 type agentDirectiveActiveSession struct {

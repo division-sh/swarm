@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	runtimecorrelation "swarm/internal/runtime/correlation"
-	"swarm/internal/runtime/entityruntime"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 )
 
 func TestOrderedEntityFieldNamesFromInput_NormalizesSortsAndDedupes(t *testing.T) {

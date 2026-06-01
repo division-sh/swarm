@@ -3,7 +3,7 @@ package requiredagents
 import (
 	"testing"
 
-	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 )
 
 func TestResolveAgentRequiresMapKeyIdentity(t *testing.T) {

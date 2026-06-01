@@ -3,7 +3,7 @@ package values
 import (
 	"testing"
 
-	"swarm/internal/runtime/core/paths"
+	"github.com/division-sh/swarm/internal/runtime/core/paths"
 )
 
 func TestBucketLookupAndSetPath(t *testing.T) {

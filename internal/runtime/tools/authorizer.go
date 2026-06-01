@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"strings"
 
-	runtimeauthority "swarm/internal/runtime/authority"
-	models "swarm/internal/runtime/core/actors"
-	"swarm/internal/runtime/core/toolresultpolicy"
+	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/toolresultpolicy"
 )
 
 type ToolAuthorizer struct {

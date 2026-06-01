@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"gopkg.in/yaml.v3"
-	models "swarm/internal/runtime/core/actors"
 )
 
 type PromptResolver interface {

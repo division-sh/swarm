@@ -3,7 +3,7 @@ package bus
 import (
 	"testing"
 
-	"swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events"
 )
 
 func requireBusEvent(t testing.TB, ch <-chan events.Event, context string) events.Event {

@@ -3,7 +3,7 @@ package bus
 import (
 	"context"
 
-	"swarm/internal/runtime/diaglog"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
 )
 
 type LoggerHook interface {

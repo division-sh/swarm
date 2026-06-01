@@ -7,12 +7,12 @@ import (
 	"strings"
 	"testing"
 
-	runtimeauthority "swarm/internal/runtime/authority"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	models "swarm/internal/runtime/core/actors"
-	"swarm/internal/runtime/flowmodel"
-	llm "swarm/internal/runtime/llm"
-	"swarm/internal/runtime/semanticview"
+	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/flowmodel"
+	llm "github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func TestEmitToolName_LocalizesScopedEventTypes(t *testing.T) {

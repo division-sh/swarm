@@ -21,8 +21,12 @@ func TestCLIOutputModesForLocalConsumers(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("version --json code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
+	versionMetadata := currentTestVersionMetadata(t)
 	versionJSON := decodeOutputJSON[map[string]any](t, stdout.String())
-	if versionJSON["binary_version"] != binaryVersion || versionJSON["commit"] != binaryCommit {
+	if versionJSON["binary_version"] != versionMetadata.BinaryVersion ||
+		versionJSON["module_version"] != versionMetadata.ModuleVersion ||
+		versionJSON["platform_version"] != versionMetadata.PlatformVersion ||
+		versionJSON["commit"] != versionMetadata.Commit {
 		t.Fatalf("version json = %#v, want local metadata", versionJSON)
 	}
 	if strings.TrimSpace(stderr.String()) != "" {
@@ -35,7 +39,7 @@ func TestCLIOutputModesForLocalConsumers(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("version --quiet code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
-	if got := stdout.String(); got != binaryVersion+"\n" {
+	if got := stdout.String(); got != versionMetadata.BinaryVersion+"\n" {
 		t.Fatalf("version --quiet stdout = %q, want binary version", got)
 	}
 
@@ -63,7 +67,7 @@ func TestCLIOutputModesForLocalConsumers(t *testing.T) {
 			if result.Server == nil || result.Server.Bundle.Fingerprint != "sha256:server" {
 				t.Fatalf("version --server json = %#v, want server identity", result)
 			}
-		} else if got := stdout.String(); got != binaryVersion+"\nsha256:server\n" {
+		} else if got := stdout.String(); got != versionMetadata.BinaryVersion+"\nsha256:server\n" {
 			t.Fatalf("version --server quiet stdout = %q, want binary and fingerprint", got)
 		}
 		assertEmptyStderr(t, stderr.String())
@@ -507,10 +511,11 @@ func TestCLIOutputNoColorDoesNotRewriteMachineModes(t *testing.T) {
 			assertEmptyStderr(t, stderr.String())
 			if stringSliceContains(tc.args, "--json") {
 				result := decodeOutputJSON[versionOutputResult](t, stdout.String())
-				if result.BinaryVersion != binaryVersion {
-					t.Fatalf("version json = %#v, want binary version %q", result, binaryVersion)
+				metadata := currentTestVersionMetadata(t)
+				if result.BinaryVersion != metadata.BinaryVersion {
+					t.Fatalf("version json = %#v, want binary version %q", result, metadata.BinaryVersion)
 				}
-			} else if got := stdout.String(); got != binaryVersion+"\n" {
+			} else if got := stdout.String(); got != currentTestVersionMetadata(t).BinaryVersion+"\n" {
 				t.Fatalf("version quiet stdout = %q, want binary version", got)
 			}
 		})

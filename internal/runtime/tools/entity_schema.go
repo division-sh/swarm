@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"swarm/internal/runtime/entityruntime"
-	"swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type entityToolSchema struct {

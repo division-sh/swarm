@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"swarm/internal/events"
-	runtimepinrouting "swarm/internal/runtime/core/pinrouting"
-	runtimecorrelation "swarm/internal/runtime/correlation"
-	"swarm/internal/runtime/diaglog"
-	runtimepipeline "swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/events"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
 var errAuthoritativeDeliveryIncomplete = errors.New("authoritative delivery incomplete")

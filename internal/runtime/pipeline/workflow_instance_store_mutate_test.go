@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
-	"swarm/internal/testutil"
 )
 
 func TestWorkflowInstanceStoreMutate_SerializesOverlappingMutations(t *testing.T) {

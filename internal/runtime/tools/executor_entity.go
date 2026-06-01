@@ -7,10 +7,10 @@ import (
 	"sort"
 	"strings"
 
+	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
-	runtimecurrentstate "swarm/internal/runtime/currentstate"
-	"swarm/internal/runtime/entityruntime"
-	"swarm/internal/runtime/semanticview"
 )
 
 var entityStateTopLevelFields = map[string]struct{}{

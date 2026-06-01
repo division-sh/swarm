@@ -6,9 +6,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/events"
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/google/uuid"
-	"swarm/internal/events"
-	runtimeactors "swarm/internal/runtime/core/actors"
 )
 
 func OrderAgentsByParent(in []PersistedAgent) ([]PersistedAgent, error) {

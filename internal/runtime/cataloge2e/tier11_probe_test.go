@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	runtimebootverify "swarm/internal/runtime/bootverify"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	"swarm/internal/runtime/semanticview"
+	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func TestTier11Probe(t *testing.T) {

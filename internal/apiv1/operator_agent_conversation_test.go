@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store"
 )
 
 type fakeAgentConversationReadStore struct {

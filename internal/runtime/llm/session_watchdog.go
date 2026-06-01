@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"swarm/internal/runtime/sessions"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
 const (

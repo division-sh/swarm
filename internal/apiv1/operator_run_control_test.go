@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
+	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
-	runtimebus "swarm/internal/runtime/bus"
-	runtimeruncontrol "swarm/internal/runtime/runcontrol"
-	"swarm/internal/store"
-	"swarm/internal/testutil"
 )
 
 func TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.T) {

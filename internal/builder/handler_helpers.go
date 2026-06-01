@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	runtimecredentials "swarm/internal/runtime/credentials"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 )
 
 func methodUnavailable(message string) *RPCError {

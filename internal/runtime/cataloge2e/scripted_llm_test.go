@@ -7,8 +7,8 @@ import (
 	"strings"
 	"sync"
 
-	llm "swarm/internal/runtime/llm"
-	runtimetools "swarm/internal/runtime/tools"
+	llm "github.com/division-sh/swarm/internal/runtime/llm"
+	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 )
 
 type scriptedLLMRuntime struct {

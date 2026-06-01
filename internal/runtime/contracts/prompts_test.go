@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	models "swarm/internal/runtime/core/actors"
-	flowmodel "swarm/internal/runtime/flowmodel"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	flowmodel "github.com/division-sh/swarm/internal/runtime/flowmodel"
 )
 
 func TestLoadPromptForAgent_UsesPromptRefAndWorkspaceRoleFallback(t *testing.T) {

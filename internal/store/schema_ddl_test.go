@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"gopkg.in/yaml.v3"
-	runtimecontracts "swarm/internal/runtime/contracts"
 )
 
 func TestSchemaFieldTypeToDDL(t *testing.T) {

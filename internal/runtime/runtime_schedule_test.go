@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"swarm/internal/config"
-	"swarm/internal/events"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	llm "swarm/internal/runtime/llm"
-	runtimepipeline "swarm/internal/runtime/pipeline"
-	"swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/events"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	llm "github.com/division-sh/swarm/internal/runtime/llm"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func TestScheduleEventPayloadInjectsEntityID(t *testing.T) {

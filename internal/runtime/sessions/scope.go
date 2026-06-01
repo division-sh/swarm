@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	runtimeactors "swarm/internal/runtime/core/actors"
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 )
 
 type RuntimeMode string

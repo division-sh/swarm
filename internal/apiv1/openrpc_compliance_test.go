@@ -17,8 +17,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"swarm/internal/apispec"
-	"swarm/internal/platform"
+	"github.com/division-sh/swarm/internal/apispec"
+	"github.com/division-sh/swarm/internal/platform"
 )
 
 type openRPCComplianceMatrix struct {

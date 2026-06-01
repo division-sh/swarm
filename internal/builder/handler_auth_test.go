@@ -8,8 +8,8 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	runtimepkg "swarm/internal/runtime"
-	runtimebus "swarm/internal/runtime/bus"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 )
 
 type stubBuilderRuntimeControl struct{}

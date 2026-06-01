@@ -11,15 +11,15 @@ import (
 	"strings"
 	"time"
 
-	"swarm/internal/config"
-	runtimeactors "swarm/internal/runtime/core/actors"
-	"swarm/internal/runtime/core/toolcapabilities"
-	llm "swarm/internal/runtime/llm"
-	llmselection "swarm/internal/runtime/llm/selection"
-	runtimemanager "swarm/internal/runtime/manager"
-	runtimemcp "swarm/internal/runtime/mcp"
-	"swarm/internal/runtime/semanticview"
-	workspace "swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/config"
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
+	llm "github.com/division-sh/swarm/internal/runtime/llm"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
 func validateClaudeStartupConfig(cfg *config.Config, opts RuntimeOptions, source semanticview.Source) error {

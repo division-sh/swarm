@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func ValidateToolImplementations(source semanticview.Source) ([]error, error) {

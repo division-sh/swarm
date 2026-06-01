@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events"
 )
 
 type backgroundWorkflowNode struct {

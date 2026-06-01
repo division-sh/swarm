@@ -28,7 +28,8 @@ func TestVersionLocalDoesNotRequireTokenOrRequest(t *testing.T) {
 	if calls.Load() != 0 {
 		t.Fatalf("server calls = %d, want 0", calls.Load())
 	}
-	for _, want := range []string{"Swarm dev", "Commit: unknown", "Built: unknown", "Go:"} {
+	metadata := currentTestVersionMetadata(t)
+	for _, want := range []string{"Swarm " + metadata.BinaryVersion, "Commit: " + metadata.Commit, "Built: " + metadata.Built, "Go:"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
 		}
@@ -72,10 +73,11 @@ func TestVersionServerUsesHealthCheck(t *testing.T) {
 	if len(captured.Params) != 0 {
 		t.Fatalf("params = %#v, want empty", captured.Params)
 	}
+	metadata := currentTestVersionMetadata(t)
 	for _, want := range []string{
-		"Swarm dev",
-		"Commit: unknown",
-		"Built: unknown",
+		"Swarm " + metadata.BinaryVersion,
+		"Commit: " + metadata.Commit,
+		"Built: " + metadata.Built,
 		"Go:",
 		"Server:",
 		"alive=true ready=false db_ok=true runtime_ok=false",

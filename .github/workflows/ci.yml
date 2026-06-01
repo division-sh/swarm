@@ -107,7 +107,7 @@ jobs:
         run: |
           mkdir -p test-results
           go list ./... > test-results/go-packages.txt
-          awk '$0 != "swarm/internal/runtime/cataloge2e" { print }' test-results/go-packages.txt > test-results/go-packages-required.txt
+          awk '$0 != "github.com/division-sh/swarm/internal/runtime/cataloge2e" { print }' test-results/go-packages.txt > test-results/go-packages-required.txt
           if [ ! -s test-results/go-packages-required.txt ]; then
             echo "no non-catalog Go packages discovered"
             exit 1

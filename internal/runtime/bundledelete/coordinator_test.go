@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"swarm/internal/runtime/destructivereset"
-	"swarm/internal/runtime/preservationcleanup"
+	"github.com/division-sh/swarm/internal/runtime/destructivereset"
+	"github.com/division-sh/swarm/internal/runtime/preservationcleanup"
 )
 
 func TestCoordinatorExecutesForceDeleteOwnerChain(t *testing.T) {

@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"swarm/internal/events"
-	runtimepinrouting "swarm/internal/runtime/core/pinrouting"
+	"github.com/division-sh/swarm/internal/events"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 )
 
 func TestDeliveryRouteResolver_SeparatesRouteResolutionAndDiagnostics(t *testing.T) {

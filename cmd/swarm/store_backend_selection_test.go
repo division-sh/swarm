@@ -9,14 +9,14 @@ import (
 	"strings"
 	"testing"
 
-	apiv1 "swarm/internal/apiv1"
-	"swarm/internal/config"
-	"swarm/internal/runtime"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	runtimellm "swarm/internal/runtime/llm"
-	runtimepipeline "swarm/internal/runtime/pipeline"
-	"swarm/internal/runtime/semanticview"
-	storebackend "swarm/internal/store/backendselection"
+	apiv1 "github.com/division-sh/swarm/internal/apiv1"
+	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/runtime"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 )
 
 func TestResolveRuntimeStoreSelectionConsumesCanonicalSources(t *testing.T) {

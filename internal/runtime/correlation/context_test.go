@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events"
 )
 
 func TestCorrelateEvent_InheritsRunAndParentWithoutGeneratingTrace(t *testing.T) {

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"sync"
 
-	models "swarm/internal/runtime/core/actors"
-	"swarm/internal/runtime/semanticview"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type sourceProvider struct {

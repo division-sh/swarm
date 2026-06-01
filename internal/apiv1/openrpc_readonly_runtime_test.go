@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"swarm/internal/apispec"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	"swarm/internal/store"
+	"github.com/division-sh/swarm/internal/apispec"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/store"
 )
 
 const readOnlyRuntimeProbeTestName = "TestOpenRPCReadOnlyHTTPRuntimeProbes"

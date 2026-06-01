@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	storepkg "github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
-	"swarm/internal/events"
-	runtimepkg "swarm/internal/runtime"
-	runtimecorrelation "swarm/internal/runtime/correlation"
-	storepkg "swarm/internal/store"
-	"swarm/internal/store/storetest"
 )
 
 func TestSQLiteObservabilityOwnerBacksSupportedAPISurfaces(t *testing.T) {

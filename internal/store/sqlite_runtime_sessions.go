@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
+	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/google/uuid"
-	runtimesessions "swarm/internal/runtime/sessions"
-	runtimestartupownership "swarm/internal/runtime/startupownership"
 )
 
 type sqliteRuntimeStartupLease struct {

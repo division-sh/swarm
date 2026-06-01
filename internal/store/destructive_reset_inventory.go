@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"swarm/internal/runtime/destructivereset"
+	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 )
 
 func (s *PostgresStore) ReadResetInventory(ctx context.Context) (destructivereset.Inventory, error) {

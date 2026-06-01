@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func TestCatalogPromptSemanticSourceAndMode_UsesFlowRefModeAndPackageKey(t *testing.T) {

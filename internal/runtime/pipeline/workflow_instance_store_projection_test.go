@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
-	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
-	"swarm/internal/testutil"
 )
 
 func TestWorkflowInstanceStoreProjection_RoundTripPreservesCanonicalState(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	runtimetools "swarm/internal/runtime/tools"
+	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 )
 
 func TestWebhookNotifier(t *testing.T) {

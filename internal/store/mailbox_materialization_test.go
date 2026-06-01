@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
-	"swarm/internal/events"
-	runtimepipeline "swarm/internal/runtime/pipeline"
-	"swarm/internal/testutil"
 )
 
 func TestPostgresStore_MaterializeMailboxWriteUsesTransactionAndV1ReadOwner(t *testing.T) {
