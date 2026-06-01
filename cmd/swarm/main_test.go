@@ -1862,7 +1862,7 @@ func TestPlatformSpecWorkspaceBackendSelectionPromoted(t *testing.T) {
 	if hostBackend.WorkspaceRoot.EnvVar != workspace.EnvHostWorkspaceRoot || hostBackend.WorkspaceRoot.Default != "~/.swarm/workspaces" {
 		t.Fatalf("host workspace root spec = %#v", hostBackend.WorkspaceRoot)
 	}
-	for _, want := range []string{"canonical/evaluated paths", "symlink escapes"} {
+	for _, want := range []string{"canonical/evaluated paths", "Every host lifecycle consumer", "symlink escapes"} {
 		if !strings.Contains(hostBackend.WorkspaceRoot.Rule, want) {
 			t.Fatalf("host workspace root rule missing %q:\n%s", want, hostBackend.WorkspaceRoot.Rule)
 		}

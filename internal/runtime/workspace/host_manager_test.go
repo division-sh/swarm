@@ -193,6 +193,35 @@ func TestHostManagerRejectsSymlinkedWorkspaceChildEscape(t *testing.T) {
 	}
 }
 
+func TestHostManagerResolveWorkspaceValidatesRootBeforeCreate(t *testing.T) {
+	dataDir := t.TempDir()
+	contractsDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
+		t.Fatalf("write package.yaml: %v", err)
+	}
+	rootLink := filepath.Join(t.TempDir(), "host-workspaces")
+	if err := os.Symlink(dataDir, rootLink); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	manager := NewHostManager(nil)
+	manager.SetConfig(HostConfig{
+		WorkspaceRoot:       rootLink,
+		SharedDataSource:    dataDir,
+		DataMountPoint:      "/data",
+		ContractsSource:     contractsDir,
+		ContractsMountPoint: "/opt/swarm/contracts",
+	})
+	manager.SetSemanticSource(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}))
+
+	_, err := manager.ResolveWorkspace(context.Background(), models.AgentConfig{ID: "agent-1"})
+	if err == nil || !strings.Contains(err.Error(), "must not overlap /data source") {
+		t.Fatalf("ResolveWorkspace error = %v, want validation-before-create overlap rejection", err)
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, "agents")); !os.IsNotExist(err) {
+		t.Fatalf("ResolveWorkspace created workspace directory through symlinked host root: %v", err)
+	}
+}
+
 func TestHostManagerContainerSurfacesAreNoop(t *testing.T) {
 	manager := NewHostManager(nil)
 	inventory, err := manager.ManagedResetContainerInventory(context.Background())

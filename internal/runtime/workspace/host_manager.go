@@ -117,6 +117,9 @@ func (m *HostManager) EnsurePrereqs(context.Context) error {
 	if m == nil {
 		return fmt.Errorf("host workspace manager is required")
 	}
+	if err := m.validateSharedMounts(); err != nil {
+		return err
+	}
 	root, err := m.hostRoot()
 	if err != nil {
 		return err
@@ -220,6 +223,9 @@ func (m *HostManager) hostTarget(rel string) (*Target, error) {
 }
 
 func (m *HostManager) ensureHostWorkspaceDir(rel string) (string, error) {
+	if err := m.validateSharedMounts(); err != nil {
+		return "", err
+	}
 	root, err := m.hostRoot()
 	if err != nil {
 		return "", err
