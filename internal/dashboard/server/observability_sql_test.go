@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -515,7 +516,7 @@ func TestSQLObservabilityReader_ListIncidents_SortsByRawLastSeenBeforeLimit(t *t
 }
 
 func TestSQLObservabilityReader_ListEvents_FailsClosedWithoutCapabilityOwner(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	db := storetest.StartSQLiteRuntimeStore(t).DB
 	reader := NewSQLObservabilityReader(db, nil)
 
 	if _, err := reader.ListEvents(context.Background(), EventFilter{}, 10); err == nil || !strings.Contains(err.Error(), "observability reader requires explicit schema capability owner") {
@@ -524,7 +525,7 @@ func TestSQLObservabilityReader_ListEvents_FailsClosedWithoutCapabilityOwner(t *
 }
 
 func TestSQLObservabilityReader_GetEvent_FailsClosedWithoutCapabilityOwner(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	db := storetest.StartSQLiteRuntimeStore(t).DB
 	reader := NewSQLObservabilityReader(db, nil)
 
 	if _, _, err := reader.GetEvent(context.Background(), "evt-1"); err == nil || !strings.Contains(err.Error(), "observability reader requires explicit schema capability owner") {
@@ -533,7 +534,7 @@ func TestSQLObservabilityReader_GetEvent_FailsClosedWithoutCapabilityOwner(t *te
 }
 
 func TestSQLObservabilityReader_ListRuntimeLogs_FailsClosedWithoutCapabilityOwner(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	db := storetest.StartSQLiteRuntimeStore(t).DB
 	reader := NewSQLObservabilityReader(db, nil)
 
 	if _, err := reader.ListRuntimeLogs(context.Background(), RuntimeLogFilter{}, 10); err == nil || !strings.Contains(err.Error(), "observability reader requires explicit schema capability owner") {
@@ -542,7 +543,7 @@ func TestSQLObservabilityReader_ListRuntimeLogs_FailsClosedWithoutCapabilityOwne
 }
 
 func TestSQLObservabilityReader_ListIncidents_FailsClosedWithoutCapabilityOwner(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	db := storetest.StartSQLiteRuntimeStore(t).DB
 	reader := NewSQLObservabilityReader(db, nil)
 
 	if _, err := reader.ListIncidents(context.Background(), IncidentFilter{SinceHours: 24}); err == nil || !strings.Contains(err.Error(), "observability reader requires explicit schema capability owner") {
@@ -551,7 +552,7 @@ func TestSQLObservabilityReader_ListIncidents_FailsClosedWithoutCapabilityOwner(
 }
 
 func TestSQLObservabilityReader_ListEvents_FailsClosedWithoutCanonicalEventSurface(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	db := storetest.StartSQLiteRuntimeStore(t).DB
 	caps := canonicalObservabilityCaps()
 	caps.Events.Deliveries = store.SchemaFlavorLegacy
 	reader := NewSQLObservabilityReader(db, stubObservabilityCaps{caps: caps})
@@ -562,7 +563,7 @@ func TestSQLObservabilityReader_ListEvents_FailsClosedWithoutCanonicalEventSurfa
 }
 
 func TestSQLObservabilityReader_GetEvent_FailsClosedWhenCapabilityOwnerReportsUnavailableEventSurface(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	db := storetest.StartSQLiteRuntimeStore(t).DB
 	caps := canonicalObservabilityCaps()
 	caps.Events.Deliveries = store.SchemaFlavorUnavailable
 	reader := NewSQLObservabilityReader(db, stubObservabilityCaps{caps: caps})
@@ -573,7 +574,7 @@ func TestSQLObservabilityReader_GetEvent_FailsClosedWhenCapabilityOwnerReportsUn
 }
 
 func TestSQLObservabilityReader_ListRuntimeLogs_FailsClosedWithoutCanonicalRuntimeLogSurface(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	db := storetest.StartSQLiteRuntimeStore(t).DB
 	caps := canonicalObservabilityCaps()
 	caps.Events.Log = store.SchemaFlavorLegacy
 	reader := NewSQLObservabilityReader(db, stubObservabilityCaps{caps: caps})
@@ -584,7 +585,7 @@ func TestSQLObservabilityReader_ListRuntimeLogs_FailsClosedWithoutCanonicalRunti
 }
 
 func TestSQLObservabilityReader_ListIncidents_FailsClosedWhenCapabilityOwnerReportsUnavailableRuntimeLogSurface(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	db := storetest.StartSQLiteRuntimeStore(t).DB
 	caps := canonicalObservabilityCaps()
 	caps.Events.Log = store.SchemaFlavorUnavailable
 	reader := NewSQLObservabilityReader(db, stubObservabilityCaps{caps: caps})
