@@ -5999,16 +5999,16 @@ multi_bundle_persistence:
         Source runs with bundle_source ephemeral, deleted, or legacy return BUNDLE_UNAVAILABLE for fork admission because
         the server lacks authoritative persisted bundle bytes.
   cli_surface:
-    publication_status: bundle_inventory_register_envelope_directory_run_fork_and_boot_pinned_serve_bundle_hash_implemented_other_cli_children_pending
+    publication_status: bundle_inventory_register_envelope_directory_delete_run_fork_and_boot_pinned_serve_bundle_hash_implemented_other_cli_children_pending
     bundle_commands_supported:
       - swarm bundle list
       - swarm bundle show <bundle-hash>
       - swarm bundle agents <bundle-hash>
       - swarm bundle register <registration-envelope-yaml> [--data-blob <data-blob-json>] [--idempotency-key <key>]
       - swarm bundle register --contracts <contracts-directory> [--idempotency-key <key>]
+      - swarm bundle delete <bundle-hash> [--force] [--dry-run] [--idempotency-key <key>]
     bundle_commands_split:
       - swarm bundle register --archive <archive-file>
-      - swarm bundle delete <bundle-hash> [--force] [--dry-run] [--idempotency-key <key>]
     bundle_register_directory_packager:
       owner: internal/runtime/contracts.BuildBundleRegistrationDirectoryUpload
       status: implemented_local_directory_packager
@@ -6110,8 +6110,8 @@ multi_bundle_persistence:
       reason: swarm fork consumes /v1/rpc run.fork only; same-bundle DB-loaded source loading is supported by #1024, and cross-bundle fork routing remains split to #976.
     multi_bundle_cli_inventory:
       tracker: '#1023'
-      implementation_status: inventory_prepared_envelope_and_directory_register_implemented
-      reason: swarm bundle list/show/agents consume /v1/rpc bundle.list/get/agents only, prepared-envelope swarm bundle register consumes /v1/rpc bundle.register only, and swarm bundle register --contracts packages a local contracts directory through the non-hashing registration upload owner before calling /v1/rpc bundle.register. Archive register packaging and bundle.delete CLI remain split until their exact CLI/runtime/packaging owners land.
+      implementation_status: inventory_prepared_envelope_directory_register_and_bundle_delete_implemented
+      reason: swarm bundle list/show/agents consume /v1/rpc bundle.list/get/agents only, prepared-envelope swarm bundle register consumes /v1/rpc bundle.register only, swarm bundle register --contracts packages a local contracts directory through the non-hashing registration upload owner before calling /v1/rpc bundle.register, and swarm bundle delete consumes /v1/rpc bundle.delete only. Archive register packaging remains split until archive input and extraction safety authority lands.
     bundle_hash_dual_accept_migration:
       tracker: '#1001'
       reason: Old bundle_fingerprint/bundle_ref names must be reconciled in code and generated artifacts under the locked bundle_hash naming decision.
@@ -9649,33 +9649,36 @@ cli_specification:
       - SESSION_NOT_FOUND, TURN_NOT_FOUND, malformed results, auth/HTTP/RPC failures, and transport failures fail closed with tested exit codes
       - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, conversation.current_for_agent, runtime.logs, run.trace, or forkchat usage
     bundle:
-      command: swarm bundle list|show|agents|register
+      command: swarm bundle list|show|agents|register|delete
       tier: should_have
-      implementation_status: implemented_inventory_prepared_envelope_and_directory_register
-      blocker_state: 'Read-only bundle list/show/agents are implemented by #1023 over /v1/rpc bundle.list/get/agents. Prepared-envelope swarm bundle register and local directory swarm bundle register --contracts are implemented over /v1/rpc bundle.register. Archive packaging and bundle.delete CLI remain split until their exact owners are promoted.'
+      implementation_status: implemented_inventory_prepared_envelope_directory_register_and_delete
+      blocker_state: 'Read-only bundle list/show/agents are implemented by #1023 over /v1/rpc bundle.list/get/agents. Prepared-envelope swarm bundle register and local directory swarm bundle register --contracts are implemented over /v1/rpc bundle.register. Destructive swarm bundle delete is implemented over /v1/rpc bundle.delete. Archive packaging remains split until archive input/extraction safety authority is promoted.'
       owners:
       - multi_bundle_persistence.cli_surface.bundle_commands_supported
       - multi_bundle_persistence.api_surface.bundle_methods_planned
       behavior: >
         Public CLI family for persisted bundle inventory, agent catalog inspection, prepared-envelope registration, and
-        local contracts-directory registration.
+        local contracts-directory registration, plus destructive bundle deletion through the canonical API owner.
         The implemented list/show/agents commands consume /v1/rpc bundle.list, bundle.get, and bundle.agents. The
         implemented register command consumes /v1/rpc bundle.register with an already-prepared
         BundleRegistrationEnvelopeV1 YAML file as content_yaml, optional BundleRegisterDataBlobV1 JSON from
         --data-blob, and optional --idempotency-key, or with --contracts <contracts-directory> through the non-hashing
         registration upload owner. The --contracts path may package local upload bytes but must not call internal
         store/runtime helpers, compute bundle_hash, build catalog projection bytes, infer persisted bundle state from
-        local files, or send server-local path semantics. Archive packaging remains split. Destructive bundle.delete has
-        a live API owner but remains split as a CLI consumer until a later gate promotes that command.
+        local files, or send server-local path semantics. The implemented delete command consumes /v1/rpc bundle.delete
+        with bundle_hash plus optional force, dry_run, and idempotency_key only; it must not plan active runs, inspect
+        bundle existence, call store/runtime/destructive reset owners, or infer deletion eligibility locally. Archive
+        packaging remains split.
       proof_expectations:
       - exact /v1/rpc bundle.list/get/agents calls with only promoted params
       - exact /v1/rpc bundle.register call with only content_yaml, optional data_blob, and optional idempotency_key
+      - exact /v1/rpc bundle.delete call with only bundle_hash, optional force, optional dry_run, and optional idempotency_key
       - local directory packaging proves traversal/root escape, symlink fail-closed behavior, ignored file/dir policy, slash-relative NFC paths, duplicate and ASCII case-collision failure, text-vs-every-discovered-flow-data split including empty raw data, deterministic ordering, and no bundle_hash param
       - invalid args, invalid local envelope/data blob files, invalid local contracts directories, and missing SWARM_API_TOKEN make zero API calls
       - human and --json output render only server-owned result fields
-      - BUNDLE_NOT_FOUND, BUNDLE_REGISTER_CONFLICT, IDEMPOTENCY_CONFLICT, invalid params, malformed responses, auth/HTTP/RPC failures, and transport failures fail closed with tested exit codes
+      - BUNDLE_NOT_FOUND, BUNDLE_REGISTER_CONFLICT, BUNDLE_HAS_ACTIVE_RUNS, BUNDLE_DELETE_IN_PROGRESS, IDEMPOTENCY_CONFLICT, invalid params, malformed responses, auth/HTTP/RPC failures, and transport failures fail closed with tested exit codes
       - no direct DB/store/runtime/hash-owner bundle reads or writes from CLI
-      - swarm bundle delete, unpromoted bundle.get alias, and archive register packaging remain absent/unknown until later CLI gates
+      - unpromoted bundle.get alias and archive register packaging remain absent/unknown until later CLI gates
     run_fork:
       command: swarm fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]
       tier: should_have
@@ -10121,7 +10124,6 @@ cli_specification:
     remaining_must_have_not_implemented: []
     remaining_should_have_not_implemented:
     - swarm bundle register --archive <archive-file>
-    - swarm bundle delete <bundle-hash> [--force] [--dry-run] [--idempotency-key <key>]
     rule: 'Remaining commands require separate gates and must consume canonical API owners; they MUST NOT resurrect direct DB/store/runtime-state readers.'
 
 api_specification:
@@ -10165,7 +10167,7 @@ api_specification:
       bundle register CLI consumer is implemented by #1167, and local contracts-directory packaging is implemented by
       #1187 through the non-hashing upload packager owner, while archive packaging remains split.
       run.fork is also promoted into method_catalog/OpenRPC with matching selected-contract API/runtime handler proof by
-      #989. The swarm bundle list/show/agents/register and swarm fork CLI consumers are implemented by #1023/#1167/#1187 and
+      #989. The swarm bundle list/show/agents/register/delete and swarm fork CLI consumers are implemented by #1023/#1167/#1187/#1200 and
       consume only those canonical /v1/rpc methods. bundle.delete is promoted into method_catalog/OpenRPC with matching
       API/runtime handler proof by #1018 and #1019: omitted or false force performs non-force deletion and force=true
       performs force cleanup. Remaining multi-bundle methods and shapes are

@@ -19,6 +19,7 @@ const (
 	bundleGetMethod      = "bundle.get"
 	bundleAgentsMethod   = "bundle.agents"
 	bundleRegisterMethod = "bundle.register"
+	bundleDeleteMethod   = "bundle.delete"
 )
 
 type bundleListCommandOptions struct {
@@ -48,6 +49,19 @@ type bundleRegisterCommandOptions struct {
 	contractsSet      bool
 	idempotencyKeySet bool
 	repoRoot          string
+}
+
+type bundleDeleteCommandOptions struct {
+	apiOptions rootCommandOptions
+	output     cliOutputOptions
+
+	force          bool
+	dryRun         bool
+	idempotencyKey string
+
+	forceSet          bool
+	dryRunSet         bool
+	idempotencyKeySet bool
 }
 
 type bundleListResult struct {
@@ -86,6 +100,30 @@ type bundleRegistrationResult struct {
 	DataSizeBytes *int64 `json:"data_size_bytes"`
 }
 
+type bundleDeleteResult struct {
+	OK                  *bool                      `json:"ok"`
+	Status              string                     `json:"status"`
+	OperationName       string                     `json:"operation_name"`
+	BundleHash          string                     `json:"bundle_hash"`
+	Force               *bool                      `json:"force"`
+	Deleted             *bool                      `json:"deleted"`
+	DryRun              *bool                      `json:"dry_run"`
+	ActiveRunsStopped   *int                       `json:"active_runs_stopped"`
+	DeliveriesCancelled *int                       `json:"deliveries_cancelled"`
+	ContainersStopped   *int                       `json:"containers_stopped"`
+	PartialFailure      *bool                      `json:"partial_failure"`
+	Plan                map[string]any             `json:"plan"`
+	Cleanup             map[string]any             `json:"cleanup"`
+	Containers          map[string]any             `json:"containers"`
+	FinalMutation       map[string]any             `json:"final_mutation"`
+	Errors              []bundleDeletePartialError `json:"errors,omitempty"`
+}
+
+type bundleDeletePartialError struct {
+	Scope   string `json:"scope"`
+	Message string `json:"message"`
+}
+
 type bundleAgentDefinition struct {
 	AgentID          string   `json:"agent_id"`
 	FlowInstance     string   `json:"flow_instance,omitempty"`
@@ -114,6 +152,7 @@ func newBundleCommand(repoRoot string, opts rootCommandOptions) *cobra.Command {
 		newBundleShowCommand(opts),
 		newBundleAgentsCommand(opts),
 		newBundleRegisterCommand(repoRoot, opts),
+		newBundleDeleteCommand(opts),
 	)
 	return cmd
 }
@@ -197,6 +236,30 @@ func newBundleRegisterCommand(repoRoot string, opts rootCommandOptions) *cobra.C
 	cmd.Flags().StringVar(&registerOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for bundle.register")
 	bindCLIOutputFlags(cmd, &registerOpts.output)
 	bindCLIAPIConnectionFlags(cmd, &registerOpts.apiOptions)
+	return cmd
+}
+
+func newBundleDeleteCommand(opts rootCommandOptions) *cobra.Command {
+	deleteOpts := bundleDeleteCommandOptions{apiOptions: opts}
+	cmd := &cobra.Command{
+		Use:   "delete <bundle-hash>",
+		Short: "Delete a persisted bundle through /v1/rpc bundle.delete.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			deleteOpts.forceSet = cmd.Flags().Changed("force")
+			deleteOpts.dryRunSet = cmd.Flags().Changed("dry-run")
+			deleteOpts.idempotencyKeySet = cmd.Flags().Changed("idempotency-key")
+			if err := deleteOpts.output.validate(); err != nil {
+				return returnCLIValidationError(cmd.ErrOrStderr(), err)
+			}
+			return runBundleDeleteCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), deleteOpts, args[0])
+		},
+	}
+	cmd.Flags().BoolVar(&deleteOpts.force, "force", false, "Force bundle deletion by quiescing affected active work before deleting")
+	cmd.Flags().BoolVar(&deleteOpts.dryRun, "dry-run", false, "Plan bundle deletion without applying destructive changes")
+	cmd.Flags().StringVar(&deleteOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for bundle.delete")
+	bindCLIOutputFlags(cmd, &deleteOpts.output)
+	bindCLIAPIConnectionFlags(cmd, &deleteOpts.apiOptions)
 	return cmd
 }
 
@@ -300,6 +363,29 @@ func runBundleRegisterCommand(ctx context.Context, out, errOut io.Writer, opts b
 	})
 }
 
+func runBundleDeleteCommand(ctx context.Context, out, errOut io.Writer, opts bundleDeleteCommandOptions, rawBundleHash string) error {
+	params, bundleHash, err := opts.params(rawBundleHash)
+	if err != nil {
+		return returnCLIValidationError(errOut, err)
+	}
+	client, err := newCLIAPIClient(opts.apiOptions)
+	if err != nil {
+		return returnCLIAPIError(errOut, err, bundleDeleteAPIErrorClassifier())
+	}
+	var result bundleDeleteResult
+	if err := client.call(ctx, bundleDeleteMethod, params, &result); err != nil {
+		return returnCLIAPIError(errOut, err, bundleDeleteAPIErrorClassifier())
+	}
+	if err := validateBundleDeleteResult(result, bundleHash); err != nil {
+		return returnCLIAPIError(errOut, err, bundleDeleteAPIErrorClassifier())
+	}
+	return renderCLIOutput(out, errOut, opts.output, result, func(w io.Writer) {
+		writeBundleDeleteHuman(w, result)
+	}, func() ([]string, error) {
+		return []string{result.BundleHash}, nil
+	})
+}
+
 func (opts bundleListCommandOptions) params() (map[string]any, error) {
 	params := map[string]any{}
 	if opts.limitSet {
@@ -393,10 +479,37 @@ func (opts bundleRegisterCommandOptions) contractsDirectoryParams(args []string)
 	return params, nil
 }
 
+func (opts bundleDeleteCommandOptions) params(rawBundleHash string) (map[string]any, string, error) {
+	bundleHash, err := validateBundleHashArg("bundle hash", rawBundleHash)
+	if err != nil {
+		return nil, "", err
+	}
+	params := map[string]any{"bundle_hash": bundleHash}
+	if opts.forceSet {
+		params["force"] = opts.force
+	}
+	if opts.dryRunSet {
+		params["dry_run"] = opts.dryRun
+	}
+	if idempotencyKey, err := optionalNonEmptyFlag("--idempotency-key", opts.idempotencyKey, opts.idempotencyKeySet); err != nil {
+		return nil, "", err
+	} else if idempotencyKey != "" {
+		params["idempotency_key"] = idempotencyKey
+	}
+	return params, bundleHash, nil
+}
+
 func bundleAPIErrorClassifier() cliAPIErrorClassifier {
 	return cliAPIErrorClassifier{
 		notFoundCodes: []string{"BUNDLE_NOT_FOUND"},
 		conflictCodes: []string{"BUNDLE_REGISTER_CONFLICT", "IDEMPOTENCY_CONFLICT"},
+	}
+}
+
+func bundleDeleteAPIErrorClassifier() cliAPIErrorClassifier {
+	return cliAPIErrorClassifier{
+		notFoundCodes: []string{"BUNDLE_NOT_FOUND"},
+		conflictCodes: []string{"BUNDLE_HAS_ACTIVE_RUNS", "BUNDLE_DELETE_IN_PROGRESS", "IDEMPOTENCY_CONFLICT"},
 	}
 }
 
@@ -495,6 +608,69 @@ func validateBundleRegistrationResult(result bundleRegistrationResult) error {
 	}
 	if *result.DataSizeBytes < 0 {
 		return fmt.Errorf("malformed bundle.register result: data_size_bytes must be non-negative")
+	}
+	return nil
+}
+
+func validateBundleDeleteResult(result bundleDeleteResult, expectedBundleHash string) error {
+	if result.OK == nil {
+		return fmt.Errorf("malformed bundle.delete result: ok is required")
+	}
+	switch result.Status {
+	case "dry_run", "completed", "partial_failure":
+	default:
+		return fmt.Errorf("malformed bundle.delete result: status must be dry_run, completed, or partial_failure")
+	}
+	if result.OperationName != bundleDeleteMethod {
+		return fmt.Errorf("malformed bundle.delete result: operation_name must be %s", bundleDeleteMethod)
+	}
+	if _, err := validateBundleHashArg("bundle_hash", result.BundleHash); err != nil {
+		return fmt.Errorf("malformed bundle.delete result: %w", err)
+	}
+	if result.BundleHash != expectedBundleHash {
+		return fmt.Errorf("malformed bundle.delete result: bundle_hash=%q, want %q", result.BundleHash, expectedBundleHash)
+	}
+	if result.Force == nil {
+		return fmt.Errorf("malformed bundle.delete result: force is required")
+	}
+	if result.Deleted == nil {
+		return fmt.Errorf("malformed bundle.delete result: deleted is required")
+	}
+	if result.DryRun == nil {
+		return fmt.Errorf("malformed bundle.delete result: dry_run is required")
+	}
+	if result.PartialFailure == nil {
+		return fmt.Errorf("malformed bundle.delete result: partial_failure is required")
+	}
+	for name, value := range map[string]*int{
+		"active_runs_stopped":  result.ActiveRunsStopped,
+		"deliveries_cancelled": result.DeliveriesCancelled,
+		"containers_stopped":   result.ContainersStopped,
+	} {
+		if value == nil {
+			return fmt.Errorf("malformed bundle.delete result: %s is required", name)
+		}
+		if *value < 0 {
+			return fmt.Errorf("malformed bundle.delete result: %s must be non-negative", name)
+		}
+	}
+	for name, value := range map[string]map[string]any{
+		"plan":           result.Plan,
+		"cleanup":        result.Cleanup,
+		"containers":     result.Containers,
+		"final_mutation": result.FinalMutation,
+	} {
+		if value == nil {
+			return fmt.Errorf("malformed bundle.delete result: %s is required", name)
+		}
+	}
+	for i, item := range result.Errors {
+		if strings.TrimSpace(item.Scope) == "" {
+			return fmt.Errorf("malformed bundle.delete result: errors[%d].scope is required", i)
+		}
+		if strings.TrimSpace(item.Message) == "" {
+			return fmt.Errorf("malformed bundle.delete result: errors[%d].message is required", i)
+		}
 	}
 	return nil
 }
@@ -614,6 +790,17 @@ func writeBundleRegistrationHuman(w io.Writer, result bundleRegistrationResult) 
 	}
 	fmt.Fprintf(w, "bundle %s registered=%t has_data=%t data_size_bytes=%d\n",
 		result.BundleHash, *result.Registered, *result.HasData, *result.DataSizeBytes)
+}
+
+func writeBundleDeleteHuman(w io.Writer, result bundleDeleteResult) {
+	if w == nil {
+		return
+	}
+	fmt.Fprintf(w, "bundle %s status=%s deleted=%t force=%t dry_run=%t active_runs_stopped=%d deliveries_cancelled=%d containers_stopped=%d partial_failure=%t\n",
+		result.BundleHash, result.Status, *result.Deleted, *result.Force, *result.DryRun, *result.ActiveRunsStopped, *result.DeliveriesCancelled, *result.ContainersStopped, *result.PartialFailure)
+	if len(result.Errors) > 0 {
+		fmt.Fprintf(w, "errors=%s\n", compactJSONValue(result.Errors))
+	}
 }
 
 func compactJSONValue(value any) string {

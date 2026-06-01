@@ -122,9 +122,135 @@ func TestBundleCommandsJSONPreserveAPIShape(t *testing.T) {
 	}
 }
 
-func TestBundleAgentsJSONUsesCanonicalModelField(t *testing.T) {
+func TestBundleDeleteUsesCanonicalRPCAndRenders(t *testing.T) {
 	t.Setenv("SWARM_API_TOKEN", "test-token")
 	bundleHash := validBundleHash("d")
+	var requests []jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/rpc" {
+			t.Errorf("path = %q, want /v1/rpc", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
+			t.Errorf("Authorization = %q, want bearer token", got)
+		}
+		var req jsonRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		requests = append(requests, req)
+		force, _ := req.Params["force"].(bool)
+		dryRun, _ := req.Params["dry_run"].(bool)
+		status := "completed"
+		deleted := true
+		if dryRun {
+			status = "dry_run"
+			deleted = false
+		}
+		writeJSONRPCResult(t, w, req.ID, validBundleDeleteResult(bundleHash, force, dryRun, status, deleted))
+	}))
+	defer server.Close()
+
+	commands := []struct {
+		name       string
+		args       []string
+		wantParams map[string]any
+		wantStdout []string
+	}{
+		{
+			name:       "default",
+			args:       []string{"bundle", "delete", bundleHash},
+			wantParams: map[string]any{"bundle_hash": bundleHash},
+			wantStdout: []string{"bundle " + bundleHash, "status=completed", "deleted=true", "force=false", "dry_run=false"},
+		},
+		{
+			name:       "force",
+			args:       []string{"bundle", "delete", bundleHash, "--force"},
+			wantParams: map[string]any{"bundle_hash": bundleHash, "force": true},
+			wantStdout: []string{"bundle " + bundleHash, "status=completed", "deleted=true", "force=true"},
+		},
+		{
+			name:       "dry run idempotent",
+			args:       []string{"bundle", "delete", bundleHash, "--dry-run", "--idempotency-key", "idem-delete"},
+			wantParams: map[string]any{"bundle_hash": bundleHash, "dry_run": true, "idempotency_key": "idem-delete"},
+			wantStdout: []string{"bundle " + bundleHash, "status=dry_run", "deleted=false", "dry_run=true"},
+		},
+		{
+			name:       "explicit false flags",
+			args:       []string{"bundle", "delete", bundleHash, "--force=false", "--dry-run=false"},
+			wantParams: map[string]any{"bundle_hash": bundleHash, "force": false, "dry_run": false},
+			wantStdout: []string{"bundle " + bundleHash, "status=completed", "deleted=true", "force=false", "dry_run=false"},
+		},
+	}
+	for _, command := range commands {
+		t.Run(command.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), command.args, &stdout, &stderr, testRootCommandOptions(server))
+			if code != 0 {
+				t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+			}
+			for _, want := range command.wantStdout {
+				if !strings.Contains(stdout.String(), want) {
+					t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
+				}
+			}
+			if strings.TrimSpace(stderr.String()) != "" {
+				t.Fatalf("stderr = %q, want empty", stderr.String())
+			}
+		})
+	}
+	if len(requests) != len(commands) {
+		t.Fatalf("requests = %d, want %d", len(requests), len(commands))
+	}
+	for i, command := range commands {
+		assertBundleRequest(t, requests[i], bundleDeleteMethod, command.wantParams)
+	}
+}
+
+func TestBundleDeleteJSONPreservesAPIShape(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	bundleHash := validBundleHash("e")
+	var captured jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		writeJSONRPCResult(t, w, captured.ID, validBundleDeleteResult(bundleHash, true, true, "dry_run", false))
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"bundle", "delete", bundleHash, "--force", "--dry-run", "--idempotency-key", "idem-delete", "--json"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	assertBundleRequest(t, captured, bundleDeleteMethod, map[string]any{
+		"bundle_hash":     bundleHash,
+		"force":           true,
+		"dry_run":         true,
+		"idempotency_key": "idem-delete",
+	})
+	var decoded map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatalf("decode stdout json: %v\n%s", err, stdout.String())
+	}
+	for _, want := range []string{"ok", "status", "operation_name", "bundle_hash", "force", "deleted", "dry_run", "plan", "cleanup", "containers", "final_mutation"} {
+		if _, ok := decoded[want]; !ok {
+			t.Fatalf("json output missing %q: %#v", want, decoded)
+		}
+	}
+	if decoded["operation_name"] != bundleDeleteMethod || decoded["bundle_hash"] != bundleHash || decoded["force"] != true || decoded["dry_run"] != true || decoded["deleted"] != false {
+		t.Fatalf("json delete result = %#v", decoded)
+	}
+	for _, wrapper := range []string{"bundle_delete", "delete_result", "result"} {
+		if _, ok := decoded[wrapper]; ok {
+			t.Fatalf("json output contains CLI wrapper %q: %#v", wrapper, decoded)
+		}
+	}
+}
+
+func TestBundleAgentsJSONUsesCanonicalModelField(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	bundleHash := validBundleHash("f")
 	var captured jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
@@ -159,6 +285,34 @@ func TestBundleAgentsJSONUsesCanonicalModelField(t *testing.T) {
 	}
 	if _, ok := agent["model_tier"]; ok {
 		t.Fatalf("json agent contains retired model_tier field: %#v", agent)
+	}
+}
+
+func TestBundleDeleteHelpDocumentsCanonicalFlags(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"bundle", "delete", "--help"}, &stdout, &stderr, rootCommandOptions{})
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	for _, want := range []string{
+		"delete <bundle-hash>",
+		"--force",
+		"--dry-run",
+		"--idempotency-key",
+		"--api-server",
+		"--json",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("help missing %q:\n%s", want, stdout.String())
+		}
+	}
+	for _, notWant := range []string{"archive", "contracts"} {
+		if strings.Contains(stdout.String(), notWant) {
+			t.Fatalf("help contains out-of-scope term %q:\n%s", notWant, stdout.String())
+		}
+	}
+	if strings.TrimSpace(stderr.String()) != "" {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
 	}
 }
 
@@ -382,6 +536,10 @@ func TestBundleCommandsRejectInvalidInputBeforeRequest(t *testing.T) {
 		{name: "show invalid hash", args: []string{"bundle", "show", "sha256:abc"}, wantStderr: "bundle hash must match bundle-v1:sha256:<64 lowercase hex>"},
 		{name: "agents invalid hash", args: []string{"bundle", "agents", "bad"}, wantStderr: "bundle hash must match bundle-v1:sha256:<64 lowercase hex>"},
 		{name: "get alias not promoted", args: []string{"bundle", "get", validBundleHash("a")}, wantStderr: "unknown command"},
+		{name: "delete missing hash", args: []string{"bundle", "delete"}, wantStderr: "accepts 1 arg(s)"},
+		{name: "delete extra arg", args: []string{"bundle", "delete", validBundleHash("a"), "extra"}, wantStderr: "accepts 1 arg(s)"},
+		{name: "delete invalid hash", args: []string{"bundle", "delete", "bad"}, wantStderr: "bundle hash must match bundle-v1:sha256:<64 lowercase hex>"},
+		{name: "delete blank idempotency", args: []string{"bundle", "delete", validBundleHash("a"), "--idempotency-key", " "}, wantStderr: "--idempotency-key must be non-empty"},
 		{name: "register missing envelope", args: []string{"bundle", "register"}, wantStderr: "register requires <registration-envelope-yaml> or --contracts <contracts-directory>"},
 		{name: "register missing file", args: []string{"bundle", "register", filepath.Join(t.TempDir(), "missing.yaml")}, wantStderr: "read registration envelope"},
 		{name: "register directory", args: []string{"bundle", "register", dirPath}, wantStderr: "registration envelope must be a file"},
@@ -393,7 +551,6 @@ func TestBundleCommandsRejectInvalidInputBeforeRequest(t *testing.T) {
 		{name: "register contracts with envelope", args: []string{"bundle", "register", envelopePath, "--contracts", contractsDir}, wantStderr: "--contracts cannot be combined with a registration envelope argument"},
 		{name: "register contracts with data blob", args: []string{"bundle", "register", "--contracts", contractsDir, "--data-blob", dataBlobPath}, wantStderr: "--data-blob cannot be used with --contracts"},
 		{name: "register contracts missing package", args: []string{"bundle", "register", "--contracts", invalidContractsDir}, wantStderr: "package contracts directory"},
-		{name: "delete not promoted", args: []string{"bundle", "delete", validBundleHash("a")}, wantStderr: "unknown command"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			calls.Store(0)
@@ -553,6 +710,76 @@ func TestBundleCommandsFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 			wantCode:   cliExitRuntime,
 			wantStderr: "malformed bundle.register result: data_size_bytes must be non-negative",
 		},
+		{
+			name: "bundle delete active runs conflict",
+			args: []string{"bundle", "delete", bundleHash},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				writeBundleJSONRPCError(t, w, req.ID, "BUNDLE_HAS_ACTIVE_RUNS")
+			},
+			wantCode:   cliExitConflict,
+			wantStderr: "BUNDLE_HAS_ACTIVE_RUNS: Application error: BUNDLE_HAS_ACTIVE_RUNS",
+		},
+		{
+			name: "bundle delete in progress conflict",
+			args: []string{"bundle", "delete", bundleHash, "--force"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				writeBundleJSONRPCError(t, w, req.ID, "BUNDLE_DELETE_IN_PROGRESS")
+			},
+			wantCode:   cliExitConflict,
+			wantStderr: "BUNDLE_DELETE_IN_PROGRESS: Application error: BUNDLE_DELETE_IN_PROGRESS",
+		},
+		{
+			name: "bundle delete idempotency conflict",
+			args: []string{"bundle", "delete", bundleHash, "--idempotency-key", "idem-delete"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				writeBundleJSONRPCError(t, w, req.ID, "IDEMPOTENCY_CONFLICT")
+			},
+			wantCode:   cliExitConflict,
+			wantStderr: "IDEMPOTENCY_CONFLICT: Application error: IDEMPOTENCY_CONFLICT",
+		},
+		{
+			name: "bundle delete undeclared runtime nuke error fails closed",
+			args: []string{"bundle", "delete", bundleHash, "--force"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				writeBundleJSONRPCError(t, w, req.ID, "RUNTIME_NUKE_IN_PROGRESS")
+			},
+			wantCode:   cliExitRuntime,
+			wantStderr: "RUNTIME_NUKE_IN_PROGRESS: Application error: RUNTIME_NUKE_IN_PROGRESS",
+		},
+		{
+			name: "malformed delete missing ok",
+			args: []string{"bundle", "delete", bundleHash},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				result := validBundleDeleteResult(bundleHash, false, false, "completed", true)
+				delete(result, "ok")
+				writeJSONRPCResult(t, w, req.ID, result)
+			},
+			wantCode:   cliExitRuntime,
+			wantStderr: "malformed bundle.delete result: ok is required",
+		},
+		{
+			name: "malformed delete negative stopped count",
+			args: []string{"bundle", "delete", bundleHash, "--force"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				result := validBundleDeleteResult(bundleHash, true, false, "completed", true)
+				result["active_runs_stopped"] = -1
+				writeJSONRPCResult(t, w, req.ID, result)
+			},
+			wantCode:   cliExitRuntime,
+			wantStderr: "malformed bundle.delete result: active_runs_stopped must be non-negative",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("SWARM_API_TOKEN", "test-token")
@@ -683,6 +910,26 @@ func validBundleRegistrationResult(bundleHash string) map[string]any {
 		"registered":      true,
 		"has_data":        true,
 		"data_size_bytes": 7,
+	}
+}
+
+func validBundleDeleteResult(bundleHash string, force, dryRun bool, status string, deleted bool) map[string]any {
+	return map[string]any{
+		"ok":                   true,
+		"status":               status,
+		"operation_name":       bundleDeleteMethod,
+		"bundle_hash":          bundleHash,
+		"force":                force,
+		"deleted":              deleted,
+		"dry_run":              dryRun,
+		"active_runs_stopped":  1,
+		"deliveries_cancelled": 2,
+		"containers_stopped":   3,
+		"partial_failure":      false,
+		"plan":                 map[string]any{"bundle_hash": bundleHash, "active_runs": []any{}, "non_active_runs": []any{}},
+		"cleanup":              map[string]any{"runs": []any{}, "deliveries": []any{}},
+		"containers":           map[string]any{"selected": []any{}, "stopped": []any{}},
+		"final_mutation":       map[string]any{"bundle_hash": bundleHash, "deleted": deleted},
 	}
 }
 

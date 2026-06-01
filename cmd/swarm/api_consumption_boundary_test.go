@@ -81,6 +81,28 @@ func TestCLIRuntimeStateAPIConsumersAreExplicitlyAccounted(t *testing.T) {
 	}
 }
 
+func TestBundleDeleteCLIConsumesCanonicalAPIOnly(t *testing.T) {
+	source := readProductionCommandSources(t)["bundle.go"]
+	for _, needle := range []string{
+		"internal/runtime/bundledelete",
+		"internal/runtime/destructivereset",
+		"internal/store",
+		"PlanBundleDelete(",
+		"ApplyBundleDeleteFinalMutation(",
+		"ApplyBundleForceDeletePreservationCleanup(",
+		"ManagedResetContainerInventory(",
+		"DELETE FROM",
+		"UPDATE runs",
+	} {
+		if strings.Contains(source, needle) {
+			t.Fatalf("bundle.go contains non-authoritative bundle delete bypass %q; swarm bundle delete must consume /v1/rpc bundle.delete only", needle)
+		}
+	}
+	if !strings.Contains(source, "bundleDeleteMethod") || !strings.Contains(source, `"bundle.delete"`) || !strings.Contains(source, "newCLIAPIClient(") {
+		t.Fatalf("bundle.go must expose bundle.delete only through the shared CLI API client")
+	}
+}
+
 func TestCLILocalRuntimeHelpersRemainNonOperatorQuarantined(t *testing.T) {
 	sources := readProductionCommandSources(t)
 	all := strings.Join(sortedSourceValues(sources), "\n")
@@ -168,6 +190,7 @@ func TestCLIRuntimeStateCommandsRequireSharedAPITokenBeforeRequest(t *testing.T)
 		{name: "bundle agents", args: []string{"bundle", "agents", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},
 		{name: "bundle register", args: []string{"bundle", "register", envelopePath}},
 		{name: "bundle register contracts", args: []string{"bundle", "register", "--contracts", contractsDir}},
+		{name: "bundle delete", args: []string{"bundle", "delete", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},
 		{name: "conversations list", args: []string{"conversations", "list"}},
 		{name: "conversation view", args: []string{"conversation", "view", "session-1"}},
 		{name: "conversation turn", args: []string{"conversation", "turn", "session-1", "1"}},
