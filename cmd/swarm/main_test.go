@@ -3636,9 +3636,20 @@ func TestRunServeRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDevAbandon(t *te
 }
 
 func TestRunServeRuntimeFreshEmptySQLiteBootsWithDevAbandon(t *testing.T) {
+	runServeRuntimeFreshEmptySQLiteBootsWithAbandon(t, true)
+}
+
+func TestRunServeRuntimeFreshEmptySQLiteBootsWithDirectAbandon(t *testing.T) {
+	runServeRuntimeFreshEmptySQLiteBootsWithAbandon(t, false)
+}
+
+func runServeRuntimeFreshEmptySQLiteBootsWithAbandon(t *testing.T, dev bool) {
+	t.Helper()
 	unsetStoreSelectorEnv(t)
 	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
 	t.Setenv(storebackend.EnvSQLitePath, sqlitePath)
+	requireBundleMatch := !dev
+	noRequireBundleMatch := dev
 	ctx, cancel := context.WithCancel(context.Background())
 	var out lockedBuffer
 	done := make(chan int, 1)
@@ -3650,9 +3661,9 @@ func TestRunServeRuntimeFreshEmptySQLiteBootsWithDevAbandon(t *testing.T) {
 			APIListenAddr:        "127.0.0.1:0",
 			MCPListenAddr:        "127.0.0.1:0",
 			SelfCheck:            true,
-			Dev:                  true,
-			RequireBundleMatch:   false,
-			NoRequireBundleMatch: true,
+			Dev:                  dev,
+			RequireBundleMatch:   requireBundleMatch,
+			NoRequireBundleMatch: noRequireBundleMatch,
 			AbandonActiveRuns:    true,
 			Verbose:              true,
 			Output:               &out,
