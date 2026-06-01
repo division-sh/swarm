@@ -1559,6 +1559,20 @@ func TestResolveWorkspaceMountSourcesPrecedence(t *testing.T) {
 	if result.DataSource != envDir || result.DataSourceSource != envWorkspaceDataSource {
 		t.Fatalf("env precedence result = %#v, want source %q from %s", result, envDir, envWorkspaceDataSource)
 	}
+
+	result, err = resolveWorkspaceMountSourcesFromInput(workspaceDataSourceInput{
+		RepoRoot: repoRoot,
+	})
+	if err != nil {
+		t.Fatalf("resolve default workspace mount source: %v", err)
+	}
+	defaultDir := filepath.Join(repoRoot, defaultWorkspaceDataSourceRelativePath)
+	if result.DataSource != defaultDir || result.DataSourceSource != defaultWorkspaceDataSourceSource {
+		t.Fatalf("default result = %#v, want source %q from %s", result, defaultDir, defaultWorkspaceDataSourceSource)
+	}
+	if info, err := os.Stat(defaultDir); err != nil || !info.IsDir() {
+		t.Fatalf("default data source stat = (%v, %v), want created directory", info, err)
+	}
 }
 
 func TestResolveWorkspaceMountSourcesRejectsEmptyConfigBeforeEnvFallback(t *testing.T) {
@@ -1579,17 +1593,72 @@ func TestResolveWorkspaceMountSourcesRejectsEmptyConfigBeforeEnvFallback(t *test
 	}
 }
 
-func TestResolveWorkspaceMountSourcesDoesNotInventRepoDataDefault(t *testing.T) {
+func TestResolveWorkspaceMountSourcesDefaultsToSwarmDataNotRepoData(t *testing.T) {
 	repoRoot := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(repoRoot, "data"), 0o755); err != nil {
+	repoDataDir := filepath.Join(repoRoot, "data")
+	if err := os.MkdirAll(repoDataDir, 0o755); err != nil {
 		t.Fatalf("mkdir repo data: %v", err)
 	}
 	result, err := resolveWorkspaceMountSourcesFromInput(workspaceDataSourceInput{RepoRoot: repoRoot})
 	if err != nil {
 		t.Fatalf("resolve workspace mount sources: %v", err)
 	}
+	defaultDir := filepath.Join(repoRoot, defaultWorkspaceDataSourceRelativePath)
+	if result.DataSource != defaultDir || result.DataSourceSource != defaultWorkspaceDataSourceSource {
+		t.Fatalf("workspace mount sources = %#v, want default %q", result, defaultDir)
+	}
+	if result.DataSource == repoDataDir {
+		t.Fatalf("workspace mount source = repo data dir %q, want managed .swarm/data default", repoDataDir)
+	}
+	if info, err := os.Stat(defaultDir); err != nil || !info.IsDir() {
+		t.Fatalf("default data source stat = (%v, %v), want created directory", info, err)
+	}
+}
+
+func TestResolveWorkspaceMountSourcesDefaultWithoutRepoRoot(t *testing.T) {
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get cwd: %v", err)
+	}
+	tmp := t.TempDir()
+	if err := os.Chdir(tmp); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(oldWD); err != nil {
+			t.Fatalf("restore cwd: %v", err)
+		}
+	})
+
+	result, err := resolveWorkspaceMountSourcesFromInput(workspaceDataSourceInput{})
+	if err != nil {
+		t.Fatalf("resolve workspace mount sources: %v", err)
+	}
+	if result.DataSource != defaultWorkspaceDataSourceRelativePath || result.DataSourceSource != defaultWorkspaceDataSourceSource {
+		t.Fatalf("workspace mount sources = %#v, want relative default source", result)
+	}
+	if info, err := os.Stat(filepath.Join(tmp, defaultWorkspaceDataSourceRelativePath)); err != nil || !info.IsDir() {
+		t.Fatalf("default data source stat = (%v, %v), want created directory", info, err)
+	}
+}
+
+func TestResolveWorkspaceMountSourcesUsesVolumesFromAlternateWithoutDefault(t *testing.T) {
+	repoRoot := t.TempDir()
+	result, err := resolveWorkspaceMountSourcesFromInput(workspaceDataSourceInput{
+		RepoRoot:         repoRoot,
+		VolumesFrom:      "swarm-orchestrator",
+		VolumesFromSet:   true,
+		EnvDataSource:    " ",
+		EnvDataSourceSet: true,
+	})
+	if err != nil {
+		t.Fatalf("resolve workspace mount sources: %v", err)
+	}
 	if result.DataSource != "" || result.DataSourceSource != "" {
-		t.Fatalf("workspace mount sources = %#v, want no source without explicit owner", result)
+		t.Fatalf("workspace mount sources = %#v, want volumes-from alternate without path source", result)
+	}
+	if _, err := os.Stat(filepath.Join(repoRoot, defaultWorkspaceDataSourceRelativePath)); !os.IsNotExist(err) {
+		t.Fatalf("default data source stat error = %v, want not created", err)
 	}
 }
 
@@ -1738,6 +1807,15 @@ func TestPlatformSpecWorkspaceDataSourceAuthorityPromoted(t *testing.T) {
 						Consumers  []string `yaml:"consumers"`
 					} `yaml:"workspace_data_source_authority"`
 				} `yaml:"serve"`
+				Run struct {
+					Flags []string `yaml:"flags"`
+					Modes struct {
+						ForegroundLocalStart struct {
+							Invocation string `yaml:"invocation"`
+							Behavior   string `yaml:"behavior"`
+						} `yaml:"foreground_local_start"`
+					} `yaml:"modes"`
+				} `yaml:"run"`
 			} `yaml:"command_catalog"`
 		} `yaml:"cli_specification"`
 	}
@@ -1749,7 +1827,7 @@ func TestPlatformSpecWorkspaceDataSourceAuthorityPromoted(t *testing.T) {
 		t.Fatalf("parse platform spec: %v", err)
 	}
 	authority := spec.WorkspaceModel.DataSourceAuthority
-	if strings.TrimSpace(authority.PromotedBy) != "#1139" || strings.TrimSpace(authority.ImplementationStatus) != "implemented_first_slice" {
+	if !strings.Contains(authority.PromotedBy, "#1139") || !strings.Contains(authority.PromotedBy, "#1223") || strings.TrimSpace(authority.ImplementationStatus) != "implemented" {
 		t.Fatalf("workspace data source authority status = promoted_by:%q implementation_status:%q", authority.PromotedBy, authority.ImplementationStatus)
 	}
 	if !strings.Contains(authority.CanonicalOwner, "workspace_model.data_source_authority") {
@@ -1758,29 +1836,36 @@ func TestPlatformSpecWorkspaceDataSourceAuthorityPromoted(t *testing.T) {
 	if authority.CLIFlag != "--data" || authority.ConfigKey != "workspace.data_source" || authority.EnvVar != envWorkspaceDataSource {
 		t.Fatalf("workspace data source selectors = %#v", authority)
 	}
-	for _, want := range []string{"--data", "workspace.data_source", envWorkspaceDataSource, "no path source"} {
+	for _, want := range []string{"--data", "workspace.data_source", envWorkspaceDataSource, defaultWorkspaceDataSourceSource} {
 		if !stringSliceContains(authority.SourceOrder, want) {
 			t.Fatalf("workspace data source order missing %q: %#v", want, authority.SourceOrder)
 		}
 	}
-	for _, want := range []string{"repo-local `data/`", "fail closed", "SWARM_WORKSPACE_VOLUMES_FROM", "read-only", "opaque"} {
+	for _, want := range []string{defaultWorkspaceDataSourceRelativePath, "0755", "repo-local `data/`", "fail closed", "SWARM_WORKSPACE_VOLUMES_FROM", "read-only", "opaque"} {
 		if !strings.Contains(authority.DefaultBehavior+authority.FailureBehavior+authority.VolumesFromConflictRule+authority.ReadPolicy+strings.Join(authority.RetiredNonAuthoritativeSources, "\n"), want) {
 			t.Fatalf("workspace data source spec missing %q:\n%#v", want, authority)
 		}
 	}
-	for _, want := range []string{"#1137", "#1138", "SWARM_WORKSPACE_DATA_MOUNT"} {
+	for _, want := range []string{"#1137", "#1138", "#1214", "workspace-init", "SWARM_WORKSPACE_DATA_MOUNT"} {
 		if !joinedContains(authority.SplitScope, want) {
 			t.Fatalf("workspace data source split scope missing %q: %#v", want, authority.SplitScope)
 		}
 	}
 	command := spec.CLISpecification.CommandCatalog.Serve.WorkspaceDataSourceAuthority
-	if command.PromotedBy != "#1139" || command.Owner != "workspace_model.data_source_authority" || command.Flag != "--data <path>" {
+	if !strings.Contains(command.PromotedBy, "#1139") || !strings.Contains(command.PromotedBy, "#1223") || command.Owner != "workspace_model.data_source_authority" || command.Flag != "--data <path>" {
 		t.Fatalf("serve command data authority = %#v", command)
 	}
-	for _, want := range []string{"serve boot", "Builder project reload", "selected-contract run-fork"} {
+	for _, want := range []string{"serve boot", "local foreground swarm run", "Builder project reload", "selected-contract run-fork"} {
 		if !joinedContains(command.Consumers, want) {
 			t.Fatalf("serve command data authority consumers missing %q: %#v", want, command.Consumers)
 		}
+	}
+	run := spec.CLISpecification.CommandCatalog.Run
+	if !stringSliceContains(run.Flags, "--data <path>") {
+		t.Fatalf("run command flags missing --data <path>: %#v", run.Flags)
+	}
+	if !strings.Contains(run.Modes.ForegroundLocalStart.Invocation, "--data <path>") || !strings.Contains(run.Modes.ForegroundLocalStart.Behavior, "workspace_model.data_source_authority") || !strings.Contains(run.Modes.ForegroundLocalStart.Behavior, "--connect") || !strings.Contains(run.Modes.ForegroundLocalStart.Behavior, "--reattach") {
+		t.Fatalf("run local foreground data authority missing from spec: %#v", run.Modes.ForegroundLocalStart)
 	}
 }
 

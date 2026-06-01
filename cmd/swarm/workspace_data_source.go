@@ -9,7 +9,13 @@ import (
 	"swarm/internal/config"
 )
 
-const envWorkspaceDataSource = "SWARM_WORKSPACE_DATA_SOURCE"
+const (
+	envWorkspaceDataSource  = "SWARM_WORKSPACE_DATA_SOURCE"
+	envWorkspaceVolumesFrom = "SWARM_WORKSPACE_VOLUMES_FROM"
+
+	defaultWorkspaceDataSourceRelativePath = ".swarm/data"
+	defaultWorkspaceDataSourceSource       = "default"
+)
 
 type workspaceMountSources struct {
 	DataSource       string
@@ -26,11 +32,15 @@ type workspaceDataSourceInput struct {
 
 	EnvDataSource    string
 	EnvDataSourceSet bool
+
+	VolumesFrom    string
+	VolumesFromSet bool
 }
 
 func resolveWorkspaceMountSources(repoRoot string, flagDataSource string, cfg *config.Config) (workspaceMountSources, error) {
 	envDataSource, envDataSourceSet := os.LookupEnv(envWorkspaceDataSource)
 	configDataSource, configDataSourceSet := runtimeConfigWorkspaceDataSource(cfg)
+	volumesFrom, volumesFromSet := os.LookupEnv(envWorkspaceVolumesFrom)
 	return resolveWorkspaceMountSourcesFromInput(workspaceDataSourceInput{
 		RepoRoot:            repoRoot,
 		FlagDataSource:      flagDataSource,
@@ -38,6 +48,8 @@ func resolveWorkspaceMountSources(repoRoot string, flagDataSource string, cfg *c
 		ConfigDataSourceSet: configDataSourceSet,
 		EnvDataSource:       envDataSource,
 		EnvDataSourceSet:    envDataSourceSet,
+		VolumesFrom:         volumesFrom,
+		VolumesFromSet:      volumesFromSet,
 	})
 }
 
@@ -52,8 +64,14 @@ func resolveWorkspaceMountSourcesFromInput(in workspaceDataSourceInput) (workspa
 	case in.EnvDataSourceSet && strings.TrimSpace(in.EnvDataSource) != "":
 		path, err := normalizeWorkspaceDataSourcePath(in.RepoRoot, in.EnvDataSource, envWorkspaceDataSource)
 		return workspaceMountSources{DataSource: path, DataSourceSource: envWorkspaceDataSource}, err
-	default:
+	case in.VolumesFromSet && strings.TrimSpace(in.VolumesFrom) != "":
 		return workspaceMountSources{}, nil
+	default:
+		path := filepath.Clean(resolvePath(in.RepoRoot, defaultWorkspaceDataSourceRelativePath))
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			return workspaceMountSources{DataSource: path, DataSourceSource: defaultWorkspaceDataSourceSource}, fmt.Errorf("create default workspace data source %s: %w", path, err)
+		}
+		return workspaceMountSources{DataSource: path, DataSourceSource: defaultWorkspaceDataSourceSource}, nil
 	}
 }
 
