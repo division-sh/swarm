@@ -134,13 +134,9 @@ func TestSweepUndispatchedUsesPersistedDeliveryRecipients(t *testing.T) {
 	if got := store.receipts["evt-1"]; got != "processed" {
 		t.Fatalf("receipt status = %q, want processed", got)
 	}
-	select {
-	case evt := <-ch:
-		if evt.ID != "evt-1" {
-			t.Fatalf("delivered event id = %q, want evt-1", evt.ID)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("expected swept delivery")
+	evt := requireBusEvent(t, ch, "swept subscribed delivery")
+	if evt.ID != "evt-1" {
+		t.Fatalf("delivered event id = %q, want evt-1", evt.ID)
 	}
 }
 
@@ -173,7 +169,7 @@ func TestSweepUndispatched_UsesAuthoritativeEmptyFanOutWithoutSubscribedFallback
 	if got := store.receipts["evt-2"]; got != "processed" {
 		t.Fatalf("receipt status = %q, want processed", got)
 	}
-	waitForNoEvent(t, ch)
+	requireNoBusEvent(t, ch, "empty direct fan-out replay")
 }
 
 func TestSweepUndispatched_ReplaysSubscribedInternalOnlyUsingReplayScope(t *testing.T) {
@@ -205,13 +201,9 @@ func TestSweepUndispatched_ReplaysSubscribedInternalOnlyUsingReplayScope(t *test
 	if got := store.receipts["evt-internal-only"]; got != "processed" {
 		t.Fatalf("receipt status = %q, want processed", got)
 	}
-	select {
-	case evt := <-internalCh:
-		if evt.ID != "evt-internal-only" {
-			t.Fatalf("delivered event id = %q, want evt-internal-only", evt.ID)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("expected internal subscriber to receive replayed event")
+	evt := requireBusEvent(t, internalCh, "internal-only replay delivery")
+	if evt.ID != "evt-internal-only" {
+		t.Fatalf("delivered event id = %q, want evt-internal-only", evt.ID)
 	}
 }
 
@@ -242,21 +234,13 @@ func TestSweepUndispatched_ReplaysSubscribedMixedRecipientsUsingReplayScope(t *t
 	if count != 1 {
 		t.Fatalf("swept count = %d, want 1", count)
 	}
-	select {
-	case evt := <-internalCh:
-		if evt.ID != "evt-mixed" {
-			t.Fatalf("internal delivered event id = %q, want evt-mixed", evt.ID)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("expected internal subscriber to receive replayed event")
+	evt := requireBusEvent(t, internalCh, "mixed replay delivery to internal subscriber")
+	if evt.ID != "evt-mixed" {
+		t.Fatalf("internal delivered event id = %q, want evt-mixed", evt.ID)
 	}
-	select {
-	case evt := <-agentCh:
-		if evt.ID != "evt-mixed" {
-			t.Fatalf("agent delivered event id = %q, want evt-mixed", evt.ID)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("expected persisted agent to receive replayed event")
+	evt = requireBusEvent(t, agentCh, "mixed replay delivery to persisted agent")
+	if evt.ID != "evt-mixed" {
+		t.Fatalf("agent delivered event id = %q, want evt-mixed", evt.ID)
 	}
 }
 
@@ -289,15 +273,11 @@ func TestSweepUndispatched_DirectScopeDoesNotBroadenToCurrentInternalSubscribers
 	if count != 1 {
 		t.Fatalf("swept count = %d, want 1", count)
 	}
-	select {
-	case evt := <-agentCh:
-		if evt.ID != "evt-direct-mixed" {
-			t.Fatalf("agent delivered event id = %q, want evt-direct-mixed", evt.ID)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("expected direct persisted agent recipient to receive replayed event")
+	evt := requireBusEvent(t, agentCh, "direct replay delivery to persisted agent")
+	if evt.ID != "evt-direct-mixed" {
+		t.Fatalf("agent delivered event id = %q, want evt-direct-mixed", evt.ID)
 	}
-	waitForNoEvent(t, internalCh)
+	requireNoBusEvent(t, internalCh, "direct replay delivery to current internal subscriber")
 }
 
 func TestSweepUndispatched_DirectEmptyManifestDoesNotBroadenToCurrentInternalSubscribers(t *testing.T) {
@@ -331,7 +311,7 @@ func TestSweepUndispatched_DirectEmptyManifestDoesNotBroadenToCurrentInternalSub
 	if got := store.receipts["evt-direct-empty"]; got != "processed" {
 		t.Fatalf("receipt status = %q, want processed", got)
 	}
-	waitForNoEvent(t, internalCh)
+	requireNoBusEvent(t, internalCh, "direct empty manifest delivery to current internal subscriber")
 }
 
 func TestSweepUndispatched_SkipsMalformedReplayRowsAndContinues(t *testing.T) {
@@ -379,13 +359,9 @@ func TestSweepUndispatched_SkipsMalformedReplayRowsAndContinues(t *testing.T) {
 	if got := store.receipts["evt-good"]; got != "processed" {
 		t.Fatalf("good receipt status = %q, want processed", got)
 	}
-	select {
-	case evt := <-ch:
-		if evt.ID != "evt-good" {
-			t.Fatalf("delivered event id = %q, want evt-good", evt.ID)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("expected good swept delivery")
+	evt := requireBusEvent(t, ch, "good replay delivery after malformed row")
+	if evt.ID != "evt-good" {
+		t.Fatalf("delivered event id = %q, want evt-good", evt.ID)
 	}
 }
 
@@ -447,14 +423,10 @@ func TestSweepUndispatched_TerminallyMarksMissingCommittedReplayScopeAndContinue
 	if !foundTerminalLog {
 		t.Fatal("expected explicit terminal committed replay-scope warning")
 	}
-	waitForNoEvent(t, missingCh)
-	select {
-	case evt := <-goodCh:
-		if evt.ID != "evt-good-after-markerless" {
-			t.Fatalf("delivered event id = %q, want evt-good-after-markerless", evt.ID)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("expected good event after markerless row to be replayed")
+	requireNoBusEvent(t, missingCh, "markerless replay delivery to missing subscriber")
+	evt := requireBusEvent(t, goodCh, "good replay delivery after markerless row")
+	if evt.ID != "evt-good-after-markerless" {
+		t.Fatalf("delivered event id = %q, want evt-good-after-markerless", evt.ID)
 	}
 }
 
@@ -487,11 +459,7 @@ func TestSweepUndispatched_ClaimsReplayOwnershipBeforeDispatch(t *testing.T) {
 		}
 	}()
 
-	select {
-	case <-store.releasing:
-	case <-time.After(time.Second):
-		t.Fatal("expected first sweep to reach claim release")
-	}
+	requireSignalBefore(t, store.releasing, time.Second, "first sweep replay claim release")
 
 	secondCount, err := eb.SweepUndispatched(context.Background(), time.Hour, 10)
 	if err != nil {
@@ -502,21 +470,13 @@ func TestSweepUndispatched_ClaimsReplayOwnershipBeforeDispatch(t *testing.T) {
 	}
 
 	close(store.releaseGate)
-	select {
-	case <-firstDone:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for first sweep to finish")
-	}
+	requireSignalBefore(t, firstDone, time.Second, "first sweep completion")
 
-	select {
-	case evt := <-ch:
-		if evt.ID != "evt-claim" {
-			t.Fatalf("delivered event id = %q, want evt-claim", evt.ID)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("expected claimed replay delivery")
+	evt := requireBusEvent(t, ch, "claimed replay delivery")
+	if evt.ID != "evt-claim" {
+		t.Fatalf("delivered event id = %q, want evt-claim", evt.ID)
 	}
-	waitForNoEvent(t, ch)
+	requireNoBusEvent(t, ch, "duplicate claimed replay delivery")
 }
 
 func TestSweepUndispatched_FailsClosedWithoutReplayClaimOwner(t *testing.T) {

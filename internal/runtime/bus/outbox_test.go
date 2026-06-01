@@ -186,24 +186,15 @@ func TestEngineDispatcherQueuesWhenPipelineSQLTxActive(t *testing.T) {
 		_ = tx.Rollback()
 		t.Fatalf("post-commit actions = %d, want 1", len(postCommitActions))
 	}
-	select {
-	case got := <-ch:
-		_ = tx.Rollback()
-		t.Fatalf("event delivered before post-commit flush: %#v", got)
-	case <-time.After(25 * time.Millisecond):
-	}
+	requireNoBusEvent(t, ch, "post-commit delivery before flush")
 
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("Commit: %v", err)
 	}
 	runtimepipeline.FlushPipelinePostCommitActions(postCommitActions)
-	select {
-	case got := <-ch:
-		if got.ID != intent.Event.ID {
-			t.Fatalf("delivered event id = %s, want %s", got.ID, intent.Event.ID)
-		}
-	case <-time.After(250 * time.Millisecond):
-		t.Fatal("timed out waiting for post-commit outbox dispatch")
+	got := requireBusEvent(t, ch, "post-commit outbox dispatch")
+	if got.ID != intent.Event.ID {
+		t.Fatalf("delivered event id = %s, want %s", got.ID, intent.Event.ID)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)
@@ -269,23 +260,15 @@ func TestEngineDispatcherQueuesImmutableIntentSnapshotWhenPipelineSQLTxActive(t 
 		t.Fatalf("Commit: %v", err)
 	}
 	runtimepipeline.FlushPipelinePostCommitActions(postCommitActions)
-	select {
-	case got := <-originalCh:
-		if string(got.Payload) != `{"value":"original"}` {
-			t.Fatalf("delivered payload = %s, want original snapshot", string(got.Payload))
-		}
-		routes := got.TargetRoutes()
-		if len(routes) != 1 || routes[0].FlowInstance != "flow-original" || routes[0].EntityID != "entity-original" {
-			t.Fatalf("delivered target routes = %#v, want original snapshot", routes)
-		}
-	case <-time.After(250 * time.Millisecond):
-		t.Fatal("timed out waiting for original recipient delivery")
+	got := requireBusEvent(t, originalCh, "immutable intent snapshot delivery")
+	if string(got.Payload) != `{"value":"original"}` {
+		t.Fatalf("delivered payload = %s, want original snapshot", string(got.Payload))
 	}
-	select {
-	case got := <-mutatedCh:
-		t.Fatalf("unexpected delivery to mutated recipient: %#v", got)
-	case <-time.After(25 * time.Millisecond):
+	routes := got.TargetRoutes()
+	if len(routes) != 1 || routes[0].FlowInstance != "flow-original" || routes[0].EntityID != "entity-original" {
+		t.Fatalf("delivered target routes = %#v, want original snapshot", routes)
 	}
+	requireNoBusEvent(t, mutatedCh, "mutated recipient delivery")
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)
 	}
@@ -446,24 +429,12 @@ func TestEngineOutboxAndDispatcher_UseCanonicalDirectRecipientManifest(t *testin
 	if err := eb.EngineDispatcher().DispatchPostCommit(context.Background(), []runtimeengine.EmitIntent{intent}); err != nil {
 		t.Fatalf("DispatchPostCommit: %v", err)
 	}
-	select {
-	case <-controlCh:
-	case <-time.After(250 * time.Millisecond):
-		t.Fatal("control-plane did not receive direct intent")
+	_ = requireBusEvent(t, controlCh, "direct intent delivery to control-plane")
+	evt := requireBusEvent(t, matchCh, "direct intent delivery to matching entity-scoped agent")
+	if got := evt.EntityID(); got != "ent-1" {
+		t.Fatalf("matched event entity_id = %q, want ent-1", got)
 	}
-	select {
-	case evt := <-matchCh:
-		if got := evt.EntityID(); got != "ent-1" {
-			t.Fatalf("matched event entity_id = %q, want ent-1", got)
-		}
-	case <-time.After(250 * time.Millisecond):
-		t.Fatal("matching entity-scoped agent did not receive direct intent")
-	}
-	select {
-	case evt := <-otherCh:
-		t.Fatalf("unexpected event delivered to filtered recipient: %#v", evt)
-	case <-time.After(25 * time.Millisecond):
-	}
+	requireNoBusEvent(t, otherCh, "direct intent delivery to filtered recipient")
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)
@@ -523,21 +494,13 @@ func TestEngineOutboxAndDispatcher_DeliverInternalSubscribersOutsidePersistedMan
 	if err := eb.EngineDispatcher().DispatchPostCommit(context.Background(), []runtimeengine.EmitIntent{intent}); err != nil {
 		t.Fatalf("DispatchPostCommit: %v", err)
 	}
-	select {
-	case evt := <-internalCh:
-		if got := evt.EntityID(); got != "ent-1" {
-			t.Fatalf("internal event entity_id = %q, want ent-1", got)
-		}
-	case <-time.After(250 * time.Millisecond):
-		t.Fatal("expected internal subscriber to receive outbox event")
+	evt := requireBusEvent(t, internalCh, "outbox event delivery to internal subscriber")
+	if got := evt.EntityID(); got != "ent-1" {
+		t.Fatalf("internal event entity_id = %q, want ent-1", got)
 	}
-	select {
-	case evt := <-agentCh:
-		if got := evt.EntityID(); got != "ent-1" {
-			t.Fatalf("agent event entity_id = %q, want ent-1", got)
-		}
-	case <-time.After(250 * time.Millisecond):
-		t.Fatal("expected agent subscriber to receive outbox event")
+	evt = requireBusEvent(t, agentCh, "outbox event delivery to agent subscriber")
+	if got := evt.EntityID(); got != "ent-1" {
+		t.Fatalf("agent event entity_id = %q, want ent-1", got)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -615,13 +578,9 @@ func TestEngineDispatcher_DirectIntentUsesExplicitRecipientsWhenManifestWasNotPe
 		t.Fatalf("DispatchPostCommit: %v", err)
 	}
 
-	select {
-	case evt := <-recipientCh:
-		if got := evt.EntityID(); got != "ent-1" {
-			t.Fatalf("delivered event entity_id = %q, want ent-1", got)
-		}
-	case <-time.After(250 * time.Millisecond):
-		t.Fatal("expected explicit direct recipient to receive event")
+	evt := requireBusEvent(t, recipientCh, "direct no-tx delivery to explicit recipient")
+	if got := evt.EntityID(); got != "ent-1" {
+		t.Fatalf("delivered event entity_id = %q, want ent-1", got)
 	}
 }
 
@@ -678,11 +637,7 @@ func TestEngineDispatcher_TransactionalDirectIntentHonorsEmptyPersistedManifest(
 	if err := eb.EngineDispatcher().DispatchPostCommit(context.Background(), []runtimeengine.EmitIntent{intent}); err != nil {
 		t.Fatalf("DispatchPostCommit: %v", err)
 	}
-	select {
-	case evt := <-filteredCh:
-		t.Fatalf("unexpected event delivered from empty authoritative manifest: %#v", evt)
-	case <-time.After(25 * time.Millisecond):
-	}
+	requireNoBusEvent(t, filteredCh, "empty authoritative direct manifest delivery")
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)

@@ -344,15 +344,6 @@ func (*replayCapableAtomicStoreMissingScope) ClaimPipelineReplay(context.Context
 	return nil, false, nil
 }
 
-func waitForNoEvent(t *testing.T, ch <-chan events.Event) {
-	t.Helper()
-	select {
-	case evt := <-ch:
-		t.Fatalf("unexpected event delivered: %#v", evt)
-	case <-time.After(25 * time.Millisecond):
-	}
-}
-
 func assertSortedStringsEqual(t *testing.T, got, want []string) {
 	t.Helper()
 	got = append([]string(nil), got...)
@@ -489,13 +480,9 @@ func TestEventBusPublishTransactionalPostCommitReceiptFailureIsRecoverable(t *te
 	if !hasRuntimeLogAction(logger.entries, "pipeline_receipt_persist_failed") {
 		t.Fatalf("logger entries = %#v, want pipeline_receipt_persist_failed", logger.entries)
 	}
-	select {
-	case got := <-ch:
-		if got.ID != eventID {
-			t.Fatalf("delivered event = %s, want %s", got.ID, eventID)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for delivered event")
+	got := requireBusEvent(t, ch, "post-commit receipt failure delivery")
+	if got.ID != eventID {
+		t.Fatalf("delivered event = %s, want %s", got.ID, eventID)
 	}
 }
 
@@ -548,13 +535,9 @@ func TestEventBusPublishTransactionalPostCommitCompletionFailureIsRecoverable(t 
 	if !hasRuntimeLogAction(logger.entries, "publish_post_commit_convergence_failed") {
 		t.Fatalf("logger entries = %#v, want publish_post_commit_convergence_failed", logger.entries)
 	}
-	select {
-	case got := <-ch:
-		if got.ID != eventID {
-			t.Fatalf("delivered event = %s, want %s", got.ID, eventID)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for delivered event")
+	got := requireBusEvent(t, ch, "post-commit completion failure delivery")
+	if got.ID != eventID {
+		t.Fatalf("delivered event = %s, want %s", got.ID, eventID)
 	}
 }
 
@@ -653,11 +636,7 @@ func TestEventBusPublish_LogsQueuedDeliveryLifecycleTransition(t *testing.T) {
 	if err := bus.Publish(context.Background(), evt); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
-	select {
-	case <-ch:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for delivered event")
-	}
+	_ = requireBusEvent(t, ch, "queued delivery lifecycle transition")
 
 	var found bool
 	for _, entry := range logger.entries {
@@ -749,11 +728,7 @@ func TestEventBusPublish_AttachesBundleSourceFactToRuntimeLogs(t *testing.T) {
 	}.WithEntityID("ent-1")); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
-	select {
-	case <-ch:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for delivered event")
-	}
+	_ = requireBusEvent(t, ch, "bundle source fact delivery")
 	for _, entry := range logger.entries {
 		if entry.HasSource && entry.SourceFact == sourceFact.Normalized() {
 			return
@@ -913,23 +888,15 @@ func TestEventBusPublishDirect_FiltersEntityScopedRecipientsByExplicitMetadata(t
 		t.Fatalf("PublishDirect: %v", err)
 	}
 
-	select {
-	case evt := <-controlCh:
-		if got := evt.EntityID(); got != "ent-1" {
-			t.Fatalf("control event entity_id = %q, want ent-1", got)
-		}
-	case <-time.After(250 * time.Millisecond):
-		t.Fatal("control-plane did not receive direct event")
+	evt := requireBusEvent(t, controlCh, "direct delivery to control-plane")
+	if got := evt.EntityID(); got != "ent-1" {
+		t.Fatalf("control event entity_id = %q, want ent-1", got)
 	}
-	select {
-	case evt := <-matchCh:
-		if got := evt.EntityID(); got != "ent-1" {
-			t.Fatalf("matched event entity_id = %q, want ent-1", got)
-		}
-	case <-time.After(250 * time.Millisecond):
-		t.Fatal("matching entity-scoped reviewer did not receive direct event")
+	evt = requireBusEvent(t, matchCh, "direct delivery to matching entity-scoped reviewer")
+	if got := evt.EntityID(); got != "ent-1" {
+		t.Fatalf("matched event entity_id = %q, want ent-1", got)
 	}
-	waitForNoEvent(t, otherCh)
+	requireNoBusEvent(t, otherCh, "direct delivery to filtered entity-scoped reviewer")
 
 	assertSortedStringsEqual(t, store.persistedDeliveries(), []string{"control-plane", "reviewer-ent-1"})
 }
@@ -958,23 +925,15 @@ func TestEventBusPublish_FiltersEntityScopedRecipientsByExplicitMetadata(t *test
 		t.Fatalf("Publish: %v", err)
 	}
 
-	select {
-	case evt := <-controlCh:
-		if got := evt.EntityID(); got != "ent-1" {
-			t.Fatalf("control event entity_id = %q, want ent-1", got)
-		}
-	case <-time.After(250 * time.Millisecond):
-		t.Fatal("control-plane did not receive event")
+	evt := requireBusEvent(t, controlCh, "explicit metadata delivery to control-plane")
+	if got := evt.EntityID(); got != "ent-1" {
+		t.Fatalf("control event entity_id = %q, want ent-1", got)
 	}
-	select {
-	case evt := <-matchCh:
-		if got := evt.EntityID(); got != "ent-1" {
-			t.Fatalf("matched event entity_id = %q, want ent-1", got)
-		}
-	case <-time.After(250 * time.Millisecond):
-		t.Fatal("entity-scoped reviewer did not receive matching event")
+	evt = requireBusEvent(t, matchCh, "explicit metadata delivery to entity-scoped reviewer")
+	if got := evt.EntityID(); got != "ent-1" {
+		t.Fatalf("matched event entity_id = %q, want ent-1", got)
 	}
-	waitForNoEvent(t, otherCh)
+	requireNoBusEvent(t, otherCh, "explicit metadata delivery to filtered entity-scoped reviewer")
 
 	assertSortedStringsEqual(t, store.persistedDeliveries(), []string{"control-plane", "reviewer-ent-1"})
 }
@@ -1002,15 +961,11 @@ func TestEventBusPublish_FiltersEntityScopedRecipientsByTypedEnvelopeNotPayload(
 		t.Fatalf("Publish: %v", err)
 	}
 
-	select {
-	case evt := <-matchCh:
-		if got := evt.EntityID(); got != "ent-1" {
-			t.Fatalf("matched event entity_id = %q, want ent-1", got)
-		}
-	case <-time.After(250 * time.Millisecond):
-		t.Fatal("entity-scoped reviewer did not receive typed-envelope match")
+	evt := requireBusEvent(t, matchCh, "typed-envelope delivery to entity-scoped reviewer")
+	if got := evt.EntityID(); got != "ent-1" {
+		t.Fatalf("matched event entity_id = %q, want ent-1", got)
 	}
-	waitForNoEvent(t, otherCh)
+	requireNoBusEvent(t, otherCh, "typed-envelope delivery to filtered entity-scoped reviewer")
 	assertSortedStringsEqual(t, store.persistedDeliveries(), []string{"reviewer-ent-1"})
 }
 
@@ -1035,12 +990,8 @@ func TestEventBusPublish_DropsRecipientsMissingExplicitDescriptor(t *testing.T) 
 		t.Fatalf("Publish: %v", err)
 	}
 
-	select {
-	case <-controlCh:
-	case <-time.After(250 * time.Millisecond):
-		t.Fatal("control-plane did not receive event")
-	}
-	waitForNoEvent(t, missingCh)
+	_ = requireBusEvent(t, controlCh, "descriptor delivery to control-plane")
+	requireNoBusEvent(t, missingCh, "descriptor delivery to missing reviewer")
 
 	assertSortedStringsEqual(t, store.persistedDeliveries(), []string{"control-plane"})
 }
@@ -1068,31 +1019,19 @@ func TestEventBusPublish_KeepsInternalSubscribersLiveOnlyUnderDescriptorPlanning
 		t.Fatalf("Publish: %v", err)
 	}
 
-	select {
-	case evt := <-workflowCh:
-		if got := evt.EntityID(); got != "ent-1" {
-			t.Fatalf("workflow-runtime event entity_id = %q, want ent-1", got)
-		}
-	case <-time.After(250 * time.Millisecond):
-		t.Fatal("workflow-runtime did not receive event")
+	evt := requireBusEvent(t, workflowCh, "internal workflow-runtime descriptor delivery")
+	if got := evt.EntityID(); got != "ent-1" {
+		t.Fatalf("workflow-runtime event entity_id = %q, want ent-1", got)
 	}
-	select {
-	case evt := <-nodeCh:
-		if got := evt.EntityID(); got != "ent-1" {
-			t.Fatalf("system node event entity_id = %q, want ent-1", got)
-		}
-	case <-time.After(250 * time.Millisecond):
-		t.Fatal("system node did not receive event")
+	evt = requireBusEvent(t, nodeCh, "internal system-node descriptor delivery")
+	if got := evt.EntityID(); got != "ent-1" {
+		t.Fatalf("system node event entity_id = %q, want ent-1", got)
 	}
-	select {
-	case evt := <-agentCh:
-		if got := evt.EntityID(); got != "ent-1" {
-			t.Fatalf("agent event entity_id = %q, want ent-1", got)
-		}
-	case <-time.After(250 * time.Millisecond):
-		t.Fatal("agent did not receive event")
+	evt = requireBusEvent(t, agentCh, "agent descriptor delivery")
+	if got := evt.EntityID(); got != "ent-1" {
+		t.Fatalf("agent event entity_id = %q, want ent-1", got)
 	}
-	waitForNoEvent(t, missingCh)
+	requireNoBusEvent(t, missingCh, "descriptor delivery to missing agent")
 
 	assertSortedStringsEqual(t, store.persistedDeliveries(), []string{"agent-a"})
 }
@@ -1122,23 +1061,15 @@ func TestEventBusPublishDeferred_UsesCanonicalSubscribedRecipientFiltering(t *te
 		t.Fatalf("Publish: %v", err)
 	}
 
-	select {
-	case evt := <-workflowCh:
-		if got := evt.EntityID(); got != "ent-1" {
-			t.Fatalf("workflow-runtime event entity_id = %q, want ent-1", got)
-		}
-	case <-time.After(250 * time.Millisecond):
-		t.Fatal("workflow-runtime did not receive deferred event")
+	evt := requireBusEvent(t, workflowCh, "deferred delivery to workflow-runtime")
+	if got := evt.EntityID(); got != "ent-1" {
+		t.Fatalf("workflow-runtime event entity_id = %q, want ent-1", got)
 	}
-	select {
-	case evt := <-agentCh:
-		if got := evt.EntityID(); got != "ent-1" {
-			t.Fatalf("agent event entity_id = %q, want ent-1", got)
-		}
-	case <-time.After(250 * time.Millisecond):
-		t.Fatal("agent did not receive deferred event")
+	evt = requireBusEvent(t, agentCh, "deferred delivery to agent")
+	if got := evt.EntityID(); got != "ent-1" {
+		t.Fatalf("agent event entity_id = %q, want ent-1", got)
 	}
-	waitForNoEvent(t, otherCh)
+	requireNoBusEvent(t, otherCh, "deferred delivery to filtered agent")
 
 	assertSortedStringsEqual(t, store.persistedDeliveries(), []string{"agent-a"})
 }
@@ -1161,7 +1092,7 @@ func TestEventBusPublish_FailsClosedWhenDescriptorLookupFails(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "descriptor lookup failed") {
 		t.Fatalf("Publish error = %v, want descriptor lookup failure", err)
 	}
-	waitForNoEvent(t, ch)
+	requireNoBusEvent(t, ch, "descriptor lookup failure delivery")
 	if got := store.persistedDeliveries(); len(got) != 0 {
 		t.Fatalf("persisted deliveries = %v, want none", got)
 	}
@@ -1182,11 +1113,7 @@ func TestEventBusWaitForQuiescenceWaitsForPublishCompletion(t *testing.T) {
 		publishDone <- eb.Publish(context.Background(), events.Event{Type: "task.completed", Payload: []byte(`{}`)})
 	}()
 
-	select {
-	case <-started:
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("interceptor did not start")
-	}
+	requireSignalBefore(t, started, 500*time.Millisecond, "interceptor start")
 
 	waitCtx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
 	defer cancel()
@@ -1195,13 +1122,8 @@ func TestEventBusWaitForQuiescenceWaitsForPublishCompletion(t *testing.T) {
 	}
 
 	close(release)
-	select {
-	case err := <-publishDone:
-		if err != nil {
-			t.Fatalf("Publish: %v", err)
-		}
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("publish did not finish")
+	if err := requireErrorBefore(t, publishDone, 500*time.Millisecond, "publish completion"); err != nil {
+		t.Fatalf("Publish: %v", err)
 	}
 
 	waitCtx, cancel = context.WithTimeout(context.Background(), 250*time.Millisecond)
@@ -1280,18 +1202,10 @@ func TestEventBusPublishTransactional_RunsInterceptorsAfterCommit(t *testing.T) 
 	}.WithEntityID("11111111-1111-1111-1111-111111111114")); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
-	select {
-	case <-called:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for post-commit interceptor")
-	}
-	select {
-	case got := <-ch:
-		if got.ID != eventID {
-			t.Fatalf("delivered event id = %s, want %s", got.ID, eventID)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for post-commit delivery")
+	requireSignalBefore(t, called, time.Second, "post-commit interceptor")
+	got := requireBusEvent(t, ch, "post-commit delivery")
+	if got.ID != eventID {
+		t.Fatalf("delivered event id = %s, want %s", got.ID, eventID)
 	}
 }
 
@@ -1396,11 +1310,7 @@ func TestEventBusPublishTxRunsInterceptorsAfterCallerCommit(t *testing.T) {
 		t.Fatalf("Commit: %v", err)
 	}
 	runtimepipeline.FlushPipelinePostCommitActions(postCommitActions)
-	select {
-	case <-called:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for post-commit interceptor")
-	}
+	requireSignalBefore(t, called, time.Second, "post-commit interceptor")
 	if got := countPipelineReceiptsForEvent(t, ctx, db, eventID); got != 1 {
 		t.Fatalf("pipeline receipts = %d, want 1", got)
 	}
@@ -1678,13 +1588,9 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeWithoutPersis
 				t.Fatalf("Publish(%s): %v", tc.eventType, err)
 			}
 
-			select {
-			case got := <-internal:
-				if got.ID != tc.eventID {
-					t.Fatalf("internal delivery event_id = %q, want %q", got.ID, tc.eventID)
-				}
-			case <-time.After(250 * time.Millisecond):
-				t.Fatalf("timed out waiting for internal %s delivery", tc.eventType)
+			got := requireBusEvent(t, internal, "standalone platform event internal delivery")
+			if got.ID != tc.eventID {
+				t.Fatalf("internal delivery event_id = %q, want %q", got.ID, tc.eventID)
 			}
 
 			runID, runStatus, triggerEventType := loadRunStateForEvent(t, ctx, db, tc.eventID)
@@ -1755,13 +1661,9 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeAfterFinalRec
 				t.Fatalf("Publish(%s): %v", tc.eventType, err)
 			}
 
-			select {
-			case got := <-subscription:
-				if got.ID != tc.eventID {
-					t.Fatalf("delivered event_id = %q, want %q", got.ID, tc.eventID)
-				}
-			case <-time.After(250 * time.Millisecond):
-				t.Fatalf("timed out waiting for agent delivery of %s", tc.eventType)
+			got := requireBusEvent(t, subscription, "standalone agent event delivery")
+			if got.ID != tc.eventID {
+				t.Fatalf("delivered event_id = %q, want %q", got.ID, tc.eventID)
 			}
 
 			if got := countEventDeliveriesForEvent(t, ctx, db, tc.eventID); got != 1 {
@@ -1825,11 +1727,7 @@ func TestEventBusRuntimeIngressPauseQueuesAndResumeReleases(t *testing.T) {
 		t.Fatalf("Publish while paused: %v", err)
 	}
 
-	select {
-	case got := <-ch:
-		t.Fatalf("paused runtime delivered event %s before resume", got.ID)
-	case <-time.After(150 * time.Millisecond):
-	}
+	requireNoBusEvent(t, ch, "paused runtime before resume")
 	if got := countEventDeliveriesForEvent(t, ctx, db, eventID); got != 1 {
 		t.Fatalf("event deliveries while paused = %d, want 1", got)
 	}
@@ -1847,13 +1745,9 @@ func TestEventBusRuntimeIngressPauseQueuesAndResumeReleases(t *testing.T) {
 	if resumed.ReleasedCount != 1 {
 		t.Fatalf("released count = %d, want 1", resumed.ReleasedCount)
 	}
-	select {
-	case got := <-ch:
-		if got.ID != eventID {
-			t.Fatalf("delivered event = %s, want %s", got.ID, eventID)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for queued event release")
+	got := requireBusEvent(t, ch, "queued event release after resume")
+	if got.ID != eventID {
+		t.Fatalf("delivered event = %s, want %s", got.ID, eventID)
 	}
 	if got := countPipelineReceiptsForEvent(t, ctx, db, eventID); got != 1 {
 		t.Fatalf("pipeline receipts after resume = %d, want 1", got)
@@ -1875,11 +1769,7 @@ func TestEventBusPublish_HumanTaskEventsRouteBySubscriptionOnly(t *testing.T) {
 		t.Fatalf("Publish: %v", err)
 	}
 
-	select {
-	case evt := <-ch:
-		t.Fatalf("unexpected delivery without subscription: %#v", evt)
-	case <-time.After(50 * time.Millisecond):
-	}
+	requireNoBusEvent(t, ch, "human task event without subscription")
 }
 
 func TestEventBusPublish_LogsRoutedAndSubscribedRecipientsSeparately(t *testing.T) {

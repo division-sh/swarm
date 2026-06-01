@@ -57,11 +57,7 @@ func TestEventBusRunControlPauseQueuesOnlyTargetRunAndContinueReleases(t *testin
 	}.WithEntityID("21000000-0000-0000-0000-000000000002")); err != nil {
 		t.Fatalf("Publish paused run event: %v", err)
 	}
-	select {
-	case got := <-ch:
-		t.Fatalf("paused run delivered event %s before continue", got.ID)
-	case <-time.After(150 * time.Millisecond):
-	}
+	requireNoBusEvent(t, ch, "paused run before continue")
 	if got := countPipelineReceiptsForEvent(t, ctx, db, pausedEventID); got != 0 {
 		t.Fatalf("paused run pipeline receipts = %d, want 0", got)
 	}
@@ -77,13 +73,9 @@ func TestEventBusRunControlPauseQueuesOnlyTargetRunAndContinueReleases(t *testin
 	}.WithEntityID("21000000-0000-0000-0000-000000000003")); err != nil {
 		t.Fatalf("Publish other run event: %v", err)
 	}
-	select {
-	case got := <-ch:
-		if got.ID != otherEventID {
-			t.Fatalf("delivered event = %s, want other run %s", got.ID, otherEventID)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for other run dispatch")
+	got := requireBusEvent(t, ch, "other run dispatch")
+	if got.ID != otherEventID {
+		t.Fatalf("delivered event = %s, want other run %s", got.ID, otherEventID)
 	}
 
 	result, err := controller.Continue(ctx, runtimeruncontrol.TransitionRequest{RunID: pausedRunID, Reason: "test", ControlledBy: "test"})
@@ -93,13 +85,9 @@ func TestEventBusRunControlPauseQueuesOnlyTargetRunAndContinueReleases(t *testin
 	if result.ReleasedDeliveries != 1 {
 		t.Fatalf("released deliveries = %d, want 1", result.ReleasedDeliveries)
 	}
-	select {
-	case got := <-ch:
-		if got.ID != pausedEventID {
-			t.Fatalf("released event = %s, want paused run %s", got.ID, pausedEventID)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for paused run release")
+	got = requireBusEvent(t, ch, "paused run release")
+	if got.ID != pausedEventID {
+		t.Fatalf("released event = %s, want paused run %s", got.ID, pausedEventID)
 	}
 	if got := countPipelineReceiptsForEvent(t, ctx, db, pausedEventID); got != 1 {
 		t.Fatalf("paused run pipeline receipts after continue = %d, want 1", got)
@@ -151,11 +139,7 @@ func TestEventBusRunControlPauseQueuesBeforeInterceptorsAndContinueReplaysThem(t
 	}.WithEntityID("22000000-0000-0000-0000-000000000001")); err != nil {
 		t.Fatalf("Publish paused run event: %v", err)
 	}
-	select {
-	case got := <-ch:
-		t.Fatalf("paused run delivered event %s before continue", got.ID)
-	case <-time.After(150 * time.Millisecond):
-	}
+	requireNoBusEvent(t, ch, "paused intercepted run before continue")
 	if got := recorder.count(); got != 0 {
 		t.Fatalf("interceptor executions before continue = %d, want 0", got)
 	}
@@ -174,22 +158,7 @@ func TestEventBusRunControlPauseQueuesBeforeInterceptorsAndContinueReplaysThem(t
 		t.Fatalf("interceptor executions after continue = %d, want 1", got)
 	}
 
-	received := map[events.EventType]struct{}{}
-	deadline := time.After(time.Second)
-	for len(received) < 2 {
-		select {
-		case got := <-ch:
-			received[got.Type] = struct{}{}
-		case <-deadline:
-			t.Fatalf("timed out waiting for released original and deferred events, got %#v", received)
-		}
-	}
-	if _, ok := received[eventType]; !ok {
-		t.Fatalf("released original event missing: %#v", received)
-	}
-	if _, ok := received[deferredType]; !ok {
-		t.Fatalf("released deferred event missing: %#v", received)
-	}
+	requireBusEventTypes(t, ch, "released original and deferred events", eventType, deferredType)
 	if got := countPipelineReceiptsForEvent(t, ctx, db, queuedEventID); got != 1 {
 		t.Fatalf("queued event receipts after continue = %d, want 1", got)
 	}
@@ -255,11 +224,7 @@ func TestEventBusRunControlPauseQueuesPostCommitEmitBeforeInterceptors(t *testin
 	if err := eb.EngineDispatcher().DispatchPostCommit(ctx, []runtimeengine.EmitIntent{intent}); err != nil {
 		t.Fatalf("DispatchPostCommit while paused: %v", err)
 	}
-	select {
-	case got := <-ch:
-		t.Fatalf("paused post-commit dispatch delivered event %s before continue", got.ID)
-	case <-time.After(150 * time.Millisecond):
-	}
+	requireNoBusEvent(t, ch, "paused post-commit dispatch before continue")
 	if got := recorder.count(); got != 0 {
 		t.Fatalf("post-commit interceptor executions while paused = %d, want 0", got)
 	}
@@ -277,22 +242,7 @@ func TestEventBusRunControlPauseQueuesPostCommitEmitBeforeInterceptors(t *testin
 	if got := recorder.count(); got != 1 {
 		t.Fatalf("post-commit interceptor executions after continue = %d, want 1", got)
 	}
-	received := map[events.EventType]struct{}{}
-	deadline := time.After(time.Second)
-	for len(received) < 2 {
-		select {
-		case got := <-ch:
-			received[got.Type] = struct{}{}
-		case <-deadline:
-			t.Fatalf("timed out waiting for released post-commit original and deferred events, got %#v", received)
-		}
-	}
-	if _, ok := received[eventType]; !ok {
-		t.Fatalf("released post-commit original event missing: %#v", received)
-	}
-	if _, ok := received[deferredType]; !ok {
-		t.Fatalf("released post-commit deferred event missing: %#v", received)
-	}
+	requireBusEventTypes(t, ch, "released post-commit original and deferred events", eventType, deferredType)
 	if got := countPipelineReceiptsForEvent(t, ctx, db, intent.Event.ID); got != 1 {
 		t.Fatalf("post-commit event receipts after continue = %d, want 1", got)
 	}
