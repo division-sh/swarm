@@ -366,7 +366,9 @@ source contract.
 Requirements: Go 1.23. Docker is required for Compose, workspace-container, and
 Postgres-backed integration workflows. Plain local `swarm run --contracts ...`
 uses SQLite at `.swarm/dev.db` unless you explicitly opt into Postgres with
-`--store postgres`, `SWARM_STORE_BACKEND=postgres`, or `store.backend: postgres`.
+`SWARM_STORE_BACKEND=postgres` or `store.backend: postgres`. For `swarm serve`,
+use `--store postgres`; local foreground `swarm run` inherits store selection
+from environment or runtime config.
 Starting the Compose orchestrator requires `SWARM_CONTRACTS_HOST_DIR` and an
 explicit `SWARM_API_TOKEN` because the Compose API listener is non-loopback.
 
