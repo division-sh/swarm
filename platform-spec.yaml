@@ -6890,14 +6890,15 @@ workspace_model:
     - full host Claude CLI, native tool execution, and tool relay parity
     - production SQLite multi-writer semantics
   workspace_execution_target_capability:
-    promoted_by: '#1213'
-    implementation_status: implemented_first_slice
+    promoted_by: '#1213/#1235'
+    implementation_status: implemented_host_file_slice
     canonical_owner: platform-spec.yaml#workspace_model.workspace_execution_target_capability
     scope: >
       Defines the canonical runtime execution-target and capability authority for workspace-backed execution surfaces after
       workspace backend selection. The owner distinguishes Docker container execution, explicit host-local targets, and
-      unsupported targets. It does not make host execution Docker-equivalent and does not enable host native tools, host
-      command execution, host tool-result relay, or host Claude/provider runtime support in this first slice.
+      unsupported targets. It does not make host execution Docker-equivalent. Host-local targets support only platform-managed
+      native file read/write over logical workspace mounts; host command execution, host tool-result relay, and host
+      Claude/provider runtime support remain unsupported unless a later gate promotes those surfaces.
     implementation_owner: internal/runtime/workspace.ExecutionTarget
     target_modes:
       docker_container:
@@ -6913,9 +6914,12 @@ workspace_model:
       host_local:
         rule: >
           A host target is an explicit local-dev backend target with platform-managed raw host backing paths and logical
-          mount identities. Host-local targets MUST NOT infer execution support from an empty container field and MUST fail
-          closed for all current execution capabilities until a later gate promotes a specific host execution surface.
-        capabilities: []
+          mount identities. Host-local targets MUST NOT infer execution support from an empty container field. Host-local
+          targets support file_read and file_write only through the platform-managed workspace execution owner; native_command,
+          tool_result_relay, and claude_cli remain unsupported.
+        capabilities:
+        - file_read
+        - file_write
       unsupported:
         rule: >
           Nil targets, unknown backend names, Docker targets without a container, and empty targets are unsupported. They MUST
@@ -6933,6 +6937,8 @@ workspace_model:
       - Reads outside logical `/workspace`, `/data`, and `/opt/swarm/contracts` fail closed.
       - Runtime execution surfaces MUST expose logical paths as product semantics and MUST NOT leak raw host backing paths as
         agent-visible authority.
+      - Host file operations MUST resolve private host backing paths through this owner from the selected logical mount and
+        MUST reject symlink escapes or raw host absolute paths as product input.
       - Host execution target production MUST consume `workspace_model.data_source_authority` for `/data` and the loaded
         contracts source for `/opt/swarm/contracts`.
     consumers:
@@ -6954,12 +6960,14 @@ workspace_model:
     - nil target or empty target cwd fallback
     - ad hoc HostBackend() checks outside the execution-target owner
     failure_behavior:
-    - Host-local targets remain fail closed for native tool execution, tool-result relay, and Claude/provider execution until
-      a later gate promotes and proves a specific host execution surface.
+    - Host-local targets remain fail closed for native command execution, tool-result relay, and Claude/provider execution until
+      a later gate promotes and proves those surfaces.
+    - Host-local file operations fail closed when the logical path is outside allowed mounts, when a write targets a read-only
+      mount, when a raw host path is provided as product input, or when private backing-path resolution would escape the selected
+      mount root.
     - Empty-container targets MUST NOT authorize local host execution.
     - Docker behavior must remain regression-proven through the same typed owner.
     split_scope:
-    - host native file operations
     - host native bash/command execution
     - host tool-result relay support
     - Claude CLI/provider-native host runtime support
@@ -8740,12 +8748,13 @@ cli_specification:
         - dynamic Builder project reload workspace lifecycle
         - selected-contract run-fork workspace lifecycle
       workspace_execution_target_capability:
-        promoted_by: '#1213'
+        promoted_by: '#1213/#1235'
         owner: workspace_model.workspace_execution_target_capability
         rule: >
           `swarm serve` runtime execution surfaces MUST consume the typed workspace execution target/capability owner after
-          backend selection. Host-local targets remain explicit and fail closed for native command/file execution, tool-result
-          relay, and Claude/provider execution in this first slice; Docker targets continue through container execution.
+          backend selection. Host-local targets remain explicit and support only platform-managed native file read/write;
+          native command execution, tool-result relay, and Claude/provider execution remain fail closed. Docker targets continue
+          through container execution.
         consumers:
         - native executor command/file path authority
         - native fallback tool-surface truth

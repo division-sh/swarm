@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -70,6 +71,9 @@ func (e *Executor) execNativeBash(ctx context.Context, actor models.AgentConfig,
 	if execErr != nil && (ctx.Err() != nil || strings.Contains(strings.ToLower(execErr.Error()), "deadline exceeded")) {
 		return nil, execErr
 	}
+	if execErr != nil && exitCode == -1 {
+		return nil, execErr
+	}
 	return map[string]any{
 		"stdout":      string(stdout),
 		"stderr":      string(stderr),
@@ -89,6 +93,10 @@ func (e *Executor) execNativeReadFile(ctx context.Context, actor models.AgentCon
 	}
 	if err := target.ExecutionTarget().Require(workspace.ExecutionCapabilityFileRead); err != nil {
 		return nil, err
+	}
+	execTarget := target.ExecutionTarget()
+	if execTarget.Mode == workspace.ExecutionModeHostLocal {
+		return execNativeHostReadFile(execTarget, in.Path)
 	}
 	path, err := resolveNativeReadPath(target, in.Path)
 	if err != nil {
@@ -115,6 +123,10 @@ func (e *Executor) execNativeWriteFile(ctx context.Context, actor models.AgentCo
 	}
 	if err := target.ExecutionTarget().Require(workspace.ExecutionCapabilityFileWrite); err != nil {
 		return nil, err
+	}
+	execTarget := target.ExecutionTarget()
+	if execTarget.Mode == workspace.ExecutionModeHostLocal {
+		return execNativeHostWriteFile(execTarget, in.Path, in.Content)
 	}
 	path, err := resolveNativeWritePath(target, in.Path)
 	if err != nil {
@@ -358,6 +370,49 @@ func resolveNativeReadPath(target *workspace.Target, raw string) (string, error)
 
 func resolveNativeWritePath(target *workspace.Target, raw string) (string, error) {
 	return target.ExecutionTarget().ResolvePath(raw, workspace.PathAccessWrite)
+}
+
+func execNativeHostReadFile(target workspace.ExecutionTarget, rawPath string) (any, error) {
+	resolved, err := target.ResolveHostPath(rawPath, workspace.PathAccessRead)
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(resolved.HostPath)
+	if err != nil {
+		return nil, fmt.Errorf("read_file failed for %s: %s", resolved.LogicalPath, hostFileErrorMessage(err))
+	}
+	return map[string]any{
+		"content":    string(data),
+		"size_bytes": len(data),
+	}, nil
+}
+
+func execNativeHostWriteFile(target workspace.ExecutionTarget, rawPath string, content string) (any, error) {
+	resolved, err := target.ResolveHostPath(rawPath, workspace.PathAccessWrite)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(filepath.Dir(resolved.HostPath), 0o700); err != nil {
+		return nil, fmt.Errorf("write_file failed for %s: %s", resolved.LogicalPath, hostFileErrorMessage(err))
+	}
+	data := []byte(content)
+	if err := os.WriteFile(resolved.HostPath, data, 0o644); err != nil {
+		return nil, fmt.Errorf("write_file failed for %s: %s", resolved.LogicalPath, hostFileErrorMessage(err))
+	}
+	return map[string]any{
+		"bytes_written": len(data),
+	}, nil
+}
+
+func hostFileErrorMessage(err error) string {
+	switch {
+	case os.IsNotExist(err):
+		return "file does not exist"
+	case os.IsPermission(err):
+		return "permission denied"
+	default:
+		return "file is unavailable"
+	}
 }
 
 func (e *Executor) resolveWebSearchProviderConfig() (webSearchProviderConfig, error) {
