@@ -53,8 +53,10 @@ type StoreSQLiteConfig struct {
 
 type WorkspaceConfig struct {
 	DataSource string `yaml:"data_source"`
+	Backend    string `yaml:"backend"`
 
 	dataSourceSet bool
+	backendSet    bool
 }
 
 func (w *WorkspaceConfig) UnmarshalYAML(value *yaml.Node) error {
@@ -66,9 +68,11 @@ func (w *WorkspaceConfig) UnmarshalYAML(value *yaml.Node) error {
 	*w = WorkspaceConfig(decoded)
 	if value.Kind == yaml.MappingNode {
 		for i := 0; i+1 < len(value.Content); i += 2 {
-			if value.Content[i].Value == "data_source" {
+			switch value.Content[i].Value {
+			case "data_source":
 				w.dataSourceSet = true
-				break
+			case "backend":
+				w.backendSet = true
 			}
 		}
 	}
@@ -77,6 +81,10 @@ func (w *WorkspaceConfig) UnmarshalYAML(value *yaml.Node) error {
 
 func (w WorkspaceConfig) DataSourceConfigured() bool {
 	return w.dataSourceSet || strings.TrimSpace(w.DataSource) != ""
+}
+
+func (w WorkspaceConfig) BackendConfigured() bool {
+	return w.backendSet || strings.TrimSpace(w.Backend) != ""
 }
 
 type LLMConfig struct {

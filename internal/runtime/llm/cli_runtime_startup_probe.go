@@ -112,6 +112,9 @@ func PlannedProviderNativeVisibleToolsForActor(actor models.AgentConfig, tools [
 
 func (r *ClaudeCLIRuntime) runUntilCLIStartupInit(ctx context.Context, args []string, target *workspace.Target, input string) (*Response, error) {
 	timeout := r.effectiveCLITimeout(ctx)
+	if target != nil && target.HostBackend() {
+		return nil, errClaudeHostWorkspaceUnsupported()
+	}
 	if target == nil || !target.Enabled() {
 		return nil, fmt.Errorf("%w: claude sessions must run in a container workspace", ErrClaudeWorkspaceRequired)
 	}

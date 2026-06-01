@@ -299,6 +299,9 @@ func (e *Executor) resolveNativeWorkspace(ctx context.Context, actor models.Agen
 func (e *Executor) runWorkspaceCommand(ctx context.Context, target *workspace.Target, timeout time.Duration, stdin string, args ...string) ([]byte, []byte, int, error) {
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	if target != nil && target.HostBackend() {
+		return nil, nil, -1, fmt.Errorf("host workspace backend does not support native tool execution yet")
+	}
 	var cmd *exec.Cmd
 	if target != nil && target.Enabled() {
 		dockerBin := strings.TrimSpace(os.Getenv("SWARM_DOCKER_BIN"))

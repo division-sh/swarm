@@ -65,6 +65,41 @@ func TestClaudeCLIRuntimeContinueSession_RejectsHostFallbackWhenTargetMissing(t 
 	_ = session
 }
 
+func TestClaudeCLIRuntimeRejectsHostWorkspaceBackend(t *testing.T) {
+	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil, nil)
+	target := &workspace.Target{
+		Workdir: t.TempDir(),
+		Backend: workspace.BackendHost,
+	}
+
+	_, err := runtime.runWithInput(context.Background(), nil, target, "hello", MonitorTurnMeta{})
+	if !errors.Is(err, ErrClaudeWorkspaceRequired) {
+		t.Fatalf("runWithInput error = %v, want ErrClaudeWorkspaceRequired", err)
+	}
+	if !strings.Contains(err.Error(), "host workspace backend does not support Claude CLI execution yet") {
+		t.Fatalf("runWithInput error = %v, want host backend fail-closed diagnostic", err)
+	}
+}
+
+func TestClaudeCLIRuntimeWorkspaceCommandRejectsHostWorkspaceBackend(t *testing.T) {
+	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil, nil)
+	target := &workspace.Target{
+		Workdir: t.TempDir(),
+		Backend: workspace.BackendHost,
+	}
+
+	_, _, exitCode, err := runtime.runWorkspaceCommand(context.Background(), target, "", "sh", "-lc", "true")
+	if !errors.Is(err, ErrClaudeWorkspaceRequired) {
+		t.Fatalf("runWorkspaceCommand error = %v, want ErrClaudeWorkspaceRequired", err)
+	}
+	if !strings.Contains(err.Error(), "host workspace backend does not support Claude CLI execution yet") {
+		t.Fatalf("runWorkspaceCommand error = %v, want host backend fail-closed diagnostic", err)
+	}
+	if exitCode != 0 {
+		t.Fatalf("runWorkspaceCommand exit code = %d, want zero for pre-exec fail-closed path", exitCode)
+	}
+}
+
 func TestClaudeCLIRuntimeBuildCommand_UsesContainerReachableMCPGatewayURL(t *testing.T) {
 	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "http://host.docker.internal:8081")
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "gateway-token")

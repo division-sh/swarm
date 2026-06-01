@@ -73,8 +73,8 @@ const (
 var (
 	buildStoresForServe                  = buildStores
 	runtimeConfigExecutablePath          = os.Executable
-	configuredWorkspaceLifecycleForServe = func(db *sql.DB, contractsRoot string, source semanticview.Source, mountSources workspaceMountSources) (serveWorkspaceLifecycle, error) {
-		return configuredWorkspaceLifecycle(db, contractsRoot, source, mountSources)
+	configuredWorkspaceLifecycleForServe = func(db *sql.DB, contractsRoot string, source semanticview.Source, mountSources workspaceMountSources, backend workspaceBackendSelection) (serveWorkspaceLifecycle, error) {
+		return configuredWorkspaceLifecycleForBackend(db, contractsRoot, source, mountSources, backend)
 	}
 )
 
@@ -192,6 +192,8 @@ type serveOptions struct {
 	Backend              string
 	ContractsPath        string
 	DataSource           string
+	WorkspaceBackend     string
+	WorkspaceBackendSet  bool
 	BundleHash           string
 	BundleHashes         []string
 	PlatformSpecPath     string
@@ -238,6 +240,7 @@ type serveRuntimeBundleContextRequest struct {
 	Loaded                 serveRuntimeBundle
 	Options                serveOptions
 	MountSources           workspaceMountSources
+	WorkspaceBackend       workspaceBackendSelection
 	Credentials            runtimecredentials.Store
 	BootStartedAt          time.Time
 	BootProgress           func(runtime.BootProgressEvent)
@@ -250,6 +253,7 @@ type serveRuntimeBundleContextRequest struct {
 func defaultServeOptions() serveOptions {
 	return serveOptions{
 		StoreMode:          storebackend.ActiveDefaultBackend().String(),
+		WorkspaceBackend:   defaultWorkspaceBackend,
 		APIListenAddr:      defaultAPIListenAddr,
 		MCPListenAddr:      defaultMCPListenAddr,
 		ShutdownGrace:      runtime.DefaultShutdownGrace,
@@ -490,7 +494,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 	}
 	bootIdentity := loaded.bootIdentity
 	bootIdentity.BundleHash = strings.TrimSpace(bundleSourceFact.BundleHash)
-	workspaces, err := configuredWorkspaceLifecycleForServe(req.Stores.SQLDB, loaded.contractsRoot, loaded.source, req.MountSources)
+	workspaces, err := configuredWorkspaceLifecycleForServe(req.Stores.SQLDB, loaded.contractsRoot, loaded.source, req.MountSources, req.WorkspaceBackend)
 	if err != nil {
 		return serveRuntimeBundleContext{}, fmt.Errorf("configure workspaces: %w", err)
 	}
@@ -609,6 +613,12 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		log.Printf("resolve workspace data source: %v", err)
 		return 1
 	}
+	workspaceBackend, err := resolveWorkspaceBackend(opts.WorkspaceBackend, opts.WorkspaceBackendSet, cfg)
+	if err != nil {
+		reporter.emit(2, "config_load", "FAILED", err.Error())
+		log.Printf("resolve workspace backend: %v", err)
+		return 1
+	}
 	storeSelection, err := resolveRuntimeStoreSelection(repo, opts.StoreMode, opts.StoreModeSet, cfg)
 	if err != nil {
 		reporter.emit(3, "db_connection", "FAILED", err.Error())
@@ -659,7 +669,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		log.Printf("serve abandon active runs complete: runs=%d deliveries=%d pipeline_receipts=%d", len(result.Runs), len(result.Deliveries), result.PipelineReceiptCount)
 	}
 	if stores.Postgres != nil {
-		recoveryWorkspaces, err := configuredWorkspaceLifecycleForServe(stores.SQLDB, loadedBundle.contractsRoot, source, mountSources)
+		recoveryWorkspaces, err := configuredWorkspaceLifecycleForServe(stores.SQLDB, loadedBundle.contractsRoot, source, mountSources, workspaceBackend)
 		if err != nil {
 			slog.Error("configure recovery workspaces", "error", err)
 			return 1
@@ -711,6 +721,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 			Loaded:                 loaded,
 			Options:                opts,
 			MountSources:           mountSources,
+			WorkspaceBackend:       workspaceBackend,
 			Credentials:            credentialStore,
 			BootStartedAt:          bootStartedAt,
 			BootProgress:           reporter.runtimeSink(),
@@ -767,7 +778,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	}
 
 	var ready atomic.Bool
-	supervisor := newRuntimeProjectSupervisor(repo, resolvedPlatformSpecPath, cfg, stores, &ready, mountSources, contractsRoot, bundle, source, rt, opts.Dev)
+	supervisor := newRuntimeProjectSupervisor(repo, resolvedPlatformSpecPath, cfg, stores, &ready, mountSources, workspaceBackend, contractsRoot, bundle, source, rt, opts.Dev)
 	if len(pinnedBundleHashes) > 0 {
 		supervisor.DisableSourceReplacement("swarm serve --bundle-hash pins persisted bundle contexts for the process; dynamic project reload is split to RuntimeContextManager Load/Unload work")
 	}
@@ -1404,7 +1415,14 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 			}
 			return 1
 		}
-		workspaces, err := configuredWorkspaceLifecycle(stores.SQLDB, contractsRoot, source, mountSources)
+		workspaceBackend, err := resolveWorkspaceBackend("", false, cfg)
+		if err != nil {
+			if out != nil {
+				fmt.Fprintf(out, "fork failed: resolve workspace backend: %v\n", err)
+			}
+			return 1
+		}
+		workspaces, err := configuredWorkspaceLifecycleForBackend(stores.SQLDB, contractsRoot, source, mountSources, workspaceBackend)
 		if err != nil {
 			if out != nil {
 				fmt.Fprintf(out, "fork failed: configure workspaces: %v\n", err)
@@ -3068,6 +3086,42 @@ func configuredWorkspaceLifecycle(db *sql.DB, contractsRoot string, source seman
 			}
 			return nil, fmt.Errorf("workspace data source from %s cannot be combined with SWARM_WORKSPACE_VOLUMES_FROM=%s", sourceLabel, volumesFrom)
 		}
+		cfg.SharedDataSource = dataSource
+	}
+	if contractsDir := strings.TrimSpace(contractsRoot); contractsDir != "" {
+		cfg.ContractsSource = contractsDir
+	}
+	manager.SetConfig(cfg)
+	manager.SetSemanticSource(source)
+	return manager, nil
+}
+
+func configuredWorkspaceLifecycleForBackend(db *sql.DB, contractsRoot string, source semanticview.Source, mountSources workspaceMountSources, backend workspaceBackendSelection) (serveWorkspaceLifecycle, error) {
+	selected := strings.TrimSpace(backend.Backend)
+	if selected == "" {
+		selected = defaultWorkspaceBackend
+	}
+	switch selected {
+	case workspace.BackendDocker:
+		return configuredWorkspaceLifecycle(db, contractsRoot, source, mountSources)
+	case workspace.BackendHost:
+		return configuredHostWorkspaceLifecycle(db, contractsRoot, source, mountSources)
+	default:
+		sourceLabel := strings.TrimSpace(backend.Source)
+		if sourceLabel == "" {
+			sourceLabel = "workspace backend"
+		}
+		return nil, fmt.Errorf("workspace backend from %s must be docker or host, got %q", sourceLabel, selected)
+	}
+}
+
+func configuredHostWorkspaceLifecycle(db *sql.DB, contractsRoot string, source semanticview.Source, mountSources workspaceMountSources) (*workspace.HostManager, error) {
+	if volumesFrom := strings.TrimSpace(os.Getenv("SWARM_WORKSPACE_VOLUMES_FROM")); volumesFrom != "" {
+		return nil, fmt.Errorf("host workspace backend cannot consume SWARM_WORKSPACE_VOLUMES_FROM=%s", volumesFrom)
+	}
+	manager := workspace.NewHostManager(db)
+	cfg := workspace.DefaultHostConfig()
+	if dataSource := strings.TrimSpace(mountSources.DataSource); dataSource != "" {
 		cfg.SharedDataSource = dataSource
 	}
 	if contractsDir := strings.TrimSpace(contractsRoot); contractsDir != "" {

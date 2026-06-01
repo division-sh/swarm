@@ -67,6 +67,9 @@ func TestLoadAndValidate_CLI_TestMode(t *testing.T) {
 	if !cfg.Workspace.DataSourceConfigured() {
 		t.Fatal("workspace.data_source presence was not preserved")
 	}
+	if cfg.Workspace.Backend != "" {
+		t.Fatalf("workspace.backend = %q, want empty", cfg.Workspace.Backend)
+	}
 
 	var ext ExtensionsConfig
 	if err := cfg.DecodeExtensions(&ext); err != nil {
@@ -113,6 +116,35 @@ func TestLoad_PreservesEmptyWorkspaceDataSourcePresence(t *testing.T) {
 	}
 	if cfg.Workspace.DataSource != "   " {
 		t.Fatalf("workspace.data_source = %q, want preserved whitespace", cfg.Workspace.DataSource)
+	}
+}
+
+func TestLoad_PreservesWorkspaceBackendPresence(t *testing.T) {
+	cfgText := strings.Join([]string{
+		"runtime:",
+		"  recovery_on_startup: false",
+		"workspace:",
+		"  backend: \"   \"",
+		"llm:",
+		"  backend: anthropic",
+		"  session:",
+		"    lock_ttl: 10s",
+		"    rotate_after_turns: 40",
+		"    rotate_on_parse_failures: 3",
+	}, "\n") + "\n"
+	p := filepath.Join(t.TempDir(), "swarm.yaml")
+	if err := os.WriteFile(p, []byte(cfgText), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.Workspace.BackendConfigured() {
+		t.Fatal("empty workspace.backend presence was not preserved")
+	}
+	if cfg.Workspace.Backend != "   " {
+		t.Fatalf("workspace.backend = %q, want preserved whitespace", cfg.Workspace.Backend)
 	}
 }
 
