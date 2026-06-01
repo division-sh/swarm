@@ -653,6 +653,15 @@ runtime_enforcement:
       entity selectors must resolve either to an envelope field or to a
       declared scalar or enum leaf. Composite whole-value comparison is
       not part of Wave 1.
+    handler_expression_rule: |
+      `query_entities(...).count` used inside handler boolean expressions
+      (guards, rules/on_complete conditions, and accumulator completion
+      expressions) resolves through the active handler workflow identity and
+      current run context. Missing workflow/run context, unsupported scoped
+      operands, or missing scoped operand values fail closed with a diagnostic.
+      Static validation may accept syntactically valid scoped operands whose
+      values are only available at runtime, but runtime evaluation must not
+      reinterpret unresolved scoped operands as string literals.
   error_shape:
     invalid_field: cause=invalid_tool_input with nearest declared matches
     immutable_write: cause=invalid_tool_input for post-create immutable writes
@@ -1027,6 +1036,9 @@ handler_specification:
         declared_field_resolution: Every entity.X reference must resolve against the inferred entity contract.
         nested_type_resolution: Nested paths must resolve through named types to a declared field.
         filter_leaf_rule: query_entities filter paths must resolve to scalar or enum leaves.
+        query_operand_rule: query_entities operands with supported scopes (entity, event, payload, policy, fan_out)
+          are validated as scoped operands; unsupported scoped roots are invalid. Runtime evaluation fails closed
+          when a supported scoped operand is unavailable in the handler context.
       rule: 'For every entity.X used as a value, X must be declared on the inferred entity contract. Universal
         presence semantics provide the runtime value via explicit initial or type default. Dynamic writes remain
         relevant for business meaning, but not for raw field readability.'

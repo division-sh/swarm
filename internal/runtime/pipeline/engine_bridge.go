@@ -217,7 +217,11 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	if err != nil {
 		return contractHandlerExecutionResult{}, fmt.Errorf("build runtime engine: %w", err)
 	}
-	stateSnapshot, err := handlerExecutionStateSnapshot(handler, entityID, triggerCtx.State)
+	workflowVersion := ""
+	if source != nil {
+		workflowVersion = source.WorkflowVersion()
+	}
+	stateSnapshot, err := handlerExecutionStateSnapshot(handler, entityID, triggerCtx.State, flowID, workflowVersion)
 	if err != nil {
 		return contractHandlerExecutionResult{}, err
 	}

@@ -42,7 +42,7 @@ func TestHandlerExecutionStateSnapshotRejectsMalformedPersistedGateShape(t *test
 		EntityID: "ent-1",
 		Stage:    WorkflowStateID("queued"),
 		Metadata: map[string]any{"gates": "invalid"},
-	})
+	}, "default", "v-test")
 	if err == nil {
 		t.Fatal("expected malformed persisted gates to fail closed")
 	}

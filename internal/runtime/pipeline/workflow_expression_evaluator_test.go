@@ -1,6 +1,9 @@
 package pipeline
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestNormalizeWorkflowExpressionStringLiterals(t *testing.T) {
 	got, _, err := normalizeWorkflowExpression(
@@ -28,6 +31,12 @@ func TestValidateConditionCEL_RejectsFanOutOutsideDataAccumulationExpressions(t 
 	}
 }
 
+func TestValidateConditionCEL_AllowsQueryEntitiesPayloadOperandWithoutRuntimeValue(t *testing.T) {
+	if err := ValidateConditionCEL(`query_entities(name == payload.name).count == 0`, WorkflowConditionContextGuard); err != nil {
+		t.Fatalf("expected static query_entities payload operand to validate, got %v", err)
+	}
+}
+
 func TestValidateConditionCEL_AllowsItemOnlyInFilterLikeContexts(t *testing.T) {
 	if err := ValidateConditionCEL(`item.score > 50`, WorkflowConditionContextFilter); err != nil {
 		t.Fatalf("expected filter item scope to validate, got %v", err)
@@ -50,6 +59,54 @@ func TestNormalizeWorkflowExpression_RewritesQueryEntitiesCount(t *testing.T) {
 	want := `0 == 0`
 	if got != want {
 		t.Fatalf("normalizeWorkflowExpression(...) = %q, want %q", got, want)
+	}
+}
+
+func TestWorkflowExpressionEvaluator_EvalBoolSurfacesQueryRewriteError(t *testing.T) {
+	eval := newWorkflowExpressionEvaluator()
+	_, err := eval.EvalBool(`query_entities(name ~= payload.name).count == 0`, workflowExpressionContext{
+		Payload: map[string]any{"name": "candidate-a"},
+	})
+	if err == nil {
+		t.Fatal("expected query_entities predicate error")
+	}
+	if got := err.Error(); !strings.Contains(got, "unsupported query_entities predicate") {
+		t.Fatalf("error = %q, want query_entities predicate diagnostic", got)
+	}
+}
+
+func TestWorkflowExpressionEvaluator_QueryEntitiesMissingScopedOperandFailsClosed(t *testing.T) {
+	eval := newWorkflowExpressionEvaluator()
+	_, err := eval.EvalBool(`query_entities(name == payload.missing).count == 0`, workflowExpressionContext{
+		Payload: map[string]any{"name": "candidate-a"},
+	})
+	if err == nil {
+		t.Fatal("expected missing scoped operand to fail closed")
+	}
+	if got := err.Error(); !strings.Contains(got, "payload.missing") || !strings.Contains(got, "unavailable") {
+		t.Fatalf("error = %q, want missing scoped operand diagnostic", got)
+	}
+}
+
+func TestWorkflowExpressionEvaluator_QueryEntitiesUnsupportedScopedOperandFailsClosed(t *testing.T) {
+	eval := newWorkflowExpressionEvaluator()
+	_, err := eval.EvalBool(`query_entities(name == request.id).count == 0`, workflowExpressionContext{})
+	if err == nil {
+		t.Fatal("expected unsupported scoped operand to fail closed")
+	}
+	if got := err.Error(); !strings.Contains(got, "unsupported query_entities operand scope") || !strings.Contains(got, "request.id") {
+		t.Fatalf("error = %q, want unsupported scoped operand diagnostic", got)
+	}
+}
+
+func TestWorkflowExpressionEvaluator_QueryEntitiesKeepsQuotedScopedLiteral(t *testing.T) {
+	eval := newWorkflowExpressionEvaluator()
+	ok, err := eval.EvalBool(`query_entities(name == "payload.missing").count == 0`, workflowExpressionContext{})
+	if err != nil {
+		t.Fatalf("EvalBool error = %v", err)
+	}
+	if !ok {
+		t.Fatal("expected quoted scoped-looking literal to remain a literal")
 	}
 }
 
