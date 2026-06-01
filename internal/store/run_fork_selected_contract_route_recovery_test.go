@@ -105,6 +105,68 @@ func TestRecordRunForkSelectedContractRouteRecoveryRoundTripsForkLocalEvidence(t
 	}
 }
 
+func TestRecordRunForkSelectedContractRouteRecoveryRoundTripsBundleHashSelection(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	sourceRunID := uuid.NewString()
+	forkRunID := uuid.NewString()
+	eventID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running'), ($2::uuid, 'running')
+	`, sourceRunID, forkRunID); err != nil {
+		t.Fatalf("seed runs: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (run_id, event_id, event_name, payload, produced_by_type)
+		VALUES ($1::uuid, $2::uuid, 'item.received', '{}'::jsonb, 'platform')
+	`, sourceRunID, eventID); err != nil {
+		t.Fatalf("seed fork point event: %v", err)
+	}
+
+	selection, topology, planning := testSelectedRouteRecoveryEvidence(eventID)
+	targetHash := "bundle-v1:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+	selection = RunForkContractSelection{
+		Mode:            RunForkContractSelectionModeBundleHash,
+		BundleHash:      targetHash,
+		WorkflowName:    selection.WorkflowName,
+		WorkflowVersion: selection.WorkflowVersion,
+	}
+	topology.ContractSelection = selection
+	planning.ContractSelection = selection
+
+	record, err := pg.RecordRunForkSelectedContractRouteRecovery(ctx, RunForkSelectedContractRouteRecoveryRequest{
+		ForkRunID:         forkRunID,
+		SourceRunID:       sourceRunID,
+		ForkEventID:       eventID,
+		ContractSelection: selection,
+		RouteTopology:     topology,
+		RecipientPlanning: planning,
+	})
+	if err != nil {
+		t.Fatalf("RecordRunForkSelectedContractRouteRecovery: %v", err)
+	}
+	if record.ContractSelection.Mode != RunForkContractSelectionModeBundleHash ||
+		record.ContractSelection.BundleHash != targetHash ||
+		record.ContractSelection.ContractsRoot != "" {
+		t.Fatalf("record selection = %#v", record.ContractSelection)
+	}
+	loaded, ok, err := pg.LoadRunForkSelectedContractRouteRecovery(ctx, forkRunID)
+	if err != nil {
+		t.Fatalf("LoadRunForkSelectedContractRouteRecovery: %v", err)
+	}
+	if !ok {
+		t.Fatal("route recovery row not found")
+	}
+	if loaded.ContractSelection.Mode != RunForkContractSelectionModeBundleHash ||
+		loaded.ContractSelection.BundleHash != targetHash ||
+		loaded.ContractSelection.ContractsRoot != "" ||
+		!strings.Contains(string(loaded.RouteTopology), targetHash) ||
+		!strings.Contains(string(loaded.RecipientPlanning), targetHash) {
+		t.Fatalf("loaded bundle_hash route recovery = %#v", loaded)
+	}
+}
+
 func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughJSONB(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
@@ -161,6 +223,74 @@ func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughJS
 		}},
 	}); err != nil {
 		t.Fatalf("Authorize recovered JSONB recipient plan: %v", err)
+	}
+}
+
+func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughBundleHashJSONB(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	sourceRunID := uuid.NewString()
+	forkRunID := uuid.NewString()
+	eventID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running'), ($2::uuid, 'running')
+	`, sourceRunID, forkRunID); err != nil {
+		t.Fatalf("seed runs: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (run_id, event_id, event_name, payload, produced_by_type)
+		VALUES ($1::uuid, $2::uuid, 'item.received', '{}'::jsonb, 'platform')
+	`, sourceRunID, eventID); err != nil {
+		t.Fatalf("seed fork point event: %v", err)
+	}
+	selection, topology, planning := testSelectedRouteRecoveryEvidence(eventID)
+	targetHash := "bundle-v1:sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+	selection = RunForkContractSelection{
+		Mode:            RunForkContractSelectionModeBundleHash,
+		BundleHash:      targetHash,
+		WorkflowName:    selection.WorkflowName,
+		WorkflowVersion: selection.WorkflowVersion,
+	}
+	topology.ContractSelection = selection
+	planning.ContractSelection = selection
+	if _, err := pg.RecordRunForkSelectedContractRouteRecovery(ctx, RunForkSelectedContractRouteRecoveryRequest{
+		ForkRunID:         forkRunID,
+		SourceRunID:       sourceRunID,
+		ForkEventID:       eventID,
+		ContractSelection: selection,
+		RouteTopology:     topology,
+		RecipientPlanning: planning,
+	}); err != nil {
+		t.Fatalf("RecordRunForkSelectedContractRouteRecovery: %v", err)
+	}
+	bus := &selectedRouteRecoveryPostgresBus{store: selectedRouteRecoveryStoreWrapper{pg: pg}}
+	am := runtimemanager.NewAgentManager(bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
+		return selectedRouteRecoveryAgent{id: cfg.ID}, nil
+	}, pg)
+
+	if err := am.Recover(ctx); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+	guard, ok := am.SelectedContractRouteRecoveryRecipientGuard(forkRunID)
+	if !ok {
+		t.Fatalf("missing recovered recipient guard for fork %s", forkRunID)
+	}
+	guard.ExpectForkEvent("00000000-0000-0000-0000-000000000992", eventID)
+	evt := events.Event{
+		ID:          "00000000-0000-0000-0000-000000000992",
+		Type:        events.EventType("item.received"),
+		SourceAgent: RunForkSelectedContractExecutionOwner,
+	}
+	if err := guard.Authorize(ctx, evt, runtimebus.PublishRecipientPlan{
+		RoutedRecipients: []runtimebus.PublishDiagnosticRecipient{{
+			Type:        "node",
+			ID:          "node-a",
+			Path:        "flow-a/node-a",
+			RouteSource: "selected_contracts",
+		}},
+	}); err != nil {
+		t.Fatalf("Authorize recovered bundle_hash JSONB recipient plan: %v", err)
 	}
 }
 

@@ -7,6 +7,9 @@ const (
 
 	RunForkSelectedContractDiagnosticPlatformOutcomePolicyOwner = "runtime.run_fork.contract_frontier_admission.selected_contract_diagnostic_platform_outcome_policy"
 
+	RunForkContractSelectionModeSelectedContracts = "selected_contracts"
+	RunForkContractSelectionModeBundleHash        = "bundle_hash"
+
 	RunForkContractFrontierDispositionLineageNoAction = "lineage_no_action"
 
 	RunForkBlockerContractFrontierExecutionUnsupported = "contract_frontier_execution_unsupported"
@@ -16,6 +19,7 @@ const (
 type RunForkContractSelection struct {
 	Mode            string `json:"mode"`
 	ContractsRoot   string `json:"contracts_root,omitempty"`
+	BundleHash      string `json:"bundle_hash,omitempty"`
 	WorkflowName    string `json:"workflow_name,omitempty"`
 	WorkflowVersion string `json:"workflow_version,omitempty"`
 }

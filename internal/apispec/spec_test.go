@@ -269,7 +269,9 @@ func TestGeneratedOpenRPCBundleIdentityDescriptionsPreserveConstraints(t *testin
 	}
 	assertOpenRPCParamDescriptionContains(t, "run.fork", runForkParams, "bundle_hash",
 		"#976",
-		"UNSUPPORTED_BUNDLE_HASH_FORK",
+		"loaded/boot-pinned RuntimeContextManager BundleContext",
+		"BUNDLE_UNAVAILABLE",
+		"BUNDLE_DATA_INTEGRITY_ERROR",
 	)
 }
 

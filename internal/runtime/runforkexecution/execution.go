@@ -9,6 +9,7 @@ import (
 
 	"swarm/internal/events"
 	runtimebus "swarm/internal/runtime/bus"
+	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/runforkadmission"
 	"swarm/internal/store"
@@ -326,16 +327,32 @@ func selectedContractExecutionFrontierEventIDs(events []store.RunForkContractFro
 func normalizeSelectedContractExecutionSelection(selection store.RunForkContractSelection) (store.RunForkContractSelection, error) {
 	selection.Mode = strings.TrimSpace(selection.Mode)
 	if selection.Mode == "" {
-		selection.Mode = "selected_contracts"
-	}
-	if selection.Mode != "selected_contracts" {
-		return store.RunForkContractSelection{}, fmt.Errorf("selected-contract execution requires mode selected_contracts; got %q", selection.Mode)
+		selection.Mode = store.RunForkContractSelectionModeSelectedContracts
 	}
 	selection.ContractsRoot = strings.TrimSpace(selection.ContractsRoot)
+	selection.BundleHash = strings.TrimSpace(selection.BundleHash)
 	selection.WorkflowName = strings.TrimSpace(selection.WorkflowName)
 	selection.WorkflowVersion = strings.TrimSpace(selection.WorkflowVersion)
-	if selection.ContractsRoot == "" {
-		return store.RunForkContractSelection{}, fmt.Errorf("selected-contract execution requires contracts_root")
+	switch selection.Mode {
+	case store.RunForkContractSelectionModeSelectedContracts:
+		if selection.ContractsRoot == "" {
+			return store.RunForkContractSelection{}, fmt.Errorf("selected-contract execution requires contracts_root")
+		}
+		if selection.BundleHash != "" {
+			return store.RunForkContractSelection{}, fmt.Errorf("selected-contract execution selected_contracts mode cannot carry bundle_hash")
+		}
+	case store.RunForkContractSelectionModeBundleHash:
+		if selection.BundleHash == "" {
+			return store.RunForkContractSelection{}, fmt.Errorf("selected-contract execution requires bundle_hash")
+		}
+		if err := runtimecontracts.ValidateBundleHash(selection.BundleHash); err != nil {
+			return store.RunForkContractSelection{}, fmt.Errorf("selected-contract execution bundle_hash invalid: %w", err)
+		}
+		if selection.ContractsRoot != "" {
+			return store.RunForkContractSelection{}, fmt.Errorf("selected-contract execution bundle_hash mode cannot carry contracts_root")
+		}
+	default:
+		return store.RunForkContractSelection{}, fmt.Errorf("selected-contract execution requires mode selected_contracts or bundle_hash; got %q", selection.Mode)
 	}
 	return selection, nil
 }

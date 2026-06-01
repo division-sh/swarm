@@ -7,6 +7,7 @@ import (
 
 	swruntime "swarm/internal/runtime"
 	runtimecorrelation "swarm/internal/runtime/correlation"
+	runtimerunforkadmission "swarm/internal/runtime/runforkadmission"
 	"swarm/internal/store"
 	"swarm/internal/store/runbundle"
 )
@@ -36,7 +37,42 @@ func operatorOptionsForBundleContext(opts OperatorReadOptions, contextDef *swrun
 	if contextDef.Runtime.Manager != nil {
 		selected.AgentControl = contextDef.Runtime.Manager
 	}
+	selected.RunFork = runForkExecutorForBundleContext(selected.RunFork, contextDef)
 	return selected
+}
+
+func runForkExecutorForBundleContext(executor RunForkExecutor, contextDef *swruntime.BundleContext) RunForkExecutor {
+	if contextDef == nil || contextDef.Runtime == nil || executor == nil {
+		return executor
+	}
+	apply := func(selected SelectedContractRunForkExecutor) SelectedContractRunForkExecutor {
+		selected.AgentRuntime.Config = contextDef.Runtime.Config
+		selected.AgentRuntime.EntityStore = contextDef.Runtime.Stores.ToolEntityStore
+		selected.AgentRuntime.HumanTaskStore = contextDef.Runtime.Stores.HumanTaskStore
+		selected.AgentRuntime.SessionRegistry = contextDef.Runtime.Stores.SessionRegistry
+		selected.AgentRuntime.ConversationStore = contextDef.Runtime.Stores.ConversationStore
+		selected.AgentRuntime.TurnStore = contextDef.Runtime.Stores.TurnStore
+		selected.AgentRuntime.ScheduleStore = contextDef.Runtime.Stores.ScheduleStore
+		selected.AgentRuntime.MailboxStore = contextDef.Runtime.Stores.MailboxStore
+		selected.AgentRuntime.Workspace = contextDef.Runtime.Workspace
+		selected.AgentRuntime.Credentials = contextDef.Runtime.Credentials
+		selected.AgentRuntime.LLMRuntime = contextDef.Runtime.LLM
+		selected.ContractSelection = runtimerunforkadmission.SelectedContractSelection(contextDef.Source, contextDef.ContractsRoot)
+		return selected
+	}
+	switch typed := executor.(type) {
+	case SelectedContractRunForkExecutor:
+		return apply(typed)
+	case *SelectedContractRunForkExecutor:
+		if typed == nil {
+			return executor
+		}
+		copied := *typed
+		selected := apply(copied)
+		return selected
+	default:
+		return executor
+	}
 }
 
 func runtimeBundleContextByHash(ctx context.Context, opts OperatorReadOptions, bundleHash, runID string) (context.Context, OperatorReadOptions, *swruntime.BundleContext, error) {

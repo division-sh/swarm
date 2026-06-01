@@ -96,7 +96,7 @@ func TestOperatorRunForkHandlersFailClosedOnBundleAvailability(t *testing.T) {
 				runForkTestSourceRunID,
 				runForkTestEventID,
 			),
-			wantCode: UnsupportedBundleHashForkCode,
+			wantCode: BundleUnavailableCode,
 		},
 	}
 
@@ -174,15 +174,15 @@ func TestOperatorRunForkHandlersMapSourceAndEventErrors(t *testing.T) {
 	})
 
 	t.Run("executor source hash mismatch", func(t *testing.T) {
-		executor := &recordingRunForkExecutor{err: errors.New("DB-loaded selected-contract source hash mismatch: request bundle-v1:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc source " + runForkTestBundleHash)}
+		executor := &recordingRunForkExecutor{err: errors.New(runbundle.CodeBundleDataIntegrityError + ": selected_contracts source hash mismatch: request bundle-v1:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc source " + runForkTestBundleHash)}
 		handler := runForkTestHandler(t, &recordingRunForkAvailability{rows: map[string]runbundle.Availability{runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, runForkTestBundleHash)}}, executor)
 		resp := rpcCall(t, handler, fmt.Sprintf(
 			`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"fork_event_id":%q,"idempotency_key":"hash-mismatch"}}`,
 			runForkTestSourceRunID,
 			runForkTestEventID,
 		))
-		if resp.Error == nil || asMap(t, resp.Error.Data)["code"] != UnsupportedBundleHashForkCode {
-			t.Fatalf("run.fork hash mismatch error = %#v, want %s", resp.Error, UnsupportedBundleHashForkCode)
+		if resp.Error == nil || asMap(t, resp.Error.Data)["code"] != BundleDataIntegrityErrorCode {
+			t.Fatalf("run.fork hash mismatch error = %#v, want %s", resp.Error, BundleDataIntegrityErrorCode)
 		}
 	})
 }

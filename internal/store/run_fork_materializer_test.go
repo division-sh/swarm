@@ -558,6 +558,58 @@ func TestRunForkSelectedContractBinding_MaterializesDurableForkRunBinding(t *tes
 	}
 }
 
+func TestRunForkSelectedContractBinding_MaterializesDurableBundleHashBinding(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	eventID := uuid.NewString()
+	at := time.Unix(1700000515, 0).UTC()
+	seedActivationReadySourceRun(t, db, sourceRunID, entityID, eventID, at)
+
+	targetHash := "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	selection := RunForkContractSelection{
+		Mode:            RunForkContractSelectionModeBundleHash,
+		BundleHash:      targetHash,
+		WorkflowName:    "selected-workflow",
+		WorkflowVersion: "v2",
+	}
+	materialized, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{
+		SourceRunID:       sourceRunID,
+		At:                eventID,
+		BundleHash:        targetHash,
+		BundleSource:      "persisted",
+		ContractSelection: &selection,
+	})
+	if err != nil {
+		t.Fatalf("MaterializeRunFork: %v", err)
+	}
+	loaded, err := pg.RequireRunForkSelectedContractBinding(ctx, materialized.ForkRunID)
+	if err != nil {
+		t.Fatalf("RequireRunForkSelectedContractBinding: %v", err)
+	}
+	if loaded.ContractSelection.Mode != RunForkContractSelectionModeBundleHash ||
+		loaded.ContractSelection.BundleHash != targetHash ||
+		loaded.ContractSelection.ContractsRoot != "" ||
+		loaded.ContractSelection.WorkflowName != selection.WorkflowName ||
+		loaded.ContractSelection.WorkflowVersion != selection.WorkflowVersion {
+		t.Fatalf("loaded bundle_hash binding = %#v", loaded)
+	}
+	var forkBundleHash, forkBundleSource string
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(bundle_hash, ''), COALESCE(bundle_source, '')
+		FROM runs
+		WHERE run_id = $1::uuid
+	`, materialized.ForkRunID).Scan(&forkBundleHash, &forkBundleSource); err != nil {
+		t.Fatalf("load fork bundle identity: %v", err)
+	}
+	if forkBundleHash != targetHash || forkBundleSource != "persisted" {
+		t.Fatalf("fork bundle identity = %s/%s, want %s/persisted", forkBundleHash, forkBundleSource, targetHash)
+	}
+}
+
 func TestRunForkSelectedContractBinding_FailsClosedOnMissingDuplicateAndInvalidSelection(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}

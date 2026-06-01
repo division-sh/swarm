@@ -92,6 +92,9 @@ func (l ContractBundleSourceLoader) LoadRunForkSelectedContractSource(ctx contex
 	if err := validateSelectedSourceLoaderSelection(selection); err != nil {
 		return LoadedSelectedContractSource{}, err
 	}
+	if strings.TrimSpace(selection.Mode) == store.RunForkContractSelectionModeBundleHash {
+		return LoadedSelectedContractSource{}, fmt.Errorf("%s: disk selected-contract source loader cannot load bundle_hash mode %s", runbundle.CodeBundleUnavailable, strings.TrimSpace(selection.BundleHash))
+	}
 	repoRoot := strings.TrimSpace(l.RepoRoot)
 	if repoRoot == "" {
 		return LoadedSelectedContractSource{}, fmt.Errorf("selected-contract execution admission source loader requires repo root")
@@ -151,31 +154,42 @@ func (l BundleCatalogSelectedContractSourceLoader) LoadRunForkSelectedContractSo
 		return LoadedSelectedContractSource{}, fmt.Errorf("DB-loaded selected-contract source loader requires bundle catalog store")
 	}
 	sourceRunID := strings.TrimSpace(req.SourceRunID)
-	if sourceRunID == "" {
-		return LoadedSelectedContractSource{}, fmt.Errorf("DB-loaded selected-contract source loader requires source run_id")
-	}
-	availability, err := l.Store.LoadRunBundleAvailability(ctx, sourceRunID)
-	if err != nil {
-		return LoadedSelectedContractSource{}, err
-	}
-	if availability.DataIntegrityError() {
-		return LoadedSelectedContractSource{}, fmt.Errorf("%s: %s", runbundle.CodeBundleDataIntegrityError, availability.DetailString())
-	}
-	if !availability.Available() {
-		return LoadedSelectedContractSource{}, fmt.Errorf("%s: %s", runbundle.CodeBundleUnavailable, availability.DetailString())
-	}
-	bundleHash := strings.TrimSpace(req.BundleHash)
-	if bundleHash == "" {
-		bundleHash = strings.TrimSpace(availability.BundleHash)
-	}
-	if bundleHash == "" {
-		return LoadedSelectedContractSource{}, fmt.Errorf("%s: source run %s has no canonical bundle_hash", runbundle.CodeBundleDataIntegrityError, sourceRunID)
-	}
-	if bundleHash != strings.TrimSpace(availability.BundleHash) {
-		return LoadedSelectedContractSource{}, fmt.Errorf("DB-loaded selected-contract source hash mismatch: request %s source %s", bundleHash, availability.BundleHash)
+	requestedHash := strings.TrimSpace(req.BundleHash)
+	bundleHash := strings.TrimSpace(selection.BundleHash)
+	if selection.Mode == store.RunForkContractSelectionModeSelectedContracts {
+		if sourceRunID == "" {
+			return LoadedSelectedContractSource{}, fmt.Errorf("DB-loaded selected-contract source loader requires source run_id")
+		}
+		availability, err := l.Store.LoadRunBundleAvailability(ctx, sourceRunID)
+		if err != nil {
+			return LoadedSelectedContractSource{}, err
+		}
+		if availability.DataIntegrityError() {
+			return LoadedSelectedContractSource{}, fmt.Errorf("%s: %s", runbundle.CodeBundleDataIntegrityError, availability.DetailString())
+		}
+		if !availability.Available() {
+			return LoadedSelectedContractSource{}, fmt.Errorf("%s: %s", runbundle.CodeBundleUnavailable, availability.DetailString())
+		}
+		bundleHash = requestedHash
+		if bundleHash == "" {
+			bundleHash = strings.TrimSpace(availability.BundleHash)
+		}
+		if bundleHash == "" {
+			return LoadedSelectedContractSource{}, fmt.Errorf("%s: source run %s has no canonical bundle_hash", runbundle.CodeBundleDataIntegrityError, sourceRunID)
+		}
+		if bundleHash != strings.TrimSpace(availability.BundleHash) {
+			return LoadedSelectedContractSource{}, fmt.Errorf("%s: selected_contracts source hash mismatch: request %s source %s", runbundle.CodeBundleDataIntegrityError, bundleHash, availability.BundleHash)
+		}
+	} else {
+		if requestedHash != "" && requestedHash != bundleHash {
+			return LoadedSelectedContractSource{}, fmt.Errorf("%s: target bundle_hash selection %s does not match request %s", runbundle.CodeBundleDataIntegrityError, bundleHash, requestedHash)
+		}
 	}
 	record, err := l.Store.LoadBundleCatalogRuntimeRecord(ctx, bundleHash)
 	if errors.Is(err, store.ErrBundleNotFound) {
+		if selection.Mode == store.RunForkContractSelectionModeBundleHash {
+			return LoadedSelectedContractSource{}, fmt.Errorf("%s: target bundle %s is not available", runbundle.CodeBundleUnavailable, bundleHash)
+		}
 		return LoadedSelectedContractSource{}, fmt.Errorf("%s: source run %s bundle row missing for %s", runbundle.CodeBundleDataIntegrityError, sourceRunID, bundleHash)
 	}
 	if err != nil {
@@ -464,6 +478,7 @@ func validateSelectionMatches(label string, want, got store.RunForkContractSelec
 	}
 	if strings.TrimSpace(want.Mode) != strings.TrimSpace(got.Mode) ||
 		strings.TrimSpace(want.ContractsRoot) != strings.TrimSpace(got.ContractsRoot) ||
+		strings.TrimSpace(want.BundleHash) != strings.TrimSpace(got.BundleHash) ||
 		strings.TrimSpace(want.WorkflowName) != strings.TrimSpace(got.WorkflowName) ||
 		strings.TrimSpace(want.WorkflowVersion) != strings.TrimSpace(got.WorkflowVersion) {
 		return fmt.Errorf("selected-contract execution admission %s selection does not match durable binding", label)
@@ -472,11 +487,26 @@ func validateSelectionMatches(label string, want, got store.RunForkContractSelec
 }
 
 func validateSelectedContractSelection(label string, selection store.RunForkContractSelection) error {
-	if strings.TrimSpace(selection.Mode) != "selected_contracts" {
-		return fmt.Errorf("selected-contract execution admission %s requires mode selected_contracts; got %q", label, selection.Mode)
-	}
-	if strings.TrimSpace(selection.ContractsRoot) == "" {
-		return fmt.Errorf("selected-contract execution admission %s requires contracts_root", label)
+	switch strings.TrimSpace(selection.Mode) {
+	case store.RunForkContractSelectionModeSelectedContracts:
+		if strings.TrimSpace(selection.ContractsRoot) == "" {
+			return fmt.Errorf("selected-contract execution admission %s requires contracts_root", label)
+		}
+		if strings.TrimSpace(selection.BundleHash) != "" {
+			return fmt.Errorf("selected-contract execution admission %s selected_contracts mode cannot carry bundle_hash", label)
+		}
+	case store.RunForkContractSelectionModeBundleHash:
+		if strings.TrimSpace(selection.BundleHash) == "" {
+			return fmt.Errorf("selected-contract execution admission %s requires bundle_hash", label)
+		}
+		if err := runtimecontracts.ValidateBundleHash(selection.BundleHash); err != nil {
+			return fmt.Errorf("selected-contract execution admission %s bundle_hash invalid: %w", label, err)
+		}
+		if strings.TrimSpace(selection.ContractsRoot) != "" {
+			return fmt.Errorf("selected-contract execution admission %s bundle_hash mode cannot carry contracts_root", label)
+		}
+	default:
+		return fmt.Errorf("selected-contract execution admission %s requires mode selected_contracts or bundle_hash; got %q", label, selection.Mode)
 	}
 	if strings.TrimSpace(selection.WorkflowName) == "" {
 		return fmt.Errorf("selected-contract execution admission %s requires workflow_name", label)
@@ -488,11 +518,20 @@ func validateSelectedContractSelection(label string, selection store.RunForkCont
 }
 
 func validateSelectedSourceLoaderSelection(selection store.RunForkContractSelection) error {
-	if strings.TrimSpace(selection.Mode) != "selected_contracts" {
-		return fmt.Errorf("selected-contract execution admission selected source loader requires mode selected_contracts; got %q", selection.Mode)
-	}
-	if strings.TrimSpace(selection.ContractsRoot) == "" {
-		return fmt.Errorf("selected-contract execution admission selected source loader requires contracts_root")
+	switch strings.TrimSpace(selection.Mode) {
+	case store.RunForkContractSelectionModeSelectedContracts:
+		if strings.TrimSpace(selection.ContractsRoot) == "" {
+			return fmt.Errorf("selected-contract execution admission selected source loader requires contracts_root")
+		}
+	case store.RunForkContractSelectionModeBundleHash:
+		if strings.TrimSpace(selection.BundleHash) == "" {
+			return fmt.Errorf("selected-contract execution admission selected source loader requires bundle_hash")
+		}
+		if err := runtimecontracts.ValidateBundleHash(selection.BundleHash); err != nil {
+			return fmt.Errorf("selected-contract execution admission selected source loader bundle_hash invalid: %w", err)
+		}
+	default:
+		return fmt.Errorf("selected-contract execution admission selected source loader requires mode selected_contracts or bundle_hash; got %q", selection.Mode)
 	}
 	return nil
 }

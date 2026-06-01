@@ -42,6 +42,7 @@ func RequireRunForkSelectedContractBindingCapabilities(caps StoreSchemaCapabilit
 			"fork_event_id",
 			"mode",
 			"contracts_root",
+			"bundle_hash",
 			"workflow_name",
 			"workflow_version",
 			"created_at",
@@ -90,6 +91,7 @@ func (s *PostgresStore) LoadRunForkSelectedContractBinding(ctx context.Context, 
 		"fork_event_id",
 		"mode",
 		"contracts_root",
+		"bundle_hash",
 		"workflow_name",
 		"workflow_version",
 		"created_at",
@@ -131,15 +133,16 @@ func insertRunForkSelectedContractBinding(ctx context.Context, tx *sql.Tx, req R
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO run_fork_selected_contract_bindings (
 			fork_run_id, source_run_id, fork_event_id,
-			mode, contracts_root, workflow_name, workflow_version, created_at
+			mode, contracts_root, bundle_hash, workflow_name, workflow_version, created_at
 		)
 		VALUES (
 			$1::uuid, $2::uuid, $3::uuid,
-			$4, $5, $6, $7, $8
+			$4, NULLIF($5, ''), NULLIF($6, ''), $7, $8, $9
 		)
 	`, binding.ForkRunID, binding.SourceRunID, binding.ForkEventID,
 		binding.ContractSelection.Mode,
 		binding.ContractSelection.ContractsRoot,
+		binding.ContractSelection.BundleHash,
 		binding.ContractSelection.WorkflowName,
 		binding.ContractSelection.WorkflowVersion,
 		binding.CreatedAt); err != nil {
@@ -159,7 +162,8 @@ func loadRunForkSelectedContractBinding(ctx context.Context, querier interface {
 			source_run_id::text,
 			fork_event_id::text,
 			mode,
-			contracts_root,
+			COALESCE(contracts_root, ''),
+			COALESCE(bundle_hash, ''),
 			workflow_name,
 			workflow_version,
 			created_at
@@ -171,6 +175,7 @@ func loadRunForkSelectedContractBinding(ctx context.Context, querier interface {
 		&binding.ForkEventID,
 		&selection.Mode,
 		&selection.ContractsRoot,
+		&selection.BundleHash,
 		&selection.WorkflowName,
 		&selection.WorkflowVersion,
 		&binding.CreatedAt,
@@ -225,16 +230,32 @@ func normalizeRunForkSelectedContractBinding(req RunForkSelectedContractBindingR
 func normalizeRunForkSelectedContractSelection(selection RunForkContractSelection) (RunForkContractSelection, error) {
 	selection.Mode = strings.TrimSpace(selection.Mode)
 	if selection.Mode == "" {
-		selection.Mode = "selected_contracts"
-	}
-	if selection.Mode != "selected_contracts" {
-		return RunForkContractSelection{}, fmt.Errorf("selected contract binding requires mode selected_contracts; got %q", selection.Mode)
+		selection.Mode = RunForkContractSelectionModeSelectedContracts
 	}
 	selection.ContractsRoot = strings.TrimSpace(selection.ContractsRoot)
+	selection.BundleHash = strings.TrimSpace(selection.BundleHash)
 	selection.WorkflowName = strings.TrimSpace(selection.WorkflowName)
 	selection.WorkflowVersion = strings.TrimSpace(selection.WorkflowVersion)
-	if selection.ContractsRoot == "" {
-		return RunForkContractSelection{}, fmt.Errorf("selected contract binding requires contracts_root")
+	switch selection.Mode {
+	case RunForkContractSelectionModeSelectedContracts:
+		if selection.ContractsRoot == "" {
+			return RunForkContractSelection{}, fmt.Errorf("selected contract binding requires contracts_root")
+		}
+		if selection.BundleHash != "" {
+			return RunForkContractSelection{}, fmt.Errorf("selected contract binding selected_contracts mode cannot carry bundle_hash")
+		}
+	case RunForkContractSelectionModeBundleHash:
+		if selection.BundleHash == "" {
+			return RunForkContractSelection{}, fmt.Errorf("selected contract binding bundle_hash mode requires bundle_hash")
+		}
+		if !canonicalBundleHashPattern.MatchString(selection.BundleHash) {
+			return RunForkContractSelection{}, fmt.Errorf("selected contract binding bundle_hash must be bundle-v1:sha256:<64 lowercase hex>")
+		}
+		if selection.ContractsRoot != "" {
+			return RunForkContractSelection{}, fmt.Errorf("selected contract binding bundle_hash mode cannot carry contracts_root")
+		}
+	default:
+		return RunForkContractSelection{}, fmt.Errorf("selected contract binding requires mode selected_contracts or bundle_hash; got %q", selection.Mode)
 	}
 	if selection.WorkflowName == "" {
 		return RunForkContractSelection{}, fmt.Errorf("selected contract binding requires workflow_name")
