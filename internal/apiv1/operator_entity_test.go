@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
@@ -193,6 +194,79 @@ func TestOperatorEntityHandlersServeContractEntityTypesFromPostgres(t *testing.T
 	stateCounts := asMap(t, asMap(t, typedState.Result)["counts"])
 	if stateCounts["discovered"] != float64(1) || stateCounts["pending"] != float64(1) {
 		t.Fatalf("typed current_state counts = %#v", stateCounts)
+	}
+}
+
+func TestOperatorEntityHandlersServeContractEntityTypesFromSQLite(t *testing.T) {
+	ctx := context.Background()
+	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
+	runID := "11111111-1111-1111-1111-111111111111"
+	entityA := "22222222-2222-2222-2222-222222222222"
+	entityB := "33333333-3333-3333-3333-333333333333"
+	now := time.Unix(1700000000, 0).UTC()
+	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, now); err != nil {
+		t.Fatalf("seed sqlite run: %v", err)
+	}
+	if _, err := sqliteStore.DB.ExecContext(ctx, `
+		INSERT INTO entity_state (
+			run_id, entity_id, flow_instance, entity_type, current_state,
+			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
+		) VALUES
+			(?, ?, 'scoring/vertical-a', 'vertical', 'discovered',
+			 '{}', '{"vertical_name":"Healthcare"}', '{}', 1, ?, ?, ?),
+			(?, ?, 'scoring/vertical-b', 'vertical', 'pending',
+			 '{}', '{"vertical_name":"Manufacturing"}', '{}', 1, ?, ?, ?)
+	`, runID, entityA, now, now, now, runID, entityB, now, now, now); err != nil {
+		t.Fatalf("seed sqlite entity_state: %v", err)
+	}
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			Entities: sqliteStore,
+		}),
+	})
+
+	list := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"list","method":"entity.list","params":{"run_id":"11111111-1111-1111-1111-111111111111","type":"vertical","limit":10}}`)
+	if list.Error != nil {
+		t.Fatalf("entity.list error = %#v", list.Error)
+	}
+	rows, _ := asMap(t, list.Result)["entities"].([]any)
+	if len(rows) != 2 {
+		t.Fatalf("entity.list rows = %#v", list.Result)
+	}
+	for _, row := range rows {
+		if got := asMap(t, row)["entity_type"]; got != "vertical" {
+			t.Fatalf("entity.list entity_type = %#v, want vertical", got)
+		}
+	}
+
+	get := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"get","method":"entity.get","params":{"entity_id":"22222222-2222-2222-2222-222222222222","run_id":"11111111-1111-1111-1111-111111111111"}}`)
+	if get.Error != nil {
+		t.Fatalf("entity.get error = %#v", get.Error)
+	}
+	getResult := asMap(t, get.Result)
+	if got := asMap(t, getResult["entity"])["entity_type"]; got != "vertical" {
+		t.Fatalf("entity.get entity_type = %#v, want vertical", got)
+	}
+	if fields := asMap(t, getResult["fields"]); fields["vertical_name"] != "Healthcare" {
+		t.Fatalf("entity.get fields = %#v", fields)
+	}
+
+	byType := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agg-type","method":"entity.aggregate","params":{"run_id":"11111111-1111-1111-1111-111111111111","group_by":"entity_type"}}`)
+	if byType.Error != nil {
+		t.Fatalf("entity.aggregate entity_type error = %#v", byType.Error)
+	}
+	typeCounts := asMap(t, asMap(t, byType.Result)["counts"])
+	if typeCounts["vertical"] != float64(2) || typeCounts["default"] != nil {
+		t.Fatalf("entity_type counts = %#v", typeCounts)
+	}
+
+	entityContext := mailboxEntityContext(ctx, store.MailboxV1Item{
+		SourceRunID:    runID,
+		SourceEntityID: entityA,
+	}, sqliteStore)
+	if !entityContext.Available || entityContext.Entity == nil || entityContext.Entity.Entity.EntityID != entityA {
+		t.Fatalf("mailbox entity context = %#v, want sqlite entity context", entityContext)
 	}
 }
 
