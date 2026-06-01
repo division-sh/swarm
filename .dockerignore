@@ -1,16 +1,23 @@
 .git
 .gitignore
 .DS_Store
+.idea
 
 # Local agent auth / editor state should never enter build context.
 .claude
 .codex
+AGENT_STATUS.md
+CONTROL.yaml
+RESPONSE.yaml
 
 # Large or generated artifacts.
 coverage
+test-results/
 **/*.log
 **/*.tmp
 empire
+empire.exe
+*.test
 
 # Dashboard frontend build artifacts.
 internal/dashboard/ui/node_modules
@@ -19,3 +26,11 @@ internal/dashboard/ui/dist
 # Local env files.
 .env
 .env.*
+!.env.example
+
+# Local data, Docker placeholder state, private docs, and parallel worktrees.
+data/
+.docker/
+worktrees/
+misc/
+docs/
