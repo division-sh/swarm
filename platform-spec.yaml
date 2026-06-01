@@ -2526,7 +2526,7 @@ engine:
             provider: openai
             transport: api
             provider_contract_runtime_mode: openai_responses
-            protocol: Native OpenAI Responses API at /v1/responses relative to the configured base URL.
+            protocol: Native OpenAI Responses API resource path /responses relative to the configured base URL.
             credential_source:
               env_var: OPENAI_API_KEY
               required: true
@@ -2569,7 +2569,7 @@ engine:
           - "openai_compatible remains Chat Completions-compatible HTTP JSON and MUST NOT inherit native Responses semantics."
         protocol_family:
           name: native_openai_responses
-          endpoint_path: /v1/responses
+          endpoint_path: /responses
           transport: api
           request_body_owner: "provider adapter behind internal/runtime/llm.ProviderContract after #1224"
           input_scope: >
