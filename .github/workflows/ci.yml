@@ -106,9 +106,15 @@ jobs:
         shell: bash
         run: |
           mkdir -p test-results
-          mapfile -t test_packages < <(go list ./... | grep -v '^swarm/internal/runtime/cataloge2e$')
+          go list ./... > test-results/go-packages.txt
+          awk '$0 != "swarm/internal/runtime/cataloge2e" { print }' test-results/go-packages.txt > test-results/go-packages-required.txt
+          if [ ! -s test-results/go-packages-required.txt ]; then
+            echo "no non-catalog Go packages discovered"
+            exit 1
+          fi
+          test_packages=$(cat test-results/go-packages-required.txt)
           set +e
-          go test "${test_packages[@]}" -count=1 -json 2>&1 | tee test-results/go-test.json
+          go test $test_packages -count=1 -json 2>&1 | tee test-results/go-test.json
           package_status=${PIPESTATUS[0]}
           go test ./internal/runtime/cataloge2e -run '^TestCatalogRequiredSmoke$' -count=1 -json 2>&1 | tee -a test-results/go-test.json
           catalog_smoke_status=${PIPESTATUS[0]}
