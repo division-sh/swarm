@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	swruntime "swarm/internal/runtime"
 	"swarm/internal/runtime/destructivereset"
 	"swarm/internal/store"
 )
@@ -100,6 +101,134 @@ func TestOperatorRuntimeNukeApplyReportsPartialFailureAndIdempotency(t *testing.
 	}
 	if data := asMap(t, conflict.Error.Data); data["code"] != IdempotencyConflictCode {
 		t.Fatalf("runtime.nuke conflict data = %#v, want %s", data, IdempotencyConflictCode)
+	}
+}
+
+func TestOperatorRuntimeNukeIncludeBundlesDeactivatesLoadedRuntimeContexts(t *testing.T) {
+	now := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
+	fixture := newOperatorRuntimeContextFixture(t)
+	owners := newRecordingRuntimeNukeOwners()
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			Now:              func() time.Time { return now },
+			Ready:            func() bool { return true },
+			Database:         fakePinger{},
+			Idempotency:      newRecordingAPIIdempotencyStore(),
+			RuntimeContexts:  fixture.manager,
+			ResetCoordinator: owners,
+			ResetQuiescer:    recordingRuntimeNukeQuiescer{owners},
+			ResetCleaner:     recordingRuntimeNukeCleaner{owners},
+			ResetContainers:  recordingRuntimeNukeContainerStopper{owners},
+		}),
+	})
+
+	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"nuke","method":"runtime.nuke","params":{"include_bundles":true,"idempotency_key":"nuke-contexts"}}`)
+	if resp.Error != nil {
+		t.Fatalf("runtime.nuke error = %#v", resp.Error)
+	}
+	assertRuntimeContextsUnloaded(t, fixture.manager)
+}
+
+func TestOperatorRuntimeNukeIncludeBundlesPartialFailureDeactivatesLoadedRuntimeContextsAndReplay(t *testing.T) {
+	now := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
+	idempotency := newRecordingAPIIdempotencyStore()
+	fixture := newOperatorRuntimeContextFixture(t)
+	owners := newRecordingRuntimeNukeOwners()
+	owners.containerFailure = "docker stop denied"
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			Now:              func() time.Time { return now },
+			Ready:            func() bool { return true },
+			Database:         fakePinger{},
+			Idempotency:      idempotency,
+			RuntimeContexts:  fixture.manager,
+			ResetCoordinator: owners,
+			ResetQuiescer:    recordingRuntimeNukeQuiescer{owners},
+			ResetCleaner:     recordingRuntimeNukeCleaner{owners},
+			ResetContainers:  recordingRuntimeNukeContainerStopper{owners},
+		}),
+	})
+	body := `{"jsonrpc":"2.0","id":"nuke","method":"runtime.nuke","params":{"include_bundles":true,"idempotency_key":"nuke-contexts-partial"}}`
+
+	resp := rpcCall(t, handler, body)
+	if resp.Error != nil {
+		t.Fatalf("runtime.nuke partial error = %#v", resp.Error)
+	}
+	result := asMap(t, resp.Result)
+	if result["ok"] != false || result["status"] != "partial_failure" || result["include_bundles"] != true || result["partial_failure"] != true {
+		t.Fatalf("runtime.nuke include_bundles partial result = %#v", result)
+	}
+	if len(owners.calls) != 4 {
+		t.Fatalf("runtime.nuke partial owner calls = %d, want 4", len(owners.calls))
+	}
+	assertRuntimeContextsUnloaded(t, fixture.manager)
+
+	replayFixture := newOperatorRuntimeContextFixture(t)
+	replayOwners := newRecordingRuntimeNukeOwners()
+	replayHandler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			Now:              func() time.Time { return now },
+			Ready:            func() bool { return true },
+			Database:         fakePinger{},
+			Idempotency:      idempotency,
+			RuntimeContexts:  replayFixture.manager,
+			ResetCoordinator: replayOwners,
+			ResetQuiescer:    recordingRuntimeNukeQuiescer{replayOwners},
+			ResetCleaner:     recordingRuntimeNukeCleaner{replayOwners},
+			ResetContainers:  recordingRuntimeNukeContainerStopper{replayOwners},
+		}),
+	})
+	replay := rpcCall(t, replayHandler, body)
+	if replay.Error != nil {
+		t.Fatalf("runtime.nuke partial replay error = %#v", replay.Error)
+	}
+	if len(replayOwners.calls) != 0 {
+		t.Fatalf("runtime.nuke partial replay owner calls = %d, want 0", len(replayOwners.calls))
+	}
+	assertRuntimeContextsUnloaded(t, replayFixture.manager)
+}
+
+func assertRuntimeContextsUnloaded(t *testing.T, manager *swruntime.RuntimeContextManager) {
+	t.Helper()
+	for _, bundleHash := range []string{runStartTestBundleHash, runtimeContextTestBundleHashB} {
+		lookup := manager.LookupBundleHashStatus(bundleHash)
+		if lookup.Loaded() || lookup.Cause != swruntime.RuntimeContextCauseUnloaded {
+			t.Fatalf("runtime context %s after runtime.nuke = %#v, want unloaded", bundleHash, lookup)
+		}
+	}
+}
+
+func TestOperatorRuntimeNukeExcludeBundlesLeavesRuntimeContextsLoaded(t *testing.T) {
+	now := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
+	fixture := newOperatorRuntimeContextFixture(t)
+	owners := newRecordingRuntimeNukeOwners()
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			Now:              func() time.Time { return now },
+			Ready:            func() bool { return true },
+			Database:         fakePinger{},
+			Idempotency:      newRecordingAPIIdempotencyStore(),
+			RuntimeContexts:  fixture.manager,
+			ResetCoordinator: owners,
+			ResetQuiescer:    recordingRuntimeNukeQuiescer{owners},
+			ResetCleaner:     recordingRuntimeNukeCleaner{owners},
+			ResetContainers:  recordingRuntimeNukeContainerStopper{owners},
+		}),
+	})
+
+	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"nuke","method":"runtime.nuke","params":{"include_bundles":false,"idempotency_key":"nuke-no-contexts"}}`)
+	if resp.Error != nil {
+		t.Fatalf("runtime.nuke include_bundles=false error = %#v", resp.Error)
+	}
+	for _, bundleHash := range []string{runStartTestBundleHash, runtimeContextTestBundleHashB} {
+		lookup := fixture.manager.LookupBundleHashStatus(bundleHash)
+		if !lookup.Loaded() {
+			t.Fatalf("runtime context %s after include_bundles=false = %#v, want loaded", bundleHash, lookup)
+		}
 	}
 }
 

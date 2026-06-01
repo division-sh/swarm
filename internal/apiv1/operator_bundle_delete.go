@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
+	swruntime "swarm/internal/runtime"
 	"swarm/internal/runtime/bundledelete"
 	"swarm/internal/runtime/destructivereset"
 	"swarm/internal/store"
@@ -85,7 +87,44 @@ func executeBundleDelete(ctx context.Context, req Request, opts OperatorReadOpti
 		}
 		return nil, fmt.Errorf("decode bundle.delete response: %w", err)
 	}
+	deactivateRuntimeContextAfterBundleDelete(opts, stored)
 	return stored, nil
+}
+
+func deactivateRuntimeContextAfterBundleDelete(opts OperatorReadOptions, result bundledelete.Result) {
+	if opts.RuntimeContexts == nil || result.DryRun || strings.TrimSpace(result.BundleHash) == "" {
+		return
+	}
+	if !bundleDeleteMadeRuntimeContextUnavailable(result) {
+		return
+	}
+	cause := swruntime.RuntimeContextCauseUnloaded
+	if result.PartialFailure && !result.Deleted {
+		cause = swruntime.RuntimeContextCauseUnavailable
+	}
+	opts.RuntimeContexts.DeactivateBundleHash(result.BundleHash, cause)
+}
+
+func bundleDeleteMadeRuntimeContextUnavailable(result bundledelete.Result) bool {
+	if result.Deleted {
+		return true
+	}
+	if !result.Force || !result.PartialFailure {
+		return false
+	}
+	if !result.Cleanup.AppliedAt.IsZero() {
+		return true
+	}
+	if len(result.Cleanup.Runs) > 0 || len(result.Cleanup.Deliveries) > 0 || len(result.Cleanup.Sessions) > 0 || len(result.Cleanup.Timers) > 0 {
+		return true
+	}
+	if !result.Containers.AppliedAt.IsZero() || len(result.Containers.Selected) > 0 || len(result.Containers.Stopped) > 0 || len(result.Containers.Failed) > 0 {
+		return true
+	}
+	if !result.FinalMutation.AppliedAt.IsZero() || result.FinalMutation.RunsMarkedDeleted > 0 || result.FinalMutation.BundleRowsDeleted > 0 {
+		return true
+	}
+	return false
 }
 
 func bundleDeleteError(bundleHash string, err error) error {

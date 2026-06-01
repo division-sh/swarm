@@ -68,6 +68,62 @@ func TestRuntimeContextManagerRejectsDuplicateBundleHashes(t *testing.T) {
 	}
 }
 
+func TestRuntimeContextManagerDeactivatesPinnedContextFailClosed(t *testing.T) {
+	availability := fakeRunBundleAvailability{
+		rows: map[string]runbundle.Availability{
+			"run-b": {
+				RunID:            "run-b",
+				BundleHash:       runtimeContextTestHashB,
+				BundleSource:     storerunlifecycle.BundleSourcePersisted,
+				BundleRowPresent: true,
+			},
+		},
+	}
+	contextA := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
+	contextB := testBundleContext(t, runtimeContextTestHashB, "beta.requested")
+	manager, err := NewRuntimeContextManager(availability, contextA, contextB)
+	if err != nil {
+		t.Fatalf("NewRuntimeContextManager: %v", err)
+	}
+
+	result := manager.DeactivateBundleHash(runtimeContextTestHashB, RuntimeContextCauseUnloaded)
+	if !result.Found || !result.Changed || result.State != RuntimeContextStateUnloaded || result.Cause != RuntimeContextCauseUnloaded {
+		t.Fatalf("DeactivateBundleHash result = %#v, want changed unloaded", result)
+	}
+	if contextB.Runtime == nil || !contextB.Runtime.shutdownAdmissionClosed() {
+		t.Fatal("deactivated runtime shutdown admission is still open")
+	}
+	if manager.Len() != 2 || !manager.MultiContext() {
+		t.Fatalf("manager Len/MultiContext after deactivation = %d/%v, want 2/true", manager.Len(), manager.MultiContext())
+	}
+	if _, ok := manager.LookupBundleHash(runtimeContextTestHashB); ok {
+		t.Fatal("LookupBundleHash loaded deactivated bundle = true")
+	}
+	lookup := manager.LookupBundleHashStatus(runtimeContextTestHashB)
+	if lookup.Loaded() || !lookup.Found || lookup.State != RuntimeContextStateUnloaded || lookup.Cause != RuntimeContextCauseUnloaded {
+		t.Fatalf("LookupBundleHashStatus = %#v, want found unloaded", lookup)
+	}
+	primary, ok := manager.Primary()
+	if !ok || primary.BundleHash != runtimeContextTestHashA {
+		t.Fatalf("Primary after deactivation = %#v/%v, want %s", primary, ok, runtimeContextTestHashA)
+	}
+	runLookup, availabilityResult, err := manager.LookupRunStatus(context.Background(), "run-b")
+	if err != nil {
+		t.Fatalf("LookupRunStatus: %v", err)
+	}
+	if runLookup.Loaded() || runLookup.Cause != RuntimeContextCauseUnloaded {
+		t.Fatalf("LookupRunStatus lookup = %#v, want unloaded", runLookup)
+	}
+	if availabilityResult.BundleHash != runtimeContextTestHashB || !availabilityResult.Available() {
+		t.Fatalf("LookupRunStatus availability = %#v, want available %s", availabilityResult, runtimeContextTestHashB)
+	}
+
+	second := manager.DeactivateBundleHash(runtimeContextTestHashB, RuntimeContextCauseUnavailable)
+	if !second.Found || second.Changed || second.Cause != RuntimeContextCauseUnloaded {
+		t.Fatalf("second DeactivateBundleHash result = %#v, want idempotent original cause", second)
+	}
+}
+
 func testBundleContext(t *testing.T, bundleHash, eventName string) BundleContext {
 	t.Helper()
 	bundle := &runtimecontracts.WorkflowContractBundle{

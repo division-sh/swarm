@@ -327,6 +327,43 @@ func TestOperatorRuntimeContextManagerFailsClosedForUnloadedBundle(t *testing.T)
 	}
 }
 
+func TestOperatorRuntimeContextManagerFailsClosedForDeactivatedBundle(t *testing.T) {
+	fixture := newOperatorRuntimeContextFixture(t)
+	result := fixture.manager.DeactivateBundleHash(runtimeContextTestBundleHashB, swruntime.RuntimeContextCauseUnloaded)
+	if !result.Found || !result.Changed {
+		t.Fatalf("DeactivateBundleHash result = %#v, want changed", result)
+	}
+	handler := fixture.handler(t)
+
+	explicit := rpcCall(t, handler, eventPublishBodyWithBundleHash("", runtimeContextTestBundleHashB, "triage.requested", `{"topic":"deactivated"}`, "", "idem-deactivated-context"))
+	if explicit.Error == nil {
+		t.Fatal("event.publish deactivated explicit hash error = nil")
+	}
+	data := asMap(t, explicit.Error.Data)
+	details := asMap(t, data["details"])
+	if data["code"] != BundleUnavailableCode || details["cause"] != swruntime.RuntimeContextCauseUnloaded {
+		t.Fatalf("event.publish deactivated explicit hash error data = %#v", data)
+	}
+	if got := countAllRunRows(t, fixture.db); got != 0 {
+		t.Fatalf("run rows after explicit deactivated bundle = %d, want 0", got)
+	}
+
+	runID := uuid.NewString()
+	seedRuntimeContextRunBundle(t, fixture.db, runID, runtimeContextTestBundleHashB, storerunlifecycle.BundleSourcePersisted, "")
+	existing := rpcCall(t, handler, eventPublishBodyWithoutBundle(runID, "triage.requested", `{"topic":"existing-deactivated"}`, "", "idem-existing-deactivated-context"))
+	if existing.Error == nil {
+		t.Fatal("event.publish deactivated run context error = nil")
+	}
+	data = asMap(t, existing.Error.Data)
+	details = asMap(t, data["details"])
+	if data["code"] != BundleUnavailableCode || details["cause"] != swruntime.RuntimeContextCauseUnloaded {
+		t.Fatalf("event.publish deactivated run context error data = %#v", data)
+	}
+	if got := countEventRowsByRunID(t, fixture.db, runID); got != 0 {
+		t.Fatalf("event rows for deactivated existing run = %d, want 0", got)
+	}
+}
+
 func TestOperatorRuntimeContextManagerFailsClosedForAmbiguousRuntimeConsumers(t *testing.T) {
 	fixture := newOperatorRuntimeContextFixture(t)
 	ingress := &recordingRuntimeIngress{}

@@ -51,14 +51,15 @@ func runtimeBundleContextByHash(ctx context.Context, opts OperatorReadOptions, b
 			"reason": "bundle_hash is required to select a runtime context",
 		})
 	}
-	contextDef, ok := manager.LookupBundleHash(bundleHash)
-	if !ok || contextDef == nil {
+	lookup := manager.LookupBundleHashStatus(bundleHash)
+	if !lookup.Loaded() {
 		return ctx, opts, nil, NewApplicationError(BundleUnavailableCode, false, map[string]any{
 			"bundle_hash": bundleHash,
 			"run_id":      strings.TrimSpace(runID),
-			"cause":       "runtime_context_not_loaded",
+			"cause":       runtimeContextLookupCause(lookup),
 		})
 	}
+	contextDef := lookup.Context
 	selected := operatorOptionsForBundleContext(opts, contextDef)
 	fact := contextDef.BundleSourceFact.Normalized()
 	if fact.BundleHash == "" {
@@ -72,7 +73,7 @@ func runtimeBundleContextByRun(ctx context.Context, opts OperatorReadOptions, ru
 	if manager == nil {
 		return ctx, opts, runbundle.Availability{}, nil
 	}
-	contextDef, availability, loaded, err := manager.LookupRun(ctx, strings.TrimSpace(runID))
+	lookup, availability, err := manager.LookupRunStatus(ctx, strings.TrimSpace(runID))
 	if errors.Is(err, store.ErrRunNotFound) {
 		return ctx, opts, runbundle.Availability{}, NewApplicationError(RunNotFoundCode, false, map[string]any{"run_id": strings.TrimSpace(runID)})
 	}
@@ -85,11 +86,12 @@ func runtimeBundleContextByRun(ctx context.Context, opts OperatorReadOptions, ru
 	if !availability.Available() {
 		return ctx, opts, availability, NewApplicationError(BundleUnavailableCode, false, bundleAvailabilityDetails(availability))
 	}
-	if !loaded || contextDef == nil {
+	if !lookup.Loaded() {
 		details := bundleAvailabilityDetails(availability)
-		details["cause"] = "runtime_context_not_loaded"
+		details["cause"] = runtimeContextLookupCause(lookup)
 		return ctx, opts, availability, NewApplicationError(BundleUnavailableCode, false, details)
 	}
+	contextDef := lookup.Context
 	selected := operatorOptionsForBundleContext(opts, contextDef)
 	fact := contextDef.BundleSourceFact.Normalized()
 	if fact.BundleHash == "" {
@@ -103,4 +105,11 @@ func runtimeContextRequiredError(method, reason string) error {
 		"method": strings.TrimSpace(method),
 		"reason": strings.TrimSpace(reason),
 	})
+}
+
+func runtimeContextLookupCause(lookup swruntime.RuntimeContextLookup) string {
+	if cause := strings.TrimSpace(lookup.Cause); cause != "" {
+		return cause
+	}
+	return swruntime.RuntimeContextCauseNotLoaded
 }
