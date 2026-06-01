@@ -49,6 +49,7 @@ func TestHostManagerResolveWorkspaceCreatesScopedHostTargets(t *testing.T) {
 		t.Fatalf("write package.yaml: %v", err)
 	}
 	root := filepath.Join(t.TempDir(), "host-workspaces")
+	canonicalRoot := canonicalTestPath(t, root)
 	manager := NewHostManager(nil)
 	manager.SetConfig(HostConfig{
 		WorkspaceRoot:       root,
@@ -78,8 +79,8 @@ func TestHostManagerResolveWorkspaceCreatesScopedHostTargets(t *testing.T) {
 	if dedicated == nil || dedicated.Enabled() || !dedicated.HostBackend() {
 		t.Fatalf("dedicated target = %#v, want host target without container", dedicated)
 	}
-	if !strings.HasPrefix(filepath.Clean(dedicated.Workdir), filepath.Join(root, "agents")) {
-		t.Fatalf("dedicated workdir = %q, want under agents root %q", dedicated.Workdir, filepath.Join(root, "agents"))
+	if !strings.HasPrefix(filepath.Clean(dedicated.Workdir), filepath.Join(canonicalRoot, "agents")) {
+		t.Fatalf("dedicated workdir = %q, want under agents root %q", dedicated.Workdir, filepath.Join(canonicalRoot, "agents"))
 	}
 
 	shared, err := manager.ResolveWorkspace(context.Background(), models.AgentConfig{
@@ -93,8 +94,8 @@ func TestHostManagerResolveWorkspaceCreatesScopedHostTargets(t *testing.T) {
 	if shared == nil || shared.Enabled() || !shared.HostBackend() {
 		t.Fatalf("shared target = %#v, want host target without container", shared)
 	}
-	if !strings.HasPrefix(filepath.Clean(shared.Workdir), filepath.Join(root, "flows")) {
-		t.Fatalf("shared workdir = %q, want under flows root %q", shared.Workdir, filepath.Join(root, "flows"))
+	if !strings.HasPrefix(filepath.Clean(shared.Workdir), filepath.Join(canonicalRoot, "flows")) {
+		t.Fatalf("shared workdir = %q, want under flows root %q", shared.Workdir, filepath.Join(canonicalRoot, "flows"))
 	}
 }
 
@@ -122,6 +123,76 @@ func TestHostManagerRejectsWorkspaceRootOverlappingReadOnlySources(t *testing.T)
 	}
 }
 
+func TestHostManagerRejectsSymlinkedWorkspaceRootIntoReadOnlySources(t *testing.T) {
+	dataDir := t.TempDir()
+	contractsDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
+		t.Fatalf("write package.yaml: %v", err)
+	}
+	for _, tt := range []struct {
+		name       string
+		target     string
+		wantSource string
+	}{
+		{name: "data", target: dataDir, wantSource: "/data source"},
+		{name: "contracts", target: contractsDir, wantSource: "/opt/swarm/contracts source"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			rootLink := filepath.Join(t.TempDir(), "host-workspaces")
+			if err := os.Symlink(tt.target, rootLink); err != nil {
+				t.Skipf("symlink unavailable: %v", err)
+			}
+			manager := NewHostManager(nil)
+			manager.SetConfig(HostConfig{
+				WorkspaceRoot:       rootLink,
+				SharedDataSource:    dataDir,
+				DataMountPoint:      "/data",
+				ContractsSource:     contractsDir,
+				ContractsMountPoint: "/opt/swarm/contracts",
+			})
+			err := manager.ValidateSource(context.Background(), semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}))
+			if err == nil || !strings.Contains(err.Error(), "must not overlap "+tt.wantSource) {
+				t.Fatalf("ValidateSource error = %v, want symlink overlap rejection for %s", err, tt.wantSource)
+			}
+		})
+	}
+}
+
+func TestHostManagerRejectsSymlinkedWorkspaceChildEscape(t *testing.T) {
+	dataDir := t.TempDir()
+	contractsDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
+		t.Fatalf("write package.yaml: %v", err)
+	}
+	root := filepath.Join(t.TempDir(), "host-workspaces")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+	if err := os.Symlink(dataDir, filepath.Join(root, "agents")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	manager := NewHostManager(nil)
+	manager.SetConfig(HostConfig{
+		WorkspaceRoot:       root,
+		SharedDataSource:    dataDir,
+		DataMountPoint:      "/data",
+		ContractsSource:     contractsDir,
+		ContractsMountPoint: "/opt/swarm/contracts",
+	})
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
+	if err := manager.ValidateSource(context.Background(), source); err != nil {
+		t.Fatalf("ValidateSource: %v", err)
+	}
+	manager.SetSemanticSource(source)
+	_, err := manager.ResolveWorkspace(context.Background(), models.AgentConfig{ID: "agent-1"})
+	if err == nil || !strings.Contains(err.Error(), "escapes root") {
+		t.Fatalf("ResolveWorkspace error = %v, want symlink child escape rejection", err)
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, "agent-1")); !os.IsNotExist(err) {
+		t.Fatalf("symlinked workspace child created under /data: %v", err)
+	}
+}
+
 func TestHostManagerContainerSurfacesAreNoop(t *testing.T) {
 	manager := NewHostManager(nil)
 	inventory, err := manager.ManagedResetContainerInventory(context.Background())
@@ -138,4 +209,13 @@ func TestHostManagerContainerSurfacesAreNoop(t *testing.T) {
 	if result.OperationName != DevEntityCleanupOperationName {
 		t.Fatalf("cleanup operation = %q, want %q", result.OperationName, DevEntityCleanupOperationName)
 	}
+}
+
+func canonicalTestPath(t *testing.T, path string) string {
+	t.Helper()
+	canonical, err := canonicalPathForOverlap(path, "test path")
+	if err != nil {
+		t.Fatalf("canonical test path %s: %v", path, err)
+	}
+	return canonical
 }

@@ -229,13 +229,17 @@ func (m *HostManager) ensureHostWorkspaceDir(rel string) (string, error) {
 		return "", fmt.Errorf("host workspace path is required")
 	}
 	path := filepath.Join(append([]string{root}, components...)...)
-	if err := ensurePathWithinRoot(path, root, "host workspace"); err != nil {
+	canonicalPath, err := canonicalPathForOverlap(path, "host workspace")
+	if err != nil {
 		return "", err
 	}
-	if err := os.MkdirAll(path, 0o700); err != nil {
-		return "", fmt.Errorf("create host workspace %s: %w", path, err)
+	if err := ensurePathWithinRoot(canonicalPath, root, "host workspace"); err != nil {
+		return "", err
 	}
-	return path, nil
+	if err := os.MkdirAll(canonicalPath, 0o700); err != nil {
+		return "", fmt.Errorf("create host workspace %s: %w", canonicalPath, err)
+	}
+	return canonicalPath, nil
 }
 
 func (m *HostManager) hostRoot() (string, error) {
@@ -249,18 +253,20 @@ func (m *HostManager) hostRoot() (string, error) {
 	if scope := strings.TrimSpace(m.cfg.BundleScope); scope != "" {
 		root = filepath.Join(root, SanitizeSlug(scope))
 	}
-	return root, nil
+	return canonicalPathForOverlap(root, "host workspace root")
 }
 
 func (m *HostManager) validateSharedMounts() error {
-	if err := validateReadableDir(strings.TrimSpace(m.cfg.SharedDataSource), "workspace validation failed: /data source"); err != nil {
+	dataSource, err := canonicalReadableDir(strings.TrimSpace(m.cfg.SharedDataSource), "workspace validation failed: /data source")
+	if err != nil {
 		return err
 	}
-	if err := validateReadableDir(strings.TrimSpace(m.cfg.ContractsSource), "workspace validation failed: /opt/swarm/contracts source"); err != nil {
+	contractsSource, err := canonicalReadableDir(strings.TrimSpace(m.cfg.ContractsSource), "workspace validation failed: /opt/swarm/contracts source")
+	if err != nil {
 		return err
 	}
-	if _, err := os.Stat(filepath.Join(strings.TrimSpace(m.cfg.ContractsSource), "package.yaml")); err != nil {
-		return fmt.Errorf("workspace validation failed: contracts source %s missing package.yaml", strings.TrimSpace(m.cfg.ContractsSource))
+	if _, err := os.Stat(filepath.Join(contractsSource, "package.yaml")); err != nil {
+		return fmt.Errorf("workspace validation failed: contracts source %s missing package.yaml", contractsSource)
 	}
 	root, err := m.hostRoot()
 	if err != nil {
@@ -270,11 +276,11 @@ func (m *HostManager) validateSharedMounts() error {
 		name string
 		path string
 	}{
-		{name: "/data source", path: m.cfg.SharedDataSource},
-		{name: "/opt/swarm/contracts source", path: m.cfg.ContractsSource},
+		{name: "/data source", path: dataSource},
+		{name: "/opt/swarm/contracts source", path: contractsSource},
 	} {
 		if pathsOverlap(root, source.path) {
-			return fmt.Errorf("workspace validation failed: host workspace root %s must not overlap %s %s", root, source.name, filepath.Clean(source.path))
+			return fmt.Errorf("workspace validation failed: host workspace root %s must not overlap %s %s", root, source.name, source.path)
 		}
 	}
 	return nil
@@ -317,9 +323,59 @@ func cleanAbsPath(path string, label string) (string, error) {
 	return filepath.Clean(path), nil
 }
 
+func canonicalReadableDir(path, prefix string) (string, error) {
+	canonicalPath, err := canonicalPathForOverlap(path, prefix)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(canonicalPath)
+	if err != nil {
+		return "", fmt.Errorf("%s %s: %w", prefix, canonicalPath, err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("%s %s is not a directory", prefix, canonicalPath)
+	}
+	return canonicalPath, nil
+}
+
+func canonicalPathForOverlap(path, label string) (string, error) {
+	clean, err := cleanAbsPath(path, label)
+	if err != nil {
+		return "", err
+	}
+	current := clean
+	missing := []string{}
+	for {
+		info, statErr := os.Lstat(current)
+		if statErr == nil {
+			if info.Mode()&os.ModeSymlink != 0 {
+				resolved, err := filepath.EvalSymlinks(current)
+				if err != nil {
+					return "", fmt.Errorf("resolve %s symlink %s: %w", label, current, err)
+				}
+				return filepath.Clean(filepath.Join(append([]string{resolved}, missing...)...)), nil
+			}
+			resolved, err := filepath.EvalSymlinks(current)
+			if err != nil {
+				return "", fmt.Errorf("resolve %s %s: %w", label, current, err)
+			}
+			return filepath.Clean(filepath.Join(append([]string{resolved}, missing...)...)), nil
+		}
+		if !os.IsNotExist(statErr) {
+			return "", fmt.Errorf("inspect %s %s: %w", label, current, statErr)
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return "", fmt.Errorf("resolve %s %s: no existing ancestor", label, clean)
+		}
+		missing = append([]string{filepath.Base(current)}, missing...)
+		current = parent
+	}
+}
+
 func pathsOverlap(a, b string) bool {
-	cleanA, errA := cleanAbsPath(a, "path")
-	cleanB, errB := cleanAbsPath(b, "path")
+	cleanA, errA := canonicalPathForOverlap(a, "path")
+	cleanB, errB := canonicalPathForOverlap(b, "path")
 	if errA != nil || errB != nil {
 		return false
 	}

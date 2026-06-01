@@ -1862,6 +1862,11 @@ func TestPlatformSpecWorkspaceBackendSelectionPromoted(t *testing.T) {
 	if hostBackend.WorkspaceRoot.EnvVar != workspace.EnvHostWorkspaceRoot || hostBackend.WorkspaceRoot.Default != "~/.swarm/workspaces" {
 		t.Fatalf("host workspace root spec = %#v", hostBackend.WorkspaceRoot)
 	}
+	for _, want := range []string{"canonical/evaluated paths", "symlink escapes"} {
+		if !strings.Contains(hostBackend.WorkspaceRoot.Rule, want) {
+			t.Fatalf("host workspace root rule missing %q:\n%s", want, hostBackend.WorkspaceRoot.Rule)
+		}
+	}
 	for _, want := range []string{"Unsupported backend", "Empty explicit backend", "SWARM_WORKSPACE_VOLUMES_FROM", "Claude CLI", "native tool execution"} {
 		if !joinedContains(authority.FailureBehavior, want) {
 			t.Fatalf("workspace backend failure behavior missing %q: %#v", want, authority.FailureBehavior)
