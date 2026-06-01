@@ -151,6 +151,104 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 	`, 1)
 }
 
+func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyleSideEffect(t *testing.T) {
+	bundle := loadRuntimeTempBundle(t, templateInstanceEmpireOutboxFixtureFiles())
+	source := semanticview.Wrap(bundle)
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	ctx := seedRuntimeTestRun(t, db)
+	pg := &store.PostgresStore{DB: db}
+	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+	manager := runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+		WorkflowInstances: workflowStore,
+	})
+	module := newRuntimeTestWorkflowModule(t, source)
+	pc := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+		Module:            module,
+		InstanceActivator: manager.ActivateFlowInstance,
+		WorkflowStore:     workflowStore,
+		EventReceiptsCapability: func(context.Context) (bool, error) {
+			return true, nil
+		},
+	})
+	subscribed := make(chan struct{}, 1)
+	pc.SetTestSubscribeHook(func() { subscribed <- struct{}{} })
+	runCtx, cancel := context.WithCancel(ctx)
+	t.Cleanup(cancel)
+	go pc.Run(runCtx)
+	select {
+	case <-subscribed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("workflow runtime did not subscribe")
+	}
+
+	mailbox := (events.Event{
+		ID:        "99999999-9999-4999-8999-999999999912",
+		RunID:     templateInstanceDeliveryRunID,
+		Type:      events.EventType("mailbox.item_decided"),
+		Payload:   []byte(`{"entity_id":"22222222-2222-4222-8222-222222222222","instance_id":"11111111-1111-4111-8111-111111111111","product_id":"product-1"}`),
+		CreatedAt: time.Now().UTC(),
+	}).WithEntityID("22222222-2222-4222-8222-222222222222")
+	if err := bus.Publish(ctx, mailbox); err != nil {
+		t.Fatalf("Publish mailbox: %v", err)
+	}
+
+	waitRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM event_receipts
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'approval-router' AND outcome = 'no_op'
+	`, 1, mailbox.ID)
+	assertRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM event_deliveries
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'approval-router'
+	`, 1, mailbox.ID)
+
+	spinupEventID := waitRuntimeEventID(t, ctx, db, `
+		SELECT event_id::text FROM events
+		WHERE event_name = 'opco.spinup_requested'
+	`, nil)
+	waitRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM event_receipts
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'portfolio-node' AND outcome = 'no_op'
+	`, 1, spinupEventID)
+	assertRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM event_deliveries
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'portfolio-node'
+	`, 1, spinupEventID)
+	assertRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM event_deliveries
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = '__runtime_replay_scope__'
+	`, 1, spinupEventID)
+	assertRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM event_deliveries
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'workflow-runtime'
+	`, 0, spinupEventID)
+
+	autoEventID := waitRuntimeEventID(t, ctx, db, `
+		SELECT event_id::text FROM events
+		WHERE event_name = 'operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested'
+	`, nil)
+	waitRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM event_receipts
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'lifecycle-orchestrator' AND outcome = 'no_op'
+	`, 1, autoEventID)
+	assertRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM event_deliveries
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'lifecycle-orchestrator'
+	`, 1, autoEventID)
+	assertRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM event_deliveries
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = '__runtime_replay_scope__'
+	`, 1, autoEventID)
+	waitRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM events
+		WHERE event_name = 'operating/component_scaffold.spawn_requested'
+	`, 1)
+}
+
 type runtimeTestWorkflowModule struct {
 	source       semanticview.Source
 	workflow     *runtimepipeline.WorkflowDefinition
@@ -261,6 +359,80 @@ flows:
   product_id: string
 `,
 		"nodes.yaml": `portfolio-node:
+  id: portfolio-node
+  execution_type: system_node
+  subscribes_to: [opco.spinup_requested]
+  event_handlers:
+    opco.spinup_requested:
+      action: create_flow_instance
+      template: operating
+      instance_id_from: payload.instance_id
+      config_from:
+        product_id: payload.product_id
+`,
+		"flows/operating/schema.yaml": `name: operating
+initial_state: initializing
+terminal_states: [ready]
+states: [initializing, ready]
+auto_emit_on_create:
+  event: opco.product_initialization_requested
+`,
+		"flows/operating/events.yaml": `opco.product_initialization_requested:
+  instance_id: string
+  template_id: string
+  flow_path: string
+  parent_entity_id: string
+  product_id: string
+component_scaffold.spawn_requested:
+  instance_id: string
+  template_id: string
+  flow_path: string
+  parent_entity_id: string
+  product_id: string
+`,
+		"flows/operating/nodes.yaml": `lifecycle-orchestrator:
+  id: lifecycle-orchestrator
+  execution_type: system_node
+  subscribes_to: [opco.product_initialization_requested]
+  produces: [component_scaffold.spawn_requested]
+  event_handlers:
+    opco.product_initialization_requested:
+      emit: component_scaffold.spawn_requested
+`,
+	}
+}
+
+func templateInstanceEmpireOutboxFixtureFiles() map[string]string {
+	return map[string]string{
+		"package.yaml": `name: test
+version: 1.0.0
+flows:
+  - id: operating
+    flow: operating
+    mode: template
+`,
+		"events.yaml": `mailbox.item_decided:
+  entity_id: string
+  instance_id: string
+  product_id: string
+opco.spinup_requested:
+  instance_id: string
+  product_id: string
+`,
+		"nodes.yaml": `approval-router:
+  id: approval-router
+  execution_type: system_node
+  subscribes_to: [mailbox.item_decided]
+  produces: [opco.spinup_requested]
+  event_handlers:
+    mailbox.item_decided:
+      emit:
+        event: opco.spinup_requested
+        broadcast: true
+        fields:
+          instance_id: payload.instance_id
+          product_id: payload.product_id
+portfolio-node:
   id: portfolio-node
   execution_type: system_node
   subscribes_to: [opco.spinup_requested]

@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"swarm/internal/config"
-	runtimeactors "swarm/internal/runtime/core/actors"
-	"swarm/internal/runtime/sessions"
+	"github.com/division-sh/swarm/internal/config"
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
 func TestOpenAIResponsesRuntimeConversationToolBudgetAndPersistence(t *testing.T) {

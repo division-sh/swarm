@@ -431,8 +431,12 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 				frame.result.EmitIntents = append(frame.result.EmitIntents, actionIntents...)
 			}
 			result = frame.result
+			if err := e.persist(frame.tx.Context(), frame); err != nil {
+				return err
+			}
+			result = frame.result
 			intents = append([]EmitIntent(nil), frame.result.EmitIntents...)
-			return e.persist(frame.tx.Context(), frame)
+			return nil
 		})
 	})
 	if err != nil {

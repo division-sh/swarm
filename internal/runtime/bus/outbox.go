@@ -214,9 +214,12 @@ func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengi
 	if len(recipients) > 0 {
 		deliveryRoutes = events.NormalizeDeliveryRoutes(append(deliveryRoutes, deliveryRoutesFromTargetMap(recipients, "agent", d.bus.deliveryTargetsForEvent(ctx, intent.Event.ID))...))
 	}
-	internalRecipients := deliveryRouteRecipientIDsByType(deliveryRoutes, "node")
+	internalRecipients := deliveryRouteRecipientIDsByType(pendingInternalRoutes, "node")
+	if len(internalRecipients) == 0 {
+		internalRecipients = deliveryRouteRecipientIDsByType(deliveryRoutes, "node")
+	}
 	liveRecipients := uniqueStrings(append(append([]string(nil), recipients...), internalRecipients...))
-	if len(deliveryRoutes) > 0 {
+	if len(deliveryRoutes) > 0 && len(pendingInternalRoutes) == 0 {
 		liveRecipients = uniqueStrings(append(deliveryRouteRecipientIDs(deliveryRoutes), recipients...))
 	}
 	if len(liveRecipients) == 0 {

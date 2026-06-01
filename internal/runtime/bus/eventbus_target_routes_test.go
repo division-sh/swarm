@@ -2,6 +2,8 @@ package bus
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -190,6 +192,64 @@ func TestEventBusPublish_NoTargetConcreteRoutedNodeUsesWorkflowCarrierAndNodeDel
 	}
 }
 
+func TestEventBusPublish_NoTargetRootRoutedNodeUsesSemanticNodeDeliveryRoute(t *testing.T) {
+	store := newTargetRouteMemoryStore()
+	source := semanticview.Wrap(loadTargetRouteTempBundle(t, routedRootNodeFixtureFiles()))
+	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	ch := eb.SubscribeInternal("portfolio-node", events.EventType("opco.spinup_requested"))
+	evt := (events.Event{
+		ID:        uuid.NewString(),
+		Type:      events.EventType("opco.spinup_requested"),
+		Payload:   []byte(`{}`),
+		CreatedAt: time.Now().UTC(),
+	}).WithEntityID("ent-root")
+
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	got := requireBusEvent(t, ch, "root routed node event delivery")
+	if got.FlowInstance() != "" {
+		t.Fatalf("delivered flow instance = %q, want root event", got.FlowInstance())
+	}
+
+	routes := store.routes[evt.ID]
+	if len(routes) != 1 {
+		t.Fatalf("persisted delivery routes = %#v, want one semantic root node route", routes)
+	}
+	route := routes[0]
+	if route.SubscriberType != "node" || route.SubscriberID != "portfolio-node" {
+		t.Fatalf("delivery route = %#v, want node/portfolio-node", route)
+	}
+	if !route.Target.Empty() {
+		t.Fatalf("delivery target = %#v, want empty root target", route.Target)
+	}
+
+	live, internal, replayRoutes, err := eb.replayRecipientsForCommittedEvent(context.Background(), evt, nil, replayclaim.CommittedReplayScopeSubscribed)
+	if err != nil {
+		t.Fatalf("replayRecipientsForCommittedEvent: %v", err)
+	}
+	if len(live) != 1 || live[0] != "portfolio-node" {
+		t.Fatalf("replay live recipients = %#v, want portfolio-node", live)
+	}
+	if len(internal) != 1 || internal[0] != "portfolio-node" {
+		t.Fatalf("replay internal recipients = %#v, want portfolio-node", internal)
+	}
+	if len(replayRoutes) != 1 || replayRoutes[0].SubscriberID != "portfolio-node" || !replayRoutes[0].Target.Empty() {
+		t.Fatalf("replay routes = %#v, want empty node/portfolio-node route", replayRoutes)
+	}
+
+	if err := eb.PublishPersistedRecipients(context.Background(), evt, nil); err != nil {
+		t.Fatalf("PublishPersistedRecipients: %v", err)
+	}
+	got = requireBusEvent(t, ch, "root routed node replay delivery")
+	if got.FlowInstance() != "" {
+		t.Fatalf("replayed flow instance = %q, want root event", got.FlowInstance())
+	}
+}
+
 func assertTargetRouteDeliveries(t *testing.T, ch <-chan events.Event, wantEntityIDs ...string) {
 	t.Helper()
 	seen := map[string]struct{}{}
@@ -208,6 +268,45 @@ func assertTargetRouteDeliveries(t *testing.T, ch <-chan events.Event, wantEntit
 		if _, ok := seen[want]; !ok {
 			t.Fatalf("missing target delivery for %q; saw %#v", want, seen)
 		}
+	}
+}
+
+func loadTargetRouteTempBundle(t *testing.T, files map[string]string) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	root := t.TempDir()
+	for rel, body := range files {
+		path := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", path, err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, platformSpec)
+	if err != nil {
+		t.Fatalf("load target route temp bundle: %v", err)
+	}
+	return bundle
+}
+
+func routedRootNodeFixtureFiles() map[string]string {
+	return map[string]string{
+		"package.yaml": `name: test
+version: 1.0.0
+`,
+		"events.yaml": `opco.spinup_requested:
+  entity_id: string
+`,
+		"nodes.yaml": `portfolio-node:
+  id: portfolio-node
+  execution_type: system_node
+  subscribes_to: [opco.spinup_requested]
+  event_handlers:
+    opco.spinup_requested: {}
+`,
 	}
 }
 
