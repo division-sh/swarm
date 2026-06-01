@@ -853,6 +853,9 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		if runStore, ok := stores.ObservabilityStore.(apiv1.RunReadStore); ok {
 			apiRuns = runStore
 		}
+		if entityStore, ok := stores.ObservabilityStore.(apiv1.EntityReadStore); ok {
+			apiEntities = entityStore
+		}
 	}
 	resetPlanner := runtimedestructivereset.InventoryPlanner{
 		Reader: runtimedestructivereset.CompositeInventoryReader{

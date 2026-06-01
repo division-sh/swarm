@@ -10,6 +10,10 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
+
+	apiv1 "github.com/division-sh/swarm/internal/apiv1"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestEntitiesListUsesEntityListV1RPCWithFilters(t *testing.T) {
@@ -93,6 +97,91 @@ func TestEntitiesListEmptyResultOmitsUnsetParams(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "No entities match the filter.") {
 		t.Fatalf("stdout = %q, want empty-state text", stdout.String())
+	}
+}
+
+func TestEntityCommandsUseSQLiteEntityReadStoreThroughV1API(t *testing.T) {
+	ctx := context.Background()
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
+	runID := "11111111-1111-1111-1111-111111111111"
+	entityA := "22222222-2222-2222-2222-222222222222"
+	entityB := "33333333-3333-3333-3333-333333333333"
+	now := time.Unix(1700000000, 0).UTC()
+	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, now); err != nil {
+		t.Fatalf("seed sqlite run: %v", err)
+	}
+	if _, err := sqliteStore.DB.ExecContext(ctx, `
+		INSERT INTO entity_state (
+			run_id, entity_id, flow_instance, entity_type, current_state,
+			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
+		) VALUES
+			(?, ?, 'scoring/vertical-a', 'vertical', 'discovered',
+			 '{}', '{"vertical_name":"Healthcare"}', '{}', 1, ?, ?, ?),
+			(?, ?, 'scoring/vertical-b', 'vertical', 'pending',
+			 '{}', '{"vertical_name":"Manufacturing"}', '{}', 1, ?, ?, ?)
+	`, runID, entityA, now, now, now, runID, entityB, now, now, now); err != nil {
+		t.Fatalf("seed sqlite entity_state: %v", err)
+	}
+	registry, err := apiv1.LoadRegistry(resolvePath(repoRoot(), defaultPlatformSpecPath))
+	if err != nil {
+		t.Fatalf("LoadRegistry: %v", err)
+	}
+	apiHandler, err := apiv1.NewHandler(apiv1.Options{
+		Registry:   registry,
+		AuthTokens: []string{"test-token"},
+		Handlers: apiv1.OperatorReadHandlers(apiv1.OperatorReadOptions{
+			Entities: sqliteStore,
+		}),
+	})
+	if err != nil {
+		t.Fatalf("NewHandler: %v", err)
+	}
+	server := httptest.NewServer(apiHandler)
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(ctx, t.TempDir(), []string{"entities", "list", "--run-id", runID, "--type", "vertical", "--limit", "10"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("entities list code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	for _, want := range []string{"ENTITY_ID", "RUN_ID", entityA, entityB, "vertical", "discovered", "pending"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("entities list stdout missing %q:\n%s", want, stdout.String())
+		}
+	}
+	if strings.TrimSpace(stderr.String()) != "" {
+		t.Fatalf("entities list stderr = %q, want empty", stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = executeRootCommandWithOptions(ctx, t.TempDir(), []string{"entity", "view", entityA, "--run-id", runID}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("entity view code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	for _, want := range []string{"Entity " + entityA, "type=vertical state=discovered", `fields={"vertical_name":"Healthcare"}`} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("entity view stdout missing %q:\n%s", want, stdout.String())
+		}
+	}
+	if strings.TrimSpace(stderr.String()) != "" {
+		t.Fatalf("entity view stderr = %q, want empty", stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = executeRootCommandWithOptions(ctx, t.TempDir(), []string{"entity", "aggregate", "--run-id", runID, "--group-by", "entity_type"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("entity aggregate code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	for _, want := range []string{"GROUP\tCOUNT", "vertical\t2"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("entity aggregate stdout missing %q:\n%s", want, stdout.String())
+		}
+	}
+	if strings.TrimSpace(stderr.String()) != "" {
+		t.Fatalf("entity aggregate stderr = %q, want empty", stderr.String())
 	}
 }
 

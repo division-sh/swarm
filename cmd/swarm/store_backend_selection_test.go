@@ -205,6 +205,9 @@ func TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore(t *testing.T) {
 	if _, ok := stores.ObservabilityStore.(apiv1.RunReadStore); !ok {
 		t.Fatalf("sqlite ObservabilityStore = %T, want selected run read store for run.get/list", stores.ObservabilityStore)
 	}
+	if _, ok := stores.ObservabilityStore.(apiv1.EntityReadStore); !ok {
+		t.Fatalf("sqlite ObservabilityStore = %T, want selected entity read store for entity.*", stores.ObservabilityStore)
+	}
 	runtimeStores := stores.runtimeStores()
 	if runtimeStores.SQLDB != nil {
 		t.Fatalf("sqlite runtimeStores SQLDB = %#v, want nil raw runtime SQL handle", runtimeStores.SQLDB)
