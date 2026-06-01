@@ -61,7 +61,7 @@ func resolveWorkspaceMountSourcesFromInput(in workspaceDataSourceInput) (workspa
 	case in.ConfigDataSourceSet:
 		path, err := normalizeWorkspaceDataSourcePath(in.RepoRoot, in.ConfigDataSource, "workspace.data_source")
 		return workspaceMountSources{DataSource: path, DataSourceSource: "workspace.data_source"}, err
-	case in.EnvDataSourceSet && strings.TrimSpace(in.EnvDataSource) != "":
+	case in.EnvDataSourceSet:
 		path, err := normalizeWorkspaceDataSourcePath(in.RepoRoot, in.EnvDataSource, envWorkspaceDataSource)
 		return workspaceMountSources{DataSource: path, DataSourceSource: envWorkspaceDataSource}, err
 	case in.VolumesFromSet && strings.TrimSpace(in.VolumesFrom) != "":

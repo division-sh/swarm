@@ -1593,6 +1593,26 @@ func TestResolveWorkspaceMountSourcesRejectsEmptyConfigBeforeEnvFallback(t *test
 	}
 }
 
+func TestResolveWorkspaceMountSourcesRejectsEmptyEnvBeforeDefault(t *testing.T) {
+	repoRoot := t.TempDir()
+	result, err := resolveWorkspaceMountSourcesFromInput(workspaceDataSourceInput{
+		RepoRoot:         repoRoot,
+		EnvDataSource:    " \t ",
+		EnvDataSourceSet: true,
+		VolumesFrom:      "swarm-orchestrator",
+		VolumesFromSet:   true,
+	})
+	if err == nil || !strings.Contains(err.Error(), envWorkspaceDataSource) || !strings.Contains(err.Error(), "must be non-empty") {
+		t.Fatalf("resolve workspace mount sources error = %v, want empty env rejection", err)
+	}
+	if result.DataSource != "" || result.DataSourceSource != envWorkspaceDataSource {
+		t.Fatalf("workspace mount sources = %#v, want no default or volumes-from fallback and env source label", result)
+	}
+	if _, err := os.Stat(filepath.Join(repoRoot, defaultWorkspaceDataSourceRelativePath)); !os.IsNotExist(err) {
+		t.Fatalf("default data source stat error = %v, want not created", err)
+	}
+}
+
 func TestResolveWorkspaceMountSourcesDefaultsToSwarmDataNotRepoData(t *testing.T) {
 	repoRoot := t.TempDir()
 	repoDataDir := filepath.Join(repoRoot, "data")
@@ -1645,11 +1665,9 @@ func TestResolveWorkspaceMountSourcesDefaultWithoutRepoRoot(t *testing.T) {
 func TestResolveWorkspaceMountSourcesUsesVolumesFromAlternateWithoutDefault(t *testing.T) {
 	repoRoot := t.TempDir()
 	result, err := resolveWorkspaceMountSourcesFromInput(workspaceDataSourceInput{
-		RepoRoot:         repoRoot,
-		VolumesFrom:      "swarm-orchestrator",
-		VolumesFromSet:   true,
-		EnvDataSource:    " ",
-		EnvDataSourceSet: true,
+		RepoRoot:       repoRoot,
+		VolumesFrom:    "swarm-orchestrator",
+		VolumesFromSet: true,
 	})
 	if err != nil {
 		t.Fatalf("resolve workspace mount sources: %v", err)
