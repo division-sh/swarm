@@ -13,6 +13,35 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  sqlite-local-dev:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build swarm binary
+        run: go build ./cmd/swarm
+
+      - name: Prove no-selector SQLite local run
+        env:
+          SWARM_API_TOKEN: ci-local-dev-token
+          SWARM_WORKSPACE_DATA_SOURCE: ${{ github.workspace }}/data
+        run: |
+          payload=$(mktemp)
+          printf '{"entity_id":"11111111-1111-4111-8111-111111111111"}\n' > "$payload"
+          ./swarm run \
+            --contracts tests/tier1-primitives/test-emits-single \
+            --event item.received \
+            --payload "$payload" \
+            --api-port 18091
+
   test:
     runs-on: ubuntu-latest
     services:
@@ -66,6 +95,9 @@ jobs:
 
       - name: Vet
         run: go vet ./...
+
+      - name: Prove explicit Postgres opt-in selector
+        run: go test ./cmd/swarm -run TestRunServeRuntimeConsumesCanonicalStoreSelectionBeforeStoreConstruction -count=1
 
       - name: Run tests
         run: go test ./... -count=1

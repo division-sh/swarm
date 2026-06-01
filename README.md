@@ -8,7 +8,7 @@ Swarm runs fleets of LLM agents as a durable, stateful system. You declare it in
 
 More than a simple orchestrator that decides which agent runs next, Swarm runs the system around it. Work is modeled as entities (an order, a ticket, a candidate business) moving through a state machine you declare: the runtime schedules hundreds at once, keeps them isolated, meters their spend, persists their state, and resumes them after a crash, days later if a timer or a human kept them waiting. Any run can be replayed or forked from the log. Deterministic routing is one piece; the rest is the operating system.
 
-Single Go binary, Postgres for persistence. Three LLM backend profiles ship today: `anthropic` for Anthropic API, `claude_cli` for the Claude CLI subprocess transport, and `openai_compatible` for Chat Completions-compatible HTTP JSON. All three consume the shared LLM provider adapter contract; native OpenAI Responses and provider-specific OpenRouter, Ollama, Bedrock, Azure OpenAI, Vertex, or vLLM support remain separate gated runtime/config work.
+Single Go binary, local/dev SQLite persistence by default. Postgres remains an explicit external/production opt-in backend. Three LLM backend profiles ship today: `anthropic` for Anthropic API, `claude_cli` for the Claude CLI subprocess transport, and `openai_compatible` for Chat Completions-compatible HTTP JSON. All three consume the shared LLM provider adapter contract; native OpenAI Responses and provider-specific OpenRouter, Ollama, Bedrock, Azure OpenAI, Vertex, or vLLM support remain separate gated runtime/config work.
 
 **Long-term direction:** entire divisions (engineering, support, operations) running as autonomous Swarm flows. Humans in the loop where judgment is required; agents and deterministic system nodes everywhere else.
 
@@ -18,7 +18,7 @@ Single Go binary, Postgres for persistence. Three LLM backend profiles ship toda
 
 Swarm makes a small number of opinionated choices and sticks to them.
 
-- **Work is a durable state machine.** Every unit of work is an entity that moves through declared states by guarded transitions. The runtime tracks where each one is in Postgres, so state survives a crash and hundreds of entities advance independently without interfering.
+- **Work is a durable state machine.** Every unit of work is an entity that moves through declared states by guarded transitions. The runtime persists state in the selected runtime store, so state survives a crash and hundreds of entities advance independently without interfering. Local/dev commands default to file-backed SQLite; Postgres is explicit opt-in for external and production deployments.
 - **The control loop is deterministic.** No LLM decides what fires next. Routing is derived from declared subscriptions, and every event runs through a fixed handler pipeline. Conditions use [CEL](https://github.com/google/cel-spec): strongly typed, non-Turing-complete, no hallucinating router.
 - **Every transition is one transaction.** Guard, accumulate, compute, commit, emit: all-or-nothing. A crash mid-handler leaves no partial state.
 - **Flows are composable units.** A flow package declares its identity, state machine, system nodes, events, agents, tools, and policy. Typed input and output pins make composition mechanical rather than a refactor. Create your specialized flows and import them in other Swarm projects.
@@ -82,39 +82,67 @@ Guard failures have explicit semantics: `reject` (default), `discard`, `kill`, o
 
 ## Quickstart
 
-Requires Docker, a contract bundle, and credentials for the configured shipped LLM runtime. The Compose quickstart currently starts the orchestrator with the `claude_cli` backend from `docker-compose.yml`; `.env` supplies secrets such as `CLAUDE_CODE_OAUTH_TOKEN`, not the backend selector.
+Requires Go 1.23 and a contract bundle. Plain local commands require no database
+service: when no runtime store is selected, Swarm uses file-backed SQLite at
+`.swarm/dev.db`. Credentials are required only for flows that actually invoke
+the configured LLM backend.
 
 ```bash
 # 1. clone
 git clone https://github.com/<org>/swarm && cd swarm
 
-# 2. point at a contract bundle and provide Compose credentials
+# 2. build the CLI
+go build ./cmd/swarm
+
+# 3. choose the shared /data source explicitly for local workspaces
+export SWARM_WORKSPACE_DATA_SOURCE="$PWD/data"
+
+# 4. run a contract locally; this creates/uses .swarm/dev.db
+printf '{"entity_id":"11111111-1111-4111-8111-111111111111"}\n' > /tmp/swarm-payload.json
+./swarm run \
+  --contracts tests/tier1-primitives/test-emits-single \
+  --event item.received \
+  --payload /tmp/swarm-payload.json
+```
+
+### Explicit Postgres / Compose Opt-In
+
+Use Docker Compose when you want the containerized orchestrator and the explicit
+Postgres runtime store. The Compose sample passes `--store postgres`; it is not
+the no-selector local/dev default. `.env` supplies deployment credentials such
+as `CLAUDE_CODE_OAUTH_TOKEN` and `SWARM_API_TOKEN`, not a generic backend
+selector.
+
+```bash
+# 1. point at a contract bundle and provide Compose credentials
 export SWARM_CONTRACTS_HOST_DIR=/absolute/path/to/your/contracts
 echo 'CLAUDE_CODE_OAUTH_TOKEN=...' >> .env
 echo "SWARM_API_TOKEN=$(uuidgen | tr '[:upper:]' '[:lower:]')" >> .env
 
-# 3. boot
+# 2. boot the explicit Postgres-backed Compose deployment
 docker compose up -d postgres orchestrator
 
-# 4. confirm the runtime is up and contracts validated
+# 3. confirm the runtime is up and contracts validated
 curl -fsS http://localhost:8070/healthz
 
-# 5. trigger a run
+# 4. trigger a run
+printf '{"order_id":"o-123","priority":"high"}\n' > /tmp/order-created.json
 docker compose exec orchestrator swarm run \
   --event order.created \
-  --payload-json '{"order_id":"o-123","priority":"high"}'
+  --payload /tmp/order-created.json
 ```
 
-If you only need the local database, `docker compose up -d postgres` is supported
-without `SWARM_CONTRACTS_HOST_DIR`. The contracts path is required only when
-starting the `orchestrator` service. The Compose orchestrator also requires
-`SWARM_API_TOKEN` because it binds the API inside the container on `0.0.0.0`.
-Plain local `swarm serve` and foreground `swarm run` use the built-in dev API
-token only on numeric loopback binds, with bearer auth still enabled. Set an
-explicit token before exposing the API beyond loopback; the built-in token is
-not user isolation on a shared host.
+If you only need the explicit Postgres database service, `docker compose up -d
+postgres` is supported without `SWARM_CONTRACTS_HOST_DIR`. The contracts path is
+required only when starting the `orchestrator` service. The Compose orchestrator
+also requires `SWARM_API_TOKEN` because it binds the API inside the container on
+`0.0.0.0`. Plain local `swarm serve` and foreground `swarm run` use the built-in
+dev API token only on numeric loopback binds, with bearer auth still enabled.
+Set an explicit token before exposing the API beyond loopback; the built-in
+token is not user isolation on a shared host.
 
-See [`.env.example`](.env.example) for the public local environment template.
+See [`.env.example`](.env.example) for the explicit Compose environment
+template.
 
 ### Workspace Reference Data
 
@@ -263,14 +291,14 @@ flowchart TB
     BUS -->|"routed by subscription"| AG["agents<br/>LLM, scoped sessions"]
     SN -->|emit| BUS
     AG -->|"emit results"| BUS
-    SN ==>|"advance state, one transaction"| PG[("Postgres: events,<br/>entity state + history,<br/>gates, timers, sessions")]
-    PG -.->|"replay / fork"| BUS
+    SN ==>|"advance state, one transaction"| STORE[("Selected store:<br/>SQLite local/dev default<br/>or Postgres opt-in")]
+    STORE -.->|"replay / fork"| BUS
 ```
 
 Only the system node writes state, and it does so in one transaction; agents reach the store only indirectly, by emitting an event a node handles. Underneath the loop are the primitives that make the design positions enforceable:
 
 - **A static analyzer for contracts.** Before any event fires, every contract is run through 54 structural checks: state reachability, payload completeness, agent routing, timer lifecycle, CEL parse, prompt linting. A bundle that boots has passed this analysis.
-- **Two-layer event-sourced persistence.** Every event lands in Postgres; every entity state mutation lands in a separate mutation log with before/after diffs. Replay says "show me what happened"; the mutation log says "show me exactly what changed." Accumulator projections compute read-models off the streams, so handlers and external readers can query aggregated state without scanning the raw logs.
+- **Two-layer event-sourced persistence.** Every event lands in the selected runtime store; every entity state mutation lands in a separate mutation log with before/after diffs. Local/dev runs use SQLite by default, while Postgres remains the explicit external/production option. Replay says "show me what happened"; the mutation log says "show me exactly what changed." Accumulator projections compute read-models off the streams, so handlers and external readers can query aggregated state without scanning the raw logs.
 - **Role-based routing authority.** Agent isolation is enforced by an authority layer that decides, per entity status, which agent role may address which other role. "Any agent can talk to any agent" is not a default the runtime offers.
 - **Reliability primitives.** Undeliverable events retry with exponential backoff and land in a dead-letter store after exhaustion. Dead-letters are indexed and replayable.
 - **Live budget tracking.** Token usage is tracked per entity and per actor in real time. Declared thresholds escalate into throttle and emergency states; humans get a mailbox item when the runtime hits an emergency.
@@ -300,7 +328,7 @@ The static analyzer's refusal to boot on a half-finished contract is a feature i
 - **Conversational chatbots.** Short interactions where the value is in the conversation. The YAML overhead does not pay for itself.
 - **Exploratory prototyping where the workflow changes every hour.** The static analyzer refusing to boot a half-finished contract is exactly the wrong friction during design. Sketch loose first; port to Swarm once the workflow stabilizes.
 - **LLM-managed routing at runtime.** Swarm explicitly refuses this. If "the model decides what happens next" is the point of your system, this is the wrong tool.
-- **Sunday-afternoon prototypes.** Postgres, Docker, and a separate runtime is too much infrastructure for casual use.
+- **Sunday-afternoon prototypes.** The local/dev path is now zero-service SQLite, but Swarm still expects a declared contract bundle and a deterministic runtime. Use a lighter tool if even that structure is too much.
 
 ---
 
@@ -335,10 +363,12 @@ source contract.
 
 ## Development
 
-Requirements: Go 1.23, Docker, Postgres 16 (provided via `docker-compose.yml`).
-Start only the database with `docker compose up -d postgres`; starting the
-orchestrator additionally requires `SWARM_CONTRACTS_HOST_DIR` and an explicit
-`SWARM_API_TOKEN` because the Compose API listener is non-loopback.
+Requirements: Go 1.23. Docker is required for Compose, workspace-container, and
+Postgres-backed integration workflows. Plain local `swarm run --contracts ...`
+uses SQLite at `.swarm/dev.db` unless you explicitly opt into Postgres with
+`--store postgres`, `SWARM_STORE_BACKEND=postgres`, or `store.backend: postgres`.
+Starting the Compose orchestrator requires `SWARM_CONTRACTS_HOST_DIR` and an
+explicit `SWARM_API_TOKEN` because the Compose API listener is non-loopback.
 
 ```bash
 # build
@@ -350,8 +380,13 @@ golangci-lint run
 # tests
 go test ./...
 
-# local runtime commands
-go run ./cmd/swarm serve --contracts ./contracts
+# zero-service local runtime command; uses SQLite by default
+printf '{"entity_id":"11111111-1111-4111-8111-111111111111"}\n' > /tmp/swarm-payload.json
+SWARM_WORKSPACE_DATA_SOURCE="$PWD/data" \
+go run ./cmd/swarm run --contracts tests/tier1-primitives/test-emits-single --event item.received --payload /tmp/swarm-payload.json
+
+# explicit Postgres opt-in runtime commands
+go run ./cmd/swarm serve --store postgres --contracts ./contracts
 go run ./cmd/swarm run --connect http://127.0.0.1:8081 --event <event> --payload <payload.json>
 go run ./cmd/swarm control nuke --api-server http://127.0.0.1:8081 --yes
 ```

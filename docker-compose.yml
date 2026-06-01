@@ -1,5 +1,7 @@
 name: swarm
 
+# Compose is the explicit Postgres-backed deployment sample. Plain local
+# `swarm run --contracts ...` uses the SQLite runtime store by default.
 services:
   postgres:
     image: postgres:16
