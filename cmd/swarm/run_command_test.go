@@ -60,7 +60,7 @@ func TestRunCommandLocalForegroundConsumesServeOwnerAndV1API(t *testing.T) {
 	configPath := filepath.Join(repo, "runtime.yaml")
 	opts.runServe = func(ctx context.Context, repo string, serveOpts serveOptions) int {
 		serveCalled.Add(1)
-		if serveOpts.ConfigPath != configPath || serveOpts.Backend != "claude_cli" || serveOpts.ContractsPath != filepath.Join(repo, "contracts") || serveOpts.PlatformSpecPath != filepath.Join(repo, "platform.yaml") {
+		if serveOpts.ConfigPath != configPath || serveOpts.Backend != "claude_cli" || serveOpts.ContractsPath != filepath.Join(repo, "contracts") || serveOpts.DataSource != "reference-data" || serveOpts.PlatformSpecPath != filepath.Join(repo, "platform.yaml") {
 			t.Errorf("serve opts = %#v", serveOpts)
 		}
 		<-ctx.Done()
@@ -69,7 +69,7 @@ func TestRunCommandLocalForegroundConsumesServeOwnerAndV1API(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), repo, []string{"run", "--event", "scan.requested", "--payload", payloadPath, "--config", configPath, "--backend", "claude_cli", "--contracts", "contracts", "--platform-spec", "platform.yaml"}, &stdout, &stderr, opts)
+	code := executeRootCommandWithOptions(context.Background(), repo, []string{"run", "--event", "scan.requested", "--payload", payloadPath, "--config", configPath, "--backend", "claude_cli", "--contracts", "contracts", "--data", "reference-data", "--platform-spec", "platform.yaml"}, &stdout, &stderr, opts)
 	if code != 0 {
 		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -141,6 +141,22 @@ func TestStartLocalRunServeConsumesContractPathConfigResolver(t *testing.T) {
 	}
 	if serveOpts.StoreMode != "sqlite" || serveOpts.StoreModeSet {
 		t.Fatalf("store opts = mode %q set %v, want sqlite default with no flag source", serveOpts.StoreMode, serveOpts.StoreModeSet)
+	}
+	if serveOpts.DataSource != "" {
+		t.Fatalf("data source = %q, want unset so serve resolver owns default selection", serveOpts.DataSource)
+	}
+}
+
+func TestRunCommandHelpShowsDataFlag(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "--help"}, &stdout, &stderr, rootCommandOptions{})
+	if code != 0 {
+		t.Fatalf("run --help code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	for _, want := range []string{"--data", "Path to agent-visible read-only /data reference directory"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("run help missing %q:\n%s", want, stdout.String())
+		}
 	}
 }
 
@@ -652,14 +668,17 @@ func TestRunCommandValidationAndAuthNoCallPaths(t *testing.T) {
 		{name: "reattach rejects config flag", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--config", "swarm.yaml"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --config"},
 		{name: "reattach rejects backend flag", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--backend", "claude_cli"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --backend"},
 		{name: "reattach rejects local startup flags", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--contracts", "contracts"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --contracts"},
+		{name: "reattach rejects data flag", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--data", "reference-data"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --data"},
 		{name: "reattach rejects platform spec flag", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--platform-spec", "platform.yaml"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --platform-spec"},
 		{name: "reattach rejects api port flag", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--api-port", "8081"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --api-port"},
+		{name: "blank data rejected", token: "test-token", args: []string{"run", "--event", "scan.requested", "--payload", payloadPath, "--data", " "}, wantCode: 2, wantStderr: "--data must be non-empty"},
 		{name: "api port zero rejected when explicit", token: "test-token", args: []string{"run", "--event", "scan.requested", "--payload", payloadPath, "--api-port", "0"}, wantCode: 2, wantStderr: "--api-port must be between 1 and 65535"},
 		{name: "api port rejects default mcp listener conflict", token: "test-token", args: []string{"run", "--event", "scan.requested", "--payload", payloadPath, "--api-port", "8082"}, wantCode: 2, wantStderr: "--api-port 8082 conflicts with default MCP listener 127.0.0.1:8082"},
 		{name: "mcp port unsupported", token: "test-token", args: []string{"run", "--event", "scan.requested", "--payload", payloadPath, "--mcp-port", "9000"}, wantCode: 2, wantStderr: "--mcp-port is not supported"},
 		{name: "connect rejects config local flag", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--config", "swarm.yaml"}, wantCode: 2, wantStderr: "--config requires local foreground mode"},
 		{name: "connect rejects backend local flag", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--backend", "claude_cli"}, wantCode: 2, wantStderr: "--backend requires local foreground mode"},
 		{name: "connect rejects contracts local flag", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--contracts", "contracts"}, wantCode: 2, wantStderr: "--contracts requires local foreground mode"},
+		{name: "connect rejects data local flag", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--data", "reference-data"}, wantCode: 2, wantStderr: "--data requires local foreground mode"},
 		{name: "connect rejects platform spec local flag", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--platform-spec", "platform.yaml"}, wantCode: 2, wantStderr: "--platform-spec requires local foreground mode"},
 		{name: "connect rejects api port local flag", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--api-port", "8081"}, wantCode: 2, wantStderr: "--api-port requires local foreground mode"},
 		{name: "connect rejects legacy path", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1/api/rpc", "--event", "scan.requested", "--payload", payloadPath}, wantCode: 2, wantStderr: "--connect path must be empty or /v1/rpc"},

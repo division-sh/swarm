@@ -42,6 +42,7 @@ type runCommandOptions struct {
 	configPath        string
 	backend           string
 	contractsPath     string
+	dataSource        string
 	platformSpecPath  string
 	idempotencyKey    string
 	runID             string
@@ -102,6 +103,7 @@ func newRunCommand(repo string, rootOpts rootCommandOptions) *cobra.Command {
 	cmd.Flags().StringVar(&opts.configPath, "config", "", "Path to Swarm runtime config for local foreground startup")
 	cmd.Flags().StringVar(&opts.backend, "backend", "", "LLM backend profile for local foreground startup: anthropic, claude_cli, or openai_compatible")
 	cmd.Flags().StringVar(&opts.contractsPath, "contracts", "", "Path to Swarm contract bundle root for local foreground startup")
+	cmd.Flags().StringVar(&opts.dataSource, "data", "", "Path to agent-visible read-only /data reference directory")
 	cmd.Flags().StringVar(&opts.platformSpecPath, "platform-spec", "", "Path to platform spec yaml for local foreground startup")
 	cmd.Flags().StringVar(&opts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for run.start")
 	cmd.Flags().StringVar(&opts.runID, "run-id", "", "Optional caller-provided run id for run.start")
@@ -222,6 +224,9 @@ func (o runCommandOptions) validate() error {
 	if o.changedFlags["mcp-port"] {
 		return fmt.Errorf("--mcp-port is not supported until the serve owner can bind MCP explicitly")
 	}
+	if o.changedFlags["data"] && strings.TrimSpace(o.dataSource) == "" {
+		return fmt.Errorf("--data must be non-empty")
+	}
 	if o.changedFlags["api-port"] {
 		_, defaultMCPPort, err := net.SplitHostPort(defaultMCPListenAddr)
 		if err != nil {
@@ -241,7 +246,7 @@ func (o runCommandOptions) validate() error {
 		if strings.TrimSpace(o.eventName) != "" || strings.TrimSpace(o.payloadPath) != "" || strings.TrimSpace(o.idempotencyKey) != "" || strings.TrimSpace(o.runID) != "" {
 			return fmt.Errorf("--reattach is mutually exclusive with --event, --payload, --idempotency-key, and --run-id")
 		}
-		for _, flag := range []string{"bundle-hash", "bundle-fingerprint", "config", "backend", "contracts", "platform-spec", "api-port", "mcp-port"} {
+		for _, flag := range []string{"bundle-hash", "bundle-fingerprint", "config", "backend", "contracts", "data", "platform-spec", "api-port", "mcp-port"} {
 			if o.changedFlags[flag] {
 				return fmt.Errorf("--reattach is mutually exclusive with --%s", flag)
 			}
@@ -249,7 +254,7 @@ func (o runCommandOptions) validate() error {
 		return nil
 	}
 	if strings.TrimSpace(o.connectURL) != "" {
-		for _, flag := range []string{"config", "backend", "contracts", "platform-spec", "api-port"} {
+		for _, flag := range []string{"config", "backend", "contracts", "data", "platform-spec", "api-port"} {
 			if o.changedFlags[flag] {
 				return fmt.Errorf("--%s requires local foreground mode and cannot be used with --connect", flag)
 			}
@@ -361,6 +366,7 @@ func startLocalRunServe(ctx context.Context, repo string, opts runCommandOptions
 	serveOpts.ConfigPath = opts.configPath
 	serveOpts.Backend = opts.backend
 	serveOpts.ContractsPath = resolvedPaths.ContractsPath
+	serveOpts.DataSource = opts.dataSource
 	serveOpts.PlatformSpecPath = resolvedPaths.PlatformSpecPath
 	if opts.apiPort > 0 {
 		serveOpts.APIListenAddr = net.JoinHostPort("127.0.0.1", strconv.Itoa(opts.apiPort))

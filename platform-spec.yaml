@@ -6539,20 +6539,23 @@ workspace_model:
       absent. Production runtime code MUST NOT build a missing workspace image from source-checkout `Dockerfile.workspace`, use
       `runtime.Caller` / Go source paths as a runtime asset root, or walk for `go.mod` to recover build material.
     mount_source_rule: >
-      Host sources for `/data` and `/opt/swarm/contracts` MUST come from explicit deployment configuration, environment,
-      config/CLI path resolution, or an already selected workflow/project root passed by the command owner. Default workspace
-      runtime configuration MUST NOT derive those mount sources from the Swarm source checkout.
+      Host sources for `/data` and `/opt/swarm/contracts` MUST come from `workspace_model.data_source_authority`,
+      explicit deployment configuration, environment, config/CLI path resolution, or an already selected workflow/project
+      root passed by the command owner. Default workspace runtime configuration MUST NOT derive those mount sources from
+      the Swarm source checkout except for the promoted `.swarm/data` managed local default owned by
+      `workspace_model.data_source_authority`.
     split_scope: >
       Docker Compose setup and workspace image contents/default agent CLI availability remain tracked separately by #996 and
       #997 unless a future gate explicitly widens them.
   data_source_authority:
-    promoted_by: '#1139'
-    implementation_status: implemented_first_slice
+    promoted_by: '#1139/#1223'
+    implementation_status: implemented
     canonical_owner: platform-spec.yaml#workspace_model.data_source_authority
     scope: >
-      Defines the host/source authority for the agent-visible `/data` mount for `swarm serve` and current Docker workspace
-      lifecycle consumers. Compose/Postgres onboarding (#1137), host workspace backend implementation (#1138), SQLite default,
-      and mount destination override cleanup remain split.
+      Defines the host/source authority for the agent-visible `/data` mount for `swarm serve`, local foreground `swarm run`,
+      and current workspace lifecycle consumers. Compose/Postgres onboarding (#1137), host workspace backend execution
+      parity (#1138/#1213), SQLite store concurrency, agent-free workspace-init skipping, and mount destination override
+      cleanup remain split.
     cli_flag: --data
     config_key: workspace.data_source
     env_var: SWARM_WORKSPACE_DATA_SOURCE
@@ -6560,37 +6563,46 @@ workspace_model:
     - --data
     - workspace.data_source
     - SWARM_WORKSPACE_DATA_SOURCE
-    - no path source
+    - default
     default_behavior: >
-      The runtime MUST NOT synthesize a source path from the Swarm source checkout. In particular, a non-empty repo root or a
-      repo-local `data/` directory is not a valid `/data` source unless the operator selected it explicitly through the
-      authoritative source order.
+      If no explicit path source is selected and no deployment alternate such as `SWARM_WORKSPACE_VOLUMES_FROM` is active,
+      the command resolver MUST select the managed local default `.swarm/data` under the active repo root, or relative
+      `.swarm/data` when no repo root is available, create it with mode 0755 before workspace validation, and report source
+      label `default`. The runtime MUST NOT synthesize `/data` from the Swarm source checkout or from a repo-local `data/`
+      directory unless that path was explicitly selected through the authoritative source order.
     path_resolution_rule: >
       Non-empty relative path sources are resolved through the command path resolver with the active repo root when present;
       absolute path sources are used as-is after cleaning. Empty explicit values are invalid.
     failure_behavior: >
-      Missing or unreadable path sources fail closed during workspace boot validation. If no path source is selected,
-      workspace boot must still fail closed unless an explicit deployment alternate such as `SWARM_WORKSPACE_VOLUMES_FROM`
-      satisfies the invariant `/data` mount.
+      Missing or unreadable explicit path sources fail closed during workspace boot validation. Empty explicit values are
+      invalid and MUST NOT fall through to environment or default sources. Default directory creation failures fail closed
+      before workspace lifecycle construction.
     volumes_from_conflict_rule: >
-      `SWARM_WORKSPACE_VOLUMES_FROM` is an explicit deployment alternate, not a fallback path source. It MUST NOT be combined
-      with an explicit `/data` path source from `--data`, `workspace.data_source`, or `SWARM_WORKSPACE_DATA_SOURCE`; startup
-      must fail closed on that conflict.
+      `SWARM_WORKSPACE_VOLUMES_FROM` is an explicit Docker deployment alternate, not a fallback path source. If no explicit
+      `/data` path source is selected and `SWARM_WORKSPACE_VOLUMES_FROM` is active, the command resolver MUST NOT
+      materialize or override with `.swarm/data`; Docker workspace validation consumes the alternate shared mounts instead.
+      `SWARM_WORKSPACE_VOLUMES_FROM` MUST NOT be combined with an explicit `/data` path source from `--data`,
+      `workspace.data_source`, or `SWARM_WORKSPACE_DATA_SOURCE`; startup must fail closed on that conflict. Host backend
+      startup continues to reject `SWARM_WORKSPACE_VOLUMES_FROM`.
     read_policy: >
       `/data` remains read-only, global, and opaque to the platform. Source authority does not permit indexing, mutating,
       validating contents beyond mount readability, or folding runtime `/data` into workflow bundle identity.
     consumers:
     - swarm serve boot workspace lifecycle
+    - local foreground swarm run startup through the serve startup owner
     - builder project supervisor reload workspace lifecycle
     - selected-contract run-fork workspace lifecycle
     - Docker workspace manager SharedDataSource mount consumer
+    - Host workspace manager SharedDataSource mount consumer
     retired_non_authoritative_sources:
     - repoRoot/data derivation in cmd/swarm configuredWorkspaceLifecycle
     - lower-level Docker default ownership of SWARM_WORKSPACE_DATA_SOURCE
     split_scope:
     - '#1137 Compose/Postgres onboarding and Compose ./data:/data:ro deployment shape'
-    - '#1138 host workspace backend'
-    - SQLite local default and broader local runtime onboarding
+    - '#1138/#1213 host workspace backend execution parity'
+    - '#1214 SQLite first run/event locking'
+    - agent-free workspace-init skipping
+    - broader local runtime onboarding/docs polish
     - mount destination override semantics such as SWARM_WORKSPACE_DATA_MOUNT
   workspace_backend_selection:
     promoted_by: '#1138'
@@ -8458,7 +8470,7 @@ cli_specification:
           SWARM_LLM_BACKEND, SWARM_LLM_RUNTIME_MODE, llm.runtime_mode, and SWARM_OPENAI_COMPATIBLE_BASE_URL are retired
           selector/connection-owner seams and must fail closed.
       workspace_data_source_authority:
-        promoted_by: '#1139'
+        promoted_by: '#1139/#1223'
         owner: workspace_model.data_source_authority
         flag: --data <path>
         config_key: workspace.data_source
@@ -8467,9 +8479,11 @@ cli_specification:
           `swarm serve` MUST resolve the agent-visible `/data` source through
           `workspace_model.data_source_authority` before constructing any workspace lifecycle. The command MUST NOT
           derive `/data` from the Swarm source checkout or from a repo-local `data/` directory unless that path was
-          explicitly selected by the operator through the promoted source order.
+          explicitly selected by the operator through the promoted source order. When no explicit path source and no
+          deployment alternate are selected, the shared resolver MUST create and use the managed `.swarm/data` default.
         consumers:
         - serve boot workspace lifecycle
+        - local foreground swarm run startup through the serve startup owner
         - dynamic Builder project reload workspace lifecycle
         - selected-contract run-fork workspace lifecycle
       workspace_backend_selection:
@@ -8939,6 +8953,7 @@ cli_specification:
       - --config <path>
       - --backend <anthropic|claude_cli|openai_compatible>
       - --contracts <path>
+      - --data <path>
       - --platform-spec <path>
       - --idempotency-key <key>
       - --run-id <id>
@@ -8948,13 +8963,15 @@ cli_specification:
         --mcp-port: 'Unsupported in #743; `swarm run` may consume the existing serve startup owner, but explicit MCP bind ownership remains split to the #750 serve-owner tail and MUST fail before API/WS calls.'
       modes:
         foreground_local_start:
-          invocation: swarm run --event <name> --payload <file> [--config <path>] [--backend <profile>] --contracts <path> --platform-spec <path>
+          invocation: swarm run --event <name> --payload <file> [--config <path>] [--backend <profile>] --contracts <path> [--data <path>] --platform-spec <path>
           behavior: >
             Start runtime/API/MCP through the existing serve startup owner, call health.check, call run.start, subscribe
             with run.subscribe_trace, render composed trace rows and final summary until terminal. Local runtime config and
-            backend selection consume the same shared resolver as `swarm serve`. When the caller does not pass
+            backend selection consume the same shared resolver as `swarm serve`; local `/data` source selection consumes
+            `workspace_model.data_source_authority` through the serve startup owner. When the caller does not pass
             `--bundle-hash` or the deprecated `--bundle-fingerprint`, run.start uses the active canonical bundle_hash
-            returned by health.check for create-new-work scope.
+            returned by health.check for create-new-work scope. `--data` is local foreground startup configuration only and
+            MUST fail closed with `--connect` or `--reattach`.
           ctrl_c: 'First Ctrl-C calls run.stop after a run_id exists, shuts down the locally started runtime, and exits 130. A second interrupt may hard-exit.'
         foreground_connected_start:
           invocation: swarm run --connect <url> --event <name> --payload <file>
