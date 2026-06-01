@@ -520,3 +520,48 @@ func sqliteTableExists(t *testing.T, db *sql.DB, tableName string) bool {
 	}
 	return exists == 1
 }
+
+// TestSQLiteSchemaStoreAcceptsRelativePath is a regression guard for the
+// `sqliteFileDSN` path. Before this guard, the DSN was built with
+// `url.URL{Scheme: "file", Path: path}`, which for a relative path like
+// `.swarm/dev.db` serialized to `file://.swarm/dev.db` and bound the
+// connection to a malformed URI; the first statement then failed with
+// "SQL logic error: out of memory (1)". This test runs the open path with a
+// relative path from a temp working directory and confirms a trivial query
+// succeeds, which is only possible if the DSN is parsed correctly.
+func TestSQLiteSchemaStoreAcceptsRelativePath(t *testing.T) {
+	dir := t.TempDir()
+	prev, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir %s: %v", dir, err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(prev); err != nil {
+			t.Fatalf("restore chdir: %v", err)
+		}
+	})
+
+	store, err := NewSQLiteSchemaStore(".swarm/dev.db")
+	if err != nil {
+		t.Fatalf("NewSQLiteSchemaStore(relative): %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+	})
+
+	var got int
+	if err := store.DB.QueryRow(`SELECT 1`).Scan(&got); err != nil {
+		t.Fatalf("SELECT 1 on relative-path store: %v", err)
+	}
+	if got != 1 {
+		t.Fatalf("SELECT 1 returned %d, want 1", got)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".swarm", "dev.db")); err != nil {
+		t.Fatalf("relative-path store did not create file at expected location: %v", err)
+	}
+}

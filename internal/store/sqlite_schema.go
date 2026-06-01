@@ -53,7 +53,14 @@ func NewSQLiteSchemaStore(path string) (*SQLiteSchemaStore, error) {
 }
 
 func sqliteFileDSN(path string) string {
-	u := url.URL{Scheme: "file", Path: path}
+	// Use Opaque (not Path) so the result serializes as `file:<path>?...`.
+	// With Path, url.URL.String() emits `file://<path>...`, which makes the
+	// driver treat the first path segment as the URI authority. For a relative
+	// path like `.swarm/dev.db` that yields `file://.swarm/dev.db`, binds the
+	// connection to a malformed URI, and the very first statement fails with
+	// "SQL logic error: out of memory (1)". Opaque form is unambiguous for
+	// both relative and absolute paths.
+	u := url.URL{Scheme: "file", Opaque: path}
 	q := u.Query()
 	q.Add("_pragma", "foreign_keys(ON)")
 	q.Add("_pragma", "busy_timeout(5000)")
