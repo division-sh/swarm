@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"swarm/internal/events"
+	runtimebus "swarm/internal/runtime/bus"
 	runtimeactors "swarm/internal/runtime/core/actors"
 	runtimecorrelation "swarm/internal/runtime/correlation"
 	runtimeingress "swarm/internal/runtime/ingress"
@@ -234,6 +235,47 @@ func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 	})
 	if !errors.Is(err, ErrAPIIdempotencyConflict) {
 		t.Fatalf("idempotency conflict err = %v, want ErrAPIIdempotencyConflict", err)
+	}
+}
+
+func TestSQLiteRuntimeStoreRuntimeIngressReadDuringPublishTxDoesNotReenterWrite(t *testing.T) {
+	ctx := context.Background()
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	runID := uuid.NewString()
+	if _, err := store.DB.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status)
+		VALUES (?, 'running')
+	`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	bus, err := runtimebus.NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	controller := runtimeingress.NewController(store, bus, runtimeingress.Options{})
+	if err := controller.SyncState(ctx); err != nil {
+		t.Fatalf("SyncState: %v", err)
+	}
+	bus.SetRuntimeIngressDispatchGate(controller)
+
+	eventID := uuid.NewString()
+	err = bus.Publish(ctx, (events.Event{
+		ID:          eventID,
+		RunID:       runID,
+		Type:        events.EventType("item.received"),
+		SourceAgent: "api.v1",
+		Payload:     []byte(`{"entity_id":"11111111-1111-1111-1111-111111111111"}`),
+		CreatedAt:   time.Now().UTC(),
+	}).WithEntityID("11111111-1111-1111-1111-111111111111"))
+	if err != nil {
+		t.Fatalf("Publish with runtime ingress gate: %v", err)
+	}
+	var count int
+	if err := store.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_id = ?`, eventID).Scan(&count); err != nil {
+		t.Fatalf("count event: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("event rows = %d, want 1", count)
 	}
 }
 

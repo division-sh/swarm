@@ -41,6 +41,10 @@ type SQLiteRuntimeStore struct {
 
 var _ SchemaBootstrapper = (*SQLiteRuntimeStore)(nil)
 var _ runtimebus.EventStore = (*SQLiteRuntimeStore)(nil)
+var _ runtimebus.RunLifecyclePersistence = (*SQLiteRuntimeStore)(nil)
+var _ runtimebus.RunLifecycleReadPersistence = (*SQLiteRuntimeStore)(nil)
+var _ runtimebus.StandaloneRuntimePlatformRunConvergencePersistence = (*SQLiteRuntimeStore)(nil)
+var _ runtimebus.NormalRunCompletionConvergencePersistence = (*SQLiteRuntimeStore)(nil)
 var _ runtimemanager.ManagerPersistence = (*SQLiteRuntimeStore)(nil)
 var _ runtimepipeline.SchedulePersistence = (*SQLiteRuntimeStore)(nil)
 var _ runtimetools.MailboxPersistence = (*SQLiteRuntimeStore)(nil)
@@ -428,7 +432,7 @@ func (s *SQLiteRuntimeStore) LoadRuntimeIngressState(ctx context.Context) (runti
 		WHERE id = 1
 	`))
 	if err == sql.ErrNoRows {
-		return runtimeingress.State{}, fmt.Errorf("runtime ingress state is not initialized")
+		return runtimeingress.State{}, runtimeingress.ErrStateNotInitialized
 	}
 	if err != nil {
 		return runtimeingress.State{}, fmt.Errorf("load sqlite runtime ingress state: %w", err)

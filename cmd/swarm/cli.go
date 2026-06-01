@@ -189,7 +189,7 @@ func newServeCommand(ctx context.Context, repo string, runServe func(context.Con
 	cmd.Flags().StringVar(&opts.DataSource, "data", opts.DataSource, "Path to agent-visible read-only /data reference directory")
 	cmd.Flags().StringArrayVar(&opts.BundleHashes, "bundle-hash", opts.BundleHashes, "Load a persisted bundle catalog row by canonical bundle_hash; repeat to boot multiple pinned contexts")
 	cmd.Flags().StringVar(&opts.PlatformSpecPath, "platform-spec", opts.PlatformSpecPath, "Path to platform spec yaml")
-	cmd.Flags().StringVar(&opts.StoreMode, "store", opts.StoreMode, "Runtime store backend: postgres (active default) or sqlite (selected core stores; default flip after #1088)")
+	cmd.Flags().StringVar(&opts.StoreMode, "store", opts.StoreMode, runtimeStoreBackendHelp)
 	cmd.Flags().StringVar(&opts.APIListenAddr, "api-listen-addr", opts.APIListenAddr, "HTTP bind address for API, WebSocket, health, and readiness routes")
 	cmd.Flags().StringVar(&opts.MCPListenAddr, "mcp-listen-addr", opts.MCPListenAddr, "HTTP bind address for MCP and tools routes")
 	cmd.Flags().DurationVar(&opts.ShutdownGrace, "shutdown-grace", opts.ShutdownGrace, "Time to wait for in-flight work to drain after shutdown starts")

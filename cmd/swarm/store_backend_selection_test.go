@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	apiv1 "swarm/internal/apiv1"
 	"swarm/internal/config"
 	"swarm/internal/runtime"
 	runtimecontracts "swarm/internal/runtime/contracts"
@@ -19,14 +20,18 @@ import (
 )
 
 func TestResolveRuntimeStoreSelectionConsumesCanonicalSources(t *testing.T) {
-	t.Run("staged default remains postgres", func(t *testing.T) {
+	t.Run("rollout default is sqlite", func(t *testing.T) {
 		unsetStoreSelectorEnv(t)
-		got, err := resolveRuntimeStoreSelection(t.TempDir(), storebackend.ActiveDefaultBackend().String(), false, &config.Config{})
+		repo := t.TempDir()
+		got, err := resolveRuntimeStoreSelection(repo, storebackend.ActiveDefaultBackend().String(), false, &config.Config{})
 		if err != nil {
 			t.Fatalf("resolveRuntimeStoreSelection: %v", err)
 		}
-		if got.Backend != storebackend.BackendPostgres || got.BackendSource != storebackend.SourceRolloutDefault {
-			t.Fatalf("selection = %#v, want staged postgres rollout default", got)
+		if got.Backend != storebackend.BackendSQLite || got.BackendSource != storebackend.SourceRolloutDefault {
+			t.Fatalf("selection = %#v, want sqlite rollout default", got)
+		}
+		if want := filepath.Join(repo, ".swarm", "dev.db"); got.SQLitePath != want || got.SQLitePathSource != storebackend.SourceRolloutDefault {
+			t.Fatalf("sqlite path = %q source %q, want %q from rollout default", got.SQLitePath, got.SQLitePathSource, want)
 		}
 	})
 
@@ -76,6 +81,12 @@ func TestRunServeRuntimeConsumesCanonicalStoreSelectionBeforeStoreConstruction(t
 		wantBackend storebackend.Backend
 		wantSource  storebackend.Source
 	}{
+		{
+			name:        "rollout default sqlite reaches store construction",
+			storeMode:   storebackend.ActiveDefaultBackend().String(),
+			wantBackend: storebackend.BackendSQLite,
+			wantSource:  storebackend.SourceRolloutDefault,
+		},
 		{
 			name:        "flag postgres reaches store construction",
 			storeMode:   storebackend.BackendPostgres.String(),
@@ -160,13 +171,13 @@ func TestServeCommandCapturesStoreFlagForCanonicalResolver(t *testing.T) {
 	}
 }
 
-func TestServeHelpDocumentsStagedStoreBackends(t *testing.T) {
+func TestServeHelpDocumentsSQLiteDefaultAndPostgresOptIn(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", "--help"}, &stdout, &stderr, defaultRootCommandOptions())
 	if code != 0 {
 		t.Fatalf("serve --help code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	for _, want := range []string{"Runtime store backend", "postgres (active default)", "sqlite (selected core stores; default flip after #1088)"} {
+	for _, want := range []string{"Runtime store backend", "sqlite (local/dev default)", "postgres (explicit opt-in production/external backend)"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("serve help missing %q:\n%s", want, stdout.String())
 		}
@@ -190,6 +201,9 @@ func TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore(t *testing.T) {
 	}
 	if stores.Postgres != nil {
 		t.Fatalf("sqlite store bundle Postgres = %#v, want nil", stores.Postgres)
+	}
+	if _, ok := stores.ObservabilityStore.(apiv1.RunReadStore); !ok {
+		t.Fatalf("sqlite ObservabilityStore = %T, want selected run read store for run.get/list", stores.ObservabilityStore)
 	}
 	runtimeStores := stores.runtimeStores()
 	if runtimeStores.SQLDB != nil {

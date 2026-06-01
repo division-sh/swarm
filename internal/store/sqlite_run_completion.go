@@ -1,0 +1,550 @@
+package store
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"swarm/internal/events"
+	runtimebus "swarm/internal/runtime/bus"
+	storerunlifecycle "swarm/internal/store/runlifecycle"
+)
+
+type sqliteRunCompletionDBTX interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+func (s *SQLiteRuntimeStore) LoadRunLifecycleSnapshot(ctx context.Context, runID string) (runtimebus.RunLifecycleSnapshot, error) {
+	if s == nil || s.DB == nil {
+		return runtimebus.RunLifecycleSnapshot{}, fmt.Errorf("sqlite runtime store is required")
+	}
+	snap, err := s.sqliteLoadRunLifecycleSnapshot(ctx, s.DB, runID)
+	if err != nil {
+		return runtimebus.RunLifecycleSnapshot{}, err
+	}
+	return runtimebus.RunLifecycleSnapshot{
+		RunID:        snap.RunID,
+		Status:       snap.Status,
+		EventCount:   snap.EventCount,
+		EntityCount:  snap.EntityCount,
+		ErrorSummary: snap.ErrorSummary,
+		StartedAt:    snap.StartedAt,
+		EndedAt:      snap.EndedAt,
+	}, nil
+}
+
+func (s *SQLiteRuntimeStore) MarkRunTerminal(ctx context.Context, runID, status, errorSummary string, endedAt time.Time) error {
+	if s == nil || s.DB == nil {
+		return fmt.Errorf("sqlite runtime store is required")
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin sqlite mark run terminal tx: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	if _, err := s.sqliteMarkRunTerminalTx(ctx, tx, runID, status, errorSummary, endedAt); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit sqlite mark run terminal tx: %w", err)
+	}
+	committed = true
+	return nil
+}
+
+func (s *SQLiteRuntimeStore) ConvergeStandaloneRuntimePlatformRun(ctx context.Context, evt events.Event) error {
+	if s == nil || s.DB == nil {
+		return fmt.Errorf("sqlite runtime store is required")
+	}
+	eventID := sanitizeOptionalUUID(strings.TrimSpace(evt.ID))
+	if eventID == "" {
+		return nil
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin sqlite standalone platform run convergence tx: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	rec, found, err := sqliteLoadStandaloneRuntimePlatformRunRecord(ctx, tx, eventID)
+	if err != nil || !found || !isStandaloneRuntimePlatformRunRecord(rec) {
+		return err
+	}
+	switch strings.TrimSpace(rec.RunStatus) {
+	case "completed":
+		committed = true
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit sqlite standalone platform run convergence noop tx: %w", err)
+		}
+		return nil
+	case "failed", "cancelled", "forked":
+		return fmt.Errorf("standalone runtime platform run %s already terminal with status %s", rec.RunID, strings.TrimSpace(rec.RunStatus))
+	}
+	active, err := sqliteHasActiveRunDeliveries(ctx, tx, rec.RunID)
+	if err != nil || active {
+		if err != nil {
+			return err
+		}
+		committed = true
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit sqlite standalone platform active-delivery noop tx: %w", err)
+		}
+		return nil
+	}
+	if _, err := s.sqliteMarkRunTerminalTx(ctx, tx, rec.RunID, "completed", "", s.now()); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit sqlite standalone platform run convergence tx: %w", err)
+	}
+	committed = true
+	return nil
+}
+
+func (s *SQLiteRuntimeStore) ConvergeNormalRunCompletion(ctx context.Context, eventID string, workflowTerminalStates []string, flowTerminalStates map[string][]string) error {
+	if s == nil || s.DB == nil {
+		return fmt.Errorf("sqlite runtime store is required")
+	}
+	eventID = sanitizeOptionalUUID(eventID)
+	if eventID == "" {
+		return nil
+	}
+	workflowTerminals := normalRunCompletionStateSet(workflowTerminalStates)
+	flowTerminals := normalRunCompletionFlowStateSets(flowTerminalStates)
+	if len(workflowTerminals) == 0 && len(flowTerminals) == 0 {
+		return nil
+	}
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return err
+	}
+	if !normalRunCompletionSupported(caps) {
+		return nil
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin sqlite normal run completion tx: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	candidate, found, err := sqliteNormalRunCompletionCandidateTx(ctx, tx, eventID)
+	if err != nil || !found {
+		return err
+	}
+	switch candidate.Status {
+	case "completed":
+		committed = true
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit sqlite normal run completion noop tx: %w", err)
+		}
+		return nil
+	case "running":
+	default:
+		committed = true
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit sqlite normal run completion non-running noop tx: %w", err)
+		}
+		return nil
+	}
+	if platformRec, platformFound, err := sqliteLoadStandaloneRuntimePlatformRunRecord(ctx, tx, eventID); err != nil {
+		return err
+	} else if platformFound && isStandaloneRuntimePlatformRunRecord(platformRec) {
+		committed = true
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit sqlite normal run completion platform noop tx: %w", err)
+		}
+		return nil
+	}
+	ready, err := s.sqliteNormalRunCompletionRunReadyTx(ctx, tx, candidate.RunID, workflowTerminals, flowTerminals)
+	if err != nil || !ready {
+		if err != nil {
+			return err
+		}
+		committed = true
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit sqlite normal run completion not-ready noop tx: %w", err)
+		}
+		return nil
+	}
+	if _, err := s.sqliteMarkRunTerminalTx(ctx, tx, candidate.RunID, "completed", "", s.now()); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit sqlite normal run completion tx: %w", err)
+	}
+	committed = true
+	return nil
+}
+
+func (s *SQLiteRuntimeStore) sqliteLoadRunLifecycleSnapshot(ctx context.Context, q execQueryer, runID string) (storerunlifecycle.Snapshot, error) {
+	runID = nullUUIDString(runID)
+	if s == nil || q == nil || runID == "" {
+		return storerunlifecycle.Snapshot{}, fmt.Errorf("run_id is required")
+	}
+	var (
+		snap      storerunlifecycle.Snapshot
+		startedAt any
+		endedAt   any
+	)
+	err := q.QueryRowContext(ctx, `
+		SELECT
+			run_id,
+			LOWER(COALESCE(status, '')),
+			COALESCE(event_count, 0),
+			COALESCE(entity_count, 0),
+			COALESCE(error_summary, ''),
+			started_at,
+			ended_at
+		FROM runs
+		WHERE run_id = ?
+	`, runID).Scan(
+		&snap.RunID,
+		&snap.Status,
+		&snap.EventCount,
+		&snap.EntityCount,
+		&snap.ErrorSummary,
+		&startedAt,
+		&endedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return storerunlifecycle.Snapshot{}, fmt.Errorf("run %s not found", runID)
+		}
+		return storerunlifecycle.Snapshot{}, fmt.Errorf("load sqlite run snapshot: %w", err)
+	}
+	if at, ok, err := sqliteTimeValue(startedAt); err != nil {
+		return storerunlifecycle.Snapshot{}, err
+	} else if ok {
+		snap.StartedAt = at
+	}
+	if at, ok, err := sqliteTimeValue(endedAt); err != nil {
+		return storerunlifecycle.Snapshot{}, err
+	} else if ok {
+		snap.EndedAt = &at
+	}
+	snap.RunID = strings.TrimSpace(snap.RunID)
+	snap.Status = strings.TrimSpace(strings.ToLower(snap.Status))
+	snap.ErrorSummary = strings.TrimSpace(snap.ErrorSummary)
+	return snap, nil
+}
+
+func (s *SQLiteRuntimeStore) sqliteMarkRunTerminalTx(ctx context.Context, tx *sql.Tx, runID, status, errorSummary string, endedAt time.Time) (storerunlifecycle.Snapshot, error) {
+	if tx == nil {
+		return storerunlifecycle.Snapshot{}, fmt.Errorf("sqlite run terminal tx is required")
+	}
+	runID = nullUUIDString(runID)
+	if runID == "" {
+		return storerunlifecycle.Snapshot{}, fmt.Errorf("run_id is required")
+	}
+	var err error
+	status, err = canonicalRunTerminalStatus(status)
+	if err != nil {
+		return storerunlifecycle.Snapshot{}, err
+	}
+	errorSummary = strings.TrimSpace(errorSummary)
+	if status != "failed" {
+		errorSummary = ""
+	}
+	if endedAt.IsZero() {
+		endedAt = s.now()
+	}
+	if err := sqliteSyncRunCounts(ctx, tx, runID); err != nil {
+		return storerunlifecycle.Snapshot{}, err
+	}
+	if status == "completed" || status == "failed" {
+		active, err := sqliteHasActiveRunDeliveries(ctx, tx, runID)
+		if err != nil {
+			return storerunlifecycle.Snapshot{}, err
+		}
+		if active {
+			return storerunlifecycle.Snapshot{}, fmt.Errorf("run %s still has active deliveries", runID)
+		}
+	}
+	result, err := tx.ExecContext(ctx, `
+		UPDATE runs
+		SET status = ?,
+		    error_summary = NULLIF(?, ''),
+		    ended_at = COALESCE(ended_at, ?)
+		WHERE run_id = ?
+		  AND (status IN ('running', 'paused') OR status = ?)
+	`, status, errorSummary, endedAt.UTC(), runID, status)
+	if err != nil {
+		return storerunlifecycle.Snapshot{}, fmt.Errorf("mark sqlite run terminal: %w", err)
+	}
+	if rows, err := result.RowsAffected(); err == nil && rows == 0 {
+		current, loadErr := s.sqliteLoadRunLifecycleSnapshot(ctx, tx, runID)
+		if loadErr != nil {
+			return storerunlifecycle.Snapshot{}, loadErr
+		}
+		if current.Status != status {
+			return storerunlifecycle.Snapshot{}, fmt.Errorf("run %s already terminal with status %s", runID, current.Status)
+		}
+		return current, nil
+	}
+	return s.sqliteLoadRunLifecycleSnapshot(ctx, tx, runID)
+}
+
+func sqliteSyncRunCounts(ctx context.Context, q execQueryer, runID string) error {
+	runID = nullUUIDString(runID)
+	if q == nil || runID == "" {
+		return nil
+	}
+	_, err := q.ExecContext(ctx, `
+		UPDATE runs
+		SET
+			event_count = (SELECT COUNT(*) FROM events WHERE run_id = ?),
+			entity_count = (SELECT COUNT(DISTINCT entity_id) FROM events WHERE run_id = ?)
+		WHERE run_id = ?
+	`, runID, runID, runID)
+	if err != nil {
+		return fmt.Errorf("sync sqlite run counters: %w", err)
+	}
+	return nil
+}
+
+func sqliteHasActiveRunDeliveries(ctx context.Context, q execQueryer, runID string) (bool, error) {
+	runID = nullUUIDString(runID)
+	if q == nil || runID == "" {
+		return false, nil
+	}
+	var active bool
+	if err := q.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM event_deliveries
+			WHERE run_id = ?
+			  AND (
+				status IN ('pending', 'in_progress')
+				OR (status = 'failed' AND COALESCE(retry_count, 0) < 2)
+			  )
+		)
+	`, runID).Scan(&active); err != nil {
+		return false, fmt.Errorf("load sqlite active deliveries: %w", err)
+	}
+	return active, nil
+}
+
+func sqliteNormalRunCompletionCandidateTx(ctx context.Context, tx *sql.Tx, eventID string) (normalRunCompletionCandidate, bool, error) {
+	var candidate normalRunCompletionCandidate
+	err := tx.QueryRowContext(ctx, `
+		SELECT
+			r.run_id,
+			LOWER(COALESCE(r.status, ''))
+		FROM events e
+		INNER JOIN runs r ON r.run_id = e.run_id
+		WHERE e.event_id = ?
+	`, eventID).Scan(&candidate.RunID, &candidate.Status)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return normalRunCompletionCandidate{}, false, nil
+	case err != nil:
+		return normalRunCompletionCandidate{}, false, fmt.Errorf("load sqlite normal run completion candidate: %w", err)
+	default:
+		candidate.RunID = strings.TrimSpace(candidate.RunID)
+		candidate.Status = strings.TrimSpace(candidate.Status)
+		return candidate, candidate.RunID != "", nil
+	}
+}
+
+func (s *SQLiteRuntimeStore) sqliteNormalRunCompletionRunReadyTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	runID string,
+	workflowTerminals map[string]struct{},
+	flowTerminals map[string]map[string]struct{},
+) (bool, error) {
+	runID = nullUUIDString(runID)
+	if runID == "" {
+		return false, nil
+	}
+	checks := []func(context.Context, *sql.Tx, string) (bool, error){
+		sqliteNormalRunCompletionPipelinesSettledTx,
+		sqliteNormalRunCompletionDeliveriesSettledTx,
+		sqliteNormalRunCompletionTimersSettledTx,
+		s.sqliteNormalRunCompletionSessionLeasesSettledTx,
+	}
+	for _, check := range checks {
+		ready, err := check(ctx, tx, runID)
+		if err != nil || !ready {
+			return ready, err
+		}
+	}
+	return sqliteNormalRunCompletionEntitiesTerminalTx(ctx, tx, runID, workflowTerminals, flowTerminals)
+}
+
+func sqliteNormalRunCompletionPipelinesSettledTx(ctx context.Context, tx *sql.Tx, runID string) (bool, error) {
+	var unsettled bool
+	if err := tx.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM events e
+			LEFT JOIN event_receipts r
+				ON r.event_id = e.event_id
+				AND r.subscriber_type = 'platform'
+				AND r.subscriber_id = 'pipeline'
+			WHERE e.run_id = ?
+			  AND e.event_name <> ?
+			  AND (r.event_id IS NULL OR COALESCE(r.outcome, '') <> 'success')
+		)
+	`, runID, runtimeLogEventName).Scan(&unsettled); err != nil {
+		return false, fmt.Errorf("check sqlite normal run pipeline settlement: %w", err)
+	}
+	return !unsettled, nil
+}
+
+func sqliteNormalRunCompletionDeliveriesSettledTx(ctx context.Context, tx *sql.Tx, runID string) (bool, error) {
+	active, err := sqliteHasActiveRunDeliveries(ctx, tx, runID)
+	if err != nil {
+		return false, err
+	}
+	return !active, nil
+}
+
+func sqliteNormalRunCompletionTimersSettledTx(ctx context.Context, tx *sql.Tx, runID string) (bool, error) {
+	var active bool
+	if err := tx.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM timers
+			WHERE run_id = ?
+			  AND status = 'active'
+		)
+	`, runID).Scan(&active); err != nil {
+		return false, fmt.Errorf("check sqlite normal run active timers: %w", err)
+	}
+	return !active, nil
+}
+
+func (s *SQLiteRuntimeStore) sqliteNormalRunCompletionSessionLeasesSettledTx(ctx context.Context, tx *sql.Tx, runID string) (bool, error) {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT lease_expires_at
+		FROM agent_sessions
+		WHERE run_id = ?
+		  AND status = 'active'
+		  AND lease_holder IS NOT NULL
+		  AND lease_expires_at IS NOT NULL
+	`, runID)
+	if err != nil {
+		return false, fmt.Errorf("check sqlite normal run active session leases: %w", err)
+	}
+	defer rows.Close()
+	now := s.now()
+	for rows.Next() {
+		var raw any
+		if err := rows.Scan(&raw); err != nil {
+			return false, fmt.Errorf("scan sqlite session lease expiry: %w", err)
+		}
+		expiresAt, ok, err := sqliteTimeValue(raw)
+		if err != nil {
+			return false, err
+		}
+		if ok && expiresAt.After(now) {
+			return false, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, fmt.Errorf("read sqlite session lease expiries: %w", err)
+	}
+	return true, nil
+}
+
+func sqliteNormalRunCompletionEntitiesTerminalTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	runID string,
+	workflowTerminals map[string]struct{},
+	flowTerminals map[string]map[string]struct{},
+) (bool, error) {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT
+			LOWER(COALESCE(es.current_state, '')),
+			COALESCE(es.flow_instance, ''),
+			COALESCE(fi.flow_template, '')
+		FROM entity_state es
+		LEFT JOIN flow_instances fi ON fi.instance_id = es.flow_instance
+		WHERE es.run_id = ?
+	`, runID)
+	if err != nil {
+		return false, fmt.Errorf("load sqlite normal run entity terminality: %w", err)
+	}
+	defer rows.Close()
+	seen := false
+	for rows.Next() {
+		seen = true
+		var state, flowInstance, flowTemplate string
+		if err := rows.Scan(&state, &flowInstance, &flowTemplate); err != nil {
+			return false, fmt.Errorf("scan sqlite normal run entity terminality: %w", err)
+		}
+		terminals, ok := normalRunCompletionTerminalSetForEntity(flowTemplate, flowInstance, workflowTerminals, flowTerminals)
+		if !ok {
+			return false, nil
+		}
+		if _, ok := terminals[strings.TrimSpace(strings.ToLower(state))]; !ok {
+			return false, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, fmt.Errorf("read sqlite normal run entity terminality: %w", err)
+	}
+	return seen, nil
+}
+
+func sqliteLoadStandaloneRuntimePlatformRunRecord(ctx context.Context, q sqliteRunCompletionDBTX, eventID string) (standaloneRuntimePlatformRunRecord, bool, error) {
+	eventID = sanitizeOptionalUUID(eventID)
+	if q == nil || eventID == "" {
+		return standaloneRuntimePlatformRunRecord{}, false, nil
+	}
+	var rec standaloneRuntimePlatformRunRecord
+	err := q.QueryRowContext(ctx, `
+		SELECT
+			COALESCE(r.run_id, ''),
+			COALESCE(r.status, ''),
+			COALESCE(e.event_id, ''),
+			COALESCE(e.event_name, ''),
+			COALESCE(e.produced_by, ''),
+			COALESCE(e.produced_by_type, ''),
+			COALESCE(e.source_event_id, ''),
+			COALESCE(r.trigger_event_id, ''),
+			COALESCE(r.trigger_event_type, '')
+		FROM events e
+		INNER JOIN runs r ON r.run_id = e.run_id
+		WHERE e.event_id = ?
+		LIMIT 1
+	`, eventID).Scan(
+		&rec.RunID,
+		&rec.RunStatus,
+		&rec.EventID,
+		&rec.EventType,
+		&rec.ProducedBy,
+		&rec.ProducedByType,
+		&rec.SourceEventID,
+		&rec.TriggerEventID,
+		&rec.TriggerEventType,
+	)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return standaloneRuntimePlatformRunRecord{}, false, nil
+	case err != nil:
+		return standaloneRuntimePlatformRunRecord{}, false, fmt.Errorf("load sqlite standalone runtime platform run candidate: %w", err)
+	default:
+		return rec, true, nil
+	}
+}

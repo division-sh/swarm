@@ -110,7 +110,7 @@ func TestOperatorRunStartHandlersPersistRootEventAndReplayIdempotency(t *testing
 	}
 }
 
-func TestOperatorRunStartHandlersRequireBundleHashForCreateNewWork(t *testing.T) {
+func TestOperatorRunStartHandlersUseActiveEphemeralBundleScopeForCreateNewWork(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
@@ -122,8 +122,26 @@ func TestOperatorRunStartHandlersRequireBundleHashForCreateNewWork(t *testing.T)
 	runID := uuid.NewString()
 
 	started := rpcCall(t, handler, runStartBodyWithoutBundle(runID, "scan.requested", `{"topic":"medicine"}`, "idem-start-no-bundle"))
+	if started.Error != nil {
+		t.Fatalf("run.start active ephemeral bundle scope error = %#v", started.Error)
+	}
+	result := asMap(t, started.Result)
+	if result["run_id"] != runID || result["status"] != "running" {
+		t.Fatalf("run.start result = %#v", result)
+	}
+	assertRunStartPersistence(t, db, runID, "scan.requested", runStartTestFingerprint)
+}
+
+func TestOperatorRunStartHandlersRequireBundleScopeForCreateNewWorkWithoutActiveRuntimeFact(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+	handler := runStartTestHandler(t, pg, missingRunStartBundleScopePublisher{}, source)
+	runID := uuid.NewString()
+
+	started := rpcCall(t, handler, runStartBodyWithoutBundle(runID, "scan.requested", `{"topic":"medicine"}`, "idem-start-no-bundle"))
 	if started.Error == nil {
-		t.Fatal("run.start missing bundle_hash error = nil")
+		t.Fatal("run.start missing bundle scope error = nil")
 	}
 	if data := asMap(t, started.Error.Data); data["code"] != BundleScopeRequiredCode {
 		t.Fatalf("missing bundle scope data = %#v", data)
@@ -554,6 +572,12 @@ func (p failingRunStartPublisher) Publish(context.Context, events.Event) error {
 
 func (p failingRunStartPublisher) WithBundleFingerprint(ctx context.Context) context.Context {
 	return runtimecorrelation.WithBundleSourceFact(ctx, runStartTestBundleSourceFact())
+}
+
+type missingRunStartBundleScopePublisher struct{}
+
+func (missingRunStartBundleScopePublisher) Publish(context.Context, events.Event) error {
+	return errors.New("unexpected publish without active runtime bundle scope")
 }
 
 func runStartBody(runID, fingerprint, eventName, payload, idempotencyKey string) string {

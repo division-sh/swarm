@@ -59,10 +59,6 @@ func (b Backend) String() string {
 }
 
 func ActiveDefaultBackend() Backend {
-	return BackendPostgres
-}
-
-func FutureDefaultBackend() Backend {
 	return BackendSQLite
 }
 
@@ -85,14 +81,6 @@ func Resolve(in Input) (Selection, error) {
 	selection.SQLitePath = path
 	selection.SQLitePathSource = pathSource
 	return selection, nil
-}
-
-func SQLiteUnsupportedRuntimeError(path string) error {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		path = filepath.Clean(DefaultSQLiteRelativePath)
-	}
-	return fmt.Errorf("store backend %q is recognized but SQLite runtime stores are not implemented yet; runtime support remains tracked by #1085-#1088 (sqlite_path=%s)", BackendSQLite, path)
 }
 
 func resolveBackend(in Input) (Backend, Source, error) {

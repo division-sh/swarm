@@ -255,6 +255,40 @@ func TestOperatorEventPublishHandlersRequireCanonicalBundleHashForCreateNewWork(
 	assertNoEventPublishPersistence(t, db)
 }
 
+func TestOperatorEventPublishHandlersUseActiveEphemeralBundleScopeForCreateNewWork(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+	bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	seedActiveAPIV1RuntimeBusAgent(t, context.Background(), pg, "scan-orchestrator")
+	ch := bus.Subscribe("scan-orchestrator", events.EventType("scan.requested"))
+	defer bus.Unsubscribe("scan-orchestrator")
+	handler := eventPublishTestHandler(t, pg, bus, source)
+
+	published := rpcCall(t, handler, eventPublishBodyWithoutBundle("", "scan.requested", `{"topic":"medicine"}`, "", "idem-publish-no-bundle"))
+	if published.Error != nil {
+		t.Fatalf("event.publish active ephemeral bundle scope error = %#v", published.Error)
+	}
+	result := asMap(t, published.Result)
+	eventID := stringValue(t, result["event_id"], "event_id")
+	runID := stringValue(t, result["run_id"], "run_id")
+	assertEventPublishPersistence(t, db, runID, eventID, "scan.requested", "cli-publish:"+actorTokenID(testToken))
+	if got := countEventsByName(t, db, "scan.requested"); got != 1 {
+		t.Fatalf("scan.requested event count = %d, want 1", got)
+	}
+	select {
+	case got := <-ch:
+		if got.ID != eventID {
+			t.Fatalf("delivered event = %s, want %s", got.ID, eventID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for event.publish delivery")
+	}
+}
+
 func TestOperatorEventPublishPersistsIdempotencyBeforeReadbackFailure(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
@@ -981,6 +1015,21 @@ func eventPublishBody(runID, fingerprint, eventName, payload, emitter, idempoten
 func eventPublishBodyWithBundleHash(runID, bundleHash, eventName, payload, emitter, idempotencyKey string) string {
 	parts := []string{
 		fmt.Sprintf(`"bundle_hash":%q`, bundleHash),
+		fmt.Sprintf(`"event_name":%q`, eventName),
+		fmt.Sprintf(`"payload":%s`, payload),
+		fmt.Sprintf(`"idempotency_key":%q`, idempotencyKey),
+	}
+	if strings.TrimSpace(runID) != "" {
+		parts = append(parts, fmt.Sprintf(`"run_id":%q`, runID))
+	}
+	if strings.TrimSpace(emitter) != "" {
+		parts = append(parts, fmt.Sprintf(`"emitter":%q`, emitter))
+	}
+	return fmt.Sprintf(`{"jsonrpc":"2.0","id":"publish","method":"event.publish","params":{%s}}`, strings.Join(parts, ","))
+}
+
+func eventPublishBodyWithoutBundle(runID, eventName, payload, emitter, idempotencyKey string) string {
+	parts := []string{
 		fmt.Sprintf(`"event_name":%q`, eventName),
 		fmt.Sprintf(`"payload":%s`, payload),
 		fmt.Sprintf(`"idempotency_key":%q`, idempotencyKey),

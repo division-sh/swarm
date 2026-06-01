@@ -1218,6 +1218,9 @@ func ensureLifecycleWorkflowSchedules(ctx context.Context, store runtimepipeline
 	if store == nil || workflow == nil {
 		return nil
 	}
+	if strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx)) == "" {
+		return nil
+	}
 	source := workflow.SemanticSource()
 	if source == nil {
 		return nil

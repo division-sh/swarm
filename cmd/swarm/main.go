@@ -67,6 +67,7 @@ const (
 	serveReadinessRoutes    = "/healthz /readyz"
 	serveGatewayTokenBytes  = 32
 	serveExitDataIntegrity  = 78
+	runtimeStoreBackendHelp = "Runtime store backend: sqlite (local/dev default) or postgres (explicit opt-in production/external backend)"
 )
 
 var (
@@ -144,6 +145,17 @@ type storeBundle struct {
 	IdempotencyStore    apiv1.APIIdempotencyStore
 	TurnStore           runtimellm.TurnPersistence
 	StartupOwnership    runtimestartupownership.Store
+}
+
+type sqlDBPinger struct {
+	db *sql.DB
+}
+
+func (p sqlDBPinger) Ping(ctx context.Context) error {
+	if p.db == nil {
+		return errors.New("sql database is not configured")
+	}
+	return p.db.PingContext(ctx)
 }
 
 func (s storeBundle) runtimeStores() runtime.Stores {
@@ -774,11 +786,22 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	}
 	var apiEntities apiv1.EntityReadStore
 	var apiAgentConversations apiv1.AgentConversationReadStore
+	var apiDatabase apiv1.Pinger
+	var apiRuns apiv1.RunReadStore
 	apiObservability := stores.ObservabilityStore
 	if stores.Postgres != nil {
+		apiDatabase = stores.Postgres
+		apiRuns = stores.Postgres
 		apiEntities = stores.Postgres
 		apiAgentConversations = stores.Postgres
 		apiObservability = stores.Postgres
+	} else if stores.SQLDB != nil {
+		apiDatabase = sqlDBPinger{db: stores.SQLDB}
+	}
+	if stores.Postgres == nil {
+		if runStore, ok := stores.ObservabilityStore.(apiv1.RunReadStore); ok {
+			apiRuns = runStore
+		}
 	}
 	resetPlanner := runtimedestructivereset.InventoryPlanner{
 		Reader: runtimedestructivereset.CompositeInventoryReader{
@@ -808,8 +831,8 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		Ready: func() bool {
 			return ready.Load()
 		},
-		Database:           stores.Postgres,
-		Runs:               stores.Postgres,
+		Database:           apiDatabase,
+		Runs:               apiRuns,
 		Observability:      apiObservability,
 		Entities:           apiEntities,
 		AgentConversations: apiAgentConversations,
@@ -1197,7 +1220,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 	backend := fs.String("backend", "", "LLM backend profile for local runtime startup")
 	contractsPath := fs.String("contracts", "", "Path to selected Swarm contract bundle root for fork planning or selected-contract execution")
 	platformSpecPath := fs.String("platform-spec", defaultPlatformSpecPath, "Path to platform spec yaml")
-	storeMode := fs.String("store", storebackend.ActiveDefaultBackend().String(), "Runtime store backend: postgres (active default) or sqlite (selected core stores; default flip after #1088)")
+	storeMode := fs.String("store", storebackend.ActiveDefaultBackend().String(), runtimeStoreBackendHelp)
 	runID := fs.String("run", "", "Source run ID to plan from")
 	at := fs.String("at", "", "Fork point event UUID or RFC3339 timestamp")
 	dryRun := fs.Bool("dry-run", false, "Plan the fork without mutating runtime state")

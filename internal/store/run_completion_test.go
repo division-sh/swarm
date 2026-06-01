@@ -107,6 +107,17 @@ func TestPostgresStore_ConvergeNormalRunCompletion_MarksCompletedWhenTerminalAnd
 	if err := pg.UpsertPipelineReceipt(ctx, fixture.EventID, "processed", ""); err != nil {
 		t.Fatalf("UpsertPipelineReceipt: %v", err)
 	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			event_id, run_id, event_name, entity_id, flow_instance, scope, payload,
+			chain_depth, produced_by, produced_by_type, source_event_id, created_at
+		) VALUES (
+			gen_random_uuid(), $1::uuid, $2, NULL, NULL, 'global', '{"message":"diagnostic"}'::jsonb,
+			0, 'runtime', 'platform', $3::uuid, now()
+		)
+	`, fixture.RunID, runtimeLogEventName, fixture.EventID); err != nil {
+		t.Fatalf("seed runtime log: %v", err)
+	}
 	if err := pg.ConvergeNormalRunCompletion(ctx, fixture.EventID, []string{"done"}, map[string][]string{"review": []string{"done"}}); err != nil {
 		t.Fatalf("ConvergeNormalRunCompletion: %v", err)
 	}
