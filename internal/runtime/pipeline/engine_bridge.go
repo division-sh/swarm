@@ -68,20 +68,22 @@ func (pc *PipelineCoordinator) executeAuthoritativeNodeHandler(ctx context.Conte
 		return contractHandlerExecutionResult{}, nil
 	}
 	var (
-		nodeID  string
-		handler runtimecontracts.SystemNodeEventHandler
-		matched bool
+		nodeID          string
+		handler         runtimecontracts.SystemNodeEventHandler
+		handlerEventKey string
+		matched         bool
 	)
 	for _, owner := range owners {
-		candidate, ok := source.NodeEventHandler(owner, trigger)
-		if !ok {
+		resolved := workflowNodeEventHandlerResolutionForDelivery(source, owner, evt)
+		if !resolved.Matched {
 			continue
 		}
 		if matched {
 			return contractHandlerExecutionResult{}, nil
 		}
 		nodeID = strings.TrimSpace(owner)
-		handler = candidate
+		handler = resolved.Handler
+		handlerEventKey = resolved.HandlerEventKey
 		matched = true
 	}
 	if !matched && isAccumulationTimeoutEvent(events.EventType(trigger)) {
@@ -90,12 +92,16 @@ func (pc *PipelineCoordinator) executeAuthoritativeNodeHandler(ctx context.Conte
 			if ok {
 				nodeID = bucket.NodeID
 				handler = timeoutHandler
+				handlerEventKey = bucket.EventType
 				matched = true
 			}
 		}
 	}
 	if !matched {
 		return contractHandlerExecutionResult{}, nil
+	}
+	if strings.TrimSpace(triggerCtx.HandlerEventKey) == "" {
+		triggerCtx.HandlerEventKey = handlerEventKey
 	}
 	return pc.executeNodeContractHandler(ctx, nodeID, handler, triggerCtx, false)
 }
@@ -209,6 +215,10 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	if handler.CreateEntity {
 		ctx = withWorkflowCreateEntityInitialValues(ctx, workflowEntitySchemaInitialValues(source, flowID))
 	}
+	handlerEventKey := strings.TrimSpace(triggerCtx.HandlerEventKey)
+	if handlerEventKey == "" {
+		handlerEventKey = workflowNodeHandlerEventKeyForExecution(source, nodeID, triggerCtx.Event)
+	}
 	deps := coordinatorEngineDependencies(pc)
 	if collectLocally {
 		deps.Outbox = noOpEngineOutbox{}
@@ -226,14 +236,15 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		return contractHandlerExecutionResult{}, err
 	}
 	result, err := exec.Execute(ctx, runtimeengine.ExecutionRequest{
-		EntityID:   identity.NormalizeEntityID(entityID),
-		NodeID:     identity.NormalizeNodeID(nodeID),
-		FlowID:     identity.NormalizeFlowID(flowID),
-		Event:      triggerCtx.Event,
-		ChainDepth: triggerCtx.Event.ChainDepth,
-		Handler:    handler,
-		Preview:    preview,
-		State:      stateSnapshot,
+		EntityID:        identity.NormalizeEntityID(entityID),
+		NodeID:          identity.NormalizeNodeID(nodeID),
+		FlowID:          identity.NormalizeFlowID(flowID),
+		Event:           triggerCtx.Event,
+		HandlerEventKey: handlerEventKey,
+		ChainDepth:      triggerCtx.Event.ChainDepth,
+		Handler:         handler,
+		Preview:         preview,
+		State:           stateSnapshot,
 	})
 	if !preview {
 		logAccumulatorCompletionOutcome(ctx, pc.bus, nodeID, triggerCtx.Event, result.AccumulatorCompletionDiagnostics, err)
@@ -252,7 +263,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	if !preview {
 		pc.recordInterceptedEmitDeadLetters(ctx, triggerCtx.Event, nodeID, handlerOutcomeFromExecutionResult(result))
 	}
-	if err := pc.reconcileAccumulationTimeoutSchedule(ctx, entityID, nodeID, handler, triggerCtx.Event, result.StateMutation.StateCarrier.PersistedStateBuckets(), result.Status == runtimeengine.OutcomeWaiting); err != nil {
+	if err := pc.reconcileAccumulationTimeoutSchedule(ctx, entityID, nodeID, handler, triggerCtx.Event, handlerEventKey, result.StateMutation.StateCarrier.PersistedStateBuckets(), result.Status == runtimeengine.OutcomeWaiting); err != nil {
 		return contractHandlerExecutionResult{}, err
 	}
 	if collectLocally {

@@ -173,6 +173,7 @@ func (pc *PipelineCoordinator) reconcileAccumulationTimeoutSchedule(
 	entityID, nodeID string,
 	handler runtimecontracts.SystemNodeEventHandler,
 	evt Event,
+	handlerEventKey string,
 	stateBuckets map[string]any,
 	waiting bool,
 ) error {
@@ -188,7 +189,7 @@ func (pc *PipelineCoordinator) reconcileAccumulationTimeoutSchedule(
 	if entityID == "" || nodeID == "" {
 		return nil
 	}
-	bucketRef, ok := accumulationTimeoutBucketRef(evt, nodeID)
+	bucketRef, ok := accumulationTimeoutBucketRef(evt, nodeID, handlerEventKey)
 	if !ok {
 		return nil
 	}
@@ -213,13 +214,17 @@ func workflowTimerLifecycleMatches(trigger timeridentity.Trigger, stage, sourceE
 	return trigger.MatchesStage(stage) || trigger.MatchesEvent(sourceEvent)
 }
 
-func accumulationTimeoutBucketRef(evt Event, nodeID string) (timeridentity.AccumulatorBucketRef, bool) {
+func accumulationTimeoutBucketRef(evt Event, nodeID, handlerEventKey string) (timeridentity.AccumulatorBucketRef, bool) {
 	nodeID = strings.TrimSpace(nodeID)
 	if nodeID == "" {
 		return timeridentity.AccumulatorBucketRef{}, false
 	}
 	if !isAccumulationTimeoutEvent(evt.Type) {
-		bucket := timeridentity.NewAccumulatorBucketRef(nodeID, string(evt.Type))
+		eventType := strings.TrimSpace(handlerEventKey)
+		if eventType == "" {
+			eventType = strings.TrimSpace(string(evt.Type))
+		}
+		bucket := timeridentity.NewAccumulatorBucketRef(nodeID, eventType)
 		return bucket, bucket.Valid()
 	}
 	bucket, ok := timeridentity.ParseAccumulatorBucketRef(parsePayloadMap(evt.Payload))

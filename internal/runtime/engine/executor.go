@@ -18,7 +18,6 @@ import (
 	"swarm/internal/runtime/core/identity"
 	"swarm/internal/runtime/core/paths"
 	runtimepinrouting "swarm/internal/runtime/core/pinrouting"
-	"swarm/internal/runtime/core/timeridentity"
 	"swarm/internal/runtime/core/values"
 	"swarm/internal/runtime/entityruntime"
 	"swarm/internal/runtime/semanticview"
@@ -702,7 +701,7 @@ func (e *Executor) stepAccumulate(frame *executionFrame) (bool, error) {
 	frame.result.AccumulatorCompletionDiagnostics.CompletionMode = spec.Completion.String()
 	frame.result.AccumulatorCompletionDiagnostics.OnCompleteDeclared = len(frame.req.Handler.OnComplete) > 0 || len(spec.OnComplete) > 0
 	frame.result.AccumulatorCompletionDiagnostics.EvaluationOutcome = AccumulatorCompletionEvaluationNotAttempted
-	bucketRef := timeridentity.NewAccumulatorBucketRef(frame.req.NodeID.String(), string(frame.req.Event.Type))
+	bucketRef := handlerAccumulatorBucketRef(frame.req)
 	if isAccumulationTimeoutEvent(frame.req.Event.Type) {
 		parsed, ok := accumulationTimeoutBucketRefFromPayload(frame.payload)
 		if !ok || parsed.NodeID != frame.req.NodeID.String() {
@@ -863,7 +862,7 @@ func (e *Executor) stepCompute(frame *executionFrame) error {
 	if spec == nil {
 		return nil
 	}
-	acc, _ := loadAccumulator(frame.state.State, frame.req.NodeID, frame.req.Event.Type)
+	acc, _ := loadAccumulatorForBucket(frame.state.State, handlerAccumulatorBucketRef(frame.req))
 	value, err := computeValue(acc, frame.payload, spec)
 	if err != nil {
 		return err
@@ -1140,7 +1139,8 @@ func (e *Executor) stepProjection(frame *executionFrame) error {
 	if !frame.accumulatorProjectionEligible {
 		return nil
 	}
-	result := accprojection.ForHandlerWithAccumulator(e.deps.Source, frame.req.FlowID.String(), frame.req.NodeID.String(), string(frame.req.Event.Type), activeAccumulatorName(frame.req.Handler))
+	handlerEventType := handlerAccumulatorEventType(frame.req)
+	result := accprojection.ForHandlerWithAccumulator(e.deps.Source, frame.req.FlowID.String(), frame.req.NodeID.String(), string(handlerEventType), activeAccumulatorName(frame.req.Handler))
 	if len(result.Issues) > 0 {
 		return fmt.Errorf("accumulator projection declarations are invalid: %s", result.Issues[0].Message)
 	}
@@ -1150,9 +1150,9 @@ func (e *Executor) stepProjection(frame *executionFrame) error {
 		}
 		return nil
 	}
-	acc, ok := loadAccumulator(frame.state.State, frame.req.NodeID, frame.req.Event.Type)
+	acc, ok := loadAccumulatorForBucket(frame.state.State, handlerAccumulatorBucketRef(frame.req))
 	if !ok {
-		return fmt.Errorf("accumulator projection source missing for node %s event %s", frame.req.NodeID.String(), string(frame.req.Event.Type))
+		return fmt.Errorf("accumulator projection source missing for node %s event %s", frame.req.NodeID.String(), string(handlerEventType))
 	}
 	for _, binding := range result.Bindings {
 		projected, err := e.projectAccumulatorItems(frame, binding, acc.Items)

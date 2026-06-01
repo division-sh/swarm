@@ -829,11 +829,18 @@ func TestExecutor_AccumulatorProjectionMaterializesForQualifiedRuntimeEvent(t *t
 			Type:    "scoring/score.dimension_complete",
 			Payload: json.RawMessage(`{"dimension":"market","score":87}`),
 		},
-		Handler: handler,
-		State:   testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		HandlerEventKey: "score.dimension_complete",
+		Handler:         handler,
+		State:           testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
+	}
+	if _, ok := loadAccumulatorForBucket(StateSnapshot{StateCarrier: result.StateMutation.StateCarrier}, accumulatorBucketRef("scoring-node", "score.dimension_complete")); !ok {
+		t.Fatalf("logical accumulator bucket missing from state mutation: %#v", result.StateMutation.StateCarrier.StateBuckets)
+	}
+	if _, ok := loadAccumulatorForBucket(StateSnapshot{StateCarrier: result.StateMutation.StateCarrier}, accumulatorBucketRef("scoring-node", "scoring/score.dimension_complete")); ok {
+		t.Fatalf("concrete runtime event bucket survived in state mutation: %#v", result.StateMutation.StateCarrier.StateBuckets)
 	}
 	scores, ok := result.StateMutation.Metadata["scores"].([]any)
 	if !ok || len(scores) != 1 {
@@ -848,6 +855,135 @@ func TestExecutor_AccumulatorProjectionMaterializesForQualifiedRuntimeEvent(t *t
 	}
 	if _, exists := score["event_type"]; exists {
 		t.Fatalf("projected score leaked accumulator metadata: %#v", score)
+	}
+}
+
+func TestExecutor_AccumulatorBucketUsesMatchedHandlerEventKeyForScopedConcreteEvents(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     stubSource(),
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	handler := runtimecontracts.SystemNodeEventHandler{
+		Accumulate: &runtimecontracts.AccumulateSpec{
+			ExpectedFrom: "entity.expected_count",
+			Completion:   runtimecontracts.ParseAccumulateCompletion("all"),
+			DedupBy:      "payload.component_id",
+			DedupPath:    runtimecontracts.RefExpression("payload.component_id").RefPath,
+		},
+	}
+	firstState := testStateSnapshot("pending", map[string]any{"expected_count": 2}, nil, map[string]map[string]any{})
+	first, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "entity-1",
+		NodeID:   "lifecycle-orchestrator",
+		FlowID:   "operating",
+		Event: events.Event{
+			ID:        "evt-a",
+			Type:      "component-scaffold/a/component.scaffolded",
+			Payload:   json.RawMessage(`{"component_id":"a"}`),
+			CreatedAt: time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
+		}.WithEntityID("entity-1"),
+		HandlerEventKey: "component.scaffolded",
+		Handler:         handler,
+		State:           firstState,
+	})
+	if err != nil {
+		t.Fatalf("first Execute error: %v", err)
+	}
+	if !first.AccumulatorCompletionDiagnostics.Relevant || first.AccumulatorCompletionDiagnostics.CompletionReached {
+		t.Fatalf("first diagnostics = %#v, want relevant waiting accumulator", first.AccumulatorCompletionDiagnostics)
+	}
+	secondState := testStateSnapshot("pending", map[string]any{"expected_count": 2}, nil, first.StateMutation.StateCarrier.StateBuckets)
+	second, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "entity-1",
+		NodeID:   "lifecycle-orchestrator",
+		FlowID:   "operating",
+		Event: events.Event{
+			ID:        "evt-b",
+			Type:      "component-scaffold/b/component.scaffolded",
+			Payload:   json.RawMessage(`{"component_id":"b"}`),
+			CreatedAt: time.Date(2026, time.January, 1, 0, 0, 1, 0, time.UTC),
+		}.WithEntityID("entity-1"),
+		HandlerEventKey: "component.scaffolded",
+		Handler:         handler,
+		State:           secondState,
+	})
+	if err != nil {
+		t.Fatalf("second Execute error: %v", err)
+	}
+	if !second.AccumulatorCompletionDiagnostics.CompletionReached {
+		t.Fatalf("second diagnostics = %#v, want completion reached", second.AccumulatorCompletionDiagnostics)
+	}
+	state := StateSnapshot{StateCarrier: second.StateMutation.StateCarrier}
+	acc, ok := loadAccumulatorForBucket(state, accumulatorBucketRef("lifecycle-orchestrator", "component.scaffolded"))
+	if !ok {
+		t.Fatalf("logical accumulator bucket missing: %#v", second.StateMutation.StateCarrier.StateBuckets)
+	}
+	if got := len(acc.Items); got != 2 {
+		t.Fatalf("accumulator items = %d, want 2", got)
+	}
+	if got := acc.Items[0]["event_type"]; got != "component-scaffold/a/component.scaffolded" {
+		t.Fatalf("first item event_type = %#v", got)
+	}
+	if got := acc.Items[1]["event_type"]; got != "component-scaffold/b/component.scaffolded" {
+		t.Fatalf("second item event_type = %#v", got)
+	}
+	if _, ok := loadAccumulatorForBucket(state, accumulatorBucketRef("lifecycle-orchestrator", "component-scaffold/a/component.scaffolded")); ok {
+		t.Fatalf("first concrete event bucket survived: %#v", second.StateMutation.StateCarrier.StateBuckets)
+	}
+	if _, ok := loadAccumulatorForBucket(state, accumulatorBucketRef("lifecycle-orchestrator", "component-scaffold/b/component.scaffolded")); ok {
+		t.Fatalf("second concrete event bucket survived: %#v", second.StateMutation.StateCarrier.StateBuckets)
+	}
+}
+
+func TestExecutor_ComputeReadsAccumulatorByMatchedHandlerEventKey(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     stubSource(),
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	state := testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{})
+	storeAccumulator(&state, "lifecycle-orchestrator", "component.scaffolded", &Accumulator{
+		Items: []map[string]any{
+			{"component_id": "a"},
+			{"component_id": "b"},
+		},
+	})
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "entity-1",
+		NodeID:   "lifecycle-orchestrator",
+		FlowID:   "operating",
+		Event: events.Event{
+			ID:      "evt-b",
+			Type:    "component-scaffold/b/component.scaffolded",
+			Payload: json.RawMessage(`{"component_id":"b"}`),
+		}.WithEntityID("entity-1"),
+		HandlerEventKey: "component.scaffolded",
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			Compute: &runtimecontracts.ComputeSpec{
+				Operation: runtimecontracts.ComputeOpCount,
+				StoreAs:   "entity.component_count",
+			},
+		},
+		State: state,
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if got := result.StateMutation.Metadata["component_count"]; got != 2 {
+		t.Fatalf("component_count = %#v, want 2", got)
 	}
 }
 

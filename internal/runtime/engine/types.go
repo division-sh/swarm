@@ -213,11 +213,14 @@ type ExecutionRequest struct {
 	NodeID      identity.NodeID
 	FlowID      identity.FlowID
 	Event       events.Event
-	Handler     runtimecontracts.SystemNodeEventHandler
-	State       StateSnapshot
-	ChainDepth  int
-	MaxDepth    int
-	Preview     bool
+	// HandlerEventKey is the matched authored handler event key selected by
+	// runtime dispatch. Concrete Event.Type remains event provenance.
+	HandlerEventKey string
+	Handler         runtimecontracts.SystemNodeEventHandler
+	State           StateSnapshot
+	ChainDepth      int
+	MaxDepth        int
+	Preview         bool
 }
 
 type ExecutionContext struct {

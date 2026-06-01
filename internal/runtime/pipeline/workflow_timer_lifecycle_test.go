@@ -11,6 +11,7 @@ import (
 	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/runtime/core/timeridentity"
+	"swarm/internal/runtime/semanticview"
 	"swarm/internal/testutil"
 )
 
@@ -393,6 +394,78 @@ func TestExecuteNodeHandlerPlan_AccumulateTimeoutRegistersSchedule(t *testing.T)
 	}
 	if handle.Bucket.NodeID != "test-node" || handle.Bucket.EventType != "item.arrived" {
 		t.Fatalf("scheduled payload = %#v", payload)
+	}
+}
+
+func TestReconcileAccumulationTimeoutScheduleUsesMatchedHandlerEventKey(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	fixtureRoot := filepath.Join(repoRoot, "tests", "tier2-accumulation", "test-accumulate-timeout")
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
+	if err != nil {
+		t.Fatalf("load bundle: %v", err)
+	}
+	module, err := newPipelineFixtureWorkflowModule(bundle)
+	if err != nil {
+		t.Fatalf("newPipelineFixtureWorkflowModule: %v", err)
+	}
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	store := &recordingSchedulePersistence{}
+	pc := newTimerLifecycleCoordinator(noopPipelineBus{}, db, module, store)
+	if pc == nil {
+		t.Fatal("expected coordinator")
+	}
+	start := time.Now().UTC()
+	handler := runtimecontracts.SystemNodeEventHandler{
+		Accumulate: &runtimecontracts.AccumulateSpec{
+			ExpectedFrom: "entity.expected_count",
+			Completion:   runtimecontracts.ParseAccumulateCompletion("timeout"),
+			TimeoutMS:    5000,
+		},
+	}
+	stateBuckets := map[string]any{
+		"test-node": map[string]any{
+			"handler_accumulators": map[string]any{
+				timeridentity.NewAccumulatorBucketRef("test-node", "item.arrived").Key(): map[string]any{
+					"started_at": start.Format(time.RFC3339Nano),
+				},
+			},
+		},
+	}
+	evt := events.Event{
+		ID:          "evt-item-a",
+		Type:        events.EventType("component-scaffold/a/item.arrived"),
+		SourceAgent: "cataloge2e",
+		Payload:     []byte(`{"entity_id":"ent-001","item_id":"a"}`),
+		CreatedAt:   start,
+	}.WithEntityID("ent-001").WithFlowInstance("component-scaffold/a")
+
+	if err := pc.reconcileAccumulationTimeoutSchedule(context.Background(), "ent-001", "test-node", handler, evt, "item.arrived", stateBuckets, true); err != nil {
+		t.Fatalf("reconcileAccumulationTimeoutSchedule: %v", err)
+	}
+	if len(store.schedules) != 1 {
+		t.Fatalf("registered schedules = %d, want 1", len(store.schedules))
+	}
+	got := store.schedules[0]
+	wantHandle := timeridentity.AccumulationTimeoutHandle(timeridentity.NewAccumulatorBucketRef("test-node", "item.arrived"))
+	if got.TaskID != wantHandle.TaskID() {
+		t.Fatalf("scheduled task_id = %q, want %q", got.TaskID, wantHandle.TaskID())
+	}
+	if got.At.Before(start.Add(4900*time.Millisecond)) || got.At.After(start.Add(5100*time.Millisecond)) {
+		t.Fatalf("scheduled at = %s, want about %s", got.At.Format(time.RFC3339Nano), start.Add(5*time.Second).Format(time.RFC3339Nano))
+	}
+	payload := parsePayloadMap(got.Payload)
+	handle, ok := timeridentity.ParseTimerHandle(payload)
+	if !ok || handle.Kind != timeridentity.TimerHandleAccumulationTimeout {
+		t.Fatalf("scheduled payload = %#v", payload)
+	}
+	if handle.Bucket.NodeID != "test-node" || handle.Bucket.EventType != "item.arrived" {
+		t.Fatalf("scheduled payload bucket = %#v", handle.Bucket)
+	}
+	if _, ok := findAccumulationTimeoutHandlerForBucket(semanticview.Wrap(bundle), handle.Bucket); !ok {
+		t.Fatalf("timeout handler did not resolve for scheduled bucket %#v", handle.Bucket)
 	}
 }
 

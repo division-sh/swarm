@@ -1975,6 +1975,14 @@ engine:
     tracking:
       setup: 'When an entity first encounters a handler with accumulate.track, the platform creates an accumulator record:
         expected items list, received items list (empty).'
+      bucket_identity: |
+        Handler accumulator buckets are keyed by the selected authored handler
+        event key after runtime handler resolution/localization, not by the
+        concrete event-bus event type that delivered the event. The concrete
+        event type remains event provenance and must be retained on accumulated
+        item metadata and diagnostics. Timeout bucket handles, compute reads,
+        and `materialize_from` projection reads must consume the same selected
+        handler event key.
       arrival: 'Each event arrival is identified by its dedup_by key. Default: sender session ID. Can be overridden to a payload
         field (e.g., payload.dimension). If the key was already received, the arrival is ignored (idempotent). If not, it
         is added to the received set and persisted.'

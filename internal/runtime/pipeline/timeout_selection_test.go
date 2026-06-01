@@ -13,13 +13,15 @@ import (
 )
 
 type recordingExecutionEngine struct {
-	called  bool
-	handler runtimecontracts.SystemNodeEventHandler
+	called          bool
+	handler         runtimecontracts.SystemNodeEventHandler
+	handlerEventKey string
 }
 
-func (r *recordingExecutionEngine) ExecuteHandlerSteps(_ context.Context, handler SystemNodeEventHandler, _ Event) (*HandlerOutcome, error) {
+func (r *recordingExecutionEngine) ExecuteHandlerSteps(_ context.Context, handler SystemNodeEventHandler, _ Event, handlerEventKey string) (*HandlerOutcome, error) {
 	r.called = true
 	r.handler = handler
+	r.handlerEventKey = handlerEventKey
 	return &HandlerOutcome{Handled: true}, nil
 }
 
@@ -75,6 +77,9 @@ func TestDeclarativeNodeHandleEvent_SelectsOnTimeoutAccumulatorHandler(t *testin
 	if !engine.called {
 		t.Fatal("expected execution engine to be called")
 	}
+	if got := engine.handlerEventKey; got != "item.arrived" {
+		t.Fatalf("handler event key = %q, want item.arrived", got)
+	}
 }
 
 func TestDeclarativeNodeHandleEvent_MatchesWildcardHandler(t *testing.T) {
@@ -94,6 +99,9 @@ func TestDeclarativeNodeHandleEvent_MatchesWildcardHandler(t *testing.T) {
 	}
 	if !engine.called {
 		t.Fatal("expected execution engine to be called")
+	}
+	if got := engine.handlerEventKey; got != "*.completed" {
+		t.Fatalf("handler event key = %q, want *.completed", got)
 	}
 }
 
@@ -135,6 +143,9 @@ func TestDeclarativeNodeHandleEvent_MatchesDeepWildcardChildFlowHandler(t *testi
 	}
 	if !engine.called {
 		t.Fatal("expected execution engine to be called")
+	}
+	if got := engine.handlerEventKey; got != "**/task.done" {
+		t.Fatalf("handler event key = %q, want **/task.done", got)
 	}
 }
 

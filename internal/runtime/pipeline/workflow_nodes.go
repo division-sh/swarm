@@ -102,21 +102,101 @@ func workflowNodeEventPolicy(nodes []WorkflowNode, nodeID, eventType string) (Wo
 }
 
 func workflowNodeEventHandlerForDelivery(source semanticview.Source, nodeID string, evt events.Event) (runtimecontracts.SystemNodeEventHandler, bool) {
+	resolved := workflowNodeEventHandlerResolutionForDelivery(source, nodeID, evt)
+	return resolved.Handler, resolved.Matched
+}
+
+type workflowNodeEventHandlerResolution struct {
+	Handler         runtimecontracts.SystemNodeEventHandler
+	HandlerEventKey string
+	Matched         bool
+}
+
+func workflowNodeEventHandlerResolutionForDelivery(source semanticview.Source, nodeID string, evt events.Event) workflowNodeEventHandlerResolution {
 	if source == nil {
-		return runtimecontracts.SystemNodeEventHandler{}, false
+		return workflowNodeEventHandlerResolution{}
 	}
 	rawEventType := eventidentity.Normalize(string(evt.Type))
 	if rawEventType == "" {
-		return runtimecontracts.SystemNodeEventHandler{}, false
+		return workflowNodeEventHandlerResolution{}
 	}
-	if handler, ok := source.NodeEventHandler(nodeID, rawEventType); ok {
-		return handler, true
+	if resolved := workflowNodeEventHandlerResolutionForEventType(source, nodeID, rawEventType); resolved.Matched {
+		return resolved
 	}
 	localizedEventType := workflowNodeConcreteInstanceLocalEventType(source, nodeID, evt)
 	if localizedEventType == "" || localizedEventType == rawEventType {
-		return runtimecontracts.SystemNodeEventHandler{}, false
+		return workflowNodeEventHandlerResolution{}
 	}
-	return source.NodeEventHandler(nodeID, localizedEventType)
+	return workflowNodeEventHandlerResolutionForEventType(source, nodeID, localizedEventType)
+}
+
+func workflowNodeEventHandlerResolutionForEventType(source semanticview.Source, nodeID, eventType string) workflowNodeEventHandlerResolution {
+	if source == nil {
+		return workflowNodeEventHandlerResolution{}
+	}
+	eventType = eventidentity.Normalize(eventType)
+	if eventType == "" {
+		return workflowNodeEventHandlerResolution{}
+	}
+	if bundle, ok := semanticview.Bundle(source); ok {
+		resolved := bundle.ResolveNodeEventHandler(nodeID, eventType)
+		if resolved.Matched {
+			handler, ok := source.NodeEventHandler(nodeID, eventType)
+			if !ok {
+				handler = resolved.Handler
+			}
+			return workflowNodeEventHandlerResolution{
+				Handler:         handler,
+				HandlerEventKey: strings.TrimSpace(resolved.AuthoredEventType),
+				Matched:         true,
+			}
+		}
+	}
+	handler, ok := source.NodeEventHandler(nodeID, eventType)
+	if !ok {
+		return workflowNodeEventHandlerResolution{}
+	}
+	return workflowNodeEventHandlerResolution{
+		Handler:         handler,
+		HandlerEventKey: workflowNodeMatchedHandlerEventKey(source, nodeID, eventType),
+		Matched:         true,
+	}
+}
+
+func workflowNodeMatchedHandlerEventKey(source semanticview.Source, nodeID, eventType string) string {
+	eventType = eventidentity.Normalize(eventType)
+	if source == nil {
+		return eventType
+	}
+	handlers := source.NodeEventHandlers(nodeID)
+	if len(handlers) == 0 {
+		return eventType
+	}
+	for key := range handlers {
+		if eventidentity.Normalize(key) == eventType {
+			return strings.TrimSpace(key)
+		}
+	}
+	for key := range handlers {
+		key = strings.TrimSpace(key)
+		if key != "" && runtimecontractsHandlerPatternMatches(key, eventType) {
+			return key
+		}
+	}
+	return eventType
+}
+
+func workflowNodeHandlerEventKeyForExecution(source semanticview.Source, nodeID string, evt events.Event) string {
+	if isAccumulationTimeoutEvent(evt.Type) {
+		if bucket, ok := timeridentity.ParseAccumulatorBucketRef(parsePayloadMap(evt.Payload)); ok && strings.TrimSpace(bucket.NodeID) == strings.TrimSpace(nodeID) {
+			return bucket.EventType
+		}
+	}
+	resolved := workflowNodeEventHandlerResolutionForDelivery(source, nodeID, evt)
+	if resolved.Matched {
+		return resolved.HandlerEventKey
+	}
+	return eventidentity.Normalize(string(evt.Type))
 }
 
 func workflowNodeConcreteInstanceLocalEventType(source semanticview.Source, nodeID string, evt events.Event) string {

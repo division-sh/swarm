@@ -3,9 +3,12 @@ package engine
 import (
 	"context"
 	"reflect"
+	"strings"
 
 	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/runtime/core/eventidentity"
 	"swarm/internal/runtime/core/identity"
+	"swarm/internal/runtime/semanticview"
 )
 
 type DeclarativeNode struct {
@@ -34,11 +37,20 @@ func (n *DeclarativeNode) handle(ctx context.Context, req ExecutionRequest) (Exe
 	}
 	req.NodeID = nodeID
 	if isZeroHandler(req.Handler) {
-		handler, ok := n.executor.deps.Source.NodeEventHandler(nodeID.String(), string(req.Event.Type))
-		if !ok {
+		resolved := resolvedExecutionHandler(n.executor.deps.Source, nodeID.String(), string(req.Event.Type))
+		if !resolved.matched {
 			return ExecutionResult{}, ErrMissingNodeHandler
 		}
-		req.Handler = handler
+		req.Handler = resolved.handler
+		if strings.TrimSpace(req.HandlerEventKey) == "" {
+			req.HandlerEventKey = resolved.handlerEventKey
+		}
+	}
+	if strings.TrimSpace(req.HandlerEventKey) == "" {
+		resolved := resolvedExecutionHandler(n.executor.deps.Source, nodeID.String(), string(req.Event.Type))
+		if resolved.matched {
+			req.HandlerEventKey = resolved.handlerEventKey
+		}
 	}
 	return n.executor.Execute(ctx, req)
 }
@@ -52,4 +64,55 @@ func (n *DeclarativeNode) Handle(ctx context.Context, req ExecutionRequest) (Exe
 
 func isZeroHandler(handler runtimecontracts.SystemNodeEventHandler) bool {
 	return reflect.DeepEqual(handler, runtimecontracts.SystemNodeEventHandler{})
+}
+
+type executionHandlerResolution struct {
+	handler         runtimecontracts.SystemNodeEventHandler
+	handlerEventKey string
+	matched         bool
+}
+
+func resolvedExecutionHandler(source semanticview.Source, nodeID, eventType string) executionHandlerResolution {
+	if source == nil {
+		return executionHandlerResolution{}
+	}
+	if bundle, ok := semanticview.Bundle(source); ok {
+		resolved := bundle.ResolveNodeEventHandler(nodeID, eventType)
+		if resolved.Matched {
+			handler, ok := source.NodeEventHandler(nodeID, eventType)
+			if !ok {
+				handler = resolved.Handler
+			}
+			return executionHandlerResolution{
+				handler:         handler,
+				handlerEventKey: strings.TrimSpace(resolved.AuthoredEventType),
+				matched:         true,
+			}
+		}
+	}
+	handler, ok := source.NodeEventHandler(nodeID, eventType)
+	if !ok {
+		return executionHandlerResolution{}
+	}
+	return executionHandlerResolution{
+		handler:         handler,
+		handlerEventKey: matchedHandlerEventKeyFromHandlers(source.NodeEventHandlers(nodeID), eventType),
+		matched:         true,
+	}
+}
+
+func matchedHandlerEventKeyFromHandlers(handlers map[string]runtimecontracts.SystemNodeEventHandler, eventType string) string {
+	eventType = strings.TrimSpace(eventType)
+	for key := range handlers {
+		if strings.TrimSpace(key) == eventType {
+			return strings.TrimSpace(key)
+		}
+	}
+	for key := range handlers {
+		key = strings.TrimSpace(key)
+		if key != "" && eventidentity.MatchPattern(key, eventType) {
+			return key
+		}
+	}
+	return eventType
 }
