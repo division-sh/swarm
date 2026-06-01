@@ -16,6 +16,8 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 	newer := uuid.NewString()
 	older := uuid.NewString()
 	newerEvent := uuid.NewString()
+	newerMiddleEvent := uuid.NewString()
+	newerLatestEvent := uuid.NewString()
 	olderEvent := uuid.NewString()
 	bundleA := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	bundleB := "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -35,9 +37,11 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 		INSERT INTO events (run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
 		VALUES
 			(?, ?, 'scan.requested', 'global', '{}', 'test', 'agent', ?),
+			(?, ?, 'scan.progressed', 'global', '{}', 'test', 'agent', ?),
+			(?, ?, 'scan.finished', 'global', '{}', 'test', 'agent', ?),
 			(?, ?, 'scan.completed', 'global', '{}', 'test', 'agent', ?),
 			(?, ?, 'platform.runtime_log', 'global', '{"log_level":"error","message":"boom","details":{"component":"runtime","action":"proof","error_code":"E_PROOF"}}', 'runtime', 'platform', ?)
-	`, newer, newerEvent, now.Add(time.Second), older, olderEvent, now.Add(-time.Hour+time.Second), newer, uuid.NewString(), now.Add(2*time.Second)); err != nil {
+	`, newer, newerEvent, now.Add(time.Second), newer, newerMiddleEvent, now.Add(2*time.Second), newer, newerLatestEvent, now.Add(3*time.Second), older, olderEvent, now.Add(-time.Hour+time.Second), newer, uuid.NewString(), now.Add(4*time.Second)); err != nil {
 		t.Fatalf("seed sqlite events: %v", err)
 	}
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
@@ -83,7 +87,7 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 		t.Fatalf("filtered = %#v, want newer only", filtered)
 	}
 
-	report, err := sqliteStore.LoadRunDebugReport(ctx, newer, RunDebugQueryOptions{})
+	report, err := sqliteStore.LoadRunDebugReport(ctx, newer, RunDebugQueryOptions{EventLimit: 2})
 	if err != nil {
 		t.Fatalf("LoadRunDebugReport: %v", err)
 	}
@@ -92,6 +96,9 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 	}
 	if len(report.Deliveries) != 1 || report.Deliveries[0].SubscriberID != "agent-1" {
 		t.Fatalf("report deliveries = %#v, want agent-1 delivery count", report.Deliveries)
+	}
+	if len(report.Events) != 2 || report.Events[0].EventID != newerLatestEvent || report.Events[1].EventID != newerMiddleEvent {
+		t.Fatalf("report events = %#v, want latest non-log events first", report.Events)
 	}
 	if len(report.RuntimeLogs) != 1 || report.RuntimeLogs[0].Component != "runtime" || report.RuntimeLogs[0].Action != "proof" {
 		t.Fatalf("runtime logs = %#v, want runtime proof log", report.RuntimeLogs)

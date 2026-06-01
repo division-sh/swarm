@@ -303,7 +303,7 @@ func (s *SQLiteRuntimeStore) sqliteRunDebugEvents(ctx context.Context, runID str
 		       COALESCE(produced_by, ''), COALESCE(produced_by_type, ''), payload
 		FROM events
 		WHERE run_id = ? AND event_name <> 'platform.runtime_log'
-		ORDER BY created_at ASC, event_id ASC
+		ORDER BY created_at DESC, event_id DESC
 		LIMIT ?
 	`, runID, limit)
 	if err != nil {
