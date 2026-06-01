@@ -86,16 +86,48 @@ func workflowNodeEventPolicy(nodes []WorkflowNode, nodeID, eventType string) (Wo
 		if nodeID != "" && strings.TrimSpace(node.ID) != nodeID {
 			continue
 		}
-		if policy, ok := node.Policies[eventType]; ok {
+		if policy, ok := workflowNodePolicyForEventType(node.Policies, eventType); ok {
 			return policy, true
 		}
-		for pattern, policy := range node.Policies {
-			if strings.TrimSpace(pattern) == eventType {
-				continue
-			}
-			if runtimecontractsHandlerPatternMatches(pattern, eventType) {
-				return policy, true
-			}
+	}
+	return WorkflowEventPolicy{}, false
+}
+
+func workflowNodePolicyForDelivery(source semanticview.Source, node WorkflowNode, evt events.Event) (WorkflowEventPolicy, bool) {
+	eventType := strings.TrimSpace(string(evt.Type))
+	if policy, ok := workflowNodePolicyForEventType(node.Policies, eventType); ok {
+		return policy, true
+	}
+	resolved := workflowNodeEventHandlerResolutionForDelivery(source, strings.TrimSpace(node.ID), evt)
+	if !resolved.Matched {
+		return WorkflowEventPolicy{}, false
+	}
+	candidates := []string{resolved.HandlerEventKey}
+	if source != nil {
+		candidates = append(candidates, workflowNodeExternalEventType(source, strings.TrimSpace(node.ID), resolved.HandlerEventKey))
+	}
+	for _, candidate := range candidates {
+		if policy, ok := workflowNodePolicyForEventType(node.Policies, candidate); ok {
+			return policy, true
+		}
+	}
+	return WorkflowEventPolicy{}, false
+}
+
+func workflowNodePolicyForEventType(policies map[string]WorkflowEventPolicy, eventType string) (WorkflowEventPolicy, bool) {
+	eventType = strings.TrimSpace(eventType)
+	if eventType == "" || policies == nil {
+		return WorkflowEventPolicy{}, false
+	}
+	if policy, ok := policies[eventType]; ok {
+		return policy, true
+	}
+	for pattern, policy := range policies {
+		if strings.TrimSpace(pattern) == eventType {
+			continue
+		}
+		if runtimecontractsHandlerPatternMatches(pattern, eventType) {
+			return policy, true
 		}
 	}
 	return WorkflowEventPolicy{}, false
@@ -737,6 +769,7 @@ func (pc *PipelineCoordinator) workflowNodeExecutors() []workflowNodeExecutor {
 
 func (pc *PipelineCoordinator) workflowNodeInterceptPolicy(eventType string, evt events.Event) (bool, bool) {
 	eventType = strings.TrimSpace(eventType)
+	source := pc.SemanticSource()
 	for _, node := range pc.WorkflowNodes() {
 		if !pc.workflowNodeMatchesDeliveryTarget(strings.TrimSpace(node.ID), evt.TargetRoute()) {
 			continue
@@ -745,37 +778,11 @@ func (pc *PipelineCoordinator) workflowNodeInterceptPolicy(eventType string, evt
 			policy WorkflowEventPolicy
 			ok     bool
 		)
-		if node.Policies != nil {
-			policy, ok = node.Policies[eventType]
-			if !ok {
-				for pattern, candidate := range node.Policies {
-					if strings.TrimSpace(pattern) == eventType {
-						continue
-					}
-					if runtimecontractsHandlerPatternMatches(pattern, eventType) {
-						policy = candidate
-						ok = true
-						break
-					}
-				}
-			}
-		}
+		policy, ok = workflowNodePolicyForDelivery(source, node, evt)
 		if !ok && isAccumulationTimeoutEvent(events.EventType(eventType)) {
 			if bucket, bucketOK := timeridentity.ParseAccumulatorBucketRef(parsePayloadMap(evt.Payload)); bucketOK && bucket.NodeID == strings.TrimSpace(node.ID) {
 				if node.Policies != nil {
-					policy, ok = node.Policies[bucket.EventType]
-					if !ok {
-						for pattern, candidate := range node.Policies {
-							if strings.TrimSpace(pattern) == bucket.EventType {
-								continue
-							}
-							if runtimecontractsHandlerPatternMatches(pattern, bucket.EventType) {
-								policy = candidate
-								ok = true
-								break
-							}
-						}
-					}
+					policy, ok = workflowNodePolicyForEventType(node.Policies, bucket.EventType)
 				}
 			}
 		}

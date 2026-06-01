@@ -39,6 +39,7 @@ type declarativeWorkflowNode struct {
 type DeclarativeNode struct {
 	nodeID   string
 	contract SystemNodeContract
+	source   semanticview.Source
 	policies map[string]WorkflowEventPolicy
 	engine   HandlerExecutionEngine
 	hooks    *ProductHookRegistry
@@ -64,6 +65,7 @@ func NewNode(contract SystemNodeContract, source semanticview.Source, engine Han
 	return &DeclarativeNode{
 		nodeID:   nodeID,
 		contract: contract,
+		source:   source,
 		policies: buildWorkflowNodePolicies(source, nodeID, subscriptions),
 		engine:   engine,
 		hooks:    hooks,
@@ -173,7 +175,13 @@ func (n *DeclarativeNode) HandleEvent(ctx context.Context, evt Event) (*HandlerO
 	}
 	eventType := strings.TrimSpace(string(evt.Type))
 	handlerEventKey := eventType
-	handler, ok := n.contract.EventHandlers[eventType]
+	handler, ok := n.resolvedHandlerForDelivery(evt)
+	if !ok {
+		handler, ok = n.contract.EventHandlers[eventType]
+	}
+	if ok {
+		handlerEventKey = workflowNodeHandlerEventKeyForExecution(n.source, n.NodeID(), evt)
+	}
 	if !ok {
 		for pattern, candidate := range n.contract.EventHandlers {
 			if strings.TrimSpace(pattern) == eventType {
@@ -214,6 +222,14 @@ func (n *DeclarativeNode) HandleEvent(ctx context.Context, evt Event) (*HandlerO
 		return nil, err
 	}
 	return outcome, nil
+}
+
+func (n *DeclarativeNode) resolvedHandlerForDelivery(evt Event) (SystemNodeEventHandler, bool) {
+	if n == nil || n.source == nil {
+		return SystemNodeEventHandler{}, false
+	}
+	resolved := workflowNodeEventHandlerResolutionForDelivery(n.source, n.NodeID(), evt)
+	return resolved.Handler, resolved.Matched
 }
 
 func (r *ProductHookRegistry) Register(actionID string, handler ActionHandler) {
