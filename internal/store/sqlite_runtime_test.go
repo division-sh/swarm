@@ -238,6 +238,158 @@ func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 	}
 }
 
+func TestSQLiteRuntimeStoreAPIIdempotencyAllowsNestedEventBusPublish(t *testing.T) {
+	ctx := context.Background()
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	bus, err := runtimebus.NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	entityID := "11111111-1111-1111-1111-111111111111"
+	req := APIIdempotencyRequest{
+		Method:         "event.publish",
+		ActorTokenID:   "token-1",
+		IdempotencyKey: "idem-nested-publish",
+		RequestHash:    "hash-nested-publish",
+		Now:            time.Now().UTC(),
+	}
+	publishCalls := 0
+	publish := func(ctx context.Context) (APIIdempotencyCompletion, error) {
+		publishCalls++
+		if err := bus.Publish(ctx, (events.Event{
+			ID:          eventID,
+			RunID:       runID,
+			Type:        events.EventType("item.received"),
+			SourceAgent: "api.v1",
+			Payload:     json.RawMessage(`{"entity_id":"11111111-1111-1111-1111-111111111111","topic":"medicine"}`),
+			CreatedAt:   time.Now().UTC(),
+		}).WithEntityID(entityID)); err != nil {
+			return APIIdempotencyCompletion{}, err
+		}
+		response, err := json.Marshal(map[string]string{"event_id": eventID, "run_id": runID})
+		if err != nil {
+			return APIIdempotencyCompletion{}, err
+		}
+		return APIIdempotencyCompletion{ResourceID: eventID, Response: response}, nil
+	}
+
+	first, replayed, err := store.WithAPIIdempotency(ctx, req, publish)
+	if err != nil {
+		t.Fatalf("WithAPIIdempotency nested publish: %v", err)
+	}
+	if replayed || first.ResourceID != eventID || publishCalls != 1 {
+		t.Fatalf("first completion=%+v replayed=%v calls=%d, want new event", first, replayed, publishCalls)
+	}
+	assertSQLiteRuntimeCount(t, store, `SELECT COUNT(*) FROM runs WHERE run_id = ?`, 1, runID)
+	assertSQLiteRuntimeCount(t, store, `SELECT COUNT(*) FROM events WHERE event_id = ?`, 1, eventID)
+	assertSQLiteRuntimeCount(t, store, `SELECT COUNT(*) FROM api_idempotency WHERE method = ? AND idempotency_key = ?`, 1, req.Method, req.IdempotencyKey)
+
+	second, replayed, err := store.WithAPIIdempotency(ctx, req, func(context.Context) (APIIdempotencyCompletion, error) {
+		return APIIdempotencyCompletion{}, errors.New("replay executed callback")
+	})
+	if err != nil {
+		t.Fatalf("WithAPIIdempotency replay: %v", err)
+	}
+	if !replayed || second.ResourceID != eventID || string(second.Response) != string(first.Response) || publishCalls != 1 {
+		t.Fatalf("replay completion=%+v replayed=%v calls=%d, want stored event", second, replayed, publishCalls)
+	}
+
+	req.RequestHash = "hash-nested-publish-conflict"
+	_, _, err = store.WithAPIIdempotency(ctx, req, func(context.Context) (APIIdempotencyCompletion, error) {
+		return APIIdempotencyCompletion{}, errors.New("conflict executed callback")
+	})
+	if !errors.Is(err, ErrAPIIdempotencyConflict) {
+		t.Fatalf("conflict err = %v, want ErrAPIIdempotencyConflict", err)
+	}
+	assertSQLiteRuntimeCount(t, store, `SELECT COUNT(*) FROM events WHERE event_id = ?`, 1, eventID)
+}
+
+func TestSQLiteRuntimeStoreAPIIdempotencyFailedNestedPublishLeavesNoCompletionOrRows(t *testing.T) {
+	ctx := context.Background()
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	store.SetEventPayloadValidator(func(eventType string, _ []byte) error {
+		if eventType == "item.failed" {
+			return errors.New("schema violation")
+		}
+		return nil
+	})
+	bus, err := runtimebus.NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	req := APIIdempotencyRequest{
+		Method:         "event.publish",
+		ActorTokenID:   "token-1",
+		IdempotencyKey: "idem-failed-publish",
+		RequestHash:    "hash-failed-publish",
+		Now:            time.Now().UTC(),
+	}
+	completion, replayed, err := store.WithAPIIdempotency(ctx, req, func(ctx context.Context) (APIIdempotencyCompletion, error) {
+		err := bus.Publish(ctx, (events.Event{
+			ID:          eventID,
+			RunID:       runID,
+			Type:        events.EventType("item.failed"),
+			SourceAgent: "api.v1",
+			Payload:     json.RawMessage(`{"entity_id":"22222222-2222-2222-2222-222222222222"}`),
+			CreatedAt:   time.Now().UTC(),
+		}).WithEntityID("22222222-2222-2222-2222-222222222222"))
+		if err != nil {
+			return APIIdempotencyCompletion{}, err
+		}
+		return APIIdempotencyCompletion{ResourceID: eventID, Response: json.RawMessage(`{"ok":true}`)}, nil
+	})
+	if err == nil {
+		t.Fatal("WithAPIIdempotency failed publish err = nil")
+	}
+	if replayed || completion.ResourceID != "" || len(completion.Response) != 0 {
+		t.Fatalf("failed completion=%+v replayed=%v, want no completion", completion, replayed)
+	}
+	assertSQLiteRuntimeCount(t, store, `SELECT COUNT(*) FROM api_idempotency WHERE method = ? AND idempotency_key = ?`, 0, req.Method, req.IdempotencyKey)
+	assertSQLiteRuntimeCount(t, store, `SELECT COUNT(*) FROM runs WHERE run_id = ?`, 0, runID)
+	assertSQLiteRuntimeCount(t, store, `SELECT COUNT(*) FROM events WHERE event_id = ?`, 0, eventID)
+}
+
+func TestSQLiteRuntimeStoreAppendEventTxEnsuresFreshRunRow(t *testing.T) {
+	ctx := context.Background()
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	tx, err := store.BeginEventTx(ctx)
+	if err != nil {
+		t.Fatalf("BeginEventTx: %v", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	if err := store.AppendEventTx(ctx, tx, (events.Event{
+		ID:          eventID,
+		RunID:       runID,
+		Type:        events.EventType("item.received"),
+		SourceAgent: "api.v1",
+		Payload:     json.RawMessage(`{"entity_id":"33333333-3333-3333-3333-333333333333"}`),
+		CreatedAt:   time.Now().UTC(),
+	}).WithEntityID("33333333-3333-3333-3333-333333333333")); err != nil {
+		t.Fatalf("AppendEventTx: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit event tx: %v", err)
+	}
+	committed = true
+
+	assertSQLiteRuntimeCount(t, store, `SELECT COUNT(*) FROM runs WHERE run_id = ?`, 1, runID)
+	assertSQLiteRuntimeCount(t, store, `SELECT COUNT(*) FROM events WHERE event_id = ?`, 1, eventID)
+}
+
 func TestSQLiteRuntimeStoreRuntimeIngressReadDuringPublishTxDoesNotReenterWrite(t *testing.T) {
 	ctx := context.Background()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
@@ -276,6 +428,17 @@ func TestSQLiteRuntimeStoreRuntimeIngressReadDuringPublishTxDoesNotReenterWrite(
 	}
 	if count != 1 {
 		t.Fatalf("event rows = %d, want 1", count)
+	}
+}
+
+func assertSQLiteRuntimeCount(t *testing.T, store *SQLiteRuntimeStore, query string, want int, args ...any) {
+	t.Helper()
+	var count int
+	if err := store.DB.QueryRowContext(context.Background(), query, args...).Scan(&count); err != nil {
+		t.Fatalf("count sqlite runtime rows: %v", err)
+	}
+	if count != want {
+		t.Fatalf("sqlite count for %q = %d, want %d", query, count, want)
 	}
 }
 

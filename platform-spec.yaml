@@ -2308,6 +2308,14 @@ engine:
       owner: internal/store API idempotency persistence contract
       sqlite_owner: internal/store.SQLiteRuntimeStore.WithAPIIdempotency
       postgres_owner: internal/store.PostgresStore.WithAPIIdempotency
+      promoted_by: '#1214'
+      scope: >
+        API idempotency owns replay, conflict detection, and completion persistence for mutating v1 API calls. SQLite
+        local-dev idempotency must serialize idempotent callback execution without holding a SQLite write transaction
+        across the callback, because callbacks may write through selected runtime owners such as EventBus.Publish and
+        SQLiteRuntimeStore.AppendEventTx. SQLite uses process-local serialization plus short database operations for
+        purge/load/completion rows; Postgres remains authoritative for production concurrency through its advisory-lock
+        owner. Callback or publish failure must leave no idempotency completion for the failed request.
       excludes:
       - broad API delivery/replay/concurrency semantics owned by #1087
     - name: runtime_session_registry_rows
