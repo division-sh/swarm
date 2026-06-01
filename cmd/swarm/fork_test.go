@@ -178,14 +178,14 @@ func TestForkCommandFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 			wantStderr: "IDEMPOTENCY_CONFLICT: Application error: IDEMPOTENCY_CONFLICT",
 		},
 		{
-			name: "cross bundle split failure",
+			name: "target bundle unavailable",
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)
-				writeRunForkJSONRPCError(t, w, req.ID, "UNSUPPORTED_BUNDLE_HASH_FORK")
+				writeRunForkJSONRPCError(t, w, req.ID, "BUNDLE_UNAVAILABLE")
 			},
 			wantCode:   cliExitRuntime,
-			wantStderr: "UNSUPPORTED_BUNDLE_HASH_FORK: Application error: UNSUPPORTED_BUNDLE_HASH_FORK",
+			wantStderr: "BUNDLE_UNAVAILABLE: Application error: BUNDLE_UNAVAILABLE",
 		},
 		{
 			name: "malformed missing owner",

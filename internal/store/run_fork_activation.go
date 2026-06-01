@@ -135,7 +135,7 @@ func (s *PostgresStore) ActivateRunFork(ctx context.Context, req RunForkActivate
 	if len(lineage.EntityIDs) == 0 {
 		return result, fmt.Errorf("fork activation requires materialized fork entity_state rows")
 	}
-	if catalog.hasColumns(runForkSelectedContractBindingTable, "fork_run_id", "source_run_id", "fork_event_id", "mode", "contracts_root", "workflow_name", "workflow_version", "created_at") {
+	if catalog.hasColumns(runForkSelectedContractBindingTable, "fork_run_id", "source_run_id", "fork_event_id", "mode", "contracts_root", "bundle_hash", "workflow_name", "workflow_version", "created_at") {
 		binding, err := loadRunForkSelectedContractBinding(ctx, tx, lineage.ForkRunID)
 		if err == nil {
 			result.SelectedContractBinding = &binding

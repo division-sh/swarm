@@ -4128,7 +4128,7 @@ platform_tables:
         selected-contract execution; CLI/API arguments, dry-run JSON, and local model output are not semantic owners. It
         does not authorize handler execution, event/delivery replay, timer, route, session, turn, source-advanced, or
         contract-swap mutation.
-      ddl: "CREATE TABLE run_fork_selected_contract_bindings (\n    binding_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    fork_run_id      UUID NOT NULL REFERENCES runs(run_id),\n    source_run_id    UUID NOT NULL REFERENCES runs(run_id),\n    fork_event_id    UUID NOT NULL REFERENCES events(event_id),\n    mode             TEXT NOT NULL CHECK (mode IN ('selected_contracts')),\n    contracts_root   TEXT NOT NULL,\n    workflow_name    TEXT NOT NULL,\n    workflow_version TEXT NOT NULL,\n    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    UNIQUE (fork_run_id),\n    INDEX idx_run_fork_selected_contract_bindings_source (source_run_id, fork_event_id)\n);"
+      ddl: "CREATE TABLE run_fork_selected_contract_bindings (\n    binding_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    fork_run_id      UUID NOT NULL REFERENCES runs(run_id),\n    source_run_id    UUID NOT NULL REFERENCES runs(run_id),\n    fork_event_id    UUID NOT NULL REFERENCES events(event_id),\n    mode             TEXT NOT NULL CHECK (mode IN ('selected_contracts', 'bundle_hash')),\n    contracts_root   TEXT,\n    bundle_hash      TEXT CHECK (bundle_hash IS NULL OR bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$'),\n    workflow_name    TEXT NOT NULL,\n    workflow_version TEXT NOT NULL,\n    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    CHECK ((mode = 'selected_contracts' AND NULLIF(TRIM(COALESCE(contracts_root, '')), '') IS NOT NULL AND NULLIF(TRIM(COALESCE(bundle_hash, '')), '') IS NULL) OR (mode = 'bundle_hash' AND NULLIF(TRIM(COALESCE(contracts_root, '')), '') IS NULL AND bundle_hash IS NOT NULL)),\n    UNIQUE (fork_run_id),\n    INDEX idx_run_fork_selected_contract_bindings_source (source_run_id, fork_event_id)\n);"
     run_fork_selected_contract_executions:
       description: Source-to-fork lineage table for mutating selected-contract timestamp-fork execution. The runtime
         selected-contract execution owner publishes fresh fork-local events under the fork run_id and records which source
@@ -4152,7 +4152,7 @@ platform_tables:
         runtime.run_fork.selected_contract_recipient_planning before publish. This table does not authorize delivery
         replay, handler execution, receipts, dead letters, idempotency, timers, sessions, contract swap, or UI/API
         ownership.
-      ddl: "CREATE TABLE run_fork_selected_contract_route_recoveries (\n    recovery_id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    fork_run_id                    UUID NOT NULL REFERENCES runs(run_id),\n    source_run_id                  UUID NOT NULL REFERENCES runs(run_id),\n    fork_event_id                  UUID NOT NULL REFERENCES events(event_id),\n    owner                          TEXT NOT NULL,\n    runtime_recovery_owner         TEXT NOT NULL,\n    mode                           TEXT NOT NULL CHECK (mode IN ('selected_contracts')),\n    contracts_root                 TEXT NOT NULL,\n    workflow_name                  TEXT NOT NULL,\n    workflow_version               TEXT NOT NULL,\n    route_topology_owner           TEXT NOT NULL,\n    dynamic_topology_owner         TEXT,\n    recipient_planning_owner       TEXT NOT NULL,\n    frontier_evidence_fingerprint  TEXT NOT NULL,\n    route_topology_fingerprint     TEXT NOT NULL,\n    recipient_planning_fingerprint TEXT NOT NULL,\n    static_route_event_count       INTEGER NOT NULL DEFAULT 0,\n    dynamic_topology_proof_count   INTEGER NOT NULL DEFAULT 0,\n    recipient_plan_event_count     INTEGER NOT NULL DEFAULT 0,\n    route_topology                 JSONB NOT NULL,\n    recipient_planning             JSONB NOT NULL,\n    created_at                     TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    UNIQUE (fork_run_id),\n    INDEX idx_run_fork_selected_contract_route_recoveries_source (source_run_id, fork_event_id),\n    INDEX idx_run_fork_selected_contract_route_recoveries_owner (owner, runtime_recovery_owner)\n);"
+      ddl: "CREATE TABLE run_fork_selected_contract_route_recoveries (\n    recovery_id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    fork_run_id                    UUID NOT NULL REFERENCES runs(run_id),\n    source_run_id                  UUID NOT NULL REFERENCES runs(run_id),\n    fork_event_id                  UUID NOT NULL REFERENCES events(event_id),\n    owner                          TEXT NOT NULL,\n    runtime_recovery_owner         TEXT NOT NULL,\n    mode                           TEXT NOT NULL CHECK (mode IN ('selected_contracts', 'bundle_hash')),\n    contracts_root                 TEXT,\n    bundle_hash                    TEXT CHECK (bundle_hash IS NULL OR bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$'),\n    workflow_name                  TEXT NOT NULL,\n    workflow_version               TEXT NOT NULL,\n    route_topology_owner           TEXT NOT NULL,\n    dynamic_topology_owner         TEXT,\n    recipient_planning_owner       TEXT NOT NULL,\n    frontier_evidence_fingerprint  TEXT NOT NULL,\n    route_topology_fingerprint     TEXT NOT NULL,\n    recipient_planning_fingerprint TEXT NOT NULL,\n    static_route_event_count       INTEGER NOT NULL DEFAULT 0,\n    dynamic_topology_proof_count   INTEGER NOT NULL DEFAULT 0,\n    recipient_plan_event_count     INTEGER NOT NULL DEFAULT 0,\n    route_topology                 JSONB NOT NULL,\n    recipient_planning             JSONB NOT NULL,\n    created_at                     TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    CHECK ((mode = 'selected_contracts' AND NULLIF(TRIM(COALESCE(contracts_root, '')), '') IS NOT NULL AND NULLIF(TRIM(COALESCE(bundle_hash, '')), '') IS NULL) OR (mode = 'bundle_hash' AND NULLIF(TRIM(COALESCE(contracts_root, '')), '') IS NULL AND bundle_hash IS NOT NULL)),\n    UNIQUE (fork_run_id),\n    INDEX idx_run_fork_selected_contract_route_recoveries_source (source_run_id, fork_event_id),\n    INDEX idx_run_fork_selected_contract_route_recoveries_owner (owner, runtime_recovery_owner)\n);"
     event_deliveries:
       description: Tracks delivery of events to subscribers (nodes and agents). One row per event × subscriber. run_id
         inherited from the parent event for run-scoped queries. delivery_target_route stores the concrete target_set
@@ -5770,7 +5770,7 @@ multi_bundle_persistence:
       split_boundaries:
         - Dynamic post-boot RuntimeContextManager Load remains split to #1176/#981 follow-up; this slice only implements unload/deactivation triggered by existing authoritative delete/nuke owners.
         - Same-bundle selected-contract fork execution from DB bytes consumes the persisted bundle catalog runtime source owner.
-        - Cross-bundle fork routing remains #976.
+        - Cross-bundle run.fork target selection is implemented for already loaded/boot-pinned target BundleContexts under #976.
         - Final lifecycle/scoped API conformance matrix remains #1025.
         - Ambient CLI bundle context remains #1028.
         - Bundle CLI inventory and swarm fork consumers remain #1023/#989.
@@ -6026,8 +6026,15 @@ multi_bundle_persistence:
         owner for the source run bundle_hash, verify the reconstructed hash, and stamp fork-created runs with
         bundle_source=persisted and that canonical bundle_hash.
       cross_bundle_rule: >
-        If bundle_hash differs from the source run bundle_hash, admission returns UNSUPPORTED_BUNDLE_HASH_FORK until #976
-        promotes and implements cross-bundle selected-contract routing.
+        If bundle_hash differs from the source run bundle_hash, the target hash selects an already loaded/boot-pinned
+        RuntimeContextManager BundleContext under current Option A. The fork loads target bundle bytes from the persisted
+        bundle catalog, persists selected-contract ownership as mode=bundle_hash with that target bundle_hash, records
+        route recovery against the same target identity, and stamps fork-created runs with bundle_source=persisted plus
+        the target canonical bundle_hash. Valid target hashes that are not loaded by this process, have been unloaded or
+        deactivated, are missing/deleted from the catalog, or otherwise lack supported persisted bytes fail closed with
+        BUNDLE_UNAVAILABLE. Corrupt or hash-mismatched persisted target bytes fail with BUNDLE_DATA_INTEGRITY_ERROR.
+        run.fork MUST NOT perform Dynamic Load, bundle.register runtime start, catalog-only runtime load, ambient CLI
+        bundle selection, or Option B artifact capture.
       unavailable_rule: >
         Source runs with bundle_source ephemeral, deleted, or legacy return BUNDLE_UNAVAILABLE for fork admission because
         the server lacks authoritative persisted bundle bytes.
@@ -6127,7 +6134,8 @@ multi_bundle_persistence:
       reason: event.publish/run.start create-new-work admission with required bundle_hash when run_id is absent is API/runtime routing implementation.
     cross_bundle_fork:
       tracker: '#976'
-      reason: Different target bundle_hash selected for run.fork requires selected-contract routing and admission work beyond source authority.
+      implementation_status: implemented_for_boot_pinned_option_a_targets
+      reason: Different target bundle_hash selected for run.fork consumes RuntimeContextManager loaded BundleContext ownership, persists selected-contract selection as mode=bundle_hash, recovers routes against that target hash, and fail-closes unloaded, unavailable, missing, deleted, or corrupt target bundle sources without Dynamic Load.
     db_loaded_same_bundle_source:
       tracker: '#1024'
       implementation_status: implemented_for_same_bundle_selected_contracts
@@ -6140,7 +6148,7 @@ multi_bundle_persistence:
     run_fork_cli_consumer:
       tracker: '#1023'
       implementation_status: implemented_by_1023_first_slice
-      reason: swarm fork consumes /v1/rpc run.fork only; same-bundle DB-loaded source loading is supported by #1024, and cross-bundle fork routing remains split to #976.
+      reason: swarm fork consumes /v1/rpc run.fork only; same-bundle DB-loaded source loading is supported by #1024, and cross-bundle target selection for already loaded/boot-pinned BundleContexts is supported by #976.
     multi_bundle_cli_inventory:
       tracker: '#1023'
       implementation_status: inventory_prepared_envelope_directory_register_and_bundle_delete_implemented
@@ -9879,7 +9887,7 @@ cli_specification:
       command: swarm fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]
       tier: should_have
       implementation_status: implemented_public_cli_consumer
-      blocker_state: 'Implemented by #1023 over /v1/rpc run.fork after #989 promoted the API/runtime/spec owner; DB-loaded same-bundle source loading is supported by #1024 and cross-bundle fork remains split to #976.'
+      blocker_state: 'Implemented by #1023 over /v1/rpc run.fork after #989 promoted the API/runtime/spec owner; DB-loaded same-bundle source loading is supported by #1024 and boot-pinned Option A cross-bundle target selection is supported by #976.'
       owner: multi_bundle_persistence.cli_surface.run_fork
       api_owner: /v1/rpc run.fork
       behavior: >
@@ -9887,10 +9895,11 @@ cli_specification:
         `--bundle-hash`; draft `--bundle` is superseded by #1001. `--at-event` is an explicit fork-event selector only.
         The CLI validates source_run_id and fork_event_id as currently UUID-shaped runtime IDs before calling the
         handler, calls /v1/rpc run.fork exactly once, and renders only server-owned fork results.
-      split_blockers:
-        cross_bundle_fork: '#976'
+      implemented_dependencies:
         api_runtime_cli_owner: '#989'
         cli_inventory_gate: '#1023'
+        same_bundle_db_loaded_source: '#1024'
+        boot_pinned_cross_bundle_target_selection: '#976'
       rejected_legacy_flags:
       - --dry-run
       - --materialize-only
@@ -9901,10 +9910,10 @@ cli_specification:
       - no `swarm control run fork` command shape is promoted
       - no draft `--bundle` flag is promoted
       - no direct DB/store/runtime/fork harness access from CLI
-      - cross-bundle targets fail closed as #976 until that child lands
+      - cross-bundle targets select already loaded/boot-pinned RuntimeContextManager BundleContexts; valid but unloaded/unavailable targets fail with BUNDLE_UNAVAILABLE and corrupt target catalog bytes fail with BUNDLE_DATA_INTEGRITY_ERROR
       - DB-loaded same-bundle source loading is exercised through /v1/rpc run.fork, not a direct CLI runtime/store helper
       - missing SWARM_API_TOKEN, invalid args, and legacy harness flags make zero API calls
-      - RUN_NOT_FOUND, EVENT_NOT_FOUND, IDEMPOTENCY_CONFLICT, unsupported bundle fork, malformed responses, auth/HTTP/RPC failures, and transport failures fail closed with tested exit codes
+      - RUN_NOT_FOUND, EVENT_NOT_FOUND, BUNDLE_UNAVAILABLE, BUNDLE_DATA_INTEGRITY_ERROR, IDEMPOTENCY_CONFLICT, malformed responses, auth/HTTP/RPC failures, and transport failures fail closed with tested exit codes
     forkchat:
       command: swarm forkchat new|resume|list|view|delete
       tier: should_have
@@ -14290,7 +14299,7 @@ api_specification:
       - IDEMPOTENCY_CONFLICT
     run.fork:
       tier: should_have
-      description: "Public selected-contract run fork mutation.\n\nCreates and executes a same-bundle selected-contract fork from a source run. The method consumes source bundle availability from runs.bundle_source / runs.bundle_hash and bundle-row presence before any fork mutation. Source runs whose canonical bundle bytes are unavailable fail closed with BUNDLE_UNAVAILABLE; persisted source rows with missing bundle data fail with BUNDLE_DATA_INTEGRITY_ERROR. The selected-contract execution path consumes the existing store/runtime run_fork selected_contracts owners and must not infer source identity from legacy bundle_fingerprint, bundle_ref, null-collapse, or local filesystem heuristics.\n\nIf bundle_hash is omitted, the source run's canonical bundle_hash is used. If bundle_hash is supplied and equals the source run bundle_hash, the same-bundle selected_contracts fork may proceed. Disk-loaded source execution uses the existing runtime selected-contract source loader. DB-loaded source execution must load source bytes from the persisted bundle catalog runtime source owner, verify the reconstructed bundle_hash, and stamp fork-created runs with bundle_source=persisted plus that canonical bundle_hash. If bundle_hash differs, the method fails closed with UNSUPPORTED_BUNDLE_HASH_FORK; cross-bundle fork routing remains split to #976. The swarm fork CLI consumes this method and must not call runtime/store helpers directly.\n"
+      description: "Public selected-contract run fork mutation.\n\nCreates and executes a selected-contract fork from a source run. The method consumes source bundle availability from runs.bundle_source / runs.bundle_hash and bundle-row presence before any fork mutation. Source runs whose canonical bundle bytes are unavailable fail closed with BUNDLE_UNAVAILABLE; persisted source rows with missing bundle data fail with BUNDLE_DATA_INTEGRITY_ERROR. The selected-contract execution path consumes the existing store/runtime run_fork selected_contracts owners and must not infer source identity from legacy bundle_fingerprint, bundle_ref, null-collapse, or local filesystem heuristics.\n\nIf bundle_hash is omitted, the source run's canonical bundle_hash is used. If bundle_hash is supplied and equals the source run bundle_hash, the same-bundle selected_contracts fork may proceed. Disk-loaded source execution uses the existing runtime selected-contract source loader. DB-loaded same-bundle source execution must load source bytes from the persisted bundle catalog runtime source owner, verify the reconstructed bundle_hash, and stamp fork-created runs with bundle_source=persisted plus that canonical bundle_hash.\n\nIf bundle_hash differs from the source run bundle_hash, the target hash selects an already loaded/boot-pinned RuntimeContextManager BundleContext under current Option A. The method must persist selected-contract ownership as mode=bundle_hash with that target bundle_hash, recover routes against the same target identity, execute against the target BundleContext runtime/source, and stamp fork-created runs with bundle_source=persisted plus the target canonical bundle_hash. Valid target hashes that are not loaded by this process, have been unloaded or deactivated, are missing/deleted from the catalog, or otherwise lack supported persisted bytes fail closed with BUNDLE_UNAVAILABLE. Corrupt or hash-mismatched persisted target bytes fail with BUNDLE_DATA_INTEGRITY_ERROR. run.fork MUST NOT perform Dynamic Load, bundle.register runtime start, catalog-only runtime load, ambient CLI bundle selection, or Option B artifact capture. The swarm fork CLI consumes this method and must not call runtime/store helpers directly.\n"
       scope:
         required:
         - write:runs
@@ -14308,7 +14317,7 @@ api_specification:
           $ref: '#/components/schemas/OpaqueId'
       - name: bundle_hash
         required: false
-        description: "Optional same-bundle selector. Must equal the source run's canonical bundle_hash; differing values fail with UNSUPPORTED_BUNDLE_HASH_FORK until #976."
+        description: "Optional target/source bundle selector. Equal or omitted values use same-bundle selected_contracts semantics. A differing value selects an already loaded/boot-pinned RuntimeContextManager BundleContext under #976; valid but unavailable targets fail with BUNDLE_UNAVAILABLE and corrupt target catalog bytes fail with BUNDLE_DATA_INTEGRITY_ERROR."
         schema:
           $ref: '#/components/schemas/BundleHash'
       - name: idempotency_key
@@ -14323,7 +14332,6 @@ api_specification:
       errors:
       - BUNDLE_UNAVAILABLE
       - BUNDLE_DATA_INTEGRITY_ERROR
-      - UNSUPPORTED_BUNDLE_HASH_FORK
       - RUN_NOT_FOUND
       - EVENT_NOT_FOUND
       - IDEMPOTENCY_CONFLICT

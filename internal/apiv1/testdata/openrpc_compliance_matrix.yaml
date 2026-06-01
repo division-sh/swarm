@@ -681,7 +681,7 @@ methods:
   - method: run.fork
     transport: http
     required_params: [source_run_id]
-    declared_errors: [BUNDLE_UNAVAILABLE, BUNDLE_DATA_INTEGRITY_ERROR, UNSUPPORTED_BUNDLE_HASH_FORK, RUN_NOT_FOUND, EVENT_NOT_FOUND, IDEMPOTENCY_CONFLICT]
+    declared_errors: [BUNDLE_UNAVAILABLE, BUNDLE_DATA_INTEGRITY_ERROR, RUN_NOT_FOUND, EVENT_NOT_FOUND, IDEMPOTENCY_CONFLICT]
     happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorRunForkHandlersUseAvailabilityAndSelectedExecutor}]}
     required_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
     unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}]}

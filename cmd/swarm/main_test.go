@@ -2988,6 +2988,223 @@ func TestRunServeRuntimeDBLoadedRunForkSupportedSurfaceExecutesAndStampsPersiste
 	stopped = true
 }
 
+func TestRunServeRuntimeDBLoadedRunForkCrossBundleTargetExecutesAndStampsTargetIdentity(t *testing.T) {
+	_, db, pg := installServeRuntimePostgresTestStores(t, func() serveWorkspaceLifecycle {
+		return serveRuntimeWorkspaceStub{}
+	})
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	ctx := context.Background()
+	sourceBundle := loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier8-boot-verification", "test-boot-success"))
+	sourceProjection, err := runtimecontracts.BuildBundleCatalogProjection(sourceBundle)
+	if err != nil {
+		t.Fatalf("BuildBundleCatalogProjection(source): %v", err)
+	}
+	targetRoot := filepath.Join(t.TempDir(), "target-contracts")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(targetRoot, "package.yaml"), `
+name: cross-bundle-target
+version: 1.0.0
+description: Cross-bundle target fixture for run.fork.
+platform_version: ">=1.1.0"
+flows: []
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(targetRoot, "schema.yaml"), `
+initial_state: pending
+terminal_states: [done]
+states: [pending, done]
+pins:
+  inputs:
+    events: [task.requested]
+  outputs:
+    events: [task.completed]
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(targetRoot, "policy.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(targetRoot, "tools.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(targetRoot, "agents.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(targetRoot, "nodes.yaml"), `
+test-node:
+  id: test-node
+  execution_type: system_node
+  subscribes_to: [task.requested]
+  produces: [task.completed]
+  event_handlers:
+    task.requested:
+      advances_to: done
+      emit:
+        event: task.completed
+        broadcast: true
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(targetRoot, "events.yaml"), `
+task.requested:
+  swarm:
+    source: external
+  entity_id: string
+task.completed:
+  swarm:
+    source: external
+  entity_id: string
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(targetRoot, "entities.yaml"), `{}`)
+	targetBundle := loadWorkflowValidationBundleAt(t, targetRoot)
+	targetProjection, err := runtimecontracts.BuildBundleCatalogProjection(targetBundle)
+	if err != nil {
+		t.Fatalf("BuildBundleCatalogProjection(target): %v", err)
+	}
+	for label, projection := range map[string]runtimecontracts.BundleCatalogProjection{
+		"source": sourceProjection,
+		"target": targetProjection,
+	} {
+		if _, err := pg.UpsertBundleCatalog(ctx, store.BundleCatalogUpsert{
+			BundleHash:  projection.BundleHash,
+			ContentYAML: projection.ContentYAML,
+			ParsedJSON:  projection.ParsedJSON,
+			DataBlob:    projection.DataBlob,
+			Metadata:    projection.Metadata,
+		}); err != nil {
+			t.Fatalf("UpsertBundleCatalog(%s): %v", label, err)
+		}
+	}
+	if sourceProjection.BundleHash == targetProjection.BundleHash {
+		t.Fatalf("source and target projections unexpectedly share hash %s", sourceProjection.BundleHash)
+	}
+
+	serveCtx, cancelServe := context.WithCancel(context.Background())
+	var out lockedBuffer
+	done := make(chan int, 1)
+	go func() {
+		done <- runServeRuntime(serveCtx, repoRoot(), serveOptions{
+			ConfigPath:         writeServeRuntimeTestConfig(t),
+			BundleHash:         sourceProjection.BundleHash,
+			BundleHashes:       []string{targetProjection.BundleHash},
+			PlatformSpecPath:   defaultPlatformSpecPath,
+			StoreMode:          "postgres",
+			APIListenAddr:      "127.0.0.1:0",
+			MCPListenAddr:      "127.0.0.1:0",
+			SelfCheck:          true,
+			RequireBundleMatch: true,
+			Verbose:            true,
+			Output:             &out,
+		})
+	}()
+	stopped := false
+	t.Cleanup(func() {
+		if stopped {
+			return
+		}
+		cancelServe()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Errorf("timed out stopping runServeRuntime\noutput:\n%s", out.String())
+		}
+	})
+	waitForServeReadyLine(t, &out, done)
+	apiAddr := serveRuntimeAPIListenerFromOutput(t, out.String())
+
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	sourceEventID := uuid.NewString()
+	at := time.Unix(1700000345, 0).UTC()
+	seedRunForkSelectedExecutionSourceEvent(t, db, sourceRunID, entityID, sourceEventID, "task.requested", "complete-task", "pending", "Serve Cross Bundle Entity", "serve-cross-bundle-test", at)
+	if _, err := db.ExecContext(ctx, `
+		UPDATE runs
+		SET bundle_hash = $2,
+		    bundle_source = $3
+		WHERE run_id = $1::uuid
+	`, sourceRunID, sourceProjection.BundleHash, storerunlifecycle.BundleSourcePersisted); err != nil {
+		t.Fatalf("stamp source run bundle identity: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	cliOpts := defaultRootCommandOptions()
+	cliOpts.apiRPCEndpointOverride = "http://" + apiAddr + "/v1/rpc"
+	code := executeRootCommandWithOptions(ctx, t.TempDir(), []string{
+		"fork", sourceRunID,
+		"--bundle-hash", targetProjection.BundleHash,
+		"--at-event", sourceEventID,
+		"--idempotency-key", "db-loaded-cross-bundle-serve-fork",
+		"--json",
+	}, &stdout, &stderr, cliOpts)
+	if code != 0 {
+		t.Fatalf("swarm fork code=%d stderr=%s stdout=%s\nserve output:\n%s", code, stderr.String(), stdout.String(), out.String())
+	}
+	if strings.TrimSpace(stderr.String()) != "" {
+		t.Fatalf("swarm fork stderr=%q, want empty", stderr.String())
+	}
+	var rpcResult apiv1.RunForkExecutionResult
+	if err := json.Unmarshal(stdout.Bytes(), &rpcResult); err != nil {
+		t.Fatalf("decode swarm fork json: %v\n%s", err, stdout.String())
+	}
+	if rpcResult.SourceRunID != sourceRunID || rpcResult.BundleHash != targetProjection.BundleHash || rpcResult.ExecutedEventCount != 1 {
+		t.Fatalf("run.fork result = %#v, want source=%s target=%s executed=1", rpcResult, sourceRunID, targetProjection.BundleHash)
+	}
+
+	var forkBundleHash, forkBundleSource, forkBundleFingerprint string
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(bundle_hash, ''), COALESCE(bundle_source, ''), COALESCE(bundle_fingerprint, '')
+		FROM runs
+		WHERE run_id = $1::uuid
+	`, rpcResult.ForkRunID).Scan(&forkBundleHash, &forkBundleSource, &forkBundleFingerprint); err != nil {
+		t.Fatalf("load fork run bundle identity: %v", err)
+	}
+	if forkBundleHash != targetProjection.BundleHash || forkBundleSource != storerunlifecycle.BundleSourcePersisted || forkBundleFingerprint != "" {
+		t.Fatalf("fork bundle identity = hash:%q source:%q fingerprint:%q, want persisted target %s without legacy fingerprint", forkBundleHash, forkBundleSource, forkBundleFingerprint, targetProjection.BundleHash)
+	}
+	var mode, selectedHash, contractsRoot string
+	if err := db.QueryRowContext(ctx, `
+		SELECT mode, COALESCE(bundle_hash, ''), COALESCE(contracts_root, '')
+		FROM run_fork_selected_contract_bindings
+		WHERE fork_run_id = $1::uuid
+	`, rpcResult.ForkRunID).Scan(&mode, &selectedHash, &contractsRoot); err != nil {
+		t.Fatalf("load selected-contract binding: %v", err)
+	}
+	if mode != store.RunForkContractSelectionModeBundleHash || selectedHash != targetProjection.BundleHash || contractsRoot != "" {
+		t.Fatalf("selected-contract binding = mode:%q hash:%q root:%q, want target bundle_hash selection", mode, selectedHash, contractsRoot)
+	}
+	var routeMode, routeHash string
+	if err := db.QueryRowContext(ctx, `
+		SELECT mode, COALESCE(bundle_hash, '')
+		FROM run_fork_selected_contract_route_recoveries
+		WHERE fork_run_id = $1::uuid
+	`, rpcResult.ForkRunID).Scan(&routeMode, &routeHash); err != nil {
+		t.Fatalf("load selected-contract route recovery: %v", err)
+	}
+	if routeMode != store.RunForkContractSelectionModeBundleHash || routeHash != targetProjection.BundleHash {
+		t.Fatalf("route recovery = mode:%q hash:%q, want target bundle_hash selection", routeMode, routeHash)
+	}
+	var forkEventID string
+	if err := db.QueryRowContext(ctx, `
+		SELECT fork_event_id::text
+		FROM run_fork_selected_contract_executions
+		WHERE fork_run_id = $1::uuid AND source_event_id = $2::uuid
+	`, rpcResult.ForkRunID, sourceEventID).Scan(&forkEventID); err != nil {
+		t.Fatalf("load selected-contract execution lineage: %v", err)
+	}
+	var targetSubscriberDeliveries, sourceSubscriberDeliveries int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_deliveries
+		WHERE run_id = $1::uuid AND event_id = $2::uuid AND subscriber_id = 'test-node'
+	`, rpcResult.ForkRunID, forkEventID).Scan(&targetSubscriberDeliveries); err != nil {
+		t.Fatalf("count target subscriber deliveries: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_deliveries
+		WHERE run_id = $1::uuid AND event_id = $2::uuid AND subscriber_id = 'complete-task'
+	`, rpcResult.ForkRunID, forkEventID).Scan(&sourceSubscriberDeliveries); err != nil {
+		t.Fatalf("count source subscriber deliveries: %v", err)
+	}
+	if targetSubscriberDeliveries == 0 || sourceSubscriberDeliveries != 0 {
+		t.Fatalf("fork delivery recipients target=%d source=%d, want target bundle route only", targetSubscriberDeliveries, sourceSubscriberDeliveries)
+	}
+
+	cancelServe()
+	if code := <-done; code != 0 {
+		t.Fatalf("runServeRuntime exit code = %d\noutput:\n%s", code, out.String())
+	}
+	stopped = true
+}
+
 func TestRunServeRuntimePassesDataFlagToWorkspaceLifecycle(t *testing.T) {
 	dataDir := t.TempDir()
 	var capturedMountSources workspaceMountSources

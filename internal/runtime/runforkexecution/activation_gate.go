@@ -66,6 +66,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 
 	loadedSource, err := loadRunForkSelectedContractSource(ctx, req.SourceLoader, SelectedContractSourceLoadRequest{
 		SourceRunID: binding.SourceRunID,
+		BundleHash:  binding.ContractSelection.BundleHash,
 		Selection:   binding.ContractSelection,
 	})
 	if err != nil {
@@ -118,6 +119,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 	admission, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
 		ForkRunID:         forkRunID,
 		SourceRunID:       binding.SourceRunID,
+		BundleHash:        binding.ContractSelection.BundleHash,
 		BindingReader:     req.Store,
 		SourceLoader:      req.SourceLoader,
 		FrontierAdmission: frontier,

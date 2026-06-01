@@ -26,9 +26,10 @@ type RunForkExecutor interface {
 }
 
 type RunForkExecutionRequest struct {
-	SourceRunID string
-	ForkEventID string
-	BundleHash  string
+	SourceRunID       string
+	ForkEventID       string
+	BundleHash        string
+	ContractSelection store.RunForkContractSelection
 }
 
 type RunForkExecutionResult struct {
@@ -52,6 +53,10 @@ func (e SelectedContractRunForkExecutor) ExecuteRunFork(ctx context.Context, req
 	if e.Store == nil {
 		return RunForkExecutionResult{}, fmt.Errorf("run.fork requires selected-contract store")
 	}
+	selection := req.ContractSelection
+	if strings.TrimSpace(selection.Mode) == "" {
+		selection = e.ContractSelection
+	}
 	result, err := runtimerunforkexecution.ExecuteSelectedContractRunFork(ctx, runtimerunforkexecution.SelectedContractExecutionRequest{
 		SourceRunID:       strings.TrimSpace(req.SourceRunID),
 		At:                strings.TrimSpace(req.ForkEventID),
@@ -59,7 +64,7 @@ func (e SelectedContractRunForkExecutor) ExecuteRunFork(ctx context.Context, req
 		BundleSource:      storerunlifecycle.BundleSourcePersisted,
 		Store:             e.Store,
 		SourceLoader:      e.SourceLoader,
-		ContractSelection: e.ContractSelection,
+		ContractSelection: selection,
 		AgentRuntime:      e.AgentRuntime,
 	})
 	if err != nil {
@@ -96,13 +101,6 @@ func OperatorRunForkHandlers(opts OperatorReadOptions) map[string]MethodHandler 
 }
 
 func executeRunFork(ctx context.Context, req Request, opts OperatorReadOptions, now time.Time) (any, error) {
-	if multiRuntimeContextMode(opts) {
-		return nil, NewApplicationError(UnsupportedBundleHashForkCode, false, map[string]any{
-			"tracked_follow_up":  "#976/#1025",
-			"unsupported_reason": "run.fork runtime dispatch in multi-context DB-loaded mode is split from the pinned RuntimeContextManager boot slice",
-			"supported_selector": "single DB-loaded runtime context or same source bundle_hash in serial mode",
-		})
-	}
 	params, err := runForkParamsFromRequest(req.Params)
 	if err != nil {
 		return nil, err
@@ -117,19 +115,44 @@ func executeRunFork(ctx context.Context, req Request, opts OperatorReadOptions, 
 	if !availability.Available() {
 		return nil, NewApplicationError(BundleUnavailableCode, false, runForkAvailabilityDetails(availability))
 	}
-	if params.BundleHash != "" && params.BundleHash != availability.BundleHash {
-		return nil, NewApplicationError(UnsupportedBundleHashForkCode, false, map[string]any{
-			"source_run_id":      availability.RunID,
-			"source_bundle_hash": availability.BundleHash,
-			"requested_hash":     params.BundleHash,
-			"tracked_follow_up":  "#976",
-			"unsupported_reason": "cross-bundle run.fork is split to #976",
-			"supported_selector": "same source bundle_hash only",
+	sourceBundleHash := strings.TrimSpace(availability.BundleHash)
+	targetBundleHash := strings.TrimSpace(params.BundleHash)
+	if targetBundleHash == "" {
+		targetBundleHash = sourceBundleHash
+	}
+	if targetBundleHash == "" {
+		return nil, NewApplicationError(BundleDataIntegrityErrorCode, false, map[string]any{
+			"source_run_id": availability.RunID,
+			"reason":        "source run has no canonical bundle_hash",
 		})
 	}
-	params.BundleHash = availability.BundleHash
+	selectedOpts := opts
+	selectedCtx := ctx
+	var contractSelection store.RunForkContractSelection
+	if runtimeContextManager(opts) != nil {
+		var contextErr error
+		selectedCtx, selectedOpts, _, contextErr = runtimeBundleContextByHash(ctx, opts, targetBundleHash, params.SourceRunID)
+		if contextErr != nil {
+			return nil, contextErr
+		}
+	} else if targetBundleHash != sourceBundleHash {
+		return nil, NewApplicationError(BundleUnavailableCode, false, map[string]any{
+			"source_run_id":      availability.RunID,
+			"source_bundle_hash": sourceBundleHash,
+			"bundle_hash":        targetBundleHash,
+			"cause":              "runtime_context_not_loaded",
+			"supported_selector": "same source bundle_hash in disk/serial mode, or loaded target BundleContext in DB-loaded RuntimeContextManager mode",
+		})
+	}
+	if targetBundleHash != sourceBundleHash {
+		contractSelection = store.RunForkContractSelection{
+			Mode:       store.RunForkContractSelectionModeBundleHash,
+			BundleHash: targetBundleHash,
+		}
+	}
+	params.BundleHash = targetBundleHash
 
-	completion, replay, err := opts.Idempotency.WithAPIIdempotency(ctx, store.APIIdempotencyRequest{
+	completion, replay, err := selectedOpts.Idempotency.WithAPIIdempotency(selectedCtx, store.APIIdempotencyRequest{
 		Method:         req.Method,
 		ActorTokenID:   req.ActorTokenID,
 		IdempotencyKey: params.IdempotencyKey,
@@ -138,10 +161,11 @@ func executeRunFork(ctx context.Context, req Request, opts OperatorReadOptions, 
 		TTL:            runForkIdempotencyTTL,
 		Now:            now,
 	}, func(ctx context.Context) (store.APIIdempotencyCompletion, error) {
-		result, err := opts.RunFork.ExecuteRunFork(ctx, RunForkExecutionRequest{
-			SourceRunID: params.SourceRunID,
-			ForkEventID: params.ForkEventID,
-			BundleHash:  params.BundleHash,
+		result, err := selectedOpts.RunFork.ExecuteRunFork(ctx, RunForkExecutionRequest{
+			SourceRunID:       params.SourceRunID,
+			ForkEventID:       params.ForkEventID,
+			BundleHash:        params.BundleHash,
+			ContractSelection: contractSelection,
 		})
 		if err != nil {
 			return store.APIIdempotencyCompletion{}, runForkError(params.SourceRunID, params.ForkEventID, err)
@@ -263,14 +287,12 @@ func runForkError(sourceRunID, forkEventID string, err error) error {
 	}
 	msg := err.Error()
 	switch {
-	case strings.Contains(msg, UnsupportedBundleHashForkCode) || strings.Contains(msg, "source hash mismatch"):
+	case strings.Contains(msg, UnsupportedBundleHashForkCode):
 		return NewApplicationError(UnsupportedBundleHashForkCode, false, map[string]any{
 			"run_id":             strings.TrimSpace(sourceRunID),
 			"event_id":           strings.TrimSpace(forkEventID),
 			"reason":             msg,
-			"tracked_follow_up":  "#976",
-			"unsupported_reason": "cross-bundle run.fork is split to #976",
-			"supported_selector": "same source bundle_hash only",
+			"unsupported_reason": "run.fork target bundle selection is unsupported for the requested mode",
 		})
 	case strings.Contains(msg, runbundle.CodeBundleDataIntegrityError):
 		return NewApplicationError(BundleDataIntegrityErrorCode, false, map[string]any{

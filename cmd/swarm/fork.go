@@ -55,7 +55,7 @@ func newForkCommand(opts rootCommandOptions) *cobra.Command {
 			return runForkCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), forkOpts, args[0])
 		},
 	}
-	cmd.Flags().StringVar(&forkOpts.bundleHash, "bundle-hash", "", "Target bundle hash for same-bundle run.fork validation")
+	cmd.Flags().StringVar(&forkOpts.bundleHash, "bundle-hash", "", "Target bundle hash for run.fork selection")
 	cmd.Flags().StringVar(&forkOpts.atEvent, "at-event", "", "Fork at this source event id")
 	cmd.Flags().StringVar(&forkOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for retry-safe fork creation")
 	bindCLIOutputFlags(cmd, &forkOpts.output)

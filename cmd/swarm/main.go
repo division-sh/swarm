@@ -464,9 +464,8 @@ func loadServeRuntimeBundleFromCatalog(ctx context.Context, repo string, stores 
 		return serveRuntimeBundle{}, fmt.Errorf("compute DB-loaded boot bundle identity: %w", err)
 	}
 	fact := runtimecorrelation.BundleSourceFact{
-		BundleHash:        runtimeSource.BundleHash,
-		BundleSource:      storerunlifecycle.BundleSourcePersisted,
-		BundleFingerprint: bootIdentity.Fingerprint,
+		BundleHash:   runtimeSource.BundleHash,
+		BundleSource: storerunlifecycle.BundleSourcePersisted,
 	}.Normalized()
 	cleanupOnError = false
 	return serveRuntimeBundle{

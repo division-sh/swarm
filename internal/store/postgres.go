@@ -176,6 +176,9 @@ func (s *PostgresStore) ensureSchemaCompatibilityColumns(ctx context.Context) er
 			return err
 		}
 	}
+	if err := s.ensureRunForkBundleHashSelectionSchema(ctx, catalog); err != nil {
+		return err
+	}
 	if catalog.hasTable("events") {
 		for _, stmt := range []struct {
 			column string
@@ -499,6 +502,64 @@ func (s *PostgresStore) ensureRunBundleSourceSchema(ctx context.Context, catalog
 	} {
 		if _, err := s.DB.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("ensure runs bundle source schema: %w", err)
+		}
+	}
+	return nil
+}
+
+func (s *PostgresStore) ensureRunForkBundleHashSelectionSchema(ctx context.Context, catalog schemaColumnCatalog) error {
+	if s == nil || s.DB == nil {
+		return nil
+	}
+	for _, tableName := range []string{
+		runForkSelectedContractBindingTable,
+		runForkSelectedContractRouteRecoveryTable,
+	} {
+		if !catalog.hasTable(tableName) {
+			continue
+		}
+		for _, stmt := range []struct {
+			name string
+			sql  string
+		}{
+			{"add bundle_hash", fmt.Sprintf(`ALTER TABLE %s ADD COLUMN IF NOT EXISTS bundle_hash TEXT`, tableName)},
+			{"drop contracts_root not null", fmt.Sprintf(`ALTER TABLE %s ALTER COLUMN contracts_root DROP NOT NULL`, tableName)},
+			{"drop legacy selection checks", fmt.Sprintf(`
+				DO $$
+				DECLARE rec RECORD;
+				BEGIN
+					FOR rec IN
+						SELECT c.conname
+						FROM pg_constraint c
+						JOIN pg_class tbl ON tbl.oid = c.conrelid
+						JOIN pg_namespace ns ON ns.oid = tbl.relnamespace
+						WHERE ns.nspname = 'public'
+						  AND tbl.relname = '%s'
+						  AND c.contype = 'c'
+						  AND pg_get_constraintdef(c.oid) LIKE '%%selected_contracts%%'
+					LOOP
+						EXECUTE format('ALTER TABLE %%I.%%I DROP CONSTRAINT %%I', 'public', '%s', rec.conname);
+					END LOOP;
+				END
+				$$;
+			`, tableName, tableName)},
+			{"add mode check", fmt.Sprintf(`ALTER TABLE %s ADD CONSTRAINT %s_mode_check CHECK (mode IN ('selected_contracts', 'bundle_hash'))`, tableName, tableName)},
+			{"add selection shape check", fmt.Sprintf(`ALTER TABLE %s ADD CONSTRAINT %s_selection_shape_check CHECK (
+				(
+					mode = 'selected_contracts'
+					AND NULLIF(BTRIM(COALESCE(contracts_root, '')), '') IS NOT NULL
+					AND NULLIF(BTRIM(COALESCE(bundle_hash, '')), '') IS NULL
+				)
+				OR (
+					mode = 'bundle_hash'
+					AND NULLIF(BTRIM(COALESCE(contracts_root, '')), '') IS NULL
+					AND bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$'
+				)
+			)`, tableName, tableName)},
+		} {
+			if _, err := s.DB.ExecContext(ctx, stmt.sql); err != nil {
+				return fmt.Errorf("ensure %s %s: %w", tableName, stmt.name, err)
+			}
 		}
 	}
 	return nil
