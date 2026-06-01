@@ -10,6 +10,7 @@ import (
 
 	_ "github.com/lib/pq"
 	"swarm/internal/config"
+	"swarm/internal/store/platformschema"
 )
 
 type PostgresStore struct {
@@ -77,42 +78,16 @@ func (s *PostgresStore) EnsureSchemaTables(ctx context.Context, plans []SchemaTa
 	if len(plans) == 0 {
 		return nil
 	}
-	if _, err := s.DB.ExecContext(ctx, `CREATE EXTENSION IF NOT EXISTS pgcrypto`); err != nil {
-		return fmt.Errorf("ensure pgcrypto extension: %w", err)
-	}
 	if schemaDDLIncludesPlatformTables(plans) {
 		if err := s.ensureSchemaCompatibilityColumns(ctx); err != nil {
 			return fmt.Errorf("ensure platform-table compatibility prerequisites: %w", err)
 		}
 	}
-	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{})
-	if err != nil {
-		return fmt.Errorf("begin schema ddl tx: %w", err)
+	if err := platformschema.EnsurePostgresTables(ctx, s.DB, plans, func(plan SchemaTableDDL, cause error) error {
+		return s.outdatedSchemaErrorForPlan(ctx, plan, cause)
+	}); err != nil {
+		return err
 	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
-	for _, plan := range plans {
-		for _, statement := range plan.Statements {
-			statement = strings.TrimSpace(statement)
-			if statement == "" {
-				continue
-			}
-			if _, err := tx.ExecContext(ctx, statement); err != nil {
-				if schemaErr := s.outdatedSchemaErrorForPlan(ctx, plan, err); schemaErr != nil {
-					return schemaErr
-				}
-				return fmt.Errorf("ensure %s table %s: %w", strings.TrimSpace(plan.SchemaKind), strings.TrimSpace(plan.TableName), err)
-			}
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit schema ddl tx: %w", err)
-	}
-	committed = true
 	if schemaDDLIncludesPlatformTables(plans) {
 		if err := s.ensureSchemaCompatibilityColumns(ctx); err != nil {
 			return fmt.Errorf("ensure platform-table compatibility aftermath: %w", err)
@@ -155,12 +130,7 @@ func (s *PostgresStore) outdatedSchemaErrorForPlan(ctx context.Context, plan Sch
 }
 
 func schemaDDLIncludesPlatformTables(plans []SchemaTableDDL) bool {
-	for _, plan := range plans {
-		if strings.TrimSpace(plan.SchemaKind) == "platform_spec" {
-			return true
-		}
-	}
-	return false
+	return platformschema.IncludesPlatformTables(plans)
 }
 
 func (s *PostgresStore) ensureSchemaCompatibilityColumns(ctx context.Context) error {
