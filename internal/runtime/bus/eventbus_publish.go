@@ -765,12 +765,21 @@ func (eb *EventBus) authorizePublishRecipientPlan(ctx context.Context, evt event
 	if eb == nil || eb.recipientPlanGuard == nil {
 		return nil
 	}
-	return eb.recipientPlanGuard(ctx, evt, PublishRecipientPlan{
+	return eb.recipientPlanGuard(ctx, evt, eb.publishRecipientPlan(evt, plan))
+}
+
+func (eb *EventBus) publishRecipientPlan(evt events.Event, plan eventDeliveryPlan) PublishRecipientPlan {
+	out := PublishRecipientPlan{
 		Recipients:             uniqueStrings(plan.Recipients),
 		PersistedRecipients:    uniqueStrings(plan.PersistedRecipients),
-		RoutedRecipients:       eb.describeSubscribersForEvent(string(evt.Type), plan.RoutedRecipients),
 		SubscriptionRecipients: uniqueStrings(plan.SubscribedRecipients),
-	})
+		DeliveryRoutes:         events.NormalizeDeliveryRoutes(plan.DeliveryRoutes),
+		TargetFailure:          strings.TrimSpace(string(plan.TargetFailure)),
+	}
+	if eb != nil {
+		out.RoutedRecipients = eb.describeSubscribersForEvent(string(evt.Type), plan.RoutedRecipients)
+	}
+	return out
 }
 
 func (eb *EventBus) persistSubscribedPublishPlan(ctx context.Context, evt events.Event, plan eventDeliveryPlan) error {
@@ -1168,6 +1177,38 @@ func (eb *EventBus) CheckDirectRecipients(ctx context.Context, evt events.Event,
 	}
 	status.Missing = uniqueStrings(append(status.Missing, status.Filtered...))
 	return status, nil
+}
+
+// CheckPublishRecipientPlan applies the same subscribed-publish recipient
+// policy used by Publish, but does not persist event, delivery, replay, or
+// diagnostic evidence. Public ingress owners use this to fail closed before
+// claiming successful publication.
+func (eb *EventBus) CheckPublishRecipientPlan(ctx context.Context, evt events.Event) (PublishRecipientPlan, error) {
+	if eb == nil {
+		return PublishRecipientPlan{}, nil
+	}
+	if evt.Type == "" {
+		return PublishRecipientPlan{}, errors.New("event type is required")
+	}
+	if !isValidEventTypeName(string(evt.Type)) {
+		return PublishRecipientPlan{}, fmt.Errorf("invalid event type: %s", strings.TrimSpace(string(evt.Type)))
+	}
+	if eb.payloadValidator != nil {
+		if err := eb.payloadValidator(string(evt.Type), evt.Payload); err != nil {
+			return PublishRecipientPlan{}, fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type)), err)
+		}
+	}
+	if err := eb.authorizePublishRecipientPlanning(ctx, evt); err != nil {
+		return PublishRecipientPlan{}, err
+	}
+	plan, err := eb.deliveryPlanner.Plan(ctx, evt)
+	if err != nil {
+		return PublishRecipientPlan{}, err
+	}
+	if err := eb.authorizePublishRecipientPlan(ctx, evt, plan); err != nil {
+		return PublishRecipientPlan{}, err
+	}
+	return eb.publishRecipientPlan(evt, plan), nil
 }
 
 // PublishPersistedRecipients delivers an already-committed event using the

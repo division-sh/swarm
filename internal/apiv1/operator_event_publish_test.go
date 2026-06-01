@@ -632,6 +632,8 @@ func TestOperatorEventPublishExplicitRunTargetRequiresExistingNonterminalRun(t *
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	seedActiveAPIV1RuntimeBusAgent(t, context.Background(), pg, "scan-orchestrator")
+	ch := bus.Subscribe("scan-orchestrator", events.EventType("scan.requested"))
+	defer bus.Unsubscribe("scan-orchestrator")
 	handler := eventPublishTestHandler(t, pg, bus, source)
 
 	initial := rpcCall(t, handler, eventPublishBody("", runStartTestFingerprint, "scan.requested", `{"topic":"first"}`, "", "idem-new-run"))
@@ -639,17 +641,34 @@ func TestOperatorEventPublishExplicitRunTargetRequiresExistingNonterminalRun(t *
 		t.Fatalf("initial event.publish error = %#v", initial.Error)
 	}
 	runID := stringValue(t, asMap(t, initial.Result)["run_id"], "run_id")
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for initial explicit-run target delivery")
+	}
 
 	targeted := rpcCall(t, handler, eventPublishBody(runID, runStartTestFingerprint, "scan.requested", `{"topic":"second"}`, "operator-test", "idem-existing-run"))
 	if targeted.Error != nil {
 		t.Fatalf("targeted event.publish error = %#v", targeted.Error)
 	}
 	targetedResult := asMap(t, targeted.Result)
+	targetedEventID := stringValue(t, targetedResult["event_id"], "event_id")
 	if targetedResult["run_id"] != runID || targetedResult["new_run_created"] != false {
 		t.Fatalf("targeted result = %#v, want existing run", targetedResult)
 	}
+	if got := len(asSlice(t, targetedResult["deliveries"])); got != 1 {
+		t.Fatalf("targeted deliveries = %d, want 1", got)
+	}
 	if count := countEventsByName(t, db, "scan.requested"); count != 2 {
 		t.Fatalf("scan.requested events after targeted publish = %d, want 2", count)
+	}
+	select {
+	case got := <-ch:
+		if got.ID != targetedEventID || got.RunID != runID {
+			t.Fatalf("targeted delivered event id/run = %s/%s, want %s/%s", got.ID, got.RunID, targetedEventID, runID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for targeted explicit-run delivery")
 	}
 
 	mismatch := rpcCall(t, handler, eventPublishBody(runID, "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "scan.requested", `{"topic":"mismatch"}`, "", "idem-existing-run-mismatch"))
@@ -687,6 +706,186 @@ func TestOperatorEventPublishExplicitRunTargetRequiresExistingNonterminalRun(t *
 	}
 }
 
+func TestOperatorEventPublishExplicitRunFollowUpRequiresRecipientBeforePersistence(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	source := semanticview.Wrap(eventPublishFollowUpTestBundle())
+	bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	ctx := context.Background()
+	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "scan-orchestrator")
+	initialCh := bus.Subscribe("scan-orchestrator", events.EventType("scan.requested"))
+	followUpCh := bus.Subscribe("scan-orchestrator", events.EventType("scan.followup"))
+	defer bus.Unsubscribe("scan-orchestrator")
+	handler := eventPublishTestHandler(t, pg, bus, source)
+
+	initial := rpcCall(t, handler, eventPublishBody("", runStartTestFingerprint, "scan.requested", `{"topic":"first"}`, "", "idem-followup-initial"))
+	if initial.Error != nil {
+		t.Fatalf("initial event.publish error = %#v", initial.Error)
+	}
+	initialResult := asMap(t, initial.Result)
+	runID := stringValue(t, initialResult["run_id"], "run_id")
+	if initialResult["new_run_created"] != true {
+		t.Fatalf("initial result = %#v, want new run", initialResult)
+	}
+	select {
+	case <-initialCh:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for initial delivery")
+	}
+
+	followUp := rpcCall(t, handler, eventPublishBody(runID, runStartTestFingerprint, "scan.followup", `{"topic":"second"}`, "operator-test", "idem-followup-existing"))
+	if followUp.Error != nil {
+		t.Fatalf("follow-up event.publish error = %#v", followUp.Error)
+	}
+	followUpResult := asMap(t, followUp.Result)
+	followUpEventID := stringValue(t, followUpResult["event_id"], "event_id")
+	if followUpResult["run_id"] != runID || followUpResult["new_run_created"] != false {
+		t.Fatalf("follow-up result = %#v, want selected existing run", followUpResult)
+	}
+	deliveries := asSlice(t, followUpResult["deliveries"])
+	if len(deliveries) != 1 {
+		t.Fatalf("follow-up deliveries = %#v, want one delivery", deliveries)
+	}
+	if delivery := asMap(t, deliveries[0]); delivery["subscriber_id"] != "scan-orchestrator" {
+		t.Fatalf("follow-up delivery = %#v, want scan-orchestrator", delivery)
+	}
+	assertEventPublishEventRow(t, db, runID, followUpEventID, "scan.followup", "operator-test")
+	if got := countRunRowsByID(t, db, runID); got != 1 {
+		t.Fatalf("run rows for selected run = %d, want 1", got)
+	}
+	if got := countAllRunRows(t, db); got != 1 {
+		t.Fatalf("all run rows after follow-up = %d, want 1", got)
+	}
+	if got := countEventRowsByRunID(t, db, runID); got != 2 {
+		t.Fatalf("events for selected run = %d, want 2", got)
+	}
+	if got := countEventDeliveriesForEvent(t, ctx, db, followUpEventID); got != 1 {
+		t.Fatalf("event_deliveries for follow-up = %d, want 1", got)
+	}
+	select {
+	case got := <-followUpCh:
+		if got.ID != followUpEventID || got.RunID != runID {
+			t.Fatalf("follow-up delivered event id/run = %s/%s, want %s/%s", got.ID, got.RunID, followUpEventID, runID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for follow-up delivery")
+	}
+
+	rejected := rpcCall(t, handler, eventPublishBody(runID, runStartTestFingerprint, "scan.unhandled", `{"topic":"lost"}`, "operator-test", "idem-followup-unhandled"))
+	if rejected.Error == nil {
+		t.Fatal("unhandled follow-up event.publish error = nil")
+	}
+	data := asMap(t, rejected.Error.Data)
+	if data["code"] != EventNotDeclaredCode {
+		t.Fatalf("unhandled follow-up data = %#v, want %s", data, EventNotDeclaredCode)
+	}
+	details := asMap(t, data["details"])
+	if details["reason"] != "declared_event_has_no_selected_run_recipient" {
+		t.Fatalf("unhandled follow-up details = %#v", details)
+	}
+	if got := countAllEventRows(t, db); got != 2 {
+		t.Fatalf("event rows after rejected follow-up = %d, want 2", got)
+	}
+	if got := countAPIIdempotencyRows(t, db); got != 2 {
+		t.Fatalf("api_idempotency rows after rejected follow-up = %d, want 2", got)
+	}
+}
+
+func TestOperatorEventPublishSQLiteExplicitRunFollowUpUsesSelectedRun(t *testing.T) {
+	ctx := context.Background()
+	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+	source := semanticview.Wrap(eventPublishFollowUpTestBundle())
+	bus, err := runtimebus.NewEventBusWithOptions(sqliteStore, runStartTestEventBusOptions(source))
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	initialCh := bus.Subscribe("scan-orchestrator", events.EventType("scan.requested"))
+	followUpCh := bus.Subscribe("scan-orchestrator", events.EventType("scan.followup"))
+	defer bus.Unsubscribe("scan-orchestrator")
+	handler := eventPublishTestHandlerWithStores(t, sqliteStore, sqliteStore, sqliteStore, bus, source)
+
+	initial := rpcCall(t, handler, eventPublishBody("", runStartTestFingerprint, "scan.requested", `{"topic":"first"}`, "", "idem-sqlite-followup-initial"))
+	if initial.Error != nil {
+		t.Fatalf("sqlite initial event.publish error = %#v", initial.Error)
+	}
+	runID := stringValue(t, asMap(t, initial.Result)["run_id"], "run_id")
+	select {
+	case <-initialCh:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for sqlite initial delivery")
+	}
+
+	followUp := rpcCall(t, handler, eventPublishBody(runID, runStartTestFingerprint, "scan.followup", `{"topic":"second"}`, "operator-test", "idem-sqlite-followup-existing"))
+	if followUp.Error != nil {
+		t.Fatalf("sqlite follow-up event.publish error = %#v", followUp.Error)
+	}
+	result := asMap(t, followUp.Result)
+	eventID := stringValue(t, result["event_id"], "event_id")
+	if result["run_id"] != runID || result["new_run_created"] != false {
+		t.Fatalf("sqlite follow-up result = %#v, want selected existing run", result)
+	}
+	if got := countSQLiteAllRunRows(t, sqliteStore.DB); got != 1 {
+		t.Fatalf("sqlite run rows after follow-up = %d, want 1", got)
+	}
+	if got := countSQLiteEventRowsByRunID(t, sqliteStore.DB, runID); got != 2 {
+		t.Fatalf("sqlite events for selected run = %d, want 2", got)
+	}
+	if got := countSQLiteEventsByName(t, sqliteStore.DB, "scan.followup"); got != 1 {
+		t.Fatalf("sqlite scan.followup rows = %d, want 1", got)
+	}
+	if got := len(asSlice(t, result["deliveries"])); got != 1 {
+		t.Fatalf("sqlite follow-up deliveries = %d, want 1", got)
+	}
+	select {
+	case got := <-followUpCh:
+		if got.ID != eventID || got.RunID != runID {
+			t.Fatalf("sqlite follow-up delivered id/run = %s/%s, want %s/%s", got.ID, got.RunID, eventID, runID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for sqlite follow-up delivery")
+	}
+}
+
+func TestOperatorEventPublishRejectsCallerEntityIDForCreateEntityBeforePersistence(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	source := semanticview.Wrap(eventPublishCreateEntityTestBundle())
+	bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	handler := eventPublishTestHandler(t, pg, bus, source)
+
+	resp := rpcCall(t, handler, eventPublishBody("", runStartTestFingerprint, "thing.created", `{"entity_id":"11111111-1111-4111-8111-111111111111","amount":50}`, "", "idem-create-entity-supplied-id"))
+	if resp.Error == nil {
+		t.Fatal("create-entity supplied entity_id error = nil")
+	}
+	data := asMap(t, resp.Error.Data)
+	if data["code"] != PayloadValidationFailedCode {
+		t.Fatalf("create-entity supplied entity_id data = %#v, want %s", data, PayloadValidationFailedCode)
+	}
+	details := asMap(t, data["details"])
+	violations := asSlice(t, details["violations"])
+	if len(violations) != 1 {
+		t.Fatalf("violations = %#v, want one", violations)
+	}
+	if violation := asMap(t, violations[0]); violation["field_path"] != "$.entity_id" || violation["rule"] != "create_entity_mints_entity_id" {
+		t.Fatalf("violation = %#v", violation)
+	}
+	if got := countAllRunRows(t, db); got != 0 {
+		t.Fatalf("run rows after create-entity rejection = %d, want 0", got)
+	}
+	if got := countAllEventRows(t, db); got != 0 {
+		t.Fatalf("event rows after create-entity rejection = %d, want 0", got)
+	}
+	if got := countAPIIdempotencyRows(t, db); got != 0 {
+		t.Fatalf("api_idempotency rows after create-entity rejection = %d, want 0", got)
+	}
+}
+
 func TestOperatorEventPublishSourceEventIDValidatesSameRunLineage(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
@@ -695,6 +894,10 @@ func TestOperatorEventPublishSourceEventIDValidatesSameRunLineage(t *testing.T) 
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	ctx := context.Background()
+	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "scan-orchestrator")
+	ch := bus.Subscribe("scan-orchestrator", events.EventType("scan.requested"))
+	defer bus.Unsubscribe("scan-orchestrator")
 	handler := eventPublishTestHandler(t, pg, bus, source)
 
 	parent := rpcCall(t, handler, eventPublishBody("", runStartTestFingerprint, "scan.requested", `{"topic":"medicine"}`, "", "idem-source-parent"))
@@ -704,6 +907,11 @@ func TestOperatorEventPublishSourceEventIDValidatesSameRunLineage(t *testing.T) 
 	parentResult := asMap(t, parent.Result)
 	parentEventID := stringValue(t, parentResult["event_id"], "event_id")
 	parentRunID := stringValue(t, parentResult["run_id"], "run_id")
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for parent source_event_id delivery")
+	}
 
 	child := rpcCall(t, handler, eventPublishBodyWithSource(parentRunID, parentEventID, runStartTestFingerprint, "scan.requested", `{"topic":"checkpoint"}`, "operator-test", "idem-source-child"))
 	if child.Error != nil {
@@ -723,6 +931,14 @@ func TestOperatorEventPublishSourceEventIDValidatesSameRunLineage(t *testing.T) 
 	}
 	if count := countAPIIdempotencyRows(t, db); count != 2 {
 		t.Fatalf("api_idempotency rows after sourced publish = %d, want 2", count)
+	}
+	select {
+	case got := <-ch:
+		if got.ID != childEventID || got.RunID != parentRunID {
+			t.Fatalf("child delivered event id/run = %s/%s, want %s/%s", got.ID, got.RunID, childEventID, parentRunID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for child source_event_id delivery")
 	}
 }
 
@@ -1274,6 +1490,127 @@ func flowScopedEventPublishBundle(eventsByFlow map[string]string) *runtimecontra
 	}
 }
 
+func eventPublishFollowUpTestBundle() *runtimecontracts.WorkflowContractBundle {
+	eventsByName := map[string]runtimecontracts.EventCatalogEntry{
+		"scan.requested": {},
+		"scan.followup":  {},
+		"scan.unhandled": {},
+	}
+	node := runtimecontracts.SystemNodeContract{
+		ID:           "scan-orchestrator",
+		SubscribesTo: []string{"scan.requested", "scan.followup"},
+	}
+	flow := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "discovery", Flow: "discovery"},
+		Path:  "discovery",
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{
+				Inputs: runtimecontracts.FlowInputPins{Events: []string{"scan.requested"}},
+			},
+		},
+		Events: eventsByName,
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"scan-orchestrator": node,
+		},
+	}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
+	return &runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{Name: "review", Version: "1.0.0"},
+		Events:    eventsByName,
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"scan-orchestrator": node,
+		},
+		RootSchema: &runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{
+				Inputs: runtimecontracts.FlowInputPins{Events: []string{"scan.requested"}},
+			},
+		},
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"discovery": &root.Children[0],
+			},
+		},
+	}
+}
+
+func eventPublishCreateEntityTestBundle() *runtimecontracts.WorkflowContractBundle {
+	const eventName = "thing.created"
+	handler := runtimecontracts.SystemNodeEventHandler{CreateEntity: true}
+	node := runtimecontracts.SystemNodeContract{
+		ID:           "thing-writer",
+		SubscribesTo: []string{eventName},
+		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+			eventName: handler,
+		},
+	}
+	flow := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "factory", Flow: "factory"},
+		Path:  "factory",
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{
+				Inputs: runtimecontracts.FlowInputPins{Events: []string{eventName}},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			eventName: {},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"thing-writer": node,
+		},
+	}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
+	return &runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Name:    "factory",
+			Version: "1.0.0",
+			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
+				"thing-writer": {
+					eventName: handler,
+				},
+			},
+			EventOwners: map[string][]string{
+				eventName: []string{"thing-writer"},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			eventName: {},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"thing-writer": node,
+		},
+		RootSchema: &runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{
+				Inputs: runtimecontracts.FlowInputPins{Events: []string{eventName}},
+			},
+		},
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"factory": &root.Children[0],
+			},
+		},
+	}
+}
+
+func assertEventPublishEventRow(t *testing.T, db *sql.DB, runID, eventID, eventName, producedBy string) {
+	t.Helper()
+	var gotRunID, gotEventName, gotProducedBy, gotEntityID string
+	if err := db.QueryRow(`
+		SELECT run_id::text, event_name, produced_by, COALESCE(entity_id::text, '')
+		FROM events
+		WHERE event_id = $1::uuid
+	`, eventID).Scan(&gotRunID, &gotEventName, &gotProducedBy, &gotEntityID); err != nil {
+		t.Fatalf("load event.publish event row: %v", err)
+	}
+	if gotRunID != runID || gotEventName != eventName || gotProducedBy != producedBy {
+		t.Fatalf("event row run/event/producer = %q/%q/%q, want %q/%q/%q", gotRunID, gotEventName, gotProducedBy, runID, eventName, producedBy)
+	}
+	if gotEntityID != "" {
+		t.Fatalf("event row entity_id = %q, want empty stateful-context inference for follow-up", gotEntityID)
+	}
+}
+
 func assertEventPublishPersistence(t *testing.T, db *sql.DB, runID, eventID, eventName, producedBy string) {
 	t.Helper()
 	var runStatus, triggerType, triggerID, bundleHash, bundleSource, legacyFingerprint string
@@ -1410,6 +1747,15 @@ func countSQLiteEventsByName(t *testing.T, db *sql.DB, eventName string) int {
 	var count int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE event_name = ?`, eventName).Scan(&count); err != nil {
 		t.Fatalf("count sqlite events: %v", err)
+	}
+	return count
+}
+
+func countSQLiteEventRowsByRunID(t *testing.T, db *sql.DB, runID string) int {
+	t.Helper()
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id = ?`, runID).Scan(&count); err != nil {
+		t.Fatalf("count sqlite event rows: %v", err)
 	}
 	return count
 }

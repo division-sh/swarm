@@ -12,6 +12,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -20,6 +21,7 @@ import (
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -742,10 +744,25 @@ func sqliteEnsureRunRow(ctx context.Context, tx *sql.Tx, runID, triggerEventID, 
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
+	bundleHash := ""
+	bundleSource := storerunlifecycle.BundleSourceLegacy
+	bundleFingerprint := runtimecorrelation.BundleFingerprintFromContext(ctx)
+	if fact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx); ok {
+		fact = fact.Normalized()
+		bundleHash = fact.BundleHash
+		bundleSource = fact.BundleSource
+		bundleFingerprint = fact.BundleFingerprint
+	}
+	if bundleSource == "" {
+		bundleSource = storerunlifecycle.BundleSourceLegacy
+	}
 	_, err := tx.ExecContext(ctx, `
-		INSERT OR IGNORE INTO runs (run_id, status, bundle_source, trigger_event_id, trigger_event_type, started_at)
-		VALUES (?, 'running', 'legacy', ?, ?, ?)
-	`, runID, sqliteNullUUID(triggerEventID), sqliteNullString(triggerEventType), now.UTC())
+		INSERT OR IGNORE INTO runs (
+			run_id, status, bundle_hash, bundle_source, bundle_fingerprint,
+			trigger_event_id, trigger_event_type, started_at
+		)
+		VALUES (?, 'running', ?, ?, ?, ?, ?, ?)
+	`, runID, sqliteNullString(bundleHash), bundleSource, sqliteNullString(bundleFingerprint), sqliteNullUUID(triggerEventID), sqliteNullString(triggerEventType), now.UTC())
 	if err != nil {
 		return fmt.Errorf("ensure sqlite run row: %w", err)
 	}

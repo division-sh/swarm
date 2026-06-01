@@ -840,6 +840,36 @@ func TestEventBusCheckDirectRecipients_PayloadValidatorFailureAbortsBeforeRecipi
 	}
 }
 
+func TestEventBusCheckPublishRecipientPlanReportsSubscribedPublishWithoutDelivery(t *testing.T) {
+	eb, err := runtimebus.NewEventBus(runtimebus.InMemoryEventStore{})
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	ch := eb.Subscribe("agent-a", events.EventType("task.completed"))
+
+	plan, err := eb.CheckPublishRecipientPlan(context.Background(), events.Event{
+		Type:    "task.completed",
+		Payload: []byte(`{"ok":true}`),
+	})
+	if err != nil {
+		t.Fatalf("CheckPublishRecipientPlan: %v", err)
+	}
+	if !slices.Equal(plan.Recipients, []string{"agent-a"}) {
+		t.Fatalf("recipients = %#v, want agent-a", plan.Recipients)
+	}
+	if !slices.Equal(plan.PersistedRecipients, []string{"agent-a"}) {
+		t.Fatalf("persisted recipients = %#v, want agent-a", plan.PersistedRecipients)
+	}
+	if !slices.Equal(plan.SubscriptionRecipients, []string{"agent-a"}) {
+		t.Fatalf("subscription recipients = %#v, want agent-a", plan.SubscriptionRecipients)
+	}
+	select {
+	case got := <-ch:
+		t.Fatalf("CheckPublishRecipientPlan delivered event %#v", got)
+	default:
+	}
+}
+
 func TestEventBusPublishDirect_PersistsButDoesNotMarkDeliveredBeforeRealFanOut(t *testing.T) {
 	store := &descriptorAwareEventStore{
 		descriptors: []runtimebus.ActiveAgentDescriptor{

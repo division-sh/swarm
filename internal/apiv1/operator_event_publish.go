@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeeventidentity "github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimerunstart "github.com/division-sh/swarm/internal/runtime/runstart"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -40,6 +41,7 @@ type eventPublicationParams struct {
 	EventName         string
 	Payload           json.RawMessage
 	EntityID          string
+	EntityIDProvided  bool
 	RunID             string
 	SourceEventID     string
 	IdempotencyKey    string
@@ -185,15 +187,7 @@ func executeOperatorEventPublication(
 		if err := validateEventPublication(ctx, selectedOpts, params, cfg); err != nil {
 			return store.APIIdempotencyCompletion{}, err
 		}
-		if err := selectedOpts.Events.Publish(ctx, events.Event{
-			ID:            params.EventID,
-			RunID:         params.RunID,
-			ParentEventID: params.SourceEventID,
-			Type:          events.EventType(params.EventName),
-			SourceAgent:   params.Emitter,
-			Payload:       params.Payload,
-			CreatedAt:     now,
-		}.WithEntityID(params.EntityID)); err != nil {
+		if err := selectedOpts.Events.Publish(ctx, eventPublicationEvent(params, now)); err != nil {
 			if cfg.publishError != nil {
 				return store.APIIdempotencyCompletion{}, cfg.publishError(params, err)
 			}
@@ -254,7 +248,7 @@ func eventPublicationParamsFromRequest(req Request, cfg eventPublicationConfig) 
 		runID = parsed.String()
 	}
 	injectEntityID := cfg.injectRunIDEntityIDWhenMissing && (!cfg.injectRunIDEntityIDOnlyNewRun || newRun)
-	payload, entityID, err := eventPublicationPayload(req.Params, runID, injectEntityID)
+	payload, entityID, entityIDProvided, err := eventPublicationPayload(req.Params, runID, injectEntityID)
 	if err != nil {
 		return eventPublicationParams{}, bundleIdentityParam{}, err
 	}
@@ -278,6 +272,7 @@ func eventPublicationParamsFromRequest(req Request, cfg eventPublicationConfig) 
 		EventName:         eventName,
 		Payload:           payload,
 		EntityID:          entityID,
+		EntityIDProvided:  entityIDProvided,
 		RunID:             runID,
 		SourceEventID:     sourceEventID,
 		IdempotencyKey:    idempotencyKey,
@@ -287,17 +282,17 @@ func eventPublicationParamsFromRequest(req Request, cfg eventPublicationConfig) 
 	}, bundleIdentity, nil
 }
 
-func eventPublicationPayload(params map[string]any, runID string, injectRunIDEntityID bool) (json.RawMessage, string, error) {
+func eventPublicationPayload(params map[string]any, runID string, injectRunIDEntityID bool) (json.RawMessage, string, bool, error) {
 	if params == nil {
-		return nil, "", NewInvalidParamsError(map[string]any{"field": "payload", "reason": "required parameter is missing"})
+		return nil, "", false, NewInvalidParamsError(map[string]any{"field": "payload", "reason": "required parameter is missing"})
 	}
 	raw, ok := params["payload"]
 	if !ok || isEmptyParam(raw) {
-		return nil, "", NewInvalidParamsError(map[string]any{"field": "payload", "reason": "required parameter is missing"})
+		return nil, "", false, NewInvalidParamsError(map[string]any{"field": "payload", "reason": "required parameter is missing"})
 	}
 	payload, ok := raw.(map[string]any)
 	if !ok {
-		return nil, "", NewInvalidParamsError(map[string]any{"field": "payload", "reason": "must be an object"})
+		return nil, "", false, NewInvalidParamsError(map[string]any{"field": "payload", "reason": "must be an object"})
 	}
 	cloned := make(map[string]any, len(payload)+1)
 	for key, value := range payload {
@@ -305,7 +300,7 @@ func eventPublicationPayload(params map[string]any, runID string, injectRunIDEnt
 	}
 	entityID, supplied, err := runStartPayloadEntityID(cloned["entity_id"])
 	if err != nil {
-		return nil, "", err
+		return nil, "", false, err
 	}
 	switch {
 	case supplied:
@@ -316,9 +311,21 @@ func eventPublicationPayload(params map[string]any, runID string, injectRunIDEnt
 	}
 	encoded, err := json.Marshal(cloned)
 	if err != nil {
-		return nil, "", err
+		return nil, "", false, err
 	}
-	return encoded, entityID, nil
+	return encoded, entityID, supplied, nil
+}
+
+func eventPublicationEvent(params eventPublicationParams, createdAt time.Time) events.Event {
+	return (events.Event{
+		ID:            params.EventID,
+		RunID:         params.RunID,
+		ParentEventID: params.SourceEventID,
+		Type:          events.EventType(params.EventName),
+		SourceAgent:   params.Emitter,
+		Payload:       params.Payload,
+		CreatedAt:     createdAt,
+	}).WithEntityID(params.EntityID)
 }
 
 func validateEventPublication(ctx context.Context, opts OperatorReadOptions, params eventPublicationParams, cfg eventPublicationConfig) error {
@@ -333,6 +340,16 @@ func validateEventPublication(ctx context.Context, opts OperatorReadOptions, par
 		return NewApplicationError(EventNotDeclaredCode, false, map[string]any{
 			"event_name":      params.EventName,
 			"declared_events": declaredEventNames(opts.Source),
+		})
+	}
+	if params.EntityIDProvided && eventPublicationHasCreateEntityHandler(opts.Source, params.EventName) {
+		return NewApplicationError(PayloadValidationFailedCode, false, map[string]any{
+			"violations": []map[string]any{{
+				"field_path": "$.entity_id",
+				"rule":       "create_entity_mints_entity_id",
+				"message":    "caller-supplied entity_id is not allowed for create-entity event.publish",
+			}},
+			"event_name": params.EventName,
 		})
 	}
 	if cfg.requireExistingExplicitRun && !params.NewRunCreated {
@@ -373,7 +390,82 @@ func validateEventPublication(ctx context.Context, opts OperatorReadOptions, par
 			})
 		}
 	}
+	if cfg.requireExistingExplicitRun && !params.NewRunCreated {
+		if err := validateExistingRunEventPublicationRecipientPlan(ctx, opts, params, cfg); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+type eventPublishRecipientPlanChecker interface {
+	CheckPublishRecipientPlan(context.Context, events.Event) (runtimebus.PublishRecipientPlan, error)
+}
+
+func validateExistingRunEventPublicationRecipientPlan(ctx context.Context, opts OperatorReadOptions, params eventPublicationParams, cfg eventPublicationConfig) error {
+	checker, ok := opts.Events.(eventPublishRecipientPlanChecker)
+	if !ok || checker == nil {
+		return NewApplicationError(EventPublishFailedCode, true, map[string]any{
+			"event_name": params.EventName,
+			"event_id":   params.EventID,
+			"run_id":     params.RunID,
+			"phase":      "recipient_plan",
+			"reason":     "event publisher does not expose subscribed recipient planning",
+		})
+	}
+	plan, err := checker.CheckPublishRecipientPlan(ctx, eventPublicationEvent(params, time.Time{}))
+	if err != nil {
+		if cfg.publishError != nil {
+			return cfg.publishError(params, err)
+		}
+		return runStartPublishError(params.EventName, err)
+	}
+	if strings.TrimSpace(plan.TargetFailure) != "" {
+		return NewApplicationError(EventNotDeclaredCode, false, map[string]any{
+			"event_name":      params.EventName,
+			"run_id":          params.RunID,
+			"declared_events": declaredEventNames(opts.Source),
+			"reason":          "selected_run_target_not_routable",
+			"target_failure":  plan.TargetFailure,
+		})
+	}
+	if len(plan.PersistedRecipients) == 0 && len(plan.DeliveryRoutes) == 0 {
+		return NewApplicationError(EventNotDeclaredCode, false, map[string]any{
+			"event_name":              params.EventName,
+			"run_id":                  params.RunID,
+			"declared_events":         declaredEventNames(opts.Source),
+			"reason":                  "declared_event_has_no_selected_run_recipient",
+			"routed_recipients":       plan.RoutedRecipients,
+			"subscription_recipients": plan.SubscriptionRecipients,
+		})
+	}
+	return nil
+}
+
+func eventPublicationHasCreateEntityHandler(source semanticview.Source, eventName string) bool {
+	if source == nil {
+		return false
+	}
+	eventName = runtimeeventidentity.Normalize(eventName)
+	for _, nodeID := range source.RuntimeEventOwners(eventName) {
+		handler, ok := source.NodeEventHandler(nodeID, eventName)
+		if ok && handler.CreateEntity {
+			return true
+		}
+	}
+	for nodeID := range source.NodeEntries() {
+		for authoredEventName, handler := range source.NodeEventHandlers(nodeID) {
+			if !handler.CreateEntity {
+				continue
+			}
+			canonical := runtimeeventidentity.Normalize(source.ResolveNodeEventReference(nodeID, authoredEventName))
+			authored := runtimeeventidentity.Normalize(authoredEventName)
+			if canonical == eventName || authored == eventName {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func runStartRootInputError(eventName string, set runtimerunstart.RootInputSet, err error) error {
