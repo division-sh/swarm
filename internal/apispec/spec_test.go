@@ -915,6 +915,53 @@ func TestRuntimeIngressConventionsRatifyQueueAndRejectSemantics(t *testing.T) {
 	assertMethodDescriptionContains(t, api, "runtime.resume", "exactly once")
 }
 
+func TestAgentIdentityModelRecordsCurrentSlugConstraint(t *testing.T) {
+	root := loadPlatformSpecYAMLNode(t)
+	identity := mustMappingValue(t, root, "agent_identity_model")
+	assertScalarValue(t, mappingValue(identity, "status"), "current_global_slug_constraint_promoted_source_authority")
+	assertScalarValue(t, mappingValue(identity, "promoted_by"), "#977")
+	assertScalarValue(t, mappingValue(identity, "current_supported_posture"), "global_live_slug_identity")
+	assertScalarContains(t, mappingValue(identity, "authority_rule"), "agent_id as the authored contract slug")
+	assertScalarContains(t, mappingValue(identity, "authority_rule"), "globally unique live runtime identity")
+
+	constraint := mustMappingValue(t, identity, "current_multi_bundle_constraint")
+	assertScalarContains(t, mappingValue(constraint, "rule"), "globally unique authored agent_id values")
+	assertScalarContains(t, mappingValue(constraint, "rule"), "Duplicate authored agent slugs across live loaded BundleContexts are unsupported")
+	assertScalarContains(t, mappingValue(constraint, "enforcement_status"), "does not add runtime/store enforcement")
+
+	migration := mustMappingValue(t, identity, "uuid_internal_migration_target")
+	assertScalarValue(t, mappingValue(migration, "tracker"), "#977")
+	assertScalarValue(t, mappingValue(migration, "status"), "staged_parent_only_not_current_runtime_behavior")
+	assertSurfaceListedValue(t, mustMappingValue(t, migration, "not_promoted_in_this_slice"), "agents.id UUID schema migration")
+	assertSurfaceListedValue(t, mustMappingValue(t, migration, "not_promoted_in_this_slice"), "duplicate slug support across loaded bundles")
+
+	disposition := mustMappingValue(t, identity, "consumer_disposition")
+	for _, key := range []string{
+		"uuid_internal_candidates",
+		"slug_display_aliases",
+		"bundle_scoped_lookup_candidates",
+		"historical_immutable_records",
+		"split_or_escalate",
+	} {
+		if mappingValue(disposition, key) == nil {
+			t.Fatalf("agent_identity_model.consumer_disposition missing %s", key)
+		}
+	}
+
+	multiBundle := mustMappingValue(t, root, "multi_bundle_persistence")
+	assertScalarValue(t, mappingValue(mustMappingValue(t, multiBundle, "agent_identity_boundary"), "owner"), "platform-spec.yaml#agent_identity_model")
+	sourceEvidence := mustMappingValue(t, multiBundle, "source_evidence")
+	assertScalarValue(t, mappingValue(sourceEvidence, "agent_identity_source_authority"), "#977")
+
+	api := mustMappingValue(t, root, "api_specification")
+	assertScalarValue(t, mappingValue(mustMappingValue(t, api, "agent_identity_boundary"), "owner"), "platform-spec.yaml#agent_identity_model")
+	blocked := mustMappingValue(t, mustMappingValue(t, api, "multi_bundle_publication_boundary"), "blocked_children")
+	assertScalarValue(t, mappingValue(blocked, "agent_identity_duplicate_slug_migration"), "#977")
+
+	cli := mustMappingValue(t, root, "cli_specification")
+	assertScalarValue(t, mappingValue(mustMappingValue(t, cli, "agent_identity_boundary"), "owner"), "platform-spec.yaml#agent_identity_model")
+}
+
 func TestContentDescriptorsDeclareRequiredFlag(t *testing.T) {
 	root := loadPlatformSpecYAMLNode(t)
 	api := mustMappingValue(t, root, "api_specification")
@@ -1077,4 +1124,24 @@ func assertSurfaceListed(t *testing.T, ingress *yaml.Node, listName, surface str
 		}
 	}
 	t.Fatalf("runtime_ingress.%s missing surface %s", listName, surface)
+}
+
+func assertSurfaceListedValue(t *testing.T, list *yaml.Node, want string) {
+	t.Helper()
+	if list == nil || list.Kind != yaml.SequenceNode {
+		t.Fatalf("list kind = %v, want sequence", listKind(list))
+	}
+	for _, entry := range list.Content {
+		if scalarValue(entry) == want {
+			return
+		}
+	}
+	t.Fatalf("list missing value %s", want)
+}
+
+func listKind(node *yaml.Node) yaml.Kind {
+	if node == nil {
+		return 0
+	}
+	return node.Kind
 }
