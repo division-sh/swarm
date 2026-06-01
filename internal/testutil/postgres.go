@@ -9,12 +9,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
-	"sort"
 	"strconv"
 	"strings"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/store/platformschema"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -29,6 +28,8 @@ type sharedPostgresState struct {
 	dockerBin string
 	name      string
 	adminDSN  string
+	template  string
+	templated bool
 	nextDBID  uint64
 }
 
@@ -36,7 +37,7 @@ var sharedPostgres sharedPostgresState
 
 // StartPostgres provides an isolated database on a shared Postgres container.
 // The container is started once per test process; each call creates a fresh
-// database, applies the canonical schema, and drops that database on cleanup.
+// database cloned from one canonical schema template, and drops that database on cleanup.
 func StartPostgres(t *testing.T) (dsn string, db *sql.DB, cleanup func()) {
 	t.Helper()
 
@@ -59,29 +60,16 @@ func StartPostgres(t *testing.T) (dsn string, db *sql.DB, cleanup func()) {
 	defer adminDB.Close()
 
 	sharedPostgres.lifecycle.Lock()
-	if err := createIsolatedDatabase(adminDB, dbName); err != nil {
+	if err := sharedPostgres.ensureTemplateDatabase(adminDB); err != nil {
+		sharedPostgres.lifecycle.Unlock()
+		t.Fatalf("initialize postgres template: %v", err)
+	}
+	if err := createIsolatedDatabaseFromTemplate(adminDB, dbName, sharedPostgres.template); err != nil {
 		sharedPostgres.lifecycle.Unlock()
 		t.Fatalf("create isolated postgres database %q: %v", dbName, err)
 	}
 
 	dsn = withDBName(adminDSN, dbName)
-	db, err = sql.Open("postgres", dsn)
-	if err != nil {
-		_ = dropIsolatedDatabase(adminDB, dbName)
-		sharedPostgres.lifecycle.Unlock()
-		t.Fatalf("open postgres %q: %v", dbName, err)
-	}
-	if err := initializeDatabase(db); err != nil {
-		_ = db.Close()
-		_ = dropIsolatedDatabase(adminDB, dbName)
-		sharedPostgres.lifecycle.Unlock()
-		t.Fatalf("initialize postgres %q: %v", dbName, err)
-	}
-	if err := db.Close(); err != nil {
-		_ = dropIsolatedDatabase(adminDB, dbName)
-		sharedPostgres.lifecycle.Unlock()
-		t.Fatalf("close bootstrap postgres %q: %v", dbName, err)
-	}
 	db, err = sql.Open("postgres", dsn)
 	if err != nil {
 		_ = dropIsolatedDatabase(adminDB, dbName)
@@ -268,20 +256,49 @@ func (s *sharedPostgresState) nextDatabaseName() string {
 	return fmt.Sprintf("mas_test_%d_%d", os.Getpid(), id)
 }
 
+func (s *sharedPostgresState) templateDatabaseName() string {
+	if s.template == "" {
+		s.template = fmt.Sprintf("mas_template_%d", os.Getpid())
+	}
+	return s.template
+}
+
+func (s *sharedPostgresState) ensureTemplateDatabase(adminDB *sql.DB) error {
+	if s.templated {
+		return nil
+	}
+	templateName := s.templateDatabaseName()
+	if err := dropIsolatedDatabase(adminDB, templateName); err != nil {
+		return fmt.Errorf("reset template database %q: %w", templateName, err)
+	}
+	if err := createIsolatedDatabase(adminDB, templateName); err != nil {
+		return fmt.Errorf("create template database %q: %w", templateName, err)
+	}
+	templateDSN := withDBName(s.adminDSN, templateName)
+	templateDB, err := sql.Open("postgres", templateDSN)
+	if err != nil {
+		_ = dropIsolatedDatabase(adminDB, templateName)
+		return fmt.Errorf("open template database %q: %w", templateName, err)
+	}
+	if err := initializeDatabase(templateDB); err != nil {
+		_ = templateDB.Close()
+		_ = dropIsolatedDatabase(adminDB, templateName)
+		return fmt.Errorf("initialize template database %q: %w", templateName, err)
+	}
+	if err := templateDB.Close(); err != nil {
+		_ = dropIsolatedDatabase(adminDB, templateName)
+		return fmt.Errorf("close template database %q: %w", templateName, err)
+	}
+	s.templated = true
+	return nil
+}
+
 func initializeDatabase(db *sql.DB) error {
-	specPath, err := platformSpecPath()
+	spec, err := loadPlatformSpec()
 	if err != nil {
 		return err
 	}
-	b, err := os.ReadFile(specPath)
-	if err != nil {
-		return fmt.Errorf("read platform spec: %w", err)
-	}
-	var spec runtimecontracts.PlatformSpecDocument
-	if err := yaml.Unmarshal(b, &spec); err != nil {
-		return fmt.Errorf("unmarshal platform spec: %w", err)
-	}
-	statements, err := bootstrapPlatformTableStatements(spec)
+	plans, err := platformschema.GeneratePlatformTableDDLs(spec)
 	if err != nil {
 		return fmt.Errorf("generate platform tables ddl: %w", err)
 	}
@@ -289,18 +306,10 @@ func initializeDatabase(db *sql.DB) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	initSQL := []string{
-		`CREATE SCHEMA IF NOT EXISTS public`,
-		`GRANT ALL ON SCHEMA public TO postgres`,
-		`GRANT ALL ON SCHEMA public TO public`,
-		`CREATE EXTENSION IF NOT EXISTS pgcrypto`,
+	if err := ensurePublicSchema(ctx, db); err != nil {
+		return err
 	}
-	for _, stmt := range initSQL {
-		if _, err := db.ExecContext(ctx, stmt); err != nil {
-			return fmt.Errorf("init stmt %q: %w", stmt, err)
-		}
-	}
-	if err := execBootstrapStatements(ctx, db, statements); err != nil {
+	if err := platformschema.EnsurePostgresTables(ctx, db, plans, nil); err != nil {
 		return fmt.Errorf("bootstrap platform tables: %w", err)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -315,10 +324,48 @@ func initializeDatabase(db *sql.DB) error {
 	return nil
 }
 
+func loadPlatformSpec() (runtimecontracts.PlatformSpecDocument, error) {
+	specPath, err := platformSpecPath()
+	if err != nil {
+		return runtimecontracts.PlatformSpecDocument{}, err
+	}
+	b, err := os.ReadFile(specPath)
+	if err != nil {
+		return runtimecontracts.PlatformSpecDocument{}, fmt.Errorf("read platform spec: %w", err)
+	}
+	var spec runtimecontracts.PlatformSpecDocument
+	if err := yaml.Unmarshal(b, &spec); err != nil {
+		return runtimecontracts.PlatformSpecDocument{}, fmt.Errorf("unmarshal platform spec: %w", err)
+	}
+	return spec, nil
+}
+
+func ensurePublicSchema(ctx context.Context, db *sql.DB) error {
+	for _, stmt := range []string{
+		`CREATE SCHEMA IF NOT EXISTS public`,
+		`GRANT ALL ON SCHEMA public TO postgres`,
+		`GRANT ALL ON SCHEMA public TO public`,
+	} {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("init stmt %q: %w", stmt, err)
+		}
+	}
+	return nil
+}
+
 func createIsolatedDatabase(adminDB *sql.DB, dbName string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	if _, err := adminDB.ExecContext(ctx, "CREATE DATABASE "+quoteIdent(dbName)); err != nil {
+		return err
+	}
+	return nil
+}
+
+func createIsolatedDatabaseFromTemplate(adminDB *sql.DB, dbName, templateName string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	if _, err := adminDB.ExecContext(ctx, "CREATE DATABASE "+quoteIdent(dbName)+" WITH TEMPLATE "+quoteIdent(templateName)); err != nil {
 		return err
 	}
 	return nil
@@ -364,196 +411,6 @@ func platformSpecPath() (string, error) {
 		return "", fmt.Errorf("platform spec not found: %w", statErr)
 	}
 	return specPath, nil
-}
-
-var (
-	testutilCreateTableName = regexp.MustCompile(`(?is)^create\s+table(?:\s+if\s+not\s+exists)?\s+"?([a-z_][a-z0-9_]*)"?`)
-	testutilInlineIndexLine = regexp.MustCompile(`(?i)^(unique\s+)?index\s+([a-z_][a-z0-9_]*)\s*\((.+?)\)\s*(where\s+.+)?$`)
-)
-
-func bootstrapPlatformTableStatements(spec runtimecontracts.PlatformSpecDocument) ([]string, error) {
-	tableNames := make([]string, 0, len(spec.PlatformTables.Tables))
-	for tableName := range spec.PlatformTables.Tables {
-		tableNames = append(tableNames, strings.TrimSpace(tableName))
-	}
-	sort.Slice(tableNames, func(i, j int) bool {
-		left := bootstrapPlatformTableOrder(tableNames[i])
-		right := bootstrapPlatformTableOrder(tableNames[j])
-		if left != right {
-			return left < right
-		}
-		return tableNames[i] < tableNames[j]
-	})
-	statements := make([]string, 0, len(tableNames)*2)
-	for _, tableName := range tableNames {
-		normalized, err := bootstrapNormalizePlatformDDL(spec.PlatformTables.Tables[tableName].DDL)
-		if err != nil {
-			return nil, fmt.Errorf("platform table %s: %w", tableName, err)
-		}
-		statements = append(statements, normalized...)
-	}
-	return statements, nil
-}
-
-func execBootstrapStatements(ctx context.Context, db *sql.DB, statements []string) error {
-	for _, statement := range statements {
-		statement = strings.TrimSpace(statement)
-		if statement == "" {
-			continue
-		}
-		if _, err := db.ExecContext(ctx, statement); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func bootstrapNormalizePlatformDDL(rawDDL string) ([]string, error) {
-	chunks := strings.Split(rawDDL, ";")
-	statements := make([]string, 0, len(chunks))
-	for _, chunk := range chunks {
-		statement := strings.TrimSpace(chunk)
-		if statement == "" {
-			continue
-		}
-		switch {
-		case strings.HasPrefix(strings.ToUpper(statement), "CREATE TABLE "):
-			tableStmt, indexStatements, err := bootstrapNormalizeCreateTable(statement)
-			if err != nil {
-				return nil, err
-			}
-			statements = append(statements, tableStmt)
-			statements = append(statements, indexStatements...)
-		case strings.HasPrefix(strings.ToUpper(statement), "CREATE INDEX "):
-			statements = append(statements, bootstrapEnsureIfNotExists(statement, "CREATE INDEX"))
-		case strings.HasPrefix(strings.ToUpper(statement), "CREATE UNIQUE INDEX "):
-			statements = append(statements, bootstrapEnsureIfNotExists(statement, "CREATE UNIQUE INDEX"))
-		default:
-			return nil, fmt.Errorf("unsupported platform ddl statement %q", statement)
-		}
-	}
-	if len(statements) == 0 {
-		return nil, fmt.Errorf("no executable platform ddl statements found")
-	}
-	return statements, nil
-}
-
-func bootstrapNormalizeCreateTable(statement string) (string, []string, error) {
-	statement = bootstrapEnsureIfNotExists(statement, "CREATE TABLE")
-	tableName := bootstrapExtractTableName(statement)
-	if tableName == "" {
-		return "", nil, fmt.Errorf("unable to extract table name from %q", statement)
-	}
-	start := strings.Index(statement, "(")
-	end := strings.LastIndex(statement, ")")
-	if start < 0 || end <= start {
-		return statement, nil, nil
-	}
-	body := statement[start+1 : end]
-	lines := strings.Split(body, "\n")
-	kept := make([]string, 0, len(lines))
-	indexStatements := make([]string, 0, 2)
-	for _, rawLine := range lines {
-		trimmed := strings.TrimSpace(strings.TrimSuffix(rawLine, ","))
-		if trimmed == "" {
-			continue
-		}
-		if matches := testutilInlineIndexLine.FindStringSubmatch(trimmed); len(matches) >= 3 {
-			uniquePrefix := strings.TrimSpace(matches[1])
-			indexName := strings.TrimSpace(matches[2])
-			indexCols := strings.TrimSpace(matches[3])
-			whereClause := ""
-			if len(matches) >= 5 {
-				whereClause = strings.TrimSpace(matches[4])
-			}
-			indexStmt := fmt.Sprintf("CREATE INDEX IF NOT EXISTS %s ON %s(%s)", quoteIdent(indexName), quoteIdent(tableName), indexCols)
-			if uniquePrefix != "" {
-				indexStmt = fmt.Sprintf("CREATE UNIQUE INDEX IF NOT EXISTS %s ON %s(%s)", quoteIdent(indexName), quoteIdent(tableName), indexCols)
-			}
-			if whereClause != "" {
-				indexStmt += " " + whereClause
-			}
-			indexStatements = append(indexStatements, indexStmt)
-			continue
-		}
-		kept = append(kept, trimmed)
-	}
-	return fmt.Sprintf("%s (\n    %s\n)", statement[:start], strings.Join(kept, ",\n    ")), indexStatements, nil
-}
-
-func bootstrapEnsureIfNotExists(statement, prefix string) string {
-	statement = strings.TrimSpace(statement)
-	upper := strings.ToUpper(statement)
-	if strings.HasPrefix(upper, prefix+" IF NOT EXISTS ") {
-		return statement
-	}
-	return prefix + " IF NOT EXISTS " + strings.TrimSpace(statement[len(prefix):])
-}
-
-func bootstrapExtractTableName(statement string) string {
-	statement = strings.TrimSpace(statement)
-	matches := testutilCreateTableName.FindStringSubmatch(statement)
-	if len(matches) < 2 {
-		return ""
-	}
-	return strings.TrimSpace(matches[1])
-}
-
-func bootstrapPlatformTableOrder(name string) int {
-	switch strings.TrimSpace(name) {
-	case "schema_version":
-		return 0
-	case "runs":
-		return 5
-	case "events":
-		return 10
-	case "run_fork_selected_contract_bindings":
-		return 15
-	case "run_fork_selected_contract_executions":
-		return 18
-	case "run_fork_selected_contract_branch_divergences":
-		return 19
-	case "dead_letters":
-		return 20
-	case "agents":
-		return 30
-	case "flow_instances":
-		return 40
-	case "entity_state":
-		return 50
-	case "agent_sessions":
-		return 60
-	case "agent_turns":
-		return 65
-	case "conversation_forks":
-		return 66
-	case "conversation_fork_snapshots":
-		return 67
-	case "conversation_fork_turns":
-		return 68
-	case "routing_rules":
-		return 70
-	case "event_deliveries":
-		return 80
-	case "run_fork_delivery_event_replays":
-		return 85
-	case "event_receipts":
-		return 90
-	case "entity_mutations":
-		return 95
-	case "mailbox":
-		return 100
-	case "api_idempotency":
-		return 105
-	case "runtime_ingress_state":
-		return 108
-	case "spend_ledger":
-		return 110
-	case "timers":
-		return 120
-	default:
-		return 1000
-	}
 }
 
 func startContainerWatcher(dockerBin, containerName string) error {
