@@ -277,6 +277,111 @@ func TestPostgresStore_ApplyServeAbandonActiveRunQuiescence_QuiescesRecoverableW
 	}
 }
 
+func TestSQLiteRuntimeStore_ApplyServeAbandonActiveRunQuiescence_QuiescesRecoverableWork(t *testing.T) {
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx := context.Background()
+	now := time.Date(2026, 5, 18, 2, 10, 0, 0, time.UTC)
+	runID := uuid.NewString()
+	pausedRunID := uuid.NewString()
+	terminalRunID := uuid.NewString()
+	if _, err := store.DB.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, started_at) VALUES
+			(?, 'running', ?),
+			(?, 'paused', ?),
+			(?, 'completed', ?)
+	`, runID, now.Add(-time.Hour), pausedRunID, now.Add(-time.Hour), terminalRunID, now.Add(-time.Hour)); err != nil {
+		t.Fatalf("seed sqlite runs: %v", err)
+	}
+	agentPending := seedSQLiteServeAbandonEvent(t, ctx, store, runID, "serve.agent.pending", now)
+	agentInProgress := seedSQLiteServeAbandonEvent(t, ctx, store, runID, "serve.agent.in_progress", now)
+	agentRetryableFailed := seedSQLiteServeAbandonEvent(t, ctx, store, runID, "serve.agent.failed_retryable", now)
+	agentExhaustedFailed := seedSQLiteServeAbandonEvent(t, ctx, store, runID, "serve.agent.failed_exhausted", now)
+	nodePending := seedSQLiteServeAbandonEvent(t, ctx, store, runID, "serve.node.pending", now)
+	terminalRunPending := seedSQLiteServeAbandonEvent(t, ctx, store, terminalRunID, "serve.terminal.pending", now)
+	activeSessionID := uuid.NewString()
+	if _, err := store.DB.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, active_session_id, retry_count, reason_code, created_at, delivered_at
+		) VALUES
+			(?, ?, ?, 'agent', 'agent-a', 'pending', NULL, 0, 'matched_agent_subscription', ?, NULL),
+			(?, ?, ?, 'agent', 'agent-a', 'in_progress', ?, 0, 'agent_processing', ?, NULL),
+			(?, ?, ?, 'agent', 'agent-a', 'failed', NULL, 1, 'agent_retryable_error', ?, ?),
+			(?, ?, ?, 'agent', 'agent-a', 'failed', NULL, 2, 'retry_exhausted', ?, ?),
+			(?, ?, ?, 'node', 'node-a', 'pending', NULL, 0, 'matched_node_subscription', ?, NULL),
+			(?, ?, ?, 'agent', 'agent-a', 'pending', NULL, 0, 'matched_agent_subscription', ?, NULL)
+	`, uuid.NewString(), runID, agentPending, now,
+		uuid.NewString(), runID, agentInProgress, activeSessionID, now,
+		uuid.NewString(), runID, agentRetryableFailed, now.Add(-5*time.Minute), now.Add(-2*time.Minute),
+		uuid.NewString(), runID, agentExhaustedFailed, now.Add(-5*time.Minute), now.Add(-2*time.Minute),
+		uuid.NewString(), runID, nodePending, now,
+		uuid.NewString(), terminalRunID, terminalRunPending, now); err != nil {
+		t.Fatalf("seed sqlite deliveries: %v", err)
+	}
+
+	result, err := store.ApplyServeAbandonActiveRunQuiescence(ctx, now)
+	if err != nil {
+		t.Fatalf("ApplyServeAbandonActiveRunQuiescence: %v", err)
+	}
+	if result.OperationName != runtimerunquiescence.ServeAbandonOperationName || result.ReasonCode != runtimerunquiescence.ServeAbandonReasonCode || result.ControlledBy != runtimerunquiescence.ServeAbandonControlledBy {
+		t.Fatalf("serve abandon result metadata = %#v", result)
+	}
+	if len(result.Runs) != 2 {
+		t.Fatalf("runs = %#v, want running and paused rows cancelled", result.Runs)
+	}
+	if len(result.Deliveries) != 4 || result.PipelineReceiptCount != 4 {
+		t.Fatalf("deliveries=%d pipeline_receipts=%d, want 4/4", len(result.Deliveries), result.PipelineReceiptCount)
+	}
+	assertSQLiteServeAbandonRun(t, ctx, store, runID)
+	assertSQLiteServeAbandonRun(t, ctx, store, pausedRunID)
+	assertSQLiteServeAbandonDelivery(t, ctx, store, agentPending, "agent", "agent-a")
+	assertSQLiteServeAbandonDelivery(t, ctx, store, agentInProgress, "agent", "agent-a")
+	assertSQLiteServeAbandonDelivery(t, ctx, store, agentRetryableFailed, "agent", "agent-a")
+	assertSQLiteServeAbandonDelivery(t, ctx, store, nodePending, "node", "node-a")
+
+	if err := store.MarkEventDeliveryInProgress(ctx, agentRetryableFailed, "agent-a", uuid.NewString()); err != nil {
+		t.Fatalf("late retryable failed MarkEventDeliveryInProgress: %v", err)
+	}
+	if err := store.UpsertEventReceipt(ctx, agentInProgress, "agent-a", runtimemanager.ReceiptStatusProcessed, ""); err != nil {
+		t.Fatalf("late UpsertEventReceipt: %v", err)
+	}
+	if err := store.UpsertPipelineReceipt(ctx, agentInProgress, "processed", ""); err != nil {
+		t.Fatalf("late UpsertPipelineReceipt: %v", err)
+	}
+	assertSQLiteServeAbandonDelivery(t, ctx, store, agentRetryableFailed, "agent", "agent-a")
+	assertSQLiteServeAbandonReceipt(t, ctx, store, agentInProgress, "agent-a")
+	assertSQLiteServeAbandonReceipt(t, ctx, store, agentInProgress, activeRunQuiescencePipelineSubscriberID)
+
+	replay, err := store.ListEventsMissingPipelineReceiptForRun(ctx, runID, now.Add(-time.Hour), 20)
+	if err != nil {
+		t.Fatalf("ListEventsMissingPipelineReceiptForRun: %v", err)
+	}
+	if len(replay) != 1 || replay[0].Event.ID != agentExhaustedFailed {
+		t.Fatalf("missing pipeline replay events = %#v, want only exhausted failed delivery", replay)
+	}
+	var exhaustedStatus, exhaustedReason string
+	if err := store.DB.QueryRowContext(ctx, `
+		SELECT status, COALESCE(reason_code, '')
+		FROM event_deliveries
+		WHERE event_id = ?
+	`, agentExhaustedFailed).Scan(&exhaustedStatus, &exhaustedReason); err != nil {
+		t.Fatalf("load exhausted failed delivery: %v", err)
+	}
+	if exhaustedStatus != "failed" || exhaustedReason != "retry_exhausted" {
+		t.Fatalf("exhausted failed delivery = %s/%s, want untouched", exhaustedStatus, exhaustedReason)
+	}
+	var terminalDeliveryStatus, terminalDeliveryReason string
+	if err := store.DB.QueryRowContext(ctx, `
+		SELECT status, COALESCE(reason_code, '')
+		FROM event_deliveries
+		WHERE event_id = ?
+	`, terminalRunPending).Scan(&terminalDeliveryStatus, &terminalDeliveryReason); err != nil {
+		t.Fatalf("load terminal run delivery: %v", err)
+	}
+	if terminalDeliveryStatus != "pending" || terminalDeliveryReason != "matched_agent_subscription" {
+		t.Fatalf("terminal run delivery = %s/%s, want untouched", terminalDeliveryStatus, terminalDeliveryReason)
+	}
+}
+
 func TestPostgresStore_ApplyDestructiveResetQuiescence_DryRunDoesNotMutate(t *testing.T) {
 	dsn, _, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
@@ -359,6 +464,72 @@ func assertServeAbandonReceipt(t *testing.T, ctx context.Context, pg *PostgresSt
 	}
 	if outcome != "dead_letter" || reason != runtimerunquiescence.ServeAbandonReasonCode {
 		t.Fatalf("receipt %s/%s = %s/%s, want serve abandon dead_letter", eventID, subscriberID, outcome, reason)
+	}
+}
+
+func seedSQLiteServeAbandonEvent(t *testing.T, ctx context.Context, store *SQLiteRuntimeStore, runID, name string, at time.Time) string {
+	t.Helper()
+	eventID := uuid.NewString()
+	if _, err := store.DB.ExecContext(ctx, `
+		INSERT INTO events (
+			event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at
+		) VALUES (
+			?, ?, ?, 'global', '{}', 'test', 'agent', ?
+		)
+	`, eventID, runID, name, at.UTC()); err != nil {
+		t.Fatalf("seed sqlite event %s: %v", name, err)
+	}
+	return eventID
+}
+
+func assertSQLiteServeAbandonRun(t *testing.T, ctx context.Context, store *SQLiteRuntimeStore, runID string) {
+	t.Helper()
+	var runStatus, controlStatus, reason, controlledBy string
+	if err := store.DB.QueryRowContext(ctx, `
+		SELECT r.status, rc.control_status, COALESCE(rc.reason, ''), COALESCE(rc.controlled_by, '')
+		FROM runs r
+		JOIN run_control_state rc ON rc.run_id = r.run_id
+		WHERE r.run_id = ?
+	`, runID).Scan(&runStatus, &controlStatus, &reason, &controlledBy); err != nil {
+		t.Fatalf("load sqlite run/control state: %v", err)
+	}
+	if runStatus != "cancelled" || controlStatus != "stopped" || reason != runtimerunquiescence.ServeAbandonReasonCode || controlledBy != runtimerunquiescence.ServeAbandonControlledBy {
+		t.Fatalf("sqlite run/control = %s/%s/%s/%s, want cancelled/stopped/%s/%s", runStatus, controlStatus, reason, controlledBy, runtimerunquiescence.ServeAbandonReasonCode, runtimerunquiescence.ServeAbandonControlledBy)
+	}
+}
+
+func assertSQLiteServeAbandonDelivery(t *testing.T, ctx context.Context, store *SQLiteRuntimeStore, eventID, subscriberType, subscriberID string) {
+	t.Helper()
+	var status, reason string
+	var activeSession sql.NullString
+	if err := store.DB.QueryRowContext(ctx, `
+		SELECT status, COALESCE(reason_code, ''), active_session_id
+		FROM event_deliveries
+		WHERE event_id = ?
+		  AND subscriber_type = ?
+		  AND subscriber_id = ?
+	`, eventID, subscriberType, subscriberID).Scan(&status, &reason, &activeSession); err != nil {
+		t.Fatalf("load sqlite delivery %s/%s/%s: %v", eventID, subscriberType, subscriberID, err)
+	}
+	if status != "dead_letter" || reason != runtimerunquiescence.ServeAbandonReasonCode || activeSession.Valid {
+		t.Fatalf("sqlite delivery %s/%s/%s = %s/%s active=%v, want serve abandon dead_letter", eventID, subscriberType, subscriberID, status, reason, activeSession.Valid)
+	}
+	assertSQLiteServeAbandonReceipt(t, ctx, store, eventID, subscriberID)
+}
+
+func assertSQLiteServeAbandonReceipt(t *testing.T, ctx context.Context, store *SQLiteRuntimeStore, eventID, subscriberID string) {
+	t.Helper()
+	var outcome, reason string
+	if err := store.DB.QueryRowContext(ctx, `
+		SELECT outcome, COALESCE(reason_code, '')
+		FROM event_receipts
+		WHERE event_id = ?
+		  AND subscriber_id = ?
+	`, eventID, subscriberID).Scan(&outcome, &reason); err != nil {
+		t.Fatalf("load sqlite receipt %s/%s: %v", eventID, subscriberID, err)
+	}
+	if outcome != "dead_letter" || reason != runtimerunquiescence.ServeAbandonReasonCode {
+		t.Fatalf("sqlite receipt %s/%s = %s/%s, want serve abandon dead_letter", eventID, subscriberID, outcome, reason)
 	}
 }
 

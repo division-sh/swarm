@@ -1,6 +1,9 @@
 package runquiescence
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 const (
 	ServeAbandonOperationName = "swarm.serve.abandon_active_runs"
@@ -29,6 +32,10 @@ type Result struct {
 	Runs                 []QuiescedRun
 	Deliveries           []QuiescedDelivery
 	PipelineReceiptCount int
+}
+
+type ServeAbandonStore interface {
+	ApplyServeAbandonActiveRunQuiescence(context.Context, time.Time) (Result, error)
 }
 
 type QuiescedRun struct {

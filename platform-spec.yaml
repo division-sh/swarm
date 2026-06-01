@@ -2306,6 +2306,21 @@ engine:
       postgres_owner: internal/store.PostgresStore ingress/run-control methods
       excludes:
       - delivery release/abandon and replay behavior owned by #1087
+    - name: serve_active_run_abandon_quiescence_rows
+      owner: runtimerunquiescence.ServeAbandonStore consumed by cmd/swarm serve --abandon-active-runs and --dev
+      promoted_by: '#1251'
+      sqlite_owner: internal/store.SQLiteRuntimeStore.ApplyServeAbandonActiveRunQuiescence
+      postgres_owner: internal/store.PostgresStore.ApplyServeAbandonActiveRunQuiescence
+      scope: >
+        The selected runtime store owns serve-startup active-run abandon quiescence for its backend. Both SQLite local/dev
+        and Postgres production/external backends apply the same `server_restart_abandon` semantics over active runs,
+        same-run recoverable agent/node deliveries, agent/node event receipts, and platform pipeline receipts before
+        runtime startup can reclaim work. `cmd/swarm serve` consumes this typed selected-store owner and must not infer
+        support from raw Postgres handles or skip the operation on SQLite.
+      excludes:
+      - destructive reset/runtime.nuke container and row-deletion semantics
+      - broader startup recovery/replay policy outside the rows explicitly terminalized by serve abandon
+      - production multi-writer SQLite semantics
     - name: api_idempotency_rows
       owner: internal/store API idempotency persistence contract
       sqlite_owner: internal/store.SQLiteRuntimeStore.WithAPIIdempotency
@@ -9102,13 +9117,18 @@ cli_specification:
           mean unknown bundle and do not block startup. `--no-require-bundle-match` disables this admission gate for operator-approved
           recovery/dev workflows.
       active_run_abandon_quiescence:
-        implemented_by: '#808'
+        implemented_by: '#808/#1251'
         flag: --abandon-active-runs
-        owner: internal/runtime/runquiescence plus PostgresStore active-run quiescence owner, consumed by cmd/swarm serve
+        owner: internal/runtime/runquiescence plus selected runtime store active-run quiescence owner, consumed by cmd/swarm serve
         ordering: >
           `swarm serve --abandon-active-runs` applies after platform schema/state-store initialization and before bundle-match
           admission, startup recovery, runtime start, API readiness, or late delivery recovery can reclaim work. Failure to apply
           the quiescence owner is a serve startup failure; serve MUST NOT continue with partial abandon state.
+        backend_ownership: >
+          The selected runtime store implements this owner for its backend: `PostgresStore` for explicit Postgres and
+          `SQLiteRuntimeStore` for the local/dev SQLite default. Serve MUST call the selected owner for both direct
+          `--abandon-active-runs` and `--dev`; it MUST NOT special-case SQLite as a skip/no-op and MUST NOT use raw
+          Postgres handle presence as the capability decision.
         active_run_scope: >
           The owner selects all active source runs with `runs.status` in `running` or `paused`. Each selected run is terminalized
           as `runs.status=cancelled`, with `run_control_state.control_status=stopped`, `reason=server_restart_abandon`, and

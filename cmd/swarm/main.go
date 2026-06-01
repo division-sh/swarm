@@ -46,6 +46,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunforkadmission "github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -147,6 +148,7 @@ type storeBundle struct {
 	IdempotencyStore    apiv1.APIIdempotencyStore
 	TurnStore           runtimellm.TurnPersistence
 	StartupOwnership    runtimestartupownership.Store
+	RunQuiescenceStore  runtimerunquiescence.ServeAbandonStore
 }
 
 type sqlDBPinger struct {
@@ -650,7 +652,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	}
 	reporter.emit(3, "db_connection", "ok", storeSelection.Backend.String())
 	defer closeDB(stores.SQLDB)
-	if stores.Postgres != nil {
+	if stores.SchemaBootstrapper != nil {
 		preCatalogPlatformSpecPath, err := servePreCatalogPlatformSpecPath(resolvedPaths, opts)
 		if err != nil {
 			reporter.emit(4, "bundle_load", "FAILED", err.Error())
@@ -687,7 +689,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	resolvedPlatformSpecPath := loadedBundle.platformSpecPath
 	reporter.emit(4, "bundle_load", "ok", serveBootBundleLoadDetail(serveRuntimeBundleIdentitiesDetail(loadedBundles), source))
 	stateStoreSummaries := make([]string, len(loadedBundles))
-	if stores.Postgres != nil {
+	if stores.SchemaBootstrapper != nil {
 		summaries, err := initializeLoadedServeRuntimeStateStores(ctx, stores, loadedBundles)
 		if err != nil {
 			slog.Error("initialize state stores", "error", err)
@@ -696,11 +698,11 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		stateStoreSummaries = summaries
 	}
 	if opts.AbandonActiveRuns {
-		if stores.Postgres == nil {
-			slog.Error("abandon active runs failed", "error", "postgres store is required")
+		if stores.RunQuiescenceStore == nil {
+			slog.Error("abandon active runs failed", "error", "selected store active-run quiescence owner is required")
 			return 3
 		}
-		result, err := stores.Postgres.ApplyServeAbandonActiveRunQuiescence(ctx, time.Now().UTC())
+		result, err := stores.RunQuiescenceStore.ApplyServeAbandonActiveRunQuiescence(ctx, time.Now().UTC())
 		if err != nil {
 			slog.Error("abandon active runs failed", "error", err)
 			return 3
@@ -2425,6 +2427,7 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 			IdempotencyStore:    pg,
 			TurnStore:           pg,
 			StartupOwnership:    pg,
+			RunQuiescenceStore:  pg,
 		}, nil
 	case storebackend.BackendSQLite:
 		sqliteStore, err := store.NewSQLiteRuntimeStore(selection.SQLitePath)
@@ -2462,6 +2465,7 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 			IdempotencyStore:    sqliteStore,
 			TurnStore:           sqliteStore,
 			StartupOwnership:    sqliteStore,
+			RunQuiescenceStore:  sqliteStore,
 		}, nil
 	default:
 		return storeBundle{}, fmt.Errorf("store backend selection is required; supported backends: %s, %s", storebackend.BackendPostgres, storebackend.BackendSQLite)
