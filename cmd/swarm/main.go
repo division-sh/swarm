@@ -355,6 +355,17 @@ func serveBundleHashes(opts serveOptions) ([]string, error) {
 	return out, nil
 }
 
+func servePreCatalogPlatformSpecPath(resolvedPaths cliContractPlatformSpecPaths, opts serveOptions) (string, error) {
+	hashes, err := serveBundleHashes(opts)
+	if err != nil {
+		return "", err
+	}
+	if len(hashes) > 0 {
+		return embeddedPlatformSpecPath()
+	}
+	return resolvedPaths.PlatformSpecPath, nil
+}
+
 func loadServeRuntimeBundles(ctx context.Context, repo string, stores storeBundle, resolvedPaths cliContractPlatformSpecPaths, opts serveOptions) ([]serveRuntimeBundle, error) {
 	hashes, err := serveBundleHashes(opts)
 	if err != nil {
@@ -641,7 +652,13 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	reporter.emit(3, "db_connection", "ok", storeSelection.Backend.String())
 	defer closeDB(stores.SQLDB)
 	if stores.Postgres != nil {
-		if _, err := initializeServePlatformStateStores(ctx, stores, resolvedPaths.PlatformSpecPath); err != nil {
+		preCatalogPlatformSpecPath, err := servePreCatalogPlatformSpecPath(resolvedPaths, opts)
+		if err != nil {
+			reporter.emit(4, "bundle_load", "FAILED", err.Error())
+			log.Printf("resolve pre-catalog platform spec: %v", err)
+			return 1
+		}
+		if _, err := initializeServePlatformStateStores(ctx, stores, preCatalogPlatformSpecPath); err != nil {
 			reporter.emit(4, "bundle_load", "FAILED", err.Error())
 			log.Printf("initialize platform state stores: %v", err)
 			return 1
