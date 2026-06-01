@@ -499,18 +499,21 @@ func (am *AgentManager) DeactivateFlowInstanceModel(ctx context.Context, req run
 }
 
 func (am *AgentManager) applyTerminalFlowInstanceSideEffects(plan terminalFlowInstanceSideEffectPlan) error {
-	var errs []error
+	var agentErrs []error
 	for _, agentID := range plan.AgentIDs {
 		if err := am.TeardownAgent(agentID); err != nil && !strings.Contains(err.Error(), "not found") {
-			errs = append(errs, fmt.Errorf("teardown flow instance agent %s: %w", agentID, err))
+			agentErrs = append(agentErrs, fmt.Errorf("teardown flow instance agent %s: %w", agentID, err))
 		}
 	}
-	if plan.Remover == nil {
-		errs = append(errs, fmt.Errorf("event bus does not support derived flow-instance route removal for %s", plan.FlowPath))
-	} else if err := plan.Remover.RemoveFlowInstanceRoute(plan.Route); err != nil {
-		errs = append(errs, fmt.Errorf("remove flow instance route %s: %w", plan.FlowPath, err))
+	if len(agentErrs) > 0 {
+		return errors.Join(agentErrs...)
 	}
-	return errors.Join(errs...)
+	if plan.Remover == nil {
+		return fmt.Errorf("event bus does not support derived flow-instance route removal for %s", plan.FlowPath)
+	} else if err := plan.Remover.RemoveFlowInstanceRoute(plan.Route); err != nil {
+		return fmt.Errorf("remove flow instance route %s: %w", plan.FlowPath, err)
+	}
+	return nil
 }
 
 func (am *AgentManager) logTerminalFlowInstanceSideEffectFailure(plan terminalFlowInstanceSideEffectPlan, err error) {
