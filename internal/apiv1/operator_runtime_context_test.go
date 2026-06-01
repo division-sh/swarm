@@ -75,10 +75,20 @@ func TestOperatorRuntimeContextManagerRoutesCreateNewWorkToSelectedBundle(t *tes
 func TestOperatorRuntimeContextManagerRoutesExistingRunByStoredBundle(t *testing.T) {
 	fixture := newOperatorRuntimeContextFixture(t)
 	handler := fixture.handler(t)
+	chSelected := fixture.busB.Subscribe("scan-orchestrator", events.EventType("triage.requested"))
+	defer fixture.busB.Unsubscribe("scan-orchestrator")
 	runID := uuid.NewString()
 	started := rpcCall(t, handler, runStartBodyWithBundleHash(runID, runtimeContextTestBundleHashB, "triage.requested", `{"topic":"seed-existing"}`, "idem-existing-seed"))
 	if started.Error != nil {
 		t.Fatalf("seed run.start error = %#v", started.Error)
+	}
+	select {
+	case got := <-chSelected:
+		if got.RunID != runID {
+			t.Fatalf("seed existing-run delivery run = %s, want %s", got.RunID, runID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for seed existing-run delivery")
 	}
 
 	body := fmt.Sprintf(
@@ -89,10 +99,23 @@ func TestOperatorRuntimeContextManagerRoutesExistingRunByStoredBundle(t *testing
 	if resp.Error != nil {
 		t.Fatalf("event.publish existing run error = %#v", resp.Error)
 	}
+	result := asMap(t, resp.Result)
+	eventID := stringValue(t, result["event_id"], "event_id")
+	if got := len(asSlice(t, result["deliveries"])); got != 1 {
+		t.Fatalf("event.publish existing run deliveries = %d, want 1", got)
+	}
 	if got := countEventRowsByRunID(t, fixture.db, runID); got != 2 {
 		t.Fatalf("event rows for existing run = %d, want 2", got)
 	}
 	assertRunBundleIdentity(t, fixture.db, runID, runtimeContextTestBundleHashB, storerunlifecycle.BundleSourcePersisted, "")
+	select {
+	case got := <-chSelected:
+		if got.ID != eventID || got.RunID != runID {
+			t.Fatalf("existing-run delivery id/run = %s/%s, want %s/%s", got.ID, got.RunID, eventID, runID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for existing-run selected-context delivery")
+	}
 }
 
 func TestOperatorRuntimeContextManagerRejectsExistingRunUnavailableSourceStates(t *testing.T) {

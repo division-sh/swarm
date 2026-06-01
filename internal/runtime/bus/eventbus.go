@@ -58,6 +58,8 @@ type PublishRecipientPlan struct {
 	PersistedRecipients    []string
 	RoutedRecipients       []PublishDiagnosticRecipient
 	SubscriptionRecipients []string
+	DeliveryRoutes         []events.DeliveryRoute
+	TargetFailure          string
 }
 
 type DirectRecipientStatus struct {

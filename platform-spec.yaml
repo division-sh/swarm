@@ -9974,7 +9974,12 @@ cli_specification:
         names are server-owned contract references: the CLI sends the caller string unchanged, and /v1/rpc event.publish
         resolves valid flow_id/local_event or flow-path/local-event references through the loaded contract catalog before
         declaration validation, payload validation, EventBus publish, and idempotency completion persistence. Unknown
-        flow/event combinations and ambiguous unscoped leaf names fail closed with EVENT_NOT_DECLARED.
+        flow/event combinations and ambiguous unscoped leaf names fail closed with EVENT_NOT_DECLARED. When --run-id selects
+        an existing run, the server preflights the selected runtime EventBus recipient plan and rejects declared-but-unroutable
+        follow-up events before event/idempotency persistence; the CLI must render that server EVENT_NOT_DECLARED rejection
+        rather than reporting a successful publish with zero deliveries. Caller-supplied payload.entity_id is not target or
+        entity authority. If the selected handler uses create_entity, /v1/rpc event.publish rejects payload.entity_id with
+        PAYLOAD_VALIDATION_FAILED because create_entity mints the platform entity identity.
       flags:
       - name: --payload-json <json-object>
         required: true
@@ -10024,6 +10029,8 @@ cli_specification:
       proof_expectations:
       - exact /v1/rpc event.publish call with event_name, required payload, optional run_id, optional source_event_id, optional canonical bundle_hash or deprecated legacy bundle_ref.fingerprint, optional emitter, and optional idempotency_key params only; missing create-new-work bundle scope maps to server BUNDLE_SCOPE_REQUIRED and valid non-routable hashes map to BUNDLE_UNAVAILABLE
       - flow-scoped event names are passed through exactly by the CLI and resolved only by the server-owned /v1/rpc event.publish contract-catalog resolver; unknown scoped references and ambiguous unscoped leaf names produce EVENT_NOT_DECLARED without mutation or idempotency completion
+      - existing-run follow-up publish with no selected persisted delivery recipient or delivery route produces server EVENT_NOT_DECLARED before event/idempotency persistence; the CLI exits through publish_rejected and never reports deliveries=0 as success for that path
+      - payload.entity_id on a create_entity event produces server PAYLOAD_VALIDATION_FAILED before event/idempotency persistence; the CLI exits through publish_rejected and does not treat payload.entity_id as target/entity routing authority
       - missing/blank event name, invalid or non-object --payload-json, blank optional flags, malformed bundle_hash, malformed bundle fingerprint, both bundle identity flags together, invalid args, and missing explicit token for non-loopback API targets make zero API calls
       - success output renders only server-owned EventPublishResult event_id, run_id, source_event_id when present, new_run_created, and delivery rows
       - RUN_NOT_FOUND, EVENT_NOT_FOUND, publish rejection errors, auth/HTTP/RPC failures, and malformed EventPublishResult values fail closed with tested exit codes
@@ -14345,7 +14352,11 @@ api_specification:
       description: "Canonical low-level event publication and workflow-creation primitive.\nPublishes one declared event into\
         \ the runtime bus. If run_id is omitted,\nthe server allocates a new run_id, persists the event as that run's\ntrigger,\
         \ and returns new_run_created=true. If run_id is provided,\nit must identify an existing nonterminal run; missing\
-        \ or terminal\nruns fail closed with RUN_NOT_FOUND or RUN_ALREADY_TERMINAL.\n\nCheckpoint/source-authority policy:\
+        \ or terminal\nruns fail closed with RUN_NOT_FOUND or RUN_ALREADY_TERMINAL. Existing-run publication must preflight\
+        \ the selected runtime EventBus recipient plan before event/idempotency persistence. A declared event with no selected\
+        \ persisted delivery recipient or delivery route for that run fails closed with EVENT_NOT_DECLARED and must not return\
+        \ success with deliveries=0. Target resolution failures in the selected plan also fail closed with EVENT_NOT_DECLARED.\
+        \ The API must not infer an entity target from run_id or payload.entity_id.\n\nCheckpoint/source-authority policy:\
         \ callers that need causal proof\nMUST provide source_event_id together with run_id. The source event\nmust exist\
         \ in the same run_id and the server persists it as\nevents.source_event_id / ParentEventID. Omitted source_event_id\n\
         means the published event is unparented; it is valid low-level\ningress but MUST NOT be presented as proof that an\
@@ -14358,7 +14369,11 @@ api_specification:
         \ name or a flow-scoped reference such as `flow_id/local_event` or `flow-path/local-event`. The server resolves\
         \ flow-scoped references through the loaded contract catalog before declaration validation, payload validation,\
         \ EventBus publish, and idempotency completion persistence. Unknown flow/event combinations and ambiguous unscoped\
-        \ leaf names fail closed with EVENT_NOT_DECLARED and no mutation.\n"
+        \ leaf names fail closed with EVENT_NOT_DECLARED and no mutation.\n\nCreate-entity ownership: handler create_entity\
+        \ is the only authority that mints a new entity identity. Caller-supplied payload.entity_id on an event whose selected\
+        \ handler declares create_entity fails closed with PAYLOAD_VALIDATION_FAILED before event/idempotency persistence.\
+        \ select_entity/select_or_create_entity use their declared payload-key bindings only; payload.entity_id is not target\
+        \ or stateful-context authority.\n"
       scope:
         required:
         - write:runs
@@ -14396,6 +14411,10 @@ api_specification:
           type: string
       - name: payload
         required: true
+        description: >-
+          JSON object business payload. payload.entity_id is not an event envelope, target, or stateful-context authority.
+          If the selected handler uses create_entity, caller-supplied payload.entity_id fails closed with PAYLOAD_VALIDATION_FAILED
+          because the handler mints the platform entity identity.
         schema:
           type: object
           additionalProperties: true
