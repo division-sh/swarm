@@ -1896,6 +1896,129 @@ func TestPlatformSpecWorkspaceBackendSelectionPromoted(t *testing.T) {
 	}
 }
 
+func TestPlatformSpecWorkspaceExecutionTargetCapabilityPromoted(t *testing.T) {
+	var spec struct {
+		WorkspaceModel struct {
+			WorkspaceExecutionTargetCapability struct {
+				PromotedBy           string `yaml:"promoted_by"`
+				ImplementationStatus string `yaml:"implementation_status"`
+				CanonicalOwner       string `yaml:"canonical_owner"`
+				Scope                string `yaml:"scope"`
+				ImplementationOwner  string `yaml:"implementation_owner"`
+				TargetModes          map[string]struct {
+					Rule         string   `yaml:"rule"`
+					Capabilities []string `yaml:"capabilities"`
+				} `yaml:"target_modes"`
+				LogicalMountAuthority struct {
+					Writable []string `yaml:"writable"`
+					ReadOnly []string `yaml:"read_only"`
+					Rules    []string `yaml:"rules"`
+				} `yaml:"logical_mount_authority"`
+				Consumers                           []string `yaml:"consumers"`
+				RetiredNonAuthoritativeInterpreters []string `yaml:"retired_non_authoritative_interpreters"`
+				FailureBehavior                     []string `yaml:"failure_behavior"`
+				SplitScope                          []string `yaml:"split_scope"`
+			} `yaml:"workspace_execution_target_capability"`
+		} `yaml:"workspace_model"`
+		CLISpecification struct {
+			CommandCatalog struct {
+				Serve struct {
+					WorkspaceExecutionTargetCapability struct {
+						PromotedBy string   `yaml:"promoted_by"`
+						Owner      string   `yaml:"owner"`
+						Rule       string   `yaml:"rule"`
+						Consumers  []string `yaml:"consumers"`
+					} `yaml:"workspace_execution_target_capability"`
+				} `yaml:"serve"`
+			} `yaml:"command_catalog"`
+		} `yaml:"cli_specification"`
+	}
+	data, err := os.ReadFile(filepath.Join(repoRoot(), defaultPlatformSpecPath))
+	if err != nil {
+		t.Fatalf("read platform spec: %v", err)
+	}
+	if err := yaml.Unmarshal(data, &spec); err != nil {
+		t.Fatalf("parse platform spec: %v", err)
+	}
+	authority := spec.WorkspaceModel.WorkspaceExecutionTargetCapability
+	if strings.TrimSpace(authority.PromotedBy) != "#1213" || strings.TrimSpace(authority.ImplementationStatus) != "implemented_first_slice" {
+		t.Fatalf("workspace execution target authority status = promoted_by:%q implementation_status:%q", authority.PromotedBy, authority.ImplementationStatus)
+	}
+	if !strings.Contains(authority.CanonicalOwner, "workspace_model.workspace_execution_target_capability") || !strings.Contains(authority.ImplementationOwner, "internal/runtime/workspace.ExecutionTarget") {
+		t.Fatalf("workspace execution target owners = canonical:%q implementation:%q", authority.CanonicalOwner, authority.ImplementationOwner)
+	}
+	for _, want := range []string{"Docker container execution", "explicit host-local targets", "unsupported targets", "does not enable host native tools"} {
+		if !strings.Contains(authority.Scope, want) {
+			t.Fatalf("workspace execution target scope missing %q:\n%s", want, authority.Scope)
+		}
+	}
+	dockerMode := authority.TargetModes[string(workspace.ExecutionModeDockerContainer)]
+	for _, want := range []string{
+		string(workspace.ExecutionCapabilityNativeCommand),
+		string(workspace.ExecutionCapabilityFileRead),
+		string(workspace.ExecutionCapabilityFileWrite),
+		string(workspace.ExecutionCapabilityToolResultRelay),
+		string(workspace.ExecutionCapabilityClaudeCLI),
+	} {
+		if !stringSliceContains(dockerMode.Capabilities, want) {
+			t.Fatalf("docker execution capabilities missing %q: %#v", want, dockerMode.Capabilities)
+		}
+	}
+	hostMode := authority.TargetModes[string(workspace.ExecutionModeHostLocal)]
+	if !strings.Contains(hostMode.Rule, "MUST NOT infer execution support from an empty container") || len(hostMode.Capabilities) != 0 {
+		t.Fatalf("host execution mode = %#v, want explicit unsupported first slice", hostMode)
+	}
+	unsupportedMode := authority.TargetModes[string(workspace.ExecutionModeUnsupported)]
+	if !strings.Contains(unsupportedMode.Rule, "process cwd") || len(unsupportedMode.Capabilities) != 0 {
+		t.Fatalf("unsupported execution mode = %#v, want fail-closed no fallback", unsupportedMode)
+	}
+	if !stringSliceContains(authority.LogicalMountAuthority.Writable, workspace.LogicalWorkspaceMount) {
+		t.Fatalf("logical writable mounts = %#v, want %s", authority.LogicalMountAuthority.Writable, workspace.LogicalWorkspaceMount)
+	}
+	for _, want := range []string{workspace.LogicalDataMount, workspace.LogicalContractsMount} {
+		if !stringSliceContains(authority.LogicalMountAuthority.ReadOnly, want) {
+			t.Fatalf("logical read-only mounts missing %q: %#v", want, authority.LogicalMountAuthority.ReadOnly)
+		}
+	}
+	for _, want := range []string{"Relative execution paths", "Writes outside logical `/workspace`", "MUST NOT leak raw host backing paths", "data_source_authority"} {
+		if !joinedContains(authority.LogicalMountAuthority.Rules, want) {
+			t.Fatalf("logical mount authority rules missing %q: %#v", want, authority.LogicalMountAuthority.Rules)
+		}
+	}
+	for _, want := range []string{"Host workspace target production", "native executor command", "native fallback tool definitions", "OpenAI-compatible/API fallback-tool routing", "tool-result relay", "Claude CLI process", "runtime Claude managed-agent startup"} {
+		if !joinedContains(authority.Consumers, want) {
+			t.Fatalf("workspace execution target consumers missing %q: %#v", want, authority.Consumers)
+		}
+	}
+	for _, want := range []string{"Target.Container", "Target.Enabled()", "raw Target.Workdir", "cwd fallback", "HostBackend()"} {
+		if !joinedContains(authority.RetiredNonAuthoritativeInterpreters, want) {
+			t.Fatalf("retired interpreters missing %q: %#v", want, authority.RetiredNonAuthoritativeInterpreters)
+		}
+	}
+	for _, want := range []string{"Host-local targets remain fail closed", "Empty-container targets", "Docker behavior"} {
+		if !joinedContains(authority.FailureBehavior, want) {
+			t.Fatalf("failure behavior missing %q: %#v", want, authority.FailureBehavior)
+		}
+	}
+	for _, want := range []string{"host native file", "host native bash", "host tool-result relay", "Claude CLI", "#1137"} {
+		if !joinedContains(authority.SplitScope, want) {
+			t.Fatalf("split scope missing %q: %#v", want, authority.SplitScope)
+		}
+	}
+	command := spec.CLISpecification.CommandCatalog.Serve.WorkspaceExecutionTargetCapability
+	if command.PromotedBy != "#1213" || command.Owner != "workspace_model.workspace_execution_target_capability" {
+		t.Fatalf("serve command workspace execution authority = %#v", command)
+	}
+	if !strings.Contains(command.Rule, "Host-local targets remain explicit and fail closed") {
+		t.Fatalf("serve command workspace execution rule = %q", command.Rule)
+	}
+	for _, want := range []string{"native executor", "fallback-tool routing", "tool-result relay", "Claude CLI"} {
+		if !joinedContains(command.Consumers, want) {
+			t.Fatalf("serve command workspace execution consumers missing %q: %#v", want, command.Consumers)
+		}
+	}
+}
+
 func TestPlatformSpecInstalledBinaryPortabilityPromoted(t *testing.T) {
 	var spec struct {
 		CLISpecification struct {

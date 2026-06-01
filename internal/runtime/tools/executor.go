@@ -48,6 +48,7 @@ type Executor struct {
 	validator                      *ToolInputValidator
 	dispatcher                     *ToolDispatcher
 	allowInternalLegacyEntityTools bool
+	execWorkspaceFn                func(ctx context.Context, target workspace.ExecutionTarget, timeout time.Duration, stdin string, args ...string) ([]byte, []byte, int, error)
 	oneShotMu                      sync.Mutex
 	oneShotEmits                   map[string]struct{}
 }
@@ -224,7 +225,7 @@ func (e *Executor) ToolDefinitionsForActorInContext(ctx context.Context, actor m
 	defs := e.ToolDefinitionsForActor(actor)
 	roleScopedNames := e.RoleScopedEntityToolNamesForActor(actor)
 	if len(roleScopedNames) == 0 || e.roleScopedEntityToolsEligibleForCurrentTurn(ctx, actor) {
-		return defs
+		return e.filterNativeDefinitionsForWorkspaceExecution(ctx, actor, defs)
 	}
 	filtered := make([]llm.ToolDefinition, 0, len(defs))
 	for _, def := range defs {
@@ -233,7 +234,7 @@ func (e *Executor) ToolDefinitionsForActorInContext(ctx context.Context, actor m
 		}
 		filtered = append(filtered, def)
 	}
-	return filtered
+	return e.filterNativeDefinitionsForWorkspaceExecution(ctx, actor, filtered)
 }
 
 func (e *Executor) ToolCapabilitiesForActor(actor models.AgentConfig, names []string, requestAllowed map[string]struct{}) toolcapabilities.Set {
@@ -277,15 +278,17 @@ func (e *Executor) ToolCapabilitiesForActor(actor models.AgentConfig, names []st
 func (e *Executor) ToolCapabilitiesForActorInContext(ctx context.Context, actor models.AgentConfig, names []string, requestAllowed map[string]struct{}) toolcapabilities.Set {
 	set := e.ToolCapabilitiesForActor(actor, names, requestAllowed)
 	roleScopedNames := e.RoleScopedEntityToolNamesForActor(actor)
-	if len(roleScopedNames) == 0 || e.roleScopedEntityToolsEligibleForCurrentTurn(ctx, actor) {
-		return set
-	}
 	caps := make([]toolcapabilities.Capability, 0, len(set.ByName))
 	for name, cap := range set.ByName {
-		if _, ok := roleScopedNames[name]; ok {
-			cap.Visible = false
-			cap.Callable = false
-			cap.DenialReason = "current_entity_contract_unavailable"
+		if len(roleScopedNames) > 0 && !e.roleScopedEntityToolsEligibleForCurrentTurn(ctx, actor) {
+			if _, ok := roleScopedNames[name]; ok {
+				cap.Visible = false
+				cap.Callable = false
+				cap.DenialReason = "current_entity_contract_unavailable"
+			}
+		}
+		if cap.Visible || cap.Callable {
+			cap = e.applyWorkspaceExecutionDecision(ctx, actor, cap)
 		}
 		caps = append(caps, cap)
 	}

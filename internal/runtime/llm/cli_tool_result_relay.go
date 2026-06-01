@@ -34,10 +34,6 @@ func (r *ClaudeCLIRuntime) PersistOversizedToolResultRelay(ctx context.Context, 
 }
 
 func relayWorkspacePath(target *workspace.Target, session *Session, toolName string) string {
-	base := strings.TrimSpace(target.Workdir)
-	if base == "" {
-		base = "/workspace"
-	}
 	sessionID := "session"
 	if session != nil && strings.TrimSpace(session.ID) != "" {
 		sessionID = sanitizeRelayPathComponent(session.ID)
@@ -47,7 +43,11 @@ func relayWorkspacePath(target *workspace.Target, session *Session, toolName str
 		name = "tool"
 	}
 	filename := fmt.Sprintf("%s-%d.json", name, time.Now().UnixNano())
-	return path.Join(base, workspaceToolResultRelayDir, sessionID, filename)
+	relayPath, err := target.ExecutionTarget().WorkspacePath(path.Join(workspaceToolResultRelayDir, sessionID, filename))
+	if err != nil {
+		return path.Join(workspace.LogicalWorkspaceMount, workspaceToolResultRelayDir, sessionID, filename)
+	}
+	return relayPath
 }
 
 func sanitizeRelayPathComponent(raw string) string {
@@ -89,27 +89,28 @@ func (r *ClaudeCLIRuntime) writeWorkspaceRelayFile(ctx context.Context, target *
 }
 
 func (r *ClaudeCLIRuntime) runWorkspaceCommand(ctx context.Context, target *workspace.Target, stdin string, args ...string) ([]byte, []byte, int, error) {
-	if r != nil && r.execWorkspaceFn != nil {
-		return r.execWorkspaceFn(ctx, target, stdin, args...)
-	}
-	if target != nil && target.HostBackend() {
-		return nil, nil, 0, errClaudeHostWorkspaceUnsupported()
-	}
-	if target == nil || !target.Enabled() {
-		return nil, nil, 0, fmt.Errorf("%w: claude sessions must run in a container workspace", ErrClaudeWorkspaceRequired)
+	execTarget := target.ExecutionTarget()
+	if err := execTarget.Require(workspace.ExecutionCapabilityToolResultRelay); err != nil {
+		if strings.EqualFold(strings.TrimSpace(execTarget.Backend), workspace.BackendHost) {
+			return nil, nil, 0, errClaudeHostWorkspaceUnsupported()
+		}
+		return nil, nil, 0, fmt.Errorf("%w: %s", ErrClaudeWorkspaceRequired, err.Error())
 	}
 	if len(args) == 0 {
 		return nil, nil, 0, fmt.Errorf("workspace command args are required")
+	}
+	if r != nil && r.execWorkspaceFn != nil {
+		return r.execWorkspaceFn(ctx, target, stdin, args...)
 	}
 	dockerBin := strings.TrimSpace(os.Getenv("SWARM_DOCKER_BIN"))
 	if dockerBin == "" {
 		dockerBin = "docker"
 	}
 	dockerArgs := []string{"exec", "-i"}
-	if strings.TrimSpace(target.Workdir) != "" {
-		dockerArgs = append(dockerArgs, "-w", target.Workdir)
+	if strings.TrimSpace(execTarget.Workdir) != "" {
+		dockerArgs = append(dockerArgs, "-w", execTarget.Workdir)
 	}
-	dockerArgs = append(dockerArgs, strings.TrimSpace(target.Container))
+	dockerArgs = append(dockerArgs, strings.TrimSpace(execTarget.Container))
 	dockerArgs = append(dockerArgs, args...)
 	cmd := exec.CommandContext(ctx, dockerBin, dockerArgs...)
 	var stdout bytes.Buffer

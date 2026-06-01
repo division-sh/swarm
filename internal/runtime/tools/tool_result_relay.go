@@ -33,7 +33,14 @@ func (e *Executor) PersistOversizedToolResultRelay(ctx context.Context, toolName
 	if relay, ok, err := e.persistChunkedReadFileRelay(ctx, target, actor, toolName, rawJSON); ok {
 		return relay, err
 	}
-	relayPath := toolResultRelayPath(target, actor, toolName)
+	execTarget := target.ExecutionTarget()
+	if err := execTarget.Require(workspace.ExecutionCapabilityToolResultRelay); err != nil {
+		return runtimemcp.ToolResultRelayRef{}, err
+	}
+	relayPath, err := toolResultRelayPath(execTarget, actor, toolName)
+	if err != nil {
+		return runtimemcp.ToolResultRelayRef{}, err
+	}
 	_, stderr, exitCode, execErr := e.runWorkspaceCommand(ctx, target, 30*time.Second, string(rawJSON), "sh", "-lc", `mkdir -p -- "$(dirname -- "$1")" && cat > "$1"`, "swarm-tool-result-relay", relayPath)
 	if execErr != nil || exitCode != 0 {
 		msg := strings.TrimSpace(string(stderr))
@@ -57,6 +64,10 @@ func (e *Executor) persistChunkedReadFileRelay(ctx context.Context, target *work
 	if strings.TrimSpace(toolName) != "read_file" {
 		return runtimemcp.ToolResultRelayRef{}, false, nil
 	}
+	execTarget := target.ExecutionTarget()
+	if err := execTarget.Require(workspace.ExecutionCapabilityToolResultRelay); err != nil {
+		return runtimemcp.ToolResultRelayRef{}, true, err
+	}
 	var payload readFileRelayPayload
 	if err := json.Unmarshal(rawJSON, &payload); err != nil {
 		return runtimemcp.ToolResultRelayRef{}, false, nil
@@ -70,7 +81,10 @@ func (e *Executor) persistChunkedReadFileRelay(ctx context.Context, target *work
 	}
 	relayPaths := make([]string, 0, len(chunks))
 	for idx, chunk := range chunks {
-		relayPath := toolResultRelayChunkPath(target, actor, toolName, idx)
+		relayPath, err := toolResultRelayChunkPath(execTarget, actor, toolName, idx)
+		if err != nil {
+			return runtimemcp.ToolResultRelayRef{}, true, err
+		}
 		_, stderr, exitCode, execErr := e.runWorkspaceCommand(ctx, target, 30*time.Second, chunk, "sh", "-lc", `mkdir -p -- "$(dirname -- "$1")" && cat > "$1"`, "swarm-tool-result-relay", relayPath)
 		if execErr != nil || exitCode != 0 {
 			msg := strings.TrimSpace(string(stderr))
@@ -92,11 +106,7 @@ func (e *Executor) persistChunkedReadFileRelay(ctx context.Context, target *work
 	}, true, nil
 }
 
-func toolResultRelayPath(target *workspace.Target, actor models.AgentConfig, toolName string) string {
-	base := "/workspace"
-	if target != nil && strings.TrimSpace(target.Workdir) != "" {
-		base = strings.TrimSpace(target.Workdir)
-	}
+func toolResultRelayPath(target workspace.ExecutionTarget, actor models.AgentConfig, toolName string) (string, error) {
 	owner := sanitizeToolResultRelayPathComponent(actor.EffectiveEntityID())
 	if owner == "" {
 		owner = sanitizeToolResultRelayPathComponent(actor.ID)
@@ -109,14 +119,10 @@ func toolResultRelayPath(target *workspace.Target, actor models.AgentConfig, too
 		name = "tool"
 	}
 	filename := fmt.Sprintf("%s-%d.json", name, time.Now().UnixNano())
-	return path.Join(base, workspaceToolResultRelayDir, owner, filename)
+	return target.WorkspacePath(path.Join(workspaceToolResultRelayDir, owner, filename))
 }
 
-func toolResultRelayChunkPath(target *workspace.Target, actor models.AgentConfig, toolName string, idx int) string {
-	base := "/workspace"
-	if target != nil && strings.TrimSpace(target.Workdir) != "" {
-		base = strings.TrimSpace(target.Workdir)
-	}
+func toolResultRelayChunkPath(target workspace.ExecutionTarget, actor models.AgentConfig, toolName string, idx int) (string, error) {
 	owner := sanitizeToolResultRelayPathComponent(actor.EffectiveEntityID())
 	if owner == "" {
 		owner = sanitizeToolResultRelayPathComponent(actor.ID)
@@ -129,7 +135,7 @@ func toolResultRelayChunkPath(target *workspace.Target, actor models.AgentConfig
 		name = "tool"
 	}
 	filename := fmt.Sprintf("%s-chunk-%03d-%d.txt", name, idx+1, time.Now().UnixNano())
-	return path.Join(base, workspaceToolResultRelayDir, owner, filename)
+	return target.WorkspacePath(path.Join(workspaceToolResultRelayDir, owner, filename))
 }
 
 func sanitizeToolResultRelayPathComponent(raw string) string {

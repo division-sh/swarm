@@ -10,7 +10,6 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -88,6 +87,9 @@ func (e *Executor) execNativeReadFile(ctx context.Context, actor models.AgentCon
 	if err != nil {
 		return nil, err
 	}
+	if err := target.ExecutionTarget().Require(workspace.ExecutionCapabilityFileRead); err != nil {
+		return nil, err
+	}
 	path, err := resolveNativeReadPath(target, in.Path)
 	if err != nil {
 		return nil, err
@@ -109,6 +111,9 @@ func (e *Executor) execNativeWriteFile(ctx context.Context, actor models.AgentCo
 	}
 	target, err := e.resolveNativeWorkspace(ctx, actor)
 	if err != nil {
+		return nil, err
+	}
+	if err := target.ExecutionTarget().Require(workspace.ExecutionCapabilityFileWrite); err != nil {
 		return nil, err
 	}
 	path, err := resolveNativeWritePath(target, in.Path)
@@ -299,27 +304,32 @@ func (e *Executor) resolveNativeWorkspace(ctx context.Context, actor models.Agen
 func (e *Executor) runWorkspaceCommand(ctx context.Context, target *workspace.Target, timeout time.Duration, stdin string, args ...string) ([]byte, []byte, int, error) {
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	if target != nil && target.HostBackend() {
-		return nil, nil, -1, fmt.Errorf("host workspace backend does not support native tool execution yet")
+	execTarget := target.ExecutionTarget()
+	if err := execTarget.Require(workspace.ExecutionCapabilityNativeCommand); err != nil {
+		return nil, nil, -1, err
+	}
+	if len(args) == 0 {
+		return nil, nil, -1, fmt.Errorf("workspace command args are required")
+	}
+	if e != nil && e.execWorkspaceFn != nil {
+		return e.execWorkspaceFn(runCtx, execTarget, timeout, stdin, args...)
 	}
 	var cmd *exec.Cmd
-	if target != nil && target.Enabled() {
+	switch execTarget.Mode {
+	case workspace.ExecutionModeDockerContainer:
 		dockerBin := strings.TrimSpace(os.Getenv("SWARM_DOCKER_BIN"))
 		if dockerBin == "" {
 			dockerBin = "docker"
 		}
 		dockerArgs := []string{"exec", "-i"}
-		if workdir := strings.TrimSpace(target.Workdir); workdir != "" {
+		if workdir := strings.TrimSpace(execTarget.Workdir); workdir != "" {
 			dockerArgs = append(dockerArgs, "-w", workdir)
 		}
-		dockerArgs = append(dockerArgs, strings.TrimSpace(target.Container))
+		dockerArgs = append(dockerArgs, strings.TrimSpace(execTarget.Container))
 		dockerArgs = append(dockerArgs, args...)
 		cmd = exec.CommandContext(runCtx, dockerBin, dockerArgs...)
-	} else {
-		cmd = exec.CommandContext(runCtx, args[0], args[1:]...)
-		if target != nil && strings.TrimSpace(target.Workdir) != "" {
-			cmd.Dir = strings.TrimSpace(target.Workdir)
-		}
+	default:
+		return nil, nil, -1, fmt.Errorf("%s", execTarget.UnsupportedMessage(workspace.ExecutionCapabilityNativeCommand))
 	}
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -343,67 +353,11 @@ func (e *Executor) runWorkspaceCommand(ctx context.Context, target *workspace.Ta
 }
 
 func resolveNativeReadPath(target *workspace.Target, raw string) (string, error) {
-	return resolveNativePath(target, raw, false)
+	return target.ExecutionTarget().ResolvePath(raw, workspace.PathAccessRead)
 }
 
 func resolveNativeWritePath(target *workspace.Target, raw string) (string, error) {
-	return resolveNativePath(target, raw, true)
-}
-
-func resolveNativePath(target *workspace.Target, raw string, write bool) (string, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return "", fmt.Errorf("path is required")
-	}
-	base := nativeWorkspaceBase(target)
-	if target != nil && target.Enabled() {
-		base = "/workspace"
-	}
-	clean := filepath.Clean(raw)
-	if !filepath.IsAbs(clean) {
-		clean = filepath.Join(base, clean)
-	}
-	clean = filepath.Clean(clean)
-	allowed := []string{base}
-	if target != nil && target.Enabled() {
-		if write {
-			allowed = []string{"/workspace"}
-		} else {
-			allowed = []string{"/workspace", "/data", "/opt/swarm/contracts"}
-		}
-	}
-	for _, root := range allowed {
-		if pathWithinRoot(clean, root) {
-			return clean, nil
-		}
-	}
-	if write {
-		return "", fmt.Errorf("write_file path %s is outside the writable workspace", raw)
-	}
-	return "", fmt.Errorf("read_file path %s is outside the allowed workspace mounts", raw)
-}
-
-func nativeWorkspaceBase(target *workspace.Target) string {
-	if target != nil && strings.TrimSpace(target.Workdir) != "" {
-		return strings.TrimSpace(target.Workdir)
-	}
-	if cwd, err := os.Getwd(); err == nil && strings.TrimSpace(cwd) != "" {
-		return cwd
-	}
-	return "/workspace"
-}
-
-func pathWithinRoot(pathValue, root string) bool {
-	pathValue = filepath.Clean(strings.TrimSpace(pathValue))
-	root = filepath.Clean(strings.TrimSpace(root))
-	if pathValue == "" || root == "" {
-		return false
-	}
-	rel, err := filepath.Rel(root, pathValue)
-	if err != nil {
-		return false
-	}
-	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+	return target.ExecutionTarget().ResolvePath(raw, workspace.PathAccessWrite)
 }
 
 func (e *Executor) resolveWebSearchProviderConfig() (webSearchProviderConfig, error) {

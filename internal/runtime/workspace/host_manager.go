@@ -219,7 +219,24 @@ func (m *HostManager) hostTarget(rel string) (*Target, error) {
 	return &Target{
 		Workdir: workdir,
 		Backend: BackendHost,
+		Mounts:  m.hostExecutionMounts(workdir),
 	}, nil
+}
+
+func (m *HostManager) hostExecutionMounts(workdir string) []ExecutionMount {
+	dataMount := strings.TrimSpace(m.cfg.DataMountPoint)
+	if dataMount == "" {
+		dataMount = LogicalDataMount
+	}
+	contractsMount := strings.TrimSpace(m.cfg.ContractsMountPoint)
+	if contractsMount == "" {
+		contractsMount = LogicalContractsMount
+	}
+	return []ExecutionMount{
+		{LogicalPath: LogicalWorkspaceMount, HostPath: strings.TrimSpace(workdir), Access: MountAccessReadWrite},
+		{LogicalPath: dataMount, HostPath: strings.TrimSpace(m.cfg.SharedDataSource), Access: MountAccessReadOnly},
+		{LogicalPath: contractsMount, HostPath: strings.TrimSpace(m.cfg.ContractsSource), Access: MountAccessReadOnly},
+	}
 }
 
 func (m *HostManager) ensureHostWorkspaceDir(rel string) (string, error) {

@@ -25,6 +25,7 @@ type Target struct {
 	Container string
 	Workdir   string
 	Backend   string
+	Mounts    []ExecutionMount
 }
 
 func (t *Target) Enabled() bool {
@@ -491,6 +492,7 @@ func (m *DockerManager) ResolveWorkspace(ctx context.Context, actor models.Agent
 			Container: m.cfg.ScaffoldContainer,
 			Workdir:   m.cfg.ScaffoldWorkdir,
 			Backend:   BackendDocker,
+			Mounts:    dockerExecutionMounts(m.cfg),
 		}, nil
 	case "system":
 		if err := m.EnsureContainerRunningWithIdentity(ctx, m.cfg.SystemContainer, m.systemContainerIdentity("workspace.ResolveWorkspace", runtimecontaineridentity.KindSystem), []string{
@@ -508,6 +510,7 @@ func (m *DockerManager) ResolveWorkspace(ctx context.Context, actor models.Agent
 			Container: m.cfg.SystemContainer,
 			Workdir:   m.cfg.SystemWorkdir,
 			Backend:   BackendDocker,
+			Mounts:    dockerExecutionMounts(m.cfg),
 		}, nil
 	}
 	scope, scopeKey, err := m.workspaceScopeForActor(actor)
@@ -532,7 +535,24 @@ func (m *DockerManager) ResolveWorkspace(ctx context.Context, actor models.Agent
 		Container: container,
 		Workdir:   m.cfg.EntityWorkdir,
 		Backend:   BackendDocker,
+		Mounts:    dockerExecutionMounts(m.cfg),
 	}, nil
+}
+
+func dockerExecutionMounts(cfg DockerConfig) []ExecutionMount {
+	dataMount := strings.TrimSpace(cfg.DataMountPoint)
+	if dataMount == "" {
+		dataMount = LogicalDataMount
+	}
+	contractsMount := strings.TrimSpace(cfg.ContractsMountPoint)
+	if contractsMount == "" {
+		contractsMount = LogicalContractsMount
+	}
+	return []ExecutionMount{
+		{LogicalPath: LogicalWorkspaceMount, Access: MountAccessReadWrite},
+		{LogicalPath: dataMount, Access: MountAccessReadOnly},
+		{LogicalPath: contractsMount, Access: MountAccessReadOnly},
+	}
 }
 
 func (m *DockerManager) workspaceClass(actor models.AgentConfig) (string, error) {

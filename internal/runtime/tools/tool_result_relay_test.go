@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	models "swarm/internal/runtime/core/actors"
 	workspace "swarm/internal/runtime/workspace"
@@ -24,7 +25,21 @@ func TestExecutorPersistOversizedToolResultRelay_ChunksLargeReadFileResults(t *t
 	tmpDir := t.TempDir()
 	exec := &Executor{
 		workspaces: relayWorkspaceResolverStub{
-			target: &workspace.Target{Workdir: tmpDir},
+			target: &workspace.Target{Backend: workspace.BackendDocker, Container: "swarm-agent", Workdir: "/workspace"},
+		},
+		execWorkspaceFn: func(_ context.Context, _ workspace.ExecutionTarget, _ time.Duration, stdin string, args ...string) ([]byte, []byte, int, error) {
+			if len(args) == 0 {
+				return nil, []byte("missing args"), 1, nil
+			}
+			relayPath := args[len(args)-1]
+			hostPath := filepath.Join(tmpDir, strings.TrimPrefix(relayPath, "/workspace/"))
+			if err := os.MkdirAll(filepath.Dir(hostPath), 0o755); err != nil {
+				return nil, []byte(err.Error()), 1, nil
+			}
+			if err := os.WriteFile(hostPath, []byte(stdin), 0o644); err != nil {
+				return nil, []byte(err.Error()), 1, nil
+			}
+			return nil, nil, 0, nil
 		},
 	}
 	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "market-research-agent"})
@@ -47,12 +62,13 @@ func TestExecutorPersistOversizedToolResultRelay_ChunksLargeReadFileResults(t *t
 		t.Fatalf("relay path = %q, want empty for chunked read_file relay", relay.Path)
 	}
 	for _, chunk := range relay.Chunks {
-		if !strings.HasPrefix(chunk, filepath.Join(tmpDir, workspaceToolResultRelayDir)+"/") {
-			t.Fatalf("chunk path = %q, want workspace relay path", chunk)
+		if !strings.HasPrefix(chunk, "/workspace/"+workspaceToolResultRelayDir+"/") {
+			t.Fatalf("chunk path = %q, want logical workspace relay path", chunk)
 		}
-		data, err := os.ReadFile(chunk)
+		hostChunk := filepath.Join(tmpDir, strings.TrimPrefix(chunk, "/workspace/"))
+		data, err := os.ReadFile(hostChunk)
 		if err != nil {
-			t.Fatalf("ReadFile(%q): %v", chunk, err)
+			t.Fatalf("ReadFile(%q): %v", hostChunk, err)
 		}
 		if len(data) == 0 {
 			t.Fatalf("chunk %q is empty", chunk)
@@ -60,5 +76,23 @@ func TestExecutorPersistOversizedToolResultRelay_ChunksLargeReadFileResults(t *t
 		if len(data) > toolResultRelayChunkBytes {
 			t.Fatalf("chunk %q length = %d, want <= %d", chunk, len(data), toolResultRelayChunkBytes)
 		}
+	}
+}
+
+func TestExecutorPersistOversizedToolResultRelay_FailsClosedForHostBackend(t *testing.T) {
+	exec := &Executor{
+		workspaces: relayWorkspaceResolverStub{
+			target: &workspace.Target{Backend: workspace.BackendHost, Workdir: t.TempDir()},
+		},
+		execWorkspaceFn: func(context.Context, workspace.ExecutionTarget, time.Duration, string, ...string) ([]byte, []byte, int, error) {
+			t.Fatalf("host relay must fail closed before workspace command execution")
+			return nil, nil, 0, nil
+		},
+	}
+	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "market-research-agent"})
+
+	_, err := exec.PersistOversizedToolResultRelay(ctx, "sql_execute", []byte(`{"blob":"hello"}`))
+	if err == nil || !strings.Contains(err.Error(), "host workspace backend does not support tool result relay yet") {
+		t.Fatalf("PersistOversizedToolResultRelay error = %v, want host relay fail-closed diagnostic", err)
 	}
 }

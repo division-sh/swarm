@@ -27,13 +27,21 @@ func errClaudeHostWorkspaceUnsupported() error {
 	return fmt.Errorf("%w: host workspace backend does not support Claude CLI execution yet", ErrClaudeWorkspaceRequired)
 }
 
+func requireClaudeExecutionTarget(target *workspace.Target) (workspace.ExecutionTarget, error) {
+	execTarget := target.ExecutionTarget()
+	if execTarget.Supports(workspace.ExecutionCapabilityClaudeCLI) {
+		return execTarget, nil
+	}
+	if strings.EqualFold(strings.TrimSpace(execTarget.Backend), workspace.BackendHost) {
+		return execTarget, errClaudeHostWorkspaceUnsupported()
+	}
+	return execTarget, fmt.Errorf("%w: %s", ErrClaudeWorkspaceRequired, execTarget.UnsupportedMessage(workspace.ExecutionCapabilityClaudeCLI))
+}
+
 func (r *ClaudeCLIRuntime) runWithInput(ctx context.Context, args []string, target *workspace.Target, input string, meta MonitorTurnMeta) (*Response, error) {
 	timeout := r.effectiveCLITimeout(ctx)
-	if target != nil && target.HostBackend() {
-		return nil, errClaudeHostWorkspaceUnsupported()
-	}
-	if target == nil || !target.Enabled() {
-		return nil, fmt.Errorf("%w: claude sessions must run in a container workspace", ErrClaudeWorkspaceRequired)
+	if _, err := requireClaudeExecutionTarget(target); err != nil {
+		return nil, err
 	}
 	profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendClaudeCLI)
 	if err := llmselection.RequireCredential(profile, os.LookupEnv); err != nil {
@@ -43,7 +51,10 @@ func (r *ClaudeCLIRuntime) runWithInput(ctx context.Context, args []string, targ
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cmd := r.buildCommand(runCtx, args, target)
+	cmd, err := r.buildCommand(runCtx, args, target)
+	if err != nil {
+		return nil, err
+	}
 	if configuredCLIOutputFormat(r.cfg) == "stream-json" {
 		return r.runStreaming(runCtx, cmd, target, timeout, input, meta)
 	}
@@ -274,8 +285,12 @@ func summarizeCLIErrorOutput(raw string) string {
 	return msg
 }
 
-func (r *ClaudeCLIRuntime) buildCommand(ctx context.Context, args []string, target *workspace.Target) *exec.Cmd {
-	if target != nil && target.Enabled() {
+func (r *ClaudeCLIRuntime) buildCommand(ctx context.Context, args []string, target *workspace.Target) (*exec.Cmd, error) {
+	execTarget, err := requireClaudeExecutionTarget(target)
+	if err != nil {
+		return nil, err
+	}
+	if execTarget.Mode == workspace.ExecutionModeDockerContainer {
 		dockerBin := strings.TrimSpace(os.Getenv("SWARM_DOCKER_BIN"))
 		if dockerBin == "" {
 			dockerBin = "docker"
@@ -292,14 +307,14 @@ func (r *ClaudeCLIRuntime) buildCommand(ctx context.Context, args []string, targ
 		if oauthToken := llmselection.CredentialValue(profile, os.LookupEnv); oauthToken != "" {
 			dockerArgs = append(dockerArgs, "-e", profile.Credential.EnvVar+"="+oauthToken)
 		}
-		if strings.TrimSpace(target.Workdir) != "" {
-			dockerArgs = append(dockerArgs, "-w", target.Workdir)
+		if strings.TrimSpace(execTarget.Workdir) != "" {
+			dockerArgs = append(dockerArgs, "-w", execTarget.Workdir)
 		}
-		dockerArgs = append(dockerArgs, target.Container, r.cfg.LLM.ClaudeCLI.Command)
+		dockerArgs = append(dockerArgs, execTarget.Container, r.cfg.LLM.ClaudeCLI.Command)
 		dockerArgs = append(dockerArgs, args...)
-		return exec.CommandContext(ctx, dockerBin, dockerArgs...)
+		return exec.CommandContext(ctx, dockerBin, dockerArgs...), nil
 	}
-	return exec.CommandContext(ctx, r.cfg.LLM.ClaudeCLI.Command, args...)
+	return nil, fmt.Errorf("%w: %s", ErrClaudeWorkspaceRequired, execTarget.UnsupportedMessage(workspace.ExecutionCapabilityClaudeCLI))
 }
 
 func (r *ClaudeCLIRuntime) resolveWorkspace(ctx context.Context) (*workspace.Target, error) {
@@ -314,8 +329,8 @@ func (r *ClaudeCLIRuntime) resolveWorkspace(ctx context.Context) (*workspace.Tar
 	if err != nil {
 		return nil, err
 	}
-	if target == nil || !target.Enabled() {
-		return nil, fmt.Errorf("%w: no container workspace target resolved for agent %s", ErrClaudeWorkspaceRequired, strings.TrimSpace(actor.ID))
+	if _, err := requireClaudeExecutionTarget(target); err != nil {
+		return nil, fmt.Errorf("%w for agent %s", err, strings.TrimSpace(actor.ID))
 	}
 	return target, nil
 }
