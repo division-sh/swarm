@@ -280,6 +280,18 @@ func accumulatorBucketRef(nodeID identity.NodeID, eventType events.EventType) ti
 	return timeridentity.NewAccumulatorBucketRef(nodeID.String(), string(eventType))
 }
 
+func handlerAccumulatorEventType(req ExecutionRequest) events.EventType {
+	eventType := strings.TrimSpace(req.HandlerEventKey)
+	if eventType == "" {
+		eventType = strings.TrimSpace(string(req.Event.Type))
+	}
+	return events.EventType(eventType)
+}
+
+func handlerAccumulatorBucketRef(req ExecutionRequest) timeridentity.AccumulatorBucketRef {
+	return accumulatorBucketRef(req.NodeID, handlerAccumulatorEventType(req))
+}
+
 func loadAccumulator(state StateSnapshot, nodeID identity.NodeID, eventType events.EventType) (*Accumulator, bool) {
 	return loadAccumulatorForBucket(state, accumulatorBucketRef(nodeID, eventType))
 }

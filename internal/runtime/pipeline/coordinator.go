@@ -238,11 +238,15 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 	if trigger == "" {
 		return false, nil
 	}
-	handler, ok := workflowNodeEventHandlerForDelivery(source, nodeID, evt)
+	resolved := workflowNodeEventHandlerResolutionForDelivery(source, nodeID, evt)
+	handler := resolved.Handler
+	handlerEventKey := resolved.HandlerEventKey
+	ok := resolved.Matched
 	if !ok && isAccumulationTimeoutEvent(events.EventType(trigger)) {
 		bucket, bucketOK := timeridentity.ParseAccumulatorBucketRef(parsePayloadMap(evt.Payload))
 		if bucketOK && strings.TrimSpace(bucket.NodeID) == nodeID {
 			handler, ok = findAccumulationTimeoutHandlerForBucket(source, bucket)
+			handlerEventKey = bucket.EventType
 		}
 	}
 	if !ok {
@@ -250,8 +254,9 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 	}
 	ctx = withPipelineFlowScope(ctx, workflowNodeFlowID(source, nodeID))
 	result, err := pc.executeNodeContractHandler(ctx, nodeID, handler, workflowTriggerContext{
-		Event: evt,
-		State: pc.currentWorkflowState(ctx, workflowEventEntityID(evt)),
+		Event:           evt,
+		HandlerEventKey: handlerEventKey,
+		State:           pc.currentWorkflowState(ctx, workflowEventEntityID(evt)),
 	}, false)
 	if err != nil {
 		if errors.Is(err, runtimeengine.ErrChainDepthExceeded) {

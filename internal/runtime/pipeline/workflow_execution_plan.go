@@ -9,8 +9,9 @@ import (
 )
 
 type workflowTriggerContext struct {
-	Event events.Event
-	State WorkflowState
+	Event           events.Event
+	HandlerEventKey string
+	State           WorkflowState
 }
 
 type handlerExecutionPlan struct {

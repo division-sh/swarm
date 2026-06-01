@@ -517,8 +517,12 @@ opco.ceo_ready:
 	if _, ok := source.NodeEventHandler("lifecycle-orchestrator", string(evt.Type)); ok {
 		t.Fatal("raw bundle handler lookup unexpectedly matched concrete instance event without delivery localization")
 	}
-	if _, ok := workflowNodeEventHandlerForDelivery(source, "lifecycle-orchestrator", evt); !ok {
+	resolved := workflowNodeEventHandlerResolutionForDelivery(source, "lifecycle-orchestrator", evt)
+	if !resolved.Matched {
 		t.Fatal("expected concrete instance event to resolve to local lifecycle-orchestrator handler")
+	}
+	if got := resolved.HandlerEventKey; got != "opco.product_initialization_requested" {
+		t.Fatalf("handler event key = %q, want opco.product_initialization_requested", got)
 	}
 
 	bus := &recordingPipelineBus{}

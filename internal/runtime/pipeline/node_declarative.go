@@ -28,7 +28,7 @@ type HandlerOutcome struct {
 }
 
 type HandlerExecutionEngine interface {
-	ExecuteHandlerSteps(ctx context.Context, handler SystemNodeEventHandler, evt Event) (*HandlerOutcome, error)
+	ExecuteHandlerSteps(ctx context.Context, handler SystemNodeEventHandler, evt Event, handlerEventKey string) (*HandlerOutcome, error)
 }
 
 type declarativeWorkflowNode struct {
@@ -172,6 +172,7 @@ func (n *DeclarativeNode) HandleEvent(ctx context.Context, evt Event) (*HandlerO
 		return nil, nil
 	}
 	eventType := strings.TrimSpace(string(evt.Type))
+	handlerEventKey := eventType
 	handler, ok := n.contract.EventHandlers[eventType]
 	if !ok {
 		for pattern, candidate := range n.contract.EventHandlers {
@@ -180,6 +181,7 @@ func (n *DeclarativeNode) HandleEvent(ctx context.Context, evt Event) (*HandlerO
 			}
 			if runtimecontractsHandlerPatternMatches(pattern, eventType) {
 				handler = candidate
+				handlerEventKey = strings.TrimSpace(pattern)
 				ok = true
 				break
 			}
@@ -195,6 +197,7 @@ func (n *DeclarativeNode) HandleEvent(ctx context.Context, evt Event) (*HandlerO
 					continue
 				}
 				handler = candidate
+				handlerEventKey = bucket.EventType
 				ok = true
 				break
 			}
@@ -206,7 +209,7 @@ func (n *DeclarativeNode) HandleEvent(ctx context.Context, evt Event) (*HandlerO
 	if n.engine == nil {
 		return nil, fmt.Errorf("declarative node %s has no handler execution engine", n.NodeID())
 	}
-	outcome, err := n.engine.ExecuteHandlerSteps(ctx, handler, evt)
+	outcome, err := n.engine.ExecuteHandlerSteps(ctx, handler, evt, handlerEventKey)
 	if err != nil {
 		return nil, err
 	}
@@ -269,7 +272,7 @@ func newCoordinatorHandlerExecutionEngine(pc *PipelineCoordinator, nodeID string
 	return engine
 }
 
-func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Context, handler SystemNodeEventHandler, evt Event) (*HandlerOutcome, error) {
+func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Context, handler SystemNodeEventHandler, evt Event, handlerEventKey string) (*HandlerOutcome, error) {
 	if e == nil || e.coordinator == nil {
 		return nil, fmt.Errorf("handler execution engine is not configured")
 	}
@@ -331,6 +334,10 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 		exec = tmpExec
 		node = runtimeengine.NewDeclarativeNode(strings.TrimSpace(e.nodeID), exec)
 	}
+	handlerEventKey = strings.TrimSpace(handlerEventKey)
+	if handlerEventKey == "" {
+		handlerEventKey = workflowNodeHandlerEventKeyForExecution(source, e.nodeID, evt)
+	}
 	workflowVersion := ""
 	if source != nil {
 		workflowVersion = source.WorkflowVersion()
@@ -340,13 +347,14 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 		return nil, err
 	}
 	result, err := node.Handle(ctx, runtimeengine.ExecutionRequest{
-		EntityID:   identity.NormalizeEntityID(entityID),
-		NodeID:     identity.NormalizeNodeID(e.nodeID),
-		FlowID:     identity.NormalizeFlowID(flowID),
-		Event:      evt,
-		ChainDepth: evt.ChainDepth,
-		Handler:    handler,
-		State:      stateSnapshot,
+		EntityID:        identity.NormalizeEntityID(entityID),
+		NodeID:          identity.NormalizeNodeID(e.nodeID),
+		FlowID:          identity.NormalizeFlowID(flowID),
+		Event:           evt,
+		HandlerEventKey: handlerEventKey,
+		ChainDepth:      evt.ChainDepth,
+		Handler:         handler,
+		State:           stateSnapshot,
 	})
 	if err != nil {
 		return nil, err
