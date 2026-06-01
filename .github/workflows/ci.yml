@@ -29,6 +29,9 @@ jobs:
       - name: Build swarm binary
         run: go build ./cmd/swarm
 
+      - name: Build workspace image
+        run: docker build -t swarm-workspace:latest -f Dockerfile.workspace .
+
       - name: Prove no-selector SQLite local run
         env:
           SWARM_API_TOKEN: ci-local-dev-token
