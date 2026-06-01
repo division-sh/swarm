@@ -2445,7 +2445,7 @@ func TestPlatformSpecLLMProviderModelSelectionSourceAuthorityPromoted(t *testing
 		}
 	}
 	protocol := responses.ProtocolFamily
-	if protocol.Name != "native_openai_responses" || protocol.EndpointPath != "/v1/responses" || protocol.Transport != "api" {
+	if protocol.Name != "native_openai_responses" || protocol.EndpointPath != "/responses" || protocol.Transport != "api" {
 		t.Fatalf("native responses protocol = %#v", protocol)
 	}
 	for _, want := range []string{"Platform-managed text transcript", "function", "server-sent events", "previous_response_id"} {
