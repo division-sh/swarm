@@ -3042,8 +3042,81 @@ func TestRunServeRuntimeHostWorkspaceBackendBootsWithoutDockerForSystemOnlyFlow(
 	}
 }
 
+func TestRunServeRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDiskContractsServe(t *testing.T) {
+	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() serveWorkspaceLifecycle {
+		return serveRuntimeWorkspaceStub{}
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	var out lockedBuffer
+	done := make(chan int, 1)
+	go func() {
+		done <- runServeRuntime(ctx, repoRoot(), serveOptions{
+			ConfigPath:         writeServeRuntimeTestConfig(t),
+			ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+			PlatformSpecPath:   defaultPlatformSpecPath,
+			StoreMode:          "postgres",
+			APIListenAddr:      "127.0.0.1:0",
+			MCPListenAddr:      "127.0.0.1:0",
+			SelfCheck:          true,
+			RequireBundleMatch: true,
+			Verbose:            true,
+			Output:             &out,
+		})
+	}()
+
+	waitForServeReadyLine(t, &out, done)
+	cancel()
+	if code := <-done; code != 0 {
+		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, out.String())
+	}
+	for _, table := range []string{"bundles", "runs", "events", "event_deliveries"} {
+		assertPostgresTableExists(t, db, table)
+	}
+	if !strings.Contains(out.String(), "state_stores=verified") {
+		t.Fatalf("serve output missing state store proof:\n%s", out.String())
+	}
+}
+
+func TestRunServeRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDevAbandon(t *testing.T) {
+	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() serveWorkspaceLifecycle {
+		return serveRuntimeWorkspaceStub{}
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	var out lockedBuffer
+	done := make(chan int, 1)
+	go func() {
+		done <- runServeRuntime(ctx, repoRoot(), serveOptions{
+			ConfigPath:           writeServeRuntimeTestConfig(t),
+			ContractsPath:        filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+			PlatformSpecPath:     defaultPlatformSpecPath,
+			StoreMode:            "postgres",
+			APIListenAddr:        "127.0.0.1:0",
+			MCPListenAddr:        "127.0.0.1:0",
+			SelfCheck:            true,
+			Dev:                  true,
+			RequireBundleMatch:   false,
+			NoRequireBundleMatch: true,
+			AbandonActiveRuns:    true,
+			Verbose:              true,
+			Output:               &out,
+		})
+	}()
+
+	waitForServeReadyLine(t, &out, done)
+	cancel()
+	if code := <-done; code != 0 {
+		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, out.String())
+	}
+	for _, table := range []string{"bundles", "runs", "run_control_state", "event_receipts"} {
+		assertPostgresTableExists(t, db, table)
+	}
+	if strings.Contains(out.String(), "relation") && strings.Contains(out.String(), "does not exist") {
+		t.Fatalf("serve output contains missing-table failure:\n%s", out.String())
+	}
+}
+
 func TestRunServeRuntimeBundleHashMissingFailsBeforeReadiness(t *testing.T) {
-	_, _, _ = installServeRuntimePostgresTestStores(t, func() serveWorkspaceLifecycle {
+	_, _, _ = installServeRuntimeEmptyPostgresTestStores(t, func() serveWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
 	missingHash := "bundle-v1:sha256:2222222222222222222222222222222222222222222222222222222222222222"
@@ -3074,6 +3147,9 @@ func TestRunServeRuntimeBundleHashMissingFailsBeforeReadiness(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "ready                      ok") || strings.Contains(out.String(), "[22/22]") {
 		t.Fatalf("serve reached readiness after missing DB-loaded bundle:\n%s", out.String())
+	}
+	if strings.Contains(out.String(), "bundle catalog read surface requires bundles columns") || strings.Contains(out.String(), "relation \"bundles\" does not exist") {
+		t.Fatalf("serve reported schema/bootstrap failure instead of typed bundle unavailability:\n%s", out.String())
 	}
 }
 
@@ -3218,11 +3294,30 @@ func installServeRuntimePostgresTestStores(t *testing.T, workspaceFactory func()
 	})
 }
 
+func installServeRuntimeEmptyPostgresTestStores(t *testing.T, workspaceFactory func() serveWorkspaceLifecycle) (string, *sql.DB, *store.PostgresStore) {
+	t.Helper()
+	return installServeRuntimePostgresTestStoresForDatabase(t, func(workspaceMountSources) serveWorkspaceLifecycle {
+		return workspaceFactory()
+	}, false)
+}
+
 func installServeRuntimePostgresTestStoresWithWorkspaceFactory(t *testing.T, workspaceFactory func(workspaceMountSources) serveWorkspaceLifecycle) (string, *sql.DB, *store.PostgresStore) {
+	t.Helper()
+	return installServeRuntimePostgresTestStoresForDatabase(t, workspaceFactory, true)
+}
+
+func installServeRuntimePostgresTestStoresForDatabase(t *testing.T, workspaceFactory func(workspaceMountSources) serveWorkspaceLifecycle, useTemplate bool) (string, *sql.DB, *store.PostgresStore) {
 	t.Helper()
 	oldBuildStores := buildStoresForServe
 	oldWorkspaceLifecycle := configuredWorkspaceLifecycleForServe
-	dsn, db, cleanup := testutil.StartPostgres(t)
+	var dsn string
+	var db *sql.DB
+	var cleanup func()
+	if useTemplate {
+		dsn, db, cleanup = testutil.StartPostgres(t)
+	} else {
+		dsn, db, cleanup = testutil.StartEmptyPostgres(t)
+	}
 	t.Cleanup(cleanup)
 	runtimePG, err := store.NewPostgresStore(dsn)
 	if err != nil {
@@ -3261,6 +3356,17 @@ func installServeRuntimePostgresTestStoresWithWorkspaceFactory(t *testing.T, wor
 		configuredWorkspaceLifecycleForServe = oldWorkspaceLifecycle
 	})
 	return dsn, db, runtimePG
+}
+
+func assertPostgresTableExists(t *testing.T, db *sql.DB, tableName string) {
+	t.Helper()
+	var found sql.NullString
+	if err := db.QueryRowContext(context.Background(), `SELECT to_regclass($1)::text`, "public."+tableName).Scan(&found); err != nil {
+		t.Fatalf("check table %s exists: %v", tableName, err)
+	}
+	if !found.Valid || strings.TrimSpace(found.String) == "" {
+		t.Fatalf("table %s was not bootstrapped", tableName)
+	}
 }
 
 func seedServeRuntimeUnavailableBundleRunState(t *testing.T, ctx context.Context, db *sql.DB, runID, source, fingerprint string) {

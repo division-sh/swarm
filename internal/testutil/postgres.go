@@ -49,7 +49,19 @@ func init() {
 // database cloned from one canonical schema template, and drops that database on cleanup.
 func StartPostgres(t *testing.T) (dsn string, db *sql.DB, cleanup func()) {
 	t.Helper()
+	return startPostgresDatabase(t, true)
+}
 
+// StartEmptyPostgres provides an isolated database without the canonical schema
+// template. Use it for bootstrapping tests that must prove schema creation from
+// a fresh Postgres database.
+func StartEmptyPostgres(t *testing.T) (dsn string, db *sql.DB, cleanup func()) {
+	t.Helper()
+	return startPostgresDatabase(t, false)
+}
+
+func startPostgresDatabase(t *testing.T, useTemplate bool) (dsn string, db *sql.DB, cleanup func()) {
+	t.Helper()
 	sharedPostgres.mu.Lock()
 	var err error
 	if !sharedPostgres.started {
@@ -69,13 +81,18 @@ func StartPostgres(t *testing.T) (dsn string, db *sql.DB, cleanup func()) {
 	defer adminDB.Close()
 
 	sharedPostgres.lifecycle.Lock()
-	if err := sharedPostgres.ensureTemplateDatabase(adminDB); err != nil {
+	if useTemplate {
+		if err := sharedPostgres.ensureTemplateDatabase(adminDB); err != nil {
+			sharedPostgres.lifecycle.Unlock()
+			t.Fatalf("initialize postgres template: %v", err)
+		}
+		if err := createIsolatedDatabaseFromTemplate(adminDB, dbName, sharedPostgres.template); err != nil {
+			sharedPostgres.lifecycle.Unlock()
+			t.Fatalf("create isolated postgres database %q: %v", dbName, err)
+		}
+	} else if err := createIsolatedDatabase(adminDB, dbName); err != nil {
 		sharedPostgres.lifecycle.Unlock()
-		t.Fatalf("initialize postgres template: %v", err)
-	}
-	if err := createIsolatedDatabaseFromTemplate(adminDB, dbName, sharedPostgres.template); err != nil {
-		sharedPostgres.lifecycle.Unlock()
-		t.Fatalf("create isolated postgres database %q: %v", dbName, err)
+		t.Fatalf("create empty postgres database %q: %v", dbName, err)
 	}
 
 	dsn = withDBName(adminDSN, dbName)
