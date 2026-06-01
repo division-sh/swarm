@@ -3635,6 +3635,123 @@ func TestRunServeRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDevAbandon(t *te
 	}
 }
 
+func TestRunServeRuntimeFreshEmptySQLiteBootsWithDevAbandon(t *testing.T) {
+	unsetStoreSelectorEnv(t)
+	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
+	t.Setenv(storebackend.EnvSQLitePath, sqlitePath)
+	ctx, cancel := context.WithCancel(context.Background())
+	var out lockedBuffer
+	done := make(chan int, 1)
+	go func() {
+		done <- runServeRuntime(ctx, repoRoot(), serveOptions{
+			ConfigPath:           writeServeRuntimeTestConfig(t),
+			ContractsPath:        filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+			PlatformSpecPath:     defaultPlatformSpecPath,
+			APIListenAddr:        "127.0.0.1:0",
+			MCPListenAddr:        "127.0.0.1:0",
+			SelfCheck:            true,
+			Dev:                  true,
+			RequireBundleMatch:   false,
+			NoRequireBundleMatch: true,
+			AbandonActiveRuns:    true,
+			Verbose:              true,
+			Output:               &out,
+		})
+	}()
+
+	waitForServeReadyLine(t, &out, done)
+	cancel()
+	if code := <-done; code != 0 {
+		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, out.String())
+	}
+	if strings.Contains(out.String(), "postgres store is required") {
+		t.Fatalf("serve output contains stale postgres-only abandon failure:\n%s", out.String())
+	}
+	if _, err := os.Stat(sqlitePath); err != nil {
+		t.Fatalf("sqlite dev db not created at %s: %v", sqlitePath, err)
+	}
+}
+
+func TestRunServeRuntimeSQLiteAbandonActiveRunsQuiescesBeforeReadiness(t *testing.T) {
+	unsetStoreSelectorEnv(t)
+	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
+	runID, eventID := seedServeRuntimeSQLiteAbandonWork(t, sqlitePath)
+	t.Setenv(storebackend.EnvSQLitePath, sqlitePath)
+	ctx, cancel := context.WithCancel(context.Background())
+	var out lockedBuffer
+	done := make(chan int, 1)
+	go func() {
+		done <- runServeRuntime(ctx, repoRoot(), serveOptions{
+			ConfigPath:         writeServeRuntimeTestConfig(t),
+			ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+			PlatformSpecPath:   defaultPlatformSpecPath,
+			APIListenAddr:      "127.0.0.1:0",
+			MCPListenAddr:      "127.0.0.1:0",
+			SelfCheck:          true,
+			RequireBundleMatch: true,
+			AbandonActiveRuns:  true,
+			Verbose:            true,
+			Output:             &out,
+		})
+	}()
+
+	waitForServeReadyLine(t, &out, done)
+	cancel()
+	if code := <-done; code != 0 {
+		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, out.String())
+	}
+	sqliteStore, err := store.NewSQLiteRuntimeStore(sqlitePath)
+	if err != nil {
+		t.Fatalf("reopen sqlite store: %v", err)
+	}
+	defer func() {
+		if err := sqliteStore.Close(); err != nil {
+			t.Fatalf("close sqlite store: %v", err)
+		}
+	}()
+	ctx = context.Background()
+	var runStatus, controlStatus, reason, controlledBy string
+	if err := sqliteStore.DB.QueryRowContext(ctx, `
+		SELECT r.status, rc.control_status, COALESCE(rc.reason, ''), COALESCE(rc.controlled_by, '')
+		FROM runs r
+		JOIN run_control_state rc ON rc.run_id = r.run_id
+		WHERE r.run_id = ?
+	`, runID).Scan(&runStatus, &controlStatus, &reason, &controlledBy); err != nil {
+		t.Fatalf("load sqlite serve-abandoned run/control: %v", err)
+	}
+	if runStatus != "cancelled" || controlStatus != "stopped" || reason != runtimerunquiescence.ServeAbandonReasonCode || controlledBy != runtimerunquiescence.ServeAbandonControlledBy {
+		t.Fatalf("sqlite serve run/control = %s/%s/%s/%s, want cancelled/stopped/%s/%s", runStatus, controlStatus, reason, controlledBy, runtimerunquiescence.ServeAbandonReasonCode, runtimerunquiescence.ServeAbandonControlledBy)
+	}
+	var deliveryStatus, deliveryReason string
+	var activeSession sql.NullString
+	if err := sqliteStore.DB.QueryRowContext(ctx, `
+		SELECT status, COALESCE(reason_code, ''), active_session_id
+		FROM event_deliveries
+		WHERE event_id = ?
+		  AND subscriber_type = 'agent'
+		  AND subscriber_id = 'agent-a'
+	`, eventID).Scan(&deliveryStatus, &deliveryReason, &activeSession); err != nil {
+		t.Fatalf("load sqlite serve-abandoned delivery: %v", err)
+	}
+	if deliveryStatus != "dead_letter" || deliveryReason != runtimerunquiescence.ServeAbandonReasonCode || activeSession.Valid {
+		t.Fatalf("sqlite serve delivery = %s/%s active=%v, want dead_letter/%s inactive", deliveryStatus, deliveryReason, activeSession.Valid, runtimerunquiescence.ServeAbandonReasonCode)
+	}
+	for _, subscriberID := range []string{"agent-a", "pipeline"} {
+		var outcome, receiptReason string
+		if err := sqliteStore.DB.QueryRowContext(ctx, `
+			SELECT outcome, COALESCE(reason_code, '')
+			FROM event_receipts
+			WHERE event_id = ?
+			  AND subscriber_id = ?
+		`, eventID, subscriberID).Scan(&outcome, &receiptReason); err != nil {
+			t.Fatalf("load sqlite serve receipt %s: %v", subscriberID, err)
+		}
+		if outcome != "dead_letter" || receiptReason != runtimerunquiescence.ServeAbandonReasonCode {
+			t.Fatalf("sqlite serve receipt %s = %s/%s, want dead_letter/%s", subscriberID, outcome, receiptReason, runtimerunquiescence.ServeAbandonReasonCode)
+		}
+	}
+}
+
 func TestRunServeRuntimeBundleHashMissingFailsBeforeReadiness(t *testing.T) {
 	_, _, _ = installServeRuntimeEmptyPostgresTestStores(t, func() serveWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
@@ -3821,6 +3938,62 @@ func installServeRuntimeEmptyPostgresTestStores(t *testing.T, workspaceFactory f
 	}, false)
 }
 
+func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath string) (string, string) {
+	t.Helper()
+	spec, err := loadServePlatformSpecDocument(filepath.Join(repoRoot(), defaultPlatformSpecPath))
+	if err != nil {
+		t.Fatalf("load platform spec: %v", err)
+	}
+	plans, err := store.GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
+	}
+	sqliteStore, err := store.NewSQLiteRuntimeStore(sqlitePath)
+	if err != nil {
+		t.Fatalf("NewSQLiteRuntimeStore: %v", err)
+	}
+	if err := sqliteStore.EnsureSchemaTables(context.Background(), plans); err != nil {
+		_ = sqliteStore.Close()
+		t.Fatalf("EnsureSchemaTables: %v", err)
+	}
+	ctx := context.Background()
+	now := time.Date(2026, 5, 18, 4, 30, 0, 0, time.UTC)
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	activeSessionID := uuid.NewString()
+	if _, err := sqliteStore.DB.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, bundle_fingerprint, started_at)
+		VALUES (?, 'running', ?, ?)
+	`, runID, "sha256:2222222222222222222222222222222222222222222222222222222222222222", now.Add(-time.Hour)); err != nil {
+		_ = sqliteStore.Close()
+		t.Fatalf("seed sqlite active run: %v", err)
+	}
+	if _, err := sqliteStore.DB.ExecContext(ctx, `
+		INSERT INTO events (
+			event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at
+		) VALUES (
+			?, ?, 'serve.abandon.test', 'global', '{}', 'test', 'agent', ?
+		)
+	`, eventID, runID, now); err != nil {
+		_ = sqliteStore.Close()
+		t.Fatalf("seed sqlite active delivery event: %v", err)
+	}
+	if _, err := sqliteStore.DB.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, active_session_id, reason_code, created_at
+		) VALUES (
+			?, ?, ?, 'agent', 'agent-a', 'in_progress', ?, 'agent_processing', ?
+		)
+	`, uuid.NewString(), runID, eventID, activeSessionID, now); err != nil {
+		_ = sqliteStore.Close()
+		t.Fatalf("seed sqlite active delivery: %v", err)
+	}
+	if err := sqliteStore.Close(); err != nil {
+		t.Fatalf("close seeded sqlite store: %v", err)
+	}
+	return runID, eventID
+}
+
 func installServeRuntimePostgresTestStoresWithWorkspaceFactory(t *testing.T, workspaceFactory func(workspaceMountSources) serveWorkspaceLifecycle) (string, *sql.DB, *store.PostgresStore) {
 	t.Helper()
 	return installServeRuntimePostgresTestStoresForDatabase(t, workspaceFactory, true)
@@ -3866,6 +4039,7 @@ func installServeRuntimePostgresTestStoresForDatabase(t *testing.T, workspaceFac
 			RuntimeIngressStore: runtimePG,
 			IdempotencyStore:    runtimePG,
 			TurnStore:           runtimePG,
+			RunQuiescenceStore:  runtimePG,
 		}, nil
 	}
 	configuredWorkspaceLifecycleForServe = func(_ *sql.DB, _ string, _ semanticview.Source, mountSources workspaceMountSources, _ workspaceBackendSelection) (serveWorkspaceLifecycle, error) {
@@ -6872,6 +7046,7 @@ func TestRunServeRuntimeVerboseEmitsPlatformSpecBootSequence(t *testing.T) {
 			ManagerStore:       runtimePG,
 			ScheduleStore:      runtimePG,
 			TurnStore:          runtimePG,
+			RunQuiescenceStore: runtimePG,
 		}, nil
 	}
 	configuredWorkspaceLifecycleForServe = func(*sql.DB, string, semanticview.Source, workspaceMountSources, workspaceBackendSelection) (serveWorkspaceLifecycle, error) {
@@ -6965,6 +7140,7 @@ func TestRunServeRuntimeListenerBindFailuresExitBeforeReadiness(t *testing.T) {
 					ManagerStore:       runtimePG,
 					ScheduleStore:      runtimePG,
 					TurnStore:          runtimePG,
+					RunQuiescenceStore: runtimePG,
 				}, nil
 			}
 			configuredWorkspaceLifecycleForServe = func(*sql.DB, string, semanticview.Source, workspaceMountSources, workspaceBackendSelection) (serveWorkspaceLifecycle, error) {
@@ -7132,6 +7308,7 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 			ManagerStore:       runtimePG,
 			ScheduleStore:      runtimePG,
 			TurnStore:          runtimePG,
+			RunQuiescenceStore: runtimePG,
 		}, nil
 	}
 	configuredWorkspaceLifecycleForServe = func(*sql.DB, string, semanticview.Source, workspaceMountSources, workspaceBackendSelection) (serveWorkspaceLifecycle, error) {

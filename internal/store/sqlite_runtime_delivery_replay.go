@@ -48,6 +48,14 @@ func (s *SQLiteRuntimeStore) UpsertPipelineReceiptTx(ctx context.Context, tx *sq
 	if tx != nil {
 		exec = tx.ExecContext
 	}
+	terminalReasons := activeRunQuiescenceTerminalReasonCodes()
+	args := []any{uuid.NewString(), outcome, sqliteNullString(reasonCode), string(sideEffects), s.now(), eventID}
+	for _, reason := range terminalReasons {
+		args = append(args, reason)
+	}
+	for _, reason := range terminalReasons {
+		args = append(args, reason)
+	}
 	_, err = exec(ctx, `
 		INSERT INTO event_receipts (
 			receipt_id, event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
@@ -58,12 +66,20 @@ func (s *SQLiteRuntimeStore) UpsertPipelineReceiptTx(ctx context.Context, tx *sq
 			?, ?, ?, ?
 		FROM events e
 		WHERE e.event_id = ?
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM event_deliveries d
+			WHERE d.event_id = e.event_id
+			  AND d.status = 'dead_letter'
+			  AND d.reason_code IN (`+sqlitePlaceholders(len(terminalReasons))+`)
+		  )
 		ON CONFLICT(event_id, subscriber_type, subscriber_id) DO UPDATE SET
 			outcome = excluded.outcome,
 			reason_code = excluded.reason_code,
 			side_effects = excluded.side_effects,
 			processed_at = excluded.processed_at
-	`, uuid.NewString(), outcome, sqliteNullString(reasonCode), string(sideEffects), s.now(), eventID)
+		WHERE COALESCE(event_receipts.reason_code, '') NOT IN (`+sqlitePlaceholders(len(terminalReasons))+`)
+	`, args...)
 	if err != nil {
 		return fmt.Errorf("upsert sqlite pipeline receipt: %w", err)
 	}
@@ -486,6 +502,11 @@ func (s *SQLiteRuntimeStore) MarkEventDeliveryInProgress(ctx context.Context, ev
 	if eventID == "" || agentID == "" {
 		return fmt.Errorf("mark sqlite event delivery in progress: eventID and agentID required")
 	}
+	terminalReasons := activeRunQuiescenceTerminalReasonCodes()
+	args := []any{sqliteNullUUID(sessionID), s.now(), eventID, agentID}
+	for _, reason := range terminalReasons {
+		args = append(args, reason)
+	}
 	res, err := s.DB.ExecContext(ctx, `
 		UPDATE event_deliveries
 		SET status = 'in_progress',
@@ -495,11 +516,17 @@ func (s *SQLiteRuntimeStore) MarkEventDeliveryInProgress(ctx context.Context, ev
 		  AND subscriber_type = 'agent'
 		  AND subscriber_id = ?
 		  AND status IN ('pending', 'failed', 'in_progress')
-	`, sqliteNullUUID(sessionID), s.now(), eventID, agentID)
+		  AND COALESCE(reason_code, '') NOT IN (`+sqlitePlaceholders(len(terminalReasons))+`)
+	`, args...)
 	if err != nil {
 		return fmt.Errorf("mark sqlite event delivery in progress: %w", err)
 	}
 	if rows, _ := res.RowsAffected(); rows == 0 {
+		if _, ok, err := s.ActiveRunDeliveryQuiesced(ctx, eventID, "agent", agentID); err != nil {
+			return err
+		} else if ok {
+			return nil
+		}
 		return fmt.Errorf("mark sqlite event delivery in progress: delivery row required for event %s agent %s", eventID, agentID)
 	}
 	return nil
@@ -525,6 +552,9 @@ func (s *SQLiteRuntimeStore) UpsertEventReceipt(ctx context.Context, eventID, ag
 	}
 	if !delivery.found {
 		return fmt.Errorf("upsert sqlite event receipt: delivery row required for event %s agent %s", eventID, agentID)
+	}
+	if activeRunQuiescenceDeliveryTerminal(delivery.status, delivery.reasonCode) {
+		return nil
 	}
 	state := buildAgentReceiptWriteState(delivery.retryCount, status, errText)
 	now := s.now()
