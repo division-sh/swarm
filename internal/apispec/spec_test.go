@@ -436,10 +436,11 @@ func TestMultiBundleSourceAuthorityPublishesOnlyImplementedBundleReadAndRunForkM
 	cli := mustMappingValue(t, root, "cli_specification")
 	commandCatalog := mustMappingValue(t, cli, "command_catalog")
 	bundleCommand := mustMappingValue(t, commandCatalog, "bundle")
-	assertScalarValue(t, mustMappingValue(t, bundleCommand, "command"), "swarm bundle list|show|agents|register")
-	assertScalarValue(t, mustMappingValue(t, bundleCommand, "implementation_status"), "implemented_inventory_prepared_envelope_and_directory_register")
+	assertScalarValue(t, mustMappingValue(t, bundleCommand, "command"), "swarm bundle list|show|agents|register|delete")
+	assertScalarValue(t, mustMappingValue(t, bundleCommand, "implementation_status"), "implemented_inventory_prepared_envelope_directory_register_and_delete")
 	assertScalarContains(t, mustMappingValue(t, bundleCommand, "blocker_state"), "local directory swarm bundle register --contracts")
-	assertScalarContains(t, mustMappingValue(t, bundleCommand, "blocker_state"), "Archive packaging and bundle.delete CLI remain split")
+	assertScalarContains(t, mustMappingValue(t, bundleCommand, "blocker_state"), "Destructive swarm bundle delete is implemented")
+	assertScalarContains(t, mustMappingValue(t, bundleCommand, "blocker_state"), "Archive packaging remains split")
 	runForkCatalog := mustMappingValue(t, commandCatalog, "run_fork")
 	assertScalarValue(t, mustMappingValue(t, runForkCatalog, "command"), runForkCommand)
 	assertScalarValue(t, mustMappingValue(t, runForkCatalog, "implementation_status"), "implemented_public_cli_consumer")
@@ -464,13 +465,11 @@ func TestMultiBundleSourceAuthorityPublishesOnlyImplementedBundleReadAndRunForkM
 	if sequenceContainsScalar(remaining, "swarm bundle list|show|agents|register|delete") {
 		t.Fatal("remaining_should_have_not_implemented still includes implemented swarm bundle inventory commands")
 	}
-	for _, want := range []string{
-		"swarm bundle register --archive <archive-file>",
-		"swarm bundle delete <bundle-hash> [--force] [--dry-run] [--idempotency-key <key>]",
-	} {
-		if !sequenceContainsScalar(remaining, want) {
-			t.Fatalf("remaining_should_have_not_implemented missing %q", want)
-		}
+	if !sequenceContainsScalar(remaining, "swarm bundle register --archive <archive-file>") {
+		t.Fatal("remaining_should_have_not_implemented missing archive register split")
+	}
+	if sequenceContainsScalar(remaining, "swarm bundle delete <bundle-hash> [--force] [--dry-run] [--idempotency-key <key>]") {
+		t.Fatal("remaining_should_have_not_implemented still includes implemented swarm bundle delete")
 	}
 
 	apiBoundary := mustMappingValue(t, mustMappingValue(t, root, "api_specification"), "multi_bundle_publication_boundary")
