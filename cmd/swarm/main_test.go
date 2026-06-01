@@ -3022,6 +3022,23 @@ func TestPrepareServeBundleSourceDevStampsEphemeralWithoutCatalogRow(t *testing.
 	}
 }
 
+func TestPrepareServeBundleSourceSQLiteStampsEphemeralWithoutPostgresCatalog(t *testing.T) {
+	ctx := context.Background()
+	bundle := loadWorkflowValidationFixtureBundle(t, "tests/tier1-primitives/test-emits-single")
+	identity, err := runtimecontracts.BootBundleIdentity(bundle)
+	if err != nil {
+		t.Fatalf("BootBundleIdentity: %v", err)
+	}
+
+	fact, err := prepareServeBundleSource(ctx, storeBundle{}, bundle, identity.Fingerprint, false)
+	if err != nil {
+		t.Fatalf("prepareServeBundleSource(sqlite local): %v", err)
+	}
+	if fact.BundleSource != storerunlifecycle.BundleSourceEphemeral || fact.BundleHash == "" || fact.BundleFingerprint != identity.Fingerprint {
+		t.Fatalf("source fact = %#v", fact)
+	}
+}
+
 func TestCLI_NoArgCommandsRejectUnexpectedArgs(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -3480,6 +3497,7 @@ func TestRunForkRuntimeOwnerHarness_DryRunUsesCanonicalPlannerJSON(t *testing.T)
 	}
 	var buf bytes.Buffer
 	code := runForkRuntimeOwnerHarness(ctx, t.TempDir(), []string{
+		"--store", "postgres",
 		"--dry-run",
 		"--run", runID,
 		"--at", eventID,
@@ -3544,6 +3562,7 @@ func TestRunForkRuntimeOwnerHarness_DryRunJSONReportsDeliveryEventReplayReady(t 
 
 	var buf bytes.Buffer
 	code := runForkRuntimeOwnerHarness(ctx, t.TempDir(), []string{
+		"--store", "postgres",
 		"--dry-run",
 		"--run", runID,
 		"--at", eventID,
@@ -3597,6 +3616,7 @@ func TestRunForkRuntimeOwnerHarness_DryRunContractsAddsContractFrontierAdmission
 	repo := repoRoot()
 	var buf bytes.Buffer
 	code := runForkRuntimeOwnerHarness(ctx, repo, []string{
+		"--store", "postgres",
 		"--dry-run",
 		"--run", runID,
 		"--at", eventID,
@@ -3762,6 +3782,7 @@ func TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteThroughCanonicalOwne
 
 	var buf bytes.Buffer
 	code := runForkRuntimeOwnerHarness(context.Background(), repo, []string{
+		"--store", "postgres",
 		"--contracts", contractsRoot,
 		"--run", sourceRunID,
 		"--at", sourceEventID,
@@ -3860,6 +3881,7 @@ func TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteReportsSourceAdvance
 
 	var buf bytes.Buffer
 	code := runForkRuntimeOwnerHarness(context.Background(), repo, []string{
+		"--store", "postgres",
 		"--contracts", contractsRoot,
 		"--run", sourceRunID,
 		"--at", sourceEventID,
@@ -3938,6 +3960,7 @@ func TestRunForkRuntimeOwnerHarness_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t
 	contractsRoot := filepath.Join(repo, "tests", "tier11-flow-composition", "test-sibling-both-instantiated-isolated")
 	var buf bytes.Buffer
 	code := runForkRuntimeOwnerHarness(ctx, repo, []string{
+		"--store", "postgres",
 		"--materialize-only",
 		"--run", runID,
 		"--at", eventID,
@@ -4010,6 +4033,7 @@ func TestRunForkRuntimeOwnerHarness_ActivateUsesCanonicalStoreOwnerJSON(t *testi
 
 	var buf bytes.Buffer
 	code := runForkRuntimeOwnerHarness(ctx, t.TempDir(), []string{
+		"--store", "postgres",
 		"--activate",
 		"--run", materialized.ForkRunID,
 		"--json",
@@ -4062,6 +4086,7 @@ func TestRunForkRuntimeOwnerHarness_ActivateNonSelectedDoesNotRequireSelectedBin
 
 	var buf bytes.Buffer
 	code := runForkRuntimeOwnerHarness(ctx, t.TempDir(), []string{
+		"--store", "postgres",
 		"--activate",
 		"--run", materialized.ForkRunID,
 		"--json",
@@ -4092,6 +4117,7 @@ func TestRunForkRuntimeOwnerHarness_ActivateSelectedBindingConsumesRuntimeAdmiss
 
 	var materializeOut bytes.Buffer
 	materializeCode := runForkRuntimeOwnerHarness(ctx, repo, []string{
+		"--store", "postgres",
 		"--materialize-only",
 		"--run", runID,
 		"--at", eventID,
@@ -4108,6 +4134,7 @@ func TestRunForkRuntimeOwnerHarness_ActivateSelectedBindingConsumesRuntimeAdmiss
 
 	var activateOut bytes.Buffer
 	activateCode := runForkRuntimeOwnerHarness(ctx, repo, []string{
+		"--store", "postgres",
 		"--activate",
 		"--run", materialized.ForkRunID,
 		"--json",
@@ -4159,6 +4186,7 @@ func TestRunForkRuntimeOwnerHarness_ActivateSelectedBindingBlocksReplayWithoutSe
 
 	var materializeOut bytes.Buffer
 	materializeCode := runForkRuntimeOwnerHarness(ctx, repo, []string{
+		"--store", "postgres",
 		"--materialize-only",
 		"--run", runID,
 		"--at", eventID,
@@ -4175,6 +4203,7 @@ func TestRunForkRuntimeOwnerHarness_ActivateSelectedBindingBlocksReplayWithoutSe
 
 	var activateOut bytes.Buffer
 	activateCode := runForkRuntimeOwnerHarness(ctx, repo, []string{
+		"--store", "postgres",
 		"--activate",
 		"--run", materialized.ForkRunID,
 		"--json",

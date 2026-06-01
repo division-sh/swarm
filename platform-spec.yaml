@@ -1991,15 +1991,15 @@ engine:
     backend_ids:
       postgres:
         status: active_supported_runtime_backend
-        meaning: External Postgres runtime store. Postgres remains explicitly selectable for production and existing operator deployments.
+        meaning: External Postgres runtime store. Postgres remains explicitly selectable for production and existing operator deployments through flag, environment, or runtime config.
       sqlite:
-        status: explicit_local_store_backend_until_runtime_construction_gate
+        status: active_local_dev_default_runtime_backend
         meaning: >
-          Local/dev SQLite runtime store selection. Explicit sqlite selection may construct the selected typed SQLite store
-          owners promoted by #1086 and staged by #1087, including backend-neutral runtime diagnostics/log persistence
-          promoted by #1150 and backend-neutral mailbox_write materialization promoted by #1186, without exposing a raw
-          runtime SQL handle to Postgres-only consumers. SQLite remains staged until the public default flip is separately
-          proven by #1088; it does not promote production multi-writer SQLite semantics.
+          Local/dev SQLite runtime store selection. No-selection local/dev runtime startup resolves to SQLite through the
+          rollout default owned by internal/store/backendselection. Explicit sqlite selection constructs the selected typed
+          SQLite store owners promoted by #1086/#1087/#1147/#1148/#1149/#1150/#1186/#1157 without exposing a raw runtime
+          SQL handle to Postgres-only runtime consumers. SQLite is the local/dev default; it does not promote production
+          multi-writer SQLite semantics.
     selector_precedence:
       source_order:
       - flag
@@ -2014,11 +2014,12 @@ engine:
       runtime_config:
         backend_key: store.backend
       rollout_default:
-        active_no_selection_default_until_sqlite_runtime_support: postgres
-        future_local_dev_default_after_supported_surface_proof: sqlite
+        active_no_selection_default: sqlite
+        postgres_opt_in_backend: postgres
         rule: >
-          No-selection must not expose a broken SQLite runtime default before #1088 proves the supported SQLite runtime
-          path and explicit Postgres opt-in path together.
+          No-selection local/dev runtime startup resolves to SQLite. Postgres remains explicitly selectable through
+          --store postgres, SWARM_STORE_BACKEND=postgres, or store.backend=postgres and remains the production/external
+          backend.
     sqlite_path:
       canonical_owner: internal/store/backendselection SQLite path resolver
       environment: SWARM_SQLITE_PATH
@@ -2052,15 +2053,19 @@ engine:
         Existing SWARM_DB_* / PG* variables and database.* config keys are Postgres connection details after the canonical
         selector resolves to postgres. They are not generic backend selectors and must not imply backend selection by
         presence alone.
-    staged_runtime_rule:
+    runtime_backend_rule:
     - Unsupported backend ids fail closed with supported backend guidance.
     - >
-      Explicit sqlite selection is recognized as a canonical backend id. It may construct the selected typed SQLite store
-      owners without passing a raw runtime SQL handle into Postgres-only runtime consumers. runtime.NewRuntime must
-      consume backend-neutral owners for runtime construction, including #1186 mailbox_write materialization, while public
-      default selection and CI/public support surfaces split to #1088/#1089 remain unavailable until their owning children land.
+      SQLite is recognized as the active local/dev default backend id. It constructs the selected typed SQLite store owners
+      without passing a raw runtime SQL handle into Postgres-only runtime consumers. runtime.NewRuntime must consume
+      backend-neutral owners for runtime construction, including #1186 mailbox_write materialization and #1157 agent.usage
+      reads.
     - Explicit postgres selection must remain available through flag, environment, and runtime config and must reach the
       existing Postgres runtime store path.
+    - >
+      Local/dev SQLite `swarm run --contracts` may stamp an ephemeral bundle source fact when no Postgres bundle catalog
+      is present. DB-loaded `--bundle-hash` boot remains Postgres-only until a separate bundle-catalog portability owner
+      promotes SQLite support.
     required_consumers:
     - cmd/swarm defaultServeOptions
     - cmd/swarm swarm serve --store
@@ -2070,10 +2075,10 @@ engine:
     - cmd/swarm runForkRuntimeOwnerHarness
     - runtime config loading for store.backend and store.sqlite.path
     split_boundaries:
-    - "SQLite dialect/schema/bootstrap remains split to #1085."
-    - "Backend-neutral core runtime persistence stores remain split to #1086."
+    - "SQLite dialect/schema/bootstrap is promoted by #1085."
+    - "Backend-neutral core runtime persistence stores are promoted by #1086."
     - "SQLite runtime construction semantics remain under #1087 parent closeout; mailbox_write materialization is promoted by #1186 and must consume its backend-neutral owner rather than the raw pipeline SQL database."
-    - "Public local/dev default flip plus zero-service swarm run proof remains split to #1088."
+    - "Public local/dev default flip plus zero-service swarm run proof is promoted by #1088."
     - "Docs, CI, and repo-wide stale-default closeout remains split to #1089."
   runtime_store_schema_dialect_bootstrap:
     promoted_by: '#1085'
@@ -2116,9 +2121,9 @@ engine:
         SQLite must use SQLite catalog/PRAGMA inspection. Runtime readers may consume capability results, but runtime SQL
         portability remains split until #1086/#1087.
     split_boundaries:
-    - "Core runtime store method portability remains split to #1086."
-    - "Explicit SQLite local-runtime session locking, event delivery/replay, and trace/read model semantics remain staged under #1087 and do not unblock runtime construction until the raw-SQL consumer blocker is resolved or explicitly split."
-    - "Public local/dev default flip plus zero-service swarm run proof remains split to #1088."
+    - "Core runtime store method portability is promoted by #1086."
+    - "Explicit SQLite local-runtime session locking, event delivery/replay, and trace/read model semantics are promoted under #1087 child closeout."
+    - "Public local/dev default flip plus zero-service swarm run proof is promoted by #1088."
     - "Docs, CI, and repo-wide stale-default closeout remains split to #1089."
   runtime_core_persistence_store_contracts:
     promoted_by: '#1086'
@@ -2128,15 +2133,15 @@ engine:
       Core runtime persistence selected for #1086 is owned by typed store contracts selected during runtime store construction.
       CLI/runtime startup may keep raw database handles only for explicitly split surfaces, but selected core persistence
       operations must be reachable through the runtime store bundle instead of treating Postgres-only construction as the
-      semantic owner. SQLite support at this layer is file-backed selected-store support only; it is not the public local/dev
-      default and does not promote production SQLite semantics.
+      semantic owner. SQLite support at this layer is file-backed local/dev runtime support; it is the public local/dev
+      default promoted by #1088 and does not promote production SQLite semantics.
     backend_implementations:
       postgres:
         owner: internal/store.PostgresStore implementations consumed through selected runtime store interfaces
         status: active_supported_runtime_backend
       sqlite:
         owner: internal/store.SQLiteRuntimeStore
-        status: staged_selected_core_store_backend
+        status: active_local_dev_default_store_backend
         rules:
         - Must be file-backed and use the canonical SQLite path selected by internal/store/backendselection.
         - "Must consume the #1085 SQLite schema/bootstrap capability owner before selected runtime methods execute."
@@ -2148,9 +2153,8 @@ engine:
           to Postgres-only runtime consumers.
         - Must not pass a raw runtime SQL handle to Postgres-only runtime consumers.
         - >
-          Must keep public default selection fail-closed until #1088 proves zero-service SQLite `swarm run` and explicit
-          Postgres opt-in together. Explicit SQLite construction remains local/dev selected-store support only; it does
-          not promote production multi-writer SQLite semantics.
+          Must support the #1088 zero-service SQLite `swarm run` local/dev default and explicit Postgres opt-in proof.
+          SQLite construction remains local/dev support only; it does not promote production multi-writer SQLite semantics.
     selected_contracts:
     - name: runtime_store_bundle_construction
       owner: cmd/swarm buildStores plus storeBundle.runtimeStores consuming typed runtime store interfaces
@@ -2200,7 +2204,7 @@ engine:
       - public operator agent.usage reads over spend_ledger owned by operator_agent_usage_read_rows
       - tool executor entity and human-task persistence owned by runtime_tool_entity_and_human_task_rows
       - runtime diagnostics/logging owned by #1150
-      - local/dev default flip and zero-service swarm run proof owned by #1088
+      - broader docs/CI/repo-wide closeout owned by #1089
       - production multi-writer SQLite budget concurrency semantics
     - name: operator_agent_usage_read_rows
       owner: internal/store.OperatorAgentUsageReadStore consumed by api_specification.method_catalog.agent.usage through apiv1.OperatorReadOptions.AgentUsage
@@ -2217,7 +2221,7 @@ engine:
       excludes:
       - spend writes, threshold evaluation, and runtime budget side effects owned by runtime_budget_spend_rows
       - agent.diagnose, agent.delivery_diagnostics, conversation, dashboard, trace, and runtime diagnostics surfaces
-      - local/dev default flip and zero-service swarm run proof owned by #1088
+      - broader docs/CI/repo-wide closeout owned by #1089
       - public-source and CI closeout owned by #1089
       - production multi-writer SQLite concurrency semantics
     - name: runtime_tool_entity_and_human_task_rows
@@ -2235,7 +2239,7 @@ engine:
       - public operator mailbox API decisions owned by api_specification.method_catalog.mailbox.*
       - public operator agent.usage reads over spend_ledger owned by operator_agent_usage_read_rows
       - runtime diagnostics/logging owned by #1150
-      - local/dev default flip and zero-service swarm run proof owned by #1088
+      - broader docs/CI/repo-wide closeout owned by #1089
       - production multi-writer SQLite concurrency semantics
     - name: runtime_diagnostics_log_rows
       owner: internal/runtime.RuntimeLogPersistence consumed by internal/runtime.RuntimeLogger through runtime.Stores.RuntimeLogStore
@@ -2250,7 +2254,7 @@ engine:
         persistence, bundle-source fail-closed run creation, and run counter synchronization.
       excludes:
       - public operator agent.usage reads over spend_ledger owned by operator_agent_usage_read_rows
-      - local/dev default flip and zero-service swarm run proof owned by #1088
+      - broader docs/CI/repo-wide closeout owned by #1089
       - repo-wide CI closeout owned by #1089
       - production multi-writer SQLite concurrency semantics
     - name: mailbox_write_materialization_rows
@@ -2267,7 +2271,7 @@ engine:
       excludes:
       - broad public mailbox decision API behavior owned by api_specification.method_catalog.mailbox.*
       - dashboard and digest mailbox read closure
-      - public local/dev default flip and zero-service swarm run proof owned by #1088
+      - broader docs/CI/repo-wide closeout owned by #1089
       - repo-wide CI closeout owned by #1089
       - production multi-writer SQLite concurrency semantics
     - name: mailbox_rows
@@ -2329,7 +2333,7 @@ engine:
         consumer must receive a separately gated backend-neutral owner before it can participate in explicit SQLite runtime
         construction.
     split_boundaries:
-    - "Public local/dev SQLite default flip and zero-service swarm run proof remain split to #1088."
+    - "Public local/dev SQLite default flip and zero-service swarm run proof are promoted by #1088."
     - "Docs, CI, repo-wide stale-default closeout, and #1066 parent proof remain split to #1089."
     - "Production multi-writer SQLite concurrency semantics are not promoted by #1087."
     - "Additional raw-SQL runtime feature parity for SQLite requires a separately gated backend-neutral owner before use."
@@ -5715,7 +5719,8 @@ multi_bundle_persistence:
         - DB-loaded same-bundle source/fork loaders consume the persisted bundle catalog runtime source owner.
         - New-work routing and bundle_hash admission remain #1022.
         - Bundle register/delete APIs remain #1017/#1018/#1019.
-        - SQLite runtime support remains blocked by #1087/#1088 unless separately gated.
+        - SQLite local/dev runtime support is promoted for `swarm run --contracts`, but DB-loaded `--bundle-hash`
+          bundle-catalog boot remains Postgres-only unless separately gated.
     serve_db_loaded_runtime_source:
       status: implemented_for_boot_pinned_postgres_serve_bundle_hash_contexts
       cli_flag: 'swarm serve --bundle-hash <bundle-v1:sha256:<64 lowercase hex>> [--bundle-hash <bundle-v1:sha256:<64 lowercase hex>> ...]'

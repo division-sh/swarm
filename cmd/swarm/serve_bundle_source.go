@@ -17,7 +17,7 @@ func prepareServeBundleSource(ctx context.Context, stores storeBundle, bundle *r
 		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("derive canonical bundle hash: %w", err)
 	}
 	source := storerunlifecycle.BundleSourcePersisted
-	if dev {
+	if dev || stores.Postgres == nil {
 		source = storerunlifecycle.BundleSourceEphemeral
 	}
 	fact := runtimecorrelation.BundleSourceFact{
@@ -25,11 +25,8 @@ func prepareServeBundleSource(ctx context.Context, stores storeBundle, bundle *r
 		BundleSource:      source,
 		BundleFingerprint: strings.TrimSpace(legacyFingerprint),
 	}.Normalized()
-	if dev {
+	if source == storerunlifecycle.BundleSourceEphemeral {
 		return fact, nil
-	}
-	if stores.Postgres == nil {
-		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("postgres bundle catalog store is required for persisted serve bundle source")
 	}
 	projection, err := runtimecontracts.BuildBundleCatalogProjection(bundle)
 	if err != nil {

@@ -20,8 +20,9 @@ const (
 )
 
 var (
-	ErrAlreadyPaused = errors.New("runtime ingress already paused")
-	ErrNotPaused     = errors.New("runtime ingress is not paused")
+	ErrAlreadyPaused       = errors.New("runtime ingress already paused")
+	ErrNotPaused           = errors.New("runtime ingress is not paused")
+	ErrStateNotInitialized = errors.New("runtime ingress state is not initialized")
 )
 
 type Status string
@@ -214,6 +215,13 @@ func (c *Controller) ensureState(ctx context.Context, now time.Time) (State, err
 		return State{Status: StatusRunning}, nil
 	}
 	if c.store != nil {
+		state, err := c.store.LoadRuntimeIngressState(ctx)
+		if err == nil {
+			return state, nil
+		}
+		if !errors.Is(err, ErrStateNotInitialized) {
+			return State{}, err
+		}
 		return c.store.EnsureRuntimeIngressState(ctx, now)
 	}
 	c.mu.Lock()

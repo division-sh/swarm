@@ -56,6 +56,19 @@ func resolveEventPublicationBundleScope(
 		resolvedHash = runAvailability.BundleHash
 		params.BundleSource = runAvailability.BundleSource
 	}
+	if resolvedHash == "" && identity.LegacyFingerprint == "" && !hasRunContext && runtimeContextManager(opts) == nil {
+		currentFact, hasCurrentFact := eventPublicationRuntimeSourceFact(ctx, opts.Events)
+		currentFact = currentFact.Normalized()
+		if hasCurrentFact &&
+			currentFact.BundleHash != "" &&
+			currentFact.BundleSource == storerunlifecycle.BundleSourceEphemeral &&
+			currentFact.BundleFingerprint != "" {
+			params.BundleHash = currentFact.BundleHash
+			params.BundleSource = currentFact.BundleSource
+			params.BundleFingerprint = currentFact.BundleFingerprint
+			return runtimecorrelation.WithBundleSourceFact(ctx, currentFact), opts, params, nil
+		}
+	}
 	if resolvedHash == "" {
 		details := map[string]any{
 			"field":  "bundle_hash",

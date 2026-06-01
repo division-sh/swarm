@@ -48,11 +48,11 @@ func TestResolveBackendSourcePrecedence(t *testing.T) {
 			src:  SourceRuntimeConfig,
 		},
 		{
-			name: "rollout default remains postgres until SQLite runtime support lands",
+			name: "rollout default is sqlite for local dev",
 			in: Input{
 				RepoRoot: repo,
 			},
-			want: BackendPostgres,
+			want: BackendSQLite,
 			src:  SourceRolloutDefault,
 		},
 	}
@@ -161,17 +161,5 @@ func TestResolveRejectsEmptyExplicitSQLitePath(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "sqlite path from environment must be non-empty") {
 		t.Fatalf("error = %v, want empty path guidance", err)
-	}
-}
-
-func TestSQLiteUnsupportedRuntimeErrorNamesTrackedTail(t *testing.T) {
-	err := SQLiteUnsupportedRuntimeError(filepath.Join("tmp", "dev.db"))
-	if err == nil {
-		t.Fatal("SQLiteUnsupportedRuntimeError returned nil")
-	}
-	for _, want := range []string{"sqlite", "#1085-#1088", "tmp"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("error %q missing %q", err.Error(), want)
-		}
 	}
 }

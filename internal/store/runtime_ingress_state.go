@@ -40,7 +40,7 @@ func (s *PostgresStore) LoadRuntimeIngressState(ctx context.Context) (runtimeing
 		return state, nil
 	}
 	if err == sql.ErrNoRows {
-		return runtimeingress.State{}, fmt.Errorf("runtime ingress state is not initialized")
+		return runtimeingress.State{}, runtimeingress.ErrStateNotInitialized
 	}
 	return runtimeingress.State{}, fmt.Errorf("load runtime ingress state: %w", err)
 }

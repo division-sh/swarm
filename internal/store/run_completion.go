@@ -164,6 +164,7 @@ func normalRunCompletionPipelinesSettledTx(ctx context.Context, tx *sql.Tx, runI
 				AND r.subscriber_type = 'platform'
 				AND r.subscriber_id = 'pipeline'
 			WHERE e.run_id = $1::uuid
+			  AND e.event_name <> '`+runtimeLogEventName+`'
 			  AND (r.event_id IS NULL OR COALESCE(r.outcome, '') <> 'success')
 		)
 	`, runID).Scan(&unsettled); err != nil {

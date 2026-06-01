@@ -139,8 +139,8 @@ func TestStartLocalRunServeConsumesContractPathConfigResolver(t *testing.T) {
 	if serveOpts.MCPListenAddr != defaultMCPListenAddr {
 		t.Fatalf("mcp listen addr = %q, want unchanged default %q", serveOpts.MCPListenAddr, defaultMCPListenAddr)
 	}
-	if serveOpts.StoreMode != "postgres" || serveOpts.StoreModeSet {
-		t.Fatalf("store opts = mode %q set %v, want staged postgres default with no flag source", serveOpts.StoreMode, serveOpts.StoreModeSet)
+	if serveOpts.StoreMode != "sqlite" || serveOpts.StoreModeSet {
+		t.Fatalf("store opts = mode %q set %v, want sqlite default with no flag source", serveOpts.StoreMode, serveOpts.StoreModeSet)
 	}
 }
 

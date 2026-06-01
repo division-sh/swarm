@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,16 +38,28 @@ func NewSQLiteSchemaStore(path string) (*SQLiteSchemaStore, error) {
 			return nil, fmt.Errorf("create sqlite schema store parent directory: %w", err)
 		}
 	}
-	db, err := sql.Open("sqlite", cleanPath)
+	db, err := sql.Open("sqlite", sqliteFileDSN(cleanPath))
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite schema store: %w", err)
 	}
+	db.SetMaxOpenConns(4)
+	db.SetMaxIdleConns(4)
 	store := &SQLiteSchemaStore{DB: db, path: cleanPath}
 	if err := store.configure(context.Background()); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
 	return store, nil
+}
+
+func sqliteFileDSN(path string) string {
+	u := url.URL{Scheme: "file", Path: path}
+	q := u.Query()
+	q.Add("_pragma", "foreign_keys(ON)")
+	q.Add("_pragma", "busy_timeout(5000)")
+	q.Add("_pragma", "journal_mode(WAL)")
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 func sqlitePathIsInMemory(path string) bool {
@@ -530,7 +543,6 @@ func loadSQLiteSchemaColumnCatalog(ctx context.Context, db *sql.DB) (schemaColum
 	if err != nil {
 		return schemaColumnCatalog{}, fmt.Errorf("inspect sqlite schema tables: %w", err)
 	}
-	defer rows.Close()
 
 	tableNames := make([]string, 0)
 	for rows.Next() {
@@ -544,7 +556,11 @@ func loadSQLiteSchemaColumnCatalog(ctx context.Context, db *sql.DB) (schemaColum
 		}
 	}
 	if err := rows.Err(); err != nil {
+		_ = rows.Close()
 		return schemaColumnCatalog{}, fmt.Errorf("read sqlite schema tables: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return schemaColumnCatalog{}, fmt.Errorf("close sqlite schema table rows: %w", err)
 	}
 
 	for _, tableName := range tableNames {
@@ -594,8 +610,8 @@ func sqliteEventReceiptsTypedSubscriberIdentityKeyExists(ctx context.Context, db
 	if err != nil {
 		return false, fmt.Errorf("inspect sqlite event_receipts indexes: %w", err)
 	}
-	defer rows.Close()
 
+	indexNames := []string{}
 	for rows.Next() {
 		var seq int
 		var indexName string
@@ -608,6 +624,19 @@ func sqliteEventReceiptsTypedSubscriberIdentityKeyExists(ctx context.Context, db
 		if unique != 1 {
 			continue
 		}
+		indexName = strings.TrimSpace(indexName)
+		if indexName != "" {
+			indexNames = append(indexNames, indexName)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return false, fmt.Errorf("read sqlite event_receipts indexes: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return false, fmt.Errorf("close sqlite event_receipts index rows: %w", err)
+	}
+	for _, indexName := range indexNames {
 		columns, err := sqliteIndexColumns(ctx, db, indexName)
 		if err != nil {
 			return false, err
@@ -615,9 +644,6 @@ func sqliteEventReceiptsTypedSubscriberIdentityKeyExists(ctx context.Context, db
 		if sameStringSlice(columns, []string{"event_id", "subscriber_type", "subscriber_id"}) {
 			return true, nil
 		}
-	}
-	if err := rows.Err(); err != nil {
-		return false, fmt.Errorf("read sqlite event_receipts indexes: %w", err)
 	}
 	return false, nil
 }
