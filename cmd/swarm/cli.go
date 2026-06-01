@@ -143,6 +143,13 @@ func newServeCommand(ctx context.Context, repo string, runServe func(context.Con
 					return fmt.Errorf("--data must be non-empty")
 				}
 			}
+			if cmd.Flags().Changed("workspace-backend") {
+				backend, err := normalizeWorkspaceBackend(opts.WorkspaceBackend, "--workspace-backend")
+				if err != nil {
+					return err
+				}
+				opts.WorkspaceBackend = backend
+			}
 			if opts.Dev {
 				opts.AbandonActiveRuns = true
 				opts.NoRequireBundleMatch = true
@@ -152,6 +159,7 @@ func newServeCommand(ctx context.Context, repo string, runServe func(context.Con
 				opts.RequireBundleMatch = false
 			}
 			opts.StoreModeSet = cmd.Flags().Changed("store")
+			opts.WorkspaceBackendSet = cmd.Flags().Changed("workspace-backend")
 			if opts.ShutdownGrace <= 0 {
 				return fmt.Errorf("--shutdown-grace must be a positive duration")
 			}
@@ -187,6 +195,7 @@ func newServeCommand(ctx context.Context, repo string, runServe func(context.Con
 	cmd.Flags().StringVar(&opts.Backend, "backend", opts.Backend, "LLM backend profile for local runtime startup: anthropic, claude_cli, or openai_compatible")
 	cmd.Flags().StringVar(&opts.ContractsPath, "contracts", opts.ContractsPath, "Path to Swarm contract bundle root")
 	cmd.Flags().StringVar(&opts.DataSource, "data", opts.DataSource, "Path to agent-visible read-only /data reference directory")
+	cmd.Flags().StringVar(&opts.WorkspaceBackend, "workspace-backend", opts.WorkspaceBackend, "Workspace backend for local serve: docker (default isolation backend) or host (explicit local-dev opt-in)")
 	cmd.Flags().StringArrayVar(&opts.BundleHashes, "bundle-hash", opts.BundleHashes, "Load a persisted bundle catalog row by canonical bundle_hash; repeat to boot multiple pinned contexts")
 	cmd.Flags().StringVar(&opts.PlatformSpecPath, "platform-spec", opts.PlatformSpecPath, "Path to platform spec yaml")
 	cmd.Flags().StringVar(&opts.StoreMode, "store", opts.StoreMode, runtimeStoreBackendHelp)

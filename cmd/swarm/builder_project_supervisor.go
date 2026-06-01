@@ -28,6 +28,7 @@ type runtimeProjectSupervisor struct {
 	ready            *atomic.Bool
 	dev              bool
 	mountSources     workspaceMountSources
+	workspaceBackend workspaceBackendSelection
 	startRuntime     func(context.Context, *runtime.Runtime) error
 	shutdownRuntime  func(context.Context, *runtime.Runtime, runtime.ShutdownOptions) error
 	loadWorkflow     func(repoRoot, contractsRoot, platformSpecPath string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error)
@@ -51,6 +52,7 @@ func newRuntimeProjectSupervisor(
 	stores storeBundle,
 	ready *atomic.Bool,
 	mountSources workspaceMountSources,
+	workspaceBackend workspaceBackendSelection,
 	initialRoot string,
 	initialBundle *runtimecontracts.WorkflowContractBundle,
 	initialSource semanticview.Source,
@@ -69,6 +71,7 @@ func newRuntimeProjectSupervisor(
 		ready:            ready,
 		dev:              dev,
 		mountSources:     mountSources,
+		workspaceBackend: workspaceBackend,
 		startRuntime: func(ctx context.Context, rt *runtime.Runtime) error {
 			return rt.Start(ctx)
 		},
@@ -83,7 +86,7 @@ func newRuntimeProjectSupervisor(
 		},
 		initStateStores: initializeStateStores,
 		newWorkspaces: func(stores storeBundle, contractsRoot string, source semanticview.Source, mountSources workspaceMountSources) (workspace.Lifecycle, error) {
-			return configuredWorkspaceLifecycle(stores.SQLDB, contractsRoot, source, mountSources)
+			return configuredWorkspaceLifecycleForBackend(stores.SQLDB, contractsRoot, source, mountSources, workspaceBackend)
 		},
 		createRuntime: func(ctx context.Context, deps runtime.RuntimeDeps) (*runtime.Runtime, error) {
 			return runtime.NewRuntime(ctx, deps)

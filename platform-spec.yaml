@@ -6592,6 +6592,57 @@ workspace_model:
     - '#1138 host workspace backend'
     - SQLite local default and broader local runtime onboarding
     - mount destination override semantics such as SWARM_WORKSPACE_DATA_MOUNT
+  workspace_backend_selection:
+    promoted_by: '#1138'
+    implementation_status: implemented_first_slice
+    canonical_owner: platform-spec.yaml#workspace_model.workspace_backend_selection
+    scope: >
+      Defines the workspace backend selector for `swarm serve` boot, dynamic Builder project reload, and selected-contract
+      run-fork lifecycle consumers. The selector chooses either the existing Docker workspace lifecycle or the explicit
+      host local-dev lifecycle; it does not make host execution behavior equivalent to Docker isolation.
+    cli_flag: --workspace-backend <docker|host>
+    config_key: workspace.backend
+    env_var: SWARM_WORKSPACE_BACKEND
+    source_order:
+    - --workspace-backend
+    - workspace.backend
+    - SWARM_WORKSPACE_BACKEND
+    - docker default
+    default_backend: docker
+    backends:
+      docker:
+        behavior: >
+          Default workspace backend. Startup preserves the existing Docker fail-closed checks for the configured workspace
+          image, Docker binary availability, Docker network, container creation, mounted `/data`, mounted contracts, and
+          managed container lifecycle.
+      host:
+        behavior: >
+          Explicit local-dev opt-in. Startup consumes the selected `/data` source from
+          `workspace_model.data_source_authority`, the loaded contracts source, and a platform-managed host workspace root.
+          It MUST NOT require Docker, build Docker images, or create containers. It MUST fail closed for unsupported execution
+          surfaces until those host execution semantics are explicitly promoted.
+        workspace_root:
+          env_var: SWARM_WORKSPACE_HOST_ROOT
+          default: ~/.swarm/workspaces
+          rule: >
+            The host workspace root is platform-managed and writable. Startup MUST create/validate required workspace roots and
+            MUST reject roots that overlap the read-only `/data` source or loaded contracts source.
+    failure_behavior:
+    - Unsupported backend names fail closed before runtime construction.
+    - Empty explicit backend sources from the flag, config, or environment fail closed instead of falling through.
+    - Host backend MUST reject `SWARM_WORKSPACE_VOLUMES_FROM`; the host backend consumes explicit path authorities, not Docker
+      volume inheritance.
+    - Host backend MUST fail closed for Claude CLI, native tool execution, and tool relay surfaces unless a later gate promotes
+      safe host execution semantics.
+    consumers:
+    - swarm serve boot workspace lifecycle
+    - dynamic Builder project reload workspace lifecycle
+    - selected-contract run-fork workspace lifecycle
+    split_scope:
+    - '#1137 Compose/Postgres onboarding and Compose cleanup'
+    - '#1136 broader local onboarding/docs'
+    - full host Claude CLI, native tool execution, and tool relay parity
+    - production SQLite multi-writer semantics
   standard_mounts:
     description: Three mount points are available to every agent session. Products cannot add new mount points — they configure
       access and scope for these three via workspace class definitions.
@@ -8338,6 +8389,21 @@ cli_specification:
           `workspace_model.data_source_authority` before constructing any workspace lifecycle. The command MUST NOT
           derive `/data` from the Swarm source checkout or from a repo-local `data/` directory unless that path was
           explicitly selected by the operator through the promoted source order.
+        consumers:
+        - serve boot workspace lifecycle
+        - dynamic Builder project reload workspace lifecycle
+        - selected-contract run-fork workspace lifecycle
+      workspace_backend_selection:
+        promoted_by: '#1138'
+        owner: workspace_model.workspace_backend_selection
+        flag: --workspace-backend <docker|host>
+        config_key: workspace.backend
+        env_var: SWARM_WORKSPACE_BACKEND
+        default_backend: docker
+        rule: >
+          `swarm serve` MUST resolve workspace backend selection through
+          `workspace_model.workspace_backend_selection` before constructing any workspace lifecycle. The command MUST keep
+          Docker as the default isolation backend and MUST require an explicit selector for the host local-dev backend.
         consumers:
         - serve boot workspace lifecycle
         - dynamic Builder project reload workspace lifecycle

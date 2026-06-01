@@ -23,8 +23,15 @@ func (r *ClaudeCLIRuntime) run(ctx context.Context, args []string, target *works
 	return r.runWithInput(ctx, args, target, "", MonitorTurnMeta{})
 }
 
+func errClaudeHostWorkspaceUnsupported() error {
+	return fmt.Errorf("%w: host workspace backend does not support Claude CLI execution yet", ErrClaudeWorkspaceRequired)
+}
+
 func (r *ClaudeCLIRuntime) runWithInput(ctx context.Context, args []string, target *workspace.Target, input string, meta MonitorTurnMeta) (*Response, error) {
 	timeout := r.effectiveCLITimeout(ctx)
+	if target != nil && target.HostBackend() {
+		return nil, errClaudeHostWorkspaceUnsupported()
+	}
 	if target == nil || !target.Enabled() {
 		return nil, fmt.Errorf("%w: claude sessions must run in a container workspace", ErrClaudeWorkspaceRequired)
 	}

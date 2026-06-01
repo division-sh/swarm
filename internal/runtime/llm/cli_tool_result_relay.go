@@ -92,6 +92,9 @@ func (r *ClaudeCLIRuntime) runWorkspaceCommand(ctx context.Context, target *work
 	if r != nil && r.execWorkspaceFn != nil {
 		return r.execWorkspaceFn(ctx, target, stdin, args...)
 	}
+	if target != nil && target.HostBackend() {
+		return nil, nil, 0, errClaudeHostWorkspaceUnsupported()
+	}
 	if target == nil || !target.Enabled() {
 		return nil, nil, 0, fmt.Errorf("%w: claude sessions must run in a container workspace", ErrClaudeWorkspaceRequired)
 	}

@@ -24,11 +24,21 @@ import (
 type Target struct {
 	Container string
 	Workdir   string
+	Backend   string
 }
 
 func (t *Target) Enabled() bool {
 	return t != nil && strings.TrimSpace(t.Container) != ""
 }
+
+func (t *Target) HostBackend() bool {
+	return t != nil && strings.EqualFold(strings.TrimSpace(t.Backend), BackendHost)
+}
+
+const (
+	BackendDocker = "docker"
+	BackendHost   = "host"
+)
 
 type Resolver interface {
 	ResolveWorkspace(ctx context.Context, actor models.AgentConfig) (*Target, error)
@@ -480,6 +490,7 @@ func (m *DockerManager) ResolveWorkspace(ctx context.Context, actor models.Agent
 		return &Target{
 			Container: m.cfg.ScaffoldContainer,
 			Workdir:   m.cfg.ScaffoldWorkdir,
+			Backend:   BackendDocker,
 		}, nil
 	case "system":
 		if err := m.EnsureContainerRunningWithIdentity(ctx, m.cfg.SystemContainer, m.systemContainerIdentity("workspace.ResolveWorkspace", runtimecontaineridentity.KindSystem), []string{
@@ -496,6 +507,7 @@ func (m *DockerManager) ResolveWorkspace(ctx context.Context, actor models.Agent
 		return &Target{
 			Container: m.cfg.SystemContainer,
 			Workdir:   m.cfg.SystemWorkdir,
+			Backend:   BackendDocker,
 		}, nil
 	}
 	scope, scopeKey, err := m.workspaceScopeForActor(actor)
@@ -519,21 +531,12 @@ func (m *DockerManager) ResolveWorkspace(ctx context.Context, actor models.Agent
 	return &Target{
 		Container: container,
 		Workdir:   m.cfg.EntityWorkdir,
+		Backend:   BackendDocker,
 	}, nil
 }
 
 func (m *DockerManager) workspaceClass(actor models.AgentConfig) (string, error) {
-	if cfgClass := strings.TrimSpace(actor.WorkspaceClass); cfgClass != "" {
-		return cfgClass, nil
-	}
-	source := m.semanticSource()
-	if source == nil {
-		return "", nil
-	}
-	if _, entry, ok := semanticview.ResolveAgentRegistryEntry(source, actor); ok {
-		return strings.TrimSpace(entry.WorkspaceClass), nil
-	}
-	return "", nil
+	return workspaceClassForSource(m.semanticSource(), actor)
 }
 
 func workspaceRouteClass(class string) string {
@@ -555,13 +558,29 @@ func (m *DockerManager) semanticSource() semanticview.Source {
 }
 
 func (m *DockerManager) workspaceScopeForActor(actor models.AgentConfig) (string, string, error) {
-	class, err := m.workspaceClass(actor)
+	return workspaceScopeForActor(m.semanticSource(), actor)
+}
+
+func workspaceClassForSource(source semanticview.Source, actor models.AgentConfig) (string, error) {
+	if cfgClass := strings.TrimSpace(actor.WorkspaceClass); cfgClass != "" {
+		return cfgClass, nil
+	}
+	if source == nil {
+		return "", nil
+	}
+	if _, entry, ok := semanticview.ResolveAgentRegistryEntry(source, actor); ok {
+		return strings.TrimSpace(entry.WorkspaceClass), nil
+	}
+	return "", nil
+}
+
+func workspaceScopeForActor(source semanticview.Source, actor models.AgentConfig) (string, string, error) {
+	class, err := workspaceClassForSource(source, actor)
 	if err != nil {
 		return "", "", err
 	}
 	scope := "per-agent"
 	if class != "" {
-		source := m.semanticSource()
 		if source == nil {
 			return "", "", fmt.Errorf("workspace resolution failed: semantic source is required for workspace_class %q", class)
 		}

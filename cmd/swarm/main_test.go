@@ -40,6 +40,7 @@ import (
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/runtime/sessions"
 	runtimetools "swarm/internal/runtime/tools"
+	workspace "swarm/internal/runtime/workspace"
 	"swarm/internal/store"
 	storebackend "swarm/internal/store/backendselection"
 	storerunlifecycle "swarm/internal/store/runlifecycle"
@@ -315,7 +316,7 @@ func TestCLI_ServeOwnsRuntimeStartupFlags(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("serve help code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	for _, want := range []string{"Start the Swarm runtime", "--config", "--backend", "--contracts", "--data", "--bundle-hash", "--api-listen-addr", "API, WebSocket, health, and readiness routes", "--mcp-listen-addr", "MCP and tools routes", "--platform-spec", "--store", "--self-check", "--dev", "--require-bundle-match", "--no-require-bundle-match", "--abandon-active-runs", "--shutdown-grace", "--verbose"} {
+	for _, want := range []string{"Start the Swarm runtime", "--config", "--backend", "--contracts", "--data", "--workspace-backend", "--bundle-hash", "--api-listen-addr", "API, WebSocket, health, and readiness routes", "--mcp-listen-addr", "MCP and tools routes", "--platform-spec", "--store", "--self-check", "--dev", "--require-bundle-match", "--no-require-bundle-match", "--abandon-active-runs", "--shutdown-grace", "--verbose"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("serve help missing %q:\n%s", want, stdout.String())
 		}
@@ -732,6 +733,35 @@ func TestCLI_ServeDataFlagRejectsEmptySource(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "--data must be non-empty") {
 		t.Fatalf("serve stderr = %q, want --data validation error", stderr.String())
+	}
+}
+
+func TestCLI_ServeWorkspaceBackendFlagFeedsServeOptions(t *testing.T) {
+	var captured serveOptions
+	opts := defaultRootCommandOptions()
+	opts.runServe = func(_ context.Context, _ string, serveOpts serveOptions) int {
+		captured = serveOpts
+		return 0
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", "--workspace-backend", "host"}, &stdout, &stderr, opts)
+	if code != 0 {
+		t.Fatalf("serve code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if captured.WorkspaceBackend != workspace.BackendHost || !captured.WorkspaceBackendSet {
+		t.Fatalf("workspace backend opts = backend %q set %v, want host set=true", captured.WorkspaceBackend, captured.WorkspaceBackendSet)
+	}
+}
+
+func TestCLI_ServeWorkspaceBackendFlagRejectsUnsupportedBackend(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", "--workspace-backend", "none"}, &stdout, &stderr, defaultRootCommandOptions())
+	if code == 0 {
+		t.Fatalf("serve code = 0, want failure stdout=%s stderr=%s", stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "--workspace-backend") || !strings.Contains(stderr.String(), "docker or host") {
+		t.Fatalf("serve stderr = %q, want workspace backend validation error", stderr.String())
 	}
 }
 
@@ -1438,6 +1468,45 @@ func TestConfiguredWorkspaceLifecycleRejectsExplicitDataSourceWithVolumesFrom(t 
 	}
 }
 
+func TestConfiguredWorkspaceLifecycleForBackendSelectsHostWithoutDocker(t *testing.T) {
+	t.Setenv("SWARM_WORKSPACE_VOLUMES_FROM", "")
+	t.Setenv("SWARM_WORKSPACE_HOST_ROOT", filepath.Join(t.TempDir(), "host-workspaces"))
+	t.Setenv("SWARM_DOCKER_BIN", filepath.Join(t.TempDir(), "missing-docker"))
+	dataDir := t.TempDir()
+	contractsDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
+		t.Fatalf("write package.yaml: %v", err)
+	}
+	lifecycle, err := configuredWorkspaceLifecycleForBackend(nil, contractsDir, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), workspaceMountSources{
+		DataSource:       dataDir,
+		DataSourceSource: "--data",
+	}, workspaceBackendSelection{Backend: workspace.BackendHost, Source: "--workspace-backend"})
+	if err != nil {
+		t.Fatalf("configuredWorkspaceLifecycleForBackend: %v", err)
+	}
+	manager, ok := lifecycle.(*workspace.HostManager)
+	if !ok {
+		t.Fatalf("lifecycle = %T, want *workspace.HostManager", lifecycle)
+	}
+	if err := manager.ValidateSource(context.Background(), semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})); err != nil {
+		t.Fatalf("ValidateSource: %v", err)
+	}
+	if err := manager.EnsureSystemWorkspaces(context.Background()); err != nil {
+		t.Fatalf("EnsureSystemWorkspaces: %v", err)
+	}
+}
+
+func TestConfiguredWorkspaceLifecycleForBackendRejectsHostVolumesFrom(t *testing.T) {
+	t.Setenv("SWARM_WORKSPACE_VOLUMES_FROM", "swarm-orchestrator")
+	_, err := configuredWorkspaceLifecycleForBackend(nil, t.TempDir(), semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), workspaceMountSources{
+		DataSource:       t.TempDir(),
+		DataSourceSource: "--data",
+	}, workspaceBackendSelection{Backend: workspace.BackendHost, Source: "--workspace-backend"})
+	if err == nil || !strings.Contains(err.Error(), "host workspace backend cannot consume SWARM_WORKSPACE_VOLUMES_FROM") {
+		t.Fatalf("configuredWorkspaceLifecycleForBackend error = %v, want host volumes-from rejection", err)
+	}
+}
+
 func TestResolveWorkspaceMountSourcesPrecedence(t *testing.T) {
 	repoRoot := t.TempDir()
 	flagDir := filepath.Join(repoRoot, "flag-data")
@@ -1574,6 +1643,70 @@ func TestResolveWorkspaceMountSourcesReadsRuntimeConfigAndEnvFallback(t *testing
 	}
 }
 
+func TestResolveWorkspaceBackendPrecedence(t *testing.T) {
+	result, err := resolveWorkspaceBackendFromInput(workspaceBackendInput{
+		FlagBackend:   "host",
+		FlagSet:       true,
+		ConfigBackend: workspace.BackendDocker,
+		ConfigSet:     true,
+		EnvBackend:    workspace.BackendDocker,
+		EnvSet:        true,
+	})
+	if err != nil {
+		t.Fatalf("resolve workspace backend flag precedence: %v", err)
+	}
+	if result.Backend != workspace.BackendHost || result.Source != "--workspace-backend" {
+		t.Fatalf("flag precedence result = %#v, want host from --workspace-backend", result)
+	}
+
+	result, err = resolveWorkspaceBackendFromInput(workspaceBackendInput{
+		ConfigBackend: workspace.BackendHost,
+		ConfigSet:     true,
+		EnvBackend:    workspace.BackendDocker,
+		EnvSet:        true,
+	})
+	if err != nil {
+		t.Fatalf("resolve workspace backend config precedence: %v", err)
+	}
+	if result.Backend != workspace.BackendHost || result.Source != "workspace.backend" {
+		t.Fatalf("config precedence result = %#v, want host from workspace.backend", result)
+	}
+
+	result, err = resolveWorkspaceBackendFromInput(workspaceBackendInput{
+		EnvBackend: workspace.BackendHost,
+		EnvSet:     true,
+	})
+	if err != nil {
+		t.Fatalf("resolve workspace backend env precedence: %v", err)
+	}
+	if result.Backend != workspace.BackendHost || result.Source != envWorkspaceBackend {
+		t.Fatalf("env precedence result = %#v, want host from %s", result, envWorkspaceBackend)
+	}
+
+	result, err = resolveWorkspaceBackendFromInput(workspaceBackendInput{})
+	if err != nil {
+		t.Fatalf("resolve workspace backend default: %v", err)
+	}
+	if result.Backend != workspace.BackendDocker || result.Source != "default" {
+		t.Fatalf("default result = %#v, want docker default", result)
+	}
+}
+
+func TestResolveWorkspaceBackendRejectsEmptyConfigBeforeEnvFallback(t *testing.T) {
+	result, err := resolveWorkspaceBackendFromInput(workspaceBackendInput{
+		ConfigBackend: " \t ",
+		ConfigSet:     true,
+		EnvBackend:    workspace.BackendHost,
+		EnvSet:        true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "workspace.backend") || !strings.Contains(err.Error(), "must be non-empty") {
+		t.Fatalf("resolve empty configured workspace backend error = %v, want fail-closed config rejection before env fallback", err)
+	}
+	if result.Backend != "" || result.Source != "workspace.backend" {
+		t.Fatalf("empty configured workspace backend result = %#v, want no env fallback", result)
+	}
+}
+
 func TestPlatformSpecWorkspaceDataSourceAuthorityPromoted(t *testing.T) {
 	var spec struct {
 		WorkspaceModel struct {
@@ -1647,6 +1780,113 @@ func TestPlatformSpecWorkspaceDataSourceAuthorityPromoted(t *testing.T) {
 	for _, want := range []string{"serve boot", "Builder project reload", "selected-contract run-fork"} {
 		if !joinedContains(command.Consumers, want) {
 			t.Fatalf("serve command data authority consumers missing %q: %#v", want, command.Consumers)
+		}
+	}
+}
+
+func TestPlatformSpecWorkspaceBackendSelectionPromoted(t *testing.T) {
+	var spec struct {
+		WorkspaceModel struct {
+			WorkspaceBackendSelection struct {
+				PromotedBy           string   `yaml:"promoted_by"`
+				ImplementationStatus string   `yaml:"implementation_status"`
+				CanonicalOwner       string   `yaml:"canonical_owner"`
+				Scope                string   `yaml:"scope"`
+				CLIFlag              string   `yaml:"cli_flag"`
+				ConfigKey            string   `yaml:"config_key"`
+				EnvVar               string   `yaml:"env_var"`
+				SourceOrder          []string `yaml:"source_order"`
+				DefaultBackend       string   `yaml:"default_backend"`
+				Backends             map[string]struct {
+					Behavior      string `yaml:"behavior"`
+					WorkspaceRoot struct {
+						EnvVar  string `yaml:"env_var"`
+						Default string `yaml:"default"`
+						Rule    string `yaml:"rule"`
+					} `yaml:"workspace_root"`
+				} `yaml:"backends"`
+				FailureBehavior []string `yaml:"failure_behavior"`
+				Consumers       []string `yaml:"consumers"`
+				SplitScope      []string `yaml:"split_scope"`
+			} `yaml:"workspace_backend_selection"`
+		} `yaml:"workspace_model"`
+		CLISpecification struct {
+			CommandCatalog struct {
+				Serve struct {
+					WorkspaceBackendSelection struct {
+						PromotedBy     string   `yaml:"promoted_by"`
+						Owner          string   `yaml:"owner"`
+						Flag           string   `yaml:"flag"`
+						ConfigKey      string   `yaml:"config_key"`
+						EnvVar         string   `yaml:"env_var"`
+						DefaultBackend string   `yaml:"default_backend"`
+						Consumers      []string `yaml:"consumers"`
+					} `yaml:"workspace_backend_selection"`
+				} `yaml:"serve"`
+			} `yaml:"command_catalog"`
+		} `yaml:"cli_specification"`
+	}
+	data, err := os.ReadFile(filepath.Join(repoRoot(), defaultPlatformSpecPath))
+	if err != nil {
+		t.Fatalf("read platform spec: %v", err)
+	}
+	if err := yaml.Unmarshal(data, &spec); err != nil {
+		t.Fatalf("parse platform spec: %v", err)
+	}
+	authority := spec.WorkspaceModel.WorkspaceBackendSelection
+	if strings.TrimSpace(authority.PromotedBy) != "#1138" || strings.TrimSpace(authority.ImplementationStatus) != "implemented_first_slice" {
+		t.Fatalf("workspace backend authority status = promoted_by:%q implementation_status:%q", authority.PromotedBy, authority.ImplementationStatus)
+	}
+	if !strings.Contains(authority.CanonicalOwner, "workspace_model.workspace_backend_selection") {
+		t.Fatalf("workspace backend canonical owner = %q", authority.CanonicalOwner)
+	}
+	if authority.CLIFlag != "--workspace-backend <docker|host>" || authority.ConfigKey != "workspace.backend" || authority.EnvVar != envWorkspaceBackend {
+		t.Fatalf("workspace backend selectors = %#v", authority)
+	}
+	for _, want := range []string{"--workspace-backend", "workspace.backend", envWorkspaceBackend, "docker default"} {
+		if !stringSliceContains(authority.SourceOrder, want) {
+			t.Fatalf("workspace backend order missing %q: %#v", want, authority.SourceOrder)
+		}
+	}
+	if authority.DefaultBackend != workspace.BackendDocker {
+		t.Fatalf("workspace backend default = %q, want docker", authority.DefaultBackend)
+	}
+	dockerBackend, ok := authority.Backends[workspace.BackendDocker]
+	if !ok || !strings.Contains(dockerBackend.Behavior, "Docker fail-closed") || !strings.Contains(dockerBackend.Behavior, "configured workspace image") {
+		t.Fatalf("docker backend spec missing default fail-closed behavior: %#v", authority.Backends)
+	}
+	hostBackend, ok := authority.Backends[workspace.BackendHost]
+	if !ok || !strings.Contains(hostBackend.Behavior, "Explicit local-dev opt-in") || !strings.Contains(hostBackend.Behavior, "MUST NOT require Docker") {
+		t.Fatalf("host backend spec missing local-dev no-Docker behavior: %#v", authority.Backends)
+	}
+	if hostBackend.WorkspaceRoot.EnvVar != workspace.EnvHostWorkspaceRoot || hostBackend.WorkspaceRoot.Default != "~/.swarm/workspaces" {
+		t.Fatalf("host workspace root spec = %#v", hostBackend.WorkspaceRoot)
+	}
+	for _, want := range []string{"Unsupported backend", "Empty explicit backend", "SWARM_WORKSPACE_VOLUMES_FROM", "Claude CLI", "native tool execution"} {
+		if !joinedContains(authority.FailureBehavior, want) {
+			t.Fatalf("workspace backend failure behavior missing %q: %#v", want, authority.FailureBehavior)
+		}
+	}
+	for _, want := range []string{"serve boot", "Builder project reload", "selected-contract run-fork"} {
+		if !joinedContains(authority.Consumers, want) {
+			t.Fatalf("workspace backend consumers missing %q: %#v", want, authority.Consumers)
+		}
+	}
+	for _, want := range []string{"#1137", "#1136", "full host Claude CLI", "production SQLite"} {
+		if !joinedContains(authority.SplitScope, want) {
+			t.Fatalf("workspace backend split scope missing %q: %#v", want, authority.SplitScope)
+		}
+	}
+	command := spec.CLISpecification.CommandCatalog.Serve.WorkspaceBackendSelection
+	if command.PromotedBy != "#1138" || command.Owner != "workspace_model.workspace_backend_selection" || command.Flag != "--workspace-backend <docker|host>" {
+		t.Fatalf("serve command workspace backend authority = %#v", command)
+	}
+	if command.ConfigKey != "workspace.backend" || command.EnvVar != envWorkspaceBackend || command.DefaultBackend != workspace.BackendDocker {
+		t.Fatalf("serve command workspace backend selectors = %#v", command)
+	}
+	for _, want := range []string{"serve boot", "Builder project reload", "selected-contract run-fork"} {
+		if !joinedContains(command.Consumers, want) {
+			t.Fatalf("serve command workspace backend consumers missing %q: %#v", want, command.Consumers)
 		}
 	}
 }
@@ -2621,6 +2861,59 @@ func TestRunServeRuntimePassesDataFlagToWorkspaceLifecycle(t *testing.T) {
 	}
 }
 
+func TestRunServeRuntimeHostWorkspaceBackendBootsWithoutDockerForSystemOnlyFlow(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	t.Setenv("SWARM_DOCKER_BIN", filepath.Join(t.TempDir(), "missing-docker"))
+	t.Setenv("SWARM_WORKSPACE_HOST_ROOT", filepath.Join(t.TempDir(), "host-workspaces"))
+	t.Setenv(storebackend.EnvSQLitePath, filepath.Join(t.TempDir(), "runtime.db"))
+	dataDir := t.TempDir()
+	configPath := writeServeRuntimeTestConfig(t)
+
+	serveCtx, cancelServe := context.WithCancel(context.Background())
+	var out lockedBuffer
+	done := make(chan int, 1)
+	go func() {
+		done <- runServeRuntime(serveCtx, repoRoot(), serveOptions{
+			ConfigPath:           configPath,
+			ContractsPath:        filepath.Join("tests", "tier1-primitives", "test-emits-single"),
+			DataSource:           dataDir,
+			WorkspaceBackend:     workspace.BackendHost,
+			WorkspaceBackendSet:  true,
+			PlatformSpecPath:     defaultPlatformSpecPath,
+			StoreMode:            storebackend.ActiveDefaultBackend().String(),
+			APIListenAddr:        "127.0.0.1:0",
+			MCPListenAddr:        "127.0.0.1:0",
+			SelfCheck:            true,
+			RequireBundleMatch:   false,
+			ShutdownGrace:        runtimepkg.DefaultShutdownGrace,
+			Verbose:              true,
+			Output:               &out,
+			NoRequireBundleMatch: true,
+		})
+	}()
+	stopped := false
+	t.Cleanup(func() {
+		if stopped {
+			return
+		}
+		cancelServe()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Errorf("timed out stopping runServeRuntime\noutput:\n%s", out.String())
+		}
+	})
+	waitForServeReadyLine(t, &out, done)
+	cancelServe()
+	if code := <-done; code != 0 {
+		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, out.String())
+	}
+	stopped = true
+	if strings.Contains(out.String(), "workspace image") || strings.Contains(out.String(), "docker is not available") {
+		t.Fatalf("host workspace serve output shows Docker dependency despite host backend:\n%s", out.String())
+	}
+}
+
 func TestRunServeRuntimeBundleHashMissingFailsBeforeReadiness(t *testing.T) {
 	_, _, _ = installServeRuntimePostgresTestStores(t, func() serveWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
@@ -2832,7 +3125,7 @@ func installServeRuntimePostgresTestStoresWithWorkspaceFactory(t *testing.T, wor
 			TurnStore:           runtimePG,
 		}, nil
 	}
-	configuredWorkspaceLifecycleForServe = func(_ *sql.DB, _ string, _ semanticview.Source, mountSources workspaceMountSources) (serveWorkspaceLifecycle, error) {
+	configuredWorkspaceLifecycleForServe = func(_ *sql.DB, _ string, _ semanticview.Source, mountSources workspaceMountSources, _ workspaceBackendSelection) (serveWorkspaceLifecycle, error) {
 		return workspaceFactory(mountSources), nil
 	}
 	t.Cleanup(func() {
@@ -5825,7 +6118,7 @@ func TestRunServeRuntimeVerboseEmitsPlatformSpecBootSequence(t *testing.T) {
 			TurnStore:          runtimePG,
 		}, nil
 	}
-	configuredWorkspaceLifecycleForServe = func(*sql.DB, string, semanticview.Source, workspaceMountSources) (serveWorkspaceLifecycle, error) {
+	configuredWorkspaceLifecycleForServe = func(*sql.DB, string, semanticview.Source, workspaceMountSources, workspaceBackendSelection) (serveWorkspaceLifecycle, error) {
 		return serveRuntimeWorkspaceStub{}, nil
 	}
 	t.Cleanup(func() {
@@ -5918,7 +6211,7 @@ func TestRunServeRuntimeListenerBindFailuresExitBeforeReadiness(t *testing.T) {
 					TurnStore:          runtimePG,
 				}, nil
 			}
-			configuredWorkspaceLifecycleForServe = func(*sql.DB, string, semanticview.Source, workspaceMountSources) (serveWorkspaceLifecycle, error) {
+			configuredWorkspaceLifecycleForServe = func(*sql.DB, string, semanticview.Source, workspaceMountSources, workspaceBackendSelection) (serveWorkspaceLifecycle, error) {
 				return serveRuntimeWorkspaceStub{}, nil
 			}
 			t.Cleanup(func() {
@@ -6085,7 +6378,7 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 			TurnStore:          runtimePG,
 		}, nil
 	}
-	configuredWorkspaceLifecycleForServe = func(*sql.DB, string, semanticview.Source, workspaceMountSources) (serveWorkspaceLifecycle, error) {
+	configuredWorkspaceLifecycleForServe = func(*sql.DB, string, semanticview.Source, workspaceMountSources, workspaceBackendSelection) (serveWorkspaceLifecycle, error) {
 		return serveRuntimeWorkspaceStub{}, nil
 	}
 	t.Cleanup(func() {
