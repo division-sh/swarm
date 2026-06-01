@@ -9,6 +9,7 @@ const (
 	BackendAnthropic        = "anthropic"
 	BackendClaudeCLI        = "claude_cli"
 	BackendOpenAICompatible = "openai_compatible"
+	BackendOpenAIResponses  = "openai_responses"
 	BackendMock             = "mock"
 	BackendLocal            = "local"
 
@@ -18,6 +19,7 @@ const (
 	ProviderAnthropic        = "anthropic"
 	ProviderClaude           = "claude"
 	ProviderOpenAICompatible = "openai_compatible"
+	ProviderOpenAI           = "openai"
 	ProviderMock             = "mock"
 	ProviderLocal            = "local"
 
@@ -26,8 +28,9 @@ const (
 	TransportMock  = "mock"
 	TransportLocal = "local"
 
-	ProviderContractRuntimeModeAPI       = "api"
-	ProviderContractRuntimeModeClaudeCLI = "cli_test"
+	ProviderContractRuntimeModeAPI             = "api"
+	ProviderContractRuntimeModeClaudeCLI       = "cli_test"
+	ProviderContractRuntimeModeOpenAIResponses = BackendOpenAIResponses
 
 	DefaultBackend = BackendAnthropic
 
@@ -44,6 +47,10 @@ const (
 	OpenAICompatibleBaseURLConfigField = "llm.openai_compatible.base_url"
 	OpenAICompatibleDefaultModelConfig = "llm.openai_compatible.default_model"
 	OpenAICompatibleLowCostModelConfig = "llm.openai_compatible.low_cost_model"
+
+	OpenAIResponsesCredentialEnv      = "OPENAI_API_KEY"
+	OpenAIResponsesBaseURLConfigField = "llm.openai_responses.base_url"
+	OpenAIResponsesDefaultBaseURL     = "https://api.openai.com/v1"
 )
 
 type CredentialSource struct {
@@ -53,10 +60,11 @@ type CredentialSource struct {
 }
 
 type BaseURLSource struct {
-	ConfigKey string
-	EnvVar    string
-	Required  bool
-	Purpose   string
+	ConfigKey      string
+	EnvVar         string
+	Required       bool
+	BuiltInDefault string
+	Purpose        string
 }
 
 type Profile struct {
@@ -105,16 +113,19 @@ var builtInModelAliases = ModelAliases{
 		BackendAnthropic:        "claude-3-5-haiku",
 		BackendClaudeCLI:        "haiku",
 		BackendOpenAICompatible: "gpt-compatible-mini",
+		BackendOpenAIResponses:  "gpt-5.4-nano",
 	},
 	ModelAliasRegular: {
 		BackendAnthropic:        "claude-3-5-sonnet",
 		BackendClaudeCLI:        "sonnet",
 		BackendOpenAICompatible: "gpt-compatible",
+		BackendOpenAIResponses:  "gpt-5.4",
 	},
 	ModelAliasFrontier: {
 		BackendAnthropic:        "claude-3-opus",
 		BackendClaudeCLI:        "opus",
 		BackendOpenAICompatible: "gpt-compatible-frontier",
+		BackendOpenAIResponses:  "gpt-5.5",
 	},
 }
 
@@ -157,6 +168,24 @@ var profiles = map[string]Profile{
 			ConfigKey: OpenAICompatibleBaseURLConfigField,
 			Required:  true,
 			Purpose:   "openai-compatible chat completions endpoint base url",
+		},
+		Active: true,
+	},
+	BackendOpenAIResponses: {
+		ID:          BackendOpenAIResponses,
+		Provider:    ProviderOpenAI,
+		Transport:   TransportAPI,
+		RuntimeMode: ProviderContractRuntimeModeOpenAIResponses,
+		Credential: CredentialSource{
+			EnvVar:   OpenAIResponsesCredentialEnv,
+			Required: true,
+			Purpose:  "native OpenAI Responses runtime",
+		},
+		BaseURL: BaseURLSource{
+			ConfigKey:      OpenAIResponsesBaseURLConfigField,
+			Required:       false,
+			BuiltInDefault: OpenAIResponsesDefaultBaseURL,
+			Purpose:        "native OpenAI Responses endpoint base url",
 		},
 		Active: true,
 	},
@@ -290,6 +319,9 @@ func CredentialValue(profile Profile, lookup EnvLookup) string {
 func ResolveBaseURL(profile Profile, raw string) (string, error) {
 	baseURL := strings.TrimSpace(raw)
 	if baseURL == "" {
+		if strings.TrimSpace(profile.BaseURL.BuiltInDefault) != "" {
+			return strings.TrimRight(strings.TrimSpace(profile.BaseURL.BuiltInDefault), "/"), nil
+		}
 		if profile.BaseURL.Required {
 			field := strings.TrimSpace(profile.BaseURL.ConfigKey)
 			if field == "" {

@@ -204,6 +204,25 @@ func TestValidate_OpenAICompatibleRequiresProfileOwnedConfig(t *testing.T) {
 	}
 }
 
+func TestValidate_OpenAIResponsesUsesProfileOwnedDefaultAndOverride(t *testing.T) {
+	c := &Config{}
+	c.LLM.Backend = "openai_responses"
+	c.LLM.Session.LockTTL = 1 * time.Second
+	c.LLM.Session.RotateAfterTurns = 1
+	c.LLM.Session.RotateOnParseFailures = 1
+	if err := c.Validate(); err != nil {
+		t.Fatalf("Validate with built-in OpenAI Responses base URL: %v", err)
+	}
+	c.LLM.OpenAIResponses.BaseURL = "localhost:8080"
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "llm.openai_responses.base_url") {
+		t.Fatalf("Validate invalid base_url error = %v, want openai_responses base URL guidance", err)
+	}
+	c.LLM.OpenAIResponses.BaseURL = "https://proxy.test/v1"
+	if err := c.Validate(); err != nil {
+		t.Fatalf("Validate with OpenAI Responses override: %v", err)
+	}
+}
+
 func TestValidate_RejectsRetiredRuntimeMode(t *testing.T) {
 	c := &Config{}
 	c.LLM.RuntimeMode = "api"

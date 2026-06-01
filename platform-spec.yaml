@@ -2444,8 +2444,14 @@ engine:
           budget_usage_accounting: exact
           native_tool_policy: fallback-aware non-strict runtime
           protocol: chat_completions_compatible_json
+        openai_responses:
+          provider: openai
+          transport: api
+          budget_usage_accounting: exact
+          native_tool_policy: fallback-aware non-strict runtime
+          protocol: native_openai_responses
       split_boundaries:
-      - Adding additional provider identities or protocol families such as OpenAI Responses, OpenRouter, Ollama, Bedrock,
+      - Adding additional provider identities or protocol families such as OpenRouter, Ollama, Bedrock,
         Azure OpenAI, Vertex, or vLLM requires a separate provider implementation/parity gate that consumes llm_provider_selection_config_authority.
       - Renaming cli_test is a separate compatibility/semantics decision.
       - Provider-selection UI is outside this adapter-contract slice.
@@ -2520,13 +2526,12 @@ engine:
             proof_boundary: This profile proves one non-Anthropic Chat Completions-compatible HTTP provider path. It remains
               named openai_compatible and is not a native OpenAI Responses API provider, not an official-OpenAI-only provider
               identity, not OpenRouter/Ollama/Bedrock/Azure/Vertex/vLLM closure, and not a provider matrix.
-        pending_backend_profiles:
           openai_responses:
-            status: source_authority_only_not_selectable
             provider: openai
             transport: api
             provider_contract_runtime_mode: openai_responses
             protocol: Native OpenAI Responses API resource path /responses relative to the configured base URL.
+            legacy_backend_ids: []
             credential_source:
               env_var: OPENAI_API_KEY
               required: true
@@ -2536,11 +2541,13 @@ engine:
               required: false
               built_in_default: https://api.openai.com/v1
               rule: "This is deployment configuration, not a secret. Runtime config is canonical; no env-var endpoint selector is promoted."
-            activation_rule: "This profile is source-authority only after #1229. It is not active for --backend, config llm.backend, persisted agents.llm_backend, RuntimeFactory materialization, or CLI help until #1224 or a later gated implementation PR promotes the runtime adapter."
             proof_boundary: >
-              This profile names native OpenAI Responses source authority only. It is not openai_compatible,
-              not Chat Completions-compatible HTTP JSON, not an OpenRouter/Ollama/Bedrock/Azure/Vertex/vLLM provider-matrix
-              proof, and not a provider runtime implementation.
+              This profile proves the first native OpenAI Responses runtime adapter subset: platform-managed text transcript,
+              platform function tools/function-call outputs, Responses output normalization, deterministic Responses SSE parsing,
+              turn/conversation persistence, and exact provider-reported usage. It is not openai_compatible, not
+              Chat Completions-compatible HTTP JSON, not provider-hosted previous_response_id continuity, not OpenAI built-in
+              tools/file/image/audio/prompt/conversation closure, not an OpenRouter/Ollama/Bedrock/Azure/Vertex/vLLM provider-matrix
+              proof, and not a provider runtime implementation for any backend id named openai.
         reserved_persisted_backend_profiles:
           mock: Reserved persisted profile id for fixture replay. It is not a supported active runtime backend until a
             dedicated provider/runtime owner lands.
@@ -2550,21 +2557,21 @@ engine:
           openai: >
             Not active for this authority because the shipped non-Anthropic proof is Chat Completions-compatible and
             may front OpenRouter or local-compatible endpoints. Native OpenAI Responses source authority is named
-            openai_responses by #1229, but it remains source-authority only and not selectable until #1224 or a later gated
-            implementation PR promotes the runtime adapter.
+            and activated as openai_responses by #1229/#1224; provider identity openai remains intentionally separate from
+            backend profile id and openai must not be accepted as a selector alias.
       native_openai_responses_source_authority:
         promoted_by: '#1229'
-        implementation_status: source_authority_only_runtime_split
+        implementation_status: runtime_adapter_activated_first_subset
         target_backend_profile_id: openai_responses
         provider_identity: openai
-        activation_status: pending_runtime_adapter_not_selectable
+        activation_status: active_backend_profile_runtime_adapter_promoted_by_1224
         authoritative_refs:
           - "https://platform.openai.com/docs/api-reference/responses"
           - "https://platform.openai.com/docs/models"
           - "https://platform.openai.com/docs/guides/function-calling?api-mode=responses"
           - "https://platform.openai.com/docs/guides/streaming-responses?api-mode=responses"
         active_selector_policy:
-          - "openai_responses MUST NOT be accepted by --backend, config llm.backend, persisted agents.llm_backend, RuntimeFactory, or CLI help until a later gated implementation PR activates the runtime adapter."
+          - "openai_responses is accepted by --backend, config llm.backend, persisted agents.llm_backend, RuntimeFactory, and CLI help after #1224."
           - "openai remains a rejected backend selector name; provider identity and backend profile id are intentionally separate."
           - "openai_compatible remains Chat Completions-compatible HTTP JSON and MUST NOT inherit native Responses semantics."
         protocol_family:
@@ -2579,8 +2586,8 @@ engine:
             Platform function tools only. OpenAI built-in tools such as web search, file search, code interpreter,
             computer use, hosted shell, MCP, and tool search are explicitly outside the first subset until separately gated.
           streaming_scope: >
-            Streaming must use Responses server-sent events when #1224 promotes runtime implementation. The
-            source authority names the parser family, but #1229 does not implement streaming or make it selectable.
+            Streaming uses Responses server-sent events for the first supported subset. The parser family is owned by
+            the native Responses adapter behind internal/runtime/llm.ProviderContract.
           session_continuity: >
             Platform session IDs and platform-managed transcript history remain canonical. Provider response
             IDs may be persisted as raw provider metadata, but previous_response_id/provider-hosted continuity is deferred
@@ -2597,15 +2604,14 @@ engine:
           rules:
             - Environment variables provide the OpenAI API secret only; they do not select the backend or endpoint.
             - Runtime config is canonical for endpoint/base URL overrides used by deterministic tests or deployments.
-            - "Credential validation happens only after a selected active backend exists; #1229 does not make openai_responses active."
+            - "Credential validation happens after openai_responses is selected and must fail closed before HTTP if OPENAI_API_KEY is missing."
         model_alias_defaults:
           cheap: gpt-5.4-nano
           regular: gpt-5.4
           frontier: gpt-5.5
         model_alias_rule: >
-          The target profile uses the existing llm.models provider-scoped alias map. These defaults are source
-          authority for #1224 but are not consumed by boot or verify until openai_responses is activated by a later gated
-          implementation PR.
+          The target profile uses the existing llm.models provider-scoped alias map. These defaults are consumed by
+          verify, boot, and runtime materialization for openai_responses after #1224.
         provider_contract_expectations:
           tool_schema:
             - Translate platform tools to OpenAI Responses function tools with validated JSON schema parameters.
@@ -2624,9 +2630,9 @@ engine:
             - Use exact provider-reported usage when available; fail closed or explicitly record unsupported usage if the provider
               response lacks required accounting fields.
         store_profile_implication: >
-          No agents.llm_backend schema/check migration is required for #1229 because openai_responses
-          is not active or persisted by this source-authority slice. The later runtime implementation PR must update store,
-          CLI, config, and RuntimeFactory activation together if it makes openai_responses selectable.
+          #1224 updates agents.llm_backend schema/check admission so openai_responses is a valid active persisted backend
+          profile id alongside anthropic, claude_cli, and openai_compatible. Legacy api and cli_test backfill behavior
+          remains unchanged.
         split_boundaries:
           - '#1224 owns native OpenAI Responses runtime adapter implementation and deterministic protocol proof after this source authority lands.'
           - Provider-hosted continuity through previous_response_id, OpenAI built-in tools, file/image/audio inputs, provider
@@ -2646,14 +2652,17 @@ engine:
             anthropic: claude-3-5-haiku
             claude_cli: haiku
             openai_compatible: gpt-compatible-mini
+            openai_responses: gpt-5.4-nano
           regular:
             anthropic: claude-3-5-sonnet
             claude_cli: sonnet
             openai_compatible: gpt-compatible
+            openai_responses: gpt-5.4
           frontier:
             anthropic: claude-3-opus
             claude_cli: opus
             openai_compatible: gpt-compatible-frontier
+            openai_responses: gpt-5.5
         alias_vocabulary_declaration: none; aliases are free-form strings in bundles, with well-formedness checked by verify
           and selected-backend resolution checked at boot.
         resolution_rule: Resolution is deterministic and provider-scoped. The canonical input is (backend profile id, authored
@@ -2669,6 +2678,7 @@ engine:
         - ANTHROPIC_API_KEY
         - CLAUDE_CODE_OAUTH_TOKEN
         - OPENAI_COMPATIBLE_API_KEY
+        - OPENAI_API_KEY
         - SWARM_TOOL_GATEWAY_TOKEN
         - SWARM_API_TOKEN
         - database password env/store sources
@@ -2681,7 +2691,7 @@ engine:
         infra_connection_override_policy: Config remains canonical; env overrides are allowed only for pragmatic infra/connection
           values explicitly named by their owning config sections. This does not allow env-based backend selection.
       persistence_rules:
-      - Target agents.llm_backend stores the provider-named backend profile ids anthropic, claude_cli, and openai_compatible.
+      - Target agents.llm_backend stores the provider-named backend profile ids anthropic, claude_cli, openai_compatible, and openai_responses.
       - "Legacy persisted backend ids api and cli_test are non-authoritative after #1128/#1129 migration and must be explicitly backfilled to anthropic and claude_cli."
       - "Authored model aliases replace model_tier as the bundle/source selector. Store/schema migration was closed by #1129."
       - Runtime manager/default materialization must persist the resolved backend profile id and model alias rather than
@@ -2694,8 +2704,8 @@ engine:
       - '#1128 owns backend selection/config discovery, --backend precedence, env selector retirement, and backend id migration.'
       - '#1129 owns model_tier to model alias migration, boot/verify alias validation, runtime model resolution, and audit writes.'
       - '#1130 owns public/local config and model-alias cleanup after behavior lands.'
-      - '#1229 defines native OpenAI Responses source authority only and MUST NOT make openai_responses selectable or add a runtime adapter.'
-      - '#1224 owns native OpenAI Responses runtime implementation/protocol proof after #1229.'
+      - '#1229 defines native OpenAI Responses source authority.'
+      - '#1224 owns native OpenAI Responses active backend runtime implementation/protocol proof after #1229.'
       - Implementing OpenAI Responses, OpenRouter, Ollama, Bedrock, Azure OpenAI, Vertex, vLLM, or any other additional
         provider remains a separate provider implementation/parity gate.
       - Native multi-backend-per-run remains deferred until a separate real user need is gated.
@@ -4331,14 +4341,14 @@ platform_tables:
         — set only for agents scoped to a specific entity (rare). The contract in agents.yaml is the source of truth and
         permissions_bundle is resolved at boot into the persisted permissions array rather than being stored directly.
         llm_backend stores the backend profile id owned by llm_provider_selection_config_authority. Active runtime profiles
-        are anthropic (Anthropic API transport), claude_cli (Claude CLI transport), and openai_compatible (Chat Completions-compatible
-        HTTP transport); legacy api and cli_test persisted rows are migration/backfill inputs only and are not valid new
+        are anthropic (Anthropic API transport), claude_cli (Claude CLI transport), openai_compatible (Chat Completions-compatible
+        HTTP transport), and openai_responses (native OpenAI Responses API transport); legacy api and cli_test persisted rows are migration/backfill inputs only and are not valid new
         config/operator inputs. mock and local are reserved persisted profile ids and are not active runtimes until a dedicated provider/runtime owner lands. This value is provider-selection
         deployment truth, not provider identity alone and not transport mode alone. This is a deployment/agent property, not
         a session property. agent_sessions.runtime_mode tracks conversation scope only.'
       ddl: "CREATE TABLE agents (\n    agent_id          TEXT PRIMARY KEY,\n    flow_instance     TEXT,\n    role        \
         \      TEXT NOT NULL,\n    model             TEXT NOT NULL,\n    llm_backend       TEXT NOT NULL DEFAULT 'anthropic' CHECK\
-        \ (llm_backend IN ('anthropic', 'claude_cli', 'openai_compatible', 'mock', 'local')),\n    conversation_mode TEXT NOT NULL CHECK (conversation_mode\
+        \ (llm_backend IN ('anthropic', 'claude_cli', 'openai_compatible', 'openai_responses', 'mock', 'local')),\n    conversation_mode TEXT NOT NULL CHECK (conversation_mode\
         \ IN ('task', 'session', 'session_per_entity')),\n    parent_agent_id   TEXT,\n    entity_id         UUID,\n    config\
         \            JSONB NOT NULL DEFAULT '{}',\n    subscriptions     JSONB NOT NULL DEFAULT '[]',\n    emit_events   \
         \    JSONB NOT NULL DEFAULT '[]',\n    tools             JSONB NOT NULL DEFAULT '[]',\n    permissions       JSONB\
@@ -8586,7 +8596,7 @@ cli_specification:
         enable-disable controls and env/config listener precedence remain pending follow-up children.
       runtime_config_backend_selection:
         config_flag: --config <path>
-        backend_flag: --backend <anthropic|claude_cli|openai_compatible>
+        backend_flag: --backend <anthropic|claude_cli|openai_compatible|openai_responses>
         owner: engine.agent_session_management.llm_provider_selection_config_authority
         rule: >
           `swarm serve` consumes the shared runtime config resolver: explicit --config first, config.yaml beside the
@@ -9075,7 +9085,7 @@ cli_specification:
       - --bundle-hash <bundle-v1:sha256:...>
       - --bundle-fingerprint <sha>
       - --config <path>
-      - --backend <anthropic|claude_cli|openai_compatible>
+      - --backend <anthropic|claude_cli|openai_compatible|openai_responses>
       - --contracts <path>
       - --data <path>
       - --platform-spec <path>
@@ -12404,7 +12414,7 @@ api_specification:
           invocation_type:
             type: string
             minLength: 1
-            description: Backend profile id recorded by the spend ledger, such as anthropic, claude_cli, or openai_compatible.
+            description: Backend profile id recorded by the spend ledger, such as anthropic, claude_cli, openai_compatible, or openai_responses.
           model:
             type: string
             minLength: 1

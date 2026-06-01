@@ -52,6 +52,14 @@ func TestProviderContractsValidateShippedRuntimes(t *testing.T) {
 			transport:       ProviderTransportAPI,
 			usageAccounting: BudgetUsageExact,
 		},
+		{
+			name:            "openai responses",
+			mode:            "openai_responses",
+			runtime:         NewOpenAIResponsesRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil),
+			provider:        "openai",
+			transport:       ProviderTransportAPI,
+			usageAccounting: BudgetUsageExact,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -90,6 +98,7 @@ func TestRuntimeFactoryValidatesProviderContract(t *testing.T) {
 		{backend: "anthropic", runtimeMode: "api", provider: "anthropic"},
 		{backend: "claude_cli", runtimeMode: "cli_test", provider: "claude"},
 		{backend: "openai_compatible", runtimeMode: "openai_compatible", provider: "openai_compatible"},
+		{backend: "openai_responses", runtimeMode: "openai_responses", provider: "openai"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.backend, func(t *testing.T) {

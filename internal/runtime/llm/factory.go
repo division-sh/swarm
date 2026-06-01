@@ -51,6 +51,8 @@ func (f RuntimeFactory) Build() (Runtime, error) {
 		})
 	case llmselection.BackendOpenAICompatible:
 		runtime = NewOpenAICompatibleRuntime(f.Cfg, f.Sessions, f.LockOwner, f.Turns, f.Conversations, f.Budget, f.Events)
+	case llmselection.BackendOpenAIResponses:
+		runtime = NewOpenAIResponsesRuntime(f.Cfg, f.Sessions, f.LockOwner, f.Turns, f.Conversations, f.Budget, f.Events)
 	default:
 		return nil, fmt.Errorf("unsupported llm backend profile: %s", profile.ID)
 	}

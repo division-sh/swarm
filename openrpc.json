@@ -8055,7 +8055,7 @@
             "type": "string"
           },
           "invocation_type": {
-            "description": "Backend profile id recorded by the spend ledger, such as anthropic, claude_cli, or openai_compatible.",
+            "description": "Backend profile id recorded by the spend ledger, such as anthropic, claude_cli, openai_compatible, or openai_responses.",
             "minLength": 1,
             "type": "string"
           },

@@ -220,6 +220,9 @@ func TestSQLiteSchemaStoreMigratesLegacyAgentLLMBackendProfiles(t *testing.T) {
 	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO agents (agent_id, role, model, llm_backend, conversation_mode) VALUES ('agent-legacy', 'worker', 'sonnet', 'api', 'task')`); err == nil {
 		t.Fatal("insert legacy sqlite llm_backend api succeeded after migration")
 	}
+	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO agents (agent_id, role, model, llm_backend, conversation_mode) VALUES ('agent-openai-responses', 'worker', 'regular', 'openai_responses', 'task')`); err != nil {
+		t.Fatalf("insert openai_responses sqlite llm_backend after migration: %v", err)
+	}
 	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO agents (agent_id, role, model, conversation_mode) VALUES ('agent-default', 'worker', 'sonnet', 'task')`); err != nil {
 		t.Fatalf("insert default sqlite llm_backend after migration: %v", err)
 	}
