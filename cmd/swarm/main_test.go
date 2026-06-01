@@ -4683,29 +4683,6 @@ func TestLoadRuntimeConfigWithOptions_RejectsLegacyBackendBeforeOverride(t *test
 	}
 }
 
-func TestDockerComposeUsesBackendFlagNotRetiredLLMBackendEnv(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join(repoRoot(), "docker-compose.yml"))
-	if err != nil {
-		t.Fatalf("read docker-compose.yml: %v", err)
-	}
-	text := string(raw)
-	if strings.Contains(text, "SWARM_LLM_BACKEND") {
-		t.Fatalf("docker-compose.yml still uses retired SWARM_LLM_BACKEND selector")
-	}
-	if !strings.Contains(text, "--backend claude_cli") {
-		t.Fatalf("docker-compose.yml missing canonical --backend claude_cli selector")
-	}
-	if !strings.Contains(text, "SWARM_API_TOKEN: ${SWARM_API_TOKEN:-}") {
-		t.Fatalf("docker-compose.yml must keep model rendering tokenless for postgres-only startup")
-	}
-	if !strings.Contains(text, "SWARM_API_TOKEN must be set because the orchestrator API binds to 0.0.0.0.") {
-		t.Fatalf("docker-compose.yml must require explicit SWARM_API_TOKEN inside the orchestrator command")
-	}
-	if strings.Contains(text, "SWARM_API_TOKEN:-"+apiv1.DefaultLoopbackAPIToken) {
-		t.Fatalf("docker-compose.yml must not default the non-loopback API to the built-in token")
-	}
-}
-
 func TestLoadRuntimeConfig_RejectsUnsupportedRuntimeControlsFromFile(t *testing.T) {
 	cfgText := strings.Join([]string{
 		"runtime:",

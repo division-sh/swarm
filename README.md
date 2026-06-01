@@ -82,10 +82,13 @@ Guard failures have explicit semantics: `reject` (default), `discard`, `kill`, o
 
 ## Quickstart
 
-Requires Go 1.23 and a contract bundle. Plain local commands require no database
-service: when no runtime store is selected, Swarm uses file-backed SQLite at
-`.swarm/dev.db`. Credentials are required only for flows that actually invoke
-the configured LLM backend.
+Requires Go 1.23, Docker for the current workspace-isolation backend, and a
+contract bundle. Plain local commands require no database service: when no
+runtime store is selected, Swarm uses file-backed SQLite at `.swarm/dev.db`.
+Credentials are required only for flows that actually invoke the configured LLM
+backend. The workspace backend also requires a compatible Docker image;
+`swarm-workspace:latest` is the default, or set `SWARM_WORKSPACE_IMAGE` to an
+image you already provide.
 
 ```bash
 # 1. clone
@@ -94,10 +97,13 @@ git clone https://github.com/<org>/swarm && cd swarm
 # 2. build the CLI
 go build ./cmd/swarm
 
-# 3. choose the shared /data source explicitly for local workspaces
+# 3. build the current workspace image
+docker build -f Dockerfile.workspace -t swarm-workspace:latest .
+
+# 4. choose the shared /data source explicitly for local workspaces
 export SWARM_WORKSPACE_DATA_SOURCE="$PWD/data"
 
-# 4. run a contract locally; this creates/uses .swarm/dev.db
+# 5. run a contract locally; this creates/uses .swarm/dev.db
 printf '{"entity_id":"11111111-1111-4111-8111-111111111111"}\n' > /tmp/swarm-payload.json
 ./swarm run \
   --contracts tests/tier1-primitives/test-emits-single \
@@ -105,44 +111,34 @@ printf '{"entity_id":"11111111-1111-4111-8111-111111111111"}\n' > /tmp/swarm-pay
   --payload /tmp/swarm-payload.json
 ```
 
-### Explicit Postgres / Compose Opt-In
-
-Use Docker Compose when you want the containerized orchestrator and the explicit
-Postgres runtime store. The Compose sample passes `--store postgres`; it is not
-the no-selector local/dev default. `.env` supplies deployment credentials such
-as `CLAUDE_CODE_OAUTH_TOKEN` and `SWARM_API_TOKEN`, not a generic backend
-selector.
+For a long-running local API runtime, use the same direct contract path:
 
 ```bash
-# 1. point at a contract bundle and provide Compose credentials
-export SWARM_CONTRACTS_HOST_DIR=/absolute/path/to/your/contracts
-echo 'CLAUDE_CODE_OAUTH_TOKEN=...' >> .env
-echo "SWARM_API_TOKEN=$(uuidgen | tr '[:upper:]' '[:lower:]')" >> .env
-
-# 2. boot the explicit Postgres-backed Compose deployment
-docker compose up -d postgres orchestrator
-
-# 3. confirm the runtime is up and contracts validated
-curl -fsS http://localhost:8070/healthz
-
-# 4. trigger a run
-printf '{"order_id":"o-123","priority":"high"}\n' > /tmp/order-created.json
-docker compose exec orchestrator swarm run \
-  --event order.created \
-  --payload /tmp/order-created.json
+./swarm serve --contracts tests/tier1-primitives/test-emits-single
 ```
 
-If you only need the explicit Postgres database service, `docker compose up -d
-postgres` is supported without `SWARM_CONTRACTS_HOST_DIR`. The contracts path is
-required only when starting the `orchestrator` service. The Compose orchestrator
-also requires `SWARM_API_TOKEN` because it binds the API inside the container on
-`0.0.0.0`. Plain local `swarm serve` and foreground `swarm run` use the built-in
-dev API token only on numeric loopback binds, with bearer auth still enabled.
-Set an explicit token before exposing the API beyond loopback; the built-in
-token is not user isolation on a shared host.
+Plain local `swarm serve` and foreground `swarm run` use the built-in dev API
+token only on numeric loopback binds, with bearer auth still enabled. Set
+`SWARM_API_TOKEN` before exposing the API beyond loopback; the built-in token is
+not user isolation on a shared host.
 
-See [`.env.example`](.env.example) for the explicit Compose environment
-template.
+See [`.env.example`](.env.example) for the public local environment template.
+
+### External Postgres Opt-In
+
+The local/dev default is SQLite. If you need Postgres, run and manage it
+outside the repo, then opt in explicitly:
+
+```bash
+docker run -d --name swarm-postgres \
+  -e POSTGRES_PASSWORD=postgres \
+  -e POSTGRES_DB=swarm \
+  -p 5432:5432 \
+  postgres:16
+
+SWARM_DB_HOST=127.0.0.1 SWARM_DB_PASSWORD=postgres \
+  ./swarm serve --store postgres --contracts tests/tier1-primitives/test-emits-single
+```
 
 ### Workspace Reference Data
 
@@ -161,8 +157,8 @@ separate bundled contract input.
 
 ### LLM Backend Profiles
 
-Outside the Compose quickstart, select a shipped backend with `--backend` or
-the equivalent `llm.backend` config key. Selection precedence is
+Select a shipped backend with `--backend` or the equivalent `llm.backend`
+config key. Selection precedence is
 `--backend > llm.backend > default anthropic`; environment variables never
 select the backend. Commands that need runtime/operator config discover an
 explicit `--config` first, `config.yaml` beside the running binary second, and
@@ -328,7 +324,7 @@ The static analyzer's refusal to boot on a half-finished contract is a feature i
 - **Conversational chatbots.** Short interactions where the value is in the conversation. The YAML overhead does not pay for itself.
 - **Exploratory prototyping where the workflow changes every hour.** The static analyzer refusing to boot a half-finished contract is exactly the wrong friction during design. Sketch loose first; port to Swarm once the workflow stabilizes.
 - **LLM-managed routing at runtime.** Swarm explicitly refuses this. If "the model decides what happens next" is the point of your system, this is the wrong tool.
-- **Sunday-afternoon prototypes.** The local/dev path is now zero-service SQLite, but Swarm still expects a declared contract bundle and a deterministic runtime. Use a lighter tool if even that structure is too much.
+- **Sunday-afternoon prototypes.** The local/dev path is now zero-service SQLite, but Swarm still expects a declared contract bundle, the current Docker-backed workspace runtime, and deterministic execution. Use a lighter tool if even that structure is too much.
 
 ---
 
@@ -363,14 +359,12 @@ source contract.
 
 ## Development
 
-Requirements: Go 1.23. Docker is required for Compose, workspace-container, and
-Postgres-backed integration workflows. Plain local `swarm run --contracts ...`
-uses SQLite at `.swarm/dev.db` unless you explicitly opt into Postgres with
-`SWARM_STORE_BACKEND=postgres` or `store.backend: postgres`. For `swarm serve`,
-use `--store postgres`; local foreground `swarm run` inherits store selection
-from environment or runtime config.
-Starting the Compose orchestrator requires `SWARM_CONTRACTS_HOST_DIR` and an
-explicit `SWARM_API_TOKEN` because the Compose API listener is non-loopback.
+Requirements: Go 1.23 and Docker for the current workspace-isolation backend.
+Plain local `swarm run --contracts ...` uses SQLite at `.swarm/dev.db` unless
+you explicitly opt into Postgres with `SWARM_STORE_BACKEND=postgres` or
+`store.backend: postgres`. Build or pull the configured workspace image
+(`swarm-workspace:latest` by default), or set `SWARM_WORKSPACE_IMAGE` to a
+compatible image before commands that start the runtime.
 
 ```bash
 # build
