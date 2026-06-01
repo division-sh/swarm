@@ -30,6 +30,17 @@ type BundleContext struct {
 	WorkspaceScopeKey string
 }
 
+type RuntimeContextState string
+
+const (
+	RuntimeContextStateLoaded   RuntimeContextState = "loaded"
+	RuntimeContextStateUnloaded RuntimeContextState = "unloaded"
+
+	RuntimeContextCauseNotLoaded   = "runtime_context_not_loaded"
+	RuntimeContextCauseUnavailable = "runtime_context_unavailable"
+	RuntimeContextCauseUnloaded    = "runtime_context_unloaded"
+)
+
 func (c BundleContext) normalized() BundleContext {
 	c.BundleHash = strings.TrimSpace(c.BundleHash)
 	c.BundleSourceFact = c.BundleSourceFact.Normalized()
@@ -42,17 +53,43 @@ func (c BundleContext) normalized() BundleContext {
 	return c
 }
 
+type runtimeContextEntry struct {
+	context *BundleContext
+	state   RuntimeContextState
+	cause   string
+}
+
+type RuntimeContextLookup struct {
+	Context *BundleContext
+	State   RuntimeContextState
+	Cause   string
+	Found   bool
+}
+
+func (l RuntimeContextLookup) Loaded() bool {
+	return l.Found && l.State == RuntimeContextStateLoaded && l.Context != nil
+}
+
+type RuntimeContextDeactivationResult struct {
+	BundleHash  string
+	State       RuntimeContextState
+	Cause       string
+	Found       bool
+	Changed     bool
+	ShutdownErr error
+}
+
 type RuntimeContextManager struct {
 	mu           sync.RWMutex
 	availability RunBundleAvailabilityReader
-	contexts     map[string]*BundleContext
+	contexts     map[string]*runtimeContextEntry
 	order        []string
 }
 
 func NewRuntimeContextManager(availability RunBundleAvailabilityReader, contexts ...BundleContext) (*RuntimeContextManager, error) {
 	manager := &RuntimeContextManager{
 		availability: availability,
-		contexts:     map[string]*BundleContext{},
+		contexts:     map[string]*runtimeContextEntry{},
 	}
 	for _, contextDef := range contexts {
 		if err := manager.Register(contextDef); err != nil {
@@ -90,13 +127,16 @@ func (m *RuntimeContextManager) Register(contextDef BundleContext) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.contexts == nil {
-		m.contexts = map[string]*BundleContext{}
+		m.contexts = map[string]*runtimeContextEntry{}
 	}
 	if _, exists := m.contexts[contextDef.BundleHash]; exists {
 		return fmt.Errorf("duplicate runtime context bundle_hash %s", contextDef.BundleHash)
 	}
 	copied := contextDef
-	m.contexts[contextDef.BundleHash] = &copied
+	m.contexts[contextDef.BundleHash] = &runtimeContextEntry{
+		context: &copied,
+		state:   RuntimeContextStateLoaded,
+	}
 	m.order = append(m.order, contextDef.BundleHash)
 	sort.Strings(m.order)
 	return nil
@@ -135,41 +175,138 @@ func (m *RuntimeContextManager) Primary() (*BundleContext, bool) {
 	if len(m.order) == 0 {
 		return nil, false
 	}
-	ctx := m.contexts[m.order[0]]
-	if ctx == nil {
-		return nil, false
+	for _, bundleHash := range m.order {
+		entry := m.contexts[bundleHash]
+		if entry == nil || entry.state != RuntimeContextStateLoaded || entry.context == nil {
+			continue
+		}
+		return entry.context, true
 	}
-	return ctx, true
+	return nil, false
 }
 
 func (m *RuntimeContextManager) LookupBundleHash(bundleHash string) (*BundleContext, bool) {
-	if m == nil {
+	lookup := m.LookupBundleHashStatus(bundleHash)
+	if !lookup.Loaded() {
 		return nil, false
+	}
+	return lookup.Context, true
+}
+
+func (m *RuntimeContextManager) LookupBundleHashStatus(bundleHash string) RuntimeContextLookup {
+	if m == nil {
+		return RuntimeContextLookup{State: RuntimeContextStateUnloaded, Cause: RuntimeContextCauseNotLoaded}
 	}
 	bundleHash = strings.TrimSpace(bundleHash)
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	ctx := m.contexts[bundleHash]
-	if ctx == nil {
-		return nil, false
+	entry := m.contexts[bundleHash]
+	if entry == nil {
+		return RuntimeContextLookup{State: RuntimeContextStateUnloaded, Cause: RuntimeContextCauseNotLoaded}
 	}
-	return ctx, true
+	state := entry.state
+	if state == "" {
+		state = RuntimeContextStateLoaded
+	}
+	cause := strings.TrimSpace(entry.cause)
+	if cause == "" && state != RuntimeContextStateLoaded {
+		cause = RuntimeContextCauseUnavailable
+	}
+	lookup := RuntimeContextLookup{
+		State: state,
+		Cause: cause,
+		Found: true,
+	}
+	if state == RuntimeContextStateLoaded {
+		lookup.Context = entry.context
+	}
+	return lookup
 }
 
 func (m *RuntimeContextManager) LookupRun(ctx context.Context, runID string) (*BundleContext, runbundle.Availability, bool, error) {
+	lookup, availability, err := m.LookupRunStatus(ctx, runID)
+	if err != nil {
+		return nil, availability, false, err
+	}
+	return lookup.Context, availability, lookup.Loaded(), nil
+}
+
+func (m *RuntimeContextManager) LookupRunStatus(ctx context.Context, runID string) (RuntimeContextLookup, runbundle.Availability, error) {
 	if m == nil {
-		return nil, runbundle.Availability{}, false, nil
+		return RuntimeContextLookup{State: RuntimeContextStateUnloaded, Cause: RuntimeContextCauseNotLoaded}, runbundle.Availability{}, nil
 	}
 	if m.availability == nil {
-		return nil, runbundle.Availability{}, false, fmt.Errorf("run bundle availability reader is required")
+		return RuntimeContextLookup{}, runbundle.Availability{}, fmt.Errorf("run bundle availability reader is required")
 	}
 	availability, err := m.availability.LoadRunBundleAvailability(ctx, strings.TrimSpace(runID))
 	if err != nil {
-		return nil, runbundle.Availability{}, false, err
+		return RuntimeContextLookup{}, runbundle.Availability{}, err
 	}
 	if strings.TrimSpace(availability.BundleHash) == "" {
-		return nil, availability, false, nil
+		return RuntimeContextLookup{State: RuntimeContextStateUnloaded, Cause: RuntimeContextCauseNotLoaded}, availability, nil
 	}
-	contextDef, ok := m.LookupBundleHash(availability.BundleHash)
-	return contextDef, availability, ok, nil
+	return m.LookupBundleHashStatus(availability.BundleHash), availability, nil
+}
+
+func (m *RuntimeContextManager) DeactivateBundleHash(bundleHash, cause string) RuntimeContextDeactivationResult {
+	result := RuntimeContextDeactivationResult{
+		BundleHash: strings.TrimSpace(bundleHash),
+		State:      RuntimeContextStateUnloaded,
+		Cause:      normalizeRuntimeContextDeactivationCause(cause),
+	}
+	if m == nil || result.BundleHash == "" {
+		return result
+	}
+	var runtimeToShutdown *Runtime
+	m.mu.Lock()
+	entry := m.contexts[result.BundleHash]
+	if entry == nil {
+		m.mu.Unlock()
+		return result
+	}
+	result.Found = true
+	state := entry.state
+	if state == "" {
+		state = RuntimeContextStateLoaded
+	}
+	if state != RuntimeContextStateLoaded {
+		result.State = state
+		if strings.TrimSpace(entry.cause) != "" {
+			result.Cause = strings.TrimSpace(entry.cause)
+		}
+		m.mu.Unlock()
+		return result
+	}
+	entry.state = RuntimeContextStateUnloaded
+	entry.cause = result.Cause
+	result.Changed = true
+	if entry.context != nil {
+		runtimeToShutdown = entry.context.Runtime
+	}
+	m.mu.Unlock()
+	if runtimeToShutdown != nil {
+		result.ShutdownErr = runtimeToShutdown.Shutdown()
+	}
+	return result
+}
+
+func (m *RuntimeContextManager) DeactivateAll(cause string) []RuntimeContextDeactivationResult {
+	if m == nil {
+		return nil
+	}
+	m.mu.RLock()
+	hashes := append([]string(nil), m.order...)
+	m.mu.RUnlock()
+	results := make([]RuntimeContextDeactivationResult, 0, len(hashes))
+	for _, bundleHash := range hashes {
+		results = append(results, m.DeactivateBundleHash(bundleHash, cause))
+	}
+	return results
+}
+
+func normalizeRuntimeContextDeactivationCause(cause string) string {
+	if cause = strings.TrimSpace(cause); cause != "" {
+		return cause
+	}
+	return RuntimeContextCauseUnavailable
 }

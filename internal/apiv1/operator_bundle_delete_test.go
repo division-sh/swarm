@@ -7,11 +7,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	swruntime "swarm/internal/runtime"
 	"swarm/internal/runtime/bundledelete"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimecorrelation "swarm/internal/runtime/correlation"
 	"swarm/internal/runtime/destructivereset"
+	"swarm/internal/runtime/preservationcleanup"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/store"
 	storerunlifecycle "swarm/internal/store/runlifecycle"
@@ -123,6 +125,109 @@ func TestOperatorBundleDeleteNonForceMissingBundleError(t *testing.T) {
 	}
 	if len(executor.calls) != 1 || executor.calls[0].Force {
 		t.Fatalf("bundle.delete missing bundle request = %#v", executor.calls)
+	}
+}
+
+func TestOperatorBundleDeleteDeactivatesLoadedRuntimeContext(t *testing.T) {
+	now := time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC)
+	manager := newBundleDeleteRuntimeContextManager(t)
+	executor := &recordingBundleDeleteExecutor{bundleHash: runStartTestBundleHash}
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			Now:             func() time.Time { return now },
+			Ready:           func() bool { return true },
+			Database:        fakePinger{},
+			Idempotency:     newRecordingAPIIdempotencyStore(),
+			RuntimeContexts: manager,
+			BundleDelete:    executor,
+		}),
+	})
+
+	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"delete","method":"bundle.delete","params":{"bundle_hash":"`+runStartTestBundleHash+`","idempotency_key":"runtime-context-delete"}}`)
+	if resp.Error != nil {
+		t.Fatalf("bundle.delete error = %#v", resp.Error)
+	}
+	if result := asMap(t, resp.Result); result["deleted"] != true {
+		t.Fatalf("bundle.delete result = %#v, want deleted", result)
+	}
+	lookup := manager.LookupBundleHashStatus(runStartTestBundleHash)
+	if lookup.Loaded() || lookup.Cause != swruntime.RuntimeContextCauseUnloaded {
+		t.Fatalf("runtime context lookup after bundle.delete = %#v, want unloaded", lookup)
+	}
+}
+
+func TestOperatorBundleDeleteForcePartialRequiresCleanupEvidenceBeforeDeactivation(t *testing.T) {
+	now := time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name       string
+		result     bundledelete.Result
+		wantLoaded bool
+		wantCause  string
+	}{
+		{
+			name: "pre_cleanup_inventory_failure_stays_loaded",
+			result: bundledelete.Result{
+				OK:             false,
+				Status:         "partial_failure",
+				OperationName:  bundledelete.DefaultOperationName,
+				BundleHash:     runStartTestBundleHash,
+				Force:          true,
+				PartialFailure: true,
+				Errors:         []bundledelete.PartialError{{Scope: "managed_containers", Message: "inventory failed"}},
+			},
+			wantLoaded: true,
+		},
+		{
+			name: "cleanup_started_partial_failure_deactivates",
+			result: bundledelete.Result{
+				OK:             false,
+				Status:         "partial_failure",
+				OperationName:  bundledelete.DefaultOperationName,
+				BundleHash:     runStartTestBundleHash,
+				Force:          true,
+				PartialFailure: true,
+				Cleanup: preservationcleanup.Result{
+					OperationName: preservationcleanup.BundleForceDeleteOperationName,
+					AppliedAt:     now,
+					ControlledBy:  preservationcleanup.BundleForceDeleteControlledBy,
+				},
+				Errors: []bundledelete.PartialError{{Scope: "managed_containers", Message: "stop failed"}},
+			},
+			wantCause: swruntime.RuntimeContextCauseUnavailable,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			manager := newBundleDeleteRuntimeContextManager(t)
+			executor := &staticBundleDeleteResultExecutor{result: tt.result}
+			handler := testHandler(t, Options{
+				AuthTokens: []string{testToken},
+				Handlers: OperatorReadHandlers(OperatorReadOptions{
+					Now:             func() time.Time { return now },
+					Ready:           func() bool { return true },
+					Database:        fakePinger{},
+					Idempotency:     newRecordingAPIIdempotencyStore(),
+					RuntimeContexts: manager,
+					BundleDelete:    executor,
+				}),
+			})
+
+			resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"delete","method":"bundle.delete","params":{"bundle_hash":"`+runStartTestBundleHash+`","force":true,"idempotency_key":"runtime-context-partial-`+tt.name+`"}}`)
+			if resp.Error != nil {
+				t.Fatalf("bundle.delete partial error = %#v", resp.Error)
+			}
+			lookup := manager.LookupBundleHashStatus(runStartTestBundleHash)
+			if tt.wantLoaded {
+				if !lookup.Loaded() {
+					t.Fatalf("runtime context lookup after pre-cleanup partial = %#v, want loaded", lookup)
+				}
+				return
+			}
+			if lookup.Loaded() || lookup.Cause != tt.wantCause {
+				t.Fatalf("runtime context lookup after cleanup-started partial = %#v, want cause %s", lookup, tt.wantCause)
+			}
+		})
 	}
 }
 
@@ -356,6 +461,45 @@ func assertBundleUnavailableNewWork(t *testing.T, resp rpcResponse, method strin
 	if data := asMap(t, resp.Error.Data); data["code"] != BundleUnavailableCode {
 		t.Fatalf("%s error data = %#v, want %s", method, data, BundleUnavailableCode)
 	}
+}
+
+func newBundleDeleteRuntimeContextManager(t *testing.T) *swruntime.RuntimeContextManager {
+	t.Helper()
+	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+	bus, err := runtimebus.NewEventBusWithOptions(nil, runtimebus.EventBusOptions{
+		ContractBundle:   source,
+		BundleSourceFact: runtimeContextTestSourceFact(runStartTestBundleHash),
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	manager, err := swruntime.NewRuntimeContextManager(nil, swruntime.BundleContext{
+		BundleHash:       runStartTestBundleHash,
+		BundleSourceFact: runtimeContextTestSourceFact(runStartTestBundleHash),
+		BundleIdentity:   runtimecontracts.BundleIdentity{WorkflowName: "review", WorkflowVersion: "1.0.0"},
+		Source:           source,
+		Runtime:          &swruntime.Runtime{Bus: bus},
+	})
+	if err != nil {
+		t.Fatalf("NewRuntimeContextManager: %v", err)
+	}
+	return manager
+}
+
+type staticBundleDeleteResultExecutor struct {
+	result bundledelete.Result
+	calls  []bundledelete.Request
+}
+
+func (e *staticBundleDeleteResultExecutor) Execute(_ context.Context, req bundledelete.Request) (bundledelete.Result, error) {
+	e.calls = append(e.calls, req)
+	result := e.result
+	if result.BundleHash == "" {
+		result.BundleHash = req.BundleHash
+	}
+	result.Force = req.Force
+	result.DryRun = req.DryRun
+	return result, nil
 }
 
 type emptyBundleDeleteContainerInventory struct{}

@@ -5736,8 +5736,10 @@ multi_bundle_persistence:
         - The mode is Postgres-only and all-or-nothing before API readiness. SQLite, no-store, missing store, missing bundle row, malformed archive, missing bytes, hash mismatch, duplicate hash, and noncanonical hash fail closed before any runtime context is served.
         - The runtime loader consumes stored bundles.content_yaml and raw bundles.data_blob bytes only; parsed_json is inspection output and is never a runtime source.
         - The loader reconstructs platform spec, contract definition files, prompts, and flow data/ raw bytes into a process-owned temporary source, then recomputes BundleHash and requires it to equal the requested bundle_hash before runtime construction.
-        - Each pinned bundle is registered as a BundleContext under RuntimeContextManager. The BundleContext owns its source, BundleSourceFact, EventBus, route table, pipeline/coordinator, agent manager, subscriptions, and source-bound runtime components.
+        - Each pinned bundle is registered as a BundleContext under RuntimeContextManager. The BundleContext owns its source, BundleSourceFact, EventBus, route table, pipeline/coordinator, agent manager, subscriptions, source-bound runtime components, and manager-owned lifecycle state.
         - event.publish and run.start select a loaded BundleContext by explicit canonical bundle_hash for create-new work or by runs.bundle_hash/runs.bundle_source for existing-run work. Missing, deleted, legacy, or unloaded contexts fail closed rather than falling back to ambient boot state.
+        - RuntimeContextManager lifecycle state is fail-closed and monotonic in this slice: once a loaded persisted BundleContext is marked unavailable/unloaded by an authoritative bundle-unavailability operation, supported admission paths must reject that context with BUNDLE_UNAVAILABLE unless a later separately-approved Load/repair owner exists.
+        - Successful bundle.delete, force bundle.delete partial failure after force-controlled cleanup begins, and successful or partial runtime.nuke with include_bundles=true consume RuntimeContextManager deactivation for loaded matching contexts. runtime.nuke include_bundles=false must not deactivate bundle contexts.
         - Existing-run controls that can be resolved by run_id dispatch through the selected BundleContext. Ambiguous singleton controls such as runtime.pause/resume, mailbox approval event publication, and broad agent restart/backlog replay fail closed in multi-context mode pending dynamic lifecycle work.
         - When more than one bundle is pinned in the same process, unscoped startup ownership, active schedule restoration, and manager pending-event recovery are disabled for every context until bundle-scoped recovery filters are promoted. Single-bundle DB-loaded serve may keep the existing startup recovery owner.
         - Every run writer reachable under the selected runtime context consumes BundleSourceFact with bundle_source=persisted and bundle_hash equal to that context's canonical hash.
@@ -5745,7 +5747,7 @@ multi_bundle_persistence:
         - Workspace/container names, volumes, and managed identity labels for executable context paths include bundle-disambiguated identity when more than one context can be loaded.
         - External executable code, tools, container images, credentials, and host environment dependencies remain environment-owned and are not stored in the bundles row.
       split_boundaries:
-        - Dynamic post-boot RuntimeContextManager Load/Unload remains #1176.
+        - Dynamic post-boot RuntimeContextManager Load remains split to #1176/#981 follow-up; this slice only implements unload/deactivation triggered by existing authoritative delete/nuke owners.
         - Same-bundle selected-contract fork execution from DB bytes consumes the persisted bundle catalog runtime source owner.
         - Cross-bundle fork routing remains #976.
         - Final lifecycle/scoped API conformance matrix remains #1025.
@@ -5855,6 +5857,19 @@ multi_bundle_persistence:
           the bundle row has been deleted. A successful bundle.delete, with or without --force, must therefore make later
           same-runtime event.publish, run.start, runtime-log, and mutation-log attempts fail closed rather than recreating
           bundle_source=persisted with a missing bundle row.
+      runtime_context_deactivation:
+        status: implemented_for_runtime_context_manager_unload_first_slice
+        canonical_owner: internal/runtime.RuntimeContextManager
+        consumed_by:
+          - /v1/rpc bundle.delete
+          - /v1/rpc runtime.nuke when include_bundles=true
+          - internal/apiv1 runtime context admission helpers
+        rule: >
+          In DB-loaded RuntimeContextManager mode, successful bundle.delete for a loaded bundle_hash MUST mark that
+          BundleContext unloaded before later supported admission paths can select it again. bundle.delete --force
+          partial failure after force-controlled cleanup has begun MUST also fail closed by marking the matching context
+          unavailable. Non-force active-run refusal, dry-run delete, missing bundle errors, and idempotency conflicts MUST
+          NOT deactivate a loaded context because those operations do not establish bundle unavailability.
       reader_invariant: >
         Bundle availability readers MUST read runs.bundle_source before consulting bundles. Readers only look up bundles
         when bundle_source=persisted. bundle_source in (ephemeral, deleted, legacy) returns BUNDLE_UNAVAILABLE without a
@@ -6090,12 +6105,12 @@ multi_bundle_persistence:
       reason: Old bundle_fingerprint/bundle_ref names must be reconciled in code and generated artifacts under the locked bundle_hash naming decision.
     runtime_context_isolation:
       tracker: '#981'
-      implementation_status: boot_pinned_first_slice_implemented_by_1175_parent_remains_open
+      implementation_status: boot_pinned_dispatch_and_unload_first_slices_implemented_parent_remains_open
       runtime_owners:
         - internal/runtime.RuntimeContextManager
         - internal/runtime.BundleContext
         - internal/apiv1.OperatorReadOptions.RuntimeContexts
-      reason: Boot-pinned multi-context serve now routes supported runtime mutations through loaded BundleContext ownership and disables unscoped startup recovery/restore in multi-context processes; dynamic Load/Unload, scoped recovery filters, final matrix, ambient CLI context, cross-bundle fork, and cleanup siblings remain separately gated.
+      reason: Boot-pinned multi-context serve now routes supported runtime mutations through loaded BundleContext ownership, disables unscoped startup recovery/restore in multi-context processes, and marks loaded contexts unavailable/unloaded after authoritative bundle.delete/runtime.nuke include_bundles=true operations. Dynamic Load, scoped recovery filters, final matrix, ambient CLI context, cross-bundle fork, and cleanup siblings remain separately gated.
     lifecycle_cleanup:
       trackers:
         - '#987'
@@ -15694,8 +15709,10 @@ api_specification:
         \ previews from each owner. Apply mode sequences plan -> quiescence -> cleanup -> managed-container stop. Managed-container\
         \ stop failures are represented as `status=partial_failure`, `ok=false`, and explicit `errors`; they must not masquerade\
         \ as complete success. `include_bundles` defaults true and is the only runtime.nuke control for whether server-wide\
-        \ bundle catalog state is deleted with the cleanup owner; false preserves bundle catalog rows. Public final-response\
-        \ idempotency follows the v1 API idempotency convention.\n"
+        \ bundle catalog state is deleted with the cleanup owner; false preserves bundle catalog rows. In DB-loaded RuntimeContextManager\
+        \ mode, successful or partial apply-mode runtime.nuke requests with `include_bundles=true` also mark loaded BundleContext\
+        \ entries unavailable/unloaded so later supported admissions fail closed with BUNDLE_UNAVAILABLE; `include_bundles=false`\
+        \ must not deactivate loaded contexts. Public final-response idempotency follows the v1 API idempotency convention.\n"
       scope:
         required:
         - control:runtime
