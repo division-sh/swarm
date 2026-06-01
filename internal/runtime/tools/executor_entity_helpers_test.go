@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"reflect"
 	"strings"
 	"testing"
@@ -23,7 +24,7 @@ func TestEntityStateQuery_OptionallyIncludesFlowInstance(t *testing.T) {
 	payload := map[string]any{
 		"flow_instance": " review/inst-1 ",
 	}
-	ctx := runtimecorrelation.WithRunID(t.Context(), "00000000-0000-0000-0000-000000000001")
+	ctx := runtimecorrelation.WithRunID(context.Background(), "00000000-0000-0000-0000-000000000001")
 
 	queryWithoutFlow, err := entityStateQueryForContractRun(ctx, nil, entityruntime.Contract{}, payload, false)
 	if err != nil {
