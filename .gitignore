@@ -19,6 +19,7 @@ data/*
 
 # Generated artifacts
 coverage
+test-results/
 internal/dashboard/ui/node_modules
 internal/dashboard/ui/dist
 /empire
