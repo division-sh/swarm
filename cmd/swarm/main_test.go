@@ -2367,8 +2367,71 @@ func TestPlatformSpecLLMProviderModelSelectionSourceAuthorityPromoted(t *testing
 								Rule      string `yaml:"rule"`
 							} `yaml:"endpoint_source"`
 						} `yaml:"active_backend_profiles"`
+						PendingBackendProfiles map[string]struct {
+							Status                      string `yaml:"status"`
+							Provider                    string `yaml:"provider"`
+							Transport                   string `yaml:"transport"`
+							ProviderContractRuntimeMode string `yaml:"provider_contract_runtime_mode"`
+							Protocol                    string `yaml:"protocol"`
+							CredentialSource            struct {
+								EnvVar   string `yaml:"env_var"`
+								Required bool   `yaml:"required"`
+							} `yaml:"credential_source"`
+							EndpointSource struct {
+								ConfigKey      string `yaml:"config_key"`
+								EnvVar         string `yaml:"env_var"`
+								Required       bool   `yaml:"required"`
+								BuiltInDefault string `yaml:"built_in_default"`
+								Rule           string `yaml:"rule"`
+							} `yaml:"endpoint_source"`
+							ActivationRule string `yaml:"activation_rule"`
+							ProofBoundary  string `yaml:"proof_boundary"`
+						} `yaml:"pending_backend_profiles"`
 						RejectedTargetNames map[string]string `yaml:"rejected_target_names"`
 					} `yaml:"backend_profile_identity"`
+					NativeOpenAIResponsesSourceAuthority struct {
+						PromotedBy             string   `yaml:"promoted_by"`
+						ImplementationStatus   string   `yaml:"implementation_status"`
+						TargetBackendProfileID string   `yaml:"target_backend_profile_id"`
+						ProviderIdentity       string   `yaml:"provider_identity"`
+						ActivationStatus       string   `yaml:"activation_status"`
+						AuthoritativeRefs      []string `yaml:"authoritative_refs"`
+						ActiveSelectorPolicy   []string `yaml:"active_selector_policy"`
+						ProtocolFamily         struct {
+							Name              string `yaml:"name"`
+							EndpointPath      string `yaml:"endpoint_path"`
+							Transport         string `yaml:"transport"`
+							RequestBodyOwner  string `yaml:"request_body_owner"`
+							InputScope        string `yaml:"input_scope"`
+							ToolScope         string `yaml:"tool_scope"`
+							StreamingScope    string `yaml:"streaming_scope"`
+							SessionContinuity string `yaml:"session_continuity"`
+						} `yaml:"protocol_family"`
+						CredentialAndEndpointPolicy struct {
+							CredentialSource struct {
+								EnvVar   string `yaml:"env_var"`
+								Required bool   `yaml:"required"`
+							} `yaml:"credential_source"`
+							EndpointSource struct {
+								ConfigKey      string `yaml:"config_key"`
+								EnvVar         string `yaml:"env_var"`
+								Required       bool   `yaml:"required"`
+								BuiltInDefault string `yaml:"built_in_default"`
+							} `yaml:"endpoint_source"`
+							Rules []string `yaml:"rules"`
+						} `yaml:"credential_and_endpoint_policy"`
+						ModelAliasDefaults           map[string]string `yaml:"model_alias_defaults"`
+						ModelAliasRule               string            `yaml:"model_alias_rule"`
+						ProviderContractExpectations struct {
+							ToolSchema            []string `yaml:"tool_schema"`
+							ResponseNormalization []string `yaml:"response_normalization"`
+							SessionLifecycle      []string `yaml:"session_lifecycle"`
+							Persistence           []string `yaml:"persistence"`
+							Budget                []string `yaml:"budget"`
+						} `yaml:"provider_contract_expectations"`
+						StoreProfileImplication string   `yaml:"store_profile_implication"`
+						SplitBoundaries         []string `yaml:"split_boundaries"`
+					} `yaml:"native_openai_responses_source_authority"`
 					ModelAliasAuthority struct {
 						ContractField              string                       `yaml:"contract_field"`
 						Replaces                   string                       `yaml:"replaces"`
@@ -2445,8 +2508,85 @@ func TestPlatformSpecLLMProviderModelSelectionSourceAuthorityPromoted(t *testing
 	if got := profiles["openai_compatible"]; got.Provider != "openai_compatible" || got.ProviderContractRuntimeMode != "openai_compatible" || got.EndpointSource.EnvVar != "" || !strings.Contains(got.EndpointSource.Rule, "SWARM_OPENAI_COMPATIBLE_BASE_URL is retired") {
 		t.Fatalf("openai_compatible profile = %#v", got)
 	}
+	if _, ok := profiles["openai_responses"]; ok {
+		t.Fatalf("openai_responses must not be active until #1224: %#v", profiles["openai_responses"])
+	}
+	pendingResponses := authority.BackendProfileIdentity.PendingBackendProfiles["openai_responses"]
+	if pendingResponses.Provider != "openai" || pendingResponses.ProviderContractRuntimeMode != "openai_responses" || pendingResponses.Status != "source_authority_only_not_selectable" {
+		t.Fatalf("pending openai_responses profile = %#v", pendingResponses)
+	}
+	if pendingResponses.CredentialSource.EnvVar != "OPENAI_API_KEY" || !pendingResponses.CredentialSource.Required {
+		t.Fatalf("pending openai_responses credential source = %#v", pendingResponses.CredentialSource)
+	}
+	if pendingResponses.EndpointSource.ConfigKey != "llm.openai_responses.base_url" || pendingResponses.EndpointSource.EnvVar != "" || pendingResponses.EndpointSource.BuiltInDefault != "https://api.openai.com/v1" {
+		t.Fatalf("pending openai_responses endpoint source = %#v", pendingResponses.EndpointSource)
+	}
+	openAIRejectedTarget := authority.BackendProfileIdentity.RejectedTargetNames["openai"]
+	for _, want := range []string{"not active", "openai_responses", "#1224"} {
+		if !strings.Contains(strings.ToLower(openAIRejectedTarget), strings.ToLower(want)) {
+			t.Fatalf("openai rejected target missing %q: %#v", want, authority.BackendProfileIdentity.RejectedTargetNames)
+		}
+	}
 	if !strings.Contains(strings.ToLower(authority.BackendProfileIdentity.RejectedTargetNames["openai"]), "not active") {
 		t.Fatalf("openai rejected target missing design decision: %#v", authority.BackendProfileIdentity.RejectedTargetNames)
+	}
+	responses := authority.NativeOpenAIResponsesSourceAuthority
+	if responses.PromotedBy != "#1229" || responses.ImplementationStatus != "source_authority_only_runtime_split" {
+		t.Fatalf("native responses source authority status = %#v", responses)
+	}
+	if responses.TargetBackendProfileID != "openai_responses" || responses.ProviderIdentity != "openai" || responses.ActivationStatus != "pending_runtime_adapter_not_selectable" {
+		t.Fatalf("native responses identity = %#v", responses)
+	}
+	for _, want := range []string{"api-reference/responses", "docs/models", "function-calling", "streaming-responses"} {
+		if !joinedContains(responses.AuthoritativeRefs, want) {
+			t.Fatalf("native responses authoritative refs missing %q: %#v", want, responses.AuthoritativeRefs)
+		}
+	}
+	for _, want := range []string{"MUST NOT be accepted", "openai remains a rejected", "openai_compatible remains Chat Completions-compatible"} {
+		if !joinedContains(responses.ActiveSelectorPolicy, want) {
+			t.Fatalf("native responses selector policy missing %q: %#v", want, responses.ActiveSelectorPolicy)
+		}
+	}
+	protocol := responses.ProtocolFamily
+	if protocol.Name != "native_openai_responses" || protocol.EndpointPath != "/v1/responses" || protocol.Transport != "api" {
+		t.Fatalf("native responses protocol = %#v", protocol)
+	}
+	for _, want := range []string{"Platform-managed text transcript", "function", "server-sent events", "previous_response_id"} {
+		if !strings.Contains(protocol.InputScope+protocol.ToolScope+protocol.StreamingScope+protocol.SessionContinuity, want) {
+			t.Fatalf("native responses protocol scope missing %q: %#v", want, protocol)
+		}
+	}
+	if responses.CredentialAndEndpointPolicy.CredentialSource.EnvVar != "OPENAI_API_KEY" || !responses.CredentialAndEndpointPolicy.CredentialSource.Required {
+		t.Fatalf("native responses credential policy = %#v", responses.CredentialAndEndpointPolicy.CredentialSource)
+	}
+	if responses.CredentialAndEndpointPolicy.EndpointSource.ConfigKey != "llm.openai_responses.base_url" || responses.CredentialAndEndpointPolicy.EndpointSource.EnvVar != "" || responses.CredentialAndEndpointPolicy.EndpointSource.BuiltInDefault != "https://api.openai.com/v1" {
+		t.Fatalf("native responses endpoint policy = %#v", responses.CredentialAndEndpointPolicy.EndpointSource)
+	}
+	for alias, model := range map[string]string{"cheap": "gpt-5.4-nano", "regular": "gpt-5.4", "frontier": "gpt-5.5"} {
+		if got := strings.TrimSpace(responses.ModelAliasDefaults[alias]); got != model {
+			t.Fatalf("native responses model alias %s = %q, want %q; aliases=%#v", alias, got, model, responses.ModelAliasDefaults)
+		}
+	}
+	if !strings.Contains(responses.ModelAliasRule, "not consumed by boot or verify until openai_responses is activated") {
+		t.Fatalf("native responses model alias rule does not preserve inactive boundary: %s", responses.ModelAliasRule)
+	}
+	for _, want := range []string{"function tools", "function-call output", "raw Responses payloads", "previous_response_id", "backend profile id openai_responses", "exact provider-reported usage"} {
+		combined := strings.Join(responses.ProviderContractExpectations.ToolSchema, " ") +
+			strings.Join(responses.ProviderContractExpectations.ResponseNormalization, " ") +
+			strings.Join(responses.ProviderContractExpectations.SessionLifecycle, " ") +
+			strings.Join(responses.ProviderContractExpectations.Persistence, " ") +
+			strings.Join(responses.ProviderContractExpectations.Budget, " ")
+		if !strings.Contains(combined, want) {
+			t.Fatalf("native responses provider contract expectations missing %q: %#v", want, responses.ProviderContractExpectations)
+		}
+	}
+	if !strings.Contains(responses.StoreProfileImplication, "No agents.llm_backend schema/check migration is required") || !strings.Contains(responses.StoreProfileImplication, "not active") {
+		t.Fatalf("native responses store implication must preserve inactive boundary: %s", responses.StoreProfileImplication)
+	}
+	for _, want := range []string{"#1224", "previous_response_id", "Provider matrix"} {
+		if !joinedContains(responses.SplitBoundaries, want) {
+			t.Fatalf("native responses split boundaries missing %q: %#v", want, responses.SplitBoundaries)
+		}
 	}
 	models := authority.ModelAliasAuthority
 	if models.ContractField != "model" || models.Replaces != "model_tier" || models.AliasConfigKey != "llm.models" {
@@ -2488,7 +2628,7 @@ func TestPlatformSpecLLMProviderModelSelectionSourceAuthorityPromoted(t *testing
 			t.Fatalf("persistence rules missing %q: %#v", want, authority.PersistenceRules)
 		}
 	}
-	for _, want := range []string{"#1127", "#1128", "#1129", "#1130", "MUST NOT change runtime"} {
+	for _, want := range []string{"#1127", "#1128", "#1129", "#1130", "#1229", "#1224", "MUST NOT change runtime"} {
 		if !joinedContains(authority.SplitBoundaries, want) {
 			t.Fatalf("split boundaries missing %q: %#v", want, authority.SplitBoundaries)
 		}

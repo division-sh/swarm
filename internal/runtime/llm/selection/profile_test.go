@@ -31,7 +31,7 @@ func TestResolveActiveBackendProfiles(t *testing.T) {
 }
 
 func TestResolveActiveBackendRejectsReservedAndUnknown(t *testing.T) {
-	for _, raw := range []string{BackendMock, BackendLocal, LegacyBackendAPI, LegacyBackendCLITest, "openai"} {
+	for _, raw := range []string{BackendMock, BackendLocal, LegacyBackendAPI, LegacyBackendCLITest, "openai", "openai_responses"} {
 		t.Run(raw, func(t *testing.T) {
 			if _, err := ResolveActiveBackend(raw); err == nil {
 				t.Fatal("expected error")
@@ -51,6 +51,12 @@ func TestResolvePersistedBackendAllowsReservedProfiles(t *testing.T) {
 				t.Fatalf("profile id = %q, want %q", profile.ID, raw)
 			}
 		})
+	}
+}
+
+func TestResolvePersistedBackendRejectsSourceOnlyOpenAIResponsesProfile(t *testing.T) {
+	if _, err := ResolvePersistedBackend("openai_responses"); err == nil || !strings.Contains(err.Error(), "unsupported llm backend profile") {
+		t.Fatalf("ResolvePersistedBackend(openai_responses) error = %v, want unsupported profile", err)
 	}
 }
 

@@ -2520,14 +2520,119 @@ engine:
             proof_boundary: This profile proves one non-Anthropic Chat Completions-compatible HTTP provider path. It remains
               named openai_compatible and is not a native OpenAI Responses API provider, not an official-OpenAI-only provider
               identity, not OpenRouter/Ollama/Bedrock/Azure/Vertex/vLLM closure, and not a provider matrix.
+        pending_backend_profiles:
+          openai_responses:
+            status: source_authority_only_not_selectable
+            provider: openai
+            transport: api
+            provider_contract_runtime_mode: openai_responses
+            protocol: Native OpenAI Responses API at /v1/responses relative to the configured base URL.
+            credential_source:
+              env_var: OPENAI_API_KEY
+              required: true
+            endpoint_source:
+              config_key: llm.openai_responses.base_url
+              env_var: null
+              required: false
+              built_in_default: https://api.openai.com/v1
+              rule: "This is deployment configuration, not a secret. Runtime config is canonical; no env-var endpoint selector is promoted."
+            activation_rule: "This profile is source-authority only after #1229. It is not active for --backend, config llm.backend, persisted agents.llm_backend, RuntimeFactory materialization, or CLI help until #1224 or a later gated implementation PR promotes the runtime adapter."
+            proof_boundary: >
+              This profile names native OpenAI Responses source authority only. It is not openai_compatible,
+              not Chat Completions-compatible HTTP JSON, not an OpenRouter/Ollama/Bedrock/Azure/Vertex/vLLM provider-matrix
+              proof, and not a provider runtime implementation.
         reserved_persisted_backend_profiles:
           mock: Reserved persisted profile id for fixture replay. It is not a supported active runtime backend until a
             dedicated provider/runtime owner lands.
           local: Reserved persisted profile id for local model execution. It is not a supported active runtime backend until
             a dedicated provider/runtime owner lands.
         rejected_target_names:
-          openai: Not active for this authority because the shipped non-Anthropic proof is Chat Completions-compatible and
-            may front OpenRouter or local-compatible endpoints. Native OpenAI Responses requires a separate provider/protocol gate.
+          openai: >
+            Not active for this authority because the shipped non-Anthropic proof is Chat Completions-compatible and
+            may front OpenRouter or local-compatible endpoints. Native OpenAI Responses source authority is named
+            openai_responses by #1229, but it remains source-authority only and not selectable until #1224 or a later gated
+            implementation PR promotes the runtime adapter.
+      native_openai_responses_source_authority:
+        promoted_by: '#1229'
+        implementation_status: source_authority_only_runtime_split
+        target_backend_profile_id: openai_responses
+        provider_identity: openai
+        activation_status: pending_runtime_adapter_not_selectable
+        authoritative_refs:
+          - "https://platform.openai.com/docs/api-reference/responses"
+          - "https://platform.openai.com/docs/models"
+          - "https://platform.openai.com/docs/guides/function-calling?api-mode=responses"
+          - "https://platform.openai.com/docs/guides/streaming-responses?api-mode=responses"
+        active_selector_policy:
+          - "openai_responses MUST NOT be accepted by --backend, config llm.backend, persisted agents.llm_backend, RuntimeFactory, or CLI help until a later gated implementation PR activates the runtime adapter."
+          - "openai remains a rejected backend selector name; provider identity and backend profile id are intentionally separate."
+          - "openai_compatible remains Chat Completions-compatible HTTP JSON and MUST NOT inherit native Responses semantics."
+        protocol_family:
+          name: native_openai_responses
+          endpoint_path: /v1/responses
+          transport: api
+          request_body_owner: "provider adapter behind internal/runtime/llm.ProviderContract after #1224"
+          input_scope: >
+            Platform-managed text transcript plus function-tool call outputs. Image, audio, file, provider prompt
+            templates, conversations, and provider-hosted item references are not part of the first source-authority subset.
+          tool_scope: >
+            Platform function tools only. OpenAI built-in tools such as web search, file search, code interpreter,
+            computer use, hosted shell, MCP, and tool search are explicitly outside the first subset until separately gated.
+          streaming_scope: >
+            Streaming must use Responses server-sent events when #1224 promotes runtime implementation. The
+            source authority names the parser family, but #1229 does not implement streaming or make it selectable.
+          session_continuity: >
+            Platform session IDs and platform-managed transcript history remain canonical. Provider response
+            IDs may be persisted as raw provider metadata, but previous_response_id/provider-hosted continuity is deferred
+            unless a later gate promotes it explicitly.
+        credential_and_endpoint_policy:
+          credential_source:
+            env_var: OPENAI_API_KEY
+            required: true
+          endpoint_source:
+            config_key: llm.openai_responses.base_url
+            env_var: null
+            required: false
+            built_in_default: https://api.openai.com/v1
+          rules:
+            - Environment variables provide the OpenAI API secret only; they do not select the backend or endpoint.
+            - Runtime config is canonical for endpoint/base URL overrides used by deterministic tests or deployments.
+            - "Credential validation happens only after a selected active backend exists; #1229 does not make openai_responses active."
+        model_alias_defaults:
+          cheap: gpt-5.4-nano
+          regular: gpt-5.4
+          frontier: gpt-5.5
+        model_alias_rule: >
+          The target profile uses the existing llm.models provider-scoped alias map. These defaults are source
+          authority for #1224 but are not consumed by boot or verify until openai_responses is activated by a later gated
+          implementation PR.
+        provider_contract_expectations:
+          tool_schema:
+            - Translate platform tools to OpenAI Responses function tools with validated JSON schema parameters.
+            - Return platform tool results as Responses function-call output items.
+          response_normalization:
+            - Normalize output messages and function calls into the platform response model.
+            - Preserve raw Responses payloads for turn and audit persistence.
+            - Treat provider built-in tool output as unsupported until a separate native-tool gate promotes it.
+          session_lifecycle:
+            - Preserve task, session, and session_per_entity conversation modes through platform-managed transcript state.
+            - Persist provider response IDs only as provider metadata until previous_response_id continuity is separately promoted.
+          persistence:
+            - Persist authored model alias, backend profile id openai_responses, provider identity openai, transport api, concrete
+              model, and raw provider response at write time once runtime implementation is promoted.
+          budget:
+            - Use exact provider-reported usage when available; fail closed or explicitly record unsupported usage if the provider
+              response lacks required accounting fields.
+        store_profile_implication: >
+          No agents.llm_backend schema/check migration is required for #1229 because openai_responses
+          is not active or persisted by this source-authority slice. The later runtime implementation PR must update store,
+          CLI, config, and RuntimeFactory activation together if it makes openai_responses selectable.
+        split_boundaries:
+          - '#1224 owns native OpenAI Responses runtime adapter implementation and deterministic protocol proof after this source authority lands.'
+          - Provider-hosted continuity through previous_response_id, OpenAI built-in tools, file/image/audio inputs, provider
+            prompt templates, conversations, and broader streaming parity remain separate gates unless explicitly promoted.
+          - Provider matrix work, OpenRouter/Ollama/Bedrock/Azure/Vertex/vLLM support, Compose/local defaults, .env release docs,
+            and provider-contributor docs remain split.
       model_alias_authority:
         contract_field: model
         replaces: model_tier
@@ -2589,6 +2694,8 @@ engine:
       - '#1128 owns backend selection/config discovery, --backend precedence, env selector retirement, and backend id migration.'
       - '#1129 owns model_tier to model alias migration, boot/verify alias validation, runtime model resolution, and audit writes.'
       - '#1130 owns public/local config and model-alias cleanup after behavior lands.'
+      - '#1229 defines native OpenAI Responses source authority only and MUST NOT make openai_responses selectable or add a runtime adapter.'
+      - '#1224 owns native OpenAI Responses runtime implementation/protocol proof after #1229.'
       - Implementing OpenAI Responses, OpenRouter, Ollama, Bedrock, Azure OpenAI, Vertex, vLLM, or any other additional
         provider remains a separate provider implementation/parity gate.
       - Native multi-backend-per-run remains deferred until a separate real user need is gated.
