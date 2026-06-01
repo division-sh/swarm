@@ -878,8 +878,8 @@ func TestDeactivateFlowInstanceQueuesTerminalSideEffectsUntilPostCommitWhenAvail
 	}
 }
 
-func TestDeactivateFlowInstanceLogsPostCommitTerminalSideEffectFailures(t *testing.T) {
-	bus := &flowActivationTestBus{removeErr: errors.New("route removal failed")}
+func TestDeactivateFlowInstanceLogsPostCommitAgentFailureWithoutRouteRemoval(t *testing.T) {
+	bus := &flowActivationTestBus{}
 	instances := &flowActivationTestInstanceStore{}
 	managerStore := &flowActivationTestStore{terminateErr: errors.New("agent terminate failed")}
 	am := newFlowActivationManager(bus, instances, managerStore)
@@ -902,11 +902,49 @@ func TestDeactivateFlowInstanceLogsPostCommitTerminalSideEffectFailures(t *testi
 	if log.Action != "terminal_flow_instance_side_effects_failed" || log.Level != "warn" {
 		t.Fatalf("runtime log = %#v, want warning terminal_flow_instance_side_effects_failed", log)
 	}
-	if !strings.Contains(log.Error, "agent terminate failed") || !strings.Contains(log.Error, "route removal failed") {
-		t.Fatalf("runtime log error = %q, want both side-effect failures", log.Error)
+	if !strings.Contains(log.Error, "agent terminate failed") {
+		t.Fatalf("runtime log error = %q, want agent termination failure", log.Error)
+	}
+	if len(bus.removedPairs) != 0 {
+		t.Fatalf("removed routes after agent failure = %#v, want no route removal", bus.removedPairs)
+	}
+	if len(instances.terminatedPaths) != 1 || instances.terminatedPaths[0] != "review/inst-1" {
+		t.Fatalf("flow terminal state = %#v, want preserved terminal transition", instances.terminatedPaths)
+	}
+}
+
+func TestDeactivateFlowInstanceLogsPostCommitRouteFailureAfterAgentTeardown(t *testing.T) {
+	bus := &flowActivationTestBus{removeErr: errors.New("route removal failed")}
+	instances := &flowActivationTestInstanceStore{}
+	managerStore := &flowActivationTestStore{}
+	am := newFlowActivationManager(bus, instances, managerStore)
+	bundle := testFlowBundle("")
+
+	if err := am.ActivateFlowInstance(context.Background(), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")); err != nil {
+		t.Fatalf("ActivateFlowInstance: %v", err)
+	}
+	postCommit := make([]func(), 0, 1)
+	ctx := runtimepipeline.WithPipelinePostCommitActions(context.Background(), &postCommit)
+	if err := am.DeactivateFlowInstance(ctx, "review", "inst-1", "review/inst-1", "ent-1"); err != nil {
+		t.Fatalf("DeactivateFlowInstance returned pre-commit error: %v", err)
+	}
+
+	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
+	if len(bus.runtimeLogs) != 1 {
+		t.Fatalf("runtime logs = %#v, want one post-commit failure log", bus.runtimeLogs)
+	}
+	log := bus.runtimeLogs[0]
+	if log.Action != "terminal_flow_instance_side_effects_failed" || log.Level != "warn" {
+		t.Fatalf("runtime log = %#v, want warning terminal_flow_instance_side_effects_failed", log)
+	}
+	if !strings.Contains(log.Error, "route removal failed") {
+		t.Fatalf("runtime log error = %q, want route removal failure", log.Error)
+	}
+	if len(managerStore.terminated) != 1 || managerStore.terminated[0] != "reviewer-inst-1" {
+		t.Fatalf("agent terminations after route failure = %#v, want reviewer-inst-1", managerStore.terminated)
 	}
 	if len(bus.removedPairs) != 1 || bus.removedPairs[0] != "review/inst-1" {
-		t.Fatalf("removed routes after failure = %#v, want route attempt after agent failure", bus.removedPairs)
+		t.Fatalf("removed routes after route failure = %#v, want one route attempt", bus.removedPairs)
 	}
 	if len(instances.terminatedPaths) != 1 || instances.terminatedPaths[0] != "review/inst-1" {
 		t.Fatalf("flow terminal state = %#v, want preserved terminal transition", instances.terminatedPaths)
