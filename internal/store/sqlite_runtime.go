@@ -33,6 +33,7 @@ type SQLiteRuntimeStore struct {
 	startupMu             sync.Mutex
 	sessionMu             sync.Mutex
 	replayMu              sync.Mutex
+	apiIdempotencyMu      sync.Mutex
 	startupOwner          string
 	replayClaims          map[string]struct{}
 	sessionLockTTL        time.Duration
@@ -614,6 +615,9 @@ func (s *SQLiteRuntimeStore) WithAPIIdempotency(ctx context.Context, req APIIdem
 		completion, err := execute(ctx)
 		return completion, false, err
 	}
+	if s == nil || s.DB == nil {
+		return APIIdempotencyCompletion{}, false, fmt.Errorf("sqlite runtime store is required")
+	}
 	if execute == nil {
 		return APIIdempotencyCompletion{}, false, fmt.Errorf("api idempotency executor is required")
 	}
@@ -621,6 +625,7 @@ func (s *SQLiteRuntimeStore) WithAPIIdempotency(ctx context.Context, req APIIdem
 	req.ActorTokenID = strings.TrimSpace(req.ActorTokenID)
 	req.IdempotencyKey = strings.TrimSpace(req.IdempotencyKey)
 	req.RequestHash = strings.TrimSpace(req.RequestHash)
+	req.ResourceID = strings.TrimSpace(req.ResourceID)
 	if req.Method == "" || req.ActorTokenID == "" || req.RequestHash == "" {
 		return APIIdempotencyCompletion{}, false, fmt.Errorf("method, actor token id, and request hash are required")
 	}
@@ -630,20 +635,17 @@ func (s *SQLiteRuntimeStore) WithAPIIdempotency(ctx context.Context, req APIIdem
 	if req.TTL <= 0 {
 		req.TTL = 24 * time.Hour
 	}
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return APIIdempotencyCompletion{}, false, fmt.Errorf("begin sqlite api idempotency tx: %w", err)
+
+	// SQLite is local-dev only here: serialize idempotent callbacks in-process,
+	// but never keep a SQLite write transaction open while the callback writes
+	// through the selected runtime store.
+	s.apiIdempotencyMu.Lock()
+	defer s.apiIdempotencyMu.Unlock()
+
+	if err := purgeExpiredSQLiteAPIIdempotency(ctx, s.DB, req.Now); err != nil {
+		return APIIdempotencyCompletion{}, false, err
 	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
-	if _, err := tx.ExecContext(ctx, `DELETE FROM api_idempotency WHERE expires_at <= ?`, req.Now.UTC()); err != nil {
-		return APIIdempotencyCompletion{}, false, fmt.Errorf("purge expired sqlite api idempotency: %w", err)
-	}
-	existing, ok, err := sqliteLoadAPIIdempotency(ctx, tx, req)
+	existing, ok, err := sqliteLoadAPIIdempotency(ctx, s.DB, req)
 	if err != nil {
 		return APIIdempotencyCompletion{}, false, err
 	}
@@ -656,11 +658,10 @@ func (s *SQLiteRuntimeStore) WithAPIIdempotency(ctx context.Context, req APIIdem
 				ResourceID:             existing.ResourceID,
 			}
 		}
-		if err := tx.Commit(); err != nil {
-			return APIIdempotencyCompletion{}, false, fmt.Errorf("commit sqlite api idempotency replay: %w", err)
-		}
-		committed = true
-		return APIIdempotencyCompletion{ResourceID: existing.ResourceID, Response: existing.Response}, true, nil
+		return APIIdempotencyCompletion{
+			ResourceID: existing.ResourceID,
+			Response:   append(json.RawMessage(nil), existing.Response...),
+		}, true, nil
 	}
 	completion, err := execute(ctx)
 	if err != nil {
@@ -669,17 +670,20 @@ func (s *SQLiteRuntimeStore) WithAPIIdempotency(ctx context.Context, req APIIdem
 	if len(completion.Response) == 0 {
 		return APIIdempotencyCompletion{}, false, fmt.Errorf("api idempotency response is required")
 	}
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO api_idempotency (method, actor_token_id, idempotency_key, request_hash, resource_id, response, created_at, expires_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`, req.Method, req.ActorTokenID, req.IdempotencyKey, req.RequestHash, strings.TrimSpace(completion.ResourceID), string(completion.Response), req.Now.UTC(), req.Now.Add(req.TTL).UTC()); err != nil {
-		return APIIdempotencyCompletion{}, false, fmt.Errorf("store sqlite api idempotency response: %w", err)
+	if strings.TrimSpace(completion.ResourceID) == "" {
+		completion.ResourceID = req.ResourceID
 	}
-	if err := tx.Commit(); err != nil {
-		return APIIdempotencyCompletion{}, false, fmt.Errorf("commit sqlite api idempotency tx: %w", err)
+	if err := sqliteStoreAPIIdempotency(ctx, s.DB, req, completion); err != nil {
+		return APIIdempotencyCompletion{}, false, err
 	}
-	committed = true
 	return completion, false, nil
+}
+
+func purgeExpiredSQLiteAPIIdempotency(ctx context.Context, q execQueryer, now time.Time) error {
+	if _, err := q.ExecContext(ctx, `DELETE FROM api_idempotency WHERE expires_at <= ?`, now.UTC()); err != nil {
+		return fmt.Errorf("purge expired sqlite api idempotency: %w", err)
+	}
+	return nil
 }
 
 func sqliteLoadAPIIdempotency(ctx context.Context, q execQueryer, req APIIdempotencyRequest) (apiIdempotencyRecord, bool, error) {

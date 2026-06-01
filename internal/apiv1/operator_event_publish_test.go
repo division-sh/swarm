@@ -21,6 +21,7 @@ import (
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/store"
 	storerunlifecycle "swarm/internal/store/runlifecycle"
+	"swarm/internal/store/storetest"
 	"swarm/internal/testutil"
 )
 
@@ -99,6 +100,104 @@ func TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempo
 	}
 	if count := countEventsByName(t, db, "scan.requested"); count != 1 {
 		t.Fatalf("scan.requested event count after conflict = %d, want 1", count)
+	}
+}
+
+func TestOperatorEventPublishSQLiteIdempotentFirstEventPublishesWithoutLock(t *testing.T) {
+	ctx := context.Background()
+	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+	bus, err := runtimebus.NewEventBusWithOptions(sqliteStore, runStartTestEventBusOptions(source))
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	handler := eventPublishTestHandlerWithStores(t, sqliteStore, sqliteStore, sqliteStore, bus, source)
+	body := eventPublishBody("", runStartTestFingerprint, "scan.requested", `{"topic":"medicine"}`, "", "idem-sqlite-publish")
+
+	published := rpcCall(t, handler, body)
+	if published.Error != nil {
+		t.Fatalf("sqlite event.publish error = %#v", published.Error)
+	}
+	result := asMap(t, published.Result)
+	eventID := stringValue(t, result["event_id"], "event_id")
+	runID := stringValue(t, result["run_id"], "run_id")
+	if result["new_run_created"] != true {
+		t.Fatalf("sqlite new_run_created = %#v, want true", result["new_run_created"])
+	}
+	assertSQLiteEventPublishRows(t, sqliteStore.DB, runID, eventID, "scan.requested", "cli-publish:"+actorTokenID(testToken))
+	if count := countSQLiteAPIIdempotencyRows(t, sqliteStore.DB); count != 1 {
+		t.Fatalf("sqlite api_idempotency rows = %d, want 1", count)
+	}
+
+	replay := rpcCall(t, handler, body)
+	if replay.Error != nil {
+		t.Fatalf("sqlite event.publish replay error = %#v", replay.Error)
+	}
+	replayResult := asMap(t, replay.Result)
+	if replayResult["event_id"] != eventID || replayResult["run_id"] != runID {
+		t.Fatalf("sqlite replay result = %#v, want original event/run", replayResult)
+	}
+	if count := countSQLiteEventsByName(t, sqliteStore.DB, "scan.requested"); count != 1 {
+		t.Fatalf("sqlite event rows after replay = %d, want 1", count)
+	}
+
+	conflict := rpcCall(t, handler, eventPublishBody("", runStartTestFingerprint, "scan.requested", `{"topic":"changed"}`, "", "idem-sqlite-publish"))
+	if conflict.Error == nil {
+		t.Fatal("sqlite event.publish idempotency conflict error = nil")
+	}
+	if data := asMap(t, conflict.Error.Data); data["code"] != IdempotencyConflictCode {
+		t.Fatalf("sqlite idempotency conflict data = %#v", data)
+	}
+	if count := countSQLiteEventsByName(t, sqliteStore.DB, "scan.requested"); count != 1 {
+		t.Fatalf("sqlite event rows after conflict = %d, want 1", count)
+	}
+
+	nonIDEM := rpcCall(t, handler, eventPublishBody("", runStartTestFingerprint, "scan.requested", `{"topic":"second"}`, "", ""))
+	if nonIDEM.Error != nil {
+		t.Fatalf("sqlite non-idempotent event.publish error = %#v", nonIDEM.Error)
+	}
+	if count := countSQLiteEventsByName(t, sqliteStore.DB, "scan.requested"); count != 2 {
+		t.Fatalf("sqlite event rows after non-idempotent publish = %d, want 2", count)
+	}
+	if count := countSQLiteAPIIdempotencyRows(t, sqliteStore.DB); count != 1 {
+		t.Fatalf("sqlite api_idempotency rows after non-idempotent publish = %d, want 1", count)
+	}
+}
+
+func TestOperatorEventPublishSQLitePayloadFailureLeavesNoIdempotencyCompletionOrRows(t *testing.T) {
+	ctx := context.Background()
+	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+	bus, err := runtimebus.NewEventBusWithOptions(sqliteStore, runtimebus.EventBusOptions{
+		ContractBundle:   source,
+		BundleSourceFact: runStartTestBundleSourceFact(),
+		PayloadValidator: func(eventType string, _ []byte) error {
+			if eventType == "scan.requested" {
+				return errors.New("schema violation")
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	handler := eventPublishTestHandlerWithStores(t, sqliteStore, sqliteStore, sqliteStore, bus, source)
+
+	resp := rpcCall(t, handler, eventPublishBody("", runStartTestFingerprint, "scan.requested", `{"topic":"medicine"}`, "", "idem-sqlite-payload-fails"))
+	if resp.Error == nil {
+		t.Fatal("sqlite event.publish payload validation error = nil")
+	}
+	if data := asMap(t, resp.Error.Data); data["code"] != PayloadValidationFailedCode {
+		t.Fatalf("sqlite payload validation data = %#v", data)
+	}
+	if count := countSQLiteEventsByName(t, sqliteStore.DB, "scan.requested"); count != 0 {
+		t.Fatalf("sqlite event rows after failed publish = %d, want 0", count)
+	}
+	if count := countSQLiteAllRunRows(t, sqliteStore.DB); count != 0 {
+		t.Fatalf("sqlite run rows after failed publish = %d, want 0", count)
+	}
+	if count := countSQLiteAPIIdempotencyRows(t, sqliteStore.DB); count != 0 {
+		t.Fatalf("sqlite api_idempotency rows after failed publish = %d, want 0", count)
 	}
 }
 
@@ -1197,6 +1296,42 @@ func assertEventPublishPersistence(t *testing.T, db *sql.DB, runID, eventID, eve
 	}
 }
 
+func assertSQLiteEventPublishRows(t *testing.T, db *sql.DB, runID, eventID, eventName, producedBy string) {
+	t.Helper()
+	var runStatus, triggerType, triggerID string
+	if err := db.QueryRow(`
+		SELECT status, COALESCE(trigger_event_type, ''), COALESCE(trigger_event_id, '')
+		FROM runs
+		WHERE run_id = ?
+	`, runID).Scan(&runStatus, &triggerType, &triggerID); err != nil {
+		t.Fatalf("load sqlite event.publish run row: %v", err)
+	}
+	if runStatus != "running" || triggerType != eventName || triggerID != eventID {
+		t.Fatalf("sqlite run row status=%q trigger=%q/%q, want running/%s/%s", runStatus, triggerType, triggerID, eventName, eventID)
+	}
+	var entityID, gotProducedBy, payloadText string
+	if err := db.QueryRow(`
+		SELECT COALESCE(entity_id, ''), COALESCE(produced_by, ''), payload
+		FROM events
+		WHERE event_id = ?
+	`, eventID).Scan(&entityID, &gotProducedBy, &payloadText); err != nil {
+		t.Fatalf("load sqlite event.publish event row: %v", err)
+	}
+	if entityID != runID {
+		t.Fatalf("sqlite event entity_id = %q, want run_id %q", entityID, runID)
+	}
+	if gotProducedBy != producedBy {
+		t.Fatalf("sqlite event produced_by = %q, want %q", gotProducedBy, producedBy)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(payloadText), &decoded); err != nil {
+		t.Fatalf("decode sqlite event.publish payload: %v", err)
+	}
+	if decoded["entity_id"] != runID || decoded["topic"] != "medicine" {
+		t.Fatalf("sqlite event.publish payload = %#v", decoded)
+	}
+}
+
 func assertEventSourceEventID(t *testing.T, db *sql.DB, eventID, wantSourceEventID string) {
 	t.Helper()
 	var got string
@@ -1248,6 +1383,33 @@ func countAllEventRows(t *testing.T, db *sql.DB) int {
 	var count int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM events`).Scan(&count); err != nil {
 		t.Fatalf("count all event rows: %v", err)
+	}
+	return count
+}
+
+func countSQLiteEventsByName(t *testing.T, db *sql.DB, eventName string) int {
+	t.Helper()
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE event_name = ?`, eventName).Scan(&count); err != nil {
+		t.Fatalf("count sqlite events: %v", err)
+	}
+	return count
+}
+
+func countSQLiteAllRunRows(t *testing.T, db *sql.DB) int {
+	t.Helper()
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM runs`).Scan(&count); err != nil {
+		t.Fatalf("count sqlite runs: %v", err)
+	}
+	return count
+}
+
+func countSQLiteAPIIdempotencyRows(t *testing.T, db *sql.DB) int {
+	t.Helper()
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM api_idempotency`).Scan(&count); err != nil {
+		t.Fatalf("count sqlite api_idempotency rows: %v", err)
 	}
 	return count
 }
