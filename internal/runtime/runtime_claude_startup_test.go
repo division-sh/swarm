@@ -129,7 +129,7 @@ func TestValidateClaudeManagedAgentWorkspaces_RequiresResolvedContainerTargets(t
 	}
 
 	err := validateClaudeManagedAgentWorkspaces(context.Background(), cfg, claudeStartupAgentSource("campaign-coordinator"), claudeStartupWorkspaceStub{}, manager)
-	if err == nil || !strings.Contains(err.Error(), "resolved no container workspace target") {
+	if err == nil || !strings.Contains(err.Error(), "does not support Claude CLI execution") {
 		t.Fatalf("expected workspace target error, got %v", err)
 	}
 }

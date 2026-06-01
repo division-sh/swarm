@@ -6646,6 +6646,82 @@ workspace_model:
     - '#1136 broader local onboarding/docs'
     - full host Claude CLI, native tool execution, and tool relay parity
     - production SQLite multi-writer semantics
+  workspace_execution_target_capability:
+    promoted_by: '#1213'
+    implementation_status: implemented_first_slice
+    canonical_owner: platform-spec.yaml#workspace_model.workspace_execution_target_capability
+    scope: >
+      Defines the canonical runtime execution-target and capability authority for workspace-backed execution surfaces after
+      workspace backend selection. The owner distinguishes Docker container execution, explicit host-local targets, and
+      unsupported targets. It does not make host execution Docker-equivalent and does not enable host native tools, host
+      command execution, host tool-result relay, or host Claude/provider runtime support in this first slice.
+    implementation_owner: internal/runtime/workspace.ExecutionTarget
+    target_modes:
+      docker_container:
+        rule: >
+          A Docker target has an explicit backend, container identity, logical workdir, and standard logical mounts. Current
+          Docker-backed execution capabilities remain supported through this mode.
+        capabilities:
+        - native_command
+        - file_read
+        - file_write
+        - tool_result_relay
+        - claude_cli
+      host_local:
+        rule: >
+          A host target is an explicit local-dev backend target with platform-managed raw host backing paths and logical
+          mount identities. Host-local targets MUST NOT infer execution support from an empty container field and MUST fail
+          closed for all current execution capabilities until a later gate promotes a specific host execution surface.
+        capabilities: []
+      unsupported:
+        rule: >
+          Nil targets, unknown backend names, Docker targets without a container, and empty targets are unsupported. They MUST
+          fail closed instead of falling back to process cwd, raw workdir execution, or implicit host execution.
+        capabilities: []
+    logical_mount_authority:
+      writable:
+      - /workspace
+      read_only:
+      - /data
+      - /opt/swarm/contracts
+      rules:
+      - Relative execution paths resolve under logical `/workspace`.
+      - Writes outside logical `/workspace` fail closed.
+      - Reads outside logical `/workspace`, `/data`, and `/opt/swarm/contracts` fail closed.
+      - Runtime execution surfaces MUST expose logical paths as product semantics and MUST NOT leak raw host backing paths as
+        agent-visible authority.
+      - Host execution target production MUST consume `workspace_model.data_source_authority` for `/data` and the loaded
+        contracts source for `/opt/swarm/contracts`.
+    consumers:
+    - Docker workspace target production
+    - Host workspace target production
+    - native executor command execution
+    - native executor read_file and write_file path resolution
+    - native fallback tool definitions and callable capability truth
+    - OpenAI-compatible/API fallback-tool routing through tools.Executor
+    - native tool-result relay path construction and execution support
+    - Claude CLI process command construction
+    - Claude workspace-command relay
+    - Claude startup visible-tool probe workspace validation
+    - runtime Claude managed-agent startup validation
+    retired_non_authoritative_interpreters:
+    - Target.Container as execution support
+    - Target.Enabled() as execution support
+    - raw Target.Workdir as product path authority
+    - nil target or empty target cwd fallback
+    - ad hoc HostBackend() checks outside the execution-target owner
+    failure_behavior:
+    - Host-local targets remain fail closed for native tool execution, tool-result relay, and Claude/provider execution until
+      a later gate promotes and proves a specific host execution surface.
+    - Empty-container targets MUST NOT authorize local host execution.
+    - Docker behavior must remain regression-proven through the same typed owner.
+    split_scope:
+    - host native file operations
+    - host native bash/command execution
+    - host tool-result relay support
+    - Claude CLI/provider-native host runtime support
+    - Docker-equivalent host isolation claims
+    - '#1137 and #1136 docs/onboarding cleanup'
   standard_mounts:
     description: Three mount points are available to every agent session. Products cannot add new mount points — they configure
       access and scope for these three via workspace class definitions.
@@ -8411,6 +8487,19 @@ cli_specification:
         - serve boot workspace lifecycle
         - dynamic Builder project reload workspace lifecycle
         - selected-contract run-fork workspace lifecycle
+      workspace_execution_target_capability:
+        promoted_by: '#1213'
+        owner: workspace_model.workspace_execution_target_capability
+        rule: >
+          `swarm serve` runtime execution surfaces MUST consume the typed workspace execution target/capability owner after
+          backend selection. Host-local targets remain explicit and fail closed for native command/file execution, tool-result
+          relay, and Claude/provider execution in this first slice; Docker targets continue through container execution.
+        consumers:
+        - native executor command/file path authority
+        - native fallback tool-surface truth
+        - OpenAI-compatible/API fallback-tool routing through tools.Executor
+        - tool-result relay path authority
+        - Claude CLI process/startup/relay validation
       unified_listener_bind_contract:
         implemented_by: '#853'
         superseded_by: '#992 listener_topology_v2_1 runtime bind implementation'

@@ -108,10 +108,14 @@ func TestClaudeCLIRuntimeBuildCommand_UsesContainerReachableMCPGatewayURL(t *tes
 	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil, nil)
 	runtime.cfg.LLM.ClaudeCLI.Command = "claude"
 
-	cmd := runtime.buildCommand(context.Background(), []string{"--print", "hello"}, &workspace.Target{
+	cmd, err := runtime.buildCommand(context.Background(), []string{"--print", "hello"}, &workspace.Target{
+		Backend:   workspace.BackendDocker,
 		Container: "swarm-agent-market-research",
 		Workdir:   "/workspace",
 	})
+	if err != nil {
+		t.Fatalf("buildCommand: %v", err)
+	}
 	got := strings.Join(cmd.Args, " ")
 	if !strings.Contains(got, "SWARM_TOOL_GATEWAY_URL=http://host.docker.internal:8081/mcp") {
 		t.Fatalf("docker args = %q, want explicit container MCP gateway URL", got)

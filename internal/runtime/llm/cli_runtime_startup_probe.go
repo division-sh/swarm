@@ -112,11 +112,8 @@ func PlannedProviderNativeVisibleToolsForActor(actor models.AgentConfig, tools [
 
 func (r *ClaudeCLIRuntime) runUntilCLIStartupInit(ctx context.Context, args []string, target *workspace.Target, input string) (*Response, error) {
 	timeout := r.effectiveCLITimeout(ctx)
-	if target != nil && target.HostBackend() {
-		return nil, errClaudeHostWorkspaceUnsupported()
-	}
-	if target == nil || !target.Enabled() {
-		return nil, fmt.Errorf("%w: claude sessions must run in a container workspace", ErrClaudeWorkspaceRequired)
+	if _, err := requireClaudeExecutionTarget(target); err != nil {
+		return nil, err
 	}
 	if strings.TrimSpace(input) == "" {
 		return nil, errors.New("startup probe requires non-empty prompt")
@@ -125,7 +122,10 @@ func (r *ClaudeCLIRuntime) runUntilCLIStartupInit(ctx context.Context, args []st
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cmd := r.buildCommand(runCtx, args, target)
+	cmd, err := r.buildCommand(runCtx, args, target)
+	if err != nil {
+		return nil, err
+	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, fmt.Errorf("create claude stdout pipe: %w", err)

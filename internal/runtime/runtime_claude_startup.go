@@ -176,8 +176,9 @@ func validateClaudeManagedAgentWorkspaces(ctx context.Context, cfg *config.Confi
 		if err != nil {
 			return fmt.Errorf("resolve workspace for agent %s: %w", strings.TrimSpace(agentCfg.ID), err)
 		}
-		if target == nil || !target.Enabled() {
-			return fmt.Errorf("agent %s resolved no container workspace target", strings.TrimSpace(agentCfg.ID))
+		execTarget := target.ExecutionTarget()
+		if err := execTarget.Require(workspace.ExecutionCapabilityClaudeCLI); err != nil {
+			return fmt.Errorf("agent %s resolved workspace target that does not support Claude CLI execution: %w", strings.TrimSpace(agentCfg.ID), err)
 		}
 	}
 	return nil
