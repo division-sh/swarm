@@ -2681,6 +2681,54 @@ func TestLoadServeRuntimeBundleFromCatalogLoadsPersistedRuntimeSource(t *testing
 	}
 }
 
+func TestRunServeRuntimeDBLoadedUsesEmbeddedSpecBeforeCatalogRead(t *testing.T) {
+	_, _, pg := installServeRuntimePostgresTestStores(t, func() serveWorkspaceLifecycle {
+		return serveRuntimeWorkspaceStub{}
+	})
+	ctx := context.Background()
+	bundle := loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier8-boot-verification", "test-boot-success"))
+	projection, err := runtimecontracts.BuildBundleCatalogProjection(bundle)
+	if err != nil {
+		t.Fatalf("BuildBundleCatalogProjection: %v", err)
+	}
+	if _, err := pg.UpsertBundleCatalog(ctx, store.BundleCatalogUpsert{
+		BundleHash:  projection.BundleHash,
+		ContentYAML: projection.ContentYAML,
+		ParsedJSON:  projection.ParsedJSON,
+		DataBlob:    projection.DataBlob,
+		Metadata:    projection.Metadata,
+	}); err != nil {
+		t.Fatalf("UpsertBundleCatalog: %v", err)
+	}
+
+	serveCtx, cancelServe := context.WithCancel(context.Background())
+	var out lockedBuffer
+	done := make(chan int, 1)
+	go func() {
+		done <- runServeRuntime(serveCtx, repoRoot(), serveOptions{
+			ConfigPath:         writeServeRuntimeTestConfig(t),
+			BundleHash:         projection.BundleHash,
+			PlatformSpecPath:   filepath.Join(t.TempDir(), "missing-platform-spec.yaml"),
+			StoreMode:          "postgres",
+			APIListenAddr:      "127.0.0.1:0",
+			MCPListenAddr:      "127.0.0.1:0",
+			SelfCheck:          true,
+			RequireBundleMatch: true,
+			Verbose:            true,
+			Output:             &out,
+		})
+	}()
+
+	waitForServeReadyLine(t, &out, done)
+	cancelServe()
+	if code := <-done; code != 0 {
+		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, out.String())
+	}
+	if strings.Contains(out.String(), "missing-platform-spec.yaml") || strings.Contains(out.String(), "read platform spec") {
+		t.Fatalf("DB-loaded serve used missing local platform spec before catalog read:\n%s", out.String())
+	}
+}
+
 func TestRunServeRuntimeDBLoadedRunForkSupportedSurfaceExecutesAndStampsPersistedIdentity(t *testing.T) {
 	_, db, pg := installServeRuntimePostgresTestStores(t, func() serveWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
