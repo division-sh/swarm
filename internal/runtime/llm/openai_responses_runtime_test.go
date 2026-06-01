@@ -236,6 +236,39 @@ func TestOpenAIResponsesSSEParserNormalizesTextAndFunctionCalls(t *testing.T) {
 	}
 }
 
+func TestOpenAIResponsesSSEParserNormalizesFunctionCallLifecycleThroughCompleted(t *testing.T) {
+	raw := strings.Join([]string{
+		`data: {"type":"response.output_item.added","output_index":0,"item":{"id":"fc_1","type":"function_call","status":"in_progress","call_id":"call_1","name":"lookup","arguments":""}}`,
+		``,
+		`data: {"type":"response.function_call_arguments.delta","item_id":"fc_1","output_index":0,"delta":"{\"query\""}`,
+		``,
+		`data: {"type":"response.function_call_arguments.delta","item_id":"fc_1","output_index":0,"delta":":\"status\"}"}`,
+		``,
+		`data: {"type":"response.function_call_arguments.done","item_id":"fc_1","output_index":0,"arguments":"{\"query\":\"status\"}"}`,
+		``,
+		`data: {"type":"response.output_item.done","output_index":0,"item":{"id":"fc_1","type":"function_call","status":"completed","call_id":"call_1","name":"lookup","arguments":""}}`,
+		``,
+		`data: {"type":"response.completed","response":{"id":"resp_1","model":"gpt-5.4","output":[{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"output_text","text":"need lookup"}]},{"id":"fc_1","type":"function_call","call_id":"call_1","name":"lookup","arguments":""}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`,
+		``,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+	resp, err := parseOpenAIResponsesSSE([]byte(raw))
+	if err != nil {
+		t.Fatalf("parseOpenAIResponsesSSE: %v", err)
+	}
+	if resp.Message.Content != "need lookup" {
+		t.Fatalf("content = %q, want completed response text", resp.Message.Content)
+	}
+	if len(resp.ToolCalls) != 1 || resp.ToolCalls[0].ID != "call_1" || resp.ToolCalls[0].Name != "lookup" {
+		t.Fatalf("tool calls = %#v, want lookup call_1", resp.ToolCalls)
+	}
+	args, ok := resp.ToolCalls[0].Arguments.(map[string]any)
+	if !ok || args["query"] != "status" {
+		t.Fatalf("tool call arguments = %#v, want streamed query status", resp.ToolCalls[0].Arguments)
+	}
+}
+
 func openAIResponsesTestConfig(baseURL string) *config.Config {
 	return &config.Config{
 		LLM: config.LLMConfig{
