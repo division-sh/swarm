@@ -82,129 +82,19 @@ Conditions use [CEL](https://github.com/google/cel-spec): strongly typed, non-Tu
 
 ## Quickstart
 
-Requires Go 1.23. Plain local commands need no database service: Swarm
-defaults to file-backed SQLite at `.swarm/dev.db`. LLM credentials are
-required only when a flow runs agents.
+Build the binary, then follow the [docs Quickstart](https://docs.division.sh/quickstart)
+for a 4-file flow you can run end to end:
 
 ```bash
 git clone https://github.com/division-sh/swarm && cd swarm
 go build ./cmd/swarm
 ```
 
-Define a self-contained flow next to the binary. The static analyzer expects
-six files; the four below carry the logic, and the other two are empty
-placeholders.
-
-```yaml greeting-flow/package.yaml
-name: greeting-flow
-version: 1.0.0
-description: Receives a greeting request and emits a greeting delivered event.
-platform_version: ">=1.6.0"
-flows: []
-```
-
-```yaml greeting-flow/schema.yaml
-initial_state: requested
-terminal_states: [greeted]
-states: [requested, greeted]
-pins:
-  inputs:
-    events: [greeting.requested]
-  outputs:
-    events: [greeting.delivered]
-```
-
-```yaml greeting-flow/events.yaml
-greeting.requested:
-  swarm:
-    source: external
-  entity_id: string
-greeting.delivered:
-  entity_id: string
-```
-
-```yaml greeting-flow/nodes.yaml
-greeter:
-  id: greeter
-  execution_type: system_node
-  subscribes_to: [greeting.requested]
-  produces: [greeting.delivered]
-  event_handlers:
-    greeting.requested:
-      advances_to: greeted
-      emit:
-        event: greeting.delivered
-        broadcast: true
-```
-
-```bash
-# Empty placeholders plus the entry-point payload
-echo '{}' > greeting-flow/agents.yaml
-echo '{}' > greeting-flow/policy.yaml
-echo '{"entity_id":"11111111-1111-4111-8111-111111111111"}' > greeting-flow/payload.json
-
-# Run the flow against the local SQLite runtime (creates .swarm/dev.db)
-./swarm run --contracts ./greeting-flow --event greeting.requested --payload greeting-flow/payload.json
-```
-
-For a long-running local API runtime, point `swarm serve` at the same bundle:
-
-```bash
-./swarm serve --contracts ./greeting-flow
-```
-
-Local loopback uses a built-in dev API token (bearer auth still enabled); set
-`SWARM_API_TOKEN` to expose the API beyond loopback.
-
-See [`.env.example`](.env.example) for the public local environment template.
-
-### External Postgres Opt-In
-
-The local/dev default is SQLite. If you need Postgres, run and manage it
-outside the repo, then opt in explicitly:
-
-```bash
-docker run -d --name swarm-postgres \
-  -e POSTGRES_PASSWORD=postgres \
-  -e POSTGRES_DB=swarm \
-  -p 5432:5432 \
-  postgres:16
-
-SWARM_DB_HOST=127.0.0.1 SWARM_DB_PASSWORD=postgres \
-  ./swarm serve --store postgres --contracts ./greeting-flow
-```
-
-### For agent flows
-
-A flow that runs agents on the `claude_cli` backend needs the workspace-isolation
-backend (Docker) and a compatible workspace image:
-
-```bash
-docker build -f Dockerfile.workspace -t swarm-workspace:latest .
-```
-
-The `swarm-workspace:latest` tag is the default; set `SWARM_WORKSPACE_IMAGE` to
-use a different image. The shared `/data` mount auto-creates at `.swarm/data/`
-when the runtime starts; pass `--data <dir>` (on `swarm serve` or `swarm run`)
-if your agents need a specific host directory for `flow_data_access`.
-
-See [LLM backends](#llm-backends) for selecting the agent backend and providing
-its credential.
-
-### LLM backends
-
-Three backends ship today; select one with the `--backend` flag (or
-`llm.backend` in `config.yaml`). The default is `anthropic`.
-
-| Backend | Credential | Notes |
-|---|---|---|
-| `anthropic` | `ANTHROPIC_API_KEY` | The Anthropic API transport. |
-| `claude_cli` | `CLAUDE_CODE_OAUTH_TOKEN` | Drives the Claude CLI as a subprocess; requires the workspace image (see "For agent flows"). |
-| `openai_compatible` | `OPENAI_COMPATIBLE_API_KEY` | Any Chat Completions endpoint; also needs `llm.openai_compatible.base_url` and a default model. |
-
-Authored agents pick a model alias (`cheap`, `regular`, or `frontier`); `llm.models`
-maps each alias to a concrete model per backend. Full setup (env vars,
-`config.yaml`, alias resolution) is in [the docs](https://docs.division.sh/reference/configuration).
+Plain local runs need no database service (SQLite at `.swarm/dev.db` is the
+default) and no LLM credential (an agent-free flow boots without one). For
+Postgres, the agent workspace image, and LLM backend setup, see
+[Installation](https://docs.division.sh/installation) and
+[Configuration](https://docs.division.sh/reference/configuration).
 
 ---
 
