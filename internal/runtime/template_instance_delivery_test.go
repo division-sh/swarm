@@ -3,6 +3,7 @@ package runtime_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "swarm/internal/runtime/correlation"
+	runtimemanager "swarm/internal/runtime/manager"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/store"
@@ -84,6 +86,68 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScope
 	waitRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM events
 		WHERE event_name = 'operating/opco.ceo_ready'
+	`, 1)
+}
+
+func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(t *testing.T) {
+	bundle := loadRuntimeTempBundle(t, templateInstanceEmpireStyleFixtureFiles())
+	source := semanticview.Wrap(bundle)
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	ctx := seedRuntimeTestRun(t, db)
+	pg := &store.PostgresStore{DB: db}
+	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+	manager := runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+		WorkflowInstances: workflowStore,
+	})
+	module := newRuntimeTestWorkflowModule(t, source)
+	pc := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+		Module:            module,
+		InstanceActivator: manager.ActivateFlowInstance,
+		WorkflowStore:     workflowStore,
+		EventReceiptsCapability: func(context.Context) (bool, error) {
+			return true, nil
+		},
+	})
+	bus.SetInterceptors(pc)
+
+	spinup := (events.Event{
+		ID:        "99999999-9999-4999-8999-999999999910",
+		RunID:     templateInstanceDeliveryRunID,
+		Type:      events.EventType("opco.spinup_requested"),
+		Payload:   []byte(`{"entity_id":"22222222-2222-4222-8222-222222222222","instance_id":"11111111-1111-4111-8111-111111111111","product_id":"product-1"}`),
+		CreatedAt: time.Now().UTC(),
+	}).WithEntityID("22222222-2222-4222-8222-222222222222")
+	if err := bus.Publish(ctx, spinup); err != nil {
+		t.Fatalf("Publish spinup: %v", err)
+	}
+	autoEventID := waitRuntimeEventID(t, ctx, db, `
+		SELECT event_id::text FROM events
+		WHERE event_name = 'operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested'
+	`, nil)
+	waitRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM event_receipts
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'lifecycle-orchestrator' AND outcome = 'no_op'
+	`, 1, autoEventID)
+	assertRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM event_deliveries
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'lifecycle-orchestrator'
+	`, 1, autoEventID)
+	assertRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM event_deliveries
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = '__runtime_replay_scope__'
+	`, 1, autoEventID)
+	assertRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM event_deliveries
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'workflow-runtime'
+	`, 0, autoEventID)
+	waitRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM events
+		WHERE event_name = 'operating/component_scaffold.spawn_requested'
 	`, 1)
 }
 
@@ -182,6 +246,64 @@ opco.ceo_ready:
 	}
 }
 
+func templateInstanceEmpireStyleFixtureFiles() map[string]string {
+	return map[string]string{
+		"package.yaml": `name: test
+version: 1.0.0
+flows:
+  - id: operating
+    flow: operating
+    mode: template
+`,
+		"events.yaml": `opco.spinup_requested:
+  entity_id: string
+  instance_id: string
+  product_id: string
+`,
+		"nodes.yaml": `portfolio-node:
+  id: portfolio-node
+  execution_type: system_node
+  subscribes_to: [opco.spinup_requested]
+  event_handlers:
+    opco.spinup_requested:
+      action: create_flow_instance
+      template: operating
+      instance_id_from: payload.instance_id
+      config_from:
+        product_id: payload.product_id
+`,
+		"flows/operating/schema.yaml": `name: operating
+initial_state: initializing
+terminal_states: [ready]
+states: [initializing, ready]
+auto_emit_on_create:
+  event: opco.product_initialization_requested
+`,
+		"flows/operating/events.yaml": `opco.product_initialization_requested:
+  instance_id: string
+  template_id: string
+  flow_path: string
+  parent_entity_id: string
+  product_id: string
+component_scaffold.spawn_requested:
+  instance_id: string
+  template_id: string
+  flow_path: string
+  parent_entity_id: string
+  product_id: string
+`,
+		"flows/operating/nodes.yaml": `lifecycle-orchestrator:
+  id: lifecycle-orchestrator
+  execution_type: system_node
+  subscribes_to: [opco.product_initialization_requested]
+  produces: [component_scaffold.spawn_requested]
+  event_handlers:
+    opco.product_initialization_requested:
+      emit: component_scaffold.spawn_requested
+`,
+	}
+}
+
 func seedRuntimeTestRun(t *testing.T, db *sql.DB) context.Context {
 	t.Helper()
 	ctx := runtimecorrelation.WithRunID(context.Background(), templateInstanceDeliveryRunID)
@@ -208,6 +330,25 @@ func waitRuntimeDBCount(t *testing.T, ctx context.Context, db *sql.DB, query str
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("count = %d, want %d for query %s", got, want, strings.TrimSpace(query))
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+func waitRuntimeEventID(t *testing.T, ctx context.Context, db *sql.DB, query string, args []any) string {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		var got string
+		err := db.QueryRowContext(ctx, query, args...).Scan(&got)
+		if err == nil && got != "" {
+			return got
+		}
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			t.Fatalf("query event id: %v", err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for event id from query %s", strings.TrimSpace(query))
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
