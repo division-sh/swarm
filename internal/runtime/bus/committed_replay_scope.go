@@ -51,10 +51,24 @@ func (eb *EventBus) replayRecipientsForCommittedEvent(
 		}
 	}
 	if scope == runtimereplayclaim.CommittedReplayScopeSubscribed && hasDeliveryRouteSubscriberType(persistedRoutes, "node") {
-		live := deliveryRouteRecipientIDs(persistedRoutes)
-		internal := deliveryRouteRecipientIDsByType(persistedRoutes, "node")
+		internal, err := eb.currentInternalRecipientsForCommittedEvent(ctx, evt)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		live := uniqueStrings(append(deliveryRouteRecipientIDsByType(persistedRoutes, "agent"), internal...))
+		if len(live) == 0 {
+			live = deliveryRouteRecipientIDs(persistedRoutes)
+			internal = deliveryRouteRecipientIDsByType(persistedRoutes, "node")
+		}
 		if len(live) > 0 {
-			return live, internal, persistedRoutes, nil
+			routes := append([]events.DeliveryRoute(nil), persistedRoutes...)
+			for _, recipient := range internal {
+				if hasDeliveryRouteRecipient(routes, "node", recipient) {
+					continue
+				}
+				routes = append(routes, events.DeliveryRoute{SubscriberType: "node", SubscriberID: recipient})
+			}
+			return live, internal, events.NormalizeDeliveryRoutes(routes), nil
 		}
 	}
 	switch scope {
@@ -71,6 +85,9 @@ func (eb *EventBus) replayRecipientsForCommittedEvent(
 			routes = deliveryRoutesFromTargetMap(persisted, "agent", eb.deliveryTargetsForEvent(ctx, evt.ID))
 		}
 		for _, recipient := range internal {
+			if hasDeliveryRouteRecipient(routes, "node", recipient) {
+				continue
+			}
 			routes = append(routes, events.DeliveryRoute{SubscriberType: "node", SubscriberID: recipient})
 		}
 		return live, internal, events.NormalizeDeliveryRoutes(routes), nil
@@ -83,6 +100,20 @@ func hasDeliveryRouteSubscriberType(routes []events.DeliveryRoute, subscriberTyp
 	subscriberType = strings.TrimSpace(subscriberType)
 	for _, route := range events.NormalizeDeliveryRoutes(routes) {
 		if route.SubscriberType == subscriberType {
+			return true
+		}
+	}
+	return false
+}
+
+func hasDeliveryRouteRecipient(routes []events.DeliveryRoute, subscriberType, subscriberID string) bool {
+	subscriberType = strings.TrimSpace(subscriberType)
+	subscriberID = strings.TrimSpace(subscriberID)
+	if subscriberType == "" || subscriberID == "" {
+		return false
+	}
+	for _, route := range events.NormalizeDeliveryRoutes(routes) {
+		if route.SubscriberType == subscriberType && route.SubscriberID == subscriberID {
 			return true
 		}
 	}

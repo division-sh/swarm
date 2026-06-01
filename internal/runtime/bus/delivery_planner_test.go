@@ -369,6 +369,57 @@ func TestDeliveryPlanner_NoTargetConcreteRoutedNodeUsesInternalCarrierAndNodeRou
 	}
 }
 
+func TestDeliveryPlanner_NoTargetRootRoutedNodeUsesSemanticNodeDeliveryRoute(t *testing.T) {
+	planner := newDeliveryPlanner(
+		deliveryRouteResolver{
+			resolveRoutedSubscribers: func(string) []Subscriber {
+				return []Subscriber{{
+					ID:           "portfolio-node",
+					Type:         "node",
+					MatchPattern: "opco.spinup_requested",
+				}}
+			},
+			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
+				return []deliveryRecipientCandidate{{ID: "portfolio-node", PersistAsDelivery: false}}
+			},
+			describeSubscribersForEvent: func(string, []Subscriber) []PublishDiagnosticRecipient {
+				return nil
+			},
+		},
+		deliveryRecipientPolicy{
+			loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
+				return map[string]ActiveAgentDescriptor{}, true, nil
+			},
+		},
+	)
+
+	plan, err := planner.Plan(context.Background(), (events.Event{
+		Type: "opco.spinup_requested",
+	}).WithEntityID("ent-root"))
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if got := plan.Recipients; len(got) != 1 || got[0] != "portfolio-node" {
+		t.Fatalf("recipients = %#v, want [portfolio-node]", got)
+	}
+	if len(plan.PersistedRecipients) != 0 {
+		t.Fatalf("persisted recipients = %#v, want none for internal node", plan.PersistedRecipients)
+	}
+	if got := plan.DeliveryRoutes; len(got) != 1 {
+		t.Fatalf("delivery routes = %#v, want semantic root node route", got)
+	}
+	route := plan.DeliveryRoutes[0]
+	if route.SubscriberType != "node" || route.SubscriberID != "portfolio-node" {
+		t.Fatalf("delivery route = %#v, want node/portfolio-node", route)
+	}
+	if !route.Target.Empty() {
+		t.Fatalf("delivery target = %#v, want empty root target", route.Target)
+	}
+	if plan.TargetFailure != "" {
+		t.Fatalf("target failure = %q, want none", plan.TargetFailure)
+	}
+}
+
 func TestDeliveryPlanner_FailsClosedOnPolicyError(t *testing.T) {
 	planner := newDeliveryPlanner(
 		deliveryRouteResolver{
