@@ -379,11 +379,18 @@ func runBundleDeleteCommand(ctx context.Context, out, errOut io.Writer, opts bun
 	if err := validateBundleDeleteResult(result, bundleHash); err != nil {
 		return returnCLIAPIError(errOut, err, bundleDeleteAPIErrorClassifier())
 	}
-	return renderCLIOutput(out, errOut, opts.output, result, func(w io.Writer) {
+	if err := renderCLIOutput(out, errOut, opts.output, result, func(w io.Writer) {
 		writeBundleDeleteHuman(w, result)
 	}, func() ([]string, error) {
 		return []string{result.BundleHash}, nil
-	})
+	}); err != nil {
+		return err
+	}
+	if !*result.OK || *result.PartialFailure {
+		writeBundleDeleteFailures(errOut, result)
+		return commandExitError{code: cliExitRuntime}
+	}
+	return nil
 }
 
 func (opts bundleListCommandOptions) params() (map[string]any, error) {
@@ -672,6 +679,23 @@ func validateBundleDeleteResult(result bundleDeleteResult, expectedBundleHash st
 			return fmt.Errorf("malformed bundle.delete result: errors[%d].message is required", i)
 		}
 	}
+	switch result.Status {
+	case "dry_run":
+		if !*result.OK || !*result.DryRun || *result.Deleted || *result.PartialFailure {
+			return fmt.Errorf("malformed bundle.delete result: dry_run status must be ok=true deleted=false dry_run=true partial_failure=false")
+		}
+	case "completed":
+		if !*result.OK || *result.DryRun || !*result.Deleted || *result.PartialFailure {
+			return fmt.Errorf("malformed bundle.delete result: completed status must be ok=true deleted=true dry_run=false partial_failure=false")
+		}
+	case "partial_failure":
+		if *result.OK || *result.DryRun || *result.Deleted || !*result.PartialFailure {
+			return fmt.Errorf("malformed bundle.delete result: partial_failure status must be ok=false deleted=false dry_run=false partial_failure=true")
+		}
+		if len(result.Errors) == 0 {
+			return fmt.Errorf("malformed bundle.delete result: partial_failure status requires errors")
+		}
+	}
 	return nil
 }
 
@@ -800,6 +824,19 @@ func writeBundleDeleteHuman(w io.Writer, result bundleDeleteResult) {
 		result.BundleHash, result.Status, *result.Deleted, *result.Force, *result.DryRun, *result.ActiveRunsStopped, *result.DeliveriesCancelled, *result.ContainersStopped, *result.PartialFailure)
 	if len(result.Errors) > 0 {
 		fmt.Fprintf(w, "errors=%s\n", compactJSONValue(result.Errors))
+	}
+}
+
+func writeBundleDeleteFailures(errOut io.Writer, result bundleDeleteResult) {
+	if errOut == nil {
+		return
+	}
+	if len(result.Errors) == 0 {
+		fmt.Fprintln(errOut, "bundle.delete partial failure")
+		return
+	}
+	for _, failure := range result.Errors {
+		fmt.Fprintf(errOut, "bundle.delete failure: scope=%s message=%s\n", failure.Scope, failure.Message)
 	}
 }
 
