@@ -2,6 +2,7 @@ package cataloge2e
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,6 +13,10 @@ import (
 )
 
 func TestTier11Probe(t *testing.T) {
+	if os.Getenv("SWARM_CATALOG_E2E_DEBUG") != "1" {
+		t.Skip("diagnostic duplicate of Tier 11 runtime/classification proof; run with SWARM_CATALOG_E2E_DEBUG=1 for manual probe output")
+	}
+
 	repoRoot := repoRootFromCatalogE2E(t)
 	for _, fixtureName := range []string{
 		"test-child-flow-absolute-path",

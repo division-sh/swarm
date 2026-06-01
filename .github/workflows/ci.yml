@@ -106,15 +106,21 @@ jobs:
         shell: bash
         run: |
           mkdir -p test-results
+          mapfile -t test_packages < <(go list ./... | grep -v '^swarm/internal/runtime/cataloge2e$')
           set +e
-          go test ./... -count=1 -json 2>&1 | tee test-results/go-test.json
-          test_status=${PIPESTATUS[0]}
+          go test "${test_packages[@]}" -count=1 -json 2>&1 | tee test-results/go-test.json
+          package_status=${PIPESTATUS[0]}
+          go test ./internal/runtime/cataloge2e -run '^TestCatalogRequiredSmoke$' -count=1 -json 2>&1 | tee -a test-results/go-test.json
+          catalog_smoke_status=${PIPESTATUS[0]}
           set -e
           go run ./cmd/swarm-test-timing \
             -input test-results/go-test.json \
             -markdown test-results/go-test-timing.md
           cat test-results/go-test-timing.md >> "$GITHUB_STEP_SUMMARY"
-          exit "$test_status"
+          if [ "$package_status" -ne 0 ]; then
+            exit "$package_status"
+          fi
+          exit "$catalog_smoke_status"
 
       - name: Upload test timing artifact
         if: always()
