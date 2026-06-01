@@ -248,6 +248,58 @@ func TestBundleDeleteJSONPreservesAPIShape(t *testing.T) {
 	}
 }
 
+func TestBundleDeletePartialFailureRendersAndExitsRuntime(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	bundleHash := validBundleHash("9")
+	for _, tc := range []struct {
+		name string
+		args []string
+		json bool
+	}{
+		{name: "human", args: []string{"bundle", "delete", bundleHash, "--force"}},
+		{name: "json", args: []string{"bundle", "delete", bundleHash, "--force", "--json"}, json: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var captured jsonRPCRequest
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+					t.Errorf("decode request: %v", err)
+				}
+				writeJSONRPCResult(t, w, captured.ID, partialBundleDeleteResult(bundleHash))
+			}))
+			defer server.Close()
+
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), tc.args, &stdout, &stderr, testRootCommandOptions(server))
+			if code != cliExitRuntime {
+				t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitRuntime, stdout.String(), stderr.String())
+			}
+			assertBundleRequest(t, captured, bundleDeleteMethod, map[string]any{
+				"bundle_hash": bundleHash,
+				"force":       true,
+			})
+			if !strings.Contains(stderr.String(), "bundle.delete failure: scope=managed_containers message=container stop failed") {
+				t.Fatalf("stderr = %q, want partial failure details", stderr.String())
+			}
+			if tc.json {
+				var decoded map[string]any
+				if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+					t.Fatalf("decode stdout json: %v\n%s", err, stdout.String())
+				}
+				if decoded["ok"] != false || decoded["status"] != "partial_failure" || decoded["partial_failure"] != true {
+					t.Fatalf("json partial result = %#v", decoded)
+				}
+				return
+			}
+			for _, want := range []string{"status=partial_failure", "deleted=false", "partial_failure=true", "errors="} {
+				if !strings.Contains(stdout.String(), want) {
+					t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
+				}
+			}
+		})
+	}
+}
+
 func TestBundleAgentsJSONUsesCanonicalModelField(t *testing.T) {
 	t.Setenv("SWARM_API_TOKEN", "test-token")
 	bundleHash := validBundleHash("f")
@@ -931,6 +983,16 @@ func validBundleDeleteResult(bundleHash string, force, dryRun bool, status strin
 		"containers":           map[string]any{"selected": []any{}, "stopped": []any{}},
 		"final_mutation":       map[string]any{"bundle_hash": bundleHash, "deleted": deleted},
 	}
+}
+
+func partialBundleDeleteResult(bundleHash string) map[string]any {
+	result := validBundleDeleteResult(bundleHash, true, false, "partial_failure", false)
+	result["ok"] = false
+	result["partial_failure"] = true
+	result["errors"] = []map[string]any{
+		{"scope": "managed_containers", "message": "container stop failed"},
+	}
+	return result
 }
 
 func writeBundleJSONRPCError(t *testing.T, w http.ResponseWriter, id string, code string) {
