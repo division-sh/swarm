@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"swarm/internal/runtime/diaglog"
-	"swarm/internal/runtime/sessions"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
 func MaybeRotateAfterTurn(ctx context.Context, s *Session, runtimeMode sessions.RuntimeMode, registry sessions.Registry, lockOwner string, rotateAfter int, sink any) (*sessions.Lease, error) {

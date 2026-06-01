@@ -3,10 +3,10 @@ package contracts
 import (
 	"fmt"
 
+	"github.com/division-sh/swarm/internal/runtime/core/paths"
+	flowmodel "github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"gopkg.in/yaml.v3"
 	"strings"
-	"swarm/internal/runtime/core/paths"
-	flowmodel "swarm/internal/runtime/flowmodel"
 )
 
 type ContractPaths struct {

@@ -5,9 +5,9 @@ import (
 	"strings"
 	"time"
 
-	runtimebus "swarm/internal/runtime/bus"
-	runtimeactors "swarm/internal/runtime/core/actors"
-	runtimecorrelation "swarm/internal/runtime/correlation"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 )
 
 type AgentTurnRecord struct {

@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
-	"swarm/internal/events"
-	"swarm/internal/runtime/core/identity"
-	runtimeregistry "swarm/internal/runtime/core/registry"
-	"swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 const runtimeWorkflowID = "workflow-runtime"

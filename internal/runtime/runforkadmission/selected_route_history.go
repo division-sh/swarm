@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	runtimebus "swarm/internal/runtime/bus"
-	"swarm/internal/runtime/semanticview"
-	"swarm/internal/store"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store"
 )
 
 type SelectedContractRouteHistoryRequest struct {

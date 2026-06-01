@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"swarm/internal/events"
-	runtimebus "swarm/internal/runtime/bus"
-	runtimeactors "swarm/internal/runtime/core/actors"
-	runtimemanager "swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/events"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 )
 
 type runtimeShutdownTestAgent struct {

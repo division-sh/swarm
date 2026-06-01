@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	runtimeagentcontrol "swarm/internal/runtime/agentcontrol"
-	"swarm/internal/testutil"
+	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	"github.com/division-sh/swarm/internal/testutil"
 )
 
 func TestPostgresStoreResolveAgentDirectiveRunTarget(t *testing.T) {

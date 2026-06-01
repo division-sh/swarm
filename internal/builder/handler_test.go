@@ -7,11 +7,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	runtimecontracts "swarm/internal/runtime/contracts"
-	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
-	runtimecredentials "swarm/internal/runtime/credentials"
-	"swarm/internal/runtime/semanticview"
-	"swarm/internal/store"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store"
 )
 
 const testBuilderAuthToken = "builder-test-token"

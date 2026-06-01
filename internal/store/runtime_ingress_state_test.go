@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"swarm/internal/events"
-	runtimeingress "swarm/internal/runtime/ingress"
-	"swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/events"
+	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
+	"github.com/division-sh/swarm/internal/testutil"
 )
 
 func TestRuntimeIngressStatePersistsTypedTransitions(t *testing.T) {

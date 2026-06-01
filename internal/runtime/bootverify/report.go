@@ -6,9 +6,9 @@ import (
 	"sort"
 	"strings"
 
-	runtimecredentials "swarm/internal/runtime/credentials"
-	llmselection "swarm/internal/runtime/llm/selection"
-	"swarm/internal/runtime/semanticview"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type Finding struct {

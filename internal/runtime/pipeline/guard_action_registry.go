@@ -4,10 +4,10 @@ import (
 	"sort"
 	"strings"
 
-	runtimecontracts "swarm/internal/runtime/contracts"
-	"swarm/internal/runtime/core/identity"
-	runtimeregistry "swarm/internal/runtime/core/registry"
-	"swarm/internal/runtime/semanticview"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type contractIDRegistry struct {

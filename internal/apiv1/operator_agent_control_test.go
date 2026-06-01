@@ -7,14 +7,14 @@ import (
 	"testing"
 	"time"
 
-	"swarm/internal/events"
-	runtimeagentcontrol "swarm/internal/runtime/agentcontrol"
-	runtimebus "swarm/internal/runtime/bus"
-	runtimeactors "swarm/internal/runtime/core/actors"
-	runtimemanager "swarm/internal/runtime/manager"
-	"swarm/internal/store"
-	"swarm/internal/store/storetest"
-	"swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/events"
+	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil"
 )
 
 func TestOperatorAgentControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.T) {

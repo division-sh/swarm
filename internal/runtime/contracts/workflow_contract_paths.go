@@ -8,8 +8,8 @@ import (
 	"sort"
 	"strings"
 
-	"swarm/internal/platform"
-	"swarm/internal/runtime/core/eventidentity"
+	"github.com/division-sh/swarm/internal/platform"
+	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 )
 
 const maxDiscoveredPackageDepth = 99

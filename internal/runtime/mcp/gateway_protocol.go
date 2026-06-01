@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"swarm/internal/runtime/core/toolidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
 )
 
 const (

@@ -3,10 +3,10 @@ package mailbox
 import (
 	"bytes"
 	"context"
+	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	runtimetools "swarm/internal/runtime/tools"
 	"sync/atomic"
 	"testing"
 	"time"

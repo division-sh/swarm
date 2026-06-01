@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"swarm/internal/events"
-	runtimebus "swarm/internal/runtime/bus"
-	models "swarm/internal/runtime/core/actors"
-	runtimecorrelation "swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/events"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 )
 
 func TestTurnContextRegistry_ResetIsScopedToRegistry(t *testing.T) {

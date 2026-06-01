@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type Requirement struct {

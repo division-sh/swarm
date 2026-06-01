@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"swarm/internal/config"
-	"swarm/internal/runtime"
-	storebackend "swarm/internal/store/backendselection"
+	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/runtime"
+	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 )
 
 func TestResolveCLIContractPlatformSpecPathsPrecedenceAndDiscovery(t *testing.T) {

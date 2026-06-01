@@ -1,11 +1,11 @@
 package engine
 
 import (
-	"swarm/internal/events"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	"swarm/internal/runtime/core/values"
-	"swarm/internal/runtime/entityruntime"
-	"swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/events"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/values"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type BaseContext = values.Context

@@ -3,9 +3,9 @@ package pipeline
 import (
 	"strings"
 
-	runtimecontracts "swarm/internal/runtime/contracts"
-	"swarm/internal/runtime/entityruntime"
-	"swarm/internal/runtime/workflowexpr"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
+	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
 
 type WorkflowEntityFieldLifecyclePhase string

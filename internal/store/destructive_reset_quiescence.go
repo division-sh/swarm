@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"swarm/internal/runtime/destructivereset"
-	runtimerunquiescence "swarm/internal/runtime/runquiescence"
+	"github.com/division-sh/swarm/internal/runtime/destructivereset"
+	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 )
 
 const destructiveResetPipelineSubscriberID = activeRunQuiescencePipelineSubscriberID

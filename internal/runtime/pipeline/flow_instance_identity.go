@@ -3,9 +3,9 @@ package pipeline
 import (
 	"strings"
 
-	"swarm/internal/events"
-	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
-	"swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/events"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type FlowInstanceIdentity struct {

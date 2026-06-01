@@ -5,9 +5,9 @@ import (
 	"database/sql"
 	"testing"
 
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
-	storerunlifecycle "swarm/internal/store/runlifecycle"
-	"swarm/internal/testutil"
 )
 
 const (

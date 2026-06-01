@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"swarm/internal/runtime/preservationcleanup"
-	"swarm/internal/store/runbundle"
-	storerunlifecycle "swarm/internal/store/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/preservationcleanup"
+	"github.com/division-sh/swarm/internal/store/runbundle"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 )
 
 func TestRecoverFailsPersistedMissingBeforeCleanupOrContainers(t *testing.T) {

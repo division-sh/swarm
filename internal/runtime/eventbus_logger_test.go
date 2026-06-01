@@ -3,9 +3,9 @@ package runtime
 import (
 	"testing"
 
-	runtimecontracts "swarm/internal/runtime/contracts"
-	"swarm/internal/runtime/semanticview"
-	runtimetools "swarm/internal/runtime/tools"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 )
 
 func TestRuntimePayloadValidator_AllowsValidSchemaPayload(t *testing.T) {

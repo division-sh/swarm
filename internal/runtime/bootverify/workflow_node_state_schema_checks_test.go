@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	runtimecontracts "swarm/internal/runtime/contracts"
-	"swarm/internal/runtime/semanticview"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func TestRun_ReportsNodeStateJSONBWithTypedCounterpart(t *testing.T) {

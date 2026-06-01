@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"strings"
 
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/google/uuid"
-	runtimeactors "swarm/internal/runtime/core/actors"
-	runtimecurrentstate "swarm/internal/runtime/currentstate"
-	llmselection "swarm/internal/runtime/llm/selection"
-	runtimemanager "swarm/internal/runtime/manager"
-	runtimesessions "swarm/internal/runtime/sessions"
 )
 
 func (s *PostgresStore) UpsertAgent(ctx context.Context, rec runtimemanager.PersistedAgent) error {

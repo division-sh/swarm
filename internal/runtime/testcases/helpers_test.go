@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"swarm/internal/events"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	models "swarm/internal/runtime/core/actors"
-	runtimepipeline "swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/events"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
 func loadGenericSwarmBundle(t testing.TB) *runtimecontracts.WorkflowContractBundle {

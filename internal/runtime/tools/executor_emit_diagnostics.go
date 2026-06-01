@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"strings"
 
-	"swarm/internal/events"
-	models "swarm/internal/runtime/core/actors"
-	"swarm/internal/runtime/diaglog"
-	runtimepipeline "swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/events"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
 const emitToolOutcomeAction = "emit_tool_outcome"

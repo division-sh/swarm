@@ -3,9 +3,9 @@ package bus_test
 import (
 	"testing"
 
-	runtimebus "swarm/internal/runtime/bus"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	"swarm/internal/runtime/flowmodel"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 )
 
 func TestNewEventBusWithOptions_DoesNotUseAmbientWorkflowSemanticSource(t *testing.T) {

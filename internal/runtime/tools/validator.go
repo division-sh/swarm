@@ -4,9 +4,9 @@ import (
 	"errors"
 	"strings"
 
-	models "swarm/internal/runtime/core/actors"
-	"swarm/internal/runtime/core/toolcapabilities"
-	llm "swarm/internal/runtime/llm"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
+	llm "github.com/division-sh/swarm/internal/runtime/llm"
 )
 
 type ToolInputValidator struct {

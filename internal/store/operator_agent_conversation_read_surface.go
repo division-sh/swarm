@@ -11,11 +11,11 @@ import (
 	"strings"
 	"time"
 
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
-	runtimellm "swarm/internal/runtime/llm"
-	runtimemanager "swarm/internal/runtime/manager"
-	runtimesessions "swarm/internal/runtime/sessions"
 )
 
 type OperatorAgentConversationReadSource interface {

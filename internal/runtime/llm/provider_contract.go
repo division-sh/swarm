@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	llmselection "swarm/internal/runtime/llm/selection"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 )
 
 type ProviderTransport string

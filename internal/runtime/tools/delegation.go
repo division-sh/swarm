@@ -5,8 +5,8 @@ import (
 	"slices"
 	"strings"
 
-	runtimeauthority "swarm/internal/runtime/authority"
-	models "swarm/internal/runtime/core/actors"
+	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 )
 
 func authorizeDelegableAgentConfig(actor, current, proposed models.AgentConfig, provider runtimeauthority.Provider, emitRegistry *EmitRegistry) error {

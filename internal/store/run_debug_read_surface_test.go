@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
-	runtimeactors "swarm/internal/runtime/core/actors"
-	runtimedeadletters "swarm/internal/runtime/deadletters"
-	runtimemanager "swarm/internal/runtime/manager"
-	"swarm/internal/testutil"
 )
 
 func seedRunDebugAgent(t *testing.T, pg *PostgresStore, ctx context.Context, agentID string, entityID string) {

@@ -16,8 +16,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	runtimecredentials "swarm/internal/runtime/credentials"
-	"swarm/internal/runtime/semanticview"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type ServerConfig struct {

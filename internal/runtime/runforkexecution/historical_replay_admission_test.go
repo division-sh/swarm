@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store"
 )
 
 func TestBuildHistoricalReplayExecutionAdmissionClassifiesFactsAndConsumesOwners(t *testing.T) {

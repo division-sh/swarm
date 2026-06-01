@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	runtimepkg "swarm/internal/runtime"
-	runtimebus "swarm/internal/runtime/bus"
-	"swarm/internal/store"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/store"
 )
 
 type snapshotRunStore struct {

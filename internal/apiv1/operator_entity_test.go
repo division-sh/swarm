@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"swarm/internal/store"
-	"swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/testutil"
 )
 
 type fakeEntityReadStore struct {

@@ -6,13 +6,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
-	"swarm/internal/events"
-	runtimebus "swarm/internal/runtime/bus"
-	runtimeactors "swarm/internal/runtime/core/actors"
-	runtimemanager "swarm/internal/runtime/manager"
-	runtimepipeline "swarm/internal/runtime/pipeline"
-	"swarm/internal/testutil"
 )
 
 func TestNormalizeRunForkSelectedContractRouteRecoveryRejectsCurrentRouteOwner(t *testing.T) {

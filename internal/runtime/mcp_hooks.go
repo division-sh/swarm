@@ -5,13 +5,13 @@ import (
 	"net/http"
 	"strings"
 
-	runtimebus "swarm/internal/runtime/bus"
-	runtimeactors "swarm/internal/runtime/core/actors"
-	"swarm/internal/runtime/diaglog"
-	runtimeingress "swarm/internal/runtime/ingress"
-	llm "swarm/internal/runtime/llm"
-	runtimemcp "swarm/internal/runtime/mcp"
-	runtimetools "swarm/internal/runtime/tools"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
+	llm "github.com/division-sh/swarm/internal/runtime/llm"
+	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
+	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 )
 
 const (

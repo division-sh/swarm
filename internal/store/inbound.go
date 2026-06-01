@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"swarm/internal/runtime"
-	runtimecorrelation "swarm/internal/runtime/correlation"
-	runtimecurrentstate "swarm/internal/runtime/currentstate"
+	"github.com/division-sh/swarm/internal/runtime"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 )
 
 func (s *PostgresStore) RecordInboundEvent(ctx context.Context, providerEventID, entityID, provider string) (bool, error) {

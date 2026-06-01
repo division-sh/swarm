@@ -7,8 +7,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"swarm/internal/runtime/runforkadmission"
-	"swarm/internal/store"
+	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
+	"github.com/division-sh/swarm/internal/store"
 )
 
 type SelectedContractActivationStore interface {

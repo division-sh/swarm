@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	runtimebus "swarm/internal/runtime/bus"
-	runtimecorrelation "swarm/internal/runtime/correlation"
-	"swarm/internal/runtime/diaglog"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
 )
 
 // RuntimeLogEntry is a structured runtime operation record (spec v2.0.14).

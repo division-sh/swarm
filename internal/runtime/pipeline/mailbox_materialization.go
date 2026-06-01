@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"strings"
 
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/paths"
+	"github.com/division-sh/swarm/internal/runtime/core/values"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	"github.com/google/uuid"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	"swarm/internal/runtime/core/paths"
-	"swarm/internal/runtime/core/values"
-	runtimeengine "swarm/internal/runtime/engine"
-	"swarm/internal/runtime/workflowexpr"
 )
 
 type MailboxWriteMaterialization struct {

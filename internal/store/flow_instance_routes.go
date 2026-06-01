@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"strings"
 
-	runtimebus "swarm/internal/runtime/bus"
-	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 )
 
 func (s *PostgresStore) UpsertFlowInstanceRoute(ctx context.Context, route runtimebus.FlowInstanceRouteRecord) error {

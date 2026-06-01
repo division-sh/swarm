@@ -6,13 +6,13 @@ import (
 	"strings"
 	"testing"
 
-	"swarm/internal/events"
-	runtimebus "swarm/internal/runtime/bus"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	models "swarm/internal/runtime/core/actors"
-	"swarm/internal/runtime/flowmodel"
-	runtimepipeline "swarm/internal/runtime/pipeline"
-	"swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/events"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/flowmodel"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type publishBusCapture struct {

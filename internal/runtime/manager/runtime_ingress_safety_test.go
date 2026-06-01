@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	runtimebus "swarm/internal/runtime/bus"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 )
 
 func TestAuthBreakerConsumesRuntimeIngressSafetyPauseOwner(t *testing.T) {

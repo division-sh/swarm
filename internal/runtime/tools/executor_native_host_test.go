@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	runtimecontracts "swarm/internal/runtime/contracts"
-	models "swarm/internal/runtime/core/actors"
-	llm "swarm/internal/runtime/llm"
-	"swarm/internal/runtime/semanticview"
-	workspace "swarm/internal/runtime/workspace"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	llm "github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
 func TestNativeWorkspaceCommandFailsClosedForHostBackend(t *testing.T) {

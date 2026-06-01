@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"swarm/internal/runtime"
-	runtimetools "swarm/internal/runtime/tools"
+	"github.com/division-sh/swarm/internal/runtime"
+	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 )
 
 type Snapshot struct {

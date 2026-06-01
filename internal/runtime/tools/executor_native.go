@@ -14,10 +14,10 @@ import (
 	"strings"
 	"time"
 
-	runtimecontracts "swarm/internal/runtime/contracts"
-	models "swarm/internal/runtime/core/actors"
-	"swarm/internal/runtime/semanticview"
-	workspace "swarm/internal/runtime/workspace"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
 type nativeBashInput struct {

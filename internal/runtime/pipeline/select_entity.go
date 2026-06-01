@@ -7,14 +7,14 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/events"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/paths"
+	"github.com/division-sh/swarm/internal/runtime/core/values"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
-	"swarm/internal/events"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
-	"swarm/internal/runtime/core/paths"
-	"swarm/internal/runtime/core/values"
-	"swarm/internal/runtime/entityruntime"
-	"swarm/internal/runtime/semanticview"
 )
 
 var selectOrCreateEntityNamespace = uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm-select-or-create-entity"))

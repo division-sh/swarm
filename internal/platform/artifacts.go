@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	rootartifacts "swarm"
+	rootartifacts "github.com/division-sh/swarm"
 )
 
 const (

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	runtimesharedjson "swarm/internal/runtime/sharedjson"
+	runtimesharedjson "github.com/division-sh/swarm/internal/runtime/sharedjson"
 )
 
 func asFloat64(v any) (float64, bool) {

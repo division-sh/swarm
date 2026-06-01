@@ -5,9 +5,9 @@ import (
 	"sort"
 	"strings"
 
-	runtimecontracts "swarm/internal/runtime/contracts"
-	runtimeengine "swarm/internal/runtime/engine"
-	"swarm/internal/runtime/semanticview"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func checkSemanticDriftPayloadCompleteness(c *checkerContext) []Finding {

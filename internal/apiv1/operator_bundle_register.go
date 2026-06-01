@@ -15,8 +15,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	runtimecontracts "swarm/internal/runtime/contracts"
-	"swarm/internal/store"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/store"
 
 	"golang.org/x/text/unicode/norm"
 	"gopkg.in/yaml.v3"

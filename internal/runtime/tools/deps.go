@@ -3,15 +3,15 @@ package tools
 import (
 	"context"
 
-	"swarm/internal/config"
-	"swarm/internal/events"
-	runtimeauthority "swarm/internal/runtime/authority"
-	models "swarm/internal/runtime/core/actors"
-	runtimecredentials "swarm/internal/runtime/credentials"
-	runtimemcp "swarm/internal/runtime/mcp"
-	runtimepipeline "swarm/internal/runtime/pipeline"
-	"swarm/internal/runtime/semanticview"
-	workspace "swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/events"
+	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
 type Schedule = runtimepipeline.Schedule

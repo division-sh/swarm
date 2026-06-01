@@ -5,7 +5,7 @@ import (
 	"context"
 	"testing"
 
-	runtimetools "swarm/internal/runtime/tools"
+	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 )
 
 type fakeStore struct{}

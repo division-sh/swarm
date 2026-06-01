@@ -1,6 +1,6 @@
 package values
 
-import "swarm/internal/runtime/core/paths"
+import "github.com/division-sh/swarm/internal/runtime/core/paths"
 
 type Context struct {
 	Entity      Bucket

@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
+	runtimesharedjson "github.com/division-sh/swarm/internal/runtime/sharedjson"
 	"github.com/google/uuid"
-	runtimesharedjson "swarm/internal/runtime/sharedjson"
 )
 
 func ValidatePayloadAgainstSchema(schema map[string]any, payload map[string]any) error {

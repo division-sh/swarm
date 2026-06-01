@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	runtimebus "swarm/internal/runtime/bus"
-	"swarm/internal/store"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/store"
 )
 
 const builderRunDebugReplayLimit = 128

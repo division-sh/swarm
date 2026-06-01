@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/google/uuid"
-	"swarm/internal/events"
-	runtimepkg "swarm/internal/runtime"
 )
 
 const runtimeLogEventName = "platform.runtime_log"

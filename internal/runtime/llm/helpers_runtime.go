@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	models "swarm/internal/runtime/core/actors"
-	runtimesharedjson "swarm/internal/runtime/sharedjson"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimesharedjson "github.com/division-sh/swarm/internal/runtime/sharedjson"
 )
 
 func budgetExecutionScopeKey(actor models.AgentConfig) string {

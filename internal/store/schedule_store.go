@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	runtimecorrelation "swarm/internal/runtime/correlation"
-	runtimepipeline "swarm/internal/runtime/pipeline"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
 func (s *PostgresStore) UpsertSchedule(ctx context.Context, sc runtimepipeline.Schedule) error {

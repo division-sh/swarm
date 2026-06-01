@@ -5,10 +5,10 @@ import (
 	"reflect"
 	"strings"
 
-	runtimecontracts "swarm/internal/runtime/contracts"
-	"swarm/internal/runtime/core/eventidentity"
-	"swarm/internal/runtime/core/identity"
-	"swarm/internal/runtime/semanticview"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type DeclarativeNode struct {

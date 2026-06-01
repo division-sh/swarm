@@ -7,13 +7,13 @@ import (
 	"testing"
 	"time"
 
-	"swarm/internal/config"
-	"swarm/internal/runtime/budgetspend"
-	runtimebus "swarm/internal/runtime/bus"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	llm "swarm/internal/runtime/llm"
-	"swarm/internal/runtime/semanticview"
-	runtimetools "swarm/internal/runtime/tools"
+	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/runtime/budgetspend"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	llm "github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 )
 
 func TestBudgetTracker_KeepsTerminalStatesInstanceOwned(t *testing.T) {

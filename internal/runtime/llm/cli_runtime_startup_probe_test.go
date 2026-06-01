@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"swarm/internal/config"
-	runtimeactors "swarm/internal/runtime/core/actors"
-	"swarm/internal/runtime/sessions"
-	workspace "swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/config"
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
+	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
 func TestClaudeCLIRuntimeProbeStartupVisibleToolSurface_CapturesProviderInitVisibleTools(t *testing.T) {

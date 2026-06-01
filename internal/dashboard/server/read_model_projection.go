@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	runtimellm "swarm/internal/runtime/llm"
-	"swarm/internal/store"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/store"
 )
 
 func projectConversationSummaryMetadata(p store.ConversationRuntimeStateDescriptor) ConversationSummaryMetadata {

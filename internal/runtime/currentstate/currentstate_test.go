@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/google/uuid"
-	runtimecorrelation "swarm/internal/runtime/correlation"
 )
 
 func TestRequireIdentityRequiresRunID(t *testing.T) {

@@ -5,12 +5,12 @@ import (
 	"sort"
 	"strings"
 
-	runtimebus "swarm/internal/runtime/bus"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
-	runtimepipeline "swarm/internal/runtime/pipeline"
-	"swarm/internal/runtime/semanticview"
-	"swarm/internal/store"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store"
 )
 
 type ContractFrontierRequest struct {

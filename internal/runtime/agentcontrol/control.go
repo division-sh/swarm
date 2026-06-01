@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/google/uuid"
-	"swarm/internal/events"
 )
 
 const (

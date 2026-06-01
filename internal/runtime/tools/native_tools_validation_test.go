@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	runtimecontracts "swarm/internal/runtime/contracts"
-	llm "swarm/internal/runtime/llm"
-	"swarm/internal/runtime/semanticview"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	llm "github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type nativeCapabilityRuntimeStub struct {

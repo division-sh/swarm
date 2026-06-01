@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 )
 
 func TestProjectScopes_PackageBackedScopeCarriesOwningFlowID(t *testing.T) {

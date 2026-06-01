@@ -5,10 +5,10 @@ import (
 	"errors"
 	"strings"
 
-	runtimecorrelation "swarm/internal/runtime/correlation"
-	"swarm/internal/store"
-	"swarm/internal/store/runbundle"
-	storerunlifecycle "swarm/internal/store/runlifecycle"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/runbundle"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 )
 
 type RunBundleContextStore interface {

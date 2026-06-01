@@ -6,9 +6,9 @@ import (
 	"strings"
 	"sync"
 
-	"swarm/internal/events"
-	runtimecorrelation "swarm/internal/runtime/correlation"
-	"swarm/internal/runtime/diaglog"
+	"github.com/division-sh/swarm/internal/events"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
 )
 
 type emittedEventsContextKey struct{}

@@ -8,12 +8,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/google/uuid"
-	"swarm/internal/events"
-	runtimeauthority "swarm/internal/runtime/authority"
-	models "swarm/internal/runtime/core/actors"
-	runtimecorrelation "swarm/internal/runtime/correlation"
-	runtimesessions "swarm/internal/runtime/sessions"
 )
 
 func (e *Executor) execAgentMessage(ctx context.Context, actor models.AgentConfig, input any) (any, error) {

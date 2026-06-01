@@ -17,11 +17,11 @@ import (
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
 
-	"swarm/internal/events"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	"swarm/internal/runtime/core/identity"
-	"swarm/internal/runtime/core/paths"
-	runtimeengine "swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/events"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/core/paths"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 )
 
 const (

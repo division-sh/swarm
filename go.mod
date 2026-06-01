@@ -1,4 +1,4 @@
-module swarm
+module github.com/division-sh/swarm
 
 go 1.23.0
 

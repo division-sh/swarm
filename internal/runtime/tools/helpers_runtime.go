@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"swarm/internal/runtime/diaglog"
-	runtimesharedjson "swarm/internal/runtime/sharedjson"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	runtimesharedjson "github.com/division-sh/swarm/internal/runtime/sharedjson"
 )
 
 func canonicalRuntimeRole(role string) string {

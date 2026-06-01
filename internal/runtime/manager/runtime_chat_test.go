@@ -5,11 +5,11 @@ import (
 	"testing"
 	"time"
 
-	"swarm/internal/events"
-	runtimeagentcontrol "swarm/internal/runtime/agentcontrol"
-	runtimebus "swarm/internal/runtime/bus"
-	runtimepipeline "swarm/internal/runtime/pipeline"
-	runtimereplayclaim "swarm/internal/runtime/replayclaim"
+	"github.com/division-sh/swarm/internal/events"
+	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 )
 
 type chatTestAgent struct {

@@ -3,8 +3,8 @@ package engine
 import (
 	"testing"
 
-	"swarm/internal/runtime/core/paths"
-	"swarm/internal/runtime/core/values"
+	"github.com/division-sh/swarm/internal/runtime/core/paths"
+	"github.com/division-sh/swarm/internal/runtime/core/values"
 )
 
 func TestBuildBaseContext_CopiesPayloadMetadataAndPolicy(t *testing.T) {

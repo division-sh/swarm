@@ -8,16 +8,16 @@ import (
 	"testing"
 	"time"
 
-	"swarm/internal/config"
-	"swarm/internal/events"
-	runtimebus "swarm/internal/runtime/bus"
-	runtimeactors "swarm/internal/runtime/core/actors"
-	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
-	runtimeownership "swarm/internal/runtime/core/ownership"
-	runtimemanager "swarm/internal/runtime/manager"
-	runtimepipeline "swarm/internal/runtime/pipeline"
-	runtimereplayclaim "swarm/internal/runtime/replayclaim"
-	"swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/events"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
+	"github.com/division-sh/swarm/internal/testutil"
 )
 
 type startupRecoveryTestLease struct{}

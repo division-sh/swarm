@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"swarm/internal/runtime/accprojection"
+	"github.com/division-sh/swarm/internal/runtime/accprojection"
 )
 
 func checkAccumulatorEntityProjection(c *checkerContext) []Finding {

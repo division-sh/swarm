@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"swarm/internal/apispec"
-	"swarm/internal/platform"
+	"github.com/division-sh/swarm/internal/apispec"
+	"github.com/division-sh/swarm/internal/platform"
 )
 
 func main() {

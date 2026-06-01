@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store"
 )
 
 type EventFilter struct {

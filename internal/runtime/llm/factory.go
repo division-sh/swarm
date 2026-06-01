@@ -6,11 +6,11 @@ import (
 	"os"
 	"time"
 
-	"swarm/internal/config"
-	"swarm/internal/events"
-	llmselection "swarm/internal/runtime/llm/selection"
-	"swarm/internal/runtime/sessions"
-	workspace "swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/events"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
+	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
 type RuntimeFactory struct {

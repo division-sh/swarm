@@ -3,9 +3,9 @@ package tools
 import (
 	"strings"
 
-	models "swarm/internal/runtime/core/actors"
-	"swarm/internal/runtime/core/toolidentity"
-	llm "swarm/internal/runtime/llm"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
+	llm "github.com/division-sh/swarm/internal/runtime/llm"
 )
 
 const runtimeToolsMCPPrefix = toolidentity.RuntimeToolsMCPPrefix

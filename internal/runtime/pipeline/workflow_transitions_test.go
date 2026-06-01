@@ -5,9 +5,9 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/store"
 	"github.com/google/uuid"
-	runtimepipeline "swarm/internal/runtime/pipeline"
-	"swarm/internal/store"
 )
 
 func TestRecordPipelineTransition_PersistsViaCanonicalCapabilityOwner(t *testing.T) {

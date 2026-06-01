@@ -5,9 +5,9 @@ import (
 	"reflect"
 	"testing"
 
-	"swarm/internal/events"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	"swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/events"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func TestNewDeclarativeNode_RequiresExecutor(t *testing.T) {

@@ -1,9 +1,9 @@
 package tools
 
 import (
-	"swarm/internal/events"
-	models "swarm/internal/runtime/core/actors"
-	runtimeeventpayload "swarm/internal/runtime/eventpayload"
+	"github.com/division-sh/swarm/internal/events"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeeventpayload "github.com/division-sh/swarm/internal/runtime/eventpayload"
 )
 
 func (e *Executor) enrichEmitPayloadContext(actor models.AgentConfig, inbound events.Event, eventType string, payload map[string]any) map[string]any {

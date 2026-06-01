@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	runtimesharding "swarm/internal/runtime/core/sharding"
+	runtimesharding "github.com/division-sh/swarm/internal/runtime/core/sharding"
 )
 
 func TestLoadAndValidate_CLI_TestMode(t *testing.T) {

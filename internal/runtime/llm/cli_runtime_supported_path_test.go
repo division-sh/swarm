@@ -14,13 +14,13 @@ import (
 	"testing"
 	"time"
 
-	"swarm/internal/config"
-	"swarm/internal/events"
-	runtimebus "swarm/internal/runtime/bus"
-	runtimeactors "swarm/internal/runtime/core/actors"
-	"swarm/internal/runtime/core/toolcapabilities"
-	"swarm/internal/runtime/sessions"
-	workspace "swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/events"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
+	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
 type firstTurnWorkflowToolExec struct {

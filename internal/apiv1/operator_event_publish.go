@@ -9,12 +9,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	runtimeeventidentity "github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimerunstart "github.com/division-sh/swarm/internal/runtime/runstart"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store"
 	"github.com/google/uuid"
-	"swarm/internal/events"
-	runtimeeventidentity "swarm/internal/runtime/core/eventidentity"
-	runtimerunstart "swarm/internal/runtime/runstart"
-	"swarm/internal/runtime/semanticview"
-	"swarm/internal/store"
 )
 
 type eventPublishResult struct {

@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	runtimecontracts "swarm/internal/runtime/contracts"
-	models "swarm/internal/runtime/core/actors"
-	runtimepipeline "swarm/internal/runtime/pipeline"
-	"swarm/internal/runtime/semanticview"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func TestToolAuthorizer_PermissionGatedTools(t *testing.T) {

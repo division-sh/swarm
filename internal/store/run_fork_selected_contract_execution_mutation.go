@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
-	runtimecorrelation "swarm/internal/runtime/correlation"
 )
 
 const (

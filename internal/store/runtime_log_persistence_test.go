@@ -7,12 +7,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
-	"swarm/internal/events"
-	runtimepkg "swarm/internal/runtime"
-	runtimecorrelation "swarm/internal/runtime/correlation"
-	storerunlifecycle "swarm/internal/store/runlifecycle"
-	"swarm/internal/testutil"
 )
 
 func TestSQLiteRuntimeLogPersistenceWritesLoggerRowsForObservability(t *testing.T) {

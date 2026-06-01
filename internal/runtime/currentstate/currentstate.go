@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/google/uuid"
-	runtimecorrelation "swarm/internal/runtime/correlation"
 )
 
 type Identity struct {

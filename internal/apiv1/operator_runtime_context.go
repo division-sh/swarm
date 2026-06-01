@@ -5,11 +5,11 @@ import (
 	"errors"
 	"strings"
 
-	swruntime "swarm/internal/runtime"
-	runtimecorrelation "swarm/internal/runtime/correlation"
-	runtimerunforkadmission "swarm/internal/runtime/runforkadmission"
-	"swarm/internal/store"
-	"swarm/internal/store/runbundle"
+	swruntime "github.com/division-sh/swarm/internal/runtime"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimerunforkadmission "github.com/division-sh/swarm/internal/runtime/runforkadmission"
+	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/runbundle"
 )
 
 func runtimeContextManager(opts OperatorReadOptions) *swruntime.RuntimeContextManager {

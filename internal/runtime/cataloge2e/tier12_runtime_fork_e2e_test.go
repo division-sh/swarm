@@ -13,13 +13,13 @@ import (
 
 	"github.com/google/uuid"
 
-	"swarm/internal/events"
-	runtimebus "swarm/internal/runtime/bus"
-	runtimeruncontrol "swarm/internal/runtime/runcontrol"
-	"swarm/internal/runtime/runforkadmission"
-	runtimerunforkexecution "swarm/internal/runtime/runforkexecution"
-	"swarm/internal/runtime/sessions"
-	"swarm/internal/store"
+	"github.com/division-sh/swarm/internal/events"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
+	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
+	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
+	"github.com/division-sh/swarm/internal/store"
 )
 
 var tier12RuntimeForkFixtures = []string{

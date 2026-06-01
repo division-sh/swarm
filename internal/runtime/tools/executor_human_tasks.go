@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	runtimeauthority "swarm/internal/runtime/authority"
-	models "swarm/internal/runtime/core/actors"
+	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 )
 
 func (e *Executor) execHumanTaskRequest(ctx context.Context, actor models.AgentConfig, input any) (any, error) {

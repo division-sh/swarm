@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 )
 
 func checkGateSchemaValidation(c *checkerContext) []Finding { return c.gateSchemaValidation() }

@@ -8,13 +8,13 @@ import (
 	"strings"
 	"time"
 
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
+	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
-	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
-	runtimecorrelation "swarm/internal/runtime/correlation"
-	runtimecurrentstate "swarm/internal/runtime/currentstate"
-	"swarm/internal/runtime/entityruntime"
-	runtimemutationlog "swarm/internal/runtime/mutationlog"
-	"swarm/internal/runtime/semanticview"
 )
 
 func (s *WorkflowInstanceStore) loadSQLite(ctx context.Context, instanceID string) (WorkflowInstance, bool, error) {

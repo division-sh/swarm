@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	runtimecontracts "swarm/internal/runtime/contracts"
-	"swarm/internal/runtime/core/timeridentity"
-	"swarm/internal/runtime/semanticview"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func checkTimerValidation(c *checkerContext) []Finding { return c.timerValidation() }

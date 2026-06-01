@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	runtimedestructivereset "swarm/internal/runtime/destructivereset"
-	"swarm/internal/runtime/semanticview"
+	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 
-	models "swarm/internal/runtime/core/actors"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 )
 
 const EnvHostWorkspaceRoot = "SWARM_WORKSPACE_HOST_ROOT"

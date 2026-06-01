@@ -7,13 +7,13 @@ import (
 	"strings"
 	"time"
 
-	"swarm/internal/config"
-	"swarm/internal/events"
-	runtimeactors "swarm/internal/runtime/core/actors"
-	runtimecorrelation "swarm/internal/runtime/correlation"
-	llmselection "swarm/internal/runtime/llm/selection"
-	"swarm/internal/runtime/sessions"
-	workspace "swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/events"
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
+	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
 type ClaudeCLIRuntime struct {

@@ -3,7 +3,7 @@ package testcases
 import (
 	"testing"
 
-	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 )
 
 func TestGenericBundle_TimerLifecyclePatterns(t *testing.T) {

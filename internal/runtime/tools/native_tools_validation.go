@@ -6,9 +6,9 @@ import (
 	"sort"
 	"strings"
 
-	runtimecredentials "swarm/internal/runtime/credentials"
-	llm "swarm/internal/runtime/llm"
-	"swarm/internal/runtime/semanticview"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	llm "github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func ValidateNativeToolBootConfig(ctx context.Context, source semanticview.Source, store runtimecredentials.Store, runtime llm.Runtime) ([]error, error) {

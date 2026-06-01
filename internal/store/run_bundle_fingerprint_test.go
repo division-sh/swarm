@@ -7,12 +7,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/store/runbundle"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
-	"swarm/internal/events"
-	runtimecorrelation "swarm/internal/runtime/correlation"
-	"swarm/internal/store/runbundle"
-	storerunlifecycle "swarm/internal/store/runlifecycle"
-	"swarm/internal/testutil"
 )
 
 const (

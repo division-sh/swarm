@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	storerunlifecycle "swarm/internal/store/runlifecycle"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 )
 
 type normalRunCompletionCandidate struct {

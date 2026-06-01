@@ -6,12 +6,12 @@ import (
 	"testing"
 	"time"
 
-	"swarm/internal/runtime/budgetspend"
-	runtimeactors "swarm/internal/runtime/core/actors"
-	runtimemanager "swarm/internal/runtime/manager"
-	runtimesessions "swarm/internal/runtime/sessions"
-	storepkg "swarm/internal/store"
-	"swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/runtime/budgetspend"
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
+	storepkg "github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestSQLiteAgentUsageOwnerBacksSupportedAPISurface(t *testing.T) {

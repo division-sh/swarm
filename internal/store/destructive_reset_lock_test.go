@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil"
 )
 
 func TestPostgresStore_TryAcquireSerializesDestructiveResetLock(t *testing.T) {

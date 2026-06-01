@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	storepkg "github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
-	"swarm/internal/events"
-	runtimepipeline "swarm/internal/runtime/pipeline"
-	storepkg "swarm/internal/store"
-	"swarm/internal/store/storetest"
 )
 
 func TestOperatorMailboxHandlersSQLiteReadsMaterializedMailboxWrite(t *testing.T) {

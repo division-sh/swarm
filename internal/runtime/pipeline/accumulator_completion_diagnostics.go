@@ -4,9 +4,9 @@ import (
 	"context"
 	"strings"
 
-	"swarm/internal/events"
-	"swarm/internal/runtime/diaglog"
-	runtimeengine "swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 )
 
 const accumulatorCompletionOutcomeAction = "accumulator_completion_outcome"

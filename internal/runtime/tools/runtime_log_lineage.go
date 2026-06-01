@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	runtimebus "swarm/internal/runtime/bus"
-	runtimecorrelation "swarm/internal/runtime/correlation"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 )
 
 func toolExecutorRuntimeLogContext(ctx context.Context) context.Context {

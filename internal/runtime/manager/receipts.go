@@ -6,13 +6,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimerterr "github.com/division-sh/swarm/internal/runtime/rterrors"
 	"github.com/google/uuid"
-	"swarm/internal/events"
-	runtimecorrelation "swarm/internal/runtime/correlation"
-	runtimedeadletters "swarm/internal/runtime/deadletters"
-	runtimedelivery "swarm/internal/runtime/deliverylifecycle"
-	runtimepipeline "swarm/internal/runtime/pipeline"
-	runtimerterr "swarm/internal/runtime/rterrors"
 )
 
 type eventReceiptReader interface {

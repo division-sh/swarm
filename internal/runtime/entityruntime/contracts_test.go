@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 )
 
 func TestNormalizeFieldValue_AcceptsBuiltInNumberAndJSONTypes(t *testing.T) {

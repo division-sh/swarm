@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"swarm/internal/runtime/diaglog"
-	runtimepipeline "swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
 const startupTimerRecoveryAction = "startup_recovery_timer_aftermath"

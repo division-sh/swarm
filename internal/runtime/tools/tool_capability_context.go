@@ -3,9 +3,9 @@ package tools
 import (
 	"strings"
 
-	runtimeauthority "swarm/internal/runtime/authority"
-	models "swarm/internal/runtime/core/actors"
-	"swarm/internal/runtime/core/toolcapabilities"
+	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 )
 
 func capabilityForTool(actor models.AgentConfig, toolName string, requestAllowed map[string]struct{}, provider runtimeauthority.Provider, emitRegistry *EmitRegistry) toolcapabilities.Capability {

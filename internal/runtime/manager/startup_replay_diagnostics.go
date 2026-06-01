@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"swarm/internal/events"
-	"swarm/internal/runtime/diaglog"
-	runtimepipeline "swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
 const startupManagerReplayAction = "startup_recovery_manager_replay_aftermath"

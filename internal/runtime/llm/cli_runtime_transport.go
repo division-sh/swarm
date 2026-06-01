@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"swarm/internal/config"
-	models "swarm/internal/runtime/core/actors"
-	workspace "swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/config"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
 const (

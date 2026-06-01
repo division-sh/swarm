@@ -9,14 +9,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/core/paths"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	"github.com/division-sh/swarm/internal/runtime/core/values"
+	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	"github.com/google/cel-go/cel"
-	"swarm/internal/events"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	"swarm/internal/runtime/core/identity"
-	"swarm/internal/runtime/core/paths"
-	"swarm/internal/runtime/core/timeridentity"
-	"swarm/internal/runtime/core/values"
-	"swarm/internal/runtime/workflowexpr"
 )
 
 const handlerAccumulatorBucketKey = "handler_accumulators"

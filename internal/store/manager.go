@@ -7,9 +7,9 @@ import (
 	"sort"
 	"strings"
 
-	runtimeactors "swarm/internal/runtime/core/actors"
-	llmselection "swarm/internal/runtime/llm/selection"
-	runtimesessions "swarm/internal/runtime/sessions"
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
 type persistedAgentRuntimeDescriptor struct {

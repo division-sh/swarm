@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/google/uuid"
-	"swarm/internal/events"
 )
 
 type inboundEventContextKey struct{}

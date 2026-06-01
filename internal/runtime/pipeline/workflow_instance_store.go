@@ -10,13 +10,13 @@ import (
 	"strings"
 	"time"
 
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
+	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
-	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
-	runtimecurrentstate "swarm/internal/runtime/currentstate"
-	"swarm/internal/runtime/entityruntime"
-	runtimemutationlog "swarm/internal/runtime/mutationlog"
-	"swarm/internal/runtime/semanticview"
 )
 
 type SchedulePersistence interface {

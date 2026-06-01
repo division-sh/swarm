@@ -12,11 +12,11 @@ import (
 	"strings"
 	"testing"
 
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/paths"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"gopkg.in/yaml.v3"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	"swarm/internal/runtime/core/paths"
-	runtimepipeline "swarm/internal/runtime/pipeline"
-	"swarm/internal/runtime/semanticview"
 )
 
 func TestRun_MapsMissingToolToToolResolutionWarning(t *testing.T) {

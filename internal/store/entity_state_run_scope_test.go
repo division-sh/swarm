@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
-	"swarm/internal/testutil"
 )
 
 func TestEntityStateSchema_AllowsSameEntityIDInDifferentRuns(t *testing.T) {

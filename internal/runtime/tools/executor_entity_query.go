@@ -6,14 +6,14 @@ import (
 	"sort"
 	"strings"
 
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/cel-go/cel"
 	celast "github.com/google/cel-go/common/ast"
 	"github.com/google/cel-go/common/types"
-	models "swarm/internal/runtime/core/actors"
-	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
-	runtimecurrentstate "swarm/internal/runtime/currentstate"
-	"swarm/internal/runtime/entityruntime"
-	"swarm/internal/runtime/semanticview"
 )
 
 func (e *Executor) execSearchEntities(ctx context.Context, actor models.AgentConfig, input any) (any, error) {

@@ -9,15 +9,15 @@ import (
 	"strings"
 	"time"
 
-	"swarm/internal/events"
-	runtimebus "swarm/internal/runtime/bus"
-	models "swarm/internal/runtime/core/actors"
-	"swarm/internal/runtime/core/toolcapabilities"
-	"swarm/internal/runtime/core/toolidentity"
-	"swarm/internal/runtime/core/toolresultpolicy"
-	runtimecorrelation "swarm/internal/runtime/correlation"
-	llm "swarm/internal/runtime/llm"
-	runtimerterr "swarm/internal/runtime/rterrors"
+	"github.com/division-sh/swarm/internal/events"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/toolresultpolicy"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	llm "github.com/division-sh/swarm/internal/runtime/llm"
+	runtimerterr "github.com/division-sh/swarm/internal/runtime/rterrors"
 )
 
 type GatewayHooks struct {

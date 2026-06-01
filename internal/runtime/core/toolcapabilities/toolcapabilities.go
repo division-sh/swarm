@@ -3,7 +3,7 @@ package toolcapabilities
 import (
 	"context"
 
-	"swarm/internal/runtime/core/toolidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
 )
 
 type ToolKind string

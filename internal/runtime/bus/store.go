@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"swarm/internal/events"
-	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
-	runtimereplayclaim "swarm/internal/runtime/replayclaim"
+	"github.com/division-sh/swarm/internal/events"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 )
 
 type EventStore interface {

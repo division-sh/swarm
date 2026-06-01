@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	runtimecontracts "swarm/internal/runtime/contracts"
-	runtimemcp "swarm/internal/runtime/mcp"
-	"swarm/internal/runtime/semanticview"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func TestValidateUsageHintCoverage_RejectsMissingPlatformOwnedHint(t *testing.T) {

@@ -5,8 +5,8 @@ import (
 	"path"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
-	"swarm/internal/runtime/semanticview"
 )
 
 var flowInstanceEntityNamespace = uuid.NewSHA1(uuid.NameSpaceOID, []byte("flow-instance-entity"))

@@ -5,8 +5,8 @@ import (
 	"sort"
 	"strings"
 
-	llm "swarm/internal/runtime/llm"
-	"swarm/internal/runtime/semanticview"
+	llm "github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type ContractSchemaEntry struct {

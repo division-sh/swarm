@@ -12,16 +12,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	runtime "github.com/division-sh/swarm/internal/runtime"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
+	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
-	"swarm/internal/events"
-	runtime "swarm/internal/runtime"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	runtimecorrelation "swarm/internal/runtime/correlation"
-	runtimepipeline "swarm/internal/runtime/pipeline"
-	"swarm/internal/runtime/semanticview"
-	"swarm/internal/runtime/sessions"
-	"swarm/internal/store"
-	"swarm/internal/testutil"
 )
 
 const (

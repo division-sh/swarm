@@ -5,12 +5,12 @@ import (
 	"strings"
 	"testing"
 
-	"swarm/internal/events"
-	runtimeauthority "swarm/internal/runtime/authority"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	models "swarm/internal/runtime/core/actors"
-	"swarm/internal/runtime/semanticview"
-	runtimesessions "swarm/internal/runtime/sessions"
+	"github.com/division-sh/swarm/internal/events"
+	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
 type managerStub struct {

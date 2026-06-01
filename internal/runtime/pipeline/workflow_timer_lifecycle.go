@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
-	runtimecontracts "swarm/internal/runtime/contracts"
-	"swarm/internal/runtime/core/timeridentity"
-	runtimecorrelation "swarm/internal/runtime/correlation"
-	"swarm/internal/runtime/semanticview"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func (pc *PipelineCoordinator) applyWorkflowTimerIntents(ctx context.Context, entityID, currentStage, nextStage, sourceEvent string) error {

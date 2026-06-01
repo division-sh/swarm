@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events"
 )
 
 func TestFlowInstanceIdentity_DistinguishesScopeKeyInstancePathAndEntityID(t *testing.T) {

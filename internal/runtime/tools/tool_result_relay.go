@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	models "swarm/internal/runtime/core/actors"
-	runtimemcp "swarm/internal/runtime/mcp"
-	workspace "swarm/internal/runtime/workspace"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
+	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
 const workspaceToolResultRelayDir = ".swarm/tool-results"

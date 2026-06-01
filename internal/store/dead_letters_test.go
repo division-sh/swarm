@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
-	"swarm/internal/events"
-	runtimedeadletters "swarm/internal/runtime/deadletters"
-	"swarm/internal/testutil"
 )
 
 func TestRecordDeadLetter_PersistsAndDedupes(t *testing.T) {

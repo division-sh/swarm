@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	models "swarm/internal/runtime/core/actors"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 )
 
 type ToolDefinition struct {

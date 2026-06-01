@@ -11,11 +11,11 @@ import (
 	"strings"
 	"time"
 
-	runtimeagentcontrol "swarm/internal/runtime/agentcontrol"
-	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
-	runtimemanager "swarm/internal/runtime/manager"
-	runtimetools "swarm/internal/runtime/tools"
-	"swarm/internal/store"
+	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	"github.com/division-sh/swarm/internal/store"
 )
 
 type HealthChecker func(ctx context.Context) (map[string]any, error)

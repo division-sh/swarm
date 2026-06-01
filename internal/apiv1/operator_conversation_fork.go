@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store"
 )
 
 const conversationForkIdempotencyTTL = 24 * time.Hour

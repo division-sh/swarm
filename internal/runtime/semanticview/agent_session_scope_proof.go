@@ -3,7 +3,7 @@ package semanticview
 import (
 	"strings"
 
-	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 )
 
 type AgentSessionScopeLocator struct {

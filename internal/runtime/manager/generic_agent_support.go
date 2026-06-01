@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 
-	"swarm/internal/events"
-	runtimeactors "swarm/internal/runtime/core/actors"
-	workspace "swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/events"
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
 type genericAgent struct {

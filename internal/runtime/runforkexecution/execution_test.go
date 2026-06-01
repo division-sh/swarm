@@ -13,18 +13,18 @@ import (
 
 	"github.com/google/uuid"
 
-	"swarm/internal/config"
-	"swarm/internal/events"
-	"swarm/internal/runtime/bus"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	runtimeactors "swarm/internal/runtime/core/actors"
-	runtimellm "swarm/internal/runtime/llm"
-	runtimemanager "swarm/internal/runtime/manager"
-	"swarm/internal/runtime/runforkadmission"
-	"swarm/internal/runtime/semanticview"
-	"swarm/internal/store"
-	storerunlifecycle "swarm/internal/store/runlifecycle"
-	"swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/bus"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
+	"github.com/division-sh/swarm/internal/testutil"
 )
 
 func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *testing.T) {

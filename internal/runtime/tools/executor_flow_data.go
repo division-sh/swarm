@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	models "swarm/internal/runtime/core/actors"
-	"swarm/internal/runtime/flowdata"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/flowdata"
 )
 
 type flowDataReadInput struct {

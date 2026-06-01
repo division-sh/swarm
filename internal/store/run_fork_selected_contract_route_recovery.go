@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/google/uuid"
-	runtimemanager "swarm/internal/runtime/manager"
 )
 
 const (

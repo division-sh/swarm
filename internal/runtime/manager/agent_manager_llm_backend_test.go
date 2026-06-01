@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	models "swarm/internal/runtime/core/actors"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 )
 
 func TestAgentManagerDefaultsLLMBackendFromCanonicalProfile(t *testing.T) {

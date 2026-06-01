@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"testing"
 
-	runtimecorrelation "swarm/internal/runtime/correlation"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 )
 
 const testPipelineRunID = "77777777-7777-7777-7777-777777777777"

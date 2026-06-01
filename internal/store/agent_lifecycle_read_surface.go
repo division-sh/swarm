@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	runtimedelivery "swarm/internal/runtime/deliverylifecycle"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 
 	"github.com/lib/pq"
 )

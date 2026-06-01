@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"strings"
 
+	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/google/uuid"
-	runtimetools "swarm/internal/runtime/tools"
 )
 
 // MailboxStore is the runtime mailbox persistence surface.

@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"swarm/internal/events"
-	runtimemanager "swarm/internal/runtime/manager"
-	"swarm/internal/store"
+	"github.com/division-sh/swarm/internal/events"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/store"
 )
 
 func TestCanonicalDeliveryOwnerInvariant_PendingSurfacesAgree_V2(t *testing.T) {

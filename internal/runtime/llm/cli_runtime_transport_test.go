@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"swarm/internal/config"
-	models "swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/config"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 )
 
 type mcpTurnContextStoreStub struct {

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"swarm/internal/runtime/preservationcleanup"
-	"swarm/internal/store/runbundle"
+	"github.com/division-sh/swarm/internal/runtime/preservationcleanup"
+	"github.com/division-sh/swarm/internal/store/runbundle"
 )
 
 type AvailabilityReader interface {

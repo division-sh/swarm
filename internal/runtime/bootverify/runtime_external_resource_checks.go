@@ -3,8 +3,8 @@ package bootverify
 import (
 	"strings"
 
-	runtimecredentials "swarm/internal/runtime/credentials"
-	runtimemcp "swarm/internal/runtime/mcp"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 )
 
 func (c *checkerContext) credentials() []Finding {

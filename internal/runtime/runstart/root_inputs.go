@@ -5,8 +5,8 @@ import (
 	"sort"
 	"strings"
 
-	runtimebus "swarm/internal/runtime/bus"
-	"swarm/internal/runtime/semanticview"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type RootInputSet struct {

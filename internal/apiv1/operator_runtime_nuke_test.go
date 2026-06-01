@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	swruntime "swarm/internal/runtime"
-	"swarm/internal/runtime/destructivereset"
-	"swarm/internal/store"
+	swruntime "github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/destructivereset"
+	"github.com/division-sh/swarm/internal/store"
 )
 
 func TestOperatorRuntimeNukeDryRunUsesDestructiveResetOwners(t *testing.T) {

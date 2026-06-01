@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
-	coreidentity "swarm/internal/runtime/core/identity"
+	coreidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
 // Instance is the platform-owned workflow instance record defined by the Swarm

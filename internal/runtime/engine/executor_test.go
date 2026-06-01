@@ -11,12 +11,12 @@ import (
 	"testing"
 	"time"
 
-	"swarm/internal/events"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	"swarm/internal/runtime/core/identity"
-	runtimeregistry "swarm/internal/runtime/core/registry"
-	"swarm/internal/runtime/flowmodel"
-	"swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/events"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
+	"github.com/division-sh/swarm/internal/runtime/flowmodel"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func stubSource() semanticview.Source {

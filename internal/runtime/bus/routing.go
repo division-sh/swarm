@@ -4,8 +4,8 @@ import (
 	"regexp"
 	"strings"
 
-	"swarm/internal/events"
-	"swarm/internal/runtime/core/eventidentity"
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 )
 
 var eventTypeTokenPattern = regexp.MustCompile(`^[a-z0-9_]+$`)

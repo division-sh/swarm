@@ -3,9 +3,9 @@ package manager
 import (
 	"testing"
 
-	runtimecontracts "swarm/internal/runtime/contracts"
-	runtimeactors "swarm/internal/runtime/core/actors"
-	"swarm/internal/runtime/semanticview"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func TestDefaultManagerAgentID_UsesInjectedSemanticSource(t *testing.T) {

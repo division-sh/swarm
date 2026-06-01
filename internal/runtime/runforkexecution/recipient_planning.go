@@ -7,9 +7,9 @@ import (
 	"sort"
 	"strings"
 
-	"swarm/internal/events"
-	runtimebus "swarm/internal/runtime/bus"
-	"swarm/internal/store"
+	"github.com/division-sh/swarm/internal/events"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/store"
 )
 
 type SelectedContractRecipientPlanningRequest struct {

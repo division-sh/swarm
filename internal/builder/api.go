@@ -6,11 +6,11 @@ import (
 	"strings"
 	"time"
 
-	runtimepkg "swarm/internal/runtime"
-	runtimebus "swarm/internal/runtime/bus"
-	runtimecredentials "swarm/internal/runtime/credentials"
-	"swarm/internal/runtime/semanticview"
-	"swarm/internal/store"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store"
 )
 
 type HealthChecker func(ctx context.Context) (map[string]any, error)

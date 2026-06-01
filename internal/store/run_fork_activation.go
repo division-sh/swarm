@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
-	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 )
 
 const (

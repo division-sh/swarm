@@ -13,10 +13,10 @@ import (
 	"strings"
 	"time"
 
-	"swarm/internal/config"
-	runtimeactors "swarm/internal/runtime/core/actors"
-	llmselection "swarm/internal/runtime/llm/selection"
-	workspace "swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/config"
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
 func (r *ClaudeCLIRuntime) run(ctx context.Context, args []string, target *workspace.Target) (*Response, error) {

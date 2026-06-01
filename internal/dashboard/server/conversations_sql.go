@@ -6,7 +6,7 @@ import (
 	"errors"
 	"strings"
 
-	"swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store"
 )
 
 const (

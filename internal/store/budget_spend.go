@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/budgetspend"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
-	"swarm/internal/runtime/budgetspend"
 )
 
 var _ budgetspend.Store = (*PostgresStore)(nil)

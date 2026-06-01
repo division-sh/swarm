@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"swarm/internal/apiv1"
+	"github.com/division-sh/swarm/internal/apiv1"
 
 	"gopkg.in/yaml.v3"
 )

@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"swarm/internal/events"
-	runtimebus "swarm/internal/runtime/bus"
-	runtimeownership "swarm/internal/runtime/core/ownership"
-	runtimereplayclaim "swarm/internal/runtime/replayclaim"
+	"github.com/division-sh/swarm/internal/events"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
+	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 )
 
 type sweeperTestStore struct {

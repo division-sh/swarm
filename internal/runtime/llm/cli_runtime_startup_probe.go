@@ -10,8 +10,8 @@ import (
 	"io"
 	"strings"
 
-	models "swarm/internal/runtime/core/actors"
-	workspace "swarm/internal/runtime/workspace"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
 const cliStartupProbePrompt = "Startup validation probe. Do not call any tools. Reply with the exact text ok."

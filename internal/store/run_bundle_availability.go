@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"swarm/internal/store/runbundle"
+	"github.com/division-sh/swarm/internal/store/runbundle"
 )
 
 type ActiveRunBundleAvailabilityConflict = runbundle.Availability

@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/google/uuid"
-	"swarm/internal/events"
-	runtimepkg "swarm/internal/runtime"
-	runtimebus "swarm/internal/runtime/bus"
-	runtimeruncontrol "swarm/internal/runtime/runcontrol"
 )
 
 var runCompletionTimeout = 30 * time.Second

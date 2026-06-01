@@ -6,7 +6,7 @@ import (
 	"io"
 	"os"
 
-	"swarm/internal/testtiming"
+	"github.com/division-sh/swarm/internal/testtiming"
 )
 
 func main() {

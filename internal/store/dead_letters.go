@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 
-	runtimedeadletters "swarm/internal/runtime/deadletters"
+	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 )
 
 func (s *PostgresStore) RecordDeadLetter(ctx context.Context, rec runtimedeadletters.Record) error {

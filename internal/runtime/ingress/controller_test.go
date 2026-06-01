@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events"
 )
 
 type transitionFailurePublisher struct {

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	runtimemanager "swarm/internal/runtime/manager"
-	"swarm/internal/store"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/store"
 )
 
 type SQLAgentReader struct {

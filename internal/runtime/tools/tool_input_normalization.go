@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	"swarm/internal/runtime/core/toolcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 )
 
 func canonicalRuntimeToolInput(name string, input any) any {

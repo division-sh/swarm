@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/destructivereset"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
-	"swarm/internal/runtime/destructivereset"
-	runtimemanager "swarm/internal/runtime/manager"
-	runtimerunquiescence "swarm/internal/runtime/runquiescence"
-	"swarm/internal/testutil"
 )
 
 func TestPostgresStore_ApplyDestructiveResetQuiescence_TerminalizesRunsAndDeliveries(t *testing.T) {

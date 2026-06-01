@@ -5,8 +5,8 @@ import (
 	"errors"
 	"time"
 
-	"swarm/internal/events"
-	runtimeownership "swarm/internal/runtime/core/ownership"
+	"github.com/division-sh/swarm/internal/events"
+	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
 )
 
 var (

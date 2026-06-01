@@ -6,8 +6,8 @@ import (
 	"strings"
 	"unicode"
 
-	runtimecontracts "swarm/internal/runtime/contracts"
-	"swarm/internal/runtime/semanticview"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type nodeStateTypedCounterpart struct {

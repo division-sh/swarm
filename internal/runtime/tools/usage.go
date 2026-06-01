@@ -5,10 +5,10 @@ import (
 	"sort"
 	"strings"
 
-	runtimeauthority "swarm/internal/runtime/authority"
-	llm "swarm/internal/runtime/llm"
-	runtimemcp "swarm/internal/runtime/mcp"
-	"swarm/internal/runtime/semanticview"
+	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
+	llm "github.com/division-sh/swarm/internal/runtime/llm"
+	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 const maxUsageHintRunes = 1200

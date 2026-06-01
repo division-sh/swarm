@@ -3,7 +3,7 @@ package builder
 import (
 	"sync"
 
-	runtimepkg "swarm/internal/runtime"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 )
 
 type runHub struct {

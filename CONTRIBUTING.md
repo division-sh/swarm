@@ -28,6 +28,21 @@ go run ./cmd/swarm-openrpc-gen --check
 If you change API/spec authority, update the authoritative root artifact in the
 same pull request as the implementation that makes it true.
 
+## Release Build Metadata
+
+Public release artifacts should inject binary metadata explicitly while keeping
+ordinary tagged `go install` builds useful through Go build-info fallback:
+
+```bash
+go build \
+  -ldflags "-X main.binaryVersion=v1.6.0 -X main.binaryCommit=$(git rev-parse HEAD) -X main.binaryDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  ./cmd/swarm
+```
+
+`swarm version --json` reports `binary_version`, `module_version`, and
+`platform_version` separately. The first two describe the installed binary and
+Go module ref; `platform_version` comes from root `platform-spec.yaml`.
+
 ## Issue And PR Expectations
 
 Open an issue before large semantic, runtime, API, CLI, or public-surface

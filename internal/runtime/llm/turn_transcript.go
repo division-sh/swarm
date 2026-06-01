@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	runtimebus "swarm/internal/runtime/bus"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 )
 
 const turnSummaryBlockKind = "turn_summary"

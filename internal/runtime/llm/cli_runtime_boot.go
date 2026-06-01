@@ -6,8 +6,8 @@ import (
 	"os"
 	"strings"
 
-	"swarm/internal/config"
-	llmselection "swarm/internal/runtime/llm/selection"
+	"github.com/division-sh/swarm/internal/config"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 )
 
 func ValidateClaudeCLIRuntimeConfig(cfg *config.Config) error {

@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	runtime "swarm/internal/runtime"
-	runtimebootverify "swarm/internal/runtime/bootverify"
-	"swarm/internal/runtime/semanticview"
+	runtime "github.com/division-sh/swarm/internal/runtime"
+	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func runBootCatalogFixture(t *testing.T, fixtureRoot string) {

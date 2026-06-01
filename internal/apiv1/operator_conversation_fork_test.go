@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	runtimellm "swarm/internal/runtime/llm"
-	"swarm/internal/store"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/store"
 )
 
 type fakeConversationForkLifecycleStore struct {

@@ -5,14 +5,14 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/events"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
-	"swarm/internal/events"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	"swarm/internal/runtime/core/identity"
-	"swarm/internal/runtime/core/timeridentity"
-	runtimecorrelation "swarm/internal/runtime/correlation"
-	runtimeengine "swarm/internal/runtime/engine"
-	"swarm/internal/runtime/semanticview"
 )
 
 type HandlerOutcomeStatus string

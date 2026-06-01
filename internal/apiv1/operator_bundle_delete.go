@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	swruntime "swarm/internal/runtime"
-	"swarm/internal/runtime/bundledelete"
-	"swarm/internal/runtime/destructivereset"
-	"swarm/internal/store"
+	swruntime "github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/bundledelete"
+	"github.com/division-sh/swarm/internal/runtime/destructivereset"
+	"github.com/division-sh/swarm/internal/store"
 )
 
 const bundleDeleteIdempotencyTTL = 24 * time.Hour

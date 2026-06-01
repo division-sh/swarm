@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	goruntime "runtime"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -248,13 +247,15 @@ type versionCommandOptions struct {
 }
 
 type versionOutputResult struct {
-	BinaryVersion string                       `json:"binary_version"`
-	Commit        string                       `json:"commit"`
-	Built         string                       `json:"built"`
-	GoVersion     string                       `json:"go_version"`
-	GOOS          string                       `json:"goos"`
-	GOARCH        string                       `json:"goarch"`
-	Server        *diagnosticHealthCheckResult `json:"server,omitempty"`
+	BinaryVersion   string                       `json:"binary_version"`
+	ModuleVersion   string                       `json:"module_version"`
+	PlatformVersion string                       `json:"platform_version"`
+	Commit          string                       `json:"commit"`
+	Built           string                       `json:"built"`
+	GoVersion       string                       `json:"go_version"`
+	GOOS            string                       `json:"goos"`
+	GOARCH          string                       `json:"goarch"`
+	Server          *diagnosticHealthCheckResult `json:"server,omitempty"`
 }
 
 func newVersionCommand(opts rootCommandOptions) *cobra.Command {
@@ -284,19 +285,25 @@ func newVersionCommand(opts rootCommandOptions) *cobra.Command {
 }
 
 func runVersionCommand(ctx context.Context, out, errOut io.Writer, opts versionCommandOptions) error {
+	metadata, err := resolveLocalVersionMetadata()
+	if err != nil {
+		return err
+	}
 	result := versionOutputResult{
-		BinaryVersion: binaryVersion,
-		Commit:        binaryCommit,
-		Built:         binaryDate,
-		GoVersion:     goruntime.Version(),
-		GOOS:          goruntime.GOOS,
-		GOARCH:        goruntime.GOARCH,
+		BinaryVersion:   metadata.BinaryVersion,
+		ModuleVersion:   metadata.ModuleVersion,
+		PlatformVersion: metadata.PlatformVersion,
+		Commit:          metadata.Commit,
+		Built:           metadata.Built,
+		GoVersion:       metadata.GoVersion,
+		GOOS:            metadata.GOOS,
+		GOARCH:          metadata.GOARCH,
 	}
 	if !opts.server {
 		return renderCLIOutput(out, errOut, opts.output, result, func(w io.Writer) {
-			writeLocalVersion(w)
+			writeLocalVersion(w, metadata)
 		}, func() ([]string, error) {
-			return []string{binaryVersion}, nil
+			return []string{metadata.BinaryVersion}, nil
 		})
 	}
 	health, err := fetchDiagnosticHealthCheck(ctx, opts.apiOptions)
@@ -305,21 +312,21 @@ func runVersionCommand(ctx context.Context, out, errOut io.Writer, opts versionC
 	}
 	result.Server = &health
 	return renderCLIOutput(out, errOut, opts.output, result, func(w io.Writer) {
-		writeLocalVersion(w)
+		writeLocalVersion(w, metadata)
 		writeVersionServerIdentity(w, health)
 	}, func() ([]string, error) {
-		return []string{binaryVersion, health.Bundle.Fingerprint}, nil
+		return []string{metadata.BinaryVersion, health.Bundle.Fingerprint}, nil
 	})
 }
 
-func writeLocalVersion(out io.Writer) {
+func writeLocalVersion(out io.Writer, metadata localVersionMetadata) {
 	if out == nil {
 		return
 	}
-	fmt.Fprintf(out, "Swarm %s\n", binaryVersion)
-	fmt.Fprintf(out, "Commit: %s\n", binaryCommit)
-	fmt.Fprintf(out, "Built: %s\n", binaryDate)
-	fmt.Fprintf(out, "Go: %s %s/%s\n", goruntime.Version(), goruntime.GOOS, goruntime.GOARCH)
+	fmt.Fprintf(out, "Swarm %s\n", metadata.BinaryVersion)
+	fmt.Fprintf(out, "Commit: %s\n", metadata.Commit)
+	fmt.Fprintf(out, "Built: %s\n", metadata.Built)
+	fmt.Fprintf(out, "Go: %s %s/%s\n", metadata.GoVersion, metadata.GOOS, metadata.GOARCH)
 }
 
 func writeVersionServerIdentity(out io.Writer, result diagnosticHealthCheckResult) {

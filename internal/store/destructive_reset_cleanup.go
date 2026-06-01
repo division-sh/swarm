@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/destructivereset"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/lib/pq"
-	"swarm/internal/runtime/destructivereset"
-	storerunlifecycle "swarm/internal/store/runlifecycle"
 )
 
 type destructiveResetCleanupExecutor interface {

@@ -3,7 +3,7 @@ package values
 import (
 	"strings"
 
-	"swarm/internal/runtime/core/paths"
+	"github.com/division-sh/swarm/internal/runtime/core/paths"
 )
 
 type Bucket struct {

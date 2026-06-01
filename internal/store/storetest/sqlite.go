@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/platform"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/store"
 	"gopkg.in/yaml.v3"
-	"swarm/internal/platform"
-	runtimecontracts "swarm/internal/runtime/contracts"
-	"swarm/internal/store"
 )
 
 // StartSQLiteRuntimeStore creates a file-backed SQLite runtime store with the

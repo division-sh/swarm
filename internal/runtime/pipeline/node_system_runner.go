@@ -10,10 +10,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
+	runtimerterr "github.com/division-sh/swarm/internal/runtime/rterrors"
 	"github.com/google/uuid"
-	"swarm/internal/events"
-	runtimedeadletters "swarm/internal/runtime/deadletters"
-	runtimerterr "swarm/internal/runtime/rterrors"
 )
 
 type systemNodeBus interface {

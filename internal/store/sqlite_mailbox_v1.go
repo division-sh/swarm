@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/google/uuid"
-	"swarm/internal/events"
-	runtimepipeline "swarm/internal/runtime/pipeline"
 )
 
 func (s *SQLiteRuntimeStore) ListV1MailboxItems(ctx context.Context, opts MailboxV1ListOptions) ([]MailboxV1Item, string, error) {

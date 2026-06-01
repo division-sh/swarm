@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	runtimeingress "swarm/internal/runtime/ingress"
+	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 )
 
 func (s *PostgresStore) EnsureRuntimeIngressState(ctx context.Context, now time.Time) (runtimeingress.State, error) {

@@ -5,11 +5,11 @@ import (
 	"sort"
 	"strings"
 
-	runtimeauthority "swarm/internal/runtime/authority"
-	models "swarm/internal/runtime/core/actors"
-	llm "swarm/internal/runtime/llm"
-	"swarm/internal/runtime/semanticview"
-	runtimesharedjson "swarm/internal/runtime/sharedjson"
+	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	llm "github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimesharedjson "github.com/division-sh/swarm/internal/runtime/sharedjson"
 )
 
 // ValidateGeneratedToolSchemaClosureForSource enforces the Path alpha generated

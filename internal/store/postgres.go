@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/store/platformschema"
 	_ "github.com/lib/pq"
-	"swarm/internal/config"
-	"swarm/internal/store/platformschema"
 )
 
 type PostgresStore struct {
