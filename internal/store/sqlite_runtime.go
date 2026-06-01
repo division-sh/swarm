@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -33,7 +34,6 @@ type SQLiteRuntimeStore struct {
 	startupMu             sync.Mutex
 	sessionMu             sync.Mutex
 	replayMu              sync.Mutex
-	apiIdempotencyMu      sync.Mutex
 	startupOwner          string
 	replayClaims          map[string]struct{}
 	sessionLockTTL        time.Duration
@@ -52,6 +52,11 @@ var _ runtimetools.MailboxPersistence = (*SQLiteRuntimeStore)(nil)
 var _ runtimeingress.Store = (*SQLiteRuntimeStore)(nil)
 var _ runtimeruncontrol.Store = (*SQLiteRuntimeStore)(nil)
 var _ runtimereplayclaim.Participation = (*SQLiteRuntimeStore)(nil)
+
+var sqliteAPIIdempotencyLocks = struct {
+	sync.Mutex
+	byPath map[string]*sync.Mutex
+}{byPath: map[string]*sync.Mutex{}}
 
 func NewSQLiteRuntimeStore(path string) (*SQLiteRuntimeStore, error) {
 	schemaStore, err := NewSQLiteSchemaStore(path)
@@ -636,11 +641,12 @@ func (s *SQLiteRuntimeStore) WithAPIIdempotency(ctx context.Context, req APIIdem
 		req.TTL = 24 * time.Hour
 	}
 
-	// SQLite is local-dev only here: serialize idempotent callbacks in-process,
-	// but never keep a SQLite write transaction open while the callback writes
-	// through the selected runtime store.
-	s.apiIdempotencyMu.Lock()
-	defer s.apiIdempotencyMu.Unlock()
+	// SQLite is local-dev only here: serialize idempotent callbacks in-process
+	// per database file, but never keep a SQLite write transaction open while
+	// the callback writes through the selected runtime store.
+	lock := sqliteAPIIdempotencyLockForPath(s.Path())
+	lock.Lock()
+	defer lock.Unlock()
 
 	if err := purgeExpiredSQLiteAPIIdempotency(ctx, s.DB, req.Now); err != nil {
 		return APIIdempotencyCompletion{}, false, err
@@ -684,6 +690,30 @@ func purgeExpiredSQLiteAPIIdempotency(ctx context.Context, q execQueryer, now ti
 		return fmt.Errorf("purge expired sqlite api idempotency: %w", err)
 	}
 	return nil
+}
+
+func sqliteAPIIdempotencyLockForPath(path string) *sync.Mutex {
+	key := sqliteAPIIdempotencyLockKey(path)
+	sqliteAPIIdempotencyLocks.Lock()
+	defer sqliteAPIIdempotencyLocks.Unlock()
+	lock := sqliteAPIIdempotencyLocks.byPath[key]
+	if lock == nil {
+		lock = &sync.Mutex{}
+		sqliteAPIIdempotencyLocks.byPath[key] = lock
+	}
+	return lock
+}
+
+func sqliteAPIIdempotencyLockKey(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "<unknown>"
+	}
+	cleanPath := filepath.Clean(path)
+	if abs, err := filepath.Abs(cleanPath); err == nil {
+		return abs
+	}
+	return cleanPath
 }
 
 func sqliteLoadAPIIdempotency(ctx context.Context, q execQueryer, req APIIdempotencyRequest) (apiIdempotencyRecord, bool, error) {

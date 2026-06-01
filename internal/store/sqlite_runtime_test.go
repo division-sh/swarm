@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -353,6 +354,92 @@ func TestSQLiteRuntimeStoreAPIIdempotencyFailedNestedPublishLeavesNoCompletionOr
 	assertSQLiteRuntimeCount(t, store, `SELECT COUNT(*) FROM api_idempotency WHERE method = ? AND idempotency_key = ?`, 0, req.Method, req.IdempotencyKey)
 	assertSQLiteRuntimeCount(t, store, `SELECT COUNT(*) FROM runs WHERE run_id = ?`, 0, runID)
 	assertSQLiteRuntimeCount(t, store, `SELECT COUNT(*) FROM events WHERE event_id = ?`, 0, eventID)
+}
+
+func TestSQLiteRuntimeStoreAPIIdempotencySerializesAcrossSamePathHandles(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
+	storeA := newBootstrappedSQLiteRuntimeStoreForPath(t, dbPath)
+	storeB := newBootstrappedSQLiteRuntimeStoreForPath(t, dbPath)
+	req := APIIdempotencyRequest{
+		Method:         "event.publish",
+		ActorTokenID:   "token-1",
+		IdempotencyKey: "idem-shared-path",
+		RequestHash:    "hash-shared-path",
+		Now:            time.Now().UTC(),
+	}
+
+	type callResult struct {
+		completion APIIdempotencyCompletion
+		replayed   bool
+		err        error
+	}
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	secondExecuted := make(chan struct{}, 1)
+	firstDone := make(chan callResult, 1)
+	secondDone := make(chan callResult, 1)
+	var callbackCalls atomic.Int32
+
+	go func() {
+		completion, replayed, err := storeA.WithAPIIdempotency(ctx, req, func(context.Context) (APIIdempotencyCompletion, error) {
+			if calls := callbackCalls.Add(1); calls != 1 {
+				secondExecuted <- struct{}{}
+			}
+			close(firstStarted)
+			<-releaseFirst
+			return APIIdempotencyCompletion{ResourceID: "resource-1", Response: json.RawMessage(`{"ok":true}`)}, nil
+		})
+		firstDone <- callResult{completion: completion, replayed: replayed, err: err}
+	}()
+
+	select {
+	case <-firstStarted:
+	case <-time.After(time.Second):
+		t.Fatal("first idempotency callback did not start")
+	}
+
+	go func() {
+		completion, replayed, err := storeB.WithAPIIdempotency(ctx, req, func(context.Context) (APIIdempotencyCompletion, error) {
+			callbackCalls.Add(1)
+			secondExecuted <- struct{}{}
+			return APIIdempotencyCompletion{ResourceID: "resource-2", Response: json.RawMessage(`{"ok":false}`)}, nil
+		})
+		secondDone <- callResult{completion: completion, replayed: replayed, err: err}
+	}()
+
+	select {
+	case <-secondExecuted:
+		close(releaseFirst)
+		first := <-firstDone
+		second := <-secondDone
+		t.Fatalf("second handle executed callback before first completion; first=%+v second=%+v calls=%d", first, second, callbackCalls.Load())
+	case <-time.After(250 * time.Millisecond):
+	}
+	close(releaseFirst)
+
+	var first callResult
+	select {
+	case first = <-firstDone:
+	case <-time.After(time.Second):
+		t.Fatal("first idempotency call did not finish")
+	}
+	if first.err != nil || first.replayed || first.completion.ResourceID != "resource-1" {
+		t.Fatalf("first idempotency result=%+v, want new resource-1", first)
+	}
+	var second callResult
+	select {
+	case second = <-secondDone:
+	case <-time.After(time.Second):
+		t.Fatal("second idempotency call did not finish")
+	}
+	if second.err != nil || !second.replayed || second.completion.ResourceID != "resource-1" || string(second.completion.Response) != `{"ok":true}` {
+		t.Fatalf("second idempotency result=%+v, want replayed resource-1", second)
+	}
+	if calls := callbackCalls.Load(); calls != 1 {
+		t.Fatalf("callback calls = %d, want 1", calls)
+	}
+	assertSQLiteRuntimeCount(t, storeA, `SELECT COUNT(*) FROM api_idempotency WHERE method = ? AND idempotency_key = ?`, 1, req.Method, req.IdempotencyKey)
 }
 
 func TestSQLiteRuntimeStoreAppendEventTxEnsuresFreshRunRow(t *testing.T) {
@@ -1108,12 +1195,16 @@ func TestSQLiteRuntimeStoreClaimScheduleRequiresActiveRow(t *testing.T) {
 
 func newBootstrappedSQLiteRuntimeStoreForTest(t *testing.T) *SQLiteRuntimeStore {
 	t.Helper()
+	return newBootstrappedSQLiteRuntimeStoreForPath(t, filepath.Join(t.TempDir(), ".swarm", "dev.db"))
+}
+
+func newBootstrappedSQLiteRuntimeStoreForPath(t *testing.T, dbPath string) *SQLiteRuntimeStore {
+	t.Helper()
 	spec := loadPlatformSpecForSQLiteSchemaTest(t)
 	plans, err := GeneratePlatformTableDDLs(spec)
 	if err != nil {
 		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
 	}
-	dbPath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
 	store, err := NewSQLiteRuntimeStore(dbPath)
 	if err != nil {
 		t.Fatalf("NewSQLiteRuntimeStore: %v", err)
