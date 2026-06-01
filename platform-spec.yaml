@@ -5525,6 +5525,7 @@ multi_bundle_persistence:
     run_fork_cli_authority_absorbed_from: '#1038'
     serve_db_loaded_runtime_source: '#1020'
     boot_pinned_runtime_context_manager: '#1175'
+    dynamic_load_disposition: '#1209'
   authority_rule: >
     This section is the merge-bearing source authority for multi-bundle persistence, bundle identity, bundle-aware
     resume/delete/fork semantics, planned bundle API methods, and planned CLI command shape. The draft is now evidence
@@ -5774,6 +5775,30 @@ multi_bundle_persistence:
         - Ambient CLI bundle context remains #1028.
         - Bundle CLI inventory and swarm fork consumers remain #1023/#989.
         - Delete/runtime.nuke/lifecycle cleanup remains #987/#988/#998/#1008/#1009.
+    dynamic_load_source_authority:
+      tracker: '#1209'
+      status: parked_no_supported_post_boot_load
+      decision: >
+        Dynamic post-boot RuntimeContextManager Load is not a supported Option A runtime behavior in the current platform
+        contract. Supported loaded BundleContexts are created only by boot-pinned `swarm serve --bundle-hash` before API
+        readiness. `bundle.register` remains a persisted catalog mutation only: it must not construct, repair, reload, or
+        expose a RuntimeContextManager BundleContext in the running process. No public runtime/admin Load API or CLI
+        surface is currently published. Previously unloaded/deactivated contexts remain fail-closed and are not
+        reactivated in-process by registration, retry, idempotency replay, or catalog row presence.
+      trigger_disposition:
+        bundle_register: catalog_only_no_runtime_load
+        explicit_runtime_admin_load: not_published
+        repair_reload_unloaded_context: not_supported
+        automatic_load_on_admission: not_supported
+      supported_recovery_path: >
+        Operators that need a newly registered or previously unloaded persisted bundle to become routable under the
+        current contract must start a process pinned to that bundle_hash. Any future in-process Load, repair, or reload
+        behavior requires a separately gated source-authority PR that names the public or internal trigger, runtime graph
+        factory owner, idempotency/concurrency semantics, and generated artifacts if a public surface is introduced.
+      final_matrix_disposition: >
+        #1025 must treat Dynamic Load as explicitly parked/not supported for this phase. The matrix should prove that
+        registration remains catalog-only, unloaded contexts fail closed after #1201 deactivation, and no current
+        supported API/CLI surface promises post-readiness RuntimeContextManager Load.
     runs_table:
       planned_live_owner_after_migration: platform_tables.tables.runs
       promoted_fields:
@@ -6131,6 +6156,11 @@ multi_bundle_persistence:
         - internal/runtime.BundleContext
         - internal/apiv1.OperatorReadOptions.RuntimeContexts
       reason: Boot-pinned multi-context serve now routes supported runtime mutations through loaded BundleContext ownership, disables unscoped startup recovery/restore in multi-context processes, and marks loaded contexts unavailable/unloaded after authoritative bundle.delete/runtime.nuke include_bundles=true operations. Dynamic Load, scoped recovery filters, final matrix, ambient CLI context, cross-bundle fork, and cleanup siblings remain separately gated.
+      dynamic_load_disposition: >
+        #1209 records the current Dynamic Load source-authority decision: no post-readiness RuntimeContextManager Load,
+        repair, or reload surface is supported. Bundle registration is catalog-only and does not make a BundleContext
+        routable in the active process. Future Dynamic Load work must start from a new gated authority update rather than
+        from RuntimeContextManager helper implementation alone.
     lifecycle_cleanup:
       trackers:
         - '#987'
