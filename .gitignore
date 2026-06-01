@@ -17,6 +17,9 @@ RESPONSE.yaml
 data/*
 !data/.gitkeep
 
+# Local Docker/Compose placeholder state
+.docker/
+
 # Generated artifacts
 coverage
 test-results/

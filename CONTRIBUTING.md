@@ -53,8 +53,8 @@ state the owner, scope, and proof clearly.
 ## Scope Boundaries
 
 Do not silently change the public runtime model while editing documentation.
-Docker Compose/Postgres onboarding, host workspace backend behavior, and
-explicit `/data` source semantics each have their own tracked cleanup streams.
+Host workspace backend behavior, repo-wide SQLite-default rollout proof, and
+explicit `/data` source semantics each have their own tracked owners.
 
 Do not reintroduce retired private Makefile or `scripts/` helper workflows as
 public setup instructions.
