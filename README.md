@@ -34,6 +34,7 @@ Swarm makes a small number of opinionated choices and sticks to them.
 - **Execution is replayable.** Every event and every state mutation is persisted. Any run can be reconstructed turn by turn, audited end to end, or resumed from its last consistent checkpoint after a crash. Auditability is native.
 - **Runs are forkable.** Re-execute any run from any point in its history with a counterfactual like a different policy value, a tweaked prompt, or an entirely new contract bundle, and compare outcomes against the original. Last week's failed run can be replayed against this week's fixed contracts. The cost of iterating on a flow drops to the cost of forking a run, which turns continuous improvement into a regular engineering loop instead of a deploy-and-watch cycle.
 - **Humans participate as a first-class actor.** Approvals, rejections, and deferrals flow through a durable mailbox using the same event model as the rest of the runtime. A pending decision is just another event waiting for its handler: a human's, in this case. Autonomy is a dial, not a switch.
+- **Spec-driven and well-suited for agentic authoring.** The platform specification is a single machine-readable YAML file, the static analyzer's errors cite check ids and exact field paths an LLM can act on directly, and 200+ verifying conformance bundles provide working patterns to mirror. The declarative substrate is unusually agent-friendly. See [For agent authors](https://docs.division.sh/build/agentic-authoring).
 
 The tradeoff: a Swarm flow cannot be re-wired by an LLM at runtime. That rigidity is the point.
 
@@ -229,6 +230,7 @@ source contract.
 |---|---|
 | [`platform-spec.yaml`](platform-spec.yaml) | You need the authoritative specification. |
 | [`openrpc.json`](openrpc.json) | You need the generated public API artifact. |
+| [For agent authors](https://docs.division.sh/build/agentic-authoring) | You are an LLM agent helping a human author a Swarm flow. |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | You want to contribute issues, docs, code, or tests. |
 | [`SECURITY.md`](SECURITY.md) | You need to report a suspected vulnerability privately. |
 | [GitHub Discussions](https://github.com/division-sh/swarm/discussions) | You want to ask a question, share a flow, or propose a feature. |
