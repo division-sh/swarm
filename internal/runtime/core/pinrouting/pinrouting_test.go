@@ -82,21 +82,27 @@ func TestResolveAllowsEntityOnlyParentRouteOnlyWhenExplicitlyAllowed(t *testing.
 }
 
 func TestPinDeclaredOutputRecognizesRootSchemaOutputWithoutLeafFallback(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		RootSchema: &runtimecontracts.FlowSchemaDocument{
-			Pins: runtimecontracts.FlowPins{
-				Outputs: runtimecontracts.FlowOutputPins{
-					Events: []string{"root.ready"},
-				},
-			},
-		},
-	})
+	source := testRootPinRoutingSource()
 
 	if !PinDeclaredOutput(source, "", "root.ready") {
 		t.Fatal("root output pin was not recognized")
 	}
 	if PinDeclaredOutput(source, "", "worker/root.ready") {
 		t.Fatal("namespaced event matched root output pin by leaf name")
+	}
+}
+
+func TestResolveFailsClosedForRootPinOutputWithoutTargetMechanism(t *testing.T) {
+	result := Resolve(ResolutionInput{
+		Source:    testRootPinRoutingSource(),
+		EventType: "root.ready",
+	}, events.Event{Type: "root.ready"})
+
+	if result.Failure != FailureTargetRequiredMissing {
+		t.Fatalf("Failure = %q, want %q", result.Failure, FailureTargetRequiredMissing)
+	}
+	if got := result.Event.TargetRoute(); !got.Empty() {
+		t.Fatalf("Event target = %#v, want empty on failed root target resolution", got)
 	}
 }
 
@@ -123,6 +129,21 @@ func testPinRoutingSource() semanticview.Source {
 			ByID: map[string]*runtimecontracts.FlowContractView{
 				"child": &child,
 			},
+		},
+	})
+}
+
+func testRootPinRoutingSource() semanticview.Source {
+	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		RootSchema: &runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{
+				Outputs: runtimecontracts.FlowOutputPins{
+					Events: []string{"root.ready"},
+				},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"root.ready": {},
 		},
 	})
 }
