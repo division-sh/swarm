@@ -2937,6 +2937,117 @@ func TestExecutor_RejectsAmbiguousHandlerTopLevelActionWithRules(t *testing.T) {
 	}
 }
 
+func TestExecutor_RejectsUnsupportedRuleActionContextsBeforeExecution(t *testing.T) {
+	cases := []struct {
+		name    string
+		handler runtimecontracts.SystemNodeEventHandler
+		want    string
+	}{
+		{
+			name: "on_complete",
+			handler: runtimecontracts.SystemNodeEventHandler{
+				OnComplete: []runtimecontracts.HandlerRuleEntry{{
+					ID:        "complete",
+					Condition: "else",
+					Action:    runtimecontracts.ActionSpec{ID: "notify"},
+				}},
+			},
+			want: "handler.on_complete[complete] action is unsupported",
+		},
+		{
+			name: "accumulate on_complete",
+			handler: runtimecontracts.SystemNodeEventHandler{
+				Accumulate: &runtimecontracts.AccumulateSpec{
+					Completion: runtimecontracts.ParseAccumulateCompletion("all"),
+					OnComplete: []runtimecontracts.HandlerRuleEntry{{
+						ID:        "complete",
+						Condition: "else",
+						Action:    runtimecontracts.ActionSpec{ID: "notify"},
+					}},
+				},
+			},
+			want: "handler.accumulate.on_complete[complete] action is unsupported",
+		},
+		{
+			name: "accumulate on_timeout",
+			handler: runtimecontracts.SystemNodeEventHandler{
+				Accumulate: &runtimecontracts.AccumulateSpec{
+					Completion: runtimecontracts.ParseAccumulateCompletion("all"),
+					OnTimeout: &runtimecontracts.HandlerRuleEntry{
+						ID:     "timeout",
+						Action: runtimecontracts.ActionSpec{ID: "notify"},
+					},
+				},
+			},
+			want: "handler.accumulate.on_timeout[timeout] action is unsupported",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := &stubActionRunner{}
+			exec, err := NewExecutor(RuntimeDependencies{
+				Source:     stubSource(),
+				StateRepo:  stubStateRepo{},
+				TxRunner:   stubRunner{},
+				Locker:     stubLocker{},
+				Outbox:     stubOutbox{},
+				Dispatcher: stubDispatcher{},
+				ActionRegistry: stubActionRegistry{entries: map[identity.ActionKey]runtimeregistry.ActionInstruction{
+					identity.NormalizeActionKey("notify"): {
+						Key: identity.NormalizeActionKey("notify"),
+					},
+				}},
+				ActionRunner: runner,
+			}, stubEvaluator{bools: map[string]bool{"payload.ok": true}})
+			if err != nil {
+				t.Fatalf("NewExecutor error: %v", err)
+			}
+			result, err := exec.Execute(context.Background(), ExecutionRequest{
+				EntityID: "entity-1",
+				NodeID:   "node-1",
+				FlowID:   "flow-1",
+				Event:    events.Event{ID: "evt-1", Type: "task.completed", Payload: json.RawMessage(`{"ok":true}`)},
+				Handler:  tc.handler,
+				State:    testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+			})
+			if err == nil {
+				t.Fatalf("expected unsupported action context rejection, got result %+v", result)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want %q", err, tc.want)
+			}
+			if len(runner.called) != 0 {
+				t.Fatalf("action runner calls = %#v, want none", runner.called)
+			}
+			if len(result.ActionsExecuted) != 0 {
+				t.Fatalf("ActionsExecuted = %#v, want none", result.ActionsExecuted)
+			}
+		})
+	}
+}
+
+func TestSelectedActionSpecConsumesRuleActionOnlyFromHandlerRules(t *testing.T) {
+	handler := runtimecontracts.SystemNodeEventHandler{Action: runtimecontracts.ActionSpec{ID: "handler_action"}}
+	rule := &runtimecontracts.HandlerRuleEntry{Action: runtimecontracts.ActionSpec{ID: "rule_action"}}
+	cases := []struct {
+		name   string
+		source handlerRuleSource
+		want   string
+	}{
+		{name: "handler rules", source: handlerRuleSourceRules, want: "rule_action"},
+		{name: "on complete", source: handlerRuleSourceOnComplete, want: "handler_action"},
+		{name: "accumulate on complete", source: handlerRuleSourceAccumulateOnComplete, want: "handler_action"},
+		{name: "accumulate on timeout", source: handlerRuleSourceAccumulateOnTimeout, want: "handler_action"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := selectedActionSpec(handler, rule, tc.source).ID; got != tc.want {
+				t.Fatalf("selectedActionSpec = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestExecutor_MergePersistedActionStatePreservesInMemoryWrites(t *testing.T) {
 	entityID := identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111")
 	baseline := testStateSnapshot("ready", map[string]any{
