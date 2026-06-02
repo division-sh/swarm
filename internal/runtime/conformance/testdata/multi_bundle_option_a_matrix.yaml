@@ -1,0 +1,465 @@
+version: 1
+kind: multi_bundle_option_a_lifecycle_scoped_api_conformance_matrix
+issue: 1025
+parent_issue: 1011
+source:
+  platform_spec: platform-spec.yaml
+  openrpc_artifact: openrpc.json
+  api_compliance_matrix: internal/apiv1/testdata/openrpc_compliance_matrix.yaml
+classifications:
+  - implemented_proof
+  - explicit_split
+  - not_current_option_a
+rows:
+  - id: source_authority_openrpc
+    category: source_authority
+    concept: platform-spec and generated OpenRPC are the merge-bearing public contract.
+    classification: implemented_proof
+    owner_refs:
+      - {kind: spec_ref, path: platform-spec.yaml, ref: multi_bundle_persistence}
+      - {kind: artifact, path: openrpc.json}
+    proof_refs:
+      - {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}
+      - {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}
+      - {kind: command, name: "go run ./cmd/swarm-openrpc-gen --check"}
+
+  - id: canonical_bundle_hash_identity
+    category: identity
+    concept: canonical bundle_hash v1 identity replaces legacy fingerprint/ref authority.
+    classification: implemented_proof
+    owner_refs:
+      - {kind: spec_ref, path: platform-spec.yaml, ref: bundle_identity}
+    proof_refs:
+      - {kind: go_test, name: TestBundleHashV1GoldenCorpus}
+      - {kind: go_test, name: TestBundleCatalogProjectionConsumesCanonicalBundleHashOwner}
+      - {kind: go_test, name: TestGeneratedOpenRPCBundleIdentityDescriptionsPreserveConstraints}
+
+  - id: schema_foundation
+    category: schema
+    concept: bundles table plus run bundle_hash/source columns are platform-owned schema.
+    classification: implemented_proof
+    owner_refs:
+      - {kind: spec_ref, path: platform-spec.yaml, ref: platform_tables}
+    proof_refs:
+      - {kind: go_test, name: TestPlatformSpecOwnsMultiBundleSchemaFoundation}
+
+  - id: run_source_availability
+    category: store
+    concept: persisted, ephemeral, deleted, legacy, and missing bundle rows are classified through the runbundle availability owner.
+    classification: implemented_proof
+    owner_refs:
+      - {kind: spec_ref, path: platform-spec.yaml, ref: resume_and_recovery}
+    proof_refs:
+      - {kind: go_test, name: TestLoadAvailabilityClassifiesBundleSourceStates}
+      - {kind: go_test, name: TestLoadAvailabilityClassifiesPersistedMissingHashAsDataIntegrity}
+      - {kind: go_test, name: TestPostgresStore_RunBundleSourceConsumesCanonicalSourceFact}
+
+  - id: serve_contracts_persisted_ingest
+    category: serve_boot
+    concept: swarm serve --contracts persists/reuses a bundle row and stamps persisted source facts.
+    classification: implemented_proof
+    owner_refs:
+      - {kind: spec_ref, path: platform-spec.yaml, ref: serve_ingest_projection}
+    proof_refs:
+      - {kind: go_test, name: TestPrepareServeBundleSourcePersistsCatalogForContractsServe}
+      - {kind: go_test, name: TestBundleCatalogWriteSurfaceUpsertsAndRejectsHashCollision}
+
+  - id: serve_dev_ephemeral_source
+    category: serve_boot
+    concept: swarm serve --contracts --dev stamps ephemeral source facts without catalog persistence.
+    classification: implemented_proof
+    owner_refs:
+      - {kind: spec_ref, path: platform-spec.yaml, ref: serve_ingest_projection}
+    proof_refs:
+      - {kind: go_test, name: TestPrepareServeBundleSourceDevStampsEphemeralWithoutCatalogRow}
+      - {kind: go_test, name: TestPrepareServeBundleSourceSQLiteStampsEphemeralWithoutPostgresCatalog}
+
+  - id: db_loaded_serve_boot
+    category: serve_boot
+    concept: swarm serve --bundle-hash loads persisted content/data bytes, verifies hash, and pins BundleContexts.
+    classification: implemented_proof
+    owner_refs:
+      - {kind: spec_ref, path: platform-spec.yaml, ref: serve_db_loaded_runtime_source}
+    proof_refs:
+      - {kind: go_test, name: TestCLI_ServeBundleHashValidationAndSerialScope}
+      - {kind: go_test, name: TestLoadServeRuntimeBundleFromCatalogLoadsPersistedRuntimeSource}
+      - {kind: go_test, name: TestRunServeRuntimeBundleHashMissingFailsBeforeReadiness}
+
+  - id: dynamic_post_boot_load
+    category: runtime_context
+    concept: post-boot RuntimeContextManager Load is parked; bundle.register remains catalog-only.
+    classification: not_current_option_a
+    owner_refs:
+      - {kind: spec_ref, path: platform-spec.yaml, ref: dynamic_load_source_authority}
+    proof_refs:
+      - {kind: issue, issue: 1209}
+      - {kind: pr, pr: 1211}
+      - {kind: spec_ref, path: platform-spec.yaml, ref: Dynamic post-boot RuntimeContextManager Load}
+
+  - id: bundle_catalog_api
+    category: api
+    concept: bundle.list/get/agents/register consume catalog/store owners and do not start runtime work.
+    classification: implemented_proof
+    owner_refs:
+      - {kind: spec_ref, path: platform-spec.yaml, ref: api_surface}
+    proof_refs:
+      - {kind: api_matrix_method, method: bundle.list}
+      - {kind: api_matrix_method, method: bundle.get}
+      - {kind: api_matrix_method, method: bundle.agents}
+      - {kind: api_matrix_method, method: bundle.register}
+      - {kind: go_test, name: TestBundleCatalogReadSurfaceListGetAgentsAndCursor}
+      - {kind: go_test, name: TestOperatorBundleRegisterHandlersMaterializeCanonicalProjectionAndIdempotency}
+
+  - id: bundle_delete_non_force
+    category: delete
+    concept: non-force bundle.delete refuses active persisted runs and uses the delete owner chain.
+    classification: implemented_proof
+    owner_refs:
+      - {kind: spec_ref, path: platform-spec.yaml, ref: bundle_delete}
+    proof_refs:
+      - {kind: api_matrix_method, method: bundle.delete}
+      - {kind: go_test, name: TestOperatorBundleDeleteNonForceUsesOwnerChainAndIdempotency}
+      - {kind: go_test, name: TestOperatorBundleDeleteNonForceActiveRunsError}
+
+  - id: bundle_delete_force
+    category: delete
+    concept: force bundle.delete owns preservation cleanup, dry-run, partial failure, mutex, and final mutation.
+    classification: implemented_proof
+    owner_refs:
+      - {kind: spec_ref, path: platform-spec.yaml, ref: bundle_delete}
+    proof_refs:
+      - {kind: api_matrix_method, method: bundle.delete}
+      - {kind: go_test, name: TestOperatorBundleDeleteForceUsesOwnerChainAndIdempotency}
+      - {kind: go_test, name: TestPostgresStore_BundleDeleteForceCleanupAndFinalMutation}
+
+  - id: phase5_delete_source_owner
+    category: delete
+    concept: bundle.delete final mutation serializes source-state changes and run creation against deleted bundles.
+    classification: implemented_proof
+    owner_refs:
+      - {kind: spec_ref, path: platform-spec.yaml, ref: lifecycle_cleanup}
+    proof_refs:
+      - {kind: go_test, name: TestPostgresStore_BundleDeleteFinalMutationSerializesConcurrentRunCreation}
+      - {kind: go_test, name: TestPostgresStore_BundleDeleteFinalMutationBlocksPostDeletePersistedSourceRunCreation}
+      - {kind: issue, issue: 1009}
+
+  - id: runtime_nuke_include_bundles
+    category: destructive_reset
+    concept: runtime.nuke include_bundles consumes destructive reset and bundle context deactivation owners.
+    classification: implemented_proof
+    owner_refs:
+      - {kind: spec_ref, path: platform-spec.yaml, ref: runtime.nuke}
+    proof_refs:
+      - {kind: api_matrix_method, method: runtime.nuke}
+      - {kind: go_test, name: TestOperatorRuntimeNukeIncludeBundlesDeactivatesLoadedRuntimeContexts}
+      - {kind: go_test, name: TestOperatorRuntimeNukeApplyReportsPartialFailureAndIdempotency}
+
+  - id: startup_recovery
+    category: recovery
+    concept: startup recovery owns active-run unavailable-bundle orphaning and persisted-missing fail-fast behavior.
+    classification: implemented_proof
+    owner_refs:
+      - {kind: spec_ref, path: platform-spec.yaml, ref: startup_recovery_unavailable_bundle}
+    proof_refs:
+      - {kind: go_test, name: TestRunServeRuntimeUnavailableBundleStartupRecoveryFailsPersistedMissingBeforeCleanup}
+      - {kind: go_test, name: TestRunServeRuntimeUnavailableBundleStartupRecoveryOrphansExpectedUnavailableRuns}
+      - {kind: go_test, name: TestRunServeRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDiskContractsServe}
+
+  - id: sqlite_first_event_run_lock
+    category: sqlite
+    concept: fresh SQLite first event/run lock blocker is closed for the supported public event.publish surface.
+    classification: implemented_proof
+    owner_refs:
+      - {kind: artifact, path: internal/apiv1/operator_event_publish_test.go}
+    proof_refs:
+      - {kind: go_test, name: TestOperatorEventPublishSQLiteIdempotentFirstEventPublishesWithoutLock}
+      - {kind: go_test, name: TestSQLiteObservabilityOwnerBacksSupportedAPISurfaces}
+
+  - id: scoped_read_filters
+    category: api
+    concept: run-scoped list/read methods and bundle filters consume API read owners.
+    classification: implemented_proof
+    owner_refs:
+      - {kind: spec_ref, path: platform-spec.yaml, ref: bundle_safe_list_read_scoping}
+    proof_refs:
+      - {kind: api_matrix_method, method: run.list}
+      - {kind: api_matrix_method, method: runtime.logs}
+      - {kind: api_matrix_method, method: runtime.incidents}
+      - {kind: go_test, name: TestRunAPIReadSurface_LoadAndListRunHeaders}
+      - {kind: go_test, name: TestOperatorObservabilityHandlersExposePersistedReadMethods}
+
+  - id: create_new_work_bundle_admission
+    category: api
+    concept: event.publish and run.start require/validate canonical bundle_hash for create-new-work admission.
+    classification: implemented_proof
+    owner_refs:
+      - {kind: spec_ref, path: platform-spec.yaml, ref: create_new_work_bundle_hash}
+    proof_refs:
+      - {kind: api_matrix_method, method: event.publish}
+      - {kind: api_matrix_method, method: run.start}
+      - {kind: go_test, name: TestOperatorEventPublishHandlersRequireCanonicalBundleHashForCreateNewWork}
+      - {kind: go_test, name: TestEventPublishBundleHashSerializesCanonicalParamAndMapsUnsupported}
+
+  - id: runtime_context_boot_pinned
+    category: runtime_context
+    concept: RuntimeContextManager/BundleContext own boot-pinned loaded context dispatch and graph isolation.
+    classification: implemented_proof
+    owner_refs:
+      - {kind: spec_ref, path: platform-spec.yaml, ref: runtime_context_isolation}
+    proof_refs:
+      - {kind: go_test, name: TestRuntimeContextManagerRegistersAndLooksUpPinnedContexts}
+      - {kind: go_test, name: TestRuntimeContextManagerRejectsDuplicateBundleHashes}
+      - {kind: go_test, name: TestRunServeRuntimeDBLoadedRunForkCrossBundleTargetExecutesAndStampsTargetIdentity}
+
+  - id: runtime_context_unload_deactivation
+    category: runtime_context
+    concept: loaded contexts fail closed after authoritative unload/deactivation from delete or nuke.
+    classification: implemented_proof
+    owner_refs:
+      - {kind: spec_ref, path: platform-spec.yaml, ref: RuntimeContextManager lifecycle state}
+    proof_refs:
+      - {kind: go_test, name: TestRuntimeContextManagerDeactivatesPinnedContextFailClosed}
+      - {kind: go_test, name: TestOperatorBundleDeleteDeactivatesLoadedRuntimeContext}
+      - {kind: go_test, name: TestOperatorRuntimeNukeIncludeBundlesDeactivatesLoadedRuntimeContexts}
+
+  - id: fork_same_bundle_disk
+    category: fork
+    concept: disk-loaded same-bundle selected-contract run.fork remains supported through selected-contract owners.
+    classification: implemented_proof
+    owner_refs:
+      - {kind: spec_ref, path: platform-spec.yaml, ref: run_fork}
+    proof_refs:
+      - {kind: api_matrix_method, method: run.fork}
+      - {kind: go_test, name: TestOperatorRunForkHandlersUseAvailabilityAndSelectedExecutor}
+      - {kind: go_test, name: TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage}
+
+  - id: fork_same_bundle_db_loaded
+    category: fork
+    concept: DB-loaded same-bundle selected-contract run.fork loads source bytes and stamps persisted identity.
+    classification: implemented_proof
+    owner_refs:
+      - {kind: spec_ref, path: platform-spec.yaml, ref: db_loaded_same_bundle_source}
+    proof_refs:
+      - {kind: go_test, name: TestRunServeRuntimeDBLoadedRunForkSupportedSurfaceExecutesAndStampsPersistedIdentity}
+      - {kind: go_test, name: TestExecuteSelectedContractRunForkLoadsDBBackedSourceAndStampsPersistedIdentity}
+      - {kind: go_test, name: TestBundleCatalogSelectedContractSourceLoaderLoadsPersistedSourceForRequest}
+
+  - id: fork_cross_bundle_loaded_target
+    category: fork
+    concept: cross-bundle run.fork selects an already loaded target BundleContext and fails closed without Dynamic Load.
+    classification: implemented_proof
+    owner_refs:
+      - {kind: spec_ref, path: platform-spec.yaml, ref: cross_bundle_fork}
+    proof_refs:
+      - {kind: api_matrix_method, method: run.fork}
+      - {kind: go_test, name: TestRunServeRuntimeDBLoadedRunForkCrossBundleTargetExecutesAndStampsTargetIdentity}
+      - {kind: go_test, name: TestBundleCatalogSelectedContractSourceLoaderLoadsCrossBundleTargetSelection}
+
+  - id: cli_bundle_fork_consumers
+    category: cli
+    concept: supported bundle, event, run, and fork CLI consumers call canonical v1 RPC surfaces.
+    classification: implemented_proof
+    owner_refs:
+      - {kind: spec_ref, path: platform-spec.yaml, ref: cli_surface}
+    proof_refs:
+      - {kind: go_test, name: TestBundleCommandsUseCanonicalRPCAndRender}
+      - {kind: go_test, name: TestBundleRegisterContractsDirectoryUsesCanonicalRPCAndRenders}
+      - {kind: go_test, name: TestForkCommandUsesRunForkRPCAndRenders}
+      - {kind: go_test, name: TestEventPublishBundleHashSerializesCanonicalParamAndMapsUnsupported}
+
+  - id: cli_bundle_register_archive
+    category: cli
+    concept: swarm bundle register --archive remains a should-have split, not current closure.
+    classification: explicit_split
+    owner_refs:
+      - {kind: spec_ref, path: platform-spec.yaml, ref: bundle_commands_split}
+    proof_refs:
+      - {kind: issue, issue: 794}
+      - {kind: issue, issue: 1023}
+      - {kind: spec_ref, path: platform-spec.yaml, ref: "swarm bundle register --archive"}
+
+  - id: cli_agents_list_run_id
+    category: cli
+    concept: swarm agents list --run-id is split until agent.list run-scope authority exists.
+    classification: explicit_split
+    owner_refs:
+      - {kind: spec_ref, path: platform-spec.yaml, ref: modified_commands_planned}
+    proof_refs:
+      - {kind: issue, issue: 794}
+      - {kind: issue, issue: 1023}
+      - {kind: go_test, name: TestAgentsListUsesV1RPCWithFilters}
+
+  - id: ambient_cli_bundle_context
+    category: cli
+    concept: ambient CLI bundle context is not part of current Option A.
+    classification: not_current_option_a
+    owner_refs:
+      - {kind: spec_ref, path: platform-spec.yaml, ref: Ambient CLI}
+    proof_refs:
+      - {kind: issue, issue: 1028}
+      - {kind: spec_ref, path: platform-spec.yaml, ref: Ambient CLI}
+
+  - id: option_b_artifact_capture
+    category: option_boundary
+    concept: self-contained executable artifact capture is Option B, not current Option A.
+    classification: not_current_option_a
+    owner_refs:
+      - {kind: spec_ref, path: platform-spec.yaml, ref: Option B}
+    proof_refs:
+      - {kind: issue, issue: 1026}
+      - {kind: spec_ref, path: platform-spec.yaml, ref: Option B}
+
+  - id: duplicate_agent_slug_posture
+    category: identity
+    concept: duplicate authored agent slugs across live bundles are unsupported under current global slug posture.
+    classification: not_current_option_a
+    owner_refs:
+      - {kind: spec_ref, path: platform-spec.yaml, ref: agent_identity_model}
+    proof_refs:
+      - {kind: issue, issue: 977}
+      - {kind: pr, pr: 1243}
+      - {kind: spec_ref, path: platform-spec.yaml, ref: current_global_slug_constraint}
+
+  - id: provider_native_llm_exclusion
+    category: parent_boundary
+    concept: provider/native LLM work belongs to #983 and is not part of the multi-bundle matrix.
+    classification: explicit_split
+    owner_refs:
+      - {kind: issue, issue: 983}
+    proof_refs:
+      - {kind: issue, issue: 983}
+
+  - id: static_root_pin_verifier
+    category: verifier
+    concept: static root pin declaration verification is separately tracked and not proof-bearing for #1025.
+    classification: explicit_split
+    owner_refs:
+      - {kind: issue, issue: 1258}
+    proof_refs:
+      - {kind: issue, issue: 1258}
+
+  - id: sqlite_exact_once_handler_effects
+    category: sqlite
+    concept: exact-once SQLite handler side-effect cardinality remains a separate live split/risk.
+    classification: explicit_split
+    owner_refs:
+      - {kind: issue, issue: 1253}
+    proof_refs:
+      - {kind: issue, issue: 1253}
+
+  - id: preservation_cleanup_watchlist
+    category: lifecycle
+    concept: preservation cleanup remains parent/watchlist context; current Option A consumers are accounted separately.
+    classification: explicit_split
+    owner_refs:
+      - {kind: spec_ref, path: platform-spec.yaml, ref: lifecycle_cleanup}
+    proof_refs:
+      - {kind: issue, issue: 1008}
+      - {kind: spec_ref, path: platform-spec.yaml, ref: lifecycle_cleanup}
+
+  - id: empire_template_delivery
+    category: runtime_lifecycle
+    concept: template-instance and root no-target system-node events localize to handlers with delivery/receipt and replay-scope separation.
+    classification: implemented_proof
+    owner_refs:
+      - {kind: artifact, path: internal/runtime/template_instance_delivery_test.go}
+    proof_refs:
+      - {kind: go_test, name: TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScopeSeparately}
+      - {kind: go_test, name: TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect}
+      - {kind: go_test, name: TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyleSideEffect}
+
+  - id: empire_parent_route_metadata
+    category: runtime_lifecycle
+    concept: runtime-owned ParentRoute/control metadata survives activation, persistence/reload, and handler mutation.
+    classification: implemented_proof
+    owner_refs:
+      - {kind: artifact, path: internal/runtime/manager/flow_activation_test.go}
+    proof_refs:
+      - {kind: go_test, name: TestActivateFlowInstancePersistsFullParentRouteMetadata}
+      - {kind: go_test, name: TestSQLiteWorkflowInstanceStore_PreservesParentRouteControlMetadata}
+      - {kind: go_test, name: TestApplyEngineStateMutationRejectsAuthoredParentRouteInsertion}
+
+  - id: empire_auto_emit_run_id
+    category: runtime_lifecycle
+    concept: template activation auto_emit_on_create events inherit the active run id.
+    classification: implemented_proof
+    owner_refs:
+      - {kind: artifact, path: internal/runtime/manager/flow_activation_test.go}
+    proof_refs:
+      - {kind: go_test, name: TestActivateFlowInstancePublishesAutoEmitEvent}
+      - {kind: go_test, name: TestActivateFlowInstanceQueuesAutoEmitUntilPostCommitWhenAvailable}
+      - {kind: go_test, name: TestCorrelateEvent_PreservesExplicitEventRunID}
+
+  - id: empire_post_commit_delivery
+    category: runtime_lifecycle
+    concept: post-commit EventBus/outbox dispatch preserves immutable queued delivery intent.
+    classification: implemented_proof
+    owner_refs:
+      - {kind: artifact, path: internal/runtime/bus/eventbus_publish_test.go}
+    proof_refs:
+      - {kind: go_test, name: TestEventBusPublishTransactionalPostCommitReceiptFailureIsRecoverable}
+      - {kind: go_test, name: TestEventBusPublishTransactional_ReturnsPostCommitInterceptorErrorAndRecordsReceipt}
+
+  - id: empire_terminal_route_teardown
+    category: runtime_lifecycle
+    concept: terminal flow-instance route teardown occurs only after the terminal state commit.
+    classification: implemented_proof
+    owner_refs:
+      - {kind: artifact, path: internal/runtime/manager/flow_activation_test.go}
+    proof_refs:
+      - {kind: go_test, name: TestDeactivateFlowInstanceQueuesTerminalSideEffectsUntilPostCommitWhenAvailable}
+      - {kind: go_test, name: TestDeactivateFlowInstanceModel_PostCommitSideEffectsFollowTerminalCommit}
+
+  - id: empire_route_wildcards
+    category: runtime_lifecycle
+    concept: RouteTable wildcard subscriber resolution handles concrete child/template event paths.
+    classification: implemented_proof
+    owner_refs:
+      - {kind: artifact, path: internal/runtime/bus/routing_derivation_internal_test.go}
+    proof_refs:
+      - {kind: go_test, name: TestRouteTableResolve_WildcardSubscriberMatchesActiveConcreteChildEventWithoutMaterializedKey}
+      - {kind: go_test, name: TestRouteTableResolve_WildcardSubscriberDoesNotMatchRemovedConcreteChildEvent}
+      - {kind: go_test, name: TestEventBusPublish_UsesRouteTableWildcardSubscriberResolution}
+
+  - id: empire_accumulator_bucket_identity
+    category: runtime_lifecycle
+    concept: accumulator buckets key by matched handler event key while preserving concrete runtime event provenance.
+    classification: implemented_proof
+    owner_refs:
+      - {kind: artifact, path: internal/runtime/engine/executor_test.go}
+    proof_refs:
+      - {kind: go_test, name: TestExecutor_AccumulatorBucketUsesMatchedHandlerEventKeyForScopedConcreteEvents}
+      - {kind: go_test, name: TestExecutor_ComputeReadsAccumulatorByMatchedHandlerEventKey}
+      - {kind: go_test, name: TestAccumulatorStoreLoad_PreservesHandlerAccumulatorBucketPath}
+
+  - id: empire_output_event_namespace
+    category: runtime_lifecycle
+    concept: declarative output events use producer/source-route namespace authority.
+    classification: implemented_proof
+    owner_refs:
+      - {kind: artifact, path: internal/runtime/engine/executor_test.go}
+    proof_refs:
+      - {kind: go_test, name: TestExecutor_DeclarativeEmitSurfacesUseProducerSourceRouteNamespace}
+      - {kind: go_test, name: TestExecutor_StaticProducerTargetRouteDoesNotOwnEventNamespace}
+
+  - id: empire_event_publish_flow_scope
+    category: api
+    concept: public event.publish resolves supported flow-scoped event names through the canonical API/runtime owners.
+    classification: implemented_proof
+    owner_refs:
+      - {kind: spec_ref, path: platform-spec.yaml, ref: event.publish}
+    proof_refs:
+      - {kind: api_matrix_method, method: event.publish}
+      - {kind: go_test, name: TestOperatorEventPublishResolvesFlowScopedContractEventName}
+      - {kind: go_test, name: TestEventPublishPassesFlowScopedEventNameToV1RPC}
+
+  - id: empire_query_entities_guard_context
+    category: runtime_lifecycle
+    concept: query_entities guards carry workflow context and fail closed for unsupported scoped operands.
+    classification: implemented_proof
+    owner_refs:
+      - {kind: artifact, path: internal/runtime/pipeline/workflow_expression_evaluator_test.go}
+    proof_refs:
+      - {kind: go_test, name: TestExecuteNodeContractHandlerQueryEntitiesGuardUsesWorkflowContext}
+      - {kind: go_test, name: TestWorkflowExpressionEvaluator_QueryEntitiesMissingScopedOperandFailsClosed}
+      - {kind: go_test, name: TestWorkflowExpressionEvaluator_QueryEntitiesUnsupportedScopedOperandFailsClosed}
