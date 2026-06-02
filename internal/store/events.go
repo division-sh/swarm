@@ -699,7 +699,7 @@ func (s *PostgresStore) appendEventSpec(ctx context.Context, caps StoreSchemaCap
 		if err := s.ensureRunRow(ctx, caps, tx, runID, id, name, true); err != nil {
 			return err
 		}
-		if caps.Events.RunCounterColumns {
+		if caps.Events.RunCounterColumns && runLifecycleEntityStateCountSource(caps) {
 			if err := storerunlifecycle.SyncCounts(ctx, chooseExecQueryer(s.DB, tx), runID); err != nil {
 				return err
 			}
@@ -1407,11 +1407,16 @@ func runLifecycleOptions(caps StoreSchemaCapabilities) storerunlifecycle.EnsureA
 		HasStartedAtCol:         caps.Events.RunStartedAt,
 		HasTriggerCols:          caps.Events.RunTriggerColumns,
 		HasCounterCols:          caps.Events.RunCounterColumns,
+		HasEntityStateCountSrc:  runLifecycleEntityStateCountSource(caps),
 		HasTerminalCols:         caps.Events.RunTerminalFields,
 		HasBundleHashCol:        caps.Events.RunBundleHash,
 		HasBundleSourceCol:      caps.Events.RunBundleSource,
 		HasBundleFingerprintCol: caps.Events.RunBundleFingerprint,
 	}
+}
+
+func runLifecycleEntityStateCountSource(caps StoreSchemaCapabilities) bool {
+	return caps.EntityState == SchemaFlavorCanonical && caps.EntityRunID
 }
 
 type standaloneRuntimePlatformRunRecord struct {
