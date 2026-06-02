@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/store"
 )
 
@@ -174,12 +175,12 @@ func mailboxDownstreamSubscribers(eventName string, opts OperatorReadOptions) ([
 	if opts.Source == nil {
 		return []string{}, "unavailable"
 	}
-	entry, ok := opts.Source.EventEntry(eventName)
-	if !ok {
+	_, hasProductEvent := opts.Source.EventEntry(eventName)
+	_, _, hasPlatformEvent := runtimecontracts.PlatformEventCatalogEntry(opts.Source.PlatformSpec(), eventName)
+	if !hasProductEvent && !hasPlatformEvent {
 		return []string{}, "unavailable"
 	}
-	subscribers := append([]string(nil), entry.SwarmConsumer()...)
-	subscribers = append(subscribers, entry.Consumer...)
+	subscribers := opts.Source.RuntimeEventOwners(eventName)
 	subscribers = uniqueNonEmptyStrings(subscribers)
 	sort.Strings(subscribers)
 	return subscribers, "event_catalog"

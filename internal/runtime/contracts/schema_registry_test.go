@@ -8,6 +8,7 @@ func TestEventSchemaRegistryFromCatalog_NormalizesAnnotatedFieldTypes(t *testing
 			Payload: EventPayloadSpec{
 				Properties: map[string]EventFieldSpec{
 					"corpus_path":   {Type: "string (required for corpus mode — path to signals file in /data)"},
+					"finished_at":   {Type: "timestamp (nullable)"},
 					"score":         {Type: "float"},
 					"subcategories": {Type: "array (required for saas_gap, local_services modes)"},
 				},
@@ -26,6 +27,10 @@ func TestEventSchemaRegistryFromCatalog_NormalizesAnnotatedFieldTypes(t *testing
 	}
 	if corpusPath["description"] == "" {
 		t.Fatalf("corpus_path description = %#v", corpusPath["description"])
+	}
+	finishedAt, _ := props["finished_at"].(map[string]any)
+	if finishedAt["type"] != "string" || finishedAt["format"] != "date-time" || finishedAt["nullable"] != true {
+		t.Fatalf("finished_at schema = %#v, want nullable date-time string", finishedAt)
 	}
 	score, _ := props["score"].(map[string]any)
 	if score["type"] != "number" {

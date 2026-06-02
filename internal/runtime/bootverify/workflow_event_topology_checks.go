@@ -175,6 +175,9 @@ func (c *checkerContext) eventWarnings() []Finding {
 		if eventRefProducedLocal(c.source, ref, emittedRefs) {
 			continue
 		}
+		if runtimecontracts.PlatformEventCatalogContains(c.source.PlatformSpec(), ref.Canonical) {
+			continue
+		}
 		if eventProducedExternallyLocal(ref.Entry) || strings.EqualFold(strings.TrimSpace(ref.Entry.SwarmStatus()), "planned") {
 			continue
 		}

@@ -251,10 +251,8 @@ func (c *checkerContext) inputPinRootNodeHandlerPath(localEvent, canonicalEvent 
 }
 
 func inputPinPlatformEventPath(platform runtimecontracts.PlatformSpecDocument, localEvent string) string {
-	for eventName := range platform.PlatformEvents.Catalog {
-		if eventidentity.Normalize(eventName) == localEvent {
-			return "matched"
-		}
+	if runtimecontracts.PlatformEventCatalogContains(platform, localEvent) {
+		return "matched"
 	}
 	return "not matched"
 }

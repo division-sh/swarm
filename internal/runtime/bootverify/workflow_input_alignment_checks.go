@@ -348,12 +348,12 @@ func eventPayloadFieldsForExistingEvent(source semanticview.Source, eventType st
 	if source == nil {
 		return nil, false
 	}
-	entry, ok := source.EventEntry(strings.TrimSpace(eventType))
-	if !ok {
+	proof := semanticview.ResolveFlowEventProof(source, "", strings.TrimSpace(eventType))
+	if !proof.HasSchema {
 		return nil, false
 	}
 	out := map[string]struct{}{}
-	collectPayloadFields("", entry.Payload.Properties, out)
+	collectPayloadFields("", proof.Entry.Payload.Properties, out)
 	return out, true
 }
 

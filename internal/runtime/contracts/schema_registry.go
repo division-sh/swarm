@@ -90,6 +90,7 @@ func EventSchemaRegistryFromBundle(bundle *WorkflowContractBundle) map[string]Ev
 		}
 		appendEventSchemas(out, bundle, flowID, view.Events, bundle.ResolvedTypeCatalogForFlow(flowID))
 	}
+	appendPlatformEventSchemas(out, bundle.Platform)
 	return out
 }
 
@@ -111,7 +112,7 @@ func normalizeEventFieldType(raw string) (string, string) {
 	if raw == "" {
 		return "", ""
 	}
-	for _, base := range []string{"string", "integer", "number", "numeric", "boolean", "object", "array"} {
+	for _, base := range []string{"text", "string", "integer", "number", "numeric", "float", "double", "real", "boolean", "timestamp", "uuid", "object", "array"} {
 		if raw == base {
 			return base, ""
 		}
@@ -173,6 +174,9 @@ func eventSchemaDeclarationForFlowEvent(bundle *WorkflowContractBundle, flowID, 
 	if bundle.FlowTree.Root == nil {
 		entry, key, ok := bundle.ResolveFlowEventCatalogEntry(flowID, eventType)
 		if !ok {
+			if platformEntry, platformKey, platformOK := PlatformEventCatalogEntry(bundle.Platform, eventType); platformOK && len(platformEntry.Payload.Properties) > 0 {
+				return platformEntry, platformKey, TypeCatalogDocument{}, true
+			}
 			return EventCatalogEntry{}, "", TypeCatalogDocument{}, false
 		}
 		return entry, key, bundle.RootTypeCatalog(), true
@@ -192,12 +196,25 @@ func eventSchemaDeclarationForFlowEvent(bundle *WorkflowContractBundle, flowID, 
 
 	entry, key, ok := bundle.ResolveFlowEventCatalogEntry(flowID, eventType)
 	if !ok {
+		if platformEntry, platformKey, platformOK := PlatformEventCatalogEntry(bundle.Platform, eventType); platformOK && len(platformEntry.Payload.Properties) > 0 {
+			return platformEntry, platformKey, TypeCatalogDocument{}, true
+		}
 		return EventCatalogEntry{}, "", TypeCatalogDocument{}, false
 	}
 	if flowID != "" {
 		return entry, key, bundle.ResolvedTypeCatalogForFlow(flowID), true
 	}
 	return entry, key, bundle.RootTypeCatalog(), true
+}
+
+func appendPlatformEventSchemas(out map[string]EventSchema, platform PlatformSpecDocument) {
+	for _, eventType := range PlatformEventCatalogNames(platform) {
+		entry, key, ok := PlatformEventCatalogEntry(platform, eventType)
+		if !ok || len(entry.Payload.Properties) == 0 {
+			continue
+		}
+		out[key] = eventSchemaFromCatalogEntry(key, entry, TypeCatalogDocument{})
+	}
 }
 
 type eventSchemaDeclarationScope struct {
@@ -435,10 +452,24 @@ func eventSchemaForTypeRef(raw string, types TypeCatalogDocument, seen map[strin
 	if raw == "" {
 		return map[string]any{}, ""
 	}
+	nullable := eventFieldTypeAllowsNull(raw)
 	if normalized, typeDescription := normalizeEventFieldType(raw); normalized != "" && normalized != raw {
-		return eventSchemaForResolvedType(normalized, types, seen), typeDescription
+		prop := eventSchemaForResolvedType(normalized, types, seen)
+		if nullable {
+			prop["nullable"] = true
+		}
+		return prop, typeDescription
 	}
-	return eventSchemaForResolvedType(raw, types, seen), ""
+	prop := eventSchemaForResolvedType(raw, types, seen)
+	if nullable {
+		prop["nullable"] = true
+	}
+	return prop, ""
+}
+
+func eventFieldTypeAllowsNull(raw string) bool {
+	lower := strings.ToLower(strings.TrimSpace(raw))
+	return strings.Contains(lower, "nullable") || strings.Contains(lower, "null until")
 }
 
 func eventSchemaForResolvedType(typeRef string, types TypeCatalogDocument, seen map[string]struct{}) map[string]any {

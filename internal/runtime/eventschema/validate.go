@@ -44,6 +44,9 @@ func validateSchemaObject(path string, schema map[string]any, payload map[string
 }
 
 func validateValue(path string, schema map[string]any, value any) error {
+	if value == nil && schemaAllowsNull(schema) {
+		return nil
+	}
 	st := strings.TrimSpace(asString(schema["type"]))
 	if st == "" {
 		props := schemaProperties(schema["properties"])
@@ -146,6 +149,16 @@ func schemaProperties(raw any) map[string]map[string]any {
 
 func schemaAdditionalProps(raw any) bool { return runtimesharedjson.SchemaAdditionalProps(raw) }
 func requiredList(raw any) []string      { return runtimesharedjson.RequiredList(raw) }
+
+func schemaAllowsNull(schema map[string]any) bool {
+	if schema == nil {
+		return false
+	}
+	if b, ok := schema["nullable"].(bool); ok && b {
+		return true
+	}
+	return strings.EqualFold(strings.TrimSpace(asString(schema["nullable"])), "true")
+}
 
 func validateStringFormat(path string, schema map[string]any, value string) error {
 	switch strings.TrimSpace(asString(schema["format"])) {

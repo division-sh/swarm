@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
+	"gopkg.in/yaml.v3"
 )
 
 func TestOperatorMailboxHandlersSupportedRPCPath(t *testing.T) {
@@ -76,8 +77,12 @@ func TestOperatorMailboxHandlersSupportedRPCPath(t *testing.T) {
 		t.Fatalf("set flow instance: %v", err)
 	}
 	bundle := runStartTestBundle("mailbox.item_decided")
-	bundle.Events["mailbox.item_decided"] = runtimecontracts.EventCatalogEntry{
-		Consumer: []string{"approval-agent", "review-agent"},
+	delete(bundle.Events, "mailbox.item_decided")
+	bundle.Platform.PlatformEvents.Catalog = map[string]yaml.Node{
+		"mailbox.item_decided": {},
+	}
+	bundle.Semantics.EventOwners = map[string][]string{
+		"mailbox.item_decided": {"approval-agent", "review-agent"},
 	}
 	source := semanticview.Wrap(bundle)
 	handler := testHandler(t, Options{

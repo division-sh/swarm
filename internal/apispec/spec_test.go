@@ -928,6 +928,81 @@ func TestRuntimeIngressConventionsRatifyQueueAndRejectSemantics(t *testing.T) {
 	assertMethodDescriptionContains(t, api, "runtime.resume", "exactly once")
 }
 
+func TestPlatformEventsCatalogOwnsPlatformEmittedEvents(t *testing.T) {
+	root := loadPlatformSpecYAMLNode(t)
+	catalog := mustMappingValue(t, mustMappingValue(t, root, "platform_events"), "catalog")
+	for _, eventName := range []string{
+		"platform.dead_letter",
+		"platform.runtime_log",
+		"platform.agent_failed",
+		"platform.agent_panic",
+		"platform.event_quarantined",
+		"platform.dead_letter_escalation",
+		"platform.reset",
+		"platform.auth_required",
+		"platform.budget_threshold_crossed",
+		"platform.paused",
+		"platform.resumed",
+		"platform.agent_directive",
+		"platform.agent_started",
+		"platform.boot",
+		"platform.inbound_recorded",
+		"platform.recovery_failed",
+		"mailbox.item_decided",
+	} {
+		entry := mustMappingValue(t, catalog, eventName)
+		if scalarValue(mappingValue(entry, "schema_authority")) == "" {
+			t.Fatalf("%s missing schema_authority", eventName)
+		}
+		if scalarValue(mappingValue(entry, "routing_class")) == "" {
+			t.Fatalf("%s missing routing_class", eventName)
+		}
+		evidence := mustMappingValue(t, entry, "producer_evidence")
+		locations := mustMappingValue(t, evidence, "locations")
+		if locations.Kind != yaml.SequenceNode || len(locations.Content) == 0 {
+			t.Fatalf("%s producer_evidence.locations missing entries", eventName)
+		}
+		for _, location := range locations.Content {
+			path := strings.TrimSpace(strings.SplitN(scalarValue(location), "#", 2)[0])
+			if path == "" {
+				t.Fatalf("%s has empty producer evidence location", eventName)
+			}
+			if _, err := os.Stat(filepath.Join(repoRoot(t), path)); err != nil {
+				t.Fatalf("%s producer evidence location %s not readable: %v", eventName, path, err)
+			}
+		}
+	}
+
+	mailbox := mustMappingValue(t, catalog, "mailbox.item_decided")
+	assertScalarContains(t, mappingValue(mailbox, "schema_authority"), "approval_event_payload_contract")
+	assertScalarValue(t, mappingValue(mailbox, "routing_class"), "event_loop_routable")
+	payload := mustMappingValue(t, mailbox, "payload")
+	required := mustMappingValue(t, mailbox, "required")
+	for _, field := range []string{
+		"mailbox_id",
+		"mailbox_decision_id",
+		"decision",
+		"decision_payload",
+		"item_type",
+		"mailbox_payload",
+		"source_event_id",
+		"source_flow",
+		"source_entity_id",
+		"decided_by",
+		"decided_at",
+	} {
+		if mappingValue(payload, field) == nil {
+			t.Fatalf("mailbox.item_decided payload missing %s", field)
+		}
+		if !sequenceContainsScalar(required, field) {
+			t.Fatalf("mailbox.item_decided required missing %s", field)
+		}
+	}
+	if !sequenceContainsScalar(mustMappingValue(t, mailbox, "forbidden_fields"), "payload") {
+		t.Fatal("mailbox.item_decided must forbid retired payload field")
+	}
+}
+
 func TestAgentIdentityModelRecordsCurrentSlugConstraint(t *testing.T) {
 	root := loadPlatformSpecYAMLNode(t)
 	identity := mustMappingValue(t, root, "agent_identity_model")

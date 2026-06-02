@@ -6,6 +6,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
+	"gopkg.in/yaml.v3"
 )
 
 func TestResolveEventSchema_ReportsUnresolvedTypesAfterBundleResolution(t *testing.T) {
@@ -36,6 +37,41 @@ func TestResolveEventSchema_ReportsUnresolvedTypesAfterBundleResolution(t *testi
 	}
 	if err := resolution.UnresolvedTypeError(); err == nil || !strings.Contains(err.Error(), "NotDeclared") {
 		t.Fatalf("UnresolvedTypeError = %v, want NotDeclared", err)
+	}
+}
+
+func TestResolveEventSchema_UsesPlatformEmittedCatalogEntry(t *testing.T) {
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(`
+payload:
+  mailbox_id: uuid
+  mailbox_payload: object
+  decided_at: timestamp
+required:
+  - mailbox_id
+  - mailbox_payload
+  - decided_at
+`), &doc); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	bundle := &runtimecontracts.WorkflowContractBundle{}
+	bundle.Platform.PlatformEvents.Catalog = map[string]yaml.Node{
+		"mailbox.item_decided": *doc.Content[0],
+	}
+
+	resolution := ResolveEventSchema(Wrap(bundle), "", "mailbox.item_decided")
+	if !resolution.HasSchema {
+		t.Fatal("expected platform event schema resolution")
+	}
+	properties, ok := resolution.Schema.Schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("properties = %#v, want map", resolution.Schema.Schema["properties"])
+	}
+	if _, ok := properties["mailbox_payload"]; !ok {
+		t.Fatalf("properties missing mailbox_payload: %#v", properties)
+	}
+	if resolution.EventKey != "mailbox.item_decided" {
+		t.Fatalf("EventKey = %q, want mailbox.item_decided", resolution.EventKey)
 	}
 }
 
