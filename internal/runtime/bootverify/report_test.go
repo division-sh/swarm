@@ -908,6 +908,33 @@ payload:
 	}
 }
 
+func TestRun_RejectsFlowOutputPinClaimOfPlatformEmittedEvent(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		RootSchema: &runtimecontracts.FlowSchemaDocument{
+			Name: "approval",
+			Pins: runtimecontracts.FlowPins{
+				Outputs: runtimecontracts.FlowOutputPins{
+					Events: []string{"mailbox.item_decided"},
+				},
+			},
+		},
+	}
+	bundle.Platform.Platform.Name = "test"
+	bundle.Platform.Platform.Version = "1.0.0"
+	bundle.Platform.PlatformEvents.Catalog = map[string]yaml.Node{
+		"mailbox.item_decided": platformEventCatalogTestNode(t, `
+payload:
+  mailbox_id: uuid
+`),
+	}
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "platform_namespace_violation", "root schema pins.outputs.events references platform-emitted event mailbox.item_decided; platform owns this event") {
+		t.Fatalf("expected platform-emitted event output pin error, got %#v", report.Errors())
+	}
+}
+
 func TestRun_MapsMissingPromptToPromptExistsWarning(t *testing.T) {
 	source := loadTier8Fixture(t, "test-boot-prompt-missing")
 
