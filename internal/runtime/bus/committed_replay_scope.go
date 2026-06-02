@@ -43,9 +43,8 @@ func (eb *EventBus) replayRecipientsForCommittedEvent(
 	persisted = uniqueStrings(persisted)
 	persistedRoutes := eb.deliveryRoutesForEvent(ctx, evt.ID)
 	if scope == runtimereplayclaim.CommittedReplayScopeDirect && len(persistedRoutes) > 0 {
-		live := deliveryRouteRecipientIDs(persistedRoutes)
 		internal := []string(nil)
-		live = deliveryRouteRecipientIDsByType(persistedRoutes, "agent")
+		live := deliveryRouteRecipientIDsByType(persistedRoutes, "agent")
 		if len(live) > 0 {
 			return live, internal, persistedRoutes, nil
 		}
@@ -56,20 +55,14 @@ func (eb *EventBus) replayRecipientsForCommittedEvent(
 			return nil, nil, nil, err
 		}
 		live := uniqueStrings(append(deliveryRouteRecipientIDsByType(persistedRoutes, "agent"), internal...))
-		if len(live) == 0 {
-			live = deliveryRouteRecipientIDs(persistedRoutes)
-			internal = deliveryRouteRecipientIDsByType(persistedRoutes, "node")
-		}
-		if len(live) > 0 {
-			routes := append([]events.DeliveryRoute(nil), persistedRoutes...)
-			for _, recipient := range internal {
-				if hasDeliveryRouteRecipient(routes, "node", recipient) {
-					continue
-				}
-				routes = append(routes, events.DeliveryRoute{SubscriberType: "node", SubscriberID: recipient})
+		routes := append([]events.DeliveryRoute(nil), persistedRoutes...)
+		for _, recipient := range internal {
+			if hasDeliveryRouteRecipient(routes, "node", recipient) {
+				continue
 			}
-			return live, internal, events.NormalizeDeliveryRoutes(routes), nil
+			routes = append(routes, events.DeliveryRoute{SubscriberType: "node", SubscriberID: recipient})
 		}
+		return live, internal, events.NormalizeDeliveryRoutes(routes), nil
 	}
 	switch scope {
 	case runtimereplayclaim.CommittedReplayScopeDirect:
