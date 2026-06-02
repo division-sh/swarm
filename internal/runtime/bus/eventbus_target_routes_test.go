@@ -250,6 +250,39 @@ func TestEventBusPublish_NoTargetRootRoutedNodeUsesSemanticNodeDeliveryRoute(t *
 	}
 }
 
+func TestEventBusPublish_NoTargetRootRoutedNodePersistsSemanticRouteWithoutInternalSubscription(t *testing.T) {
+	store := newTargetRouteMemoryStore()
+	source := semanticview.Wrap(loadTargetRouteTempBundle(t, routedRootNodeFixtureFiles()))
+	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	evt := (events.Event{
+		ID:        uuid.NewString(),
+		Type:      events.EventType("opco.spinup_requested"),
+		Payload:   []byte(`{}`),
+		CreatedAt: time.Now().UTC(),
+	}).WithEntityID("ent-root")
+
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	routes := store.routes[evt.ID]
+	if len(routes) != 1 {
+		t.Fatalf("persisted delivery routes = %#v, want one semantic root node route without an internal subscription", routes)
+	}
+	route := routes[0]
+	if route.SubscriberType != "node" || route.SubscriberID != "portfolio-node" {
+		t.Fatalf("delivery route = %#v, want node/portfolio-node", route)
+	}
+	if !route.Target.Empty() {
+		t.Fatalf("delivery target = %#v, want empty root target", route.Target)
+	}
+	if got := store.scopes[evt.ID]; got != replayclaim.CommittedReplayScopeSubscribed {
+		t.Fatalf("committed replay scope = %q, want subscribed", got)
+	}
+}
+
 func assertTargetRouteDeliveries(t *testing.T, ch <-chan events.Event, wantEntityIDs ...string) {
 	t.Helper()
 	seen := map[string]struct{}{}

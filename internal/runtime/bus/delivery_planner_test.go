@@ -380,7 +380,7 @@ func TestDeliveryPlanner_NoTargetRootRoutedNodeUsesSemanticNodeDeliveryRoute(t *
 				}}
 			},
 			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
-				return []deliveryRecipientCandidate{{ID: "portfolio-node", PersistAsDelivery: false}}
+				return nil
 			},
 			describeSubscribersForEvent: func(string, []Subscriber) []PublishDiagnosticRecipient {
 				return nil
@@ -399,8 +399,8 @@ func TestDeliveryPlanner_NoTargetRootRoutedNodeUsesSemanticNodeDeliveryRoute(t *
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
 	}
-	if got := plan.Recipients; len(got) != 1 || got[0] != "portfolio-node" {
-		t.Fatalf("recipients = %#v, want [portfolio-node]", got)
+	if got := plan.Recipients; len(got) != 0 {
+		t.Fatalf("recipients = %#v, want none without an internal carrier", got)
 	}
 	if len(plan.PersistedRecipients) != 0 {
 		t.Fatalf("persisted recipients = %#v, want none for internal node", plan.PersistedRecipients)
