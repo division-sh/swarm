@@ -786,6 +786,128 @@ func TestRun_DoesNotWarnForEventProducerExistsWhenCatalogDeclaresExternalOrPlann
 	}
 }
 
+func TestRun_DoesNotWarnForPlatformEmittedEventCatalogSubscription(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		eventType string
+		nodeID    string
+		node      runtimecontracts.SystemNodeContract
+		catalog   yaml.Node
+	}{
+		{
+			name:      "mailbox item decided",
+			eventType: "mailbox.item_decided",
+			nodeID:    "approval-handler",
+			node: runtimecontracts.SystemNodeContract{
+				ID:           "approval-handler",
+				SubscribesTo: []string{"mailbox.item_decided"},
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"mailbox.item_decided": {},
+				},
+			},
+			catalog: platformEventCatalogTestNode(t, `
+payload:
+  mailbox_id: uuid
+  mailbox_decision_id: uuid
+  decision: text
+  decision_payload: object
+  item_type: text
+  mailbox_payload: object
+  source_event_id: uuid
+  source_flow: text
+  source_entity_id: uuid
+  decided_by: text
+  decided_at: timestamp
+required:
+  - mailbox_id
+  - mailbox_decision_id
+  - decision
+  - decision_payload
+  - item_type
+  - mailbox_payload
+  - source_event_id
+  - source_flow
+  - source_entity_id
+  - decided_by
+  - decided_at
+`),
+		},
+		{
+			name:      "platform paused",
+			eventType: "platform.paused",
+			nodeID:    "pause-handler",
+			node: runtimecontracts.SystemNodeContract{
+				ID:           "pause-handler",
+				SubscribesTo: []string{"platform.paused"},
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"platform.paused": {},
+				},
+			},
+			catalog: platformEventCatalogTestNode(t, `
+payload:
+  reason: text
+  paused_by: text
+  timestamp: timestamp
+`),
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			bundle := &runtimecontracts.WorkflowContractBundle{
+				Semantics: runtimecontracts.WorkflowSemanticView{
+					Name:    "platform-event-test",
+					Version: "1.0.0",
+					NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
+						tc.nodeID: tc.node.EventHandlers,
+					},
+				},
+				Nodes: map[string]runtimecontracts.SystemNodeContract{
+					tc.nodeID: tc.node,
+				},
+			}
+			bundle.Platform.Platform.Name = "test"
+			bundle.Platform.Platform.Version = "1.0.0"
+			bundle.Platform.PlatformEvents.Catalog = map[string]yaml.Node{
+				tc.eventType: tc.catalog,
+			}
+			source := semanticview.Wrap(bundle)
+
+			report := Run(context.Background(), source, Options{})
+
+			if reportContains(report.Warnings(), "event_producer_exists", tc.eventType) {
+				t.Fatalf("unexpected event_producer_exists warning for platform catalog event, got %#v", report.Warnings())
+			}
+		})
+	}
+}
+
+func TestRun_RejectsProductRedeclarationOfPlatformEmittedEvent(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"mailbox.item_decided": {
+				Swarm: runtimecontracts.EventSwarmMetadata{Source: "external"},
+			},
+		},
+	}
+	bundle.Platform.Platform.Name = "test"
+	bundle.Platform.Platform.Version = "1.0.0"
+	bundle.Platform.PlatformEvents.Catalog = map[string]yaml.Node{
+		"mailbox.item_decided": platformEventCatalogTestNode(t, `
+payload:
+  mailbox_id: uuid
+`),
+	}
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "platform_namespace_violation", "Event mailbox.item_decided is platform-emitted and auto-registered; remove the local redeclaration.") {
+		t.Fatalf("expected platform-emitted event redeclaration error, got %#v", report.Errors())
+	}
+}
+
 func TestRun_MapsMissingPromptToPromptExistsWarning(t *testing.T) {
 	source := loadTier8Fixture(t, "test-boot-prompt-missing")
 
@@ -5934,4 +6056,16 @@ func addProjectHandler(t *testing.T, bundle *runtimecontracts.WorkflowContractBu
 		bundle.Semantics.NodeHandlers[nodeID] = map[string]runtimecontracts.SystemNodeEventHandler{}
 	}
 	bundle.Semantics.NodeHandlers[nodeID][eventType] = handler
+}
+
+func platformEventCatalogTestNode(t *testing.T, raw string) yaml.Node {
+	t.Helper()
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(raw), &doc); err != nil {
+		t.Fatalf("yaml.Unmarshal platform event catalog node: %v", err)
+	}
+	if doc.Kind == yaml.DocumentNode && len(doc.Content) > 0 {
+		return *doc.Content[0]
+	}
+	return doc
 }

@@ -53,6 +53,20 @@ func ResolveFlowEventProof(source Source, flowID, eventType string) FlowEventPro
 		}
 		break
 	}
+	if !proof.HasSchema {
+		for _, candidate := range candidates {
+			entry, key, ok := runtimecontracts.PlatformEventCatalogEntry(source.PlatformSpec(), candidate)
+			if !ok {
+				continue
+			}
+			proof.Entry = entry
+			proof.CatalogKey = strings.TrimSpace(key)
+			proof.Canonical = proof.CatalogKey
+			proof.Local = proof.CatalogKey
+			proof.HasSchema = true
+			break
+		}
+	}
 	return proof
 }
 

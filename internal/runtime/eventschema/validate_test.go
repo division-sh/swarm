@@ -17,6 +17,29 @@ func TestValidatePayloadAgainstSchema_RejectsUnsupportedSchemaType(t *testing.T)
 	}
 }
 
+func TestValidatePayloadAgainstSchema_AllowsOnlyExplicitNullableNull(t *testing.T) {
+	t.Parallel()
+
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"nullable_value": map[string]any{"type": "boolean", "nullable": true},
+			"strict_value":   map[string]any{"type": "boolean"},
+		},
+		"additionalProperties": false,
+	}
+
+	if err := ValidatePayloadAgainstSchema(schema, map[string]any{"nullable_value": nil, "strict_value": true}); err != nil {
+		t.Fatalf("nullable value rejected: %v", err)
+	}
+	if err := ValidatePayloadAgainstSchema(schema, map[string]any{"nullable_value": "not-bool", "strict_value": true}); err == nil {
+		t.Fatal("expected non-null nullable field to still enforce declared type")
+	}
+	if err := ValidatePayloadAgainstSchema(schema, map[string]any{"strict_value": nil}); err == nil {
+		t.Fatal("expected non-nullable field to reject null")
+	}
+}
+
 func TestValidatePayloadAgainstSchema_RejectsInvalidStringFormats(t *testing.T) {
 	t.Parallel()
 

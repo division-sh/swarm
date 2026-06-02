@@ -66,6 +66,7 @@ var tier8SupportedFixtures = []string{
 	"test-boot-state-machine-invalid",
 	"test-boot-success",
 	"test-boot-tool-missing",
+	"test-platform-mailbox-event-subscription",
 }
 
 var tier8ExcludedFixtures = map[string]tier8ExcludedFixture{

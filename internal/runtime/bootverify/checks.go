@@ -1097,55 +1097,83 @@ func (c *checkerContext) platformNamespace() []Finding {
 	c.namespaceLoaded = true
 	for eventType := range c.source.EventEntries() {
 		eventType = strings.TrimSpace(eventType)
-		if !strings.HasPrefix(eventType, "platform.") {
-			continue
+		switch {
+		case runtimecontracts.PlatformEventCatalogContains(c.source.PlatformSpec(), eventType):
+			c.namespaceFindings = append(c.namespaceFindings, Finding{
+				CheckID:  "platform_namespace_violation",
+				Severity: "error",
+				Message:  fmt.Sprintf(runtimecontracts.PlatformEventRedeclarationMessage, eventType),
+				Location: eventType,
+			})
+		case strings.HasPrefix(eventType, "platform."):
+			c.namespaceFindings = append(c.namespaceFindings, Finding{
+				CheckID:  "platform_namespace_violation",
+				Severity: "error",
+				Message:  fmt.Sprintf("event %s uses reserved platform.* namespace", eventType),
+				Location: eventType,
+			})
 		}
-		c.namespaceFindings = append(c.namespaceFindings, Finding{
-			CheckID:  "platform_namespace_violation",
-			Severity: "error",
-			Message:  fmt.Sprintf("event %s uses reserved platform.* namespace", eventType),
-			Location: eventType,
-		})
 	}
 	for agentID, agent := range c.source.AgentEntries() {
 		for _, eventType := range agent.EmitEvents {
 			eventType = strings.TrimSpace(eventType)
-			if !strings.HasPrefix(eventType, "platform.") {
-				continue
+			switch {
+			case runtimecontracts.PlatformEventCatalogContains(c.source.PlatformSpec(), eventType):
+				c.namespaceFindings = append(c.namespaceFindings, Finding{
+					CheckID:  "platform_namespace_violation",
+					Severity: "error",
+					Message:  fmt.Sprintf("agent %s emit_events references platform-emitted event %s; platform owns this event", strings.TrimSpace(agentID), eventType),
+					Location: strings.TrimSpace(agentID),
+				})
+			case strings.HasPrefix(eventType, "platform."):
+				c.namespaceFindings = append(c.namespaceFindings, Finding{
+					CheckID:  "platform_namespace_violation",
+					Severity: "error",
+					Message:  fmt.Sprintf("agent %s emit_events references reserved platform.* namespace event %s", strings.TrimSpace(agentID), eventType),
+					Location: strings.TrimSpace(agentID),
+				})
 			}
-			c.namespaceFindings = append(c.namespaceFindings, Finding{
-				CheckID:  "platform_namespace_violation",
-				Severity: "error",
-				Message:  fmt.Sprintf("agent %s emit_events references reserved platform.* namespace event %s", strings.TrimSpace(agentID), eventType),
-				Location: strings.TrimSpace(agentID),
-			})
 		}
 	}
 	for nodeID, node := range c.source.NodeEntries() {
 		for _, eventType := range node.Produces {
 			eventType = strings.TrimSpace(eventType)
-			if !strings.HasPrefix(eventType, "platform.") {
-				continue
+			switch {
+			case runtimecontracts.PlatformEventCatalogContains(c.source.PlatformSpec(), eventType):
+				c.namespaceFindings = append(c.namespaceFindings, Finding{
+					CheckID:  "platform_namespace_violation",
+					Severity: "error",
+					Message:  fmt.Sprintf("node %s produces references platform-emitted event %s; platform owns this event", strings.TrimSpace(nodeID), eventType),
+					Location: strings.TrimSpace(nodeID),
+				})
+			case strings.HasPrefix(eventType, "platform."):
+				c.namespaceFindings = append(c.namespaceFindings, Finding{
+					CheckID:  "platform_namespace_violation",
+					Severity: "error",
+					Message:  fmt.Sprintf("node %s produces references reserved platform.* namespace event %s", strings.TrimSpace(nodeID), eventType),
+					Location: strings.TrimSpace(nodeID),
+				})
 			}
-			c.namespaceFindings = append(c.namespaceFindings, Finding{
-				CheckID:  "platform_namespace_violation",
-				Severity: "error",
-				Message:  fmt.Sprintf("node %s produces references reserved platform.* namespace event %s", strings.TrimSpace(nodeID), eventType),
-				Location: strings.TrimSpace(nodeID),
-			})
 		}
 		for eventType, handler := range c.source.NodeEventHandlers(nodeID) {
 			for _, emitted := range handlerEmits(handler) {
 				emitted = strings.TrimSpace(emitted)
-				if !strings.HasPrefix(emitted, "platform.") {
-					continue
+				switch {
+				case runtimecontracts.PlatformEventCatalogContains(c.source.PlatformSpec(), emitted):
+					c.namespaceFindings = append(c.namespaceFindings, Finding{
+						CheckID:  "platform_namespace_violation",
+						Severity: "error",
+						Message:  fmt.Sprintf("node %s handler %s emits platform-emitted event %s; platform owns this event", strings.TrimSpace(nodeID), strings.TrimSpace(eventType), emitted),
+						Location: strings.TrimSpace(nodeID),
+					})
+				case strings.HasPrefix(emitted, "platform."):
+					c.namespaceFindings = append(c.namespaceFindings, Finding{
+						CheckID:  "platform_namespace_violation",
+						Severity: "error",
+						Message:  fmt.Sprintf("node %s handler %s emits reserved platform.* namespace event %s", strings.TrimSpace(nodeID), strings.TrimSpace(eventType), emitted),
+						Location: strings.TrimSpace(nodeID),
+					})
 				}
-				c.namespaceFindings = append(c.namespaceFindings, Finding{
-					CheckID:  "platform_namespace_violation",
-					Severity: "error",
-					Message:  fmt.Sprintf("node %s handler %s emits reserved platform.* namespace event %s", strings.TrimSpace(nodeID), strings.TrimSpace(eventType), emitted),
-					Location: strings.TrimSpace(nodeID),
-				})
 			}
 		}
 	}
@@ -1679,7 +1707,7 @@ func eventExists(source semanticview.Source, eventType string) bool {
 	if eventType == "" {
 		return false
 	}
-	if strings.HasPrefix(eventType, "platform.") {
+	if runtimecontracts.PlatformEventCatalogContains(source.PlatformSpec(), eventType) || strings.HasPrefix(eventType, "platform.") {
 		return true
 	}
 	if _, ok := source.ResolvedEventCatalog()[eventType]; ok {
@@ -1690,6 +1718,11 @@ func eventExists(source semanticview.Source, eventType string) bool {
 	}
 	if !strings.Contains(eventType, "*") {
 		return false
+	}
+	for _, candidate := range runtimecontracts.PlatformEventCatalogNames(source.PlatformSpec()) {
+		if routeMatchesLocal(eventType, strings.TrimSpace(candidate)) {
+			return true
+		}
 	}
 	for candidate := range source.ResolvedEventCatalog() {
 		if routeMatchesLocal(eventType, strings.TrimSpace(candidate)) {

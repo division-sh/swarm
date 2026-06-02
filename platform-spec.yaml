@@ -3209,7 +3209,7 @@ engine:
       severity: warning
       scope: per-flow
       trigger: An agent subscribes to an event that no node handler emits and no agent lists in emit_events. Suppressed if the
-        event has swarm.source, swarm.producer, or swarm.status metadata.
+        event has swarm.source, swarm.producer, swarm.status metadata, or an exact authoritative platform_events.catalog match.
       when: boot-only
     - id: payload_field_coverage
       severity: error
@@ -3349,8 +3349,8 @@ engine:
     - id: platform_namespace_violation
       severity: error
       scope: per-flow
-      trigger: A product events.yaml contains an event name starting with the reserved platform. prefix. Also applies to
-        agent emit_events declarations.
+      trigger: A product events.yaml contains an event name starting with the reserved platform. prefix, or declares/emits any
+        platform_events.catalog-owned event name. Also applies to agent emit_events declarations.
       when: boot-only
     - id: workspace_class_exists
       severity: error
@@ -6440,7 +6440,9 @@ multi_bundle_persistence:
       reason: Delete/restart/ephemeral-run cleanup must consume existing lifecycle owners rather than invent bundle-local shortcuts.
 platform_events:
   description: Events emitted by the platform engine itself. These are NOT product events — they are operational signals from
-    the engine. All platform events use the platform.* namespace. Products MUST NOT define events with reserved prefixes.
+    the engine or product-facing platform emissions whose schema is owned by the engine. Most operational signals use the
+    platform.* namespace, but platform-emitted events are defined by this catalog rather than by namespace alone. Products MUST
+    NOT define events with reserved prefixes or any event name owned by this catalog.
   namespace_reservation:
     reserved_prefixes:
     - platform.
@@ -6455,17 +6457,37 @@ platform_events:
     - Agent subscriptions to platform.* events (subscribing is allowed — products SHOULD subscribe to platform events)
     - Wildcard subscriptions that match platform.* events (e.g., platform.* subscription pattern)
     - Flow schema.yaml pins.inputs.events listing platform.* events (flows MAY declare them as inputs to receive routing)
+    - Product subscriptions, handlers, or input pins that reference non-platform.* catalog-owned events such as mailbox.item_decided
   catalog:
     platform.dead_letter:
       description: Failed event after retry exhaustion or chain depth overflow.
       defined_in: engine.error_model.dead_letter_schema
+      schema_authority: platform-spec.yaml#engine.error_model.dead_letter_schema
+      producer_evidence:
+        produced_by_type: platform
+        locations:
+        - internal/runtime/pipeline/coordinator.go#publish
+        - internal/runtime/pipeline/node_system_runner.go
+      routing_class: event_loop_routable
       note: Full payload schema defined in engine.error_model. Not duplicated here.
     platform.runtime_log:
       description: Diagnostic log record persisted as a global event.
       defined_in: platform_tables.diagnostics_encoding
+      schema_authority: platform-spec.yaml#platform_tables.diagnostics_encoding
+      producer_evidence:
+        produced_by_type: platform
+        locations:
+        - internal/store/runtime_log_persistence.go
+      routing_class: diagnostic_direct_persisted
       note: Full payload schema defined in platform_tables. Not duplicated here.
     platform.agent_failed:
       description: Agent session failed after retry.
+      schema_authority: platform-spec.yaml#platform_events.catalog.platform.agent_failed.payload
+      producer_evidence:
+        produced_by_type: platform
+        locations:
+        - internal/runtime/manager/runtime.go
+      routing_class: event_loop_routable
       scope: entity (if entity-scoped agent) or flow
       payload:
         agent_id: string
@@ -6478,6 +6500,12 @@ platform_events:
       produced_by_type: platform
     platform.agent_panic:
       description: Agent session panicked with unrecoverable error.
+      schema_authority: platform-spec.yaml#platform_events.catalog.platform.agent_panic.payload
+      producer_evidence:
+        produced_by_type: platform
+        locations:
+        - internal/runtime/manager/runtime.go
+      routing_class: event_loop_routable
       scope: entity or flow
       payload:
         agent_id: string
@@ -6490,6 +6518,12 @@ platform_events:
       produced_by_type: platform
     platform.event_quarantined:
       description: Poison event quarantined after repeated handler failures on different entities.
+      schema_authority: platform-spec.yaml#platform_events.catalog.platform.event_quarantined.payload
+      producer_evidence:
+        produced_by_type: platform
+        locations:
+        - internal/runtime/manager/runtime.go
+      routing_class: event_loop_routable
       scope: global
       payload:
         event_name: string
@@ -6500,6 +6534,12 @@ platform_events:
       produced_by_type: platform
     platform.dead_letter_escalation:
       description: Dead letter volume or pattern crossed escalation threshold.
+      schema_authority: platform-spec.yaml#platform_events.catalog.platform.dead_letter_escalation.payload
+      producer_evidence:
+        produced_by_type: platform
+        locations:
+        - internal/runtime/manager/receipts.go
+      routing_class: event_loop_routable
       scope: global
       payload:
         flow_instance: string
@@ -6513,6 +6553,12 @@ platform_events:
         via the internal admin reset source. Builder/dashboard reset_state is retired and MUST NOT emit this event. NOT
         emitted on crash recovery or automatic recovery fallback — those use platform.recovery_failed if they fail, or normal
         boot if they succeed.
+      schema_authority: platform-spec.yaml#platform_events.catalog.platform.reset.payload
+      producer_evidence:
+        produced_by_type: platform
+        locations:
+        - internal/runtime/manager/runtime.go#ResetRuntimeState
+      routing_class: event_loop_routable
       scope: global
       trigger: Explicit internal admin action only. The runtime calls ResetRuntimeState() and emits this event after the reset
         completes.
@@ -6525,6 +6571,12 @@ platform_events:
         source: external (platform admin CLI)
     platform.auth_required:
       description: Agent or tool call blocked pending authorization.
+      schema_authority: platform-spec.yaml#platform_events.catalog.platform.auth_required.payload
+      producer_evidence:
+        produced_by_type: platform
+        locations:
+        - internal/runtime/manager/receipts.go
+      routing_class: event_loop_routable
       scope: flow
       payload:
         agent_id: string
@@ -6536,6 +6588,12 @@ platform_events:
     platform.budget_threshold_crossed:
       description: LLM spend crossed a configured threshold. The platform monitors spend_ledger against policy-defined thresholds
         and emits this event when a boundary is crossed. One event with a level field — no separate events per level.
+      schema_authority: platform-spec.yaml#platform_events.catalog.platform.budget_threshold_crossed.payload
+      producer_evidence:
+        produced_by_type: platform
+        locations:
+        - internal/runtime/budget.go
+      routing_class: event_loop_routable
       scope: global
       payload:
         level: string (warning | throttle | emergency | ok)
@@ -6558,6 +6616,12 @@ platform_events:
         such as MCP/tool execution is rejected fail-closed while paused. In-flight events already dispatched complete their handler
         execution and commit. Agent sessions in progress complete their current turn; new agent invocations for queued work are
         deferred until resume.
+      schema_authority: platform-spec.yaml#platform_events.catalog.platform.paused.payload
+      producer_evidence:
+        produced_by_type: platform
+        locations:
+        - internal/runtime/ingress/controller.go
+      routing_class: event_loop_routable
       scope: global
       payload:
         reason: string
@@ -6568,6 +6632,12 @@ platform_events:
       description: Runtime ingress left paused state. Queued event-producing ingress is eligible for normal EventBus dispatch
         exactly once through the canonical delivery/idempotency owners. Synchronous request/response ingress may execute again
         after resume.
+      schema_authority: platform-spec.yaml#platform_events.catalog.platform.resumed.payload
+      producer_evidence:
+        produced_by_type: platform
+        locations:
+        - internal/runtime/ingress/controller.go
+      routing_class: event_loop_routable
       scope: global
       payload:
         reason: string
@@ -6578,6 +6648,13 @@ platform_events:
       description: Operator-issued directive accepted by the runtime for an agent. This is the authoritative persisted root
         event for directive-started or directive-targeted work; BoardStep and all child emissions inherit this event's run_id
         and source_event_id. It is persisted before agent execution and is not defined by the legacy board.directive helper.
+      schema_authority: platform-spec.yaml#platform_events.catalog.platform.agent_directive.payload
+      producer_evidence:
+        produced_by_type: platform
+        locations:
+        - cmd/swarm/agent_directive.go
+        - internal/runtime/agentcontrol/control.go
+      routing_class: diagnostic_direct_persisted
       scope: global
       payload:
         agent_id: string
@@ -6591,6 +6668,12 @@ platform_events:
       produced_by_type: platform
     platform.agent_started:
       description: Agent session created and ready to process events.
+      schema_authority: platform-spec.yaml#platform_events.catalog.platform.agent_started.payload
+      producer_evidence:
+        produced_by_type: platform
+        locations:
+        - internal/runtime/llm/session_events.go#publishAgentStarted
+      routing_class: event_loop_routable
       scope: flow
       payload:
         agent_id: string
@@ -6607,6 +6690,12 @@ platform_events:
     platform.boot:
       description: Platform boot completed successfully. Emitted after validation passes, runtime boot/recovery decisions are made,
         nodes/agents are started, and the boot event is published before the runtime becomes ready.
+      schema_authority: platform-spec.yaml#platform_events.catalog.platform.boot.payload
+      producer_evidence:
+        produced_by_type: platform
+        locations:
+        - internal/runtime/runtime.go#publishBootEvent
+      routing_class: event_loop_routable
       scope: global
       payload:
         flow_count: integer
@@ -6640,6 +6729,12 @@ platform_events:
     platform.inbound_recorded:
       description: External event received and persisted. Emitted when an event enters the system from an external source
         (API, webhook, admin CLI).
+      schema_authority: platform-spec.yaml#platform_events.catalog.platform.inbound_recorded.payload
+      producer_evidence:
+        produced_by_type: platform
+        locations:
+        - internal/store/inbound.go
+      routing_class: diagnostic_direct_persisted
       scope: entity or global
       payload:
         event_name: string
@@ -6649,19 +6744,62 @@ platform_events:
       produced_by_type: platform
     platform.recovery_failed:
       description: Crash recovery failed during event replay. Unrecoverable state.
+      schema_authority: platform-spec.yaml#platform_events.catalog.platform.recovery_failed.payload
+      producer_evidence:
+        produced_by_type: platform
+        locations:
+        - internal/runtime/runtime.go
+      routing_class: event_loop_routable
       scope: global
       payload:
         error: string
         failed_event_id: string (nullable)
         timestamp: string (ISO 8601)
       produced_by_type: platform
+    mailbox.item_decided:
+      description: Product-facing platform event emitted after an operator makes a terminal mailbox decision.
+      schema_authority: platform-spec.yaml#api_specification.conventions.mailbox.approval_event_payload_contract
+      producer_evidence:
+        produced_by_type: platform
+        locations:
+        - internal/store/mailbox_v1.go#DecideV1MailboxItem
+        - internal/apiv1/operator_mailbox.go#executeMailboxDecision
+      routing_class: event_loop_routable
+      scope: entity or flow
+      payload:
+        mailbox_id: uuid
+        mailbox_decision_id: uuid
+        decision: text
+        decision_payload: object
+        item_type: text
+        mailbox_payload: object
+        source_event_id: uuid
+        source_flow: text
+        source_entity_id: uuid
+        decided_by: text
+        decided_at: timestamp
+      required:
+      - mailbox_id
+      - mailbox_decision_id
+      - decision
+      - decision_payload
+      - item_type
+      - mailbox_payload
+      - source_event_id
+      - source_flow
+      - source_entity_id
+      - decided_by
+      - decided_at
+      forbidden_fields:
+      - payload
+      produced_by_type: platform
   routing_rules:
     description: Most platform events enter the normal event loop. Products can subscribe agents to them. System nodes can handle
       them. They follow standard routing, delivery, and persistence rules.
     routable_events: 'Platform events that enter the normal event loop: platform.dead_letter, platform.agent_failed,
       platform.agent_panic, platform.event_quarantined, platform.dead_letter_escalation, platform.reset, platform.auth_required,
-      platform.paused, platform.resumed, platform.boot, platform.recovery_failed, platform.agent_started, platform.budget_threshold_crossed.
-      Products can subscribe to these.'
+      platform.paused, platform.resumed, platform.boot, platform.recovery_failed, platform.agent_started, platform.budget_threshold_crossed,
+      mailbox.item_decided. Products can subscribe to these.'
     diagnostic_events: 'Platform events that bypass the event loop and are persisted directly to the events table:
       platform.runtime_log, platform.inbound_recorded, platform.agent_directive. These are high-frequency diagnostic records
       or operator-control root records. Routing them through the event loop would cause recursive emission loops or duplicate
