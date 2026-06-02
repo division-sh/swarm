@@ -67,13 +67,20 @@ func (s *PostgresStore) requireRunHeaderCapabilities(ctx context.Context) error 
 	if !caps.Events.LogRunID {
 		return fmt.Errorf("run api read surface requires canonical events.run_id")
 	}
+	if caps.EntityState != SchemaFlavorCanonical {
+		return unsupportedSchemaCapability("entity_state", caps.EntityState)
+	}
+	if !caps.EntityRunID {
+		return fmt.Errorf("run api read surface requires canonical entity_state.run_id")
+	}
 	catalog, err := loadSchemaColumnCatalog(ctx, s.DB)
 	if err != nil {
 		return err
 	}
 	required := map[string][]string{
-		"runs":   {"run_id", "status", "bundle_hash", "trigger_event_id", "trigger_event_type", "forked_from_run_id", "entity_count", "event_count", "error_summary", "started_at", "ended_at"},
-		"events": {"run_id", "event_id", "event_name", "created_at"},
+		"runs":         {"run_id", "status", "bundle_hash", "trigger_event_id", "trigger_event_type", "forked_from_run_id", "entity_count", "event_count", "error_summary", "started_at", "ended_at"},
+		"events":       {"run_id", "event_id", "event_name", "created_at"},
+		"entity_state": {"run_id", "entity_id"},
 	}
 	for tableName, columns := range required {
 		if catalog.hasColumns(tableName, columns...) {
@@ -187,7 +194,7 @@ SELECT
 	lower(r.status),
 	COALESCE(r.trigger_event_type, root.event_name, ''),
 	COALESCE(r.trigger_event_id::text, root.event_id::text, ''),
-	COALESCE(r.entity_count, 0),
+	COALESCE(entity_summary.entity_count, 0),
 	COALESCE(NULLIF(r.event_count, 0), summary.event_count, 0),
 	r.started_at,
 	r.ended_at,
@@ -206,6 +213,11 @@ LEFT JOIN LATERAL (
 	FROM events e
 	WHERE e.run_id = r.run_id
 ) summary ON TRUE
+LEFT JOIN LATERAL (
+	SELECT COUNT(DISTINCT es.entity_id)::integer AS entity_count
+	FROM entity_state es
+	WHERE es.run_id = r.run_id
+) entity_summary ON TRUE
 `
 }
 

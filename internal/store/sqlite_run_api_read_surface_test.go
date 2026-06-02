@@ -19,6 +19,10 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 	newerMiddleEvent := uuid.NewString()
 	newerLatestEvent := uuid.NewString()
 	olderEvent := uuid.NewString()
+	newerEntityA := uuid.NewString()
+	newerEntityB := uuid.NewString()
+	olderEntity := uuid.NewString()
+	olderEventOnly := uuid.NewString()
 	bundleA := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	bundleB := "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
@@ -34,16 +38,19 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 		t.Fatalf("seed sqlite runs: %v", err)
 	}
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
-		INSERT INTO events (run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
+		INSERT INTO events (run_id, event_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at)
 		VALUES
-			(?, ?, 'scan.requested', 'global', '{}', 'test', 'agent', ?),
-			(?, ?, 'scan.progressed', 'global', '{}', 'test', 'agent', ?),
-			(?, ?, 'scan.finished', 'global', '{}', 'test', 'agent', ?),
-			(?, ?, 'scan.completed', 'global', '{}', 'test', 'agent', ?),
-			(?, ?, 'platform.runtime_log', 'global', '{"log_level":"error","message":"boom","details":{"component":"runtime","action":"proof","error_code":"E_PROOF"}}', 'runtime', 'platform', ?)
-	`, newer, newerEvent, now.Add(time.Second), newer, newerMiddleEvent, now.Add(2*time.Second), newer, newerLatestEvent, now.Add(3*time.Second), older, olderEvent, now.Add(-time.Hour+time.Second), newer, uuid.NewString(), now.Add(4*time.Second)); err != nil {
+			(?, ?, 'scan.requested', NULL, 'global', '{}', 'test', 'agent', ?),
+			(?, ?, 'scan.progressed', NULL, 'global', '{}', 'test', 'agent', ?),
+			(?, ?, 'scan.finished', NULL, 'global', '{}', 'test', 'agent', ?),
+			(?, ?, 'scan.completed', ?, 'global', '{}', 'test', 'agent', ?),
+			(?, ?, 'scan.replayed', ?, 'global', '{}', 'test', 'agent', ?),
+			(?, ?, 'platform.runtime_log', NULL, 'global', '{"log_level":"error","message":"boom","details":{"component":"runtime","action":"proof","error_code":"E_PROOF"}}', 'runtime', 'platform', ?)
+	`, newer, newerEvent, now.Add(time.Second), newer, newerMiddleEvent, now.Add(2*time.Second), newer, newerLatestEvent, now.Add(3*time.Second), older, olderEvent, olderEntity, now.Add(-time.Hour+time.Second), older, uuid.NewString(), olderEventOnly, now.Add(-time.Hour+2*time.Second), newer, uuid.NewString(), now.Add(4*time.Second)); err != nil {
 		t.Fatalf("seed sqlite events: %v", err)
 	}
+	seedSQLiteEntityStateRows(t, sqliteStore.DB, ctx, newer, newerEntityA, newerEntityB)
+	seedSQLiteEntityStateRows(t, sqliteStore.DB, ctx, older, olderEntity)
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
 		INSERT INTO event_deliveries (delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, created_at)
 		VALUES (?, ?, ?, 'agent', 'agent-1', 'pending', ?)
@@ -61,6 +68,9 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 	if header.EndedAt == nil {
 		t.Fatal("header.EndedAt = nil, want terminal timestamp")
 	}
+	if header.EntityCount != 1 {
+		t.Fatalf("header.EntityCount = %d, want entity_state count 1 despite stale run counter and event overcount", header.EntityCount)
+	}
 
 	firstPage, cursor, err := sqliteStore.ListRunHeaders(ctx, RunHeaderListOptions{Limit: 1})
 	if err != nil {
@@ -68,6 +78,9 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 	}
 	if len(firstPage) != 1 || firstPage[0].RunID != newer {
 		t.Fatalf("first page = %#v, want newer run", firstPage)
+	}
+	if firstPage[0].EntityCount != 2 {
+		t.Fatalf("first page entity_count = %d, want entity_state count 2 despite event undercount", firstPage[0].EntityCount)
 	}
 	if cursor == "" {
 		t.Fatal("cursor empty for truncated sqlite run list")
@@ -93,6 +106,9 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 	}
 	if report.RunID != newer || report.RootEventID != newerEvent || report.WarnErrorLogCount != 1 {
 		t.Fatalf("report = %#v", report)
+	}
+	if report.EntityCount != 2 {
+		t.Fatalf("report.EntityCount = %d, want entity_state count 2", report.EntityCount)
 	}
 	if len(report.Deliveries) != 1 || report.Deliveries[0].SubscriberID != "agent-1" {
 		t.Fatalf("report deliveries = %#v, want agent-1 delivery count", report.Deliveries)

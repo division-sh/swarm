@@ -107,6 +107,54 @@ func TestSQLiteRuntimeStoreConvergeNormalRunCompletionMarksCompletedAndIgnoresRu
 	}
 }
 
+func TestSQLiteRunLifecycleEntityCountUsesEntityState(t *testing.T) {
+	ctx := context.Background()
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	now := time.Now().UTC()
+	runID := uuid.NewString()
+	eventEntityA := uuid.NewString()
+	eventEntityB := uuid.NewString()
+	currentEntity := uuid.NewString()
+	if _, err := store.DB.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, event_count, entity_count, started_at)
+		VALUES (?, 'running', 99, 9, ?)
+	`, runID, now); err != nil {
+		t.Fatalf("seed sqlite run: %v", err)
+	}
+	if _, err := store.DB.ExecContext(ctx, `
+		INSERT INTO events (event_id, run_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at)
+		VALUES
+			(?, ?, 'scan.requested', ?, 'entity', '{}', 'test', 'agent', ?),
+			(?, ?, 'scan.replayed', ?, 'entity', '{}', 'test', 'agent', ?)
+	`, uuid.NewString(), runID, eventEntityA, now.Add(time.Second), uuid.NewString(), runID, eventEntityB, now.Add(2*time.Second)); err != nil {
+		t.Fatalf("seed sqlite events: %v", err)
+	}
+	seedSQLiteEntityStateRows(t, store.DB, ctx, runID, currentEntity)
+
+	snap, err := store.LoadRunLifecycleSnapshot(ctx, runID)
+	if err != nil {
+		t.Fatalf("LoadRunLifecycleSnapshot: %v", err)
+	}
+	if snap.EntityCount != 1 {
+		t.Fatalf("snapshot entity_count = %d, want entity_state count 1 despite stale run/event overcount", snap.EntityCount)
+	}
+
+	if err := sqliteSyncRunCounts(ctx, store.DB, runID); err != nil {
+		t.Fatalf("sqliteSyncRunCounts: %v", err)
+	}
+	var eventCount, entityCount int
+	if err := store.DB.QueryRowContext(ctx, `
+		SELECT event_count, entity_count
+		FROM runs
+		WHERE run_id = ?
+	`, runID).Scan(&eventCount, &entityCount); err != nil {
+		t.Fatalf("load synced sqlite counters: %v", err)
+	}
+	if eventCount != 2 || entityCount != 1 {
+		t.Fatalf("synced counters event_count=%d entity_count=%d, want 2/1 from events/entity_state", eventCount, entityCount)
+	}
+}
+
 func TestSQLiteRuntimeStoreConvergeNormalRunCompletionFailsClosedWhileDeliveryActive(t *testing.T) {
 	ctx := context.Background()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)

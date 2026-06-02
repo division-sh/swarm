@@ -241,6 +241,10 @@ func RequireCanonicalRunDebugCapabilities(caps StoreSchemaCapabilities, catalog 
 		return unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
 	case !caps.Events.DeliveryRunID:
 		return fmt.Errorf("run debug read surface requires canonical event_deliveries.run_id")
+	case caps.EntityState != SchemaFlavorCanonical:
+		return unsupportedSchemaCapability("entity_state", caps.EntityState)
+	case !caps.EntityRunID:
+		return fmt.Errorf("run debug read surface requires canonical entity_state.run_id")
 	case caps.Conversations.Turns != SchemaFlavorCanonical:
 		return unsupportedSchemaCapability("agent_turns", caps.Conversations.Turns)
 	case !caps.Conversations.TurnRunID:
@@ -248,6 +252,7 @@ func RequireCanonicalRunDebugCapabilities(caps StoreSchemaCapabilities, catalog 
 	}
 	required := map[string][]string{
 		"runs":             {"run_id", "status", "error_summary", "started_at", "ended_at", "entity_count"},
+		"entity_state":     {"run_id", "entity_id"},
 		"dead_letters":     {"original_event_id", "original_event", "entity_id", "failure_type", "error_message", "handler_node", "created_at"},
 		"entity_mutations": {"mutation_id", "run_id", "entity_id", "field", "old_value", "new_value", "caused_by_event", "writer_type", "writer_id", "handler_step", "created_at"},
 	}
@@ -323,7 +328,7 @@ func (s *PostgresStore) ListRunDebugRuns(ctx context.Context, limit int) ([]RunD
 			summary.last_event_at,
 			r.ended_at,
 			COALESCE(summary.event_count, 0),
-			COALESCE(r.entity_count, 0)
+			COALESCE(entity_summary.entity_count, 0)
 		FROM runs r
 		LEFT JOIN LATERAL (
 			SELECT e.event_id, e.event_name, e.created_at
@@ -337,6 +342,11 @@ func (s *PostgresStore) ListRunDebugRuns(ctx context.Context, limit int) ([]RunD
 			FROM events
 			WHERE run_id = r.run_id
 		) summary ON TRUE
+		LEFT JOIN LATERAL (
+			SELECT COUNT(DISTINCT es.entity_id)::int AS entity_count
+			FROM entity_state es
+			WHERE es.run_id = r.run_id
+		) entity_summary ON TRUE
 		WHERE root.event_id IS NOT NULL
 		ORDER BY COALESCE(summary.last_event_at, root.created_at, r.started_at) DESC, r.run_id DESC
 		LIMIT $1
@@ -402,9 +412,19 @@ func (s *PostgresStore) LoadRunDebugReport(ctx context.Context, runID string, op
 		entityCount  sql.NullInt64
 	)
 	if err := s.DB.QueryRowContext(ctx, `
-		SELECT COALESCE(status, ''), COALESCE(error_summary, ''), started_at, ended_at, COALESCE(entity_count, 0)
-		FROM runs
-		WHERE run_id = $1::uuid
+		SELECT
+			COALESCE(r.status, ''),
+			COALESCE(r.error_summary, ''),
+			r.started_at,
+			r.ended_at,
+			COALESCE(entity_summary.entity_count, 0)
+		FROM runs r
+		LEFT JOIN LATERAL (
+			SELECT COUNT(DISTINCT es.entity_id)::int AS entity_count
+			FROM entity_state es
+			WHERE es.run_id = r.run_id
+		) entity_summary ON TRUE
+		WHERE r.run_id = $1::uuid
 	`, report.RunID).Scan(&runStatus, &errorSummary, &started, &ended, &entityCount); err == nil {
 		report.RunTableStatus = strings.TrimSpace(runStatus)
 		report.ErrorSummary = strings.TrimSpace(errorSummary)

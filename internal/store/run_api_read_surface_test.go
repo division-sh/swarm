@@ -22,6 +22,11 @@ func TestRunAPIReadSurface_LoadAndListRunHeaders(t *testing.T) {
 	newerEvent := uuid.NewString()
 	middleEvent := uuid.NewString()
 	olderEvent := uuid.NewString()
+	newerEntityA := uuid.NewString()
+	newerEntityB := uuid.NewString()
+	middleEntity := uuid.NewString()
+	olderEventOnlyA := uuid.NewString()
+	olderEventOnlyB := uuid.NewString()
 	bundleA := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	bundleB := "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	if _, err := db.ExecContext(ctx, `
@@ -36,15 +41,18 @@ func TestRunAPIReadSurface_LoadAndListRunHeaders(t *testing.T) {
 		t.Fatalf("seed runs: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
+		INSERT INTO events (run_id, event_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at)
 		VALUES
-			($1::uuid, $2::uuid, 'scan.requested', 'global', '{}'::jsonb, 'test', 'agent', $3),
-			($1::uuid, gen_random_uuid(), 'scan.completed', 'global', '{}'::jsonb, 'test', 'agent', $4),
-			($5::uuid, $6::uuid, 'scan.requested', 'global', '{}'::jsonb, 'test', 'agent', $7),
-			($8::uuid, $9::uuid, 'scan.failed', 'global', '{}'::jsonb, 'test', 'agent', $10)
-	`, newer, newerEvent, now.Add(time.Second), now.Add(2*time.Second), middle, middleEvent, now.Add(-time.Hour+time.Second), older, olderEvent, now.Add(-2*time.Hour+time.Second)); err != nil {
+			($1::uuid, $2::uuid, 'scan.requested', NULL, 'global', '{}'::jsonb, 'test', 'agent', $3),
+			($1::uuid, gen_random_uuid(), 'scan.completed', NULL, 'global', '{}'::jsonb, 'test', 'agent', $4),
+			($5::uuid, $6::uuid, 'scan.requested', NULL, 'global', '{}'::jsonb, 'test', 'agent', $7),
+			($8::uuid, $9::uuid, 'scan.failed', $10::uuid, 'global', '{}'::jsonb, 'test', 'agent', $12),
+			($8::uuid, gen_random_uuid(), 'scan.replayed', $11::uuid, 'global', '{}'::jsonb, 'test', 'agent', $13)
+	`, newer, newerEvent, now.Add(time.Second), now.Add(2*time.Second), middle, middleEvent, now.Add(-time.Hour+time.Second), older, olderEvent, olderEventOnlyA, olderEventOnlyB, now.Add(-2*time.Hour+time.Second), now.Add(-2*time.Hour+2*time.Second)); err != nil {
 		t.Fatalf("seed events: %v", err)
 	}
+	seedPostgresEntityStateRows(t, db, ctx, newer, newerEntityA, newerEntityB)
+	seedPostgresEntityStateRows(t, db, ctx, middle, middleEntity)
 
 	header, err := pg.LoadRunHeader(ctx, middle)
 	if err != nil {
@@ -56,6 +64,9 @@ func TestRunAPIReadSurface_LoadAndListRunHeaders(t *testing.T) {
 	if header.EndedAt == nil {
 		t.Fatalf("header.EndedAt = nil, want terminal timestamp")
 	}
+	if header.EntityCount != 1 {
+		t.Fatalf("header.EntityCount = %d, want entity_state count 1 despite stale run counter", header.EntityCount)
+	}
 
 	firstPage, cursor, err := pg.ListRunHeaders(ctx, RunHeaderListOptions{Status: "running", Limit: 1})
 	if err != nil {
@@ -63,6 +74,9 @@ func TestRunAPIReadSurface_LoadAndListRunHeaders(t *testing.T) {
 	}
 	if len(firstPage) != 1 || firstPage[0].RunID != newer {
 		t.Fatalf("first page = %#v, want newer running run", firstPage)
+	}
+	if firstPage[0].EntityCount != 2 {
+		t.Fatalf("first page entity_count = %d, want entity_state count 2 despite event undercount", firstPage[0].EntityCount)
 	}
 	if cursor != "" {
 		t.Fatalf("running-only cursor = %q, want empty", cursor)
@@ -84,6 +98,9 @@ func TestRunAPIReadSurface_LoadAndListRunHeaders(t *testing.T) {
 	}
 	if len(allSecondPage) != 1 || allSecondPage[0].RunID != older || next != "" {
 		t.Fatalf("all second page = %#v cursor=%q, want older only and no next cursor", allSecondPage, next)
+	}
+	if allSecondPage[0].EntityCount != 0 {
+		t.Fatalf("older entity_count = %d, want entity_state count 0 despite event overcount", allSecondPage[0].EntityCount)
 	}
 
 	since := now.Add(-90 * time.Minute)

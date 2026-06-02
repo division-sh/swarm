@@ -22,6 +22,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -171,6 +172,7 @@ func TestPostgresStore_MarkRunTerminal_UsesCanonicalCountersAndRejectsActiveDeli
 	`, eventID, runID, entityID); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
+	seedPostgresEntityStateRows(t, db, ctx, runID, entityID)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
 			run_id, event_id, subscriber_type, subscriber_id, status, created_at
@@ -227,6 +229,56 @@ func TestPostgresStore_MarkRunTerminal_UsesCanonicalCountersAndRejectsActiveDeli
 	}
 }
 
+func TestPostgresRunLifecycleEntityCountUsesEntityState(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	runID := uuid.NewString()
+	eventEntityA := uuid.NewString()
+	eventEntityB := uuid.NewString()
+	currentEntity := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, event_count, entity_count, started_at)
+		VALUES ($1::uuid, 'running', 99, 9, now())
+	`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			event_id, run_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at
+		) VALUES
+			(gen_random_uuid(), $1::uuid, 'scan.requested', $2::uuid, 'entity', '{}'::jsonb, 'test', 'agent', now()),
+			(gen_random_uuid(), $1::uuid, 'scan.replayed', $3::uuid, 'entity', '{}'::jsonb, 'test', 'agent', now())
+	`, runID, eventEntityA, eventEntityB); err != nil {
+		t.Fatalf("seed events: %v", err)
+	}
+	seedPostgresEntityStateRows(t, db, ctx, runID, currentEntity)
+
+	snap, err := pg.LoadRunLifecycleSnapshot(ctx, runID)
+	if err != nil {
+		t.Fatalf("LoadRunLifecycleSnapshot: %v", err)
+	}
+	if snap.EntityCount != 1 {
+		t.Fatalf("snapshot entity_count = %d, want entity_state count 1 despite stale run/event overcount", snap.EntityCount)
+	}
+
+	if err := storerunlifecycle.SyncCounts(ctx, db, runID); err != nil {
+		t.Fatalf("SyncCounts: %v", err)
+	}
+	var eventCount, entityCount int
+	if err := db.QueryRowContext(ctx, `
+		SELECT event_count, entity_count
+		FROM runs
+		WHERE run_id = $1::uuid
+	`, runID).Scan(&eventCount, &entityCount); err != nil {
+		t.Fatalf("load synced counters: %v", err)
+	}
+	if eventCount != 2 || entityCount != 1 {
+		t.Fatalf("synced counters event_count=%d entity_count=%d, want 2/1 from events/entity_state", eventCount, entityCount)
+	}
+}
+
 func TestPostgresStore_AppendEvent_ReopensPrematureCompletedRunAndSyncsCounters(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
@@ -240,6 +292,7 @@ func TestPostgresStore_AppendEvent_ReopensPrematureCompletedRunAndSyncsCounters(
 	`, runID); err != nil {
 		t.Fatalf("seed completed run: %v", err)
 	}
+	seedPostgresEntityStateRows(t, db, ctx, runID, entityID)
 
 	evt := events.Event{
 		ID:          uuid.NewString(),
@@ -304,6 +357,7 @@ func TestPostgresStore_AppendEvent_DuplicateDoesNotReopenCompletedRun(t *testing
 	`, eventID, runID, entityID); err != nil {
 		t.Fatalf("seed duplicate event: %v", err)
 	}
+	seedPostgresEntityStateRows(t, db, ctx, runID, entityID)
 
 	evt := events.Event{
 		ID:          eventID,
