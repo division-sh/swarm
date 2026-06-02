@@ -340,12 +340,13 @@ rows:
 
   - id: sqlite_exact_once_handler_effects
     category: sqlite
-    concept: exact-once SQLite handler side-effect cardinality remains a separate live split/risk.
+    concept: exact-once SQLite handler side-effect cardinality is a separate class closed outside issue 1025.
     classification: explicit_split
     owner_refs:
       - {kind: issue, issue: 1253}
     proof_refs:
       - {kind: issue, issue: 1253}
+      - {kind: pr, pr: 1269, ref: dce2b4b1}
 
   - id: preservation_cleanup_watchlist
     category: lifecycle
