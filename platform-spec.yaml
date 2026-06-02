@@ -6310,9 +6310,10 @@ multi_bundle_persistence:
         inputs under every discovered flow data directory to data_blob, including root flows/<flow>/data/...,
         package flows such as packages/<package>/flows/<flow>/data/..., and nested flow packages such as
         flows/<parent>/flows/<child>/data/.... Empty raw-data files are represented as empty base64 strings. The
-        `--contracts` value is an explicit operator input: it MUST name the selected contracts directory itself and
-        MUST NOT fall back to a parent bundle when the supplied path is a typo/non-root child. Archive packaging
-        remains split until archive format and extraction safety rules are promoted.
+        `--contracts` value is an explicit operator input: it MUST name either the selected contracts directory itself
+        or that directory's `package.yaml` file shorthand, and MUST NOT fall back to a parent bundle when the supplied
+        path is a typo/non-root child. Archive packaging remains split until archive format and extraction safety rules
+        are promoted.
     modified_commands_planned:
       - swarm serve --bundle-hash <bundle_hash> [--bundle-hash <bundle_hash> ...] (implemented boot-pinned Postgres DB-loaded process mode)
       - swarm serve --dev
