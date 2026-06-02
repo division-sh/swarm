@@ -140,7 +140,8 @@ Generated subset of `swarm --help`. Each command targets the running orchestrato
 | `swarm events {list,follow,view}` | Inspect the event log. |
 | `swarm event {replay,view}` | Replay or view a single historical event. |
 | `swarm event publish <event-name>` | Publish one event into the runtime (`--payload-json` or `--payload-file`). |
-| `swarm entities {list,view,aggregate}` | Inspect entity state. |
+| `swarm entities list` | List entities for a run. |
+| `swarm entity {view,aggregate}` | View one entity, or aggregate counts grouped by a field. |
 | `swarm agents` / `swarm agent {view,restart,directive,replay,replay-backlog}` | Inspect or control agents. |
 | `swarm conversations` / `swarm conversation {view,turn}` | Inspect agent sessions and turns. |
 | `swarm incidents` | List runtime incidents. |
