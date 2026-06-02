@@ -88,6 +88,60 @@ func TestOperatorMailboxWriteSupportedSurfacePublishesAndReadsAcrossBackends(t *
 	}
 }
 
+func TestOperatorRuleMailboxWriteSupportedSurfaceIsBranchScopedAcrossBackends(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name  string
+		setup func(*testing.T, context.Context, semanticview.Source, runtimecorrelation.BundleSourceFact) (*Handler, *sql.DB)
+	}{
+		{
+			name: "sqlite_default_no_selector",
+			setup: func(t *testing.T, ctx context.Context, source semanticview.Source, fact runtimecorrelation.BundleSourceFact) (*Handler, *sql.DB) {
+				t.Helper()
+				sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+				handler := newMailboxWriteSupportedSurfaceHandler(t, ctx, sqliteStore, sqliteStore.DB, source, fact, sqliteStore)
+				return handler, sqliteStore.DB
+			},
+		},
+		{
+			name: "postgres_explicit_opt_in",
+			setup: func(t *testing.T, _ context.Context, source semanticview.Source, fact runtimecorrelation.BundleSourceFact) (*Handler, *sql.DB) {
+				t.Helper()
+				_, db, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				pg := &store.PostgresStore{DB: db}
+				handler := newMailboxWriteSupportedSurfaceHandler(t, context.Background(), pg, db, source, fact, pg)
+				return handler, db
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bundle := conditionalRuleMailboxWriteSupportedSurfaceBundle(t)
+			source := semanticview.Wrap(bundle)
+			fact := bundleSourceFactForTestBundle(t, bundle)
+			handler, db := tc.setup(t, ctx, source, fact)
+
+			auto := rpcCall(t, handler, eventPublishBodyWithoutBundle("", "thing.created", `{"amount":50,"who":"alice"}`, "", "idem-rule-mailbox-write-auto-"+tc.name))
+			if auto.Error != nil {
+				t.Fatalf("auto event.publish error = %#v", auto.Error)
+			}
+			autoRunID := stringValue(t, asMap(t, auto.Result)["run_id"], "run_id")
+			waitForConditionalRuleEntityState(t, db, autoRunID, tc.name, "approved", 50)
+			assertMailboxListCount(t, handler, autoRunID, 0)
+
+			human := rpcCall(t, handler, eventPublishBodyWithoutBundle("", "thing.created", `{"amount":250,"who":"bob"}`, "", "idem-rule-mailbox-write-human-"+tc.name))
+			if human.Error != nil {
+				t.Fatalf("human event.publish error = %#v", human.Error)
+			}
+			humanResult := asMap(t, human.Result)
+			humanEventID := stringValue(t, humanResult["event_id"], "event_id")
+			humanRunID := stringValue(t, humanResult["run_id"], "run_id")
+			waitForConditionalRuleEntityState(t, db, humanRunID, tc.name, "awaiting_human", 250)
+			waitForConditionalRuleMailboxWrite(t, handler, humanRunID, humanEventID)
+		})
+	}
+}
+
 func TestOperatorMailboxWriteSupportedSurfaceMissingMaterializerIsLoud(t *testing.T) {
 	ctx := context.Background()
 	bundle := mailboxWriteSupportedSurfaceBundle(t)
@@ -221,6 +275,64 @@ func waitForMailboxWriteSupportedSurface(t *testing.T, handler *Handler, db *sql
 	t.Fatalf("mailbox_write supported surface did not converge for %s: %v", backend, lastErr)
 }
 
+func waitForConditionalRuleMailboxWrite(t *testing.T, handler *Handler, runID, eventID string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		listed := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"rule-mailbox-list","method":"mailbox.list","params":{"status":"pending","run_id":%q,"limit":10}}`, runID))
+		if listed.Error != nil {
+			t.Fatalf("mailbox.list error = %#v", listed.Error)
+		}
+		items := asSlice(t, asMap(t, listed.Result)["items"])
+		if len(items) == 1 {
+			item := asMap(t, items[0])
+			if err := assertConditionalRuleMailboxItem(t, handler, item, runID, eventID); err != nil {
+				lastErr = err
+				time.Sleep(25 * time.Millisecond)
+				continue
+			}
+			return
+		}
+		lastErr = fmt.Errorf("mailbox.list returned %d items", len(items))
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("rule mailbox_write supported surface did not converge: %v", lastErr)
+}
+
+func assertConditionalRuleMailboxItem(t *testing.T, handler *Handler, item map[string]any, runID, eventID string) error {
+	t.Helper()
+	mailboxID := stringValue(t, item["mailbox_id"], "mailbox_id")
+	if item["type"] != "approval" || item["status"] != "pending" || item["priority"] != "normal" || item["source_event_id"] != eventID || item["source_entity_id"] != runID {
+		return fmt.Errorf("mailbox.list item = %#v, want approval pending normal for source event/entity", item)
+	}
+	payload := asMap(t, item["payload"])
+	if payload["who"] != "bob" || payload["amount"] != float64(250) || payload["review_kind"] != "conditional" {
+		return fmt.Errorf("mailbox.list payload = %#v, want selected rule payload", payload)
+	}
+	detail := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"rule-mailbox-get","method":"mailbox.get","params":{"mailbox_id":%q}}`, mailboxID))
+	if detail.Error != nil {
+		return fmt.Errorf("mailbox.get error = %#v", detail.Error)
+	}
+	detailPayload := asMap(t, asMap(t, detail.Result)["payload"])
+	if detailPayload["who"] != "bob" || detailPayload["amount"] != float64(250) || detailPayload["review_kind"] != "conditional" {
+		return fmt.Errorf("mailbox.get payload = %#v, want selected rule payload", detailPayload)
+	}
+	return nil
+}
+
+func assertMailboxListCount(t *testing.T, handler *Handler, runID string, want int) {
+	t.Helper()
+	listed := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"mailbox-list-count","method":"mailbox.list","params":{"status":"pending","run_id":%q,"limit":10}}`, runID))
+	if listed.Error != nil {
+		t.Fatalf("mailbox.list error = %#v", listed.Error)
+	}
+	items := asSlice(t, asMap(t, listed.Result)["items"])
+	if len(items) != want {
+		t.Fatalf("mailbox.list returned %d items for run %s, want %d: %#v", len(items), runID, want, items)
+	}
+}
+
 func assertMailboxWriteSupportedSurfaceItem(t *testing.T, handler *Handler, item map[string]any, runID, eventID string) error {
 	t.Helper()
 	mailboxID := stringValue(t, item["mailbox_id"], "mailbox_id")
@@ -244,33 +356,60 @@ func assertMailboxWriteSupportedSurfaceItem(t *testing.T, handler *Handler, item
 
 func assertMailboxWriteEntityState(t *testing.T, db *sql.DB, runID, backend string) {
 	t.Helper()
+	state, fields, err := loadMailboxWriteEntityState(t, db, runID, backend)
+	if err != nil {
+		t.Fatalf("load %s entity_state: %v", backend, err)
+	}
+	if state != "done" {
+		t.Fatalf("%s entity state = %q, want done", backend, state)
+	}
+	if fields["who"] != "alice" || fields["amount"] != float64(250) {
+		t.Fatalf("%s entity fields = %#v, want accumulated payload", backend, fields)
+	}
+}
+
+func waitForConditionalRuleEntityState(t *testing.T, db *sql.DB, runID, backend, wantState string, wantAmount int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		state, fields, err := loadMailboxWriteEntityState(t, db, runID, backend)
+		if err == nil {
+			if state == wantState && fields["amount"] == float64(wantAmount) {
+				return
+			}
+			lastErr = fmt.Errorf("state=%q fields=%#v", state, fields)
+		} else {
+			lastErr = err
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("%s entity state did not converge to %s: %v", backend, wantState, lastErr)
+}
+
+func loadMailboxWriteEntityState(t *testing.T, db *sql.DB, runID, backend string) (string, map[string]any, error) {
+	t.Helper()
 	var state string
 	var fieldsRaw []byte
 	switch backend {
 	case "sqlite_default_no_selector":
 		if err := db.QueryRow(`
-			SELECT current_state, fields
-			FROM entity_state
-			WHERE run_id = ?
-		`, runID).Scan(&state, &fieldsRaw); err != nil {
-			t.Fatalf("load sqlite entity_state: %v", err)
+				SELECT current_state, fields
+				FROM entity_state
+				WHERE run_id = ?
+			`, runID).Scan(&state, &fieldsRaw); err != nil {
+			return "", nil, err
 		}
 	default:
 		if err := db.QueryRow(`
-			SELECT current_state, fields
-			FROM entity_state
-			WHERE run_id = $1::uuid
-		`, runID).Scan(&state, &fieldsRaw); err != nil {
-			t.Fatalf("load postgres entity_state: %v", err)
+				SELECT current_state, fields
+				FROM entity_state
+				WHERE run_id = $1::uuid
+			`, runID).Scan(&state, &fieldsRaw); err != nil {
+			return "", nil, err
 		}
 	}
-	if state != "done" {
-		t.Fatalf("%s entity state = %q, want done", backend, state)
-	}
-	fields := decodeJSONMap(t, json.RawMessage(fieldsRaw))
-	if fields["who"] != "alice" || fields["amount"] != float64(250) {
-		t.Fatalf("%s entity fields = %#v, want accumulated payload", backend, fields)
-	}
+	return state, decodeJSONMap(t, json.RawMessage(fieldsRaw)), nil
 }
 
 func waitForSQLitePipelineReceipt(t *testing.T, db *sql.DB) (string, string, string) {
@@ -373,6 +512,99 @@ func mailboxWriteSupportedSurfaceBundle(t *testing.T) *runtimecontracts.Workflow
 			InitialState:   "new",
 			TerminalStates: []string{"done"},
 			States:         []string{"new", "done"},
+			Pins: runtimecontracts.FlowPins{
+				Inputs: runtimecontracts.FlowInputPins{Events: []string{"thing.created"}},
+			},
+		},
+	}
+}
+
+func conditionalRuleMailboxWriteSupportedSurfaceBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	handler := runtimecontracts.SystemNodeEventHandler{
+		CreateEntity: true,
+		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+			Writes: []runtimecontracts.WorkflowDataWrite{
+				{TargetField: "amount", Value: runtimecontracts.RefExpression("payload.amount")},
+				{TargetField: "who", Value: runtimecontracts.RefExpression("payload.who")},
+			},
+		},
+		Rules: []runtimecontracts.HandlerRuleEntry{
+			{
+				ID:         "auto_approve",
+				Condition:  "payload.amount < 100",
+				AdvancesTo: "approved",
+			},
+			{
+				ID:         "needs_human",
+				Condition:  "payload.amount >= 100",
+				AdvancesTo: "awaiting_human",
+				Action: runtimecontracts.ActionSpec{
+					ID: "mailbox_write",
+					Mailbox: &runtimecontracts.MailboxWriteSpec{
+						ItemType: runtimecontracts.LiteralExpression("approval"),
+						Summary:  runtimecontracts.LiteralExpression("Review refund"),
+						EntityID: runtimecontracts.RefExpression("event.entity_id"),
+						Payload: map[string]runtimecontracts.ExpressionValue{
+							"review_kind": runtimecontracts.LiteralExpression("conditional"),
+							"who":         runtimecontracts.RefExpression("payload.who"),
+							"amount":      runtimecontracts.RefExpression("payload.amount"),
+						},
+					},
+				},
+			},
+		},
+	}
+	return &runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Name:         "rule-mailbox-write-supported-surface",
+			Version:      "1.0.0",
+			InitialStage: "new",
+			Stages: []runtimecontracts.WorkflowStageContract{
+				{ID: "new"},
+				{ID: "approved"},
+				{ID: "awaiting_human"},
+			},
+			TerminalStages: []string{"approved", "awaiting_human"},
+			Transitions: []runtimecontracts.WorkflowTransitionContract{
+				{
+					ID:      "auto-approve",
+					From:    []string{"new"},
+					To:      "approved",
+					Trigger: "thing.created",
+					Node:    "reviewer",
+				},
+				{
+					ID:      "needs-human",
+					From:    []string{"new"},
+					To:      "awaiting_human",
+					Trigger: "thing.created",
+					Node:    "reviewer",
+					Actions: []string{"mailbox_write"},
+				},
+			},
+			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
+				"reviewer": {"thing.created": handler},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"thing.created": {},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"reviewer": {
+				ID:            "reviewer",
+				ExecutionType: "system_node",
+				SubscribesTo:  []string{"thing.created"},
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"thing.created": handler,
+				},
+			},
+		},
+		RootSchema: &runtimecontracts.FlowSchemaDocument{
+			Name:           "rule-mailbox-write-supported-surface",
+			InitialState:   "new",
+			TerminalStates: []string{"approved", "awaiting_human"},
+			States:         []string{"new", "approved", "awaiting_human"},
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{Events: []string{"thing.created"}},
 			},

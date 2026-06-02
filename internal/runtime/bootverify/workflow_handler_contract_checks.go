@@ -61,106 +61,80 @@ func (c *checkerContext) handlerFieldCompliance() []Finding {
 		nodeID = strings.TrimSpace(nodeID)
 		for eventType, handler := range node.EventHandlers {
 			eventType = strings.TrimSpace(eventType)
-			if actionID := strings.TrimSpace(handler.Action.ID); actionID != "" {
-				if normalizeWorkflowBuiltinActionID(actionID) == "create_flow_instance" {
-					templateID := strings.TrimSpace(handler.Action.Template)
-					if templateID == "" {
-						c.handlerFindings = append(c.handlerFindings, Finding{
-							CheckID:  "handler_field_compliance",
-							Severity: "error",
-							Message:  fmt.Sprintf("node %s handler %s create_flow_instance is missing template", nodeID, eventType),
-							Location: nodeID,
-						})
-					} else if !flowSchemaIsTemplate(c.source, templateID) {
-						c.handlerFindings = append(c.handlerFindings, Finding{
-							CheckID:  "handler_field_compliance",
-							Severity: "error",
-							Message:  fmt.Sprintf("node %s handler %s create_flow_instance template %s is not mode: template", nodeID, eventType, templateID),
-							Location: nodeID,
-						})
-					}
-					if strings.TrimSpace(handler.Action.InstanceIDFrom) == "" {
-						c.handlerFindings = append(c.handlerFindings, Finding{
-							CheckID:  "handler_field_compliance",
-							Severity: "error",
-							Message:  fmt.Sprintf("node %s handler %s create_flow_instance is missing instance_id_from", nodeID, eventType),
-							Location: nodeID,
-						})
-					}
-					if handler.Action.ConfigFrom == nil || len(handler.Action.ConfigFrom.ConfigEntries()) == 0 {
-						c.handlerFindings = append(c.handlerFindings, Finding{
-							CheckID:  "handler_field_compliance",
-							Severity: "error",
-							Message:  fmt.Sprintf("node %s handler %s create_flow_instance is missing config_from", nodeID, eventType),
-							Location: nodeID,
-						})
-					}
+			if runtimecontracts.HandlerHasAmbiguousTopLevelAction(handler) {
+				c.handlerFindings = append(c.handlerFindings, handlerActionFinding(nodeID, eventType, "handler-level action is invalid when rules are present; move action ownership to the active rule"))
+			}
+			c.handlerFindings = append(c.handlerFindings, c.validateWorkflowActionSpec(nodeID, eventType, handler.EvidenceTarget, handler.Action)...)
+			for idx, rule := range handler.Rules {
+				ruleLabel := strings.TrimSpace(rule.ID)
+				if ruleLabel == "" {
+					ruleLabel = fmt.Sprintf("%d", idx)
 				}
-				if normalizeWorkflowBuiltinActionID(actionID) == "record_evidence" && strings.TrimSpace(handler.EvidenceTarget) == "" {
-					c.handlerFindings = append(c.handlerFindings, Finding{
-						CheckID:  "handler_field_compliance",
-						Severity: "error",
-						Message:  fmt.Sprintf("node %s handler %s record_evidence is missing evidence_target", nodeID, eventType),
-						Location: nodeID,
-					})
-				}
-				if normalizeWorkflowBuiltinActionID(actionID) == "mailbox_write" {
-					if handler.Action.Mailbox == nil {
-						c.handlerFindings = append(c.handlerFindings, Finding{
-							CheckID:  "handler_field_compliance",
-							Severity: "error",
-							Message:  fmt.Sprintf("node %s handler %s mailbox_write is missing mailbox", nodeID, eventType),
-							Location: nodeID,
-						})
-					} else {
-						if handler.Action.Mailbox.ItemType.IsZero() {
-							c.handlerFindings = append(c.handlerFindings, Finding{
-								CheckID:  "handler_field_compliance",
-								Severity: "error",
-								Message:  fmt.Sprintf("node %s handler %s mailbox_write is missing mailbox.item_type", nodeID, eventType),
-								Location: nodeID,
-							})
-						}
-						if handler.Action.Mailbox.Summary.IsZero() {
-							c.handlerFindings = append(c.handlerFindings, Finding{
-								CheckID:  "handler_field_compliance",
-								Severity: "error",
-								Message:  fmt.Sprintf("node %s handler %s mailbox_write is missing mailbox.summary", nodeID, eventType),
-								Location: nodeID,
-							})
-						}
-					}
-				} else if handler.Action.Mailbox != nil {
-					c.handlerFindings = append(c.handlerFindings, Finding{
-						CheckID:  "handler_field_compliance",
-						Severity: "error",
-						Message:  fmt.Sprintf("node %s handler %s mailbox declaration requires action mailbox_write", nodeID, eventType),
-						Location: nodeID,
-					})
-				}
-				if normalizeWorkflowBuiltinActionID(actionID) == "artifact_repo_commit" {
-					c.handlerFindings = append(c.handlerFindings, validateArtifactRepoActionSpec(c.source, nodeFlowID(c.source, nodeID), nodeID, eventType, handler.Action)...)
-				} else if handler.Action.ArtifactRepo != nil {
-					c.handlerFindings = append(c.handlerFindings, Finding{
-						CheckID:  "handler_field_compliance",
-						Severity: "error",
-						Message:  fmt.Sprintf("node %s handler %s artifact_repo declaration requires action artifact_repo_commit", nodeID, eventType),
-						Location: nodeID,
-					})
-				}
-				if !handlerActionExecutable(c.source, actionID) {
-					c.handlerFindings = append(c.handlerFindings, Finding{
-						CheckID:  "handler_field_compliance",
-						Severity: "error",
-						Message:  fmt.Sprintf("node %s handler %s action %s is not executable", nodeID, eventType, actionID),
-						Location: nodeID,
-					})
-				}
+				c.handlerFindings = append(c.handlerFindings, c.validateWorkflowActionSpec(nodeID, fmt.Sprintf("%s rule %s", eventType, ruleLabel), handler.EvidenceTarget, rule.Action)...)
 			}
 		}
 	}
 	c.handlerFindings = append(c.handlerFindings, runtimeHandledEventsMissingExecutors(c.source)...)
 	return c.handlerFindings
+}
+
+func (c *checkerContext) validateWorkflowActionSpec(nodeID, eventContext, evidenceTarget string, action runtimecontracts.ActionSpec) []Finding {
+	actionID := strings.TrimSpace(action.ID)
+	if actionID == "" {
+		return nil
+	}
+	findings := []Finding{}
+	switch normalizeWorkflowBuiltinActionID(actionID) {
+	case "create_flow_instance":
+		templateID := strings.TrimSpace(action.Template)
+		if templateID == "" {
+			findings = append(findings, handlerActionFinding(nodeID, eventContext, "create_flow_instance is missing template"))
+		} else if !flowSchemaIsTemplate(c.source, templateID) {
+			findings = append(findings, handlerActionFinding(nodeID, eventContext, fmt.Sprintf("create_flow_instance template %s is not mode: template", templateID)))
+		}
+		if strings.TrimSpace(action.InstanceIDFrom) == "" {
+			findings = append(findings, handlerActionFinding(nodeID, eventContext, "create_flow_instance is missing instance_id_from"))
+		}
+		if action.ConfigFrom == nil || len(action.ConfigFrom.ConfigEntries()) == 0 {
+			findings = append(findings, handlerActionFinding(nodeID, eventContext, "create_flow_instance is missing config_from"))
+		}
+	case "record_evidence":
+		if strings.TrimSpace(evidenceTarget) == "" {
+			findings = append(findings, handlerActionFinding(nodeID, eventContext, "record_evidence is missing evidence_target"))
+		}
+	case "mailbox_write":
+		if action.Mailbox == nil {
+			findings = append(findings, handlerActionFinding(nodeID, eventContext, "mailbox_write is missing mailbox"))
+		} else {
+			if action.Mailbox.ItemType.IsZero() {
+				findings = append(findings, handlerActionFinding(nodeID, eventContext, "mailbox_write is missing mailbox.item_type"))
+			}
+			if action.Mailbox.Summary.IsZero() {
+				findings = append(findings, handlerActionFinding(nodeID, eventContext, "mailbox_write is missing mailbox.summary"))
+			}
+		}
+	}
+	if normalizeWorkflowBuiltinActionID(actionID) != "mailbox_write" && action.Mailbox != nil {
+		findings = append(findings, handlerActionFinding(nodeID, eventContext, "mailbox declaration requires action mailbox_write"))
+	}
+	if normalizeWorkflowBuiltinActionID(actionID) == "artifact_repo_commit" {
+		findings = append(findings, validateArtifactRepoActionSpec(c.source, nodeFlowID(c.source, nodeID), nodeID, eventContext, action)...)
+	} else if action.ArtifactRepo != nil {
+		findings = append(findings, handlerActionFinding(nodeID, eventContext, "artifact_repo declaration requires action artifact_repo_commit"))
+	}
+	if !handlerActionExecutable(c.source, actionID) {
+		findings = append(findings, handlerActionFinding(nodeID, eventContext, fmt.Sprintf("action %s is not executable", actionID)))
+	}
+	return findings
+}
+
+func handlerActionFinding(nodeID, eventContext, message string) Finding {
+	return Finding{
+		CheckID:  "handler_field_compliance",
+		Severity: "error",
+		Message:  fmt.Sprintf("node %s handler %s %s", nodeID, eventContext, message),
+		Location: nodeID,
+	}
 }
 
 func supportedWorkflowRuntimeExecutorIDs(source semanticview.Source) map[string]struct{} {

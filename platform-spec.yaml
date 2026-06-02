@@ -1214,8 +1214,9 @@ handler_specification:
     action:
       field: action
       type: string or object
-      purpose: 'Names a platform-provided action. Valid values: create_flow_instance, record_evidence, mailbox_write, artifact_repo_commit. The
-        platform executes the named action. NOT for platform actions — all behavior must be declarative.'
+      purpose: 'Names a platform-provided action on a handler without rules or on a handler.rules[*] branch. Valid values:
+        create_flow_instance, record_evidence, mailbox_write, artifact_repo_commit. The platform executes the named action.
+        NOT for product actions — all behavior must be declarative.'
       emit_interaction: If the resolved runtime action instruction emits a follow-up event, that event uses the action-originated
         emitted-event payload rules under observation_model.emitted_events.payload_rules. The action field itself does not
         declare authored payload fields; runtime-owned action instructions construct and validate any follow-up payload.
@@ -1411,17 +1412,19 @@ handler_specification:
     per source order. A handler may list on_complete before accumulate in YAML — the engine still runs accumulate first. Authors
     SHOULD order fields to match the dependency graph for readability, but the engine does not require it.
   rules_handler_interaction:
-    description: When a handler has rules, the active rule owns conditional emit selection for that execution.
+    description: When a handler has rules, the active rule owns conditional emit and action selection for that execution.
     execution_order: 1. rules execute first — the matching rule determines the active condition-specific side effects (rule-level
-      emit, data_accumulation, advances_to). 2. Handler-level data_accumulation executes AFTER rules when present and supplements
-      rule-level writes in the same atomic transaction. 3. Handler-level emit does NOT supplement rules. If rules are present,
-      handler-level emit is invalid and boot fails as ambiguous.
+      emit, action, data_accumulation, advances_to). 2. Handler-level data_accumulation executes AFTER rules when present and
+      supplements rule-level writes in the same atomic transaction. 3. Handler-level emit and handler-level action do NOT supplement
+      rules. If rules are present, handler-level emit or handler-level action is invalid and boot fails as ambiguous. 4. The
+      selected rule action executes at the normal action step after active state/gate/data updates and selected emit queuing, and
+      remains in the same system-node handler transaction as those side effects.
     example: 'order.received may have handler-level data_accumulation (3 fields) + rules with per-rule data_accumulation (category_data).
       Result: all 3 handler-level fields are written, PLUS the matching rule writes category_data. Event emission, however,
-      must be owned by the matching rule.'
+      and action must be owned by the matching rule.'
     precedence: Handler-level advances_to, sets_gate, and data_accumulation are defaults. If the matched rule specifies any
-      of these, the rule value OVERRIDES the handler-level value for that field only. emit never falls through from a handler
-      into a rules-based multi-emit handler.
+      of these, the rule value OVERRIDES the handler-level value for that field only. emit and action never fall through from
+      a handler into a rules-based multi-emit/action handler.
 engine:
   description: Specification for the platform engine — how it loads, validates, and executes flows.
   flow_tree_walker:
@@ -3503,10 +3506,10 @@ compliance:
     - 'If handler has guard: evaluate condition. If false, reject or kill.'
     - 'If handler has accumulate: track arrival, check completion, proceed only on complete.'
     - 'If handler has on_complete: evaluate conditions, execute matching branch.'
-    - 'If handler has rules: match payload field, select the matching rule-local emit if present.'
+    - 'If handler has rules: match payload field, select the matching rule-local emit and action if present.'
     - 'Apply advances_to, sets_gate, and data_accumulation from the active handler/branch/rule outcome.'
     - 'If the active emit site has emit: publish the selected follow-up event.'
-    - 'If handler has action that is a platform action: call registered platform action.'
+    - 'If the active handler or selected rule has action that is a platform action: call registered platform action.'
     - 'If the resolved action runtime instruction emits an event: publish it using the action-originated payload rules and fail-closed schema validation before commit.'
   product_boundary:
     description: Rules for product-specific code isolation.
@@ -3657,15 +3660,17 @@ tool_model:
       search_entities: Query entities by stage, field values, or metadata. Legacy trusted runtime-internal compatibility
         surface; not provider-visible or callable for normal agents.
     handler_actions:
-      description: These are handler ACTION field values, not agent-callable tools. They are invoked via the action field in
-        node handlers. The platform ships the handler code. They are listed separately from the tool catalog because agents
-        cannot call them directly.
+      description: These are handler/action-branch ACTION field values, not agent-callable tools. They are invoked via the
+        action field in node handlers without rules or in selected handler.rules branches. The platform ships the handler code.
+        They are listed separately from the tool catalog because agents cannot call them directly.
       actions:
         create_flow_instance: Create a new dynamic flow instance from a template.
         record_evidence: Append payload to entity accumulator. Requires evidence_target field on the handler.
-        mailbox_write: Deterministically materialize authored mailbox request events into public.mailbox. Handler action only.
+        mailbox_write: Deterministically materialize authored mailbox request events into public.mailbox. Handler-without-rules
+          or selected handler.rules branch action only.
         artifact_repo_commit: Deterministically commit allowlisted service-owned artifact files to a local git repository,
-          persist opaque artifact URL/ref metadata, and publish declared result events. Handler action only.
+          persist opaque artifact URL/ref metadata, and publish declared result events. Handler-without-rules or selected
+          handler.rules branch action only.
     planned_tools:
       description: Tools planned for future platform versions. Not yet implemented. The permission may exist (as an authorization
         gate) before the tool does.

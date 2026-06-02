@@ -2837,6 +2837,106 @@ func TestExecutor_ActionRegistryEmitsAndRunsActionRunner(t *testing.T) {
 	}
 }
 
+func TestExecutor_RuleActionRunsOnlyForSelectedRule(t *testing.T) {
+	runner := &stubActionRunner{}
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     stubSource(),
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+		ActionRegistry: stubActionRegistry{entries: map[identity.ActionKey]runtimeregistry.ActionInstruction{
+			identity.NormalizeActionKey("auto_action"): {
+				Key: identity.NormalizeActionKey("auto_action"),
+			},
+			identity.NormalizeActionKey("human_action"): {
+				Key: identity.NormalizeActionKey("human_action"),
+			},
+		}},
+		ActionRunner: runner,
+	}, stubEvaluator{bools: map[string]bool{
+		"payload.amount < 100":  false,
+		"payload.amount >= 100": true,
+	}})
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "entity-1",
+		NodeID:   "node-1",
+		FlowID:   "flow-1",
+		Event:    events.Event{ID: "evt-1", Type: "refund.requested", Payload: json.RawMessage(`{"amount":250}`)},
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			Rules: []runtimecontracts.HandlerRuleEntry{
+				{
+					ID:        "auto",
+					Condition: "payload.amount < 100",
+					Action:    runtimecontracts.ActionSpec{ID: "auto_action"},
+				},
+				{
+					ID:        "needs-human",
+					Condition: "payload.amount >= 100",
+					Action:    runtimecontracts.ActionSpec{ID: "human_action"},
+				},
+			},
+		},
+		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if got := result.RuleID; got != "needs-human" {
+		t.Fatalf("RuleID = %q, want needs-human", got)
+	}
+	if got := runner.called; !reflect.DeepEqual(got, []string{"human_action"}) {
+		t.Fatalf("action runner calls = %#v, want only selected rule action", got)
+	}
+	if got := result.ActionsExecuted; !reflect.DeepEqual(got, []string{"human_action"}) {
+		t.Fatalf("ActionsExecuted = %#v, want only selected rule action", got)
+	}
+}
+
+func TestExecutor_RejectsAmbiguousHandlerTopLevelActionWithRules(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     stubSource(),
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+		ActionRegistry: stubActionRegistry{entries: map[identity.ActionKey]runtimeregistry.ActionInstruction{
+			identity.NormalizeActionKey("handler_action"): {
+				Key: identity.NormalizeActionKey("handler_action"),
+			},
+		}},
+		ActionRunner: &stubActionRunner{},
+	}, stubEvaluator{bools: map[string]bool{"payload.amount >= 100": true}})
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "entity-1",
+		NodeID:   "node-1",
+		FlowID:   "flow-1",
+		Event:    events.Event{ID: "evt-1", Type: "refund.requested", Payload: json.RawMessage(`{"amount":250}`)},
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			Action: runtimecontracts.ActionSpec{ID: "handler_action"},
+			Rules: []runtimecontracts.HandlerRuleEntry{{
+				ID:        "needs-human",
+				Condition: "payload.amount >= 100",
+			}},
+		},
+		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+	})
+	if err == nil {
+		t.Fatalf("expected ambiguous handler-level action config to be rejected, got %+v", result)
+	}
+	if !strings.Contains(err.Error(), "handler-top-level action is only allowed on handlers without rules") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestExecutor_MergePersistedActionStatePreservesInMemoryWrites(t *testing.T) {
 	entityID := identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111")
 	baseline := testStateSnapshot("ready", map[string]any{

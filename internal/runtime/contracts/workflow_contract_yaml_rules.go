@@ -68,10 +68,10 @@ func (a *AccumulateSpec) UnmarshalYAML(node *yaml.Node) error {
 		Completion:   ParseAccumulateCompletion(aux.Completion),
 	}
 	var err error
-	if a.OnComplete, err = decodeHandlerRuleEntriesNode(&aux.OnComplete); err != nil {
+	if a.OnComplete, err = decodeHandlerRuleEntriesNode(&aux.OnComplete, handlerRuleDecodeContextAccumulateOnComplete); err != nil {
 		return err
 	}
-	if a.OnTimeout, err = decodeHandlerRuleEntryNode(&aux.OnTimeout); err != nil {
+	if a.OnTimeout, err = decodeHandlerRuleEntryNode(&aux.OnTimeout, handlerRuleDecodeContextAccumulateOnTimeout); err != nil {
 		return err
 	}
 	return nil

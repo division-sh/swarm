@@ -227,11 +227,14 @@ func deriveWorkflowActionEntries(bundle *WorkflowContractBundle) []GuardActionEn
 		node := bundle.Nodes[nodeID]
 		for _, eventType := range sortedContractKeys(node.EventHandlers) {
 			handler := node.EventHandlers[eventType]
-			id := strings.TrimSpace(handler.Action.ID)
-			if id == "" {
-				continue
+			if id := strings.TrimSpace(handler.Action.ID); id != "" {
+				seen[id] = GuardActionEntry{ID: id}
 			}
-			seen[id] = GuardActionEntry{ID: id}
+			for _, rule := range handler.Rules {
+				if id := strings.TrimSpace(rule.Action.ID); id != "" {
+					seen[id] = GuardActionEntry{ID: id}
+				}
+			}
 		}
 	}
 	return sortedGuardActionEntries(seen)
@@ -315,9 +318,17 @@ func deriveRuleTransitions(transition HandlerTransitionSemantic) []WorkflowTrans
 			To:      to,
 			Trigger: strings.TrimSpace(transition.EventType),
 			Node:    strings.TrimSpace(transition.NodeID),
+			Actions: actionIDsForRule(rule),
 		})
 	}
 	return out
+}
+
+func actionIDsForRule(rule HandlerRuleEntry) []string {
+	if id := strings.TrimSpace(rule.Action.ID); id != "" {
+		return []string{id}
+	}
+	return nil
 }
 
 func firstTransitionGuardID(guard *GuardSpec) string {

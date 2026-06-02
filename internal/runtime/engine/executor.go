@@ -145,6 +145,9 @@ func (e *Executor) ValidateRequest(req ExecutionRequest) error {
 	if runtimecontracts.HandlerHasAmbiguousTopLevelEmit(req.Handler) {
 		return fmt.Errorf("%w: handler-top-level emit is only allowed on single-emit handlers", ErrInvalidConfig)
 	}
+	if runtimecontracts.HandlerHasAmbiguousTopLevelAction(req.Handler) {
+		return fmt.Errorf("%w: handler-top-level action is only allowed on handlers without rules", ErrInvalidConfig)
+	}
 	if req.Handler.CreateEntity && req.Handler.Accumulate != nil {
 		return fmt.Errorf("%w: handler declares both create_entity and accumulate", ErrInvalidConfig)
 	}
@@ -1334,7 +1337,8 @@ func (e *Executor) stepEmits(frame *executionFrame) error {
 }
 
 func (e *Executor) stepAction(frame *executionFrame) error {
-	actionKey := identity.NormalizeActionKey(frame.req.Handler.Action.ID)
+	actionSpec := selectedActionSpec(frame.req.Handler, frame.rule)
+	actionKey := identity.NormalizeActionKey(actionSpec.ID)
 	if actionKey.IsZero() {
 		return nil
 	}
@@ -1355,7 +1359,7 @@ func (e *Executor) stepAction(frame *executionFrame) error {
 		}
 		if e.deps.ActionRunner != nil {
 			execCtx := e.executionContext(frame, StepAction)
-			handled, err := e.deps.ActionRunner.ExecuteAction(frame.tx.Context(), frame.req.Handler.Action, entry, execCtx)
+			handled, err := e.deps.ActionRunner.ExecuteAction(frame.tx.Context(), actionSpec, entry, execCtx)
 			if err != nil {
 				return err
 			}
@@ -1924,6 +1928,13 @@ func selectedEmitSpec(handler runtimecontracts.SystemNodeEventHandler, rule *run
 		return rule.Emit
 	}
 	return handler.Emit
+}
+
+func selectedActionSpec(handler runtimecontracts.SystemNodeEventHandler, rule *runtimecontracts.HandlerRuleEntry) runtimecontracts.ActionSpec {
+	if rule != nil && strings.TrimSpace(rule.Action.ID) != "" {
+		return rule.Action
+	}
+	return handler.Action
 }
 
 func (e *Executor) shapeEmitPayload(frame *executionFrame, eventType string, payload map[string]any) (map[string]any, error) {

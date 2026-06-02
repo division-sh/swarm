@@ -129,10 +129,19 @@ func handlerExecutionOrderForPlan(plan handlerExecutionPlan) []string {
 	if len(plan.EmitEvents) > 0 {
 		steps = append(steps, "emits")
 	}
-	if plan.Action != "" {
+	if plan.Action != "" || handlerPlanHasRuleActions(plan) {
 		steps = append(steps, "action")
 	}
 	return steps
+}
+
+func handlerPlanHasRuleActions(plan handlerExecutionPlan) bool {
+	for _, rule := range plan.Rules {
+		if strings.TrimSpace(rule.Action.ID) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func handlerPlanHasEmitFields(plan handlerExecutionPlan) bool {
