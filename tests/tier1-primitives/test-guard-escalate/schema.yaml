@@ -4,5 +4,3 @@ states: [pending, done]
 pins:
   inputs:
     events: [check.requested]
-  outputs:
-    events: [check.escalated]

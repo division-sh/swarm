@@ -5,4 +5,4 @@ pins:
   inputs:
     events: [attempt.requested]
   outputs:
-    events: [attempt.processed, attempt.limit_hit]
+    events: [attempt.processed]

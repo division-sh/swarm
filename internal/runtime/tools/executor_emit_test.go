@@ -586,6 +586,44 @@ func TestHandleEmitTool_RootStaticPinOutputStillRequiresTarget(t *testing.T) {
 	}
 }
 
+func TestHandleEmitTool_RootSchemaPinOutputStillRequiresTarget(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		RootSchema: &runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{
+				Outputs: runtimecontracts.FlowOutputPins{
+					Events: []string{"root.ready"},
+				},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"root.ready": {
+				Payload: runtimecontracts.EventPayloadSpec{Type: "object"},
+			},
+		},
+	}
+	source := semanticview.Wrap(bundle)
+	emitRegistry := NewEmitRegistry(source, nil)
+
+	bus := &publishBusCapture{}
+	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
+	actor := models.AgentConfig{
+		ID:         "root-agent",
+		Role:       "root-agent",
+		EmitEvents: []string{"root.ready"},
+	}
+
+	_, err := exec.handleEmitTool(context.Background(), actor, "emit_root_ready", map[string]any{})
+	if err == nil {
+		t.Fatal("handleEmitTool error = nil, want target_required_missing")
+	}
+	if !strings.Contains(err.Error(), "target_required_missing") {
+		t.Fatalf("handleEmitTool error = %v, want target_required_missing", err)
+	}
+	if bus.count != 0 {
+		t.Fatalf("publish count = %d, want 0", bus.count)
+	}
+}
+
 func TestHandleEmitTool_FailsClosedOnUndeclaredPayloadField(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Events: map[string]runtimecontracts.EventCatalogEntry{

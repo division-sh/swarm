@@ -9,15 +9,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
-type pinEmitSite struct {
-	FlowID    string
-	NodeID    string
-	EventType string
-	Site      string
-	Spec      runtimecontracts.EmitSpec
-	Handler   runtimecontracts.SystemNodeEventHandler
-}
-
 func checkPinTargetResolution(c *checkerContext) []Finding {
 	findings := []Finding{}
 	for _, site := range pinRoutingEmitSites(c.source) {
@@ -29,7 +20,7 @@ func checkPinTargetResolution(c *checkerContext) []Finding {
 			findings = append(findings, pinTargetFinding(site, string(failure)))
 			continue
 		}
-		if site.Spec.Target.Normalized().Kind == runtimecontracts.EmitTargetKindSender && pinRoutingEventExternalSource(c.source, site.FlowID, site.EventType) {
+		if site.Spec.Target.Normalized().Kind == runtimecontracts.EmitTargetKindSender && pinRoutingEventExternalSource(c.source, site.FlowID, site.HandlerEvent) {
 			findings = append(findings, pinTargetFinding(site, "target_sender_empty_source"))
 		}
 	}
@@ -108,73 +99,22 @@ func checkMissingExternalSelectEntity(c *checkerContext) []Finding {
 	return findings
 }
 
-func pinRoutingEmitSites(source semanticview.Source) []pinEmitSite {
-	if source == nil {
-		return nil
-	}
-	out := []pinEmitSite{}
-	for flowID := range source.FlowSchemaEntries() {
-		flowID = strings.TrimSpace(flowID)
-		scope, ok := source.FlowScopeByID(flowID)
-		if !ok {
-			continue
-		}
-		for nodeID, node := range scope.Nodes {
-			nodeID = strings.TrimSpace(nodeID)
-			for eventType, handler := range node.EventHandlers {
-				eventType = strings.TrimSpace(eventType)
-				appendSite := func(site string, spec runtimecontracts.EmitSpec) {
-					if spec.Empty() {
-						return
-					}
-					out = append(out, pinEmitSite{
-						FlowID:    flowID,
-						NodeID:    nodeID,
-						EventType: eventType,
-						Site:      site,
-						Spec:      spec,
-						Handler:   handler,
-					})
-				}
-				appendSite("handler.emit", handler.Emit)
-				for _, rule := range handler.Rules {
-					appendSite("handler.rules.emit", rule.Emit)
-					if rule.FanOut != nil {
-						appendSite("handler.rules.fan_out.emit", rule.FanOut.Emit)
-					}
-				}
-				for _, rule := range handler.OnComplete {
-					appendSite("handler.on_complete.emit", rule.Emit)
-					if rule.FanOut != nil {
-						appendSite("handler.on_complete.fan_out.emit", rule.FanOut.Emit)
-					}
-				}
-				if handler.Accumulate != nil {
-					for _, rule := range handler.Accumulate.OnComplete {
-						appendSite("handler.accumulate.on_complete.emit", rule.Emit)
-						if rule.FanOut != nil {
-							appendSite("handler.accumulate.on_complete.fan_out.emit", rule.FanOut.Emit)
-						}
-					}
-					if handler.Accumulate.OnTimeout != nil {
-						appendSite("handler.accumulate.on_timeout.emit", handler.Accumulate.OnTimeout.Emit)
-					}
-				}
-				if handler.FanOut != nil {
-					appendSite("handler.fan_out.emit", handler.FanOut.Emit)
-				}
-			}
-		}
-	}
-	return out
+func pinRoutingEmitSites(source semanticview.Source) []semanticview.AuthoredEmitSite {
+	return semanticview.AuthoredEmitSites(source)
 }
 
-func pinTargetFinding(site pinEmitSite, reason string) Finding {
+func pinTargetFinding(site semanticview.AuthoredEmitSite, reason string) Finding {
+	scope := fmt.Sprintf("flow %s", site.FlowID)
+	location := site.FlowID
+	if strings.TrimSpace(site.FlowID) == "" {
+		scope = "root"
+		location = "root"
+	}
 	return Finding{
 		CheckID:  "pin_target_resolution",
 		Severity: "error",
-		Message:  fmt.Sprintf("flow %s %s on node %s emits pin-declared output %s without valid target mechanism: %s", site.FlowID, site.Site, site.NodeID, site.Spec.EventType(), reason),
-		Location: site.FlowID,
+		Message:  fmt.Sprintf("%s %s on node %s emits pin-declared output %s without valid target mechanism: %s", scope, site.Site, site.NodeID, site.Spec.EventType(), reason),
+		Location: location,
 	}
 }
 

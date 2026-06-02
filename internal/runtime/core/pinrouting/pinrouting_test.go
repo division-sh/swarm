@@ -81,6 +81,25 @@ func TestResolveAllowsEntityOnlyParentRouteOnlyWhenExplicitlyAllowed(t *testing.
 	}
 }
 
+func TestPinDeclaredOutputRecognizesRootSchemaOutputWithoutLeafFallback(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		RootSchema: &runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{
+				Outputs: runtimecontracts.FlowOutputPins{
+					Events: []string{"root.ready"},
+				},
+			},
+		},
+	})
+
+	if !PinDeclaredOutput(source, "", "root.ready") {
+		t.Fatal("root output pin was not recognized")
+	}
+	if PinDeclaredOutput(source, "", "worker/root.ready") {
+		t.Fatal("namespaced event matched root output pin by leaf name")
+	}
+}
+
 func testPinRoutingSource() semanticview.Source {
 	child := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{

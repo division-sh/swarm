@@ -67,8 +67,11 @@ type Resolution struct {
 func PinDeclaredOutput(source semanticview.Source, flowID, eventType string) bool {
 	flowID = strings.TrimSpace(flowID)
 	eventType = eventidentity.Normalize(eventType)
-	if source == nil || flowID == "" || eventType == "" {
+	if source == nil || eventType == "" {
 		return false
+	}
+	if flowID == "" {
+		return rootPinDeclaredOutput(source, eventType)
 	}
 	if source.FlowHasOutputEvent(flowID, eventType) {
 		return true
@@ -84,6 +87,31 @@ func PinDeclaredOutput(source semanticview.Source, flowID, eventType string) boo
 	for _, output := range source.FlowOutputEvents(flowID) {
 		output = eventidentity.Normalize(output)
 		if output == eventType || output == resolved || output == leaf {
+			return true
+		}
+	}
+	return false
+}
+
+func rootPinDeclaredOutput(source semanticview.Source, eventType string) bool {
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle == nil || bundle.RootSchema == nil {
+		return false
+	}
+	eventType = eventidentity.Normalize(eventType)
+	if eventType == "" {
+		return false
+	}
+	for _, output := range bundle.RootSchema.Pins.Outputs.Events {
+		output = eventidentity.Normalize(output)
+		if output == "" {
+			continue
+		}
+		if output == eventType {
+			return true
+		}
+		resolved := eventidentity.Normalize(source.ResolveFlowEventReference("", output))
+		if resolved != "" && resolved == eventType {
 			return true
 		}
 	}

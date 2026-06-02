@@ -6894,7 +6894,9 @@ scorer:
         completion: all
       on_complete:
         - condition: "true"
-          emit: score.completed
+          emit:
+            event: score.completed
+            broadcast: true
       advances_to: complete
   state_schema:
     fields:
