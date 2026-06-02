@@ -163,6 +163,47 @@ func newSQLiteWorkflowInstanceStoreTestDB(t *testing.T) *sql.DB {
 			handler_step TEXT,
 			created_at TIMESTAMP
 		)`,
+		`CREATE TABLE events (
+			event_id TEXT PRIMARY KEY,
+			run_id TEXT,
+			event_name TEXT,
+			entity_id TEXT,
+			flow_instance TEXT,
+			scope TEXT,
+			payload TEXT,
+			chain_depth INTEGER,
+			produced_by_type TEXT,
+			created_at TIMESTAMP
+		)`,
+		`CREATE TABLE event_receipts (
+			receipt_id TEXT PRIMARY KEY,
+			event_id TEXT,
+			subscriber_type TEXT,
+			subscriber_id TEXT,
+			entity_id TEXT,
+			flow_instance TEXT,
+			outcome TEXT,
+			reason_code TEXT,
+			side_effects TEXT,
+			idempotency_key TEXT,
+			processed_at TIMESTAMP,
+			UNIQUE(event_id, subscriber_type, subscriber_id)
+		)`,
+		`CREATE TABLE event_deliveries (
+			delivery_id TEXT PRIMARY KEY,
+			run_id TEXT,
+			event_id TEXT,
+			subscriber_type TEXT,
+			subscriber_id TEXT,
+			status TEXT,
+			retry_count INTEGER,
+			reason_code TEXT,
+			last_error TEXT,
+			active_session_id TEXT,
+			started_at TIMESTAMP,
+			delivered_at TIMESTAMP,
+			created_at TIMESTAMP
+		)`,
 	} {
 		if _, err := db.Exec(stmt); err != nil {
 			t.Fatalf("create sqlite test schema: %v", err)

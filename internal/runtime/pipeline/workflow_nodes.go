@@ -855,6 +855,22 @@ func (pc *PipelineCoordinator) markWorkflowNodeProcessed(ctx context.Context, no
 	pc.convergeWorkflowNodeNormalRunCompletion(ctx, nodeID, evt)
 }
 
+func (pc *PipelineCoordinator) workflowNodeEventProcessed(ctx context.Context, nodeID string, evt events.Event) bool {
+	if pc == nil || pc.workflowStore == nil {
+		return false
+	}
+	nodeID = strings.TrimSpace(nodeID)
+	eventID := strings.TrimSpace(evt.ID)
+	if nodeID == "" || eventID == "" {
+		return false
+	}
+	if !pc.eventReceiptsAvailable(ctx) {
+		return false
+	}
+	ok, err := pc.workflowStore.SystemNodeProcessed(ctx, nodeID, eventID)
+	return err == nil && ok
+}
+
 func (pc *PipelineCoordinator) eventReceiptsAvailable(ctx context.Context) bool {
 	if pc == nil || pc.eventReceiptsCapability == nil {
 		return false

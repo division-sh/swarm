@@ -252,6 +252,9 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 	if !ok {
 		return false, nil
 	}
+	if pc.workflowNodeEventProcessed(ctx, nodeID, evt) {
+		return true, nil
+	}
 	ctx = withPipelineFlowScope(ctx, workflowNodeFlowID(source, nodeID))
 	result, err := pc.executeNodeContractHandler(ctx, nodeID, handler, workflowTriggerContext{
 		Event:           evt,

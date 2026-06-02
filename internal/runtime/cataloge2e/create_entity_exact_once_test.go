@@ -1,0 +1,200 @@
+package cataloge2e
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestCatalogCreateEntityHandlerEffectCardinality(t *testing.T) {
+	fixtureRoot := writeCreateEntityExactOnceFixture(t)
+	h := newRuntimeHarness(t, fixtureRoot, true)
+
+	h.publishAndWait(catalogTriggerStep{
+		Event:   "validation/thing.created",
+		Payload: map[string]any{"amount": 250, "who": "alice"},
+	}, catalogRuntimePublishTimeout)
+	if len(h.publishedOrder) != 1 {
+		t.Fatalf("published source events = %d, want 1", len(h.publishedOrder))
+	}
+	eventID := h.publishedOrder[0]
+
+	assertCatalogMutationCount(t, h, eventID, "amount", "entity_initial_value", "create_entity", 1)
+	assertCatalogMutationCount(t, h, eventID, "who", "entity_initial_value", "create_entity", 1)
+	assertCatalogMutationCount(t, h, eventID, "counter", "entity_initial_value", "create_entity", 1)
+	assertCatalogMutationCount(t, h, eventID, "amount", "workflow_instance_store", "upsert", 1)
+	assertCatalogMutationCount(t, h, eventID, "who", "workflow_instance_store", "upsert", 1)
+	assertCatalogMutationCount(t, h, eventID, "counter", "workflow_instance_store", "upsert", 1)
+	assertCatalogReceiptCount(t, h, eventID, "w-node", 1)
+	assertCatalogDeliveryStatusCount(t, h, eventID, "w-node", "delivered", 1)
+
+	var createdEntityID string
+	if err := h.db.QueryRowContext(context.Background(), `
+		SELECT COALESCE(entity_id::text, '')
+		FROM events
+		WHERE event_name = 'validation/thing.emitted'
+		  AND source_event_id = $1::uuid
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, eventID).Scan(&createdEntityID); err != nil {
+		t.Fatalf("load emitted entity id: %v", err)
+	}
+	if strings.TrimSpace(createdEntityID) == "" {
+		t.Fatal("emitted event did not carry created entity id")
+	}
+	instance, ok, err := h.workflow.Load(catalogRuntimeContext(), createdEntityID)
+	if err != nil {
+		t.Fatalf("load created entity: %v", err)
+	}
+	if !ok {
+		t.Fatal("created workflow instance missing")
+	}
+	if got := strings.TrimSpace(instance.CurrentState); got != "done" {
+		t.Fatalf("created entity state = %q, want done", got)
+	}
+}
+
+func writeCreateEntityExactOnceFixture(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	writeFixtureFile(t, root, "package.yaml", `
+name: exact-once-catalog
+version: "1.0.0"
+platform_version: ">=1.0.0"
+flows:
+  - id: validation
+    flow: validation
+    mode: static
+`)
+	writeFixtureFile(t, root, "schema.yaml", "name: exact-once-catalog\n")
+	writeFixtureFile(t, root, filepath.Join("flows", "validation", "schema.yaml"), `
+name: validation
+mode: static
+initial_state: new
+terminal_states: [done]
+states: [new, done]
+pins:
+  inputs:
+    events: [thing.created]
+  outputs:
+    events: [thing.emitted]
+`)
+	writeFixtureFile(t, root, filepath.Join("flows", "validation", "entities.yaml"), `
+widget:
+  amount:
+    type: integer
+    initial: 0
+  who:
+    type: text
+    initial: ""
+  counter:
+    type: integer
+    initial: 0
+`)
+	writeFixtureFile(t, root, filepath.Join("flows", "validation", "events.yaml"), `
+thing.created:
+  swarm:
+    source: external
+  amount: integer
+  who: text
+thing.emitted:
+  amount: integer
+  who: text
+`)
+	writeFixtureFile(t, root, filepath.Join("flows", "validation", "nodes.yaml"), `
+w-node:
+  id: w-node
+  execution_type: system_node
+  subscribes_to: [thing.created]
+  produces: [thing.emitted]
+  event_handlers:
+    thing.created:
+      create_entity: true
+      data_accumulation:
+        source_event: thing.created
+        writes:
+          - source_field: amount
+            target_field: amount
+          - source_field: who
+            target_field: who
+          - target_field: counter
+            value:
+              cel: entity.counter + 1
+      advances_to: done
+      emit:
+        event: thing.emitted
+        broadcast: true
+        fields:
+          amount:
+            cel: entity.amount
+          who:
+            cel: entity.who
+`)
+	return root
+}
+
+func writeFixtureFile(t *testing.T, root, rel, content string) {
+	t.Helper()
+	path := filepath.Join(root, rel)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir fixture path %s: %v", rel, err)
+	}
+	if err := os.WriteFile(path, []byte(strings.TrimLeft(content, "\n")), 0o644); err != nil {
+		t.Fatalf("write fixture file %s: %v", rel, err)
+	}
+}
+
+func assertCatalogMutationCount(t *testing.T, h *runtimeHarness, eventID, field, writerID, handlerStep string, want int) {
+	t.Helper()
+	var got int
+	if err := h.db.QueryRowContext(context.Background(), `
+		SELECT COUNT(*)
+		FROM entity_mutations
+		WHERE caused_by_event = $1::uuid
+		  AND field = $2
+		  AND writer_id = $3
+		  AND handler_step = $4
+	`, eventID, field, writerID, handlerStep).Scan(&got); err != nil {
+		t.Fatalf("count entity_mutations: %v", err)
+	}
+	if got != want {
+		t.Fatalf("mutation count field=%s writer=%s step=%s = %d, want %d", field, writerID, handlerStep, got, want)
+	}
+}
+
+func assertCatalogReceiptCount(t *testing.T, h *runtimeHarness, eventID, nodeID string, want int) {
+	t.Helper()
+	var got int
+	if err := h.db.QueryRowContext(context.Background(), `
+		SELECT COUNT(*)
+		FROM event_receipts
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'node'
+		  AND subscriber_id = $2
+	`, eventID, nodeID).Scan(&got); err != nil {
+		t.Fatalf("count event_receipts: %v", err)
+	}
+	if got != want {
+		t.Fatalf("event receipt count = %d, want %d", got, want)
+	}
+}
+
+func assertCatalogDeliveryStatusCount(t *testing.T, h *runtimeHarness, eventID, nodeID, status string, want int) {
+	t.Helper()
+	var got int
+	if err := h.db.QueryRowContext(context.Background(), `
+		SELECT COUNT(*)
+		FROM event_deliveries
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'node'
+		  AND subscriber_id = $2
+		  AND status = $3
+	`, eventID, nodeID, status).Scan(&got); err != nil {
+		t.Fatalf("count event_deliveries: %v", err)
+	}
+	if got != want {
+		t.Fatalf("delivery status %s count = %d, want %d", status, got, want)
+	}
+}

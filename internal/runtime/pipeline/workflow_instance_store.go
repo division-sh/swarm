@@ -1121,7 +1121,7 @@ func insertWorkflowCreateEntityInitialValueMutations(
 		}
 		finalValue, ok := after.Fields[field]
 		oldValue, hadOld := adjusted.Fields[field]
-		if hadOld && workflowJSONValuesEqual(oldValue, declared) {
+		if hadOld {
 			continue
 		}
 		if err := runtimemutationlog.Insert(ctx, tx, runtimemutationlog.Record{
