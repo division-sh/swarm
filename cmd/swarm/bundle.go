@@ -470,7 +470,11 @@ func (opts bundleRegisterCommandOptions) contractsDirectoryParams(args []string)
 	if err != nil {
 		return nil, err
 	}
-	upload, err := runtimecontracts.BuildBundleRegistrationDirectoryUpload(repoRoot, paths.ContractsPath, paths.PlatformSpecPath)
+	contractsRoot, err := normalizeContractsRoot(paths.ContractsPath)
+	if err != nil {
+		return nil, fmt.Errorf("resolve contracts: %w", err)
+	}
+	upload, err := runtimecontracts.BuildBundleRegistrationDirectoryUpload(repoRoot, contractsRoot, paths.PlatformSpecPath)
 	if err != nil {
 		return nil, fmt.Errorf("package contracts directory: %w", err)
 	}

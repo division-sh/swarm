@@ -481,6 +481,48 @@ func TestBundleRegisterContractsDirectoryUsesCanonicalRPCAndRenders(t *testing.T
 	}
 }
 
+func TestBundleRegisterContractsPackageFileShorthandUsesCanonicalRPC(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	bundleHash := validBundleHash("8")
+	contractsDir := writeBundleRegisterContractsFixture(t)
+	var captured jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/rpc" {
+			t.Errorf("path = %q, want /v1/rpc", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
+			t.Errorf("Authorization = %q, want bearer token", got)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		writeJSONRPCResult(t, w, captured.ID, validBundleRegistrationResult(bundleHash))
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{
+		"bundle", "register",
+		"--contracts", filepath.Join(contractsDir, "package.yaml"),
+	}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if captured.Method != bundleRegisterMethod {
+		t.Fatalf("method = %q, want %q", captured.Method, bundleRegisterMethod)
+	}
+	contentYAML, ok := captured.Params["content_yaml"].(string)
+	if !ok || !strings.Contains(contentYAML, "package.yaml") || !strings.Contains(contentYAML, "flows/alpha/schema.yaml") {
+		t.Fatalf("content_yaml = %#v", captured.Params["content_yaml"])
+	}
+	if _, ok := captured.Params["data_blob"]; !ok {
+		t.Fatalf("data_blob missing from params: %#v", captured.Params)
+	}
+	if strings.TrimSpace(stderr.String()) != "" {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
 func TestBundleRegisterPreparedEnvelopeUsesCanonicalRPCAndRenders(t *testing.T) {
 	t.Setenv("SWARM_API_TOKEN", "test-token")
 	bundleHash := validBundleHash("e")
@@ -603,8 +645,8 @@ func TestBundleCommandsRejectInvalidInputBeforeRequest(t *testing.T) {
 		{name: "register blank idempotency", args: []string{"bundle", "register", envelopePath, "--data-blob", dataBlobPath, "--idempotency-key", " "}, wantStderr: "--idempotency-key must be non-empty"},
 		{name: "register contracts with envelope", args: []string{"bundle", "register", envelopePath, "--contracts", contractsDir}, wantStderr: "--contracts cannot be combined with a registration envelope argument"},
 		{name: "register contracts with data blob", args: []string{"bundle", "register", "--contracts", contractsDir, "--data-blob", dataBlobPath}, wantStderr: "--data-blob cannot be used with --contracts"},
-		{name: "register contracts typo child under bundle", args: []string{"bundle", "register", "--contracts", invalidChildContractsDir}, wantStderr: "package contracts directory"},
-		{name: "register contracts missing package", args: []string{"bundle", "register", "--contracts", invalidContractsDir}, wantStderr: "package contracts directory"},
+		{name: "register contracts typo child under bundle", args: []string{"bundle", "register", "--contracts", invalidChildContractsDir}, wantStderr: "resolve contracts"},
+		{name: "register contracts missing package", args: []string{"bundle", "register", "--contracts", invalidContractsDir}, wantStderr: "resolve contracts"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			calls.Store(0)
