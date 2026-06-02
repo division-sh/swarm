@@ -5,4 +5,4 @@ pins:
   inputs:
     events: [retry.requested]
   outputs:
-    events: [retry.dispatched, limit.reached]
+    events: [retry.dispatched]
