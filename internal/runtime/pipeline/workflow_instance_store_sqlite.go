@@ -566,7 +566,7 @@ func insertSQLiteWorkflowCreateEntityInitialValueMutations(
 		}
 		finalValue, ok := after.Fields[field]
 		oldValue, hadOld := adjusted.Fields[field]
-		if hadOld && workflowJSONValuesEqual(oldValue, declared) {
+		if hadOld {
 			continue
 		}
 		if err := insertSQLiteEntityMutationRecord(ctx, tx, runID, runtimemutationlog.Record{
