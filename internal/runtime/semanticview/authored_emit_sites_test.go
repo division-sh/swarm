@@ -77,18 +77,38 @@ func TestAuthoredEmitSites_OutsidePackageDoesNotSuppressGenericFlowScope(t *test
 	}
 }
 
+func TestAuthoredEmitSites_NestedFlowPackageDoesNotSuppressMainFlowScope(t *testing.T) {
+	source := loadAuthoredEmitSiteFixture(t, authoredEmitSiteFixture{
+		flowNodeID:          "flow-node",
+		flowEmit:            "support.ready",
+		nestedPackageNodeID: "nested-node",
+		nestedPackageEmit:   "support.ready",
+		omitFlowPackage:     true,
+	})
+
+	sites := AuthoredEmitSites(source)
+	if countAuthoredEmitSites(sites, "support", "flow-node", "support.ready") != 1 {
+		t.Fatalf("expected main flow scope site, got %#v", authoredEmitSiteSummaries(sites))
+	}
+	if countAuthoredEmitSites(sites, "support", "nested-node", "support.ready") != 1 {
+		t.Fatalf("expected nested package site, got %#v", authoredEmitSiteSummaries(sites))
+	}
+}
+
 type authoredEmitSiteFixture struct {
-	rootNodeID      string
-	rootEmit        string
-	rootGuardEmit   string
-	rootBroadcast   bool
-	flowNodeID      string
-	flowEmit        string
-	flowBroadcast   bool
-	extrasNodeID    string
-	extrasEmit      string
-	extrasBroadcast bool
-	omitFlowPackage bool
+	rootNodeID          string
+	rootEmit            string
+	rootGuardEmit       string
+	rootBroadcast       bool
+	flowNodeID          string
+	flowEmit            string
+	flowBroadcast       bool
+	extrasNodeID        string
+	extrasEmit          string
+	extrasBroadcast     bool
+	omitFlowPackage     bool
+	nestedPackageNodeID string
+	nestedPackageEmit   string
 }
 
 func loadAuthoredEmitSiteFixture(t *testing.T, opts authoredEmitSiteFixture) Source {
@@ -99,12 +119,17 @@ func loadAuthoredEmitSiteFixture(t *testing.T, opts authoredEmitSiteFixture) Sou
 	}
 	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
 	root := t.TempDir()
+	nestedPackageRef := ""
+	if strings.TrimSpace(opts.nestedPackageNodeID) != "" {
+		nestedPackageRef = "  - path: flows/support/addon\n"
+	}
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: authored-emit-site-fixture
 version: "1.0.0"
 platform_version: ">=1.6.0"
 packages:
   - path: extras
+`+nestedPackageRef+`
 flows:
   - id: support
     flow: support
@@ -157,6 +182,14 @@ version: "1.0.0"
 flows: []
 `)
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "extras", "nodes.yaml"), authoredEmitSiteNodeYAML(opts.extrasNodeID, "support.start", opts.extrasEmit, "", opts.extrasBroadcast))
+	if strings.TrimSpace(opts.nestedPackageNodeID) != "" {
+		writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "addon", "package.yaml"), `
+name: support-addon
+version: "1.0.0"
+flows: []
+`)
+		writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "addon", "nodes.yaml"), authoredEmitSiteNodeYAML(opts.nestedPackageNodeID, "support.start", opts.nestedPackageEmit, "", false))
+	}
 
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
