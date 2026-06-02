@@ -90,6 +90,12 @@ func (r *ClaudeCLIRuntime) writeWorkspaceRelayFile(ctx context.Context, target *
 
 func (r *ClaudeCLIRuntime) runWorkspaceCommand(ctx context.Context, target *workspace.Target, stdin string, args ...string) ([]byte, []byte, int, error) {
 	execTarget := target.ExecutionTarget()
+	if err := execTarget.Require(workspace.ExecutionCapabilityClaudeCLI); err != nil {
+		if strings.EqualFold(strings.TrimSpace(execTarget.Backend), workspace.BackendHost) {
+			return nil, nil, 0, errClaudeHostWorkspaceUnsupported()
+		}
+		return nil, nil, 0, fmt.Errorf("%w: %s", ErrClaudeWorkspaceRequired, err.Error())
+	}
 	if err := execTarget.Require(workspace.ExecutionCapabilityToolResultRelay); err != nil {
 		if strings.EqualFold(strings.TrimSpace(execTarget.Backend), workspace.BackendHost) {
 			return nil, nil, 0, errClaudeHostWorkspaceUnsupported()
