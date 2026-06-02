@@ -4,16 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/google/uuid"
+	"gopkg.in/yaml.v3"
 )
 
 type recordingReceiptBus struct {
@@ -239,6 +243,7 @@ func TestMaybeTripAuthCircuitBreaker_PublishesFlowScopedAuthRequired(t *testing.
 	if got := payload["flow_instance"]; got != "review/inst-1" {
 		t.Fatalf("auth event flow_instance = %#v, want review/inst-1", got)
 	}
+	validateCurrentPlatformEventPayloadForManagerTest(t, string(authEvt.Type), authEvt.Payload)
 }
 
 func TestMaybeTripAuthCircuitBreaker_PreservesCanceledEventLineage(t *testing.T) {
@@ -272,6 +277,30 @@ func TestMaybeTripAuthCircuitBreaker_PreservesCanceledEventLineage(t *testing.T)
 	}
 	if got := authEvt.RunID; got != inbound.RunID {
 		t.Fatalf("auth event run_id = %q, want %q", got, inbound.RunID)
+	}
+}
+
+func validateCurrentPlatformEventPayloadForManagerTest(t testing.TB, eventType string, payload []byte) {
+	t.Helper()
+	raw, err := os.ReadFile(runtimecontracts.DefaultPlatformSpecFile(runtimepipeline.WorkflowRepoRoot()))
+	if err != nil {
+		t.Fatalf("read platform spec: %v", err)
+	}
+	var spec runtimecontracts.PlatformSpecDocument
+	if err := yaml.Unmarshal(raw, &spec); err != nil {
+		t.Fatalf("unmarshal platform spec: %v", err)
+	}
+	registry := runtimecontracts.EventSchemaRegistryFromBundle(&runtimecontracts.WorkflowContractBundle{Platform: spec})
+	schema, ok := registry[eventType]
+	if !ok {
+		t.Fatalf("missing generated platform schema for %s", eventType)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatalf("unmarshal %s payload: %v", eventType, err)
+	}
+	if err := runtimeeventschema.ValidatePayloadAgainstSchema(schema.Schema, decoded); err != nil {
+		t.Fatalf("generated %s schema rejected producer payload %#v: %v", eventType, decoded, err)
 	}
 }
 

@@ -6580,10 +6580,20 @@ platform_events:
       scope: flow
       payload:
         agent_id: string
+        entity_id: string
+        flow_instance: string
         tool_name: string (nullable)
         action: string
         reason: string
         timestamp: string (ISO 8601)
+      required:
+      - agent_id
+      - entity_id
+      - flow_instance
+      - tool_name
+      - action
+      - reason
+      - timestamp
       produced_by_type: platform
     platform.budget_threshold_crossed:
       description: LLM spend crossed a configured threshold. The platform monitors spend_ledger against policy-defined thresholds
@@ -6665,6 +6675,14 @@ platform_events:
         source: string
         operator_id: string (nullable)
         timestamp: string (ISO 8601)
+      required:
+      - agent_id
+      - directive_text
+      - mode
+      - run_id
+      - run_id_resolution
+      - source
+      - timestamp
       produced_by_type: platform
     platform.agent_started:
       description: Agent session created and ready to process events.
@@ -6737,10 +6755,13 @@ platform_events:
       routing_class: diagnostic_direct_persisted
       scope: entity or global
       payload:
-        event_name: string
-        source: string
-        entity_id: string (nullable)
-        timestamp: string (ISO 8601)
+        provider: string
+        provider_event_id: string
+        entity_id: uuid
+      required:
+      - provider
+      - provider_event_id
+      - entity_id
       produced_by_type: platform
     platform.recovery_failed:
       description: Crash recovery failed during event replay. Unrecoverable state.

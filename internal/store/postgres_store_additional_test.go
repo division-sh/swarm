@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"os"
 	"reflect"
 	"strings"
 	"sync/atomic"
@@ -16,6 +17,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -25,6 +27,7 @@ import (
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
+	"gopkg.in/yaml.v3"
 )
 
 const specEntityStateRunID = "33333333-3333-3333-3333-333333333333"
@@ -1708,6 +1711,69 @@ func TestPostgresStore_RecordInboundEvent_RejectsPayloadValidatorFailureBeforePe
 	}
 	if count != 0 {
 		t.Fatalf("expected rejected inbound marker not to persist, count=%d", count)
+	}
+}
+
+func TestPostgresStore_RecordInboundEvent_PlatformCatalogSchemaMatchesProducerPayload(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	pg.SetEventPayloadValidator(currentPlatformPayloadValidatorForStoreTest(t))
+	ctx := context.Background()
+	entityID := uuid.NewString()
+
+	inserted, err := pg.RecordInboundEvent(ctx, "provider-evt-1", entityID, "github")
+	if err != nil {
+		t.Fatalf("RecordInboundEvent: %v", err)
+	}
+	if !inserted {
+		t.Fatal("expected inbound marker insertion")
+	}
+
+	var payloadRaw []byte
+	if err := db.QueryRowContext(ctx, `
+		SELECT payload
+		FROM events
+		WHERE event_name = 'platform.inbound_recorded'
+	`).Scan(&payloadRaw); err != nil {
+		t.Fatalf("load inbound event payload: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(payloadRaw, &payload); err != nil {
+		t.Fatalf("unmarshal inbound event payload: %v", err)
+	}
+	for _, key := range []string{"provider", "provider_event_id", "entity_id"} {
+		if _, ok := payload[key]; !ok {
+			t.Fatalf("inbound payload missing %s: %#v", key, payload)
+		}
+	}
+	for _, retired := range []string{"event_name", "source", "timestamp"} {
+		if _, ok := payload[retired]; ok {
+			t.Fatalf("inbound payload retained retired %s: %#v", retired, payload)
+		}
+	}
+}
+
+func currentPlatformPayloadValidatorForStoreTest(t testing.TB) EventPayloadValidator {
+	t.Helper()
+	raw, err := os.ReadFile(runtimecontracts.DefaultPlatformSpecFile(runtimepipeline.WorkflowRepoRoot()))
+	if err != nil {
+		t.Fatalf("read platform spec: %v", err)
+	}
+	var spec runtimecontracts.PlatformSpecDocument
+	if err := yaml.Unmarshal(raw, &spec); err != nil {
+		t.Fatalf("unmarshal platform spec: %v", err)
+	}
+	registry := runtimecontracts.EventSchemaRegistryFromBundle(&runtimecontracts.WorkflowContractBundle{Platform: spec})
+	return func(eventType string, payload []byte) error {
+		schema, ok := registry[strings.TrimSpace(eventType)]
+		if !ok {
+			return nil
+		}
+		var decoded map[string]any
+		if err := json.Unmarshal(payload, &decoded); err != nil {
+			return err
+		}
+		return runtimeeventschema.ValidatePayloadAgainstSchema(schema.Schema, decoded)
 	}
 }
 
