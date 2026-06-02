@@ -74,7 +74,7 @@ func platformEventEntryFromYAMLNode(node yaml.Node) EventCatalogEntry {
 	if required := platformEventStringList(node, "required"); len(required) > 0 {
 		entry.Required = required
 	} else {
-		entry.Required = sortedEventFieldNames(entry.Payload.Properties)
+		entry.Required = requiredPlatformEventFieldNames(entry.Payload.Properties)
 	}
 	if consumer := platformEventStringList(node, "consumer"); len(consumer) > 0 {
 		entry.Consumer = consumer
@@ -202,4 +202,22 @@ func sortedEventFieldNames(fields map[string]EventFieldSpec) []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+func requiredPlatformEventFieldNames(fields map[string]EventFieldSpec) []string {
+	names := make([]string, 0, len(fields))
+	for name, field := range fields {
+		name = strings.TrimSpace(name)
+		if name == "" || platformEventFieldAllowsOmission(field) {
+			continue
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func platformEventFieldAllowsOmission(field EventFieldSpec) bool {
+	lower := strings.ToLower(strings.TrimSpace(field.Type + " " + field.Description))
+	return strings.Contains(lower, "nullable") || strings.Contains(lower, "null until")
 }

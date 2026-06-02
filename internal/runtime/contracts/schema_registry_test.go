@@ -1,6 +1,13 @@
 package contracts
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/division-sh/swarm/internal/runtime/eventschema"
+	"gopkg.in/yaml.v3"
+)
 
 func TestEventSchemaRegistryFromCatalog_NormalizesAnnotatedFieldTypes(t *testing.T) {
 	registry := EventSchemaRegistryFromCatalog(map[string]EventCatalogEntry{
@@ -39,6 +46,77 @@ func TestEventSchemaRegistryFromCatalog_NormalizesAnnotatedFieldTypes(t *testing
 	subcategories, _ := props["subcategories"].(map[string]any)
 	if subcategories["type"] != "array" {
 		t.Fatalf("subcategories type = %#v", subcategories["type"])
+	}
+}
+
+func TestPlatformEventCatalogImplicitRequiredSkipsNullableFields(t *testing.T) {
+	var node yaml.Node
+	if err := yaml.Unmarshal([]byte(`
+payload:
+  required_value: string
+  optional_value: string (nullable)
+`), &node); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+
+	entry := platformEventEntryFromYAMLNode(*node.Content[0])
+
+	if len(entry.Required) != 1 || entry.Required[0] != "required_value" {
+		t.Fatalf("Required = %#v, want only required_value", entry.Required)
+	}
+}
+
+func TestPlatformEventCatalogSchemasValidateCurrentProducerPayloadShapes(t *testing.T) {
+	registry := EventSchemaRegistryFromBundle(&WorkflowContractBundle{
+		Platform: currentPlatformSpecForSchemaRegistryTest(t),
+	})
+
+	for _, tc := range []struct {
+		eventType string
+		payload   map[string]any
+	}{
+		{
+			eventType: "platform.inbound_recorded",
+			payload: map[string]any{
+				"provider":          "github",
+				"provider_event_id": "provider-evt-1",
+				"entity_id":         "00000000-0000-0000-0000-000000000127",
+			},
+		},
+		{
+			eventType: "platform.auth_required",
+			payload: map[string]any{
+				"agent_id":      "agent-a",
+				"entity_id":     "00000000-0000-0000-0000-000000000128",
+				"flow_instance": "review/inst-1",
+				"tool_name":     nil,
+				"action":        "llm_call",
+				"reason":        "claude_auth_required",
+				"timestamp":     "2026-06-02T03:00:00Z",
+			},
+		},
+		{
+			eventType: "platform.agent_directive",
+			payload: map[string]any{
+				"agent_id":          "agent-1",
+				"directive_text":    "run corpus",
+				"mode":              "directive",
+				"run_id":            "00000000-0000-0000-0000-000000000129",
+				"run_id_resolution": "specified",
+				"source":            "v1_rpc",
+				"timestamp":         "2026-06-02T03:00:00Z",
+			},
+		},
+	} {
+		t.Run(tc.eventType, func(t *testing.T) {
+			schema, ok := registry[tc.eventType]
+			if !ok {
+				t.Fatalf("missing generated schema for %s", tc.eventType)
+			}
+			if err := eventschema.ValidatePayloadAgainstSchema(schema.Schema, tc.payload); err != nil {
+				t.Fatalf("generated %s schema rejected producer payload %#v: %v", tc.eventType, tc.payload, err)
+			}
+		})
 	}
 }
 
@@ -376,4 +454,31 @@ func TestEventSchemaForFlowEvent_UsesDeclaringRootTypeCatalogForChildOutput(t *t
 	if _, _, ok := EventSchemaForFlowEvent(bundle, "child", "sibling/handoff.completed"); ok {
 		t.Fatal("sibling-qualified event must not match root declaration by leaf name")
 	}
+}
+
+func currentPlatformSpecForSchemaRegistryTest(t *testing.T) PlatformSpecDocument {
+	t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			break
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatal("repo root with go.mod not found")
+		}
+		dir = parent
+	}
+	raw, err := os.ReadFile(DefaultPlatformSpecFile(dir))
+	if err != nil {
+		t.Fatalf("read platform spec: %v", err)
+	}
+	var spec PlatformSpecDocument
+	if err := yaml.Unmarshal(raw, &spec); err != nil {
+		t.Fatalf("unmarshal platform spec: %v", err)
+	}
+	return spec
 }
