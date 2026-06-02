@@ -213,7 +213,7 @@ The static analyzer's refusal to boot on a half-finished contract is a feature i
 
 - Platform specification: **v1.6.0**, complete. See [`platform-spec.yaml`](platform-spec.yaml).
 - Engine: Go, Phase 11. Handler-first execution for the proven-safe subset; full handler-first execution in progress.
-- Conformance suite: **12 tiers, 200+ distinct test contract bundles** spanning primitives, accumulation, atomic event-loop semantics, composition, boot verification, runtime fork, and policy patterns. The suite runs against a scripted LLM, so it doesn't pay an LLM bill.
+- Conformance suite: **12 tiers, 200+ distinct test contract bundles** spanning primitives, accumulation, atomic event-loop semantics, composition, boot verification, runtime fork, and policy patterns. The suite runs against an internal scripted harness, so it doesn't cost LLM tokens to exercise the engine. A user-selectable scripted backend is on the roadmap.
 - Used internally to power autonomous multi-agent workflows. External use at your own risk.
 
 The trajectory points at running whole company divisions as autonomous flows. The shipped surface today covers a much smaller scope: deterministic multi-agent orchestration with human-in-the-loop, on a single deployment. Distributed execution, multi-tenant isolation, and a flow marketplace are not yet in scope.
