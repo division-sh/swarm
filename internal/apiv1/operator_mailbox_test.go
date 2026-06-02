@@ -614,11 +614,7 @@ func TestOperatorMailboxApproveQueuesTransactionalPublishWhileRuntimePaused(t *t
 	if interceptorCalls != 0 {
 		t.Fatalf("interceptor calls while paused = %d, want 0", interceptorCalls)
 	}
-	select {
-	case got := <-ch:
-		t.Fatalf("paused mailbox approval delivered event %s before resume", got.ID)
-	case <-time.After(150 * time.Millisecond):
-	}
+	requireNoAPIV1RuntimeBusEvent(t, ch, "paused mailbox approval before resume")
 	if got := countEventDeliveriesForEvent(t, ctx, db, downstreamID); got != 1 {
 		t.Fatalf("mailbox approval event deliveries while paused = %d, want 1", got)
 	}
@@ -651,13 +647,9 @@ func TestOperatorMailboxApproveQueuesTransactionalPublishWhileRuntimePaused(t *t
 	if resumed.ReleasedCount != 1 {
 		t.Fatalf("released count = %d, want 1", resumed.ReleasedCount)
 	}
-	select {
-	case got := <-ch:
-		if got.ID != downstreamID {
-			t.Fatalf("released mailbox approval event = %s, want %s", got.ID, downstreamID)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for queued mailbox approval release")
+	got := requireAPIV1RuntimeBusEvent(t, ch, "queued mailbox approval release")
+	if got.ID != downstreamID {
+		t.Fatalf("released mailbox approval event = %s, want %s", got.ID, downstreamID)
 	}
 	if interceptorCalls != 0 {
 		t.Fatalf("interceptor calls after resume release = %d, want 0", interceptorCalls)
@@ -770,13 +762,9 @@ func TestOperatorMailboxApproveRunsPublishDispatchAfterDecisionCommit(t *testing
 	if downstreamID == "" {
 		t.Fatalf("mailbox.approve downstream event id = %#v", approved.Result)
 	}
-	select {
-	case got := <-interceptorCalls:
-		if got != downstreamID {
-			t.Fatalf("interceptor event id = %s, want %s", got, downstreamID)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for mailbox approval post-commit dispatch")
+	got := requireAPIV1RuntimeBusSignal(t, interceptorCalls, "mailbox approval post-commit dispatch")
+	if got != downstreamID {
+		t.Fatalf("interceptor event id = %s, want %s", got, downstreamID)
 	}
 	if got := countEventsByName(t, db, "mailbox.item_decided"); got != 1 {
 		t.Fatalf("mailbox.item_decided event count = %d, want 1", got)
@@ -794,11 +782,7 @@ func TestOperatorMailboxApproveRunsPublishDispatchAfterDecisionCommit(t *testing
 	if got := asMap(t, replay.Result)["downstream_event_id"]; got != downstreamID {
 		t.Fatalf("replay downstream_event_id = %v, want %s", got, downstreamID)
 	}
-	select {
-	case got := <-interceptorCalls:
-		t.Fatalf("idempotency replay re-dispatched mailbox event %s", got)
-	default:
-	}
+	requireNoAPIV1RuntimeBusSignal(t, interceptorCalls, "mailbox approval idempotency replay")
 	if got := countEventsByName(t, db, "mailbox.item_decided"); got != 1 {
 		t.Fatalf("mailbox.item_decided event count after replay = %d, want 1", got)
 	}
