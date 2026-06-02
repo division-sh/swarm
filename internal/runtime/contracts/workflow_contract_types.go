@@ -618,13 +618,14 @@ type EntityContract struct {
 }
 
 type EntityFieldDecl struct {
-	Type            string         `yaml:"type"`
-	Initial         any            `yaml:"initial"`
-	Immutable       bool           `yaml:"immutable"`
-	Description     string         `yaml:"description"`
-	MaterializeFrom string         `yaml:"materialize_from"`
-	Project         map[string]any `yaml:"project"`
-	UnusedReason    string         `yaml:"_unused_reason"`
+	Type               string         `yaml:"type"`
+	Initial            any            `yaml:"initial"`
+	Immutable          bool           `yaml:"immutable"`
+	Description        string         `yaml:"description"`
+	MaterializeFrom    string         `yaml:"materialize_from"`
+	Project            map[string]any `yaml:"project"`
+	UnusedReason       string         `yaml:"_unused_reason"`
+	UnusedReaderReason string         `yaml:"_unused_reader_reason"`
 }
 type ProjectPackageRef struct {
 	ID      string `yaml:"id"`

@@ -176,9 +176,12 @@ func (c *checkerContext) entityReaderCoverage() []Finding {
 
 	readers := wave1EntityReaderCoverageByFlow(c.source)
 	for _, contract := range wave1DeclaredEntityContracts(c.source) {
-		for fieldName := range contract.Contract.Fields {
+		for fieldName, fieldDecl := range contract.Contract.Fields {
 			fieldName = strings.TrimSpace(fieldName)
 			if fieldName == "" || wave1EntityEnvelopeField(fieldName) {
+				continue
+			}
+			if strings.TrimSpace(fieldDecl.UnusedReaderReason) != "" {
 				continue
 			}
 			if _, ok := readers[contract.FlowID][fieldName]; ok {

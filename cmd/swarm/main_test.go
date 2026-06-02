@@ -6467,6 +6467,91 @@ reader:
 	}
 }
 
+func TestRunVerifyCommand_FirstFlowEquivalentSuppressesTutorialLintEvidence(t *testing.T) {
+	root := t.TempDir()
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: ticket-flow
+version: "1.0.0"
+platform: ">=1.6.0"
+flows: []
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
+name: ticket-flow
+initial_state: open
+terminal_states: [resolved]
+states: [open, assigned, resolved]
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), `
+ticket:
+  category:
+    type: text
+    initial: ""
+  priority:
+    type: text
+    initial: ""
+  resolution:
+    type: text
+    initial: ""
+    _unused_reader_reason: External operator readout from the persisted ticket record
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `
+ticket.classified:
+  swarm:
+    source: external (first-flow verify proof)
+  category: text
+  priority: text
+ticket.assigned:
+  category: text
+  priority: text
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
+classifier:
+  id: classifier
+  execution_type: system_node
+  subscribes_to: [ticket.classified]
+  produces: [ticket.assigned]
+  event_handlers:
+    ticket.classified:
+      guard:
+        check: "entity.category != '' && entity.priority != ''"
+      emit:
+        event: ticket.assigned
+        broadcast: true
+        fields:
+          category: entity.category
+          priority: entity.priority
+      advances_to: assigned
+assignee:
+  id: assignee
+  execution_type: system_node
+  subscribes_to: [ticket.assigned]
+  event_handlers:
+    ticket.assigned:
+      guard:
+        check: "entity.category != ''"
+      advances_to: resolved
+`)
+
+	var buf bytes.Buffer
+	code := runVerifyCommandWithContractsForTest(context.Background(), repoRoot(), root, &buf)
+	if code != 0 {
+		t.Fatalf("runVerifyCommand exit code = %d, output = %q", code, buf.String())
+	}
+	out := buf.String()
+	if strings.Contains(out, "lint_evidence: cross_surface_named_type_use") {
+		t.Fatalf("verify output should not contain tutorial cross-surface lint evidence:\n%s", out)
+	}
+	if strings.Contains(out, "lint_evidence: entity_reader_coverage") {
+		t.Fatalf("verify output should not contain tutorial reader coverage lint evidence:\n%s", out)
+	}
+	if !strings.Contains(out, "verify ok: contracts=") {
+		t.Fatalf("verify output missing success marker:\n%s", out)
+	}
+}
+
 func TestRunVerifyCommand_FailsForUndefinedSelectedBackendModelAlias(t *testing.T) {
 	root := t.TempDir()
 	writeVerifyModelAliasFixture(t, root, "not_configured")

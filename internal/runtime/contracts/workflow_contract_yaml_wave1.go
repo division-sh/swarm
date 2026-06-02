@@ -273,12 +273,13 @@ func (f *EntityFieldDecl) UnmarshalYAML(node *yaml.Node) error {
 		return nil
 	}
 	parsed, err := decodeWave1FieldNode(node, wave1FieldNodeOptions{
-		Context:              "entity field",
-		AllowInitial:         true,
-		AllowImmutable:       true,
-		AllowUnusedReason:    true,
-		AllowMaterializeFrom: true,
-		AllowProject:         true,
+		Context:                 "entity field",
+		AllowInitial:            true,
+		AllowImmutable:          true,
+		AllowUnusedReason:       true,
+		AllowUnusedReaderReason: true,
+		AllowMaterializeFrom:    true,
+		AllowProject:            true,
 	})
 	if err != nil {
 		return err
@@ -290,6 +291,7 @@ func (f *EntityFieldDecl) UnmarshalYAML(node *yaml.Node) error {
 	f.MaterializeFrom = parsed.MaterializeFrom
 	f.Project = parsed.Project
 	f.UnusedReason = parsed.UnusedReason
+	f.UnusedReaderReason = parsed.UnusedReaderReason
 	return nil
 }
 
@@ -338,6 +340,9 @@ func decodeWave1FieldNode(node *yaml.Node, opts wave1FieldNodeOptions) (wave1Par
 	if opts.AllowUnusedReason {
 		allowed["_unused_reason"] = struct{}{}
 	}
+	if opts.AllowUnusedReaderReason {
+		allowed["_unused_reader_reason"] = struct{}{}
+	}
 	if opts.AllowMaterializeFrom {
 		allowed["materialize_from"] = struct{}{}
 	}
@@ -364,7 +369,7 @@ func decodeWave1FieldNode(node *yaml.Node, opts wave1FieldNodeOptions) (wave1Par
 				}
 				listOf = listValue
 				continue
-			case "initial", "immutable", "_unused_reason", "materialize_from", "project":
+			case "initial", "immutable", "_unused_reason", "_unused_reader_reason", "materialize_from", "project":
 				return wave1ParsedFieldNode{}, fmt.Errorf("UNDEFINED-FIELD: %s field %q not in platform spec", opts.Context, key)
 			default:
 				return wave1ParsedFieldNode{}, fmt.Errorf("UNDEFINED-FIELD: %s field %q not in platform spec", opts.Context, key)
@@ -401,6 +406,12 @@ func decodeWave1FieldNode(node *yaml.Node, opts wave1FieldNodeOptions) (wave1Par
 				return wave1ParsedFieldNode{}, err
 			}
 			field.UnusedReason = text
+		case "_unused_reader_reason":
+			text, err := decodeScalarStringNode(value)
+			if err != nil {
+				return wave1ParsedFieldNode{}, err
+			}
+			field.UnusedReaderReason = text
 		case "materialize_from":
 			text, err := decodeScalarStringNode(value)
 			if err != nil {
@@ -429,6 +440,9 @@ func decodeWave1FieldNode(node *yaml.Node, opts wave1FieldNodeOptions) (wave1Par
 	}
 	if opts.AllowUnusedReason && strings.TrimSpace(field.UnusedReason) != "" && len(strings.TrimSpace(field.UnusedReason)) < 10 {
 		return wave1ParsedFieldNode{}, fmt.Errorf("%s _unused_reason must be at least 10 characters", opts.Context)
+	}
+	if opts.AllowUnusedReaderReason && strings.TrimSpace(field.UnusedReaderReason) != "" && len(strings.TrimSpace(field.UnusedReaderReason)) < 10 {
+		return wave1ParsedFieldNode{}, fmt.Errorf("%s _unused_reader_reason must be at least 10 characters", opts.Context)
 	}
 	return field, nil
 }
@@ -525,20 +539,22 @@ func buildFlatEventPayloadSpec(node *yaml.Node) (EventPayloadSpec, error) {
 }
 
 type wave1FieldNodeOptions struct {
-	Context              string
-	AllowInitial         bool
-	AllowImmutable       bool
-	AllowUnusedReason    bool
-	AllowMaterializeFrom bool
-	AllowProject         bool
+	Context                 string
+	AllowInitial            bool
+	AllowImmutable          bool
+	AllowUnusedReason       bool
+	AllowUnusedReaderReason bool
+	AllowMaterializeFrom    bool
+	AllowProject            bool
 }
 
 type wave1ParsedFieldNode struct {
-	Type            string
-	Initial         any
-	Immutable       bool
-	Description     string
-	MaterializeFrom string
-	Project         map[string]any
-	UnusedReason    string
+	Type               string
+	Initial            any
+	Immutable          bool
+	Description        string
+	MaterializeFrom    string
+	Project            map[string]any
+	UnusedReason       string
+	UnusedReaderReason string
 }
