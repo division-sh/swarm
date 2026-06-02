@@ -138,6 +138,7 @@ type HandlerRuleEntry struct {
 	Condition        string                   `yaml:"condition"`
 	AdvancesTo       string                   `yaml:"advances_to"`
 	Emit             EmitSpec                 `yaml:"emit"`
+	Action           ActionSpec               `yaml:"action"`
 	DataAccumulation WorkflowDataAccumulation `yaml:"data_accumulation"`
 	Compute          *ComputeSpec             `yaml:"compute"`
 	FanOut           *FanOutSpec              `yaml:"fan_out"`

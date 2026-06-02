@@ -68,6 +68,20 @@ func HandlerHasAmbiguousTopLevelEmit(handler SystemNodeEventHandler) bool {
 	return !handler.Emit.Empty() && HandlerHasNestedEmitSites(handler)
 }
 
+func HandlerHasAmbiguousTopLevelAction(handler SystemNodeEventHandler) bool {
+	return strings.TrimSpace(handler.Action.ID) != "" && len(handler.Rules) > 0
+}
+
+func HandlerRuleActionIDs(handler SystemNodeEventHandler) []string {
+	out := make([]string, 0, len(handler.Rules))
+	for _, rule := range handler.Rules {
+		if id := strings.TrimSpace(rule.Action.ID); id != "" {
+			out = append(out, id)
+		}
+	}
+	return uniqueOrderedStrings(out)
+}
+
 func uniqueOrderedStrings(values []string) []string {
 	if len(values) == 0 {
 		return nil

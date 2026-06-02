@@ -706,6 +706,107 @@ data_accumulation:
 	}
 }
 
+func TestSystemNodeEventHandlerDecode_PreservesRuleLevelAction(t *testing.T) {
+	var handler SystemNodeEventHandler
+	if err := yaml.Unmarshal([]byte(`
+rules:
+  needs_human:
+    condition: "payload.amount >= 100"
+    advances_to: awaiting_human
+    action:
+      id: mailbox_write
+      mailbox:
+        item_type:
+          literal: approval
+        summary:
+          literal: Review refund
+`), &handler); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if got := len(handler.Rules); got != 1 {
+		t.Fatalf("Rules len = %d, want 1", got)
+	}
+	rule := handler.Rules[0]
+	if got := rule.ID; got != "needs_human" {
+		t.Fatalf("rule ID = %q, want needs_human", got)
+	}
+	if got := rule.Action.ID; got != "mailbox_write" {
+		t.Fatalf("rule Action.ID = %q, want mailbox_write", got)
+	}
+	if rule.Action.Mailbox == nil {
+		t.Fatal("expected rule Action.Mailbox")
+	}
+	if got := rule.Action.Mailbox.ItemType.Literal; got != "approval" {
+		t.Fatalf("rule Action.Mailbox.ItemType = %#v, want approval", got)
+	}
+}
+
+func TestSystemNodeEventHandlerDecode_RejectsHandlerActionWithRules(t *testing.T) {
+	var handler SystemNodeEventHandler
+	err := yaml.Unmarshal([]byte(`
+action: mailbox_write
+rules:
+  needs_human:
+    condition: "else"
+    advances_to: awaiting_human
+`), &handler)
+	if err == nil || !strings.Contains(err.Error(), "AMBIGUOUS-ACTION") {
+		t.Fatalf("yaml.Unmarshal error = %v, want AMBIGUOUS-ACTION", err)
+	}
+}
+
+func TestSystemNodeEventHandlerDecode_RejectsActionOutsideRulesContext(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+	}{
+		{
+			name: "on_complete",
+			raw: `
+on_complete:
+  - id: done
+    condition: "else"
+    action:
+      id: mailbox_write
+`,
+		},
+		{
+			name: "accumulate_on_complete",
+			raw: `
+accumulate:
+  into: approvals
+  expected_from: entity.expected_approvals
+  on_complete:
+    - id: done
+      condition: "else"
+      action:
+        id: mailbox_write
+`,
+		},
+		{
+			name: "accumulate_on_timeout",
+			raw: `
+accumulate:
+  into: approvals
+  expected_from: entity.expected_approvals
+  on_timeout:
+    advances_to: timed_out
+    action:
+      id: mailbox_write
+`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var handler SystemNodeEventHandler
+			err := yaml.Unmarshal([]byte(tc.raw), &handler)
+			if err == nil || !strings.Contains(err.Error(), "UNSUPPORTED-ACTION") {
+				t.Fatalf("yaml.Unmarshal error = %v, want UNSUPPORTED-ACTION", err)
+			}
+		})
+	}
+}
+
 func TestSystemNodeEventHandlerDecode_MergesScalarActionWithCreateFlowFields(t *testing.T) {
 	var handler SystemNodeEventHandler
 	if err := yaml.Unmarshal([]byte(`

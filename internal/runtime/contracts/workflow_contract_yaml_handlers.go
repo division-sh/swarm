@@ -642,10 +642,10 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 	if h.ClearGates, err = decodeClearGatesNode(&aux.ClearGates); err != nil {
 		return err
 	}
-	if h.OnComplete, err = decodeHandlerRuleEntriesNode(&aux.OnComplete); err != nil {
+	if h.OnComplete, err = decodeHandlerRuleEntriesNode(&aux.OnComplete, handlerRuleDecodeContextOnComplete); err != nil {
 		return err
 	}
-	if h.Rules, err = decodeHandlerRuleEntriesNode(&aux.Rules); err != nil {
+	if h.Rules, err = decodeHandlerRuleEntriesNode(&aux.Rules, handlerRuleDecodeContextRules); err != nil {
 		return err
 	}
 	if h.Query, err = decodeQuerySpecNode(&aux.Query); err != nil {
@@ -659,6 +659,9 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 	}
 	if HandlerHasAmbiguousTopLevelEmit(*h) {
 		return fmt.Errorf("AMBIGUOUS-EMIT: handler-top-level emit is only allowed on single-emit handlers; move emit ownership to the active branch, rule, timeout, or fan_out site")
+	}
+	if HandlerHasAmbiguousTopLevelAction(*h) {
+		return fmt.Errorf("AMBIGUOUS-ACTION: handler-top-level action is only allowed on handlers without rules; move action ownership to the active rule")
 	}
 	return nil
 }
@@ -991,7 +994,16 @@ func decodeClearGatesNode(node *yaml.Node) ([]string, error) {
 	}
 }
 
-func decodeHandlerRuleEntryNode(node *yaml.Node) (*HandlerRuleEntry, error) {
+type handlerRuleDecodeContext string
+
+const (
+	handlerRuleDecodeContextRules                handlerRuleDecodeContext = "rules"
+	handlerRuleDecodeContextOnComplete           handlerRuleDecodeContext = "on_complete"
+	handlerRuleDecodeContextAccumulateOnComplete handlerRuleDecodeContext = "accumulate.on_complete"
+	handlerRuleDecodeContextAccumulateOnTimeout  handlerRuleDecodeContext = "accumulate.on_timeout"
+)
+
+func decodeHandlerRuleEntryNode(node *yaml.Node, context handlerRuleDecodeContext) (*HandlerRuleEntry, error) {
 	if node == nil || node.Kind == 0 {
 		return nil, nil
 	}
@@ -999,13 +1011,16 @@ func decodeHandlerRuleEntryNode(node *yaml.Node) (*HandlerRuleEntry, error) {
 	if err := node.Decode(&rule); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(rule.ID) == "" && strings.TrimSpace(rule.Description) == "" && strings.TrimSpace(rule.Condition) == "" && strings.TrimSpace(rule.AdvancesTo) == "" && rule.Emit.Empty() && !rule.DataAccumulation.HasWrites() && rule.Compute == nil && rule.FanOut == nil {
+	if err := rejectRuleActionOutsideRules(rule, context); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(rule.ID) == "" && strings.TrimSpace(rule.Description) == "" && strings.TrimSpace(rule.Condition) == "" && strings.TrimSpace(rule.AdvancesTo) == "" && rule.Emit.Empty() && strings.TrimSpace(rule.Action.ID) == "" && !rule.DataAccumulation.HasWrites() && rule.Compute == nil && rule.FanOut == nil {
 		return nil, nil
 	}
 	return &rule, nil
 }
 
-func decodeHandlerRuleEntriesNode(node *yaml.Node) ([]HandlerRuleEntry, error) {
+func decodeHandlerRuleEntriesNode(node *yaml.Node, context handlerRuleDecodeContext) ([]HandlerRuleEntry, error) {
 	if node == nil || node.Kind == 0 {
 		return nil, nil
 	}
@@ -1015,10 +1030,15 @@ func decodeHandlerRuleEntriesNode(node *yaml.Node) ([]HandlerRuleEntry, error) {
 		if err := node.Decode(&rules); err != nil {
 			return nil, err
 		}
+		for _, rule := range rules {
+			if err := rejectRuleActionOutsideRules(rule, context); err != nil {
+				return nil, err
+			}
+		}
 		return rules, nil
 	case yaml.MappingNode:
-		if hasAnyYAMLMappingKey(node, "condition", "advances_to", "emit", "emits", "data_accumulation", "compute", "fan_out") {
-			rule, err := decodeHandlerRuleEntryNode(node)
+		if hasAnyYAMLMappingKey(node, "condition", "advances_to", "emit", "emits", "action", "data_accumulation", "compute", "fan_out") {
+			rule, err := decodeHandlerRuleEntryNode(node, context)
 			if err != nil || rule == nil {
 				return nil, err
 			}
@@ -1034,6 +1054,9 @@ func decodeHandlerRuleEntriesNode(node *yaml.Node) ([]HandlerRuleEntry, error) {
 			if err := node.Content[i+1].Decode(&rule); err != nil {
 				return nil, err
 			}
+			if err := rejectRuleActionOutsideRules(rule, context); err != nil {
+				return nil, err
+			}
 			if strings.TrimSpace(rule.ID) == "" {
 				rule.ID = id
 			}
@@ -1043,6 +1066,13 @@ func decodeHandlerRuleEntriesNode(node *yaml.Node) ([]HandlerRuleEntry, error) {
 	default:
 		return nil, fmt.Errorf("unsupported rules yaml node kind %d", node.Kind)
 	}
+}
+
+func rejectRuleActionOutsideRules(rule HandlerRuleEntry, context handlerRuleDecodeContext) error {
+	if context == handlerRuleDecodeContextRules || strings.TrimSpace(rule.Action.ID) == "" {
+		return nil
+	}
+	return fmt.Errorf("UNSUPPORTED-ACTION: %s entries do not support action; rule-level action is only supported under handler.rules", context)
 }
 
 func decodeQuerySpecNode(node *yaml.Node) (*QuerySpec, error) {
@@ -1142,6 +1172,18 @@ func decodeEntitySelectionSpecNode(node *yaml.Node, label string) (*SelectEntity
 		})
 	}
 	return spec, nil
+}
+
+func (a *ActionSpec) UnmarshalYAML(node *yaml.Node) error {
+	if a == nil {
+		return nil
+	}
+	spec, err := decodeActionSpecNode(node)
+	if err != nil {
+		return err
+	}
+	*a = spec
+	return nil
 }
 
 func decodeActionSpecNode(node *yaml.Node) (ActionSpec, error) {

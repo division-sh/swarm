@@ -858,6 +858,29 @@ func TestRun_ReportsMailboxWriteMissingMailboxSpec(t *testing.T) {
 	}
 }
 
+func TestRun_ReportsRuleMailboxWriteMissingMailboxSpec(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"mailbox-node": {
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"mailbox.review_requested": {
+						Rules: []runtimecontracts.HandlerRuleEntry{{
+							ID:     "needs-human",
+							Action: runtimecontracts.ActionSpec{ID: "mailbox_write"},
+						}},
+					},
+				},
+			},
+		},
+	})
+
+	report := Run(context.Background(), source, Options{})
+
+	if !reportContains(report.Errors(), "handler_field_compliance", "handler mailbox.review_requested rule needs-human mailbox_write is missing mailbox") {
+		t.Fatalf("expected rule handler_field_compliance missing mailbox error, got %#v", report.Errors())
+	}
+}
+
 func TestRun_ReportsMailboxWriteMissingRequiredFields(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
@@ -881,6 +904,59 @@ func TestRun_ReportsMailboxWriteMissingRequiredFields(t *testing.T) {
 	}
 	if !reportContains(report.Errors(), "handler_field_compliance", "mailbox_write is missing mailbox.summary") {
 		t.Fatalf("expected handler_field_compliance missing mailbox.summary error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_ReportsRuleMailboxWriteMissingRequiredFields(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"mailbox-node": {
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"mailbox.review_requested": {
+						Rules: []runtimecontracts.HandlerRuleEntry{{
+							ID: "needs-human",
+							Action: runtimecontracts.ActionSpec{
+								ID:      "mailbox_write",
+								Mailbox: &runtimecontracts.MailboxWriteSpec{},
+							},
+						}},
+					},
+				},
+			},
+		},
+	})
+
+	report := Run(context.Background(), source, Options{})
+
+	if !reportContains(report.Errors(), "handler_field_compliance", "handler mailbox.review_requested rule needs-human mailbox_write is missing mailbox.item_type") {
+		t.Fatalf("expected rule handler_field_compliance missing mailbox.item_type error, got %#v", report.Errors())
+	}
+	if !reportContains(report.Errors(), "handler_field_compliance", "handler mailbox.review_requested rule needs-human mailbox_write is missing mailbox.summary") {
+		t.Fatalf("expected rule handler_field_compliance missing mailbox.summary error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_ReportsHandlerLevelActionWithRules(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"mailbox-node": {
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"mailbox.review_requested": {
+						Action: runtimecontracts.ActionSpec{ID: "mailbox_write"},
+						Rules: []runtimecontracts.HandlerRuleEntry{{
+							ID:        "needs-human",
+							Condition: "else",
+						}},
+					},
+				},
+			},
+		},
+	})
+
+	report := Run(context.Background(), source, Options{})
+
+	if !reportContains(report.Errors(), "handler_field_compliance", "handler-level action is invalid when rules are present") {
+		t.Fatalf("expected ambiguous handler-level action error, got %#v", report.Errors())
 	}
 }
 
