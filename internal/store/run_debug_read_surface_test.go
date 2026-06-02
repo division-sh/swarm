@@ -42,6 +42,9 @@ func TestRunDebugReadSurface_ListRunDebugRuns_UsesCanonicalRunScope(t *testing.T
 	newerRunID := uuid.NewString()
 	olderEventID := uuid.NewString()
 	newerEventID := uuid.NewString()
+	olderEntityID := uuid.NewString()
+	newerEntityA := uuid.NewString()
+	newerEntityB := uuid.NewString()
 	now := time.Unix(1700000000, 0).UTC()
 
 	if _, err := db.ExecContext(ctx, `
@@ -63,6 +66,8 @@ func TestRunDebugReadSurface_ListRunDebugRuns_UsesCanonicalRunScope(t *testing.T
 	`, olderRunID, olderEventID, newerRunID, newerEventID, now.Add(-119*time.Minute), now.Add(-91*time.Minute), now.Add(-59*time.Minute)); err != nil {
 		t.Fatalf("seed events: %v", err)
 	}
+	seedPostgresEntityStateRows(t, db, ctx, olderRunID, olderEntityID)
+	seedPostgresEntityStateRows(t, db, ctx, newerRunID, newerEntityA, newerEntityB)
 
 	runs, err := pg.ListRunDebugRuns(ctx, 10)
 	if err != nil {
@@ -77,11 +82,17 @@ func TestRunDebugReadSurface_ListRunDebugRuns_UsesCanonicalRunScope(t *testing.T
 	if runs[0].RootEventID != newerEventID || runs[0].RootEventType != "scan.requested" {
 		t.Fatalf("runs[0] root = %#v", runs[0])
 	}
+	if runs[0].EntityCount != 2 {
+		t.Fatalf("runs[0].EntityCount = %d, want entity_state count 2", runs[0].EntityCount)
+	}
 	if runs[1].RunID != olderRunID {
 		t.Fatalf("runs[1].RunID = %q, want %q", runs[1].RunID, olderRunID)
 	}
 	if runs[1].EventCount != 2 {
 		t.Fatalf("runs[1].EventCount = %d, want 2", runs[1].EventCount)
+	}
+	if runs[1].EntityCount != 1 {
+		t.Fatalf("runs[1].EntityCount = %d, want entity_state count 1", runs[1].EntityCount)
 	}
 }
 
@@ -131,6 +142,7 @@ func TestRunDebugReadSurface_LoadRunDebugReport_UsesCanonicalRunIDForLogsAndMuta
 	targetRunID := uuid.NewString()
 	otherRunID := uuid.NewString()
 	targetEntityID := uuid.NewString()
+	targetSecondEntityID := uuid.NewString()
 	otherEntityID := uuid.NewString()
 	targetEventID := uuid.NewString()
 	otherEventID := uuid.NewString()
@@ -154,6 +166,8 @@ func TestRunDebugReadSurface_LoadRunDebugReport_UsesCanonicalRunIDForLogsAndMuta
 	`, targetRunID, targetEventID, targetEntityID, now.Add(-4*time.Minute), otherRunID, otherEventID, otherEntityID, now.Add(-3*time.Minute)); err != nil {
 		t.Fatalf("seed root events: %v", err)
 	}
+	seedPostgresEntityStateRows(t, db, ctx, targetRunID, targetEntityID, targetSecondEntityID)
+	seedPostgresEntityStateRows(t, db, ctx, otherRunID, otherEntityID)
 
 	insertRuntimeLog := func(runID string, payloadRunID string, component string, action string, createdAt time.Time) {
 		t.Helper()
@@ -229,6 +243,9 @@ func TestRunDebugReadSurface_LoadRunDebugReport_UsesCanonicalRunIDForLogsAndMuta
 	}
 	if report.RootEventID != targetEventID {
 		t.Fatalf("RootEventID = %q, want %q", report.RootEventID, targetEventID)
+	}
+	if report.EntityCount != 2 {
+		t.Fatalf("EntityCount = %d, want entity_state count 2", report.EntityCount)
 	}
 	if report.WarnErrorLogCount != 1 {
 		t.Fatalf("WarnErrorLogCount = %d, want 1", report.WarnErrorLogCount)

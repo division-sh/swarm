@@ -209,7 +209,7 @@ func (s *SQLiteRuntimeStore) sqliteLoadRunLifecycleSnapshot(ctx context.Context,
 			run_id,
 			LOWER(COALESCE(status, '')),
 			COALESCE(event_count, 0),
-			COALESCE(entity_count, 0),
+			COALESCE((SELECT COUNT(DISTINCT es.entity_id) FROM entity_state es WHERE es.run_id = runs.run_id), 0),
 			COALESCE(error_summary, ''),
 			started_at,
 			ended_at
@@ -311,7 +311,7 @@ func sqliteSyncRunCounts(ctx context.Context, q execQueryer, runID string) error
 		UPDATE runs
 		SET
 			event_count = (SELECT COUNT(*) FROM events WHERE run_id = ?),
-			entity_count = (SELECT COUNT(DISTINCT entity_id) FROM events WHERE run_id = ?)
+			entity_count = (SELECT COUNT(DISTINCT entity_id) FROM entity_state WHERE run_id = ?)
 		WHERE run_id = ?
 	`, runID, runID, runID)
 	if err != nil {

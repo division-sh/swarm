@@ -26,6 +26,12 @@ func (s *SQLiteRuntimeStore) requireRunHeaderCapabilities(ctx context.Context) e
 	if !caps.Events.LogRunID {
 		return fmt.Errorf("run api read surface requires canonical events.run_id")
 	}
+	if caps.EntityState != SchemaFlavorCanonical {
+		return unsupportedSchemaCapability("entity_state", caps.EntityState)
+	}
+	if !caps.EntityRunID {
+		return fmt.Errorf("run api read surface requires canonical entity_state.run_id")
+	}
 	return nil
 }
 
@@ -189,7 +195,7 @@ SELECT
 		ORDER BY e.created_at ASC, e.event_id ASC
 		LIMIT 1
 	), ''),
-	COALESCE(r.entity_count, 0),
+	COALESCE((SELECT COUNT(DISTINCT es.entity_id) FROM entity_state es WHERE es.run_id = r.run_id), 0),
 	COALESCE(NULLIF(r.event_count, 0), (SELECT COUNT(*) FROM events e WHERE e.run_id = r.run_id), 0),
 	r.started_at,
 	r.ended_at,

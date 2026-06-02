@@ -279,15 +279,16 @@ func SyncCounts(ctx context.Context, db DBTX, runID string) error {
 	_, err := db.ExecContext(ctx, `
 		UPDATE runs
 		SET
-			event_count = counts.event_count,
-			entity_count = counts.entity_count
-		FROM (
-			SELECT
-				COUNT(*)::integer AS event_count,
-				COUNT(DISTINCT entity_id)::integer AS entity_count
-			FROM events
-			WHERE run_id = $1::uuid
-		) AS counts
+			event_count = (
+				SELECT COUNT(*)::integer
+				FROM events
+				WHERE run_id = $1::uuid
+			),
+			entity_count = (
+				SELECT COUNT(DISTINCT entity_id)::integer
+				FROM entity_state
+				WHERE run_id = $1::uuid
+			)
 		WHERE runs.run_id = $1::uuid
 	`, runID)
 	if err != nil {
@@ -348,7 +349,11 @@ func LoadSnapshot(ctx context.Context, db DBTX, runID string, opts EnsureActiveO
 		if opts.HasCounterCols {
 			query += `
 			COALESCE(event_count, 0),
-			COALESCE(entity_count, 0),`
+			COALESCE((
+				SELECT COUNT(DISTINCT es.entity_id)::integer
+				FROM entity_state es
+				WHERE es.run_id = runs.run_id
+			), 0),`
 		} else {
 			query += `
 			0,

@@ -123,6 +123,25 @@ func publishRunStatusRootEvent(t *testing.T, bus *runtimebus.EventBus, runID, en
 	}
 }
 
+func seedRunStatusEntityState(t *testing.T, db *sql.DB, runID, entityID string) {
+	t.Helper()
+	now := time.Now().UTC()
+	if _, err := db.ExecContext(context.Background(), `
+		INSERT INTO entity_state (
+			run_id, entity_id, flow_instance, entity_type, slug, name, current_state,
+			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
+		) VALUES (
+			$1::uuid, $2::uuid, 'run-status-test', 'default', 'status-entity', 'Status Entity', 'ready',
+			'{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, $3, $3, $3
+		)
+	`, runID, entityID, now); err != nil {
+		t.Fatalf("seed run status entity_state: %v", err)
+	}
+	if err := storerunlifecycle.SyncCounts(context.Background(), db, runID); err != nil {
+		t.Fatalf("sync run status entity_count: %v", err)
+	}
+}
+
 func markRunStatusCompleted(t *testing.T, pg *store.PostgresStore, runID string) {
 	t.Helper()
 	if err := pg.MarkRunTerminal(context.Background(), runID, "completed", "", time.Now().UTC()); err != nil {
@@ -5960,6 +5979,7 @@ func TestLoadRunStatusReport_UsesDurableCompletedRunState(t *testing.T) {
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
 	publishRunStatusRootEvent(t, eb, runID, entityID)
+	seedRunStatusEntityState(t, db, runID, entityID)
 	markRunStatusCompleted(t, pg, runID)
 
 	ctx := context.Background()
@@ -6028,6 +6048,7 @@ func TestLoadRunStatusReport_KeepsSupportedRunRunningUntilManagerWorkSettles(t *
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
 	publishRunStatusRootEvent(t, eb, runID, entityID)
+	seedRunStatusEntityState(t, db, runID, entityID)
 
 	select {
 	case <-agentStarted:
@@ -6148,6 +6169,7 @@ func TestLoadRunStatusReport_PreservesRunningTruthWhileManagerWorkIsActive(t *te
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
 	publishRunStatusRootEvent(t, eb, runID, entityID)
+	seedRunStatusEntityState(t, db, runID, entityID)
 
 	select {
 	case <-agentStarted:
