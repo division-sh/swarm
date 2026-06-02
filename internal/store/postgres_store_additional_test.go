@@ -279,7 +279,7 @@ func TestPostgresRunLifecycleEntityCountUsesEntityState(t *testing.T) {
 	}
 }
 
-func TestPostgresRunLifecycleSkipsEntityStateCounterSyncWhenUnavailable(t *testing.T) {
+func TestPostgresRunLifecycleFailsClosedWhenEntityStateCountSourceUnavailable(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
@@ -309,22 +309,21 @@ func TestPostgresRunLifecycleSkipsEntityStateCounterSyncWhenUnavailable(t *testi
 		t.Fatalf("AppendEvent: %v", err)
 	}
 
-	if err := pg.MarkRunTerminal(ctx, runID, "completed", "", time.Now().UTC()); err != nil {
-		t.Fatalf("MarkRunTerminal: %v", err)
+	snap, err := pg.LoadRunLifecycleSnapshot(ctx, runID)
+	if err == nil || !strings.Contains(err.Error(), "canonical run-scoped entity_state") {
+		t.Fatalf("LoadRunLifecycleSnapshot = (%+v, %v), want canonical entity_state failure", snap, err)
 	}
 
-	snap, err := pg.LoadRunLifecycleSnapshot(ctx, runID)
-	if err != nil {
-		t.Fatalf("LoadRunLifecycleSnapshot: %v", err)
+	if err := pg.MarkRunTerminal(ctx, runID, "completed", "", time.Now().UTC()); err == nil || !strings.Contains(err.Error(), "canonical run-scoped entity_state") {
+		t.Fatalf("MarkRunTerminal error = %v, want canonical entity_state failure", err)
 	}
-	if snap.Status != "completed" {
-		t.Fatalf("snapshot status = %q, want completed", snap.Status)
+
+	var status string
+	if err := db.QueryRowContext(ctx, `SELECT COALESCE(status, '') FROM runs WHERE run_id = $1::uuid`, runID).Scan(&status); err != nil {
+		t.Fatalf("load run status: %v", err)
 	}
-	if snap.EventCount != 41 {
-		t.Fatalf("snapshot event_count = %d, want existing runs counter 41", snap.EventCount)
-	}
-	if snap.EntityCount != 7 {
-		t.Fatalf("snapshot entity_count = %d, want existing runs counter 7", snap.EntityCount)
+	if status != "running" {
+		t.Fatalf("run status = %q, want unchanged running after fail-closed terminal attempt", status)
 	}
 }
 

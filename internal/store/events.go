@@ -1408,6 +1408,7 @@ func runLifecycleOptions(caps StoreSchemaCapabilities) storerunlifecycle.EnsureA
 		HasTriggerCols:          caps.Events.RunTriggerColumns,
 		HasCounterCols:          caps.Events.RunCounterColumns,
 		HasEntityStateCountSrc:  runLifecycleEntityStateCountSource(caps),
+		RequireEntityStateCount: true,
 		HasTerminalCols:         caps.Events.RunTerminalFields,
 		HasBundleHashCol:        caps.Events.RunBundleHash,
 		HasBundleSourceCol:      caps.Events.RunBundleSource,

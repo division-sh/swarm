@@ -30,6 +30,7 @@ type EnsureActiveOptions struct {
 	HasTriggerCols          bool
 	HasCounterCols          bool
 	HasEntityStateCountSrc  bool
+	RequireEntityStateCount bool
 	HasTerminalCols         bool
 	HasBundleHashCol        bool
 	HasBundleSourceCol      bool
@@ -325,6 +326,9 @@ func LoadSnapshot(ctx context.Context, db DBTX, runID string, opts EnsureActiveO
 	if db == nil || runID == "" {
 		return Snapshot{}, fmt.Errorf("run_id is required")
 	}
+	if opts.RequireEntityStateCount && !opts.HasEntityStateCountSrc {
+		return Snapshot{}, fmt.Errorf("run lifecycle entity count requires canonical run-scoped entity_state")
+	}
 	var (
 		snap      Snapshot
 		startedAt sql.NullTime
@@ -342,26 +346,27 @@ func LoadSnapshot(ctx context.Context, db DBTX, runID string, opts EnsureActiveO
 		FROM runs
 		WHERE run_id = $1::uuid
 	`
-	if opts.HasCounterCols || opts.HasTerminalCols || opts.HasStartedAtCol {
+	if opts.HasCounterCols || opts.HasEntityStateCountSrc || opts.HasTerminalCols || opts.HasStartedAtCol {
 		query = `
 		SELECT
 			run_id::text,
 			COALESCE(status, ''), `
-		if opts.HasCounterCols && opts.HasEntityStateCountSrc {
+		if opts.HasCounterCols {
 			query += `
-			COALESCE(event_count, 0),
+			COALESCE(event_count, 0),`
+		} else {
+			query += `
+			0,`
+		}
+		if opts.HasEntityStateCountSrc {
+			query += `
 			COALESCE((
 				SELECT COUNT(DISTINCT es.entity_id)::integer
 				FROM entity_state es
 				WHERE es.run_id = runs.run_id
 			), 0),`
-		} else if opts.HasCounterCols {
-			query += `
-			COALESCE(event_count, 0),
-			COALESCE(entity_count, 0),`
 		} else {
 			query += `
-			0,
 			0,`
 		}
 		if opts.HasTerminalCols {
@@ -436,6 +441,9 @@ func MarkTerminal(ctx context.Context, db DBTX, runID, status, errorSummary stri
 	}
 	if endedAt.IsZero() {
 		endedAt = time.Now().UTC()
+	}
+	if opts.RequireEntityStateCount && !opts.HasEntityStateCountSrc {
+		return Snapshot{}, fmt.Errorf("run lifecycle entity count requires canonical run-scoped entity_state")
 	}
 	if opts.HasCounterCols && opts.HasEntityStateCountSrc {
 		if err := SyncCounts(ctx, db, runID); err != nil {
