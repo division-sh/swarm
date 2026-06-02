@@ -279,6 +279,55 @@ func TestPostgresRunLifecycleEntityCountUsesEntityState(t *testing.T) {
 	}
 }
 
+func TestPostgresRunLifecycleSkipsEntityStateCounterSyncWhenUnavailable(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	if _, err := db.ExecContext(ctx, `DROP TABLE IF EXISTS entity_state CASCADE`); err != nil {
+		t.Fatalf("drop entity_state: %v", err)
+	}
+
+	runID := uuid.NewString()
+	entityID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, event_count, entity_count, started_at)
+		VALUES ($1::uuid, 'running', 41, 7, now())
+	`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	evt := events.Event{
+		ID:          uuid.NewString(),
+		RunID:       runID,
+		Type:        events.EventType("scan.requested"),
+		SourceAgent: "agent-1",
+		Payload:     []byte(`{}`),
+		CreatedAt:   time.Now().UTC(),
+	}.WithEntityID(entityID)
+	if err := pg.AppendEvent(ctx, evt); err != nil {
+		t.Fatalf("AppendEvent: %v", err)
+	}
+
+	if err := pg.MarkRunTerminal(ctx, runID, "completed", "", time.Now().UTC()); err != nil {
+		t.Fatalf("MarkRunTerminal: %v", err)
+	}
+
+	snap, err := pg.LoadRunLifecycleSnapshot(ctx, runID)
+	if err != nil {
+		t.Fatalf("LoadRunLifecycleSnapshot: %v", err)
+	}
+	if snap.Status != "completed" {
+		t.Fatalf("snapshot status = %q, want completed", snap.Status)
+	}
+	if snap.EventCount != 41 {
+		t.Fatalf("snapshot event_count = %d, want existing runs counter 41", snap.EventCount)
+	}
+	if snap.EntityCount != 7 {
+		t.Fatalf("snapshot entity_count = %d, want existing runs counter 7", snap.EntityCount)
+	}
+}
+
 func TestPostgresStore_AppendEvent_ReopensPrematureCompletedRunAndSyncsCounters(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}

@@ -29,6 +29,7 @@ type EnsureActiveOptions struct {
 	HasStartedAtCol         bool
 	HasTriggerCols          bool
 	HasCounterCols          bool
+	HasEntityStateCountSrc  bool
 	HasTerminalCols         bool
 	HasBundleHashCol        bool
 	HasBundleSourceCol      bool
@@ -346,7 +347,7 @@ func LoadSnapshot(ctx context.Context, db DBTX, runID string, opts EnsureActiveO
 		SELECT
 			run_id::text,
 			COALESCE(status, ''), `
-		if opts.HasCounterCols {
+		if opts.HasCounterCols && opts.HasEntityStateCountSrc {
 			query += `
 			COALESCE(event_count, 0),
 			COALESCE((
@@ -354,6 +355,10 @@ func LoadSnapshot(ctx context.Context, db DBTX, runID string, opts EnsureActiveO
 				FROM entity_state es
 				WHERE es.run_id = runs.run_id
 			), 0),`
+		} else if opts.HasCounterCols {
+			query += `
+			COALESCE(event_count, 0),
+			COALESCE(entity_count, 0),`
 		} else {
 			query += `
 			0,
@@ -432,7 +437,7 @@ func MarkTerminal(ctx context.Context, db DBTX, runID, status, errorSummary stri
 	if endedAt.IsZero() {
 		endedAt = time.Now().UTC()
 	}
-	if opts.HasCounterCols {
+	if opts.HasCounterCols && opts.HasEntityStateCountSrc {
 		if err := SyncCounts(ctx, db, runID); err != nil {
 			return Snapshot{}, err
 		}
