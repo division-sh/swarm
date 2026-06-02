@@ -294,17 +294,18 @@ func deriveAccumulateTimeoutTransition(transition HandlerTransitionSemantic) (Wo
 }
 
 func deriveRuleTransitions(transition HandlerTransitionSemantic) []WorkflowTransitionContract {
-	rules := transition.OnComplete
+	rules := append([]HandlerRuleEntry{}, transition.OnComplete...)
 	if len(rules) == 0 && transition.Accumulate != nil {
-		rules = transition.Accumulate.OnComplete
+		rules = append(rules, transition.Accumulate.OnComplete...)
 	}
-	rules = append(append([]HandlerRuleEntry{}, rules...), transition.Rules...)
-	if len(rules) == 0 {
-		return nil
-	}
+	nonHandlerRuleCount := len(rules)
+	rules = append(rules, transition.Rules...)
 	out := make([]WorkflowTransitionContract, 0, len(rules))
 	for idx, rule := range rules {
 		to := strings.TrimSpace(rule.AdvancesTo)
+		if to == "" && idx >= nonHandlerRuleCount && strings.TrimSpace(rule.Action.ID) != "" {
+			to = strings.TrimSpace(transition.AdvancesTo)
+		}
 		if to == "" {
 			continue
 		}
