@@ -334,6 +334,8 @@ rows:
       - Postgres bundle catalog boot owner
     proof_dimensions: [backend_selection, fail_closed, split_tracker]
     proof_refs:
+      - kind: go_test
+        name: TestCLI_ServeBundleHashValidationAndSerialScope
       - kind: artifact
         path: platform-spec.yaml
       - kind: tracker
@@ -341,5 +343,7 @@ rows:
         watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
     notes: >
       SQLite local/dev runtime support does not promote DB-loaded persisted
-      bundle catalog boot. That remains an intentional Postgres-only split until
-      separately gated.
+      bundle catalog boot. The executable proof covers `serve --bundle-hash ...
+      --store sqlite` failing with the typed `--bundle-hash requires --store
+      postgres` diagnostic. SQLite DB-loaded bundle boot remains an intentional
+      Postgres-only split until separately gated.

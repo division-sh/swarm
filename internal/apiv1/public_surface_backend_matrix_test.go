@@ -124,6 +124,17 @@ func TestPublicSurfaceBackendMatrixRejectsStaleReferences(t *testing.T) {
 			},
 			want: "status_run_get_entity_count must remain split_to_existing_issue with split_issue 1254",
 		},
+		{
+			name: "fail closed row requires executable proof",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				row := publicSurfaceMatrixRowByID(t, matrix, "bundle_hash_catalog_boot_postgres_only")
+				row.ProofRefs = []publicSurfaceProofRef{
+					{Kind: "artifact", Path: "platform-spec.yaml"},
+					{Kind: "tracker", Issue: 1239, Watchlist: "runtime_operations.runtime_store_backend_default_and_sqlite_portability"},
+				}
+			},
+			want: "bundle_hash_catalog_boot_postgres_only fail-closed row requires at least one go_test proof_ref",
+		},
 	}
 
 	for _, tc := range tests {
@@ -401,6 +412,7 @@ func validatePublicSurfaceRow(root string, row publicSurfaceMatrixRow, ctx publi
 func validatePublicSurfaceProofRefs(root, rowID string, row publicSurfaceMatrixRow, ctx publicSurfaceValidationContext, activeTrackers map[string]struct{}) []string {
 	var problems []string
 	seenSplitTracker := false
+	seenGoTest := false
 	for _, ref := range row.ProofRefs {
 		kind := strings.TrimSpace(ref.Kind)
 		if _, ok := allowedPublicSurfaceProofKinds()[kind]; !ok {
@@ -409,6 +421,7 @@ func validatePublicSurfaceProofRefs(root, rowID string, row publicSurfaceMatrixR
 		}
 		switch kind {
 		case "go_test":
+			seenGoTest = true
 			if strings.TrimSpace(ref.Name) == "" {
 				problems = append(problems, fmt.Sprintf("%s go_test proof_ref missing name", rowID))
 				continue
@@ -446,6 +459,9 @@ func validatePublicSurfaceProofRefs(root, rowID string, row publicSurfaceMatrixR
 	}
 	if row.Classification == "split_to_existing_issue" && row.SplitIssue != 0 && !seenSplitTracker {
 		problems = append(problems, fmt.Sprintf("%s split row missing tracker proof_ref for issue #%d", rowID, row.SplitIssue))
+	}
+	if publicSurfaceFailClosedRow(row) && !seenGoTest {
+		problems = append(problems, fmt.Sprintf("%s fail-closed row requires at least one go_test proof_ref", rowID))
 	}
 	return problems
 }
@@ -561,6 +577,10 @@ func publicSurfaceSupported(row publicSurfaceMatrixRow) bool {
 	default:
 		return false
 	}
+}
+
+func publicSurfaceFailClosedRow(row publicSurfaceMatrixRow) bool {
+	return row.Tier == "postgres_only_fail_closed" || publicSurfaceHasValue(row.ProofDimensions, "fail_closed")
 }
 
 func publicSurfaceHasValue(values []string, want string) bool {
