@@ -147,6 +147,56 @@ func TestEventPublishBundleHashSerializesCanonicalParamAndMapsUnsupported(t *tes
 	}
 }
 
+func TestEventPublishPayloadEntityIDServerRejectionMapsSupportedCLISurface(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	var captured jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		writeEventPublishJSONRPCErrorWithDetails(t, w, captured.ID, "PAYLOAD_VALIDATION_FAILED", map[string]any{
+			"event_name": "thing.created",
+			"violations": []any{
+				map[string]any{
+					"field_path": "$.entity_id",
+					"rule":       "create_entity_mints_entity_id",
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{
+		"event", "publish", "thing.created",
+		"--payload-json", `{"entity_id":"11111111-1111-4111-8111-111111111111","amount":50}`,
+		"--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"--idempotency-key", "idem-cli-create-entity-supplied-id",
+	}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 6 {
+		t.Fatalf("code = %d, want 6 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if captured.Method != eventPublishMethod {
+		t.Fatalf("method = %s, want %s", captured.Method, eventPublishMethod)
+	}
+	payload := captured.Params["payload"].(map[string]any)
+	if payload["entity_id"] != "11111111-1111-4111-8111-111111111111" || payload["amount"] != float64(50) {
+		t.Fatalf("payload = %#v, want supplied entity_id and amount", payload)
+	}
+	if got := captured.Params["bundle_hash"]; got != "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+		t.Fatalf("bundle_hash = %#v", got)
+	}
+	if got := captured.Params["idempotency_key"]; got != "idem-cli-create-entity-supplied-id" {
+		t.Fatalf("idempotency_key = %#v", got)
+	}
+	if strings.TrimSpace(stdout.String()) != "" {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "PAYLOAD_VALIDATION_FAILED: Application error: PAYLOAD_VALIDATION_FAILED") {
+		t.Fatalf("stderr = %q, want server payload validation rejection", stderr.String())
+	}
+}
+
 func TestEventPublishLegacyBundleFingerprintSerializesBundleRef(t *testing.T) {
 	t.Setenv("SWARM_API_TOKEN", "test-token")
 	var captured jsonRPCRequest
@@ -565,6 +615,11 @@ func eventPublishTestResult(newRunCreated bool) map[string]any {
 
 func writeEventPublishJSONRPCError(t *testing.T, w http.ResponseWriter, id string, code string) {
 	t.Helper()
+	writeEventPublishJSONRPCErrorWithDetails(t, w, id, code, map[string]any{"event_name": "scan.requested"})
+}
+
+func writeEventPublishJSONRPCErrorWithDetails(t *testing.T, w http.ResponseWriter, id string, code string, details map[string]any) {
+	t.Helper()
 	w.Header().Set("content-type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]any{
 		"jsonrpc": "2.0",
@@ -574,7 +629,7 @@ func writeEventPublishJSONRPCError(t *testing.T, w http.ResponseWriter, id strin
 			"message": "Application error: " + code,
 			"data": map[string]any{
 				"code":           code,
-				"details":        map[string]any{"event_name": "scan.requested"},
+				"details":        details,
 				"retryable":      false,
 				"correlation_id": "corr-event-publish",
 			},
