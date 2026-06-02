@@ -2,6 +2,14 @@
 
 # Division Swarm
 
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache_2.0-blue.svg" alt="License: Apache 2.0"></a>
+  <a href="platform-spec.yaml"><img src="https://img.shields.io/badge/platform--spec-v1.6.0-15803D.svg" alt="Platform spec v1.6.0"></a>
+  <a href="https://goreportcard.com/report/github.com/division-sh/swarm"><img src="https://goreportcard.com/badge/github.com/division-sh/swarm" alt="Go Report Card"></a>
+  <a href="https://github.com/division-sh/swarm/discussions"><img src="https://img.shields.io/github/discussions/division-sh/swarm" alt="GitHub Discussions"></a>
+  <a href="https://docs.division.sh"><img src="https://img.shields.io/badge/docs-docs.division.sh-15803D.svg" alt="Docs"></a>
+</p>
+
 **The operating system for autonomous multi-agent systems.**
 
 Swarm runs fleets of LLM agents as a durable, stateful system. You declare it in YAML and a deterministic engine runs it, owning state, routing, isolation, cost, and recovery. The LLM never runs the system: agents reason in scoped sessions and emit events, and deterministic code, never the model, decides what each result changes.
@@ -132,7 +140,8 @@ Generated subset of `swarm --help`. Each command targets the running orchestrato
 | `swarm events {list,follow,view}` | Inspect the event log. |
 | `swarm event {replay,view}` | Replay or view a single historical event. |
 | `swarm event publish <event-name>` | Publish one event into the runtime (`--payload-json` or `--payload-file`). |
-| `swarm entities {list,view,aggregate}` | Inspect entity state. |
+| `swarm entities list` | List entities for a run. |
+| `swarm entity {view,aggregate}` | View one entity, or aggregate counts grouped by a field. |
 | `swarm agents` / `swarm agent {view,restart,directive,replay,replay-backlog}` | Inspect or control agents. |
 | `swarm conversations` / `swarm conversation {view,turn}` | Inspect agent sessions and turns. |
 | `swarm incidents` | List runtime incidents. |
