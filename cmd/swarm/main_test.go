@@ -3645,6 +3645,7 @@ func TestRunServeRuntimeFreshEmptySQLiteBootsWithDirectAbandon(t *testing.T) {
 
 func runServeRuntimeFreshEmptySQLiteBootsWithAbandon(t *testing.T, dev bool) {
 	t.Helper()
+	stubServeRuntimeWorkspaceLifecycle(t)
 	unsetStoreSelectorEnv(t)
 	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
 	t.Setenv(storebackend.EnvSQLitePath, sqlitePath)
@@ -3684,6 +3685,7 @@ func runServeRuntimeFreshEmptySQLiteBootsWithAbandon(t *testing.T, dev bool) {
 }
 
 func TestRunServeRuntimeSQLiteAbandonActiveRunsQuiescesBeforeReadiness(t *testing.T) {
+	stubServeRuntimeWorkspaceLifecycle(t)
 	unsetStoreSelectorEnv(t)
 	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
 	runID, eventID := seedServeRuntimeSQLiteAbandonWork(t, sqlitePath)
@@ -4003,6 +4005,17 @@ func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath string) (string,
 		t.Fatalf("close seeded sqlite store: %v", err)
 	}
 	return runID, eventID
+}
+
+func stubServeRuntimeWorkspaceLifecycle(t *testing.T) {
+	t.Helper()
+	oldWorkspaceLifecycle := configuredWorkspaceLifecycleForServe
+	configuredWorkspaceLifecycleForServe = func(*sql.DB, string, semanticview.Source, workspaceMountSources, workspaceBackendSelection) (serveWorkspaceLifecycle, error) {
+		return serveRuntimeWorkspaceStub{}, nil
+	}
+	t.Cleanup(func() {
+		configuredWorkspaceLifecycleForServe = oldWorkspaceLifecycle
+	})
 }
 
 func installServeRuntimePostgresTestStoresWithWorkspaceFactory(t *testing.T, workspaceFactory func(workspaceMountSources) serveWorkspaceLifecycle) (string, *sql.DB, *store.PostgresStore) {
