@@ -285,20 +285,22 @@ rows:
     surface: create-entity handler effect exact-once and mutation-log cardinality after #1253
     classification: already_covered_by_existing_proof
     tier: full_conformance
-    backends: [default_sqlite, explicit_postgres]
+    backends: [postgres_only]
     store_owners:
       - WorkflowInstanceStore
       - SystemNodeProcessed receipt owner
       - mutation_log
-    proof_dimensions: [selected_store, canonical_store_owner, full_conformance]
+    proof_dimensions: [canonical_store_owner, full_conformance]
     proof_refs:
       - kind: go_test
         name: TestCatalogCreateEntityHandlerEffectCardinality
       - kind: manual_command
         command: go test ./internal/runtime/cataloge2e -count=1
     notes: >
-      This is a semantic correctness/full conformance row, not a basic API or
-      CLI registration row.
+      This is a Postgres-only semantic correctness/full conformance row, not a
+      basic API or CLI registration row. It must not be used as SQLite
+      conformance proof unless a SQLite catalog E2E harness is added under a
+      separate gate.
 
   - id: remaining_openrpc_selected_backend_tail
     surface: remaining supported OpenRPC methods without selected-backend public-surface classification
