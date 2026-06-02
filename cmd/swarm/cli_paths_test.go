@@ -172,7 +172,7 @@ func TestRunVerifyCommandConsumesContractPathResolver(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	repo := repoRoot()
 	configContracts := filepath.Join(t.TempDir(), "config-contracts")
-	envContracts := filepath.Join(t.TempDir(), "env-contracts")
+	envContracts := filepath.Join(repo, "tests", "tier8-boot-verification", "test-boot-success", "zzz-not-a-real-dir")
 	legacyContracts := filepath.Join(t.TempDir(), "legacy-contracts")
 	writeWorkflowValidationFixtureFile(t, filepath.Join(legacyContracts, "package.yaml"), `name: legacy`)
 	t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
@@ -196,8 +196,8 @@ func TestRunVerifyCommandConsumesContractPathResolver(t *testing.T) {
 
 func TestRunServeRuntimeConsumesContractPathResolverBeforeBundleLoad(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
-	repo := t.TempDir()
-	configContracts := filepath.Join(t.TempDir(), "config-contracts")
+	repo := repoRoot()
+	configContracts := filepath.Join(repo, "tests", "tier8-boot-verification", "test-boot-success", "zzz-not-a-real-dir")
 	t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
 		"contracts_path": configContracts,
 	}))

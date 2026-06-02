@@ -2355,14 +2355,11 @@ func normalizeContractsRoot(path string) (string, error) {
 		return "", errors.New("contracts path is required")
 	}
 	root = filepath.Clean(root)
-	if _, err := os.Stat(filepath.Join(root, "package.yaml")); err == nil {
+	if regularFileExists(filepath.Join(root, "package.yaml")) {
 		return root, nil
 	}
-	parent := filepath.Dir(root)
-	if parent != root {
-		if _, err := os.Stat(filepath.Join(parent, "package.yaml")); err == nil {
-			return parent, nil
-		}
+	if filepath.Base(root) == "package.yaml" && regularFileExists(root) {
+		return filepath.Dir(root), nil
 	}
 	return "", fmt.Errorf("no package.yaml found under %s", path)
 }

@@ -570,6 +570,7 @@ func TestBundleCommandsRejectInvalidInputBeforeRequest(t *testing.T) {
 	badDataBlobPath := writeBundleRegisterFixture(t, "bad-data.json", `{bad json`)
 	multipleDataBlobPath := writeBundleRegisterFixture(t, "multi-data.json", `{"api_version":"swarm.bundle.data.v1","entries":[]}{}`)
 	contractsDir := writeBundleRegisterContractsFixture(t)
+	invalidChildContractsDir := filepath.Join(contractsDir, "zzz-not-a-real-dir")
 	invalidContractsDir := t.TempDir()
 	dirPath := filepath.Join(t.TempDir(), "bundle-dir")
 	if err := os.Mkdir(dirPath, 0o700); err != nil {
@@ -602,6 +603,7 @@ func TestBundleCommandsRejectInvalidInputBeforeRequest(t *testing.T) {
 		{name: "register blank idempotency", args: []string{"bundle", "register", envelopePath, "--data-blob", dataBlobPath, "--idempotency-key", " "}, wantStderr: "--idempotency-key must be non-empty"},
 		{name: "register contracts with envelope", args: []string{"bundle", "register", envelopePath, "--contracts", contractsDir}, wantStderr: "--contracts cannot be combined with a registration envelope argument"},
 		{name: "register contracts with data blob", args: []string{"bundle", "register", "--contracts", contractsDir, "--data-blob", dataBlobPath}, wantStderr: "--data-blob cannot be used with --contracts"},
+		{name: "register contracts typo child under bundle", args: []string{"bundle", "register", "--contracts", invalidChildContractsDir}, wantStderr: "package contracts directory"},
 		{name: "register contracts missing package", args: []string{"bundle", "register", "--contracts", invalidContractsDir}, wantStderr: "package contracts directory"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
