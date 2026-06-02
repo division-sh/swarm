@@ -1,0 +1,343 @@
+version: 1
+kind: public_surface_backend_matrix
+issue: 1268
+issue_role: canonical_owner
+source:
+  platform_spec: platform-spec.yaml
+  openrpc_artifact: openrpc.json
+  adjacent_openrpc_matrix: internal/apiv1/testdata/openrpc_compliance_matrix.yaml
+policy:
+  closure_level: matrix_owner_first_slice_complete
+  claims_parent_closure: false
+  named_full_conformance_command: go test ./internal/runtime/cataloge2e -count=1
+  required_smoke_policy: >
+    Required PR smoke is row/accounting validation plus the smallest selected-backend
+    proof refs needed for launch-critical SQLite-default and explicit-Postgres
+    public surfaces. The matrix composes existing selected-store, real v1 handler,
+    and CLI exact-method proofs instead of expanding every surface into a backend
+    Cartesian product.
+active_trackers:
+  - kind: github_issue
+    issue: 1239
+    watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
+  - kind: github_issue
+    issue: 1254
+    watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
+  - kind: watchlist
+    issue: 0
+    watchlist: operator_surfaces.v1_openrpc_api_conformance
+rows:
+  - id: serve_contracts_default_sqlite
+    surface: default SQLite swarm serve --contracts readiness and API availability
+    classification: add_to_matrix
+    tier: required_smoke
+    backends: [default_sqlite]
+    cli_commands: [serve]
+    store_owners:
+      - internal/store/backendselection
+      - cmd/swarm buildStores
+      - cmd/swarm runServeRuntime
+    proof_dimensions: [backend_selection, selected_store, real_runtime_startup]
+    proof_refs:
+      - kind: go_test
+        name: TestRunServeRuntimeHostWorkspaceBackendBootsWithoutDockerForSystemOnlyFlow
+      - kind: go_test
+        name: TestRunServeRuntimeFreshEmptySQLiteBootsWithDirectAbandon
+      - kind: go_test
+        name: TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore
+    notes: >
+      Existing proof establishes no-selector/default SQLite selected-store startup
+      through serve-owned runtime construction. This row is required smoke/accounting,
+      not a request for a wider serve behavior repair.
+
+  - id: serve_contracts_explicit_postgres
+    surface: explicit Postgres swarm serve --contracts readiness and API availability
+    classification: already_covered_by_existing_proof
+    tier: required_smoke
+    backends: [explicit_postgres]
+    cli_commands: [serve]
+    store_owners:
+      - internal/store/backendselection
+      - cmd/swarm buildStores
+      - cmd/swarm runServeRuntime
+    proof_dimensions: [backend_selection, selected_store, real_runtime_startup]
+    proof_refs:
+      - kind: go_test
+        name: TestRunServeRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDiskContractsServe
+
+  - id: run_contracts_default_sqlite
+    surface: default SQLite swarm run --contracts no-service path
+    classification: add_to_matrix
+    tier: required_smoke
+    backends: [default_sqlite]
+    cli_commands: [run]
+    api_methods: [health.check, run.start, run.get]
+    openrpc_matrix_methods: [health.check, run.start, run.get]
+    store_owners:
+      - cmd/swarm run command local serve owner
+      - internal/store/backendselection
+      - /v1/rpc health.check
+      - /v1/rpc run.start
+      - /v1/rpc run.get
+    proof_dimensions: [backend_selection, selected_store, real_v1_handler, cli_v1_path, openrpc_publication]
+    proof_refs:
+      - kind: go_test
+        name: TestRunCommandLocalForegroundConsumesServeOwnerAndV1API
+      - kind: go_test
+        name: TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore
+    notes: >
+      The row composes run-command local foreground proof with selected SQLite
+      store construction proof. It intentionally avoids adding a long external
+      process run smoke to every PR.
+
+  - id: run_contracts_explicit_postgres
+    surface: explicit Postgres counterpart for swarm run --contracts
+    classification: add_to_matrix
+    tier: full_conformance
+    backends: [explicit_postgres]
+    cli_commands: [run]
+    api_methods: [health.check, run.start, run.get]
+    openrpc_matrix_methods: [health.check, run.start, run.get]
+    store_owners:
+      - cmd/swarm run command local serve owner
+      - internal/store/backendselection
+      - /v1/rpc health.check
+      - /v1/rpc run.start
+      - /v1/rpc run.get
+    proof_dimensions: [backend_selection, selected_store, real_v1_handler, cli_v1_path, openrpc_publication]
+    proof_refs:
+      - kind: go_test
+        name: TestRunCommandLocalForegroundConsumesServeOwnerAndV1API
+      - kind: go_test
+        name: TestRunServeRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDiskContractsServe
+      - kind: tracker
+        issue: 1239
+        watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
+    notes: >
+      This row records the explicit-Postgres counterpart without making Postgres
+      startup a required Cartesian duplicate of every fast SQLite run row.
+
+  - id: entity_read_api
+    surface: /v1/rpc entity.list, entity.get, and entity.aggregate over selected stores
+    classification: already_covered_by_existing_proof
+    tier: required_smoke
+    backends: [default_sqlite, explicit_postgres]
+    api_methods: [entity.list, entity.get, entity.aggregate]
+    openrpc_matrix_methods: [entity.list, entity.get, entity.aggregate]
+    store_owners:
+      - apiv1.EntityReadStore
+      - schema_storage.entity_state
+      - platform-spec.yaml entity_registry_policy
+    proof_dimensions: [selected_store, real_v1_handler, canonical_store_owner, openrpc_publication]
+    proof_refs:
+      - kind: go_test
+        name: TestOperatorEntityHandlersServeContractEntityTypesFromSQLite
+      - kind: go_test
+        name: TestOperatorEntityHandlersServeContractEntityTypesFromPostgres
+      - kind: go_test
+        name: TestOperatorEntityHandlersExposeEntityNativeReads
+
+  - id: entity_read_cli
+    surface: swarm entities list, swarm entity view, and swarm entity aggregate
+    classification: already_covered_by_existing_proof
+    tier: required_smoke
+    backends: [default_sqlite, explicit_postgres]
+    cli_commands: [entities_list, entity_view, entity_aggregate]
+    api_methods: [entity.list, entity.get, entity.aggregate]
+    openrpc_matrix_methods: [entity.list, entity.get, entity.aggregate]
+    store_owners:
+      - cmd/swarm entity CLI commands
+      - apiv1.EntityReadStore
+      - schema_storage.entity_state
+    proof_dimensions: [selected_store, real_v1_handler, cli_v1_path, canonical_store_owner, openrpc_publication]
+    proof_refs:
+      - kind: go_test
+        name: TestEntityCommandsUseSQLiteEntityReadStoreThroughV1API
+      - kind: go_test
+        name: TestEntitiesListUsesEntityListV1RPCWithFilters
+      - kind: go_test
+        name: TestOperatorEntityHandlersServeContractEntityTypesFromPostgres
+    notes: >
+      The Postgres side is accounted for through the API selected-store row and
+      the CLI exact-method row. The fast tier must not duplicate every CLI
+      command across both backends.
+
+  - id: status_run_get_entity_count
+    surface: swarm status and /v1/rpc run.get entity_count correctness
+    classification: split_to_existing_issue
+    tier: split_open
+    split_issue: 1254
+    backends: [default_sqlite, explicit_postgres]
+    cli_commands: [status]
+    api_methods: [run.get]
+    openrpc_matrix_methods: [run.get]
+    store_owners:
+      - apiv1.RunReadStore
+      - RunHeader.entity_count
+      - run lifecycle count owners
+    proof_dimensions: [split_tracker, openrpc_publication, cli_v1_path]
+    proof_refs:
+      - kind: go_test
+        name: TestStatusUsesDiagnoseAndRunGet
+      - kind: tracker
+        issue: 1254
+        watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
+    notes: >
+      This row must remain split/open until #1254 repairs the run-header/status
+      entity-count owner. CLI path proof alone is not selected-backend count
+      correctness proof.
+
+  - id: event_publish_api
+    surface: /v1/rpc event.publish creating work against SQLite and Postgres
+    classification: already_covered_by_existing_proof
+    tier: required_smoke
+    backends: [default_sqlite, explicit_postgres]
+    api_methods: [event.publish]
+    openrpc_matrix_methods: [event.publish]
+    store_owners:
+      - OperatorEventPublishHandlers
+      - runtimebus.EventStore
+      - internal/store API idempotency persistence
+    proof_dimensions: [selected_store, real_v1_handler, canonical_store_owner, openrpc_publication]
+    proof_refs:
+      - kind: go_test
+        name: TestOperatorEventPublishSQLiteIdempotentFirstEventPublishesWithoutLock
+      - kind: go_test
+        name: TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempotency
+
+  - id: event_publish_cli
+    surface: swarm event publish
+    classification: already_covered_by_existing_proof
+    tier: required_smoke
+    backends: [default_sqlite, explicit_postgres]
+    cli_commands: [event_publish]
+    api_methods: [event.publish]
+    openrpc_matrix_methods: [event.publish]
+    store_owners:
+      - cmd/swarm event publish CLI
+      - /v1/rpc event.publish
+    proof_dimensions: [selected_store, real_v1_handler, cli_v1_path, openrpc_publication]
+    proof_refs:
+      - kind: go_test
+        name: TestEventPublishUsesEventPublishV1RPCWithBoundParams
+      - kind: go_test
+        name: TestOperatorEventPublishSQLiteIdempotentFirstEventPublishesWithoutLock
+      - kind: go_test
+        name: TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempotency
+
+  - id: mailbox_read_api_after_mailbox_write
+    surface: mailbox.list and mailbox.get after handler-level mailbox_write on selected stores
+    classification: already_covered_by_existing_proof
+    tier: required_smoke
+    backends: [default_sqlite, explicit_postgres]
+    api_methods: [mailbox.list, mailbox.get]
+    openrpc_matrix_methods: [mailbox.list, mailbox.get]
+    store_owners:
+      - runtimepipeline.MailboxWriteMaterializationStore
+      - apiv1.MailboxAPIStore
+    proof_dimensions: [selected_store, real_v1_handler, canonical_store_owner, openrpc_publication]
+    proof_refs:
+      - kind: go_test
+        name: TestOperatorMailboxWriteSupportedSurfacePublishesAndReadsAcrossBackends
+
+  - id: mailbox_read_cli
+    surface: swarm mailbox list and swarm mailbox view
+    classification: already_covered_by_existing_proof
+    tier: required_smoke
+    backends: [default_sqlite, explicit_postgres]
+    cli_commands: [mailbox_list, mailbox_view]
+    api_methods: [mailbox.list, mailbox.get]
+    openrpc_matrix_methods: [mailbox.list, mailbox.get]
+    store_owners:
+      - cmd/swarm mailbox CLI commands
+      - apiv1.MailboxAPIStore
+    proof_dimensions: [selected_store, real_v1_handler, cli_v1_path, openrpc_publication]
+    proof_refs:
+      - kind: go_test
+        name: TestMailboxListSendsV1RPCRequestAndRendersResult
+      - kind: go_test
+        name: TestMailboxViewSendsV1RPCRequestAndRendersDetail
+      - kind: go_test
+        name: TestOperatorMailboxWriteSupportedSurfacePublishesAndReadsAcrossBackends
+
+  - id: serve_dev_abandon_active_runs
+    surface: swarm serve --dev and --abandon-active-runs selected-store quiescence
+    classification: already_covered_by_existing_proof
+    tier: required_smoke
+    backends: [default_sqlite, explicit_postgres]
+    cli_commands: [serve]
+    store_owners:
+      - runtimerunquiescence.ServeAbandonStore
+      - SQLiteRuntimeStore.ApplyServeAbandonActiveRunQuiescence
+      - PostgresStore.ApplyServeAbandonActiveRunQuiescence
+    proof_dimensions: [selected_store, canonical_store_owner, real_runtime_startup]
+    proof_refs:
+      - kind: go_test
+        name: TestRunServeRuntimeFreshEmptySQLiteBootsWithDevAbandon
+      - kind: go_test
+        name: TestRunServeRuntimeFreshEmptySQLiteBootsWithDirectAbandon
+      - kind: go_test
+        name: TestRunServeRuntimeSQLiteAbandonActiveRunsQuiescesBeforeReadiness
+      - kind: go_test
+        name: TestRunServeRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDevAbandon
+
+  - id: handler_create_entity_exact_once
+    surface: create-entity handler effect exact-once and mutation-log cardinality after #1253
+    classification: already_covered_by_existing_proof
+    tier: full_conformance
+    backends: [default_sqlite, explicit_postgres]
+    store_owners:
+      - WorkflowInstanceStore
+      - SystemNodeProcessed receipt owner
+      - mutation_log
+    proof_dimensions: [selected_store, canonical_store_owner, full_conformance]
+    proof_refs:
+      - kind: go_test
+        name: TestCatalogCreateEntityHandlerEffectCardinality
+      - kind: manual_command
+        command: go test ./internal/runtime/cataloge2e -count=1
+    notes: >
+      This is a semantic correctness/full conformance row, not a basic API or
+      CLI registration row.
+
+  - id: remaining_openrpc_selected_backend_tail
+    surface: remaining supported OpenRPC methods without selected-backend public-surface classification
+    classification: split_to_existing_issue
+    tier: future_parent_tail
+    split_issue: 1239
+    backends: [default_sqlite, explicit_postgres]
+    store_owners:
+      - internal/apiv1/testdata/openrpc_compliance_matrix.yaml
+      - future selected-backend public-surface rows
+    proof_dimensions: [split_tracker, openrpc_publication]
+    proof_refs:
+      - kind: artifact
+        path: internal/apiv1/testdata/openrpc_compliance_matrix.yaml
+      - kind: tracker
+        issue: 1239
+        watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
+    notes: >
+      The existing OpenRPC matrix remains authoritative for method publication,
+      schema, and transport proof. Backend support for every method remains a
+      parent-tail classification task, not first-slice behavior repair.
+
+  - id: bundle_hash_catalog_boot_postgres_only
+    surface: DB-loaded swarm serve --bundle-hash catalog boot
+    classification: different_semantic_concept_with_proof
+    tier: postgres_only_fail_closed
+    backends: [postgres_only]
+    cli_commands: [serve]
+    store_owners:
+      - platform-spec.yaml runtime_store_backend_selection
+      - Postgres bundle catalog boot owner
+    proof_dimensions: [backend_selection, fail_closed, split_tracker]
+    proof_refs:
+      - kind: artifact
+        path: platform-spec.yaml
+      - kind: tracker
+        issue: 1239
+        watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
+    notes: >
+      SQLite local/dev runtime support does not promote DB-loaded persisted
+      bundle catalog boot. That remains an intentional Postgres-only split until
+      separately gated.
