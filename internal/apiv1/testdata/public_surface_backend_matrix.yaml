@@ -20,9 +20,6 @@ active_trackers:
   - kind: github_issue
     issue: 1239
     watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
-  - kind: github_issue
-    issue: 1254
-    watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
   - kind: watchlist
     issue: 0
     watchlist: operator_surfaces.v1_openrpc_api_conformance
@@ -164,9 +161,8 @@ rows:
 
   - id: status_run_get_entity_count
     surface: swarm status and /v1/rpc run.get entity_count correctness
-    classification: split_to_existing_issue
-    tier: split_open
-    split_issue: 1254
+    classification: already_covered_by_existing_proof
+    tier: required_smoke
     backends: [default_sqlite, explicit_postgres]
     cli_commands: [status]
     api_methods: [run.get]
@@ -174,18 +170,24 @@ rows:
     store_owners:
       - apiv1.RunReadStore
       - RunHeader.entity_count
+      - platform-spec.yaml entity_registry_policy
       - run lifecycle count owners
-    proof_dimensions: [split_tracker, openrpc_publication, cli_v1_path]
+    proof_dimensions: [selected_store, real_v1_handler, cli_v1_path, canonical_store_owner, openrpc_publication]
     proof_refs:
       - kind: go_test
+        name: TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence
+      - kind: go_test
+        name: TestRunAPIReadSurface_LoadAndListRunHeaders
+      - kind: go_test
+        name: TestOpenRPCReadOnlyHTTPRuntimeProbes
+      - kind: go_test
         name: TestStatusUsesDiagnoseAndRunGet
-      - kind: tracker
-        issue: 1254
-        watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
     notes: >
-      This row must remain split/open until #1254 repairs the run-header/status
-      entity-count owner. CLI path proof alone is not selected-backend count
-      correctness proof.
+      #1254 / PR #1278 closed the current-run entity_count class by moving
+      SQLite and Postgres run headers, lifecycle/debug owners, API run reads,
+      builder summaries, and CLI status consumers to canonical run-scoped
+      entity_state. This row consumes that closed proof without claiming the
+      broader #1239 parent tail is closed.
 
   - id: event_publish_api
     surface: /v1/rpc event.publish creating work against SQLite and Postgres

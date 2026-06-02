@@ -116,13 +116,40 @@ func TestPublicSurfaceBackendMatrixRejectsStaleReferences(t *testing.T) {
 			want: "event_publish_api go_test proof_ref TestMissingPublicSurfaceProof does not resolve",
 		},
 		{
-			name: "status count cannot be marked covered",
+			name: "status count cannot revert to stale #1254 split",
 			mutate: func(matrix *publicSurfaceBackendMatrix) {
 				row := publicSurfaceMatrixRowByID(t, matrix, "status_run_get_entity_count")
-				row.Classification = "already_covered_by_existing_proof"
-				row.SplitIssue = 0
+				row.Classification = "split_to_existing_issue"
+				row.Tier = "split_open"
+				row.SplitIssue = 1254
+				row.ProofDimensions = []string{"split_tracker", "openrpc_publication", "cli_v1_path"}
+				row.ProofRefs = []publicSurfaceProofRef{
+					{Kind: "go_test", Name: "TestStatusUsesDiagnoseAndRunGet"},
+					{Kind: "tracker", Issue: 1254, Watchlist: "runtime_operations.runtime_store_backend_default_and_sqlite_portability"},
+				}
 			},
-			want: "status_run_get_entity_count must remain split_to_existing_issue with split_issue 1254",
+			want: "status_run_get_entity_count must remain post-#1254 covered proof, not split-open issue #1254",
+		},
+		{
+			name: "status count requires closed proof refs",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				row := publicSurfaceMatrixRowByID(t, matrix, "status_run_get_entity_count")
+				row.ProofRefs = []publicSurfaceProofRef{
+					{Kind: "go_test", Name: "TestStatusUsesDiagnoseAndRunGet"},
+				}
+			},
+			want: "status_run_get_entity_count missing post-#1254 proof_ref TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence",
+		},
+		{
+			name: "closed #1254 cannot be active tracker",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				matrix.ActiveTrackers = append(matrix.ActiveTrackers, complianceActiveTracker{
+					Kind:      "github_issue",
+					Issue:     1254,
+					Watchlist: "runtime_operations.runtime_store_backend_default_and_sqlite_portability",
+				})
+			},
+			want: "active_trackers must not include closed #1254 runtime_store_backend_default_and_sqlite_portability",
 		},
 		{
 			name: "fail closed row requires executable proof",
@@ -234,8 +261,8 @@ func validatePublicSurfaceBackendMatrix(root string, matrix publicSurfaceBackend
 	if _, ok := activeTrackers[trackerKey(1239, "runtime_operations.runtime_store_backend_default_and_sqlite_portability")]; !ok {
 		problems = append(problems, "active_trackers missing #1239 runtime_store_backend_default_and_sqlite_portability")
 	}
-	if _, ok := activeTrackers[trackerKey(1254, "runtime_operations.runtime_store_backend_default_and_sqlite_portability")]; !ok {
-		problems = append(problems, "active_trackers missing #1254 runtime_store_backend_default_and_sqlite_portability")
+	if _, ok := activeTrackers[trackerKey(1254, "runtime_operations.runtime_store_backend_default_and_sqlite_portability")]; ok {
+		problems = append(problems, "active_trackers must not include closed #1254 runtime_store_backend_default_and_sqlite_portability")
 	}
 	if _, ok := activeTrackers[trackerKey(0, "operator_surfaces.v1_openrpc_api_conformance")]; !ok {
 		problems = append(problems, "active_trackers missing operator_surfaces.v1_openrpc_api_conformance watchlist")
@@ -275,8 +302,18 @@ func validatePublicSurfaceBackendMatrix(root string, matrix publicSurfaceBackend
 		problems = append(problems, "matrix missing required_smoke explicit_postgres row")
 	}
 	if row, ok := rowsByID["status_run_get_entity_count"]; ok {
-		if row.Classification != "split_to_existing_issue" || row.SplitIssue != 1254 || row.Tier != "split_open" {
-			problems = append(problems, "status_run_get_entity_count must remain split_to_existing_issue with split_issue 1254 and tier split_open")
+		if row.Classification != "already_covered_by_existing_proof" || row.SplitIssue != 0 || row.Tier != "required_smoke" {
+			problems = append(problems, "status_run_get_entity_count must remain post-#1254 covered proof, not split-open issue #1254")
+		}
+		for _, proof := range []string{
+			"TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence",
+			"TestRunAPIReadSurface_LoadAndListRunHeaders",
+			"TestOpenRPCReadOnlyHTTPRuntimeProbes",
+			"TestStatusUsesDiagnoseAndRunGet",
+		} {
+			if !publicSurfaceHasGoTestProof(row.ProofRefs, proof) {
+				problems = append(problems, fmt.Sprintf("status_run_get_entity_count missing post-#1254 proof_ref %s", proof))
+			}
 		}
 	}
 	sort.Strings(problems)
@@ -586,6 +623,15 @@ func publicSurfaceFailClosedRow(row publicSurfaceMatrixRow) bool {
 func publicSurfaceHasValue(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func publicSurfaceHasGoTestProof(refs []publicSurfaceProofRef, want string) bool {
+	for _, ref := range refs {
+		if ref.Kind == "go_test" && ref.Name == want {
 			return true
 		}
 	}
