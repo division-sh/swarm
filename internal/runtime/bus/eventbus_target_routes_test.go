@@ -281,6 +281,22 @@ func TestEventBusPublish_NoTargetRootRoutedNodePersistsSemanticRouteWithoutInter
 	if got := store.scopes[evt.ID]; got != replayclaim.CommittedReplayScopeSubscribed {
 		t.Fatalf("committed replay scope = %q, want subscribed", got)
 	}
+	live, internal, replayRoutes, err := eb.replayRecipientsForCommittedEvent(context.Background(), evt, nil, replayclaim.CommittedReplayScopeSubscribed)
+	if err != nil {
+		t.Fatalf("replayRecipientsForCommittedEvent: %v", err)
+	}
+	if len(live) != 0 {
+		t.Fatalf("replay live recipients = %#v, want none without an internal carrier", live)
+	}
+	if len(internal) != 0 {
+		t.Fatalf("replay internal recipients = %#v, want none without an internal carrier", internal)
+	}
+	if len(replayRoutes) != 1 || replayRoutes[0].SubscriberType != "node" || replayRoutes[0].SubscriberID != "portfolio-node" {
+		t.Fatalf("replay routes = %#v, want retained semantic node/portfolio-node evidence", replayRoutes)
+	}
+	if err := eb.PublishPersistedRecipients(context.Background(), evt, nil); err != nil {
+		t.Fatalf("PublishPersistedRecipients without internal carrier: %v", err)
+	}
 }
 
 func assertTargetRouteDeliveries(t *testing.T, ch <-chan events.Event, wantEntityIDs ...string) {
