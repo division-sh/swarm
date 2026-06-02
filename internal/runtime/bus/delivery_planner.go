@@ -109,7 +109,7 @@ func (p deliveryPlanner) Plan(ctx context.Context, evt events.Event) (eventDeliv
 	plan.PersistedRecipients = manifest.PersistedRecipients
 	plan.DeliveryTargets = manifest.DeliveryTargets
 	plan.DeliveryRoutes = append([]events.DeliveryRoute(nil), manifest.DeliveryRoutes...)
-	plan.DeliveryRoutes = append(plan.DeliveryRoutes, routedRootNodeDeliveryRoutesForNoTargetEvent(evt, routing.RoutedRecipients, plan.Recipients, plan.PersistedRecipients)...)
+	plan.DeliveryRoutes = append(plan.DeliveryRoutes, routedRootNodeDeliveryRoutesForNoTargetEvent(evt, routing.RoutedRecipients)...)
 	plan.DeliveryRoutes = append(plan.DeliveryRoutes, routedNodeDeliveryRoutesForNoTargetEvent(evt, routing.RoutedRecipients, plan.Recipients, plan.PersistedRecipients)...)
 	plan.DeliveryRoutes = append(plan.DeliveryRoutes, internalDeliveryRoutesForPlan(evt, plan.Recipients, plan.PersistedRecipients, routing.RoutedRecipients)...)
 	plan.DeliveryRoutes = events.NormalizeDeliveryRoutes(plan.DeliveryRoutes)
@@ -403,7 +403,7 @@ func routedNodeDeliveryRoutesForNoTargetEvent(evt events.Event, routed []Subscri
 	return events.NormalizeDeliveryRoutes(out)
 }
 
-func routedRootNodeDeliveryRoutesForNoTargetEvent(evt events.Event, routed []Subscriber, recipients, persisted []string) []events.DeliveryRoute {
+func routedRootNodeDeliveryRoutesForNoTargetEvent(evt events.Event, routed []Subscriber) []events.DeliveryRoute {
 	if len(routed) == 0 || len(eventDeliveryTargetRoutes(evt)) > 0 {
 		return nil
 	}
@@ -412,10 +412,6 @@ func routedRootNodeDeliveryRoutesForNoTargetEvent(evt events.Event, routed []Sub
 	}
 	rootNodeIDs := routedRootNodeSubscriberIDsForNoTargetEvent(evt, routed)
 	if len(rootNodeIDs) == 0 {
-		return nil
-	}
-	internalRecipients := filterOutAgentIDs(recipients, persisted)
-	if len(internalRecipients) == 0 {
 		return nil
 	}
 	out := make([]events.DeliveryRoute, 0, len(rootNodeIDs))
@@ -447,7 +443,7 @@ func routedRootNodeSubscriberIDsForNoTargetEvent(evt events.Event, routed []Subs
 }
 
 func routedRootNodeMatchesNoTargetEvent(evt events.Event, subscriber Subscriber) bool {
-	if strings.TrimSpace(subscriber.ID) == "" || strings.TrimSpace(subscriber.Type) == "agent" {
+	if strings.TrimSpace(subscriber.ID) == "" || strings.TrimSpace(subscriber.Type) != "node" {
 		return false
 	}
 	if strings.Trim(strings.TrimSpace(subscriber.Path), "/") != "" {

@@ -125,6 +125,27 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 	if err := bus.Publish(ctx, spinup); err != nil {
 		t.Fatalf("Publish spinup: %v", err)
 	}
+	waitRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM event_receipts
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'portfolio-node' AND outcome = 'no_op'
+	`, 1, spinup.ID)
+	assertRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM event_deliveries
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'portfolio-node'
+	`, 1, spinup.ID)
+	assertRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM event_deliveries
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'portfolio-node'
+		  AND delivered_at IS NOT NULL AND created_at < delivered_at
+	`, 1, spinup.ID)
+	assertRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM event_deliveries
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = '__runtime_replay_scope__'
+	`, 1, spinup.ID)
+	assertRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM event_deliveries
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'workflow-runtime'
+	`, 0, spinup.ID)
 	autoEventID := waitRuntimeEventID(t, ctx, db, `
 		SELECT event_id::text FROM events
 		WHERE event_name = 'operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested'
@@ -145,6 +166,117 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 		SELECT COUNT(*) FROM event_deliveries
 		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'workflow-runtime'
 	`, 0, autoEventID)
+	waitRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM events
+		WHERE event_name = 'operating/component_scaffold.spawn_requested'
+	`, 1)
+}
+
+func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeWithoutInternalCarrierAndEmpireStyleSideEffect(t *testing.T) {
+	bundle := loadRuntimeTempBundle(t, templateInstanceEmpireOutboxFixtureFiles())
+	source := semanticview.Wrap(bundle)
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	ctx := seedRuntimeTestRun(t, db)
+	pg := &store.PostgresStore{DB: db}
+	var pc *runtimepipeline.PipelineCoordinator
+	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
+		ContractBundle: source,
+		InterceptorProvider: func() []runtimebus.EventInterceptor {
+			if pc == nil {
+				return nil
+			}
+			return []runtimebus.EventInterceptor{pc}
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+	manager := runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+		WorkflowInstances: workflowStore,
+	})
+	module := newRuntimeTestWorkflowModule(t, source)
+	pc = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+		Module:            module,
+		InstanceActivator: manager.ActivateFlowInstance,
+		WorkflowStore:     workflowStore,
+		EventReceiptsCapability: func(context.Context) (bool, error) {
+			return true, nil
+		},
+	})
+
+	mailbox := (events.Event{
+		ID:        "99999999-9999-4999-8999-999999999913",
+		RunID:     templateInstanceDeliveryRunID,
+		Type:      events.EventType("mailbox.item_decided"),
+		Payload:   []byte(`{"entity_id":"22222222-2222-4222-8222-222222222222","instance_id":"11111111-1111-4111-8111-111111111111","product_id":"product-1"}`),
+		CreatedAt: time.Now().UTC(),
+	}).WithEntityID("22222222-2222-4222-8222-222222222222")
+	if err := bus.Publish(ctx, mailbox); err != nil {
+		t.Fatalf("Publish mailbox: %v", err)
+	}
+
+	waitRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM event_receipts
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'approval-router' AND outcome = 'no_op'
+	`, 1, mailbox.ID)
+	assertRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM event_deliveries
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'approval-router'
+	`, 1, mailbox.ID)
+	assertRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM event_deliveries
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'approval-router'
+		  AND delivered_at IS NOT NULL AND created_at < delivered_at
+	`, 1, mailbox.ID)
+	assertRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM event_deliveries
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'workflow-runtime'
+	`, 0, mailbox.ID)
+
+	spinupEventID := waitRuntimeEventID(t, ctx, db, `
+		SELECT event_id::text FROM events
+		WHERE event_name = 'opco.spinup_requested'
+	`, nil)
+	waitRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM event_receipts
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'portfolio-node' AND outcome = 'no_op'
+	`, 1, spinupEventID)
+	assertRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM event_deliveries
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'portfolio-node'
+	`, 1, spinupEventID)
+	assertRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM event_deliveries
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'portfolio-node'
+		  AND delivered_at IS NOT NULL AND created_at < delivered_at
+	`, 1, spinupEventID)
+	assertRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM event_deliveries
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = '__runtime_replay_scope__'
+	`, 1, spinupEventID)
+	assertRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM event_deliveries
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'workflow-runtime'
+	`, 0, spinupEventID)
+
+	autoEventID := waitRuntimeEventID(t, ctx, db, `
+		SELECT event_id::text FROM events
+		WHERE event_name = 'operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested'
+	`, nil)
+	waitRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM event_receipts
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'lifecycle-orchestrator' AND outcome = 'no_op'
+	`, 1, autoEventID)
+	assertRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM event_deliveries
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'lifecycle-orchestrator'
+	`, 1, autoEventID)
+	assertRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM event_deliveries
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = '__runtime_replay_scope__'
+	`, 1, autoEventID)
 	waitRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM events
 		WHERE event_name = 'operating/component_scaffold.spawn_requested'
