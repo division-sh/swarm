@@ -20,6 +20,9 @@ active_trackers:
   - kind: github_issue
     issue: 1239
     watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
+  - kind: github_issue
+    issue: 1255
+    watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
   - kind: watchlist
     issue: 0
     watchlist: operator_surfaces.v1_openrpc_api_conformance
@@ -190,7 +193,7 @@ rows:
       broader #1239 parent tail is closed.
 
   - id: event_publish_api
-    surface: /v1/rpc event.publish creating work against SQLite and Postgres
+    surface: /v1/rpc event.publish create-new/idempotent publication against SQLite and Postgres
     classification: already_covered_by_existing_proof
     tier: required_smoke
     backends: [default_sqlite, explicit_postgres]
@@ -206,9 +209,16 @@ rows:
         name: TestOperatorEventPublishSQLiteIdempotentFirstEventPublishesWithoutLock
       - kind: go_test
         name: TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempotency
+      - kind: go_test
+        name: TestOperatorEventPublishRejectsCallerEntityIDForCreateEntityBeforePersistence
+    notes: >
+      This covered row is intentionally limited to create-new/idempotent
+      publication and create-entity payload identity admission. Existing-run
+      served follow-up state advance remains split to #1255 below until the
+      required supported-surface proof exists.
 
   - id: event_publish_cli
-    surface: swarm event publish
+    surface: swarm event publish create-new publication and exact v1 RPC command shape
     classification: already_covered_by_existing_proof
     tier: required_smoke
     backends: [default_sqlite, explicit_postgres]
@@ -226,6 +236,44 @@ rows:
         name: TestOperatorEventPublishSQLiteIdempotentFirstEventPublishesWithoutLock
       - kind: go_test
         name: TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempotency
+    notes: >
+      CLI existing-run follow-up semantics are not claimed by this covered row.
+      The exact RPC-shape proof composes with the API create-new/idempotent
+      publication proof only; served `--run-id` state-advance coverage remains
+      split to #1255.
+
+  - id: event_publish_existing_run_followup_served_path
+    surface: default SQLite served swarm event publish --run-id follow-up state advance and readback
+    classification: split_to_existing_issue
+    tier: split_open
+    split_issue: 1255
+    backends: [default_sqlite, explicit_postgres]
+    cli_commands: [event_publish]
+    api_methods: [event.publish]
+    openrpc_matrix_methods: [event.publish]
+    store_owners:
+      - cmd/swarm event publish CLI
+      - /v1/rpc event.publish
+      - apiv1.RunBundleContextStore
+      - runtimebus.EventStore
+      - event_deliveries readback owner
+    proof_dimensions: [selected_store, real_v1_handler, cli_v1_path, real_runtime_startup, split_tracker]
+    proof_refs:
+      - kind: go_test
+        name: TestBuildStoresSQLiteSelectsRunBundleContextForServedEventPublish
+      - kind: go_test
+        name: TestOperatorEventPublishSQLiteExplicitRunFollowUpUsesSelectedRun
+      - kind: go_test
+        name: TestOperatorEventPublishExplicitRunFollowUpRequiresRecipientBeforePersistence
+      - kind: tracker
+        issue: 1255
+        watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
+    notes: >
+      Current proofs show selected owner wiring and lower-level API follow-up
+      behavior, but they do not prove the default SQLite served public path with
+      `swarm event publish --run-id`, system-node state advance, persisted
+      event/delivery evidence, and public readback. Keep #1255 active until
+      that proof is added or a lead-approved split records a narrower closure.
 
   - id: mailbox_read_api_after_mailbox_write
     surface: mailbox.list and mailbox.get after handler-level mailbox_write on selected stores

@@ -244,6 +244,27 @@ func TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore(t *testing.T) {
 	}
 }
 
+func TestBuildStoresSQLiteSelectsRunBundleContextForServedEventPublish(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "dev.db")
+	stores, err := buildStores(context.Background(), storebackend.Selection{
+		Backend:          storebackend.BackendSQLite,
+		BackendSource:    storebackend.SourceFlag,
+		SQLitePath:       path,
+		SQLitePathSource: storebackend.SourceRolloutDefault,
+	}, &config.Config{})
+	if err != nil {
+		t.Fatalf("buildStores(sqlite): %v", err)
+	}
+	t.Cleanup(func() { closeDB(stores.SQLDB) })
+	runBundleContext, ok := stores.ObservabilityStore.(apiv1.RunBundleContextStore)
+	if !ok {
+		t.Fatalf("sqlite ObservabilityStore = %T, want selected run bundle context store for event.publish --run-id", stores.ObservabilityStore)
+	}
+	if got := selectedAPIRunBundleContextStore(stores); got == nil || got != runBundleContext {
+		t.Fatalf("selected API run bundle context = %T, want sqlite selected owner %T", got, runBundleContext)
+	}
+}
+
 func TestBuildStoresSQLiteRuntimeNoLongerFailsClosedOnMailboxMaterializationOwner(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "dev.db")
