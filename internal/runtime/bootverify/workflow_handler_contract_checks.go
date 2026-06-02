@@ -72,10 +72,41 @@ func (c *checkerContext) handlerFieldCompliance() []Finding {
 				}
 				c.handlerFindings = append(c.handlerFindings, c.validateWorkflowActionSpec(nodeID, fmt.Sprintf("%s rule %s", eventType, ruleLabel), handler.EvidenceTarget, rule.Action)...)
 			}
+			c.handlerFindings = append(c.handlerFindings, rejectUnsupportedRuleActions(nodeID, eventType, handler)...)
 		}
 	}
 	c.handlerFindings = append(c.handlerFindings, runtimeHandledEventsMissingExecutors(c.source)...)
 	return c.handlerFindings
+}
+
+func rejectUnsupportedRuleActions(nodeID, eventType string, handler runtimecontracts.SystemNodeEventHandler) []Finding {
+	rejectRule := func(context string, rule runtimecontracts.HandlerRuleEntry) []Finding {
+		if strings.TrimSpace(rule.Action.ID) == "" {
+			return nil
+		}
+		return []Finding{handlerActionFinding(nodeID, eventType, fmt.Sprintf("%s action is unsupported; action is only allowed in handler.rules[*]", context))}
+	}
+	findings := []Finding{}
+	for idx, rule := range handler.OnComplete {
+		findings = append(findings, rejectRule(handlerRuleContext("handler.on_complete", idx, rule.ID), rule)...)
+	}
+	if handler.Accumulate != nil {
+		for idx, rule := range handler.Accumulate.OnComplete {
+			findings = append(findings, rejectRule(handlerRuleContext("handler.accumulate.on_complete", idx, rule.ID), rule)...)
+		}
+		if handler.Accumulate.OnTimeout != nil {
+			findings = append(findings, rejectRule(handlerRuleContext("handler.accumulate.on_timeout", 0, handler.Accumulate.OnTimeout.ID), *handler.Accumulate.OnTimeout)...)
+		}
+	}
+	return findings
+}
+
+func handlerRuleContext(prefix string, idx int, id string) string {
+	id = strings.TrimSpace(id)
+	if id != "" {
+		return fmt.Sprintf("%s[%s]", prefix, id)
+	}
+	return fmt.Sprintf("%s[%d]", prefix, idx)
 }
 
 func (c *checkerContext) validateWorkflowActionSpec(nodeID, eventContext, evidenceTarget string, action runtimecontracts.ActionSpec) []Finding {

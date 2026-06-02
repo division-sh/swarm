@@ -960,6 +960,68 @@ func TestRun_ReportsHandlerLevelActionWithRules(t *testing.T) {
 	}
 }
 
+func TestRun_ReportsUnsupportedRuleActionContexts(t *testing.T) {
+	cases := []struct {
+		name    string
+		handler runtimecontracts.SystemNodeEventHandler
+		want    string
+	}{
+		{
+			name: "on_complete",
+			handler: runtimecontracts.SystemNodeEventHandler{
+				OnComplete: []runtimecontracts.HandlerRuleEntry{{
+					ID:     "complete",
+					Action: runtimecontracts.ActionSpec{ID: "mailbox_write"},
+				}},
+			},
+			want: "handler.on_complete[complete] action is unsupported",
+		},
+		{
+			name: "accumulate on_complete",
+			handler: runtimecontracts.SystemNodeEventHandler{
+				Accumulate: &runtimecontracts.AccumulateSpec{
+					OnComplete: []runtimecontracts.HandlerRuleEntry{{
+						ID:     "complete",
+						Action: runtimecontracts.ActionSpec{ID: "mailbox_write"},
+					}},
+				},
+			},
+			want: "handler.accumulate.on_complete[complete] action is unsupported",
+		},
+		{
+			name: "accumulate on_timeout",
+			handler: runtimecontracts.SystemNodeEventHandler{
+				Accumulate: &runtimecontracts.AccumulateSpec{
+					OnTimeout: &runtimecontracts.HandlerRuleEntry{
+						ID:     "timeout",
+						Action: runtimecontracts.ActionSpec{ID: "mailbox_write"},
+					},
+				},
+			},
+			want: "handler.accumulate.on_timeout[timeout] action is unsupported",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+				Nodes: map[string]runtimecontracts.SystemNodeContract{
+					"mailbox-node": {
+						EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+							"mailbox.review_requested": tc.handler,
+						},
+					},
+				},
+			})
+
+			report := Run(context.Background(), source, Options{})
+
+			if !reportContains(report.Errors(), "handler_field_compliance", tc.want) {
+				t.Fatalf("expected unsupported rule action context error %q, got %#v", tc.want, report.Errors())
+			}
+		})
+	}
+}
+
 func TestRun_ReportsMailboxDeclarationOnNonMailboxAction(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{

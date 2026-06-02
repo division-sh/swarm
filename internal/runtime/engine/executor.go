@@ -84,11 +84,22 @@ type executionFrame struct {
 	state                         ExecutionState
 	result                        ExecutionResult
 	rule                          *runtimecontracts.HandlerRuleEntry
+	ruleSource                    handlerRuleSource
 	payload                       map[string]any
 	topLevelDataAccumulation      runtimecontracts.WorkflowDataAccumulation
 	topLevelDataWritesApplied     bool
 	accumulatorProjectionEligible bool
 }
+
+type handlerRuleSource string
+
+const (
+	handlerRuleSourceNone                 handlerRuleSource = ""
+	handlerRuleSourceRules                handlerRuleSource = "handler.rules"
+	handlerRuleSourceOnComplete           handlerRuleSource = "handler.on_complete"
+	handlerRuleSourceAccumulateOnComplete handlerRuleSource = "handler.accumulate.on_complete"
+	handlerRuleSourceAccumulateOnTimeout  handlerRuleSource = "handler.accumulate.on_timeout"
+)
 
 type contextTx struct {
 	Tx
@@ -148,6 +159,9 @@ func (e *Executor) ValidateRequest(req ExecutionRequest) error {
 	if runtimecontracts.HandlerHasAmbiguousTopLevelAction(req.Handler) {
 		return fmt.Errorf("%w: handler-top-level action is only allowed on handlers without rules", ErrInvalidConfig)
 	}
+	if err := validateUnsupportedRuleActions(req.Handler); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidConfig, err)
+	}
 	if req.Handler.CreateEntity && req.Handler.Accumulate != nil {
 		return fmt.Errorf("%w: handler declares both create_entity and accumulate", ErrInvalidConfig)
 	}
@@ -167,6 +181,41 @@ func (e *Executor) ValidateRequest(req ExecutionRequest) error {
 		return fmt.Errorf("%w: %v", ErrInvalidConfig, err)
 	}
 	return nil
+}
+
+func validateUnsupportedRuleActions(handler runtimecontracts.SystemNodeEventHandler) error {
+	validateRule := func(context string, rule runtimecontracts.HandlerRuleEntry) error {
+		if strings.TrimSpace(rule.Action.ID) == "" {
+			return nil
+		}
+		return fmt.Errorf("%s action is unsupported; action is only allowed in handler.rules[*]", context)
+	}
+	for idx, rule := range handler.OnComplete {
+		if err := validateRule(handlerRuleContext("handler.on_complete", idx, rule.ID), rule); err != nil {
+			return err
+		}
+	}
+	if handler.Accumulate != nil {
+		for idx, rule := range handler.Accumulate.OnComplete {
+			if err := validateRule(handlerRuleContext("handler.accumulate.on_complete", idx, rule.ID), rule); err != nil {
+				return err
+			}
+		}
+		if handler.Accumulate.OnTimeout != nil {
+			if err := validateRule(handlerRuleContext("handler.accumulate.on_timeout", 0, handler.Accumulate.OnTimeout.ID), *handler.Accumulate.OnTimeout); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func handlerRuleContext(prefix string, idx int, id string) string {
+	id = strings.TrimSpace(id)
+	if id != "" {
+		return fmt.Sprintf("%s[%s]", prefix, id)
+	}
+	return fmt.Sprintf("%s[%d]", prefix, idx)
 }
 
 func validateHandlerEntityWriteTargets(source semanticview.Source, flowID string, handler runtimecontracts.SystemNodeEventHandler) error {
@@ -763,6 +812,7 @@ func (e *Executor) stepAccumulate(frame *executionFrame) (bool, error) {
 	frame.state.Accumulated = accumulatorExpressionValue(acc)
 	if isAccumulationTimeoutEvent(frame.req.Event.Type) && spec.OnTimeout != nil {
 		frame.rule = spec.OnTimeout
+		frame.ruleSource = handlerRuleSourceAccumulateOnTimeout
 		e.applyRule(frame, spec.OnTimeout)
 		return false, nil
 	}
@@ -1014,8 +1064,10 @@ func (e *Executor) stepOnComplete(frame *executionFrame) error {
 		return nil
 	}
 	rules := frame.req.Handler.OnComplete
+	ruleSource := handlerRuleSourceOnComplete
 	if len(rules) == 0 && frame.req.Handler.Accumulate != nil {
 		rules = frame.req.Handler.Accumulate.OnComplete
+		ruleSource = handlerRuleSourceAccumulateOnComplete
 	}
 	if frame.result.AccumulatorCompletionDiagnostics.Relevant && len(rules) > 0 {
 		frame.result.AccumulatorCompletionDiagnostics.OnCompleteDeclared = true
@@ -1032,6 +1084,7 @@ func (e *Executor) stepOnComplete(frame *executionFrame) error {
 	}
 	if rule != nil {
 		frame.rule = rule
+		frame.ruleSource = ruleSource
 		if frame.result.AccumulatorCompletionDiagnostics.Relevant &&
 			frame.result.AccumulatorCompletionDiagnostics.CompletionReached &&
 			frame.req.Handler.Accumulate != nil {
@@ -1060,6 +1113,7 @@ func (e *Executor) stepRules(frame *executionFrame) error {
 	}
 	if rule != nil {
 		frame.rule = rule
+		frame.ruleSource = handlerRuleSourceRules
 		e.applyRule(frame, rule)
 		if rule.FanOut != nil {
 			if _, err := e.stepFanOut(frame); err != nil {
@@ -1337,7 +1391,7 @@ func (e *Executor) stepEmits(frame *executionFrame) error {
 }
 
 func (e *Executor) stepAction(frame *executionFrame) error {
-	actionSpec := selectedActionSpec(frame.req.Handler, frame.rule)
+	actionSpec := selectedActionSpec(frame.req.Handler, frame.rule, frame.ruleSource)
 	actionKey := identity.NormalizeActionKey(actionSpec.ID)
 	if actionKey.IsZero() {
 		return nil
@@ -1930,8 +1984,8 @@ func selectedEmitSpec(handler runtimecontracts.SystemNodeEventHandler, rule *run
 	return handler.Emit
 }
 
-func selectedActionSpec(handler runtimecontracts.SystemNodeEventHandler, rule *runtimecontracts.HandlerRuleEntry) runtimecontracts.ActionSpec {
-	if rule != nil && strings.TrimSpace(rule.Action.ID) != "" {
+func selectedActionSpec(handler runtimecontracts.SystemNodeEventHandler, rule *runtimecontracts.HandlerRuleEntry, source handlerRuleSource) runtimecontracts.ActionSpec {
+	if source == handlerRuleSourceRules && rule != nil && strings.TrimSpace(rule.Action.ID) != "" {
 		return rule.Action
 	}
 	return handler.Action
