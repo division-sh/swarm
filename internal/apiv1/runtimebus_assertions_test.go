@@ -8,6 +8,7 @@ import (
 )
 
 const apiv1RuntimeBusAssertionTimeout = time.Second
+const apiv1RuntimeBusAbsenceTimeout = 150 * time.Millisecond
 
 func requireAPIV1RuntimeBusEvent(t *testing.T, ch <-chan events.Event, description string) events.Event {
 	t.Helper()
@@ -47,9 +48,12 @@ func requireAPIV1RuntimeBusValue[T any](t *testing.T, ch <-chan T, description s
 
 func requireNoAPIV1RuntimeBusValue[T any](t *testing.T, ch <-chan T, description string) {
 	t.Helper()
+	timer := time.NewTimer(apiv1RuntimeBusAbsenceTimeout)
+	defer timer.Stop()
+
 	select {
 	case got := <-ch:
 		t.Fatalf("%s delivered unexpected runtimebus value: %#v", description, got)
-	default:
+	case <-timer.C:
 	}
 }
