@@ -409,8 +409,8 @@ func validateExistingRunEventPublicationRecipientPlan(ctx context.Context, opts 
 			"event_name": params.EventName,
 			"event_id":   params.EventID,
 			"run_id":     params.RunID,
-			"phase":      "recipient_plan",
-			"reason":     "event publisher does not expose subscribed recipient planning",
+			"phase":      "publish",
+			"reason":     "recipient planning unavailable: event publisher does not expose subscribed recipient planning",
 		})
 	}
 	plan, err := checker.CheckPublishRecipientPlan(ctx, eventPublicationEvent(params, time.Time{}))

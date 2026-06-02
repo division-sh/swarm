@@ -776,6 +776,58 @@ func TestOperatorEventPublishExplicitRunFollowUpRequiresRecipientBeforePersisten
 	}
 }
 
+func TestOperatorEventPublishExplicitRunRequiresRecipientPlanCheckerBeforePersistence(t *testing.T) {
+	ctx := context.Background()
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	source := semanticview.Wrap(eventPublishFollowUpTestBundle())
+	bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "scan-orchestrator")
+	initialCh := bus.Subscribe("scan-orchestrator", events.EventType("scan.requested"))
+	defer bus.Unsubscribe("scan-orchestrator")
+	handler := eventPublishTestHandler(t, pg, bus, source)
+
+	initial := rpcCall(t, handler, eventPublishBody("", runStartTestFingerprint, "scan.requested", `{"topic":"first"}`, "", "idem-followup-missing-plan-initial"))
+	if initial.Error != nil {
+		t.Fatalf("initial event.publish error = %#v", initial.Error)
+	}
+	runID := stringValue(t, asMap(t, initial.Result)["run_id"], "run_id")
+	select {
+	case <-initialCh:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for initial delivery")
+	}
+
+	noCheckerHandler := eventPublishTestHandlerWithStores(t, pg, pg, pg, failingRunStartPublisher{}, source)
+	rejected := rpcCall(t, noCheckerHandler, eventPublishBody(runID, runStartTestFingerprint, "scan.followup", `{"topic":"second"}`, "operator-test", "idem-followup-missing-plan"))
+	if rejected.Error == nil {
+		t.Fatal("missing recipient-plan checker event.publish error = nil")
+	}
+	data := asMap(t, rejected.Error.Data)
+	if data["code"] != EventPublishFailedCode {
+		t.Fatalf("missing recipient-plan checker data = %#v, want %s", data, EventPublishFailedCode)
+	}
+	details := asMap(t, data["details"])
+	if details["phase"] != "publish" {
+		t.Fatalf("missing recipient-plan checker details = %#v, want phase=publish", details)
+	}
+	if reason := stringValue(t, details["reason"], "reason"); !strings.Contains(reason, "recipient planning unavailable") {
+		t.Fatalf("missing recipient-plan checker reason = %q", reason)
+	}
+	if got := countAllRunRows(t, db); got != 1 {
+		t.Fatalf("run rows after missing recipient-plan checker = %d, want 1", got)
+	}
+	if got := countAllEventRows(t, db); got != 1 {
+		t.Fatalf("event rows after missing recipient-plan checker = %d, want 1", got)
+	}
+	if got := countAPIIdempotencyRows(t, db); got != 1 {
+		t.Fatalf("api_idempotency rows after missing recipient-plan checker = %d, want 1", got)
+	}
+}
+
 func TestOperatorEventPublishSQLiteExplicitRunFollowUpUsesSelectedRun(t *testing.T) {
 	ctx := context.Background()
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
@@ -865,6 +917,43 @@ func TestOperatorEventPublishRejectsCallerEntityIDForCreateEntityBeforePersisten
 	}
 	if got := countAPIIdempotencyRows(t, db); got != 0 {
 		t.Fatalf("api_idempotency rows after create-entity rejection = %d, want 0", got)
+	}
+}
+
+func TestOperatorEventPublishSQLiteRejectsCallerEntityIDForCreateEntityBeforePersistence(t *testing.T) {
+	ctx := context.Background()
+	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+	source := semanticview.Wrap(eventPublishCreateEntityTestBundle())
+	bus, err := runtimebus.NewEventBusWithOptions(sqliteStore, runStartTestEventBusOptions(source))
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	handler := eventPublishTestHandlerWithStores(t, sqliteStore, sqliteStore, sqliteStore, bus, source)
+
+	resp := rpcCall(t, handler, eventPublishBody("", runStartTestFingerprint, "thing.created", `{"entity_id":"11111111-1111-4111-8111-111111111111","amount":50}`, "", "idem-sqlite-create-entity-supplied-id"))
+	if resp.Error == nil {
+		t.Fatal("sqlite create-entity supplied entity_id error = nil")
+	}
+	data := asMap(t, resp.Error.Data)
+	if data["code"] != PayloadValidationFailedCode {
+		t.Fatalf("sqlite create-entity supplied entity_id data = %#v, want %s", data, PayloadValidationFailedCode)
+	}
+	details := asMap(t, data["details"])
+	violations := asSlice(t, details["violations"])
+	if len(violations) != 1 {
+		t.Fatalf("sqlite violations = %#v, want one", violations)
+	}
+	if violation := asMap(t, violations[0]); violation["field_path"] != "$.entity_id" || violation["rule"] != "create_entity_mints_entity_id" {
+		t.Fatalf("sqlite violation = %#v", violation)
+	}
+	if got := countSQLiteAllRunRows(t, sqliteStore.DB); got != 0 {
+		t.Fatalf("sqlite run rows after create-entity rejection = %d, want 0", got)
+	}
+	if got := countSQLiteAllEventRows(t, sqliteStore.DB); got != 0 {
+		t.Fatalf("sqlite event rows after create-entity rejection = %d, want 0", got)
+	}
+	if got := countSQLiteAPIIdempotencyRows(t, sqliteStore.DB); got != 0 {
+		t.Fatalf("sqlite api_idempotency rows after create-entity rejection = %d, want 0", got)
 	}
 }
 
@@ -1738,6 +1827,15 @@ func countSQLiteEventRowsByRunID(t *testing.T, db *sql.DB, runID string) int {
 	var count int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id = ?`, runID).Scan(&count); err != nil {
 		t.Fatalf("count sqlite event rows: %v", err)
+	}
+	return count
+}
+
+func countSQLiteAllEventRows(t *testing.T, db *sql.DB) int {
+	t.Helper()
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM events`).Scan(&count); err != nil {
+		t.Fatalf("count sqlite all event rows: %v", err)
 	}
 	return count
 }
