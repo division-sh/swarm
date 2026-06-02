@@ -1095,88 +1095,162 @@ func (c *checkerContext) platformNamespace() []Finding {
 		return c.namespaceFindings
 	}
 	c.namespaceLoaded = true
-	for eventType := range c.source.EventEntries() {
-		eventType = strings.TrimSpace(eventType)
-		switch {
-		case runtimecontracts.PlatformEventCatalogContains(c.source.PlatformSpec(), eventType):
-			c.namespaceFindings = append(c.namespaceFindings, Finding{
-				CheckID:  "platform_namespace_violation",
-				Severity: "error",
-				Message:  fmt.Sprintf(runtimecontracts.PlatformEventRedeclarationMessage, eventType),
-				Location: eventType,
-			})
-		case strings.HasPrefix(eventType, "platform."):
-			c.namespaceFindings = append(c.namespaceFindings, Finding{
-				CheckID:  "platform_namespace_violation",
-				Severity: "error",
-				Message:  fmt.Sprintf("event %s uses reserved platform.* namespace", eventType),
-				Location: eventType,
-			})
+
+	addEventCatalogClaim := func(eventType, location string) {
+		if finding, ok := platformProducerClaimFinding(
+			c.source,
+			eventType,
+			location,
+			func(eventType string) string {
+				return fmt.Sprintf(runtimecontracts.PlatformEventRedeclarationMessage, eventType)
+			},
+			func(eventType string) string {
+				return fmt.Sprintf("event %s uses reserved platform.* namespace", eventType)
+			},
+		); ok {
+			c.namespaceFindings = append(c.namespaceFindings, finding)
 		}
 	}
-	for agentID, agent := range c.source.AgentEntries() {
+
+	addAgentProducerClaims := func(agentLabel string, agent runtimecontracts.AgentRegistryEntry) {
 		for _, eventType := range agent.EmitEvents {
 			eventType = strings.TrimSpace(eventType)
-			switch {
-			case runtimecontracts.PlatformEventCatalogContains(c.source.PlatformSpec(), eventType):
-				c.namespaceFindings = append(c.namespaceFindings, Finding{
-					CheckID:  "platform_namespace_violation",
-					Severity: "error",
-					Message:  fmt.Sprintf("agent %s emit_events references platform-emitted event %s; platform owns this event", strings.TrimSpace(agentID), eventType),
-					Location: strings.TrimSpace(agentID),
-				})
-			case strings.HasPrefix(eventType, "platform."):
-				c.namespaceFindings = append(c.namespaceFindings, Finding{
-					CheckID:  "platform_namespace_violation",
-					Severity: "error",
-					Message:  fmt.Sprintf("agent %s emit_events references reserved platform.* namespace event %s", strings.TrimSpace(agentID), eventType),
-					Location: strings.TrimSpace(agentID),
-				})
+			if finding, ok := platformProducerClaimFinding(
+				c.source,
+				eventType,
+				agentLabel,
+				func(eventType string) string {
+					return fmt.Sprintf("agent %s emit_events references platform-emitted event %s; platform owns this event", strings.TrimSpace(agentLabel), eventType)
+				},
+				func(eventType string) string {
+					return fmt.Sprintf("agent %s emit_events references reserved platform.* namespace event %s", strings.TrimSpace(agentLabel), eventType)
+				},
+			); ok {
+				c.namespaceFindings = append(c.namespaceFindings, finding)
 			}
 		}
 	}
+
+	for eventType := range c.source.EventEntries() {
+		eventType = strings.TrimSpace(eventType)
+		addEventCatalogClaim(eventType, eventType)
+	}
+	for _, scope := range c.source.ProjectScopes() {
+		scopeLabel := projectScopeLabel(scope.Key, scope.Manifest.Name)
+		for eventType := range scope.Events {
+			eventType = strings.TrimSpace(eventType)
+			addEventCatalogClaim(eventType, scopedObjectLabel(scopeLabel, eventType))
+		}
+	}
+	for _, scope := range c.source.FlowScopes() {
+		scopeLabel := flowScopeLabel(scope.ID, scope.Path)
+		for eventType := range scope.Events {
+			eventType = strings.TrimSpace(eventType)
+			addEventCatalogClaim(eventType, scopedObjectLabel(scopeLabel, eventType))
+		}
+	}
+
+	for _, scope := range c.source.ProjectScopes() {
+		scopeLabel := projectScopeLabel(scope.Key, scope.Manifest.Name)
+		for agentID, agent := range scope.Agents {
+			agentID = strings.TrimSpace(agentID)
+			if agentID == "" {
+				continue
+			}
+			addAgentProducerClaims(scopedObjectLabel(scopeLabel, agentID), agent)
+		}
+	}
+	for _, scope := range c.source.FlowScopes() {
+		scopeLabel := flowScopeLabel(scope.ID, scope.Path)
+		for agentID, agent := range scope.Agents {
+			agentID = strings.TrimSpace(agentID)
+			if agentID == "" {
+				continue
+			}
+			addAgentProducerClaims(scopedObjectLabel(scopeLabel, agentID), agent)
+		}
+	}
+	for agentID, agent := range c.source.AgentEntries() {
+		agentID = strings.TrimSpace(agentID)
+		if agentID == "" {
+			continue
+		}
+		addAgentProducerClaims(agentID, agent)
+	}
+
 	for nodeID, node := range c.source.NodeEntries() {
 		for _, eventType := range node.Produces {
 			eventType = strings.TrimSpace(eventType)
-			switch {
-			case runtimecontracts.PlatformEventCatalogContains(c.source.PlatformSpec(), eventType):
-				c.namespaceFindings = append(c.namespaceFindings, Finding{
-					CheckID:  "platform_namespace_violation",
-					Severity: "error",
-					Message:  fmt.Sprintf("node %s produces references platform-emitted event %s; platform owns this event", strings.TrimSpace(nodeID), eventType),
-					Location: strings.TrimSpace(nodeID),
-				})
-			case strings.HasPrefix(eventType, "platform."):
-				c.namespaceFindings = append(c.namespaceFindings, Finding{
-					CheckID:  "platform_namespace_violation",
-					Severity: "error",
-					Message:  fmt.Sprintf("node %s produces references reserved platform.* namespace event %s", strings.TrimSpace(nodeID), eventType),
-					Location: strings.TrimSpace(nodeID),
-				})
+			if finding, ok := platformProducerClaimFinding(
+				c.source,
+				eventType,
+				nodeID,
+				func(eventType string) string {
+					return fmt.Sprintf("node %s produces references platform-emitted event %s; platform owns this event", strings.TrimSpace(nodeID), eventType)
+				},
+				func(eventType string) string {
+					return fmt.Sprintf("node %s produces references reserved platform.* namespace event %s", strings.TrimSpace(nodeID), eventType)
+				},
+			); ok {
+				c.namespaceFindings = append(c.namespaceFindings, finding)
 			}
 		}
 		for eventType, handler := range c.source.NodeEventHandlers(nodeID) {
 			for _, emitted := range handlerEmits(handler) {
 				emitted = strings.TrimSpace(emitted)
-				switch {
-				case runtimecontracts.PlatformEventCatalogContains(c.source.PlatformSpec(), emitted):
-					c.namespaceFindings = append(c.namespaceFindings, Finding{
-						CheckID:  "platform_namespace_violation",
-						Severity: "error",
-						Message:  fmt.Sprintf("node %s handler %s emits platform-emitted event %s; platform owns this event", strings.TrimSpace(nodeID), strings.TrimSpace(eventType), emitted),
-						Location: strings.TrimSpace(nodeID),
-					})
-				case strings.HasPrefix(emitted, "platform."):
-					c.namespaceFindings = append(c.namespaceFindings, Finding{
-						CheckID:  "platform_namespace_violation",
-						Severity: "error",
-						Message:  fmt.Sprintf("node %s handler %s emits reserved platform.* namespace event %s", strings.TrimSpace(nodeID), strings.TrimSpace(eventType), emitted),
-						Location: strings.TrimSpace(nodeID),
-					})
+				if finding, ok := platformProducerClaimFinding(
+					c.source,
+					emitted,
+					nodeID,
+					func(emitted string) string {
+						return fmt.Sprintf("node %s handler %s emits platform-emitted event %s; platform owns this event", strings.TrimSpace(nodeID), strings.TrimSpace(eventType), emitted)
+					},
+					func(emitted string) string {
+						return fmt.Sprintf("node %s handler %s emits reserved platform.* namespace event %s", strings.TrimSpace(nodeID), strings.TrimSpace(eventType), emitted)
+					},
+				); ok {
+					c.namespaceFindings = append(c.namespaceFindings, finding)
 				}
 			}
 		}
 	}
+	if bundle, ok := semanticview.Bundle(c.source); ok && bundle != nil && bundle.RootSchema != nil {
+		for _, eventType := range bundle.RootSchema.Pins.Outputs.Events {
+			eventType = strings.TrimSpace(eventType)
+			if finding, ok := platformProducerClaimFinding(
+				c.source,
+				eventType,
+				"root schema",
+				func(eventType string) string {
+					return fmt.Sprintf("root schema pins.outputs.events references platform-emitted event %s; platform owns this event", eventType)
+				},
+				func(eventType string) string {
+					return fmt.Sprintf("root schema pins.outputs.events references reserved platform.* namespace event %s", eventType)
+				},
+			); ok {
+				c.namespaceFindings = append(c.namespaceFindings, finding)
+			}
+		}
+	}
+	for flowID, schema := range c.source.FlowSchemaEntries() {
+		for _, eventType := range schema.Pins.Outputs.Events {
+			eventType = strings.TrimSpace(eventType)
+			if finding, ok := platformProducerClaimFinding(
+				c.source,
+				eventType,
+				flowID,
+				func(eventType string) string {
+					return fmt.Sprintf("flow %s pins.outputs.events references platform-emitted event %s; platform owns this event", strings.TrimSpace(flowID), eventType)
+				},
+				func(eventType string) string {
+					return fmt.Sprintf("flow %s pins.outputs.events references reserved platform.* namespace event %s", strings.TrimSpace(flowID), eventType)
+				},
+			); ok {
+				c.namespaceFindings = append(c.namespaceFindings, finding)
+			}
+		}
+	}
+	c.namespaceFindings = uniqueFindings(c.namespaceFindings)
 	sort.SliceStable(c.namespaceFindings, func(i, j int) bool {
 		if c.namespaceFindings[i].Location == c.namespaceFindings[j].Location {
 			return c.namespaceFindings[i].Message < c.namespaceFindings[j].Message
@@ -1184,6 +1258,28 @@ func (c *checkerContext) platformNamespace() []Finding {
 		return c.namespaceFindings[i].Location < c.namespaceFindings[j].Location
 	})
 	return c.namespaceFindings
+}
+
+func platformProducerClaimFinding(source semanticview.Source, eventType, location string, catalogMessage, reservedMessage func(string) string) (Finding, bool) {
+	eventType = strings.TrimSpace(eventType)
+	if source == nil || eventType == "" {
+		return Finding{}, false
+	}
+	message := ""
+	switch {
+	case runtimecontracts.PlatformEventCatalogContains(source.PlatformSpec(), eventType):
+		message = catalogMessage(eventType)
+	case strings.HasPrefix(eventType, "platform."):
+		message = reservedMessage(eventType)
+	default:
+		return Finding{}, false
+	}
+	return Finding{
+		CheckID:  "platform_namespace_violation",
+		Severity: "error",
+		Message:  strings.TrimSpace(message),
+		Location: strings.TrimSpace(location),
+	}, true
 }
 
 func promptFindingsForScope(bundle *runtimecontracts.WorkflowContractBundle, hasBundle bool, promptsDir, scopeLabel string, agents map[string]runtimecontracts.AgentRegistryEntry, source runtimecontracts.ContractItemSource, mode string) []Finding {
