@@ -633,23 +633,15 @@ func agentReplayBody(eventID, agentID, idempotencyKey string) string {
 
 func assertReplayEventDelivered(t *testing.T, ch <-chan events.Event, replayEventID, originalEventID string) {
 	t.Helper()
-	select {
-	case got := <-ch:
-		if got.ID != replayEventID || got.ParentEventID != originalEventID {
-			t.Fatalf("delivered replay event id=%s parent=%s, want id=%s parent=%s", got.ID, got.ParentEventID, replayEventID, originalEventID)
-		}
-	case <-time.After(time.Second):
-		t.Fatalf("timed out waiting for replay event %s", replayEventID)
+	got := requireAPIV1RuntimeBusEvent(t, ch, "replay event "+replayEventID)
+	if got.ID != replayEventID || got.ParentEventID != originalEventID {
+		t.Fatalf("delivered replay event id=%s parent=%s, want id=%s parent=%s", got.ID, got.ParentEventID, replayEventID, originalEventID)
 	}
 }
 
 func assertNoReplayEvent(t *testing.T, ch <-chan events.Event) {
 	t.Helper()
-	select {
-	case got := <-ch:
-		t.Fatalf("unexpected replay event delivered: %#v", got)
-	case <-time.After(150 * time.Millisecond):
-	}
+	requireNoAPIV1RuntimeBusEvent(t, ch, "replay assertion")
 }
 
 func fillAgentChannel(t *testing.T, ctx context.Context, bus *runtimebus.EventBus, agentID string, count int) {
@@ -670,11 +662,7 @@ func fillAgentChannel(t *testing.T, ctx context.Context, bus *runtimebus.EventBu
 func drainAgentChannel(t *testing.T, ch <-chan events.Event, count int) {
 	t.Helper()
 	for i := 0; i < count; i++ {
-		select {
-		case <-ch:
-		case <-time.After(time.Second):
-			t.Fatalf("timed out draining agent channel at item %d", i)
-		}
+		requireAPIV1RuntimeBusEvent(t, ch, fmt.Sprintf("agent channel drain item %d", i))
 	}
 }
 

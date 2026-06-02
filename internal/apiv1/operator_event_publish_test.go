@@ -70,13 +70,9 @@ func TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempo
 	if count := countAPIIdempotencyRows(t, db); count != 1 {
 		t.Fatalf("api_idempotency rows = %d, want 1", count)
 	}
-	select {
-	case got := <-ch:
-		if got.ID != eventID {
-			t.Fatalf("delivered event = %s, want %s", got.ID, eventID)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for event.publish delivery")
+	got := requireAPIV1RuntimeBusEvent(t, ch, "event.publish delivery")
+	if got.ID != eventID {
+		t.Fatalf("delivered event = %s, want %s", got.ID, eventID)
 	}
 
 	replay := rpcCall(t, handler, body)
@@ -244,13 +240,9 @@ func TestOperatorEventPublishResolvesFlowScopedContractEventName(t *testing.T) {
 	if delivery := asMap(t, deliveries[0]); delivery["subscriber_id"] != "repo-observer" {
 		t.Fatalf("delivery = %#v, want repo-observer", delivery)
 	}
-	select {
-	case got := <-ch:
-		if got.ID != eventID || string(got.Type) != canonicalEventName {
-			t.Fatalf("delivered event = %#v, want %s/%s", got, eventID, canonicalEventName)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for flow-scoped event.publish delivery")
+	got := requireAPIV1RuntimeBusEvent(t, ch, "flow-scoped event.publish delivery")
+	if got.ID != eventID || string(got.Type) != canonicalEventName {
+		t.Fatalf("delivered event = %#v, want %s/%s", got, eventID, canonicalEventName)
 	}
 }
 
@@ -378,13 +370,9 @@ func TestOperatorEventPublishHandlersUseActiveEphemeralBundleScopeForCreateNewWo
 	if got := countEventsByName(t, db, "scan.requested"); got != 1 {
 		t.Fatalf("scan.requested event count = %d, want 1", got)
 	}
-	select {
-	case got := <-ch:
-		if got.ID != eventID {
-			t.Fatalf("delivered event = %s, want %s", got.ID, eventID)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for event.publish delivery")
+	got := requireAPIV1RuntimeBusEvent(t, ch, "event.publish delivery")
+	if got.ID != eventID {
+		t.Fatalf("delivered event = %s, want %s", got.ID, eventID)
 	}
 }
 
@@ -434,11 +422,7 @@ func TestOperatorEventPublishPersistsIdempotencyBeforeReadbackFailure(t *testing
 	if count := countAPIIdempotencyRows(t, db); count != 1 {
 		t.Fatalf("api_idempotency rows after readback failure = %d, want 1", count)
 	}
-	select {
-	case <-ch:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for event delivery after readback failure")
-	}
+	requireAPIV1RuntimeBusEvent(t, ch, "event delivery after readback failure")
 
 	replay := rpcCall(t, handler, body)
 	if replay.Error != nil {
@@ -505,11 +489,7 @@ func TestOperatorEventPublishPostCommitReceiptFailureReplaysWithoutDuplicate(t *
 	if !containsMissingPipelineReceiptEvent(missing, eventID) {
 		t.Fatalf("missing pipeline receipt events = %#v, want %s", missing, eventID)
 	}
-	select {
-	case <-ch:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for event delivery after post-commit receipt failure")
-	}
+	requireAPIV1RuntimeBusEvent(t, ch, "event delivery after post-commit receipt failure")
 
 	replay := rpcCall(t, handler, body)
 	if replay.Error != nil {
@@ -564,11 +544,7 @@ func TestOperatorEventPublishPostCommitCompletionFailureReplaysWithoutDuplicate(
 	if outcome != "dead_letter" || !strings.Contains(errText, "simulated normal-run completion failure") {
 		t.Fatalf("pipeline receipt outcome=%q error=%q, want dead_letter with completion failure", outcome, errText)
 	}
-	select {
-	case <-ch:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for event delivery after post-commit completion failure")
-	}
+	requireAPIV1RuntimeBusEvent(t, ch, "event delivery after post-commit completion failure")
 
 	replay := rpcCall(t, handler, body)
 	if replay.Error != nil {
@@ -641,11 +617,7 @@ func TestOperatorEventPublishExplicitRunTargetRequiresExistingNonterminalRun(t *
 		t.Fatalf("initial event.publish error = %#v", initial.Error)
 	}
 	runID := stringValue(t, asMap(t, initial.Result)["run_id"], "run_id")
-	select {
-	case <-ch:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for initial explicit-run target delivery")
-	}
+	requireAPIV1RuntimeBusEvent(t, ch, "initial explicit-run target delivery")
 
 	targeted := rpcCall(t, handler, eventPublishBody(runID, runStartTestFingerprint, "scan.requested", `{"topic":"second"}`, "operator-test", "idem-existing-run"))
 	if targeted.Error != nil {
@@ -662,13 +634,9 @@ func TestOperatorEventPublishExplicitRunTargetRequiresExistingNonterminalRun(t *
 	if count := countEventsByName(t, db, "scan.requested"); count != 2 {
 		t.Fatalf("scan.requested events after targeted publish = %d, want 2", count)
 	}
-	select {
-	case got := <-ch:
-		if got.ID != targetedEventID || got.RunID != runID {
-			t.Fatalf("targeted delivered event id/run = %s/%s, want %s/%s", got.ID, got.RunID, targetedEventID, runID)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for targeted explicit-run delivery")
+	got := requireAPIV1RuntimeBusEvent(t, ch, "targeted explicit-run delivery")
+	if got.ID != targetedEventID || got.RunID != runID {
+		t.Fatalf("targeted delivered event id/run = %s/%s, want %s/%s", got.ID, got.RunID, targetedEventID, runID)
 	}
 
 	mismatch := rpcCall(t, handler, eventPublishBody(runID, "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "scan.requested", `{"topic":"mismatch"}`, "", "idem-existing-run-mismatch"))
@@ -730,11 +698,7 @@ func TestOperatorEventPublishExplicitRunFollowUpRequiresRecipientBeforePersisten
 	if initialResult["new_run_created"] != true {
 		t.Fatalf("initial result = %#v, want new run", initialResult)
 	}
-	select {
-	case <-initialCh:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for initial delivery")
-	}
+	requireAPIV1RuntimeBusEvent(t, initialCh, "initial delivery")
 
 	followUp := rpcCall(t, handler, eventPublishBody(runID, runStartTestFingerprint, "scan.followup", `{"topic":"second"}`, "operator-test", "idem-followup-existing"))
 	if followUp.Error != nil {
@@ -765,13 +729,9 @@ func TestOperatorEventPublishExplicitRunFollowUpRequiresRecipientBeforePersisten
 	if got := countEventDeliveriesForEvent(t, ctx, db, followUpEventID); got != 1 {
 		t.Fatalf("event_deliveries for follow-up = %d, want 1", got)
 	}
-	select {
-	case got := <-followUpCh:
-		if got.ID != followUpEventID || got.RunID != runID {
-			t.Fatalf("follow-up delivered event id/run = %s/%s, want %s/%s", got.ID, got.RunID, followUpEventID, runID)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for follow-up delivery")
+	got := requireAPIV1RuntimeBusEvent(t, followUpCh, "follow-up delivery")
+	if got.ID != followUpEventID || got.RunID != runID {
+		t.Fatalf("follow-up delivered event id/run = %s/%s, want %s/%s", got.ID, got.RunID, followUpEventID, runID)
 	}
 
 	rejected := rpcCall(t, handler, eventPublishBody(runID, runStartTestFingerprint, "scan.unhandled", `{"topic":"lost"}`, "operator-test", "idem-followup-unhandled"))
@@ -813,11 +773,7 @@ func TestOperatorEventPublishExplicitRunRequiresRecipientPlanCheckerBeforePersis
 		t.Fatalf("initial event.publish error = %#v", initial.Error)
 	}
 	runID := stringValue(t, asMap(t, initial.Result)["run_id"], "run_id")
-	select {
-	case <-initialCh:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for initial delivery")
-	}
+	requireAPIV1RuntimeBusEvent(t, initialCh, "initial delivery")
 
 	noCheckerHandler := eventPublishTestHandlerWithStores(t, pg, pg, pg, failingRunStartPublisher{}, source)
 	rejected := rpcCall(t, noCheckerHandler, eventPublishBody(runID, runStartTestFingerprint, "scan.followup", `{"topic":"second"}`, "operator-test", "idem-followup-missing-plan"))
@@ -864,11 +820,7 @@ func TestOperatorEventPublishSQLiteExplicitRunFollowUpUsesSelectedRun(t *testing
 		t.Fatalf("sqlite initial event.publish error = %#v", initial.Error)
 	}
 	runID := stringValue(t, asMap(t, initial.Result)["run_id"], "run_id")
-	select {
-	case <-initialCh:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for sqlite initial delivery")
-	}
+	requireAPIV1RuntimeBusEvent(t, initialCh, "sqlite initial delivery")
 
 	followUp := rpcCall(t, handler, eventPublishBody(runID, runStartTestFingerprint, "scan.followup", `{"topic":"second"}`, "operator-test", "idem-sqlite-followup-existing"))
 	if followUp.Error != nil {
@@ -891,13 +843,9 @@ func TestOperatorEventPublishSQLiteExplicitRunFollowUpUsesSelectedRun(t *testing
 	if got := len(asSlice(t, result["deliveries"])); got != 1 {
 		t.Fatalf("sqlite follow-up deliveries = %d, want 1", got)
 	}
-	select {
-	case got := <-followUpCh:
-		if got.ID != eventID || got.RunID != runID {
-			t.Fatalf("sqlite follow-up delivered id/run = %s/%s, want %s/%s", got.ID, got.RunID, eventID, runID)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for sqlite follow-up delivery")
+	got := requireAPIV1RuntimeBusEvent(t, followUpCh, "sqlite follow-up delivery")
+	if got.ID != eventID || got.RunID != runID {
+		t.Fatalf("sqlite follow-up delivered id/run = %s/%s, want %s/%s", got.ID, got.RunID, eventID, runID)
 	}
 }
 
@@ -996,11 +944,7 @@ func TestOperatorEventPublishSourceEventIDValidatesSameRunLineage(t *testing.T) 
 	parentResult := asMap(t, parent.Result)
 	parentEventID := stringValue(t, parentResult["event_id"], "event_id")
 	parentRunID := stringValue(t, parentResult["run_id"], "run_id")
-	select {
-	case <-ch:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for parent source_event_id delivery")
-	}
+	requireAPIV1RuntimeBusEvent(t, ch, "parent source_event_id delivery")
 
 	child := rpcCall(t, handler, eventPublishBodyWithSource(parentRunID, parentEventID, runStartTestFingerprint, "scan.requested", `{"topic":"checkpoint"}`, "operator-test", "idem-source-child"))
 	if child.Error != nil {
@@ -1021,13 +965,9 @@ func TestOperatorEventPublishSourceEventIDValidatesSameRunLineage(t *testing.T) 
 	if count := countAPIIdempotencyRows(t, db); count != 2 {
 		t.Fatalf("api_idempotency rows after sourced publish = %d, want 2", count)
 	}
-	select {
-	case got := <-ch:
-		if got.ID != childEventID || got.RunID != parentRunID {
-			t.Fatalf("child delivered event id/run = %s/%s, want %s/%s", got.ID, got.RunID, childEventID, parentRunID)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for child source_event_id delivery")
+	got := requireAPIV1RuntimeBusEvent(t, ch, "child source_event_id delivery")
+	if got.ID != childEventID || got.RunID != parentRunID {
+		t.Fatalf("child delivered event id/run = %s/%s, want %s/%s", got.ID, got.RunID, childEventID, parentRunID)
 	}
 }
 
@@ -1307,11 +1247,7 @@ func TestOperatorEventPublishQueuesWhileRuntimePaused(t *testing.T) {
 	if got := len(asSlice(t, asMap(t, published.Result)["deliveries"])); got != 1 {
 		t.Fatalf("paused event.publish deliveries = %d, want 1", got)
 	}
-	select {
-	case got := <-ch:
-		t.Fatalf("paused event.publish delivered event %s before resume", got.ID)
-	case <-time.After(150 * time.Millisecond):
-	}
+	requireNoAPIV1RuntimeBusEvent(t, ch, "paused event.publish before resume")
 	if got := countEventDeliveriesForEvent(t, ctx, db, eventID); got != 1 {
 		t.Fatalf("paused event deliveries = %d, want 1", got)
 	}
@@ -1330,13 +1266,9 @@ func TestOperatorEventPublishQueuesWhileRuntimePaused(t *testing.T) {
 	if resumed.ReleasedCount != 1 {
 		t.Fatalf("released count = %d, want 1", resumed.ReleasedCount)
 	}
-	select {
-	case got := <-ch:
-		if got.ID != eventID {
-			t.Fatalf("released event = %s, want %s", got.ID, eventID)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for queued event.publish release")
+	got := requireAPIV1RuntimeBusEvent(t, ch, "queued event.publish release")
+	if got.ID != eventID {
+		t.Fatalf("released event = %s, want %s", got.ID, eventID)
 	}
 	if got := countPipelineReceiptsForEvent(t, ctx, db, eventID); got != 1 {
 		t.Fatalf("pipeline receipts after resume = %d, want 1", got)

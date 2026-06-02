@@ -47,19 +47,11 @@ func TestOperatorRuntimeContextManagerRoutesCreateNewWorkToSelectedBundle(t *tes
 	if got := countEventsByName(t, fixture.db, "triage.requested"); got != 1 {
 		t.Fatalf("triage.requested count after event.publish = %d, want 1", got)
 	}
-	select {
-	case got := <-chSelected:
-		if got.ID != publishedEventID {
-			t.Fatalf("selected context delivered event = %s, want %s", got.ID, publishedEventID)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for selected context delivery")
+	got := requireAPIV1RuntimeBusEvent(t, chSelected, "selected context delivery")
+	if got.ID != publishedEventID {
+		t.Fatalf("selected context delivered event = %s, want %s", got.ID, publishedEventID)
 	}
-	select {
-	case got := <-chPrimary:
-		t.Fatalf("primary context unexpectedly delivered selected bundle event %s", got.ID)
-	default:
-	}
+	requireNoAPIV1RuntimeBusEvent(t, chPrimary, "primary context selected bundle route")
 
 	runID := uuid.NewString()
 	started := rpcCall(t, handler, runStartBodyWithBundleHash(runID, runtimeContextTestBundleHashB, "triage.requested", `{"topic":"context-b-start"}`, "idem-context-start"))
@@ -82,13 +74,9 @@ func TestOperatorRuntimeContextManagerRoutesExistingRunByStoredBundle(t *testing
 	if started.Error != nil {
 		t.Fatalf("seed run.start error = %#v", started.Error)
 	}
-	select {
-	case got := <-chSelected:
-		if got.RunID != runID {
-			t.Fatalf("seed existing-run delivery run = %s, want %s", got.RunID, runID)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for seed existing-run delivery")
+	got := requireAPIV1RuntimeBusEvent(t, chSelected, "seed existing-run delivery")
+	if got.RunID != runID {
+		t.Fatalf("seed existing-run delivery run = %s, want %s", got.RunID, runID)
 	}
 
 	body := fmt.Sprintf(
@@ -108,13 +96,9 @@ func TestOperatorRuntimeContextManagerRoutesExistingRunByStoredBundle(t *testing
 		t.Fatalf("event rows for existing run = %d, want 2", got)
 	}
 	assertRunBundleIdentity(t, fixture.db, runID, runtimeContextTestBundleHashB, storerunlifecycle.BundleSourcePersisted, "")
-	select {
-	case got := <-chSelected:
-		if got.ID != eventID || got.RunID != runID {
-			t.Fatalf("existing-run delivery id/run = %s/%s, want %s/%s", got.ID, got.RunID, eventID, runID)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for existing-run selected-context delivery")
+	got = requireAPIV1RuntimeBusEvent(t, chSelected, "existing-run selected-context delivery")
+	if got.ID != eventID || got.RunID != runID {
+		t.Fatalf("existing-run delivery id/run = %s/%s, want %s/%s", got.ID, got.RunID, eventID, runID)
 	}
 }
 
