@@ -229,6 +229,7 @@ func authoredEmitSiteFlowScopeKey(scope FlowScope) string {
 
 func authoredPreferredFlowScopeKeys(projectScopes []ProjectScope, flowScopes []FlowScope) map[string]string {
 	out := map[string]string{}
+	flowRootProjectScopeKeys := authoredFlowRootProjectScopeKeys(flowScopes)
 	for _, scope := range projectScopes {
 		flowID := strings.TrimSpace(scope.OwningFlowID)
 		if flowID == "" {
@@ -238,7 +239,7 @@ func authoredPreferredFlowScopeKeys(projectScopes []ProjectScope, flowScopes []F
 		if key == "" {
 			continue
 		}
-		if authoredFlowScopeKeyRank(key) < 2 {
+		if _, ok := flowRootProjectScopeKeys[flowID][key]; !ok {
 			continue
 		}
 		current := out[flowID]
@@ -259,6 +260,29 @@ func authoredPreferredFlowScopeKeys(projectScopes []ProjectScope, flowScopes []F
 		if current == "" || authoredFlowScopeKeyRank(key) > authoredFlowScopeKeyRank(current) {
 			out[flowID] = key
 		}
+	}
+	return out
+}
+
+func authoredFlowRootProjectScopeKeys(flowScopes []FlowScope) map[string]map[string]struct{} {
+	out := map[string]map[string]struct{}{}
+	for _, scope := range flowScopes {
+		flowID := strings.TrimSpace(scope.ID)
+		if flowID == "" {
+			continue
+		}
+		keys := out[flowID]
+		if keys == nil {
+			keys = map[string]struct{}{}
+			out[flowID] = keys
+		}
+		if key := strings.TrimSpace(scope.PackageKey); key != "" && key != "." {
+			keys[key] = struct{}{}
+		}
+		if path := strings.Trim(strings.TrimSpace(scope.Path), "/"); path != "" && path != "." {
+			keys[path] = struct{}{}
+		}
+		keys["flows/"+flowID] = struct{}{}
 	}
 	return out
 }
