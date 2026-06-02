@@ -480,6 +480,7 @@ type_system:
         immutable: true           # entities only
         description: Human-readable annotation
         _unused_reason: Reason    # entities only; verify suppression for E1
+        _unused_reader_reason: Reason # entities only; reader lint suppression for external/operator readout
   restrictions:
     retired:
     - jsonb as an author-declared contract type
@@ -540,12 +541,16 @@ entity_contracts:
             <target_policy_field>: policy.<policy_path>
             <target_literal_field>: <literal>
           _unused_reason: <reason>
+          _unused_reader_reason: <reason>
     notes:
     - Entity-level metadata is underscore-prefixed.
     - State does not live in entity contracts.
     - Envelope names are reserved and must not be author-declared.
     - '`materialize_from` is valid only for a list of a declared named type.'
     - '`materialize_from` and `_unused_reason` are mutually exclusive.'
+    - '`_unused_reader_reason` documents that a field is intentionally read only outside platform-visible internal handlers.
+      It suppresses only the informational `entity_reader_coverage` slice; it does not count as writer coverage, authorize
+      runtime/API reads, or change persistence semantics.'
     - 'A `materialize_from` field is runtime-owned and not agent-writable.'
   accumulator_entity_projection:
     description: |
@@ -7561,7 +7566,45 @@ static_analyzer:
       excludes:
       - external/operator readers outside platform visibility
       - hard gating or warning-level surfacing
+    accepted_suppression:
+      unused_reader_reason:
+        field_metadata: _unused_reader_reason
+        rule: Explicit `_unused_reader_reason:` with a trimmed reason of at least 10 characters declares intentional
+          external/operator readout and suppresses this lint-evidence slice only.
     rule: Emit lint evidence when a declared entity field has no detected internal reader on the supported verify surface.
+  slice_9a_cross_surface_named_type_use:
+    id: cross_surface_named_type_use
+    domain: semantic_validity
+    authority: lint_evidence
+    severity: informational
+    canonical_owner: internal/runtime/bootverify
+    supported_surface: cmd/swarm verify
+    spec_basis:
+    - type_system.field_forms
+    - spec_authority.review_artifact_boundary
+    - design_principles
+    scope:
+      description: Informational audit over repeated authored object shapes that may represent an unextracted named type.
+      applies_to:
+      - root and flow type catalog named-type field shapes
+      - root and flow entity contract field shapes, excluding platform envelope fields
+      - resolved event payload field shapes
+      - root, project, and flow policy object shapes
+      excludes:
+      - scalar-only values and object shapes with fewer than two normalized field/type pairs
+      - runtime-delivered payload instances or persisted runtime state
+      - hard gating or warning-level surfacing
+      - exact duplicate shapes with exactly two candidates and exactly two normalized field/type pairs
+    exact_duplicate_threshold:
+      rule: Emit exact duplicate lint evidence only when the normalized shape appears in at least two authored candidates
+        and either `field_count >= 3` or `candidate_count >= 3`.
+    near_duplicate_threshold:
+      rule: Emit near-duplicate lint evidence only when compared shapes are not exact duplicates, both shapes have at least
+        four field/type pairs, they share at least four field/type pairs, the larger shape has at most two additional pairs,
+        and common pair coverage is at least 75% of the larger shape.
+    rule: Emit lint evidence when authored object shapes satisfy the exact duplicate or near-duplicate thresholds; the finding
+      must remain advisory and must not require authors to extract a named type unless the shared shape is genuinely the same
+      concept.
   slice_10_agent_prompt_lint_structural:
     id: agent_prompt_lint_structural
     domain: semantic_validity

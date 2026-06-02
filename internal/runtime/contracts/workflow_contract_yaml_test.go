@@ -1001,6 +1001,30 @@ project:
 	}
 }
 
+func TestEntityFieldDeclDecode_PreservesUnusedReaderReason(t *testing.T) {
+	var field EntityFieldDecl
+	if err := yaml.Unmarshal([]byte(`
+type: text
+_unused_reader_reason: External operator readout
+`), &field); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if got := field.UnusedReaderReason; got != "External operator readout" {
+		t.Fatalf("UnusedReaderReason = %q", got)
+	}
+}
+
+func TestEntityFieldDeclDecode_RejectsShortUnusedReaderReason(t *testing.T) {
+	var field EntityFieldDecl
+	err := yaml.Unmarshal([]byte(`
+type: text
+_unused_reader_reason: short
+`), &field)
+	if err == nil || !strings.Contains(err.Error(), "_unused_reader_reason must be at least 10 characters") {
+		t.Fatalf("yaml.Unmarshal error = %v, want _unused_reader_reason length error", err)
+	}
+}
+
 func TestAccumulateSpecDecode_PreservesDescriptionAndRejectsUnknownField(t *testing.T) {
 	var spec AccumulateSpec
 	if err := yaml.Unmarshal([]byte(`

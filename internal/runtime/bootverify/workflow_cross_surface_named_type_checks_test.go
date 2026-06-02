@@ -34,6 +34,66 @@ func TestRun_ReportsCrossSurfaceExactDuplicateShapesAsLintEvidence(t *testing.T)
 	}
 }
 
+func TestRun_DoesNotReportLowSignalTwoByTwoExactDuplicateShape(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"ticket.classified": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"category": {Type: "text"},
+						"priority": {Type: "text"},
+					},
+				},
+			},
+			"ticket.assigned": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"category": {Type: "text"},
+						"priority": {Type: "text"},
+					},
+				},
+			},
+		},
+	}
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.LintEvidence(), crossSurfaceNamedTypeUseCheckID, "identical shape {category:text, priority:text}") {
+		t.Fatalf("expected low-signal 2x2 exact duplicate shape to be ignored, got %#v", report.LintEvidence())
+	}
+}
+
+func TestRun_ReportsTwoCandidateThreeFieldExactDuplicateShape(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"ticket.classified": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"category":   {Type: "text"},
+						"priority":   {Type: "text"},
+						"confidence": {Type: "numeric"},
+					},
+				},
+			},
+			"ticket.assigned": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"category":   {Type: "text"},
+						"priority":   {Type: "text"},
+						"confidence": {Type: "numeric"},
+					},
+				},
+			},
+		},
+	}
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.LintEvidence(), crossSurfaceNamedTypeUseCheckID, "identical shape {category:text, confidence:numeric, priority:text}") {
+		t.Fatalf("expected 2-candidate 3-field exact duplicate lint evidence, got %#v", report.LintEvidence())
+	}
+}
+
 func TestRun_ReportsConservativeNearDuplicateShapeAsLintEvidence(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootTypes: runtimecontracts.TypeCatalogDocument{

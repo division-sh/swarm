@@ -10,7 +10,15 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
-const crossSurfaceNamedTypeUseCheckID = "cross_surface_named_type_use"
+const (
+	crossSurfaceNamedTypeUseCheckID = "cross_surface_named_type_use"
+
+	crossSurfaceExactDuplicateMinFields     = 3
+	crossSurfaceExactDuplicateMinCandidates = 3
+	crossSurfaceNearDuplicateMinPairs       = 4
+	crossSurfaceNearDuplicateMaxSizeDelta   = 2
+	crossSurfaceNearDuplicateMinPercent     = 75
+)
 
 type crossSurfaceShapeCandidate struct {
 	Label     string
@@ -42,7 +50,7 @@ func crossSurfaceNamedTypeUseFindings(source semanticview.Source) []Finding {
 
 	findings := make([]Finding, 0)
 	for _, group := range groups {
-		if len(group.Candidates) < 2 {
+		if !crossSurfaceExactDuplicateMeetsThreshold(group) {
 			continue
 		}
 		findings = append(findings, Finding{
@@ -68,6 +76,13 @@ func crossSurfaceNamedTypeUseFindings(source semanticview.Source) []Finding {
 		return findings[i].Location < findings[j].Location
 	})
 	return findings
+}
+
+func crossSurfaceExactDuplicateMeetsThreshold(group crossSurfaceShapeGroup) bool {
+	if len(group.Candidates) < 2 {
+		return false
+	}
+	return len(group.Pairs) >= crossSurfaceExactDuplicateMinFields || len(group.Candidates) >= crossSurfaceExactDuplicateMinCandidates
 }
 
 func collectCrossSurfaceShapeCandidates(source semanticview.Source) []crossSurfaceShapeCandidate {
@@ -341,7 +356,7 @@ func nearDuplicateCrossSurfaceShapeFindings(groups []crossSurfaceShapeGroup) []F
 }
 
 func conservativeNearDuplicateShape(left, right crossSurfaceShapeGroup) (int, int, []string, bool) {
-	if left.Signature == right.Signature || len(left.Pairs) < 4 || len(right.Pairs) < 4 {
+	if left.Signature == right.Signature || len(left.Pairs) < crossSurfaceNearDuplicateMinPairs || len(right.Pairs) < crossSurfaceNearDuplicateMinPairs {
 		return 0, 0, nil, false
 	}
 	leftPairs := map[string]struct{}{}
@@ -356,7 +371,9 @@ func conservativeNearDuplicateShape(left, right crossSurfaceShapeGroup) (int, in
 	}
 	common := len(commonPairs)
 	total := maxInt(len(left.Pairs), len(right.Pairs))
-	if common < 4 || total-common > 2 || common*100 < total*75 {
+	if common < crossSurfaceNearDuplicateMinPairs ||
+		total-common > crossSurfaceNearDuplicateMaxSizeDelta ||
+		common*100 < total*crossSurfaceNearDuplicateMinPercent {
 		return 0, 0, nil, false
 	}
 	sort.Strings(commonPairs)
