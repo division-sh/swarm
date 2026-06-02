@@ -6309,8 +6309,10 @@ multi_bundle_persistence:
         emits slash-relative NFC bundle paths in deterministic order, writes text inputs to content_yaml, and writes raw
         inputs under every discovered flow data directory to data_blob, including root flows/<flow>/data/...,
         package flows such as packages/<package>/flows/<flow>/data/..., and nested flow packages such as
-        flows/<parent>/flows/<child>/data/.... Empty raw-data files are represented as empty base64 strings. Archive
-        packaging remains split until archive format and extraction safety rules are promoted.
+        flows/<parent>/flows/<child>/data/.... Empty raw-data files are represented as empty base64 strings. The
+        `--contracts` value is an explicit operator input: it MUST name the selected contracts directory itself and
+        MUST NOT fall back to a parent bundle when the supplied path is a typo/non-root child. Archive packaging
+        remains split until archive format and extraction safety rules are promoted.
     modified_commands_planned:
       - swarm serve --bundle-hash <bundle_hash> [--bundle-hash <bundle_hash> ...] (implemented boot-pinned Postgres DB-loaded process mode)
       - swarm serve --dev
@@ -8598,6 +8600,12 @@ cli_specification:
           If no source yields a contracts root and repo discovery does not find `contracts/package.yaml`, the
           command fails closed during local contract resolution with the promoted missing-contracts-source error.
           There is no implicit contracts root default without a discovered package file.
+        explicit_source_validation_rule: >
+          Values from `--contracts`, `SWARM_CONTRACTS_PATH`, and config `contracts_path` are explicit operator
+          inputs. After normal relative-path resolution, the resolver MUST validate the named value itself as either
+          a directory containing `package.yaml` or that directory's `package.yaml` file shorthand. It MUST NOT walk
+          upward or fall back to a parent directory to satisfy a typo/non-root child path. Repo-local
+          `contracts/package.yaml` discovery remains the only discovered default.
       platform_spec_path:
         accepted_sources:
           flag: --platform-spec <path>

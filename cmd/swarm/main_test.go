@@ -6384,13 +6384,56 @@ func runVerifyCommandWithContractsForTest(ctx context.Context, repo, contractsPa
 }
 
 func TestRunVerifyCommand_BadContractsPath(t *testing.T) {
-	var buf bytes.Buffer
-	code := runVerifyCommandWithContractsForTest(context.Background(), repoRoot(), filepath.Join(t.TempDir(), "missing"), &buf)
-	if code == 0 {
-		t.Fatal("expected non-zero exit code")
+	cases := []struct {
+		name string
+		path string
+	}{
+		{name: "missing absolute path", path: filepath.Join(t.TempDir(), "missing")},
+		{name: "explicit child path under bundle", path: filepath.Join(repoRoot(), "tests", "tier8-boot-verification", "test-boot-success", "zzz-not-a-real-dir")},
 	}
-	if out := buf.String(); !strings.Contains(out, "verify failed: resolve contracts") {
-		t.Fatalf("output = %q", out)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			code := runVerifyCommandWithContractsForTest(context.Background(), repoRoot(), tc.path, &buf)
+			if code == 0 {
+				t.Fatal("expected non-zero exit code")
+			}
+			out := buf.String()
+			if !strings.Contains(out, "verify failed: resolve contracts") {
+				t.Fatalf("output = %q", out)
+			}
+			if !strings.Contains(out, tc.path) {
+				t.Fatalf("output does not name explicit path %q:\n%s", tc.path, out)
+			}
+		})
+	}
+}
+
+func TestNormalizeContractsRootExplicitPathValidation(t *testing.T) {
+	root := t.TempDir()
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `name: explicit-root`)
+
+	got, err := normalizeContractsRoot(root)
+	if err != nil {
+		t.Fatalf("normalize directory root: %v", err)
+	}
+	if got != root {
+		t.Fatalf("root = %q, want %q", got, root)
+	}
+
+	got, err = normalizeContractsRoot(filepath.Join(root, "package.yaml"))
+	if err != nil {
+		t.Fatalf("normalize package file shorthand: %v", err)
+	}
+	if got != root {
+		t.Fatalf("root from package file = %q, want %q", got, root)
+	}
+
+	explicitChild := filepath.Join(root, "zzz-not-a-real-dir")
+	if got, err := normalizeContractsRoot(explicitChild); err == nil {
+		t.Fatalf("normalize explicit child returned %q, want fail-closed error", got)
+	} else if !strings.Contains(err.Error(), explicitChild) {
+		t.Fatalf("error = %q, want explicit child path %q", err.Error(), explicitChild)
 	}
 }
 
