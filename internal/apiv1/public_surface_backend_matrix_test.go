@@ -264,6 +264,9 @@ func validatePublicSurfaceBackendMatrix(root string, matrix publicSurfaceBackend
 	if _, ok := activeTrackers[trackerKey(1254, "runtime_operations.runtime_store_backend_default_and_sqlite_portability")]; ok {
 		problems = append(problems, "active_trackers must not include closed #1254 runtime_store_backend_default_and_sqlite_portability")
 	}
+	if _, ok := activeTrackers[trackerKey(1255, "runtime_operations.runtime_store_backend_default_and_sqlite_portability")]; !ok {
+		problems = append(problems, "active_trackers missing #1255 runtime_store_backend_default_and_sqlite_portability")
+	}
 	if _, ok := activeTrackers[trackerKey(0, "operator_surfaces.v1_openrpc_api_conformance")]; !ok {
 		problems = append(problems, "active_trackers missing operator_surfaces.v1_openrpc_api_conformance watchlist")
 	}
@@ -649,6 +652,7 @@ func requiredPublicSurfaceRows() map[string]struct{} {
 		"status_run_get_entity_count",
 		"event_publish_api",
 		"event_publish_cli",
+		"event_publish_existing_run_followup_served_path",
 		"mailbox_read_api_after_mailbox_write",
 		"mailbox_read_cli",
 		"serve_dev_abandon_active_runs",

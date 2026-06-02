@@ -184,6 +184,14 @@ func (s storeBundle) runtimeStores() runtime.Stores {
 	}
 }
 
+func selectedAPIRunBundleContextStore(stores storeBundle) apiv1.RunBundleContextStore {
+	if stores.Postgres != nil {
+		return stores.Postgres
+	}
+	runBundleContext, _ := stores.ObservabilityStore.(apiv1.RunBundleContextStore)
+	return runBundleContext
+}
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -841,6 +849,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	var apiAgentConversations apiv1.AgentConversationReadStore
 	var apiDatabase apiv1.Pinger
 	var apiRuns apiv1.RunReadStore
+	apiRunBundleContext := selectedAPIRunBundleContextStore(stores)
 	apiObservability := stores.ObservabilityStore
 	if stores.Postgres != nil {
 		apiDatabase = stores.Postgres
@@ -904,7 +913,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		},
 		ConversationForks:   stores.Postgres,
 		ForkChatExecutor:    apiv1.NewLLMForkChatExecutor(forkChatLLM),
-		RunBundleContext:    stores.Postgres,
+		RunBundleContext:    apiRunBundleContext,
 		RunForkAvailability: runForkAvailability,
 		RunFork: apiv1.SelectedContractRunForkExecutor{
 			Store:             stores.Postgres,
