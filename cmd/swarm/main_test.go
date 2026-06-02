@@ -2063,13 +2063,13 @@ func TestPlatformSpecWorkspaceExecutionTargetCapabilityPromoted(t *testing.T) {
 		t.Fatalf("parse platform spec: %v", err)
 	}
 	authority := spec.WorkspaceModel.WorkspaceExecutionTargetCapability
-	if strings.TrimSpace(authority.PromotedBy) != "#1213/#1235" || strings.TrimSpace(authority.ImplementationStatus) != "implemented_host_file_slice" {
+	if strings.TrimSpace(authority.PromotedBy) != "#1213/#1235/#1286" || strings.TrimSpace(authority.ImplementationStatus) != "implemented_host_file_and_relay_slice" {
 		t.Fatalf("workspace execution target authority status = promoted_by:%q implementation_status:%q", authority.PromotedBy, authority.ImplementationStatus)
 	}
 	if !strings.Contains(authority.CanonicalOwner, "workspace_model.workspace_execution_target_capability") || !strings.Contains(authority.ImplementationOwner, "internal/runtime/workspace.ExecutionTarget") {
 		t.Fatalf("workspace execution target owners = canonical:%q implementation:%q", authority.CanonicalOwner, authority.ImplementationOwner)
 	}
-	for _, want := range []string{"Docker container execution", "explicit host-local targets", "unsupported targets", "platform-managed native file read/write"} {
+	for _, want := range []string{"Docker container execution", "explicit host-local targets", "unsupported targets", "tool-result relay"} {
 		if !strings.Contains(authority.Scope, want) {
 			t.Fatalf("workspace execution target scope missing %q:\n%s", want, authority.Scope)
 		}
@@ -2090,12 +2090,12 @@ func TestPlatformSpecWorkspaceExecutionTargetCapabilityPromoted(t *testing.T) {
 	if !strings.Contains(hostMode.Rule, "MUST NOT infer execution support from an empty container") {
 		t.Fatalf("host execution mode rule = %q", hostMode.Rule)
 	}
-	for _, want := range []string{string(workspace.ExecutionCapabilityFileRead), string(workspace.ExecutionCapabilityFileWrite)} {
+	for _, want := range []string{string(workspace.ExecutionCapabilityFileRead), string(workspace.ExecutionCapabilityFileWrite), string(workspace.ExecutionCapabilityToolResultRelay)} {
 		if !stringSliceContains(hostMode.Capabilities, want) {
 			t.Fatalf("host execution capabilities missing %q: %#v", want, hostMode.Capabilities)
 		}
 	}
-	for _, forbidden := range []string{string(workspace.ExecutionCapabilityNativeCommand), string(workspace.ExecutionCapabilityToolResultRelay), string(workspace.ExecutionCapabilityClaudeCLI)} {
+	for _, forbidden := range []string{string(workspace.ExecutionCapabilityNativeCommand), string(workspace.ExecutionCapabilityClaudeCLI)} {
 		if stringSliceContains(hostMode.Capabilities, forbidden) {
 			t.Fatalf("host execution capabilities include forbidden %q: %#v", forbidden, hostMode.Capabilities)
 		}
@@ -2127,21 +2127,21 @@ func TestPlatformSpecWorkspaceExecutionTargetCapabilityPromoted(t *testing.T) {
 			t.Fatalf("retired interpreters missing %q: %#v", want, authority.RetiredNonAuthoritativeInterpreters)
 		}
 	}
-	for _, want := range []string{"native command execution", "Host-local file operations fail closed", "Empty-container targets", "Docker behavior"} {
+	for _, want := range []string{"native command execution", "Host-local tool-result relay writes", "Host-local file operations fail closed", "Empty-container targets", "Docker behavior"} {
 		if !joinedContains(authority.FailureBehavior, want) {
 			t.Fatalf("failure behavior missing %q: %#v", want, authority.FailureBehavior)
 		}
 	}
-	for _, want := range []string{"host native bash", "host tool-result relay", "Claude CLI", "#1137"} {
+	for _, want := range []string{"host native bash", "Claude CLI", "#1137"} {
 		if !joinedContains(authority.SplitScope, want) {
 			t.Fatalf("split scope missing %q: %#v", want, authority.SplitScope)
 		}
 	}
 	command := spec.CLISpecification.CommandCatalog.Serve.WorkspaceExecutionTargetCapability
-	if command.PromotedBy != "#1213/#1235" || command.Owner != "workspace_model.workspace_execution_target_capability" {
+	if command.PromotedBy != "#1213/#1235/#1286" || command.Owner != "workspace_model.workspace_execution_target_capability" {
 		t.Fatalf("serve command workspace execution authority = %#v", command)
 	}
-	if !strings.Contains(command.Rule, "support only platform-managed native file read/write") {
+	if !strings.Contains(command.Rule, "tool-result relay through execution-target path authority") {
 		t.Fatalf("serve command workspace execution rule = %q", command.Rule)
 	}
 	for _, want := range []string{"native executor", "fallback-tool routing", "tool-result relay", "Claude CLI"} {

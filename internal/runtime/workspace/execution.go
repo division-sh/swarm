@@ -130,6 +130,7 @@ func hostExecutionTarget(workdir string, mounts []ExecutionMount) ExecutionTarge
 		capabilities: capabilitySet(
 			ExecutionCapabilityFileRead,
 			ExecutionCapabilityFileWrite,
+			ExecutionCapabilityToolResultRelay,
 		),
 	}
 }
@@ -199,8 +200,6 @@ func (e ExecutionTarget) UnsupportedMessage(capability ExecutionCapability) stri
 		switch capability {
 		case ExecutionCapabilityClaudeCLI:
 			return "host workspace backend does not support Claude CLI execution yet"
-		case ExecutionCapabilityToolResultRelay:
-			return "host workspace backend does not support tool result relay yet"
 		default:
 			return "host workspace backend does not support native tool execution yet"
 		}
