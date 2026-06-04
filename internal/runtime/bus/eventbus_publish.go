@@ -309,6 +309,10 @@ func (eb *EventBus) PublishTx(ctx context.Context, tx *sql.Tx, evt events.Event)
 	if err != nil {
 		return err
 	}
+	inboundPlan, err = eb.materializePublishRecipientPlan(txctx, evt, inboundPlan)
+	if err != nil {
+		return err
+	}
 	if err := eb.authorizePublishRecipientPlan(txctx, evt, inboundPlan); err != nil {
 		return err
 	}
@@ -480,6 +484,10 @@ func (eb *EventBus) publishTransactional(
 		return err
 	}
 	inboundPlan, err := eb.deliveryPlanner.Plan(txctx, evt)
+	if err != nil {
+		return err
+	}
+	inboundPlan, err = eb.materializePublishRecipientPlan(txctx, evt, inboundPlan)
 	if err != nil {
 		return err
 	}
@@ -747,6 +755,10 @@ func (eb *EventBus) planSubscribedPublish(ctx context.Context, evt events.Event)
 	if err != nil {
 		return eventDeliveryPlan{}, err
 	}
+	plan, err = eb.materializePublishRecipientPlan(ctx, evt, plan)
+	if err != nil {
+		return eventDeliveryPlan{}, err
+	}
 	if err := eb.authorizePublishRecipientPlan(ctx, evt, plan); err != nil {
 		return eventDeliveryPlan{}, err
 	}
@@ -759,6 +771,21 @@ func (eb *EventBus) authorizePublishRecipientPlanning(ctx context.Context, evt e
 		return nil
 	}
 	return eb.recipientPlanAdmissionGuard(ctx, evt)
+}
+
+func (eb *EventBus) materializePublishRecipientPlan(ctx context.Context, evt events.Event, plan eventDeliveryPlan) (eventDeliveryPlan, error) {
+	if eb == nil || eb.recipientPlanMaterializer == nil {
+		return plan, nil
+	}
+	routes, err := eb.recipientPlanMaterializer(ctx, evt, eb.publishRecipientPlan(evt, plan))
+	if err != nil {
+		return eventDeliveryPlan{}, err
+	}
+	if len(routes) == 0 {
+		return plan, nil
+	}
+	plan.DeliveryRoutes = events.NormalizeDeliveryRoutes(append(plan.DeliveryRoutes, routes...))
+	return plan, nil
 }
 
 func (eb *EventBus) authorizePublishRecipientPlan(ctx context.Context, evt events.Event, plan eventDeliveryPlan) error {
@@ -1202,6 +1229,10 @@ func (eb *EventBus) CheckPublishRecipientPlan(ctx context.Context, evt events.Ev
 		return PublishRecipientPlan{}, err
 	}
 	plan, err := eb.deliveryPlanner.Plan(ctx, evt)
+	if err != nil {
+		return PublishRecipientPlan{}, err
+	}
+	plan, err = eb.materializePublishRecipientPlan(ctx, evt, plan)
 	if err != nil {
 		return PublishRecipientPlan{}, err
 	}

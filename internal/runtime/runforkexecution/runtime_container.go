@@ -146,6 +146,7 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 		ContractBundle:              req.LoadedSource.Source,
 		Logger:                      selectedContractRuntimeContainerLogger(req.Store),
 		RecipientPlanAdmissionGuard: guard.AuthorizeEvent,
+		RecipientPlanMaterializer:   guard.MaterializeNodeDeliveryRoutes,
 		RecipientPlanGuard:          guard.Authorize,
 	})
 	if err != nil {

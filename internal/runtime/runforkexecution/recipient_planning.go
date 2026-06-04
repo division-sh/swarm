@@ -382,6 +382,23 @@ func (g *selectedContractRecipientPlanPublishGuard) Authorize(ctx context.Contex
 	return nil
 }
 
+func (g *selectedContractRecipientPlanPublishGuard) MaterializeNodeDeliveryRoutes(ctx context.Context, evt events.Event, actual runtimebus.PublishRecipientPlan) ([]events.DeliveryRoute, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if !g.authorizesSourceAgent(evt.SourceAgent) {
+		return nil, nil
+	}
+	if err := g.Authorize(ctx, evt, actual); err != nil {
+		return nil, err
+	}
+	_, expected, err := g.expectedRecipientPlanEvent(evt)
+	if err != nil {
+		return nil, err
+	}
+	return selectedContractNodeDeliveryRoutes(expected.Recipients), nil
+}
+
 func (g *selectedContractRecipientPlanPublishGuard) authorizesSourceAgent(sourceAgent string) bool {
 	if g == nil {
 		return false
@@ -404,6 +421,31 @@ func (g *selectedContractRecipientPlanPublishGuard) expectedRecipientPlanEvent(e
 		return "", store.RunForkSelectedContractRecipientPlanEvent{}, fmt.Errorf("selected-contract publish event type mismatch for source event %s: got %q want %q", sourceEventID, evt.Type, expected.EventName)
 	}
 	return sourceEventID, expected, nil
+}
+
+func selectedContractNodeDeliveryRoutes(in []store.RunForkContractFrontierRecipient) []events.DeliveryRoute {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]events.DeliveryRoute, 0, len(in))
+	for _, recipient := range in {
+		if strings.TrimSpace(recipient.SubscriberType) != "node" {
+			continue
+		}
+		id := strings.TrimSpace(recipient.SubscriberID)
+		if id == "" {
+			continue
+		}
+		route := events.DeliveryRoute{
+			SubscriberType: "node",
+			SubscriberID:   id,
+		}
+		if path := strings.Trim(strings.TrimSpace(recipient.Path), "/"); path != "" {
+			route.Target.FlowInstance = path
+		}
+		out = append(out, route)
+	}
+	return events.NormalizeDeliveryRoutes(out)
 }
 
 func expectedRecipientKeys(in []store.RunForkContractFrontierRecipient) []string {

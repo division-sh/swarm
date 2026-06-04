@@ -48,6 +48,15 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 	sourceEventID := uuid.NewString()
 	at := time.Unix(1700002200, 0).UTC()
 	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "item.received", at)
+	if _, err := db.ExecContext(ctx, `
+		UPDATE event_deliveries
+		SET subscriber_id = 'source-only-node'
+		WHERE run_id = $1::uuid
+		  AND event_id = $2::uuid
+		  AND subscriber_type = 'node'
+	`, sourceRunID, sourceEventID); err != nil {
+		t.Fatalf("stamp source-only delivery identity: %v", err)
+	}
 	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
 
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
@@ -166,15 +175,32 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 		t.Fatalf("copied source event ids into fork run = %d, want 0", sourceCopiedEvents)
 	}
 
-	var forkReceipts, forkDeliveries int
+	var forkReceipts, targetNodeDeliveries, sourceNodeDeliveries int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts WHERE event_id = $1::uuid`, forkEventID).Scan(&forkReceipts); err != nil {
 		t.Fatalf("count fork receipts: %v", err)
 	}
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id = $1::uuid AND event_id = $2::uuid`, result.Materialization.ForkRunID, forkEventID).Scan(&forkDeliveries); err != nil {
-		t.Fatalf("count fork deliveries: %v", err)
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_deliveries
+		WHERE run_id = $1::uuid
+		  AND event_id = $2::uuid
+		  AND subscriber_type = 'node'
+		  AND subscriber_id = 'test-node'
+	`, result.Materialization.ForkRunID, forkEventID).Scan(&targetNodeDeliveries); err != nil {
+		t.Fatalf("count target node fork deliveries: %v", err)
 	}
-	if forkReceipts == 0 || forkDeliveries == 0 {
-		t.Fatalf("fork outcomes = receipts:%d deliveries:%d, want fork-local writes", forkReceipts, forkDeliveries)
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_deliveries
+		WHERE run_id = $1::uuid
+		  AND event_id = $2::uuid
+		  AND subscriber_type = 'node'
+		  AND subscriber_id = 'source-only-node'
+	`, result.Materialization.ForkRunID, forkEventID).Scan(&sourceNodeDeliveries); err != nil {
+		t.Fatalf("count source node fork deliveries: %v", err)
+	}
+	if forkReceipts == 0 || targetNodeDeliveries != 1 || sourceNodeDeliveries != 0 {
+		t.Fatalf("fork outcomes = receipts:%d targetNodeDeliveries:%d sourceNodeDeliveries:%d, want target node only", forkReceipts, targetNodeDeliveries, sourceNodeDeliveries)
 	}
 
 	var emittedFollowUps int
@@ -1669,6 +1695,66 @@ func TestSelectedContractRecipientPlanPublishGuardAuthorizesCanonicalPlan(t *tes
 	})
 	if err != nil {
 		t.Fatalf("Authorize canonical recipient plan: %v", err)
+	}
+}
+
+func TestSelectedContractRecipientPlanPublishGuardMaterializesTargetNodeDeliveryRoutes(t *testing.T) {
+	planning := store.RunForkSelectedContractRecipientPlanning{
+		Owner:                      store.RunForkSelectedContractRecipientPlanningOwner,
+		FutureExecutionOwner:       store.RunForkSelectedContractExecutionOwner,
+		NonMutating:                true,
+		RecipientPlanningSupported: true,
+		DeliveryWritesSupported:    false,
+		RecipientPlanEvents: []store.RunForkSelectedContractRecipientPlanEvent{{
+			SourceEventID: "source-event",
+			EventName:     "item.received",
+			Recipients: []store.RunForkContractFrontierRecipient{
+				{
+					SubscriberType: "agent",
+					SubscriberID:   "target-agent",
+					RouteSource:    "selected_contracts",
+				},
+				{
+					SubscriberType: "node",
+					SubscriberID:   "test-node",
+					RouteSource:    "selected_contracts",
+				},
+			},
+			Disposition: store.RunForkSelectedContractDispositionForkLocalTruth,
+		}},
+	}
+	guard, err := newSelectedContractRecipientPlanPublishGuard(planning)
+	if err != nil {
+		t.Fatalf("newSelectedContractRecipientPlanPublishGuard: %v", err)
+	}
+	guard.ExpectForkEvent("fork-event", "source-event")
+
+	routes, err := guard.MaterializeNodeDeliveryRoutes(context.Background(), events.Event{
+		ID:          "fork-event",
+		Type:        "item.received",
+		SourceAgent: store.RunForkSelectedContractExecutionOwner,
+	}, bus.PublishRecipientPlan{
+		RoutedRecipients: []bus.PublishDiagnosticRecipient{
+			{
+				Type:        "agent",
+				ID:          "target-agent",
+				RouteSource: "selected_contracts",
+			},
+			{
+				Type:        "node",
+				ID:          "test-node",
+				RouteSource: "selected_contracts",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("MaterializeNodeDeliveryRoutes: %v", err)
+	}
+	if len(routes) != 1 ||
+		routes[0].SubscriberType != "node" ||
+		routes[0].SubscriberID != "test-node" ||
+		!routes[0].Target.Empty() {
+		t.Fatalf("materialized routes = %#v, want target node route only", routes)
 	}
 }
 
