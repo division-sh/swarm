@@ -3748,6 +3748,53 @@ func TestRunServeRuntimeArtifactRepoCommitFailsBeforeReadinessForUnusableArtifac
 	}
 }
 
+func TestRunServeRuntimeArtifactRepoCommitFailsBeforeReadinessForBlockedRepoStorageBase(t *testing.T) {
+	stubServeRuntimeWorkspaceLifecycle(t)
+	unsetStoreSelectorEnv(t)
+	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
+	t.Setenv(storebackend.EnvSQLitePath, sqlitePath)
+	artifactRoot := t.TempDir()
+	reposFile := filepath.Join(artifactRoot, "repos")
+	if err := os.WriteFile(reposFile, []byte("not a directory"), 0o644); err != nil {
+		t.Fatalf("write unusable repos base: %v", err)
+	}
+	t.Setenv("SWARM_ARTIFACT_ROOT", artifactRoot)
+
+	var out lockedBuffer
+	code := runServeRuntime(context.Background(), repoRoot(), serveOptions{
+		ConfigPath:           writeServeRuntimeTestConfig(t),
+		ContractsPath:        writeArtifactRepoCommitServeFixture(t),
+		PlatformSpecPath:     defaultPlatformSpecPath,
+		StoreMode:            "sqlite",
+		StoreModeSet:         true,
+		APIListenAddr:        "127.0.0.1:0",
+		MCPListenAddr:        "127.0.0.1:0",
+		SelfCheck:            true,
+		Dev:                  true,
+		RequireBundleMatch:   false,
+		NoRequireBundleMatch: true,
+		Verbose:              true,
+		Output:               &out,
+	})
+	if code == 0 {
+		t.Fatalf("runServeRuntime code = 0, want startup failure\noutput:\n%s", out.String())
+	}
+	for _, want := range []string{
+		"[5/22] runtime_context",
+		"artifact repo root startup validation failed",
+		artifactRoot,
+		reposFile,
+		"SWARM_ARTIFACT_ROOT=<writable runtime-private absolute path>",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("serve output missing %q:\n%s", want, out.String())
+		}
+	}
+	if strings.Contains(out.String(), "[22/22]") {
+		t.Fatalf("serve reached readiness despite blocked artifact repo storage base:\n%s", out.String())
+	}
+}
+
 func TestRunServeRuntimeNonArtifactBundleDoesNotExerciseUnusableArtifactRoot(t *testing.T) {
 	stubServeRuntimeWorkspaceLifecycle(t)
 	unsetStoreSelectorEnv(t)

@@ -354,7 +354,29 @@ func validateArtifactRepoRootWritable(root string) error {
 	if err != nil {
 		return err
 	}
-	probe, err := os.CreateTemp(cleaned, ".swarm-artifact-root-check-*")
+	if err := validateArtifactRepoWritableDirectory(cleaned, ".swarm-artifact-root-check-*"); err != nil {
+		return err
+	}
+	reposRoot, err := artifactRepoLocalGitStorageBase(cleaned)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(reposRoot, 0o755); err != nil {
+		return fmt.Errorf("artifact repository storage base %q: %w", reposRoot, err)
+	}
+	if resolved, ok := artifactRootResolveExistingPrefix(reposRoot); ok {
+		if mount, ok := artifactRootAgentMount(resolved); ok {
+			return fmt.Errorf("artifact repository storage base %q resolves under agent-visible mount %s", reposRoot, mount)
+		}
+	}
+	if err := validateArtifactRepoWritableDirectory(reposRoot, ".swarm-artifact-repos-check-*"); err != nil {
+		return fmt.Errorf("artifact repository storage base %q: %w", reposRoot, err)
+	}
+	return nil
+}
+
+func validateArtifactRepoWritableDirectory(dir, pattern string) error {
+	probe, err := os.CreateTemp(dir, pattern)
 	if err != nil {
 		return err
 	}
@@ -364,6 +386,18 @@ func validateArtifactRepoRootWritable(root string) error {
 		return err
 	}
 	return os.Remove(probeName)
+}
+
+func artifactRepoLocalGitStorageBase(root string) (string, error) {
+	cleaned, err := validateArtifactRepoRoot(root)
+	if err != nil {
+		return "", err
+	}
+	reposRoot := filepath.Join(cleaned, "repos")
+	if !artifactPathWithinRoot(reposRoot, cleaned) {
+		return "", fmt.Errorf("artifact repository storage base escaped artifact root")
+	}
+	return reposRoot, nil
 }
 
 func SourceUsesArtifactRepoCommit(source semanticview.Source) bool {
