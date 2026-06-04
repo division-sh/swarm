@@ -436,7 +436,17 @@ func (e *jsonRPCError) Error() string {
 		}
 		return message
 	}
-	return e.Message
+	message := strings.TrimSpace(e.Message)
+	if message == "" {
+		message = "JSON-RPC error"
+	}
+	if e.Code != 0 {
+		message = fmt.Sprintf("JSON-RPC %d: %s", e.Code, message)
+	}
+	if details := standardJSONRPCErrorDetails(e.Data); details != "" {
+		message = fmt.Sprintf("%s (%s)", message, details)
+	}
+	return message
 }
 
 func applicationErrorCode(raw json.RawMessage) string {
@@ -462,8 +472,44 @@ func applicationErrorDetails(raw json.RawMessage) string {
 	if err := json.Unmarshal(raw, &data); err != nil || len(data.Details) == 0 {
 		return ""
 	}
-	keys := make([]string, 0, len(data.Details))
-	for key := range data.Details {
+	return formatCLIErrorDetails(data.Details)
+}
+
+func standardJSONRPCErrorDetails(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var data struct {
+		CorrelationID string `json:"correlation_id"`
+		Details       any    `json:"details"`
+	}
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return ""
+	}
+	parts := make([]string, 0, 2)
+	if correlationID := strings.TrimSpace(data.CorrelationID); correlationID != "" {
+		parts = append(parts, fmt.Sprintf("correlation_id=%s", correlationID))
+	}
+	if details := standardJSONRPCDetailValue(data.Details); details != "" {
+		parts = append(parts, "details: "+details)
+	}
+	return strings.Join(parts, ", ")
+}
+
+func standardJSONRPCDetailValue(value any) string {
+	switch typed := value.(type) {
+	case nil:
+		return ""
+	case map[string]any:
+		return formatCLIErrorDetails(typed)
+	default:
+		return applicationErrorDetailValue(typed)
+	}
+}
+
+func formatCLIErrorDetails(details map[string]any) string {
+	keys := make([]string, 0, len(details))
+	for key := range details {
 		if strings.TrimSpace(key) != "" {
 			keys = append(keys, key)
 		}
@@ -471,7 +517,7 @@ func applicationErrorDetails(raw json.RawMessage) string {
 	sort.Strings(keys)
 	parts := make([]string, 0, len(keys))
 	for _, key := range keys {
-		if value := applicationErrorDetailValue(data.Details[key]); value != "" {
+		if value := applicationErrorDetailValue(details[key]); value != "" {
 			parts = append(parts, fmt.Sprintf("%s=%s", key, value))
 		}
 	}

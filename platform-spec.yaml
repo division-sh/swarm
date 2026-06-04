@@ -8962,6 +8962,11 @@ cli_specification:
         known_resource_not_found_application_codes: 5
         known_resource_state_or_idempotency_conflict_application_codes: 6
         transport_errors_http_non_auth_json_rpc_envelope_errors_unknown_rpc_codes_and_malformed_success_payloads: 3
+      standard_json_rpc_error_rendering: >
+        Standard JSON-RPC errors that do not carry an application-level `data.code` still render diagnostic context on
+        stderr. API-backed CLI commands MUST include the top-level JSON-RPC numeric code, message, `data.correlation_id`,
+        and structured `data.details` when the server supplies them; they MUST NOT collapse `-32603` to the bare string
+        `internal error`.
       command_local_preservation: >
         Commands may define resource-specific not-found and conflict application-code sets, and `swarm run` preserves
         terminal workflow exit 7 and interrupt/detach exit 130. Those command-local helpers still delegate shared
@@ -10336,6 +10341,7 @@ cli_specification:
         - UNSUPPORTED_BUNDLE_HASH
         - UNSUPPORTED_BUNDLE_REF
         - EVENT_NOT_DECLARED
+        - EVENT_PUBLISH_FAILED
         - PAYLOAD_VALIDATION_FAILED
         - RUN_ALREADY_TERMINAL
         - IDEMPOTENCY_CONFLICT

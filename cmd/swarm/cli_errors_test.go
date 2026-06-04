@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -41,5 +42,33 @@ func TestCLIAPIErrorExitCodeClassifiesSharedCategories(t *testing.T) {
 				t.Fatalf("exit = %d, want %d", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestJSONRPCErrorRendersStandardErrorDiagnostics(t *testing.T) {
+	data, err := json.Marshal(map[string]any{
+		"correlation_id": "corr-event-publish",
+		"details": map[string]any{
+			"error":  "postgres store is required",
+			"run_id": "run-1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal rpc error data: %v", err)
+	}
+	got := (&jsonRPCError{Code: -32603, Message: "internal error", Data: data}).Error()
+	for _, want := range []string{
+		"JSON-RPC -32603: internal error",
+		"correlation_id=corr-event-publish",
+		"details: ",
+		"error=postgres store is required",
+		"run_id=run-1",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("error string = %q, want substring %q", got, want)
+		}
+	}
+	if strings.TrimSpace(got) == "internal error" {
+		t.Fatalf("error string = %q, want diagnostic context", got)
 	}
 }
