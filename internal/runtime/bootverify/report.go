@@ -27,6 +27,12 @@ const (
 	legacySeverityWarning     = "warning"
 )
 
+const (
+	FindingSurfaceLevelError = "ERROR"
+	FindingSurfaceLevelWarn  = "WARN"
+	FindingSurfaceLevelInfo  = "INFO"
+)
+
 type Report struct {
 	Findings []Finding
 }
@@ -183,6 +189,35 @@ func severityRank(severity string) int {
 	default:
 		return 4
 	}
+}
+
+func FindingSurfaceLevel(f Finding, blocking bool) string {
+	return SurfaceLevelForSeverity(f.Severity, blocking)
+}
+
+func SurfaceLevelForSeverity(severity string, blocking bool) string {
+	if blocking {
+		return FindingSurfaceLevelError
+	}
+	switch normalizeFindingSeverity(severity) {
+	case SeverityHardInvalidity:
+		return FindingSurfaceLevelError
+	case SeveritySemanticDriftWarn:
+		return FindingSurfaceLevelWarn
+	case SeverityAuditAnalysis, SeverityLintEvidence:
+		return FindingSurfaceLevelInfo
+	default:
+		return FindingSurfaceLevelError
+	}
+}
+
+func FormatSurfaceFinding(f Finding, blocking bool) string {
+	return fmt.Sprintf("%s: %s [%s] %s",
+		FindingSurfaceLevel(f, blocking),
+		strings.TrimSpace(f.CheckID),
+		strings.TrimSpace(f.Location),
+		strings.TrimSpace(f.Message),
+	)
 }
 
 func locationFromMessage(message string) string {

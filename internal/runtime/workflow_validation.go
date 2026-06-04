@@ -60,12 +60,12 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 		ModelAliases:            opts.ModelAliases,
 	})
 	if result.BootReport.HasErrors() {
-		return result, fmt.Errorf("boot verification failed:\n%s", formatWorkflowValidationFindings(result.BootReport.Errors()))
+		return result, fmt.Errorf("boot verification failed:\n%s", formatWorkflowValidationFindings(result.BootReport.Errors(), true))
 	}
 	if opts.FatalBootWarnings {
 		warnings := filterWorkflowValidationFindings(result.BootReport.Warnings(), opts.ExcludedFatalBootWarningChecks...)
 		if len(warnings) > 0 {
-			return result, fmt.Errorf("boot verification warnings:\n%s", formatWorkflowValidationFindings(warnings))
+			return result, fmt.Errorf("boot verification blocked by policy-escalated findings:\n%s", formatWorkflowValidationFindings(warnings, true))
 		}
 	}
 
@@ -99,10 +99,10 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 	return result, nil
 }
 
-func formatWorkflowValidationFindings(findings []runtimebootverify.Finding) string {
+func formatWorkflowValidationFindings(findings []runtimebootverify.Finding, blocking bool) string {
 	lines := make([]string, 0, len(findings))
 	for _, finding := range findings {
-		lines = append(lines, fmt.Sprintf("%s [%s] %s", strings.TrimSpace(finding.CheckID), strings.TrimSpace(finding.Location), strings.TrimSpace(finding.Message)))
+		lines = append(lines, runtimebootverify.FormatSurfaceFinding(finding, blocking))
 	}
 	return strings.Join(lines, "\n")
 }
