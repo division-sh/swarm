@@ -338,6 +338,168 @@ contract_formats:
         consuming: If only a node subscribes → route to node only
         passthrough: If no node subscribes → pure agent delivery
         workflow_node_route_authority: Workflow-node delivery route authority is derived from semantic route topology at publish time and persisted as typed event_deliveries rows before workflow-node execution. Live internal carriers, interceptors, handler lookup, receipts, settlement, replay markers, and API/CLI readback are consumers or evidence only; they MUST NOT be required or used as the authority that creates a workflow-node delivery route.
+      route_plan_authority:
+        status: merge_bearing_source_authority
+        owner: platform-spec.yaml#contract_formats.event_schema.routing_derivation.route_plan_authority
+        definition: |
+          A RoutePlan is the publish-time typed authority that states which
+          concrete recipients should receive one event, why they were selected,
+          which target route identity applies to each recipient, and which
+          persistence/replay expectations downstream consumers inherit. It is
+          produced before executable delivery work is dispatched and before any
+          workflow-node handler can run.
+        rule: |
+          RoutePlan construction MUST consume semantic route topology and the
+          event's resolved context exactly once for the publish operation. The
+          resulting typed recipients MUST be persisted through event_deliveries
+          before they are treated as executable delivery work. Runtime dispatch,
+          API/CLI readback, receipts, settlement, replay markers, handler lookup,
+          descriptor lookup, live carriers, and interceptors consume or observe
+          RoutePlan results; they MUST NOT create, replace, or repair missing
+          route authority.
+        inputs:
+          event_identity:
+            fields:
+            - event_id when already allocated
+            - event_name
+            - source_event_id
+            - emitter/source
+            rule: Event identity carries the concrete event being published and
+              any causal parent/source facts. It is not enough by itself to
+              infer recipients.
+          run_bundle_context:
+            fields:
+            - run_id
+            - bundle_hash
+            - bundle_source
+            - workflow_name
+            - workflow_version
+            rule: Run and bundle context select the loaded semantic topology
+              and fail closed when the selected topology is unavailable or
+              inconsistent with the publish request.
+          route_topology:
+            fields:
+            - RouteTable semantic subscribers
+            - nodes.yaml subscribes_to entries
+            - agents.yaml subscriptions
+            - event_handlers keys
+            - pins.inputs.events and pins.outputs.events
+            rule: Semantic route topology is the source for recipient
+              derivation. Live subscription channels, active descriptors, and
+              handler lookup are not topology authority.
+          target_context:
+            fields:
+            - event.target
+            - event.target_set
+            - delivery_target_route
+            - explicit target routes
+            - structural ParentRoute
+            - flow_instance
+            - entity_id
+            rule: Target context narrows or materializes recipient route
+              identities. A fan-out target_set MUST be resolved to concrete
+              per-recipient delivery targets before persistence.
+          execution_context:
+            fields:
+            - selected_contract_context
+            - fork_run_context
+            - runtime_callback_context
+            - replay_scope_context
+            rule: Selected, fork, runtime callback, and replay contexts may add
+              or constrain route-plan inputs only through their own gated
+              owners. Source rows, current live subscriptions, readback state,
+              receipts, or settlement evidence remain invalid recipient truth.
+        outputs:
+          typed_recipients:
+            fields:
+            - subscriber_type
+            - subscriber_id
+            rule: Each executable recipient MUST be typed. subscriber_id alone
+              is not sufficient when the semantic question is recipient
+              identity or delivery authority.
+          target_route_identity:
+            fields:
+            - delivery_target_route
+            - target_set_member
+            - flow_instance
+            - entity_id
+            rule: Each recipient that is narrowed or fanned out by target
+              routing MUST carry the concrete target route identity that
+              downstream dispatch exposes as receiver context.
+          source_and_reason:
+            fields:
+            - route_source
+            - reason_code
+            - target_failure_reason
+            - route_owner
+            rule: RoutePlan output MUST preserve enough typed source/reason
+              data to distinguish semantic route production, target-resolution
+              failure, replay-scope ownership, and diagnostic/projection
+              evidence.
+          replay_scope_expectations:
+            fields:
+            - replay_scope_required
+            - replay_scope_owner
+            - source_delivery_lineage
+            rule: Replay scope is an explicit expectation or lineage fact
+              attached to a gated replay/fork owner. Replay markers are not
+              route authority and MUST NOT authorize fresh delivery work by
+              themselves.
+          persistence_requirements:
+            fields:
+            - event_id
+            - run_id
+            - subscriber_type
+            - subscriber_id
+            - delivery_target_route
+            - status
+            - reason_code
+            rule: Executable RoutePlan recipients are committed as typed
+              event_deliveries rows. The durable row is the delivery-authority
+              sink consumed by workflow-node admission, dispatch, retry,
+              recovery, replay, and readback surfaces.
+        authority_boundaries:
+          admission: Event admission decides whether an event may enter or
+            start work. It is a prerequisite to RoutePlan construction, not a
+            substitute for a persisted recipient plan.
+          route_production: Route production owns the typed recipient and
+            target-route decisions before persistence. Later consumers must not
+            re-plan the same event from local runtime evidence.
+          persistence: event_deliveries is the durable authority sink for
+            executable delivery work. Missing rows fail closed in consumers
+            that require delivery authority.
+          live_dispatch: Live carriers, workflow-runtime interceptors, active
+            descriptors, and handler lookup are dispatch/observation consumers
+            only. They must consume a RoutePlan or persisted deliveries rather
+            than create authority.
+          completion_evidence: event_receipts, settlement, backfill, processed
+            markers, dead-letter state, and retry counters describe work after
+            route authority exists. They must not repair or backfill missing
+            pre-execution recipient authority.
+          readback: API, CLI, dashboard, OpenRPC, and event read surfaces are
+            projections over persisted owner data. They must not re-plan
+            subscribers or fabricate delivery rows.
+          replay_recovery: Replay, retry, sweeper, outbox, fork, and recovery
+            paths consume persisted RoutePlan output or an explicitly gated
+            replay/fork owner. They must not infer fresh recipients from current
+            live topology unless their governing owner explicitly requires a
+            current-recipient publish.
+        public_projection_policy:
+          current_boundary: |
+            The internal and persisted RoutePlan authority is typed. Public
+            event.publish delivery projection remains a non-authoritative
+            readback surface unless a separately gated API/OpenRPC change
+            promotes subscriber_type or route-target identity into that public
+            result.
+          split_owner: '#1345 owns any event.publish/OpenRPC/CLI readback shape change for subscriber_type or typed route identity.'
+        split_children:
+          runtime_model: '#1343 owns the canonical internal EventBus RoutePlan model.'
+          publish_consumers: '#1344 owns Publish, PublishTx, deferred/outbox publish, and CheckPublishRecipientPlan consumption of one RoutePlan authority.'
+          readback: '#1345 owns API/CLI/OpenRPC/readback consumption and any public subscriber_type exposure.'
+          conformance: '#1346 owns the route-authority proof matrix.'
+          execution_admission: '#1293 owns workflow-node execution admission against committed delivery authority.'
+          wildcard_routes: '#1299 owns wildcard static-service route production.'
+          runtime_callback_routes: '#1301 owns runtime callback flow_instance localization.'
   persistence_model:
     description: Agents do not have raw database access. The platform derives agent-facing persistence tools from the
       authoritative flow-owned entity contracts in entities.yaml, agents.yaml entity_writes declarations, and the shared
