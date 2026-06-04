@@ -868,10 +868,7 @@ func staticFlowLocalEventSet(agents map[string]runtimecontracts.AgentRegistryEnt
 }
 
 func flowActivationVars(req runtimepipeline.FlowInstanceActivationRequest) map[string]string {
-	vars := map[string]string{
-		"entity_id":   strings.TrimSpace(req.Instance.EntityID),
-		"instance_id": strings.TrimSpace(req.Instance.InstanceID),
-	}
+	vars := map[string]string{}
 	for key, value := range req.Config {
 		key = strings.TrimSpace(key)
 		if key == "" {
@@ -879,7 +876,20 @@ func flowActivationVars(req runtimepipeline.FlowInstanceActivationRequest) map[s
 		}
 		vars[key] = stringifyPromptTemplateValue(value)
 	}
+	setFlowActivationBuiltin(vars, "entity_id", req.Instance.EntityID)
+	setFlowActivationBuiltin(vars, "instance_id", req.Instance.InstanceID)
+	setFlowActivationBuiltin(vars, "template_id", req.Instance.TemplateID)
+	setFlowActivationBuiltin(vars, "flow_scope_key", req.Instance.ScopeKey)
+	setFlowActivationBuiltin(vars, "flow_instance_path", req.Instance.InstancePath)
 	return vars
+}
+
+func setFlowActivationBuiltin(vars map[string]string, key, value string) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return
+	}
+	vars[key] = value
 }
 
 func cloneFlowConfig(in map[string]any) map[string]any {
