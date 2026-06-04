@@ -12,3 +12,10 @@ expected:
   entity_state: spawned
   emitted_events:
     - flow.spawned
+  flow_instance_created:
+    template: worker-flow
+    instance_id: worker-cfg-001
+    config:
+      max_retries: 3
+      timeout_ms: 5000
+    auto_emitted: worker-flow/worker-cfg-001/worker.ready
