@@ -740,7 +740,7 @@ func TestPipelineEngineActionRunner_CreateFlowInstanceUsesExecutionBaseContextFo
 		ID:            "evt-123",
 		Type:          "spawn.requested",
 		ParentEventID: "source-evt-1",
-		Payload:       []byte(`{"instance_id":"inst-42","name":"alpha"}`),
+		Payload:       []byte(`{"instance_id":"inst-42","name":"alpha","template_id":"application-basic-v1"}`),
 	}).WithEnvelope(events.EventEnvelope{
 		EntityID: "ent-1",
 		Source: events.RouteIdentity{
@@ -764,6 +764,7 @@ func TestPipelineEngineActionRunner_CreateFlowInstanceUsesExecutionBaseContextFo
 				"source_flow":     "event.source.flow_id",
 				"correlation_id":  "event.source_event_id",
 				"name":            "payload.name",
+				"template_id":     "payload.template_id",
 				"parent_entity":   "entity.entity_id",
 			},
 		},
@@ -789,6 +790,7 @@ func TestPipelineEngineActionRunner_CreateFlowInstanceUsesExecutionBaseContextFo
 		"source_flow":     "parent-flow",
 		"correlation_id":  "source-evt-1",
 		"name":            "alpha",
+		"template_id":     "application-basic-v1",
 		"parent_entity":   "ent-1",
 	} {
 		if got := captured.Config[key]; got != want {
