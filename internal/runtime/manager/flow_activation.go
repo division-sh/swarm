@@ -33,7 +33,7 @@ type flowInstancePersistence interface {
 }
 
 type flowInstanceRouteInstaller interface {
-	AddFlowInstanceRoute(template runtimecontracts.SystemNodeContract, identity runtimeflowidentity.Route) error
+	AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest) error
 }
 
 type flowInstanceRouteRemover interface {
@@ -135,7 +135,10 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 		}
 	}
 	if installer, ok := am.bus.(flowInstanceRouteInstaller); ok && installer != nil {
-		if err := installer.AddFlowInstanceRoute(runtimecontracts.SystemNodeContract{}, instance.Route()); err != nil {
+		if err := installer.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{
+			Identity:            instance.Route(),
+			ActivationVariables: vars,
+		}); err != nil {
 			return err
 		}
 	} else {

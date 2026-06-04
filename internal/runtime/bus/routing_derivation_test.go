@@ -17,11 +17,14 @@ func TestEventBusRemoveFlowInstanceDropsDerivedRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	if err := eb.AddFlowInstanceRoute(runtimecontracts.SystemNodeContract{
-		ID:           "reviewer-{instance_id}",
-		Produces:     []string{"task.started"},
-		SubscribesTo: []string{"task.started"},
-	}, runtimeflowidentity.DeriveRoute("review", "inst-1")); err != nil {
+	if err := eb.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{
+		Template: runtimecontracts.SystemNodeContract{
+			ID:           "reviewer-{instance_id}",
+			Produces:     []string{"task.started"},
+			SubscribesTo: []string{"task.started"},
+		},
+		Identity: runtimeflowidentity.DeriveRoute("review", "inst-1"),
+	}); err != nil {
 		t.Fatalf("AddFlowInstance: %v", err)
 	}
 	if got := eb.RouteTable().Resolve("review/inst-1/task.started"); len(got) != 1 || got[0].ID != "reviewer-inst-1" {
@@ -37,6 +40,7 @@ func TestEventBusRemoveFlowInstanceDropsDerivedRoutes(t *testing.T) {
 
 type routePersistenceTestStore struct {
 	routes           map[string]runtimebus.FlowInstanceRouteRecord
+	deliveries       map[string][]string
 	upsertErr        error
 	deleteErr        error
 	rollbackCalls    []string
@@ -44,7 +48,11 @@ type routePersistenceTestStore struct {
 }
 
 func (*routePersistenceTestStore) AppendEvent(context.Context, events.Event) error { return nil }
-func (*routePersistenceTestStore) InsertEventDeliveries(context.Context, string, []string) error {
+func (s *routePersistenceTestStore) InsertEventDeliveries(_ context.Context, eventID string, agentIDs []string) error {
+	if s.deliveries == nil {
+		s.deliveries = map[string][]string{}
+	}
+	s.deliveries[eventID] = append([]string(nil), agentIDs...)
 	return nil
 }
 func (*routePersistenceTestStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
@@ -94,11 +102,14 @@ func TestEventBusFlowInstanceRoutesPersistAcrossAddAndRemove(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	if err := eb.AddFlowInstanceRoute(runtimecontracts.SystemNodeContract{
-		ID:           "reviewer-{instance_id}",
-		Produces:     []string{"task.started"},
-		SubscribesTo: []string{"task.started"},
-	}, runtimeflowidentity.DeriveRoute("review", "inst-1")); err != nil {
+	if err := eb.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{
+		Template: runtimecontracts.SystemNodeContract{
+			ID:           "reviewer-{instance_id}",
+			Produces:     []string{"task.started"},
+			SubscribesTo: []string{"task.started"},
+		},
+		Identity: runtimeflowidentity.DeriveRoute("review", "inst-1"),
+	}); err != nil {
 		t.Fatalf("AddFlowInstance: %v", err)
 	}
 	if _, ok := store.routes["review/inst-1"]; !ok {
@@ -122,11 +133,14 @@ func TestEventBusAddFlowInstanceRouteRollsBackPersistedRouteOnActiveInstallFailu
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	err = eb.AddFlowInstanceRoute(runtimecontracts.SystemNodeContract{
-		ID:           "reviewer-{instance_id}",
-		Produces:     []string{"task.started"},
-		SubscribesTo: []string{"task.started"},
-	}, runtimeflowidentity.DeriveRoute("review", "inst-1"))
+	err = eb.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{
+		Template: runtimecontracts.SystemNodeContract{
+			ID:           "reviewer-{instance_id}",
+			Produces:     []string{"task.started"},
+			SubscribesTo: []string{"task.started"},
+		},
+		Identity: runtimeflowidentity.DeriveRoute("review", "inst-1"),
+	})
 	if err == nil {
 		t.Fatal("expected AddFlowInstanceRoute to fail")
 	}
@@ -141,16 +155,60 @@ func TestEventBusAddFlowInstanceRouteRollsBackPersistedRouteOnActiveInstallFailu
 	}
 }
 
+func TestEventBusFlowInstanceRoutePersistsAndDeliversRenderedActivationConfigSubscriber(t *testing.T) {
+	store := &routePersistenceTestStore{}
+	bundle := routeMaterializationConfigVarBundle()
+	eb, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{
+		ContractBundle: semanticview.Wrap(bundle),
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	identity := runtimeflowidentity.DeriveRoute("operating", "11111111-1111-4111-8111-111111111111")
+	if err := eb.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{
+		Identity: identity,
+		ActivationVariables: map[string]string{
+			"vertical_id": "11111111-1111-4111-8111-111111111111",
+		},
+	}); err != nil {
+		t.Fatalf("AddFlowInstanceRoute: %v", err)
+	}
+	route, ok := store.routes["operating/11111111-1111-4111-8111-111111111111"]
+	if !ok {
+		t.Fatalf("persisted routes = %#v, want operating instance route", store.routes)
+	}
+	if route.SubscriberID != "ceo-11111111-1111-4111-8111-111111111111" {
+		t.Fatalf("persisted subscriber_id = %q, want rendered ceo id", route.SubscriberID)
+	}
+
+	eb.Subscribe("ceo-11111111-1111-4111-8111-111111111111")
+	defer eb.Unsubscribe("ceo-11111111-1111-4111-8111-111111111111")
+	evt := events.Event{
+		ID:   "event-rendered-route-delivery",
+		Type: events.EventType("operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested"),
+	}
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	got := store.deliveries[evt.ID]
+	if len(got) != 1 || got[0] != "ceo-11111111-1111-4111-8111-111111111111" {
+		t.Fatalf("delivery recipients = %#v, want rendered ceo id", got)
+	}
+}
+
 func TestEventBusRemoveNestedFlowInstanceDropsDerivedRoutes(t *testing.T) {
 	eb, err := runtimebus.NewEventBus(runtimebus.InMemoryEventStore{})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	if err := eb.AddFlowInstanceRoute(runtimecontracts.SystemNodeContract{
-		ID:           "worker-{instance_id}",
-		Produces:     []string{"micro.started"},
-		SubscribesTo: []string{"micro.started"},
-	}, runtimeflowidentity.DeriveRoute("child/grandchild", "inst-1")); err != nil {
+	if err := eb.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{
+		Template: runtimecontracts.SystemNodeContract{
+			ID:           "worker-{instance_id}",
+			Produces:     []string{"micro.started"},
+			SubscribesTo: []string{"micro.started"},
+		},
+		Identity: runtimeflowidentity.DeriveRoute("child/grandchild", "inst-1"),
+	}); err != nil {
 		t.Fatalf("AddFlowInstance: %v", err)
 	}
 	if got := eb.RouteTable().Resolve("child/grandchild/inst-1/micro.started"); len(got) != 1 || got[0].ID != "worker-inst-1" {
@@ -209,7 +267,7 @@ func TestRouteTableConcreteTemplateInstanceNodeSubscriberResolvesBeforeDeliveryP
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
-	if err := rt.AddFlowInstanceRoute(runtimecontracts.SystemNodeContract{}, runtimeflowidentity.DeriveRoute("operating", "inst-1")); err != nil {
+	if err := rt.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("operating", "inst-1")}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 	got := rt.Resolve("operating/inst-1/opco.product_initialization_requested")
@@ -218,6 +276,75 @@ func TestRouteTableConcreteTemplateInstanceNodeSubscriberResolvesBeforeDeliveryP
 	}
 	if got[0].ID != "lifecycle-orchestrator" || got[0].Type != "node" || got[0].Path != "operating/inst-1" {
 		t.Fatalf("resolved subscriber = %#v, want node lifecycle-orchestrator at operating/inst-1", got[0])
+	}
+}
+
+func TestRouteTableFlowInstanceRouteRendersSubscriberWithActivationConfigVars(t *testing.T) {
+	rt, err := runtimebus.DeriveRouteTable(semanticview.Wrap(routeMaterializationConfigVarBundle()))
+	if err != nil {
+		t.Fatalf("DeriveRouteTable: %v", err)
+	}
+	identity := runtimeflowidentity.DeriveRoute("operating", "11111111-1111-4111-8111-111111111111")
+	if err := rt.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{
+		Identity: identity,
+		ActivationVariables: map[string]string{
+			"vertical_id": "11111111-1111-4111-8111-111111111111",
+		},
+	}); err != nil {
+		t.Fatalf("AddFlowInstanceRoute: %v", err)
+	}
+
+	got := rt.Resolve("operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested")
+	if len(got) != 1 {
+		t.Fatalf("resolved subscribers = %#v, want one ceo route", got)
+	}
+	if got[0].ID != "ceo-11111111-1111-4111-8111-111111111111" {
+		t.Fatalf("resolved subscriber id = %q, want rendered ceo id", got[0].ID)
+	}
+	routes := rt.MaterializedRoutes(identity)
+	if len(routes) != 1 || routes[0].SubscriberID != "ceo-11111111-1111-4111-8111-111111111111" {
+		t.Fatalf("materialized routes = %#v, want rendered ceo subscriber", routes)
+	}
+}
+
+func routeMaterializationConfigVarBundle() *runtimecontracts.WorkflowContractBundle {
+	operating := runtimecontracts.FlowContractView{
+		Path:  "operating",
+		Paths: runtimecontracts.FlowContractPaths{ID: "operating", Flow: "operating"},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Mode: "template",
+			Pins: runtimecontracts.FlowPins{
+				Inputs: runtimecontracts.FlowInputPins{Events: []string{"opco.product_initialization_requested"}},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"opco.product_initialization_requested": {},
+		},
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"ceo": {
+				ID:            "ceo-{vertical_id}",
+				Type:          "generic",
+				Role:          "ceo",
+				Subscriptions: []string{"opco.product_initialization_requested"},
+			},
+		},
+	}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{operating}}
+	return &runtimecontracts.WorkflowContractBundle{
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"operating": &root.Children[0],
+			},
+		},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
+			"operating": {
+				Mode: "template",
+				Pins: runtimecontracts.FlowPins{
+					Inputs: runtimecontracts.FlowInputPins{Events: []string{"opco.product_initialization_requested"}},
+				},
+			},
+		},
 	}
 }
 
@@ -258,7 +385,7 @@ func TestRouteTableTemplateOutputPinWildcardSubscriberResolvesThroughDerivedInst
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
 	identity := runtimeflowidentity.DeriveRoute("component-scaffold", "component-a")
-	if err := rt.AddFlowInstanceRoute(runtimecontracts.SystemNodeContract{}, identity); err != nil {
+	if err := rt.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 
@@ -582,7 +709,7 @@ func TestDeriveRouteTable_NestedTemplateInstancesPersistSemanticScopeKey(t *test
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
 	identity := runtimeflowidentity.DeriveRoute("child/grandchild", "inst-1")
-	if err := rt.AddFlowInstanceRoute(runtimecontracts.SystemNodeContract{}, identity); err != nil {
+	if err := rt.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity}); err != nil {
 		t.Fatalf("AddFlowInstance: %v", err)
 	}
 	routes := rt.MaterializedRoutes(identity)

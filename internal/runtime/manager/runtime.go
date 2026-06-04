@@ -13,8 +13,8 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
@@ -719,11 +719,41 @@ func (am *AgentManager) restoreFlowInstanceRoutes(ctx context.Context) error {
 		return fmt.Errorf("list persisted flow instance routes: %w", err)
 	}
 	for _, route := range routes {
-		if err := installer.AddFlowInstanceRoute(runtimecontracts.SystemNodeContract{}, route); err != nil {
+		req, err := am.restoredFlowInstanceRouteMaterializationRequest(ctx, route)
+		if err != nil {
+			return err
+		}
+		if err := installer.AddFlowInstanceRoute(req); err != nil {
 			return fmt.Errorf("restore flow instance route %s/%s: %w", route.ScopeKey, route.InstanceID, err)
 		}
 	}
 	return nil
+}
+
+func (am *AgentManager) restoredFlowInstanceRouteMaterializationRequest(ctx context.Context, route runtimeflowidentity.Route) (runtimebus.FlowInstanceRouteMaterializationRequest, error) {
+	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
+	if !route.Valid() {
+		return runtimebus.FlowInstanceRouteMaterializationRequest{}, fmt.Errorf("flow-instance route identity is required")
+	}
+	if am.workflowInstances == nil {
+		return runtimebus.FlowInstanceRouteMaterializationRequest{}, fmt.Errorf("workflow instance store is required to restore flow instance route %s", route.InstancePath)
+	}
+	instance, ok, err := am.workflowInstances.Load(ctx, route.InstancePath)
+	if err != nil {
+		return runtimebus.FlowInstanceRouteMaterializationRequest{}, fmt.Errorf("load flow instance for route recovery %s: %w", route.InstancePath, err)
+	}
+	if !ok {
+		return runtimebus.FlowInstanceRouteMaterializationRequest{}, fmt.Errorf("flow instance not found for route recovery: %s", route.InstancePath)
+	}
+	activationInstance := runtimepipeline.StoredFlowInstance(am.semanticSource, instance)
+	vars := flowActivationVars(runtimepipeline.FlowInstanceActivationRequest{
+		Instance: activationInstance,
+		Config:   instance.Config,
+	})
+	return runtimebus.FlowInstanceRouteMaterializationRequest{
+		Identity:            route,
+		ActivationVariables: vars,
+	}, nil
 }
 
 func (am *AgentManager) retryLoop(ctx context.Context) {

@@ -1763,6 +1763,17 @@ engine:
         incomplete_policy: A child instance with incomplete ParentRoute metadata MUST fail closed with parent_route_incomplete
           before emitting a structurally routed pin output.
         single_parent_v1: Each child has exactly one ParentRoute in v1. Multiple parents are v2.
+      route_materialization:
+        subscriber_identity_variables: Dynamic flow-instance route subscribers MUST render from the same activation variable
+          set used to materialize the child instance's agents. That set includes `config_from` values plus runtime built-ins
+          `instance_id`, `template_id`, `flow_scope_key`, and `flow_instance_path`; built-ins remain authoritative for their
+          reserved names.
+        persisted_truth: Materialized `routing_rules.subscriber_id` rows store concrete rendered subscriber IDs. Route
+          persistence, delivery planning, active-agent lookup, and runtime recovery consume that materialized route truth and
+          MUST NOT independently reinterpret authored subscriber templates.
+        recovery: Startup recovery of active flow-instance routes MUST reconstruct the same activation variable set from the
+          persisted flow instance config, or recover from persisted rendered route truth. It MUST fail closed rather than
+          re-render route subscribers from route identity alone.
       auto_emit: Flow schemas may declare auto_emit_on_create. When the platform creates an instance, it automatically emits
         the declared event after the instance is fully started. Duplicate create failures MUST NOT auto-emit. This bootstraps
         the flow without requiring an external trigger.
@@ -4501,7 +4512,8 @@ platform_tables:
       lifecycle:
         boot: Load contract subscriptions → INSERT pattern rows. Clear stale materialized rows from previous boot.
         create_flow_instance: For each wildcard pattern matching the new instance path → INSERT materialized row with concrete
-          flow_instance.
+          flow_instance and rendered subscriber_id using the dynamic_instance_lifecycle.route_materialization activation variable
+          set.
         terminate_flow_instance: UPDATE materialized rows for this flow_instance → status = inactive.
         event_dispatch: SELECT WHERE event_pattern matches AND status = active. Concrete rows (is_materialized) take priority
           over wildcards.

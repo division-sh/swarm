@@ -29,13 +29,14 @@ type flowActivationRouteStore interface {
 }
 
 type flowActivationTestBus struct {
-	addedPaths   []string
-	removedPairs []string
-	published    []events.Event
-	runtimeLogs  []runtimepipeline.RuntimeLogEntry
-	unsubscribed []string
-	removeErr    error
-	routeStore   flowActivationRouteStore
+	addedPaths         []string
+	addedRouteRequests []runtimebus.FlowInstanceRouteMaterializationRequest
+	removedPairs       []string
+	published          []events.Event
+	runtimeLogs        []runtimepipeline.RuntimeLogEntry
+	unsubscribed       []string
+	removeErr          error
+	routeStore         flowActivationRouteStore
 }
 
 type flowActivationTestRouteStore struct {
@@ -178,8 +179,11 @@ func (b *flowActivationTestBus) LogRuntime(_ context.Context, entry runtimepipel
 	return nil
 }
 
-func (b *flowActivationTestBus) AddFlowInstanceRoute(_ runtimecontracts.SystemNodeContract, identity runtimeflowidentity.Route) error {
+func (b *flowActivationTestBus) AddFlowInstanceRoute(req runtimebus.FlowInstanceRouteMaterializationRequest) error {
+	req = req.Normalized()
+	identity := req.Identity
 	b.addedPaths = append(b.addedPaths, identity.InstancePath)
+	b.addedRouteRequests = append(b.addedRouteRequests, req)
 	if b.routeStore != nil {
 		return b.routeStore.UpsertFlowInstanceRoute(context.Background(), runtimebus.FlowInstanceRouteRecord{
 			Identity:       identity,
@@ -404,6 +408,30 @@ func TestActivateFlowInstanceAddsDerivedRouteTableInstance(t *testing.T) {
 	cfg, _ := am.GetAgentConfig("reviewer-inst-1")
 	if got := strings.TrimSpace(cfg.EntityID); got != runtimepipeline.FlowInstanceEntityID("review/inst-1") {
 		t.Fatalf("agent entity_id = %q, want %q", got, runtimepipeline.FlowInstanceEntityID("review/inst-1"))
+	}
+}
+
+func TestActivateFlowInstancePassesActivationConfigToRouteMaterialization(t *testing.T) {
+	bus := &flowActivationTestBus{}
+	am := newFlowActivationManager(bus, &flowActivationTestInstanceStore{})
+	bundle := testFlowBundle("")
+
+	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
+	req.Config = map[string]any{
+		"vertical_id": "11111111-1111-4111-8111-111111111111",
+	}
+	if err := am.ActivateFlowInstance(context.Background(), req); err != nil {
+		t.Fatalf("ActivateFlowInstance: %v", err)
+	}
+	if len(bus.addedRouteRequests) != 1 {
+		t.Fatalf("route materialization requests = %#v, want one", bus.addedRouteRequests)
+	}
+	got := bus.addedRouteRequests[0].ActivationVariables["vertical_id"]
+	if got != "11111111-1111-4111-8111-111111111111" {
+		t.Fatalf("route activation variable vertical_id = %q, want config value", got)
+	}
+	if got := bus.addedRouteRequests[0].ActivationVariables["instance_id"]; got != "inst-1" {
+		t.Fatalf("route activation variable instance_id = %q, want inst-1", got)
 	}
 }
 

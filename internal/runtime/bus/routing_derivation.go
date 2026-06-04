@@ -118,12 +118,13 @@ func (rt *RouteTable) Resolve(eventType string) []Subscriber {
 	return out
 }
 
-func (rt *RouteTable) AddFlowInstanceRoute(template runtimecontracts.SystemNodeContract, identity runtimeflowidentity.Route) error {
+func (rt *RouteTable) AddFlowInstanceRoute(req FlowInstanceRouteMaterializationRequest) error {
 	if rt == nil {
 		return fmt.Errorf("route table is required")
 	}
 
-	identity = runtimeflowidentity.StoredRoute(identity.ScopeKey, identity.InstanceID, identity.InstancePath)
+	req = req.Normalized()
+	identity := req.Identity
 	if !identity.Valid() {
 		return fmt.Errorf("flow-instance route identity is required")
 	}
@@ -140,12 +141,7 @@ func (rt *RouteTable) AddFlowInstanceRoute(template runtimecontracts.SystemNodeC
 	if templateDef, ok := rt.templates[templateScope]; ok {
 		rt.instances[instancePath] = struct{}{}
 		rt.instanceEventPath[instancePath] = rt.addEventPathsLocked(instancePath, templateDef.LocalEvents)
-		vars := map[string]string{
-			"flow_instance_path": instancePath,
-			"instance_id":        identity.InstanceID,
-			"template_id":        templateDef.FlowID,
-			"flow_scope_key":     templateScope,
-		}
+		vars := flowInstanceRouteMaterializationVars(req, templateDef.FlowID)
 		for _, subscriberTemplate := range templateDef.Subscribers {
 			subscriber := Subscriber{
 				ID:   routeRenderTemplate(subscriberTemplate.IDTemplate, vars),
@@ -172,18 +168,19 @@ func (rt *RouteTable) AddFlowInstanceRoute(template runtimecontracts.SystemNodeC
 
 	// Compatibility fallback for the current odd handoff signature.
 	templateID := templateScope
-	if strings.TrimSpace(template.ID) == "" {
+	if strings.TrimSpace(req.Template.ID) == "" {
 		return fmt.Errorf("route template %q not found", templateID)
 	}
-	localEvents := routeNodeLocalEventSet(template)
+	localEvents := routeNodeLocalEventSet(req.Template)
 	rt.instances[instancePath] = struct{}{}
 	rt.instanceEventPath[instancePath] = rt.addEventPathsLocked(instancePath, localEvents)
+	vars := flowInstanceRouteMaterializationVars(req, templateID)
 	subscriber := Subscriber{
-		ID:   routeRenderTemplate(template.ID, map[string]string{"instance_id": identity.InstanceID}),
+		ID:   routeRenderTemplate(req.Template.ID, vars),
 		Type: "node",
 		Path: instancePath,
 	}
-	for _, rawPattern := range normalizeStringList(template.SubscribesTo) {
+	for _, rawPattern := range normalizeStringList(req.Template.SubscribesTo) {
 		for _, resolved := range routeResolveSubscriberPatterns(rt.source, templateID, nil, instancePath, localEvents, rawPattern) {
 			if strings.TrimSpace(resolved.EventPattern) == "" {
 				continue
