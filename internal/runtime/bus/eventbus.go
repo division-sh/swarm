@@ -102,6 +102,7 @@ const deliverySendTimeout = 250 * time.Millisecond
 var ErrStaleRuntimeEpoch = errors.New("stale runtime epoch")
 
 type eventDeliveryPlan struct {
+	RoutePlan            RoutePlan
 	Event                events.Event
 	Recipients           []string
 	PersistedRecipients  []string
