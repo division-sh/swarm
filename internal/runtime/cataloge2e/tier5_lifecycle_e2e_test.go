@@ -15,6 +15,9 @@ type catalogExcludedFixture struct {
 
 var tier5LifecycleFixtures = []string{
 	"test-auto-emit-on-create",
+	"test-create-flow-instance",
+	"test-create-flow-instance-config",
+	"test-create-flow-instance-duplicate",
 	"test-template-no-boot-instance",
 	"test-terminal-state-preserves",
 	"test-terminal-state-rejects",
@@ -26,9 +29,6 @@ var tier5LifecycleFixtures = []string{
 }
 
 var tier5ExcludedFixtures = map[string]catalogExcludedFixture{
-	"test-create-flow-instance":           {reason: "legacy create_flow_instance action shape now rejected; fixture migration belongs to #416"},
-	"test-create-flow-instance-config":    {reason: "legacy create_flow_instance action shape now rejected; fixture migration belongs to #416"},
-	"test-create-flow-instance-duplicate": {reason: "legacy create_flow_instance action shape now rejected; fixture migration belongs to #416"},
 }
 
 func TestTier5LifecycleCatalogFixtures_RealRuntime(t *testing.T) {
@@ -39,7 +39,12 @@ func TestTier5LifecycleCatalogFixtures_RealRuntime(t *testing.T) {
 			var expected catalogExpectedDocument
 			loadYAML(t, filepath.Join(fixtureRoot, "expected.yaml"), &expected)
 
-			startRuntime := fixtureName == "test-auto-emit-on-create" || fixtureName == "test-timer-fire" || fixtureName == "test-timer-recurring"
+			startRuntime := fixtureName == "test-auto-emit-on-create" ||
+				fixtureName == "test-create-flow-instance" ||
+				fixtureName == "test-create-flow-instance-config" ||
+				fixtureName == "test-create-flow-instance-duplicate" ||
+				fixtureName == "test-timer-fire" ||
+				fixtureName == "test-timer-recurring"
 			h := newRuntimeHarness(t, fixtureRoot, startRuntime)
 			h.seedEntityFields(expected)
 			if expected.Trigger.Boot || strings.TrimSpace(expected.Expected.BootResult) != "" {

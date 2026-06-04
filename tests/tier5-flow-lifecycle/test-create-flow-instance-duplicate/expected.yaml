@@ -14,3 +14,9 @@ expected:
   entity_state: spawned
   emitted_events:
     - flow.spawned
+  flow_instance_created:
+    template: worker-flow
+    instance_id: worker-dup
+    config:
+      entity_id: 11111111-1111-4111-8111-111111111111
+    auto_emitted: worker-flow/worker-dup/worker.ready

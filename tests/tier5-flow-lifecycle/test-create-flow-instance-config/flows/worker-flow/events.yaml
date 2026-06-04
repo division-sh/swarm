@@ -1,2 +1,3 @@
 worker.ready:
-  entity_id: string
+  max_retries: integer
+  timeout_ms: integer
