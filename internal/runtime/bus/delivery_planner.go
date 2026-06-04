@@ -110,7 +110,7 @@ func (p deliveryPlanner) Plan(ctx context.Context, evt events.Event) (eventDeliv
 	plan.DeliveryTargets = manifest.DeliveryTargets
 	plan.DeliveryRoutes = append([]events.DeliveryRoute(nil), manifest.DeliveryRoutes...)
 	plan.DeliveryRoutes = append(plan.DeliveryRoutes, routedRootNodeDeliveryRoutesForNoTargetEvent(evt, routing.RoutedRecipients)...)
-	plan.DeliveryRoutes = append(plan.DeliveryRoutes, routedRootInputFlowNodeDeliveryRoutesForNoTargetEvent(evt, routing.RoutedRecipients, plan.Recipients, plan.PersistedRecipients)...)
+	plan.DeliveryRoutes = append(plan.DeliveryRoutes, routedRootInputFlowNodeDeliveryRoutesForNoTargetEvent(evt, routing.RoutedRecipients)...)
 	plan.DeliveryRoutes = append(plan.DeliveryRoutes, routedNodeDeliveryRoutesForNoRecipientFlowInstanceEvent(evt, routing.RoutedRecipients, plan.Recipients, plan.PersistedRecipients)...)
 	plan.DeliveryRoutes = append(plan.DeliveryRoutes, routedNodeDeliveryRoutesForNoTargetEvent(evt, routing.RoutedRecipients, plan.Recipients, plan.PersistedRecipients)...)
 	plan.DeliveryRoutes = append(plan.DeliveryRoutes, internalDeliveryRoutesForPlan(evt, plan.Recipients, plan.PersistedRecipients, routing.RoutedRecipients)...)
@@ -508,11 +508,8 @@ func routedRootNodeDeliveryRoutesForNoTargetEvent(evt events.Event, routed []Sub
 	return events.NormalizeDeliveryRoutes(out)
 }
 
-func routedRootInputFlowNodeDeliveryRoutesForNoTargetEvent(evt events.Event, routed []Subscriber, recipients, persisted []string) []events.DeliveryRoute {
+func routedRootInputFlowNodeDeliveryRoutesForNoTargetEvent(evt events.Event, routed []Subscriber) []events.DeliveryRoute {
 	if len(routed) == 0 || len(eventDeliveryTargetRoutes(evt)) > 0 {
-		return nil
-	}
-	if len(filterOutAgentIDs(recipients, persisted)) == 0 {
 		return nil
 	}
 	if strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/") != "" {

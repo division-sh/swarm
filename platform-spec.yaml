@@ -337,6 +337,7 @@ contract_formats:
         dual_delivery: If a node AND agents subscribe → route to both
         consuming: If only a node subscribes → route to node only
         passthrough: If no node subscribes → pure agent delivery
+        workflow_node_route_authority: Workflow-node delivery route authority is derived from semantic route topology at publish time and persisted as typed event_deliveries rows before workflow-node execution. Live internal carriers, interceptors, handler lookup, receipts, settlement, replay markers, and API/CLI readback are consumers or evidence only; they MUST NOT be required or used as the authority that creates a workflow-node delivery route.
   persistence_model:
     description: Agents do not have raw database access. The platform derives agent-facing persistence tools from the
       authoritative flow-owned entity contracts in entities.yaml, agents.yaml entity_writes declarations, and the shared

@@ -558,6 +558,7 @@ func eventPublishPublishError(params eventPublicationParams, err error) error {
 
 func eventPublishDeliveries(in []store.OperatorEventDelivery) []eventPublishDelivery {
 	out := make([]eventPublishDelivery, 0, len(in))
+	seen := map[eventPublishDelivery]struct{}{}
 	for _, delivery := range in {
 		if strings.TrimSpace(delivery.SubscriberID) == "__runtime_replay_scope__" {
 			continue
@@ -566,12 +567,17 @@ func eventPublishDeliveries(in []store.OperatorEventDelivery) []eventPublishDeli
 		if attempt < 1 {
 			attempt = 1
 		}
-		out = append(out, eventPublishDelivery{
+		item := eventPublishDelivery{
 			SubscriberID: strings.TrimSpace(delivery.SubscriberID),
 			SessionID:    strings.TrimSpace(delivery.SessionID),
 			Status:       strings.TrimSpace(delivery.Status),
 			Attempt:      attempt,
-		})
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		out = append(out, item)
 	}
 	return out
 }
