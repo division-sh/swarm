@@ -3463,11 +3463,29 @@ engine:
       when: boot-only
     severity_behavior:
       error: Boot aborts. System does not start.
-      warning: Boot continues. Warning logged with finding details.
+      warning: Canonical warning-level analyzer severity. Boot continues and logs finding details unless an explicitly
+        configured strict startup/verify policy escalates warning-level findings to blocking surface failures.
       hard_invalidity: Boot aborts. Deterministic Wave 1 contract drift is treated as error-level invalidity.
-      semantic_drift_warning: Boot continues. Warning logged with finding details and explicit check ID.
+      semantic_drift_warning: Canonical warning-level semantic drift finding. Boot continues and logs finding details and
+        explicit check ID unless an explicitly configured strict startup/verify policy escalates warning-level findings to
+        blocking surface failures.
       audit_analysis: Not surfaced on normal boot. Available on dedicated audit surfaces.
       lint_evidence: Informational only. Available on detailed lint/audit surfaces.
+    surface_fatality:
+      description: Analyzer finding severity and supported-surface fatality are separate concepts. A finding keeps its
+        canonical severity for JSON/scriptable consumers even when a strict policy makes the current surface block.
+      strict_warning_escalation: When strict startup or verify warning escalation is enabled, warning-level analyzer findings
+        may block startup or `swarm verify`. Human-readable output must render those findings as blocking/error-level surface
+        failures, not as non-fatal warnings.
+      text_rendering:
+        error_or_blocking: Human text lines for hard invalidities, errors, and policy-escalated warning findings use an
+          `ERROR:` prefix.
+        non_blocking_warning: Human text lines for non-blocking warning-level findings use a `WARN:` prefix.
+        informational: Human text lines for audit/informational lint evidence use an `INFO:` prefix.
+      stream_contract:
+        stdout: Successful load-bearing command result only, such as `verify ok` for human output, the single JSON document
+          for `--json`, or `ok` for `--quiet`.
+        stderr: Human-readable analyzer diagnostics, advisory lint evidence, warnings, and blocking failures.
     check_count: 43 primary checks plus 3 supplemental checks
     implementation_notes:
       framework: Each check is a named function that receives the loaded contract bundle and returns a list of findings. Each
@@ -8481,6 +8499,9 @@ cli_specification:
             verify:
               fact_owner: local contract verification
               json_shape: object with ok, contracts, warnings, and lint_evidence
+              human_text_streams:
+                stdout: "successful load-bearing `verify ok: contracts=...` result only"
+                stderr: "analyzer diagnostics and advisory findings, rendered with the boot verification surface severity prefixes `ERROR:`, `WARN:`, or `INFO:`"
               quiet_values:
               - ok
             health:

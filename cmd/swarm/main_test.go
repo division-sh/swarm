@@ -6404,9 +6404,13 @@ func TestLoadDotEnvFileRejectsMalformedLine(t *testing.T) {
 }
 
 func runVerifyCommandWithContractsForTest(ctx context.Context, repo, contractsPath string, out *bytes.Buffer) int {
+	return runVerifyCommandWithContractsOutputForTest(ctx, repo, contractsPath, out, out)
+}
+
+func runVerifyCommandWithContractsOutputForTest(ctx context.Context, repo, contractsPath string, out, errOut *bytes.Buffer) int {
 	opts := defaultVerifyCommandOptions()
 	opts.contractsPath = contractsPath
-	return runVerifyCommand(ctx, repo, opts, out)
+	return runVerifyCommandWithOutput(ctx, repo, opts, out, errOut)
 }
 
 func TestRunVerifyCommand_BadContractsPath(t *testing.T) {
@@ -6522,17 +6526,71 @@ reader:
       advances_to: done
 `)
 
-	var buf bytes.Buffer
-	code := runVerifyCommandWithContractsForTest(context.Background(), repoRoot(), root, &buf)
+	var stdout, stderr bytes.Buffer
+	code := runVerifyCommandWithContractsOutputForTest(context.Background(), repoRoot(), root, &stdout, &stderr)
 	if code != 0 {
-		t.Fatalf("runVerifyCommand exit code = %d, output = %q", code, buf.String())
+		t.Fatalf("runVerifyCommand exit code = %d, stdout = %q stderr = %q", code, stdout.String(), stderr.String())
 	}
-	out := buf.String()
-	if !strings.Contains(out, "lint_evidence: entity_reader_coverage [root] flow root entity_type case declares field untouched with no detected internal reader coverage") {
-		t.Fatalf("verify output missing lint evidence:\n%s", out)
+	if out := stdout.String(); !strings.Contains(out, "verify ok: contracts=") {
+		t.Fatalf("verify stdout missing success marker:\n%s", out)
+	} else if strings.Contains(out, "entity_reader_coverage") || strings.Contains(out, "lint_evidence") {
+		t.Fatalf("verify stdout contains advisory diagnostics:\n%s", out)
 	}
-	if !strings.Contains(out, "verify ok: contracts=") {
-		t.Fatalf("verify output missing success marker:\n%s", out)
+	errText := stderr.String()
+	if !strings.Contains(errText, "INFO: entity_reader_coverage [root] flow root entity_type case declares field untouched with no detected internal reader coverage") {
+		t.Fatalf("verify stderr missing lint evidence:\n%s", errText)
+	}
+	if strings.Contains(errText, "lint_evidence:") {
+		t.Fatalf("verify stderr used legacy lint_evidence prefix:\n%s", errText)
+	}
+
+	opts := defaultVerifyCommandOptions()
+	opts.contractsPath = root
+	opts.output.asJSON = true
+	stdout.Reset()
+	stderr.Reset()
+	code = runVerifyCommandWithOutput(context.Background(), repoRoot(), opts, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("runVerifyCommand --json exit code = %d, stdout = %q stderr = %q", code, stdout.String(), stderr.String())
+	}
+	if strings.TrimSpace(stderr.String()) != "" {
+		t.Fatalf("verify --json stderr = %q, want empty", stderr.String())
+	}
+	verifyJSON := decodeOutputJSON[verifyCommandResult](t, stdout.String())
+	if len(verifyJSON.LintEvidence) == 0 || verifyJSON.LintEvidence[0].Severity != "lint_evidence" {
+		t.Fatalf("verify --json lint evidence = %#v, want canonical severity", verifyJSON.LintEvidence)
+	}
+}
+
+func TestRunVerifyCommand_EscalatedWarningUsesBlockingAnalyzerOutput(t *testing.T) {
+	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
+
+	var stdout, stderr bytes.Buffer
+	code := runVerifyCommandWithContractsOutputForTest(
+		context.Background(),
+		repoRoot(),
+		filepath.Join(repoRoot(), "tests", "tier8-boot-verification", "test-boot-missing-pin"),
+		&stdout,
+		&stderr,
+	)
+	if code == 0 {
+		t.Fatalf("runVerifyCommand exit code = 0, stdout = %q stderr = %q", stdout.String(), stderr.String())
+	}
+	if strings.TrimSpace(stdout.String()) != "" {
+		t.Fatalf("verify stdout = %q, want empty for blocking analyzer failure", stdout.String())
+	}
+	errText := stderr.String()
+	for _, want := range []string{
+		"verify failed: boot verification blocked by policy-escalated findings:",
+		"ERROR: input_pin_wiring",
+		"no producer path was found in the authored bundle",
+	} {
+		if !strings.Contains(errText, want) {
+			t.Fatalf("verify stderr missing %q:\n%s", want, errText)
+		}
+	}
+	if strings.Contains(errText, "boot verification warnings:") {
+		t.Fatalf("verify stderr used legacy fatal warning banner:\n%s", errText)
 	}
 }
 
@@ -8065,6 +8123,23 @@ const (
 	serveRuntimeReadyTimeout = 30 * time.Second
 	serveRuntimeStopTimeout  = 5 * time.Second
 )
+
+func waitForServeReadyLine(t *testing.T, out *lockedBuffer, _ <-chan int) {
+	t.Helper()
+	deadline := time.After(serveRuntimeReadyTimeout)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for serve ready line\noutput:\n%s", out.String())
+		case <-ticker.C:
+			if strings.Contains(out.String(), "[22/22]") {
+				return
+			}
+		}
+	}
+}
 
 type serveRuntimeTestProcess struct {
 	t      *testing.T

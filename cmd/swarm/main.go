@@ -1164,11 +1164,11 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 			Warnings:     verifyFindingOutputs(result.BootReport.Warnings()),
 			LintEvidence: verifyFindingOutputs(result.BootReport.LintEvidence()),
 		}
-		if err := renderCLIOutput(out, errOut, opts.output, output, func(w io.Writer) {
-			writeVerifyFindings(w, "warning", result.BootReport.Warnings())
-			writeVerifyFindings(w, "lint_evidence", result.BootReport.LintEvidence())
-			if w != nil {
-				fmt.Fprintf(w, "verify ok: contracts=%s\n", contractsRoot)
+		if err := renderCLIOutput(out, errOut, opts.output, output, func(_ io.Writer) {
+			writeVerifyFindings(errOut, result.BootReport.Warnings(), false)
+			writeVerifyFindings(errOut, result.BootReport.LintEvidence(), false)
+			if out != nil {
+				fmt.Fprintf(out, "verify ok: contracts=%s\n", contractsRoot)
 			}
 		}, func() ([]string, error) {
 			return []string{"ok"}, nil
@@ -2046,12 +2046,12 @@ func verifyWorkflowContractValidationOptions(repo string) (runtime.WorkflowContr
 	return opts, nil
 }
 
-func writeVerifyFindings(out io.Writer, label string, findings []runtimebootverify.Finding) {
+func writeVerifyFindings(out io.Writer, findings []runtimebootverify.Finding, blocking bool) {
 	if out == nil || len(findings) == 0 {
 		return
 	}
 	for _, finding := range findings {
-		fmt.Fprintf(out, "%s: %s [%s] %s\n", strings.TrimSpace(label), strings.TrimSpace(finding.CheckID), strings.TrimSpace(finding.Location), strings.TrimSpace(finding.Message))
+		fmt.Fprintln(out, runtimebootverify.FormatSurfaceFinding(finding, blocking))
 	}
 }
 
