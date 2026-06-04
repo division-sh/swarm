@@ -781,21 +781,18 @@ func TestRecoveryManager_DoesNotEmitAftermathLogForRuntimeLogReplayCandidate(t *
 	if len(capture.logs) != 0 {
 		t.Fatalf("runtime log aftermath entries = %#v, want none", capture.logs)
 	}
-	var receiptStatus, receiptReason string
+	var receiptCount int
 	if err := db.QueryRowContext(ctx, `
-		SELECT outcome, COALESCE(reason_code, '')
+		SELECT COUNT(*)
 		FROM event_receipts
 		WHERE event_id = $1::uuid
 		  AND subscriber_type = 'platform'
 		  AND subscriber_id = 'pipeline'
-	`, eventID).Scan(&receiptStatus, &receiptReason); err != nil {
-		t.Fatalf("load runtime log receipt: %v", err)
+	`, eventID).Scan(&receiptCount); err != nil {
+		t.Fatalf("count runtime log receipt: %v", err)
 	}
-	if receiptStatus != "dead_letter" {
-		t.Fatalf("runtime log receipt outcome = %q, want dead_letter", receiptStatus)
-	}
-	if receiptReason != "pipeline_error" {
-		t.Fatalf("runtime log receipt reason = %q, want pipeline_error", receiptReason)
+	if receiptCount != 0 {
+		t.Fatalf("runtime log pipeline receipts = %d, want 0", receiptCount)
 	}
 }
 

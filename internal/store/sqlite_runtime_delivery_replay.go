@@ -376,7 +376,9 @@ func (s *SQLiteRuntimeStore) ListEventsMissingPipelineReceiptForRun(ctx context.
 }
 
 func (s *SQLiteRuntimeStore) listSQLiteEventsMissingPipelineReceipt(ctx context.Context, where string, args []any, limit int) ([]events.PersistedReplayEvent, error) {
-	args = append(append([]any{}, args...), limit)
+	queryArgs := append([]any{}, args...)
+	queryArgs = append(queryArgs, diagnosticDirectReplayEventArgs()...)
+	queryArgs = append(queryArgs, limit)
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT
 			e.event_id,
@@ -399,9 +401,10 @@ func (s *SQLiteRuntimeStore) listSQLiteEventsMissingPipelineReceipt(ctx context.
 			AND r.subscriber_id = 'pipeline'
 		WHERE r.event_id IS NULL
 		  AND `+where+`
+		  AND `+sqliteDiagnosticDirectReplayExclusionSQL("e")+`
 		ORDER BY e.created_at ASC, e.event_id ASC
 		LIMIT ?
-	`, args...)
+	`, queryArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("list sqlite events missing pipeline receipt: %w", err)
 	}
