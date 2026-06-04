@@ -369,6 +369,58 @@ func TestDeliveryPlanner_NoTargetConcreteRoutedNodeUsesInternalCarrierAndNodeRou
 	}
 }
 
+func TestRoutedNodeInternalSubscriptionAliases_NestedSemanticScopeDoesNotLeakParentConcreteRoute(t *testing.T) {
+	evt := (events.Event{
+		Type: events.EventType("child/grandchild/micro.started"),
+	}).WithFlowInstance("child/grandchild/inst-1")
+
+	aliases := routedNodeInternalSubscriptionAliases(evt, []Subscriber{{
+		ID:   "grandchild-worker",
+		Type: "node",
+		Path: "child/grandchild",
+	}})
+
+	for _, alias := range aliases {
+		if alias == "child/inst-1/micro.started" {
+			t.Fatalf("aliases = %#v, leaked parent concrete route alias", aliases)
+		}
+	}
+	want := map[string]struct{}{
+		"child/grandchild/micro.started":        {},
+		"child/grandchild/inst-1/micro.started": {},
+	}
+	if len(aliases) != len(want) {
+		t.Fatalf("aliases = %#v, want exactly semantic and concrete route aliases", aliases)
+	}
+	for _, alias := range aliases {
+		if _, ok := want[alias]; !ok {
+			t.Fatalf("aliases = %#v, unexpected alias %q", aliases, alias)
+		}
+	}
+}
+
+func TestResolveInternalRecipientsForRoutedNodePlanning_DoesNotSelectParentConcreteRouteForNestedSemanticScope(t *testing.T) {
+	eb, err := NewEventBus(InMemoryEventStore{})
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	eb.SubscribeInternal("parent-carrier", events.EventType("child/inst-1/micro.started"))
+	defer eb.Unsubscribe("parent-carrier")
+
+	evt := (events.Event{
+		Type: events.EventType("child/grandchild/micro.started"),
+	}).WithFlowInstance("child/grandchild/inst-1")
+	got := eb.resolveInternalRecipientsForRoutedNodePlanning(evt, []Subscriber{{
+		ID:   "grandchild-worker",
+		Type: "node",
+		Path: "child/grandchild",
+	}})
+
+	if len(got) != 0 {
+		t.Fatalf("internal recipients = %#v, want none for parent concrete route", got)
+	}
+}
+
 func TestDeliveryPlanner_NoTargetRootRoutedNodeUsesSemanticNodeDeliveryRoute(t *testing.T) {
 	planner := newDeliveryPlanner(
 		deliveryRouteResolver{
