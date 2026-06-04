@@ -1109,6 +1109,83 @@ func TestResolveArtifactRepoRootRejectsUnsafeRoots(t *testing.T) {
 	}
 }
 
+func TestEnsureArtifactRepoRootWritableRejectsUnusableRoot(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		explicit bool
+		source   string
+	}{
+		{name: "explicit option", explicit: true, source: "explicit runtime ArtifactRoot option"},
+		{name: "environment", explicit: false, source: "SWARM_ARTIFACT_ROOT"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rootFile := filepath.Join(t.TempDir(), "artifact-root")
+			if err := os.WriteFile(rootFile, []byte("not a directory"), 0o644); err != nil {
+				t.Fatalf("write root file: %v", err)
+			}
+			explicit := ""
+			t.Setenv("SWARM_ARTIFACT_ROOT", "")
+			if tc.explicit {
+				explicit = rootFile
+			} else {
+				t.Setenv("SWARM_ARTIFACT_ROOT", rootFile)
+			}
+
+			resolution, err := EnsureArtifactRepoRootWritable(explicit)
+			if err == nil {
+				t.Fatal("EnsureArtifactRepoRootWritable returned nil error, want unusable root rejection")
+			}
+			if resolution.Source != tc.source {
+				t.Fatalf("source = %q, want %q", resolution.Source, tc.source)
+			}
+			for _, want := range []string{rootFile, "not writable by the runtime process", "SWARM_ARTIFACT_ROOT=<writable runtime-private absolute path>"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("error = %q, want %q", err.Error(), want)
+				}
+			}
+		})
+	}
+}
+
+func TestSourceUsesArtifactRepoCommitDetectsSupportedActionSurfaces(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"handler": {
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"artifact.requested": {
+						Action: runtimecontracts.ActionSpec{ID: "artifact_repo_commit"},
+					},
+				},
+			},
+			"rule": {
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"artifact.routed": {
+						Rules: []runtimecontracts.HandlerRuleEntry{{
+							ID:     "commit",
+							Action: runtimecontracts.ActionSpec{ID: "artifact_repo_commit"},
+						}},
+					},
+				},
+			},
+		},
+	})
+	if !SourceUsesArtifactRepoCommit(source) {
+		t.Fatal("SourceUsesArtifactRepoCommit = false, want true for handler/rule action")
+	}
+	empty := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"handler": {
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"task.requested": {Action: runtimecontracts.ActionSpec{ID: "record_evidence"}},
+				},
+			},
+		},
+	})
+	if SourceUsesArtifactRepoCommit(empty) {
+		t.Fatal("SourceUsesArtifactRepoCommit = true, want false without artifact action")
+	}
+}
+
 func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsAgentVisibleArtifactRoot(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()

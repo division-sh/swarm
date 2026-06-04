@@ -3703,6 +3703,105 @@ func runServeRuntimeFreshEmptySQLiteBootsWithAbandon(t *testing.T, dev bool) {
 	}
 }
 
+func TestRunServeRuntimeArtifactRepoCommitFailsBeforeReadinessForUnusableArtifactRoot(t *testing.T) {
+	stubServeRuntimeWorkspaceLifecycle(t)
+	unsetStoreSelectorEnv(t)
+	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
+	t.Setenv(storebackend.EnvSQLitePath, sqlitePath)
+	rootFile := filepath.Join(t.TempDir(), "artifact-root")
+	if err := os.WriteFile(rootFile, []byte("not a directory"), 0o644); err != nil {
+		t.Fatalf("write unusable artifact root: %v", err)
+	}
+	t.Setenv("SWARM_ARTIFACT_ROOT", rootFile)
+
+	var out lockedBuffer
+	code := runServeRuntime(context.Background(), repoRoot(), serveOptions{
+		ConfigPath:           writeServeRuntimeTestConfig(t),
+		ContractsPath:        writeArtifactRepoCommitServeFixture(t),
+		PlatformSpecPath:     defaultPlatformSpecPath,
+		StoreMode:            "sqlite",
+		StoreModeSet:         true,
+		APIListenAddr:        "127.0.0.1:0",
+		MCPListenAddr:        "127.0.0.1:0",
+		SelfCheck:            true,
+		Dev:                  true,
+		RequireBundleMatch:   false,
+		NoRequireBundleMatch: true,
+		Verbose:              true,
+		Output:               &out,
+	})
+	if code == 0 {
+		t.Fatalf("runServeRuntime code = 0, want startup failure\noutput:\n%s", out.String())
+	}
+	for _, want := range []string{
+		"[5/22] runtime_context",
+		"artifact repo root startup validation failed",
+		rootFile,
+		"SWARM_ARTIFACT_ROOT=<writable runtime-private absolute path>",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("serve output missing %q:\n%s", want, out.String())
+		}
+	}
+	if strings.Contains(out.String(), "[22/22]") {
+		t.Fatalf("serve reached readiness despite unusable artifact root:\n%s", out.String())
+	}
+}
+
+func TestRunServeRuntimeNonArtifactBundleDoesNotExerciseUnusableArtifactRoot(t *testing.T) {
+	stubServeRuntimeWorkspaceLifecycle(t)
+	unsetStoreSelectorEnv(t)
+	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
+	t.Setenv(storebackend.EnvSQLitePath, sqlitePath)
+	rootFile := filepath.Join(t.TempDir(), "artifact-root")
+	if err := os.WriteFile(rootFile, []byte("not a directory"), 0o644); err != nil {
+		t.Fatalf("write unusable artifact root: %v", err)
+	}
+	t.Setenv("SWARM_ARTIFACT_ROOT", rootFile)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var out lockedBuffer
+	done := make(chan int, 1)
+	go func() {
+		done <- runServeRuntime(ctx, repoRoot(), serveOptions{
+			ConfigPath:           writeServeRuntimeTestConfig(t),
+			ContractsPath:        filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+			PlatformSpecPath:     defaultPlatformSpecPath,
+			StoreMode:            "sqlite",
+			StoreModeSet:         true,
+			APIListenAddr:        "127.0.0.1:0",
+			MCPListenAddr:        "127.0.0.1:0",
+			SelfCheck:            true,
+			Dev:                  true,
+			RequireBundleMatch:   false,
+			NoRequireBundleMatch: true,
+			Verbose:              true,
+			Output:               &out,
+		})
+	}()
+	stopped := false
+	t.Cleanup(func() {
+		if stopped {
+			return
+		}
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Errorf("timed out stopping runServeRuntime\noutput:\n%s", out.String())
+		}
+	})
+	waitForServeReadyLine(t, &out, done)
+	cancel()
+	if code := <-done; code != 0 {
+		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, out.String())
+	}
+	stopped = true
+	if strings.Contains(out.String(), "artifact repo root startup validation failed") {
+		t.Fatalf("non-artifact bundle hit artifact root admission:\n%s", out.String())
+	}
+}
+
 func TestRunServeRuntimeSQLiteAbandonActiveRunsQuiescesBeforeReadiness(t *testing.T) {
 	stubServeRuntimeWorkspaceLifecycle(t)
 	unsetStoreSelectorEnv(t)
@@ -6951,6 +7050,93 @@ func writeWorkflowValidationFixtureFile(t *testing.T, path, contents string) {
 	if err := os.WriteFile(path, []byte(strings.TrimLeft(contents, "\n")), 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
+}
+
+func writeArtifactRepoCommitServeFixture(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: artifact-root-startup
+version: "1.0.0"
+platform_version: ">=1.1.0"
+flows: []
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
+initial_state: ready
+terminal_states: [done]
+states: [ready, done]
+pins:
+  inputs:
+    events: [artifact.requested]
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), `
+core:
+  repo_url:
+    type: text
+    _unused_reason: artifact startup admission proof output field
+  current_ref:
+    type: text
+    _unused_reason: artifact startup admission proof output field
+  file_manifest:
+    type: text
+    _unused_reason: artifact startup admission proof output field
+  status:
+    type: text
+    _unused_reason: artifact startup admission proof output field
+  failure_reason:
+    type: text
+    _unused_reason: artifact startup admission proof output field
+  last_request_id:
+    type: text
+    _unused_reason: artifact startup admission proof output field
+  last_source_event_id:
+    type: text
+    _unused_reason: artifact startup admission proof output field
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `
+artifact.requested:
+  swarm:
+    source: external
+  entity_id: string
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
+artifact-writer:
+  id: artifact-writer
+  execution_type: system_node
+  subscribes_to: [artifact.requested]
+  event_handlers:
+    artifact.requested:
+      action:
+        id: artifact_repo_commit
+        artifact_repo:
+          provider: local_git
+          repo_id:
+            literal: "11111111-1111-1111-1111-111111111111"
+          namespace:
+            literal: local-proof
+          request_id:
+            literal: "22222222-2222-2222-2222-222222222222"
+          allowed_paths:
+            - readme.md
+          files:
+            - path:
+                literal: readme.md
+              content:
+                literal: "# Demo\n"
+              content_type: markdown
+          output:
+            repo_url: repo_url
+            current_ref: current_ref
+            file_manifest: file_manifest
+            status: status
+            failure_reason: failure_reason
+            last_request_id: last_request_id
+            last_source_event_id: last_source_event_id
+`)
+	return root
 }
 
 func writeVerifyModelAliasFixture(t *testing.T, root, model string) {

@@ -246,6 +246,12 @@ you explicitly opt into Postgres with `SWARM_STORE_BACKEND=postgres` or
 (`swarm-workspace:latest` by default), or set `SWARM_WORKSPACE_IMAGE` to a
 compatible image before commands that start the runtime.
 
+Contracts that use `artifact_repo_commit` need a writable runtime-private
+artifact root. The default is `/var/lib/swarm/artifacts`; local machines that
+cannot write there should set `SWARM_ARTIFACT_ROOT` to an absolute writable host
+path outside `/data`, `/workspace`, and `/opt/swarm/contracts` before starting
+`swarm serve` or local foreground `swarm run`.
+
 ```bash
 # build
 go build ./cmd/swarm

@@ -546,6 +546,11 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 	if err != nil {
 		return serveRuntimeBundleContext{}, err
 	}
+	if runtimepipeline.SourceUsesArtifactRepoCommit(loaded.source) {
+		if _, err := runtimepipeline.EnsureArtifactRepoRootWritable(""); err != nil {
+			return serveRuntimeBundleContext{}, fmt.Errorf("artifact repo root startup validation failed: %w", err)
+		}
+	}
 	runtimeStores := req.Stores.runtimeStores()
 	if !req.UseStartupOwnership {
 		runtimeStores.StartupOwnership = nil
@@ -781,6 +786,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 			RequireBundleScopeName: len(loadedBundles) > 1,
 		})
 		if err != nil {
+			reporter.emit(5, "runtime_context", "FAILED", err.Error())
 			slog.Error("build runtime context", "bundle_hash", strings.TrimSpace(loaded.bundleSourceFact.BundleHash), "error", err)
 			return 1
 		}
