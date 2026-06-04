@@ -3,6 +3,7 @@ package runtime_test
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -150,6 +151,7 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 		SELECT event_id::text FROM events
 		WHERE event_name = 'operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested'
 	`, nil)
+	assertRuntimeEventPayloadProductOnly(t, ctx, db, autoEventID)
 	waitRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_receipts
 		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'lifecycle-orchestrator' AND outcome = 'no_op'
@@ -166,10 +168,11 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 		SELECT COUNT(*) FROM event_deliveries
 		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'workflow-runtime'
 	`, 0, autoEventID)
-	waitRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM events
+	componentEventID := waitRuntimeEventID(t, ctx, db, `
+		SELECT event_id::text FROM events
 		WHERE event_name = 'operating/component_scaffold.spawn_requested'
-	`, 1)
+	`, nil)
+	assertRuntimeEventPayloadProductOnly(t, ctx, db, componentEventID)
 }
 
 func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeWithoutInternalCarrierAndEmpireStyleSideEffect(t *testing.T) {
@@ -265,6 +268,7 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeWithoutInterna
 		SELECT event_id::text FROM events
 		WHERE event_name = 'operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested'
 	`, nil)
+	assertRuntimeEventPayloadProductOnly(t, ctx, db, autoEventID)
 	waitRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_receipts
 		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'lifecycle-orchestrator' AND outcome = 'no_op'
@@ -277,10 +281,11 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeWithoutInterna
 		SELECT COUNT(*) FROM event_deliveries
 		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = '__runtime_replay_scope__'
 	`, 1, autoEventID)
-	waitRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM events
+	componentEventID := waitRuntimeEventID(t, ctx, db, `
+		SELECT event_id::text FROM events
 		WHERE event_name = 'operating/component_scaffold.spawn_requested'
-	`, 1)
+	`, nil)
+	assertRuntimeEventPayloadProductOnly(t, ctx, db, componentEventID)
 }
 
 func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyleSideEffect(t *testing.T) {
@@ -363,6 +368,7 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 		SELECT event_id::text FROM events
 		WHERE event_name = 'operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested'
 	`, nil)
+	assertRuntimeEventPayloadProductOnly(t, ctx, db, autoEventID)
 	waitRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_receipts
 		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'lifecycle-orchestrator' AND outcome = 'no_op'
@@ -375,10 +381,11 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 		SELECT COUNT(*) FROM event_deliveries
 		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = '__runtime_replay_scope__'
 	`, 1, autoEventID)
-	waitRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM events
+	componentEventID := waitRuntimeEventID(t, ctx, db, `
+		SELECT event_id::text FROM events
 		WHERE event_name = 'operating/component_scaffold.spawn_requested'
-	`, 1)
+	`, nil)
+	assertRuntimeEventPayloadProductOnly(t, ctx, db, componentEventID)
 }
 
 type runtimeTestWorkflowModule struct {
@@ -510,16 +517,8 @@ auto_emit_on_create:
   event: opco.product_initialization_requested
 `,
 		"flows/operating/events.yaml": `opco.product_initialization_requested:
-  instance_id: string
-  template_id: string
-  flow_path: string
-  parent_entity_id: string
   product_id: string
 component_scaffold.spawn_requested:
-  instance_id: string
-  template_id: string
-  flow_path: string
-  parent_entity_id: string
   product_id: string
 `,
 		"flows/operating/nodes.yaml": `lifecycle-orchestrator:
@@ -529,7 +528,10 @@ component_scaffold.spawn_requested:
   produces: [component_scaffold.spawn_requested]
   event_handlers:
     opco.product_initialization_requested:
-      emit: component_scaffold.spawn_requested
+      emit:
+        event: component_scaffold.spawn_requested
+        fields:
+          product_id: payload.product_id
 `,
 	}
 }
@@ -584,16 +586,8 @@ auto_emit_on_create:
   event: opco.product_initialization_requested
 `,
 		"flows/operating/events.yaml": `opco.product_initialization_requested:
-  instance_id: string
-  template_id: string
-  flow_path: string
-  parent_entity_id: string
   product_id: string
 component_scaffold.spawn_requested:
-  instance_id: string
-  template_id: string
-  flow_path: string
-  parent_entity_id: string
   product_id: string
 `,
 		"flows/operating/nodes.yaml": `lifecycle-orchestrator:
@@ -603,7 +597,10 @@ component_scaffold.spawn_requested:
   produces: [component_scaffold.spawn_requested]
   event_handlers:
     opco.product_initialization_requested:
-      emit: component_scaffold.spawn_requested
+      emit:
+        event: component_scaffold.spawn_requested
+        fields:
+          product_id: payload.product_id
 `,
 	}
 }
@@ -655,6 +652,29 @@ func waitRuntimeEventID(t *testing.T, ctx context.Context, db *sql.DB, query str
 			t.Fatalf("timed out waiting for event id from query %s", strings.TrimSpace(query))
 		}
 		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+func assertRuntimeEventPayloadProductOnly(t *testing.T, ctx context.Context, db *sql.DB, eventID string) {
+	t.Helper()
+	var raw string
+	if err := db.QueryRowContext(ctx, `
+		SELECT payload::text FROM events
+		WHERE event_id = $1::uuid
+	`, eventID).Scan(&raw); err != nil {
+		t.Fatalf("query event payload: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		t.Fatalf("decode event payload %s: %v", eventID, err)
+	}
+	if got := payload["product_id"]; got != "product-1" {
+		t.Fatalf("payload product_id = %#v, want product-1: %#v", got, payload)
+	}
+	for _, key := range []string{"instance_id", "template_id", "flow_path", "parent_entity_id"} {
+		if _, ok := payload[key]; ok {
+			t.Fatalf("payload includes hidden activation context %q: %#v", key, payload)
+		}
 	}
 }
 
