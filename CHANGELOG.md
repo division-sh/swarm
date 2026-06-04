@@ -10,6 +10,13 @@ until v1.0. Each entry below lists the platform-spec version it ships against.
 
 ## [Unreleased]
 
+### Changed
+
+- Operator setup docs now list native OpenAI Responses alongside the existing
+  Anthropic API, Claude CLI, and OpenAI-compatible Chat Completions backends,
+  including the required `OPENAI_API_KEY` credential example. Backend selection
+  remains `--backend`, then `llm.backend`, then the default `anthropic`.
+
 ## [1.6.0] - 2026-06-01
 
 First public open-source release. Engine is Phase 11 (handler-first execution for
