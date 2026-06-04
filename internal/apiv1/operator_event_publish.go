@@ -42,6 +42,7 @@ type eventPublicationParams struct {
 	Payload           json.RawMessage
 	EntityID          string
 	EntityIDProvided  bool
+	FlowInstance      string
 	RunID             string
 	SourceEventID     string
 	IdempotencyKey    string
@@ -184,7 +185,8 @@ func executeOperatorEventPublication(
 			}
 			params.EventName = resolvedEventName
 		}
-		if err := validateEventPublication(ctx, selectedOpts, params, cfg); err != nil {
+		params, err = validateEventPublication(ctx, selectedOpts, params, cfg)
+		if err != nil {
 			return store.APIIdempotencyCompletion{}, err
 		}
 		if err := selectedOpts.Events.Publish(ctx, eventPublicationEvent(params, now)); err != nil {
@@ -317,7 +319,7 @@ func eventPublicationPayload(params map[string]any, runID string, injectRunIDEnt
 }
 
 func eventPublicationEvent(params eventPublicationParams, createdAt time.Time) events.Event {
-	return (events.Event{
+	evt := (events.Event{
 		ID:            params.EventID,
 		RunID:         params.RunID,
 		ParentEventID: params.SourceEventID,
@@ -326,24 +328,28 @@ func eventPublicationEvent(params eventPublicationParams, createdAt time.Time) e
 		Payload:       params.Payload,
 		CreatedAt:     createdAt,
 	}).WithEntityID(params.EntityID)
+	if flowInstance := strings.Trim(strings.TrimSpace(params.FlowInstance), "/"); flowInstance != "" {
+		evt = evt.WithFlowInstance(flowInstance)
+	}
+	return evt
 }
 
-func validateEventPublication(ctx context.Context, opts OperatorReadOptions, params eventPublicationParams, cfg eventPublicationConfig) error {
+func validateEventPublication(ctx context.Context, opts OperatorReadOptions, params eventPublicationParams, cfg eventPublicationConfig) (eventPublicationParams, error) {
 	if cfg.rootInputOnly {
 		set, err := runtimerunstart.ValidateInputEvents(opts.Source, []string{params.EventName})
 		if err != nil {
-			return runStartRootInputError(params.EventName, set, err)
+			return params, runStartRootInputError(params.EventName, set, err)
 		}
-		return nil
+		return params, nil
 	}
 	if !eventDeclared(opts.Source, params.EventName) {
-		return NewApplicationError(EventNotDeclaredCode, false, map[string]any{
+		return params, NewApplicationError(EventNotDeclaredCode, false, map[string]any{
 			"event_name":      params.EventName,
 			"declared_events": declaredEventNames(opts.Source),
 		})
 	}
 	if params.EntityIDProvided && eventPublicationHasCreateEntityHandler(opts.Source, params.EventName) {
-		return NewApplicationError(PayloadValidationFailedCode, false, map[string]any{
+		return params, NewApplicationError(PayloadValidationFailedCode, false, map[string]any{
 			"violations": []map[string]any{{
 				"field_path": "$.entity_id",
 				"rule":       "create_entity_mints_entity_id",
@@ -355,18 +361,18 @@ func validateEventPublication(ctx context.Context, opts OperatorReadOptions, par
 	if cfg.requireExistingExplicitRun && !params.NewRunCreated {
 		runs, err := requireRunReadStore(opts.Runs)
 		if err != nil {
-			return err
+			return params, err
 		}
 		header, err := runs.LoadRunHeader(ctx, params.RunID)
 		if errors.Is(err, store.ErrRunNotFound) {
-			return NewApplicationError(RunNotFoundCode, false, map[string]any{"run_id": params.RunID})
+			return params, NewApplicationError(RunNotFoundCode, false, map[string]any{"run_id": params.RunID})
 		}
 		if err != nil {
-			return err
+			return params, err
 		}
 		status := strings.TrimSpace(strings.ToLower(header.Status))
 		if status != "running" && status != "paused" {
-			return NewApplicationError(RunAlreadyTerminalCode, false, map[string]any{
+			return params, NewApplicationError(RunAlreadyTerminalCode, false, map[string]any{
 				"run_id":         params.RunID,
 				"current_status": status,
 			})
@@ -375,13 +381,13 @@ func validateEventPublication(ctx context.Context, opts OperatorReadOptions, par
 	if params.SourceEventID != "" {
 		sourceEvent, err := opts.Observability.LoadOperatorEvent(ctx, params.SourceEventID)
 		if errors.Is(err, store.ErrEventNotFound) {
-			return NewApplicationError(EventNotFoundCode, false, map[string]any{"event_id": params.SourceEventID})
+			return params, NewApplicationError(EventNotFoundCode, false, map[string]any{"event_id": params.SourceEventID})
 		}
 		if err != nil {
-			return err
+			return params, err
 		}
 		if strings.TrimSpace(sourceEvent.RunID) != params.RunID {
-			return NewInvalidParamsError(map[string]any{
+			return params, NewInvalidParamsError(map[string]any{
 				"field":           "source_event_id",
 				"reason":          "must belong to run_id",
 				"source_event_id": params.SourceEventID,
@@ -391,11 +397,41 @@ func validateEventPublication(ctx context.Context, opts OperatorReadOptions, par
 		}
 	}
 	if cfg.requireExistingExplicitRun && !params.NewRunCreated {
+		enriched, err := enrichExistingRunEventPublicationRoute(ctx, opts, params)
+		if err != nil {
+			return params, err
+		}
+		params = enriched
 		if err := validateExistingRunEventPublicationRecipientPlan(ctx, opts, params, cfg); err != nil {
-			return err
+			return params, err
 		}
 	}
-	return nil
+	return params, nil
+}
+
+func enrichExistingRunEventPublicationRoute(ctx context.Context, opts OperatorReadOptions, params eventPublicationParams) (eventPublicationParams, error) {
+	if strings.TrimSpace(params.EntityID) == "" {
+		return params, nil
+	}
+	entities, err := requireEntityReadStore(opts.Entities)
+	if err != nil {
+		return params, err
+	}
+	entity, err := entities.LoadOperatorEntity(ctx, params.EntityID, params.RunID)
+	if errors.Is(err, store.ErrEntityNotFound) {
+		return params, NewApplicationError(EventNotDeclaredCode, false, map[string]any{
+			"event_name":      params.EventName,
+			"run_id":          params.RunID,
+			"entity_id":       params.EntityID,
+			"declared_events": declaredEventNames(opts.Source),
+			"reason":          "selected_run_entity_not_found",
+		})
+	}
+	if err != nil {
+		return params, err
+	}
+	params.FlowInstance = strings.Trim(strings.TrimSpace(entity.Entity.FlowInstance), "/")
+	return params, nil
 }
 
 type eventPublishRecipientPlanChecker interface {
@@ -433,6 +469,8 @@ func validateExistingRunEventPublicationRecipientPlan(ctx context.Context, opts 
 		return NewApplicationError(EventNotDeclaredCode, false, map[string]any{
 			"event_name":              params.EventName,
 			"run_id":                  params.RunID,
+			"entity_id":               params.EntityID,
+			"flow_instance":           params.FlowInstance,
 			"declared_events":         declaredEventNames(opts.Source),
 			"reason":                  "declared_event_has_no_selected_run_recipient",
 			"routed_recipients":       plan.RoutedRecipients,
