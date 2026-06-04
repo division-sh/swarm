@@ -1159,6 +1159,10 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptSpec(ctx context.Context
 	if caps.Events.LogRouteIdentity {
 		routeSelect = `COALESCE(e.source_route, '{}'::jsonb), COALESCE(e.target_route, '{}'::jsonb), COALESCE(e.target_set, '[]'::jsonb)`
 	}
+	exclusionArgs := diagnosticDirectReplayEventArgs()
+	limitPlaceholder := 2 + len(exclusionArgs)
+	args := append([]any{since}, exclusionArgs...)
+	args = append(args, limit)
 	rows, err := s.DB.QueryContext(ctx, fmt.Sprintf(`
 		SELECT
 			e.event_id::text, %s, e.event_name, COALESCE(e.produced_by, ''),
@@ -1172,9 +1176,10 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptSpec(ctx context.Context
 			AND r.subscriber_id = 'pipeline'
 		WHERE r.event_id IS NULL
 		  AND e.created_at >= $1
+		  AND %s
 		ORDER BY e.created_at ASC
-		LIMIT $2
-	`, runIDExpr, routeSelect), since, limit)
+		LIMIT $%d
+	`, runIDExpr, routeSelect, postgresDiagnosticDirectReplayExclusionSQL("e", 2), limitPlaceholder), args...)
 	if err != nil {
 		return nil, fmt.Errorf("list events missing pipeline receipt: %w", err)
 	}
@@ -1222,6 +1227,10 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptForRunSpec(ctx context.C
 	if caps.Events.LogRouteIdentity {
 		routeSelect = `COALESCE(e.source_route, '{}'::jsonb), COALESCE(e.target_route, '{}'::jsonb), COALESCE(e.target_set, '[]'::jsonb)`
 	}
+	exclusionArgs := diagnosticDirectReplayEventArgs()
+	limitPlaceholder := 3 + len(exclusionArgs)
+	args := append([]any{runID, since}, exclusionArgs...)
+	args = append(args, limit)
 	rows, err := s.DB.QueryContext(ctx, fmt.Sprintf(`
 		SELECT
 			e.event_id::text, COALESCE(e.run_id::text, ''), e.event_name, COALESCE(e.produced_by, ''),
@@ -1236,9 +1245,10 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptForRunSpec(ctx context.C
 		WHERE r.event_id IS NULL
 		  AND e.run_id = $1::uuid
 		  AND e.created_at >= $2
+		  AND %s
 		ORDER BY e.created_at ASC
-		LIMIT $3
-	`, routeSelect), runID, since, limit)
+		LIMIT $%d
+	`, routeSelect, postgresDiagnosticDirectReplayExclusionSQL("e", 3), limitPlaceholder), args...)
 	if err != nil {
 		return nil, fmt.Errorf("list run events missing pipeline receipt: %w", err)
 	}
