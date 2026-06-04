@@ -110,6 +110,7 @@ func (p deliveryPlanner) Plan(ctx context.Context, evt events.Event) (eventDeliv
 	plan.DeliveryTargets = manifest.DeliveryTargets
 	plan.DeliveryRoutes = append([]events.DeliveryRoute(nil), manifest.DeliveryRoutes...)
 	plan.DeliveryRoutes = append(plan.DeliveryRoutes, routedRootNodeDeliveryRoutesForNoTargetEvent(evt, routing.RoutedRecipients)...)
+	plan.DeliveryRoutes = append(plan.DeliveryRoutes, routedNodeDeliveryRoutesForNoRecipientFlowInstanceEvent(evt, routing.RoutedRecipients, plan.Recipients, plan.PersistedRecipients)...)
 	plan.DeliveryRoutes = append(plan.DeliveryRoutes, routedNodeDeliveryRoutesForNoTargetEvent(evt, routing.RoutedRecipients, plan.Recipients, plan.PersistedRecipients)...)
 	plan.DeliveryRoutes = append(plan.DeliveryRoutes, internalDeliveryRoutesForPlan(evt, plan.Recipients, plan.PersistedRecipients, routing.RoutedRecipients)...)
 	plan.DeliveryRoutes = events.NormalizeDeliveryRoutes(plan.DeliveryRoutes)
@@ -433,6 +434,46 @@ func routedNodeDeliveryRoutesForNoTargetEvent(evt events.Event, routed []Subscri
 	}
 	out := make([]events.DeliveryRoute, 0, len(internalRecipients))
 	for _, recipient := range internalRecipients {
+		out = append(out, events.DeliveryRoute{
+			SubscriberType: "node",
+			SubscriberID:   recipient,
+			Target: events.RouteIdentity{
+				FlowInstance: flowInstance,
+				EntityID:     eventEntityID,
+			},
+		})
+	}
+	return events.NormalizeDeliveryRoutes(out)
+}
+
+func routedNodeDeliveryRoutesForNoRecipientFlowInstanceEvent(evt events.Event, routed []Subscriber, recipients, persisted []string) []events.DeliveryRoute {
+	if len(routed) == 0 || len(eventDeliveryTargetRoutes(evt)) > 0 {
+		return nil
+	}
+	if len(recipients) > 0 || len(persisted) > 0 {
+		return nil
+	}
+	flowInstance := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/")
+	if flowInstance == "" {
+		return nil
+	}
+	eventEntityID := strings.TrimSpace(evt.EntityID())
+	nodeIDs := make(map[string]struct{}, len(routed))
+	for _, subscriber := range routed {
+		if !routedNodeMatchesConcreteFlowInstanceEvent(evt, subscriber) {
+			continue
+		}
+		id := strings.TrimSpace(subscriber.ID)
+		if id == "" {
+			continue
+		}
+		nodeIDs[id] = struct{}{}
+	}
+	if len(nodeIDs) == 0 {
+		return nil
+	}
+	out := make([]events.DeliveryRoute, 0, len(nodeIDs))
+	for _, recipient := range sortedStringKeys(nodeIDs) {
 		out = append(out, events.DeliveryRoute{
 			SubscriberType: "node",
 			SubscriberID:   recipient,

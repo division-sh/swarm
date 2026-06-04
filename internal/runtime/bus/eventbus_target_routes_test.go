@@ -624,6 +624,51 @@ func TestEventBusCheckPublishRecipientPlan_SemanticScopeFlowInstanceMaterializes
 	}
 }
 
+func TestEventBusCheckPublishRecipientPlan_SemanticScopeFlowInstanceMaterializesSystemNodeRouteWithoutLiveSubscription(t *testing.T) {
+	store := newTargetRouteMemoryStore()
+	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+		ContractBundle: semanticview.Wrap(routedNodeStaticValidationBundle()),
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	evt := (events.Event{
+		ID:        uuid.NewString(),
+		Type:      events.EventType("validation/thing.reviewed"),
+		Payload:   []byte(`{}`),
+		CreatedAt: time.Now().UTC(),
+	}).WithEntityID("ent-validation").WithFlowInstance("validation/inst-1")
+
+	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("CheckPublishRecipientPlan: %v", err)
+	}
+	if len(plan.Recipients) != 0 || len(plan.PersistedRecipients) != 0 {
+		t.Fatalf("recipients=%#v persisted=%#v, want no live subscriber recipients", plan.Recipients, plan.PersistedRecipients)
+	}
+	if len(plan.RoutedRecipients) != 1 || plan.RoutedRecipients[0].ID != "entity-writer" || plan.RoutedRecipients[0].Path != "validation" || plan.RoutedRecipients[0].LocalizedEvent != "thing.reviewed" {
+		t.Fatalf("routed recipients = %#v, want entity-writer local thing.reviewed at semantic validation scope", plan.RoutedRecipients)
+	}
+	if got := plan.DeliveryRoutes; len(got) != 1 {
+		t.Fatalf("delivery routes = %#v, want one route-table system-node route", got)
+	}
+	route := plan.DeliveryRoutes[0]
+	if route.SubscriberType != "node" || route.SubscriberID != "entity-writer" {
+		t.Fatalf("delivery route = %#v, want node/entity-writer", route)
+	}
+	if route.Target.FlowInstance != "validation/inst-1" || route.Target.EntityID != "ent-validation" {
+		t.Fatalf("delivery route target = %#v, want validation/inst-1 ent-validation", route.Target)
+	}
+
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	routes := store.routes[evt.ID]
+	if len(routes) != 1 || routes[0].SubscriberID != "entity-writer" || routes[0].Target.FlowInstance != "validation/inst-1" {
+		t.Fatalf("persisted routes = %#v, want entity-writer concrete validation route", routes)
+	}
+}
+
 func TestEventBusPublish_NoTargetRootRoutedNodeUsesSemanticNodeDeliveryRoute(t *testing.T) {
 	store := newTargetRouteMemoryStore()
 	source := semanticview.Wrap(loadTargetRouteTempBundle(t, routedRootNodeFixtureFiles()))
