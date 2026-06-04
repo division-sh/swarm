@@ -1147,6 +1147,28 @@ func TestEnsureArtifactRepoRootWritableRejectsUnusableRoot(t *testing.T) {
 	}
 }
 
+func TestEnsureArtifactRepoRootWritableRejectsBlockedLocalGitStorageBase(t *testing.T) {
+	t.Setenv("SWARM_ARTIFACT_ROOT", "")
+	root := t.TempDir()
+	reposFile := filepath.Join(root, "repos")
+	if err := os.WriteFile(reposFile, []byte("not a directory"), 0o644); err != nil {
+		t.Fatalf("write repos file: %v", err)
+	}
+
+	resolution, err := EnsureArtifactRepoRootWritable(root)
+	if err == nil {
+		t.Fatal("EnsureArtifactRepoRootWritable returned nil error, want blocked repos rejection")
+	}
+	if resolution.Source != "explicit runtime ArtifactRoot option" {
+		t.Fatalf("source = %q, want explicit runtime ArtifactRoot option", resolution.Source)
+	}
+	for _, want := range []string{root, reposFile, "not writable by the runtime process", "SWARM_ARTIFACT_ROOT=<writable runtime-private absolute path>"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error = %q, want %q", err.Error(), want)
+		}
+	}
+}
+
 func TestSourceUsesArtifactRepoCommitDetectsSupportedActionSurfaces(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
@@ -1236,49 +1258,77 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsAgentVisibleArtifac
 }
 
 func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsUnusableArtifactRoot(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	defer cleanup()
-	store := NewWorkflowInstanceStore(db)
-	bus := &recordingPipelineBus{}
-	rootFile := filepath.Join(t.TempDir(), "artifact-root")
-	if err := os.WriteFile(rootFile, []byte("not a directory"), 0o644); err != nil {
-		t.Fatalf("write artifact root file: %v", err)
-	}
-	pc := &PipelineCoordinator{db: db, workflowStore: store, artifactRoot: rootFile, bus: bus}
-	ctx := testWorkflowStoreRunContext(t, store)
-	entityID := "22222222-2222-2222-2222-222222222222"
-	initial := testArtifactRepoEntityFields()
-	if err := store.Upsert(ctx, WorkflowInstance{
-		InstanceID:      entityID,
-		StorageRef:      entityID,
-		WorkflowName:    "artifact-repo",
-		WorkflowVersion: "1.0.0",
-		CurrentState:    "ready",
-		Metadata:        cloneStringAnyMap(initial),
-	}); err != nil {
-		t.Fatalf("seed workflow instance: %v", err)
-	}
-	action, execCtx := testArtifactRepoActionAndContext(entityID, initial, "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444", "name: Demo\n")
+	for _, tc := range []struct {
+		name string
+		root func(t *testing.T) (root string, wantDetail string)
+	}{
+		{
+			name: "root file",
+			root: func(t *testing.T) (string, string) {
+				t.Helper()
+				rootFile := filepath.Join(t.TempDir(), "artifact-root")
+				if err := os.WriteFile(rootFile, []byte("not a directory"), 0o644); err != nil {
+					t.Fatalf("write artifact root file: %v", err)
+				}
+				return rootFile, rootFile
+			},
+		},
+		{
+			name: "blocked local git storage base",
+			root: func(t *testing.T) (string, string) {
+				t.Helper()
+				root := t.TempDir()
+				reposFile := filepath.Join(root, "repos")
+				if err := os.WriteFile(reposFile, []byte("not a directory"), 0o644); err != nil {
+					t.Fatalf("write repos file: %v", err)
+				}
+				return root, reposFile
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, db, cleanup := testutil.StartPostgres(t)
+			defer cleanup()
+			store := NewWorkflowInstanceStore(db)
+			bus := &recordingPipelineBus{}
+			artifactRoot, wantDetail := tc.root(t)
+			pc := &PipelineCoordinator{db: db, workflowStore: store, artifactRoot: artifactRoot, bus: bus}
+			ctx := testWorkflowStoreRunContext(t, store)
+			entityID := "22222222-2222-2222-2222-222222222222"
+			initial := testArtifactRepoEntityFields()
+			if err := store.Upsert(ctx, WorkflowInstance{
+				InstanceID:      entityID,
+				StorageRef:      entityID,
+				WorkflowName:    "artifact-repo",
+				WorkflowVersion: "1.0.0",
+				CurrentState:    "ready",
+				Metadata:        cloneStringAnyMap(initial),
+			}); err != nil {
+				t.Fatalf("seed workflow instance: %v", err)
+			}
+			action, execCtx := testArtifactRepoActionAndContext(entityID, initial, "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444", "name: Demo\n")
 
-	ok, err := pipelineEngineActionRunner{coordinator: pc}.ExecuteAction(ctx, action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx)
-	if !ok {
-		t.Fatal("expected artifact_repo_commit action to be claimed")
-	}
-	if err == nil || !strings.Contains(err.Error(), "not writable by the runtime process") || !strings.Contains(err.Error(), "SWARM_ARTIFACT_ROOT=<writable runtime-private absolute path>") {
-		t.Fatalf("ExecuteAction error = %v, want unusable root remediation", err)
-	}
-	instance, _, err := store.Load(ctx, entityID)
-	if err != nil {
-		t.Fatalf("load workflow instance: %v", err)
-	}
-	if got := strings.TrimSpace(asString(instance.Metadata["status"])); got != "failed" {
-		t.Fatalf("status = %q, want failed", got)
-	}
-	if got := strings.TrimSpace(asString(instance.Metadata["failure_reason"])); !strings.Contains(got, rootFile) || !strings.Contains(got, "not writable by the runtime process") {
-		t.Fatalf("failure_reason = %q, want unusable root detail", got)
-	}
-	if got := bus.publishedCount(); got != 1 {
-		t.Fatalf("failure event count = %d, want 1", got)
+			ok, err := pipelineEngineActionRunner{coordinator: pc}.ExecuteAction(ctx, action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx)
+			if !ok {
+				t.Fatal("expected artifact_repo_commit action to be claimed")
+			}
+			if err == nil || !strings.Contains(err.Error(), "not writable by the runtime process") || !strings.Contains(err.Error(), "SWARM_ARTIFACT_ROOT=<writable runtime-private absolute path>") {
+				t.Fatalf("ExecuteAction error = %v, want unusable root remediation", err)
+			}
+			instance, _, err := store.Load(ctx, entityID)
+			if err != nil {
+				t.Fatalf("load workflow instance: %v", err)
+			}
+			if got := strings.TrimSpace(asString(instance.Metadata["status"])); got != "failed" {
+				t.Fatalf("status = %q, want failed", got)
+			}
+			if got := strings.TrimSpace(asString(instance.Metadata["failure_reason"])); !strings.Contains(got, wantDetail) || !strings.Contains(got, "not writable by the runtime process") {
+				t.Fatalf("failure_reason = %q, want unusable root detail %q", got, wantDetail)
+			}
+			if got := bus.publishedCount(); got != 1 {
+				t.Fatalf("failure event count = %d, want 1", got)
+			}
+		})
 	}
 }
 
