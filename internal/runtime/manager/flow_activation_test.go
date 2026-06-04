@@ -453,6 +453,48 @@ func TestActivateFlowInstancePassesActivationConfigToRouteMaterialization(t *tes
 	}
 }
 
+func TestActivateFlowInstanceUsesSameBuiltinsForAgentAndRouteMaterialization(t *testing.T) {
+	bus := &flowActivationTestBus{}
+	am := newFlowActivationManager(bus, &flowActivationTestInstanceStore{})
+	bundle := testFlowBundle("")
+	bundle.FlowTree.ByID["review"].Agents["reviewer"] = runtimecontracts.AgentRegistryEntry{
+		ID:            "reviewer-{flow_instance_path}",
+		Type:          "generic",
+		Role:          "reviewer",
+		Subscriptions: []string{"task.started"},
+	}
+
+	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
+	req.Config = map[string]any{
+		"flow_instance_path": "wrong-config-path",
+		"flow_scope_key":     "wrong-config-scope",
+		"instance_id":        "wrong-config-instance",
+		"template_id":        "wrong-config-template",
+	}
+	if err := am.ActivateFlowInstance(context.Background(), req); err != nil {
+		t.Fatalf("ActivateFlowInstance: %v", err)
+	}
+	if _, ok := am.GetAgentConfig("reviewer-review/inst-1"); !ok {
+		t.Fatalf("expected flow agent rendered with built-in flow_instance_path, configs=%#v", am.agentCfg)
+	}
+	if len(bus.addedRouteRequests) != 1 {
+		t.Fatalf("route materialization requests = %#v, want one", bus.addedRouteRequests)
+	}
+	vars := bus.addedRouteRequests[0].ActivationVariables
+	if got := vars["flow_instance_path"]; got != "review/inst-1" {
+		t.Fatalf("route activation variable flow_instance_path = %q, want review/inst-1", got)
+	}
+	if got := vars["flow_scope_key"]; got != "review" {
+		t.Fatalf("route activation variable flow_scope_key = %q, want review", got)
+	}
+	if got := vars["instance_id"]; got != "inst-1" {
+		t.Fatalf("route activation variable instance_id = %q, want inst-1", got)
+	}
+	if got := vars["template_id"]; got != "review" {
+		t.Fatalf("route activation variable template_id = %q, want review", got)
+	}
+}
+
 func TestActivateFlowInstancePublishesAutoEmitEvent(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	am := newFlowActivationManager(bus, &flowActivationTestInstanceStore{})
