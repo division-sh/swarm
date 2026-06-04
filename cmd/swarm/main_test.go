@@ -8300,23 +8300,6 @@ const (
 	serveRuntimeStopTimeout  = 5 * time.Second
 )
 
-func waitForServeReadyLine(t *testing.T, out *lockedBuffer, _ <-chan int) {
-	t.Helper()
-	deadline := time.After(serveRuntimeReadyTimeout)
-	ticker := time.NewTicker(10 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-deadline:
-			t.Fatalf("timed out waiting for serve ready line\noutput:\n%s", out.String())
-		case <-ticker.C:
-			if strings.Contains(out.String(), "[22/22]") {
-				return
-			}
-		}
-	}
-}
-
 type serveRuntimeTestProcess struct {
 	t      *testing.T
 	cancel context.CancelFunc
