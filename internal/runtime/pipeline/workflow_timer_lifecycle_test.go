@@ -353,6 +353,43 @@ func TestPersistWorkflowTimerCancellation_StillCancelsSchedulerWhenClaimReleaseF
 	}
 }
 
+func TestCancelWorkflowTimerSchedule_StillCancelsSchedulerWhenClaimReleaseFailsAfterPersist(t *testing.T) {
+	store := &recordingSchedulePersistence{
+		cancelErr: &ScheduleTerminalError{
+			Stage:             "release_claim",
+			TransitionApplied: true,
+			Err:               context.DeadlineExceeded,
+		},
+	}
+	scheduler := NewScheduler()
+	defer scheduler.Stop()
+	pc := &PipelineCoordinator{
+		timerScheduleStore: store,
+		timerScheduler:     scheduler,
+	}
+	sc := Schedule{
+		AgentID:      "validation-orchestrator",
+		EventType:    "timer.validation_timeout",
+		Mode:         "once",
+		At:           time.Now().Add(time.Hour),
+		EntityID:     "ent-001",
+		FlowInstance: "review/inst-1",
+		TaskID:       "timer-a",
+	}
+	if err := scheduler.Register(sc); err != nil {
+		t.Fatalf("Register(schedule): %v", err)
+	}
+
+	pc.cancelWorkflowTimerSchedule(testPipelineCoordinatorRunContext(t, pc), sc)
+
+	if got := store.cancelOwned; got != 1 {
+		t.Fatalf("cancel owned calls = %d, want 1", got)
+	}
+	if got := len(scheduler.tasks); got != 0 {
+		t.Fatalf("scheduler tasks after partial failure = %d, want 0", got)
+	}
+}
+
 func TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-child-flow-absolute-path")
