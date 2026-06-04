@@ -3698,46 +3698,26 @@ func TestRunServeRuntimeNonArtifactBundleDoesNotExerciseUnusableArtifactRoot(t *
 	}
 	t.Setenv("SWARM_ARTIFACT_ROOT", rootFile)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	var out lockedBuffer
-	done := make(chan int, 1)
-	go func() {
-		done <- runServeRuntime(ctx, repoRoot(), serveOptions{
-			ConfigPath:           writeServeRuntimeTestConfig(t),
-			ContractsPath:        filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-			PlatformSpecPath:     defaultPlatformSpecPath,
-			StoreMode:            "sqlite",
-			StoreModeSet:         true,
-			APIListenAddr:        "127.0.0.1:0",
-			MCPListenAddr:        "127.0.0.1:0",
-			SelfCheck:            true,
-			Dev:                  true,
-			RequireBundleMatch:   false,
-			NoRequireBundleMatch: true,
-			Verbose:              true,
-			Output:               &out,
-		})
-	}()
-	stopped := false
-	t.Cleanup(func() {
-		if stopped {
-			return
-		}
-		cancel()
-		select {
-		case <-done:
-		case <-time.After(5 * time.Second):
-			t.Errorf("timed out stopping runServeRuntime\noutput:\n%s", out.String())
-		}
+	serve := startServeRuntimeTestProcess(t, serveOptions{
+		ConfigPath:           writeServeRuntimeTestConfig(t),
+		ContractsPath:        filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+		PlatformSpecPath:     defaultPlatformSpecPath,
+		StoreMode:            "sqlite",
+		StoreModeSet:         true,
+		APIListenAddr:        "127.0.0.1:0",
+		MCPListenAddr:        "127.0.0.1:0",
+		SelfCheck:            true,
+		Dev:                  true,
+		RequireBundleMatch:   false,
+		NoRequireBundleMatch: true,
+		Verbose:              true,
 	})
-	waitForServeReadyLine(t, &out, done)
-	cancel()
-	if code := <-done; code != 0 {
-		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, out.String())
+	serve.waitForReadyLine()
+	if code := serve.stop(); code != 0 {
+		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, serve.outputString())
 	}
-	stopped = true
-	if strings.Contains(out.String(), "artifact repo root startup validation failed") {
-		t.Fatalf("non-artifact bundle hit artifact root admission:\n%s", out.String())
+	if strings.Contains(serve.outputString(), "artifact repo root startup validation failed") {
+		t.Fatalf("non-artifact bundle hit artifact root admission:\n%s", serve.outputString())
 	}
 }
 
