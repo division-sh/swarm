@@ -7445,6 +7445,73 @@ func TestInitializeServeSchemaStateStoresConsumeVerboseOwner(t *testing.T) {
 	}
 }
 
+func TestInitializeStateStoresDoesNotPlanGeneratedEntityTables(t *testing.T) {
+	ctx := context.Background()
+	bundle := workflowBundleWithGeneratedEntitySchemaForStateStoreTest(t)
+	recorder := &capturingSchemaBootstrapper{}
+
+	summary, err := initializeStateStores(ctx, storeBundle{SchemaBootstrapper: recorder}, bundle, true)
+	if err != nil {
+		t.Fatalf("initializeStateStores: %v", err)
+	}
+	if !schemaPlanContainsTable(recorder.plans, "entity_state") {
+		t.Fatal("normal boot schema plan missing canonical entity_state table")
+	}
+	if schemaPlanContainsTable(recorder.plans, "products") {
+		t.Fatalf("normal boot schema plan included generated typed entity table products: %s", summary)
+	}
+}
+
+func TestInitializeStateStoresSQLiteDoesNotCreateGeneratedEntityTables(t *testing.T) {
+	ctx := context.Background()
+	bundle := workflowBundleWithGeneratedEntitySchemaForStateStoreTest(t)
+	sqliteStore, err := store.NewSQLiteRuntimeStore(filepath.Join(t.TempDir(), "dev.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteRuntimeStore: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := sqliteStore.Close(); err != nil {
+			t.Fatalf("close sqlite store: %v", err)
+		}
+	})
+
+	if _, err := initializeStateStores(ctx, storeBundle{SchemaBootstrapper: sqliteStore}, bundle, false); err != nil {
+		t.Fatalf("initializeStateStores(sqlite): %v", err)
+	}
+	if !sqliteMainTestTableExists(t, sqliteStore.DB, "entity_state") {
+		t.Fatal("sqlite normal boot missing canonical entity_state table")
+	}
+	if sqliteMainTestTableExists(t, sqliteStore.DB, "products") {
+		t.Fatal("sqlite normal boot created misleading generated typed entity table products")
+	}
+}
+
+func TestInitializeStateStoresPostgresDoesNotCreateGeneratedEntityTables(t *testing.T) {
+	ctx := context.Background()
+	bundle := workflowBundleWithGeneratedEntitySchemaForStateStoreTest(t)
+	dsn, db, cleanup := testutil.StartEmptyPostgres(t)
+	t.Cleanup(cleanup)
+	pg, err := store.NewPostgresStore(dsn)
+	if err != nil {
+		t.Fatalf("NewPostgresStore: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := pg.DB.Close(); err != nil {
+			t.Fatalf("close postgres store: %v", err)
+		}
+	})
+
+	if _, err := initializeStateStores(ctx, storeBundle{Postgres: pg, SchemaBootstrapper: pg}, bundle, false); err != nil {
+		t.Fatalf("initializeStateStores(postgres): %v", err)
+	}
+	if !postgresMainTestTableExists(t, db, "entity_state") {
+		t.Fatal("postgres normal boot missing canonical entity_state table")
+	}
+	if postgresMainTestTableExists(t, db, "products") {
+		t.Fatal("postgres normal boot created misleading generated typed entity table products")
+	}
+}
+
 func TestServeRuntimeStateStoreSummaryDedupesSchemaSummaries(t *testing.T) {
 	got := serveRuntimeStateStoreSummary([]serveRuntimeBundleContext{
 		{stateStoreSummary: "verified 2 generated tables"},
@@ -7480,6 +7547,76 @@ func (recordingSchemaBootstrapper) EnsureSchemaTables(context.Context, []store.S
 
 func (recordingSchemaBootstrapper) ResolveSchemaCapabilities(context.Context) (store.StoreSchemaCapabilities, error) {
 	return store.StoreSchemaCapabilities{}, nil
+}
+
+type capturingSchemaBootstrapper struct {
+	plans []store.SchemaTableDDL
+}
+
+func (c *capturingSchemaBootstrapper) EnsureSchemaTables(_ context.Context, plans []store.SchemaTableDDL) error {
+	c.plans = append([]store.SchemaTableDDL{}, plans...)
+	return nil
+}
+
+func (c *capturingSchemaBootstrapper) ResolveSchemaCapabilities(context.Context) (store.StoreSchemaCapabilities, error) {
+	return store.StoreSchemaCapabilities{}, nil
+}
+
+func workflowBundleWithGeneratedEntitySchemaForStateStoreTest(t *testing.T) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	spec, err := loadServePlatformSpecDocument(filepath.Join(repoRoot(), defaultPlatformSpecPath))
+	if err != nil {
+		t.Fatalf("load platform spec: %v", err)
+	}
+	return &runtimecontracts.WorkflowContractBundle{
+		Platform: spec,
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			EntitySchema: runtimecontracts.EntitySchema{
+				Groups: []runtimecontracts.EntitySchemaGroup{{
+					Name: "products",
+					Fields: []runtimecontracts.EntitySchemaField{
+						{Name: "slug", Type: "text", Indexed: true},
+						{Name: "score", Type: "numeric(12,2)", Nullable: true},
+					},
+				}},
+			},
+		},
+	}
+}
+
+func schemaPlanContainsTable(plans []store.SchemaTableDDL, tableName string) bool {
+	for _, plan := range plans {
+		if strings.EqualFold(strings.TrimSpace(plan.TableName), tableName) {
+			return true
+		}
+	}
+	return false
+}
+
+func sqliteMainTestTableExists(t *testing.T, db *sql.DB, tableName string) bool {
+	t.Helper()
+	var name string
+	err := db.QueryRowContext(context.Background(), `
+		SELECT name
+		FROM sqlite_master
+		WHERE type='table' AND name=?
+	`, tableName).Scan(&name)
+	if err == sql.ErrNoRows {
+		return false
+	}
+	if err != nil {
+		t.Fatalf("check sqlite table %s: %v", tableName, err)
+	}
+	return strings.TrimSpace(name) != ""
+}
+
+func postgresMainTestTableExists(t *testing.T, db *sql.DB, tableName string) bool {
+	t.Helper()
+	var exists bool
+	if err := db.QueryRowContext(context.Background(), `SELECT to_regclass($1)::text IS NOT NULL`, "public."+tableName).Scan(&exists); err != nil {
+		t.Fatalf("check postgres table %s: %v", tableName, err)
+	}
+	return exists
 }
 
 func TestWaitForServeHealthEndpointsProvesHealthAndReadyRoutes(t *testing.T) {
