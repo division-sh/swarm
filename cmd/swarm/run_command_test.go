@@ -63,6 +63,9 @@ func TestRunCommandLocalForegroundConsumesServeOwnerAndV1API(t *testing.T) {
 		if serveOpts.ConfigPath != configPath || serveOpts.Backend != "claude_cli" || serveOpts.ContractsPath != filepath.Join(repo, "contracts") || serveOpts.DataSource != "reference-data" || serveOpts.PlatformSpecPath != filepath.Join(repo, "platform.yaml") {
 			t.Errorf("serve opts = %#v", serveOpts)
 		}
+		if serveOpts.Verbose {
+			t.Errorf("local run serve opts Verbose = true, want default non-verbose schema summary owner")
+		}
 		<-ctx.Done()
 		close(serveCanceled)
 		return 0
@@ -144,6 +147,9 @@ func TestStartLocalRunServeConsumesContractPathConfigResolver(t *testing.T) {
 	}
 	if serveOpts.DataSource != "" {
 		t.Fatalf("data source = %q, want unset so serve resolver owns default selection", serveOpts.DataSource)
+	}
+	if serveOpts.Verbose {
+		t.Fatalf("serve verbose = true, want local run default to consume non-verbose serve boot owner")
 	}
 }
 

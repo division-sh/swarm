@@ -84,7 +84,9 @@ func newRuntimeProjectSupervisor(
 		validateSource: func(ctx context.Context, source semanticview.Source) error {
 			return verifyBundle(ctx, source)
 		},
-		initStateStores: initializeStateStores,
+		initStateStores: func(ctx context.Context, stores storeBundle, bundle *runtimecontracts.WorkflowContractBundle) (string, error) {
+			return initializeStateStores(ctx, stores, bundle, false)
+		},
 		newWorkspaces: func(stores storeBundle, contractsRoot string, source semanticview.Source, mountSources workspaceMountSources) (workspace.Lifecycle, error) {
 			return configuredWorkspaceLifecycleForBackend(stores.SQLDB, contractsRoot, source, mountSources, workspaceBackend)
 		},

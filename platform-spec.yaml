@@ -9333,6 +9333,11 @@ cli_specification:
           By default `swarm serve` remains quiet except for readiness and errors. With `--verbose` or `-v`, serve prints
           the numbered boot-progress sequence to stdout as the canonical serve/runtime boot phases complete. The CLI
           owns stdout rendering; runtime owns the boot-progress facts and the persisted `platform.boot` payload.
+        schema_inventory_detail: >
+          Default serve and local foreground run process logs may report concise generated state-store schema counts
+          such as `tables=N` and `columns=M`, but MUST NOT dump per-table `table(column_count)` inventory details.
+          Per-table generated schema inventory is diagnostic boot detail owned by the explicit serve verbose channel
+          (`swarm serve --verbose/-v`, and `--dev` through its verbose composition).
         boot_progress_sequence:
           total_steps: 22
           steps:

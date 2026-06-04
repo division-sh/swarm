@@ -510,7 +510,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 	stateStoreSummary := strings.TrimSpace(req.StateStoreSummary)
 	if stateStoreSummary == "" {
 		var err error
-		stateStoreSummary, err = initializeStateStores(req.Ctx, req.Stores, loaded.bundle)
+		stateStoreSummary, err = initializeStateStores(req.Ctx, req.Stores, loaded.bundle, req.Options.Verbose)
 		if err != nil {
 			return serveRuntimeBundleContext{}, err
 		}
@@ -672,7 +672,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 			log.Printf("resolve pre-catalog platform spec: %v", err)
 			return 1
 		}
-		if _, err := initializeServePlatformStateStores(ctx, stores, preCatalogPlatformSpecPath); err != nil {
+		if _, err := initializeServePlatformStateStores(ctx, stores, preCatalogPlatformSpecPath, opts.Verbose); err != nil {
 			reporter.emit(4, "bundle_load", "FAILED", err.Error())
 			log.Printf("initialize platform state stores: %v", err)
 			return 1
@@ -703,7 +703,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	reporter.emit(4, "bundle_load", "ok", serveBootBundleLoadDetail(serveRuntimeBundleIdentitiesDetail(loadedBundles), source))
 	stateStoreSummaries := make([]string, len(loadedBundles))
 	if stores.SchemaBootstrapper != nil {
-		summaries, err := initializeLoadedServeRuntimeStateStores(ctx, stores, loadedBundles)
+		summaries, err := initializeLoadedServeRuntimeStateStores(ctx, stores, loadedBundles, opts.Verbose)
 		if err != nil {
 			slog.Error("initialize state stores", "error", err)
 			return 1
@@ -2599,7 +2599,7 @@ func uniqueTrimmedServeBundleHashes(values []string) []string {
 	return out
 }
 
-func initializeStateStores(ctx context.Context, stores storeBundle, bundle *runtimecontracts.WorkflowContractBundle) (string, error) {
+func initializeStateStores(ctx context.Context, stores storeBundle, bundle *runtimecontracts.WorkflowContractBundle, verbose bool) (string, error) {
 	if stores.SchemaBootstrapper == nil || bundle == nil {
 		return "store wiring ready", nil
 	}
@@ -2620,10 +2620,10 @@ func initializeStateStores(ctx context.Context, stores storeBundle, bundle *runt
 	if err := ensureServeSchemaTables(ctx, stores, plans); err != nil {
 		return "", err
 	}
-	return summarizeServeSchemaPlans(plans), nil
+	return summarizeServeSchemaPlans(plans, verbose), nil
 }
 
-func initializeServePlatformStateStores(ctx context.Context, stores storeBundle, platformSpecPath string) (string, error) {
+func initializeServePlatformStateStores(ctx context.Context, stores storeBundle, platformSpecPath string, verbose bool) (string, error) {
 	if stores.SchemaBootstrapper == nil {
 		return "store wiring ready", nil
 	}
@@ -2638,13 +2638,13 @@ func initializeServePlatformStateStores(ctx context.Context, stores storeBundle,
 	if err := ensureServeSchemaTables(ctx, stores, plans); err != nil {
 		return "", err
 	}
-	return summarizeServeSchemaPlans(plans), nil
+	return summarizeServeSchemaPlans(plans, verbose), nil
 }
 
-func initializeLoadedServeRuntimeStateStores(ctx context.Context, stores storeBundle, loaded []serveRuntimeBundle) ([]string, error) {
+func initializeLoadedServeRuntimeStateStores(ctx context.Context, stores storeBundle, loaded []serveRuntimeBundle, verbose bool) ([]string, error) {
 	summaries := make([]string, len(loaded))
 	for i, bundle := range loaded {
-		summary, err := initializeStateStores(ctx, stores, bundle.bundle)
+		summary, err := initializeStateStores(ctx, stores, bundle.bundle, verbose)
 		if err != nil {
 			return nil, fmt.Errorf("bundle %s state stores: %w", bundle.serveIdentityDetail(), err)
 		}
@@ -2692,7 +2692,19 @@ func loadServePlatformSpecDocument(platformSpecPath string) (runtimecontracts.Pl
 	return spec, nil
 }
 
-func summarizeServeSchemaPlans(plans []store.SchemaTableDDL) string {
+type serveSchemaPlanSummary struct {
+	tableCount  int
+	columnCount int
+	detail      string
+}
+
+func summarizeServeSchemaPlans(plans []store.SchemaTableDDL, verbose bool) string {
+	summary := newServeSchemaPlanSummary(plans)
+	slog.Info("swarm boot state stores", "tables", summary.tableCount, "columns", summary.columnCount)
+	return summary.text(verbose)
+}
+
+func newServeSchemaPlanSummary(plans []store.SchemaTableDDL) serveSchemaPlanSummary {
 	tableNames := make([]string, 0, len(plans))
 	totalColumns := 0
 	for _, plan := range plans {
@@ -2700,11 +2712,22 @@ func summarizeServeSchemaPlans(plans []store.SchemaTableDDL) string {
 		totalColumns += plan.ColumnCount
 	}
 	sort.Strings(tableNames)
-	slog.Info("swarm boot state stores", "tables", len(plans), "columns", totalColumns, "detail", strings.Join(tableNames, ", "))
-	if len(tableNames) == 0 {
+	return serveSchemaPlanSummary{
+		tableCount:  len(plans),
+		columnCount: totalColumns,
+		detail:      strings.Join(tableNames, ", "),
+	}
+}
+
+func (summary serveSchemaPlanSummary) text(verbose bool) string {
+	if summary.tableCount == 0 {
 		return "verified 0 generated tables"
 	}
-	return fmt.Sprintf("verified %d generated tables (%s)", len(plans), strings.Join(tableNames, ", "))
+	base := fmt.Sprintf("verified %d generated tables", summary.tableCount)
+	if verbose && strings.TrimSpace(summary.detail) != "" {
+		return fmt.Sprintf("%s (%s)", base, summary.detail)
+	}
+	return base
 }
 
 func serveStateStoreSummaryAt(summaries []string, index int) string {
