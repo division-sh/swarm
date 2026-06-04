@@ -516,7 +516,8 @@ func routedNodeInternalSubscriptionAliases(evt events.Event, routed []Subscriber
 		}
 		eventType := routedNodeConcreteEventKey(evt, subscriber)
 		instancePath := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
-		if instancePath == "" || !strings.HasPrefix(eventType, instancePath+"/") {
+		flowInstance := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/")
+		if instancePath == "" || instancePath != flowInstance || !strings.HasPrefix(eventType, instancePath+"/") {
 			continue
 		}
 		localEvent := strings.TrimPrefix(eventType, instancePath+"/")
