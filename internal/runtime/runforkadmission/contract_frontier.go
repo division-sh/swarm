@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -197,7 +196,7 @@ func runForkFrontierEvents(pending []store.RunForkPendingWork) ([]store.RunForkC
 
 func installContractFrontierFlowInstanceRoutes(routeTable *runtimebus.RouteTable, source semanticview.Source, pending []store.RunForkPendingWork) error {
 	for _, route := range contractFrontierFlowInstanceRoutes(source, pending) {
-		if err := routeTable.AddFlowInstanceRoute(runtimecontracts.SystemNodeContract{}, route); err != nil {
+		if err := routeTable.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: route}); err != nil {
 			return fmt.Errorf("derive selected-contract flow-instance route %s: %w", route.InstancePath, err)
 		}
 	}

@@ -2446,7 +2446,7 @@ func TestEventBusPublish_RecordsNestedTemplateInstanceLocalizedEvent(t *testing.
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.AddFlowInstanceRoute(runtimecontracts.SystemNodeContract{}, runtimeflowidentity.DeriveRoute("child/grandchild", "inst-1")); err != nil {
+	if err := eb.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("child/grandchild", "inst-1")}); err != nil {
 		t.Fatalf("AddFlowInstance: %v", err)
 	}
 	eb.Subscribe("worker-inst-1")

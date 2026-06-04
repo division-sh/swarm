@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -224,7 +223,7 @@ func (eb *EventBus) RouteTable() *RouteTable {
 	return eb.routeTable
 }
 
-func (eb *EventBus) AddFlowInstanceRoute(template runtimecontracts.SystemNodeContract, identity runtimeflowidentity.Route) error {
+func (eb *EventBus) AddFlowInstanceRoute(req FlowInstanceRouteMaterializationRequest) error {
 	if eb == nil {
 		return errors.New("event bus is required")
 	}
@@ -234,14 +233,15 @@ func (eb *EventBus) AddFlowInstanceRoute(template runtimecontracts.SystemNodeCon
 	if table == nil {
 		return errors.New("route table is not initialized")
 	}
-	if err := table.AddFlowInstanceRoute(template, identity); err != nil {
+	req = req.Normalized()
+	if err := table.AddFlowInstanceRoute(req); err != nil {
 		return err
 	}
 	persister, ok := eb.store.(FlowInstanceRoutePersistence)
 	if !ok {
 		return nil
 	}
-	routes := table.MaterializedRoutes(identity)
+	routes := table.MaterializedRoutes(req.Identity)
 	if len(routes) == 0 {
 		return nil
 	}

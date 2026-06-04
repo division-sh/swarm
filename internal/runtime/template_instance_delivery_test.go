@@ -53,7 +53,7 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScope
 	case <-time.After(2 * time.Second):
 		t.Fatal("workflow runtime did not subscribe")
 	}
-	if err := bus.AddFlowInstanceRoute(runtimecontracts.SystemNodeContract{}, runtimeflowidentity.DeriveRoute("operating", "inst-1")); err != nil {
+	if err := bus.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("operating", "inst-1")}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 	eventID := "99999999-9999-4999-8999-999999999902"
@@ -173,6 +173,74 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 		WHERE event_name = 'operating/component_scaffold.spawn_requested'
 	`, nil)
 	assertRuntimeEventPayloadProductOnly(t, ctx, db, componentEventID)
+}
+
+func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliveryRows(t *testing.T) {
+	bundle := loadRuntimeTempBundle(t, templateInstanceActivationConfigSubscriberFixtureFiles())
+	source := semanticview.Wrap(bundle)
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	ctx := seedRuntimeTestRun(t, db)
+	pg := &store.PostgresStore{DB: db}
+	proofStore := routeMaterializationDBProofStore{pg: pg}
+	bus, err := runtimebus.NewEventBusWithOptions(proofStore, runtimebus.EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+	manager := runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+		WorkflowInstances: workflowStore,
+	})
+	module := newRuntimeTestWorkflowModule(t, source)
+	pc := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+		Module:            module,
+		InstanceActivator: manager.ActivateFlowInstance,
+		WorkflowStore:     workflowStore,
+		EventReceiptsCapability: func(context.Context) (bool, error) {
+			return true, nil
+		},
+	})
+	bus.SetInterceptors(pc)
+
+	spinup := (events.Event{
+		ID:        "99999999-9999-4999-8999-999999999930",
+		RunID:     templateInstanceDeliveryRunID,
+		Type:      events.EventType("opco.spinup_requested"),
+		Payload:   []byte(`{"entity_id":"22222222-2222-4222-8222-222222222222","instance_id":"11111111-1111-4111-8111-111111111111","product_id":"product-1"}`),
+		CreatedAt: time.Now().UTC(),
+	}).WithEntityID("22222222-2222-4222-8222-222222222222")
+	if err := bus.Publish(ctx, spinup); err != nil {
+		t.Fatalf("Publish spinup: %v", err)
+	}
+	autoEventID := waitRuntimeEventID(t, ctx, db, `
+		SELECT event_id::text FROM events
+		WHERE event_name = 'operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested'
+	`, nil)
+
+	renderedAgentID := "ceo-product-1"
+	waitRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM routing_rules
+		WHERE flow_instance = 'operating/11111111-1111-4111-8111-111111111111'
+		  AND subscriber_type = 'agent'
+		  AND subscriber_id = $1
+		  AND status = 'active'
+	`, 1, renderedAgentID)
+	assertRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM routing_rules
+		WHERE flow_instance = 'operating/11111111-1111-4111-8111-111111111111'
+		  AND subscriber_id = 'ceo-{product_id}'
+	`, 0)
+	waitRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM event_deliveries
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'agent'
+		  AND subscriber_id = $2
+	`, 1, autoEventID, renderedAgentID)
+	assertRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM event_deliveries
+		WHERE event_id = $1::uuid
+		  AND subscriber_id = 'ceo-{product_id}'
+	`, 0, autoEventID)
 }
 
 func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeWithoutInternalCarrierAndEmpireStyleSideEffect(t *testing.T) {
@@ -534,6 +602,83 @@ component_scaffold.spawn_requested:
           product_id: payload.product_id
 `,
 	}
+}
+
+func templateInstanceActivationConfigSubscriberFixtureFiles() map[string]string {
+	return map[string]string{
+		"package.yaml": `name: test
+version: 1.0.0
+flows:
+  - id: operating
+    flow: operating
+    mode: template
+`,
+		"events.yaml": `opco.spinup_requested:
+  entity_id: string
+  instance_id: string
+  product_id: string
+`,
+		"nodes.yaml": `portfolio-node:
+  id: portfolio-node
+  execution_type: system_node
+  subscribes_to: [opco.spinup_requested]
+  event_handlers:
+    opco.spinup_requested:
+      action: create_flow_instance
+      template: operating
+      instance_id_from: payload.instance_id
+      config_from:
+        product_id: payload.product_id
+`,
+		"flows/operating/schema.yaml": `name: operating
+initial_state: initializing
+terminal_states: [ready]
+states: [initializing, ready]
+auto_emit_on_create:
+  event: opco.product_initialization_requested
+`,
+		"flows/operating/events.yaml": `opco.product_initialization_requested:
+  instance_id: string
+  template_id: string
+  flow_path: string
+  parent_entity_id: string
+  product_id: string
+`,
+		"flows/operating/agents.yaml": `ceo:
+  id: ceo-{product_id}
+  type: generic
+  role: ceo
+  subscriptions: [opco.product_initialization_requested]
+`,
+	}
+}
+
+type routeMaterializationDBProofStore struct {
+	pg *store.PostgresStore
+}
+
+func (s routeMaterializationDBProofStore) AppendEvent(ctx context.Context, evt events.Event) error {
+	return s.pg.AppendEvent(ctx, evt)
+}
+
+func (s routeMaterializationDBProofStore) InsertEventDeliveries(ctx context.Context, eventID string, agentIDs []string) error {
+	return s.pg.InsertEventDeliveries(ctx, eventID, agentIDs)
+}
+
+func (s routeMaterializationDBProofStore) ListEventDeliveryRecipients(ctx context.Context, eventID string) ([]string, error) {
+	return s.pg.ListEventDeliveryRecipients(ctx, eventID)
+}
+
+func (s routeMaterializationDBProofStore) UpsertFlowInstanceRoute(ctx context.Context, route runtimebus.FlowInstanceRouteRecord) error {
+	return s.pg.UpsertFlowInstanceRoute(ctx, route)
+}
+
+func (s routeMaterializationDBProofStore) DeleteFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.Route) error {
+	return s.pg.DeleteFlowInstanceRoute(ctx, identity)
+}
+
+func (s routeMaterializationDBProofStore) ListFlowInstanceRoutes(ctx context.Context) ([]runtimeflowidentity.Route, error) {
+	return s.pg.ListFlowInstanceRoutes(ctx)
 }
 
 func templateInstanceEmpireOutboxFixtureFiles() map[string]string {

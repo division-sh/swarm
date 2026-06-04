@@ -13,7 +13,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
@@ -24,6 +23,7 @@ type recoveryTestBus struct {
 	storedRoutes            []runtimebus.FlowInstanceRouteRecord
 	selectedRouteRecoveries []SelectedContractRouteRecoveryRecord
 	restored                []string
+	restoredRequests        []runtimebus.FlowInstanceRouteMaterializationRequest
 	replayable              []events.PersistedReplayEvent
 	deliveries              map[string][]string
 	runtimeLogs             []runtimepipeline.RuntimeLogEntry
@@ -73,8 +73,11 @@ func (b *recoveryTestBus) ListFlowInstanceRoutes(context.Context) ([]runtimeflow
 func (b *recoveryTestBus) ListSelectedContractRouteRecoveryRecords(context.Context) ([]SelectedContractRouteRecoveryRecord, error) {
 	return append([]SelectedContractRouteRecoveryRecord(nil), b.selectedRouteRecoveries...), nil
 }
-func (b *recoveryTestBus) AddFlowInstanceRoute(_ runtimecontracts.SystemNodeContract, identity runtimeflowidentity.Route) error {
+func (b *recoveryTestBus) AddFlowInstanceRoute(req runtimebus.FlowInstanceRouteMaterializationRequest) error {
+	req = req.Normalized()
+	identity := req.Identity
 	b.restored = append(b.restored, identity.InstancePath)
+	b.restoredRequests = append(b.restoredRequests, req)
 	return nil
 }
 
@@ -152,15 +155,35 @@ func TestRecoverRestoresPersistedFlowInstanceRoutes(t *testing.T) {
 			StartedAt: time.Now().UTC(),
 		}},
 	}
-	am := NewAgentManager(bus, func(cfg models.AgentConfig) (Agent, error) {
+	workflowInstances := &flowActivationTestInstanceStore{
+		byStorageRef: map[string]runtimepipeline.WorkflowInstance{
+			"review/inst-1": {
+				InstanceID:   "inst-1",
+				StorageRef:   "review/inst-1",
+				WorkflowName: "review",
+				Config: map[string]any{
+					"vertical_id": "11111111-1111-4111-8111-111111111111",
+				},
+				Metadata: map[string]any{
+					"entity_id":   "ent-1",
+					"flow_path":   "review/inst-1",
+					"instance_id": "inst-1",
+				},
+			},
+		},
+	}
+	am := NewAgentManagerWithOptions(bus, func(cfg models.AgentConfig) (Agent, error) {
 		return recoveryTestAgent{id: cfg.ID}, nil
-	}, store)
+	}, AgentManagerOptions{WorkflowInstances: workflowInstances}, store)
 
 	if err := am.Recover(context.Background()); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
 	if len(bus.restored) != 1 || bus.restored[0] != "review/inst-1" {
 		t.Fatalf("restored routes = %#v, want [review/inst-1]", bus.restored)
+	}
+	if got := bus.restoredRequests[0].ActivationVariables["vertical_id"]; got != "11111111-1111-4111-8111-111111111111" {
+		t.Fatalf("restored activation variable vertical_id = %q, want persisted config value", got)
 	}
 }
 
