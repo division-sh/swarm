@@ -108,6 +108,94 @@ func (l targetRouteMemoryLease) Release(context.Context) error {
 	return nil
 }
 
+type materializedRoutePersistedBeforeInterceptor struct {
+	t       *testing.T
+	store   *targetRouteMemoryStore
+	eventID string
+	want    events.DeliveryRoute
+}
+
+func (i materializedRoutePersistedBeforeInterceptor) Intercept(ctx context.Context, evt events.Event) (bool, []events.Event, error) {
+	i.t.Helper()
+	if evt.ID != i.eventID {
+		i.t.Fatalf("interceptor event_id = %q, want %q", evt.ID, i.eventID)
+	}
+	routes, err := i.store.ListEventDeliveryRoutes(ctx, i.eventID)
+	if err != nil {
+		i.t.Fatalf("ListEventDeliveryRoutes: %v", err)
+	}
+	if !deliveryRoutesContain(routes, i.want) {
+		i.t.Fatalf("persisted routes before interceptor = %#v, want %#v", routes, i.want)
+	}
+	return true, nil, nil
+}
+
+func TestEventBusRecipientPlanMaterializerPersistsRoutesBeforeInterceptors(t *testing.T) {
+	store := newTargetRouteMemoryStore()
+	eventID := uuid.NewString()
+	want := events.DeliveryRoute{
+		SubscriberType: "node",
+		SubscriberID:   "target-node",
+		Target: events.RouteIdentity{
+			FlowInstance: "review/inst-1",
+		},
+	}
+	guardSawMaterializedRoute := false
+	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+		RecipientPlanMaterializer: func(ctx context.Context, evt events.Event, plan PublishRecipientPlan) ([]events.DeliveryRoute, error) {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			if evt.ID != eventID {
+				t.Fatalf("materializer event_id = %q, want %q", evt.ID, eventID)
+			}
+			if len(plan.DeliveryRoutes) != 0 {
+				t.Fatalf("pre-materialized delivery routes = %#v, want none", plan.DeliveryRoutes)
+			}
+			return []events.DeliveryRoute{want}, nil
+		},
+		RecipientPlanGuard: func(ctx context.Context, evt events.Event, plan PublishRecipientPlan) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if !deliveryRoutesContain(plan.DeliveryRoutes, want) {
+				t.Fatalf("guard delivery routes = %#v, want materialized %#v", plan.DeliveryRoutes, want)
+			}
+			guardSawMaterializedRoute = true
+			return nil
+		},
+		Interceptors: []EventInterceptor{materializedRoutePersistedBeforeInterceptor{
+			t:       t,
+			store:   store,
+			eventID: eventID,
+			want:    want,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	if err := eb.Publish(context.Background(), events.Event{
+		ID:        eventID,
+		Type:      events.EventType("review/inst-1/task.started"),
+		CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if !guardSawMaterializedRoute {
+		t.Fatal("recipient plan guard did not see materialized route")
+	}
+}
+
+func deliveryRoutesContain(routes []events.DeliveryRoute, want events.DeliveryRoute) bool {
+	want = want.Normalized()
+	for _, got := range events.NormalizeDeliveryRoutes(routes) {
+		if got == want {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *targetRouteMemoryStore) LoadCommittedReplayScope(_ context.Context, eventID string) (replayclaim.CommittedReplayScope, error) {
 	scope := s.scopes[eventID]
 	if scope == "" {

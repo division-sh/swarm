@@ -43,6 +43,7 @@ type EventBus struct {
 	semanticSource              semanticview.Source
 	payloadValidator            PayloadValidator
 	recipientPlanAdmissionGuard PublishRecipientPlanAdmissionGuard
+	recipientPlanMaterializer   PublishRecipientPlanMaterializer
 	recipientPlanGuard          PublishRecipientPlanGuard
 	runtimeIngressDispatchGate  RuntimeIngressDispatchGate
 	runDispatchGate             RunDispatchGate
@@ -69,6 +70,7 @@ type DirectRecipientStatus struct {
 }
 
 type PublishRecipientPlanAdmissionGuard func(context.Context, events.Event) error
+type PublishRecipientPlanMaterializer func(context.Context, events.Event, PublishRecipientPlan) ([]events.DeliveryRoute, error)
 type PublishRecipientPlanGuard func(context.Context, events.Event, PublishRecipientPlan) error
 
 type RuntimeIngressDispatchGate interface {
@@ -87,6 +89,7 @@ type EventBusOptions struct {
 	RouteTable                  *RouteTable
 	PayloadValidator            PayloadValidator
 	RecipientPlanAdmissionGuard PublishRecipientPlanAdmissionGuard
+	RecipientPlanMaterializer   PublishRecipientPlanMaterializer
 	RecipientPlanGuard          PublishRecipientPlanGuard
 	RuntimeIngressDispatchGate  RuntimeIngressDispatchGate
 	RunDispatchGate             RunDispatchGate
@@ -158,6 +161,7 @@ func NewEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 		semanticSource:              semanticSource,
 		payloadValidator:            opts.PayloadValidator,
 		recipientPlanAdmissionGuard: opts.RecipientPlanAdmissionGuard,
+		recipientPlanMaterializer:   opts.RecipientPlanMaterializer,
 		recipientPlanGuard:          opts.RecipientPlanGuard,
 		runtimeIngressDispatchGate:  opts.RuntimeIngressDispatchGate,
 		runDispatchGate:             opts.RunDispatchGate,
