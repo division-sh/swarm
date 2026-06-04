@@ -6790,17 +6790,23 @@ closer:
 Use save_entity_field for `+"`business_brief`"+`.
 `)
 
-	var buf bytes.Buffer
-	code := runVerifyCommandWithContractsForTest(context.Background(), repoRoot(), root, &buf)
+	var stdout, stderr bytes.Buffer
+	code := runVerifyCommandWithContractsOutputForTest(context.Background(), repoRoot(), root, &stdout, &stderr)
 	if code == 0 {
-		t.Fatalf("expected non-zero exit code, output = %q", buf.String())
+		t.Fatalf("expected non-zero exit code, stdout = %q stderr = %q", stdout.String(), stderr.String())
 	}
-	out := buf.String()
-	if !strings.Contains(out, "entity_writer_coverage") {
-		t.Fatalf("verify output missing entity_writer_coverage:\n%s", out)
+	if strings.TrimSpace(stdout.String()) != "" {
+		t.Fatalf("verify stdout = %q, want empty for hard invalidity", stdout.String())
 	}
-	if !strings.Contains(out, "business_brief") {
-		t.Fatalf("verify output missing offending field:\n%s", out)
+	errText := stderr.String()
+	for _, want := range []string{
+		"verify failed: boot verification failed:",
+		"ERROR: entity_writer_coverage",
+		"business_brief",
+	} {
+		if !strings.Contains(errText, want) {
+			t.Fatalf("verify stderr missing %q:\n%s", want, errText)
+		}
 	}
 }
 
