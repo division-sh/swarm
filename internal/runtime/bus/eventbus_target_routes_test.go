@@ -669,6 +669,143 @@ func TestEventBusCheckPublishRecipientPlan_SemanticScopeFlowInstanceMaterializes
 	}
 }
 
+func TestRouteTableRootInputFlowNodeResolvesRootInputRoute(t *testing.T) {
+	rt, err := DeriveRouteTable(semanticview.Wrap(routedRootInputFlowNodeBundle()))
+	if err != nil {
+		t.Fatalf("DeriveRouteTable: %v", err)
+	}
+	got := rt.Resolve("thing.created")
+	if len(got) != 1 {
+		t.Fatalf("Resolve(thing.created) = %#v, want one root-input flow node route", got)
+	}
+	if got[0].ID != "entity-writer" || got[0].Type != "node" || got[0].Path != "validation" {
+		t.Fatalf("resolved subscriber = %#v, want validation/entity-writer node", got[0])
+	}
+	if got[0].MatchPattern != "thing.created" || got[0].RouteSource != "root_input_flow" {
+		t.Fatalf("resolved subscriber metadata = %#v, want root_input_flow thing.created", got[0])
+	}
+}
+
+func TestEventBusPublish_RootInputFlowNodePersistsRouteBeforeDispatch(t *testing.T) {
+	store := newTargetRouteMemoryStore()
+	eventID := uuid.NewString()
+	want := events.DeliveryRoute{
+		SubscriberType: "node",
+		SubscriberID:   "entity-writer",
+	}
+	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+		ContractBundle: semanticview.Wrap(routedRootInputFlowNodeBundle()),
+		Interceptors: []EventInterceptor{materializedRoutePersistedBeforeInterceptor{
+			t:       t,
+			store:   store,
+			eventID: eventID,
+			want:    want,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	ch := eb.SubscribeInternal("workflow-runtime", events.EventType("thing.created"))
+	evt := (events.Event{
+		ID:        eventID,
+		Type:      events.EventType("thing.created"),
+		Payload:   []byte(`{}`),
+		CreatedAt: time.Now().UTC(),
+	}).WithEntityID("ent-root-input")
+
+	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("CheckPublishRecipientPlan: %v", err)
+	}
+	if len(plan.PersistedRecipients) != 0 {
+		t.Fatalf("persisted recipients = %#v, want none for internal root-input node carrier", plan.PersistedRecipients)
+	}
+	if got := plan.DeliveryRoutes; len(got) != 1 || got[0].SubscriberType != "node" || got[0].SubscriberID != "entity-writer" || !got[0].Target.Empty() {
+		t.Fatalf("delivery routes = %#v, want empty-target node/entity-writer route", got)
+	}
+	if len(plan.RoutedRecipients) != 1 || plan.RoutedRecipients[0].ID != "entity-writer" || plan.RoutedRecipients[0].Path != "validation" || plan.RoutedRecipients[0].RouteSource != "root_input_flow" {
+		t.Fatalf("routed recipients = %#v, want root-input validation/entity-writer", plan.RoutedRecipients)
+	}
+
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	got := requireBusEvent(t, ch, "root-input flow-node carrier delivery")
+	if got.FlowInstance() != "" || got.EntityID() != "ent-root-input" {
+		t.Fatalf("delivered root input identity flow=%q entity=%q, want root ent-root-input", got.FlowInstance(), got.EntityID())
+	}
+	routes := store.routes[evt.ID]
+	if !deliveryRoutesContain(routes, want) {
+		t.Fatalf("persisted delivery routes = %#v, want %#v", routes, want)
+	}
+	if got := store.scopes[evt.ID]; got != replayclaim.CommittedReplayScopeSubscribed {
+		t.Fatalf("committed replay scope = %q, want subscribed", got)
+	}
+}
+
+func TestEventBusPublish_LoadedRootInputProjectEventPersistsRouteBeforeDispatch(t *testing.T) {
+	store := newTargetRouteMemoryStore()
+	eventID := uuid.NewString()
+	want := events.DeliveryRoute{
+		SubscriberType: "node",
+		SubscriberID:   "entity-writer",
+	}
+	source := semanticview.Wrap(loadTargetRouteTempBundle(t, routedRootInputProjectEventFixtureFiles()))
+	rt, err := DeriveRouteTable(source)
+	if err != nil {
+		t.Fatalf("DeriveRouteTable: %v", err)
+	}
+	resolved := rt.Resolve("thing.created")
+	if len(resolved) != 1 || resolved[0].ID != "entity-writer" || resolved[0].Path != "validation" || resolved[0].RouteSource != "root_input_flow" {
+		t.Fatalf("resolved subscribers = %#v, want root_input_flow validation/entity-writer", resolved)
+	}
+
+	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+		ContractBundle: source,
+		Interceptors: []EventInterceptor{materializedRoutePersistedBeforeInterceptor{
+			t:       t,
+			store:   store,
+			eventID: eventID,
+			want:    want,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	ch := eb.SubscribeInternal("workflow-runtime", events.EventType("thing.created"))
+	evt := (events.Event{
+		ID:        eventID,
+		Type:      events.EventType("thing.created"),
+		Payload:   []byte(`{}`),
+		CreatedAt: time.Now().UTC(),
+	}).WithEntityID("ent-loaded-root-input")
+
+	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("CheckPublishRecipientPlan: %v", err)
+	}
+	if len(plan.PersistedRecipients) != 0 {
+		t.Fatalf("persisted recipients = %#v, want none for internal root-input node carrier", plan.PersistedRecipients)
+	}
+	if len(plan.RoutedRecipients) != 1 || plan.RoutedRecipients[0].ID != "entity-writer" || plan.RoutedRecipients[0].Path != "validation" || plan.RoutedRecipients[0].RouteSource != "root_input_flow" {
+		t.Fatalf("routed recipients = %#v, want loaded root-input validation/entity-writer", plan.RoutedRecipients)
+	}
+	if got := plan.DeliveryRoutes; len(got) != 1 || !deliveryRoutesContain(got, want) {
+		t.Fatalf("delivery routes = %#v, want empty-target node/entity-writer route", got)
+	}
+
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	got := requireBusEvent(t, ch, "loaded root-input flow-node carrier delivery")
+	if got.FlowInstance() != "" || got.EntityID() != "ent-loaded-root-input" {
+		t.Fatalf("delivered root input identity flow=%q entity=%q, want root ent-loaded-root-input", got.FlowInstance(), got.EntityID())
+	}
+	if routes := store.routes[evt.ID]; !deliveryRoutesContain(routes, want) {
+		t.Fatalf("persisted delivery routes = %#v, want %#v", routes, want)
+	}
+}
+
 func TestEventBusPublish_NoTargetRootRoutedNodeUsesSemanticNodeDeliveryRoute(t *testing.T) {
 	store := newTargetRouteMemoryStore()
 	source := semanticview.Wrap(loadTargetRouteTempBundle(t, routedRootNodeFixtureFiles()))
@@ -833,6 +970,95 @@ version: 1.0.0
   event_handlers:
     opco.spinup_requested: {}
 `,
+	}
+}
+
+func routedRootInputProjectEventFixtureFiles() map[string]string {
+	return map[string]string{
+		"package.yaml": `name: test-root-input-project-event
+version: 1.0.0
+platform_version: ">=1.0.0"
+flows:
+  - id: validation
+    flow: validation
+    mode: static
+`,
+		"schema.yaml": `name: test-root-input-project-event
+pins:
+  inputs:
+    events: [thing.created]
+  outputs:
+    events: []
+`,
+		"events.yaml": `thing.created:
+  entity_id: string
+`,
+		"flows/validation/schema.yaml": `name: validation
+mode: static
+initial_state: ready
+terminal_states: [done]
+states: [ready, done]
+pins:
+  inputs:
+    events: [thing.created]
+  outputs:
+    events: []
+`,
+		"flows/validation/nodes.yaml": `entity-writer:
+  id: entity-writer
+  execution_type: system_node
+  subscribes_to: [thing.created]
+  event_handlers:
+    thing.created: {}
+`,
+	}
+}
+
+func routedRootInputFlowNodeBundle() *runtimecontracts.WorkflowContractBundle {
+	validation := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "validation", Flow: "validation"},
+		Path:  "validation",
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Mode: "static",
+			Pins: runtimecontracts.FlowPins{
+				Inputs: runtimecontracts.FlowInputPins{Events: []string{"thing.created"}},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"thing.created": {},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"entity-writer": {
+				ID:            "entity-writer",
+				ExecutionType: "system_node",
+				SubscribesTo:  []string{"thing.created"},
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"thing.created": {},
+				},
+			},
+		},
+	}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{validation}}
+	return &runtimecontracts.WorkflowContractBundle{
+		RootSchema: &runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{
+				Inputs: runtimecontracts.FlowInputPins{Events: []string{"thing.created"}},
+			},
+		},
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			FlowInputs: map[string][]string{
+				"validation": []string{"thing.created"},
+			},
+		},
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"validation": &root.Children[0],
+			},
+		},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
+			"validation": validation.Schema,
+		},
 	}
 }
 

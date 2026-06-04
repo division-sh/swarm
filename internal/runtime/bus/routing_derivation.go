@@ -24,6 +24,7 @@ type RouteTable struct {
 	mu                sync.RWMutex
 	source            semanticview.Source
 	routes            map[string][]Subscriber
+	rootInputRoutes   map[string][]Subscriber
 	patterns          []routePattern
 	eventPath         map[string]struct{}
 	templates         map[string]routeFlowTemplate
@@ -85,6 +86,7 @@ func DeriveRouteTable(source semanticview.Source) (*RouteTable, error) {
 		rt.addNodePatternsLocked(source, scope.ID, scope.InputEvents, flowPath, localEvents, scope.Nodes)
 	}
 
+	rt.addRootInputFlowNodeRoutesLocked(source)
 	rt.rebuildLocked()
 	return rt, nil
 }
@@ -100,6 +102,9 @@ func (rt *RouteTable) Resolve(eventType string) []Subscriber {
 	rt.mu.RLock()
 	defer rt.mu.RUnlock()
 	out := cloneSubscribers(rt.routes[eventType])
+	for _, subscriber := range rt.rootInputRoutes[eventType] {
+		out = appendUniqueRootInputSubscriber(out, subscriber)
+	}
 	if _, active := rt.eventPath[eventType]; !active {
 		return out
 	}
@@ -280,11 +285,66 @@ func newRouteTable(source semanticview.Source) *RouteTable {
 	return &RouteTable{
 		source:            source,
 		routes:            make(map[string][]Subscriber),
+		rootInputRoutes:   make(map[string][]Subscriber),
 		eventPath:         make(map[string]struct{}),
 		templates:         make(map[string]routeFlowTemplate),
 		instances:         make(map[string]struct{}),
 		instanceEventPath: make(map[string][]string),
 	}
+}
+
+func (rt *RouteTable) addRootInputFlowNodeRoutesLocked(source semanticview.Source) {
+	if rt == nil || source == nil {
+		return
+	}
+	rootInputs := routeRootInputEventSet(source)
+	if len(rootInputs) == 0 {
+		return
+	}
+	for _, scope := range source.FlowScopes() {
+		if strings.EqualFold(scope.Mode, "template") {
+			continue
+		}
+		flowID := strings.TrimSpace(scope.ID)
+		flowPath := strings.Trim(strings.TrimSpace(routeFlowPath(source, flowID)), "/")
+		if flowID == "" || flowPath == "" {
+			continue
+		}
+		for _, eventType := range sortedStringKeys(rootInputs) {
+			if !normalizedStringListContains(scope.InputEvents, eventType) {
+				continue
+			}
+			for _, key := range sortedStringKeys(scope.Nodes) {
+				entry := scope.Nodes[key]
+				nodeID := strings.TrimSpace(entry.ID)
+				if nodeID == "" {
+					nodeID = strings.TrimSpace(key)
+				}
+				if nodeID == "" || !normalizedStringListContains(source.NodeRuntimeSubscriptions(nodeID), eventType) {
+					continue
+				}
+				rt.rootInputRoutes[eventType] = appendUniqueSubscriber(rt.rootInputRoutes[eventType], Subscriber{
+					ID:           nodeID,
+					Type:         "node",
+					Path:         flowPath,
+					MatchPattern: eventType,
+					RouteSource:  "root_input_flow",
+				})
+			}
+		}
+	}
+}
+
+func routeRootInputEventSet(source semanticview.Source) map[string]struct{} {
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle == nil || bundle.RootSchema == nil {
+		return nil
+	}
+	out := make(map[string]struct{})
+	for _, eventType := range normalizeStringList(bundle.RootSchema.Pins.Inputs.Events) {
+		out[eventType] = struct{}{}
+	}
+	return out
 }
 
 func (rt *RouteTable) addEventPathsLocked(basePath string, localEvents map[string]struct{}) []string {
@@ -620,9 +680,35 @@ func routeRenderTemplate(raw string, vars map[string]string) string {
 	return strings.NewReplacer(replacements...).Replace(raw)
 }
 
+func normalizedStringListContains(values []string, needle string) bool {
+	needle = eventidentity.Normalize(needle)
+	if needle == "" {
+		return false
+	}
+	for _, value := range values {
+		if eventidentity.Normalize(value) == needle {
+			return true
+		}
+	}
+	return false
+}
+
 func appendUniqueSubscriber(in []Subscriber, subscriber Subscriber) []Subscriber {
 	for _, existing := range in {
 		if existing.ID == subscriber.ID && existing.Type == subscriber.Type && existing.Path == subscriber.Path {
+			return in
+		}
+	}
+	return append(in, subscriber)
+}
+
+func appendUniqueRootInputSubscriber(in []Subscriber, subscriber Subscriber) []Subscriber {
+	for idx, existing := range in {
+		if existing.ID == subscriber.ID && existing.Type == subscriber.Type && existing.Path == subscriber.Path {
+			if strings.TrimSpace(subscriber.RouteSource) == "root_input_flow" {
+				in[idx].MatchPattern = subscriber.MatchPattern
+				in[idx].RouteSource = subscriber.RouteSource
+			}
 			return in
 		}
 	}
