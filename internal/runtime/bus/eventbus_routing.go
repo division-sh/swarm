@@ -129,11 +129,15 @@ func filterRecipientsForExplicitAgentScope(evt events.Event, recipients []string
 }
 
 func (eb *EventBus) resolveRoutedSubscribers(eventType string) []Subscriber {
+	return eb.resolveRoutedSubscribersForEvent(events.Event{Type: events.EventType(eventType)})
+}
+
+func (eb *EventBus) resolveRoutedSubscribersForEvent(evt events.Event) []Subscriber {
 	if eb == nil {
 		return nil
 	}
-	eventType = strings.Trim(strings.TrimSpace(eventType), "/")
-	if eventType == "" {
+	eventKeys := routedEventKeysForPlan(evt)
+	if len(eventKeys) == 0 {
 		return nil
 	}
 	eb.mu.RLock()
@@ -141,13 +145,19 @@ func (eb *EventBus) resolveRoutedSubscribers(eventType string) []Subscriber {
 	eb.mu.RUnlock()
 	out := make([]Subscriber, 0, 8)
 	if table != nil {
-		out = append(out, table.Resolve(eventType)...)
+		for _, eventType := range eventKeys {
+			out = append(out, table.Resolve(eventType)...)
+		}
 	}
 	return dedupeSubscribers(out)
 }
 
 func (eb *EventBus) resolveRoutedRecipients(eventType string) []string {
-	subscribers := eb.resolveRoutedSubscribers(eventType)
+	return eb.resolveRoutedRecipientsForEvent(events.Event{Type: events.EventType(eventType)})
+}
+
+func (eb *EventBus) resolveRoutedRecipientsForEvent(evt events.Event) []string {
+	subscribers := eb.resolveRoutedSubscribersForEvent(evt)
 	if len(subscribers) == 0 {
 		return nil
 	}
@@ -348,7 +358,7 @@ func (eb *EventBus) snapshotRecipientChans(agentIDs []string) []agentRecipient {
 
 func (eb *EventBus) deliverByType(evt events.Event) {
 	recipients := uniqueStrings(append(
-		eb.resolveRoutedRecipients(string(evt.Type)),
+		eb.resolveRoutedRecipientsForEvent(evt),
 		eb.resolveSubscribedRecipients(string(evt.Type))...,
 	))
 	_ = eb.deliverToAgents(context.Background(), evt, recipients)

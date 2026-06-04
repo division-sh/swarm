@@ -11,7 +11,7 @@ import (
 
 func TestDeliveryRouteResolver_SeparatesRouteResolutionAndDiagnostics(t *testing.T) {
 	resolver := deliveryRouteResolver{
-		resolveRoutedSubscribers: func(string) []Subscriber {
+		resolveRoutedSubscribers: func(events.Event) []Subscriber {
 			return []Subscriber{{
 				ID:           "scan-orchestrator",
 				Type:         "node",
@@ -170,7 +170,7 @@ func TestDeliveryRecipientPolicy_TargetedEventFailsWhenTargetDoesNotSubscribe(t 
 func TestDeliveryPlanner_ComposesRoutingPolicyAndManifest(t *testing.T) {
 	planner := newDeliveryPlanner(
 		deliveryRouteResolver{
-			resolveRoutedSubscribers: func(string) []Subscriber {
+			resolveRoutedSubscribers: func(events.Event) []Subscriber {
 				return []Subscriber{{ID: "worker", Type: "node"}}
 			},
 			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
@@ -211,7 +211,7 @@ func TestDeliveryPlanner_ComposesRoutingPolicyAndManifest(t *testing.T) {
 func TestDeliveryPlanner_DoesNotDeadLetterTargetedWorkflowNodeSubscriber(t *testing.T) {
 	planner := newDeliveryPlanner(
 		deliveryRouteResolver{
-			resolveRoutedSubscribers: func(string) []Subscriber {
+			resolveRoutedSubscribers: func(events.Event) []Subscriber {
 				return []Subscriber{{ID: "parent-listener", Type: "node"}}
 			},
 			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate { return nil },
@@ -240,7 +240,7 @@ func TestDeliveryPlanner_DoesNotDeadLetterTargetedWorkflowNodeSubscriber(t *test
 func TestDeliveryPlanner_PreservesTargetFailureWhenRoutedNodeDoesNotMatchTarget(t *testing.T) {
 	planner := newDeliveryPlanner(
 		deliveryRouteResolver{
-			resolveRoutedSubscribers: func(string) []Subscriber {
+			resolveRoutedSubscribers: func(events.Event) []Subscriber {
 				return []Subscriber{{ID: "unrelated-listener", Type: "node", Path: "other-flow"}}
 			},
 			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate { return nil },
@@ -269,7 +269,7 @@ func TestDeliveryPlanner_PreservesTargetFailureWhenRoutedNodeDoesNotMatchTarget(
 func TestDeliveryPlanner_ExpandsTargetSetForInternalWorkflowRecipient(t *testing.T) {
 	planner := newDeliveryPlanner(
 		deliveryRouteResolver{
-			resolveRoutedSubscribers: func(string) []Subscriber {
+			resolveRoutedSubscribers: func(events.Event) []Subscriber {
 				return []Subscriber{
 					{ID: "child-a-listener", Type: "node", Path: "child-a/inst-1"},
 					{ID: "child-b-listener", Type: "node", Path: "child-b/inst-1"},
@@ -320,7 +320,7 @@ func TestDeliveryPlanner_ExpandsTargetSetForInternalWorkflowRecipient(t *testing
 func TestDeliveryPlanner_NoTargetConcreteRoutedNodeUsesInternalCarrierAndNodeRoute(t *testing.T) {
 	planner := newDeliveryPlanner(
 		deliveryRouteResolver{
-			resolveRoutedSubscribers: func(string) []Subscriber {
+			resolveRoutedSubscribers: func(events.Event) []Subscriber {
 				return []Subscriber{{
 					ID:   "lifecycle-orchestrator",
 					Type: "node",
@@ -372,7 +372,7 @@ func TestDeliveryPlanner_NoTargetConcreteRoutedNodeUsesInternalCarrierAndNodeRou
 func TestDeliveryPlanner_NoTargetRootRoutedNodeUsesSemanticNodeDeliveryRoute(t *testing.T) {
 	planner := newDeliveryPlanner(
 		deliveryRouteResolver{
-			resolveRoutedSubscribers: func(string) []Subscriber {
+			resolveRoutedSubscribers: func(events.Event) []Subscriber {
 				return []Subscriber{{
 					ID:           "portfolio-node",
 					Type:         "node",
@@ -423,7 +423,7 @@ func TestDeliveryPlanner_NoTargetRootRoutedNodeUsesSemanticNodeDeliveryRoute(t *
 func TestDeliveryPlanner_FailsClosedOnPolicyError(t *testing.T) {
 	planner := newDeliveryPlanner(
 		deliveryRouteResolver{
-			resolveRoutedSubscribers: func(string) []Subscriber { return nil },
+			resolveRoutedSubscribers: func(events.Event) []Subscriber { return nil },
 			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
 				return []deliveryRecipientCandidate{{ID: "worker", PersistAsDelivery: true}}
 			},

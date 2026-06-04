@@ -23,14 +23,14 @@ type deliveryRecipientCandidate struct {
 }
 
 type deliveryRouteResolver struct {
-	resolveRoutedSubscribers            func(string) []Subscriber
+	resolveRoutedSubscribers            func(events.Event) []Subscriber
 	resolveSubscribedRecipients         func(string) []deliveryRecipientCandidate
 	resolveRoutedNodeInternalRecipients func(events.Event, []Subscriber) []deliveryRecipientCandidate
 	describeSubscribersForEvent         func(string, []Subscriber) []PublishDiagnosticRecipient
 }
 
 func (r deliveryRouteResolver) Resolve(evt events.Event) deliveryRoutingResult {
-	routedRecipients := r.resolveRoutedSubscribers(string(evt.Type))
+	routedRecipients := r.resolveRoutedSubscribers(evt)
 	subscribedRecipients := r.resolveSubscribedRecipients(string(evt.Type))
 	routedCandidates := routedSubscriberCandidates(routedRecipients)
 	if r.resolveRoutedNodeInternalRecipients != nil {
@@ -174,7 +174,7 @@ func filteredRecipients(requested, allowed []string) []string {
 func (eb *EventBus) newEventBusDeliveryPlanner() deliveryPlanner {
 	return newDeliveryPlanner(
 		deliveryRouteResolver{
-			resolveRoutedSubscribers:            eb.resolveRoutedSubscribers,
+			resolveRoutedSubscribers:            eb.resolveRoutedSubscribersForEvent,
 			resolveSubscribedRecipients:         eb.resolveSubscribedRecipientsForPlanning,
 			resolveRoutedNodeInternalRecipients: eb.resolveInternalRecipientsForRoutedNodePlanning,
 			describeSubscribersForEvent:         eb.describeSubscribersForEvent,
@@ -238,6 +238,48 @@ func agentDeliveryRecipientCandidates(in []string) []deliveryRecipientCandidate 
 		}
 	}
 	return normalizeDeliveryRecipientCandidates(out)
+}
+
+func routedEventKeysForPlan(evt events.Event) []string {
+	eventType := strings.Trim(strings.TrimSpace(string(evt.Type)), "/")
+	if eventType == "" {
+		return nil
+	}
+	out := []string{eventType}
+	if concrete := concreteFlowInstanceEventKey(evt); concrete != "" {
+		out = append(out, concrete)
+	}
+	return uniqueStrings(out)
+}
+
+func concreteFlowInstanceEventKey(evt events.Event) string {
+	eventType := strings.Trim(strings.TrimSpace(string(evt.Type)), "/")
+	flowInstance := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/")
+	if eventType == "" || flowInstance == "" {
+		return ""
+	}
+	staticScope := runtimeflowidentity.SemanticScopeFromInstancePath(flowInstance)
+	if staticScope == "" {
+		return ""
+	}
+	localEvent := semanticScopedLocalEvent(eventType, staticScope)
+	if localEvent == "" {
+		return ""
+	}
+	return flowInstance + "/" + localEvent
+}
+
+func semanticScopedLocalEvent(eventType, staticScope string) string {
+	eventType = strings.Trim(strings.TrimSpace(eventType), "/")
+	staticScope = strings.Trim(strings.TrimSpace(staticScope), "/")
+	if eventType == "" || staticScope == "" || !strings.HasPrefix(eventType, staticScope+"/") {
+		return ""
+	}
+	localEvent := strings.TrimPrefix(eventType, staticScope+"/")
+	if localEvent == "" || strings.Contains(localEvent, "/") {
+		return ""
+	}
+	return localEvent
 }
 
 func deliveryRecipientIDs(in []deliveryRecipientCandidate) []string {
@@ -465,10 +507,14 @@ func routedNodeInternalSubscriptionAliases(evt events.Event, routed []Subscriber
 		return nil
 	}
 	out := []string{eventType}
+	if concrete := concreteFlowInstanceEventKey(evt); concrete != "" {
+		out = append(out, concrete)
+	}
 	for _, subscriber := range routed {
 		if !routedNodeMatchesConcreteFlowInstanceEvent(evt, subscriber) {
 			continue
 		}
+		eventType := routedNodeConcreteEventKey(evt, subscriber)
 		instancePath := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
 		if instancePath == "" || !strings.HasPrefix(eventType, instancePath+"/") {
 			continue
@@ -484,16 +530,29 @@ func routedNodeInternalSubscriptionAliases(evt events.Event, routed []Subscriber
 }
 
 func routedNodeMatchesConcreteFlowInstanceEvent(evt events.Event, subscriber Subscriber) bool {
+	return routedNodeConcreteEventKey(evt, subscriber) != ""
+}
+
+func routedNodeConcreteEventKey(evt events.Event, subscriber Subscriber) string {
 	if strings.TrimSpace(subscriber.ID) == "" || strings.TrimSpace(subscriber.Type) == "agent" {
-		return false
+		return ""
 	}
 	instancePath := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
 	flowInstance := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/")
 	if instancePath == "" || flowInstance == "" || instancePath != flowInstance {
-		return false
+		staticScope := runtimeflowidentity.SemanticScopeFromInstancePath(flowInstance)
+		if staticScope == "" || instancePath != staticScope {
+			return ""
+		}
 	}
 	eventType := strings.Trim(strings.TrimSpace(string(evt.Type)), "/")
-	return eventType != "" && strings.HasPrefix(eventType, instancePath+"/")
+	if eventType != "" && strings.HasPrefix(eventType, flowInstance+"/") {
+		if instancePath == flowInstance {
+			return eventType
+		}
+		return ""
+	}
+	return concreteFlowInstanceEventKey(evt)
 }
 
 func matchedInternalDeliveryTargets(evt events.Event, subscribers []Subscriber) []events.RouteIdentity {

@@ -236,7 +236,7 @@ func (s *targetRouteMemoryStore) LoadCommittedReplayScope(_ context.Context, eve
 func nodeOnlyDeliveryPlanner(nodeID string) deliveryPlanner {
 	return newDeliveryPlanner(
 		deliveryRouteResolver{
-			resolveRoutedSubscribers: func(string) []Subscriber {
+			resolveRoutedSubscribers: func(events.Event) []Subscriber {
 				return []Subscriber{{ID: nodeID, Type: "node"}}
 			},
 			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
@@ -257,7 +257,7 @@ func nodeOnlyDeliveryPlanner(nodeID string) deliveryPlanner {
 func mixedNodeAgentDeliveryPlanner(nodeID, agentID string) deliveryPlanner {
 	return newDeliveryPlanner(
 		deliveryRouteResolver{
-			resolveRoutedSubscribers: func(string) []Subscriber {
+			resolveRoutedSubscribers: func(events.Event) []Subscriber {
 				return []Subscriber{{ID: nodeID, Type: "node"}}
 			},
 			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
@@ -418,7 +418,7 @@ func TestEventBusPublish_TargetSetInternalDeliveryUsesPerTargetRoutes(t *testing
 	}
 	eb.deliveryPlanner = newDeliveryPlanner(
 		deliveryRouteResolver{
-			resolveRoutedSubscribers: func(string) []Subscriber {
+			resolveRoutedSubscribers: func(events.Event) []Subscriber {
 				return []Subscriber{
 					{ID: "child-a-listener", Type: "node", Path: "child-a/inst-1"},
 					{ID: "child-b-listener", Type: "node", Path: "child-b/inst-1"},
@@ -529,6 +529,98 @@ func TestEventBusPublish_NoTargetConcreteRoutedNodeUsesWorkflowCarrierAndNodeDel
 	}
 	if len(replayRoutes) != 1 || replayRoutes[0].SubscriberID != "workflow-runtime" {
 		t.Fatalf("replay routes = %#v, want workflow-runtime carrier route", replayRoutes)
+	}
+}
+
+func TestEventBusPublish_SemanticScopeFlowInstanceResolvesConcreteRoute(t *testing.T) {
+	store := newTargetRouteMemoryStore()
+	source := semanticview.Wrap(routedNodeTemplateBundle())
+	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("operating", "inst-1")}); err != nil {
+		t.Fatalf("AddFlowInstanceRoute: %v", err)
+	}
+	ch := eb.SubscribeInternal("workflow-runtime", events.EventType("operating/opco.product_initialization_requested"))
+	evt := (events.Event{
+		ID:        uuid.NewString(),
+		Type:      events.EventType("operating/opco.product_initialization_requested"),
+		Payload:   []byte(`{}`),
+		CreatedAt: time.Now().UTC(),
+	}).WithEntityID("ent-operating").WithFlowInstance("operating/inst-1")
+
+	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("CheckPublishRecipientPlan: %v", err)
+	}
+	if len(plan.RoutedRecipients) != 1 || plan.RoutedRecipients[0].Path != "operating/inst-1" {
+		t.Fatalf("routed recipients = %#v, want concrete operating/inst-1 route", plan.RoutedRecipients)
+	}
+	if len(plan.DeliveryRoutes) != 1 || plan.DeliveryRoutes[0].Target.FlowInstance != "operating/inst-1" {
+		t.Fatalf("delivery routes = %#v, want one concrete operating route", plan.DeliveryRoutes)
+	}
+
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	got := requireBusEvent(t, ch, "semantic-scope routed node event delivery")
+	if got.FlowInstance() != "operating/inst-1" {
+		t.Fatalf("delivered flow instance = %q, want operating/inst-1", got.FlowInstance())
+	}
+	routes := store.routes[evt.ID]
+	if len(routes) != 1 || routes[0].Target.FlowInstance != "operating/inst-1" {
+		t.Fatalf("persisted delivery routes = %#v, want concrete operating route", routes)
+	}
+}
+
+func TestEventBusCheckPublishRecipientPlan_SemanticScopeFlowInstanceMaterializesNodeRoute(t *testing.T) {
+	store := newTargetRouteMemoryStore()
+	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+		ContractBundle: semanticview.Wrap(routedNodeStaticValidationBundle()),
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	ch := eb.SubscribeInternal("workflow-runtime", events.EventType("validation/thing.reviewed"))
+	evt := (events.Event{
+		ID:        uuid.NewString(),
+		Type:      events.EventType("validation/thing.reviewed"),
+		Payload:   []byte(`{}`),
+		CreatedAt: time.Now().UTC(),
+	}).WithEntityID("ent-validation").WithFlowInstance("validation/inst-1")
+
+	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("CheckPublishRecipientPlan: %v", err)
+	}
+	if len(plan.PersistedRecipients) != 0 {
+		t.Fatalf("persisted recipients = %#v, want none for internal workflow node carrier", plan.PersistedRecipients)
+	}
+	if got := plan.DeliveryRoutes; len(got) != 1 {
+		t.Fatalf("delivery routes = %#v, want one concrete node route", got)
+	}
+	route := plan.DeliveryRoutes[0]
+	if route.SubscriberType != "node" || route.SubscriberID != "workflow-runtime" {
+		t.Fatalf("delivery route = %#v, want node/workflow-runtime carrier", route)
+	}
+	if route.Target.FlowInstance != "validation/inst-1" || route.Target.EntityID != "ent-validation" {
+		t.Fatalf("delivery route target = %#v, want validation/inst-1 ent-validation", route.Target)
+	}
+	if len(plan.RoutedRecipients) != 1 || plan.RoutedRecipients[0].ID != "entity-writer" || plan.RoutedRecipients[0].Path != "validation" {
+		t.Fatalf("routed recipients = %#v, want entity-writer at semantic validation scope", plan.RoutedRecipients)
+	}
+
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	got := requireBusEvent(t, ch, "semantic-scope concrete route event delivery")
+	if got.FlowInstance() != "validation/inst-1" || got.EntityID() != "ent-validation" {
+		t.Fatalf("delivered route identity flow=%q entity=%q, want validation/inst-1 ent-validation", got.FlowInstance(), got.EntityID())
+	}
+	routes := store.routes[evt.ID]
+	if len(routes) != 1 || routes[0].Target.FlowInstance != "validation/inst-1" {
+		t.Fatalf("persisted routes = %#v, want concrete validation route", routes)
 	}
 }
 
@@ -738,6 +830,38 @@ func routedNodeTemplateBundle() *runtimecontracts.WorkflowContractBundle {
 					Event: "opco.product_initialization_requested",
 				},
 			},
+		},
+	}
+}
+
+func routedNodeStaticValidationBundle() *runtimecontracts.WorkflowContractBundle {
+	validation := runtimecontracts.FlowContractView{
+		Path:  "validation",
+		Paths: runtimecontracts.FlowContractPaths{ID: "validation", Flow: "validation"},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"thing.reviewed": {},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"entity-writer": {
+				ID:            "entity-writer",
+				ExecutionType: "system_node",
+				SubscribesTo:  []string{"thing.reviewed"},
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"thing.reviewed": {},
+				},
+			},
+		},
+	}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{validation}}
+	return &runtimecontracts.WorkflowContractBundle{
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"validation": &root.Children[0],
+			},
+		},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
+			"validation": {},
 		},
 	}
 }
