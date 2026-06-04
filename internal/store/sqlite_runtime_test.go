@@ -329,6 +329,12 @@ func TestSQLiteDynamicFlowActivationRequiredAgentsUsePipelineTransaction(t *test
 	}
 	assertSQLiteActivatedAgentIDs(t, agents, "reviewer-inst-1")
 	assertSQLiteAddedRoutes(t, bus, "review/inst-1")
+	assertSQLiteRouteMaterializationVars(t, bus, "review/inst-1", map[string]string{
+		"flow_instance_path": "review/inst-1",
+		"flow_scope_key":     "review",
+		"instance_id":        "inst-1",
+		"template_id":        "review",
+	})
 }
 
 func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T) {
@@ -381,16 +387,28 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 	}
 	assertSQLiteActivatedAgentIDs(t, agents, "reviewer-component-a", "reviewer-component-b")
 	assertSQLiteAddedRoutes(t, bus, "review/component-a", "review/component-b")
+	assertSQLiteRouteMaterializationVars(t, bus, "review/component-a", map[string]string{
+		"flow_instance_path": "review/component-a",
+		"flow_scope_key":     "review",
+		"instance_id":        "component-a",
+		"template_id":        "review",
+	})
+	assertSQLiteRouteMaterializationVars(t, bus, "review/component-b", map[string]string{
+		"flow_instance_path": "review/component-b",
+		"flow_scope_key":     "review",
+		"instance_id":        "component-b",
+		"template_id":        "review",
+	})
 	if logs := bus.runtimeLogEntries(); len(logs) != 0 {
 		t.Fatalf("runtime logs = %#v, want no activation dead-letter/runtime errors", logs)
 	}
 }
 
 type sqliteFlowActivationBus struct {
-	mu          sync.Mutex
-	runtimeLog  []runtimepipeline.RuntimeLogEntry
-	addedRoutes []string
-	published   []events.Event
+	mu            sync.Mutex
+	runtimeLog    []runtimepipeline.RuntimeLogEntry
+	routeRequests []runtimebus.FlowInstanceRouteMaterializationRequest
+	published     []events.Event
 }
 
 func (b *sqliteFlowActivationBus) Publish(_ context.Context, evt events.Event) error {
@@ -425,10 +443,10 @@ func (b *sqliteFlowActivationBus) LogRuntime(_ context.Context, entry runtimepip
 	return nil
 }
 
-func (b *sqliteFlowActivationBus) AddFlowInstanceRoute(_ runtimecontracts.SystemNodeContract, identity runtimeflowidentity.Route) error {
+func (b *sqliteFlowActivationBus) AddFlowInstanceRoute(req runtimebus.FlowInstanceRouteMaterializationRequest) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.addedRoutes = append(b.addedRoutes, strings.TrimSpace(identity.InstancePath))
+	b.routeRequests = append(b.routeRequests, req.Normalized())
 	return nil
 }
 
@@ -443,8 +461,18 @@ func (b *sqliteFlowActivationBus) runtimeLogEntries() []runtimepipeline.RuntimeL
 func (b *sqliteFlowActivationBus) routePaths() []string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	out := make([]string, len(b.addedRoutes))
-	copy(out, b.addedRoutes)
+	out := make([]string, 0, len(b.routeRequests))
+	for _, req := range b.routeRequests {
+		out = append(out, strings.TrimSpace(req.Identity.InstancePath))
+	}
+	return out
+}
+
+func (b *sqliteFlowActivationBus) materializationRequests() []runtimebus.FlowInstanceRouteMaterializationRequest {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([]runtimebus.FlowInstanceRouteMaterializationRequest, len(b.routeRequests))
+	copy(out, b.routeRequests)
 	return out
 }
 
@@ -521,6 +549,22 @@ func assertSQLiteAddedRoutes(t *testing.T, bus *sqliteFlowActivationBus, wantPat
 			t.Fatalf("added route paths = %#v, missing %q", got, want)
 		}
 	}
+}
+
+func assertSQLiteRouteMaterializationVars(t *testing.T, bus *sqliteFlowActivationBus, wantPath string, wantVars map[string]string) {
+	t.Helper()
+	for _, req := range bus.materializationRequests() {
+		if strings.TrimSpace(req.Identity.InstancePath) != wantPath {
+			continue
+		}
+		for key, want := range wantVars {
+			if got := strings.TrimSpace(req.ActivationVariables[key]); got != want {
+				t.Fatalf("route materialization vars for %s key %s = %q, want %q; all vars=%#v", wantPath, key, got, want, req.ActivationVariables)
+			}
+		}
+		return
+	}
+	t.Fatalf("route materialization request for %s not found; got %#v", wantPath, bus.materializationRequests())
 }
 
 func TestSQLiteRuntimeStoreAPIIdempotencyAllowsNestedEventBusPublish(t *testing.T) {
