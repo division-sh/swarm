@@ -4,12 +4,15 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -17,9 +20,13 @@ import (
 )
 
 type targetRouteMemoryStore struct {
-	events map[string]events.Event
-	routes map[string][]events.DeliveryRoute
-	scopes map[string]replayclaim.CommittedReplayScope
+	events      map[string]events.Event
+	routes      map[string][]events.DeliveryRoute
+	scopes      map[string]replayclaim.CommittedReplayScope
+	missing     []events.PersistedReplayEvent
+	receipts    map[string]string
+	receiptErrs map[string]string
+	claimed     map[string]bool
 }
 
 func newTargetRouteMemoryStore() *targetRouteMemoryStore {
@@ -62,12 +69,228 @@ func (s *targetRouteMemoryStore) ListEventDeliveryRoutes(_ context.Context, even
 	return append([]events.DeliveryRoute(nil), s.routes[eventID]...), nil
 }
 
+func (s *targetRouteMemoryStore) UpsertPipelineReceipt(_ context.Context, eventID, status, errText string) error {
+	if s.receipts == nil {
+		s.receipts = map[string]string{}
+	}
+	if s.receiptErrs == nil {
+		s.receiptErrs = map[string]string{}
+	}
+	s.receipts[eventID] = status
+	s.receiptErrs[eventID] = errText
+	return nil
+}
+
+func (s *targetRouteMemoryStore) ListEventsMissingPipelineReceipt(context.Context, time.Time, int) ([]events.PersistedReplayEvent, error) {
+	return append([]events.PersistedReplayEvent(nil), s.missing...), nil
+}
+
+func (s *targetRouteMemoryStore) ClaimPipelineReplay(_ context.Context, eventID string) (runtimeownership.Lease, bool, error) {
+	if s.claimed == nil {
+		s.claimed = map[string]bool{}
+	}
+	if s.claimed[eventID] {
+		return nil, false, nil
+	}
+	s.claimed[eventID] = true
+	return targetRouteMemoryLease{store: s, eventID: eventID}, true, nil
+}
+
+type targetRouteMemoryLease struct {
+	store   *targetRouteMemoryStore
+	eventID string
+}
+
+func (l targetRouteMemoryLease) Release(context.Context) error {
+	if l.store != nil && l.store.claimed != nil {
+		delete(l.store.claimed, l.eventID)
+	}
+	return nil
+}
+
 func (s *targetRouteMemoryStore) LoadCommittedReplayScope(_ context.Context, eventID string) (replayclaim.CommittedReplayScope, error) {
 	scope := s.scopes[eventID]
 	if scope == "" {
 		return "", replayclaim.ErrMissingCommittedReplayScope
 	}
 	return scope, nil
+}
+
+func nodeOnlyDeliveryPlanner(nodeID string) deliveryPlanner {
+	return newDeliveryPlanner(
+		deliveryRouteResolver{
+			resolveRoutedSubscribers: func(string) []Subscriber {
+				return []Subscriber{{ID: nodeID, Type: "node"}}
+			},
+			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
+				return []deliveryRecipientCandidate{{ID: nodeID, PersistAsDelivery: false}}
+			},
+			describeSubscribersForEvent: func(string, []Subscriber) []PublishDiagnosticRecipient {
+				return nil
+			},
+		},
+		deliveryRecipientPolicy{
+			loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
+				return map[string]ActiveAgentDescriptor{}, true, nil
+			},
+		},
+	)
+}
+
+func mixedNodeAgentDeliveryPlanner(nodeID, agentID string) deliveryPlanner {
+	return newDeliveryPlanner(
+		deliveryRouteResolver{
+			resolveRoutedSubscribers: func(string) []Subscriber {
+				return []Subscriber{{ID: nodeID, Type: "node"}}
+			},
+			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
+				return []deliveryRecipientCandidate{
+					{ID: nodeID, PersistAsDelivery: false},
+					{ID: agentID, PersistAsDelivery: true},
+				}
+			},
+			describeSubscribersForEvent: func(string, []Subscriber) []PublishDiagnosticRecipient {
+				return nil
+			},
+		},
+		deliveryRecipientPolicy{
+			loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
+				return map[string]ActiveAgentDescriptor{agentID: {AgentID: agentID}}, true, nil
+			},
+		},
+	)
+}
+
+func nodeOnlyDeliveryPlan(evt events.Event, nodeID string) eventDeliveryPlan {
+	return eventDeliveryPlan{
+		Event:      evt,
+		Recipients: []string{nodeID},
+		DeliveryRoutes: []events.DeliveryRoute{{
+			SubscriberType: "node",
+			SubscriberID:   nodeID,
+		}},
+	}
+}
+
+func TestEventBusPublish_NodeOnlyRouteDoesNotRequireAgentChannel(t *testing.T) {
+	store := newTargetRouteMemoryStore()
+	eb, err := NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	eb.deliveryPlanner = nodeOnlyDeliveryPlanner("workflow-node")
+	evt := events.Event{
+		ID:        uuid.NewString(),
+		Type:      events.EventType("custom.node_only"),
+		Payload:   []byte(`{}`),
+		CreatedAt: time.Now().UTC(),
+	}
+
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish node-only route without agent channel: %v", err)
+	}
+	if got := store.receipts[evt.ID]; got != "processed" {
+		t.Fatalf("pipeline receipt = %q err=%q, want processed", got, store.receiptErrs[evt.ID])
+	}
+	if routes := store.routes[evt.ID]; len(routes) != 1 || routes[0].SubscriberType != "node" || routes[0].SubscriberID != "workflow-node" {
+		t.Fatalf("delivery routes = %#v, want node/workflow-node", routes)
+	}
+}
+
+func TestEventBusPublishTxDispatch_NodeOnlyRouteDoesNotRequireAgentChannel(t *testing.T) {
+	store := newTargetRouteMemoryStore()
+	eb, err := NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	evt := events.Event{
+		ID:        uuid.NewString(),
+		Type:      events.EventType("custom.node_only_tx"),
+		Payload:   []byte(`{}`),
+		CreatedAt: time.Now().UTC(),
+	}
+
+	eb.completePublishTxDispatch(context.Background(), evt, nodeOnlyDeliveryPlan(evt, "workflow-node"))
+
+	if got := store.receipts[evt.ID]; got != "processed" {
+		t.Fatalf("pipeline receipt = %q err=%q, want processed", got, store.receiptErrs[evt.ID])
+	}
+}
+
+func TestEngineDispatcher_NodeOnlyRouteDoesNotRequireAgentChannel(t *testing.T) {
+	store := newTargetRouteMemoryStore()
+	eb, err := NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	evt := events.Event{
+		ID:        uuid.NewString(),
+		Type:      events.EventType("custom.node_only_outbox"),
+		Payload:   []byte(`{}`),
+		CreatedAt: time.Now().UTC(),
+	}
+	store.events[evt.ID] = evt
+	store.routes[evt.ID] = []events.DeliveryRoute{{SubscriberType: "node", SubscriberID: "workflow-node"}}
+
+	if err := eb.EngineDispatcher().DispatchPostCommit(context.Background(), []runtimeengine.EmitIntent{{Event: evt}}); err != nil {
+		t.Fatalf("DispatchPostCommit node-only route without agent channel: %v", err)
+	}
+	if got := store.receipts[evt.ID]; got != "processed" {
+		t.Fatalf("pipeline receipt = %q err=%q, want processed", got, store.receiptErrs[evt.ID])
+	}
+}
+
+func TestSweepUndispatched_NodeOnlyRouteDoesNotRequireAgentChannel(t *testing.T) {
+	store := newTargetRouteMemoryStore()
+	evt := events.Event{
+		ID:        uuid.NewString(),
+		Type:      events.EventType("custom.node_only_sweep"),
+		Payload:   []byte(`{}`),
+		CreatedAt: time.Now().UTC(),
+	}
+	store.events[evt.ID] = evt
+	store.routes[evt.ID] = []events.DeliveryRoute{{SubscriberType: "node", SubscriberID: "workflow-node"}}
+	store.scopes[evt.ID] = replayclaim.CommittedReplayScopeSubscribed
+	store.missing = []events.PersistedReplayEvent{{Event: evt}}
+	eb, err := NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	eb.deliveryPlanner = nodeOnlyDeliveryPlanner("workflow-node")
+
+	count, err := eb.SweepUndispatched(context.Background(), time.Hour, 10)
+	if err != nil {
+		t.Fatalf("SweepUndispatched node-only route without agent channel: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("swept count = %d, want 1", count)
+	}
+	if got := store.receipts[evt.ID]; got != "processed" {
+		t.Fatalf("pipeline receipt = %q err=%q, want processed", got, store.receiptErrs[evt.ID])
+	}
+}
+
+func TestEventBusPublish_MixedNodeAgentRouteStillRequiresAgentChannel(t *testing.T) {
+	store := newTargetRouteMemoryStore()
+	eb, err := NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	eb.deliveryPlanner = mixedNodeAgentDeliveryPlanner("workflow-node", "agent-missing")
+	evt := events.Event{
+		ID:        uuid.NewString(),
+		Type:      events.EventType("custom.mixed_node_agent"),
+		Payload:   []byte(`{}`),
+		CreatedAt: time.Now().UTC(),
+	}
+
+	err = eb.Publish(context.Background(), evt)
+	if err == nil {
+		t.Fatal("Publish succeeded, want missing agent-channel failure")
+	}
+	if got := err.Error(); !strings.Contains(got, "missing=agent-missing") || strings.Contains(got, "workflow-node") {
+		t.Fatalf("Publish error = %q, want missing agent only", got)
+	}
 }
 
 func TestEventBusPublish_TargetSetInternalDeliveryUsesPerTargetRoutes(t *testing.T) {

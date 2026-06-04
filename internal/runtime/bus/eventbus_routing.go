@@ -176,12 +176,17 @@ func (eb *EventBus) deliverToAgentsWithTargets(ctx context.Context, evt events.E
 }
 
 func (eb *EventBus) deliverToRecipientsWithRoutes(ctx context.Context, evt events.Event, recipientIDs []string, deliveryRoutes []events.DeliveryRoute) error {
-	expected := uniqueStrings(recipientIDs)
-	if len(expected) == 0 {
+	expected := agentChannelDeliveryRecipients(recipientIDs, deliveryRoutes)
+	dispatchRecipients := uniqueStrings(append(append([]string(nil), recipientIDs...), expected...))
+	if len(dispatchRecipients) == 0 {
 		return nil
 	}
+	expectedSet := make(map[string]struct{}, len(expected))
+	for _, recipient := range expected {
+		expectedSet[recipient] = struct{}{}
+	}
 	targetsByRecipient := deliveryRouteTargetsByRecipient(deliveryRoutes)
-	recipients := eb.snapshotRecipientChans(expected)
+	recipients := eb.snapshotRecipientChans(dispatchRecipients)
 	delivered := make([]string, 0, len(recipients))
 	seen := make(map[string]struct{}, len(recipients))
 	for _, recipient := range recipients {
@@ -228,7 +233,9 @@ func (eb *EventBus) deliverToRecipientsWithRoutes(ctx context.Context, evt event
 				}
 				return eb.logAuthoritativeDeliveryIncomplete(ctx, evt, expected, delivered, missing, remaining, ctx.Err())
 			case <-time.After(deliverySendTimeout):
-				timedOut = append(timedOut, recipient.agentID)
+				if _, required := expectedSet[recipient.agentID]; required {
+					timedOut = append(timedOut, recipient.agentID)
+				}
 				eb.logRuntime(ctx, "warn", "Event delivery to a recipient timed out", "eventbus", "delivery_timeout", evt.ID, string(evt.Type), recipient.agentID, evt.EntityID(), "", nil, map[string]any{
 					"timeout_ms": int(deliverySendTimeout / time.Millisecond),
 				}, "", 0)
@@ -239,6 +246,14 @@ func (eb *EventBus) deliverToRecipientsWithRoutes(ctx context.Context, evt event
 		return eb.logAuthoritativeDeliveryIncomplete(ctx, evt, expected, delivered, missing, timedOut, nil)
 	}
 	return nil
+}
+
+func agentChannelDeliveryRecipients(recipientIDs []string, deliveryRoutes []events.DeliveryRoute) []string {
+	deliveryRoutes = events.NormalizeDeliveryRoutes(deliveryRoutes)
+	if len(deliveryRoutes) == 0 {
+		return uniqueStrings(recipientIDs)
+	}
+	return deliveryRouteRecipientIDsByType(deliveryRoutes, "agent")
 }
 
 func deliveryRoutesFromTargetMap(recipients []string, subscriberType string, deliveryTargets map[string]events.RouteIdentity) []events.DeliveryRoute {
