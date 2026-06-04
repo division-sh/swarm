@@ -304,7 +304,11 @@ func (s *SQLiteRuntimeStore) UpsertAgent(ctx context.Context, rec runtimemanager
 	if startedAt.IsZero() {
 		startedAt = time.Now().UTC()
 	}
-	_, err = s.DB.ExecContext(ctx, `
+	q := execQueryer(s.DB)
+	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok {
+		q = tx
+	}
+	_, err = q.ExecContext(ctx, `
 		INSERT INTO agents (
 			agent_id, flow_instance, role, model, llm_backend, conversation_mode,
 			parent_agent_id, entity_id, config, subscriptions, emit_events, tools, permissions,

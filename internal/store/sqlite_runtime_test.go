@@ -2,17 +2,22 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -20,6 +25,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/google/uuid"
@@ -236,6 +242,284 @@ func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 	})
 	if !errors.Is(err, ErrAPIIdempotencyConflict) {
 		t.Fatalf("idempotency conflict err = %v, want ErrAPIIdempotencyConflict", err)
+	}
+}
+
+func TestSQLiteRuntimeStoreUpsertAgentConsumesActivePipelineTransaction(t *testing.T) {
+	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+
+	tx, err := store.DB.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin sqlite tx: %v", err)
+	}
+	committed := false
+	t.Cleanup(func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	})
+
+	now := time.Now().UTC()
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, started_at)
+		VALUES (?, 'running', ?)
+	`, runtimecorrelation.RunIDFromContext(ctx), now); err != nil {
+		t.Fatalf("seed active sqlite write transaction: %v", err)
+	}
+
+	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
+	if err := store.UpsertAgent(txctx, runtimemanager.PersistedAgent{
+		Config: runtimeactors.AgentConfig{
+			ID:               "agent-in-pipeline-tx",
+			Role:             "worker",
+			Mode:             "global",
+			Model:            "regular",
+			LLMBackend:       "anthropic",
+			ConversationMode: "task",
+			Config:           json.RawMessage(`{"system_prompt":"tx-owned agent","tools":[]}`),
+		},
+		Status:    "active",
+		StartedAt: now,
+	}); err != nil {
+		t.Fatalf("UpsertAgent with active pipeline transaction: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit sqlite tx: %v", err)
+	}
+	committed = true
+
+	agents, err := store.LoadAgents(ctx)
+	if err != nil {
+		t.Fatalf("LoadAgents: %v", err)
+	}
+	if len(agents) != 1 || agents[0].Config.ID != "agent-in-pipeline-tx" {
+		t.Fatalf("agents = %#v, want agent-in-pipeline-tx", agents)
+	}
+}
+
+func TestSQLiteDynamicFlowActivationRequiredAgentsUsePipelineTransaction(t *testing.T) {
+	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
+	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStore(sqliteStore.DB)
+	bus := &sqliteFlowActivationBus{}
+	manager := runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+		WorkflowInstances: workflowStore,
+		LLMBackend:        "anthropic",
+	}, sqliteStore)
+	bundle := sqliteFlowActivationBundle()
+
+	req := sqliteFlowActivationRequest(bundle, "review", "inst-1", "parent-ent", "review/inst-1")
+	if err := workflowStore.RunInPipelineTransaction(ctx, func(txctx context.Context, _ *sql.Tx) error {
+		return manager.ActivateFlowInstance(txctx, req)
+	}); err != nil {
+		t.Fatalf("ActivateFlowInstance inside sqlite pipeline transaction: %v", err)
+	}
+
+	loaded, ok, err := workflowStore.Load(ctx, "review/inst-1")
+	if err != nil {
+		t.Fatalf("Load workflow instance: %v", err)
+	}
+	if !ok || strings.TrimSpace(loaded.StorageRef) != "review/inst-1" {
+		t.Fatalf("workflow instance loaded=%v value=%+v, want review/inst-1", ok, loaded)
+	}
+	agents, err := sqliteStore.LoadAgents(ctx)
+	if err != nil {
+		t.Fatalf("LoadAgents: %v", err)
+	}
+	assertSQLiteActivatedAgentIDs(t, agents, "reviewer-inst-1")
+	assertSQLiteAddedRoutes(t, bus, "review/inst-1")
+}
+
+func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T) {
+	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
+	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStore(sqliteStore.DB)
+	bus := &sqliteFlowActivationBus{}
+	manager := runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+		WorkflowInstances: workflowStore,
+		LLMBackend:        "anthropic",
+	}, sqliteStore)
+	bundle := sqliteFlowActivationBundle()
+
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	for _, instanceID := range []string{"component-a", "component-b"} {
+		instanceID := instanceID
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			req := sqliteFlowActivationRequest(bundle, "review", instanceID, "parent-ent", "review/"+instanceID)
+			errs <- workflowStore.RunInPipelineTransaction(ctx, func(txctx context.Context, _ *sql.Tx) error {
+				return manager.ActivateFlowInstance(txctx, req)
+			})
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent fan-out activation: %v", err)
+		}
+	}
+
+	for _, storageRef := range []string{"review/component-a", "review/component-b"} {
+		loaded, ok, err := workflowStore.Load(ctx, storageRef)
+		if err != nil {
+			t.Fatalf("Load workflow instance %s: %v", storageRef, err)
+		}
+		if !ok || strings.TrimSpace(loaded.StorageRef) != storageRef {
+			t.Fatalf("workflow instance %s loaded=%v value=%+v", storageRef, ok, loaded)
+		}
+	}
+	agents, err := sqliteStore.LoadAgents(ctx)
+	if err != nil {
+		t.Fatalf("LoadAgents: %v", err)
+	}
+	assertSQLiteActivatedAgentIDs(t, agents, "reviewer-component-a", "reviewer-component-b")
+	assertSQLiteAddedRoutes(t, bus, "review/component-a", "review/component-b")
+	if logs := bus.runtimeLogEntries(); len(logs) != 0 {
+		t.Fatalf("runtime logs = %#v, want no activation dead-letter/runtime errors", logs)
+	}
+}
+
+type sqliteFlowActivationBus struct {
+	mu          sync.Mutex
+	runtimeLog  []runtimepipeline.RuntimeLogEntry
+	addedRoutes []string
+	published   []events.Event
+}
+
+func (b *sqliteFlowActivationBus) Publish(_ context.Context, evt events.Event) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.published = append(b.published, evt)
+	return nil
+}
+
+func (*sqliteFlowActivationBus) PublishDirect(context.Context, events.Event, []string) error {
+	return nil
+}
+
+func (*sqliteFlowActivationBus) PublishPersistedRecipients(context.Context, events.Event, []string) error {
+	return nil
+}
+
+func (*sqliteFlowActivationBus) Subscribe(string, ...events.EventType) <-chan events.Event {
+	return make(chan events.Event)
+}
+
+func (*sqliteFlowActivationBus) Unsubscribe(string) {}
+
+func (*sqliteFlowActivationBus) Store() runtimebus.EventStore { return nil }
+
+func (*sqliteFlowActivationBus) ResetInMemoryState() error { return nil }
+
+func (b *sqliteFlowActivationBus) LogRuntime(_ context.Context, entry runtimepipeline.RuntimeLogEntry) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.runtimeLog = append(b.runtimeLog, entry)
+	return nil
+}
+
+func (b *sqliteFlowActivationBus) AddFlowInstanceRoute(_ runtimecontracts.SystemNodeContract, identity runtimeflowidentity.Route) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.addedRoutes = append(b.addedRoutes, strings.TrimSpace(identity.InstancePath))
+	return nil
+}
+
+func (b *sqliteFlowActivationBus) runtimeLogEntries() []runtimepipeline.RuntimeLogEntry {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([]runtimepipeline.RuntimeLogEntry, len(b.runtimeLog))
+	copy(out, b.runtimeLog)
+	return out
+}
+
+func (b *sqliteFlowActivationBus) routePaths() []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([]string, len(b.addedRoutes))
+	copy(out, b.addedRoutes)
+	return out
+}
+
+func sqliteFlowActivationBundle() *runtimecontracts.WorkflowContractBundle {
+	reviewFlow := &runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "review"},
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"reviewer": {
+				ID:            "reviewer-{instance_id}",
+				Type:          "generic",
+				Role:          "reviewer",
+				Model:         "regular",
+				Subscriptions: []string{"task.started"},
+			},
+		},
+	}
+	return &runtimecontracts.WorkflowContractBundle{
+		FlowTree: runtimecontracts.FlowTree{
+			Root: &runtimecontracts.FlowContractView{
+				Children: []runtimecontracts.FlowContractView{*reviewFlow},
+			},
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"review": reviewFlow,
+			},
+		},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
+			"review": {
+				Mode: "template",
+				Pins: runtimecontracts.FlowPins{
+					Inputs: runtimecontracts.FlowInputPins{Events: []string{"task.started"}},
+				},
+			},
+		},
+		Semantics: runtimecontracts.WorkflowSemanticView{Version: "v-test"},
+	}
+}
+
+func sqliteFlowActivationRequest(bundle *runtimecontracts.WorkflowContractBundle, templateID, instanceID, parentEntityID, flowPath string) runtimepipeline.FlowInstanceActivationRequest {
+	instance := runtimeflowidentity.Stored(
+		semanticview.Wrap(bundle),
+		templateID,
+		flowPath,
+		instanceID,
+		runtimepipeline.FlowInstanceEntityID(flowPath),
+		parentEntityID,
+	)
+	return runtimepipeline.FlowInstanceActivationRequest{
+		ContractBundle: semanticview.Wrap(bundle),
+		Instance:       instance,
+	}
+}
+
+func assertSQLiteActivatedAgentIDs(t *testing.T, agents []runtimemanager.PersistedAgent, wantIDs ...string) {
+	t.Helper()
+	got := map[string]struct{}{}
+	for _, rec := range agents {
+		got[strings.TrimSpace(rec.Config.ID)] = struct{}{}
+	}
+	for _, want := range wantIDs {
+		if _, ok := got[want]; !ok {
+			t.Fatalf("activated agent ids = %#v, missing %q", got, want)
+		}
+	}
+}
+
+func assertSQLiteAddedRoutes(t *testing.T, bus *sqliteFlowActivationBus, wantPaths ...string) {
+	t.Helper()
+	got := map[string]struct{}{}
+	for _, path := range bus.routePaths() {
+		got[strings.TrimSpace(path)] = struct{}{}
+	}
+	for _, want := range wantPaths {
+		if _, ok := got[want]; !ok {
+			t.Fatalf("added route paths = %#v, missing %q", got, want)
+		}
 	}
 }
 
