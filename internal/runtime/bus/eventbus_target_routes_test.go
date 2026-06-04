@@ -186,6 +186,35 @@ func TestEventBusRecipientPlanMaterializerPersistsRoutesBeforeInterceptors(t *te
 	}
 }
 
+func TestEventBusAgentDispatchIgnoresSameIDNodeRouteTargets(t *testing.T) {
+	store := newTargetRouteMemoryStore()
+	eb, err := NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	ch := eb.Subscribe("shared-subscriber", events.EventType("review/inst-1/task.started"))
+	defer eb.Unsubscribe("shared-subscriber")
+
+	evt := events.Event{
+		ID:        uuid.NewString(),
+		Type:      events.EventType("review/inst-1/task.started"),
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := eb.deliverToRecipientsWithRoutes(context.Background(), evt, []string{"shared-subscriber"}, []events.DeliveryRoute{{
+		SubscriberType: "node",
+		SubscriberID:   "shared-subscriber",
+		Target: events.RouteIdentity{
+			FlowInstance: "review/inst-1",
+		},
+	}}); err != nil {
+		t.Fatalf("deliverToRecipientsWithRoutes: %v", err)
+	}
+	got := requireBusEvent(t, ch, "same-id agent delivery")
+	if got.HasTargetRoute() || got.FlowInstance() != "" {
+		t.Fatalf("agent delivery target = route:%#v flow:%q, want no node target leakage", got.TargetRoute(), got.FlowInstance())
+	}
+}
+
 func deliveryRoutesContain(routes []events.DeliveryRoute, want events.DeliveryRoute) bool {
 	want = want.Normalized()
 	for _, got := range events.NormalizeDeliveryRoutes(routes) {
