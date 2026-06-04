@@ -25,10 +25,12 @@ import (
 )
 
 type catalogTriggerStep struct {
-	Event         string         `yaml:"event"`
-	Payload       map[string]any `yaml:"payload"`
-	Sender        string         `yaml:"sender"`
-	ErrorContains string         `yaml:"error_contains"`
+	Event                string         `yaml:"event"`
+	Payload              map[string]any `yaml:"payload"`
+	Sender               string         `yaml:"sender"`
+	ErrorContains        string         `yaml:"error_contains"`
+	ReceiptOutcome       string         `yaml:"receipt_outcome"`
+	ReceiptErrorContains string         `yaml:"receipt_error_contains"`
 }
 
 type catalogExpectedDocument struct {
