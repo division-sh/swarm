@@ -8,6 +8,8 @@ trigger:
       payload:
         entity_id: 22222222-2222-4222-8222-222222222222
         instance_id: worker-dup
+      receipt_outcome: dead_letter
+      receipt_error_contains: "flow instance already exists: worker-flow/worker-dup"
 
 expected:
   handler_outcome: success

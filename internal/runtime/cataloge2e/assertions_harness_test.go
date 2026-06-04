@@ -850,6 +850,51 @@ func assertHandlerOutcome(t testing.TB, h *runtimeHarness, want, entityID string
 	assertHandlerOutcomeForEntity(t, h, want, entityID, chainDepthExceeded)
 }
 
+func (h *runtimeHarness) assertTriggerReceipt(step catalogTriggerStep) {
+	wantOutcome := strings.TrimSpace(strings.ToLower(step.ReceiptOutcome))
+	wantError := strings.TrimSpace(step.ReceiptErrorContains)
+	if wantOutcome == "" && wantError == "" {
+		return
+	}
+	h.t.Helper()
+	if h == nil || h.db == nil {
+		h.t.Fatal("database is required for trigger receipt assertions")
+	}
+	eventIDs := h.publishedEventIDs(triggerPayloadEntityID(step.Payload))
+	for _, eventID := range eventIDs {
+		var subscriberID, outcome, sideEffects string
+		err := h.db.QueryRowContext(context.Background(), `
+			SELECT subscriber_id, outcome, COALESCE(side_effects::text, '')
+			FROM event_receipts
+			WHERE event_id = $1::uuid
+			  AND subscriber_type = 'platform'
+			  AND (
+				subscriber_id = 'pipeline'
+				OR subscriber_id LIKE 'pipeline:%'
+			  )
+			ORDER BY processed_at DESC
+			LIMIT 1
+		`, strings.TrimSpace(eventID)).Scan(&subscriberID, &outcome, &sideEffects)
+		if err == sql.ErrNoRows {
+			continue
+		}
+		if err != nil {
+			h.t.Fatalf("query trigger receipt for event %s: %v", eventID, err)
+		}
+		if wantOutcome != "" {
+			gotOutcome := strings.TrimSpace(strings.ToLower(outcome))
+			if gotOutcome != wantOutcome {
+				h.t.Fatalf("trigger receipt outcome for %s/%s = %q, want %q", eventID, subscriberID, gotOutcome, wantOutcome)
+			}
+		}
+		if wantError != "" && !strings.Contains(sideEffects, wantError) {
+			h.t.Fatalf("trigger receipt side_effects for %s/%s = %s, want error containing %q", eventID, subscriberID, sideEffects, wantError)
+		}
+		return
+	}
+	h.t.Fatalf("trigger receipt %q could not be asserted: no platform pipeline receipt found", wantOutcome)
+}
+
 func assertHandlerOutcomeForEntity(t testing.TB, h *runtimeHarness, want, entityID string, chainDepthExceeded bool) {
 	t.Helper()
 	if h == nil || h.db == nil {

@@ -34,6 +34,8 @@ type catalogTriggerStep struct {
 	Payload                       map[string]any `yaml:"payload"`
 	AssertPersistedBeforeDelivery bool           `yaml:"assert_persisted_before_delivery"`
 	ErrorContains                 string         `yaml:"error_contains"`
+	ReceiptOutcome                string         `yaml:"receipt_outcome"`
+	ReceiptErrorContains          string         `yaml:"receipt_error_contains"`
 }
 
 type catalogExpectedDocument struct {
@@ -276,6 +278,7 @@ func (h *runtimeHarness) publishAndWait(step catalogTriggerStep, timeout time.Du
 		return
 	}
 	h.publishRuntimeEvent(eventType, "cataloge2e", payload, timeout, true, true)
+	h.assertTriggerReceipt(step)
 	if eventType == "flow.created" {
 		if autoEmit := h.rootAutoEmitOnCreateEvent(); autoEmit != "" {
 			h.publishRuntimeEvent(autoEmit, "flow-instance-activator", payload, timeout, true, false)
