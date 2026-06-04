@@ -3098,31 +3098,24 @@ func TestRunServeRuntimeDBLoadedUsesEmbeddedSpecBeforeCatalogRead(t *testing.T) 
 		t.Fatalf("UpsertBundleCatalog: %v", err)
 	}
 
-	serveCtx, cancelServe := context.WithCancel(context.Background())
-	var out lockedBuffer
-	done := make(chan int, 1)
-	go func() {
-		done <- runServeRuntime(serveCtx, repoRoot(), serveOptions{
-			ConfigPath:         writeServeRuntimeTestConfig(t),
-			BundleHash:         projection.BundleHash,
-			PlatformSpecPath:   filepath.Join(t.TempDir(), "missing-platform-spec.yaml"),
-			StoreMode:          "postgres",
-			APIListenAddr:      "127.0.0.1:0",
-			MCPListenAddr:      "127.0.0.1:0",
-			SelfCheck:          true,
-			RequireBundleMatch: true,
-			Verbose:            true,
-			Output:             &out,
-		})
-	}()
+	serve := startServeRuntimeTestProcess(t, serveOptions{
+		ConfigPath:         writeServeRuntimeTestConfig(t),
+		BundleHash:         projection.BundleHash,
+		PlatformSpecPath:   filepath.Join(t.TempDir(), "missing-platform-spec.yaml"),
+		StoreMode:          "postgres",
+		APIListenAddr:      "127.0.0.1:0",
+		MCPListenAddr:      "127.0.0.1:0",
+		SelfCheck:          true,
+		RequireBundleMatch: true,
+		Verbose:            true,
+	})
 
-	waitForServeReadyLine(t, &out, done)
-	cancelServe()
-	if code := <-done; code != 0 {
-		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, out.String())
+	serve.waitForReadyLine()
+	if code := serve.stop(); code != 0 {
+		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, serve.outputString())
 	}
-	if strings.Contains(out.String(), "missing-platform-spec.yaml") || strings.Contains(out.String(), "read platform spec") {
-		t.Fatalf("DB-loaded serve used missing local platform spec before catalog read:\n%s", out.String())
+	if strings.Contains(serve.outputString(), "missing-platform-spec.yaml") || strings.Contains(serve.outputString(), "read platform spec") {
+		t.Fatalf("DB-loaded serve used missing local platform spec before catalog read:\n%s", serve.outputString())
 	}
 }
 
@@ -3147,37 +3140,19 @@ func TestRunServeRuntimeDBLoadedRunForkSupportedSurfaceExecutesAndStampsPersiste
 		t.Fatalf("UpsertBundleCatalog: %v", err)
 	}
 
-	serveCtx, cancelServe := context.WithCancel(context.Background())
-	var out lockedBuffer
-	done := make(chan int, 1)
-	go func() {
-		done <- runServeRuntime(serveCtx, repoRoot(), serveOptions{
-			ConfigPath:         writeServeRuntimeTestConfig(t),
-			BundleHash:         projection.BundleHash,
-			PlatformSpecPath:   defaultPlatformSpecPath,
-			StoreMode:          "postgres",
-			APIListenAddr:      "127.0.0.1:0",
-			MCPListenAddr:      "127.0.0.1:0",
-			SelfCheck:          true,
-			RequireBundleMatch: true,
-			Verbose:            true,
-			Output:             &out,
-		})
-	}()
-	stopped := false
-	t.Cleanup(func() {
-		if stopped {
-			return
-		}
-		cancelServe()
-		select {
-		case <-done:
-		case <-time.After(5 * time.Second):
-			t.Errorf("timed out stopping runServeRuntime\noutput:\n%s", out.String())
-		}
+	serve := startServeRuntimeTestProcess(t, serveOptions{
+		ConfigPath:         writeServeRuntimeTestConfig(t),
+		BundleHash:         projection.BundleHash,
+		PlatformSpecPath:   defaultPlatformSpecPath,
+		StoreMode:          "postgres",
+		APIListenAddr:      "127.0.0.1:0",
+		MCPListenAddr:      "127.0.0.1:0",
+		SelfCheck:          true,
+		RequireBundleMatch: true,
+		Verbose:            true,
 	})
-	waitForServeReadyLine(t, &out, done)
-	apiAddr := serveRuntimeAPIListenerFromOutput(t, out.String())
+	serve.waitForReadyLine()
+	apiAddr := serveRuntimeAPIListenerFromOutput(t, serve.outputString())
 
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -3206,7 +3181,7 @@ func TestRunServeRuntimeDBLoadedRunForkSupportedSurfaceExecutesAndStampsPersiste
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		t.Fatalf("POST /v1/rpc run.fork: %v\nserve output:\n%s", err, out.String())
+		t.Fatalf("POST /v1/rpc run.fork: %v\nserve output:\n%s", err, serve.outputString())
 	}
 	defer resp.Body.Close()
 	var rpc struct {
@@ -3221,7 +3196,7 @@ func TestRunServeRuntimeDBLoadedRunForkSupportedSurfaceExecutesAndStampsPersiste
 		t.Fatalf("decode run.fork response: %v", err)
 	}
 	if resp.StatusCode != http.StatusOK || rpc.Error != nil {
-		t.Fatalf("run.fork status=%d error=%#v result=%#v\nserve output:\n%s", resp.StatusCode, rpc.Error, rpc.Result, out.String())
+		t.Fatalf("run.fork status=%d error=%#v result=%#v\nserve output:\n%s", resp.StatusCode, rpc.Error, rpc.Result, serve.outputString())
 	}
 	if rpc.Result.SourceRunID != sourceRunID || rpc.Result.BundleHash != projection.BundleHash || rpc.Result.ExecutedEventCount != 1 {
 		t.Fatalf("run.fork result = %#v, want source=%s bundle_hash=%s executed=1", rpc.Result, sourceRunID, projection.BundleHash)
@@ -3255,11 +3230,9 @@ func TestRunServeRuntimeDBLoadedRunForkSupportedSurfaceExecutesAndStampsPersiste
 		t.Fatalf("selected-contract execution lineage rows = %d, want 1", lineageRows)
 	}
 
-	cancelServe()
-	if code := <-done; code != 0 {
-		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, out.String())
+	if code := serve.stop(); code != 0 {
+		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, serve.outputString())
 	}
-	stopped = true
 }
 
 func TestRunServeRuntimeDBLoadedRunForkCrossBundleTargetExecutesAndStampsTargetIdentity(t *testing.T) {
@@ -3341,38 +3314,20 @@ task.completed:
 		t.Fatalf("source and target projections unexpectedly share hash %s", sourceProjection.BundleHash)
 	}
 
-	serveCtx, cancelServe := context.WithCancel(context.Background())
-	var out lockedBuffer
-	done := make(chan int, 1)
-	go func() {
-		done <- runServeRuntime(serveCtx, repoRoot(), serveOptions{
-			ConfigPath:         writeServeRuntimeTestConfig(t),
-			BundleHash:         sourceProjection.BundleHash,
-			BundleHashes:       []string{targetProjection.BundleHash},
-			PlatformSpecPath:   defaultPlatformSpecPath,
-			StoreMode:          "postgres",
-			APIListenAddr:      "127.0.0.1:0",
-			MCPListenAddr:      "127.0.0.1:0",
-			SelfCheck:          true,
-			RequireBundleMatch: true,
-			Verbose:            true,
-			Output:             &out,
-		})
-	}()
-	stopped := false
-	t.Cleanup(func() {
-		if stopped {
-			return
-		}
-		cancelServe()
-		select {
-		case <-done:
-		case <-time.After(5 * time.Second):
-			t.Errorf("timed out stopping runServeRuntime\noutput:\n%s", out.String())
-		}
+	serve := startServeRuntimeTestProcess(t, serveOptions{
+		ConfigPath:         writeServeRuntimeTestConfig(t),
+		BundleHash:         sourceProjection.BundleHash,
+		BundleHashes:       []string{targetProjection.BundleHash},
+		PlatformSpecPath:   defaultPlatformSpecPath,
+		StoreMode:          "postgres",
+		APIListenAddr:      "127.0.0.1:0",
+		MCPListenAddr:      "127.0.0.1:0",
+		SelfCheck:          true,
+		RequireBundleMatch: true,
+		Verbose:            true,
 	})
-	waitForServeReadyLine(t, &out, done)
-	apiAddr := serveRuntimeAPIListenerFromOutput(t, out.String())
+	serve.waitForReadyLine()
+	apiAddr := serveRuntimeAPIListenerFromOutput(t, serve.outputString())
 
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -3399,7 +3354,7 @@ task.completed:
 		"--json",
 	}, &stdout, &stderr, cliOpts)
 	if code != 0 {
-		t.Fatalf("swarm fork code=%d stderr=%s stdout=%s\nserve output:\n%s", code, stderr.String(), stdout.String(), out.String())
+		t.Fatalf("swarm fork code=%d stderr=%s stdout=%s\nserve output:\n%s", code, stderr.String(), stdout.String(), serve.outputString())
 	}
 	if strings.TrimSpace(stderr.String()) != "" {
 		t.Fatalf("swarm fork stderr=%q, want empty", stderr.String())
@@ -3472,11 +3427,9 @@ task.completed:
 		t.Fatalf("fork delivery recipients target=%d source=%d, want target bundle route only", targetSubscriberDeliveries, sourceSubscriberDeliveries)
 	}
 
-	cancelServe()
-	if code := <-done; code != 0 {
-		t.Fatalf("runServeRuntime exit code = %d\noutput:\n%s", code, out.String())
+	if code := serve.stop(); code != 0 {
+		t.Fatalf("runServeRuntime exit code = %d\noutput:\n%s", code, serve.outputString())
 	}
-	stopped = true
 }
 
 func TestRunServeRuntimePassesDataFlagToWorkspaceLifecycle(t *testing.T) {
@@ -3487,42 +3440,22 @@ func TestRunServeRuntimePassesDataFlagToWorkspaceLifecycle(t *testing.T) {
 		return serveRuntimeWorkspaceStub{}
 	})
 
-	serveCtx, cancelServe := context.WithCancel(context.Background())
-	var out lockedBuffer
-	done := make(chan int, 1)
-	go func() {
-		done <- runServeRuntime(serveCtx, repoRoot(), serveOptions{
-			ConfigPath:         writeServeRuntimeTestConfig(t),
-			ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-			DataSource:         dataDir,
-			PlatformSpecPath:   defaultPlatformSpecPath,
-			StoreMode:          "postgres",
-			APIListenAddr:      "127.0.0.1:0",
-			MCPListenAddr:      "127.0.0.1:0",
-			SelfCheck:          true,
-			RequireBundleMatch: false,
-			Verbose:            true,
-			Output:             &out,
-		})
-	}()
-	stopped := false
-	t.Cleanup(func() {
-		if stopped {
-			return
-		}
-		cancelServe()
-		select {
-		case <-done:
-		case <-time.After(5 * time.Second):
-			t.Errorf("timed out stopping runServeRuntime\noutput:\n%s", out.String())
-		}
+	serve := startServeRuntimeTestProcess(t, serveOptions{
+		ConfigPath:         writeServeRuntimeTestConfig(t),
+		ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+		DataSource:         dataDir,
+		PlatformSpecPath:   defaultPlatformSpecPath,
+		StoreMode:          "postgres",
+		APIListenAddr:      "127.0.0.1:0",
+		MCPListenAddr:      "127.0.0.1:0",
+		SelfCheck:          true,
+		RequireBundleMatch: false,
+		Verbose:            true,
 	})
-	waitForServeReadyLine(t, &out, done)
-	cancelServe()
-	if code := <-done; code != 0 {
-		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, out.String())
+	serve.waitForReadyLine()
+	if code := serve.stop(); code != 0 {
+		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, serve.outputString())
 	}
-	stopped = true
 	if capturedMountSources.DataSource != dataDir || capturedMountSources.DataSourceSource != "--data" {
 		t.Fatalf("workspace mount sources = %#v, want %q from --data", capturedMountSources, dataDir)
 	}
@@ -3536,48 +3469,28 @@ func TestRunServeRuntimeHostWorkspaceBackendBootsWithoutDockerForSystemOnlyFlow(
 	dataDir := t.TempDir()
 	configPath := writeServeRuntimeTestConfig(t)
 
-	serveCtx, cancelServe := context.WithCancel(context.Background())
-	var out lockedBuffer
-	done := make(chan int, 1)
-	go func() {
-		done <- runServeRuntime(serveCtx, repoRoot(), serveOptions{
-			ConfigPath:           configPath,
-			ContractsPath:        filepath.Join("tests", "tier1-primitives", "test-emits-single"),
-			DataSource:           dataDir,
-			WorkspaceBackend:     workspace.BackendHost,
-			WorkspaceBackendSet:  true,
-			PlatformSpecPath:     defaultPlatformSpecPath,
-			StoreMode:            storebackend.ActiveDefaultBackend().String(),
-			APIListenAddr:        "127.0.0.1:0",
-			MCPListenAddr:        "127.0.0.1:0",
-			SelfCheck:            true,
-			RequireBundleMatch:   false,
-			ShutdownGrace:        runtimepkg.DefaultShutdownGrace,
-			Verbose:              true,
-			Output:               &out,
-			NoRequireBundleMatch: true,
-		})
-	}()
-	stopped := false
-	t.Cleanup(func() {
-		if stopped {
-			return
-		}
-		cancelServe()
-		select {
-		case <-done:
-		case <-time.After(5 * time.Second):
-			t.Errorf("timed out stopping runServeRuntime\noutput:\n%s", out.String())
-		}
+	serve := startServeRuntimeTestProcess(t, serveOptions{
+		ConfigPath:           configPath,
+		ContractsPath:        filepath.Join("tests", "tier1-primitives", "test-emits-single"),
+		DataSource:           dataDir,
+		WorkspaceBackend:     workspace.BackendHost,
+		WorkspaceBackendSet:  true,
+		PlatformSpecPath:     defaultPlatformSpecPath,
+		StoreMode:            storebackend.ActiveDefaultBackend().String(),
+		APIListenAddr:        "127.0.0.1:0",
+		MCPListenAddr:        "127.0.0.1:0",
+		SelfCheck:            true,
+		RequireBundleMatch:   false,
+		ShutdownGrace:        runtimepkg.DefaultShutdownGrace,
+		Verbose:              true,
+		NoRequireBundleMatch: true,
 	})
-	waitForServeReadyLine(t, &out, done)
-	cancelServe()
-	if code := <-done; code != 0 {
-		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, out.String())
+	serve.waitForReadyLine()
+	if code := serve.stop(); code != 0 {
+		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, serve.outputString())
 	}
-	stopped = true
-	if strings.Contains(out.String(), "workspace image") || strings.Contains(out.String(), "docker is not available") {
-		t.Fatalf("host workspace serve output shows Docker dependency despite host backend:\n%s", out.String())
+	if strings.Contains(serve.outputString(), "workspace image") || strings.Contains(serve.outputString(), "docker is not available") {
+		t.Fatalf("host workspace serve output shows Docker dependency despite host backend:\n%s", serve.outputString())
 	}
 }
 
@@ -3585,34 +3498,27 @@ func TestRunServeRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDiskContractsSer
 	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() serveWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
-	ctx, cancel := context.WithCancel(context.Background())
-	var out lockedBuffer
-	done := make(chan int, 1)
-	go func() {
-		done <- runServeRuntime(ctx, repoRoot(), serveOptions{
-			ConfigPath:         writeServeRuntimeTestConfig(t),
-			ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-			PlatformSpecPath:   defaultPlatformSpecPath,
-			StoreMode:          "postgres",
-			APIListenAddr:      "127.0.0.1:0",
-			MCPListenAddr:      "127.0.0.1:0",
-			SelfCheck:          true,
-			RequireBundleMatch: true,
-			Verbose:            true,
-			Output:             &out,
-		})
-	}()
+	serve := startServeRuntimeTestProcess(t, serveOptions{
+		ConfigPath:         writeServeRuntimeTestConfig(t),
+		ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+		PlatformSpecPath:   defaultPlatformSpecPath,
+		StoreMode:          "postgres",
+		APIListenAddr:      "127.0.0.1:0",
+		MCPListenAddr:      "127.0.0.1:0",
+		SelfCheck:          true,
+		RequireBundleMatch: true,
+		Verbose:            true,
+	})
 
-	waitForServeReadyLine(t, &out, done)
-	cancel()
-	if code := <-done; code != 0 {
-		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, out.String())
+	serve.waitForReadyLine()
+	if code := serve.stop(); code != 0 {
+		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, serve.outputString())
 	}
 	for _, table := range []string{"bundles", "runs", "events", "event_deliveries"} {
 		assertPostgresTableExists(t, db, table)
 	}
-	if !strings.Contains(out.String(), "state_stores=verified") {
-		t.Fatalf("serve output missing state store proof:\n%s", out.String())
+	if !strings.Contains(serve.outputString(), "state_stores=verified") {
+		t.Fatalf("serve output missing state store proof:\n%s", serve.outputString())
 	}
 }
 
@@ -3620,37 +3526,30 @@ func TestRunServeRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDevAbandon(t *te
 	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() serveWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
-	ctx, cancel := context.WithCancel(context.Background())
-	var out lockedBuffer
-	done := make(chan int, 1)
-	go func() {
-		done <- runServeRuntime(ctx, repoRoot(), serveOptions{
-			ConfigPath:           writeServeRuntimeTestConfig(t),
-			ContractsPath:        filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-			PlatformSpecPath:     defaultPlatformSpecPath,
-			StoreMode:            "postgres",
-			APIListenAddr:        "127.0.0.1:0",
-			MCPListenAddr:        "127.0.0.1:0",
-			SelfCheck:            true,
-			Dev:                  true,
-			RequireBundleMatch:   false,
-			NoRequireBundleMatch: true,
-			AbandonActiveRuns:    true,
-			Verbose:              true,
-			Output:               &out,
-		})
-	}()
+	serve := startServeRuntimeTestProcess(t, serveOptions{
+		ConfigPath:           writeServeRuntimeTestConfig(t),
+		ContractsPath:        filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+		PlatformSpecPath:     defaultPlatformSpecPath,
+		StoreMode:            "postgres",
+		APIListenAddr:        "127.0.0.1:0",
+		MCPListenAddr:        "127.0.0.1:0",
+		SelfCheck:            true,
+		Dev:                  true,
+		RequireBundleMatch:   false,
+		NoRequireBundleMatch: true,
+		AbandonActiveRuns:    true,
+		Verbose:              true,
+	})
 
-	waitForServeReadyLine(t, &out, done)
-	cancel()
-	if code := <-done; code != 0 {
-		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, out.String())
+	serve.waitForReadyLine()
+	if code := serve.stop(); code != 0 {
+		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, serve.outputString())
 	}
 	for _, table := range []string{"bundles", "runs", "run_control_state", "event_receipts"} {
 		assertPostgresTableExists(t, db, table)
 	}
-	if strings.Contains(out.String(), "relation") && strings.Contains(out.String(), "does not exist") {
-		t.Fatalf("serve output contains missing-table failure:\n%s", out.String())
+	if strings.Contains(serve.outputString(), "relation") && strings.Contains(serve.outputString(), "does not exist") {
+		t.Fatalf("serve output contains missing-table failure:\n%s", serve.outputString())
 	}
 }
 
@@ -3670,33 +3569,26 @@ func runServeRuntimeFreshEmptySQLiteBootsWithAbandon(t *testing.T, dev bool) {
 	t.Setenv(storebackend.EnvSQLitePath, sqlitePath)
 	requireBundleMatch := !dev
 	noRequireBundleMatch := dev
-	ctx, cancel := context.WithCancel(context.Background())
-	var out lockedBuffer
-	done := make(chan int, 1)
-	go func() {
-		done <- runServeRuntime(ctx, repoRoot(), serveOptions{
-			ConfigPath:           writeServeRuntimeTestConfig(t),
-			ContractsPath:        filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-			PlatformSpecPath:     defaultPlatformSpecPath,
-			APIListenAddr:        "127.0.0.1:0",
-			MCPListenAddr:        "127.0.0.1:0",
-			SelfCheck:            true,
-			Dev:                  dev,
-			RequireBundleMatch:   requireBundleMatch,
-			NoRequireBundleMatch: noRequireBundleMatch,
-			AbandonActiveRuns:    true,
-			Verbose:              true,
-			Output:               &out,
-		})
-	}()
+	serve := startServeRuntimeTestProcess(t, serveOptions{
+		ConfigPath:           writeServeRuntimeTestConfig(t),
+		ContractsPath:        filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+		PlatformSpecPath:     defaultPlatformSpecPath,
+		APIListenAddr:        "127.0.0.1:0",
+		MCPListenAddr:        "127.0.0.1:0",
+		SelfCheck:            true,
+		Dev:                  dev,
+		RequireBundleMatch:   requireBundleMatch,
+		NoRequireBundleMatch: noRequireBundleMatch,
+		AbandonActiveRuns:    true,
+		Verbose:              true,
+	})
 
-	waitForServeReadyLine(t, &out, done)
-	cancel()
-	if code := <-done; code != 0 {
-		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, out.String())
+	serve.waitForReadyLine()
+	if code := serve.stop(); code != 0 {
+		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, serve.outputString())
 	}
-	if strings.Contains(out.String(), "postgres store is required") {
-		t.Fatalf("serve output contains stale postgres-only abandon failure:\n%s", out.String())
+	if strings.Contains(serve.outputString(), "postgres store is required") {
+		t.Fatalf("serve output contains stale postgres-only abandon failure:\n%s", serve.outputString())
 	}
 	if _, err := os.Stat(sqlitePath); err != nil {
 		t.Fatalf("sqlite dev db not created at %s: %v", sqlitePath, err)
@@ -3709,28 +3601,22 @@ func TestRunServeRuntimeSQLiteAbandonActiveRunsQuiescesBeforeReadiness(t *testin
 	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
 	runID, eventID := seedServeRuntimeSQLiteAbandonWork(t, sqlitePath)
 	t.Setenv(storebackend.EnvSQLitePath, sqlitePath)
-	ctx, cancel := context.WithCancel(context.Background())
-	var out lockedBuffer
-	done := make(chan int, 1)
-	go func() {
-		done <- runServeRuntime(ctx, repoRoot(), serveOptions{
-			ConfigPath:         writeServeRuntimeTestConfig(t),
-			ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-			PlatformSpecPath:   defaultPlatformSpecPath,
-			APIListenAddr:      "127.0.0.1:0",
-			MCPListenAddr:      "127.0.0.1:0",
-			SelfCheck:          true,
-			RequireBundleMatch: true,
-			AbandonActiveRuns:  true,
-			Verbose:            true,
-			Output:             &out,
-		})
-	}()
+	ctx := context.Background()
+	serve := startServeRuntimeTestProcess(t, serveOptions{
+		ConfigPath:         writeServeRuntimeTestConfig(t),
+		ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+		PlatformSpecPath:   defaultPlatformSpecPath,
+		APIListenAddr:      "127.0.0.1:0",
+		MCPListenAddr:      "127.0.0.1:0",
+		SelfCheck:          true,
+		RequireBundleMatch: true,
+		AbandonActiveRuns:  true,
+		Verbose:            true,
+	})
 
-	waitForServeReadyLine(t, &out, done)
-	cancel()
-	if code := <-done; code != 0 {
-		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, out.String())
+	serve.waitForReadyLine()
+	if code := serve.stop(); code != 0 {
+		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, serve.outputString())
 	}
 	sqliteStore, err := store.NewSQLiteRuntimeStore(sqlitePath)
 	if err != nil {
@@ -3921,29 +3807,21 @@ func TestRunServeRuntimeUnavailableBundleStartupRecoveryOrphansExpectedUnavailab
 		seedServeRuntimeUnavailableBundleRunState(t, ctx, db, target.runID, target.source, target.fingerprint)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	var out lockedBuffer
-	done := make(chan int, 1)
-	go func() {
-		done <- runServeRuntime(ctx, repoRoot(), serveOptions{
-			ConfigPath:         writeServeRuntimeTestConfig(t),
-			ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-			PlatformSpecPath:   defaultPlatformSpecPath,
-			StoreMode:          "postgres",
-			APIListenAddr:      "127.0.0.1:0",
-			MCPListenAddr:      "127.0.0.1:0",
-			SelfCheck:          true,
-			RequireBundleMatch: true,
-			Verbose:            true,
-			Output:             &out,
-		})
-	}()
+	serve := startServeRuntimeTestProcess(t, serveOptions{
+		ConfigPath:         writeServeRuntimeTestConfig(t),
+		ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+		PlatformSpecPath:   defaultPlatformSpecPath,
+		StoreMode:          "postgres",
+		APIListenAddr:      "127.0.0.1:0",
+		MCPListenAddr:      "127.0.0.1:0",
+		SelfCheck:          true,
+		RequireBundleMatch: true,
+		Verbose:            true,
+	})
 
-	waitForServeReadyLine(t, &out, done)
-	cancel()
-	if code := <-done; code != 0 {
-		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, out.String())
+	serve.waitForReadyLine()
+	if code := serve.stop(); code != 0 {
+		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, serve.outputString())
 	}
 	assertServeRuntimeRunStillActive(t, context.Background(), &store.PostgresStore{DB: db}, persistedRunID)
 	for _, target := range orphanTargets {
@@ -7233,51 +7111,43 @@ func TestRunServeRuntimeVerboseEmitsPlatformSpecBootSequence(t *testing.T) {
 		configuredWorkspaceLifecycleForServe = oldWorkspaceLifecycle
 	})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	var out lockedBuffer
-	done := make(chan int, 1)
-	go func() {
-		done <- runServeRuntime(ctx, repoRoot(), serveOptions{
-			ConfigPath:         writeServeRuntimeTestConfig(t),
-			ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-			PlatformSpecPath:   defaultPlatformSpecPath,
-			StoreMode:          "postgres",
-			APIListenAddr:      "127.0.0.1:0",
-			MCPListenAddr:      "127.0.0.1:0",
-			SelfCheck:          true,
-			RequireBundleMatch: true,
-			Verbose:            true,
-			Output:             &out,
-		})
-	}()
+	serve := startServeRuntimeTestProcess(t, serveOptions{
+		ConfigPath:         writeServeRuntimeTestConfig(t),
+		ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+		PlatformSpecPath:   defaultPlatformSpecPath,
+		StoreMode:          "postgres",
+		APIListenAddr:      "127.0.0.1:0",
+		MCPListenAddr:      "127.0.0.1:0",
+		SelfCheck:          true,
+		RequireBundleMatch: true,
+		Verbose:            true,
+	})
 
-	waitForServeReadyLine(t, &out, done)
-	cancel()
-	if code := <-done; code != 0 {
-		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, out.String())
+	serve.waitForReadyLine()
+	if code := serve.stop(); code != 0 {
+		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, serve.outputString())
 	}
 
-	rows := parseServeBootProgressRows(t, out.String())
+	rows := parseServeBootProgressRows(t, serve.outputString())
 	if got, want := len(rows), len(steps); got != want {
-		t.Fatalf("serve boot progress rows = %d, want %d\noutput:\n%s", got, want, out.String())
+		t.Fatalf("serve boot progress rows = %d, want %d\noutput:\n%s", got, want, serve.outputString())
 	}
 	for i, want := range steps {
 		got := rows[i]
 		if got.Step != want.Step || got.Total != runtimepkg.BootProgressTotalSteps || got.Name != want.Name {
-			t.Fatalf("row %d = step=%d total=%d name=%q, want step=%d total=%d name=%q\noutput:\n%s", i, got.Step, got.Total, got.Name, want.Step, runtimepkg.BootProgressTotalSteps, want.Name, out.String())
+			t.Fatalf("row %d = step=%d total=%d name=%q, want step=%d total=%d name=%q\noutput:\n%s", i, got.Step, got.Total, got.Name, want.Step, runtimepkg.BootProgressTotalSteps, want.Name, serve.outputString())
 		}
 	}
-	if strings.Contains(out.String(), "health_endpoints_respond       ok  (/healthz /readyz /v1/rpc /v1/ws)") {
-		t.Fatalf("serve verbose output still claims unproven v1 endpoint response:\n%s", out.String())
+	if strings.Contains(serve.outputString(), "health_endpoints_respond       ok  (/healthz /readyz /v1/rpc /v1/ws)") {
+		t.Fatalf("serve verbose output still claims unproven v1 endpoint response:\n%s", serve.outputString())
 	}
 	for _, want := range []string{"http_listener_bind", "api_listener=", "api_routes=" + serveAPIRoutes, "mcp_listener=", "mcp_routes=" + serveMCPRoutes, "health_endpoints_respond", serveReadinessRoutes} {
-		if !strings.Contains(out.String(), want) {
-			t.Fatalf("serve verbose output missing %q:\n%s", want, out.String())
+		if !strings.Contains(serve.outputString(), want) {
+			t.Fatalf("serve verbose output missing %q:\n%s", want, serve.outputString())
 		}
 	}
-	if strings.Contains(out.String(), "health=127.") {
-		t.Fatalf("serve verbose output still labels the unified listener as health-only:\n%s", out.String())
+	if strings.Contains(serve.outputString(), "health=127.") {
+		t.Fatalf("serve verbose output still labels the unified listener as health-only:\n%s", serve.outputString())
 	}
 }
 
@@ -7525,30 +7395,22 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 		t.Fatalf("seed active delivery: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	var out lockedBuffer
-	done := make(chan int, 1)
-	go func() {
-		done <- runServeRuntime(ctx, repoRoot(), serveOptions{
-			ConfigPath:         writeServeRuntimeTestConfig(t),
-			ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-			PlatformSpecPath:   defaultPlatformSpecPath,
-			StoreMode:          "postgres",
-			APIListenAddr:      "127.0.0.1:0",
-			MCPListenAddr:      "127.0.0.1:0",
-			SelfCheck:          true,
-			RequireBundleMatch: true,
-			AbandonActiveRuns:  true,
-			Verbose:            true,
-			Output:             &out,
-		})
-	}()
+	serve := startServeRuntimeTestProcess(t, serveOptions{
+		ConfigPath:         writeServeRuntimeTestConfig(t),
+		ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+		PlatformSpecPath:   defaultPlatformSpecPath,
+		StoreMode:          "postgres",
+		APIListenAddr:      "127.0.0.1:0",
+		MCPListenAddr:      "127.0.0.1:0",
+		SelfCheck:          true,
+		RequireBundleMatch: true,
+		AbandonActiveRuns:  true,
+		Verbose:            true,
+	})
 
-	waitForServeReadyLine(t, &out, done)
-	cancel()
-	if code := <-done; code != 0 {
-		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, out.String())
+	serve.waitForReadyLine()
+	if code := serve.stop(); code != 0 {
+		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, serve.outputString())
 	}
 
 	var runStatus, controlStatus, reason, controlledBy string
@@ -7986,23 +7848,118 @@ func (b *lockedBuffer) String() string {
 	return b.buf.String()
 }
 
-func waitForServeReadyLine(t *testing.T, out *lockedBuffer, done <-chan int) {
+const (
+	serveRuntimeReadyTimeout = 30 * time.Second
+	serveRuntimeStopTimeout  = 5 * time.Second
+)
+
+type serveRuntimeTestProcess struct {
+	t      *testing.T
+	cancel context.CancelFunc
+	done   <-chan int
+	out    *lockedBuffer
+
+	mu      sync.Mutex
+	stopped bool
+	code    int
+}
+
+func startServeRuntimeTestProcess(t *testing.T, opts serveOptions) *serveRuntimeTestProcess {
 	t.Helper()
-	deadline := time.After(5 * time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
+	out := &lockedBuffer{}
+	opts.Output = out
+	done := make(chan int, 1)
+	process := &serveRuntimeTestProcess{
+		t:      t,
+		cancel: cancel,
+		done:   done,
+		out:    out,
+	}
+	t.Cleanup(process.cleanup)
+	go func() {
+		done <- runServeRuntime(ctx, repoRoot(), opts)
+	}()
+	return process
+}
+
+func (p *serveRuntimeTestProcess) outputString() string {
+	return p.out.String()
+}
+
+func (p *serveRuntimeTestProcess) waitForReadyLine() {
+	p.t.Helper()
+	deadline := time.After(serveRuntimeReadyTimeout)
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		select {
-		case code := <-done:
-			t.Fatalf("runServeRuntime exited before ready line with code %d\noutput:\n%s", code, out.String())
+		case code := <-p.done:
+			p.recordStopped(code)
+			p.t.Fatalf("runServeRuntime exited before ready line with code %d\noutput:\n%s", code, p.outputString())
 		case <-deadline:
-			t.Fatalf("timed out waiting for serve ready line\noutput:\n%s", out.String())
+			p.cancel()
+			if code, ok := p.waitForExit(serveRuntimeStopTimeout); ok {
+				p.t.Fatalf("timed out waiting for serve ready line; runServeRuntime stopped after cancellation with code %d\noutput:\n%s", code, p.outputString())
+			}
+			p.t.Fatalf("timed out waiting for serve ready line and stopping runServeRuntime\noutput:\n%s", p.outputString())
 		case <-ticker.C:
-			if strings.Contains(out.String(), "[22/22]") {
+			if strings.Contains(p.outputString(), "[22/22]") {
 				return
 			}
 		}
 	}
+}
+
+func (p *serveRuntimeTestProcess) stop() int {
+	p.t.Helper()
+	p.cancel()
+	code, ok := p.waitForExit(serveRuntimeStopTimeout)
+	if !ok {
+		p.t.Fatalf("timed out stopping runServeRuntime\noutput:\n%s", p.outputString())
+	}
+	return code
+}
+
+func (p *serveRuntimeTestProcess) cleanup() {
+	p.t.Helper()
+	p.mu.Lock()
+	stopped := p.stopped
+	p.mu.Unlock()
+	if stopped {
+		return
+	}
+	p.cancel()
+	if _, ok := p.waitForExit(serveRuntimeStopTimeout); !ok {
+		p.t.Errorf("timed out stopping runServeRuntime during cleanup\noutput:\n%s", p.outputString())
+	}
+}
+
+func (p *serveRuntimeTestProcess) waitForExit(timeout time.Duration) (int, bool) {
+	p.t.Helper()
+	p.mu.Lock()
+	if p.stopped {
+		code := p.code
+		p.mu.Unlock()
+		return code, true
+	}
+	p.mu.Unlock()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case code := <-p.done:
+		p.recordStopped(code)
+		return code, true
+	case <-timer.C:
+		return 0, false
+	}
+}
+
+func (p *serveRuntimeTestProcess) recordStopped(code int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.stopped = true
+	p.code = code
 }
 
 func serveRuntimeAPIListenerFromOutput(t *testing.T, output string) string {
