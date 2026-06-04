@@ -664,6 +664,49 @@ func TestHandleEmitTool_FailsClosedOnUndeclaredPayloadField(t *testing.T) {
 	}
 }
 
+func TestHandleEmitTool_AllowsDeclaredTemplateIDBusinessPayload(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"repo.template.selected": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Type: "object",
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"template_id": {Type: "string"},
+					},
+					Required: []string{"template_id"},
+				},
+			},
+		},
+	}
+	source := semanticview.Wrap(bundle)
+	emitRegistry := NewEmitRegistry(source, nil)
+
+	bus := &publishBusCapture{}
+	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
+	actor := models.AgentConfig{
+		ID:         "repo-agent",
+		Role:       "repo_agent",
+		EmitEvents: []string{"repo.template.selected"},
+	}
+
+	_, err := exec.handleEmitTool(context.Background(), actor, "emit_repo_template_selected", map[string]any{
+		"template_id": "application-basic-v1",
+	})
+	if err != nil {
+		t.Fatalf("handleEmitTool: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(bus.event.Payload, &payload); err != nil {
+		t.Fatalf("json.Unmarshal payload: %v", err)
+	}
+	if got := payload["template_id"]; got != "application-basic-v1" {
+		t.Fatalf("payload template_id = %#v, want business value", got)
+	}
+	if bus.count != 1 {
+		t.Fatalf("publish count = %d, want 1", bus.count)
+	}
+}
+
 func TestHandleEmitTool_AllowsValidWave1EventPayloadTypes(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootTypes: runtimecontracts.TypeCatalogDocument{
