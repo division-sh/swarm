@@ -6887,21 +6887,27 @@ observation_model:
             envelope-owned fields back into payload.
       auto_emit_on_create_surface:
         construction_order:
-        - 1. Start from lifecycle-owned activation fields: instance_id, template_id, flow_path, parent_entity_id
-        - 2. Overlay create_flow_instance config entries only for keys not already owned by the lifecycle surface
-        - 3. Attach runtime-owned envelope context to the emitted event carrier; envelope fields are not copied into payload
-        collision_priority: lifecycle-owned payload fields > create_flow_instance config; runtime-owned envelope context is separate
-          from payload
+        - 1. Start from the resolved create_flow_instance config entries as the authored/config business payload.
+        - '2. Keep activation lifecycle context, including instance_id, template_id, flow_path, and parent_entity_id, on runtime
+          activation metadata and event envelope context; do not synthesize it into payload.'
+        - 3. Attach runtime-owned envelope context to the emitted event carrier; envelope fields are not copied into payload.
+        collision_priority: create_flow_instance config owns the business payload. Activation lifecycle context is separate
+          from payload, so same-named config fields such as template_id remain business fields when the target schema declares
+          them.
         note: This surface is authored only as `auto_emit_on_create.event`, so runtime owns the payload construction. It still
-          must satisfy the active event schema fail-closed. Lifecycle-owned fields are explicit runtime payload on this surface;
-          create_flow_instance config does not silently widen the event contract; envelope fields remain accessible through event.*.
+          must satisfy the active event schema fail-closed. Hidden activation lifecycle context does not silently widen the
+          event contract and is not published as payload merely because the runtime needed it to create the instance; envelope
+          fields remain accessible through event.*.
         runtime_validation:
           description: Runtime validates the constructed auto-emit payload fail-closed before either immediate publish or queued
             post-commit publish.
           validation_view: Validate the constructed payload carrier against the target event schema after canonical Wave 1 type-aware
             schema lowering. Runtime-owned envelope fields are not synthesized into payload for validation.
-          rejection_rule: If any lifecycle/config-authored field is undeclared or violates the schema, flow activation fails. Runtime
-            does not downgrade auto_emit_on_create schema violations into warning-only success on the queued post-commit branch.
+          rejection_rule: If any config-authored business field is undeclared or violates the schema, flow activation fails.
+            Hidden activation lifecycle context fields do not fail validation merely because the target schema omits same-named
+            payload fields. If an event schema declares a lifecycle-shaped field name such as template_id as business payload,
+            the config payload must supply it explicitly. Runtime does not downgrade auto_emit_on_create schema violations into
+            warning-only success on the queued post-commit branch.
   entity_state:
     description: The entity document after handler execution commits.
     observable_fields:

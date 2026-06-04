@@ -16,12 +16,10 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	runtimeeventpayload "github.com/division-sh/swarm/internal/runtime/eventpayload"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerequiredagents "github.com/division-sh/swarm/internal/runtime/requiredagents"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	runtimesharedjson "github.com/division-sh/swarm/internal/runtime/sharedjson"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/google/uuid"
 )
@@ -86,7 +84,7 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 	if initialState == "" {
 		initialState = "pending"
 	}
-	autoEmitEvent, autoEmitName, err := buildAutoEmitOnCreateEvent(req.ContractBundle, schema, templateID, flowPath, instanceID, flowEntityID, parentEntityID, req.Config)
+	autoEmitEvent, autoEmitName, err := buildAutoEmitOnCreateEvent(req.ContractBundle, schema, templateID, flowPath, flowEntityID, req.Config)
 	if err != nil {
 		return err
 	}
@@ -187,26 +185,19 @@ func flowInstanceActivationMetadata(instance runtimeflowidentity.Instance, flowE
 	return metadata
 }
 
-func buildAutoEmitOnCreateEvent(source semanticview.Source, schema runtimecontracts.FlowSchemaDocument, templateID, flowPath, instanceID, flowEntityID, parentEntityID string, config map[string]any) (events.Event, string, error) {
+func buildAutoEmitOnCreateEvent(source semanticview.Source, schema runtimecontracts.FlowSchemaDocument, templateID, flowPath, flowEntityID string, config map[string]any) (events.Event, string, error) {
 	autoEmit := strings.TrimSpace(schema.AutoEmitOnCreate.Event)
 	if autoEmit == "" {
 		return events.Event{}, "", nil
 	}
 	eventType := eventidentity.ExternalizeForFlow(flowPath, []string{autoEmit}, autoEmit)
-	payload := map[string]any{
-		"instance_id":      instanceID,
-		"template_id":      templateID,
-		"flow_path":        flowPath,
-		"parent_entity_id": strings.TrimSpace(parentEntityID),
-	}
+	payload := map[string]any{}
 	for key, value := range config {
 		key = strings.TrimSpace(key)
 		if key == "" {
 			continue
 		}
-		if _, exists := payload[key]; !exists {
-			payload[key] = value
-		}
+		payload[key] = value
 	}
 	if err := validateAutoEmitPayload(source, templateID, autoEmit, payload); err != nil {
 		return events.Event{}, autoEmit, fmt.Errorf("auto-emit %s: %w", autoEmit, err)
@@ -242,24 +233,10 @@ func validateAutoEmitPayload(source semanticview.Source, flowID, eventType strin
 		return fmt.Errorf("%w for %s: %v", runtimebus.ErrPayloadValidation, proof.EventKey(), err)
 	}
 	schema := resolution.Schema
-	validationPayload := runtimeeventpayload.StripUndeclaredRuntimeOwnedCanonicalContext(payload, autoEmitSchemaPropertyNames(schema.Schema))
-	if err := runtimeeventschema.ValidatePayloadAgainstSchema(schema.Schema, validationPayload); err != nil {
+	if err := runtimeeventschema.ValidatePayloadAgainstSchema(schema.Schema, payload); err != nil {
 		return fmt.Errorf("%w for %s: %v", runtimebus.ErrPayloadValidation, proof.EventKey(), err)
 	}
 	return nil
-}
-
-func autoEmitSchemaPropertyNames(schema map[string]any) map[string]struct{} {
-	props := runtimesharedjson.SchemaProperties(schema["properties"])
-	out := make(map[string]struct{}, len(props))
-	for key := range props {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
-		out[key] = struct{}{}
-	}
-	return out
 }
 
 func (am *AgentManager) EnsureStaticFlowRequiredAgents(ctx context.Context, source semanticview.Source) error {

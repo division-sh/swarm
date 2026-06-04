@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -218,14 +219,8 @@ func testFlowBundle(autoEmit string) *runtimecontracts.WorkflowContractBundle {
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"task.started": {
 				Payload: runtimecontracts.EventPayloadSpec{
-					Properties: map[string]runtimecontracts.EventFieldSpec{
-						"instance_id":      {Type: "string"},
-						"template_id":      {Type: "string"},
-						"flow_path":        {Type: "string"},
-						"parent_entity_id": {Type: "string"},
-					},
+					Properties: map[string]runtimecontracts.EventFieldSpec{},
 				},
-				Required: []string{"instance_id", "template_id", "flow_path", "parent_entity_id"},
 			},
 		},
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
@@ -384,6 +379,29 @@ func testActivationRequest(bundle *runtimecontracts.WorkflowContractBundle, temp
 	}
 }
 
+func decodeFlowActivationEventPayload(t *testing.T, event events.Event) map[string]any {
+	t.Helper()
+	var payload map[string]any
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		t.Fatalf("decode event payload: %v", err)
+	}
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	return payload
+}
+
+func findPublishedFlowActivationEvent(t *testing.T, bus *flowActivationTestBus, eventType string) events.Event {
+	t.Helper()
+	for _, event := range bus.published {
+		if string(event.Type) == eventType {
+			return event
+		}
+	}
+	t.Fatalf("published events = %#v, want %s", bus.published, eventType)
+	return events.Event{}
+}
+
 func TestActivateFlowInstanceAddsDerivedRouteTableInstance(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	am := newFlowActivationManager(bus, &flowActivationTestInstanceStore{})
@@ -433,6 +451,107 @@ func TestActivateFlowInstancePublishesAutoEmitEvent(t *testing.T) {
 	}
 	if got := strings.TrimSpace(autoEmit.RunID); got != runID {
 		t.Fatalf("published run_id = %q, want active run %q", got, runID)
+	}
+}
+
+func TestActivateFlowInstanceAutoEmitPublishesConfigPayloadWithoutActivationContext(t *testing.T) {
+	bus := &flowActivationTestBus{}
+	am := newFlowActivationManager(bus, &flowActivationTestInstanceStore{})
+	bundle := testFlowBundleWithAutoEmitEntry("component.scaffold.start", runtimecontracts.EventCatalogEntry{
+		Payload: runtimecontracts.EventPayloadSpec{
+			Properties: map[string]runtimecontracts.EventFieldSpec{
+				"component_id":   {Type: "string"},
+				"component_type": {Type: "string"},
+			},
+		},
+		Required: []string{"component_id", "component_type"},
+	})
+	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
+	req.Config = map[string]any{
+		"component_id":   "component-1",
+		"component_type": "api",
+	}
+
+	if err := am.ActivateFlowInstance(context.Background(), req); err != nil {
+		t.Fatalf("ActivateFlowInstance: %v", err)
+	}
+	event := findPublishedFlowActivationEvent(t, bus, "review/inst-1/component.scaffold.start")
+	payload := decodeFlowActivationEventPayload(t, event)
+	if got := payload["component_id"]; got != "component-1" {
+		t.Fatalf("component_id payload = %#v, want component-1", got)
+	}
+	if got := payload["component_type"]; got != "api" {
+		t.Fatalf("component_type payload = %#v, want api", got)
+	}
+	for _, key := range []string{"instance_id", "template_id", "flow_path", "parent_entity_id"} {
+		if _, ok := payload[key]; ok {
+			t.Fatalf("auto-emit payload included activation context %q: %#v", key, payload)
+		}
+	}
+	if got := event.EntityID(); got != runtimepipeline.FlowInstanceEntityID("review/inst-1") {
+		t.Fatalf("auto-emit entity_id = %q, want flow instance entity", got)
+	}
+	if got := event.FlowInstance(); got != "review/inst-1" {
+		t.Fatalf("auto-emit flow_instance = %q, want review/inst-1", got)
+	}
+}
+
+func TestActivateFlowInstanceQueuedAutoEmitUsesProjectedConfigPayload(t *testing.T) {
+	bus := &flowActivationTestBus{}
+	am := newFlowActivationManager(bus, &flowActivationTestInstanceStore{})
+	bundle := testFlowBundleWithAutoEmitEntry("component.scaffold.start", runtimecontracts.EventCatalogEntry{
+		Payload: runtimecontracts.EventPayloadSpec{
+			Properties: map[string]runtimecontracts.EventFieldSpec{
+				"component_id": {Type: "string"},
+			},
+		},
+		Required: []string{"component_id"},
+	})
+	postCommit := make([]func(), 0, 1)
+	ctx := runtimepipeline.WithPipelinePostCommitActions(context.Background(), &postCommit)
+	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
+	req.Config = map[string]any{"component_id": "component-1"}
+
+	if err := am.ActivateFlowInstance(ctx, req); err != nil {
+		t.Fatalf("ActivateFlowInstance: %v", err)
+	}
+	if len(bus.published) != 0 {
+		t.Fatalf("auto-emit published before post-commit flush: %#v", bus.published)
+	}
+	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
+	event := findPublishedFlowActivationEvent(t, bus, "review/inst-1/component.scaffold.start")
+	payload := decodeFlowActivationEventPayload(t, event)
+	if got := payload["component_id"]; got != "component-1" {
+		t.Fatalf("component_id payload = %#v, want component-1", got)
+	}
+	for _, key := range []string{"instance_id", "template_id", "flow_path", "parent_entity_id"} {
+		if _, ok := payload[key]; ok {
+			t.Fatalf("queued auto-emit payload included activation context %q: %#v", key, payload)
+		}
+	}
+}
+
+func TestActivateFlowInstanceAutoEmitAllowsDeclaredTemplateIDBusinessField(t *testing.T) {
+	bus := &flowActivationTestBus{}
+	am := newFlowActivationManager(bus, &flowActivationTestInstanceStore{})
+	bundle := testFlowBundleWithAutoEmitEntry("repo.template.selected", runtimecontracts.EventCatalogEntry{
+		Payload: runtimecontracts.EventPayloadSpec{
+			Properties: map[string]runtimecontracts.EventFieldSpec{
+				"template_id": {Type: "string"},
+			},
+		},
+		Required: []string{"template_id"},
+	})
+	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
+	req.Config = map[string]any{"template_id": "application-basic-v1"}
+
+	if err := am.ActivateFlowInstance(context.Background(), req); err != nil {
+		t.Fatalf("ActivateFlowInstance: %v", err)
+	}
+	event := findPublishedFlowActivationEvent(t, bus, "review/inst-1/repo.template.selected")
+	payload := decodeFlowActivationEventPayload(t, event)
+	if got := payload["template_id"]; got != "application-basic-v1" {
+		t.Fatalf("template_id payload = %#v, want config business value", got)
 	}
 }
 
@@ -509,11 +628,10 @@ func TestActivateFlowInstanceFailsClosedOnAutoEmitMissingRequiredField(t *testin
 	bundle := testFlowBundleWithAutoEmitEntry("task.started", runtimecontracts.EventCatalogEntry{
 		Payload: runtimecontracts.EventPayloadSpec{
 			Properties: map[string]runtimecontracts.EventFieldSpec{
-				"instance_id": {Type: "string"},
-				"reason":      {Type: "string"},
+				"reason": {Type: "string"},
 			},
 		},
-		Required: []string{"instance_id", "reason"},
+		Required: []string{"reason"},
 	})
 
 	err := am.ActivateFlowInstance(context.Background(), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1"))
@@ -570,6 +688,28 @@ func TestActivateFlowInstanceQueuedAutoEmitFailsClosedOnUndeclaredConfigField(t 
 	}
 	if _, ok := am.GetAgentConfig("reviewer-inst-1"); ok {
 		t.Fatal("unexpected activated agent config after queued auto-emit schema failure")
+	}
+}
+
+func TestActivateFlowInstanceAutoEmitFailsClosedOnUndeclaredEnvelopeLikeConfigField(t *testing.T) {
+	bus := &flowActivationTestBus{}
+	instances := &flowActivationTestInstanceStore{}
+	am := newFlowActivationManager(bus, instances)
+	bundle := testFlowBundle("task.started")
+	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
+	req.Config = map[string]any{
+		"entity_id": "business-value",
+	}
+
+	err := am.ActivateFlowInstance(context.Background(), req)
+	if err == nil || !strings.Contains(err.Error(), "auto-emit task.started") || !strings.Contains(err.Error(), "entity_id is not allowed") {
+		t.Fatalf("ActivateFlowInstance error = %v, want undeclared envelope-like config field failure", err)
+	}
+	if len(bus.published) != 0 {
+		t.Fatalf("published events = %#v, want none", bus.published)
+	}
+	if len(instances.creates) != 0 {
+		t.Fatalf("instance creates = %#v, want none", instances.creates)
 	}
 }
 
@@ -689,15 +829,10 @@ func TestActivateFlowInstancePersistsFlowInstanceConfig(t *testing.T) {
 	bundle := testFlowBundleWithAutoEmitEntry("task.started", runtimecontracts.EventCatalogEntry{
 		Payload: runtimecontracts.EventPayloadSpec{
 			Properties: map[string]runtimecontracts.EventFieldSpec{
-				"instance_id":      {Type: "string"},
-				"template_id":      {Type: "string"},
-				"flow_path":        {Type: "string"},
-				"parent_entity_id": {Type: "string"},
-				"name":             {Type: "string"},
-				"priority":         {Type: "integer"},
+				"name":     {Type: "string"},
+				"priority": {Type: "integer"},
 			},
 		},
-		Required: []string{"instance_id", "template_id", "flow_path", "parent_entity_id"},
 	})
 
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
