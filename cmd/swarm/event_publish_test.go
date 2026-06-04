@@ -431,6 +431,16 @@ func TestEventPublishMapsFailureExitCodes(t *testing.T) {
 			wantStderr: "EVENT_NOT_DECLARED",
 		},
 		{
+			name: "publish failed exits six",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				writeEventPublishJSONRPCError(t, w, req.ID, "EVENT_PUBLISH_FAILED")
+			},
+			wantCode:   6,
+			wantStderr: "EVENT_PUBLISH_FAILED",
+		},
+		{
 			name: "payload validation exits six",
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
@@ -479,6 +489,21 @@ func TestEventPublishMapsFailureExitCodes(t *testing.T) {
 			},
 			wantCode:   3,
 			wantStderr: "METHOD_UNAVAILABLE",
+		},
+		{
+			name: "standard internal error includes diagnostics",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				writeEventPublishJSONRPCStandardError(t, w, req.ID)
+			},
+			wantCode:   3,
+			wantStderr: "JSON-RPC -32603: internal error",
+			wantExtra: []string{
+				"correlation_id=corr-event-publish",
+				"error=postgres store is required",
+				"run_id=run-1",
+			},
 		},
 		{
 			name: "http auth exits four",
@@ -632,6 +657,28 @@ func writeEventPublishJSONRPCErrorWithDetails(t *testing.T, w http.ResponseWrite
 				"details":        details,
 				"retryable":      false,
 				"correlation_id": "corr-event-publish",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("encode response: %v", err)
+	}
+}
+
+func writeEventPublishJSONRPCStandardError(t *testing.T, w http.ResponseWriter, id string) {
+	t.Helper()
+	w.Header().Set("content-type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"error": map[string]any{
+			"code":    -32603,
+			"message": "internal error",
+			"data": map[string]any{
+				"correlation_id": "corr-event-publish",
+				"details": map[string]any{
+					"error":  "postgres store is required",
+					"run_id": "run-1",
+				},
 			},
 		},
 	}); err != nil {
