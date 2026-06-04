@@ -14,6 +14,12 @@ import (
 	"github.com/google/uuid"
 )
 
+type sqliteScheduleExecutor interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
 func (s *SQLiteRuntimeStore) InsertMailboxItem(ctx context.Context, item runtimetools.MailboxItem) (string, error) {
 	if strings.TrimSpace(item.Type) == "" {
 		return "", fmt.Errorf("mailbox item type is required")
@@ -228,7 +234,8 @@ func (s *SQLiteRuntimeStore) UpsertSchedule(ctx context.Context, sc runtimepipel
 	if timerName == "" {
 		timerName = strings.TrimSpace(sc.EventType)
 	}
-	_, err := s.DB.ExecContext(ctx, `
+	exec := sqliteScheduleDBExecutor(ctx, s.DB)
+	_, err := exec.ExecContext(ctx, `
 		INSERT INTO timers (
 			timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
 			fire_at, recurring, recurrence_cron, owner_agent, task_type, status, created_at
@@ -247,7 +254,8 @@ func (s *SQLiteRuntimeStore) CancelScheduleExact(ctx context.Context, sc runtime
 	sc.NormalizeRunID()
 	sc.NormalizeEntityID()
 	sc.NormalizeFlowInstance()
-	_, err := s.DB.ExecContext(ctx, `
+	exec := sqliteScheduleDBExecutor(ctx, s.DB)
+	_, err := exec.ExecContext(ctx, `
 		UPDATE timers
 		SET status = 'cancelled'
 		WHERE COALESCE(run_id, '') = COALESCE(?, '')
@@ -269,7 +277,8 @@ func (s *SQLiteRuntimeStore) CancelScheduleExactTerminal(ctx context.Context, sc
 }
 
 func (s *SQLiteRuntimeStore) LoadActiveSchedules(ctx context.Context) ([]runtimepipeline.Schedule, error) {
-	rows, err := s.DB.QueryContext(ctx, `
+	exec := sqliteScheduleDBExecutor(ctx, s.DB)
+	rows, err := exec.QueryContext(ctx, `
 		SELECT COALESCE(run_id, ''), COALESCE(owner_agent, ''), fire_event, COALESCE(recurrence_cron, ''),
 		       fire_at, COALESCE(entity_id, ''), COALESCE(flow_instance, ''), COALESCE(fire_payload, '{}')
 		FROM timers
@@ -310,7 +319,8 @@ func (s *SQLiteRuntimeStore) MarkScheduleFiredExact(ctx context.Context, sc runt
 	sc.NormalizeRunID()
 	sc.NormalizeEntityID()
 	sc.NormalizeFlowInstance()
-	_, err := s.DB.ExecContext(ctx, `
+	exec := sqliteScheduleDBExecutor(ctx, s.DB)
+	_, err := exec.ExecContext(ctx, `
 		UPDATE timers
 		SET status = 'fired', fired_at = ?
 		WHERE COALESCE(run_id, '') = COALESCE(?, '')
@@ -337,7 +347,8 @@ func (s *SQLiteRuntimeStore) ClaimSchedule(ctx context.Context, sc runtimepipeli
 	sc.NormalizeEntityID()
 	sc.NormalizeFlowInstance()
 	var active bool
-	err := s.DB.QueryRowContext(ctx, `
+	exec := sqliteScheduleDBExecutor(ctx, s.DB)
+	err := exec.QueryRowContext(ctx, `
 		SELECT EXISTS (
 			SELECT 1
 			FROM timers
@@ -362,6 +373,13 @@ func (s *SQLiteRuntimeStore) ReleaseSchedule(context.Context, runtimepipeline.Sc
 
 func (s *SQLiteRuntimeStore) ReleaseScheduleClaims(context.Context) error {
 	return nil
+}
+
+func sqliteScheduleDBExecutor(ctx context.Context, db *sql.DB) sqliteScheduleExecutor {
+	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		return tx
+	}
+	return db
 }
 
 func scheduleTaskIDFromPayload(payload []byte) string {
