@@ -3433,6 +3433,718 @@ task.completed:
 	}
 }
 
+func TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite(t *testing.T) {
+	unsetStoreSelectorEnv(t)
+	stubServeRuntimeWorkspaceLifecycle(t)
+	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
+	t.Setenv(storebackend.EnvSQLitePath, sqlitePath)
+	contractsPath := writeServedEventPublishFollowUpFixture(t)
+	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+	endpoint := startServedEventPublishFollowUpRuntime(t, serveOptions{
+		ConfigPath:           writeServeRuntimeTestConfig(t),
+		ContractsPath:        contractsPath,
+		PlatformSpecPath:     defaultPlatformSpecPath,
+		APIListenAddr:        "127.0.0.1:0",
+		MCPListenAddr:        "127.0.0.1:0",
+		SelfCheck:            true,
+		RequireBundleMatch:   false,
+		NoRequireBundleMatch: true,
+		Verbose:              true,
+	})
+
+	sqliteStore, err := store.NewSQLiteRuntimeStore(sqlitePath)
+	if err != nil {
+		t.Fatalf("NewSQLiteRuntimeStore(%s): %v", sqlitePath, err)
+	}
+	runServedEventPublishFollowUpProof(t, endpoint, sqliteStore.DB, "sqlite", bundleHash)
+	if err := sqliteStore.Close(); err != nil {
+		t.Fatalf("close sqlite proof store: %v", err)
+	}
+}
+
+func TestRunServeRuntimeEventPublishRunIDFollowUpServedPathPostgres(t *testing.T) {
+	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() serveWorkspaceLifecycle {
+		return serveRuntimeWorkspaceStub{}
+	})
+	contractsPath := writeServedEventPublishFollowUpFixture(t)
+	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+	endpoint := startServedEventPublishFollowUpRuntime(t, serveOptions{
+		ConfigPath:         writeServeRuntimeTestConfig(t),
+		ContractsPath:      contractsPath,
+		PlatformSpecPath:   defaultPlatformSpecPath,
+		StoreMode:          "postgres",
+		StoreModeSet:       true,
+		APIListenAddr:      "127.0.0.1:0",
+		MCPListenAddr:      "127.0.0.1:0",
+		SelfCheck:          true,
+		RequireBundleMatch: false,
+		Verbose:            true,
+	})
+
+	runServedEventPublishFollowUpProof(t, endpoint, db, "postgres", bundleHash)
+}
+
+func writeServedEventPublishFollowUpFixture(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: served-event-publish-followup
+version: "1.0.0"
+platform_version: ">=1.6.0"
+flows:
+  - id: validation
+    flow: validation
+    mode: static
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
+initial_state: new
+terminal_states: [done]
+states: [new, waiting, done]
+pins:
+  inputs:
+    events: [thing.created]
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "validation", "schema.yaml"), `
+name: validation
+mode: static
+initial_state: new
+terminal_states: [done]
+states: [new, waiting, done]
+pins:
+  inputs:
+    events: [thing.created]
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "validation", "entities.yaml"), `
+widget:
+  amount:
+    type: integer
+    initial: 0
+  who: text
+  note: text
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "validation", "events.yaml"), `
+thing.created:
+  swarm:
+    source: external
+  entity_id: string
+  amount: integer
+  who: text
+  required:
+    - entity_id
+
+thing.reviewed:
+  swarm:
+    source: external
+  entity_id: string
+  note: text
+  required:
+    - entity_id
+
+thing.unhandled:
+  swarm:
+    source: external
+  entity_id: string
+  note: text
+  required:
+    - entity_id
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "validation", "nodes.yaml"), `
+entity-writer:
+  id: entity-writer
+  execution_type: system_node
+  subscribes_to: [thing.created, thing.reviewed]
+  event_handlers:
+    thing.created:
+      create_entity: true
+      data_accumulation:
+        source_event: thing.created
+        writes:
+          - source_field: amount
+            target_field: amount
+          - source_field: who
+            target_field: who
+      advances_to: waiting
+    thing.reviewed:
+      data_accumulation:
+        source_event: thing.reviewed
+        writes:
+          - source_field: note
+            target_field: note
+      advances_to: done
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "validation", "policy.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "validation", "tools.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "validation", "agents.yaml"), `{}`)
+	return root
+}
+
+func servedEventPublishFixtureBundleHash(t *testing.T, contractsPath string) string {
+	t.Helper()
+	bundle := loadWorkflowValidationBundleAt(t, contractsPath)
+	bundleHash, err := runtimecontracts.BundleHash(bundle)
+	if err != nil {
+		t.Fatalf("BundleHash(%s): %v", contractsPath, err)
+	}
+	return bundleHash
+}
+
+func startServedEventPublishFollowUpRuntime(t *testing.T, opts serveOptions) string {
+	t.Helper()
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	serveCtx, cancelServe := context.WithCancel(context.Background())
+	var out lockedBuffer
+	done := make(chan int, 1)
+	opts.Output = &out
+	go func() {
+		done <- runServeRuntime(serveCtx, repoRoot(), opts)
+	}()
+	stopped := false
+	waitForServeReadyLine(t, &out, done)
+	t.Cleanup(func() {
+		if stopped {
+			return
+		}
+		cancelServe()
+		select {
+		case code := <-done:
+			if code != 0 {
+				t.Errorf("runServeRuntime exit code = %d\noutput:\n%s", code, out.String())
+			}
+		case <-time.After(5 * time.Second):
+			t.Errorf("timed out stopping runServeRuntime\noutput:\n%s", out.String())
+		}
+		stopped = true
+	})
+	return "http://" + serveRuntimeAPIListenerFromOutput(t, out.String()) + "/v1/rpc"
+}
+
+func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.DB, backend, bundleHash string) {
+	t.Helper()
+	beforeCreateRejectEvents := servedEventPublishScalarCount(t, db, backend, "events_all", "", "")
+	beforeCreateRejectIdempotency := servedEventPublishScalarCount(t, db, backend, "api_idempotency_all", "", "")
+	createReject := requireServedJSONRPCError(t, endpoint, "event.publish", map[string]any{
+		"event_name":      "thing.created",
+		"bundle_hash":     bundleHash,
+		"payload":         map[string]any{"entity_id": "11111111-1111-4111-8111-111111111111", "amount": 7, "who": "operator"},
+		"idempotency_key": "issue-1255-" + backend + "-create-entity-reject",
+	})
+	if createReject.Data["code"] != apiv1.PayloadValidationFailedCode {
+		t.Fatalf("create-entity rejection data = %#v, want %s", createReject.Data, apiv1.PayloadValidationFailedCode)
+	}
+	if got := servedEventPublishScalarCount(t, db, backend, "events_all", "", ""); got != beforeCreateRejectEvents {
+		t.Fatalf("%s event rows after rejected create-entity publish = %d, want %d", backend, got, beforeCreateRejectEvents)
+	}
+	if got := servedEventPublishScalarCount(t, db, backend, "api_idempotency_all", "", ""); got != beforeCreateRejectIdempotency {
+		t.Fatalf("%s idempotency rows after rejected create-entity publish = %d, want %d", backend, got, beforeCreateRejectIdempotency)
+	}
+
+	initialStdout, initialStderr, code := runServedCLICommand(t, endpoint, []string{
+		"event", "publish", "thing.created",
+		"--bundle-hash", bundleHash,
+		"--payload-json", `{"amount":7,"who":"operator"}`,
+		"--idempotency-key", "issue-1255-" + backend + "-initial",
+	})
+	if code != 0 {
+		t.Fatalf("initial event publish code=%d stderr=%s stdout=%s", code, initialStderr, initialStdout)
+	}
+	initial := parseServedEventPublishOutput(t, initialStdout)
+	runID := initial["run_id"]
+	initialEventID := initial["event_id"]
+	if initial["new_run_created"] != "true" || initial["deliveries"] == "0" || runID == "" || initialEventID == "" {
+		t.Fatalf("initial event publish fields = %#v, want new run with delivery", initial)
+	}
+	if got := servedEventPublishRowCount(t, db, backend, "runs", runID, ""); got != 1 {
+		t.Fatalf("%s runs for initial run = %d, want 1", backend, got)
+	}
+	entityID := requireServedEventPublishEntityState(t, db, backend, runID, "", "waiting")
+	requireServedEntityReadback(t, endpoint, runID, entityID, "waiting")
+
+	followUpStdout, followUpStderr, code := runServedCLICommand(t, endpoint, []string{
+		"event", "publish", "validation/thing.reviewed",
+		"--run-id", runID,
+		"--payload-json", fmt.Sprintf(`{"entity_id":%q,"note":"approved"}`, entityID),
+		"--idempotency-key", "issue-1255-" + backend + "-follow-up",
+	})
+	if code != 0 {
+		t.Fatalf("follow-up event publish code=%d stderr=%s stdout=%s", code, followUpStderr, followUpStdout)
+	}
+	followUp := parseServedEventPublishOutput(t, followUpStdout)
+	followUpEventID := followUp["event_id"]
+	if followUp["run_id"] != runID || followUp["new_run_created"] != "false" || followUp["deliveries"] == "0" || followUpEventID == "" {
+		t.Fatalf("follow-up event publish fields = %#v, want selected existing run with delivery", followUp)
+	}
+	if got := servedEventPublishRowCount(t, db, backend, "runs", runID, ""); got != 1 {
+		t.Fatalf("%s runs for selected run after follow-up = %d, want 1", backend, got)
+	}
+	if got := servedEventPublishScalarCount(t, db, backend, "application_events_by_run", runID, ""); got != 2 {
+		t.Fatalf("%s application events for selected run = %d, want 2\n%s", backend, got, servedEventPublishDebugSummary(t, db, backend, runID))
+	}
+	if got := servedEventPublishScalarCount(t, db, backend, "event_deliveries", runID, followUpEventID); got == 0 {
+		t.Fatalf("%s follow-up deliveries = %d, want non-empty persisted evidence", backend, got)
+	}
+	requireServedEventPublishEntityState(t, db, backend, runID, entityID, "done")
+	requireServedEntityReadback(t, endpoint, runID, entityID, "done")
+	requireServedRunStatus(t, endpoint, runID, "completed")
+	requireServedEventReadback(t, endpoint, followUpEventID, runID, entityID, "validation/thing.reviewed", "entity-writer")
+	requireServedTraceReadback(t, endpoint, runID, followUpEventID, "validation/thing.reviewed", "entity-writer")
+
+	traceStdout, traceStderr, traceCode := runServedCLICommand(t, endpoint, []string{
+		"trace", runID,
+		"--event-name", "validation/thing.reviewed",
+		"--entity-id", entityID,
+		"--limit", "10",
+	})
+	if traceCode != 0 {
+		t.Fatalf("trace readback code=%d stderr=%s stdout=%s", traceCode, traceStderr, traceStdout)
+	}
+	for _, want := range []string{"validation/thing.reviewed", followUpEventID, "delivered", "node/entity-writer"} {
+		if !strings.Contains(traceStdout, want) {
+			t.Fatalf("trace readback missing %q:\n%s", want, traceStdout)
+		}
+	}
+	statusStdout, statusStderr, statusCode := runServedCLICommand(t, endpoint, []string{"status", runID, "--no-diagnose"})
+	if statusCode != 0 {
+		t.Fatalf("status readback code=%d stderr=%s stdout=%s", statusCode, statusStderr, statusStdout)
+	}
+	if !strings.Contains(statusStdout, "status=completed") {
+		t.Fatalf("status readback missing completed status:\n%s", statusStdout)
+	}
+	entityListStdout, entityListStderr, entityListCode := runServedCLICommand(t, endpoint, []string{"entities", "list", "--run-id", runID, "--limit", "10"})
+	if entityListCode != 0 {
+		t.Fatalf("entities list readback code=%d stderr=%s stdout=%s", entityListCode, entityListStderr, entityListStdout)
+	}
+	for _, want := range []string{entityID, runID, "done"} {
+		if !strings.Contains(entityListStdout, want) {
+			t.Fatalf("entities list readback missing %q:\n%s", want, entityListStdout)
+		}
+	}
+	entityViewStdout, entityViewStderr, entityViewCode := runServedCLICommand(t, endpoint, []string{"entity", "view", entityID, "--run-id", runID})
+	if entityViewCode != 0 {
+		t.Fatalf("entity view readback code=%d stderr=%s stdout=%s", entityViewCode, entityViewStderr, entityViewStdout)
+	}
+	for _, want := range []string{entityID, "state=done", `"note":"approved"`} {
+		if !strings.Contains(entityViewStdout, want) {
+			t.Fatalf("entity view readback missing %q:\n%s", want, entityViewStdout)
+		}
+	}
+
+	beforeEvents := servedEventPublishScalarCount(t, db, backend, "events_all", "", "")
+	beforeIdempotency := servedEventPublishScalarCount(t, db, backend, "api_idempotency_all", "", "")
+	errResp := requireServedJSONRPCError(t, endpoint, "event.publish", map[string]any{
+		"event_name":      "validation/thing.unhandled",
+		"run_id":          runID,
+		"payload":         map[string]any{"entity_id": entityID, "note": "lost"},
+		"idempotency_key": "issue-1255-" + backend + "-unhandled",
+	})
+	if errResp.Data["code"] != apiv1.RunAlreadyTerminalCode {
+		t.Fatalf("unhandled follow-up error data = %#v, want %s", errResp.Data, apiv1.RunAlreadyTerminalCode)
+	}
+	details, ok := errResp.Data["details"].(map[string]any)
+	if !ok || details["current_status"] != "completed" {
+		t.Fatalf("unhandled follow-up details = %#v", errResp.Data["details"])
+	}
+	if got := servedEventPublishScalarCount(t, db, backend, "events_all", "", ""); got != beforeEvents {
+		t.Fatalf("%s event rows after rejected follow-up = %d, want %d", backend, got, beforeEvents)
+	}
+	if got := servedEventPublishScalarCount(t, db, backend, "api_idempotency_all", "", ""); got != beforeIdempotency {
+		t.Fatalf("%s idempotency rows after rejected follow-up = %d, want %d", backend, got, beforeIdempotency)
+	}
+}
+
+func runServedCLICommand(t *testing.T, endpoint string, args []string) (string, string, int) {
+	t.Helper()
+	var stdout, stderr bytes.Buffer
+	cliOpts := defaultRootCommandOptions()
+	cliOpts.apiRPCEndpointOverride = endpoint
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, cliOpts)
+	return stdout.String(), stderr.String(), code
+}
+
+func parseServedEventPublishOutput(t *testing.T, output string) map[string]string {
+	t.Helper()
+	for _, line := range strings.Split(output, "\n") {
+		if !strings.HasPrefix(line, "event publish ok:") {
+			continue
+		}
+		out := map[string]string{}
+		for _, field := range strings.Fields(strings.TrimPrefix(line, "event publish ok:")) {
+			key, value, ok := strings.Cut(field, "=")
+			if ok {
+				out[key] = value
+			}
+		}
+		return out
+	}
+	t.Fatalf("event publish output missing success line:\n%s", output)
+	return nil
+}
+
+type servedJSONRPCError struct {
+	Code    int            `json:"code"`
+	Message string         `json:"message"`
+	Data    map[string]any `json:"data"`
+}
+
+type servedJSONRPCEnvelope struct {
+	JSONRPC string              `json:"jsonrpc"`
+	ID      string              `json:"id"`
+	Result  json.RawMessage     `json:"result"`
+	Error   *servedJSONRPCError `json:"error"`
+}
+
+func requireServedJSONRPCResult(t *testing.T, endpoint, method string, params map[string]any, out any) {
+	t.Helper()
+	resp := requestServedJSONRPC(t, endpoint, method, params)
+	if resp.Error != nil {
+		t.Fatalf("%s error = %#v", method, resp.Error)
+	}
+	if err := json.Unmarshal(resp.Result, out); err != nil {
+		t.Fatalf("decode %s result: %v\n%s", method, err, string(resp.Result))
+	}
+}
+
+func requireServedJSONRPCError(t *testing.T, endpoint, method string, params map[string]any) *servedJSONRPCError {
+	t.Helper()
+	resp := requestServedJSONRPC(t, endpoint, method, params)
+	if resp.Error == nil {
+		t.Fatalf("%s error = nil, result=%s", method, string(resp.Result))
+	}
+	return resp.Error
+}
+
+func requestServedJSONRPC(t *testing.T, endpoint, method string, params map[string]any) servedJSONRPCEnvelope {
+	t.Helper()
+	body, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      method + "-proof",
+		"method":  method,
+		"params":  params,
+	})
+	if err != nil {
+		t.Fatalf("marshal %s request: %v", method, err)
+	}
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("build %s request: %v", method, err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer test-token")
+	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
+	if err != nil {
+		t.Fatalf("post %s request: %v", method, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("%s HTTP status = %d, want 200", method, resp.StatusCode)
+	}
+	var envelope servedJSONRPCEnvelope
+	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+		t.Fatalf("decode %s envelope: %v", method, err)
+	}
+	return envelope
+}
+
+func requireServedRunStatus(t *testing.T, endpoint, runID, want string) {
+	t.Helper()
+	var last string
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		var result struct {
+			Run struct {
+				RunID  string `json:"run_id"`
+				Status string `json:"status"`
+			} `json:"run"`
+		}
+		requireServedJSONRPCResult(t, endpoint, "run.get", map[string]any{"run_id": runID}, &result)
+		last = result.Run.Status
+		if result.Run.RunID == runID && result.Run.Status == want {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("run.get status for %s = %q, want %q", runID, last, want)
+}
+
+func requireServedEventReadback(t *testing.T, endpoint, eventID, runID, entityID, eventName, subscriberID string) {
+	t.Helper()
+	var event struct {
+		EventID    string `json:"event_id"`
+		EventName  string `json:"event_name"`
+		EntityID   string `json:"entity_id"`
+		RunID      string `json:"run_id"`
+		Deliveries []struct {
+			SubscriberType string `json:"subscriber_type"`
+			SubscriberID   string `json:"subscriber_id"`
+			Status         string `json:"status"`
+		} `json:"deliveries"`
+	}
+	requireServedJSONRPCResult(t, endpoint, "event.get", map[string]any{"event_id": eventID}, &event)
+	if event.EventID != eventID || event.RunID != runID || event.EntityID != entityID || event.EventName != eventName {
+		t.Fatalf("event.get result = %#v, want follow-up event on selected run", event)
+	}
+	for _, delivery := range event.Deliveries {
+		if delivery.SubscriberType == "node" && delivery.SubscriberID == subscriberID && delivery.Status == "delivered" {
+			return
+		}
+	}
+	t.Fatalf("event.get deliveries = %#v, want delivered node/%s", event.Deliveries, subscriberID)
+}
+
+func requireServedTraceReadback(t *testing.T, endpoint, runID, eventID, eventName, subscriberID string) {
+	t.Helper()
+	var trace struct {
+		Trace []struct {
+			EventID        string `json:"event_id"`
+			EventName      string `json:"event_name"`
+			DeliveryStatus string `json:"delivery_status"`
+			SubscriberType string `json:"subscriber_type"`
+			SubscriberID   string `json:"subscriber_id"`
+		} `json:"trace"`
+	}
+	requireServedJSONRPCResult(t, endpoint, "run.trace", map[string]any{
+		"run_id": runID,
+		"filter": map[string]any{
+			"event_name": []string{eventName},
+		},
+		"limit": 10,
+	}, &trace)
+	for _, row := range trace.Trace {
+		if row.EventID == eventID && row.EventName == eventName && row.DeliveryStatus == "delivered" &&
+			row.SubscriberType == "node" && row.SubscriberID == subscriberID {
+			return
+		}
+	}
+	t.Fatalf("run.trace rows = %#v, want delivered node/%s row for %s", trace.Trace, subscriberID, eventID)
+}
+
+func requireServedEntityReadback(t *testing.T, endpoint, runID, entityID, wantState string) {
+	t.Helper()
+	var result struct {
+		Entity struct {
+			EntityID     string `json:"entity_id"`
+			RunID        string `json:"run_id"`
+			CurrentState string `json:"current_state"`
+		} `json:"entity"`
+	}
+	requireServedJSONRPCResult(t, endpoint, "entity.get", map[string]any{"entity_id": entityID, "run_id": runID}, &result)
+	if result.Entity.EntityID != entityID || result.Entity.RunID != runID || result.Entity.CurrentState != wantState {
+		t.Fatalf("entity.get result = %#v, want %s/%s state %s", result.Entity, runID, entityID, wantState)
+	}
+}
+
+func requireServedEventPublishEntityState(t *testing.T, db *sql.DB, backend, runID, entityID, wantState string) string {
+	t.Helper()
+	var lastState, lastEntityID string
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		gotEntityID, state := servedEventPublishEntityState(t, db, backend, runID, entityID, wantState)
+		if state == wantState && gotEntityID != "" {
+			return gotEntityID
+		}
+		lastEntityID = gotEntityID
+		lastState = state
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("%s entity_state for run %s entity %q = %q (entity %q), want %q\n%s", backend, runID, entityID, lastState, lastEntityID, wantState, servedEventPublishDebugSummary(t, db, backend, runID))
+	return ""
+}
+
+func servedEventPublishDebugSummary(t *testing.T, db *sql.DB, backend, runID string) string {
+	t.Helper()
+	sections := []string{
+		servedEventPublishDebugQuery(t, db, backend, "entity_state", runID),
+		servedEventPublishDebugQuery(t, db, backend, "events", runID),
+		servedEventPublishDebugQuery(t, db, backend, "event_deliveries", runID),
+		servedEventPublishDebugQuery(t, db, backend, "event_receipts", runID),
+		servedEventPublishDebugQuery(t, db, backend, "dead_letters", runID),
+	}
+	return strings.Join(sections, "\n")
+}
+
+func servedEventPublishDebugQuery(t *testing.T, db *sql.DB, backend, scope, runID string) string {
+	t.Helper()
+	sqlText := ""
+	args := []any{runID}
+	switch backend {
+	case "postgres":
+		switch scope {
+		case "entity_state":
+			sqlText = `SELECT entity_id::text, COALESCE(flow_instance, ''), COALESCE(current_state, '') FROM entity_state WHERE run_id = $1::uuid ORDER BY created_at, entity_id LIMIT 5`
+		case "events":
+			sqlText = `SELECT event_id::text, event_name, COALESCE(entity_id::text, ''), COALESCE(flow_instance, '') FROM events WHERE run_id = $1::uuid ORDER BY created_at, event_id LIMIT 5`
+		case "event_deliveries":
+			sqlText = `SELECT event_id::text, subscriber_type, subscriber_id, status, COALESCE(reason_code, '') FROM event_deliveries WHERE run_id = $1::uuid ORDER BY created_at, event_id LIMIT 8`
+		case "event_receipts":
+			sqlText = `SELECT event_id::text, subscriber_type, subscriber_id, outcome, COALESCE(reason_code, '') FROM event_receipts WHERE run_id = $1::uuid ORDER BY processed_at, event_id LIMIT 8`
+		case "dead_letters":
+			sqlText = `SELECT original_event, COALESCE(entity_id::text, ''), failure_type, COALESCE(error_message, '') FROM dead_letters WHERE run_id = $1::uuid ORDER BY created_at LIMIT 5`
+		}
+	case "sqlite":
+		switch scope {
+		case "entity_state":
+			sqlText = `SELECT entity_id, COALESCE(flow_instance, ''), COALESCE(current_state, '') FROM entity_state WHERE run_id = ? ORDER BY created_at, entity_id LIMIT 5`
+		case "events":
+			sqlText = `SELECT event_id, event_name, COALESCE(entity_id, ''), COALESCE(flow_instance, '') FROM events WHERE run_id = ? ORDER BY created_at, event_id LIMIT 5`
+		case "event_deliveries":
+			sqlText = `SELECT event_id, subscriber_type, subscriber_id, status, COALESCE(reason_code, '') FROM event_deliveries WHERE run_id = ? ORDER BY created_at, event_id LIMIT 8`
+		case "event_receipts":
+			sqlText = `SELECT event_id, subscriber_type, subscriber_id, outcome, COALESCE(reason_code, '') FROM event_receipts WHERE run_id = ? ORDER BY processed_at, event_id LIMIT 8`
+		case "dead_letters":
+			sqlText = `SELECT original_event, COALESCE(entity_id, ''), failure_type, COALESCE(error_message, '') FROM dead_letters WHERE run_id = ? ORDER BY created_at LIMIT 5`
+		}
+	}
+	if sqlText == "" {
+		return scope + ": unsupported debug query"
+	}
+	rows, err := db.QueryContext(context.Background(), sqlText, args...)
+	if err != nil {
+		return fmt.Sprintf("%s: %v", scope, err)
+	}
+	defer rows.Close()
+	out := []string{}
+	columns, err := rows.Columns()
+	if err != nil {
+		return fmt.Sprintf("%s columns: %v", scope, err)
+	}
+	for rows.Next() {
+		values := make([]sql.NullString, len(columns))
+		scan := make([]any, len(values))
+		for i := range values {
+			scan[i] = &values[i]
+		}
+		if err := rows.Scan(scan...); err != nil {
+			return fmt.Sprintf("%s scan: %v", scope, err)
+		}
+		cols := make([]string, len(values))
+		for i, value := range values {
+			if value.Valid {
+				cols[i] = value.String
+			}
+		}
+		out = append(out, fmt.Sprintf("%v", cols))
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Sprintf("%s rows: %v", scope, err)
+	}
+	if len(out) == 0 {
+		return scope + ": []"
+	}
+	return scope + ": " + strings.Join(out, "; ")
+}
+
+func servedEventPublishRowCount(t *testing.T, db *sql.DB, backend, scope, runID, eventID string) int {
+	t.Helper()
+	return servedEventPublishScalarCount(t, db, backend, scope, runID, eventID)
+}
+
+func servedEventPublishScalarCount(t *testing.T, db *sql.DB, backend, scope, runID, eventID string) int {
+	t.Helper()
+	var sqlText string
+	var args []any
+	switch backend {
+	case "postgres":
+		switch scope {
+		case "runs":
+			sqlText = `SELECT COUNT(*) FROM runs WHERE run_id = $1::uuid`
+			args = []any{runID}
+		case "events_by_run":
+			sqlText = `SELECT COUNT(*) FROM events WHERE run_id = $1::uuid`
+			args = []any{runID}
+		case "application_events_by_run":
+			sqlText = `SELECT COUNT(*) FROM events WHERE run_id = $1::uuid AND event_name NOT LIKE 'platform.%'`
+			args = []any{runID}
+		case "event_deliveries":
+			sqlText = `SELECT COUNT(*) FROM event_deliveries WHERE run_id = $1::uuid AND event_id = $2::uuid`
+			args = []any{runID, eventID}
+		case "events_all":
+			sqlText = `SELECT COUNT(*) FROM events`
+		case "api_idempotency_all":
+			sqlText = `SELECT COUNT(*) FROM api_idempotency`
+		default:
+			t.Fatalf("unknown postgres proof count scope %q", scope)
+		}
+	case "sqlite":
+		switch scope {
+		case "runs":
+			sqlText = `SELECT COUNT(*) FROM runs WHERE run_id = ?`
+			args = []any{runID}
+		case "events_by_run":
+			sqlText = `SELECT COUNT(*) FROM events WHERE run_id = ?`
+			args = []any{runID}
+		case "application_events_by_run":
+			sqlText = `SELECT COUNT(*) FROM events WHERE run_id = ? AND event_name NOT LIKE 'platform.%'`
+			args = []any{runID}
+		case "event_deliveries":
+			sqlText = `SELECT COUNT(*) FROM event_deliveries WHERE run_id = ? AND event_id = ?`
+			args = []any{runID, eventID}
+		case "events_all":
+			sqlText = `SELECT COUNT(*) FROM events`
+		case "api_idempotency_all":
+			sqlText = `SELECT COUNT(*) FROM api_idempotency`
+		default:
+			t.Fatalf("unknown sqlite proof count scope %q", scope)
+		}
+	default:
+		t.Fatalf("unknown proof backend %q", backend)
+	}
+	var count int
+	if err := db.QueryRowContext(context.Background(), sqlText, args...).Scan(&count); err != nil {
+		t.Fatalf("%s count %s: %v", backend, scope, err)
+	}
+	return count
+}
+
+func servedEventPublishEntityState(t *testing.T, db *sql.DB, backend, runID, entityID, wantState string) (string, string) {
+	t.Helper()
+	var sqlText string
+	var args []any
+	switch backend {
+	case "postgres":
+		if strings.TrimSpace(entityID) != "" {
+			sqlText = `SELECT COALESCE(current_state, '') FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid`
+			args = []any{runID, entityID}
+		} else {
+			sqlText = `SELECT entity_id::text, COALESCE(current_state, '') FROM entity_state WHERE run_id = $1::uuid AND current_state = $2 ORDER BY created_at, entity_id LIMIT 1`
+			args = []any{runID, wantState}
+		}
+	case "sqlite":
+		if strings.TrimSpace(entityID) != "" {
+			sqlText = `SELECT COALESCE(current_state, '') FROM entity_state WHERE run_id = ? AND entity_id = ?`
+			args = []any{runID, entityID}
+		} else {
+			sqlText = `SELECT entity_id, COALESCE(current_state, '') FROM entity_state WHERE run_id = ? AND current_state = ? ORDER BY created_at, entity_id LIMIT 1`
+			args = []any{runID, wantState}
+		}
+	default:
+		t.Fatalf("unknown proof backend %q", backend)
+	}
+	var gotEntityID, state string
+	if strings.TrimSpace(entityID) != "" {
+		gotEntityID = strings.TrimSpace(entityID)
+		err := db.QueryRowContext(context.Background(), sqlText, args...).Scan(&state)
+		if err == sql.ErrNoRows {
+			return gotEntityID, ""
+		}
+		if err != nil {
+			t.Fatalf("%s entity_state query: %v", backend, err)
+		}
+		return gotEntityID, state
+	}
+	err := db.QueryRowContext(context.Background(), sqlText, args...).Scan(&gotEntityID, &state)
+	if err == sql.ErrNoRows {
+		return "", ""
+	}
+	if err != nil {
+		t.Fatalf("%s entity_state query: %v", backend, err)
+	}
+	return gotEntityID, state
+}
+
 func TestRunServeRuntimePassesDataFlagToWorkspaceLifecycle(t *testing.T) {
 	dataDir := t.TempDir()
 	var capturedMountSources workspaceMountSources
