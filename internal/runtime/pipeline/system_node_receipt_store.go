@@ -19,6 +19,8 @@ func (s *WorkflowInstanceStore) SystemNodeProcessed(ctx context.Context, nodeID,
 		return false, nil
 	}
 	if s.isSQLite() {
+		unlock := s.lockSQLitePipelineOperation(ctx)
+		defer unlock()
 		var ok bool
 		err := dbQueryRowContext(ctx, s.db, `
 			SELECT EXISTS(
@@ -54,6 +56,8 @@ func (s *WorkflowInstanceStore) SystemNodeDeliveryQuiesced(ctx context.Context, 
 		return false, nil
 	}
 	if s.isSQLite() {
+		unlock := s.lockSQLitePipelineOperation(ctx)
+		defer unlock()
 		var ok bool
 		err := dbQueryRowContext(ctx, s.db, `
 			SELECT EXISTS (

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -94,8 +95,9 @@ type workflowInstancePersistedControl struct {
 }
 
 type WorkflowInstanceStore struct {
-	db      *sql.DB
-	dialect workflowStoreDialect
+	db                 *sql.DB
+	dialect            workflowStoreDialect
+	sqlitePipelineTxMu sync.Mutex
 }
 
 type WorkflowInstanceFieldSelector struct {
@@ -161,6 +163,8 @@ func (s *WorkflowInstanceStore) Load(ctx context.Context, instanceID string) (Wo
 		return WorkflowInstance{}, false, nil
 	}
 	if s.isSQLite() {
+		unlock := s.lockSQLitePipelineOperation(ctx)
+		defer unlock()
 		return s.loadSQLite(ctx, instanceID)
 	}
 	keys := workflowInstanceLookupKeys(instanceID)
@@ -175,6 +179,8 @@ func (s *WorkflowInstanceStore) List(ctx context.Context) ([]WorkflowInstance, e
 		return nil, nil
 	}
 	if s.isSQLite() {
+		unlock := s.lockSQLitePipelineOperation(ctx)
+		defer unlock()
 		return s.listSQLite(ctx)
 	}
 	return s.listSpec(ctx)
@@ -189,6 +195,8 @@ func (s *WorkflowInstanceStore) SelectActiveByFields(ctx context.Context, scopeK
 		return nil, nil
 	}
 	if s.isSQLite() {
+		unlock := s.lockSQLitePipelineOperation(ctx)
+		defer unlock()
 		return s.selectActiveByFieldsSQLite(ctx, scopeKey, selectors, excludedStates)
 	}
 	return s.selectActiveByFieldsSpec(ctx, scopeKey, selectors, excludedStates)
@@ -329,6 +337,8 @@ func (s *WorkflowInstanceStore) MarkTerminated(ctx context.Context, storageRef s
 		return nil
 	}
 	if s.isSQLite() {
+		unlock := s.lockSQLitePipelineOperation(ctx)
+		defer unlock()
 		return s.markTerminatedSQLite(ctx, storageRef, terminatedAt)
 	}
 	storageRef = strings.TrimSpace(storageRef)
@@ -383,6 +393,17 @@ func (s *WorkflowInstanceStore) isSQLite() bool {
 	return s != nil && s.dialect == workflowStoreDialectSQLite
 }
 
+func (s *WorkflowInstanceStore) lockSQLitePipelineOperation(ctx context.Context) func() {
+	if !s.isSQLite() {
+		return func() {}
+	}
+	if tx, ok := sqlTxFromContext(ctx); ok && tx != nil {
+		return func() {}
+	}
+	s.sqlitePipelineTxMu.Lock()
+	return s.sqlitePipelineTxMu.Unlock
+}
+
 func (s *WorkflowInstanceStore) RunInPipelineTransaction(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
 	if fn == nil {
 		return nil
@@ -393,6 +414,11 @@ func (s *WorkflowInstanceStore) RunInPipelineTransaction(ctx context.Context, fn
 	if tx, ok := sqlTxFromContext(ctx); ok && tx != nil {
 		return fn(ctx, tx)
 	}
+	// SQLite has a single writer. Keep the local-dev pipeline transaction
+	// boundary authoritative instead of letting sibling handler activations
+	// race into SQLITE_BUSY at the first persisted row.
+	unlock := s.lockSQLitePipelineOperation(ctx)
+	defer unlock()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -415,6 +441,8 @@ func (s *WorkflowInstanceStore) QueryEntityCount(ctx context.Context, runID stri
 		return 0, nil
 	}
 	if s.isSQLite() {
+		unlock := s.lockSQLitePipelineOperation(ctx)
+		defer unlock()
 		return s.queryEntityStateCountSQLite(ctx, runID, source, contract, predicate)
 	}
 	return queryEntityStateCount(runID, s.db, source, contract, predicate)
