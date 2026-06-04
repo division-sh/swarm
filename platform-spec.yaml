@@ -1837,8 +1837,9 @@ engine:
       action: Root flow's platform_version range includes the running platform version.
     - step: 12
       name: initialize_state_stores
-      action: Create or verify entity tables, accumulator state tables, event store. Derive entity contract metadata from
-        entities.yaml plus the shared type system; derive node-local state from nodes.yaml.
+      action: Create or verify platform runtime tables, including the canonical entity_state/accumulator current-state
+        store, event store, and generated node-local state tables. Derive entity contract metadata from entities.yaml plus
+        the shared type system, but do not create product-specific typed entity tables during normal runtime boot.
     - step: 13
       name: start_system_nodes
       action: Each node subscribes to its declared events. Nodes are ready to handle.
@@ -2144,8 +2145,8 @@ engine:
         rules:
         - SQLite schema bootstrap must be file-backed and must not silently use an in-memory database.
         - SQLite bootstrap must create parent directories for the selected path when the schema owner opens the database.
-        - SQLite DDL must cover every current platform_tables.tables entry plus generated entity and node-state tables
-          unless a gate explicitly records a named deferral.
+        - SQLite DDL must cover every current platform_tables.tables entry plus generated node-state tables unless a gate
+          explicitly records a named deferral. Normal runtime boot must not create product-specific typed entity tables.
         - SQLite DDL must be rendered from the normalized schema plan subset. The renderer must explicitly classify each
           supported Postgres-authored construct it accepts, including UUID defaults, timestamp defaults, JSON text storage,
           text-array storage, partial indexes, expression indexes, and check predicates.
@@ -2153,7 +2154,6 @@ engine:
           heuristic free-form SQL rewriting.
     covered_schema_inputs:
     - platform_tables.tables
-    - generated entity tables from workflow entity_schema
     - generated node-state tables from system node state_schema
     schema_capabilities:
       owner: backend-specific schema catalog readers feeding StoreSchemaCapabilities
@@ -4215,8 +4215,8 @@ versioning:
       2.0.0.'
 platform_tables:
   description: Platform-owned infrastructure tables. These exist regardless of which product contracts are loaded. They are
-    NOT entity tables (those are contract-driven from entities.yaml and the shared type system). The platform generates DDL
-    for these at boot via GeneratePlatformTableDDLs.
+    the normal runtime boot schema, including canonical entity_state. They do not include product-specific typed entity
+    tables derived from entities.yaml. The platform generates DDL for these at boot via GeneratePlatformTableDDLs.
   destructive_reset_cleanup_policy:
     status: internal_only
     owner: internal/runtime/destructivereset cleanup catalog and PostgresStore.ApplyDestructiveResetCleanup
@@ -4232,7 +4232,8 @@ platform_tables:
       - Before deleting planned run-scoped rows, apply must sever nullable preserved/out-of-scope references into the cleanup set; current severed references are agent_sessions.successor_session_id, runs.forked_from_run_id/forked_from_event_id, runtime_ingress_state.transition_event_id, entity_mutations.caused_by_event, and timers.source_timer_id.
       - Fork-lineage cleanup must delete fork replay and selected-contract rows by fork/source run_id and by linked cleanup-owned event/delivery references before deleting event_deliveries or events; preserved fork/source run IDs are not sufficient proof that the row is out of scope.
       - Runtime-owned persisted facts that describe running or historical execution must carry an exact run_id, event lineage, or fork/source run lineage before destructive reset may delete them.
-      - Generated product/entity/node-state tables remain split-preserved until a separate owner gives them exact run-scoped identity.
+      - Generated node-state tables and legacy/future product optimization tables remain split-preserved until a separate
+        owner gives them exact run-scoped identity. Normal runtime boot does not create generated typed entity tables.
       - Schema, auth/idempotency-like, operator/system, product config, topology, global timers, mailbox, and spend/cost audit state must survive this internal cleanup slice unless a later gate defines an exact run-scoped owner.
       - "The bundle catalog is request-scoped by `runtime.nuke.include_bundles`: `false` preserves `bundles`; `true` deletes `bundles` only inside the destructive-reset cleanup transaction after serializing persisted run creation and failing closed if any persisted bundle-source run remains outside the cleanup plan."
       - Apply executes in one database transaction, reports per-table dry-run/apply counts, rolls back on any SQL/FK/order error, and produces no successful result unless the transaction commits.
@@ -4274,9 +4275,8 @@ platform_tables:
       split_preserve:
         - mailbox
         - spend_ledger
-        - generated entity tables from GenerateEntityTableDDLs
         - generated node-state tables from GenerateNodeStateTableDDLs
-        - contract-driven product optimization tables
+        - legacy/future contract-driven product optimization tables
   tables:
     bundles:
       description: 'Content-addressed bundle catalog. The primary key is the canonical bundle_hash
@@ -4805,8 +4805,9 @@ platform_tables:
         duration, and side_effects. This IS the pipeline transition record. No separate table needed.
   entity_registry_policy: There is no separate entity registry table. entity_state IS the run-scoped current registry.
     Generic reads (list entities, find by slug, count by state) query entity_state through an explicit run context.
-    Contract-driven entity tables are optional optimizations — they materialize fields JSONB into typed columns for
-    query performance. Not required for correctness.
+    Contract-driven typed entity tables are not created by normal runtime boot. They may become optional optimizations only
+    if a future source-authority owner defines projection identity, run scoping, rebuild/backfill, cleanup, and exhaustive
+    writer coverage. They are never required for correctness.
   entity_lifecycle_scoping:
     description: Entity identity can be compared across runs, but current entity state is run-scoped. Entity queries
       (search_entities, query_entities, get_entity) return entity_state rows from the current run context only. Cross-run
@@ -4841,17 +4842,21 @@ platform_tables:
     migrations). The boot sequence: read schema_version → compare to current platform version → generate DDL diff → apply
     → update schema_version.'
   test_bootstrap:
-    description: After legacy SQL deletion, test bootstrap creates tables from two sources only.
+    description: After legacy SQL deletion, normal runtime/test bootstrap creates only platform tables plus generated
+      node-state tables. Product-specific typed entity table DDL is explicit future/legacy optimization-test input, not
+      normal boot input.
     sources:
       platform_tables: All tables from platform_tables.tables in platform-spec.yaml. Always created.
-      entity_tables: Generated from entities.yaml in the flow contracts loaded for the test. Optional — only if the test uses
-        entity fields beyond the JSONB.
+      node_state_tables: Generated from node state_schema in the flow contracts loaded for the test. Optional — only if the
+        test uses generated node-local state tables.
+      product_optimization_tables: Optional explicit future/legacy test-only DDL generated from entities.yaml plus
+        types.yaml. Not created by production boot or generic test bootstrap.
     generic_store_tests: Generic store tests (postgres_smoke_test.go, etc.) bootstrap using platform_tables only. They create
       entities in entity_state, events in events, sessions in agent_sessions. No product contracts needed. No legacy SQL files.
       No migrations/ directory.
-    product_integration_tests: Tests that need product-specific entity tables load product contracts and generate DDL from
-      entities.yaml plus types.yaml.
-      These tests are product tests, not platform tests.
+    product_integration_tests: Tests that explicitly exercise future/legacy product optimization tables may load product
+      contracts and generate DDL from entities.yaml plus types.yaml. These tables are not normal runtime boot artifacts and
+      are not supported entity current-state read authority.
     bootstrap_function: BootstrapPlatformTables(spec PlatformSpec) — reads platform_tables.tables, generates DDL, executes.
       Called by both production boot and test setup. Single code path.
   credentials_policy:

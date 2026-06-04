@@ -2607,15 +2607,11 @@ func initializeStateStores(ctx context.Context, stores storeBundle, bundle *runt
 	if err != nil {
 		return "", fmt.Errorf("platform-owned tables: %w", err)
 	}
-	entityPlans, err := store.GenerateEntityTableDDLs(bundle.WorkflowEntitySchema())
-	if err != nil {
-		return "", fmt.Errorf("entity_schema tables: %w", err)
-	}
 	statePlans, err := store.GenerateNodeStateTableDDLs(bundle.NodeEntries())
 	if err != nil {
 		return "", fmt.Errorf("state_schema tables: %w", err)
 	}
-	plans := append(platformPlans, entityPlans...)
+	plans := append([]store.SchemaTableDDL{}, platformPlans...)
 	plans = append(plans, statePlans...)
 	if err := ensureServeSchemaTables(ctx, stores, plans); err != nil {
 		return "", err
