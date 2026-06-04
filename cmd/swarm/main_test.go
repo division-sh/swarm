@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -7331,6 +7332,156 @@ func TestServeBootRegistryDetail_UsesRuntimeToolInventoryCount(t *testing.T) {
 	}
 }
 
+func TestSummarizeServeSchemaPlansDefaultOmitsTableBreakdown(t *testing.T) {
+	plans := []store.SchemaTableDDL{
+		{TableName: "events", ColumnCount: 17},
+		{TableName: "runs", ColumnCount: 14},
+	}
+
+	summary, logOutput := captureServeSchemaPlanSummary(t, plans, false)
+
+	if summary != "verified 2 generated tables" {
+		t.Fatalf("summary = %q, want concise generated-table count", summary)
+	}
+	for _, forbidden := range []string{"events(17)", "runs(14)", "detail="} {
+		if strings.Contains(summary, forbidden) || strings.Contains(logOutput, forbidden) {
+			t.Fatalf("default schema summary leaked %q\nsummary=%s\nlog=%s", forbidden, summary, logOutput)
+		}
+	}
+	for _, want := range []string{"swarm boot state stores", "tables=2", "columns=31"} {
+		if !strings.Contains(logOutput, want) {
+			t.Fatalf("default schema log missing %q:\n%s", want, logOutput)
+		}
+	}
+}
+
+func TestSummarizeServeSchemaPlansVerboseRetainsTableBreakdown(t *testing.T) {
+	plans := []store.SchemaTableDDL{
+		{TableName: "runs", ColumnCount: 14},
+		{TableName: "events", ColumnCount: 17},
+	}
+
+	summary, logOutput := captureServeSchemaPlanSummary(t, plans, true)
+
+	if summary != "verified 2 generated tables (events(17), runs(14))" {
+		t.Fatalf("summary = %q, want sorted verbose table breakdown", summary)
+	}
+	for _, forbidden := range []string{"events(17)", "runs(14)", "detail="} {
+		if strings.Contains(logOutput, forbidden) {
+			t.Fatalf("process log leaked verbose schema detail %q:\n%s", forbidden, logOutput)
+		}
+	}
+}
+
+func TestSummarizeServeSchemaPlansZeroPlans(t *testing.T) {
+	summary, logOutput := captureServeSchemaPlanSummary(t, nil, true)
+
+	if summary != "verified 0 generated tables" {
+		t.Fatalf("summary = %q, want zero generated-table summary", summary)
+	}
+	for _, want := range []string{"tables=0", "columns=0"} {
+		if !strings.Contains(logOutput, want) {
+			t.Fatalf("zero-plan schema log missing %q:\n%s", want, logOutput)
+		}
+	}
+	if strings.Contains(logOutput, "detail=") {
+		t.Fatalf("zero-plan schema log emitted empty detail:\n%s", logOutput)
+	}
+}
+
+func TestInitializeServeSchemaStateStoresConsumeVerboseOwner(t *testing.T) {
+	ctx := context.Background()
+	bundle := loadStoreBackendSelectionWorkflowBundle(t)
+	stores := storeBundle{SchemaBootstrapper: recordingSchemaBootstrapper{}}
+
+	defaultSummary, err := initializeStateStores(ctx, stores, bundle, false)
+	if err != nil {
+		t.Fatalf("initializeStateStores(default): %v", err)
+	}
+	if strings.Contains(defaultSummary, "(") {
+		t.Fatalf("default loaded-bundle state store summary leaked table detail:\n%s", defaultSummary)
+	}
+
+	verboseSummary, err := initializeStateStores(ctx, stores, bundle, true)
+	if err != nil {
+		t.Fatalf("initializeStateStores(verbose): %v", err)
+	}
+	if !strings.Contains(verboseSummary, "(") || !strings.Contains(verboseSummary, ")") {
+		t.Fatalf("verbose loaded-bundle state store summary missing table detail:\n%s", verboseSummary)
+	}
+
+	loadedDefaultSummaries, err := initializeLoadedServeRuntimeStateStores(ctx, stores, []serveRuntimeBundle{{bundle: bundle}, {bundle: bundle}}, false)
+	if err != nil {
+		t.Fatalf("initializeLoadedServeRuntimeStateStores(default): %v", err)
+	}
+	for _, summary := range loadedDefaultSummaries {
+		if strings.Contains(summary, "(") {
+			t.Fatalf("default loaded runtime state store summary leaked table detail:\n%v", loadedDefaultSummaries)
+		}
+	}
+
+	loadedVerboseSummaries, err := initializeLoadedServeRuntimeStateStores(ctx, stores, []serveRuntimeBundle{{bundle: bundle}}, true)
+	if err != nil {
+		t.Fatalf("initializeLoadedServeRuntimeStateStores(verbose): %v", err)
+	}
+	if len(loadedVerboseSummaries) != 1 || !strings.Contains(loadedVerboseSummaries[0], "(") || !strings.Contains(loadedVerboseSummaries[0], ")") {
+		t.Fatalf("verbose loaded runtime state store summary missing table detail:\n%v", loadedVerboseSummaries)
+	}
+
+	defaultPlatformSummary, err := initializeServePlatformStateStores(ctx, stores, filepath.Join(repoRoot(), defaultPlatformSpecPath), false)
+	if err != nil {
+		t.Fatalf("initializeServePlatformStateStores(default): %v", err)
+	}
+	if strings.Contains(defaultPlatformSummary, "(") {
+		t.Fatalf("default pre-catalog platform state store summary leaked table detail:\n%s", defaultPlatformSummary)
+	}
+
+	verbosePlatformSummary, err := initializeServePlatformStateStores(ctx, stores, filepath.Join(repoRoot(), defaultPlatformSpecPath), true)
+	if err != nil {
+		t.Fatalf("initializeServePlatformStateStores(verbose): %v", err)
+	}
+	if !strings.Contains(verbosePlatformSummary, "(") || !strings.Contains(verbosePlatformSummary, ")") {
+		t.Fatalf("verbose pre-catalog platform state store summary missing table detail:\n%s", verbosePlatformSummary)
+	}
+}
+
+func TestServeRuntimeStateStoreSummaryDedupesSchemaSummaries(t *testing.T) {
+	got := serveRuntimeStateStoreSummary([]serveRuntimeBundleContext{
+		{stateStoreSummary: "verified 2 generated tables"},
+		{stateStoreSummary: "verified 2 generated tables"},
+		{stateStoreSummary: "verified 2 generated tables (events(17), runs(14))"},
+		{stateStoreSummary: " "},
+	})
+
+	if strings.Count(got, "verified 2 generated tables") != 2 {
+		t.Fatalf("summary = %q, want one concise and one verbose summary after de-dupe", got)
+	}
+	if strings.Count(got, "events(17)") != 1 {
+		t.Fatalf("summary = %q, want one verbose table detail after de-dupe", got)
+	}
+}
+
+func captureServeSchemaPlanSummary(t *testing.T, plans []store.SchemaTableDDL, verbose bool) (string, string) {
+	t.Helper()
+	var logOutput bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logOutput, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	t.Cleanup(func() {
+		slog.SetDefault(previous)
+	})
+	return summarizeServeSchemaPlans(plans, verbose), logOutput.String()
+}
+
+type recordingSchemaBootstrapper struct{}
+
+func (recordingSchemaBootstrapper) EnsureSchemaTables(context.Context, []store.SchemaTableDDL) error {
+	return nil
+}
+
+func (recordingSchemaBootstrapper) ResolveSchemaCapabilities(context.Context) (store.StoreSchemaCapabilities, error) {
+	return store.StoreSchemaCapabilities{}, nil
+}
+
 func TestWaitForServeHealthEndpointsProvesHealthAndReadyRoutes(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -8123,6 +8274,25 @@ func (b *lockedBuffer) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.buf.String()
+}
+
+func waitForServeReadyLine(t *testing.T, out *lockedBuffer, done <-chan int) {
+	t.Helper()
+	deadline := time.After(serveRuntimeReadyTimeout)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case code := <-done:
+			t.Fatalf("runServeRuntime exited before ready line with code %d\noutput:\n%s", code, out.String())
+		case <-deadline:
+			t.Fatalf("timed out waiting for serve ready line\noutput:\n%s", out.String())
+		case <-ticker.C:
+			if strings.Contains(out.String(), "[22/22]") {
+				return
+			}
+		}
+	}
 }
 
 const (
