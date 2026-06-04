@@ -185,7 +185,7 @@ func (eb *EventBus) deliverToRecipientsWithRoutes(ctx context.Context, evt event
 	for _, recipient := range expected {
 		expectedSet[recipient] = struct{}{}
 	}
-	targetsByRecipient := deliveryRouteTargetsByRecipient(deliveryRoutes)
+	targetsByRecipient := deliveryRouteTargetsBySubscriber(deliveryRoutes)
 	recipients := eb.snapshotRecipientChans(dispatchRecipients)
 	delivered := make([]string, 0, len(recipients))
 	seen := make(map[string]struct{}, len(recipients))
@@ -200,7 +200,7 @@ func (eb *EventBus) deliverToRecipientsWithRoutes(ctx context.Context, evt event
 	}
 	timedOut := make([]string, 0, len(recipients))
 	for _, recipient := range recipients {
-		targets := targetsByRecipient[strings.TrimSpace(recipient.agentID)]
+		targets := targetsByRecipient[recipient.deliveryRouteTargetKey()]
 		if len(targets) == 0 {
 			targets = []events.RouteIdentity{{}}
 		}
@@ -272,21 +272,31 @@ func deliveryRoutesFromTargetMap(recipients []string, subscriberType string, del
 	return events.NormalizeDeliveryRoutes(out)
 }
 
-func deliveryRouteTargetsByRecipient(deliveryRoutes []events.DeliveryRoute) map[string][]events.RouteIdentity {
+type deliveryRouteTargetKey struct {
+	subscriberType string
+	subscriberID   string
+}
+
+func deliveryRouteTargetsBySubscriber(deliveryRoutes []events.DeliveryRoute) map[deliveryRouteTargetKey][]events.RouteIdentity {
 	deliveryRoutes = events.NormalizeDeliveryRoutes(deliveryRoutes)
 	if len(deliveryRoutes) == 0 {
 		return nil
 	}
-	out := make(map[string][]events.RouteIdentity, len(deliveryRoutes))
+	out := make(map[deliveryRouteTargetKey][]events.RouteIdentity, len(deliveryRoutes))
 	for _, route := range deliveryRoutes {
+		subscriberType := strings.TrimSpace(route.SubscriberType)
 		recipient := strings.TrimSpace(route.SubscriberID)
-		if recipient == "" {
+		if subscriberType == "" || recipient == "" {
 			continue
 		}
 		if route.Target.Empty() {
 			continue
 		}
-		out[recipient] = append(out[recipient], route.Target.Normalized())
+		key := deliveryRouteTargetKey{
+			subscriberType: subscriberType,
+			subscriberID:   recipient,
+		}
+		out[key] = append(out[key], route.Target.Normalized())
 	}
 	if len(out) == 0 {
 		return nil
@@ -297,6 +307,18 @@ func deliveryRouteTargetsByRecipient(deliveryRoutes []events.DeliveryRoute) map[
 type agentRecipient struct {
 	agentID string
 	ch      chan events.Event
+	kind    inMemorySubscriberKind
+}
+
+func (r agentRecipient) deliveryRouteTargetKey() deliveryRouteTargetKey {
+	subscriberType := "agent"
+	if r.kind == inMemorySubscriberInternal {
+		subscriberType = "node"
+	}
+	return deliveryRouteTargetKey{
+		subscriberType: subscriberType,
+		subscriberID:   strings.TrimSpace(r.agentID),
+	}
 }
 
 func (eb *EventBus) snapshotRecipientChans(agentIDs []string) []agentRecipient {
@@ -315,7 +337,11 @@ func (eb *EventBus) snapshotRecipientChans(agentIDs []string) []agentRecipient {
 		if !ok {
 			continue
 		}
-		out = append(out, agentRecipient{agentID: id, ch: ch})
+		kind := eb.subscriptionKinds[id]
+		if kind == "" {
+			kind = inMemorySubscriberAgent
+		}
+		out = append(out, agentRecipient{agentID: id, ch: ch, kind: kind})
 	}
 	return out
 }
