@@ -7021,6 +7021,9 @@ runtime_storage:
     requirements:
     - The resolved path MUST be an absolute runtime-private host path.
     - The resolved path MUST be writable by the runtime process when `artifact_repo_commit` executes.
+    - When a loaded bundle declares `artifact_repo_commit`, `swarm serve` and local foreground `swarm run` MUST validate
+      that the resolved artifact root is writable before runtime readiness. Bundles that do not declare
+      `artifact_repo_commit` MUST NOT fail solely because the default artifact root is currently unwritable.
     - The resolved path MUST persist across runtime restarts.
     - The resolved path MUST NOT be `/workspace`, `/data`, `/opt/swarm/contracts`, or any descendant of those agent-visible
       mounts.

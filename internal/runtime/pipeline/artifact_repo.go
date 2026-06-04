@@ -22,9 +22,11 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 const (
+	artifactRepoCommitActionID   = "artifact_repo_commit"
 	artifactRepoProviderLocalGit = "local_git"
 	artifactRepoPublicScheme     = "swarm-artifact://repos/"
 	defaultArtifactRoot          = "/var/lib/swarm/artifacts"
@@ -284,24 +286,107 @@ func normalizedArtifactRepoFlowInstance(value string) string {
 }
 
 func (pc *PipelineCoordinator) artifactRepoRoot() (string, error) {
+	explicit := ""
 	if pc != nil && strings.TrimSpace(pc.artifactRoot) != "" {
-		return ResolveArtifactRepoRoot(pc.artifactRoot)
+		explicit = pc.artifactRoot
 	}
-	return ResolveArtifactRepoRoot("")
+	resolution, err := EnsureArtifactRepoRootWritable(explicit)
+	if err != nil {
+		return "", err
+	}
+	return resolution.Root, nil
+}
+
+type ArtifactRepoRootResolution struct {
+	Root   string
+	Source string
 }
 
 // ResolveArtifactRepoRoot returns the validated runtime-private artifact root.
 // The explicit root has precedence over SWARM_ARTIFACT_ROOT, which has
 // precedence over the platform default.
 func ResolveArtifactRepoRoot(explicit string) (string, error) {
+	resolution, err := ResolveArtifactRepoRootWithSource(explicit)
+	if err != nil {
+		return "", err
+	}
+	return resolution.Root, nil
+}
+
+// ResolveArtifactRepoRootWithSource returns the validated root plus the source
+// selected for operator diagnostics.
+func ResolveArtifactRepoRootWithSource(explicit string) (ArtifactRepoRootResolution, error) {
 	root := strings.TrimSpace(explicit)
 	if root != "" {
-		return validateArtifactRepoRoot(root)
+		validated, err := validateArtifactRepoRoot(root)
+		return ArtifactRepoRootResolution{Root: validated, Source: "explicit runtime ArtifactRoot option"}, err
 	}
 	if env := strings.TrimSpace(os.Getenv("SWARM_ARTIFACT_ROOT")); env != "" {
-		return validateArtifactRepoRoot(env)
+		validated, err := validateArtifactRepoRoot(env)
+		return ArtifactRepoRootResolution{Root: validated, Source: "SWARM_ARTIFACT_ROOT"}, err
 	}
-	return validateArtifactRepoRoot(defaultArtifactRoot)
+	validated, err := validateArtifactRepoRoot(defaultArtifactRoot)
+	return ArtifactRepoRootResolution{Root: validated, Source: "platform default /var/lib/swarm/artifacts"}, err
+}
+
+// EnsureArtifactRepoRootWritable validates and exercises the runtime-private
+// artifact root so platform config defects surface before action execution.
+func EnsureArtifactRepoRootWritable(explicit string) (ArtifactRepoRootResolution, error) {
+	resolution, err := ResolveArtifactRepoRootWithSource(explicit)
+	if err != nil {
+		return resolution, err
+	}
+	if err := validateArtifactRepoRootWritable(resolution.Root); err != nil {
+		return resolution, fmt.Errorf("artifact root %q from %s is not writable by the runtime process: %w; set SWARM_ARTIFACT_ROOT=<writable runtime-private absolute path>", resolution.Root, resolution.Source, err)
+	}
+	return resolution, nil
+}
+
+func validateArtifactRepoRootWritable(root string) error {
+	cleaned, err := validateArtifactRepoRoot(root)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(cleaned, 0o755); err != nil {
+		return err
+	}
+	cleaned, err = validateArtifactRepoRoot(cleaned)
+	if err != nil {
+		return err
+	}
+	probe, err := os.CreateTemp(cleaned, ".swarm-artifact-root-check-*")
+	if err != nil {
+		return err
+	}
+	probeName := probe.Name()
+	if err := probe.Close(); err != nil {
+		_ = os.Remove(probeName)
+		return err
+	}
+	return os.Remove(probeName)
+}
+
+func SourceUsesArtifactRepoCommit(source semanticview.Source) bool {
+	if source == nil {
+		return false
+	}
+	for _, node := range source.NodeEntries() {
+		for _, handler := range node.EventHandlers {
+			if artifactActionSpecIsCommit(handler.Action) {
+				return true
+			}
+			for _, rule := range handler.Rules {
+				if artifactActionSpecIsCommit(rule.Action) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func artifactActionSpecIsCommit(action runtimecontracts.ActionSpec) bool {
+	return strings.TrimSpace(strings.ToLower(action.ID)) == artifactRepoCommitActionID
 }
 
 func validateArtifactRepoRoot(raw string) (string, error) {
