@@ -251,9 +251,7 @@ func eventReceiptsCapability(persistence any) func(context.Context) (bool, error
 
 func waitForMailboxWriteSupportedSurface(t *testing.T, handler *Handler, db *sql.DB, runID, eventID, backend string) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	var lastErr error
-	for time.Now().Before(deadline) {
+	requireAPIV1Convergence(t, fmt.Sprintf("mailbox_write supported surface for %s", backend), func() (bool, error) {
 		listed := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"mailbox-list","method":"mailbox.list","params":{"status":"pending","run_id":%q,"limit":10}}`, runID))
 		if listed.Error != nil {
 			t.Fatalf("mailbox.list error = %#v", listed.Error)
@@ -262,24 +260,18 @@ func waitForMailboxWriteSupportedSurface(t *testing.T, handler *Handler, db *sql
 		if len(items) == 1 {
 			item := asMap(t, items[0])
 			if err := assertMailboxWriteSupportedSurfaceItem(t, handler, item, runID, eventID); err != nil {
-				lastErr = err
-				time.Sleep(25 * time.Millisecond)
-				continue
+				return false, err
 			}
 			assertMailboxWriteEntityState(t, db, runID, backend)
-			return
+			return true, nil
 		}
-		lastErr = fmt.Errorf("mailbox.list returned %d items", len(items))
-		time.Sleep(25 * time.Millisecond)
-	}
-	t.Fatalf("mailbox_write supported surface did not converge for %s: %v", backend, lastErr)
+		return false, fmt.Errorf("mailbox.list returned %d items", len(items))
+	})
 }
 
 func waitForConditionalRuleMailboxWrite(t *testing.T, handler *Handler, runID, eventID string) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	var lastErr error
-	for time.Now().Before(deadline) {
+	requireAPIV1Convergence(t, "rule mailbox_write supported surface", func() (bool, error) {
 		listed := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"rule-mailbox-list","method":"mailbox.list","params":{"status":"pending","run_id":%q,"limit":10}}`, runID))
 		if listed.Error != nil {
 			t.Fatalf("mailbox.list error = %#v", listed.Error)
@@ -288,16 +280,12 @@ func waitForConditionalRuleMailboxWrite(t *testing.T, handler *Handler, runID, e
 		if len(items) == 1 {
 			item := asMap(t, items[0])
 			if err := assertConditionalRuleMailboxItem(t, handler, item, runID, eventID); err != nil {
-				lastErr = err
-				time.Sleep(25 * time.Millisecond)
-				continue
+				return false, err
 			}
-			return
+			return true, nil
 		}
-		lastErr = fmt.Errorf("mailbox.list returned %d items", len(items))
-		time.Sleep(25 * time.Millisecond)
-	}
-	t.Fatalf("rule mailbox_write supported surface did not converge: %v", lastErr)
+		return false, fmt.Errorf("mailbox.list returned %d items", len(items))
+	})
 }
 
 func assertConditionalRuleMailboxItem(t *testing.T, handler *Handler, item map[string]any, runID, eventID string) error {
@@ -370,21 +358,16 @@ func assertMailboxWriteEntityState(t *testing.T, db *sql.DB, runID, backend stri
 
 func waitForConditionalRuleEntityState(t *testing.T, db *sql.DB, runID, backend, wantState string, wantAmount int) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	var lastErr error
-	for time.Now().Before(deadline) {
+	requireAPIV1Convergence(t, fmt.Sprintf("%s entity state to %s", backend, wantState), func() (bool, error) {
 		state, fields, err := loadMailboxWriteEntityState(t, db, runID, backend)
 		if err == nil {
 			if state == wantState && fields["amount"] == float64(wantAmount) {
-				return
+				return true, nil
 			}
-			lastErr = fmt.Errorf("state=%q fields=%#v", state, fields)
-		} else {
-			lastErr = err
+			return false, fmt.Errorf("state=%q fields=%#v", state, fields)
 		}
-		time.Sleep(25 * time.Millisecond)
-	}
-	t.Fatalf("%s entity state did not converge to %s: %v", backend, wantState, lastErr)
+		return false, err
+	})
 }
 
 func loadMailboxWriteEntityState(t *testing.T, db *sql.DB, runID, backend string) (string, map[string]any, error) {
@@ -414,25 +397,24 @@ func loadMailboxWriteEntityState(t *testing.T, db *sql.DB, runID, backend string
 
 func waitForSQLitePipelineReceipt(t *testing.T, db *sql.DB) (string, string, string) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	var lastErr error
-	for time.Now().Before(deadline) {
-		var outcome, reason, errText string
+	var outcome, reason, errText string
+	requireAPIV1Convergence(t, "sqlite pipeline receipt", func() (bool, error) {
+		var gotOutcome, gotReason, gotErrText string
 		if err := db.QueryRow(`
 			SELECT outcome, COALESCE(reason_code, ''), COALESCE(json_extract(side_effects, '$.error'), '')
 			FROM event_receipts
 			WHERE subscriber_type = 'platform' AND subscriber_id = 'pipeline'
 			ORDER BY processed_at DESC
 			LIMIT 1
-		`).Scan(&outcome, &reason, &errText); err == nil {
-			return outcome, reason, errText
+		`).Scan(&gotOutcome, &gotReason, &gotErrText); err == nil {
+			// Assign only after Scan succeeds so callers never observe partial values.
+			outcome, reason, errText = gotOutcome, gotReason, gotErrText
+			return true, nil
 		} else {
-			lastErr = err
+			return false, err
 		}
-		time.Sleep(25 * time.Millisecond)
-	}
-	t.Fatalf("sqlite pipeline receipt did not appear: %v", lastErr)
-	return "", "", ""
+	})
+	return outcome, reason, errText
 }
 
 func bundleSourceFactForTestBundle(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle) runtimecorrelation.BundleSourceFact {

@@ -8,7 +8,6 @@ import (
 	"runtime"
 	"strings"
 	"testing"
-	"time"
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -142,22 +141,19 @@ func (m runCompletionSystemNodeModule) ActionRegistry() runtimepipeline.ActionRe
 
 func waitForRunGetStatus(t *testing.T, handler *Handler, runID, wantStatus string) map[string]any {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	var lastStatus any
-	for time.Now().Before(deadline) {
+	var run map[string]any
+	requireAPIV1Convergence(t, fmt.Sprintf("run.get status for %s", runID), func() (bool, error) {
 		get := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"get","method":"run.get","params":{"run_id":%q}}`, runID))
 		if get.Error != nil {
 			t.Fatalf("run.get error = %#v", get.Error)
 		}
-		run := asMap(t, asMap(t, get.Result)["run"])
-		lastStatus = run["status"]
+		run = asMap(t, asMap(t, get.Result)["run"])
 		if run["status"] == wantStatus {
-			return run
+			return true, nil
 		}
-		time.Sleep(25 * time.Millisecond)
-	}
-	t.Fatalf("run.get status for %s = %#v, want %s", runID, lastStatus, wantStatus)
-	return nil
+		return false, fmt.Errorf("status=%#v, want %s", run["status"], wantStatus)
+	})
+	return run
 }
 
 func triggerEventIDForRun(t *testing.T, db *sql.DB, runID string) string {

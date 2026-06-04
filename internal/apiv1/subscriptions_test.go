@@ -147,12 +147,7 @@ func TestHandlerWebSocketEventSubscribeUsesOwnerFilterAndReplay(t *testing.T) {
 	if got := asMap(t, notification.Params.Result)["event_id"]; got != "evt-1" {
 		t.Fatalf("event notification result = %#v, want evt-1", notification.Params.Result)
 	}
-	conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
-	_, raw, err := conn.ReadMessage()
-	conn.SetReadDeadline(time.Time{})
-	if err == nil {
-		t.Fatalf("unexpected payload-only event notification: %s", raw)
-	}
+	requireNoWSMessage(t, conn, apiv1WebSocketNoMessageTimeout, "payload-only event notification")
 	if observability.lastEventList.Filter.RunID != "run-1" ||
 		observability.lastEventList.Filter.EntityID != "entity-1" ||
 		observability.lastEventList.Filter.EventName != "scan.requested" ||
@@ -277,9 +272,7 @@ func TestHandlerWebSocketSubscriptionOwnerErrorClosesConnection(t *testing.T) {
 			"filter": map[string]any{"run_id": "run-1"},
 		},
 	})
-	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	defer conn.SetReadDeadline(time.Time{})
-	_, raw, err := conn.ReadMessage()
+	raw, err := readWSMessageWithTimeout(t, conn, apiv1WebSocketReadTimeout)
 	if err != nil {
 		return
 	}
@@ -290,7 +283,7 @@ func TestHandlerWebSocketSubscriptionOwnerErrorClosesConnection(t *testing.T) {
 	if subscribe.Error != nil {
 		t.Fatalf("event.subscribe response error = %#v", subscribe.Error)
 	}
-	if _, _, err := conn.ReadMessage(); err == nil {
+	if _, err := readWSMessageWithTimeout(t, conn, apiv1WebSocketReadTimeout); err == nil {
 		t.Fatal("websocket stayed open after owner read error, want fail-closed disconnect")
 	}
 }
@@ -314,9 +307,7 @@ func TestHandlerWebSocketRuntimeSubscribeLogsOwnerErrorClosesConnection(t *testi
 		"method":  "runtime.subscribe_logs",
 		"params":  map[string]any{},
 	})
-	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	defer conn.SetReadDeadline(time.Time{})
-	_, raw, err := conn.ReadMessage()
+	raw, err := readWSMessageWithTimeout(t, conn, apiv1WebSocketReadTimeout)
 	if err != nil {
 		return
 	}
@@ -327,7 +318,7 @@ func TestHandlerWebSocketRuntimeSubscribeLogsOwnerErrorClosesConnection(t *testi
 	if subscribe.Error != nil {
 		t.Fatalf("runtime.subscribe_logs response error = %#v", subscribe.Error)
 	}
-	if _, _, err := conn.ReadMessage(); err == nil {
+	if _, err := readWSMessageWithTimeout(t, conn, apiv1WebSocketReadTimeout); err == nil {
 		t.Fatal("websocket stayed open after runtime log owner read error, want fail-closed disconnect")
 	}
 }
@@ -672,20 +663,12 @@ func TestWebSocketSessionBackpressureAndUnsubscribeCancelState(t *testing.T) {
 	if session.enqueue(rpcResponse{JSONRPC: jsonRPCVersion, ID: "second", Result: map[string]any{"ok": true}}) {
 		t.Fatal("second enqueue succeeded, want bounded backpressure cancellation")
 	}
-	select {
-	case <-ctx.Done():
-	case <-time.After(time.Second):
-		t.Fatal("session context was not canceled on backpressure")
-	}
+	requireContextCanceled(t, ctx, "session context was not canceled on backpressure")
 
 	subCtx, subCancel := context.WithCancel(context.Background())
 	session.registerSubscription("sub-1", subCancel)
 	session.cancelSubscription("sub-1")
-	select {
-	case <-subCtx.Done():
-	case <-time.After(time.Second):
-		t.Fatal("subscription context was not canceled by unsubscribe")
-	}
+	requireContextCanceled(t, subCtx, "subscription context was not canceled by unsubscribe")
 }
 
 func dialTestWS(t *testing.T, serverURL string) *websocket.Conn {
@@ -705,14 +688,14 @@ func writeWSRequest(t *testing.T, conn *websocket.Conn, request map[string]any) 
 	}
 }
 
+const (
+	apiv1WebSocketReadTimeout      = 2 * time.Second
+	apiv1WebSocketNoMessageTimeout = 100 * time.Millisecond
+)
+
 func readWSResponse(t *testing.T, conn *websocket.Conn) rpcResponse {
 	t.Helper()
-	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	defer conn.SetReadDeadline(time.Time{})
-	_, raw, err := conn.ReadMessage()
-	if err != nil {
-		t.Fatalf("read websocket response: %v", err)
-	}
+	raw := requireWSMessage(t, conn, "websocket response")
 	var envelope map[string]any
 	if err := json.Unmarshal(raw, &envelope); err != nil {
 		t.Fatalf("decode websocket response envelope: %v raw=%s", err, raw)
@@ -729,12 +712,7 @@ func readWSResponse(t *testing.T, conn *websocket.Conn) rpcResponse {
 
 func readWSNotification(t *testing.T, conn *websocket.Conn) rpcSubscriptionNotification {
 	t.Helper()
-	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	defer conn.SetReadDeadline(time.Time{})
-	_, raw, err := conn.ReadMessage()
-	if err != nil {
-		t.Fatalf("read websocket notification: %v", err)
-	}
+	raw := requireWSMessage(t, conn, "websocket notification")
 	var notification rpcSubscriptionNotification
 	if err := json.Unmarshal(raw, &notification); err != nil {
 		t.Fatalf("decode websocket notification: %v raw=%s", err, raw)
@@ -743,6 +721,53 @@ func readWSNotification(t *testing.T, conn *websocket.Conn) rpcSubscriptionNotif
 		t.Fatalf("websocket notification = %s, want rpc.subscription", raw)
 	}
 	return notification
+}
+
+func requireWSMessage(t *testing.T, conn *websocket.Conn, description string) []byte {
+	t.Helper()
+	raw, err := readWSMessageWithTimeout(t, conn, apiv1WebSocketReadTimeout)
+	if err != nil {
+		t.Fatalf("read %s: %v", description, err)
+	}
+	return raw
+}
+
+func requireNoWSMessage(t *testing.T, conn *websocket.Conn, timeout time.Duration, description string) {
+	t.Helper()
+	raw, err := readWSMessageWithTimeout(t, conn, timeout)
+	if err == nil {
+		t.Fatalf("unexpected %s: %s", description, raw)
+	}
+}
+
+func readWSMessageWithTimeout(t *testing.T, conn *websocket.Conn, timeout time.Duration) ([]byte, error) {
+	t.Helper()
+	clearDeadline := setWSReadDeadline(t, conn, timeout)
+	defer clearDeadline()
+	_, raw, err := conn.ReadMessage()
+	return raw, err
+}
+
+func setWSReadDeadline(t *testing.T, conn *websocket.Conn, timeout time.Duration) func() {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	if err := conn.SetReadDeadline(deadline); err != nil {
+		t.Fatalf("set websocket read deadline: %v", err)
+	}
+	return func() {
+		if err := conn.SetReadDeadline(time.Time{}); err != nil {
+			t.Fatalf("clear websocket read deadline: %v", err)
+		}
+	}
+}
+
+func requireContextCanceled(t *testing.T, ctx context.Context, description string) {
+	t.Helper()
+	select {
+	case <-ctx.Done():
+	default:
+		t.Fatal(description)
+	}
 }
 
 func sameJSON(a, b any) bool {
