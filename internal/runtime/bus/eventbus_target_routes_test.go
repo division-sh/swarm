@@ -743,6 +743,57 @@ func TestEventBusPublish_RootInputFlowNodePersistsRouteBeforeDispatch(t *testing
 	}
 }
 
+func TestEventBusPublish_RootInputFlowNodePersistsRouteBeforeInterceptorWithoutInternalCarrier(t *testing.T) {
+	store := newTargetRouteMemoryStore()
+	eventID := uuid.NewString()
+	want := events.DeliveryRoute{
+		SubscriberType: "node",
+		SubscriberID:   "entity-writer",
+	}
+	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+		ContractBundle: semanticview.Wrap(routedRootInputFlowNodeBundle()),
+		Interceptors: []EventInterceptor{materializedRoutePersistedBeforeInterceptor{
+			t:       t,
+			store:   store,
+			eventID: eventID,
+			want:    want,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	evt := (events.Event{
+		ID:        eventID,
+		Type:      events.EventType("thing.created"),
+		Payload:   []byte(`{}`),
+		CreatedAt: time.Now().UTC(),
+	}).WithEntityID("ent-root-input")
+
+	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("CheckPublishRecipientPlan: %v", err)
+	}
+	if len(plan.Recipients) != 0 || len(plan.PersistedRecipients) != 0 {
+		t.Fatalf("recipients=%#v persisted=%#v, want no live carrier recipients", plan.Recipients, plan.PersistedRecipients)
+	}
+	if len(plan.RoutedRecipients) != 1 || plan.RoutedRecipients[0].ID != "entity-writer" || plan.RoutedRecipients[0].Path != "validation" || plan.RoutedRecipients[0].RouteSource != "root_input_flow" {
+		t.Fatalf("routed recipients = %#v, want root-input validation/entity-writer", plan.RoutedRecipients)
+	}
+	if got := plan.DeliveryRoutes; len(got) != 1 || !deliveryRoutesContain(got, want) {
+		t.Fatalf("delivery routes = %#v, want empty-target node/entity-writer route", got)
+	}
+
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if routes := store.routes[evt.ID]; !deliveryRoutesContain(routes, want) {
+		t.Fatalf("persisted delivery routes = %#v, want %#v", routes, want)
+	}
+	if got := store.scopes[evt.ID]; got != replayclaim.CommittedReplayScopeSubscribed {
+		t.Fatalf("committed replay scope = %q, want subscribed", got)
+	}
+}
+
 func TestEventBusPublish_LoadedRootInputProjectEventPersistsRouteBeforeDispatch(t *testing.T) {
 	store := newTargetRouteMemoryStore()
 	eventID := uuid.NewString()
