@@ -127,31 +127,7 @@ Authoritative reference: [`platform-spec.yaml`](platform-spec.yaml). The generat
 
 ## CLI
 
-Generated subset of `swarm --help`. Each command targets the running orchestrator's v1 RPC unless otherwise noted.
-
-| Command | Purpose |
-|---|---|
-| `swarm serve` | Start the runtime, API, health, and MCP surfaces. |
-| `swarm verify` | Run the static analyzer against local contract files. |
-| `swarm run` | Start or reattach to a run; stream its trace. |
-| `swarm trace [run-id]` | Print or follow (`-f`) the causal trace of a run. |
-| `swarm runs` | List runs. |
-| `swarm status [run-id]` | Diagnose one run. |
-| `swarm health` | Operator health summary. |
-| `swarm events {list,follow,view}` | Inspect the event log. |
-| `swarm event {replay,view}` | Replay or view a single historical event. |
-| `swarm event publish <event-name>` | Publish one event into the runtime (`--payload-json` or `--payload-file`). |
-| `swarm entities list` | List entities for a run. |
-| `swarm entity {view,aggregate}` | View one entity, or aggregate counts grouped by a field. |
-| `swarm agents` / `swarm agent {view,restart,directive,replay,replay-backlog}` | Inspect or control agents. |
-| `swarm conversations` / `swarm conversation {view,turn}` | Inspect agent sessions and turns. |
-| `swarm incidents` | List runtime incidents. |
-| `swarm logs` | List or follow runtime logs. |
-| `swarm mailbox {list,view,approve,reject,defer}` | Human-in-the-loop mailbox decisions. |
-| `swarm control nuke` | Destructively reset runtime state. |
-| `swarm fork <source-run-id> --at-event <event-id>` | Re-execute a run from any point in its history. |
-| `swarm version` | Print binary version. |
-| `swarm completion <shell>` | Generate shell completion. |
+The `swarm` CLI is one client over the v1 RPC; full command reference at [docs.division.sh/reference/cli](https://docs.division.sh/reference/cli).
 
 ---
 
@@ -172,7 +148,7 @@ flowchart TB
 
 Only the system node writes state, and it does so in one transaction; agents reach the store only indirectly, by emitting an event a node handles. Underneath the loop are the primitives that make the design positions enforceable:
 
-- **A static analyzer for contracts.** Before any event fires, every contract is run through 54 structural checks: state reachability, payload completeness, agent routing, timer lifecycle, CEL parse, prompt linting. A bundle that boots has passed this analysis.
+- **A static analyzer for contracts.** Before any event fires, every contract is run through dozens of structural checks: state reachability, payload completeness, agent routing, timer lifecycle, CEL parse, prompt linting. A bundle that boots has passed this analysis.
 - **Two-layer event-sourced persistence.** Every event lands in the selected runtime store; every entity state mutation lands in a separate mutation log with before/after diffs. Local/dev runs use SQLite by default, while Postgres remains the explicit external/production option. Replay says "show me what happened"; the mutation log says "show me exactly what changed." Accumulator projections compute read-models off the streams, so handlers and external readers can query aggregated state without scanning the raw logs.
 - **Role-based routing authority.** Agent isolation is enforced by an authority layer that decides, per entity status, which agent role may address which other role. "Any agent can talk to any agent" is not a default the runtime offers.
 - **Reliability primitives.** Undeliverable events retry with exponential backoff and land in a dead-letter store after exhaustion. Dead-letters are indexed and replayable.
@@ -203,7 +179,7 @@ The static analyzer's refusal to boot on a half-finished contract is a feature i
 - **Conversational chatbots.** Short interactions where the value is in the conversation. The YAML overhead does not pay for itself.
 - **Exploratory prototyping where the workflow changes every hour.** The static analyzer refusing to boot a half-finished contract is exactly the wrong friction during design. Sketch loose first; port to Swarm once the workflow stabilizes.
 - **LLM-managed routing at runtime.** Swarm explicitly refuses this. If "the model decides what happens next" is the point of your system, this is the wrong tool.
-- **Sunday-afternoon prototypes.** The local/dev path is now zero-service SQLite, but Swarm still expects a declared contract bundle, the current Docker-backed workspace runtime, and deterministic execution. Use a lighter tool if even that structure is too much.
+- **Sunday-afternoon prototypes.** The local/dev path is now zero-service SQLite, but Swarm still expects a declared contract bundle, the current workspace runtime (Docker by default), and deterministic execution. Use a lighter tool if even that structure is too much.
 
 ---
 
@@ -212,7 +188,7 @@ The static analyzer's refusal to boot on a half-finished contract is a feature i
 **Pre-1.0. Breaking changes expected.**
 
 - Platform specification: **v1.6.0**, complete. See [`platform-spec.yaml`](platform-spec.yaml).
-- Engine: Go, Phase 11. Handler-first execution for the proven-safe subset; full handler-first execution in progress.
+- Engine: Go. Handler-first execution for the proven-safe subset; full handler-first execution in progress.
 - Conformance suite: **12 tiers, 200+ distinct test contract bundles** spanning primitives, accumulation, atomic event-loop semantics, composition, boot verification, runtime fork, and policy patterns. The suite runs against an internal scripted harness, so it doesn't cost LLM tokens to exercise the engine. A user-selectable scripted backend is on the roadmap.
 - Used internally to power autonomous multi-agent workflows. External use at your own risk.
 
@@ -239,39 +215,24 @@ source contract.
 
 ## Development
 
-Requirements: Go 1.23 and Docker for the current workspace-isolation backend.
+Requirements: Go 1.23. Docker is the default workspace-isolation backend; a
+host backend is available for local-dev work (see [`.env.example`](.env.example)).
 Plain local `swarm run --contracts ...` uses SQLite at `.swarm/dev.db` unless
 you explicitly opt into Postgres with `SWARM_STORE_BACKEND=postgres` or
 `store.backend: postgres`. Build or pull the configured workspace image
 (`swarm-workspace:latest` by default), or set `SWARM_WORKSPACE_IMAGE` to a
 compatible image before commands that start the runtime.
 
-Contracts that use `artifact_repo_commit` need a writable runtime-private
-artifact root. The default is `/var/lib/swarm/artifacts`; local machines that
-cannot write there should set `SWARM_ARTIFACT_ROOT` to an absolute writable host
-path whose `repos` child can be created and written, outside `/data`,
-`/workspace`, and `/opt/swarm/contracts` before starting `swarm serve` or local
-foreground `swarm run`.
+Set `SWARM_ARTIFACT_ROOT` to a writable host path if your machine can't write
+the default `/var/lib/swarm/artifacts` (needed for `artifact_repo_commit`).
 
 ```bash
-# build
 go build ./cmd/swarm
-
-# lint
 golangci-lint run
-
-# tests
 go test ./...
-
-# zero-service local runtime command; uses SQLite by default
-printf '{"entity_id":"11111111-1111-4111-8111-111111111111"}\n' > /tmp/swarm-payload.json
-go run ./cmd/swarm run --contracts tests/tier1-primitives/test-emits-single --event item.received --payload /tmp/swarm-payload.json
-
-# explicit Postgres opt-in runtime commands
-go run ./cmd/swarm serve --store postgres --contracts ./contracts
-go run ./cmd/swarm run --connect http://127.0.0.1:8081 --event <event> --payload <payload.json>
-go run ./cmd/swarm control nuke --api-server http://127.0.0.1:8081 --yes
 ```
+
+To run a flow locally, see the [docs Quickstart](https://docs.division.sh/quickstart).
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) before opening a PR. High-risk
 semantic/runtime work must follow its pre-audit, source-owner, and proof-audit
