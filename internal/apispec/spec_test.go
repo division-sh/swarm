@@ -938,6 +938,7 @@ func TestPlatformEventsCatalogOwnsPlatformEmittedEvents(t *testing.T) {
 		"platform.agent_panic",
 		"platform.event_quarantined",
 		"platform.dead_letter_escalation",
+		"platform.run_stalled",
 		"platform.reset",
 		"platform.auth_required",
 		"platform.budget_threshold_crossed",

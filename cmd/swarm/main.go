@@ -972,6 +972,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		log.Printf("start runtime: %v", err)
 		return 1
 	}
+	startServeRunStalledEscalation(ctx, stores, runtimeContexts, rt.Bus)
 	reporter.emit(20, "http_listener_bind", "ok", fmt.Sprintf("api_listener=%s api_routes=%s mcp_listener=%s mcp_routes=%s", apiListener.Addr(), serveAPIRoutes, mcpListener.Addr(), serveMCPRoutes))
 	ready.Store(true)
 	if err := waitForServeHealthEndpoints(ctx, apiListener.Addr()); err != nil {

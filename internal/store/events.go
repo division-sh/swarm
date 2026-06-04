@@ -1453,6 +1453,7 @@ func isStandaloneRuntimePlatformEventType(eventType string) bool {
 		"platform.paused",
 		"platform.resumed",
 		"platform.dead_letter_escalation",
+		"platform.run_stalled",
 		"platform.budget_threshold_crossed":
 		return true
 	default:

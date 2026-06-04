@@ -4902,6 +4902,33 @@ run_model:
       state is persisted in run_control_state so run.continue can distinguish operator-paused runs from materialized
       fork rows that also use runs.status=paused. It gates dispatch for one run while in-flight events complete.
       Runtime-scoped external ingress pause/resume is a separate global control owned by api_specification.conventions.runtime_ingress.'
+    stalled_run_escalation:
+      owner: policy.runtime.stalled_run_escalation
+      event_owner: platform_events.catalog.platform.run_stalled
+      diagnosis_owner: internal/store/run_operational_status_read_surface.go.ProjectRunOperationalStatus
+      progress_timestamp_owner: latest events.created_at for the run excluding platform.run_stalled self-alert rows
+      default_policy:
+        enabled: true
+        threshold_seconds: 300
+      policy_keys:
+        runtime.stalled_run_escalation.enabled: boolean
+        runtime.stalled_run_escalation.threshold_seconds: positive integer seconds
+      rule: >
+        The serve runtime may emit platform.run_stalled only for runs whose canonical run diagnosis
+        projects operational_state=stalled and whose latest non-platform.run_stalled event timestamp is
+        non-zero and at least threshold_seconds in the past. The platform.run_stalled event itself is
+        not progress evidence and must not advance the dedupe timestamp. Runs with terminal run-table
+        status, active-delivery diagnosis, or zero non-alert progress timestamp do not emit in this slice.
+      dedupe: >
+        The runtime emits at most one platform.run_stalled event for a tuple of
+        (run_id, blocking_layer, blocking_reason, last_progress_at). A new event may be emitted only
+        when canonical progress advances LastEventAt or the diagnosis tuple changes while the run
+        remains stalled.
+      non_owners:
+      - mailbox item creation
+      - incident records
+      - dashboard alert UI
+      - CLI alert rendering
   fork:
     description: 'Fork creates a new run by reconstructing full system state at a point in time, optionally
       loading new contracts, and resuming execution. The system automatically determines which events need
@@ -6548,6 +6575,36 @@ platform_events:
         sample_events: array
         timestamp: string (ISO 8601)
       produced_by_type: platform
+    platform.run_stalled:
+      description: Runtime detected a running run that has crossed the stalled-run escalation threshold according to the canonical run diagnosis projection.
+      schema_authority: platform-spec.yaml#platform_events.catalog.platform.run_stalled.payload
+      producer_evidence:
+        produced_by_type: platform
+        locations:
+        - internal/runtime/runstalled/monitor.go
+        - cmd/swarm/run_stalled_monitor.go
+      routing_class: event_loop_routable
+      scope: flow or global
+      payload:
+        run_id: uuid
+        flow_instance: string
+        operational_state: string
+        blocking_layer: string
+        blocking_reason: string
+        last_progress_at: string (ISO 8601)
+        threshold_seconds: integer
+        stalled_for_seconds: integer
+        emitted_at: string (ISO 8601)
+      required:
+      - run_id
+      - operational_state
+      - blocking_layer
+      - blocking_reason
+      - last_progress_at
+      - threshold_seconds
+      - stalled_for_seconds
+      - emitted_at
+      produced_by_type: platform
     platform.reset:
       description: Admin-initiated platform state reset. Emitted ONLY when a human administrator explicitly triggers a reset
         via the internal admin reset source. Builder/dashboard reset_state is retired and MUST NOT emit this event. NOT
@@ -6818,7 +6875,7 @@ platform_events:
     description: Most platform events enter the normal event loop. Products can subscribe agents to them. System nodes can handle
       them. They follow standard routing, delivery, and persistence rules.
     routable_events: 'Platform events that enter the normal event loop: platform.dead_letter, platform.agent_failed,
-      platform.agent_panic, platform.event_quarantined, platform.dead_letter_escalation, platform.reset, platform.auth_required,
+      platform.agent_panic, platform.event_quarantined, platform.dead_letter_escalation, platform.run_stalled, platform.reset, platform.auth_required,
       platform.paused, platform.resumed, platform.boot, platform.recovery_failed, platform.agent_started, platform.budget_threshold_crossed,
       mailbox.item_decided. Products can subscribe to these.'
     diagnostic_events: 'Platform events that bypass the event loop and are persisted directly to the events table:
@@ -16680,6 +16737,11 @@ api_specification:
       over the JSON-RPC API, returning operational_state + blocking_layer + blocking_reason + heuristics. The projection itself
       is the canonical owner and is unchanged; this proof confirms the API surface routes through it (no second interpretation
       layer in the API handler).
+    - platform.run_stalled is emitted by the serve runtime only after policy.runtime.stalled_run_escalation consumes
+      ProjectRunOperationalStatus plus the latest non-platform.run_stalled run event timestamp. The default policy is
+      enabled with threshold_seconds=300, and the producer dedupes by (run_id, blocking_layer, blocking_reason,
+      last_progress_at). The self-emitted platform.run_stalled alert is not progress evidence. Mailbox item creation,
+      incident records, dashboard alert UI, and CLI alert rendering are not owned by this slice.
     cli:
     - '`swarm runs`, `swarm status`, `swarm trace`, and `swarm health` consume /v1/rpc or /v1/ws methods, with no direct internal-package
       access (except the `swarm verify` carve-out). Retired `swarm investigate *` commands are non-authoritative legacy consumers.'

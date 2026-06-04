@@ -1194,6 +1194,7 @@ func runForkSelectedContractForkLocalRuntimePlatformEventNames() []string {
 		"platform.event_quarantined",
 		"platform.paused",
 		"platform.resumed",
+		"platform.run_stalled",
 		"platform.runtime_log",
 	}
 }
