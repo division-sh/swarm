@@ -186,6 +186,50 @@ func TestEventBusRecipientPlanMaterializerPersistsRoutesBeforeInterceptors(t *te
 	}
 }
 
+func TestEventBusRecipientPlanMaterializerNormalizesIntoCanonicalRoutePlan(t *testing.T) {
+	want := events.DeliveryRoute{
+		SubscriberType: "node",
+		SubscriberID:   "target-node",
+		Target: events.RouteIdentity{
+			FlowInstance: "review/inst-1",
+		},
+	}
+	eb, err := NewEventBusWithOptions(InMemoryEventStore{}, EventBusOptions{
+		RecipientPlanMaterializer: func(ctx context.Context, evt events.Event, plan PublishRecipientPlan) ([]events.DeliveryRoute, error) {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			if len(plan.DeliveryRoutes) != 0 {
+				t.Fatalf("pre-materialized delivery routes = %#v, want none", plan.DeliveryRoutes)
+			}
+			return []events.DeliveryRoute{want}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	evt := events.Event{ID: uuid.NewString(), Type: events.EventType("review/inst-1/task.started")}
+
+	plan, err := eb.materializePublishRecipientPlan(context.Background(), evt, newRoutePlan(evt).EventDeliveryPlan())
+	if err != nil {
+		t.Fatalf("materializePublishRecipientPlan: %v", err)
+	}
+	if got, wantLen := len(plan.RoutePlan.DeliveryIntents), 1; got != wantLen {
+		t.Fatalf("route plan delivery intents = %d, want %d", got, wantLen)
+	}
+	intent := plan.RoutePlan.DeliveryIntents[0]
+	if intent.SubscriberType != want.SubscriberType || intent.SubscriberID != want.SubscriberID || intent.Target != want.Target {
+		t.Fatalf("route plan delivery intent = %#v, want route %#v", intent, want)
+	}
+	if intent.Source != routePlanSourceRecipientMaterializer || intent.Reason != routePlanReasonMaterializedRoute {
+		t.Fatalf("route plan materializer source/reason = %q/%q, want materializer route", intent.Source, intent.Reason)
+	}
+	projected := eb.publishRecipientPlan(evt, plan)
+	if !deliveryRoutesContain(projected.DeliveryRoutes, want) {
+		t.Fatalf("projected delivery routes = %#v, want materialized route %#v", projected.DeliveryRoutes, want)
+	}
+}
+
 func TestEventBusAgentDispatchIgnoresSameIDNodeRouteTargets(t *testing.T) {
 	store := newTargetRouteMemoryStore()
 	eb, err := NewEventBus(store)

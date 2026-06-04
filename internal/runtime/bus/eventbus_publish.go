@@ -784,8 +784,9 @@ func (eb *EventBus) materializePublishRecipientPlan(ctx context.Context, evt eve
 	if len(routes) == 0 {
 		return plan, nil
 	}
-	plan.DeliveryRoutes = events.NormalizeDeliveryRoutes(append(plan.DeliveryRoutes, routes...))
-	return plan, nil
+	routePlan := plan.CanonicalRoutePlan()
+	routePlan.AddDeliveryIntents(routePlanDeliveryIntentsFromRoutes(routes, routePlanSourceRecipientMaterializer, routePlanReasonMaterializedRoute)...)
+	return plan.WithCanonicalRoutePlan(routePlan), nil
 }
 
 func (eb *EventBus) authorizePublishRecipientPlan(ctx context.Context, evt events.Event, plan eventDeliveryPlan) error {
@@ -796,24 +797,27 @@ func (eb *EventBus) authorizePublishRecipientPlan(ctx context.Context, evt event
 }
 
 func (eb *EventBus) publishRecipientPlan(evt events.Event, plan eventDeliveryPlan) PublishRecipientPlan {
+	routePlan := plan.CanonicalRoutePlan()
 	out := PublishRecipientPlan{
-		Recipients:             uniqueStrings(plan.Recipients),
-		PersistedRecipients:    uniqueStrings(plan.PersistedRecipients),
-		SubscriptionRecipients: uniqueStrings(plan.SubscribedRecipients),
-		DeliveryRoutes:         events.NormalizeDeliveryRoutes(plan.DeliveryRoutes),
-		TargetFailure:          strings.TrimSpace(string(plan.TargetFailure)),
+		Recipients:             routePlan.RecipientIDs(),
+		PersistedRecipients:    routePlan.PersistedRecipientIDs(),
+		SubscriptionRecipients: uniqueStrings(routePlan.SubscribedRecipients),
+		DeliveryRoutes:         routePlan.DeliveryRoutes(),
+		TargetFailure:          strings.TrimSpace(string(routePlan.TargetFailure)),
 	}
 	if eb != nil {
-		out.RoutedRecipients = eb.describeSubscribersForEvent(string(evt.Type), plan.RoutedRecipients)
+		out.RoutedRecipients = eb.describeSubscribersForEvent(string(evt.Type), routePlan.RoutedRecipients)
 	}
 	return out
 }
 
 func (eb *EventBus) persistSubscribedPublishPlan(ctx context.Context, evt events.Event, plan eventDeliveryPlan) error {
-	if err := eb.persistEventRecord(ctx, evt, plan.PersistedRecipients, plan.DeliveryTargets, plan.DeliveryRoutes, runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
+	routePlan := plan.CanonicalRoutePlan()
+	persistedRecipients := routePlan.PersistedRecipientIDs()
+	if err := eb.persistEventRecord(ctx, evt, persistedRecipients, routePlan.DeliveryTargets(), routePlan.DeliveryRoutes(), runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
 		return err
 	}
-	eb.logQueuedDeliveries(ctx, evt, plan.PersistedRecipients, "matched_agent_subscription", plan.ExtraDetail)
+	eb.logQueuedDeliveries(ctx, evt, persistedRecipients, "matched_agent_subscription", routePlan.ExtraDetail)
 	return nil
 }
 
@@ -824,19 +828,21 @@ func (eb *EventBus) deliverSubscribedPublishPlan(ctx context.Context, evt events
 		eb.logDispatchQueued(ctx, reason, evt, len(plan.Recipients), false, false)
 		return true, nil
 	}
-	if len(plan.Recipients) > 0 {
-		if err := eb.deliverToRecipientsWithRoutes(ctx, evt, plan.Recipients, plan.DeliveryRoutes); err != nil {
+	routePlan := plan.CanonicalRoutePlan()
+	recipients := routePlan.RecipientIDs()
+	if len(recipients) > 0 {
+		if err := eb.deliverToRecipientsWithRoutes(ctx, evt, recipients, routePlan.DeliveryRoutes()); err != nil {
 			return false, err
 		}
-		eb.logDelivery(ctx, evt, plan.Recipients, plan.ExtraDetail)
+		eb.logDelivery(ctx, evt, recipients, routePlan.ExtraDetail)
 	}
-	if plan.BlockedByCycle && plan.CycleEscalation != nil {
-		if err := eb.publishDeferred(ctx, *plan.CycleEscalation); err != nil {
+	if routePlan.BlockedByCycle && routePlan.CycleEscalation != nil {
+		if err := eb.publishDeferred(ctx, *routePlan.CycleEscalation); err != nil {
 			return false, err
 		}
 	}
-	if strings.TrimSpace(plan.ContradictionReason) != "" {
-		_ = eb.emitContradiction(ctx, evt, plan.ContradictionReason)
+	if strings.TrimSpace(routePlan.ContradictionReason) != "" {
+		_ = eb.emitContradiction(ctx, evt, routePlan.ContradictionReason)
 	}
 	return false, nil
 }
@@ -1075,13 +1081,14 @@ func (eb *EventBus) recordPublishDiagnostic(ctx context.Context, evt events.Even
 	if !ok || rec == nil {
 		return
 	}
+	routePlan := plan.CanonicalRoutePlan()
 	rec.AppendPublish(PublishDiagnostic{
 		EventID:                strings.TrimSpace(evt.ID),
 		EventType:              strings.TrimSpace(string(evt.Type)),
 		EntityID:               strings.TrimSpace(evt.EntityID()),
 		ParentEventID:          strings.TrimSpace(evt.ParentEventID),
-		RoutedRecipients:       eb.describeSubscribersForEvent(string(evt.Type), plan.RoutedRecipients),
-		SubscriptionRecipients: uniqueStrings(plan.SubscribedRecipients),
+		RoutedRecipients:       eb.describeSubscribersForEvent(string(evt.Type), routePlan.RoutedRecipients),
+		SubscriptionRecipients: uniqueStrings(routePlan.SubscribedRecipients),
 	})
 }
 

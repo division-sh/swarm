@@ -203,6 +203,24 @@ func TestDeliveryPlanner_ComposesRoutingPolicyAndManifest(t *testing.T) {
 	if got := plan.PersistedRecipients[0]; got != "observer" {
 		t.Fatalf("persisted recipient = %q, want observer", got)
 	}
+	if got, want := len(plan.RoutePlan.LiveRecipients), 2; got != want {
+		t.Fatalf("route plan live recipients = %d, want %d", got, want)
+	}
+	if got, want := len(plan.RoutePlan.DeliveryIntents), 2; got != want {
+		t.Fatalf("route plan delivery intents = %d, want %d", got, want)
+	}
+	var sawObserverAgent, sawWorkerNode bool
+	for _, intent := range plan.RoutePlan.DeliveryIntents {
+		if intent.SubscriberType == "agent" && intent.SubscriberID == "observer" && intent.Source == routePlanSourceAgentPolicy && intent.Reason == routePlanReasonMatchedAgentSubscription {
+			sawObserverAgent = true
+		}
+		if intent.SubscriberType == "node" && intent.SubscriberID == "worker" && intent.Source == routePlanSourceRootNodeRoute && intent.Reason == routePlanReasonRouteTableNode {
+			sawWorkerNode = true
+		}
+	}
+	if !sawObserverAgent || !sawWorkerNode {
+		t.Fatalf("route plan delivery intents = %#v, want observer agent policy and worker node route intents", plan.RoutePlan.DeliveryIntents)
+	}
 	if got := plan.ExtraDetail["routed_recipients_count"]; got != 1 {
 		t.Fatalf("routed_recipients_count = %#v, want 1", got)
 	}
@@ -313,6 +331,14 @@ func TestDeliveryPlanner_ExpandsTargetSetForInternalWorkflowRecipient(t *testing
 		}
 		if route.Target.Empty() {
 			t.Fatalf("delivery route target is empty: %#v", route)
+		}
+	}
+	if got, want := len(plan.RoutePlan.DeliveryIntents), 2; got != want {
+		t.Fatalf("route plan delivery intents = %d, want %d", got, want)
+	}
+	for _, intent := range plan.RoutePlan.DeliveryIntents {
+		if intent.Source != routePlanSourceInternalTarget || intent.Reason != routePlanReasonInternalCarrier {
+			t.Fatalf("route plan delivery intent = %#v, want internal target carrier source", intent)
 		}
 	}
 }

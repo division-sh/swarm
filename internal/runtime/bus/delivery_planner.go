@@ -96,39 +96,36 @@ func newDeliveryPlanner(routeResolver deliveryRouteResolver, recipientPolicy del
 }
 
 func (p deliveryPlanner) Plan(ctx context.Context, evt events.Event) (eventDeliveryPlan, error) {
-	plan := eventDeliveryPlan{Event: evt}
+	routePlan := newRoutePlan(evt)
 	if evt.Type == events.EventType("platform.runtime_log") {
-		return plan, nil
+		return routePlan.EventDeliveryPlan(), nil
 	}
 	routing := p.routeResolver.Resolve(evt)
 	manifest, err := p.recipientPolicy.Evaluate(ctx, evt, routing.Recipients)
 	if err != nil {
 		return eventDeliveryPlan{}, err
 	}
-	plan.Recipients = manifest.Recipients
-	plan.PersistedRecipients = manifest.PersistedRecipients
-	plan.DeliveryTargets = manifest.DeliveryTargets
-	plan.DeliveryRoutes = append([]events.DeliveryRoute(nil), manifest.DeliveryRoutes...)
-	plan.DeliveryRoutes = append(plan.DeliveryRoutes, routedRootNodeDeliveryRoutesForNoTargetEvent(evt, routing.RoutedRecipients)...)
-	plan.DeliveryRoutes = append(plan.DeliveryRoutes, routedRootInputFlowNodeDeliveryRoutesForNoTargetEvent(evt, routing.RoutedRecipients)...)
-	plan.DeliveryRoutes = append(plan.DeliveryRoutes, routedNodeDeliveryRoutesForNoRecipientFlowInstanceEvent(evt, routing.RoutedRecipients, plan.Recipients, plan.PersistedRecipients)...)
-	plan.DeliveryRoutes = append(plan.DeliveryRoutes, routedNodeDeliveryRoutesForNoTargetEvent(evt, routing.RoutedRecipients, plan.Recipients, plan.PersistedRecipients)...)
-	plan.DeliveryRoutes = append(plan.DeliveryRoutes, internalDeliveryRoutesForPlan(evt, plan.Recipients, plan.PersistedRecipients, routing.RoutedRecipients)...)
-	plan.DeliveryRoutes = events.NormalizeDeliveryRoutes(plan.DeliveryRoutes)
-	plan.TargetFailure = manifest.TargetFailure
-	if plan.TargetFailure != "" && hasInternalRoutedSubscriberForTarget(evt, routing.RoutedRecipients) {
-		plan.TargetFailure = ""
+	routePlan = routePlanFromManifest(evt, manifest, routePlanSourceAgentPolicy, routePlanReasonMatchedAgentSubscription)
+	recipients := routePlan.RecipientIDs()
+	persisted := routePlan.PersistedRecipientIDs()
+	routePlan.AddDeliveryIntents(routedRootNodeDeliveryIntentsForNoTargetEvent(evt, routing.RoutedRecipients)...)
+	routePlan.AddDeliveryIntents(routedRootInputFlowNodeDeliveryIntentsForNoTargetEvent(evt, routing.RoutedRecipients)...)
+	routePlan.AddDeliveryIntents(routedNodeDeliveryIntentsForNoRecipientFlowInstanceEvent(evt, routing.RoutedRecipients, recipients, persisted)...)
+	routePlan.AddDeliveryIntents(routedNodeDeliveryIntentsForNoTargetEvent(evt, routing.RoutedRecipients, recipients, persisted)...)
+	routePlan.AddDeliveryIntents(internalDeliveryIntentsForPlan(evt, recipients, persisted, routing.RoutedRecipients)...)
+	if routePlan.TargetFailure != "" && hasInternalRoutedSubscriberForTarget(evt, routing.RoutedRecipients) {
+		routePlan.TargetFailure = ""
 	}
-	plan.RoutedRecipients = routing.RoutedRecipients
-	plan.SubscribedRecipients = routing.SubscribedRecipients
-	plan.ExtraDetail = routing.ExtraDetail
-	return plan, nil
+	routePlan.RoutedRecipients = routing.RoutedRecipients
+	routePlan.SubscribedRecipients = routing.SubscribedRecipients
+	routePlan.ExtraDetail = routing.ExtraDetail
+	return routePlan.EventDeliveryPlan(), nil
 }
 
 func (p deliveryPlanner) PlanDirect(ctx context.Context, evt events.Event, recipients []string) (eventDeliveryPlan, error) {
-	plan := eventDeliveryPlan{Event: evt}
+	routePlan := newRoutePlan(evt)
 	if evt.Type == events.EventType("platform.runtime_log") {
-		return plan, nil
+		return routePlan.EventDeliveryPlan(), nil
 	}
 	requested := uniqueStrings(recipients)
 	if len(requested) == 0 {
@@ -138,21 +135,17 @@ func (p deliveryPlanner) PlanDirect(ctx context.Context, evt events.Event, recip
 	if err != nil {
 		return eventDeliveryPlan{}, err
 	}
-	plan.Recipients = manifest.Recipients
-	plan.PersistedRecipients = manifest.PersistedRecipients
-	plan.DeliveryTargets = manifest.DeliveryTargets
-	plan.DeliveryRoutes = append([]events.DeliveryRoute(nil), manifest.DeliveryRoutes...)
-	plan.TargetFailure = manifest.TargetFailure
-	plan.ExtraDetail = map[string]any{
+	routePlan = routePlanFromManifest(evt, manifest, routePlanSourceDirectPolicy, routePlanReasonDirectPublish)
+	routePlan.ExtraDetail = map[string]any{
 		"direct":                     true,
 		"requested_recipients":       append([]string(nil), requested...),
 		"requested_recipients_count": len(requested),
 	}
 	if filtered := filteredRecipients(requested, manifest.Recipients); len(filtered) > 0 {
-		plan.ExtraDetail["filtered_out_recipients"] = filtered
-		plan.ExtraDetail["filtered_out_recipients_count"] = len(filtered)
+		routePlan.ExtraDetail["filtered_out_recipients"] = filtered
+		routePlan.ExtraDetail["filtered_out_recipients_count"] = len(filtered)
 	}
-	return plan, nil
+	return routePlan.EventDeliveryPlan(), nil
 }
 
 func filteredRecipients(requested, allowed []string) []string {
@@ -387,7 +380,7 @@ func agentDeliveryRoutesForRecipients(recipients []string, deliveryTargets map[s
 	return events.NormalizeDeliveryRoutes(out)
 }
 
-func internalDeliveryRoutesForPlan(evt events.Event, recipients, persisted []string, routed []Subscriber) []events.DeliveryRoute {
+func internalDeliveryIntentsForPlan(evt events.Event, recipients, persisted []string, routed []Subscriber) []RoutePlanDeliveryIntent {
 	internalRecipients := filterOutAgentIDs(recipients, persisted)
 	if len(internalRecipients) == 0 {
 		return nil
@@ -406,10 +399,10 @@ func internalDeliveryRoutesForPlan(evt events.Event, recipients, persisted []str
 			})
 		}
 	}
-	return events.NormalizeDeliveryRoutes(out)
+	return routePlanDeliveryIntentsFromRoutes(out, routePlanSourceInternalTarget, routePlanReasonInternalCarrier)
 }
 
-func routedNodeDeliveryRoutesForNoTargetEvent(evt events.Event, routed []Subscriber, recipients, persisted []string) []events.DeliveryRoute {
+func routedNodeDeliveryIntentsForNoTargetEvent(evt events.Event, routed []Subscriber, recipients, persisted []string) []RoutePlanDeliveryIntent {
 	if len(routed) == 0 || len(eventDeliveryTargetRoutes(evt)) > 0 {
 		return nil
 	}
@@ -444,10 +437,10 @@ func routedNodeDeliveryRoutesForNoTargetEvent(evt events.Event, routed []Subscri
 			},
 		})
 	}
-	return events.NormalizeDeliveryRoutes(out)
+	return routePlanDeliveryIntentsFromRoutes(out, routePlanSourceConcreteNodeRoute, routePlanReasonRouteTableNode)
 }
 
-func routedNodeDeliveryRoutesForNoRecipientFlowInstanceEvent(evt events.Event, routed []Subscriber, recipients, persisted []string) []events.DeliveryRoute {
+func routedNodeDeliveryIntentsForNoRecipientFlowInstanceEvent(evt events.Event, routed []Subscriber, recipients, persisted []string) []RoutePlanDeliveryIntent {
 	if len(routed) == 0 || len(eventDeliveryTargetRoutes(evt)) > 0 {
 		return nil
 	}
@@ -484,10 +477,10 @@ func routedNodeDeliveryRoutesForNoRecipientFlowInstanceEvent(evt events.Event, r
 			},
 		})
 	}
-	return events.NormalizeDeliveryRoutes(out)
+	return routePlanDeliveryIntentsFromRoutes(out, routePlanSourceConcreteNodeRoute, routePlanReasonRouteTableNode)
 }
 
-func routedRootNodeDeliveryRoutesForNoTargetEvent(evt events.Event, routed []Subscriber) []events.DeliveryRoute {
+func routedRootNodeDeliveryIntentsForNoTargetEvent(evt events.Event, routed []Subscriber) []RoutePlanDeliveryIntent {
 	if len(routed) == 0 || len(eventDeliveryTargetRoutes(evt)) > 0 {
 		return nil
 	}
@@ -505,10 +498,10 @@ func routedRootNodeDeliveryRoutesForNoTargetEvent(evt events.Event, routed []Sub
 			SubscriberID:   recipient,
 		})
 	}
-	return events.NormalizeDeliveryRoutes(out)
+	return routePlanDeliveryIntentsFromRoutes(out, routePlanSourceRootNodeRoute, routePlanReasonRouteTableNode)
 }
 
-func routedRootInputFlowNodeDeliveryRoutesForNoTargetEvent(evt events.Event, routed []Subscriber) []events.DeliveryRoute {
+func routedRootInputFlowNodeDeliveryIntentsForNoTargetEvent(evt events.Event, routed []Subscriber) []RoutePlanDeliveryIntent {
 	if len(routed) == 0 || len(eventDeliveryTargetRoutes(evt)) > 0 {
 		return nil
 	}
@@ -536,7 +529,7 @@ func routedRootInputFlowNodeDeliveryRoutesForNoTargetEvent(evt events.Event, rou
 			SubscriberID:   recipient,
 		})
 	}
-	return events.NormalizeDeliveryRoutes(out)
+	return routePlanDeliveryIntentsFromRoutes(out, routePlanSourceRootInputFlowNode, routePlanReasonRouteTableNode)
 }
 
 func routedRootInputFlowNodeMatchesNoTargetEvent(evt events.Event, subscriber Subscriber) bool {
