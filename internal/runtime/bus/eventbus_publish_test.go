@@ -1674,6 +1674,11 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeAfterFinalRec
 			eventID:   "20000000-0000-0000-0000-000000000003",
 			eventType: events.EventType("platform.budget_threshold_crossed"),
 		},
+		{
+			name:      "run lifecycle platform.run_stalled",
+			eventID:   "20000000-0000-0000-0000-000000000004",
+			eventType: events.EventType("platform.run_stalled"),
+		},
 	}
 
 	for _, tc := range testCases {
