@@ -19,13 +19,18 @@ type recordingSchedulePersistence struct {
 	schedules    []Schedule
 	cancels      []Schedule
 	releases     []Schedule
+	upsertTx     []bool
+	cancelTx     []bool
+	claimTx      []bool
 	cancelExacts int
 	cancelOwned  int
 	cancelErr    error
 }
 
-func (s *recordingSchedulePersistence) UpsertSchedule(_ context.Context, sc Schedule) error {
+func (s *recordingSchedulePersistence) UpsertSchedule(ctx context.Context, sc Schedule) error {
 	s.schedules = append(s.schedules, sc)
+	_, txActive := PipelineSQLTxFromContext(ctx)
+	s.upsertTx = append(s.upsertTx, txActive)
 	return nil
 }
 
@@ -33,7 +38,9 @@ func (s *recordingSchedulePersistence) LoadActiveSchedules(context.Context) ([]S
 	return nil, nil
 }
 
-func (*recordingSchedulePersistence) ClaimSchedule(context.Context, Schedule) (bool, error) {
+func (s *recordingSchedulePersistence) ClaimSchedule(ctx context.Context, _ Schedule) (bool, error) {
+	_, txActive := PipelineSQLTxFromContext(ctx)
+	s.claimTx = append(s.claimTx, txActive)
 	return true, nil
 }
 
@@ -46,15 +53,19 @@ func (*recordingSchedulePersistence) ReleaseScheduleClaims(context.Context) erro
 	return nil
 }
 
-func (s *recordingSchedulePersistence) CancelScheduleExact(_ context.Context, sc Schedule) error {
+func (s *recordingSchedulePersistence) CancelScheduleExact(ctx context.Context, sc Schedule) error {
 	s.cancelExacts++
 	s.cancels = append(s.cancels, sc)
+	_, txActive := PipelineSQLTxFromContext(ctx)
+	s.cancelTx = append(s.cancelTx, txActive)
 	return nil
 }
 
-func (s *recordingSchedulePersistence) CancelScheduleExactTerminal(_ context.Context, sc Schedule) error {
+func (s *recordingSchedulePersistence) CancelScheduleExactTerminal(ctx context.Context, sc Schedule) error {
 	s.cancelOwned++
 	s.cancels = append(s.cancels, sc)
+	_, txActive := PipelineSQLTxFromContext(ctx)
+	s.cancelTx = append(s.cancelTx, txActive)
 	return s.cancelErr
 }
 
@@ -73,6 +84,16 @@ func newTimerLifecycleCoordinator(bus Bus, db *sql.DB, module WorkflowModule, st
 		opts.TimerScheduleStore = store
 	}
 	return NewPipelineCoordinatorWithOptions(bus, db, opts)
+}
+
+func testActivePipelineSQLTxContext(t *testing.T, db *sql.DB, ctx context.Context) context.Context {
+	t.Helper()
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	t.Cleanup(func() { _ = tx.Rollback() })
+	return WithPipelineSQLTxContext(ctx, tx)
 }
 
 func TestExecuteNodeHandlerPlan_EventTimerStartOnRegistersSchedule(t *testing.T) {
@@ -96,7 +117,8 @@ func TestExecuteNodeHandlerPlan_EventTimerStartOnRegistersSchedule(t *testing.T)
 		t.Fatal("expected coordinator")
 	}
 
-	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), WorkflowInstance{
+	ctx := testPipelineCoordinatorRunContext(t, pc)
+	if err := pc.workflowStore.Upsert(ctx, WorkflowInstance{
 		InstanceID:      "ent-001",
 		WorkflowName:    bundle.WorkflowName(),
 		WorkflowVersion: bundle.WorkflowVersion(),
@@ -113,7 +135,8 @@ func TestExecuteNodeHandlerPlan_EventTimerStartOnRegistersSchedule(t *testing.T)
 		CreatedAt:   time.Now().UTC(),
 	}.WithEntityID("ent-001")
 
-	if handled := pc.executeNodeHandlerPlan(testPipelineCoordinatorRunContext(t, pc), "test-node", evt); !handled {
+	txctx := testActivePipelineSQLTxContext(t, db, ctx)
+	if handled := pc.executeNodeHandlerPlan(txctx, "test-node", evt); !handled {
 		t.Fatal("expected timer.scheduled handler to be handled")
 	}
 	if len(store.schedules) != 1 {
@@ -128,6 +151,9 @@ func TestExecuteNodeHandlerPlan_EventTimerStartOnRegistersSchedule(t *testing.T)
 	}
 	if got.TaskID != "check_timer" {
 		t.Fatalf("scheduled task_id = %q, want check_timer", got.TaskID)
+	}
+	if len(store.upsertTx) != 1 || !store.upsertTx[0] {
+		t.Fatalf("schedule upsert tx-active flags = %#v, want [true]", store.upsertTx)
 	}
 	payload := parsePayloadMap(got.Payload)
 	handle, ok := timeridentity.ParseTimerHandle(payload)
@@ -193,6 +219,76 @@ func TestPipelineIntercept_EventTimerStartOnRegistersSchedule(t *testing.T) {
 	}
 	if got := store.schedules[0].EventType; got != "timer.check" {
 		t.Fatalf("scheduled event = %q, want timer.check", got)
+	}
+}
+
+func TestRegisterWorkflowTimerSchedule_PostCommitClaimDropsPipelineTransaction(t *testing.T) {
+	assertWorkflowTimerSchedulePostCommitClaimDropsPipelineTransaction(t, func(pc *PipelineCoordinator, ctx context.Context, sc Schedule) {
+		pc.registerWorkflowTimerSchedule(ctx, sc)
+	})
+}
+
+func TestPersistWorkflowTimerSchedule_PostCommitClaimDropsPipelineTransaction(t *testing.T) {
+	assertWorkflowTimerSchedulePostCommitClaimDropsPipelineTransaction(t, func(pc *PipelineCoordinator, ctx context.Context, sc Schedule) {
+		pc.persistWorkflowTimerSchedule(ctx, sc)
+	})
+}
+
+func assertWorkflowTimerSchedulePostCommitClaimDropsPipelineTransaction(t *testing.T, schedule func(*PipelineCoordinator, context.Context, Schedule)) {
+	t.Helper()
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	store := &recordingSchedulePersistence{}
+	scheduler := NewScheduler()
+	defer scheduler.Stop()
+	pc := &PipelineCoordinator{
+		timerScheduleStore: store,
+		timerScheduler:     scheduler,
+	}
+	tx, err := db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	committed := false
+	t.Cleanup(func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	})
+	actions := make([]func(), 0, 1)
+	ctx := WithPipelineSQLTxContext(withPipelinePostCommitActions(context.Background(), &actions), tx)
+	sc := Schedule{
+		AgentID:   "owner",
+		EventType: "timer.review",
+		Mode:      "once",
+		At:        time.Now().Add(time.Hour),
+		EntityID:  "ent-1",
+		TaskID:    "timer-1",
+	}
+
+	schedule(pc, ctx, sc)
+	if len(store.upsertTx) != 1 || !store.upsertTx[0] {
+		t.Fatalf("schedule upsert tx-active flags = %#v, want [true]", store.upsertTx)
+	}
+	if len(store.claimTx) != 0 {
+		t.Fatalf("claim tx-active flags before flush = %#v, want none", store.claimTx)
+	}
+	if len(actions) != 1 {
+		t.Fatalf("post-commit actions = %d, want 1", len(actions))
+	}
+	if got := len(scheduler.tasks); got != 0 {
+		t.Fatalf("scheduler tasks before flush = %d, want 0", got)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	committed = true
+	flushPipelinePostCommitActions(actions)
+	if len(store.claimTx) != 1 || store.claimTx[0] {
+		t.Fatalf("claim tx-active flags after flush = %#v, want [false]", store.claimTx)
+	}
+	if got := len(scheduler.tasks); got != 1 {
+		t.Fatalf("scheduler tasks after flush = %d, want 1", got)
 	}
 }
 
@@ -278,7 +374,8 @@ func TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler(t *testing.T) {
 	if pc == nil {
 		t.Fatal("expected coordinator")
 	}
-	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), WorkflowInstance{
+	ctx := testPipelineCoordinatorRunContext(t, pc)
+	if err := pc.workflowStore.Upsert(ctx, WorkflowInstance{
 		InstanceID:      "ent-001",
 		WorkflowName:    bundle.WorkflowName(),
 		WorkflowVersion: bundle.WorkflowVersion(),
@@ -345,7 +442,8 @@ func TestExecuteNodeHandlerPlan_AccumulateTimeoutRegistersSchedule(t *testing.T)
 		t.Fatal("expected coordinator")
 	}
 
-	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), WorkflowInstance{
+	ctx := testPipelineCoordinatorRunContext(t, pc)
+	if err := pc.workflowStore.Upsert(ctx, WorkflowInstance{
 		InstanceID:      "ent-001",
 		WorkflowName:    bundle.WorkflowName(),
 		WorkflowVersion: bundle.WorkflowVersion(),
@@ -364,7 +462,8 @@ func TestExecuteNodeHandlerPlan_AccumulateTimeoutRegistersSchedule(t *testing.T)
 		CreatedAt:   start,
 	}.WithEntityID("ent-001")
 
-	if handled := pc.executeNodeHandlerPlan(testPipelineCoordinatorRunContext(t, pc), "test-node", evt); !handled {
+	txctx := testActivePipelineSQLTxContext(t, db, ctx)
+	if handled := pc.executeNodeHandlerPlan(txctx, "test-node", evt); !handled {
 		t.Fatal("expected item.arrived handler to be handled")
 	}
 	if len(store.schedules) != 1 {
@@ -383,6 +482,9 @@ func TestExecuteNodeHandlerPlan_AccumulateTimeoutRegistersSchedule(t *testing.T)
 	}
 	if got.EntityID != "ent-001" {
 		t.Fatalf("scheduled entity_id = %q, want ent-001", got.EntityID)
+	}
+	if len(store.upsertTx) != 1 || !store.upsertTx[0] {
+		t.Fatalf("schedule upsert tx-active flags = %#v, want [true]", store.upsertTx)
 	}
 	if got.At.Before(start.Add(4900*time.Millisecond)) || got.At.After(start.Add(5100*time.Millisecond)) {
 		t.Fatalf("scheduled at = %s, want about %s", got.At.Format(time.RFC3339Nano), start.Add(5*time.Second).Format(time.RFC3339Nano))
@@ -490,7 +592,8 @@ func TestExecuteNodeHandlerPlan_AccumulateTimeoutCancelsScheduleOnTimeout(t *tes
 		t.Fatal("expected coordinator")
 	}
 
-	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), WorkflowInstance{
+	ctx := testPipelineCoordinatorRunContext(t, pc)
+	if err := pc.workflowStore.Upsert(ctx, WorkflowInstance{
 		InstanceID:      "ent-001",
 		WorkflowName:    bundle.WorkflowName(),
 		WorkflowVersion: bundle.WorkflowVersion(),
@@ -507,7 +610,7 @@ func TestExecuteNodeHandlerPlan_AccumulateTimeoutCancelsScheduleOnTimeout(t *tes
 		Payload:     []byte(`{"entity_id":"ent-001","item_id":"a"}`),
 		CreatedAt:   time.Now().UTC(),
 	}.WithEntityID("ent-001")
-	if handled := pc.executeNodeHandlerPlan(testPipelineCoordinatorRunContext(t, pc), "test-node", evt); !handled {
+	if handled := pc.executeNodeHandlerPlan(ctx, "test-node", evt); !handled {
 		t.Fatal("expected item.arrived handler to be handled")
 	}
 
@@ -527,7 +630,8 @@ func TestExecuteNodeHandlerPlan_AccumulateTimeoutCancelsScheduleOnTimeout(t *tes
 		}),
 		CreatedAt: time.Now().UTC(),
 	}.WithEntityID("ent-001")
-	if handled := pc.executeNodeHandlerPlan(testPipelineCoordinatorRunContext(t, pc), "test-node", timeoutEvt); !handled {
+	txctx := testActivePipelineSQLTxContext(t, db, ctx)
+	if handled := pc.executeNodeHandlerPlan(txctx, "test-node", timeoutEvt); !handled {
 		t.Fatal("expected accumulate.timeout handler to be handled")
 	}
 	if len(store.cancels) != 1 {
@@ -535,6 +639,9 @@ func TestExecuteNodeHandlerPlan_AccumulateTimeoutCancelsScheduleOnTimeout(t *tes
 	}
 	if store.cancelOwned != 1 {
 		t.Fatalf("CancelScheduleExactTerminal calls = %d, want 1", store.cancelOwned)
+	}
+	if len(store.cancelTx) == 0 || !store.cancelTx[len(store.cancelTx)-1] {
+		t.Fatalf("schedule cancel tx-active flags = %#v, want final true", store.cancelTx)
 	}
 	if got := store.cancels[0].TaskID; got != timeridentity.AccumulationTimeoutHandle(timeridentity.NewAccumulatorBucketRef("test-node", "item.arrived")).TaskID() {
 		t.Fatalf("cancelled task_id = %q", got)

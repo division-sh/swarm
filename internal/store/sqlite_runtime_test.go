@@ -1470,12 +1470,7 @@ func TestSQLiteRuntimeStoreClaimScheduleRequiresActiveRow(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
-	if _, err := store.DB.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_source, started_at)
-		VALUES (?, 'running', 'legacy', ?)
-	`, runID, time.Now().UTC()); err != nil {
-		t.Fatalf("seed sqlite run row: %v", err)
-	}
+	seedSQLiteScheduleRun(t, store, ctx, runID)
 	schedule := runtimepipeline.Schedule{
 		RunID:     runID,
 		AgentID:   "agent-1",
@@ -1518,6 +1513,147 @@ func TestSQLiteRuntimeStoreClaimScheduleRequiresActiveRow(t *testing.T) {
 	}
 	if claimed {
 		t.Fatal("ClaimSchedule fired = true, want false")
+	}
+}
+
+func TestSQLiteRuntimeStoreScheduleUsesPipelineTransactionForCommitVisibility(t *testing.T) {
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	runID := uuid.NewString()
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	seedSQLiteScheduleRun(t, store, ctx, runID)
+	schedule := sqliteScheduleTransactionTestSchedule(runID, "task-commit")
+
+	tx, err := store.DB.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("BeginTx(upsert): %v", err)
+	}
+	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
+	if err := store.UpsertSchedule(txctx, schedule); err != nil {
+		t.Fatalf("UpsertSchedule(tx): %v", err)
+	}
+	assertSQLiteScheduleClaimed(t, store, txctx, schedule, true)
+	assertSQLiteActiveScheduleCount(t, store, txctx, 1)
+	assertSQLiteScheduleClaimed(t, store, ctx, schedule, false)
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit(upsert): %v", err)
+	}
+	assertSQLiteScheduleClaimed(t, store, ctx, schedule, true)
+
+	tx, err = store.DB.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("BeginTx(cancel): %v", err)
+	}
+	txctx = runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
+	if err := store.CancelScheduleExact(txctx, schedule); err != nil {
+		t.Fatalf("CancelScheduleExact(tx): %v", err)
+	}
+	assertSQLiteScheduleClaimed(t, store, txctx, schedule, false)
+	assertSQLiteScheduleClaimed(t, store, ctx, schedule, true)
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit(cancel): %v", err)
+	}
+	assertSQLiteScheduleClaimed(t, store, ctx, schedule, false)
+
+	if err := store.UpsertSchedule(ctx, schedule); err != nil {
+		t.Fatalf("UpsertSchedule(before complete): %v", err)
+	}
+	tx, err = store.DB.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("BeginTx(complete): %v", err)
+	}
+	txctx = runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
+	if err := store.CompleteScheduleFireExact(txctx, schedule); err != nil {
+		t.Fatalf("CompleteScheduleFireExact(tx): %v", err)
+	}
+	assertSQLiteScheduleClaimed(t, store, txctx, schedule, false)
+	assertSQLiteScheduleClaimed(t, store, ctx, schedule, true)
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit(complete): %v", err)
+	}
+	assertSQLiteScheduleClaimed(t, store, ctx, schedule, false)
+}
+
+func TestSQLiteRuntimeStoreScheduleUsesPipelineTransactionForRollbackVisibility(t *testing.T) {
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	runID := uuid.NewString()
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	seedSQLiteScheduleRun(t, store, ctx, runID)
+	schedule := sqliteScheduleTransactionTestSchedule(runID, "task-rollback")
+
+	tx, err := store.DB.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("BeginTx(upsert rollback): %v", err)
+	}
+	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
+	if err := store.UpsertSchedule(txctx, schedule); err != nil {
+		t.Fatalf("UpsertSchedule(tx): %v", err)
+	}
+	assertSQLiteScheduleClaimed(t, store, txctx, schedule, true)
+	if err := tx.Rollback(); err != nil {
+		t.Fatalf("Rollback(upsert): %v", err)
+	}
+	assertSQLiteScheduleClaimed(t, store, ctx, schedule, false)
+
+	if err := store.UpsertSchedule(ctx, schedule); err != nil {
+		t.Fatalf("UpsertSchedule(seed active): %v", err)
+	}
+	tx, err = store.DB.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("BeginTx(cancel rollback): %v", err)
+	}
+	txctx = runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
+	if err := store.CancelScheduleExact(txctx, schedule); err != nil {
+		t.Fatalf("CancelScheduleExact(tx): %v", err)
+	}
+	assertSQLiteScheduleClaimed(t, store, txctx, schedule, false)
+	assertSQLiteScheduleClaimed(t, store, ctx, schedule, true)
+	if err := tx.Rollback(); err != nil {
+		t.Fatalf("Rollback(cancel): %v", err)
+	}
+	assertSQLiteScheduleClaimed(t, store, ctx, schedule, true)
+}
+
+func seedSQLiteScheduleRun(t *testing.T, store *SQLiteRuntimeStore, ctx context.Context, runID string) {
+	t.Helper()
+	if _, err := store.DB.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, bundle_source, started_at)
+		VALUES (?, 'running', 'legacy', ?)
+	`, runID, time.Now().UTC()); err != nil {
+		t.Fatalf("seed sqlite run row: %v", err)
+	}
+}
+
+func sqliteScheduleTransactionTestSchedule(runID, taskID string) runtimepipeline.Schedule {
+	return runtimepipeline.Schedule{
+		RunID:     runID,
+		AgentID:   "agent-1",
+		EventType: "timer.fired",
+		Mode:      "once",
+		At:        time.Now().UTC().Add(time.Hour),
+		TaskID:    taskID,
+		Payload:   json.RawMessage(`{"__schedule_task_id":"` + taskID + `"}`),
+	}
+}
+
+func assertSQLiteScheduleClaimed(t *testing.T, store *SQLiteRuntimeStore, ctx context.Context, schedule runtimepipeline.Schedule, want bool) {
+	t.Helper()
+	claimed, err := store.ClaimSchedule(ctx, schedule)
+	if err != nil {
+		t.Fatalf("ClaimSchedule: %v", err)
+	}
+	if claimed != want {
+		t.Fatalf("ClaimSchedule = %v, want %v", claimed, want)
+	}
+}
+
+func assertSQLiteActiveScheduleCount(t *testing.T, store *SQLiteRuntimeStore, ctx context.Context, want int) {
+	t.Helper()
+	active, err := store.LoadActiveSchedules(ctx)
+	if err != nil {
+		t.Fatalf("LoadActiveSchedules: %v", err)
+	}
+	if len(active) != want {
+		t.Fatalf("active schedule count = %d, want %d: %#v", len(active), want, active)
 	}
 }
 
