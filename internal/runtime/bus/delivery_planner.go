@@ -110,6 +110,7 @@ func (p deliveryPlanner) Plan(ctx context.Context, evt events.Event) (eventDeliv
 	plan.DeliveryTargets = manifest.DeliveryTargets
 	plan.DeliveryRoutes = append([]events.DeliveryRoute(nil), manifest.DeliveryRoutes...)
 	plan.DeliveryRoutes = append(plan.DeliveryRoutes, routedRootNodeDeliveryRoutesForNoTargetEvent(evt, routing.RoutedRecipients)...)
+	plan.DeliveryRoutes = append(plan.DeliveryRoutes, routedRootInputFlowNodeDeliveryRoutesForNoTargetEvent(evt, routing.RoutedRecipients, plan.Recipients, plan.PersistedRecipients)...)
 	plan.DeliveryRoutes = append(plan.DeliveryRoutes, routedNodeDeliveryRoutesForNoRecipientFlowInstanceEvent(evt, routing.RoutedRecipients, plan.Recipients, plan.PersistedRecipients)...)
 	plan.DeliveryRoutes = append(plan.DeliveryRoutes, routedNodeDeliveryRoutesForNoTargetEvent(evt, routing.RoutedRecipients, plan.Recipients, plan.PersistedRecipients)...)
 	plan.DeliveryRoutes = append(plan.DeliveryRoutes, internalDeliveryRoutesForPlan(evt, plan.Recipients, plan.PersistedRecipients, routing.RoutedRecipients)...)
@@ -505,6 +506,57 @@ func routedRootNodeDeliveryRoutesForNoTargetEvent(evt events.Event, routed []Sub
 		})
 	}
 	return events.NormalizeDeliveryRoutes(out)
+}
+
+func routedRootInputFlowNodeDeliveryRoutesForNoTargetEvent(evt events.Event, routed []Subscriber, recipients, persisted []string) []events.DeliveryRoute {
+	if len(routed) == 0 || len(eventDeliveryTargetRoutes(evt)) > 0 {
+		return nil
+	}
+	if len(filterOutAgentIDs(recipients, persisted)) == 0 {
+		return nil
+	}
+	if strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/") != "" {
+		return nil
+	}
+	eventType := strings.Trim(strings.TrimSpace(string(evt.Type)), "/")
+	if eventType == "" || strings.Contains(eventType, "/") {
+		return nil
+	}
+	nodeIDs := make(map[string]struct{}, len(routed))
+	for _, subscriber := range routed {
+		if !routedRootInputFlowNodeMatchesNoTargetEvent(evt, subscriber) {
+			continue
+		}
+		nodeIDs[strings.TrimSpace(subscriber.ID)] = struct{}{}
+	}
+	if len(nodeIDs) == 0 {
+		return nil
+	}
+	out := make([]events.DeliveryRoute, 0, len(nodeIDs))
+	for _, recipient := range sortedStringKeys(nodeIDs) {
+		out = append(out, events.DeliveryRoute{
+			SubscriberType: "node",
+			SubscriberID:   recipient,
+		})
+	}
+	return events.NormalizeDeliveryRoutes(out)
+}
+
+func routedRootInputFlowNodeMatchesNoTargetEvent(evt events.Event, subscriber Subscriber) bool {
+	if strings.TrimSpace(subscriber.ID) == "" || strings.TrimSpace(subscriber.Type) != "node" {
+		return false
+	}
+	if strings.TrimSpace(subscriber.RouteSource) != "root_input_flow" {
+		return false
+	}
+	if strings.Trim(strings.TrimSpace(subscriber.Path), "/") == "" {
+		return false
+	}
+	if strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/") != "" {
+		return false
+	}
+	eventType := strings.Trim(strings.TrimSpace(string(evt.Type)), "/")
+	return eventType != "" && !strings.Contains(eventType, "/")
 }
 
 func routedRootNodeSubscriberIDsForNoTargetEvent(evt events.Event, routed []Subscriber) map[string]struct{} {
