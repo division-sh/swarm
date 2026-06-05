@@ -213,7 +213,7 @@ func validateRouteAuthorityMatrix(root string, matrix routeAuthorityMatrix, ctx 
 		}
 		activeTrackers[key] = struct{}{}
 	}
-	for _, issue := range []int{1340, 1337, 1293, 1299, 1301} {
+	for _, issue := range []int{1340, 1293, 1299, 1301} {
 		key := routeAuthorityTrackerKey(issue, "runtime_operations.delivery_and_replay_ownership")
 		if _, ok := activeTrackers[key]; !ok {
 			problems = append(problems, fmt.Sprintf("active_trackers missing #%d runtime_operations.delivery_and_replay_ownership", issue))
@@ -475,10 +475,9 @@ func requiredRouteAuthorityRows() []string {
 
 func requiredRouteAuthoritySplitRows() map[string]int {
 	return map[string]int{
-		"served_root_input_event_publish_supported_surfaces": 1337,
-		"workflow_node_execution_admission":                  1293,
-		"wildcard_static_service_route_production":           1299,
-		"runtime_callback_flow_instance_localization":        1301,
+		"workflow_node_execution_admission":           1293,
+		"wildcard_static_service_route_production":    1299,
+		"runtime_callback_flow_instance_localization": 1301,
 	}
 }
 

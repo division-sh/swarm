@@ -24,9 +24,6 @@ active_trackers:
     issue: 1340
     watchlist: runtime_operations.delivery_and_replay_ownership
   - kind: github_issue
-    issue: 1337
-    watchlist: runtime_operations.delivery_and_replay_ownership
-  - kind: github_issue
     issue: 1293
     watchlist: runtime_operations.delivery_and_replay_ownership
   - kind: github_issue
@@ -113,21 +110,23 @@ rows:
       explicitly consumer proof only, not route authority proof.
 
   - id: served_root_input_event_publish_supported_surfaces
-    concept: Served root-input event.publish --run-id proof exists for SQLite and Postgres, but tracker #1337 remains open.
-    classification: split_to_existing_issue
-    tier: split_open
-    split_issue: 1337
-    proof_dimensions: [default_sqlite, explicit_postgres, real_v1_handler, cli_v1_path, split_tracker]
+    concept: Served root-input event.publish proof persists typed workflow-node authority for SQLite and Postgres.
+    classification: already_covered_by_existing_proof
+    tier: required_pr_smoke
+    proof_dimensions: [default_sqlite, explicit_postgres, real_v1_handler, cli_v1_path, persistence_authority, required_pr_smoke]
     owner_refs:
       - {kind: artifact, path: internal/apiv1/testdata/public_surface_backend_matrix.yaml}
       - {kind: spec_ref, path: platform-spec.yaml, ref: event.publish}
+      - {kind: spec_ref, path: platform-spec.yaml, ref: workflow_node_route_authority}
     proof_refs:
       - {kind: go_test, name: TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite}
       - {kind: go_test, name: TestRunServeRuntimeEventPublishRunIDFollowUpServedPathPostgres}
-      - {kind: tracker, issue: 1337, watchlist: runtime_operations.delivery_and_replay_ownership}
+      - {kind: issue, issue: 1337}
     notes: >
-      Current master proves this served path passes, but #1337 is still open.
-      This row preserves that tracker state instead of silently closing it.
+      The served proof asserts that the initial root-input publication persists
+      typed node/entity-writer event_deliveries authority before the workflow
+      node result is accepted. #1293 remains the separate execution-admission
+      consumer of that persisted authority.
 
   - id: workflow_node_execution_admission
     concept: Workflow-node execution must require committed node delivery authority before handler execution.
