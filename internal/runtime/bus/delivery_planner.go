@@ -409,6 +409,9 @@ func routedNodeDeliveryIntentsForNoTargetEvent(evt events.Event, routed []Subscr
 	if routes := routedConcreteNoTargetNodeDeliveryRoutes(evt, routed); len(routes) > 0 {
 		return routePlanDeliveryIntentsFromRoutes(routes, routePlanSourceConcreteNodeRoute, routePlanReasonRouteTableNode)
 	}
+	if routes := routedScopedNoTargetNodeDeliveryRoutes(evt, routed); len(routes) > 0 {
+		return routePlanDeliveryIntentsFromRoutes(routes, routePlanSourceScopedNodeRoute, routePlanReasonRouteTableNode)
+	}
 	internalRecipients := filterOutAgentIDs(recipients, persisted)
 	if len(internalRecipients) == 0 {
 		return nil
@@ -478,6 +481,96 @@ func routedConcreteNoTargetNodeDeliveryRoutes(evt events.Event, routed []Subscri
 	return events.NormalizeDeliveryRoutes(out)
 }
 
+func routedScopedNoTargetNodeDeliveryRoutes(evt events.Event, routed []Subscriber) []events.DeliveryRoute {
+	if len(routed) == 0 || len(eventDeliveryTargetRoutes(evt)) > 0 {
+		return nil
+	}
+	eventType := strings.Trim(strings.TrimSpace(string(evt.Type)), "/")
+	if eventType == "" || !strings.Contains(eventType, "/") {
+		return nil
+	}
+	eventEntityID := strings.TrimSpace(evt.EntityID())
+	out := make([]events.DeliveryRoute, 0, len(routed))
+	for _, subscriber := range routed {
+		targetFlowInstance, ok := routedScopedNoTargetNodeDeliveryFlowInstance(evt, subscriber)
+		if !ok {
+			continue
+		}
+		out = append(out, events.DeliveryRoute{
+			SubscriberType: "node",
+			SubscriberID:   strings.TrimSpace(subscriber.ID),
+			Target: events.RouteIdentity{
+				FlowInstance: targetFlowInstance,
+				EntityID:     eventEntityID,
+			},
+		})
+	}
+	return events.NormalizeDeliveryRoutes(out)
+}
+
+func routedScopedNoTargetNodeDeliveryFlowInstance(evt events.Event, subscriber Subscriber) (string, bool) {
+	if strings.TrimSpace(subscriber.ID) == "" || strings.TrimSpace(subscriber.Type) == "agent" {
+		return "", false
+	}
+	if strings.Contains(strings.TrimSpace(subscriber.MatchPattern), "*") {
+		return "", false
+	}
+	path := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
+	if path == "" {
+		return "", false
+	}
+	flowInstance := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/")
+	if flowInstance == "" {
+		if routedNodeMatchesScopedNoTargetEvent(evt, subscriber) {
+			return path, true
+		}
+		return "", false
+	}
+	if routedNodeMatchesConcreteFlowInstanceEvent(evt, subscriber) {
+		return flowInstance, true
+	}
+	if target := routedDescendantStaticFlowInstanceTarget(evt, subscriber); target != "" {
+		return target, true
+	}
+	if target := routedStaticCrossFlowInstanceTarget(evt, subscriber); target != "" {
+		return target, true
+	}
+	return "", false
+}
+
+func routedDescendantStaticFlowInstanceTarget(evt events.Event, subscriber Subscriber) string {
+	flowInstance := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/")
+	path := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
+	eventType := strings.Trim(strings.TrimSpace(string(evt.Type)), "/")
+	matchPattern := strings.Trim(strings.TrimSpace(subscriber.MatchPattern), "/")
+	if flowInstance == "" || path == "" || eventType == "" || eventType != matchPattern || !strings.HasPrefix(eventType, path+"/") {
+		return ""
+	}
+	staticScope := strings.Trim(strings.TrimSpace(runtimeflowidentity.SemanticScopeFromInstancePath(flowInstance)), "/")
+	if staticScope == "" || path == staticScope || !strings.HasPrefix(path, staticScope+"/") {
+		return ""
+	}
+	return flowInstance + strings.TrimPrefix(path, staticScope)
+}
+
+func routedStaticCrossFlowInstanceTarget(evt events.Event, subscriber Subscriber) string {
+	path := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
+	eventType := strings.Trim(strings.TrimSpace(string(evt.Type)), "/")
+	matchPattern := strings.Trim(strings.TrimSpace(subscriber.MatchPattern), "/")
+	if path == "" || eventType == "" || eventType != matchPattern {
+		return ""
+	}
+	flowInstance := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/")
+	if flowInstance == "" {
+		return ""
+	}
+	staticScope := strings.Trim(strings.TrimSpace(runtimeflowidentity.SemanticScopeFromInstancePath(flowInstance)), "/")
+	if staticScope != "" && (path == staticScope || strings.HasPrefix(path, staticScope+"/")) {
+		return ""
+	}
+	return path
+}
+
 func routedNodeDeliveryIntentsForNoRecipientFlowInstanceEvent(evt events.Event, routed []Subscriber, recipients, persisted []string) []RoutePlanDeliveryIntent {
 	if len(routed) == 0 || len(eventDeliveryTargetRoutes(evt)) > 0 {
 		return nil
@@ -520,9 +613,6 @@ func routedNodeDeliveryIntentsForNoRecipientFlowInstanceEvent(evt events.Event, 
 
 func routedRootNodeDeliveryIntentsForNoTargetEvent(evt events.Event, routed []Subscriber) []RoutePlanDeliveryIntent {
 	if len(routed) == 0 || len(eventDeliveryTargetRoutes(evt)) > 0 {
-		return nil
-	}
-	if strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/") != "" {
 		return nil
 	}
 	rootNodeIDs := routedRootNodeSubscriberIDsForNoTargetEvent(evt, routed)
@@ -589,7 +679,7 @@ func routedRootInputFlowNodeMatchesNoTargetEvent(evt events.Event, subscriber Su
 
 func routedRootNodeSubscriberIDsForNoTargetEvent(evt events.Event, routed []Subscriber) map[string]struct{} {
 	eventType := strings.Trim(strings.TrimSpace(string(evt.Type)), "/")
-	if eventType == "" || strings.Contains(eventType, "/") {
+	if eventType == "" {
 		return nil
 	}
 	out := make(map[string]struct{}, len(routed))
@@ -612,11 +702,15 @@ func routedRootNodeMatchesNoTargetEvent(evt events.Event, subscriber Subscriber)
 	if strings.Trim(strings.TrimSpace(subscriber.Path), "/") != "" {
 		return false
 	}
-	if strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/") != "" {
+	eventType := strings.Trim(strings.TrimSpace(string(evt.Type)), "/")
+	if eventType == "" {
 		return false
 	}
-	eventType := strings.Trim(strings.TrimSpace(string(evt.Type)), "/")
-	return eventType != "" && !strings.Contains(eventType, "/")
+	if !strings.Contains(eventType, "/") {
+		return true
+	}
+	matchPattern := strings.Trim(strings.TrimSpace(subscriber.MatchPattern), "/")
+	return matchPattern != "" && !strings.Contains(matchPattern, "*") && eventType == matchPattern
 }
 
 func routedNodeInternalSubscriptionAliases(evt events.Event, routed []Subscriber) []string {
@@ -653,6 +747,25 @@ func routedNodeInternalSubscriptionAliases(evt events.Event, routed []Subscriber
 
 func routedNodeMatchesConcreteFlowInstanceEvent(evt events.Event, subscriber Subscriber) bool {
 	return routedNodeConcreteEventKey(evt, subscriber) != ""
+}
+
+func routedNodeMatchesScopedNoTargetEvent(evt events.Event, subscriber Subscriber) bool {
+	if strings.TrimSpace(subscriber.ID) == "" || strings.TrimSpace(subscriber.Type) == "agent" {
+		return false
+	}
+	if strings.Contains(strings.TrimSpace(subscriber.MatchPattern), "*") {
+		return false
+	}
+	path := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
+	if path == "" {
+		return false
+	}
+	if strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/") != "" {
+		return routedNodeMatchesConcreteFlowInstanceEvent(evt, subscriber)
+	}
+	eventType := strings.Trim(strings.TrimSpace(string(evt.Type)), "/")
+	matchPattern := strings.Trim(strings.TrimSpace(subscriber.MatchPattern), "/")
+	return eventType != "" && eventType == matchPattern
 }
 
 func routedNodeMatchesConcreteEventTypeFlowInstance(evt events.Event, subscriber Subscriber) bool {

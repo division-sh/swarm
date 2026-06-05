@@ -2,6 +2,7 @@ package bus_test
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
@@ -508,6 +509,110 @@ func TestDeriveRouteTable_HandlerOnlyInputPinsAutoWireFromProducerOutput(t *test
 	got := rt.Resolve("producer/scan.requested")
 	if len(got) != 1 || got[0].ID != "consumer-node" {
 		t.Fatalf("Resolve(producer/scan.requested) = %#v, want consumer-node", got)
+	}
+}
+
+func TestDeriveRouteTable_StaticChildFlowInputSubscriptionsResolveCanonicalNodeOwners(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
+	for _, tc := range []struct {
+		fixture    string
+		eventType  string
+		nodeID     string
+		flowPath   string
+		routeMatch string
+	}{
+		{
+			fixture:    "test-child-flow-local-events",
+			eventType:  "child/child.start",
+			nodeID:     "child-intake",
+			flowPath:   "child",
+			routeMatch: "child/child.start",
+		},
+		{
+			fixture:    "test-nested-three-levels",
+			eventType:  "child/step.begin",
+			nodeID:     "child-relay",
+			flowPath:   "child",
+			routeMatch: "child/step.begin",
+		},
+	} {
+		t.Run(tc.fixture, func(t *testing.T) {
+			fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", tc.fixture)
+			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
+			if err != nil {
+				t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+			}
+			rt, err := runtimebus.DeriveRouteTable(semanticview.Wrap(bundle))
+			if err != nil {
+				t.Fatalf("DeriveRouteTable: %v", err)
+			}
+			got := rt.Resolve(tc.eventType)
+			if len(got) != 1 ||
+				got[0].ID != tc.nodeID ||
+				got[0].Type != "node" ||
+				got[0].Path != tc.flowPath ||
+				got[0].MatchPattern != tc.routeMatch ||
+				got[0].RouteSource != "subscription" {
+				t.Fatalf("Resolve(%s) = %#v, want %s %s %s", tc.eventType, got, tc.nodeID, tc.flowPath, tc.routeMatch)
+			}
+		})
+	}
+}
+
+func TestDeriveRouteTable_RuntimeProducedFollowUpSubscriptionsResolveCanonicalNodeOwners(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
+	for _, tc := range []struct {
+		name       string
+		fixture    string
+		eventType  string
+		nodeID     string
+		flowPath   string
+		routeMatch string
+	}{
+		{
+			name:       "root-local timer follow-up",
+			fixture:    filepath.Join("tests", "tier5-flow-lifecycle", "test-timer-fire"),
+			eventType:  "timer.check",
+			nodeID:     "test-node",
+			flowPath:   "",
+			routeMatch: "timer.check",
+		},
+		{
+			name:       "cross-flow static subscriber",
+			fixture:    filepath.Join("tests", "tier7-composition", "test-cross-flow-subscription"),
+			eventType:  "flow-b/order.completed",
+			nodeID:     "flow-a-node",
+			flowPath:   "flow-a",
+			routeMatch: "flow-b/order.completed",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fixtureRoot := filepath.Join(repoRoot, tc.fixture)
+			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
+			if err != nil {
+				t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+			}
+			rt, err := runtimebus.DeriveRouteTable(semanticview.Wrap(bundle))
+			if err != nil {
+				t.Fatalf("DeriveRouteTable: %v", err)
+			}
+			got := rt.Resolve(tc.eventType)
+			found := false
+			for _, subscriber := range got {
+				if subscriber.ID == tc.nodeID &&
+					subscriber.Type == "node" &&
+					subscriber.Path == tc.flowPath &&
+					subscriber.MatchPattern == tc.routeMatch {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("Resolve(%s) = %#v, want %s %s %s", tc.eventType, got, tc.nodeID, tc.flowPath, tc.routeMatch)
+			}
+		})
 	}
 }
 

@@ -466,7 +466,32 @@ func (rt *RouteTable) addNodePatternsLocked(source semanticview.Source, flowID s
 					Subscriber:   subscriber,
 				})
 			}
+			if resolved := routeResolveNodeCanonicalPattern(source, basePath, nodeID, rawPattern); strings.TrimSpace(resolved.EventPattern) != "" {
+				subscriber.RouteSource = resolved.RouteSource
+				rt.patterns = append(rt.patterns, routePattern{
+					EventPattern: resolved.EventPattern,
+					Subscriber:   subscriber,
+				})
+			}
 		}
+	}
+}
+
+func routeResolveNodeCanonicalPattern(source semanticview.Source, basePath, nodeID, rawPattern string) routeResolvedPattern {
+	if source == nil || strings.Trim(strings.TrimSpace(basePath), "/") == "" || strings.TrimSpace(nodeID) == "" {
+		return routeResolvedPattern{}
+	}
+	rawPattern = eventidentity.Normalize(rawPattern)
+	if rawPattern == "" || strings.Contains(rawPattern, "*") {
+		return routeResolvedPattern{}
+	}
+	resolved := eventidentity.Normalize(source.ResolveNodeEventReference(nodeID, rawPattern))
+	if resolved == "" || resolved == rawPattern || strings.Contains(resolved, "*") {
+		return routeResolvedPattern{}
+	}
+	return routeResolvedPattern{
+		EventPattern: resolved,
+		RouteSource:  "subscription",
 	}
 }
 

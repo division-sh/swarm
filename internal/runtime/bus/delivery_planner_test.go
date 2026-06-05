@@ -505,6 +505,311 @@ func TestDeliveryPlanner_NoTargetRootRoutedNodeUsesSemanticNodeDeliveryRoute(t *
 	}
 }
 
+func TestDeliveryPlanner_NoTargetRootLocalEventWithFlowInstanceUsesRootNodeRoute(t *testing.T) {
+	planner := newDeliveryPlanner(
+		deliveryRouteResolver{
+			resolveRoutedSubscribers: func(events.Event) []Subscriber {
+				return []Subscriber{{
+					ID:           "test-node",
+					Type:         "node",
+					MatchPattern: "timer.check",
+				}}
+			},
+			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
+				return nil
+			},
+			resolveRoutedNodeInternalRecipients: func(events.Event, []Subscriber) []deliveryRecipientCandidate {
+				return []deliveryRecipientCandidate{{ID: "workflow-runtime", PersistAsDelivery: false}}
+			},
+			describeSubscribersForEvent: func(string, []Subscriber) []PublishDiagnosticRecipient {
+				return nil
+			},
+		},
+		deliveryRecipientPolicy{
+			loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
+				return map[string]ActiveAgentDescriptor{}, true, nil
+			},
+		},
+	)
+
+	plan, err := planner.Plan(context.Background(), (events.Event{
+		Type: "timer.check",
+	}).WithEntityID("ent-root").WithFlowInstance("11111111-1111-4111-8111-111111111111"))
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if got := plan.Recipients; len(got) != 1 || got[0] != "workflow-runtime" {
+		t.Fatalf("recipients = %#v, want workflow-runtime live carrier", got)
+	}
+	if len(plan.PersistedRecipients) != 0 {
+		t.Fatalf("persisted recipients = %#v, want none for internal carrier", plan.PersistedRecipients)
+	}
+	if got := plan.DeliveryRoutes; len(got) != 1 {
+		t.Fatalf("delivery routes = %#v, want test-node root node route", got)
+	}
+	route := plan.DeliveryRoutes[0]
+	if route.SubscriberType != "node" || route.SubscriberID != "test-node" {
+		t.Fatalf("delivery route = %#v, want node/test-node", route)
+	}
+	if !route.Target.Empty() {
+		t.Fatalf("delivery target = %#v, want empty root target", route.Target)
+	}
+	if got, want := len(plan.RoutePlan.DeliveryIntents), 1; got != want {
+		t.Fatalf("route plan delivery intents = %d, want %d", got, want)
+	}
+	intent := plan.RoutePlan.DeliveryIntents[0]
+	if intent.Source != routePlanSourceRootNodeRoute || intent.Reason != routePlanReasonRouteTableNode {
+		t.Fatalf("route plan delivery intent = %#v, want root route-table node source", intent)
+	}
+}
+
+func TestDeliveryPlanner_NoTargetScopedRoutedNodeUsesSemanticNodeDeliveryRoute(t *testing.T) {
+	planner := newDeliveryPlanner(
+		deliveryRouteResolver{
+			resolveRoutedSubscribers: func(events.Event) []Subscriber {
+				return []Subscriber{{
+					ID:           "child-intake",
+					Type:         "node",
+					Path:         "child",
+					MatchPattern: "child/child.start",
+					RouteSource:  "subscription",
+				}}
+			},
+			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
+				return nil
+			},
+			resolveRoutedNodeInternalRecipients: func(events.Event, []Subscriber) []deliveryRecipientCandidate {
+				return []deliveryRecipientCandidate{{ID: "workflow-runtime", PersistAsDelivery: false}}
+			},
+			describeSubscribersForEvent: func(string, []Subscriber) []PublishDiagnosticRecipient {
+				return nil
+			},
+		},
+		deliveryRecipientPolicy{
+			loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
+				return map[string]ActiveAgentDescriptor{}, true, nil
+			},
+		},
+	)
+
+	plan, err := planner.Plan(context.Background(), (events.Event{
+		Type: "child/child.start",
+	}).WithEntityID("ent-child"))
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if got := plan.Recipients; len(got) != 1 || got[0] != "workflow-runtime" {
+		t.Fatalf("recipients = %#v, want workflow-runtime live carrier", got)
+	}
+	if len(plan.PersistedRecipients) != 0 {
+		t.Fatalf("persisted recipients = %#v, want none for internal carrier", plan.PersistedRecipients)
+	}
+	if got := plan.DeliveryRoutes; len(got) != 1 {
+		t.Fatalf("delivery routes = %#v, want child-intake semantic node route", got)
+	}
+	route := plan.DeliveryRoutes[0]
+	if route.SubscriberType != "node" || route.SubscriberID != "child-intake" {
+		t.Fatalf("delivery route = %#v, want node/child-intake", route)
+	}
+	if route.Target.FlowInstance != "child" || route.Target.EntityID != "ent-child" {
+		t.Fatalf("delivery target = %#v, want child ent-child", route.Target)
+	}
+	if got, want := len(plan.RoutePlan.DeliveryIntents), 1; got != want {
+		t.Fatalf("route plan delivery intents = %d, want %d", got, want)
+	}
+	intent := plan.RoutePlan.DeliveryIntents[0]
+	if intent.Source != routePlanSourceScopedNodeRoute || intent.Reason != routePlanReasonRouteTableNode {
+		t.Fatalf("route plan delivery intent = %#v, want scoped route-table node source", intent)
+	}
+}
+
+func TestDeliveryPlanner_NoTargetScopedEventPreservesPathlessRoutedNodeRoute(t *testing.T) {
+	planner := newDeliveryPlanner(
+		deliveryRouteResolver{
+			resolveRoutedSubscribers: func(events.Event) []Subscriber {
+				return []Subscriber{
+					{
+						ID:           "project-observer",
+						Type:         "node",
+						MatchPattern: "child/child.start",
+						RouteSource:  "subscription",
+					},
+					{
+						ID:           "child-intake",
+						Type:         "node",
+						Path:         "child",
+						MatchPattern: "child/child.start",
+						RouteSource:  "subscription",
+					},
+				}
+			},
+			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
+				return nil
+			},
+			resolveRoutedNodeInternalRecipients: func(events.Event, []Subscriber) []deliveryRecipientCandidate {
+				return []deliveryRecipientCandidate{{ID: "workflow-runtime", PersistAsDelivery: false}}
+			},
+			describeSubscribersForEvent: func(string, []Subscriber) []PublishDiagnosticRecipient {
+				return nil
+			},
+		},
+		deliveryRecipientPolicy{
+			loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
+				return map[string]ActiveAgentDescriptor{}, true, nil
+			},
+		},
+	)
+
+	plan, err := planner.Plan(context.Background(), (events.Event{
+		Type: "child/child.start",
+	}).WithEntityID("ent-child"))
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if got := plan.Recipients; len(got) != 1 || got[0] != "workflow-runtime" {
+		t.Fatalf("recipients = %#v, want workflow-runtime live carrier", got)
+	}
+	if got := plan.DeliveryRoutes; len(got) != 2 {
+		t.Fatalf("delivery routes = %#v, want project-observer and child-intake semantic node routes", got)
+	}
+	routes := map[string]events.RouteIdentity{}
+	for _, route := range plan.DeliveryRoutes {
+		if route.SubscriberType != "node" {
+			t.Fatalf("delivery route = %#v, want node route", route)
+		}
+		routes[route.SubscriberID] = route.Target
+	}
+	if target, ok := routes["project-observer"]; !ok || !target.Empty() {
+		t.Fatalf("project-observer target = %#v, ok=%v; want empty root target", target, ok)
+	}
+	if target, ok := routes["child-intake"]; !ok || target.FlowInstance != "child" || target.EntityID != "ent-child" {
+		t.Fatalf("child-intake target = %#v, ok=%v; want child ent-child", target, ok)
+	}
+	if got, want := len(plan.RoutePlan.DeliveryIntents), 2; got != want {
+		t.Fatalf("route plan delivery intents = %d, want %d", got, want)
+	}
+}
+
+func TestDeliveryPlanner_NoTargetCrossFlowStaticRoutedNodeUsesSubscriberScope(t *testing.T) {
+	planner := newDeliveryPlanner(
+		deliveryRouteResolver{
+			resolveRoutedSubscribers: func(events.Event) []Subscriber {
+				return []Subscriber{{
+					ID:           "flow-a-node",
+					Type:         "node",
+					Path:         "flow-a",
+					MatchPattern: "flow-b/order.completed",
+					RouteSource:  "subscription",
+				}}
+			},
+			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
+				return nil
+			},
+			resolveRoutedNodeInternalRecipients: func(events.Event, []Subscriber) []deliveryRecipientCandidate {
+				return []deliveryRecipientCandidate{{ID: "workflow-runtime", PersistAsDelivery: false}}
+			},
+			describeSubscribersForEvent: func(string, []Subscriber) []PublishDiagnosticRecipient {
+				return nil
+			},
+		},
+		deliveryRecipientPolicy{
+			loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
+				return map[string]ActiveAgentDescriptor{}, true, nil
+			},
+		},
+	)
+
+	plan, err := planner.Plan(context.Background(), (events.Event{
+		Type: "flow-b/order.completed",
+	}).WithEntityID("ent-flow-b").WithFlowInstance("flow-b/inst-1"))
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if got := plan.Recipients; len(got) != 1 || got[0] != "workflow-runtime" {
+		t.Fatalf("recipients = %#v, want workflow-runtime live carrier", got)
+	}
+	if len(plan.PersistedRecipients) != 0 {
+		t.Fatalf("persisted recipients = %#v, want none for internal carrier", plan.PersistedRecipients)
+	}
+	if got := plan.DeliveryRoutes; len(got) != 1 {
+		t.Fatalf("delivery routes = %#v, want flow-a-node semantic node route", got)
+	}
+	route := plan.DeliveryRoutes[0]
+	if route.SubscriberType != "node" || route.SubscriberID != "flow-a-node" {
+		t.Fatalf("delivery route = %#v, want node/flow-a-node", route)
+	}
+	if route.Target.FlowInstance != "flow-a" || route.Target.EntityID != "ent-flow-b" {
+		t.Fatalf("delivery target = %#v, want flow-a ent-flow-b", route.Target)
+	}
+	if got, want := len(plan.RoutePlan.DeliveryIntents), 1; got != want {
+		t.Fatalf("route plan delivery intents = %d, want %d", got, want)
+	}
+	intent := plan.RoutePlan.DeliveryIntents[0]
+	if intent.Source != routePlanSourceScopedNodeRoute || intent.Reason != routePlanReasonRouteTableNode {
+		t.Fatalf("route plan delivery intent = %#v, want scoped route-table node source", intent)
+	}
+}
+
+func TestDeliveryPlanner_NoTargetDescendantScopedRoutedNodeUsesParentInstanceRoute(t *testing.T) {
+	planner := newDeliveryPlanner(
+		deliveryRouteResolver{
+			resolveRoutedSubscribers: func(events.Event) []Subscriber {
+				return []Subscriber{{
+					ID:           "grandchild-worker",
+					Type:         "node",
+					Path:         "child/grandchild",
+					MatchPattern: "child/grandchild/micro.start",
+					RouteSource:  "subscription",
+				}}
+			},
+			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
+				return nil
+			},
+			resolveRoutedNodeInternalRecipients: func(events.Event, []Subscriber) []deliveryRecipientCandidate {
+				return []deliveryRecipientCandidate{{ID: "workflow-runtime", PersistAsDelivery: false}}
+			},
+			describeSubscribersForEvent: func(string, []Subscriber) []PublishDiagnosticRecipient {
+				return nil
+			},
+		},
+		deliveryRecipientPolicy{
+			loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
+				return map[string]ActiveAgentDescriptor{}, true, nil
+			},
+		},
+	)
+
+	plan, err := planner.Plan(context.Background(), (events.Event{
+		Type: "child/grandchild/micro.start",
+	}).WithEntityID("ent-child").WithFlowInstance("child/inst-1"))
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if got := plan.Recipients; len(got) != 1 || got[0] != "workflow-runtime" {
+		t.Fatalf("recipients = %#v, want workflow-runtime live carrier", got)
+	}
+	if len(plan.PersistedRecipients) != 0 {
+		t.Fatalf("persisted recipients = %#v, want none for internal carrier", plan.PersistedRecipients)
+	}
+	if got := plan.DeliveryRoutes; len(got) != 1 {
+		t.Fatalf("delivery routes = %#v, want grandchild-worker semantic node route", got)
+	}
+	route := plan.DeliveryRoutes[0]
+	if route.SubscriberType != "node" || route.SubscriberID != "grandchild-worker" {
+		t.Fatalf("delivery route = %#v, want node/grandchild-worker", route)
+	}
+	if route.Target.FlowInstance != "child/inst-1/grandchild" || route.Target.EntityID != "ent-child" {
+		t.Fatalf("delivery target = %#v, want child/inst-1/grandchild ent-child", route.Target)
+	}
+	if got, want := len(plan.RoutePlan.DeliveryIntents), 1; got != want {
+		t.Fatalf("route plan delivery intents = %d, want %d", got, want)
+	}
+	intent := plan.RoutePlan.DeliveryIntents[0]
+	if intent.Source != routePlanSourceScopedNodeRoute || intent.Reason != routePlanReasonRouteTableNode {
+		t.Fatalf("route plan delivery intent = %#v, want scoped route-table node source", intent)
+	}
+}
+
 func TestDeliveryPlanner_FailsClosedOnPolicyError(t *testing.T) {
 	planner := newDeliveryPlanner(
 		deliveryRouteResolver{

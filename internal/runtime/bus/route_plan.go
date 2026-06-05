@@ -15,6 +15,7 @@ const (
 	routePlanSourceDirectPolicy          = "direct_policy"
 	routePlanSourceInternalTarget        = "internal_target_route"
 	routePlanSourceConcreteNodeRoute     = "concrete_node_route"
+	routePlanSourceScopedNodeRoute       = "scoped_node_route"
 	routePlanSourceRootNodeRoute         = "root_node_route"
 	routePlanSourceRootInputFlowNode     = "root_input_flow_node_route"
 	routePlanSourceRecipientMaterializer = "recipient_plan_materializer"

@@ -284,9 +284,21 @@ type descriptorAwareEventStore struct {
 	listErr     error
 }
 
+type routeSetEventStore struct {
+	runtimebus.InMemoryEventStore
+	mu     sync.Mutex
+	routes map[string][]events.DeliveryRoute
+}
+
 type replayCapableAtomicStoreMissingScope struct {
 	mu         sync.Mutex
 	deliveries []string
+}
+
+func newRouteSetEventStore() *routeSetEventStore {
+	return &routeSetEventStore{
+		routes: map[string][]events.DeliveryRoute{},
+	}
 }
 
 func (*descriptorAwareEventStore) AppendEvent(context.Context, events.Event) error { return nil }
@@ -313,6 +325,22 @@ func (s *descriptorAwareEventStore) persistedDeliveries() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string(nil), s.deliveries...)
+}
+
+func (s *routeSetEventStore) PersistEventWithDeliveryRouteSetAndScope(_ context.Context, evt events.Event, routes []events.DeliveryRoute, _ runtimereplayclaim.CommittedReplayScope) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.routes == nil {
+		s.routes = map[string][]events.DeliveryRoute{}
+	}
+	s.routes[evt.ID] = events.NormalizeDeliveryRoutes(routes)
+	return nil
+}
+
+func (s *routeSetEventStore) ListEventDeliveryRoutes(_ context.Context, eventID string) ([]events.DeliveryRoute, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]events.DeliveryRoute(nil), s.routes[eventID]...), nil
 }
 
 func (*replayCapableAtomicStoreMissingScope) AppendEvent(context.Context, events.Event) error {
@@ -1843,7 +1871,7 @@ func TestEventBusPublish_LogsRoutedAndSubscribedRecipientsSeparately(t *testing.
 		},
 	}
 	hook := &recordingLoggerHook{}
-	eb, err := runtimebus.NewEventBusWithOptions(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{
+	eb, err := runtimebus.NewEventBusWithOptions(newRouteSetEventStore(), runtimebus.EventBusOptions{
 		Logger:         hook,
 		ContractBundle: semanticview.Wrap(bundle),
 	})
@@ -1949,7 +1977,7 @@ func TestEventBusPublish_RecordsPublishDiagnosticsInTurnRecorder(t *testing.T) {
 			},
 		},
 	}
-	eb, err := runtimebus.NewEventBusWithOptions(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{
+	eb, err := runtimebus.NewEventBusWithOptions(newRouteSetEventStore(), runtimebus.EventBusOptions{
 		ContractBundle: semanticview.Wrap(bundle),
 	})
 	if err != nil {
@@ -2009,7 +2037,8 @@ func TestEventBusPublish_NestedDescendantCompletionDoesNotEmitChildContinuation(
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	pc = runtimepipeline.NewPipelineCoordinatorWithOptions(eb, db, runtimepipeline.PipelineCoordinatorOptions{
-		Module: module,
+		Module:                  module,
+		EventReceiptsCapability: pg.CanonicalEventReceiptsCapability,
 	})
 	if pc == nil {
 		t.Fatal("expected coordinator")
@@ -2157,7 +2186,8 @@ func TestEventBusPublish_NestedThreeLevelChain_FromRootStartCompletesWithoutChil
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	pc = runtimepipeline.NewPipelineCoordinatorWithOptions(eb, db, runtimepipeline.PipelineCoordinatorOptions{
-		Module: module,
+		Module:                  module,
+		EventReceiptsCapability: pg.CanonicalEventReceiptsCapability,
 	})
 	if pc == nil {
 		t.Fatal("expected coordinator")
@@ -2285,7 +2315,8 @@ func TestEventBusPublish_GatedChildFlowCompletionAdvancesRoot(t *testing.T) {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	pc = runtimepipeline.NewPipelineCoordinatorWithOptions(eb, db, runtimepipeline.PipelineCoordinatorOptions{
-		Module: module,
+		Module:                  module,
+		EventReceiptsCapability: pg.CanonicalEventReceiptsCapability,
 	})
 	if pc == nil {
 		t.Fatal("expected coordinator")
@@ -2384,7 +2415,7 @@ func TestEventBusPublish_RecordsNestedDescendantLocalizedEvent(t *testing.T) {
 			},
 		},
 	}
-	eb, err := runtimebus.NewEventBusWithOptions(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{
+	eb, err := runtimebus.NewEventBusWithOptions(newRouteSetEventStore(), runtimebus.EventBusOptions{
 		ContractBundle: semanticview.Wrap(bundle),
 	})
 	if err != nil {
@@ -2440,7 +2471,7 @@ func TestEventBusPublish_RecordsNestedTemplateInstanceLocalizedEvent(t *testing.
 			},
 		},
 	}
-	eb, err := runtimebus.NewEventBusWithOptions(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{
+	eb, err := runtimebus.NewEventBusWithOptions(newRouteSetEventStore(), runtimebus.EventBusOptions{
 		ContractBundle: semanticview.Wrap(bundle),
 	})
 	if err != nil {
