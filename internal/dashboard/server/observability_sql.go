@@ -37,10 +37,12 @@ type IncidentFilter struct {
 }
 
 type eventDeliveryRecord struct {
-	AgentID    string `json:"agent_id,omitempty"`
-	Status     string `json:"status,omitempty"`
-	Error      string `json:"error,omitempty"`
-	RetryCount int    `json:"retry_count,omitempty"`
+	DeliveryID     string `json:"delivery_id,omitempty"`
+	SubscriberType string `json:"subscriber_type,omitempty"`
+	SubscriberID   string `json:"subscriber_id,omitempty"`
+	Status         string `json:"status,omitempty"`
+	Error          string `json:"error,omitempty"`
+	RetryCount     int    `json:"retry_count,omitempty"`
 }
 
 type deliveryLifecycleSummary struct {
@@ -280,10 +282,12 @@ func dashboardEventRecord(event store.OperatorEventFull) eventRecord {
 	}
 	for _, delivery := range event.Deliveries {
 		record.Deliveries = append(record.Deliveries, eventDeliveryRecord{
-			AgentID:    delivery.SubscriberID,
-			Status:     delivery.Status,
-			Error:      delivery.LastError,
-			RetryCount: delivery.RetryCount,
+			DeliveryID:     delivery.DeliveryID,
+			SubscriberType: delivery.SubscriberType,
+			SubscriberID:   delivery.SubscriberID,
+			Status:         delivery.Status,
+			Error:          delivery.LastError,
+			RetryCount:     delivery.RetryCount,
 		})
 		record.DeliveryLifecycle.record(delivery.Status)
 	}

@@ -487,11 +487,13 @@ contract_formats:
         public_projection_policy:
           current_boundary: |
             The internal and persisted RoutePlan authority is typed. Public
-            event.publish delivery projection remains a non-authoritative
-            readback surface unless a separately gated API/OpenRPC change
-            promotes subscriber_type or route-target identity into that public
-            result.
-          split_owner: '#1345 owns any event.publish/OpenRPC/CLI readback shape change for subscriber_type or typed route identity.'
+            event.publish, dashboard, and operator delivery readback projections
+            expose persisted typed delivery identity as delivery_id,
+            subscriber_type, and subscriber_id. They remain non-authoritative
+            readback surfaces and must not re-plan subscribers, fabricate rows,
+            or expose delivery_target_route unless a separately gated public
+            schema change promotes route-target identity.
+          split_owner: '#1345 owns the public/operator readback projection for delivery_id, subscriber_type, and subscriber_id; route-target public exposure remains split.'
         split_children:
           runtime_model: '#1343 owns the canonical internal EventBus RoutePlan model.'
           publish_consumers: '#1344 owns Publish, PublishTx, deferred/outbox publish, and CheckPublishRecipientPlan consumption of one RoutePlan authority.'
@@ -10520,7 +10522,10 @@ cli_specification:
         maps_to: idempotency_key
         behavior: Optional v1 API idempotency key for this mutating publish request.
       output:
-        success_detail: One publish summary line with event_id, event_name, run_id, new_run_created, and delivery count, followed by persisted delivery rows containing subscriber_id, status, session_id, and attempt, and source_event_id when server-owned lineage was supplied.
+        success_detail: >-
+          One publish summary line with event_id, event_name, run_id, new_run_created, and delivery count,
+          followed by persisted delivery rows containing delivery_id, subscriber_type, subscriber_id, status,
+          session_id, and attempt, and source_event_id when server-owned lineage was supplied.
       exit_codes:
         success: 0
         cli_validation: 2
@@ -10549,7 +10554,7 @@ cli_specification:
       - existing-run follow-up publish with no selected persisted delivery recipient or delivery route produces server EVENT_NOT_DECLARED before event/idempotency persistence; the CLI exits through publish_rejected and never reports deliveries=0 as success for that path
       - payload.entity_id on a create_entity event produces server PAYLOAD_VALIDATION_FAILED before event/idempotency persistence; the CLI exits through publish_rejected and does not treat payload.entity_id as target/entity routing authority
       - missing/blank event name, invalid or non-object --payload-json, blank optional flags, malformed bundle_hash, malformed bundle fingerprint, both bundle identity flags together, invalid args, and missing explicit token for non-loopback API targets make zero API calls
-      - success output renders only server-owned EventPublishResult event_id, run_id, source_event_id when present, new_run_created, and delivery rows
+      - success output renders only server-owned EventPublishResult event_id, run_id, source_event_id when present, new_run_created, and typed persisted delivery rows
       - RUN_NOT_FOUND, EVENT_NOT_FOUND, publish rejection errors, auth/HTTP/RPC failures, and malformed EventPublishResult values fail closed with tested exit codes
       - no direct DB/store/runtime/EventBus/dashboard/Builder reads or writes and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, run.start, event.replay, agent.replay, or agent.replay_backlog usage
       relation_to_run_start: '`run.start` remains usable for #743 until a separate migration changes the CLI internals to event.publish.'
@@ -12261,10 +12266,16 @@ api_specification:
         type: object
         additionalProperties: false
         required:
+        - delivery_id
+        - subscriber_type
         - subscriber_id
         - status
         - attempt
         properties:
+          delivery_id:
+            $ref: '#/components/schemas/OpaqueId'
+          subscriber_type:
+            $ref: '#/components/schemas/SubscriberType'
           subscriber_id:
             type: string
           session_id:

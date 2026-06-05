@@ -27,10 +27,12 @@ type eventPublishResult struct {
 }
 
 type eventPublishDelivery struct {
-	SubscriberID string `json:"subscriber_id"`
-	SessionID    string `json:"session_id,omitempty"`
-	Status       string `json:"status"`
-	Attempt      int    `json:"attempt"`
+	DeliveryID     string `json:"delivery_id"`
+	SubscriberType string `json:"subscriber_type"`
+	SubscriberID   string `json:"subscriber_id"`
+	SessionID      string `json:"session_id,omitempty"`
+	Status         string `json:"status"`
+	Attempt        int    `json:"attempt"`
 }
 
 type eventPublicationParams struct {
@@ -568,10 +570,12 @@ func eventPublishDeliveries(in []store.OperatorEventDelivery) []eventPublishDeli
 			attempt = 1
 		}
 		item := eventPublishDelivery{
-			SubscriberID: strings.TrimSpace(delivery.SubscriberID),
-			SessionID:    strings.TrimSpace(delivery.SessionID),
-			Status:       strings.TrimSpace(delivery.Status),
-			Attempt:      attempt,
+			DeliveryID:     strings.TrimSpace(delivery.DeliveryID),
+			SubscriberType: strings.TrimSpace(delivery.SubscriberType),
+			SubscriberID:   strings.TrimSpace(delivery.SubscriberID),
+			SessionID:      strings.TrimSpace(delivery.SessionID),
+			Status:         strings.TrimSpace(delivery.Status),
+			Attempt:        attempt,
 		}
 		if _, ok := seen[item]; ok {
 			continue

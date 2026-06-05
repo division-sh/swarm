@@ -56,13 +56,11 @@ func TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempo
 		t.Fatalf("new_run_created = %#v, want true", result["new_run_created"])
 	}
 	deliveries := asSlice(t, result["deliveries"])
-	if len(deliveries) != 1 {
-		t.Fatalf("deliveries = %#v, want one persisted delivery", deliveries)
+	if len(deliveries) != 2 {
+		t.Fatalf("deliveries = %#v, want persisted node and agent deliveries", deliveries)
 	}
-	delivery := asMap(t, deliveries[0])
-	if delivery["subscriber_id"] != "scan-orchestrator" || delivery["status"] != "pending" || delivery["attempt"] != float64(1) {
-		t.Fatalf("delivery = %#v, want scan-orchestrator pending attempt 1", delivery)
-	}
+	assertEventPublishDeliveriesContain(t, deliveries, "agent", "scan-orchestrator", "pending", 1)
+	assertEventPublishDeliveriesContain(t, deliveries, "node", "scan-orchestrator", "pending", 1)
 	if count := countEventsByName(t, db, "scan.requested"); count != 1 {
 		t.Fatalf("scan.requested event count = %d, want 1", count)
 	}
@@ -83,6 +81,12 @@ func TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempo
 	if replayResult["event_id"] != eventID || replayResult["run_id"] != runID {
 		t.Fatalf("event.publish replay result = %#v, want original event/run", replayResult)
 	}
+	replayDeliveries := asSlice(t, replayResult["deliveries"])
+	if len(replayDeliveries) != 2 {
+		t.Fatalf("event.publish replay deliveries = %#v, want persisted node and agent deliveries", replayDeliveries)
+	}
+	assertEventPublishDeliveriesContain(t, replayDeliveries, "agent", "scan-orchestrator", "pending", 1)
+	assertEventPublishDeliveriesContain(t, replayDeliveries, "node", "scan-orchestrator", "pending", 1)
 	if count := countEventsByName(t, db, "scan.requested"); count != 1 {
 		t.Fatalf("scan.requested event count after replay = %d, want 1", count)
 	}
@@ -120,6 +124,11 @@ func TestOperatorEventPublishSQLiteIdempotentFirstEventPublishesWithoutLock(t *t
 	if result["new_run_created"] != true {
 		t.Fatalf("sqlite new_run_created = %#v, want true", result["new_run_created"])
 	}
+	deliveries := asSlice(t, result["deliveries"])
+	if len(deliveries) != 1 {
+		t.Fatalf("sqlite deliveries = %#v, want one persisted delivery", deliveries)
+	}
+	assertEventPublishDeliveryIdentity(t, asMap(t, deliveries[0]), "node", "scan-orchestrator", "pending", 1)
 	assertSQLiteEventPublishRows(t, sqliteStore.DB, runID, eventID, "scan.requested", "cli-publish:"+actorTokenID(testToken))
 	if count := countSQLiteAPIIdempotencyRows(t, sqliteStore.DB); count != 1 {
 		t.Fatalf("sqlite api_idempotency rows = %d, want 1", count)
@@ -239,6 +248,8 @@ func TestOperatorEventPublishResolvesFlowScopedContractEventName(t *testing.T) {
 	}
 	if delivery := asMap(t, deliveries[0]); delivery["subscriber_id"] != "repo-observer" {
 		t.Fatalf("delivery = %#v, want repo-observer", delivery)
+	} else {
+		assertEventPublishDeliveryIdentity(t, delivery, "agent", "repo-observer", "pending", 1)
 	}
 	got := requireAPIV1RuntimeBusEvent(t, ch, "flow-scoped event.publish delivery")
 	if got.ID != eventID || string(got.Type) != canonicalEventName {
@@ -440,9 +451,12 @@ func TestOperatorEventPublishPersistsIdempotencyBeforeReadbackFailure(t *testing
 	if count := countEventsByName(t, db, "scan.requested"); count != 1 {
 		t.Fatalf("scan.requested event count after replay = %d, want 1", count)
 	}
-	if got := len(asSlice(t, replayResult["deliveries"])); got != 1 {
-		t.Fatalf("replay deliveries = %d, want persisted delivery result", got)
+	deliveries := asSlice(t, replayResult["deliveries"])
+	if len(deliveries) != 2 {
+		t.Fatalf("replay deliveries = %#v, want typed persisted delivery results", deliveries)
 	}
+	assertEventPublishDeliveriesContain(t, deliveries, "agent", "scan-orchestrator", "pending", 1)
+	assertEventPublishDeliveriesContain(t, deliveries, "node", "scan-orchestrator", "pending", 1)
 }
 
 func TestOperatorEventPublishPostCommitReceiptFailureReplaysWithoutDuplicate(t *testing.T) {
@@ -628,9 +642,12 @@ func TestOperatorEventPublishExplicitRunTargetRequiresExistingNonterminalRun(t *
 	if targetedResult["run_id"] != runID || targetedResult["new_run_created"] != false {
 		t.Fatalf("targeted result = %#v, want existing run", targetedResult)
 	}
-	if got := len(asSlice(t, targetedResult["deliveries"])); got != 1 {
-		t.Fatalf("targeted deliveries = %d, want 1", got)
+	deliveries := asSlice(t, targetedResult["deliveries"])
+	if len(deliveries) != 2 {
+		t.Fatalf("targeted deliveries = %#v, want typed agent and node deliveries", deliveries)
 	}
+	assertEventPublishDeliveriesContain(t, deliveries, "agent", "scan-orchestrator", "pending", 1)
+	assertEventPublishDeliveriesContain(t, deliveries, "node", "scan-orchestrator", "pending", 1)
 	if count := countEventsByName(t, db, "scan.requested"); count != 2 {
 		t.Fatalf("scan.requested events after targeted publish = %d, want 2", count)
 	}
@@ -715,6 +732,8 @@ func TestOperatorEventPublishExplicitRunFollowUpRequiresRecipientBeforePersisten
 	}
 	if delivery := asMap(t, deliveries[0]); delivery["subscriber_id"] != "scan-orchestrator" {
 		t.Fatalf("follow-up delivery = %#v, want scan-orchestrator", delivery)
+	} else {
+		assertEventPublishDeliveryIdentity(t, delivery, "agent", "scan-orchestrator", "pending", 1)
 	}
 	assertEventPublishEventRow(t, db, runID, followUpEventID, "scan.followup", "operator-test")
 	if got := countRunRowsByID(t, db, runID); got != 1 {
@@ -840,9 +859,11 @@ func TestOperatorEventPublishSQLiteExplicitRunFollowUpUsesSelectedRun(t *testing
 	if got := countSQLiteEventsByName(t, sqliteStore.DB, "scan.followup"); got != 1 {
 		t.Fatalf("sqlite scan.followup rows = %d, want 1", got)
 	}
-	if got := len(asSlice(t, result["deliveries"])); got != 1 {
-		t.Fatalf("sqlite follow-up deliveries = %d, want 1", got)
+	deliveries := asSlice(t, result["deliveries"])
+	if len(deliveries) != 1 {
+		t.Fatalf("sqlite follow-up deliveries = %#v, want 1", deliveries)
 	}
+	assertEventPublishDeliveryIdentity(t, asMap(t, deliveries[0]), "agent", "scan-orchestrator", "pending", 1)
 	got := requireAPIV1RuntimeBusEvent(t, followUpCh, "sqlite follow-up delivery")
 	if got.ID != eventID || got.RunID != runID {
 		t.Fatalf("sqlite follow-up delivered id/run = %s/%s, want %s/%s", got.ID, got.RunID, eventID, runID)
@@ -1244,12 +1265,15 @@ func TestOperatorEventPublishQueuesWhileRuntimePaused(t *testing.T) {
 		t.Fatalf("paused event.publish error = %#v", published.Error)
 	}
 	eventID := stringValue(t, asMap(t, published.Result)["event_id"], "event_id")
-	if got := len(asSlice(t, asMap(t, published.Result)["deliveries"])); got != 1 {
-		t.Fatalf("paused event.publish deliveries = %d, want 1", got)
+	deliveries := asSlice(t, asMap(t, published.Result)["deliveries"])
+	if len(deliveries) != 2 {
+		t.Fatalf("paused event.publish deliveries = %#v, want typed agent and node deliveries", deliveries)
 	}
+	assertEventPublishDeliveriesContain(t, deliveries, "agent", "scan-orchestrator", "pending", 1)
+	assertEventPublishDeliveriesContain(t, deliveries, "node", "scan-orchestrator", "pending", 1)
 	requireNoAPIV1RuntimeBusEvent(t, ch, "paused event.publish before resume")
 	if got := countEventDeliveriesForEvent(t, ctx, db, eventID); got != 1 {
-		t.Fatalf("paused event deliveries = %d, want 1", got)
+		t.Fatalf("paused event deliveries = %d, want 1 queued route", got)
 	}
 	if got := countPipelineReceiptsForEvent(t, ctx, db, eventID); got != 0 {
 		t.Fatalf("paused pipeline receipts = %d, want 0", got)
@@ -1839,6 +1863,43 @@ func stringValue(t *testing.T, value any, field string) string {
 		t.Fatalf("%s = %#v, want non-empty string", field, value)
 	}
 	return strings.TrimSpace(text)
+}
+
+func assertEventPublishDeliveryIdentity(t *testing.T, delivery map[string]any, wantSubscriberType, wantSubscriberID, wantStatus string, wantAttempt int) {
+	t.Helper()
+	if strings.TrimSpace(stringValue(t, delivery["delivery_id"], "delivery_id")) == "" {
+		t.Fatalf("delivery = %#v, want non-empty delivery_id", delivery)
+	}
+	if delivery["subscriber_type"] != wantSubscriberType ||
+		delivery["subscriber_id"] != wantSubscriberID ||
+		delivery["status"] != wantStatus ||
+		delivery["attempt"] != float64(wantAttempt) {
+		t.Fatalf("delivery = %#v, want %s/%s %s attempt %d", delivery, wantSubscriberType, wantSubscriberID, wantStatus, wantAttempt)
+	}
+}
+
+func assertEventPublishDeliveriesContain(t *testing.T, deliveries []any, wantSubscriberType, wantSubscriberID, wantStatus string, wantAttempt int) {
+	t.Helper()
+	for _, raw := range deliveries {
+		delivery := asMap(t, raw)
+		if delivery["subscriber_type"] == wantSubscriberType &&
+			delivery["subscriber_id"] == wantSubscriberID &&
+			delivery["status"] == wantStatus &&
+			delivery["attempt"] == float64(wantAttempt) {
+			assertEventPublishDeliveryIdentity(t, delivery, wantSubscriberType, wantSubscriberID, wantStatus, wantAttempt)
+			return
+		}
+	}
+	t.Fatalf("deliveries = %#v, want %s/%s %s attempt %d", deliveries, wantSubscriberType, wantSubscriberID, wantStatus, wantAttempt)
+}
+
+func validEventPublishSubscriberType(value string) bool {
+	switch strings.TrimSpace(value) {
+	case "agent", "node":
+		return true
+	default:
+		return false
+	}
 }
 
 func asSlice(t *testing.T, value any) []any {

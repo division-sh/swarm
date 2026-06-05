@@ -99,6 +99,14 @@ func TestSQLObservabilityReader_ListEvents_UsesCanonicalDeliveryLifecycle(t *tes
 	if got.PendingCount != 1 || got.ErrorCount != 1 || got.DeadCount != 1 {
 		t.Fatalf("legacy counts = pending=%d error=%d dead=%d", got.PendingCount, got.ErrorCount, got.DeadCount)
 	}
+	if len(got.Deliveries) != 5 {
+		t.Fatalf("deliveries len = %d, want 5", len(got.Deliveries))
+	}
+	for _, item := range got.Deliveries {
+		if strings.TrimSpace(item.DeliveryID) == "" || item.SubscriberType != "agent" || strings.TrimSpace(item.SubscriberID) == "" {
+			t.Fatalf("delivery identity = %#v, want delivery_id and agent subscriber identity", item)
+		}
+	}
 }
 
 func TestSQLObservabilityReader_GetEvent_UsesCanonicalDeliveryRows(t *testing.T) {
@@ -152,7 +160,7 @@ func TestSQLObservabilityReader_GetEvent_UsesCanonicalDeliveryRows(t *testing.T)
 	if len(got.Deliveries) != 1 {
 		t.Fatalf("deliveries len = %d, want 1", len(got.Deliveries))
 	}
-	if item := got.Deliveries[0]; item.AgentID != "agent-a" || item.Status != "pending" || item.RetryCount != 1 || item.Error != "delivery-wins" {
+	if item := got.Deliveries[0]; strings.TrimSpace(item.DeliveryID) == "" || item.SubscriberType != "agent" || item.SubscriberID != "agent-a" || item.Status != "pending" || item.RetryCount != 1 || item.Error != "delivery-wins" {
 		t.Fatalf("delivery = %#v", item)
 	}
 }

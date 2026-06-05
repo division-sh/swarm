@@ -1221,8 +1221,10 @@ func TestHandler_ConversationsAndAggregates(t *testing.T) {
 					EventID: "evt-1",
 					Type:    "task.completed",
 					Deliveries: []eventDeliveryRecord{{
-						AgentID: "agent-1",
-						Status:  "success",
+						DeliveryID:     "delivery-1",
+						SubscriberType: "agent",
+						SubscriberID:   "agent-1",
+						Status:         "success",
 					}},
 				},
 			},
