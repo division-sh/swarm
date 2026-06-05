@@ -26,6 +26,7 @@ type directRecipientTransactionalStore struct {
 	descriptors []runtimebus.ActiveAgentDescriptor
 	events      []events.Event
 	deliveries  map[string][]string
+	routes      map[string][]events.DeliveryRoute
 }
 
 func (s *recordingEventStore) AppendEvent(_ context.Context, evt events.Event) error {
@@ -92,8 +93,44 @@ func (s *directRecipientTransactionalStore) InsertEventDeliveriesTx(ctx context.
 	return s.InsertEventDeliveries(ctx, eventID, agentIDs)
 }
 
+func (s *directRecipientTransactionalStore) InsertEventDeliveryRoutesTx(_ context.Context, _ *sql.Tx, eventID string, routes []events.DeliveryRoute) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.routes == nil {
+		s.routes = map[string][]events.DeliveryRoute{}
+	}
+	if s.deliveries == nil {
+		s.deliveries = map[string][]string{}
+	}
+	s.routes[eventID] = events.NormalizeDeliveryRoutes(routes)
+	for _, route := range s.routes[eventID] {
+		if route.SubscriberType != "agent" {
+			continue
+		}
+		s.deliveries[eventID] = append(s.deliveries[eventID], route.SubscriberID)
+	}
+	return nil
+}
+
 func (*directRecipientTransactionalStore) UpsertPipelineReceiptTx(context.Context, *sql.Tx, string, string, string) error {
 	return nil
+}
+
+func (s *directRecipientTransactionalStore) deliveryRoutes(eventID string) []events.DeliveryRoute {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]events.DeliveryRoute(nil), s.routes[eventID]...)
+}
+
+func deliveryRoutesContain(routes []events.DeliveryRoute, want events.DeliveryRoute) bool {
+	for _, route := range events.NormalizeDeliveryRoutes(routes) {
+		if route.SubscriberType == want.SubscriberType &&
+			route.SubscriberID == want.SubscriberID &&
+			route.Target.Normalized() == want.Target.Normalized() {
+			return true
+		}
+	}
+	return false
 }
 
 type interceptingTestHandler struct{}
@@ -365,6 +402,79 @@ func TestEngineOutboxPersistsEventsAndDeliveriesInTransaction(t *testing.T) {
 	}
 	if strings.Join(gotPersisted, ",") != "reviewer" {
 		t.Fatalf("persisted recipients = %v, want [reviewer]", gotPersisted)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestEngineOutboxSubscribedIntentConsumesCanonicalMaterializedRoutePlan(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectBegin()
+	mock.ExpectCommit()
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	store := &directRecipientTransactionalStore{}
+	want := events.DeliveryRoute{
+		SubscriberType: "node",
+		SubscriberID:   "target-node",
+		Target: events.RouteIdentity{
+			FlowInstance: "review/inst-1",
+		},
+	}
+	guardSawMaterializedRoute := false
+	eb, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{
+		RecipientPlanMaterializer: func(ctx context.Context, evt events.Event, plan runtimebus.PublishRecipientPlan) ([]events.DeliveryRoute, error) {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			if len(plan.DeliveryRoutes) != 0 {
+				t.Fatalf("pre-materialized delivery routes = %#v, want none", plan.DeliveryRoutes)
+			}
+			return []events.DeliveryRoute{want}, nil
+		},
+		RecipientPlanGuard: func(ctx context.Context, evt events.Event, plan runtimebus.PublishRecipientPlan) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if !deliveryRoutesContain(plan.DeliveryRoutes, want) {
+				t.Fatalf("guard delivery routes = %#v, want %#v", plan.DeliveryRoutes, want)
+			}
+			guardSawMaterializedRoute = true
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	intent := runtimeengine.EmitIntent{
+		Event: events.Event{
+			ID:        "evt-outbox-materialized-route",
+			Type:      events.EventType("review/inst-1/task.started"),
+			Payload:   []byte(`{}`),
+			CreatedAt: time.Now().UTC(),
+		},
+	}
+	ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
+	if err := eb.EngineOutbox().WriteOutbox(ctx, []runtimeengine.EmitIntent{intent}); err != nil {
+		t.Fatalf("WriteOutbox: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	if !guardSawMaterializedRoute {
+		t.Fatal("recipient plan guard did not see materialized route")
+	}
+	if got := store.deliveryRoutes(intent.Event.ID); !deliveryRoutesContain(got, want) {
+		t.Fatalf("persisted delivery routes = %#v, want %#v", got, want)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)
