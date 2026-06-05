@@ -1,0 +1,324 @@
+version: 1
+kind: route_authority_conformance_matrix
+issue: 1346
+parent_issue: 1340
+source:
+  platform_spec: platform-spec.yaml
+  openrpc_artifact: openrpc.json
+  public_surface_backend_matrix: internal/apiv1/testdata/public_surface_backend_matrix.yaml
+  multi_bundle_matrix: internal/runtime/conformance/testdata/multi_bundle_option_a_matrix.yaml
+  catalog_tiers: internal/runtime/cataloge2e/README.md
+policy:
+  closure_level: matrix_owner_first_slice_complete
+  claims_parent_closure: false
+  named_full_conformance_command: SWARM_TOOL_GATEWAY_URL= SWARM_TOOL_GATEWAY_CONTAINER_URL= SWARM_TOOL_GATEWAY_TOKEN= go test ./internal/runtime/bus ./internal/runtime/pipeline ./internal/apiv1 ./cmd/swarm ./internal/dashboard/server ./internal/runtime/cataloge2e -count=1
+  required_smoke_policy: >
+    Required PR smoke proves the matrix owner, the RoutePlan contract/model,
+    the covered publish/readback consumers, and the smallest SQLite-default plus
+    explicit-Postgres served evidence needed for route-authority accounting.
+    Full catalog/replay/fork coverage stays in the named full conformance
+    command so route authority does not become a backend x surface x route
+    Cartesian suite.
+active_trackers:
+  - kind: github_issue
+    issue: 1340
+    watchlist: runtime_operations.delivery_and_replay_ownership
+  - kind: github_issue
+    issue: 1337
+    watchlist: runtime_operations.delivery_and_replay_ownership
+  - kind: github_issue
+    issue: 1293
+    watchlist: runtime_operations.delivery_and_replay_ownership
+  - kind: github_issue
+    issue: 1299
+    watchlist: runtime_operations.delivery_and_replay_ownership
+  - kind: github_issue
+    issue: 1301
+    watchlist: runtime_operations.delivery_and_replay_ownership
+rows:
+  - id: route_plan_spec_contract
+    concept: RoutePlan is the publish-time typed authority and event_deliveries is the durable authority sink.
+    classification: already_covered_by_existing_proof
+    tier: required_pr_smoke
+    proof_dimensions: [source_authority, openrpc_publication, persistence_authority, required_pr_smoke]
+    owner_refs:
+      - {kind: spec_ref, path: platform-spec.yaml, ref: route_plan_authority}
+      - {kind: spec_ref, path: platform-spec.yaml, ref: workflow_node_route_authority}
+      - {kind: artifact, path: openrpc.json}
+    proof_refs:
+      - {kind: pr, pr: 1347}
+      - {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}
+      - {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}
+      - {kind: command, command: "go run ./cmd/swarm-openrpc-gen --check"}
+    notes: >
+      Closed #1342 owns the merge-bearing spec/OpenRPC contract. This matrix
+      cites it as source authority and does not redefine route semantics.
+
+  - id: eventbus_route_plan_model
+    concept: EventBus owns the canonical internal RoutePlan model and materializer.
+    classification: already_covered_by_existing_proof
+    tier: required_pr_smoke
+    proof_dimensions: [route_plan_model, source_authority, required_pr_smoke]
+    owner_refs:
+      - {kind: artifact, path: internal/runtime/bus/route_plan.go}
+      - {kind: artifact, path: internal/runtime/bus/eventbus_target_routes_test.go}
+      - {kind: spec_ref, path: platform-spec.yaml, ref: route_plan_authority}
+    proof_refs:
+      - {kind: pr, pr: 1348}
+      - {kind: go_test, name: TestEventBusRecipientPlanMaterializerNormalizesIntoCanonicalRoutePlan}
+      - {kind: go_test, name: TestRouteTableRootInputFlowNodeResolvesRootInputRoute}
+    notes: >
+      Closed #1343 owns the runtime model row. Consumers must cite RoutePlan or
+      persisted event_deliveries, not reconstruct recipient authority locally.
+
+  - id: publish_preflight_deferred_outbox_consumers
+    concept: Publish, PublishTx, preflight, deferred publish, and outbox paths consume one RoutePlan authority.
+    classification: already_covered_by_existing_proof
+    tier: required_pr_smoke
+    proof_dimensions: [route_plan_model, persistence_authority, required_pr_smoke]
+    owner_refs:
+      - {kind: artifact, path: internal/runtime/bus/eventbus_publish.go}
+      - {kind: artifact, path: internal/runtime/bus/outbox.go}
+      - {kind: spec_ref, path: platform-spec.yaml, ref: persistence_requirements}
+    proof_refs:
+      - {kind: pr, pr: 1349}
+      - {kind: go_test, name: TestEventBusCheckPublishRecipientPlanReportsSubscribedPublishWithoutDelivery}
+      - {kind: go_test, name: TestEventBusPublishTxDispatch_NodeOnlyRouteDoesNotRequireAgentChannel}
+      - {kind: go_test, name: TestEngineOutboxSubscribedIntentConsumesCanonicalMaterializedRoutePlan}
+    notes: >
+      Closed #1344 owns these publish-side consumer rows. They are required
+      smoke because they prove the main write path consumes the same RoutePlan.
+
+  - id: public_operator_typed_readback
+    concept: API, CLI, OpenRPC, and dashboard readback consume persisted typed delivery identity without creating authority.
+    classification: already_covered_by_existing_proof
+    tier: required_pr_smoke
+    proof_dimensions: [public_projection, real_v1_handler, cli_v1_path, openrpc_publication, required_pr_smoke]
+    owner_refs:
+      - {kind: spec_ref, path: platform-spec.yaml, ref: public_projection_policy}
+      - {kind: spec_ref, path: platform-spec.yaml, ref: operator_api_disposition}
+      - {kind: artifact, path: internal/apiv1/testdata/public_surface_backend_matrix.yaml}
+    proof_refs:
+      - {kind: pr, pr: 1350}
+      - {kind: openrpc_method, method: event.publish}
+      - {kind: openrpc_method, method: event.list}
+      - {kind: openrpc_method, method: event.get}
+      - {kind: openrpc_method, method: event.subscribe}
+      - {kind: go_test, name: TestEventPublishUsesEventPublishV1RPCWithBoundParams}
+      - {kind: go_test, name: TestEventPublishMalformedResultsFailClosed}
+      - {kind: go_test, name: TestSQLObservabilityReader_ListEvents_FiltersTypedSubscriberIdentity}
+      - {kind: go_test, name: TestSQLObservabilityReader_GetEvent_UsesCanonicalDeliveryRows}
+    notes: >
+      Closed #1345 owns public/operator typed readback. Green readback is
+      explicitly consumer proof only, not route authority proof.
+
+  - id: served_root_input_event_publish_supported_surfaces
+    concept: Served root-input event.publish --run-id proof exists for SQLite and Postgres, but tracker #1337 remains open.
+    classification: split_to_existing_issue
+    tier: split_open
+    split_issue: 1337
+    proof_dimensions: [default_sqlite, explicit_postgres, real_v1_handler, cli_v1_path, split_tracker]
+    owner_refs:
+      - {kind: artifact, path: internal/apiv1/testdata/public_surface_backend_matrix.yaml}
+      - {kind: spec_ref, path: platform-spec.yaml, ref: event.publish}
+    proof_refs:
+      - {kind: go_test, name: TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite}
+      - {kind: go_test, name: TestRunServeRuntimeEventPublishRunIDFollowUpServedPathPostgres}
+      - {kind: tracker, issue: 1337, watchlist: runtime_operations.delivery_and_replay_ownership}
+    notes: >
+      Current master proves this served path passes, but #1337 is still open.
+      This row preserves that tracker state instead of silently closing it.
+
+  - id: workflow_node_execution_admission
+    concept: Workflow-node execution must require committed node delivery authority before handler execution.
+    classification: split_to_existing_issue
+    tier: split_open
+    split_issue: 1293
+    proof_dimensions: [persistence_authority, split_tracker]
+    owner_refs:
+      - {kind: spec_ref, path: platform-spec.yaml, ref: execution_admission}
+      - {kind: spec_ref, path: platform-spec.yaml, ref: workflow_node_route_authority}
+    proof_refs:
+      - {kind: tracker, issue: 1293, watchlist: runtime_operations.delivery_and_replay_ownership}
+    notes: >
+      #1293 remains the execution-admission sibling. Settlement, backfill,
+      receipts, and handler lookup must not become shortcuts for this row.
+
+  - id: wildcard_static_service_route_production
+    concept: Wildcard static-service route production is a route-production sibling, not a matrix behavior change.
+    classification: split_to_existing_issue
+    tier: split_open
+    split_issue: 1299
+    proof_dimensions: [route_plan_model, split_tracker]
+    owner_refs:
+      - {kind: spec_ref, path: platform-spec.yaml, ref: wildcard_routes}
+      - {kind: artifact, path: internal/runtime/bus/routing_derivation_internal_test.go}
+    proof_refs:
+      - {kind: tracker, issue: 1299, watchlist: runtime_operations.delivery_and_replay_ownership}
+    notes: >
+      #1299 owns concrete wildcard static-service route production. #1346
+      classifies it only.
+
+  - id: runtime_callback_flow_instance_localization
+    concept: Runtime callback flow_instance localization is a route-production sibling, not a matrix behavior change.
+    classification: split_to_existing_issue
+    tier: split_open
+    split_issue: 1301
+    proof_dimensions: [route_plan_model, split_tracker]
+    owner_refs:
+      - {kind: spec_ref, path: platform-spec.yaml, ref: runtime_callback_routes}
+      - {kind: artifact, path: internal/runtime/bus/delivery_planner.go}
+    proof_refs:
+      - {kind: tracker, issue: 1301, watchlist: runtime_operations.delivery_and_replay_ownership}
+    notes: >
+      #1301 owns runtime callback localization. The matrix keeps it visible as
+      open route-production work.
+
+  - id: live_carriers_handler_lookup_descriptors_not_authority
+    concept: Live carriers, interceptors, handler lookup, and active descriptors are consumers or observations only.
+    classification: add_to_matrix
+    tier: required_pr_smoke
+    proof_dimensions: [negative_authority, route_plan_model, required_pr_smoke]
+    invalid_authority:
+      - live internal carriers
+      - workflow-runtime interceptors
+      - handler lookup
+      - active descriptors
+    owner_refs:
+      - {kind: spec_ref, path: platform-spec.yaml, ref: live_dispatch}
+      - {kind: spec_ref, path: platform-spec.yaml, ref: route_topology}
+    proof_refs:
+      - {kind: go_test, name: TestEventBusPublish_RootInputFlowNodePersistsRouteBeforeInterceptorWithoutInternalCarrier}
+      - {kind: go_test, name: TestEventBusPublish_NodeOnlyRouteDoesNotRequireAgentChannel}
+      - {kind: go_test, name: TestDeliveryRecipientPolicy_KeepsInternalSubscribersLiveOnlyUnderDescriptorPlanning}
+    notes: >
+      These paths may dispatch or observe work after authority exists. They
+      must not create, repair, or replace missing typed RoutePlan recipients.
+
+  - id: receipts_settlement_backfill_not_authority
+    concept: Receipts, settlement, backfill, processed markers, dead letters, and retry counters describe post-authority work.
+    classification: add_to_matrix
+    tier: required_pr_smoke
+    proof_dimensions: [negative_authority, persistence_authority, required_pr_smoke]
+    invalid_authority:
+      - event_receipts
+      - settlement and backfill
+      - processed markers
+      - dead-letter state
+      - retry counters
+    owner_refs:
+      - {kind: spec_ref, path: platform-spec.yaml, ref: completion_evidence}
+      - {kind: spec_ref, path: platform-spec.yaml, ref: event_receipts}
+    proof_refs:
+      - {kind: go_test, name: TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScopeSeparately}
+      - {kind: go_test, name: TestSystemNodeRunner_MarkProcessedSettlesNodeDeliveryAndTriggersNormalRunCompletion}
+      - {kind: go_test, name: TestEventBusPublishTransactional_ReturnsPostCommitInterceptorErrorAndRecordsReceipt}
+    notes: >
+      Completion evidence remains after-the-fact evidence. It cannot authorize
+      workflow-node delivery when the committed event_deliveries row is absent.
+
+  - id: replay_markers_not_authority
+    concept: Replay-scope markers and replay lineage are gated replay evidence, not arbitrary fresh recipient authority.
+    classification: add_to_matrix
+    tier: required_pr_smoke
+    proof_dimensions: [negative_authority, replay_recovery, required_pr_smoke]
+    invalid_authority:
+      - replay markers
+      - replay-scope markers
+      - source delivery lineage
+    owner_refs:
+      - {kind: spec_ref, path: platform-spec.yaml, ref: replay_scope_expectations}
+      - {kind: spec_ref, path: platform-spec.yaml, ref: replay_recovery}
+    proof_refs:
+      - {kind: go_test, name: TestSweepUndispatched_FailsClosedWithoutReplayClaimOwner}
+      - {kind: go_test, name: TestRecoveryManager_FailsClosedWithoutReplayClaimOwner}
+      - {kind: go_test, name: TestBuildHistoricalReplayExecutionRejectsTaxonomyReadyWithoutOwnerWork}
+    notes: >
+      Replay can consume persisted route authority or explicitly gated replay
+      owners. Markers alone do not authorize new workflow-node work.
+
+  - id: readback_not_authority
+    concept: API, CLI, dashboard, OpenRPC, and event read surfaces expose persisted owner data without replanning.
+    classification: add_to_matrix
+    tier: required_pr_smoke
+    proof_dimensions: [negative_authority, public_projection, required_pr_smoke]
+    invalid_authority:
+      - API readback
+      - CLI readback
+      - dashboard readback
+      - delivery count reconstruction
+    owner_refs:
+      - {kind: spec_ref, path: platform-spec.yaml, ref: readback}
+      - {kind: artifact, path: internal/apiv1/testdata/public_surface_backend_matrix.yaml}
+    proof_refs:
+      - {kind: go_test, name: TestEventPublishUsesEventPublishV1RPCWithBoundParams}
+      - {kind: go_test, name: TestSQLObservabilityReader_ListEvents_FiltersTypedSubscriberIdentity}
+      - {kind: go_test, name: TestSQLObservabilityReader_GetEvent_UsesCanonicalDeliveryRows}
+    notes: >
+      Public/operator surfaces prove typed projection only. They do not create,
+      fabricate, or backfill delivery authority.
+
+  - id: subscriber_id_only_not_authority
+    concept: subscriber_id by itself is not recipient identity; route authority requires typed subscriber identity.
+    classification: add_to_matrix
+    tier: required_pr_smoke
+    proof_dimensions: [negative_authority, public_projection, required_pr_smoke]
+    invalid_authority:
+      - string-only subscriber_id coincidence
+      - untyped delivery filters
+    owner_refs:
+      - {kind: spec_ref, path: platform-spec.yaml, ref: typed_recipients}
+      - {kind: spec_ref, path: platform-spec.yaml, ref: subscriber_type}
+    proof_refs:
+      - {kind: go_test, name: TestEventBusAgentDispatchIgnoresSameIDNodeRouteTargets}
+      - {kind: go_test, name: TestSQLObservabilityReader_ListEvents_FiltersTypedSubscriberIdentity}
+      - {kind: go_test, name: TestSQLObservabilityReader_GetEvent_UsesCanonicalDeliveryRows}
+    notes: >
+      A matching raw subscriber_id is not enough when agent and node recipients
+      can share names. Typed subscriber identity is the read and write boundary.
+
+  - id: replay_recovery_fork_consumers
+    concept: Replay, retry, sweeper, fork, and recovery consume persisted RoutePlan output or explicitly gated replay/fork owners.
+    classification: add_to_matrix
+    tier: full_conformance_manual_nightly
+    proof_dimensions: [replay_recovery, full_conformance, persistence_authority]
+    owner_refs:
+      - {kind: spec_ref, path: platform-spec.yaml, ref: replay_recovery}
+      - {kind: artifact, path: internal/runtime/conformance/testdata/multi_bundle_option_a_matrix.yaml}
+    proof_refs:
+      - {kind: go_test, name: TestRecoveryManager_UsesPersistedDeliveryRecipientsInsteadOfCurrentSubscriptions}
+      - {kind: go_test, name: TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteReportsSourceAdvancedBranchJSON}
+      - {kind: go_test, name: TestTier12RuntimeFork_SelectedContractForkExecutionFixture}
+      - {kind: command, command: "SWARM_TOOL_GATEWAY_URL= SWARM_TOOL_GATEWAY_CONTAINER_URL= SWARM_TOOL_GATEWAY_TOKEN= go test ./internal/runtime/bus ./internal/runtime/pipeline ./internal/apiv1 ./cmd/swarm ./internal/dashboard/server ./internal/runtime/cataloge2e -count=1"}
+    notes: >
+      This row belongs to full/touched-surface conformance. It should not expand
+      every PR into a replay/fork/catalog Cartesian test suite.
+
+  - id: catalog_e2e_route_behavior
+    concept: Catalog route behavior remains covered by catalog E2E tiering and is cited rather than duplicated.
+    classification: already_covered_by_existing_proof
+    tier: full_conformance_manual_nightly
+    proof_dimensions: [catalog_tiering, full_conformance]
+    owner_refs:
+      - {kind: artifact, path: internal/runtime/cataloge2e/README.md}
+    proof_refs:
+      - {kind: go_test, name: TestTier11FlowCompositionCatalogFixtures_RealRuntime}
+      - {kind: go_test, name: TestTier12RuntimeFork_SelectedContractForkExecutionFixture}
+      - {kind: command, command: "go test ./internal/runtime/cataloge2e -count=1"}
+    notes: >
+      Catalog E2E tiering stays the full behavior proof owner. #1346 only names
+      how route-authority audits should cite it.
+
+  - id: diagnostic_catalog_probe_duplicate
+    concept: One-off diagnostic catalog probes are duplicate proof once catalog tiering and the route-authority matrix exist.
+    classification: obsolete_duplicate
+    tier: obsolete_duplicate
+    replacement: catalog_e2e_route_behavior
+    proof_dimensions: [obsolete_duplicate, catalog_tiering]
+    owner_refs:
+      - {kind: artifact, path: internal/runtime/cataloge2e/README.md}
+    proof_refs:
+      - {kind: command, command: "go test ./internal/runtime/cataloge2e -count=1"}
+    notes: >
+      Ad hoc probes can remain useful locally, but closure-bearing route proof
+      should name the catalog tier row or the focused RoutePlan rows above.
