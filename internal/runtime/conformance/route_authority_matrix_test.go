@@ -130,6 +130,22 @@ func TestRouteAuthorityMatrixRejectsStaleReferences(t *testing.T) {
 			},
 			want: "live_carriers_handler_lookup_descriptors_not_authority negative authority row missing invalid_authority",
 		},
+		{
+			name: "spec refs must reject absolute paths",
+			mutate: func(matrix *routeAuthorityMatrix) {
+				row := routeAuthorityMatrixRowByID(t, matrix, "route_plan_spec_contract")
+				row.OwnerRefs[0].Path = "/tmp/platform-spec.yaml"
+			},
+			want: "route_plan_spec_contract spec_ref proof_ref path /tmp/platform-spec.yaml must be repo-relative",
+		},
+		{
+			name: "spec refs must reject parent traversal",
+			mutate: func(matrix *routeAuthorityMatrix) {
+				row := routeAuthorityMatrixRowByID(t, matrix, "route_plan_spec_contract")
+				row.OwnerRefs[0].Path = "../platform-spec.yaml"
+			},
+			want: "route_plan_spec_contract spec_ref proof_ref path ../platform-spec.yaml must be repo-relative",
+		},
 	}
 
 	for _, tc := range tests {
@@ -378,7 +394,12 @@ func validateRouteAuthorityProofRef(root, rowID string, ref routeAuthorityProofR
 			problems = append(problems, fmt.Sprintf("%s spec_ref proof_ref missing path/ref", rowID))
 			return problems
 		}
-		raw, err := os.ReadFile(filepath.Join(root, filepath.Clean(ref.Path)))
+		cleaned := filepath.Clean(ref.Path)
+		if filepath.IsAbs(ref.Path) || strings.HasPrefix(cleaned, "..") {
+			problems = append(problems, fmt.Sprintf("%s spec_ref proof_ref path %s must be repo-relative", rowID, ref.Path))
+			return problems
+		}
+		raw, err := os.ReadFile(filepath.Join(root, cleaned))
 		if err != nil {
 			problems = append(problems, fmt.Sprintf("%s spec_ref path %s cannot be read: %v", rowID, ref.Path, err))
 			return problems
