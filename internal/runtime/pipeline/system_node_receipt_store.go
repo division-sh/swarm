@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -11,6 +12,51 @@ import (
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	"github.com/google/uuid"
 )
+
+var ErrSystemNodeDeliveryAuthorityMissing = errors.New("system node delivery authority missing")
+
+func (s *WorkflowInstanceStore) SystemNodeDeliveryAuthorized(ctx context.Context, nodeID, eventID string) (bool, error) {
+	nodeID = strings.TrimSpace(nodeID)
+	eventID = strings.TrimSpace(eventID)
+	if s == nil || s.db == nil || nodeID == "" || eventID == "" {
+		return false, nil
+	}
+	if _, err := uuid.Parse(eventID); err != nil {
+		return false, nil
+	}
+	if s.isSQLite() {
+		var ok bool
+		err := dbQueryRowContext(ctx, s.db, `
+			SELECT EXISTS (
+				SELECT 1
+				FROM event_deliveries
+				WHERE event_id = ?
+				  AND subscriber_type = 'node'
+				  AND subscriber_id = ?
+				  AND (
+					status IN ('pending', 'in_progress')
+					OR (status = 'failed' AND COALESCE(retry_count, 0) < 2)
+				  )
+			)
+		`, eventID, nodeID).Scan(&ok)
+		return ok, err
+	}
+	var ok bool
+	err := dbQueryRowContext(ctx, s.db, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM event_deliveries
+			WHERE event_id = $1::uuid
+			  AND subscriber_type = 'node'
+			  AND subscriber_id = $2
+			  AND (
+				status IN ('pending', 'in_progress')
+				OR (status = 'failed' AND COALESCE(retry_count, 0) < 2)
+			  )
+		)
+	`, eventID, nodeID).Scan(&ok)
+	return ok, err
+}
 
 func (s *WorkflowInstanceStore) SystemNodeProcessed(ctx context.Context, nodeID, eventID string) (bool, error) {
 	nodeID = strings.TrimSpace(nodeID)
@@ -101,6 +147,13 @@ func (s *WorkflowInstanceStore) MarkSystemNodeProcessedAndSettleDelivery(ctx con
 
 func (s *WorkflowInstanceStore) markSQLiteSystemNodeProcessedAndSettleDelivery(ctx context.Context, nodeID, eventID, sideEffects string) error {
 	return s.RunInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		authorized, err := sqliteSystemNodeDeliveryAuthorizedTx(txctx, tx, nodeID, eventID)
+		if err != nil {
+			return fmt.Errorf("query sqlite system node delivery authority: %w", err)
+		}
+		if !authorized {
+			return fmt.Errorf("%w: node %s event %s", ErrSystemNodeDeliveryAuthorityMissing, nodeID, eventID)
+		}
 		now := time.Now().UTC()
 		res, err := tx.ExecContext(txctx, `
 			INSERT INTO event_receipts (
@@ -150,28 +203,32 @@ func (s *WorkflowInstanceStore) markSQLiteSystemNodeProcessedAndSettleDelivery(c
 		if rows, _ := res.RowsAffected(); rows > 0 {
 			return nil
 		}
-		if _, err := tx.ExecContext(txctx, `
-			INSERT INTO event_deliveries (
-				delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, retry_count,
-				reason_code, last_error, active_session_id, started_at, delivered_at, created_at
-			)
-			SELECT
-				?, e.run_id, e.event_id, 'node', ?, 'delivered', 0,
-				'node_processed', NULL, NULL, ?, ?, ?
-			FROM events e
-			WHERE e.event_id = ?
-			  AND NOT EXISTS (
-				SELECT 1
-				FROM event_deliveries d
-				WHERE d.event_id = e.event_id
-				  AND d.subscriber_type = 'node'
-				  AND d.subscriber_id = ?
-			  )
-		`, uuid.NewString(), nodeID, now, now, now, eventID, nodeID); err != nil {
-			return fmt.Errorf("insert sqlite settled system node delivery: %w", err)
-		}
 		return nil
 	})
+}
+
+func sqliteSystemNodeDeliveryAuthorizedTx(ctx context.Context, tx *sql.Tx, nodeID, eventID string) (bool, error) {
+	if tx == nil {
+		return false, nil
+	}
+	if _, err := uuid.Parse(strings.TrimSpace(eventID)); err != nil {
+		return false, nil
+	}
+	var ok bool
+	err := tx.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM event_deliveries
+			WHERE event_id = ?
+			  AND subscriber_type = 'node'
+			  AND subscriber_id = ?
+			  AND (
+				status IN ('pending', 'in_progress')
+				OR (status = 'failed' AND COALESCE(retry_count, 0) < 2)
+			  )
+		)
+	`, strings.TrimSpace(eventID), strings.TrimSpace(nodeID)).Scan(&ok)
+	return ok, err
 }
 
 func sqliteNodeJSON(raw string) string {

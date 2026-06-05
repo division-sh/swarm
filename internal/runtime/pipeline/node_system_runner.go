@@ -121,6 +121,9 @@ func (n *systemNodeRunner) ProcessEventForTest(ctx context.Context, evt events.E
 	if n.isProcessed(ctx, evt) {
 		return
 	}
+	if !n.deliveryAuthorized(ctx, evt) {
+		return
+	}
 	retryLimit := n.retryLimit
 	if retryLimit <= 0 {
 		retryLimit = DefaultSystemNodeRetryLimit
@@ -392,6 +395,13 @@ func persistSystemNodeProcessedReceiptAndSettleDeliveryTx(ctx context.Context, t
 	if tx == nil {
 		return nil
 	}
+	authorized, err := postgresSystemNodeDeliveryAuthorizedTx(ctx, tx, nodeID, eventID)
+	if err != nil {
+		return fmt.Errorf("query system node delivery authority: %w", err)
+	}
+	if !authorized {
+		return fmt.Errorf("%w: node %s event %s", ErrSystemNodeDeliveryAuthorityMissing, nodeID, eventID)
+	}
 	res, err := tx.ExecContext(ctx, `
 		INSERT INTO event_receipts (
 			event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
@@ -418,16 +428,40 @@ func persistSystemNodeProcessedReceiptAndSettleDeliveryTx(ctx context.Context, t
 		return fmt.Errorf("upsert system node receipt: event %s not found", eventID)
 	}
 	if _, err := tx.ExecContext(ctx, `
-		WITH settled AS (
-			UPDATE event_deliveries
-			SET
-				status = 'delivered',
-				retry_count = COALESCE(retry_count, 0),
-				reason_code = 'node_processed',
-				last_error = NULL,
-				active_session_id = NULL,
-				started_at = COALESCE(started_at, created_at),
-				delivered_at = now()
+		UPDATE event_deliveries
+		SET
+			status = 'delivered',
+			retry_count = COALESCE(retry_count, 0),
+			reason_code = 'node_processed',
+			last_error = NULL,
+			active_session_id = NULL,
+			started_at = COALESCE(started_at, created_at),
+			delivered_at = now()
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'node'
+		  AND subscriber_id = $2
+		  AND (
+			status IN ('pending', 'in_progress')
+			OR (status = 'failed' AND COALESCE(retry_count, 0) < 2)
+		  )
+	`, eventID, nodeID); err != nil {
+		return fmt.Errorf("settle system node delivery: %w", err)
+	}
+	return nil
+}
+
+func postgresSystemNodeDeliveryAuthorizedTx(ctx context.Context, tx *sql.Tx, nodeID, eventID string) (bool, error) {
+	if tx == nil {
+		return false, nil
+	}
+	if _, err := uuid.Parse(strings.TrimSpace(eventID)); err != nil {
+		return false, nil
+	}
+	var ok bool
+	err := tx.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM event_deliveries
 			WHERE event_id = $1::uuid
 			  AND subscriber_type = 'node'
 			  AND subscriber_id = $2
@@ -435,32 +469,9 @@ func persistSystemNodeProcessedReceiptAndSettleDeliveryTx(ctx context.Context, t
 				status IN ('pending', 'in_progress')
 				OR (status = 'failed' AND COALESCE(retry_count, 0) < 2)
 			  )
-			RETURNING delivery_id
 		)
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, retry_count,
-			reason_code, last_error, active_session_id, started_at, delivered_at, created_at
-		)
-		SELECT
-			e.run_id, e.event_id, 'node', $2, 'delivered', 0,
-			'node_processed', NULL, NULL, now(), now(), now()
-		FROM events e
-		WHERE e.event_id = $1::uuid
-		  AND NOT EXISTS (
-			SELECT 1
-			FROM settled
-		  )
-		  AND NOT EXISTS (
-			SELECT 1
-			FROM event_deliveries d
-			WHERE d.event_id = $1::uuid
-			  AND d.subscriber_type = 'node'
-			  AND d.subscriber_id = $2
-		  )
-	`, eventID, nodeID); err != nil {
-		return fmt.Errorf("settle system node delivery: %w", err)
-	}
-	return nil
+	`, strings.TrimSpace(eventID), strings.TrimSpace(nodeID)).Scan(&ok)
+	return ok, err
 }
 
 func (n *systemNodeRunner) convergeNormalRunCompletion(ctx context.Context, evt events.Event) {
@@ -504,6 +515,47 @@ func (n *systemNodeRunner) isActiveRunQuiesced(ctx context.Context, evt events.E
 	if err != nil {
 		slog.Error("system node active run quiescence check failed", "node_id", n.nodeID, "event_id", eventID, "error", err)
 		return true
+	}
+	return ok
+}
+
+func (n *systemNodeRunner) deliveryAuthorized(ctx context.Context, evt events.Event) bool {
+	eventID := strings.TrimSpace(evt.ID)
+	if n == nil || n.receiptStore == nil || eventID == "" {
+		return false
+	}
+	if !n.eventReceiptsAvailable(ctx) {
+		return false
+	}
+	ok, err := n.receiptStore.SystemNodeDeliveryAuthorized(ctx, n.nodeID, eventID)
+	if err != nil {
+		slog.Error("system node delivery authority check failed", "node_id", n.nodeID, "event_id", eventID, "error", err)
+		if logger, ok := n.bus.(systemNodeRuntimeLogger); ok && logger != nil {
+			logger.LogRuntime(ctx, RuntimeLogEntry{
+				Level:     "error",
+				Message:   "Checking system node delivery authority failed",
+				Component: n.nodeID,
+				Action:    "delivery_authority_check_failed",
+				EventID:   eventID,
+				EventType: strings.TrimSpace(string(evt.Type)),
+				EntityID:  workflowEventEntityID(evt),
+				Error:     strings.TrimSpace(err.Error()),
+			})
+		}
+		return false
+	}
+	if !ok {
+		if logger, ok := n.bus.(systemNodeRuntimeLogger); ok && logger != nil {
+			logger.LogRuntime(ctx, RuntimeLogEntry{
+				Level:     "error",
+				Message:   "System node delivery authority is missing; handler execution skipped",
+				Component: n.nodeID,
+				Action:    "delivery_authority_missing",
+				EventID:   eventID,
+				EventType: strings.TrimSpace(string(evt.Type)),
+				EntityID:  workflowEventEntityID(evt),
+			})
+		}
 	}
 	return ok
 }

@@ -959,6 +959,12 @@ func seedSelectEntitySpendEvent(t *testing.T, db *sql.DB, ctx context.Context, p
 	`, evt.ID, string(evt.Type), entityID, string(evt.Payload)); err != nil {
 		t.Fatalf("seed select_entity spend event: %v", err)
 	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (event_id, subscriber_type, subscriber_id, status, created_at)
+		VALUES ($1::uuid, 'node', 'treasury-orchestrator', 'pending', now())
+	`, evt.ID); err != nil {
+		t.Fatalf("seed select_entity node delivery: %v", err)
+	}
 	return evt
 }
 

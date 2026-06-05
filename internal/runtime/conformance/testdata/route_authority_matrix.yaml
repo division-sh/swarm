@@ -24,9 +24,6 @@ active_trackers:
     issue: 1340
     watchlist: runtime_operations.delivery_and_replay_ownership
   - kind: github_issue
-    issue: 1293
-    watchlist: runtime_operations.delivery_and_replay_ownership
-  - kind: github_issue
     issue: 1299
     watchlist: runtime_operations.delivery_and_replay_ownership
   - kind: github_issue
@@ -193,18 +190,40 @@ rows:
 
   - id: workflow_node_execution_admission
     concept: Workflow-node execution must require committed node delivery authority before handler execution.
-    classification: split_to_existing_issue
-    tier: split_open
-    split_issue: 1293
-    proof_dimensions: [persistence_authority, split_tracker]
+    classification: already_covered_by_existing_proof
+    tier: required_pr_smoke
+    proof_dimensions: [persistence_authority, negative_authority, default_sqlite, explicit_postgres, required_pr_smoke]
+    invalid_authority:
+      - workflow-runtime carrier route
+      - live internal carrier subscription
+      - handler lookup
+      - processed receipts
+      - event_receipts settlement/backfill
+      - replay-scope markers
+      - API/CLI readback
     owner_refs:
       - {kind: spec_ref, path: platform-spec.yaml, ref: execution_admission}
       - {kind: spec_ref, path: platform-spec.yaml, ref: workflow_node_route_authority}
+      - {kind: artifact, path: internal/runtime/pipeline/workflow_nodes.go}
+      - {kind: artifact, path: internal/runtime/pipeline/node_system_runner.go}
+      - {kind: artifact, path: internal/runtime/pipeline/system_node_receipt_store.go}
     proof_refs:
-      - {kind: tracker, issue: 1293, watchlist: runtime_operations.delivery_and_replay_ownership}
+      - {kind: issue, issue: 1293}
+      - {kind: go_test, name: TestPipelineCoordinatorInterceptSkipsNodeWithoutPersistedDeliveryAuthority}
+      - {kind: go_test, name: TestPipelineCoordinatorInterceptReplayScopeMarkerDoesNotAuthorizeConcreteNode}
+      - {kind: go_test, name: TestPipelineCoordinatorInterceptSkipsWhenCanonicalDeliveryAuthorityUnavailable}
+      - {kind: go_test, name: TestPipelineCoordinatorInterceptSettlesAuthorizedNodeDelivery}
+      - {kind: go_test, name: TestSystemNodeRunner_SkipsWithoutPersistedNodeDeliveryAuthority}
+      - {kind: go_test, name: TestSystemNodeProcessedSettlementFailsWithoutNodeDeliveryAuthority}
+      - {kind: go_test, name: TestSQLiteRuntimeStoreSystemNodeReceiptOwnerFailsWithoutDeliveryAuthority}
+      - {kind: go_test, name: TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite}
+      - {kind: go_test, name: TestRunServeRuntimeEventPublishRunIDFollowUpServedPathPostgres}
     notes: >
-      #1293 remains the execution-admission sibling. Settlement, backfill,
-      receipts, and handler lookup must not become shortcuts for this row.
+      #1293 owns execution admission. Workflow nodes now consume committed
+      typed node event_deliveries authority before handler execution across the
+      coordinator and system/background runner paths. Settlement, backfill,
+      receipts, carrier dispatch, replay markers, handler lookup, and readback
+      remain invalid authority.
 
   - id: wildcard_static_service_route_production
     concept: Wildcard static-service route production is a route-production sibling, not a matrix behavior change.

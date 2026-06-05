@@ -16,6 +16,7 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/google/uuid"
 )
 
 type recordingPipelineBus struct {
@@ -2059,12 +2060,13 @@ func TestExecuteNodeHandlerPlanResult_NestedDescendantCompletionDoesNotBackPropa
 	store := NewWorkflowInstanceStore(db)
 	bus := &recordingPipelineBus{}
 	pc := &PipelineCoordinator{
-		bus:            bus,
-		db:             db,
-		module:         module,
-		workflowStore:  store,
-		expressionEval: newWorkflowExpressionEvaluator(),
-		entityLocks:    map[string]*sync.Mutex{},
+		bus:                     bus,
+		db:                      db,
+		module:                  module,
+		workflowStore:           store,
+		expressionEval:          newWorkflowExpressionEvaluator(),
+		entityLocks:             map[string]*sync.Mutex{},
+		eventReceiptsCapability: eventReceiptsCapabilityStub{enabled: true}.resolve,
 	}
 
 	const (
@@ -2106,9 +2108,12 @@ func TestExecuteNodeHandlerPlanResult_NestedDescendantCompletionDoesNotBackPropa
 		t.Fatalf("workflowNodeInterceptPolicy handled = %v, consume = %v, want handled", handled, consume)
 	}
 
-	handled, err := pc.dispatchWorkflowNodeEventResult(testWorkflowStoreRunContext(t, store), events.Event{
+	evt := events.Event{
+		ID:   uuid.NewString(),
 		Type: events.EventType("child/grandchild/micro.done"),
-	}.WithEntityID(grandchildEntityID))
+	}.WithEntityID(grandchildEntityID)
+	seedPipelineNodeDeliveryAuthority(t, db, evt, "root-collector")
+	handled, err := pc.dispatchWorkflowNodeEventResult(testWorkflowStoreRunContext(t, store), evt)
 	if err != nil {
 		t.Fatalf("executeNodeHandlerPlanResult: %v", err)
 	}

@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"testing"
 	"time"
 
@@ -160,12 +161,129 @@ func TestSystemNodeRunner_PipelineNamedNodeDoesNotMaskPlatformReceipt(t *testing
 	}
 }
 
+func TestSystemNodeProcessedSettlementFailsWithoutNodeDeliveryAuthority(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	ctx := context.Background()
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	entityID := uuid.NewString()
+	seedSystemNodeCompletionEventWithoutDelivery(t, db, runID, eventID, entityID)
+
+	sideEffects := systemNodeProcessedReceiptSideEffects("terminal-node", eventID)
+	err := persistSystemNodeProcessedReceiptAndSettleDelivery(ctx, db, "terminal-node", eventID, sideEffects)
+	if !errors.Is(err, ErrSystemNodeDeliveryAuthorityMissing) {
+		t.Fatalf("persistSystemNodeProcessedReceiptAndSettleDelivery error = %v, want ErrSystemNodeDeliveryAuthorityMissing", err)
+	}
+	var deliveries int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_deliveries
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'node'
+		  AND subscriber_id = 'terminal-node'
+	`, eventID).Scan(&deliveries); err != nil {
+		t.Fatalf("count node deliveries: %v", err)
+	}
+	if deliveries != 0 {
+		t.Fatalf("node deliveries = %d, want 0", deliveries)
+	}
+	var receipts int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_receipts
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'node'
+		  AND subscriber_id = 'terminal-node'
+	`, eventID).Scan(&receipts); err != nil {
+		t.Fatalf("count node receipts: %v", err)
+	}
+	if receipts != 0 {
+		t.Fatalf("node receipts = %d, want 0", receipts)
+	}
+}
+
+func TestSystemNodeProcessedSettlementFailsWithTerminalNodeDeliveryAuthority(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		status     string
+		retryCount int
+	}{
+		{name: "dead_letter", status: "dead_letter", retryCount: 2},
+		{name: "retry_exhausted_failed", status: "failed", retryCount: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, db, _ := testutil.StartPostgres(t)
+			ctx := context.Background()
+			runID := uuid.NewString()
+			eventID := uuid.NewString()
+			entityID := uuid.NewString()
+			seedSystemNodeCompletionEventWithoutDelivery(t, db, runID, eventID, entityID)
+			if _, err := db.ExecContext(ctx, `
+				INSERT INTO event_deliveries (
+					run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, created_at
+				) VALUES (
+					$1::uuid, $2::uuid, 'node', 'terminal-node', $3, $4, 'terminal_test', now()
+				)
+			`, runID, eventID, tc.status, tc.retryCount); err != nil {
+				t.Fatalf("seed terminal node delivery: %v", err)
+			}
+
+			sideEffects := systemNodeProcessedReceiptSideEffects("terminal-node", eventID)
+			err := persistSystemNodeProcessedReceiptAndSettleDelivery(ctx, db, "terminal-node", eventID, sideEffects)
+			if !errors.Is(err, ErrSystemNodeDeliveryAuthorityMissing) {
+				t.Fatalf("persistSystemNodeProcessedReceiptAndSettleDelivery error = %v, want ErrSystemNodeDeliveryAuthorityMissing", err)
+			}
+			var status string
+			var retryCount int
+			if err := db.QueryRowContext(ctx, `
+				SELECT COALESCE(status, ''), COALESCE(retry_count, 0)
+				FROM event_deliveries
+				WHERE event_id = $1::uuid
+				  AND subscriber_type = 'node'
+				  AND subscriber_id = 'terminal-node'
+			`, eventID).Scan(&status, &retryCount); err != nil {
+				t.Fatalf("load terminal delivery: %v", err)
+			}
+			if status != tc.status || retryCount != tc.retryCount {
+				t.Fatalf("terminal delivery = %s/%d, want %s/%d", status, retryCount, tc.status, tc.retryCount)
+			}
+			var receipts int
+			if err := db.QueryRowContext(ctx, `
+				SELECT COUNT(*)
+				FROM event_receipts
+				WHERE event_id = $1::uuid
+				  AND subscriber_type = 'node'
+				  AND subscriber_id = 'terminal-node'
+			`, eventID).Scan(&receipts); err != nil {
+				t.Fatalf("count node receipts: %v", err)
+			}
+			if receipts != 0 {
+				t.Fatalf("node receipts = %d, want 0", receipts)
+			}
+		})
+	}
+}
+
 func seedSystemNodeCompletionRun(t *testing.T, db *sql.DB, runID, eventID, entityID string, nodeIDs ...string) {
 	t.Helper()
 	nodeID := "terminal-node"
 	if len(nodeIDs) > 0 && nodeIDs[0] != "" {
 		nodeID = nodeIDs[0]
 	}
+	seedSystemNodeCompletionEventWithoutDelivery(t, db, runID, eventID, entityID)
+	if _, err := db.ExecContext(context.Background(), `
+		INSERT INTO event_deliveries (
+			run_id, event_id, subscriber_type, subscriber_id, status, reason_code, created_at
+		) VALUES (
+			$1::uuid, $2::uuid, 'node', $3, 'pending', 'matched_node_subscription', now()
+		)
+	`, runID, eventID, nodeID); err != nil {
+		t.Fatalf("seed node delivery: %v", err)
+	}
+}
+
+func seedSystemNodeCompletionEventWithoutDelivery(t *testing.T, db *sql.DB, runID, eventID, entityID string) {
+	t.Helper()
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO runs (run_id, status, started_at)
@@ -202,14 +320,5 @@ func seedSystemNodeCompletionRun(t *testing.T, db *sql.DB, runID, eventID, entit
 		)
 	`, runID, entityID); err != nil {
 		t.Fatalf("seed entity state: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, reason_code, created_at
-		) VALUES (
-			$1::uuid, $2::uuid, 'node', $3, 'pending', 'matched_node_subscription', now()
-		)
-	`, runID, eventID, nodeID); err != nil {
-		t.Fatalf("seed node delivery: %v", err)
 	}
 }

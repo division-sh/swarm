@@ -56,6 +56,7 @@ type WorkflowInstancePersistence interface {
 }
 
 type SystemNodeReceiptPersistence interface {
+	SystemNodeDeliveryAuthorized(ctx context.Context, nodeID, eventID string) (bool, error)
 	SystemNodeProcessed(ctx context.Context, nodeID, eventID string) (bool, error)
 	SystemNodeDeliveryQuiesced(ctx context.Context, nodeID, eventID string) (bool, error)
 	MarkSystemNodeProcessedAndSettleDelivery(ctx context.Context, nodeID, eventID, sideEffects string) error

@@ -3,9 +3,13 @@ package pipeline
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/google/uuid"
 )
 
 const testPipelineRunID = "77777777-7777-7777-7777-777777777777"
@@ -53,4 +57,86 @@ func testPipelineCoordinatorRunContext(t *testing.T, pc *PipelineCoordinator) co
 		return testWorkflowStoreRunContext(t, pc.workflowStore)
 	}
 	return testPipelineRunContextNoSeed()
+}
+
+func seedPipelineNodeDeliveryAuthority(t *testing.T, db *sql.DB, evt events.Event, nodeID string) {
+	t.Helper()
+	if db == nil {
+		t.Fatal("seed pipeline node delivery authority requires db")
+	}
+	nodeID = strings.TrimSpace(nodeID)
+	if nodeID == "" {
+		t.Fatal("seed pipeline node delivery authority requires nodeID")
+	}
+	eventID := strings.TrimSpace(evt.ID)
+	if _, err := uuid.Parse(eventID); err != nil {
+		t.Fatalf("seed pipeline node delivery authority event id = %q: %v", eventID, err)
+	}
+	runID := strings.TrimSpace(evt.RunID)
+	if runID == "" {
+		runID = testPipelineRunID
+	}
+	if _, err := uuid.Parse(runID); err != nil {
+		t.Fatalf("seed pipeline node delivery authority run id = %q: %v", runID, err)
+	}
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status)
+		VALUES ($1::uuid, 'running')
+		ON CONFLICT (run_id) DO NOTHING
+	`, runID); err != nil {
+		t.Fatalf("seed pipeline node delivery authority run: %v", err)
+	}
+	var entityID any
+	if raw := strings.TrimSpace(evt.EntityID()); raw != "" {
+		if _, err := uuid.Parse(raw); err == nil {
+			entityID = raw
+		}
+	}
+	payload := strings.TrimSpace(string(evt.Payload))
+	if payload == "" {
+		payload = "{}"
+	}
+	eventType := strings.TrimSpace(string(evt.Type))
+	if eventType == "" {
+		eventType = "test.event"
+	}
+	flowInstance := strings.TrimSpace(evt.FlowInstance())
+	if flowInstance == "" {
+		flowInstance = "runtime"
+	}
+	scope := strings.TrimSpace(string(evt.Scope()))
+	if scope == "" {
+		scope = "entity"
+	}
+	sourceAgent := strings.TrimSpace(evt.SourceAgent)
+	if sourceAgent == "" {
+		sourceAgent = "test"
+	}
+	createdAt := evt.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = time.Now().UTC()
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			event_id, run_id, event_name, entity_id, flow_instance, scope, payload,
+			produced_by, produced_by_type, created_at
+		) VALUES (
+			$1::uuid, $2::uuid, $3, $4::uuid, $5, $6, $7::jsonb,
+			$8, 'agent', $9
+		)
+		ON CONFLICT (event_id) DO NOTHING
+	`, eventID, runID, eventType, entityID, flowInstance, scope, payload, sourceAgent, createdAt); err != nil {
+		t.Fatalf("seed pipeline node delivery authority event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			run_id, event_id, subscriber_type, subscriber_id, status, reason_code, created_at
+		) VALUES (
+			$1::uuid, $2::uuid, 'node', $3, 'pending', 'test_node_delivery_authority', now()
+		)
+		ON CONFLICT DO NOTHING
+	`, runID, eventID, nodeID); err != nil {
+		t.Fatalf("seed pipeline node delivery authority row: %v", err)
+	}
 }
