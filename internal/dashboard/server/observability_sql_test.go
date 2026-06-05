@@ -109,6 +109,70 @@ func TestSQLObservabilityReader_ListEvents_UsesCanonicalDeliveryLifecycle(t *tes
 	}
 }
 
+func TestSQLObservabilityReader_ListEvents_FiltersTypedSubscriberIdentity(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	reader := NewSQLObservabilityReader(db, stubObservabilityCaps{caps: canonicalObservabilityCaps()})
+	ctx := context.Background()
+
+	runID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	type deliverySeed struct {
+		subscriberType string
+		subscriberID   string
+	}
+	seedEvent := func(eventName string, at time.Time, deliveries ...deliverySeed) string {
+		t.Helper()
+		eventID := uuid.NewString()
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO events (
+				event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at
+			) VALUES (
+				$1::uuid, $2::uuid, $3, 'global', '{}'::jsonb, 'runtime', 'agent', $4
+			)
+		`, eventID, runID, eventName, at.UTC()); err != nil {
+			t.Fatalf("seed event %s: %v", eventName, err)
+		}
+		for _, delivery := range deliveries {
+			if _, err := db.ExecContext(ctx, `
+				INSERT INTO event_deliveries (
+					run_id, event_id, subscriber_type, subscriber_id, status, created_at
+				) VALUES (
+					$1::uuid, $2::uuid, $3, $4, 'pending', $5
+				)
+			`, runID, eventID, delivery.subscriberType, delivery.subscriberID, at.UTC()); err != nil {
+				t.Fatalf("seed delivery %s/%s: %v", delivery.subscriberType, delivery.subscriberID, err)
+			}
+		}
+		return eventID
+	}
+
+	base := time.Unix(1700000600, 0).UTC()
+	wantAgentEvent := seedEvent("typed.agent", base,
+		deliverySeed{subscriberType: "agent", subscriberID: "colliding-subscriber"},
+	)
+	seedEvent("typed.node", base.Add(time.Second),
+		deliverySeed{subscriberType: "node", subscriberID: "colliding-subscriber"},
+	)
+	seedEvent("typed.cross-product", base.Add(2*time.Second),
+		deliverySeed{subscriberType: "node", subscriberID: "colliding-subscriber"},
+		deliverySeed{subscriberType: "agent", subscriberID: "different-subscriber"},
+	)
+
+	rows, err := reader.ListEvents(ctx, EventFilter{
+		SubscriberID:   "colliding-subscriber",
+		SubscriberType: "agent",
+	}, 10)
+	if err != nil {
+		t.Fatalf("ListEvents typed subscriber filter: %v", err)
+	}
+	if len(rows) != 1 || rows[0].EventID != wantAgentEvent {
+		t.Fatalf("typed subscriber filtered rows = %#v, want only %s", rows, wantAgentEvent)
+	}
+}
+
 func TestSQLObservabilityReader_GetEvent_UsesCanonicalDeliveryRows(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	reader := NewSQLObservabilityReader(db, stubObservabilityCaps{caps: canonicalObservabilityCaps()})

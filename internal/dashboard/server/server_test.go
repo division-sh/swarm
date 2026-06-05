@@ -108,6 +108,38 @@ func setOperatorAuth(req *http.Request) {
 	req.Header.Set("Authorization", "Bearer "+testOperatorAuthToken)
 }
 
+func TestDashboardEventFilterFromRequestPreservesTypedSubscriberIdentity(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/events?type=task.completed&source=runtime&entity_id=entity-1&subscriber=worker-1&subscriber_id=worker-1&subscriber_type=node", nil)
+
+	filter, err := dashboardEventFilterFromRequest(req)
+	if err != nil {
+		t.Fatalf("dashboardEventFilterFromRequest: %v", err)
+	}
+	if filter.Type != "task.completed" ||
+		filter.Source != "runtime" ||
+		filter.EntityID != "entity-1" ||
+		filter.SubscriberID != "worker-1" ||
+		filter.SubscriberType != "node" {
+		t.Fatalf("filter = %#v", filter)
+	}
+}
+
+func TestDashboardEventFilterFromRequestRejectsInvalidSubscriberType(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/events?subscriber=worker-1&subscriber_type=platform", nil)
+
+	if _, err := dashboardEventFilterFromRequest(req); err == nil || !strings.Contains(err.Error(), "subscriber_type") {
+		t.Fatalf("dashboardEventFilterFromRequest error = %v, want subscriber_type rejection", err)
+	}
+}
+
+func TestDashboardEventFilterFromRequestRejectsConflictingSubscriberAliases(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/events?subscriber=worker-1&subscriber_id=worker-2&subscriber_type=agent", nil)
+
+	if _, err := dashboardEventFilterFromRequest(req); err == nil || !strings.Contains(err.Error(), "subscriber and subscriber_id must match") {
+		t.Fatalf("dashboardEventFilterFromRequest error = %v, want alias conflict rejection", err)
+	}
+}
+
 type stubAgents struct {
 	rows []runtimemanager.PersistedAgent
 }
