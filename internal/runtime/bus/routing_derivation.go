@@ -86,6 +86,7 @@ func DeriveRouteTable(source semanticview.Source) (*RouteTable, error) {
 		rt.addNodePatternsLocked(source, scope.ID, scope.InputEvents, flowPath, localEvents, scope.Nodes)
 	}
 
+	rt.addTopLevelRootInputNodeRoutesLocked(source)
 	rt.addRootInputFlowNodeRoutesLocked(source)
 	rt.rebuildLocked()
 	return rt, nil
@@ -291,6 +292,60 @@ func newRouteTable(source semanticview.Source) *RouteTable {
 		instances:         make(map[string]struct{}),
 		instanceEventPath: make(map[string][]string),
 	}
+}
+
+func (rt *RouteTable) addTopLevelRootInputNodeRoutesLocked(source semanticview.Source) {
+	if rt == nil || source == nil {
+		return
+	}
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle == nil || len(bundle.Nodes) == 0 {
+		return
+	}
+	rootInputs := routeRootInputEventSet(source)
+	if len(rootInputs) == 0 {
+		return
+	}
+	for _, eventType := range sortedStringKeys(rootInputs) {
+		for _, key := range sortedStringKeys(bundle.Nodes) {
+			entry := bundle.Nodes[key]
+			nodeID := strings.TrimSpace(entry.ID)
+			if nodeID == "" {
+				nodeID = strings.TrimSpace(key)
+			}
+			if nodeID == "" || !normalizedStringListContains(source.NodeRuntimeSubscriptions(nodeID), eventType) {
+				continue
+			}
+			if rootInputFlowOwnsNodeRoute(source, nodeID, eventType) {
+				continue
+			}
+			rt.rootInputRoutes[eventType] = appendUniqueRootInputSubscriber(rt.rootInputRoutes[eventType], Subscriber{
+				ID:           nodeID,
+				Type:         "node",
+				MatchPattern: eventType,
+				RouteSource:  "root_input_project",
+			})
+		}
+	}
+}
+
+func rootInputFlowOwnsNodeRoute(source semanticview.Source, nodeID string, eventType string) bool {
+	for _, scope := range source.FlowScopes() {
+		if strings.EqualFold(scope.Mode, "template") || !normalizedStringListContains(scope.InputEvents, eventType) {
+			continue
+		}
+		for _, key := range sortedStringKeys(scope.Nodes) {
+			entry := scope.Nodes[key]
+			scopedNodeID := strings.TrimSpace(entry.ID)
+			if scopedNodeID == "" {
+				scopedNodeID = strings.TrimSpace(key)
+			}
+			if scopedNodeID == nodeID {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (rt *RouteTable) addRootInputFlowNodeRoutesLocked(source semanticview.Source) {

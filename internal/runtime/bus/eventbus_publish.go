@@ -851,6 +851,27 @@ func (eb *EventBus) persistEventRecord(
 		}
 		return nil
 	}
+	if deliveryRouteSetPersistenceRequired(deliveryRoutes) {
+		if _, ok := eb.store.(EventDeliveryRouteSetPersistence); !ok {
+			return fmt.Errorf("persist typed event delivery routes: %w", errMissingEventDeliveryRouteSetPersistence)
+		}
+		if err := eb.store.AppendEvent(ctx, evt); err != nil {
+			return fmt.Errorf("persist event: %w", err)
+		}
+		if err := eb.insertEventDeliveries(ctx, evt.ID, recipients, deliveryTargets, deliveryRoutes); err != nil {
+			return fmt.Errorf("persist event deliveries: %w", err)
+		}
+		if scopeWriter, ok := eb.store.(EventReplayScopePersistence); ok && scopeWriter != nil {
+			if err := scopeWriter.UpsertCommittedReplayScope(ctx, evt.ID, scope); err != nil {
+				return fmt.Errorf("persist committed replay scope: %w", err)
+			}
+			return nil
+		}
+		if replayScopePersistenceRequired(eb.store) {
+			return fmt.Errorf("persist committed replay scope: %w", runtimereplayclaim.ErrMissingCommittedReplayScope)
+		}
+		return nil
+	}
 	if atomicStore, ok := eb.store.(AtomicEventRoutePersistence); ok {
 		if err := atomicStore.PersistEventWithDeliveryRoutesAndScope(ctx, evt, recipients, deliveryTargets, scope); err != nil {
 			return fmt.Errorf("persist event transaction: %w", err)
@@ -903,6 +924,9 @@ func (eb *EventBus) insertEventDeliveries(ctx context.Context, eventID string, r
 	if store, ok := eb.store.(EventDeliveryRouteSetPersistence); ok && store != nil && len(deliveryRoutes) > 0 {
 		return store.InsertEventDeliveryRoutes(ctx, eventID, deliveryRoutes)
 	}
+	if deliveryRouteSetPersistenceRequired(deliveryRoutes) {
+		return errMissingEventDeliveryRouteSetPersistence
+	}
 	if store, ok := eb.store.(EventDeliveryRoutePersistence); ok && store != nil {
 		return store.InsertEventDeliveriesWithTargets(ctx, eventID, recipients, deliveryTargets)
 	}
@@ -922,10 +946,24 @@ func (eb *EventBus) insertEventDeliveriesTx(
 	if store, ok := txStore.(TransactionalEventDeliveryRouteSetPersistence); ok && store != nil && len(deliveryRoutes) > 0 {
 		return store.InsertEventDeliveryRoutesTx(ctx, tx, eventID, deliveryRoutes)
 	}
+	if deliveryRouteSetPersistenceRequired(deliveryRoutes) {
+		return errMissingEventDeliveryRouteSetPersistence
+	}
 	if store, ok := txStore.(TransactionalEventDeliveryRoutePersistence); ok && store != nil {
 		return store.InsertEventDeliveriesWithTargetsTx(ctx, tx, eventID, recipients, deliveryTargets)
 	}
 	return txStore.InsertEventDeliveriesTx(ctx, tx, eventID, recipients)
+}
+
+var errMissingEventDeliveryRouteSetPersistence = errors.New("event store does not support typed delivery route persistence")
+
+func deliveryRouteSetPersistenceRequired(routes []events.DeliveryRoute) bool {
+	for _, route := range events.NormalizeDeliveryRoutes(routes) {
+		if strings.TrimSpace(route.SubscriberType) != routePlanSubscriberAgent {
+			return true
+		}
+	}
+	return false
 }
 
 func (eb *EventBus) logDelivery(ctx context.Context, evt events.Event, recipients []string, extra map[string]any) {
