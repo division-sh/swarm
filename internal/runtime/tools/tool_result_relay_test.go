@@ -124,9 +124,6 @@ func TestExecutorPersistOversizedToolResultRelay_HostUsesExecutionTargetFileIO(t
 	if got := read.(map[string]any)["content"]; got != `{"blob":"hello"}` {
 		t.Fatalf("read relay content = %#v", got)
 	}
-	if _, err := exec.Execute(ctx, "bash", map[string]any{"command": "true"}); err == nil || !strings.Contains(err.Error(), "host workspace backend does not support native tool execution yet") {
-		t.Fatalf("Execute bash error = %v, want host native command fail-closed", err)
-	}
 }
 
 func TestExecutorPersistOversizedToolResultRelay_HostChunksLargeReadFileResults(t *testing.T) {

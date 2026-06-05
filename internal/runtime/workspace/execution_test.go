@@ -14,14 +14,17 @@ func TestExecutionTargetDistinguishesDockerHostAndEmptyContainer(t *testing.T) {
 	}
 
 	host := (&Target{Backend: BackendHost, Workdir: t.TempDir()}).ExecutionTarget()
-	if host.Mode != ExecutionModeHostLocal || !host.Supports(ExecutionCapabilityFileRead) || !host.Supports(ExecutionCapabilityFileWrite) || !host.Supports(ExecutionCapabilityToolResultRelay) {
-		t.Fatalf("host execution target = %#v, want explicit host file/relay capabilities", host)
+	if host.Mode != ExecutionModeHostLocal || !host.Supports(ExecutionCapabilityNativeCommand) || !host.Supports(ExecutionCapabilityFileRead) || !host.Supports(ExecutionCapabilityFileWrite) || !host.Supports(ExecutionCapabilityToolResultRelay) {
+		t.Fatalf("host execution target = %#v, want explicit trusted host command/file/relay capabilities", host)
 	}
-	if host.Supports(ExecutionCapabilityNativeCommand) || host.Supports(ExecutionCapabilityClaudeCLI) {
-		t.Fatalf("host execution target = %#v, want command/claude unsupported", host)
+	if host.Supports(ExecutionCapabilityClaudeCLI) {
+		t.Fatalf("host execution target = %#v, want claude unsupported", host)
 	}
-	if err := host.Require(ExecutionCapabilityNativeCommand); err == nil || !strings.Contains(err.Error(), "host workspace backend does not support native tool execution yet") {
-		t.Fatalf("host native command error = %v, want fail-closed diagnostic", err)
+	if err := host.Require(ExecutionCapabilityNativeCommand); err != nil {
+		t.Fatalf("host native command capability error = %v, want explicit trusted host support", err)
+	}
+	if err := host.Require(ExecutionCapabilityClaudeCLI); err == nil || !strings.Contains(err.Error(), "host workspace backend does not support Claude CLI execution yet") {
+		t.Fatalf("host Claude error = %v, want fail-closed diagnostic", err)
 	}
 
 	empty := (&Target{Workdir: t.TempDir()}).ExecutionTarget()

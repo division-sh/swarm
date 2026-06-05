@@ -323,6 +323,9 @@ func (e *Executor) runWorkspaceCommand(ctx context.Context, target *workspace.Ta
 	if len(args) == 0 {
 		return nil, nil, -1, fmt.Errorf("workspace command args are required")
 	}
+	if strings.TrimSpace(args[0]) == "" {
+		return nil, nil, -1, fmt.Errorf("workspace command executable is required")
+	}
 	if e != nil && e.execWorkspaceFn != nil {
 		return e.execWorkspaceFn(runCtx, execTarget, timeout, stdin, args...)
 	}
@@ -340,6 +343,13 @@ func (e *Executor) runWorkspaceCommand(ctx context.Context, target *workspace.Ta
 		dockerArgs = append(dockerArgs, strings.TrimSpace(execTarget.Container))
 		dockerArgs = append(dockerArgs, args...)
 		cmd = exec.CommandContext(runCtx, dockerBin, dockerArgs...)
+	case workspace.ExecutionModeHostLocal:
+		hostWorkdir, err := hostNativeCommandWorkdir(execTarget)
+		if err != nil {
+			return nil, nil, -1, err
+		}
+		cmd = exec.CommandContext(runCtx, strings.TrimSpace(args[0]), args[1:]...)
+		cmd.Dir = hostWorkdir
 	default:
 		return nil, nil, -1, fmt.Errorf("%s", execTarget.UnsupportedMessage(workspace.ExecutionCapabilityNativeCommand))
 	}
@@ -362,6 +372,18 @@ func (e *Executor) runWorkspaceCommand(ctx context.Context, target *workspace.Ta
 		}
 	}
 	return stdout.Bytes(), stderr.Bytes(), exitCode, err
+}
+
+func hostNativeCommandWorkdir(execTarget workspace.ExecutionTarget) (string, error) {
+	workdir := strings.TrimSpace(execTarget.Workdir)
+	if workdir == "" {
+		workdir = workspace.LogicalWorkspaceMount
+	}
+	resolved, err := execTarget.ResolveHostPath(workdir, workspace.PathAccessWrite)
+	if err != nil {
+		return "", fmt.Errorf("host native command workspace path is unavailable: %w", err)
+	}
+	return resolved.HostPath, nil
 }
 
 func resolveNativeReadPath(target *workspace.Target, raw string) (string, error) {

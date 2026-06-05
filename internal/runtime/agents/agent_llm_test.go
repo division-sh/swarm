@@ -261,14 +261,23 @@ func TestResolvePromptForMode_ExpandsConfigVariables(t *testing.T) {
 	if strings.Contains(got, "{{team_name}}") {
 		t.Fatalf("expected resolved prompt to expand team_name token, got %q", got)
 	}
-	if !strings.Contains(got, "Working directory: /workspace (read-write)") {
+	if !strings.Contains(got, "Workspace: /workspace (read-write logical path)") {
 		t.Fatalf("expected prompt postamble in resolved prompt, got %q", got)
 	}
-	if !strings.Contains(got, "Reference data: /data (read-only)") {
+	if !strings.Contains(got, "Reference data: /data (read-only logical path)") {
 		t.Fatalf("expected prompt postamble in resolved prompt, got %q", got)
 	}
-	if !strings.Contains(got, "Contracts: /opt/swarm/contracts (read-only)") {
+	if !strings.Contains(got, "Contracts: /opt/swarm/contracts (read-only logical path)") {
 		t.Fatalf("expected prompt postamble in resolved prompt, got %q", got)
+	}
+	if strings.Contains(got, "Trusted host bash starts in the workspace backing directory") {
+		t.Fatalf("expected legacy prompt postamble guard to be absent from resolved prompt, got %q", got)
+	}
+	if !strings.Contains(got, "Trusted host bash is full host-user shell execution from the workspace backing directory") {
+		t.Fatalf("expected host bash full-power postamble in resolved prompt, got %q", got)
+	}
+	if !strings.Contains(got, "absolute path availability follows the host deployment namespace and OS permissions") {
+		t.Fatalf("expected host path namespace caveat in resolved prompt, got %q", got)
 	}
 }
 
@@ -1036,6 +1045,28 @@ func TestAppendPromptPostamble_IsIdempotent(t *testing.T) {
 	}
 }
 
+func TestAppendPromptPostamble_AppendsWhenPartialPostambleMissingRequiredMounts(t *testing.T) {
+	partial := strings.Join([]string{
+		"You are helpful.",
+		"Workspace: /workspace (read-write logical path)",
+		"Trusted host bash is full host-user shell execution from the workspace backing directory; use relative paths for workspace files, and absolute path availability follows the host deployment namespace and OS permissions.",
+	}, "\n")
+
+	got := appendPromptPostamble(partial)
+	if got == partial {
+		t.Fatalf("expected canonical postamble appended to partial environment prompt, got unchanged %q", got)
+	}
+	for _, want := range []string{
+		"Reference data: /data (read-only logical path)",
+		"Contracts: /opt/swarm/contracts (read-only logical path)",
+		"Docker-backed command execution exposes these as OS paths",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected appended canonical postamble to include %q, got %q", want, got)
+		}
+	}
+}
+
 type nativeCapabilityRuntimeStub struct {
 	llm.NoopRuntime
 	caps llm.NativeToolCapabilities
@@ -1073,6 +1104,19 @@ func TestNewLLMAgent_InjectsNativeFallbackToolsWhenProviderLacksSupport(t *testi
 			t.Fatalf("expected native fallback tool %s in %v", want, names)
 		}
 	}
+	for _, tool := range agent.conversation.Tools {
+		if tool.Name != "bash" {
+			continue
+		}
+		if !strings.Contains(tool.Usage, "trusted host bash is full host-user shell execution from the workspace backing directory") {
+			t.Fatalf("bash usage = %q, want trusted host path contract", tool.Usage)
+		}
+		if !strings.Contains(tool.Usage, "absolute paths follow the host deployment namespace and OS permissions") {
+			t.Fatalf("bash usage = %q, want host namespace caveat", tool.Usage)
+		}
+		return
+	}
+	t.Fatal("bash native fallback tool missing")
 }
 
 func TestNewLLMAgent_DoesNotInjectNativeFallbackToolsWhenProviderSupportsCapability(t *testing.T) {

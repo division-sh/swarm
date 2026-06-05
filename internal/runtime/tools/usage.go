@@ -32,7 +32,7 @@ var builtinToolUsageHints = map[string]string{
 }
 
 var nativeFallbackUsageHints = map[string]string{
-	"bash":       "Use only for local workspace commands. Provide command as a string and timeout_seconds when needed. Do not use for workflow event emission or entity persistence.",
+	"bash":       "Use only for local workspace commands. Provide command as a string and timeout_seconds when needed. Docker-backed bash exposes /workspace, /data, and /opt/swarm/contracts as OS paths; trusted host bash is full host-user shell execution from the workspace backing directory. Use relative paths for workspace files; absolute paths follow the host deployment namespace and OS permissions. Do not use for workflow event emission or entity persistence.",
 	"web_search": "Use for external web research only. Provide a concise query and max_results when needed. Do not use it to read Swarm entity state; use entity tools for that.",
 	"read_file":  "Read files by exact path from the workspace or mounted read-only data/contracts paths. Do not use for entity_state reads.",
 	"write_file": "Write files only within the agent workspace. Do not use file writes as a substitute for emit_* event publication or save_entity_field persistence.",

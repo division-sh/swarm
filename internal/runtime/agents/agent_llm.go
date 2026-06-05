@@ -364,19 +364,33 @@ func promptModeFromEvent(evt events.Event) string {
 	return strings.TrimSpace(sharedjson.AsString(payload["mode"]))
 }
 
-const promptEnvironmentPostamble = "## Environment\n\nWorking directory: /workspace (read-write)\nReference data: /data (read-only)\nContracts: /opt/swarm/contracts (read-only)"
+const promptEnvironmentPostamble = "## Environment\n\nWorkspace: /workspace (read-write logical path)\nReference data: /data (read-only logical path)\nContracts: /opt/swarm/contracts (read-only logical path)\nDocker-backed command execution exposes these as OS paths. Trusted host bash is full host-user shell execution from the workspace backing directory; use relative paths for workspace files, and absolute path availability follows the host deployment namespace and OS permissions."
 
 func appendPromptPostamble(prompt string) string {
 	prompt = strings.TrimSpace(prompt)
 	if prompt == "" {
 		return ""
 	}
-	if strings.Contains(prompt, "Working directory: /workspace") &&
-		strings.Contains(prompt, "Reference data: /data") &&
-		strings.Contains(prompt, "Contracts: /opt/swarm/contracts") {
+	if promptHasEnvironmentPostambleContract(prompt) {
 		return prompt
 	}
 	return prompt + "\n\n" + promptEnvironmentPostamble
+}
+
+func promptHasEnvironmentPostambleContract(prompt string) bool {
+	for _, required := range []string{
+		"Workspace: /workspace (read-write logical path)",
+		"Reference data: /data (read-only logical path)",
+		"Contracts: /opt/swarm/contracts (read-only logical path)",
+		"Docker-backed command execution exposes these as OS paths",
+		"Trusted host bash is full host-user shell execution from the workspace backing directory",
+		"absolute path availability follows the host deployment namespace and OS permissions",
+	} {
+		if !strings.Contains(prompt, required) {
+			return false
+		}
+	}
+	return true
 }
 
 func (a *LLMAgent) resetConversationScopeIfNeeded(evt events.Event) {
