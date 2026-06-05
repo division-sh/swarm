@@ -406,6 +406,9 @@ func routedNodeDeliveryIntentsForNoTargetEvent(evt events.Event, routed []Subscr
 	if len(routed) == 0 || len(eventDeliveryTargetRoutes(evt)) > 0 {
 		return nil
 	}
+	if routes := routedConcreteNoTargetNodeDeliveryRoutes(evt, routed); len(routes) > 0 {
+		return routePlanDeliveryIntentsFromRoutes(routes, routePlanSourceConcreteNodeRoute, routePlanReasonRouteTableNode)
+	}
 	internalRecipients := filterOutAgentIDs(recipients, persisted)
 	if len(internalRecipients) == 0 {
 		return nil
@@ -438,6 +441,41 @@ func routedNodeDeliveryIntentsForNoTargetEvent(evt events.Event, routed []Subscr
 		})
 	}
 	return routePlanDeliveryIntentsFromRoutes(out, routePlanSourceConcreteNodeRoute, routePlanReasonRouteTableNode)
+}
+
+func routedConcreteNoTargetNodeDeliveryRoutes(evt events.Event, routed []Subscriber) []events.DeliveryRoute {
+	flowInstance := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/")
+	eventType := strings.Trim(strings.TrimSpace(string(evt.Type)), "/")
+	if flowInstance == "" || eventType == "" || !strings.HasPrefix(eventType, flowInstance+"/") {
+		return nil
+	}
+	eventEntityID := strings.TrimSpace(evt.EntityID())
+	nodeIDs := make(map[string]struct{}, len(routed))
+	for _, subscriber := range routed {
+		if !routedNodeMatchesConcreteEventTypeFlowInstance(evt, subscriber) {
+			continue
+		}
+		id := strings.TrimSpace(subscriber.ID)
+		if id == "" {
+			continue
+		}
+		nodeIDs[id] = struct{}{}
+	}
+	if len(nodeIDs) == 0 {
+		return nil
+	}
+	out := make([]events.DeliveryRoute, 0, len(nodeIDs))
+	for _, recipient := range sortedStringKeys(nodeIDs) {
+		out = append(out, events.DeliveryRoute{
+			SubscriberType: "node",
+			SubscriberID:   recipient,
+			Target: events.RouteIdentity{
+				FlowInstance: flowInstance,
+				EntityID:     eventEntityID,
+			},
+		})
+	}
+	return events.NormalizeDeliveryRoutes(out)
 }
 
 func routedNodeDeliveryIntentsForNoRecipientFlowInstanceEvent(evt events.Event, routed []Subscriber, recipients, persisted []string) []RoutePlanDeliveryIntent {
@@ -615,6 +653,19 @@ func routedNodeInternalSubscriptionAliases(evt events.Event, routed []Subscriber
 
 func routedNodeMatchesConcreteFlowInstanceEvent(evt events.Event, subscriber Subscriber) bool {
 	return routedNodeConcreteEventKey(evt, subscriber) != ""
+}
+
+func routedNodeMatchesConcreteEventTypeFlowInstance(evt events.Event, subscriber Subscriber) bool {
+	if strings.TrimSpace(subscriber.ID) == "" || strings.TrimSpace(subscriber.Type) == "agent" {
+		return false
+	}
+	instancePath := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
+	flowInstance := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/")
+	eventType := strings.Trim(strings.TrimSpace(string(evt.Type)), "/")
+	if instancePath == "" || flowInstance == "" || eventType == "" {
+		return false
+	}
+	return instancePath == flowInstance && strings.HasPrefix(eventType, flowInstance+"/")
 }
 
 func routedNodeConcreteEventKey(evt events.Event, subscriber Subscriber) string {

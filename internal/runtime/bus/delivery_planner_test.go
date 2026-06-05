@@ -343,7 +343,7 @@ func TestDeliveryPlanner_ExpandsTargetSetForInternalWorkflowRecipient(t *testing
 	}
 }
 
-func TestDeliveryPlanner_NoTargetConcreteRoutedNodeUsesInternalCarrierAndNodeRoute(t *testing.T) {
+func TestDeliveryPlanner_NoTargetConcreteRoutedNodePersistsSemanticNodeRoute(t *testing.T) {
 	planner := newDeliveryPlanner(
 		deliveryRouteResolver{
 			resolveRoutedSubscribers: func(events.Event) []Subscriber {
@@ -381,17 +381,24 @@ func TestDeliveryPlanner_NoTargetConcreteRoutedNodeUsesInternalCarrierAndNodeRou
 		t.Fatalf("persisted recipients = %#v, want none for internal carrier", plan.PersistedRecipients)
 	}
 	if got := plan.DeliveryRoutes; len(got) != 1 {
-		t.Fatalf("delivery routes = %#v, want workflow-runtime carrier route", got)
+		t.Fatalf("delivery routes = %#v, want lifecycle-orchestrator semantic node route", got)
 	}
 	route := plan.DeliveryRoutes[0]
-	if route.SubscriberType != "node" || route.SubscriberID != "workflow-runtime" {
-		t.Fatalf("delivery route = %#v, want node/workflow-runtime carrier", route)
+	if route.SubscriberType != "node" || route.SubscriberID != "lifecycle-orchestrator" {
+		t.Fatalf("delivery route = %#v, want node/lifecycle-orchestrator semantic authority", route)
 	}
 	if route.Target.FlowInstance != "operating/inst-1" || route.Target.EntityID != "ent-operating" {
 		t.Fatalf("delivery target = %#v, want operating/inst-1 ent-operating", route.Target)
 	}
 	if plan.TargetFailure != "" {
 		t.Fatalf("target failure = %q, want none", plan.TargetFailure)
+	}
+	if got, want := len(plan.RoutePlan.DeliveryIntents), 1; got != want {
+		t.Fatalf("route plan delivery intents = %d, want %d", got, want)
+	}
+	intent := plan.RoutePlan.DeliveryIntents[0]
+	if intent.Source != routePlanSourceConcreteNodeRoute || intent.Reason != routePlanReasonRouteTableNode {
+		t.Fatalf("route plan delivery intent = %#v, want concrete route-table semantic node source", intent)
 	}
 }
 

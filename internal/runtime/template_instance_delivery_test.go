@@ -75,7 +75,7 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScope
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
 		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'workflow-runtime'
-	`, 1, eventID)
+	`, 0, eventID)
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
 		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'lifecycle-orchestrator'
@@ -88,6 +88,54 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScope
 		SELECT COUNT(*) FROM events
 		WHERE event_name = 'operating/opco.ceo_ready'
 	`, 1)
+}
+
+func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsAuthorityBeforeHandlerExecution(t *testing.T) {
+	bundle := loadRuntimeTempBundle(t, templateInstanceDeliveryFixtureFiles())
+	source := semanticview.Wrap(bundle)
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	ctx := seedRuntimeTestRun(t, db)
+	pg := &store.PostgresStore{DB: db}
+	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	if err := bus.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("operating", "inst-1")}); err != nil {
+		t.Fatalf("AddFlowInstanceRoute: %v", err)
+	}
+	ch := bus.SubscribeInternal("workflow-runtime", events.EventType("operating/opco.product_initialization_requested"))
+	eventID := "99999999-9999-4999-8999-999999999903"
+	evt := (events.Event{
+		ID:        eventID,
+		RunID:     templateInstanceDeliveryRunID,
+		Type:      events.EventType("operating/inst-1/opco.product_initialization_requested"),
+		Payload:   []byte(`{"entity_id":"11111111-1111-4111-8111-111111111111"}`),
+		CreatedAt: time.Now().UTC(),
+	}).WithEntityID("11111111-1111-4111-8111-111111111111").WithFlowInstance("operating/inst-1")
+	if err := bus.Publish(ctx, evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	select {
+	case got := <-ch:
+		if got.FlowInstance() != "operating/inst-1" || got.EntityID() != "11111111-1111-4111-8111-111111111111" {
+			t.Fatalf("delivered route identity flow=%q entity=%q, want operating/inst-1 product entity", got.FlowInstance(), got.EntityID())
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("workflow-runtime carrier did not receive concrete template event")
+	}
+	assertRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM event_deliveries
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'lifecycle-orchestrator'
+	`, 1, eventID)
+	assertRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM event_deliveries
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'workflow-runtime'
+	`, 0, eventID)
+	assertRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM event_receipts
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'lifecycle-orchestrator'
+	`, 0, eventID)
 }
 
 func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(t *testing.T) {
