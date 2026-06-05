@@ -492,7 +492,9 @@ contract_formats:
             subscriber_type, and subscriber_id. They remain non-authoritative
             readback surfaces and must not re-plan subscribers, fabricate rows,
             or expose delivery_target_route unless a separately gated public
-            schema change promotes route-target identity.
+            schema change promotes route-target identity. Dashboard event-list
+            subscriber selectors consume the same typed subscriber_id +
+            subscriber_type delivery identity as the canonical event.list owner.
           split_owner: '#1345 owns the public/operator readback projection for delivery_id, subscriber_type, and subscriber_id; route-target public exposure remains split.'
         split_children:
           runtime_model: '#1343 owns the canonical internal EventBus RoutePlan model.'

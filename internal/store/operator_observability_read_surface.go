@@ -226,17 +226,24 @@ func (s *PostgresStore) ListOperatorEvents(ctx context.Context, opts OperatorEve
 		n := add(opts.Source)
 		where = append(where, fmt.Sprintf("COALESCE(e.produced_by, '') = $%d", n))
 	}
+	deliveryWhere := make([]string, 0, 3)
 	if opts.Filter.DeliveryStatus != "" {
 		n := add(opts.Filter.DeliveryStatus)
-		where = append(where, fmt.Sprintf("EXISTS (SELECT 1 FROM event_deliveries d WHERE d.event_id = e.event_id AND d.status = $%d)", n))
+		deliveryWhere = append(deliveryWhere, fmt.Sprintf("d.status = $%d", n))
 	}
 	if opts.Filter.SubscriberID != "" {
 		n := add(opts.Filter.SubscriberID)
-		where = append(where, fmt.Sprintf("EXISTS (SELECT 1 FROM event_deliveries d WHERE d.event_id = e.event_id AND d.subscriber_id = $%d)", n))
+		deliveryWhere = append(deliveryWhere, fmt.Sprintf("d.subscriber_id = $%d", n))
 	}
 	if opts.Filter.SubscriberType != "" {
 		n := add(opts.Filter.SubscriberType)
-		where = append(where, fmt.Sprintf("EXISTS (SELECT 1 FROM event_deliveries d WHERE d.event_id = e.event_id AND d.subscriber_type = $%d)", n))
+		deliveryWhere = append(deliveryWhere, fmt.Sprintf("d.subscriber_type = $%d", n))
+	}
+	if len(deliveryWhere) > 0 {
+		where = append(where, fmt.Sprintf(
+			"EXISTS (SELECT 1 FROM event_deliveries d WHERE d.event_id = e.event_id AND %s)",
+			strings.Join(deliveryWhere, " AND "),
+		))
 	}
 	if opts.Filter.ReasonCode != "" {
 		n := add(opts.Filter.ReasonCode)

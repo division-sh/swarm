@@ -545,13 +545,11 @@ func (h *Handler) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	rows := []eventRecord{}
 	if h.observability != nil {
-		filter := EventFilter{
-			Type:       strings.TrimSpace(r.URL.Query().Get("type")),
-			Source:     strings.TrimSpace(r.URL.Query().Get("source")),
-			EntityID:   strings.TrimSpace(r.URL.Query().Get("entity_id")),
-			Subscriber: strings.TrimSpace(r.URL.Query().Get("subscriber")),
+		filter, err := dashboardEventFilterFromRequest(r)
+		if err != nil {
+			writeJSONError(w, http.StatusBadRequest, err)
+			return
 		}
-		var err error
 		rows, err = h.observability.ListEvents(r.Context(), filter, intQuery(r, "limit", 200))
 		if err != nil {
 			writeJSONError(w, http.StatusInternalServerError, err)
@@ -710,6 +708,14 @@ func (h *Handler) handleRunTrace(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleEventStream(w http.ResponseWriter, r *http.Request) {
+	includeRuntime := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("include_runtime")), "true")
+	eventFilter, err := dashboardEventFilterFromRequest(r)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, err)
+		return
+	}
+	eventFilter.After = time.Now().UTC().Add(-2 * time.Second)
+
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeJSONError(w, http.StatusInternalServerError, errors.New("streaming is not supported"))
@@ -721,14 +727,6 @@ func (h *Handler) handleEventStream(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
-	includeRuntime := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("include_runtime")), "true")
-	eventFilter := EventFilter{
-		Type:       strings.TrimSpace(r.URL.Query().Get("type")),
-		Source:     strings.TrimSpace(r.URL.Query().Get("source")),
-		EntityID:   strings.TrimSpace(r.URL.Query().Get("entity_id")),
-		Subscriber: strings.TrimSpace(r.URL.Query().Get("subscriber")),
-		After:      time.Now().UTC().Add(-2 * time.Second),
-	}
 	logFilter := RuntimeLogFilter{
 		Type:      strings.TrimSpace(r.URL.Query().Get("type")),
 		Source:    strings.TrimSpace(r.URL.Query().Get("source")),
@@ -779,6 +777,36 @@ func (h *Handler) handleEventStream(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+}
+
+func dashboardEventFilterFromRequest(r *http.Request) (EventFilter, error) {
+	query := r.URL.Query()
+	subscriberID := strings.TrimSpace(query.Get("subscriber_id"))
+	legacySubscriber := strings.TrimSpace(query.Get("subscriber"))
+	if subscriberID != "" && legacySubscriber != "" && subscriberID != legacySubscriber {
+		return EventFilter{}, errors.New("subscriber and subscriber_id must match")
+	}
+	if subscriberID == "" {
+		subscriberID = legacySubscriber
+	}
+	subscriberType := strings.TrimSpace(query.Get("subscriber_type"))
+	if subscriberType != "" {
+		if _, ok := dashboardEventSubscriberTypes[subscriberType]; !ok {
+			return EventFilter{}, fmt.Errorf("subscriber_type=%q is not a valid SubscriberType", subscriberType)
+		}
+	}
+	return EventFilter{
+		Type:           strings.TrimSpace(query.Get("type")),
+		Source:         strings.TrimSpace(query.Get("source")),
+		EntityID:       strings.TrimSpace(query.Get("entity_id")),
+		SubscriberID:   subscriberID,
+		SubscriberType: subscriberType,
+	}, nil
+}
+
+var dashboardEventSubscriberTypes = map[string]struct{}{
+	"agent": {},
+	"node":  {},
 }
 
 func (h *Handler) handleMailbox(w http.ResponseWriter, r *http.Request) {

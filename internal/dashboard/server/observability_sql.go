@@ -10,11 +10,12 @@ import (
 )
 
 type EventFilter struct {
-	Type       string
-	Source     string
-	EntityID   string
-	Subscriber string
-	After      time.Time
+	Type           string
+	Source         string
+	EntityID       string
+	SubscriberID   string
+	SubscriberType string
+	After          time.Time
 }
 
 type RuntimeLogFilter struct {
@@ -162,9 +163,10 @@ func (r *SQLObservabilityReader) ListEvents(ctx context.Context, filter EventFil
 	owner := &store.PostgresStore{DB: r.db}
 	result, err := owner.ListOperatorEvents(ctx, store.OperatorEventListOptions{
 		Filter: store.OperatorEventListFilter{
-			EntityID:     filter.EntityID,
-			EventName:    filter.Type,
-			SubscriberID: filter.Subscriber,
+			EntityID:       filter.EntityID,
+			EventName:      filter.Type,
+			SubscriberID:   filter.SubscriberID,
+			SubscriberType: filter.SubscriberType,
 		},
 		Source:             filter.Source,
 		Since:              dashboardTimePtr(filter.After),
