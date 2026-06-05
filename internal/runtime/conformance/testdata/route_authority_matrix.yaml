@@ -128,6 +128,41 @@ rows:
       node result is accepted. #1293 remains the separate execution-admission
       consumer of that persisted authority.
 
+  - id: top_level_project_node_event_publish_materialization
+    concept: Top-level project workflow-node routes are materialized into typed event_deliveries before admission, even when a live workflow-runtime carrier also exists.
+    classification: already_covered_by_existing_proof
+    tier: required_pr_smoke
+    proof_dimensions: [route_plan_model, default_sqlite, explicit_postgres, real_v1_handler, persistence_authority, negative_authority, required_pr_smoke]
+    invalid_authority:
+      - workflow-runtime carrier route
+      - live internal carrier subscription
+      - handler lookup
+      - event_receipts settlement/backfill
+      - replay-scope markers
+      - legacy InsertEventDeliveries agent-only fallback
+    owner_refs:
+      - {kind: artifact, path: internal/runtime/bus/routing_derivation.go}
+      - {kind: artifact, path: internal/runtime/bus/eventbus_publish.go}
+      - {kind: artifact, path: internal/runtime/bus/eventbus_target_routes_test.go}
+      - {kind: spec_ref, path: platform-spec.yaml, ref: route_plan_authority}
+      - {kind: spec_ref, path: platform-spec.yaml, ref: workflow_node_route_authority}
+    proof_refs:
+      - {kind: issue, issue: 1355}
+      - {kind: go_test, name: TestRouteTableTopLevelProjectNodeResolvesProgrammaticRootInputRoute}
+      - {kind: go_test, name: TestEventBusPublish_TopLevelProjectNodePersistsRouteBeforeInterceptor}
+      - {kind: go_test, name: TestEventBusPublish_NodeRouteFailsClosedWithoutRouteSetPersistence}
+      - {kind: go_test, name: TestOperatorMailboxWriteSupportedSurfacePublishesAndReadsAcrossBackends}
+      - {kind: go_test, name: TestOperatorRuleMailboxWriteSupportedSurfaceIsBranchScopedAcrossBackends}
+      - {kind: go_test, name: TestOperatorMailboxWriteSupportedSurfaceMissingMaterializerIsLoud}
+      - {kind: go_test, name: TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliveryRows}
+    notes: >
+      #1355 closes the first producer/materialization slice exposed by #1293:
+      programmatic/top-level project nodes are part of the root project route
+      topology, and non-agent typed delivery routes require the route-set
+      persistence owner instead of lossy legacy agent-only fallback. This row
+      does not claim #1293 execution admission, #1299 wildcard route production,
+      or #1301 runtime callback localization closed.
+
   - id: concrete_template_no_target_node_delivery_route_materialization
     concept: Already-concrete no-target flow-instance events persist semantic workflow-node authority separately from workflow-runtime carrier dispatch.
     classification: already_covered_by_existing_proof

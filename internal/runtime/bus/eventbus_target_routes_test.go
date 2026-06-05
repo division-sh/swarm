@@ -1029,6 +1029,92 @@ func TestEventBusPublish_NoTargetRootRoutedNodePersistsSemanticRouteWithoutInter
 	}
 }
 
+func TestRouteTableTopLevelProjectNodeResolvesProgrammaticRootInputRoute(t *testing.T) {
+	rt, err := DeriveRouteTable(semanticview.Wrap(routedTopLevelProjectNodeBundle()))
+	if err != nil {
+		t.Fatalf("DeriveRouteTable: %v", err)
+	}
+	got := rt.Resolve("thing.created")
+	if len(got) != 1 {
+		t.Fatalf("Resolve(thing.created) = %#v, want one top-level project node route", got)
+	}
+	if got[0].ID != "reviewer" || got[0].Type != "node" || got[0].Path != "" || got[0].MatchPattern != "thing.created" || got[0].RouteSource != "root_input_project" {
+		t.Fatalf("resolved subscriber = %#v, want root input project reviewer route", got[0])
+	}
+}
+
+func TestEventBusPublish_TopLevelProjectNodePersistsRouteBeforeInterceptor(t *testing.T) {
+	store := newTargetRouteMemoryStore()
+	eventID := uuid.NewString()
+	reviewerRoute := events.DeliveryRoute{
+		SubscriberType: "node",
+		SubscriberID:   "reviewer",
+	}
+	workflowRuntimeRoute := events.DeliveryRoute{
+		SubscriberType: "agent",
+		SubscriberID:   "workflow-runtime",
+	}
+	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+		ContractBundle: semanticview.Wrap(routedTopLevelProjectNodeBundle()),
+		Interceptors: []EventInterceptor{materializedRoutePersistedBeforeInterceptor{
+			t:       t,
+			store:   store,
+			eventID: eventID,
+			want:    reviewerRoute,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	eb.RegisterRuntimeActiveAgentDescriptor(ActiveAgentDescriptor{AgentID: "workflow-runtime"})
+	ch := eb.Subscribe("workflow-runtime", events.EventType("thing.created"))
+	evt := (events.Event{
+		ID:        eventID,
+		Type:      events.EventType("thing.created"),
+		Payload:   []byte(`{}`),
+		CreatedAt: time.Now().UTC(),
+	}).WithEntityID("ent-project")
+
+	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("CheckPublishRecipientPlan: %v", err)
+	}
+	if got := plan.PersistedRecipients; len(got) != 1 || got[0] != "workflow-runtime" {
+		t.Fatalf("persisted recipients = %#v, want workflow-runtime carrier", got)
+	}
+	if !deliveryRoutesContain(plan.DeliveryRoutes, reviewerRoute) || !deliveryRoutesContain(plan.DeliveryRoutes, workflowRuntimeRoute) {
+		t.Fatalf("delivery routes = %#v, want workflow-runtime agent and reviewer node routes", plan.DeliveryRoutes)
+	}
+
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	got := requireBusEvent(t, ch, "workflow-runtime carrier delivery")
+	if got.EntityID() != "ent-project" {
+		t.Fatalf("delivered entity_id = %q, want ent-project", got.EntityID())
+	}
+	if routes := store.routes[eventID]; !deliveryRoutesContain(routes, reviewerRoute) || !deliveryRoutesContain(routes, workflowRuntimeRoute) {
+		t.Fatalf("persisted delivery routes = %#v, want workflow-runtime agent and reviewer node routes", routes)
+	}
+}
+
+func TestEventBusPublish_NodeRouteFailsClosedWithoutRouteSetPersistence(t *testing.T) {
+	eb, err := NewEventBusWithOptions(InMemoryEventStore{}, EventBusOptions{
+		ContractBundle: semanticview.Wrap(routedTopLevelProjectNodeBundle()),
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	if err := eb.Publish(context.Background(), events.Event{
+		ID:        uuid.NewString(),
+		Type:      events.EventType("thing.created"),
+		Payload:   []byte(`{}`),
+		CreatedAt: time.Now().UTC(),
+	}); err == nil || !strings.Contains(err.Error(), "typed delivery route persistence") {
+		t.Fatalf("Publish error = %v, want typed delivery route persistence failure", err)
+	}
+}
+
 func assertTargetRouteDeliveries(t *testing.T, ch <-chan events.Event, wantEntityIDs ...string) {
 	t.Helper()
 	seen := map[string]struct{}{}
@@ -1174,6 +1260,41 @@ func routedRootInputFlowNodeBundle() *runtimecontracts.WorkflowContractBundle {
 		},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
 			"validation": validation.Schema,
+		},
+	}
+}
+
+func routedTopLevelProjectNodeBundle() *runtimecontracts.WorkflowContractBundle {
+	handler := runtimecontracts.SystemNodeEventHandler{AdvancesTo: "done"}
+	return &runtimecontracts.WorkflowContractBundle{
+		Package: runtimecontracts.ProjectPackageDocument{
+			Name:    "top-level-project-node",
+			Version: "1.0.0",
+		},
+		RootSchema: &runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{
+				Inputs: runtimecontracts.FlowInputPins{Events: []string{"thing.created"}},
+			},
+		},
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Name:    "top-level-project-node",
+			Version: "1.0.0",
+			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
+				"reviewer": {"thing.created": handler},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"thing.created": {},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"reviewer": {
+				ID:            "reviewer",
+				ExecutionType: "system_node",
+				SubscribesTo:  []string{"thing.created"},
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"thing.created": handler,
+				},
+			},
 		},
 	}
 }

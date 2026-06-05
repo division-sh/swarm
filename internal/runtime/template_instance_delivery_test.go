@@ -18,6 +18,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -711,6 +712,14 @@ func (s routeMaterializationDBProofStore) AppendEvent(ctx context.Context, evt e
 
 func (s routeMaterializationDBProofStore) InsertEventDeliveries(ctx context.Context, eventID string, agentIDs []string) error {
 	return s.pg.InsertEventDeliveries(ctx, eventID, agentIDs)
+}
+
+func (s routeMaterializationDBProofStore) InsertEventDeliveryRoutes(ctx context.Context, eventID string, routes []events.DeliveryRoute) error {
+	return s.pg.InsertEventDeliveryRoutes(ctx, eventID, routes)
+}
+
+func (s routeMaterializationDBProofStore) PersistEventWithDeliveryRouteSetAndScope(ctx context.Context, evt events.Event, routes []events.DeliveryRoute, scope runtimereplayclaim.CommittedReplayScope) error {
+	return s.pg.PersistEventWithDeliveryRouteSetAndScope(ctx, evt, routes, scope)
 }
 
 func (s routeMaterializationDBProofStore) ListEventDeliveryRecipients(ctx context.Context, eventID string) ([]string, error) {

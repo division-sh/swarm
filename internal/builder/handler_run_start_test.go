@@ -26,6 +26,10 @@ func (*runStartAppendStore) InsertEventDeliveries(context.Context, string, []str
 	return nil
 }
 
+func (*runStartAppendStore) InsertEventDeliveryRoutes(context.Context, string, []events.DeliveryRoute) error {
+	return nil
+}
+
 func (*runStartAppendStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
 	return nil, nil
 }
