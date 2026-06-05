@@ -46,10 +46,12 @@ type eventPublishResult struct {
 }
 
 type eventPublishDelivery struct {
-	SubscriberID string `json:"subscriber_id"`
-	SessionID    string `json:"session_id,omitempty"`
-	Status       string `json:"status"`
-	Attempt      int    `json:"attempt"`
+	DeliveryID     string `json:"delivery_id"`
+	SubscriberType string `json:"subscriber_type"`
+	SubscriberID   string `json:"subscriber_id"`
+	SessionID      string `json:"session_id,omitempty"`
+	Status         string `json:"status"`
+	Attempt        int    `json:"attempt"`
 }
 
 func newEventPublishCommand(opts rootCommandOptions) *cobra.Command {
@@ -233,12 +235,17 @@ func validateEventPublishDelivery(prefix string, delivery eventPublishDelivery) 
 		name  string
 		value string
 	}{
+		{name: "delivery_id", value: delivery.DeliveryID},
+		{name: "subscriber_type", value: delivery.SubscriberType},
 		{name: "subscriber_id", value: delivery.SubscriberID},
 		{name: "status", value: delivery.Status},
 	} {
 		if strings.TrimSpace(field.value) == "" {
 			return fmt.Errorf("malformed event.publish result: %s.%s is required", prefix, field.name)
 		}
+	}
+	if _, ok := eventObservationValidSubscriberTypes[strings.TrimSpace(delivery.SubscriberType)]; !ok {
+		return fmt.Errorf("malformed event.publish result: %s.subscriber_type=%q is not a valid SubscriberType", prefix, delivery.SubscriberType)
 	}
 	if _, ok := eventObservationValidDeliveryStatuses[strings.TrimSpace(delivery.Status)]; !ok {
 		return fmt.Errorf("malformed event.publish result: %s.status=%q is not a valid DeliveryStatus", prefix, delivery.Status)
@@ -261,7 +268,9 @@ func writeEventPublishResult(out io.Writer, eventName string, result eventPublis
 		len(result.Deliveries),
 	)
 	for _, delivery := range result.Deliveries {
-		fmt.Fprintf(out, "delivery subscriber_id=%s status=%s session_id=%s attempt=%d\n",
+		fmt.Fprintf(out, "delivery delivery_id=%s subscriber=%s/%s status=%s session_id=%s attempt=%d\n",
+			delivery.DeliveryID,
+			delivery.SubscriberType,
 			delivery.SubscriberID,
 			delivery.Status,
 			eventObservationDash(delivery.SessionID),

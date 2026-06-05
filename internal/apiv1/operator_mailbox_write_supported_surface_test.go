@@ -72,6 +72,9 @@ func TestOperatorMailboxWriteSupportedSurfacePublishesAndReadsAcrossBackends(t *
 			seenReviewer := false
 			for _, rawDelivery := range deliveries {
 				delivery := asMap(t, rawDelivery)
+				if strings.TrimSpace(stringValue(t, delivery["delivery_id"], "delivery_id")) == "" || !validEventPublishSubscriberType(fmt.Sprint(delivery["subscriber_type"])) {
+					t.Fatalf("event.publish delivery identity = %#v, want persisted typed delivery identity", delivery)
+				}
 				switch delivery["subscriber_id"] {
 				case "workflow-runtime":
 					seenWorkflowRuntime = delivery["status"] == "pending"

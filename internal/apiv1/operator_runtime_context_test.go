@@ -89,9 +89,12 @@ func TestOperatorRuntimeContextManagerRoutesExistingRunByStoredBundle(t *testing
 	}
 	result := asMap(t, resp.Result)
 	eventID := stringValue(t, result["event_id"], "event_id")
-	if got := len(asSlice(t, result["deliveries"])); got != 1 {
-		t.Fatalf("event.publish existing run deliveries = %d, want 1", got)
+	deliveries := asSlice(t, result["deliveries"])
+	if len(deliveries) != 2 {
+		t.Fatalf("event.publish existing run deliveries = %#v, want typed agent and node rows", deliveries)
 	}
+	assertEventPublishDeliveriesContain(t, deliveries, "agent", "scan-orchestrator", "pending", 1)
+	assertEventPublishDeliveriesContain(t, deliveries, "node", "scan-orchestrator", "pending", 1)
 	if got := countEventRowsByRunID(t, fixture.db, runID); got != 2 {
 		t.Fatalf("event rows for existing run = %d, want 2", got)
 	}

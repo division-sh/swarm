@@ -9547,6 +9547,9 @@
             "minimum": 1,
             "type": "integer"
           },
+          "delivery_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
           "session_id": {
             "type": "string"
           },
@@ -9555,9 +9558,14 @@
           },
           "subscriber_id": {
             "type": "string"
+          },
+          "subscriber_type": {
+            "$ref": "#/components/schemas/SubscriberType"
           }
         },
         "required": [
+          "delivery_id",
+          "subscriber_type",
           "subscriber_id",
           "status",
           "attempt"

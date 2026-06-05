@@ -67,7 +67,8 @@ func TestEventPublishUsesEventPublishV1RPCWithBoundParams(t *testing.T) {
 		"run_id=run-1",
 		"new_run_created=true",
 		"deliveries=1",
-		"delivery subscriber_id=agent-1",
+		"delivery delivery_id=delivery-1",
+		"subscriber=agent/agent-1",
 		"session_id=session-1",
 		"attempt=2",
 		"source_event_id=event-parent-1",
@@ -571,12 +572,36 @@ func TestEventPublishMalformedResultsFailClosed(t *testing.T) {
 			wantStderr: "deliveries is required",
 		},
 		{
+			name: "missing delivery id",
+			mutate: func(result map[string]any) {
+				delivery := result["deliveries"].([]any)[0].(map[string]any)
+				delete(delivery, "delivery_id")
+			},
+			wantStderr: "deliveries[0].delivery_id is required",
+		},
+		{
+			name: "missing subscriber type",
+			mutate: func(result map[string]any) {
+				delivery := result["deliveries"].([]any)[0].(map[string]any)
+				delete(delivery, "subscriber_type")
+			},
+			wantStderr: "deliveries[0].subscriber_type is required",
+		},
+		{
 			name: "missing subscriber",
 			mutate: func(result map[string]any) {
 				delivery := result["deliveries"].([]any)[0].(map[string]any)
 				delete(delivery, "subscriber_id")
 			},
 			wantStderr: "deliveries[0].subscriber_id is required",
+		},
+		{
+			name: "invalid subscriber type",
+			mutate: func(result map[string]any) {
+				delivery := result["deliveries"].([]any)[0].(map[string]any)
+				delivery["subscriber_type"] = "platform"
+			},
+			wantStderr: "deliveries[0].subscriber_type",
 		},
 		{
 			name: "invalid delivery status",
@@ -629,10 +654,12 @@ func eventPublishTestResult(newRunCreated bool) map[string]any {
 		"new_run_created": newRunCreated,
 		"deliveries": []any{
 			map[string]any{
-				"subscriber_id": "agent-1",
-				"session_id":    "session-1",
-				"status":        "delivered",
-				"attempt":       2,
+				"delivery_id":     "delivery-1",
+				"subscriber_type": "agent",
+				"subscriber_id":   "agent-1",
+				"session_id":      "session-1",
+				"status":          "delivered",
+				"attempt":         2,
 			},
 		},
 	}
