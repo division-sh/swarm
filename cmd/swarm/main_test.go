@@ -2001,7 +2001,7 @@ func TestPlatformSpecWorkspaceBackendSelectionPromoted(t *testing.T) {
 			t.Fatalf("workspace backend consumers missing %q: %#v", want, authority.Consumers)
 		}
 	}
-	for _, want := range []string{"#1137", "#1136", "full host Claude CLI", "production SQLite"} {
+	for _, want := range []string{"#1137", "#1136", "full host Claude CLI/provider", "production SQLite"} {
 		if !joinedContains(authority.SplitScope, want) {
 			t.Fatalf("workspace backend split scope missing %q: %#v", want, authority.SplitScope)
 		}
@@ -2065,13 +2065,13 @@ func TestPlatformSpecWorkspaceExecutionTargetCapabilityPromoted(t *testing.T) {
 		t.Fatalf("parse platform spec: %v", err)
 	}
 	authority := spec.WorkspaceModel.WorkspaceExecutionTargetCapability
-	if strings.TrimSpace(authority.PromotedBy) != "#1213/#1235/#1286" || strings.TrimSpace(authority.ImplementationStatus) != "implemented_host_file_and_relay_slice" {
+	if strings.TrimSpace(authority.PromotedBy) != "#1213/#1235/#1286/#1356" || strings.TrimSpace(authority.ImplementationStatus) != "implemented_host_file_relay_and_trusted_command_slice" {
 		t.Fatalf("workspace execution target authority status = promoted_by:%q implementation_status:%q", authority.PromotedBy, authority.ImplementationStatus)
 	}
 	if !strings.Contains(authority.CanonicalOwner, "workspace_model.workspace_execution_target_capability") || !strings.Contains(authority.ImplementationOwner, "internal/runtime/workspace.ExecutionTarget") {
 		t.Fatalf("workspace execution target owners = canonical:%q implementation:%q", authority.CanonicalOwner, authority.ImplementationOwner)
 	}
-	for _, want := range []string{"Docker container execution", "explicit host-local targets", "unsupported targets", "tool-result relay"} {
+	for _, want := range []string{"Docker container execution", "explicit host-local targets", "unsupported targets", "trusted/unsafe", "tool-result relay"} {
 		if !strings.Contains(authority.Scope, want) {
 			t.Fatalf("workspace execution target scope missing %q:\n%s", want, authority.Scope)
 		}
@@ -2089,15 +2089,15 @@ func TestPlatformSpecWorkspaceExecutionTargetCapabilityPromoted(t *testing.T) {
 		}
 	}
 	hostMode := authority.TargetModes[string(workspace.ExecutionModeHostLocal)]
-	if !strings.Contains(hostMode.Rule, "MUST NOT infer execution support from an empty container") {
+	if !strings.Contains(hostMode.Rule, "MUST NOT infer execution support from an empty container") || !strings.Contains(hostMode.Rule, "trusted/unsafe native_command") {
 		t.Fatalf("host execution mode rule = %q", hostMode.Rule)
 	}
-	for _, want := range []string{string(workspace.ExecutionCapabilityFileRead), string(workspace.ExecutionCapabilityFileWrite), string(workspace.ExecutionCapabilityToolResultRelay)} {
+	for _, want := range []string{string(workspace.ExecutionCapabilityNativeCommand), string(workspace.ExecutionCapabilityFileRead), string(workspace.ExecutionCapabilityFileWrite), string(workspace.ExecutionCapabilityToolResultRelay)} {
 		if !stringSliceContains(hostMode.Capabilities, want) {
 			t.Fatalf("host execution capabilities missing %q: %#v", want, hostMode.Capabilities)
 		}
 	}
-	for _, forbidden := range []string{string(workspace.ExecutionCapabilityNativeCommand), string(workspace.ExecutionCapabilityClaudeCLI)} {
+	for _, forbidden := range []string{string(workspace.ExecutionCapabilityClaudeCLI)} {
 		if stringSliceContains(hostMode.Capabilities, forbidden) {
 			t.Fatalf("host execution capabilities include forbidden %q: %#v", forbidden, hostMode.Capabilities)
 		}
@@ -2129,21 +2129,21 @@ func TestPlatformSpecWorkspaceExecutionTargetCapabilityPromoted(t *testing.T) {
 			t.Fatalf("retired interpreters missing %q: %#v", want, authority.RetiredNonAuthoritativeInterpreters)
 		}
 	}
-	for _, want := range []string{"native command execution", "Host-local tool-result relay writes", "Host-local file operations fail closed", "Empty-container targets", "Docker behavior"} {
+	for _, want := range []string{"explicit host backend selection", "native_tools.bash", "Docker target failures", "Host-local tool-result relay writes", "Host-local file operations fail closed", "Empty-container targets", "Docker behavior"} {
 		if !joinedContains(authority.FailureBehavior, want) {
 			t.Fatalf("failure behavior missing %q: %#v", want, authority.FailureBehavior)
 		}
 	}
-	for _, want := range []string{"host native bash", "Claude CLI", "#1137"} {
+	for _, want := range []string{"Claude CLI", "Docker-equivalent host isolation", "#1137"} {
 		if !joinedContains(authority.SplitScope, want) {
 			t.Fatalf("split scope missing %q: %#v", want, authority.SplitScope)
 		}
 	}
 	command := spec.CLISpecification.CommandCatalog.Serve.WorkspaceExecutionTargetCapability
-	if command.PromotedBy != "#1213/#1235/#1286" || command.Owner != "workspace_model.workspace_execution_target_capability" {
+	if command.PromotedBy != "#1213/#1235/#1286/#1356" || command.Owner != "workspace_model.workspace_execution_target_capability" {
 		t.Fatalf("serve command workspace execution authority = %#v", command)
 	}
-	if !strings.Contains(command.Rule, "tool-result relay through execution-target path authority") {
+	if !strings.Contains(command.Rule, "trusted/unsafe native command execution") || !strings.Contains(command.Rule, "Claude/provider execution remains fail closed") {
 		t.Fatalf("serve command workspace execution rule = %q", command.Rule)
 	}
 	for _, want := range []string{"native executor", "fallback-tool routing", "tool-result relay", "Claude CLI"} {

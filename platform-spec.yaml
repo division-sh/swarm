@@ -3103,10 +3103,10 @@ engine:
     native_tools:
       description: Optional agent contract field. Declares which host-level capabilities the agent may use. Default all false
         (omitted = no native capabilities). The native_tools field is the sole authorization gate — no separate permission
-        entry is required. Native tools are not part of the tools system. They are runtime-level capabilities. On the shipped
-        CLI runtime, `bash`, `web_search`, and `file_io` are provider-native only; the platform does not satisfy native_tools
-        by injecting fallback tools, and visible native-tool surface must equal callable truth. Other runtimes may still use
-        runtime-specific fallback paths outside this CLI-specific rule.
+        entry is required. Native tools are not part of the tools system. They are runtime-level capabilities. Provider-native
+        CLI runtimes may expose native tools only when their provider/runtime can actually call them; platform fallback native
+        tools may be exposed only when the selected workspace execution target supports the matching capability, and visible
+        native-tool surface must equal callable truth on the same turn.
       contract_field:
         field: native_tools
         type: object
@@ -3121,18 +3121,24 @@ engine:
       relationship_to_tool_filtering:
         description: Native tools are NOT part of the tools filtering system. tools controls what the platform
           injects as platform/MCP/HTTP tools. Native tools control runtime-level capabilities. They are separate channels.
-          On CLI, the platform must not inject a platform tool, MCP shim, or local fallback execution path to satisfy a
-          native_tools declaration. The visible native-tool surface for a turn must equal callable truth on that same turn.
+          On provider-native CLI runtimes, the platform must not inject a platform tool, MCP shim, or local fallback execution
+          path to satisfy a native_tools declaration. Platform fallback native tools must consume the same actor authorization
+          plus workspace execution-target capability owner. The visible native-tool surface for a turn must equal callable truth
+          on that same turn.
       capabilities:
         bash:
-          description: Shell command execution. On supporting runtimes, bash runs provider-natively and always executes locally
-            on the platform host, in the agent's workspace directory with workspace mounts active (/workspace read-write, /data
-            read-only, /opt/swarm/contracts read-only).
+          description: Shell command execution. On supporting provider-native runtimes, bash runs provider-natively. On the
+            platform fallback host workspace runtime, bash is trusted/unsafe host-user execution and is available only when the
+            host backend is explicitly selected and the workspace execution target supports native_command. It runs with the
+            agent's workspace backing directory as the process cwd, does not command-filter shell input, and does not provide
+            Docker-equivalent isolation.
           tool_schema:
             input:
               command: string — shell command to execute
               timeout_seconds: integer — optional, default 30
-              working_dir: string — always /workspace for the agent's workspace scope. Not overridable by the agent.
+              working_dir: string — Docker-backed bash uses /workspace as the process cwd. Trusted host fallback bash starts
+                in the workspace backing directory resolved from logical /workspace; that backing path is not overridable by
+                the agent, and absolute paths follow the host deployment namespace and OS permissions.
             output:
               stdout: string
               stderr: string
@@ -3213,7 +3219,10 @@ engine:
         description: All native tool execution is local to the platform host and respects the workspace model.
         rules:
         - All native tool execution runs locally on the platform host. There is no remote execution case.
-        - bash cwd is /workspace for the agent's workspace class scope
+        - bash cwd is /workspace for Docker-backed command execution. Trusted host fallback bash is full host-user shell
+          execution from the resolved workspace backing directory and MUST NOT claim Docker-equivalent absolute mount paths.
+          The runtime does not command-filter host bash input; command and absolute-path access follow the host deployment
+          namespace and OS permissions.
         - file_io is scoped to /workspace (read-write) and /data (read-only). Writes outside /workspace are rejected.
         - On CLI, workspace scoping is guaranteed on the provider-native runtime path. The platform does not satisfy native_tools
           by switching to a separate fallback execution path.
@@ -4177,17 +4186,26 @@ prompt_templating:
       - Always included. Every agent gets workspace context.
       - Does NOT list tools or native capabilities — those are conveyed via tool definitions, not prompt text.
       - Generated at session creation time from the agent's workspace_class. Not editable by the product author.
-    template: "## Environment\n\nWorking directory: /workspace (read-write)\nReference data: /data (read-only)\nContracts:
-      /opt/swarm/contracts (read-only)"
-    normative_content: The three workspace lines (/workspace, /data, /opt/swarm/contracts with their access levels) are
-      required. The exact wording is not normative — the content requirements are. The implementation may rephrase as long as
-      the paths and access levels are communicated.
+    template: |
+      ## Environment
+
+      Workspace: /workspace (read-write logical path)
+      Reference data: /data (read-only logical path)
+      Contracts: /opt/swarm/contracts (read-only logical path)
+      Docker-backed command execution exposes these as OS paths. Trusted host bash is full host-user shell execution from the workspace backing directory; use relative paths for workspace files, and absolute path availability follows the host deployment namespace and OS permissions.
+    normative_content: >
+      The three logical workspace paths (/workspace, /data, /opt/swarm/contracts with their access levels) are required. The
+      postamble MUST distinguish logical platform paths from host native bash process paths: Docker-backed command execution
+      exposes the logical paths as OS mount paths, while trusted host bash is full host-user shell execution from the workspace
+      backing directory, does not synthesize absolute /workspace, /data, or /opt/swarm/contracts OS paths, and must not be
+      described as a reduced or platform-file-only command surface. The exact wording is not normative — the content
+      requirements are.
     native_tools_in_postamble: No. Native tools are NOT described in the postamble. They are conveyed via tool definitions
       in the LLM API call, same as all other tools. The platform must not hide a fallback/native distinction by advertising
       native tools the current turn cannot actually call.
-    note: The workspace paths are the same for all workspace classes — only the /workspace scope differs (per-agent vs
-      per-flow-instance). The postamble does not vary by scope — it tells the agent the paths, the platform enforces the
-      scoping.
+    note: The logical workspace paths are the same for all workspace classes — only the /workspace scope differs (per-agent vs
+      per-flow-instance). The postamble does not vary by scope — it tells the agent the logical paths, the platform enforces
+      scoping, and host native bash must not be represented as Docker-equivalent mount isolation.
 flow_model:
   description: A Flow is the universal building block. Every level of the system is a flow — from the root flow down to the
     smallest sub-flow. A flow can contain child flows. The root flow is what others call "the root flow." There is no separate
@@ -7328,8 +7346,11 @@ workspace_model:
         behavior: >
           Explicit local-dev opt-in. Startup consumes the selected `/data` source from
           `workspace_model.data_source_authority`, the loaded contracts source, and a platform-managed host workspace root.
-          It MUST NOT require Docker, build Docker images, or create containers. It MUST fail closed for unsupported execution
-          surfaces until those host execution semantics are explicitly promoted.
+          It MUST NOT require Docker, build Docker images, or create containers. It supports trusted/unsafe native command
+          execution only through `workspace_execution_target_capability` after explicit host backend selection and actor
+          `native_tools.bash` authorization. Host native command execution is full host-user shell execution and must not be
+          command-filtered by the runtime. It MUST fail closed for unsupported execution surfaces until those host execution
+          semantics are explicitly promoted.
         workspace_root:
           env_var: SWARM_WORKSPACE_HOST_ROOT
           default: ~/.swarm/workspaces
@@ -7344,8 +7365,11 @@ workspace_model:
     - Empty explicit backend sources from the flag, config, or environment fail closed instead of falling through.
     - Host backend MUST reject `SWARM_WORKSPACE_VOLUMES_FROM`; the host backend consumes explicit path authorities, not Docker
       volume inheritance.
-    - Host backend MUST fail closed for Claude CLI and native tool execution unless a later gate promotes safe host execution
-      semantics. Host tool-result relay is supported only through `workspace_execution_target_capability` path authority.
+    - Host backend MUST fail closed for Claude CLI/provider execution. Host native command execution is supported only as
+      trusted/unsafe explicit host-mode execution through `workspace_execution_target_capability`; unsupported native tool
+      execution MUST still fail closed.
+    - Docker target failures, missing containers, nil targets, empty targets, unknown backends, and non-host-authorized
+      contexts MUST NOT silently fall back to host native command execution.
     consumers:
     - swarm serve boot workspace lifecycle
     - dynamic Builder project reload workspace lifecycle
@@ -7353,18 +7377,20 @@ workspace_model:
     split_scope:
     - '#1137 Compose/Postgres onboarding and Compose cleanup'
     - '#1136 broader local onboarding/docs'
-    - full host Claude CLI and native tool execution parity
+    - full host Claude CLI/provider execution parity
     - production SQLite multi-writer semantics
   workspace_execution_target_capability:
-    promoted_by: '#1213/#1235/#1286'
-    implementation_status: implemented_host_file_and_relay_slice
+    promoted_by: '#1213/#1235/#1286/#1356'
+    implementation_status: implemented_host_file_relay_and_trusted_command_slice
     canonical_owner: platform-spec.yaml#workspace_model.workspace_execution_target_capability
     scope: >
       Defines the canonical runtime execution-target and capability authority for workspace-backed execution surfaces after
       workspace backend selection. The owner distinguishes Docker container execution, explicit host-local targets, and
-      unsupported targets. It does not make host execution Docker-equivalent. Host-local targets support platform-managed
-      native file read/write and tool-result relay over logical workspace mounts; host command execution and host
-      Claude/provider runtime support remain unsupported unless a later gate promotes those surfaces.
+      unsupported targets. It does not make host execution Docker-equivalent. Host-local targets support trusted/unsafe
+      native command execution, platform-managed native file read/write, and tool-result relay over logical workspace mounts.
+      Host native command execution is full host-user shell execution from the workspace backing directory; command and
+      absolute-path access follow the host deployment namespace and OS permissions. Host Claude/provider runtime support
+      remains unsupported unless a later gate promotes that surface.
     implementation_owner: internal/runtime/workspace.ExecutionTarget
     target_modes:
       docker_container:
@@ -7381,9 +7407,10 @@ workspace_model:
         rule: >
           A host target is an explicit local-dev backend target with platform-managed raw host backing paths and logical
           mount identities. Host-local targets MUST NOT infer execution support from an empty container field. Host-local
-          targets support file_read, file_write, and tool_result_relay only through the platform-managed workspace execution
-          owner; native_command and claude_cli remain unsupported.
+          targets support trusted/unsafe native_command, file_read, file_write, and tool_result_relay only through the
+          platform-managed workspace execution owner; claude_cli remains unsupported.
         capabilities:
+        - native_command
         - file_read
         - file_write
         - tool_result_relay
@@ -7427,8 +7454,12 @@ workspace_model:
     - nil target or empty target cwd fallback
     - ad hoc HostBackend() checks outside the execution-target owner
     failure_behavior:
-    - Host-local targets remain fail closed for native command execution and Claude/provider execution until a later gate promotes
-      and proves those surfaces.
+    - Host-local native command execution MUST require explicit host backend selection, actor `native_tools.bash`
+      authorization, and execution-target path authority. It is trusted/unsafe host-user execution and MUST NOT be described
+      as Docker-equivalent isolation or as a command-filtered/platform-file-only surface.
+    - Host-local targets remain fail closed for Claude/provider execution until a later gate promotes and proves that surface.
+    - Docker target failures, Docker targets without containers, unsupported targets, and unauthorized actors MUST NOT fall
+      back to host native command execution.
     - Host-local tool-result relay writes MUST use platform-managed host file I/O through the execution-target path owner and
       MUST NOT use native command, shell, or provider execution.
     - Host-local file operations fail closed when the logical path is outside allowed mounts, when a write targets a read-only
@@ -7437,7 +7468,6 @@ workspace_model:
     - Empty-container targets MUST NOT authorize local host execution.
     - Docker behavior must remain regression-proven through the same typed owner.
     split_scope:
-    - host native bash/command execution
     - Claude CLI/provider-native host runtime support
     - Docker-equivalent host isolation claims
     - '#1137 and #1136 docs/onboarding cleanup'
@@ -7486,12 +7516,16 @@ workspace_model:
   mount_guarantees:
     description: Rules the runtime MUST enforce.
     rules:
-    - Every agent session executes with all three standard mounts active. No mount may be missing.
+    - Every agent session has all three standard logical mounts available through platform workspace/file surfaces. Docker-backed
+      command execution exposes those logical mounts as OS paths; trusted host native command execution is full host-user shell
+      execution from the resolved workspace backing directory and does not synthesize absolute OS mount paths.
     - /data is the SAME mount point across all workspace classes. An agent in any class sees identical /data contents.
     - /workspace isolation follows the workspace_scope declared by the agent's workspace class. per-agent workspaces are never
       visible to other agents. per-flow-instance workspaces are visible to all agents in that flow instance only.
-    - Read-only mounts are enforced at the filesystem level (read-only bind mount, or equivalent). Agents cannot write to /data
-      or /opt/swarm/contracts.
+    - Read-only mounts are enforced at the filesystem level for backends that expose the logical mounts as OS paths
+      (read-only bind mount, or equivalent). Platform-managed host file operations enforce read-only /data and
+      /opt/swarm/contracts through logical path authority. Trusted host native commands are full host-user shell execution
+      and do not provide Docker-equivalent read-only mount isolation.
     - The runtime MUST NOT vary mount availability based on conversation_mode, model, or any other agent property. Workspace
       class is the sole determinant of /workspace scope.
   boot_validation:
@@ -7504,7 +7538,8 @@ workspace_model:
     failure: Boot aborts if any workspace mount cannot be satisfied. Error message identifies the failing mount, workspace class,
       and agent.
   deployment_mapping:
-    description: How standard mounts map to deployment environments. Mount paths are invariant — only backing storage changes.
+    description: How standard logical mounts map to deployment environments. Platform logical paths are invariant; command
+      process namespace behavior differs by backend as explicitly documented.
     local_dev:
       /data: Host directory bind-mounted read-only. Same path for all agent processes.
       /workspace: Host directory under a platform-managed root (e.g., ~/.swarm/workspaces/{scope}/{id}).
@@ -9268,13 +9303,13 @@ cli_specification:
         - dynamic Builder project reload workspace lifecycle
         - selected-contract run-fork workspace lifecycle
       workspace_execution_target_capability:
-        promoted_by: '#1213/#1235/#1286'
+        promoted_by: '#1213/#1235/#1286/#1356'
         owner: workspace_model.workspace_execution_target_capability
         rule: >
           `swarm serve` runtime execution surfaces MUST consume the typed workspace execution target/capability owner after
-          backend selection. Host-local targets remain explicit and support platform-managed native file read/write plus
-          tool-result relay through execution-target path authority; native command execution and Claude/provider execution remain fail closed. Docker targets continue
-          through container execution.
+          backend selection. Host-local targets remain explicit and support trusted/unsafe native command execution,
+          platform-managed native file read/write, and tool-result relay through execution-target path authority; Claude/provider
+          execution remains fail closed. Docker targets continue through container execution.
         consumers:
         - native executor command/file path authority
         - native fallback tool-surface truth

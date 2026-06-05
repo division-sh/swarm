@@ -128,6 +128,7 @@ func hostExecutionTarget(workdir string, mounts []ExecutionMount) ExecutionTarge
 		Workdir: LogicalWorkspaceMount,
 		Mounts:  executionMountsOrDefault(mounts),
 		capabilities: capabilitySet(
+			ExecutionCapabilityNativeCommand,
 			ExecutionCapabilityFileRead,
 			ExecutionCapabilityFileWrite,
 			ExecutionCapabilityToolResultRelay,

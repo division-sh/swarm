@@ -215,8 +215,16 @@ source contract.
 
 ## Development
 
-Requirements: Go 1.23. Docker is the default workspace-isolation backend; a
-host backend is available for local-dev work (see [`.env.example`](.env.example)).
+Requirements: Go 1.23. Docker is the default workspace-isolation backend; an
+explicit host backend is available for local-dev or trusted remote work (see
+[`.env.example`](.env.example)). Host backend command execution is
+trusted/unsafe: native `bash` commands run as the host user when both host
+backend selection and `native_tools.bash` authorization are present. Host bash
+is full host-user shell execution from the workspace backing directory; use
+relative paths for workspace files, and absolute paths follow the host
+deployment namespace and OS permissions. It is not command-limited or
+Docker-equivalent isolation, and Claude/provider host execution remains
+unsupported.
 Plain local `swarm run --contracts ...` uses SQLite at `.swarm/dev.db` unless
 you explicitly opt into Postgres with `SWARM_STORE_BACKEND=postgres` or
 `store.backend: postgres`. Build or pull the configured workspace image

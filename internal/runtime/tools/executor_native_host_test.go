@@ -15,17 +15,73 @@ import (
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
-func TestNativeWorkspaceCommandFailsClosedForHostBackend(t *testing.T) {
+func TestNativeWorkspaceCommandRunsInExplicitHostBackendWorkdir(t *testing.T) {
+	workspaceDir := t.TempDir()
+	dataDir := t.TempDir()
+	contractsDir := t.TempDir()
+	exec := &Executor{}
+	stdout, stderr, exitCode, err := exec.runWorkspaceCommand(context.Background(), &workspace.Target{
+		Workdir: workspaceDir,
+		Backend: workspace.BackendHost,
+		Mounts: []workspace.ExecutionMount{
+			{LogicalPath: workspace.LogicalWorkspaceMount, HostPath: workspaceDir, Access: workspace.MountAccessReadWrite},
+			{LogicalPath: workspace.LogicalDataMount, HostPath: dataDir, Access: workspace.MountAccessReadOnly},
+			{LogicalPath: workspace.LogicalContractsMount, HostPath: contractsDir, Access: workspace.MountAccessReadOnly},
+		},
+	}, time.Second, "", "sh", "-lc", "mkdir -p nested && printf host-ok > nested/out.txt && printf done")
+	if err != nil {
+		t.Fatalf("runWorkspaceCommand host error = %v stderr=%s", err, stderr)
+	}
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d stdout=%s stderr=%s, want 0", exitCode, stdout, stderr)
+	}
+	if string(stdout) != "done" {
+		t.Fatalf("stdout = %q, want done", stdout)
+	}
+	data, err := os.ReadFile(filepath.Join(workspaceDir, "nested", "out.txt"))
+	if err != nil {
+		t.Fatalf("read host command output: %v", err)
+	}
+	if string(data) != "host-ok" {
+		t.Fatalf("host command output file = %q, want host-ok", data)
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, "nested", "out.txt")); !os.IsNotExist(err) {
+		t.Fatalf("host command wrote outside workspace dataDir err=%v", err)
+	}
+}
+
+func TestNativeWorkspaceCommandFailsClosedForHostTargetWithoutBackingPath(t *testing.T) {
 	exec := &Executor{}
 	_, _, exitCode, err := exec.runWorkspaceCommand(context.Background(), &workspace.Target{
 		Workdir: t.TempDir(),
 		Backend: workspace.BackendHost,
 	}, time.Second, "", "sh", "-lc", "true")
-	if err == nil || !strings.Contains(err.Error(), "host workspace backend does not support native tool execution yet") {
-		t.Fatalf("runWorkspaceCommand error = %v, want host backend fail-closed error", err)
+	if err == nil || !strings.Contains(err.Error(), "host native command workspace path is unavailable") {
+		t.Fatalf("runWorkspaceCommand error = %v, want host backing path fail-closed error", err)
 	}
 	if exitCode != -1 {
-		t.Fatalf("exit code = %d, want -1 for fail-closed host backend", exitCode)
+		t.Fatalf("exit code = %d, want -1 for fail-closed host backing path", exitCode)
+	}
+}
+
+func TestNativeWorkspaceCommandDoesNotFallbackFromDockerToHost(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "fallback-marker")
+	missingDocker := filepath.Join(t.TempDir(), "missing-docker")
+	t.Setenv("SWARM_DOCKER_BIN", missingDocker)
+	exec := &Executor{}
+	_, _, exitCode, err := exec.runWorkspaceCommand(context.Background(), &workspace.Target{
+		Backend:   workspace.BackendDocker,
+		Container: "swarm-agent",
+		Workdir:   workspace.LogicalWorkspaceMount,
+	}, time.Second, "", "sh", "-lc", "printf fallback > "+shellQuote(marker))
+	if err == nil {
+		t.Fatal("runWorkspaceCommand docker with missing binary succeeded, want fail closed")
+	}
+	if exitCode != -1 {
+		t.Fatalf("exit code = %d, want -1 for missing Docker binary", exitCode)
+	}
+	if _, statErr := os.Stat(marker); !os.IsNotExist(statErr) {
+		t.Fatalf("docker failure fell back to host command; marker stat err=%v", statErr)
 	}
 }
 
@@ -221,10 +277,62 @@ func TestExecutorHostFileToolsUseHostManagerSupportedSurfaceWithoutDocker(t *tes
 	if err == nil || !strings.Contains(err.Error(), "escapes /workspace") {
 		t.Fatalf("Execute read_file symlink error = %v, want escape rejection", err)
 	}
+}
 
-	_, err = exec.Execute(actorCtx, "bash", map[string]any{"command": "true"})
-	if err == nil || !strings.Contains(err.Error(), "host workspace backend does not support native tool execution yet") {
-		t.Fatalf("Execute bash error = %v, want host native command fail-closed", err)
+func TestExecutorHostNativeBashUsesExplicitHostManagerTarget(t *testing.T) {
+	ctx := context.Background()
+	workspaceRoot := filepath.Join(t.TempDir(), "host-workspaces")
+	dataDir := t.TempDir()
+	contractsDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("contracts content"), 0o644); err != nil {
+		t.Fatalf("write contracts package: %v", err)
+	}
+
+	manager := workspace.NewHostManager(nil)
+	manager.SetConfig(workspace.HostConfig{
+		WorkspaceRoot:       workspaceRoot,
+		SharedDataSource:    dataDir,
+		DataMountPoint:      workspace.LogicalDataMount,
+		ContractsSource:     contractsDir,
+		ContractsMountPoint: workspace.LogicalContractsMount,
+	})
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
+	if err := manager.ValidateSource(ctx, source); err != nil {
+		t.Fatalf("ValidateSource: %v", err)
+	}
+	if err := manager.EnsurePrereqs(ctx); err != nil {
+		t.Fatalf("EnsurePrereqs: %v", err)
+	}
+
+	actor := models.AgentConfig{
+		ID:          "host-bash-agent",
+		NativeTools: models.NativeToolConfig{Bash: true},
+	}
+	target, err := manager.ResolveWorkspace(ctx, actor)
+	if err != nil {
+		t.Fatalf("ResolveWorkspace: %v", err)
+	}
+	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkspaceResolver: manager})
+	actorCtx := models.WithActor(ctx, actor)
+
+	out, err := exec.Execute(actorCtx, "bash", map[string]any{
+		"command": "mkdir -p cmd && printf host-bash > cmd/out.txt && printf ok",
+	})
+	if err != nil {
+		t.Fatalf("Execute bash host: %v", err)
+	}
+	result := out.(map[string]any)
+	if got := result["stdout"]; got != "ok" {
+		t.Fatalf("host bash stdout = %#v, want ok", got)
+	}
+	if got := result["exit_code"]; got != 0 {
+		t.Fatalf("host bash exit_code = %#v, want 0", got)
+	}
+	if data, err := os.ReadFile(filepath.Join(target.Workdir, "cmd", "out.txt")); err != nil || string(data) != "host-bash" {
+		t.Fatalf("host bash workspace file = %q err=%v", data, err)
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, "cmd", "out.txt")); !os.IsNotExist(err) {
+		t.Fatalf("host bash wrote outside workspace dataDir err=%v", err)
 	}
 }
 
@@ -309,33 +417,48 @@ func TestNativeFallbackToolSurfaceConsumesWorkspaceExecutionTarget(t *testing.T)
 	}
 
 	defs := exec.ToolDefinitionsForActorInContext(context.Background(), actor)
-	for _, denied := range []string{"bash"} {
-		if containsToolDefinition(defs, denied) {
-			t.Fatalf("context definitions contain %q for host backend: %#v", denied, defs)
-		}
-	}
-	for _, allowed := range []string{"read_file", "write_file", "web_search"} {
+	for _, allowed := range []string{"bash", "read_file", "write_file", "web_search"} {
 		if !containsToolDefinition(defs, allowed) {
 			t.Fatalf("context definitions missing %q: %#v", allowed, defs)
 		}
 	}
 
 	caps := exec.ToolCapabilitiesForActorInContext(context.Background(), actor, []string{"bash", "read_file", "write_file", "web_search"}, nil)
-	for _, denied := range []string{"bash"} {
-		cap := caps.ByName[denied]
-		if cap.Visible || cap.Callable || !strings.Contains(cap.DenialReason, "host workspace backend does not support native tool execution yet") {
-			t.Fatalf("capability %s = %#v, want host workspace execution denial", denied, cap)
-		}
-	}
-	for _, allowed := range []string{"read_file", "write_file"} {
+	for _, allowed := range []string{"bash", "read_file", "write_file"} {
 		cap := caps.ByName[allowed]
 		if !cap.Visible || !cap.Callable || cap.DenialReason != "" {
-			t.Fatalf("capability %s = %#v, want visible/callable host file operation", allowed, cap)
+			t.Fatalf("capability %s = %#v, want visible/callable host native operation", allowed, cap)
 		}
 	}
 	web := caps.ByName["web_search"]
 	if !web.Visible || !web.Callable {
 		t.Fatalf("web_search capability = %#v, want visible/callable", web)
+	}
+}
+
+func TestNativeWorkspaceCommandRequiresActorBashAuthorization(t *testing.T) {
+	workspaceDir := t.TempDir()
+	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+		WorkspaceResolver: relayWorkspaceResolverStub{
+			target: &workspace.Target{
+				Backend: workspace.BackendHost,
+				Workdir: workspaceDir,
+				Mounts: []workspace.ExecutionMount{
+					{LogicalPath: workspace.LogicalWorkspaceMount, HostPath: workspaceDir, Access: workspace.MountAccessReadWrite},
+				},
+			},
+		},
+	})
+	actorCtx := models.WithActor(context.Background(), models.AgentConfig{
+		ID:          "host-no-bash",
+		NativeTools: models.NativeToolConfig{FileIO: true},
+	})
+	_, err := exec.Execute(actorCtx, "bash", map[string]any{"command": "printf should-not-run > denied.txt"})
+	if err == nil || !strings.Contains(err.Error(), "not allowed") {
+		t.Fatalf("Execute bash without native_tools.bash error = %v, want authorization denial", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(workspaceDir, "denied.txt")); !os.IsNotExist(statErr) {
+		t.Fatalf("unauthorized host bash created file; stat err=%v", statErr)
 	}
 }
 
@@ -346,4 +469,8 @@ func containsToolDefinition(defs []llm.ToolDefinition, name string) bool {
 		}
 	}
 	return false
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }
