@@ -788,6 +788,113 @@ func TestEventBusPublish_NoTargetScopedRoutedNodePersistsSemanticRouteBeforeInte
 	}
 }
 
+func TestEventBusPublish_WildcardStaticServiceNodePersistsRouteBeforeInternalCarrier(t *testing.T) {
+	const (
+		pattern   = "component-scaffold/*/opco.repo_scaffold_requested"
+		eventType = "component-scaffold/component-a/opco.repo_scaffold_requested"
+	)
+	rt := newRouteTable(nil)
+	rt.eventPath[eventType] = struct{}{}
+	rt.patterns = []routePattern{
+		{
+			EventPattern: eventType,
+			Subscriber: Subscriber{
+				ID:          "component-node",
+				Type:        "node",
+				Path:        "component-scaffold/component-a",
+				RouteSource: "subscription",
+			},
+		},
+		{
+			EventPattern: pattern,
+			Subscriber: Subscriber{
+				ID:          "repo-scaffold-node",
+				Type:        "node",
+				Path:        "repo-scaffold",
+				RouteSource: "subscription",
+			},
+		},
+	}
+	rt.rebuildLocked()
+
+	store := newTargetRouteMemoryStore()
+	eventID := uuid.NewString()
+	wildcardServiceRoute := events.DeliveryRoute{
+		SubscriberType: "node",
+		SubscriberID:   "repo-scaffold-node",
+		Target: events.RouteIdentity{
+			FlowInstance: "repo-scaffold",
+			EntityID:     "ent-component",
+		},
+	}
+	concreteComponentRoute := events.DeliveryRoute{
+		SubscriberType: "node",
+		SubscriberID:   "component-node",
+		Target: events.RouteIdentity{
+			FlowInstance: "component-scaffold/component-a",
+			EntityID:     "ent-component",
+		},
+	}
+	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+		RouteTable: rt,
+		Interceptors: []EventInterceptor{materializedRoutePersistedBeforeInterceptor{
+			t:       t,
+			store:   store,
+			eventID: eventID,
+			want:    wildcardServiceRoute,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	ch := eb.SubscribeInternal("workflow-runtime", events.EventType(eventType))
+	defer eb.Unsubscribe("workflow-runtime")
+	evt := (events.Event{
+		ID:        eventID,
+		Type:      events.EventType(eventType),
+		Payload:   []byte(`{}`),
+		CreatedAt: time.Now().UTC(),
+	}).WithEntityID("ent-component").WithFlowInstance("component-scaffold/component-a")
+
+	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("CheckPublishRecipientPlan: %v", err)
+	}
+	if got := plan.Recipients; len(got) != 1 || got[0] != "workflow-runtime" {
+		t.Fatalf("recipients = %#v, want workflow-runtime live carrier", got)
+	}
+	if len(plan.PersistedRecipients) != 0 {
+		t.Fatalf("persisted recipients = %#v, want none for internal carrier", plan.PersistedRecipients)
+	}
+	if len(plan.RoutedRecipients) != 2 {
+		t.Fatalf("routed recipients = %#v, want component node and repo-scaffold wildcard match", plan.RoutedRecipients)
+	}
+	sawWildcardService := false
+	for _, recipient := range plan.RoutedRecipients {
+		if recipient.ID == "repo-scaffold-node" && recipient.Path == "repo-scaffold" && recipient.MatchedPattern == pattern {
+			sawWildcardService = true
+		}
+	}
+	if !sawWildcardService {
+		t.Fatalf("routed recipients = %#v, want repo-scaffold wildcard match", plan.RoutedRecipients)
+	}
+	if got := plan.DeliveryRoutes; len(got) != 2 || !deliveryRoutesContain(got, wildcardServiceRoute) || !deliveryRoutesContain(got, concreteComponentRoute) {
+		t.Fatalf("delivery routes = %#v, want wildcard service route %#v and concrete route %#v", got, wildcardServiceRoute, concreteComponentRoute)
+	}
+
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	got := requireBusEvent(t, ch, "wildcard static-service workflow-runtime carrier delivery")
+	if got.Type != events.EventType(eventType) || got.FlowInstance() != "component-scaffold/component-a" {
+		t.Fatalf("delivered event type=%q flow=%q, want concrete component event", got.Type, got.FlowInstance())
+	}
+	routes := store.routes[evt.ID]
+	if len(routes) != 2 || !deliveryRoutesContain(routes, wildcardServiceRoute) || !deliveryRoutesContain(routes, concreteComponentRoute) {
+		t.Fatalf("persisted delivery routes = %#v, want wildcard service route %#v and concrete route %#v", routes, wildcardServiceRoute, concreteComponentRoute)
+	}
+}
+
 func TestRouteTableRootInputFlowNodeResolvesRootInputRoute(t *testing.T) {
 	rt, err := DeriveRouteTable(semanticview.Wrap(routedRootInputFlowNodeBundle()))
 	if err != nil {

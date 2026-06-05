@@ -107,13 +107,13 @@ func TestRouteAuthorityMatrixRejectsStaleReferences(t *testing.T) {
 		{
 			name: "split sibling cannot be reclassified as covered",
 			mutate: func(matrix *routeAuthorityMatrix) {
-				row := routeAuthorityMatrixRowByID(t, matrix, "wildcard_static_service_route_production")
+				row := routeAuthorityMatrixRowByID(t, matrix, "runtime_callback_flow_instance_localization")
 				row.Classification = "already_covered_by_existing_proof"
 				row.Tier = "required_pr_smoke"
 				row.SplitIssue = 0
 				row.ProofDimensions = []string{"persistence_authority"}
 			},
-			want: "wildcard_static_service_route_production must remain split-open issue #1299",
+			want: "runtime_callback_flow_instance_localization must remain split-open issue #1301",
 		},
 		{
 			name: "parent closure stays false",
@@ -213,7 +213,7 @@ func validateRouteAuthorityMatrix(root string, matrix routeAuthorityMatrix, ctx 
 		}
 		activeTrackers[key] = struct{}{}
 	}
-	for _, issue := range []int{1340, 1299, 1301} {
+	for _, issue := range []int{1340, 1301} {
 		key := routeAuthorityTrackerKey(issue, "runtime_operations.delivery_and_replay_ownership")
 		if _, ok := activeTrackers[key]; !ok {
 			problems = append(problems, fmt.Sprintf("active_trackers missing #%d runtime_operations.delivery_and_replay_ownership", issue))
@@ -475,7 +475,6 @@ func requiredRouteAuthorityRows() []string {
 
 func requiredRouteAuthoritySplitRows() map[string]int {
 	return map[string]int{
-		"wildcard_static_service_route_production":    1299,
 		"runtime_callback_flow_instance_localization": 1301,
 	}
 }
