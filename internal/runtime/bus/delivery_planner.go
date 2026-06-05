@@ -406,11 +406,18 @@ func routedNodeDeliveryIntentsForNoTargetEvent(evt events.Event, routed []Subscr
 	if len(routed) == 0 || len(eventDeliveryTargetRoutes(evt)) > 0 {
 		return nil
 	}
+	var intents []RoutePlanDeliveryIntent
 	if routes := routedConcreteNoTargetNodeDeliveryRoutes(evt, routed); len(routes) > 0 {
-		return routePlanDeliveryIntentsFromRoutes(routes, routePlanSourceConcreteNodeRoute, routePlanReasonRouteTableNode)
+		intents = append(intents, routePlanDeliveryIntentsFromRoutes(routes, routePlanSourceConcreteNodeRoute, routePlanReasonRouteTableNode)...)
 	}
 	if routes := routedScopedNoTargetNodeDeliveryRoutes(evt, routed); len(routes) > 0 {
-		return routePlanDeliveryIntentsFromRoutes(routes, routePlanSourceScopedNodeRoute, routePlanReasonRouteTableNode)
+		intents = append(intents, routePlanDeliveryIntentsFromRoutes(routes, routePlanSourceScopedNodeRoute, routePlanReasonRouteTableNode)...)
+	}
+	if routes := routedWildcardStaticServiceNoTargetNodeDeliveryRoutes(evt, routed); len(routes) > 0 {
+		intents = append(intents, routePlanDeliveryIntentsFromRoutes(routes, routePlanSourceScopedNodeRoute, routePlanReasonRouteTableNode)...)
+	}
+	if len(intents) > 0 {
+		return intents
 	}
 	internalRecipients := filterOutAgentIDs(recipients, persisted)
 	if len(internalRecipients) == 0 {
@@ -501,6 +508,44 @@ func routedScopedNoTargetNodeDeliveryRoutes(evt events.Event, routed []Subscribe
 			SubscriberID:   strings.TrimSpace(subscriber.ID),
 			Target: events.RouteIdentity{
 				FlowInstance: targetFlowInstance,
+				EntityID:     eventEntityID,
+			},
+		})
+	}
+	return events.NormalizeDeliveryRoutes(out)
+}
+
+func routedWildcardStaticServiceNoTargetNodeDeliveryRoutes(evt events.Event, routed []Subscriber) []events.DeliveryRoute {
+	if len(routed) == 0 || len(eventDeliveryTargetRoutes(evt)) > 0 {
+		return nil
+	}
+	eventType := strings.Trim(strings.TrimSpace(string(evt.Type)), "/")
+	if eventType == "" {
+		return nil
+	}
+	eventEntityID := strings.TrimSpace(evt.EntityID())
+	out := make([]events.DeliveryRoute, 0, len(routed))
+	for _, subscriber := range routed {
+		id := strings.TrimSpace(subscriber.ID)
+		if id == "" || strings.TrimSpace(subscriber.Type) != "node" {
+			continue
+		}
+		path := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
+		if path == "" {
+			continue
+		}
+		matchPattern := strings.Trim(strings.TrimSpace(subscriber.MatchPattern), "/")
+		if matchPattern == "" || !strings.Contains(matchPattern, "*") || !RouteMatches(matchPattern, eventType) {
+			continue
+		}
+		if routedNodeMatchesConcreteEventTypeFlowInstance(evt, subscriber) {
+			continue
+		}
+		out = append(out, events.DeliveryRoute{
+			SubscriberType: "node",
+			SubscriberID:   id,
+			Target: events.RouteIdentity{
+				FlowInstance: path,
 				EntityID:     eventEntityID,
 			},
 		})

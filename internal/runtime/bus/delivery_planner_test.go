@@ -750,6 +750,66 @@ func TestDeliveryPlanner_NoTargetCrossFlowStaticRoutedNodeUsesSubscriberScope(t 
 	}
 }
 
+func TestDeliveryPlanner_NoTargetWildcardStaticServiceRoutedNodeUsesSubscriberScope(t *testing.T) {
+	planner := newDeliveryPlanner(
+		deliveryRouteResolver{
+			resolveRoutedSubscribers: func(events.Event) []Subscriber {
+				return []Subscriber{{
+					ID:           "repo-scaffold-node",
+					Type:         "node",
+					Path:         "repo-scaffold",
+					MatchPattern: "component-scaffold/*/opco.repo_scaffold_requested",
+					RouteSource:  "subscription",
+				}}
+			},
+			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
+				return nil
+			},
+			resolveRoutedNodeInternalRecipients: func(events.Event, []Subscriber) []deliveryRecipientCandidate {
+				return []deliveryRecipientCandidate{{ID: "workflow-runtime", PersistAsDelivery: false}}
+			},
+			describeSubscribersForEvent: func(string, []Subscriber) []PublishDiagnosticRecipient {
+				return nil
+			},
+		},
+		deliveryRecipientPolicy{
+			loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
+				return map[string]ActiveAgentDescriptor{}, true, nil
+			},
+		},
+	)
+
+	plan, err := planner.Plan(context.Background(), (events.Event{
+		Type: "component-scaffold/component-a/opco.repo_scaffold_requested",
+	}).WithEntityID("ent-component").WithFlowInstance("component-scaffold/component-a"))
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if got := plan.Recipients; len(got) != 1 || got[0] != "workflow-runtime" {
+		t.Fatalf("recipients = %#v, want workflow-runtime live carrier", got)
+	}
+	if len(plan.PersistedRecipients) != 0 {
+		t.Fatalf("persisted recipients = %#v, want none for internal carrier", plan.PersistedRecipients)
+	}
+	if got := plan.DeliveryRoutes; len(got) != 1 {
+		t.Fatalf("delivery routes = %#v, want repo-scaffold-node wildcard static-service node route", got)
+	}
+	route := plan.DeliveryRoutes[0]
+	if route.SubscriberType != "node" || route.SubscriberID != "repo-scaffold-node" {
+		t.Fatalf("delivery route = %#v, want node/repo-scaffold-node", route)
+	}
+	if route.Target.FlowInstance != "repo-scaffold" || route.Target.EntityID != "ent-component" {
+		t.Fatalf("delivery target = %#v, want repo-scaffold ent-component", route.Target)
+	}
+	if got, want := len(plan.RoutePlan.DeliveryIntents), 1; got != want {
+		t.Fatalf("route plan delivery intents = %d, want %d", got, want)
+	}
+	intent := plan.RoutePlan.DeliveryIntents[0]
+	if intent.Source != routePlanSourceScopedNodeRoute || intent.Reason != routePlanReasonRouteTableNode {
+		t.Fatalf("route plan delivery intent = %#v, want scoped route-table node source", intent)
+	}
+}
+
 func TestDeliveryPlanner_NoTargetDescendantScopedRoutedNodeUsesParentInstanceRoute(t *testing.T) {
 	planner := newDeliveryPlanner(
 		deliveryRouteResolver{

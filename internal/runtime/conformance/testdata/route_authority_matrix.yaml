@@ -24,9 +24,6 @@ active_trackers:
     issue: 1340
     watchlist: runtime_operations.delivery_and_replay_ownership
   - kind: github_issue
-    issue: 1299
-    watchlist: runtime_operations.delivery_and_replay_ownership
-  - kind: github_issue
     issue: 1301
     watchlist: runtime_operations.delivery_and_replay_ownership
 rows:
@@ -226,19 +223,37 @@ rows:
       remain invalid authority.
 
   - id: wildcard_static_service_route_production
-    concept: Wildcard static-service route production is a route-production sibling, not a matrix behavior change.
-    classification: split_to_existing_issue
-    tier: split_open
-    split_issue: 1299
-    proof_dimensions: [route_plan_model, split_tracker]
+    concept: Wildcard static-service route-table matches for concrete child-flow events persist typed workflow-node authority for the static service subscriber.
+    classification: already_covered_by_existing_proof
+    tier: required_pr_smoke
+    proof_dimensions: [route_plan_model, persistence_authority, negative_authority, required_pr_smoke]
+    invalid_authority:
+      - hardcoded Empire diagnostic route
+      - workflow-runtime carrier route
+      - live internal carrier subscription
+      - handler lookup
+      - event_receipts settlement/backfill
+      - replay-scope markers
+      - API/CLI readback
     owner_refs:
       - {kind: spec_ref, path: platform-spec.yaml, ref: wildcard_routes}
+      - {kind: spec_ref, path: platform-spec.yaml, ref: workflow_node_route_authority}
+      - {kind: spec_ref, path: platform-spec.yaml, ref: route_plan_authority}
+      - {kind: artifact, path: internal/runtime/bus/delivery_planner.go}
       - {kind: artifact, path: internal/runtime/bus/routing_derivation_internal_test.go}
+      - {kind: artifact, path: internal/runtime/bus/eventbus_target_routes_test.go}
     proof_refs:
-      - {kind: tracker, issue: 1299, watchlist: runtime_operations.delivery_and_replay_ownership}
+      - {kind: issue, issue: 1299}
+      - {kind: go_test, name: TestRouteTableResolve_WildcardSubscriberMatchesActiveConcreteChildEventWithoutMaterializedKey}
+      - {kind: go_test, name: TestDeliveryPlanner_NoTargetWildcardStaticServiceRoutedNodeUsesSubscriberScope}
+      - {kind: go_test, name: TestEventBusPublish_WildcardStaticServiceNodePersistsRouteBeforeInternalCarrier}
     notes: >
-      #1299 owns concrete wildcard static-service route production. #1346
-      classifies it only.
+      #1299 owns concrete wildcard static-service route production, for example
+      component-scaffold/*/opco.repo_scaffold_requested matching
+      component-scaffold/<id>/opco.repo_scaffold_requested and persisting the
+      static service node delivery row. RouteTable remains the wildcard matcher;
+      RoutePlan owns typed delivery materialization; live carriers, receipts,
+      replay markers, and readback are not authority.
 
   - id: runtime_callback_flow_instance_localization
     concept: Runtime callback flow_instance localization is a route-production sibling, not a matrix behavior change.
