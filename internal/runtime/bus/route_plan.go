@@ -148,6 +148,46 @@ func (p RoutePlan) DeliveryRoutes() []events.DeliveryRoute {
 	return events.NormalizeDeliveryRoutes(out)
 }
 
+func (p RoutePlan) HasPersistentDeliveries() bool {
+	return len(p.PersistedRecipientIDs()) > 0 || len(p.DeliveryRoutes()) > 0
+}
+
+func (p RoutePlan) InternalDeliveryRoutes() []events.DeliveryRoute {
+	p = p.Normalized()
+	internalRecipients := make([]string, 0, len(p.LiveRecipients))
+	for _, recipient := range p.LiveRecipients {
+		if recipient.PersistAsDelivery {
+			continue
+		}
+		internalRecipients = append(internalRecipients, recipient.RecipientID)
+	}
+	internalRecipients = uniqueStrings(internalRecipients)
+	if len(internalRecipients) == 0 {
+		return nil
+	}
+	known := p.DeliveryRoutes()
+	out := make([]events.DeliveryRoute, 0, len(known))
+	internalSet := make(map[string]struct{}, len(internalRecipients))
+	for _, recipient := range internalRecipients {
+		internalSet[strings.TrimSpace(recipient)] = struct{}{}
+	}
+	for _, route := range known {
+		if _, ok := internalSet[strings.TrimSpace(route.SubscriberID)]; !ok {
+			continue
+		}
+		out = append(out, route)
+	}
+	if len(out) == 0 {
+		for _, recipient := range internalRecipients {
+			out = append(out, events.DeliveryRoute{
+				SubscriberType: "node",
+				SubscriberID:   recipient,
+			})
+		}
+	}
+	return events.NormalizeDeliveryRoutes(out)
+}
+
 func (p RoutePlan) EventDeliveryPlan() eventDeliveryPlan {
 	p = p.Normalized()
 	return eventDeliveryPlan{

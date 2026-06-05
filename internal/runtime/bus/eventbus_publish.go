@@ -233,7 +233,7 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 		return err
 	} else if reason != "" {
 		queued = true
-		eb.logDispatchQueued(ictx, reason, evt, len(plan.Recipients), false, false)
+		eb.logDispatchQueued(ictx, reason, evt, len(plan.RecipientIDs()), false, false)
 		eb.logPublished(ictx, evt, int(time.Since(start)/time.Microsecond))
 		return eb.convergeStandaloneRuntimePlatformRun(ictx, evt)
 	}
@@ -302,23 +302,12 @@ func (eb *EventBus) PublishTx(ctx context.Context, tx *sql.Tx, evt events.Event)
 	if err := txStore.AppendEventTx(txctx, tx, evt); err != nil {
 		return fmt.Errorf("persist event: %w", err)
 	}
-	if err := eb.authorizePublishRecipientPlanning(txctx, evt); err != nil {
-		return err
-	}
-	inboundPlan, err := eb.deliveryPlanner.Plan(txctx, evt)
+	inboundPlan, err := eb.planSubscribedRoutePlan(txctx, evt, true)
 	if err != nil {
 		return err
 	}
-	inboundPlan, err = eb.materializePublishRecipientPlan(txctx, evt, inboundPlan)
-	if err != nil {
-		return err
-	}
-	if err := eb.authorizePublishRecipientPlan(txctx, evt, inboundPlan); err != nil {
-		return err
-	}
-	eb.recordPublishDiagnostic(txctx, evt, inboundPlan)
-	if len(inboundPlan.PersistedRecipients) > 0 || len(inboundPlan.DeliveryRoutes) > 0 {
-		if err := eb.insertEventDeliveriesTx(txctx, txStore, tx, evt.ID, inboundPlan.PersistedRecipients, inboundPlan.DeliveryTargets, inboundPlan.DeliveryRoutes); err != nil {
+	if inboundPlan.HasPersistentDeliveries() {
+		if err := eb.insertEventDeliveriesTx(txctx, txStore, tx, evt.ID, inboundPlan.PersistedRecipientIDs(), inboundPlan.DeliveryTargets(), inboundPlan.DeliveryRoutes()); err != nil {
 			return fmt.Errorf("persist event deliveries: %w", err)
 		}
 	}
@@ -339,7 +328,7 @@ func (eb *EventBus) PublishTx(ctx context.Context, tx *sql.Tx, evt events.Event)
 	if reason, err := eb.dispatchQueueReason(txctx, evt); err != nil {
 		return err
 	} else if reason != "" {
-		eb.logDispatchQueued(txctx, reason, evt, len(inboundPlan.Recipients), false, true)
+		eb.logDispatchQueued(txctx, reason, evt, len(inboundPlan.RecipientIDs()), false, true)
 		return nil
 	}
 	if !runtimepipeline.QueuePipelinePostCommitAction(txctx, func() {
@@ -350,7 +339,8 @@ func (eb *EventBus) PublishTx(ctx context.Context, tx *sql.Tx, evt events.Event)
 	return nil
 }
 
-func (eb *EventBus) completePublishTxDispatch(ctx context.Context, evt events.Event, inboundPlan eventDeliveryPlan) {
+func (eb *EventBus) completePublishTxDispatch(ctx context.Context, evt events.Event, inboundPlan RoutePlan) {
+	inboundPlan = inboundPlan.Normalized()
 	deferredTransitions := make([]runtimepipeline.DeferredPipelineTransition, 0, 8)
 	postCommitActions := make([]func(), 0, 8)
 	afterPublishActions := make([]func(), 0, 4)
@@ -370,13 +360,14 @@ func (eb *EventBus) completePublishTxDispatch(ctx context.Context, evt events.Ev
 	runtimepipeline.FlushDeferredPipelineTransitions(ctx, deferredTransitions)
 
 	if passthrough {
-		if len(inboundPlan.Recipients) > 0 {
-			eb.logQueuedDeliveries(ctx, evt, inboundPlan.PersistedRecipients, "matched_agent_subscription", inboundPlan.ExtraDetail)
-			if err := eb.deliverToRecipientsWithRoutes(ctx, evt, inboundPlan.Recipients, inboundPlan.DeliveryRoutes); err != nil {
+		recipients := inboundPlan.RecipientIDs()
+		if len(recipients) > 0 {
+			eb.logQueuedDeliveries(ctx, evt, inboundPlan.PersistedRecipientIDs(), "matched_agent_subscription", inboundPlan.ExtraDetail)
+			if err := eb.deliverToRecipientsWithRoutes(ctx, evt, recipients, inboundPlan.DeliveryRoutes()); err != nil {
 				eb.recordCommittedPublishReceipt(ctx, evt, err)
 				return
 			}
-			eb.logDelivery(ctx, evt, inboundPlan.Recipients, inboundPlan.ExtraDetail)
+			eb.logDelivery(ctx, evt, recipients, inboundPlan.ExtraDetail)
 		}
 		if inboundPlan.BlockedByCycle && inboundPlan.CycleEscalation != nil {
 			if err := eb.publishDeferred(ctx, *inboundPlan.CycleEscalation); err != nil {
@@ -480,23 +471,12 @@ func (eb *EventBus) publishTransactional(
 		return fmt.Errorf("persist event: %w", err)
 	}
 
-	if err := eb.authorizePublishRecipientPlanning(txctx, evt); err != nil {
-		return err
-	}
-	inboundPlan, err := eb.deliveryPlanner.Plan(txctx, evt)
+	inboundPlan, err := eb.planSubscribedRoutePlan(txctx, evt, true)
 	if err != nil {
 		return err
 	}
-	inboundPlan, err = eb.materializePublishRecipientPlan(txctx, evt, inboundPlan)
-	if err != nil {
-		return err
-	}
-	if err := eb.authorizePublishRecipientPlan(txctx, evt, inboundPlan); err != nil {
-		return err
-	}
-	eb.recordPublishDiagnostic(txctx, evt, inboundPlan)
-	if len(inboundPlan.PersistedRecipients) > 0 || len(inboundPlan.DeliveryRoutes) > 0 {
-		if err := eb.insertEventDeliveriesTx(txctx, txStore, tx, evt.ID, inboundPlan.PersistedRecipients, inboundPlan.DeliveryTargets, inboundPlan.DeliveryRoutes); err != nil {
+	if inboundPlan.HasPersistentDeliveries() {
+		if err := eb.insertEventDeliveriesTx(txctx, txStore, tx, evt.ID, inboundPlan.PersistedRecipientIDs(), inboundPlan.DeliveryTargets(), inboundPlan.DeliveryRoutes()); err != nil {
 			return fmt.Errorf("persist event deliveries: %w", err)
 		}
 	}
@@ -530,7 +510,7 @@ func (eb *EventBus) publishTransactional(
 			return fmt.Errorf("commit publish tx: %w", err)
 		}
 		committed = true
-		eb.logDispatchQueued(ctx, reason, evt, len(inboundPlan.Recipients), false, false)
+		eb.logDispatchQueued(ctx, reason, evt, len(inboundPlan.RecipientIDs()), false, false)
 		eb.logPublished(ctx, evt, int(time.Since(start)/time.Microsecond))
 		return nil
 	}
@@ -556,13 +536,14 @@ func (eb *EventBus) publishTransactional(
 	}
 
 	if passthrough {
-		if len(inboundPlan.Recipients) > 0 {
-			eb.logQueuedDeliveries(dispatchCtx, evt, inboundPlan.PersistedRecipients, "matched_agent_subscription", inboundPlan.ExtraDetail)
-			if err := eb.deliverToRecipientsWithRoutes(dispatchCtx, evt, inboundPlan.Recipients, inboundPlan.DeliveryRoutes); err != nil {
+		recipients := inboundPlan.RecipientIDs()
+		if len(recipients) > 0 {
+			eb.logQueuedDeliveries(dispatchCtx, evt, inboundPlan.PersistedRecipientIDs(), "matched_agent_subscription", inboundPlan.ExtraDetail)
+			if err := eb.deliverToRecipientsWithRoutes(dispatchCtx, evt, recipients, inboundPlan.DeliveryRoutes()); err != nil {
 				eb.recordCommittedPublishReceipt(dispatchCtx, evt, err)
 				return nil
 			}
-			eb.logDelivery(dispatchCtx, evt, inboundPlan.Recipients, inboundPlan.ExtraDetail)
+			eb.logDelivery(dispatchCtx, evt, recipients, inboundPlan.ExtraDetail)
 		}
 		if inboundPlan.BlockedByCycle && inboundPlan.CycleEscalation != nil {
 			if err := eb.publishDeferred(dispatchCtx, *inboundPlan.CycleEscalation); err != nil {
@@ -704,7 +685,7 @@ func (eb *EventBus) publishDeferred(ctx context.Context, evt events.Event) (err 
 		return err
 	} else if reason != "" {
 		queued = true
-		eb.logDispatchQueued(ctx, reason, evt, len(plan.Recipients), false, false)
+		eb.logDispatchQueued(ctx, reason, evt, len(plan.RecipientIDs()), false, false)
 		eb.logPublished(ctx, evt, 0)
 		return nil
 	}
@@ -747,23 +728,30 @@ func (eb *EventBus) publishSubscribedNonTransactional(ctx context.Context, evt e
 	return eb.deliverSubscribedPublishPlan(ctx, evt, plan)
 }
 
-func (eb *EventBus) planSubscribedPublish(ctx context.Context, evt events.Event) (eventDeliveryPlan, error) {
+func (eb *EventBus) planSubscribedPublish(ctx context.Context, evt events.Event) (RoutePlan, error) {
+	return eb.planSubscribedRoutePlan(ctx, evt, true)
+}
+
+func (eb *EventBus) planSubscribedRoutePlan(ctx context.Context, evt events.Event, recordDiagnostic bool) (RoutePlan, error) {
 	if err := eb.authorizePublishRecipientPlanning(ctx, evt); err != nil {
-		return eventDeliveryPlan{}, err
+		return RoutePlan{}, err
 	}
 	plan, err := eb.deliveryPlanner.Plan(ctx, evt)
 	if err != nil {
-		return eventDeliveryPlan{}, err
+		return RoutePlan{}, err
 	}
 	plan, err = eb.materializePublishRecipientPlan(ctx, evt, plan)
 	if err != nil {
-		return eventDeliveryPlan{}, err
+		return RoutePlan{}, err
 	}
 	if err := eb.authorizePublishRecipientPlan(ctx, evt, plan); err != nil {
-		return eventDeliveryPlan{}, err
+		return RoutePlan{}, err
 	}
-	eb.recordPublishDiagnostic(ctx, evt, plan)
-	return plan, nil
+	routePlan := plan.CanonicalRoutePlan()
+	if recordDiagnostic {
+		eb.recordPublishDiagnostic(ctx, evt, routePlan)
+	}
+	return routePlan, nil
 }
 
 func (eb *EventBus) authorizePublishRecipientPlanning(ctx context.Context, evt events.Event) error {
@@ -777,7 +765,7 @@ func (eb *EventBus) materializePublishRecipientPlan(ctx context.Context, evt eve
 	if eb == nil || eb.recipientPlanMaterializer == nil {
 		return plan, nil
 	}
-	routes, err := eb.recipientPlanMaterializer(ctx, evt, eb.publishRecipientPlan(evt, plan))
+	routes, err := eb.recipientPlanMaterializer(ctx, evt, eb.publishRecipientPlan(evt, plan.CanonicalRoutePlan()))
 	if err != nil {
 		return eventDeliveryPlan{}, err
 	}
@@ -793,11 +781,11 @@ func (eb *EventBus) authorizePublishRecipientPlan(ctx context.Context, evt event
 	if eb == nil || eb.recipientPlanGuard == nil {
 		return nil
 	}
-	return eb.recipientPlanGuard(ctx, evt, eb.publishRecipientPlan(evt, plan))
+	return eb.recipientPlanGuard(ctx, evt, eb.publishRecipientPlan(evt, plan.CanonicalRoutePlan()))
 }
 
-func (eb *EventBus) publishRecipientPlan(evt events.Event, plan eventDeliveryPlan) PublishRecipientPlan {
-	routePlan := plan.CanonicalRoutePlan()
+func (eb *EventBus) publishRecipientPlan(evt events.Event, routePlan RoutePlan) PublishRecipientPlan {
+	routePlan = routePlan.Normalized()
 	out := PublishRecipientPlan{
 		Recipients:             routePlan.RecipientIDs(),
 		PersistedRecipients:    routePlan.PersistedRecipientIDs(),
@@ -811,8 +799,8 @@ func (eb *EventBus) publishRecipientPlan(evt events.Event, plan eventDeliveryPla
 	return out
 }
 
-func (eb *EventBus) persistSubscribedPublishPlan(ctx context.Context, evt events.Event, plan eventDeliveryPlan) error {
-	routePlan := plan.CanonicalRoutePlan()
+func (eb *EventBus) persistSubscribedPublishPlan(ctx context.Context, evt events.Event, routePlan RoutePlan) error {
+	routePlan = routePlan.Normalized()
 	persistedRecipients := routePlan.PersistedRecipientIDs()
 	if err := eb.persistEventRecord(ctx, evt, persistedRecipients, routePlan.DeliveryTargets(), routePlan.DeliveryRoutes(), runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
 		return err
@@ -821,14 +809,14 @@ func (eb *EventBus) persistSubscribedPublishPlan(ctx context.Context, evt events
 	return nil
 }
 
-func (eb *EventBus) deliverSubscribedPublishPlan(ctx context.Context, evt events.Event, plan eventDeliveryPlan) (bool, error) {
+func (eb *EventBus) deliverSubscribedPublishPlan(ctx context.Context, evt events.Event, routePlan RoutePlan) (bool, error) {
 	if reason, err := eb.dispatchQueueReason(ctx, evt); err != nil {
 		return false, err
 	} else if reason != "" {
-		eb.logDispatchQueued(ctx, reason, evt, len(plan.Recipients), false, false)
+		eb.logDispatchQueued(ctx, reason, evt, len(routePlan.RecipientIDs()), false, false)
 		return true, nil
 	}
-	routePlan := plan.CanonicalRoutePlan()
+	routePlan = routePlan.Normalized()
 	recipients := routePlan.RecipientIDs()
 	if len(recipients) > 0 {
 		if err := eb.deliverToRecipientsWithRoutes(ctx, evt, recipients, routePlan.DeliveryRoutes()); err != nil {
@@ -1076,12 +1064,12 @@ func (eb *EventBus) localizedSubscriberEvent(eventType string, subscriber Subscr
 	return ""
 }
 
-func (eb *EventBus) recordPublishDiagnostic(ctx context.Context, evt events.Event, plan eventDeliveryPlan) {
+func (eb *EventBus) recordPublishDiagnostic(ctx context.Context, evt events.Event, routePlan RoutePlan) {
 	rec, ok := EmittedEventsRecorderFromContext(ctx)
 	if !ok || rec == nil {
 		return
 	}
-	routePlan := plan.CanonicalRoutePlan()
+	routePlan = routePlan.Normalized()
 	rec.AppendPublish(PublishDiagnostic{
 		EventID:                strings.TrimSpace(evt.ID),
 		EventType:              strings.TrimSpace(string(evt.Type)),
@@ -1090,6 +1078,14 @@ func (eb *EventBus) recordPublishDiagnostic(ctx context.Context, evt events.Even
 		RoutedRecipients:       eb.describeSubscribersForEvent(string(evt.Type), routePlan.RoutedRecipients),
 		SubscriptionRecipients: uniqueStrings(routePlan.SubscribedRecipients),
 	})
+}
+
+func (eb *EventBus) planDirectRoutePlan(ctx context.Context, evt events.Event, recipients []string) (RoutePlan, error) {
+	plan, err := eb.deliveryPlanner.PlanDirect(ctx, evt, recipients)
+	if err != nil {
+		return RoutePlan{}, err
+	}
+	return plan.CanonicalRoutePlan(), nil
 }
 
 // PublishDirect persists an event and delivers it to an explicit caller-supplied
@@ -1134,11 +1130,11 @@ func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipie
 		evt.CreatedAt = time.Now()
 	}
 	ctx, evt = runtimecorrelation.CorrelateEvent(ctx, evt)
-	plan, err := eb.deliveryPlanner.PlanDirect(ctx, evt, recipients)
+	plan, err := eb.planDirectRoutePlan(ctx, evt, recipients)
 	if err != nil {
 		return err
 	}
-	if err := eb.persistEventRecord(ctx, evt, plan.PersistedRecipients, plan.DeliveryTargets, plan.DeliveryRoutes, runtimereplayclaim.CommittedReplayScopeDirect); err != nil {
+	if err := eb.persistEventRecord(ctx, evt, plan.PersistedRecipientIDs(), plan.DeliveryTargets(), plan.DeliveryRoutes(), runtimereplayclaim.CommittedReplayScopeDirect); err != nil {
 		return err
 	}
 	persisted = true
@@ -1148,20 +1144,21 @@ func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipie
 		eb.logPublished(ctx, evt, int(time.Since(start)/time.Microsecond))
 		return nil
 	}
-	eb.logQueuedDeliveries(ctx, evt, plan.PersistedRecipients, "direct_publish", plan.ExtraDetail)
+	eb.logQueuedDeliveries(ctx, evt, plan.PersistedRecipientIDs(), "direct_publish", plan.ExtraDetail)
 	if reason, err := eb.dispatchQueueReason(ctx, evt); err != nil {
 		return err
 	} else if reason != "" {
 		queued = true
-		eb.logDispatchQueued(ctx, reason, evt, len(plan.Recipients), true, false)
+		eb.logDispatchQueued(ctx, reason, evt, len(plan.RecipientIDs()), true, false)
 		return nil
 	}
-	if err := eb.deliverToRecipientsWithRoutes(ctx, evt, plan.Recipients, plan.DeliveryRoutes); err != nil {
+	recipients = plan.RecipientIDs()
+	if err := eb.deliverToRecipientsWithRoutes(ctx, evt, recipients, plan.DeliveryRoutes()); err != nil {
 		return err
 	}
 	detail := map[string]any{
 		"direct":           true,
-		"recipients_count": len(plan.Recipients),
+		"recipients_count": len(recipients),
 		"parent_event_id":  strings.TrimSpace(evt.ParentEventID),
 	}
 	for k, v := range plan.ExtraDetail {
@@ -1193,18 +1190,19 @@ func (eb *EventBus) CheckDirectRecipients(ctx context.Context, evt events.Event,
 			return status, fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type)), err)
 		}
 	}
-	plan, err := eb.deliveryPlanner.PlanDirect(ctx, evt, requested)
+	plan, err := eb.planDirectRoutePlan(ctx, evt, requested)
 	if err != nil {
 		return status, err
 	}
-	status.Recipients = append([]string(nil), plan.Recipients...)
-	status.Filtered = filteredRecipients(requested, plan.Recipients)
-	liveRecipients := eb.snapshotRecipientChans(plan.Recipients)
+	plannedRecipients := plan.RecipientIDs()
+	status.Recipients = append([]string(nil), plannedRecipients...)
+	status.Filtered = filteredRecipients(requested, plannedRecipients)
+	liveRecipients := eb.snapshotRecipientChans(plannedRecipients)
 	live := make(map[string]struct{}, len(liveRecipients))
 	for _, recipient := range liveRecipients {
 		live[recipient.agentID] = struct{}{}
 	}
-	for _, recipient := range plan.Recipients {
+	for _, recipient := range plannedRecipients {
 		if _, ok := live[recipient]; !ok {
 			status.Missing = append(status.Missing, recipient)
 		}
@@ -1232,18 +1230,8 @@ func (eb *EventBus) CheckPublishRecipientPlan(ctx context.Context, evt events.Ev
 			return PublishRecipientPlan{}, fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type)), err)
 		}
 	}
-	if err := eb.authorizePublishRecipientPlanning(ctx, evt); err != nil {
-		return PublishRecipientPlan{}, err
-	}
-	plan, err := eb.deliveryPlanner.Plan(ctx, evt)
+	plan, err := eb.planSubscribedRoutePlan(ctx, evt, false)
 	if err != nil {
-		return PublishRecipientPlan{}, err
-	}
-	plan, err = eb.materializePublishRecipientPlan(ctx, evt, plan)
-	if err != nil {
-		return PublishRecipientPlan{}, err
-	}
-	if err := eb.authorizePublishRecipientPlan(ctx, evt, plan); err != nil {
 		return PublishRecipientPlan{}, err
 	}
 	return eb.publishRecipientPlan(evt, plan), nil
@@ -1368,7 +1356,7 @@ func (eb *EventBus) deliveryRoutesForEvent(ctx context.Context, eventID string) 
 	return deliveryRoutesFromTargetMap(recipients, "agent", targets)
 }
 
-func (eb *EventBus) recordTargetDeliveryFailure(ctx context.Context, evt events.Event, plan eventDeliveryPlan) {
+func (eb *EventBus) recordTargetDeliveryFailure(ctx context.Context, evt events.Event, plan RoutePlan) {
 	failure := runtimepinrouting.TargetFailure(strings.TrimSpace(string(plan.TargetFailure)))
 	if failure == "" {
 		return
@@ -1385,7 +1373,7 @@ func (eb *EventBus) recordTargetDeliveryFailure(ctx context.Context, evt events.
 	}
 }
 
-func (eb *EventBus) recordTargetDeliveryFailureTx(ctx context.Context, tx *sql.Tx, evt events.Event, plan eventDeliveryPlan) {
+func (eb *EventBus) recordTargetDeliveryFailureTx(ctx context.Context, tx *sql.Tx, evt events.Event, plan RoutePlan) {
 	failure := runtimepinrouting.TargetFailure(strings.TrimSpace(string(plan.TargetFailure)))
 	if failure == "" {
 		return
@@ -1402,7 +1390,8 @@ func (eb *EventBus) recordTargetDeliveryFailureTx(ctx context.Context, tx *sql.T
 	}
 }
 
-func targetDeliveryFailureRecord(evt events.Event, plan eventDeliveryPlan, failure runtimepinrouting.TargetFailure) (string, map[string]any, runtimedeadletters.Record) {
+func targetDeliveryFailureRecord(evt events.Event, plan RoutePlan, failure runtimepinrouting.TargetFailure) (string, map[string]any, runtimedeadletters.Record) {
+	plan = plan.Normalized()
 	message := targetDeliveryFailureMessage(failure)
 	target := evt.TargetRoute()
 	targetSet := evt.TargetRoutes()
@@ -1411,9 +1400,10 @@ func targetDeliveryFailureRecord(evt events.Event, plan eventDeliveryPlan, failu
 		"source":                evt.SourceRoute(),
 		"target":                target,
 		"target_set":            targetSet,
-		"recipients":            append([]string(nil), plan.Recipients...),
-		"persisted_recipients":  append([]string(nil), plan.PersistedRecipients...),
-		"delivery_targets":      cloneRouteTargetMap(plan.DeliveryTargets),
+		"recipients":            plan.RecipientIDs(),
+		"persisted_recipients":  plan.PersistedRecipientIDs(),
+		"delivery_targets":      cloneRouteTargetMap(plan.DeliveryTargets()),
+		"delivery_routes":       plan.DeliveryRoutes(),
 	}
 	targetContext, _ := json.Marshal(detail)
 	deadLetterRoute := target

@@ -224,7 +224,7 @@ func TestEventBusRecipientPlanMaterializerNormalizesIntoCanonicalRoutePlan(t *te
 	if intent.Source != routePlanSourceRecipientMaterializer || intent.Reason != routePlanReasonMaterializedRoute {
 		t.Fatalf("route plan materializer source/reason = %q/%q, want materializer route", intent.Source, intent.Reason)
 	}
-	projected := eb.publishRecipientPlan(evt, plan)
+	projected := eb.publishRecipientPlan(evt, plan.CanonicalRoutePlan())
 	if !deliveryRoutesContain(projected.DeliveryRoutes, want) {
 		t.Fatalf("projected delivery routes = %#v, want materialized route %#v", projected.DeliveryRoutes, want)
 	}
@@ -322,15 +322,23 @@ func mixedNodeAgentDeliveryPlanner(nodeID, agentID string) deliveryPlanner {
 	)
 }
 
-func nodeOnlyDeliveryPlan(evt events.Event, nodeID string) eventDeliveryPlan {
-	return eventDeliveryPlan{
-		Event:      evt,
-		Recipients: []string{nodeID},
-		DeliveryRoutes: []events.DeliveryRoute{{
-			SubscriberType: "node",
-			SubscriberID:   nodeID,
-		}},
-	}
+func nodeOnlyDeliveryPlan(evt events.Event, nodeID string) RoutePlan {
+	plan := newRoutePlan(evt)
+	plan.AddLiveRecipients(RoutePlanLiveRecipient{
+		RecipientID:       nodeID,
+		SubscriberType:    routePlanSubscriberInternal,
+		PersistAsDelivery: false,
+		Source:            "test",
+		Reason:            "test",
+	})
+	plan.AddDeliveryIntents(RoutePlanDeliveryIntent{
+		SubscriberType: "node",
+		SubscriberID:   nodeID,
+		Source:         "test",
+		Reason:         "test",
+		Persist:        true,
+	})
+	return plan.Normalized()
 }
 
 func TestEventBusPublish_NodeOnlyRouteDoesNotRequireAgentChannel(t *testing.T) {
