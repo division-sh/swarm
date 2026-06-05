@@ -243,14 +243,11 @@ func TestOperatorEventPublishResolvesFlowScopedContractEventName(t *testing.T) {
 	}
 	assertEventPublishPersistence(t, db, runID, eventID, canonicalEventName, "cli-publish:"+actorTokenID(testToken))
 	deliveries := asSlice(t, result["deliveries"])
-	if len(deliveries) != 1 {
-		t.Fatalf("deliveries = %#v, want one persisted delivery", deliveries)
+	if len(deliveries) != 2 {
+		t.Fatalf("deliveries = %#v, want typed agent and node deliveries", deliveries)
 	}
-	if delivery := asMap(t, deliveries[0]); delivery["subscriber_id"] != "repo-observer" {
-		t.Fatalf("delivery = %#v, want repo-observer", delivery)
-	} else {
-		assertEventPublishDeliveryIdentity(t, delivery, "agent", "repo-observer", "pending", 1)
-	}
+	assertEventPublishDeliveriesContain(t, deliveries, "agent", "repo-observer", "pending", 1)
+	assertEventPublishDeliveriesContain(t, deliveries, "node", "repo-observer", "pending", 1)
 	got := requireAPIV1RuntimeBusEvent(t, ch, "flow-scoped event.publish delivery")
 	if got.ID != eventID || string(got.Type) != canonicalEventName {
 		t.Fatalf("delivered event = %#v, want %s/%s", got, eventID, canonicalEventName)
