@@ -531,7 +531,7 @@ func TestEventBusPublish_TargetSetInternalDeliveryUsesPerTargetRoutes(t *testing
 	assertTargetRouteDeliveries(t, ch, "ent-a", "ent-b")
 }
 
-func TestEventBusPublish_NoTargetConcreteRoutedNodeUsesWorkflowCarrierAndNodeDeliveryRoute(t *testing.T) {
+func TestEventBusPublish_NoTargetConcreteRoutedNodePersistsSemanticNodeRoute(t *testing.T) {
 	store := newTargetRouteMemoryStore()
 	source := semanticview.Wrap(routedNodeTemplateBundle())
 	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source})
@@ -559,11 +559,11 @@ func TestEventBusPublish_NoTargetConcreteRoutedNodeUsesWorkflowCarrierAndNodeDel
 
 	routes := store.routes[evt.ID]
 	if len(routes) != 1 {
-		t.Fatalf("persisted delivery routes = %#v, want one workflow-runtime carrier route", routes)
+		t.Fatalf("persisted delivery routes = %#v, want one lifecycle-orchestrator semantic route", routes)
 	}
 	route := routes[0]
-	if route.SubscriberType != "node" || route.SubscriberID != "workflow-runtime" {
-		t.Fatalf("delivery route = %#v, want node/workflow-runtime carrier", route)
+	if route.SubscriberType != "node" || route.SubscriberID != "lifecycle-orchestrator" {
+		t.Fatalf("delivery route = %#v, want node/lifecycle-orchestrator semantic authority", route)
 	}
 	if route.Target.FlowInstance != "operating/inst-1" || route.Target.EntityID != "ent-operating" {
 		t.Fatalf("delivery target = %#v, want operating/inst-1 ent-operating", route.Target)
@@ -579,8 +579,21 @@ func TestEventBusPublish_NoTargetConcreteRoutedNodeUsesWorkflowCarrierAndNodeDel
 	if len(internal) != 1 || internal[0] != "workflow-runtime" {
 		t.Fatalf("replay internal recipients = %#v, want workflow-runtime", internal)
 	}
-	if len(replayRoutes) != 1 || replayRoutes[0].SubscriberID != "workflow-runtime" {
-		t.Fatalf("replay routes = %#v, want workflow-runtime carrier route", replayRoutes)
+	if !deliveryRoutesContain(replayRoutes, events.DeliveryRoute{
+		SubscriberType: "node",
+		SubscriberID:   "lifecycle-orchestrator",
+		Target: events.RouteIdentity{
+			FlowInstance: "operating/inst-1",
+			EntityID:     "ent-operating",
+		},
+	}) {
+		t.Fatalf("replay routes = %#v, want lifecycle-orchestrator semantic route", replayRoutes)
+	}
+	if !deliveryRoutesContain(replayRoutes, events.DeliveryRoute{
+		SubscriberType: "node",
+		SubscriberID:   "workflow-runtime",
+	}) {
+		t.Fatalf("replay routes = %#v, want workflow-runtime replay carrier route", replayRoutes)
 	}
 }
 
