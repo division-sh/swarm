@@ -855,6 +855,56 @@ func (pc *PipelineCoordinator) markWorkflowNodeProcessed(ctx context.Context, no
 	pc.convergeWorkflowNodeNormalRunCompletion(ctx, nodeID, evt)
 }
 
+func (pc *PipelineCoordinator) workflowNodeDeliveryAuthorized(ctx context.Context, nodeID string, evt events.Event) bool {
+	if pc == nil {
+		return false
+	}
+	nodeID = strings.TrimSpace(nodeID)
+	if nodeID == "" {
+		return false
+	}
+	if !pc.eventReceiptsAvailable(ctx) {
+		return false
+	}
+	if pc.workflowStore == nil {
+		return false
+	}
+	eventID := strings.TrimSpace(evt.ID)
+	if eventID == "" {
+		return false
+	}
+	ok, err := pc.workflowStore.SystemNodeDeliveryAuthorized(ctx, nodeID, eventID)
+	if err != nil {
+		if logger, logOK := pc.bus.(systemNodeRuntimeLogger); logOK && logger != nil {
+			logger.LogRuntime(ctx, RuntimeLogEntry{
+				Level:     "error",
+				Message:   "Checking workflow node delivery authority failed",
+				Component: nodeID,
+				Action:    "delivery_authority_check_failed",
+				EventID:   eventID,
+				EventType: strings.TrimSpace(string(evt.Type)),
+				EntityID:  workflowEventEntityID(evt),
+				Error:     strings.TrimSpace(err.Error()),
+			})
+		}
+		return false
+	}
+	if !ok {
+		if logger, logOK := pc.bus.(systemNodeRuntimeLogger); logOK && logger != nil {
+			logger.LogRuntime(ctx, RuntimeLogEntry{
+				Level:     "error",
+				Message:   "Workflow node delivery authority is missing; handler execution skipped",
+				Component: nodeID,
+				Action:    "delivery_authority_missing",
+				EventID:   eventID,
+				EventType: strings.TrimSpace(string(evt.Type)),
+				EntityID:  workflowEventEntityID(evt),
+			})
+		}
+	}
+	return ok
+}
+
 func (pc *PipelineCoordinator) workflowNodeEventProcessed(ctx context.Context, nodeID string, evt events.Event) bool {
 	if pc == nil || pc.workflowStore == nil {
 		return false

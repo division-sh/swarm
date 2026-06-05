@@ -963,6 +963,118 @@ func TestSQLiteRuntimeStoreSystemNodeReceiptOwnerSettlesDelivery(t *testing.T) {
 	}
 }
 
+func TestSQLiteRuntimeStoreSystemNodeReceiptOwnerFailsWithoutDeliveryAuthority(t *testing.T) {
+	ctx := context.Background()
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	runID := uuid.NewString()
+	ctx = runtimecorrelation.WithRunID(ctx, runID)
+	eventID := uuid.NewString()
+	evt := events.Event{
+		ID:          eventID,
+		RunID:       runID,
+		Type:        events.EventType("company.scanned"),
+		SourceAgent: "agent-1",
+		Payload:     json.RawMessage(`{"ok":true}`),
+		CreatedAt:   time.Now().UTC(),
+	}
+	if err := store.AppendEvent(ctx, evt); err != nil {
+		t.Fatalf("AppendEvent: %v", err)
+	}
+	owner := runtimepipeline.NewSQLiteWorkflowInstanceStore(store.DB)
+	err := owner.MarkSystemNodeProcessedAndSettleDelivery(ctx, "background-node", eventID, `{"idempotency_key":"test"}`)
+	if !errors.Is(err, runtimepipeline.ErrSystemNodeDeliveryAuthorityMissing) {
+		t.Fatalf("MarkSystemNodeProcessedAndSettleDelivery error = %v, want ErrSystemNodeDeliveryAuthorityMissing", err)
+	}
+	var deliveries, receipts int
+	if err := store.DB.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_deliveries
+		WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = 'background-node'
+	`, eventID).Scan(&deliveries); err != nil {
+		t.Fatalf("count sqlite node deliveries: %v", err)
+	}
+	if deliveries != 0 {
+		t.Fatalf("sqlite node deliveries = %d, want 0", deliveries)
+	}
+	if err := store.DB.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_receipts
+		WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = 'background-node'
+	`, eventID).Scan(&receipts); err != nil {
+		t.Fatalf("count sqlite node receipts: %v", err)
+	}
+	if receipts != 0 {
+		t.Fatalf("sqlite node receipts = %d, want 0", receipts)
+	}
+}
+
+func TestSQLiteRuntimeStoreSystemNodeReceiptOwnerFailsWithTerminalDeliveryAuthority(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		status     string
+		retryCount int
+	}{
+		{name: "dead_letter", status: "dead_letter", retryCount: 2},
+		{name: "retry_exhausted_failed", status: "failed", retryCount: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+			runID := uuid.NewString()
+			ctx = runtimecorrelation.WithRunID(ctx, runID)
+			eventID := uuid.NewString()
+			evt := events.Event{
+				ID:          eventID,
+				RunID:       runID,
+				Type:        events.EventType("company.scanned"),
+				SourceAgent: "agent-1",
+				Payload:     json.RawMessage(`{"ok":true}`),
+				CreatedAt:   time.Now().UTC(),
+			}
+			if err := store.AppendEvent(ctx, evt); err != nil {
+				t.Fatalf("AppendEvent: %v", err)
+			}
+			if _, err := store.DB.ExecContext(ctx, `
+				INSERT INTO event_deliveries (
+					delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, created_at
+				) VALUES (
+					?, ?, ?, 'node', 'background-node', ?, ?, 'terminal_test', ?
+				)
+			`, uuid.NewString(), runID, eventID, tc.status, tc.retryCount, time.Now().UTC()); err != nil {
+				t.Fatalf("seed sqlite terminal node delivery: %v", err)
+			}
+			owner := runtimepipeline.NewSQLiteWorkflowInstanceStore(store.DB)
+			err := owner.MarkSystemNodeProcessedAndSettleDelivery(ctx, "background-node", eventID, `{"idempotency_key":"test"}`)
+			if !errors.Is(err, runtimepipeline.ErrSystemNodeDeliveryAuthorityMissing) {
+				t.Fatalf("MarkSystemNodeProcessedAndSettleDelivery error = %v, want ErrSystemNodeDeliveryAuthorityMissing", err)
+			}
+			var status string
+			var retryCount int
+			if err := store.DB.QueryRowContext(ctx, `
+				SELECT COALESCE(status, ''), COALESCE(retry_count, 0)
+				FROM event_deliveries
+				WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = 'background-node'
+			`, eventID).Scan(&status, &retryCount); err != nil {
+				t.Fatalf("load sqlite terminal delivery: %v", err)
+			}
+			if status != tc.status || retryCount != tc.retryCount {
+				t.Fatalf("sqlite terminal delivery = %s/%d, want %s/%d", status, retryCount, tc.status, tc.retryCount)
+			}
+			var receipts int
+			if err := store.DB.QueryRowContext(ctx, `
+				SELECT COUNT(*)
+				FROM event_receipts
+				WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = 'background-node'
+			`, eventID).Scan(&receipts); err != nil {
+				t.Fatalf("count sqlite node receipts: %v", err)
+			}
+			if receipts != 0 {
+				t.Fatalf("sqlite node receipts = %d, want 0", receipts)
+			}
+		})
+	}
+}
+
 func TestSQLiteRuntimeStoreDeliveryReplayAndReceiptSemantics(t *testing.T) {
 	ctx := context.Background()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)

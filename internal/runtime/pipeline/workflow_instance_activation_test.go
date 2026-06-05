@@ -14,6 +14,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/core/values"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/google/uuid"
 )
 
 func testCreateFlowInstanceContext(trigger workflowTriggerContext) values.Context {
@@ -511,6 +513,7 @@ opco.ceo_ready:
 `,
 	})
 	evt := (events.Event{
+		ID:      uuid.NewString(),
 		Type:    events.EventType("operating/inst-1/opco.product_initialization_requested"),
 		Payload: []byte(`{"entity_id":"ent-operating"}`),
 	}).WithEntityID("ent-operating").WithFlowInstance("operating/inst-1")
@@ -525,14 +528,19 @@ opco.ceo_ready:
 		t.Fatalf("handler event key = %q, want opco.product_initialization_requested", got)
 	}
 
+	_, db, _ := testutil.StartPostgres(t)
 	bus := &recordingPipelineBus{}
 	pc := &PipelineCoordinator{
-		bus:            bus,
-		expressionEval: newWorkflowExpressionEvaluator(),
-		entityLocks:    map[string]*sync.Mutex{},
-		module:         staticSemanticWorkflowModule{source: source},
+		bus:                     bus,
+		db:                      db,
+		workflowStore:           NewWorkflowInstanceStore(db),
+		expressionEval:          newWorkflowExpressionEvaluator(),
+		entityLocks:             map[string]*sync.Mutex{},
+		module:                  staticSemanticWorkflowModule{source: source},
+		eventReceiptsCapability: eventReceiptsCapabilityStub{enabled: true}.resolve,
 	}
-	handled, err := pc.executeNodeHandlerPlanResult(context.Background(), "lifecycle-orchestrator", evt)
+	seedPipelineNodeDeliveryAuthority(t, db, evt, "lifecycle-orchestrator")
+	handled, err := pc.executeNodeHandlerPlanResult(testPipelineCoordinatorRunContext(t, pc), "lifecycle-orchestrator", evt)
 	if err != nil {
 		t.Fatalf("executeNodeHandlerPlanResult: %v", err)
 	}

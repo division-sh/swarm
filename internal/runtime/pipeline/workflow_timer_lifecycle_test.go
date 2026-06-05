@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/google/uuid"
 )
 
 type recordingSchedulePersistence struct {
@@ -78,7 +79,10 @@ func (*recordingSchedulePersistence) CompleteScheduleFireExact(context.Context, 
 }
 
 func newTimerLifecycleCoordinator(bus Bus, db *sql.DB, module WorkflowModule, store SchedulePersistence) *PipelineCoordinator {
-	opts := PipelineCoordinatorOptions{Module: module}
+	opts := PipelineCoordinatorOptions{
+		Module:                  module,
+		EventReceiptsCapability: eventReceiptsCapabilityStub{enabled: true}.resolve,
+	}
 	if store != nil {
 		opts.TimerScheduler = NewScheduler()
 		opts.TimerScheduleStore = store
@@ -128,12 +132,13 @@ func TestExecuteNodeHandlerPlan_EventTimerStartOnRegistersSchedule(t *testing.T)
 	}
 
 	evt := events.Event{
-		ID:          "evt-start",
+		ID:          uuid.NewString(),
 		Type:        events.EventType("timer.scheduled"),
 		SourceAgent: "cataloge2e",
 		Payload:     []byte(`{"entity_id":"ent-001"}`),
 		CreatedAt:   time.Now().UTC(),
 	}.WithEntityID("ent-001")
+	seedPipelineNodeDeliveryAuthority(t, db, evt, "test-node")
 
 	txctx := testActivePipelineSQLTxContext(t, db, ctx)
 	if handled := pc.executeNodeHandlerPlan(txctx, "test-node", evt); !handled {
@@ -193,12 +198,13 @@ func TestPipelineIntercept_EventTimerStartOnRegistersSchedule(t *testing.T) {
 	}
 
 	evt := events.Event{
-		ID:          "evt-start",
+		ID:          uuid.NewString(),
 		Type:        events.EventType("timer.scheduled"),
 		SourceAgent: "cataloge2e",
 		Payload:     []byte(`{"entity_id":"ent-001"}`),
 		CreatedAt:   time.Now().UTC(),
 	}.WithEntityID("ent-001")
+	seedPipelineNodeDeliveryAuthority(t, db, evt, "test-node")
 
 	_, handled := pc.interceptPolicy("timer.scheduled", evt)
 	if !handled {
@@ -406,7 +412,8 @@ func TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler(t *testing.T) {
 	t.Cleanup(cleanup)
 
 	pc := NewPipelineCoordinatorWithOptions(noopPipelineBus{}, db, PipelineCoordinatorOptions{
-		Module: module,
+		Module:                  module,
+		EventReceiptsCapability: eventReceiptsCapabilityStub{enabled: true}.resolve,
 	})
 	if pc == nil {
 		t.Fatal("expected coordinator")
@@ -422,12 +429,13 @@ func TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler(t *testing.T) {
 	}
 
 	evt := events.Event{
-		ID:          "evt-child-done",
+		ID:          uuid.NewString(),
 		Type:        events.EventType("child/task.done"),
 		SourceAgent: "cataloge2e",
 		Payload:     []byte(`{"entity_id":"ent-001"}`),
 		CreatedAt:   time.Now().UTC(),
 	}.WithEntityID("ent-001")
+	seedPipelineNodeDeliveryAuthority(t, db, evt, "listener")
 
 	if handled := pc.executeNodeHandlerPlan(testPipelineCoordinatorRunContext(t, pc), "dispatcher", evt); handled {
 		t.Fatal("dispatcher should not handle child/task.done")
@@ -492,12 +500,13 @@ func TestExecuteNodeHandlerPlan_AccumulateTimeoutRegistersSchedule(t *testing.T)
 
 	start := time.Now().UTC()
 	evt := events.Event{
-		ID:          "evt-item-a",
+		ID:          uuid.NewString(),
 		Type:        events.EventType("item.arrived"),
 		SourceAgent: "cataloge2e",
 		Payload:     []byte(`{"entity_id":"ent-001","item_id":"a"}`),
 		CreatedAt:   start,
 	}.WithEntityID("ent-001")
+	seedPipelineNodeDeliveryAuthority(t, db, evt, "test-node")
 
 	txctx := testActivePipelineSQLTxContext(t, db, ctx)
 	if handled := pc.executeNodeHandlerPlan(txctx, "test-node", evt); !handled {
@@ -641,18 +650,19 @@ func TestExecuteNodeHandlerPlan_AccumulateTimeoutCancelsScheduleOnTimeout(t *tes
 	}
 
 	evt := events.Event{
-		ID:          "evt-item-a",
+		ID:          uuid.NewString(),
 		Type:        events.EventType("item.arrived"),
 		SourceAgent: "cataloge2e",
 		Payload:     []byte(`{"entity_id":"ent-001","item_id":"a"}`),
 		CreatedAt:   time.Now().UTC(),
 	}.WithEntityID("ent-001")
+	seedPipelineNodeDeliveryAuthority(t, db, evt, "test-node")
 	if handled := pc.executeNodeHandlerPlan(ctx, "test-node", evt); !handled {
 		t.Fatal("expected item.arrived handler to be handled")
 	}
 
 	timeoutEvt := events.Event{
-		ID:          "evt-timeout",
+		ID:          uuid.NewString(),
 		Type:        events.EventType("accumulate.timeout"),
 		SourceAgent: runtimeWorkflowID,
 		Payload: mustJSON(map[string]any{
@@ -667,6 +677,7 @@ func TestExecuteNodeHandlerPlan_AccumulateTimeoutCancelsScheduleOnTimeout(t *tes
 		}),
 		CreatedAt: time.Now().UTC(),
 	}.WithEntityID("ent-001")
+	seedPipelineNodeDeliveryAuthority(t, db, timeoutEvt, "test-node")
 	txctx := testActivePipelineSQLTxContext(t, db, ctx)
 	if handled := pc.executeNodeHandlerPlan(txctx, "test-node", timeoutEvt); !handled {
 		t.Fatal("expected accumulate.timeout handler to be handled")
@@ -701,7 +712,8 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 	t.Cleanup(cleanup)
 
 	pc := NewPipelineCoordinatorWithOptions(noopPipelineBus{}, db, PipelineCoordinatorOptions{
-		Module: module,
+		Module:                  module,
+		EventReceiptsCapability: eventReceiptsCapabilityStub{enabled: true}.resolve,
 	})
 	if pc == nil {
 		t.Fatal("expected coordinator")
@@ -716,12 +728,13 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 	}
 
 	trigger := events.Event{
-		ID:          "evt-work-requested",
+		ID:          uuid.NewString(),
 		Type:        events.EventType("work.requested"),
 		SourceAgent: "cataloge2e",
 		Payload:     []byte(`{"entity_id":"ent-001"}`),
 		CreatedAt:   time.Now().UTC(),
 	}.WithEntityID("ent-001")
+	seedPipelineNodeDeliveryAuthority(t, db, trigger, "child-worker")
 
 	if handled := pc.executeNodeHandlerPlan(testPipelineCoordinatorRunContext(t, pc), "child-worker", trigger); !handled {
 		t.Fatal("child-worker should handle work.requested through the input-pin alias")
@@ -739,12 +752,13 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 
 	listenerCtx := withPipelineFlowScope(testPipelineCoordinatorRunContext(t, pc), "child")
 	completion := events.Event{
-		ID:          "evt-child-work-completed",
+		ID:          uuid.NewString(),
 		Type:        events.EventType("child/work.completed"),
 		SourceAgent: "cataloge2e",
 		Payload:     []byte(`{"entity_id":"ent-001"}`),
 		CreatedAt:   time.Now().UTC(),
 	}.WithEntityID("ent-001")
+	seedPipelineNodeDeliveryAuthority(t, db, completion, "parent-listener")
 	handler, ok := pc.SemanticSource().NodeEventHandler("parent-listener", "child/work.completed")
 	if !ok {
 		t.Fatal("parent-listener handler missing for child/work.completed")
@@ -792,7 +806,8 @@ func TestPipelineIntercept_HandlesChildFlowOutputForRootListener(t *testing.T) {
 
 	bus := &recordingPipelineBus{}
 	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
-		Module: module,
+		Module:                  module,
+		EventReceiptsCapability: eventReceiptsCapabilityStub{enabled: true}.resolve,
 	})
 	if pc == nil {
 		t.Fatal("expected coordinator")
@@ -808,12 +823,13 @@ func TestPipelineIntercept_HandlesChildFlowOutputForRootListener(t *testing.T) {
 	}
 
 	completion := events.Event{
-		ID:          "evt-child-work-completed",
+		ID:          uuid.NewString(),
 		Type:        events.EventType("child/work.completed"),
 		SourceAgent: "cataloge2e",
 		Payload:     []byte(`{"entity_id":"ent-001"}`),
 		CreatedAt:   time.Now().UTC(),
 	}.WithEntityID("ent-001")
+	seedPipelineNodeDeliveryAuthority(t, db, completion, "parent-listener")
 	passThrough, emitted, err := pc.Intercept(testPipelineCoordinatorRunContext(t, pc), completion)
 	if err != nil {
 		t.Fatalf("Intercept: %v", err)
@@ -843,7 +859,8 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionDoesNotEmitChild
 
 	bus := &recordingPipelineBus{}
 	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
-		Module: module,
+		Module:                  module,
+		EventReceiptsCapability: eventReceiptsCapabilityStub{enabled: true}.resolve,
 	})
 	if pc == nil {
 		t.Fatal("expected coordinator")
@@ -880,13 +897,15 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionDoesNotEmitChild
 		t.Fatalf("seed grandchild instance: %v", err)
 	}
 
-	passThrough, emitted, err := pc.Intercept(testPipelineCoordinatorRunContext(t, pc), (events.Event{
-		ID:          "evt-nested-done",
+	completion := (events.Event{
+		ID:          uuid.NewString(),
 		Type:        events.EventType("child/grandchild/micro.done"),
 		SourceAgent: "cataloge2e",
 		Payload:     []byte(`{"entity_id":"` + grandchildEntityID + `"}`),
 		CreatedAt:   time.Now().UTC(),
-	}).WithEntityID(grandchildEntityID))
+	}).WithEntityID(grandchildEntityID)
+	seedPipelineNodeDeliveryAuthority(t, db, completion, "root-collector")
+	passThrough, emitted, err := pc.Intercept(testPipelineCoordinatorRunContext(t, pc), completion)
 	if err != nil {
 		t.Fatalf("Intercept: %v", err)
 	}
@@ -926,7 +945,8 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionAlreadyTargetedT
 
 	bus := &recordingPipelineBus{}
 	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
-		Module: module,
+		Module:                  module,
+		EventReceiptsCapability: eventReceiptsCapabilityStub{enabled: true}.resolve,
 	})
 	if pc == nil {
 		t.Fatal("expected coordinator")
@@ -964,13 +984,15 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionAlreadyTargetedT
 		t.Fatalf("workflowNodeInterceptPolicy handled = %v, consume = %v, want handled", handled, consume)
 	}
 
-	passThrough, emitted, err := pc.Intercept(testPipelineCoordinatorRunContext(t, pc), (events.Event{
-		ID:          "evt-nested-done-parent-targeted",
+	completion := (events.Event{
+		ID:          uuid.NewString(),
 		Type:        events.EventType("child/grandchild/micro.done"),
 		SourceAgent: "cataloge2e",
 		Payload:     []byte(`{"entity_id":"` + childRowID + `"}`),
 		CreatedAt:   time.Now().UTC(),
-	}).WithEntityID(childRowID))
+	}).WithEntityID(childRowID)
+	seedPipelineNodeDeliveryAuthority(t, db, completion, "root-collector")
+	passThrough, emitted, err := pc.Intercept(testPipelineCoordinatorRunContext(t, pc), completion)
 	if err != nil {
 		t.Fatalf("Intercept: %v", err)
 	}
@@ -1002,7 +1024,8 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionInsideOuterSQLTx
 
 	bus := &recordingPipelineBus{}
 	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
-		Module: module,
+		Module:                  module,
+		EventReceiptsCapability: eventReceiptsCapabilityStub{enabled: true}.resolve,
 	})
 	if pc == nil {
 		t.Fatal("expected coordinator")
@@ -1041,13 +1064,15 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionInsideOuterSQLTx
 	t.Cleanup(func() { _ = tx.Rollback() })
 	ctx := WithPipelineSQLTxContext(testPipelineCoordinatorRunContext(t, pc), tx)
 
-	passThrough, emitted, err := pc.Intercept(ctx, (events.Event{
-		ID:          "evt-nested-done-tx",
+	completion := (events.Event{
+		ID:          uuid.NewString(),
 		Type:        events.EventType("child/grandchild/micro.done"),
 		SourceAgent: "cataloge2e",
 		Payload:     []byte(`{"entity_id":"` + childRowID + `"}`),
 		CreatedAt:   time.Now().UTC(),
-	}).WithEntityID(childRowID))
+	}).WithEntityID(childRowID)
+	seedPipelineNodeDeliveryAuthority(t, db, completion, "root-collector")
+	passThrough, emitted, err := pc.Intercept(ctx, completion)
 	if err != nil {
 		t.Fatalf("Intercept: %v", err)
 	}

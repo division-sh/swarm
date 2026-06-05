@@ -28,8 +28,13 @@ func (s eventReceiptsCapabilityStub) resolve(context.Context) (bool, error) {
 }
 
 type typedSystemNodeReceiptStore struct {
-	processed bool
-	marked    int
+	deliveryAuthorized bool
+	processed          bool
+	marked             int
+}
+
+func (s *typedSystemNodeReceiptStore) SystemNodeDeliveryAuthorized(context.Context, string, string) (bool, error) {
+	return s.deliveryAuthorized, nil
 }
 
 func (s *typedSystemNodeReceiptStore) SystemNodeProcessed(context.Context, string, string) (bool, error) {
@@ -51,7 +56,7 @@ func TestSystemNodeRunner_RecordsDeadLetterRow(t *testing.T) {
 	ctx := testPipelineRunContext(t, db)
 	runner := newSystemNodeRunner("node-a", deadLetterTestBus{}, db, func() []events.EventType { return []events.EventType{"source.evt"} }, func(context.Context, events.Event) error {
 		return errors.New("boom")
-	})
+	}, eventReceiptsCapabilityStub{enabled: true}.resolve)
 	runner.SetRetryPolicyForTest(2, func(int) time.Duration { return 0 })
 
 	evt := events.Event{
@@ -67,6 +72,7 @@ func TestSystemNodeRunner_RecordsDeadLetterRow(t *testing.T) {
 	`, evt.ID, string(evt.Type), evt.EntityID(), string(evt.Payload)); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
+	seedPipelineNodeDeliveryAuthority(t, db, evt, "node-a")
 
 	runner.ProcessEventForTest(ctx, evt)
 
@@ -119,7 +125,8 @@ func TestCoordinator_RecordsChainDepthDeadLetterRow(t *testing.T) {
 		t.Fatalf("newPipelineFixtureWorkflowModule: %v", err)
 	}
 	pc := NewPipelineCoordinatorWithOptions(noopPipelineBus{}, db, PipelineCoordinatorOptions{
-		Module: module,
+		Module:                  module,
+		EventReceiptsCapability: eventReceiptsCapabilityStub{enabled: true}.resolve,
 	})
 	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), WorkflowInstance{
 		InstanceID:      entityID,
@@ -129,6 +136,7 @@ func TestCoordinator_RecordsChainDepthDeadLetterRow(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
+	seedPipelineNodeDeliveryAuthority(t, db, evt, "node-1")
 
 	if handled := pc.executeNodeHandlerPlan(ctx, "node-1", evt); !handled {
 		t.Fatalf("executeNodeHandlerPlan handled = false, want true")
@@ -200,10 +208,10 @@ func TestSystemNodeRunner_SkipsQuiescedDestructiveResetDelivery(t *testing.T) {
 func TestSystemNodeRunner_NonRetryableRuntimeErrorDeadLettersImmediately(t *testing.T) {
 	bus := &capturingDeadLetterBus{}
 	attempts := 0
-	runner := newSystemNodeRunner("node-a", bus, nil, func() []events.EventType { return []events.EventType{"source.evt"} }, func(context.Context, events.Event) error {
+	runner := newSystemNodeRunnerWithReceiptStoreAndRetryBase("node-a", bus, nil, &typedSystemNodeReceiptStore{deliveryAuthorized: true}, func() []events.EventType { return []events.EventType{"source.evt"} }, func(context.Context, events.Event) error {
 		attempts++
 		return runtimerterr.NewRuntimeError("invalid_contract", "pipeline", "node.handle", false, "bad handler config")
-	})
+	}, 0, eventReceiptsCapabilityStub{enabled: true}.resolve)
 	runner.SetRetryPolicyForTest(5, func(int) time.Duration { return 0 })
 
 	evt := events.Event{
@@ -255,11 +263,16 @@ func TestSystemNodeRunner_FailsClosedWithoutCanonicalEventReceiptsCapability(t *
 		t.Fatalf("seed event: %v", err)
 	}
 
+	attempts := 0
 	runner := newSystemNodeRunner("node-a", deadLetterTestBus{}, db, func() []events.EventType { return []events.EventType{"source.evt"} }, func(context.Context, events.Event) error {
+		attempts++
 		return nil
 	}, eventReceiptsCapabilityStub{}.resolve)
 	runner.ProcessEventForTest(ctx, evt)
 
+	if attempts != 0 {
+		t.Fatalf("attempts = %d, want 0 without canonical capability", attempts)
+	}
 	var count int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts WHERE event_id = $1::uuid`, evt.ID).Scan(&count); err != nil {
 		t.Fatalf("count event_receipts: %v", err)
@@ -286,6 +299,12 @@ func TestSystemNodeRunner_UsesCanonicalEventReceiptsCapabilityForIdempotency(t *
 	`, evt.ID, string(evt.Type), entityID, string(evt.Payload)); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (event_id, subscriber_type, subscriber_id, status, created_at)
+		VALUES ($1::uuid, 'node', 'node-a', 'pending', now())
+	`, evt.ID); err != nil {
+		t.Fatalf("seed node delivery: %v", err)
+	}
 
 	attempts := 0
 	runner := newSystemNodeRunner("node-a", deadLetterTestBus{}, db, func() []events.EventType { return []events.EventType{"source.evt"} }, func(context.Context, events.Event) error {
@@ -307,9 +326,55 @@ func TestSystemNodeRunner_UsesCanonicalEventReceiptsCapabilityForIdempotency(t *
 	}
 }
 
+func TestSystemNodeRunner_SkipsWithoutPersistedNodeDeliveryAuthority(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	ctx := context.Background()
+	entityID := uuid.NewString()
+	evt := (events.Event{
+		ID:          uuid.NewString(),
+		Type:        "source.evt",
+		SourceAgent: "src",
+		Payload:     []byte(`{"entity_id":"` + entityID + `"}`),
+		CreatedAt:   time.Now().UTC(),
+	}).WithEntityID(entityID)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
+		VALUES ($1::uuid, $2, $3::uuid, 'runtime', 'entity', $4::jsonb, 'src', 'agent', now())
+	`, evt.ID, string(evt.Type), entityID, string(evt.Payload)); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+
+	attempts := 0
+	bus := &recordingPipelineBus{}
+	runner := newSystemNodeRunner("node-a", bus, db, func() []events.EventType { return []events.EventType{"source.evt"} }, func(context.Context, events.Event) error {
+		attempts++
+		return nil
+	}, eventReceiptsCapabilityStub{enabled: true}.resolve)
+	runner.ProcessEventForTest(ctx, evt)
+
+	if attempts != 0 {
+		t.Fatalf("attempts = %d, want 0 without persisted node delivery authority", attempts)
+	}
+	var receipts int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_receipts
+		WHERE event_id = $1::uuid
+	`, evt.ID).Scan(&receipts); err != nil {
+		t.Fatalf("count event_receipts: %v", err)
+	}
+	if receipts != 0 {
+		t.Fatalf("event_receipts rows = %d, want 0 without authority", receipts)
+	}
+	logs := bus.runtimeLogEntries()
+	if len(logs) != 1 || logs[0].Action != "delivery_authority_missing" {
+		t.Fatalf("runtime logs = %#v, want one delivery_authority_missing entry", logs)
+	}
+}
+
 func TestSystemNodeRunner_UsesTypedReceiptOwnerWithoutRawDB(t *testing.T) {
 	ctx := context.Background()
-	receipts := &typedSystemNodeReceiptStore{}
+	receipts := &typedSystemNodeReceiptStore{deliveryAuthorized: true}
 	attempts := 0
 	runner := newSystemNodeRunnerWithReceiptStoreAndRetryBase("node-a", deadLetterTestBus{}, nil, receipts, func() []events.EventType {
 		return []events.EventType{"source.evt"}
@@ -362,6 +427,7 @@ func TestCoordinator_InterceptHandlerErrorDoesNotSilentlyFallback(t *testing.T) 
 				},
 			},
 		},
+		EventReceiptsCapability: eventReceiptsCapabilityStub{enabled: true}.resolve,
 	})
 	evt := (events.Event{
 		ID:          uuid.NewString(),
@@ -376,6 +442,7 @@ func TestCoordinator_InterceptHandlerErrorDoesNotSilentlyFallback(t *testing.T) 
 	`, evt.ID, string(evt.Type), evt.EntityID(), string(evt.Payload)); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
+	seedPipelineNodeDeliveryAuthority(t, db, evt, "node-a")
 	postCommit := make([]func(), 0, 1)
 	override := &PipelineReceiptOverride{}
 	ctx := WithPipelinePostCommitActions(context.Background(), &postCommit)

@@ -269,6 +269,9 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 	if pc.workflowNodeEventProcessed(ctx, nodeID, evt) {
 		return true, nil
 	}
+	if !pc.workflowNodeDeliveryAuthorized(ctx, nodeID, evt) {
+		return false, nil
+	}
 	ctx = withPipelineFlowScope(ctx, workflowNodeFlowID(source, nodeID))
 	if err := pc.notifyTestWorkflowNodeHandlerStarting(ctx, nodeID, evt); err != nil {
 		return false, err
