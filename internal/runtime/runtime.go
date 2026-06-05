@@ -77,6 +77,7 @@ type RuntimeOptions struct {
 	BootProgress                     func(BootProgressEvent)
 	SystemContainers                 []string
 	DisablePersistentStartupRecovery bool
+	TestWorkflowNodeHandlerStartHook runtimepipeline.WorkflowNodeHandlerStartHook
 }
 
 // RuntimeDeps is the canonical dependency graph for NewRuntime boot wiring.
@@ -453,12 +454,13 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 				}
 				return managerRef.DeactivateFlowInstanceModel(ctx, req)
 			},
-			TimerScheduler:          rt.Scheduler,
-			TimerScheduleStore:      stores.ScheduleStore,
-			MailboxMaterializer:     stores.MailboxMaterializer,
-			EventReceiptsCapability: boot.EventReceiptCapability,
-			ArtifactRoot:            artifactRoot,
-			BundleFingerprint:       opts.BundleFingerprint,
+			TimerScheduler:                   rt.Scheduler,
+			TimerScheduleStore:               stores.ScheduleStore,
+			MailboxMaterializer:              stores.MailboxMaterializer,
+			EventReceiptsCapability:          boot.EventReceiptCapability,
+			ArtifactRoot:                     artifactRoot,
+			BundleFingerprint:                opts.BundleFingerprint,
+			TestWorkflowNodeHandlerStartHook: opts.TestWorkflowNodeHandlerStartHook,
 		})
 		if rt.Pipeline != nil {
 			rt.SystemNodes = append(rt.SystemNodes, rt.Pipeline.BackgroundNodesWithReceiptStore(rt.Bus, stores.SQLDB, pipelineStore)...)

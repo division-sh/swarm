@@ -60,22 +60,26 @@ type PipelineCoordinator struct {
 	artifactRoot            string
 	bundleFingerprint       string
 
-	testSubscribeHook   func()
-	testEntityStateHook func(entityID, state string)
+	testSubscribeHook                func()
+	testEntityStateHook              func(entityID, state string)
+	testWorkflowNodeHandlerStartHook WorkflowNodeHandlerStartHook
 }
 
+type WorkflowNodeHandlerStartHook func(context.Context, string, events.Event) error
+
 type PipelineCoordinatorOptions struct {
-	ShardPlanner            any
-	Module                  WorkflowModule
-	WorkflowStore           *WorkflowInstanceStore
-	InstanceActivator       FlowInstanceActivator
-	InstanceDeactivator     FlowInstanceDeactivator
-	TimerScheduler          *Scheduler
-	TimerScheduleStore      SchedulePersistence
-	MailboxMaterializer     MailboxWriteMaterializationStore
-	EventReceiptsCapability func(context.Context) (bool, error)
-	ArtifactRoot            string
-	BundleFingerprint       string
+	ShardPlanner                     any
+	Module                           WorkflowModule
+	WorkflowStore                    *WorkflowInstanceStore
+	InstanceActivator                FlowInstanceActivator
+	InstanceDeactivator              FlowInstanceDeactivator
+	TimerScheduler                   *Scheduler
+	TimerScheduleStore               SchedulePersistence
+	MailboxMaterializer              MailboxWriteMaterializationStore
+	EventReceiptsCapability          func(context.Context) (bool, error)
+	ArtifactRoot                     string
+	BundleFingerprint                string
+	TestWorkflowNodeHandlerStartHook WorkflowNodeHandlerStartHook
 }
 
 func NewPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordinatorOptions) *PipelineCoordinator {
@@ -91,20 +95,21 @@ func NewPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordin
 		workflowStore = NewWorkflowInstanceStore(db)
 	}
 	return &PipelineCoordinator{
-		bus:                     bus,
-		db:                      db,
-		module:                  module,
-		workflowStore:           workflowStore,
-		expressionEval:          newWorkflowExpressionEvaluator(),
-		instanceActivator:       opts.InstanceActivator,
-		instanceDeactivator:     opts.InstanceDeactivator,
-		timerScheduler:          opts.TimerScheduler,
-		timerScheduleStore:      opts.TimerScheduleStore,
-		mailboxMaterializer:     opts.MailboxMaterializer,
-		eventReceiptsCapability: opts.EventReceiptsCapability,
-		artifactRoot:            strings.TrimSpace(opts.ArtifactRoot),
-		bundleFingerprint:       strings.TrimSpace(opts.BundleFingerprint),
-		entityLocks:             make(map[string]*sync.Mutex),
+		bus:                              bus,
+		db:                               db,
+		module:                           module,
+		workflowStore:                    workflowStore,
+		expressionEval:                   newWorkflowExpressionEvaluator(),
+		instanceActivator:                opts.InstanceActivator,
+		instanceDeactivator:              opts.InstanceDeactivator,
+		timerScheduler:                   opts.TimerScheduler,
+		timerScheduleStore:               opts.TimerScheduleStore,
+		mailboxMaterializer:              opts.MailboxMaterializer,
+		eventReceiptsCapability:          opts.EventReceiptsCapability,
+		artifactRoot:                     strings.TrimSpace(opts.ArtifactRoot),
+		bundleFingerprint:                strings.TrimSpace(opts.BundleFingerprint),
+		testWorkflowNodeHandlerStartHook: opts.TestWorkflowNodeHandlerStartHook,
+		entityLocks:                      make(map[string]*sync.Mutex),
 	}
 }
 
@@ -127,6 +132,15 @@ func (pc *PipelineCoordinator) SetTestEntityStateHook(fn func(entityID, state st
 	}
 	pc.mu.Lock()
 	pc.testEntityStateHook = fn
+	pc.mu.Unlock()
+}
+
+func (pc *PipelineCoordinator) SetTestWorkflowNodeHandlerStartHook(fn WorkflowNodeHandlerStartHook) {
+	if pc == nil {
+		return
+	}
+	pc.mu.Lock()
+	pc.testWorkflowNodeHandlerStartHook = fn
 	pc.mu.Unlock()
 }
 
@@ -256,6 +270,9 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 		return true, nil
 	}
 	ctx = withPipelineFlowScope(ctx, workflowNodeFlowID(source, nodeID))
+	if err := pc.notifyTestWorkflowNodeHandlerStarting(ctx, nodeID, evt); err != nil {
+		return false, err
+	}
 	result, err := pc.executeNodeContractHandler(ctx, nodeID, handler, workflowTriggerContext{
 		Event:           evt,
 		HandlerEventKey: handlerEventKey,
@@ -452,6 +469,19 @@ func (pc *PipelineCoordinator) notifyTestEntityStateUpdated(entityID, state stri
 	if hook != nil {
 		hook(strings.TrimSpace(entityID), strings.TrimSpace(state))
 	}
+}
+
+func (pc *PipelineCoordinator) notifyTestWorkflowNodeHandlerStarting(ctx context.Context, nodeID string, evt events.Event) error {
+	if pc == nil {
+		return nil
+	}
+	pc.mu.Lock()
+	hook := pc.testWorkflowNodeHandlerStartHook
+	pc.mu.Unlock()
+	if hook == nil {
+		return nil
+	}
+	return hook(ctx, strings.TrimSpace(nodeID), evt)
 }
 
 func (pc *PipelineCoordinator) publish(ctx context.Context, eventType, entityID string, payload map[string]any) error {

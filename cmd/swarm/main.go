@@ -200,27 +200,28 @@ func main() {
 }
 
 type serveOptions struct {
-	ConfigPath           string
-	Backend              string
-	ContractsPath        string
-	DataSource           string
-	WorkspaceBackend     string
-	WorkspaceBackendSet  bool
-	BundleHash           string
-	BundleHashes         []string
-	PlatformSpecPath     string
-	StoreMode            string
-	StoreModeSet         bool
-	APIListenAddr        string
-	MCPListenAddr        string
-	ShutdownGrace        time.Duration
-	Dev                  bool
-	SelfCheck            bool
-	RequireBundleMatch   bool
-	NoRequireBundleMatch bool
-	AbandonActiveRuns    bool
-	Verbose              bool
-	Output               io.Writer
+	ConfigPath                       string
+	Backend                          string
+	ContractsPath                    string
+	DataSource                       string
+	WorkspaceBackend                 string
+	WorkspaceBackendSet              bool
+	BundleHash                       string
+	BundleHashes                     []string
+	PlatformSpecPath                 string
+	StoreMode                        string
+	StoreModeSet                     bool
+	APIListenAddr                    string
+	MCPListenAddr                    string
+	ShutdownGrace                    time.Duration
+	Dev                              bool
+	SelfCheck                        bool
+	RequireBundleMatch               bool
+	NoRequireBundleMatch             bool
+	AbandonActiveRuns                bool
+	Verbose                          bool
+	Output                           io.Writer
+	TestWorkflowNodeHandlerStartHook runtimepipeline.WorkflowNodeHandlerStartHook
 }
 
 type serveRuntimeBundle struct {
@@ -571,6 +572,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 			BootProgress:                     req.BootProgress,
 			SystemContainers:                 systemWorkspaceContainers(workspaces),
 			DisablePersistentStartupRecovery: !req.UseStartupRecovery,
+			TestWorkflowNodeHandlerStartHook: req.Options.TestWorkflowNodeHandlerStartHook,
 		},
 	})
 	if err != nil {
