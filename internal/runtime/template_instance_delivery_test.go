@@ -292,7 +292,7 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 	`, 0, autoEventID)
 }
 
-func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeWithoutInternalCarrierAndEmpireStyleSideEffect(t *testing.T) {
+func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInternalCarrierAndEmpireStyleSideEffect(t *testing.T) {
 	bundle := loadRuntimeTempBundle(t, templateInstanceEmpireOutboxFixtureFiles())
 	source := semanticview.Wrap(bundle)
 	_, db, cleanup := testutil.StartPostgres(t)
@@ -333,8 +333,8 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeWithoutInterna
 		Payload:   []byte(`{"entity_id":"22222222-2222-4222-8222-222222222222","instance_id":"11111111-1111-4111-8111-111111111111","product_id":"product-1"}`),
 		CreatedAt: time.Now().UTC(),
 	}).WithEntityID("22222222-2222-4222-8222-222222222222")
-	if err := bus.Publish(ctx, mailbox); err != nil {
-		t.Fatalf("Publish mailbox: %v", err)
+	if err := bus.PublishAcknowledged(ctx, mailbox); err != nil {
+		t.Fatalf("PublishAcknowledged mailbox: %v", err)
 	}
 
 	waitRuntimeDBCount(t, ctx, db, `

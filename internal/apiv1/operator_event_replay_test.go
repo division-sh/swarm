@@ -283,6 +283,59 @@ func TestOperatorEventReplaySubsetAndFailClosedCases(t *testing.T) {
 		}
 	})
 
+	t.Run("pending node-only delivery is not replay eligible and does not mutate", func(t *testing.T) {
+		ctx := context.Background()
+		_, db, _ := testutil.StartPostgres(t)
+		pg := &store.PostgresStore{DB: db}
+		eventID := uuid.NewString()
+		runID := uuid.NewString()
+		if err := pg.AppendEvent(ctx, (events.Event{
+			ID:          eventID,
+			RunID:       runID,
+			Type:        events.EventType("scan.requested"),
+			SourceAgent: "workflow-runtime",
+			Payload:     []byte(`{"topic":"medicine"}`),
+			CreatedAt:   time.Now().UTC(),
+		}).WithEntityID(runID)); err != nil {
+			t.Fatalf("AppendEvent: %v", err)
+		}
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO event_deliveries (
+				run_id, event_id, subscriber_type, subscriber_id, status, retry_count, created_at
+			)
+			VALUES ($1::uuid, $2::uuid, 'node', 'workflow-runtime', 'pending', 0, now())
+		`, runID, eventID); err != nil {
+			t.Fatalf("seed node-only delivery: %v", err)
+		}
+		handler := eventReplayTestHandler(t, pg, eventReplayTestBus(t, pg))
+		resp := rpcCall(t, handler, eventReplayBody(eventID, nil, "idem-node-only-pending"))
+		if resp.Error == nil {
+			t.Fatal("node-only event.replay error = nil")
+		}
+		if data := asMap(t, resp.Error.Data); data["code"] != EventReplayNoDeliveryHistoryCode {
+			t.Fatalf("node-only data = %#v, want %s", data, EventReplayNoDeliveryHistoryCode)
+		}
+		if count := countEventsByName(t, db, "scan.requested"); count != 1 {
+			t.Fatalf("scan.requested events after node-only replay = %d, want original only", count)
+		}
+		if count := countEventsByName(t, db, "event.replayed"); count != 0 {
+			t.Fatalf("event.replayed events after node-only replay = %d, want 0", count)
+		}
+		if count := countAPIIdempotencyRows(t, db); count != 0 {
+			t.Fatalf("api_idempotency rows after node-only replay = %d, want 0", count)
+		}
+		var status string
+		if err := db.QueryRowContext(ctx, `
+			SELECT status FROM event_deliveries
+			WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'workflow-runtime'
+		`, eventID).Scan(&status); err != nil {
+			t.Fatalf("load node-only delivery status: %v", err)
+		}
+		if status != eventReplayStatusPending {
+			t.Fatalf("node-only delivery status = %q, want pending", status)
+		}
+	})
+
 	t.Run("requested subscriber was not original", func(t *testing.T) {
 		ctx := context.Background()
 		_, db, _ := testutil.StartPostgres(t)
