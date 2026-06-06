@@ -18,6 +18,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
+	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
@@ -109,12 +110,13 @@ func TestOperatorEventPublishReturnsDurableAckBeforePostCommitDispatchCompletes(
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-	started := make(chan string, 1)
 	release := make(chan struct{})
 	var releaseOnce sync.Once
 	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+	probe := runtimelifecycleprobe.New()
 	opts := runStartTestEventBusOptions(source)
-	opts.Interceptors = []runtimebus.EventInterceptor{blockingAPIV1PublishInterceptor{started: started, release: release}}
+	opts.TestLifecycleProbe = probe
+	opts.Interceptors = []runtimebus.EventInterceptor{blockingAPIV1PublishInterceptor{release: release}}
 	bus, err := runtimebus.NewEventBusWithOptions(pg, opts)
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -150,7 +152,11 @@ func TestOperatorEventPublishReturnsDurableAckBeforePostCommitDispatchCompletes(
 		t.Fatalf("api_idempotency rows before dispatch release = %d, want 1", count)
 	}
 
-	requireAPIV1RuntimeBusSignal(t, started, "post-commit interceptor started")
+	startCtx, cancelStart := context.WithTimeout(ctx, time.Second)
+	defer cancelStart()
+	if _, err := probe.WaitForPostCommitDispatchStarted(startCtx, eventID); err != nil {
+		t.Fatalf("post-commit dispatch start for %s: %v", eventID, err)
+	}
 	requireNoAPIV1RuntimeBusEvent(t, ch, "event.publish delivery before post-commit release")
 	if got := countPipelineReceiptsForEvent(t, ctx, db, eventID); got != 0 {
 		t.Fatalf("pipeline receipts before post-commit release = %d, want 0", got)
@@ -161,7 +167,14 @@ func TestOperatorEventPublishReturnsDurableAckBeforePostCommitDispatchCompletes(
 	if got.ID() != eventID {
 		t.Fatalf("delivered event = %s, want %s", got.ID(), eventID)
 	}
-	waitPipelineReceiptsForEvent(t, ctx, db, eventID, 1)
+	doneCtx, cancelDone := context.WithTimeout(ctx, time.Second)
+	defer cancelDone()
+	if _, err := probe.WaitForPostCommitDispatchCompleted(doneCtx, eventID); err != nil {
+		t.Fatalf("post-commit dispatch completion for %s: %v", eventID, err)
+	}
+	if got := countPipelineReceiptsForEvent(t, ctx, db, eventID); got != 1 {
+		t.Fatalf("pipeline receipts after post-commit release = %d, want 1", got)
+	}
 }
 
 func TestOperatorEventPublishSQLiteIdempotentFirstEventPublishesWithoutLock(t *testing.T) {
@@ -1421,15 +1434,10 @@ func eventPublishTestHandlerWithStores(t *testing.T, runs RunReadStore, observab
 }
 
 type blockingAPIV1PublishInterceptor struct {
-	started chan string
 	release <-chan struct{}
 }
 
 func (i blockingAPIV1PublishInterceptor) Intercept(_ context.Context, _ events.Event) (bool, []events.Event, error) {
-	select {
-	case i.started <- "started":
-	default:
-	}
 	<-i.release
 	return true, nil, nil
 }
@@ -1959,20 +1967,6 @@ func loadPipelineReceiptOutcomeAndError(t *testing.T, ctx context.Context, db *s
 		t.Fatalf("load pipeline receipt for %s: %v", eventID, err)
 	}
 	return outcome, errText
-}
-
-func waitPipelineReceiptsForEvent(t *testing.T, ctx context.Context, db *sql.DB, eventID string, want int) {
-	t.Helper()
-	deadline := time.Now().Add(time.Second)
-	for {
-		if got := countPipelineReceiptsForEvent(t, ctx, db, eventID); got == want {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("pipeline receipts for %s did not reach %d", eventID, want)
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
 }
 
 func containsMissingPipelineReceiptEvent(items []events.PersistedReplayEvent, eventID string) bool {

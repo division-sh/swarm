@@ -13,6 +13,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
@@ -28,26 +29,28 @@ func TestOperatorMailboxWriteSupportedSurfacePublishesAndReadsAcrossBackends(t *
 	ctx := context.Background()
 	for _, tc := range []struct {
 		name  string
-		setup func(*testing.T, context.Context, semanticview.Source, runtimecorrelation.BundleSourceFact) (*Handler, *sql.DB, *runtimebus.EventBus)
+		setup func(*testing.T, context.Context, semanticview.Source, runtimecorrelation.BundleSourceFact) (*Handler, *sql.DB, *runtimebus.EventBus, *runtimelifecycleprobe.Probe)
 	}{
 		{
 			name: "sqlite_default_no_selector",
-			setup: func(t *testing.T, ctx context.Context, source semanticview.Source, fact runtimecorrelation.BundleSourceFact) (*Handler, *sql.DB, *runtimebus.EventBus) {
+			setup: func(t *testing.T, ctx context.Context, source semanticview.Source, fact runtimecorrelation.BundleSourceFact) (*Handler, *sql.DB, *runtimebus.EventBus, *runtimelifecycleprobe.Probe) {
 				t.Helper()
 				sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-				handler, bus := newMailboxWriteSupportedSurfaceHandler(t, ctx, sqliteStore, sqliteStore.DB, source, fact, sqliteStore)
-				return handler, sqliteStore.DB, bus
+				probe := runtimelifecycleprobe.New()
+				handler, bus := newMailboxWriteSupportedSurfaceHandler(t, ctx, sqliteStore, sqliteStore.DB, source, fact, sqliteStore, probe)
+				return handler, sqliteStore.DB, bus, probe
 			},
 		},
 		{
 			name: "postgres_explicit_opt_in",
-			setup: func(t *testing.T, _ context.Context, source semanticview.Source, fact runtimecorrelation.BundleSourceFact) (*Handler, *sql.DB, *runtimebus.EventBus) {
+			setup: func(t *testing.T, _ context.Context, source semanticview.Source, fact runtimecorrelation.BundleSourceFact) (*Handler, *sql.DB, *runtimebus.EventBus, *runtimelifecycleprobe.Probe) {
 				t.Helper()
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
 				pg := &store.PostgresStore{DB: db}
-				handler, bus := newMailboxWriteSupportedSurfaceHandler(t, context.Background(), pg, db, source, fact, pg)
-				return handler, db, bus
+				probe := runtimelifecycleprobe.New()
+				handler, bus := newMailboxWriteSupportedSurfaceHandler(t, context.Background(), pg, db, source, fact, pg, probe)
+				return handler, db, bus, probe
 			},
 		},
 	} {
@@ -55,7 +58,7 @@ func TestOperatorMailboxWriteSupportedSurfacePublishesAndReadsAcrossBackends(t *
 			bundle := mailboxWriteSupportedSurfaceBundle(t)
 			source := semanticview.Wrap(bundle)
 			fact := bundleSourceFactForTestBundle(t, bundle)
-			handler, db, bus := tc.setup(t, ctx, source, fact)
+			handler, db, bus, probe := tc.setup(t, ctx, source, fact)
 
 			published := rpcCall(t, handler, eventPublishBodyWithoutBundle("", "thing.created", `{"amount":250,"who":"alice"}`, "", "idem-mailbox-write-"+tc.name))
 			if published.Error != nil {
@@ -89,8 +92,7 @@ func TestOperatorMailboxWriteSupportedSurfacePublishesAndReadsAcrossBackends(t *
 				t.Fatalf("event.publish deliveries = %#v, want durable workflow-runtime and reviewer node snapshot", deliveries)
 			}
 
-			releaseMailboxWritePendingNodeDeliveries(t, db, bus, tc.name, eventID)
-			waitForMailboxWriteBusQuiescence(t, bus, "mailbox_write supported surface")
+			releaseMailboxWritePendingNodeDeliveries(t, db, bus, probe, tc.name, eventID)
 			waitForMailboxWriteSupportedSurface(t, handler, db, bus, runID, eventID, tc.name)
 		})
 	}
@@ -100,26 +102,28 @@ func TestOperatorRuleMailboxWriteSupportedSurfaceIsBranchScopedAcrossBackends(t 
 	ctx := context.Background()
 	for _, tc := range []struct {
 		name  string
-		setup func(*testing.T, context.Context, semanticview.Source, runtimecorrelation.BundleSourceFact) (*Handler, *sql.DB, *runtimebus.EventBus)
+		setup func(*testing.T, context.Context, semanticview.Source, runtimecorrelation.BundleSourceFact) (*Handler, *sql.DB, *runtimebus.EventBus, *runtimelifecycleprobe.Probe)
 	}{
 		{
 			name: "sqlite_default_no_selector",
-			setup: func(t *testing.T, ctx context.Context, source semanticview.Source, fact runtimecorrelation.BundleSourceFact) (*Handler, *sql.DB, *runtimebus.EventBus) {
+			setup: func(t *testing.T, ctx context.Context, source semanticview.Source, fact runtimecorrelation.BundleSourceFact) (*Handler, *sql.DB, *runtimebus.EventBus, *runtimelifecycleprobe.Probe) {
 				t.Helper()
 				sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-				handler, bus := newMailboxWriteSupportedSurfaceHandler(t, ctx, sqliteStore, sqliteStore.DB, source, fact, sqliteStore)
-				return handler, sqliteStore.DB, bus
+				probe := runtimelifecycleprobe.New()
+				handler, bus := newMailboxWriteSupportedSurfaceHandler(t, ctx, sqliteStore, sqliteStore.DB, source, fact, sqliteStore, probe)
+				return handler, sqliteStore.DB, bus, probe
 			},
 		},
 		{
 			name: "postgres_explicit_opt_in",
-			setup: func(t *testing.T, _ context.Context, source semanticview.Source, fact runtimecorrelation.BundleSourceFact) (*Handler, *sql.DB, *runtimebus.EventBus) {
+			setup: func(t *testing.T, _ context.Context, source semanticview.Source, fact runtimecorrelation.BundleSourceFact) (*Handler, *sql.DB, *runtimebus.EventBus, *runtimelifecycleprobe.Probe) {
 				t.Helper()
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
 				pg := &store.PostgresStore{DB: db}
-				handler, bus := newMailboxWriteSupportedSurfaceHandler(t, context.Background(), pg, db, source, fact, pg)
-				return handler, db, bus
+				probe := runtimelifecycleprobe.New()
+				handler, bus := newMailboxWriteSupportedSurfaceHandler(t, context.Background(), pg, db, source, fact, pg, probe)
+				return handler, db, bus, probe
 			},
 		},
 	} {
@@ -127,7 +131,7 @@ func TestOperatorRuleMailboxWriteSupportedSurfaceIsBranchScopedAcrossBackends(t 
 			bundle := conditionalRuleMailboxWriteSupportedSurfaceBundle(t)
 			source := semanticview.Wrap(bundle)
 			fact := bundleSourceFactForTestBundle(t, bundle)
-			handler, db, bus := tc.setup(t, ctx, source, fact)
+			handler, db, bus, probe := tc.setup(t, ctx, source, fact)
 
 			auto := rpcCall(t, handler, eventPublishBodyWithoutBundle("", "thing.created", `{"amount":50,"who":"alice"}`, "", "idem-rule-mailbox-write-auto-"+tc.name))
 			if auto.Error != nil {
@@ -136,8 +140,7 @@ func TestOperatorRuleMailboxWriteSupportedSurfaceIsBranchScopedAcrossBackends(t 
 			autoResult := asMap(t, auto.Result)
 			autoEventID := stringValue(t, autoResult["event_id"], "event_id")
 			autoRunID := stringValue(t, autoResult["run_id"], "run_id")
-			releaseMailboxWritePendingNodeDeliveries(t, db, bus, tc.name, autoEventID)
-			waitForMailboxWriteBusQuiescence(t, bus, "rule mailbox_write auto branch")
+			releaseMailboxWritePendingNodeDeliveries(t, db, bus, probe, tc.name, autoEventID)
 			waitForConditionalRuleEntityState(t, db, autoRunID, tc.name, "approved", 50)
 			assertMailboxListCount(t, handler, autoRunID, 0)
 
@@ -148,8 +151,7 @@ func TestOperatorRuleMailboxWriteSupportedSurfaceIsBranchScopedAcrossBackends(t 
 			humanResult := asMap(t, human.Result)
 			humanEventID := stringValue(t, humanResult["event_id"], "event_id")
 			humanRunID := stringValue(t, humanResult["run_id"], "run_id")
-			releaseMailboxWritePendingNodeDeliveries(t, db, bus, tc.name, humanEventID)
-			waitForMailboxWriteBusQuiescence(t, bus, "rule mailbox_write human branch")
+			releaseMailboxWritePendingNodeDeliveries(t, db, bus, probe, tc.name, humanEventID)
 			waitForConditionalRuleMailboxWrite(t, handler, db, bus, humanRunID, humanEventID, tc.name)
 			waitForConditionalRuleEntityState(t, db, humanRunID, tc.name, "awaiting_human", 250)
 		})
@@ -162,7 +164,7 @@ func TestOperatorMailboxWriteSupportedSurfaceMissingMaterializerIsLoud(t *testin
 	source := semanticview.Wrap(bundle)
 	fact := bundleSourceFactForTestBundle(t, bundle)
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-	handler, _ := newMailboxWriteSupportedSurfaceHandler(t, ctx, sqliteStore, sqliteStore.DB, source, fact, nil)
+	handler, _ := newMailboxWriteSupportedSurfaceHandler(t, ctx, sqliteStore, sqliteStore.DB, source, fact, nil, nil)
 
 	published := rpcCall(t, handler, eventPublishBodyWithoutBundle("", "thing.created", `{"amount":250,"who":"alice"}`, "", "idem-mailbox-write-missing-materializer"))
 	if published.Error != nil {
@@ -181,13 +183,15 @@ func newMailboxWriteSupportedSurfaceHandler(
 	source semanticview.Source,
 	fact runtimecorrelation.BundleSourceFact,
 	materializer runtimepipeline.MailboxWriteMaterializationStore,
+	probe *runtimelifecycleprobe.Probe,
 ) (*Handler, *runtimebus.EventBus) {
 	t.Helper()
 	var coordinator *runtimepipeline.PipelineCoordinator
 	bus, err := runtimebus.NewEventBusWithOptions(persistence.(runtimebus.EventStore), runtimebus.EventBusOptions{
-		ContractBundle:    source,
-		BundleFingerprint: fact.BundleFingerprint,
-		BundleSourceFact:  fact,
+		ContractBundle:     source,
+		BundleFingerprint:  fact.BundleFingerprint,
+		BundleSourceFact:   fact,
+		TestLifecycleProbe: probe,
 		InterceptorProvider: func() []runtimebus.EventInterceptor {
 			if coordinator == nil {
 				return nil
@@ -209,6 +213,7 @@ func newMailboxWriteSupportedSurfaceHandler(
 		MailboxMaterializer:     materializer,
 		EventReceiptsCapability: eventReceiptsCapability(persistence),
 		BundleFingerprint:       fact.BundleFingerprint,
+		TestLifecycleProbe:      probe,
 	})
 	bus.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{AgentID: "workflow-runtime"})
 	bus.Subscribe("workflow-runtime", events.EventType("thing.created"))
@@ -253,19 +258,14 @@ func newMailboxWriteSupportedSurfaceHandler(
 	return handler, bus
 }
 
-func releaseMailboxWritePendingNodeDeliveries(t *testing.T, db *sql.DB, bus *runtimebus.EventBus, backend, eventID string) {
+func releaseMailboxWritePendingNodeDeliveries(t *testing.T, db *sql.DB, bus *runtimebus.EventBus, probe *runtimelifecycleprobe.Probe, backend, eventID string) {
 	t.Helper()
 	if bus == nil {
 		t.Fatalf("%s runtime bus is required to release pending node deliveries", backend)
 	}
-	requireAPIV1Convergence(t, fmt.Sprintf("%s node delivery authority for %s", backend, eventID), func() (bool, error) {
-		_, total := mailboxWriteNodeDeliveryCounts(t, db, backend, eventID)
-		if total > 0 {
-			return true, nil
-		}
-		return false, fmt.Errorf("node delivery row not visible yet")
-	})
+	waitForMailboxWriteLifecycleDeliveryStatus(t, probe, backend, eventID, "pending")
 	if pending, _ := mailboxWriteNodeDeliveryCounts(t, db, backend, eventID); pending == 0 {
+		waitForMailboxWriteLifecycleDeliveryStatus(t, probe, backend, eventID, "delivered")
 		return
 	}
 	evt := loadMailboxWritePersistedEvent(t, db, backend, eventID)
@@ -274,8 +274,18 @@ func releaseMailboxWritePendingNodeDeliveries(t *testing.T, db *sql.DB, bus *run
 	if err := bus.ReleasePendingPersistedDeliveriesForEvent(ctx, evt); err != nil {
 		t.Fatalf("%s release pending node deliveries for event %s: %v", backend, eventID, err)
 	}
-	if err := bus.WaitForQuiescence(ctx); err != nil {
-		t.Fatalf("%s wait for released node deliveries for event %s: %v", backend, eventID, err)
+	waitForMailboxWriteLifecycleDeliveryStatus(t, probe, backend, eventID, "delivered")
+}
+
+func waitForMailboxWriteLifecycleDeliveryStatus(t *testing.T, probe *runtimelifecycleprobe.Probe, backend, eventID, status string) {
+	t.Helper()
+	if probe == nil {
+		t.Fatalf("%s lifecycle probe is required for node delivery %s on event %s", backend, status, eventID)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := probe.WaitForDeliveryStatus(ctx, eventID, "node", "", status); err != nil {
+		t.Fatalf("%s node delivery %s for event %s: %v", backend, status, eventID, err)
 	}
 }
 

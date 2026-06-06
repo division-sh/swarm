@@ -12,6 +12,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -49,6 +50,7 @@ type EventBus struct {
 	runDispatchGate             RunDispatchGate
 	bundleFingerprint           string
 	bundleSourceFact            runtimecorrelation.BundleSourceFact
+	testLifecycleProbe          runtimelifecycleprobe.Observer
 	outboxSweeperActive         bool
 	inFlightPublishes           atomic.Int64
 }
@@ -95,6 +97,7 @@ type EventBusOptions struct {
 	RunDispatchGate             RunDispatchGate
 	BundleFingerprint           string
 	BundleSourceFact            runtimecorrelation.BundleSourceFact
+	TestLifecycleProbe          runtimelifecycleprobe.Observer
 }
 
 const deliverySendTimeout = 250 * time.Millisecond
@@ -168,6 +171,7 @@ func NewEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 		runDispatchGate:             opts.RunDispatchGate,
 		bundleFingerprint:           strings.TrimSpace(opts.BundleFingerprint),
 		bundleSourceFact:            opts.BundleSourceFact.Normalized(),
+		testLifecycleProbe:          opts.TestLifecycleProbe,
 	}
 	eb.deliveryPlanner = eb.newEventBusDeliveryPlanner()
 	return eb, nil

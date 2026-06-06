@@ -364,6 +364,11 @@ func (eb *EventBus) PublishTx(ctx context.Context, tx *sql.Tx, evt events.Event)
 			return fmt.Errorf("persist event deliveries: %w", err)
 		}
 	}
+	if eb.testLifecycleProbe != nil {
+		runtimepipeline.QueuePipelinePostCommitAction(txctx, func() {
+			eb.notifyTestPublishPersisted(context.WithoutCancel(txctx), evt, inboundPlan)
+		})
+	}
 	if scopeWriter, ok := eb.store.(TransactionalEventReplayScopePersistence); ok && scopeWriter != nil {
 		if err := scopeWriter.UpsertCommittedReplayScopeTx(txctx, tx, evt.ID(), runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
 			return fmt.Errorf("persist committed replay scope: %w", err)
@@ -405,6 +410,9 @@ func (eb *EventBus) dispatchCommittedPublishAsync(ctx context.Context, evt event
 }
 
 func (eb *EventBus) completePublishTxDispatch(ctx context.Context, evt events.Event, inboundPlan RoutePlan) {
+	eb.notifyTestPostCommitDispatchStarted(ctx, evt)
+	defer eb.notifyTestPostCommitDispatchCompleted(ctx, evt)
+
 	inboundPlan = inboundPlan.Normalized()
 	deferredTransitions := make([]runtimepipeline.DeferredPipelineTransition, 0, 8)
 	postCommitActions := make([]func(), 0, 8)
@@ -563,6 +571,7 @@ func (eb *EventBus) publishTransactional(
 		}
 		committed = true
 		runtimepipeline.FlushPipelinePostCommitActions(txPostCommitActions)
+		eb.notifyTestPublishPersisted(ctx, evt, inboundPlan)
 		eb.recordTargetDeliveryFailure(ctx, evt, inboundPlan)
 		eb.logPublished(ctx, evt, int(time.Since(start)/time.Microsecond))
 		return nil
@@ -575,6 +584,7 @@ func (eb *EventBus) publishTransactional(
 			return fmt.Errorf("commit publish tx: %w", err)
 		}
 		committed = true
+		eb.notifyTestPublishPersisted(ctx, evt, inboundPlan)
 		eb.logDispatchQueued(ctx, reason, evt, len(inboundPlan.RecipientIDs()), false, false)
 		eb.logPublished(ctx, evt, int(time.Since(start)/time.Microsecond))
 		return nil
@@ -585,6 +595,7 @@ func (eb *EventBus) publishTransactional(
 	}
 	committed = true
 	runtimepipeline.FlushPipelinePostCommitActions(txPostCommitActions)
+	eb.notifyTestPublishPersisted(ctx, evt, inboundPlan)
 
 	postCommitActions := make([]func(), 0, 8)
 	dispatchCtx := runtimepipeline.WithoutPipelineSQLTxContext(ctx)
@@ -688,6 +699,7 @@ func (eb *EventBus) publishAcknowledgedTransactional(
 		}
 		committed = true
 		runtimepipeline.FlushPipelinePostCommitActions(txPostCommitActions)
+		eb.notifyTestPublishPersisted(ctx, evt, inboundPlan)
 		eb.recordTargetDeliveryFailure(ctx, evt, inboundPlan)
 		eb.logPublished(ctx, evt, int(time.Since(start)/time.Microsecond))
 		eb.recordCommittedPublishConvergence(ctx, evt)
@@ -701,6 +713,7 @@ func (eb *EventBus) publishAcknowledgedTransactional(
 		}
 		committed = true
 		runtimepipeline.FlushPipelinePostCommitActions(txPostCommitActions)
+		eb.notifyTestPublishPersisted(ctx, evt, inboundPlan)
 		eb.logDispatchQueued(ctx, reason, evt, len(inboundPlan.RecipientIDs()), false, true)
 		eb.logPublished(ctx, evt, int(time.Since(start)/time.Microsecond))
 		eb.recordCommittedPublishConvergence(ctx, evt)
@@ -711,6 +724,7 @@ func (eb *EventBus) publishAcknowledgedTransactional(
 	}
 	committed = true
 	runtimepipeline.FlushPipelinePostCommitActions(txPostCommitActions)
+	eb.notifyTestPublishPersisted(ctx, evt, inboundPlan)
 	eb.dispatchCommittedPublishAsync(ctx, evt, inboundPlan)
 	return nil
 }
@@ -1011,6 +1025,7 @@ func (eb *EventBus) persistSubscribedPublishPlan(ctx context.Context, evt events
 	if err := eb.persistEventRecord(ctx, evt, persistedRecipients, routePlan.DeliveryTargets(), routePlan.DeliveryRoutes(), runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
 		return err
 	}
+	eb.notifyTestPublishPersisted(ctx, evt, routePlan)
 	eb.logQueuedDeliveries(ctx, evt, persistedRecipients, "matched_agent_subscription", routePlan.ExtraDetail)
 	return nil
 }
@@ -1379,6 +1394,7 @@ func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipie
 		return err
 	}
 	persisted = true
+	eb.notifyTestPublishPersisted(ctx, evt, plan)
 	if plan.TargetFailure != "" {
 		applyTargetDeliveryFailureReceipt(receiptOverride, plan.TargetFailure)
 		eb.recordTargetDeliveryFailure(ctx, evt, plan)

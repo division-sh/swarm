@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/google/uuid"
 )
 
@@ -63,6 +64,7 @@ type PipelineCoordinator struct {
 	testSubscribeHook                func()
 	testEntityStateHook              func(entityID, state string)
 	testWorkflowNodeHandlerStartHook WorkflowNodeHandlerStartHook
+	testLifecycleProbe               runtimelifecycleprobe.Observer
 }
 
 type WorkflowNodeHandlerStartHook func(context.Context, string, events.Event) error
@@ -81,6 +83,7 @@ type PipelineCoordinatorOptions struct {
 	BundleFingerprint                string
 	TestEntityStateHook              func(entityID, state string)
 	TestWorkflowNodeHandlerStartHook WorkflowNodeHandlerStartHook
+	TestLifecycleProbe               runtimelifecycleprobe.Observer
 }
 
 func NewPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordinatorOptions) *PipelineCoordinator {
@@ -111,6 +114,7 @@ func NewPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordin
 		bundleFingerprint:                strings.TrimSpace(opts.BundleFingerprint),
 		testEntityStateHook:              opts.TestEntityStateHook,
 		testWorkflowNodeHandlerStartHook: opts.TestWorkflowNodeHandlerStartHook,
+		testLifecycleProbe:               opts.TestLifecycleProbe,
 		entityLocks:                      make(map[string]*sync.Mutex),
 	}
 }
@@ -143,6 +147,15 @@ func (pc *PipelineCoordinator) SetTestWorkflowNodeHandlerStartHook(fn WorkflowNo
 	}
 	pc.mu.Lock()
 	pc.testWorkflowNodeHandlerStartHook = fn
+	pc.mu.Unlock()
+}
+
+func (pc *PipelineCoordinator) SetTestLifecycleProbe(probe runtimelifecycleprobe.Observer) {
+	if pc == nil {
+		return
+	}
+	pc.mu.Lock()
+	pc.testLifecycleProbe = probe
 	pc.mu.Unlock()
 }
 
@@ -281,12 +294,14 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 	if err := pc.notifyTestWorkflowNodeHandlerStarting(ctx, nodeID, evt); err != nil {
 		return false, err
 	}
+	pc.notifyTestLifecycleHandlerStarted(ctx, nodeID, evt)
 	result, err := pc.executeNodeContractHandler(ctx, nodeID, handler, workflowTriggerContext{
 		Event:           evt,
 		HandlerEventKey: handlerEventKey,
 		State:           pc.currentWorkflowState(ctx, workflowEventEntityID(evt)),
 	}, false)
 	if err != nil {
+		pc.notifyTestLifecycleHandlerCompleted(ctx, nodeID, evt, "failed")
 		if errors.Is(err, runtimeengine.ErrChainDepthExceeded) {
 			_ = runtimedeadletters.Insert(ctx, pc.db, runtimedeadletters.Record{
 				OriginalEventID: strings.TrimSpace(evt.ID()),
@@ -303,6 +318,7 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 		pc.markWorkflowNodeDeliveryDeadLetter(ctx, nodeID, evt, "handler_error", err, 0)
 		return true, err
 	}
+	pc.notifyTestLifecycleHandlerCompleted(ctx, nodeID, evt, "completed")
 	pc.recordInterceptedEmitDeadLetters(ctx, evt, nodeID, result.Outcome)
 	if result.Handled {
 		pc.reconcileWorkflowEventTimers(ctx, workflowEventEntityID(evt), trigger)

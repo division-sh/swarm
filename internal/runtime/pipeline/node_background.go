@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 )
 
 type backgroundWorkflowNode struct {
@@ -69,6 +70,13 @@ func (n *backgroundWorkflowNode) SetOnSubscribeForTest(fn func()) {
 		return
 	}
 	n.runner.SetOnSubscribeForTest(fn)
+}
+
+func (n *backgroundWorkflowNode) SetTestLifecycleProbe(probe runtimelifecycleprobe.Observer) {
+	if n == nil || n.runner == nil {
+		return
+	}
+	n.runner.SetTestLifecycleProbe(probe)
 }
 
 func (n *backgroundWorkflowNode) String() string {

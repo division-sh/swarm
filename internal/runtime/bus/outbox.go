@@ -85,6 +85,13 @@ func (o engineOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.E
 				o.bus.recordTargetDeliveryFailure(context.WithoutCancel(ctx), failedEvent, failedPlan)
 			})
 		}
+		if o.bus.testLifecycleProbe != nil {
+			event := intent.Event
+			routePlan := plan
+			runtimepipeline.QueuePipelinePostCommitAction(ctx, func() {
+				o.bus.notifyTestPublishPersisted(context.WithoutCancel(ctx), event, routePlan)
+			})
+		}
 		o.bus.setPendingInternalDeliveryRoutes(intent.Event.ID(), plan.InternalDeliveryRoutes())
 	}
 	return nil

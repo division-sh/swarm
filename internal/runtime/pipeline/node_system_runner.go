@@ -12,6 +12,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
+	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimerterr "github.com/division-sh/swarm/internal/runtime/rterrors"
 	"github.com/google/uuid"
 )
@@ -43,6 +44,7 @@ type systemNodeRunner struct {
 	overrideHandle          func(context.Context, events.Event) error
 	onSubscribe             func()
 	eventReceiptsCapability func(context.Context) (bool, error)
+	testLifecycleProbe      runtimelifecycleprobe.Observer
 
 	receiptsMu      sync.Mutex
 	receiptsChecked bool
@@ -136,12 +138,15 @@ func (n *systemNodeRunner) ProcessEventForTest(ctx context.Context, evt events.E
 		if !n.markDeliveryInProgress(ctx, evt) {
 			return
 		}
+		n.notifyTestLifecycleHandlerStarted(ctx, evt)
 		if err := n.handle(ctx, evt); err == nil {
+			n.notifyTestLifecycleHandlerCompleted(ctx, evt, "completed")
 			if !n.isActiveRunQuiesced(ctx, evt) {
 				n.markProcessed(ctx, evt)
 			}
 			return
 		} else {
+			n.notifyTestLifecycleHandlerCompleted(ctx, evt, "failed")
 			lastErr = err
 			if isNonRetryableHandlerError(err) {
 				failureType = "handler_error"
@@ -194,6 +199,13 @@ func (n *systemNodeRunner) SetOnSubscribeForTest(fn func()) {
 		return
 	}
 	n.onSubscribe = fn
+}
+
+func (n *systemNodeRunner) SetTestLifecycleProbe(probe runtimelifecycleprobe.Observer) {
+	if n == nil {
+		return
+	}
+	n.testLifecycleProbe = probe
 }
 
 func (n *systemNodeRunner) subscribe() <-chan events.Event {
@@ -356,6 +368,7 @@ func (n *systemNodeRunner) markProcessed(ctx context.Context, evt events.Event) 
 		return
 	}
 	n.convergeNormalRunCompletion(ctx, evt)
+	n.notifyTestLifecycleDeliveryStatus(ctx, evt, "delivered")
 }
 
 func (n *systemNodeRunner) markDeliveryInProgress(ctx context.Context, evt events.Event) bool {
@@ -373,6 +386,7 @@ func (n *systemNodeRunner) markDeliveryInProgress(ctx context.Context, evt event
 		n.logSystemNodeDeliveryTransitionError(ctx, evt, "mark_delivery_in_progress_failed", "Marking the system node delivery in progress failed", err)
 		return false
 	}
+	n.notifyTestLifecycleDeliveryStatus(ctx, evt, "in_progress")
 	return true
 }
 
@@ -393,7 +407,9 @@ func (n *systemNodeRunner) markDeliveryFailed(ctx context.Context, evt events.Ev
 	}
 	if err := n.receiptStore.MarkSystemNodeDeliveryFailed(ctx, n.nodeID, eventID, reasonCode, errText, retryCount, n.effectiveRetryLimit()); err != nil {
 		n.logSystemNodeDeliveryTransitionError(ctx, evt, "mark_delivery_failed_failed", "Marking the system node delivery as failed failed", err)
+		return
 	}
+	n.notifyTestLifecycleDeliveryStatus(ctx, evt, "failed")
 }
 
 func (n *systemNodeRunner) markDeliveryDeadLetter(ctx context.Context, evt events.Event, reasonCode string, cause error, retryCount int) {
@@ -417,6 +433,7 @@ func (n *systemNodeRunner) markDeliveryDeadLetter(ctx context.Context, evt event
 		return
 	}
 	n.convergeNormalRunCompletion(ctx, evt)
+	n.notifyTestLifecycleDeliveryStatus(ctx, evt, "dead_letter")
 }
 
 func (n *systemNodeRunner) logSystemNodeDeliveryTransitionError(ctx context.Context, evt events.Event, action, message string, err error) {
