@@ -28,26 +28,26 @@ func TestOperatorMailboxWriteSupportedSurfacePublishesAndReadsAcrossBackends(t *
 	ctx := context.Background()
 	for _, tc := range []struct {
 		name  string
-		setup func(*testing.T, context.Context, semanticview.Source, runtimecorrelation.BundleSourceFact) (*Handler, *sql.DB)
+		setup func(*testing.T, context.Context, semanticview.Source, runtimecorrelation.BundleSourceFact) (*Handler, *sql.DB, *runtimebus.EventBus)
 	}{
 		{
 			name: "sqlite_default_no_selector",
-			setup: func(t *testing.T, ctx context.Context, source semanticview.Source, fact runtimecorrelation.BundleSourceFact) (*Handler, *sql.DB) {
+			setup: func(t *testing.T, ctx context.Context, source semanticview.Source, fact runtimecorrelation.BundleSourceFact) (*Handler, *sql.DB, *runtimebus.EventBus) {
 				t.Helper()
 				sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-				handler := newMailboxWriteSupportedSurfaceHandler(t, ctx, sqliteStore, sqliteStore.DB, source, fact, sqliteStore)
-				return handler, sqliteStore.DB
+				handler, bus := newMailboxWriteSupportedSurfaceHandler(t, ctx, sqliteStore, sqliteStore.DB, source, fact, sqliteStore)
+				return handler, sqliteStore.DB, bus
 			},
 		},
 		{
 			name: "postgres_explicit_opt_in",
-			setup: func(t *testing.T, _ context.Context, source semanticview.Source, fact runtimecorrelation.BundleSourceFact) (*Handler, *sql.DB) {
+			setup: func(t *testing.T, _ context.Context, source semanticview.Source, fact runtimecorrelation.BundleSourceFact) (*Handler, *sql.DB, *runtimebus.EventBus) {
 				t.Helper()
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
 				pg := &store.PostgresStore{DB: db}
-				handler := newMailboxWriteSupportedSurfaceHandler(t, context.Background(), pg, db, source, fact, pg)
-				return handler, db
+				handler, bus := newMailboxWriteSupportedSurfaceHandler(t, context.Background(), pg, db, source, fact, pg)
+				return handler, db, bus
 			},
 		},
 	} {
@@ -55,7 +55,7 @@ func TestOperatorMailboxWriteSupportedSurfacePublishesAndReadsAcrossBackends(t *
 			bundle := mailboxWriteSupportedSurfaceBundle(t)
 			source := semanticview.Wrap(bundle)
 			fact := bundleSourceFactForTestBundle(t, bundle)
-			handler, db := tc.setup(t, ctx, source, fact)
+			handler, db, bus := tc.setup(t, ctx, source, fact)
 
 			published := rpcCall(t, handler, eventPublishBodyWithoutBundle("", "thing.created", `{"amount":250,"who":"alice"}`, "", "idem-mailbox-write-"+tc.name))
 			if published.Error != nil {
@@ -82,14 +82,16 @@ func TestOperatorMailboxWriteSupportedSurfacePublishesAndReadsAcrossBackends(t *
 				case "workflow-runtime":
 					seenWorkflowRuntime = subscriberType == "agent" && status == "pending"
 				case "reviewer":
-					seenReviewer = subscriberType == "node" && (status == "pending" || status == "delivered")
+					seenReviewer = subscriberType == "node" && (status == "pending" || status == "in_progress" || status == "delivered")
 				}
 			}
 			if !seenWorkflowRuntime || !seenReviewer {
-				t.Fatalf("event.publish deliveries = %#v, want durable pending workflow-runtime and reviewer node snapshot", deliveries)
+				t.Fatalf("event.publish deliveries = %#v, want durable workflow-runtime and reviewer node snapshot", deliveries)
 			}
 
-			waitForMailboxWriteSupportedSurface(t, handler, db, runID, eventID, tc.name)
+			releaseMailboxWritePendingNodeDeliveries(t, db, bus, tc.name, eventID)
+			waitForMailboxWriteBusQuiescence(t, bus, "mailbox_write supported surface")
+			waitForMailboxWriteSupportedSurface(t, handler, db, bus, runID, eventID, tc.name)
 		})
 	}
 }
@@ -98,26 +100,26 @@ func TestOperatorRuleMailboxWriteSupportedSurfaceIsBranchScopedAcrossBackends(t 
 	ctx := context.Background()
 	for _, tc := range []struct {
 		name  string
-		setup func(*testing.T, context.Context, semanticview.Source, runtimecorrelation.BundleSourceFact) (*Handler, *sql.DB)
+		setup func(*testing.T, context.Context, semanticview.Source, runtimecorrelation.BundleSourceFact) (*Handler, *sql.DB, *runtimebus.EventBus)
 	}{
 		{
 			name: "sqlite_default_no_selector",
-			setup: func(t *testing.T, ctx context.Context, source semanticview.Source, fact runtimecorrelation.BundleSourceFact) (*Handler, *sql.DB) {
+			setup: func(t *testing.T, ctx context.Context, source semanticview.Source, fact runtimecorrelation.BundleSourceFact) (*Handler, *sql.DB, *runtimebus.EventBus) {
 				t.Helper()
 				sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-				handler := newMailboxWriteSupportedSurfaceHandler(t, ctx, sqliteStore, sqliteStore.DB, source, fact, sqliteStore)
-				return handler, sqliteStore.DB
+				handler, bus := newMailboxWriteSupportedSurfaceHandler(t, ctx, sqliteStore, sqliteStore.DB, source, fact, sqliteStore)
+				return handler, sqliteStore.DB, bus
 			},
 		},
 		{
 			name: "postgres_explicit_opt_in",
-			setup: func(t *testing.T, _ context.Context, source semanticview.Source, fact runtimecorrelation.BundleSourceFact) (*Handler, *sql.DB) {
+			setup: func(t *testing.T, _ context.Context, source semanticview.Source, fact runtimecorrelation.BundleSourceFact) (*Handler, *sql.DB, *runtimebus.EventBus) {
 				t.Helper()
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
 				pg := &store.PostgresStore{DB: db}
-				handler := newMailboxWriteSupportedSurfaceHandler(t, context.Background(), pg, db, source, fact, pg)
-				return handler, db
+				handler, bus := newMailboxWriteSupportedSurfaceHandler(t, context.Background(), pg, db, source, fact, pg)
+				return handler, db, bus
 			},
 		},
 	} {
@@ -125,13 +127,17 @@ func TestOperatorRuleMailboxWriteSupportedSurfaceIsBranchScopedAcrossBackends(t 
 			bundle := conditionalRuleMailboxWriteSupportedSurfaceBundle(t)
 			source := semanticview.Wrap(bundle)
 			fact := bundleSourceFactForTestBundle(t, bundle)
-			handler, db := tc.setup(t, ctx, source, fact)
+			handler, db, bus := tc.setup(t, ctx, source, fact)
 
 			auto := rpcCall(t, handler, eventPublishBodyWithoutBundle("", "thing.created", `{"amount":50,"who":"alice"}`, "", "idem-rule-mailbox-write-auto-"+tc.name))
 			if auto.Error != nil {
 				t.Fatalf("auto event.publish error = %#v", auto.Error)
 			}
-			autoRunID := stringValue(t, asMap(t, auto.Result)["run_id"], "run_id")
+			autoResult := asMap(t, auto.Result)
+			autoEventID := stringValue(t, autoResult["event_id"], "event_id")
+			autoRunID := stringValue(t, autoResult["run_id"], "run_id")
+			releaseMailboxWritePendingNodeDeliveries(t, db, bus, tc.name, autoEventID)
+			waitForMailboxWriteBusQuiescence(t, bus, "rule mailbox_write auto branch")
 			waitForConditionalRuleEntityState(t, db, autoRunID, tc.name, "approved", 50)
 			assertMailboxListCount(t, handler, autoRunID, 0)
 
@@ -142,8 +148,10 @@ func TestOperatorRuleMailboxWriteSupportedSurfaceIsBranchScopedAcrossBackends(t 
 			humanResult := asMap(t, human.Result)
 			humanEventID := stringValue(t, humanResult["event_id"], "event_id")
 			humanRunID := stringValue(t, humanResult["run_id"], "run_id")
+			releaseMailboxWritePendingNodeDeliveries(t, db, bus, tc.name, humanEventID)
+			waitForMailboxWriteBusQuiescence(t, bus, "rule mailbox_write human branch")
+			waitForConditionalRuleMailboxWrite(t, handler, db, bus, humanRunID, humanEventID, tc.name)
 			waitForConditionalRuleEntityState(t, db, humanRunID, tc.name, "awaiting_human", 250)
-			waitForConditionalRuleMailboxWrite(t, handler, humanRunID, humanEventID)
 		})
 	}
 }
@@ -154,16 +162,15 @@ func TestOperatorMailboxWriteSupportedSurfaceMissingMaterializerIsLoud(t *testin
 	source := semanticview.Wrap(bundle)
 	fact := bundleSourceFactForTestBundle(t, bundle)
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-	handler := newMailboxWriteSupportedSurfaceHandler(t, ctx, sqliteStore, sqliteStore.DB, source, fact, nil)
+	handler, _ := newMailboxWriteSupportedSurfaceHandler(t, ctx, sqliteStore, sqliteStore.DB, source, fact, nil)
 
 	published := rpcCall(t, handler, eventPublishBodyWithoutBundle("", "thing.created", `{"amount":250,"who":"alice"}`, "", "idem-mailbox-write-missing-materializer"))
 	if published.Error != nil {
 		t.Fatalf("event.publish missing materializer should return with diagnostic receipt, got %#v", published.Error)
 	}
-	outcome, reason, errText := waitForSQLitePipelineReceipt(t, sqliteStore.DB)
-	if outcome != "dead_letter" || reason != "pipeline_error" || !strings.Contains(errText, "mailbox_write requires mailbox materialization store") {
-		t.Fatalf("sqlite pipeline receipt = outcome:%q reason:%q error:%q, want loud mailbox materializer failure", outcome, reason, errText)
-	}
+	result := asMap(t, published.Result)
+	eventID := stringValue(t, result["event_id"], "event_id")
+	waitForSQLiteNodeMaterializerFailure(t, sqliteStore.DB, eventID, "reviewer")
 }
 
 func newMailboxWriteSupportedSurfaceHandler(
@@ -174,7 +181,7 @@ func newMailboxWriteSupportedSurfaceHandler(
 	source semanticview.Source,
 	fact runtimecorrelation.BundleSourceFact,
 	materializer runtimepipeline.MailboxWriteMaterializationStore,
-) *Handler {
+) (*Handler, *runtimebus.EventBus) {
 	t.Helper()
 	var coordinator *runtimepipeline.PipelineCoordinator
 	bus, err := runtimebus.NewEventBusWithOptions(persistence.(runtimebus.EventStore), runtimebus.EventBusOptions{
@@ -222,7 +229,7 @@ func newMailboxWriteSupportedSurfaceHandler(
 		t.Fatal("persistence store does not implement APIIdempotencyStore")
 	}
 	runBundleContext, _ := persistence.(RunBundleContextStore)
-	return testHandler(t, Options{
+	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: OperatorReadHandlers(OperatorReadOptions{
 			Now:              func() time.Time { return time.Now().UTC() },
@@ -243,6 +250,184 @@ func newMailboxWriteSupportedSurfaceHandler(
 			},
 		}),
 	})
+	return handler, bus
+}
+
+func releaseMailboxWritePendingNodeDeliveries(t *testing.T, db *sql.DB, bus *runtimebus.EventBus, backend, eventID string) {
+	t.Helper()
+	if bus == nil {
+		t.Fatalf("%s runtime bus is required to release pending node deliveries", backend)
+	}
+	if mailboxWritePendingNodeDeliveryCount(t, db, backend, eventID) == 0 {
+		return
+	}
+	evt := loadMailboxWritePersistedEvent(t, db, backend, eventID)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := bus.ReleasePendingPersistedDeliveriesForEvent(ctx, evt); err != nil {
+		t.Fatalf("%s release pending node deliveries for event %s: %v", backend, eventID, err)
+	}
+	if err := bus.WaitForQuiescence(ctx); err != nil {
+		t.Fatalf("%s wait for released node deliveries for event %s: %v", backend, eventID, err)
+	}
+}
+
+func mailboxWritePendingNodeDeliveryCount(t *testing.T, db *sql.DB, backend, eventID string) int {
+	t.Helper()
+	if strings.TrimSpace(eventID) == "" {
+		return 0
+	}
+	sqlText := ""
+	if strings.HasPrefix(backend, "sqlite") {
+		sqlText = `SELECT COUNT(*) FROM event_deliveries WHERE event_id = ? AND subscriber_type = 'node' AND status = 'pending'`
+	} else {
+		sqlText = `SELECT COUNT(*) FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = 'node' AND status = 'pending'`
+	}
+	var count int
+	if err := db.QueryRowContext(context.Background(), sqlText, eventID).Scan(&count); err != nil {
+		t.Fatalf("%s pending node delivery count for %s: %v", backend, eventID, err)
+	}
+	return count
+}
+
+func loadMailboxWritePersistedEvent(t *testing.T, db *sql.DB, backend, eventID string) events.Event {
+	t.Helper()
+	sqlText := ""
+	if strings.HasPrefix(backend, "sqlite") {
+		sqlText = `
+			SELECT event_id, COALESCE(run_id, ''), event_name, COALESCE(produced_by, ''),
+			       COALESCE(entity_id, ''), COALESCE(flow_instance, ''), COALESCE(scope, 'global'),
+			       payload, created_at, COALESCE(source_event_id, ''),
+			       COALESCE(source_route, '{}'), COALESCE(target_route, '{}'), COALESCE(target_set, '[]')
+			FROM events
+			WHERE event_id = ?
+		`
+	} else {
+		sqlText = `
+			SELECT event_id::text, COALESCE(run_id::text, ''), event_name, COALESCE(produced_by, ''),
+			       COALESCE(entity_id::text, ''), COALESCE(flow_instance, ''), COALESCE(scope, 'global'),
+			       payload, created_at, COALESCE(source_event_id::text, ''),
+			       COALESCE(source_route, '{}'::jsonb), COALESCE(target_route, '{}'::jsonb), COALESCE(target_set, '[]'::jsonb)
+			FROM events
+			WHERE event_id = $1::uuid
+		`
+	}
+	var id, runID, eventName, producedBy, entityID, flowInstance, scope, sourceEventID string
+	var payloadRaw, createdAtRaw, sourceRouteRaw, targetRouteRaw, targetSetRaw any
+	if err := db.QueryRowContext(context.Background(), sqlText, eventID).Scan(
+		&id,
+		&runID,
+		&eventName,
+		&producedBy,
+		&entityID,
+		&flowInstance,
+		&scope,
+		&payloadRaw,
+		&createdAtRaw,
+		&sourceEventID,
+		&sourceRouteRaw,
+		&targetRouteRaw,
+		&targetSetRaw,
+	); err != nil {
+		t.Fatalf("%s load event %s: %v", backend, eventID, err)
+	}
+	return events.NewProjectionEvent(
+		id,
+		events.EventType(eventName),
+		producedBy,
+		"",
+		mailboxWriteDBJSON(payloadRaw, "{}"),
+		0,
+		runID,
+		sourceEventID,
+		mailboxWriteDBEnvelope(t, entityID, flowInstance, scope, sourceRouteRaw, targetRouteRaw, targetSetRaw),
+		mailboxWriteDBTime(createdAtRaw),
+	)
+}
+
+func mailboxWriteDBEnvelope(t *testing.T, entityID, flowInstance, scope string, sourceRouteRaw, targetRouteRaw, targetSetRaw any) events.EventEnvelope {
+	t.Helper()
+	envelope := events.EventEnvelope{
+		EntityID:     strings.TrimSpace(entityID),
+		FlowInstance: strings.Trim(strings.TrimSpace(flowInstance), "/"),
+		Scope:        events.EventScope(strings.TrimSpace(scope)),
+	}
+	if err := json.Unmarshal(mailboxWriteDBJSON(sourceRouteRaw, "{}"), &envelope.Source); err != nil {
+		t.Fatalf("decode source_route: %v", err)
+	}
+	if err := json.Unmarshal(mailboxWriteDBJSON(targetRouteRaw, "{}"), &envelope.Target); err != nil {
+		t.Fatalf("decode target_route: %v", err)
+	}
+	if err := json.Unmarshal(mailboxWriteDBJSON(targetSetRaw, "[]"), &envelope.TargetSet); err != nil {
+		t.Fatalf("decode target_set: %v", err)
+	}
+	return envelope.Normalized()
+}
+
+func mailboxWriteDBJSON(raw any, fallback string) json.RawMessage {
+	switch v := raw.(type) {
+	case nil:
+		return json.RawMessage(fallback)
+	case json.RawMessage:
+		if len(v) == 0 {
+			return json.RawMessage(fallback)
+		}
+		return v
+	case []byte:
+		if len(v) == 0 {
+			return json.RawMessage(fallback)
+		}
+		return json.RawMessage(v)
+	case string:
+		if strings.TrimSpace(v) == "" {
+			return json.RawMessage(fallback)
+		}
+		return json.RawMessage(v)
+	default:
+		encoded, err := json.Marshal(v)
+		if err != nil || len(encoded) == 0 {
+			return json.RawMessage(fallback)
+		}
+		return json.RawMessage(encoded)
+	}
+}
+
+func mailboxWriteDBTime(raw any) time.Time {
+	switch v := raw.(type) {
+	case time.Time:
+		return v.UTC()
+	case []byte:
+		return mailboxWriteParseDBTime(string(v))
+	case string:
+		return mailboxWriteParseDBTime(v)
+	default:
+		return time.Now().UTC()
+	}
+}
+
+func mailboxWriteParseDBTime(raw string) time.Time {
+	raw = strings.TrimSpace(raw)
+	for _, layout := range []string{
+		time.RFC3339Nano,
+		"2006-01-02 15:04:05.999999999Z07:00",
+		"2006-01-02 15:04:05.999999999-07:00",
+		"2006-01-02 15:04:05.999999",
+		"2006-01-02 15:04:05",
+	} {
+		if parsed, err := time.Parse(layout, raw); err == nil {
+			return parsed.UTC()
+		}
+	}
+	return time.Now().UTC()
+}
+
+func waitForMailboxWriteBusQuiescence(t *testing.T, bus *runtimebus.EventBus, description string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := drainMailboxWriteBus(ctx, bus); err != nil {
+		t.Fatalf("%s bus drain: %v", description, err)
+	}
 }
 
 func eventReceiptsCapability(persistence any) func(context.Context) (bool, error) {
@@ -255,9 +440,12 @@ func eventReceiptsCapability(persistence any) func(context.Context) (bool, error
 	return provider.CanonicalEventReceiptsCapability
 }
 
-func waitForMailboxWriteSupportedSurface(t *testing.T, handler *Handler, db *sql.DB, runID, eventID, backend string) {
+func waitForMailboxWriteSupportedSurface(t *testing.T, handler *Handler, db *sql.DB, bus *runtimebus.EventBus, runID, eventID, backend string) {
 	t.Helper()
 	requireAPIV1Convergence(t, fmt.Sprintf("mailbox_write supported surface for %s", backend), func() (bool, error) {
+		if err := drainMailboxWriteBusPoll(bus); err != nil {
+			return false, err
+		}
 		listed := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"mailbox-list","method":"mailbox.list","params":{"status":"pending","run_id":%q,"limit":10}}`, runID))
 		if listed.Error != nil {
 			t.Fatalf("mailbox.list error = %#v", listed.Error)
@@ -275,9 +463,12 @@ func waitForMailboxWriteSupportedSurface(t *testing.T, handler *Handler, db *sql
 	})
 }
 
-func waitForConditionalRuleMailboxWrite(t *testing.T, handler *Handler, runID, eventID string) {
+func waitForConditionalRuleMailboxWrite(t *testing.T, handler *Handler, db *sql.DB, bus *runtimebus.EventBus, runID, eventID, backend string) {
 	t.Helper()
 	requireAPIV1Convergence(t, "rule mailbox_write supported surface", func() (bool, error) {
+		if err := drainMailboxWriteBusPoll(bus); err != nil {
+			return false, err
+		}
 		listed := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"rule-mailbox-list","method":"mailbox.list","params":{"status":"pending","run_id":%q,"limit":10}}`, runID))
 		if listed.Error != nil {
 			t.Fatalf("mailbox.list error = %#v", listed.Error)
@@ -290,8 +481,119 @@ func waitForConditionalRuleMailboxWrite(t *testing.T, handler *Handler, runID, e
 			}
 			return true, nil
 		}
-		return false, fmt.Errorf("mailbox.list returned %d items", len(items))
+		return false, fmt.Errorf("mailbox.list returned %d items\n%s", len(items), mailboxWriteDebugSummary(t, db, backend, runID, eventID))
 	})
+}
+
+func drainMailboxWriteBusPoll(bus *runtimebus.EventBus) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	return drainMailboxWriteBus(ctx, bus)
+}
+
+func drainMailboxWriteBus(ctx context.Context, bus *runtimebus.EventBus) error {
+	if bus == nil {
+		return nil
+	}
+	for i := 0; i < 4; i++ {
+		if err := bus.WaitForQuiescence(ctx); err != nil {
+			return err
+		}
+		swept, err := bus.SweepUndispatched(ctx, time.Hour, 10)
+		if err != nil {
+			return err
+		}
+		if swept == 0 {
+			return bus.WaitForQuiescence(ctx)
+		}
+	}
+	return bus.WaitForQuiescence(ctx)
+}
+
+func mailboxWriteDebugSummary(t *testing.T, db *sql.DB, backend, runID, eventID string) string {
+	t.Helper()
+	sections := []string{
+		mailboxWriteDebugQuery(t, db, backend, "entity_state", runID, eventID),
+		mailboxWriteDebugQuery(t, db, backend, "events", runID, eventID),
+		mailboxWriteDebugQuery(t, db, backend, "event_deliveries", runID, eventID),
+		mailboxWriteDebugQuery(t, db, backend, "event_receipts", runID, eventID),
+		mailboxWriteDebugQuery(t, db, backend, "mailbox", runID, eventID),
+	}
+	return strings.Join(sections, "\n")
+}
+
+func mailboxWriteDebugQuery(t *testing.T, db *sql.DB, backend, scope, runID, eventID string) string {
+	t.Helper()
+	sqlText := ""
+	args := []any{runID, eventID}
+	if backend == "sqlite_default_no_selector" {
+		switch scope {
+		case "entity_state":
+			sqlText = `SELECT entity_id, current_state, fields FROM entity_state WHERE run_id = ? ORDER BY created_at, entity_id LIMIT 5`
+			args = []any{runID}
+		case "events":
+			sqlText = `SELECT event_id, event_name, COALESCE(entity_id, '') FROM events WHERE run_id = ? OR event_id = ? ORDER BY created_at, event_id LIMIT 8`
+		case "event_deliveries":
+			sqlText = `SELECT event_id, subscriber_type, subscriber_id, status, COALESCE(reason_code, '') FROM event_deliveries WHERE run_id = ? OR event_id = ? ORDER BY created_at, event_id, subscriber_id LIMIT 8`
+		case "event_receipts":
+			sqlText = `SELECT r.event_id, r.subscriber_type, r.subscriber_id, r.outcome, COALESCE(r.reason_code, '') FROM event_receipts r JOIN events e ON e.event_id = r.event_id WHERE e.run_id = ? OR r.event_id = ? ORDER BY r.processed_at, r.event_id LIMIT 8`
+		case "mailbox":
+			sqlText = `SELECT item_id, status, item_type, source_event_id, COALESCE(entity_id, ''), payload FROM mailbox WHERE source_event_id = ? ORDER BY created_at, item_id LIMIT 5`
+			args = []any{eventID}
+		}
+	} else {
+		switch scope {
+		case "entity_state":
+			sqlText = `SELECT entity_id::text, current_state, fields::text FROM entity_state WHERE run_id = $1::uuid ORDER BY created_at, entity_id LIMIT 5`
+			args = []any{runID}
+		case "events":
+			sqlText = `SELECT event_id::text, event_name, COALESCE(entity_id::text, '') FROM events WHERE run_id = $1::uuid OR event_id = $2::uuid ORDER BY created_at, event_id LIMIT 8`
+		case "event_deliveries":
+			sqlText = `SELECT event_id::text, subscriber_type, subscriber_id, status, COALESCE(reason_code, '') FROM event_deliveries WHERE run_id = $1::uuid OR event_id = $2::uuid ORDER BY created_at, event_id, subscriber_id LIMIT 8`
+		case "event_receipts":
+			sqlText = `SELECT r.event_id::text, r.subscriber_type, r.subscriber_id, r.outcome, COALESCE(r.reason_code, '') FROM event_receipts r JOIN events e ON e.event_id = r.event_id WHERE e.run_id = $1::uuid OR r.event_id = $2::uuid ORDER BY r.processed_at, r.event_id LIMIT 8`
+		case "mailbox":
+			sqlText = `SELECT item_id::text, status, item_type, source_event_id::text, COALESCE(entity_id::text, ''), payload::text FROM mailbox WHERE source_event_id = $1::uuid ORDER BY created_at, item_id LIMIT 5`
+			args = []any{eventID}
+		}
+	}
+	if sqlText == "" {
+		return scope + ": unsupported debug query"
+	}
+	rows, err := db.QueryContext(context.Background(), sqlText, args...)
+	if err != nil {
+		return fmt.Sprintf("%s: %v", scope, err)
+	}
+	defer rows.Close()
+	columns, err := rows.Columns()
+	if err != nil {
+		return fmt.Sprintf("%s columns: %v", scope, err)
+	}
+	out := []string{}
+	for rows.Next() {
+		values := make([]sql.NullString, len(columns))
+		scan := make([]any, len(values))
+		for i := range values {
+			scan[i] = &values[i]
+		}
+		if err := rows.Scan(scan...); err != nil {
+			return fmt.Sprintf("%s scan: %v", scope, err)
+		}
+		cols := make([]string, len(values))
+		for i, value := range values {
+			if value.Valid {
+				cols[i] = value.String
+			}
+		}
+		out = append(out, fmt.Sprintf("%v", cols))
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Sprintf("%s rows: %v", scope, err)
+	}
+	if len(out) == 0 {
+		return scope + ": <none>"
+	}
+	return scope + ": " + strings.Join(out, "; ")
 }
 
 func assertConditionalRuleMailboxItem(t *testing.T, handler *Handler, item map[string]any, runID, eventID string) error {
@@ -401,26 +703,41 @@ func loadMailboxWriteEntityState(t *testing.T, db *sql.DB, runID, backend string
 	return state, decodeJSONMap(t, json.RawMessage(fieldsRaw)), nil
 }
 
-func waitForSQLitePipelineReceipt(t *testing.T, db *sql.DB) (string, string, string) {
+func waitForSQLiteNodeMaterializerFailure(t *testing.T, db *sql.DB, eventID, nodeID string) {
 	t.Helper()
-	var outcome, reason, errText string
-	requireAPIV1Convergence(t, "sqlite pipeline receipt", func() (bool, error) {
-		var gotOutcome, gotReason, gotErrText string
+	var lastStatus, lastReason, lastError, lastReceiptOutcome, lastReceiptReason, lastReceiptError string
+	requireAPIV1Convergence(t, "sqlite node mailbox materializer failure", func() (bool, error) {
 		if err := db.QueryRow(`
-			SELECT outcome, COALESCE(reason_code, ''), COALESCE(json_extract(side_effects, '$.error'), '')
-			FROM event_receipts
-			WHERE subscriber_type = 'platform' AND subscriber_id = 'pipeline'
-			ORDER BY processed_at DESC
+			SELECT
+				COALESCE(d.status, ''),
+				COALESCE(d.reason_code, ''),
+				COALESCE(d.last_error, ''),
+				COALESCE(r.outcome, ''),
+				COALESCE(r.reason_code, ''),
+				COALESCE(json_extract(r.side_effects, '$.error'), '')
+			FROM event_deliveries d
+			LEFT JOIN event_receipts r
+			  ON r.event_id = d.event_id
+			 AND r.subscriber_type = 'node'
+			 AND r.subscriber_id = d.subscriber_id
+			WHERE d.event_id = ?
+			  AND d.subscriber_type = 'node'
+			  AND d.subscriber_id = ?
 			LIMIT 1
-		`).Scan(&gotOutcome, &gotReason, &gotErrText); err == nil {
-			// Assign only after Scan succeeds so callers never observe partial values.
-			outcome, reason, errText = gotOutcome, gotReason, gotErrText
-			return true, nil
-		} else {
+		`, eventID, nodeID).Scan(&lastStatus, &lastReason, &lastError, &lastReceiptOutcome, &lastReceiptReason, &lastReceiptError); err != nil {
 			return false, err
 		}
+		if lastStatus != "dead_letter" || lastReceiptOutcome != "dead_letter" {
+			return false, nil
+		}
+		return strings.Contains(lastError, "mailbox_write requires mailbox materialization store") &&
+			strings.Contains(lastReceiptError, "mailbox_write requires mailbox materialization store"), nil
 	})
-	return outcome, reason, errText
+	if lastStatus != "dead_letter" || lastReceiptOutcome != "dead_letter" ||
+		!strings.Contains(lastError, "mailbox_write requires mailbox materialization store") ||
+		!strings.Contains(lastReceiptError, "mailbox_write requires mailbox materialization store") {
+		t.Fatalf("sqlite node/%s materializer failure = delivery status:%q reason:%q error:%q receipt outcome:%q reason:%q error:%q, want dead_letter materializer failure", nodeID, lastStatus, lastReason, lastError, lastReceiptOutcome, lastReceiptReason, lastReceiptError)
+	}
 }
 
 func bundleSourceFactForTestBundle(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle) runtimecorrelation.BundleSourceFact {

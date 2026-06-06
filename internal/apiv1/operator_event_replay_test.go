@@ -382,24 +382,45 @@ func TestOperatorEventReplaySubsetAndFailClosedCases(t *testing.T) {
 		}
 	})
 
-	t.Run("nonterminal original delivery is not eligible", func(t *testing.T) {
-		ctx := context.Background()
-		_, db, _ := testutil.StartPostgres(t)
-		pg := &store.PostgresStore{DB: db}
-		bus := eventReplayTestBus(t, pg)
-		seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "agent-a")
-		bus.Subscribe("agent-a")
-		defer bus.Unsubscribe("agent-a")
-		original := seedReplayableOperatorEvent(t, ctx, pg, "scan.requested", []string{"agent-a"}, eventReplayStatusPending)
-		handler := eventReplayTestHandler(t, pg, bus)
-		resp := rpcCall(t, handler, eventReplayBody(original.EventID, nil, "idem-not-eligible"))
-		if resp.Error == nil {
-			t.Fatal("not-eligible event.replay error = nil")
-		}
-		if data := asMap(t, resp.Error.Data); data["code"] != EventReplayNotEligibleCode {
-			t.Fatalf("not-eligible data = %#v, want %s", data, EventReplayNotEligibleCode)
-		}
-	})
+	for _, status := range []string{eventReplayStatusPending, eventReplayStatusInProgress} {
+		t.Run("nonterminal original delivery is not eligible "+status, func(t *testing.T) {
+			ctx := context.Background()
+			_, db, _ := testutil.StartPostgres(t)
+			pg := &store.PostgresStore{DB: db}
+			bus := eventReplayTestBus(t, pg)
+			seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "agent-a")
+			bus.Subscribe("agent-a")
+			defer bus.Unsubscribe("agent-a")
+			original := seedReplayableOperatorEvent(t, ctx, pg, "scan.requested", []string{"agent-a"}, status)
+			handler := eventReplayTestHandler(t, pg, bus)
+			resp := rpcCall(t, handler, eventReplayBody(original.EventID, nil, "idem-not-eligible-"+status))
+			if resp.Error == nil {
+				t.Fatal("not-eligible event.replay error = nil")
+			}
+			data := asMap(t, resp.Error.Data)
+			details := asMap(t, data["details"])
+			if data["code"] != EventReplayNotEligibleCode || details["status"] != status {
+				t.Fatalf("not-eligible data = %#v, want %s status %s", data, EventReplayNotEligibleCode, status)
+			}
+			if count := countEventsByName(t, db, "event.replayed"); count != 0 {
+				t.Fatalf("event.replayed events after nonterminal replay = %d, want 0", count)
+			}
+			if count := countAPIIdempotencyRows(t, db); count != 0 {
+				t.Fatalf("api_idempotency rows after nonterminal replay = %d, want 0", count)
+			}
+			var persistedStatus string
+			if err := db.QueryRowContext(ctx, `
+				SELECT COALESCE(status, '')
+				FROM event_deliveries
+				WHERE event_id = $1::uuid AND subscriber_type = 'agent' AND subscriber_id = 'agent-a'
+			`, original.EventID).Scan(&persistedStatus); err != nil {
+				t.Fatalf("load original delivery after nonterminal replay: %v", err)
+			}
+			if persistedStatus != status {
+				t.Fatalf("original delivery status after replay = %q, want unchanged %q", persistedStatus, status)
+			}
+		})
+	}
 }
 
 func TestOperatorAgentReplayProjectsSingletonEventReplayOwner(t *testing.T) {

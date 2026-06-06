@@ -1446,6 +1446,13 @@ func (eb *EventBus) PublishPersistedRecipients(ctx context.Context, evt events.E
 	return eb.publishPersistedRecipients(ctx, evt, recipients, false)
 }
 
+func (eb *EventBus) ReleasePendingPersistedDeliveriesForEvent(ctx context.Context, evt events.Event) error {
+	if eb == nil {
+		return nil
+	}
+	return eb.publishPersistedRecipients(ctx, evt, nil, true)
+}
+
 func (eb *EventBus) publishPersistedRecipients(ctx context.Context, evt events.Event, recipients []string, replayInterceptors bool) error {
 	ctx = WithCurrentRuntimeEpoch(ctx)
 	if err := ensurePublishEpoch(ctx); err != nil {

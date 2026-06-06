@@ -223,6 +223,8 @@ type serveOptions struct {
 	Output                           io.Writer
 	TestEntityStateHook              func(entityID, state string)
 	TestWorkflowNodeHandlerStartHook runtimepipeline.WorkflowNodeHandlerStartHook
+	TestOutboxSweeperConfig          runtimebus.OutboxSweeperConfig
+	TestRuntimeReadyHook             func(*runtime.Runtime)
 }
 
 type serveRuntimeBundle struct {
@@ -575,6 +577,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 			DisablePersistentStartupRecovery: !req.UseStartupRecovery,
 			TestEntityStateHook:              req.Options.TestEntityStateHook,
 			TestWorkflowNodeHandlerStartHook: req.Options.TestWorkflowNodeHandlerStartHook,
+			TestOutboxSweeperConfig:          req.Options.TestOutboxSweeperConfig,
 		},
 	})
 	if err != nil {
@@ -981,6 +984,9 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		reporter.emit(22, "ready", "FAILED", err.Error())
 		log.Printf("start runtime: %v", err)
 		return 1
+	}
+	if opts.TestRuntimeReadyHook != nil {
+		opts.TestRuntimeReadyHook(rt)
 	}
 	startServeRunStalledEscalation(ctx, stores, runtimeContexts, rt.Bus)
 	reporter.emit(20, "http_listener_bind", "ok", fmt.Sprintf("api_listener=%s api_routes=%s mcp_listener=%s mcp_routes=%s", apiListener.Addr(), serveAPIRoutes, mcpListener.Addr(), serveMCPRoutes))

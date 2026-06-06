@@ -36,10 +36,21 @@ func TestSystemNodeRunner_MarkProcessedSettlesNodeDeliveryAndTriggersNormalRunCo
 	seedSystemNodeCompletionRun(t, db, runID, eventID, entityID)
 	bus := &systemNodeCompletionBus{}
 	handlerCalled := false
+	handlerObservedStatus := ""
+	handlerObservedReason := ""
 	runner := newSystemNodeRunner("terminal-node", bus, db, func() []events.EventType {
 		return []events.EventType{"example.started"}
 	}, func(ctx context.Context, evt events.Event) error {
 		handlerCalled = true
+		if err := db.QueryRowContext(ctx, `
+			SELECT COALESCE(status, ''), COALESCE(reason_code, '')
+			FROM event_deliveries
+			WHERE event_id = $1::uuid
+			  AND subscriber_type = 'node'
+			  AND subscriber_id = 'terminal-node'
+		`, eventID).Scan(&handlerObservedStatus, &handlerObservedReason); err != nil {
+			t.Fatalf("load node delivery during handler: %v", err)
+		}
 		if _, err := db.ExecContext(ctx, `
 			UPDATE entity_state
 			SET current_state = 'done',
@@ -57,6 +68,9 @@ func TestSystemNodeRunner_MarkProcessedSettlesNodeDeliveryAndTriggersNormalRunCo
 
 	if !handlerCalled {
 		t.Fatal("handler was not called")
+	}
+	if handlerObservedStatus != "in_progress" || handlerObservedReason != "node_processing" {
+		t.Fatalf("handler observed node delivery = %s/%s, want in_progress/node_processing", handlerObservedStatus, handlerObservedReason)
 	}
 	if len(bus.converged) != 1 || bus.converged[0] != eventID {
 		t.Fatalf("normal run convergence events = %#v, want %s", bus.converged, eventID)
@@ -90,6 +104,114 @@ func TestSystemNodeRunner_MarkProcessedSettlesNodeDeliveryAndTriggersNormalRunCo
 	}
 	if receiptOutcome != "no_op" {
 		t.Fatalf("node receipt outcome = %q, want no_op", receiptOutcome)
+	}
+}
+
+func TestSystemNodeRunner_RetryableFailureWritesFailedBeforeRetry(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	ctx := context.Background()
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	entityID := uuid.NewString()
+	seedSystemNodeCompletionRun(t, db, runID, eventID, entityID)
+	bus := &systemNodeCompletionBus{}
+	attempts := 0
+	var (
+		backoffStatus string
+		backoffReason string
+		backoffError  string
+		backoffRetry  int
+	)
+	runner := newSystemNodeRunner("terminal-node", bus, db, func() []events.EventType {
+		return []events.EventType{"example.started"}
+	}, func(context.Context, events.Event) error {
+		attempts++
+		if attempts == 1 {
+			return errors.New("temporary node failure")
+		}
+		return nil
+	}, func(context.Context) (bool, error) { return true, nil })
+	runner.SetRetryPolicyForTest(2, func(int) time.Duration {
+		if err := db.QueryRowContext(ctx, `
+			SELECT COALESCE(status, ''), COALESCE(reason_code, ''), COALESCE(last_error, ''), COALESCE(retry_count, 0)
+			FROM event_deliveries
+			WHERE event_id = $1::uuid
+			  AND subscriber_type = 'node'
+			  AND subscriber_id = 'terminal-node'
+		`, eventID).Scan(&backoffStatus, &backoffReason, &backoffError, &backoffRetry); err != nil {
+			t.Fatalf("load node delivery during retry backoff: %v", err)
+		}
+		return 0
+	})
+
+	runner.ProcessEventForTest(ctx, (events.NewProjectionEvent(eventID,
+		"example.started", "", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID(entityID))
+
+	if attempts != 2 {
+		t.Fatalf("attempts = %d, want 2", attempts)
+	}
+	if backoffStatus != "failed" || backoffReason != "handler_error" || backoffRetry != 1 || backoffError == "" {
+		t.Fatalf("retry backoff delivery = %s/%s retry=%d err=%q, want failed/handler_error retry=1 with error", backoffStatus, backoffReason, backoffRetry, backoffError)
+	}
+	var finalStatus string
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(status, '')
+		FROM event_deliveries
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'node'
+		  AND subscriber_id = 'terminal-node'
+	`, eventID).Scan(&finalStatus); err != nil {
+		t.Fatalf("load final node delivery: %v", err)
+	}
+	if finalStatus != "delivered" {
+		t.Fatalf("final node delivery status = %q, want delivered", finalStatus)
+	}
+}
+
+func TestSystemNodeRunner_RetryableFailureExhaustsConfiguredRetryLimit(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	ctx := context.Background()
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	entityID := uuid.NewString()
+	seedSystemNodeCompletionRun(t, db, runID, eventID, entityID)
+	bus := &systemNodeCompletionBus{}
+	attempts := 0
+	runner := newSystemNodeRunner("terminal-node", bus, db, func() []events.EventType {
+		return []events.EventType{"example.started"}
+	}, func(context.Context, events.Event) error {
+		attempts++
+		return errors.New("temporary node failure")
+	}, func(context.Context) (bool, error) { return true, nil })
+	runner.SetRetryPolicyForTest(DefaultSystemNodeRetryLimit, func(int) time.Duration { return 0 })
+
+	runner.ProcessEventForTest(ctx, (events.NewProjectionEvent(eventID,
+		"example.started", "", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID(entityID))
+
+	if attempts != DefaultSystemNodeRetryLimit {
+		t.Fatalf("attempts = %d, want configured retry limit %d", attempts, DefaultSystemNodeRetryLimit)
+	}
+	var (
+		deliveryStatus string
+		deliveryReason string
+		deliveryRetry  int
+		receiptOutcome string
+	)
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(d.status, ''), COALESCE(d.reason_code, ''), COALESCE(d.retry_count, 0), COALESCE(r.outcome, '')
+		FROM event_deliveries d
+		LEFT JOIN event_receipts r
+		  ON r.event_id = d.event_id
+		 AND r.subscriber_type = d.subscriber_type
+		 AND r.subscriber_id = d.subscriber_id
+		WHERE d.event_id = $1::uuid
+		  AND d.subscriber_type = 'node'
+		  AND d.subscriber_id = 'terminal-node'
+	`, eventID).Scan(&deliveryStatus, &deliveryReason, &deliveryRetry, &receiptOutcome); err != nil {
+		t.Fatalf("load exhausted node delivery: %v", err)
+	}
+	if deliveryStatus != "dead_letter" || deliveryReason != "retry_exhausted" || deliveryRetry != DefaultSystemNodeRetryLimit || receiptOutcome != "dead_letter" {
+		t.Fatalf("exhausted node delivery = %s/%s retry=%d receipt=%q, want dead_letter/retry_exhausted retry=%d receipt dead_letter", deliveryStatus, deliveryReason, deliveryRetry, receiptOutcome, DefaultSystemNodeRetryLimit)
 	}
 }
 
@@ -204,7 +326,7 @@ func TestSystemNodeProcessedSettlementFailsWithTerminalNodeDeliveryAuthority(t *
 		retryCount int
 	}{
 		{name: "dead_letter", status: "dead_letter", retryCount: 2},
-		{name: "retry_exhausted_failed", status: "failed", retryCount: 2},
+		{name: "retry_exhausted_failed", status: "failed", retryCount: DefaultSystemNodeRetryLimit},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, db, _ := testutil.StartPostgres(t)

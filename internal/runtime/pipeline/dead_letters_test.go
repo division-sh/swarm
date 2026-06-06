@@ -30,10 +30,13 @@ func (s eventReceiptsCapabilityStub) resolve(context.Context) (bool, error) {
 type typedSystemNodeReceiptStore struct {
 	deliveryAuthorized bool
 	processed          bool
+	inProgress         int
+	failed             int
+	deadLettered       int
 	marked             int
 }
 
-func (s *typedSystemNodeReceiptStore) SystemNodeDeliveryAuthorized(context.Context, string, string) (bool, error) {
+func (s *typedSystemNodeReceiptStore) SystemNodeDeliveryAuthorized(context.Context, string, string, int) (bool, error) {
 	return s.deliveryAuthorized, nil
 }
 
@@ -43,6 +46,22 @@ func (s *typedSystemNodeReceiptStore) SystemNodeProcessed(context.Context, strin
 
 func (*typedSystemNodeReceiptStore) SystemNodeDeliveryQuiesced(context.Context, string, string) (bool, error) {
 	return false, nil
+}
+
+func (s *typedSystemNodeReceiptStore) MarkSystemNodeDeliveryInProgress(context.Context, string, string, int) error {
+	s.inProgress++
+	return nil
+}
+
+func (s *typedSystemNodeReceiptStore) MarkSystemNodeDeliveryFailed(context.Context, string, string, string, string, int, int) error {
+	s.failed++
+	return nil
+}
+
+func (s *typedSystemNodeReceiptStore) MarkSystemNodeDeliveryDeadLetter(context.Context, string, string, string, string, int, string) error {
+	s.processed = true
+	s.deadLettered++
+	return nil
 }
 
 func (s *typedSystemNodeReceiptStore) MarkSystemNodeProcessedAndSettleDelivery(context.Context, string, string, string) error {
@@ -87,6 +106,36 @@ func TestSystemNodeRunner_RecordsDeadLetterRow(t *testing.T) {
 	}
 	if failureType != "retry_exhausted" || retryCount != 2 || handlerNode != "node-a" {
 		t.Fatalf("dead_letter row = type=%q retry=%d handler=%q", failureType, retryCount, handlerNode)
+	}
+	var (
+		deliveryStatus string
+		deliveryReason string
+		deliveryError  string
+		receiptOutcome string
+	)
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(status, ''), COALESCE(reason_code, ''), COALESCE(last_error, '')
+		FROM event_deliveries
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'node'
+		  AND subscriber_id = 'node-a'
+	`, evt.ID()).Scan(&deliveryStatus, &deliveryReason, &deliveryError); err != nil {
+		t.Fatalf("query node delivery: %v", err)
+	}
+	if deliveryStatus != "dead_letter" || deliveryReason != "retry_exhausted" || !strings.Contains(deliveryError, "boom") {
+		t.Fatalf("node delivery = %s/%s err=%q, want dead_letter/retry_exhausted with error", deliveryStatus, deliveryReason, deliveryError)
+	}
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(outcome, '')
+		FROM event_receipts
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'node'
+		  AND subscriber_id = 'node-a'
+	`, evt.ID()).Scan(&receiptOutcome); err != nil {
+		t.Fatalf("query node receipt: %v", err)
+	}
+	if receiptOutcome != "dead_letter" {
+		t.Fatalf("node receipt outcome = %q, want dead_letter", receiptOutcome)
 	}
 }
 
@@ -201,7 +250,8 @@ func TestSystemNodeRunner_SkipsQuiescedDestructiveResetDelivery(t *testing.T) {
 func TestSystemNodeRunner_NonRetryableRuntimeErrorDeadLettersImmediately(t *testing.T) {
 	bus := &capturingDeadLetterBus{}
 	attempts := 0
-	runner := newSystemNodeRunnerWithReceiptStoreAndRetryBase("node-a", bus, nil, &typedSystemNodeReceiptStore{deliveryAuthorized: true}, func() []events.EventType { return []events.EventType{"source.evt"} }, func(context.Context, events.Event) error {
+	receipts := &typedSystemNodeReceiptStore{deliveryAuthorized: true}
+	runner := newSystemNodeRunnerWithReceiptStoreAndRetryBase("node-a", bus, nil, receipts, func() []events.EventType { return []events.EventType{"source.evt"} }, func(context.Context, events.Event) error {
 		attempts++
 		return runtimerterr.NewRuntimeError("invalid_contract", "pipeline", "node.handle", false, "bad handler config")
 	}, 0, eventReceiptsCapabilityStub{enabled: true}.resolve)
@@ -232,6 +282,9 @@ func TestSystemNodeRunner_NonRetryableRuntimeErrorDeadLettersImmediately(t *test
 	}
 	if got := asInt(payload["retry_count"]); got != 0 {
 		t.Fatalf("retry_count = %d, want 0", got)
+	}
+	if receipts.deadLettered != 1 || receipts.marked != 0 {
+		t.Fatalf("typed receipt owner deadLettered=%d marked=%d, want deadLettered=1 marked=0", receipts.deadLettered, receipts.marked)
 	}
 }
 
@@ -445,6 +498,35 @@ func TestCoordinator_InterceptHandlerErrorDoesNotSilentlyFallback(t *testing.T) 
 	}
 	if failureType != "handler_error" || handlerNode != "node-a" || strings.TrimSpace(errorText) == "" {
 		t.Fatalf("dead_letter row = type=%q handler=%q error=%q", failureType, handlerNode, errorText)
+	}
+	var (
+		deliveryStatus string
+		deliveryReason string
+		receiptOutcome string
+	)
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT COALESCE(status, ''), COALESCE(reason_code, '')
+		FROM event_deliveries
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'node'
+		  AND subscriber_id = 'node-a'
+	`, evt.ID()).Scan(&deliveryStatus, &deliveryReason); err != nil {
+		t.Fatalf("query workflow node delivery: %v", err)
+	}
+	if deliveryStatus != "dead_letter" || deliveryReason != "handler_error" {
+		t.Fatalf("workflow node delivery = %s/%s, want dead_letter/handler_error", deliveryStatus, deliveryReason)
+	}
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT COALESCE(outcome, '')
+		FROM event_receipts
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'node'
+		  AND subscriber_id = 'node-a'
+	`, evt.ID()).Scan(&receiptOutcome); err != nil {
+		t.Fatalf("query workflow node receipt: %v", err)
+	}
+	if receiptOutcome != "dead_letter" {
+		t.Fatalf("workflow node receipt outcome = %q, want dead_letter", receiptOutcome)
 	}
 }
 

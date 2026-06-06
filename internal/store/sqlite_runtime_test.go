@@ -912,6 +912,20 @@ func TestSQLiteRuntimeStoreSystemNodeReceiptOwnerSettlesDelivery(t *testing.T) {
 	if processed, err := owner.SystemNodeProcessed(ctx, "background-node", eventID); err != nil || processed {
 		t.Fatalf("SystemNodeProcessed before mark = %v err=%v, want false nil", processed, err)
 	}
+	if err := owner.MarkSystemNodeDeliveryInProgress(ctx, "background-node", eventID, runtimepipeline.DefaultSystemNodeRetryLimit); err != nil {
+		t.Fatalf("MarkSystemNodeDeliveryInProgress: %v", err)
+	}
+	var inProgressStatus, inProgressReason string
+	if err := store.DB.QueryRowContext(ctx, `
+		SELECT COALESCE(status, ''), COALESCE(reason_code, '')
+		FROM event_deliveries
+		WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = 'background-node'
+	`, eventID).Scan(&inProgressStatus, &inProgressReason); err != nil {
+		t.Fatalf("load sqlite node delivery after start: %v", err)
+	}
+	if inProgressStatus != "in_progress" || inProgressReason != "node_processing" {
+		t.Fatalf("node delivery after start = %s/%s, want in_progress/node_processing", inProgressStatus, inProgressReason)
+	}
 	if err := owner.MarkSystemNodeProcessedAndSettleDelivery(ctx, "background-node", eventID, `{"idempotency_key":"test"}`); err != nil {
 		t.Fatalf("MarkSystemNodeProcessedAndSettleDelivery: %v", err)
 	}
@@ -938,6 +952,56 @@ func TestSQLiteRuntimeStoreSystemNodeReceiptOwnerSettlesDelivery(t *testing.T) {
 	}
 	if receiptOutcome != "no_op" {
 		t.Fatalf("node receipt outcome = %q, want no_op", receiptOutcome)
+	}
+}
+
+func TestSQLiteRuntimeStoreSystemNodeReceiptOwnerDeadLettersDelivery(t *testing.T) {
+	ctx := context.Background()
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	runID := uuid.NewString()
+	ctx = runtimecorrelation.WithRunID(ctx, runID)
+	eventID := uuid.NewString()
+	evt := events.NewProjectionEvent(eventID,
+		events.EventType("company.scanned"),
+		"agent-1", "", json.RawMessage(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
+
+	if err := store.AppendEvent(ctx, evt); err != nil {
+		t.Fatalf("AppendEvent: %v", err)
+	}
+	if err := store.InsertEventDeliveryRoutes(ctx, eventID, []events.DeliveryRoute{{SubscriberType: "node", SubscriberID: "background-node"}}); err != nil {
+		t.Fatalf("InsertEventDeliveryRoutes: %v", err)
+	}
+	owner := runtimepipeline.NewSQLiteWorkflowInstanceStore(store.DB)
+	if err := owner.MarkSystemNodeDeliveryInProgress(ctx, "background-node", eventID, runtimepipeline.DefaultSystemNodeRetryLimit); err != nil {
+		t.Fatalf("MarkSystemNodeDeliveryInProgress: %v", err)
+	}
+	if err := owner.MarkSystemNodeDeliveryDeadLetter(ctx, "background-node", eventID, "retry_exhausted", "boom", 2, `{"idempotency_key":"test"}`); err != nil {
+		t.Fatalf("MarkSystemNodeDeliveryDeadLetter: %v", err)
+	}
+	if processed, err := owner.SystemNodeProcessed(ctx, "background-node", eventID); err != nil || !processed {
+		t.Fatalf("SystemNodeProcessed after dead-letter = %v err=%v, want true nil", processed, err)
+	}
+	var deliveryStatus, deliveryReason, deliveryError, receiptOutcome string
+	var retryCount int
+	if err := store.DB.QueryRowContext(ctx, `
+		SELECT COALESCE(status, ''), COALESCE(reason_code, ''), COALESCE(last_error, ''), COALESCE(retry_count, 0)
+		FROM event_deliveries
+		WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = 'background-node'
+	`, eventID).Scan(&deliveryStatus, &deliveryReason, &deliveryError, &retryCount); err != nil {
+		t.Fatalf("load sqlite node delivery: %v", err)
+	}
+	if deliveryStatus != "dead_letter" || deliveryReason != "retry_exhausted" || deliveryError != "boom" || retryCount != 2 {
+		t.Fatalf("sqlite node delivery = %s/%s retry=%d err=%q, want dead_letter/retry_exhausted retry=2 err=boom", deliveryStatus, deliveryReason, retryCount, deliveryError)
+	}
+	if err := store.DB.QueryRowContext(ctx, `
+		SELECT COALESCE(outcome, '')
+		FROM event_receipts
+		WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = 'background-node'
+	`, eventID).Scan(&receiptOutcome); err != nil {
+		t.Fatalf("load sqlite node receipt: %v", err)
+	}
+	if receiptOutcome != "dead_letter" {
+		t.Fatalf("node receipt outcome = %q, want dead_letter", receiptOutcome)
 	}
 }
 
@@ -990,7 +1054,7 @@ func TestSQLiteRuntimeStoreSystemNodeReceiptOwnerFailsWithTerminalDeliveryAuthor
 		retryCount int
 	}{
 		{name: "dead_letter", status: "dead_letter", retryCount: 2},
-		{name: "retry_exhausted_failed", status: "failed", retryCount: 2},
+		{name: "retry_exhausted_failed", status: "failed", retryCount: runtimepipeline.DefaultSystemNodeRetryLimit},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()

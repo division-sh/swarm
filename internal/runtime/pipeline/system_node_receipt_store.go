@@ -15,9 +15,10 @@ import (
 
 var ErrSystemNodeDeliveryAuthorityMissing = errors.New("system node delivery authority missing")
 
-func (s *WorkflowInstanceStore) SystemNodeDeliveryAuthorized(ctx context.Context, nodeID, eventID string) (bool, error) {
+func (s *WorkflowInstanceStore) SystemNodeDeliveryAuthorized(ctx context.Context, nodeID, eventID string, retryLimit int) (bool, error) {
 	nodeID = strings.TrimSpace(nodeID)
 	eventID = strings.TrimSpace(eventID)
+	retryLimit = normalizeSystemNodeRetryLimit(retryLimit)
 	if s == nil || s.db == nil || nodeID == "" || eventID == "" {
 		return false, nil
 	}
@@ -32,13 +33,13 @@ func (s *WorkflowInstanceStore) SystemNodeDeliveryAuthorized(ctx context.Context
 				FROM event_deliveries
 				WHERE event_id = ?
 				  AND subscriber_type = 'node'
-				  AND subscriber_id = ?
-				  AND (
-					status IN ('pending', 'in_progress')
-					OR (status = 'failed' AND COALESCE(retry_count, 0) < 2)
-				  )
-			)
-		`, eventID, nodeID).Scan(&ok)
+					  AND subscriber_id = ?
+					  AND (
+						status IN ('pending', 'in_progress')
+						OR (status = 'failed' AND COALESCE(retry_count, 0) < ?)
+					  )
+				)
+			`, eventID, nodeID, retryLimit).Scan(&ok)
 		return ok, err
 	}
 	var ok bool
@@ -48,13 +49,13 @@ func (s *WorkflowInstanceStore) SystemNodeDeliveryAuthorized(ctx context.Context
 			FROM event_deliveries
 			WHERE event_id = $1::uuid
 			  AND subscriber_type = 'node'
-			  AND subscriber_id = $2
-			  AND (
-				status IN ('pending', 'in_progress')
-				OR (status = 'failed' AND COALESCE(retry_count, 0) < 2)
-			  )
-		)
-	`, eventID, nodeID).Scan(&ok)
+				  AND subscriber_id = $2
+				  AND (
+					status IN ('pending', 'in_progress')
+					OR (status = 'failed' AND COALESCE(retry_count, 0) < $3)
+				  )
+			)
+		`, eventID, nodeID, retryLimit).Scan(&ok)
 	return ok, err
 }
 
@@ -145,9 +146,48 @@ func (s *WorkflowInstanceStore) MarkSystemNodeProcessedAndSettleDelivery(ctx con
 	return persistSystemNodeProcessedReceiptAndSettleDelivery(ctx, s.db, nodeID, eventID, sideEffects)
 }
 
+func (s *WorkflowInstanceStore) MarkSystemNodeDeliveryInProgress(ctx context.Context, nodeID, eventID string, retryLimit int) error {
+	nodeID = strings.TrimSpace(nodeID)
+	eventID = strings.TrimSpace(eventID)
+	retryLimit = normalizeSystemNodeRetryLimit(retryLimit)
+	if s == nil || s.db == nil || nodeID == "" || eventID == "" {
+		return nil
+	}
+	if s.isSQLite() {
+		return s.markSQLiteSystemNodeDeliveryInProgress(ctx, nodeID, eventID, retryLimit)
+	}
+	return markPostgresSystemNodeDeliveryInProgress(ctx, s.db, nodeID, eventID, retryLimit)
+}
+
+func (s *WorkflowInstanceStore) MarkSystemNodeDeliveryFailed(ctx context.Context, nodeID, eventID, reasonCode, errText string, retryCount, retryLimit int) error {
+	nodeID = strings.TrimSpace(nodeID)
+	eventID = strings.TrimSpace(eventID)
+	retryLimit = normalizeSystemNodeRetryLimit(retryLimit)
+	if s == nil || s.db == nil || nodeID == "" || eventID == "" {
+		return nil
+	}
+	if s.isSQLite() {
+		return s.markSQLiteSystemNodeDeliveryFailed(ctx, nodeID, eventID, reasonCode, errText, retryCount, retryLimit)
+	}
+	return markPostgresSystemNodeDeliveryFailed(ctx, s.db, nodeID, eventID, reasonCode, errText, retryCount, retryLimit)
+}
+
+func (s *WorkflowInstanceStore) MarkSystemNodeDeliveryDeadLetter(ctx context.Context, nodeID, eventID, reasonCode, errText string, retryCount int, sideEffects string) error {
+	nodeID = strings.TrimSpace(nodeID)
+	eventID = strings.TrimSpace(eventID)
+	if s == nil || s.db == nil || nodeID == "" || eventID == "" {
+		return nil
+	}
+	if s.isSQLite() {
+		return s.markSQLiteSystemNodeDeliveryDeadLetter(ctx, nodeID, eventID, reasonCode, errText, retryCount, sideEffects)
+	}
+	return markPostgresSystemNodeDeliveryDeadLetter(ctx, s.db, nodeID, eventID, reasonCode, errText, retryCount, sideEffects)
+}
+
 func (s *WorkflowInstanceStore) markSQLiteSystemNodeProcessedAndSettleDelivery(ctx context.Context, nodeID, eventID, sideEffects string) error {
 	return s.RunInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		authorized, err := sqliteSystemNodeDeliveryAuthorizedTx(txctx, tx, nodeID, eventID)
+		retryLimit := normalizeSystemNodeRetryLimit(DefaultSystemNodeRetryLimit)
+		authorized, err := sqliteSystemNodeDeliveryAuthorizedTx(txctx, tx, nodeID, eventID, retryLimit)
 		if err != nil {
 			return fmt.Errorf("query sqlite system node delivery authority: %w", err)
 		}
@@ -191,12 +231,12 @@ func (s *WorkflowInstanceStore) markSQLiteSystemNodeProcessedAndSettleDelivery(c
 			    delivered_at = ?
 			WHERE event_id = ?
 			  AND subscriber_type = 'node'
-			  AND subscriber_id = ?
-			  AND (
-				status IN ('pending', 'in_progress')
-				OR (status = 'failed' AND COALESCE(retry_count, 0) < 2)
-			  )
-		`, now, eventID, nodeID)
+				  AND subscriber_id = ?
+				  AND (
+					status IN ('pending', 'in_progress')
+					OR (status = 'failed' AND COALESCE(retry_count, 0) < ?)
+				  )
+			`, now, eventID, nodeID, retryLimit)
 		if err != nil {
 			return fmt.Errorf("settle sqlite system node delivery: %w", err)
 		}
@@ -207,7 +247,166 @@ func (s *WorkflowInstanceStore) markSQLiteSystemNodeProcessedAndSettleDelivery(c
 	})
 }
 
-func sqliteSystemNodeDeliveryAuthorizedTx(ctx context.Context, tx *sql.Tx, nodeID, eventID string) (bool, error) {
+func (s *WorkflowInstanceStore) markSQLiteSystemNodeDeliveryInProgress(ctx context.Context, nodeID, eventID string, retryLimit int) error {
+	retryLimit = normalizeSystemNodeRetryLimit(retryLimit)
+	return s.RunInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		authorized, err := sqliteSystemNodeDeliveryAuthorizedTx(txctx, tx, nodeID, eventID, retryLimit)
+		if err != nil {
+			return fmt.Errorf("query sqlite system node delivery authority: %w", err)
+		}
+		if !authorized {
+			return fmt.Errorf("%w: node %s event %s", ErrSystemNodeDeliveryAuthorityMissing, nodeID, eventID)
+		}
+		now := time.Now().UTC()
+		res, err := tx.ExecContext(txctx, `
+			UPDATE event_deliveries
+			SET status = 'in_progress',
+			    reason_code = 'node_processing',
+			    last_error = NULL,
+			    active_session_id = NULL,
+			    started_at = COALESCE(started_at, ?),
+			    delivered_at = NULL
+			WHERE event_id = ?
+			  AND subscriber_type = 'node'
+			  AND subscriber_id = ?
+			  AND (
+				status IN ('pending', 'in_progress')
+				OR (status = 'failed' AND COALESCE(retry_count, 0) < ?)
+			  )
+		`, now, eventID, nodeID, retryLimit)
+		if err != nil {
+			return fmt.Errorf("mark sqlite system node delivery in progress: %w", err)
+		}
+		if rows, _ := res.RowsAffected(); rows == 0 {
+			return fmt.Errorf("%w: node %s event %s", ErrSystemNodeDeliveryAuthorityMissing, nodeID, eventID)
+		}
+		return nil
+	})
+}
+
+func (s *WorkflowInstanceStore) markSQLiteSystemNodeDeliveryFailed(ctx context.Context, nodeID, eventID, reasonCode, errText string, retryCount, retryLimit int) error {
+	retryLimit = normalizeSystemNodeRetryLimit(retryLimit)
+	return s.RunInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		authorized, err := sqliteSystemNodeDeliveryAuthorizedTx(txctx, tx, nodeID, eventID, retryLimit)
+		if err != nil {
+			return fmt.Errorf("query sqlite system node delivery authority: %w", err)
+		}
+		if !authorized {
+			return fmt.Errorf("%w: node %s event %s", ErrSystemNodeDeliveryAuthorityMissing, nodeID, eventID)
+		}
+		now := time.Now().UTC()
+		res, err := tx.ExecContext(txctx, `
+			UPDATE event_deliveries
+			SET status = 'failed',
+			    retry_count = ?,
+			    reason_code = NULLIF(?, ''),
+			    last_error = NULLIF(?, ''),
+			    active_session_id = NULL,
+			    started_at = COALESCE(started_at, created_at),
+			    delivered_at = ?
+			WHERE event_id = ?
+			  AND subscriber_type = 'node'
+			  AND subscriber_id = ?
+			  AND status IN ('pending', 'in_progress', 'failed')
+			  AND COALESCE(retry_count, 0) < ?
+		`, sanitizedSystemNodeRetryCount(retryCount), sanitizeSystemNodeReasonCode(reasonCode, "handler_error"), strings.TrimSpace(errText), now, eventID, nodeID, retryLimit)
+		if err != nil {
+			return fmt.Errorf("mark sqlite system node delivery failed: %w", err)
+		}
+		if rows, _ := res.RowsAffected(); rows == 0 {
+			return fmt.Errorf("%w: node %s event %s", ErrSystemNodeDeliveryAuthorityMissing, nodeID, eventID)
+		}
+		return nil
+	})
+}
+
+func (s *WorkflowInstanceStore) markSQLiteSystemNodeDeliveryDeadLetter(ctx context.Context, nodeID, eventID, reasonCode, errText string, retryCount int, sideEffects string) error {
+	return s.RunInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		exists, err := sqliteSystemNodeDeliveryRowExistsTx(txctx, tx, nodeID, eventID)
+		if err != nil {
+			return fmt.Errorf("query sqlite system node delivery row: %w", err)
+		}
+		if !exists {
+			return fmt.Errorf("%w: node %s event %s", ErrSystemNodeDeliveryAuthorityMissing, nodeID, eventID)
+		}
+		now := time.Now().UTC()
+		reasonCode = sanitizeSystemNodeReasonCode(reasonCode, "retry_exhausted")
+		errText = strings.TrimSpace(errText)
+		res, err := tx.ExecContext(txctx, `
+			UPDATE event_deliveries
+			SET status = 'dead_letter',
+			    retry_count = ?,
+			    reason_code = NULLIF(?, ''),
+			    last_error = NULLIF(?, ''),
+			    active_session_id = NULL,
+			    started_at = COALESCE(started_at, created_at),
+			    delivered_at = ?
+			WHERE event_id = ?
+			  AND subscriber_type = 'node'
+			  AND subscriber_id = ?
+			  AND status IN ('pending', 'in_progress', 'failed')
+		`, sanitizedSystemNodeRetryCount(retryCount), reasonCode, errText, now, eventID, nodeID)
+		if err != nil {
+			return fmt.Errorf("dead-letter sqlite system node delivery: %w", err)
+		}
+		if rows, _ := res.RowsAffected(); rows == 0 {
+			return fmt.Errorf("%w: node %s event %s", ErrSystemNodeDeliveryAuthorityMissing, nodeID, eventID)
+		}
+		res, err = tx.ExecContext(txctx, `
+			INSERT INTO event_receipts (
+				receipt_id, event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
+				outcome, reason_code, side_effects, idempotency_key, processed_at
+			)
+			SELECT
+				?, e.event_id, 'node', ?, e.entity_id, e.flow_instance,
+				'dead_letter', NULLIF(?, ''), ?, ?, ?
+			FROM events e
+			WHERE e.event_id = ?
+			ON CONFLICT(event_id, subscriber_type, subscriber_id) DO UPDATE SET
+				entity_id = excluded.entity_id,
+				flow_instance = excluded.flow_instance,
+				outcome = excluded.outcome,
+				reason_code = excluded.reason_code,
+				side_effects = excluded.side_effects,
+				idempotency_key = excluded.idempotency_key,
+				processed_at = excluded.processed_at
+		`, uuid.NewString(), nodeID, reasonCode, sqliteNodeJSON(sideEffects), SystemNodeReceiptIdempotencyKey(nodeID, eventID), now, eventID)
+		if err != nil {
+			return fmt.Errorf("upsert sqlite system node dead-letter receipt: %w", err)
+		}
+		if rows, err := res.RowsAffected(); err == nil && rows == 0 {
+			return fmt.Errorf("upsert sqlite system node dead-letter receipt: event %s not found", eventID)
+		}
+		return nil
+	})
+}
+
+func sqliteSystemNodeDeliveryAuthorizedTx(ctx context.Context, tx *sql.Tx, nodeID, eventID string, retryLimit int) (bool, error) {
+	if tx == nil {
+		return false, nil
+	}
+	retryLimit = normalizeSystemNodeRetryLimit(retryLimit)
+	if _, err := uuid.Parse(strings.TrimSpace(eventID)); err != nil {
+		return false, nil
+	}
+	var ok bool
+	err := tx.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM event_deliveries
+			WHERE event_id = ?
+			  AND subscriber_type = 'node'
+			  AND subscriber_id = ?
+			  AND (
+				status IN ('pending', 'in_progress')
+				OR (status = 'failed' AND COALESCE(retry_count, 0) < ?)
+			  )
+			)
+	`, strings.TrimSpace(eventID), strings.TrimSpace(nodeID), retryLimit).Scan(&ok)
+	return ok, err
+}
+
+func sqliteSystemNodeDeliveryRowExistsTx(ctx context.Context, tx *sql.Tx, nodeID, eventID string) (bool, error) {
 	if tx == nil {
 		return false, nil
 	}
@@ -222,10 +421,6 @@ func sqliteSystemNodeDeliveryAuthorizedTx(ctx context.Context, tx *sql.Tx, nodeI
 			WHERE event_id = ?
 			  AND subscriber_type = 'node'
 			  AND subscriber_id = ?
-			  AND (
-				status IN ('pending', 'in_progress')
-				OR (status = 'failed' AND COALESCE(retry_count, 0) < 2)
-			  )
 		)
 	`, strings.TrimSpace(eventID), strings.TrimSpace(nodeID)).Scan(&ok)
 	return ok, err
@@ -237,4 +432,30 @@ func sqliteNodeJSON(raw string) string {
 		return "{}"
 	}
 	return raw
+}
+
+func sanitizedSystemNodeRetryCount(retryCount int) int {
+	if retryCount < 0 {
+		return 0
+	}
+	return retryCount
+}
+
+func sanitizeSystemNodeReasonCode(reasonCode, fallback string) string {
+	reasonCode = strings.TrimSpace(reasonCode)
+	if reasonCode != "" {
+		return reasonCode
+	}
+	fallback = strings.TrimSpace(fallback)
+	if fallback != "" {
+		return fallback
+	}
+	return "handler_error"
+}
+
+func normalizeSystemNodeRetryLimit(retryLimit int) int {
+	if retryLimit <= 0 {
+		return DefaultSystemNodeRetryLimit
+	}
+	return retryLimit
 }

@@ -855,6 +855,67 @@ func (pc *PipelineCoordinator) markWorkflowNodeProcessed(ctx context.Context, no
 	pc.convergeWorkflowNodeNormalRunCompletion(ctx, nodeID, evt)
 }
 
+func (pc *PipelineCoordinator) markWorkflowNodeDeliveryInProgress(ctx context.Context, nodeID string, evt events.Event) bool {
+	if pc == nil || pc.workflowStore == nil {
+		return false
+	}
+	nodeID = strings.TrimSpace(nodeID)
+	eventID := strings.TrimSpace(evt.ID())
+	if nodeID == "" || eventID == "" {
+		return false
+	}
+	if !pc.eventReceiptsAvailable(ctx) {
+		return false
+	}
+	if err := pc.workflowStore.MarkSystemNodeDeliveryInProgress(ctx, nodeID, eventID, DefaultSystemNodeRetryLimit); err != nil {
+		pc.logWorkflowNodeDeliveryTransitionError(ctx, nodeID, evt, "mark_delivery_in_progress_failed", "Marking the workflow node delivery in progress failed", err)
+		return false
+	}
+	return true
+}
+
+func (pc *PipelineCoordinator) markWorkflowNodeDeliveryDeadLetter(ctx context.Context, nodeID string, evt events.Event, reasonCode string, cause error, retryCount int) {
+	if pc == nil || pc.workflowStore == nil {
+		return
+	}
+	nodeID = strings.TrimSpace(nodeID)
+	eventID := strings.TrimSpace(evt.ID())
+	if nodeID == "" || eventID == "" {
+		return
+	}
+	if !pc.eventReceiptsAvailable(ctx) {
+		return
+	}
+	errText := ""
+	if cause != nil {
+		errText = strings.TrimSpace(cause.Error())
+	}
+	sideEffects := systemNodeDeadLetterReceiptSideEffects(nodeID, eventID, reasonCode, errText, retryCount)
+	if err := pc.workflowStore.MarkSystemNodeDeliveryDeadLetter(ctx, nodeID, eventID, reasonCode, errText, retryCount, sideEffects); err != nil {
+		pc.logWorkflowNodeDeliveryTransitionError(ctx, nodeID, evt, "mark_delivery_dead_letter_failed", "Marking the workflow node delivery as dead_letter failed", err)
+		return
+	}
+	pc.convergeWorkflowNodeNormalRunCompletion(ctx, nodeID, evt)
+}
+
+func (pc *PipelineCoordinator) logWorkflowNodeDeliveryTransitionError(ctx context.Context, nodeID string, evt events.Event, action, message string, err error) {
+	if pc == nil || err == nil {
+		return
+	}
+	if logger, ok := pc.bus.(systemNodeRuntimeLogger); ok && logger != nil {
+		logger.LogRuntime(ctx, RuntimeLogEntry{
+			Level:     "error",
+			Message:   message,
+			Component: nodeID,
+			Action:    action,
+			EventID:   strings.TrimSpace(evt.ID()),
+			EventType: strings.TrimSpace(string(evt.Type())),
+			EntityID:  workflowEventEntityID(evt),
+			Error:     strings.TrimSpace(err.Error()),
+		})
+	}
+}
+
 func (pc *PipelineCoordinator) workflowNodeDeliveryAuthorized(ctx context.Context, nodeID string, evt events.Event) bool {
 	if pc == nil {
 		return false
@@ -873,7 +934,7 @@ func (pc *PipelineCoordinator) workflowNodeDeliveryAuthorized(ctx context.Contex
 	if eventID == "" {
 		return false
 	}
-	ok, err := pc.workflowStore.SystemNodeDeliveryAuthorized(ctx, nodeID, eventID)
+	ok, err := pc.workflowStore.SystemNodeDeliveryAuthorized(ctx, nodeID, eventID, DefaultSystemNodeRetryLimit)
 	if err != nil {
 		if logger, logOK := pc.bus.(systemNodeRuntimeLogger); logOK && logger != nil {
 			logger.LogRuntime(ctx, RuntimeLogEntry{
