@@ -1387,7 +1387,7 @@ func TestEventBusPublishTransactional_RecordsTargetFailureDeadLetter(t *testing.
 	}
 	eventID := uuid.NewString()
 	targetEntityID := uuid.NewString()
-	err = eb.PublishTx(ctx, tx, (events.NewProjectionEvent(eventID,
+	err = eb.PublishTx(ctx, tx, (events.NewRootIngressEvent(eventID,
 		events.EventType("child/output.done"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())).WithTargetRoute(events.RouteIdentity{EntityID: targetEntityID, FlowInstance: "missing-flow"}))
 	if err != nil {
 		_ = tx.Rollback()
@@ -1501,7 +1501,7 @@ func TestEventBusPublishDeferred_RunsInterceptorsAfterDeferredEventCommit(t *tes
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.Publish(context.Background(), events.NewProjectionEvent("11111111-1111-1111-1111-111111111111",
+	if err := eb.Publish(context.Background(), events.NewRootIngressEvent("11111111-1111-1111-1111-111111111111",
 		events.EventType("custom.root"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 	); err != nil {
 		t.Fatalf("Publish: %v", err)

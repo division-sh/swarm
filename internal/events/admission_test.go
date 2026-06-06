@@ -85,6 +85,77 @@ func TestAdmissionDiagnosticDirectAllowsGlobalNoRun(t *testing.T) {
 	}
 }
 
+func TestAdmissionRejectsProjectionPersistenceWithoutAuthoritativeFacts(t *testing.T) {
+	_, err := AdmitForPersistence(NewProjectionEvent(
+		"",
+		EventType("task.completed"),
+		"agent-1",
+		"",
+		nil,
+		0,
+		"",
+		"",
+		EventEnvelope{},
+		time.Time{},
+	), AdmissionOptions{Now: time.Date(2026, 6, 6, 10, 11, 12, 0, time.UTC)})
+	if err == nil {
+		t.Fatal("expected projection persistence admission error")
+	}
+	if !strings.Contains(err.Error(), "authoritative event_id") {
+		t.Fatalf("error = %v, want missing authoritative event_id", err)
+	}
+
+	_, err = AdmitForPersistence(NewProjectionEvent(
+		"evt-projection",
+		EventType("task.completed"),
+		"agent-1",
+		"",
+		nil,
+		0,
+		"",
+		"",
+		EventEnvelope{},
+		time.Date(2026, 6, 6, 10, 11, 12, 0, time.UTC),
+	), AdmissionOptions{RunIDCandidate: "run-from-context"})
+	if err == nil {
+		t.Fatal("expected projection persistence admission error for missing run_id")
+	}
+	if !strings.Contains(err.Error(), "authoritative run_id") {
+		t.Fatalf("error = %v, want missing authoritative run_id", err)
+	}
+}
+
+func TestAdmissionPublishStillDefaultsProjectionShell(t *testing.T) {
+	now := time.Date(2026, 6, 6, 10, 11, 12, 0, time.UTC)
+	admitted, err := AdmitForPublish(NewProjectionEvent(
+		"",
+		EventType("task.completed"),
+		"agent-1",
+		"",
+		nil,
+		0,
+		"",
+		"",
+		EventEnvelope{},
+		time.Time{},
+	), AdmissionOptions{
+		Now:            now,
+		RunIDCandidate: "run-from-publish",
+	})
+	if err != nil {
+		t.Fatalf("AdmitForPublish projection shell: %v", err)
+	}
+	if admitted.ID() == "" {
+		t.Fatal("admitted projection shell event_id is empty")
+	}
+	if got := admitted.RunID(); got != "run-from-publish" {
+		t.Fatalf("admitted projection shell run_id = %q, want publish candidate", got)
+	}
+	if !admitted.CreatedAt().Equal(now) {
+		t.Fatalf("created_at = %s, want %s", admitted.CreatedAt(), now)
+	}
+}
+
 func TestAdmissionRejectsMissingChildLineage(t *testing.T) {
 	_, err := AdmitForPersistence(NewChildEventWithLineage(
 		"",

@@ -721,7 +721,7 @@ func assertNoReplayEvent(t *testing.T, ch <-chan events.Event) {
 func fillAgentChannel(t *testing.T, ctx context.Context, bus *runtimebus.EventBus, agentID string, count int) {
 	t.Helper()
 	for i := 0; i < count; i++ {
-		err := bus.PublishDirect(ctx, events.NewProjectionEvent(uuid.NewString(),
+		err := bus.PublishDirect(ctx, events.NewRootIngressEvent(uuid.NewString(),
 			events.EventType("filler.event"), "", "", []byte(`{"ok":true}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()), []string{agentID})
 		if err != nil {
 			t.Fatalf("fill agent channel publish %d: %v", i, err)
