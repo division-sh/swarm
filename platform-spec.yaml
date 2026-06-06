@@ -12278,9 +12278,9 @@ api_specification:
           \ exist\nAdditional values may be added as the operator-state owner gains\nmore diagnostic semantics. Type stays\
           \ string (not enum) for\nforward compatibility \u2014 additive owner extensions must not\nrequire a /v2/ bump.\n"
       DiagnosisEvidence:
-        description: "Reserved for future owner extension. Currently unreferenced by any\nv1 method \u2014 the operator-state\
-          \ projection does not yet emit\nevidence pointers. Kept in components.schemas as the canonical\nshape so that when\
-          \ the owner gains evidence emission (a follow-on\nslice), RunDiagnosis can additively reference this type.\n"
+        description: "Generic evidence pointer shape for future diagnosis extensions. Current run.diagnose failure evidence\
+          \ is owner-backed by RunDebugFailureDelivery, which carries concrete event_deliveries/dead_letters facts instead\
+          \ of opaque pointers.\n"
         type: object
         additionalProperties: false
         required:
@@ -12296,11 +12296,69 @@ api_specification:
           summary:
             type: string
             description: Human-readable one-line description of why this evidence supports the diagnosis.
+      RunDebugFailureDelivery:
+        description: >-
+          Concrete failed or terminal delivery evidence for run.diagnose. Source
+          of truth is event_deliveries joined to the owning event; dead_letters is
+          event-scoped terminal evidence when present. Consumers MUST NOT infer
+          this shape from aggregate delivery counts.
+        type: object
+        additionalProperties: false
+        required:
+        - event_id
+        - event_name
+        - delivery_id
+        - subscriber_type
+        - subscriber_id
+        - status
+        - retry_count
+        - retry_eligible
+        - terminal
+        properties:
+          event_id:
+            $ref: '#/components/schemas/OpaqueId'
+          event_name:
+            type: string
+          entity_id:
+            $ref: '#/components/schemas/OpaqueId'
+          delivery_id:
+            $ref: '#/components/schemas/OpaqueId'
+          subscriber_type:
+            $ref: '#/components/schemas/SubscriberType'
+          subscriber_id:
+            type: string
+          session_id:
+            type: string
+          status:
+            $ref: '#/components/schemas/DeliveryStatus'
+          reason_code:
+            type: string
+          last_error:
+            type: string
+          retry_count:
+            type: integer
+            minimum: 0
+          retry_eligible:
+            type: boolean
+            description: True exactly when status is failed, the retry-visible failure state.
+          terminal:
+            type: boolean
+            description: True exactly when status is delivered or dead_letter.
+          created_at:
+            $ref: '#/components/schemas/Timestamp'
+          started_at:
+            $ref: '#/components/schemas/Timestamp'
+          finished_at:
+            $ref: '#/components/schemas/Timestamp'
+          dead_letters:
+            type: array
+            description: Event-scoped terminal dead-letter records linked to this failed or dead-letter delivery when present.
+            items:
+              $ref: '#/components/schemas/DeadLetterRecord'
       RunDiagnosis:
-        description: "Run header plus the canonical operator-state projection. Source of\ntruth: ProjectRunOperationalStatus.\
-          \ Spec exposes exactly what the\nowner produces in v1; richer fields (evidence pointers,\nsuggested_next_action)\
-          \ are additive owner extensions for a future\nslice \u2014 when the store owner gains them, the spec adds them\n\
-          additively (no /v2/ bump).\n"
+        description: "Run header plus the canonical operator-state projection and concrete failed-delivery evidence. Source\
+          \ of truth: ProjectRunOperationalStatus for operational_state/blocking fields and RunDebugReport.FailedDeliveries\
+          \ for event_deliveries/dead_letters failure evidence.\n"
         type: object
         additionalProperties: false
         required:
@@ -12309,6 +12367,7 @@ api_specification:
         - blocking_layer
         - blocking_reason
         - heuristics
+        - failed_deliveries
         properties:
           run:
             $ref: '#/components/schemas/RunHeader'
@@ -12332,6 +12391,11 @@ api_specification:
               exist for this run".
 
               '
+          failed_deliveries:
+            type: array
+            description: Failed or dead-letter delivery rows with persisted reason/error/retry/dead-letter evidence for this run.
+            items:
+              $ref: '#/components/schemas/RunDebugFailureDelivery'
       EntitySummary:
         type: object
         additionalProperties: false
@@ -12449,6 +12513,9 @@ api_specification:
         - subscriber_type
         - subscriber_id
         - status
+        - retry_count
+        - retry_eligible
+        - terminal
         properties:
           delivery_id:
             $ref: '#/components/schemas/OpaqueId'
@@ -12464,6 +12531,23 @@ api_specification:
             type: string
           last_error:
             type: string
+          retry_count:
+            type: integer
+            minimum: 0
+          retry_eligible:
+            type: boolean
+          terminal:
+            type: boolean
+          created_at:
+            $ref: '#/components/schemas/Timestamp'
+          started_at:
+            $ref: '#/components/schemas/Timestamp'
+          finished_at:
+            $ref: '#/components/schemas/Timestamp'
+          dead_letters:
+            type: array
+            items:
+              $ref: '#/components/schemas/DeadLetterRecord'
       EventPublishDelivery:
         type: object
         additionalProperties: false
@@ -12473,6 +12557,9 @@ api_specification:
         - subscriber_id
         - status
         - attempt
+        - retry_count
+        - retry_eligible
+        - terminal
         properties:
           delivery_id:
             $ref: '#/components/schemas/OpaqueId'
@@ -12484,9 +12571,30 @@ api_specification:
             type: string
           status:
             $ref: '#/components/schemas/DeliveryStatus'
+          reason_code:
+            type: string
+          last_error:
+            type: string
           attempt:
             type: integer
             minimum: 1
+          retry_count:
+            type: integer
+            minimum: 0
+          retry_eligible:
+            type: boolean
+          terminal:
+            type: boolean
+          created_at:
+            $ref: '#/components/schemas/Timestamp'
+          started_at:
+            $ref: '#/components/schemas/Timestamp'
+          finished_at:
+            $ref: '#/components/schemas/Timestamp'
+          dead_letters:
+            type: array
+            items:
+              $ref: '#/components/schemas/DeadLetterRecord'
       EventPublishResult:
         type: object
         additionalProperties: false
@@ -12518,6 +12626,9 @@ api_specification:
         - subscriber_id
         - status
         - attempt
+        - retry_count
+        - retry_eligible
+        - terminal
         properties:
           delivery_id:
             $ref: '#/components/schemas/OpaqueId'
@@ -12527,9 +12638,30 @@ api_specification:
             type: string
           status:
             $ref: '#/components/schemas/DeliveryStatus'
+          reason_code:
+            type: string
+          last_error:
+            type: string
           attempt:
             type: integer
             minimum: 1
+          retry_count:
+            type: integer
+            minimum: 0
+          retry_eligible:
+            type: boolean
+          terminal:
+            type: boolean
+          created_at:
+            $ref: '#/components/schemas/Timestamp'
+          started_at:
+            $ref: '#/components/schemas/Timestamp'
+          finished_at:
+            $ref: '#/components/schemas/Timestamp'
+          dead_letters:
+            type: array
+            items:
+              $ref: '#/components/schemas/DeadLetterRecord'
           source_delivery_id:
             $ref: '#/components/schemas/OpaqueId'
       EventReplayResult:
@@ -14073,6 +14205,15 @@ api_specification:
             $ref: '#/components/schemas/DeliveryStatus'
           delivery_reason_code:
             type: string
+          delivery_last_error:
+            type: string
+          delivery_retry_count:
+            type: integer
+            minimum: 0
+          delivery_retry_eligible:
+            type: boolean
+          delivery_terminal:
+            type: boolean
           active_session_id:
             $ref: '#/components/schemas/OpaqueId'
           delivery_created_at:
@@ -15575,11 +15716,10 @@ api_specification:
       - RUN_NOT_FOUND
     run.diagnose:
       tier: must_have
-      description: "Interpreted run diagnosis. Returns the run header plus the\noperator-state projection from\ninternal/store/run_operational_status_read_surface.go.\
-        \ The single\ncanonical owner for \"why isn't this run progressing?\" \u2014 routes the\nexisting projection through\
-        \ the API instead of having every\nconsumer recompute it. Today the projection produces\noperational_state, blocking_layer,\
-        \ blocking_reason, and\nheuristics; richer fields (evidence pointers, suggested_next_action)\nare additive owner extensions\
-        \ for a future slice.\n"
+      description: "Interpreted run diagnosis. Returns the run header plus the\noperator-state projection from\ninternal/store/run_operational_status_read_surface.go\
+        \ and concrete failed-delivery evidence from\nRunDebugReport.FailedDeliveries. The single canonical owner for\n\"why\
+        \ isn't this run progressing?\" routes persisted evidence through\nthe API instead of having every consumer recompute\
+        \ it.\n"
       scope:
         required:
         - read:runs

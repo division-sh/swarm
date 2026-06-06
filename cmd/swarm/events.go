@@ -81,13 +81,20 @@ type eventFull struct {
 }
 
 type eventDelivery struct {
-	DeliveryID     string `json:"delivery_id"`
-	SubscriberType string `json:"subscriber_type"`
-	SubscriberID   string `json:"subscriber_id"`
-	Status         string `json:"status"`
-	SessionID      string `json:"session_id,omitempty"`
-	ReasonCode     string `json:"reason_code,omitempty"`
-	LastError      string `json:"last_error,omitempty"`
+	DeliveryID     string            `json:"delivery_id"`
+	SubscriberType string            `json:"subscriber_type"`
+	SubscriberID   string            `json:"subscriber_id"`
+	Status         string            `json:"status"`
+	SessionID      string            `json:"session_id,omitempty"`
+	ReasonCode     string            `json:"reason_code,omitempty"`
+	LastError      string            `json:"last_error,omitempty"`
+	RetryCount     int               `json:"retry_count"`
+	RetryEligible  bool              `json:"retry_eligible"`
+	Terminal       bool              `json:"terminal"`
+	CreatedAt      string            `json:"created_at,omitempty"`
+	StartedAt      string            `json:"started_at,omitempty"`
+	FinishedAt     string            `json:"finished_at,omitempty"`
+	DeadLetters    []eventDeadLetter `json:"dead_letters,omitempty"`
 }
 
 type eventDeadLetter struct {
@@ -114,12 +121,21 @@ type eventReplayResult struct {
 }
 
 type eventReplayDelivery struct {
-	DeliveryID       string `json:"delivery_id"`
-	SubscriberID     string `json:"subscriber_id"`
-	SessionID        string `json:"session_id,omitempty"`
-	Status           string `json:"status"`
-	Attempt          int    `json:"attempt"`
-	SourceDeliveryID string `json:"source_delivery_id,omitempty"`
+	DeliveryID       string            `json:"delivery_id"`
+	SubscriberID     string            `json:"subscriber_id"`
+	SessionID        string            `json:"session_id,omitempty"`
+	Status           string            `json:"status"`
+	ReasonCode       string            `json:"reason_code,omitempty"`
+	LastError        string            `json:"last_error,omitempty"`
+	Attempt          int               `json:"attempt"`
+	RetryCount       int               `json:"retry_count"`
+	RetryEligible    bool              `json:"retry_eligible"`
+	Terminal         bool              `json:"terminal"`
+	CreatedAt        string            `json:"created_at,omitempty"`
+	StartedAt        string            `json:"started_at,omitempty"`
+	FinishedAt       string            `json:"finished_at,omitempty"`
+	DeadLetters      []eventDeadLetter `json:"dead_letters,omitempty"`
+	SourceDeliveryID string            `json:"source_delivery_id,omitempty"`
 }
 
 type eventSubscriptionNotification struct {
@@ -576,6 +592,14 @@ func validateEventDelivery(prefix string, delivery eventDelivery) error {
 	if _, ok := eventObservationValidDeliveryStatuses[strings.TrimSpace(delivery.Status)]; !ok {
 		return fmt.Errorf("malformed %s: status=%q is not a valid DeliveryStatus", prefix, delivery.Status)
 	}
+	if delivery.RetryCount < 0 {
+		return fmt.Errorf("malformed %s: retry_count must be >= 0", prefix)
+	}
+	for i, deadLetter := range delivery.DeadLetters {
+		if err := validateEventDeadLetter(fmt.Sprintf("%s.dead_letters[%d]", prefix, i), deadLetter); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -674,6 +698,14 @@ func validateEventReplayDelivery(field string, delivery eventReplayDelivery, req
 	}
 	if delivery.Attempt < 1 {
 		return fmt.Errorf("malformed event.replay result: %s.attempt must be >= 1", field)
+	}
+	if delivery.RetryCount < 0 {
+		return fmt.Errorf("malformed event.replay result: %s.retry_count must be >= 0", field)
+	}
+	for i, deadLetter := range delivery.DeadLetters {
+		if err := validateEventDeadLetter(fmt.Sprintf("%s.dead_letters[%d]", field, i), deadLetter); err != nil {
+			return err
+		}
 	}
 	if requireSource && strings.TrimSpace(delivery.SourceDeliveryID) == "" {
 		return fmt.Errorf("malformed event.replay result: %s.source_delivery_id is required", field)
@@ -842,7 +874,7 @@ func writeEventDetailResult(out io.Writer, event eventFull) {
 	} else {
 		fmt.Fprintln(out, "deliveries:")
 		for _, delivery := range event.Deliveries {
-			fmt.Fprintf(out, "  delivery_id=%s subscriber=%s/%s status=%s session_id=%s reason_code=%s last_error=%s\n",
+			fmt.Fprintf(out, "  delivery_id=%s subscriber=%s/%s status=%s session_id=%s reason_code=%s last_error=%s retry_count=%d retry_eligible=%t terminal=%t dead_letters=%d\n",
 				delivery.DeliveryID,
 				delivery.SubscriberType,
 				delivery.SubscriberID,
@@ -850,6 +882,10 @@ func writeEventDetailResult(out io.Writer, event eventFull) {
 				eventObservationDash(delivery.SessionID),
 				eventObservationDash(delivery.ReasonCode),
 				eventObservationDash(delivery.LastError),
+				delivery.RetryCount,
+				delivery.RetryEligible,
+				delivery.Terminal,
+				len(delivery.DeadLetters),
 			)
 		}
 	}
@@ -910,21 +946,33 @@ func writeEventReplayResult(out io.Writer, result eventReplayResult) {
 		len(result.NewDeliveries),
 	)
 	for _, delivery := range result.OriginalDeliveries {
-		fmt.Fprintf(out, "original_delivery delivery_id=%s subscriber_id=%s status=%s session_id=%s attempt=%d\n",
+		fmt.Fprintf(out, "original_delivery delivery_id=%s subscriber_id=%s status=%s session_id=%s attempt=%d retry_count=%d retry_eligible=%t terminal=%t reason_code=%s last_error=%s dead_letters=%d\n",
 			delivery.DeliveryID,
 			delivery.SubscriberID,
 			delivery.Status,
 			eventObservationDash(delivery.SessionID),
 			delivery.Attempt,
+			delivery.RetryCount,
+			delivery.RetryEligible,
+			delivery.Terminal,
+			eventObservationDash(delivery.ReasonCode),
+			eventObservationDash(delivery.LastError),
+			len(delivery.DeadLetters),
 		)
 	}
 	for _, delivery := range result.NewDeliveries {
-		fmt.Fprintf(out, "new_delivery delivery_id=%s subscriber_id=%s status=%s session_id=%s attempt=%d source_delivery_id=%s\n",
+		fmt.Fprintf(out, "new_delivery delivery_id=%s subscriber_id=%s status=%s session_id=%s attempt=%d retry_count=%d retry_eligible=%t terminal=%t reason_code=%s last_error=%s dead_letters=%d source_delivery_id=%s\n",
 			delivery.DeliveryID,
 			delivery.SubscriberID,
 			delivery.Status,
 			eventObservationDash(delivery.SessionID),
 			delivery.Attempt,
+			delivery.RetryCount,
+			delivery.RetryEligible,
+			delivery.Terminal,
+			eventObservationDash(delivery.ReasonCode),
+			eventObservationDash(delivery.LastError),
+			len(delivery.DeadLetters),
 			delivery.SourceDeliveryID,
 		)
 	}

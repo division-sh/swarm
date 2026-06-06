@@ -5256,7 +5256,7 @@
     },
     {
       "name": "run.diagnose",
-      "description": "Interpreted run diagnosis. Returns the run header plus the\noperator-state projection from\ninternal/store/run_operational_status_read_surface.go. The single\ncanonical owner for \"why isn't this run progressing?\" — routes the\nexisting projection through the API instead of having every\nconsumer recompute it. Today the projection produces\noperational_state, blocking_layer, blocking_reason, and\nheuristics; richer fields (evidence pointers, suggested_next_action)\nare additive owner extensions for a future slice.\n",
+      "description": "Interpreted run diagnosis. Returns the run header plus the\noperator-state projection from\ninternal/store/run_operational_status_read_surface.go and concrete failed-delivery evidence from\nRunDebugReport.FailedDeliveries. The single canonical owner for\n\"why isn't this run progressing?\" routes persisted evidence through\nthe API instead of having every consumer recompute it.\n",
       "params": [
         {
           "name": "run_id",
@@ -9303,7 +9303,7 @@
       },
       "DiagnosisEvidence": {
         "additionalProperties": false,
-        "description": "Reserved for future owner extension. Currently unreferenced by any\nv1 method — the operator-state projection does not yet emit\nevidence pointers. Kept in components.schemas as the canonical\nshape so that when the owner gains evidence emission (a follow-on\nslice), RunDiagnosis can additively reference this type.\n",
+        "description": "Generic evidence pointer shape for future diagnosis extensions. Current run.diagnose failure evidence is owner-backed by RunDebugFailureDelivery, which carries concrete event_deliveries/dead_letters facts instead of opaque pointers.\n",
         "properties": {
           "kind": {
             "description": "e.g., event, entity, turn, mailbox_item, dead_letter.",
@@ -9424,8 +9424,20 @@
       "EventDelivery": {
         "additionalProperties": false,
         "properties": {
+          "created_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "dead_letters": {
+            "items": {
+              "$ref": "#/components/schemas/DeadLetterRecord"
+            },
+            "type": "array"
+          },
           "delivery_id": {
             "$ref": "#/components/schemas/OpaqueId"
+          },
+          "finished_at": {
+            "$ref": "#/components/schemas/Timestamp"
           },
           "last_error": {
             "type": "string"
@@ -9433,8 +9445,18 @@
           "reason_code": {
             "type": "string"
           },
+          "retry_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "retry_eligible": {
+            "type": "boolean"
+          },
           "session_id": {
             "type": "string"
+          },
+          "started_at": {
+            "$ref": "#/components/schemas/Timestamp"
           },
           "status": {
             "$ref": "#/components/schemas/DeliveryStatus"
@@ -9444,13 +9466,19 @@
           },
           "subscriber_type": {
             "$ref": "#/components/schemas/SubscriberType"
+          },
+          "terminal": {
+            "type": "boolean"
           }
         },
         "required": [
           "delivery_id",
           "subscriber_type",
           "subscriber_id",
-          "status"
+          "status",
+          "retry_count",
+          "retry_eligible",
+          "terminal"
         ],
         "type": "object"
       },
@@ -9548,11 +9576,39 @@
             "minimum": 1,
             "type": "integer"
           },
+          "created_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "dead_letters": {
+            "items": {
+              "$ref": "#/components/schemas/DeadLetterRecord"
+            },
+            "type": "array"
+          },
           "delivery_id": {
             "$ref": "#/components/schemas/OpaqueId"
           },
+          "finished_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "last_error": {
+            "type": "string"
+          },
+          "reason_code": {
+            "type": "string"
+          },
+          "retry_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "retry_eligible": {
+            "type": "boolean"
+          },
           "session_id": {
             "type": "string"
+          },
+          "started_at": {
+            "$ref": "#/components/schemas/Timestamp"
           },
           "status": {
             "$ref": "#/components/schemas/DeliveryStatus"
@@ -9562,6 +9618,9 @@
           },
           "subscriber_type": {
             "$ref": "#/components/schemas/SubscriberType"
+          },
+          "terminal": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -9569,7 +9628,10 @@
           "subscriber_type",
           "subscriber_id",
           "status",
-          "attempt"
+          "attempt",
+          "retry_count",
+          "retry_eligible",
+          "terminal"
         ],
         "type": "object"
       },
@@ -9612,8 +9674,33 @@
             "minimum": 1,
             "type": "integer"
           },
+          "created_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "dead_letters": {
+            "items": {
+              "$ref": "#/components/schemas/DeadLetterRecord"
+            },
+            "type": "array"
+          },
           "delivery_id": {
             "$ref": "#/components/schemas/OpaqueId"
+          },
+          "finished_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "last_error": {
+            "type": "string"
+          },
+          "reason_code": {
+            "type": "string"
+          },
+          "retry_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "retry_eligible": {
+            "type": "boolean"
           },
           "session_id": {
             "type": "string"
@@ -9621,18 +9708,27 @@
           "source_delivery_id": {
             "$ref": "#/components/schemas/OpaqueId"
           },
+          "started_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
           "status": {
             "$ref": "#/components/schemas/DeliveryStatus"
           },
           "subscriber_id": {
             "type": "string"
+          },
+          "terminal": {
+            "type": "boolean"
           }
         },
         "required": [
           "delivery_id",
           "subscriber_id",
           "status",
-          "attempt"
+          "attempt",
+          "retry_count",
+          "retry_eligible",
+          "terminal"
         ],
         "type": "object"
       },
@@ -10148,9 +10244,85 @@
         ],
         "type": "object"
       },
+      "RunDebugFailureDelivery": {
+        "additionalProperties": false,
+        "description": "Concrete failed or terminal delivery evidence for run.diagnose. Source of truth is event_deliveries joined to the owning event; dead_letters is event-scoped terminal evidence when present. Consumers MUST NOT infer this shape from aggregate delivery counts.",
+        "properties": {
+          "created_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "dead_letters": {
+            "description": "Event-scoped terminal dead-letter records linked to this failed or dead-letter delivery when present.",
+            "items": {
+              "$ref": "#/components/schemas/DeadLetterRecord"
+            },
+            "type": "array"
+          },
+          "delivery_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "entity_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "event_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "event_name": {
+            "type": "string"
+          },
+          "finished_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "last_error": {
+            "type": "string"
+          },
+          "reason_code": {
+            "type": "string"
+          },
+          "retry_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "retry_eligible": {
+            "description": "True exactly when status is failed, the retry-visible failure state.",
+            "type": "boolean"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "started_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DeliveryStatus"
+          },
+          "subscriber_id": {
+            "type": "string"
+          },
+          "subscriber_type": {
+            "$ref": "#/components/schemas/SubscriberType"
+          },
+          "terminal": {
+            "description": "True exactly when status is delivered or dead_letter.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "event_id",
+          "event_name",
+          "delivery_id",
+          "subscriber_type",
+          "subscriber_id",
+          "status",
+          "retry_count",
+          "retry_eligible",
+          "terminal"
+        ],
+        "type": "object"
+      },
       "RunDiagnosis": {
         "additionalProperties": false,
-        "description": "Run header plus the canonical operator-state projection. Source of\ntruth: ProjectRunOperationalStatus. Spec exposes exactly what the\nowner produces in v1; richer fields (evidence pointers,\nsuggested_next_action) are additive owner extensions for a future\nslice — when the store owner gains them, the spec adds them\nadditively (no /v2/ bump).\n",
+        "description": "Run header plus the canonical operator-state projection and concrete failed-delivery evidence. Source of truth: ProjectRunOperationalStatus for operational_state/blocking fields and RunDebugReport.FailedDeliveries for event_deliveries/dead_letters failure evidence.\n",
         "properties": {
           "blocking_layer": {
             "$ref": "#/components/schemas/BlockingLayer"
@@ -10158,6 +10330,13 @@
           "blocking_reason": {
             "description": "Free-form reason string when operational_state is \"stalled\".\nEmpty when state is running or terminal. Current owner emits:\n  \"\" (empty)\n  \"terminal_scoring_outcome_missing\"\n  \"no_active_deliveries\"\nAdditional values may be added additively.\n",
             "type": "string"
+          },
+          "failed_deliveries": {
+            "description": "Failed or dead-letter delivery rows with persisted reason/error/retry/dead-letter evidence for this run.",
+            "items": {
+              "$ref": "#/components/schemas/RunDebugFailureDelivery"
+            },
+            "type": "array"
           },
           "heuristics": {
             "description": "Free-form diagnostic notes from the projection. Current owner\nemits one entry per detected condition, e.g. \"dead letters\nexist for this run\".\n",
@@ -10178,7 +10357,8 @@
           "operational_state",
           "blocking_layer",
           "blocking_reason",
-          "heuristics"
+          "heuristics",
+          "failed_deliveries"
         ],
         "type": "object"
       },
@@ -10364,14 +10544,27 @@
           "delivery_id": {
             "$ref": "#/components/schemas/OpaqueId"
           },
+          "delivery_last_error": {
+            "type": "string"
+          },
           "delivery_reason_code": {
             "type": "string"
+          },
+          "delivery_retry_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "delivery_retry_eligible": {
+            "type": "boolean"
           },
           "delivery_started_at": {
             "$ref": "#/components/schemas/Timestamp"
           },
           "delivery_status": {
             "$ref": "#/components/schemas/DeliveryStatus"
+          },
+          "delivery_terminal": {
+            "type": "boolean"
           },
           "entity_id": {
             "$ref": "#/components/schemas/OpaqueId"

@@ -128,11 +128,12 @@ type runTraceListResult struct {
 }
 
 type runDiagnosis struct {
-	Run              store.RunHeader `json:"run"`
-	OperationalState string          `json:"operational_state"`
-	BlockingLayer    string          `json:"blocking_layer"`
-	BlockingReason   string          `json:"blocking_reason"`
-	Heuristics       []string        `json:"heuristics"`
+	Run              store.RunHeader                 `json:"run"`
+	OperationalState string                          `json:"operational_state"`
+	BlockingLayer    string                          `json:"blocking_layer"`
+	BlockingReason   string                          `json:"blocking_reason"`
+	Heuristics       []string                        `json:"heuristics"`
+	FailedDeliveries []store.RunDebugFailureDelivery `json:"failed_deliveries"`
 }
 
 var runListStatuses = map[string]struct{}{
@@ -217,12 +218,17 @@ func OperatorReadHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 				return nil, err
 			}
 			status := store.ProjectRunOperationalStatus(report)
+			failedDeliveries := report.FailedDeliveries
+			if failedDeliveries == nil {
+				failedDeliveries = []store.RunDebugFailureDelivery{}
+			}
 			return runDiagnosis{
 				Run:              header,
 				OperationalState: strings.TrimSpace(status.State),
 				BlockingLayer:    strings.TrimSpace(status.BlockingLayer),
 				BlockingReason:   strings.TrimSpace(status.BlockingReason),
 				Heuristics:       status.Heuristics,
+				FailedDeliveries: failedDeliveries,
 			}, nil
 		},
 	}
