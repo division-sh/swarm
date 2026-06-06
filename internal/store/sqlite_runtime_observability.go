@@ -256,6 +256,10 @@ func (s *SQLiteRuntimeStore) ListOperatorRuntimeLogs(ctx context.Context, opts O
 		where = append(where, "json_extract(payload, '$.details.component') = ?")
 		args = append(args, opts.Component)
 	}
+	if opts.Source != "" {
+		where = append(where, "COALESCE(NULLIF(TRIM(json_extract(payload, '$.details.agent_id')), ''), NULLIF(TRIM(produced_by), ''), 'runtime') = ?")
+		args = append(args, opts.Source)
+	}
 	if opts.SessionID != "" {
 		where = append(where, "json_extract(payload, '$.details.session_id') = ?")
 		args = append(args, opts.SessionID)
@@ -274,7 +278,7 @@ func (s *SQLiteRuntimeStore) ListOperatorRuntimeLogs(ctx context.Context, opts O
 	}
 	args = append(args, opts.Limit)
 	rows, err := s.DB.QueryContext(ctx, `
-		SELECT event_id, created_at, COALESCE(run_id, ''), COALESCE(entity_id, ''), payload
+		SELECT event_id, created_at, COALESCE(run_id, ''), COALESCE(entity_id, ''), COALESCE(produced_by, ''), payload
 		FROM events
 		WHERE `+strings.Join(where, " AND ")+`
 		ORDER BY created_at `+order+`, event_id `+order+`
@@ -286,17 +290,21 @@ func (s *SQLiteRuntimeStore) ListOperatorRuntimeLogs(ctx context.Context, opts O
 	defer rows.Close()
 	result := OperatorRuntimeLogListResult{Logs: []OperatorRuntimeLogEntry{}}
 	for rows.Next() {
-		var log OperatorRuntimeLogEntry
 		var createdRaw, payloadRaw any
-		if err := rows.Scan(&log.LogID, &createdRaw, &log.RunID, &log.EntityID, &payloadRaw); err != nil {
+		var logID, runID, entityID, producedBy string
+		if err := rows.Scan(&logID, &createdRaw, &runID, &entityID, &producedBy, &payloadRaw); err != nil {
 			return OperatorRuntimeLogListResult{}, fmt.Errorf("scan sqlite runtime log: %w", err)
 		}
+		var createdAt time.Time
 		if at, ok, err := sqliteTimeValue(createdRaw); err != nil {
 			return OperatorRuntimeLogListResult{}, err
 		} else if ok {
-			log.TS = at
+			createdAt = at
 		}
-		applySQLiteRuntimeLogPayload(&log, sqliteJSONRawMessage(payloadRaw))
+		log, err := operatorRuntimeLogEntry(logID, runID, entityID, producedBy, createdAt, sqliteJSONRawMessage(payloadRaw))
+		if err != nil {
+			return OperatorRuntimeLogListResult{}, err
+		}
 		result.Logs = append(result.Logs, log)
 	}
 	if err := rows.Err(); err != nil {

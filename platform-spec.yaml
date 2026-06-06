@@ -11017,9 +11017,9 @@ cli_specification:
         - --cursor
         - --order
       output:
-        snapshot_table: TIME / LEVEL / COMPONENT / SOURCE / RUN / ENTITY / SESSION / ERROR / MESSAGE plus next_cursor when present
+        snapshot_table: TIME / LEVEL / COMPONENT / ACTION / SOURCE / RUN / ENTITY / SESSION / ERROR / MESSAGE plus next_cursor when present
         snapshot_empty: No runtime logs match the filter.
-        follow_notification_line: log log_id=<id> ts=<timestamp> level=<level> component=<component> source=<source> [run_id=<run>] [entity_id=<entity>] [session_id=<session>] [error_code=<code>] message=<message> [details=<compact-json>]
+        follow_notification_line: log log_id=<id> ts=<timestamp> level=<level> component=<component> [action=<details.action>] source=<source> [run_id=<run>] [entity_id=<entity>] [session_id=<session>] [error_code=<code>] message=<message> [details=<compact-json>]
       exit_codes:
         success: 0
         cli_validation: 2
@@ -11032,6 +11032,7 @@ cli_specification:
       - follow rejects --since, --until, --limit, --cursor, and --order before opening the WebSocket; --replay-since is accepted only with --follow
       - invalid flags and missing explicit token for non-loopback API targets make zero API or WS calls
       - malformed runtime.logs results, malformed runtime.subscribe_logs subscription results/notifications, auth/HTTP/RPC/WS failures, and cancellation are tested with closed exit-code behavior
+      - server-owned details.action renders as ACTION in snapshot mode and action=<value> in follow mode when present; action is display-only and is not required by LogEntry
       - no direct DB/store/runtime/EventBus/dashboard/process-log/container-log reads and no legacy /api/*, /rpc, /api/rpc, /ws, or /api/ws usage
     incidents:
       command: swarm incidents [filters]

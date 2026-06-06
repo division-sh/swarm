@@ -61,6 +61,9 @@ func TestSQLiteRuntimeLogPersistenceWritesLoggerRowsForObservability(t *testing.
 	if log.RunID != runID || log.SessionID != "session-1" || log.Message != "sqlite diagnostic persisted" {
 		t.Fatalf("sqlite runtime log = %#v, want run/session/message", log)
 	}
+	if log.Source != "runtime" {
+		t.Fatalf("sqlite runtime log source = %q, want runtime", log.Source)
+	}
 	gotParentEventID, _ := log.Details["parent_event_id"].(string)
 	if got := strings.TrimSpace(gotParentEventID); got != subjectEventID {
 		t.Fatalf("sqlite runtime log parent_event_id = %q, want %q", got, subjectEventID)
@@ -75,6 +78,87 @@ func TestSQLiteRuntimeLogPersistenceWritesLoggerRowsForObservability(t *testing.
 	}
 	if sourceEventID != subjectEventID {
 		t.Fatalf("sqlite source_event_id = %q, want %q", sourceEventID, subjectEventID)
+	}
+}
+
+func TestSQLiteRuntimeLogSourceProjectionAndFilterParity(t *testing.T) {
+	ctx := context.Background()
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	runID := uuid.NewString()
+	ctx = runtimecorrelation.WithRunID(ctx, runID)
+
+	logger := runtimepkg.NewRuntimeLogger(store)
+	if err := logger.Log(ctx, runtimepkg.RuntimeLogEntry{
+		Level:     "warn",
+		Message:   "runtime-owned source",
+		Component: "source-parity",
+		Action:    "runtime_source",
+	}); err != nil {
+		t.Fatalf("RuntimeLogger.Log runtime source: %v", err)
+	}
+	if err := logger.Log(ctx, runtimepkg.RuntimeLogEntry{
+		Level:     "warn",
+		Message:   "agent-owned source",
+		Component: "source-parity",
+		Action:    "agent_source",
+		AgentID:   "agent-1",
+	}); err != nil {
+		t.Fatalf("RuntimeLogger.Log agent source: %v", err)
+	}
+
+	all, err := store.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{
+		RunID:     runID,
+		Component: "source-parity",
+		Level:     "warn",
+		Limit:     10,
+	})
+	if err != nil {
+		t.Fatalf("ListOperatorRuntimeLogs all: %v", err)
+	}
+	if len(all.Logs) != 2 {
+		t.Fatalf("all runtime logs = %#v, want two", all.Logs)
+	}
+
+	runtimeRows, err := store.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{
+		RunID:     runID,
+		Component: "source-parity",
+		Level:     "warn",
+		Source:    "runtime",
+		Limit:     10,
+	})
+	if err != nil {
+		t.Fatalf("ListOperatorRuntimeLogs runtime source: %v", err)
+	}
+	if len(runtimeRows.Logs) != 1 || runtimeRows.Logs[0].Source != "runtime" || runtimeRows.Logs[0].Message != "runtime-owned source" {
+		t.Fatalf("runtime source logs = %#v, want only runtime-owned row", runtimeRows.Logs)
+	}
+
+	agentRows, err := store.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{
+		RunID:     runID,
+		Component: "source-parity",
+		Level:     "warn",
+		Source:    "agent-1",
+		Limit:     10,
+	})
+	if err != nil {
+		t.Fatalf("ListOperatorRuntimeLogs agent source: %v", err)
+	}
+	if len(agentRows.Logs) != 1 || agentRows.Logs[0].Source != "agent-1" || agentRows.Logs[0].Message != "agent-owned source" {
+		t.Fatalf("agent source logs = %#v, want only agent-owned row", agentRows.Logs)
+	}
+
+	missingRows, err := store.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{
+		RunID:     runID,
+		Component: "source-parity",
+		Level:     "warn",
+		Source:    "missing-source",
+		Limit:     10,
+	})
+	if err != nil {
+		t.Fatalf("ListOperatorRuntimeLogs missing source: %v", err)
+	}
+	if len(missingRows.Logs) != 0 {
+		t.Fatalf("missing source logs = %#v, want none", missingRows.Logs)
 	}
 }
 

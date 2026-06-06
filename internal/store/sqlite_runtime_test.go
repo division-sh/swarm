@@ -1340,7 +1340,7 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 		RunID:       runID,
 		Type:        events.EventType("platform.runtime_log"),
 		SourceAgent: "runtime",
-		Payload:     json.RawMessage(`{"log_level":"warn","message":"runtime warning","details":{"component":"scheduler","session_id":"` + lease.SessionID + `"}}`),
+		Payload:     json.RawMessage(`{"log_level":"warn","message":"runtime warning","details":{"component":"scheduler","action":"session_warning","session_id":"` + lease.SessionID + `"}}`),
 		CreatedAt:   now.Add(time.Second),
 	}); err != nil {
 		t.Fatalf("AppendEvent runtime log: %v", err)
