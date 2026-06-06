@@ -432,6 +432,66 @@ func TestRoutedNodeInternalSubscriptionAliases_NestedSemanticScopeDoesNotLeakPar
 	}
 }
 
+func TestRoutedEventKeysForPlan_RuntimeCallbackLocalEventWithFlowInstanceDerivesConcreteKey(t *testing.T) {
+	tests := []struct {
+		name         string
+		eventType    string
+		flowInstance string
+		want         []string
+	}{
+		{
+			name:         "success callback",
+			eventType:    "repo_scaffold.repo_commit_succeeded",
+			flowInstance: "repo-scaffold/inst-1",
+			want: []string{
+				"repo_scaffold.repo_commit_succeeded",
+				"repo-scaffold/inst-1/repo_scaffold.repo_commit_succeeded",
+			},
+		},
+		{
+			name:         "failure callback",
+			eventType:    "repo_scaffold.repo_commit_failed",
+			flowInstance: "repo-scaffold/inst-1",
+			want: []string{
+				"repo_scaffold.repo_commit_failed",
+				"repo-scaffold/inst-1/repo_scaffold.repo_commit_failed",
+			},
+		},
+		{
+			name:         "semantic scoped event keeps existing concrete derivation",
+			eventType:    "repo-scaffold/repo_scaffold.repo_commit_succeeded",
+			flowInstance: "repo-scaffold/inst-1",
+			want: []string{
+				"repo-scaffold/repo_scaffold.repo_commit_succeeded",
+				"repo-scaffold/inst-1/repo_scaffold.repo_commit_succeeded",
+			},
+		},
+		{
+			name:         "root flow instance has no semantic scope",
+			eventType:    "repo_scaffold.repo_commit_succeeded",
+			flowInstance: "11111111-1111-4111-8111-111111111111",
+			want: []string{
+				"repo_scaffold.repo_commit_succeeded",
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := routedEventKeysForPlan((events.Event{
+				Type: events.EventType(tc.eventType),
+			}).WithFlowInstance(tc.flowInstance))
+			if len(got) != len(tc.want) {
+				t.Fatalf("event keys = %#v, want %#v", got, tc.want)
+			}
+			for i := range tc.want {
+				if got[i] != tc.want[i] {
+					t.Fatalf("event keys = %#v, want %#v", got, tc.want)
+				}
+			}
+		})
+	}
+}
+
 func TestResolveInternalRecipientsForRoutedNodePlanning_DoesNotSelectParentConcreteRouteForNestedSemanticScope(t *testing.T) {
 	eb, err := NewEventBus(InMemoryEventStore{})
 	if err != nil {

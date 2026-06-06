@@ -105,15 +105,15 @@ func TestRouteAuthorityMatrixRejectsStaleReferences(t *testing.T) {
 			want: "eventbus_route_plan_model go_test proof_ref TestMissingRouteAuthorityProof does not resolve",
 		},
 		{
-			name: "split sibling cannot be reclassified as covered",
+			name: "covered callback row cannot regress to split tracking",
 			mutate: func(matrix *routeAuthorityMatrix) {
 				row := routeAuthorityMatrixRowByID(t, matrix, "runtime_callback_flow_instance_localization")
-				row.Classification = "already_covered_by_existing_proof"
-				row.Tier = "required_pr_smoke"
-				row.SplitIssue = 0
-				row.ProofDimensions = []string{"persistence_authority"}
+				row.Classification = "split_to_existing_issue"
+				row.Tier = "split_open"
+				row.SplitIssue = 1301
+				row.ProofDimensions = []string{"route_plan_model", "split_tracker"}
 			},
-			want: "runtime_callback_flow_instance_localization must remain split-open issue #1301",
+			want: "runtime_callback_flow_instance_localization must remain covered in tier required_pr_smoke",
 		},
 		{
 			name: "parent closure stays false",
@@ -213,7 +213,7 @@ func validateRouteAuthorityMatrix(root string, matrix routeAuthorityMatrix, ctx 
 		}
 		activeTrackers[key] = struct{}{}
 	}
-	for _, issue := range []int{1340, 1301} {
+	for _, issue := range []int{1340} {
 		key := routeAuthorityTrackerKey(issue, "runtime_operations.delivery_and_replay_ownership")
 		if _, ok := activeTrackers[key]; !ok {
 			problems = append(problems, fmt.Sprintf("active_trackers missing #%d runtime_operations.delivery_and_replay_ownership", issue))
@@ -242,6 +242,13 @@ func validateRouteAuthorityMatrix(root string, matrix routeAuthorityMatrix, ctx 
 		if row, ok := rowsByID[rowID]; ok {
 			if row.Classification != "split_to_existing_issue" || row.Tier != "split_open" || row.SplitIssue != splitIssue {
 				problems = append(problems, fmt.Sprintf("%s must remain split-open issue #%d", rowID, splitIssue))
+			}
+		}
+	}
+	for rowID, tier := range requiredRouteAuthorityCoveredRows() {
+		if row, ok := rowsByID[rowID]; ok {
+			if row.Classification != "already_covered_by_existing_proof" || row.Tier != tier {
+				problems = append(problems, fmt.Sprintf("%s must remain covered in tier %s", rowID, tier))
 			}
 		}
 	}
@@ -474,8 +481,12 @@ func requiredRouteAuthorityRows() []string {
 }
 
 func requiredRouteAuthoritySplitRows() map[string]int {
-	return map[string]int{
-		"runtime_callback_flow_instance_localization": 1301,
+	return nil
+}
+
+func requiredRouteAuthorityCoveredRows() map[string]string {
+	return map[string]string{
+		"runtime_callback_flow_instance_localization": "required_pr_smoke",
 	}
 }
 

@@ -257,24 +257,30 @@ func concreteFlowInstanceEventKey(evt events.Event) string {
 	if staticScope == "" {
 		return ""
 	}
-	localEvent := semanticScopedLocalEvent(eventType, staticScope)
+	localEvent := eventContextLocalEventForFlowInstance(eventType, staticScope)
 	if localEvent == "" {
 		return ""
 	}
 	return flowInstance + "/" + localEvent
 }
 
-func semanticScopedLocalEvent(eventType, staticScope string) string {
+func eventContextLocalEventForFlowInstance(eventType, staticScope string) string {
 	eventType = strings.Trim(strings.TrimSpace(eventType), "/")
 	staticScope = strings.Trim(strings.TrimSpace(staticScope), "/")
-	if eventType == "" || staticScope == "" || !strings.HasPrefix(eventType, staticScope+"/") {
+	if eventType == "" || staticScope == "" {
 		return ""
 	}
-	localEvent := strings.TrimPrefix(eventType, staticScope+"/")
-	if localEvent == "" || strings.Contains(localEvent, "/") {
+	if strings.HasPrefix(eventType, staticScope+"/") {
+		localEvent := strings.TrimPrefix(eventType, staticScope+"/")
+		if localEvent == "" || strings.Contains(localEvent, "/") {
+			return ""
+		}
+		return localEvent
+	}
+	if strings.Contains(eventType, "/") {
 		return ""
 	}
-	return localEvent
+	return eventType
 }
 
 func deliveryRecipientIDs(in []deliveryRecipientCandidate) []string {
@@ -493,7 +499,11 @@ func routedScopedNoTargetNodeDeliveryRoutes(evt events.Event, routed []Subscribe
 		return nil
 	}
 	eventType := strings.Trim(strings.TrimSpace(string(evt.Type)), "/")
-	if eventType == "" || !strings.Contains(eventType, "/") {
+	flowInstance := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/")
+	if eventType == "" {
+		return nil
+	}
+	if !strings.Contains(eventType, "/") && (flowInstance == "" || concreteFlowInstanceEventKey(evt) == "") {
 		return nil
 	}
 	eventEntityID := strings.TrimSpace(evt.EntityID())
