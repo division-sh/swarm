@@ -649,12 +649,12 @@ func (r pipelineEngineGuardRunner) EvaluateGuard(ctx context.Context, id identit
 	}
 	builtin := strings.TrimSpace(firstNonEmptyString(entry.Builtin, id.String()))
 	state := workflowStateFromEngine(execCtx.Request.State)
-	payload := parsePayloadMap(execCtx.Request.Event.Payload)
+	payload := parsePayloadMap(execCtx.Request.Event.Payload())
 	switch builtin {
 	case "has_entity_id":
 		return strings.TrimSpace(execCtx.Request.EntityID.String()) != "", true, nil
 	case "has_human_decision":
-		source := strings.TrimSpace(execCtx.Request.Event.SourceAgent)
+		source := strings.TrimSpace(execCtx.Request.Event.SourceAgent())
 		if strings.EqualFold(source, "human") || strings.EqualFold(source, "mailbox") {
 			return true, true, nil
 		}
@@ -741,10 +741,10 @@ func (r pipelineEngineActionRunner) ExecuteAction(ctx context.Context, action ru
 	}
 	switch actionID {
 	case "record_evidence":
-		payload := parsePayloadMap(execCtx.Request.Event.Payload)
-		bucketID := pc.evidenceTargetForHandler(execCtx.Request.NodeID.String(), string(execCtx.Request.Event.Type))
+		payload := parsePayloadMap(execCtx.Request.Event.Payload())
+		bucketID := pc.evidenceTargetForHandler(execCtx.Request.NodeID.String(), string(execCtx.Request.Event.Type()))
 		if bucketID == "" {
-			return true, fmt.Errorf("node %s handler %s record_evidence is missing evidence_target", execCtx.Request.NodeID.String(), strings.TrimSpace(string(execCtx.Request.Event.Type)))
+			return true, fmt.Errorf("node %s handler %s record_evidence is missing evidence_target", execCtx.Request.NodeID.String(), strings.TrimSpace(string(execCtx.Request.Event.Type())))
 		}
 		if err := pc.recordWorkflowEvidence(ctx, execCtx.Request.EntityID.String(), bucketID, payload); err != nil {
 			return true, err
@@ -753,7 +753,7 @@ func (r pipelineEngineActionRunner) ExecuteAction(ctx context.Context, action ru
 	case "create_flow_instance":
 		plan := handlerExecutionPlan{
 			NodeID:         execCtx.Request.NodeID.String(),
-			EventType:      strings.TrimSpace(string(execCtx.Request.Event.Type)),
+			EventType:      strings.TrimSpace(string(execCtx.Request.Event.Type())),
 			Action:         actionID,
 			Template:       strings.TrimSpace(action.Template),
 			InstanceIDFrom: strings.TrimSpace(action.InstanceIDFrom),
@@ -1071,11 +1071,18 @@ func (pc *PipelineCoordinator) isTerminalFlowState(flowID, state string) bool {
 }
 
 func cloneEvent(evt events.Event) events.Event {
-	cloned := evt
-	if len(evt.Payload) > 0 {
-		cloned.Payload = append([]byte(nil), evt.Payload...)
-	}
-	return cloned
+	return events.NewProjectionEvent(
+		evt.ID(),
+		evt.Type(),
+		evt.SourceAgent(),
+		evt.TaskID(),
+		evt.Payload(),
+		evt.ChainDepth(),
+		evt.RunID(),
+		evt.ParentEventID(),
+		evt.NormalizedEnvelope(),
+		evt.CreatedAt(),
+	)
 }
 
 func workflowStateFromEngine(snapshot runtimeengine.StateSnapshot) *WorkflowState {

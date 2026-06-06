@@ -29,7 +29,7 @@ func RunIDFromContext(ctx context.Context) (string, bool, error) {
 	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
 	if runID == "" {
 		if inbound, ok := runtimecorrelation.InboundEventFromContext(ctx); ok {
-			runID = strings.TrimSpace(inbound.RunID)
+			runID = strings.TrimSpace(inbound.RunID())
 		}
 	}
 	if runID == "" {

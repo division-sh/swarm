@@ -224,28 +224,22 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 		t.Fatalf("seed run: %v", err)
 	}
 
-	event1 := events.Event{
-		ID:          uuid.NewString(),
-		RunID:       runID,
-		Type:        events.EventType("review.requested"),
-		SourceAgent: "runtime",
-		Payload:     []byte(`{"turn":1}`),
-		CreatedAt:   time.Now().Add(-2 * time.Minute).UTC(),
-	}
-	event2 := events.Event{
-		ID:          uuid.NewString(),
-		RunID:       runID,
-		Type:        events.EventType("review.requested"),
-		SourceAgent: "runtime",
-		Payload:     []byte(`{"turn":2}`),
-		CreatedAt:   time.Now().Add(-1 * time.Minute).UTC(),
-	}
+	event1 := events.NewProjectionEvent(uuid.NewString(),
+
+		events.EventType("review.requested"),
+		"runtime", "", []byte(`{"turn":1}`), 0, runID, "", events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC())
+
+	event2 := events.NewProjectionEvent(uuid.NewString(),
+
+		events.EventType("review.requested"),
+		"runtime", "", []byte(`{"turn":2}`), 0, runID, "", events.EventEnvelope{}, time.Now().Add(-1*time.Minute).UTC())
+
 	for _, evt := range []events.Event{event1, event2} {
 		if err := pg.AppendEvent(ctx, evt); err != nil {
-			t.Fatalf("AppendEvent(%s): %v", evt.ID, err)
+			t.Fatalf("AppendEvent(%s): %v", evt.ID(), err)
 		}
-		if err := pg.InsertEventDeliveries(ctx, evt.ID, []string{"agent-1"}); err != nil {
-			t.Fatalf("InsertEventDeliveries(%s): %v", evt.ID, err)
+		if err := pg.InsertEventDeliveries(ctx, evt.ID(), []string{"agent-1"}); err != nil {
+			t.Fatalf("InsertEventDeliveries(%s): %v", evt.ID(), err)
 		}
 	}
 
@@ -297,11 +291,11 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 	if _, err := runtime.ContinueSession(newTurnContext(event1), session, runtimellm.Message{Role: "user", Content: "first"}); err != nil {
 		t.Fatalf("ContinueSession(first): %v", err)
 	}
-	if err := pg.UpsertEventReceipt(newTurnContext(event1), event1.ID, "agent-1", runtimemanager.ReceiptStatusProcessed, ""); err != nil {
+	if err := pg.UpsertEventReceipt(newTurnContext(event1), event1.ID(), "agent-1", runtimemanager.ReceiptStatusProcessed, ""); err != nil {
 		t.Fatalf("UpsertEventReceipt(first): %v", err)
 	}
 
-	if err := pg.MarkEventDeliveryInProgress(newTurnContext(event2), event2.ID, "agent-1", ""); err != nil {
+	if err := pg.MarkEventDeliveryInProgress(newTurnContext(event2), event2.ID(), "agent-1", ""); err != nil {
 		t.Fatalf("MarkEventDeliveryInProgress(second prelaunch): %v", err)
 	}
 	if _, err := runtime.ContinueSession(newTurnContext(event2), session, runtimellm.Message{Role: "user", Content: "second"}); err != nil {
@@ -321,7 +315,7 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 		WHERE event_id = $1::uuid
 		  AND subscriber_type = 'agent'
 		  AND subscriber_id = 'agent-1'
-	`, event2.ID).Scan(&deliveryStatus, &activeSessionID); err != nil {
+	`, event2.ID()).Scan(&deliveryStatus, &activeSessionID); err != nil {
 		t.Fatalf("load second delivery: %v", err)
 	}
 	if deliveryStatus != "in_progress" {
@@ -387,18 +381,15 @@ func TestRotatedLiveSessionRebindsDeliveryFrontierToSuccessorSession(t *testing.
 	}
 
 	eventID := uuid.NewString()
-	evt := events.Event{
-		ID:          eventID,
-		RunID:       runID,
-		Type:        events.EventType("review.requested"),
-		SourceAgent: "runtime",
-		Payload:     []byte(`{"turn":1}`),
-		CreatedAt:   time.Now().UTC(),
-	}
+	evt := events.NewProjectionEvent(eventID,
+
+		events.EventType("review.requested"),
+		"runtime", "", []byte(`{"turn":1}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
+
 	if err := pg.AppendEvent(ctx, evt); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
-	if err := pg.InsertEventDeliveries(ctx, evt.ID, []string{"agent-1"}); err != nil {
+	if err := pg.InsertEventDeliveries(ctx, evt.ID(), []string{"agent-1"}); err != nil {
 		t.Fatalf("InsertEventDeliveries: %v", err)
 	}
 
@@ -462,7 +453,7 @@ printf '{"result":"ok"}'
 		t.Fatalf("StartSession: %v", err)
 	}
 	originalSessionID := session.ID
-	if err := pg.MarkEventDeliveryInProgress(newTurnContext(evt), evt.ID, "agent-1", ""); err != nil {
+	if err := pg.MarkEventDeliveryInProgress(newTurnContext(evt), evt.ID(), "agent-1", ""); err != nil {
 		t.Fatalf("MarkEventDeliveryInProgress(prelaunch): %v", err)
 	}
 	resp, err := runtime.ContinueSession(newTurnContext(evt), session, runtimellm.Message{Role: "user", Content: "rotate me"})
@@ -489,7 +480,7 @@ printf '{"result":"ok"}'
 		WHERE event_id = $1::uuid
 		  AND subscriber_type = 'agent'
 		  AND subscriber_id = 'agent-1'
-	`, evt.ID).Scan(&deliveryStatus, &activeSessionID); err != nil {
+	`, evt.ID()).Scan(&deliveryStatus, &activeSessionID); err != nil {
 		t.Fatalf("load delivery: %v", err)
 	}
 	if deliveryStatus != "in_progress" {
@@ -817,12 +808,8 @@ func TestAccumulatorCompletionOutcomeSurface_RoundTripsThroughObservabilityReade
 		if err != nil {
 			t.Fatalf("marshal payload: %v", err)
 		}
-		if err := rt.Bus.Publish(ctx, (events.Event{
-			ID:        uuid.NewString(),
-			Type:      events.EventType("score.received"),
-			Payload:   payload,
-			CreatedAt: time.Now().UTC().Add(time.Duration(idx) * time.Millisecond),
-		}).WithEntityID(entityID)); err != nil {
+		if err := rt.Bus.Publish(ctx, (events.NewProjectionEvent(uuid.NewString(),
+			events.EventType("score.received"), "", "", payload, 0, "", "", events.EventEnvelope{}, time.Now().UTC().Add(time.Duration(idx)*time.Millisecond))).WithEntityID(entityID)); err != nil {
 			t.Fatalf("Publish(%d): %v", idx, err)
 		}
 	}
@@ -1098,7 +1085,7 @@ func (a conformanceManagerReplayAgent) ID() string                      { return
 func (conformanceManagerReplayAgent) Type() string                      { return "generic" }
 func (conformanceManagerReplayAgent) Subscriptions() []events.EventType { return nil }
 func (conformanceManagerReplayAgent) OnEvent(_ context.Context, evt events.Event) ([]events.Event, error) {
-	switch evt.Type {
+	switch evt.Type() {
 	case events.EventType("support.replay.drop"):
 		return nil, fmt.Errorf("boom")
 	case events.EventType("support.replay.leased"):
@@ -1240,11 +1227,8 @@ func TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWitho
 	eventStore := conformanceRecoveryFailureEventStore{
 		store: pg,
 		missing: []events.PersistedReplayEvent{{
-			Event: events.Event{
-				ID:        uuid.NewString(),
-				Type:      events.EventType("support.item_created"),
-				CreatedAt: time.Now().Add(-time.Minute).UTC(),
-			},
+			Event: events.NewProjectionEvent(uuid.NewString(),
+				events.EventType("support.item_created"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().Add(-time.Minute).UTC()),
 		}},
 		claimErr: errors.New("claim failed"),
 	}
@@ -1605,10 +1589,10 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 		}},
 		pending: map[string][]events.Event{
 			"agent-a": {
-				{ID: "evt-replay", Type: events.EventType("support.replay.ok"), CreatedAt: time.Now().Add(-4 * time.Minute).UTC()},
-				{ID: "evt-skip", Type: events.EventType("support.replay.skip"), CreatedAt: time.Now().Add(-3 * time.Minute).UTC()},
-				{ID: "evt-leased", Type: events.EventType("support.replay.leased"), CreatedAt: time.Now().Add(-2 * time.Minute).UTC()},
-				{ID: "evt-drop", Type: events.EventType("support.replay.drop"), CreatedAt: time.Now().Add(-time.Minute).UTC()},
+				events.NewProjectionEvent("evt-replay", events.EventType("support.replay.ok"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().Add(-4*time.Minute).UTC()),
+				events.NewProjectionEvent("evt-skip", events.EventType("support.replay.skip"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().Add(-3*time.Minute).UTC()),
+				events.NewProjectionEvent("evt-leased", events.EventType("support.replay.leased"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC()),
+				events.NewProjectionEvent("evt-drop", events.EventType("support.replay.drop"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().Add(-time.Minute).UTC()),
 			},
 		},
 		receipts: map[string]runtimemanager.EventReceipt{
@@ -1740,25 +1724,17 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 	replayRunID := uuid.NewString()
 	replayParentID := uuid.NewString()
 	replayChildID := uuid.NewString()
-	if err := pg.AppendEvent(ctx, events.Event{
-		ID:          replayParentID,
-		Type:        events.EventType("system.parent"),
-		SourceAgent: "runtime",
-		Payload:     []byte(`{"ok":true}`),
-		RunID:       replayRunID,
-		CreatedAt:   time.Now().Add(-3 * time.Minute).UTC(),
-	}); err != nil {
+	if err := pg.AppendEvent(ctx, events.NewProjectionEvent(replayParentID,
+		events.EventType("system.parent"),
+		"runtime", "", []byte(`{"ok":true}`), 0, replayRunID, "", events.EventEnvelope{}, time.Now().Add(-3*time.Minute).UTC()),
+	); err != nil {
 		t.Fatalf("AppendEvent(replay parent): %v", err)
 	}
-	if err := pg.AppendEvent(ctx, events.Event{
-		ID:            replayChildID,
-		Type:          events.EventType("system.recover.replay"),
-		SourceAgent:   "runtime",
-		Payload:       []byte(`{"ok":true}`),
-		RunID:         replayRunID,
-		ParentEventID: replayParentID,
-		CreatedAt:     time.Now().Add(-2 * time.Minute).UTC(),
-	}); err != nil {
+	if err := pg.AppendEvent(ctx, events.NewProjectionEvent(replayChildID,
+		events.EventType("system.recover.replay"),
+		"runtime", "", []byte(`{"ok":true}`), 0, replayRunID,
+		replayParentID, events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC()),
+	); err != nil {
 		t.Fatalf("AppendEvent(replay child): %v", err)
 	}
 	if err := pg.InsertEventDeliveries(ctx, replayChildID, []string{replayRecipient}); err != nil {
@@ -1774,25 +1750,17 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 	skipRunID := uuid.NewString()
 	skipParentID := uuid.NewString()
 	skipChildID := uuid.NewString()
-	if err := pg.AppendEvent(ctx, events.Event{
-		ID:          skipParentID,
-		Type:        events.EventType("system.parent"),
-		SourceAgent: "runtime",
-		Payload:     []byte(`{"ok":true}`),
-		RunID:       skipRunID,
-		CreatedAt:   time.Now().Add(-3 * time.Minute).UTC(),
-	}); err != nil {
+	if err := pg.AppendEvent(ctx, events.NewProjectionEvent(skipParentID,
+		events.EventType("system.parent"),
+		"runtime", "", []byte(`{"ok":true}`), 0, skipRunID, "", events.EventEnvelope{}, time.Now().Add(-3*time.Minute).UTC()),
+	); err != nil {
 		t.Fatalf("AppendEvent(skip parent): %v", err)
 	}
-	if err := pg.AppendEvent(ctx, events.Event{
-		ID:            skipChildID,
-		Type:          events.EventType("system.recover.skip"),
-		SourceAgent:   "runtime",
-		Payload:       []byte(`{"ok":true}`),
-		RunID:         skipRunID,
-		ParentEventID: skipParentID,
-		CreatedAt:     time.Now().Add(-2 * time.Minute).UTC(),
-	}); err != nil {
+	if err := pg.AppendEvent(ctx, events.NewProjectionEvent(skipChildID,
+		events.EventType("system.recover.skip"),
+		"runtime", "", []byte(`{"ok":true}`), 0, skipRunID,
+		skipParentID, events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC()),
+	); err != nil {
 		t.Fatalf("AppendEvent(skip child): %v", err)
 	}
 	if err := pg.UpsertCommittedReplayScope(ctx, skipChildID, runtimereplayclaim.CommittedReplayScopeDirect); err != nil {

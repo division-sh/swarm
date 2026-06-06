@@ -44,13 +44,9 @@ func TestCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutations(t *testing.T
 			schedules := pc.timerScheduleStore.(*recordingScheduleStore)
 			mailbox := pc.mailboxMaterializer.(*recordingMailboxWriteMaterializer)
 			eventID := uuid.NewString()
-			evt := events.Event{
-				ID:        eventID,
-				Type:      events.EventType("thing.created"),
-				Payload:   mustJSON(map[string]any{"amount": 250, "who": "alice"}),
-				CreatedAt: time.Now().UTC(),
-				RunID:     runtimecorrelation.RunIDFromContext(ctx),
-			}
+			evt := events.NewProjectionEvent(eventID,
+				events.EventType("thing.created"), "", "", mustJSON(map[string]any{"amount": 250, "who": "alice"}), 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EventEnvelope{}, time.Now().UTC())
+
 			seedExactOnceEvent(t, pc.workflowStore, ctx, evt)
 
 			result, err := pc.executeNodeContractHandler(ctx, "w-node", exactOnceCreateEntityHandler(), workflowTriggerContext{
@@ -143,13 +139,9 @@ func TestDispatchWorkflowNodeEventSkipsAlreadyProcessedCreateEntityHandler(t *te
 			bus := pc.bus.(*recordingPipelineBus)
 			mailbox := pc.mailboxMaterializer.(*recordingMailboxWriteMaterializer)
 			eventID := uuid.NewString()
-			evt := events.Event{
-				ID:        eventID,
-				Type:      events.EventType("thing.created"),
-				Payload:   mustJSON(map[string]any{"amount": 250, "who": "alice"}),
-				CreatedAt: time.Now().UTC(),
-				RunID:     runtimecorrelation.RunIDFromContext(ctx),
-			}
+			evt := events.NewProjectionEvent(eventID,
+				events.EventType("thing.created"), "", "", mustJSON(map[string]any{"amount": 250, "who": "alice"}), 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EventEnvelope{}, time.Now().UTC())
+
 			seedExactOnceEventDelivery(t, pc.workflowStore, ctx, evt, "w-node")
 
 			handled, err := pc.dispatchWorkflowNodeEventResult(ctx, evt)
@@ -361,7 +353,7 @@ func seedExactOnceEventDelivery(t *testing.T, store *WorkflowInstanceStore, ctx 
 		if _, err := store.db.ExecContext(ctx, `
 			INSERT INTO event_deliveries (delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, retry_count, created_at)
 			VALUES (?, ?, ?, 'node', ?, 'pending', 0, ?)
-		`, uuid.NewString(), runID, evt.ID, nodeID, evt.CreatedAt); err != nil {
+		`, uuid.NewString(), runID, evt.ID(), nodeID, evt.CreatedAt()); err != nil {
 			t.Fatalf("seed sqlite delivery: %v", err)
 		}
 		return
@@ -369,7 +361,7 @@ func seedExactOnceEventDelivery(t *testing.T, store *WorkflowInstanceStore, ctx 
 	if _, err := store.db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (run_id, event_id, subscriber_type, subscriber_id, status, retry_count, created_at)
 		VALUES ($1::uuid, $2::uuid, 'node', $3, 'pending', 0, $4)
-	`, runID, evt.ID, nodeID, evt.CreatedAt); err != nil {
+	`, runID, evt.ID(), nodeID, evt.CreatedAt()); err != nil {
 		t.Fatalf("seed postgres delivery: %v", err)
 	}
 }
@@ -381,7 +373,7 @@ func seedExactOnceEvent(t *testing.T, store *WorkflowInstanceStore, ctx context.
 		if _, err := store.db.ExecContext(ctx, `
 			INSERT OR IGNORE INTO events (event_id, run_id, event_name, scope, payload, chain_depth, produced_by_type, created_at)
 			VALUES (?, ?, ?, 'global', ?, ?, 'agent', ?)
-		`, evt.ID, runID, strings.TrimSpace(string(evt.Type)), string(evt.Payload), evt.ChainDepth, evt.CreatedAt); err != nil {
+		`, evt.ID(), runID, strings.TrimSpace(string(evt.Type())), string(evt.Payload()), evt.ChainDepth(), evt.CreatedAt()); err != nil {
 			t.Fatalf("seed sqlite event: %v", err)
 		}
 		return
@@ -390,7 +382,7 @@ func seedExactOnceEvent(t *testing.T, store *WorkflowInstanceStore, ctx context.
 		INSERT INTO events (event_id, run_id, event_name, scope, payload, chain_depth, produced_by_type, created_at)
 		VALUES ($1::uuid, $2::uuid, $3, 'global', $4::jsonb, $5, 'agent', $6)
 		ON CONFLICT (event_id) DO NOTHING
-	`, evt.ID, runID, strings.TrimSpace(string(evt.Type)), string(evt.Payload), evt.ChainDepth, evt.CreatedAt); err != nil {
+	`, evt.ID(), runID, strings.TrimSpace(string(evt.Type())), string(evt.Payload()), evt.ChainDepth(), evt.CreatedAt()); err != nil {
 		t.Fatalf("seed postgres event: %v", err)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"time"
 )
 
 func TestResolveTargetsCompleteParentRouteForPinDeclaredOutput(t *testing.T) {
@@ -22,7 +23,7 @@ func TestResolveTargetsCompleteParentRouteForPinDeclaredOutput(t *testing.T) {
 		FlowID:      "child",
 		EventType:   "child.done",
 		ParentRoute: parent,
-	}, events.Event{Type: "child.done"})
+	}, events.NewProjectionEvent("", "child.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 
 	if result.Failure != "" {
 		t.Fatalf("Failure = %q, want empty", result.Failure)
@@ -44,7 +45,7 @@ func TestResolveFailsClosedOnIncompleteParentRouteForPinDeclaredOutput(t *testin
 			FlowID:   "root",
 			EntityID: "parent-ent",
 		},
-	}, events.Event{Type: "child.done"})
+	}, events.NewProjectionEvent("", "child.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 
 	if result.Failure != FailureParentRouteIncomplete {
 		t.Fatalf("Failure = %q, want %q", result.Failure, FailureParentRouteIncomplete)
@@ -61,7 +62,7 @@ func TestResolveAllowsEntityOnlyParentRouteOnlyWhenExplicitlyAllowed(t *testing.
 		FlowID:      "child",
 		EventType:   "child.done",
 		ParentRoute: parent,
-	}, events.Event{Type: "child.done"})
+	}, events.NewProjectionEvent("", "child.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 	if blocked.Failure != FailureParentRouteIncomplete {
 		t.Fatalf("blocked Failure = %q, want %q", blocked.Failure, FailureParentRouteIncomplete)
 	}
@@ -72,7 +73,7 @@ func TestResolveAllowsEntityOnlyParentRouteOnlyWhenExplicitlyAllowed(t *testing.
 		EventType:                  "child.done",
 		ParentRoute:                parent,
 		AllowEntityOnlyParentRoute: true,
-	}, events.Event{Type: "child.done"})
+	}, events.NewProjectionEvent("", "child.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 	if allowed.Failure != "" {
 		t.Fatalf("allowed Failure = %q, want empty", allowed.Failure)
 	}
@@ -96,7 +97,7 @@ func TestResolveFailsClosedForRootPinOutputWithoutTargetMechanism(t *testing.T) 
 	result := Resolve(ResolutionInput{
 		Source:    testRootPinRoutingSource(),
 		EventType: "root.ready",
-	}, events.Event{Type: "root.ready"})
+	}, events.NewProjectionEvent("", "root.ready", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 
 	if result.Failure != FailureTargetRequiredMissing {
 		t.Fatalf("Failure = %q, want %q", result.Failure, FailureTargetRequiredMissing)

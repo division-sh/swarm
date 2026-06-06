@@ -48,8 +48,8 @@ func TestOperatorRuntimeContextManagerRoutesCreateNewWorkToSelectedBundle(t *tes
 		t.Fatalf("triage.requested count after event.publish = %d, want 1", got)
 	}
 	got := requireAPIV1RuntimeBusEvent(t, chSelected, "selected context delivery")
-	if got.ID != publishedEventID {
-		t.Fatalf("selected context delivered event = %s, want %s", got.ID, publishedEventID)
+	if got.ID() != publishedEventID {
+		t.Fatalf("selected context delivered event = %s, want %s", got.ID(), publishedEventID)
 	}
 	requireNoAPIV1RuntimeBusEvent(t, chPrimary, "primary context selected bundle route")
 
@@ -75,8 +75,8 @@ func TestOperatorRuntimeContextManagerRoutesExistingRunByStoredBundle(t *testing
 		t.Fatalf("seed run.start error = %#v", started.Error)
 	}
 	got := requireAPIV1RuntimeBusEvent(t, chSelected, "seed existing-run delivery")
-	if got.RunID != runID {
-		t.Fatalf("seed existing-run delivery run = %s, want %s", got.RunID, runID)
+	if got.RunID() != runID {
+		t.Fatalf("seed existing-run delivery run = %s, want %s", got.RunID(), runID)
 	}
 
 	body := fmt.Sprintf(
@@ -100,8 +100,8 @@ func TestOperatorRuntimeContextManagerRoutesExistingRunByStoredBundle(t *testing
 	}
 	assertRunBundleIdentity(t, fixture.db, runID, runtimeContextTestBundleHashB, storerunlifecycle.BundleSourcePersisted, "")
 	got = requireAPIV1RuntimeBusEvent(t, chSelected, "existing-run selected-context delivery")
-	if got.ID != eventID || got.RunID != runID {
-		t.Fatalf("existing-run delivery id/run = %s/%s, want %s/%s", got.ID, got.RunID, eventID, runID)
+	if got.ID() != eventID || got.RunID() != runID {
+		t.Fatalf("existing-run delivery id/run = %s/%s, want %s/%s", got.ID(), got.RunID(), eventID, runID)
 	}
 }
 

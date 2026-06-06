@@ -610,7 +610,7 @@ func insertSQLiteEntityMutationRecord(ctx context.Context, tx *sql.Tx, runID str
 	}
 	causedByEvent := ""
 	if inbound, ok := runtimecorrelation.InboundEventFromContext(ctx); ok {
-		if parsed := validSQLiteWorkflowUUID(inbound.ID); parsed != "" {
+		if parsed := validSQLiteWorkflowUUID(inbound.ID()); parsed != "" {
 			causedByEvent = parsed
 		}
 	}

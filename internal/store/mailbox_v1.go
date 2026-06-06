@@ -502,10 +502,10 @@ func (s *PostgresStore) appendMailboxV1ApprovalEventTx(ctx context.Context, tx *
 	if err := s.AppendEventTx(ctx, tx, evt); err != nil {
 		return err
 	}
-	if err := s.UpsertCommittedReplayScopeTx(ctx, tx, evt.ID, runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
+	if err := s.UpsertCommittedReplayScopeTx(ctx, tx, evt.ID(), runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
 		return err
 	}
-	if err := s.UpsertPipelineReceiptTx(ctx, tx, evt.ID, "processed", ""); err != nil {
+	if err := s.UpsertPipelineReceiptTx(ctx, tx, evt.ID(), "processed", ""); err != nil {
 		return err
 	}
 	return nil
@@ -757,7 +757,7 @@ func (r mailboxV1Row) approvalEvent(eventID, decisionID, eventType, actorTokenID
 	payloadMap := map[string]any{}
 	if len(decisionPayload) > 0 {
 		if err := json.Unmarshal(decisionPayload, &payloadMap); err != nil {
-			return events.Event{}, fmt.Errorf("decode decision payload: %w", err)
+			return events.EmptyEvent(), fmt.Errorf("decode decision payload: %w", err)
 		}
 	}
 	if payloadMap == nil {
@@ -778,23 +778,26 @@ func (r mailboxV1Row) approvalEvent(eventID, decisionID, eventType, actorTokenID
 	}
 	raw, err := json.Marshal(eventPayload)
 	if err != nil {
-		return events.Event{}, err
+		return events.EmptyEvent(), err
 	}
-	evt := events.Event{
-		ID:            strings.TrimSpace(eventID),
-		Type:          events.EventType(strings.TrimSpace(eventType)),
-		SourceAgent:   "mailbox_human",
-		Payload:       raw,
-		RunID:         strings.TrimSpace(r.RunID),
-		ParentEventID: strings.TrimSpace(r.SourceEventID),
-		CreatedAt:     now.UTC(),
+	envelope := events.EventEnvelope{
+		EntityID:     strings.TrimSpace(r.EntityID),
+		FlowInstance: strings.TrimSpace(r.FlowInstance),
 	}
-	if entityID := strings.TrimSpace(r.EntityID); entityID != "" {
-		evt = evt.WithEntityID(entityID)
-	}
-	if flowInstance := strings.TrimSpace(r.FlowInstance); flowInstance != "" {
-		evt = evt.WithFlowInstance(flowInstance)
-	}
+	evt := events.NewChildEventWithLineage(
+		strings.TrimSpace(eventID),
+		events.EventType(strings.TrimSpace(eventType)),
+		"mailbox_human",
+		"",
+		raw,
+		0,
+		events.EventLineage{
+			RunID:         strings.TrimSpace(r.RunID),
+			ParentEventID: strings.TrimSpace(r.SourceEventID),
+		},
+		envelope,
+		now.UTC(),
+	)
 	return evt, nil
 }
 

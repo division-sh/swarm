@@ -384,19 +384,16 @@ func testActivationRequest(bundle *runtimecontracts.WorkflowContractBundle, temp
 }
 
 func testFlowActivationTriggerEvent(eventID string) events.Event {
-	return events.Event{
-		ID:          strings.TrimSpace(eventID),
-		Type:        events.EventType("spawn.requested"),
-		SourceAgent: "spawner",
-		Payload:     json.RawMessage(`{}`),
-		CreatedAt:   time.Now().UTC(),
-	}
+	return events.NewProjectionEvent(strings.TrimSpace(eventID),
+		events.EventType("spawn.requested"),
+		"spawner", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+
 }
 
 func decodeFlowActivationEventPayload(t *testing.T, event events.Event) map[string]any {
 	t.Helper()
 	var payload map[string]any
-	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+	if err := json.Unmarshal(event.Payload(), &payload); err != nil {
 		t.Fatalf("decode event payload: %v", err)
 	}
 	if payload == nil {
@@ -408,12 +405,12 @@ func decodeFlowActivationEventPayload(t *testing.T, event events.Event) map[stri
 func findPublishedFlowActivationEvent(t *testing.T, bus *flowActivationTestBus, eventType string) events.Event {
 	t.Helper()
 	for _, event := range bus.published {
-		if string(event.Type) == eventType {
+		if string(event.Type()) == eventType {
 			return event
 		}
 	}
 	t.Fatalf("published events = %#v, want %s", bus.published, eventType)
-	return events.Event{}
+	return events.NewProjectionEvent("", events.EventType(""), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
 }
 
 func TestActivateFlowInstanceAddsDerivedRouteTableInstance(t *testing.T) {
@@ -521,7 +518,7 @@ func TestActivateFlowInstancePublishesAutoEmitEvent(t *testing.T) {
 	}
 	var autoEmit *events.Event
 	for idx := range bus.published {
-		if string(bus.published[idx].Type) == "review/inst-1/task.started" {
+		if string(bus.published[idx].Type()) == "review/inst-1/task.started" {
 			autoEmit = &bus.published[idx]
 			break
 		}
@@ -532,10 +529,10 @@ func TestActivateFlowInstancePublishesAutoEmitEvent(t *testing.T) {
 	if got := autoEmit.EntityID(); got != runtimepipeline.FlowInstanceEntityID("review/inst-1") {
 		t.Fatalf("published entity_id = %q, want %q", got, runtimepipeline.FlowInstanceEntityID("review/inst-1"))
 	}
-	if got := strings.TrimSpace(autoEmit.RunID); got != runID {
+	if got := strings.TrimSpace(autoEmit.RunID()); got != runID {
 		t.Fatalf("published run_id = %q, want active run %q", got, runID)
 	}
-	if got := strings.TrimSpace(autoEmit.ParentEventID); got != triggerEventID {
+	if got := strings.TrimSpace(autoEmit.ParentEventID()); got != triggerEventID {
 		t.Fatalf("published parent_event_id = %q, want trigger event %q", got, triggerEventID)
 	}
 	if got, _ := autoEmit.ContextMap("")["source_event_id"].(string); got != triggerEventID {
@@ -552,7 +549,7 @@ func TestActivateFlowInstanceAutoEmitDoesNotInventLineageWithoutTrigger(t *testi
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
 	event := findPublishedFlowActivationEvent(t, bus, "review/inst-1/task.started")
-	if got := strings.TrimSpace(event.ParentEventID); got != "" {
+	if got := strings.TrimSpace(event.ParentEventID()); got != "" {
 		t.Fatalf("parent_event_id = %q, want empty without concrete trigger", got)
 	}
 	if _, ok := event.ContextMap("")["source_event_id"]; ok {
@@ -623,7 +620,7 @@ func TestActivateFlowInstanceAutoEmitKeepsPayloadSourceEventIDNonAuthoritative(t
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
 	event := findPublishedFlowActivationEvent(t, bus, "review/inst-1/component.scaffold.start")
-	if got := strings.TrimSpace(event.ParentEventID); got != triggerEventID {
+	if got := strings.TrimSpace(event.ParentEventID()); got != triggerEventID {
 		t.Fatalf("parent_event_id = %q, want trigger event %q", got, triggerEventID)
 	}
 	if got, _ := event.ContextMap("")["source_event_id"].(string); got != triggerEventID {
@@ -721,13 +718,13 @@ func TestActivateFlowInstanceQueuesAutoEmitUntilPostCommitWhenAvailable(t *testi
 	if len(bus.published) != 1 {
 		t.Fatalf("published events after post-commit = %d, want 1", len(bus.published))
 	}
-	if got := string(bus.published[0].Type); got != "review/inst-1/task.started" {
+	if got := string(bus.published[0].Type()); got != "review/inst-1/task.started" {
 		t.Fatalf("auto-emitted type = %q, want review/inst-1/task.started", got)
 	}
-	if got := strings.TrimSpace(bus.published[0].RunID); got != runID {
+	if got := strings.TrimSpace(bus.published[0].RunID()); got != runID {
 		t.Fatalf("auto-emitted run_id = %q, want active run %q", got, runID)
 	}
-	if got := strings.TrimSpace(bus.published[0].ParentEventID); got != triggerEventID {
+	if got := strings.TrimSpace(bus.published[0].ParentEventID()); got != triggerEventID {
 		t.Fatalf("auto-emitted parent_event_id = %q, want trigger event %q", got, triggerEventID)
 	}
 }

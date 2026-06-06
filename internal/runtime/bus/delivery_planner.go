@@ -31,7 +31,7 @@ type deliveryRouteResolver struct {
 
 func (r deliveryRouteResolver) Resolve(evt events.Event) deliveryRoutingResult {
 	routedRecipients := r.resolveRoutedSubscribers(evt)
-	subscribedRecipients := r.resolveSubscribedRecipients(string(evt.Type))
+	subscribedRecipients := r.resolveSubscribedRecipients(string(evt.Type()))
 	routedCandidates := routedSubscriberCandidates(routedRecipients)
 	if r.resolveRoutedNodeInternalRecipients != nil {
 		routedCandidates = append(routedCandidates, r.resolveRoutedNodeInternalRecipients(evt, routedRecipients)...)
@@ -46,7 +46,7 @@ func (r deliveryRouteResolver) Resolve(evt events.Event) deliveryRoutingResult {
 			"subscription_recipients_count": len(subscribedRecipients),
 		},
 	}
-	if described := publishDiagnosticRecipientMaps(r.describeSubscribersForEvent(string(evt.Type), routedRecipients)); len(described) > 0 {
+	if described := publishDiagnosticRecipientMaps(r.describeSubscribersForEvent(string(evt.Type()), routedRecipients)); len(described) > 0 {
 		result.ExtraDetail["routed_recipients"] = described
 	}
 	if direct := deliveryRecipientIDs(subscribedRecipients); len(direct) > 0 {
@@ -97,7 +97,7 @@ func newDeliveryPlanner(routeResolver deliveryRouteResolver, recipientPolicy del
 
 func (p deliveryPlanner) Plan(ctx context.Context, evt events.Event) (eventDeliveryPlan, error) {
 	routePlan := newRoutePlan(evt)
-	if evt.Type == events.EventType("platform.runtime_log") {
+	if evt.Type() == events.EventType("platform.runtime_log") {
 		return routePlan.EventDeliveryPlan(), nil
 	}
 	routing := p.routeResolver.Resolve(evt)
@@ -124,7 +124,7 @@ func (p deliveryPlanner) Plan(ctx context.Context, evt events.Event) (eventDeliv
 
 func (p deliveryPlanner) PlanDirect(ctx context.Context, evt events.Event, recipients []string) (eventDeliveryPlan, error) {
 	routePlan := newRoutePlan(evt)
-	if evt.Type == events.EventType("platform.runtime_log") {
+	if evt.Type() == events.EventType("platform.runtime_log") {
 		return routePlan.EventDeliveryPlan(), nil
 	}
 	requested := uniqueStrings(recipients)
@@ -236,7 +236,7 @@ func agentDeliveryRecipientCandidates(in []string) []deliveryRecipientCandidate 
 }
 
 func routedEventKeysForPlan(evt events.Event) []string {
-	eventType := strings.Trim(strings.TrimSpace(string(evt.Type)), "/")
+	eventType := strings.Trim(strings.TrimSpace(string(evt.Type())), "/")
 	if eventType == "" {
 		return nil
 	}
@@ -248,7 +248,7 @@ func routedEventKeysForPlan(evt events.Event) []string {
 }
 
 func concreteFlowInstanceEventKey(evt events.Event) string {
-	eventType := strings.Trim(strings.TrimSpace(string(evt.Type)), "/")
+	eventType := strings.Trim(strings.TrimSpace(string(evt.Type())), "/")
 	flowInstance := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/")
 	if eventType == "" || flowInstance == "" {
 		return ""
@@ -461,7 +461,7 @@ func routedNodeDeliveryIntentsForNoTargetEvent(evt events.Event, routed []Subscr
 
 func routedConcreteNoTargetNodeDeliveryRoutes(evt events.Event, routed []Subscriber) []events.DeliveryRoute {
 	flowInstance := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/")
-	eventType := strings.Trim(strings.TrimSpace(string(evt.Type)), "/")
+	eventType := strings.Trim(strings.TrimSpace(string(evt.Type())), "/")
 	if flowInstance == "" || eventType == "" || !strings.HasPrefix(eventType, flowInstance+"/") {
 		return nil
 	}
@@ -498,7 +498,7 @@ func routedScopedNoTargetNodeDeliveryRoutes(evt events.Event, routed []Subscribe
 	if len(routed) == 0 || len(eventDeliveryTargetRoutes(evt)) > 0 {
 		return nil
 	}
-	eventType := strings.Trim(strings.TrimSpace(string(evt.Type)), "/")
+	eventType := strings.Trim(strings.TrimSpace(string(evt.Type())), "/")
 	flowInstance := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/")
 	if eventType == "" {
 		return nil
@@ -529,7 +529,7 @@ func routedWildcardStaticServiceNoTargetNodeDeliveryRoutes(evt events.Event, rou
 	if len(routed) == 0 || len(eventDeliveryTargetRoutes(evt)) > 0 {
 		return nil
 	}
-	eventType := strings.Trim(strings.TrimSpace(string(evt.Type)), "/")
+	eventType := strings.Trim(strings.TrimSpace(string(evt.Type())), "/")
 	if eventType == "" {
 		return nil
 	}
@@ -596,7 +596,7 @@ func routedScopedNoTargetNodeDeliveryFlowInstance(evt events.Event, subscriber S
 func routedDescendantStaticFlowInstanceTarget(evt events.Event, subscriber Subscriber) string {
 	flowInstance := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/")
 	path := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
-	eventType := strings.Trim(strings.TrimSpace(string(evt.Type)), "/")
+	eventType := strings.Trim(strings.TrimSpace(string(evt.Type())), "/")
 	matchPattern := strings.Trim(strings.TrimSpace(subscriber.MatchPattern), "/")
 	if flowInstance == "" || path == "" || eventType == "" || eventType != matchPattern || !strings.HasPrefix(eventType, path+"/") {
 		return ""
@@ -610,7 +610,7 @@ func routedDescendantStaticFlowInstanceTarget(evt events.Event, subscriber Subsc
 
 func routedStaticCrossFlowInstanceTarget(evt events.Event, subscriber Subscriber) string {
 	path := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
-	eventType := strings.Trim(strings.TrimSpace(string(evt.Type)), "/")
+	eventType := strings.Trim(strings.TrimSpace(string(evt.Type())), "/")
 	matchPattern := strings.Trim(strings.TrimSpace(subscriber.MatchPattern), "/")
 	if path == "" || eventType == "" || eventType != matchPattern {
 		return ""
@@ -691,7 +691,7 @@ func routedRootInputFlowNodeDeliveryIntentsForNoTargetEvent(evt events.Event, ro
 	if strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/") != "" {
 		return nil
 	}
-	eventType := strings.Trim(strings.TrimSpace(string(evt.Type)), "/")
+	eventType := strings.Trim(strings.TrimSpace(string(evt.Type())), "/")
 	if eventType == "" || strings.Contains(eventType, "/") {
 		return nil
 	}
@@ -728,12 +728,12 @@ func routedRootInputFlowNodeMatchesNoTargetEvent(evt events.Event, subscriber Su
 	if strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/") != "" {
 		return false
 	}
-	eventType := strings.Trim(strings.TrimSpace(string(evt.Type)), "/")
+	eventType := strings.Trim(strings.TrimSpace(string(evt.Type())), "/")
 	return eventType != "" && !strings.Contains(eventType, "/")
 }
 
 func routedRootNodeSubscriberIDsForNoTargetEvent(evt events.Event, routed []Subscriber) map[string]struct{} {
-	eventType := strings.Trim(strings.TrimSpace(string(evt.Type)), "/")
+	eventType := strings.Trim(strings.TrimSpace(string(evt.Type())), "/")
 	if eventType == "" {
 		return nil
 	}
@@ -757,7 +757,7 @@ func routedRootNodeMatchesNoTargetEvent(evt events.Event, subscriber Subscriber)
 	if strings.Trim(strings.TrimSpace(subscriber.Path), "/") != "" {
 		return false
 	}
-	eventType := strings.Trim(strings.TrimSpace(string(evt.Type)), "/")
+	eventType := strings.Trim(strings.TrimSpace(string(evt.Type())), "/")
 	if eventType == "" {
 		return false
 	}
@@ -772,7 +772,7 @@ func routedNodeInternalSubscriptionAliases(evt events.Event, routed []Subscriber
 	if len(routed) == 0 || len(eventDeliveryTargetRoutes(evt)) > 0 {
 		return nil
 	}
-	eventType := strings.Trim(strings.TrimSpace(string(evt.Type)), "/")
+	eventType := strings.Trim(strings.TrimSpace(string(evt.Type())), "/")
 	if eventType == "" {
 		return nil
 	}
@@ -818,7 +818,7 @@ func routedNodeMatchesScopedNoTargetEvent(evt events.Event, subscriber Subscribe
 	if strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/") != "" {
 		return routedNodeMatchesConcreteFlowInstanceEvent(evt, subscriber)
 	}
-	eventType := strings.Trim(strings.TrimSpace(string(evt.Type)), "/")
+	eventType := strings.Trim(strings.TrimSpace(string(evt.Type())), "/")
 	matchPattern := strings.Trim(strings.TrimSpace(subscriber.MatchPattern), "/")
 	return eventType != "" && eventType == matchPattern
 }
@@ -829,7 +829,7 @@ func routedNodeMatchesConcreteEventTypeFlowInstance(evt events.Event, subscriber
 	}
 	instancePath := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
 	flowInstance := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/")
-	eventType := strings.Trim(strings.TrimSpace(string(evt.Type)), "/")
+	eventType := strings.Trim(strings.TrimSpace(string(evt.Type())), "/")
 	if instancePath == "" || flowInstance == "" || eventType == "" {
 		return false
 	}
@@ -848,7 +848,7 @@ func routedNodeConcreteEventKey(evt events.Event, subscriber Subscriber) string 
 			return ""
 		}
 	}
-	eventType := strings.Trim(strings.TrimSpace(string(evt.Type)), "/")
+	eventType := strings.Trim(strings.TrimSpace(string(evt.Type())), "/")
 	if eventType != "" && strings.HasPrefix(eventType, flowInstance+"/") {
 		if instancePath == flowInstance {
 			return eventType

@@ -338,15 +338,20 @@ func ensureEventReplayAudit(
 	if err != nil {
 		return err
 	}
-	if err := publisher.Publish(ctx, events.Event{
-		ID:            stored.AuditEventID,
-		RunID:         original.RunID,
-		Type:          events.EventType(eventReplaySyntheticEventName),
-		SourceAgent:   eventReplayActorSource(req),
-		Payload:       auditPayload,
-		ParentEventID: original.EventID,
-		CreatedAt:     now,
-	}.WithEntityID(original.EntityID)); err != nil {
+	if err := publisher.Publish(ctx, events.NewReplayEvent(
+		stored.AuditEventID,
+		events.EventType(eventReplaySyntheticEventName),
+		eventReplayActorSource(req),
+		"",
+		auditPayload,
+		0,
+		events.EventLineage{
+			RunID:         original.RunID,
+			ParentEventID: original.EventID,
+		},
+		events.EventEnvelope{EntityID: original.EntityID},
+		now,
+	)); err != nil {
 		return eventReplayPublishError(eventReplaySyntheticEventName, err)
 	}
 	return nil
@@ -436,22 +441,27 @@ func deliveriesForSubscribers(eventID string, index map[string]store.OperatorEve
 func replayEventFromOriginal(original store.OperatorEventFull, replayEventID string, now time.Time) (events.Event, error) {
 	payload, err := json.Marshal(original.Payload)
 	if err != nil {
-		return events.Event{}, err
+		return events.EmptyEvent(), err
 	}
 	source := strings.TrimSpace(original.Source)
 	if source == "" || source == "unknown" {
 		source = "event.replay"
 	}
-	evt := events.Event{
-		ID:            replayEventID,
-		RunID:         original.RunID,
-		Type:          events.EventType(original.EventName),
-		SourceAgent:   source,
-		Payload:       payload,
-		ParentEventID: original.EventID,
-		CreatedAt:     now,
-	}
-	return evt.WithEntityID(original.EntityID), nil
+	evt := events.NewReplayEvent(
+		replayEventID,
+		events.EventType(original.EventName),
+		source,
+		"",
+		payload,
+		0,
+		events.EventLineage{
+			RunID:         original.RunID,
+			ParentEventID: original.EventID,
+		},
+		events.EventEnvelope{EntityID: original.EntityID},
+		now,
+	)
+	return evt, nil
 }
 
 func eventReplayAuditPayload(

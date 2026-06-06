@@ -131,13 +131,10 @@ func TestExecuteNodeHandlerPlan_EventTimerStartOnRegistersSchedule(t *testing.T)
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 
-	evt := events.Event{
-		ID:          uuid.NewString(),
-		Type:        events.EventType("timer.scheduled"),
-		SourceAgent: "cataloge2e",
-		Payload:     []byte(`{"entity_id":"ent-001"}`),
-		CreatedAt:   time.Now().UTC(),
-	}.WithEntityID("ent-001")
+	evt := events.NewProjectionEvent(uuid.NewString(),
+		events.EventType("timer.scheduled"),
+		"cataloge2e", "", []byte(`{"entity_id":"ent-001"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()).
+		WithEntityID("ent-001")
 	seedPipelineNodeDeliveryAuthority(t, db, evt, "test-node")
 
 	txctx := testActivePipelineSQLTxContext(t, db, ctx)
@@ -197,13 +194,10 @@ func TestPipelineIntercept_EventTimerStartOnRegistersSchedule(t *testing.T) {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 
-	evt := events.Event{
-		ID:          uuid.NewString(),
-		Type:        events.EventType("timer.scheduled"),
-		SourceAgent: "cataloge2e",
-		Payload:     []byte(`{"entity_id":"ent-001"}`),
-		CreatedAt:   time.Now().UTC(),
-	}.WithEntityID("ent-001")
+	evt := events.NewProjectionEvent(uuid.NewString(),
+		events.EventType("timer.scheduled"),
+		"cataloge2e", "", []byte(`{"entity_id":"ent-001"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()).
+		WithEntityID("ent-001")
 	seedPipelineNodeDeliveryAuthority(t, db, evt, "test-node")
 
 	_, handled := pc.interceptPolicy("timer.scheduled", evt)
@@ -428,13 +422,10 @@ func TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler(t *testing.T) {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 
-	evt := events.Event{
-		ID:          uuid.NewString(),
-		Type:        events.EventType("child/task.done"),
-		SourceAgent: "cataloge2e",
-		Payload:     []byte(`{"entity_id":"ent-001"}`),
-		CreatedAt:   time.Now().UTC(),
-	}.WithEntityID("ent-001")
+	evt := events.NewProjectionEvent(uuid.NewString(),
+		events.EventType("child/task.done"),
+		"cataloge2e", "", []byte(`{"entity_id":"ent-001"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()).
+		WithEntityID("ent-001")
 	seedPipelineNodeDeliveryAuthority(t, db, evt, "listener")
 
 	if handled := pc.executeNodeHandlerPlan(testPipelineCoordinatorRunContext(t, pc), "dispatcher", evt); handled {
@@ -499,13 +490,10 @@ func TestExecuteNodeHandlerPlan_AccumulateTimeoutRegistersSchedule(t *testing.T)
 	}
 
 	start := time.Now().UTC()
-	evt := events.Event{
-		ID:          uuid.NewString(),
-		Type:        events.EventType("item.arrived"),
-		SourceAgent: "cataloge2e",
-		Payload:     []byte(`{"entity_id":"ent-001","item_id":"a"}`),
-		CreatedAt:   start,
-	}.WithEntityID("ent-001")
+	evt := events.NewProjectionEvent(uuid.NewString(),
+		events.EventType("item.arrived"),
+		"cataloge2e", "", []byte(`{"entity_id":"ent-001","item_id":"a"}`), 0, "", "", events.EventEnvelope{}, start).
+		WithEntityID("ent-001")
 	seedPipelineNodeDeliveryAuthority(t, db, evt, "test-node")
 
 	txctx := testActivePipelineSQLTxContext(t, db, ctx)
@@ -582,13 +570,10 @@ func TestReconcileAccumulationTimeoutScheduleUsesMatchedHandlerEventKey(t *testi
 			},
 		},
 	}
-	evt := events.Event{
-		ID:          "evt-item-a",
-		Type:        events.EventType("component-scaffold/a/item.arrived"),
-		SourceAgent: "cataloge2e",
-		Payload:     []byte(`{"entity_id":"ent-001","item_id":"a"}`),
-		CreatedAt:   start,
-	}.WithEntityID("ent-001").WithFlowInstance("component-scaffold/a")
+	evt := events.NewProjectionEvent("evt-item-a",
+		events.EventType("component-scaffold/a/item.arrived"),
+		"cataloge2e", "", []byte(`{"entity_id":"ent-001","item_id":"a"}`), 0, "", "", events.EventEnvelope{}, start).
+		WithEntityID("ent-001").WithFlowInstance("component-scaffold/a")
 
 	if err := pc.reconcileAccumulationTimeoutSchedule(context.Background(), "ent-001", "test-node", handler, evt, "item.arrived", stateBuckets, true); err != nil {
 		t.Fatalf("reconcileAccumulationTimeoutSchedule: %v", err)
@@ -649,23 +634,18 @@ func TestExecuteNodeHandlerPlan_AccumulateTimeoutCancelsScheduleOnTimeout(t *tes
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 
-	evt := events.Event{
-		ID:          uuid.NewString(),
-		Type:        events.EventType("item.arrived"),
-		SourceAgent: "cataloge2e",
-		Payload:     []byte(`{"entity_id":"ent-001","item_id":"a"}`),
-		CreatedAt:   time.Now().UTC(),
-	}.WithEntityID("ent-001")
+	evt := events.NewProjectionEvent(uuid.NewString(),
+		events.EventType("item.arrived"),
+		"cataloge2e", "", []byte(`{"entity_id":"ent-001","item_id":"a"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()).
+		WithEntityID("ent-001")
 	seedPipelineNodeDeliveryAuthority(t, db, evt, "test-node")
 	if handled := pc.executeNodeHandlerPlan(ctx, "test-node", evt); !handled {
 		t.Fatal("expected item.arrived handler to be handled")
 	}
 
-	timeoutEvt := events.Event{
-		ID:          uuid.NewString(),
-		Type:        events.EventType("accumulate.timeout"),
-		SourceAgent: runtimeWorkflowID,
-		Payload: mustJSON(map[string]any{
+	timeoutEvt := events.NewProjectionEvent(uuid.NewString(),
+		events.EventType("accumulate.timeout"),
+		runtimeWorkflowID, "", mustJSON(map[string]any{
 			"entity_id": "ent-001",
 			"timer_handle": map[string]any{
 				"kind": "accumulation_timeout",
@@ -674,9 +654,8 @@ func TestExecuteNodeHandlerPlan_AccumulateTimeoutCancelsScheduleOnTimeout(t *tes
 					"event_type": "item.arrived",
 				},
 			},
-		}),
-		CreatedAt: time.Now().UTC(),
-	}.WithEntityID("ent-001")
+		}), 0, "", "", events.EventEnvelope{}, time.Now().UTC()).
+		WithEntityID("ent-001")
 	seedPipelineNodeDeliveryAuthority(t, db, timeoutEvt, "test-node")
 	txctx := testActivePipelineSQLTxContext(t, db, ctx)
 	if handled := pc.executeNodeHandlerPlan(txctx, "test-node", timeoutEvt); !handled {
@@ -727,13 +706,10 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 
-	trigger := events.Event{
-		ID:          uuid.NewString(),
-		Type:        events.EventType("work.requested"),
-		SourceAgent: "cataloge2e",
-		Payload:     []byte(`{"entity_id":"ent-001"}`),
-		CreatedAt:   time.Now().UTC(),
-	}.WithEntityID("ent-001")
+	trigger := events.NewProjectionEvent(uuid.NewString(),
+		events.EventType("work.requested"),
+		"cataloge2e", "", []byte(`{"entity_id":"ent-001"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()).
+		WithEntityID("ent-001")
 	seedPipelineNodeDeliveryAuthority(t, db, trigger, "child-worker")
 
 	if handled := pc.executeNodeHandlerPlan(testPipelineCoordinatorRunContext(t, pc), "child-worker", trigger); !handled {
@@ -751,13 +727,10 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 	}
 
 	listenerCtx := withPipelineFlowScope(testPipelineCoordinatorRunContext(t, pc), "child")
-	completion := events.Event{
-		ID:          uuid.NewString(),
-		Type:        events.EventType("child/work.completed"),
-		SourceAgent: "cataloge2e",
-		Payload:     []byte(`{"entity_id":"ent-001"}`),
-		CreatedAt:   time.Now().UTC(),
-	}.WithEntityID("ent-001")
+	completion := events.NewProjectionEvent(uuid.NewString(),
+		events.EventType("child/work.completed"),
+		"cataloge2e", "", []byte(`{"entity_id":"ent-001"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()).
+		WithEntityID("ent-001")
 	seedPipelineNodeDeliveryAuthority(t, db, completion, "parent-listener")
 	handler, ok := pc.SemanticSource().NodeEventHandler("parent-listener", "child/work.completed")
 	if !ok {
@@ -822,13 +795,10 @@ func TestPipelineIntercept_HandlesChildFlowOutputForRootListener(t *testing.T) {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 
-	completion := events.Event{
-		ID:          uuid.NewString(),
-		Type:        events.EventType("child/work.completed"),
-		SourceAgent: "cataloge2e",
-		Payload:     []byte(`{"entity_id":"ent-001"}`),
-		CreatedAt:   time.Now().UTC(),
-	}.WithEntityID("ent-001")
+	completion := events.NewProjectionEvent(uuid.NewString(),
+		events.EventType("child/work.completed"),
+		"cataloge2e", "", []byte(`{"entity_id":"ent-001"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()).
+		WithEntityID("ent-001")
 	seedPipelineNodeDeliveryAuthority(t, db, completion, "parent-listener")
 	passThrough, emitted, err := pc.Intercept(testPipelineCoordinatorRunContext(t, pc), completion)
 	if err != nil {
@@ -837,7 +807,7 @@ func TestPipelineIntercept_HandlesChildFlowOutputForRootListener(t *testing.T) {
 	if !passThrough {
 		t.Fatal("expected child/work.completed to remain visible downstream")
 	}
-	if len(emitted) != 1 || string(emitted[0].Type) != "job.done" {
+	if len(emitted) != 1 || string(emitted[0].Type()) != "job.done" {
 		t.Fatalf("emitted = %#v, want [job.done]", emitted)
 	}
 }
@@ -897,13 +867,9 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionDoesNotEmitChild
 		t.Fatalf("seed grandchild instance: %v", err)
 	}
 
-	completion := (events.Event{
-		ID:          uuid.NewString(),
-		Type:        events.EventType("child/grandchild/micro.done"),
-		SourceAgent: "cataloge2e",
-		Payload:     []byte(`{"entity_id":"` + grandchildEntityID + `"}`),
-		CreatedAt:   time.Now().UTC(),
-	}).WithEntityID(grandchildEntityID)
+	completion := (events.NewProjectionEvent(uuid.NewString(),
+		events.EventType("child/grandchild/micro.done"),
+		"cataloge2e", "", []byte(`{"entity_id":"`+grandchildEntityID+`"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID(grandchildEntityID)
 	seedPipelineNodeDeliveryAuthority(t, db, completion, "root-collector")
 	passThrough, emitted, err := pc.Intercept(testPipelineCoordinatorRunContext(t, pc), completion)
 	if err != nil {
@@ -978,19 +944,13 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionAlreadyTargetedT
 	}); err != nil {
 		t.Fatalf("seed child instance: %v", err)
 	}
-	if consume, handled := pc.workflowNodeInterceptPolicy("child/grandchild/micro.done", (events.Event{
-		Type: events.EventType("child/grandchild/micro.done"),
-	}).WithEntityID(childRowID)); !handled {
+	if consume, handled := pc.workflowNodeInterceptPolicy("child/grandchild/micro.done", (events.NewProjectionEvent("", events.EventType("child/grandchild/micro.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID(childRowID)); !handled {
 		t.Fatalf("workflowNodeInterceptPolicy handled = %v, consume = %v, want handled", handled, consume)
 	}
 
-	completion := (events.Event{
-		ID:          uuid.NewString(),
-		Type:        events.EventType("child/grandchild/micro.done"),
-		SourceAgent: "cataloge2e",
-		Payload:     []byte(`{"entity_id":"` + childRowID + `"}`),
-		CreatedAt:   time.Now().UTC(),
-	}).WithEntityID(childRowID)
+	completion := (events.NewProjectionEvent(uuid.NewString(),
+		events.EventType("child/grandchild/micro.done"),
+		"cataloge2e", "", []byte(`{"entity_id":"`+childRowID+`"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID(childRowID)
 	seedPipelineNodeDeliveryAuthority(t, db, completion, "root-collector")
 	passThrough, emitted, err := pc.Intercept(testPipelineCoordinatorRunContext(t, pc), completion)
 	if err != nil {
@@ -999,7 +959,7 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionAlreadyTargetedT
 	if !passThrough {
 		t.Fatal("expected nested descendant completion to remain visible downstream")
 	}
-	if len(emitted) != 1 || string(emitted[0].Type) != "pipeline.complete" {
+	if len(emitted) != 1 || string(emitted[0].Type()) != "pipeline.complete" {
 		t.Fatalf("emitted = %#v, want [pipeline.complete]", emitted)
 	}
 	if got := emitted[0].EntityID(); got != childRowID {
@@ -1064,13 +1024,9 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionInsideOuterSQLTx
 	t.Cleanup(func() { _ = tx.Rollback() })
 	ctx := WithPipelineSQLTxContext(testPipelineCoordinatorRunContext(t, pc), tx)
 
-	completion := (events.Event{
-		ID:          uuid.NewString(),
-		Type:        events.EventType("child/grandchild/micro.done"),
-		SourceAgent: "cataloge2e",
-		Payload:     []byte(`{"entity_id":"` + childRowID + `"}`),
-		CreatedAt:   time.Now().UTC(),
-	}).WithEntityID(childRowID)
+	completion := (events.NewProjectionEvent(uuid.NewString(),
+		events.EventType("child/grandchild/micro.done"),
+		"cataloge2e", "", []byte(`{"entity_id":"`+childRowID+`"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID(childRowID)
 	seedPipelineNodeDeliveryAuthority(t, db, completion, "root-collector")
 	passThrough, emitted, err := pc.Intercept(ctx, completion)
 	if err != nil {
@@ -1079,7 +1035,7 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionInsideOuterSQLTx
 	if !passThrough {
 		t.Fatal("expected nested descendant completion to remain visible downstream")
 	}
-	if len(emitted) != 1 || string(emitted[0].Type) != "pipeline.complete" {
+	if len(emitted) != 1 || string(emitted[0].Type()) != "pipeline.complete" {
 		t.Fatalf("emitted = %#v, want [pipeline.complete]", emitted)
 	}
 	if got := emitted[0].EntityID(); got != childRowID {

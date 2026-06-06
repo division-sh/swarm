@@ -126,10 +126,22 @@ func (pc *PipelineCoordinator) selectedHandlerEntityFromInstance(ctx context.Con
 	if strings.TrimSpace(state.EntityID) == "" {
 		state.EntityID = entityID
 	}
-	selectedEvent := evt.WithEntityID(entityID)
+	envelope := events.EnvelopeForEntityID(evt.NormalizedEnvelope(), entityID)
 	if storageRef := strings.TrimSpace(selected.StorageRef); storageRef != "" {
-		selectedEvent = selectedEvent.WithFlowInstance(storageRef)
+		envelope = events.EnvelopeForFlowInstance(envelope, storageRef)
 	}
+	selectedEvent := events.NewProjectionEvent(
+		evt.ID(),
+		evt.Type(),
+		evt.SourceAgent(),
+		evt.TaskID(),
+		evt.Payload(),
+		evt.ChainDepth(),
+		evt.RunID(),
+		evt.ParentEventID(),
+		envelope,
+		evt.CreatedAt(),
+	)
 	return selectedHandlerEntity{
 		EntityID: entityID,
 		State:    state,
@@ -152,7 +164,7 @@ func selectOrCreateEntityExpectedValues(spec *runtimecontracts.SelectOrCreateEnt
 }
 
 func entityAcquisitionExpectedValues(bindings []runtimecontracts.SelectEntityKeyBinding, evt events.Event) (map[string]any, error) {
-	payload := values.NewContext().WithPayload(parsePayloadMap(evt.Payload))
+	payload := values.NewContext().WithPayload(parsePayloadMap(evt.Payload()))
 	out := make(map[string]any, len(bindings))
 	for _, binding := range bindings {
 		field := strings.TrimSpace(binding.Field)
@@ -199,7 +211,20 @@ func (pc *PipelineCoordinator) createdHandlerEntityForDeclaredKey(ctx context.Co
 	for field, value := range expected {
 		values.Wrap(state.Metadata).SetPath(paths.Parse(field), value)
 	}
-	selectedEvent := evt.WithEntityID(entityID).WithFlowInstance(instance.InstancePath)
+	envelope := events.EnvelopeForEntityID(evt.NormalizedEnvelope(), entityID)
+	envelope = events.EnvelopeForFlowInstance(envelope, instance.InstancePath)
+	selectedEvent := events.NewProjectionEvent(
+		evt.ID(),
+		evt.Type(),
+		evt.SourceAgent(),
+		evt.TaskID(),
+		evt.Payload(),
+		evt.ChainDepth(),
+		evt.RunID(),
+		evt.ParentEventID(),
+		envelope,
+		evt.CreatedAt(),
+	)
 	return selectedHandlerEntity{
 		EntityID: entityID,
 		State:    state,

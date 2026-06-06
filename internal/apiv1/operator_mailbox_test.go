@@ -53,12 +53,9 @@ func TestOperatorMailboxHandlersSupportedRPCPath(t *testing.T) {
 	`, runID, entityID, base); err != nil {
 		t.Fatalf("seed entity_state: %v", err)
 	}
-	if err := pg.AppendEvent(ctx, events.Event{
-		ID:      sourceEventID,
-		Type:    "review.requested",
-		RunID:   runID,
-		Payload: json.RawMessage(`{"request":true}`),
-	}.WithEntityID(entityID).WithFlowInstance("empire/review")); err != nil {
+	if err := pg.AppendEvent(ctx, events.NewProjectionEvent(sourceEventID,
+		"review.requested", "", "", json.RawMessage(`{"request":true}`), 0, runID, "", events.EventEnvelope{}, time.Time{}).
+		WithEntityID(entityID).WithFlowInstance("empire/review")); err != nil {
 		t.Fatalf("append source event: %v", err)
 	}
 	mailboxID, err := pg.InsertMailboxItem(ctx, runtimetools.MailboxItem{
@@ -374,12 +371,9 @@ func TestOperatorMailboxApproveRejectsUndeclaredMailboxPayloadSchemaAndRollsBack
 	ctx := context.Background()
 	sourceEventID := uuid.NewString()
 	entityID := uuid.NewString()
-	if err := pg.AppendEvent(ctx, events.Event{
-		ID:      sourceEventID,
-		Type:    "review.requested",
-		RunID:   uuid.NewString(),
-		Payload: json.RawMessage(`{"request":true}`),
-	}.WithEntityID(entityID)); err != nil {
+	if err := pg.AppendEvent(ctx, events.NewProjectionEvent(sourceEventID,
+		"review.requested", "", "", json.RawMessage(`{"request":true}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Time{}).
+		WithEntityID(entityID)); err != nil {
 		t.Fatalf("append source event: %v", err)
 	}
 	mailboxID, err := pg.InsertMailboxItem(ctx, runtimetools.MailboxItem{
@@ -440,12 +434,9 @@ func TestOperatorMailboxApprovePublishFailureLeavesItemRetryable(t *testing.T) {
 	ctx := context.Background()
 	sourceEventID := uuid.NewString()
 	entityID := uuid.NewString()
-	if err := pg.AppendEvent(ctx, events.Event{
-		ID:      sourceEventID,
-		Type:    "review.requested",
-		RunID:   uuid.NewString(),
-		Payload: json.RawMessage(`{"request":true}`),
-	}.WithEntityID(entityID)); err != nil {
+	if err := pg.AppendEvent(ctx, events.NewProjectionEvent(sourceEventID,
+		"review.requested", "", "", json.RawMessage(`{"request":true}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Time{}).
+		WithEntityID(entityID)); err != nil {
 		t.Fatalf("append source event: %v", err)
 	}
 	mailboxID, err := pg.InsertMailboxItem(ctx, runtimetools.MailboxItem{
@@ -547,7 +538,7 @@ func TestOperatorMailboxApproveQueuesTransactionalPublishWhileRuntimePaused(t *t
 
 	interceptorCalls := 0
 	bus.SetInterceptors(interceptorFunc(func(_ context.Context, evt events.Event) (bool, []events.Event, error) {
-		if evt.Type == events.EventType("mailbox.item_decided") {
+		if evt.Type() == events.EventType("mailbox.item_decided") {
 			interceptorCalls++
 		}
 		return true, nil, nil
@@ -557,12 +548,9 @@ func TestOperatorMailboxApproveQueuesTransactionalPublishWhileRuntimePaused(t *t
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
 	sourceEventID := uuid.NewString()
-	if err := pg.AppendEvent(ctx, events.Event{
-		ID:      sourceEventID,
-		Type:    "review.requested",
-		RunID:   runID,
-		Payload: json.RawMessage(`{"request":true}`),
-	}.WithEntityID(entityID).WithFlowInstance("empire/review")); err != nil {
+	if err := pg.AppendEvent(ctx, events.NewProjectionEvent(sourceEventID,
+		"review.requested", "", "", json.RawMessage(`{"request":true}`), 0, runID, "", events.EventEnvelope{}, time.Time{}).
+		WithEntityID(entityID).WithFlowInstance("empire/review")); err != nil {
 		t.Fatalf("append source event: %v", err)
 	}
 	mailboxID, err := pg.InsertMailboxItem(ctx, runtimetools.MailboxItem{
@@ -653,8 +641,8 @@ func TestOperatorMailboxApproveQueuesTransactionalPublishWhileRuntimePaused(t *t
 		t.Fatalf("released count = %d, want 1", resumed.ReleasedCount)
 	}
 	got := requireAPIV1RuntimeBusEvent(t, ch, "queued mailbox approval release")
-	if got.ID != downstreamID {
-		t.Fatalf("released mailbox approval event = %s, want %s", got.ID, downstreamID)
+	if got.ID() != downstreamID {
+		t.Fatalf("released mailbox approval event = %s, want %s", got.ID(), downstreamID)
 	}
 	if interceptorCalls != 0 {
 		t.Fatalf("interceptor calls after resume release = %d, want 0", interceptorCalls)
@@ -676,12 +664,9 @@ func TestOperatorMailboxApproveRunsPublishDispatchAfterDecisionCommit(t *testing
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
 	sourceEventID := uuid.NewString()
-	if err := pg.AppendEvent(ctx, events.Event{
-		ID:      sourceEventID,
-		Type:    "review.requested",
-		RunID:   runID,
-		Payload: json.RawMessage(`{"request":true}`),
-	}.WithEntityID(entityID).WithFlowInstance("empire/review")); err != nil {
+	if err := pg.AppendEvent(ctx, events.NewProjectionEvent(sourceEventID,
+		"review.requested", "", "", json.RawMessage(`{"request":true}`), 0, runID, "", events.EventEnvelope{}, time.Time{}).
+		WithEntityID(entityID).WithFlowInstance("empire/review")); err != nil {
 		t.Fatalf("append source event: %v", err)
 	}
 	mailboxID, err := pg.InsertMailboxItem(ctx, runtimetools.MailboxItem{
@@ -704,7 +689,7 @@ func TestOperatorMailboxApproveRunsPublishDispatchAfterDecisionCommit(t *testing
 	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
 		PayloadValidator: mailboxItemDecidedPayloadValidator(t, mailboxItemDecidedStrictPayloadSchema(true)),
 		Interceptors: []runtimebus.EventInterceptor{interceptorFunc(func(interceptCtx context.Context, evt events.Event) (bool, []events.Event, error) {
-			if evt.Type != events.EventType("mailbox.item_decided") {
+			if evt.Type() != events.EventType("mailbox.item_decided") {
 				return true, nil, nil
 			}
 			if tx, ok := runtimepipeline.PipelineSQLTxFromContext(interceptCtx); ok && tx != nil {
@@ -730,7 +715,7 @@ func TestOperatorMailboxApproveRunsPublishDispatchAfterDecisionCommit(t *testing
 				t.Fatalf("api_idempotency rows visible to interceptor = %d, want 1", idempotencyRows)
 			}
 			select {
-			case interceptorCalls <- evt.ID:
+			case interceptorCalls <- evt.ID():
 			default:
 			}
 			return true, nil, nil

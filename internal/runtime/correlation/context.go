@@ -166,11 +166,11 @@ func WithInboundEvent(ctx context.Context, evt events.Event) context.Context {
 		return nil
 	}
 	if lineage, ok := RuntimeLineageFromContext(ctx); ok {
-		if eventID := strings.TrimSpace(evt.ID); eventID != "" {
+		if eventID := evt.ID(); eventID != "" {
 			lineage.SubjectEventID = eventID
 			lineage.ParentEventID = eventID
 		}
-		if eventType := strings.TrimSpace(string(evt.Type)); eventType != "" {
+		if eventType := strings.TrimSpace(string(evt.Type())); eventType != "" {
 			lineage.SubjectEventType = eventType
 		}
 		ctx = WithRuntimeLineage(ctx, lineage)
@@ -180,11 +180,11 @@ func WithInboundEvent(ctx context.Context, evt events.Event) context.Context {
 
 func InboundEventFromContext(ctx context.Context) (events.Event, bool) {
 	if ctx == nil {
-		return events.Event{}, false
+		return events.EmptyEvent(), false
 	}
 	v := ctx.Value(inboundEventContextKey{})
 	if v == nil {
-		return events.Event{}, false
+		return events.EmptyEvent(), false
 	}
 	evt, ok := v.(events.Event)
 	return evt, ok
@@ -278,7 +278,7 @@ func BundleSourceFactFromContext(ctx context.Context) (BundleSourceFact, bool) {
 }
 
 func CorrelateEvent(ctx context.Context, evt events.Event) (context.Context, events.Event) {
-	runID := strings.TrimSpace(evt.RunID)
+	runID := evt.RunID()
 	if runID == "" {
 		runID = RunIDFromContext(ctx)
 	}
@@ -289,26 +289,35 @@ func CorrelateEvent(ctx context.Context, evt events.Event) (context.Context, eve
 	}
 	if runID == "" {
 		if inbound, ok := InboundEventFromContext(ctx); ok {
-			runID = strings.TrimSpace(inbound.RunID)
+			runID = inbound.RunID()
 		}
 	}
 	if runID == "" {
 		runID = uuid.NewString()
 	}
-	evt.RunID = runID
 	ctx = WithRunID(ctx, runID)
 
-	if strings.TrimSpace(evt.ParentEventID) == "" {
-		if parentID := RuntimeLineageParentForEvent(ctx, evt.ID); parentID != "" {
-			evt.ParentEventID = parentID
-			return ctx, evt
-		}
-		if inbound, ok := InboundEventFromContext(ctx); ok {
-			parentID := strings.TrimSpace(inbound.ID)
-			if parentID != "" && parentID != strings.TrimSpace(evt.ID) {
-				evt.ParentEventID = parentID
+	parentEventID := evt.ParentEventID()
+	if parentEventID == "" {
+		if parentID := RuntimeLineageParentForEvent(ctx, evt.ID()); parentID != "" {
+			parentEventID = parentID
+		} else if inbound, ok := InboundEventFromContext(ctx); ok {
+			parentID := inbound.ID()
+			if parentID != "" && parentID != evt.ID() {
+				parentEventID = parentID
 			}
 		}
 	}
-	return ctx, evt
+	return ctx, events.NewProjectionEvent(
+		evt.ID(),
+		evt.Type(),
+		evt.SourceAgent(),
+		evt.TaskID(),
+		evt.Payload(),
+		evt.ChainDepth(),
+		runID,
+		parentEventID,
+		evt.NormalizedEnvelope(),
+		evt.CreatedAt(),
+	)
 }

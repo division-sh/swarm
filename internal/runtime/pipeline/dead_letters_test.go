@@ -59,17 +59,14 @@ func TestSystemNodeRunner_RecordsDeadLetterRow(t *testing.T) {
 	}, eventReceiptsCapabilityStub{enabled: true}.resolve)
 	runner.SetRetryPolicyForTest(2, func(int) time.Duration { return 0 })
 
-	evt := events.Event{
-		ID:          uuid.NewString(),
-		Type:        "source.evt",
-		SourceAgent: "src",
-		Payload:     []byte(`{"entity_id":"` + uuid.NewString() + `"}`),
-		CreatedAt:   time.Now().UTC(),
-	}
+	evt := events.NewProjectionEvent(uuid.NewString(),
+		"source.evt",
+		"src", "", []byte(`{"entity_id":"`+uuid.NewString()+`"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO events (event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
 		VALUES ($1::uuid, $2, NULLIF($3,'')::uuid, 'runtime', 'entity', $4::jsonb, 'src', 'agent', now())
-	`, evt.ID, string(evt.Type), evt.EntityID(), string(evt.Payload)); err != nil {
+	`, evt.ID(), string(evt.Type()), evt.EntityID(), string(evt.Payload())); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
 	seedPipelineNodeDeliveryAuthority(t, db, evt, "node-a")
@@ -85,7 +82,7 @@ func TestSystemNodeRunner_RecordsDeadLetterRow(t *testing.T) {
 		SELECT failure_type, retry_count, COALESCE(handler_node, '')
 		FROM dead_letters
 		WHERE original_event_id = $1::uuid
-	`, evt.ID).Scan(&failureType, &retryCount, &handlerNode); err != nil {
+	`, evt.ID()).Scan(&failureType, &retryCount, &handlerNode); err != nil {
 		t.Fatalf("query dead_letters: %v", err)
 	}
 	if failureType != "retry_exhausted" || retryCount != 2 || handlerNode != "node-a" {
@@ -97,19 +94,15 @@ func TestCoordinator_RecordsChainDepthDeadLetterRow(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := context.Background()
 	entityID := uuid.NewString()
-	evt := (events.Event{
-		ID:          uuid.NewString(),
-		Type:        "chain.start",
-		SourceAgent: "src",
-		RunID:       testPipelineRunID,
-		Payload:     []byte(`{}`),
-		CreatedAt:   time.Now().UTC(),
-		ChainDepth:  5,
-	}).WithEntityID(entityID)
+	evt := (events.NewProjectionEvent(uuid.NewString(),
+		"chain.start",
+		"src", "", []byte(`{}`),
+
+		5, testPipelineRunID, "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID(entityID)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO events (event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
 		VALUES ($1::uuid, $2, $3::uuid, 'runtime', 'entity', $4::jsonb, 'src', 'agent', now())
-	`, evt.ID, string(evt.Type), entityID, string(evt.Payload)); err != nil {
+	`, evt.ID(), string(evt.Type()), entityID, string(evt.Payload())); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
 
@@ -151,7 +144,7 @@ func TestCoordinator_RecordsChainDepthDeadLetterRow(t *testing.T) {
 		SELECT failure_type, chain_depth, COALESCE(handler_node, '')
 		FROM dead_letters
 		WHERE original_event_id = $1::uuid
-	`, evt.ID).Scan(&failureType, &chainDepth, &handlerNode); err != nil {
+	`, evt.ID()).Scan(&failureType, &chainDepth, &handlerNode); err != nil {
 		t.Fatalf("query dead_letters: %v", err)
 	}
 	if failureType != "chain_depth_exceeded" || chainDepth != 6 || !strings.HasPrefix(handlerNode, "node-1") {
@@ -188,7 +181,7 @@ func TestSystemNodeRunner_SkipsQuiescedDestructiveResetDelivery(t *testing.T) {
 		return errors.New("should not run")
 	})
 
-	runner.ProcessEventForTest(ctx, events.Event{ID: eventID, RunID: testPipelineRunID, Type: "source.evt", Payload: []byte(`{}`), CreatedAt: time.Now().UTC()})
+	runner.ProcessEventForTest(ctx, events.NewProjectionEvent(eventID, "source.evt", "", "", []byte(`{}`), 0, testPipelineRunID, "", events.EventEnvelope{}, time.Now().UTC()))
 
 	if handled != 0 {
 		t.Fatalf("handler calls = %d, want 0 for quiesced delivery", handled)
@@ -214,13 +207,10 @@ func TestSystemNodeRunner_NonRetryableRuntimeErrorDeadLettersImmediately(t *test
 	}, 0, eventReceiptsCapabilityStub{enabled: true}.resolve)
 	runner.SetRetryPolicyForTest(5, func(int) time.Duration { return 0 })
 
-	evt := events.Event{
-		ID:          uuid.NewString(),
-		Type:        "source.evt",
-		SourceAgent: "src",
-		Payload:     []byte(`{"entity_id":"ent-1"}`),
-		CreatedAt:   time.Now().UTC(),
-	}
+	evt := events.NewProjectionEvent(uuid.NewString(),
+		"source.evt",
+		"src", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+
 	runner.ProcessEventForTest(context.Background(), evt)
 
 	if attempts != 1 {
@@ -230,11 +220,11 @@ func TestSystemNodeRunner_NonRetryableRuntimeErrorDeadLettersImmediately(t *test
 	if len(published) != 1 {
 		t.Fatalf("published dead letters = %d, want 1", len(published))
 	}
-	if published[0].Type != "platform.dead_letter" {
-		t.Fatalf("event type = %q, want platform.dead_letter", published[0].Type)
+	if published[0].Type() != "platform.dead_letter" {
+		t.Fatalf("event type = %q, want platform.dead_letter", published[0].Type())
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(published[0].Payload, &payload); err != nil {
+	if err := json.Unmarshal(published[0].Payload(), &payload); err != nil {
 		t.Fatalf("unmarshal payload: %v", err)
 	}
 	if got := strings.TrimSpace(asString(payload["failure_type"])); got != "handler_error" {
@@ -249,17 +239,13 @@ func TestSystemNodeRunner_FailsClosedWithoutCanonicalEventReceiptsCapability(t *
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := context.Background()
 	entityID := uuid.NewString()
-	evt := (events.Event{
-		ID:          uuid.NewString(),
-		Type:        "source.evt",
-		SourceAgent: "src",
-		Payload:     []byte(`{"entity_id":"` + entityID + `"}`),
-		CreatedAt:   time.Now().UTC(),
-	}).WithEntityID(entityID)
+	evt := (events.NewProjectionEvent(uuid.NewString(),
+		"source.evt",
+		"src", "", []byte(`{"entity_id":"`+entityID+`"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID(entityID)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO events (event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
 		VALUES ($1::uuid, $2, $3::uuid, 'runtime', 'entity', $4::jsonb, 'src', 'agent', now())
-	`, evt.ID, string(evt.Type), entityID, string(evt.Payload)); err != nil {
+	`, evt.ID(), string(evt.Type()), entityID, string(evt.Payload())); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
 
@@ -274,7 +260,7 @@ func TestSystemNodeRunner_FailsClosedWithoutCanonicalEventReceiptsCapability(t *
 		t.Fatalf("attempts = %d, want 0 without canonical capability", attempts)
 	}
 	var count int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts WHERE event_id = $1::uuid`, evt.ID).Scan(&count); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts WHERE event_id = $1::uuid`, evt.ID()).Scan(&count); err != nil {
 		t.Fatalf("count event_receipts: %v", err)
 	}
 	if count != 0 {
@@ -286,23 +272,19 @@ func TestSystemNodeRunner_UsesCanonicalEventReceiptsCapabilityForIdempotency(t *
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := context.Background()
 	entityID := uuid.NewString()
-	evt := (events.Event{
-		ID:          uuid.NewString(),
-		Type:        "source.evt",
-		SourceAgent: "src",
-		Payload:     []byte(`{"entity_id":"` + entityID + `"}`),
-		CreatedAt:   time.Now().UTC(),
-	}).WithEntityID(entityID)
+	evt := (events.NewProjectionEvent(uuid.NewString(),
+		"source.evt",
+		"src", "", []byte(`{"entity_id":"`+entityID+`"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID(entityID)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO events (event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
 		VALUES ($1::uuid, $2, $3::uuid, 'runtime', 'entity', $4::jsonb, 'src', 'agent', now())
-	`, evt.ID, string(evt.Type), entityID, string(evt.Payload)); err != nil {
+	`, evt.ID(), string(evt.Type()), entityID, string(evt.Payload())); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (event_id, subscriber_type, subscriber_id, status, created_at)
 		VALUES ($1::uuid, 'node', 'node-a', 'pending', now())
-	`, evt.ID); err != nil {
+	`, evt.ID()); err != nil {
 		t.Fatalf("seed node delivery: %v", err)
 	}
 
@@ -318,7 +300,7 @@ func TestSystemNodeRunner_UsesCanonicalEventReceiptsCapabilityForIdempotency(t *
 		t.Fatalf("attempts = %d, want 1 after idempotent receipt", attempts)
 	}
 	var count int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts WHERE event_id = $1::uuid AND subscriber_id = 'node-a'`, evt.ID).Scan(&count); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts WHERE event_id = $1::uuid AND subscriber_id = 'node-a'`, evt.ID()).Scan(&count); err != nil {
 		t.Fatalf("count event_receipts: %v", err)
 	}
 	if count != 1 {
@@ -330,17 +312,13 @@ func TestSystemNodeRunner_SkipsWithoutPersistedNodeDeliveryAuthority(t *testing.
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := context.Background()
 	entityID := uuid.NewString()
-	evt := (events.Event{
-		ID:          uuid.NewString(),
-		Type:        "source.evt",
-		SourceAgent: "src",
-		Payload:     []byte(`{"entity_id":"` + entityID + `"}`),
-		CreatedAt:   time.Now().UTC(),
-	}).WithEntityID(entityID)
+	evt := (events.NewProjectionEvent(uuid.NewString(),
+		"source.evt",
+		"src", "", []byte(`{"entity_id":"`+entityID+`"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID(entityID)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO events (event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
 		VALUES ($1::uuid, $2, $3::uuid, 'runtime', 'entity', $4::jsonb, 'src', 'agent', now())
-	`, evt.ID, string(evt.Type), entityID, string(evt.Payload)); err != nil {
+	`, evt.ID(), string(evt.Type()), entityID, string(evt.Payload())); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
 
@@ -360,7 +338,7 @@ func TestSystemNodeRunner_SkipsWithoutPersistedNodeDeliveryAuthority(t *testing.
 		SELECT COUNT(*)
 		FROM event_receipts
 		WHERE event_id = $1::uuid
-	`, evt.ID).Scan(&receipts); err != nil {
+	`, evt.ID()).Scan(&receipts); err != nil {
 		t.Fatalf("count event_receipts: %v", err)
 	}
 	if receipts != 0 {
@@ -382,12 +360,8 @@ func TestSystemNodeRunner_UsesTypedReceiptOwnerWithoutRawDB(t *testing.T) {
 		attempts++
 		return nil
 	}, 0, eventReceiptsCapabilityStub{enabled: true}.resolve)
-	evt := events.Event{
-		ID:        uuid.NewString(),
-		Type:      "source.evt",
-		Payload:   []byte(`{}`),
-		CreatedAt: time.Now().UTC(),
-	}
+	evt := events.NewProjectionEvent(uuid.NewString(),
+		"source.evt", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
 	runner.ProcessEventForTest(ctx, evt)
 	runner.ProcessEventForTest(ctx, evt)
@@ -429,17 +403,13 @@ func TestCoordinator_InterceptHandlerErrorDoesNotSilentlyFallback(t *testing.T) 
 		},
 		EventReceiptsCapability: eventReceiptsCapabilityStub{enabled: true}.resolve,
 	})
-	evt := (events.Event{
-		ID:          uuid.NewString(),
-		Type:        events.EventType("score.dimension_complete"),
-		SourceAgent: "analysis-agent",
-		Payload:     []byte(`{"entity_id":"` + uuid.NewString() + `","dimension":"expansion_potential","score":74,"tier":3}`),
-		CreatedAt:   time.Now().UTC(),
-	}).WithEntityID(uuid.NewString())
+	evt := (events.NewProjectionEvent(uuid.NewString(),
+		events.EventType("score.dimension_complete"),
+		"analysis-agent", "", []byte(`{"entity_id":"`+uuid.NewString()+`","dimension":"expansion_potential","score":74,"tier":3}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID(uuid.NewString())
 	if _, err := db.ExecContext(context.Background(), `
 		INSERT INTO events (event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
 		VALUES ($1::uuid, $2, NULLIF($3,'')::uuid, 'runtime', 'entity', $4::jsonb, 'analysis-agent', 'agent', now())
-	`, evt.ID, string(evt.Type), evt.EntityID(), string(evt.Payload)); err != nil {
+	`, evt.ID(), string(evt.Type()), evt.EntityID(), string(evt.Payload())); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
 	seedPipelineNodeDeliveryAuthority(t, db, evt, "node-a")
@@ -470,7 +440,7 @@ func TestCoordinator_InterceptHandlerErrorDoesNotSilentlyFallback(t *testing.T) 
 		SELECT failure_type, COALESCE(handler_node, ''), COALESCE(error_message, '')
 		FROM dead_letters
 		WHERE original_event_id = $1::uuid
-	`, evt.ID).Scan(&failureType, &handlerNode, &errorText); err != nil {
+	`, evt.ID()).Scan(&failureType, &handlerNode, &errorText); err != nil {
 		t.Fatalf("query dead_letters: %v", err)
 	}
 	if failureType != "handler_error" || handlerNode != "node-a" || strings.TrimSpace(errorText) == "" {

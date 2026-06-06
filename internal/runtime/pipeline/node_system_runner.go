@@ -111,7 +111,7 @@ func (n *systemNodeRunner) ProcessEventForTest(ctx context.Context, evt events.E
 	if n == nil {
 		return
 	}
-	eventID := strings.TrimSpace(evt.ID)
+	eventID := strings.TrimSpace(evt.ID())
 	if eventID == "" {
 		return
 	}
@@ -233,60 +233,65 @@ func (n *systemNodeRunner) emitDeadLetter(ctx context.Context, evt events.Event,
 		}
 	}
 	payload := map[string]any{
-		"original_event":   strings.TrimSpace(string(evt.Type)),
-		"original_payload": json.RawMessage(evt.Payload),
+		"original_event":   strings.TrimSpace(string(evt.Type())),
+		"original_payload": json.RawMessage(evt.Payload()),
 		"entity_id":        workflowEventEntityID(evt),
 		"flow_instance":    "runtime",
 		"failure_type":     failureType,
 		"error_message":    msg,
 		"retry_count":      retryCount,
-		"chain_depth":      evt.ChainDepth,
+		"chain_depth":      evt.ChainDepth(),
 		"handler_node":     n.nodeID,
 		"timestamp":        time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	if n.db != nil {
 		if err := runtimedeadletters.Insert(ctx, n.db, runtimedeadletters.Record{
-			OriginalEventID: strings.TrimSpace(evt.ID),
-			OriginalEvent:   strings.TrimSpace(string(evt.Type)),
-			OriginalPayload: evt.Payload,
+			OriginalEventID: strings.TrimSpace(evt.ID()),
+			OriginalEvent:   strings.TrimSpace(string(evt.Type())),
+			OriginalPayload: evt.Payload(),
 			EntityID:        workflowEventEntityID(evt),
 			FailureType:     failureType,
 			ErrorMessage:    msg,
 			RetryCount:      retryCount,
-			ChainDepth:      evt.ChainDepth,
+			ChainDepth:      evt.ChainDepth(),
 			HandlerNode:     n.nodeID,
 		}); err != nil {
-			slog.Error("system node dead letter persist failed", "node_id", n.nodeID, "event_id", strings.TrimSpace(evt.ID), "error", err)
+			slog.Error("system node dead letter persist failed", "node_id", n.nodeID, "event_id", strings.TrimSpace(evt.ID()), "error", err)
 			if logger, ok := n.bus.(systemNodeRuntimeLogger); ok && logger != nil {
 				logger.LogRuntime(ctx, RuntimeLogEntry{
 					Level:     "error",
 					Message:   "Persisting the system node dead letter failed",
 					Component: n.nodeID,
 					Action:    "dead_letter_persist_failed",
-					EventID:   strings.TrimSpace(evt.ID),
-					EventType: strings.TrimSpace(string(evt.Type)),
+					EventID:   strings.TrimSpace(evt.ID()),
+					EventType: strings.TrimSpace(string(evt.Type())),
 					EntityID:  workflowEventEntityID(evt),
 					Error:     strings.TrimSpace(err.Error()),
 				})
 			}
 		}
 	}
-	if err := n.bus.Publish(ctx, (events.Event{
-		ID:          uuid.NewString(),
-		Type:        events.EventType("platform.dead_letter"),
-		SourceAgent: n.nodeID,
-		Payload:     mustJSON(payload),
-		CreatedAt:   time.Now().UTC(),
-	}).WithEntityID(workflowEventEntityID(evt))); err != nil {
-		slog.Error("system node dead letter publish failed", "node_id", n.nodeID, "event_id", strings.TrimSpace(evt.ID), "error", err)
+	if err := n.bus.Publish(ctx, events.NewRuntimeDiagnosticEvent(
+		uuid.NewString(),
+		events.EventType("platform.dead_letter"),
+		n.nodeID,
+		"",
+		mustJSON(payload),
+		0,
+		"",
+		"",
+		events.EventEnvelope{EntityID: workflowEventEntityID(evt)},
+		time.Now().UTC(),
+	)); err != nil {
+		slog.Error("system node dead letter publish failed", "node_id", n.nodeID, "event_id", strings.TrimSpace(evt.ID()), "error", err)
 		if logger, ok := n.bus.(systemNodeRuntimeLogger); ok && logger != nil {
 			logger.LogRuntime(ctx, RuntimeLogEntry{
 				Level:     "error",
 				Message:   "Publishing the system node dead letter failed",
 				Component: n.nodeID,
 				Action:    "dead_letter_publish_failed",
-				EventID:   strings.TrimSpace(evt.ID),
-				EventType: strings.TrimSpace(string(evt.Type)),
+				EventID:   strings.TrimSpace(evt.ID()),
+				EventType: strings.TrimSpace(string(evt.Type())),
 				EntityID:  workflowEventEntityID(evt),
 				Error:     strings.TrimSpace(err.Error()),
 			})
@@ -303,7 +308,7 @@ func isNonRetryableHandlerError(err error) bool {
 }
 
 func (n *systemNodeRunner) isProcessed(ctx context.Context, evt events.Event) bool {
-	eventID := strings.TrimSpace(evt.ID)
+	eventID := strings.TrimSpace(evt.ID())
 	if n == nil || n.receiptStore == nil || eventID == "" {
 		return false
 	}
@@ -315,7 +320,7 @@ func (n *systemNodeRunner) isProcessed(ctx context.Context, evt events.Event) bo
 }
 
 func (n *systemNodeRunner) markProcessed(ctx context.Context, evt events.Event) {
-	eventID := strings.TrimSpace(evt.ID)
+	eventID := strings.TrimSpace(evt.ID())
 	if n == nil || n.receiptStore == nil || eventID == "" {
 		return
 	}
@@ -335,7 +340,7 @@ func (n *systemNodeRunner) markProcessed(ctx context.Context, evt events.Event) 
 				Component: n.nodeID,
 				Action:    "mark_processed_failed",
 				EventID:   eventID,
-				EventType: strings.TrimSpace(string(evt.Type)),
+				EventType: strings.TrimSpace(string(evt.Type())),
 				EntityID:  workflowEventEntityID(evt),
 				Error:     strings.TrimSpace(err.Error()),
 			})
@@ -478,7 +483,7 @@ func (n *systemNodeRunner) convergeNormalRunCompletion(ctx context.Context, evt 
 	if n == nil || n.bus == nil {
 		return
 	}
-	eventID := strings.TrimSpace(evt.ID)
+	eventID := strings.TrimSpace(evt.ID())
 	if eventID == "" {
 		return
 	}
@@ -495,7 +500,7 @@ func (n *systemNodeRunner) convergeNormalRunCompletion(ctx context.Context, evt 
 				Component: n.nodeID,
 				Action:    "normal_run_completion_failed",
 				EventID:   eventID,
-				EventType: strings.TrimSpace(string(evt.Type)),
+				EventType: strings.TrimSpace(string(evt.Type())),
 				EntityID:  workflowEventEntityID(evt),
 				Error:     strings.TrimSpace(err.Error()),
 			})
@@ -504,7 +509,7 @@ func (n *systemNodeRunner) convergeNormalRunCompletion(ctx context.Context, evt 
 }
 
 func (n *systemNodeRunner) isActiveRunQuiesced(ctx context.Context, evt events.Event) bool {
-	eventID := strings.TrimSpace(evt.ID)
+	eventID := strings.TrimSpace(evt.ID())
 	if n == nil || n.receiptStore == nil || eventID == "" {
 		return false
 	}
@@ -520,7 +525,7 @@ func (n *systemNodeRunner) isActiveRunQuiesced(ctx context.Context, evt events.E
 }
 
 func (n *systemNodeRunner) deliveryAuthorized(ctx context.Context, evt events.Event) bool {
-	eventID := strings.TrimSpace(evt.ID)
+	eventID := strings.TrimSpace(evt.ID())
 	if n == nil || n.receiptStore == nil || eventID == "" {
 		return false
 	}
@@ -537,7 +542,7 @@ func (n *systemNodeRunner) deliveryAuthorized(ctx context.Context, evt events.Ev
 				Component: n.nodeID,
 				Action:    "delivery_authority_check_failed",
 				EventID:   eventID,
-				EventType: strings.TrimSpace(string(evt.Type)),
+				EventType: strings.TrimSpace(string(evt.Type())),
 				EntityID:  workflowEventEntityID(evt),
 				Error:     strings.TrimSpace(err.Error()),
 			})
@@ -552,7 +557,7 @@ func (n *systemNodeRunner) deliveryAuthorized(ctx context.Context, evt events.Ev
 				Component: n.nodeID,
 				Action:    "delivery_authority_missing",
 				EventID:   eventID,
-				EventType: strings.TrimSpace(string(evt.Type)),
+				EventType: strings.TrimSpace(string(evt.Type())),
 				EntityID:  workflowEventEntityID(evt),
 			})
 		}

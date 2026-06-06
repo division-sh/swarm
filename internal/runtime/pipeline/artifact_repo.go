@@ -60,7 +60,7 @@ func (pc *PipelineCoordinator) commitArtifactRepo(ctx context.Context, action ru
 	if strings.TrimSpace(spec.Provider) != artifactRepoProviderLocalGit {
 		return fmt.Errorf("artifact_repo_commit provider %q is unsupported", strings.TrimSpace(spec.Provider))
 	}
-	sourceEventID := strings.TrimSpace(execCtx.Request.Event.ID)
+	sourceEventID := strings.TrimSpace(execCtx.Request.Event.ID())
 	if _, err := uuid.Parse(sourceEventID); err != nil {
 		return fmt.Errorf("artifact_repo_commit requires UUID source event id: %w", err)
 	}
@@ -119,7 +119,7 @@ func (pc *PipelineCoordinator) commitArtifactRepo(ctx context.Context, action ru
 	if err != nil {
 		return fail(err)
 	}
-	if err := ensureArtifactRepoInitialized(ctx, repoPath, commitTime(execCtx.Request.Event.CreatedAt)); err != nil {
+	if err := ensureArtifactRepoInitialized(ctx, repoPath, commitTime(execCtx.Request.Event.CreatedAt())); err != nil {
 		return fail(err)
 	}
 	if previous, found, err := artifactRepoRequestRecord(ctx, repoPath, requestID); err != nil {
@@ -149,7 +149,7 @@ func (pc *PipelineCoordinator) commitArtifactRepo(ctx context.Context, action ru
 	} else if maxRepo := artifactRepoMaxBytes(spec.Limits); maxRepo > 0 && size > maxRepo {
 		return fail(fmt.Errorf("artifact_repo repository tree exceeds max repo bytes %d", maxRepo))
 	}
-	ref, err := commitArtifactRepoFiles(ctx, repoPath, files, sourceEventID, requestID, treeHash, optionalArtifactString(execCtx.Base, spec.Author), commitTime(execCtx.Request.Event.CreatedAt))
+	ref, err := commitArtifactRepoFiles(ctx, repoPath, files, sourceEventID, requestID, treeHash, optionalArtifactString(execCtx.Base, spec.Author), commitTime(execCtx.Request.Event.CreatedAt()))
 	if err != nil {
 		return fail(err)
 	}
@@ -249,35 +249,34 @@ func (pc *PipelineCoordinator) queueArtifactRepoResultEvent(ctx context.Context,
 	}
 	chainDepth := execCtx.Request.ChainDepth + 1
 	if chainDepth <= 0 {
-		chainDepth = execCtx.Request.Event.ChainDepth + 1
+		chainDepth = execCtx.Request.Event.ChainDepth() + 1
 	}
 	if chainDepth <= 0 {
 		chainDepth = 1
 	}
-	evt := events.Event{
-		ID:          uuid.NewString(),
-		Type:        events.EventType(eventType),
-		SourceAgent: sourceAgent,
-		Payload:     mustJSON(payload),
-		ChainDepth:  chainDepth,
-		CreatedAt:   time.Now().UTC(),
-	}
-	if entityID := strings.TrimSpace(execCtx.Request.EntityID.String()); entityID != "" {
-		evt = evt.WithEntityID(entityID)
-	}
+	entityID := strings.TrimSpace(execCtx.Request.EntityID.String())
 	flowInstance := firstNonEmptyString(
 		normalizedArtifactRepoFlowInstance(asString(execCtx.Request.State.StateCarrier.Metadata["flow_path"])),
 		normalizedArtifactRepoFlowInstance(execCtx.Request.Event.FlowInstance()),
 	)
-	if flowInstance != "" {
-		evt = evt.WithFlowInstance(flowInstance)
-	}
-	evt.ParentEventID = strings.TrimSpace(execCtx.Request.Event.ID)
-	evt.TaskID = strings.TrimSpace(execCtx.Request.Event.TaskID)
+	evt := events.NewChildEvent(
+		uuid.NewString(),
+		events.EventType(eventType),
+		sourceAgent,
+		"",
+		mustJSON(payload),
+		chainDepth,
+		execCtx.Request.Event,
+		events.EventEnvelope{
+			EntityID:     entityID,
+			FlowInstance: flowInstance,
+		},
+		time.Now().UTC(),
+	)
 	return runtimeengine.QueueActionEmitIntent(ctx, runtimeengine.EmitIntent{
 		Event:         evt,
 		ChainDepth:    chainDepth,
-		ParentEventID: evt.ParentEventID,
+		ParentEventID: evt.ParentEventID(),
 	}), nil
 }
 
@@ -503,7 +502,7 @@ func artifactNamespace(execCtx runtimeengine.ExecutionContext, spec *runtimecont
 	if spec != nil && !spec.Namespace.IsZero() {
 		return requiredArtifactSegment(execCtx.Base, spec.Namespace, "artifact_repo.namespace")
 	}
-	namespace := strings.TrimSpace(execCtx.Request.Event.RunID)
+	namespace := strings.TrimSpace(execCtx.Request.Event.RunID())
 	if namespace == "" {
 		if value, ok := execCtx.Base.Event.Lookup(paths.Parse("run_id")); ok {
 			namespace = strings.TrimSpace(asString(value))

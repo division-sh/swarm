@@ -108,7 +108,7 @@ func TestReplayEventFromOriginalUsesCanonicalEventEntityOnly(t *testing.T) {
 		t.Fatalf("replay event entity_id = %q, want empty", replay.EntityID())
 	}
 	var replayPayload map[string]any
-	if err := json.Unmarshal(replay.Payload, &replayPayload); err != nil {
+	if err := json.Unmarshal(replay.Payload(), &replayPayload); err != nil {
 		t.Fatalf("unmarshal replay payload: %v", err)
 	}
 	if replayPayload["entity_id"] != "payload-entity" {
@@ -289,14 +289,18 @@ func TestOperatorEventReplaySubsetAndFailClosedCases(t *testing.T) {
 		pg := &store.PostgresStore{DB: db}
 		eventID := uuid.NewString()
 		runID := uuid.NewString()
-		if err := pg.AppendEvent(ctx, (events.Event{
-			ID:          eventID,
-			RunID:       runID,
-			Type:        events.EventType("scan.requested"),
-			SourceAgent: "workflow-runtime",
-			Payload:     []byte(`{"topic":"medicine"}`),
-			CreatedAt:   time.Now().UTC(),
-		}).WithEntityID(runID)); err != nil {
+		if err := pg.AppendEvent(ctx, events.NewProjectionEvent(
+			eventID,
+			events.EventType("scan.requested"),
+			"workflow-runtime",
+			"",
+			[]byte(`{"topic":"medicine"}`),
+			0,
+			runID,
+			"",
+			events.EventEnvelope{EntityID: runID},
+			time.Now().UTC(),
+		)); err != nil {
 			t.Fatalf("AppendEvent: %v", err)
 		}
 		if _, err := db.ExecContext(ctx, `
@@ -596,7 +600,7 @@ type failOnceAuditEventPublisher struct {
 }
 
 func (p *failOnceAuditEventPublisher) Publish(ctx context.Context, evt events.Event) error {
-	if strings.TrimSpace(string(evt.Type)) == eventReplaySyntheticEventName && p.err != nil {
+	if strings.TrimSpace(string(evt.Type())) == eventReplaySyntheticEventName && p.err != nil {
 		err := p.err
 		p.err = nil
 		return err
@@ -638,14 +642,10 @@ func seedReplayableOperatorEvent(t *testing.T, ctx context.Context, pg *store.Po
 	t.Helper()
 	eventID := uuid.NewString()
 	runID := uuid.NewString()
-	if err := pg.AppendEvent(ctx, (events.Event{
-		ID:          eventID,
-		RunID:       runID,
-		Type:        events.EventType(eventName),
-		SourceAgent: "origin-agent",
-		Payload:     []byte(`{"topic":"medicine"}`),
-		CreatedAt:   time.Now().UTC(),
-	}).WithEntityID(runID)); err != nil {
+	if err := pg.AppendEvent(ctx, (events.NewProjectionEvent(eventID,
+
+		events.EventType(eventName),
+		"origin-agent", "", []byte(`{"topic":"medicine"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID(runID)); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
 	if err := pg.InsertEventDeliveries(ctx, eventID, subscribers); err != nil {
@@ -687,8 +687,8 @@ func agentReplayBody(eventID, agentID, idempotencyKey string) string {
 func assertReplayEventDelivered(t *testing.T, ch <-chan events.Event, replayEventID, originalEventID string) {
 	t.Helper()
 	got := requireAPIV1RuntimeBusEvent(t, ch, "replay event "+replayEventID)
-	if got.ID != replayEventID || got.ParentEventID != originalEventID {
-		t.Fatalf("delivered replay event id=%s parent=%s, want id=%s parent=%s", got.ID, got.ParentEventID, replayEventID, originalEventID)
+	if got.ID() != replayEventID || got.ParentEventID() != originalEventID {
+		t.Fatalf("delivered replay event id=%s parent=%s, want id=%s parent=%s", got.ID(), got.ParentEventID(), replayEventID, originalEventID)
 	}
 }
 
@@ -700,12 +700,8 @@ func assertNoReplayEvent(t *testing.T, ch <-chan events.Event) {
 func fillAgentChannel(t *testing.T, ctx context.Context, bus *runtimebus.EventBus, agentID string, count int) {
 	t.Helper()
 	for i := 0; i < count; i++ {
-		err := bus.PublishDirect(ctx, events.Event{
-			ID:        uuid.NewString(),
-			Type:      events.EventType("filler.event"),
-			Payload:   []byte(`{"ok":true}`),
-			CreatedAt: time.Now().UTC(),
-		}, []string{agentID})
+		err := bus.PublishDirect(ctx, events.NewProjectionEvent(uuid.NewString(),
+			events.EventType("filler.event"), "", "", []byte(`{"ok":true}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()), []string{agentID})
 		if err != nil {
 			t.Fatalf("fill agent channel publish %d: %v", i, err)
 		}

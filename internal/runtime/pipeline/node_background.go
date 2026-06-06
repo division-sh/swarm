@@ -31,7 +31,7 @@ func newBackgroundWorkflowNodeWithReceiptStoreAndRetryBase(executor WorkflowNode
 		if handled := executor.Handle(ctx, evt); handled {
 			return nil
 		}
-		return fmt.Errorf("workflow executor %s did not handle subscribed event %s", executor.NodeID(), evt.Type)
+		return fmt.Errorf("workflow executor %s did not handle subscribed event %s", executor.NodeID(), evt.Type())
 	}, retryBase, eventReceiptsCapability)
 	return node
 }

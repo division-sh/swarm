@@ -71,10 +71,8 @@ func TestExecuteAuthoritativeNodeHandler_OnTimeoutAdvancesPartial(t *testing.T) 
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 
-	timeoutEvt := events.Event{
-		ID:   "timeout-1",
-		Type: events.EventType("accumulate.timeout"),
-		Payload: mustJSON(map[string]any{
+	timeoutEvt := events.NewProjectionEvent("timeout-1",
+		events.EventType("accumulate.timeout"), "", "", mustJSON(map[string]any{
 			"timer_handle": map[string]any{
 				"kind": "accumulation_timeout",
 				"bucket": map[string]any{
@@ -82,9 +80,8 @@ func TestExecuteAuthoritativeNodeHandler_OnTimeoutAdvancesPartial(t *testing.T) 
 					"event_type": "item.arrived",
 				},
 			},
-		}),
-		CreatedAt: time.Now().UTC(),
-	}.WithEntityID("ent-001")
+		}), 0, "", "", events.EventEnvelope{}, time.Now().UTC()).
+		WithEntityID("ent-001")
 	result, err := pc.executeAuthoritativeNodeHandler(testPipelineCoordinatorRunContext(t, pc), timeoutEvt, workflowTriggerContext{
 		Event: timeoutEvt,
 		State: pc.currentWorkflowState(testPipelineCoordinatorRunContext(t, pc), "ent-001"),

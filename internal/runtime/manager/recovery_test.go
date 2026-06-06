@@ -128,7 +128,7 @@ func (a startupReplayTestAgent) ID() string                      { return a.id }
 func (startupReplayTestAgent) Type() string                      { return "generic" }
 func (startupReplayTestAgent) Subscriptions() []events.EventType { return nil }
 func (startupReplayTestAgent) OnEvent(_ context.Context, evt events.Event) ([]events.Event, error) {
-	switch evt.Type {
+	switch evt.Type() {
 	case events.EventType("system.recover.drop"):
 		return nil, errors.New("boom")
 	case events.EventType("system.recover.leased"):
@@ -217,11 +217,10 @@ func TestRecoverRestoresSelectedContractRouteRecoveriesFromForkLocalOwner(t *tes
 		t.Fatalf("missing selected route recovery recipient guard for %s", forkRunID)
 	}
 	guard.ExpectForkEvent("fork-event-1", "source-event-1")
-	evt := events.Event{
-		ID:          "fork-event-1",
-		Type:        events.EventType("work.ready"),
-		SourceAgent: selectedContractExecutionOwner,
-	}
+	evt := events.NewProjectionEvent("fork-event-1",
+		events.EventType("work.ready"),
+		selectedContractExecutionOwner, "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
+
 	if err := guard.AuthorizeEvent(context.Background(), evt); err != nil {
 		t.Fatalf("AuthorizeEvent recovered guard: %v", err)
 	}
@@ -477,13 +476,9 @@ func TestRecover_UsesCanonicalPipelineReplayAftermathDiagnostics(t *testing.T) {
 	parentID := "evt-parent"
 	bus := &recoveryTestBus{
 		replayable: []events.PersistedReplayEvent{{
-			Event: events.Event{
-				ID:            childID,
-				Type:          events.EventType("system.recover"),
-				RunID:         "run-1",
-				ParentEventID: parentID,
-				CreatedAt:     time.Now().UTC(),
-			},
+			Event: events.NewProjectionEvent(childID,
+				events.EventType("system.recover"), "", "", nil, 0, "run-1",
+				parentID, events.EventEnvelope{}, time.Now().UTC()),
 		}},
 		deliveries: map[string][]string{
 			childID: {"agent-a"},
@@ -496,7 +491,7 @@ func TestRecover_UsesCanonicalPipelineReplayAftermathDiagnostics(t *testing.T) {
 	if err := am.Recover(context.Background()); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
-	if len(bus.direct) != 1 || bus.direct[0].ID != childID {
+	if len(bus.direct) != 1 || bus.direct[0].ID() != childID {
 		t.Fatalf("direct replayed events = %#v, want [%s]", bus.direct, childID)
 	}
 	entry := findManagerRecoveryAftermathLog(t, bus.runtimeLogs, childID, "replayed", "persisted_recipients_replayed")
@@ -518,11 +513,11 @@ func TestRecoverWithStartupReplayDiagnostics_LogsCanonicalManagerReplayAftermath
 		},
 		pending: map[string][]events.Event{
 			"agent-a": {
-				{ID: "evt-replay", Type: events.EventType("system.recover.ok"), CreatedAt: now.Add(-5 * time.Minute)},
-				{ID: "evt-receipt", Type: events.EventType("system.recover.receipt"), CreatedAt: now.Add(-4 * time.Minute)},
-				{ID: "evt-inflight", Type: events.EventType("system.recover.inflight"), CreatedAt: now.Add(-3 * time.Minute)},
-				{ID: "evt-leased", Type: events.EventType("system.recover.leased"), CreatedAt: now.Add(-2 * time.Minute)},
-				{ID: "evt-drop", Type: events.EventType("system.recover.drop"), CreatedAt: now.Add(-time.Minute)},
+				events.NewProjectionEvent("evt-replay", events.EventType("system.recover.ok"), "", "", nil, 0, "", "", events.EventEnvelope{}, now.Add(-5*time.Minute)),
+				events.NewProjectionEvent("evt-receipt", events.EventType("system.recover.receipt"), "", "", nil, 0, "", "", events.EventEnvelope{}, now.Add(-4*time.Minute)),
+				events.NewProjectionEvent("evt-inflight", events.EventType("system.recover.inflight"), "", "", nil, 0, "", "", events.EventEnvelope{}, now.Add(-3*time.Minute)),
+				events.NewProjectionEvent("evt-leased", events.EventType("system.recover.leased"), "", "", nil, 0, "", "", events.EventEnvelope{}, now.Add(-2*time.Minute)),
+				events.NewProjectionEvent("evt-drop", events.EventType("system.recover.drop"), "", "", nil, 0, "", "", events.EventEnvelope{}, now.Add(-time.Minute)),
 			},
 		},
 		receipts: map[string]EventReceipt{
@@ -589,7 +584,7 @@ func TestReplayAgentBacklog_DoesNotEmitStartupAftermathOutsideStartupRecovery(t 
 	store := &startupReplayTestStore{
 		pending: map[string][]events.Event{
 			"agent-a": {
-				{ID: "evt-drop", Type: events.EventType("system.recover.drop"), CreatedAt: now.Add(-time.Minute)},
+				events.NewProjectionEvent("evt-drop", events.EventType("system.recover.drop"), "", "", nil, 0, "", "", events.EventEnvelope{}, now.Add(-time.Minute)),
 			},
 		},
 	}
@@ -625,8 +620,8 @@ func TestReplayBacklogReportsDirectReplayCount(t *testing.T) {
 	store := &startupReplayTestStore{
 		pending: map[string][]events.Event{
 			"agent-a": {
-				{ID: "evt-1", Type: events.EventType("system.recover.ok"), CreatedAt: now.Add(-2 * time.Minute)},
-				{ID: "evt-2", Type: events.EventType("system.recover.ok"), CreatedAt: now.Add(-time.Minute)},
+				events.NewProjectionEvent("evt-1", events.EventType("system.recover.ok"), "", "", nil, 0, "", "", events.EventEnvelope{}, now.Add(-2*time.Minute)),
+				events.NewProjectionEvent("evt-2", events.EventType("system.recover.ok"), "", "", nil, 0, "", "", events.EventEnvelope{}, now.Add(-time.Minute)),
 			},
 		},
 	}

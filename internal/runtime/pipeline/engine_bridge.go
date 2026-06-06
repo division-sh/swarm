@@ -59,7 +59,7 @@ func (pc *PipelineCoordinator) executeAuthoritativeNodeHandler(ctx context.Conte
 	if pc == nil || source == nil {
 		return contractHandlerExecutionResult{}, nil
 	}
-	trigger := strings.TrimSpace(string(evt.Type))
+	trigger := strings.TrimSpace(string(evt.Type()))
 	if trigger == "" {
 		return contractHandlerExecutionResult{}, nil
 	}
@@ -87,7 +87,7 @@ func (pc *PipelineCoordinator) executeAuthoritativeNodeHandler(ctx context.Conte
 		matched = true
 	}
 	if !matched && isAccumulationTimeoutEvent(events.EventType(trigger)) {
-		if bucket, ok := timeridentity.ParseAccumulatorBucketRef(parsePayloadMap(evt.Payload)); ok {
+		if bucket, ok := timeridentity.ParseAccumulatorBucketRef(parsePayloadMap(evt.Payload())); ok {
 			timeoutHandler, ok := findAccumulationTimeoutHandlerForBucket(source, bucket)
 			if ok {
 				nodeID = bucket.NodeID
@@ -193,9 +193,9 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 			Status:          HandlerOutcomeTerminalReject,
 			GuardsEvaluated: []string{"not_in_terminal_state"},
 		}
-		plan := handlerExecutionPlanFromNodeHandler(nodeID, strings.TrimSpace(string(triggerCtx.Event.Type)), handler)
+		plan := handlerExecutionPlanFromNodeHandler(nodeID, strings.TrimSpace(string(triggerCtx.Event.Type())), handler)
 		return contractHandlerExecutionResult{
-			Transition:      workflowTransitionFromHandlerOutcome(triggerCtx.State, nodeID, strings.TrimSpace(string(triggerCtx.Event.Type)), outcome),
+			Transition:      workflowTransitionFromHandlerOutcome(triggerCtx.State, nodeID, strings.TrimSpace(string(triggerCtx.Event.Type())), outcome),
 			Plan:            plan,
 			Outcome:         outcome,
 			GuardsEvaluated: append([]string{}, outcome.GuardsEvaluated...),
@@ -211,7 +211,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	ctx, parentEventCollector, collectedIntents, collectLocally = pipelineCollectorExecutionContext(ctx)
 	ctx = withPipelineFlowScope(ctx, flowID)
 	ctx = runtimecorrelation.WithInboundEvent(ctx, triggerCtx.Event)
-	ctx = runtimecorrelation.WithHandlerID(ctx, strings.TrimSpace(nodeID)+":"+strings.TrimSpace(string(triggerCtx.Event.Type)))
+	ctx = runtimecorrelation.WithHandlerID(ctx, strings.TrimSpace(nodeID)+":"+strings.TrimSpace(string(triggerCtx.Event.Type())))
 	if handler.CreateEntity {
 		ctx = withWorkflowCreateEntityInitialValues(ctx, workflowEntitySchemaInitialValues(source, flowID))
 	}
@@ -241,7 +241,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		FlowID:          identity.NormalizeFlowID(flowID),
 		Event:           triggerCtx.Event,
 		HandlerEventKey: handlerEventKey,
-		ChainDepth:      triggerCtx.Event.ChainDepth,
+		ChainDepth:      triggerCtx.Event.ChainDepth(),
 		Handler:         handler,
 		Preview:         preview,
 		State:           stateSnapshot,
@@ -273,7 +273,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		return contractHandlerExecutionResult{Handled: false}, nil
 	}
 	outcome := handlerOutcomeFromExecutionResult(result)
-	plan := handlerExecutionPlanFromNodeHandler(nodeID, strings.TrimSpace(string(triggerCtx.Event.Type)), handler)
+	plan := handlerExecutionPlanFromNodeHandler(nodeID, strings.TrimSpace(string(triggerCtx.Event.Type())), handler)
 	plan.AdvancesTo = firstNonEmptyString(outcome.AdvancesTo, plan.AdvancesTo)
 	if len(outcome.Emits) > 0 {
 		plan.EmitEvents = append([]string{}, outcome.Emits...)
@@ -286,7 +286,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	}
 	plan.DataAccumulation = outcome.DataAccumulation
 	return contractHandlerExecutionResult{
-		Transition:                workflowTransitionFromHandlerOutcome(triggerCtx.State, nodeID, strings.TrimSpace(string(triggerCtx.Event.Type)), outcome),
+		Transition:                workflowTransitionFromHandlerOutcome(triggerCtx.State, nodeID, strings.TrimSpace(string(triggerCtx.Event.Type())), outcome),
 		Plan:                      plan,
 		Outcome:                   outcome,
 		GuardsEvaluated:           append([]string{}, outcome.GuardsEvaluated...),
@@ -383,7 +383,7 @@ func handlerOutcomeFromExecutionResult(result runtimeengine.ExecutionResult) *ha
 	if len(result.EmitIntents) > 0 {
 		out.Emits = make([]string, 0, len(result.EmitIntents))
 		for _, intent := range result.EmitIntents {
-			if eventType := strings.TrimSpace(string(intent.Event.Type)); eventType != "" {
+			if eventType := strings.TrimSpace(string(intent.Event.Type())); eventType != "" {
 				out.Emits = append(out.Emits, eventType)
 			}
 		}

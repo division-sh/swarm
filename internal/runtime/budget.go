@@ -485,13 +485,18 @@ func (t *BudgetTracker) evaluateScope(ctx context.Context, scope string, entityI
 		"timestamp":     now.Format(time.RFC3339),
 	}
 	evtID := uuid.NewString()
-	evt := (events.Event{
-		ID:          evtID,
-		Type:        events.EventType("platform.budget_threshold_crossed"),
-		SourceAgent: "runtime",
-		Payload:     mustJSON(payload),
-		CreatedAt:   time.Now(),
-	})
+	evt := events.NewRuntimeDiagnosticEvent(
+		evtID,
+		events.EventType("platform.budget_threshold_crossed"),
+		"runtime",
+		"",
+		mustJSON(payload),
+		0,
+		"",
+		"",
+		events.EventEnvelope{},
+		time.Now(),
+	)
 	if err := t.bus.Publish(ctx, evt); err != nil {
 		return err
 	}

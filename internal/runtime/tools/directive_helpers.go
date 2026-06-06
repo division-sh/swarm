@@ -24,12 +24,12 @@ func transitionContextKey(primary events.Event, fallback events.Event) string {
 
 func extractContextIDs(evt events.Event) (entityID, taskID string) {
 	entityID = strings.TrimSpace(evt.EntityID())
-	taskID = strings.TrimSpace(evt.TaskID)
-	if len(evt.Payload) == 0 {
+	taskID = strings.TrimSpace(evt.TaskID())
+	if len(evt.Payload()) == 0 {
 		return entityID, taskID
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(evt.Payload, &payload); err != nil || payload == nil {
+	if err := json.Unmarshal(evt.Payload(), &payload); err != nil || payload == nil {
 		return entityID, taskID
 	}
 	if entityID == "" {

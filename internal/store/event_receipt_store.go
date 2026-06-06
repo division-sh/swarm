@@ -513,7 +513,7 @@ func (s *PostgresStore) listPendingSubscribedEventsSpec(ctx context.Context, age
 	filtered := make([]events.Event, 0, len(pending))
 	for _, evt := range pending {
 		for _, subscription := range subscriptions {
-			if eventidentity.MatchPattern(string(subscription), string(evt.Type)) {
+			if eventidentity.MatchPattern(string(subscription), string(evt.Type())) {
 				filtered = append(filtered, evt)
 				if limit > 0 && len(filtered) >= limit {
 					return filtered, nil

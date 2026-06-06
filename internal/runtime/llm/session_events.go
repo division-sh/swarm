@@ -57,19 +57,23 @@ func publishAgentStarted(ctx context.Context, publisher EventPublisher, session 
 		}, err)
 		return
 	}
-	evt := events.Event{
-		ID:          uuid.NewString(),
-		Type:        eventType,
-		SourceAgent: "runtime",
-		Payload:     raw,
-		CreatedAt:   time.Now(),
-	}
-	if entityID := actor.EffectiveEntityID(); entityID != "" {
-		evt = evt.WithEntityID(entityID)
-	}
-	if flowInstance := strings.TrimSpace(asString(payload["flow_instance"])); flowInstance != "" {
-		evt = evt.WithFlowInstance(flowInstance)
-	}
+	entityID := actor.EffectiveEntityID()
+	flowInstance := strings.TrimSpace(asString(payload["flow_instance"]))
+	evt := events.NewRuntimeDiagnosticEvent(
+		uuid.NewString(),
+		eventType,
+		"runtime",
+		"",
+		raw,
+		0,
+		"",
+		"",
+		events.EventEnvelope{
+			EntityID:     entityID,
+			FlowInstance: flowInstance,
+		},
+		time.Now(),
+	)
 	if err := publisher.Publish(ctx, evt); err != nil {
 		logPublisherRuntime(ctx, publisher, "error", "publish_agent_started_failed", "Publishing the agent-started event failed", session.AgentID, session.ID, evt.EntityID(), map[string]any{
 			"event_type": strings.TrimSpace(string(eventType)),

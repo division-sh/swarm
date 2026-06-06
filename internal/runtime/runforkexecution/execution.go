@@ -283,20 +283,24 @@ func selectedContractForkEvent(forkRunID, forkEventID string, sourceEvent store.
 	if len(sourceEvent.Payload) > 0 && json.Valid(sourceEvent.Payload) {
 		payload = append(json.RawMessage(nil), sourceEvent.Payload...)
 	}
-	evt := events.Event{
-		ID:          strings.TrimSpace(forkEventID),
-		Type:        events.EventType(strings.TrimSpace(sourceEvent.EventName)),
-		SourceAgent: strings.TrimSpace(sourceAgent),
-		Payload:     payload,
-		RunID:       strings.TrimSpace(forkRunID),
-		CreatedAt:   time.Now().UTC(),
-	}
 	envelope := events.EventEnvelope{
 		EntityID:     strings.TrimSpace(sourceEvent.EntityID),
 		FlowInstance: strings.Trim(strings.TrimSpace(sourceEvent.FlowInstance), "/"),
 		Scope:        events.EventScope(strings.TrimSpace(sourceEvent.Scope)),
 	}
-	return evt.WithEnvelope(envelope)
+	return events.NewReplayEvent(
+		strings.TrimSpace(forkEventID),
+		events.EventType(strings.TrimSpace(sourceEvent.EventName)),
+		strings.TrimSpace(sourceAgent),
+		"",
+		payload,
+		0,
+		events.EventLineage{
+			RunID: strings.TrimSpace(forkRunID),
+		},
+		envelope,
+		time.Now().UTC(),
+	)
 }
 
 func newSelectedContractPipeline(bus *runtimebus.EventBus, store *store.PostgresStore, loaded LoadedSelectedContractSource) *runtimepipeline.PipelineCoordinator {

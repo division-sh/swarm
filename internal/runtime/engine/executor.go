@@ -542,7 +542,7 @@ func (e *Executor) newExecutionFrame(tx Tx, req ExecutionRequest) executionFrame
 	if state.StateCarrier.StateBuckets == nil {
 		state.StateCarrier.StateBuckets = map[string]map[string]any{}
 	}
-	payload := decodePayload(req.Event.Payload)
+	payload := decodePayload(req.Event.Payload())
 	if len(payload) == 0 {
 		payload = map[string]any{}
 	}
@@ -758,7 +758,7 @@ func (e *Executor) stepAccumulate(frame *executionFrame) (bool, error) {
 	frame.result.AccumulatorCompletionDiagnostics.OnCompleteDeclared = len(frame.req.Handler.OnComplete) > 0 || len(spec.OnComplete) > 0
 	frame.result.AccumulatorCompletionDiagnostics.EvaluationOutcome = AccumulatorCompletionEvaluationNotAttempted
 	bucketRef := handlerAccumulatorBucketRef(frame.req)
-	if isAccumulationTimeoutEvent(frame.req.Event.Type) {
+	if isAccumulationTimeoutEvent(frame.req.Event.Type()) {
 		parsed, ok := accumulationTimeoutBucketRefFromPayload(frame.payload)
 		if !ok || parsed.NodeID != frame.req.NodeID.String() {
 			return false, nil
@@ -770,7 +770,7 @@ func (e *Executor) stepAccumulate(frame *executionFrame) (bool, error) {
 		acc = &Accumulator{}
 	}
 	if strings.TrimSpace(acc.StartedAt) == "" {
-		acc.StartedAt = frame.req.Event.CreatedAt.UTC().Format(time.RFC3339Nano)
+		acc.StartedAt = frame.req.Event.CreatedAt().UTC().Format(time.RFC3339Nano)
 	}
 	current := e.currentContext(frame)
 	expectedIDs, expectedCount := expectedAccumulatorTargets(current, frame.state, spec.ExpectedPath, spec.ExpectedFrom)
@@ -783,7 +783,7 @@ func (e *Executor) stepAccumulate(frame *executionFrame) (bool, error) {
 	if acc.Received == nil {
 		acc.Received = map[string]bool{}
 	}
-	if !isAccumulationTimeoutEvent(frame.req.Event.Type) {
+	if !isAccumulationTimeoutEvent(frame.req.Event.Type()) {
 		arrivalID := dedupIdentifier(current, frame.state, frame.req.Event, spec)
 		if arrivalID != "" && !acc.Received[arrivalID] {
 			acc.Received[arrivalID] = true
@@ -791,17 +791,17 @@ func (e *Executor) stepAccumulate(frame *executionFrame) (bool, error) {
 			if item == nil {
 				item = map[string]any{}
 			}
-			item["event_id"] = strings.TrimSpace(frame.req.Event.ID)
-			item["event_type"] = strings.TrimSpace(string(frame.req.Event.Type))
-			item["source"] = strings.TrimSpace(frame.req.Event.SourceAgent)
-			item["received_at"] = frame.req.Event.CreatedAt.UTC().Format(time.RFC3339Nano)
+			item["event_id"] = strings.TrimSpace(frame.req.Event.ID())
+			item["event_type"] = strings.TrimSpace(string(frame.req.Event.Type()))
+			item["source"] = strings.TrimSpace(frame.req.Event.SourceAgent())
+			item["received_at"] = frame.req.Event.CreatedAt().UTC().Format(time.RFC3339Nano)
 			acc.Items = append(acc.Items, item)
 		}
 	}
-	acc.LastEventID = strings.TrimSpace(frame.req.Event.ID)
-	acc.LastEventType = strings.TrimSpace(string(frame.req.Event.Type))
-	acc.LastSource = strings.TrimSpace(frame.req.Event.SourceAgent)
-	acc.LastReceivedAt = frame.req.Event.CreatedAt.UTC().Format(time.RFC3339Nano)
+	acc.LastEventID = strings.TrimSpace(frame.req.Event.ID())
+	acc.LastEventType = strings.TrimSpace(string(frame.req.Event.Type()))
+	acc.LastSource = strings.TrimSpace(frame.req.Event.SourceAgent())
+	acc.LastReceivedAt = frame.req.Event.CreatedAt().UTC().Format(time.RFC3339Nano)
 	frame.result.AccumulatorCompletionDiagnostics.ReceivedCount = len(acc.Received)
 	frame.result.AccumulatorCompletionDiagnostics.ExpectedCount = acc.ExpectedCount
 	if len(acc.Expected) > 0 {
@@ -810,7 +810,7 @@ func (e *Executor) stepAccumulate(frame *executionFrame) (bool, error) {
 	storeAccumulatorForBucket(&frame.state.State, bucketRef, acc)
 	frame.result.StateMutation.SetStateBuckets(frame.state.State.StateCarrier.StateBuckets)
 	frame.state.Accumulated = accumulatorExpressionValue(acc)
-	if isAccumulationTimeoutEvent(frame.req.Event.Type) && spec.OnTimeout != nil {
+	if isAccumulationTimeoutEvent(frame.req.Event.Type()) && spec.OnTimeout != nil {
 		frame.rule = spec.OnTimeout
 		frame.ruleSource = handlerRuleSourceAccumulateOnTimeout
 		e.applyRule(frame, spec.OnTimeout)
@@ -1057,7 +1057,7 @@ func (e *Executor) stepGroupBy(frame *executionFrame) error {
 }
 
 func (e *Executor) stepOnComplete(frame *executionFrame) error {
-	if isAccumulationTimeoutEvent(frame.req.Event.Type) &&
+	if isAccumulationTimeoutEvent(frame.req.Event.Type()) &&
 		frame.req.Handler.Accumulate != nil &&
 		frame.req.Handler.Accumulate.OnTimeout != nil &&
 		frame.rule == frame.req.Handler.Accumulate.OnTimeout {
@@ -1207,7 +1207,7 @@ func (e *Executor) stepProjection(frame *executionFrame) error {
 	}
 	if len(result.Bindings) == 0 {
 		if result.ExpectedBindingCount > 0 {
-			return fmt.Errorf("runtime_invariant_violation: materialize_from binding declared for node %s accumulator %s but no accumulator buffer resolved at runtime for event %s; likely event identity drift between verify-time declaration and execution-time lookup", frame.req.NodeID.String(), result.ActiveAccumulatorName, string(frame.req.Event.Type))
+			return fmt.Errorf("runtime_invariant_violation: materialize_from binding declared for node %s accumulator %s but no accumulator buffer resolved at runtime for event %s; likely event identity drift between verify-time declaration and execution-time lookup", frame.req.NodeID.String(), result.ActiveAccumulatorName, string(frame.req.Event.Type()))
 		}
 		return nil
 	}
@@ -1531,14 +1531,14 @@ func (e *Executor) buildTimerIntents(frame *executionFrame) []TimerIntent {
 			Owner:        frame.req.NodeID,
 			FromState:    frame.result.CurrentState,
 			ToState:      frame.result.NextState,
-			TriggerEvent: strings.TrimSpace(string(frame.req.Event.Type)),
+			TriggerEvent: strings.TrimSpace(string(frame.req.Event.Type())),
 		},
 		{
 			Operation:    TimerStart,
 			Owner:        frame.req.NodeID,
 			FromState:    frame.result.CurrentState,
 			ToState:      frame.result.NextState,
-			TriggerEvent: strings.TrimSpace(string(frame.req.Event.Type)),
+			TriggerEvent: strings.TrimSpace(string(frame.req.Event.Type())),
 		},
 	}
 }
@@ -1957,7 +1957,7 @@ func (e *Executor) applyDataAccumulation(frame *executionFrame, spec runtimecont
 			}
 		}
 	}
-	frame.state.State.SetMetadata("last_data_accumulation_event", strings.TrimSpace(string(frame.req.Event.Type)))
+	frame.state.State.SetMetadata("last_data_accumulation_event", strings.TrimSpace(string(frame.req.Event.Type())))
 	frame.result.StateMutation.StateCarrier.Metadata = cloneStringAnyMap(frame.state.State.StateCarrier.Metadata)
 	frame.result.StateMutation.DataAccumulation = spec
 	return nil
@@ -2085,7 +2085,7 @@ func (e *Executor) newEmitIntent(frame *executionFrame, spec runtimecontracts.Em
 	}
 	createdAt := time.Now().UTC()
 	if n := len(frame.result.EmitIntents); n > 0 {
-		last := frame.result.EmitIntents[n-1].Event.CreatedAt
+		last := frame.result.EmitIntents[n-1].Event.CreatedAt()
 		if !last.IsZero() && !createdAt.After(last) {
 			createdAt = last.Add(time.Nanosecond)
 		}
@@ -2093,38 +2093,36 @@ func (e *Executor) newEmitIntent(frame *executionFrame, spec runtimecontracts.Em
 	sourceRoute := emitSourceRoute(frame)
 	entityID := sourceRoute.EntityID
 	flowInstance := sourceRoute.FlowInstance
-	evt := events.Event{
-		Type:       events.EventType(strings.TrimSpace(eventType)),
-		Payload:    encoded,
-		ChainDepth: chainDepth,
-		CreatedAt:  createdAt,
-	}
-	if entityID != "" {
-		evt = evt.WithEntityID(entityID)
-	}
-	if flowInstance != "" {
-		evt = evt.WithFlowInstance(flowInstance)
+	envelope := events.EventEnvelope{
+		EntityID:     entityID,
+		FlowInstance: flowInstance,
 	}
 	if !sourceRoute.Empty() {
-		evt = evt.WithSourceRoute(sourceRoute)
+		envelope = events.EnvelopeForSourceRoute(envelope, sourceRoute)
 	}
-	resolution, err := e.resolveEmitRoute(frame, spec, eventType, evt)
+	resolution, err := e.resolveEmitRoute(frame, spec, eventType, sourceRoute, envelope)
 	if err != nil {
 		return EmitIntent{}, err
 	}
-	evt = resolution.Event
-	evt.ParentEventID = strings.TrimSpace(frame.req.Event.ID)
-	if evt.TaskID == "" {
-		evt.TaskID = strings.TrimSpace(frame.req.Event.TaskID)
-	}
+	evt := events.NewChildEvent(
+		"",
+		events.EventType(strings.TrimSpace(eventType)),
+		"",
+		"",
+		encoded,
+		chainDepth,
+		frame.req.Event,
+		resolution.Envelope,
+		createdAt,
+	)
 	return EmitIntent{
 		Event:         evt,
 		ChainDepth:    chainDepth,
-		ParentEventID: strings.TrimSpace(frame.req.Event.ID),
+		ParentEventID: strings.TrimSpace(frame.req.Event.ID()),
 	}, nil
 }
 
-func (e *Executor) resolveEmitRoute(frame *executionFrame, spec runtimecontracts.EmitSpec, eventType string, evt events.Event) (runtimepinrouting.Resolution, error) {
+func (e *Executor) resolveEmitRoute(frame *executionFrame, spec runtimecontracts.EmitSpec, eventType string, sourceRoute events.RouteIdentity, envelope events.EventEnvelope) (runtimepinrouting.Resolution, error) {
 	if spec.EventType() == "" {
 		spec.Event = strings.TrimSpace(eventType)
 	}
@@ -2133,7 +2131,7 @@ func (e *Executor) resolveEmitRoute(frame *executionFrame, spec runtimecontracts
 		FlowID:      strings.TrimSpace(frame.req.FlowID.String()),
 		EventType:   strings.TrimSpace(eventType),
 		Emit:        spec,
-		SourceRoute: evt.SourceRoute(),
+		SourceRoute: sourceRoute,
 		Inbound:     frame.req.Event,
 		ParentRoute: parentRouteFromState(frame.state.State.StateCarrier.Metadata),
 	}
@@ -2151,7 +2149,7 @@ func (e *Executor) resolveEmitRoute(frame *executionFrame, spec runtimecontracts
 		}
 		input.Descriptors = descriptors
 	}
-	resolution := runtimepinrouting.Resolve(input, evt)
+	resolution := runtimepinrouting.ResolveEnvelope(input, envelope)
 	if err := runtimepinrouting.FailureError(resolution.Failure); err != nil {
 		return runtimepinrouting.Resolution{}, err
 	}

@@ -355,7 +355,7 @@ func (g *selectedContractRecipientPlanPublishGuard) AuthorizeEvent(ctx context.C
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if !g.authorizesSourceAgent(evt.SourceAgent) {
+	if !g.authorizesSourceAgent(evt.SourceAgent()) {
 		return nil
 	}
 	_, _, err := g.expectedRecipientPlanEvent(evt)
@@ -366,7 +366,7 @@ func (g *selectedContractRecipientPlanPublishGuard) Authorize(ctx context.Contex
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if !g.authorizesSourceAgent(evt.SourceAgent) {
+	if !g.authorizesSourceAgent(evt.SourceAgent()) {
 		return nil
 	}
 	sourceEventID, expected, err := g.expectedRecipientPlanEvent(evt)
@@ -386,7 +386,7 @@ func (g *selectedContractRecipientPlanPublishGuard) MaterializeNodeDeliveryRoute
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if !g.authorizesSourceAgent(evt.SourceAgent) {
+	if !g.authorizesSourceAgent(evt.SourceAgent()) {
 		return nil, nil
 	}
 	if err := g.Authorize(ctx, evt, actual); err != nil {
@@ -408,7 +408,7 @@ func (g *selectedContractRecipientPlanPublishGuard) authorizesSourceAgent(source
 }
 
 func (g *selectedContractRecipientPlanPublishGuard) expectedRecipientPlanEvent(evt events.Event) (string, store.RunForkSelectedContractRecipientPlanEvent, error) {
-	forkEventID := strings.TrimSpace(evt.ID)
+	forkEventID := strings.TrimSpace(evt.ID())
 	sourceEventID := strings.TrimSpace(g.sourceByForkEvent[forkEventID])
 	if sourceEventID == "" {
 		return "", store.RunForkSelectedContractRecipientPlanEvent{}, fmt.Errorf("selected-contract publish path missing %s evidence for fork event %s", store.RunForkSelectedContractRecipientPlanningOwner, forkEventID)
@@ -417,8 +417,8 @@ func (g *selectedContractRecipientPlanPublishGuard) expectedRecipientPlanEvent(e
 	if !ok {
 		return "", store.RunForkSelectedContractRecipientPlanEvent{}, fmt.Errorf("selected-contract publish path has no recipient plan for source event %s", sourceEventID)
 	}
-	if strings.TrimSpace(expected.EventName) != strings.TrimSpace(string(evt.Type)) {
-		return "", store.RunForkSelectedContractRecipientPlanEvent{}, fmt.Errorf("selected-contract publish event type mismatch for source event %s: got %q want %q", sourceEventID, evt.Type, expected.EventName)
+	if strings.TrimSpace(expected.EventName) != strings.TrimSpace(string(evt.Type())) {
+		return "", store.RunForkSelectedContractRecipientPlanEvent{}, fmt.Errorf("selected-contract publish event type mismatch for source event %s: got %q want %q", sourceEventID, evt.Type(), expected.EventName)
 	}
 	return sourceEventID, expected, nil
 }

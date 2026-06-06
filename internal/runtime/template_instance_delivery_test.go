@@ -58,13 +58,9 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScope
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 	eventID := "99999999-9999-4999-8999-999999999902"
-	evt := (events.Event{
-		ID:        eventID,
-		RunID:     templateInstanceDeliveryRunID,
-		Type:      events.EventType("operating/inst-1/opco.product_initialization_requested"),
-		Payload:   []byte(`{"entity_id":"11111111-1111-4111-8111-111111111111"}`),
-		CreatedAt: time.Now().UTC(),
-	}).WithEntityID("11111111-1111-4111-8111-111111111111").WithFlowInstance("operating/inst-1")
+	evt := (events.NewProjectionEvent(eventID,
+
+		events.EventType("operating/inst-1/opco.product_initialization_requested"), "", "", []byte(`{"entity_id":"11111111-1111-4111-8111-111111111111"}`), 0, templateInstanceDeliveryRunID, "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID("11111111-1111-4111-8111-111111111111").WithFlowInstance("operating/inst-1")
 	if err := bus.Publish(ctx, evt); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
@@ -107,13 +103,9 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsAuthorityBeforeHandle
 	}
 	ch := bus.SubscribeInternal("workflow-runtime", events.EventType("operating/opco.product_initialization_requested"))
 	eventID := "99999999-9999-4999-8999-999999999903"
-	evt := (events.Event{
-		ID:        eventID,
-		RunID:     templateInstanceDeliveryRunID,
-		Type:      events.EventType("operating/inst-1/opco.product_initialization_requested"),
-		Payload:   []byte(`{"entity_id":"11111111-1111-4111-8111-111111111111"}`),
-		CreatedAt: time.Now().UTC(),
-	}).WithEntityID("11111111-1111-4111-8111-111111111111").WithFlowInstance("operating/inst-1")
+	evt := (events.NewProjectionEvent(eventID,
+
+		events.EventType("operating/inst-1/opco.product_initialization_requested"), "", "", []byte(`{"entity_id":"11111111-1111-4111-8111-111111111111"}`), 0, templateInstanceDeliveryRunID, "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID("11111111-1111-4111-8111-111111111111").WithFlowInstance("operating/inst-1")
 	if err := bus.Publish(ctx, evt); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
@@ -165,37 +157,33 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 	})
 	bus.SetInterceptors(pc)
 
-	spinup := (events.Event{
-		ID:        "99999999-9999-4999-8999-999999999910",
-		RunID:     templateInstanceDeliveryRunID,
-		Type:      events.EventType("opco.spinup_requested"),
-		Payload:   []byte(`{"entity_id":"22222222-2222-4222-8222-222222222222","instance_id":"11111111-1111-4111-8111-111111111111","product_id":"product-1"}`),
-		CreatedAt: time.Now().UTC(),
-	}).WithEntityID("22222222-2222-4222-8222-222222222222")
+	spinup := (events.NewProjectionEvent("99999999-9999-4999-8999-999999999910",
+
+		events.EventType("opco.spinup_requested"), "", "", []byte(`{"entity_id":"22222222-2222-4222-8222-222222222222","instance_id":"11111111-1111-4111-8111-111111111111","product_id":"product-1"}`), 0, templateInstanceDeliveryRunID, "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID("22222222-2222-4222-8222-222222222222")
 	if err := bus.Publish(ctx, spinup); err != nil {
 		t.Fatalf("Publish spinup: %v", err)
 	}
 	waitRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_receipts
 		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'portfolio-node' AND outcome = 'no_op'
-	`, 1, spinup.ID)
+	`, 1, spinup.ID())
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
 		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'portfolio-node'
-	`, 1, spinup.ID)
+	`, 1, spinup.ID())
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
 		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'portfolio-node'
 		  AND delivered_at IS NOT NULL AND created_at < delivered_at
-	`, 1, spinup.ID)
+	`, 1, spinup.ID())
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
 		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = '__runtime_replay_scope__'
-	`, 1, spinup.ID)
+	`, 1, spinup.ID())
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
 		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'workflow-runtime'
-	`, 0, spinup.ID)
+	`, 0, spinup.ID())
 	autoEventID := waitRuntimeEventID(t, ctx, db, `
 		SELECT event_id::text FROM events
 		WHERE event_name = 'operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested'
@@ -251,13 +239,9 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 	})
 	bus.SetInterceptors(pc)
 
-	spinup := (events.Event{
-		ID:        "99999999-9999-4999-8999-999999999930",
-		RunID:     templateInstanceDeliveryRunID,
-		Type:      events.EventType("opco.spinup_requested"),
-		Payload:   []byte(`{"entity_id":"22222222-2222-4222-8222-222222222222","instance_id":"11111111-1111-4111-8111-111111111111","product_id":"product-1"}`),
-		CreatedAt: time.Now().UTC(),
-	}).WithEntityID("22222222-2222-4222-8222-222222222222")
+	spinup := (events.NewProjectionEvent("99999999-9999-4999-8999-999999999930",
+
+		events.EventType("opco.spinup_requested"), "", "", []byte(`{"entity_id":"22222222-2222-4222-8222-222222222222","instance_id":"11111111-1111-4111-8111-111111111111","product_id":"product-1"}`), 0, templateInstanceDeliveryRunID, "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID("22222222-2222-4222-8222-222222222222")
 	if err := bus.Publish(ctx, spinup); err != nil {
 		t.Fatalf("Publish spinup: %v", err)
 	}
@@ -326,13 +310,18 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 		},
 	})
 
-	mailbox := (events.Event{
-		ID:        "99999999-9999-4999-8999-999999999913",
-		RunID:     templateInstanceDeliveryRunID,
-		Type:      events.EventType("mailbox.item_decided"),
-		Payload:   []byte(`{"entity_id":"22222222-2222-4222-8222-222222222222","instance_id":"11111111-1111-4111-8111-111111111111","product_id":"product-1"}`),
-		CreatedAt: time.Now().UTC(),
-	}).WithEntityID("22222222-2222-4222-8222-222222222222")
+	mailbox := events.NewProjectionEvent(
+		"99999999-9999-4999-8999-999999999913",
+		events.EventType("mailbox.item_decided"),
+		"",
+		"",
+		[]byte(`{"entity_id":"22222222-2222-4222-8222-222222222222","instance_id":"11111111-1111-4111-8111-111111111111","product_id":"product-1"}`),
+		0,
+		templateInstanceDeliveryRunID,
+		"",
+		events.EventEnvelope{EntityID: "22222222-2222-4222-8222-222222222222"},
+		time.Now().UTC(),
+	)
 	if err := bus.PublishAcknowledged(ctx, mailbox); err != nil {
 		t.Fatalf("PublishAcknowledged mailbox: %v", err)
 	}
@@ -340,20 +329,20 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 	waitRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_receipts
 		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'approval-router' AND outcome = 'no_op'
-	`, 1, mailbox.ID)
+	`, 1, mailbox.ID())
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
 		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'approval-router'
-	`, 1, mailbox.ID)
+	`, 1, mailbox.ID())
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
 		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'approval-router'
 		  AND delivered_at IS NOT NULL AND created_at < delivered_at
-	`, 1, mailbox.ID)
+	`, 1, mailbox.ID())
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
 		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'workflow-runtime'
-	`, 0, mailbox.ID)
+	`, 0, mailbox.ID())
 
 	spinupEventID := waitRuntimeEventID(t, ctx, db, `
 		SELECT event_id::text FROM events
@@ -440,13 +429,9 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 		t.Fatal("workflow runtime did not subscribe")
 	}
 
-	mailbox := (events.Event{
-		ID:        "99999999-9999-4999-8999-999999999912",
-		RunID:     templateInstanceDeliveryRunID,
-		Type:      events.EventType("mailbox.item_decided"),
-		Payload:   []byte(`{"entity_id":"22222222-2222-4222-8222-222222222222","instance_id":"11111111-1111-4111-8111-111111111111","product_id":"product-1"}`),
-		CreatedAt: time.Now().UTC(),
-	}).WithEntityID("22222222-2222-4222-8222-222222222222")
+	mailbox := (events.NewProjectionEvent("99999999-9999-4999-8999-999999999912",
+
+		events.EventType("mailbox.item_decided"), "", "", []byte(`{"entity_id":"22222222-2222-4222-8222-222222222222","instance_id":"11111111-1111-4111-8111-111111111111","product_id":"product-1"}`), 0, templateInstanceDeliveryRunID, "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID("22222222-2222-4222-8222-222222222222")
 	if err := bus.Publish(ctx, mailbox); err != nil {
 		t.Fatalf("Publish mailbox: %v", err)
 	}
@@ -454,11 +439,11 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 	waitRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_receipts
 		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'approval-router' AND outcome = 'no_op'
-	`, 1, mailbox.ID)
+	`, 1, mailbox.ID())
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
 		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'approval-router'
-	`, 1, mailbox.ID)
+	`, 1, mailbox.ID())
 
 	spinupEventID := waitRuntimeEventID(t, ctx, db, `
 		SELECT event_id::text FROM events

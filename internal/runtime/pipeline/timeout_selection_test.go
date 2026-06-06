@@ -59,18 +59,16 @@ func TestDeclarativeNodeHandleEvent_SelectsOnTimeoutAccumulatorHandler(t *testin
 	entry := bundle.NodeEntries()["test-node"]
 	engine := &recordingExecutionEngine{}
 	node := NewNode(entry, semanticview.Wrap(bundle), engine, nil)
-	handled := node.Handle(context.Background(), events.Event{
-		Type: "accumulate.timeout",
-		Payload: mustJSON(map[string]any{
-			"timer_handle": map[string]any{
-				"kind": "accumulation_timeout",
-				"bucket": map[string]any{
-					"node_id":    "test-node",
-					"event_type": "item.arrived",
-				},
+	handled := node.Handle(context.Background(), events.NewProjectionEvent("", "accumulate.timeout", "", "", mustJSON(map[string]any{
+		"timer_handle": map[string]any{
+			"kind": "accumulation_timeout",
+			"bucket": map[string]any{
+				"node_id":    "test-node",
+				"event_type": "item.arrived",
 			},
-		}),
-	})
+		},
+	}), 0, "", "", events.EventEnvelope{}, time.Time{}),
+	)
 	if !handled {
 		t.Fatal("expected timeout event to be handled")
 	}
@@ -93,7 +91,7 @@ func TestDeclarativeNodeHandleEvent_MatchesWildcardHandler(t *testing.T) {
 	entry := bundle.NodeEntries()["test-node"]
 	engine := &recordingExecutionEngine{}
 	node := NewNode(entry, semanticview.Wrap(bundle), engine, nil)
-	handled := node.Handle(context.Background(), events.Event{Type: "task.completed"}.WithEntityID("ent-1"))
+	handled := node.Handle(context.Background(), events.NewProjectionEvent("", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}).WithEntityID("ent-1"))
 	if !handled {
 		t.Fatal("expected wildcard event to be handled")
 	}
@@ -137,7 +135,7 @@ func TestDeclarativeNodeHandleEvent_MatchesDeepWildcardChildFlowHandler(t *testi
 	entry := bundle.NodeEntries()["collector"]
 	engine := &recordingExecutionEngine{}
 	node := NewNode(entry, semanticview.Wrap(bundle), engine, nil)
-	handled := node.Handle(context.Background(), events.Event{Type: "child/grandchild/task.done"}.WithEntityID("ent-1"))
+	handled := node.Handle(context.Background(), events.NewProjectionEvent("", "child/grandchild/task.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}).WithEntityID("ent-1"))
 	if !handled {
 		t.Fatal("expected deep wildcard event to be handled")
 	}

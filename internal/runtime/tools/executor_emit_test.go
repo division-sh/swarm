@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"time"
 )
 
 type publishBusCapture struct {
@@ -100,12 +101,12 @@ func TestHandleEmitTool_PreservesPayloadForFlowScopedEmit(t *testing.T) {
 		t.Fatalf("handleEmitTool: %v", err)
 	}
 
-	if got, want := string(bus.event.Type), "discovery/category.assessed"; got != want {
+	if got, want := string(bus.event.Type()), "discovery/category.assessed"; got != want {
 		t.Fatalf("published event type = %q, want %q", got, want)
 	}
 
 	var payload map[string]any
-	if err := json.Unmarshal(bus.event.Payload, &payload); err != nil {
+	if err := json.Unmarshal(bus.event.Payload(), &payload); err != nil {
 		t.Fatalf("json.Unmarshal payload: %v", err)
 	}
 	if got, want := payload["category"], "AP automation"; got != want {
@@ -159,9 +160,7 @@ func TestHandleEmitTool_PreservesInboundChildFlowOwnerWithinActorScope(t *testin
 		FlowPath:   "validation",
 		EmitEvents: []string{"research.completed"},
 	}
-	inbound := (events.Event{
-		Type: events.EventType("validation/validation.started"),
-	}).WithEntityID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").WithFlowInstance("validation/inst-1")
+	inbound := (events.NewProjectionEvent("", events.EventType("validation/validation.started"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").WithFlowInstance("validation/inst-1")
 	ctx := runtimebus.WithInboundEvent(context.Background(), inbound)
 
 	_, err := exec.handleEmitTool(ctx, actor, "emit_research_completed", map[string]any{
@@ -218,9 +217,7 @@ func TestHandleEmitTool_DoesNotAdoptForeignInboundFlowOwner(t *testing.T) {
 		FlowPath:   "validation",
 		EmitEvents: []string{"research.completed"},
 	}
-	inbound := (events.Event{
-		Type: events.EventType("scoring/vertical.shortlisted"),
-	}).WithEntityID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").WithFlowInstance("scoring/inst-1")
+	inbound := (events.NewProjectionEvent("", events.EventType("scoring/vertical.shortlisted"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").WithFlowInstance("scoring/inst-1")
 	ctx := runtimebus.WithInboundEvent(context.Background(), inbound)
 
 	_, err := exec.handleEmitTool(ctx, actor, "emit_research_completed", map[string]any{
@@ -289,7 +286,7 @@ func TestHandleEmitTool_KeepsFlowOutputPinAtParentScope(t *testing.T) {
 		t.Fatalf("handleEmitTool: %v", err)
 	}
 
-	if got, want := string(bus.event.Type), "discovery/vertical.discovered"; got != want {
+	if got, want := string(bus.event.Type()), "discovery/vertical.discovered"; got != want {
 		t.Fatalf("published event type = %q, want %q", got, want)
 	}
 	if bus.count != 1 {
@@ -370,9 +367,7 @@ func TestHandleEmitTool_TargetsParentRouteForChildPinOutput(t *testing.T) {
 		FlowInstance: "wrong-root",
 		EntityID:     "33333333-3333-3333-3333-333333333333",
 	}
-	inbound := (events.Event{
-		Type: events.EventType("analyzer-flow/analysis.requested"),
-	}).WithSourceRoute(wrongInboundParent).WithTargetRoute(childRoute)
+	inbound := (events.NewProjectionEvent("", events.EventType("analyzer-flow/analysis.requested"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})).WithSourceRoute(wrongInboundParent).WithTargetRoute(childRoute)
 	ctx := runtimebus.WithInboundEvent(context.Background(), inbound)
 
 	_, err := exec.handleEmitTool(ctx, actor, "emit_analysis_done", map[string]any{})
@@ -444,9 +439,7 @@ func TestHandleEmitTool_FailsClosedOnIncompleteStoredParentRoute(t *testing.T) {
 		EntityID:   "22222222-2222-2222-2222-222222222222",
 		EmitEvents: []string{"analyzer-flow/analysis.done"},
 	}
-	ctx := runtimebus.WithInboundEvent(context.Background(), events.Event{
-		Type: events.EventType("analyzer-flow/analysis.requested"),
-	})
+	ctx := runtimebus.WithInboundEvent(context.Background(), events.NewProjectionEvent("", events.EventType("analyzer-flow/analysis.requested"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 
 	_, err := exec.handleEmitTool(ctx, actor, "emit_analysis_done", map[string]any{})
 	if err == nil {
@@ -505,9 +498,7 @@ func TestHandleEmitTool_StaticChildPinOutputTargetsDeliveryEntity(t *testing.T) 
 		FlowPath:   "root/analyzer-flow",
 		EmitEvents: []string{"analyzer-flow/analysis.done"},
 	}
-	inbound := (events.Event{
-		Type: events.EventType("analyzer-flow/analysis.requested"),
-	}).WithEntityID("11111111-1111-1111-1111-111111111111").WithSourceRoute(events.RouteIdentity{
+	inbound := (events.NewProjectionEvent("", events.EventType("analyzer-flow/analysis.requested"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID("11111111-1111-1111-1111-111111111111").WithSourceRoute(events.RouteIdentity{
 		FlowID:       "wrong-root",
 		FlowInstance: "wrong-root",
 		EntityID:     "33333333-3333-3333-3333-333333333333",
@@ -569,9 +560,7 @@ func TestHandleEmitTool_RootStaticPinOutputStillRequiresTarget(t *testing.T) {
 		FlowPath:   "analyzer-flow",
 		EmitEvents: []string{"analyzer-flow/analysis.done"},
 	}
-	inbound := (events.Event{
-		Type: events.EventType("analyzer-flow/analysis.requested"),
-	}).WithEntityID("11111111-1111-1111-1111-111111111111")
+	inbound := (events.NewProjectionEvent("", events.EventType("analyzer-flow/analysis.requested"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID("11111111-1111-1111-1111-111111111111")
 	ctx := runtimebus.WithInboundEvent(context.Background(), inbound)
 
 	_, err := exec.handleEmitTool(ctx, actor, "emit_analysis_done", map[string]any{})
@@ -696,7 +685,7 @@ func TestHandleEmitTool_AllowsDeclaredTemplateIDBusinessPayload(t *testing.T) {
 		t.Fatalf("handleEmitTool: %v", err)
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(bus.event.Payload, &payload); err != nil {
+	if err := json.Unmarshal(bus.event.Payload(), &payload); err != nil {
 		t.Fatalf("json.Unmarshal payload: %v", err)
 	}
 	if got := payload["template_id"]; got != "application-basic-v1" {
@@ -852,7 +841,7 @@ func TestHandleEmitTool_ResolvesDuplicateLeafScopedSchemasThroughActor(t *testin
 	if err != nil {
 		t.Fatalf("review handleEmitTool: %v", err)
 	}
-	if got, want := string(bus.event.Type), "review/task.requested"; got != want {
+	if got, want := string(bus.event.Type()), "review/task.requested"; got != want {
 		t.Fatalf("review published event type = %q, want %q", got, want)
 	}
 
@@ -871,7 +860,7 @@ func TestHandleEmitTool_ResolvesDuplicateLeafScopedSchemasThroughActor(t *testin
 	if err != nil {
 		t.Fatalf("validation handleEmitTool: %v", err)
 	}
-	if got, want := string(bus.event.Type), "validation/task.requested"; got != want {
+	if got, want := string(bus.event.Type()), "validation/task.requested"; got != want {
 		t.Fatalf("validation published event type = %q, want %q", got, want)
 	}
 	if bus.count != 2 {

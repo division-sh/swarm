@@ -53,12 +53,9 @@ func TestShutdown_DrainsInFlightWorkBeforeCancellingLoopContext(t *testing.T) {
 				return nil, ctx.Err()
 			}
 			ctxErrCh <- ctx.Err()
-			return []events.Event{{
-				ID:          "evt-out-1",
-				Type:        events.EventType("test.out"),
-				SourceAgent: "agent-1",
-				CreatedAt:   time.Now().UTC(),
-			}}, nil
+			return []events.Event{
+				events.NewProjectionEvent("evt-out-1", events.EventType("test.out"), "agent-1", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
+			}, nil
 		},
 	}
 
@@ -75,12 +72,10 @@ func TestShutdown_DrainsInFlightWorkBeforeCancellingLoopContext(t *testing.T) {
 	}
 
 	am.Run(context.Background())
-	if err := bus.Publish(context.Background(), events.Event{
-		ID:          "evt-in-1",
-		Type:        events.EventType("test.in"),
-		SourceAgent: "tester",
-		CreatedAt:   time.Now().UTC(),
-	}); err != nil {
+	if err := bus.Publish(context.Background(), events.NewProjectionEvent("evt-in-1",
+		events.EventType("test.in"),
+		"tester", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
+	); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 
@@ -114,7 +109,7 @@ func TestShutdown_DrainsInFlightWorkBeforeCancellingLoopContext(t *testing.T) {
 
 	select {
 	case evt := <-outputs:
-		if got := string(evt.Type); got != "test.out" {
+		if got := string(evt.Type()); got != "test.out" {
 			t.Fatalf("output event type = %q, want test.out", got)
 		}
 	case <-time.After(time.Second):
@@ -163,12 +158,10 @@ func TestShutdownWithOptions_TimesOutAfterConfiguredGraceAndCancelsLoopContext(t
 	}
 
 	am.Run(context.Background())
-	if err := bus.Publish(context.Background(), events.Event{
-		ID:          "evt-in-1",
-		Type:        events.EventType("test.in"),
-		SourceAgent: "tester",
-		CreatedAt:   time.Now().UTC(),
-	}); err != nil {
+	if err := bus.Publish(context.Background(), events.NewProjectionEvent("evt-in-1",
+		events.EventType("test.in"),
+		"tester", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
+	); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 
@@ -248,12 +241,10 @@ func TestShutdown_DoesNotStartQueuedWorkAfterDrainBegins(t *testing.T) {
 
 	am.Run(context.Background())
 	for _, eventID := range []string{"evt-in-1", "evt-in-2"} {
-		if err := bus.Publish(context.Background(), events.Event{
-			ID:          eventID,
-			Type:        events.EventType("test.in"),
-			SourceAgent: "tester",
-			CreatedAt:   time.Now().UTC(),
-		}); err != nil {
+		if err := bus.Publish(context.Background(), events.NewProjectionEvent(eventID,
+			events.EventType("test.in"),
+			"tester", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
+		); err != nil {
 			t.Fatalf("Publish(%s): %v", eventID, err)
 		}
 	}
@@ -334,12 +325,10 @@ func TestShutdown_DoesNotAllowRunToReplaceActiveRunContextDuringDrain(t *testing
 		t.Fatal("expected initial run context")
 	}
 
-	if err := bus.Publish(context.Background(), events.Event{
-		ID:          "evt-in-1",
-		Type:        events.EventType("test.in"),
-		SourceAgent: "tester",
-		CreatedAt:   time.Now().UTC(),
-	}); err != nil {
+	if err := bus.Publish(context.Background(), events.NewProjectionEvent("evt-in-1",
+		events.EventType("test.in"),
+		"tester", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
+	); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 

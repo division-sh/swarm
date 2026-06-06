@@ -138,14 +138,7 @@ func (h *runHub) submitPendingHumanDecision(ctx context.Context, runID string, d
 	if err != nil {
 		return err
 	}
-	if err := runtimeRef.Bus.Publish(ctx, (events.Event{
-		ID:          uuid.NewString(),
-		RunID:       runID,
-		Type:        events.EventType(eventType),
-		SourceAgent: "builder",
-		Payload:     encoded,
-		CreatedAt:   time.Now().UTC(),
-	}).WithEntityID(pending.instanceID)); err != nil {
+	if err := runtimeRef.Bus.Publish(ctx, events.NewRootIngressEvent(uuid.NewString(), events.EventType(eventType), "builder", "", encoded, 0, runID, "", events.EventEnvelope{EntityID: pending.instanceID}, time.Now().UTC())); err != nil {
 		return err
 	}
 	h.emitControl(runID, map[string]any{

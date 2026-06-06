@@ -50,40 +50,40 @@ func (am *AgentManager) processEventDetailed(ctx context.Context, agent Agent, e
 		Event:   evt,
 		AgentID: agent.ID(),
 	}
-	if !am.markEventInFlight(agent.ID(), evt.ID) {
+	if !am.markEventInFlight(agent.ID(), evt.ID()) {
 		record.Outcome = startupManagerReplayOutcomeSkipped
 		record.ReasonCode = startupManagerReplayReasonDuplicateInFlight
 		return eventProcessResult{record: record}
 	}
-	defer am.unmarkEventInFlight(agent.ID(), evt.ID)
-	if skip, reason := am.shouldSkipEventDetailed(agent.ID(), evt.ID); skip {
+	defer am.unmarkEventInFlight(agent.ID(), evt.ID())
+	if skip, reason := am.shouldSkipEventDetailed(agent.ID(), evt.ID()); skip {
 		record.Outcome = startupManagerReplayOutcomeSkipped
 		record.ReasonCode = reason
 		return eventProcessResult{record: record}
 	}
 	if suppress, reason := am.shouldSuppressForBudget(agent.ID(), evt); suppress {
-		am.writeReceipt(ctx, evt.ID, agent.ID(), ReceiptStatusProcessed, reason)
+		am.writeReceipt(ctx, evt.ID(), agent.ID(), ReceiptStatusProcessed, reason)
 		record.Outcome = startupManagerReplayOutcomeSkipped
 		record.ReasonCode = startupManagerReplayReasonBudgetSuppressed
 		return eventProcessResult{record: record}
 	}
 	if am.shouldInterceptDirective(agent.ID(), evt) {
-		am.writeReceipt(ctx, evt.ID, agent.ID(), ReceiptStatusProcessed, "intercepted simple directive (runtime-handled)")
+		am.writeReceipt(ctx, evt.ID(), agent.ID(), ReceiptStatusProcessed, "intercepted simple directive (runtime-handled)")
 		record.Outcome = startupManagerReplayOutcomeSkipped
 		record.ReasonCode = startupManagerReplayReasonDirectiveIntercepted
 		return eventProcessResult{record: record}
 	}
 	ctx = runtimecorrelation.WithInboundEvent(ctx, evt)
-	ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(evt.RunID))
+	ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(evt.RunID()))
 	if writer, ok := am.store.(deliveryProgressWriter); ok && writer != nil {
-		if err := writer.MarkEventDeliveryInProgress(ctx, evt.ID, agent.ID(), ""); err != nil {
+		if err := writer.MarkEventDeliveryInProgress(ctx, evt.ID(), agent.ID(), ""); err != nil {
 			if am.bus != nil {
 				am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
 					Level:     "error",
 					Component: "agent-manager",
 					Action:    "mark_delivery_in_progress_failed",
-					EventID:   strings.TrimSpace(evt.ID),
-					EventType: strings.TrimSpace(string(evt.Type)),
+					EventID:   strings.TrimSpace(evt.ID()),
+					EventType: strings.TrimSpace(string(evt.Type())),
 					AgentID:   agent.ID(),
 					EntityID:  strings.TrimSpace(evt.EntityID()),
 					Error:     strings.TrimSpace(err.Error()),
@@ -94,8 +94,8 @@ func (am *AgentManager) processEventDetailed(ctx context.Context, agent Agent, e
 				Level:     "debug",
 				Component: "agent-manager",
 				Action:    "delivery_lifecycle_transition",
-				EventID:   strings.TrimSpace(evt.ID),
-				EventType: strings.TrimSpace(string(evt.Type)),
+				EventID:   strings.TrimSpace(evt.ID()),
+				EventType: strings.TrimSpace(string(evt.Type())),
 				AgentID:   agent.ID(),
 				EntityID:  strings.TrimSpace(evt.EntityID()),
 				Detail: map[string]any{
@@ -109,13 +109,13 @@ func (am *AgentManager) processEventDetailed(ctx context.Context, agent Agent, e
 			})
 		}
 	}
-	if reason, ok := am.activeRunDeliveryQuiesced(ctx, evt.ID, agent.ID()); ok {
+	if reason, ok := am.activeRunDeliveryQuiesced(ctx, evt.ID(), agent.ID()); ok {
 		record.Outcome = startupManagerReplayOutcomeSkipped
 		record.ReasonCode = reason
 		return eventProcessResult{record: record}
 	}
 	out, err := agent.OnEvent(ctx, evt)
-	if reason, ok := am.activeRunDeliveryQuiesced(ctx, evt.ID, agent.ID()); ok {
+	if reason, ok := am.activeRunDeliveryQuiesced(ctx, evt.ID(), agent.ID()); ok {
 		record.Outcome = startupManagerReplayOutcomeSkipped
 		record.ReasonCode = reason
 		return eventProcessResult{record: record}
@@ -135,21 +135,32 @@ func (am *AgentManager) processEventDetailed(ctx context.Context, agent Agent, e
 			err,
 			"agent %s failed processing event %s (%s)",
 			agent.ID(),
-			strings.TrimSpace(evt.ID),
-			strings.TrimSpace(string(evt.Type)),
+			strings.TrimSpace(evt.ID()),
+			strings.TrimSpace(string(evt.Type())),
 		)
-		am.maybeTripAuthCircuitBreaker(ctx, agent.ID(), evt.ID, err)
-		am.writeReceipt(ctx, evt.ID, agent.ID(), ReceiptStatusError, runtimerterr.FormatRuntimeError(agentErr))
+		am.maybeTripAuthCircuitBreaker(ctx, agent.ID(), evt.ID(), err)
+		am.writeReceipt(ctx, evt.ID(), agent.ID(), ReceiptStatusError, runtimerterr.FormatRuntimeError(agentErr))
 		record.Outcome = startupManagerReplayOutcomeDropped
 		record.ReasonCode = startupManagerReplayReasonProcessFailed
 		record.ErrorText = agentErr.Error()
 		return eventProcessResult{record: record, err: agentErr}
 	}
 	for idx, e := range out {
-		if strings.TrimSpace(e.ID) == "" {
-			e.ID = deterministicOutputEventID(evt, agent.ID(), idx, e)
+		if strings.TrimSpace(e.ID()) == "" {
+			e = events.NewProjectionEvent(
+				deterministicOutputEventID(evt, agent.ID(), idx, e),
+				e.Type(),
+				e.SourceAgent(),
+				e.TaskID(),
+				e.Payload(),
+				e.ChainDepth(),
+				e.RunID(),
+				e.ParentEventID(),
+				e.Envelope(),
+				e.CreatedAt(),
+			)
 		}
-		if am.shouldSkipAlreadyPublishedOutput(ctx, e.ID) {
+		if am.shouldSkipAlreadyPublishedOutput(ctx, e.ID()) {
 			continue
 		}
 		if err := am.bus.Publish(ctx, e); err != nil {
@@ -160,18 +171,18 @@ func (am *AgentManager) processEventDetailed(ctx context.Context, agent Agent, e
 				true,
 				err,
 				"failed publishing output event id=%s type=%s from agent=%s",
-				strings.TrimSpace(e.ID),
-				strings.TrimSpace(string(e.Type)),
+				strings.TrimSpace(e.ID()),
+				strings.TrimSpace(string(e.Type())),
 				agent.ID(),
 			)
-			am.writeReceipt(ctx, evt.ID, agent.ID(), ReceiptStatusError, runtimerterr.FormatRuntimeError(pubErr))
+			am.writeReceipt(ctx, evt.ID(), agent.ID(), ReceiptStatusError, runtimerterr.FormatRuntimeError(pubErr))
 			record.Outcome = startupManagerReplayOutcomeDropped
 			record.ReasonCode = startupManagerReplayReasonPublishFailed
 			record.ErrorText = pubErr.Error()
 			return eventProcessResult{record: record, err: pubErr}
 		}
 	}
-	am.writeReceipt(ctx, evt.ID, agent.ID(), ReceiptStatusProcessed, "")
+	am.writeReceipt(ctx, evt.ID(), agent.ID(), ReceiptStatusProcessed, "")
 	record.Outcome = startupManagerReplayOutcomeReplayed
 	record.ReasonCode = startupManagerReplayReasonReplayed
 	return eventProcessResult{record: record}
@@ -215,7 +226,7 @@ func (am *AgentManager) shouldSuppressForBudget(agentID string, evt events.Event
 	if !ok || tracker == nil {
 		return false, ""
 	}
-	eventType := strings.ToLower(strings.TrimSpace(string(evt.Type)))
+	eventType := strings.ToLower(strings.TrimSpace(string(evt.Type())))
 	if eventType == "platform.budget_threshold_crossed" {
 		return false, ""
 	}
@@ -408,21 +419,15 @@ func (am *AgentManager) maybeTripAuthCircuitBreaker(ctx context.Context, agentID
 	}
 	am.mu.RUnlock()
 	if authRequired {
-		authEvt := events.Event{
-			ID:          uuid.NewString(),
-			Type:        events.EventType("platform.auth_required"),
-			SourceAgent: "runtime",
-			Payload: mustJSON(map[string]any{
-				"agent_id":      strings.TrimSpace(agentID),
-				"entity_id":     entityID,
-				"flow_instance": flowInstance,
-				"tool_name":     nil,
-				"action":        "llm_call",
-				"reason":        reason,
-				"timestamp":     now.Format(time.RFC3339Nano),
-			}),
-			CreatedAt: now,
-		}.WithEntityID(entityID).WithFlowInstance(flowInstance)
+		authEvt := events.NewRuntimeControlEvent(uuid.NewString(), events.EventType("platform.auth_required"), "runtime", "", mustJSON(map[string]any{
+			"agent_id":      strings.TrimSpace(agentID),
+			"entity_id":     entityID,
+			"flow_instance": flowInstance,
+			"tool_name":     nil,
+			"action":        "llm_call",
+			"reason":        reason,
+			"timestamp":     now.Format(time.RFC3339Nano),
+		}), 0, "", "", events.EventEnvelope{EntityID: entityID, FlowInstance: flowInstance}, now)
 		if err := am.bus.Publish(eventCtx, authEvt); err != nil {
 			if am.bus != nil {
 				am.bus.LogRuntime(eventCtx, runtimepipeline.RuntimeLogEntry{
@@ -632,19 +637,13 @@ func (am *AgentManager) maybeEscalateDeadLetter(ctx context.Context, eventID, ag
 	}
 
 	eventCtx := am.runtimePlatformControlEventContext(ctx)
-	if err := am.bus.Publish(eventCtx, events.Event{
-		ID:          uuid.NewString(),
-		Type:        events.EventType("platform.dead_letter_escalation"),
-		SourceAgent: "runtime",
-		Payload: mustJSON(map[string]any{
-			"flow_instance":     flowInstance,
-			"dead_letter_count": count,
-			"window_minutes":    int(deadLetterEscalationWindow / time.Minute),
-			"sample_events":     sampleEvents,
-			"timestamp":         time.Now().UTC().Format(time.RFC3339Nano),
-		}),
-		CreatedAt: time.Now().UTC(),
-	}.WithFlowInstance(flowInstance)); err != nil {
+	if err := am.bus.Publish(eventCtx, events.NewRuntimeDiagnosticEvent(uuid.NewString(), events.EventType("platform.dead_letter_escalation"), "runtime", "", mustJSON(map[string]any{
+		"flow_instance":     flowInstance,
+		"dead_letter_count": count,
+		"window_minutes":    int(deadLetterEscalationWindow / time.Minute),
+		"sample_events":     sampleEvents,
+		"timestamp":         time.Now().UTC().Format(time.RFC3339Nano),
+	}), 0, "", "", events.EventEnvelope{FlowInstance: flowInstance}, time.Now().UTC())); err != nil {
 		if am.bus != nil {
 			am.bus.LogRuntime(eventCtx, runtimepipeline.RuntimeLogEntry{
 				Level:     "error",

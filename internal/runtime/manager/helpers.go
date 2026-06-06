@@ -276,10 +276,10 @@ func stringifyPromptTemplateValue(value any) string {
 
 func DeterministicOutputEventID(inbound events.Event, agentID string, index int, out events.Event) string {
 	seed := strings.Join([]string{
-		strings.TrimSpace(inbound.ID),
+		strings.TrimSpace(inbound.ID()),
 		strings.TrimSpace(agentID),
 		fmt.Sprintf("%d", index),
-		strings.TrimSpace(string(out.Type)),
+		strings.TrimSpace(string(out.Type())),
 		strings.TrimSpace(out.EntityID()),
 	}, "|")
 	return uuid.NewSHA1(uuid.NameSpaceURL, []byte(seed)).String()

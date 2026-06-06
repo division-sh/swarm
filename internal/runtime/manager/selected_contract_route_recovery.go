@@ -266,7 +266,7 @@ func (g *selectedContractRecoveredRecipientGuard) AuthorizeEvent(ctx context.Con
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if strings.TrimSpace(evt.SourceAgent) != selectedContractExecutionOwner {
+	if strings.TrimSpace(evt.SourceAgent()) != selectedContractExecutionOwner {
 		return nil
 	}
 	_, _, err := g.expectedRecipientPlanEvent(evt)
@@ -277,7 +277,7 @@ func (g *selectedContractRecoveredRecipientGuard) Authorize(ctx context.Context,
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if strings.TrimSpace(evt.SourceAgent) != selectedContractExecutionOwner {
+	if strings.TrimSpace(evt.SourceAgent()) != selectedContractExecutionOwner {
 		return nil
 	}
 	sourceEventID, expected, err := g.expectedRecipientPlanEvent(evt)
@@ -297,7 +297,7 @@ func (g *selectedContractRecoveredRecipientGuard) expectedRecipientPlanEvent(evt
 	if g == nil {
 		return "", selectedContractRecoveredRecipientPlanEvent{}, fmt.Errorf("selected-contract recovered recipient guard is required")
 	}
-	forkEventID := strings.TrimSpace(evt.ID)
+	forkEventID := strings.TrimSpace(evt.ID())
 	sourceEventID := strings.TrimSpace(g.sourceByForkEvent[forkEventID])
 	if sourceEventID == "" {
 		return "", selectedContractRecoveredRecipientPlanEvent{}, fmt.Errorf("selected-contract recovered publish path missing %s evidence for fork event %s", selectedContractRecipientPlanningOwner, forkEventID)
@@ -306,8 +306,8 @@ func (g *selectedContractRecoveredRecipientGuard) expectedRecipientPlanEvent(evt
 	if !ok {
 		return "", selectedContractRecoveredRecipientPlanEvent{}, fmt.Errorf("selected-contract recovered publish path has no recipient plan for source event %s", sourceEventID)
 	}
-	if strings.TrimSpace(expected.EventName) != strings.TrimSpace(string(evt.Type)) {
-		return "", selectedContractRecoveredRecipientPlanEvent{}, fmt.Errorf("selected-contract recovered publish event type mismatch for source event %s: got %q want %q", sourceEventID, evt.Type, expected.EventName)
+	if strings.TrimSpace(expected.EventName) != strings.TrimSpace(string(evt.Type())) {
+		return "", selectedContractRecoveredRecipientPlanEvent{}, fmt.Errorf("selected-contract recovered publish event type mismatch for source event %s: got %q want %q", sourceEventID, evt.Type(), expected.EventName)
 	}
 	return sourceEventID, expected, nil
 }

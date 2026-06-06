@@ -71,8 +71,8 @@ func TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempo
 		t.Fatalf("api_idempotency rows = %d, want 1", count)
 	}
 	got := requireAPIV1RuntimeBusEvent(t, ch, "event.publish delivery")
-	if got.ID != eventID {
-		t.Fatalf("delivered event = %s, want %s", got.ID, eventID)
+	if got.ID() != eventID {
+		t.Fatalf("delivered event = %s, want %s", got.ID(), eventID)
 	}
 
 	replay := rpcCall(t, handler, body)
@@ -158,8 +158,8 @@ func TestOperatorEventPublishReturnsDurableAckBeforePostCommitDispatchCompletes(
 
 	releaseOnce.Do(func() { close(release) })
 	got := requireAPIV1RuntimeBusEvent(t, ch, "event.publish delivery after post-commit release")
-	if got.ID != eventID {
-		t.Fatalf("delivered event = %s, want %s", got.ID, eventID)
+	if got.ID() != eventID {
+		t.Fatalf("delivered event = %s, want %s", got.ID(), eventID)
 	}
 	waitPipelineReceiptsForEvent(t, ctx, db, eventID, 1)
 }
@@ -310,7 +310,7 @@ func TestOperatorEventPublishResolvesFlowScopedContractEventName(t *testing.T) {
 	assertEventPublishDeliveriesContain(t, deliveries, "agent", "repo-observer", "pending", 1)
 	assertEventPublishDeliveriesContain(t, deliveries, "node", "repo-observer", "pending", 1)
 	got := requireAPIV1RuntimeBusEvent(t, ch, "flow-scoped event.publish delivery")
-	if got.ID != eventID || string(got.Type) != canonicalEventName {
+	if got.ID() != eventID || string(got.Type()) != canonicalEventName {
 		t.Fatalf("delivered event = %#v, want %s/%s", got, eventID, canonicalEventName)
 	}
 }
@@ -440,8 +440,8 @@ func TestOperatorEventPublishHandlersUseActiveEphemeralBundleScopeForCreateNewWo
 		t.Fatalf("scan.requested event count = %d, want 1", got)
 	}
 	got := requireAPIV1RuntimeBusEvent(t, ch, "event.publish delivery")
-	if got.ID != eventID {
-		t.Fatalf("delivered event = %s, want %s", got.ID, eventID)
+	if got.ID() != eventID {
+		t.Fatalf("delivered event = %s, want %s", got.ID(), eventID)
 	}
 }
 
@@ -739,8 +739,8 @@ func TestOperatorEventPublishExplicitRunTargetRequiresExistingNonterminalRun(t *
 		t.Fatalf("scan.requested events after targeted publish = %d, want 2", count)
 	}
 	got := requireAPIV1RuntimeBusEvent(t, ch, "targeted explicit-run delivery")
-	if got.ID != targetedEventID || got.RunID != runID {
-		t.Fatalf("targeted delivered event id/run = %s/%s, want %s/%s", got.ID, got.RunID, targetedEventID, runID)
+	if got.ID() != targetedEventID || got.RunID() != runID {
+		t.Fatalf("targeted delivered event id/run = %s/%s, want %s/%s", got.ID(), got.RunID(), targetedEventID, runID)
 	}
 
 	mismatch := rpcCall(t, handler, eventPublishBody(runID, "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "scan.requested", `{"topic":"mismatch"}`, "", "idem-existing-run-mismatch"))
@@ -836,8 +836,8 @@ func TestOperatorEventPublishExplicitRunFollowUpRequiresRecipientBeforePersisten
 		t.Fatalf("event_deliveries for follow-up = %d, want 1", got)
 	}
 	got := requireAPIV1RuntimeBusEvent(t, followUpCh, "follow-up delivery")
-	if got.ID != followUpEventID || got.RunID != runID {
-		t.Fatalf("follow-up delivered event id/run = %s/%s, want %s/%s", got.ID, got.RunID, followUpEventID, runID)
+	if got.ID() != followUpEventID || got.RunID() != runID {
+		t.Fatalf("follow-up delivered event id/run = %s/%s, want %s/%s", got.ID(), got.RunID(), followUpEventID, runID)
 	}
 
 	rejected := rpcCall(t, handler, eventPublishBody(runID, runStartTestFingerprint, "scan.unhandled", `{"topic":"lost"}`, "operator-test", "idem-followup-unhandled"))
@@ -952,8 +952,8 @@ func TestOperatorEventPublishSQLiteExplicitRunFollowUpUsesSelectedRun(t *testing
 	}
 	assertEventPublishDeliveryIdentity(t, asMap(t, deliveries[0]), "agent", "scan-orchestrator", "pending", 1)
 	got := requireAPIV1RuntimeBusEvent(t, followUpCh, "sqlite follow-up delivery")
-	if got.ID != eventID || got.RunID != runID {
-		t.Fatalf("sqlite follow-up delivered id/run = %s/%s, want %s/%s", got.ID, got.RunID, eventID, runID)
+	if got.ID() != eventID || got.RunID() != runID {
+		t.Fatalf("sqlite follow-up delivered id/run = %s/%s, want %s/%s", got.ID(), got.RunID(), eventID, runID)
 	}
 }
 
@@ -1074,8 +1074,8 @@ func TestOperatorEventPublishSourceEventIDValidatesSameRunLineage(t *testing.T) 
 		t.Fatalf("api_idempotency rows after sourced publish = %d, want 2", count)
 	}
 	got := requireAPIV1RuntimeBusEvent(t, ch, "child source_event_id delivery")
-	if got.ID != childEventID || got.RunID != parentRunID {
-		t.Fatalf("child delivered event id/run = %s/%s, want %s/%s", got.ID, got.RunID, childEventID, parentRunID)
+	if got.ID() != childEventID || got.RunID() != parentRunID {
+		t.Fatalf("child delivered event id/run = %s/%s, want %s/%s", got.ID(), got.RunID(), childEventID, parentRunID)
 	}
 }
 
@@ -1378,8 +1378,8 @@ func TestOperatorEventPublishQueuesWhileRuntimePaused(t *testing.T) {
 		t.Fatalf("released count = %d, want 1", resumed.ReleasedCount)
 	}
 	got := requireAPIV1RuntimeBusEvent(t, ch, "queued event.publish release")
-	if got.ID != eventID {
-		t.Fatalf("released event = %s, want %s", got.ID, eventID)
+	if got.ID() != eventID {
+		t.Fatalf("released event = %s, want %s", got.ID(), eventID)
 	}
 	if got := countPipelineReceiptsForEvent(t, ctx, db, eventID); got != 1 {
 		t.Fatalf("pipeline receipts after resume = %d, want 1", got)
@@ -1977,7 +1977,7 @@ func waitPipelineReceiptsForEvent(t *testing.T, ctx context.Context, db *sql.DB,
 
 func containsMissingPipelineReceiptEvent(items []events.PersistedReplayEvent, eventID string) bool {
 	for _, evt := range items {
-		if strings.TrimSpace(evt.Event.ID) == strings.TrimSpace(eventID) {
+		if strings.TrimSpace(evt.Event.ID()) == strings.TrimSpace(eventID) {
 			return true
 		}
 	}

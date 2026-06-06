@@ -79,6 +79,7 @@ type PipelineCoordinatorOptions struct {
 	EventReceiptsCapability          func(context.Context) (bool, error)
 	ArtifactRoot                     string
 	BundleFingerprint                string
+	TestEntityStateHook              func(entityID, state string)
 	TestWorkflowNodeHandlerStartHook WorkflowNodeHandlerStartHook
 }
 
@@ -108,6 +109,7 @@ func NewPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordin
 		eventReceiptsCapability:          opts.EventReceiptsCapability,
 		artifactRoot:                     strings.TrimSpace(opts.ArtifactRoot),
 		bundleFingerprint:                strings.TrimSpace(opts.BundleFingerprint),
+		testEntityStateHook:              opts.TestEntityStateHook,
 		testWorkflowNodeHandlerStartHook: opts.TestWorkflowNodeHandlerStartHook,
 		entityLocks:                      make(map[string]*sync.Mutex),
 	}
@@ -166,8 +168,8 @@ func (pc *PipelineCoordinator) Run(ctx context.Context) {
 					Message:   "Workflow handler execution failed",
 					Component: runtimeWorkflowID,
 					Action:    "handler_error",
-					EventID:   strings.TrimSpace(evt.ID),
-					EventType: strings.TrimSpace(string(evt.Type)),
+					EventID:   strings.TrimSpace(evt.ID()),
+					EventType: strings.TrimSpace(string(evt.Type())),
 					EntityID:  workflowEventEntityID(evt),
 					Error:     strings.TrimSpace(err.Error()),
 				})
@@ -182,7 +184,7 @@ func (pc *PipelineCoordinator) Intercept(ctx context.Context, evt events.Event) 
 	if pc == nil {
 		return true, nil, nil
 	}
-	eventType := strings.TrimSpace(string(evt.Type))
+	eventType := strings.TrimSpace(string(evt.Type()))
 	if eventType == "" {
 		return true, nil, nil
 	}
@@ -248,7 +250,7 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 	if source == nil {
 		return false, nil
 	}
-	trigger := strings.TrimSpace(string(evt.Type))
+	trigger := strings.TrimSpace(string(evt.Type()))
 	if trigger == "" {
 		return false, nil
 	}
@@ -257,7 +259,7 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 	handlerEventKey := resolved.HandlerEventKey
 	ok := resolved.Matched
 	if !ok && isAccumulationTimeoutEvent(events.EventType(trigger)) {
-		bucket, bucketOK := timeridentity.ParseAccumulatorBucketRef(parsePayloadMap(evt.Payload))
+		bucket, bucketOK := timeridentity.ParseAccumulatorBucketRef(parsePayloadMap(evt.Payload()))
 		if bucketOK && strings.TrimSpace(bucket.NodeID) == nodeID {
 			handler, ok = findAccumulationTimeoutHandlerForBucket(source, bucket)
 			handlerEventKey = bucket.EventType
@@ -284,10 +286,10 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 	if err != nil {
 		if errors.Is(err, runtimeengine.ErrChainDepthExceeded) {
 			_ = runtimedeadletters.Insert(ctx, pc.db, runtimedeadletters.Record{
-				OriginalEventID: strings.TrimSpace(evt.ID),
+				OriginalEventID: strings.TrimSpace(evt.ID()),
 				FailureType:     "chain_depth_exceeded",
 				ErrorMessage:    strings.TrimSpace(err.Error()),
-				ChainDepth:      evt.ChainDepth,
+				ChainDepth:      evt.ChainDepth(),
 				HandlerNode:     nodeID,
 			})
 			setPipelineReceiptOverride(ctx, "dead_letter", err.Error())
@@ -318,8 +320,8 @@ func (pc *PipelineCoordinator) recordWorkflowHandlerFailure(ctx context.Context,
 			Message:   "Workflow handler execution failed",
 			Component: runtimeWorkflowID,
 			Action:    "handler_error",
-			EventID:   strings.TrimSpace(evt.ID),
-			EventType: strings.TrimSpace(string(evt.Type)),
+			EventID:   strings.TrimSpace(evt.ID()),
+			EventType: strings.TrimSpace(string(evt.Type())),
 			EntityID:  workflowEventEntityID(evt),
 			Error:     errText,
 			Detail: map[string]any{
@@ -329,15 +331,15 @@ func (pc *PipelineCoordinator) recordWorkflowHandlerFailure(ctx context.Context,
 	}
 	if pc.db != nil {
 		_ = runtimedeadletters.Insert(ctx, pc.db, runtimedeadletters.Record{
-			OriginalEventID: strings.TrimSpace(evt.ID),
-			OriginalEvent:   strings.TrimSpace(string(evt.Type)),
-			OriginalPayload: evt.Payload,
+			OriginalEventID: strings.TrimSpace(evt.ID()),
+			OriginalEvent:   strings.TrimSpace(string(evt.Type())),
+			OriginalPayload: evt.Payload(),
 			EntityID:        workflowEventEntityID(evt),
 			FlowInstance:    "runtime",
 			FailureType:     "handler_error",
 			ErrorMessage:    errText,
 			RetryCount:      0,
-			ChainDepth:      evt.ChainDepth,
+			ChainDepth:      evt.ChainDepth(),
 			HandlerNode:     strings.TrimSpace(nodeID),
 		})
 	}
@@ -353,12 +355,12 @@ func (pc *PipelineCoordinator) recordInterceptedEmitDeadLetters(ctx context.Cont
 		if strings.TrimSpace(intercepted.DeadLetterHint) != "chain_depth_exceeded" {
 			continue
 		}
-		eventType := strings.TrimSpace(string(intercepted.Event.Type))
+		eventType := strings.TrimSpace(string(intercepted.Event.Type()))
 		errMsg := fmt.Sprintf("emit %s exceeded chain depth limit", eventType)
 		rec := runtimedeadletters.Record{
-			OriginalEventID: strings.TrimSpace(trigger.ID),
+			OriginalEventID: strings.TrimSpace(trigger.ID()),
 			OriginalEvent:   eventType,
-			OriginalPayload: intercepted.Event.Payload,
+			OriginalPayload: intercepted.Event.Payload(),
 			EntityID:        entityID,
 			FlowInstance:    "runtime",
 			FailureType:     "chain_depth_exceeded",
@@ -371,7 +373,7 @@ func (pc *PipelineCoordinator) recordInterceptedEmitDeadLetters(ctx context.Cont
 				return
 			}
 			if err := runtimedeadletters.Insert(ctx, pc.db, rec); err != nil {
-				pc.logRuntimeWarn(ctx, "workflow-runtime", "intercepted_emit_dead_letter_persist_failed", strings.TrimSpace(trigger.ID), strings.TrimSpace(string(trigger.Type)), runtimeWorkflowID, entityID, map[string]any{
+				pc.logRuntimeWarn(ctx, "workflow-runtime", "intercepted_emit_dead_letter_persist_failed", strings.TrimSpace(trigger.ID()), strings.TrimSpace(string(trigger.Type())), runtimeWorkflowID, entityID, map[string]any{
 					"intercepted_event_type": eventType,
 					"handler_node":           nodeID,
 				}, err)
@@ -382,7 +384,7 @@ func (pc *PipelineCoordinator) recordInterceptedEmitDeadLetters(ctx context.Cont
 		}
 		deadLetterPayload := map[string]any{
 			"original_event":   eventType,
-			"original_payload": json.RawMessage(intercepted.Event.Payload),
+			"original_payload": json.RawMessage(intercepted.Event.Payload()),
 			"entity_id":        entityID,
 			"flow_instance":    "runtime",
 			"failure_type":     "chain_depth_exceeded",
@@ -397,18 +399,23 @@ func (pc *PipelineCoordinator) recordInterceptedEmitDeadLetters(ctx context.Cont
 			if sourceAgent == "" {
 				sourceAgent = runtimeWorkflowID
 			}
-			*collector = append(*collector, (events.Event{
-				ID:          uuid.NewString(),
-				Type:        events.EventType("platform.dead_letter"),
-				SourceAgent: sourceAgent,
-				Payload:     mustJSON(deadLetterPayload),
-				CreatedAt:   time.Now().UTC(),
-			}).WithEntityID(entityID))
+			*collector = append(*collector, events.NewRuntimeDiagnosticEvent(
+				uuid.NewString(),
+				events.EventType("platform.dead_letter"),
+				sourceAgent,
+				"",
+				mustJSON(deadLetterPayload),
+				0,
+				"",
+				"",
+				events.EventEnvelope{EntityID: entityID},
+				time.Now().UTC(),
+			))
 			continue
 		}
 		publishDeadLetter := func() {
 			if err := pc.publish(ctx, "platform.dead_letter", entityID, deadLetterPayload); err != nil {
-				pc.logRuntimeWarn(ctx, "workflow-runtime", "intercepted_emit_dead_letter_publish_failed", strings.TrimSpace(trigger.ID), strings.TrimSpace(string(trigger.Type)), runtimeWorkflowID, entityID, map[string]any{
+				pc.logRuntimeWarn(ctx, "workflow-runtime", "intercepted_emit_dead_letter_publish_failed", strings.TrimSpace(trigger.ID()), strings.TrimSpace(string(trigger.Type())), runtimeWorkflowID, entityID, map[string]any{
 					"intercepted_event_type": eventType,
 					"handler_node":           nodeID,
 				}, err)
@@ -498,16 +505,22 @@ func (pc *PipelineCoordinator) publish(ctx context.Context, eventType, entityID 
 	if sourceAgent == "" {
 		sourceAgent = runtimeWorkflowID
 	}
-	emitted := (events.Event{
-		ID:          uuid.NewString(),
-		Type:        events.EventType(strings.TrimSpace(eventType)),
-		SourceAgent: sourceAgent,
-		Payload:     mustJSON(payload),
-		CreatedAt:   time.Now().UTC(),
-	}).WithEntityID(entityID)
-	if flowInstance := strings.Trim(strings.TrimSpace(asString(payload["flow_instance"])), "/"); flowInstance != "" {
-		emitted = emitted.WithFlowInstance(flowInstance)
-	}
+	flowInstance := strings.Trim(strings.TrimSpace(asString(payload["flow_instance"])), "/")
+	emitted := events.NewRuntimeDiagnosticEvent(
+		uuid.NewString(),
+		events.EventType(strings.TrimSpace(eventType)),
+		sourceAgent,
+		"",
+		mustJSON(payload),
+		0,
+		"",
+		"",
+		events.EventEnvelope{
+			EntityID:     entityID,
+			FlowInstance: flowInstance,
+		},
+		time.Now().UTC(),
+	)
 	if collector, ok := ctx.Value(pipelineEmitCollectorKey{}).(*[]events.Event); ok && collector != nil {
 		*collector = append(*collector, emitted)
 		return nil
@@ -532,16 +545,22 @@ func (pc *PipelineCoordinator) publishDirect(ctx context.Context, eventType, ent
 	if sourceAgent == "" {
 		sourceAgent = runtimeWorkflowID
 	}
-	emitted := (events.Event{
-		ID:          uuid.NewString(),
-		Type:        events.EventType(strings.TrimSpace(eventType)),
-		SourceAgent: sourceAgent,
-		Payload:     mustJSON(payload),
-		CreatedAt:   time.Now().UTC(),
-	}).WithEntityID(entityID)
-	if flowInstance := strings.Trim(strings.TrimSpace(asString(payload["flow_instance"])), "/"); flowInstance != "" {
-		emitted = emitted.WithFlowInstance(flowInstance)
-	}
+	flowInstance := strings.Trim(strings.TrimSpace(asString(payload["flow_instance"])), "/")
+	emitted := events.NewRuntimeDiagnosticEvent(
+		uuid.NewString(),
+		events.EventType(strings.TrimSpace(eventType)),
+		sourceAgent,
+		"",
+		mustJSON(payload),
+		0,
+		"",
+		"",
+		events.EventEnvelope{
+			EntityID:     entityID,
+			FlowInstance: flowInstance,
+		},
+		time.Now().UTC(),
+	)
 	if collector, ok := ctx.Value(pipelineEmitCollectorKey{}).(*[]events.Event); ok && collector != nil {
 		*collector = append(*collector, emitted)
 		return nil

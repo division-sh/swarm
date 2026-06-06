@@ -94,7 +94,7 @@ func workflowNodeEventPolicy(nodes []WorkflowNode, nodeID, eventType string) (Wo
 }
 
 func workflowNodePolicyForDelivery(source semanticview.Source, node WorkflowNode, evt events.Event) (WorkflowEventPolicy, bool) {
-	eventType := strings.TrimSpace(string(evt.Type))
+	eventType := strings.TrimSpace(string(evt.Type()))
 	if policy, ok := workflowNodePolicyForEventType(node.Policies, eventType); ok {
 		return policy, true
 	}
@@ -148,7 +148,7 @@ func workflowNodeEventHandlerResolutionForDelivery(source semanticview.Source, n
 	if source == nil {
 		return workflowNodeEventHandlerResolution{}
 	}
-	rawEventType := eventidentity.Normalize(string(evt.Type))
+	rawEventType := eventidentity.Normalize(string(evt.Type()))
 	if rawEventType == "" {
 		return workflowNodeEventHandlerResolution{}
 	}
@@ -219,8 +219,8 @@ func workflowNodeMatchedHandlerEventKey(source semanticview.Source, nodeID, even
 }
 
 func workflowNodeHandlerEventKeyForExecution(source semanticview.Source, nodeID string, evt events.Event) string {
-	if isAccumulationTimeoutEvent(evt.Type) {
-		if bucket, ok := timeridentity.ParseAccumulatorBucketRef(parsePayloadMap(evt.Payload)); ok && strings.TrimSpace(bucket.NodeID) == strings.TrimSpace(nodeID) {
+	if isAccumulationTimeoutEvent(evt.Type()) {
+		if bucket, ok := timeridentity.ParseAccumulatorBucketRef(parsePayloadMap(evt.Payload())); ok && strings.TrimSpace(bucket.NodeID) == strings.TrimSpace(nodeID) {
 			return bucket.EventType
 		}
 	}
@@ -228,14 +228,14 @@ func workflowNodeHandlerEventKeyForExecution(source semanticview.Source, nodeID 
 	if resolved.Matched {
 		return resolved.HandlerEventKey
 	}
-	return eventidentity.Normalize(string(evt.Type))
+	return eventidentity.Normalize(string(evt.Type()))
 }
 
 func workflowNodeConcreteInstanceLocalEventType(source semanticview.Source, nodeID string, evt events.Event) string {
 	if source == nil {
 		return ""
 	}
-	rawEventType := eventidentity.Normalize(string(evt.Type))
+	rawEventType := eventidentity.Normalize(string(evt.Type()))
 	if rawEventType == "" || !strings.Contains(rawEventType, "/") {
 		return ""
 	}
@@ -780,7 +780,7 @@ func (pc *PipelineCoordinator) workflowNodeInterceptPolicy(eventType string, evt
 		)
 		policy, ok = workflowNodePolicyForDelivery(source, node, evt)
 		if !ok && isAccumulationTimeoutEvent(events.EventType(eventType)) {
-			if bucket, bucketOK := timeridentity.ParseAccumulatorBucketRef(parsePayloadMap(evt.Payload)); bucketOK && bucket.NodeID == strings.TrimSpace(node.ID) {
+			if bucket, bucketOK := timeridentity.ParseAccumulatorBucketRef(parsePayloadMap(evt.Payload())); bucketOK && bucket.NodeID == strings.TrimSpace(node.ID) {
 				if node.Policies != nil {
 					policy, ok = workflowNodePolicyForEventType(node.Policies, bucket.EventType)
 				}
@@ -802,7 +802,7 @@ func (pc *PipelineCoordinator) dispatchWorkflowNodeEvent(ctx context.Context, ev
 }
 
 func (pc *PipelineCoordinator) dispatchWorkflowNodeEventResult(ctx context.Context, evt events.Event) (bool, error) {
-	eventType := strings.TrimSpace(string(evt.Type))
+	eventType := strings.TrimSpace(string(evt.Type()))
 	if eventType == "" {
 		return false, nil
 	}
@@ -829,7 +829,7 @@ func (pc *PipelineCoordinator) markWorkflowNodeProcessed(ctx context.Context, no
 		return
 	}
 	nodeID = strings.TrimSpace(nodeID)
-	eventID := strings.TrimSpace(evt.ID)
+	eventID := strings.TrimSpace(evt.ID())
 	if nodeID == "" || eventID == "" {
 		return
 	}
@@ -845,7 +845,7 @@ func (pc *PipelineCoordinator) markWorkflowNodeProcessed(ctx context.Context, no
 				Component: nodeID,
 				Action:    "mark_processed_failed",
 				EventID:   eventID,
-				EventType: strings.TrimSpace(string(evt.Type)),
+				EventType: strings.TrimSpace(string(evt.Type())),
 				EntityID:  workflowEventEntityID(evt),
 				Error:     strings.TrimSpace(err.Error()),
 			})
@@ -869,7 +869,7 @@ func (pc *PipelineCoordinator) workflowNodeDeliveryAuthorized(ctx context.Contex
 	if pc.workflowStore == nil {
 		return false
 	}
-	eventID := strings.TrimSpace(evt.ID)
+	eventID := strings.TrimSpace(evt.ID())
 	if eventID == "" {
 		return false
 	}
@@ -882,7 +882,7 @@ func (pc *PipelineCoordinator) workflowNodeDeliveryAuthorized(ctx context.Contex
 				Component: nodeID,
 				Action:    "delivery_authority_check_failed",
 				EventID:   eventID,
-				EventType: strings.TrimSpace(string(evt.Type)),
+				EventType: strings.TrimSpace(string(evt.Type())),
 				EntityID:  workflowEventEntityID(evt),
 				Error:     strings.TrimSpace(err.Error()),
 			})
@@ -897,7 +897,7 @@ func (pc *PipelineCoordinator) workflowNodeDeliveryAuthorized(ctx context.Contex
 				Component: nodeID,
 				Action:    "delivery_authority_missing",
 				EventID:   eventID,
-				EventType: strings.TrimSpace(string(evt.Type)),
+				EventType: strings.TrimSpace(string(evt.Type())),
 				EntityID:  workflowEventEntityID(evt),
 			})
 		}
@@ -910,7 +910,7 @@ func (pc *PipelineCoordinator) workflowNodeEventProcessed(ctx context.Context, n
 		return false
 	}
 	nodeID = strings.TrimSpace(nodeID)
-	eventID := strings.TrimSpace(evt.ID)
+	eventID := strings.TrimSpace(evt.ID())
 	if nodeID == "" || eventID == "" {
 		return false
 	}
@@ -933,7 +933,7 @@ func (pc *PipelineCoordinator) convergeWorkflowNodeNormalRunCompletion(ctx conte
 	if pc == nil || pc.bus == nil {
 		return
 	}
-	eventID := strings.TrimSpace(evt.ID)
+	eventID := strings.TrimSpace(evt.ID())
 	if eventID == "" {
 		return
 	}
@@ -949,7 +949,7 @@ func (pc *PipelineCoordinator) convergeWorkflowNodeNormalRunCompletion(ctx conte
 				Component: nodeID,
 				Action:    "normal_run_completion_failed",
 				EventID:   eventID,
-				EventType: strings.TrimSpace(string(evt.Type)),
+				EventType: strings.TrimSpace(string(evt.Type())),
 				EntityID:  workflowEventEntityID(evt),
 				Error:     strings.TrimSpace(err.Error()),
 			})

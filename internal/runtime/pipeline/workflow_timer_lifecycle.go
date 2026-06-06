@@ -194,10 +194,10 @@ func (pc *PipelineCoordinator) reconcileAccumulationTimeoutSchedule(
 		return nil
 	}
 	sc := accumulationTimeoutSchedule(entityID, evt.FlowInstance(), bucketRef, time.Time{}, spec.TimeoutMS)
-	if runID := strings.TrimSpace(evt.RunID); runID != "" {
+	if runID := strings.TrimSpace(evt.RunID()); runID != "" {
 		sc.RunID = runID
 	}
-	if isAccumulationTimeoutEvent(evt.Type) || !waiting {
+	if isAccumulationTimeoutEvent(evt.Type()) || !waiting {
 		pc.persistWorkflowTimerCancellation(ctx, sc)
 		return nil
 	}
@@ -219,15 +219,15 @@ func accumulationTimeoutBucketRef(evt Event, nodeID, handlerEventKey string) (ti
 	if nodeID == "" {
 		return timeridentity.AccumulatorBucketRef{}, false
 	}
-	if !isAccumulationTimeoutEvent(evt.Type) {
+	if !isAccumulationTimeoutEvent(evt.Type()) {
 		eventType := strings.TrimSpace(handlerEventKey)
 		if eventType == "" {
-			eventType = strings.TrimSpace(string(evt.Type))
+			eventType = strings.TrimSpace(string(evt.Type()))
 		}
 		bucket := timeridentity.NewAccumulatorBucketRef(nodeID, eventType)
 		return bucket, bucket.Valid()
 	}
-	bucket, ok := timeridentity.ParseAccumulatorBucketRef(parsePayloadMap(evt.Payload))
+	bucket, ok := timeridentity.ParseAccumulatorBucketRef(parsePayloadMap(evt.Payload()))
 	if !ok || strings.TrimSpace(bucket.NodeID) != nodeID {
 		return timeridentity.AccumulatorBucketRef{}, false
 	}
@@ -282,7 +282,7 @@ func scheduleWithRunIDFromContext(ctx context.Context, sc Schedule) Schedule {
 	}
 	if strings.TrimSpace(sc.RunID) == "" {
 		if inbound, ok := runtimecorrelation.InboundEventFromContext(ctx); ok {
-			sc.RunID = strings.TrimSpace(inbound.RunID)
+			sc.RunID = strings.TrimSpace(inbound.RunID())
 		}
 	}
 	sc.NormalizeRunID()

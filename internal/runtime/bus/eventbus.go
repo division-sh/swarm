@@ -203,7 +203,7 @@ func (eb *EventBus) MarkDeliveryInProgress(ctx context.Context, agentID, session
 		return false, nil
 	}
 	inbound, ok := runtimecorrelation.InboundEventFromContext(ctx)
-	if !ok || strings.TrimSpace(inbound.ID) == "" || strings.TrimSpace(agentID) == "" {
+	if !ok || strings.TrimSpace(inbound.ID()) == "" || strings.TrimSpace(agentID) == "" {
 		return false, nil
 	}
 	type deliveryProgressWriter interface {
@@ -213,7 +213,7 @@ func (eb *EventBus) MarkDeliveryInProgress(ctx context.Context, agentID, session
 	if !ok || writer == nil {
 		return false, nil
 	}
-	if err := writer.MarkEventDeliveryInProgress(ctx, inbound.ID, agentID, sessionID); err != nil {
+	if err := writer.MarkEventDeliveryInProgress(ctx, inbound.ID(), agentID, sessionID); err != nil {
 		return false, err
 	}
 	return true, nil

@@ -11,6 +11,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"time"
 )
 
 func TestEventBusRemoveFlowInstanceDropsDerivedRoutes(t *testing.T) {
@@ -184,14 +185,13 @@ func TestEventBusFlowInstanceRoutePersistsAndDeliversRenderedActivationConfigSub
 
 	eb.Subscribe("ceo-11111111-1111-4111-8111-111111111111")
 	defer eb.Unsubscribe("ceo-11111111-1111-4111-8111-111111111111")
-	evt := events.Event{
-		ID:   "event-rendered-route-delivery",
-		Type: events.EventType("operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested"),
-	}
+	evt := events.NewProjectionEvent("event-rendered-route-delivery",
+		events.EventType("operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
+
 	if err := eb.Publish(context.Background(), evt); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
-	got := store.deliveries[evt.ID]
+	got := store.deliveries[evt.ID()]
 	if len(got) != 1 || got[0] != "ceo-11111111-1111-4111-8111-111111111111" {
 		t.Fatalf("delivery recipients = %#v, want rendered ceo id", got)
 	}

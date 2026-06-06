@@ -323,6 +323,85 @@ contract_formats:
       - Inline `type: object` without declared inner shape
       - jsonb payload declarations
       - Author-declared envelope fields
+    runtime_event_construction:
+      status: merge_bearing_source_authority
+      owner: platform-spec.yaml#contract_formats.event_schema.runtime_event_construction
+      rule: |
+        Runtime event carriers are read-only outside the event package.
+        Event-owned fields such as id, type, source_agent, task_id, payload,
+        chain_depth, run_id, source_event_id/parent_event_id, envelope, and
+        created_at MUST be supplied through semantic event constructors or
+        through explicitly bounded projection/readback constructors. Production
+        code MUST NOT mutate event-owned fields after construction and MUST NOT
+        construct events through direct carrier literals.
+
+        The constructor class is part of the semantic claim. A runtime producer
+        MUST use the constructor class that matches the producer role rather
+        than a generic all-fields constructor. Constructor APIs MUST clone
+        caller-owned payload bytes, normalize event-owned identity fields, and
+        expose event facts through read-only accessors.
+      constructor_classes:
+        root_ingress:
+          rule: External/operator/root run ingress events carry their final
+            explicit run, source, envelope, and timestamp facts at construction.
+        child:
+          rule: Child/runtime emits inherit lineage from the supplied parent or
+            explicit EventLineage at construction. Lineage inheritance MUST NOT
+            be patched by later carrier mutation.
+        replay:
+          rule: Replay/fork events use replay lineage constructors so replay
+            source and run ownership are explicit before persistence or dispatch.
+        runtime_control:
+          rule: Platform control and directive events use runtime-control
+            constructors so diagnostics/control traffic is not confused with
+            producer-authored domain emits.
+        runtime_diagnostic:
+          rule: Runtime diagnostic/dead-letter/status events use diagnostic
+            constructors and remain separate from route or delivery authority.
+        route_probe:
+          rule: Route-query and sentinel probes may use dedicated probe
+            constructors only when the event is not a persisted runtime emit and
+            is not executable delivery work.
+      projection_boundary:
+        rule: |
+          Projection construction is not runtime producer authority. It exists
+          only to reconstruct or copy an event from facts that another canonical
+          owner has already produced. Production projection call sites MUST be
+          exact-path/function/count allowlisted by the event-construction guard.
+          Adding a new production projection call requires naming the upstream
+          owner whose facts are being projected and proving that the projection
+          does not create, repair, or infer missing lineage, envelope, recipient,
+          or delivery authority.
+        allowed_classes:
+        - persisted event-store, delivery, replay, and readback row hydration
+        - publish-admission default projection of an already constructed event
+          shell for generated event_id, created_at, or source_agent facts before
+          persistence
+        - route/envelope projection after RoutePlan, pin-routing, or selected
+          entity owners have already resolved the final envelope facts
+        - pure immutable carrier copy/snapshot for post-commit, preview, or
+          engine adapter isolation
+        - route-query/sentinel probes that are not persisted runtime events and
+          cannot become executable delivery work
+        invalid_authority:
+        - constructing a new domain/runtime event because the caller has all
+          fields available
+        - filling missing run_id, source_event_id, task_id, target, target_set,
+          or delivery_target_route after the responsible semantic owner failed
+          to produce them
+        - creating workflow-node recipient or event_deliveries authority
+        - repairing replay, receipt, settlement, or readback gaps
+        - preserving legacy payload-derived lineage or envelope behavior
+      conformance_guard:
+        rule: |
+          The production construction guard MUST scan production Go files under
+          internal/ and cmd/ and fail on direct events.Event literals, direct
+          event-owned field assignment, event With* projection/mutation calls,
+          dot-imported event APIs, and unallowlisted NewProjectionEvent or
+          NewRouteProbeEvent calls.
+          Projection allowlist entries MUST be exact enough to detect both new
+          call sites and extra calls added inside an existing allowed function;
+          route-probe allowlist entries MUST meet the same exactness bar.
     routing_derivation:
       description: 'Routing is derived from two sources depending on scope:'
       intra_flow: 'Within a flow, routing derives from local subscriptions — agents.yaml subscriptions,

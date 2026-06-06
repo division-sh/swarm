@@ -41,7 +41,7 @@ func (eb *EventBus) replayRecipientsForCommittedEvent(
 	scope runtimereplayclaim.CommittedReplayScope,
 ) ([]string, []string, []events.DeliveryRoute, error) {
 	persisted = uniqueStrings(persisted)
-	persistedRoutes := eb.deliveryRoutesForEvent(ctx, evt.ID)
+	persistedRoutes := eb.deliveryRoutesForEvent(ctx, evt.ID())
 	if scope == runtimereplayclaim.CommittedReplayScopeDirect && len(persistedRoutes) > 0 {
 		internal := []string(nil)
 		live := deliveryRouteRecipientIDsByType(persistedRoutes, "agent")
@@ -66,7 +66,7 @@ func (eb *EventBus) replayRecipientsForCommittedEvent(
 	}
 	switch scope {
 	case runtimereplayclaim.CommittedReplayScopeDirect:
-		return persisted, nil, deliveryRoutesFromTargetMap(persisted, "agent", eb.deliveryTargetsForEvent(ctx, evt.ID)), nil
+		return persisted, nil, deliveryRoutesFromTargetMap(persisted, "agent", eb.deliveryTargetsForEvent(ctx, evt.ID())), nil
 	case runtimereplayclaim.CommittedReplayScopeSubscribed:
 		internal, err := eb.currentInternalRecipientsForCommittedEvent(ctx, evt)
 		if err != nil {
@@ -75,7 +75,7 @@ func (eb *EventBus) replayRecipientsForCommittedEvent(
 		live := uniqueStrings(append(append([]string(nil), persisted...), internal...))
 		routes := append([]events.DeliveryRoute(nil), persistedRoutes...)
 		if len(routes) == 0 {
-			routes = deliveryRoutesFromTargetMap(persisted, "agent", eb.deliveryTargetsForEvent(ctx, evt.ID))
+			routes = deliveryRoutesFromTargetMap(persisted, "agent", eb.deliveryTargetsForEvent(ctx, evt.ID()))
 		}
 		for _, recipient := range internal {
 			if hasDeliveryRouteRecipient(routes, "node", recipient) {

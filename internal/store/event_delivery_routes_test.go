@@ -16,15 +16,12 @@ func TestPostgresStore_EventDeliveryRoutesPersistNodeTargetRows(t *testing.T) {
 
 	ctx := context.Background()
 	pg := &PostgresStore{DB: db}
-	evt := events.Event{
-		ID:        uuid.NewString(),
-		Type:      events.EventType("child/output.done"),
-		Payload:   []byte(`{}`),
-		CreatedAt: time.Now().UTC(),
-	}.WithTargetSet([]events.RouteIdentity{
-		{EntityID: "ent-a", FlowInstance: "child-a/inst-1"},
-		{EntityID: "ent-b", FlowInstance: "child-b/inst-1"},
-	})
+	evt := events.NewProjectionEvent(uuid.NewString(),
+		events.EventType("child/output.done"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()).
+		WithTargetSet([]events.RouteIdentity{
+			{EntityID: "ent-a", FlowInstance: "child-a/inst-1"},
+			{EntityID: "ent-b", FlowInstance: "child-b/inst-1"},
+		})
 	if err := pg.AppendEvent(ctx, evt); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
@@ -32,11 +29,11 @@ func TestPostgresStore_EventDeliveryRoutesPersistNodeTargetRows(t *testing.T) {
 		{SubscriberType: "node", SubscriberID: "workflow-runtime", Target: events.RouteIdentity{EntityID: "ent-a", FlowInstance: "child-a/inst-1"}},
 		{SubscriberType: "node", SubscriberID: "workflow-runtime", Target: events.RouteIdentity{EntityID: "ent-b", FlowInstance: "child-b/inst-1"}},
 	}
-	if err := pg.InsertEventDeliveryRoutes(ctx, evt.ID, routes); err != nil {
+	if err := pg.InsertEventDeliveryRoutes(ctx, evt.ID(), routes); err != nil {
 		t.Fatalf("InsertEventDeliveryRoutes: %v", err)
 	}
 
-	got, err := pg.ListEventDeliveryRoutes(ctx, evt.ID)
+	got, err := pg.ListEventDeliveryRoutes(ctx, evt.ID())
 	if err != nil {
 		t.Fatalf("ListEventDeliveryRoutes: %v", err)
 	}

@@ -1,14 +1,27 @@
 package events
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+	"time"
+)
 
 func TestEventEnvelopeOwnsCanonicalIdentity(t *testing.T) {
-	evt := Event{
-		Payload: []byte(`{"entity_id":"payload-ent","flow_instance":"payload-flow"}`),
-	}.WithEnvelope(EventEnvelope{
-		EntityID:     "env-ent",
-		FlowInstance: "review/inst-1",
-	})
+	evt := NewProjectionEvent(
+		"",
+		"",
+		"",
+		"",
+		json.RawMessage(`{"entity_id":"payload-ent","flow_instance":"payload-flow"}`),
+		0,
+		"",
+		"",
+		EventEnvelope{
+			EntityID:     "env-ent",
+			FlowInstance: "review/inst-1",
+		},
+		time.Time{},
+	)
 
 	if got := evt.EntityID(); got != "env-ent" {
 		t.Fatalf("EntityID() = %q, want env-ent", got)
@@ -22,9 +35,7 @@ func TestEventEnvelopeOwnsCanonicalIdentity(t *testing.T) {
 }
 
 func TestEventWithoutEnvelopeFailsClosedToGlobalScope(t *testing.T) {
-	evt := Event{
-		Payload: []byte(`{"entity_id":"payload-ent","flow_instance":"payload-flow"}`),
-	}
+	evt := NewProjectionEvent("", "", "", "", json.RawMessage(`{"entity_id":"payload-ent","flow_instance":"payload-flow"}`), 0, "", "", EventEnvelope{}, time.Time{})
 
 	if got := evt.EntityID(); got != "" {
 		t.Fatalf("EntityID() = %q, want empty without envelope metadata", got)
@@ -38,13 +49,15 @@ func TestEventWithoutEnvelopeFailsClosedToGlobalScope(t *testing.T) {
 }
 
 func TestEventTargetSetDoesNotMaterializeFirstTargetProjection(t *testing.T) {
-	evt := (Event{}).WithSourceRoute(RouteIdentity{
+	envelope := EnvelopeForSourceRoute(EventEnvelope{}, RouteIdentity{
 		EntityID:     "source-ent",
 		FlowInstance: "source-flow",
-	}).WithTargetSet([]RouteIdentity{
+	})
+	envelope = EnvelopeForTargetSet(envelope, []RouteIdentity{
 		{EntityID: "target-ent-1", FlowInstance: "target-flow-1"},
 		{EntityID: "target-ent-2", FlowInstance: "target-flow-2"},
 	})
+	evt := NewProjectionEvent("", "", "", "", nil, 0, "", "", envelope, time.Time{})
 
 	if got := evt.EntityID(); got != "" {
 		t.Fatalf("EntityID() = %q, want empty before per-recipient delivery target", got)
@@ -62,7 +75,7 @@ func TestEventTargetSetDoesNotMaterializeFirstTargetProjection(t *testing.T) {
 		t.Fatalf("TargetRoutes() count = %d, want 2", len(got))
 	}
 
-	delivered := evt.WithDeliveryTarget(RouteIdentity{EntityID: "target-ent-2", FlowInstance: "target-flow-2"})
+	delivered := NewProjectionEvent("", "", "", "", nil, 0, "", "", EnvelopeForTargetRoute(evt.NormalizedEnvelope(), RouteIdentity{EntityID: "target-ent-2", FlowInstance: "target-flow-2"}), time.Time{})
 	if got := delivered.EntityID(); got != "target-ent-2" {
 		t.Fatalf("delivered EntityID() = %q, want target-ent-2", got)
 	}
@@ -71,5 +84,62 @@ func TestEventTargetSetDoesNotMaterializeFirstTargetProjection(t *testing.T) {
 	}
 	if got := delivered.TargetRoutes(); len(got) != 0 {
 		t.Fatalf("delivered TargetRoutes() count = %d, want 0 after singular delivery target", len(got))
+	}
+}
+
+func TestEventPayloadIsImmutableThroughConstructorAndAccessor(t *testing.T) {
+	payload := json.RawMessage(`{"level":"warn"}`)
+	evt := NewProjectionEvent(
+		"evt-1",
+		EventType("diagnostic.emitted"),
+		"runtime",
+		"task-1",
+		payload,
+		0,
+		"run-1",
+		"parent-1",
+		EventEnvelope{},
+		time.Time{},
+	)
+
+	payload[10] = 'e'
+	if got := string(evt.Payload()); got != `{"level":"warn"}` {
+		t.Fatalf("Payload() after caller mutation = %s, want original payload", got)
+	}
+
+	got := evt.Payload()
+	got[10] = 'e'
+	if again := string(evt.Payload()); again != `{"level":"warn"}` {
+		t.Fatalf("Payload() after accessor mutation = %s, want original payload", again)
+	}
+}
+
+func TestEventProjectionMethodsReturnCopies(t *testing.T) {
+	evt := NewProjectionEvent(
+		"evt-1",
+		EventType("root.started"),
+		"runtime",
+		"task-1",
+		nil,
+		0,
+		"run-1",
+		"parent-1",
+		EventEnvelope{},
+		time.Time{},
+	)
+
+	projected := evt.WithEntityID("entity-1").WithFlowInstance("flow/inst-1")
+
+	if got := evt.EntityID(); got != "" {
+		t.Fatalf("original EntityID() = %q, want unchanged empty identity", got)
+	}
+	if got := evt.FlowInstance(); got != "" {
+		t.Fatalf("original FlowInstance() = %q, want unchanged empty identity", got)
+	}
+	if got := projected.EntityID(); got != "entity-1" {
+		t.Fatalf("projected EntityID() = %q, want entity-1", got)
+	}
+	if got := projected.FlowInstance(); got != "flow/inst-1" {
+		t.Fatalf("projected FlowInstance() = %q, want flow/inst-1", got)
 	}
 }

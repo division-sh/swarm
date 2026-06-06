@@ -21,18 +21,14 @@ func TestSQLiteFanOutCreateFlowInstanceDeliveriesPersistWithoutDeadLetter(t *tes
 	ctx := sqliteExactOnceRunContext(t, db)
 	pc, bus := newSQLiteDynamicActivationCoordinator(t, db, workflowStore)
 
-	parent := events.Event{
-		ID:   uuid.NewString(),
-		Type: events.EventType("component_scaffold.batch_requested"),
-		Payload: mustJSON(map[string]any{
+	parent := events.NewProjectionEvent(uuid.NewString(),
+		events.EventType("component_scaffold.batch_requested"), "", "", mustJSON(map[string]any{
 			"components": []any{
 				map[string]any{"component_id": "component-a"},
 				map[string]any{"component_id": "component-b"},
 			},
-		}),
-		CreatedAt: time.Now().UTC(),
-		RunID:     runtimecorrelation.RunIDFromContext(ctx),
-	}.WithEntityID("parent-ent").WithFlowInstance("root/parent")
+		}), 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EventEnvelope{}, time.Now().UTC()).
+		WithEntityID("parent-ent").WithFlowInstance("root/parent")
 	if err := workflowStore.Create(ctx, WorkflowInstance{
 		InstanceID:      "parent-ent",
 		StorageRef:      "parent-ent",
@@ -57,19 +53,33 @@ func TestSQLiteFanOutCreateFlowInstanceDeliveriesPersistWithoutDeadLetter(t *tes
 	if got := bus.publishedCount(); got != 2 {
 		t.Fatalf("published child events = %d, want 2", got)
 	}
-	assertDeliveryStatusCount(t, workflowStore, ctx, parent.ID, "fanout-node", "delivered", 1)
+	assertDeliveryStatusCount(t, workflowStore, ctx, parent.ID(), "fanout-node", "delivered", 1)
 
 	children := []events.Event{bus.publishedEvent(0), bus.publishedEvent(1)}
 	for idx, child := range children {
-		if got := strings.TrimSpace(child.ParentEventID); got != parent.ID {
-			t.Fatalf("child %s parent_event_id = %q, want %q", child.ID, got, parent.ID)
+		if got := strings.TrimSpace(child.ParentEventID()); got != parent.ID() {
+			t.Fatalf("child %s parent_event_id = %q, want %q", child.ID(), got, parent.ID())
 		}
-		if strings.TrimSpace(child.ID) == "" {
-			child.ID = uuid.NewString()
+		childID := strings.TrimSpace(child.ID())
+		if childID == "" {
+			childID = uuid.NewString()
 		}
-		if strings.TrimSpace(child.RunID) == "" {
-			child.RunID = runtimecorrelation.RunIDFromContext(ctx)
+		childRunID := strings.TrimSpace(child.RunID())
+		if childRunID == "" {
+			childRunID = runtimecorrelation.RunIDFromContext(ctx)
 		}
+		child = events.NewProjectionEvent(
+			childID,
+			child.Type(),
+			child.SourceAgent(),
+			child.TaskID(),
+			child.Payload(),
+			child.ChainDepth(),
+			childRunID,
+			child.ParentEventID(),
+			child.Envelope(),
+			child.CreatedAt(),
+		)
 		children[idx] = child
 		seedExactOnceEventDelivery(t, workflowStore, ctx, child, "spawn-node")
 	}
@@ -89,7 +99,7 @@ func TestSQLiteFanOutCreateFlowInstanceDeliveriesPersistWithoutDeadLetter(t *tes
 				return
 			}
 			if !handled {
-				errs <- fmt.Errorf("child event %s type %s was not handled", child.ID, child.Type)
+				errs <- fmt.Errorf("child event %s type %s was not handled", child.ID(), child.Type())
 				return
 			}
 			errs <- nil
@@ -107,8 +117,8 @@ func TestSQLiteFanOutCreateFlowInstanceDeliveriesPersistWithoutDeadLetter(t *tes
 	assertSQLiteWorkflowInstancePersisted(t, workflowStore, ctx, "review/component-a")
 	assertSQLiteWorkflowInstancePersisted(t, workflowStore, ctx, "review/component-b")
 	for _, child := range children {
-		assertDeliveryStatusCount(t, workflowStore, ctx, child.ID, "spawn-node", "delivered", 1)
-		assertDeliveryStatusCount(t, workflowStore, ctx, child.ID, "spawn-node", "dead_letter", 0)
+		assertDeliveryStatusCount(t, workflowStore, ctx, child.ID(), "spawn-node", "delivered", 1)
+		assertDeliveryStatusCount(t, workflowStore, ctx, child.ID(), "spawn-node", "dead_letter", 0)
 	}
 	if logs := bus.runtimeLogEntries(); len(logs) != 0 {
 		t.Fatalf("runtime logs = %#v, want none", logs)
@@ -132,7 +142,7 @@ func newSQLiteDynamicActivationCoordinator(t *testing.T, db *sql.DB, workflowSto
 				Metadata: map[string]any{
 					"component_id":         req.Config["component_id"],
 					"instance_kind":        "dynamic_flow",
-					"last_source_event":    strings.TrimSpace(req.TriggerEvent.ID),
+					"last_source_event":    strings.TrimSpace(req.TriggerEvent.ID()),
 					"parent_entity_id":     strings.TrimSpace(req.Instance.ParentEntityID),
 					"parent_flow_id":       strings.TrimSpace(req.Instance.ParentRoute.FlowID),
 					"parent_flow_instance": strings.TrimSpace(req.Instance.ParentRoute.FlowInstance),

@@ -197,11 +197,11 @@ func TestBudgetTrackerThresholdEventAndEmergencyMailboxConsumeBudgetSpendOwner(t
 		t.Fatalf("RecordSpend: %v", err)
 	}
 	events := eventStore.appendedEvents()
-	if len(events) != 1 || string(events[0].Type) != "platform.budget_threshold_crossed" {
+	if len(events) != 1 || string(events[0].Type()) != "platform.budget_threshold_crossed" {
 		t.Fatalf("events = %#v, want one platform.budget_threshold_crossed", events)
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(events[0].Payload, &payload); err != nil {
+	if err := json.Unmarshal(events[0].Payload(), &payload); err != nil {
 		t.Fatalf("unmarshal budget event payload: %v", err)
 	}
 	if payload["level"] != "emergency" {

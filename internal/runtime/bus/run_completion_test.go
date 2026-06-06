@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
+	"time"
 )
 
 type normalRunCompletionTestStore struct {
@@ -20,7 +21,7 @@ func (s *normalRunCompletionTestStore) UpsertPipelineReceipt(_ context.Context, 
 }
 
 func (s *normalRunCompletionTestStore) ConvergeStandaloneRuntimePlatformRun(_ context.Context, evt events.Event) error {
-	s.standaloneEvents = append(s.standaloneEvents, evt.ID)
+	s.standaloneEvents = append(s.standaloneEvents, evt.ID())
 	return nil
 }
 
@@ -52,7 +53,7 @@ func TestEventBusStandalonePlatformConvergenceAlsoProbesNormalRunCompletion(t *t
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	evt := events.Event{ID: "event-2", Type: events.EventType("platform.boot")}
+	evt := events.NewProjectionEvent("event-2", events.EventType("platform.boot"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
 	if err := eb.convergeStandaloneRuntimePlatformRun(context.Background(), evt); err != nil {
 		t.Fatalf("convergeStandaloneRuntimePlatformRun: %v", err)
 	}

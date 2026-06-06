@@ -86,11 +86,11 @@ func TestCanonicalDeliveryOwnerInvariant_PendingSurfacesAgree_V2(t *testing.T) {
 			ctx := context.Background()
 			entityID, agentID := seedEntityAndAgent(t, ctx, pg)
 			evt := seedEvent(t, ctx, pg, entityID, "test.delivery_receipt.invariant."+strings.ReplaceAll(tt.name, " ", "_"))
-			if err := pg.InsertEventDeliveries(ctx, evt.ID, []string{agentID}); err != nil {
+			if err := pg.InsertEventDeliveries(ctx, evt.ID(), []string{agentID}); err != nil {
 				t.Fatalf("InsertEventDeliveries: %v", err)
 			}
 
-			tt.setup(t, ctx, pg, evt.ID, agentID)
+			tt.setup(t, ctx, pg, evt.ID(), agentID)
 			assertCanonicalPendingTruthAcrossSurfaces(t, ctx, pg, agentID, evt, tt.wantPending)
 		})
 	}
@@ -103,11 +103,11 @@ func TestCanonicalDeliveryOwnerInvariant_ReceiptRowsRemainOutcomeOnly_V2(t *test
 	ctx := context.Background()
 	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
 	evt := seedEvent(t, ctx, pg, entityID, "test.delivery_receipt.invariant.legacy_receipt_only")
-	insertLegacyAgentReceiptState(t, ctx, pg, evt.ID, agentID, runtimemanager.ReceiptStatusError, 1, "handler_error", "boom", time.Now().Add(-2*time.Minute))
+	insertLegacyAgentReceiptState(t, ctx, pg, evt.ID(), agentID, runtimemanager.ReceiptStatusError, 1, "handler_error", "boom", time.Now().Add(-2*time.Minute))
 
 	assertCanonicalPendingTruthAcrossSurfaces(t, ctx, pg, agentID, evt, false)
 
-	err := pg.UpsertEventReceipt(ctx, evt.ID, agentID, runtimemanager.ReceiptStatusError, "boom")
+	err := pg.UpsertEventReceipt(ctx, evt.ID(), agentID, runtimemanager.ReceiptStatusError, "boom")
 	if err == nil {
 		t.Fatal("expected receipt-only state to fail closed without a canonical delivery row")
 	}
@@ -132,13 +132,13 @@ func assertCanonicalPendingTruthAcrossSurfaces(
 	if err != nil {
 		t.Fatalf("ListPendingEventsForAgent: %v", err)
 	}
-	assertPendingEventPresence(t, "direct pending reads", direct, evt.ID, wantPending)
+	assertPendingEventPresence(t, "direct pending reads", direct, evt.ID(), wantPending)
 
-	subscribed, err := pg.ListPendingSubscribedEvents(ctx, agentID, []events.EventType{evt.Type}, since, 100)
+	subscribed, err := pg.ListPendingSubscribedEvents(ctx, agentID, []events.EventType{evt.Type()}, since, 100)
 	if err != nil {
 		t.Fatalf("ListPendingSubscribedEvents: %v", err)
 	}
-	assertPendingEventPresence(t, "subscribed pending reads", subscribed, evt.ID, wantPending)
+	assertPendingEventPresence(t, "subscribed pending reads", subscribed, evt.ID(), wantPending)
 
 	factsByAgent, err := pg.ListPendingAgentDeliveryFacts(ctx, []string{agentID}, since)
 	if err != nil {
@@ -163,7 +163,7 @@ func assertPendingEventPresence(t *testing.T, surface string, evts []events.Even
 	t.Helper()
 	found := false
 	for _, evt := range evts {
-		if strings.TrimSpace(evt.ID) == strings.TrimSpace(eventID) {
+		if strings.TrimSpace(evt.ID()) == strings.TrimSpace(eventID) {
 			found = true
 			break
 		}

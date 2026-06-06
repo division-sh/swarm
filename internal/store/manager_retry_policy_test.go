@@ -27,12 +27,12 @@ func TestUpsertEventReceipt_DeadLettersAfterOneRetry_V2(t *testing.T) {
 	ctx := context.Background()
 	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
 	evt := seedEvent(t, ctx, pg, entityID, "test.retry_upsert")
-	if err := pg.InsertEventDeliveries(ctx, evt.ID, []string{agentID}); err != nil {
+	if err := pg.InsertEventDeliveries(ctx, evt.ID(), []string{agentID}); err != nil {
 		t.Fatalf("insert deliveries: %v", err)
 	}
 
 	for i := 1; i <= 2; i++ {
-		if err := pg.UpsertEventReceipt(ctx, evt.ID, agentID, "error", "boom"); err != nil {
+		if err := pg.UpsertEventReceipt(ctx, evt.ID(), agentID, "error", "boom"); err != nil {
 			t.Fatalf("upsert receipt error #%d: %v", i, err)
 		}
 
@@ -44,7 +44,7 @@ func TestUpsertEventReceipt_DeadLettersAfterOneRetry_V2(t *testing.T) {
 			WHERE event_id = $1::uuid
 			  AND subscriber_type = 'agent'
 			  AND subscriber_id = $2
-		`, evt.ID, agentID).Scan(&status, &retryCount); err != nil {
+		`, evt.ID(), agentID).Scan(&status, &retryCount); err != nil {
 			t.Fatalf("query receipt after #%d: %v", i, err)
 		}
 
@@ -65,11 +65,11 @@ func TestUpsertEventReceipt_PreservesRetryableVsTerminalDeliveryStatus_V2(t *tes
 	ctx := context.Background()
 	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
 	evt := seedEvent(t, ctx, pg, entityID, "test.retry_delivery_status")
-	if err := pg.InsertEventDeliveries(ctx, evt.ID, []string{agentID}); err != nil {
+	if err := pg.InsertEventDeliveries(ctx, evt.ID(), []string{agentID}); err != nil {
 		t.Fatalf("insert deliveries: %v", err)
 	}
 
-	if err := pg.UpsertEventReceipt(ctx, evt.ID, agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, evt.ID(), agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
 		t.Fatalf("upsert retryable error: %v", err)
 	}
 
@@ -93,14 +93,14 @@ func TestUpsertEventReceipt_PreservesRetryableVsTerminalDeliveryStatus_V2(t *tes
 		WHERE d.event_id = $1::uuid
 		  AND d.subscriber_type = 'agent'
 		  AND d.subscriber_id = $2
-	`, evt.ID, agentID).Scan(&deliveryStatus, &reasonCode, &deliveryRetry, &managerStatus); err != nil {
+	`, evt.ID(), agentID).Scan(&deliveryStatus, &reasonCode, &deliveryRetry, &managerStatus); err != nil {
 		t.Fatalf("query retryable delivery status: %v", err)
 	}
 	if deliveryStatus != "failed" || managerStatus != "error" || deliveryRetry != 1 || reasonCode != "handler_error" {
 		t.Fatalf("retryable status mismatch: delivery=%q manager=%q retry=%d reason=%q", deliveryStatus, managerStatus, deliveryRetry, reasonCode)
 	}
 
-	if err := pg.UpsertEventReceipt(ctx, evt.ID, agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, evt.ID(), agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
 		t.Fatalf("upsert terminal error: %v", err)
 	}
 	if err := pg.DB.QueryRowContext(ctx, `
@@ -117,7 +117,7 @@ func TestUpsertEventReceipt_PreservesRetryableVsTerminalDeliveryStatus_V2(t *tes
 		WHERE d.event_id = $1::uuid
 		  AND d.subscriber_type = 'agent'
 		  AND d.subscriber_id = $2
-	`, evt.ID, agentID).Scan(&deliveryStatus, &reasonCode, &deliveryRetry, &managerStatus); err != nil {
+	`, evt.ID(), agentID).Scan(&deliveryStatus, &reasonCode, &deliveryRetry, &managerStatus); err != nil {
 		t.Fatalf("query terminal delivery status: %v", err)
 	}
 	if deliveryStatus != "dead_letter" || managerStatus != "dead_letter" || deliveryRetry != 2 || reasonCode != "retry_exhausted" {
@@ -132,11 +132,11 @@ func TestUpsertEventReceipt_AlignsRetryOwnershipOnCanonicalDelivery_V2(t *testin
 	ctx := context.Background()
 	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
 	evt := seedEvent(t, ctx, pg, entityID, "test.retry_alignment.delivery_backed")
-	if err := pg.InsertEventDeliveries(ctx, evt.ID, []string{agentID}); err != nil {
+	if err := pg.InsertEventDeliveries(ctx, evt.ID(), []string{agentID}); err != nil {
 		t.Fatalf("insert deliveries: %v", err)
 	}
 
-	if err := pg.UpsertEventReceipt(ctx, evt.ID, agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, evt.ID(), agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
 		t.Fatalf("upsert retryable error: %v", err)
 	}
 
@@ -162,14 +162,14 @@ func TestUpsertEventReceipt_AlignsRetryOwnershipOnCanonicalDelivery_V2(t *testin
 		WHERE d.event_id = $1::uuid
 		  AND d.subscriber_type = 'agent'
 		  AND d.subscriber_id = $2
-	`, evt.ID, agentID).Scan(&deliveryStatus, &deliveryRetry, &reasonCode, &managerStatus, &receiptRetry); err != nil {
+	`, evt.ID(), agentID).Scan(&deliveryStatus, &deliveryRetry, &reasonCode, &managerStatus, &receiptRetry); err != nil {
 		t.Fatalf("query retryable aligned state: %v", err)
 	}
 	if deliveryStatus != "failed" || deliveryRetry != 1 || reasonCode != "handler_error" || managerStatus != "error" || receiptRetry != 1 {
 		t.Fatalf("retryable aligned state mismatch: delivery=%q retry=%d reason=%q manager=%q receiptRetry=%d", deliveryStatus, deliveryRetry, reasonCode, managerStatus, receiptRetry)
 	}
 
-	if err := pg.UpsertEventReceipt(ctx, evt.ID, agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, evt.ID(), agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
 		t.Fatalf("upsert exhausted error: %v", err)
 	}
 
@@ -188,7 +188,7 @@ func TestUpsertEventReceipt_AlignsRetryOwnershipOnCanonicalDelivery_V2(t *testin
 		WHERE d.event_id = $1::uuid
 		  AND d.subscriber_type = 'agent'
 		  AND d.subscriber_id = $2
-	`, evt.ID, agentID).Scan(&deliveryStatus, &deliveryRetry, &reasonCode, &managerStatus, &receiptRetry); err != nil {
+	`, evt.ID(), agentID).Scan(&deliveryStatus, &deliveryRetry, &reasonCode, &managerStatus, &receiptRetry); err != nil {
 		t.Fatalf("query exhausted aligned state: %v", err)
 	}
 	if deliveryStatus != "dead_letter" || deliveryRetry != 2 || reasonCode != "retry_exhausted" || managerStatus != "dead_letter" || receiptRetry != 2 {
@@ -203,9 +203,9 @@ func TestUpsertEventReceipt_FailsClosedOnLegacyReceiptOnlyRetryHistory_V2(t *tes
 	ctx := context.Background()
 	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
 	evt := seedEvent(t, ctx, pg, entityID, "test.retry_legacy_receipt_only")
-	insertLegacyAgentReceiptState(t, ctx, pg, evt.ID, agentID, runtimemanager.ReceiptStatusError, 1, "handler_error", "boom", time.Now().Add(-2*time.Minute))
+	insertLegacyAgentReceiptState(t, ctx, pg, evt.ID(), agentID, runtimemanager.ReceiptStatusError, 1, "handler_error", "boom", time.Now().Add(-2*time.Minute))
 
-	err := pg.UpsertEventReceipt(ctx, evt.ID, agentID, runtimemanager.ReceiptStatusError, "boom")
+	err := pg.UpsertEventReceipt(ctx, evt.ID(), agentID, runtimemanager.ReceiptStatusError, "boom")
 	if err == nil {
 		t.Fatal("expected legacy receipt-only retry history write to fail closed")
 	}
@@ -220,7 +220,7 @@ func TestUpsertEventReceipt_FailsClosedOnLegacyReceiptOnlyRetryHistory_V2(t *tes
 		WHERE event_id = $1::uuid
 		  AND subscriber_type = 'agent'
 		  AND subscriber_id = $2
-	`, evt.ID, agentID).Scan(&deliveryCount); err != nil {
+	`, evt.ID(), agentID).Scan(&deliveryCount); err != nil {
 		t.Fatalf("query delivery count: %v", err)
 	}
 	if deliveryCount != 0 {
@@ -237,7 +237,7 @@ func TestUpsertEventReceipt_FailsClosedOnLegacyReceiptOnlyRetryHistory_V2(t *tes
 		WHERE event_id = $1::uuid
 		  AND subscriber_type = 'agent'
 		  AND subscriber_id = $2
-	`, evt.ID, agentID).Scan(&managerStatus, &receiptRetry); err != nil {
+	`, evt.ID(), agentID).Scan(&managerStatus, &receiptRetry); err != nil {
 		t.Fatalf("query receipt after fail-closed write: %v", err)
 	}
 	if managerStatus != "error" || receiptRetry != 1 {
@@ -252,7 +252,7 @@ func TestUpsertEventReceipt_ConcurrentErrorRetriesAdvanceAtomically_V2(t *testin
 	ctx := context.Background()
 	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
 	evt := seedEvent(t, ctx, pg, entityID, "test.concurrent_retry_upsert")
-	if err := pg.InsertEventDeliveries(ctx, evt.ID, []string{agentID}); err != nil {
+	if err := pg.InsertEventDeliveries(ctx, evt.ID(), []string{agentID}); err != nil {
 		t.Fatalf("insert deliveries: %v", err)
 	}
 
@@ -267,14 +267,14 @@ func TestUpsertEventReceipt_ConcurrentErrorRetriesAdvanceAtomically_V2(t *testin
 		  AND subscriber_type = 'agent'
 		  AND subscriber_id = $2
 		FOR UPDATE
-	`, evt.ID, agentID); err != nil {
+	`, evt.ID(), agentID); err != nil {
 		t.Fatalf("lock delivery row: %v", err)
 	}
 
 	errCh := make(chan error, 2)
 	for i := 0; i < 2; i++ {
 		go func() {
-			errCh <- pg.UpsertEventReceipt(ctx, evt.ID, agentID, runtimemanager.ReceiptStatusError, "boom")
+			errCh <- pg.UpsertEventReceipt(ctx, evt.ID(), agentID, runtimemanager.ReceiptStatusError, "boom")
 		}()
 	}
 	time.Sleep(150 * time.Millisecond)
@@ -312,7 +312,7 @@ func TestUpsertEventReceipt_ConcurrentErrorRetriesAdvanceAtomically_V2(t *testin
 		WHERE d.event_id = $1::uuid
 		  AND d.subscriber_type = 'agent'
 		  AND d.subscriber_id = $2
-	`, evt.ID, agentID).Scan(&deliveryStatus, &deliveryRetry, &managerStatus, &receiptRetry); err != nil {
+	`, evt.ID(), agentID).Scan(&deliveryStatus, &deliveryRetry, &managerStatus, &receiptRetry); err != nil {
 		t.Fatalf("query concurrent retry state: %v", err)
 	}
 	if deliveryStatus != "dead_letter" || deliveryRetry != 2 || managerStatus != "dead_letter" || receiptRetry != 2 {
@@ -344,18 +344,14 @@ func TestUpsertEventReceipt_ConcurrentTerminalReceiptsConvergeStandaloneRuntimeR
 		t.Fatalf("seed second agent: %v", err)
 	}
 	payload, _ := json.Marshal(map[string]any{"k": "v"})
-	evt := (events.Event{
-		ID:          uuid.NewString(),
-		RunID:       "",
-		Type:        events.EventType("platform.paused"),
-		SourceAgent: "runtime",
-		Payload:     payload,
-		CreatedAt:   time.Now().Add(-1 * time.Hour),
-	}).WithEntityID(entityID)
+	evt := (events.NewProjectionEvent(uuid.NewString(),
+
+		events.EventType("platform.paused"),
+		"runtime", "", payload, 0, "", "", events.EventEnvelope{}, time.Now().Add(-1*time.Hour))).WithEntityID(entityID)
 	if err := pg.AppendEvent(ctx, evt); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
-	if err := pg.InsertEventDeliveries(ctx, evt.ID, []string{agentA, agentB}); err != nil {
+	if err := pg.InsertEventDeliveries(ctx, evt.ID(), []string{agentA, agentB}); err != nil {
 		t.Fatalf("insert deliveries: %v", err)
 	}
 
@@ -385,7 +381,7 @@ func TestUpsertEventReceipt_ConcurrentTerminalReceiptsConvergeStandaloneRuntimeR
 	for _, agentID := range []string{agentA, agentB} {
 		agentID := agentID
 		go func() {
-			errCh <- pg.UpsertEventReceipt(ctx, evt.ID, agentID, runtimemanager.ReceiptStatusProcessed, "")
+			errCh <- pg.UpsertEventReceipt(ctx, evt.ID(), agentID, runtimemanager.ReceiptStatusProcessed, "")
 		}()
 	}
 	for i := 0; i < 2; i++ {
@@ -409,7 +405,7 @@ func TestUpsertEventReceipt_ConcurrentTerminalReceiptsConvergeStandaloneRuntimeR
 		FROM events e
 		INNER JOIN runs r ON r.run_id = e.run_id
 		WHERE e.event_id = $1::uuid
-	`, evt.ID).Scan(&runStatus); err != nil {
+	`, evt.ID()).Scan(&runStatus); err != nil {
 		t.Fatalf("load run status: %v", err)
 	}
 	if err := pg.DB.QueryRowContext(ctx, `
@@ -419,7 +415,7 @@ func TestUpsertEventReceipt_ConcurrentTerminalReceiptsConvergeStandaloneRuntimeR
 		FROM event_deliveries
 		WHERE event_id = $1::uuid
 		  AND subscriber_type = 'agent'
-	`, evt.ID).Scan(&pendingCount, &deliveredCount); err != nil {
+	`, evt.ID()).Scan(&pendingCount, &deliveredCount); err != nil {
 		t.Fatalf("load delivery counts: %v", err)
 	}
 	if runStatus != "completed" {
@@ -437,7 +433,7 @@ func TestUpsertEventReceipt_RollsBackReceiptWhenDeliverySyncFails_V2(t *testing.
 	ctx := context.Background()
 	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
 	evt := seedEvent(t, ctx, pg, entityID, "test.receipt_delivery_atomicity")
-	if err := pg.InsertEventDeliveries(ctx, evt.ID, []string{agentID}); err != nil {
+	if err := pg.InsertEventDeliveries(ctx, evt.ID(), []string{agentID}); err != nil {
 		t.Fatalf("insert deliveries: %v", err)
 	}
 	var originalReasonCode string
@@ -447,7 +443,7 @@ func TestUpsertEventReceipt_RollsBackReceiptWhenDeliverySyncFails_V2(t *testing.
 		WHERE event_id = $1::uuid
 		  AND subscriber_type = 'agent'
 		  AND subscriber_id = $2
-	`, evt.ID, agentID).Scan(&originalReasonCode); err != nil {
+	`, evt.ID(), agentID).Scan(&originalReasonCode); err != nil {
 		t.Fatalf("load original delivery reason: %v", err)
 	}
 
@@ -472,7 +468,7 @@ func TestUpsertEventReceipt_RollsBackReceiptWhenDeliverySyncFails_V2(t *testing.
 		t.Fatalf("create trigger: %v", err)
 	}
 
-	err := pg.UpsertEventReceipt(ctx, evt.ID, agentID, runtimemanager.ReceiptStatusProcessed, "")
+	err := pg.UpsertEventReceipt(ctx, evt.ID(), agentID, runtimemanager.ReceiptStatusProcessed, "")
 	if err == nil {
 		t.Fatal("expected delivery sync failure")
 	}
@@ -487,7 +483,7 @@ func TestUpsertEventReceipt_RollsBackReceiptWhenDeliverySyncFails_V2(t *testing.
 		WHERE event_id = $1::uuid
 		  AND subscriber_type = 'agent'
 		  AND subscriber_id = $2
-	`, evt.ID, agentID).Scan(&receiptCount); err != nil {
+	`, evt.ID(), agentID).Scan(&receiptCount); err != nil {
 		t.Fatalf("count receipts after rollback: %v", err)
 	}
 	if receiptCount != 0 {
@@ -505,7 +501,7 @@ func TestUpsertEventReceipt_RollsBackReceiptWhenDeliverySyncFails_V2(t *testing.
 		WHERE event_id = $1::uuid
 		  AND subscriber_type = 'agent'
 		  AND subscriber_id = $2
-	`, evt.ID, agentID).Scan(&deliveryStatus, &retryCount, &reasonCode); err != nil {
+	`, evt.ID(), agentID).Scan(&deliveryStatus, &retryCount, &reasonCode); err != nil {
 		t.Fatalf("load delivery after rollback: %v", err)
 	}
 	if deliveryStatus != "pending" || retryCount != 0 || reasonCode != originalReasonCode {
@@ -520,7 +516,7 @@ func TestListPendingEventsForAgent_RetryBackoff_V2(t *testing.T) {
 	ctx := context.Background()
 	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
 	evt := seedEvent(t, ctx, pg, entityID, "test.pending_direct")
-	if err := pg.InsertEventDeliveries(ctx, evt.ID, []string{agentID}); err != nil {
+	if err := pg.InsertEventDeliveries(ctx, evt.ID(), []string{agentID}); err != nil {
 		t.Fatalf("insert deliveries: %v", err)
 	}
 
@@ -531,11 +527,11 @@ func TestListPendingEventsForAgent_RetryBackoff_V2(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list pending (no receipt): %v", err)
 	}
-	if len(evts) != 1 || evts[0].ID != evt.ID {
-		t.Fatalf("list pending (no receipt): got %v events, want 1 (%s)", len(evts), evt.ID)
+	if len(evts) != 1 || evts[0].ID() != evt.ID() {
+		t.Fatalf("list pending (no receipt): got %v events, want 1 (%s)", len(evts), evt.ID())
 	}
 
-	if err := pg.UpsertEventReceipt(ctx, evt.ID, agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, evt.ID(), agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
 		t.Fatalf("upsert retryable receipt: %v", err)
 	}
 	evts, err = pg.ListPendingEventsForAgent(ctx, agentID, since, 100)
@@ -546,17 +542,17 @@ func TestListPendingEventsForAgent_RetryBackoff_V2(t *testing.T) {
 		t.Fatalf("list pending (retry=1 not ready): got %d events, want 0", len(evts))
 	}
 
-	rewindCanonicalDeliveryAttempt(t, ctx, pg, evt.ID, agentID, time.Now().Add(-2*time.Minute))
+	rewindCanonicalDeliveryAttempt(t, ctx, pg, evt.ID(), agentID, time.Now().Add(-2*time.Minute))
 	evts, err = pg.ListPendingEventsForAgent(ctx, agentID, since, 100)
 	if err != nil {
 		t.Fatalf("list pending (retry=1 ready): %v", err)
 	}
-	if len(evts) != 1 || evts[0].ID != evt.ID {
-		t.Fatalf("list pending (retry=1 ready): got %v events, want 1 (%s)", len(evts), evt.ID)
+	if len(evts) != 1 || evts[0].ID() != evt.ID() {
+		t.Fatalf("list pending (retry=1 ready): got %v events, want 1 (%s)", len(evts), evt.ID())
 	}
 
 	// After retries are exhausted, the event should not be pending.
-	if err := pg.UpsertEventReceipt(ctx, evt.ID, agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, evt.ID(), agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
 		t.Fatalf("upsert dead_letter receipt: %v", err)
 	}
 	evts, err = pg.ListPendingEventsForAgent(ctx, agentID, since, 100)
@@ -575,34 +571,34 @@ func TestListPendingSubscribedEvents_RetryBackoff_V2(t *testing.T) {
 	ctx := context.Background()
 	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
 	evt := seedEvent(t, ctx, pg, entityID, "test.pending_subscribed")
-	if err := pg.InsertEventDeliveries(ctx, evt.ID, []string{agentID}); err != nil {
+	if err := pg.InsertEventDeliveries(ctx, evt.ID(), []string{agentID}); err != nil {
 		t.Fatalf("insert deliveries: %v", err)
 	}
 
 	since := time.Now().Add(-2 * time.Hour)
-	subs := []events.EventType{evt.Type}
+	subs := []events.EventType{evt.Type()}
 
 	evts, err := pg.ListPendingSubscribedEvents(ctx, agentID, subs, since, 100)
 	if err != nil {
 		t.Fatalf("list subscribed pending (no receipt): %v", err)
 	}
-	if len(evts) != 1 || evts[0].ID != evt.ID {
-		t.Fatalf("list subscribed pending (no receipt): got %v events, want 1 (%s)", len(evts), evt.ID)
+	if len(evts) != 1 || evts[0].ID() != evt.ID() {
+		t.Fatalf("list subscribed pending (no receipt): got %v events, want 1 (%s)", len(evts), evt.ID())
 	}
 
-	if err := pg.UpsertEventReceipt(ctx, evt.ID, agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, evt.ID(), agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
 		t.Fatalf("upsert retryable receipt: %v", err)
 	}
-	rewindCanonicalDeliveryAttempt(t, ctx, pg, evt.ID, agentID, time.Now().Add(-2*time.Minute))
+	rewindCanonicalDeliveryAttempt(t, ctx, pg, evt.ID(), agentID, time.Now().Add(-2*time.Minute))
 	evts, err = pg.ListPendingSubscribedEvents(ctx, agentID, subs, since, 100)
 	if err != nil {
 		t.Fatalf("list subscribed pending (retry=1 ready): %v", err)
 	}
-	if len(evts) != 1 || evts[0].ID != evt.ID {
-		t.Fatalf("list subscribed pending (retry=1 ready): got %v events, want 1 (%s)", len(evts), evt.ID)
+	if len(evts) != 1 || evts[0].ID() != evt.ID() {
+		t.Fatalf("list subscribed pending (retry=1 ready): got %v events, want 1 (%s)", len(evts), evt.ID())
 	}
 
-	if err := pg.UpsertEventReceipt(ctx, evt.ID, agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, evt.ID(), agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
 		t.Fatalf("upsert dead_letter receipt: %v", err)
 	}
 	evts, err = pg.ListPendingSubscribedEvents(ctx, agentID, subs, since, 100)
@@ -631,7 +627,7 @@ func TestPendingAgentEvents_IgnoreLegacyReceiptOnlyRetryOwner_V2(t *testing.T) {
 			ctx := context.Background()
 			entityID, agentID := seedEntityAndAgent(t, ctx, pg)
 			evt := seedEvent(t, ctx, pg, entityID, "test.pending_legacy_retry_owner."+tt.name)
-			insertLegacyAgentReceiptState(t, ctx, pg, evt.ID, agentID, runtimemanager.ReceiptStatusError, 1, "handler_error", "boom", time.Now().Add(-2*time.Minute))
+			insertLegacyAgentReceiptState(t, ctx, pg, evt.ID(), agentID, runtimemanager.ReceiptStatusError, 1, "handler_error", "boom", time.Now().Add(-2*time.Minute))
 
 			var (
 				evts []events.Event
@@ -639,7 +635,7 @@ func TestPendingAgentEvents_IgnoreLegacyReceiptOnlyRetryOwner_V2(t *testing.T) {
 			)
 			since := time.Now().Add(-2 * time.Hour)
 			if tt.subscribed {
-				evts, err = pg.ListPendingSubscribedEvents(ctx, agentID, []events.EventType{evt.Type}, since, 100)
+				evts, err = pg.ListPendingSubscribedEvents(ctx, agentID, []events.EventType{evt.Type()}, since, 100)
 			} else {
 				evts, err = pg.ListPendingEventsForAgent(ctx, agentID, since, 100)
 			}
@@ -657,7 +653,7 @@ func TestPendingAgentEvents_IgnoreLegacyReceiptOnlyRetryOwner_V2(t *testing.T) {
 				WHERE event_id = $1::uuid
 				  AND subscriber_type = 'agent'
 				  AND subscriber_id = $2
-			`, evt.ID, agentID).Scan(&deliveryCount); err != nil {
+			`, evt.ID(), agentID).Scan(&deliveryCount); err != nil {
 				t.Fatalf("query delivery count: %v", err)
 			}
 			if deliveryCount != 0 {
@@ -674,7 +670,7 @@ func TestListPendingAgentDeliveryFacts_IgnoresLegacyReceiptOnlyRetryOwner_V2(t *
 	ctx := context.Background()
 	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
 	evt := seedEvent(t, ctx, pg, entityID, "test.pending_facts.legacy_receipt_only")
-	insertLegacyAgentReceiptState(t, ctx, pg, evt.ID, agentID, runtimemanager.ReceiptStatusError, 1, "handler_error", "boom", time.Now().Add(-2*time.Minute))
+	insertLegacyAgentReceiptState(t, ctx, pg, evt.ID(), agentID, runtimemanager.ReceiptStatusError, 1, "handler_error", "boom", time.Now().Add(-2*time.Minute))
 
 	factsByAgent, err := pg.ListPendingAgentDeliveryFacts(ctx, []string{agentID}, time.Now().Add(-2*time.Hour))
 	if err != nil {
@@ -692,7 +688,7 @@ func TestListPendingAgentDeliveryFacts_IgnoresLegacyReceiptOnlyRetryOwner_V2(t *
 		WHERE event_id = $1::uuid
 		  AND subscriber_type = 'agent'
 		  AND subscriber_id = $2
-	`, evt.ID, agentID).Scan(&deliveryCount); err != nil {
+	`, evt.ID(), agentID).Scan(&deliveryCount); err != nil {
 		t.Fatalf("query delivery count: %v", err)
 	}
 	if deliveryCount != 0 {
@@ -712,7 +708,7 @@ func TestListPendingAgentDeliveryFacts_AlignsWithCanonicalPendingStates_V2(t *te
 	inProgressEvt := seedEvent(t, ctx, pg, entityID, "test.pending_facts.in_progress")
 	deadEvt := seedEvent(t, ctx, pg, entityID, "test.pending_facts.dead")
 
-	for _, eventID := range []string{pendingEvt.ID, retryableEvt.ID, inProgressEvt.ID, deadEvt.ID} {
+	for _, eventID := range []string{pendingEvt.ID(), retryableEvt.ID(), inProgressEvt.ID(), deadEvt.ID()} {
 		if err := pg.InsertEventDeliveries(ctx, eventID, []string{agentID}); err != nil {
 			t.Fatalf("insert deliveries for %s: %v", eventID, err)
 		}
@@ -721,20 +717,20 @@ func TestListPendingAgentDeliveryFacts_AlignsWithCanonicalPendingStates_V2(t *te
 		UPDATE event_deliveries
 		SET created_at = now() - interval '8 minutes'
 		WHERE event_id = $1::uuid AND subscriber_id = $2
-	`, pendingEvt.ID, agentID); err != nil {
+	`, pendingEvt.ID(), agentID); err != nil {
 		t.Fatalf("age pending delivery: %v", err)
 	}
-	if err := pg.UpsertEventReceipt(ctx, retryableEvt.ID, agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, retryableEvt.ID(), agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
 		t.Fatalf("upsert retryable receipt: %v", err)
 	}
-	rewindCanonicalDeliveryAttempt(t, ctx, pg, retryableEvt.ID, agentID, time.Now().Add(-2*time.Minute))
-	if err := pg.MarkEventDeliveryInProgress(ctx, inProgressEvt.ID, agentID, ""); err != nil {
+	rewindCanonicalDeliveryAttempt(t, ctx, pg, retryableEvt.ID(), agentID, time.Now().Add(-2*time.Minute))
+	if err := pg.MarkEventDeliveryInProgress(ctx, inProgressEvt.ID(), agentID, ""); err != nil {
 		t.Fatalf("mark in progress: %v", err)
 	}
-	if err := pg.UpsertEventReceipt(ctx, deadEvt.ID, agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, deadEvt.ID(), agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
 		t.Fatalf("upsert dead-letter first error: %v", err)
 	}
-	if err := pg.UpsertEventReceipt(ctx, deadEvt.ID, agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, deadEvt.ID(), agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
 		t.Fatalf("upsert dead-letter second error: %v", err)
 	}
 
@@ -765,7 +761,7 @@ func TestListPendingAgentDeliveryDetails_PagesCanonicalQueueTruth_V2(t *testing.
 	deliveredEvt := seedEvent(t, ctx, pg, entityID, "test.pending_details.delivered")
 	legacyEvt := seedEvent(t, ctx, pg, entityID, "test.pending_details.legacy_receipt_only")
 
-	for _, eventID := range []string{pendingEvt.ID, retryableEvt.ID, inProgressEvt.ID, deadEvt.ID, deliveredEvt.ID} {
+	for _, eventID := range []string{pendingEvt.ID(), retryableEvt.ID(), inProgressEvt.ID(), deadEvt.ID(), deliveredEvt.ID()} {
 		if err := pg.InsertEventDeliveries(ctx, eventID, []string{agentID}); err != nil {
 			t.Fatalf("insert deliveries for %s: %v", eventID, err)
 		}
@@ -773,12 +769,12 @@ func TestListPendingAgentDeliveryDetails_PagesCanonicalQueueTruth_V2(t *testing.
 
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	eventTimes := map[string]time.Time{
-		pendingEvt.ID:    now.Add(-30 * time.Minute),
-		retryableEvt.ID:  now.Add(-20 * time.Minute),
-		inProgressEvt.ID: now.Add(-10 * time.Minute),
-		deadEvt.ID:       now.Add(-5 * time.Minute),
-		deliveredEvt.ID:  now.Add(-4 * time.Minute),
-		legacyEvt.ID:     now.Add(-3 * time.Minute),
+		pendingEvt.ID():    now.Add(-30 * time.Minute),
+		retryableEvt.ID():  now.Add(-20 * time.Minute),
+		inProgressEvt.ID(): now.Add(-10 * time.Minute),
+		deadEvt.ID():       now.Add(-5 * time.Minute),
+		deliveredEvt.ID():  now.Add(-4 * time.Minute),
+		legacyEvt.ID():     now.Add(-3 * time.Minute),
 	}
 	for eventID, createdAt := range eventTimes {
 		if _, err := pg.DB.ExecContext(ctx, `
@@ -790,23 +786,23 @@ func TestListPendingAgentDeliveryDetails_PagesCanonicalQueueTruth_V2(t *testing.
 		}
 	}
 
-	if err := pg.UpsertEventReceipt(ctx, retryableEvt.ID, agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, retryableEvt.ID(), agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
 		t.Fatalf("upsert retryable receipt: %v", err)
 	}
-	rewindCanonicalDeliveryAttempt(t, ctx, pg, retryableEvt.ID, agentID, now.Add(-2*time.Minute))
-	if err := pg.MarkEventDeliveryInProgress(ctx, inProgressEvt.ID, agentID, ""); err != nil {
+	rewindCanonicalDeliveryAttempt(t, ctx, pg, retryableEvt.ID(), agentID, now.Add(-2*time.Minute))
+	if err := pg.MarkEventDeliveryInProgress(ctx, inProgressEvt.ID(), agentID, ""); err != nil {
 		t.Fatalf("mark in progress: %v", err)
 	}
-	if err := pg.UpsertEventReceipt(ctx, deadEvt.ID, agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, deadEvt.ID(), agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
 		t.Fatalf("upsert dead-letter first error: %v", err)
 	}
-	if err := pg.UpsertEventReceipt(ctx, deadEvt.ID, agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, deadEvt.ID(), agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
 		t.Fatalf("upsert dead-letter second error: %v", err)
 	}
-	if err := pg.UpsertEventReceipt(ctx, deliveredEvt.ID, agentID, runtimemanager.ReceiptStatusProcessed, "done"); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, deliveredEvt.ID(), agentID, runtimemanager.ReceiptStatusProcessed, "done"); err != nil {
 		t.Fatalf("upsert delivered receipt: %v", err)
 	}
-	insertLegacyAgentReceiptState(t, ctx, pg, legacyEvt.ID, agentID, runtimemanager.ReceiptStatusError, 1, "handler_error", "boom", now.Add(-2*time.Minute))
+	insertLegacyAgentReceiptState(t, ctx, pg, legacyEvt.ID(), agentID, runtimemanager.ReceiptStatusError, 1, "handler_error", "boom", now.Add(-2*time.Minute))
 
 	firstPage, err := pg.ListPendingAgentDeliveryDetails(ctx, store.PendingAgentDeliveryListOptions{
 		AgentID: agentID,
@@ -825,8 +821,8 @@ func TestListPendingAgentDeliveryDetails_PagesCanonicalQueueTruth_V2(t *testing.
 	if len(firstPage.PendingDeliveries) != 2 || firstPage.NextCursor == "" {
 		t.Fatalf("first page = %+v, want 2 rows with next cursor", firstPage)
 	}
-	assertPendingDeliveryDetail(t, firstPage.PendingDeliveries[0], pendingEvt.ID, string(pendingEvt.Type), eventTimes[pendingEvt.ID], 0)
-	assertPendingDeliveryDetail(t, firstPage.PendingDeliveries[1], retryableEvt.ID, string(retryableEvt.Type), eventTimes[retryableEvt.ID], 1)
+	assertPendingDeliveryDetail(t, firstPage.PendingDeliveries[0], pendingEvt.ID(), string(pendingEvt.Type()), eventTimes[pendingEvt.ID()], 0)
+	assertPendingDeliveryDetail(t, firstPage.PendingDeliveries[1], retryableEvt.ID(), string(retryableEvt.Type()), eventTimes[retryableEvt.ID()], 1)
 
 	secondPage, err := pg.ListPendingAgentDeliveryDetails(ctx, store.PendingAgentDeliveryListOptions{
 		AgentID: agentID,
@@ -843,13 +839,13 @@ func TestListPendingAgentDeliveryDetails_PagesCanonicalQueueTruth_V2(t *testing.
 	if len(secondPage.PendingDeliveries) != 1 || secondPage.NextCursor != "" {
 		t.Fatalf("second page = %+v, want final single row", secondPage)
 	}
-	assertPendingDeliveryDetail(t, secondPage.PendingDeliveries[0], inProgressEvt.ID, string(inProgressEvt.Type), eventTimes[inProgressEvt.ID], 0)
+	assertPendingDeliveryDetail(t, secondPage.PendingDeliveries[0], inProgressEvt.ID(), string(inProgressEvt.Type()), eventTimes[inProgressEvt.ID()], 0)
 
 	runtimeEvents, err := pg.ListPendingEventsForAgent(ctx, agentID, now.Add(-2*time.Hour), 2)
 	if err != nil {
 		t.Fatalf("ListPendingEventsForAgent: %v", err)
 	}
-	if len(runtimeEvents) != 2 || runtimeEvents[0].ID != pendingEvt.ID || runtimeEvents[1].ID != retryableEvt.ID {
+	if len(runtimeEvents) != 2 || runtimeEvents[0].ID() != pendingEvt.ID() || runtimeEvents[1].ID() != retryableEvt.ID() {
 		t.Fatalf("runtime pending events = %#v, want shared first detail page order", runtimeEvents)
 	}
 
@@ -867,8 +863,8 @@ func assertPendingDeliveryDetail(t *testing.T, got store.PendingAgentDeliveryDet
 	if got.EventID != eventID || got.EventName != eventName || !got.EnqueuedAt.Equal(enqueuedAt) || got.Attempts != attempts {
 		t.Fatalf("pending delivery detail = %+v, want event_id=%s event_name=%s enqueued_at=%s attempts=%d", got, eventID, eventName, enqueuedAt, attempts)
 	}
-	if got.Event.ID != eventID {
-		t.Fatalf("pending delivery embedded event id = %q, want %q", got.Event.ID, eventID)
+	if got.Event.ID() != eventID {
+		t.Fatalf("pending delivery embedded event id = %q, want %q", got.Event.ID(), eventID)
 	}
 }
 
@@ -879,14 +875,14 @@ func TestListPendingAgentDeliveryFacts_UsesFullPendingHorizon_V2(t *testing.T) {
 	ctx := context.Background()
 	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
 	evt := seedEvent(t, ctx, pg, entityID, "test.pending_facts.full_horizon")
-	if err := pg.InsertEventDeliveries(ctx, evt.ID, []string{agentID}); err != nil {
+	if err := pg.InsertEventDeliveries(ctx, evt.ID(), []string{agentID}); err != nil {
 		t.Fatalf("insert deliveries: %v", err)
 	}
 	if _, err := pg.DB.ExecContext(ctx, `
 		UPDATE events
 		SET created_at = now() - interval '45 days'
 		WHERE event_id = $1::uuid
-	`, evt.ID); err != nil {
+	`, evt.ID()); err != nil {
 		t.Fatalf("age event: %v", err)
 	}
 	if _, err := pg.DB.ExecContext(ctx, `
@@ -894,7 +890,7 @@ func TestListPendingAgentDeliveryFacts_UsesFullPendingHorizon_V2(t *testing.T) {
 		SET created_at = now() - interval '45 days'
 		WHERE event_id = $1::uuid
 		  AND subscriber_id = $2
-	`, evt.ID, agentID); err != nil {
+	`, evt.ID(), agentID); err != nil {
 		t.Fatalf("age delivery: %v", err)
 	}
 
@@ -918,10 +914,10 @@ func TestListPendingEventsForAgent_InProgressWithoutReceipt_RemainsPending(t *te
 	ctx := context.Background()
 	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
 	evt := seedEvent(t, ctx, pg, entityID, "test.pending_in_progress")
-	if err := pg.InsertEventDeliveries(ctx, evt.ID, []string{agentID}); err != nil {
+	if err := pg.InsertEventDeliveries(ctx, evt.ID(), []string{agentID}); err != nil {
 		t.Fatalf("insert deliveries: %v", err)
 	}
-	if err := pg.MarkEventDeliveryInProgress(ctx, evt.ID, agentID, ""); err != nil {
+	if err := pg.MarkEventDeliveryInProgress(ctx, evt.ID(), agentID, ""); err != nil {
 		t.Fatalf("MarkEventDeliveryInProgress: %v", err)
 	}
 
@@ -929,8 +925,8 @@ func TestListPendingEventsForAgent_InProgressWithoutReceipt_RemainsPending(t *te
 	if err != nil {
 		t.Fatalf("ListPendingEventsForAgent: %v", err)
 	}
-	if len(evts) != 1 || evts[0].ID != evt.ID {
-		t.Fatalf("in_progress without receipt pending events = %#v, want [%s]", evts, evt.ID)
+	if len(evts) != 1 || evts[0].ID() != evt.ID() {
+		t.Fatalf("in_progress without receipt pending events = %#v, want [%s]", evts, evt.ID())
 	}
 }
 
@@ -941,15 +937,15 @@ func TestMarkEventDeliveryInProgress_AllowsRetryableFailedDeliveryClaim_V2(t *te
 	ctx := context.Background()
 	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
 	evt := seedEvent(t, ctx, pg, entityID, "test.retry_claim.failed")
-	if err := pg.InsertEventDeliveries(ctx, evt.ID, []string{agentID}); err != nil {
+	if err := pg.InsertEventDeliveries(ctx, evt.ID(), []string{agentID}); err != nil {
 		t.Fatalf("insert deliveries: %v", err)
 	}
-	if err := pg.UpsertEventReceipt(ctx, evt.ID, agentID, runtimemanager.ReceiptStatusError, "retryable"); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, evt.ID(), agentID, runtimemanager.ReceiptStatusError, "retryable"); err != nil {
 		t.Fatalf("upsert retryable receipt: %v", err)
 	}
-	rewindCanonicalDeliveryAttempt(t, ctx, pg, evt.ID, agentID, time.Now().Add(-2*time.Minute))
+	rewindCanonicalDeliveryAttempt(t, ctx, pg, evt.ID(), agentID, time.Now().Add(-2*time.Minute))
 
-	if err := pg.MarkEventDeliveryInProgress(ctx, evt.ID, agentID, ""); err != nil {
+	if err := pg.MarkEventDeliveryInProgress(ctx, evt.ID(), agentID, ""); err != nil {
 		t.Fatalf("MarkEventDeliveryInProgress retryable failed delivery: %v", err)
 	}
 
@@ -959,7 +955,7 @@ func TestMarkEventDeliveryInProgress_AllowsRetryableFailedDeliveryClaim_V2(t *te
 		FROM event_deliveries
 		WHERE event_id = $1::uuid
 		  AND subscriber_id = $2
-	`, evt.ID, agentID).Scan(&status, &reason); err != nil {
+	`, evt.ID(), agentID).Scan(&status, &reason); err != nil {
 		t.Fatalf("load delivery: %v", err)
 	}
 	if status != "in_progress" || reason != "agent_processing" {
@@ -978,7 +974,7 @@ func TestListPendingSubscribedEvents_UsesCanonicalMatcherParity(t *testing.T) {
 	segment := seedEvent(t, ctx, pg, entityID, "review.ready")
 	tooDeep := seedEvent(t, ctx, pg, entityID, "scoring/a/b")
 	invalidPattern := seedEvent(t, ctx, pg, entityID, "budget.alert")
-	for _, eventID := range []string{deep.ID, segment.ID, tooDeep.ID, invalidPattern.ID} {
+	for _, eventID := range []string{deep.ID(), segment.ID(), tooDeep.ID(), invalidPattern.ID()} {
 		if err := pg.InsertEventDeliveries(ctx, eventID, []string{agentID}); err != nil {
 			t.Fatalf("insert deliveries for %s: %v", eventID, err)
 		}
@@ -994,25 +990,25 @@ func TestListPendingSubscribedEvents_UsesCanonicalMatcherParity(t *testing.T) {
 		{
 			name:          "recursive wildcard matches deep scoped event",
 			subscriptions: []events.EventType{"operating/**/opco.launched"},
-			eventType:     string(deep.Type),
-			wantIDs:       []string{deep.ID},
+			eventType:     string(deep.Type()),
+			wantIDs:       []string{deep.ID()},
 		},
 		{
 			name:          "segment glob matches canonical runtime semantics",
 			subscriptions: []events.EventType{"*.ready"},
-			eventType:     string(segment.Type),
-			wantIDs:       []string{segment.ID},
+			eventType:     string(segment.Type()),
+			wantIDs:       []string{segment.ID()},
 		},
 		{
 			name:          "single segment wildcard does not span multiple segments",
 			subscriptions: []events.EventType{"scoring/*"},
-			eventType:     string(tooDeep.Type),
+			eventType:     string(tooDeep.Type()),
 			wantIDs:       nil,
 		},
 		{
 			name:          "invalid pattern fails closed",
 			subscriptions: []events.EventType{"["},
-			eventType:     string(invalidPattern.Type),
+			eventType:     string(invalidPattern.Type()),
 			wantIDs:       nil,
 		},
 	}
@@ -1028,7 +1024,7 @@ func TestListPendingSubscribedEvents_UsesCanonicalMatcherParity(t *testing.T) {
 			}
 			gotIDs := make([]string, 0, len(evts))
 			for _, evt := range evts {
-				gotIDs = append(gotIDs, evt.ID)
+				gotIDs = append(gotIDs, evt.ID())
 			}
 			if len(gotIDs) != len(tt.wantIDs) {
 				t.Fatalf("subscriptions=%v got=%v want=%v", tt.subscriptions, gotIDs, tt.wantIDs)
@@ -1135,13 +1131,9 @@ func seedEvent(t *testing.T, ctx context.Context, pg *store.PostgresStore, entit
 	t.Helper()
 
 	payload, _ := json.Marshal(map[string]any{"k": "v"})
-	evt := (events.Event{
-		ID:          uuid.NewString(),
-		Type:        events.EventType(eventType),
-		SourceAgent: "store-test",
-		Payload:     payload,
-		CreatedAt:   time.Now().Add(-1 * time.Hour),
-	}).WithEntityID(entityID)
+	evt := (events.NewProjectionEvent(uuid.NewString(),
+		events.EventType(eventType),
+		"store-test", "", payload, 0, "", "", events.EventEnvelope{}, time.Now().Add(-1*time.Hour))).WithEntityID(entityID)
 	if err := pg.AppendEvent(ctx, evt); err != nil {
 		t.Fatalf("append event: %v", err)
 	}

@@ -111,7 +111,7 @@ type deferredChainInterceptor struct{}
 
 func (deferredChainInterceptor) Intercept(_ context.Context, evt events.Event) (bool, []events.Event, error) {
 	next := ""
-	switch evt.Type {
+	switch evt.Type() {
 	case events.EventType("custom.root"):
 		next = "custom.middle"
 	case events.EventType("custom.middle"):
@@ -121,22 +121,16 @@ func (deferredChainInterceptor) Intercept(_ context.Context, evt events.Event) (
 	default:
 		return true, nil, nil
 	}
-	return false, []events.Event{(events.Event{
-		Type:      events.EventType(next),
-		CreatedAt: time.Now().UTC(),
-	}).WithEntityID(evt.EntityID())}, nil
+	return false, []events.Event{(events.NewProjectionEvent("", events.EventType(next), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID(evt.EntityID())}, nil
 }
 
 type singleDeferredInterceptor struct{}
 
 func (singleDeferredInterceptor) Intercept(_ context.Context, evt events.Event) (bool, []events.Event, error) {
-	if evt.Type != events.EventType("custom.root") {
+	if evt.Type() != events.EventType("custom.root") {
 		return true, nil, nil
 	}
-	return false, []events.Event{(events.Event{
-		Type:      events.EventType("custom.middle"),
-		CreatedAt: time.Now().UTC(),
-	}).WithEntityID(evt.EntityID())}, nil
+	return false, []events.Event{(events.NewProjectionEvent("", events.EventType("custom.middle"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID(evt.EntityID())}, nil
 }
 
 type nonTransactionalPersistedBeforeInterceptor struct {
@@ -150,11 +144,11 @@ func (i nonTransactionalPersistedBeforeInterceptor) Intercept(ctx context.Contex
 		i.t.Fatal("non-transactional interceptor unexpectedly ran with sql tx")
 	}
 	for _, got := range i.store.eventTypes() {
-		if got == string(evt.Type) {
+		if got == string(evt.Type()) {
 			return true, nil, nil
 		}
 	}
-	i.t.Fatalf("event type %s was not persisted before non-transactional interceptor ran; persisted=%v", evt.Type, i.store.eventTypes())
+	i.t.Fatalf("event type %s was not persisted before non-transactional interceptor ran; persisted=%v", evt.Type(), i.store.eventTypes())
 	return true, nil, nil
 }
 
@@ -233,15 +227,12 @@ type deferredEventVisibleInterceptor struct {
 
 func (i deferredEventVisibleInterceptor) Intercept(ctx context.Context, evt events.Event) (bool, []events.Event, error) {
 	i.t.Helper()
-	if evt.Type == events.EventType("custom.root") {
-		return false, []events.Event{{
-			ID:        i.eventID,
-			Type:      i.checkFor,
-			CreatedAt: time.Now().UTC(),
-			Payload:   []byte(`{"entity_id":"ent-1"}`),
-		}}, nil
+	if evt.Type() == events.EventType("custom.root") {
+		return false, []events.Event{
+			events.NewProjectionEvent(i.eventID, i.checkFor, "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
+		}, nil
 	}
-	if evt.Type != i.checkFor {
+	if evt.Type() != i.checkFor {
 		return true, nil, nil
 	}
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
@@ -333,7 +324,7 @@ func (s *routeSetEventStore) PersistEventWithDeliveryRouteSetAndScope(_ context.
 	if s.routes == nil {
 		s.routes = map[string][]events.DeliveryRoute{}
 	}
-	s.routes[evt.ID] = events.NormalizeDeliveryRoutes(routes)
+	s.routes[evt.ID()] = events.NormalizeDeliveryRoutes(routes)
 	return nil
 }
 
@@ -355,7 +346,7 @@ func (s *replayCapableAtomicStoreMissingScope) InsertEventDeliveries(_ context.C
 }
 
 func (s *replayCapableAtomicStoreMissingScope) PersistEventWithDeliveries(ctx context.Context, evt events.Event, agentIDs []string) error {
-	return s.InsertEventDeliveries(ctx, evt.ID, agentIDs)
+	return s.InsertEventDeliveries(ctx, evt.ID(), agentIDs)
 }
 
 func (s *replayCapableAtomicStoreMissingScope) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
@@ -475,14 +466,11 @@ func TestEventBusPublishTransactionalPostCommitReceiptFailureIsRecoverable(t *te
 	ch := eb.Subscribe(agentID, events.EventType("custom.receipt_failure"))
 	defer eb.Unsubscribe(agentID)
 
-	if err := eb.Publish(ctx, events.Event{
-		ID:          eventID,
-		RunID:       eventBusTestRunID,
-		Type:        events.EventType("custom.receipt_failure"),
-		SourceAgent: "api.v1",
-		Payload:     []byte(`{"entity_id":"21000000-0000-0000-0000-000000000012"}`),
-		CreatedAt:   time.Now().UTC(),
-	}.WithEntityID("21000000-0000-0000-0000-000000000012")); err != nil {
+	if err := eb.Publish(ctx, events.NewProjectionEvent(eventID,
+
+		events.EventType("custom.receipt_failure"),
+		"api.v1", "", []byte(`{"entity_id":"21000000-0000-0000-0000-000000000012"}`), 0, eventBusTestRunID, "", events.EventEnvelope{}, time.Now().UTC()).
+		WithEntityID("21000000-0000-0000-0000-000000000012")); err != nil {
 		t.Fatalf("Publish with post-commit receipt failure: %v", err)
 	}
 	ok, err := pg.EventExists(ctx, eventID)
@@ -509,8 +497,8 @@ func TestEventBusPublishTransactionalPostCommitReceiptFailureIsRecoverable(t *te
 		t.Fatalf("logger entries = %#v, want pipeline_receipt_persist_failed", logger.entries)
 	}
 	got := requireBusEvent(t, ch, "post-commit receipt failure delivery")
-	if got.ID != eventID {
-		t.Fatalf("delivered event = %s, want %s", got.ID, eventID)
+	if got.ID() != eventID {
+		t.Fatalf("delivered event = %s, want %s", got.ID(), eventID)
 	}
 }
 
@@ -536,14 +524,11 @@ func TestEventBusPublishTransactionalPostCommitCompletionFailureIsRecoverable(t 
 	ch := eb.Subscribe(agentID, events.EventType("custom.completion_failure"))
 	defer eb.Unsubscribe(agentID)
 
-	if err := eb.Publish(ctx, events.Event{
-		ID:          eventID,
-		RunID:       eventBusTestRunID,
-		Type:        events.EventType("custom.completion_failure"),
-		SourceAgent: "api.v1",
-		Payload:     []byte(`{"entity_id":"21000000-0000-0000-0000-000000000022"}`),
-		CreatedAt:   time.Now().UTC(),
-	}.WithEntityID("21000000-0000-0000-0000-000000000022")); err != nil {
+	if err := eb.Publish(ctx, events.NewProjectionEvent(eventID,
+
+		events.EventType("custom.completion_failure"),
+		"api.v1", "", []byte(`{"entity_id":"21000000-0000-0000-0000-000000000022"}`), 0, eventBusTestRunID, "", events.EventEnvelope{}, time.Now().UTC()).
+		WithEntityID("21000000-0000-0000-0000-000000000022")); err != nil {
 		t.Fatalf("Publish with post-commit completion failure: %v", err)
 	}
 	ok, err := pg.EventExists(ctx, eventID)
@@ -564,8 +549,8 @@ func TestEventBusPublishTransactionalPostCommitCompletionFailureIsRecoverable(t 
 		t.Fatalf("logger entries = %#v, want publish_post_commit_convergence_failed", logger.entries)
 	}
 	got := requireBusEvent(t, ch, "post-commit completion failure delivery")
-	if got.ID != eventID {
-		t.Fatalf("delivered event = %s, want %s", got.ID, eventID)
+	if got.ID() != eventID {
+		t.Fatalf("delivered event = %s, want %s", got.ID(), eventID)
 	}
 }
 
@@ -613,7 +598,7 @@ func loadPipelineReceiptOutcomeAndError(t *testing.T, ctx context.Context, db *s
 
 func containsMissingPipelineReceiptEvent(items []events.PersistedReplayEvent, eventID string) bool {
 	for _, evt := range items {
-		if strings.TrimSpace(evt.Event.ID) == strings.TrimSpace(eventID) {
+		if strings.TrimSpace(evt.Event.ID()) == strings.TrimSpace(eventID) {
 			return true
 		}
 	}
@@ -655,12 +640,9 @@ func TestEventBusPublish_LogsQueuedDeliveryLifecycleTransition(t *testing.T) {
 	}
 	ch := bus.Subscribe("agent-1", events.EventType("task.requested"))
 
-	evt := events.Event{
-		ID:        uuid.NewString(),
-		Type:      events.EventType("task.requested"),
-		Payload:   []byte(`{"entity_id":"ent-1"}`),
-		CreatedAt: time.Now().UTC(),
-	}.WithEntityID("ent-1")
+	evt := events.NewProjectionEvent(uuid.NewString(),
+		events.EventType("task.requested"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()).
+		WithEntityID("ent-1")
 	if err := bus.Publish(context.Background(), evt); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
@@ -703,13 +685,9 @@ func TestEventBusPublish_AttachesTypedRuntimeDiagnosticLineage(t *testing.T) {
 	})
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 
-	if err := bus.Publish(ctx, events.Event{
-		ID:        eventID,
-		Type:      events.EventType("task.requested"),
-		RunID:     runID,
-		Payload:   []byte(`{"entity_id":"ent-1"}`),
-		CreatedAt: time.Now().UTC(),
-	}.WithEntityID("ent-1")); err != nil {
+	if err := bus.Publish(ctx, events.NewProjectionEvent(eventID,
+		events.EventType("task.requested"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC()).
+		WithEntityID("ent-1")); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 
@@ -747,13 +725,9 @@ func TestEventBusPublish_AttachesBundleSourceFactToRuntimeLogs(t *testing.T) {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	ch := bus.Subscribe("agent-1", events.EventType("task.requested"))
-	if err := bus.Publish(context.Background(), events.Event{
-		ID:        uuid.NewString(),
-		Type:      events.EventType("task.requested"),
-		RunID:     uuid.NewString(),
-		Payload:   []byte(`{"entity_id":"ent-1"}`),
-		CreatedAt: time.Now().UTC(),
-	}.WithEntityID("ent-1")); err != nil {
+	if err := bus.Publish(context.Background(), events.NewProjectionEvent(uuid.NewString(),
+		events.EventType("task.requested"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC()).
+		WithEntityID("ent-1")); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	_ = requireBusEvent(t, ch, "bundle source fact delivery")
@@ -780,10 +754,7 @@ func TestEventBusPublish_UsesPayloadValidator(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.Publish(context.Background(), events.Event{
-		Type:    "task.completed",
-		Payload: []byte(`{"ok":true}`),
-	}); err != nil {
+	if err := eb.Publish(context.Background(), events.NewProjectionEvent("", "task.completed", "", "", []byte(`{"ok":true}`), 0, "", "", events.EventEnvelope{}, time.Time{})); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 }
@@ -797,10 +768,7 @@ func TestEventBusPublish_PayloadValidatorFailureAbortsPublish(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	err = eb.Publish(context.Background(), events.Event{
-		Type:    "task.completed",
-		Payload: []byte(`{}`),
-	})
+	err = eb.Publish(context.Background(), events.NewProjectionEvent("", "task.completed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}))
 	if err == nil || !errors.Is(err, runtimebus.ErrPayloadValidation) {
 		t.Fatalf("expected payload validator failure, got %v", err)
 	}
@@ -814,12 +782,9 @@ func TestEventBusPublish_FailsClosedWhenReplayCapableAtomicStoreOmitsCommittedRe
 	}
 	eb.Subscribe("agent-a", events.EventType("custom.replay.checked"))
 
-	err = eb.Publish(context.Background(), events.Event{
-		ID:        uuid.NewString(),
-		Type:      events.EventType("custom.replay.checked"),
-		Payload:   []byte(`{"ok":true}`),
-		CreatedAt: time.Now().UTC(),
-	})
+	err = eb.Publish(context.Background(), events.NewProjectionEvent(uuid.NewString(),
+		events.EventType("custom.replay.checked"), "", "", []byte(`{"ok":true}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
+	)
 	if !errors.Is(err, runtimereplayclaim.ErrMissingCommittedReplayScope) {
 		t.Fatalf("Publish error = %v, want missing committed replay scope", err)
 	}
@@ -834,10 +799,7 @@ func TestEventBusPublishDirect_PayloadValidatorFailureAbortsPublish(t *testing.T
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	err = eb.PublishDirect(context.Background(), events.Event{
-		Type:    "task.completed",
-		Payload: []byte(`{}`),
-	}, []string{"agent-a"})
+	err = eb.PublishDirect(context.Background(), events.NewProjectionEvent("", "task.completed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}), []string{"agent-a"})
 	if err == nil || !errors.Is(err, runtimebus.ErrPayloadValidation) {
 		t.Fatalf("expected payload validator failure, got %v", err)
 	}
@@ -853,10 +815,7 @@ func TestEventBusCheckDirectRecipients_PayloadValidatorFailureAbortsBeforeRecipi
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 
-	status, err := eb.CheckDirectRecipients(context.Background(), events.Event{
-		Type:    "task.completed",
-		Payload: []byte(`{}`),
-	}, []string{"agent-a"})
+	status, err := eb.CheckDirectRecipients(context.Background(), events.NewProjectionEvent("", "task.completed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}), []string{"agent-a"})
 	if err == nil || !errors.Is(err, runtimebus.ErrPayloadValidation) {
 		t.Fatalf("expected payload validator failure, got %v", err)
 	}
@@ -875,10 +834,7 @@ func TestEventBusCheckPublishRecipientPlanReportsSubscribedPublishWithoutDeliver
 	}
 	ch := eb.Subscribe("agent-a", events.EventType("task.completed"))
 
-	plan, err := eb.CheckPublishRecipientPlan(context.Background(), events.Event{
-		Type:    "task.completed",
-		Payload: []byte(`{"ok":true}`),
-	})
+	plan, err := eb.CheckPublishRecipientPlan(context.Background(), events.NewProjectionEvent("", "task.completed", "", "", []byte(`{"ok":true}`), 0, "", "", events.EventEnvelope{}, time.Time{}))
 	if err != nil {
 		t.Fatalf("CheckPublishRecipientPlan: %v", err)
 	}
@@ -909,12 +865,8 @@ func TestEventBusPublishDirect_PersistsButDoesNotMarkDeliveredBeforeRealFanOut(t
 		t.Fatalf("NewEventBus: %v", err)
 	}
 
-	err = eb.PublishDirect(context.Background(), (events.Event{
-		ID:        uuid.NewString(),
-		Type:      events.EventType("custom.direct"),
-		Payload:   []byte(`{"entity_id":"ent-1"}`),
-		CreatedAt: time.Now().UTC(),
-	}).WithEntityID("ent-1"), []string{"agent-a"})
+	err = eb.PublishDirect(context.Background(), (events.NewProjectionEvent(uuid.NewString(),
+		events.EventType("custom.direct"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID("ent-1"), []string{"agent-a"})
 	if err == nil || !strings.Contains(err.Error(), "authoritative delivery incomplete") {
 		t.Fatalf("PublishDirect missing recipient error = %v, want authoritative delivery incomplete", err)
 	}
@@ -937,11 +889,8 @@ func TestEventBusPublishDirect_FiltersEntityScopedRecipientsByExplicitMetadata(t
 	matchCh := eb.Subscribe("reviewer-ent-1")
 	otherCh := eb.Subscribe("reviewer-ent-2")
 
-	err = eb.PublishDirect(context.Background(), events.Event{
-		Type:      events.EventType("custom.direct"),
-		Payload:   []byte(`{"entity_id":"ent-1"}`),
-		CreatedAt: time.Now().UTC(),
-	}.WithEntityID("ent-1"), []string{"control-plane", "reviewer-ent-1", "reviewer-ent-2", "missing-agent"})
+	err = eb.PublishDirect(context.Background(), events.NewProjectionEvent("", events.EventType("custom.direct"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()).
+		WithEntityID("ent-1"), []string{"control-plane", "reviewer-ent-1", "reviewer-ent-2", "missing-agent"})
 	if err != nil {
 		t.Fatalf("PublishDirect: %v", err)
 	}
@@ -975,11 +924,8 @@ func TestEventBusPublish_FiltersEntityScopedRecipientsByExplicitMetadata(t *test
 	matchCh := eb.Subscribe("reviewer-ent-1", events.EventType("custom.trigger"))
 	otherCh := eb.Subscribe("reviewer-ent-2", events.EventType("custom.trigger"))
 
-	if err := eb.Publish(context.Background(), events.Event{
-		Type:      events.EventType("custom.trigger"),
-		Payload:   []byte(`{"entity_id":"ent-1"}`),
-		CreatedAt: time.Now().UTC(),
-	}.WithEntityID("ent-1")); err != nil {
+	if err := eb.Publish(context.Background(), events.NewProjectionEvent("", events.EventType("custom.trigger"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()).
+		WithEntityID("ent-1")); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 
@@ -1010,11 +956,7 @@ func TestEventBusPublish_FiltersEntityScopedRecipientsByTypedEnvelopeNotPayload(
 	matchCh := eb.Subscribe("reviewer-ent-1", events.EventType("custom.trigger"))
 	otherCh := eb.Subscribe("reviewer-ent-2", events.EventType("custom.trigger"))
 
-	err = eb.Publish(context.Background(), (events.Event{
-		Type:      events.EventType("custom.trigger"),
-		Payload:   []byte(`{"entity_id":"ent-2"}`),
-		CreatedAt: time.Now().UTC(),
-	}).WithEnvelope(events.EventEnvelope{EntityID: "ent-1"}))
+	err = eb.Publish(context.Background(), (events.NewProjectionEvent("", events.EventType("custom.trigger"), "", "", []byte(`{"entity_id":"ent-2"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())).WithEnvelope(events.EventEnvelope{EntityID: "ent-1"}))
 	if err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
@@ -1040,11 +982,8 @@ func TestEventBusPublish_DropsRecipientsMissingExplicitDescriptor(t *testing.T) 
 	controlCh := eb.Subscribe("control-plane", events.EventType("custom.trigger"))
 	missingCh := eb.Subscribe("reviewer-ent-1", events.EventType("custom.trigger"))
 
-	if err := eb.Publish(context.Background(), events.Event{
-		Type:      events.EventType("custom.trigger"),
-		Payload:   []byte(`{"entity_id":"ent-1"}`),
-		CreatedAt: time.Now().UTC(),
-	}.WithEntityID("ent-1")); err != nil {
+	if err := eb.Publish(context.Background(), events.NewProjectionEvent("", events.EventType("custom.trigger"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()).
+		WithEntityID("ent-1")); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 
@@ -1069,11 +1008,8 @@ func TestEventBusPublish_KeepsInternalSubscribersLiveOnlyUnderDescriptorPlanning
 	agentCh := eb.Subscribe("agent-a", events.EventType("custom.trigger"))
 	missingCh := eb.Subscribe("agent-missing", events.EventType("custom.trigger"))
 
-	if err := eb.Publish(context.Background(), events.Event{
-		Type:      events.EventType("custom.trigger"),
-		Payload:   []byte(`{"entity_id":"ent-1"}`),
-		CreatedAt: time.Now().UTC(),
-	}.WithEntityID("ent-1")); err != nil {
+	if err := eb.Publish(context.Background(), events.NewProjectionEvent("", events.EventType("custom.trigger"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()).
+		WithEntityID("ent-1")); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 
@@ -1111,11 +1047,7 @@ func TestEventBusPublishDeferred_UsesCanonicalSubscribedRecipientFiltering(t *te
 	agentCh := eb.Subscribe("agent-a", events.EventType("custom.middle"))
 	otherCh := eb.Subscribe("agent-b", events.EventType("custom.middle"))
 
-	if err := eb.Publish(context.Background(), (events.Event{
-		Type:      events.EventType("custom.root"),
-		Payload:   []byte(`{"entity_id":"ent-1"}`),
-		CreatedAt: time.Now().UTC(),
-	}).WithEntityID("ent-1")); err != nil {
+	if err := eb.Publish(context.Background(), (events.NewProjectionEvent("", events.EventType("custom.root"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID("ent-1")); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 
@@ -1142,11 +1074,8 @@ func TestEventBusPublish_FailsClosedWhenDescriptorLookupFails(t *testing.T) {
 	}
 	ch := eb.Subscribe("reviewer-ent-1", events.EventType("custom.trigger"))
 
-	err = eb.Publish(context.Background(), events.Event{
-		Type:      events.EventType("custom.trigger"),
-		Payload:   []byte(`{"entity_id":"ent-1"}`),
-		CreatedAt: time.Now().UTC(),
-	}.WithEntityID("ent-1"))
+	err = eb.Publish(context.Background(), events.NewProjectionEvent("", events.EventType("custom.trigger"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()).
+		WithEntityID("ent-1"))
 	if err == nil || !strings.Contains(err.Error(), "descriptor lookup failed") {
 		t.Fatalf("Publish error = %v, want descriptor lookup failure", err)
 	}
@@ -1168,7 +1097,7 @@ func TestEventBusWaitForQuiescenceWaitsForPublishCompletion(t *testing.T) {
 
 	publishDone := make(chan error, 1)
 	go func() {
-		publishDone <- eb.Publish(context.Background(), events.Event{Type: "task.completed", Payload: []byte(`{}`)})
+		publishDone <- eb.Publish(context.Background(), events.NewProjectionEvent("", "task.completed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}))
 	}()
 
 	requireSignalBefore(t, started, 500*time.Millisecond, "interceptor start")
@@ -1212,14 +1141,18 @@ func TestEventBusPublishAcknowledgedReturnsBeforePostCommitDispatchCompletes(t *
 
 	publishDone := make(chan error, 1)
 	go func() {
-		publishDone <- eb.PublishAcknowledged(ctx, events.Event{
-			ID:          eventID,
-			RunID:       eventBusTestRunID,
-			Type:        events.EventType("task.completed"),
-			SourceAgent: "api.v1",
-			CreatedAt:   time.Now().UTC(),
-			Payload:     []byte(`{"entity_id":"11111111-1111-1111-1111-111111111137"}`),
-		}.WithEntityID("11111111-1111-1111-1111-111111111137"))
+		publishDone <- eb.PublishAcknowledged(ctx, events.NewProjectionEvent(
+			eventID,
+			events.EventType("task.completed"),
+			"api.v1",
+			"",
+			[]byte(`{"entity_id":"11111111-1111-1111-1111-111111111137"}`),
+			0,
+			eventBusTestRunID,
+			"",
+			events.EventEnvelope{EntityID: "11111111-1111-1111-1111-111111111137"},
+			time.Now().UTC(),
+		))
 	}()
 	if err := requireErrorBefore(t, publishDone, 250*time.Millisecond, "acknowledged publish return before interceptor release"); err != nil {
 		t.Fatalf("PublishAcknowledged: %v", err)
@@ -1262,8 +1195,8 @@ func TestEventBusPublishAcknowledgedReturnsBeforePostCommitDispatchCompletes(t *
 	case <-deliveryTimer.C:
 		t.Fatal("acknowledged publish delivery: timed out waiting for queued bus event")
 	}
-	if got.ID != eventID {
-		t.Fatalf("delivered event id = %s, want %s", got.ID, eventID)
+	if got.ID() != eventID {
+		t.Fatalf("delivered event id = %s, want %s", got.ID(), eventID)
 	}
 	waitCtx, cancel = context.WithTimeout(context.Background(), 250*time.Millisecond)
 	defer cancel()
@@ -1280,10 +1213,7 @@ func TestEventBusPublish_InterceptsMultiHopDeferredChains(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.Publish(context.Background(), (events.Event{
-		Type:      events.EventType("custom.root"),
-		CreatedAt: time.Now().UTC(),
-	}).WithEntityID("ent-1")); err != nil {
+	if err := eb.Publish(context.Background(), (events.NewProjectionEvent("", events.EventType("custom.root"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID("ent-1")); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	if got := store.eventTypes(); len(got) < 4 || got[0] != "custom.root" || got[1] != "custom.middle" || got[2] != "custom.leaf" || got[3] != "custom.final" {
@@ -1299,10 +1229,7 @@ func TestEventBusPublishNonTransactional_PersistsBeforeInterceptorsRun(t *testin
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.Publish(context.Background(), (events.Event{
-		Type:      events.EventType("custom.non_transactional"),
-		CreatedAt: time.Now().UTC(),
-	}).WithEntityID("ent-1")); err != nil {
+	if err := eb.Publish(context.Background(), (events.NewProjectionEvent("", events.EventType("custom.non_transactional"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID("ent-1")); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 }
@@ -1331,20 +1258,17 @@ func TestEventBusPublishTransactional_RunsInterceptorsAfterCommit(t *testing.T) 
 	}
 	ch := eb.Subscribe(agentID, events.EventType("task.completed"))
 	defer eb.Unsubscribe(agentID)
-	if err := eb.Publish(ctx, events.Event{
-		ID:          eventID,
-		RunID:       eventBusTestRunID,
-		Type:        events.EventType("task.completed"),
-		SourceAgent: "api.v1",
-		CreatedAt:   time.Now().UTC(),
-		Payload:     []byte(`{"entity_id":"11111111-1111-1111-1111-111111111114"}`),
-	}.WithEntityID("11111111-1111-1111-1111-111111111114")); err != nil {
+	if err := eb.Publish(ctx, events.NewProjectionEvent(eventID,
+
+		events.EventType("task.completed"),
+		"api.v1", "", []byte(`{"entity_id":"11111111-1111-1111-1111-111111111114"}`), 0, eventBusTestRunID, "", events.EventEnvelope{}, time.Now().UTC()).
+		WithEntityID("11111111-1111-1111-1111-111111111114")); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	requireSignalBefore(t, called, time.Second, "post-commit interceptor")
 	got := requireBusEvent(t, ch, "post-commit delivery")
-	if got.ID != eventID {
-		t.Fatalf("delivered event id = %s, want %s", got.ID, eventID)
+	if got.ID() != eventID {
+		t.Fatalf("delivered event id = %s, want %s", got.ID(), eventID)
 	}
 }
 
@@ -1366,13 +1290,10 @@ func TestEventBusPublishTransactional_ReturnsPostCommitInterceptorErrorAndRecord
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	err = eb.Publish(ctx, events.Event{
-		ID:        eventID,
-		RunID:     eventBusTestRunID,
-		Type:      events.EventType("task.failed"),
-		CreatedAt: time.Now().UTC(),
-		Payload:   []byte(`{"entity_id":"11111111-1111-1111-1111-111111111114"}`),
-	}.WithEntityID("11111111-1111-1111-1111-111111111114"))
+	err = eb.Publish(ctx, events.NewProjectionEvent(eventID,
+
+		events.EventType("task.failed"), "", "", []byte(`{"entity_id":"11111111-1111-1111-1111-111111111114"}`), 0, eventBusTestRunID, "", events.EventEnvelope{}, time.Now().UTC()).
+		WithEntityID("11111111-1111-1111-1111-111111111114"))
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("Publish error = %v, want %v", err, wantErr)
 	}
@@ -1415,14 +1336,11 @@ func TestEventBusPublishTxRunsInterceptorsAfterCallerCommit(t *testing.T) {
 	}
 	postCommitActions := make([]func(), 0, 1)
 	txctx := runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommitActions)
-	if err := eb.PublishTx(txctx, tx, events.Event{
-		ID:          eventID,
-		RunID:       eventBusTestRunID,
-		Type:        events.EventType("custom.publish_tx_post_commit"),
-		SourceAgent: "api.v1",
-		Payload:     []byte(`{"entity_id":"11111111-1111-1111-1111-111111111113"}`),
-		CreatedAt:   time.Now().UTC(),
-	}.WithEntityID("11111111-1111-1111-1111-111111111113")); err != nil {
+	if err := eb.PublishTx(txctx, tx, events.NewProjectionEvent(eventID,
+
+		events.EventType("custom.publish_tx_post_commit"),
+		"api.v1", "", []byte(`{"entity_id":"11111111-1111-1111-1111-111111111113"}`), 0, eventBusTestRunID, "", events.EventEnvelope{}, time.Now().UTC()).
+		WithEntityID("11111111-1111-1111-1111-111111111113")); err != nil {
 		_ = tx.Rollback()
 		t.Fatalf("PublishTx: %v", err)
 	}
@@ -1469,12 +1387,8 @@ func TestEventBusPublishTransactional_RecordsTargetFailureDeadLetter(t *testing.
 	}
 	eventID := uuid.NewString()
 	targetEntityID := uuid.NewString()
-	err = eb.PublishTx(ctx, tx, (events.Event{
-		ID:        eventID,
-		Type:      events.EventType("child/output.done"),
-		CreatedAt: time.Now().UTC(),
-		Payload:   []byte(`{}`),
-	}).WithTargetRoute(events.RouteIdentity{EntityID: targetEntityID, FlowInstance: "missing-flow"}))
+	err = eb.PublishTx(ctx, tx, (events.NewProjectionEvent(eventID,
+		events.EventType("child/output.done"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())).WithTargetRoute(events.RouteIdentity{EntityID: targetEntityID, FlowInstance: "missing-flow"}))
 	if err != nil {
 		_ = tx.Rollback()
 		t.Fatalf("PublishTx: %v", err)
@@ -1512,14 +1426,11 @@ func TestEventBusPublish_ClassifiesRunBundleSourceThroughRunLifecycleOwner(t *te
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.Publish(context.Background(), events.Event{
-		ID:          uuid.NewString(),
-		RunID:       runID,
-		Type:        events.EventType("scan.requested"),
-		SourceAgent: "test",
-		CreatedAt:   time.Now().UTC(),
-		Payload:     []byte(`{}`),
-	}); err != nil {
+	if err := eb.Publish(context.Background(), events.NewProjectionEvent(uuid.NewString(),
+
+		events.EventType("scan.requested"),
+		"test", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC()),
+	); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	var bundleHash, bundleSource, legacyFingerprint string
@@ -1556,14 +1467,10 @@ func TestEventBusPublishDirect_StampsBundleSourceFactOnRunRow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.PublishDirect(context.Background(), events.Event{
-		ID:          uuid.NewString(),
-		RunID:       runID,
-		Type:        events.EventType("scan.requested"),
-		SourceAgent: "test",
-		CreatedAt:   time.Now().UTC(),
-		Payload:     []byte(`{}`),
-	}, []string{"agent-a"}); err != nil {
+	if err := eb.PublishDirect(context.Background(), events.NewProjectionEvent(uuid.NewString(),
+
+		events.EventType("scan.requested"),
+		"test", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC()), []string{"agent-a"}); err != nil {
 		t.Fatalf("PublishDirect: %v", err)
 	}
 	var bundleHash, bundleSource, legacyFingerprint string
@@ -1594,12 +1501,9 @@ func TestEventBusPublishDeferred_RunsInterceptorsAfterDeferredEventCommit(t *tes
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.Publish(context.Background(), events.Event{
-		ID:        "11111111-1111-1111-1111-111111111111",
-		Type:      events.EventType("custom.root"),
-		CreatedAt: time.Now().UTC(),
-		Payload:   []byte(`{"entity_id":"ent-1"}`),
-	}); err != nil {
+	if err := eb.Publish(context.Background(), events.NewProjectionEvent("11111111-1111-1111-1111-111111111111",
+		events.EventType("custom.root"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
+	); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 }
@@ -1610,28 +1514,25 @@ func TestEventBusPublish_InheritsRunAndParentFromInboundContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	ctx := runtimecorrelation.WithInboundEvent(context.Background(), events.Event{
-		ID:    "evt-parent",
-		Type:  events.EventType("task.started"),
-		RunID: "run-abc",
-	})
-	if err := eb.Publish(ctx, events.Event{
-		ID:   "evt-child",
-		Type: events.EventType("task.completed"),
-	}); err != nil {
+	ctx := runtimecorrelation.WithInboundEvent(context.Background(), events.NewProjectionEvent("evt-parent",
+		events.EventType("task.started"), "", "", nil, 0, "run-abc", "", events.EventEnvelope{}, time.Time{}),
+	)
+	if err := eb.Publish(ctx, events.NewProjectionEvent("evt-child",
+		events.EventType("task.completed"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+	); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	if len(store.events) != 1 {
 		found := false
 		for _, evt := range store.events {
-			if evt.ID != "evt-child" {
+			if evt.ID() != "evt-child" {
 				continue
 			}
 			found = true
-			if got := evt.RunID; got != "run-abc" {
+			if got := evt.RunID(); got != "run-abc" {
 				t.Fatalf("persisted run_id = %q, want run-abc", got)
 			}
-			if got := evt.ParentEventID; got != "evt-parent" {
+			if got := evt.ParentEventID(); got != "evt-parent" {
 				t.Fatalf("persisted parent_event_id = %q, want evt-parent", got)
 			}
 		}
@@ -1640,10 +1541,10 @@ func TestEventBusPublish_InheritsRunAndParentFromInboundContext(t *testing.T) {
 		}
 		return
 	}
-	if got := store.events[0].RunID; got != "run-abc" {
+	if got := store.events[0].RunID(); got != "run-abc" {
 		t.Fatalf("persisted run_id = %q, want run-abc", got)
 	}
-	if got := store.events[0].ParentEventID; got != "evt-parent" {
+	if got := store.events[0].ParentEventID(); got != "evt-parent" {
 		t.Fatalf("persisted parent_event_id = %q, want evt-parent", got)
 	}
 }
@@ -1654,10 +1555,9 @@ func TestEventBusPublish_ZeroRecipientsDoesNotEmitContradiction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	if err := eb.Publish(context.Background(), events.Event{
-		ID:   "evt-zero",
-		Type: events.EventType("custom.no_subscribers"),
-	}); err != nil {
+	if err := eb.Publish(context.Background(), events.NewProjectionEvent("evt-zero",
+		events.EventType("custom.no_subscribers"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+	); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	got := store.eventTypes()
@@ -1672,10 +1572,9 @@ func TestEventBusPublish_RuntimeLogBypassesContradictionRouting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	if err := eb.Publish(context.Background(), events.Event{
-		ID:   "evt-log",
-		Type: events.EventType("platform.runtime_log"),
-	}); err != nil {
+	if err := eb.Publish(context.Background(), events.NewProjectionEvent("evt-log",
+		events.EventType("platform.runtime_log"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+	); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	got := store.eventTypes()
@@ -1717,19 +1616,16 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeWithoutPersis
 			internal := eb.SubscribeInternal("internal-"+string(tc.eventType), tc.eventType)
 			defer eb.Unsubscribe("internal-" + string(tc.eventType))
 
-			if err := eb.Publish(ctx, events.Event{
-				ID:          tc.eventID,
-				Type:        tc.eventType,
-				SourceAgent: "runtime",
-				Payload:     []byte(`{}`),
-				CreatedAt:   time.Now().UTC(),
-			}); err != nil {
+			if err := eb.Publish(ctx, events.NewProjectionEvent(tc.eventID,
+				tc.eventType,
+				"runtime", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
+			); err != nil {
 				t.Fatalf("Publish(%s): %v", tc.eventType, err)
 			}
 
 			got := requireBusEvent(t, internal, "standalone platform event internal delivery")
-			if got.ID != tc.eventID {
-				t.Fatalf("internal delivery event_id = %q, want %q", got.ID, tc.eventID)
+			if got.ID() != tc.eventID {
+				t.Fatalf("internal delivery event_id = %q, want %q", got.ID(), tc.eventID)
 			}
 
 			runID, runStatus, triggerEventType := loadRunStateForEvent(t, ctx, db, tc.eventID)
@@ -1795,19 +1691,16 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeAfterFinalRec
 			subscription := eb.Subscribe(agentID, tc.eventType)
 			defer eb.Unsubscribe(agentID)
 
-			if err := eb.Publish(ctx, events.Event{
-				ID:          tc.eventID,
-				Type:        tc.eventType,
-				SourceAgent: "runtime",
-				Payload:     []byte(`{}`),
-				CreatedAt:   time.Now().UTC(),
-			}); err != nil {
+			if err := eb.Publish(ctx, events.NewProjectionEvent(tc.eventID,
+				tc.eventType,
+				"runtime", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
+			); err != nil {
 				t.Fatalf("Publish(%s): %v", tc.eventType, err)
 			}
 
 			got := requireBusEvent(t, subscription, "standalone agent event delivery")
-			if got.ID != tc.eventID {
-				t.Fatalf("delivered event_id = %q, want %q", got.ID, tc.eventID)
+			if got.ID() != tc.eventID {
+				t.Fatalf("delivered event_id = %q, want %q", got.ID(), tc.eventID)
 			}
 
 			if got := countEventDeliveriesForEvent(t, ctx, db, tc.eventID); got != 1 {
@@ -1860,14 +1753,11 @@ func TestEventBusRuntimeIngressPauseQueuesAndResumeReleases(t *testing.T) {
 	}
 
 	eventID := "21000000-0000-0000-0000-000000000001"
-	if err := eb.Publish(ctx, events.Event{
-		ID:          eventID,
-		RunID:       eventBusTestRunID,
-		Type:        eventType,
-		SourceAgent: "api.v1",
-		Payload:     []byte(`{"entity_id":"21000000-0000-0000-0000-000000000002"}`),
-		CreatedAt:   time.Now().UTC(),
-	}.WithEntityID("21000000-0000-0000-0000-000000000002")); err != nil {
+	if err := eb.Publish(ctx, events.NewProjectionEvent(eventID,
+
+		eventType,
+		"api.v1", "", []byte(`{"entity_id":"21000000-0000-0000-0000-000000000002"}`), 0, eventBusTestRunID, "", events.EventEnvelope{}, time.Now().UTC()).
+		WithEntityID("21000000-0000-0000-0000-000000000002")); err != nil {
 		t.Fatalf("Publish while paused: %v", err)
 	}
 
@@ -1890,8 +1780,8 @@ func TestEventBusRuntimeIngressPauseQueuesAndResumeReleases(t *testing.T) {
 		t.Fatalf("released count = %d, want 1", resumed.ReleasedCount)
 	}
 	got := requireBusEvent(t, ch, "queued event release after resume")
-	if got.ID != eventID {
-		t.Fatalf("delivered event = %s, want %s", got.ID, eventID)
+	if got.ID() != eventID {
+		t.Fatalf("delivered event = %s, want %s", got.ID(), eventID)
 	}
 	if got := countPipelineReceiptsForEvent(t, ctx, db, eventID); got != 1 {
 		t.Fatalf("pipeline receipts after resume = %d, want 1", got)
@@ -1906,10 +1796,7 @@ func TestEventBusPublish_HumanTaskEventsRouteBySubscriptionOnly(t *testing.T) {
 	ch := eb.Subscribe("requester")
 	defer eb.Unsubscribe("requester")
 
-	if err := eb.Publish(context.Background(), events.Event{
-		Type:    events.EventType("human_task.approved"),
-		Payload: []byte(`{"requesting_agent":"requester"}`),
-	}); err != nil {
+	if err := eb.Publish(context.Background(), events.NewProjectionEvent("", events.EventType("human_task.approved"), "", "", []byte(`{"requesting_agent":"requester"}`), 0, "", "", events.EventEnvelope{}, time.Time{})); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 
@@ -1964,9 +1851,7 @@ func TestEventBusPublish_LogsRoutedAndSubscribedRecipientsSeparately(t *testing.
 	defer eb.Unsubscribe("direct-agent")
 	defer eb.Unsubscribe("scan-orchestrator")
 
-	if err := eb.Publish(context.Background(), events.Event{
-		Type: events.EventType("producer/scan.requested"),
-	}); err != nil {
+	if err := eb.Publish(context.Background(), events.NewProjectionEvent("", events.EventType("producer/scan.requested"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 
@@ -2068,9 +1953,7 @@ func TestEventBusPublish_RecordsPublishDiagnosticsInTurnRecorder(t *testing.T) {
 	defer eb.Unsubscribe("scan-orchestrator")
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx := runtimebus.WithEmittedEventsRecorder(context.Background(), recorder)
-	if err := eb.Publish(ctx, (events.Event{
-		Type: "producer/scan.requested",
-	}).WithEntityID("ent-1")); err != nil {
+	if err := eb.Publish(ctx, (events.NewProjectionEvent("", "producer/scan.requested", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID("ent-1")); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	diags := recorder.SnapshotPublishes()
@@ -2171,14 +2054,9 @@ func TestEventBusPublish_NestedDescendantCompletionDoesNotEmitChildContinuation(
 		}
 	}
 
-	if err := eb.Publish(ctx, (events.Event{
-		ID:          "11111111-2222-3333-4444-555555555555",
-		Type:        events.EventType("child/grandchild/micro.done"),
-		SourceAgent: "cataloge2e",
-		RunID:       eventBusTestRunID,
-		Payload:     []byte(`{"entity_id":"` + grandchildEntityID + `"}`),
-		CreatedAt:   time.Now().UTC(),
-	}).WithEntityID(grandchildEntityID)); err != nil {
+	if err := eb.Publish(ctx, (events.NewProjectionEvent("11111111-2222-3333-4444-555555555555",
+		events.EventType("child/grandchild/micro.done"),
+		"cataloge2e", "", []byte(`{"entity_id":"`+grandchildEntityID+`"}`), 0, eventBusTestRunID, "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID(grandchildEntityID)); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	if err := eb.WaitForQuiescence(ctx); err != nil {
@@ -2286,14 +2164,9 @@ func TestEventBusPublish_NestedThreeLevelChain_FromRootStartCompletesWithoutChil
 		t.Fatalf("seed root instance: %v", err)
 	}
 
-	if err := eb.Publish(ctx, (events.Event{
-		ID:          "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
-		Type:        events.EventType("pipeline.start"),
-		SourceAgent: "cataloge2e",
-		RunID:       eventBusTestRunID,
-		Payload:     []byte(`{"entity_id":"` + rootEntityID + `"}`),
-		CreatedAt:   time.Now().UTC(),
-	}).WithEntityID(rootEntityID)); err != nil {
+	if err := eb.Publish(ctx, (events.NewProjectionEvent("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+		events.EventType("pipeline.start"),
+		"cataloge2e", "", []byte(`{"entity_id":"`+rootEntityID+`"}`), 0, eventBusTestRunID, "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID(rootEntityID)); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	if err := eb.WaitForQuiescence(ctx); err != nil {
@@ -2419,14 +2292,9 @@ func TestEventBusPublish_GatedChildFlowCompletionAdvancesRoot(t *testing.T) {
 		t.Fatalf("seed root instance: %v", err)
 	}
 
-	if err := eb.Publish(ctx, (events.Event{
-		ID:          "11111111-2222-3333-4444-555555555555",
-		Type:        events.EventType("validate.requested"),
-		SourceAgent: "cataloge2e",
-		RunID:       eventBusTestRunID,
-		Payload:     []byte(`{"entity_id":"` + rootEntityID + `"}`),
-		CreatedAt:   time.Now().UTC(),
-	}).WithEntityID(rootEntityID)); err != nil {
+	if err := eb.Publish(ctx, (events.NewProjectionEvent("11111111-2222-3333-4444-555555555555",
+		events.EventType("validate.requested"),
+		"cataloge2e", "", []byte(`{"entity_id":"`+rootEntityID+`"}`), 0, eventBusTestRunID, "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID(rootEntityID)); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	if err := eb.WaitForQuiescence(ctx); err != nil {
@@ -2506,9 +2374,7 @@ func TestEventBusPublish_RecordsNestedDescendantLocalizedEvent(t *testing.T) {
 	defer eb.Unsubscribe("child-aggregator")
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx := runtimebus.WithEmittedEventsRecorder(context.Background(), recorder)
-	if err := eb.Publish(ctx, (events.Event{
-		Type: "child/grandchild/micro.done",
-	}).WithEntityID("ent-grandchild")); err != nil {
+	if err := eb.Publish(ctx, (events.NewProjectionEvent("", "child/grandchild/micro.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID("ent-grandchild")); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	diags := recorder.SnapshotPublishes()
@@ -2565,9 +2431,7 @@ func TestEventBusPublish_RecordsNestedTemplateInstanceLocalizedEvent(t *testing.
 	defer eb.Unsubscribe("worker-inst-1")
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx := runtimebus.WithEmittedEventsRecorder(context.Background(), recorder)
-	if err := eb.Publish(ctx, (events.Event{
-		Type: "child/grandchild/inst-1/micro.done",
-	}).WithEntityID("ent-grandchild")); err != nil {
+	if err := eb.Publish(ctx, (events.NewProjectionEvent("", "child/grandchild/inst-1/micro.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID("ent-grandchild")); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	diags := recorder.SnapshotPublishes()

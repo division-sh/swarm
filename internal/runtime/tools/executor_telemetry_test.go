@@ -60,13 +60,9 @@ func selectedForkToolContext(actor models.AgentConfig) context.Context {
 		Classification:      runtimecorrelation.RuntimeLineageClassificationForkLocal,
 		SelectedForkContext: true,
 	})
-	return runtimebus.WithInboundEvent(ctx, events.Event{
-		ID:        eventID,
-		Type:      events.EventType("validation/validation.package_ready"),
-		RunID:     runID,
-		Payload:   []byte(`{"entity_id":"entity-typed-lineage"}`),
-		CreatedAt: testTime(),
-	}.WithEntityID("entity-typed-lineage"))
+	return runtimebus.WithInboundEvent(ctx, events.NewProjectionEvent(eventID,
+		events.EventType("validation/validation.package_ready"), "", "", []byte(`{"entity_id":"entity-typed-lineage"}`), 0, runID, "", events.EventEnvelope{}, testTime()).
+		WithEntityID("entity-typed-lineage"))
 }
 
 func assertToolExecutorDiagnosticLineage(t *testing.T, bus *telemetryBusStub, index int) {
@@ -362,13 +358,10 @@ func TestExecutorTelemetry_EmitToolLogsStructuredPublishedOutcome(t *testing.T) 
 			"category.assessed",
 		},
 	})
-	ctx = runtimebus.WithInboundEvent(ctx, events.Event{
-		ID:        "evt-inbound",
-		Type:      events.EventType("trigger.input"),
-		TaskID:    "task-inbound",
-		Payload:   []byte(`{"entity_id":"entity-inbound"}`),
-		CreatedAt: testTime(),
-	}.WithEntityID("entity-inbound"))
+	ctx = runtimebus.WithInboundEvent(ctx, events.NewProjectionEvent("evt-inbound",
+		events.EventType("trigger.input"), "", "task-inbound",
+		[]byte(`{"entity_id":"entity-inbound"}`), 0, "", "", events.EventEnvelope{}, testTime()).
+		WithEntityID("entity-inbound"))
 
 	if _, err := exec.Execute(ctx, "emit_category_assessed", map[string]any{"category": "AP automation"}); err != nil {
 		t.Fatalf("Execute(emit): %v", err)
@@ -410,7 +403,7 @@ func TestExecutorTelemetry_EmitToolLogsStructuredPublishedOutcome(t *testing.T) 
 	if got := bus.published[0].EntityID(); got != "entity-actor" {
 		t.Fatalf("published event entity_id = %q, want entity-actor", got)
 	}
-	if got := bus.published[0].TaskID; got != "task-inbound" {
+	if got := bus.published[0].TaskID(); got != "task-inbound" {
 		t.Fatalf("published event task_id = %q, want task-inbound", got)
 	}
 }
@@ -511,13 +504,10 @@ func TestExecutorTelemetry_EmitToolLogsUndeclaredFieldSchemaValidationFailure(t 
 			"category.assessed",
 		},
 	})
-	ctx = runtimebus.WithInboundEvent(ctx, events.Event{
-		ID:        "evt-inbound",
-		Type:      events.EventType("trigger.input"),
-		TaskID:    "task-inbound",
-		Payload:   []byte(`{"entity_id":"entity-inbound"}`),
-		CreatedAt: testTime(),
-	}.WithEntityID("entity-inbound"))
+	ctx = runtimebus.WithInboundEvent(ctx, events.NewProjectionEvent("evt-inbound",
+		events.EventType("trigger.input"), "", "task-inbound",
+		[]byte(`{"entity_id":"entity-inbound"}`), 0, "", "", events.EventEnvelope{}, testTime()).
+		WithEntityID("entity-inbound"))
 
 	if _, err := exec.Execute(ctx, "emit_category_assessed", map[string]any{
 		"category":   "AP automation",

@@ -19,13 +19,9 @@ func TestOperatorMailboxHandlersSQLiteReadsMaterializedMailboxWrite(t *testing.T
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	entityID := uuid.NewString()
-	if err := sqliteStore.AppendEvent(ctx, (events.Event{
-		ID:        eventID,
-		RunID:     runID,
-		Type:      "mailbox.review_requested",
-		Payload:   json.RawMessage(`{"kind":"review"}`),
-		CreatedAt: time.Now().UTC(),
-	}).WithEntityID(entityID).WithFlowInstance("validation/case-1")); err != nil {
+	if err := sqliteStore.AppendEvent(ctx, (events.NewProjectionEvent(eventID,
+
+		"mailbox.review_requested", "", "", json.RawMessage(`{"kind":"review"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID(entityID).WithFlowInstance("validation/case-1")); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
 	itemID := uuid.NewString()

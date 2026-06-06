@@ -30,9 +30,9 @@ func (a *chatTestAgent) OnEvent(context.Context, events.Event) ([]events.Event, 
 func (a *chatTestAgent) BoardStep(_ context.Context, directive runtimeagentcontrol.BoardDirective) (string, error) {
 	a.calls++
 	a.directive = directive.Directive
-	a.runID = directive.Event.RunID
-	a.directiveEvent = directive.Event.ID
-	a.directiveSource = string(directive.Event.Type)
+	a.runID = directive.Event.RunID()
+	a.directiveEvent = directive.Event.ID()
+	a.directiveSource = string(directive.Event.Type())
 	return "ok", nil
 }
 
@@ -142,7 +142,7 @@ func TestAgentManager_ChatWithAgentPersistsDirectiveEventBeforeBoardStep(t *test
 	if eventCount != 1 {
 		t.Fatalf("persisted directive events = %d, want 1", eventCount)
 	}
-	if bus.store.events[0].ID != agent.directiveEvent || bus.store.events[0].RunID != agent.runID {
+	if bus.store.events[0].ID() != agent.directiveEvent || bus.store.events[0].RunID() != agent.runID {
 		t.Fatalf("persisted directive event = %#v, board saw event=%q run=%q", bus.store.events[0], agent.directiveEvent, agent.runID)
 	}
 }
@@ -187,11 +187,11 @@ func TestAgentManager_SendDirectivePersistsCanonicalDirectiveEventBeforeBoardSte
 		t.Fatalf("persisted directive events = %d, want 1", eventCount)
 	}
 	evt := bus.store.events[0]
-	if string(evt.Type) != runtimeagentcontrol.DirectiveEventType || evt.RunID != runID || evt.ID == "" {
+	if string(evt.Type()) != runtimeagentcontrol.DirectiveEventType || evt.RunID() != runID || evt.ID() == "" {
 		t.Fatalf("directive event = %#v", evt)
 	}
-	if agent.calls != 1 || agent.runID != runID || agent.directiveEvent != evt.ID {
-		t.Fatalf("board step saw calls=%d run=%q event=%q, want event %q", agent.calls, agent.runID, agent.directiveEvent, evt.ID)
+	if agent.calls != 1 || agent.runID != runID || agent.directiveEvent != evt.ID() {
+		t.Fatalf("board step saw calls=%d run=%q event=%q, want event %q", agent.calls, agent.runID, agent.directiveEvent, evt.ID())
 	}
 }
 

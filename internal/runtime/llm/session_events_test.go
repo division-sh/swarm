@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
+	"time"
 )
 
 type eventPublisherStub struct {
@@ -121,11 +122,11 @@ func TestAnthropicAPIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 		t.Fatalf("expected no delivery lifecycle log without a real delivery mark, got %d", len(publisher.runtimeLogs))
 	}
 	evt := publisher.events[0]
-	if evt.Type != events.EventType("platform.agent_started") {
-		t.Fatalf("event type = %s, want platform.agent_started", evt.Type)
+	if evt.Type() != events.EventType("platform.agent_started") {
+		t.Fatalf("event type = %s, want platform.agent_started", evt.Type())
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(evt.Payload, &payload); err != nil {
+	if err := json.Unmarshal(evt.Payload(), &payload); err != nil {
 		t.Fatalf("Unmarshal payload: %v", err)
 	}
 	if got := payload["agent_id"]; got != "agent-1" {
@@ -167,11 +168,11 @@ func TestClaudeCLIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 		t.Fatalf("expected no delivery lifecycle log without a real delivery mark, got %d", len(publisher.runtimeLogs))
 	}
 	evt := publisher.events[0]
-	if evt.Type != events.EventType("platform.agent_started") {
-		t.Fatalf("event type = %s, want platform.agent_started", evt.Type)
+	if evt.Type() != events.EventType("platform.agent_started") {
+		t.Fatalf("event type = %s, want platform.agent_started", evt.Type())
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(evt.Payload, &payload); err != nil {
+	if err := json.Unmarshal(evt.Payload(), &payload); err != nil {
 		t.Fatalf("Unmarshal payload: %v", err)
 	}
 	if got := payload["agent_id"]; got != "agent-2" {
@@ -766,8 +767,7 @@ func TestAnthropicAPIRuntime_ContinueSessionReMarksInboundDeliveryForReusedSessi
 
 	ctx := runtimeactors.WithActor(
 		runtimebus.WithInboundEvent(
-			sessions.WithScope(context.Background(), sessions.RuntimeModeSession.String(), sessions.SessionScopeFlow.String(), "support/inst-1"),
-			events.Event{ID: "evt-1"},
+			sessions.WithScope(context.Background(), sessions.RuntimeModeSession.String(), sessions.SessionScopeFlow.String(), "support/inst-1"), events.NewProjectionEvent("evt-1", events.EventType(""), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		),
 		runtimeactors.AgentConfig{
 			ID:           "agent-1",
@@ -808,8 +808,7 @@ func TestAnthropicAPIRuntime_ContinueSessionFailsClosedWhenDeliveryRestampFails(
 	}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, publisher)
 	ctx := runtimeactors.WithActor(
 		runtimebus.WithInboundEvent(
-			sessions.WithScope(context.Background(), sessions.RuntimeModeSession.String(), sessions.SessionScopeFlow.String(), "support/inst-1"),
-			events.Event{ID: "evt-1"},
+			sessions.WithScope(context.Background(), sessions.RuntimeModeSession.String(), sessions.SessionScopeFlow.String(), "support/inst-1"), events.NewProjectionEvent("evt-1", events.EventType(""), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		),
 		runtimeactors.AgentConfig{
 			ID:           "agent-1",
@@ -843,8 +842,7 @@ func TestClaudeCLIRuntime_ContinueSessionFailsClosedWhenDeliveryRestampFails(t *
 	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil, publisher)
 	ctx := runtimeactors.WithActor(
 		runtimebus.WithInboundEvent(
-			sessions.WithScope(context.Background(), sessions.RuntimeModeSession.String(), sessions.SessionScopeFlow.String(), "support/inst-1"),
-			events.Event{ID: "evt-1"},
+			sessions.WithScope(context.Background(), sessions.RuntimeModeSession.String(), sessions.SessionScopeFlow.String(), "support/inst-1"), events.NewProjectionEvent("evt-1", events.EventType(""), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		),
 		runtimeactors.AgentConfig{
 			ID:           "agent-1",
@@ -875,16 +873,13 @@ func TestClaudeCLIRuntime_ContinueSessionFailsClosedWhenDeliveryRestampFails(t *
 
 func TestEnrichTurnRecordIncludesTriggerToolsAndEmits(t *testing.T) {
 	ctx := runtimecorrelation.WithRunID(context.Background(), "run-123")
-	ctx = runtimebus.WithInboundEvent(ctx, (events.Event{
-		ID:      "11111111-1111-1111-1111-111111111111",
-		RunID:   "run-123",
-		Type:    events.EventType("scan.requested"),
-		Payload: []byte(`{"entity_id":"22222222-2222-2222-2222-222222222222"}`),
-	}).WithEnvelope(events.EventEnvelope{EntityID: "22222222-2222-2222-2222-222222222222"}))
+	ctx = runtimebus.WithInboundEvent(ctx, (events.NewProjectionEvent("11111111-1111-1111-1111-111111111111",
+
+		events.EventType("scan.requested"), "", "", []byte(`{"entity_id":"22222222-2222-2222-2222-222222222222"}`), 0, "run-123", "", events.EventEnvelope{}, time.Time{})).WithEnvelope(events.EventEnvelope{EntityID: "22222222-2222-2222-2222-222222222222"}))
 	recorder := runtimebus.NewEmittedEventsRecorder()
-	recorder.Append(events.Event{Type: events.EventType("discovery/category.assessed")})
-	recorder.Append(events.Event{Type: events.EventType("discovery/category.assessed")})
-	recorder.Append(events.Event{Type: events.EventType("discovery/scan_complete")})
+	recorder.Append(events.NewProjectionEvent("", events.EventType("discovery/category.assessed"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	recorder.Append(events.NewProjectionEvent("", events.EventType("discovery/category.assessed"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	recorder.Append(events.NewProjectionEvent("", events.EventType("discovery/scan_complete"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 	recorder.AppendPublish(runtimebus.PublishDiagnostic{
 		EventID:   "44444444-4444-4444-4444-444444444444",
 		EventType: "discovery/category.assessed",

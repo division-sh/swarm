@@ -37,7 +37,7 @@ func (n *DeclarativeNode) handle(ctx context.Context, req ExecutionRequest) (Exe
 	}
 	req.NodeID = nodeID
 	if isZeroHandler(req.Handler) {
-		resolved := resolvedExecutionHandler(n.executor.deps.Source, nodeID.String(), string(req.Event.Type))
+		resolved := resolvedExecutionHandler(n.executor.deps.Source, nodeID.String(), string(req.Event.Type()))
 		if !resolved.matched {
 			return ExecutionResult{}, ErrMissingNodeHandler
 		}
@@ -47,7 +47,7 @@ func (n *DeclarativeNode) handle(ctx context.Context, req ExecutionRequest) (Exe
 		}
 	}
 	if strings.TrimSpace(req.HandlerEventKey) == "" {
-		resolved := resolvedExecutionHandler(n.executor.deps.Source, nodeID.String(), string(req.Event.Type))
+		resolved := resolvedExecutionHandler(n.executor.deps.Source, nodeID.String(), string(req.Event.Type()))
 		if resolved.matched {
 			req.HandlerEventKey = resolved.handlerEventKey
 		}

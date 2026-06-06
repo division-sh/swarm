@@ -18,18 +18,14 @@ func TestRecordDeadLetter_PersistsAndDedupes(t *testing.T) {
 	ctx := context.Background()
 
 	entityID := uuid.NewString()
-	evt := (events.Event{
-		ID:          uuid.NewString(),
-		Type:        "deadletter.test",
-		SourceAgent: "runtime",
-		Payload:     []byte(`{"x":1}`),
-		CreatedAt:   time.Now().UTC(),
-	}).WithEntityID(entityID)
+	evt := (events.NewProjectionEvent(uuid.NewString(),
+		"deadletter.test",
+		"runtime", "", []byte(`{"x":1}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID(entityID)
 	if err := pg.AppendEvent(ctx, evt); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
 	rec := runtimedeadletters.Record{
-		OriginalEventID: evt.ID,
+		OriginalEventID: evt.ID(),
 		FailureType:     "retry_exhausted",
 		ErrorMessage:    "boom",
 		RetryCount:      4,
@@ -51,7 +47,7 @@ func TestRecordDeadLetter_PersistsAndDedupes(t *testing.T) {
 		SELECT COUNT(*), COALESCE(MAX(original_event), ''), COALESCE(MAX(retry_count), 0)
 		FROM dead_letters
 		WHERE original_event_id = $1::uuid
-	`, evt.ID).Scan(&count, &eventName, &retryCount); err != nil {
+	`, evt.ID()).Scan(&count, &eventName, &retryCount); err != nil {
 		t.Fatalf("query dead_letters: %v", err)
 	}
 	if count != 1 {
@@ -67,18 +63,15 @@ func TestRecordDeadLetter_AllowsNonUUIDEntityIDViaSourceEventPayload(t *testing.
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
-	evt := events.Event{
-		ID:          uuid.NewString(),
-		Type:        "deadletter.test",
-		SourceAgent: "runtime",
-		Payload:     []byte(`{"entity_id":"ent-001","x":1}`),
-		CreatedAt:   time.Now().UTC(),
-	}
+	evt := events.NewProjectionEvent(uuid.NewString(),
+		"deadletter.test",
+		"runtime", "", []byte(`{"entity_id":"ent-001","x":1}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+
 	if err := pg.AppendEvent(ctx, evt); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
 	rec := runtimedeadletters.Record{
-		OriginalEventID: evt.ID,
+		OriginalEventID: evt.ID(),
 		EntityID:        "ent-001",
 		FailureType:     "chain_depth_exceeded",
 		ErrorMessage:    "too deep",
@@ -96,7 +89,7 @@ func TestRecordDeadLetter_AllowsNonUUIDEntityIDViaSourceEventPayload(t *testing.
 		SELECT COUNT(*), BOOL_OR(entity_id IS NOT NULL)
 		FROM dead_letters
 		WHERE original_event_id = $1::uuid
-	`, evt.ID).Scan(&count, &hasStoredEntity); err != nil {
+	`, evt.ID()).Scan(&count, &hasStoredEntity); err != nil {
 		t.Fatalf("query dead_letters: %v", err)
 	}
 	if count != 1 {
@@ -112,18 +105,14 @@ func TestRecordDeadLetter_PersistsTargetResolutionFailureContext(t *testing.T) {
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
-	evt := (events.Event{
-		ID:          uuid.NewString(),
-		Type:        "pin.output",
-		SourceAgent: "runtime",
-		Payload:     []byte(`{"x":1}`),
-		CreatedAt:   time.Now().UTC(),
-	}).WithTargetRoute(events.RouteIdentity{EntityID: uuid.NewString(), FlowInstance: "flow/target"})
+	evt := (events.NewProjectionEvent(uuid.NewString(),
+		"pin.output",
+		"runtime", "", []byte(`{"x":1}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())).WithTargetRoute(events.RouteIdentity{EntityID: uuid.NewString(), FlowInstance: "flow/target"})
 	if err := pg.AppendEvent(ctx, evt); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
 	rec := runtimedeadletters.Record{
-		OriginalEventID:     evt.ID,
+		OriginalEventID:     evt.ID(),
 		FailureType:         "target_resolution_failed",
 		TargetFailureReason: "target_not_subscribed",
 		TargetContext:       []byte(`{"target":{"flow_instance":"flow/target"}}`),
@@ -143,7 +132,7 @@ func TestRecordDeadLetter_PersistsTargetResolutionFailureContext(t *testing.T) {
 		SELECT failure_type, target_failure_reason, target_context::text
 		FROM dead_letters
 		WHERE original_event_id = $1::uuid
-	`, evt.ID).Scan(&failureType, &reason, &contextJSON); err != nil {
+	`, evt.ID()).Scan(&failureType, &reason, &contextJSON); err != nil {
 		t.Fatalf("query dead_letters: %v", err)
 	}
 	if failureType != "target_resolution_failed" {

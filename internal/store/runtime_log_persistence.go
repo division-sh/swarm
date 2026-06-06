@@ -15,15 +15,18 @@ import (
 const runtimeLogEventName = "platform.runtime_log"
 
 func runtimeLogEvent(record runtimepkg.RuntimeLogPersistenceRecord) events.Event {
-	return events.Event{
-		ID:            uuid.NewString(),
-		Type:          events.EventType(runtimeLogEventName),
-		SourceAgent:   "runtime",
-		Payload:       json.RawMessage(record.Payload),
-		RunID:         strings.TrimSpace(record.RunID),
-		ParentEventID: strings.TrimSpace(record.ParentEventID),
-		CreatedAt:     time.Now().UTC(),
-	}
+	return events.NewRuntimeDiagnosticEvent(
+		uuid.NewString(),
+		events.EventType(runtimeLogEventName),
+		"runtime",
+		"",
+		json.RawMessage(record.Payload),
+		0,
+		strings.TrimSpace(record.RunID),
+		strings.TrimSpace(record.ParentEventID),
+		events.EventEnvelope{},
+		time.Now().UTC(),
+	)
 }
 
 func (s *PostgresStore) RuntimeLogLineageParentEventID(ctx context.Context, runID, explicitParentEventID, subjectEventID string) (string, error) {

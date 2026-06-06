@@ -277,13 +277,7 @@ func (c *Controller) publishTransitionEvent(ctx context.Context, target Status, 
 		return "", err
 	}
 	eventID := uuid.NewString()
-	if err := c.publisher.Publish(ctx, events.Event{
-		ID:          eventID,
-		Type:        eventType,
-		SourceAgent: "runtime",
-		Payload:     raw,
-		CreatedAt:   now,
-	}); err != nil {
+	if err := c.publisher.Publish(ctx, events.NewRuntimeControlEvent(eventID, eventType, "runtime", "", raw, 0, "", "", events.EventEnvelope{}, now)); err != nil {
 		return "", err
 	}
 	return eventID, nil

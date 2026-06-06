@@ -88,9 +88,9 @@ func PreviewContractHandlerExecution(ctx context.Context, bundle *runtimecontrac
 	if nodeID == "" {
 		return HandlerPreview{}, fmt.Errorf("node id is required")
 	}
-	handler, ok := bundle.NodeEventHandler(nodeID, strings.TrimSpace(string(evt.Type)))
+	handler, ok := bundle.NodeEventHandler(nodeID, strings.TrimSpace(string(evt.Type())))
 	if !ok {
-		return HandlerPreview{}, fmt.Errorf("missing handler %s/%s", nodeID, evt.Type)
+		return HandlerPreview{}, fmt.Errorf("missing handler %s/%s", nodeID, evt.Type())
 	}
 
 	previewBundle := semanticview.CloneBundleForPreview(bundle, policyOverrides)
@@ -113,8 +113,19 @@ func PreviewContractHandlerExecution(ctx context.Context, bundle *runtimecontrac
 	if pc == nil {
 		return HandlerPreview{}, fmt.Errorf("preview coordinator is nil")
 	}
-	if evt.CreatedAt.IsZero() {
-		evt.CreatedAt = time.Now().UTC()
+	if evt.CreatedAt().IsZero() {
+		evt = events.NewProjectionEvent(
+			evt.ID(),
+			evt.Type(),
+			evt.SourceAgent(),
+			evt.TaskID(),
+			evt.Payload(),
+			evt.ChainDepth(),
+			evt.RunID(),
+			evt.ParentEventID(),
+			evt.NormalizedEnvelope(),
+			time.Now().UTC(),
+		)
 	}
 	result, err := pc.executeNodeContractHandler(ctx, nodeID, handler, workflowTriggerContext{
 		Event: evt,

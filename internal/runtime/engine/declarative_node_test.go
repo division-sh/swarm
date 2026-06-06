@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"time"
 )
 
 func TestNewDeclarativeNode_RequiresExecutor(t *testing.T) {
@@ -69,7 +70,7 @@ func TestDeclarativeNode_HandleResolvesHandlerFromSemanticSource(t *testing.T) {
 	result, err := node.Handle(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		FlowID:   "flow-1",
-		Event:    events.Event{ID: "evt-1", Type: "task.completed"},
+		Event:    events.NewProjectionEvent("evt-1", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		State:    StateSnapshot{CurrentState: "pending"},
 	})
 	if err != nil {
@@ -95,7 +96,7 @@ func TestDeclarativeNode_HandleRequiresHandlerWhenNotResolvable(t *testing.T) {
 	node := NewDeclarativeNode("node-a", exec)
 	_, err = node.Handle(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		Event:    events.Event{Type: "task.completed"},
+		Event:    events.NewProjectionEvent("", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 	})
 	if err != ErrMissingNodeHandler {
 		t.Fatalf("Handle error = %v, want %v", err, ErrMissingNodeHandler)
@@ -117,7 +118,7 @@ func TestDeclarativeNode_HandleUsesExplicitHandlerWithoutLookup(t *testing.T) {
 	node := NewDeclarativeNode("node-a", exec)
 	result, err := node.Handle(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		Event:    events.Event{Type: "task.completed"},
+		Event:    events.NewProjectionEvent("", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler:  runtimecontracts.SystemNodeEventHandler{ClearGates: []string{"gate_a"}},
 		State:    StateSnapshot{StateCarrier: NewStateCarrier(nil, map[string]bool{"gate_a": true}, nil)},
 	})
