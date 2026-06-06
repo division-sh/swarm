@@ -431,8 +431,6 @@ func (eb *EventBus) completePublishTxDispatch(ctx context.Context, evt events.Ev
 		eb.recordCommittedPublishReceipt(ctx, evt, err)
 		return
 	}
-	runtimepipeline.FlushPipelinePostCommitActions(postCommitActions)
-	runtimepipeline.FlushDeferredPipelineTransitions(ctx, deferredTransitions)
 
 	if passthrough {
 		recipients := inboundPlan.RecipientIDs()
@@ -455,6 +453,8 @@ func (eb *EventBus) completePublishTxDispatch(ctx context.Context, evt events.Ev
 		}
 	}
 	eb.logPublished(ctx, evt, 0)
+	runtimepipeline.FlushPipelinePostCommitActions(postCommitActions)
+	runtimepipeline.FlushDeferredPipelineTransitions(ctx, deferredTransitions)
 
 	for _, d := range deferred {
 		if err := eb.publishDeferred(ctx, d); err != nil {
