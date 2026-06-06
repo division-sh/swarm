@@ -39,6 +39,7 @@ import (
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
+	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -223,6 +224,7 @@ type serveOptions struct {
 	Output                           io.Writer
 	TestEntityStateHook              func(entityID, state string)
 	TestWorkflowNodeHandlerStartHook runtimepipeline.WorkflowNodeHandlerStartHook
+	TestLifecycleProbe               runtimelifecycleprobe.Observer
 	TestOutboxSweeperConfig          runtimebus.OutboxSweeperConfig
 	TestRuntimeReadyHook             func(*runtime.Runtime)
 }
@@ -577,6 +579,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 			DisablePersistentStartupRecovery: !req.UseStartupRecovery,
 			TestEntityStateHook:              req.Options.TestEntityStateHook,
 			TestWorkflowNodeHandlerStartHook: req.Options.TestWorkflowNodeHandlerStartHook,
+			TestLifecycleProbe:               req.Options.TestLifecycleProbe,
 			TestOutboxSweeperConfig:          req.Options.TestOutboxSweeperConfig,
 		},
 	})
