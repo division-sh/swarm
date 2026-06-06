@@ -32,6 +32,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
+	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -3438,22 +3439,22 @@ func TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite(t *test
 	if err != nil {
 		t.Fatalf("NewSQLiteRuntimeStore(%s): %v", sqlitePath, err)
 	}
-	preHandlerProof := make(chan servedEventPublishPreHandlerProof, 1)
-	endpoint, rt := startServedEventPublishFollowUpRuntime(t, serveOptions{
-		ConfigPath:                       writeServeRuntimeTestConfig(t),
-		ContractsPath:                    contractsPath,
-		PlatformSpecPath:                 defaultPlatformSpecPath,
-		APIListenAddr:                    "127.0.0.1:0",
-		MCPListenAddr:                    "127.0.0.1:0",
-		SelfCheck:                        true,
-		RequireBundleMatch:               false,
-		NoRequireBundleMatch:             true,
-		Verbose:                          true,
-		TestWorkflowNodeHandlerStartHook: servedEventPublishPreHandlerAuthorityHook(sqliteStore.DB, "sqlite", preHandlerProof),
-		TestOutboxSweeperConfig:          servedEventPublishProofOutboxSweeperConfig(),
+	probe := runtimelifecycleprobe.New()
+	endpoint, _ := startServedEventPublishFollowUpRuntime(t, serveOptions{
+		ConfigPath:              writeServeRuntimeTestConfig(t),
+		ContractsPath:           contractsPath,
+		PlatformSpecPath:        defaultPlatformSpecPath,
+		APIListenAddr:           "127.0.0.1:0",
+		MCPListenAddr:           "127.0.0.1:0",
+		SelfCheck:               true,
+		RequireBundleMatch:      false,
+		NoRequireBundleMatch:    true,
+		Verbose:                 true,
+		TestLifecycleProbe:      probe,
+		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	})
 
-	runServedEventPublishFollowUpProof(t, endpoint, sqliteStore.DB, "sqlite", bundleHash, rt.Bus, preHandlerProof)
+	runServedEventPublishFollowUpProof(t, endpoint, sqliteStore.DB, "sqlite", bundleHash, probe)
 	if err := sqliteStore.Close(); err != nil {
 		t.Fatalf("close sqlite proof store: %v", err)
 	}
@@ -3465,23 +3466,23 @@ func TestRunServeRuntimeEventPublishRunIDFollowUpServedPathPostgres(t *testing.T
 	})
 	contractsPath := writeServedEventPublishFollowUpFixture(t)
 	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
-	preHandlerProof := make(chan servedEventPublishPreHandlerProof, 1)
-	endpoint, rt := startServedEventPublishFollowUpRuntime(t, serveOptions{
-		ConfigPath:                       writeServeRuntimeTestConfig(t),
-		ContractsPath:                    contractsPath,
-		PlatformSpecPath:                 defaultPlatformSpecPath,
-		StoreMode:                        "postgres",
-		StoreModeSet:                     true,
-		APIListenAddr:                    "127.0.0.1:0",
-		MCPListenAddr:                    "127.0.0.1:0",
-		SelfCheck:                        true,
-		RequireBundleMatch:               false,
-		Verbose:                          true,
-		TestWorkflowNodeHandlerStartHook: servedEventPublishPreHandlerAuthorityHook(db, "postgres", preHandlerProof),
-		TestOutboxSweeperConfig:          servedEventPublishProofOutboxSweeperConfig(),
+	probe := runtimelifecycleprobe.New()
+	endpoint, _ := startServedEventPublishFollowUpRuntime(t, serveOptions{
+		ConfigPath:              writeServeRuntimeTestConfig(t),
+		ContractsPath:           contractsPath,
+		PlatformSpecPath:        defaultPlatformSpecPath,
+		StoreMode:               "postgres",
+		StoreModeSet:            true,
+		APIListenAddr:           "127.0.0.1:0",
+		MCPListenAddr:           "127.0.0.1:0",
+		SelfCheck:               true,
+		RequireBundleMatch:      false,
+		Verbose:                 true,
+		TestLifecycleProbe:      probe,
+		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	})
 
-	runServedEventPublishFollowUpProof(t, endpoint, db, "postgres", bundleHash, rt.Bus, preHandlerProof)
+	runServedEventPublishFollowUpProof(t, endpoint, db, "postgres", bundleHash, probe)
 }
 
 func TestRunServeRuntimeEventPublishDynamicAutoEmitReturnsDurableAckAndDispatchesChild(t *testing.T) {
@@ -3904,39 +3905,6 @@ type servedEventPublishPreHandlerProof struct {
 	Err     error
 }
 
-func servedEventPublishPreHandlerAuthorityHook(db *sql.DB, backend string, proofs chan<- servedEventPublishPreHandlerProof) runtimepipeline.WorkflowNodeHandlerStartHook {
-	var once sync.Once
-	return func(ctx context.Context, nodeID string, evt events.Event) error {
-		if strings.TrimSpace(nodeID) != "entity-writer" {
-			return nil
-		}
-		eventType := strings.TrimPrefix(strings.TrimSpace(string(evt.Type())), "validation/")
-		if eventType != "thing.created" {
-			return nil
-		}
-		once.Do(func() {
-			runID := strings.TrimSpace(evt.RunID())
-			if runID == "" {
-				runID = runtimecorrelation.RunIDFromContext(ctx)
-			}
-			eventID := strings.TrimSpace(evt.ID())
-			count, err := servedEventPublishNodeDeliveryCountValue(ctx, db, backend, runID, eventID, nodeID)
-			proof := servedEventPublishPreHandlerProof{
-				RunID:   runID,
-				EventID: eventID,
-				NodeID:  strings.TrimSpace(nodeID),
-				Count:   count,
-				Err:     err,
-			}
-			select {
-			case proofs <- proof:
-			default:
-			}
-		})
-		return nil
-	}
-}
-
 func servedEventPublishBlockingHandlerAuthorityHook(
 	db *sql.DB,
 	backend string,
@@ -4044,200 +4012,67 @@ func assertServedEventPublishDeliveriesContainStatus(t *testing.T, deliveries []
 	t.Fatalf("event.publish deliveries = %#v, want %s/%s status in %v", deliveries, subscriberType, subscriberID, statuses)
 }
 
-func releaseServedEventPublishPendingNodeDeliveries(t *testing.T, bus *runtimebus.EventBus, db *sql.DB, backend, eventID string) {
+func waitForServedEventPublishNodeDeliveryLifecycle(t *testing.T, backend, eventID string, probe *runtimelifecycleprobe.Probe) {
 	t.Helper()
-	if bus == nil {
-		t.Fatalf("%s runtime bus is required to release pending node deliveries", backend)
+	waitForServedEventPublishPostCommitDispatch(t, probe, backend, eventID)
+	waitForServedEventPublishLifecycleDeliveryStatus(t, probe, backend, eventID, "entity-writer", "pending")
+	waitForServedEventPublishHandlerStarted(t, probe, backend, eventID, "entity-writer")
+	waitForServedEventPublishHandlerCompleted(t, probe, backend, eventID, "entity-writer")
+	waitForServedEventPublishLifecycleDeliveryStatus(t, probe, backend, eventID, "entity-writer", "delivered")
+}
+
+func waitForServedEventPublishPostCommitDispatch(t *testing.T, probe *runtimelifecycleprobe.Probe, backend, eventID string) {
+	t.Helper()
+	if probe == nil {
+		t.Fatalf("%s lifecycle probe is required for post-commit dispatch on event %s", backend, eventID)
 	}
-	evt := loadServedEventPublishEvent(t, db, backend, eventID)
-	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	deadline := time.Now().Add(10 * time.Second)
-	nextReleaseAt := time.Now().Add(2 * time.Second)
-	var lastStatus string
-	for time.Now().Before(deadline) {
-		lastStatus = servedEventPublishNodeDeliveryStatus(t, db, backend, eventID, "entity-writer")
-		switch lastStatus {
-		case "delivered":
-			return
-		case "pending":
-			if time.Now().Before(nextReleaseAt) {
-				time.Sleep(25 * time.Millisecond)
-				continue
-			}
-			if err := bus.ReleasePendingPersistedDeliveriesForEvent(ctx, evt); err != nil {
-				t.Fatalf("%s release pending node deliveries for event %s: %v", backend, eventID, err)
-			}
-			if err := bus.WaitForQuiescence(ctx); err != nil {
-				t.Fatalf("%s wait for released node deliveries for event %s: %v", backend, eventID, err)
-			}
-			nextReleaseAt = time.Now().Add(2 * time.Second)
-		case "in_progress":
-		case "":
-			t.Fatalf("%s node/entity-writer delivery for event %s is missing", backend, eventID)
-		default:
-			t.Fatalf("%s node/entity-writer delivery for event %s = %q, want delivered", backend, eventID, lastStatus)
-		}
-		time.Sleep(25 * time.Millisecond)
+	if _, err := probe.WaitForPostCommitDispatchStarted(ctx, eventID); err != nil {
+		t.Fatalf("%s post-commit dispatch started for event %s: %v", backend, eventID, err)
 	}
-	t.Fatalf("%s node/entity-writer delivery for event %s = %q after release, want delivered\n%s", backend, eventID, lastStatus, servedEventPublishDebugSummary(t, db, backend, evt.RunID()))
+	if _, err := probe.WaitForPostCommitDispatchCompleted(ctx, eventID); err != nil {
+		t.Fatalf("%s post-commit dispatch completed for event %s: %v", backend, eventID, err)
+	}
 }
 
-func servedEventPublishNodeDeliveryStatus(t *testing.T, db *sql.DB, backend, eventID, nodeID string) string {
+func waitForServedEventPublishLifecycleDeliveryStatus(t *testing.T, probe *runtimelifecycleprobe.Probe, backend, eventID, nodeID, status string) {
 	t.Helper()
-	if strings.TrimSpace(eventID) == "" {
-		return ""
+	if probe == nil {
+		t.Fatalf("%s lifecycle probe is required for node delivery %s on event %s", backend, status, eventID)
 	}
-	sqlText := ""
-	args := []any{eventID, nodeID}
-	if backend == "sqlite" {
-		sqlText = `SELECT COALESCE(status, '') FROM event_deliveries WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = ? ORDER BY created_at DESC LIMIT 1`
-	} else {
-		sqlText = `SELECT COALESCE(status, '') FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2 ORDER BY created_at DESC LIMIT 1`
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := probe.WaitForDeliveryStatus(ctx, eventID, "node", nodeID, status); err != nil {
+		t.Fatalf("%s node/%s delivery %s for event %s: %v", backend, nodeID, status, eventID, err)
 	}
-	var status string
-	if err := db.QueryRowContext(context.Background(), sqlText, args...).Scan(&status); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return ""
-		}
-		t.Fatalf("%s node delivery status for %s/%s: %v", backend, eventID, nodeID, err)
-	}
-	return strings.TrimSpace(status)
 }
 
-func loadServedEventPublishEvent(t *testing.T, db *sql.DB, backend, eventID string) events.Event {
+func waitForServedEventPublishHandlerStarted(t *testing.T, probe *runtimelifecycleprobe.Probe, backend, eventID, nodeID string) {
 	t.Helper()
-	sqlText := ""
-	args := []any{eventID}
-	if backend == "sqlite" {
-		sqlText = `
-			SELECT event_id, COALESCE(run_id, ''), event_name, COALESCE(produced_by, ''),
-			       COALESCE(entity_id, ''), COALESCE(flow_instance, ''), COALESCE(scope, 'global'),
-			       payload, created_at, COALESCE(source_event_id, ''),
-			       COALESCE(source_route, '{}'), COALESCE(target_route, '{}'), COALESCE(target_set, '[]')
-			FROM events
-			WHERE event_id = ?
-		`
-	} else {
-		sqlText = `
-			SELECT event_id::text, COALESCE(run_id::text, ''), event_name, COALESCE(produced_by, ''),
-			       COALESCE(entity_id::text, ''), COALESCE(flow_instance, ''), COALESCE(scope, 'global'),
-			       payload, created_at, COALESCE(source_event_id::text, ''),
-			       COALESCE(source_route, '{}'::jsonb), COALESCE(target_route, '{}'::jsonb), COALESCE(target_set, '[]'::jsonb)
-			FROM events
-			WHERE event_id = $1::uuid
-		`
+	if probe == nil {
+		t.Fatalf("%s lifecycle probe is required for handler start on event %s", backend, eventID)
 	}
-	var id, runID, eventName, producedBy, entityID, flowInstance, scope, sourceEventID string
-	var payloadRaw, createdAtRaw, sourceRouteRaw, targetRouteRaw, targetSetRaw any
-	if err := db.QueryRowContext(context.Background(), sqlText, args...).Scan(
-		&id,
-		&runID,
-		&eventName,
-		&producedBy,
-		&entityID,
-		&flowInstance,
-		&scope,
-		&payloadRaw,
-		&createdAtRaw,
-		&sourceEventID,
-		&sourceRouteRaw,
-		&targetRouteRaw,
-		&targetSetRaw,
-	); err != nil {
-		t.Fatalf("%s load event %s: %v", backend, eventID, err)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := probe.WaitForHandlerStarted(ctx, eventID, nodeID); err != nil {
+		t.Fatalf("%s node/%s handler started for event %s: %v", backend, nodeID, eventID, err)
 	}
-	return events.NewProjectionEvent(
-		id,
-		events.EventType(eventName),
-		producedBy,
-		"",
-		servedEventPublishDBJSON(payloadRaw, "{}"),
-		0,
-		runID,
-		sourceEventID,
-		servedEventPublishDBEnvelope(t, entityID, flowInstance, scope, sourceRouteRaw, targetRouteRaw, targetSetRaw),
-		servedEventPublishDBTime(createdAtRaw),
-	)
 }
 
-func servedEventPublishDBEnvelope(t *testing.T, entityID, flowInstance, scope string, sourceRouteRaw, targetRouteRaw, targetSetRaw any) events.EventEnvelope {
+func waitForServedEventPublishHandlerCompleted(t *testing.T, probe *runtimelifecycleprobe.Probe, backend, eventID, nodeID string) {
 	t.Helper()
-	envelope := events.EventEnvelope{
-		EntityID:     strings.TrimSpace(entityID),
-		FlowInstance: strings.Trim(strings.TrimSpace(flowInstance), "/"),
-		Scope:        events.EventScope(strings.TrimSpace(scope)),
+	if probe == nil {
+		t.Fatalf("%s lifecycle probe is required for handler completion on event %s", backend, eventID)
 	}
-	if err := json.Unmarshal(servedEventPublishDBJSON(sourceRouteRaw, "{}"), &envelope.Source); err != nil {
-		t.Fatalf("decode source_route: %v", err)
-	}
-	if err := json.Unmarshal(servedEventPublishDBJSON(targetRouteRaw, "{}"), &envelope.Target); err != nil {
-		t.Fatalf("decode target_route: %v", err)
-	}
-	if err := json.Unmarshal(servedEventPublishDBJSON(targetSetRaw, "[]"), &envelope.TargetSet); err != nil {
-		t.Fatalf("decode target_set: %v", err)
-	}
-	return envelope.Normalized()
-}
-
-func servedEventPublishDBJSON(raw any, fallback string) json.RawMessage {
-	switch v := raw.(type) {
-	case nil:
-		return json.RawMessage(fallback)
-	case json.RawMessage:
-		if len(v) == 0 {
-			return json.RawMessage(fallback)
-		}
-		return v
-	case []byte:
-		if len(v) == 0 {
-			return json.RawMessage(fallback)
-		}
-		return json.RawMessage(v)
-	case string:
-		if strings.TrimSpace(v) == "" {
-			return json.RawMessage(fallback)
-		}
-		return json.RawMessage(v)
-	default:
-		encoded, err := json.Marshal(v)
-		if err != nil || len(encoded) == 0 {
-			return json.RawMessage(fallback)
-		}
-		return json.RawMessage(encoded)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := probe.WaitForHandlerCompleted(ctx, eventID, nodeID); err != nil {
+		t.Fatalf("%s node/%s handler completed for event %s: %v", backend, nodeID, eventID, err)
 	}
 }
 
-func servedEventPublishDBTime(raw any) time.Time {
-	switch v := raw.(type) {
-	case time.Time:
-		return v.UTC()
-	case []byte:
-		return servedEventPublishParseDBTime(string(v))
-	case string:
-		return servedEventPublishParseDBTime(v)
-	default:
-		return time.Now().UTC()
-	}
-}
-
-func servedEventPublishParseDBTime(raw string) time.Time {
-	raw = strings.TrimSpace(raw)
-	for _, layout := range []string{
-		time.RFC3339Nano,
-		"2006-01-02 15:04:05.999999999Z07:00",
-		"2006-01-02 15:04:05.999999999-07:00",
-		"2006-01-02 15:04:05.999999",
-		"2006-01-02 15:04:05",
-	} {
-		if parsed, err := time.Parse(layout, raw); err == nil {
-			return parsed.UTC()
-		}
-	}
-	return time.Now().UTC()
-}
-
-func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.DB, backend, bundleHash string, bus *runtimebus.EventBus, preHandlerProof <-chan servedEventPublishPreHandlerProof) {
+func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.DB, backend, bundleHash string, probe *runtimelifecycleprobe.Probe) {
 	t.Helper()
 	beforeCreateRejectEvents := servedEventPublishScalarCount(t, db, backend, "events_all", "", "")
 	beforeCreateRejectIdempotency := servedEventPublishScalarCount(t, db, backend, "api_idempotency_all", "", "")
@@ -4278,10 +4113,7 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	if got := servedEventPublishNodeDeliveryCount(t, db, backend, runID, initialEventID, "entity-writer"); got == 0 {
 		t.Fatalf("%s initial root-input node deliveries = %d, want persisted node/entity-writer authority", backend, got)
 	}
-	if backend == "postgres" {
-		requireServedEventPublishPreHandlerProof(t, db, backend, preHandlerProof, runID, initialEventID, "entity-writer")
-	}
-	releaseServedEventPublishPendingNodeDeliveries(t, bus, db, backend, initialEventID)
+	waitForServedEventPublishNodeDeliveryLifecycle(t, backend, initialEventID, probe)
 	entityID := requireServedEventPublishEntityState(t, db, backend, runID, "", "waiting")
 	requireServedEventReadback(t, endpoint, initialEventID, runID, runID, "thing.created", "entity-writer")
 	requireServedEntityReadback(t, endpoint, runID, entityID, "waiting")
@@ -4309,7 +4141,7 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	if got := servedEventPublishScalarCount(t, db, backend, "event_deliveries", runID, followUpEventID); got == 0 {
 		t.Fatalf("%s follow-up deliveries = %d, want non-empty persisted evidence", backend, got)
 	}
-	releaseServedEventPublishPendingNodeDeliveries(t, bus, db, backend, followUpEventID)
+	waitForServedEventPublishNodeDeliveryLifecycle(t, backend, followUpEventID, probe)
 	requireServedEventPublishEntityState(t, db, backend, runID, entityID, "done")
 	requireServedEntityReadback(t, endpoint, runID, entityID, "done")
 	requireServedRunStatus(t, endpoint, runID, "completed")
