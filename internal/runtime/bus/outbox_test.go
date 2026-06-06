@@ -441,6 +441,19 @@ func TestEngineOutboxSkipsEmptyNoopIntentBeforeAdmission(t *testing.T) {
 	}
 }
 
+func TestEngineDispatcherSkipsEmptyNoopIntentBeforeAdmission(t *testing.T) {
+	eb, err := runtimebus.NewEventBus(runtimebus.InMemoryEventStore{})
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	intents := []runtimeengine.EmitIntent{{
+		Event: events.NewProjectionEvent("evt-empty-noop-dispatch", "", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
+	}}
+	if err := eb.EngineDispatcher().DispatchPostCommit(context.Background(), intents); err != nil {
+		t.Fatalf("DispatchPostCommit empty noop: %v", err)
+	}
+}
+
 func TestEngineOutboxSubscribedIntentConsumesCanonicalMaterializedRoutePlan(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
