@@ -220,9 +220,11 @@ func executeOperatorEventPublication(
 
 func publishEventPublication(ctx context.Context, publisher EventPublisher, evt events.Event, cfg eventPublicationConfig) error {
 	if cfg.durablePublishAck {
-		if acknowledged, ok := publisher.(eventAcknowledgedPublisher); ok && acknowledged != nil {
-			return acknowledged.PublishAcknowledged(ctx, evt)
+		acknowledged, ok := publisher.(eventAcknowledgedPublisher)
+		if !ok || acknowledged == nil {
+			return errors.New("durable event.publish acknowledgment requires acknowledged publisher")
 		}
+		return acknowledged.PublishAcknowledged(ctx, evt)
 	}
 	return publisher.Publish(ctx, evt)
 }

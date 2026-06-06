@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
@@ -667,6 +668,35 @@ func TestOperatorEventPublishPreCommitFailureFailsClosedWithDeclaredError(t *tes
 	}
 	if _, err := db.ExecContext(ctx, `SELECT 1`); err != nil {
 		t.Fatalf("database unusable after pre-commit failure: %v", err)
+	}
+}
+
+func TestOperatorEventPublishFailsClosedWithoutDurableAckPublisher(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+	publisher := &legacyOnlyEventPublisher{}
+	handler := eventPublishTestHandlerWithStores(t, pg, pg, pg, publisher, source)
+	body := eventPublishBody("", runStartTestFingerprint, "scan.requested", `{"topic":"medicine"}`, "", "idem-no-ack-publisher")
+
+	published := rpcCall(t, handler, body)
+	if published.Error == nil {
+		t.Fatal("event.publish without durable ack publisher error = nil")
+	}
+	data := asMap(t, published.Error.Data)
+	if data["code"] != EventPublishFailedCode {
+		t.Fatalf("event.publish without durable ack publisher data = %#v, want %s", data, EventPublishFailedCode)
+	}
+	details := asMap(t, data["details"])
+	if details["event_name"] != "scan.requested" || details["phase"] != "publish" || !strings.Contains(fmt.Sprint(details["reason"]), "durable event.publish acknowledgment requires acknowledged publisher") {
+		t.Fatalf("event.publish without durable ack publisher details = %#v", details)
+	}
+	if publisher.publishCalls != 0 {
+		t.Fatalf("legacy Publish calls = %d, want 0", publisher.publishCalls)
+	}
+	assertNoEventPublishPersistence(t, db)
+	if got := countAllEventDeliveries(t, db); got != 0 {
+		t.Fatalf("event_deliveries rows after missing durable ack publisher = %d, want 0", got)
 	}
 }
 
@@ -1402,6 +1432,19 @@ func (i blockingAPIV1PublishInterceptor) Intercept(_ context.Context, _ events.E
 	}
 	<-i.release
 	return true, nil, nil
+}
+
+type legacyOnlyEventPublisher struct {
+	publishCalls int
+}
+
+func (p *legacyOnlyEventPublisher) Publish(context.Context, events.Event) error {
+	p.publishCalls++
+	return nil
+}
+
+func (p *legacyOnlyEventPublisher) WithBundleFingerprint(ctx context.Context) context.Context {
+	return runtimecorrelation.WithBundleSourceFact(ctx, runStartTestBundleSourceFact())
 }
 
 type failStandalonePipelineReceiptOnceStore struct {
