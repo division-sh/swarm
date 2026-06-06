@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -314,6 +315,148 @@ func TestOperatorRuntimeObservabilityOwnerLogsIncidentsAndCursor(t *testing.T) {
 	}
 	if bulk == nil || bulk.Count != 1005 {
 		t.Fatalf("bulk incident = %#v, want count 1005 in %#v", bulk, bulkIncidents.Incidents)
+	}
+}
+
+func TestPostgresRuntimeLogSourceFilterMatchesProjectionFallback(t *testing.T) {
+	ctx := context.Background()
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+
+	runID := uuid.NewString()
+	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, runID, base); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	producedByValue := func(value string) *string {
+		return &value
+	}
+	insertLog := func(message, details string, producedBy *string, createdAt time.Time) string {
+		t.Helper()
+		eventID := uuid.NewString()
+		payload := `{
+			"log_level":"warn",
+			"message":"` + message + `",
+			"details":` + details + `
+		}`
+		var producer any
+		if producedBy != nil {
+			producer = *producedBy
+		}
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO events (event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
+			VALUES ($1::uuid, $2::uuid, 'platform.runtime_log', 'global', $3::jsonb, $4, 'platform', $5)
+		`, eventID, runID, payload, producer, createdAt); err != nil {
+			t.Fatalf("seed runtime log: %v", err)
+		}
+		return eventID
+	}
+	runtimeFallbackID := insertLog("runtime fallback", `{"component":"source-parity","action":"runtime_fallback"}`, nil, base.Add(time.Second))
+	producedByID := insertLog("producer fallback", `{"component":"source-parity","action":"producer_fallback"}`, producedByValue("operator-runtime"), base.Add(2*time.Second))
+	agentID := insertLog("agent source", `{"component":"source-parity","action":"agent_source","agent_id":"agent-1"}`, producedByValue("runtime"), base.Add(3*time.Second))
+	blankProducedByID := insertLog("blank producer fallback", `{"component":"source-parity","action":"blank_producer_fallback"}`, producedByValue("   "), base.Add(4*time.Second))
+	blankAgentID := insertLog("blank agent fallback", `{"component":"source-parity","action":"blank_agent_fallback","agent_id":"   "}`, producedByValue("operator-runtime-trimmed"), base.Add(5*time.Second))
+
+	all, err := pg.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{
+		RunID:     runID,
+		Component: "source-parity",
+		Level:     "warn",
+		Limit:     10,
+		Order:     "asc",
+	})
+	if err != nil {
+		t.Fatalf("ListOperatorRuntimeLogs all: %v", err)
+	}
+	if len(all.Logs) != 5 {
+		t.Fatalf("all logs = %#v, want five", all.Logs)
+	}
+	assertRuntimeLogIDsAndSources(t, all.Logs, map[string]string{
+		runtimeFallbackID: "runtime",
+		producedByID:      "operator-runtime",
+		agentID:           "agent-1",
+		blankProducedByID: "runtime",
+		blankAgentID:      "operator-runtime-trimmed",
+	})
+
+	runtimeRows, err := pg.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{
+		RunID:     runID,
+		Component: "source-parity",
+		Level:     "warn",
+		Source:    "runtime",
+		Limit:     10,
+	})
+	if err != nil {
+		t.Fatalf("ListOperatorRuntimeLogs runtime source: %v", err)
+	}
+	assertRuntimeLogIDsAndSources(t, runtimeRows.Logs, map[string]string{
+		runtimeFallbackID: "runtime",
+		blankProducedByID: "runtime",
+	})
+
+	producerRows, err := pg.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{
+		RunID:     runID,
+		Component: "source-parity",
+		Level:     "warn",
+		Source:    "operator-runtime",
+		Limit:     10,
+	})
+	if err != nil {
+		t.Fatalf("ListOperatorRuntimeLogs produced_by source: %v", err)
+	}
+	assertRuntimeLogIDsAndSources(t, producerRows.Logs, map[string]string{producedByID: "operator-runtime"})
+
+	trimmedProducerRows, err := pg.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{
+		RunID:     runID,
+		Component: "source-parity",
+		Level:     "warn",
+		Source:    "operator-runtime-trimmed",
+		Limit:     10,
+	})
+	if err != nil {
+		t.Fatalf("ListOperatorRuntimeLogs trimmed produced_by source: %v", err)
+	}
+	assertRuntimeLogIDsAndSources(t, trimmedProducerRows.Logs, map[string]string{blankAgentID: "operator-runtime-trimmed"})
+
+	agentRows, err := pg.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{
+		RunID:     runID,
+		Component: "source-parity",
+		Level:     "warn",
+		Source:    "agent-1",
+		Limit:     10,
+	})
+	if err != nil {
+		t.Fatalf("ListOperatorRuntimeLogs agent source: %v", err)
+	}
+	assertRuntimeLogIDsAndSources(t, agentRows.Logs, map[string]string{agentID: "agent-1"})
+
+	missingRows, err := pg.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{
+		RunID:     runID,
+		Component: "source-parity",
+		Level:     "warn",
+		Source:    "missing-source",
+		Limit:     10,
+	})
+	if err != nil {
+		t.Fatalf("ListOperatorRuntimeLogs missing source: %v", err)
+	}
+	if len(missingRows.Logs) != 0 {
+		t.Fatalf("missing source rows = %#v, want none", missingRows.Logs)
+	}
+}
+
+func assertRuntimeLogIDsAndSources(t *testing.T, logs []OperatorRuntimeLogEntry, want map[string]string) {
+	t.Helper()
+	if len(logs) != len(want) {
+		t.Fatalf("runtime logs = %#v, want %d rows", logs, len(want))
+	}
+	for _, log := range logs {
+		wantSource, ok := want[log.LogID]
+		if !ok {
+			t.Fatalf("unexpected runtime log row = %#v; want ids %#v", log, want)
+		}
+		if got := strings.TrimSpace(log.Source); got != wantSource {
+			t.Fatalf("runtime log %s source = %q, want %q", log.LogID, got, wantSource)
+		}
 	}
 }
 
