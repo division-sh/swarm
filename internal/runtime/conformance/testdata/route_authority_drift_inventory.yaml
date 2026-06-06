@@ -1,0 +1,456 @@
+version: 1
+kind: route_authority_drift_inventory
+issue: 1364
+parent_issues: [1340, 1353]
+watchlist: runtime_operations.delivery_and_replay_ownership
+policy:
+  closure_level: repo_wide_inventory_and_guardrail_proposal
+  claims_parent_closure: false
+  claims_runtime_behavior_closure: false
+  runtime_behavior_changes_allowed: false
+  exhaustive_requirement: >
+    This artifact inventories route-authority producers, consumers,
+    interpreters, observers, projections, replay/recovery paths, store
+    readers/writers, public readback, and test fixtures across the repository.
+    It explicitly covers event name/type, semantic scope, entity/run/source
+    event context, and route/event-key derivation helpers. It must not be used
+    as proof that runtime behavior changed.
+sources:
+  platform_spec: platform-spec.yaml
+  route_authority_matrix: internal/runtime/conformance/testdata/route_authority_matrix.yaml
+  openrpc_artifact: openrpc.json
+  public_surface_backend_matrix: internal/apiv1/testdata/public_surface_backend_matrix.yaml
+  watchlist_note: private:/Users/youmew/dev/swarm-docs/docs/watchlists/runtime-operations.yaml#delivery_and_replay_ownership
+search_dimensions:
+  - id: event_deliveries
+    pattern: '\bevent_deliveries\b|EventDeliveries'
+    minimum_matching_files: 110
+    required_paths:
+      - platform-spec.yaml
+      - internal/store/event_receipt_store.go
+      - internal/store/sqlite_runtime_delivery_replay.go
+      - internal/runtime/conformance/testdata/route_authority_matrix.yaml
+      - cmd/swarm/main_test.go
+    canonical_layer: durable_delivery_authority
+  - id: delivery_route_model
+    pattern: '\bDeliveryRoute\b|delivery routes|delivery route'
+    minimum_matching_files: 23
+    required_paths:
+      - internal/events/types.go
+      - internal/runtime/bus/eventbus.go
+      - internal/store/events.go
+      - internal/store/sqlite_runtime_delivery_replay.go
+    canonical_layer: route_plan_authority
+  - id: route_plan
+    pattern: '\bRoutePlan\b|route_plan|route plan'
+    minimum_matching_files: 9
+    required_paths:
+      - platform-spec.yaml
+      - internal/runtime/bus/route_plan.go
+      - internal/runtime/conformance/testdata/route_authority_matrix.yaml
+    canonical_layer: route_plan_authority
+  - id: flow_instance
+    pattern: 'flow_instance|FlowInstance|flow instance|flow-instance'
+    minimum_matching_files: 282
+    required_paths:
+      - platform-spec.yaml
+      - internal/runtime/bus/delivery_planner.go
+      - internal/runtime/pipeline/workflow_instance_activation.go
+      - internal/store/sqlite_runtime.go
+      - tests/tier11-flow-composition/test-dynamic-flow-instance/expected.yaml
+    canonical_layer: event_context
+  - id: event_name_type
+    pattern: 'event_name|event type|EventType|EventName|\.Type|TriggerEventType'
+    minimum_matching_files: 369
+    required_paths:
+      - platform-spec.yaml
+      - openrpc.json
+      - internal/events/types.go
+      - internal/runtime/bus/delivery_planner.go
+      - internal/runtime/bus/eventbus_routing.go
+      - internal/apiv1/operator_event_publish.go
+      - cmd/swarm/event_publish.go
+    canonical_layer: event_context
+  - id: semantic_scope
+    pattern: 'EventScope|semantic scope|inferEventScope|Scope\(\)|ScopeEntity|ScopeFlow|ScopeGlobal|scope inference'
+    minimum_matching_files: 42
+    required_paths:
+      - platform-spec.yaml
+      - internal/events/types.go
+      - internal/runtime/bus/eventbus_target_routes_test.go
+      - internal/runtime/bus/delivery_planner_test.go
+    canonical_layer: event_context
+  - id: entity_context
+    pattern: 'entity_id|EntityID|EffectiveEntityID'
+    minimum_matching_files: 704
+    required_paths:
+      - platform-spec.yaml
+      - openrpc.json
+      - internal/events/types.go
+      - internal/runtime/bus/delivery_planner.go
+      - internal/apiv1/operator_event_publish.go
+      - cmd/swarm/event_publish_test.go
+    canonical_layer: event_context
+  - id: run_source_event_context
+    pattern: 'run_id|RunID|source_event_id|SourceEventID|ParentEventID|source event'
+    minimum_matching_files: 348
+    required_paths:
+      - platform-spec.yaml
+      - openrpc.json
+      - internal/events/types.go
+      - internal/store/events.go
+      - internal/apiv1/operator_event_publish.go
+      - cmd/swarm/event_publish.go
+    canonical_layer: event_context
+  - id: route_event_key_derivation
+    pattern: 'routedEventKeysForPlan|concreteFlowInstanceEventKey|eventContextLocalEventForFlowInstance|route key|event key|eventKeys|routeKey'
+    minimum_matching_files: 10
+    required_paths:
+      - platform-spec.yaml
+      - internal/runtime/bus/delivery_planner.go
+      - internal/runtime/bus/eventbus_routing.go
+      - internal/runtime/bus/delivery_planner_test.go
+    canonical_layer: route_topology
+  - id: target_set
+    pattern: '\btarget_set\b'
+    minimum_matching_files: 11
+    required_paths:
+      - platform-spec.yaml
+      - internal/runtime/bus/eventbus_publish.go
+      - internal/runtime/bus/eventbus_target_routes_test.go
+    canonical_layer: event_context
+  - id: target_context
+    pattern: '(?i)target|delivery_target_route|target_set'
+    minimum_matching_files: 260
+    required_paths:
+      - platform-spec.yaml
+      - internal/events/types.go
+      - internal/runtime/bus/route_plan.go
+      - internal/store/sqlite_runtime_delivery_replay.go
+    canonical_layer: event_context
+  - id: workflow_runtime_carrier
+    pattern: 'workflow-runtime'
+    minimum_matching_files: 16
+    required_paths:
+      - platform-spec.yaml
+      - internal/runtime/bus/eventbus_target_routes_test.go
+      - internal/runtime/conformance/testdata/route_authority_matrix.yaml
+    canonical_layer: live_dispatch_non_authority
+  - id: internal_subscriptions
+    pattern: '\bSubscribeInternal\b|agentChans|internal subscription'
+    minimum_matching_files: 12
+    required_paths:
+      - internal/runtime/bus/eventbus.go
+      - internal/runtime/bus/eventbus_publish_test.go
+      - internal/runtime/bus/eventbus_target_routes_test.go
+    canonical_layer: live_dispatch_non_authority
+  - id: event_receipts
+    pattern: '\bevent_receipts\b'
+    minimum_matching_files: 63
+    required_paths:
+      - platform-spec.yaml
+      - internal/store/event_receipt_store.go
+      - internal/store/sqlite_schema.go
+      - cmd/swarm/main_test.go
+    canonical_layer: completion_evidence_non_authority
+  - id: settlement_backfill
+    pattern: '(?i)settlement|backfill|SettleDelivery'
+    minimum_matching_files: 18
+    required_paths:
+      - platform-spec.yaml
+      - internal/runtime/pipeline/system_node_receipt_store.go
+    canonical_layer: completion_evidence_non_authority
+  - id: replay_scope
+    pattern: 'replay_scope|replay-scope|replay scope|CommittedReplayScope'
+    minimum_matching_files: 37
+    required_paths:
+      - platform-spec.yaml
+      - internal/runtime/bus/committed_replay_scope.go
+      - internal/runtime/bus/outbox.go
+      - internal/store/run_fork_replay_resume_admission.go
+    canonical_layer: replay_recovery_consumers
+  - id: handler_descriptor_lookup
+    pattern: '(?i)handler lookup|descriptor lookup|active descriptor'
+    minimum_matching_files: 4
+    required_paths:
+      - platform-spec.yaml
+      - internal/runtime/conformance/testdata/route_authority_matrix.yaml
+    canonical_layer: invalid_old_authority
+  - id: public_readback
+    pattern: 'LoadOperatorEvent|eventPublishResultFromStore|event\.list|event\.get|event\.subscribe'
+    minimum_matching_files: 10
+    required_paths:
+      - platform-spec.yaml
+      - openrpc.json
+      - internal/apiv1/operator_event_publish.go
+      - internal/store/operator_observability_read_surface.go
+    canonical_layer: public_projection_non_authority
+  - id: delivery_target_route
+    pattern: 'delivery_target_route'
+    minimum_matching_files: 7
+    required_paths:
+      - platform-spec.yaml
+      - internal/store/sqlite_runtime_delivery_replay.go
+      - internal/store/events.go
+    canonical_layer: durable_delivery_authority
+  - id: delivery_authority_writers
+    pattern: 'InsertEventDelivery|PersistEventWithDelivery|PublishPersistedRecipients'
+    minimum_matching_files: 23
+    required_paths:
+      - internal/store/events.go
+      - internal/store/sqlite_runtime_delivery_replay.go
+      - internal/runtime/bus/eventbus_publish.go
+      - internal/runtime/template_instance_delivery_test.go
+    canonical_layer: durable_delivery_authority
+  - id: execution_admission_settlement
+    pattern: 'MarkSystemNodeProcessed|SettleDelivery|SystemNodeProcessed|delivery authority'
+    minimum_matching_files: 7
+    required_paths:
+      - internal/runtime/pipeline/node_system_runner.go
+      - internal/runtime/pipeline/system_node_receipt_store.go
+      - internal/runtime/pipeline/workflow_node_delivery_authority_test.go
+    canonical_layer: execution_admission
+  - id: publish_plan_consumers
+    pattern: 'CheckPublishRecipientPlan|PublishRecipientPlanMaterializer|PublishTx|publishDeferred'
+    minimum_matching_files: 7
+    required_paths:
+      - internal/runtime/bus/eventbus.go
+      - internal/runtime/bus/eventbus_publish.go
+      - internal/runtime/bus/outbox.go
+    canonical_layer: route_plan_consumers
+seam_families:
+  - id: spec_route_authority_contract
+    layer: spec_authority
+    classification: canonical_owner
+    paths:
+      - platform-spec.yaml
+      - openrpc.json
+    search_dimensions: [route_plan, event_deliveries, public_readback]
+    notes: >
+      The authoritative runtime contract defines RoutePlan as publish-time typed
+      authority, event_deliveries as durable authority, runtime callback
+      context normalization, public readback as projection, and replay/redelivery
+      boundaries.
+  - id: event_context_inputs
+    layer: event_context
+    classification: canonical_owner
+    paths:
+      - internal/events/types.go
+      - internal/runtime/bus/delivery_planner.go
+      - internal/runtime/pipeline/coordinator.go
+      - internal/runtime/pipeline/workflow_instance_activation.go
+      - internal/apiv1/operator_event_publish.go
+      - cmd/swarm/main_test.go
+    search_dimensions: [event_name_type, semantic_scope, entity_context, run_source_event_context, flow_instance, target_set, target_context]
+    notes: >
+      Event producers and adapters stamp event name/type, semantic scope,
+      flow_instance, target, target_set, entity, run, and source event context.
+      They are inputs to planning, not route authority by themselves.
+  - id: route_topology_and_table
+    layer: route_topology
+    classification: canonical_owner
+    paths:
+      - internal/runtime/bus/eventbus_routing.go
+      - internal/runtime/bus/delivery_planner.go
+      - internal/runtime/bus/eventbus_target_routes_test.go
+      - internal/runtime/conformance/testdata/route_authority_matrix.yaml
+    search_dimensions: [route_plan, route_event_key_derivation, event_name_type, semantic_scope, flow_instance, workflow_runtime_carrier]
+    notes: >
+      Route tables, routing rules, and route/event-key derivation helpers own
+      semantic subscriber facts. They feed RoutePlan and must not be replaced by
+      live subscriber or handler lookup.
+  - id: eventbus_route_plan_authority
+    layer: route_plan_authority
+    classification: canonical_owner
+    paths:
+      - internal/runtime/bus/route_plan.go
+      - internal/runtime/bus/delivery_planner.go
+      - internal/runtime/bus/eventbus_publish.go
+      - internal/runtime/bus/outbox.go
+      - internal/runtime/bus/eventbus_target_routes_test.go
+    search_dimensions: [route_plan, route_event_key_derivation, event_name_type, delivery_route_model, publish_plan_consumers]
+    notes: >
+      EventBus owns the canonical RoutePlan model, typed delivery intents, and
+      materializers. Publish, preflight, transactional, deferred, and outbox
+      paths consume this owner.
+  - id: durable_delivery_authority_writers
+    layer: durable_delivery_authority
+    classification: canonical_owner
+    paths:
+      - internal/store/events.go
+      - internal/store/sqlite_runtime_delivery_replay.go
+      - internal/store/event_delivery_routes_test.go
+      - internal/store/postgres.go
+      - internal/store/sqlite_schema.go
+    search_dimensions: [event_deliveries, delivery_route_model, delivery_authority_writers, delivery_target_route]
+    notes: >
+      Store writers persist typed delivery authority and delivery targets. They
+      are the physical sink, not independent route planners.
+  - id: workflow_node_execution_admission
+    layer: execution_admission
+    classification: valid_consumer
+    paths:
+      - internal/runtime/pipeline/workflow_nodes.go
+      - internal/runtime/pipeline/node_system_runner.go
+      - internal/runtime/pipeline/system_node_receipt_store.go
+      - internal/runtime/pipeline/workflow_node_delivery_authority_test.go
+    search_dimensions: [event_deliveries, execution_admission_settlement]
+    notes: >
+      Workflow-node execution consumes committed typed node delivery authority
+      and fails closed when authority is missing. It must not produce route
+      authority.
+  - id: live_carriers_internal_subscriptions
+    layer: live_dispatch_non_authority
+    classification: non_authoritative_observer_projection
+    paths:
+      - internal/runtime/bus/eventbus.go
+      - internal/runtime/bus/eventbus_publish.go
+      - internal/runtime/bus/eventbus_publish_test.go
+      - internal/runtime/bus/eventbus_target_routes_test.go
+      - internal/runtime/conformance/testdata/route_authority_matrix.yaml
+    search_dimensions: [workflow_runtime_carrier, internal_subscriptions]
+    invalid_authority:
+      - workflow-runtime carrier row
+      - live internal subscription state
+      - current EventBus channel state
+    notes: >
+      Carriers and live subscriptions wake consumers after authority exists.
+      They must not create, replace, or repair typed workflow-node delivery
+      authority.
+  - id: receipts_settlement_backfill
+    layer: completion_evidence_non_authority
+    classification: non_authoritative_observer_projection
+    paths:
+      - internal/store/event_receipt_store.go
+      - internal/store/manager_retry_policy_test.go
+      - internal/runtime/pipeline/system_node_receipt_store.go
+      - internal/runtime/pipeline/node_system_runner_completion_test.go
+      - platform-spec.yaml
+    search_dimensions: [event_receipts, settlement_backfill, execution_admission_settlement]
+    invalid_authority:
+      - event_receipts
+      - processed receipts
+      - settlement
+      - backfill
+      - retry counters
+    notes: >
+      Receipts and settlement are completion evidence. They cannot authorize a
+      handler or backfill missing pre-execution node delivery rows.
+  - id: replay_recovery_and_fork_consumers
+    layer: replay_recovery_consumers
+    classification: valid_consumer
+    paths:
+      - internal/runtime/bus/committed_replay_scope.go
+      - internal/runtime/bus/outbox.go
+      - internal/runtime/bus/sweeper_test.go
+      - internal/runtime/runforkadmission/selected_route_history.go
+      - internal/runtime/runforkexecution/recipient_planning.go
+      - internal/store/run_fork_delivery_event_replay.go
+      - internal/store/run_fork_selected_contract_execution.go
+      - internal/store/run_fork_replay_resume_admission.go
+    search_dimensions: [event_deliveries, replay_scope]
+    invalid_authority:
+      - replay markers alone
+      - source event_deliveries as fresh fork truth
+      - current live subscriptions as recovery truth
+    notes: >
+      Replay, recovery, and fork paths consume persisted RoutePlan output or an
+      explicitly gated replay/fork owner. Source rows are lineage or blockers
+      unless their owner produces fresh authority.
+  - id: public_operator_readback_projection
+    layer: public_projection_non_authority
+    classification: non_authoritative_observer_projection
+    paths:
+      - internal/apiv1/operator_event_publish.go
+      - internal/apiv1/operator_event_replay.go
+      - internal/apiv1/operator_read.go
+      - internal/store/operator_observability_read_surface.go
+      - internal/dashboard/server/observability_sql.go
+      - cmd/swarm/main_test.go
+      - openrpc.json
+    search_dimensions: [public_readback, event_name_type, entity_context, run_source_event_context, event_deliveries, event_receipts]
+    invalid_authority:
+      - API readback
+      - CLI readback
+      - dashboard readback
+      - OpenRPC projection
+      - delivery count reconstruction
+    notes: >
+      Public/operator surfaces project persisted delivery identity and status.
+      They must not re-plan subscribers or fabricate delivery rows.
+  - id: store_and_cli_direct_sql_fixtures
+    layer: test_fixture_semantics
+    classification: valid_consumer
+    paths:
+      - cmd/swarm/main_test.go
+      - internal/store/run_fork_selected_contract_execution_mutation_test.go
+      - internal/store/manager_retry_policy_test.go
+      - internal/store/run_control_test.go
+      - internal/runtime/template_instance_delivery_test.go
+    search_dimensions: [event_name_type, entity_context, run_source_event_context, event_deliveries, event_receipts, delivery_authority_writers]
+    notes: >
+      Direct SQL fixtures remain proof consumers only when they assert typed
+      semantic recipient identity and do not redefine route authority from row
+      counts alone.
+  - id: catalog_and_fixture_route_behavior
+    layer: test_fixture_semantics
+    classification: valid_consumer
+    paths:
+      - internal/runtime/cataloge2e/README.md
+      - internal/runtime/cataloge2e/runtime_harness_test.go
+      - internal/runtime/cataloge2e/tier11_flow_composition_e2e_test.go
+      - internal/runtime/cataloge2e/tier12_runtime_fork_e2e_test.go
+      - internal/runtime/swarmflowtest/catalog_runner_test.go
+      - tests/tier11-flow-composition/test-dynamic-flow-instance/expected.yaml
+      - tests/tier5-flow-lifecycle/test-create-flow-instance/expected.yaml
+    search_dimensions: [flow_instance, event_deliveries, replay_scope]
+    notes: >
+      Catalog and fixture proofs are broader behavior consumers. Required PR
+      smoke must cite focused rows; full route behavior stays in named full
+      conformance/catalog tiers.
+  - id: route_authority_conformance_artifacts
+    layer: conformance_guardrails
+    classification: canonical_owner
+    paths:
+      - internal/runtime/conformance/testdata/route_authority_matrix.yaml
+      - internal/runtime/conformance/route_authority_matrix_test.go
+      - internal/runtime/conformance/testdata/route_authority_drift_inventory.yaml
+    search_dimensions: [route_plan, event_deliveries, workflow_runtime_carrier]
+    notes: >
+      The matrix proves selected route-authority rows. This inventory proves
+      the repo-wide drift audit boundary and identifies guardrails that should
+      prevent future narrow closure.
+guardrail_proposals:
+  - id: drift_inventory_search_dimension_guard
+    implementation_state: implemented_in_this_pr
+    target: internal/runtime/conformance/route_authority_drift_inventory_test.go
+    prevents:
+      - deleting required search dimensions from the exhaustive inventory
+      - letting required route-authority file families disappear from the audit
+      - treating a package-local audit as #1364 closure
+  - id: route_authority_matrix_active_tracker_guard
+    implementation_state: ready_for_followup
+    target: internal/runtime/conformance/route_authority_matrix_test.go
+    prevents:
+      - marking parent route-authority closure while #1364-class drift inventory remains open
+      - covering rows without a matrix or inventory proof reference
+  - id: negative_authority_static_scan
+    implementation_state: ready_for_followup
+    target: internal/runtime/conformance
+    prevents:
+      - workflow-runtime carriers, live subscriptions, receipts, replay markers, or readback from becoming execution authority
+      - new helper names that imply route authority outside EventContext or RoutePlan owners
+  - id: direct_sql_fixture_classification_guard
+    implementation_state: ready_for_followup
+    target: internal/runtime/conformance
+    prevents:
+      - direct SQL tests from asserting delivery counts without typed semantic subscriber identity
+      - store fixtures from becoming undocumented route-authority interpreters
+follow_up_decision:
+  tracker_state: "#1340 and #1353 remain sufficient parent trackers."
+  new_child_required_before_coding: false
+  runtime_behavior_child_required_now: false
+  notes: >
+    No runtime behavior is selected in #1364. Concrete bypasses discovered
+    after this inventory must open or update a child issue and receive an
+    independent implementation gate before coding.
