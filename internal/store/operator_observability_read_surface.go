@@ -521,7 +521,7 @@ func (s *PostgresStore) ListOperatorRuntimeLogs(ctx context.Context, opts Operat
 		  AND ($3 = '' OR COALESCE(e.payload->'details'->>'component', '') = $3)
 		  AND ($4 = '' OR COALESCE(e.payload->>'log_level', '') = $4)
 		  AND ($5 = '' OR COALESCE(e.payload->'details'->>'error_code', '') = $5)
-		  AND ($6 = '' OR COALESCE(e.payload->'details'->>'agent_id', e.produced_by, '') = $6)
+		  AND ($6 = '' OR COALESCE(NULLIF(BTRIM(e.payload->'details'->>'agent_id'), ''), NULLIF(BTRIM(e.produced_by), ''), 'runtime') = $6)
 		  AND ($7 = '' OR COALESCE(e.payload->'details'->>'action', '') = $7 OR COALESCE(e.payload->'details'->>'event_name', e.payload->'details'->>'event_type', '') = $7)
 		  AND ($8 = '' OR COALESCE(e.payload->'details'->>'session_id', '') = $8)
 		  AND ($9 = '' OR EXISTS (

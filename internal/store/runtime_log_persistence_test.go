@@ -87,6 +87,19 @@ func TestSQLiteRuntimeLogSourceProjectionAndFilterParity(t *testing.T) {
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 
+	if _, err := store.DB.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, started_at)
+		VALUES (?, 'running', ?)
+	`, runID, time.Now().UTC()); err != nil {
+		t.Fatalf("seed sqlite run: %v", err)
+	}
+	if _, err := store.DB.ExecContext(ctx, `
+		INSERT INTO events (event_id, run_id, event_name, scope, payload, produced_by_type, created_at)
+		VALUES (?, ?, 'platform.runtime_log', 'global', ?, 'platform', ?)
+	`, uuid.NewString(), runID, json.RawMessage(`{"log_level":"warn","message":"direct fallback source","details":{"component":"source-parity","action":"direct_runtime_source"}}`), time.Now().UTC()); err != nil {
+		t.Fatalf("seed direct sqlite runtime log fallback row: %v", err)
+	}
+
 	logger := runtimepkg.NewRuntimeLogger(store)
 	if err := logger.Log(ctx, runtimepkg.RuntimeLogEntry{
 		Level:     "warn",
@@ -115,8 +128,8 @@ func TestSQLiteRuntimeLogSourceProjectionAndFilterParity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListOperatorRuntimeLogs all: %v", err)
 	}
-	if len(all.Logs) != 2 {
-		t.Fatalf("all runtime logs = %#v, want two", all.Logs)
+	if len(all.Logs) != 3 {
+		t.Fatalf("all runtime logs = %#v, want three", all.Logs)
 	}
 
 	runtimeRows, err := store.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{
@@ -129,8 +142,18 @@ func TestSQLiteRuntimeLogSourceProjectionAndFilterParity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListOperatorRuntimeLogs runtime source: %v", err)
 	}
-	if len(runtimeRows.Logs) != 1 || runtimeRows.Logs[0].Source != "runtime" || runtimeRows.Logs[0].Message != "runtime-owned source" {
-		t.Fatalf("runtime source logs = %#v, want only runtime-owned row", runtimeRows.Logs)
+	if len(runtimeRows.Logs) != 2 {
+		t.Fatalf("runtime source logs = %#v, want direct fallback and runtime-owned rows", runtimeRows.Logs)
+	}
+	runtimeMessages := map[string]bool{}
+	for _, log := range runtimeRows.Logs {
+		if log.Source != "runtime" {
+			t.Fatalf("runtime source row = %#v, want source runtime", log)
+		}
+		runtimeMessages[log.Message] = true
+	}
+	if !runtimeMessages["direct fallback source"] || !runtimeMessages["runtime-owned source"] {
+		t.Fatalf("runtime source messages = %#v, want direct fallback and runtime-owned rows", runtimeMessages)
 	}
 
 	agentRows, err := store.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{
