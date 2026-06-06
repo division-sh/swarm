@@ -258,7 +258,14 @@ func releaseMailboxWritePendingNodeDeliveries(t *testing.T, db *sql.DB, bus *run
 	if bus == nil {
 		t.Fatalf("%s runtime bus is required to release pending node deliveries", backend)
 	}
-	if mailboxWritePendingNodeDeliveryCount(t, db, backend, eventID) == 0 {
+	requireAPIV1Convergence(t, fmt.Sprintf("%s node delivery authority for %s", backend, eventID), func() (bool, error) {
+		_, total := mailboxWriteNodeDeliveryCounts(t, db, backend, eventID)
+		if total > 0 {
+			return true, nil
+		}
+		return false, fmt.Errorf("node delivery row not visible yet")
+	})
+	if pending, _ := mailboxWriteNodeDeliveryCounts(t, db, backend, eventID); pending == 0 {
 		return
 	}
 	evt := loadMailboxWritePersistedEvent(t, db, backend, eventID)
@@ -272,22 +279,21 @@ func releaseMailboxWritePendingNodeDeliveries(t *testing.T, db *sql.DB, bus *run
 	}
 }
 
-func mailboxWritePendingNodeDeliveryCount(t *testing.T, db *sql.DB, backend, eventID string) int {
+func mailboxWriteNodeDeliveryCounts(t *testing.T, db *sql.DB, backend, eventID string) (pending int, total int) {
 	t.Helper()
 	if strings.TrimSpace(eventID) == "" {
-		return 0
+		return 0, 0
 	}
 	sqlText := ""
 	if strings.HasPrefix(backend, "sqlite") {
-		sqlText = `SELECT COUNT(*) FROM event_deliveries WHERE event_id = ? AND subscriber_type = 'node' AND status = 'pending'`
+		sqlText = `SELECT COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END), 0), COUNT(*) FROM event_deliveries WHERE event_id = ? AND subscriber_type = 'node'`
 	} else {
-		sqlText = `SELECT COUNT(*) FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = 'node' AND status = 'pending'`
+		sqlText = `SELECT COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END), 0), COUNT(*) FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = 'node'`
 	}
-	var count int
-	if err := db.QueryRowContext(context.Background(), sqlText, eventID).Scan(&count); err != nil {
-		t.Fatalf("%s pending node delivery count for %s: %v", backend, eventID, err)
+	if err := db.QueryRowContext(context.Background(), sqlText, eventID).Scan(&pending, &total); err != nil {
+		t.Fatalf("%s node delivery counts for %s: %v", backend, eventID, err)
 	}
-	return count
+	return pending, total
 }
 
 func loadMailboxWritePersistedEvent(t *testing.T, db *sql.DB, backend, eventID string) events.Event {
