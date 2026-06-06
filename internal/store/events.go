@@ -70,7 +70,11 @@ func (s *PostgresStore) AppendEventTx(ctx context.Context, tx *sql.Tx, evt event
 		return err
 	}
 	return withEventStoreRetry(ctx, tx, func() error {
-		evt = s.enrichEventCorrelation(ctx, caps, chooseRowQueryer(s.DB, tx), evt)
+		var err error
+		evt, err = events.AdmitForPersistence(evt, s.eventPersistenceAdmissionOptions(ctx, caps, chooseRowQueryer(s.DB, tx), evt))
+		if err != nil {
+			return err
+		}
 		switch caps.Events.Log {
 		case SchemaFlavorCanonical:
 			if tx == nil && persistedBundleRunCreationValidationRequired(ctx, caps) {
@@ -109,7 +113,10 @@ func (s *PostgresStore) PersistEventWithDeliveries(ctx context.Context, evt even
 	if err != nil {
 		return err
 	}
-	evt = s.enrichEventCorrelation(ctx, caps, chooseRowQueryer(s.DB, nil), evt)
+	evt, err = events.AdmitForPersistence(evt, s.eventPersistenceAdmissionOptions(ctx, caps, chooseRowQueryer(s.DB, nil), evt))
+	if err != nil {
+		return err
+	}
 	switch {
 	case caps.Events.Log == SchemaFlavorCanonical && caps.Events.Deliveries == SchemaFlavorCanonical:
 		return s.persistEventWithDeliveriesSpec(ctx, caps, evt, agentIDs)
@@ -131,7 +138,10 @@ func (s *PostgresStore) PersistEventWithDeliveriesAndScope(
 	if err != nil {
 		return err
 	}
-	evt = s.enrichEventCorrelation(ctx, caps, chooseRowQueryer(s.DB, nil), evt)
+	evt, err = events.AdmitForPersistence(evt, s.eventPersistenceAdmissionOptions(ctx, caps, chooseRowQueryer(s.DB, nil), evt))
+	if err != nil {
+		return err
+	}
 	switch {
 	case caps.Events.Log == SchemaFlavorCanonical && caps.Events.Deliveries == SchemaFlavorCanonical:
 		return s.persistEventWithDeliveriesAndScopeSpec(ctx, caps, evt, agentIDs, scope)
@@ -154,7 +164,10 @@ func (s *PostgresStore) PersistEventWithDeliveryRoutesAndScope(
 	if err != nil {
 		return err
 	}
-	evt = s.enrichEventCorrelation(ctx, caps, chooseRowQueryer(s.DB, nil), evt)
+	evt, err = events.AdmitForPersistence(evt, s.eventPersistenceAdmissionOptions(ctx, caps, chooseRowQueryer(s.DB, nil), evt))
+	if err != nil {
+		return err
+	}
 	switch {
 	case caps.Events.Log == SchemaFlavorCanonical && caps.Events.Deliveries == SchemaFlavorCanonical:
 		return s.persistEventWithDeliveryRoutesAndScopeSpec(ctx, caps, evt, agentIDs, deliveryTargets, scope)
@@ -176,7 +189,10 @@ func (s *PostgresStore) PersistEventWithDeliveryRouteSetAndScope(
 	if err != nil {
 		return err
 	}
-	evt = s.enrichEventCorrelation(ctx, caps, chooseRowQueryer(s.DB, nil), evt)
+	evt, err = events.AdmitForPersistence(evt, s.eventPersistenceAdmissionOptions(ctx, caps, chooseRowQueryer(s.DB, nil), evt))
+	if err != nil {
+		return err
+	}
 	switch {
 	case caps.Events.Log == SchemaFlavorCanonical && caps.Events.Deliveries == SchemaFlavorCanonical:
 		return s.persistEventWithDeliveryRouteSetAndScopeSpec(ctx, caps, evt, deliveryRoutes, scope)
@@ -188,7 +204,7 @@ func (s *PostgresStore) PersistEventWithDeliveryRouteSetAndScope(
 	return nil
 }
 
-func (s *PostgresStore) enrichEventCorrelation(ctx context.Context, caps StoreSchemaCapabilities, q rowQueryer, evt events.Event) events.Event {
+func (s *PostgresStore) eventPersistenceAdmissionOptions(ctx context.Context, caps StoreSchemaCapabilities, q rowQueryer, evt events.Event) events.AdmissionOptions {
 	runID := strings.TrimSpace(evt.RunID())
 	if runID == "" {
 		if lineage, ok := runtimecorrelation.RuntimeLineageFromContext(ctx); ok {
@@ -213,20 +229,25 @@ func (s *PostgresStore) enrichEventCorrelation(ctx context.Context, caps StoreSc
 			runID = foundRunID
 		}
 	}
-	evt = events.NewProjectionEvent(
-		evt.ID(),
-		evt.Type(),
-		evt.SourceAgent(),
-		evt.TaskID(),
-		evt.Payload(),
-		evt.ChainDepth(),
-		runID,
-		parentID,
-		evt.NormalizedEnvelope(),
-		evt.CreatedAt(),
-	)
-	_, evt = runtimecorrelation.CorrelateEvent(ctx, evt)
-	return evt
+	return events.AdmissionOptions{
+		RunIDCandidate:           runID,
+		ParentEventIDCandidate:   parentID,
+		SelectedForkLineageOwner: selectedForkLineageOwnerFromContext(ctx),
+	}
+}
+
+func selectedForkLineageOwnerFromContext(ctx context.Context) string {
+	lineage, ok := runtimecorrelation.RuntimeLineageFromContext(ctx)
+	if !ok || !lineage.SelectedForkContext {
+		return ""
+	}
+	if lineage.Classification != runtimecorrelation.RuntimeLineageClassificationForkLocal {
+		return ""
+	}
+	if lineage.RowCategory != runtimecorrelation.RuntimeLineageRowCategoryRuntimeContainer {
+		return ""
+	}
+	return strings.TrimSpace(lineage.SelectedForkOwner)
 }
 
 func sanitizeOptionalUUID(raw string) string {
@@ -1600,20 +1621,16 @@ func (s *PostgresStore) convergeStandaloneRuntimePlatformRunByEventID(
 	return nil
 }
 
-func runIDOrEventID(runID, eventID string) string {
-	if runID = nullUUIDString(runID); runID != "" {
-		return runID
-	}
-	return nullUUIDString(eventID)
-}
-
 func eventStorageEnvelope(evt events.Event) (id string, runID string, eventName string, entityID string, flowInstance string, scope string, payload []byte, chainDepth int, producedBy string, producedByType string, sourceEventID string, createdAt time.Time, err error) {
 	id = strings.TrimSpace(evt.ID())
 	if id == "" {
-		id = uuid.NewString()
+		return "", "", "", "", "", "", nil, 0, "", "", "", time.Time{}, fmt.Errorf("event_id is required after admission")
 	}
-	runID = runIDOrEventID(evt.RunID(), id)
+	runID = nullUUIDString(evt.RunID())
 	eventName = strings.TrimSpace(string(evt.Type()))
+	if eventName == "" {
+		return "", "", "", "", "", "", nil, 0, "", "", "", time.Time{}, fmt.Errorf("event_name is required after admission")
+	}
 	payload = eventPayloadForStorage(evt)
 	envelope := evt.NormalizedEnvelope()
 	entityID, err = validateOptionalEntityUUID(envelope.EntityID)
@@ -1637,7 +1654,7 @@ func eventStorageEnvelope(evt events.Event) (id string, runID string, eventName 
 	sourceEventID = sanitizeOptionalUUID(evt.ParentEventID())
 	createdAt = evt.CreatedAt()
 	if createdAt.IsZero() {
-		createdAt = time.Now().UTC()
+		return "", "", "", "", "", "", nil, 0, "", "", "", time.Time{}, fmt.Errorf("created_at is required after admission")
 	}
 	return
 }

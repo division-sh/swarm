@@ -50,7 +50,11 @@ func (o engineOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.E
 	}
 	for i := range intents {
 		intent := &intents[i]
-		intent.Event = normalizeOutboxEvent(intent.Event)
+		var err error
+		intent.Event, err = normalizeOutboxEvent(ctx, intent.Event)
+		if err != nil {
+			return err
+		}
 		if strings.TrimSpace(string(intent.Event.Type())) == "" {
 			continue
 		}
@@ -98,7 +102,11 @@ func (d engineDispatcher) DispatchPostCommit(ctx context.Context, intents []runt
 		return nil
 	}
 	for i := range intents {
-		intents[i].Event = normalizeOutboxEvent(intents[i].Event)
+		var err error
+		intents[i].Event, err = normalizeOutboxEvent(ctx, intents[i].Event)
+		if err != nil {
+			return err
+		}
 	}
 	if runtimepipeline.CollectPipelineEmitIntents(ctx, intents) {
 		return nil
@@ -263,8 +271,9 @@ func (d engineDispatcher) dispatchExplicitDirectIntent(ctx context.Context, inte
 	return nil
 }
 
-func normalizeOutboxEvent(evt events.Event) events.Event {
-	return eventWithPublishDefaults(evt, time.Now().UTC())
+func normalizeOutboxEvent(ctx context.Context, evt events.Event) (events.Event, error) {
+	_, admitted, err := admitEventForPublish(ctx, evt, time.Now().UTC(), "")
+	return admitted, err
 }
 
 func replayScopeForEmitIntent(intent runtimeengine.EmitIntent) runtimereplayclaim.CommittedReplayScope {

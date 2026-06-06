@@ -1598,16 +1598,23 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeWithoutPersis
 		name      string
 		eventID   string
 		eventType events.EventType
+		event     func(id string, eventType events.EventType) events.Event
 	}{
 		{
 			name:      "platform.boot",
 			eventID:   "10000000-0000-0000-0000-000000000001",
 			eventType: events.EventType("platform.boot"),
+			event: func(id string, eventType events.EventType) events.Event {
+				return events.NewRuntimeControlEvent(id, eventType, "runtime", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+			},
 		},
 		{
 			name:      "platform.recovery_failed",
 			eventID:   "10000000-0000-0000-0000-000000000002",
 			eventType: events.EventType("platform.recovery_failed"),
+			event: func(id string, eventType events.EventType) events.Event {
+				return events.NewRuntimeDiagnosticEvent(id, eventType, "runtime", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+			},
 		},
 	}
 
@@ -1616,10 +1623,7 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeWithoutPersis
 			internal := eb.SubscribeInternal("internal-"+string(tc.eventType), tc.eventType)
 			defer eb.Unsubscribe("internal-" + string(tc.eventType))
 
-			if err := eb.Publish(ctx, events.NewProjectionEvent(tc.eventID,
-				tc.eventType,
-				"runtime", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
-			); err != nil {
+			if err := eb.Publish(ctx, tc.event(tc.eventID, tc.eventType)); err != nil {
 				t.Fatalf("Publish(%s): %v", tc.eventType, err)
 			}
 
@@ -1663,26 +1667,39 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeAfterFinalRec
 		name      string
 		eventID   string
 		eventType events.EventType
+		event     func(id string, eventType events.EventType) events.Event
 	}{
 		{
 			name:      "manager platform.agent_failed",
 			eventID:   "20000000-0000-0000-0000-000000000001",
 			eventType: events.EventType("platform.agent_failed"),
+			event: func(id string, eventType events.EventType) events.Event {
+				return events.NewRuntimeDiagnosticEvent(id, eventType, "runtime", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+			},
 		},
 		{
 			name:      "receipts platform.paused",
 			eventID:   "20000000-0000-0000-0000-000000000002",
 			eventType: events.EventType("platform.paused"),
+			event: func(id string, eventType events.EventType) events.Event {
+				return events.NewRuntimeControlEvent(id, eventType, "runtime", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+			},
 		},
 		{
 			name:      "budget platform.budget_threshold_crossed",
 			eventID:   "20000000-0000-0000-0000-000000000003",
 			eventType: events.EventType("platform.budget_threshold_crossed"),
+			event: func(id string, eventType events.EventType) events.Event {
+				return events.NewRuntimeDiagnosticEvent(id, eventType, "runtime", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+			},
 		},
 		{
 			name:      "run lifecycle platform.run_stalled",
 			eventID:   "20000000-0000-0000-0000-000000000004",
 			eventType: events.EventType("platform.run_stalled"),
+			event: func(id string, eventType events.EventType) events.Event {
+				return events.NewRuntimeDiagnosticEvent(id, eventType, "runtime", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+			},
 		},
 	}
 
@@ -1691,10 +1708,7 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeAfterFinalRec
 			subscription := eb.Subscribe(agentID, tc.eventType)
 			defer eb.Unsubscribe(agentID)
 
-			if err := eb.Publish(ctx, events.NewProjectionEvent(tc.eventID,
-				tc.eventType,
-				"runtime", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
-			); err != nil {
+			if err := eb.Publish(ctx, tc.event(tc.eventID, tc.eventType)); err != nil {
 				t.Fatalf("Publish(%s): %v", tc.eventType, err)
 			}
 

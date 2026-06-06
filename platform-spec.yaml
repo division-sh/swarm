@@ -340,6 +340,24 @@ contract_formats:
         than a generic all-fields constructor. Constructor APIs MUST clone
         caller-owned payload bytes, normalize event-owned identity fields, and
         expose event facts through read-only accessors.
+
+        Persisted event admission is the canonical boundary between constructed
+        event shells, context/correlation candidates, and storage. The admission
+        owner MUST classify or consume the constructor class before any event row
+        is written. It may materialize explicitly admitted event_id and created_at
+        defaults, and may allocate root-ingress run_id when the ingress class
+        permits server allocation. Runtime-owned routable platform events emitted
+        by the runtime-control or runtime-diagnostic classes may also allocate an
+        explicit standalone run_id at admission so the platform event enters the
+        normal run/delivery lifecycle without relying on store fallbacks. It MUST
+        fail closed for missing child, replay, fork, or runtime-domain lineage
+        facts that are required by the event class. EventBus, transactional
+        outbox, direct store append/persist, runtime-log diagnostic-direct
+        persistence, inbound-marker persistence, and Postgres/SQLite storage
+        envelopes MUST consume this owner. Stores and database defaults are
+        schema fallbacks only; they MUST NOT silently invent event_id, run_id,
+        created_at, source_event_id, target, target_set, or other class-required
+        facts after admission.
       constructor_classes:
         root_ingress:
           rule: External/operator/root run ingress events carry their final
@@ -351,6 +369,13 @@ contract_formats:
         replay:
           rule: Replay/fork events use replay lineage constructors so replay
             source and run ownership are explicit before persistence or dispatch.
+            Selected-contract fork-local replay is the bounded exception where
+            the durable parent/source authority is
+            run_fork_selected_contract_executions rather than
+            events.source_event_id. Admission MUST consume the selected-fork
+            lineage owner instead of silently writing a generic source_event_id
+            parent, and the typed execution lineage row MUST be committed after
+            the fork event row exists and before selected-contract activation.
         runtime_control:
           rule: Platform control and directive events use runtime-control
             constructors so diagnostics/control traffic is not confused with
@@ -358,6 +383,13 @@ contract_formats:
         runtime_diagnostic:
           rule: Runtime diagnostic/dead-letter/status events use diagnostic
             constructors and remain separate from route or delivery authority.
+        diagnostic_direct:
+          rule: Diagnostic-direct persisted platform events such as
+            platform.runtime_log and platform.inbound_recorded are admitted as
+            non-routed/non-executable evidence markers before direct persistence.
+            Their event_id and created_at facts are explicit admission output,
+            not database defaults; optional run_id remains empty only when the
+            diagnostic-direct class is global/no-run by design.
         route_probe:
           rule: Route-query and sentinel probes may use dedicated probe
             constructors only when the event is not a persisted runtime emit and
@@ -2148,14 +2180,16 @@ engine:
         external API.'
     - step: 2
       name: validate_payload
-      action: Validate event payload against the schema in events.yaml before persistence. Supported producer emit surfaces
+      action: Validate event payload and admitted envelope facts before persistence. Supported producer emit surfaces
         perform their own fail-closed validation before publish; this event-loop admission check remains the canonical final
         guard for all events that reach the event store and the primary owner for ingress/direct/store append paths without
-        a more specific producer surface owner. Reject if schema mismatch. Log and discard invalid events.
+        a more specific producer surface owner. Reject if schema mismatch or if the event admission class is missing
+        required identity, time, run, or lineage facts. Log and discard invalid events.
     - step: 3
       name: persist_event
-      action: 'Write event to the event store (write-ahead). The event is durable before any processing begins. Crash after
-        this point: event replays on recovery.'
+      action: 'Write the already-admitted event to the event store (write-ahead). Storage translates admitted facts into
+        row columns and must not repair missing event-owned facts. The event is durable before any processing begins. Crash
+        after this point: event replays on recovery.'
     - step: 4
       name: resolve_subscribers
       action: 'Look up subscribers by event path. Two kinds: system nodes (from nodes.yaml subscribes_to) and agents (from

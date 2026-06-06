@@ -18,15 +18,12 @@ type eventConstructorCallsite struct {
 }
 
 var productionProjectionEventAllowlist = map[eventConstructorCallsite]int{
-	{Path: "internal/store/events.go", Scope: "PostgresStore.enrichEventCorrelation"}:                                              1,
 	{Path: "internal/store/events.go", Scope: "PostgresStore.listEventsMissingPipelineReceiptSpec"}:                                1,
 	{Path: "internal/store/events.go", Scope: "PostgresStore.listEventsMissingPipelineReceiptForRunSpec"}:                          1,
 	{Path: "internal/store/pending_delivery_read_surface.go", Scope: "scanPendingAgentDeliveryRecords"}:                            1,
 	{Path: "internal/store/sqlite_runtime_delivery_replay.go", Scope: "SQLiteRuntimeStore.ListPendingSubscribedEvents"}:            1,
 	{Path: "internal/store/sqlite_runtime_delivery_replay.go", Scope: "SQLiteRuntimeStore.listSQLiteEventsMissingPipelineReceipt"}: 1,
 	{Path: "internal/store/sqlite_runtime_delivery_replay.go", Scope: "SQLiteRuntimeStore.listSQLitePendingAgentDeliveryRecords"}:  1,
-	{Path: "internal/runtime/bus/eventbus_publish.go", Scope: "eventWithPublishDefaults"}:                                          1,
-	{Path: "internal/runtime/bus/eventbus_publish.go", Scope: "eventWithSourceAgent"}:                                              1,
 	{Path: "internal/runtime/bus/eventbus_routing.go", Scope: "EventBus.deliverToRecipientsWithRoutes"}:                            1,
 	{Path: "internal/runtime/bus/outbox.go", Scope: "clonePostCommitEvent"}:                                                        1,
 	{Path: "internal/runtime/core/pinrouting/pinrouting.go", Scope: "Resolve"}:                                                     1,
@@ -367,7 +364,7 @@ func rhsProducesEventsEvent(expr ast.Expr, eventAliases map[string]struct{}) boo
 		if isEventsPackageIdent(fun.X, eventAliases) {
 			name := fun.Sel.Name
 			return name == "EmptyEvent" || name == "NewRootIngressEvent" || name == "NewRuntimeControlEvent" ||
-				name == "NewRuntimeDiagnosticEvent" || name == "NewChildEvent" || name == "NewChildEventWithLineage" ||
+				name == "NewRuntimeDiagnosticEvent" || name == "NewDiagnosticDirectEvent" || name == "NewChildEvent" || name == "NewChildEventWithLineage" ||
 				name == "NewReplayEvent" || name == "NewProjectionEvent" || name == "NewRouteProbeEvent"
 		}
 	case *ast.Ident:

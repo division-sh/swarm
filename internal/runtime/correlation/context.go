@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/google/uuid"
 )
 
 type inboundEventContextKey struct{}
@@ -292,10 +291,9 @@ func CorrelateEvent(ctx context.Context, evt events.Event) (context.Context, eve
 			runID = inbound.RunID()
 		}
 	}
-	if runID == "" {
-		runID = uuid.NewString()
+	if runID != "" {
+		ctx = WithRunID(ctx, runID)
 	}
-	ctx = WithRunID(ctx, runID)
 
 	parentEventID := evt.ParentEventID()
 	if parentEventID == "" {

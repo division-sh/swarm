@@ -29,15 +29,15 @@ func TestCorrelateEvent_InheritsRunAndParentWithoutGeneratingTrace(t *testing.T)
 	}
 }
 
-func TestCorrelateEvent_GeneratesRunWithoutGeneratingTrace(t *testing.T) {
+func TestCorrelateEvent_DoesNotGenerateRunWithoutAdmission(t *testing.T) {
 	ctx, evt := CorrelateEvent(context.Background(), events.NewProjectionEvent("evt-root",
 		events.EventType("task.started"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 	)
-	if evt.RunID() == "" {
-		t.Fatal("expected generated run_id")
+	if evt.RunID() != "" {
+		t.Fatalf("run_id = %q, want empty before admission", evt.RunID())
 	}
-	if got := RunIDFromContext(ctx); got != evt.RunID() {
-		t.Fatalf("context run_id = %q, want %q", got, evt.RunID())
+	if got := RunIDFromContext(ctx); got != "" {
+		t.Fatalf("context run_id = %q, want empty before admission", got)
 	}
 	if evt.ParentEventID() != "" {
 		t.Fatalf("parent_event_id = %q, want empty", evt.ParentEventID())
