@@ -264,6 +264,69 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 	return eb.convergeStandaloneRuntimePlatformRun(ictx, evt)
 }
 
+// PublishAcknowledged persists the event, recipient manifest, and replay scope
+// before returning, then dispatches post-commit pipeline work asynchronously.
+// Public API surfaces use this when success means durable acceptance rather than
+// downstream handler completion.
+func (eb *EventBus) PublishAcknowledged(ctx context.Context, evt events.Event) error {
+	ctx = WithCurrentRuntimeEpoch(ctx)
+	if err := ensurePublishEpoch(ctx); err != nil {
+		return err
+	}
+	ctx = eb.withBundleFingerprint(ctx)
+	eb.inFlightPublishes.Add(1)
+	defer eb.inFlightPublishes.Add(-1)
+	start := time.Now()
+	if evt.Type == "" {
+		return errors.New("event type is required")
+	}
+	if !isValidEventTypeName(string(evt.Type)) {
+		return fmt.Errorf("invalid event type: %s", strings.TrimSpace(string(evt.Type)))
+	}
+	if eb.payloadValidator != nil {
+		if err := eb.payloadValidator(string(evt.Type), evt.Payload); err != nil {
+			return fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type)), err)
+		}
+	}
+	if evt.ID == "" {
+		evt.ID = uuid.NewString()
+	}
+	if evt.CreatedAt.IsZero() {
+		evt.CreatedAt = time.Now()
+	}
+	ictx, evt := runtimecorrelation.CorrelateEvent(ctx, evt)
+
+	if txStore, ok := eb.store.(TransactionalEventStore); ok {
+		return eb.publishAcknowledgedTransactional(ictx, evt, start, txStore)
+	}
+
+	receiptOverride := &runtimepipeline.PipelineReceiptOverride{}
+	ictx = runtimepipeline.WithPipelineReceiptOverride(ictx, receiptOverride)
+	plan, err := eb.planSubscribedPublish(ictx, evt)
+	if err != nil {
+		return err
+	}
+	if err := eb.persistSubscribedPublishPlan(ictx, evt, plan); err != nil {
+		return err
+	}
+	if plan.TargetFailure != "" {
+		applyTargetDeliveryFailureReceipt(receiptOverride, plan.TargetFailure)
+		eb.recordTargetDeliveryFailure(ictx, evt, plan)
+		eb.recordCommittedPublishReceipt(ictx, evt, nil)
+		eb.logPublished(ictx, evt, int(time.Since(start)/time.Microsecond))
+		return eb.convergeStandaloneRuntimePlatformRun(ictx, evt)
+	}
+	if reason, err := eb.dispatchQueueReason(ictx, evt); err != nil {
+		return err
+	} else if reason != "" {
+		eb.logDispatchQueued(ictx, reason, evt, len(plan.RecipientIDs()), false, false)
+		eb.logPublished(ictx, evt, int(time.Since(start)/time.Microsecond))
+		return eb.convergeStandaloneRuntimePlatformRun(ictx, evt)
+	}
+	eb.dispatchCommittedPublishAsync(ictx, evt, plan)
+	return nil
+}
+
 // PublishTx persists the canonical event record and recipient manifest in a
 // caller-owned transaction. Callers use this when another persisted state
 // transition must commit atomically with event emission.
@@ -337,6 +400,18 @@ func (eb *EventBus) PublishTx(ctx context.Context, tx *sql.Tx, evt events.Event)
 		return errors.New("transactional publish post-commit actions are required")
 	}
 	return nil
+}
+
+func (eb *EventBus) dispatchCommittedPublishAsync(ctx context.Context, evt events.Event, inboundPlan RoutePlan) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	dispatchCtx := runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(ctx))
+	eb.inFlightPublishes.Add(1)
+	go func() {
+		defer eb.inFlightPublishes.Add(-1)
+		eb.completePublishTxDispatch(dispatchCtx, evt, inboundPlan)
+	}()
 }
 
 func (eb *EventBus) completePublishTxDispatch(ctx context.Context, evt events.Event, inboundPlan RoutePlan) {
@@ -564,6 +639,89 @@ func (eb *EventBus) publishTransactional(
 		}
 	}
 	eb.recordCommittedPublishReceipt(dispatchCtx, evt, nil)
+	return nil
+}
+
+func (eb *EventBus) publishAcknowledgedTransactional(
+	ctx context.Context,
+	evt events.Event,
+	start time.Time,
+	txStore TransactionalEventStore,
+) error {
+	ctx = WithCurrentRuntimeEpoch(ctx)
+	if err := ensurePublishEpoch(ctx); err != nil {
+		return err
+	}
+	tx, err := txStore.BeginEventTx(ctx)
+	if err != nil {
+		return fmt.Errorf("begin publish tx: %w", err)
+	}
+	txPostCommitActions := make([]func(), 0, 8)
+	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
+	txctx = runtimepipeline.WithPipelinePostCommitActions(txctx, &txPostCommitActions)
+	receiptOverride := &runtimepipeline.PipelineReceiptOverride{}
+	txctx = runtimepipeline.WithPipelineReceiptOverride(txctx, receiptOverride)
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if err := txStore.AppendEventTx(txctx, tx, evt); err != nil {
+		return fmt.Errorf("persist event: %w", err)
+	}
+	inboundPlan, err := eb.planSubscribedRoutePlan(txctx, evt, true)
+	if err != nil {
+		return err
+	}
+	if inboundPlan.HasPersistentDeliveries() {
+		if err := eb.insertEventDeliveriesTx(txctx, txStore, tx, evt.ID, inboundPlan.PersistedRecipientIDs(), inboundPlan.DeliveryTargets(), inboundPlan.DeliveryRoutes()); err != nil {
+			return fmt.Errorf("persist event deliveries: %w", err)
+		}
+	}
+	if scopeWriter, ok := eb.store.(TransactionalEventReplayScopePersistence); ok && scopeWriter != nil {
+		if err := scopeWriter.UpsertCommittedReplayScopeTx(txctx, tx, evt.ID, runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
+			return fmt.Errorf("persist committed replay scope: %w", err)
+		}
+	} else if replayScopePersistenceRequired(eb.store) {
+		return fmt.Errorf("persist committed replay scope: %w", runtimereplayclaim.ErrMissingCommittedReplayScope)
+	}
+	if inboundPlan.TargetFailure != "" {
+		applyTargetDeliveryFailureReceipt(receiptOverride, inboundPlan.TargetFailure)
+		status, errText := pipelineReceiptStatus(txctx, nil)
+		if err := txStore.UpsertPipelineReceiptTx(txctx, tx, evt.ID, status, errText); err != nil {
+			return fmt.Errorf("persist pipeline receipt: %w", err)
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit publish tx: %w", err)
+		}
+		committed = true
+		runtimepipeline.FlushPipelinePostCommitActions(txPostCommitActions)
+		eb.recordTargetDeliveryFailure(ctx, evt, inboundPlan)
+		eb.logPublished(ctx, evt, int(time.Since(start)/time.Microsecond))
+		eb.recordCommittedPublishConvergence(ctx, evt)
+		return nil
+	}
+	if reason, err := eb.dispatchQueueReason(txctx, evt); err != nil {
+		return err
+	} else if reason != "" {
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit publish tx: %w", err)
+		}
+		committed = true
+		runtimepipeline.FlushPipelinePostCommitActions(txPostCommitActions)
+		eb.logDispatchQueued(ctx, reason, evt, len(inboundPlan.RecipientIDs()), false, true)
+		eb.logPublished(ctx, evt, int(time.Since(start)/time.Microsecond))
+		eb.recordCommittedPublishConvergence(ctx, evt)
+		return nil
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit publish tx: %w", err)
+	}
+	committed = true
+	runtimepipeline.FlushPipelinePostCommitActions(txPostCommitActions)
+	eb.dispatchCommittedPublishAsync(ctx, evt, inboundPlan)
 	return nil
 }
 

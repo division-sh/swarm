@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -101,6 +102,65 @@ func TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempo
 	if count := countEventsByName(t, db, "scan.requested"); count != 1 {
 		t.Fatalf("scan.requested event count after conflict = %d, want 1", count)
 	}
+}
+
+func TestOperatorEventPublishReturnsDurableAckBeforePostCommitDispatchCompletes(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+	started := make(chan string, 1)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+	opts := runStartTestEventBusOptions(source)
+	opts.Interceptors = []runtimebus.EventInterceptor{blockingAPIV1PublishInterceptor{started: started, release: release}}
+	bus, err := runtimebus.NewEventBusWithOptions(pg, opts)
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	ctx := context.Background()
+	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "scan-orchestrator")
+	ch := bus.Subscribe("scan-orchestrator", events.EventType("scan.requested"))
+	defer bus.Unsubscribe("scan-orchestrator")
+	handler := eventPublishTestHandler(t, pg, bus, source)
+	body := eventPublishBody("", runStartTestFingerprint, "scan.requested", `{"topic":"medicine"}`, "", "idem-quick-ack-publish")
+
+	respCh := make(chan rpcResponse, 1)
+	go func() {
+		respCh <- rpcCall(t, handler, body)
+	}()
+	var published rpcResponse
+	select {
+	case published = <-respCh:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("event.publish did not return before post-commit dispatch completed")
+	}
+	if published.Error != nil {
+		t.Fatalf("event.publish error = %#v", published.Error)
+	}
+	result := asMap(t, published.Result)
+	eventID := stringValue(t, result["event_id"], "event_id")
+	runID := stringValue(t, result["run_id"], "run_id")
+	deliveries := asSlice(t, result["deliveries"])
+	assertEventPublishDeliveriesContain(t, deliveries, "agent", "scan-orchestrator", "pending", 1)
+	assertEventPublishDeliveriesContain(t, deliveries, "node", "scan-orchestrator", "pending", 1)
+	assertEventPublishPersistence(t, db, runID, eventID, "scan.requested", "cli-publish:"+actorTokenID(testToken))
+	if count := countAPIIdempotencyRows(t, db); count != 1 {
+		t.Fatalf("api_idempotency rows before dispatch release = %d, want 1", count)
+	}
+
+	requireAPIV1RuntimeBusSignal(t, started, "post-commit interceptor started")
+	requireNoAPIV1RuntimeBusEvent(t, ch, "event.publish delivery before post-commit release")
+	if got := countPipelineReceiptsForEvent(t, ctx, db, eventID); got != 0 {
+		t.Fatalf("pipeline receipts before post-commit release = %d, want 0", got)
+	}
+
+	releaseOnce.Do(func() { close(release) })
+	got := requireAPIV1RuntimeBusEvent(t, ch, "event.publish delivery after post-commit release")
+	if got.ID != eventID {
+		t.Fatalf("delivered event = %s, want %s", got.ID, eventID)
+	}
+	waitPipelineReceiptsForEvent(t, ctx, db, eventID, 1)
 }
 
 func TestOperatorEventPublishSQLiteIdempotentFirstEventPublishesWithoutLock(t *testing.T) {
@@ -1330,6 +1390,20 @@ func eventPublishTestHandlerWithStores(t *testing.T, runs RunReadStore, observab
 	})
 }
 
+type blockingAPIV1PublishInterceptor struct {
+	started chan string
+	release <-chan struct{}
+}
+
+func (i blockingAPIV1PublishInterceptor) Intercept(_ context.Context, _ events.Event) (bool, []events.Event, error) {
+	select {
+	case i.started <- "started":
+	default:
+	}
+	<-i.release
+	return true, nil, nil
+}
+
 type failStandalonePipelineReceiptOnceStore struct {
 	*store.PostgresStore
 	err error
@@ -1842,6 +1916,20 @@ func loadPipelineReceiptOutcomeAndError(t *testing.T, ctx context.Context, db *s
 		t.Fatalf("load pipeline receipt for %s: %v", eventID, err)
 	}
 	return outcome, errText
+}
+
+func waitPipelineReceiptsForEvent(t *testing.T, ctx context.Context, db *sql.DB, eventID string, want int) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for {
+		if got := countPipelineReceiptsForEvent(t, ctx, db, eventID); got == want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("pipeline receipts for %s did not reach %d", eventID, want)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
 }
 
 func containsMissingPipelineReceiptEvent(items []events.PersistedReplayEvent, eventID string) bool {

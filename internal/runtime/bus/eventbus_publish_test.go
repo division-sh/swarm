@@ -1191,6 +1191,87 @@ func TestEventBusWaitForQuiescenceWaitsForPublishCompletion(t *testing.T) {
 	}
 }
 
+func TestEventBusPublishAcknowledgedReturnsBeforePostCommitDispatchCompletes(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	ctx := eventBusTestRunContext(t, db)
+	pg := &store.PostgresStore{DB: db}
+	const eventID = "11111111-1111-1111-1111-111111111136"
+	const agentID = "agent-acknowledged-publish"
+	seedActiveRuntimeBusAgent(t, ctx, pg, agentID)
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	eb, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
+		Interceptors: []runtimebus.EventInterceptor{waitInterceptor{started: started, release: release}},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	ch := eb.Subscribe(agentID, events.EventType("task.completed"))
+	defer eb.Unsubscribe(agentID)
+
+	publishDone := make(chan error, 1)
+	go func() {
+		publishDone <- eb.PublishAcknowledged(ctx, events.Event{
+			ID:          eventID,
+			RunID:       eventBusTestRunID,
+			Type:        events.EventType("task.completed"),
+			SourceAgent: "api.v1",
+			CreatedAt:   time.Now().UTC(),
+			Payload:     []byte(`{"entity_id":"11111111-1111-1111-1111-111111111137"}`),
+		}.WithEntityID("11111111-1111-1111-1111-111111111137"))
+	}()
+	if err := requireErrorBefore(t, publishDone, 250*time.Millisecond, "acknowledged publish return before interceptor release"); err != nil {
+		t.Fatalf("PublishAcknowledged: %v", err)
+	}
+
+	ok, err := pg.EventExists(ctx, eventID)
+	if err != nil {
+		t.Fatalf("EventExists(%s): %v", eventID, err)
+	}
+	if !ok {
+		t.Fatalf("event %s was not persisted before acknowledged publish returned", eventID)
+	}
+	gotRecipients, err := pg.ListEventDeliveryRecipients(ctx, eventID)
+	if err != nil {
+		t.Fatalf("ListEventDeliveryRecipients(%s): %v", eventID, err)
+	}
+	assertSortedStringsEqual(t, gotRecipients, []string{agentID})
+	gotScope, err := pg.LoadCommittedReplayScope(ctx, eventID)
+	if err != nil {
+		t.Fatalf("LoadCommittedReplayScope(%s): %v", eventID, err)
+	}
+	if gotScope != runtimereplayclaim.CommittedReplayScopeSubscribed {
+		t.Fatalf("committed replay scope = %q, want %q", gotScope, runtimereplayclaim.CommittedReplayScopeSubscribed)
+	}
+
+	requireSignalBefore(t, started, time.Second, "async post-commit interceptor start")
+	waitCtx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	if err := eb.WaitForQuiescence(waitCtx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("WaitForQuiescence while async dispatch blocked = %v, want deadline exceeded", err)
+	}
+	requireNoBusEvent(t, ch, "acknowledged publish before interceptor release")
+
+	close(release)
+	deliveryTimer := time.NewTimer(time.Second)
+	defer deliveryTimer.Stop()
+	var got events.Event
+	select {
+	case got = <-ch:
+	case <-deliveryTimer.C:
+		t.Fatal("acknowledged publish delivery: timed out waiting for queued bus event")
+	}
+	if got.ID != eventID {
+		t.Fatalf("delivered event id = %s, want %s", got.ID, eventID)
+	}
+	waitCtx, cancel = context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancel()
+	if err := eb.WaitForQuiescence(waitCtx); err != nil {
+		t.Fatalf("WaitForQuiescence after acknowledged dispatch completion: %v", err)
+	}
+}
+
 func TestEventBusPublish_InterceptsMultiHopDeferredChains(t *testing.T) {
 	store := &recordingEventStore{}
 	eb, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{

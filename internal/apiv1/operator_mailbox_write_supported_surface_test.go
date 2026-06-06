@@ -79,11 +79,11 @@ func TestOperatorMailboxWriteSupportedSurfacePublishesAndReadsAcrossBackends(t *
 				case "workflow-runtime":
 					seenWorkflowRuntime = delivery["status"] == "pending"
 				case "reviewer":
-					seenReviewer = delivery["status"] == "delivered"
+					seenReviewer = delivery["status"] == "pending"
 				}
 			}
 			if !seenWorkflowRuntime || !seenReviewer {
-				t.Fatalf("event.publish deliveries = %#v, want pending workflow-runtime and delivered reviewer", deliveries)
+				t.Fatalf("event.publish deliveries = %#v, want durable pending workflow-runtime and reviewer snapshot", deliveries)
 			}
 
 			waitForMailboxWriteSupportedSurface(t, handler, db, runID, eventID, tc.name)

@@ -14971,7 +14971,11 @@ api_specification:
         \ event from another run fails\nclosed before event or idempotency completion persistence. A missing\nsource event\
         \ fails closed with EVENT_NOT_FOUND.\n\nThe method consumes the same canonical EventBus/store event-publication\n\
         owner used by runtime dispatch. Delivery results are read back from the\npersisted event_deliveries owner; the API\
-        \ layer must not re-plan\nsubscribers. This is the canonical primitive; run.start remains only\nas a deprecated wrapper\
+        \ layer must not re-plan\nsubscribers. A successful event.publish response is a durable acceptance acknowledgment\
+        \ for the event record, selected delivery manifest, and committed replay scope; it MUST NOT wait for system-node\
+        \ handler completion, dynamic auto_emit_on_create side effects, agent processing, downstream event delivery, or downstream\
+        \ receipts. Delivery statuses in the response are a persisted snapshot and may remain pending. Post-commit runtime\
+        \ dispatch/recovery owns downstream completion. This is the canonical primitive; run.start remains only\nas a deprecated wrapper\
         \ for older callers.\n\n`event_name` is a contract event reference. Callers may pass a root/unambiguous leaf event\
         \ name or a flow-scoped reference such as `flow_id/local_event` or `flow-path/local-event`. The server resolves\
         \ flow-scoped references through the loaded contract catalog before declaration validation, payload validation,\

@@ -60,8 +60,13 @@ type eventPublicationConfig struct {
 	requireExistingExplicitRun     bool
 	injectRunIDEntityIDWhenMissing bool
 	injectRunIDEntityIDOnlyNewRun  bool
+	durablePublishAck              bool
 	publishError                   func(eventPublicationParams, error) error
 	buildCompletion                func(context.Context, OperatorReadOptions, eventPublicationParams) (any, string, error)
+}
+
+type eventAcknowledgedPublisher interface {
+	PublishAcknowledged(context.Context, events.Event) error
 }
 
 func OperatorEventPublishHandlers(opts OperatorReadOptions) map[string]MethodHandler {
@@ -90,6 +95,7 @@ func executeEventPublish(ctx context.Context, req Request, opts OperatorReadOpti
 		requireExistingExplicitRun:     true,
 		injectRunIDEntityIDWhenMissing: true,
 		injectRunIDEntityIDOnlyNewRun:  true,
+		durablePublishAck:              true,
 		publishError:                   eventPublishPublishError,
 		buildCompletion: func(_ context.Context, _ OperatorReadOptions, params eventPublicationParams) (any, string, error) {
 			return eventPublishResult{
@@ -191,7 +197,7 @@ func executeOperatorEventPublication(
 		if err != nil {
 			return store.APIIdempotencyCompletion{}, err
 		}
-		if err := selectedOpts.Events.Publish(ctx, eventPublicationEvent(params, now)); err != nil {
+		if err := publishEventPublication(ctx, selectedOpts.Events, eventPublicationEvent(params, now), cfg); err != nil {
 			if cfg.publishError != nil {
 				return store.APIIdempotencyCompletion{}, cfg.publishError(params, err)
 			}
@@ -210,6 +216,15 @@ func executeOperatorEventPublication(
 			Response:   response,
 		}, nil
 	})
+}
+
+func publishEventPublication(ctx context.Context, publisher EventPublisher, evt events.Event, cfg eventPublicationConfig) error {
+	if cfg.durablePublishAck {
+		if acknowledged, ok := publisher.(eventAcknowledgedPublisher); ok && acknowledged != nil {
+			return acknowledged.PublishAcknowledged(ctx, evt)
+		}
+	}
+	return publisher.Publish(ctx, evt)
 }
 
 func eventPublicationParamsFromRequest(req Request, cfg eventPublicationConfig) (eventPublicationParams, bundleIdentityParam, error) {

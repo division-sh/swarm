@@ -3941,7 +3941,7 @@ func requireServedRunStatus(t *testing.T, endpoint, runID, want string) {
 
 func requireServedEventReadback(t *testing.T, endpoint, eventID, runID, entityID, eventName, subscriberID string) {
 	t.Helper()
-	var event struct {
+	type servedEventReadback struct {
 		EventID    string `json:"event_id"`
 		EventName  string `json:"event_name"`
 		EntityID   string `json:"entity_id"`
@@ -3952,21 +3952,30 @@ func requireServedEventReadback(t *testing.T, endpoint, eventID, runID, entityID
 			Status         string `json:"status"`
 		} `json:"deliveries"`
 	}
-	requireServedJSONRPCResult(t, endpoint, "event.get", map[string]any{"event_id": eventID}, &event)
-	if event.EventID != eventID || event.RunID != runID || event.EntityID != entityID || event.EventName != eventName {
-		t.Fatalf("event.get result = %#v, want event %s on selected run", event, eventName)
-	}
-	for _, delivery := range event.Deliveries {
-		if delivery.SubscriberType == "node" && delivery.SubscriberID == subscriberID && delivery.Status == "delivered" {
-			return
+
+	var last servedEventReadback
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		var event servedEventReadback
+		requireServedJSONRPCResult(t, endpoint, "event.get", map[string]any{"event_id": eventID}, &event)
+		last = event
+		if event.EventID != eventID || event.RunID != runID || event.EntityID != entityID || event.EventName != eventName {
+			time.Sleep(50 * time.Millisecond)
+			continue
 		}
+		for _, delivery := range event.Deliveries {
+			if delivery.SubscriberType == "node" && delivery.SubscriberID == subscriberID && delivery.Status == "delivered" {
+				return
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
-	t.Fatalf("event.get deliveries = %#v, want delivered node/%s", event.Deliveries, subscriberID)
+	t.Fatalf("event.get result = %#v, want delivered node/%s for event %s on selected run", last, subscriberID, eventID)
 }
 
 func requireServedTraceReadback(t *testing.T, endpoint, runID, eventID, eventName, subscriberID string) {
 	t.Helper()
-	var trace struct {
+	type servedTraceReadback struct {
 		Trace []struct {
 			EventID        string `json:"event_id"`
 			EventName      string `json:"event_name"`
@@ -3975,20 +3984,28 @@ func requireServedTraceReadback(t *testing.T, endpoint, runID, eventID, eventNam
 			SubscriberID   string `json:"subscriber_id"`
 		} `json:"trace"`
 	}
-	requireServedJSONRPCResult(t, endpoint, "run.trace", map[string]any{
-		"run_id": runID,
-		"filter": map[string]any{
-			"event_name": []string{eventName},
-		},
-		"limit": 10,
-	}, &trace)
-	for _, row := range trace.Trace {
-		if row.EventID == eventID && row.EventName == eventName && row.DeliveryStatus == "delivered" &&
-			row.SubscriberType == "node" && row.SubscriberID == subscriberID {
-			return
+
+	var last servedTraceReadback
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		var trace servedTraceReadback
+		requireServedJSONRPCResult(t, endpoint, "run.trace", map[string]any{
+			"run_id": runID,
+			"filter": map[string]any{
+				"event_name": []string{eventName},
+			},
+			"limit": 10,
+		}, &trace)
+		last = trace
+		for _, row := range trace.Trace {
+			if row.EventID == eventID && row.EventName == eventName && row.DeliveryStatus == "delivered" &&
+				row.SubscriberType == "node" && row.SubscriberID == subscriberID {
+				return
+			}
 		}
+		time.Sleep(50 * time.Millisecond)
 	}
-	t.Fatalf("run.trace rows = %#v, want delivered node/%s row for %s", trace.Trace, subscriberID, eventID)
+	t.Fatalf("run.trace rows = %#v, want delivered node/%s row for %s", last.Trace, subscriberID, eventID)
 }
 
 func requireServedEntityReadback(t *testing.T, endpoint, runID, entityID, wantState string) {
