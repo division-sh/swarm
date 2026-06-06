@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -3489,6 +3490,128 @@ func TestRunServeRuntimeEventPublishRunIDFollowUpServedPathPostgres(t *testing.T
 	runServedEventPublishFollowUpProof(t, endpoint, db, "postgres", bundleHash, preHandlerProof)
 }
 
+func TestRunServeRuntimeEventPublishDynamicAutoEmitReturnsDurableAckAndDispatchesChild(t *testing.T) {
+	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() serveWorkspaceLifecycle {
+		return serveRuntimeWorkspaceStub{}
+	})
+	contractsPath := writeServedDynamicAutoEmitFixture(t)
+	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+	blocked := make(chan servedEventPublishPreHandlerProof, 1)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	endpoint := startServedEventPublishFollowUpRuntime(t, serveOptions{
+		ConfigPath:                       writeServeRuntimeTestConfig(t),
+		ContractsPath:                    contractsPath,
+		PlatformSpecPath:                 defaultPlatformSpecPath,
+		StoreMode:                        "postgres",
+		StoreModeSet:                     true,
+		APIListenAddr:                    "127.0.0.1:0",
+		MCPListenAddr:                    "127.0.0.1:0",
+		SelfCheck:                        true,
+		RequireBundleMatch:               false,
+		Verbose:                          true,
+		TestWorkflowNodeHandlerStartHook: servedEventPublishBlockingHandlerAuthorityHook(db, "postgres", "portfolio-node", "opco.spinup_requested", blocked, release),
+	})
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+
+	bootstrap := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
+		"event_name":      "portfolio/opco.bootstrap_requested",
+		"bundle_hash":     bundleHash,
+		"payload":         map[string]any{"owner": "operator"},
+		"idempotency_key": "issue-1367-bootstrap",
+	})
+	if !bootstrap.NewRunCreated || bootstrap.EventID == "" || bootstrap.RunID == "" {
+		t.Fatalf("bootstrap event.publish result = %#v, want new run and event id", bootstrap)
+	}
+	runID := bootstrap.RunID
+	parentEntityID := requireServedEventPublishEntityState(t, db, "postgres", runID, "", "waiting")
+
+	instanceID := "11111111-1111-4111-8111-111111111111"
+	start := time.Now()
+	spinupEnvelope := requestServedJSONRPC(t, endpoint, "event.publish", map[string]any{
+		"event_name":      "portfolio/opco.spinup_requested",
+		"run_id":          runID,
+		"source_event_id": bootstrap.EventID,
+		"payload": map[string]any{
+			"entity_id":   parentEntityID,
+			"instance_id": instanceID,
+			"product_id":  "product-1",
+		},
+		"idempotency_key": "issue-1367-spinup",
+	})
+	elapsed := time.Since(start)
+	if spinupEnvelope.Error != nil {
+		t.Fatalf("spinup event.publish error = %#v", spinupEnvelope.Error)
+	}
+	if elapsed > time.Second {
+		t.Fatalf("spinup event.publish returned after %s, want durable ack before blocked create_flow_instance handler completes", elapsed)
+	}
+	var spinup servedEventPublishRPCResult
+	if err := json.Unmarshal(spinupEnvelope.Result, &spinup); err != nil {
+		t.Fatalf("decode spinup event.publish result: %v\n%s", err, string(spinupEnvelope.Result))
+	}
+	if spinup.RunID != runID || spinup.SourceEventID != bootstrap.EventID || spinup.NewRunCreated || spinup.EventID == "" {
+		t.Fatalf("spinup event.publish result = %#v, want existing run with source lineage", spinup)
+	}
+	requireServedEventPublishPreHandlerProof(t, "postgres", blocked, runID, spinup.EventID, "portfolio-node")
+	assertServedEventPublishDeliveriesContain(t, spinup.Deliveries, "node", "portfolio-node", "pending")
+	assertServedPostgresCount(t, db, `
+		SELECT COUNT(*) FROM event_deliveries
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'portfolio-node' AND status = 'pending'
+	`, 1, spinup.EventID)
+	assertServedPostgresCount(t, db, `
+		SELECT COUNT(*) FROM event_deliveries
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = '__runtime_replay_scope__'
+	`, 1, spinup.EventID)
+	assertServedPostgresCount(t, db, `
+		SELECT COUNT(*) FROM event_deliveries
+		WHERE event_id = $1::uuid AND subscriber_id = 'workflow-runtime'
+	`, 0, spinup.EventID)
+	requireServedReplayNoDeliveryHistoryNoMutation(t, endpoint, db, spinup.EventID, "issue-1367-replay-pending-parent")
+
+	releaseOnce.Do(func() { close(release) })
+	waitServedPostgresCount(t, db, `
+		SELECT COUNT(*) FROM event_deliveries
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'portfolio-node' AND status = 'delivered'
+	`, 1, spinup.EventID)
+	waitServedPostgresCount(t, db, `
+		SELECT COUNT(*) FROM event_receipts
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'portfolio-node' AND outcome = 'no_op'
+	`, 1, spinup.EventID)
+
+	autoEventName := "operating/" + instanceID + "/opco.product_initialization_requested"
+	autoEventID := waitServedPostgresEventID(t, db, `
+		SELECT event_id::text FROM events
+		WHERE run_id = $1::uuid AND event_name = $2
+	`, runID, autoEventName)
+	autoEntityID := servedPostgresEventEntityID(t, db, autoEventID)
+	assertServedDynamicAutoEmitPayloadProductOnly(t, db, autoEventID)
+	requireServedEventReadback(t, endpoint, autoEventID, runID, autoEntityID, autoEventName, "lifecycle-orchestrator")
+	waitServedPostgresCount(t, db, `
+		SELECT COUNT(*) FROM event_receipts
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'lifecycle-orchestrator' AND outcome = 'no_op'
+	`, 1, autoEventID)
+	assertServedPostgresCount(t, db, `
+		SELECT COUNT(*) FROM event_deliveries
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = '__runtime_replay_scope__'
+	`, 1, autoEventID)
+	assertServedPostgresCount(t, db, `
+		SELECT COUNT(*) FROM event_deliveries
+		WHERE event_id = $1::uuid AND subscriber_id = 'workflow-runtime'
+	`, 0, autoEventID)
+	assertServedPostgresCount(t, db, `
+		SELECT COUNT(*) FROM event_receipts
+		WHERE event_id = $1::uuid AND subscriber_id IN ('workflow-runtime', '__runtime_replay_scope__')
+	`, 0, autoEventID)
+
+	componentEventID := waitServedPostgresEventID(t, db, `
+		SELECT event_id::text FROM events
+		WHERE run_id = $1::uuid AND event_name = 'operating/component_scaffold.spawn_requested'
+	`, runID)
+	assertServedDynamicAutoEmitPayloadProductOnly(t, db, componentEventID)
+	requireServedReplayNoDeliveryHistoryNoMutation(t, endpoint, db, autoEventID, "issue-1367-replay-child-node-only")
+}
+
 func writeServedEventPublishFollowUpFixture(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -3588,6 +3711,134 @@ entity-writer:
 	return root
 }
 
+func writeServedDynamicAutoEmitFixture(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: served-dynamic-auto-emit
+version: "1.0.0"
+platform_version: ">=1.6.0"
+flows:
+  - id: portfolio
+    flow: portfolio
+    mode: static
+  - id: operating
+    flow: operating
+    mode: template
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: served-dynamic-auto-emit`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "portfolio", "schema.yaml"), `
+name: portfolio
+mode: static
+initial_state: new
+terminal_states: [done]
+states: [new, waiting, done]
+pins:
+  inputs:
+    events: [opco.bootstrap_requested]
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "portfolio", "entities.yaml"), `
+portfolio:
+  owner: text
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "portfolio", "events.yaml"), `
+opco.bootstrap_requested:
+  swarm:
+    source: external
+  entity_id: string
+  owner: text
+  required:
+    - entity_id
+
+opco.spinup_requested:
+  swarm:
+    source: external
+  entity_id: string
+  instance_id: string
+  product_id: string
+  required:
+    - entity_id
+    - instance_id
+    - product_id
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "portfolio", "nodes.yaml"), `
+portfolio-bootstrap:
+  id: portfolio-bootstrap
+  execution_type: system_node
+  subscribes_to: [opco.bootstrap_requested]
+  event_handlers:
+    opco.bootstrap_requested:
+      create_entity: true
+      data_accumulation:
+        source_event: opco.bootstrap_requested
+        writes:
+          - source_field: owner
+            target_field: owner
+      advances_to: waiting
+portfolio-node:
+  id: portfolio-node
+  execution_type: system_node
+  subscribes_to: [opco.spinup_requested]
+  event_handlers:
+    opco.spinup_requested:
+      action: create_flow_instance
+      template: operating
+      instance_id_from: payload.instance_id
+      config_from:
+        product_id: payload.product_id
+      advances_to: done
+  permissions:
+    - create_flow_instance
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "portfolio", "policy.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "portfolio", "tools.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "portfolio", "agents.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "schema.yaml"), `
+name: operating
+initial_state: initializing
+terminal_states: [ready]
+states: [initializing, spawning, ready]
+auto_emit_on_create:
+  event: opco.product_initialization_requested
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "events.yaml"), `
+opco.product_initialization_requested:
+  product_id: string
+component_scaffold.spawn_requested:
+  product_id: string
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "nodes.yaml"), `
+lifecycle-orchestrator:
+  id: lifecycle-orchestrator
+  execution_type: system_node
+  subscribes_to: [opco.product_initialization_requested]
+  produces: [component_scaffold.spawn_requested]
+  event_handlers:
+    opco.product_initialization_requested:
+      emit:
+        event: component_scaffold.spawn_requested
+        fields:
+          product_id: payload.product_id
+      advances_to: spawning
+component-scaffold:
+  id: component-scaffold
+  execution_type: system_node
+  subscribes_to: [component_scaffold.spawn_requested]
+  event_handlers:
+    component_scaffold.spawn_requested:
+      advances_to: ready
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "policy.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "tools.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "agents.yaml"), `{}`)
+	return root
+}
+
 func servedEventPublishFixtureBundleHash(t *testing.T, contractsPath string) string {
 	t.Helper()
 	bundle := loadWorkflowValidationBundleAt(t, contractsPath)
@@ -3669,6 +3920,49 @@ func servedEventPublishPreHandlerAuthorityHook(db *sql.DB, backend string, proof
 	}
 }
 
+func servedEventPublishBlockingHandlerAuthorityHook(
+	db *sql.DB,
+	backend string,
+	wantNodeID string,
+	wantEventSuffix string,
+	proofs chan<- servedEventPublishPreHandlerProof,
+	release <-chan struct{},
+) runtimepipeline.WorkflowNodeHandlerStartHook {
+	var once sync.Once
+	wantNodeID = strings.TrimSpace(wantNodeID)
+	wantEventSuffix = strings.Trim(strings.TrimSpace(wantEventSuffix), "/")
+	return func(ctx context.Context, nodeID string, evt events.Event) error {
+		if strings.TrimSpace(nodeID) != wantNodeID {
+			return nil
+		}
+		eventType := strings.Trim(strings.TrimSpace(string(evt.Type)), "/")
+		if eventType != wantEventSuffix && !strings.HasSuffix(eventType, "/"+wantEventSuffix) {
+			return nil
+		}
+		once.Do(func() {
+			runID := strings.TrimSpace(evt.RunID)
+			if runID == "" {
+				runID = runtimecorrelation.RunIDFromContext(ctx)
+			}
+			eventID := strings.TrimSpace(evt.ID)
+			count, err := servedEventPublishNodeDeliveryCountValue(ctx, db, backend, runID, eventID, wantNodeID)
+			proof := servedEventPublishPreHandlerProof{
+				RunID:   runID,
+				EventID: eventID,
+				NodeID:  wantNodeID,
+				Count:   count,
+				Err:     err,
+			}
+			select {
+			case proofs <- proof:
+			default:
+			}
+			<-release
+		})
+		return nil
+	}
+}
+
 func requireServedEventPublishPreHandlerProof(t *testing.T, backend string, proofs <-chan servedEventPublishPreHandlerProof, runID, eventID, nodeID string) {
 	t.Helper()
 	select {
@@ -3685,6 +3979,39 @@ func requireServedEventPublishPreHandlerProof(t *testing.T, backend string, proo
 	case <-time.After(5 * time.Second):
 		t.Fatalf("%s pre-handler root-input node delivery authority hook did not run", backend)
 	}
+}
+
+type servedEventPublishRPCResult struct {
+	EventID       string `json:"event_id"`
+	RunID         string `json:"run_id"`
+	SourceEventID string `json:"source_event_id,omitempty"`
+	NewRunCreated bool   `json:"new_run_created"`
+	Deliveries    []struct {
+		SubscriberType string `json:"subscriber_type"`
+		SubscriberID   string `json:"subscriber_id"`
+		Status         string `json:"status"`
+	} `json:"deliveries"`
+}
+
+func requireServedEventPublishRPCResult(t *testing.T, endpoint string, params map[string]any) servedEventPublishRPCResult {
+	t.Helper()
+	var result servedEventPublishRPCResult
+	requireServedJSONRPCResult(t, endpoint, "event.publish", params, &result)
+	return result
+}
+
+func assertServedEventPublishDeliveriesContain(t *testing.T, deliveries []struct {
+	SubscriberType string `json:"subscriber_type"`
+	SubscriberID   string `json:"subscriber_id"`
+	Status         string `json:"status"`
+}, subscriberType, subscriberID, status string) {
+	t.Helper()
+	for _, delivery := range deliveries {
+		if delivery.SubscriberType == subscriberType && delivery.SubscriberID == subscriberID && delivery.Status == status {
+			return
+		}
+	}
+	t.Fatalf("event.publish deliveries = %#v, want %s/%s status %s", deliveries, subscriberType, subscriberID, status)
 }
 
 func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.DB, backend, bundleHash string, preHandlerProof <-chan servedEventPublishPreHandlerProof) {
@@ -4183,6 +4510,114 @@ func servedEventPublishScalarCount(t *testing.T, db *sql.DB, backend, scope, run
 		t.Fatalf("%s count %s: %v", backend, scope, err)
 	}
 	return count
+}
+
+func waitServedPostgresCount(t *testing.T, db *sql.DB, query string, want int, args ...any) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		got := servedPostgresCount(t, db, query, args...)
+		if got == want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("postgres count = %d, want %d for query %s", got, want, strings.TrimSpace(query))
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+func assertServedPostgresCount(t *testing.T, db *sql.DB, query string, want int, args ...any) {
+	t.Helper()
+	if got := servedPostgresCount(t, db, query, args...); got != want {
+		t.Fatalf("postgres count = %d, want %d for query %s", got, want, strings.TrimSpace(query))
+	}
+}
+
+func servedPostgresCount(t *testing.T, db *sql.DB, query string, args ...any) int {
+	t.Helper()
+	var count int
+	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&count); err != nil {
+		t.Fatalf("postgres count query failed: %v\n%s", err, strings.TrimSpace(query))
+	}
+	return count
+}
+
+func waitServedPostgresEventID(t *testing.T, db *sql.DB, query string, args ...any) string {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var eventID string
+		err := db.QueryRowContext(context.Background(), query, args...).Scan(&eventID)
+		if err == nil && strings.TrimSpace(eventID) != "" {
+			return strings.TrimSpace(eventID)
+		}
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			t.Fatalf("postgres event id query failed: %v\n%s", err, strings.TrimSpace(query))
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for event id from query %s", strings.TrimSpace(query))
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+func servedPostgresEventEntityID(t *testing.T, db *sql.DB, eventID string) string {
+	t.Helper()
+	var entityID string
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT COALESCE(entity_id::text, '') FROM events
+		WHERE event_id = $1::uuid
+	`, eventID).Scan(&entityID); err != nil {
+		t.Fatalf("load event entity_id %s: %v", eventID, err)
+	}
+	return strings.TrimSpace(entityID)
+}
+
+func assertServedDynamicAutoEmitPayloadProductOnly(t *testing.T, db *sql.DB, eventID string) {
+	t.Helper()
+	var raw string
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT payload::text FROM events
+		WHERE event_id = $1::uuid
+	`, eventID).Scan(&raw); err != nil {
+		t.Fatalf("load event payload %s: %v", eventID, err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		t.Fatalf("decode event payload %s: %v\n%s", eventID, err, raw)
+	}
+	if got := payload["product_id"]; got != "product-1" {
+		t.Fatalf("payload product_id = %#v, want product-1: %#v", got, payload)
+	}
+	for _, key := range []string{"instance_id", "template_id", "flow_path", "parent_entity_id"} {
+		if _, ok := payload[key]; ok {
+			t.Fatalf("payload includes hidden activation context %q: %#v", key, payload)
+		}
+	}
+}
+
+func requireServedReplayNoDeliveryHistoryNoMutation(t *testing.T, endpoint string, db *sql.DB, eventID, idempotencyKey string) {
+	t.Helper()
+	beforeEvents := servedEventPublishScalarCount(t, db, "postgres", "events_all", "", "")
+	beforeIdempotency := servedEventPublishScalarCount(t, db, "postgres", "api_idempotency_all", "", "")
+	beforeReplayEvents := servedPostgresCount(t, db, `SELECT COUNT(*) FROM events WHERE event_name = 'event.replayed'`)
+	errResp := requireServedJSONRPCError(t, endpoint, "event.replay", map[string]any{
+		"event_id":        eventID,
+		"idempotency_key": idempotencyKey,
+	})
+	if errResp.Data["code"] != apiv1.EventReplayNoDeliveryHistoryCode {
+		t.Fatalf("event.replay data = %#v, want %s", errResp.Data, apiv1.EventReplayNoDeliveryHistoryCode)
+	}
+	if got := servedEventPublishScalarCount(t, db, "postgres", "events_all", "", ""); got != beforeEvents {
+		t.Fatalf("events after node-only replay = %d, want %d", got, beforeEvents)
+	}
+	if got := servedEventPublishScalarCount(t, db, "postgres", "api_idempotency_all", "", ""); got != beforeIdempotency {
+		t.Fatalf("api_idempotency after node-only replay = %d, want %d", got, beforeIdempotency)
+	}
+	if got := servedPostgresCount(t, db, `SELECT COUNT(*) FROM events WHERE event_name = 'event.replayed'`); got != beforeReplayEvents {
+		t.Fatalf("event.replayed count after node-only replay = %d, want %d", got, beforeReplayEvents)
+	}
 }
 
 func servedEventPublishNodeDeliveryCount(t *testing.T, db *sql.DB, backend, runID, eventID, subscriberID string) int {
