@@ -404,6 +404,43 @@ func TestEngineOutboxPersistsEventsAndDeliveriesInTransaction(t *testing.T) {
 	}
 }
 
+func TestEngineOutboxSkipsEmptyNoopIntentBeforeAdmission(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectBegin()
+	mock.ExpectCommit()
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	recordingStore := &directRecipientTransactionalStore{}
+	eb, err := runtimebus.NewEventBus(recordingStore)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
+	intents := []runtimeengine.EmitIntent{{
+		Event: events.NewProjectionEvent("evt-empty-noop", "", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
+	}}
+	if err := eb.EngineOutbox().WriteOutbox(ctx, intents); err != nil {
+		t.Fatalf("WriteOutbox empty noop: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	if got := len(recordingStore.events); got != 0 {
+		t.Fatalf("persisted events = %d, want 0", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
 func TestEngineOutboxSubscribedIntentConsumesCanonicalMaterializedRoutePlan(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
