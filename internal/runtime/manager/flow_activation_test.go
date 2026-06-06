@@ -383,6 +383,16 @@ func testActivationRequest(bundle *runtimecontracts.WorkflowContractBundle, temp
 	}
 }
 
+func testFlowActivationTriggerEvent(eventID string) events.Event {
+	return events.Event{
+		ID:          strings.TrimSpace(eventID),
+		Type:        events.EventType("spawn.requested"),
+		SourceAgent: "spawner",
+		Payload:     json.RawMessage(`{}`),
+		CreatedAt:   time.Now().UTC(),
+	}
+}
+
 func decodeFlowActivationEventPayload(t *testing.T, event events.Event) map[string]any {
 	t.Helper()
 	var payload map[string]any
@@ -500,9 +510,12 @@ func TestActivateFlowInstancePublishesAutoEmitEvent(t *testing.T) {
 	am := newFlowActivationManager(bus, &flowActivationTestInstanceStore{})
 	bundle := testFlowBundle("task.started")
 	const runID = "11111111-1111-1111-1111-111111111115"
+	const triggerEventID = "33333333-3333-3333-3333-333333333333"
 	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
+	req.TriggerEvent = testFlowActivationTriggerEvent(triggerEventID)
 
-	err := am.ActivateFlowInstance(ctx, testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1"))
+	err := am.ActivateFlowInstance(ctx, req)
 	if err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
@@ -521,6 +534,29 @@ func TestActivateFlowInstancePublishesAutoEmitEvent(t *testing.T) {
 	}
 	if got := strings.TrimSpace(autoEmit.RunID); got != runID {
 		t.Fatalf("published run_id = %q, want active run %q", got, runID)
+	}
+	if got := strings.TrimSpace(autoEmit.ParentEventID); got != triggerEventID {
+		t.Fatalf("published parent_event_id = %q, want trigger event %q", got, triggerEventID)
+	}
+	if got, _ := autoEmit.ContextMap("")["source_event_id"].(string); got != triggerEventID {
+		t.Fatalf("event context source_event_id = %q, want trigger event %q", got, triggerEventID)
+	}
+}
+
+func TestActivateFlowInstanceAutoEmitDoesNotInventLineageWithoutTrigger(t *testing.T) {
+	bus := &flowActivationTestBus{}
+	am := newFlowActivationManager(bus, &flowActivationTestInstanceStore{})
+	bundle := testFlowBundle("task.started")
+
+	if err := am.ActivateFlowInstance(context.Background(), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")); err != nil {
+		t.Fatalf("ActivateFlowInstance: %v", err)
+	}
+	event := findPublishedFlowActivationEvent(t, bus, "review/inst-1/task.started")
+	if got := strings.TrimSpace(event.ParentEventID); got != "" {
+		t.Fatalf("parent_event_id = %q, want empty without concrete trigger", got)
+	}
+	if _, ok := event.ContextMap("")["source_event_id"]; ok {
+		t.Fatalf("event context included source_event_id without concrete trigger: %#v", event.ContextMap(""))
 	}
 }
 
@@ -563,6 +599,39 @@ func TestActivateFlowInstanceAutoEmitPublishesConfigPayloadWithoutActivationCont
 	}
 	if got := event.FlowInstance(); got != "review/inst-1" {
 		t.Fatalf("auto-emit flow_instance = %q, want review/inst-1", got)
+	}
+}
+
+func TestActivateFlowInstanceAutoEmitKeepsPayloadSourceEventIDNonAuthoritative(t *testing.T) {
+	bus := &flowActivationTestBus{}
+	am := newFlowActivationManager(bus, &flowActivationTestInstanceStore{})
+	bundle := testFlowBundleWithAutoEmitEntry("component.scaffold.start", runtimecontracts.EventCatalogEntry{
+		Payload: runtimecontracts.EventPayloadSpec{
+			Properties: map[string]runtimecontracts.EventFieldSpec{
+				"source_event_id": {Type: "string"},
+			},
+		},
+		Required: []string{"source_event_id"},
+	})
+	const triggerEventID = "44444444-4444-4444-4444-444444444444"
+	const payloadSourceEventID = "business-payload-source"
+	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
+	req.TriggerEvent = testFlowActivationTriggerEvent(triggerEventID)
+	req.Config = map[string]any{"source_event_id": payloadSourceEventID}
+
+	if err := am.ActivateFlowInstance(context.Background(), req); err != nil {
+		t.Fatalf("ActivateFlowInstance: %v", err)
+	}
+	event := findPublishedFlowActivationEvent(t, bus, "review/inst-1/component.scaffold.start")
+	if got := strings.TrimSpace(event.ParentEventID); got != triggerEventID {
+		t.Fatalf("parent_event_id = %q, want trigger event %q", got, triggerEventID)
+	}
+	if got, _ := event.ContextMap("")["source_event_id"].(string); got != triggerEventID {
+		t.Fatalf("event context source_event_id = %q, want trigger event %q", got, triggerEventID)
+	}
+	payload := decodeFlowActivationEventPayload(t, event)
+	if got := payload["source_event_id"]; got != payloadSourceEventID {
+		t.Fatalf("payload source_event_id = %#v, want business payload value %q", got, payloadSourceEventID)
 	}
 }
 
@@ -630,11 +699,14 @@ func TestActivateFlowInstanceQueuesAutoEmitUntilPostCommitWhenAvailable(t *testi
 	am := newFlowActivationManager(bus, &flowActivationTestInstanceStore{})
 	bundle := testFlowBundle("task.started")
 	const runID = "22222222-2222-2222-2222-222222222215"
+	const triggerEventID = "55555555-5555-5555-5555-555555555555"
 	postCommit := make([]func(), 0, 1)
 	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
 	ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommit)
+	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
+	req.TriggerEvent = testFlowActivationTriggerEvent(triggerEventID)
 
-	err := am.ActivateFlowInstance(ctx, testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1"))
+	err := am.ActivateFlowInstance(ctx, req)
 	if err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
@@ -654,6 +726,9 @@ func TestActivateFlowInstanceQueuesAutoEmitUntilPostCommitWhenAvailable(t *testi
 	}
 	if got := strings.TrimSpace(bus.published[0].RunID); got != runID {
 		t.Fatalf("auto-emitted run_id = %q, want active run %q", got, runID)
+	}
+	if got := strings.TrimSpace(bus.published[0].ParentEventID); got != triggerEventID {
+		t.Fatalf("auto-emitted parent_event_id = %q, want trigger event %q", got, triggerEventID)
 	}
 }
 
