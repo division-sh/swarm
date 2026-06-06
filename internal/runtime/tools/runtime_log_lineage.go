@@ -15,8 +15,8 @@ func toolExecutorRuntimeLogContext(ctx context.Context) context.Context {
 	if inbound, ok := runtimebus.InboundEventFromContext(ctx); ok {
 		return runtimecorrelation.WithRuntimeDiagnosticLineage(
 			ctx,
-			strings.TrimSpace(inbound.ID),
-			strings.TrimSpace(string(inbound.Type)),
+			strings.TrimSpace(inbound.ID()),
+			strings.TrimSpace(string(inbound.Type())),
 		)
 	}
 	if lineage, ok := runtimecorrelation.RuntimeLineageFromContext(ctx); ok {

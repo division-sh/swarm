@@ -91,7 +91,7 @@ func Insert(ctx context.Context, db DBTX, rec Record) error {
 
 	causedByEvent := ""
 	if inbound, ok := runtimecorrelation.InboundEventFromContext(ctx); ok {
-		if parsed := validUUIDString(inbound.ID); parsed != "" {
+		if parsed := validUUIDString(inbound.ID()); parsed != "" {
 			causedByEvent = parsed
 		}
 	}

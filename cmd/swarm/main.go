@@ -221,6 +221,7 @@ type serveOptions struct {
 	AbandonActiveRuns                bool
 	Verbose                          bool
 	Output                           io.Writer
+	TestEntityStateHook              func(entityID, state string)
 	TestWorkflowNodeHandlerStartHook runtimepipeline.WorkflowNodeHandlerStartHook
 }
 
@@ -572,6 +573,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 			BootProgress:                     req.BootProgress,
 			SystemContainers:                 systemWorkspaceContainers(workspaces),
 			DisablePersistentStartupRecovery: !req.UseStartupRecovery,
+			TestEntityStateHook:              req.Options.TestEntityStateHook,
 			TestWorkflowNodeHandlerStartHook: req.Options.TestWorkflowNodeHandlerStartHook,
 		},
 	})

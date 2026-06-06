@@ -66,7 +66,7 @@ func (s *SQLiteRuntimeStore) ConvergeStandaloneRuntimePlatformRun(ctx context.Co
 	if s == nil || s.DB == nil {
 		return fmt.Errorf("sqlite runtime store is required")
 	}
-	eventID := sanitizeOptionalUUID(strings.TrimSpace(evt.ID))
+	eventID := sanitizeOptionalUUID(strings.TrimSpace(evt.ID()))
 	if eventID == "" {
 		return nil
 	}

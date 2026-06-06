@@ -92,11 +92,11 @@ func (n *declarativeWorkflowNode) InterceptPolicy(eventType string, evt events.E
 	}
 	eventType = strings.TrimSpace(eventType)
 	if eventType == "" {
-		eventType = strings.TrimSpace(string(evt.Type))
+		eventType = strings.TrimSpace(string(evt.Type()))
 	}
 	policy, ok := workflowNodeEventPolicy(n.coordinator.WorkflowNodes(), n.NodeID(), eventType)
 	if !ok && isAccumulationTimeoutEvent(events.EventType(eventType)) {
-		if bucket, bucketOK := timeridentity.ParseAccumulatorBucketRef(parsePayloadMap(evt.Payload)); bucketOK && bucket.NodeID == n.NodeID() {
+		if bucket, bucketOK := timeridentity.ParseAccumulatorBucketRef(parsePayloadMap(evt.Payload())); bucketOK && bucket.NodeID == n.NodeID() {
 			policy, ok = workflowNodeEventPolicy(n.coordinator.WorkflowNodes(), n.NodeID(), bucket.EventType)
 		}
 	}
@@ -147,11 +147,11 @@ func (n *DeclarativeNode) InterceptPolicy(eventType string, evt events.Event) (b
 	}
 	eventType = strings.TrimSpace(eventType)
 	if eventType == "" {
-		eventType = strings.TrimSpace(string(evt.Type))
+		eventType = strings.TrimSpace(string(evt.Type()))
 	}
 	policy, ok := n.policies[eventType]
 	if !ok && isAccumulationTimeoutEvent(events.EventType(eventType)) {
-		if bucket, bucketOK := timeridentity.ParseAccumulatorBucketRef(parsePayloadMap(evt.Payload)); bucketOK && bucket.NodeID == n.NodeID() {
+		if bucket, bucketOK := timeridentity.ParseAccumulatorBucketRef(parsePayloadMap(evt.Payload())); bucketOK && bucket.NodeID == n.NodeID() {
 			policy, ok = n.policies[bucket.EventType]
 		}
 	}
@@ -173,7 +173,7 @@ func (n *DeclarativeNode) HandleEvent(ctx context.Context, evt Event) (*HandlerO
 	if n == nil {
 		return nil, nil
 	}
-	eventType := strings.TrimSpace(string(evt.Type))
+	eventType := strings.TrimSpace(string(evt.Type()))
 	handlerEventKey := eventType
 	handler, ok := n.resolvedHandlerForDelivery(evt)
 	if !ok {
@@ -196,7 +196,7 @@ func (n *DeclarativeNode) HandleEvent(ctx context.Context, evt Event) (*HandlerO
 		}
 	}
 	if !ok && isAccumulationTimeoutEvent(events.EventType(eventType)) && containsString(n.contract.SubscribesTo, eventType) {
-		if bucket, bucketOK := timeridentity.ParseAccumulatorBucketRef(parsePayloadMap(evt.Payload)); bucketOK && bucket.NodeID == n.NodeID() {
+		if bucket, bucketOK := timeridentity.ParseAccumulatorBucketRef(parsePayloadMap(evt.Payload())); bucketOK && bucket.NodeID == n.NodeID() {
 			for candidateEventType, candidate := range n.contract.EventHandlers {
 				if strings.TrimSpace(candidateEventType) != bucket.EventType {
 					continue
@@ -298,7 +298,7 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 	if e.executor == nil || e.node == nil {
 		return nil, fmt.Errorf("handler execution engine is not configured")
 	}
-	if e.nodeID == "" || strings.TrimSpace(string(evt.Type)) == "" {
+	if e.nodeID == "" || strings.TrimSpace(string(evt.Type())) == "" {
 		return &HandlerOutcome{Handled: false}, nil
 	}
 	source := e.coordinator.SemanticSource()
@@ -368,7 +368,7 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 		FlowID:          identity.NormalizeFlowID(flowID),
 		Event:           evt,
 		HandlerEventKey: handlerEventKey,
-		ChainDepth:      evt.ChainDepth,
+		ChainDepth:      evt.ChainDepth(),
 		Handler:         handler,
 		State:           stateSnapshot,
 	})
@@ -384,7 +384,7 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 	}
 	handled := result.Status != runtimeengine.OutcomeRejected && result.Status != runtimeengine.OutcomeDiscarded
 	if handled {
-		e.coordinator.reconcileWorkflowEventTimers(ctx, entityID, strings.TrimSpace(string(evt.Type)))
+		e.coordinator.reconcileWorkflowEventTimers(ctx, entityID, strings.TrimSpace(string(evt.Type())))
 	}
 	return &HandlerOutcome{
 		Handled:         handled,
@@ -399,7 +399,18 @@ func ensureHandlerEntityID(source semanticview.Source, flowID string, handler Sy
 	entityID = strings.TrimSpace(firstNonEmptyString(entityID, evt.EntityID()))
 	if entityID != "" {
 		if strings.TrimSpace(evt.EntityID()) == "" {
-			evt = evt.WithEntityID(entityID)
+			evt = events.NewProjectionEvent(
+				evt.ID(),
+				evt.Type(),
+				evt.SourceAgent(),
+				evt.TaskID(),
+				evt.Payload(),
+				evt.ChainDepth(),
+				evt.RunID(),
+				evt.ParentEventID(),
+				events.EnvelopeForEntityID(evt.NormalizedEnvelope(), entityID),
+				evt.CreatedAt(),
+			)
 		}
 		return entityID, evt
 	}
@@ -407,7 +418,18 @@ func ensureHandlerEntityID(source semanticview.Source, flowID string, handler Sy
 		return "", evt
 	}
 	entityID = uuid.NewString()
-	return entityID, evt.WithEntityID(entityID)
+	return entityID, events.NewProjectionEvent(
+		evt.ID(),
+		evt.Type(),
+		evt.SourceAgent(),
+		evt.TaskID(),
+		evt.Payload(),
+		evt.ChainDepth(),
+		evt.RunID(),
+		evt.ParentEventID(),
+		events.EnvelopeForEntityID(evt.NormalizedEnvelope(), entityID),
+		evt.CreatedAt(),
+	)
 }
 
 func handlerMaterializesEntity(source semanticview.Source, flowID string, handler SystemNodeEventHandler) bool {

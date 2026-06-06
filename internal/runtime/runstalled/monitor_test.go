@@ -154,8 +154,8 @@ func TestMonitorHonorsDisabledAndExtendedPolicies(t *testing.T) {
 	if result.Published != 1 || len(publisher.events) != 1 {
 		t.Fatalf("published result=%+v events=%d, want exactly one", result, len(publisher.events))
 	}
-	if publisher.events[0].RunID != "extended-old-enough" {
-		t.Fatalf("published run = %q, want extended-old-enough", publisher.events[0].RunID)
+	if publisher.events[0].RunID() != "extended-old-enough" {
+		t.Fatalf("published run = %q, want extended-old-enough", publisher.events[0].RunID())
 	}
 }
 
@@ -187,7 +187,7 @@ func TestMonitorPublishesBothSupportedStalledDiagnosisReasons(t *testing.T) {
 	got := map[string]string{}
 	for _, evt := range publisher.events {
 		payload := eventPayload(t, evt)
-		got[evt.RunID] = payload["blocking_layer"].(string) + "/" + payload["blocking_reason"].(string)
+		got[evt.RunID()] = payload["blocking_layer"].(string) + "/" + payload["blocking_reason"].(string)
 	}
 	if got["delivery-run"] != "delivery_lifecycle/no_active_deliveries" {
 		t.Fatalf("delivery-run payload = %q", got["delivery-run"])
@@ -244,7 +244,7 @@ func (f *fakePublisher) Publish(_ context.Context, evt events.Event) error {
 func eventPayload(t *testing.T, evt events.Event) map[string]any {
 	t.Helper()
 	payload := map[string]any{}
-	if err := json.Unmarshal(evt.Payload, &payload); err != nil {
+	if err := json.Unmarshal(evt.Payload(), &payload); err != nil {
 		t.Fatalf("unmarshal payload: %v", err)
 	}
 	return payload

@@ -67,13 +67,13 @@ func (r startupManagerReplayRecord) detail() map[string]any {
 		"decision_family":      "startup_manager_replay",
 		"decision_outcome":     string(r.Outcome),
 		"decision_reason_code": string(r.ReasonCode),
-		"event_id":             strings.TrimSpace(r.Event.ID),
-		"event_type":           strings.TrimSpace(string(r.Event.Type)),
+		"event_id":             strings.TrimSpace(r.Event.ID()),
+		"event_type":           strings.TrimSpace(string(r.Event.Type())),
 		"agent_id":             strings.TrimSpace(r.AgentID),
 		"entity_id":            r.Event.EntityID(),
 		"flow_instance":        r.Event.FlowInstance(),
-		"parent_event_id":      strings.TrimSpace(r.Event.ParentEventID),
-		"persisted_run_id":     strings.TrimSpace(r.Event.RunID),
+		"parent_event_id":      strings.TrimSpace(r.Event.ParentEventID()),
+		"persisted_run_id":     strings.TrimSpace(r.Event.RunID()),
 	}
 	if errText := strings.TrimSpace(r.ErrorText); errText != "" {
 		detail["error"] = errText
@@ -109,8 +109,8 @@ func logStartupManagerReplayAftermath(ctx context.Context, bus Bus, record start
 		Component: "agent-manager",
 		Action:    startupManagerReplayAction,
 		Message:   record.message(),
-		EventID:   strings.TrimSpace(record.Event.ID),
-		EventType: strings.TrimSpace(string(record.Event.Type)),
+		EventID:   strings.TrimSpace(record.Event.ID()),
+		EventType: strings.TrimSpace(string(record.Event.Type())),
 		AgentID:   strings.TrimSpace(record.AgentID),
 		EntityID:  record.Event.EntityID(),
 		Detail:    record.detail(),

@@ -185,7 +185,7 @@ func (a *LLMAgent) OnEvent(ctx context.Context, evt events.Event) ([]events.Even
 	a.resetConversationScopeIfNeeded(evt)
 
 	ctx = models.WithActor(ctx, a.cfg)
-	ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(evt.RunID))
+	ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(evt.RunID()))
 	ctx = runtimebus.WithInboundEvent(ctx, evt)
 	ctx = sessions.WithScope(ctx, llm.ConversationModeString(a.conversation.Mode), a.cfg.SessionScope, conversationScopeKeyForEvent(a.conversation.Mode, evt))
 	recorder := runtimebus.NewEmittedEventsRecorder()
@@ -194,7 +194,7 @@ func (a *LLMAgent) OnEvent(ctx context.Context, evt events.Event) ([]events.Even
 
 	// Human task events must feed back into the requesting agent's reasoning context
 	// as an async tool-result style message correlated by task_id.
-	if isHumanTaskOutcomeEvent(evt.Type) {
+	if isHumanTaskOutcomeEvent(evt.Type()) {
 		if err := a.injectHumanTaskToolResult(ctx, evt); err != nil {
 			return nil, err
 		}
@@ -360,7 +360,7 @@ func stringifyPromptTemplateValue(value any) string {
 }
 
 func promptModeFromEvent(evt events.Event) string {
-	payload := sharedjson.ParsePayloadMap(evt.Payload)
+	payload := sharedjson.ParsePayloadMap(evt.Payload())
 	return strings.TrimSpace(sharedjson.AsString(payload["mode"]))
 }
 
@@ -461,11 +461,11 @@ func isHumanTaskOutcomeEvent(t events.EventType) bool {
 }
 
 func (a *LLMAgent) injectHumanTaskToolResult(ctx context.Context, evt events.Event) error {
-	if len(evt.Payload) == 0 || a.conversation == nil {
+	if len(evt.Payload()) == 0 || a.conversation == nil {
 		return nil
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(evt.Payload, &payload); err != nil {
+	if err := json.Unmarshal(evt.Payload(), &payload); err != nil {
 		return nil
 	}
 	reqAgent, _ := payload["requesting_agent"].(string)
@@ -478,13 +478,13 @@ func (a *LLMAgent) injectHumanTaskToolResult(ctx context.Context, evt events.Eve
 
 	result := map[string]any{
 		"task_id": taskID,
-		"event":   string(evt.Type),
+		"event":   string(evt.Type()),
 		"payload": payload,
 	}
 
 	ok := true
 	errText := ""
-	switch string(evt.Type) {
+	switch string(evt.Type()) {
 	case "human_task.rejected":
 		ok = false
 		if v, _ := payload["rejection_reason"].(string); strings.TrimSpace(v) != "" {
@@ -517,7 +517,7 @@ func (a *LLMAgent) BoardStep(ctx context.Context, directive runtimeagentcontrol.
 	a.resetConversationScopeIfNeeded(evt)
 
 	ctx = models.WithActor(ctx, a.cfg)
-	ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(evt.RunID))
+	ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(evt.RunID()))
 	ctx = runtimebus.WithInboundEvent(ctx, evt)
 	ctx = sessions.WithScope(ctx, llm.ConversationModeString(a.conversation.Mode), a.cfg.SessionScope, conversationScopeKeyForEvent(a.conversation.Mode, evt))
 	recorder := runtimebus.NewEmittedEventsRecorder()
@@ -760,7 +760,7 @@ func mergeTools(in []llm.ToolDefinition, extra []llm.ToolDefinition) []llm.ToolD
 }
 
 func formatEventForAgent(cfg models.AgentConfig, evt events.Event, tools []llm.ToolDefinition) string {
-	payload := strings.TrimSpace(string(evt.Payload))
+	payload := strings.TrimSpace(string(evt.Payload()))
 	if payload == "" {
 		payload = "{}"
 	}
@@ -774,10 +774,10 @@ func formatEventForAgent(cfg models.AgentConfig, evt events.Event, tools []llm.T
 		cfg.ID,
 		cfg.Role,
 		cfg.Mode,
-		evt.ID,
-		evt.Type,
-		evt.SourceAgent,
-		evt.TaskID,
+		evt.ID(),
+		evt.Type(),
+		evt.SourceAgent(),
+		evt.TaskID(),
 		evt.EntityID(),
 		payload,
 		toolSummary,
@@ -824,12 +824,12 @@ func transitionContextKey(primary events.Event, fallback events.Event) string {
 
 func extractContextIDs(evt events.Event) (entityID, taskID string) {
 	entityID = strings.TrimSpace(evt.EntityID())
-	taskID = strings.TrimSpace(evt.TaskID)
-	if len(evt.Payload) == 0 {
+	taskID = strings.TrimSpace(evt.TaskID())
+	if len(evt.Payload()) == 0 {
 		return entityID, taskID
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(evt.Payload, &payload); err != nil || payload == nil {
+	if err := json.Unmarshal(evt.Payload(), &payload); err != nil || payload == nil {
 		return entityID, taskID
 	}
 	if taskID == "" {

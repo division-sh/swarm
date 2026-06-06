@@ -523,11 +523,9 @@ func TestExecutor_LoadsStateInsideEntityLock(t *testing.T) {
 		EntityID: identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
 		NodeID:   identity.NodeID("node-1"),
 		FlowID:   identity.FlowID("flow-1"),
-		Event: events.Event{
-			ID:        "evt-1",
-			Type:      events.EventType("test.event"),
-			CreatedAt: time.Now().UTC(),
-		}.WithEntityID("11111111-1111-1111-1111-111111111111"),
+		Event: events.NewProjectionEvent("evt-1",
+			events.EventType("test.event"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()).
+			WithEntityID("11111111-1111-1111-1111-111111111111"),
 		State: StateSnapshot{StateCarrier: NewStateCarrier(map[string]any{}, nil, map[string]map[string]any{})},
 	})
 	if err != nil {
@@ -585,12 +583,9 @@ func TestExecutor_ShapeEmitPayloadUsesUpdatedState(t *testing.T) {
 		EntityID: identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
 		NodeID:   identity.NodeID("scoring-node"),
 		FlowID:   identity.FlowID("scoring"),
-		Event: events.Event{
-			ID:        "evt-1",
-			Type:      events.EventType("scoring/score.dimension_complete"),
-			Payload:   []byte(`{"dimension":"build_complexity","score":80}`),
-			CreatedAt: time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
-		}.WithEntityID("11111111-1111-1111-1111-111111111111"),
+		Event: events.NewProjectionEvent("evt-1",
+			events.EventType("scoring/score.dimension_complete"), "", "", []byte(`{"dimension":"build_complexity","score":80}`), 0, "", "", events.EventEnvelope{}, time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)).
+			WithEntityID("11111111-1111-1111-1111-111111111111"),
 		State: StateSnapshot{
 			EntityID:     identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
 			CurrentState: "discovered",
@@ -748,11 +743,9 @@ func TestExecutor_AccumulatorProjectionMaterializesTypedEntityFieldBeforeEmit(t 
 	result, err := exec.Execute(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "scoring-node",
-		Event: events.Event{
-			ID:      "evt-1",
-			Type:    "score.dimension_complete",
-			Payload: json.RawMessage(`{"vertical_id":"11111111-1111-1111-1111-111111111111","dimension":"market","tier":2,"score":87,"evidence":"strong","confidence":"high"}`),
-		},
+		Event: events.NewProjectionEvent("evt-1",
+			"score.dimension_complete", "", "", json.RawMessage(`{"vertical_id":"11111111-1111-1111-1111-111111111111","dimension":"market","tier":2,"score":87,"evidence":"strong","confidence":"high"}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+
 		Handler: handler,
 		State:   testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
 	})
@@ -794,7 +787,7 @@ func TestExecutor_AccumulatorProjectionMaterializesTypedEntityFieldBeforeEmit(t 
 		t.Fatalf("EmitIntents count = %d, want 1", len(result.EmitIntents))
 	}
 	var emitted map[string]any
-	if err := json.Unmarshal(result.EmitIntents[0].Event.Payload, &emitted); err != nil {
+	if err := json.Unmarshal(result.EmitIntents[0].Event.Payload(), &emitted); err != nil {
 		t.Fatalf("emit payload json: %v", err)
 	}
 	emittedScores, ok := emitted["scores"].([]any)
@@ -824,11 +817,9 @@ func TestExecutor_AccumulatorProjectionMaterializesForQualifiedRuntimeEvent(t *t
 		EntityID: "entity-1",
 		NodeID:   "scoring-node",
 		FlowID:   "scoring",
-		Event: events.Event{
-			ID:      "evt-1",
-			Type:    "scoring/score.dimension_complete",
-			Payload: json.RawMessage(`{"dimension":"market","score":87}`),
-		},
+		Event: events.NewProjectionEvent("evt-1",
+			"scoring/score.dimension_complete", "", "", json.RawMessage(`{"dimension":"market","score":87}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+
 		HandlerEventKey: "score.dimension_complete",
 		Handler:         handler,
 		State:           testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
@@ -883,12 +874,9 @@ func TestExecutor_AccumulatorBucketUsesMatchedHandlerEventKeyForScopedConcreteEv
 		EntityID: "entity-1",
 		NodeID:   "lifecycle-orchestrator",
 		FlowID:   "operating",
-		Event: events.Event{
-			ID:        "evt-a",
-			Type:      "component-scaffold/a/component.scaffolded",
-			Payload:   json.RawMessage(`{"component_id":"a"}`),
-			CreatedAt: time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
-		}.WithEntityID("entity-1"),
+		Event: events.NewProjectionEvent("evt-a",
+			"component-scaffold/a/component.scaffolded", "", "", json.RawMessage(`{"component_id":"a"}`), 0, "", "", events.EventEnvelope{}, time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)).
+			WithEntityID("entity-1"),
 		HandlerEventKey: "component.scaffolded",
 		Handler:         handler,
 		State:           firstState,
@@ -904,12 +892,9 @@ func TestExecutor_AccumulatorBucketUsesMatchedHandlerEventKeyForScopedConcreteEv
 		EntityID: "entity-1",
 		NodeID:   "lifecycle-orchestrator",
 		FlowID:   "operating",
-		Event: events.Event{
-			ID:        "evt-b",
-			Type:      "component-scaffold/b/component.scaffolded",
-			Payload:   json.RawMessage(`{"component_id":"b"}`),
-			CreatedAt: time.Date(2026, time.January, 1, 0, 0, 1, 0, time.UTC),
-		}.WithEntityID("entity-1"),
+		Event: events.NewProjectionEvent("evt-b",
+			"component-scaffold/b/component.scaffolded", "", "", json.RawMessage(`{"component_id":"b"}`), 0, "", "", events.EventEnvelope{}, time.Date(2026, time.January, 1, 0, 0, 1, 0, time.UTC)).
+			WithEntityID("entity-1"),
 		HandlerEventKey: "component.scaffolded",
 		Handler:         handler,
 		State:           secondState,
@@ -965,11 +950,9 @@ func TestExecutor_ComputeReadsAccumulatorByMatchedHandlerEventKey(t *testing.T) 
 		EntityID: "entity-1",
 		NodeID:   "lifecycle-orchestrator",
 		FlowID:   "operating",
-		Event: events.Event{
-			ID:      "evt-b",
-			Type:    "component-scaffold/b/component.scaffolded",
-			Payload: json.RawMessage(`{"component_id":"b"}`),
-		}.WithEntityID("entity-1"),
+		Event: events.NewProjectionEvent("evt-b",
+			"component-scaffold/b/component.scaffolded", "", "", json.RawMessage(`{"component_id":"b"}`), 0, "", "", events.EventEnvelope{}, time.Time{}).
+			WithEntityID("entity-1"),
 		HandlerEventKey: "component.scaffolded",
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Compute: &runtimecontracts.ComputeSpec{
@@ -1008,11 +991,9 @@ func TestExecutor_AccumulatorProjectionFailsClosedWhenDeclaredBindingDoesNotReso
 		EntityID: "entity-1",
 		NodeID:   "scoring-node",
 		FlowID:   "scoring",
-		Event: events.Event{
-			ID:      "evt-1",
-			Type:    "scoring/score.unregistered_dimension_complete",
-			Payload: json.RawMessage(`{"dimension":"market","score":87}`),
-		},
+		Event: events.NewProjectionEvent("evt-1",
+			"scoring/score.unregistered_dimension_complete", "", "", json.RawMessage(`{"dimension":"market","score":87}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+
 		Handler: handler,
 		State:   testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
 	})
@@ -1088,7 +1069,7 @@ func TestExecutor_ExecuteUsesAtomicEnvelopeAndOrderedSteps(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    events.Event{ID: "evt-1", Type: "task.completed", Payload: json.RawMessage(`{"score":9}`)},
+		Event:    events.NewProjectionEvent("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			AdvancesTo: "done",
 			ClearGates: []string{"gate_a"},
@@ -1156,7 +1137,7 @@ func TestExecutor_ListPrimitivesMutateState(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    events.Event{ID: "evt-1", Type: "items.submitted", Payload: json.RawMessage(`{"items":[{"score":60,"active":true},{"score":40,"active":true},{"score":60,"active":false}]}`)},
+		Event:    events.NewProjectionEvent("evt-1", "items.submitted", "", "", json.RawMessage(`{"items":[{"score":60,"active":true},{"score":40,"active":true},{"score":60,"active":false}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Query: &runtimecontracts.QuerySpec{
 				Source:  "payload.items",
@@ -1229,7 +1210,7 @@ func TestExecutor_QueryGroupByStoresCounts(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    events.Event{ID: "evt-2", Type: "digest.requested", Payload: json.RawMessage(`{"items":[{"status":"queued"},{"status":"queued"},{"status":"done"}]}`)},
+		Event:    events.NewProjectionEvent("evt-2", "digest.requested", "", "", json.RawMessage(`{"items":[{"status":"queued"},{"status":"queued"},{"status":"done"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Query: &runtimecontracts.QuerySpec{
 				Source:  "payload.items",
@@ -1268,7 +1249,7 @@ func TestExecutor_QueryFilterUsesExplicitCollidingScopes(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    events.Event{ID: "evt-2", Type: "digest.requested", Payload: json.RawMessage(`{"score":5,"items":[{"score":7},{"score":5}]}`)},
+		Event:    events.NewProjectionEvent("evt-2", "digest.requested", "", "", json.RawMessage(`{"score":5,"items":[{"score":7},{"score":5}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Query: &runtimecontracts.QuerySpec{
 				Source:  "payload.items",
@@ -1307,7 +1288,7 @@ func TestExecutor_FilterRejectsUnqualifiedConditionField(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    events.Event{ID: "evt-1", Type: "items.submitted", Payload: json.RawMessage(`{"score":5,"items":[{"score":7}]}`)},
+		Event:    events.NewProjectionEvent("evt-1", "items.submitted", "", "", json.RawMessage(`{"score":5,"items":[{"score":7}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Filter: &runtimecontracts.FilterSpec{
 				ItemsFrom: "payload.items",
@@ -1348,7 +1329,7 @@ func TestExecutor_GuardRecursesAndUsesRegistryCheck(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    events.Event{ID: "evt-1", Type: "task.completed", Payload: json.RawMessage(`{"score":9}`)},
+		Event:    events.NewProjectionEvent("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Guard: &runtimecontracts.GuardSpec{
 				Checks: []runtimecontracts.GuardCheck{
@@ -1387,7 +1368,7 @@ func TestExecutor_RulesUseFirstMatchAndSkipLaterEntries(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    events.Event{ID: "evt-1", Type: "task.completed", Payload: json.RawMessage(`{"score":9}`)},
+		Event:    events.NewProjectionEvent("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			AdvancesTo: "default",
 			Rules: []runtimecontracts.HandlerRuleEntry{
@@ -1427,7 +1408,7 @@ func TestExecutor_RejectsAmbiguousHandlerTopLevelEmitWithRules(t *testing.T) {
 		NodeID:     "node-1",
 		FlowID:     "flow-1",
 		ChainDepth: 1,
-		Event:      events.Event{ID: "evt-1", Type: "task.completed", Payload: json.RawMessage(`{"score":9}`)},
+		Event:      events.NewProjectionEvent("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Emit: runtimecontracts.EmitSpec{Event: "handler.emitted"},
 			Rules: []runtimecontracts.HandlerRuleEntry{{
@@ -1465,7 +1446,7 @@ func TestExecutor_RejectsAmbiguousHandlerTopLevelEmitWithRulesWithoutRuleEmit(t 
 		NodeID:     "node-1",
 		FlowID:     "flow-1",
 		ChainDepth: 1,
-		Event:      events.Event{ID: "evt-1", Type: "task.completed", Payload: json.RawMessage(`{"score":9}`)},
+		Event:      events.NewProjectionEvent("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Emit: runtimecontracts.EmitSpec{Event: "handler.emitted"},
 			Rules: []runtimecontracts.HandlerRuleEntry{{
@@ -1500,7 +1481,7 @@ func TestExecutor_RuleDataAccumulationRunsBeforeTopLevelWrites(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    events.Event{ID: "evt-1", Type: "task.completed", Payload: json.RawMessage(`{"score":9}`)},
+		Event:    events.NewProjectionEvent("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 				Writes: []runtimecontracts.WorkflowDataWrite{{
@@ -1554,7 +1535,7 @@ func TestExecutor_RulesDoNotSeeCurrentHandlerTopLevelWritesBeforeSelection(t *te
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    events.Event{ID: "evt-1", Type: "task.completed", Payload: json.RawMessage(`{}`)},
+		Event:    events.NewProjectionEvent("evt-1", "task.completed", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 				Writes: []runtimecontracts.WorkflowDataWrite{{
@@ -1609,7 +1590,7 @@ func TestExecutor_OnCompleteDoesNotSeeCurrentHandlerTopLevelWritesBeforeSelectio
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    events.Event{ID: "evt-1", Type: "task.completed", Payload: json.RawMessage(`{}`)},
+		Event:    events.NewProjectionEvent("evt-1", "task.completed", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 				Writes: []runtimecontracts.WorkflowDataWrite{{
@@ -1657,7 +1638,7 @@ func TestExecutor_ChainDepthOverflowInterceptsEmitsButSucceeds(t *testing.T) {
 		NodeID:     "node-1",
 		FlowID:     "flow-1",
 		ChainDepth: 1,
-		Event:      events.Event{ID: "evt-1", Type: "task.completed", Payload: json.RawMessage(`{}`)},
+		Event:      events.NewProjectionEvent("evt-1", "task.completed", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			AdvancesTo: "done",
 			Emit:       runtimecontracts.EmitSpec{Event: "task.followup"},
@@ -1703,7 +1684,7 @@ func TestExecutor_FanOutCreatesShapedEmitIntentsAndStopsLoop(t *testing.T) {
 		NodeID:     "node-1",
 		FlowID:     "flow-1",
 		ChainDepth: 1,
-		Event:      events.Event{ID: "evt-1", Type: "task.completed", Payload: json.RawMessage(`{"items":["a","b"]}`)},
+		Event:      events.NewProjectionEvent("evt-1", "task.completed", "", "", json.RawMessage(`{"items":["a","b"]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			FanOut: &runtimecontracts.FanOutSpec{
 				ItemsFrom: "payload.items",
@@ -1737,7 +1718,7 @@ func TestExecutor_FanOutCreatesShapedEmitIntentsAndStopsLoop(t *testing.T) {
 		t.Fatalf("ActionsExecuted = %#v", got)
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(result.EmitIntents[0].Event.Payload, &payload); err != nil {
+	if err := json.Unmarshal(result.EmitIntents[0].Event.Payload(), &payload); err != nil {
 		t.Fatalf("unmarshal payload: %v", err)
 	}
 	if payload["shaped_for"] != "item.process" {
@@ -1761,11 +1742,9 @@ func TestExecutor_PayloadTransformSeesDataAccumulationWrites(t *testing.T) {
 		EntityID: "vertical-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event: events.Event{
-			ID:      "evt-1",
-			Type:    "vertical.discovered",
-			Payload: json.RawMessage(`{"mode":"corpus","discovery_context":{"source":"corpus"}}`),
-		},
+		Event: events.NewProjectionEvent("evt-1",
+			"vertical.discovered", "", "", json.RawMessage(`{"mode":"corpus","discovery_context":{"source":"corpus"}}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 				Writes: []runtimecontracts.WorkflowDataWrite{
@@ -1802,7 +1781,7 @@ func TestExecutor_PayloadTransformSeesDataAccumulationWrites(t *testing.T) {
 		t.Fatalf("EmitIntents count = %d, want 1", got)
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(result.EmitIntents[0].Event.Payload, &payload); err != nil {
+	if err := json.Unmarshal(result.EmitIntents[0].Event.Payload(), &payload); err != nil {
 		t.Fatalf("unmarshal payload: %v", err)
 	}
 	if got := payload["vertical_name"]; got != "Test Vertical" {
@@ -1857,11 +1836,8 @@ func TestExecutor_EmitIntentUsesTargetStateFlowIdentityBeforeInboundSource(t *te
 				EntityID: targetEntityID,
 				NodeID:   "validation-router",
 				FlowID:   "validation",
-				Event: (events.Event{
-					ID:      "evt-1",
-					Type:    "scoring/vertical.resumed",
-					Payload: json.RawMessage(`{"vertical_id":"` + sourceEntityID + `"}`),
-				}).WithEntityID(sourceEntityID).WithFlowInstance(sourceFlowInstance),
+				Event: (events.NewProjectionEvent("evt-1",
+					"scoring/vertical.resumed", "", "", json.RawMessage(`{"vertical_id":"`+sourceEntityID+`"}`), 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID(sourceEntityID).WithFlowInstance(sourceFlowInstance),
 				Handler: runtimecontracts.SystemNodeEventHandler{
 					Emit: runtimecontracts.EmitSpec{
 						Event: eventType,
@@ -1887,7 +1863,7 @@ func TestExecutor_EmitIntentUsesTargetStateFlowIdentityBeforeInboundSource(t *te
 				t.Fatalf("emitted flow_instance = %q, want target validation flow %q", got, targetFlowInstance)
 			}
 			var payload map[string]any
-			if err := json.Unmarshal(emitted.Payload, &payload); err != nil {
+			if err := json.Unmarshal(emitted.Payload(), &payload); err != nil {
 				t.Fatalf("unmarshal payload: %v", err)
 			}
 			if got := payload["source_entity_id"]; got != sourceEntityID {
@@ -1917,11 +1893,8 @@ func TestExecutor_EmitIntentFallsBackToInboundFlowWhenStateFlowPathNormalizesEmp
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "root",
-		Event: (events.Event{
-			ID:      "evt-1",
-			Type:    "root.started",
-			Payload: json.RawMessage(`{}`),
-		}).WithEntityID("entity-1").WithFlowInstance("source/inst-1"),
+		Event: (events.NewProjectionEvent("evt-1",
+			"root.started", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID("entity-1").WithFlowInstance("source/inst-1"),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Emit: runtimecontracts.EmitSpec{Event: "root.done"},
 		},
@@ -2034,7 +2007,7 @@ func TestExecutor_DeclarativeEmitSurfacesUseProducerSourceRouteNamespace(t *test
 				EntityID: "component-entity",
 				NodeID:   "component-node",
 				FlowID:   "component-scaffold",
-				Event:    events.Event{ID: "evt-1", Type: events.EventType(eventType), Payload: payload},
+				Event:    events.NewProjectionEvent("evt-1", events.EventType(eventType), "", "", payload, 0, "", "", events.EventEnvelope{}, time.Time{}),
 				Handler:  tc.handler,
 				State: testStateSnapshot("ready", map[string]any{
 					"flow_path":            "component-scaffold/component-1",
@@ -2050,7 +2023,7 @@ func TestExecutor_DeclarativeEmitSurfacesUseProducerSourceRouteNamespace(t *test
 				t.Fatalf("EmitIntents count = %d, want 1", got)
 			}
 			emitted := result.EmitIntents[0].Event
-			if got, want := string(emitted.Type), "component-scaffold/component-1/component.scaffolded"; got != want {
+			if got, want := string(emitted.Type()), "component-scaffold/component-1/component.scaffolded"; got != want {
 				t.Fatalf("emitted type = %q, want %q", got, want)
 			}
 			if got := emitted.SourceRoute().FlowInstance; got != "component-scaffold/component-1" {
@@ -2080,7 +2053,7 @@ func TestExecutor_FanOutEmitUsesProducerSourceRouteNamespace(t *testing.T) {
 		EntityID: "component-entity",
 		NodeID:   "component-node",
 		FlowID:   "component-scaffold",
-		Event:    events.Event{ID: "evt-1", Type: "repo-scaffold/repo_scaffold.repo_scaffolded", Payload: json.RawMessage(`{"items":[{"id":"a"},{"id":"b"}]}`)},
+		Event:    events.NewProjectionEvent("evt-1", "repo-scaffold/repo_scaffold.repo_scaffolded", "", "", json.RawMessage(`{"items":[{"id":"a"},{"id":"b"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			FanOut: &runtimecontracts.FanOutSpec{
 				ItemsFrom: "payload.items",
@@ -2103,7 +2076,7 @@ func TestExecutor_FanOutEmitUsesProducerSourceRouteNamespace(t *testing.T) {
 		t.Fatalf("EmitIntents count = %d, want 2", got)
 	}
 	for i, intent := range result.EmitIntents {
-		if got, want := string(intent.Event.Type), "component-scaffold/component-1/component.scaffolded"; got != want {
+		if got, want := string(intent.Event.Type()), "component-scaffold/component-1/component.scaffolded"; got != want {
 			t.Fatalf("emit %d type = %q, want %q", i, got, want)
 		}
 		if got := intent.Event.SourceRoute().FlowInstance; got != "component-scaffold/component-1" {
@@ -2129,7 +2102,7 @@ func TestExecutor_StaticProducerTargetRouteDoesNotOwnEventNamespace(t *testing.T
 		EntityID: "repo-entity",
 		NodeID:   "repo-node",
 		FlowID:   "repo-scaffold",
-		Event:    events.Event{ID: "evt-1", Type: "repo.commit_ready", Payload: json.RawMessage(`{}`)},
+		Event:    events.NewProjectionEvent("evt-1", "repo.commit_ready", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Emit: runtimecontracts.EmitSpec{
 				Event: "repo-scaffold/repo_scaffold.repo_scaffolded",
@@ -2151,7 +2124,7 @@ func TestExecutor_StaticProducerTargetRouteDoesNotOwnEventNamespace(t *testing.T
 		t.Fatalf("EmitIntents count = %d, want 1", got)
 	}
 	emitted := result.EmitIntents[0].Event
-	if got, want := string(emitted.Type), "repo-scaffold/repo_scaffold.repo_scaffolded"; got != want {
+	if got, want := string(emitted.Type()), "repo-scaffold/repo_scaffold.repo_scaffolded"; got != want {
 		t.Fatalf("emitted type = %q, want %q", got, want)
 	}
 	if got := emitted.SourceRoute().FlowInstance; got != "repo-scaffold" {
@@ -2195,11 +2168,8 @@ func TestExecutor_ChildPinOutputTargetsStoredParentRoute(t *testing.T) {
 		EntityID: "child-ent",
 		NodeID:   "child-node",
 		FlowID:   "child",
-		Event: (events.Event{
-			ID:      "evt-1",
-			Type:    "child/requested",
-			Payload: json.RawMessage(`{}`),
-		}).WithEntityID("wrong-parent").WithFlowInstance("wrong/root").WithSourceRoute(events.RouteIdentity{
+		Event: (events.NewProjectionEvent("evt-1",
+			"child/requested", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID("wrong-parent").WithFlowInstance("wrong/root").WithSourceRoute(events.RouteIdentity{
 			FlowID:       "wrong",
 			FlowInstance: "wrong/root",
 			EntityID:     "wrong-parent",
@@ -2265,7 +2235,7 @@ func TestExecutor_DataAccumulationTargetPathWritesNestedEntityLeaf(t *testing.T)
 	result, err := exec.Execute(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
-		Event:    events.Event{ID: "evt-1", Type: "task.completed", Payload: json.RawMessage(`{"summary":"ready"}`)},
+		Event:    events.NewProjectionEvent("evt-1", "task.completed", "", "", json.RawMessage(`{"summary":"ready"}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 				Writes: []runtimecontracts.WorkflowDataWrite{{
@@ -2311,7 +2281,7 @@ func TestExecutor_RejectsUndeclaredNestedEntityWriteBeforeExecution(t *testing.T
 	_, err = exec.Execute(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
-		Event:    events.Event{ID: "evt-1", Type: "task.completed", Payload: json.RawMessage(`{}`)},
+		Event:    events.NewProjectionEvent("evt-1", "task.completed", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Compute: &runtimecontracts.ComputeSpec{
 				Operation: runtimecontracts.ComputeOpCount,
@@ -2346,7 +2316,7 @@ func TestExecutor_ClearRemovesNestedEntityLeaf(t *testing.T) {
 	result, err := exec.Execute(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
-		Event:    events.Event{ID: "evt-1", Type: "task.completed", Payload: json.RawMessage(`{}`)},
+		Event:    events.NewProjectionEvent("evt-1", "task.completed", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Clear: &runtimecontracts.ClearSpec{Target: "entity.analysis.summary"},
 		},
@@ -2397,7 +2367,7 @@ func TestExecutor_ClearSpecialTargetsBypassContractValidation(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "root",
-		Event:    events.Event{ID: "evt-1", Type: "task.completed", Payload: json.RawMessage(`{}`)},
+		Event:    events.NewProjectionEvent("evt-1", "task.completed", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Clear: &runtimecontracts.ClearSpec{Targets: []string{"pending_dedup", "accumulator_state"}},
 		},
@@ -2435,11 +2405,9 @@ func TestExecutor_EmitFieldsCELFailureReturnsError(t *testing.T) {
 		EntityID: "vertical-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event: events.Event{
-			ID:      "evt-1",
-			Type:    "vertical.discovered",
-			Payload: json.RawMessage(`{"mode":"corpus"}`),
-		},
+		Event: events.NewProjectionEvent("evt-1",
+			"vertical.discovered", "", "", json.RawMessage(`{"mode":"corpus"}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Emit: runtimecontracts.EmitSpec{
 				Event: "scoring.requested",
@@ -2471,7 +2439,7 @@ func TestExecutor_FanOutEmptyPersistsCountAndContinues(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    events.Event{ID: "evt-1", Type: "task.completed", Payload: json.RawMessage(`{"items":[]}`)},
+		Event:    events.NewProjectionEvent("evt-1", "task.completed", "", "", json.RawMessage(`{"items":[]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			FanOut: &runtimecontracts.FanOutSpec{
 				ItemsFrom: "payload.items",
@@ -2511,7 +2479,7 @@ func TestExecutor_FanOutInternalCountBypassesEntityContractValidation(t *testing
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "root",
-		Event:    events.Event{ID: "evt-1", Type: "task.completed", Payload: json.RawMessage(`{"items":[]}`)},
+		Event:    events.NewProjectionEvent("evt-1", "task.completed", "", "", json.RawMessage(`{"items":[]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			FanOut: &runtimecontracts.FanOutSpec{
 				ItemsFrom: "payload.items",
@@ -2548,7 +2516,7 @@ func TestExecutor_FanOutUsesExplicitEmitEvent(t *testing.T) {
 		NodeID:     "node-1",
 		FlowID:     "flow-1",
 		ChainDepth: 1,
-		Event:      events.Event{ID: "evt-1", Type: "batch.submitted", Payload: json.RawMessage(`{"items":[{"kind":"a"},{"kind":"b"}]}`)},
+		Event:      events.NewProjectionEvent("evt-1", "batch.submitted", "", "", json.RawMessage(`{"items":[{"kind":"a"},{"kind":"b"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			FanOut: &runtimecontracts.FanOutSpec{
 				ItemsFrom: "payload.items",
@@ -2563,14 +2531,14 @@ func TestExecutor_FanOutUsesExplicitEmitEvent(t *testing.T) {
 	if got := len(result.EmitIntents); got != 2 {
 		t.Fatalf("EmitIntents count = %d", got)
 	}
-	if got := string(result.EmitIntents[0].Event.Type); got != "routed.item" {
+	if got := string(result.EmitIntents[0].Event.Type()); got != "routed.item" {
 		t.Fatalf("first emit type = %q", got)
 	}
-	if got := string(result.EmitIntents[1].Event.Type); got != "routed.item" {
+	if got := string(result.EmitIntents[1].Event.Type()); got != "routed.item" {
 		t.Fatalf("second emit type = %q", got)
 	}
-	if !result.EmitIntents[1].Event.CreatedAt.After(result.EmitIntents[0].Event.CreatedAt) {
-		t.Fatalf("emit CreatedAt ordering = [%s, %s]", result.EmitIntents[0].Event.CreatedAt, result.EmitIntents[1].Event.CreatedAt)
+	if !result.EmitIntents[1].Event.CreatedAt().After(result.EmitIntents[0].Event.CreatedAt()) {
+		t.Fatalf("emit CreatedAt ordering = [%s, %s]", result.EmitIntents[0].Event.CreatedAt(), result.EmitIntents[1].Event.CreatedAt())
 	}
 }
 
@@ -2590,7 +2558,7 @@ func TestExecutor_GuardKillTransitionsToKilledStateWhenDeclared(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    events.Event{ID: "evt-1", Type: "check.requested", Payload: json.RawMessage(`{"score":50}`)},
+		Event:    events.NewProjectionEvent("evt-1", "check.requested", "", "", json.RawMessage(`{"score":50}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Guard: &runtimecontracts.GuardSpec{
 				Check:  "payload.score >= policy.threshold",
@@ -2631,7 +2599,7 @@ func TestExecutor_GroupByStoresGroupedItems(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    events.Event{ID: "evt-1", Type: "items.submitted", Payload: json.RawMessage(`{"items":[{"name":"a","category":"x"},{"name":"b","category":"y"},{"name":"c","category":"x"}]}`)},
+		Event:    events.NewProjectionEvent("evt-1", "items.submitted", "", "", json.RawMessage(`{"items":[{"name":"a","category":"x"},{"name":"b","category":"y"},{"name":"c","category":"x"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			GroupBy: &runtimecontracts.GroupBySpec{
 				ItemsFrom: "payload.items",
@@ -2675,7 +2643,7 @@ func TestExecutor_GroupByBareKeyUsesItemScopeWithoutFallbackAcrossRoots(t *testi
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    events.Event{ID: "evt-1", Type: "items.submitted", Payload: json.RawMessage(`{"category":"payload","items":[{"name":"a","category":"x"},{"name":"b","category":"y"},{"name":"c","category":"x"}]}`)},
+		Event:    events.NewProjectionEvent("evt-1", "items.submitted", "", "", json.RawMessage(`{"category":"payload","items":[{"name":"a","category":"x"},{"name":"b","category":"y"},{"name":"c","category":"x"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			GroupBy: &runtimecontracts.GroupBySpec{
 				ItemsFrom: "payload.items",
@@ -2725,7 +2693,7 @@ func TestExecutor_ClearGatesWildcardUsesNodeGateSchema(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    events.Event{ID: "evt-1", Type: "task.completed"},
+		Event:    events.NewProjectionEvent("evt-1", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			ClearGates: []string{"*"},
 		},
@@ -2768,7 +2736,7 @@ func TestExecutor_ClearGatesRunsBeforeGuardEvaluation(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    events.Event{ID: "evt-1", Type: "task.completed"},
+		Event:    events.NewProjectionEvent("evt-1", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			ClearGates: []string{"review"},
 			Guard: &runtimecontracts.GuardSpec{
@@ -2811,7 +2779,7 @@ func TestExecutor_ActionRegistryEmitsAndRunsActionRunner(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    events.Event{ID: "evt-1", Type: "task.completed", Payload: json.RawMessage(`{"score":9}`)},
+		Event:    events.NewProjectionEvent("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Action: runtimecontracts.ActionSpec{ID: "notify"},
 		},
@@ -2826,7 +2794,7 @@ func TestExecutor_ActionRegistryEmitsAndRunsActionRunner(t *testing.T) {
 	if got := result.ActionsExecuted; !reflect.DeepEqual(got, []string{"notify"}) {
 		t.Fatalf("ActionsExecuted = %#v", got)
 	}
-	if len(result.EmitIntents) != 1 || string(result.EmitIntents[0].Event.Type) != "action.emitted" {
+	if len(result.EmitIntents) != 1 || string(result.EmitIntents[0].Event.Type()) != "action.emitted" {
 		t.Fatalf("unexpected action emit intents: %#v", result.EmitIntents)
 	}
 	if got := shaper.lastPayload["score"]; got != float64(9) {
@@ -2866,7 +2834,7 @@ func TestExecutor_RuleActionRunsOnlyForSelectedRule(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    events.Event{ID: "evt-1", Type: "refund.requested", Payload: json.RawMessage(`{"amount":250}`)},
+		Event:    events.NewProjectionEvent("evt-1", "refund.requested", "", "", json.RawMessage(`{"amount":250}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Rules: []runtimecontracts.HandlerRuleEntry{
 				{
@@ -2919,7 +2887,7 @@ func TestExecutor_RejectsAmbiguousHandlerTopLevelActionWithRules(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    events.Event{ID: "evt-1", Type: "refund.requested", Payload: json.RawMessage(`{"amount":250}`)},
+		Event:    events.NewProjectionEvent("evt-1", "refund.requested", "", "", json.RawMessage(`{"amount":250}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Action: runtimecontracts.ActionSpec{ID: "handler_action"},
 			Rules: []runtimecontracts.HandlerRuleEntry{{
@@ -3006,7 +2974,7 @@ func TestExecutor_RejectsUnsupportedRuleActionContextsBeforeExecution(t *testing
 				EntityID: "entity-1",
 				NodeID:   "node-1",
 				FlowID:   "flow-1",
-				Event:    events.Event{ID: "evt-1", Type: "task.completed", Payload: json.RawMessage(`{"ok":true}`)},
+				Event:    events.NewProjectionEvent("evt-1", "task.completed", "", "", json.RawMessage(`{"ok":true}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 				Handler:  tc.handler,
 				State:    testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
 			})
@@ -3117,7 +3085,7 @@ func TestExecutor_ActionRegistryEmitContractViolationRejectsHandler(t *testing.T
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    events.Event{ID: "evt-1", Type: "task.completed", Payload: json.RawMessage(`{"score":9}`)},
+		Event:    events.NewProjectionEvent("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Action: runtimecontracts.ActionSpec{ID: "notify"},
 		},
@@ -3168,7 +3136,7 @@ func TestExecutor_GuardOnFailEscalateCreatesEmitIntent(t *testing.T) {
 		NodeID:     "node-1",
 		FlowID:     "flow-1",
 		ChainDepth: 1,
-		Event:      events.Event{ID: "evt-1", Type: "task.completed", Payload: json.RawMessage(`{"ok":false}`)},
+		Event:      events.NewProjectionEvent("evt-1", "task.completed", "", "", json.RawMessage(`{"ok":false}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Guard: &runtimecontracts.GuardSpec{
 				Check:  "payload.ok == true",
@@ -3183,7 +3151,7 @@ func TestExecutor_GuardOnFailEscalateCreatesEmitIntent(t *testing.T) {
 	if result.Status != OutcomeEscalated {
 		t.Fatalf("Status = %q", result.Status)
 	}
-	if len(result.EmitIntents) != 1 || string(result.EmitIntents[0].Event.Type) != "guard.failed" {
+	if len(result.EmitIntents) != 1 || string(result.EmitIntents[0].Event.Type()) != "guard.failed" {
 		t.Fatalf("unexpected escalation intents: %#v", result.EmitIntents)
 	}
 	if result.ChainDepth != 2 {

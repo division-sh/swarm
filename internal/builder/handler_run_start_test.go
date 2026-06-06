@@ -18,7 +18,7 @@ type runStartAppendStore struct {
 }
 
 func (s *runStartAppendStore) AppendEvent(_ context.Context, evt events.Event) error {
-	s.appended = append(s.appended, string(evt.Type))
+	s.appended = append(s.appended, string(evt.Type()))
 	return nil
 }
 

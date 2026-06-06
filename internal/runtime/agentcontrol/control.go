@@ -142,16 +142,16 @@ func NewDirectiveEvent(req SendDirectiveRequest, target RunTargetResolution, now
 	directive := strings.TrimSpace(req.Directive)
 	target = target.Normalized()
 	if agentID == "" {
-		return events.Event{}, errors.New("agent id is required")
+		return events.EmptyEvent(), errors.New("agent id is required")
 	}
 	if directive == "" {
-		return events.Event{}, errors.New("directive is required")
+		return events.EmptyEvent(), errors.New("directive is required")
 	}
 	if target.RunID == "" {
-		return events.Event{}, errors.New("run_id is required")
+		return events.EmptyEvent(), errors.New("run_id is required")
 	}
 	if _, err := uuid.Parse(target.RunID); err != nil {
-		return events.Event{}, fmt.Errorf("run_id must be a UUID: %w", err)
+		return events.EmptyEvent(), fmt.Errorf("run_id must be a UUID: %w", err)
 	}
 	source := strings.TrimSpace(req.Source)
 	if source == "" {
@@ -177,16 +177,9 @@ func NewDirectiveEvent(req SendDirectiveRequest, target RunTargetResolution, now
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
-		return events.Event{}, err
+		return events.EmptyEvent(), err
 	}
-	return events.Event{
-		ID:          uuid.NewString(),
-		Type:        events.EventType(DirectiveEventType),
-		SourceAgent: "runtime",
-		RunID:       target.RunID,
-		Payload:     raw,
-		CreatedAt:   now,
-	}, nil
+	return events.NewRuntimeControlEvent(uuid.NewString(), events.EventType(DirectiveEventType), "runtime", "", raw, 0, target.RunID, "", events.EventEnvelope{}, now), nil
 }
 
 func ValidateBoardDirective(d BoardDirective) error {
@@ -194,13 +187,13 @@ func ValidateBoardDirective(d BoardDirective) error {
 		return errors.New("directive is required")
 	}
 	evt := d.Event
-	if strings.TrimSpace(evt.ID) == "" {
+	if strings.TrimSpace(evt.ID()) == "" {
 		return errors.New("directive event id is required")
 	}
-	if strings.TrimSpace(string(evt.Type)) != DirectiveEventType {
-		return fmt.Errorf("directive event type = %q, want %s", strings.TrimSpace(string(evt.Type)), DirectiveEventType)
+	if strings.TrimSpace(string(evt.Type())) != DirectiveEventType {
+		return fmt.Errorf("directive event type = %q, want %s", strings.TrimSpace(string(evt.Type())), DirectiveEventType)
 	}
-	if strings.TrimSpace(evt.RunID) == "" {
+	if strings.TrimSpace(evt.RunID()) == "" {
 		return errors.New("directive event run_id is required")
 	}
 	return nil

@@ -122,10 +122,10 @@ func canonicalPendingDeliveryPredicateSQL(deliveryAlias, receiptAlias string) st
 }
 
 func (r pendingAgentDeliveryRecord) pendingAgeSec(now time.Time) int {
-	if r.Event.CreatedAt.IsZero() {
+	if r.Event.CreatedAt().IsZero() {
 		return 0
 	}
-	age := int(now.Sub(r.Event.CreatedAt).Seconds())
+	age := int(now.Sub(r.Event.CreatedAt()).Seconds())
 	if age < 0 {
 		return 0
 	}
@@ -310,21 +310,26 @@ func scanPendingAgentDeliveryRecords(rows *sql.Rows) ([]pendingAgentDeliveryReco
 	for rows.Next() {
 		var (
 			record                 pendingAgentDeliveryRecord
+			eventID, runID         string
+			eventName, producedBy  string
+			payload                json.RawMessage
+			createdAt              time.Time
+			sourceEventID          string
 			entityID, flowInstance string
 			scope                  string
 		)
 		if err := rows.Scan(
 			&record.AgentID,
-			&record.Event.ID,
-			&record.Event.RunID,
-			&record.Event.Type,
-			&record.Event.SourceAgent,
+			&eventID,
+			&runID,
+			&eventName,
+			&producedBy,
 			&entityID,
 			&flowInstance,
 			&scope,
-			&record.Event.Payload,
-			&record.Event.CreatedAt,
-			&record.Event.ParentEventID,
+			&payload,
+			&createdAt,
+			&sourceEventID,
 			&record.DeliveryFound,
 			&record.DeliveryStatus,
 			&record.DeliveryRetryCount,
@@ -335,11 +340,22 @@ func scanPendingAgentDeliveryRecords(rows *sql.Rows) ([]pendingAgentDeliveryReco
 			return nil, fmt.Errorf("scan pending agent delivery record: %w", err)
 		}
 		record.AgentID = strings.TrimSpace(record.AgentID)
-		record.Event = record.Event.WithEnvelope(events.EventEnvelope{
-			EntityID:     entityID,
-			FlowInstance: flowInstance,
-			Scope:        events.EventScope(scope),
-		})
+		record.Event = events.NewProjectionEvent(
+			eventID,
+			events.EventType(eventName),
+			producedBy,
+			"",
+			payload,
+			0,
+			runID,
+			sourceEventID,
+			events.EventEnvelope{
+				EntityID:     entityID,
+				FlowInstance: flowInstance,
+				Scope:        events.EventScope(scope),
+			},
+			createdAt,
+		)
 		out = append(out, record)
 	}
 	if err := rows.Err(); err != nil {
@@ -384,9 +400,9 @@ func pendingAgentDeliveryPageFromRecords(records []pendingAgentDeliveryRecord, n
 
 func pendingAgentDeliveryDetailFromRecord(record pendingAgentDeliveryRecord) (PendingAgentDeliveryDetail, error) {
 	detail := PendingAgentDeliveryDetail{
-		EventID:    strings.TrimSpace(record.Event.ID),
-		EventName:  strings.TrimSpace(string(record.Event.Type)),
-		EnqueuedAt: record.Event.CreatedAt.UTC(),
+		EventID:    strings.TrimSpace(record.Event.ID()),
+		EventName:  strings.TrimSpace(string(record.Event.Type())),
+		EnqueuedAt: record.Event.CreatedAt().UTC(),
 		Attempts:   record.DeliveryRetryCount,
 		Event:      record.Event,
 	}
@@ -406,14 +422,14 @@ func pendingAgentDeliveryDetailFromRecord(record pendingAgentDeliveryRecord) (Pe
 }
 
 func pendingAgentDeliveryRecordAfterCursor(record pendingAgentDeliveryRecord, cursor pendingAgentDeliveryCursorPosition) bool {
-	enqueuedAt := record.Event.CreatedAt.UTC()
+	enqueuedAt := record.Event.CreatedAt().UTC()
 	if enqueuedAt.After(cursor.EnqueuedAt) {
 		return true
 	}
 	if enqueuedAt.Before(cursor.EnqueuedAt) {
 		return false
 	}
-	return strings.TrimSpace(record.Event.ID) > cursor.EventID
+	return strings.TrimSpace(record.Event.ID()) > cursor.EventID
 }
 
 func encodePendingAgentDeliveryCursor(detail PendingAgentDeliveryDetail) string {

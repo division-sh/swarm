@@ -25,19 +25,19 @@ func TestNewDirectiveEventPayloadPreservesDirectiveMode(t *testing.T) {
 		t.Fatalf("NewDirectiveEvent: %v", err)
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(evt.Payload, &payload); err != nil {
+	if err := json.Unmarshal(evt.Payload(), &payload); err != nil {
 		t.Fatalf("unmarshal payload: %v", err)
 	}
 	if payload["mode"] != DirectiveEventMode {
 		t.Fatalf("mode = %#v, want %q", payload["mode"], DirectiveEventMode)
 	}
-	if payload["directive_text"] != "run corpus" || payload["run_id"] != evt.RunID {
+	if payload["directive_text"] != "run corpus" || payload["run_id"] != evt.RunID() {
 		t.Fatalf("payload = %#v", payload)
 	}
 	if _, ok := payload["kill_previous"]; ok {
 		t.Fatalf("payload = %#v, want no kill_previous field", payload)
 	}
-	validateCurrentPlatformEventPayloadForAgentControlTest(t, string(evt.Type), evt.Payload)
+	validateCurrentPlatformEventPayloadForAgentControlTest(t, string(evt.Type()), evt.Payload())
 }
 
 func validateCurrentPlatformEventPayloadForAgentControlTest(t testing.TB, eventType string, payload []byte) {

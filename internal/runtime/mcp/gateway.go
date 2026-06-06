@@ -758,7 +758,7 @@ func (g *Gateway) baseContextForResolvedTurn(ctx context.Context, turn TurnConte
 	if g.hooks.WithCurrentRuntimeEpoch != nil {
 		ctx = g.hooks.WithCurrentRuntimeEpoch(ctx)
 	}
-	ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(turn.Inbound.RunID))
+	ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(turn.Inbound.RunID()))
 	if turn.HasRuntimeLineage {
 		ctx = runtimecorrelation.WithRuntimeLineage(ctx, turn.RuntimeLineage)
 	}

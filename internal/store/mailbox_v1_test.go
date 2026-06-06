@@ -22,12 +22,9 @@ func TestPostgresStore_V1MailboxReadDecisionAndIdempotencyOwners(t *testing.T) {
 	entityID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	runID := uuid.NewString()
-	if err := s.AppendEvent(ctx, events.Event{
-		ID:      sourceEventID,
-		Type:    "review.requested",
-		RunID:   runID,
-		Payload: json.RawMessage(`{"request":true}`),
-	}.WithEntityID(entityID).WithFlowInstance("main/review")); err != nil {
+	if err := s.AppendEvent(ctx, events.NewProjectionEvent(sourceEventID,
+		"review.requested", "", "", json.RawMessage(`{"request":true}`), 0, runID, "", events.EventEnvelope{}, time.Time{}).
+		WithEntityID(entityID).WithFlowInstance("main/review")); err != nil {
 		t.Fatalf("append source event: %v", err)
 	}
 
@@ -124,7 +121,7 @@ func TestPostgresStore_V1MailboxReadDecisionAndIdempotencyOwners(t *testing.T) {
 		t.Fatalf("unexpected approve outcome=%#v", outcome)
 	}
 	var approvalPayload map[string]any
-	if err := json.Unmarshal(outcome.ApprovalEvent.Payload, &approvalPayload); err != nil {
+	if err := json.Unmarshal(outcome.ApprovalEvent.Payload(), &approvalPayload); err != nil {
 		t.Fatalf("decode approval event payload: %v", err)
 	}
 	if _, ok := approvalPayload["payload"]; ok {

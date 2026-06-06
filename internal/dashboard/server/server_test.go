@@ -582,12 +582,12 @@ func (s *stubBuilderRunStore) MarkRunTerminal(_ context.Context, runID, status, 
 	eventCount := 0
 	var startedAt time.Time
 	for _, evt := range s.events {
-		if strings.TrimSpace(evt.RunID) != strings.TrimSpace(runID) {
+		if strings.TrimSpace(evt.RunID()) != strings.TrimSpace(runID) {
 			continue
 		}
 		eventCount++
-		if startedAt.IsZero() || evt.CreatedAt.Before(startedAt) {
-			startedAt = evt.CreatedAt
+		if startedAt.IsZero() || evt.CreatedAt().Before(startedAt) {
+			startedAt = evt.CreatedAt()
 		}
 		if entityID := strings.TrimSpace(evt.EntityID()); entityID != "" {
 			seenEntities[entityID] = struct{}{}
@@ -696,7 +696,7 @@ func (s *stubBuilderRunStore) stubRunStatusLocked(runID string) (string, bool) {
 		return strings.TrimSpace(snap.Status), true
 	}
 	for _, evt := range s.events {
-		if strings.TrimSpace(evt.RunID) == runID {
+		if strings.TrimSpace(evt.RunID()) == runID {
 			return "running", true
 		}
 	}
@@ -740,28 +740,28 @@ func (s *stubBuilderRunStore) LoadRunDebugReport(_ context.Context, runID string
 	}
 	counts := map[string]int{}
 	for _, evt := range s.events {
-		if strings.TrimSpace(evt.RunID) != report.RunID {
+		if strings.TrimSpace(evt.RunID()) != report.RunID {
 			continue
 		}
 		report.EventCount++
-		if report.StartedAt.IsZero() || evt.CreatedAt.Before(report.StartedAt) {
-			report.StartedAt = evt.CreatedAt.UTC()
+		if report.StartedAt.IsZero() || evt.CreatedAt().Before(report.StartedAt) {
+			report.StartedAt = evt.CreatedAt().UTC()
 		}
-		if evt.CreatedAt.After(report.LastEventAt) {
-			report.LastEventAt = evt.CreatedAt.UTC()
+		if evt.CreatedAt().After(report.LastEventAt) {
+			report.LastEventAt = evt.CreatedAt().UTC()
 		}
-		counts[string(evt.Type)]++
-		if report.RootEventID == "" || evt.CreatedAt.Before(report.StartedAt) {
-			report.RootEventID = strings.TrimSpace(evt.ID)
-			report.RootEventType = strings.TrimSpace(string(evt.Type))
+		counts[string(evt.Type())]++
+		if report.RootEventID == "" || evt.CreatedAt().Before(report.StartedAt) {
+			report.RootEventID = strings.TrimSpace(evt.ID())
+			report.RootEventType = strings.TrimSpace(string(evt.Type()))
 		}
-		if evt.Type == events.EventType("platform.runtime_log") {
+		if evt.Type() == events.EventType("platform.runtime_log") {
 			payload := map[string]any{}
-			_ = json.Unmarshal(evt.Payload, &payload)
+			_ = json.Unmarshal(evt.Payload(), &payload)
 			details, _ := payload["details"].(map[string]any)
 			detailJSON, _ := json.Marshal(details)
 			report.RuntimeLogs = append(report.RuntimeLogs, store.RunDebugRuntimeLog{
-				EventID:   strings.TrimSpace(evt.ID),
+				EventID:   strings.TrimSpace(evt.ID()),
 				Level:     strings.TrimSpace(asString(payload["log_level"])),
 				Message:   strings.TrimSpace(asString(payload["message"])),
 				Component: strings.TrimSpace(asString(details["component"])),
@@ -771,17 +771,17 @@ func (s *stubBuilderRunStore) LoadRunDebugReport(_ context.Context, runID string
 				EntityID:  strings.TrimSpace(asString(details["entity_id"])),
 				Error:     strings.TrimSpace(asString(details["error"])),
 				Detail:    append(json.RawMessage(nil), detailJSON...),
-				CreatedAt: evt.CreatedAt.UTC(),
+				CreatedAt: evt.CreatedAt().UTC(),
 			})
 			continue
 		}
-		payload := append(json.RawMessage(nil), evt.Payload...)
+		payload := append(json.RawMessage(nil), evt.Payload()...)
 		report.Events = append(report.Events, store.RunDebugEvent{
-			EventID:    strings.TrimSpace(evt.ID),
-			EventName:  strings.TrimSpace(string(evt.Type)),
+			EventID:    strings.TrimSpace(evt.ID()),
+			EventName:  strings.TrimSpace(string(evt.Type())),
 			EntityID:   strings.TrimSpace(evt.EntityID()),
-			CreatedAt:  evt.CreatedAt.UTC(),
-			Source:     strings.TrimSpace(evt.SourceAgent),
+			CreatedAt:  evt.CreatedAt().UTC(),
+			Source:     strings.TrimSpace(evt.SourceAgent()),
 			SourceType: "agent",
 			Payload:    payload,
 		})
@@ -806,20 +806,20 @@ func (s *stubBuilderRunStore) LoadRunDebugTracePage(_ context.Context, runID str
 	runID = strings.TrimSpace(runID)
 	rows := []store.RunDebugTraceRow{}
 	for _, evt := range s.events {
-		if strings.TrimSpace(evt.RunID) != runID {
+		if strings.TrimSpace(evt.RunID()) != runID {
 			continue
 		}
-		if opts.Since != nil && !evt.CreatedAt.After(opts.Since.UTC()) {
+		if opts.Since != nil && !evt.CreatedAt().After(opts.Since.UTC()) {
 			continue
 		}
 		rows = append(rows, store.RunDebugTraceRow{
-			EventID:         strings.TrimSpace(evt.ID),
-			EventName:       strings.TrimSpace(string(evt.Type)),
-			SourceEventID:   strings.TrimSpace(evt.ParentEventID),
+			EventID:         strings.TrimSpace(evt.ID()),
+			EventName:       strings.TrimSpace(string(evt.Type())),
+			SourceEventID:   strings.TrimSpace(evt.ParentEventID()),
 			EntityID:        strings.TrimSpace(evt.EntityID()),
-			EventSource:     strings.TrimSpace(evt.SourceAgent),
+			EventSource:     strings.TrimSpace(evt.SourceAgent()),
 			EventSourceType: "agent",
-			EventCreatedAt:  evt.CreatedAt.UTC(),
+			EventCreatedAt:  evt.CreatedAt().UTC(),
 		})
 	}
 	slices.SortFunc(rows, func(a, b store.RunDebugTraceRow) int {
@@ -840,24 +840,24 @@ func (s *stubBuilderRunStore) ListOperatorEvents(_ context.Context, opts store.O
 	defer s.mu.Unlock()
 	eventsOut := []store.OperatorEventFull{}
 	for _, evt := range s.events {
-		if strings.TrimSpace(evt.RunID) != strings.TrimSpace(opts.Filter.RunID) {
+		if strings.TrimSpace(evt.RunID()) != strings.TrimSpace(opts.Filter.RunID) {
 			continue
 		}
-		if opts.ExcludeRuntimeLogs && evt.Type == events.EventType("platform.runtime_log") {
+		if opts.ExcludeRuntimeLogs && evt.Type() == events.EventType("platform.runtime_log") {
 			continue
 		}
-		if opts.Since != nil && !evt.CreatedAt.After(opts.Since.UTC()) {
+		if opts.Since != nil && !evt.CreatedAt().After(opts.Since.UTC()) {
 			continue
 		}
 		payload := map[string]any{}
-		_ = json.Unmarshal(evt.Payload, &payload)
+		_ = json.Unmarshal(evt.Payload(), &payload)
 		eventsOut = append(eventsOut, store.OperatorEventFull{
-			EventID:   strings.TrimSpace(evt.ID),
-			EventName: strings.TrimSpace(string(evt.Type)),
+			EventID:   strings.TrimSpace(evt.ID()),
+			EventName: strings.TrimSpace(string(evt.Type())),
 			EntityID:  strings.TrimSpace(evt.EntityID()),
-			RunID:     strings.TrimSpace(evt.RunID),
-			CreatedAt: evt.CreatedAt.UTC(),
-			Source:    strings.TrimSpace(firstNonEmpty(evt.SourceAgent, "unknown")),
+			RunID:     strings.TrimSpace(evt.RunID()),
+			CreatedAt: evt.CreatedAt().UTC(),
+			Source:    strings.TrimSpace(firstNonEmpty(evt.SourceAgent(), "unknown")),
 			Payload:   payload,
 		})
 	}
@@ -885,22 +885,22 @@ func (s *stubBuilderRunStore) ListOperatorRuntimeLogs(_ context.Context, opts st
 	defer s.mu.Unlock()
 	logs := []store.OperatorRuntimeLogEntry{}
 	for _, evt := range s.events {
-		if strings.TrimSpace(evt.RunID) != strings.TrimSpace(opts.RunID) || evt.Type != events.EventType("platform.runtime_log") {
+		if strings.TrimSpace(evt.RunID()) != strings.TrimSpace(opts.RunID) || evt.Type() != events.EventType("platform.runtime_log") {
 			continue
 		}
-		if opts.Since != nil && !evt.CreatedAt.After(opts.Since.UTC()) {
+		if opts.Since != nil && !evt.CreatedAt().After(opts.Since.UTC()) {
 			continue
 		}
 		payload := map[string]any{}
-		_ = json.Unmarshal(evt.Payload, &payload)
+		_ = json.Unmarshal(evt.Payload(), &payload)
 		details, _ := payload["details"].(map[string]any)
 		logs = append(logs, store.OperatorRuntimeLogEntry{
-			LogID:     strings.TrimSpace(evt.ID),
-			TS:        evt.CreatedAt.UTC(),
+			LogID:     strings.TrimSpace(evt.ID()),
+			TS:        evt.CreatedAt().UTC(),
 			Level:     strings.TrimSpace(asString(payload["log_level"])),
 			Component: strings.TrimSpace(asString(details["component"])),
-			Source:    strings.TrimSpace(firstNonEmpty(asString(details["agent_id"]), evt.SourceAgent)),
-			RunID:     strings.TrimSpace(evt.RunID),
+			Source:    strings.TrimSpace(firstNonEmpty(asString(details["agent_id"]), evt.SourceAgent())),
+			RunID:     strings.TrimSpace(evt.RunID()),
 			EntityID:  strings.TrimSpace(firstNonEmpty(evt.EntityID(), asString(details["entity_id"]))),
 			ErrorCode: strings.TrimSpace(asString(details["error_code"])),
 			Message:   strings.TrimSpace(asString(payload["message"])),
@@ -1081,7 +1081,7 @@ func (e *directiveSurfaceToolExecutor) Execute(ctx context.Context, name string,
 	e.executed = append(e.executed, strings.TrimSpace(name))
 	if strings.HasPrefix(strings.TrimSpace(name), "emit_") {
 		if rec, ok := runtimebus.EmittedEventsRecorderFromContext(ctx); ok && rec != nil {
-			rec.Append(events.Event{Type: events.EventType(strings.TrimPrefix(strings.TrimSpace(name), "emit_"))})
+			rec.Append(events.NewProjectionEvent("", events.EventType(strings.TrimPrefix(strings.TrimSpace(name), "emit_")), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 		}
 		return map[string]any{"status": "published"}, nil
 	}
@@ -2421,7 +2421,7 @@ func TestSQLAgentReader_ListGenericAgents_AlignsBacklogWithCanonicalPendingSelec
 	}
 	gotPendingIDs := make([]string, 0, len(pending))
 	for _, evt := range pending {
-		gotPendingIDs = append(gotPendingIDs, evt.ID)
+		gotPendingIDs = append(gotPendingIDs, evt.ID())
 	}
 	slices.Sort(gotPendingIDs)
 	wantPendingIDs := []string{failedEventID, inProgressNoReceiptEventID, pendingEventID}
@@ -3878,25 +3878,14 @@ func TestHandler_RunEventReplayUsesCanonicalPersistedRunDebugOwner(t *testing.T)
 	t.Skip("legacy dashboard/Builder operator endpoint retired under #731; canonical v1 owner tests cover this behavior")
 	now := time.Unix(1700000000, 0).UTC()
 	runID := "run_replay_001"
-	rootEvent := (events.Event{
-		ID:          "evt-root",
-		RunID:       runID,
-		Type:        events.EventType("scan.requested"),
-		SourceAgent: "builder",
-		Payload:     json.RawMessage(`{"topic":"sample"}`),
-		CreatedAt:   now,
-	}).WithEntityID(runID)
+	rootEvent := (events.NewProjectionEvent("evt-root",
+
+		events.EventType("scan.requested"),
+		"builder", "", json.RawMessage(`{"topic":"sample"}`), 0, runID, "", events.EventEnvelope{}, now)).WithEntityID(runID)
 	storeStub := &stubBuilderRunStore{
 		events: []events.Event{
 			rootEvent,
-			{
-				ID:          "evt-log",
-				RunID:       runID,
-				Type:        events.EventType("platform.runtime_log"),
-				SourceAgent: "runtime",
-				Payload:     json.RawMessage(`{"log_level":"warn","message":"runtime log","details":{"component":"scheduler","action":"checkpoint","error":"boom"}}`),
-				CreatedAt:   now.Add(2 * time.Second),
-			},
+			events.NewProjectionEvent("evt-log", events.EventType("platform.runtime_log"), "runtime", "", json.RawMessage(`{"log_level":"warn","message":"runtime log","details":{"component":"scheduler","action":"checkpoint","error":"boom"}}`), 0, runID, "", events.EventEnvelope{}, now.Add(2*time.Second)),
 		},
 		snapshots: map[string]runtimebus.RunLifecycleSnapshot{
 			runID: {
@@ -4128,14 +4117,11 @@ func TestHandler_RunEventStreamPreservesCanonicalRuntimeLogWithoutEntityID(t *te
 	}
 
 	logPayload := json.RawMessage(`{"log_level":"warn","message":"runtime log","details":{"component":"scheduler","action":"canonical-owner","error":"boom"}}`)
-	if err := storeStub.AppendEvent(context.Background(), events.Event{
-		ID:          "evt-runtime-log",
-		RunID:       runID,
-		Type:        events.EventType("platform.runtime_log"),
-		SourceAgent: "runtime",
-		Payload:     logPayload,
-		CreatedAt:   now,
-	}); err != nil {
+	if err := storeStub.AppendEvent(context.Background(), events.NewProjectionEvent("evt-runtime-log",
+
+		events.EventType("platform.runtime_log"),
+		"runtime", "", logPayload, 0, runID, "", events.EventEnvelope{}, now),
+	); err != nil {
 		t.Fatalf("append canonical runtime log: %v", err)
 	}
 

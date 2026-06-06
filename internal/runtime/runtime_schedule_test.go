@@ -86,14 +86,14 @@ func TestScheduledEventUsesTypedScheduleEnvelope(t *testing.T) {
 	if got := evt.FlowInstance(); got != "review/inst-1" {
 		t.Fatalf("event flow_instance = %q, want review/inst-1", got)
 	}
-	if evt.RunID != "11111111-1111-1111-1111-111111111111" {
-		t.Fatalf("event run_id = %q, want schedule run_id", evt.RunID)
+	if evt.RunID() != "11111111-1111-1111-1111-111111111111" {
+		t.Fatalf("event run_id = %q, want schedule run_id", evt.RunID())
 	}
 	if got := evt.Scope(); got != events.EventScopeEntity {
 		t.Fatalf("event scope = %q, want %q", got, events.EventScopeEntity)
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(evt.Payload, &payload); err != nil {
+	if err := json.Unmarshal(evt.Payload(), &payload); err != nil {
 		t.Fatalf("Unmarshal(payload): %v", err)
 	}
 	if got := payload["entity_id"]; got != "payload-entity" {

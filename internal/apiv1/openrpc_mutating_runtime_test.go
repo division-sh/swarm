@@ -1120,17 +1120,17 @@ func (e *mutatingProbeRunForkExecutor) ExecuteRunFork(_ context.Context, req Run
 
 func (s *mutatingRuntimeProbeState) storeEvent(evt events.Event, deliveries []store.OperatorEventDelivery) {
 	payload := map[string]any{}
-	if len(evt.Payload) > 0 {
-		_ = json.Unmarshal(evt.Payload, &payload)
+	if len(evt.Payload()) > 0 {
+		_ = json.Unmarshal(evt.Payload(), &payload)
 	}
-	s.observability.events[evt.ID] = store.OperatorEventFull{
-		EventID:       evt.ID,
-		EventName:     strings.TrimSpace(string(evt.Type)),
+	s.observability.events[evt.ID()] = store.OperatorEventFull{
+		EventID:       evt.ID(),
+		EventName:     strings.TrimSpace(string(evt.Type())),
 		EntityID:      evt.EntityID(),
-		RunID:         evt.RunID,
-		SourceEventID: strings.TrimSpace(evt.ParentEventID),
-		CreatedAt:     evt.CreatedAt.UTC(),
-		Source:        evt.SourceAgent,
+		RunID:         evt.RunID(),
+		SourceEventID: strings.TrimSpace(evt.ParentEventID()),
+		CreatedAt:     evt.CreatedAt().UTC(),
+		Source:        evt.SourceAgent(),
 		Payload:       payload,
 		Deliveries:    deliveries,
 	}
@@ -1303,13 +1303,10 @@ func (s *mutatingProbeMailboxStore) DecideV1MailboxItem(ctx context.Context, dec
 			}
 			result.DownstreamSubscribers = &subscribers
 			result.DownstreamSubscriberSource = strings.TrimSpace(decision.ApprovalEventSubscriberSource)
-			if err := decision.ApprovalEventTx(ctx, nil, events.Event{
-				ID:          eventID,
-				Type:        events.EventType(decision.ApprovalEventType),
-				SourceAgent: "mailbox",
-				Payload:     json.RawMessage(`{"mailbox_id":"mailbox-1"}`),
-				CreatedAt:   decision.Now,
-			}); err != nil {
+			if err := decision.ApprovalEventTx(ctx, nil, events.NewProjectionEvent(eventID,
+				events.EventType(decision.ApprovalEventType),
+				"mailbox", "", json.RawMessage(`{"mailbox_id":"mailbox-1"}`), 0, "", "", events.EventEnvelope{}, decision.Now),
+			); err != nil {
 				return store.APIIdempotencyCompletion{}, err
 			}
 		}

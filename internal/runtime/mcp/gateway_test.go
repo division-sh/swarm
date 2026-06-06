@@ -879,20 +879,18 @@ func TestGatewayMCPToolsForRequest_FiltersRoleScopedToolsByTurnEntityEligibility
 	actor := models.AgentConfig{ID: "market-research-agent", Role: "market_research"}
 	putTestTurnContext(t, registry, "ctx-invalid-current-entity", TurnContext{
 		Actor: actor,
-		Inbound: events.Event{
-			ID:   "evt-root",
-			Type: events.EventType("discovery/market_research.corpus_file_assigned"),
-		}.WithEntityID("root-run-id"),
+		Inbound: events.NewProjectionEvent("evt-root",
+			events.EventType("discovery/market_research.corpus_file_assigned"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}).
+			WithEntityID("root-run-id"),
 		HasInbound: true,
 		CreatedAt:  time.Now().UTC(),
 		ExpiresAt:  time.Now().UTC().Add(time.Hour),
 	})
 	putTestTurnContext(t, registry, "ctx-valid-current-entity", TurnContext{
 		Actor: actor,
-		Inbound: events.Event{
-			ID:   "evt-scan",
-			Type: events.EventType("discovery/market_research.corpus_file_assigned"),
-		}.WithEntityID("valid-scan-campaign-id"),
+		Inbound: events.NewProjectionEvent("evt-scan",
+			events.EventType("discovery/market_research.corpus_file_assigned"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}).
+			WithEntityID("valid-scan-campaign-id"),
 		HasInbound: true,
 		CreatedAt:  time.Now().UTC(),
 		ExpiresAt:  time.Now().UTC().Add(time.Hour),
@@ -1822,7 +1820,7 @@ func TestGatewayExecutionContext_UsesInboundTraceNotRequestTraceOnResolvedTurn(t
 	})
 	putTestTurnContext(t, registry, "ctx-trace", TurnContext{
 		Actor:      models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
-		Inbound:    events.Event{ID: "evt-1", RunID: "run-1"},
+		Inbound:    events.NewProjectionEvent("evt-1", events.EventType(""), "", "", nil, 0, "run-1", "", events.EventEnvelope{}, time.Time{}),
 		HasInbound: true,
 		CreatedAt:  time.Now().UTC(),
 		ExpiresAt:  time.Now().UTC().Add(time.Hour),
@@ -1845,11 +1843,9 @@ func TestGatewayExecutionContext_RestoresTypedRuntimeLineageOnResolvedTurn(t *te
 	})
 	putTestTurnContext(t, registry, "ctx-lineage", TurnContext{
 		Actor: models.AgentConfig{ID: "validation-coordinator", Role: "validation"},
-		Inbound: events.Event{
-			ID:    "3134bdf0-2ce0-4260-93bd-f0a45371b7d7",
-			Type:  events.EventType("validation/validation.package_ready"),
-			RunID: "a6f6861a-d154-4d38-a2d6-1388f5bb6daf",
-		},
+		Inbound: events.NewProjectionEvent("3134bdf0-2ce0-4260-93bd-f0a45371b7d7",
+			events.EventType("validation/validation.package_ready"), "", "", nil, 0, "a6f6861a-d154-4d38-a2d6-1388f5bb6daf", "", events.EventEnvelope{}, time.Time{}),
+
 		HasInbound: true,
 		RuntimeLineage: runtimecorrelation.RuntimeLineage{
 			Owner:               "runtime.run_fork.selected_contract_execution.fork_local_runtime_typed_lineage",

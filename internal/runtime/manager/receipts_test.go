@@ -142,7 +142,7 @@ func (a *traceRecordingAgent) Type() string                      { return "llm" 
 func (a *traceRecordingAgent) Subscriptions() []events.EventType { return nil }
 func (a *traceRecordingAgent) OnEvent(ctx context.Context, evt events.Event) ([]events.Event, error) {
 	if inbound, ok := runtimebus.InboundEventFromContext(ctx); ok {
-		a.parent = inbound.ID
+		a.parent = inbound.ID()
 	}
 	return nil, nil
 }
@@ -156,7 +156,9 @@ func (a *outputRecordingAgent) Type() string                      { return "llm"
 func (a *outputRecordingAgent) Subscriptions() []events.EventType { return nil }
 func (a *outputRecordingAgent) OnEvent(context.Context, events.Event) ([]events.Event, error) {
 	a.calls++
-	return []events.Event{{ID: "out-1", Type: "task.done", SourceAgent: "agent-a", Payload: []byte(`{}`)}}, nil
+	return []events.Event{
+		events.NewProjectionEvent("out-1", events.EventType("task.done"), "agent-a", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+	}, nil
 }
 
 type panicStubAgent struct{ id string }
@@ -174,16 +176,13 @@ func TestMaybeTripAuthCircuitBreaker_PublishesFlowScopedAuthRequired(t *testing.
 	am := NewAgentManagerWithOptions(bus, nil, AgentManagerOptions{
 		RuntimeIngressSafetyPause: func(ctx context.Context, reason string) error {
 			pauseCalls++
-			return bus.Publish(ctx, events.Event{
-				Type:        events.EventType("platform.paused"),
-				SourceAgent: "runtime",
-				Payload: mustJSON(map[string]any{
+			return bus.Publish(ctx, events.NewProjectionEvent("", events.EventType("platform.paused"),
+				"runtime", "", mustJSON(map[string]any{
 					"reason":    reason,
 					"paused_by": "runtime",
 					"timestamp": time.Now().UTC().Format(time.RFC3339Nano),
-				}),
-				CreatedAt: time.Now().UTC(),
-			})
+				}), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
+			)
 		},
 	})
 	am.agentCfg["agent-a"] = runtimeactors.AgentConfig{
@@ -192,14 +191,12 @@ func TestMaybeTripAuthCircuitBreaker_PublishesFlowScopedAuthRequired(t *testing.
 		FlowPath: "review/inst-1",
 	}
 
-	inbound := events.Event{
-		ID:    "evt-1",
-		Type:  events.EventType("work.requested"),
-		RunID: "run-1",
-	}
+	inbound := events.NewProjectionEvent("evt-1",
+		events.EventType("work.requested"), "", "", nil, 0, "run-1", "", events.EventEnvelope{}, time.Time{})
+
 	ctx := runtimecorrelation.WithInboundEvent(context.Background(), inbound)
-	ctx = runtimecorrelation.WithRunID(ctx, inbound.RunID)
-	am.maybeTripAuthCircuitBreaker(ctx, "agent-a", inbound.ID, errors.New("claude auth required"))
+	ctx = runtimecorrelation.WithRunID(ctx, inbound.RunID())
+	am.maybeTripAuthCircuitBreaker(ctx, "agent-a", inbound.ID(), errors.New("claude auth required"))
 
 	if len(bus.published) != 2 {
 		t.Fatalf("published events = %d, want 2", len(bus.published))
@@ -208,24 +205,24 @@ func TestMaybeTripAuthCircuitBreaker_PublishesFlowScopedAuthRequired(t *testing.
 		t.Fatalf("runtime ingress safety pause calls = %d, want 1", pauseCalls)
 	}
 	for _, evt := range bus.published {
-		if got := evt.ParentEventID; got != inbound.ID {
-			t.Fatalf("%s parent_event_id = %q, want %q", evt.Type, got, inbound.ID)
+		if got := evt.ParentEventID(); got != inbound.ID() {
+			t.Fatalf("%s parent_event_id = %q, want %q", evt.Type(), got, inbound.ID())
 		}
 	}
 	var authEvt events.Event
 	for _, evt := range bus.published {
-		if evt.Type == events.EventType("platform.auth_required") {
+		if evt.Type() == events.EventType("platform.auth_required") {
 			authEvt = evt
 		}
 	}
-	if authEvt.Type != events.EventType("platform.auth_required") {
+	if authEvt.Type() != events.EventType("platform.auth_required") {
 		t.Fatalf("published events = %#v, want platform.auth_required", bus.published)
 	}
-	if got := authEvt.ParentEventID; got != inbound.ID {
-		t.Fatalf("auth event parent_event_id = %q, want %q", got, inbound.ID)
+	if got := authEvt.ParentEventID(); got != inbound.ID() {
+		t.Fatalf("auth event parent_event_id = %q, want %q", got, inbound.ID())
 	}
-	if got := authEvt.RunID; got != inbound.RunID {
-		t.Fatalf("auth event run_id = %q, want %q", got, inbound.RunID)
+	if got := authEvt.RunID(); got != inbound.RunID() {
+		t.Fatalf("auth event run_id = %q, want %q", got, inbound.RunID())
 	}
 	if got := authEvt.EntityID(); got != "ent-123" {
 		t.Fatalf("auth event entity_id = %q, want ent-123", got)
@@ -237,46 +234,44 @@ func TestMaybeTripAuthCircuitBreaker_PublishesFlowScopedAuthRequired(t *testing.
 		t.Fatalf("auth event scope = %q, want %q", got, events.EventScopeEntity)
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(authEvt.Payload, &payload); err != nil {
+	if err := json.Unmarshal(authEvt.Payload(), &payload); err != nil {
 		t.Fatalf("json.Unmarshal: %v", err)
 	}
 	if got := payload["flow_instance"]; got != "review/inst-1" {
 		t.Fatalf("auth event flow_instance = %#v, want review/inst-1", got)
 	}
-	validateCurrentPlatformEventPayloadForManagerTest(t, string(authEvt.Type), authEvt.Payload)
+	validateCurrentPlatformEventPayloadForManagerTest(t, string(authEvt.Type()), authEvt.Payload())
 }
 
 func TestMaybeTripAuthCircuitBreaker_PreservesCanceledEventLineage(t *testing.T) {
 	bus := &recordingReceiptBus{}
 	am := NewAgentManager(bus, nil)
 
-	inbound := events.Event{
-		ID:    "evt-canceled",
-		Type:  events.EventType("work.requested"),
-		RunID: "run-canceled",
-	}
+	inbound := events.NewProjectionEvent("evt-canceled",
+		events.EventType("work.requested"), "", "", nil, 0, "run-canceled", "", events.EventEnvelope{}, time.Time{})
+
 	ctx := runtimecorrelation.WithInboundEvent(context.Background(), inbound)
-	ctx = runtimecorrelation.WithRunID(ctx, inbound.RunID)
+	ctx = runtimecorrelation.WithRunID(ctx, inbound.RunID())
 	ctx, cancel := context.WithCancel(ctx)
 	cancel()
 
-	am.maybeTripAuthCircuitBreaker(ctx, "agent-a", inbound.ID, errors.New("claude auth required"))
+	am.maybeTripAuthCircuitBreaker(ctx, "agent-a", inbound.ID(), errors.New("claude auth required"))
 
 	var authEvt events.Event
 	for _, evt := range bus.published {
-		if evt.Type == events.EventType("platform.auth_required") {
+		if evt.Type() == events.EventType("platform.auth_required") {
 			authEvt = evt
 			break
 		}
 	}
-	if authEvt.Type != events.EventType("platform.auth_required") {
+	if authEvt.Type() != events.EventType("platform.auth_required") {
 		t.Fatalf("published events = %#v, want platform.auth_required", bus.published)
 	}
-	if got := authEvt.ParentEventID; got != inbound.ID {
-		t.Fatalf("auth event parent_event_id = %q, want %q", got, inbound.ID)
+	if got := authEvt.ParentEventID(); got != inbound.ID() {
+		t.Fatalf("auth event parent_event_id = %q, want %q", got, inbound.ID())
 	}
-	if got := authEvt.RunID; got != inbound.RunID {
-		t.Fatalf("auth event run_id = %q, want %q", got, inbound.RunID)
+	if got := authEvt.RunID(); got != inbound.RunID() {
+		t.Fatalf("auth event run_id = %q, want %q", got, inbound.RunID())
 	}
 }
 
@@ -374,8 +369,8 @@ func TestMaybeEscalateDeadLetter_PublishesTypedFlowInstanceEnvelope(t *testing.T
 		t.Fatalf("published events = %d, want 1", len(bus.published))
 	}
 	evt := bus.published[0]
-	if evt.Type != events.EventType("platform.dead_letter_escalation") {
-		t.Fatalf("event type = %s, want platform.dead_letter_escalation", evt.Type)
+	if evt.Type() != events.EventType("platform.dead_letter_escalation") {
+		t.Fatalf("event type = %s, want platform.dead_letter_escalation", evt.Type())
 	}
 	if got := evt.FlowInstance(); got != "review/inst-1" {
 		t.Fatalf("dead-letter escalation flow_instance = %q, want review/inst-1", got)
@@ -384,7 +379,7 @@ func TestMaybeEscalateDeadLetter_PublishesTypedFlowInstanceEnvelope(t *testing.T
 		t.Fatalf("dead-letter escalation scope = %q, want %q", got, events.EventScopeFlow)
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(evt.Payload, &payload); err != nil {
+	if err := json.Unmarshal(evt.Payload(), &payload); err != nil {
 		t.Fatalf("json.Unmarshal: %v", err)
 	}
 	if got := payload["flow_instance"]; got != "review/inst-1" {
@@ -439,10 +434,9 @@ func TestRecordPoisonQuarantine_RequiresDistinctEntities(t *testing.T) {
 func TestProcessEvent_PropagatesInboundParentWithoutTraceSeeding(t *testing.T) {
 	agent := &traceRecordingAgent{}
 	am := NewAgentManager(nil, nil)
-	evt := events.Event{
-		ID:   "evt-123",
-		Type: events.EventType("discovery/market_research.scan_assigned"),
-	}
+	evt := events.NewProjectionEvent("evt-123",
+		events.EventType("discovery/market_research.scan_assigned"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
+
 	if err := am.processEvent(context.Background(), agent, evt); err != nil {
 		t.Fatalf("processEvent: %v", err)
 	}
@@ -476,7 +470,7 @@ func TestProcessEvent_LogsLaunchingDeliveryLifecycleTransition(t *testing.T) {
 	bus := &recordingReceiptBus{}
 	store := &deliveryLifecycleStoreStub{}
 	am := NewAgentManager(bus, nil, store)
-	evt := events.Event{ID: "evt-1", Type: events.EventType("task.started")}
+	evt := events.NewProjectionEvent("evt-1", events.EventType("task.started"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
 	agent := traceRecordingAgent{parent: ""}
 
 	if err := am.processEvent(context.Background(), &agent, evt); err != nil {
@@ -504,7 +498,7 @@ func TestProcessEvent_SkipsLateOutputAndReceiptAfterDestructiveResetQuiescence(t
 	am := NewAgentManager(bus, nil, store)
 	agent := &outputRecordingAgent{}
 
-	result := am.processEventDetailed(context.Background(), agent, events.Event{ID: uuid.NewString(), Type: events.EventType("task.started")})
+	result := am.processEventDetailed(context.Background(), agent, events.NewProjectionEvent(uuid.NewString(), events.EventType("task.started"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 	if result.err != nil {
 		t.Fatalf("processEventDetailed error = %v", result.err)
 	}

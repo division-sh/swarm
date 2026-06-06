@@ -3,6 +3,7 @@ package pipeline
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 )
@@ -185,7 +186,5 @@ func TestWorkflowInstanceOwnedByFlow_UsesExactSemanticScope(t *testing.T) {
 }
 
 func mustEvent(eventType, entityID string) Event {
-	return Event{
-		Type: events.EventType(eventType),
-	}.WithEntityID(entityID)
+	return events.NewProjectionEvent("", events.EventType(eventType), "", "", nil, 0, "", "", events.EventEnvelope{EntityID: entityID}, time.Time{})
 }

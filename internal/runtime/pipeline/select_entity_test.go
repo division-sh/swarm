@@ -27,10 +27,8 @@ func TestExecuteNodeContractHandlerSelectEntityUpdatesTargetOwnedEntity(t *testi
 	budgetEntityID := seedSelectEntityBudget(t, pc.workflowStore, ctx, source, "vertical-1", 0)
 
 	result, err := pc.executeNodeContractHandler(ctx, "treasury-orchestrator", selectEntitySpendHandler(), workflowTriggerContext{
-		Event: events.Event{
-			Type:    events.EventType("opco.spend_recorded"),
-			Payload: mustJSON(map[string]any{"vertical_id": "vertical-1", "amount_usd": 42}),
-		}.WithEntityID("22222222-2222-2222-2222-222222222222"),
+		Event: events.NewProjectionEvent("", events.EventType("opco.spend_recorded"), "", "", mustJSON(map[string]any{"vertical_id": "vertical-1", "amount_usd": 42}), 0, "", "", events.EventEnvelope{}, time.Time{}).
+			WithEntityID("22222222-2222-2222-2222-222222222222"),
 		State: WorkflowState{},
 	}, false)
 	if err != nil {
@@ -66,10 +64,8 @@ func TestExecuteNodeContractHandlerSelectEntityReplayUsesSameTargetEntity(t *tes
 
 	for _, amount := range []int{42, 99} {
 		result, err := pc.executeNodeContractHandler(ctx, "treasury-orchestrator", selectEntitySpendHandler(), workflowTriggerContext{
-			Event: events.Event{
-				Type:    events.EventType("opco.spend_recorded"),
-				Payload: mustJSON(map[string]any{"vertical_id": "vertical-1", "amount_usd": amount}),
-			}.WithEntityID("22222222-2222-2222-2222-222222222222"),
+			Event: events.NewProjectionEvent("", events.EventType("opco.spend_recorded"), "", "", mustJSON(map[string]any{"vertical_id": "vertical-1", "amount_usd": amount}), 0, "", "", events.EventEnvelope{}, time.Time{}).
+				WithEntityID("22222222-2222-2222-2222-222222222222"),
 			State: WorkflowState{},
 		}, false)
 		if err != nil {
@@ -133,10 +129,8 @@ func TestExecuteNodeContractHandlerSelectEntityMatchesTypedStatusField(t *testin
 			}},
 		},
 	}, workflowTriggerContext{
-		Event: events.Event{
-			Type:    events.EventType("opco.spend_recorded"),
-			Payload: mustJSON(map[string]any{"vertical_id": "vertical-1", "status": "pending", "amount_usd": 42}),
-		}.WithEntityID("22222222-2222-2222-2222-222222222222"),
+		Event: events.NewProjectionEvent("", events.EventType("opco.spend_recorded"), "", "", mustJSON(map[string]any{"vertical_id": "vertical-1", "status": "pending", "amount_usd": 42}), 0, "", "", events.EventEnvelope{}, time.Time{}).
+			WithEntityID("22222222-2222-2222-2222-222222222222"),
 		State: WorkflowState{},
 	}, false)
 	if err != nil {
@@ -171,10 +165,8 @@ func TestExecuteNodeContractHandlerSelectOrCreateEntityCreatesTargetOwnedEntity(
 	ctx := testPipelineCoordinatorRunContext(t, pc)
 
 	result, err := pc.executeNodeContractHandler(ctx, "treasury-orchestrator", selectOrCreateEntitySpendHandler(), workflowTriggerContext{
-		Event: events.Event{
-			Type:    events.EventType("opco.spend_recorded"),
-			Payload: mustJSON(map[string]any{"vertical_id": "vertical-1", "amount_usd": 42}),
-		},
+		Event: events.NewProjectionEvent("", events.EventType("opco.spend_recorded"), "", "", mustJSON(map[string]any{"vertical_id": "vertical-1", "amount_usd": 42}), 0, "", "", events.EventEnvelope{}, time.Time{}),
+
 		State: WorkflowState{},
 	}, false)
 	if err != nil {
@@ -339,10 +331,8 @@ func TestExecuteNodeContractHandlerSelectOrCreateEntityReplayUsesSameDeclaredKey
 
 	for _, amount := range []int{42, 99} {
 		result, err := pc.executeNodeContractHandler(ctx, "treasury-orchestrator", selectOrCreateEntitySpendHandler(), workflowTriggerContext{
-			Event: events.Event{
-				Type:    events.EventType("opco.spend_recorded"),
-				Payload: mustJSON(map[string]any{"vertical_id": "vertical-1", "amount_usd": amount}),
-			},
+			Event: events.NewProjectionEvent("", events.EventType("opco.spend_recorded"), "", "", mustJSON(map[string]any{"vertical_id": "vertical-1", "amount_usd": amount}), 0, "", "", events.EventEnvelope{}, time.Time{}),
+
 			State: WorkflowState{},
 		}, false)
 		if err != nil {
@@ -370,10 +360,7 @@ func TestExecuteNodeContractHandlerSelectOrCreateEntityFailsClosedOnAmbiguousMat
 	seedSelectEntityBudgetWithInstance(t, pc.workflowStore, ctx, source, "budget-2", "vertical-1", 0)
 
 	_, err := pc.executeNodeContractHandler(ctx, "treasury-orchestrator", selectOrCreateEntitySpendHandler(), workflowTriggerContext{
-		Event: events.Event{
-			Type:    events.EventType("opco.spend_recorded"),
-			Payload: mustJSON(map[string]any{"vertical_id": "vertical-1", "amount_usd": 42}),
-		},
+		Event: events.NewProjectionEvent("", events.EventType("opco.spend_recorded"), "", "", mustJSON(map[string]any{"vertical_id": "vertical-1", "amount_usd": 42}), 0, "", "", events.EventEnvelope{}, time.Time{}),
 	}, false)
 	if err == nil || !strings.Contains(err.Error(), "select_or_create_entity_ambiguous") {
 		t.Fatalf("executeNodeContractHandler error = %v, want select_or_create_entity_ambiguous", err)
@@ -409,10 +396,7 @@ func TestExecuteNodeContractHandlerSelectOrCreateEntityFailsClosedOnDeterministi
 	}
 
 	_, err = pc.executeNodeContractHandler(ctx, "treasury-orchestrator", selectOrCreateEntitySpendHandler(), workflowTriggerContext{
-		Event: events.Event{
-			Type:    events.EventType("opco.spend_recorded"),
-			Payload: mustJSON(map[string]any{"vertical_id": "vertical-1", "amount_usd": 42}),
-		},
+		Event: events.NewProjectionEvent("", events.EventType("opco.spend_recorded"), "", "", mustJSON(map[string]any{"vertical_id": "vertical-1", "amount_usd": 42}), 0, "", "", events.EventEnvelope{}, time.Time{}),
 	}, false)
 	if err == nil || !strings.Contains(err.Error(), "select_or_create_entity_conflict") {
 		t.Fatalf("executeNodeContractHandler error = %v, want select_or_create_entity_conflict", err)
@@ -432,10 +416,8 @@ func TestExecuteNodeContractHandlerSelectOrCreateEntityConcurrentDuplicateCreate
 		go func() {
 			defer wg.Done()
 			result, err := pc.executeNodeContractHandler(ctx, "treasury-orchestrator", selectOrCreateEntitySpendHandler(), workflowTriggerContext{
-				Event: events.Event{
-					Type:    events.EventType("opco.spend_recorded"),
-					Payload: mustJSON(map[string]any{"vertical_id": "vertical-1", "amount_usd": 42}),
-				},
+				Event: events.NewProjectionEvent("", events.EventType("opco.spend_recorded"), "", "", mustJSON(map[string]any{"vertical_id": "vertical-1", "amount_usd": 42}), 0, "", "", events.EventEnvelope{}, time.Time{}),
+
 				State: WorkflowState{},
 			}, false)
 			if err != nil {
@@ -488,7 +470,7 @@ func TestBackgroundWorkflowNodeSelectOrCreateEntityDuplicateSameEventIsReceiptId
 	if got := instance.Metadata["spent_usd"]; got != float64(7) && got != 7 {
 		t.Fatalf("spent_usd after duplicate same-event delivery = %#v, want unchanged 7", got)
 	}
-	assertSelectEntityReceiptRow(t, db, evt.ID, "treasury-orchestrator")
+	assertSelectEntityReceiptRow(t, db, evt.ID(), "treasury-orchestrator")
 	assertEntityStateRowCount(t, db, 1)
 }
 
@@ -509,13 +491,9 @@ func TestExecuteNodeContractHandlerSelectOrCreateEntityFeedsEntityIDToArtifactRe
 	}
 
 	result, err := pc.executeNodeContractHandler(ctx, "treasury-orchestrator", selectOrCreateArtifactRepoCommitHandler(), workflowTriggerContext{
-		Event: events.Event{
-			ID:        sourceEventID,
-			Type:      events.EventType("spec_repo.commit_requested"),
-			RunID:     testPipelineRunID,
-			Payload:   mustJSON(payload),
-			CreatedAt: time.Unix(1_700_000_000, 0).UTC(),
-		},
+		Event: events.NewProjectionEvent(sourceEventID,
+			events.EventType("spec_repo.commit_requested"), "", "", mustJSON(payload), 0, testPipelineRunID, "", events.EventEnvelope{}, time.Unix(1_700_000_000, 0).UTC()),
+
 		State: WorkflowState{},
 	}, false)
 	if err != nil {
@@ -579,7 +557,7 @@ func TestBackgroundWorkflowNodeSelectEntityDuplicateSameEventIsReceiptIdempotent
 	if got := instance.Metadata["spent_usd"]; got != float64(7) && got != 7 {
 		t.Fatalf("spent_usd after duplicate same-event delivery = %#v, want unchanged 7", got)
 	}
-	assertSelectEntityReceiptRow(t, db, evt.ID, "treasury-orchestrator")
+	assertSelectEntityReceiptRow(t, db, evt.ID(), "treasury-orchestrator")
 	assertEntityStateRowCount(t, db, 1)
 }
 
@@ -604,10 +582,8 @@ func TestExecuteNodeContractHandlerSelectEntityIgnoresTerminalAndTerminatedMatch
 	}
 
 	result, err := pc.executeNodeContractHandler(ctx, "treasury-orchestrator", selectEntitySpendHandler(), workflowTriggerContext{
-		Event: events.Event{
-			Type:    events.EventType("opco.spend_recorded"),
-			Payload: mustJSON(map[string]any{"vertical_id": "vertical-1", "amount_usd": 42}),
-		},
+		Event: events.NewProjectionEvent("", events.EventType("opco.spend_recorded"), "", "", mustJSON(map[string]any{"vertical_id": "vertical-1", "amount_usd": 42}), 0, "", "", events.EventEnvelope{}, time.Time{}),
+
 		State: WorkflowState{},
 	}, false)
 	if err != nil {
@@ -659,10 +635,7 @@ func TestExecuteNodeContractHandlerSelectEntityFailsClosedOnNoMatch(t *testing.T
 	seedSelectEntityBudget(t, pc.workflowStore, ctx, source, "vertical-1", 0)
 
 	_, err := pc.executeNodeContractHandler(ctx, "treasury-orchestrator", selectEntitySpendHandler(), workflowTriggerContext{
-		Event: events.Event{
-			Type:    events.EventType("opco.spend_recorded"),
-			Payload: mustJSON(map[string]any{"vertical_id": "missing", "amount_usd": 42}),
-		},
+		Event: events.NewProjectionEvent("", events.EventType("opco.spend_recorded"), "", "", mustJSON(map[string]any{"vertical_id": "missing", "amount_usd": 42}), 0, "", "", events.EventEnvelope{}, time.Time{}),
 	}, false)
 	if err == nil || !strings.Contains(err.Error(), "select_entity_no_match") {
 		t.Fatalf("executeNodeContractHandler error = %v, want select_entity_no_match", err)
@@ -678,10 +651,7 @@ func TestExecuteNodeContractHandlerSelectEntityFailsClosedOnMissingPayloadRef(t 
 	seedSelectEntityBudget(t, pc.workflowStore, ctx, source, "vertical-1", 0)
 
 	_, err := pc.executeNodeContractHandler(ctx, "treasury-orchestrator", selectEntitySpendHandler(), workflowTriggerContext{
-		Event: events.Event{
-			Type:    events.EventType("opco.spend_recorded"),
-			Payload: mustJSON(map[string]any{"amount_usd": 42}),
-		},
+		Event: events.NewProjectionEvent("", events.EventType("opco.spend_recorded"), "", "", mustJSON(map[string]any{"amount_usd": 42}), 0, "", "", events.EventEnvelope{}, time.Time{}),
 	}, false)
 	if err == nil || !strings.Contains(err.Error(), "missing required payload ref") {
 		t.Fatalf("executeNodeContractHandler error = %v, want missing payload ref", err)
@@ -698,10 +668,7 @@ func TestExecuteNodeContractHandlerSelectEntityFailsClosedOnAmbiguousMatch(t *te
 	seedSelectEntityBudgetWithInstance(t, pc.workflowStore, ctx, source, "budget-2", "vertical-1", 0)
 
 	_, err := pc.executeNodeContractHandler(ctx, "treasury-orchestrator", selectEntitySpendHandler(), workflowTriggerContext{
-		Event: events.Event{
-			Type:    events.EventType("opco.spend_recorded"),
-			Payload: mustJSON(map[string]any{"vertical_id": "vertical-1", "amount_usd": 42}),
-		},
+		Event: events.NewProjectionEvent("", events.EventType("opco.spend_recorded"), "", "", mustJSON(map[string]any{"vertical_id": "vertical-1", "amount_usd": 42}), 0, "", "", events.EventEnvelope{}, time.Time{}),
 	}, false)
 	if err == nil || !strings.Contains(err.Error(), "select_entity_ambiguous") {
 		t.Fatalf("executeNodeContractHandler error = %v, want select_entity_ambiguous", err)
@@ -946,23 +913,19 @@ func loadSelectOrCreateBudgetByKey(t *testing.T, store *WorkflowInstanceStore, c
 func seedSelectEntitySpendEvent(t *testing.T, db *sql.DB, ctx context.Context, payload map[string]any) events.Event {
 	t.Helper()
 	entityID := uuid.NewString()
-	evt := (events.Event{
-		ID:          uuid.NewString(),
-		Type:        events.EventType("opco.spend_recorded"),
-		SourceAgent: "opco",
-		Payload:     mustJSON(payload),
-		CreatedAt:   time.Now().UTC(),
-	}).WithEntityID(entityID)
+	evt := (events.NewProjectionEvent(uuid.NewString(),
+		events.EventType("opco.spend_recorded"),
+		"opco", "", mustJSON(payload), 0, "", "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID(entityID)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO events (event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
 		VALUES ($1::uuid, $2, $3::uuid, 'opco/vertical-1', 'entity', $4::jsonb, 'opco', 'node', now())
-	`, evt.ID, string(evt.Type), entityID, string(evt.Payload)); err != nil {
+	`, evt.ID(), string(evt.Type()), entityID, string(evt.Payload())); err != nil {
 		t.Fatalf("seed select_entity spend event: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (event_id, subscriber_type, subscriber_id, status, created_at)
 		VALUES ($1::uuid, 'node', 'treasury-orchestrator', 'pending', now())
-	`, evt.ID); err != nil {
+	`, evt.ID()); err != nil {
 		t.Fatalf("seed select_entity node delivery: %v", err)
 	}
 	return evt

@@ -159,7 +159,7 @@ func TestResetRuntimeStateWithSource_PublishesPlatformResetOnlyForExplicitAdminS
 		if len(bus.publishes) != 1 {
 			t.Fatalf("published event count = %d, want 1", len(bus.publishes))
 		}
-		if got := string(bus.publishes[0].Type); got != "platform.reset" {
+		if got := string(bus.publishes[0].Type()); got != "platform.reset" {
 			t.Fatalf("published event type = %q, want platform.reset", got)
 		}
 	})

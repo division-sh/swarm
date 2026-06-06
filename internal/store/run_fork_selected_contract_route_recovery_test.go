@@ -209,11 +209,10 @@ func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughJS
 		t.Fatalf("missing recovered recipient guard for fork %s", forkRunID)
 	}
 	guard.ExpectForkEvent("00000000-0000-0000-0000-000000000991", eventID)
-	evt := events.Event{
-		ID:          "00000000-0000-0000-0000-000000000991",
-		Type:        events.EventType("item.received"),
-		SourceAgent: RunForkSelectedContractExecutionOwner,
-	}
+	evt := events.NewProjectionEvent("00000000-0000-0000-0000-000000000991",
+		events.EventType("item.received"),
+		RunForkSelectedContractExecutionOwner, "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
+
 	if err := guard.Authorize(ctx, evt, runtimebus.PublishRecipientPlan{
 		RoutedRecipients: []runtimebus.PublishDiagnosticRecipient{{
 			Type:        "node",
@@ -277,11 +276,10 @@ func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughBu
 		t.Fatalf("missing recovered recipient guard for fork %s", forkRunID)
 	}
 	guard.ExpectForkEvent("00000000-0000-0000-0000-000000000992", eventID)
-	evt := events.Event{
-		ID:          "00000000-0000-0000-0000-000000000992",
-		Type:        events.EventType("item.received"),
-		SourceAgent: RunForkSelectedContractExecutionOwner,
-	}
+	evt := events.NewProjectionEvent("00000000-0000-0000-0000-000000000992",
+		events.EventType("item.received"),
+		RunForkSelectedContractExecutionOwner, "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
+
 	if err := guard.Authorize(ctx, evt, runtimebus.PublishRecipientPlan{
 		RoutedRecipients: []runtimebus.PublishDiagnosticRecipient{{
 			Type:        "node",

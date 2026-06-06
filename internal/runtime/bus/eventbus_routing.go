@@ -129,7 +129,7 @@ func filterRecipientsForExplicitAgentScope(evt events.Event, recipients []string
 }
 
 func (eb *EventBus) resolveRoutedSubscribers(eventType string) []Subscriber {
-	return eb.resolveRoutedSubscribersForEvent(events.Event{Type: events.EventType(eventType)})
+	return eb.resolveRoutedSubscribersForEvent(events.NewRouteProbeEvent(events.EventType(eventType)))
 }
 
 func (eb *EventBus) resolveRoutedSubscribersForEvent(evt events.Event) []Subscriber {
@@ -153,7 +153,7 @@ func (eb *EventBus) resolveRoutedSubscribersForEvent(evt events.Event) []Subscri
 }
 
 func (eb *EventBus) resolveRoutedRecipients(eventType string) []string {
-	return eb.resolveRoutedRecipientsForEvent(events.Event{Type: events.EventType(eventType)})
+	return eb.resolveRoutedRecipientsForEvent(events.NewRouteProbeEvent(events.EventType(eventType)))
 }
 
 func (eb *EventBus) resolveRoutedRecipientsForEvent(evt events.Event) []string {
@@ -217,7 +217,18 @@ func (eb *EventBus) deliverToRecipientsWithRoutes(ctx context.Context, evt event
 		for _, target := range targets {
 			deliverEvent := evt
 			if !target.Empty() {
-				deliverEvent = evt.WithDeliveryTarget(target)
+				deliverEvent = events.NewProjectionEvent(
+					evt.ID(),
+					evt.Type(),
+					evt.SourceAgent(),
+					evt.TaskID(),
+					evt.Payload(),
+					evt.ChainDepth(),
+					evt.RunID(),
+					evt.ParentEventID(),
+					events.EnvelopeForTargetRoute(evt.NormalizedEnvelope(), target),
+					evt.CreatedAt(),
+				)
 			}
 			select {
 			case recipient.ch <- deliverEvent:
@@ -246,7 +257,7 @@ func (eb *EventBus) deliverToRecipientsWithRoutes(ctx context.Context, evt event
 				if _, required := expectedSet[recipient.agentID]; required {
 					timedOut = append(timedOut, recipient.agentID)
 				}
-				eb.logRuntime(ctx, "warn", "Event delivery to a recipient timed out", "eventbus", "delivery_timeout", evt.ID, string(evt.Type), recipient.agentID, evt.EntityID(), "", nil, map[string]any{
+				eb.logRuntime(ctx, "warn", "Event delivery to a recipient timed out", "eventbus", "delivery_timeout", evt.ID(), string(evt.Type()), recipient.agentID, evt.EntityID(), "", nil, map[string]any{
 					"timeout_ms": int(deliverySendTimeout / time.Millisecond),
 				}, "", 0)
 			}
@@ -359,7 +370,7 @@ func (eb *EventBus) snapshotRecipientChans(agentIDs []string) []agentRecipient {
 func (eb *EventBus) deliverByType(evt events.Event) {
 	recipients := uniqueStrings(append(
 		eb.resolveRoutedRecipientsForEvent(evt),
-		eb.resolveSubscribedRecipients(string(evt.Type))...,
+		eb.resolveSubscribedRecipients(string(evt.Type()))...,
 	))
 	_ = eb.deliverToAgents(context.Background(), evt, recipients)
 }
@@ -473,7 +484,7 @@ func filterOutAgentIDs(in []string, disallow []string) []string {
 }
 
 func (eb *EventBus) emitContradiction(ctx context.Context, source events.Event, reason string) error {
-	eb.logRuntime(ctx, "warn", "Event routing contradiction was detected", "eventbus", "contradiction", strings.TrimSpace(source.ID), strings.TrimSpace(string(source.Type)), "", strings.TrimSpace(source.EntityID()), "", nil, map[string]any{
+	eb.logRuntime(ctx, "warn", "Event routing contradiction was detected", "eventbus", "contradiction", strings.TrimSpace(source.ID()), strings.TrimSpace(string(source.Type())), "", strings.TrimSpace(source.EntityID()), "", nil, map[string]any{
 		"reason": strings.TrimSpace(reason),
 	}, "", 0)
 	return nil
@@ -520,7 +531,7 @@ func (eb *EventBus) logAuthoritativeDeliveryIncomplete(ctx context.Context, evt 
 		errText = cause.Error()
 		detail["cause"] = errText
 	}
-	eb.logRuntime(ctx, "warn", "Authoritative delivery fan-out was incomplete", "eventbus", "delivery_incomplete", evt.ID, string(evt.Type), "", evt.EntityID(), "", nil, detail, errText, 0)
+	eb.logRuntime(ctx, "warn", "Authoritative delivery fan-out was incomplete", "eventbus", "delivery_incomplete", evt.ID(), string(evt.Type()), "", evt.EntityID(), "", nil, detail, errText, 0)
 	parts := make([]string, 0, 3)
 	if len(missing) > 0 {
 		parts = append(parts, "missing="+strings.Join(missing, ","))

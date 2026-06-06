@@ -101,27 +101,19 @@ func (a delayedRunStatusAgent) OnEvent(ctx context.Context, evt events.Event) ([
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
-	out := (events.Event{
-		ID:          uuid.NewString(),
-		RunID:       evt.RunID,
-		Type:        events.EventType("scan.completed"),
-		SourceAgent: a.id,
-		Payload:     []byte(`{}`),
-		CreatedAt:   time.Now().UTC(),
-	}).WithEntityID(evt.EntityID())
+	out := (events.NewProjectionEvent(uuid.NewString(),
+
+		events.EventType("scan.completed"),
+		a.id, "", []byte(`{}`), 0, evt.RunID(), "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID(evt.EntityID())
 	return []events.Event{out}, nil
 }
 
 func publishRunStatusRootEvent(t *testing.T, bus *runtimebus.EventBus, runID, entityID string) {
 	t.Helper()
-	if err := bus.Publish(context.Background(), (events.Event{
-		ID:          uuid.NewString(),
-		RunID:       runID,
-		Type:        events.EventType("scan.requested"),
-		SourceAgent: "api.v1",
-		Payload:     []byte(`{"topic":"sample"}`),
-		CreatedAt:   time.Now().UTC(),
-	}).WithEntityID(entityID)); err != nil {
+	if err := bus.Publish(context.Background(), (events.NewProjectionEvent(uuid.NewString(),
+
+		events.EventType("scan.requested"),
+		"api.v1", "", []byte(`{"topic":"sample"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID(entityID)); err != nil {
 		t.Fatalf("publish root event: %v", err)
 	}
 }
@@ -3447,6 +3439,7 @@ func TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite(t *test
 		t.Fatalf("NewSQLiteRuntimeStore(%s): %v", sqlitePath, err)
 	}
 	preHandlerProof := make(chan servedEventPublishPreHandlerProof, 1)
+	stateUpdates := make(chan servedEventPublishEntityStateUpdate, 4)
 	endpoint := startServedEventPublishFollowUpRuntime(t, serveOptions{
 		ConfigPath:                       writeServeRuntimeTestConfig(t),
 		ContractsPath:                    contractsPath,
@@ -3457,10 +3450,11 @@ func TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite(t *test
 		RequireBundleMatch:               false,
 		NoRequireBundleMatch:             true,
 		Verbose:                          true,
+		TestEntityStateHook:              servedEventPublishEntityStateHook(stateUpdates),
 		TestWorkflowNodeHandlerStartHook: servedEventPublishPreHandlerAuthorityHook(sqliteStore.DB, "sqlite", preHandlerProof),
 	})
 
-	runServedEventPublishFollowUpProof(t, endpoint, sqliteStore.DB, "sqlite", bundleHash, preHandlerProof)
+	runServedEventPublishFollowUpProof(t, endpoint, sqliteStore.DB, "sqlite", bundleHash, preHandlerProof, stateUpdates)
 	if err := sqliteStore.Close(); err != nil {
 		t.Fatalf("close sqlite proof store: %v", err)
 	}
@@ -3473,6 +3467,7 @@ func TestRunServeRuntimeEventPublishRunIDFollowUpServedPathPostgres(t *testing.T
 	contractsPath := writeServedEventPublishFollowUpFixture(t)
 	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
 	preHandlerProof := make(chan servedEventPublishPreHandlerProof, 1)
+	stateUpdates := make(chan servedEventPublishEntityStateUpdate, 4)
 	endpoint := startServedEventPublishFollowUpRuntime(t, serveOptions{
 		ConfigPath:                       writeServeRuntimeTestConfig(t),
 		ContractsPath:                    contractsPath,
@@ -3484,10 +3479,11 @@ func TestRunServeRuntimeEventPublishRunIDFollowUpServedPathPostgres(t *testing.T
 		SelfCheck:                        true,
 		RequireBundleMatch:               false,
 		Verbose:                          true,
+		TestEntityStateHook:              servedEventPublishEntityStateHook(stateUpdates),
 		TestWorkflowNodeHandlerStartHook: servedEventPublishPreHandlerAuthorityHook(db, "postgres", preHandlerProof),
 	})
 
-	runServedEventPublishFollowUpProof(t, endpoint, db, "postgres", bundleHash, preHandlerProof)
+	runServedEventPublishFollowUpProof(t, endpoint, db, "postgres", bundleHash, preHandlerProof, stateUpdates)
 }
 
 func TestRunServeRuntimeEventPublishDynamicAutoEmitReturnsDurableAckAndDispatchesChild(t *testing.T) {
@@ -3887,22 +3883,43 @@ type servedEventPublishPreHandlerProof struct {
 	Err     error
 }
 
+type servedEventPublishEntityStateUpdate struct {
+	EntityID string
+	State    string
+}
+
+func servedEventPublishEntityStateHook(updates chan<- servedEventPublishEntityStateUpdate) func(entityID, state string) {
+	return func(entityID, state string) {
+		update := servedEventPublishEntityStateUpdate{
+			EntityID: strings.TrimSpace(entityID),
+			State:    strings.TrimSpace(state),
+		}
+		if update.EntityID == "" || update.State == "" {
+			return
+		}
+		select {
+		case updates <- update:
+		default:
+		}
+	}
+}
+
 func servedEventPublishPreHandlerAuthorityHook(db *sql.DB, backend string, proofs chan<- servedEventPublishPreHandlerProof) runtimepipeline.WorkflowNodeHandlerStartHook {
 	var once sync.Once
 	return func(ctx context.Context, nodeID string, evt events.Event) error {
 		if strings.TrimSpace(nodeID) != "entity-writer" {
 			return nil
 		}
-		eventType := strings.TrimPrefix(strings.TrimSpace(string(evt.Type)), "validation/")
+		eventType := strings.TrimPrefix(strings.TrimSpace(string(evt.Type())), "validation/")
 		if eventType != "thing.created" {
 			return nil
 		}
 		once.Do(func() {
-			runID := strings.TrimSpace(evt.RunID)
+			runID := strings.TrimSpace(evt.RunID())
 			if runID == "" {
 				runID = runtimecorrelation.RunIDFromContext(ctx)
 			}
-			eventID := strings.TrimSpace(evt.ID)
+			eventID := strings.TrimSpace(evt.ID())
 			count, err := servedEventPublishNodeDeliveryCountValue(ctx, db, backend, runID, eventID, nodeID)
 			proof := servedEventPublishPreHandlerProof{
 				RunID:   runID,
@@ -3935,16 +3952,16 @@ func servedEventPublishBlockingHandlerAuthorityHook(
 		if strings.TrimSpace(nodeID) != wantNodeID {
 			return nil
 		}
-		eventType := strings.Trim(strings.TrimSpace(string(evt.Type)), "/")
+		eventType := strings.Trim(strings.TrimSpace(string(evt.Type())), "/")
 		if eventType != wantEventSuffix && !strings.HasSuffix(eventType, "/"+wantEventSuffix) {
 			return nil
 		}
 		once.Do(func() {
-			runID := strings.TrimSpace(evt.RunID)
+			runID := strings.TrimSpace(evt.RunID())
 			if runID == "" {
 				runID = runtimecorrelation.RunIDFromContext(ctx)
 			}
-			eventID := strings.TrimSpace(evt.ID)
+			eventID := strings.TrimSpace(evt.ID())
 			count, err := servedEventPublishNodeDeliveryCountValue(ctx, db, backend, runID, eventID, wantNodeID)
 			proof := servedEventPublishPreHandlerProof{
 				RunID:   runID,
@@ -3960,6 +3977,26 @@ func servedEventPublishBlockingHandlerAuthorityHook(
 			<-release
 		})
 		return nil
+	}
+}
+
+func requireServedEventPublishEntityStateUpdate(t *testing.T, backend string, updates <-chan servedEventPublishEntityStateUpdate, entityID, wantState string) string {
+	t.Helper()
+	entityID = strings.TrimSpace(entityID)
+	wantState = strings.TrimSpace(wantState)
+	observed := []servedEventPublishEntityStateUpdate{}
+	timeout := time.NewTimer(5 * time.Second)
+	defer timeout.Stop()
+	for {
+		select {
+		case update := <-updates:
+			observed = append(observed, update)
+			if update.State == wantState && update.EntityID != "" && (entityID == "" || update.EntityID == entityID) {
+				return update.EntityID
+			}
+		case <-timeout.C:
+			t.Fatalf("%s entity state hook did not observe entity %q state %q; observed=%#v", backend, entityID, wantState, observed)
+		}
 	}
 }
 
@@ -4014,7 +4051,7 @@ func assertServedEventPublishDeliveriesContain(t *testing.T, deliveries []struct
 	t.Fatalf("event.publish deliveries = %#v, want %s/%s status %s", deliveries, subscriberType, subscriberID, status)
 }
 
-func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.DB, backend, bundleHash string, preHandlerProof <-chan servedEventPublishPreHandlerProof) {
+func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.DB, backend, bundleHash string, preHandlerProof <-chan servedEventPublishPreHandlerProof, stateUpdates <-chan servedEventPublishEntityStateUpdate) {
 	t.Helper()
 	beforeCreateRejectEvents := servedEventPublishScalarCount(t, db, backend, "events_all", "", "")
 	beforeCreateRejectIdempotency := servedEventPublishScalarCount(t, db, backend, "api_idempotency_all", "", "")
@@ -4056,7 +4093,8 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	if got := servedEventPublishNodeDeliveryCount(t, db, backend, runID, initialEventID, "entity-writer"); got == 0 {
 		t.Fatalf("%s initial root-input node deliveries = %d, want persisted node/entity-writer authority", backend, got)
 	}
-	entityID := requireServedEventPublishEntityState(t, db, backend, runID, "", "waiting")
+	entityID := requireServedEventPublishEntityStateUpdate(t, backend, stateUpdates, "", "waiting")
+	requireServedEventPublishEntityState(t, db, backend, runID, entityID, "waiting")
 	requireServedEventReadback(t, endpoint, initialEventID, runID, runID, "thing.created", "entity-writer")
 	requireServedEntityReadback(t, endpoint, runID, entityID, "waiting")
 
@@ -4083,6 +4121,7 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	if got := servedEventPublishScalarCount(t, db, backend, "event_deliveries", runID, followUpEventID); got == 0 {
 		t.Fatalf("%s follow-up deliveries = %d, want non-empty persisted evidence", backend, got)
 	}
+	requireServedEventPublishEntityStateUpdate(t, backend, stateUpdates, entityID, "done")
 	requireServedEventPublishEntityState(t, db, backend, runID, entityID, "done")
 	requireServedEntityReadback(t, endpoint, runID, entityID, "done")
 	requireServedRunStatus(t, endpoint, runID, "completed")
@@ -4393,9 +4432,9 @@ func servedEventPublishDebugQuery(t *testing.T, db *sql.DB, backend, scope, runI
 		case "event_deliveries":
 			sqlText = `SELECT event_id::text, subscriber_type, subscriber_id, status, COALESCE(reason_code, '') FROM event_deliveries WHERE run_id = $1::uuid ORDER BY created_at, event_id LIMIT 8`
 		case "event_receipts":
-			sqlText = `SELECT event_id::text, subscriber_type, subscriber_id, outcome, COALESCE(reason_code, '') FROM event_receipts WHERE run_id = $1::uuid ORDER BY processed_at, event_id LIMIT 8`
+			sqlText = `SELECT r.event_id::text, r.subscriber_type, r.subscriber_id, r.outcome, COALESCE(r.reason_code, '') FROM event_receipts r JOIN events e ON e.event_id = r.event_id WHERE e.run_id = $1::uuid ORDER BY r.processed_at, r.event_id LIMIT 8`
 		case "dead_letters":
-			sqlText = `SELECT original_event, COALESCE(entity_id::text, ''), failure_type, COALESCE(error_message, '') FROM dead_letters WHERE run_id = $1::uuid ORDER BY created_at LIMIT 5`
+			sqlText = `SELECT d.original_event, COALESCE(d.entity_id::text, ''), d.failure_type, COALESCE(d.error_message, '') FROM dead_letters d JOIN events e ON e.event_id = d.original_event_id WHERE e.run_id = $1::uuid ORDER BY d.created_at LIMIT 5`
 		}
 	case "sqlite":
 		switch scope {
@@ -4406,9 +4445,9 @@ func servedEventPublishDebugQuery(t *testing.T, db *sql.DB, backend, scope, runI
 		case "event_deliveries":
 			sqlText = `SELECT event_id, subscriber_type, subscriber_id, status, COALESCE(reason_code, '') FROM event_deliveries WHERE run_id = ? ORDER BY created_at, event_id LIMIT 8`
 		case "event_receipts":
-			sqlText = `SELECT event_id, subscriber_type, subscriber_id, outcome, COALESCE(reason_code, '') FROM event_receipts WHERE run_id = ? ORDER BY processed_at, event_id LIMIT 8`
+			sqlText = `SELECT r.event_id, r.subscriber_type, r.subscriber_id, r.outcome, COALESCE(r.reason_code, '') FROM event_receipts r JOIN events e ON e.event_id = r.event_id WHERE e.run_id = ? ORDER BY r.processed_at, r.event_id LIMIT 8`
 		case "dead_letters":
-			sqlText = `SELECT original_event, COALESCE(entity_id, ''), failure_type, COALESCE(error_message, '') FROM dead_letters WHERE run_id = ? ORDER BY created_at LIMIT 5`
+			sqlText = `SELECT d.original_event, COALESCE(d.entity_id, ''), d.failure_type, COALESCE(d.error_message, '') FROM dead_letters d JOIN events e ON e.event_id = d.original_event_id WHERE e.run_id = ? ORDER BY d.created_at LIMIT 5`
 		}
 	}
 	if sqlText == "" {

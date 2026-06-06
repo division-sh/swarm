@@ -47,14 +47,11 @@ func TestEventBusRunControlPauseQueuesOnlyTargetRunAndContinueReleases(t *testin
 	}
 
 	pausedEventID := uuid.NewString()
-	if err := eb.Publish(ctx, events.Event{
-		ID:          pausedEventID,
-		RunID:       pausedRunID,
-		Type:        eventType,
-		SourceAgent: "api.v1",
-		Payload:     []byte(`{"entity_id":"21000000-0000-0000-0000-000000000002"}`),
-		CreatedAt:   time.Now().UTC(),
-	}.WithEntityID("21000000-0000-0000-0000-000000000002")); err != nil {
+	if err := eb.Publish(ctx, events.NewProjectionEvent(pausedEventID,
+
+		eventType,
+		"api.v1", "", []byte(`{"entity_id":"21000000-0000-0000-0000-000000000002"}`), 0, pausedRunID, "", events.EventEnvelope{}, time.Now().UTC()).
+		WithEntityID("21000000-0000-0000-0000-000000000002")); err != nil {
 		t.Fatalf("Publish paused run event: %v", err)
 	}
 	requireNoBusEvent(t, ch, "paused run before continue")
@@ -63,19 +60,16 @@ func TestEventBusRunControlPauseQueuesOnlyTargetRunAndContinueReleases(t *testin
 	}
 
 	otherEventID := uuid.NewString()
-	if err := eb.Publish(ctx, events.Event{
-		ID:          otherEventID,
-		RunID:       otherRunID,
-		Type:        eventType,
-		SourceAgent: "api.v1",
-		Payload:     []byte(`{"entity_id":"21000000-0000-0000-0000-000000000003"}`),
-		CreatedAt:   time.Now().UTC(),
-	}.WithEntityID("21000000-0000-0000-0000-000000000003")); err != nil {
+	if err := eb.Publish(ctx, events.NewProjectionEvent(otherEventID,
+
+		eventType,
+		"api.v1", "", []byte(`{"entity_id":"21000000-0000-0000-0000-000000000003"}`), 0, otherRunID, "", events.EventEnvelope{}, time.Now().UTC()).
+		WithEntityID("21000000-0000-0000-0000-000000000003")); err != nil {
 		t.Fatalf("Publish other run event: %v", err)
 	}
 	got := requireBusEvent(t, ch, "other run dispatch")
-	if got.ID != otherEventID {
-		t.Fatalf("delivered event = %s, want other run %s", got.ID, otherEventID)
+	if got.ID() != otherEventID {
+		t.Fatalf("delivered event = %s, want other run %s", got.ID(), otherEventID)
 	}
 
 	result, err := controller.Continue(ctx, runtimeruncontrol.TransitionRequest{RunID: pausedRunID, Reason: "test", ControlledBy: "test"})
@@ -86,8 +80,8 @@ func TestEventBusRunControlPauseQueuesOnlyTargetRunAndContinueReleases(t *testin
 		t.Fatalf("released deliveries = %d, want 1", result.ReleasedDeliveries)
 	}
 	got = requireBusEvent(t, ch, "paused run release")
-	if got.ID != pausedEventID {
-		t.Fatalf("released event = %s, want paused run %s", got.ID, pausedEventID)
+	if got.ID() != pausedEventID {
+		t.Fatalf("released event = %s, want paused run %s", got.ID(), pausedEventID)
 	}
 	if got := countPipelineReceiptsForEvent(t, ctx, db, pausedEventID); got != 1 {
 		t.Fatalf("paused run pipeline receipts after continue = %d, want 1", got)
@@ -129,14 +123,11 @@ func TestEventBusRunControlPauseQueuesBeforeInterceptorsAndContinueReplaysThem(t
 	}
 
 	queuedEventID := uuid.NewString()
-	if err := eb.Publish(ctx, events.Event{
-		ID:          queuedEventID,
-		RunID:       runID,
-		Type:        eventType,
-		SourceAgent: "api.v1",
-		Payload:     []byte(`{"entity_id":"22000000-0000-0000-0000-000000000001"}`),
-		CreatedAt:   time.Now().UTC(),
-	}.WithEntityID("22000000-0000-0000-0000-000000000001")); err != nil {
+	if err := eb.Publish(ctx, events.NewProjectionEvent(queuedEventID,
+
+		eventType,
+		"api.v1", "", []byte(`{"entity_id":"22000000-0000-0000-0000-000000000001"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC()).
+		WithEntityID("22000000-0000-0000-0000-000000000001")); err != nil {
 		t.Fatalf("Publish paused run event: %v", err)
 	}
 	requireNoBusEvent(t, ch, "paused intercepted run before continue")
@@ -196,14 +187,11 @@ func TestEventBusRunControlPauseQueuesPostCommitEmitBeforeInterceptors(t *testin
 	}
 
 	intent := runtimeengine.EmitIntent{
-		Event: events.Event{
-			ID:          uuid.NewString(),
-			RunID:       runID,
-			Type:        eventType,
-			SourceAgent: "runtime",
-			Payload:     []byte(`{"entity_id":"23000000-0000-0000-0000-000000000001"}`),
-			CreatedAt:   time.Now().UTC(),
-		}.WithEntityID("23000000-0000-0000-0000-000000000001"),
+		Event: events.NewProjectionEvent(uuid.NewString(),
+
+			eventType,
+			"runtime", "", []byte(`{"entity_id":"23000000-0000-0000-0000-000000000001"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC()).
+			WithEntityID("23000000-0000-0000-0000-000000000001"),
 	}
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -228,7 +216,7 @@ func TestEventBusRunControlPauseQueuesPostCommitEmitBeforeInterceptors(t *testin
 	if got := recorder.count(); got != 0 {
 		t.Fatalf("post-commit interceptor executions while paused = %d, want 0", got)
 	}
-	if got := countPipelineReceiptsForEvent(t, ctx, db, intent.Event.ID); got != 0 {
+	if got := countPipelineReceiptsForEvent(t, ctx, db, intent.Event.ID()); got != 0 {
 		t.Fatalf("post-commit event receipts while paused = %d, want 0", got)
 	}
 
@@ -243,7 +231,7 @@ func TestEventBusRunControlPauseQueuesPostCommitEmitBeforeInterceptors(t *testin
 		t.Fatalf("post-commit interceptor executions after continue = %d, want 1", got)
 	}
 	requireBusEventTypes(t, ch, "released post-commit original and deferred events", eventType, deferredType)
-	if got := countPipelineReceiptsForEvent(t, ctx, db, intent.Event.ID); got != 1 {
+	if got := countPipelineReceiptsForEvent(t, ctx, db, intent.Event.ID()); got != 1 {
 		t.Fatalf("post-commit event receipts after continue = %d, want 1", got)
 	}
 }
@@ -256,20 +244,16 @@ type runControlRecordingInterceptor struct {
 }
 
 func (i *runControlRecordingInterceptor) Intercept(_ context.Context, evt events.Event) (bool, []events.Event, error) {
-	if evt.Type != i.triggerType {
+	if evt.Type() != i.triggerType {
 		return true, nil, nil
 	}
 	i.mu.Lock()
-	i.seen = append(i.seen, evt.ID)
+	i.seen = append(i.seen, evt.ID())
 	i.mu.Unlock()
-	return true, []events.Event{(events.Event{
-		ID:          uuid.NewString(),
-		RunID:       evt.RunID,
-		Type:        i.deferredType,
-		SourceAgent: "runtime",
-		Payload:     []byte(`{"entity_id":"22000000-0000-0000-0000-000000000002"}`),
-		CreatedAt:   time.Now().UTC(),
-	}).WithEntityID("22000000-0000-0000-0000-000000000002")}, nil
+	return true, []events.Event{(events.NewProjectionEvent(uuid.NewString(),
+
+		i.deferredType,
+		"runtime", "", []byte(`{"entity_id":"22000000-0000-0000-0000-000000000002"}`), 0, evt.RunID(), "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID("22000000-0000-0000-0000-000000000002")}, nil
 }
 
 func (i *runControlRecordingInterceptor) count() int {

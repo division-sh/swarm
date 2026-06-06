@@ -284,14 +284,11 @@ func TestPostgresStore_BundleDeleteFinalMutationBlocksPostDeletePersistedSourceR
 		BundleSource:      storerunlifecycle.BundleSourcePersisted,
 		BundleFingerprint: testBootBundleFingerprint,
 	})
-	err = pg.AppendEvent(publishCtx, events.Event{
-		ID:          eventID,
-		RunID:       runID,
-		Type:        "scan.requested",
-		SourceAgent: "api.v1",
-		Payload:     []byte(`{"topic":"medicine"}`),
-		CreatedAt:   time.Date(2026, 5, 31, 12, 1, 0, 0, time.UTC),
-	})
+	err = pg.AppendEvent(publishCtx, events.NewProjectionEvent(eventID,
+
+		"scan.requested",
+		"api.v1", "", []byte(`{"topic":"medicine"}`), 0, runID, "", events.EventEnvelope{}, time.Date(2026, 5, 31, 12, 1, 0, 0, time.UTC)),
+	)
 	if !errors.Is(err, storerunlifecycle.ErrPersistedBundleUnavailable) {
 		t.Fatalf("AppendEvent after delete error = %v, want ErrPersistedBundleUnavailable", err)
 	}

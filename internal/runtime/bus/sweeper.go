@@ -76,7 +76,7 @@ func (eb *EventBus) SweepUndispatched(ctx context.Context, lookback time.Duratio
 	if eb == nil || eb.store == nil {
 		return 0, nil
 	}
-	paused, err := eb.runtimeIngressDispatchPaused(ctx, events.Event{Type: events.EventType("__runtime_ingress_probe__")})
+	paused, err := eb.runtimeIngressDispatchPaused(ctx, events.NewRouteProbeEvent(events.EventType("__runtime_ingress_probe__")))
 	if err != nil {
 		return 0, err
 	}
@@ -103,7 +103,7 @@ func (eb *EventBus) SweepUndispatched(ctx context.Context, lookback time.Duratio
 	redelivered := 0
 	for _, record := range events {
 		evt := record.Event
-		lease, claimed, err := replayStore.ClaimPipelineReplay(ctx, evt.ID)
+		lease, claimed, err := replayStore.ClaimPipelineReplay(ctx, evt.ID())
 		if err != nil {
 			return redelivered, err
 		}
@@ -111,13 +111,13 @@ func (eb *EventBus) SweepUndispatched(ctx context.Context, lookback time.Duratio
 			continue
 		}
 		if replayErr := strings.TrimSpace(record.ReplayError); replayErr != "" {
-			eb.markPipelineReceipt(ctx, evt.ID, "error", replayErr)
+			eb.markPipelineReceipt(ctx, evt.ID(), "error", replayErr)
 			_ = lease.Release(ctx)
 			continue
 		}
-		recipients, err := eb.authoritativeRecipientsForEvent(ctx, evt.ID)
+		recipients, err := eb.authoritativeRecipientsForEvent(ctx, evt.ID())
 		if err != nil {
-			eb.markPipelineReceipt(ctx, evt.ID, "error", err.Error())
+			eb.markPipelineReceipt(ctx, evt.ID(), "error", err.Error())
 			_ = lease.Release(ctx)
 			return redelivered, err
 		}
@@ -138,7 +138,7 @@ func (eb *EventBus) SweepUndispatched(ctx context.Context, lookback time.Duratio
 				continue
 			}
 			if !errors.Is(err, errAuthoritativeDeliveryIncomplete) {
-				if recordErr := eb.markPipelineReceipt(ctx, evt.ID, "error", err.Error()); recordErr != nil {
+				if recordErr := eb.markPipelineReceipt(ctx, evt.ID(), "error", err.Error()); recordErr != nil {
 					_ = lease.Release(ctx)
 					return redelivered, recordErr
 				}
@@ -146,7 +146,7 @@ func (eb *EventBus) SweepUndispatched(ctx context.Context, lookback time.Duratio
 			_ = lease.Release(ctx)
 			return redelivered, err
 		}
-		eb.markPipelineReceipt(ctx, evt.ID, "processed", "")
+		eb.markPipelineReceipt(ctx, evt.ID(), "processed", "")
 		_ = lease.Release(ctx)
 		redelivered++
 	}
@@ -191,7 +191,7 @@ func (eb *EventBus) ReleaseRunQueue(ctx context.Context, runID string, lookback 
 	redelivered := 0
 	for _, record := range records {
 		evt := record.Event
-		lease, claimed, err := replayStore.ClaimPipelineReplay(ctx, evt.ID)
+		lease, claimed, err := replayStore.ClaimPipelineReplay(ctx, evt.ID())
 		if err != nil {
 			return redelivered, err
 		}
@@ -199,13 +199,13 @@ func (eb *EventBus) ReleaseRunQueue(ctx context.Context, runID string, lookback 
 			continue
 		}
 		if replayErr := strings.TrimSpace(record.ReplayError); replayErr != "" {
-			eb.markPipelineReceipt(ctx, evt.ID, "error", replayErr)
+			eb.markPipelineReceipt(ctx, evt.ID(), "error", replayErr)
 			_ = lease.Release(ctx)
 			continue
 		}
-		recipients, err := eb.authoritativeRecipientsForEvent(ctx, evt.ID)
+		recipients, err := eb.authoritativeRecipientsForEvent(ctx, evt.ID())
 		if err != nil {
-			eb.markPipelineReceipt(ctx, evt.ID, "error", err.Error())
+			eb.markPipelineReceipt(ctx, evt.ID(), "error", err.Error())
 			_ = lease.Release(ctx)
 			return redelivered, err
 		}
@@ -216,7 +216,7 @@ func (eb *EventBus) ReleaseRunQueue(ctx context.Context, runID string, lookback 
 			}
 			return redelivered, err
 		}
-		eb.markPipelineReceipt(ctx, evt.ID, "processed", "")
+		eb.markPipelineReceipt(ctx, evt.ID(), "processed", "")
 		_ = lease.Release(ctx)
 		redelivered++
 	}
@@ -228,12 +228,12 @@ func (eb *EventBus) markCommittedReplayScopeUnavailable(ctx context.Context, evt
 	if errText == "" {
 		errText = runtimereplayclaim.ErrMissingCommittedReplayScope.Error()
 	}
-	if err := eb.markPipelineReceipt(ctx, evt.ID, "error", errText); err != nil {
+	if err := eb.markPipelineReceipt(ctx, evt.ID(), "error", errText); err != nil {
 		return err
 	}
-	eb.logRuntime(ctx, "warn", "Persisted event replay skipped because committed replay scope is unavailable", "eventbus", "outbox_replay_scope_unavailable", evt.ID, string(evt.Type), "", evt.EntityID(), "", nil, map[string]any{
+	eb.logRuntime(ctx, "warn", "Persisted event replay skipped because committed replay scope is unavailable", "eventbus", "outbox_replay_scope_unavailable", evt.ID(), string(evt.Type()), "", evt.EntityID(), "", nil, map[string]any{
 		"reason":          "missing_committed_replay_scope",
-		"parent_event_id": strings.TrimSpace(evt.ParentEventID),
+		"parent_event_id": strings.TrimSpace(evt.ParentEventID()),
 	}, errText, 0)
 	return nil
 }

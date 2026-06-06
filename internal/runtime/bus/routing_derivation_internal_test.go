@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
+	"time"
 )
 
 func TestRouteTableResolve_WildcardSubscriberMatchesActiveConcreteChildEventWithoutMaterializedKey(t *testing.T) {
@@ -143,14 +144,12 @@ func TestEventBusPublish_UsesRouteTableWildcardSubscriberResolution(t *testing.T
 	recorder := NewEmittedEventsRecorder()
 	ctx := WithEmittedEventsRecorder(context.Background(), recorder)
 
-	if err := eb.Publish(ctx, events.Event{
-		Type: eventType,
-	}); err != nil {
+	if err := eb.Publish(ctx, events.NewProjectionEvent("", eventType, "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	evt := requireBusEvent(t, ch, "routed wildcard delivery")
-	if evt.Type != events.EventType(eventType) {
-		t.Fatalf("delivered event type = %q, want concrete child event", evt.Type)
+	if evt.Type() != events.EventType(eventType) {
+		t.Fatalf("delivered event type = %q, want concrete child event", evt.Type())
 	}
 
 	diags := recorder.SnapshotPublishes()

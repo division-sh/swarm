@@ -115,16 +115,16 @@ func TestRuntimeStart_PlatformBootPayloadCarriesBootDecisionSummary(t *testing.T
 
 	var boot events.Event
 	for _, evt := range store.appendedEvents() {
-		if evt.Type == events.EventType("platform.boot") {
+		if evt.Type() == events.EventType("platform.boot") {
 			boot = evt
 			break
 		}
 	}
-	if boot.ID == "" {
+	if boot.ID() == "" {
 		t.Fatalf("platform.boot event not appended: %#v", store.appendedEvents())
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(boot.Payload, &payload); err != nil {
+	if err := json.Unmarshal(boot.Payload(), &payload); err != nil {
 		t.Fatalf("unmarshal platform.boot payload: %v", err)
 	}
 	for _, key := range []string{

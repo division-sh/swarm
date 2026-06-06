@@ -112,21 +112,17 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	}
 
 	// Events + deliveries + receipts.
-	evt := (events.Event{
-		ID:          uuid.NewString(),
-		Type:        events.EventType("review.requested"),
-		SourceAgent: "dashboard",
-		Payload:     json.RawMessage(`{"message":"hi"}`),
-		CreatedAt:   time.Now(),
-	}).WithEntityID(entityID)
+	evt := (events.NewProjectionEvent(uuid.NewString(),
+		events.EventType("review.requested"),
+		"dashboard", "", json.RawMessage(`{"message":"hi"}`), 0, "", "", events.EventEnvelope{}, time.Now())).WithEntityID(entityID)
 	if err := pg.AppendEvent(ctx, evt); err != nil {
 		t.Fatalf("append event: %v", err)
 	}
-	if err := pg.InsertEventDeliveries(ctx, evt.ID, []string{"control-plane"}); err != nil {
+	if err := pg.InsertEventDeliveries(ctx, evt.ID(), []string{"control-plane"}); err != nil {
 		t.Fatalf("insert deliveries: %v", err)
 	}
 	activeSessionID := uuid.NewString()
-	if err := pg.MarkEventDeliveryInProgress(ctx, evt.ID, "control-plane", activeSessionID); err != nil {
+	if err := pg.MarkEventDeliveryInProgress(ctx, evt.ID(), "control-plane", activeSessionID); err != nil {
 		t.Fatalf("mark delivery in progress: %v", err)
 	}
 	var inProgressStatus, inProgressReason, gotActiveSession string
@@ -134,7 +130,7 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 		SELECT COALESCE(status, ''), COALESCE(reason_code, ''), COALESCE(active_session_id::text, '')
 		FROM event_deliveries
 		WHERE event_id = $1::uuid AND subscriber_id = 'control-plane'
-	`, evt.ID).Scan(&inProgressStatus, &inProgressReason, &gotActiveSession); err != nil {
+	`, evt.ID()).Scan(&inProgressStatus, &inProgressReason, &gotActiveSession); err != nil {
 		t.Fatalf("load in-progress delivery: %v", err)
 	}
 	if inProgressStatus != "in_progress" {
@@ -146,7 +142,7 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	if gotActiveSession != activeSessionID {
 		t.Fatalf("active_session_id = %q, want %q", gotActiveSession, activeSessionID)
 	}
-	if err := pg.UpsertEventReceipt(ctx, evt.ID, "control-plane", "processed", ""); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, evt.ID(), "control-plane", "processed", ""); err != nil {
 		t.Fatalf("upsert receipt: %v", err)
 	}
 	var deliveryStatus, deliveryReason, receiptReason, clearedActiveSession string
@@ -154,7 +150,7 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 		SELECT COALESCE(status, ''), COALESCE(reason_code, ''), COALESCE(active_session_id::text, '')
 		FROM event_deliveries
 		WHERE event_id = $1::uuid AND subscriber_id = 'control-plane'
-	`, evt.ID).Scan(&deliveryStatus, &deliveryReason, &clearedActiveSession); err != nil {
+	`, evt.ID()).Scan(&deliveryStatus, &deliveryReason, &clearedActiveSession); err != nil {
 		t.Fatalf("load delivery status/reason: %v", err)
 	}
 	if deliveryStatus != "delivered" {
@@ -170,7 +166,7 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 		SELECT COALESCE(reason_code, '')
 		FROM event_receipts
 		WHERE event_id = $1::uuid AND subscriber_id = 'control-plane'
-	`, evt.ID).Scan(&receiptReason); err != nil {
+	`, evt.ID()).Scan(&receiptReason); err != nil {
 		t.Fatalf("load receipt reason: %v", err)
 	}
 	if receiptReason != "agent_processed" {
@@ -179,7 +175,7 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 
 	// Mailbox.
 	mbID, err := pg.InsertMailboxItem(ctx, runtimetools.MailboxItem{
-		EventID:   evt.ID,
+		EventID:   evt.ID(),
 		EntityID:  entityID,
 		FromAgent: "control-plane",
 		Type:      "review",

@@ -203,11 +203,9 @@ func TestRoleScopedEntityTools_SQLiteCurrentEntityPersistence(t *testing.T) {
 		WorkflowSource:    semanticview.Wrap(bundle),
 		AuthorityProvider: allowHumanTaskAuthority{},
 	})
-	currentCtx := runtimetools.WithActor(runtimebus.WithInboundEvent(ctx, events.Event{
-		ID:    "evt-current",
-		Type:  events.EventType("validation.started"),
-		RunID: entityToolTestRunID,
-	}.WithEntityID(entityID).WithFlowInstance("validation/inst-1")), actor)
+	currentCtx := runtimetools.WithActor(runtimebus.WithInboundEvent(ctx, events.NewProjectionEvent("evt-current",
+		events.EventType("validation.started"), "", "", nil, 0, entityToolTestRunID, "", events.EventEnvelope{}, time.Time{}).
+		WithEntityID(entityID).WithFlowInstance("validation/inst-1")), actor)
 
 	names := roleScopedToolDefinitionMap(exec.ToolDefinitionsForActorInContext(currentCtx, actor))
 	if _, ok := names["read_validation_case"]; !ok {

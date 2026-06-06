@@ -94,7 +94,7 @@ func (eb *EventBus) runDispatchBlocked(ctx context.Context, evt events.Event) (b
 	if eb == nil {
 		return false, nil
 	}
-	runID := strings.TrimSpace(evt.RunID)
+	runID := strings.TrimSpace(evt.RunID())
 	if runID == "" {
 		return false, nil
 	}
@@ -108,10 +108,10 @@ func (eb *EventBus) runDispatchBlocked(ctx context.Context, evt events.Event) (b
 }
 
 func runtimeIngressDispatchBypass(evt events.Event) bool {
-	if strings.TrimSpace(evt.SourceAgent) != "runtime" {
+	if strings.TrimSpace(evt.SourceAgent()) != "runtime" {
 		return false
 	}
-	return strings.HasPrefix(strings.TrimSpace(string(evt.Type)), "platform.")
+	return strings.HasPrefix(strings.TrimSpace(string(evt.Type())), "platform.")
 }
 
 func (eb *EventBus) dispatchQueueReason(ctx context.Context, evt events.Event) (string, error) {
@@ -136,7 +136,7 @@ func (eb *EventBus) logDispatchQueued(ctx context.Context, reason string, evt ev
 	message := "Event persisted without dispatch"
 	detail := map[string]any{
 		"recipients_count": recipientsCount,
-		"parent_event_id":  strings.TrimSpace(evt.ParentEventID),
+		"parent_event_id":  strings.TrimSpace(evt.ParentEventID()),
 	}
 	if direct {
 		detail["direct"] = true
@@ -148,9 +148,9 @@ func (eb *EventBus) logDispatchQueued(ctx context.Context, reason string, evt ev
 		message = "Runtime ingress is paused; event persisted without dispatch"
 	} else if reason == dispatchQueueRunBlocked {
 		message = "Run dispatch is blocked; event persisted without dispatch"
-		detail["run_id"] = strings.TrimSpace(evt.RunID)
+		detail["run_id"] = strings.TrimSpace(evt.RunID())
 	}
-	eb.logRuntime(ctx, "debug", message, "eventbus", reason, evt.ID, string(evt.Type), evt.SourceAgent, evt.EntityID(), "", nil, detail, "", 0)
+	eb.logRuntime(ctx, "debug", message, "eventbus", reason, evt.ID(), string(evt.Type()), evt.SourceAgent(), evt.EntityID(), "", nil, detail, "", 0)
 }
 
 func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
@@ -162,23 +162,18 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 	eb.inFlightPublishes.Add(1)
 	defer eb.inFlightPublishes.Add(-1)
 	start := time.Now()
-	if evt.Type == "" {
+	if evt.Type() == "" {
 		return errors.New("event type is required")
 	}
-	if !isValidEventTypeName(string(evt.Type)) {
-		return fmt.Errorf("invalid event type: %s", strings.TrimSpace(string(evt.Type)))
+	if !isValidEventTypeName(string(evt.Type())) {
+		return fmt.Errorf("invalid event type: %s", strings.TrimSpace(string(evt.Type())))
 	}
 	if eb.payloadValidator != nil {
-		if err := eb.payloadValidator(string(evt.Type), evt.Payload); err != nil {
-			return fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type)), err)
+		if err := eb.payloadValidator(string(evt.Type()), evt.Payload()); err != nil {
+			return fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type())), err)
 		}
 	}
-	if evt.ID == "" {
-		evt.ID = uuid.NewString()
-	}
-	if evt.CreatedAt.IsZero() {
-		evt.CreatedAt = time.Now()
-	}
+	evt = eventWithPublishDefaults(evt, time.Now())
 	ictx, evt := runtimecorrelation.CorrelateEvent(ctx, evt)
 
 	deferredTransitions := make([]runtimepipeline.DeferredPipelineTransition, 0, 8)
@@ -212,7 +207,7 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 			return
 		}
 		status, errText := pipelineReceiptStatus(ictx, err)
-		eb.markPipelineReceipt(ictx, evt.ID, status, errText)
+		eb.markPipelineReceipt(ictx, evt.ID(), status, errText)
 	}()
 
 	plan, err := eb.planSubscribedPublish(ictx, evt)
@@ -277,23 +272,18 @@ func (eb *EventBus) PublishAcknowledged(ctx context.Context, evt events.Event) e
 	eb.inFlightPublishes.Add(1)
 	defer eb.inFlightPublishes.Add(-1)
 	start := time.Now()
-	if evt.Type == "" {
+	if evt.Type() == "" {
 		return errors.New("event type is required")
 	}
-	if !isValidEventTypeName(string(evt.Type)) {
-		return fmt.Errorf("invalid event type: %s", strings.TrimSpace(string(evt.Type)))
+	if !isValidEventTypeName(string(evt.Type())) {
+		return fmt.Errorf("invalid event type: %s", strings.TrimSpace(string(evt.Type())))
 	}
 	if eb.payloadValidator != nil {
-		if err := eb.payloadValidator(string(evt.Type), evt.Payload); err != nil {
-			return fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type)), err)
+		if err := eb.payloadValidator(string(evt.Type()), evt.Payload()); err != nil {
+			return fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type())), err)
 		}
 	}
-	if evt.ID == "" {
-		evt.ID = uuid.NewString()
-	}
-	if evt.CreatedAt.IsZero() {
-		evt.CreatedAt = time.Now()
-	}
+	evt = eventWithPublishDefaults(evt, time.Now())
 	ictx, evt := runtimecorrelation.CorrelateEvent(ctx, evt)
 
 	if txStore, ok := eb.store.(TransactionalEventStore); ok {
@@ -339,23 +329,18 @@ func (eb *EventBus) PublishTx(ctx context.Context, tx *sql.Tx, evt events.Event)
 	if tx == nil {
 		return errors.New("publish tx is required")
 	}
-	if evt.Type == "" {
+	if evt.Type() == "" {
 		return errors.New("event type is required")
 	}
-	if !isValidEventTypeName(string(evt.Type)) {
-		return fmt.Errorf("invalid event type: %s", strings.TrimSpace(string(evt.Type)))
+	if !isValidEventTypeName(string(evt.Type())) {
+		return fmt.Errorf("invalid event type: %s", strings.TrimSpace(string(evt.Type())))
 	}
 	if eb.payloadValidator != nil {
-		if err := eb.payloadValidator(string(evt.Type), evt.Payload); err != nil {
-			return fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type)), err)
+		if err := eb.payloadValidator(string(evt.Type()), evt.Payload()); err != nil {
+			return fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type())), err)
 		}
 	}
-	if evt.ID == "" {
-		evt.ID = uuid.NewString()
-	}
-	if evt.CreatedAt.IsZero() {
-		evt.CreatedAt = time.Now()
-	}
+	evt = eventWithPublishDefaults(evt, time.Now())
 	ictx, evt := runtimecorrelation.CorrelateEvent(ctx, evt)
 	txStore, ok := eb.store.(TransactionalEventStore)
 	if !ok || txStore == nil {
@@ -370,19 +355,19 @@ func (eb *EventBus) PublishTx(ctx context.Context, tx *sql.Tx, evt events.Event)
 		return err
 	}
 	if inboundPlan.HasPersistentDeliveries() {
-		if err := eb.insertEventDeliveriesTx(txctx, txStore, tx, evt.ID, inboundPlan.PersistedRecipientIDs(), inboundPlan.DeliveryTargets(), inboundPlan.DeliveryRoutes()); err != nil {
+		if err := eb.insertEventDeliveriesTx(txctx, txStore, tx, evt.ID(), inboundPlan.PersistedRecipientIDs(), inboundPlan.DeliveryTargets(), inboundPlan.DeliveryRoutes()); err != nil {
 			return fmt.Errorf("persist event deliveries: %w", err)
 		}
 	}
 	if scopeWriter, ok := eb.store.(TransactionalEventReplayScopePersistence); ok && scopeWriter != nil {
-		if err := scopeWriter.UpsertCommittedReplayScopeTx(txctx, tx, evt.ID, runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
+		if err := scopeWriter.UpsertCommittedReplayScopeTx(txctx, tx, evt.ID(), runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
 			return fmt.Errorf("persist committed replay scope: %w", err)
 		}
 	} else if replayScopePersistenceRequired(eb.store) {
 		return fmt.Errorf("persist committed replay scope: %w", runtimereplayclaim.ErrMissingCommittedReplayScope)
 	}
 	if inboundPlan.TargetFailure != "" {
-		if err := txStore.UpsertPipelineReceiptTx(txctx, tx, evt.ID, "dead_letter", targetDeliveryFailureMessage(inboundPlan.TargetFailure)); err != nil {
+		if err := txStore.UpsertPipelineReceiptTx(txctx, tx, evt.ID(), "dead_letter", targetDeliveryFailureMessage(inboundPlan.TargetFailure)); err != nil {
 			return fmt.Errorf("persist pipeline receipt: %w", err)
 		}
 		eb.recordTargetDeliveryFailureTx(txctx, tx, evt, inboundPlan)
@@ -512,7 +497,7 @@ func (eb *EventBus) convergeStandaloneRuntimePlatformRun(ctx context.Context, ev
 			return err
 		}
 	}
-	return eb.ConvergeNormalRunCompletionForEvent(ctx, evt.ID)
+	return eb.ConvergeNormalRunCompletionForEvent(ctx, evt.ID())
 }
 
 func (eb *EventBus) publishTransactional(
@@ -551,12 +536,12 @@ func (eb *EventBus) publishTransactional(
 		return err
 	}
 	if inboundPlan.HasPersistentDeliveries() {
-		if err := eb.insertEventDeliveriesTx(txctx, txStore, tx, evt.ID, inboundPlan.PersistedRecipientIDs(), inboundPlan.DeliveryTargets(), inboundPlan.DeliveryRoutes()); err != nil {
+		if err := eb.insertEventDeliveriesTx(txctx, txStore, tx, evt.ID(), inboundPlan.PersistedRecipientIDs(), inboundPlan.DeliveryTargets(), inboundPlan.DeliveryRoutes()); err != nil {
 			return fmt.Errorf("persist event deliveries: %w", err)
 		}
 	}
 	if scopeWriter, ok := eb.store.(TransactionalEventReplayScopePersistence); ok && scopeWriter != nil {
-		if err := scopeWriter.UpsertCommittedReplayScopeTx(txctx, tx, evt.ID, runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
+		if err := scopeWriter.UpsertCommittedReplayScopeTx(txctx, tx, evt.ID(), runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
 			return fmt.Errorf("persist committed replay scope: %w", err)
 		}
 	} else if replayScopePersistenceRequired(eb.store) {
@@ -565,7 +550,7 @@ func (eb *EventBus) publishTransactional(
 	if inboundPlan.TargetFailure != "" {
 		applyTargetDeliveryFailureReceipt(receiptOverride, inboundPlan.TargetFailure)
 		status, errText := pipelineReceiptStatus(txctx, nil)
-		if err := txStore.UpsertPipelineReceiptTx(txctx, tx, evt.ID, status, errText); err != nil {
+		if err := txStore.UpsertPipelineReceiptTx(txctx, tx, evt.ID(), status, errText); err != nil {
 			return fmt.Errorf("persist pipeline receipt: %w", err)
 		}
 		if err := tx.Commit(); err != nil {
@@ -676,12 +661,12 @@ func (eb *EventBus) publishAcknowledgedTransactional(
 		return err
 	}
 	if inboundPlan.HasPersistentDeliveries() {
-		if err := eb.insertEventDeliveriesTx(txctx, txStore, tx, evt.ID, inboundPlan.PersistedRecipientIDs(), inboundPlan.DeliveryTargets(), inboundPlan.DeliveryRoutes()); err != nil {
+		if err := eb.insertEventDeliveriesTx(txctx, txStore, tx, evt.ID(), inboundPlan.PersistedRecipientIDs(), inboundPlan.DeliveryTargets(), inboundPlan.DeliveryRoutes()); err != nil {
 			return fmt.Errorf("persist event deliveries: %w", err)
 		}
 	}
 	if scopeWriter, ok := eb.store.(TransactionalEventReplayScopePersistence); ok && scopeWriter != nil {
-		if err := scopeWriter.UpsertCommittedReplayScopeTx(txctx, tx, evt.ID, runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
+		if err := scopeWriter.UpsertCommittedReplayScopeTx(txctx, tx, evt.ID(), runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
 			return fmt.Errorf("persist committed replay scope: %w", err)
 		}
 	} else if replayScopePersistenceRequired(eb.store) {
@@ -690,7 +675,7 @@ func (eb *EventBus) publishAcknowledgedTransactional(
 	if inboundPlan.TargetFailure != "" {
 		applyTargetDeliveryFailureReceipt(receiptOverride, inboundPlan.TargetFailure)
 		status, errText := pipelineReceiptStatus(txctx, nil)
-		if err := txStore.UpsertPipelineReceiptTx(txctx, tx, evt.ID, status, errText); err != nil {
+		if err := txStore.UpsertPipelineReceiptTx(txctx, tx, evt.ID(), status, errText); err != nil {
 			return fmt.Errorf("persist pipeline receipt: %w", err)
 		}
 		if err := tx.Commit(); err != nil {
@@ -727,13 +712,13 @@ func (eb *EventBus) publishAcknowledgedTransactional(
 
 func (eb *EventBus) recordCommittedPublishReceipt(ctx context.Context, evt events.Event, publishErr error) {
 	status, errText := pipelineReceiptStatus(ctx, publishErr)
-	_ = eb.markPipelineReceipt(ctx, evt.ID, status, errText)
+	_ = eb.markPipelineReceipt(ctx, evt.ID(), status, errText)
 }
 
 func (eb *EventBus) recordCommittedPublishConvergence(ctx context.Context, evt events.Event) {
 	if err := eb.convergeStandaloneRuntimePlatformRun(ctx, evt); err != nil {
 		eb.recordCommittedPublishReceipt(ctx, evt, err)
-		eb.logRuntime(ctx, "error", "Post-commit publish convergence failed", "eventbus", "publish_post_commit_convergence_failed", evt.ID, string(evt.Type), evt.SourceAgent, evt.EntityID(), "", nil, map[string]any{
+		eb.logRuntime(ctx, "error", "Post-commit publish convergence failed", "eventbus", "publish_post_commit_convergence_failed", evt.ID(), string(evt.Type()), evt.SourceAgent(), evt.EntityID(), "", nil, map[string]any{
 			"error": err.Error(),
 		}, err.Error(), 0)
 	}
@@ -776,16 +761,48 @@ func (eb *EventBus) runInterceptors(ctx context.Context, evt events.Event) (bool
 			passthrough = false
 		}
 		for _, d := range out {
-			if d.ID == "" {
-				d.ID = uuid.NewString()
-			}
-			if d.CreatedAt.IsZero() {
-				d.CreatedAt = time.Now()
-			}
-			deferred = append(deferred, d)
+			deferred = append(deferred, eventWithPublishDefaults(d, time.Now()))
 		}
 	}
 	return passthrough, deferred, nil
+}
+
+func eventWithPublishDefaults(evt events.Event, now time.Time) events.Event {
+	id := evt.ID()
+	if id == "" {
+		id = uuid.NewString()
+	}
+	createdAt := evt.CreatedAt()
+	if createdAt.IsZero() {
+		createdAt = now
+	}
+	return events.NewProjectionEvent(
+		id,
+		evt.Type(),
+		evt.SourceAgent(),
+		evt.TaskID(),
+		evt.Payload(),
+		evt.ChainDepth(),
+		evt.RunID(),
+		evt.ParentEventID(),
+		evt.NormalizedEnvelope(),
+		createdAt,
+	)
+}
+
+func eventWithSourceAgent(evt events.Event, sourceAgent string) events.Event {
+	return events.NewProjectionEvent(
+		evt.ID(),
+		evt.Type(),
+		sourceAgent,
+		evt.TaskID(),
+		evt.Payload(),
+		evt.ChainDepth(),
+		evt.RunID(),
+		evt.ParentEventID(),
+		evt.NormalizedEnvelope(),
+		evt.CreatedAt(),
+	)
 }
 
 func (eb *EventBus) publishDeferred(ctx context.Context, evt events.Event) (err error) {
@@ -797,21 +814,16 @@ func (eb *EventBus) publishDeferred(ctx context.Context, evt events.Event) (err 
 	ctx = runtimepipeline.WithPipelineReceiptOverride(ctx, receiptOverride)
 	eb.inFlightPublishes.Add(1)
 	defer eb.inFlightPublishes.Add(-1)
-	if evt.Type == "" {
+	if evt.Type() == "" {
 		return errors.New("deferred event type is required")
 	}
-	if !isValidEventTypeName(string(evt.Type)) {
-		return fmt.Errorf("invalid deferred event type: %s", strings.TrimSpace(string(evt.Type)))
+	if !isValidEventTypeName(string(evt.Type())) {
+		return fmt.Errorf("invalid deferred event type: %s", strings.TrimSpace(string(evt.Type())))
 	}
-	if evt.ID == "" {
-		evt.ID = uuid.NewString()
-	}
-	if evt.CreatedAt.IsZero() {
-		evt.CreatedAt = time.Now()
-	}
+	evt = eventWithPublishDefaults(evt, time.Now())
 	ctx, evt = runtimecorrelation.CorrelateEvent(ctx, evt)
-	if strings.TrimSpace(evt.SourceAgent) == "" {
-		evt.SourceAgent = "runtime"
+	if strings.TrimSpace(evt.SourceAgent()) == "" {
+		evt = eventWithSourceAgent(evt, "runtime")
 	}
 	persisted := false
 	queued := false
@@ -823,7 +835,7 @@ func (eb *EventBus) publishDeferred(ctx context.Context, evt events.Event) (err 
 			return
 		}
 		status, errText := pipelineReceiptStatus(ctx, err)
-		eb.markPipelineReceipt(ctx, evt.ID, status, errText)
+		eb.markPipelineReceipt(ctx, evt.ID(), status, errText)
 	}()
 	plan, err := eb.planSubscribedPublish(ctx, evt)
 	if err != nil {
@@ -868,10 +880,10 @@ func (eb *EventBus) publishDeferred(ctx context.Context, evt events.Event) (err 
 }
 
 func (eb *EventBus) logPublished(ctx context.Context, evt events.Event, durationUS int) {
-	eb.logRuntime(ctx, "debug", "Event was published to the event bus", "eventbus", "published", evt.ID, string(evt.Type), evt.SourceAgent, evt.EntityID(), "", nil, map[string]any{
-		"type":            string(evt.Type),
-		"source":          evt.SourceAgent,
-		"parent_event_id": strings.TrimSpace(evt.ParentEventID),
+	eb.logRuntime(ctx, "debug", "Event was published to the event bus", "eventbus", "published", evt.ID(), string(evt.Type()), evt.SourceAgent(), evt.EntityID(), "", nil, map[string]any{
+		"type":            string(evt.Type()),
+		"source":          evt.SourceAgent(),
+		"parent_event_id": strings.TrimSpace(evt.ParentEventID()),
 	}, "", durationUS)
 }
 
@@ -952,7 +964,7 @@ func (eb *EventBus) publishRecipientPlan(evt events.Event, routePlan RoutePlan) 
 		TargetFailure:          strings.TrimSpace(string(routePlan.TargetFailure)),
 	}
 	if eb != nil {
-		out.RoutedRecipients = eb.describeSubscribersForEvent(string(evt.Type), routePlan.RoutedRecipients)
+		out.RoutedRecipients = eb.describeSubscribersForEvent(string(evt.Type()), routePlan.RoutedRecipients)
 	}
 	return out
 }
@@ -1016,11 +1028,11 @@ func (eb *EventBus) persistEventRecord(
 		if err := eb.store.AppendEvent(ctx, evt); err != nil {
 			return fmt.Errorf("persist event: %w", err)
 		}
-		if err := eb.insertEventDeliveries(ctx, evt.ID, recipients, deliveryTargets, deliveryRoutes); err != nil {
+		if err := eb.insertEventDeliveries(ctx, evt.ID(), recipients, deliveryTargets, deliveryRoutes); err != nil {
 			return fmt.Errorf("persist event deliveries: %w", err)
 		}
 		if scopeWriter, ok := eb.store.(EventReplayScopePersistence); ok && scopeWriter != nil {
-			if err := scopeWriter.UpsertCommittedReplayScope(ctx, evt.ID, scope); err != nil {
+			if err := scopeWriter.UpsertCommittedReplayScope(ctx, evt.ID(), scope); err != nil {
 				return fmt.Errorf("persist committed replay scope: %w", err)
 			}
 			return nil
@@ -1047,7 +1059,7 @@ func (eb *EventBus) persistEventRecord(
 			return fmt.Errorf("persist event transaction: %w", err)
 		}
 		if scopeWriter, ok := eb.store.(EventReplayScopePersistence); ok && scopeWriter != nil {
-			if err := scopeWriter.UpsertCommittedReplayScope(ctx, evt.ID, scope); err != nil {
+			if err := scopeWriter.UpsertCommittedReplayScope(ctx, evt.ID(), scope); err != nil {
 				return fmt.Errorf("persist committed replay scope: %w", err)
 			}
 			return nil
@@ -1061,12 +1073,12 @@ func (eb *EventBus) persistEventRecord(
 		return fmt.Errorf("persist event: %w", err)
 	}
 	if len(recipients) > 0 || len(deliveryRoutes) > 0 {
-		if err := eb.insertEventDeliveries(ctx, evt.ID, recipients, deliveryTargets, deliveryRoutes); err != nil {
+		if err := eb.insertEventDeliveries(ctx, evt.ID(), recipients, deliveryTargets, deliveryRoutes); err != nil {
 			return fmt.Errorf("persist event deliveries: %w", err)
 		}
 	}
 	if scopeWriter, ok := eb.store.(EventReplayScopePersistence); ok && scopeWriter != nil {
-		if err := scopeWriter.UpsertCommittedReplayScope(ctx, evt.ID, scope); err != nil {
+		if err := scopeWriter.UpsertCommittedReplayScope(ctx, evt.ID(), scope); err != nil {
 			return fmt.Errorf("persist committed replay scope: %w", err)
 		}
 		return nil
@@ -1127,12 +1139,12 @@ func deliveryRouteSetPersistenceRequired(routes []events.DeliveryRoute) bool {
 func (eb *EventBus) logDelivery(ctx context.Context, evt events.Event, recipients []string, extra map[string]any) {
 	detail := map[string]any{
 		"recipients_count": len(recipients),
-		"parent_event_id":  strings.TrimSpace(evt.ParentEventID),
+		"parent_event_id":  strings.TrimSpace(evt.ParentEventID()),
 	}
 	for k, v := range extra {
 		detail[k] = v
 	}
-	eb.logRuntime(ctx, "debug", "Event was delivered to recipients", "eventbus", "delivered", evt.ID, string(evt.Type), "", evt.EntityID(), "", nil, detail, "", 0)
+	eb.logRuntime(ctx, "debug", "Event was delivered to recipients", "eventbus", "delivered", evt.ID(), string(evt.Type()), "", evt.EntityID(), "", nil, detail, "", 0)
 }
 
 func (eb *EventBus) logQueuedDeliveries(ctx context.Context, evt events.Event, recipients []string, reason string, extra map[string]any) {
@@ -1148,12 +1160,12 @@ func (eb *EventBus) logQueuedDeliveries(ctx context.Context, evt events.Event, r
 			"delivery_reason":         strings.TrimSpace(reason),
 			"subscriber_type":         "agent",
 			"subscriber_id":           strings.TrimSpace(recipient),
-			"parent_event_id":         strings.TrimSpace(evt.ParentEventID),
+			"parent_event_id":         strings.TrimSpace(evt.ParentEventID()),
 		}
 		for k, v := range extra {
 			detail[k] = v
 		}
-		eb.logRuntime(ctx, "debug", "Delivery entered queued state", "eventbus", "delivery_lifecycle_transition", evt.ID, string(evt.Type), strings.TrimSpace(recipient), evt.EntityID(), "", nil, detail, "", 0)
+		eb.logRuntime(ctx, "debug", "Delivery entered queued state", "eventbus", "delivery_lifecycle_transition", evt.ID(), string(evt.Type()), strings.TrimSpace(recipient), evt.EntityID(), "", nil, detail, "", 0)
 	}
 }
 
@@ -1267,11 +1279,11 @@ func (eb *EventBus) recordPublishDiagnostic(ctx context.Context, evt events.Even
 	}
 	routePlan = routePlan.Normalized()
 	rec.AppendPublish(PublishDiagnostic{
-		EventID:                strings.TrimSpace(evt.ID),
-		EventType:              strings.TrimSpace(string(evt.Type)),
+		EventID:                strings.TrimSpace(evt.ID()),
+		EventType:              strings.TrimSpace(string(evt.Type())),
 		EntityID:               strings.TrimSpace(evt.EntityID()),
-		ParentEventID:          strings.TrimSpace(evt.ParentEventID),
-		RoutedRecipients:       eb.describeSubscribersForEvent(string(evt.Type), routePlan.RoutedRecipients),
+		ParentEventID:          strings.TrimSpace(evt.ParentEventID()),
+		RoutedRecipients:       eb.describeSubscribersForEvent(string(evt.Type()), routePlan.RoutedRecipients),
 		SubscriptionRecipients: uniqueStrings(routePlan.SubscribedRecipients),
 	})
 }
@@ -1306,25 +1318,20 @@ func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipie
 			return
 		}
 		status, errText := pipelineReceiptStatus(ctx, err)
-		eb.markPipelineReceipt(ctx, evt.ID, status, errText)
+		eb.markPipelineReceipt(ctx, evt.ID(), status, errText)
 	}()
-	if evt.Type == "" {
+	if evt.Type() == "" {
 		return errors.New("event type is required")
 	}
-	if !isValidEventTypeName(string(evt.Type)) {
-		return fmt.Errorf("invalid event type: %s", strings.TrimSpace(string(evt.Type)))
+	if !isValidEventTypeName(string(evt.Type())) {
+		return fmt.Errorf("invalid event type: %s", strings.TrimSpace(string(evt.Type())))
 	}
 	if eb.payloadValidator != nil {
-		if err := eb.payloadValidator(string(evt.Type), evt.Payload); err != nil {
-			return fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type)), err)
+		if err := eb.payloadValidator(string(evt.Type()), evt.Payload()); err != nil {
+			return fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type())), err)
 		}
 	}
-	if evt.ID == "" {
-		evt.ID = uuid.NewString()
-	}
-	if evt.CreatedAt.IsZero() {
-		evt.CreatedAt = time.Now()
-	}
+	evt = eventWithPublishDefaults(evt, time.Now())
 	ctx, evt = runtimecorrelation.CorrelateEvent(ctx, evt)
 	plan, err := eb.planDirectRoutePlan(ctx, evt, recipients)
 	if err != nil {
@@ -1355,12 +1362,12 @@ func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipie
 	detail := map[string]any{
 		"direct":           true,
 		"recipients_count": len(recipients),
-		"parent_event_id":  strings.TrimSpace(evt.ParentEventID),
+		"parent_event_id":  strings.TrimSpace(evt.ParentEventID()),
 	}
 	for k, v := range plan.ExtraDetail {
 		detail[k] = v
 	}
-	eb.logRuntime(ctx, "debug", "Event was delivered directly to recipients", "eventbus", "delivered", evt.ID, string(evt.Type), "", evt.EntityID(), "", nil, detail, "", int(time.Since(start)/time.Microsecond))
+	eb.logRuntime(ctx, "debug", "Event was delivered directly to recipients", "eventbus", "delivered", evt.ID(), string(evt.Type()), "", evt.EntityID(), "", nil, detail, "", int(time.Since(start)/time.Microsecond))
 	return nil
 }
 
@@ -1375,15 +1382,15 @@ func (eb *EventBus) CheckDirectRecipients(ctx context.Context, evt events.Event,
 		status.Missing = append([]string(nil), requested...)
 		return status, nil
 	}
-	if evt.Type == "" {
+	if evt.Type() == "" {
 		return status, errors.New("event type is required")
 	}
-	if !isValidEventTypeName(string(evt.Type)) {
-		return status, fmt.Errorf("invalid event type: %s", strings.TrimSpace(string(evt.Type)))
+	if !isValidEventTypeName(string(evt.Type())) {
+		return status, fmt.Errorf("invalid event type: %s", strings.TrimSpace(string(evt.Type())))
 	}
 	if eb.payloadValidator != nil {
-		if err := eb.payloadValidator(string(evt.Type), evt.Payload); err != nil {
-			return status, fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type)), err)
+		if err := eb.payloadValidator(string(evt.Type()), evt.Payload()); err != nil {
+			return status, fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type())), err)
 		}
 	}
 	plan, err := eb.planDirectRoutePlan(ctx, evt, requested)
@@ -1415,15 +1422,15 @@ func (eb *EventBus) CheckPublishRecipientPlan(ctx context.Context, evt events.Ev
 	if eb == nil {
 		return PublishRecipientPlan{}, nil
 	}
-	if evt.Type == "" {
+	if evt.Type() == "" {
 		return PublishRecipientPlan{}, errors.New("event type is required")
 	}
-	if !isValidEventTypeName(string(evt.Type)) {
-		return PublishRecipientPlan{}, fmt.Errorf("invalid event type: %s", strings.TrimSpace(string(evt.Type)))
+	if !isValidEventTypeName(string(evt.Type())) {
+		return PublishRecipientPlan{}, fmt.Errorf("invalid event type: %s", strings.TrimSpace(string(evt.Type())))
 	}
 	if eb.payloadValidator != nil {
-		if err := eb.payloadValidator(string(evt.Type), evt.Payload); err != nil {
-			return PublishRecipientPlan{}, fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type)), err)
+		if err := eb.payloadValidator(string(evt.Type()), evt.Payload()); err != nil {
+			return PublishRecipientPlan{}, fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type())), err)
 		}
 	}
 	plan, err := eb.planSubscribedRoutePlan(ctx, evt, false)
@@ -1445,18 +1452,13 @@ func (eb *EventBus) publishPersistedRecipients(ctx context.Context, evt events.E
 		return err
 	}
 	recipients = uniqueStrings(recipients)
-	if evt.Type == "" {
+	if evt.Type() == "" {
 		return errors.New("event type is required")
 	}
-	if !isValidEventTypeName(string(evt.Type)) {
-		return fmt.Errorf("invalid event type: %s", strings.TrimSpace(string(evt.Type)))
+	if !isValidEventTypeName(string(evt.Type())) {
+		return fmt.Errorf("invalid event type: %s", strings.TrimSpace(string(evt.Type())))
 	}
-	if evt.ID == "" {
-		evt.ID = uuid.NewString()
-	}
-	if evt.CreatedAt.IsZero() {
-		evt.CreatedAt = time.Now()
-	}
+	evt = eventWithPublishDefaults(evt, time.Now())
 	if reason, err := eb.dispatchQueueReason(ctx, evt); err != nil {
 		return err
 	} else if reason != "" {
@@ -1465,7 +1467,7 @@ func (eb *EventBus) publishPersistedRecipients(ctx context.Context, evt events.E
 		}
 		return ErrRunDispatchBlocked
 	}
-	scope, err := eb.authoritativeReplayScopeForEvent(ctx, evt.ID)
+	scope, err := eb.authoritativeReplayScopeForEvent(ctx, evt.ID())
 	if err != nil {
 		return err
 	}
@@ -1507,11 +1509,11 @@ func (eb *EventBus) publishPersistedRecipients(ctx context.Context, evt events.E
 	if scope == runtimereplayclaim.CommittedReplayScopeSubscribed {
 		owner = "event_deliveries+committed_replay_scope"
 	}
-	eb.logRuntime(ctx, "debug", "Persisted event was delivered to authoritative recipients", "eventbus", "delivered", evt.ID, string(evt.Type), "", evt.EntityID(), "", nil, map[string]any{
+	eb.logRuntime(ctx, "debug", "Persisted event was delivered to authoritative recipients", "eventbus", "delivered", evt.ID(), string(evt.Type()), "", evt.EntityID(), "", nil, map[string]any{
 		"direct":                     scope == runtimereplayclaim.CommittedReplayScopeDirect,
 		"delivery_manifest_owner":    owner,
 		"recipients_count":           len(liveRecipients),
-		"parent_event_id":            strings.TrimSpace(evt.ParentEventID),
+		"parent_event_id":            strings.TrimSpace(evt.ParentEventID()),
 		"requested_recipients":       append([]string(nil), liveRecipients...),
 		"requested_recipients_count": len(liveRecipients),
 		"persisted_recipients":       append([]string(nil), recipients...),
@@ -1558,14 +1560,14 @@ func (eb *EventBus) recordTargetDeliveryFailure(ctx context.Context, evt events.
 		return
 	}
 	message, detail, record := targetDeliveryFailureRecord(evt, plan, failure)
-	eb.logRuntime(ctx, "warn", "Pin routing target delivery failed", "eventbus", "target_resolution_failed", evt.ID, string(evt.Type), evt.SourceAgent, evt.EntityID(), "", nil, detail, message, 0)
+	eb.logRuntime(ctx, "warn", "Pin routing target delivery failed", "eventbus", "target_resolution_failed", evt.ID(), string(evt.Type()), evt.SourceAgent(), evt.EntityID(), "", nil, detail, message, 0)
 
 	recorder, ok := eb.store.(targetFailureDeadLetterRecorder)
 	if !ok || recorder == nil {
 		return
 	}
 	if err := recorder.RecordDeadLetter(ctx, record); err != nil {
-		eb.logRuntime(ctx, "warn", "Pin routing target failure dead-letter record failed", "eventbus", "target_resolution_failed_dead_letter_failed", evt.ID, string(evt.Type), evt.SourceAgent, evt.EntityID(), "", nil, detail, err.Error(), 0)
+		eb.logRuntime(ctx, "warn", "Pin routing target failure dead-letter record failed", "eventbus", "target_resolution_failed_dead_letter_failed", evt.ID(), string(evt.Type()), evt.SourceAgent(), evt.EntityID(), "", nil, detail, err.Error(), 0)
 	}
 }
 
@@ -1575,14 +1577,14 @@ func (eb *EventBus) recordTargetDeliveryFailureTx(ctx context.Context, tx *sql.T
 		return
 	}
 	message, detail, record := targetDeliveryFailureRecord(evt, plan, failure)
-	eb.logRuntime(ctx, "warn", "Pin routing target delivery failed", "eventbus", "target_resolution_failed", evt.ID, string(evt.Type), evt.SourceAgent, evt.EntityID(), "", nil, detail, message, 0)
+	eb.logRuntime(ctx, "warn", "Pin routing target delivery failed", "eventbus", "target_resolution_failed", evt.ID(), string(evt.Type()), evt.SourceAgent(), evt.EntityID(), "", nil, detail, message, 0)
 
 	recorder, ok := eb.store.(targetFailureDeadLetterTxRecorder)
 	if !ok || recorder == nil {
 		return
 	}
 	if err := recorder.RecordDeadLetterTx(ctx, tx, record); err != nil {
-		eb.logRuntime(ctx, "warn", "Pin routing target failure dead-letter record failed", "eventbus", "target_resolution_failed_dead_letter_failed", evt.ID, string(evt.Type), evt.SourceAgent, evt.EntityID(), "", nil, detail, err.Error(), 0)
+		eb.logRuntime(ctx, "warn", "Pin routing target failure dead-letter record failed", "eventbus", "target_resolution_failed_dead_letter_failed", evt.ID(), string(evt.Type()), evt.SourceAgent(), evt.EntityID(), "", nil, detail, err.Error(), 0)
 	}
 }
 
@@ -1610,9 +1612,9 @@ func targetDeliveryFailureRecord(evt events.Event, plan RoutePlan, failure runti
 		deadLetterRoute = evt.SourceRoute()
 	}
 	return message, detail, runtimedeadletters.Record{
-		OriginalEventID:     strings.TrimSpace(evt.ID),
-		OriginalEvent:       strings.TrimSpace(string(evt.Type)),
-		OriginalPayload:     evt.Payload,
+		OriginalEventID:     strings.TrimSpace(evt.ID()),
+		OriginalEvent:       strings.TrimSpace(string(evt.Type())),
+		OriginalPayload:     evt.Payload(),
 		EntityID:            firstNonEmptyString(deadLetterRoute.EntityID, evt.EntityID()),
 		FlowInstance:        firstNonEmptyString(deadLetterRoute.FlowInstance, evt.FlowInstance(), "runtime"),
 		FailureType:         "target_resolution_failed",
@@ -1620,7 +1622,7 @@ func targetDeliveryFailureRecord(evt events.Event, plan RoutePlan, failure runti
 		TargetContext:       json.RawMessage(targetContext),
 		ErrorMessage:        message,
 		RetryCount:          0,
-		ChainDepth:          evt.ChainDepth,
+		ChainDepth:          evt.ChainDepth(),
 		HandlerNode:         "pin_routing",
 	}
 }

@@ -59,16 +59,16 @@ func (e *Executor) logEmitToolOutcome(
 	if post := safeTelemetryPayloadSnapshot(postEnrichmentPayload); post != nil {
 		detail["post_enrichment_payload"] = post
 	}
-	if v := strings.TrimSpace(emitted.ID); v != "" {
+	if v := strings.TrimSpace(emitted.ID()); v != "" {
 		detail["emitted_event_id"] = v
 	}
-	if v := strings.TrimSpace(string(emitted.Type)); v != "" {
+	if v := strings.TrimSpace(string(emitted.Type())); v != "" {
 		detail["emitted_event_type"] = v
 	}
 	if v := strings.TrimSpace(emitted.EntityID()); v != "" {
 		detail["emitted_entity_id"] = v
 	}
-	if v := strings.TrimSpace(emitted.TaskID); v != "" {
+	if v := strings.TrimSpace(emitted.TaskID()); v != "" {
 		detail["emitted_task_id"] = v
 	}
 	if v := strings.TrimSpace(actor.EffectiveEntityID()); v != "" {

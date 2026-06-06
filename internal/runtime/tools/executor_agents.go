@@ -91,18 +91,23 @@ func (e *Executor) execAgentMessage(ctx context.Context, actor models.AgentConfi
 	if len(wirePayload) == 0 || string(wirePayload) == "null" {
 		wirePayload = []byte("{}")
 	}
-	evt := (events.Event{
-		ID:          uuid.NewString(),
-		Type:        events.EventType(in.EventType),
-		SourceAgent: in.SourceAgent,
-		TaskID:      in.TaskID,
-		Payload:     wirePayload,
-		CreatedAt:   time.Now(),
-	}).WithEntityID(targetEntity)
+	evt := events.NewChildEventWithLineage(
+		uuid.NewString(),
+		events.EventType(in.EventType),
+		in.SourceAgent,
+		in.TaskID,
+		wirePayload,
+		0,
+		events.EventLineage{
+			RunID: runtimecorrelation.RunIDFromContext(ctx),
+		},
+		events.EventEnvelope{EntityID: targetEntity},
+		time.Now(),
+	)
 	if err := e.bus.PublishDirect(ctx, evt, targets); err != nil {
 		return nil, err
 	}
-	return map[string]any{"event_id": evt.ID, "status": "sent", "targets": targets}, nil
+	return map[string]any{"event_id": evt.ID(), "status": "sent", "targets": targets}, nil
 }
 
 func authorizeAgentMessage(provider runtimeauthority.Provider, actor, target models.AgentConfig, manager Manager) error {

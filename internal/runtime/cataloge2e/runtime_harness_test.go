@@ -308,27 +308,23 @@ func (h *runtimeHarness) publishConcurrentAndWait(steps []catalogTriggerStep, ti
 		if err != nil {
 			h.t.Fatalf("marshal concurrent trigger payload: %v", err)
 		}
-		evt := events.Event{
-			ID:          uuid.NewString(),
-			Type:        events.EventType(strings.TrimSpace(step.Event)),
-			SourceAgent: "cataloge2e",
-			RunID:       catalogRuntimeRunID,
-			Payload:     raw,
-			CreatedAt:   time.Now().UTC(),
-		}
+		evt := events.NewProjectionEvent(uuid.NewString(),
+			events.EventType(strings.TrimSpace(step.Event)),
+			"cataloge2e", "", raw, 0, catalogRuntimeRunID, "", events.EventEnvelope{}, time.Now().UTC())
+
 		if entityID := triggerPayloadEntityID(payload); entityID != "" {
 			evt = evt.WithEntityID(entityID)
 		}
 		if preview, ok := h.previewHandlerOutcome(evt); ok {
 			h.mu.Lock()
-			h.previews[evt.ID] = preview
+			h.previews[evt.ID()] = preview
 			h.mu.Unlock()
 		}
 		h.mu.Lock()
-		h.publishedIDs[evt.ID] = struct{}{}
-		h.publishedOrder = append(h.publishedOrder, evt.ID)
+		h.publishedIDs[evt.ID()] = struct{}{}
+		h.publishedOrder = append(h.publishedOrder, evt.ID())
 		if entityID := triggerPayloadEntityID(payload); entityID != "" {
-			h.eventEntityIDs[evt.ID] = entityID
+			h.eventEntityIDs[evt.ID()] = entityID
 		}
 		h.mu.Unlock()
 		items = append(items, publishItem{step: step, evt: evt})
@@ -370,32 +366,28 @@ func (h *runtimeHarness) publishRuntimeEventResult(eventType, sourceAgent string
 	if err != nil {
 		return err
 	}
-	evt := events.Event{
-		ID:          uuid.NewString(),
-		Type:        events.EventType(strings.TrimSpace(eventType)),
-		SourceAgent: strings.TrimSpace(sourceAgent),
-		RunID:       catalogRuntimeRunID,
-		Payload:     raw,
-		CreatedAt:   time.Now().UTC(),
-	}
+	evt := events.NewProjectionEvent(uuid.NewString(),
+		events.EventType(strings.TrimSpace(eventType)),
+		strings.TrimSpace(sourceAgent), "", raw, 0, catalogRuntimeRunID, "", events.EventEnvelope{}, time.Now().UTC())
+
 	if entityID := triggerPayloadEntityID(payload); entityID != "" {
 		evt = evt.WithEntityID(entityID)
 	}
 	if recordOutcome {
 		if preview, ok := h.previewHandlerOutcome(evt); ok {
 			h.mu.Lock()
-			h.previews[evt.ID] = preview
+			h.previews[evt.ID()] = preview
 			h.mu.Unlock()
 		}
 	}
 	h.mu.Lock()
 	if excludeFromEmitted {
-		h.publishedIDs[evt.ID] = struct{}{}
+		h.publishedIDs[evt.ID()] = struct{}{}
 	}
 	if recordOutcome {
-		h.publishedOrder = append(h.publishedOrder, evt.ID)
+		h.publishedOrder = append(h.publishedOrder, evt.ID())
 		if entityID := triggerPayloadEntityID(payload); entityID != "" {
-			h.eventEntityIDs[evt.ID] = entityID
+			h.eventEntityIDs[evt.ID()] = entityID
 		}
 	}
 	h.mu.Unlock()
@@ -578,7 +570,7 @@ func (h *runtimeHarness) previewHandlerOutcome(evt events.Event) (runtimepipelin
 	if h == nil || h.bundle == nil {
 		return runtimepipeline.HandlerPreview{}, false
 	}
-	nodeID := firstMatchingNodeHandler(h.bundle, strings.TrimSpace(string(evt.Type)))
+	nodeID := firstMatchingNodeHandler(h.bundle, strings.TrimSpace(string(evt.Type())))
 	if nodeID == "" {
 		return runtimepipeline.HandlerPreview{}, false
 	}

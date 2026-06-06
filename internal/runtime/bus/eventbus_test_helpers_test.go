@@ -14,7 +14,7 @@ func requireBusEvent(t testing.TB, ch <-chan events.Event, context string) event
 		return evt
 	default:
 		t.Fatalf("%s: expected queued bus event", context)
-		return events.Event{}
+		return events.NewProjectionEvent("", events.EventType(""), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
 	}
 }
 
@@ -32,7 +32,7 @@ func requireBusEventTypes(t testing.TB, ch <-chan events.Event, context string, 
 	got := make(map[events.EventType]struct{}, len(want))
 	for len(got) < len(want) {
 		evt := requireBusEvent(t, ch, context)
-		got[evt.Type] = struct{}{}
+		got[evt.Type()] = struct{}{}
 	}
 	for _, eventType := range want {
 		if _, ok := got[eventType]; !ok {

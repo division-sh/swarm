@@ -34,13 +34,10 @@ func TestRuntimeIngressStatePersistsTypedTransitions(t *testing.T) {
 	}
 	pausedAt := state.UpdatedAt
 	pausedEventID := "11111111-1111-1111-1111-111111111111"
-	if err := pg.AppendEvent(ctx, events.Event{
-		ID:          pausedEventID,
-		Type:        events.EventType("platform.paused"),
-		SourceAgent: "runtime",
-		Payload:     []byte(`{}`),
-		CreatedAt:   pausedAt,
-	}); err != nil {
+	if err := pg.AppendEvent(ctx, events.NewProjectionEvent(pausedEventID,
+		events.EventType("platform.paused"),
+		"runtime", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, pausedAt),
+	); err != nil {
 		t.Fatalf("AppendEvent(paused): %v", err)
 	}
 	if ok, err := pg.SetRuntimeIngressTransitionEvent(ctx, runtimeingress.StatusPaused, pausedEventID, pausedAt); err != nil {
@@ -82,13 +79,10 @@ func TestRuntimeIngressStatePersistsTypedTransitions(t *testing.T) {
 		t.Fatalf("state after stale event update = %#v", state)
 	}
 	runningEventID := "33333333-3333-3333-3333-333333333333"
-	if err := pg.AppendEvent(ctx, events.Event{
-		ID:          runningEventID,
-		Type:        events.EventType("platform.resumed"),
-		SourceAgent: "runtime",
-		Payload:     []byte(`{}`),
-		CreatedAt:   runningAt,
-	}); err != nil {
+	if err := pg.AppendEvent(ctx, events.NewProjectionEvent(runningEventID,
+		events.EventType("platform.resumed"),
+		"runtime", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, runningAt),
+	); err != nil {
 		t.Fatalf("AppendEvent(running): %v", err)
 	}
 	if ok, err := pg.SetRuntimeIngressTransitionEvent(ctx, runtimeingress.StatusRunning, runningEventID, runningAt); err != nil {

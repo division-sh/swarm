@@ -355,7 +355,7 @@ func TestSQLiteRuntimeStore_ApplyServeAbandonActiveRunQuiescence_QuiescesRecover
 	if err != nil {
 		t.Fatalf("ListEventsMissingPipelineReceiptForRun: %v", err)
 	}
-	if len(replay) != 1 || replay[0].Event.ID != agentExhaustedFailed {
+	if len(replay) != 1 || replay[0].Event.ID() != agentExhaustedFailed {
 		t.Fatalf("missing pipeline replay events = %#v, want only exhausted failed delivery", replay)
 	}
 	var exhaustedStatus, exhaustedReason string

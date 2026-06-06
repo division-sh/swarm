@@ -49,7 +49,7 @@ func (s *recordingEventStore) eventTypes() []string {
 	defer s.mu.Unlock()
 	out := make([]string, 0, len(s.events))
 	for _, evt := range s.events {
-		out = append(out, string(evt.Type))
+		out = append(out, string(evt.Type()))
 	}
 	return out
 }
@@ -136,14 +136,11 @@ func deliveryRoutesContain(routes []events.DeliveryRoute, want events.DeliveryRo
 type interceptingTestHandler struct{}
 
 func (interceptingTestHandler) Intercept(_ context.Context, evt events.Event) (bool, []events.Event, error) {
-	if evt.Type != events.EventType("custom.emitted") {
+	if evt.Type() != events.EventType("custom.emitted") {
 		return true, nil, nil
 	}
-	return false, []events.Event{(events.Event{
-		Type:        events.EventType("custom.followup"),
-		SourceAgent: "runtime",
-		CreatedAt:   time.Now().UTC(),
-	}).WithEntityID(evt.EntityID())}, nil
+	return false, []events.Event{(events.NewProjectionEvent("", events.EventType("custom.followup"),
+		"runtime", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID(evt.EntityID())}, nil
 }
 
 func TestEngineDispatcherCollectsEmitIntentsWithChainDepth(t *testing.T) {
@@ -156,7 +153,7 @@ func TestEngineDispatcherCollectsEmitIntentsWithChainDepth(t *testing.T) {
 	ctx := runtimepipeline.WithPipelineEmitCollectors(context.Background(), &eventCollector, &intentCollector)
 
 	intent := runtimeengine.EmitIntent{
-		Event:      (events.Event{Type: events.EventType("custom.emitted")}).WithEntityID("ent-1"),
+		Event:      (events.NewProjectionEvent("", events.EventType("custom.emitted"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID("ent-1"),
 		ChainDepth: 3,
 	}
 	if err := eb.EngineDispatcher().DispatchPostCommit(ctx, []runtimeengine.EmitIntent{intent}); err != nil {
@@ -200,12 +197,9 @@ func TestEngineDispatcherQueuesWhenPipelineSQLTxActive(t *testing.T) {
 	defer eb.Unsubscribe("agent-a")
 
 	intent := runtimeengine.EmitIntent{
-		Event: events.Event{
-			ID:        "evt-post-commit-dispatch",
-			Type:      events.EventType("custom.emitted"),
-			Payload:   []byte(`{"entity_id":"ent-1"}`),
-			CreatedAt: time.Now().UTC(),
-		}.WithEntityID("ent-1"),
+		Event: events.NewProjectionEvent("evt-post-commit-dispatch",
+			events.EventType("custom.emitted"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()).
+			WithEntityID("ent-1"),
 	}
 	postCommitActions := make([]func(), 0, 1)
 	txctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
@@ -230,8 +224,8 @@ func TestEngineDispatcherQueuesWhenPipelineSQLTxActive(t *testing.T) {
 	}
 	runtimepipeline.FlushPipelinePostCommitActions(postCommitActions)
 	got := requireBusEvent(t, ch, "post-commit outbox dispatch")
-	if got.ID != intent.Event.ID {
-		t.Fatalf("delivered event id = %s, want %s", got.ID, intent.Event.ID)
+	if got.ID() != intent.Event.ID() {
+		t.Fatalf("delivered event id = %s, want %s", got.ID(), intent.Event.ID())
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)
@@ -265,13 +259,10 @@ func TestEngineDispatcherQueuesImmutableIntentSnapshotWhenPipelineSQLTxActive(t 
 	targetSet := []events.RouteIdentity{{FlowInstance: "flow-original", EntityID: "entity-original"}}
 	recipients := []string{"agent-original"}
 	intents := []runtimeengine.EmitIntent{{
-		Event: events.Event{
-			ID:        "evt-queued-snapshot",
-			Type:      events.EventType("custom.snapshot"),
-			Payload:   payload,
-			Envelope:  events.EventEnvelope{TargetSet: targetSet},
-			CreatedAt: time.Now().UTC(),
-		},
+		Event: events.NewProjectionEvent("evt-queued-snapshot",
+			events.EventType("custom.snapshot"), "", "", payload, 0, "", "", events.EventEnvelope{TargetSet: targetSet},
+			time.Now().UTC()),
+
 		Recipients: recipients,
 	}}
 	postCommitActions := make([]func(), 0, 1)
@@ -289,8 +280,18 @@ func TestEngineDispatcherQueuesImmutableIntentSnapshotWhenPipelineSQLTxActive(t 
 	copy(payload, []byte(`{"value":"mutated!"}`))
 	targetSet[0] = events.RouteIdentity{FlowInstance: "flow-mutated", EntityID: "entity-mutated"}
 	recipients[0] = "agent-mutated"
-	intents[0].Event.Payload = []byte(`{"value":"reassigned"}`)
-	intents[0].Event.Envelope.TargetSet = []events.RouteIdentity{{FlowInstance: "flow-reassigned", EntityID: "entity-reassigned"}}
+	intents[0].Event = events.NewProjectionEvent(
+		intents[0].Event.ID(),
+		intents[0].Event.Type(),
+		intents[0].Event.SourceAgent(),
+		intents[0].Event.TaskID(),
+		[]byte(`{"value":"reassigned"}`),
+		intents[0].Event.ChainDepth(),
+		intents[0].Event.RunID(),
+		intents[0].Event.ParentEventID(),
+		events.EventEnvelope{TargetSet: []events.RouteIdentity{{FlowInstance: "flow-reassigned", EntityID: "entity-reassigned"}}},
+		intents[0].Event.CreatedAt(),
+	)
 	intents[0].Recipients = []string{"agent-reassigned"}
 
 	if err := tx.Commit(); err != nil {
@@ -298,8 +299,8 @@ func TestEngineDispatcherQueuesImmutableIntentSnapshotWhenPipelineSQLTxActive(t 
 	}
 	runtimepipeline.FlushPipelinePostCommitActions(postCommitActions)
 	got := requireBusEvent(t, originalCh, "immutable intent snapshot delivery")
-	if string(got.Payload) != `{"value":"original"}` {
-		t.Fatalf("delivered payload = %s, want original snapshot", string(got.Payload))
+	if string(got.Payload()) != `{"value":"original"}` {
+		t.Fatalf("delivered payload = %s, want original snapshot", string(got.Payload()))
 	}
 	routes := got.TargetRoutes()
 	if len(routes) != 1 || routes[0].FlowInstance != "flow-original" || routes[0].EntityID != "entity-original" {
@@ -331,11 +332,9 @@ func TestEngineDispatcherFailsClosedWithSQLTxAndNoPostCommitQueue(t *testing.T) 
 	}
 	ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
 	err = eb.EngineDispatcher().DispatchPostCommit(ctx, []runtimeengine.EmitIntent{{
-		Event: events.Event{
-			ID:        "evt-no-post-commit-queue",
-			Type:      events.EventType("custom.emitted"),
-			CreatedAt: time.Now().UTC(),
-		}.WithEntityID("ent-1"),
+		Event: events.NewProjectionEvent("evt-no-post-commit-queue",
+			events.EventType("custom.emitted"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()).
+			WithEntityID("ent-1"),
 	}})
 	if err == nil {
 		_ = tx.Rollback()
@@ -379,12 +378,9 @@ func TestEngineOutboxPersistsEventsAndDeliveriesInTransaction(t *testing.T) {
 	}
 	ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
 	intent := runtimeengine.EmitIntent{
-		Event: events.Event{
-			ID:        "evt-1",
-			Type:      events.EventType("custom.emitted"),
-			Payload:   []byte(`{"entity_id":"` + entityID + `"}`),
-			CreatedAt: time.Now().UTC(),
-		}.WithEntityID(entityID),
+		Event: events.NewProjectionEvent("evt-1",
+			events.EventType("custom.emitted"), "", "", []byte(`{"entity_id":"`+entityID+`"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()).
+			WithEntityID(entityID),
 		Recipients: []string{"reviewer"},
 	}
 	if err := eb.EngineOutbox().WriteOutbox(ctx, []runtimeengine.EmitIntent{intent}); err != nil {
@@ -456,12 +452,8 @@ func TestEngineOutboxSubscribedIntentConsumesCanonicalMaterializedRoutePlan(t *t
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	intent := runtimeengine.EmitIntent{
-		Event: events.Event{
-			ID:        "evt-outbox-materialized-route",
-			Type:      events.EventType("review/inst-1/task.started"),
-			Payload:   []byte(`{}`),
-			CreatedAt: time.Now().UTC(),
-		},
+		Event: events.NewProjectionEvent("evt-outbox-materialized-route",
+			events.EventType("review/inst-1/task.started"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 	}
 	ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
 	if err := eb.EngineOutbox().WriteOutbox(ctx, []runtimeengine.EmitIntent{intent}); err != nil {
@@ -473,7 +465,7 @@ func TestEngineOutboxSubscribedIntentConsumesCanonicalMaterializedRoutePlan(t *t
 	if !guardSawMaterializedRoute {
 		t.Fatal("recipient plan guard did not see materialized route")
 	}
-	if got := store.deliveryRoutes(intent.Event.ID); !deliveryRoutesContain(got, want) {
+	if got := store.deliveryRoutes(intent.Event.ID()); !deliveryRoutesContain(got, want) {
 		t.Fatalf("persisted delivery routes = %#v, want %#v", got, want)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -511,12 +503,9 @@ func TestEngineOutboxAndDispatcher_UseCanonicalDirectRecipientManifest(t *testin
 	otherCh := eb.Subscribe("reviewer-ent-2")
 
 	intent := runtimeengine.EmitIntent{
-		Event: events.Event{
-			ID:        "evt-direct-intent",
-			Type:      events.EventType("custom.direct"),
-			Payload:   []byte(`{"entity_id":"ent-1"}`),
-			CreatedAt: time.Now().UTC(),
-		}.WithEntityID("ent-1"),
+		Event: events.NewProjectionEvent("evt-direct-intent",
+			events.EventType("custom.direct"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()).
+			WithEntityID("ent-1"),
 		Recipients: []string{"control-plane", "reviewer-ent-1", "reviewer-ent-2", "missing-agent"},
 	}
 	ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
@@ -527,7 +516,7 @@ func TestEngineOutboxAndDispatcher_UseCanonicalDirectRecipientManifest(t *testin
 		t.Fatalf("Commit: %v", err)
 	}
 
-	gotPersisted, err := store.ListEventDeliveryRecipients(context.Background(), intent.Event.ID)
+	gotPersisted, err := store.ListEventDeliveryRecipients(context.Background(), intent.Event.ID())
 	if err != nil {
 		t.Fatalf("ListEventDeliveryRecipients: %v", err)
 	}
@@ -578,12 +567,9 @@ func TestEngineOutboxAndDispatcher_DeliverInternalSubscribersOutsidePersistedMan
 	agentCh := eb.Subscribe("agent-a", events.EventType("custom.emitted"))
 
 	intent := runtimeengine.EmitIntent{
-		Event: events.Event{
-			ID:        "evt-internal-live",
-			Type:      events.EventType("custom.emitted"),
-			Payload:   []byte(`{"entity_id":"ent-1"}`),
-			CreatedAt: time.Now().UTC(),
-		}.WithEntityID("ent-1"),
+		Event: events.NewProjectionEvent("evt-internal-live",
+			events.EventType("custom.emitted"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()).
+			WithEntityID("ent-1"),
 	}
 	ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
 	if err := eb.EngineOutbox().WriteOutbox(ctx, []runtimeengine.EmitIntent{intent}); err != nil {
@@ -593,7 +579,7 @@ func TestEngineOutboxAndDispatcher_DeliverInternalSubscribersOutsidePersistedMan
 		t.Fatalf("Commit: %v", err)
 	}
 
-	gotPersisted, err := store.ListEventDeliveryRecipients(context.Background(), intent.Event.ID)
+	gotPersisted, err := store.ListEventDeliveryRecipients(context.Background(), intent.Event.ID())
 	if err != nil {
 		t.Fatalf("ListEventDeliveryRecipients: %v", err)
 	}
@@ -627,12 +613,9 @@ func TestEngineDispatcherRunsInterceptorsForPersistedEmitIntents(t *testing.T) {
 	eb.SetInterceptors(interceptingTestHandler{})
 
 	intent := runtimeengine.EmitIntent{
-		Event: events.Event{
-			ID:        "evt-1",
-			Type:      events.EventType("custom.emitted"),
-			Payload:   []byte(`{"entity_id":"ent-1"}`),
-			CreatedAt: time.Now().UTC(),
-		}.WithEntityID("ent-1"),
+		Event: events.NewProjectionEvent("evt-1",
+			events.EventType("custom.emitted"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()).
+			WithEntityID("ent-1"),
 	}
 	if err := eb.EngineDispatcher().DispatchPostCommit(context.Background(), []runtimeengine.EmitIntent{intent}); err != nil {
 		t.Fatalf("DispatchPostCommit: %v", err)
@@ -650,12 +633,9 @@ func TestEngineDispatcher_FailsClosedWithoutAuthoritativeRecipientManifestOnInMe
 	}
 
 	intent := runtimeengine.EmitIntent{
-		Event: events.Event{
-			ID:        "evt-missing-manifest",
-			Type:      events.EventType("custom.emitted"),
-			Payload:   []byte(`{"entity_id":"ent-1"}`),
-			CreatedAt: time.Now().UTC(),
-		}.WithEntityID("ent-1"),
+		Event: events.NewProjectionEvent("evt-missing-manifest",
+			events.EventType("custom.emitted"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()).
+			WithEntityID("ent-1"),
 	}
 
 	err = eb.EngineDispatcher().DispatchPostCommit(context.Background(), []runtimeengine.EmitIntent{intent})
@@ -675,12 +655,9 @@ func TestEngineDispatcher_DirectIntentUsesExplicitRecipientsWhenManifestWasNotPe
 	recipientCh := eb.Subscribe("agent-a")
 
 	intent := runtimeengine.EmitIntent{
-		Event: events.Event{
-			ID:        "evt-direct-no-tx",
-			Type:      events.EventType("custom.emitted"),
-			Payload:   []byte(`{"entity_id":"ent-1"}`),
-			CreatedAt: time.Now().UTC(),
-		}.WithEntityID("ent-1"),
+		Event: events.NewProjectionEvent("evt-direct-no-tx",
+			events.EventType("custom.emitted"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()).
+			WithEntityID("ent-1"),
 		Recipients: []string{"agent-a"},
 	}
 
@@ -720,12 +697,9 @@ func TestEngineDispatcher_TransactionalDirectIntentHonorsEmptyPersistedManifest(
 	filteredCh := eb.Subscribe("reviewer-ent-2")
 
 	intent := runtimeengine.EmitIntent{
-		Event: events.Event{
-			ID:        "evt-empty-direct-manifest",
-			Type:      events.EventType("custom.direct"),
-			Payload:   []byte(`{"entity_id":"ent-1"}`),
-			CreatedAt: time.Now().UTC(),
-		}.WithEntityID("ent-1"),
+		Event: events.NewProjectionEvent("evt-empty-direct-manifest",
+			events.EventType("custom.direct"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()).
+			WithEntityID("ent-1"),
 		Recipients: []string{"reviewer-ent-2"},
 	}
 	ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
@@ -736,7 +710,7 @@ func TestEngineDispatcher_TransactionalDirectIntentHonorsEmptyPersistedManifest(
 		t.Fatalf("Commit: %v", err)
 	}
 
-	gotPersisted, err := store.ListEventDeliveryRecipients(context.Background(), intent.Event.ID)
+	gotPersisted, err := store.ListEventDeliveryRecipients(context.Background(), intent.Event.ID())
 	if err != nil {
 		t.Fatalf("ListEventDeliveryRecipients: %v", err)
 	}

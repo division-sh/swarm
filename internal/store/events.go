@@ -189,31 +189,42 @@ func (s *PostgresStore) PersistEventWithDeliveryRouteSetAndScope(
 }
 
 func (s *PostgresStore) enrichEventCorrelation(ctx context.Context, caps StoreSchemaCapabilities, q rowQueryer, evt events.Event) events.Event {
-	if strings.TrimSpace(evt.RunID) == "" {
+	runID := strings.TrimSpace(evt.RunID())
+	if runID == "" {
 		if lineage, ok := runtimecorrelation.RuntimeLineageFromContext(ctx); ok {
-			evt.RunID = strings.TrimSpace(lineage.RunID)
+			runID = strings.TrimSpace(lineage.RunID)
 		}
 	}
-	parentID := strings.TrimSpace(evt.ParentEventID)
+	parentID := strings.TrimSpace(evt.ParentEventID())
 	if parentID == "" {
-		if lineageParentID := runtimecorrelation.RuntimeLineageParentForEvent(ctx, evt.ID); lineageParentID != "" {
+		if lineageParentID := runtimecorrelation.RuntimeLineageParentForEvent(ctx, evt.ID()); lineageParentID != "" {
 			parentID = lineageParentID
-			evt.ParentEventID = lineageParentID
 		}
 	}
 	if parentID == "" {
 		if inbound, ok := runtimecorrelation.InboundEventFromContext(ctx); ok {
-			if inboundID := strings.TrimSpace(inbound.ID); inboundID != "" && inboundID != strings.TrimSpace(evt.ID) {
+			if inboundID := strings.TrimSpace(inbound.ID()); inboundID != "" && inboundID != strings.TrimSpace(evt.ID()) {
 				parentID = inboundID
-				evt.ParentEventID = inboundID
 			}
 		}
 	}
-	if strings.TrimSpace(evt.RunID) == "" && parentID != "" {
-		if runID := lookupEventRunID(ctx, caps, q, parentID); runID != "" {
-			evt.RunID = runID
+	if runID == "" && parentID != "" {
+		if foundRunID := lookupEventRunID(ctx, caps, q, parentID); foundRunID != "" {
+			runID = foundRunID
 		}
 	}
+	evt = events.NewProjectionEvent(
+		evt.ID(),
+		evt.Type(),
+		evt.SourceAgent(),
+		evt.TaskID(),
+		evt.Payload(),
+		evt.ChainDepth(),
+		runID,
+		parentID,
+		evt.NormalizedEnvelope(),
+		evt.CreatedAt(),
+	)
 	_, evt = runtimecorrelation.CorrelateEvent(ctx, evt)
 	return evt
 }
@@ -718,7 +729,7 @@ func (s *PostgresStore) persistEventWithDeliveriesSpec(ctx context.Context, caps
 		if err := s.appendEventSpec(ctx, caps, tx, evt); err != nil {
 			return err
 		}
-		if err := s.insertEventDeliveriesSpec(ctx, caps, tx, evt.ID, agentIDs); err != nil {
+		if err := s.insertEventDeliveriesSpec(ctx, caps, tx, evt.ID(), agentIDs); err != nil {
 			return err
 		}
 		if err := tx.Commit(); err != nil {
@@ -744,10 +755,10 @@ func (s *PostgresStore) persistEventWithDeliveriesAndScopeSpec(
 		if err := s.appendEventSpec(ctx, caps, tx, evt); err != nil {
 			return err
 		}
-		if err := s.insertEventDeliveriesSpec(ctx, caps, tx, evt.ID, agentIDs); err != nil {
+		if err := s.insertEventDeliveriesSpec(ctx, caps, tx, evt.ID(), agentIDs); err != nil {
 			return err
 		}
-		if err := s.upsertCommittedReplayScopeSpec(ctx, caps, tx, evt.ID, scope); err != nil {
+		if err := s.upsertCommittedReplayScopeSpec(ctx, caps, tx, evt.ID(), scope); err != nil {
 			return err
 		}
 		if err := tx.Commit(); err != nil {
@@ -774,10 +785,10 @@ func (s *PostgresStore) persistEventWithDeliveryRoutesAndScopeSpec(
 		if err := s.appendEventSpec(ctx, caps, tx, evt); err != nil {
 			return err
 		}
-		if err := s.insertEventDeliveriesWithTargetsSpec(ctx, caps, tx, evt.ID, agentIDs, deliveryTargets); err != nil {
+		if err := s.insertEventDeliveriesWithTargetsSpec(ctx, caps, tx, evt.ID(), agentIDs, deliveryTargets); err != nil {
 			return err
 		}
-		if err := s.upsertCommittedReplayScopeSpec(ctx, caps, tx, evt.ID, scope); err != nil {
+		if err := s.upsertCommittedReplayScopeSpec(ctx, caps, tx, evt.ID(), scope); err != nil {
 			return err
 		}
 		if err := tx.Commit(); err != nil {
@@ -803,10 +814,10 @@ func (s *PostgresStore) persistEventWithDeliveryRouteSetAndScopeSpec(
 		if err := s.appendEventSpec(ctx, caps, tx, evt); err != nil {
 			return err
 		}
-		if err := s.insertEventDeliveryRoutesSpec(ctx, caps, tx, evt.ID, deliveryRoutes); err != nil {
+		if err := s.insertEventDeliveryRoutesSpec(ctx, caps, tx, evt.ID(), deliveryRoutes); err != nil {
 			return err
 		}
-		if err := s.upsertCommittedReplayScopeSpec(ctx, caps, tx, evt.ID, scope); err != nil {
+		if err := s.upsertCommittedReplayScopeSpec(ctx, caps, tx, evt.ID(), scope); err != nil {
 			return err
 		}
 		if err := tx.Commit(); err != nil {
@@ -1187,31 +1198,44 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptSpec(ctx context.Context
 
 	out := make([]events.PersistedReplayEvent, 0, limit)
 	for rows.Next() {
-		var evt events.Event
+		var eventID, runID, eventName, producedBy, sourceEventID string
+		var payload json.RawMessage
+		var createdAt time.Time
 		var entityID, flowInstance, scope string
 		var sourceRoute, targetRoute, targetSet json.RawMessage
 		if err := rows.Scan(
-			&evt.ID,
-			&evt.RunID,
-			&evt.Type,
-			&evt.SourceAgent,
+			&eventID,
+			&runID,
+			&eventName,
+			&producedBy,
 			&entityID,
 			&flowInstance,
 			&scope,
-			&evt.Payload,
-			&evt.CreatedAt,
-			&evt.ParentEventID,
+			&payload,
+			&createdAt,
+			&sourceEventID,
 			&sourceRoute,
 			&targetRoute,
 			&targetSet,
 		); err != nil {
 			return nil, fmt.Errorf("scan missing pipeline receipt event: %w", err)
 		}
-		evt = evt.WithEnvelope(eventEnvelopeFromStorage(entityID, flowInstance, scope, sourceRoute, targetRoute, targetSet))
+		evt := events.NewProjectionEvent(
+			eventID,
+			events.EventType(eventName),
+			producedBy,
+			"",
+			payload,
+			0,
+			runID,
+			sourceEventID,
+			eventEnvelopeFromStorage(entityID, flowInstance, scope, sourceRoute, targetRoute, targetSet),
+			createdAt,
+		)
 		record := events.PersistedReplayEvent{Event: evt}
 		if !caps.Events.LogRunID {
 			record.ReplayError = "missing run_id schema capability"
-		} else if strings.TrimSpace(evt.RunID) == "" {
+		} else if strings.TrimSpace(evt.RunID()) == "" {
 			record.ReplayError = "missing canonical run_id"
 		}
 		out = append(out, record)
@@ -1256,29 +1280,42 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptForRunSpec(ctx context.C
 
 	out := make([]events.PersistedReplayEvent, 0, limit)
 	for rows.Next() {
-		var evt events.Event
+		var eventID, eventRunID, eventName, producedBy, sourceEventID string
+		var payload json.RawMessage
+		var createdAt time.Time
 		var entityID, flowInstance, scope string
 		var sourceRoute, targetRoute, targetSet json.RawMessage
 		if err := rows.Scan(
-			&evt.ID,
-			&evt.RunID,
-			&evt.Type,
-			&evt.SourceAgent,
+			&eventID,
+			&eventRunID,
+			&eventName,
+			&producedBy,
 			&entityID,
 			&flowInstance,
 			&scope,
-			&evt.Payload,
-			&evt.CreatedAt,
-			&evt.ParentEventID,
+			&payload,
+			&createdAt,
+			&sourceEventID,
 			&sourceRoute,
 			&targetRoute,
 			&targetSet,
 		); err != nil {
 			return nil, fmt.Errorf("scan run missing pipeline receipt event: %w", err)
 		}
-		evt = evt.WithEnvelope(eventEnvelopeFromStorage(entityID, flowInstance, scope, sourceRoute, targetRoute, targetSet))
+		evt := events.NewProjectionEvent(
+			eventID,
+			events.EventType(eventName),
+			producedBy,
+			"",
+			payload,
+			0,
+			eventRunID,
+			sourceEventID,
+			eventEnvelopeFromStorage(entityID, flowInstance, scope, sourceRoute, targetRoute, targetSet),
+			createdAt,
+		)
 		record := events.PersistedReplayEvent{Event: evt}
-		if strings.TrimSpace(evt.RunID) == "" {
+		if strings.TrimSpace(evt.RunID()) == "" {
 			record.ReplayError = "missing canonical run_id"
 		}
 		out = append(out, record)
@@ -1409,7 +1446,7 @@ func (s *PostgresStore) ConvergeStandaloneRuntimePlatformRun(ctx context.Context
 	if err != nil {
 		return err
 	}
-	return s.convergeStandaloneRuntimePlatformRunByEventID(ctx, s.DB, caps, strings.TrimSpace(evt.ID))
+	return s.convergeStandaloneRuntimePlatformRunByEventID(ctx, s.DB, caps, strings.TrimSpace(evt.ID()))
 }
 
 func runLifecycleOptions(caps StoreSchemaCapabilities) storerunlifecycle.EnsureActiveOptions {
@@ -1571,12 +1608,12 @@ func runIDOrEventID(runID, eventID string) string {
 }
 
 func eventStorageEnvelope(evt events.Event) (id string, runID string, eventName string, entityID string, flowInstance string, scope string, payload []byte, chainDepth int, producedBy string, producedByType string, sourceEventID string, createdAt time.Time, err error) {
-	id = strings.TrimSpace(evt.ID)
+	id = strings.TrimSpace(evt.ID())
 	if id == "" {
 		id = uuid.NewString()
 	}
-	runID = runIDOrEventID(evt.RunID, id)
-	eventName = strings.TrimSpace(string(evt.Type))
+	runID = runIDOrEventID(evt.RunID(), id)
+	eventName = strings.TrimSpace(string(evt.Type()))
 	payload = eventPayloadForStorage(evt)
 	envelope := evt.NormalizedEnvelope()
 	entityID, err = validateOptionalEntityUUID(envelope.EntityID)
@@ -1588,17 +1625,17 @@ func eventStorageEnvelope(evt events.Event) (id string, runID string, eventName 
 	if scope == "" {
 		scope = string(events.EventScopeGlobal)
 	}
-	chainDepth = evt.ChainDepth
+	chainDepth = evt.ChainDepth()
 	if chainDepth < 0 {
 		chainDepth = 0
 	}
-	producedBy = strings.TrimSpace(evt.SourceAgent)
+	producedBy = strings.TrimSpace(evt.SourceAgent())
 	producedByType = "agent"
 	if producedBy == "" || producedBy == "runtime" {
 		producedByType = "platform"
 	}
-	sourceEventID = sanitizeOptionalUUID(evt.ParentEventID)
-	createdAt = evt.CreatedAt
+	sourceEventID = sanitizeOptionalUUID(evt.ParentEventID())
+	createdAt = evt.CreatedAt()
 	if createdAt.IsZero() {
 		createdAt = time.Now().UTC()
 	}
@@ -1606,17 +1643,18 @@ func eventStorageEnvelope(evt events.Event) (id string, runID string, eventName 
 }
 
 func eventPayloadForStorage(evt events.Event) []byte {
-	taskID := sanitizeOptionalUUID(evt.TaskID)
+	taskID := sanitizeOptionalUUID(evt.TaskID())
+	eventPayload := evt.Payload()
 	if taskID == "" {
-		if len(evt.Payload) == 0 {
+		if len(eventPayload) == 0 {
 			return []byte("{}")
 		}
-		return evt.Payload
+		return eventPayload
 	}
 	payload := map[string]any{}
-	if len(evt.Payload) > 0 {
-		if err := json.Unmarshal(evt.Payload, &payload); err != nil || payload == nil {
-			return evt.Payload
+	if len(eventPayload) > 0 {
+		if err := json.Unmarshal(eventPayload, &payload); err != nil || payload == nil {
+			return eventPayload
 		}
 	}
 	if _, exists := payload["task_id"]; !exists {
@@ -1624,7 +1662,7 @@ func eventPayloadForStorage(evt events.Event) []byte {
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
-		return evt.Payload
+		return eventPayload
 	}
 	return encoded
 }

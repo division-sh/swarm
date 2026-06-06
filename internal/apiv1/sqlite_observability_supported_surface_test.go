@@ -109,14 +109,10 @@ func newSQLiteObservabilitySurfaceFixture(t *testing.T, ctx context.Context) sql
 	now := time.Unix(1700002000, 0).UTC()
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
-	if err := sqliteStore.PersistEventWithDeliveries(ctx, events.Event{
-		ID:          eventID,
-		RunID:       runID,
-		Type:        events.EventType("trace.visible"),
-		SourceAgent: "agent-1",
-		Payload:     json.RawMessage(`{"trace":true}`),
-		CreatedAt:   now,
-	}, []string{"agent-1"}); err != nil {
+	if err := sqliteStore.PersistEventWithDeliveries(ctx, events.NewProjectionEvent(eventID,
+
+		events.EventType("trace.visible"),
+		"agent-1", "", json.RawMessage(`{"trace":true}`), 0, runID, "", events.EventEnvelope{}, now), []string{"agent-1"}); err != nil {
 		t.Fatalf("PersistEventWithDeliveries: %v", err)
 	}
 	if err := sqliteStore.MarkEventDeliveryInProgress(ctx, eventID, "agent-1", "session-1"); err != nil {

@@ -16,10 +16,11 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
+	"time"
 )
 
 func testCreateFlowInstanceContext(trigger workflowTriggerContext) values.Context {
-	payload := parsePayloadMap(trigger.Event.Payload)
+	payload := parsePayloadMap(trigger.Event.Payload())
 	entity := map[string]any{
 		"entity_id": workflowEventEntityID(trigger.Event),
 	}
@@ -34,10 +35,7 @@ func TestCreateFlowInstanceResolvesInstanceIDFromPayloadPath(t *testing.T) {
 			return nil
 		},
 	}
-	trigger := (events.Event{
-		Type:    events.EventType("custom.triggered"),
-		Payload: []byte(`{"entity_id":"ent-1","desired_instance_id":"inst-42","name":"alpha"}`),
-	}).WithEntityID("ent-1")
+	trigger := (events.NewProjectionEvent("", events.EventType("custom.triggered"), "", "", []byte(`{"entity_id":"ent-1","desired_instance_id":"inst-42","name":"alpha"}`), 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID("ent-1")
 	triggerCtx := workflowTriggerContext{Event: trigger}
 
 	ok := pc.createFlowInstance(context.Background(), triggerCtx, handlerExecutionPlan{
@@ -72,10 +70,7 @@ func TestCreateFlowInstanceResolvesConfigFromBindings(t *testing.T) {
 			return nil
 		},
 	}
-	trigger := (events.Event{
-		Type:    events.EventType("spawn.requested"),
-		Payload: []byte(`{"entity_id":"ent-1","instance_id":"inst-42","name":"alpha","priority":1}`),
-	}).WithEntityID("ent-1")
+	trigger := (events.NewProjectionEvent("", events.EventType("spawn.requested"), "", "", []byte(`{"entity_id":"ent-1","instance_id":"inst-42","name":"alpha","priority":1}`), 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID("ent-1")
 	triggerCtx := workflowTriggerContext{Event: trigger}
 
 	err := pc.createFlowInstance(context.Background(), triggerCtx, handlerExecutionPlan{
@@ -111,10 +106,7 @@ func TestCreateFlowInstancePreservesNullConfigFromValues(t *testing.T) {
 			return nil
 		},
 	}
-	trigger := (events.Event{
-		Type:    events.EventType("spawn.requested"),
-		Payload: []byte(`{"entity_id":"ent-1","instance_id":"inst-42","optional_setting":null}`),
-	}).WithEntityID("ent-1")
+	trigger := (events.NewProjectionEvent("", events.EventType("spawn.requested"), "", "", []byte(`{"entity_id":"ent-1","instance_id":"inst-42","optional_setting":null}`), 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID("ent-1")
 	triggerCtx := workflowTriggerContext{Event: trigger}
 
 	err := pc.createFlowInstance(context.Background(), triggerCtx, handlerExecutionPlan{
@@ -150,12 +142,8 @@ func TestCreateFlowInstanceResolvesConfigFromHandlerEventContext(t *testing.T) {
 			return nil
 		},
 	}
-	trigger := (events.Event{
-		ID:            "evt-123",
-		Type:          events.EventType("spawn.requested"),
-		ParentEventID: "source-evt-1",
-		Payload:       []byte(`{"entity_id":"ent-1","instance_id":"inst-42","name":"alpha"}`),
-	}).WithEnvelope(events.EventEnvelope{
+	trigger := (events.NewProjectionEvent("evt-123",
+		events.EventType("spawn.requested"), "", "", []byte(`{"entity_id":"ent-1","instance_id":"inst-42","name":"alpha"}`), 0, "", "source-evt-1", events.EventEnvelope{}, time.Time{})).WithEnvelope(events.EventEnvelope{
 		EntityID: "ent-1",
 		Source: events.RouteIdentity{
 			FlowID:       "parent-flow",
@@ -204,11 +192,8 @@ func TestCreateFlowInstanceRejectsUnknownEventConfigRef(t *testing.T) {
 			return nil
 		},
 	}
-	trigger := (events.Event{
-		ID:      "evt-123",
-		Type:    events.EventType("spawn.requested"),
-		Payload: []byte(`{"entity_id":"ent-1","instance_id":"inst-42"}`),
-	}).WithEntityID("ent-1")
+	trigger := (events.NewProjectionEvent("evt-123",
+		events.EventType("spawn.requested"), "", "", []byte(`{"entity_id":"ent-1","instance_id":"inst-42"}`), 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID("ent-1")
 	triggerCtx := workflowTriggerContext{Event: trigger}
 
 	err := pc.createFlowInstance(context.Background(), triggerCtx, handlerExecutionPlan{
@@ -239,11 +224,8 @@ func TestCreateFlowInstanceRejectsUnsupportedConfigRefRoot(t *testing.T) {
 			return nil
 		},
 	}
-	trigger := (events.Event{
-		ID:      "evt-123",
-		Type:    events.EventType("spawn.requested"),
-		Payload: []byte(`{"entity_id":"ent-1","instance_id":"inst-42"}`),
-	}).WithEntityID("ent-1")
+	trigger := (events.NewProjectionEvent("evt-123",
+		events.EventType("spawn.requested"), "", "", []byte(`{"entity_id":"ent-1","instance_id":"inst-42"}`), 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID("ent-1")
 	triggerCtx := workflowTriggerContext{Event: trigger}
 
 	err := pc.createFlowInstance(context.Background(), triggerCtx, handlerExecutionPlan{
@@ -274,11 +256,8 @@ func TestCreateFlowInstanceDoesNotResolveInstanceIDFromEventRef(t *testing.T) {
 			return nil
 		},
 	}
-	trigger := (events.Event{
-		ID:      "evt-123",
-		Type:    events.EventType("spawn.requested"),
-		Payload: []byte(`{"entity_id":"ent-1","name":"alpha"}`),
-	}).WithEntityID("ent-1")
+	trigger := (events.NewProjectionEvent("evt-123",
+		events.EventType("spawn.requested"), "", "", []byte(`{"entity_id":"ent-1","name":"alpha"}`), 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID("ent-1")
 	triggerCtx := workflowTriggerContext{Event: trigger}
 
 	err := pc.createFlowInstance(context.Background(), triggerCtx, handlerExecutionPlan{
@@ -303,10 +282,7 @@ func TestCreateFlowInstanceRejectsMissingRequiredSiblingFields(t *testing.T) {
 			return nil
 		},
 	}
-	trigger := (events.Event{
-		Type:    events.EventType("spawn.requested"),
-		Payload: []byte(`{"entity_id":"ent-1","instance_id":"inst-42","name":"alpha"}`),
-	}).WithEntityID("ent-1")
+	trigger := (events.NewProjectionEvent("", events.EventType("spawn.requested"), "", "", []byte(`{"entity_id":"ent-1","instance_id":"inst-42","name":"alpha"}`), 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID("ent-1")
 	triggerCtx := workflowTriggerContext{Event: trigger}
 
 	err := pc.createFlowInstance(context.Background(), triggerCtx, handlerExecutionPlan{
@@ -324,10 +300,7 @@ func TestCreateFlowInstanceRejectsGeneratedFallbackWithoutInstanceIDFrom(t *test
 			return nil
 		},
 	}
-	trigger := (events.Event{
-		Type:    events.EventType("spawn.requested"),
-		Payload: []byte(`{"entity_id":"ent-1","instance_id":"inst-42","name":"alpha"}`),
-	}).WithEntityID("ent-1")
+	trigger := (events.NewProjectionEvent("", events.EventType("spawn.requested"), "", "", []byte(`{"entity_id":"ent-1","instance_id":"inst-42","name":"alpha"}`), 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID("ent-1")
 	triggerCtx := workflowTriggerContext{Event: trigger}
 
 	err := pc.createFlowInstance(context.Background(), triggerCtx, handlerExecutionPlan{
@@ -350,10 +323,7 @@ func TestCreateFlowInstanceRejectsEmptyConfigFromBindings(t *testing.T) {
 			return nil
 		},
 	}
-	trigger := (events.Event{
-		Type:    events.EventType("spawn.requested"),
-		Payload: []byte(`{"entity_id":"ent-1","desired_instance_id":"inst-42"}`),
-	}).WithEntityID("ent-1")
+	trigger := (events.NewProjectionEvent("", events.EventType("spawn.requested"), "", "", []byte(`{"entity_id":"ent-1","desired_instance_id":"inst-42"}`), 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID("ent-1")
 	triggerCtx := workflowTriggerContext{Event: trigger}
 
 	err := pc.createFlowInstance(context.Background(), triggerCtx, handlerExecutionPlan{
@@ -376,10 +346,7 @@ func TestCreateFlowInstanceRejectsEmptyResolvedConfig(t *testing.T) {
 			return nil
 		},
 	}
-	trigger := (events.Event{
-		Type:    events.EventType("spawn.requested"),
-		Payload: []byte(`{"entity_id":"ent-1","desired_instance_id":"inst-42"}`),
-	}).WithEntityID("ent-1")
+	trigger := (events.NewProjectionEvent("", events.EventType("spawn.requested"), "", "", []byte(`{"entity_id":"ent-1","desired_instance_id":"inst-42"}`), 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID("ent-1")
 	triggerCtx := workflowTriggerContext{Event: trigger}
 
 	err := pc.createFlowInstance(context.Background(), triggerCtx, handlerExecutionPlan{
@@ -405,10 +372,8 @@ func TestHandlerEmitEnvelope_KeepsLocalEntityAcrossOutputBoundaries(t *testing.T
 	}
 	pc := &PipelineCoordinator{module: module}
 	trigger := workflowTriggerContext{
-		Event: events.Event{
-			Type:    events.EventType("child/child.start"),
-			Payload: []byte(`{"entity_id":"ent-child"}`),
-		}.WithEntityID("ent-child"),
+		Event: events.NewProjectionEvent("", events.EventType("child/child.start"), "", "", []byte(`{"entity_id":"ent-child"}`), 0, "", "", events.EventEnvelope{}, time.Time{}).
+			WithEntityID("ent-child"),
 		State: WorkflowState{
 			EntityID: "ent-child",
 			Metadata: map[string]any{
@@ -463,10 +428,8 @@ pins:
 	})
 	pc := &PipelineCoordinator{module: staticSemanticWorkflowModule{source: source}}
 	trigger := workflowTriggerContext{
-		Event: events.Event{
-			Type:    events.EventType("vertical.discovered"),
-			Payload: []byte(`{"entity_id":"ent-root"}`),
-		}.WithEntityID("ent-root"),
+		Event: events.NewProjectionEvent("", events.EventType("vertical.discovered"), "", "", []byte(`{"entity_id":"ent-root"}`), 0, "", "", events.EventEnvelope{}, time.Time{}).
+			WithEntityID("ent-root"),
 		State: WorkflowState{
 			EntityID: "ent-child",
 			Metadata: map[string]any{
@@ -512,12 +475,9 @@ opco.ceo_ready:
       emit: opco.ceo_ready
 `,
 	})
-	evt := (events.Event{
-		ID:      uuid.NewString(),
-		Type:    events.EventType("operating/inst-1/opco.product_initialization_requested"),
-		Payload: []byte(`{"entity_id":"ent-operating"}`),
-	}).WithEntityID("ent-operating").WithFlowInstance("operating/inst-1")
-	if _, ok := source.NodeEventHandler("lifecycle-orchestrator", string(evt.Type)); ok {
+	evt := (events.NewProjectionEvent(uuid.NewString(),
+		events.EventType("operating/inst-1/opco.product_initialization_requested"), "", "", []byte(`{"entity_id":"ent-operating"}`), 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID("ent-operating").WithFlowInstance("operating/inst-1")
+	if _, ok := source.NodeEventHandler("lifecycle-orchestrator", string(evt.Type())); ok {
 		t.Fatal("raw bundle handler lookup unexpectedly matched concrete instance event without delivery localization")
 	}
 	resolved := workflowNodeEventHandlerResolutionForDelivery(source, "lifecycle-orchestrator", evt)
@@ -550,7 +510,7 @@ opco.ceo_ready:
 	if got := bus.publishedCount(); got != 1 {
 		t.Fatalf("published count = %d, want 1", got)
 	}
-	if got := string(bus.publishedEvent(0).Type); got != "operating/opco.ceo_ready" {
+	if got := string(bus.publishedEvent(0).Type()); got != "operating/opco.ceo_ready" {
 		t.Fatalf("published event type = %q, want operating/opco.ceo_ready", got)
 	}
 }

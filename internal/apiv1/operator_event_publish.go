@@ -338,19 +338,11 @@ func eventPublicationPayload(params map[string]any, runID string, injectRunIDEnt
 }
 
 func eventPublicationEvent(params eventPublicationParams, createdAt time.Time) events.Event {
-	evt := (events.Event{
-		ID:            params.EventID,
-		RunID:         params.RunID,
-		ParentEventID: params.SourceEventID,
-		Type:          events.EventType(params.EventName),
-		SourceAgent:   params.Emitter,
-		Payload:       params.Payload,
-		CreatedAt:     createdAt,
-	}).WithEntityID(params.EntityID)
+	envelope := events.EventEnvelope{EntityID: params.EntityID}
 	if flowInstance := strings.Trim(strings.TrimSpace(params.FlowInstance), "/"); flowInstance != "" {
-		evt = evt.WithFlowInstance(flowInstance)
+		envelope.FlowInstance = flowInstance
 	}
-	return evt
+	return events.NewRootIngressEvent(params.EventID, events.EventType(params.EventName), params.Emitter, "", params.Payload, 0, params.RunID, params.SourceEventID, envelope, createdAt)
 }
 
 func validateEventPublication(ctx context.Context, opts OperatorReadOptions, params eventPublicationParams, cfg eventPublicationConfig) (eventPublicationParams, error) {

@@ -56,7 +56,7 @@ func (pc *PipelineCoordinator) createFlowInstance(ctx context.Context, triggerCt
 		}
 	}
 	entityID := workflowEventEntityID(triggerCtx.Event)
-	payload := parsePayloadMap(triggerCtx.Event.Payload)
+	payload := parsePayloadMap(triggerCtx.Event.Payload())
 	entity := map[string]any{
 		"entity_id": entityID,
 	}
@@ -265,7 +265,7 @@ func DeriveFlowInstancePath(source semanticview.Source, templateID, instanceID s
 }
 
 func (pc *PipelineCoordinator) handlerEmitEnvelope(ctx context.Context, triggerCtx workflowTriggerContext, eventType string) map[string]any {
-	payload := parsePayloadMap(triggerCtx.Event.Payload)
+	payload := parsePayloadMap(triggerCtx.Event.Payload())
 	out := map[string]any{}
 	entityID := resolveEmittedEntityID(
 		pc.SemanticSource(),
@@ -280,7 +280,7 @@ func (pc *PipelineCoordinator) handlerEmitEnvelope(ctx context.Context, triggerC
 		out["entity_id"] = entityID
 	}
 	if strings.TrimSpace(eventType) != "" {
-		out["trigger_event_type"] = strings.TrimSpace(string(triggerCtx.Event.Type))
+		out["trigger_event_type"] = strings.TrimSpace(string(triggerCtx.Event.Type()))
 	}
 	if state := strings.TrimSpace(string(triggerCtx.State.Stage)); state != "" {
 		out["current_state"] = state

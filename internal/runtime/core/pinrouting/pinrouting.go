@@ -58,6 +58,7 @@ type ResolutionInput struct {
 
 type Resolution struct {
 	Event     events.Event
+	Envelope  events.EventEnvelope
 	Target    events.RouteIdentity
 	TargetSet []events.RouteIdentity
 	Broadcast bool
@@ -119,6 +120,23 @@ func rootPinDeclaredOutput(source semanticview.Source, eventType string) bool {
 }
 
 func Resolve(input ResolutionInput, evt events.Event) Resolution {
+	resolution := ResolveEnvelope(input, evt.NormalizedEnvelope())
+	resolution.Event = events.NewProjectionEvent(
+		evt.ID(),
+		evt.Type(),
+		evt.SourceAgent(),
+		evt.TaskID(),
+		evt.Payload(),
+		evt.ChainDepth(),
+		evt.RunID(),
+		evt.ParentEventID(),
+		resolution.Envelope,
+		evt.CreatedAt(),
+	)
+	return resolution
+}
+
+func ResolveEnvelope(input ResolutionInput, envelope events.EventEnvelope) Resolution {
 	input.FlowID = strings.TrimSpace(input.FlowID)
 	input.EventType = strings.TrimSpace(input.EventType)
 	input.SourceRoute = input.SourceRoute.Normalized()
@@ -126,27 +144,27 @@ func Resolve(input ResolutionInput, evt events.Event) Resolution {
 		input.SourceRoute = routeFromEvent(input.Inbound)
 	}
 	if !input.SourceRoute.Empty() {
-		evt = evt.WithSourceRoute(input.SourceRoute)
+		envelope = events.EnvelopeForSourceRoute(envelope, input.SourceRoute)
 	}
 	if !PinDeclaredOutput(input.Source, input.FlowID, input.EventType) {
-		return Resolution{Event: evt}
+		return Resolution{Envelope: envelope.Normalized()}
 	}
 	if input.Emit.Broadcast {
-		return Resolution{Event: evt.WithoutTargetRoute(), Broadcast: true}
+		return Resolution{Envelope: events.EnvelopeForBroadcast(envelope), Broadcast: true}
 	}
 	target := input.Emit.Target.Normalized()
 	if target.Empty() {
 		parentRoute := input.ParentRoute.Normalized()
 		if !parentRoute.Empty() {
 			if input.AllowEntityOnlyParentRoute && parentRoute.FlowID == "" && parentRoute.FlowInstance == "" && parentRoute.EntityID != "" {
-				return Resolution{Event: evt.WithTargetRoute(parentRoute), Target: parentRoute}
+				return Resolution{Envelope: events.EnvelopeForTargetRoute(envelope, parentRoute), Target: parentRoute}
 			}
 			if parentRoute.FlowID == "" || parentRoute.FlowInstance == "" || parentRoute.EntityID == "" {
-				return Resolution{Event: evt, Failure: FailureParentRouteIncomplete}
+				return Resolution{Envelope: envelope.Normalized(), Failure: FailureParentRouteIncomplete}
 			}
-			return Resolution{Event: evt.WithTargetRoute(parentRoute), Target: parentRoute}
+			return Resolution{Envelope: events.EnvelopeForTargetRoute(envelope, parentRoute), Target: parentRoute}
 		}
-		return Resolution{Event: evt, Failure: FailureTargetRequiredMissing}
+		return Resolution{Envelope: envelope.Normalized(), Failure: FailureTargetRequiredMissing}
 	}
 	switch target.Kind {
 	case runtimecontracts.EmitTargetKindSender:
@@ -155,34 +173,34 @@ func Resolve(input ResolutionInput, evt events.Event) Resolution {
 			route = routeFromEvent(input.Inbound)
 		}
 		if route.Empty() {
-			if strings.TrimSpace(input.Inbound.ID) == "" && strings.TrimSpace(string(input.Inbound.Type)) == "" {
-				return Resolution{Event: evt, Failure: FailureTargetSenderNoInboundRuntime}
+			if input.Inbound.ID() == "" && strings.TrimSpace(string(input.Inbound.Type())) == "" {
+				return Resolution{Envelope: envelope.Normalized(), Failure: FailureTargetSenderNoInboundRuntime}
 			}
-			return Resolution{Event: evt, Failure: FailureTargetSenderEmptySourceRuntime}
+			return Resolution{Envelope: envelope.Normalized(), Failure: FailureTargetSenderEmptySourceRuntime}
 		}
-		return Resolution{Event: evt.WithTargetRoute(route), Target: route}
+		return Resolution{Envelope: events.EnvelopeForTargetRoute(envelope, route), Target: route}
 	case runtimecontracts.EmitTargetKindInstanceID:
 		instanceID := strings.TrimSpace(target.InstanceID)
 		if instanceID == "" {
-			return Resolution{Event: evt, Failure: FailureTargetMalformed}
+			return Resolution{Envelope: envelope.Normalized(), Failure: FailureTargetMalformed}
 		}
 		flowID := strings.TrimSpace(target.Flow)
 		if flowID == "" {
 			flowID = input.FlowID
 		}
 		route := routeForInstance(input.Source, flowID, instanceID)
-		return Resolution{Event: evt.WithTargetRoute(route), Target: route}
+		return Resolution{Envelope: events.EnvelopeForTargetRoute(envelope, route), Target: route}
 	case runtimecontracts.EmitTargetKindFlowMatch:
 		routes, failure := resolveFlowMatch(input, target)
 		if failure != "" {
-			return Resolution{Event: evt, Failure: failure}
+			return Resolution{Envelope: envelope.Normalized(), Failure: failure}
 		}
 		if len(routes) == 1 {
-			return Resolution{Event: evt.WithTargetRoute(routes[0]), Target: routes[0]}
+			return Resolution{Envelope: events.EnvelopeForTargetRoute(envelope, routes[0]), Target: routes[0]}
 		}
-		return Resolution{Event: evt.WithTargetSet(routes), TargetSet: routes}
+		return Resolution{Envelope: events.EnvelopeForTargetSet(envelope, routes), TargetSet: routes}
 	default:
-		return Resolution{Event: evt, Failure: FailureTargetMalformed}
+		return Resolution{Envelope: envelope.Normalized(), Failure: FailureTargetMalformed}
 	}
 }
 

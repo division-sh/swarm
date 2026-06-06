@@ -77,6 +77,7 @@ type RuntimeOptions struct {
 	BootProgress                     func(BootProgressEvent)
 	SystemContainers                 []string
 	DisablePersistentStartupRecovery bool
+	TestEntityStateHook              func(entityID, state string)
 	TestWorkflowNodeHandlerStartHook runtimepipeline.WorkflowNodeHandlerStartHook
 }
 
@@ -460,6 +461,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 			EventReceiptsCapability:          boot.EventReceiptCapability,
 			ArtifactRoot:                     artifactRoot,
 			BundleFingerprint:                opts.BundleFingerprint,
+			TestEntityStateHook:              opts.TestEntityStateHook,
 			TestWorkflowNodeHandlerStartHook: opts.TestWorkflowNodeHandlerStartHook,
 		})
 		if rt.Pipeline != nil {
@@ -649,18 +651,21 @@ func scheduleEventPayload(sc runtimepipeline.Schedule) []byte {
 }
 
 func scheduledEvent(sc runtimepipeline.Schedule) events.Event {
-	return (events.Event{
-		ID:          uuid.NewString(),
-		Type:        events.EventType(sc.EventType),
-		SourceAgent: sc.AgentID,
-		TaskID:      sc.TaskID,
-		Payload:     scheduleEventPayload(sc),
-		RunID:       sc.EffectiveRunID(),
-		CreatedAt:   time.Now(),
-	}).WithEnvelope(events.EventEnvelope{
-		EntityID:     sc.EffectiveEntityID(),
-		FlowInstance: sc.EffectiveFlowInstance(),
-	})
+	return events.NewRuntimeControlEvent(
+		uuid.NewString(),
+		events.EventType(sc.EventType),
+		sc.AgentID,
+		sc.TaskID,
+		scheduleEventPayload(sc),
+		0,
+		sc.EffectiveRunID(),
+		"",
+		events.EventEnvelope{
+			EntityID:     sc.EffectiveEntityID(),
+			FlowInstance: sc.EffectiveFlowInstance(),
+		},
+		time.Now(),
+	)
 }
 
 func (rt *Runtime) Start(ctx context.Context) error {
@@ -845,13 +850,18 @@ func (rt *Runtime) Start(ctx context.Context) error {
 				"failed_event_id": nil,
 				"timestamp":       time.Now().UTC().Format(time.RFC3339Nano),
 			})
-			if publishErr := rt.Bus.Publish(ctx, events.Event{
-				ID:          uuid.NewString(),
-				Type:        events.EventType("platform.recovery_failed"),
-				SourceAgent: "runtime",
-				Payload:     payload,
-				CreatedAt:   time.Now(),
-			}); publishErr != nil {
+			if publishErr := rt.Bus.Publish(ctx, events.NewRuntimeDiagnosticEvent(
+				uuid.NewString(),
+				events.EventType("platform.recovery_failed"),
+				"runtime",
+				"",
+				payload,
+				0,
+				"",
+				"",
+				events.EventEnvelope{},
+				time.Now(),
+			)); publishErr != nil {
 				if rt.Logger != nil {
 					handleRuntimeLogPersistenceError("runtime", "recovery_failed_publish_failed", rt.Logger.Error(ctx, "runtime", "recovery_failed_publish_failed", nil, publishErr))
 				}
@@ -1143,13 +1153,18 @@ func (rt *Runtime) publishBootCompleted(ctx context.Context, report bootComplete
 		"self_check_passed":            nil,
 	})
 	eventID := uuid.NewString()
-	evt := events.Event{
-		ID:          eventID,
-		Type:        t,
-		SourceAgent: "runtime",
-		Payload:     payload,
-		CreatedAt:   time.Now(),
-	}
+	evt := events.NewRuntimeControlEvent(
+		eventID,
+		t,
+		"runtime",
+		"",
+		payload,
+		0,
+		"",
+		"",
+		events.EventEnvelope{},
+		time.Now(),
+	)
 	return eventID, rt.Bus.Publish(ctx, evt)
 }
 

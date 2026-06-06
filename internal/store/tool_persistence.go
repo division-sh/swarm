@@ -946,7 +946,7 @@ func insertSQLiteEntityStateDiff(ctx context.Context, tx *sql.Tx, runID string, 
 	}
 	causedByEvent := ""
 	if inbound, ok := runtimecorrelation.InboundEventFromContext(ctx); ok {
-		causedByEvent = nullUUIDString(inbound.ID)
+		causedByEvent = nullUUIDString(inbound.ID())
 	}
 	if createdAt.IsZero() {
 		createdAt = time.Now().UTC()

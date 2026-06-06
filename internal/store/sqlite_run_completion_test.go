@@ -24,14 +24,11 @@ func seedSQLiteNormalRunCompletionFixture(t *testing.T, store *SQLiteRuntimeStor
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	entityID := uuid.NewString()
-	if err := store.AppendEvent(ctx, events.Event{
-		ID:          eventID,
-		RunID:       runID,
-		Type:        events.EventType("example.started"),
-		SourceAgent: "test",
-		Payload:     json.RawMessage(`{"example":true}`),
-		CreatedAt:   now,
-	}.WithEntityID(entityID)); err != nil {
+	if err := store.AppendEvent(ctx, events.NewProjectionEvent(eventID,
+
+		events.EventType("example.started"),
+		"test", "", json.RawMessage(`{"example":true}`), 0, runID, "", events.EventEnvelope{}, now).
+		WithEntityID(entityID)); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
 	if _, err := store.DB.ExecContext(ctx, `

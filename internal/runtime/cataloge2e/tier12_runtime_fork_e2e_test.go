@@ -428,14 +428,10 @@ func publishCatalogTriggerAtFuture(t testing.TB, h *runtimeHarness, step catalog
 		t.Fatalf("marshal trigger payload: %v", err)
 	}
 	eventID := uuid.NewString()
-	evt := events.Event{
-		ID:          eventID,
-		Type:        events.EventType(strings.TrimSpace(step.Event)),
-		SourceAgent: "cataloge2e",
-		RunID:       catalogRuntimeRunID,
-		Payload:     raw,
-		CreatedAt:   time.Now().UTC().Add(time.Second),
-	}
+	evt := events.NewProjectionEvent(eventID,
+		events.EventType(strings.TrimSpace(step.Event)),
+		"cataloge2e", "", raw, 0, catalogRuntimeRunID, "", events.EventEnvelope{}, time.Now().UTC().Add(time.Second))
+
 	if entityID := triggerPayloadEntityID(payload); entityID != "" {
 		evt = evt.WithEntityID(entityID)
 	}

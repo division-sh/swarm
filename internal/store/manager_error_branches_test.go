@@ -77,13 +77,10 @@ func TestPostgresStore_Manager_ErrorBranches(t *testing.T) {
 		Status: "active", HiredBy: "t", StartedAt: time.Now(),
 	})
 	evtID := uuid.NewString()
-	if err := pg.AppendEvent(ctx, events.Event{
-		ID:          evtID,
-		Type:        "test.event",
-		SourceAgent: "tester",
-		Payload:     []byte(`{}`),
-		CreatedAt:   time.Now(),
-	}); err != nil {
+	if err := pg.AppendEvent(ctx, events.NewProjectionEvent(evtID,
+		"test.event",
+		"tester", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now()),
+	); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
 	if err := pg.InsertEventDeliveries(ctx, evtID, []string{aid}); err != nil {

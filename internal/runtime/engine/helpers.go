@@ -41,7 +41,7 @@ type Accumulator struct {
 
 func arrivalIdentifier(evt events.Event, payload map[string]any) string {
 	candidates := []string{
-		strings.TrimSpace(evt.ID),
+		strings.TrimSpace(evt.ID()),
 		strings.TrimSpace(asString(payload["event_id"])),
 		strings.TrimSpace(asString(payload["id"])),
 		strings.TrimSpace(asString(payload["item_id"])),
@@ -49,7 +49,7 @@ func arrivalIdentifier(evt events.Event, payload map[string]any) string {
 		strings.TrimSpace(asString(payload["from"])),
 		strings.TrimSpace(asString(payload["agent_id"])),
 		strings.TrimSpace(asString(payload["node_id"])),
-		strings.TrimSpace(evt.SourceAgent),
+		strings.TrimSpace(evt.SourceAgent()),
 	}
 	for _, candidate := range candidates {
 		if candidate != "" {
@@ -283,7 +283,7 @@ func accumulatorBucketRef(nodeID identity.NodeID, eventType events.EventType) ti
 func handlerAccumulatorEventType(req ExecutionRequest) events.EventType {
 	eventType := strings.TrimSpace(req.HandlerEventKey)
 	if eventType == "" {
-		eventType = strings.TrimSpace(string(req.Event.Type))
+		eventType = strings.TrimSpace(string(req.Event.Type()))
 	}
 	return events.EventType(eventType)
 }

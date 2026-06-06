@@ -52,13 +52,8 @@ func TestSystemNodeRunner_MarkProcessedSettlesNodeDeliveryAndTriggersNormalRunCo
 		return nil
 	}, func(context.Context) (bool, error) { return true, nil })
 
-	runner.ProcessEventForTest(ctx, (events.Event{
-		ID:        eventID,
-		Type:      "example.started",
-		RunID:     runID,
-		Payload:   []byte(`{}`),
-		CreatedAt: time.Now().UTC(),
-	}).WithEntityID(entityID))
+	runner.ProcessEventForTest(ctx, (events.NewProjectionEvent(eventID,
+		"example.started", "", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID(entityID))
 
 	if !handlerCalled {
 		t.Fatal("handler was not called")

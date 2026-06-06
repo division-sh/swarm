@@ -261,20 +261,16 @@ func (fx *deliveryLifecycleFixture) publishDirectEvent(t *testing.T, ctx context
 	ch := fx.bus.Subscribe(fx.agentID)
 	defer fx.bus.Unsubscribe(fx.agentID)
 
-	evt := (events.Event{
-		ID:          eventID,
-		Type:        events.EventType("review.requested"),
-		SourceAgent: "runtime",
-		Payload:     []byte(`{"ok":true}`),
-		CreatedAt:   time.Now().Add(-2 * time.Hour).UTC(),
-	}).WithEntityID(uuid.NewString())
+	evt := (events.NewProjectionEvent(eventID,
+		events.EventType("review.requested"),
+		"runtime", "", []byte(`{"ok":true}`), 0, "", "", events.EventEnvelope{}, time.Now().Add(-2*time.Hour).UTC())).WithEntityID(uuid.NewString())
 	if err := fx.bus.PublishDirect(ctx, evt, []string{fx.agentID}); err != nil {
 		t.Fatalf("PublishDirect: %v", err)
 	}
 	select {
 	case delivered := <-ch:
-		if delivered.ID != eventID {
-			t.Fatalf("delivered event id = %q, want %q", delivered.ID, eventID)
+		if delivered.ID() != eventID {
+			t.Fatalf("delivered event id = %q, want %q", delivered.ID(), eventID)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("expected direct publish to fan out to live subscriber")
@@ -363,7 +359,7 @@ func (fx *deliveryLifecycleFixture) snapshot(t *testing.T, ctx context.Context, 
 		t.Fatalf("ListPendingEventsForAgent: %v", err)
 	}
 	for _, evt := range direct {
-		got.directPendingIDs = append(got.directPendingIDs, evt.ID)
+		got.directPendingIDs = append(got.directPendingIDs, evt.ID())
 	}
 
 	subscribed, err := fx.pg.ListPendingSubscribedEvents(ctx, fx.agentID, []events.EventType{fx.subscription}, time.Now().Add(-24*time.Hour), 20)
@@ -371,7 +367,7 @@ func (fx *deliveryLifecycleFixture) snapshot(t *testing.T, ctx context.Context, 
 		t.Fatalf("ListPendingSubscribedEvents: %v", err)
 	}
 	for _, evt := range subscribed {
-		got.subscribedPending = append(got.subscribedPending, evt.ID)
+		got.subscribedPending = append(got.subscribedPending, evt.ID())
 	}
 
 	got.receipt, got.receiptFound, err = fx.pg.GetEventReceipt(ctx, eventID, fx.agentID)
@@ -402,7 +398,7 @@ func (fx *deliveryLifecycleFixture) recoverSeenEventIDs(t *testing.T, ctx contex
 			subscriptions: subscriptions,
 			record: func(evt events.Event) {
 				mu.Lock()
-				seen = append(seen, evt.ID)
+				seen = append(seen, evt.ID())
 				mu.Unlock()
 			},
 		}, nil

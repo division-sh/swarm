@@ -39,7 +39,7 @@ func (pc *PipelineCoordinator) materializeMailboxItem(ctx context.Context, actio
 	if spec == nil {
 		return fmt.Errorf("mailbox_write requires mailbox declaration")
 	}
-	sourceEventID := strings.TrimSpace(execCtx.Request.Event.ID)
+	sourceEventID := strings.TrimSpace(execCtx.Request.Event.ID())
 	if sourceEventID == "" {
 		return fmt.Errorf("mailbox_write requires triggering event id")
 	}

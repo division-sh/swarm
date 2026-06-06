@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	"time"
 )
 
 func TestDeliveryRouteResolver_SeparatesRouteResolutionAndDiagnostics(t *testing.T) {
@@ -39,7 +40,7 @@ func TestDeliveryRouteResolver_SeparatesRouteResolutionAndDiagnostics(t *testing
 		},
 	}
 
-	result := resolver.Resolve(events.Event{Type: events.EventType("producer/scan.requested")})
+	result := resolver.Resolve(events.NewProjectionEvent("", events.EventType("producer/scan.requested"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 	if got, want := len(result.RoutedRecipients), 1; got != want {
 		t.Fatalf("routed recipients = %d, want %d", got, want)
 	}
@@ -78,9 +79,7 @@ func TestDeliveryRecipientPolicy_FiltersExplicitAgentScopeIntoManifest(t *testin
 		},
 	}
 
-	manifest, err := policy.Evaluate(context.Background(), (events.Event{
-		Type: "task.completed",
-	}).WithEntityID("ent-1"), agentDeliveryRecipientCandidates([]string{"entity-agent", "other-agent", "shared-agent"}))
+	manifest, err := policy.Evaluate(context.Background(), (events.NewProjectionEvent("", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID("ent-1"), agentDeliveryRecipientCandidates([]string{"entity-agent", "other-agent", "shared-agent"}))
 	if err != nil {
 		t.Fatalf("Evaluate: %v", err)
 	}
@@ -104,7 +103,7 @@ func TestDeliveryRecipientPolicy_KeepsInternalSubscribersLiveOnlyUnderDescriptor
 		},
 	}
 
-	manifest, err := policy.Evaluate(context.Background(), events.Event{Type: "task.completed"}, []deliveryRecipientCandidate{
+	manifest, err := policy.Evaluate(context.Background(), events.NewProjectionEvent("", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), []deliveryRecipientCandidate{
 		{ID: "workflow-runtime", PersistAsDelivery: false},
 		{ID: "node:scan-orchestrator", PersistAsDelivery: false},
 		{ID: "agent-a", PersistAsDelivery: true},
@@ -130,9 +129,7 @@ func TestDeliveryRecipientPolicy_TargetedEventFailsWhenTargetInstanceIsGone(t *t
 		},
 	}
 
-	manifest, err := policy.Evaluate(context.Background(), (events.Event{
-		Type: "task.completed",
-	}).WithTargetRoute(events.RouteIdentity{EntityID: "ent-2", FlowInstance: "flow/missing"}), agentDeliveryRecipientCandidates([]string{"agent-a"}))
+	manifest, err := policy.Evaluate(context.Background(), (events.NewProjectionEvent("", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})).WithTargetRoute(events.RouteIdentity{EntityID: "ent-2", FlowInstance: "flow/missing"}), agentDeliveryRecipientCandidates([]string{"agent-a"}))
 	if err != nil {
 		t.Fatalf("Evaluate: %v", err)
 	}
@@ -153,9 +150,7 @@ func TestDeliveryRecipientPolicy_TargetedEventFailsWhenTargetDoesNotSubscribe(t 
 		},
 	}
 
-	manifest, err := policy.Evaluate(context.Background(), (events.Event{
-		Type: "task.completed",
-	}).WithTargetRoute(events.RouteIdentity{EntityID: "ent-1", FlowInstance: "flow/target"}), agentDeliveryRecipientCandidates([]string{"other-agent"}))
+	manifest, err := policy.Evaluate(context.Background(), (events.NewProjectionEvent("", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})).WithTargetRoute(events.RouteIdentity{EntityID: "ent-1", FlowInstance: "flow/target"}), agentDeliveryRecipientCandidates([]string{"other-agent"}))
 	if err != nil {
 		t.Fatalf("Evaluate: %v", err)
 	}
@@ -190,7 +185,7 @@ func TestDeliveryPlanner_ComposesRoutingPolicyAndManifest(t *testing.T) {
 		},
 	)
 
-	plan, err := planner.Plan(context.Background(), events.Event{Type: "task.completed"})
+	plan, err := planner.Plan(context.Background(), events.NewProjectionEvent("", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
 	}
@@ -244,9 +239,7 @@ func TestDeliveryPlanner_DoesNotDeadLetterTargetedWorkflowNodeSubscriber(t *test
 		},
 	)
 
-	plan, err := planner.Plan(context.Background(), (events.Event{
-		Type: "child/output.done",
-	}).WithTargetRoute(events.RouteIdentity{EntityID: "ent-1"}))
+	plan, err := planner.Plan(context.Background(), (events.NewProjectionEvent("", "child/output.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})).WithTargetRoute(events.RouteIdentity{EntityID: "ent-1"}))
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
 	}
@@ -273,9 +266,7 @@ func TestDeliveryPlanner_PreservesTargetFailureWhenRoutedNodeDoesNotMatchTarget(
 		},
 	)
 
-	plan, err := planner.Plan(context.Background(), (events.Event{
-		Type: "child/output.done",
-	}).WithTargetRoute(events.RouteIdentity{EntityID: "ent-1", FlowInstance: "target-flow"}))
+	plan, err := planner.Plan(context.Background(), (events.NewProjectionEvent("", "child/output.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})).WithTargetRoute(events.RouteIdentity{EntityID: "ent-1", FlowInstance: "target-flow"}))
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
 	}
@@ -307,9 +298,7 @@ func TestDeliveryPlanner_ExpandsTargetSetForInternalWorkflowRecipient(t *testing
 		},
 	)
 
-	plan, err := planner.Plan(context.Background(), (events.Event{
-		Type: "child/output.done",
-	}).WithTargetSet([]events.RouteIdentity{
+	plan, err := planner.Plan(context.Background(), (events.NewProjectionEvent("", "child/output.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})).WithTargetSet([]events.RouteIdentity{
 		{FlowInstance: "child-a/inst-1", EntityID: "ent-a"},
 		{FlowInstance: "child-b/inst-1", EntityID: "ent-b"},
 	}))
@@ -368,9 +357,7 @@ func TestDeliveryPlanner_NoTargetConcreteRoutedNodePersistsSemanticNodeRoute(t *
 		},
 	)
 
-	plan, err := planner.Plan(context.Background(), (events.Event{
-		Type: "operating/inst-1/opco.product_initialization_requested",
-	}).WithEntityID("ent-operating").WithFlowInstance("operating/inst-1"))
+	plan, err := planner.Plan(context.Background(), (events.NewProjectionEvent("", "operating/inst-1/opco.product_initialization_requested", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID("ent-operating").WithFlowInstance("operating/inst-1"))
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
 	}
@@ -403,9 +390,7 @@ func TestDeliveryPlanner_NoTargetConcreteRoutedNodePersistsSemanticNodeRoute(t *
 }
 
 func TestRoutedNodeInternalSubscriptionAliases_NestedSemanticScopeDoesNotLeakParentConcreteRoute(t *testing.T) {
-	evt := (events.Event{
-		Type: events.EventType("child/grandchild/micro.started"),
-	}).WithFlowInstance("child/grandchild/inst-1")
+	evt := (events.NewProjectionEvent("", events.EventType("child/grandchild/micro.started"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})).WithFlowInstance("child/grandchild/inst-1")
 
 	aliases := routedNodeInternalSubscriptionAliases(evt, []Subscriber{{
 		ID:   "grandchild-worker",
@@ -477,9 +462,7 @@ func TestRoutedEventKeysForPlan_RuntimeCallbackLocalEventWithFlowInstanceDerives
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := routedEventKeysForPlan((events.Event{
-				Type: events.EventType(tc.eventType),
-			}).WithFlowInstance(tc.flowInstance))
+			got := routedEventKeysForPlan((events.NewProjectionEvent("", events.EventType(tc.eventType), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})).WithFlowInstance(tc.flowInstance))
 			if len(got) != len(tc.want) {
 				t.Fatalf("event keys = %#v, want %#v", got, tc.want)
 			}
@@ -500,9 +483,7 @@ func TestResolveInternalRecipientsForRoutedNodePlanning_DoesNotSelectParentConcr
 	eb.SubscribeInternal("parent-carrier", events.EventType("child/inst-1/micro.started"))
 	defer eb.Unsubscribe("parent-carrier")
 
-	evt := (events.Event{
-		Type: events.EventType("child/grandchild/micro.started"),
-	}).WithFlowInstance("child/grandchild/inst-1")
+	evt := (events.NewProjectionEvent("", events.EventType("child/grandchild/micro.started"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})).WithFlowInstance("child/grandchild/inst-1")
 	got := eb.resolveInternalRecipientsForRoutedNodePlanning(evt, []Subscriber{{
 		ID:   "grandchild-worker",
 		Type: "node",
@@ -538,9 +519,7 @@ func TestDeliveryPlanner_NoTargetRootRoutedNodeUsesSemanticNodeDeliveryRoute(t *
 		},
 	)
 
-	plan, err := planner.Plan(context.Background(), (events.Event{
-		Type: "opco.spinup_requested",
-	}).WithEntityID("ent-root"))
+	plan, err := planner.Plan(context.Background(), (events.NewProjectionEvent("", "opco.spinup_requested", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID("ent-root"))
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
 	}
@@ -592,9 +571,7 @@ func TestDeliveryPlanner_NoTargetRootLocalEventWithFlowInstanceUsesRootNodeRoute
 		},
 	)
 
-	plan, err := planner.Plan(context.Background(), (events.Event{
-		Type: "timer.check",
-	}).WithEntityID("ent-root").WithFlowInstance("11111111-1111-4111-8111-111111111111"))
+	plan, err := planner.Plan(context.Background(), (events.NewProjectionEvent("", "timer.check", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID("ent-root").WithFlowInstance("11111111-1111-4111-8111-111111111111"))
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
 	}
@@ -652,9 +629,7 @@ func TestDeliveryPlanner_NoTargetScopedRoutedNodeUsesSemanticNodeDeliveryRoute(t
 		},
 	)
 
-	plan, err := planner.Plan(context.Background(), (events.Event{
-		Type: "child/child.start",
-	}).WithEntityID("ent-child"))
+	plan, err := planner.Plan(context.Background(), (events.NewProjectionEvent("", "child/child.start", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID("ent-child"))
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
 	}
@@ -720,9 +695,7 @@ func TestDeliveryPlanner_NoTargetScopedEventPreservesPathlessRoutedNodeRoute(t *
 		},
 	)
 
-	plan, err := planner.Plan(context.Background(), (events.Event{
-		Type: "child/child.start",
-	}).WithEntityID("ent-child"))
+	plan, err := planner.Plan(context.Background(), (events.NewProjectionEvent("", "child/child.start", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID("ent-child"))
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
 	}
@@ -779,9 +752,7 @@ func TestDeliveryPlanner_NoTargetCrossFlowStaticRoutedNodeUsesSubscriberScope(t 
 		},
 	)
 
-	plan, err := planner.Plan(context.Background(), (events.Event{
-		Type: "flow-b/order.completed",
-	}).WithEntityID("ent-flow-b").WithFlowInstance("flow-b/inst-1"))
+	plan, err := planner.Plan(context.Background(), (events.NewProjectionEvent("", "flow-b/order.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID("ent-flow-b").WithFlowInstance("flow-b/inst-1"))
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
 	}
@@ -839,9 +810,7 @@ func TestDeliveryPlanner_NoTargetWildcardStaticServiceRoutedNodeUsesSubscriberSc
 		},
 	)
 
-	plan, err := planner.Plan(context.Background(), (events.Event{
-		Type: "component-scaffold/component-a/opco.repo_scaffold_requested",
-	}).WithEntityID("ent-component").WithFlowInstance("component-scaffold/component-a"))
+	plan, err := planner.Plan(context.Background(), (events.NewProjectionEvent("", "component-scaffold/component-a/opco.repo_scaffold_requested", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID("ent-component").WithFlowInstance("component-scaffold/component-a"))
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
 	}
@@ -899,9 +868,7 @@ func TestDeliveryPlanner_NoTargetDescendantScopedRoutedNodeUsesParentInstanceRou
 		},
 	)
 
-	plan, err := planner.Plan(context.Background(), (events.Event{
-		Type: "child/grandchild/micro.start",
-	}).WithEntityID("ent-child").WithFlowInstance("child/inst-1"))
+	plan, err := planner.Plan(context.Background(), (events.NewProjectionEvent("", "child/grandchild/micro.start", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID("ent-child").WithFlowInstance("child/inst-1"))
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
 	}
@@ -946,7 +913,7 @@ func TestDeliveryPlanner_FailsClosedOnPolicyError(t *testing.T) {
 		},
 	)
 
-	_, err := planner.Plan(context.Background(), events.Event{Type: "task.completed"})
+	_, err := planner.Plan(context.Background(), events.NewProjectionEvent("", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 	if err == nil || err.Error() != "descriptor store unavailable" {
 		t.Fatalf("Plan err = %v, want descriptor store unavailable", err)
 	}

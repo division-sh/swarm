@@ -58,10 +58,10 @@ func enrichTurnRecord(ctx context.Context, s *Session, rec AgentTurnRecord, resp
 	}
 	if inbound, ok := runtimebus.InboundEventFromContext(ctx); ok {
 		if strings.TrimSpace(rec.TriggerEventID) == "" {
-			rec.TriggerEventID = strings.TrimSpace(inbound.ID)
+			rec.TriggerEventID = strings.TrimSpace(inbound.ID())
 		}
 		if strings.TrimSpace(rec.TriggerEventType) == "" {
-			rec.TriggerEventType = strings.TrimSpace(string(inbound.Type))
+			rec.TriggerEventType = strings.TrimSpace(string(inbound.Type()))
 		}
 		if strings.TrimSpace(rec.EntityID) == "" {
 			rec.EntityID = strings.TrimSpace(inbound.EntityID())
@@ -94,7 +94,7 @@ func enrichTurnRecord(ctx context.Context, s *Session, rec AgentTurnRecord, resp
 		if eventRec, ok := runtimebus.EmittedEventsRecorderFromContext(ctx); ok && eventRec != nil {
 			seen := map[string]struct{}{}
 			for _, evt := range eventRec.Snapshot() {
-				name := strings.TrimSpace(string(evt.Type))
+				name := strings.TrimSpace(string(evt.Type()))
 				if name == "" {
 					continue
 				}

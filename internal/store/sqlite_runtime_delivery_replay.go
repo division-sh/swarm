@@ -172,10 +172,10 @@ func (s *SQLiteRuntimeStore) PersistEventWithDeliveriesAndScope(ctx context.Cont
 	if err := s.AppendEventTx(ctx, tx, evt); err != nil {
 		return err
 	}
-	if err := s.InsertEventDeliveriesTx(ctx, tx, evt.ID, agentIDs); err != nil {
+	if err := s.InsertEventDeliveriesTx(ctx, tx, evt.ID(), agentIDs); err != nil {
 		return err
 	}
-	if err := s.UpsertCommittedReplayScopeTx(ctx, tx, evt.ID, scope); err != nil {
+	if err := s.UpsertCommittedReplayScopeTx(ctx, tx, evt.ID(), scope); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -193,10 +193,10 @@ func (s *SQLiteRuntimeStore) PersistEventWithDeliveryRoutesAndScope(ctx context.
 	if err := s.AppendEventTx(ctx, tx, evt); err != nil {
 		return err
 	}
-	if err := s.InsertEventDeliveriesWithTargetsTx(ctx, tx, evt.ID, agentIDs, deliveryTargets); err != nil {
+	if err := s.InsertEventDeliveriesWithTargetsTx(ctx, tx, evt.ID(), agentIDs, deliveryTargets); err != nil {
 		return err
 	}
-	if err := s.UpsertCommittedReplayScopeTx(ctx, tx, evt.ID, scope); err != nil {
+	if err := s.UpsertCommittedReplayScopeTx(ctx, tx, evt.ID(), scope); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -214,10 +214,10 @@ func (s *SQLiteRuntimeStore) PersistEventWithDeliveryRouteSetAndScope(ctx contex
 	if err := s.AppendEventTx(ctx, tx, evt); err != nil {
 		return err
 	}
-	if err := s.InsertEventDeliveryRoutesTx(ctx, tx, evt.ID, deliveryRoutes); err != nil {
+	if err := s.InsertEventDeliveryRoutesTx(ctx, tx, evt.ID(), deliveryRoutes); err != nil {
 		return err
 	}
-	if err := s.UpsertCommittedReplayScopeTx(ctx, tx, evt.ID, scope); err != nil {
+	if err := s.UpsertCommittedReplayScopeTx(ctx, tx, evt.ID(), scope); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -411,38 +411,50 @@ func (s *SQLiteRuntimeStore) listSQLiteEventsMissingPipelineReceipt(ctx context.
 	defer rows.Close()
 	out := make([]events.PersistedReplayEvent, 0, limit)
 	for rows.Next() {
-		var evt events.Event
+		var eventID, runID, eventName, producedBy, sourceEventID string
 		var entityID, flowInstance, scope string
 		var payloadRaw, createdAtRaw, sourceRouteRaw, targetRouteRaw, targetSetRaw any
 		if err := rows.Scan(
-			&evt.ID,
-			&evt.RunID,
-			&evt.Type,
-			&evt.SourceAgent,
+			&eventID,
+			&runID,
+			&eventName,
+			&producedBy,
 			&entityID,
 			&flowInstance,
 			&scope,
 			&payloadRaw,
 			&createdAtRaw,
-			&evt.ParentEventID,
+			&sourceEventID,
 			&sourceRouteRaw,
 			&targetRouteRaw,
 			&targetSetRaw,
 		); err != nil {
 			return nil, fmt.Errorf("scan sqlite missing pipeline receipt event: %w", err)
 		}
-		evt.Payload = sqliteJSONRawMessage(payloadRaw)
-		if createdAt, ok, err := sqliteTimeValue(createdAtRaw); err != nil {
+		payload := sqliteJSONRawMessage(payloadRaw)
+		var createdAt time.Time
+		if parsedCreatedAt, ok, err := sqliteTimeValue(createdAtRaw); err != nil {
 			return nil, fmt.Errorf("scan sqlite missing pipeline receipt created_at: %w", err)
 		} else if ok {
-			evt.CreatedAt = createdAt
+			createdAt = parsedCreatedAt.UTC()
 		}
 		sourceRoute := sqliteJSONRawMessage(sourceRouteRaw)
 		targetRoute := sqliteJSONRawMessage(targetRouteRaw)
 		targetSet := sqliteJSONRawMessage(targetSetRaw)
-		evt = evt.WithEnvelope(eventEnvelopeFromStorage(entityID, flowInstance, scope, sourceRoute, targetRoute, targetSet))
+		evt := events.NewProjectionEvent(
+			eventID,
+			events.EventType(eventName),
+			producedBy,
+			"",
+			payload,
+			0,
+			runID,
+			sourceEventID,
+			eventEnvelopeFromStorage(entityID, flowInstance, scope, sourceRoute, targetRoute, targetSet),
+			createdAt,
+		)
 		record := events.PersistedReplayEvent{Event: evt}
-		if strings.TrimSpace(evt.RunID) == "" {
+		if strings.TrimSpace(evt.RunID()) == "" {
 			record.ReplayError = "missing canonical run_id"
 		}
 		out = append(out, record)
@@ -742,22 +754,22 @@ func (s *SQLiteRuntimeStore) ListPendingSubscribedEvents(ctx context.Context, ag
 	out := make([]events.Event, 0, limit)
 	now := s.now()
 	for rows.Next() {
-		var evt events.Event
+		var eventID, runID, eventName, producedBy, sourceEventID string
 		var entityID, flowInstance, scope string
 		var payloadRaw, createdAtRaw, deliveryCreatedAtRaw, deliveryDeliveredAtRaw any
 		var deliveryFound, receiptFound int
 		record := pendingAgentDeliveryRecord{AgentID: agentID}
 		if err := rows.Scan(
-			&evt.ID,
-			&evt.RunID,
-			&evt.Type,
-			&evt.SourceAgent,
+			&eventID,
+			&runID,
+			&eventName,
+			&producedBy,
 			&entityID,
 			&flowInstance,
 			&scope,
 			&payloadRaw,
 			&createdAtRaw,
-			&evt.ParentEventID,
+			&sourceEventID,
 			&deliveryFound,
 			&record.DeliveryStatus,
 			&record.DeliveryRetryCount,
@@ -767,11 +779,12 @@ func (s *SQLiteRuntimeStore) ListPendingSubscribedEvents(ctx context.Context, ag
 		); err != nil {
 			return nil, fmt.Errorf("scan sqlite pending subscribed event: %w", err)
 		}
-		evt.Payload = sqliteJSONRawMessage(payloadRaw)
-		if createdAt, ok, err := sqliteTimeValue(createdAtRaw); err != nil {
+		payload := sqliteJSONRawMessage(payloadRaw)
+		var createdAt time.Time
+		if parsedCreatedAt, ok, err := sqliteTimeValue(createdAtRaw); err != nil {
 			return nil, fmt.Errorf("scan sqlite pending subscribed event created_at: %w", err)
 		} else if ok {
-			evt.CreatedAt = createdAt
+			createdAt = parsedCreatedAt.UTC()
 		}
 		if deliveryCreatedAt, ok, err := sqliteTimeValue(deliveryCreatedAtRaw); err != nil {
 			return nil, fmt.Errorf("scan sqlite pending subscribed delivery created_at: %w", err)
@@ -785,11 +798,22 @@ func (s *SQLiteRuntimeStore) ListPendingSubscribedEvents(ctx context.Context, ag
 		}
 		record.DeliveryFound = deliveryFound != 0
 		record.ReceiptFound = receiptFound != 0
-		record.Event = evt.WithEnvelope(events.EventEnvelope{EntityID: entityID, FlowInstance: flowInstance, Scope: events.EventScope(scope)})
+		record.Event = events.NewProjectionEvent(
+			eventID,
+			events.EventType(eventName),
+			producedBy,
+			"",
+			payload,
+			0,
+			runID,
+			sourceEventID,
+			events.EventEnvelope{EntityID: entityID, FlowInstance: flowInstance, Scope: events.EventScope(scope)},
+			createdAt,
+		)
 		if !record.isPending(now) {
 			continue
 		}
-		if !eventMatchesAnyPattern(evt.Type, subscriptions) {
+		if !eventMatchesAnyPattern(record.Event.Type(), subscriptions) {
 			continue
 		}
 		out = append(out, record.Event)
@@ -907,6 +931,9 @@ func (s *SQLiteRuntimeStore) listSQLitePendingAgentDeliveryRecords(ctx context.C
 	for rows.Next() {
 		var (
 			record                 pendingAgentDeliveryRecord
+			eventID, runID         string
+			eventName, producedBy  string
+			sourceEventID          string
 			entityID, flowInstance string
 			scope                  string
 			payloadRaw             any
@@ -916,16 +943,16 @@ func (s *SQLiteRuntimeStore) listSQLitePendingAgentDeliveryRecords(ctx context.C
 		)
 		if err := rows.Scan(
 			&record.AgentID,
-			&record.Event.ID,
-			&record.Event.RunID,
-			&record.Event.Type,
-			&record.Event.SourceAgent,
+			&eventID,
+			&runID,
+			&eventName,
+			&producedBy,
 			&entityID,
 			&flowInstance,
 			&scope,
 			&payloadRaw,
 			&eventCreatedRaw,
-			&record.Event.ParentEventID,
+			&sourceEventID,
 			&record.DeliveryFound,
 			&record.DeliveryStatus,
 			&record.DeliveryRetryCount,
@@ -935,12 +962,9 @@ func (s *SQLiteRuntimeStore) listSQLitePendingAgentDeliveryRecords(ctx context.C
 		); err != nil {
 			return nil, fmt.Errorf("scan pending agent delivery record: %w", err)
 		}
-		eventCreatedAt, ok, err := sqliteTimeValue(eventCreatedRaw)
+		eventCreatedAt, _, err := sqliteTimeValue(eventCreatedRaw)
 		if err != nil {
 			return nil, fmt.Errorf("scan pending agent event created_at: %w", err)
-		}
-		if ok {
-			record.Event.CreatedAt = eventCreatedAt
 		}
 		deliveryCreatedAt, ok, err := sqliteTimeValue(deliveryCreatedRaw)
 		if err != nil {
@@ -957,12 +981,23 @@ func (s *SQLiteRuntimeStore) listSQLitePendingAgentDeliveryRecords(ctx context.C
 			record.DeliveryDeliveredAt = sql.NullTime{Time: deliveryDeliveredAt, Valid: true}
 		}
 		record.AgentID = strings.TrimSpace(record.AgentID)
-		record.Event.Payload = sqliteJSONRawMessage(payloadRaw)
-		record.Event = record.Event.WithEnvelope(events.EventEnvelope{
-			EntityID:     entityID,
-			FlowInstance: flowInstance,
-			Scope:        events.EventScope(scope),
-		})
+		payload := sqliteJSONRawMessage(payloadRaw)
+		record.Event = events.NewProjectionEvent(
+			eventID,
+			events.EventType(eventName),
+			producedBy,
+			"",
+			payload,
+			0,
+			runID,
+			sourceEventID,
+			events.EventEnvelope{
+				EntityID:     entityID,
+				FlowInstance: flowInstance,
+				Scope:        events.EventScope(scope),
+			},
+			eventCreatedAt,
+		)
 		out = append(out, record)
 	}
 	if err := rows.Err(); err != nil {

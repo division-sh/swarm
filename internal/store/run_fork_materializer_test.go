@@ -1026,8 +1026,8 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 	}
 	select {
 	case evt := <-ch:
-		if evt.ID != forkEventID || evt.RunID != materialized.ForkRunID {
-			t.Fatalf("delivered fork replay event = id:%s run:%s", evt.ID, evt.RunID)
+		if evt.ID() != forkEventID || evt.RunID() != materialized.ForkRunID {
+			t.Fatalf("delivered fork replay event = id:%s run:%s", evt.ID(), evt.RunID())
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for fork replay event delivery")

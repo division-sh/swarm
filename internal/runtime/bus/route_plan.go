@@ -209,9 +209,9 @@ func (p RoutePlan) EventDeliveryPlan() eventDeliveryPlan {
 }
 
 func (p eventDeliveryPlan) CanonicalRoutePlan() RoutePlan {
-	if len(p.RoutePlan.LiveRecipients) > 0 || len(p.RoutePlan.DeliveryIntents) > 0 || p.RoutePlan.Event.Type != "" || p.RoutePlan.Event.ID != "" {
+	if len(p.RoutePlan.LiveRecipients) > 0 || len(p.RoutePlan.DeliveryIntents) > 0 || p.RoutePlan.Event.Type() != "" || p.RoutePlan.Event.ID() != "" {
 		plan := p.RoutePlan.Normalized()
-		if plan.Event.Type == "" && plan.Event.ID == "" {
+		if plan.Event.Type() == "" && plan.Event.ID() == "" {
 			plan.Event = p.Event
 		}
 		return plan

@@ -68,11 +68,11 @@ func seedPipelineNodeDeliveryAuthority(t *testing.T, db *sql.DB, evt events.Even
 	if nodeID == "" {
 		t.Fatal("seed pipeline node delivery authority requires nodeID")
 	}
-	eventID := strings.TrimSpace(evt.ID)
+	eventID := strings.TrimSpace(evt.ID())
 	if _, err := uuid.Parse(eventID); err != nil {
 		t.Fatalf("seed pipeline node delivery authority event id = %q: %v", eventID, err)
 	}
-	runID := strings.TrimSpace(evt.RunID)
+	runID := strings.TrimSpace(evt.RunID())
 	if runID == "" {
 		runID = testPipelineRunID
 	}
@@ -93,11 +93,11 @@ func seedPipelineNodeDeliveryAuthority(t *testing.T, db *sql.DB, evt events.Even
 			entityID = raw
 		}
 	}
-	payload := strings.TrimSpace(string(evt.Payload))
+	payload := strings.TrimSpace(string(evt.Payload()))
 	if payload == "" {
 		payload = "{}"
 	}
-	eventType := strings.TrimSpace(string(evt.Type))
+	eventType := strings.TrimSpace(string(evt.Type()))
 	if eventType == "" {
 		eventType = "test.event"
 	}
@@ -109,11 +109,11 @@ func seedPipelineNodeDeliveryAuthority(t *testing.T, db *sql.DB, evt events.Even
 	if scope == "" {
 		scope = "entity"
 	}
-	sourceAgent := strings.TrimSpace(evt.SourceAgent)
+	sourceAgent := strings.TrimSpace(evt.SourceAgent())
 	if sourceAgent == "" {
 		sourceAgent = "test"
 	}
-	createdAt := evt.CreatedAt
+	createdAt := evt.CreatedAt()
 	if createdAt.IsZero() {
 		createdAt = time.Now().UTC()
 	}

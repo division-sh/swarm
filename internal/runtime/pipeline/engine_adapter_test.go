@@ -248,7 +248,7 @@ func assertMutationParentRoutePinOutputFailure(t *testing.T, metadata map[string
 			FlowInstance: route.FlowInstance,
 			EntityID:     route.EntityID,
 		},
-	}, events.Event{Type: events.EventType("child.done")})
+	}, events.NewProjectionEvent("", events.EventType("child.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 	if result.Failure != want {
 		t.Fatalf("pin output failure = %q, want %q (metadata=%#v)", result.Failure, want, metadata)
 	}
@@ -713,10 +713,7 @@ func TestPipelineEngineActionRunner_RecordEvidenceReturnsMutationError(t *testin
 		Request: runtimeengine.ExecutionRequest{
 			EntityID: identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
 			NodeID:   identity.NormalizeNodeID("node-a"),
-			Event: (events.Event{
-				Type:    "research.completed",
-				Payload: []byte(`{"summary":"done"}`),
-			}).WithEntityID("11111111-1111-1111-1111-111111111111"),
+			Event:    (events.NewProjectionEvent("", "research.completed", "", "", []byte(`{"summary":"done"}`), 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID("11111111-1111-1111-1111-111111111111"),
 		},
 	})
 	if !ok {
@@ -736,12 +733,8 @@ func TestPipelineEngineActionRunner_CreateFlowInstanceUsesExecutionBaseContextFo
 		},
 	}
 	runner := pipelineEngineActionRunner{coordinator: pc}
-	evt := (events.Event{
-		ID:            "evt-123",
-		Type:          "spawn.requested",
-		ParentEventID: "source-evt-1",
-		Payload:       []byte(`{"instance_id":"inst-42","name":"alpha","template_id":"application-basic-v1"}`),
-	}).WithEnvelope(events.EventEnvelope{
+	evt := (events.NewProjectionEvent("evt-123",
+		"spawn.requested", "", "", []byte(`{"instance_id":"inst-42","name":"alpha","template_id":"application-basic-v1"}`), 0, "", "source-evt-1", events.EventEnvelope{}, time.Time{})).WithEnvelope(events.EventEnvelope{
 		EntityID: "ent-1",
 		Source: events.RouteIdentity{
 			FlowID:       "parent-flow",
@@ -751,7 +744,7 @@ func TestPipelineEngineActionRunner_CreateFlowInstanceUsesExecutionBaseContextFo
 	})
 	base := values.NewContext()
 	base.Event = values.Wrap(evt.ContextMap("ready"))
-	base.Payload = values.Wrap(parsePayloadMap(evt.Payload))
+	base.Payload = values.Wrap(parsePayloadMap(evt.Payload()))
 	base.Entity = values.Wrap(map[string]any{"entity_id": "ent-1"})
 	action := runtimecontracts.ActionSpec{
 		ID:             "create_flow_instance",
@@ -820,18 +813,15 @@ func TestPipelineEngineActionRunner_MailboxWriteMaterializesIdempotentRow(t *tes
 			},
 		},
 	}
-	evt := (events.Event{
-		ID:      eventID,
-		Type:    "mailbox.review_requested",
-		Payload: []byte(`{"review_kind":"validation"}`),
-	}).WithEnvelope(events.EventEnvelope{
+	evt := (events.NewProjectionEvent(eventID,
+		"mailbox.review_requested", "", "", []byte(`{"review_kind":"validation"}`), 0, "", "", events.EventEnvelope{}, time.Time{})).WithEnvelope(events.EventEnvelope{
 		EntityID:     entityID,
 		FlowInstance: "validation/case-1",
 		Scope:        events.EventScopeEntity,
 	})
 	base := values.NewContext()
 	base.Event = values.Wrap(evt.ContextMap(""))
-	base.Payload = values.Wrap(parsePayloadMap(evt.Payload))
+	base.Payload = values.Wrap(parsePayloadMap(evt.Payload()))
 	execCtx := runtimeengine.ExecutionContext{
 		Base: base,
 		Request: runtimeengine.ExecutionRequest{
@@ -890,10 +880,10 @@ func TestPipelineEngineActionRunner_MailboxWriteFailsClosedOnMissingRequiredExpr
 			Summary:  runtimecontracts.RefExpression("payload.missing_summary"),
 		},
 	}
-	evt := events.Event{ID: eventID, Type: "mailbox.review_requested", Payload: []byte(`{}`)}
+	evt := events.NewProjectionEvent(eventID, "mailbox.review_requested", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{})
 	base := values.NewContext()
 	base.Event = values.Wrap(evt.ContextMap(""))
-	base.Payload = values.Wrap(parsePayloadMap(evt.Payload))
+	base.Payload = values.Wrap(parsePayloadMap(evt.Payload()))
 
 	ok, err := runner.ExecuteAction(ctx, action, runtimeregistry.ActionInstruction{Builtin: "mailbox_write"}, runtimeengine.ExecutionContext{
 		Base: base,
@@ -990,7 +980,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitMaterializesLocalGitRef(t 
 	if !ok {
 		t.Fatalf("file_manifest = %#v", instance.Metadata["file_manifest"])
 	}
-	if got := strings.TrimSpace(asString(manifest["source_event_id"])); got != execCtx.Request.Event.ID {
+	if got := strings.TrimSpace(asString(manifest["source_event_id"])); got != execCtx.Request.Event.ID() {
 		t.Fatalf("manifest source_event_id = %q", got)
 	}
 	if _, exists := manifest["vertical_id"]; exists {
@@ -1252,7 +1242,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsAgentVisibleArtifac
 	if got := bus.publishedCount(); got != 1 {
 		t.Fatalf("failure event count = %d, want 1", got)
 	}
-	if got := string(bus.publishedEvent(0).Type); got != "artifact_repo.commit_failed" {
+	if got := string(bus.publishedEvent(0).Type()); got != "artifact_repo.commit_failed" {
 		t.Fatalf("failure event type = %q", got)
 	}
 }
@@ -1376,11 +1366,11 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitPublishesSuccessResultEven
 	if got := bus.publishedCount(); got != 1 {
 		t.Fatalf("success event count = %d, want 1", got)
 	}
-	if got := string(bus.publishedEvent(0).Type); got != "artifact_repo.commit_completed" {
+	if got := string(bus.publishedEvent(0).Type()); got != "artifact_repo.commit_completed" {
 		t.Fatalf("success event type = %q", got)
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(bus.publishedEvent(0).Payload, &payload); err != nil {
+	if err := json.Unmarshal(bus.publishedEvent(0).Payload(), &payload); err != nil {
 		t.Fatalf("success event payload: %v", err)
 	}
 	if got := strings.TrimSpace(asString(payload["repo_id"])); got != initial["repo_id"].(string) {
@@ -1469,15 +1459,14 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitQueuesSuccessResultThroughO
 	action.ArtifactRepo.SuccessPayload = map[string]runtimecontracts.ExpressionValue{
 		"result_kind": runtimecontracts.LiteralExpression("ready"),
 	}
-	sourceEvent := execCtx.Request.Event
-	sourceEvent.SourceAgent = "test"
+	sourceEvent := testProjectionEventWithSourceAgent(execCtx.Request.Event, "test")
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO events (
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload,
 			produced_by, produced_by_type, created_at
 		)
 		VALUES ($1::uuid, $2::uuid, $3, $4::uuid, '', 'entity', $5::jsonb, $6, 'agent', $7)
-	`, testPipelineRunID, sourceEvent.ID, string(sourceEvent.Type), entityID, string(sourceEvent.Payload), sourceEvent.SourceAgent, sourceEvent.CreatedAt); err != nil {
+	`, testPipelineRunID, sourceEvent.ID(), string(sourceEvent.Type()), entityID, string(sourceEvent.Payload()), sourceEvent.SourceAgent(), sourceEvent.CreatedAt()); err != nil {
 		t.Fatalf("seed source event: %v", err)
 	}
 
@@ -1496,7 +1485,7 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitQueuesSuccessResultThroughO
 	if got := bus.outboxCount(); got != 1 {
 		t.Fatalf("outbox result event count = %d, want 1 (published=%d actions=%v)", got, bus.publishedCount(), result.Outcome.ActionsExecuted)
 	}
-	if got := string(bus.outboxIntent(0).Event.Type); got != "artifact_repo.commit_completed" {
+	if got := string(bus.outboxIntent(0).Event.Type()); got != "artifact_repo.commit_completed" {
 		t.Fatalf("outbox result event type = %q", got)
 	}
 	if got := bus.publishedCount(); got != 1 {
@@ -1506,8 +1495,8 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitQueuesSuccessResultThroughO
 	if err != nil {
 		t.Fatalf("load committed workflow instance: %v", err)
 	}
-	if got := strings.TrimSpace(asString(committed.Metadata["last_source_event_id"])); got != execCtx.Request.Event.ID {
-		t.Fatalf("last_source_event_id = %q, want %q", got, execCtx.Request.Event.ID)
+	if got := strings.TrimSpace(asString(committed.Metadata["last_source_event_id"])); got != execCtx.Request.Event.ID() {
+		t.Fatalf("last_source_event_id = %q, want %q", got, execCtx.Request.Event.ID())
 	}
 }
 
@@ -1544,15 +1533,14 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitQueuesFailureResultThroughO
 	}
 	action, execCtx := testArtifactRepoActionAndContext(entityID, initial, "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444", "name: Demo\n")
 	action.ArtifactRepo.Files[0].Path = runtimecontracts.LiteralExpression("../escape.yaml")
-	sourceEvent := execCtx.Request.Event
-	sourceEvent.SourceAgent = "test"
+	sourceEvent := testProjectionEventWithSourceAgent(execCtx.Request.Event, "test")
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO events (
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload,
 			produced_by, produced_by_type, created_at
 		)
 		VALUES ($1::uuid, $2::uuid, $3, $4::uuid, '', 'entity', $5::jsonb, $6, 'agent', $7)
-	`, testPipelineRunID, sourceEvent.ID, string(sourceEvent.Type), entityID, string(sourceEvent.Payload), sourceEvent.SourceAgent, sourceEvent.CreatedAt); err != nil {
+	`, testPipelineRunID, sourceEvent.ID(), string(sourceEvent.Type()), entityID, string(sourceEvent.Payload()), sourceEvent.SourceAgent(), sourceEvent.CreatedAt()); err != nil {
 		t.Fatalf("seed source event: %v", err)
 	}
 
@@ -1571,7 +1559,7 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitQueuesFailureResultThroughO
 	if got := bus.outboxCount(); got != 1 {
 		t.Fatalf("outbox result event count = %d, want 1 (published=%d actions=%v)", got, bus.publishedCount(), result.Outcome.ActionsExecuted)
 	}
-	if got := string(bus.outboxIntent(0).Event.Type); got != "artifact_repo.commit_failed" {
+	if got := string(bus.outboxIntent(0).Event.Type()); got != "artifact_repo.commit_failed" {
 		t.Fatalf("outbox result event type = %q", got)
 	}
 	if got := bus.publishedCount(); got != 1 {
@@ -1587,8 +1575,8 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitQueuesFailureResultThroughO
 	if got := strings.TrimSpace(asString(committed.Metadata["failure_reason"])); !strings.Contains(got, "path traversal is not allowed") {
 		t.Fatalf("failure_reason = %q, want path traversal detail", got)
 	}
-	if got := strings.TrimSpace(asString(committed.Metadata["last_source_event_id"])); got != execCtx.Request.Event.ID {
-		t.Fatalf("last_source_event_id = %q, want %q", got, execCtx.Request.Event.ID)
+	if got := strings.TrimSpace(asString(committed.Metadata["last_source_event_id"])); got != execCtx.Request.Event.ID() {
+		t.Fatalf("last_source_event_id = %q, want %q", got, execCtx.Request.Event.ID())
 	}
 	if _, exists := committed.Metadata["current_ref"]; exists {
 		t.Fatalf("current_ref should not be persisted on failed commit: %#v", committed.Metadata["current_ref"])
@@ -1628,15 +1616,14 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitFailureResultOutboxFailureR
 	}
 	action, execCtx := testArtifactRepoActionAndContext(entityID, initial, "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444", "name: Demo\n")
 	action.ArtifactRepo.Files[0].Path = runtimecontracts.LiteralExpression("../escape.yaml")
-	sourceEvent := execCtx.Request.Event
-	sourceEvent.SourceAgent = "test"
+	sourceEvent := testProjectionEventWithSourceAgent(execCtx.Request.Event, "test")
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO events (
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload,
 			produced_by, produced_by_type, created_at
 		)
 		VALUES ($1::uuid, $2::uuid, $3, $4::uuid, '', 'entity', $5::jsonb, $6, 'agent', $7)
-	`, testPipelineRunID, sourceEvent.ID, string(sourceEvent.Type), entityID, string(sourceEvent.Payload), sourceEvent.SourceAgent, sourceEvent.CreatedAt); err != nil {
+	`, testPipelineRunID, sourceEvent.ID(), string(sourceEvent.Type()), entityID, string(sourceEvent.Payload()), sourceEvent.SourceAgent(), sourceEvent.CreatedAt()); err != nil {
 		t.Fatalf("seed source event: %v", err)
 	}
 
@@ -1720,7 +1707,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRetriesSuccessEventAfterPu
 	if got := strings.TrimSpace(asString(partiallyCommitted.Metadata["current_ref"])); len(got) != 40 {
 		t.Fatalf("current_ref = %q, want committed ref", got)
 	}
-	if got := strings.TrimSpace(asString(partiallyCommitted.Metadata["last_source_event_id"])); got == execCtx.Request.Event.ID {
+	if got := strings.TrimSpace(asString(partiallyCommitted.Metadata["last_source_event_id"])); got == execCtx.Request.Event.ID() {
 		t.Fatalf("last_source_event_id = %q; publish failure must not mark replay complete", got)
 	}
 	if got := bus.publishedCount(); got != 0 {
@@ -1740,8 +1727,8 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRetriesSuccessEventAfterPu
 	if err != nil {
 		t.Fatalf("load completed workflow instance: %v", err)
 	}
-	if got := strings.TrimSpace(asString(completed.Metadata["last_source_event_id"])); got != execCtx.Request.Event.ID {
-		t.Fatalf("last_source_event_id = %q, want %q", got, execCtx.Request.Event.ID)
+	if got := strings.TrimSpace(asString(completed.Metadata["last_source_event_id"])); got != execCtx.Request.Event.ID() {
+		t.Fatalf("last_source_event_id = %q, want %q", got, execCtx.Request.Event.ID())
 	}
 }
 
@@ -1798,7 +1785,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnInvalidSucces
 	if got := bus.publishedCount(); got != 1 {
 		t.Fatalf("failure event count = %d, want 1", got)
 	}
-	if got := string(bus.publishedEvent(0).Type); got != "artifact_repo.commit_failed" {
+	if got := string(bus.publishedEvent(0).Type()); got != "artifact_repo.commit_failed" {
 		t.Fatalf("published event type = %q, want failure event", got)
 	}
 }
@@ -1848,11 +1835,11 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnPathOutsideAl
 	if got := bus.publishedCount(); got != 1 {
 		t.Fatalf("failure event count = %d, want 1", got)
 	}
-	if got := string(bus.publishedEvent(0).Type); got != "artifact_repo.commit_failed" {
+	if got := string(bus.publishedEvent(0).Type()); got != "artifact_repo.commit_failed" {
 		t.Fatalf("failure event type = %q", got)
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(bus.publishedEvent(0).Payload, &payload); err != nil {
+	if err := json.Unmarshal(bus.publishedEvent(0).Payload(), &payload); err != nil {
 		t.Fatalf("failure event payload: %v", err)
 	}
 	if got := strings.TrimSpace(asString(payload["namespace"])); got != initial["namespace"].(string) {
@@ -2031,7 +2018,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRecordsNoDiffRequestHistor
 	if got := bus.publishedCount(); got != 1 {
 		t.Fatalf("conflict failure event count = %d, want 1", got)
 	}
-	if got := string(bus.publishedEvent(0).Type); got != "artifact_repo.commit_failed" {
+	if got := string(bus.publishedEvent(0).Type()); got != "artifact_repo.commit_failed" {
 		t.Fatalf("conflict published event type = %q, want failure event", got)
 	}
 }
@@ -2161,6 +2148,21 @@ func TestArtifactRepoPathRejectsUnsafeGenericSegments(t *testing.T) {
 	}
 }
 
+func testProjectionEventWithSourceAgent(evt events.Event, sourceAgent string) events.Event {
+	return events.NewProjectionEvent(
+		evt.ID(),
+		evt.Type(),
+		sourceAgent,
+		evt.TaskID(),
+		evt.Payload(),
+		evt.ChainDepth(),
+		evt.RunID(),
+		evt.ParentEventID(),
+		evt.Envelope(),
+		evt.CreatedAt(),
+	)
+}
+
 func testArtifactRepoResultEventSource(t *testing.T) semanticview.Source {
 	t.Helper()
 	return loadWorkflowTempSource(t, map[string]string{
@@ -2236,13 +2238,9 @@ func testArtifactRepoActionAndContext(entityID string, entity map[string]any, ev
 		"mvp_yaml":   content,
 	}
 	payloadBytes, _ := json.Marshal(payload)
-	evt := events.Event{
-		ID:        eventID,
-		Type:      "artifact_repo.commit_requested",
-		RunID:     testPipelineRunID,
-		Payload:   payloadBytes,
-		CreatedAt: time.Unix(1_700_000_000, 0).UTC(),
-	}.WithEnvelope(events.EventEnvelope{EntityID: entityID})
+	evt := events.NewProjectionEvent(eventID,
+		"artifact_repo.commit_requested", "", "", payloadBytes, 0, testPipelineRunID, "", events.EventEnvelope{}, time.Unix(1_700_000_000, 0).UTC()).
+		WithEnvelope(events.EventEnvelope{EntityID: entityID})
 	base := values.NewContext()
 	base.Event = values.Wrap(evt.ContextMap("ready"))
 	base.Payload = values.Wrap(payload)
@@ -2374,10 +2372,8 @@ func TestPipelineEnginePayloadShaper_UsesParentEntityForCrossFlowOutputs(t *test
 	req := runtimeengine.ExecutionRequest{
 		EntityID: identity.NormalizeEntityID("ent-child"),
 		FlowID:   identity.NormalizeFlowID("child"),
-		Event: events.Event{
-			Type:    events.EventType("child/child.internal"),
-			Payload: json.RawMessage(`{"entity_id":"ent-child","step":"done"}`),
-		}.WithEntityID("ent-child"),
+		Event: events.NewProjectionEvent("", events.EventType("child/child.internal"), "", "", json.RawMessage(`{"entity_id":"ent-child","step":"done"}`), 0, "", "", events.EventEnvelope{}, time.Time{}).
+			WithEntityID("ent-child"),
 		State: runtimeengine.StateSnapshot{
 			EntityID:     identity.NormalizeEntityID("ent-child"),
 			StateCarrier: runtimeengine.NewStateCarrier(map[string]any{"flow_path": "child/inst-1", "subject_id": "ent-parent", "parent_entity_id": "ent-parent"}, nil, nil),
@@ -2419,10 +2415,8 @@ func TestPipelineEnginePayloadShaper_RejectsUndeclaredFieldsAcrossCrossFlowOutpu
 	req := runtimeengine.ExecutionRequest{
 		EntityID: identity.NormalizeEntityID("ent-child"),
 		FlowID:   identity.NormalizeFlowID("child"),
-		Event: events.Event{
-			Type:    events.EventType("child/child.internal"),
-			Payload: json.RawMessage(`{"entity_id":"ent-child"}`),
-		}.WithEntityID("ent-child"),
+		Event: events.NewProjectionEvent("", events.EventType("child/child.internal"), "", "", json.RawMessage(`{"entity_id":"ent-child"}`), 0, "", "", events.EventEnvelope{}, time.Time{}).
+			WithEntityID("ent-child"),
 		State: runtimeengine.StateSnapshot{
 			EntityID:     identity.NormalizeEntityID("ent-child"),
 			StateCarrier: runtimeengine.NewStateCarrier(map[string]any{"flow_path": "child/inst-1", "subject_id": "ent-parent", "parent_entity_id": "ent-parent"}, nil, nil),
@@ -2458,10 +2452,8 @@ func TestPipelineEnginePayloadShaper_AllowsDeclaredPayloadOnActionSurface(t *tes
 	req := runtimeengine.ExecutionRequest{
 		EntityID: identity.NormalizeEntityID("ent-child"),
 		FlowID:   identity.NormalizeFlowID("child"),
-		Event: events.Event{
-			Type:    events.EventType("child/child.internal"),
-			Payload: json.RawMessage(`{"entity_id":"ent-child","step":"done"}`),
-		}.WithEntityID("ent-child"),
+		Event: events.NewProjectionEvent("", events.EventType("child/child.internal"), "", "", json.RawMessage(`{"entity_id":"ent-child","step":"done"}`), 0, "", "", events.EventEnvelope{}, time.Time{}).
+			WithEntityID("ent-child"),
 		State: runtimeengine.StateSnapshot{
 			EntityID:     identity.NormalizeEntityID("ent-child"),
 			StateCarrier: runtimeengine.NewStateCarrier(map[string]any{"flow_path": "child/inst-1", "subject_id": "ent-parent", "parent_entity_id": "ent-parent"}, nil, nil),
@@ -2502,10 +2494,8 @@ func TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsOnActionSurface
 	req := runtimeengine.ExecutionRequest{
 		EntityID: identity.NormalizeEntityID("ent-child"),
 		FlowID:   identity.NormalizeFlowID("child"),
-		Event: events.Event{
-			Type:    events.EventType("child/child.start"),
-			Payload: json.RawMessage(`{"entity_id":"ent-child"}`),
-		}.WithEntityID("ent-child"),
+		Event: events.NewProjectionEvent("", events.EventType("child/child.start"), "", "", json.RawMessage(`{"entity_id":"ent-child"}`), 0, "", "", events.EventEnvelope{}, time.Time{}).
+			WithEntityID("ent-child"),
 		State: runtimeengine.StateSnapshot{
 			EntityID:     identity.NormalizeEntityID("ent-child"),
 			StateCarrier: runtimeengine.NewStateCarrier(map[string]any{"flow_path": "child/inst-1", "subject_id": "ent-parent", "parent_entity_id": "ent-parent"}, nil, nil),
@@ -2548,10 +2538,8 @@ func TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsForConcreteTemp
 	req := runtimeengine.ExecutionRequest{
 		EntityID: identity.NormalizeEntityID("ent-child"),
 		FlowID:   identity.NormalizeFlowID("child"),
-		Event: events.Event{
-			Type:    events.EventType("child/child.start"),
-			Payload: json.RawMessage(`{"entity_id":"ent-child"}`),
-		}.WithEntityID("ent-child"),
+		Event: events.NewProjectionEvent("", events.EventType("child/child.start"), "", "", json.RawMessage(`{"entity_id":"ent-child"}`), 0, "", "", events.EventEnvelope{}, time.Time{}).
+			WithEntityID("ent-child"),
 		State: runtimeengine.StateSnapshot{
 			EntityID:     identity.NormalizeEntityID("ent-child"),
 			StateCarrier: runtimeengine.NewStateCarrier(map[string]any{"flow_path": "child/inst-1", "subject_id": "ent-parent", "parent_entity_id": "ent-parent"}, nil, nil),
@@ -2595,10 +2583,8 @@ func TestPipelineEnginePayloadShaper_RejectsEnvelopeOnlyRequiredFieldOnActionSur
 	req := runtimeengine.ExecutionRequest{
 		EntityID: identity.NormalizeEntityID("ent-child"),
 		FlowID:   identity.NormalizeFlowID("child"),
-		Event: events.Event{
-			Type:    events.EventType("child/child.start"),
-			Payload: json.RawMessage(`{"entity_id":"ent-child"}`),
-		}.WithEntityID("ent-child"),
+		Event: events.NewProjectionEvent("", events.EventType("child/child.start"), "", "", json.RawMessage(`{"entity_id":"ent-child"}`), 0, "", "", events.EventEnvelope{}, time.Time{}).
+			WithEntityID("ent-child"),
 		State: runtimeengine.StateSnapshot{
 			EntityID:     identity.NormalizeEntityID("ent-child"),
 			StateCarrier: runtimeengine.NewStateCarrier(map[string]any{"flow_path": "child/inst-1", "subject_id": "ent-parent", "parent_entity_id": "ent-parent"}, nil, nil),
@@ -2663,10 +2649,8 @@ func TestPipelineEnginePayloadShaper_UsesRootNamedTypeSchemaForChildOutput(t *te
 	req := runtimeengine.ExecutionRequest{
 		EntityID: identity.NormalizeEntityID("ent-child"),
 		FlowID:   identity.NormalizeFlowID("child"),
-		Event: events.Event{
-			Type:    events.EventType("child/child.internal"),
-			Payload: json.RawMessage(`{"entity_id":"ent-child"}`),
-		}.WithEntityID("ent-child"),
+		Event: events.NewProjectionEvent("", events.EventType("child/child.internal"), "", "", json.RawMessage(`{"entity_id":"ent-child"}`), 0, "", "", events.EventEnvelope{}, time.Time{}).
+			WithEntityID("ent-child"),
 		State: runtimeengine.StateSnapshot{
 			EntityID:     identity.NormalizeEntityID("ent-child"),
 			StateCarrier: runtimeengine.NewStateCarrier(map[string]any{"flow_path": "child/inst-1"}, nil, nil),
@@ -2719,10 +2703,8 @@ func TestPipelineEnginePayloadShaper_RejectsUndeclaredFieldsOnActionSurface(t *t
 	req := runtimeengine.ExecutionRequest{
 		EntityID: identity.NormalizeEntityID("ent-child"),
 		FlowID:   identity.NormalizeFlowID("child"),
-		Event: events.Event{
-			Type:    events.EventType("child/child.internal"),
-			Payload: json.RawMessage(`{"entity_id":"ent-child","step":"done"}`),
-		}.WithEntityID("ent-child"),
+		Event: events.NewProjectionEvent("", events.EventType("child/child.internal"), "", "", json.RawMessage(`{"entity_id":"ent-child","step":"done"}`), 0, "", "", events.EventEnvelope{}, time.Time{}).
+			WithEntityID("ent-child"),
 		State: runtimeengine.StateSnapshot{
 			EntityID:     identity.NormalizeEntityID("ent-child"),
 			StateCarrier: runtimeengine.NewStateCarrier(map[string]any{"flow_path": "child/inst-1", "subject_id": "ent-parent", "parent_entity_id": "ent-parent"}, nil, nil),

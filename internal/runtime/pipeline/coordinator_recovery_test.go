@@ -187,23 +187,14 @@ func TestRecoveryManager_ReplaysPersistedCorrelationEnvelope(t *testing.T) {
 	parentID := uuid.NewString()
 	childID := uuid.NewString()
 
-	parent := events.Event{
-		ID:          parentID,
-		Type:        events.EventType("system.parent"),
-		SourceAgent: "runtime",
-		Payload:     []byte(`{"ok":true}`),
-		RunID:       runID,
-		CreatedAt:   time.Now().Add(-2 * time.Minute).UTC(),
-	}
-	child := events.Event{
-		ID:            childID,
-		Type:          events.EventType("system.recover"),
-		SourceAgent:   "runtime",
-		Payload:       []byte(`{"ok":true}`),
-		RunID:         runID,
-		ParentEventID: parentID,
-		CreatedAt:     time.Now().Add(-1 * time.Minute).UTC(),
-	}
+	parent := events.NewProjectionEvent(parentID,
+		events.EventType("system.parent"),
+		"runtime", "", []byte(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC())
+
+	child := events.NewProjectionEvent(childID,
+		events.EventType("system.recover"),
+		"runtime", "", []byte(`{"ok":true}`), 0, runID,
+		parentID, events.EventEnvelope{}, time.Now().Add(-1*time.Minute).UTC())
 
 	if err := pg.AppendEvent(ctx, parent); err != nil {
 		t.Fatalf("AppendEvent(parent): %v", err)
@@ -232,19 +223,19 @@ func TestRecoveryManager_ReplaysPersistedCorrelationEnvelope(t *testing.T) {
 		t.Fatalf("direct replayed events = %#v, want one replayed event", capture.direct)
 	}
 	replayed := capture.direct[0]
-	if replayed.ID != childID {
-		t.Fatalf("replayed event id = %q, want %q", replayed.ID, childID)
+	if replayed.ID() != childID {
+		t.Fatalf("replayed event id = %q, want %q", replayed.ID(), childID)
 	}
-	if replayed.RunID != runID {
-		t.Fatalf("replayed run_id = %q, want %q", replayed.RunID, runID)
+	if replayed.RunID() != runID {
+		t.Fatalf("replayed run_id = %q, want %q", replayed.RunID(), runID)
 	}
-	if replayed.ParentEventID != parentID {
-		t.Fatalf("replayed parent_event_id = %q, want %q", replayed.ParentEventID, parentID)
+	if replayed.ParentEventID() != parentID {
+		t.Fatalf("replayed parent_event_id = %q, want %q", replayed.ParentEventID(), parentID)
 	}
 	select {
 	case delivered := <-recipientCh:
-		if delivered.ID != childID {
-			t.Fatalf("delivered event id = %q, want %q", delivered.ID, childID)
+		if delivered.ID() != childID {
+			t.Fatalf("delivered event id = %q, want %q", delivered.ID(), childID)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("expected persisted recipient to receive replayed event")
@@ -275,8 +266,8 @@ func TestRecoveryManager_ReplaysPersistedCorrelationEnvelope(t *testing.T) {
 	if logEntry.Level != "info" {
 		t.Fatalf("recovery aftermath level = %q, want info", logEntry.Level)
 	}
-	if logEntry.EventType != string(child.Type) {
-		t.Fatalf("recovery aftermath event_type = %q, want %q", logEntry.EventType, child.Type)
+	if logEntry.EventType != string(child.Type()) {
+		t.Fatalf("recovery aftermath event_type = %q, want %q", logEntry.EventType, child.Type())
 	}
 	detail, _ := logEntry.Detail.(map[string]any)
 	recipients, _ := detail["persisted_recipients"].([]string)
@@ -381,13 +372,13 @@ func TestRecoveryManager_ReplaysHistoricalForkDeliveryEventReplayRows(t *testing
 		t.Fatalf("direct replayed events = %#v, want one fork-local replay", capture.direct)
 	}
 	replayed := capture.direct[0]
-	if replayed.ID != forkEventID || replayed.RunID != materialized.ForkRunID {
-		t.Fatalf("replayed event = id:%s run:%s, want fork event %s run %s", replayed.ID, replayed.RunID, forkEventID, materialized.ForkRunID)
+	if replayed.ID() != forkEventID || replayed.RunID() != materialized.ForkRunID {
+		t.Fatalf("replayed event = id:%s run:%s, want fork event %s run %s", replayed.ID(), replayed.RunID(), forkEventID, materialized.ForkRunID)
 	}
 	select {
 	case evt := <-safeAgent:
-		if evt.ID != forkEventID || evt.RunID != materialized.ForkRunID {
-			t.Fatalf("safe-agent received = id:%s run:%s, want fork event %s run %s", evt.ID, evt.RunID, forkEventID, materialized.ForkRunID)
+		if evt.ID() != forkEventID || evt.RunID() != materialized.ForkRunID {
+			t.Fatalf("safe-agent received = id:%s run:%s, want fork event %s run %s", evt.ID(), evt.RunID(), forkEventID, materialized.ForkRunID)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("expected safe-agent to receive recovered fork replay event")
@@ -461,25 +452,17 @@ func TestRecoveryManager_QuarantinesMissingPersistedRunIDAndContinues(t *testing
 	`, badEventID); err != nil {
 		t.Fatalf("seed malformed event: %v", err)
 	}
-	if err := pg.AppendEvent(ctx, events.Event{
-		ID:          goodParentID,
-		Type:        events.EventType("system.parent"),
-		SourceAgent: "runtime",
-		Payload:     []byte(`{"ok":true}`),
-		RunID:       goodRunID,
-		CreatedAt:   time.Now().Add(-2 * time.Minute).UTC(),
-	}); err != nil {
+	if err := pg.AppendEvent(ctx, events.NewProjectionEvent(goodParentID,
+		events.EventType("system.parent"),
+		"runtime", "", []byte(`{"ok":true}`), 0, goodRunID, "", events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC()),
+	); err != nil {
 		t.Fatalf("AppendEvent(good parent): %v", err)
 	}
-	if err := pg.AppendEvent(ctx, events.Event{
-		ID:            goodEventID,
-		Type:          events.EventType("system.recover.good"),
-		SourceAgent:   "runtime",
-		Payload:       []byte(`{"ok":true}`),
-		RunID:         goodRunID,
-		ParentEventID: goodParentID,
-		CreatedAt:     time.Now().Add(-1 * time.Minute).UTC(),
-	}); err != nil {
+	if err := pg.AppendEvent(ctx, events.NewProjectionEvent(goodEventID,
+		events.EventType("system.recover.good"),
+		"runtime", "", []byte(`{"ok":true}`), 0, goodRunID,
+		goodParentID, events.EventEnvelope{}, time.Now().Add(-1*time.Minute).UTC()),
+	); err != nil {
 		t.Fatalf("AppendEvent(good child): %v", err)
 	}
 	if err := pg.InsertEventDeliveries(ctx, goodEventID, []string{goodRecipientID}); err != nil {
@@ -498,13 +481,13 @@ func TestRecoveryManager_QuarantinesMissingPersistedRunIDAndContinues(t *testing
 	if len(capture.direct) != 1 {
 		t.Fatalf("direct replayed events = %#v, want one valid replay", capture.direct)
 	}
-	if capture.direct[0].ID != goodEventID {
-		t.Fatalf("published event id = %q, want %q", capture.direct[0].ID, goodEventID)
+	if capture.direct[0].ID() != goodEventID {
+		t.Fatalf("published event id = %q, want %q", capture.direct[0].ID(), goodEventID)
 	}
 	select {
 	case delivered := <-goodRecipientCh:
-		if delivered.ID != goodEventID {
-			t.Fatalf("delivered event id = %q, want %q", delivered.ID, goodEventID)
+		if delivered.ID() != goodEventID {
+			t.Fatalf("delivered event id = %q, want %q", delivered.ID(), goodEventID)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("expected valid replay recipient to receive event")
@@ -553,14 +536,10 @@ func TestRecoveryManager_QuarantinesMissingRunIDSchemaCapability(t *testing.T) {
 
 	eventID := uuid.NewString()
 	parentID := uuid.NewString()
-	if err := pg.AppendEvent(ctx, events.Event{
-		ID:            eventID,
-		Type:          events.EventType("system.recover.no-run-id"),
-		SourceAgent:   "runtime",
-		Payload:       []byte(`{"ok":true}`),
-		ParentEventID: parentID,
-		CreatedAt:     time.Now().Add(-time.Minute).UTC(),
-	}); err != nil {
+	if err := pg.AppendEvent(ctx, events.NewProjectionEvent(eventID,
+		events.EventType("system.recover.no-run-id"),
+		"runtime", "", []byte(`{"ok":true}`), 0, "", parentID, events.EventEnvelope{}, time.Now().Add(-time.Minute).UTC()),
+	); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
 
@@ -604,25 +583,17 @@ func TestRecoveryManager_ClaimsReplayOwnershipUnderOverlap(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if err := pg1.AppendEvent(ctx, events.Event{
-		ID:          parentID,
-		Type:        events.EventType("system.parent"),
-		SourceAgent: "runtime",
-		Payload:     []byte(`{"ok":true}`),
-		RunID:       runID,
-		CreatedAt:   time.Now().Add(-2 * time.Minute).UTC(),
-	}); err != nil {
+	if err := pg1.AppendEvent(ctx, events.NewProjectionEvent(parentID,
+		events.EventType("system.parent"),
+		"runtime", "", []byte(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC()),
+	); err != nil {
 		t.Fatalf("AppendEvent(parent): %v", err)
 	}
-	if err := pg1.AppendEvent(ctx, events.Event{
-		ID:            childID,
-		Type:          events.EventType("system.recover"),
-		SourceAgent:   "runtime",
-		Payload:       []byte(`{"ok":true}`),
-		RunID:         runID,
-		ParentEventID: parentID,
-		CreatedAt:     time.Now().Add(-time.Minute).UTC(),
-	}); err != nil {
+	if err := pg1.AppendEvent(ctx, events.NewProjectionEvent(childID,
+		events.EventType("system.recover"),
+		"runtime", "", []byte(`{"ok":true}`), 0, runID,
+		parentID, events.EventEnvelope{}, time.Now().Add(-time.Minute).UTC()),
+	); err != nil {
 		t.Fatalf("AppendEvent(child): %v", err)
 	}
 	if err := pg1.InsertEventDeliveries(ctx, childID, []string{"agent-recovery"}); err != nil {
@@ -698,23 +669,14 @@ func TestRecoveryManager_ExplicitlySkipsReplayWithoutPersistedRecipients(t *test
 	parentID := uuid.NewString()
 	childID := uuid.NewString()
 
-	parent := events.Event{
-		ID:          parentID,
-		Type:        events.EventType("system.parent"),
-		SourceAgent: "runtime",
-		Payload:     []byte(`{"ok":true}`),
-		RunID:       runID,
-		CreatedAt:   time.Now().Add(-2 * time.Minute).UTC(),
-	}
-	child := events.Event{
-		ID:            childID,
-		Type:          events.EventType("system.recover.no_recipients"),
-		SourceAgent:   "runtime",
-		Payload:       []byte(`{"ok":true}`),
-		RunID:         runID,
-		ParentEventID: parentID,
-		CreatedAt:     time.Now().Add(-1 * time.Minute).UTC(),
-	}
+	parent := events.NewProjectionEvent(parentID,
+		events.EventType("system.parent"),
+		"runtime", "", []byte(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC())
+
+	child := events.NewProjectionEvent(childID,
+		events.EventType("system.recover.no_recipients"),
+		"runtime", "", []byte(`{"ok":true}`), 0, runID,
+		parentID, events.EventEnvelope{}, time.Now().Add(-1*time.Minute).UTC())
 
 	if err := pg.AppendEvent(ctx, parent); err != nil {
 		t.Fatalf("AppendEvent(parent): %v", err)
@@ -813,28 +775,19 @@ func TestRecoveryManager_UsesPersistedDeliveryRecipientsInsteadOfCurrentSubscrip
 	eventID := uuid.NewString()
 	entityID := uuid.NewString()
 
-	if err := pg.AppendEvent(ctx, events.Event{
-		ID:          parentID,
-		Type:        events.EventType("system.parent"),
-		SourceAgent: "runtime",
-		Payload:     []byte(`{"entity_id":"` + entityID + `"}`),
-		RunID:       runID,
-		CreatedAt:   time.Now().Add(-2 * time.Minute).UTC(),
-	}.WithEntityID(entityID)); err != nil {
+	if err := pg.AppendEvent(ctx, events.NewProjectionEvent(parentID,
+		events.EventType("system.parent"),
+		"runtime", "", []byte(`{"entity_id":"`+entityID+`"}`), 0, runID, "", events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC()).
+		WithEntityID(entityID)); err != nil {
 		t.Fatalf("AppendEvent(parent): %v", err)
 	}
 	if err := pg.UpsertPipelineReceipt(ctx, parentID, "processed", ""); err != nil {
 		t.Fatalf("UpsertPipelineReceipt(parent): %v", err)
 	}
-	child := (events.Event{
-		ID:            eventID,
-		Type:          events.EventType("system.recover.explicit"),
-		SourceAgent:   "runtime",
-		Payload:       []byte(`{"entity_id":"` + entityID + `"}`),
-		RunID:         runID,
-		ParentEventID: parentID,
-		CreatedAt:     time.Now().Add(-time.Minute).UTC(),
-	}).WithEntityID(entityID)
+	child := (events.NewProjectionEvent(eventID,
+		events.EventType("system.recover.explicit"),
+		"runtime", "", []byte(`{"entity_id":"`+entityID+`"}`), 0, runID,
+		parentID, events.EventEnvelope{}, time.Now().Add(-time.Minute).UTC())).WithEntityID(entityID)
 	if err := pg.AppendEvent(ctx, child); err != nil {
 		t.Fatalf("AppendEvent(child): %v", err)
 	}
@@ -850,13 +803,13 @@ func TestRecoveryManager_UsesPersistedDeliveryRecipientsInsteadOfCurrentSubscrip
 	if err := rm.Recover(ctx); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
-	if len(capture.direct) != 1 || capture.direct[0].ID != eventID {
+	if len(capture.direct) != 1 || capture.direct[0].ID() != eventID {
 		t.Fatalf("direct replayed events = %#v, want [%s]", capture.direct, eventID)
 	}
 	select {
 	case evt := <-agentA:
-		if evt.ID != eventID {
-			t.Fatalf("agent-a replayed event id = %q, want %q", evt.ID, eventID)
+		if evt.ID() != eventID {
+			t.Fatalf("agent-a replayed event id = %q, want %q", evt.ID(), eventID)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("expected agent-a to receive replayed event")
@@ -898,28 +851,20 @@ func TestRecoveryManager_ReplaysSubscribedInternalOnlyUsingCommittedReplayScope(
 	parentID := uuid.NewString()
 	eventID := uuid.NewString()
 
-	if err := pg.AppendEvent(ctx, events.Event{
-		ID:          parentID,
-		Type:        events.EventType("system.parent"),
-		SourceAgent: "runtime",
-		Payload:     []byte(`{"ok":true}`),
-		RunID:       runID,
-		CreatedAt:   time.Now().Add(-2 * time.Minute).UTC(),
-	}); err != nil {
+	if err := pg.AppendEvent(ctx, events.NewProjectionEvent(parentID,
+		events.EventType("system.parent"),
+		"runtime", "", []byte(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC()),
+	); err != nil {
 		t.Fatalf("AppendEvent(parent): %v", err)
 	}
 	if err := pg.UpsertPipelineReceipt(ctx, parentID, "processed", ""); err != nil {
 		t.Fatalf("UpsertPipelineReceipt(parent): %v", err)
 	}
-	if err := pg.AppendEvent(ctx, events.Event{
-		ID:            eventID,
-		Type:          events.EventType("system.recover.internal"),
-		SourceAgent:   "runtime",
-		Payload:       []byte(`{"ok":true}`),
-		RunID:         runID,
-		ParentEventID: parentID,
-		CreatedAt:     time.Now().Add(-time.Minute).UTC(),
-	}); err != nil {
+	if err := pg.AppendEvent(ctx, events.NewProjectionEvent(eventID,
+		events.EventType("system.recover.internal"),
+		"runtime", "", []byte(`{"ok":true}`), 0, runID,
+		parentID, events.EventEnvelope{}, time.Now().Add(-time.Minute).UTC()),
+	); err != nil {
 		t.Fatalf("AppendEvent(child): %v", err)
 	}
 	persistCommittedReplayScope(t, ctx, pg, eventID, runtimereplayclaim.CommittedReplayScopeSubscribed)
@@ -930,13 +875,13 @@ func TestRecoveryManager_ReplaysSubscribedInternalOnlyUsingCommittedReplayScope(
 	if err := rm.Recover(ctx); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
-	if len(capture.direct) != 1 || capture.direct[0].ID != eventID {
+	if len(capture.direct) != 1 || capture.direct[0].ID() != eventID {
 		t.Fatalf("direct replayed events = %#v, want [%s]", capture.direct, eventID)
 	}
 	select {
 	case evt := <-internalCh:
-		if evt.ID != eventID {
-			t.Fatalf("internal replayed event id = %q, want %q", evt.ID, eventID)
+		if evt.ID() != eventID {
+			t.Fatalf("internal replayed event id = %q, want %q", evt.ID(), eventID)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("expected internal subscriber to receive replayed subscribed event")
@@ -959,28 +904,20 @@ func TestRecoveryManager_DirectEmptyManifestDoesNotBroadenToCurrentInternalSubsc
 	parentID := uuid.NewString()
 	eventID := uuid.NewString()
 
-	if err := pg.AppendEvent(ctx, events.Event{
-		ID:          parentID,
-		Type:        events.EventType("system.parent"),
-		SourceAgent: "runtime",
-		Payload:     []byte(`{"ok":true}`),
-		RunID:       runID,
-		CreatedAt:   time.Now().Add(-2 * time.Minute).UTC(),
-	}); err != nil {
+	if err := pg.AppendEvent(ctx, events.NewProjectionEvent(parentID,
+		events.EventType("system.parent"),
+		"runtime", "", []byte(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC()),
+	); err != nil {
 		t.Fatalf("AppendEvent(parent): %v", err)
 	}
 	if err := pg.UpsertPipelineReceipt(ctx, parentID, "processed", ""); err != nil {
 		t.Fatalf("UpsertPipelineReceipt(parent): %v", err)
 	}
-	if err := pg.AppendEvent(ctx, events.Event{
-		ID:            eventID,
-		Type:          events.EventType("system.recover.direct_empty"),
-		SourceAgent:   "runtime",
-		Payload:       []byte(`{"ok":true}`),
-		RunID:         runID,
-		ParentEventID: parentID,
-		CreatedAt:     time.Now().Add(-time.Minute).UTC(),
-	}); err != nil {
+	if err := pg.AppendEvent(ctx, events.NewProjectionEvent(eventID,
+		events.EventType("system.recover.direct_empty"),
+		"runtime", "", []byte(`{"ok":true}`), 0, runID,
+		parentID, events.EventEnvelope{}, time.Now().Add(-time.Minute).UTC()),
+	); err != nil {
 		t.Fatalf("AppendEvent(child): %v", err)
 	}
 	persistCommittedReplayScope(t, ctx, pg, eventID, runtimereplayclaim.CommittedReplayScopeDirect)
@@ -1005,12 +942,9 @@ func TestRecoveryManager_DirectEmptyManifestDoesNotBroadenToCurrentInternalSubsc
 func TestRecoveryManager_FailsClosedWithoutReplayClaimOwner(t *testing.T) {
 	store := &recoveryMissingClaimStore{
 		events: []events.PersistedReplayEvent{
-			{Event: events.Event{
-				ID:        "evt-missing-claim",
-				Type:      events.EventType("system.recover"),
-				Payload:   []byte(`{"ok":true}`),
-				CreatedAt: time.Now().UTC(),
-			}},
+			{Event: events.NewProjectionEvent("evt-missing-claim",
+				events.EventType("system.recover"), "", "", []byte(`{"ok":true}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
+			},
 		},
 		deliveries: map[string][]string{"evt-missing-claim": {"agent-a"}},
 	}
