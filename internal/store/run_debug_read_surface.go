@@ -696,11 +696,7 @@ func (s *PostgresStore) loadRunDebugFailureDeliveries(ctx context.Context, runID
 		INNER JOIN events e ON e.event_id = d.event_id
 		WHERE d.run_id = $1::uuid
 		  AND NOT (COALESCE(d.subscriber_type, '') = $3 AND COALESCE(d.subscriber_id, '') = $4)
-		  AND (
-			COALESCE(d.status, '') IN ('failed', 'dead_letter')
-			OR COALESCE(d.reason_code, '') <> ''
-			OR COALESCE(d.last_error, '') <> ''
-		  )
+		  AND COALESCE(d.status, '') IN ('failed', 'dead_letter')
 		ORDER BY COALESCE(d.delivered_at, d.started_at, d.created_at, e.created_at) DESC, d.delivery_id::text DESC
 		LIMIT $2
 	`, runID, limit, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID)

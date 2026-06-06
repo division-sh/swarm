@@ -332,11 +332,7 @@ func (s *SQLiteRuntimeStore) sqliteRunDebugFailureDeliveries(ctx context.Context
 		INNER JOIN events e ON e.event_id = d.event_id
 		WHERE d.run_id = ?
 		  AND NOT (COALESCE(d.subscriber_type, '') = ? AND COALESCE(d.subscriber_id, '') = ?)
-		  AND (
-			COALESCE(d.status, '') IN ('failed', 'dead_letter')
-			OR COALESCE(d.reason_code, '') <> ''
-			OR COALESCE(d.last_error, '') <> ''
-		  )
+		  AND COALESCE(d.status, '') IN ('failed', 'dead_letter')
 		ORDER BY COALESCE(d.delivered_at, d.started_at, d.created_at, e.created_at) DESC, d.delivery_id DESC
 		LIMIT ?
 	`, runID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID, limit)

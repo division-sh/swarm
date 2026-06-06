@@ -215,6 +215,15 @@ func TestRunDebugReadSurface_LoadRunDebugReport_UsesCanonicalRunIDForLogsAndMuta
 		`, targetRunID, targetEventID, now.Add(10*time.Second), now.Add(5*time.Second)); err != nil {
 		t.Fatalf("seed delivery: %v", err)
 	}
+	successDeliveryID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+			INSERT INTO event_deliveries (
+				delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, last_error, delivered_at, created_at
+			)
+			VALUES ($1::uuid, $2::uuid, $3::uuid, 'node', 'node-success', 'delivered', 0, 'node_processed', '', $4, $5)
+		`, successDeliveryID, targetRunID, targetEventID, now.Add(20*time.Second), now.Add(15*time.Second)); err != nil {
+		t.Fatalf("seed successful delivery: %v", err)
+	}
 	if err := runtimedeadletters.Insert(ctx, db, runtimedeadletters.Record{
 		OriginalEventID: targetEventID,
 		OriginalEvent:   "scan.requested",
@@ -265,14 +274,17 @@ func TestRunDebugReadSurface_LoadRunDebugReport_UsesCanonicalRunIDForLogsAndMuta
 	if len(report.DeadLetters) != 1 {
 		t.Fatalf("DeadLetters len = %d, want 1", len(report.DeadLetters))
 	}
-	if len(report.Deliveries) != 1 {
-		t.Fatalf("Deliveries len = %d, want 1", len(report.Deliveries))
+	if len(report.Deliveries) != 2 {
+		t.Fatalf("Deliveries len = %d, want 2", len(report.Deliveries))
 	}
 	if len(report.FailedDeliveries) != 1 {
 		t.Fatalf("FailedDeliveries len = %d, want 1: %#v", len(report.FailedDeliveries), report.FailedDeliveries)
 	}
 	if got := report.FailedDeliveries[0]; got.SubscriberType != "agent" || got.RetryCount != 2 || got.RetryEligible || !got.Terminal || len(got.DeadLetters) != 1 {
 		t.Fatalf("FailedDeliveries[0] = %#v", got)
+	}
+	if report.FailedDeliveries[0].DeliveryID == successDeliveryID {
+		t.Fatalf("successful delivered/node_processed delivery appeared in FailedDeliveries: %#v", report.FailedDeliveries)
 	}
 }
 
