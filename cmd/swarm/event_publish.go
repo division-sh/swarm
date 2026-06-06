@@ -46,12 +46,21 @@ type eventPublishResult struct {
 }
 
 type eventPublishDelivery struct {
-	DeliveryID     string `json:"delivery_id"`
-	SubscriberType string `json:"subscriber_type"`
-	SubscriberID   string `json:"subscriber_id"`
-	SessionID      string `json:"session_id,omitempty"`
-	Status         string `json:"status"`
-	Attempt        int    `json:"attempt"`
+	DeliveryID     string            `json:"delivery_id"`
+	SubscriberType string            `json:"subscriber_type"`
+	SubscriberID   string            `json:"subscriber_id"`
+	SessionID      string            `json:"session_id,omitempty"`
+	Status         string            `json:"status"`
+	ReasonCode     string            `json:"reason_code,omitempty"`
+	LastError      string            `json:"last_error,omitempty"`
+	Attempt        int               `json:"attempt"`
+	RetryCount     int               `json:"retry_count"`
+	RetryEligible  bool              `json:"retry_eligible"`
+	Terminal       bool              `json:"terminal"`
+	CreatedAt      string            `json:"created_at,omitempty"`
+	StartedAt      string            `json:"started_at,omitempty"`
+	FinishedAt     string            `json:"finished_at,omitempty"`
+	DeadLetters    []eventDeadLetter `json:"dead_letters,omitempty"`
 }
 
 func newEventPublishCommand(opts rootCommandOptions) *cobra.Command {
@@ -253,6 +262,14 @@ func validateEventPublishDelivery(prefix string, delivery eventPublishDelivery) 
 	if delivery.Attempt < 1 {
 		return fmt.Errorf("malformed event.publish result: %s.attempt must be >= 1", prefix)
 	}
+	if delivery.RetryCount < 0 {
+		return fmt.Errorf("malformed event.publish result: %s.retry_count must be >= 0", prefix)
+	}
+	for i, deadLetter := range delivery.DeadLetters {
+		if err := validateEventDeadLetter(fmt.Sprintf("%s.dead_letters[%d]", prefix, i), deadLetter); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -268,13 +285,19 @@ func writeEventPublishResult(out io.Writer, eventName string, result eventPublis
 		len(result.Deliveries),
 	)
 	for _, delivery := range result.Deliveries {
-		fmt.Fprintf(out, "delivery delivery_id=%s subscriber=%s/%s status=%s session_id=%s attempt=%d\n",
+		fmt.Fprintf(out, "delivery delivery_id=%s subscriber=%s/%s status=%s session_id=%s attempt=%d retry_count=%d retry_eligible=%t terminal=%t reason_code=%s last_error=%s dead_letters=%d\n",
 			delivery.DeliveryID,
 			delivery.SubscriberType,
 			delivery.SubscriberID,
 			delivery.Status,
 			eventObservationDash(delivery.SessionID),
 			delivery.Attempt,
+			delivery.RetryCount,
+			delivery.RetryEligible,
+			delivery.Terminal,
+			eventObservationDash(delivery.ReasonCode),
+			eventObservationDash(delivery.LastError),
+			len(delivery.DeadLetters),
 		)
 	}
 	if sourceEventID := strings.TrimSpace(result.SourceEventID); sourceEventID != "" {

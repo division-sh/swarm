@@ -65,11 +65,12 @@ type diagnosticRunGetResult struct {
 }
 
 type diagnosticRunDiagnosisResult struct {
-	Run              diagnosticRunHeader `json:"run"`
-	OperationalState *string             `json:"operational_state"`
-	BlockingLayer    *string             `json:"blocking_layer"`
-	BlockingReason   *string             `json:"blocking_reason"`
-	Heuristics       []string            `json:"heuristics"`
+	Run              diagnosticRunHeader            `json:"run"`
+	OperationalState *string                        `json:"operational_state"`
+	BlockingLayer    *string                        `json:"blocking_layer"`
+	BlockingReason   *string                        `json:"blocking_reason"`
+	Heuristics       []string                       `json:"heuristics"`
+	FailedDeliveries []diagnosticRunFailureDelivery `json:"failed_deliveries"`
 }
 
 type diagnosticRunTraceResult struct {
@@ -106,16 +107,41 @@ type diagnosticRunHeader struct {
 }
 
 type diagnosticRunTraceRow struct {
-	EventID              string `json:"event_id"`
-	EventName            string `json:"event_name"`
-	EventCreatedAt       string `json:"event_created_at"`
-	EntityID             string `json:"entity_id,omitempty"`
-	DeliveryStatus       string `json:"delivery_status,omitempty"`
-	SubscriberType       string `json:"subscriber_type,omitempty"`
-	SubscriberID         string `json:"subscriber_id,omitempty"`
-	SessionID            string `json:"session_id,omitempty"`
-	TurnID               string `json:"turn_id,omitempty"`
-	TurnTriggerEventType string `json:"turn_trigger_event_type,omitempty"`
+	EventID               string `json:"event_id"`
+	EventName             string `json:"event_name"`
+	EventCreatedAt        string `json:"event_created_at"`
+	EntityID              string `json:"entity_id,omitempty"`
+	DeliveryStatus        string `json:"delivery_status,omitempty"`
+	DeliveryReasonCode    string `json:"delivery_reason_code,omitempty"`
+	DeliveryLastError     string `json:"delivery_last_error,omitempty"`
+	DeliveryRetryCount    int    `json:"delivery_retry_count,omitempty"`
+	DeliveryRetryEligible bool   `json:"delivery_retry_eligible,omitempty"`
+	DeliveryTerminal      bool   `json:"delivery_terminal,omitempty"`
+	SubscriberType        string `json:"subscriber_type,omitempty"`
+	SubscriberID          string `json:"subscriber_id,omitempty"`
+	SessionID             string `json:"session_id,omitempty"`
+	TurnID                string `json:"turn_id,omitempty"`
+	TurnTriggerEventType  string `json:"turn_trigger_event_type,omitempty"`
+}
+
+type diagnosticRunFailureDelivery struct {
+	EventID        string            `json:"event_id"`
+	EventName      string            `json:"event_name"`
+	EntityID       string            `json:"entity_id,omitempty"`
+	DeliveryID     string            `json:"delivery_id"`
+	SubscriberType string            `json:"subscriber_type"`
+	SubscriberID   string            `json:"subscriber_id"`
+	SessionID      string            `json:"session_id,omitempty"`
+	Status         string            `json:"status"`
+	ReasonCode     string            `json:"reason_code,omitempty"`
+	LastError      string            `json:"last_error,omitempty"`
+	RetryCount     int               `json:"retry_count"`
+	RetryEligible  bool              `json:"retry_eligible"`
+	Terminal       bool              `json:"terminal"`
+	CreatedAt      string            `json:"created_at,omitempty"`
+	StartedAt      string            `json:"started_at,omitempty"`
+	FinishedAt     string            `json:"finished_at,omitempty"`
+	DeadLetters    []eventDeadLetter `json:"dead_letters,omitempty"`
 }
 
 var diagnosticValidRunStatuses = map[string]struct{}{
@@ -966,6 +992,44 @@ func validateDiagnosticRunDiagnosis(result diagnosticRunDiagnosisResult) error {
 	if result.Heuristics == nil {
 		return fmt.Errorf("malformed run.diagnose result: heuristics is required")
 	}
+	for i, delivery := range result.FailedDeliveries {
+		if err := validateDiagnosticRunFailureDelivery(fmt.Sprintf("failed_deliveries[%d]", i), delivery); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateDiagnosticRunFailureDelivery(prefix string, delivery diagnosticRunFailureDelivery) error {
+	for _, field := range []struct {
+		name  string
+		value string
+	}{
+		{name: "event_id", value: delivery.EventID},
+		{name: "event_name", value: delivery.EventName},
+		{name: "delivery_id", value: delivery.DeliveryID},
+		{name: "subscriber_type", value: delivery.SubscriberType},
+		{name: "subscriber_id", value: delivery.SubscriberID},
+		{name: "status", value: delivery.Status},
+	} {
+		if strings.TrimSpace(field.value) == "" {
+			return fmt.Errorf("malformed run.diagnose result: %s.%s is required", prefix, field.name)
+		}
+	}
+	if _, ok := eventObservationValidSubscriberTypes[strings.TrimSpace(delivery.SubscriberType)]; !ok {
+		return fmt.Errorf("malformed run.diagnose result: %s.subscriber_type=%q is not a valid SubscriberType", prefix, delivery.SubscriberType)
+	}
+	if _, ok := eventObservationValidDeliveryStatuses[strings.TrimSpace(delivery.Status)]; !ok {
+		return fmt.Errorf("malformed run.diagnose result: %s.status=%q is not a valid DeliveryStatus", prefix, delivery.Status)
+	}
+	if delivery.RetryCount < 0 {
+		return fmt.Errorf("malformed run.diagnose result: %s.retry_count must be >= 0", prefix)
+	}
+	for i, deadLetter := range delivery.DeadLetters {
+		if err := validateEventDeadLetter(fmt.Sprintf("%s.dead_letters[%d]", prefix, i), deadLetter); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -1126,11 +1190,32 @@ func writeDiagnosticRunDiagnosis(out io.Writer, result diagnosticRunDiagnosisRes
 	)
 	if len(result.Heuristics) == 0 {
 		fmt.Fprintln(out, "heuristics=none")
+	} else {
+		fmt.Fprintln(out, "heuristics:")
+		for _, item := range result.Heuristics {
+			fmt.Fprintf(out, "- %s\n", item)
+		}
+	}
+	if len(result.FailedDeliveries) == 0 {
+		fmt.Fprintln(out, "failed_deliveries=none")
 		return
 	}
-	fmt.Fprintln(out, "heuristics:")
-	for _, item := range result.Heuristics {
-		fmt.Fprintf(out, "- %s\n", item)
+	fmt.Fprintln(out, "failed_deliveries:")
+	for _, delivery := range result.FailedDeliveries {
+		fmt.Fprintf(out, "  event_id=%s event_name=%s delivery_id=%s subscriber=%s/%s status=%s reason_code=%s last_error=%s retry_count=%d retry_eligible=%t terminal=%t dead_letters=%d\n",
+			delivery.EventID,
+			delivery.EventName,
+			delivery.DeliveryID,
+			delivery.SubscriberType,
+			delivery.SubscriberID,
+			delivery.Status,
+			emptyDash(delivery.ReasonCode),
+			emptyDash(delivery.LastError),
+			delivery.RetryCount,
+			delivery.RetryEligible,
+			delivery.Terminal,
+			len(delivery.DeadLetters),
+		)
 	}
 }
 

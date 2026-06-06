@@ -56,14 +56,20 @@ type OperatorEventFull struct {
 }
 
 type OperatorEventDelivery struct {
-	DeliveryID     string `json:"delivery_id"`
-	SubscriberType string `json:"subscriber_type"`
-	SubscriberID   string `json:"subscriber_id"`
-	SessionID      string `json:"session_id,omitempty"`
-	Status         string `json:"status"`
-	ReasonCode     string `json:"reason_code,omitempty"`
-	LastError      string `json:"last_error,omitempty"`
-	RetryCount     int    `json:"-"`
+	DeliveryID     string                     `json:"delivery_id"`
+	SubscriberType string                     `json:"subscriber_type"`
+	SubscriberID   string                     `json:"subscriber_id"`
+	SessionID      string                     `json:"session_id,omitempty"`
+	Status         string                     `json:"status"`
+	ReasonCode     string                     `json:"reason_code,omitempty"`
+	LastError      string                     `json:"last_error,omitempty"`
+	RetryCount     int                        `json:"retry_count"`
+	RetryEligible  bool                       `json:"retry_eligible"`
+	Terminal       bool                       `json:"terminal"`
+	CreatedAt      *time.Time                 `json:"created_at,omitempty"`
+	StartedAt      *time.Time                 `json:"started_at,omitempty"`
+	FinishedAt     *time.Time                 `json:"finished_at,omitempty"`
+	DeadLetters    []OperatorDeadLetterRecord `json:"dead_letters,omitempty"`
 }
 
 type OperatorDeadLetterRecord struct {
@@ -183,7 +189,7 @@ func (s *PostgresStore) requireOperatorObservabilityCapabilities(ctx context.Con
 		},
 		"event_deliveries": {
 			"delivery_id", "run_id", "event_id", "subscriber_type", "subscriber_id",
-			"status", "retry_count", "reason_code", "last_error", "active_session_id", "created_at",
+			"status", "retry_count", "reason_code", "last_error", "active_session_id", "created_at", "started_at", "delivered_at",
 		},
 		"dead_letters": {
 			"dead_letter_id", "original_event_id", "failure_type", "error_message",
@@ -381,15 +387,15 @@ func (s *PostgresStore) LoadOperatorEvent(ctx context.Context, eventID string) (
 		return OperatorEventFull{}, fmt.Errorf("decode operator event payload: %w", err)
 	}
 	event.Payload = payload
-	deliveries, err := s.loadOperatorEventDeliveries(ctx, event.EventID)
-	if err != nil {
-		return OperatorEventFull{}, err
-	}
 	deadLetters, err := s.loadOperatorEventDeadLetters(ctx, event.EventID)
 	if err != nil {
 		return OperatorEventFull{}, err
 	}
-	event.Deliveries = deliveries
+	deliveries, err := s.loadOperatorEventDeliveries(ctx, event.EventID)
+	if err != nil {
+		return OperatorEventFull{}, err
+	}
+	event.Deliveries = EnrichOperatorDeliveryFailureEvidence(deliveries, deadLetters)
 	event.DeadLetters = deadLetters
 	if event.Deliveries == nil {
 		event.Deliveries = []OperatorEventDelivery{}
@@ -407,11 +413,14 @@ func (s *PostgresStore) loadOperatorEventDeliveries(ctx context.Context, eventID
 			COALESCE(d.subscriber_type, ''),
 			COALESCE(d.subscriber_id, ''),
 			COALESCE(d.active_session_id::text, ''),
-			COALESCE(d.status, ''),
-			COALESCE(d.reason_code, ''),
-			COALESCE(d.last_error, ''),
-			COALESCE(d.retry_count, 0)
-		FROM event_deliveries d
+				COALESCE(d.status, ''),
+				COALESCE(d.reason_code, ''),
+				COALESCE(d.last_error, ''),
+				COALESCE(d.retry_count, 0),
+				d.created_at,
+				d.started_at,
+				d.delivered_at
+			FROM event_deliveries d
 		WHERE d.event_id::text = $1
 		ORDER BY d.created_at ASC, d.delivery_id::text ASC
 	`, eventID)
@@ -422,15 +431,70 @@ func (s *PostgresStore) loadOperatorEventDeliveries(ctx context.Context, eventID
 	out := []OperatorEventDelivery{}
 	for rows.Next() {
 		var item OperatorEventDelivery
-		if err := rows.Scan(&item.DeliveryID, &item.SubscriberType, &item.SubscriberID, &item.SessionID, &item.Status, &item.ReasonCode, &item.LastError, &item.RetryCount); err != nil {
+		var createdAt, startedAt, finishedAt sql.NullTime
+		if err := rows.Scan(&item.DeliveryID, &item.SubscriberType, &item.SubscriberID, &item.SessionID, &item.Status, &item.ReasonCode, &item.LastError, &item.RetryCount, &createdAt, &startedAt, &finishedAt); err != nil {
 			return nil, fmt.Errorf("scan operator event delivery: %w", err)
 		}
+		item.CreatedAt = nullTimePtr(createdAt)
+		item.StartedAt = nullTimePtr(startedAt)
+		item.FinishedAt = nullTimePtr(finishedAt)
 		out = append(out, item)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("read operator event deliveries: %w", err)
 	}
 	return out, nil
+}
+
+func EnrichOperatorEventFailureEvidence(event OperatorEventFull) OperatorEventFull {
+	event.Deliveries = EnrichOperatorDeliveryFailureEvidence(event.Deliveries, event.DeadLetters)
+	if event.Deliveries == nil {
+		event.Deliveries = []OperatorEventDelivery{}
+	}
+	if event.DeadLetters == nil {
+		event.DeadLetters = []OperatorDeadLetterRecord{}
+	}
+	return event
+}
+
+func EnrichOperatorDeliveryFailureEvidence(deliveries []OperatorEventDelivery, deadLetters []OperatorDeadLetterRecord) []OperatorEventDelivery {
+	out := make([]OperatorEventDelivery, 0, len(deliveries))
+	for _, delivery := range deliveries {
+		delivery.Status = strings.TrimSpace(delivery.Status)
+		delivery.ReasonCode = strings.TrimSpace(delivery.ReasonCode)
+		delivery.LastError = strings.TrimSpace(delivery.LastError)
+		delivery.RetryEligible = OperatorDeliveryRetryEligible(delivery.Status)
+		delivery.Terminal = OperatorDeliveryTerminal(delivery.Status)
+		if delivery.Status == "dead_letter" && len(deadLetters) > 0 {
+			delivery.DeadLetters = append([]OperatorDeadLetterRecord(nil), deadLetters...)
+		}
+		out = append(out, delivery)
+	}
+	if out == nil {
+		return []OperatorEventDelivery{}
+	}
+	return out
+}
+
+func OperatorDeliveryRetryEligible(status string) bool {
+	return strings.TrimSpace(status) == "failed"
+}
+
+func OperatorDeliveryTerminal(status string) bool {
+	switch strings.TrimSpace(status) {
+	case "delivered", "dead_letter":
+		return true
+	default:
+		return false
+	}
+}
+
+func nullTimePtr(value sql.NullTime) *time.Time {
+	if !value.Valid {
+		return nil
+	}
+	at := value.Time.UTC()
+	return &at
 }
 
 func (s *PostgresStore) loadOperatorEventDeadLetters(ctx context.Context, eventID string) ([]OperatorDeadLetterRecord, error) {

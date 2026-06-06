@@ -33,9 +33,11 @@ func TestOperatorObservabilityEventOwnerFiltersDetailsAndCursor(t *testing.T) {
 		t.Fatalf("seed events: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, last_error, created_at)
-		VALUES ($1::uuid, $2::uuid, 'agent', 'agent-a', 'dead_letter', 3, 'retry_exhausted', 'boom', $3)
-	`, runID, olderEventID, base.Add(time.Second)); err != nil {
+			INSERT INTO event_deliveries (run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, last_error, created_at)
+			VALUES
+				($1::uuid, $2::uuid, 'agent', 'agent-a', 'dead_letter', 3, 'retry_exhausted', 'boom', $3),
+				($1::uuid, $2::uuid, 'node', 'node-a', 'failed', 1, 'handler_error', 'node boom', $4)
+		`, runID, olderEventID, base.Add(time.Second), base.Add(1500*time.Millisecond)); err != nil {
 		t.Fatalf("seed delivery: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -69,6 +71,17 @@ func TestOperatorObservabilityEventOwnerFiltersDetailsAndCursor(t *testing.T) {
 	got := filtered.Events[0]
 	if got.EventID != olderEventID || got.Source != "agent-a" || got.Deliveries[0].ReasonCode != "retry_exhausted" || len(got.DeadLetters) != 1 {
 		t.Fatalf("filtered event = %#v", got)
+	}
+	if len(got.Deliveries) != 2 {
+		t.Fatalf("deliveries len = %d, want 2", len(got.Deliveries))
+	}
+	agentDelivery := got.Deliveries[0]
+	if agentDelivery.SubscriberType != "agent" || agentDelivery.RetryCount != 3 || agentDelivery.RetryEligible || !agentDelivery.Terminal || len(agentDelivery.DeadLetters) != 1 {
+		t.Fatalf("agent delivery evidence = %#v", agentDelivery)
+	}
+	nodeDelivery := got.Deliveries[1]
+	if nodeDelivery.SubscriberType != "node" || nodeDelivery.RetryCount != 1 || !nodeDelivery.RetryEligible || nodeDelivery.Terminal || nodeDelivery.LastError != "node boom" {
+		t.Fatalf("node delivery evidence = %#v", nodeDelivery)
 	}
 
 	page1, err := pg.ListOperatorEvents(ctx, OperatorEventListOptions{Filter: OperatorEventListFilter{RunID: runID}, Limit: 1})

@@ -208,11 +208,11 @@ func TestRunDebugReadSurface_LoadRunDebugReport_UsesCanonicalRunIDForLogsAndMuta
 		t.Fatalf("seed mutations: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, delivered_at, created_at
-		)
-		VALUES ($1::uuid, $2::uuid, 'agent', 'agent-1', 'delivered', $3, $4)
-	`, targetRunID, targetEventID, now.Add(10*time.Second), now.Add(5*time.Second)); err != nil {
+			INSERT INTO event_deliveries (
+				run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, last_error, delivered_at, created_at
+			)
+			VALUES ($1::uuid, $2::uuid, 'agent', 'agent-1', 'dead_letter', 2, 'handler_error', 'boom', $3, $4)
+		`, targetRunID, targetEventID, now.Add(10*time.Second), now.Add(5*time.Second)); err != nil {
 		t.Fatalf("seed delivery: %v", err)
 	}
 	if err := runtimedeadletters.Insert(ctx, db, runtimedeadletters.Record{
@@ -268,6 +268,12 @@ func TestRunDebugReadSurface_LoadRunDebugReport_UsesCanonicalRunIDForLogsAndMuta
 	if len(report.Deliveries) != 1 {
 		t.Fatalf("Deliveries len = %d, want 1", len(report.Deliveries))
 	}
+	if len(report.FailedDeliveries) != 1 {
+		t.Fatalf("FailedDeliveries len = %d, want 1: %#v", len(report.FailedDeliveries), report.FailedDeliveries)
+	}
+	if got := report.FailedDeliveries[0]; got.SubscriberType != "agent" || got.RetryCount != 2 || got.RetryEligible || !got.Terminal || len(got.DeadLetters) != 1 {
+		t.Fatalf("FailedDeliveries[0] = %#v", got)
+	}
 }
 
 func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(t *testing.T) {
@@ -314,11 +320,12 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
-			delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, reason_code, active_session_id, started_at, created_at
+			delivery_id, run_id, event_id, subscriber_type, subscriber_id, status,
+			retry_count, reason_code, last_error, active_session_id, started_at, created_at
 		)
 		VALUES (
-			$1::uuid, $2::uuid, $3::uuid, 'agent', 'agent-source', 'in_progress', 'session_started',
-			$4::uuid, $5, $6
+			$1::uuid, $2::uuid, $3::uuid, 'agent', 'agent-source', 'failed',
+			2, 'handler_error', 'trace boom', $4::uuid, $5, $6
 		)
 	`, deliveryID, runID, eventID, sessionID, now.Add(1*time.Second), now.Add(500*time.Millisecond)); err != nil {
 		t.Fatalf("seed delivery: %v", err)
@@ -351,8 +358,11 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(
 	if got.EventID != eventID || got.EventName != "scan.requested" {
 		t.Fatalf("event trace = %#v", got)
 	}
-	if got.DeliveryID != deliveryID || got.DeliveryStatus != "in_progress" || got.SubscriberID != "agent-source" {
+	if got.DeliveryID != deliveryID || got.DeliveryStatus != "failed" || got.SubscriberID != "agent-source" {
 		t.Fatalf("delivery trace = %#v", got)
+	}
+	if got.DeliveryReasonCode != "handler_error" || got.DeliveryLastError != "trace boom" || got.DeliveryRetryCount != 2 || !got.DeliveryRetryEligible || got.DeliveryTerminal {
+		t.Fatalf("delivery failure trace evidence = %#v", got)
 	}
 	if got.SessionID != sessionID || got.SessionKind != "live_session" || got.SessionRuntimeMode != "session" {
 		t.Fatalf("session trace = %#v", got)

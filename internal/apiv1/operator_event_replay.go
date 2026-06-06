@@ -44,12 +44,21 @@ type eventReplayResult struct {
 }
 
 type eventReplayDelivery struct {
-	DeliveryID       string `json:"delivery_id"`
-	SubscriberID     string `json:"subscriber_id"`
-	SessionID        string `json:"session_id,omitempty"`
-	Status           string `json:"status"`
-	Attempt          int    `json:"attempt"`
-	SourceDeliveryID string `json:"source_delivery_id,omitempty"`
+	DeliveryID       string                           `json:"delivery_id"`
+	SubscriberID     string                           `json:"subscriber_id"`
+	SessionID        string                           `json:"session_id,omitempty"`
+	Status           string                           `json:"status"`
+	ReasonCode       string                           `json:"reason_code,omitempty"`
+	LastError        string                           `json:"last_error,omitempty"`
+	Attempt          int                              `json:"attempt"`
+	RetryCount       int                              `json:"retry_count"`
+	RetryEligible    bool                             `json:"retry_eligible"`
+	Terminal         bool                             `json:"terminal"`
+	CreatedAt        *time.Time                       `json:"created_at,omitempty"`
+	StartedAt        *time.Time                       `json:"started_at,omitempty"`
+	FinishedAt       *time.Time                       `json:"finished_at,omitempty"`
+	DeadLetters      []store.OperatorDeadLetterRecord `json:"dead_letters,omitempty"`
+	SourceDeliveryID string                           `json:"source_delivery_id,omitempty"`
 }
 
 type agentReplayResult struct {
@@ -401,21 +410,13 @@ func validateReplayEligibleDelivery(eventID string, delivery store.OperatorEvent
 	case eventReplayStatusDelivered, eventReplayStatusFailed, eventReplayStatusDeadLetter:
 		return nil
 	case eventReplayStatusPending, eventReplayStatusInProgress, "":
-		return NewApplicationError(EventReplayNotEligibleCode, false, map[string]any{
-			"event_id":      eventID,
-			"delivery_id":   strings.TrimSpace(delivery.DeliveryID),
-			"subscriber_id": strings.TrimSpace(delivery.SubscriberID),
-			"status":        strings.TrimSpace(delivery.Status),
-			"reason":        "original delivery is not terminal",
-		})
+		data := eventReplayDeliveryFailureEvidence(eventID, delivery)
+		data["reason"] = "original delivery is not terminal"
+		return NewApplicationError(EventReplayNotEligibleCode, false, data)
 	default:
-		return NewApplicationError(EventReplayNotEligibleCode, false, map[string]any{
-			"event_id":      eventID,
-			"delivery_id":   strings.TrimSpace(delivery.DeliveryID),
-			"subscriber_id": strings.TrimSpace(delivery.SubscriberID),
-			"status":        strings.TrimSpace(delivery.Status),
-			"reason":        "unsupported delivery status",
-		})
+		data := eventReplayDeliveryFailureEvidence(eventID, delivery)
+		data["reason"] = "unsupported delivery status"
+		return NewApplicationError(EventReplayNotEligibleCode, false, data)
 	}
 }
 
@@ -426,13 +427,7 @@ func deliveriesForSubscribers(eventID string, index map[string]store.OperatorEve
 			if err := validateReplayEligibleDelivery(eventID, delivery); err != nil {
 				return nil, err
 			}
-			out = append(out, eventReplayDelivery{
-				DeliveryID:   strings.TrimSpace(delivery.DeliveryID),
-				SubscriberID: subscriber,
-				SessionID:    strings.TrimSpace(delivery.SessionID),
-				Status:       strings.TrimSpace(delivery.Status),
-				Attempt:      delivery.RetryCount + 1,
-			})
+			out = append(out, eventReplayDeliveryFromStore(delivery, ""))
 		}
 	}
 	return out, nil
@@ -529,16 +524,50 @@ func eventReplayNewDeliveries(deliveries []store.OperatorEventDelivery, original
 		if strings.TrimSpace(delivery.SubscriberType) != eventReplaySubscriberTypeAgent || subscriberID == "" || subscriberID == eventReplayScopeSubscriberID {
 			continue
 		}
-		out = append(out, eventReplayDelivery{
-			DeliveryID:       strings.TrimSpace(delivery.DeliveryID),
-			SubscriberID:     subscriberID,
-			SessionID:        strings.TrimSpace(delivery.SessionID),
-			Status:           strings.TrimSpace(delivery.Status),
-			Attempt:          delivery.RetryCount + 1,
-			SourceDeliveryID: sourceBySubscriber[subscriberID],
-		})
+		out = append(out, eventReplayDeliveryFromStore(delivery, sourceBySubscriber[subscriberID]))
 	}
 	return out
+}
+
+func eventReplayDeliveryFromStore(delivery store.OperatorEventDelivery, sourceDeliveryID string) eventReplayDelivery {
+	published := eventPublishDeliveryFromStore(delivery)
+	return eventReplayDelivery{
+		DeliveryID:       published.DeliveryID,
+		SubscriberID:     published.SubscriberID,
+		SessionID:        published.SessionID,
+		Status:           published.Status,
+		ReasonCode:       published.ReasonCode,
+		LastError:        published.LastError,
+		Attempt:          published.Attempt,
+		RetryCount:       published.RetryCount,
+		RetryEligible:    published.RetryEligible,
+		Terminal:         published.Terminal,
+		CreatedAt:        published.CreatedAt,
+		StartedAt:        published.StartedAt,
+		FinishedAt:       published.FinishedAt,
+		DeadLetters:      append([]store.OperatorDeadLetterRecord(nil), published.DeadLetters...),
+		SourceDeliveryID: strings.TrimSpace(sourceDeliveryID),
+	}
+}
+
+func eventReplayDeliveryFailureEvidence(eventID string, delivery store.OperatorEventDelivery) map[string]any {
+	data := map[string]any{
+		"event_id":       strings.TrimSpace(eventID),
+		"delivery_id":    strings.TrimSpace(delivery.DeliveryID),
+		"subscriber_id":  strings.TrimSpace(delivery.SubscriberID),
+		"status":         strings.TrimSpace(delivery.Status),
+		"retry_count":    delivery.RetryCount,
+		"retry_eligible": delivery.RetryEligible || store.OperatorDeliveryRetryEligible(delivery.Status),
+		"terminal":       delivery.Terminal || store.OperatorDeliveryTerminal(delivery.Status),
+		"dead_letters":   append([]store.OperatorDeadLetterRecord(nil), delivery.DeadLetters...),
+	}
+	if reason := strings.TrimSpace(delivery.ReasonCode); reason != "" {
+		data["reason_code"] = reason
+	}
+	if lastError := strings.TrimSpace(delivery.LastError); lastError != "" {
+		data["last_error"] = lastError
+	}
+	return data
 }
 
 func agentReplayResultFromEventReplay(agentID string, replay eventReplayResult) (agentReplayResult, error) {

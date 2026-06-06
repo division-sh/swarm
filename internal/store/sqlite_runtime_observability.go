@@ -56,9 +56,10 @@ func (s *SQLiteRuntimeStore) LoadRunDebugTracePage(ctx context.Context, runID st
 		SELECT
 			e.event_id, e.event_name, COALESCE(e.source_event_id, ''), COALESCE(e.entity_id, ''),
 			COALESCE(e.produced_by, ''), COALESCE(e.produced_by_type, ''), e.created_at,
-			COALESCE(d.delivery_id, ''), COALESCE(d.subscriber_type, ''), COALESCE(d.subscriber_id, ''),
-			COALESCE(d.status, ''), COALESCE(d.reason_code, ''), COALESCE(d.active_session_id, ''),
-			d.created_at, d.started_at, d.delivered_at,
+				COALESCE(d.delivery_id, ''), COALESCE(d.subscriber_type, ''), COALESCE(d.subscriber_id, ''),
+				COALESCE(d.status, ''), COALESCE(d.reason_code, ''), COALESCE(d.last_error, ''), COALESCE(d.retry_count, 0),
+				COALESCE(d.active_session_id, ''),
+				d.created_at, d.started_at, d.delivered_at,
 			COALESCE(ses.session_id, ''), COALESCE(ses.scope, ''), COALESCE(ses.runtime_mode, ''),
 			COALESCE(ses.status, ''), ses.updated_at,
 			COALESCE(t.turn_id, ''), COALESCE(t.trigger_event_id, ''), COALESCE(t.trigger_event_type, ''),
@@ -85,7 +86,7 @@ func (s *SQLiteRuntimeStore) LoadRunDebugTracePage(ctx context.Context, runID st
 			&row.EventID, &row.EventName, &row.SourceEventID, &row.EntityID,
 			&row.EventSource, &row.EventSourceType, &eventCreatedRaw,
 			&row.DeliveryID, &row.SubscriberType, &row.SubscriberID,
-			&row.DeliveryStatus, &row.DeliveryReasonCode, &row.ActiveSessionID,
+			&row.DeliveryStatus, &row.DeliveryReasonCode, &row.DeliveryLastError, &row.DeliveryRetryCount, &row.ActiveSessionID,
 			&deliveryCreatedRaw, &deliveryStartedRaw, &deliveryDeliveredRaw,
 			&row.SessionID, &row.SessionKind, &row.SessionRuntimeMode,
 			&row.SessionStatus, &sessionUpdatedRaw,
@@ -104,6 +105,8 @@ func (s *SQLiteRuntimeStore) LoadRunDebugTracePage(ctx context.Context, runID st
 		row.DeliveryCreatedAt = sqliteTraceTimePtr(deliveryCreatedRaw)
 		row.DeliveryStartedAt = sqliteTraceTimePtr(deliveryStartedRaw)
 		row.DeliveryDeliveredAt = sqliteTraceTimePtr(deliveryDeliveredRaw)
+		row.DeliveryRetryEligible = OperatorDeliveryRetryEligible(row.DeliveryStatus)
+		row.DeliveryTerminal = OperatorDeliveryTerminal(row.DeliveryStatus)
 		row.SessionUpdatedAt = sqliteTraceTimePtr(sessionUpdatedRaw)
 		row.TurnCreatedAt = sqliteTraceTimePtr(turnCreatedRaw)
 		out = append(out, row)
@@ -224,12 +227,19 @@ func (s *SQLiteRuntimeStore) LoadOperatorEvent(ctx context.Context, eventID stri
 	}
 	event.Payload = map[string]any{}
 	_ = json.Unmarshal(sqliteJSONRawMessage(payloadRaw), &event.Payload)
+	deadLetters, err := s.sqliteOperatorEventDeadLetters(ctx, eventID)
+	if err != nil {
+		return OperatorEventFull{}, err
+	}
 	deliveries, err := s.sqliteOperatorEventDeliveries(ctx, eventID)
 	if err != nil {
 		return OperatorEventFull{}, err
 	}
-	event.Deliveries = deliveries
-	event.DeadLetters = []OperatorDeadLetterRecord{}
+	event.Deliveries = EnrichOperatorDeliveryFailureEvidence(deliveries, deadLetters)
+	event.DeadLetters = deadLetters
+	if event.DeadLetters == nil {
+		event.DeadLetters = []OperatorDeadLetterRecord{}
+	}
 	return event, nil
 }
 
@@ -342,7 +352,8 @@ func (s *SQLiteRuntimeStore) ListOperatorRuntimeIncidents(ctx context.Context, o
 func (s *SQLiteRuntimeStore) sqliteOperatorEventDeliveries(ctx context.Context, eventID string) ([]OperatorEventDelivery, error) {
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT delivery_id, subscriber_type, subscriber_id, COALESCE(active_session_id, ''),
-		       status, COALESCE(reason_code, ''), COALESCE(last_error, ''), COALESCE(retry_count, 0)
+		       status, COALESCE(reason_code, ''), COALESCE(last_error, ''), COALESCE(retry_count, 0),
+		       created_at, started_at, delivered_at
 		FROM event_deliveries
 		WHERE event_id = ?
 		ORDER BY created_at ASC, delivery_id ASC
@@ -354,13 +365,49 @@ func (s *SQLiteRuntimeStore) sqliteOperatorEventDeliveries(ctx context.Context, 
 	out := []OperatorEventDelivery{}
 	for rows.Next() {
 		var delivery OperatorEventDelivery
-		if err := rows.Scan(&delivery.DeliveryID, &delivery.SubscriberType, &delivery.SubscriberID, &delivery.SessionID, &delivery.Status, &delivery.ReasonCode, &delivery.LastError, &delivery.RetryCount); err != nil {
+		var createdRaw, startedRaw, finishedRaw any
+		if err := rows.Scan(&delivery.DeliveryID, &delivery.SubscriberType, &delivery.SubscriberID, &delivery.SessionID, &delivery.Status, &delivery.ReasonCode, &delivery.LastError, &delivery.RetryCount, &createdRaw, &startedRaw, &finishedRaw); err != nil {
 			return nil, fmt.Errorf("scan sqlite operator event delivery: %w", err)
 		}
+		delivery.CreatedAt = sqliteTraceTimePtr(createdRaw)
+		delivery.StartedAt = sqliteTraceTimePtr(startedRaw)
+		delivery.FinishedAt = sqliteTraceTimePtr(finishedRaw)
 		out = append(out, delivery)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("read sqlite operator event deliveries: %w", err)
+	}
+	return out, nil
+}
+
+func (s *SQLiteRuntimeStore) sqliteOperatorEventDeadLetters(ctx context.Context, eventID string) ([]OperatorDeadLetterRecord, error) {
+	rows, err := s.DB.QueryContext(ctx, `
+		SELECT dead_letter_id, COALESCE(failure_type, ''), COALESCE(error_message, ''),
+		       COALESCE(retry_count, 0), COALESCE(chain_depth, 0), COALESCE(handler_node, ''), created_at
+		FROM dead_letters
+		WHERE original_event_id = ?
+		ORDER BY created_at ASC, dead_letter_id ASC
+	`, eventID)
+	if err != nil {
+		return nil, fmt.Errorf("query sqlite operator event dead letters: %w", err)
+	}
+	defer rows.Close()
+	out := []OperatorDeadLetterRecord{}
+	for rows.Next() {
+		var item OperatorDeadLetterRecord
+		var createdRaw any
+		if err := rows.Scan(&item.DeadLetterID, &item.FailureType, &item.ErrorMessage, &item.RetryCount, &item.ChainDepth, &item.HandlerNode, &createdRaw); err != nil {
+			return nil, fmt.Errorf("scan sqlite operator event dead letter: %w", err)
+		}
+		if at, ok, err := sqliteTimeValue(createdRaw); err != nil {
+			return nil, err
+		} else if ok {
+			item.CreatedAt = at
+		}
+		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read sqlite operator event dead letters: %w", err)
 	}
 	return out, nil
 }

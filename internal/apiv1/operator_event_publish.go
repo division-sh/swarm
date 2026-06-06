@@ -27,12 +27,21 @@ type eventPublishResult struct {
 }
 
 type eventPublishDelivery struct {
-	DeliveryID     string `json:"delivery_id"`
-	SubscriberType string `json:"subscriber_type"`
-	SubscriberID   string `json:"subscriber_id"`
-	SessionID      string `json:"session_id,omitempty"`
-	Status         string `json:"status"`
-	Attempt        int    `json:"attempt"`
+	DeliveryID     string                           `json:"delivery_id"`
+	SubscriberType string                           `json:"subscriber_type"`
+	SubscriberID   string                           `json:"subscriber_id"`
+	SessionID      string                           `json:"session_id,omitempty"`
+	Status         string                           `json:"status"`
+	ReasonCode     string                           `json:"reason_code,omitempty"`
+	LastError      string                           `json:"last_error,omitempty"`
+	Attempt        int                              `json:"attempt"`
+	RetryCount     int                              `json:"retry_count"`
+	RetryEligible  bool                             `json:"retry_eligible"`
+	Terminal       bool                             `json:"terminal"`
+	CreatedAt      *time.Time                       `json:"created_at,omitempty"`
+	StartedAt      *time.Time                       `json:"started_at,omitempty"`
+	FinishedAt     *time.Time                       `json:"finished_at,omitempty"`
+	DeadLetters    []store.OperatorDeadLetterRecord `json:"dead_letters,omitempty"`
 }
 
 type eventPublicationParams struct {
@@ -569,30 +578,53 @@ func eventPublishPublishError(params eventPublicationParams, err error) error {
 
 func eventPublishDeliveries(in []store.OperatorEventDelivery) []eventPublishDelivery {
 	out := make([]eventPublishDelivery, 0, len(in))
-	seen := map[eventPublishDelivery]struct{}{}
+	seen := map[string]struct{}{}
 	for _, delivery := range in {
 		if strings.TrimSpace(delivery.SubscriberID) == "__runtime_replay_scope__" {
 			continue
 		}
-		attempt := delivery.RetryCount + 1
-		if attempt < 1 {
-			attempt = 1
-		}
-		item := eventPublishDelivery{
-			DeliveryID:     strings.TrimSpace(delivery.DeliveryID),
-			SubscriberType: strings.TrimSpace(delivery.SubscriberType),
-			SubscriberID:   strings.TrimSpace(delivery.SubscriberID),
-			SessionID:      strings.TrimSpace(delivery.SessionID),
-			Status:         strings.TrimSpace(delivery.Status),
-			Attempt:        attempt,
-		}
-		if _, ok := seen[item]; ok {
+		item := eventPublishDeliveryFromStore(delivery)
+		key := strings.Join([]string{item.DeliveryID, item.SubscriberType, item.SubscriberID, item.Status}, "\x00")
+		if _, ok := seen[key]; ok {
 			continue
 		}
-		seen[item] = struct{}{}
+		seen[key] = struct{}{}
 		out = append(out, item)
 	}
 	return out
+}
+
+func eventPublishDeliveryFromStore(delivery store.OperatorEventDelivery) eventPublishDelivery {
+	attempt := delivery.RetryCount + 1
+	if attempt < 1 {
+		attempt = 1
+	}
+	status := strings.TrimSpace(delivery.Status)
+	return eventPublishDelivery{
+		DeliveryID:     strings.TrimSpace(delivery.DeliveryID),
+		SubscriberType: strings.TrimSpace(delivery.SubscriberType),
+		SubscriberID:   strings.TrimSpace(delivery.SubscriberID),
+		SessionID:      strings.TrimSpace(delivery.SessionID),
+		Status:         status,
+		ReasonCode:     strings.TrimSpace(delivery.ReasonCode),
+		LastError:      strings.TrimSpace(delivery.LastError),
+		Attempt:        attempt,
+		RetryCount:     delivery.RetryCount,
+		RetryEligible:  delivery.RetryEligible || store.OperatorDeliveryRetryEligible(status),
+		Terminal:       delivery.Terminal || store.OperatorDeliveryTerminal(status),
+		CreatedAt:      cloneTimePtr(delivery.CreatedAt),
+		StartedAt:      cloneTimePtr(delivery.StartedAt),
+		FinishedAt:     cloneTimePtr(delivery.FinishedAt),
+		DeadLetters:    append([]store.OperatorDeadLetterRecord(nil), delivery.DeadLetters...),
+	}
+}
+
+func cloneTimePtr(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	cloned := value.UTC()
+	return &cloned
 }
 
 func eventDeclared(source semanticview.Source, eventName string) bool {
