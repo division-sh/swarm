@@ -599,7 +599,10 @@ func TestOperatorEventPublishPostCommitCompletionFailureReplaysWithoutDuplicate(
 		err:           errors.New("simulated normal-run completion failure"),
 	}
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-	bus, err := runtimebus.NewEventBusWithOptions(failing, runStartTestEventBusOptions(source))
+	probe := runtimelifecycleprobe.New()
+	opts := runStartTestEventBusOptions(source)
+	opts.TestLifecycleProbe = probe
+	bus, err := runtimebus.NewEventBusWithOptions(failing, opts)
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -624,6 +627,11 @@ func TestOperatorEventPublishPostCommitCompletionFailureReplaysWithoutDuplicate(
 	}
 	if count := countAPIIdempotencyRows(t, db); count != 1 {
 		t.Fatalf("api_idempotency rows after post-commit completion failure = %d, want 1", count)
+	}
+	doneCtx, cancelDone := context.WithTimeout(ctx, 5*time.Second)
+	defer cancelDone()
+	if _, err := probe.WaitForPostCommitDispatchCompleted(doneCtx, eventID); err != nil {
+		t.Fatalf("post-commit dispatch completion for %s: %v", eventID, err)
 	}
 	outcome, errText := loadPipelineReceiptOutcomeAndError(t, ctx, db, eventID)
 	if outcome != "dead_letter" || !strings.Contains(errText, "simulated normal-run completion failure") {
