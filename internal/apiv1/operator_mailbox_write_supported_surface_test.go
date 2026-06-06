@@ -72,18 +72,21 @@ func TestOperatorMailboxWriteSupportedSurfacePublishesAndReadsAcrossBackends(t *
 			seenReviewer := false
 			for _, rawDelivery := range deliveries {
 				delivery := asMap(t, rawDelivery)
-				if strings.TrimSpace(stringValue(t, delivery["delivery_id"], "delivery_id")) == "" || !validEventPublishSubscriberType(fmt.Sprint(delivery["subscriber_type"])) {
+				subscriberType := fmt.Sprint(delivery["subscriber_type"])
+				subscriberID := fmt.Sprint(delivery["subscriber_id"])
+				status := fmt.Sprint(delivery["status"])
+				if strings.TrimSpace(stringValue(t, delivery["delivery_id"], "delivery_id")) == "" || !validEventPublishSubscriberType(subscriberType) {
 					t.Fatalf("event.publish delivery identity = %#v, want persisted typed delivery identity", delivery)
 				}
-				switch delivery["subscriber_id"] {
+				switch subscriberID {
 				case "workflow-runtime":
-					seenWorkflowRuntime = delivery["status"] == "pending"
+					seenWorkflowRuntime = subscriberType == "agent" && status == "pending"
 				case "reviewer":
-					seenReviewer = delivery["status"] == "pending"
+					seenReviewer = subscriberType == "node" && (status == "pending" || status == "delivered")
 				}
 			}
 			if !seenWorkflowRuntime || !seenReviewer {
-				t.Fatalf("event.publish deliveries = %#v, want durable pending workflow-runtime and reviewer snapshot", deliveries)
+				t.Fatalf("event.publish deliveries = %#v, want durable pending workflow-runtime and reviewer node snapshot", deliveries)
 			}
 
 			waitForMailboxWriteSupportedSurface(t, handler, db, runID, eventID, tc.name)
