@@ -67,8 +67,18 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 			VALUES
 				(?, ?, ?, 'agent', 'agent-failed', 'failed', 1, 'handler_error', 'agent boom', ?, ?, NULL),
 				(?, ?, ?, 'node', 'node-dead', 'dead_letter', 2, 'retry_exhausted', 'node boom', ?, ?, ?)
-		`, agentFailedDeliveryID, newer, newerMiddleEvent, now.Add(4*time.Second), now.Add(5*time.Second), nodeDeadDeliveryID, newer, newerLatestEvent, now.Add(6*time.Second), now.Add(7*time.Second), now.Add(8*time.Second)); err != nil {
+	`, agentFailedDeliveryID, newer, newerMiddleEvent, now.Add(4*time.Second), now.Add(5*time.Second), nodeDeadDeliveryID, newer, newerLatestEvent, now.Add(6*time.Second), now.Add(7*time.Second), now.Add(8*time.Second)); err != nil {
 		t.Fatalf("seed sqlite failed deliveries: %v", err)
+	}
+	successDeliveryID := uuid.NewString()
+	if _, err := sqliteStore.DB.ExecContext(ctx, `
+			INSERT INTO event_deliveries (
+				delivery_id, run_id, event_id, subscriber_type, subscriber_id, status,
+				retry_count, reason_code, last_error, created_at, started_at, delivered_at
+			)
+			VALUES (?, ?, ?, 'node', 'node-success', 'delivered', 0, 'node_processed', '', ?, ?, ?)
+		`, successDeliveryID, newer, newerMiddleEvent, now.Add(5*time.Second), now.Add(6*time.Second), now.Add(7*time.Second)); err != nil {
+		t.Fatalf("seed sqlite successful delivery: %v", err)
 	}
 	deadLetterID := uuid.NewString()
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
@@ -133,11 +143,16 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 	if report.EntityCount != 2 {
 		t.Fatalf("report.EntityCount = %d, want entity_state count 2", report.EntityCount)
 	}
-	if len(report.Deliveries) != 3 {
-		t.Fatalf("report deliveries = %#v, want pending/failed/dead_letter delivery count groups", report.Deliveries)
+	if len(report.Deliveries) != 4 {
+		t.Fatalf("report deliveries = %#v, want pending/delivered/failed/dead_letter delivery count groups", report.Deliveries)
 	}
 	if len(report.FailedDeliveries) != 2 {
 		t.Fatalf("report failed deliveries = %#v, want 2", report.FailedDeliveries)
+	}
+	for _, got := range report.FailedDeliveries {
+		if got.DeliveryID == successDeliveryID {
+			t.Fatalf("successful delivered/node_processed delivery appeared in FailedDeliveries: %#v", report.FailedDeliveries)
+		}
 	}
 	if got := report.FailedDeliveries[0]; got.DeliveryID != nodeDeadDeliveryID || got.SubscriberType != "node" || got.RetryCount != 2 || got.RetryEligible || !got.Terminal || len(got.DeadLetters) != 1 {
 		t.Fatalf("node failed delivery evidence = %#v", got)
