@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
@@ -236,32 +237,50 @@ func (s *PostgresStore) recordInboundEventSpec(ctx context.Context, providerEven
 		return false, err
 	}
 	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
+	evt, err := events.AdmitForPersistence(
+		events.NewDiagnosticDirectEvent(
+			"",
+			events.EventType("platform.inbound_recorded"),
+			provider,
+			"",
+			payload,
+			0,
+			runID,
+			"",
+			events.EventEnvelope{EntityID: entityID},
+			time.Time{},
+		),
+		events.AdmissionOptions{},
+	)
+	if err != nil {
+		return false, err
+	}
 	insertQ := `
 		INSERT INTO events (
-			event_name, entity_id, flow_instance, scope, payload,
+			event_id, event_name, entity_id, flow_instance, scope, payload,
 			chain_depth, produced_by, produced_by_type, idempotency_key, created_at
 		)
 		VALUES (
-			'platform.inbound_recorded', $1::uuid, NULL, 'entity', $2::jsonb,
-			0, $3, 'external', $4, now()
+			$1::uuid, 'platform.inbound_recorded', $2::uuid, NULL, 'entity', $3::jsonb,
+			0, $4, 'external', $5, $6
 		)
 	`
-	args := []any{entityID, string(payload), provider, idempotencyKey}
+	args := []any{evt.ID(), entityID, string(evt.Payload()), provider, idempotencyKey, evt.CreatedAt()}
 	if caps.Events.LogRunID {
-		if err := s.ensureRunRow(ctx, caps, tx, runID, "", "", true); err != nil {
+		if err := s.ensureRunRow(ctx, caps, tx, evt.RunID(), "", "", true); err != nil {
 			return false, err
 		}
 		insertQ = `
 			INSERT INTO events (
-				run_id, event_name, entity_id, flow_instance, scope, payload,
+				event_id, run_id, event_name, entity_id, flow_instance, scope, payload,
 				chain_depth, produced_by, produced_by_type, idempotency_key, created_at
 			)
 			VALUES (
-				NULLIF($1,'')::uuid, 'platform.inbound_recorded', $2::uuid, NULL, 'entity', $3::jsonb,
-				0, $4, 'external', $5, now()
+				$1::uuid, NULLIF($2,'')::uuid, 'platform.inbound_recorded', $3::uuid, NULL, 'entity', $4::jsonb,
+				0, $5, 'external', $6, $7
 			)
 		`
-		args = []any{runID, entityID, string(payload), provider, idempotencyKey}
+		args = []any{evt.ID(), evt.RunID(), entityID, string(evt.Payload()), provider, idempotencyKey, evt.CreatedAt()}
 	}
 	if _, err := tx.ExecContext(ctx, insertQ, args...); err != nil {
 		return false, fmt.Errorf("record inbound event in events: %w", err)

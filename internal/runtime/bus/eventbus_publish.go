@@ -17,7 +17,6 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
-	"github.com/google/uuid"
 )
 
 type pipelineTransitionSchemaCapabilityProvider interface {
@@ -173,8 +172,10 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 			return fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type())), err)
 		}
 	}
-	evt = eventWithPublishDefaults(evt, time.Now())
-	ictx, evt := runtimecorrelation.CorrelateEvent(ctx, evt)
+	ictx, evt, err := admitEventForPublish(ctx, evt, time.Now(), "")
+	if err != nil {
+		return err
+	}
 
 	deferredTransitions := make([]runtimepipeline.DeferredPipelineTransition, 0, 8)
 	postCommitActions := make([]func(), 0, 8)
@@ -283,8 +284,10 @@ func (eb *EventBus) PublishAcknowledged(ctx context.Context, evt events.Event) e
 			return fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type())), err)
 		}
 	}
-	evt = eventWithPublishDefaults(evt, time.Now())
-	ictx, evt := runtimecorrelation.CorrelateEvent(ctx, evt)
+	ictx, evt, err := admitEventForPublish(ctx, evt, time.Now(), "")
+	if err != nil {
+		return err
+	}
 
 	if txStore, ok := eb.store.(TransactionalEventStore); ok {
 		return eb.publishAcknowledgedTransactional(ictx, evt, start, txStore)
@@ -340,8 +343,10 @@ func (eb *EventBus) PublishTx(ctx context.Context, tx *sql.Tx, evt events.Event)
 			return fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type())), err)
 		}
 	}
-	evt = eventWithPublishDefaults(evt, time.Now())
-	ictx, evt := runtimecorrelation.CorrelateEvent(ctx, evt)
+	ictx, evt, err := admitEventForPublish(ctx, evt, time.Now(), "")
+	if err != nil {
+		return err
+	}
 	txStore, ok := eb.store.(TransactionalEventStore)
 	if !ok || txStore == nil {
 		return errors.New("transactional event store is required")
@@ -761,48 +766,80 @@ func (eb *EventBus) runInterceptors(ctx context.Context, evt events.Event) (bool
 			passthrough = false
 		}
 		for _, d := range out {
-			deferred = append(deferred, eventWithPublishDefaults(d, time.Now()))
+			_, admitted, err := admitEventForPublish(ctx, d, time.Now(), "")
+			if err != nil {
+				return true, nil, err
+			}
+			deferred = append(deferred, admitted)
 		}
 	}
 	return passthrough, deferred, nil
 }
 
-func eventWithPublishDefaults(evt events.Event, now time.Time) events.Event {
-	id := evt.ID()
-	if id == "" {
-		id = uuid.NewString()
+func admitEventForPublish(ctx context.Context, evt events.Event, now time.Time, sourceAgentDefault string) (context.Context, events.Event, error) {
+	opts := events.AdmissionOptions{
+		Now:                      now,
+		RunIDCandidate:           publishRunIDCandidate(ctx, evt),
+		ParentEventIDCandidate:   publishParentEventIDCandidate(ctx, evt),
+		SelectedForkLineageOwner: publishSelectedForkLineageOwner(ctx),
+		SourceAgentDefault:       sourceAgentDefault,
 	}
-	createdAt := evt.CreatedAt()
-	if createdAt.IsZero() {
-		createdAt = now
+	admitted, err := events.AdmitForPublish(evt, opts)
+	if err != nil {
+		return ctx, events.EmptyEvent(), err
 	}
-	return events.NewProjectionEvent(
-		id,
-		evt.Type(),
-		evt.SourceAgent(),
-		evt.TaskID(),
-		evt.Payload(),
-		evt.ChainDepth(),
-		evt.RunID(),
-		evt.ParentEventID(),
-		evt.NormalizedEnvelope(),
-		createdAt,
-	)
+	if runID := strings.TrimSpace(admitted.RunID()); runID != "" {
+		ctx = runtimecorrelation.WithRunID(ctx, runID)
+	}
+	return ctx, admitted, nil
 }
 
-func eventWithSourceAgent(evt events.Event, sourceAgent string) events.Event {
-	return events.NewProjectionEvent(
-		evt.ID(),
-		evt.Type(),
-		sourceAgent,
-		evt.TaskID(),
-		evt.Payload(),
-		evt.ChainDepth(),
-		evt.RunID(),
-		evt.ParentEventID(),
-		evt.NormalizedEnvelope(),
-		evt.CreatedAt(),
-	)
+func publishRunIDCandidate(ctx context.Context, evt events.Event) string {
+	if runID := strings.TrimSpace(evt.RunID()); runID != "" {
+		return runID
+	}
+	if runID := runtimecorrelation.RunIDFromContext(ctx); runID != "" {
+		return runID
+	}
+	if lineage, ok := runtimecorrelation.RuntimeLineageFromContext(ctx); ok {
+		if runID := strings.TrimSpace(lineage.RunID); runID != "" {
+			return runID
+		}
+	}
+	if inbound, ok := runtimecorrelation.InboundEventFromContext(ctx); ok {
+		return strings.TrimSpace(inbound.RunID())
+	}
+	return ""
+}
+
+func publishParentEventIDCandidate(ctx context.Context, evt events.Event) string {
+	if parentID := strings.TrimSpace(evt.ParentEventID()); parentID != "" {
+		return parentID
+	}
+	if parentID := runtimecorrelation.RuntimeLineageParentForEvent(ctx, evt.ID()); parentID != "" {
+		return parentID
+	}
+	if inbound, ok := runtimecorrelation.InboundEventFromContext(ctx); ok {
+		parentID := strings.TrimSpace(inbound.ID())
+		if parentID != "" && parentID != strings.TrimSpace(evt.ID()) {
+			return parentID
+		}
+	}
+	return ""
+}
+
+func publishSelectedForkLineageOwner(ctx context.Context) string {
+	lineage, ok := runtimecorrelation.RuntimeLineageFromContext(ctx)
+	if !ok || !lineage.SelectedForkContext {
+		return ""
+	}
+	if lineage.Classification != runtimecorrelation.RuntimeLineageClassificationForkLocal {
+		return ""
+	}
+	if lineage.RowCategory != runtimecorrelation.RuntimeLineageRowCategoryRuntimeContainer {
+		return ""
+	}
+	return strings.TrimSpace(lineage.SelectedForkOwner)
 }
 
 func (eb *EventBus) publishDeferred(ctx context.Context, evt events.Event) (err error) {
@@ -820,10 +857,9 @@ func (eb *EventBus) publishDeferred(ctx context.Context, evt events.Event) (err 
 	if !isValidEventTypeName(string(evt.Type())) {
 		return fmt.Errorf("invalid deferred event type: %s", strings.TrimSpace(string(evt.Type())))
 	}
-	evt = eventWithPublishDefaults(evt, time.Now())
-	ctx, evt = runtimecorrelation.CorrelateEvent(ctx, evt)
-	if strings.TrimSpace(evt.SourceAgent()) == "" {
-		evt = eventWithSourceAgent(evt, "runtime")
+	ctx, evt, err = admitEventForPublish(ctx, evt, time.Now(), "runtime")
+	if err != nil {
+		return err
 	}
 	persisted := false
 	queued := false
@@ -1331,8 +1367,10 @@ func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipie
 			return fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type())), err)
 		}
 	}
-	evt = eventWithPublishDefaults(evt, time.Now())
-	ctx, evt = runtimecorrelation.CorrelateEvent(ctx, evt)
+	ctx, evt, err = admitEventForPublish(ctx, evt, time.Now(), "")
+	if err != nil {
+		return err
+	}
 	plan, err := eb.planDirectRoutePlan(ctx, evt, recipients)
 	if err != nil {
 		return err
@@ -1465,7 +1503,11 @@ func (eb *EventBus) publishPersistedRecipients(ctx context.Context, evt events.E
 	if !isValidEventTypeName(string(evt.Type())) {
 		return fmt.Errorf("invalid event type: %s", strings.TrimSpace(string(evt.Type())))
 	}
-	evt = eventWithPublishDefaults(evt, time.Now())
+	var err error
+	ctx, evt, err = admitEventForPublish(ctx, evt, time.Now(), "")
+	if err != nil {
+		return err
+	}
 	if reason, err := eb.dispatchQueueReason(ctx, evt); err != nil {
 		return err
 	} else if reason != "" {

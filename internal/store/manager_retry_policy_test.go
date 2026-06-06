@@ -344,10 +344,18 @@ func TestUpsertEventReceipt_ConcurrentTerminalReceiptsConvergeStandaloneRuntimeR
 		t.Fatalf("seed second agent: %v", err)
 	}
 	payload, _ := json.Marshal(map[string]any{"k": "v"})
-	evt := (events.NewProjectionEvent(uuid.NewString(),
-
+	evt := events.NewRuntimeControlEvent(
+		uuid.NewString(),
 		events.EventType("platform.paused"),
-		"runtime", "", payload, 0, "", "", events.EventEnvelope{}, time.Now().Add(-1*time.Hour))).WithEntityID(entityID)
+		"runtime",
+		"",
+		payload,
+		0,
+		"",
+		"",
+		events.EventEnvelope{EntityID: entityID},
+		time.Now().Add(-1*time.Hour),
+	)
 	if err := pg.AppendEvent(ctx, evt); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}

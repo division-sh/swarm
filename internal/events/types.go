@@ -16,6 +16,20 @@ const (
 	EventScopeEntity EventScope = "entity"
 )
 
+type EventAdmissionClass string
+
+const (
+	EventAdmissionUnknown           EventAdmissionClass = ""
+	EventAdmissionRootIngress       EventAdmissionClass = "root_ingress"
+	EventAdmissionRuntimeControl    EventAdmissionClass = "runtime_control"
+	EventAdmissionRuntimeDiagnostic EventAdmissionClass = "runtime_diagnostic"
+	EventAdmissionDiagnosticDirect  EventAdmissionClass = "diagnostic_direct"
+	EventAdmissionChild             EventAdmissionClass = "child"
+	EventAdmissionReplay            EventAdmissionClass = "replay"
+	EventAdmissionProjection        EventAdmissionClass = "projection"
+	EventAdmissionRouteProbe        EventAdmissionClass = "route_probe"
+)
+
 type EventEnvelope struct {
 	EntityID     string          `json:"-"`
 	FlowInstance string          `json:"-"`
@@ -38,16 +52,17 @@ type DeliveryRoute struct {
 }
 
 type Event struct {
-	id            string
-	eventType     EventType
-	sourceAgent   string
-	taskID        string
-	payload       json.RawMessage
-	chainDepth    int
-	runID         string
-	parentEventID string
-	envelope      EventEnvelope
-	createdAt     time.Time
+	admissionClass EventAdmissionClass
+	id             string
+	eventType      EventType
+	sourceAgent    string
+	taskID         string
+	payload        json.RawMessage
+	chainDepth     int
+	runID          string
+	parentEventID  string
+	envelope       EventEnvelope
+	createdAt      time.Time
 }
 
 type eventJSON struct {
@@ -71,15 +86,19 @@ type EventLineage struct {
 }
 
 func NewRootIngressEvent(id string, eventType EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope EventEnvelope, createdAt time.Time) Event {
-	return newEvent(id, eventType, sourceAgent, taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
+	return newEvent(EventAdmissionRootIngress, id, eventType, sourceAgent, taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
 }
 
 func NewRuntimeControlEvent(id string, eventType EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope EventEnvelope, createdAt time.Time) Event {
-	return newEvent(id, eventType, sourceAgent, taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
+	return newEvent(EventAdmissionRuntimeControl, id, eventType, sourceAgent, taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
 }
 
 func NewRuntimeDiagnosticEvent(id string, eventType EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope EventEnvelope, createdAt time.Time) Event {
-	return newEvent(id, eventType, sourceAgent, taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
+	return newEvent(EventAdmissionRuntimeDiagnostic, id, eventType, sourceAgent, taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
+}
+
+func NewDiagnosticDirectEvent(id string, eventType EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope EventEnvelope, createdAt time.Time) Event {
+	return newEvent(EventAdmissionDiagnosticDirect, id, eventType, sourceAgent, taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
 }
 
 func NewChildEvent(id string, eventType EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, parent Event, envelope EventEnvelope, createdAt time.Time) Event {
@@ -91,24 +110,28 @@ func NewChildEventWithLineage(id string, eventType EventType, sourceAgent, taskI
 	if strings.TrimSpace(taskID) == "" {
 		taskID = lineage.TaskID
 	}
-	return newEvent(id, eventType, sourceAgent, taskID, payload, chainDepth, lineage.RunID, lineage.ParentEventID, envelope, createdAt)
+	return newEvent(EventAdmissionChild, id, eventType, sourceAgent, taskID, payload, chainDepth, lineage.RunID, lineage.ParentEventID, envelope, createdAt)
 }
 
 func NewReplayEvent(id string, eventType EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, lineage EventLineage, envelope EventEnvelope, createdAt time.Time) Event {
-	return NewChildEventWithLineage(id, eventType, sourceAgent, taskID, payload, chainDepth, lineage, envelope, createdAt)
+	lineage = lineage.Normalized()
+	if strings.TrimSpace(taskID) == "" {
+		taskID = lineage.TaskID
+	}
+	return newEvent(EventAdmissionReplay, id, eventType, sourceAgent, taskID, payload, chainDepth, lineage.RunID, lineage.ParentEventID, envelope, createdAt)
 }
 
 // NewProjectionEvent reconstructs an event from already-authoritative facts.
 // Production call sites are restricted by TestProductionEventConstructionUsesPublicAPI;
 // new runtime producers must use the semantic constructors above.
 func NewProjectionEvent(id string, eventType EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope EventEnvelope, createdAt time.Time) Event {
-	return newEvent(id, eventType, sourceAgent, taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
+	return newEvent(EventAdmissionProjection, id, eventType, sourceAgent, taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
 }
 
 // NewRouteProbeEvent constructs a non-persisted route-query/sentinel event.
 // Production call sites are restricted by TestProductionEventConstructionUsesPublicAPI.
 func NewRouteProbeEvent(eventType EventType) Event {
-	return NewProjectionEvent("", eventType, "", "", nil, 0, "", "", EventEnvelope{}, time.Time{})
+	return newEvent(EventAdmissionRouteProbe, "", eventType, "", "", nil, 0, "", "", EventEnvelope{}, time.Time{})
 }
 
 func EmptyEvent() Event {
@@ -131,18 +154,19 @@ func (l EventLineage) Normalized() EventLineage {
 	}
 }
 
-func newEvent(id string, eventType EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope EventEnvelope, createdAt time.Time) Event {
+func newEvent(class EventAdmissionClass, id string, eventType EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope EventEnvelope, createdAt time.Time) Event {
 	evt := Event{
-		id:            strings.TrimSpace(id),
-		eventType:     EventType(strings.TrimSpace(string(eventType))),
-		sourceAgent:   strings.TrimSpace(sourceAgent),
-		taskID:        strings.TrimSpace(taskID),
-		payload:       clonePayload(payload),
-		chainDepth:    chainDepth,
-		runID:         strings.TrimSpace(runID),
-		parentEventID: strings.TrimSpace(parentEventID),
-		envelope:      envelope.Normalized(),
-		createdAt:     createdAt,
+		admissionClass: EventAdmissionClass(strings.TrimSpace(string(class))),
+		id:             strings.TrimSpace(id),
+		eventType:      EventType(strings.TrimSpace(string(eventType))),
+		sourceAgent:    strings.TrimSpace(sourceAgent),
+		taskID:         strings.TrimSpace(taskID),
+		payload:        clonePayload(payload),
+		chainDepth:     chainDepth,
+		runID:          strings.TrimSpace(runID),
+		parentEventID:  strings.TrimSpace(parentEventID),
+		envelope:       envelope.Normalized(),
+		createdAt:      createdAt,
 	}
 	if !evt.createdAt.IsZero() {
 		evt.createdAt = evt.createdAt.UTC()
@@ -190,6 +214,10 @@ func clonePayload(payload json.RawMessage) json.RawMessage {
 
 func (e Event) ID() string {
 	return strings.TrimSpace(e.id)
+}
+
+func (e Event) AdmissionClass() EventAdmissionClass {
+	return EventAdmissionClass(strings.TrimSpace(string(e.admissionClass)))
 }
 
 func (e Event) Type() EventType {

@@ -15,8 +15,8 @@ import (
 const runtimeLogEventName = "platform.runtime_log"
 
 func runtimeLogEvent(record runtimepkg.RuntimeLogPersistenceRecord) events.Event {
-	return events.NewRuntimeDiagnosticEvent(
-		uuid.NewString(),
+	return events.NewDiagnosticDirectEvent(
+		"",
 		events.EventType(runtimeLogEventName),
 		"runtime",
 		"",
@@ -25,7 +25,7 @@ func runtimeLogEvent(record runtimepkg.RuntimeLogPersistenceRecord) events.Event
 		strings.TrimSpace(record.RunID),
 		strings.TrimSpace(record.ParentEventID),
 		events.EventEnvelope{},
-		time.Now().UTC(),
+		time.Time{},
 	)
 }
 
@@ -76,8 +76,12 @@ func (s *PostgresStore) PersistRuntimeLog(ctx context.Context, record runtimepkg
 	if err := s.validateEventPayload(runtimeLogEventName, record.Payload); err != nil {
 		return err
 	}
+	evt, err := events.AdmitForPersistence(runtimeLogEvent(record), events.AdmissionOptions{})
+	if err != nil {
+		return err
+	}
 	if strings.TrimSpace(record.RunID) != "" {
-		return s.AppendEvent(ctx, runtimeLogEvent(record))
+		return s.AppendEvent(ctx, evt)
 	}
 	_, err = s.DB.ExecContext(ctx, `
 		INSERT INTO events (
@@ -85,10 +89,10 @@ func (s *PostgresStore) PersistRuntimeLog(ctx context.Context, record runtimepkg
 			chain_depth, produced_by, produced_by_type, source_event_id, created_at
 		)
 		VALUES (
-			gen_random_uuid(), 'platform.runtime_log', NULL, NULL, 'global', $1::jsonb,
-			0, 'runtime', 'platform', NULLIF($2,'')::uuid, now()
+			$1::uuid, 'platform.runtime_log', NULL, NULL, 'global', $2::jsonb,
+			0, 'runtime', 'platform', NULLIF($3,'')::uuid, $4
 		)
-	`, string(record.Payload), strings.TrimSpace(record.ParentEventID))
+	`, evt.ID(), string(evt.Payload()), strings.TrimSpace(evt.ParentEventID()), evt.CreatedAt())
 	if err != nil {
 		return fmt.Errorf("persist postgres runtime log: %w", err)
 	}
@@ -142,8 +146,12 @@ func (s *SQLiteRuntimeStore) PersistRuntimeLog(ctx context.Context, record runti
 	if err := s.validateEventPayload(runtimeLogEventName, record.Payload); err != nil {
 		return err
 	}
+	evt, err := events.AdmitForPersistence(runtimeLogEvent(record), events.AdmissionOptions{})
+	if err != nil {
+		return err
+	}
 	if strings.TrimSpace(record.RunID) != "" {
-		return s.AppendEvent(ctx, runtimeLogEvent(record))
+		return s.AppendEvent(ctx, evt)
 	}
 	_, err = s.DB.ExecContext(ctx, `
 		INSERT OR IGNORE INTO events (
@@ -152,7 +160,7 @@ func (s *SQLiteRuntimeStore) PersistRuntimeLog(ctx context.Context, record runti
 		)
 		VALUES (?, NULL, 'platform.runtime_log', NULL, NULL, '{}', '{}', '[]',
 			'global', ?, 0, 'runtime', 'platform', ?, ?)
-	`, uuid.NewString(), string(record.Payload), sqliteNullUUID(record.ParentEventID), time.Now().UTC())
+	`, evt.ID(), string(evt.Payload()), sqliteNullUUID(evt.ParentEventID()), evt.CreatedAt())
 	if err != nil {
 		return fmt.Errorf("persist sqlite runtime log: %w", err)
 	}

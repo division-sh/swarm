@@ -154,6 +154,10 @@ func (s *SQLiteRuntimeStore) AppendEventTx(ctx context.Context, tx *sql.Tx, evt 
 	if caps.Events.Log != SchemaFlavorCanonical {
 		return unsupportedSchemaCapability("events", caps.Events.Log)
 	}
+	evt, err = events.AdmitForPersistence(evt, s.eventPersistenceAdmissionOptions(ctx, caps, chooseRowQueryer(s.DB, tx), evt))
+	if err != nil {
+		return err
+	}
 	id, runID, name, entityID, flowInstance, scope, payload, chainDepth, producedBy, producedByType, sourceEventID, createdAt, err := eventStorageEnvelope(evt)
 	if err != nil {
 		return err
@@ -201,6 +205,55 @@ func (s *SQLiteRuntimeStore) AppendEventTx(ctx context.Context, tx *sql.Tx, evt 
 		committed = true
 	}
 	return nil
+}
+
+func (s *SQLiteRuntimeStore) eventPersistenceAdmissionOptions(ctx context.Context, caps StoreSchemaCapabilities, q rowQueryer, evt events.Event) events.AdmissionOptions {
+	runID := strings.TrimSpace(evt.RunID())
+	if runID == "" {
+		if lineage, ok := runtimecorrelation.RuntimeLineageFromContext(ctx); ok {
+			runID = strings.TrimSpace(lineage.RunID)
+		}
+	}
+	parentID := strings.TrimSpace(evt.ParentEventID())
+	if parentID == "" {
+		if lineageParentID := runtimecorrelation.RuntimeLineageParentForEvent(ctx, evt.ID()); lineageParentID != "" {
+			parentID = lineageParentID
+		}
+	}
+	if parentID == "" {
+		if inbound, ok := runtimecorrelation.InboundEventFromContext(ctx); ok {
+			if inboundID := strings.TrimSpace(inbound.ID()); inboundID != "" && inboundID != strings.TrimSpace(evt.ID()) {
+				parentID = inboundID
+			}
+		}
+	}
+	if runID == "" && parentID != "" {
+		if foundRunID := lookupSQLiteEventRunID(ctx, caps, q, parentID); foundRunID != "" {
+			runID = foundRunID
+		}
+	}
+	return events.AdmissionOptions{
+		RunIDCandidate:           runID,
+		ParentEventIDCandidate:   parentID,
+		SelectedForkLineageOwner: selectedForkLineageOwnerFromContext(ctx),
+	}
+}
+
+func lookupSQLiteEventRunID(ctx context.Context, caps StoreSchemaCapabilities, q rowQueryer, eventID string) string {
+	eventID = strings.TrimSpace(eventID)
+	if q == nil || eventID == "" || caps.Events.Log != SchemaFlavorCanonical || !caps.Events.LogRunID {
+		return ""
+	}
+	var runID string
+	if err := q.QueryRowContext(ctx, `
+		SELECT COALESCE(run_id, '')
+		FROM events
+		WHERE event_id = ?
+		LIMIT 1
+	`, eventID).Scan(&runID); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(runID)
 }
 
 func (s *SQLiteRuntimeStore) InsertEventDeliveries(ctx context.Context, eventID string, agentIDs []string) error {
