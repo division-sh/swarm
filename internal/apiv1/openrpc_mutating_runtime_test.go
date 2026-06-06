@@ -1052,6 +1052,10 @@ func (p *mutatingProbeEventPublisher) Publish(_ context.Context, evt events.Even
 	return nil
 }
 
+func (p *mutatingProbeEventPublisher) PublishAcknowledged(ctx context.Context, evt events.Event) error {
+	return p.Publish(ctx, evt)
+}
+
 func (p *mutatingProbeEventPublisher) WithBundleFingerprint(ctx context.Context) context.Context {
 	return runtimecorrelation.WithBundleSourceFact(ctx, runStartTestBundleSourceFact())
 }
