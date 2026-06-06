@@ -25,6 +25,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
+	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
@@ -79,6 +80,7 @@ type RuntimeOptions struct {
 	DisablePersistentStartupRecovery bool
 	TestEntityStateHook              func(entityID, state string)
 	TestWorkflowNodeHandlerStartHook runtimepipeline.WorkflowNodeHandlerStartHook
+	TestLifecycleProbe               runtimelifecycleprobe.Observer
 	TestOutboxSweeperConfig          runtimebus.OutboxSweeperConfig
 }
 
@@ -390,7 +392,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 			return nil
 		}
 		return []runtimebus.EventInterceptor{rt.Pipeline}
-	}, payloadValidator)
+	}, payloadValidator, opts.TestLifecycleProbe)
 	if err != nil {
 		return nil, fmt.Errorf("build event bus: %w", err)
 	}
@@ -464,6 +466,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 			BundleFingerprint:                opts.BundleFingerprint,
 			TestEntityStateHook:              opts.TestEntityStateHook,
 			TestWorkflowNodeHandlerStartHook: opts.TestWorkflowNodeHandlerStartHook,
+			TestLifecycleProbe:               opts.TestLifecycleProbe,
 		})
 		if rt.Pipeline != nil {
 			rt.SystemNodes = append(rt.SystemNodes, rt.Pipeline.BackgroundNodesWithReceiptStore(rt.Bus, stores.SQLDB, pipelineStore)...)

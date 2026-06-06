@@ -683,6 +683,7 @@ func (pc *PipelineCoordinator) BackgroundNodesWithReceiptStore(bus systemNodeBus
 		}
 		if executor := pc.backgroundWorkflowExecutor(strings.TrimSpace(node.ID)); executor != nil {
 			if bg := newBackgroundWorkflowNodeWithReceiptStoreAndRetryBase(executor, bus, db, receiptStore, pc.eventReceiptsCapability, retryBase); bg != nil {
+				bg.SetTestLifecycleProbe(pc.testLifecycleProbe)
 				out = append(out, bg)
 			}
 		}
@@ -853,6 +854,7 @@ func (pc *PipelineCoordinator) markWorkflowNodeProcessed(ctx context.Context, no
 		return
 	}
 	pc.convergeWorkflowNodeNormalRunCompletion(ctx, nodeID, evt)
+	pc.notifyTestLifecycleDeliveryStatus(ctx, nodeID, evt, "delivered")
 }
 
 func (pc *PipelineCoordinator) markWorkflowNodeDeliveryInProgress(ctx context.Context, nodeID string, evt events.Event) bool {
@@ -871,6 +873,7 @@ func (pc *PipelineCoordinator) markWorkflowNodeDeliveryInProgress(ctx context.Co
 		pc.logWorkflowNodeDeliveryTransitionError(ctx, nodeID, evt, "mark_delivery_in_progress_failed", "Marking the workflow node delivery in progress failed", err)
 		return false
 	}
+	pc.notifyTestLifecycleDeliveryStatus(ctx, nodeID, evt, "in_progress")
 	return true
 }
 
@@ -896,6 +899,7 @@ func (pc *PipelineCoordinator) markWorkflowNodeDeliveryDeadLetter(ctx context.Co
 		return
 	}
 	pc.convergeWorkflowNodeNormalRunCompletion(ctx, nodeID, evt)
+	pc.notifyTestLifecycleDeliveryStatus(ctx, nodeID, evt, "dead_letter")
 }
 
 func (pc *PipelineCoordinator) logWorkflowNodeDeliveryTransitionError(ctx context.Context, nodeID string, evt events.Event, action, message string, err error) {
