@@ -50,13 +50,13 @@ func (o engineOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.E
 	}
 	for i := range intents {
 		intent := &intents[i]
+		if strings.TrimSpace(string(intent.Event.Type())) == "" {
+			continue
+		}
 		var err error
 		intent.Event, err = normalizeOutboxEvent(ctx, intent.Event)
 		if err != nil {
 			return err
-		}
-		if strings.TrimSpace(string(intent.Event.Type())) == "" {
-			continue
 		}
 		plan, err := o.deliveryPlanForIntent(ctx, *intent)
 		if err != nil {
