@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -104,6 +105,96 @@ func TestSystemNodeRunner_MarkProcessedSettlesNodeDeliveryAndTriggersNormalRunCo
 	}
 	if receiptOutcome != "no_op" {
 		t.Fatalf("node receipt outcome = %q, want no_op", receiptOutcome)
+	}
+}
+
+func TestSystemNodeRunnerLifecycleProbeEmitsHandlerBoundaries(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	ctx := context.Background()
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	entityID := uuid.NewString()
+	seedSystemNodeCompletionRun(t, db, runID, eventID, entityID)
+	bus := &systemNodeCompletionBus{}
+	probe := runtimelifecycleprobe.New()
+	handlerObservedStatus := ""
+	handlerObservedReason := ""
+	runner := newSystemNodeRunner("terminal-node", bus, db, func() []events.EventType {
+		return []events.EventType{"example.started"}
+	}, func(ctx context.Context, evt events.Event) error {
+		startedCtx, cancelStarted := context.WithTimeout(ctx, time.Second)
+		defer cancelStarted()
+		if _, err := probe.WaitForHandlerStarted(startedCtx, eventID, "terminal-node"); err != nil {
+			t.Fatalf("handler started lifecycle signal: %v", err)
+		}
+		if err := db.QueryRowContext(ctx, `
+			SELECT COALESCE(status, ''), COALESCE(reason_code, '')
+			FROM event_deliveries
+			WHERE event_id = $1::uuid
+			  AND subscriber_type = 'node'
+			  AND subscriber_id = 'terminal-node'
+		`, eventID).Scan(&handlerObservedStatus, &handlerObservedReason); err != nil {
+			t.Fatalf("load node delivery during handler: %v", err)
+		}
+		if _, err := db.ExecContext(ctx, `
+			UPDATE entity_state
+			SET current_state = 'done',
+			    updated_at = now()
+			WHERE run_id = $1::uuid
+			  AND entity_id = $2::uuid
+		`, runID, entityID); err != nil {
+			t.Fatalf("mark entity terminal: %v", err)
+		}
+		return nil
+	}, func(context.Context) (bool, error) { return true, nil })
+	runner.SetTestLifecycleProbe(probe)
+
+	runner.ProcessEventForTest(ctx, (events.NewProjectionEvent(eventID,
+		"example.started", "", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID(entityID))
+
+	waitCtx, cancelWait := context.WithTimeout(ctx, time.Second)
+	defer cancelWait()
+	inProgress, err := probe.WaitForDeliveryStatus(waitCtx, eventID, "node", "terminal-node", "in_progress")
+	if err != nil {
+		t.Fatalf("node in_progress lifecycle signal: %v", err)
+	}
+	started, err := probe.WaitForHandlerStarted(waitCtx, eventID, "terminal-node")
+	if err != nil {
+		t.Fatalf("handler started lifecycle signal after process: %v", err)
+	}
+	completed, err := probe.WaitForHandlerCompleted(waitCtx, eventID, "terminal-node")
+	if err != nil {
+		t.Fatalf("handler completed lifecycle signal: %v", err)
+	}
+	if completed.Status != "completed" {
+		t.Fatalf("handler completed status = %q, want completed", completed.Status)
+	}
+	delivered, err := probe.WaitForDeliveryStatus(waitCtx, eventID, "node", "terminal-node", "delivered")
+	if err != nil {
+		t.Fatalf("node delivered lifecycle signal: %v", err)
+	}
+	if started.At.Before(inProgress.At) || completed.At.Before(started.At) || delivered.At.Before(completed.At) {
+		t.Fatalf("lifecycle signal order = in_progress:%s started:%s completed:%s delivered:%s, want in-progress before handler start before completion before delivered",
+			inProgress.At.Format(time.RFC3339Nano),
+			started.At.Format(time.RFC3339Nano),
+			completed.At.Format(time.RFC3339Nano),
+			delivered.At.Format(time.RFC3339Nano))
+	}
+	if handlerObservedStatus != "in_progress" || handlerObservedReason != "node_processing" {
+		t.Fatalf("handler observed node delivery = %s/%s, want in_progress/node_processing", handlerObservedStatus, handlerObservedReason)
+	}
+	var status string
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(status, '')
+		FROM event_deliveries
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'node'
+		  AND subscriber_id = 'terminal-node'
+	`, eventID).Scan(&status); err != nil {
+		t.Fatalf("load final node delivery: %v", err)
+	}
+	if status != "delivered" {
+		t.Fatalf("final node delivery status = %q, want delivered", status)
 	}
 }
 
