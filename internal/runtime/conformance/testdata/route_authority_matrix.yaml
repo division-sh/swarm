@@ -23,9 +23,6 @@ active_trackers:
   - kind: github_issue
     issue: 1340
     watchlist: runtime_operations.delivery_and_replay_ownership
-  - kind: github_issue
-    issue: 1301
-    watchlist: runtime_operations.delivery_and_replay_ownership
 rows:
   - id: route_plan_spec_contract
     concept: RoutePlan is the publish-time typed authority and event_deliveries is the durable authority sink.
@@ -256,19 +253,36 @@ rows:
       replay markers, and readback are not authority.
 
   - id: runtime_callback_flow_instance_localization
-    concept: Runtime callback flow_instance localization is a route-production sibling, not a matrix behavior change.
-    classification: split_to_existing_issue
-    tier: split_open
-    split_issue: 1301
-    proof_dimensions: [route_plan_model, split_tracker]
+    concept: Runtime callback events with unprefixed local names plus concrete flow_instance normalize into same-flow route keys and persist typed workflow-node delivery authority.
+    classification: already_covered_by_existing_proof
+    tier: required_pr_smoke
+    proof_dimensions: [route_plan_model, persistence_authority, negative_authority, required_pr_smoke]
+    invalid_authority:
+      - artifact-specific callback fallback
+      - workflow-runtime carrier route
+      - live internal carrier subscription
+      - handler lookup
+      - event_receipts settlement/backfill
+      - replay-scope markers
+      - API/CLI readback
     owner_refs:
       - {kind: spec_ref, path: platform-spec.yaml, ref: runtime_callback_routes}
+      - {kind: spec_ref, path: platform-spec.yaml, ref: route_plan_authority}
+      - {kind: spec_ref, path: platform-spec.yaml, ref: workflow_node_route_authority}
       - {kind: artifact, path: internal/runtime/bus/delivery_planner.go}
+      - {kind: artifact, path: internal/runtime/bus/eventbus_target_routes_test.go}
     proof_refs:
-      - {kind: tracker, issue: 1301, watchlist: runtime_operations.delivery_and_replay_ownership}
+      - {kind: issue, issue: 1301}
+      - {kind: go_test, name: TestRoutedEventKeysForPlan_RuntimeCallbackLocalEventWithFlowInstanceDerivesConcreteKey}
+      - {kind: go_test, name: TestEventBusPublish_RuntimeCallbackLocalEventPersistsSameFlowNodeRouteBeforeInternalCarrier}
     notes: >
-      #1301 owns runtime callback localization. The matrix keeps it visible as
-      open route-production work.
+      #1301 closes runtime callback flow_instance localization. Runtime-owned
+      artifact callbacks such as repo_scaffold.repo_commit_succeeded and
+      repo_scaffold.repo_commit_failed may carry unprefixed local event names
+      with flow_instance=repo-scaffold/<id>; EventContext route-key derivation
+      normalizes them to repo-scaffold/<id>/<local_event>, RoutePlan produces
+      typed node recipients, and event_deliveries persists node authority
+      before workflow-runtime carrier dispatch or #1293 execution admission.
 
   - id: live_carriers_handler_lookup_descriptors_not_authority
     concept: Live carriers, interceptors, handler lookup, and active descriptors are consumers or observations only.

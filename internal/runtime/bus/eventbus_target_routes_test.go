@@ -639,6 +639,84 @@ func TestEventBusPublish_SemanticScopeFlowInstanceResolvesConcreteRoute(t *testi
 	}
 }
 
+func TestEventBusPublish_RuntimeCallbackLocalEventPersistsSameFlowNodeRouteBeforeInternalCarrier(t *testing.T) {
+	tests := []struct {
+		name      string
+		eventType string
+	}{
+		{name: "success callback", eventType: "repo_scaffold.repo_commit_succeeded"},
+		{name: "failure callback", eventType: "repo_scaffold.repo_commit_failed"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newTargetRouteMemoryStore()
+			eventID := uuid.NewString()
+			want := events.DeliveryRoute{
+				SubscriberType: "node",
+				SubscriberID:   "repo-scaffold-node",
+				Target: events.RouteIdentity{
+					FlowInstance: "repo-scaffold/inst-1",
+					EntityID:     "ent-repo",
+				},
+			}
+			eb, err := NewEventBusWithOptions(store, EventBusOptions{
+				ContractBundle: semanticview.Wrap(routedCallbackTemplateBundle()),
+				Interceptors: []EventInterceptor{materializedRoutePersistedBeforeInterceptor{
+					t:       t,
+					store:   store,
+					eventID: eventID,
+					want:    want,
+				}},
+			})
+			if err != nil {
+				t.Fatalf("NewEventBusWithOptions: %v", err)
+			}
+			if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("repo-scaffold", "inst-1")}); err != nil {
+				t.Fatalf("AddFlowInstanceRoute: %v", err)
+			}
+			concreteEventType := "repo-scaffold/inst-1/" + tc.eventType
+			ch := eb.SubscribeInternal("workflow-runtime", events.EventType(concreteEventType))
+			defer eb.Unsubscribe("workflow-runtime")
+			evt := (events.Event{
+				ID:          eventID,
+				Type:        events.EventType(tc.eventType),
+				SourceAgent: "workflow-runtime",
+				Payload:     []byte(`{}`),
+				CreatedAt:   time.Now().UTC(),
+			}).WithEntityID("ent-repo").WithFlowInstance("repo-scaffold/inst-1")
+
+			plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+			if err != nil {
+				t.Fatalf("CheckPublishRecipientPlan: %v", err)
+			}
+			if got := plan.Recipients; len(got) != 1 || got[0] != "workflow-runtime" {
+				t.Fatalf("recipients = %#v, want workflow-runtime live carrier", got)
+			}
+			if len(plan.PersistedRecipients) != 0 {
+				t.Fatalf("persisted recipients = %#v, want none for internal carrier", plan.PersistedRecipients)
+			}
+			if len(plan.RoutedRecipients) != 1 || plan.RoutedRecipients[0].ID != "repo-scaffold-node" || plan.RoutedRecipients[0].Path != "repo-scaffold/inst-1" {
+				t.Fatalf("routed recipients = %#v, want repo-scaffold-node concrete instance route", plan.RoutedRecipients)
+			}
+			if got := plan.DeliveryRoutes; len(got) != 1 || !deliveryRoutesContain(got, want) {
+				t.Fatalf("delivery routes = %#v, want runtime callback node route %#v", got, want)
+			}
+
+			if err := eb.Publish(context.Background(), evt); err != nil {
+				t.Fatalf("Publish: %v", err)
+			}
+			got := requireBusEvent(t, ch, "runtime callback workflow-runtime carrier delivery")
+			if got.Type != events.EventType(tc.eventType) || got.FlowInstance() != "repo-scaffold/inst-1" || got.EntityID() != "ent-repo" {
+				t.Fatalf("delivered event type=%q flow=%q entity=%q, want callback local event in repo-scaffold/inst-1 ent-repo", got.Type, got.FlowInstance(), got.EntityID())
+			}
+			routes := store.routes[evt.ID]
+			if len(routes) != 1 || !deliveryRoutesContain(routes, want) {
+				t.Fatalf("persisted delivery routes = %#v, want callback route %#v", routes, want)
+			}
+		})
+	}
+}
+
 func TestEventBusCheckPublishRecipientPlan_SemanticScopeFlowInstanceMaterializesNodeRoute(t *testing.T) {
 	store := newTargetRouteMemoryStore()
 	eb, err := NewEventBusWithOptions(store, EventBusOptions{
@@ -1499,6 +1577,46 @@ func routedNodeTemplateBundle() *runtimecontracts.WorkflowContractBundle {
 					Event: "opco.product_initialization_requested",
 				},
 			},
+		},
+	}
+}
+
+func routedCallbackTemplateBundle() *runtimecontracts.WorkflowContractBundle {
+	repoScaffold := runtimecontracts.FlowContractView{
+		Path:  "repo-scaffold",
+		Paths: runtimecontracts.FlowContractPaths{ID: "repo-scaffold", Flow: "repo-scaffold"},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Mode: "template",
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"repo_scaffold.repo_commit_succeeded": {},
+			"repo_scaffold.repo_commit_failed":    {},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"repo-scaffold-node": {
+				ID:            "repo-scaffold-node",
+				ExecutionType: "system_node",
+				SubscribesTo: []string{
+					"repo_scaffold.repo_commit_succeeded",
+					"repo_scaffold.repo_commit_failed",
+				},
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"repo_scaffold.repo_commit_succeeded": {},
+					"repo_scaffold.repo_commit_failed":    {},
+				},
+			},
+		},
+	}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{repoScaffold}}
+	return &runtimecontracts.WorkflowContractBundle{
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"repo-scaffold": &root.Children[0],
+			},
+		},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
+			"repo-scaffold": {Mode: "template"},
 		},
 	}
 }
