@@ -101,12 +101,22 @@ func (d engineDispatcher) DispatchPostCommit(ctx context.Context, intents []runt
 	if d.bus == nil || len(intents) == 0 {
 		return nil
 	}
+	normalized := make([]runtimeengine.EmitIntent, 0, len(intents))
 	for i := range intents {
+		if strings.TrimSpace(string(intents[i].Event.Type())) == "" {
+			continue
+		}
+		intent := intents[i]
 		var err error
-		intents[i].Event, err = normalizeOutboxEvent(ctx, intents[i].Event)
+		intent.Event, err = normalizeOutboxEvent(ctx, intent.Event)
 		if err != nil {
 			return err
 		}
+		normalized = append(normalized, intent)
+	}
+	intents = normalized
+	if len(intents) == 0 {
+		return nil
 	}
 	if runtimepipeline.CollectPipelineEmitIntents(ctx, intents) {
 		return nil
