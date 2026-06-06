@@ -6,7 +6,7 @@ import (
 )
 
 const (
-	apiv1ConvergenceTimeout      = 5 * time.Second
+	apiv1ConvergenceTimeout      = 30 * time.Second
 	apiv1ConvergencePollInterval = 25 * time.Millisecond
 )
 

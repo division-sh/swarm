@@ -375,8 +375,17 @@ func (s *PostgresStore) markEventDeliveryInProgressSpec(ctx context.Context, eve
 		  )
 		  AND COALESCE(reason_code, '') <> ALL($4)
 	`
-	if _, err := s.DB.ExecContext(ctx, q, eventID, agentID, sessionID, pq.Array(activeRunQuiescenceTerminalReasonCodes())); err != nil {
+	res, err := s.DB.ExecContext(ctx, q, eventID, agentID, sessionID, pq.Array(activeRunQuiescenceTerminalReasonCodes()))
+	if err != nil {
 		return fmt.Errorf("mark event delivery in progress: %w", err)
+	}
+	if rows, _ := res.RowsAffected(); rows == 0 {
+		if _, ok, err := s.ActiveRunDeliveryQuiesced(ctx, eventID, "agent", agentID); err != nil {
+			return err
+		} else if ok {
+			return nil
+		}
+		return fmt.Errorf("mark event delivery in progress: delivery row required for event %s agent %s", eventID, agentID)
 	}
 	return nil
 }

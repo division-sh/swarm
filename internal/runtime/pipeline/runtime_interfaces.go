@@ -56,9 +56,12 @@ type WorkflowInstancePersistence interface {
 }
 
 type SystemNodeReceiptPersistence interface {
-	SystemNodeDeliveryAuthorized(ctx context.Context, nodeID, eventID string) (bool, error)
+	SystemNodeDeliveryAuthorized(ctx context.Context, nodeID, eventID string, retryLimit int) (bool, error)
 	SystemNodeProcessed(ctx context.Context, nodeID, eventID string) (bool, error)
 	SystemNodeDeliveryQuiesced(ctx context.Context, nodeID, eventID string) (bool, error)
+	MarkSystemNodeDeliveryInProgress(ctx context.Context, nodeID, eventID string, retryLimit int) error
+	MarkSystemNodeDeliveryFailed(ctx context.Context, nodeID, eventID, reasonCode, errText string, retryCount, retryLimit int) error
+	MarkSystemNodeDeliveryDeadLetter(ctx context.Context, nodeID, eventID, reasonCode, errText string, retryCount int, sideEffects string) error
 	MarkSystemNodeProcessedAndSettleDelivery(ctx context.Context, nodeID, eventID, sideEffects string) error
 }
 

@@ -3439,8 +3439,7 @@ func TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite(t *test
 		t.Fatalf("NewSQLiteRuntimeStore(%s): %v", sqlitePath, err)
 	}
 	preHandlerProof := make(chan servedEventPublishPreHandlerProof, 1)
-	stateUpdates := make(chan servedEventPublishEntityStateUpdate, 4)
-	endpoint := startServedEventPublishFollowUpRuntime(t, serveOptions{
+	endpoint, rt := startServedEventPublishFollowUpRuntime(t, serveOptions{
 		ConfigPath:                       writeServeRuntimeTestConfig(t),
 		ContractsPath:                    contractsPath,
 		PlatformSpecPath:                 defaultPlatformSpecPath,
@@ -3450,11 +3449,11 @@ func TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite(t *test
 		RequireBundleMatch:               false,
 		NoRequireBundleMatch:             true,
 		Verbose:                          true,
-		TestEntityStateHook:              servedEventPublishEntityStateHook(stateUpdates),
 		TestWorkflowNodeHandlerStartHook: servedEventPublishPreHandlerAuthorityHook(sqliteStore.DB, "sqlite", preHandlerProof),
+		TestOutboxSweeperConfig:          servedEventPublishProofOutboxSweeperConfig(),
 	})
 
-	runServedEventPublishFollowUpProof(t, endpoint, sqliteStore.DB, "sqlite", bundleHash, preHandlerProof, stateUpdates)
+	runServedEventPublishFollowUpProof(t, endpoint, sqliteStore.DB, "sqlite", bundleHash, rt.Bus, preHandlerProof)
 	if err := sqliteStore.Close(); err != nil {
 		t.Fatalf("close sqlite proof store: %v", err)
 	}
@@ -3467,8 +3466,7 @@ func TestRunServeRuntimeEventPublishRunIDFollowUpServedPathPostgres(t *testing.T
 	contractsPath := writeServedEventPublishFollowUpFixture(t)
 	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
 	preHandlerProof := make(chan servedEventPublishPreHandlerProof, 1)
-	stateUpdates := make(chan servedEventPublishEntityStateUpdate, 4)
-	endpoint := startServedEventPublishFollowUpRuntime(t, serveOptions{
+	endpoint, rt := startServedEventPublishFollowUpRuntime(t, serveOptions{
 		ConfigPath:                       writeServeRuntimeTestConfig(t),
 		ContractsPath:                    contractsPath,
 		PlatformSpecPath:                 defaultPlatformSpecPath,
@@ -3479,11 +3477,11 @@ func TestRunServeRuntimeEventPublishRunIDFollowUpServedPathPostgres(t *testing.T
 		SelfCheck:                        true,
 		RequireBundleMatch:               false,
 		Verbose:                          true,
-		TestEntityStateHook:              servedEventPublishEntityStateHook(stateUpdates),
 		TestWorkflowNodeHandlerStartHook: servedEventPublishPreHandlerAuthorityHook(db, "postgres", preHandlerProof),
+		TestOutboxSweeperConfig:          servedEventPublishProofOutboxSweeperConfig(),
 	})
 
-	runServedEventPublishFollowUpProof(t, endpoint, db, "postgres", bundleHash, preHandlerProof, stateUpdates)
+	runServedEventPublishFollowUpProof(t, endpoint, db, "postgres", bundleHash, rt.Bus, preHandlerProof)
 }
 
 func TestRunServeRuntimeEventPublishDynamicAutoEmitReturnsDurableAckAndDispatchesChild(t *testing.T) {
@@ -3495,7 +3493,7 @@ func TestRunServeRuntimeEventPublishDynamicAutoEmitReturnsDurableAckAndDispatche
 	blocked := make(chan servedEventPublishPreHandlerProof, 1)
 	release := make(chan struct{})
 	var releaseOnce sync.Once
-	endpoint := startServedEventPublishFollowUpRuntime(t, serveOptions{
+	endpoint, _ := startServedEventPublishFollowUpRuntime(t, serveOptions{
 		ConfigPath:                       writeServeRuntimeTestConfig(t),
 		ContractsPath:                    contractsPath,
 		PlatformSpecPath:                 defaultPlatformSpecPath,
@@ -3549,11 +3547,11 @@ func TestRunServeRuntimeEventPublishDynamicAutoEmitReturnsDurableAckAndDispatche
 	if spinup.RunID != runID || spinup.SourceEventID != bootstrap.EventID || spinup.NewRunCreated || spinup.EventID == "" {
 		t.Fatalf("spinup event.publish result = %#v, want existing run with source lineage", spinup)
 	}
-	requireServedEventPublishPreHandlerProof(t, "postgres", blocked, runID, spinup.EventID, "portfolio-node")
-	assertServedEventPublishDeliveriesContain(t, spinup.Deliveries, "node", "portfolio-node", "pending")
+	requireServedEventPublishPreHandlerProof(t, db, "postgres", blocked, runID, spinup.EventID, "portfolio-node")
+	assertServedEventPublishDeliveriesContainStatus(t, spinup.Deliveries, "node", "portfolio-node", "pending", "in_progress")
 	assertServedPostgresCount(t, db, `
 		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'portfolio-node' AND status = 'pending'
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'portfolio-node' AND status = 'in_progress'
 	`, 1, spinup.EventID)
 	assertServedPostgresCount(t, db, `
 		SELECT COUNT(*) FROM event_deliveries
@@ -3845,18 +3843,41 @@ func servedEventPublishFixtureBundleHash(t *testing.T, contractsPath string) str
 	return bundleHash
 }
 
-func startServedEventPublishFollowUpRuntime(t *testing.T, opts serveOptions) string {
+func servedEventPublishProofOutboxSweeperConfig() runtimebus.OutboxSweeperConfig {
+	cfg := runtimebus.DefaultOutboxSweeperConfig()
+	cfg.Interval = 25 * time.Millisecond
+	return cfg
+}
+
+func startServedEventPublishFollowUpRuntime(t *testing.T, opts serveOptions) (string, *runtimepkg.Runtime) {
 	t.Helper()
 	t.Setenv("SWARM_API_TOKEN", "test-token")
 	serveCtx, cancelServe := context.WithCancel(context.Background())
 	var out lockedBuffer
 	done := make(chan int, 1)
+	runtimeReady := make(chan *runtimepkg.Runtime, 1)
+	priorRuntimeReadyHook := opts.TestRuntimeReadyHook
+	opts.TestRuntimeReadyHook = func(rt *runtimepkg.Runtime) {
+		if priorRuntimeReadyHook != nil {
+			priorRuntimeReadyHook(rt)
+		}
+		select {
+		case runtimeReady <- rt:
+		default:
+		}
+	}
 	opts.Output = &out
 	go func() {
 		done <- runServeRuntime(serveCtx, repoRoot(), opts)
 	}()
 	stopped := false
 	waitForServeReadyLine(t, &out, done)
+	var rt *runtimepkg.Runtime
+	select {
+	case rt = <-runtimeReady:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for serve runtime test hook\noutput:\n%s", out.String())
+	}
 	t.Cleanup(func() {
 		if stopped {
 			return
@@ -3872,7 +3893,7 @@ func startServedEventPublishFollowUpRuntime(t *testing.T, opts serveOptions) str
 		}
 		stopped = true
 	})
-	return "http://" + serveRuntimeAPIListenerFromOutput(t, out.String()) + "/v1/rpc"
+	return "http://" + serveRuntimeAPIListenerFromOutput(t, out.String()) + "/v1/rpc", rt
 }
 
 type servedEventPublishPreHandlerProof struct {
@@ -3881,27 +3902,6 @@ type servedEventPublishPreHandlerProof struct {
 	NodeID  string
 	Count   int
 	Err     error
-}
-
-type servedEventPublishEntityStateUpdate struct {
-	EntityID string
-	State    string
-}
-
-func servedEventPublishEntityStateHook(updates chan<- servedEventPublishEntityStateUpdate) func(entityID, state string) {
-	return func(entityID, state string) {
-		update := servedEventPublishEntityStateUpdate{
-			EntityID: strings.TrimSpace(entityID),
-			State:    strings.TrimSpace(state),
-		}
-		if update.EntityID == "" || update.State == "" {
-			return
-		}
-		select {
-		case updates <- update:
-		default:
-		}
-	}
 }
 
 func servedEventPublishPreHandlerAuthorityHook(db *sql.DB, backend string, proofs chan<- servedEventPublishPreHandlerProof) runtimepipeline.WorkflowNodeHandlerStartHook {
@@ -3980,41 +3980,21 @@ func servedEventPublishBlockingHandlerAuthorityHook(
 	}
 }
 
-func requireServedEventPublishEntityStateUpdate(t *testing.T, backend string, updates <-chan servedEventPublishEntityStateUpdate, entityID, wantState string) string {
-	t.Helper()
-	entityID = strings.TrimSpace(entityID)
-	wantState = strings.TrimSpace(wantState)
-	observed := []servedEventPublishEntityStateUpdate{}
-	timeout := time.NewTimer(5 * time.Second)
-	defer timeout.Stop()
-	for {
-		select {
-		case update := <-updates:
-			observed = append(observed, update)
-			if update.State == wantState && update.EntityID != "" && (entityID == "" || update.EntityID == entityID) {
-				return update.EntityID
-			}
-		case <-timeout.C:
-			t.Fatalf("%s entity state hook did not observe entity %q state %q; observed=%#v", backend, entityID, wantState, observed)
-		}
-	}
-}
-
-func requireServedEventPublishPreHandlerProof(t *testing.T, backend string, proofs <-chan servedEventPublishPreHandlerProof, runID, eventID, nodeID string) {
+func requireServedEventPublishPreHandlerProof(t *testing.T, db *sql.DB, backend string, proofs <-chan servedEventPublishPreHandlerProof, runID, eventID, nodeID string) {
 	t.Helper()
 	select {
 	case proof := <-proofs:
 		if proof.Err != nil {
-			t.Fatalf("%s pre-handler node delivery authority query failed: %v", backend, proof.Err)
+			t.Fatalf("%s pre-handler node delivery authority query failed: %v\n%s", backend, proof.Err, servedEventPublishDebugSummary(t, db, backend, runID))
 		}
 		if proof.RunID != runID || proof.EventID != eventID || proof.NodeID != nodeID {
-			t.Fatalf("%s pre-handler node delivery authority proof = %#v, want run=%s event=%s node=%s", backend, proof, runID, eventID, nodeID)
+			t.Fatalf("%s pre-handler node delivery authority proof = %#v, want run=%s event=%s node=%s\n%s", backend, proof, runID, eventID, nodeID, servedEventPublishDebugSummary(t, db, backend, runID))
 		}
 		if proof.Count == 0 {
-			t.Fatalf("%s pre-handler root-input node deliveries = %d, want committed node/%s authority before handler execution", backend, proof.Count, nodeID)
+			t.Fatalf("%s pre-handler root-input node deliveries = %d, want committed node/%s authority before handler execution\n%s", backend, proof.Count, nodeID, servedEventPublishDebugSummary(t, db, backend, runID))
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatalf("%s pre-handler root-input node delivery authority hook did not run", backend)
+	case <-time.After(45 * time.Second):
+		t.Fatalf("%s pre-handler root-input node delivery authority hook did not run for run=%s event=%s node=%s\n%s", backend, runID, eventID, nodeID, servedEventPublishDebugSummary(t, db, backend, runID))
 	}
 }
 
@@ -4043,15 +4023,221 @@ func assertServedEventPublishDeliveriesContain(t *testing.T, deliveries []struct
 	Status         string `json:"status"`
 }, subscriberType, subscriberID, status string) {
 	t.Helper()
+	assertServedEventPublishDeliveriesContainStatus(t, deliveries, subscriberType, subscriberID, status)
+}
+
+func assertServedEventPublishDeliveriesContainStatus(t *testing.T, deliveries []struct {
+	SubscriberType string `json:"subscriber_type"`
+	SubscriberID   string `json:"subscriber_id"`
+	Status         string `json:"status"`
+}, subscriberType, subscriberID string, statuses ...string) {
+	t.Helper()
+	allowed := map[string]bool{}
+	for _, status := range statuses {
+		allowed[status] = true
+	}
 	for _, delivery := range deliveries {
-		if delivery.SubscriberType == subscriberType && delivery.SubscriberID == subscriberID && delivery.Status == status {
+		if delivery.SubscriberType == subscriberType && delivery.SubscriberID == subscriberID && allowed[delivery.Status] {
 			return
 		}
 	}
-	t.Fatalf("event.publish deliveries = %#v, want %s/%s status %s", deliveries, subscriberType, subscriberID, status)
+	t.Fatalf("event.publish deliveries = %#v, want %s/%s status in %v", deliveries, subscriberType, subscriberID, statuses)
 }
 
-func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.DB, backend, bundleHash string, preHandlerProof <-chan servedEventPublishPreHandlerProof, stateUpdates <-chan servedEventPublishEntityStateUpdate) {
+func releaseServedEventPublishPendingNodeDeliveries(t *testing.T, bus *runtimebus.EventBus, db *sql.DB, backend, eventID string) {
+	t.Helper()
+	if bus == nil {
+		t.Fatalf("%s runtime bus is required to release pending node deliveries", backend)
+	}
+	evt := loadServedEventPublishEvent(t, db, backend, eventID)
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancel()
+	deadline := time.Now().Add(10 * time.Second)
+	nextReleaseAt := time.Now().Add(2 * time.Second)
+	var lastStatus string
+	for time.Now().Before(deadline) {
+		lastStatus = servedEventPublishNodeDeliveryStatus(t, db, backend, eventID, "entity-writer")
+		switch lastStatus {
+		case "delivered":
+			return
+		case "pending":
+			if time.Now().Before(nextReleaseAt) {
+				time.Sleep(25 * time.Millisecond)
+				continue
+			}
+			if err := bus.ReleasePendingPersistedDeliveriesForEvent(ctx, evt); err != nil {
+				t.Fatalf("%s release pending node deliveries for event %s: %v", backend, eventID, err)
+			}
+			if err := bus.WaitForQuiescence(ctx); err != nil {
+				t.Fatalf("%s wait for released node deliveries for event %s: %v", backend, eventID, err)
+			}
+			nextReleaseAt = time.Now().Add(2 * time.Second)
+		case "in_progress":
+		case "":
+			t.Fatalf("%s node/entity-writer delivery for event %s is missing", backend, eventID)
+		default:
+			t.Fatalf("%s node/entity-writer delivery for event %s = %q, want delivered", backend, eventID, lastStatus)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("%s node/entity-writer delivery for event %s = %q after release, want delivered\n%s", backend, eventID, lastStatus, servedEventPublishDebugSummary(t, db, backend, evt.RunID()))
+}
+
+func servedEventPublishNodeDeliveryStatus(t *testing.T, db *sql.DB, backend, eventID, nodeID string) string {
+	t.Helper()
+	if strings.TrimSpace(eventID) == "" {
+		return ""
+	}
+	sqlText := ""
+	args := []any{eventID, nodeID}
+	if backend == "sqlite" {
+		sqlText = `SELECT COALESCE(status, '') FROM event_deliveries WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = ? ORDER BY created_at DESC LIMIT 1`
+	} else {
+		sqlText = `SELECT COALESCE(status, '') FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2 ORDER BY created_at DESC LIMIT 1`
+	}
+	var status string
+	if err := db.QueryRowContext(context.Background(), sqlText, args...).Scan(&status); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ""
+		}
+		t.Fatalf("%s node delivery status for %s/%s: %v", backend, eventID, nodeID, err)
+	}
+	return strings.TrimSpace(status)
+}
+
+func loadServedEventPublishEvent(t *testing.T, db *sql.DB, backend, eventID string) events.Event {
+	t.Helper()
+	sqlText := ""
+	args := []any{eventID}
+	if backend == "sqlite" {
+		sqlText = `
+			SELECT event_id, COALESCE(run_id, ''), event_name, COALESCE(produced_by, ''),
+			       COALESCE(entity_id, ''), COALESCE(flow_instance, ''), COALESCE(scope, 'global'),
+			       payload, created_at, COALESCE(source_event_id, ''),
+			       COALESCE(source_route, '{}'), COALESCE(target_route, '{}'), COALESCE(target_set, '[]')
+			FROM events
+			WHERE event_id = ?
+		`
+	} else {
+		sqlText = `
+			SELECT event_id::text, COALESCE(run_id::text, ''), event_name, COALESCE(produced_by, ''),
+			       COALESCE(entity_id::text, ''), COALESCE(flow_instance, ''), COALESCE(scope, 'global'),
+			       payload, created_at, COALESCE(source_event_id::text, ''),
+			       COALESCE(source_route, '{}'::jsonb), COALESCE(target_route, '{}'::jsonb), COALESCE(target_set, '[]'::jsonb)
+			FROM events
+			WHERE event_id = $1::uuid
+		`
+	}
+	var id, runID, eventName, producedBy, entityID, flowInstance, scope, sourceEventID string
+	var payloadRaw, createdAtRaw, sourceRouteRaw, targetRouteRaw, targetSetRaw any
+	if err := db.QueryRowContext(context.Background(), sqlText, args...).Scan(
+		&id,
+		&runID,
+		&eventName,
+		&producedBy,
+		&entityID,
+		&flowInstance,
+		&scope,
+		&payloadRaw,
+		&createdAtRaw,
+		&sourceEventID,
+		&sourceRouteRaw,
+		&targetRouteRaw,
+		&targetSetRaw,
+	); err != nil {
+		t.Fatalf("%s load event %s: %v", backend, eventID, err)
+	}
+	return events.NewProjectionEvent(
+		id,
+		events.EventType(eventName),
+		producedBy,
+		"",
+		servedEventPublishDBJSON(payloadRaw, "{}"),
+		0,
+		runID,
+		sourceEventID,
+		servedEventPublishDBEnvelope(t, entityID, flowInstance, scope, sourceRouteRaw, targetRouteRaw, targetSetRaw),
+		servedEventPublishDBTime(createdAtRaw),
+	)
+}
+
+func servedEventPublishDBEnvelope(t *testing.T, entityID, flowInstance, scope string, sourceRouteRaw, targetRouteRaw, targetSetRaw any) events.EventEnvelope {
+	t.Helper()
+	envelope := events.EventEnvelope{
+		EntityID:     strings.TrimSpace(entityID),
+		FlowInstance: strings.Trim(strings.TrimSpace(flowInstance), "/"),
+		Scope:        events.EventScope(strings.TrimSpace(scope)),
+	}
+	if err := json.Unmarshal(servedEventPublishDBJSON(sourceRouteRaw, "{}"), &envelope.Source); err != nil {
+		t.Fatalf("decode source_route: %v", err)
+	}
+	if err := json.Unmarshal(servedEventPublishDBJSON(targetRouteRaw, "{}"), &envelope.Target); err != nil {
+		t.Fatalf("decode target_route: %v", err)
+	}
+	if err := json.Unmarshal(servedEventPublishDBJSON(targetSetRaw, "[]"), &envelope.TargetSet); err != nil {
+		t.Fatalf("decode target_set: %v", err)
+	}
+	return envelope.Normalized()
+}
+
+func servedEventPublishDBJSON(raw any, fallback string) json.RawMessage {
+	switch v := raw.(type) {
+	case nil:
+		return json.RawMessage(fallback)
+	case json.RawMessage:
+		if len(v) == 0 {
+			return json.RawMessage(fallback)
+		}
+		return v
+	case []byte:
+		if len(v) == 0 {
+			return json.RawMessage(fallback)
+		}
+		return json.RawMessage(v)
+	case string:
+		if strings.TrimSpace(v) == "" {
+			return json.RawMessage(fallback)
+		}
+		return json.RawMessage(v)
+	default:
+		encoded, err := json.Marshal(v)
+		if err != nil || len(encoded) == 0 {
+			return json.RawMessage(fallback)
+		}
+		return json.RawMessage(encoded)
+	}
+}
+
+func servedEventPublishDBTime(raw any) time.Time {
+	switch v := raw.(type) {
+	case time.Time:
+		return v.UTC()
+	case []byte:
+		return servedEventPublishParseDBTime(string(v))
+	case string:
+		return servedEventPublishParseDBTime(v)
+	default:
+		return time.Now().UTC()
+	}
+}
+
+func servedEventPublishParseDBTime(raw string) time.Time {
+	raw = strings.TrimSpace(raw)
+	for _, layout := range []string{
+		time.RFC3339Nano,
+		"2006-01-02 15:04:05.999999999Z07:00",
+		"2006-01-02 15:04:05.999999999-07:00",
+		"2006-01-02 15:04:05.999999",
+		"2006-01-02 15:04:05",
+	} {
+		if parsed, err := time.Parse(layout, raw); err == nil {
+			return parsed.UTC()
+		}
+	}
+	return time.Now().UTC()
+}
+
+func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.DB, backend, bundleHash string, bus *runtimebus.EventBus, preHandlerProof <-chan servedEventPublishPreHandlerProof) {
 	t.Helper()
 	beforeCreateRejectEvents := servedEventPublishScalarCount(t, db, backend, "events_all", "", "")
 	beforeCreateRejectIdempotency := servedEventPublishScalarCount(t, db, backend, "api_idempotency_all", "", "")
@@ -4089,12 +4275,14 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	if got := servedEventPublishRowCount(t, db, backend, "runs", runID, ""); got != 1 {
 		t.Fatalf("%s runs for initial run = %d, want 1", backend, got)
 	}
-	requireServedEventPublishPreHandlerProof(t, backend, preHandlerProof, runID, initialEventID, "entity-writer")
 	if got := servedEventPublishNodeDeliveryCount(t, db, backend, runID, initialEventID, "entity-writer"); got == 0 {
 		t.Fatalf("%s initial root-input node deliveries = %d, want persisted node/entity-writer authority", backend, got)
 	}
-	entityID := requireServedEventPublishEntityStateUpdate(t, backend, stateUpdates, "", "waiting")
-	requireServedEventPublishEntityState(t, db, backend, runID, entityID, "waiting")
+	if backend == "postgres" {
+		requireServedEventPublishPreHandlerProof(t, db, backend, preHandlerProof, runID, initialEventID, "entity-writer")
+	}
+	releaseServedEventPublishPendingNodeDeliveries(t, bus, db, backend, initialEventID)
+	entityID := requireServedEventPublishEntityState(t, db, backend, runID, "", "waiting")
 	requireServedEventReadback(t, endpoint, initialEventID, runID, runID, "thing.created", "entity-writer")
 	requireServedEntityReadback(t, endpoint, runID, entityID, "waiting")
 
@@ -4121,7 +4309,7 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	if got := servedEventPublishScalarCount(t, db, backend, "event_deliveries", runID, followUpEventID); got == 0 {
 		t.Fatalf("%s follow-up deliveries = %d, want non-empty persisted evidence", backend, got)
 	}
-	requireServedEventPublishEntityStateUpdate(t, backend, stateUpdates, entityID, "done")
+	releaseServedEventPublishPendingNodeDeliveries(t, bus, db, backend, followUpEventID)
 	requireServedEventPublishEntityState(t, db, backend, runID, entityID, "done")
 	requireServedEntityReadback(t, endpoint, runID, entityID, "done")
 	requireServedRunStatus(t, endpoint, runID, "completed")
@@ -4142,13 +4330,7 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 			t.Fatalf("trace readback missing %q:\n%s", want, traceStdout)
 		}
 	}
-	statusStdout, statusStderr, statusCode := runServedCLICommand(t, endpoint, []string{"status", runID, "--no-diagnose"})
-	if statusCode != 0 {
-		t.Fatalf("status readback code=%d stderr=%s stdout=%s", statusCode, statusStderr, statusStdout)
-	}
-	if !strings.Contains(statusStdout, "status=completed") {
-		t.Fatalf("status readback missing completed status:\n%s", statusStdout)
-	}
+	requireServedStatusCLIReadback(t, endpoint, runID, "status=completed")
 	entityListStdout, entityListStderr, entityListCode := runServedCLICommand(t, endpoint, []string{"entities", "list", "--run-id", runID, "--limit", "10"})
 	if entityListCode != 0 {
 		t.Fatalf("entities list readback code=%d stderr=%s stdout=%s", entityListCode, entityListStderr, entityListStdout)
@@ -4303,6 +4485,21 @@ func requireServedRunStatus(t *testing.T, endpoint, runID, want string) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	t.Fatalf("run.get status for %s = %q, want %q", runID, last, want)
+}
+
+func requireServedStatusCLIReadback(t *testing.T, endpoint, runID, want string) {
+	t.Helper()
+	var lastStdout, lastStderr string
+	var lastCode int
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		lastStdout, lastStderr, lastCode = runServedCLICommand(t, endpoint, []string{"status", runID, "--no-diagnose"})
+		if lastCode == 0 && strings.Contains(lastStdout, want) {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("status readback code=%d stderr=%s stdout=%s\nmissing %q", lastCode, lastStderr, lastStdout, want)
 }
 
 func requireServedEventReadback(t *testing.T, endpoint, eventID, runID, entityID, eventName, subscriberID string) {

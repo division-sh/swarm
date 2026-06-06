@@ -124,10 +124,7 @@ func (n *systemNodeRunner) ProcessEventForTest(ctx context.Context, evt events.E
 	if !n.deliveryAuthorized(ctx, evt) {
 		return
 	}
-	retryLimit := n.retryLimit
-	if retryLimit <= 0 {
-		retryLimit = DefaultSystemNodeRetryLimit
-	}
+	retryLimit := n.effectiveRetryLimit()
 	var lastErr error
 	failureType := "retry_exhausted"
 	retryCount := maxInt(retryLimit, 1)
@@ -136,6 +133,9 @@ func (n *systemNodeRunner) ProcessEventForTest(ctx context.Context, evt events.E
 		backoffFn = func(attempt int) time.Duration { return defaultSystemNodeBackoff(time.Second, attempt) }
 	}
 	for attempt := 1; attempt <= retryLimit; attempt++ {
+		if !n.markDeliveryInProgress(ctx, evt) {
+			return
+		}
 		if err := n.handle(ctx, evt); err == nil {
 			if !n.isActiveRunQuiesced(ctx, evt) {
 				n.markProcessed(ctx, evt)
@@ -153,6 +153,7 @@ func (n *systemNodeRunner) ProcessEventForTest(ctx context.Context, evt events.E
 		if attempt >= retryLimit {
 			break
 		}
+		n.markDeliveryFailed(ctx, evt, "handler_error", lastErr, retryCount)
 		select {
 		case <-ctx.Done():
 			return
@@ -163,7 +164,7 @@ func (n *systemNodeRunner) ProcessEventForTest(ctx context.Context, evt events.E
 		return
 	}
 	n.emitDeadLetter(ctx, evt, lastErr, failureType, retryCount)
-	n.markProcessed(ctx, evt)
+	n.markDeliveryDeadLetter(ctx, evt, failureType, lastErr, retryCount)
 }
 
 func (n *systemNodeRunner) SetRetryPolicyForTest(limit int, backoff func(int) time.Duration) {
@@ -172,6 +173,13 @@ func (n *systemNodeRunner) SetRetryPolicyForTest(limit int, backoff func(int) ti
 	}
 	n.retryLimit = limit
 	n.backoffFn = backoff
+}
+
+func (n *systemNodeRunner) effectiveRetryLimit() int {
+	if n == nil {
+		return DefaultSystemNodeRetryLimit
+	}
+	return normalizeSystemNodeRetryLimit(n.retryLimit)
 }
 
 func (n *systemNodeRunner) SetOverrideHandleForTest(fn func(context.Context, events.Event) error) {
@@ -350,6 +358,87 @@ func (n *systemNodeRunner) markProcessed(ctx context.Context, evt events.Event) 
 	n.convergeNormalRunCompletion(ctx, evt)
 }
 
+func (n *systemNodeRunner) markDeliveryInProgress(ctx context.Context, evt events.Event) bool {
+	eventID := strings.TrimSpace(evt.ID())
+	if n == nil || n.receiptStore == nil || eventID == "" {
+		return false
+	}
+	if n.isActiveRunQuiesced(ctx, evt) {
+		return false
+	}
+	if !n.eventReceiptsAvailable(ctx) {
+		return false
+	}
+	if err := n.receiptStore.MarkSystemNodeDeliveryInProgress(ctx, n.nodeID, eventID, n.effectiveRetryLimit()); err != nil {
+		n.logSystemNodeDeliveryTransitionError(ctx, evt, "mark_delivery_in_progress_failed", "Marking the system node delivery in progress failed", err)
+		return false
+	}
+	return true
+}
+
+func (n *systemNodeRunner) markDeliveryFailed(ctx context.Context, evt events.Event, reasonCode string, cause error, retryCount int) {
+	eventID := strings.TrimSpace(evt.ID())
+	if n == nil || n.receiptStore == nil || eventID == "" {
+		return
+	}
+	if n.isActiveRunQuiesced(ctx, evt) {
+		return
+	}
+	if !n.eventReceiptsAvailable(ctx) {
+		return
+	}
+	errText := ""
+	if cause != nil {
+		errText = strings.TrimSpace(cause.Error())
+	}
+	if err := n.receiptStore.MarkSystemNodeDeliveryFailed(ctx, n.nodeID, eventID, reasonCode, errText, retryCount, n.effectiveRetryLimit()); err != nil {
+		n.logSystemNodeDeliveryTransitionError(ctx, evt, "mark_delivery_failed_failed", "Marking the system node delivery as failed failed", err)
+	}
+}
+
+func (n *systemNodeRunner) markDeliveryDeadLetter(ctx context.Context, evt events.Event, reasonCode string, cause error, retryCount int) {
+	eventID := strings.TrimSpace(evt.ID())
+	if n == nil || n.receiptStore == nil || eventID == "" {
+		return
+	}
+	if n.isActiveRunQuiesced(ctx, evt) {
+		return
+	}
+	if !n.eventReceiptsAvailable(ctx) {
+		return
+	}
+	errText := ""
+	if cause != nil {
+		errText = strings.TrimSpace(cause.Error())
+	}
+	sideEffects := systemNodeDeadLetterReceiptSideEffects(n.nodeID, eventID, reasonCode, errText, retryCount)
+	if err := n.receiptStore.MarkSystemNodeDeliveryDeadLetter(ctx, n.nodeID, eventID, reasonCode, errText, retryCount, sideEffects); err != nil {
+		n.logSystemNodeDeliveryTransitionError(ctx, evt, "mark_delivery_dead_letter_failed", "Marking the system node delivery as dead_letter failed", err)
+		return
+	}
+	n.convergeNormalRunCompletion(ctx, evt)
+}
+
+func (n *systemNodeRunner) logSystemNodeDeliveryTransitionError(ctx context.Context, evt events.Event, action, message string, err error) {
+	if n == nil || err == nil {
+		return
+	}
+	eventID := strings.TrimSpace(evt.ID())
+	slog.Error(message, "node_id", n.nodeID, "event_id", eventID, "error", err)
+	if logger, ok := n.bus.(systemNodeRuntimeLogger); ok && logger != nil {
+		logger.LogRuntime(ctx, RuntimeLogEntry{
+			Level:     "error",
+			Message:   message,
+			Component: n.nodeID,
+			Action:    action,
+			EventID:   eventID,
+			EventType: strings.TrimSpace(string(evt.Type())),
+			EntityID:  workflowEventEntityID(evt),
+			Error:     strings.TrimSpace(err.Error()),
+		})
+	}
+}
+
 func (n *systemNodeRunner) persistProcessedReceiptAndSettleDelivery(ctx context.Context, eventID, sideEffects string) error {
 	if n == nil || n.receiptStore == nil {
 		return nil
@@ -360,6 +449,16 @@ func (n *systemNodeRunner) persistProcessedReceiptAndSettleDelivery(ctx context.
 func systemNodeProcessedReceiptSideEffects(nodeID, eventID string) string {
 	sideEffects, _ := json.Marshal(map[string]any{
 		"idempotency_key": SystemNodeReceiptIdempotencyKey(nodeID, eventID),
+	})
+	return string(sideEffects)
+}
+
+func systemNodeDeadLetterReceiptSideEffects(nodeID, eventID, reasonCode, errText string, retryCount int) string {
+	sideEffects, _ := json.Marshal(map[string]any{
+		"idempotency_key": SystemNodeReceiptIdempotencyKey(nodeID, eventID),
+		"failure_type":    strings.TrimSpace(reasonCode),
+		"retry_count":     sanitizedSystemNodeRetryCount(retryCount),
+		"error":           strings.TrimSpace(errText),
 	})
 	return string(sideEffects)
 }
@@ -400,7 +499,8 @@ func persistSystemNodeProcessedReceiptAndSettleDeliveryTx(ctx context.Context, t
 	if tx == nil {
 		return nil
 	}
-	authorized, err := postgresSystemNodeDeliveryAuthorizedTx(ctx, tx, nodeID, eventID)
+	retryLimit := normalizeSystemNodeRetryLimit(DefaultSystemNodeRetryLimit)
+	authorized, err := postgresSystemNodeDeliveryAuthorizedTx(ctx, tx, nodeID, eventID, retryLimit)
 	if err != nil {
 		return fmt.Errorf("query system node delivery authority: %w", err)
 	}
@@ -444,18 +544,278 @@ func persistSystemNodeProcessedReceiptAndSettleDeliveryTx(ctx context.Context, t
 			delivered_at = now()
 		WHERE event_id = $1::uuid
 		  AND subscriber_type = 'node'
-		  AND subscriber_id = $2
-		  AND (
-			status IN ('pending', 'in_progress')
-			OR (status = 'failed' AND COALESCE(retry_count, 0) < 2)
-		  )
-	`, eventID, nodeID); err != nil {
+			  AND subscriber_id = $2
+			  AND (
+				status IN ('pending', 'in_progress')
+				OR (status = 'failed' AND COALESCE(retry_count, 0) < $3)
+			  )
+		`, eventID, nodeID, retryLimit); err != nil {
 		return fmt.Errorf("settle system node delivery: %w", err)
 	}
 	return nil
 }
 
-func postgresSystemNodeDeliveryAuthorizedTx(ctx context.Context, tx *sql.Tx, nodeID, eventID string) (bool, error) {
+func markPostgresSystemNodeDeliveryInProgress(ctx context.Context, db *sql.DB, nodeID, eventID string, retryLimit int) error {
+	if db == nil {
+		return nil
+	}
+	nodeID = strings.TrimSpace(nodeID)
+	eventID = strings.TrimSpace(eventID)
+	if nodeID == "" || eventID == "" {
+		return nil
+	}
+	retryLimit = normalizeSystemNodeRetryLimit(retryLimit)
+	if tx, ok := PipelineSQLTxFromContext(ctx); ok {
+		return markPostgresSystemNodeDeliveryInProgressTx(ctx, tx, nodeID, eventID, retryLimit)
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin system node delivery start tx: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	if err := markPostgresSystemNodeDeliveryInProgressTx(ctx, tx, nodeID, eventID, retryLimit); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit system node delivery start tx: %w", err)
+	}
+	committed = true
+	return nil
+}
+
+func markPostgresSystemNodeDeliveryInProgressTx(ctx context.Context, tx *sql.Tx, nodeID, eventID string, retryLimit int) error {
+	if tx == nil {
+		return nil
+	}
+	retryLimit = normalizeSystemNodeRetryLimit(retryLimit)
+	authorized, err := postgresSystemNodeDeliveryAuthorizedTx(ctx, tx, nodeID, eventID, retryLimit)
+	if err != nil {
+		return fmt.Errorf("query system node delivery authority: %w", err)
+	}
+	if !authorized {
+		return fmt.Errorf("%w: node %s event %s", ErrSystemNodeDeliveryAuthorityMissing, nodeID, eventID)
+	}
+	res, err := tx.ExecContext(ctx, `
+		UPDATE event_deliveries
+		SET
+			status = 'in_progress',
+			reason_code = 'node_processing',
+			last_error = NULL,
+			active_session_id = NULL,
+			started_at = COALESCE(started_at, now()),
+			delivered_at = NULL
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'node'
+			  AND subscriber_id = $2
+			  AND (
+				status IN ('pending', 'in_progress')
+				OR (status = 'failed' AND COALESCE(retry_count, 0) < $3)
+			  )
+	`, eventID, nodeID, retryLimit)
+	if err != nil {
+		return fmt.Errorf("mark system node delivery in progress: %w", err)
+	}
+	if rows, _ := res.RowsAffected(); rows == 0 {
+		return fmt.Errorf("%w: node %s event %s", ErrSystemNodeDeliveryAuthorityMissing, nodeID, eventID)
+	}
+	return nil
+}
+
+func markPostgresSystemNodeDeliveryFailed(ctx context.Context, db *sql.DB, nodeID, eventID, reasonCode, errText string, retryCount, retryLimit int) error {
+	if db == nil {
+		return nil
+	}
+	nodeID = strings.TrimSpace(nodeID)
+	eventID = strings.TrimSpace(eventID)
+	if nodeID == "" || eventID == "" {
+		return nil
+	}
+	retryLimit = normalizeSystemNodeRetryLimit(retryLimit)
+	if tx, ok := PipelineSQLTxFromContext(ctx); ok {
+		return markPostgresSystemNodeDeliveryFailedTx(ctx, tx, nodeID, eventID, reasonCode, errText, retryCount, retryLimit)
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin system node delivery failure tx: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	if err := markPostgresSystemNodeDeliveryFailedTx(ctx, tx, nodeID, eventID, reasonCode, errText, retryCount, retryLimit); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit system node delivery failure tx: %w", err)
+	}
+	committed = true
+	return nil
+}
+
+func markPostgresSystemNodeDeliveryFailedTx(ctx context.Context, tx *sql.Tx, nodeID, eventID, reasonCode, errText string, retryCount, retryLimit int) error {
+	if tx == nil {
+		return nil
+	}
+	retryLimit = normalizeSystemNodeRetryLimit(retryLimit)
+	authorized, err := postgresSystemNodeDeliveryAuthorizedTx(ctx, tx, nodeID, eventID, retryLimit)
+	if err != nil {
+		return fmt.Errorf("query system node delivery authority: %w", err)
+	}
+	if !authorized {
+		return fmt.Errorf("%w: node %s event %s", ErrSystemNodeDeliveryAuthorityMissing, nodeID, eventID)
+	}
+	res, err := tx.ExecContext(ctx, `
+		UPDATE event_deliveries
+		SET
+			status = 'failed',
+			retry_count = $3,
+			reason_code = NULLIF($4, ''),
+			last_error = NULLIF($5, ''),
+			active_session_id = NULL,
+			started_at = COALESCE(started_at, created_at),
+			delivered_at = now()
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'node'
+		  AND subscriber_id = $2
+		  AND status IN ('pending', 'in_progress', 'failed')
+		  AND COALESCE(retry_count, 0) < $6
+	`, eventID, nodeID, sanitizedSystemNodeRetryCount(retryCount), sanitizeSystemNodeReasonCode(reasonCode, "handler_error"), strings.TrimSpace(errText), retryLimit)
+	if err != nil {
+		return fmt.Errorf("mark system node delivery failed: %w", err)
+	}
+	if rows, _ := res.RowsAffected(); rows == 0 {
+		return fmt.Errorf("%w: node %s event %s", ErrSystemNodeDeliveryAuthorityMissing, nodeID, eventID)
+	}
+	return nil
+}
+
+func markPostgresSystemNodeDeliveryDeadLetter(ctx context.Context, db *sql.DB, nodeID, eventID, reasonCode, errText string, retryCount int, sideEffects string) error {
+	if db == nil {
+		return nil
+	}
+	nodeID = strings.TrimSpace(nodeID)
+	eventID = strings.TrimSpace(eventID)
+	if nodeID == "" || eventID == "" {
+		return nil
+	}
+	if tx, ok := PipelineSQLTxFromContext(ctx); ok {
+		return markPostgresSystemNodeDeliveryDeadLetterTx(ctx, tx, nodeID, eventID, reasonCode, errText, retryCount, sideEffects)
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin system node delivery dead-letter tx: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	if err := markPostgresSystemNodeDeliveryDeadLetterTx(ctx, tx, nodeID, eventID, reasonCode, errText, retryCount, sideEffects); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit system node delivery dead-letter tx: %w", err)
+	}
+	committed = true
+	return nil
+}
+
+func markPostgresSystemNodeDeliveryDeadLetterTx(ctx context.Context, tx *sql.Tx, nodeID, eventID, reasonCode, errText string, retryCount int, sideEffects string) error {
+	if tx == nil {
+		return nil
+	}
+	exists, err := postgresSystemNodeDeliveryRowExistsTx(ctx, tx, nodeID, eventID)
+	if err != nil {
+		return fmt.Errorf("query system node delivery row: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("%w: node %s event %s", ErrSystemNodeDeliveryAuthorityMissing, nodeID, eventID)
+	}
+	reasonCode = sanitizeSystemNodeReasonCode(reasonCode, "retry_exhausted")
+	errText = strings.TrimSpace(errText)
+	res, err := tx.ExecContext(ctx, `
+		UPDATE event_deliveries
+		SET
+			status = 'dead_letter',
+			retry_count = $3,
+			reason_code = NULLIF($4, ''),
+			last_error = NULLIF($5, ''),
+			active_session_id = NULL,
+			started_at = COALESCE(started_at, created_at),
+			delivered_at = now()
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'node'
+		  AND subscriber_id = $2
+		  AND status IN ('pending', 'in_progress', 'failed')
+	`, eventID, nodeID, sanitizedSystemNodeRetryCount(retryCount), reasonCode, errText)
+	if err != nil {
+		return fmt.Errorf("dead-letter system node delivery: %w", err)
+	}
+	if rows, _ := res.RowsAffected(); rows == 0 {
+		return fmt.Errorf("%w: node %s event %s", ErrSystemNodeDeliveryAuthorityMissing, nodeID, eventID)
+	}
+	res, err = tx.ExecContext(ctx, `
+		INSERT INTO event_receipts (
+			event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
+			outcome, reason_code, side_effects, idempotency_key, processed_at
+		)
+		SELECT
+			e.event_id, 'node', $2, e.entity_id, e.flow_instance,
+			'dead_letter', NULLIF($3, ''), $4::jsonb, $5, now()
+		FROM events e
+		WHERE e.event_id = $1::uuid
+		ON CONFLICT (event_id, subscriber_type, subscriber_id) DO UPDATE SET
+			entity_id = EXCLUDED.entity_id,
+			flow_instance = EXCLUDED.flow_instance,
+			outcome = EXCLUDED.outcome,
+			reason_code = EXCLUDED.reason_code,
+			side_effects = EXCLUDED.side_effects,
+			idempotency_key = EXCLUDED.idempotency_key,
+			processed_at = now()
+	`, eventID, nodeID, reasonCode, sqliteNodeJSON(sideEffects), SystemNodeReceiptIdempotencyKey(nodeID, eventID))
+	if err != nil {
+		return fmt.Errorf("upsert system node dead-letter receipt: %w", err)
+	}
+	if rows, err := res.RowsAffected(); err == nil && rows == 0 {
+		return fmt.Errorf("upsert system node dead-letter receipt: event %s not found", eventID)
+	}
+	return nil
+}
+
+func postgresSystemNodeDeliveryAuthorizedTx(ctx context.Context, tx *sql.Tx, nodeID, eventID string, retryLimit int) (bool, error) {
+	if tx == nil {
+		return false, nil
+	}
+	retryLimit = normalizeSystemNodeRetryLimit(retryLimit)
+	if _, err := uuid.Parse(strings.TrimSpace(eventID)); err != nil {
+		return false, nil
+	}
+	var ok bool
+	err := tx.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM event_deliveries
+			WHERE event_id = $1::uuid
+			  AND subscriber_type = 'node'
+				  AND subscriber_id = $2
+				  AND (
+					status IN ('pending', 'in_progress')
+					OR (status = 'failed' AND COALESCE(retry_count, 0) < $3)
+				  )
+			)
+	`, strings.TrimSpace(eventID), strings.TrimSpace(nodeID), retryLimit).Scan(&ok)
+	return ok, err
+}
+
+func postgresSystemNodeDeliveryRowExistsTx(ctx context.Context, tx *sql.Tx, nodeID, eventID string) (bool, error) {
 	if tx == nil {
 		return false, nil
 	}
@@ -470,10 +830,6 @@ func postgresSystemNodeDeliveryAuthorizedTx(ctx context.Context, tx *sql.Tx, nod
 			WHERE event_id = $1::uuid
 			  AND subscriber_type = 'node'
 			  AND subscriber_id = $2
-			  AND (
-				status IN ('pending', 'in_progress')
-				OR (status = 'failed' AND COALESCE(retry_count, 0) < 2)
-			  )
 		)
 	`, strings.TrimSpace(eventID), strings.TrimSpace(nodeID)).Scan(&ok)
 	return ok, err
@@ -532,7 +888,7 @@ func (n *systemNodeRunner) deliveryAuthorized(ctx context.Context, evt events.Ev
 	if !n.eventReceiptsAvailable(ctx) {
 		return false
 	}
-	ok, err := n.receiptStore.SystemNodeDeliveryAuthorized(ctx, n.nodeID, eventID)
+	ok, err := n.receiptStore.SystemNodeDeliveryAuthorized(ctx, n.nodeID, eventID, n.effectiveRetryLimit())
 	if err != nil {
 		slog.Error("system node delivery authority check failed", "node_id", n.nodeID, "event_id", eventID, "error", err)
 		if logger, ok := n.bus.(systemNodeRuntimeLogger); ok && logger != nil {

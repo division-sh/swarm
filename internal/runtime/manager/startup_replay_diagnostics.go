@@ -50,6 +50,7 @@ const (
 	startupManagerReplayReasonBudgetEmergency      startupManagerReplayReasonCode = "budget_emergency"
 	startupManagerReplayReasonTransientAgentError  startupManagerReplayReasonCode = "transient_agent_error"
 	startupManagerReplayReasonProcessFailed        startupManagerReplayReasonCode = "event_processing_failed"
+	startupManagerReplayReasonDeliveryStartFailed  startupManagerReplayReasonCode = "delivery_start_failed"
 	startupManagerReplayReasonPublishFailed        startupManagerReplayReasonCode = "publish_output_failed"
 	startupManagerReplayReasonBacklogLoadFailed    startupManagerReplayReasonCode = "pending_backlog_load_failed"
 )

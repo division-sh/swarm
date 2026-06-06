@@ -79,6 +79,7 @@ type RuntimeOptions struct {
 	DisablePersistentStartupRecovery bool
 	TestEntityStateHook              func(entityID, state string)
 	TestWorkflowNodeHandlerStartHook runtimepipeline.WorkflowNodeHandlerStartHook
+	TestOutboxSweeperConfig          runtimebus.OutboxSweeperConfig
 }
 
 // RuntimeDeps is the canonical dependency graph for NewRuntime boot wiring.
@@ -885,7 +886,11 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	}
 	rt.logStartupRecoveryDecision(ctx, startupRecoveryDecision)
 	if rt.Bus != nil {
-		rt.Bus.StartOutboxSweeper(startCtx, runtimebus.DefaultOutboxSweeperConfig())
+		sweeperConfig := rt.Options.TestOutboxSweeperConfig
+		if sweeperConfig == (runtimebus.OutboxSweeperConfig{}) {
+			sweeperConfig = runtimebus.DefaultOutboxSweeperConfig()
+		}
+		rt.Bus.StartOutboxSweeper(startCtx, sweeperConfig)
 		rt.emitBootProgress(12, "outbox_sweeper", "started", "")
 	} else {
 		rt.emitBootProgress(12, "outbox_sweeper", "skipped", "event bus unavailable")

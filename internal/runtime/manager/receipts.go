@@ -89,6 +89,10 @@ func (am *AgentManager) processEventDetailed(ctx context.Context, agent Agent, e
 					Error:     strings.TrimSpace(err.Error()),
 				})
 			}
+			record.Outcome = startupManagerReplayOutcomeDropped
+			record.ReasonCode = startupManagerReplayReasonDeliveryStartFailed
+			record.ErrorText = strings.TrimSpace(err.Error())
+			return eventProcessResult{record: record, err: err}
 		} else if am.bus != nil {
 			am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
 				Level:     "debug",

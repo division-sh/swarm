@@ -274,6 +274,9 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 	if !pc.workflowNodeDeliveryAuthorized(ctx, nodeID, evt) {
 		return false, nil
 	}
+	if !pc.markWorkflowNodeDeliveryInProgress(ctx, nodeID, evt) {
+		return false, nil
+	}
 	ctx = withPipelineFlowScope(ctx, workflowNodeFlowID(source, nodeID))
 	if err := pc.notifyTestWorkflowNodeHandlerStarting(ctx, nodeID, evt); err != nil {
 		return false, err
@@ -293,9 +296,11 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 				HandlerNode:     nodeID,
 			})
 			setPipelineReceiptOverride(ctx, "dead_letter", err.Error())
+			pc.markWorkflowNodeDeliveryDeadLetter(ctx, nodeID, evt, "chain_depth_exceeded", err, 0)
 			return true, nil
 		}
 		pc.recordWorkflowHandlerFailure(ctx, evt, nodeID, err)
+		pc.markWorkflowNodeDeliveryDeadLetter(ctx, nodeID, evt, "handler_error", err, 0)
 		return true, err
 	}
 	pc.recordInterceptedEmitDeadLetters(ctx, evt, nodeID, result.Outcome)

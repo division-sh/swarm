@@ -77,7 +77,7 @@ func TestPipelineCoordinatorInterceptTerminalNodeDeliveryDoesNotAuthorizeExecuti
 		retryCount int
 	}{
 		{name: "dead_letter", status: "dead_letter", retryCount: 2},
-		{name: "retry_exhausted_failed", status: "failed", retryCount: 2},
+		{name: "retry_exhausted_failed", status: "failed", retryCount: DefaultSystemNodeRetryLimit},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, db, _ := testutil.StartPostgres(t)
