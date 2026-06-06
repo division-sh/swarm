@@ -89,6 +89,9 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 		return err
 	}
 	if strings.TrimSpace(autoEmitName) != "" {
+		if triggerEventID := strings.TrimSpace(req.TriggerEvent.ID); triggerEventID != "" {
+			autoEmitEvent.ParentEventID = triggerEventID
+		}
 		if runID := runtimecorrelation.RunIDFromContext(ctx); runID != "" {
 			autoEmitEvent.RunID = runID
 		}
