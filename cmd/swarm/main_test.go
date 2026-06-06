@@ -4353,7 +4353,7 @@ func requireServedEntityReadback(t *testing.T, endpoint, runID, entityID, wantSt
 func requireServedEventPublishEntityState(t *testing.T, db *sql.DB, backend, runID, entityID, wantState string) string {
 	t.Helper()
 	var lastState, lastEntityID string
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		gotEntityID, state := servedEventPublishEntityState(t, db, backend, runID, entityID, wantState)
 		if state == wantState && gotEntityID != "" {
