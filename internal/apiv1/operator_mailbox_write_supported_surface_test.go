@@ -164,7 +164,8 @@ func TestOperatorMailboxWriteSupportedSurfaceMissingMaterializerIsLoud(t *testin
 	source := semanticview.Wrap(bundle)
 	fact := bundleSourceFactForTestBundle(t, bundle)
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-	handler, _ := newMailboxWriteSupportedSurfaceHandler(t, ctx, sqliteStore, sqliteStore.DB, source, fact, nil, nil)
+	probe := runtimelifecycleprobe.New()
+	handler, _ := newMailboxWriteSupportedSurfaceHandler(t, ctx, sqliteStore, sqliteStore.DB, source, fact, nil, probe)
 
 	published := rpcCall(t, handler, eventPublishBodyWithoutBundle("", "thing.created", `{"amount":250,"who":"alice"}`, "", "idem-mailbox-write-missing-materializer"))
 	if published.Error != nil {
@@ -172,7 +173,7 @@ func TestOperatorMailboxWriteSupportedSurfaceMissingMaterializerIsLoud(t *testin
 	}
 	result := asMap(t, published.Result)
 	eventID := stringValue(t, result["event_id"], "event_id")
-	waitForSQLiteNodeMaterializerFailure(t, sqliteStore.DB, eventID, "reviewer")
+	waitForSQLiteNodeMaterializerFailure(t, sqliteStore.DB, probe, eventID, "reviewer")
 }
 
 func newMailboxWriteSupportedSurfaceHandler(
@@ -719,11 +720,18 @@ func loadMailboxWriteEntityState(t *testing.T, db *sql.DB, runID, backend string
 	return state, decodeJSONMap(t, json.RawMessage(fieldsRaw)), nil
 }
 
-func waitForSQLiteNodeMaterializerFailure(t *testing.T, db *sql.DB, eventID, nodeID string) {
+func waitForSQLiteNodeMaterializerFailure(t *testing.T, db *sql.DB, probe *runtimelifecycleprobe.Probe, eventID, nodeID string) {
 	t.Helper()
+	if probe == nil {
+		t.Fatalf("sqlite lifecycle probe is required for node/%s materializer failure on event %s", nodeID, eventID)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := probe.WaitForDeliveryStatus(ctx, eventID, "node", nodeID, "dead_letter"); err != nil {
+		t.Fatalf("sqlite node/%s materializer failure lifecycle for event %s: %v", nodeID, eventID, err)
+	}
 	var lastStatus, lastReason, lastError, lastReceiptOutcome, lastReceiptReason, lastReceiptError string
-	requireAPIV1Convergence(t, "sqlite node mailbox materializer failure", func() (bool, error) {
-		if err := db.QueryRow(`
+	if err := db.QueryRow(`
 			SELECT
 				COALESCE(d.status, ''),
 				COALESCE(d.reason_code, ''),
@@ -741,14 +749,8 @@ func waitForSQLiteNodeMaterializerFailure(t *testing.T, db *sql.DB, eventID, nod
 			  AND d.subscriber_id = ?
 			LIMIT 1
 		`, eventID, nodeID).Scan(&lastStatus, &lastReason, &lastError, &lastReceiptOutcome, &lastReceiptReason, &lastReceiptError); err != nil {
-			return false, err
-		}
-		if lastStatus != "dead_letter" || lastReceiptOutcome != "dead_letter" {
-			return false, nil
-		}
-		return strings.Contains(lastError, "mailbox_write requires mailbox materialization store") &&
-			strings.Contains(lastReceiptError, "mailbox_write requires mailbox materialization store"), nil
-	})
+		t.Fatalf("sqlite node/%s materializer failure row for event %s: %v", nodeID, eventID, err)
+	}
 	if lastStatus != "dead_letter" || lastReceiptOutcome != "dead_letter" ||
 		!strings.Contains(lastError, "mailbox_write requires mailbox materialization store") ||
 		!strings.Contains(lastReceiptError, "mailbox_write requires mailbox materialization store") {
