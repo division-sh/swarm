@@ -74,7 +74,7 @@ func TestLogsUsesRuntimeLogsV1RPCWithSnapshotFilters(t *testing.T) {
 	if !reflect.DeepEqual(captured.Params, wantParams) {
 		t.Fatalf("params = %#v, want %#v", captured.Params, wantParams)
 	}
-	for _, want := range []string{"TIME", "log message", "run-1", "entity-1", "session-1", "DELIVERY_FAILED", "next_cursor=log-cursor-2"} {
+	for _, want := range []string{"TIME", "ACTION", "delivery_failed", "log message", "run-1", "entity-1", "session-1", "DELIVERY_FAILED", "next_cursor=log-cursor-2"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
 		}
@@ -128,7 +128,7 @@ func TestLogsFollowUsesRuntimeSubscribeLogsV1WS(t *testing.T) {
 	if !reflect.DeepEqual(req.Params, wantParams) {
 		t.Fatalf("params = %#v, want %#v", req.Params, wantParams)
 	}
-	for _, want := range []string{"log log_id=log-live-1", "run_id=run-1", "message=log message", "details={\"attempt\":2}"} {
+	for _, want := range []string{"log log_id=log-live-1", "action=delivery_failed", "run_id=run-1", "message=log message", "details={\"action\":\"delivery_failed\",\"attempt\":2}"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
 		}
@@ -293,6 +293,32 @@ func TestLogsMapRuntimeFailuresAndMalformedResults(t *testing.T) {
 			wantCode:   3,
 			wantStderr: "message is required",
 		},
+		{
+			name: "malformed log row missing source exits three",
+			args: []string{"logs"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				log := validRuntimeLogEntry("log-1")
+				delete(log, "source")
+				writeJSONRPCResult(t, w, req.ID, map[string]any{"logs": []any{log}})
+			},
+			wantCode:   3,
+			wantStderr: "source is required",
+		},
+		{
+			name: "malformed log row blank source exits three",
+			args: []string{"logs"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				log := validRuntimeLogEntry("log-1")
+				log["source"] = " "
+				writeJSONRPCResult(t, w, req.ID, map[string]any{"logs": []any{log}})
+			},
+			wantCode:   3,
+			wantStderr: "source is required",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("SWARM_API_TOKEN", "test-token")
@@ -345,6 +371,17 @@ func TestLogsFollowMalformedWSFailsClosed(t *testing.T) {
 			},
 			wantStderr: "message is required",
 		},
+		{
+			name: "malformed notification blank source",
+			logs: []map[string]any{
+				func() map[string]any {
+					log := validRuntimeLogEntry("log-1")
+					log["source"] = " "
+					return log
+				}(),
+			},
+			wantStderr: "source is required",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("SWARM_API_TOKEN", "test-token")
@@ -364,6 +401,36 @@ func TestLogsFollowMalformedWSFailsClosed(t *testing.T) {
 				t.Fatalf("stderr = %q, want substring %q", stderr.String(), tc.wantStderr)
 			}
 		})
+	}
+}
+
+func TestLogsRenderMissingActionGracefully(t *testing.T) {
+	message := "without action"
+	log := runtimeLogEntry{
+		LogID:     "log-no-action",
+		TS:        "2026-05-19T10:00:01Z",
+		Level:     "info",
+		Component: "scheduler",
+		Source:    "runtime",
+		Message:   &message,
+		Details:   map[string]any{"attempt": float64(1)},
+	}
+
+	var snapshot bytes.Buffer
+	writeRuntimeLogListResult(&snapshot, runtimeLogListResult{Logs: []runtimeLogEntry{log}})
+	for _, want := range []string{"ACTION", "scheduler\t-\truntime", "without action"} {
+		if !strings.Contains(snapshot.String(), want) {
+			t.Fatalf("snapshot missing %q:\n%s", want, snapshot.String())
+		}
+	}
+
+	var follow bytes.Buffer
+	writeRuntimeLogFollowEntry(&follow, log)
+	if strings.Contains(follow.String(), "action=") {
+		t.Fatalf("follow = %q, want no action field", follow.String())
+	}
+	if !strings.Contains(follow.String(), "source=runtime") {
+		t.Fatalf("follow = %q, want source", follow.String())
 	}
 }
 
@@ -509,6 +576,7 @@ func validRuntimeLogEntry(logID string) map[string]any {
 		"message":    "log message",
 		"details": map[string]any{
 			"attempt": 2,
+			"action":  "delivery_failed",
 		},
 	}
 }

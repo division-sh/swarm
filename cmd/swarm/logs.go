@@ -468,12 +468,13 @@ func writeRuntimeLogListResult(out io.Writer, result runtimeLogListResult) {
 		fmt.Fprintln(out, "No runtime logs match the filter.")
 		return
 	}
-	fmt.Fprintln(out, "TIME\tLEVEL\tCOMPONENT\tSOURCE\tRUN\tENTITY\tSESSION\tERROR\tMESSAGE")
+	fmt.Fprintln(out, "TIME\tLEVEL\tCOMPONENT\tACTION\tSOURCE\tRUN\tENTITY\tSESSION\tERROR\tMESSAGE")
 	for _, log := range result.Logs {
-		fmt.Fprintf(out, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(out, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			log.TS,
 			log.Level,
 			log.Component,
+			runtimeLogDash(runtimeLogAction(log)),
 			log.Source,
 			runtimeLogDash(log.RunID),
 			runtimeLogDash(log.EntityID),
@@ -496,8 +497,11 @@ func writeRuntimeLogFollowEntry(out io.Writer, log runtimeLogEntry) {
 		"ts=" + log.TS,
 		"level=" + log.Level,
 		"component=" + log.Component,
-		"source=" + log.Source,
 	}
+	if action := runtimeLogAction(log); action != "" {
+		fields = append(fields, "action="+action)
+	}
+	fields = append(fields, "source="+log.Source)
 	if log.RunID != "" {
 		fields = append(fields, "run_id="+log.RunID)
 	}
@@ -531,6 +535,14 @@ func runtimeLogDash(value string) string {
 		return "-"
 	}
 	return value
+}
+
+func runtimeLogAction(log runtimeLogEntry) string {
+	if len(log.Details) == 0 {
+		return ""
+	}
+	action, _ := log.Details["action"].(string)
+	return strings.TrimSpace(action)
 }
 
 func runtimeLogMessage(log runtimeLogEntry) string {
