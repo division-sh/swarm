@@ -22,7 +22,7 @@ func TestPostgresStore_V1MailboxReadDecisionAndIdempotencyOwners(t *testing.T) {
 	entityID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	runID := uuid.NewString()
-	if err := s.AppendEvent(ctx, events.NewProjectionEvent(sourceEventID,
+	if err := s.AppendEvent(ctx, events.NewRootIngressEvent(sourceEventID,
 		"review.requested", "", "", json.RawMessage(`{"request":true}`), 0, runID, "", events.EventEnvelope{}, time.Time{}).
 		WithEntityID(entityID).WithFlowInstance("main/review")); err != nil {
 		t.Fatalf("append source event: %v", err)

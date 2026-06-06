@@ -261,7 +261,7 @@ func (fx *deliveryLifecycleFixture) publishDirectEvent(t *testing.T, ctx context
 	ch := fx.bus.Subscribe(fx.agentID)
 	defer fx.bus.Unsubscribe(fx.agentID)
 
-	evt := (events.NewProjectionEvent(eventID,
+	evt := (events.NewRootIngressEvent(eventID,
 		events.EventType("review.requested"),
 		"runtime", "", []byte(`{"ok":true}`), 0, "", "", events.EventEnvelope{}, time.Now().Add(-2*time.Hour).UTC())).WithEntityID(uuid.NewString())
 	if err := fx.bus.PublishDirect(ctx, evt, []string{fx.agentID}); err != nil {

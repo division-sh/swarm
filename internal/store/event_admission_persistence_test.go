@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -46,6 +47,60 @@ func TestPostgresEventAdmissionRejectsMalformedChildDirectAppend(t *testing.T) {
 	}
 }
 
+func TestPostgresEventAdmissionRejectsProjectionDirectAppendWithoutAuthoritativeFacts(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	err := pg.AppendEvent(ctx, events.NewProjectionEvent(
+		"",
+		events.EventType("task.completed"),
+		"agent-1",
+		"",
+		json.RawMessage(`{"ok":true}`),
+		0,
+		"",
+		"",
+		events.EventEnvelope{},
+		time.Time{},
+	))
+	if err == nil {
+		t.Fatal("expected malformed projection event to fail admission")
+	}
+	if !strings.Contains(err.Error(), "authoritative event_id") {
+		t.Fatalf("AppendEvent error = %v, want missing authoritative event_id admission error", err)
+	}
+
+	err = pg.AppendEvent(runtimecorrelation.WithRuntimeLineage(ctx, runtimecorrelation.RuntimeLineage{
+		RunID: uuid.NewString(),
+	}), events.NewProjectionEvent(
+		uuid.NewString(),
+		events.EventType("task.completed"),
+		"agent-1",
+		"",
+		json.RawMessage(`{"ok":true}`),
+		0,
+		"",
+		"",
+		events.EventEnvelope{},
+		time.Date(2026, 6, 6, 10, 11, 12, 0, time.UTC),
+	))
+	if err == nil {
+		t.Fatal("expected projection event missing own run_id to fail admission")
+	}
+	if !strings.Contains(err.Error(), "authoritative run_id") {
+		t.Fatalf("AppendEvent error = %v, want missing authoritative run_id admission error", err)
+	}
+
+	var count int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_name = 'task.completed'`).Scan(&count); err != nil {
+		t.Fatalf("count events: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("persisted malformed projection rows = %d, want 0", count)
+	}
+}
+
 func TestSQLiteEventAdmissionRejectsMalformedChildDirectAppend(t *testing.T) {
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	ctx := context.Background()
@@ -74,6 +129,59 @@ func TestSQLiteEventAdmissionRejectsMalformedChildDirectAppend(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatalf("persisted malformed sqlite child rows = %d, want 0", count)
+	}
+}
+
+func TestSQLiteEventAdmissionRejectsProjectionDirectAppendWithoutAuthoritativeFacts(t *testing.T) {
+	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx := context.Background()
+
+	err := sqliteStore.AppendEvent(ctx, events.NewProjectionEvent(
+		"",
+		events.EventType("task.completed"),
+		"agent-1",
+		"",
+		json.RawMessage(`{"ok":true}`),
+		0,
+		"",
+		"",
+		events.EventEnvelope{},
+		time.Time{},
+	))
+	if err == nil {
+		t.Fatal("expected malformed projection event to fail admission")
+	}
+	if !strings.Contains(err.Error(), "authoritative event_id") {
+		t.Fatalf("AppendEvent error = %v, want missing authoritative event_id admission error", err)
+	}
+
+	err = sqliteStore.AppendEvent(runtimecorrelation.WithRuntimeLineage(ctx, runtimecorrelation.RuntimeLineage{
+		RunID: uuid.NewString(),
+	}), events.NewProjectionEvent(
+		uuid.NewString(),
+		events.EventType("task.completed"),
+		"agent-1",
+		"",
+		json.RawMessage(`{"ok":true}`),
+		0,
+		"",
+		"",
+		events.EventEnvelope{},
+		time.Date(2026, 6, 6, 10, 11, 12, 0, time.UTC),
+	))
+	if err == nil {
+		t.Fatal("expected projection event missing own run_id to fail admission")
+	}
+	if !strings.Contains(err.Error(), "authoritative run_id") {
+		t.Fatalf("AppendEvent error = %v, want missing authoritative run_id admission error", err)
+	}
+
+	var count int
+	if err := sqliteStore.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_name = 'task.completed'`).Scan(&count); err != nil {
+		t.Fatalf("count sqlite events: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("persisted malformed sqlite projection rows = %d, want 0", count)
 	}
 }
 

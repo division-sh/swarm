@@ -18,14 +18,14 @@ type AdmissionOptions struct {
 }
 
 func AdmitForPublish(evt Event, opts AdmissionOptions) (Event, error) {
-	return admitPersistableEvent(evt, opts)
+	return admitPersistableEvent(evt, opts, true)
 }
 
 func AdmitForPersistence(evt Event, opts AdmissionOptions) (Event, error) {
-	return admitPersistableEvent(evt, opts)
+	return admitPersistableEvent(evt, opts, false)
 }
 
-func admitPersistableEvent(evt Event, opts AdmissionOptions) (Event, error) {
+func admitPersistableEvent(evt Event, opts AdmissionOptions, allowProjectionDefaults bool) (Event, error) {
 	class := normalizedAdmissionClass(opts.Class)
 	if class == EventAdmissionUnknown {
 		class = normalizedAdmissionClass(evt.AdmissionClass())
@@ -39,6 +39,9 @@ func admitPersistableEvent(evt Event, opts AdmissionOptions) (Event, error) {
 	eventType := EventType(strings.TrimSpace(string(evt.Type())))
 	if eventType == "" {
 		return Event{}, fmt.Errorf("event type is required for persistence admission")
+	}
+	if class == EventAdmissionProjection && !allowProjectionDefaults {
+		return admitAuthoritativeProjectionForPersistence(evt, opts, eventType)
 	}
 	id := strings.TrimSpace(evt.ID())
 	if id == "" {
@@ -99,6 +102,38 @@ func admitPersistableEvent(evt Event, opts AdmissionOptions) (Event, error) {
 		parentEventID,
 		evt.NormalizedEnvelope(),
 		createdAt,
+	), nil
+}
+
+func admitAuthoritativeProjectionForPersistence(evt Event, opts AdmissionOptions, eventType EventType) (Event, error) {
+	id := strings.TrimSpace(evt.ID())
+	if id == "" {
+		return Event{}, fmt.Errorf("%s event %s requires authoritative event_id for persistence admission", EventAdmissionProjection, eventType)
+	}
+	createdAt := evt.CreatedAt()
+	if createdAt.IsZero() {
+		return Event{}, fmt.Errorf("%s event %s requires authoritative created_at for persistence admission", EventAdmissionProjection, eventType)
+	}
+	runID := strings.TrimSpace(evt.RunID())
+	if runID == "" && strings.TrimSpace(opts.RunIDCandidate) != "" {
+		return Event{}, fmt.Errorf("%s event %s requires authoritative run_id for persistence admission", EventAdmissionProjection, eventType)
+	}
+	parentEventID := strings.TrimSpace(evt.ParentEventID())
+	if parentEventID == "" && strings.TrimSpace(opts.ParentEventIDCandidate) != "" {
+		return Event{}, fmt.Errorf("%s event %s requires authoritative parent_event_id for persistence admission", EventAdmissionProjection, eventType)
+	}
+	return newEvent(
+		EventAdmissionProjection,
+		id,
+		eventType,
+		evt.SourceAgent(),
+		evt.TaskID(),
+		evt.Payload(),
+		evt.ChainDepth(),
+		runID,
+		parentEventID,
+		evt.NormalizedEnvelope(),
+		createdAt.UTC(),
 	), nil
 }
 
