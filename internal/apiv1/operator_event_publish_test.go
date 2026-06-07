@@ -18,7 +18,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
-	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
+	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
@@ -113,7 +113,7 @@ func TestOperatorEventPublishReturnsDurableAckBeforePostCommitDispatchCompletes(
 	release := make(chan struct{})
 	var releaseOnce sync.Once
 	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
-	probe := runtimelifecycleprobe.New()
+	probe := lifecycletest.New(t)
 	opts := runStartTestEventBusOptions(source)
 	opts.TestLifecycleProbe = probe
 	opts.Interceptors = []runtimebus.EventInterceptor{blockingAPIV1PublishInterceptor{release: release}}
@@ -152,11 +152,7 @@ func TestOperatorEventPublishReturnsDurableAckBeforePostCommitDispatchCompletes(
 		t.Fatalf("api_idempotency rows before dispatch release = %d, want 1", count)
 	}
 
-	startCtx, cancelStart := context.WithTimeout(ctx, time.Second)
-	defer cancelStart()
-	if _, err := probe.WaitForPostCommitDispatchStarted(startCtx, eventID); err != nil {
-		t.Fatalf("post-commit dispatch start for %s: %v", eventID, err)
-	}
+	probe.RequirePostCommitDispatchStarted(eventID)
 	requireNoAPIV1RuntimeBusEvent(t, ch, "event.publish delivery before post-commit release")
 	if got := countPipelineReceiptsForEvent(t, ctx, db, eventID); got != 0 {
 		t.Fatalf("pipeline receipts before post-commit release = %d, want 0", got)
@@ -167,11 +163,7 @@ func TestOperatorEventPublishReturnsDurableAckBeforePostCommitDispatchCompletes(
 	if got.ID() != eventID {
 		t.Fatalf("delivered event = %s, want %s", got.ID(), eventID)
 	}
-	doneCtx, cancelDone := context.WithTimeout(ctx, time.Second)
-	defer cancelDone()
-	if _, err := probe.WaitForPostCommitDispatchCompleted(doneCtx, eventID); err != nil {
-		t.Fatalf("post-commit dispatch completion for %s: %v", eventID, err)
-	}
+	probe.RequirePostCommitDispatchCompleted(eventID)
 	if got := countPipelineReceiptsForEvent(t, ctx, db, eventID); got != 1 {
 		t.Fatalf("pipeline receipts after post-commit release = %d, want 1", got)
 	}
@@ -599,7 +591,7 @@ func TestOperatorEventPublishPostCommitCompletionFailureReplaysWithoutDuplicate(
 		err:           errors.New("simulated normal-run completion failure"),
 	}
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-	probe := runtimelifecycleprobe.New()
+	probe := lifecycletest.New(t, lifecycletest.WithTimeout(5*time.Second))
 	opts := runStartTestEventBusOptions(source)
 	opts.TestLifecycleProbe = probe
 	bus, err := runtimebus.NewEventBusWithOptions(failing, opts)
@@ -628,11 +620,7 @@ func TestOperatorEventPublishPostCommitCompletionFailureReplaysWithoutDuplicate(
 	if count := countAPIIdempotencyRows(t, db); count != 1 {
 		t.Fatalf("api_idempotency rows after post-commit completion failure = %d, want 1", count)
 	}
-	doneCtx, cancelDone := context.WithTimeout(ctx, 5*time.Second)
-	defer cancelDone()
-	if _, err := probe.WaitForPostCommitDispatchCompleted(doneCtx, eventID); err != nil {
-		t.Fatalf("post-commit dispatch completion for %s: %v", eventID, err)
-	}
+	probe.RequirePostCommitDispatchCompleted(eventID)
 	outcome, errText := loadPipelineReceiptOutcomeAndError(t, ctx, db, eventID)
 	if outcome != "dead_letter" || !strings.Contains(errText, "simulated normal-run completion failure") {
 		t.Fatalf("pipeline receipt outcome=%q error=%q, want dead_letter with completion failure", outcome, errText)

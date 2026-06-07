@@ -14,6 +14,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
+	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
@@ -264,47 +265,78 @@ func releaseMailboxWritePendingNodeDeliveries(t *testing.T, db *sql.DB, bus *run
 	if bus == nil {
 		t.Fatalf("%s runtime bus is required to release pending node deliveries", backend)
 	}
-	waitForMailboxWriteLifecycleDeliveryStatus(t, probe, backend, eventID, "pending")
-	if pending, _ := mailboxWriteNodeDeliveryCounts(t, db, backend, eventID); pending == 0 {
-		waitForMailboxWriteLifecycleDeliveryStatus(t, probe, backend, eventID, "delivered")
-		return
+	nodeID := mailboxWriteNodeDeliverySubscriberID(t, db, backend, eventID)
+	waitForMailboxWriteLifecycleDeliveryStatus(t, probe, backend, eventID, nodeID, "pending")
+	if status := mailboxWriteNodeDeliveryStatus(t, db, backend, eventID, nodeID); status == "pending" {
+		evt := loadMailboxWritePersistedEvent(t, db, backend, eventID)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := bus.ReleasePendingPersistedDeliveriesForEvent(ctx, evt); err != nil {
+			t.Fatalf("%s release pending node deliveries for event %s: %v", backend, eventID, err)
+		}
 	}
-	evt := loadMailboxWritePersistedEvent(t, db, backend, eventID)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := bus.ReleasePendingPersistedDeliveriesForEvent(ctx, evt); err != nil {
-		t.Fatalf("%s release pending node deliveries for event %s: %v", backend, eventID, err)
-	}
-	waitForMailboxWriteLifecycleDeliveryStatus(t, probe, backend, eventID, "delivered")
+	waitForMailboxWriteNodeDeliveryStatus(t, db, backend, eventID, nodeID, "delivered")
 }
 
-func waitForMailboxWriteLifecycleDeliveryStatus(t *testing.T, probe *runtimelifecycleprobe.Probe, backend, eventID, status string) {
+func waitForMailboxWriteLifecycleDeliveryStatus(t *testing.T, probe *runtimelifecycleprobe.Probe, backend, eventID, nodeID, status string) {
 	t.Helper()
 	if probe == nil {
-		t.Fatalf("%s lifecycle probe is required for node delivery %s on event %s", backend, status, eventID)
+		t.Fatalf("%s lifecycle probe is required for node delivery %s on event %s node %s", backend, status, eventID, nodeID)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if _, err := probe.WaitForDeliveryStatus(ctx, eventID, "node", "", status); err != nil {
-		t.Fatalf("%s node delivery %s for event %s: %v", backend, status, eventID, err)
-	}
+	lifecycletest.Wrap(t, probe, lifecycletest.WithTimeout(apiv1ConvergenceTimeout)).
+		RequireNodeStatus(eventID, nodeID, status)
 }
 
-func mailboxWriteNodeDeliveryCounts(t *testing.T, db *sql.DB, backend, eventID string) (pending int, total int) {
+func waitForMailboxWriteNodeDeliveryStatus(t *testing.T, db *sql.DB, backend, eventID, nodeID, wantStatus string) {
 	t.Helper()
-	if strings.TrimSpace(eventID) == "" {
-		return 0, 0
+	requireAPIV1Convergence(t, fmt.Sprintf("%s node delivery %s/%s status %s", backend, eventID, nodeID, wantStatus), func() (bool, error) {
+		status := mailboxWriteNodeDeliveryStatus(t, db, backend, eventID, nodeID)
+		if status == wantStatus {
+			return true, nil
+		}
+		return false, fmt.Errorf("delivery status = %q, want %q", status, wantStatus)
+	})
+}
+
+func mailboxWriteNodeDeliveryStatus(t *testing.T, db *sql.DB, backend, eventID, nodeID string) string {
+	t.Helper()
+	if strings.TrimSpace(eventID) == "" || strings.TrimSpace(nodeID) == "" {
+		t.Fatalf("%s node delivery status lookup requires event id and node id", backend)
 	}
 	sqlText := ""
+	args := []any{eventID, nodeID}
 	if strings.HasPrefix(backend, "sqlite") {
-		sqlText = `SELECT COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END), 0), COUNT(*) FROM event_deliveries WHERE event_id = ? AND subscriber_type = 'node'`
+		sqlText = `SELECT status FROM event_deliveries WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = ?`
 	} else {
-		sqlText = `SELECT COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END), 0), COUNT(*) FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = 'node'`
+		sqlText = `SELECT status FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2`
 	}
-	if err := db.QueryRowContext(context.Background(), sqlText, eventID).Scan(&pending, &total); err != nil {
-		t.Fatalf("%s node delivery counts for %s: %v", backend, eventID, err)
+	status := ""
+	if err := db.QueryRowContext(context.Background(), sqlText, args...).Scan(&status); err != nil {
+		t.Fatalf("%s node delivery status lookup for %s/%s: %v", backend, eventID, nodeID, err)
 	}
-	return pending, total
+	return status
+}
+
+func mailboxWriteNodeDeliverySubscriberID(t *testing.T, db *sql.DB, backend, eventID string) string {
+	t.Helper()
+	if strings.TrimSpace(eventID) == "" {
+		t.Fatalf("%s node delivery subscriber lookup requires event id", backend)
+	}
+	sqlText := ""
+	args := []any{eventID, eventReplayScopeSubscriberID}
+	if strings.HasPrefix(backend, "sqlite") {
+		sqlText = `SELECT subscriber_id FROM event_deliveries WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id <> ? ORDER BY subscriber_id LIMIT 1`
+	} else {
+		sqlText = `SELECT subscriber_id FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id <> $2 ORDER BY subscriber_id LIMIT 1`
+	}
+	nodeID := ""
+	if err := db.QueryRowContext(context.Background(), sqlText, args...).Scan(&nodeID); err != nil {
+		t.Fatalf("%s node delivery subscriber lookup for %s: %v", backend, eventID, err)
+	}
+	if strings.TrimSpace(nodeID) == "" {
+		t.Fatalf("%s node delivery subscriber lookup for %s returned empty subscriber_id", backend, eventID)
+	}
+	return nodeID
 }
 
 func loadMailboxWritePersistedEvent(t *testing.T, db *sql.DB, backend, eventID string) events.Event {
