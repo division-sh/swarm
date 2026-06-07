@@ -3,7 +3,11 @@ package pipeline
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -94,6 +98,164 @@ func TestSQLiteWorkflowInstanceStore_PreservesParentRouteControlMetadata(t *test
 	}
 }
 
+func TestSQLiteWorkflowInstanceStore_RunInPipelineTransactionRetriesBusyAndFlushesPostCommitOnce(t *testing.T) {
+	db, lockDB := newSQLiteWorkflowInstanceStoreBusyTestDBs(t)
+	store := NewSQLiteWorkflowInstanceStore(db)
+	ctx, cancel := context.WithTimeout(runtimecorrelation.WithRunID(context.Background(), uuid.NewString()), 2*time.Second)
+	defer cancel()
+
+	lockTx, err := lockDB.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin locking tx: %v", err)
+	}
+	lockCommitted := false
+	t.Cleanup(func() {
+		if !lockCommitted {
+			_ = lockTx.Rollback()
+		}
+	})
+	if _, err := lockTx.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, started_at)
+		VALUES (?, 'running', ?)
+	`, uuid.NewString(), time.Now().UTC()); err != nil {
+		t.Fatalf("hold sqlite write lock: %v", err)
+	}
+
+	busySeen := make(chan struct{})
+	var closeBusy sync.Once
+	var attempts int32
+	var postCommitActions int32
+	done := make(chan error, 1)
+	go func() {
+		done <- store.RunInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+			if tx == nil {
+				return errors.New("pipeline transaction is required")
+			}
+			atomic.AddInt32(&attempts, 1)
+			if !QueuePipelinePostCommitAction(txctx, func() {
+				atomic.AddInt32(&postCommitActions, 1)
+			}) {
+				return errors.New("queue pipeline post-commit action")
+			}
+			_, err := tx.ExecContext(txctx, `
+				INSERT INTO runs (run_id, status, started_at)
+				VALUES (?, 'running', ?)
+			`, uuid.NewString(), time.Now().UTC())
+			if sqlitePipelineBusyError(err) {
+				closeBusy.Do(func() { close(busySeen) })
+			}
+			return err
+		})
+	}()
+
+	select {
+	case <-busySeen:
+	case <-ctx.Done():
+		t.Fatalf("wait for deterministic sqlite busy attempt: %v", ctx.Err())
+	}
+	if err := lockTx.Commit(); err != nil {
+		t.Fatalf("release sqlite write lock: %v", err)
+	}
+	lockCommitted = true
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("RunInPipelineTransaction after lock release: %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatalf("wait for retried pipeline transaction: %v", ctx.Err())
+	}
+	if got := atomic.LoadInt32(&attempts); got < 2 {
+		t.Fatalf("attempts = %d, want retry after busy", got)
+	}
+	if got := atomic.LoadInt32(&postCommitActions); got != 1 {
+		t.Fatalf("post-commit actions = %d, want only successful attempt flushed", got)
+	}
+}
+
+func TestSQLiteWorkflowInstanceStore_RunInPipelineTransactionStopsRetryOnContextDeadline(t *testing.T) {
+	db, lockDB := newSQLiteWorkflowInstanceStoreBusyTestDBs(t)
+	store := NewSQLiteWorkflowInstanceStore(db)
+	baseCtx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
+
+	lockTx, err := lockDB.BeginTx(baseCtx, nil)
+	if err != nil {
+		t.Fatalf("begin locking tx: %v", err)
+	}
+	t.Cleanup(func() { _ = lockTx.Rollback() })
+	if _, err := lockTx.ExecContext(baseCtx, `
+		INSERT INTO runs (run_id, status, started_at)
+		VALUES (?, 'running', ?)
+	`, uuid.NewString(), time.Now().UTC()); err != nil {
+		t.Fatalf("hold sqlite write lock: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(baseCtx, 35*time.Millisecond)
+	defer cancel()
+	var attempts int32
+	err = store.RunInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		atomic.AddInt32(&attempts, 1)
+		_, err := tx.ExecContext(txctx, `
+			INSERT INTO runs (run_id, status, started_at)
+			VALUES (?, 'running', ?)
+		`, uuid.NewString(), time.Now().UTC())
+		return err
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("RunInPipelineTransaction error = %v, want context deadline", err)
+	}
+	if got := atomic.LoadInt32(&attempts); got == 0 {
+		t.Fatal("expected at least one busy attempt before context deadline")
+	}
+}
+
+func TestSQLiteWorkflowInstanceStore_RunInPipelineTransactionDoesNotRetryActiveTransaction(t *testing.T) {
+	db := newSQLiteWorkflowInstanceStoreTestDB(t)
+	store := NewSQLiteWorkflowInstanceStore(db)
+	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin active tx: %v", err)
+	}
+	t.Cleanup(func() { _ = tx.Rollback() })
+
+	busyErr := errors.New("SQLITE_BUSY: database is locked")
+	var attempts int32
+	err = store.RunInPipelineTransaction(WithPipelineSQLTxContext(ctx, tx), func(txctx context.Context, gotTx *sql.Tx) error {
+		atomic.AddInt32(&attempts, 1)
+		if gotTx != tx {
+			t.Fatalf("transaction = %#v, want active transaction", gotTx)
+		}
+		return busyErr
+	})
+	if !errors.Is(err, busyErr) {
+		t.Fatalf("RunInPipelineTransaction error = %v, want sentinel busy error", err)
+	}
+	if got := atomic.LoadInt32(&attempts); got != 1 {
+		t.Fatalf("attempts = %d, want no retry inside active transaction", got)
+	}
+}
+
+func TestWorkflowInstanceStore_RunInPipelineTransactionDoesNotRetryPostgresDialect(t *testing.T) {
+	db := newSQLiteWorkflowInstanceStoreTestDB(t)
+	store := NewWorkflowInstanceStore(db)
+	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
+	busyErr := errors.New("SQLITE_BUSY: database is locked")
+	var attempts int32
+
+	err := store.RunInPipelineTransaction(ctx, func(context.Context, *sql.Tx) error {
+		atomic.AddInt32(&attempts, 1)
+		return busyErr
+	})
+	if !errors.Is(err, busyErr) {
+		t.Fatalf("RunInPipelineTransaction error = %v, want sentinel busy error", err)
+	}
+	if got := atomic.LoadInt32(&attempts); got != 1 {
+		t.Fatalf("attempts = %d, want no retry for postgres dialect", got)
+	}
+}
+
 func newSQLiteWorkflowInstanceStoreTestDB(t *testing.T) *sql.DB {
 	t.Helper()
 	name := strings.NewReplacer("/", "_", " ", "_").Replace(t.Name())
@@ -102,6 +264,42 @@ func newSQLiteWorkflowInstanceStoreTestDB(t *testing.T) *sql.DB {
 		t.Fatalf("open sqlite: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
+	createSQLiteWorkflowInstanceStoreTestSchema(t, db)
+	return db
+}
+
+func newSQLiteWorkflowInstanceStoreBusyTestDBs(t *testing.T) (*sql.DB, *sql.DB) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "workflow.db")
+	workflowDB := openSQLiteWorkflowInstanceStoreBusyTestDB(t, path)
+	lockDB := openSQLiteWorkflowInstanceStoreBusyTestDB(t, path)
+	createSQLiteWorkflowInstanceStoreTestSchema(t, workflowDB)
+	return workflowDB, lockDB
+}
+
+func openSQLiteWorkflowInstanceStoreBusyTestDB(t *testing.T, path string) *sql.DB {
+	t.Helper()
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open sqlite file db: %v", err)
+	}
+	db.SetMaxOpenConns(4)
+	db.SetMaxIdleConns(4)
+	t.Cleanup(func() { _ = db.Close() })
+	for _, stmt := range []string{
+		`PRAGMA foreign_keys = ON`,
+		`PRAGMA journal_mode = WAL`,
+		`PRAGMA busy_timeout = 1`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("configure sqlite file db: %v", err)
+		}
+	}
+	return db
+}
+
+func createSQLiteWorkflowInstanceStoreTestSchema(t *testing.T, db *sql.DB) {
+	t.Helper()
 	for _, stmt := range []string{
 		`CREATE TABLE runs (
 			run_id TEXT PRIMARY KEY,
@@ -209,7 +407,6 @@ func newSQLiteWorkflowInstanceStoreTestDB(t *testing.T) *sql.DB {
 			t.Fatalf("create sqlite test schema: %v", err)
 		}
 	}
-	return db
 }
 
 func assertSQLiteMutationCount(t *testing.T, db *sql.DB, entityID, field, writerID, handlerStep, oldValue, newValue string, want int) {
