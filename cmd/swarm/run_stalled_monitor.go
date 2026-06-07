@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"log"
 	"strconv"
@@ -19,12 +18,12 @@ type runStalledReadStore interface {
 	ListRunHeaders(context.Context, store.RunHeaderListOptions) ([]store.RunHeader, string, error)
 	LoadRunDebugReport(context.Context, string, store.RunDebugQueryOptions) (store.RunDebugReport, error)
 	ListOperatorEvents(context.Context, store.OperatorEventListOptions) (store.OperatorEventListResult, error)
+	LoadLatestRunFlowInstance(context.Context, string) (string, error)
+	LoadLatestRunNonEscalationProgressAt(context.Context, string, string) (time.Time, error)
 }
 
 type serveRunStalledReader struct {
-	store    runStalledReadStore
-	db       *sql.DB
-	postgres bool
+	store runStalledReadStore
 }
 
 func startServeRunStalledEscalation(ctx context.Context, stores storeBundle, contexts []serveRuntimeBundleContext, eventBus *bus.EventBus) {
@@ -44,14 +43,11 @@ func startServeRunStalledEscalation(ctx context.Context, stores storeBundle, con
 }
 
 func newServeRunStalledReader(stores storeBundle) (*serveRunStalledReader, bool) {
-	if stores.Postgres != nil {
-		return &serveRunStalledReader{store: stores.Postgres, db: stores.SQLDB, postgres: true}, true
-	}
-	readStore, ok := stores.ObservabilityStore.(runStalledReadStore)
-	if !ok || readStore == nil {
+	readStore := stores.facade().runStalledReader()
+	if readStore == nil {
 		return nil, false
 	}
-	return &serveRunStalledReader{store: readStore, db: stores.SQLDB}, true
+	return &serveRunStalledReader{store: readStore}, true
 }
 
 func (r *serveRunStalledReader) ListRunningRuns(ctx context.Context, limit int, cursor string) ([]runstalled.RunRef, string, error) {
@@ -85,11 +81,11 @@ func (r *serveRunStalledReader) LoadRunSnapshot(ctx context.Context, runID strin
 	if err != nil {
 		return runstalled.RunSnapshot{}, err
 	}
-	flowInstance, err := r.loadLatestFlowInstance(ctx, report.RunID)
+	flowInstance, err := r.store.LoadLatestRunFlowInstance(ctx, report.RunID)
 	if err != nil {
 		return runstalled.RunSnapshot{}, err
 	}
-	progressAt, err := r.loadLatestNonEscalationProgressAt(ctx, report.RunID)
+	progressAt, err := r.store.LoadLatestRunNonEscalationProgressAt(ctx, report.RunID, runstalled.EventType)
 	if err != nil {
 		return runstalled.RunSnapshot{}, err
 	}
@@ -125,72 +121,6 @@ func (r *serveRunStalledReader) StalledRunEscalationExists(ctx context.Context, 
 		return true, nil
 	}
 	return false, nil
-}
-
-func (r *serveRunStalledReader) loadLatestFlowInstance(ctx context.Context, runID string) (string, error) {
-	runID = strings.TrimSpace(runID)
-	if r == nil || r.db == nil || runID == "" {
-		return "", nil
-	}
-	query := `
-		SELECT COALESCE(flow_instance, '')
-		FROM events
-		WHERE run_id = ?
-		  AND COALESCE(flow_instance, '') <> ''
-		ORDER BY created_at DESC, event_id DESC
-		LIMIT 1
-	`
-	args := []any{runID}
-	if r.postgres {
-		query = `
-			SELECT COALESCE(flow_instance, '')
-			FROM events
-			WHERE run_id = $1::uuid
-			  AND COALESCE(flow_instance, '') <> ''
-			ORDER BY created_at DESC, event_id::text DESC
-			LIMIT 1
-		`
-	}
-	var flowInstance string
-	err := r.db.QueryRowContext(ctx, query, args...).Scan(&flowInstance)
-	if err == sql.ErrNoRows {
-		return "", nil
-	}
-	if err != nil {
-		return "", fmt.Errorf("load latest run flow instance: %w", err)
-	}
-	return strings.Trim(flowInstance, "/"), nil
-}
-
-func (r *serveRunStalledReader) loadLatestNonEscalationProgressAt(ctx context.Context, runID string) (time.Time, error) {
-	runID = strings.TrimSpace(runID)
-	if r == nil || r.db == nil || runID == "" {
-		return time.Time{}, nil
-	}
-	query := `
-		SELECT MAX(created_at)
-		FROM events
-		WHERE run_id = ?
-		  AND event_name <> ?
-	`
-	args := []any{runID, runstalled.EventType}
-	if r.postgres {
-		query = `
-			SELECT MAX(created_at)
-			FROM events
-			WHERE run_id = $1::uuid
-			  AND event_name <> $2
-		`
-	}
-	var raw any
-	if err := r.db.QueryRowContext(ctx, query, args...).Scan(&raw); err != nil {
-		return time.Time{}, fmt.Errorf("load latest non-escalation progress timestamp: %w", err)
-	}
-	progressAt, _, err := runStalledTimeValue(raw)
-	if err != nil {
-		return time.Time{}, err
-	}
-	return progressAt, nil
 }
 
 func runStalledSnapshotFromDebugReport(report store.RunDebugReport, flowInstance string, progressAt time.Time) runstalled.RunSnapshot {

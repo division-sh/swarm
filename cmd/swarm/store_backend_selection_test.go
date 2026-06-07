@@ -260,7 +260,7 @@ func TestBuildStoresSQLiteSelectsRunBundleContextForServedEventPublish(t *testin
 	if !ok {
 		t.Fatalf("sqlite ObservabilityStore = %T, want selected run bundle context store for event.publish --run-id", stores.ObservabilityStore)
 	}
-	if got := selectedAPIRunBundleContextStore(stores); got == nil || got != runBundleContext {
+	if got := stores.facade().apiRunBundleContextStore(); got == nil || got != runBundleContext {
 		t.Fatalf("selected API run bundle context = %T, want sqlite selected owner %T", got, runBundleContext)
 	}
 }

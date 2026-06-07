@@ -2524,6 +2524,23 @@ engine:
       - swarm serve explicit --store sqlite
       - local foreground run startup through buildStores
       - runtime.NewRuntime store dependency graph
+    - name: selected_runtime_store_facade
+      owner: cmd/swarm storeBundle selectedRuntimeStoreFacade
+      promoted_by: '#1395'
+      scope: >
+        After backendselection resolves the selected runtime backend and buildStores constructs concrete stores, producer
+        and public-surface assembly code must consume named selected capability interfaces from the selected runtime store
+        facade. Concrete PostgresStore / SQLiteRuntimeStore identity, raw SQL handles, and backend dialect flags are not
+        producer-side authority for selected runtime behavior.
+      rules:
+      - Concrete backend selection remains confined to backendselection/config parsing, buildStores construction, and backend-specific store implementations.
+      - Serve/API/CLI/runtime producers must consume typed selected capabilities such as runtime stores, API read stores, bundle catalog capabilities, run-fork capabilities, destructive reset capabilities, startup recovery capabilities, and run-stalled read capabilities.
+      - Unsupported or not-yet-promoted feature families are represented as absent typed optional capabilities rather than inferred by checking concrete backend identity at the producer.
+      - Runtime construction must not reconstruct selected pipeline persistence from a raw SQL handle when buildStores failed to provide the selected PipelineStore owner.
+      excludes:
+      - backend selector precedence and CLI/config parsing
+      - SQLite feature parity for bundle catalog, selected-contract run.fork, destructive reset, preservation cleanup, and startup recovery
+      - runtime startup readiness, route planning, event admission/defaulting, delivery authority, and #1394 writer-bypass enforcement
     - name: backend_neutral_runtime_mutation_write_boundary
       owner: internal/store.SQLiteRuntimeStore.RunRuntimeMutation and internal/store.SQLiteRuntimeStore.RunEventTransaction for SQLite-local selected runtime mutations
       promoted_by: '#1388'

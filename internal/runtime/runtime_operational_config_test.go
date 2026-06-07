@@ -123,8 +123,9 @@ func TestNewRuntimeRejectsInvalidArtifactRootEnv(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
 
 	_, err := NewRuntime(context.Background(), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
-		SQLDB:      db,
-		EventStore: &minimalRuntimeEventStore{},
+		SQLDB:         db,
+		PipelineStore: runtimepipeline.NewWorkflowInstanceStore(db),
+		EventStore:    &minimalRuntimeEventStore{},
 	}, Options: RuntimeOptions{
 		WorkflowModule: module,
 		LLMRuntime:     noopLLMRuntime{},
