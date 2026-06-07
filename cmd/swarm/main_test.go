@@ -4455,6 +4455,7 @@ func servedEventPublishDebugSummary(t *testing.T, db *sql.DB, backend, runID str
 	sections := []string{
 		servedEventPublishDebugQuery(t, db, backend, "entity_state", runID),
 		servedEventPublishDebugQuery(t, db, backend, "events", runID),
+		servedEventPublishDebugQuery(t, db, backend, "runtime_logs", runID),
 		servedEventPublishDebugQuery(t, db, backend, "event_deliveries", runID),
 		servedEventPublishDebugQuery(t, db, backend, "event_receipts", runID),
 		servedEventPublishDebugQuery(t, db, backend, "dead_letters", runID),
@@ -4473,6 +4474,8 @@ func servedEventPublishDebugQuery(t *testing.T, db *sql.DB, backend, scope, runI
 			sqlText = `SELECT entity_id::text, COALESCE(flow_instance, ''), COALESCE(current_state, '') FROM entity_state WHERE run_id = $1::uuid ORDER BY created_at, entity_id LIMIT 5`
 		case "events":
 			sqlText = `SELECT event_id::text, event_name, COALESCE(entity_id::text, ''), COALESCE(flow_instance, '') FROM events WHERE run_id = $1::uuid ORDER BY created_at, event_id LIMIT 5`
+		case "runtime_logs":
+			sqlText = `SELECT event_id::text, COALESCE(payload::text, '') FROM events WHERE run_id = $1::uuid AND event_name = 'platform.runtime_log' ORDER BY created_at, event_id LIMIT 8`
 		case "event_deliveries":
 			sqlText = `SELECT event_id::text, subscriber_type, subscriber_id, status, COALESCE(reason_code, '') FROM event_deliveries WHERE run_id = $1::uuid ORDER BY created_at, event_id LIMIT 8`
 		case "event_receipts":
@@ -4486,6 +4489,8 @@ func servedEventPublishDebugQuery(t *testing.T, db *sql.DB, backend, scope, runI
 			sqlText = `SELECT entity_id, COALESCE(flow_instance, ''), COALESCE(current_state, '') FROM entity_state WHERE run_id = ? ORDER BY created_at, entity_id LIMIT 5`
 		case "events":
 			sqlText = `SELECT event_id, event_name, COALESCE(entity_id, ''), COALESCE(flow_instance, '') FROM events WHERE run_id = ? ORDER BY created_at, event_id LIMIT 5`
+		case "runtime_logs":
+			sqlText = `SELECT event_id, COALESCE(payload, '') FROM events WHERE run_id = ? AND event_name = 'platform.runtime_log' ORDER BY created_at, event_id LIMIT 8`
 		case "event_deliveries":
 			sqlText = `SELECT event_id, subscriber_type, subscriber_id, status, COALESCE(reason_code, '') FROM event_deliveries WHERE run_id = ? ORDER BY created_at, event_id LIMIT 8`
 		case "event_receipts":
