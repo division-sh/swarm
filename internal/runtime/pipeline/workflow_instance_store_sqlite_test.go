@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -210,6 +211,50 @@ func TestSQLiteWorkflowInstanceStore_RunInPipelineTransactionStopsRetryOnContext
 	}
 }
 
+func TestSQLiteWorkflowInstanceStore_RunInPipelineTransactionCapsProductionBusyTimeout(t *testing.T) {
+	db, lockDB := newSQLiteWorkflowInstanceStoreBusyTestDBsWithBusyTimeout(t, 5*time.Second)
+	store := NewSQLiteWorkflowInstanceStore(db)
+	baseCtx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
+	ctx, cancel := context.WithTimeout(baseCtx, 7*time.Second)
+	defer cancel()
+
+	lockTx, err := lockDB.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin locking tx: %v", err)
+	}
+	t.Cleanup(func() { _ = lockTx.Rollback() })
+	if _, err := lockTx.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, started_at)
+		VALUES (?, 'running', ?)
+	`, uuid.NewString(), time.Now().UTC()); err != nil {
+		t.Fatalf("hold sqlite write lock: %v", err)
+	}
+
+	var attempts int32
+	started := time.Now()
+	err = store.RunInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		atomic.AddInt32(&attempts, 1)
+		_, err := tx.ExecContext(txctx, `
+			INSERT INTO runs (run_id, status, started_at)
+			VALUES (?, 'running', ?)
+		`, uuid.NewString(), time.Now().UTC())
+		return err
+	})
+	elapsed := time.Since(started)
+	if err == nil {
+		t.Fatal("RunInPipelineTransaction succeeded under persistent sqlite write lock")
+	}
+	if !strings.Contains(err.Error(), "retry budget") || !sqlitePipelineBusyError(err) {
+		t.Fatalf("RunInPipelineTransaction error = %v, want busy retry budget exhaustion", err)
+	}
+	if got := atomic.LoadInt32(&attempts); got != 1 {
+		t.Fatalf("attempts = %d, want one production busy_timeout window", got)
+	}
+	if elapsed >= 6500*time.Millisecond {
+		t.Fatalf("RunInPipelineTransaction elapsed = %s, want cap near one production busy_timeout window", elapsed)
+	}
+}
+
 func TestSQLiteWorkflowInstanceStore_RunInPipelineTransactionDoesNotRetryActiveTransaction(t *testing.T) {
 	db := newSQLiteWorkflowInstanceStoreTestDB(t)
 	store := NewSQLiteWorkflowInstanceStore(db)
@@ -270,14 +315,19 @@ func newSQLiteWorkflowInstanceStoreTestDB(t *testing.T) *sql.DB {
 
 func newSQLiteWorkflowInstanceStoreBusyTestDBs(t *testing.T) (*sql.DB, *sql.DB) {
 	t.Helper()
+	return newSQLiteWorkflowInstanceStoreBusyTestDBsWithBusyTimeout(t, time.Millisecond)
+}
+
+func newSQLiteWorkflowInstanceStoreBusyTestDBsWithBusyTimeout(t *testing.T, busyTimeout time.Duration) (*sql.DB, *sql.DB) {
+	t.Helper()
 	path := filepath.Join(t.TempDir(), "workflow.db")
-	workflowDB := openSQLiteWorkflowInstanceStoreBusyTestDB(t, path)
-	lockDB := openSQLiteWorkflowInstanceStoreBusyTestDB(t, path)
+	workflowDB := openSQLiteWorkflowInstanceStoreBusyTestDB(t, path, busyTimeout)
+	lockDB := openSQLiteWorkflowInstanceStoreBusyTestDB(t, path, busyTimeout)
 	createSQLiteWorkflowInstanceStoreTestSchema(t, workflowDB)
 	return workflowDB, lockDB
 }
 
-func openSQLiteWorkflowInstanceStoreBusyTestDB(t *testing.T, path string) *sql.DB {
+func openSQLiteWorkflowInstanceStoreBusyTestDB(t *testing.T, path string, busyTimeout time.Duration) *sql.DB {
 	t.Helper()
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -286,10 +336,14 @@ func openSQLiteWorkflowInstanceStoreBusyTestDB(t *testing.T, path string) *sql.D
 	db.SetMaxOpenConns(4)
 	db.SetMaxIdleConns(4)
 	t.Cleanup(func() { _ = db.Close() })
+	busyTimeoutMillis := int(busyTimeout / time.Millisecond)
+	if busyTimeout > 0 && busyTimeoutMillis == 0 {
+		busyTimeoutMillis = 1
+	}
 	for _, stmt := range []string{
 		`PRAGMA foreign_keys = ON`,
 		`PRAGMA journal_mode = WAL`,
-		`PRAGMA busy_timeout = 1`,
+		fmt.Sprintf(`PRAGMA busy_timeout = %d`, busyTimeoutMillis),
 	} {
 		if _, err := db.Exec(stmt); err != nil {
 			t.Fatalf("configure sqlite file db: %v", err)

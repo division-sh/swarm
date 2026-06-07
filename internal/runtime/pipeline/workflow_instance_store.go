@@ -119,7 +119,7 @@ var workflowInstancePathNamespace = uuid.MustParse("5e7507c8-bd4f-46e0-a098-b016
 const (
 	workflowInstanceTimerOwnerNode = "workflow_instance_store"
 
-	sqlitePipelineTransactionMaxAttempts = 100
+	sqlitePipelineTransactionRetryBudget = 5 * time.Second
 	sqlitePipelineTransactionBaseDelay   = 10 * time.Millisecond
 	sqlitePipelineTransactionMaxDelay    = 100 * time.Millisecond
 )
@@ -424,10 +424,32 @@ func (s *WorkflowInstanceStore) RunInPipelineTransaction(ctx context.Context, fn
 }
 
 func (s *WorkflowInstanceStore) runInSQLitePipelineTransaction(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
+	return s.runInSQLitePipelineTransactionWithBudget(ctx, fn, sqlitePipelineTransactionRetryBudget)
+}
+
+func (s *WorkflowInstanceStore) runInSQLitePipelineTransactionWithBudget(ctx context.Context, fn func(context.Context, *sql.Tx) error, retryBudget time.Duration) error {
+	if retryBudget <= 0 {
+		retryBudget = sqlitePipelineTransactionRetryBudget
+	}
+	retryDeadline := time.Now().Add(retryBudget)
+	retryDeadlineOwnedByBudget := true
+	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(retryDeadline) {
+		retryDeadline = ctxDeadline
+		retryDeadlineOwnedByBudget = false
+	}
 	var lastErr error
-	for attempt := 0; attempt < sqlitePipelineTransactionMaxAttempts; attempt++ {
+	for attempt := 0; ; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return err
+		}
+		if time.Until(retryDeadline) <= 0 {
+			if !retryDeadlineOwnedByBudget {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				return context.DeadlineExceeded
+			}
+			return sqlitePipelineTransactionRetryBudgetError(retryBudget, lastErr)
 		}
 		err := s.runInPipelineTransactionOnce(ctx, fn)
 		if err == nil || !sqlitePipelineBusyError(err) {
@@ -435,6 +457,17 @@ func (s *WorkflowInstanceStore) runInSQLitePipelineTransaction(ctx context.Conte
 		}
 		lastErr = err
 		delay := sqlitePipelineTransactionRetryDelay(attempt)
+		if remaining := time.Until(retryDeadline); remaining <= 0 {
+			if !retryDeadlineOwnedByBudget {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				return context.DeadlineExceeded
+			}
+			return sqlitePipelineTransactionRetryBudgetError(retryBudget, lastErr)
+		} else if delay > remaining {
+			delay = remaining
+		}
 		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
@@ -443,7 +476,13 @@ func (s *WorkflowInstanceStore) runInSQLitePipelineTransaction(ctx context.Conte
 		case <-timer.C:
 		}
 	}
-	return lastErr
+}
+
+func sqlitePipelineTransactionRetryBudgetError(retryBudget time.Duration, lastErr error) error {
+	if lastErr == nil {
+		return fmt.Errorf("sqlite pipeline transaction retry budget %s exceeded: %w", retryBudget, context.DeadlineExceeded)
+	}
+	return fmt.Errorf("sqlite pipeline transaction retry budget %s exceeded: %w", retryBudget, lastErr)
 }
 
 func sqlitePipelineTransactionRetryDelay(attempt int) time.Duration {
