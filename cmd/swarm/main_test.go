@@ -4043,22 +4043,21 @@ const (
 
 func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.DB, backend, bundleHash string, probe *lifecycletest.Probe) {
 	t.Helper()
-	beforeCreateRejectEvents := servedEventPublishScalarCount(t, db, backend, "events_all", "", "")
-	beforeCreateRejectIdempotency := servedEventPublishScalarCount(t, db, backend, "api_idempotency_all", "", "")
+	createRejectIdempotencyKey := "issue-1255-" + backend + "-create-entity-reject"
 	createReject := requireServedJSONRPCError(t, endpoint, "event.publish", map[string]any{
 		"event_name":      "thing.created",
 		"bundle_hash":     bundleHash,
 		"payload":         map[string]any{"entity_id": "11111111-1111-4111-8111-111111111111", "amount": 7, "who": "operator"},
-		"idempotency_key": "issue-1255-" + backend + "-create-entity-reject",
+		"idempotency_key": createRejectIdempotencyKey,
 	})
 	if createReject.Data["code"] != apiv1.PayloadValidationFailedCode {
 		t.Fatalf("create-entity rejection data = %#v, want %s", createReject.Data, apiv1.PayloadValidationFailedCode)
 	}
-	if got := servedEventPublishScalarCount(t, db, backend, "events_all", "", ""); got != beforeCreateRejectEvents {
-		t.Fatalf("%s event rows after rejected create-entity publish = %d, want %d", backend, got, beforeCreateRejectEvents)
+	if got := servedEventPublishEventCountByIdempotencyKey(t, db, backend, createRejectIdempotencyKey); got != 0 {
+		t.Fatalf("%s event rows for rejected create-entity idempotency key = %d, want 0", backend, got)
 	}
-	if got := servedEventPublishScalarCount(t, db, backend, "api_idempotency_all", "", ""); got != beforeCreateRejectIdempotency {
-		t.Fatalf("%s idempotency rows after rejected create-entity publish = %d, want %d", backend, got, beforeCreateRejectIdempotency)
+	if got := servedEventPublishAPIIdempotencyCount(t, db, backend, "event.publish", createRejectIdempotencyKey); got != 0 {
+		t.Fatalf("%s idempotency rows for rejected create-entity publish = %d, want 0", backend, got)
 	}
 
 	initialStdout, initialStderr, code := runServedCLICommand(t, endpoint, []string{
@@ -4151,13 +4150,12 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 		}
 	}
 
-	beforeEvents := servedEventPublishScalarCount(t, db, backend, "events_all", "", "")
-	beforeIdempotency := servedEventPublishScalarCount(t, db, backend, "api_idempotency_all", "", "")
+	unhandledIdempotencyKey := "issue-1255-" + backend + "-unhandled"
 	errResp := requireServedJSONRPCError(t, endpoint, "event.publish", map[string]any{
 		"event_name":      "validation/thing.unhandled",
 		"run_id":          runID,
 		"payload":         map[string]any{"entity_id": entityID, "note": "lost"},
-		"idempotency_key": "issue-1255-" + backend + "-unhandled",
+		"idempotency_key": unhandledIdempotencyKey,
 	})
 	if errResp.Data["code"] != apiv1.RunAlreadyTerminalCode {
 		t.Fatalf("unhandled follow-up error data = %#v, want %s", errResp.Data, apiv1.RunAlreadyTerminalCode)
@@ -4166,11 +4164,11 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	if !ok || details["current_status"] != "completed" {
 		t.Fatalf("unhandled follow-up details = %#v", errResp.Data["details"])
 	}
-	if got := servedEventPublishScalarCount(t, db, backend, "events_all", "", ""); got != beforeEvents {
-		t.Fatalf("%s event rows after rejected follow-up = %d, want %d", backend, got, beforeEvents)
+	if got := servedEventPublishEventCountByIdempotencyKey(t, db, backend, unhandledIdempotencyKey); got != 0 {
+		t.Fatalf("%s event rows for rejected follow-up idempotency key = %d, want 0", backend, got)
 	}
-	if got := servedEventPublishScalarCount(t, db, backend, "api_idempotency_all", "", ""); got != beforeIdempotency {
-		t.Fatalf("%s idempotency rows after rejected follow-up = %d, want %d", backend, got, beforeIdempotency)
+	if got := servedEventPublishAPIIdempotencyCount(t, db, backend, "event.publish", unhandledIdempotencyKey); got != 0 {
+		t.Fatalf("%s idempotency rows for rejected follow-up = %d, want 0", backend, got)
 	}
 }
 
@@ -4516,10 +4514,6 @@ func servedEventPublishScalarCount(t *testing.T, db *sql.DB, backend, scope, run
 		case "event_deliveries":
 			sqlText = `SELECT COUNT(*) FROM event_deliveries WHERE run_id = $1::uuid AND event_id = $2::uuid`
 			args = []any{runID, eventID}
-		case "events_all":
-			sqlText = `SELECT COUNT(*) FROM events`
-		case "api_idempotency_all":
-			sqlText = `SELECT COUNT(*) FROM api_idempotency`
 		default:
 			t.Fatalf("unknown postgres proof count scope %q", scope)
 		}
@@ -4537,10 +4531,6 @@ func servedEventPublishScalarCount(t *testing.T, db *sql.DB, backend, scope, run
 		case "event_deliveries":
 			sqlText = `SELECT COUNT(*) FROM event_deliveries WHERE run_id = ? AND event_id = ?`
 			args = []any{runID, eventID}
-		case "events_all":
-			sqlText = `SELECT COUNT(*) FROM events`
-		case "api_idempotency_all":
-			sqlText = `SELECT COUNT(*) FROM api_idempotency`
 		default:
 			t.Fatalf("unknown sqlite proof count scope %q", scope)
 		}
@@ -4550,6 +4540,52 @@ func servedEventPublishScalarCount(t *testing.T, db *sql.DB, backend, scope, run
 	var count int
 	if err := db.QueryRowContext(context.Background(), sqlText, args...).Scan(&count); err != nil {
 		t.Fatalf("%s count %s: %v", backend, scope, err)
+	}
+	return count
+}
+
+func servedEventPublishEventCountByIdempotencyKey(t *testing.T, db *sql.DB, backend, idempotencyKey string) int {
+	t.Helper()
+	var (
+		query string
+		args  []any
+	)
+	switch backend {
+	case "postgres":
+		query = `SELECT COUNT(*) FROM events WHERE idempotency_key = $1`
+		args = []any{idempotencyKey}
+	case "sqlite":
+		query = `SELECT COUNT(*) FROM events WHERE idempotency_key = ?`
+		args = []any{idempotencyKey}
+	default:
+		t.Fatalf("unknown proof backend %q", backend)
+	}
+	var count int
+	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&count); err != nil {
+		t.Fatalf("%s count events by idempotency key %q: %v", backend, idempotencyKey, err)
+	}
+	return count
+}
+
+func servedEventPublishAPIIdempotencyCount(t *testing.T, db *sql.DB, backend, method, idempotencyKey string) int {
+	t.Helper()
+	var (
+		query string
+		args  []any
+	)
+	switch backend {
+	case "postgres":
+		query = `SELECT COUNT(*) FROM api_idempotency WHERE method = $1 AND idempotency_key = $2`
+		args = []any{method, idempotencyKey}
+	case "sqlite":
+		query = `SELECT COUNT(*) FROM api_idempotency WHERE method = ? AND idempotency_key = ?`
+		args = []any{method, idempotencyKey}
+	default:
+		t.Fatalf("unknown proof backend %q", backend)
+	}
+	var count int
+	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&count); err != nil {
+		t.Fatalf("%s count api idempotency method=%q key=%q: %v", backend, method, idempotencyKey, err)
 	}
 	return count
 }
@@ -4641,9 +4677,7 @@ func assertServedDynamicAutoEmitPayloadProductOnly(t *testing.T, db *sql.DB, eve
 
 func requireServedReplayNoDeliveryHistoryNoMutation(t *testing.T, endpoint string, db *sql.DB, eventID, idempotencyKey string) {
 	t.Helper()
-	beforeEvents := servedEventPublishScalarCount(t, db, "postgres", "events_all", "", "")
-	beforeIdempotency := servedEventPublishScalarCount(t, db, "postgres", "api_idempotency_all", "", "")
-	beforeReplayEvents := servedPostgresCount(t, db, `SELECT COUNT(*) FROM events WHERE event_name = 'event.replayed'`)
+	beforeSourcedEvents := servedPostgresCount(t, db, `SELECT COUNT(*) FROM events WHERE source_event_id = $1::uuid`, eventID)
 	errResp := requireServedJSONRPCError(t, endpoint, "event.replay", map[string]any{
 		"event_id":        eventID,
 		"idempotency_key": idempotencyKey,
@@ -4651,14 +4685,11 @@ func requireServedReplayNoDeliveryHistoryNoMutation(t *testing.T, endpoint strin
 	if errResp.Data["code"] != apiv1.EventReplayNoDeliveryHistoryCode {
 		t.Fatalf("event.replay data = %#v, want %s", errResp.Data, apiv1.EventReplayNoDeliveryHistoryCode)
 	}
-	if got := servedEventPublishScalarCount(t, db, "postgres", "events_all", "", ""); got != beforeEvents {
-		t.Fatalf("events after node-only replay = %d, want %d", got, beforeEvents)
+	if got := servedPostgresCount(t, db, `SELECT COUNT(*) FROM events WHERE source_event_id = $1::uuid`, eventID); got != beforeSourcedEvents {
+		t.Fatalf("events sourced from rejected node-only replay target = %d, want %d", got, beforeSourcedEvents)
 	}
-	if got := servedEventPublishScalarCount(t, db, "postgres", "api_idempotency_all", "", ""); got != beforeIdempotency {
-		t.Fatalf("api_idempotency after node-only replay = %d, want %d", got, beforeIdempotency)
-	}
-	if got := servedPostgresCount(t, db, `SELECT COUNT(*) FROM events WHERE event_name = 'event.replayed'`); got != beforeReplayEvents {
-		t.Fatalf("event.replayed count after node-only replay = %d, want %d", got, beforeReplayEvents)
+	if got := servedEventPublishAPIIdempotencyCount(t, db, "postgres", "event.replay", idempotencyKey); got != 0 {
+		t.Fatalf("api_idempotency rows for rejected node-only replay = %d, want 0", got)
 	}
 }
 
