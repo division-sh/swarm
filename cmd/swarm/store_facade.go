@@ -182,6 +182,9 @@ func (f selectedRuntimeStoreFacade) schemaCapabilityBinder() selectedSchemaCapab
 }
 
 func (f selectedRuntimeStoreFacade) runStalledReader() runStalledReadStore {
+	if f.stores.Postgres != nil {
+		return f.stores.Postgres
+	}
 	readStore, _ := f.stores.ObservabilityStore.(runStalledReadStore)
 	return readStore
 }
