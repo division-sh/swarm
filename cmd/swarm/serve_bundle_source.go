@@ -17,7 +17,8 @@ func prepareServeBundleSource(ctx context.Context, stores storeBundle, bundle *r
 		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("derive canonical bundle hash: %w", err)
 	}
 	source := storerunlifecycle.BundleSourcePersisted
-	if dev || stores.Postgres == nil {
+	catalog := stores.facade().bundleSourceCatalogStore()
+	if dev || catalog == nil {
 		source = storerunlifecycle.BundleSourceEphemeral
 	}
 	fact := runtimecorrelation.BundleSourceFact{
@@ -35,7 +36,7 @@ func prepareServeBundleSource(ctx context.Context, stores storeBundle, bundle *r
 	if projection.BundleHash != bundleHash {
 		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("bundle catalog projection hash %q does not match source fact %q", projection.BundleHash, bundleHash)
 	}
-	if _, err := stores.Postgres.UpsertBundleCatalog(ctx, store.BundleCatalogUpsert{
+	if _, err := catalog.UpsertBundleCatalog(ctx, store.BundleCatalogUpsert{
 		BundleHash:  projection.BundleHash,
 		ContentYAML: projection.ContentYAML,
 		ParsedJSON:  projection.ParsedJSON,

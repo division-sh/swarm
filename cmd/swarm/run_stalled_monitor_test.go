@@ -2,15 +2,12 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/runstalled"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
-
-	_ "modernc.org/sqlite"
 )
 
 func TestRunStalledSnapshotFromDebugReportUsesProjectRunOperationalStatus(t *testing.T) {
@@ -94,39 +91,54 @@ func TestRunStalledSnapshotFromDebugReportUsesNonEscalationProgressTimestamp(t *
 	}
 }
 
-func TestServeRunStalledReaderLoadsLatestNonEscalationProgressAt(t *testing.T) {
+func TestServeRunStalledReaderLoadsSnapshotProgressFromStore(t *testing.T) {
 	ctx := context.Background()
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if _, err := db.ExecContext(ctx, `
-		CREATE TABLE events (
-			run_id TEXT NOT NULL,
-			event_name TEXT NOT NULL,
-			created_at TEXT NOT NULL
-		)
-	`); err != nil {
-		t.Fatalf("create events: %v", err)
-	}
 	progressAt := time.Date(2026, 6, 4, 12, 0, 0, 0, time.UTC)
-	selfAlertAt := progressAt.Add(10 * time.Minute)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (run_id, event_name, created_at) VALUES
-			('run-1', 'task.started', ?),
-			('run-1', 'platform.run_stalled', ?)
-	`, progressAt.Format(time.RFC3339Nano), selfAlertAt.Format(time.RFC3339Nano)); err != nil {
-		t.Fatalf("seed events: %v", err)
-	}
-	reader := &serveRunStalledReader{db: db}
-	got, err := reader.loadLatestNonEscalationProgressAt(ctx, "run-1")
+	reader := &serveRunStalledReader{store: fakeRunStalledReadStore{
+		report: store.RunDebugReport{
+			RunID:          "run-1",
+			RunTableStatus: "running",
+			LastEventAt:    progressAt.Add(10 * time.Minute),
+		},
+		flowInstance: "review/inst-1",
+		progressAt:   progressAt,
+	}}
+	got, err := reader.LoadRunSnapshot(ctx, "run-1")
 	if err != nil {
-		t.Fatalf("load latest non-escalation progress: %v", err)
+		t.Fatalf("load run snapshot: %v", err)
 	}
-	if !got.Equal(progressAt) {
-		t.Fatalf("progress timestamp = %s, want %s", got, progressAt)
+	if !got.LastProgressAt.Equal(progressAt) {
+		t.Fatalf("progress timestamp = %s, want %s", got.LastProgressAt, progressAt)
 	}
+	if got.FlowInstance != "review/inst-1" {
+		t.Fatalf("flow instance = %q, want review/inst-1", got.FlowInstance)
+	}
+}
+
+type fakeRunStalledReadStore struct {
+	report       store.RunDebugReport
+	flowInstance string
+	progressAt   time.Time
+}
+
+func (s fakeRunStalledReadStore) ListRunHeaders(context.Context, store.RunHeaderListOptions) ([]store.RunHeader, string, error) {
+	return nil, "", nil
+}
+
+func (s fakeRunStalledReadStore) LoadRunDebugReport(context.Context, string, store.RunDebugQueryOptions) (store.RunDebugReport, error) {
+	return s.report, nil
+}
+
+func (s fakeRunStalledReadStore) ListOperatorEvents(context.Context, store.OperatorEventListOptions) (store.OperatorEventListResult, error) {
+	return store.OperatorEventListResult{}, nil
+}
+
+func (s fakeRunStalledReadStore) LoadLatestRunFlowInstance(context.Context, string) (string, error) {
+	return s.flowInstance, nil
+}
+
+func (s fakeRunStalledReadStore) LoadLatestRunNonEscalationProgressAt(context.Context, string, string) (time.Time, error) {
+	return s.progressAt, nil
 }
 
 func TestRunStalledFlowIDForInstanceChoosesMostSpecificScope(t *testing.T) {

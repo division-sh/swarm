@@ -32,7 +32,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
-	runtimebundledelete "github.com/division-sh/swarm/internal/runtime/bundledelete"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -164,33 +163,7 @@ func (p sqlDBPinger) Ping(ctx context.Context) error {
 }
 
 func (s storeBundle) runtimeStores() runtime.Stores {
-	return runtime.Stores{
-		SQLDB:               s.RuntimeSQLDB,
-		ConstructionBlocker: s.RuntimeBlocker,
-		EventStore:          s.EventStore,
-		RuntimeLogStore:     s.RuntimeLogStore,
-		PipelineStore:       s.PipelineStore,
-		SessionRegistry:     s.SessionRegistry,
-		ConversationStore:   s.ConversationStore,
-		ManagerStore:        s.ManagerStore,
-		ScheduleStore:       s.ScheduleStore,
-		MailboxMaterializer: s.MailboxMaterializer,
-		StartupOwnership:    s.StartupOwnership,
-		MailboxStore:        s.MailboxStore,
-		ToolEntityStore:     s.ToolEntityStore,
-		HumanTaskStore:      s.HumanTaskStore,
-		BudgetSpendStore:    s.BudgetSpendStore,
-		RuntimeIngressStore: s.RuntimeIngressStore,
-		TurnStore:           s.TurnStore,
-	}
-}
-
-func selectedAPIRunBundleContextStore(stores storeBundle) apiv1.RunBundleContextStore {
-	if stores.Postgres != nil {
-		return stores.Postgres
-	}
-	runBundleContext, _ := stores.ObservabilityStore.(apiv1.RunBundleContextStore)
-	return runBundleContext
+	return s.facade().runtimeStores()
 }
 
 func main() {
@@ -444,13 +417,14 @@ func loadServeRuntimeBundle(ctx context.Context, repo string, stores storeBundle
 }
 
 func loadServeRuntimeBundleFromCatalog(ctx context.Context, repo string, stores storeBundle, bundleHash string) (serveRuntimeBundle, error) {
-	if stores.Postgres == nil {
+	catalog := stores.facade().bundleRuntimeCatalogStore()
+	if catalog == nil {
 		return serveRuntimeBundle{}, fmt.Errorf("BUNDLE_UNAVAILABLE: swarm serve --bundle-hash requires postgres bundle catalog store")
 	}
 	if err := runtimecontracts.ValidateBundleHash(bundleHash); err != nil {
 		return serveRuntimeBundle{}, err
 	}
-	record, err := stores.Postgres.LoadBundleCatalogRuntimeRecord(ctx, bundleHash)
+	record, err := catalog.LoadBundleCatalogRuntimeRecord(ctx, bundleHash)
 	if errors.Is(err, store.ErrBundleNotFound) {
 		return serveRuntimeBundle{}, fmt.Errorf("BUNDLE_UNAVAILABLE: bundle_hash %s is not present in bundles", bundleHash)
 	}
@@ -674,7 +648,8 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		return 1
 	}
 	reporter.emit(3, "db_connection", "ok", storeSelection.Backend.String())
-	defer closeDB(stores.SQLDB)
+	storeFacade := stores.facade()
+	defer storeFacade.close()
 	if stores.SchemaBootstrapper != nil {
 		preCatalogPlatformSpecPath, err := servePreCatalogPlatformSpecPath(resolvedPaths, opts)
 		if err != nil {
@@ -732,8 +707,8 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		}
 		log.Printf("serve abandon active runs complete: runs=%d deliveries=%d pipeline_receipts=%d", len(result.Runs), len(result.Deliveries), result.PipelineReceiptCount)
 	}
-	if stores.Postgres != nil {
-		recoveryWorkspaces, err := configuredWorkspaceLifecycleForServe(stores.SQLDB, loadedBundle.contractsRoot, source, mountSources, workspaceBackend)
+	if recoveryStore := storeFacade.startupRecoveryStore(); recoveryStore != nil {
+		recoveryWorkspaces, err := configuredWorkspaceLifecycleForServe(storeFacade.workspaceDB(), loadedBundle.contractsRoot, source, mountSources, workspaceBackend)
 		if err != nil {
 			slog.Error("configure recovery workspaces", "error", err)
 			return 1
@@ -743,8 +718,8 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 			return 1
 		}
 		recovery, err := runtimestartuprecovery.Recover(ctx, runtimestartuprecovery.Request{
-			AvailabilityReader: stores.Postgres,
-			CleanupStore:       stores.Postgres,
+			AvailabilityReader: recoveryStore,
+			CleanupStore:       recoveryStore,
 			Containers:         serveStartupRecoveryContainers{lifecycle: recoveryWorkspaces},
 			RequestedAt:        time.Now().UTC(),
 		})
@@ -767,7 +742,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		}
 	}
 	pinnedBundleHashes := servePinnedBundleHashes(loadedBundles)
-	if err := enforceServeBundleMatchAdmissionForHashes(ctx, stores.Postgres, serveRuntimeBundleIdentitiesDetail(loadedBundles), opts.RequireBundleMatch, pinnedBundleHashes); err != nil {
+	if err := enforceServeBundleMatchAdmissionForHashes(ctx, storeFacade.runBundleAvailabilityStore(), serveRuntimeBundleIdentitiesDetail(loadedBundles), opts.RequireBundleMatch, pinnedBundleHashes); err != nil {
 		slog.Error("bundle match admission failed", "error", err)
 		return 3
 	}
@@ -861,47 +836,17 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		log.Printf("load v1 api mailbox approval routes: %v", err)
 		return 1
 	}
-	var apiEntities apiv1.EntityReadStore
-	var apiAgentConversations apiv1.AgentConversationReadStore
-	var apiDatabase apiv1.Pinger
-	var apiRuns apiv1.RunReadStore
-	apiRunBundleContext := selectedAPIRunBundleContextStore(stores)
-	apiObservability := stores.ObservabilityStore
-	if stores.Postgres != nil {
-		apiDatabase = stores.Postgres
-		apiRuns = stores.Postgres
-		apiEntities = stores.Postgres
-		apiAgentConversations = stores.Postgres
-		apiObservability = stores.Postgres
-	} else if stores.SQLDB != nil {
-		apiDatabase = sqlDBPinger{db: stores.SQLDB}
-	}
-	if stores.Postgres == nil {
-		if runStore, ok := stores.ObservabilityStore.(apiv1.RunReadStore); ok {
-			apiRuns = runStore
-		}
-		if entityStore, ok := stores.ObservabilityStore.(apiv1.EntityReadStore); ok {
-			apiEntities = entityStore
-		}
-	}
-	resetPlanner := runtimedestructivereset.InventoryPlanner{
-		Reader: runtimedestructivereset.CompositeInventoryReader{
-			Reader:     stores.Postgres,
-			Containers: workspaces,
-		},
-	}
-	runForkAvailability := apiv1.RunForkAvailabilityStore(stores.Postgres)
-	runForkSourceLoader := runtimerunforkexecution.SelectedContractSourceLoader(runtimerunforkexecution.ContractBundleSourceLoader{
+	apiStoreCaps, err := storeFacade.apiCapabilities(selectedAPICapabilityRequest{
 		RepoRoot:         repo,
 		PlatformSpecPath: resolvedPlatformSpecPath,
+		LoadedBundle:     loadedBundle,
+		RuntimeContexts:  runtimeContexts,
+		Source:           source,
+		ContractsRoot:    contractsRoot,
+		Config:           cfg,
+		Workspaces:       workspaces,
+		Credentials:      credentialStore,
 	})
-	if loadedBundle.dbLoaded {
-		runForkSourceLoader = runtimerunforkexecution.BundleCatalogSelectedContractSourceLoader{
-			RepoRoot: repo,
-			Store:    stores.Postgres,
-		}
-	}
-	apiRuntimeContexts, err := serveRuntimeContextManager(stores.Postgres, runtimeContexts)
 	if err != nil {
 		log.Printf("init runtime context manager: %v", err)
 		return 1
@@ -912,55 +857,29 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		Ready: func() bool {
 			return ready.Load()
 		},
-		Database:           apiDatabase,
-		Runs:               apiRuns,
-		Observability:      apiObservability,
-		Entities:           apiEntities,
-		AgentConversations: apiAgentConversations,
-		AgentUsage:         stores.AgentUsageStore,
-		BundleCatalog:      stores.Postgres,
-		BundleDelete: &runtimebundledelete.Coordinator{
-			Planner:            stores.Postgres,
-			Cleaner:            stores.Postgres,
-			Finalizer:          stores.Postgres,
-			Locks:              stores.Postgres,
-			ContainerInventory: workspaces,
-			Containers:         runtimedestructivereset.ManagedContainerStopper{Runtime: workspaces},
-		},
-		ConversationForks:   stores.Postgres,
-		ForkChatExecutor:    apiv1.NewLLMForkChatExecutor(forkChatLLM),
-		RunBundleContext:    apiRunBundleContext,
-		RunForkAvailability: runForkAvailability,
-		RunFork: apiv1.SelectedContractRunForkExecutor{
-			Store:             stores.Postgres,
-			SourceLoader:      runForkSourceLoader,
-			ContractSelection: runtimerunforkadmission.SelectedContractSelection(source, contractsRoot),
-			AgentRuntime: runtimerunforkexecution.SelectedContractAgentRuntimeOptions{
-				Config:            cfg,
-				EntityStore:       stores.ToolEntityStore,
-				HumanTaskStore:    stores.HumanTaskStore,
-				SessionRegistry:   stores.SessionRegistry,
-				ConversationStore: stores.ConversationStore,
-				TurnStore:         stores.TurnStore,
-				ScheduleStore:     stores.ScheduleStore,
-				MailboxStore:      stores.MailboxStore,
-				Workspace:         workspaces,
-				Credentials:       credentialStore,
-			},
-		},
-		AgentControl:    dashboardDynamicAgentControl{supervisor: supervisor},
-		Mailbox:         stores.MailboxAPIStore,
-		Idempotency:     stores.IdempotencyStore,
-		Events:          rt.Bus,
-		RunControl:      rt.RunControl,
-		RuntimeIngress:  rt.RuntimeIngress,
-		RuntimeContexts: apiRuntimeContexts,
-		ResetCoordinator: &runtimedestructivereset.Coordinator{
-			Planner: resetPlanner,
-			Locks:   stores.Postgres,
-		},
-		ResetQuiescer:         runtimedestructivereset.Quiescer{Store: stores.Postgres},
-		ResetCleaner:          runtimedestructivereset.Cleaner{Store: stores.Postgres},
+		Database:              apiStoreCaps.Database,
+		Runs:                  apiStoreCaps.Runs,
+		Observability:         apiStoreCaps.Observability,
+		Entities:              apiStoreCaps.Entities,
+		AgentConversations:    apiStoreCaps.AgentConversations,
+		AgentUsage:            stores.AgentUsageStore,
+		BundleCatalog:         apiStoreCaps.BundleCatalog,
+		BundleDelete:          apiStoreCaps.BundleDelete,
+		ConversationForks:     apiStoreCaps.ConversationForks,
+		ForkChatExecutor:      apiv1.NewLLMForkChatExecutor(forkChatLLM),
+		RunBundleContext:      apiStoreCaps.RunBundleContext,
+		RunForkAvailability:   apiStoreCaps.RunForkAvailability,
+		RunFork:               apiStoreCaps.RunFork,
+		AgentControl:          dashboardDynamicAgentControl{supervisor: supervisor},
+		Mailbox:               stores.MailboxAPIStore,
+		Idempotency:           stores.IdempotencyStore,
+		Events:                rt.Bus,
+		RunControl:            rt.RunControl,
+		RuntimeIngress:        rt.RuntimeIngress,
+		RuntimeContexts:       apiStoreCaps.RuntimeContexts,
+		ResetCoordinator:      apiStoreCaps.ResetCoordinator,
+		ResetQuiescer:         apiStoreCaps.ResetQuiescer,
+		ResetCleaner:          apiStoreCaps.ResetCleaner,
 		ResetContainers:       runtimedestructivereset.ManagedContainerStopper{Runtime: workspaces},
 		Source:                source,
 		MailboxApprovalRoutes: mailboxApprovalRoutes,
@@ -1381,17 +1300,18 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 		}
 		return 1
 	}
-	defer closeDB(stores.SQLDB)
-	if stores.Postgres == nil {
+	storeFacade := stores.facade()
+	defer storeFacade.close()
+	runForkOwner, ok := storeFacade.runForkRuntimeOwner()
+	if !ok {
 		if out != nil {
 			fmt.Fprintln(out, "fork failed: postgres store required")
 		}
 		return 1
 	}
 	if *activate {
-		result, err := runtimerunforkexecution.ActivateSelectedContractRunFork(ctx, runtimerunforkexecution.SelectedContractActivationGateRequest{
+		result, err := runForkOwner.activate(ctx, runtimerunforkexecution.SelectedContractActivationGateRequest{
 			ForkRunID: strings.TrimSpace(*runID),
-			Store:     stores.Postgres,
 			SourceLoader: runtimerunforkexecution.ContractBundleSourceLoader{
 				RepoRoot:         repo,
 				PlatformSpecPath: resolvePath(repo, *platformSpecPath),
@@ -1436,7 +1356,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 			selection := runtimerunforkadmission.SelectedContractSelection(source, contractsRoot)
 			contractSelection = &selection
 		}
-		result, err := stores.Postgres.MaterializeRunFork(ctx, store.RunForkMaterializeRequest{
+		result, err := runForkOwner.materialize(ctx, store.RunForkMaterializeRequest{
 			SourceRunID:       strings.TrimSpace(*runID),
 			At:                strings.TrimSpace(*at),
 			ContractSelection: contractSelection,
@@ -1496,17 +1416,16 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 			}
 			return 1
 		}
-		workspaces, err := configuredWorkspaceLifecycleForBackend(stores.SQLDB, contractsRoot, source, mountSources, workspaceBackend)
+		workspaces, err := configuredWorkspaceLifecycleForBackend(storeFacade.workspaceDB(), contractsRoot, source, mountSources, workspaceBackend)
 		if err != nil {
 			if out != nil {
 				fmt.Fprintf(out, "fork failed: configure workspaces: %v\n", err)
 			}
 			return 1
 		}
-		result, err := runtimerunforkexecution.ExecuteSelectedContractRunFork(ctx, runtimerunforkexecution.SelectedContractExecutionRequest{
+		result, err := runForkOwner.execute(ctx, runtimerunforkexecution.SelectedContractExecutionRequest{
 			SourceRunID: strings.TrimSpace(*runID),
 			At:          strings.TrimSpace(*at),
-			Store:       stores.Postgres,
 			SourceLoader: runtimerunforkexecution.ContractBundleSourceLoader{
 				RepoRoot:         repo,
 				PlatformSpecPath: resolvePath(repo, *platformSpecPath),
@@ -1543,7 +1462,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 		printSelectedContractExecution(out, result)
 		return 0
 	}
-	plan, err := stores.Postgres.PlanRunFork(ctx, store.RunForkPlanRequest{
+	plan, err := runForkOwner.plan(ctx, store.RunForkPlanRequest{
 		SourceRunID: strings.TrimSpace(*runID),
 		At:          strings.TrimSpace(*at),
 	})
@@ -1796,12 +1715,17 @@ func printRunForkPlan(w io.Writer, plan store.RunForkPlan) {
 	}
 }
 
-func loadRunStatusReport(ctx context.Context, pg *store.PostgresStore, runID string, opts runStatusOptions) (runStatusReport, error) {
-	if pg == nil || pg.DB == nil {
-		return runStatusReport{}, errors.New("postgres store is required")
+type runStatusReadStore interface {
+	LoadRunDebugReport(context.Context, string, store.RunDebugQueryOptions) (store.RunDebugReport, error)
+	ResolveLatestRunDebugRunID(context.Context) (string, error)
+}
+
+func loadRunStatusReport(ctx context.Context, reader runStatusReadStore, runID string, opts runStatusOptions) (runStatusReport, error) {
+	if reader == nil {
+		return runStatusReport{}, errors.New("run status read store is required")
 	}
 	if strings.TrimSpace(runID) == "" {
-		resolvedRunID, err := pg.ResolveLatestRunDebugRunID(ctx)
+		resolvedRunID, err := reader.ResolveLatestRunDebugRunID(ctx)
 		if err != nil {
 			return runStatusReport{}, err
 		}
@@ -1811,7 +1735,7 @@ func loadRunStatusReport(ctx context.Context, pg *store.PostgresStore, runID str
 	if runID == "" {
 		return runStatusReport{}, errors.New("run_id is required")
 	}
-	detail, err := pg.LoadRunDebugReport(ctx, runID, store.RunDebugQueryOptions{
+	detail, err := reader.LoadRunDebugReport(ctx, runID, store.RunDebugQueryOptions{
 		LogsAllLevels:   opts.LogsAllLevels,
 		Component:       opts.Component,
 		EventLimit:      15,
@@ -2498,15 +2422,15 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 	}
 }
 
-func enforceServeBundleMatchAdmission(ctx context.Context, pg *store.PostgresStore, bootIdentity string, requireMatch bool, pinnedBundleHash string) error {
+func enforceServeBundleMatchAdmission(ctx context.Context, availability selectedRunBundleAvailabilityStore, bootIdentity string, requireMatch bool, pinnedBundleHash string) error {
 	var pinned []string
 	if hash := strings.TrimSpace(pinnedBundleHash); hash != "" {
 		pinned = []string{hash}
 	}
-	return enforceServeBundleMatchAdmissionForHashes(ctx, pg, bootIdentity, requireMatch, pinned)
+	return enforceServeBundleMatchAdmissionForHashes(ctx, availability, bootIdentity, requireMatch, pinned)
 }
 
-func enforceServeBundleMatchAdmissionForHashes(ctx context.Context, pg *store.PostgresStore, bootIdentity string, requireMatch bool, pinnedBundleHashes []string) error {
+func enforceServeBundleMatchAdmissionForHashes(ctx context.Context, availability selectedRunBundleAvailabilityStore, bootIdentity string, requireMatch bool, pinnedBundleHashes []string) error {
 	bootIdentity = strings.TrimSpace(bootIdentity)
 	pinnedBundleHashes = uniqueTrimmedServeBundleHashes(pinnedBundleHashes)
 	if !requireMatch {
@@ -2516,11 +2440,11 @@ func enforceServeBundleMatchAdmissionForHashes(ctx context.Context, pg *store.Po
 	if enforceActiveAvailability && bootIdentity == "" {
 		return fmt.Errorf("boot bundle identity is required")
 	}
-	if pg == nil {
+	if availability == nil {
 		return nil
 	}
 	if enforceActiveAvailability {
-		conflicts, err := pg.ActiveRunBundleAvailabilityConflicts(ctx)
+		conflicts, err := availability.ActiveRunBundleAvailabilityConflicts(ctx)
 		if err != nil {
 			return err
 		}
@@ -2535,7 +2459,7 @@ func enforceServeBundleMatchAdmissionForHashes(ctx context.Context, pg *store.Po
 	if len(pinnedBundleHashes) == 0 {
 		return nil
 	}
-	mismatches, err := activeRunPinnedBundleHashesConflicts(ctx, pg, pinnedBundleHashes)
+	mismatches, err := activeRunPinnedBundleHashesConflicts(ctx, availability, pinnedBundleHashes)
 	if err != nil {
 		return err
 	}
@@ -2549,12 +2473,12 @@ func enforceServeBundleMatchAdmissionForHashes(ctx context.Context, pg *store.Po
 	return fmt.Errorf("active run pinned bundle_hash conflict: DB-loaded serve bundle_hash set %s cannot resume %d active run(s) with different bundle_hash: %s", strings.Join(pinnedBundleHashes, ","), len(mismatches), strings.Join(details, "; "))
 }
 
-func activeRunPinnedBundleHashConflicts(ctx context.Context, pg *store.PostgresStore, pinnedBundleHash string) ([]runbundle.Availability, error) {
+func activeRunPinnedBundleHashConflicts(ctx context.Context, availability selectedRunBundleAvailabilityStore, pinnedBundleHash string) ([]runbundle.Availability, error) {
 	pinnedBundleHash = strings.TrimSpace(pinnedBundleHash)
 	if pinnedBundleHash == "" {
 		return nil, nil
 	}
-	availabilities, err := pg.ActiveRunBundleAvailabilities(ctx)
+	availabilities, err := availability.ActiveRunBundleAvailabilities(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -2570,7 +2494,7 @@ func activeRunPinnedBundleHashConflicts(ctx context.Context, pg *store.PostgresS
 	return conflicts, nil
 }
 
-func activeRunPinnedBundleHashesConflicts(ctx context.Context, pg *store.PostgresStore, pinnedBundleHashes []string) ([]runbundle.Availability, error) {
+func activeRunPinnedBundleHashesConflicts(ctx context.Context, availability selectedRunBundleAvailabilityStore, pinnedBundleHashes []string) ([]runbundle.Availability, error) {
 	allowed := map[string]struct{}{}
 	for _, hash := range uniqueTrimmedServeBundleHashes(pinnedBundleHashes) {
 		allowed[hash] = struct{}{}
@@ -2578,7 +2502,7 @@ func activeRunPinnedBundleHashesConflicts(ctx context.Context, pg *store.Postgre
 	if len(allowed) == 0 {
 		return nil, nil
 	}
-	availabilities, err := pg.ActiveRunBundleAvailabilities(ctx)
+	availabilities, err := availability.ActiveRunBundleAvailabilities(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -2676,10 +2600,11 @@ func ensureServeSchemaTables(ctx context.Context, stores storeBundle, plans []st
 }
 
 func rebindServePostgresSchemaCapabilities(ctx context.Context, stores storeBundle) error {
-	if stores.Postgres == nil {
+	binder := stores.facade().schemaCapabilityBinder()
+	if binder == nil {
 		return nil
 	}
-	if _, err := stores.Postgres.BindSchemaCapabilities(ctx); err != nil {
+	if _, err := binder.BindSchemaCapabilities(ctx); err != nil {
 		return fmt.Errorf("bind post-bootstrap schema capabilities: %w", err)
 	}
 	return nil

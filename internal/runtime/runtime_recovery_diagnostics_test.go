@@ -366,6 +366,7 @@ func TestRuntimeStart_RecoveryDisabledEmitsDeniedDecisionForActiveSchedules(t *t
 
 	rt, err := NewRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(false), Stores: Stores{
 		SQLDB:           db,
+		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
 		RuntimeLogStore: runtimeLogCapabilityStub{enabled: true, hasRunID: true, db: db},
 		EventStore:      startupRecoveryCapabilityEventStore{},
 		ManagerStore:    &recoveryGuardManagerStore{},
@@ -425,6 +426,7 @@ func TestRuntimeStart_RecoveryDisabledAllowsAndLogsManagerSnapshotWork(t *testin
 
 	rt, err := NewRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(false), Stores: Stores{
 		SQLDB:           db,
+		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
 		RuntimeLogStore: runtimeLogCapabilityStub{enabled: true, hasRunID: true, db: db},
 		EventStore:      eventStore,
 		ManagerStore:    managerStore,
@@ -501,6 +503,7 @@ func TestRuntimeStart_RecoveryEnabledEmitsAllowedDecisionSummary(t *testing.T) {
 
 	rt, err := NewRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
 		SQLDB:           db,
+		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
 		RuntimeLogStore: runtimeLogCapabilityStub{enabled: true, hasRunID: true, db: db},
 		EventStore:      startupRecoveryCapabilityEventStore{},
 		ManagerStore:    &recoveryGuardManagerStore{},
@@ -589,6 +592,7 @@ func TestRuntimeStart_RecoveryEnabledEmitsTimerRecoveryAftermathAndSummary(t *te
 
 	rt, err := NewRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
 		SQLDB:           db,
+		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
 		RuntimeLogStore: runtimeLogCapabilityStub{enabled: true, hasRunID: true, db: db},
 		EventStore:      startupRecoveryCapabilityEventStore{},
 		ManagerStore:    &recoveryGuardManagerStore{},
@@ -715,6 +719,7 @@ func TestRuntimeStart_RecoveryEnabledEmitsManagerReplayAftermathAndSummary(t *te
 
 	rt, err := NewRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
 		SQLDB:           db,
+		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
 		RuntimeLogStore: runtimeLogCapabilityStub{enabled: true, hasRunID: true, db: db},
 		EventStore:      startupRecoveryCapabilityEventStore{},
 		ManagerStore:    managerStore,
@@ -815,6 +820,7 @@ func TestRuntimeStart_RecoveryFailureEmitsDegradedDecisionSummary(t *testing.T) 
 
 	rt, err := NewRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
 		SQLDB:           db,
+		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
 		RuntimeLogStore: runtimeLogCapabilityStub{enabled: true, hasRunID: true, db: db},
 		EventStore:      eventStore,
 		ManagerStore:    &recoveryGuardManagerStore{},
@@ -866,6 +872,7 @@ func TestRuntimeStart_RecoveryInspectionFailureDoesNotBlockRecoveryEnabledStartu
 
 	rt, err := NewRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
 		SQLDB:           db,
+		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
 		RuntimeLogStore: runtimeLogCapabilityStub{enabled: true, hasRunID: true, db: db},
 		EventStore:      startupRecoveryCapabilityEventStore{},
 		ManagerStore:    startupRecoveryManagerStore{loadErr: errors.New("load agents failed")},
@@ -945,6 +952,7 @@ func TestRuntimeStart_InspectionFailurePreservesDecisionErrorAcrossTimerSkipAndD
 
 	rt, err := NewRuntime(ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
 		SQLDB:           db,
+		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
 		RuntimeLogStore: runtimeLogCapabilityStub{enabled: true, hasRunID: true, db: db},
 		EventStore:      startupRecoveryCapabilityEventStore{},
 		ManagerStore:    managerStore,

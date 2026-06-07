@@ -436,7 +436,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	})
 	pipelineStore := stores.PipelineStore
 	if pipelineStore == nil && stores.SQLDB != nil {
-		pipelineStore = runtimepipeline.NewWorkflowInstanceStore(stores.SQLDB)
+		return nil, fmt.Errorf("runtime pipeline store must be provided by selected runtime store construction")
 	}
 	if pipelineStore != nil && pipelineStore.Enabled() {
 		artifactRoot, err := runtimepipeline.ResolveArtifactRepoRoot("")

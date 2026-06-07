@@ -781,6 +781,7 @@ func TestAccumulatorCompletionOutcomeSurface_RoundTripsThroughObservabilityReade
 		LLM:     config.LLMConfig{Backend: "anthropic"},
 	}, Stores: runtimepkg.Stores{
 		SQLDB:           db,
+		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
 		EventStore:      pg,
 		RuntimeLogStore: pg,
 		ManagerStore:    pg,
@@ -1157,6 +1158,7 @@ func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *
 		},
 	}, Stores: runtimepkg.Stores{
 		SQLDB:           db,
+		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
 		EventStore:      pg,
 		RuntimeLogStore: pg,
 		ManagerStore:    pg,
@@ -1242,6 +1244,7 @@ func TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWitho
 		},
 	}, Stores: runtimepkg.Stores{
 		SQLDB:           db,
+		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
 		EventStore:      eventStore,
 		RuntimeLogStore: pg,
 		ManagerStore:    &conformanceManagerReplayStore{},
@@ -1342,6 +1345,7 @@ func TestStartupTimerRecoveryAftermathSurface_RoundTripsThroughObservabilityRead
 		},
 	}, Stores: runtimepkg.Stores{
 		SQLDB:           db,
+		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
 		EventStore:      conformanceTimerRecoveryEventStore{},
 		RuntimeLogStore: pg,
 		ManagerStore:    pg,
@@ -1613,6 +1617,7 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 		},
 	}, Stores: runtimepkg.Stores{
 		SQLDB:           db,
+		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
 		EventStore:      conformanceTimerRecoveryEventStore{},
 		RuntimeLogStore: pg,
 		ManagerStore:    managerStore,
