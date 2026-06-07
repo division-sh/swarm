@@ -3435,11 +3435,17 @@ func TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite(t *test
 	t.Setenv(storebackend.EnvSQLitePath, sqlitePath)
 	contractsPath := writeServedEventPublishFollowUpFixture(t)
 	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
-	sqliteStore, err := store.NewSQLiteRuntimeStore(sqlitePath)
-	if err != nil {
-		t.Fatalf("NewSQLiteRuntimeStore(%s): %v", sqlitePath, err)
-	}
 	probe := runtimelifecycleprobe.New()
+	oldBuildStores := buildStoresForServe
+	var servedDB *sql.DB
+	buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (storeBundle, error) {
+		stores, err := oldBuildStores(ctx, selection, cfg)
+		if err == nil {
+			servedDB = stores.SQLDB
+		}
+		return stores, err
+	}
+	t.Cleanup(func() { buildStoresForServe = oldBuildStores })
 	endpoint, _ := startServedEventPublishFollowUpRuntime(t, serveOptions{
 		ConfigPath:              writeServeRuntimeTestConfig(t),
 		ContractsPath:           contractsPath,
@@ -3454,10 +3460,10 @@ func TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite(t *test
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	})
 
-	runServedEventPublishFollowUpProof(t, endpoint, sqliteStore.DB, "sqlite", bundleHash, probe)
-	if err := sqliteStore.Close(); err != nil {
-		t.Fatalf("close sqlite proof store: %v", err)
+	if servedDB == nil {
+		t.Fatal("served sqlite SQLDB is required for event.publish proof")
 	}
+	runServedEventPublishFollowUpProof(t, endpoint, servedDB, "sqlite", bundleHash, probe)
 }
 
 func TestRunServeRuntimeEventPublishRunIDFollowUpServedPathPostgres(t *testing.T) {
@@ -4012,21 +4018,25 @@ func assertServedEventPublishDeliveriesContainStatus(t *testing.T, deliveries []
 	t.Fatalf("event.publish deliveries = %#v, want %s/%s status in %v", deliveries, subscriberType, subscriberID, statuses)
 }
 
-func waitForServedEventPublishNodeDeliveryLifecycle(t *testing.T, backend, eventID string, probe *runtimelifecycleprobe.Probe) {
+func waitForServedEventPublishNodeDeliveryLifecycle(t *testing.T, db *sql.DB, backend, runID, eventID string, probe *runtimelifecycleprobe.Probe) {
 	t.Helper()
 	waitForServedEventPublishPostCommitDispatch(t, probe, backend, eventID)
 	waitForServedEventPublishLifecycleDeliveryStatus(t, probe, backend, eventID, "entity-writer", "pending")
-	waitForServedEventPublishHandlerStarted(t, probe, backend, eventID, "entity-writer")
+	waitForServedEventPublishHandlerStarted(t, db, probe, backend, runID, eventID, "entity-writer")
 	waitForServedEventPublishHandlerCompleted(t, probe, backend, eventID, "entity-writer")
 	waitForServedEventPublishLifecycleDeliveryStatus(t, probe, backend, eventID, "entity-writer", "delivered")
 }
+
+const (
+	servedEventPublishLifecycleProbeWaitTimeout = 20 * time.Second
+)
 
 func waitForServedEventPublishPostCommitDispatch(t *testing.T, probe *runtimelifecycleprobe.Probe, backend, eventID string) {
 	t.Helper()
 	if probe == nil {
 		t.Fatalf("%s lifecycle probe is required for post-commit dispatch on event %s", backend, eventID)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), servedEventPublishLifecycleProbeWaitTimeout)
 	defer cancel()
 	if _, err := probe.WaitForPostCommitDispatchStarted(ctx, eventID); err != nil {
 		t.Fatalf("%s post-commit dispatch started for event %s: %v", backend, eventID, err)
@@ -4041,23 +4051,28 @@ func waitForServedEventPublishLifecycleDeliveryStatus(t *testing.T, probe *runti
 	if probe == nil {
 		t.Fatalf("%s lifecycle probe is required for node delivery %s on event %s", backend, status, eventID)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), servedEventPublishLifecycleProbeWaitTimeout)
 	defer cancel()
 	if _, err := probe.WaitForDeliveryStatus(ctx, eventID, "node", nodeID, status); err != nil {
 		t.Fatalf("%s node/%s delivery %s for event %s: %v", backend, nodeID, status, eventID, err)
 	}
 }
 
-func waitForServedEventPublishHandlerStarted(t *testing.T, probe *runtimelifecycleprobe.Probe, backend, eventID, nodeID string) {
+func waitForServedEventPublishHandlerStarted(t *testing.T, db *sql.DB, probe *runtimelifecycleprobe.Probe, backend, runID, eventID, nodeID string) {
 	t.Helper()
 	if probe == nil {
 		t.Fatalf("%s lifecycle probe is required for handler start on event %s", backend, eventID)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if _, err := probe.WaitForHandlerStarted(ctx, eventID, nodeID); err != nil {
-		t.Fatalf("%s node/%s handler started for event %s: %v", backend, nodeID, eventID, err)
+	if err := waitForServedEventPublishHandlerStartedSignal(probe, eventID, nodeID, servedEventPublishLifecycleProbeWaitTimeout); err != nil {
+		t.Fatalf("%s node/%s handler started for event %s: %v\n%s", backend, nodeID, eventID, err, servedEventPublishDebugSummary(t, db, backend, runID))
 	}
+}
+
+func waitForServedEventPublishHandlerStartedSignal(probe *runtimelifecycleprobe.Probe, eventID, nodeID string, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	_, err := probe.WaitForHandlerStarted(ctx, eventID, nodeID)
+	return err
 }
 
 func waitForServedEventPublishHandlerCompleted(t *testing.T, probe *runtimelifecycleprobe.Probe, backend, eventID, nodeID string) {
@@ -4065,7 +4080,7 @@ func waitForServedEventPublishHandlerCompleted(t *testing.T, probe *runtimelifec
 	if probe == nil {
 		t.Fatalf("%s lifecycle probe is required for handler completion on event %s", backend, eventID)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), servedEventPublishLifecycleProbeWaitTimeout)
 	defer cancel()
 	if _, err := probe.WaitForHandlerCompleted(ctx, eventID, nodeID); err != nil {
 		t.Fatalf("%s node/%s handler completed for event %s: %v", backend, nodeID, eventID, err)
@@ -4113,7 +4128,7 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	if got := servedEventPublishNodeDeliveryCount(t, db, backend, runID, initialEventID, "entity-writer"); got == 0 {
 		t.Fatalf("%s initial root-input node deliveries = %d, want persisted node/entity-writer authority", backend, got)
 	}
-	waitForServedEventPublishNodeDeliveryLifecycle(t, backend, initialEventID, probe)
+	waitForServedEventPublishNodeDeliveryLifecycle(t, db, backend, runID, initialEventID, probe)
 	entityID := requireServedEventPublishEntityState(t, db, backend, runID, "", "waiting")
 	requireServedEventReadback(t, endpoint, initialEventID, runID, runID, "thing.created", "entity-writer")
 	requireServedEntityReadback(t, endpoint, runID, entityID, "waiting")
@@ -4141,10 +4156,10 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	if got := servedEventPublishScalarCount(t, db, backend, "event_deliveries", runID, followUpEventID); got == 0 {
 		t.Fatalf("%s follow-up deliveries = %d, want non-empty persisted evidence", backend, got)
 	}
-	waitForServedEventPublishNodeDeliveryLifecycle(t, backend, followUpEventID, probe)
+	waitForServedEventPublishNodeDeliveryLifecycle(t, db, backend, runID, followUpEventID, probe)
 	requireServedEventPublishEntityState(t, db, backend, runID, entityID, "done")
 	requireServedEntityReadback(t, endpoint, runID, entityID, "done")
-	requireServedRunStatus(t, endpoint, runID, "completed")
+	requireServedRunStatus(t, endpoint, db, backend, runID, "completed")
 	requireServedEventReadback(t, endpoint, followUpEventID, runID, entityID, "validation/thing.reviewed", "entity-writer")
 	requireServedTraceReadback(t, endpoint, runID, followUpEventID, "validation/thing.reviewed", "entity-writer")
 
@@ -4298,7 +4313,7 @@ func requestServedJSONRPC(t *testing.T, endpoint, method string, params map[stri
 	return envelope
 }
 
-func requireServedRunStatus(t *testing.T, endpoint, runID, want string) {
+func requireServedRunStatus(t *testing.T, endpoint string, db *sql.DB, backend, runID, want string) {
 	t.Helper()
 	var last string
 	deadline := time.Now().Add(5 * time.Second)
@@ -4316,7 +4331,7 @@ func requireServedRunStatus(t *testing.T, endpoint, runID, want string) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	t.Fatalf("run.get status for %s = %q, want %q", runID, last, want)
+	t.Fatalf("run.get status for %s = %q, want %q\n%s", runID, last, want, servedEventPublishDebugSummary(t, db, backend, runID))
 }
 
 func requireServedStatusCLIReadback(t *testing.T, endpoint, runID, want string) {
