@@ -194,15 +194,11 @@ func (n *systemNodeRunner) SetOverrideHandleForTest(fn func(context.Context, eve
 	n.overrideHandle = fn
 }
 
-func (n *systemNodeRunner) SetOnSubscribeHook(fn func()) {
+func (n *systemNodeRunner) SetOnSubscribeForTest(fn func()) {
 	if n == nil {
 		return
 	}
 	n.onSubscribe = fn
-}
-
-func (n *systemNodeRunner) SetOnSubscribeForTest(fn func()) {
-	n.SetOnSubscribeHook(fn)
 }
 
 func (n *systemNodeRunner) SetTestLifecycleProbe(probe runtimelifecycleprobe.Observer) {
