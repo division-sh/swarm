@@ -3437,6 +3437,9 @@ func TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite(t *test
 	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
 	probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
 	oldBuildStores := buildStoresForServe
+	t.Cleanup(func() {
+		buildStoresForServe = oldBuildStores
+	})
 	var servedDB *sql.DB
 	buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (storeBundle, error) {
 		stores, err := oldBuildStores(ctx, selection, cfg)
