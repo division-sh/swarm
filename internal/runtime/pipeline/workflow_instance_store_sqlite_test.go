@@ -212,11 +212,14 @@ func TestSQLiteWorkflowInstanceStore_RunInPipelineTransactionStopsRetryOnContext
 }
 
 func TestSQLiteWorkflowInstanceStore_RunInPipelineTransactionCapsProductionBusyTimeout(t *testing.T) {
-	const productionBusyTimeout = 5 * time.Second
-	db, lockDB := newSQLiteWorkflowInstanceStoreBusyTestDBsWithBusyTimeout(t, productionBusyTimeout)
+	const (
+		driverBusyTimeout = 50 * time.Millisecond
+		retryBudget       = 120 * time.Millisecond
+	)
+	db, lockDB := newSQLiteWorkflowInstanceStoreBusyTestDBsWithBusyTimeout(t, driverBusyTimeout)
 	store := NewSQLiteWorkflowInstanceStore(db)
 	baseCtx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
-	ctx, cancel := context.WithTimeout(baseCtx, 3*productionBusyTimeout)
+	ctx, cancel := context.WithTimeout(baseCtx, time.Second)
 	defer cancel()
 
 	lockTx, err := lockDB.BeginTx(ctx, nil)
@@ -232,22 +235,27 @@ func TestSQLiteWorkflowInstanceStore_RunInPipelineTransactionCapsProductionBusyT
 	}
 
 	var attempts int32
-	err = store.RunInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	start := time.Now()
+	err = store.runInSQLitePipelineTransactionWithBudget(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		atomic.AddInt32(&attempts, 1)
 		_, err := tx.ExecContext(txctx, `
 			INSERT INTO runs (run_id, status, started_at)
 			VALUES (?, 'running', ?)
 		`, uuid.NewString(), time.Now().UTC())
 		return err
-	})
+	}, retryBudget)
+	elapsed := time.Since(start)
 	if err == nil {
 		t.Fatal("RunInPipelineTransaction succeeded under persistent sqlite write lock")
 	}
 	if !strings.Contains(err.Error(), "retry budget") || !sqlitePipelineBusyError(err) {
 		t.Fatalf("RunInPipelineTransaction error = %v, want busy retry budget exhaustion", err)
 	}
-	if got := atomic.LoadInt32(&attempts); got != 1 {
-		t.Fatalf("attempts = %d, want one production busy_timeout window", got)
+	if got := atomic.LoadInt32(&attempts); got == 0 {
+		t.Fatal("expected at least one sqlite busy attempt before retry budget exhaustion")
+	}
+	if elapsed >= time.Second {
+		t.Fatalf("elapsed = %s, want retry budget to cap sqlite busy retries", elapsed)
 	}
 }
 

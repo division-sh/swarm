@@ -141,6 +141,10 @@ type TransactionalEventStore interface {
 	UpsertPipelineReceiptTx(ctx context.Context, tx *sql.Tx, eventID, status, errText string) error
 }
 
+type EventTransactionRunner interface {
+	RunEventTransaction(ctx context.Context, fn func(context.Context, *sql.Tx) error) error
+}
+
 type TransactionalEventDeliveryRoutePersistence interface {
 	InsertEventDeliveriesWithTargetsTx(ctx context.Context, tx *sql.Tx, eventID string, agentIDs []string, deliveryTargets map[string]events.RouteIdentity) error
 }

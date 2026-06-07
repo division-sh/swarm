@@ -45,66 +45,54 @@ func (s *SQLiteRuntimeStore) AppendAgentTurn(ctx context.Context, rec runtimellm
 	runID := nullUUIDString(rec.RunID)
 	now := s.now()
 
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("append sqlite agent turn begin tx: %w", err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
-	if err := sqliteEnsureRunRow(ctx, tx, runID, rec.TriggerEventID, rec.TriggerEventType, now); err != nil {
-		return err
-	}
-	if mode.IsStateless() {
-		if err := s.ensureSQLiteTaskConversationAuditRowTx(ctx, tx, rec, now); err != nil {
+	return s.runRuntimeMutation(ctx, "sqlite append agent turn", func(txctx context.Context, tx *sql.Tx) error {
+		if err := sqliteEnsureRunRow(txctx, tx, runID, rec.TriggerEventID, rec.TriggerEventType, now); err != nil {
 			return err
 		}
-	} else {
-		res, err := tx.ExecContext(ctx, `
-			UPDATE agent_sessions
-			SET run_id = COALESCE(?, run_id),
-			    updated_at = ?
-			WHERE agent_id = ?
-			  AND runtime_mode = ?
-			  AND session_id = ?
-			  AND status = 'active'
-		`, sqliteNullUUID(runID), now, strings.TrimSpace(rec.AgentID), mode.String(), strings.TrimSpace(rec.SessionID))
+		if mode.IsStateless() {
+			if err := s.ensureSQLiteTaskConversationAuditRowTx(txctx, tx, rec, now); err != nil {
+				return err
+			}
+		} else {
+			res, err := tx.ExecContext(txctx, `
+				UPDATE agent_sessions
+				SET run_id = COALESCE(?, run_id),
+				    updated_at = ?
+				WHERE agent_id = ?
+				  AND runtime_mode = ?
+				  AND session_id = ?
+				  AND status = 'active'
+			`, sqliteNullUUID(runID), now, strings.TrimSpace(rec.AgentID), mode.String(), strings.TrimSpace(rec.SessionID))
+			if err != nil {
+				return fmt.Errorf("append sqlite agent turn update session: %w", err)
+			}
+			if rows, _ := res.RowsAffected(); rows == 0 {
+				return fmt.Errorf("no persisted conversation row found for agent=%s runtime=%s session=%s", rec.AgentID, mode.String(), rec.SessionID)
+			}
+		}
+		_, err := tx.ExecContext(txctx, `
+			INSERT INTO agent_turns (
+				turn_id, run_id, agent_id, session_id, runtime_mode, scope_key, entity_id,
+				trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls,
+				emitted_events, mcp_servers, mcp_tools_listed, mcp_tools_visible,
+				request_payload, response_payload, turn_blocks, parse_ok, latency_ms, retry_count, error, created_at
+			) VALUES (
+				?, ?, ?, ?, ?, ?, ?,
+				?, ?, ?, ?, ?,
+				?, ?, ?, ?,
+				?, ?, ?, ?, ?, ?, ?, ?
+			)
+		`, uuid.NewString(), sqliteNullUUID(runID), strings.TrimSpace(rec.AgentID), strings.TrimSpace(rec.SessionID),
+			mode.String(), sqliteNullString(rec.ScopeKey), sqliteNullUUID(rec.EntityID), sqliteNullUUID(rec.TriggerEventID),
+			sqliteNullString(rec.TriggerEventType), sqliteNullString(rec.TaskID), availableToolsPayload, toolCallsPayload,
+			emittedEventsPayload, mcpServersPayload, mcpToolsListedPayload, mcpToolsVisiblePayload,
+			sqliteNullString(reqPayload), sqliteNullString(respPayload), turnBlocksPayload, rec.ParseOK, latencyMS,
+			rec.RetryCount, sqliteNullString(rec.Error), now)
 		if err != nil {
-			return fmt.Errorf("append sqlite agent turn update session: %w", err)
+			return fmt.Errorf("insert sqlite agent turn: %w", err)
 		}
-		if rows, _ := res.RowsAffected(); rows == 0 {
-			return fmt.Errorf("no persisted conversation row found for agent=%s runtime=%s session=%s", rec.AgentID, mode.String(), rec.SessionID)
-		}
-	}
-	_, err = tx.ExecContext(ctx, `
-		INSERT INTO agent_turns (
-			turn_id, run_id, agent_id, session_id, runtime_mode, scope_key, entity_id,
-			trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls,
-			emitted_events, mcp_servers, mcp_tools_listed, mcp_tools_visible,
-			request_payload, response_payload, turn_blocks, parse_ok, latency_ms, retry_count, error, created_at
-		) VALUES (
-			?, ?, ?, ?, ?, ?, ?,
-			?, ?, ?, ?, ?,
-			?, ?, ?, ?,
-			?, ?, ?, ?, ?, ?, ?, ?
-		)
-	`, uuid.NewString(), sqliteNullUUID(runID), strings.TrimSpace(rec.AgentID), strings.TrimSpace(rec.SessionID),
-		mode.String(), sqliteNullString(rec.ScopeKey), sqliteNullUUID(rec.EntityID), sqliteNullUUID(rec.TriggerEventID),
-		sqliteNullString(rec.TriggerEventType), sqliteNullString(rec.TaskID), availableToolsPayload, toolCallsPayload,
-		emittedEventsPayload, mcpServersPayload, mcpToolsListedPayload, mcpToolsVisiblePayload,
-		sqliteNullString(reqPayload), sqliteNullString(respPayload), turnBlocksPayload, rec.ParseOK, latencyMS,
-		rec.RetryCount, sqliteNullString(rec.Error), now)
-	if err != nil {
-		return fmt.Errorf("insert sqlite agent turn: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("append sqlite agent turn commit: %w", err)
-	}
-	committed = true
-	return nil
+		return nil
+	})
 }
 
 func (s *SQLiteRuntimeStore) UpsertConversation(ctx context.Context, rec runtimellm.ConversationRecord) error {
@@ -135,52 +123,43 @@ func (s *SQLiteRuntimeStore) UpsertConversation(ctx context.Context, rec runtime
 	runID := nullUUIDString(rec.RunID)
 	now := s.now()
 
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("upsert sqlite conversation begin tx: %w", err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
+	return s.runRuntimeMutation(ctx, "sqlite conversation upsert", func(txctx context.Context, tx *sql.Tx) error {
+		if err := sqliteEnsureRunRow(txctx, tx, runID, "", "", now); err != nil {
+			return err
 		}
-	}()
-	if err := sqliteEnsureRunRow(ctx, tx, runID, "", "", now); err != nil {
-		return err
-	}
-	if resolved.Stateless {
-		_, err = tx.ExecContext(ctx, `
-			INSERT INTO agent_conversation_audits (
-				session_id, run_id, agent_id, entity_id, flow_instance, scope_key, scope,
-				conversation, turn_count, runtime_mode, runtime_state, status, created_at, updated_at
-			) VALUES (
-				?, ?, ?, ?, ?, ?, ?,
-				?, ?, ?, ?, ?, ?, ?
-			)
-			ON CONFLICT(session_id) DO UPDATE SET
-				run_id = COALESCE(excluded.run_id, agent_conversation_audits.run_id),
-				agent_id = excluded.agent_id,
-				entity_id = excluded.entity_id,
-				flow_instance = excluded.flow_instance,
-				scope_key = excluded.scope_key,
-				scope = excluded.scope,
-				conversation = excluded.conversation,
-				turn_count = excluded.turn_count,
-				runtime_mode = excluded.runtime_mode,
-				runtime_state = json_patch(COALESCE(agent_conversation_audits.runtime_state, '{}'), excluded.runtime_state),
-				status = excluded.status,
-				updated_at = excluded.updated_at
-		`, sessionID, sqliteNullUUID(runID), agentID, sqliteNullUUID(resolved.EntityID), sqliteNullString(resolved.FlowInstance),
-			sqliteNullString(resolved.ScopeKey), resolved.Scope.String(), string(msgJSON), rec.TurnCount, mode.String(),
-			runtimeStatePatch, status, now, now)
-		if err != nil {
-			return fmt.Errorf("upsert sqlite task conversation audit: %w", err)
+		if resolved.Stateless {
+			if _, err := tx.ExecContext(txctx, `
+				INSERT INTO agent_conversation_audits (
+					session_id, run_id, agent_id, entity_id, flow_instance, scope_key, scope,
+					conversation, turn_count, runtime_mode, runtime_state, status, created_at, updated_at
+				) VALUES (
+					?, ?, ?, ?, ?, ?, ?,
+					?, ?, ?, ?, ?, ?, ?
+				)
+				ON CONFLICT(session_id) DO UPDATE SET
+					run_id = COALESCE(excluded.run_id, agent_conversation_audits.run_id),
+					agent_id = excluded.agent_id,
+					entity_id = excluded.entity_id,
+					flow_instance = excluded.flow_instance,
+					scope_key = excluded.scope_key,
+					scope = excluded.scope,
+					conversation = excluded.conversation,
+					turn_count = excluded.turn_count,
+					runtime_mode = excluded.runtime_mode,
+					runtime_state = json_patch(COALESCE(agent_conversation_audits.runtime_state, '{}'), excluded.runtime_state),
+					status = excluded.status,
+					updated_at = excluded.updated_at
+			`, sessionID, sqliteNullUUID(runID), agentID, sqliteNullUUID(resolved.EntityID), sqliteNullString(resolved.FlowInstance),
+				sqliteNullString(resolved.ScopeKey), resolved.Scope.String(), string(msgJSON), rec.TurnCount, mode.String(),
+				runtimeStatePatch, status, now, now); err != nil {
+				return fmt.Errorf("upsert sqlite task conversation audit: %w", err)
+			}
+			return nil
 		}
-	} else {
 		if strings.TrimSpace(rec.SessionID) == "" {
 			return fmt.Errorf("session_id is required for live session conversation persistence")
 		}
-		res, err := tx.ExecContext(ctx, `
+		res, err := tx.ExecContext(txctx, `
 			UPDATE agent_sessions
 			SET conversation = ?,
 			    turn_count = ?,
@@ -200,12 +179,8 @@ func (s *SQLiteRuntimeStore) UpsertConversation(ctx context.Context, rec runtime
 		if rows, _ := res.RowsAffected(); rows == 0 {
 			return fmt.Errorf("no active live session row found for agent=%s session=%s runtime=%s scope=%s", agentID, rec.SessionID, mode.String(), resolved.ScopeKey)
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("upsert sqlite conversation commit: %w", err)
-	}
-	committed = true
-	return nil
+		return nil
+	})
 }
 
 func (s *SQLiteRuntimeStore) LoadActiveConversation(ctx context.Context, agentID, mode, sessionScope, scopeKey string) (runtimellm.ConversationRecord, bool, error) {
@@ -295,20 +270,27 @@ func (s *SQLiteRuntimeStore) UpdateLiveSessionWatchdog(ctx context.Context, upda
 	if err != nil {
 		return fmt.Errorf("marshal sqlite live session watchdog patch: %w", err)
 	}
-	res, err := s.DB.ExecContext(ctx, `
-		UPDATE agent_sessions
-		SET runtime_state = json_patch(COALESCE(runtime_state, '{}'), ?),
-		    updated_at = ?
-		WHERE session_id = ?
-		  AND agent_id = ?
-		  AND scope_key = ?
-		  AND runtime_mode = ?
-		  AND status = 'active'
-	`, patch, s.now(), sessionID, agentID, resolved.ScopeKey, mode.String())
-	if err != nil {
+	var rows int64
+	if err := s.runRuntimeMutation(ctx, "sqlite live session watchdog update", func(txctx context.Context, tx *sql.Tx) error {
+		res, err := tx.ExecContext(txctx, `
+			UPDATE agent_sessions
+			SET runtime_state = json_patch(COALESCE(runtime_state, '{}'), ?),
+			    updated_at = ?
+			WHERE session_id = ?
+			  AND agent_id = ?
+			  AND scope_key = ?
+			  AND runtime_mode = ?
+			  AND status = 'active'
+		`, patch, s.now(), sessionID, agentID, resolved.ScopeKey, mode.String())
+		if err != nil {
+			return err
+		}
+		rows, _ = res.RowsAffected()
+		return nil
+	}); err != nil {
 		return fmt.Errorf("update sqlite live session watchdog: %w", err)
 	}
-	if rows, _ := res.RowsAffected(); rows == 0 {
+	if rows == 0 {
 		return fmt.Errorf("no active live session row found for agent=%s session=%s runtime=%s scope=%s", agentID, sessionID, mode.String(), resolved.ScopeKey)
 	}
 	return nil

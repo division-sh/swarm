@@ -98,6 +98,11 @@ type WorkflowInstanceStore struct {
 	db                 *sql.DB
 	dialect            workflowStoreDialect
 	sqlitePipelineTxMu sync.Mutex
+	runtimeMutation    RuntimeMutationRunner
+}
+
+type RuntimeMutationRunner interface {
+	RunRuntimeMutation(ctx context.Context, fn func(context.Context, *sql.Tx) error) error
 }
 
 type WorkflowInstanceFieldSelector struct {
@@ -136,6 +141,10 @@ func NewWorkflowInstanceStore(db *sql.DB) *WorkflowInstanceStore {
 
 func NewSQLiteWorkflowInstanceStore(db *sql.DB) *WorkflowInstanceStore {
 	return &WorkflowInstanceStore{db: db, dialect: workflowStoreDialectSQLite}
+}
+
+func NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db *sql.DB, runner RuntimeMutationRunner) *WorkflowInstanceStore {
+	return &WorkflowInstanceStore{db: db, dialect: workflowStoreDialectSQLite, runtimeMutation: runner}
 }
 
 func withWorkflowCreateEntityInitialValues(ctx context.Context, fields map[string]any) context.Context {
@@ -418,6 +427,9 @@ func (s *WorkflowInstanceStore) RunInPipelineTransaction(ctx context.Context, fn
 		return fn(ctx, tx)
 	}
 	if s.isSQLite() {
+		if s.runtimeMutation != nil {
+			return s.runtimeMutation.RunRuntimeMutation(ctx, fn)
+		}
 		return s.runInSQLitePipelineTransaction(ctx, fn)
 	}
 	return s.runInPipelineTransactionOnce(ctx, fn)
@@ -451,8 +463,26 @@ func (s *WorkflowInstanceStore) runInSQLitePipelineTransactionWithBudget(ctx con
 			}
 			return sqlitePipelineTransactionRetryBudgetError(retryBudget, lastErr)
 		}
-		err := s.runInPipelineTransactionOnce(ctx, fn)
-		if err == nil || !sqlitePipelineBusyError(err) {
+		attemptCtx, cancel := context.WithDeadline(ctx, retryDeadline)
+		err := s.runInPipelineTransactionOnce(attemptCtx, fn)
+		attemptErr := attemptCtx.Err()
+		cancel()
+		if err == nil {
+			if attemptErr != nil {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				return sqlitePipelineTransactionRetryBudgetError(retryBudget, lastErr)
+			}
+			return nil
+		}
+		if attemptErr != nil {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			return sqlitePipelineTransactionRetryBudgetError(retryBudget, lastErr)
+		}
+		if !sqlitePipelineBusyError(err) {
 			return err
 		}
 		lastErr = err

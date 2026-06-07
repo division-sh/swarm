@@ -2524,6 +2524,31 @@ engine:
       - swarm serve explicit --store sqlite
       - local foreground run startup through buildStores
       - runtime.NewRuntime store dependency graph
+    - name: backend_neutral_runtime_mutation_write_boundary
+      owner: internal/store.SQLiteRuntimeStore.RunRuntimeMutation and internal/store.SQLiteRuntimeStore.RunEventTransaction for SQLite-local selected runtime mutations
+      promoted_by: '#1388'
+      sqlite_owner: internal/store.SQLiteRuntimeStore mutation executor
+      postgres_owner: internal/store.PostgresStore normal transaction methods with no global write serialization or SQLite retry semantics
+      scope: >
+        SQLite local/dev selected runtime mutation writers must enter one canonical backend-neutral mutation boundary before
+        opening SQLite write transactions. The boundary owns process-local SQLite write serialization, elapsed-budgeted
+        SQLITE_BUSY / database-locked retry, context cancellation/deadline handling, active pipeline transaction detection,
+        and exactly-once post-commit action flushing for successful commits. It covers the selected runtime mutation row
+        families named in this section: event/delivery/replay/receipt, runtime log, mailbox/idempotency, ingress/run
+        control/quiescence, session/conversation/turn, schedule/timer, tool entity/human-task, budget/spend, manager/agent,
+        and run-completion mutations. Postgres remains the production runtime backend and must not inherit SQLite global
+        serialization or retry behavior.
+      rules:
+      - SQLite runtime mutation producers must not implement local SQLITE_BUSY retry loops or open independent write transactions when a selected runtime store boundary is available.
+      - SQLite driver busy_timeout must stay short; elapsed retry budget, cancellation, and backoff are owned by the selected mutation boundary rather than by long driver-level waits.
+      - SQLite post-commit action flushing must happen after the selected mutation boundary releases its process-local write serialization lock, so post-commit callbacks can safely re-enter selected runtime mutation APIs.
+      - SQLite API idempotency callback execution must stay outside the idempotency row write transaction; failed callbacks must not persist completion.
+      - Active pipeline transactions are already inside the selected mutation boundary and must be reused rather than nested.
+      - Schema/bootstrap, bundle catalog, destructive reset, preservation cleanup, fork-specific mutation/recovery, and read-only projections remain separate concepts unless independently gated.
+      consumers:
+      - runtimebus transactional publish through EventTransactionRunner
+      - runtimepipeline.WorkflowInstanceStore production SQLite construction through NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner
+      - SQLiteRuntimeStore selected runtime mutation methods for the named row families
     - name: event_append_and_run_lifecycle_rows
       owner: runtimebus.EventStore
       sqlite_owner: internal/store.SQLiteRuntimeStore.AppendEvent
@@ -2544,15 +2569,14 @@ engine:
       - cross-process timer claim/locking semantics owned by #1087
     - name: pipeline_coordination_workflow_instance_and_replay_rows
       owner: runtimepipeline.WorkflowInstanceStore consumed through runtime.Stores.PipelineStore and PipelineCoordinator
-      sqlite_owner: internal/runtime/pipeline.NewSQLiteWorkflowInstanceStore over the selected SQLite runtime store
+      sqlite_owner: internal/runtime/pipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner over the selected SQLite runtime store
       postgres_owner: internal/runtime/pipeline.NewWorkflowInstanceStore over PostgresStore.DB
       scope: >
         SQLite supports explicit local-dev pipeline coordination for workflow instance state, pipeline engine transaction/query
         persistence, background-node receipt settlement, pipeline receipt replay, process-local replay claims, and committed
-        replay scope consumption. SQLite pipeline transactions own process-local serialization plus elapsed-budgeted
-        SQLITE_BUSY / database-locked retry at WorkflowInstanceStore.RunInPipelineTransaction, so pipeline producers do not
-        branch on backend write contention. Postgres remains authoritative for production cross-runtime transaction and claim
-        semantics.
+        replay scope consumption. Production SQLite pipeline writes consume the backend_neutral_runtime_mutation_write_boundary
+        instead of owning a separate local retry/serialization policy, so pipeline producers do not branch on backend write
+        contention. Postgres remains authoritative for production cross-runtime transaction and claim semantics.
       excludes:
       - tool executor entity and human-task persistence owned by runtime_tool_entity_and_human_task_rows
       - runtime diagnostics/logging owned by #1150

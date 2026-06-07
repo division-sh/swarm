@@ -127,13 +127,15 @@ func (s *SQLiteRuntimeStore) RecordSpend(ctx context.Context, rec budgetspend.Sp
 	if err := validateBudgetSpendEntity(rec.EntityID); err != nil {
 		return err
 	}
-	_, err := s.DB.ExecContext(ctx, `
+	if err := s.runRuntimeMutation(ctx, "sqlite budget spend record", func(txctx context.Context, tx *sql.Tx) error {
+		_, err := tx.ExecContext(txctx, `
 			INSERT INTO spend_ledger (
 				entity_id, flow_instance, agent_id, model, model_alias, backend_profile, provider, transport, resolved_model,
 				input_tokens, output_tokens, cost_usd, invocation_type, usage_accounting, created_at
 			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`, sqliteNullUUID(rec.EntityID), rec.FlowInstance, rec.AgentID, rec.Model, rec.ModelAlias, rec.BackendProfile, rec.Provider, rec.Transport, rec.ResolvedModel, rec.InputTokens, rec.OutputTokens, rec.CostUSD, rec.InvocationType, rec.UsageAccounting, rec.RecordedAt.UTC())
-	if err != nil {
+		return err
+	}); err != nil {
 		return fmt.Errorf("record sqlite spend: %w", err)
 	}
 	return nil

@@ -524,6 +524,9 @@ func (eb *EventBus) publishTransactional(
 	if err := ensurePublishEpoch(ctx); err != nil {
 		return err
 	}
+	if runner, ok := txStore.(EventTransactionRunner); ok && runner != nil {
+		return eb.publishTransactionalWithRunner(ctx, evt, start, deferredTransitions, txStore, runner)
+	}
 	tx, err := txStore.BeginEventTx(ctx)
 	if err != nil {
 		return fmt.Errorf("begin publish tx: %w", err)
@@ -643,6 +646,119 @@ func (eb *EventBus) publishTransactional(
 	return nil
 }
 
+func (eb *EventBus) publishTransactionalWithRunner(
+	ctx context.Context,
+	evt events.Event,
+	start time.Time,
+	deferredTransitions *[]runtimepipeline.DeferredPipelineTransition,
+	txStore TransactionalEventStore,
+	runner EventTransactionRunner,
+) error {
+	var inboundPlan RoutePlan
+	receiptOverride := &runtimepipeline.PipelineReceiptOverride{}
+	targetFailure := false
+	dispatchQueued := false
+	queueReason := ""
+	if err := runner.RunEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		txctx = runtimepipeline.WithPipelineReceiptOverride(txctx, receiptOverride)
+		if err := txStore.AppendEventTx(txctx, tx, evt); err != nil {
+			return fmt.Errorf("persist event: %w", err)
+		}
+		plan, err := eb.planSubscribedRoutePlan(txctx, evt, true)
+		if err != nil {
+			return err
+		}
+		inboundPlan = plan
+		if inboundPlan.HasPersistentDeliveries() {
+			if err := eb.insertEventDeliveriesTx(txctx, txStore, tx, evt.ID(), inboundPlan.PersistedRecipientIDs(), inboundPlan.DeliveryTargets(), inboundPlan.DeliveryRoutes()); err != nil {
+				return fmt.Errorf("persist event deliveries: %w", err)
+			}
+		}
+		if scopeWriter, ok := eb.store.(TransactionalEventReplayScopePersistence); ok && scopeWriter != nil {
+			if err := scopeWriter.UpsertCommittedReplayScopeTx(txctx, tx, evt.ID(), runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
+				return fmt.Errorf("persist committed replay scope: %w", err)
+			}
+		} else if replayScopePersistenceRequired(eb.store) {
+			return fmt.Errorf("persist committed replay scope: %w", runtimereplayclaim.ErrMissingCommittedReplayScope)
+		}
+		if inboundPlan.TargetFailure != "" {
+			applyTargetDeliveryFailureReceipt(receiptOverride, inboundPlan.TargetFailure)
+			status, errText := pipelineReceiptStatus(txctx, nil)
+			if err := txStore.UpsertPipelineReceiptTx(txctx, tx, evt.ID(), status, errText); err != nil {
+				return fmt.Errorf("persist pipeline receipt: %w", err)
+			}
+			targetFailure = true
+			return nil
+		}
+		if reason, err := eb.dispatchQueueReason(txctx, evt); err != nil {
+			return err
+		} else if reason != "" {
+			dispatchQueued = true
+			queueReason = reason
+			return nil
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	eb.notifyTestPublishPersisted(ctx, evt, inboundPlan)
+	if targetFailure {
+		eb.recordTargetDeliveryFailure(ctx, evt, inboundPlan)
+		eb.logPublished(ctx, evt, int(time.Since(start)/time.Microsecond))
+		return nil
+	}
+	if dispatchQueued {
+		eb.logDispatchQueued(ctx, queueReason, evt, len(inboundPlan.RecipientIDs()), false, false)
+		eb.logPublished(ctx, evt, int(time.Since(start)/time.Microsecond))
+		return nil
+	}
+
+	postCommitActions := make([]func(), 0, 8)
+	dispatchCtx := runtimepipeline.WithoutPipelineSQLTxContext(ctx)
+	dispatchCtx = runtimepipeline.WithPipelinePostCommitActions(dispatchCtx, &postCommitActions)
+	dispatchCtx = runtimepipeline.WithPipelineReceiptOverride(dispatchCtx, receiptOverride)
+	passthrough, deferred, err := eb.runInterceptors(dispatchCtx, evt)
+	if err != nil {
+		eb.recordCommittedPublishReceipt(dispatchCtx, evt, err)
+		return err
+	}
+	runtimepipeline.FlushPipelinePostCommitActions(postCommitActions)
+	if deferredTransitions != nil {
+		runtimepipeline.FlushDeferredPipelineTransitions(dispatchCtx, *deferredTransitions)
+	}
+
+	if passthrough {
+		recipients := inboundPlan.RecipientIDs()
+		if len(recipients) > 0 {
+			eb.logQueuedDeliveries(dispatchCtx, evt, inboundPlan.PersistedRecipientIDs(), "matched_agent_subscription", inboundPlan.ExtraDetail)
+			if err := eb.deliverToRecipientsWithRoutes(dispatchCtx, evt, recipients, inboundPlan.DeliveryRoutes()); err != nil {
+				eb.recordCommittedPublishReceipt(dispatchCtx, evt, err)
+				return nil
+			}
+			eb.logDelivery(dispatchCtx, evt, recipients, inboundPlan.ExtraDetail)
+		}
+		if inboundPlan.BlockedByCycle && inboundPlan.CycleEscalation != nil {
+			if err := eb.publishDeferred(dispatchCtx, *inboundPlan.CycleEscalation); err != nil {
+				eb.recordCommittedPublishReceipt(dispatchCtx, evt, err)
+				return nil
+			}
+		}
+		if strings.TrimSpace(inboundPlan.ContradictionReason) != "" {
+			_ = eb.emitContradiction(dispatchCtx, evt, inboundPlan.ContradictionReason)
+		}
+	}
+	eb.logPublished(dispatchCtx, evt, int(time.Since(start)/time.Microsecond))
+
+	for _, d := range deferred {
+		if err := eb.publishDeferred(dispatchCtx, d); err != nil {
+			eb.recordCommittedPublishReceipt(dispatchCtx, evt, err)
+			return nil
+		}
+	}
+	eb.recordCommittedPublishReceipt(dispatchCtx, evt, nil)
+	return nil
+}
+
 func (eb *EventBus) publishAcknowledgedTransactional(
 	ctx context.Context,
 	evt events.Event,
@@ -652,6 +768,9 @@ func (eb *EventBus) publishAcknowledgedTransactional(
 	ctx = WithCurrentRuntimeEpoch(ctx)
 	if err := ensurePublishEpoch(ctx); err != nil {
 		return err
+	}
+	if runner, ok := txStore.(EventTransactionRunner); ok && runner != nil {
+		return eb.publishAcknowledgedTransactionalWithRunner(ctx, evt, start, txStore, runner)
 	}
 	tx, err := txStore.BeginEventTx(ctx)
 	if err != nil {
@@ -725,6 +844,77 @@ func (eb *EventBus) publishAcknowledgedTransactional(
 	committed = true
 	runtimepipeline.FlushPipelinePostCommitActions(txPostCommitActions)
 	eb.notifyTestPublishPersisted(ctx, evt, inboundPlan)
+	eb.dispatchCommittedPublishAsync(ctx, evt, inboundPlan)
+	return nil
+}
+
+func (eb *EventBus) publishAcknowledgedTransactionalWithRunner(
+	ctx context.Context,
+	evt events.Event,
+	start time.Time,
+	txStore TransactionalEventStore,
+	runner EventTransactionRunner,
+) error {
+	var inboundPlan RoutePlan
+	receiptOverride := &runtimepipeline.PipelineReceiptOverride{}
+	targetFailure := false
+	dispatchQueued := false
+	queueReason := ""
+	if err := runner.RunEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		txctx = runtimepipeline.WithPipelineReceiptOverride(txctx, receiptOverride)
+		if err := txStore.AppendEventTx(txctx, tx, evt); err != nil {
+			return fmt.Errorf("persist event: %w", err)
+		}
+		plan, err := eb.planSubscribedRoutePlan(txctx, evt, true)
+		if err != nil {
+			return err
+		}
+		inboundPlan = plan
+		if inboundPlan.HasPersistentDeliveries() {
+			if err := eb.insertEventDeliveriesTx(txctx, txStore, tx, evt.ID(), inboundPlan.PersistedRecipientIDs(), inboundPlan.DeliveryTargets(), inboundPlan.DeliveryRoutes()); err != nil {
+				return fmt.Errorf("persist event deliveries: %w", err)
+			}
+		}
+		if scopeWriter, ok := eb.store.(TransactionalEventReplayScopePersistence); ok && scopeWriter != nil {
+			if err := scopeWriter.UpsertCommittedReplayScopeTx(txctx, tx, evt.ID(), runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
+				return fmt.Errorf("persist committed replay scope: %w", err)
+			}
+		} else if replayScopePersistenceRequired(eb.store) {
+			return fmt.Errorf("persist committed replay scope: %w", runtimereplayclaim.ErrMissingCommittedReplayScope)
+		}
+		if inboundPlan.TargetFailure != "" {
+			applyTargetDeliveryFailureReceipt(receiptOverride, inboundPlan.TargetFailure)
+			status, errText := pipelineReceiptStatus(txctx, nil)
+			if err := txStore.UpsertPipelineReceiptTx(txctx, tx, evt.ID(), status, errText); err != nil {
+				return fmt.Errorf("persist pipeline receipt: %w", err)
+			}
+			targetFailure = true
+			return nil
+		}
+		if reason, err := eb.dispatchQueueReason(txctx, evt); err != nil {
+			return err
+		} else if reason != "" {
+			dispatchQueued = true
+			queueReason = reason
+			return nil
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	eb.notifyTestPublishPersisted(ctx, evt, inboundPlan)
+	if targetFailure {
+		eb.recordTargetDeliveryFailure(ctx, evt, inboundPlan)
+		eb.logPublished(ctx, evt, int(time.Since(start)/time.Microsecond))
+		eb.recordCommittedPublishConvergence(ctx, evt)
+		return nil
+	}
+	if dispatchQueued {
+		eb.logDispatchQueued(ctx, queueReason, evt, len(inboundPlan.RecipientIDs()), false, true)
+		eb.logPublished(ctx, evt, int(time.Since(start)/time.Microsecond))
+		eb.recordCommittedPublishConvergence(ctx, evt)
+		return nil
+	}
 	eb.dispatchCommittedPublishAsync(ctx, evt, inboundPlan)
 	return nil
 }

@@ -173,68 +173,59 @@ func (s *SQLiteRuntimeStore) SaveEntityField(ctx context.Context, update runtime
 	if err != nil {
 		return 0, err
 	}
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return 0, fmt.Errorf("begin sqlite entity field update: %w", err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
-	var fieldsRaw any
-	if err := tx.QueryRowContext(ctx, `
-		SELECT COALESCE(fields, '{}')
-		FROM entity_state
-		WHERE run_id = ? AND entity_id = ?
-	`, runID, entityID).Scan(&fieldsRaw); err != nil {
-		if err == sql.ErrNoRows {
-			return 0, fmt.Errorf("entity not found: %s", entityID)
-		}
-		return 0, fmt.Errorf("load sqlite entity fields: %w", err)
-	}
-	fields, err := toolDecodeJSONMap(fieldsRaw)
-	if err != nil {
-		return 0, fmt.Errorf("decode sqlite entity fields: %w", err)
-	}
-	oldValue, _ := toolPathValue(fields, segments)
-	newValue, err := toolDecodeJSONValue(valueJSON)
-	if err != nil {
-		return 0, fmt.Errorf("decode sqlite entity field value: %w", err)
-	}
-	toolSetPath(fields, segments, newValue)
-	fieldsJSON, err := json.Marshal(fields)
-	if err != nil {
-		return 0, fmt.Errorf("marshal sqlite entity fields: %w", err)
-	}
-	now := s.now()
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE entity_state
-		SET fields = ?, revision = revision + 1, updated_at = ?
-		WHERE run_id = ? AND entity_id = ?
-	`, string(fieldsJSON), now, runID, entityID); err != nil {
-		return 0, fmt.Errorf("update sqlite entity field: %w", err)
-	}
 	var revision int
-	if err := tx.QueryRowContext(ctx, `
-		SELECT revision
-		FROM entity_state
-		WHERE run_id = ? AND entity_id = ?
-	`, runID, entityID).Scan(&revision); err != nil {
-		return 0, fmt.Errorf("load sqlite entity revision: %w", err)
+	if err := s.runRuntimeMutation(ctx, "sqlite entity field update", func(txctx context.Context, tx *sql.Tx) error {
+		var fieldsRaw any
+		if err := tx.QueryRowContext(txctx, `
+			SELECT COALESCE(fields, '{}')
+			FROM entity_state
+			WHERE run_id = ? AND entity_id = ?
+		`, runID, entityID).Scan(&fieldsRaw); err != nil {
+			if err == sql.ErrNoRows {
+				return fmt.Errorf("entity not found: %s", entityID)
+			}
+			return fmt.Errorf("load sqlite entity fields: %w", err)
+		}
+		fields, err := toolDecodeJSONMap(fieldsRaw)
+		if err != nil {
+			return fmt.Errorf("decode sqlite entity fields: %w", err)
+		}
+		oldValue, _ := toolPathValue(fields, segments)
+		newValue, err := toolDecodeJSONValue(valueJSON)
+		if err != nil {
+			return fmt.Errorf("decode sqlite entity field value: %w", err)
+		}
+		toolSetPath(fields, segments, newValue)
+		fieldsJSON, err := json.Marshal(fields)
+		if err != nil {
+			return fmt.Errorf("marshal sqlite entity fields: %w", err)
+		}
+		now := s.now()
+		if _, err := tx.ExecContext(txctx, `
+			UPDATE entity_state
+			SET fields = ?, revision = revision + 1, updated_at = ?
+			WHERE run_id = ? AND entity_id = ?
+		`, string(fieldsJSON), now, runID, entityID); err != nil {
+			return fmt.Errorf("update sqlite entity field: %w", err)
+		}
+		if err := tx.QueryRowContext(txctx, `
+			SELECT revision
+			FROM entity_state
+			WHERE run_id = ? AND entity_id = ?
+		`, runID, entityID).Scan(&revision); err != nil {
+			return fmt.Errorf("load sqlite entity revision: %w", err)
+		}
+		if err := insertSQLiteEntityStateDiff(txctx, tx, runID, entityID, runtimemutationlog.EntityStateProjection{
+			Fields: map[string]any{update.FieldPath: oldValue},
+		}, runtimemutationlog.EntityStateProjection{
+			Fields: map[string]any{update.FieldPath: newValue},
+		}, mutationWriter(update.Writer), now); err != nil {
+			return fmt.Errorf("record sqlite entity mutation: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return 0, err
 	}
-	if err := insertSQLiteEntityStateDiff(ctx, tx, runID, entityID, runtimemutationlog.EntityStateProjection{
-		Fields: map[string]any{update.FieldPath: oldValue},
-	}, runtimemutationlog.EntityStateProjection{
-		Fields: map[string]any{update.FieldPath: newValue},
-	}, mutationWriter(update.Writer), now); err != nil {
-		return 0, fmt.Errorf("record sqlite entity mutation: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("commit sqlite entity field update: %w", err)
-	}
-	committed = true
 	return revision, nil
 }
 
@@ -291,38 +282,26 @@ func (s *SQLiteRuntimeStore) CreateEntity(ctx context.Context, rec runtimetools.
 	if err != nil {
 		return err
 	}
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin sqlite entity create: %w", err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
+	return s.runRuntimeMutation(ctx, "sqlite entity create", func(txctx context.Context, tx *sql.Tx) error {
+		if _, err := tx.ExecContext(txctx, `
+			INSERT INTO entity_state (
+				run_id, entity_id, flow_instance, entity_type, name,
+				current_state, gates, fields, accumulator, revision,
+				entered_state_at, created_at, updated_at
+			)
+			VALUES (?, ?, ?, ?, ?, ?, '{}', ?, '{}', 1, ?, ?, ?)
+		`, rec.RunID, rec.EntityID, rec.FlowInstance, rec.EntityType, sqliteNullString(rec.Name),
+			rec.CurrentState, string(rec.FieldsJSON), rec.CreatedAt, rec.CreatedAt, rec.CreatedAt); err != nil {
+			return fmt.Errorf("insert sqlite entity: %w", err)
 		}
-	}()
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, name,
-			current_state, gates, fields, accumulator, revision,
-			entered_state_at, created_at, updated_at
-		)
-		VALUES (?, ?, ?, ?, ?, ?, '{}', ?, '{}', 1, ?, ?, ?)
-	`, rec.RunID, rec.EntityID, rec.FlowInstance, rec.EntityType, sqliteNullString(rec.Name),
-		rec.CurrentState, string(rec.FieldsJSON), rec.CreatedAt, rec.CreatedAt, rec.CreatedAt); err != nil {
-		return fmt.Errorf("insert sqlite entity: %w", err)
-	}
-	if err := insertSQLiteEntityStateDiff(ctx, tx, rec.RunID, rec.EntityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{
-		CurrentState: rec.CurrentState,
-		Fields:       fields,
-	}, mutationWriter(rec.Writer), rec.CreatedAt); err != nil {
-		return fmt.Errorf("record sqlite entity create mutation: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit sqlite entity create: %w", err)
-	}
-	committed = true
-	return nil
+		if err := insertSQLiteEntityStateDiff(txctx, tx, rec.RunID, rec.EntityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{
+			CurrentState: rec.CurrentState,
+			Fields:       fields,
+		}, mutationWriter(rec.Writer), rec.CreatedAt); err != nil {
+			return fmt.Errorf("record sqlite entity create mutation: %w", err)
+		}
+		return nil
+	})
 }
 
 func (s *PostgresStore) CreateHumanTask(ctx context.Context, rec runtimetools.HumanTaskCreateRecord) (string, error) {
@@ -443,60 +422,48 @@ func (s *SQLiteRuntimeStore) DecideHumanTask(ctx context.Context, rec runtimetoo
 		return fmt.Errorf("sqlite human-task persistence store is required")
 	}
 	rec = normalizeHumanTaskDecisionRecord(rec)
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin sqlite human task decision: %w", err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
+	return s.runRuntimeMutation(ctx, "sqlite human task decision", func(txctx context.Context, tx *sql.Tx) error {
+		var payloadRaw any
+		if err := tx.QueryRowContext(txctx, `
+			SELECT COALESCE(payload, '{}')
+			FROM mailbox
+			WHERE item_id = ? AND item_type = 'human_task'
+		`, rec.TaskID).Scan(&payloadRaw); err != nil {
+			return fmt.Errorf("load sqlite human task payload: %w", err)
 		}
-	}()
-	var payloadRaw any
-	if err := tx.QueryRowContext(ctx, `
-		SELECT COALESCE(payload, '{}')
-		FROM mailbox
-		WHERE item_id = ? AND item_type = 'human_task'
-	`, rec.TaskID).Scan(&payloadRaw); err != nil {
-		return fmt.Errorf("load sqlite human task payload: %w", err)
-	}
-	payload, err := toolDecodeJSONMap(payloadRaw)
-	if err != nil {
-		return fmt.Errorf("decode sqlite human task payload: %w", err)
-	}
-	if rec.Status == "deferred" {
-		payload["requeue_count"] = toolIntValue(payload["requeue_count"]) + 1
-	}
-	payloadJSON, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("marshal sqlite human task payload: %w", err)
-	}
-	rowStatus := "decided"
-	if rec.Status == "timed_out" {
-		rowStatus = "expired"
-	}
-	res, err := tx.ExecContext(ctx, `
-		UPDATE mailbox
-		SET status = ?,
-		    decision = ?,
-		    decision_notes = COALESCE(NULLIF(?, ''), decision_notes),
-		    decided_by = ?,
-		    decided_at = ?,
-		    payload = ?
-		WHERE item_id = ? AND item_type = 'human_task'
-	`, rowStatus, rec.Status, rec.Reason, sqliteNullString(rec.ActorID), rec.DecidedAt.UTC(), string(payloadJSON), rec.TaskID)
-	if err != nil {
-		return fmt.Errorf("decide sqlite human task: %w", err)
-	}
-	if affected, err := res.RowsAffected(); err == nil && affected == 0 {
-		return fmt.Errorf("human task not found: %s", rec.TaskID)
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit sqlite human task decision: %w", err)
-	}
-	committed = true
-	return nil
+		payload, err := toolDecodeJSONMap(payloadRaw)
+		if err != nil {
+			return fmt.Errorf("decode sqlite human task payload: %w", err)
+		}
+		if rec.Status == "deferred" {
+			payload["requeue_count"] = toolIntValue(payload["requeue_count"]) + 1
+		}
+		payloadJSON, err := json.Marshal(payload)
+		if err != nil {
+			return fmt.Errorf("marshal sqlite human task payload: %w", err)
+		}
+		rowStatus := "decided"
+		if rec.Status == "timed_out" {
+			rowStatus = "expired"
+		}
+		res, err := tx.ExecContext(txctx, `
+			UPDATE mailbox
+			SET status = ?,
+			    decision = ?,
+			    decision_notes = COALESCE(NULLIF(?, ''), decision_notes),
+			    decided_by = ?,
+			    decided_at = ?,
+			    payload = ?
+			WHERE item_id = ? AND item_type = 'human_task'
+		`, rowStatus, rec.Status, rec.Reason, sqliteNullString(rec.ActorID), rec.DecidedAt.UTC(), string(payloadJSON), rec.TaskID)
+		if err != nil {
+			return fmt.Errorf("decide sqlite human task: %w", err)
+		}
+		if affected, err := res.RowsAffected(); err == nil && affected == 0 {
+			return fmt.Errorf("human task not found: %s", rec.TaskID)
+		}
+		return nil
+	})
 }
 
 type mailboxPersistence interface {
