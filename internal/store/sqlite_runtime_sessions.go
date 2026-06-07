@@ -65,79 +65,68 @@ func (s *SQLiteRuntimeStore) Acquire(ctx context.Context, agentID string, runtim
 	s.sessionMu.Lock()
 	defer s.sessionMu.Unlock()
 
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("begin sqlite session acquire tx: %w", err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
+	var lease *runtimesessions.Lease
+	if err := s.runRuntimeMutation(ctx, "sqlite session acquire", func(txctx context.Context, tx *sql.Tx) error {
+		rec, found, err := sqliteLoadLiveSession(txctx, tx, strings.TrimSpace(agentID), resolved.RuntimeMode, resolved.ScopeKey)
+		if err != nil {
+			return err
 		}
-	}()
-
-	rec, found, err := sqliteLoadLiveSession(ctx, tx, strings.TrimSpace(agentID), resolved.RuntimeMode, resolved.ScopeKey)
-	if err != nil {
+		now := s.now()
+		expires := now.Add(s.sessionLockTTL)
+		if !found {
+			sessionID := uuid.NewString()
+			if _, err := tx.ExecContext(txctx, `
+				INSERT INTO agent_sessions (
+					session_id, agent_id, entity_id, flow_instance, scope_key, scope,
+					conversation, turn_count, runtime_mode, runtime_state,
+					lease_holder, lease_expires_at, status, created_at, updated_at
+				)
+				VALUES (?, ?, ?, ?, ?, ?, '[]', 0, ?, '{}', ?, ?, 'active', ?, ?)
+			`, sessionID, strings.TrimSpace(agentID), sqliteNullUUID(resolved.EntityID), sqliteNullString(resolved.FlowInstance),
+				resolved.ScopeKey, resolved.Scope.String(), resolved.RuntimeMode.String(), strings.TrimSpace(lockOwner), expires, now, now); err != nil {
+				return fmt.Errorf("insert sqlite session row: %w", err)
+			}
+			lease = &runtimesessions.Lease{
+				SessionID:    sessionID,
+				AgentID:      strings.TrimSpace(agentID),
+				RuntimeMode:  resolved.RuntimeMode,
+				SessionScope: resolved.Scope,
+				LockOwner:    strings.TrimSpace(lockOwner),
+				ScopeKey:     resolved.ScopeKey,
+				ExpiresAt:    expires,
+			}
+			return nil
+		}
+		if strings.TrimSpace(rec.status) == "suspended" {
+			return runtimesessions.ErrSessionSuspended
+		}
+		if rec.leaseHolder != "" && rec.leaseExpiresAt.After(now) && rec.leaseHolder != strings.TrimSpace(lockOwner) {
+			return runtimesessions.ErrSessionLeased
+		}
+		if _, err := tx.ExecContext(txctx, `
+			UPDATE agent_sessions
+			SET lease_holder = ?, lease_expires_at = ?, updated_at = ?
+			WHERE session_id = ?
+		`, strings.TrimSpace(lockOwner), expires, now, rec.sessionID); err != nil {
+			return fmt.Errorf("update sqlite session lease: %w", err)
+		}
+		lease = &runtimesessions.Lease{
+			SessionID:            rec.sessionID,
+			ProviderSessionID:    rec.providerSessionID,
+			AgentID:              strings.TrimSpace(agentID),
+			RuntimeMode:          resolved.RuntimeMode,
+			SessionScope:         resolved.Scope,
+			RetryReason:          rec.retryReason,
+			RetriesFromSessionID: rec.retriesFromSessionID,
+			LockOwner:            strings.TrimSpace(lockOwner),
+			ScopeKey:             resolved.ScopeKey,
+			ExpiresAt:            expires,
+		}
+		return nil
+	}); err != nil {
 		return nil, err
 	}
-	now := s.now()
-	expires := now.Add(s.sessionLockTTL)
-	if !found {
-		sessionID := uuid.NewString()
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO agent_sessions (
-				session_id, agent_id, entity_id, flow_instance, scope_key, scope,
-				conversation, turn_count, runtime_mode, runtime_state,
-				lease_holder, lease_expires_at, status, created_at, updated_at
-			)
-			VALUES (?, ?, ?, ?, ?, ?, '[]', 0, ?, '{}', ?, ?, 'active', ?, ?)
-		`, sessionID, strings.TrimSpace(agentID), sqliteNullUUID(resolved.EntityID), sqliteNullString(resolved.FlowInstance),
-			resolved.ScopeKey, resolved.Scope.String(), resolved.RuntimeMode.String(), strings.TrimSpace(lockOwner), expires, now, now); err != nil {
-			return nil, fmt.Errorf("insert sqlite session row: %w", err)
-		}
-		if err := tx.Commit(); err != nil {
-			return nil, fmt.Errorf("commit sqlite session acquire new: %w", err)
-		}
-		committed = true
-		return &runtimesessions.Lease{
-			SessionID:    sessionID,
-			AgentID:      strings.TrimSpace(agentID),
-			RuntimeMode:  resolved.RuntimeMode,
-			SessionScope: resolved.Scope,
-			LockOwner:    strings.TrimSpace(lockOwner),
-			ScopeKey:     resolved.ScopeKey,
-			ExpiresAt:    expires,
-		}, nil
-	}
-	if strings.TrimSpace(rec.status) == "suspended" {
-		return nil, runtimesessions.ErrSessionSuspended
-	}
-	if rec.leaseHolder != "" && rec.leaseExpiresAt.After(now) && rec.leaseHolder != strings.TrimSpace(lockOwner) {
-		return nil, runtimesessions.ErrSessionLeased
-	}
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE agent_sessions
-		SET lease_holder = ?, lease_expires_at = ?, updated_at = ?
-		WHERE session_id = ?
-	`, strings.TrimSpace(lockOwner), expires, now, rec.sessionID); err != nil {
-		return nil, fmt.Errorf("update sqlite session lease: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit sqlite session acquire existing: %w", err)
-	}
-	committed = true
-	return &runtimesessions.Lease{
-		SessionID:            rec.sessionID,
-		ProviderSessionID:    rec.providerSessionID,
-		AgentID:              strings.TrimSpace(agentID),
-		RuntimeMode:          resolved.RuntimeMode,
-		SessionScope:         resolved.Scope,
-		RetryReason:          rec.retryReason,
-		RetriesFromSessionID: rec.retriesFromSessionID,
-		LockOwner:            strings.TrimSpace(lockOwner),
-		ScopeKey:             resolved.ScopeKey,
-		ExpiresAt:            expires,
-	}, nil
+	return lease, nil
 }
 
 func (s *SQLiteRuntimeStore) Release(ctx context.Context, lease *runtimesessions.Lease) error {
@@ -149,22 +138,29 @@ func (s *SQLiteRuntimeStore) Release(ctx context.Context, lease *runtimesessions
 	}
 	s.sessionMu.Lock()
 	defer s.sessionMu.Unlock()
-	res, err := s.DB.ExecContext(ctx, `
-		UPDATE agent_sessions
-		SET lease_holder = NULL,
-		    lease_expires_at = NULL,
-		    updated_at = ?
-		WHERE agent_id = ?
-		  AND runtime_mode = ?
-		  AND session_id = ?
-		  AND scope_key = ?
-		  AND lease_holder = ?
-		  AND status = 'active'
-	`, s.now(), strings.TrimSpace(lease.AgentID), lease.RuntimeMode.String(), strings.TrimSpace(lease.SessionID), strings.TrimSpace(lease.ScopeKey), strings.TrimSpace(lease.LockOwner))
-	if err != nil {
+	var rows int64
+	if err := s.runRuntimeMutation(ctx, "sqlite session release", func(txctx context.Context, tx *sql.Tx) error {
+		res, err := tx.ExecContext(txctx, `
+			UPDATE agent_sessions
+			SET lease_holder = NULL,
+			    lease_expires_at = NULL,
+			    updated_at = ?
+			WHERE agent_id = ?
+			  AND runtime_mode = ?
+			  AND session_id = ?
+			  AND scope_key = ?
+			  AND lease_holder = ?
+			  AND status = 'active'
+		`, s.now(), strings.TrimSpace(lease.AgentID), lease.RuntimeMode.String(), strings.TrimSpace(lease.SessionID), strings.TrimSpace(lease.ScopeKey), strings.TrimSpace(lease.LockOwner))
+		if err != nil {
+			return err
+		}
+		rows, _ = res.RowsAffected()
+		return nil
+	}); err != nil {
 		return fmt.Errorf("release sqlite session lease: %w", err)
 	}
-	if rows, _ := res.RowsAffected(); rows == 0 {
+	if rows == 0 {
 		return fmt.Errorf("no active lease to release for agent=%s session=%s", lease.AgentID, lease.SessionID)
 	}
 	return nil
@@ -188,85 +184,78 @@ func (s *SQLiteRuntimeStore) Rotate(ctx context.Context, agentID string, runtime
 	s.sessionMu.Lock()
 	defer s.sessionMu.Unlock()
 
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("begin sqlite session rotate tx: %w", err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
+	var lease *runtimesessions.Lease
+	if err := s.runRuntimeMutation(ctx, "sqlite session rotate", func(txctx context.Context, tx *sql.Tx) error {
+		rec, found, err := sqliteLoadActiveSession(txctx, tx, strings.TrimSpace(agentID), resolved.RuntimeMode, resolved.ScopeKey)
+		if err != nil {
+			return err
 		}
-	}()
-	rec, found, err := sqliteLoadActiveSession(ctx, tx, strings.TrimSpace(agentID), resolved.RuntimeMode, resolved.ScopeKey)
-	if err != nil {
+		if !found {
+			return fmt.Errorf("no active session to rotate for agent=%s", strings.TrimSpace(agentID))
+		}
+		now := s.now()
+		if rec.leaseHolder != "" && rec.leaseExpiresAt.After(now) && rec.leaseHolder != strings.TrimSpace(lockOwner) {
+			return runtimesessions.ErrSessionLeased
+		}
+		retryReason := strings.TrimSpace(rotation.RetryReason)
+		terminationReason := rotation.TerminationReason
+		if terminationReason == "" {
+			terminationReason = runtimesessions.TerminationReasonContaminated
+		}
+		if _, err := tx.ExecContext(txctx, `
+			UPDATE agent_sessions
+			SET status = 'terminated',
+			    termination_reason = ?,
+			    termination_detail = ?,
+			    terminated_at = COALESCE(terminated_at, ?),
+			    successor_session_id = NULL,
+			    lease_holder = NULL,
+			    lease_expires_at = NULL,
+			    updated_at = ?
+			WHERE session_id = ?
+			  AND status = 'active'
+		`, terminationReason.String(), sqliteNullString(retryReason), now, now, rec.sessionID); err != nil {
+			return fmt.Errorf("terminate sqlite rotated session row: %w", err)
+		}
+		newSessionID := uuid.NewString()
+		expires := now.Add(s.sessionLockTTL)
+		runtimeState := sqliteSessionRuntimeStateJSON(strings.TrimSpace(rotation.CheckpointSummary), retryReason, rec.sessionID)
+		if _, err := tx.ExecContext(txctx, `
+			INSERT INTO agent_sessions (
+				session_id, agent_id, entity_id, flow_instance, scope_key, scope,
+				conversation, turn_count, runtime_mode, runtime_state,
+				lease_holder, lease_expires_at, status,
+				created_at, updated_at
+			)
+			VALUES (?, ?, ?, ?, ?, ?, '[]', 0, ?, ?, ?, ?, 'active', ?, ?)
+		`, newSessionID, strings.TrimSpace(agentID), sqliteNullUUID(resolved.EntityID), sqliteNullString(resolved.FlowInstance),
+			resolved.ScopeKey, resolved.Scope.String(), resolved.RuntimeMode.String(), runtimeState, strings.TrimSpace(lockOwner), expires, now, now); err != nil {
+			return fmt.Errorf("insert sqlite rotated successor session row: %w", err)
+		}
+		if _, err := tx.ExecContext(txctx, `
+			UPDATE agent_sessions
+			SET successor_session_id = ?, updated_at = ?
+			WHERE session_id = ?
+			  AND status = 'terminated'
+		`, newSessionID, now, rec.sessionID); err != nil {
+			return fmt.Errorf("link sqlite rotated successor session row: %w", err)
+		}
+		lease = &runtimesessions.Lease{
+			SessionID:            newSessionID,
+			AgentID:              strings.TrimSpace(agentID),
+			RuntimeMode:          resolved.RuntimeMode,
+			SessionScope:         resolved.Scope,
+			RetryReason:          retryReason,
+			RetriesFromSessionID: rec.sessionID,
+			LockOwner:            strings.TrimSpace(lockOwner),
+			ScopeKey:             resolved.ScopeKey,
+			ExpiresAt:            expires,
+		}
+		return nil
+	}); err != nil {
 		return nil, err
 	}
-	if !found {
-		return nil, fmt.Errorf("no active session to rotate for agent=%s", strings.TrimSpace(agentID))
-	}
-	now := s.now()
-	if rec.leaseHolder != "" && rec.leaseExpiresAt.After(now) && rec.leaseHolder != strings.TrimSpace(lockOwner) {
-		return nil, runtimesessions.ErrSessionLeased
-	}
-	retryReason := strings.TrimSpace(rotation.RetryReason)
-	terminationReason := rotation.TerminationReason
-	if terminationReason == "" {
-		terminationReason = runtimesessions.TerminationReasonContaminated
-	}
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE agent_sessions
-		SET status = 'terminated',
-		    termination_reason = ?,
-		    termination_detail = ?,
-		    terminated_at = COALESCE(terminated_at, ?),
-		    successor_session_id = NULL,
-		    lease_holder = NULL,
-		    lease_expires_at = NULL,
-		    updated_at = ?
-		WHERE session_id = ?
-		  AND status = 'active'
-	`, terminationReason.String(), sqliteNullString(retryReason), now, now, rec.sessionID); err != nil {
-		return nil, fmt.Errorf("terminate sqlite rotated session row: %w", err)
-	}
-	newSessionID := uuid.NewString()
-	expires := now.Add(s.sessionLockTTL)
-	runtimeState := sqliteSessionRuntimeStateJSON(strings.TrimSpace(rotation.CheckpointSummary), retryReason, rec.sessionID)
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO agent_sessions (
-			session_id, agent_id, entity_id, flow_instance, scope_key, scope,
-			conversation, turn_count, runtime_mode, runtime_state,
-			lease_holder, lease_expires_at, status,
-			created_at, updated_at
-		)
-		VALUES (?, ?, ?, ?, ?, ?, '[]', 0, ?, ?, ?, ?, 'active', ?, ?)
-	`, newSessionID, strings.TrimSpace(agentID), sqliteNullUUID(resolved.EntityID), sqliteNullString(resolved.FlowInstance),
-		resolved.ScopeKey, resolved.Scope.String(), resolved.RuntimeMode.String(), runtimeState, strings.TrimSpace(lockOwner), expires, now, now); err != nil {
-		return nil, fmt.Errorf("insert sqlite rotated successor session row: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE agent_sessions
-		SET successor_session_id = ?, updated_at = ?
-		WHERE session_id = ?
-		  AND status = 'terminated'
-	`, newSessionID, now, rec.sessionID); err != nil {
-		return nil, fmt.Errorf("link sqlite rotated successor session row: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit sqlite session rotate: %w", err)
-	}
-	committed = true
-	return &runtimesessions.Lease{
-		SessionID:            newSessionID,
-		AgentID:              strings.TrimSpace(agentID),
-		RuntimeMode:          resolved.RuntimeMode,
-		SessionScope:         resolved.Scope,
-		RetryReason:          retryReason,
-		RetriesFromSessionID: rec.sessionID,
-		LockOwner:            strings.TrimSpace(lockOwner),
-		ScopeKey:             resolved.ScopeKey,
-		ExpiresAt:            expires,
-	}, nil
+	return lease, nil
 }
 
 func (s *SQLiteRuntimeStore) IncrementTurn(ctx context.Context, agentID string, runtimeMode runtimesessions.RuntimeMode, sessionScope runtimesessions.SessionScope, sessionID, scopeKey string) error {
@@ -277,20 +266,27 @@ func (s *SQLiteRuntimeStore) IncrementTurn(ctx context.Context, agentID string, 
 	if err != nil {
 		return err
 	}
-	res, err := s.DB.ExecContext(ctx, `
-		UPDATE agent_sessions
-		SET turn_count = turn_count + 1,
-		    updated_at = ?
-		WHERE agent_id = ?
-		  AND runtime_mode = ?
-		  AND session_id = ?
-		  AND scope_key = ?
-		  AND status = 'active'
-	`, s.now(), strings.TrimSpace(agentID), resolved.RuntimeMode.String(), strings.TrimSpace(sessionID), resolved.ScopeKey)
-	if err != nil {
+	var rows int64
+	if err := s.runRuntimeMutation(ctx, "sqlite session turn increment", func(txctx context.Context, tx *sql.Tx) error {
+		res, err := tx.ExecContext(txctx, `
+			UPDATE agent_sessions
+			SET turn_count = turn_count + 1,
+			    updated_at = ?
+			WHERE agent_id = ?
+			  AND runtime_mode = ?
+			  AND session_id = ?
+			  AND scope_key = ?
+			  AND status = 'active'
+		`, s.now(), strings.TrimSpace(agentID), resolved.RuntimeMode.String(), strings.TrimSpace(sessionID), resolved.ScopeKey)
+		if err != nil {
+			return err
+		}
+		rows, _ = res.RowsAffected()
+		return nil
+	}); err != nil {
 		return fmt.Errorf("increment sqlite session turn: %w", err)
 	}
-	if rows, _ := res.RowsAffected(); rows == 0 {
+	if rows == 0 {
 		return fmt.Errorf("session not found for turn increment: agent=%s runtime=%s scope=%s session=%s", agentID, runtimeMode, scopeKey, sessionID)
 	}
 	return nil
@@ -316,42 +312,30 @@ func (s *SQLiteRuntimeStore) AdoptSessionID(ctx context.Context, agentID string,
 	s.sessionMu.Lock()
 	defer s.sessionMu.Unlock()
 
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin sqlite adopt session id tx: %w", err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
+	return s.runRuntimeMutation(ctx, "sqlite adopt session id", func(txctx context.Context, tx *sql.Tx) error {
+		rec, found, err := sqliteLoadActiveSession(txctx, tx, agentID, resolved.RuntimeMode, resolved.ScopeKey)
+		if err != nil {
+			return err
 		}
-	}()
-	rec, found, err := sqliteLoadActiveSession(ctx, tx, agentID, resolved.RuntimeMode, resolved.ScopeKey)
-	if err != nil {
-		return err
-	}
-	if !found {
-		return fmt.Errorf("no active session to adopt for agent=%s", agentID)
-	}
-	now := s.now()
-	if rec.leaseHolder != "" && rec.leaseExpiresAt.After(now) && rec.leaseHolder != lockOwner {
-		return runtimesessions.ErrSessionLeased
-	}
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE agent_sessions
-		SET runtime_state = json_set(COALESCE(runtime_state, '{}'), '$.provider_session_id', ?),
-		    lease_holder = ?,
-		    lease_expires_at = ?,
-		    updated_at = ?
-		WHERE session_id = ?
-	`, newSessionID, lockOwner, now.Add(s.sessionLockTTL), now, rec.sessionID); err != nil {
-		return fmt.Errorf("update sqlite provider session id: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit sqlite adopt session id: %w", err)
-	}
-	committed = true
-	return nil
+		if !found {
+			return fmt.Errorf("no active session to adopt for agent=%s", agentID)
+		}
+		now := s.now()
+		if rec.leaseHolder != "" && rec.leaseExpiresAt.After(now) && rec.leaseHolder != lockOwner {
+			return runtimesessions.ErrSessionLeased
+		}
+		if _, err := tx.ExecContext(txctx, `
+			UPDATE agent_sessions
+			SET runtime_state = json_set(COALESCE(runtime_state, '{}'), '$.provider_session_id', ?),
+			    lease_holder = ?,
+			    lease_expires_at = ?,
+			    updated_at = ?
+			WHERE session_id = ?
+		`, newSessionID, lockOwner, now.Add(s.sessionLockTTL), now, rec.sessionID); err != nil {
+			return fmt.Errorf("update sqlite provider session id: %w", err)
+		}
+		return nil
+	})
 }
 
 func (s *SQLiteRuntimeStore) ResetAll(runtimeMode runtimesessions.RuntimeMode, metadata runtimesessions.ResetMetadata) (runtimesessions.ResetSummary, error) {
@@ -369,41 +353,47 @@ func (s *SQLiteRuntimeStore) ResetAll(runtimeMode runtimesessions.RuntimeMode, m
 		where += " AND runtime_mode = ?"
 		args = append(args, runtimeMode.String())
 	}
-	rows, err := s.DB.Query(`
-		SELECT session_id, agent_id, scope_key, runtime_mode, status
-		FROM agent_sessions
-		WHERE `+where+`
-		ORDER BY agent_id ASC, scope_key ASC, session_id ASC
-	`, args[4:]...)
-	if err != nil {
-		return runtimesessions.ResetSummary{}, fmt.Errorf("list sqlite sessions for reset: %w", err)
-	}
-	defer rows.Close()
 	summary := runtimesessions.ResetSummary{}
-	for rows.Next() {
-		var d runtimesessions.ResetDisposition
-		if err := rows.Scan(&d.SessionID, &d.AgentID, &d.ScopeKey, &d.RuntimeMode, &d.PreviousStatus); err != nil {
-			return runtimesessions.ResetSummary{}, fmt.Errorf("scan sqlite session reset summary: %w", err)
+	ctx := context.Background()
+	if err := s.runRuntimeMutation(ctx, "sqlite session reset", func(txctx context.Context, tx *sql.Tx) error {
+		rows, err := tx.QueryContext(txctx, `
+			SELECT session_id, agent_id, scope_key, runtime_mode, status
+			FROM agent_sessions
+			WHERE `+where+`
+			ORDER BY agent_id ASC, scope_key ASC, session_id ASC
+		`, args[4:]...)
+		if err != nil {
+			return fmt.Errorf("list sqlite sessions for reset: %w", err)
 		}
-		d.TerminationReason = runtimesessions.TerminationReasonOrphaned.String()
-		d.TerminationDetail = source
-		summary.OrphanedSessions = append(summary.OrphanedSessions, d)
-	}
-	if err := rows.Err(); err != nil {
-		return runtimesessions.ResetSummary{}, fmt.Errorf("read sqlite session reset summary: %w", err)
-	}
-	updateArgs := append([]any{}, args...)
-	if _, err := s.DB.Exec(`
-		UPDATE agent_sessions
-		SET status = 'terminated',
-		    termination_reason = ?,
-		    termination_detail = ?,
-		    terminated_at = COALESCE(terminated_at, ?),
-		    lease_holder = NULL,
-		    lease_expires_at = NULL,
-		    updated_at = ?
-		WHERE `+where, updateArgs...); err != nil {
-		return runtimesessions.ResetSummary{}, fmt.Errorf("reset sqlite sessions: %w", err)
+		defer rows.Close()
+		for rows.Next() {
+			var d runtimesessions.ResetDisposition
+			if err := rows.Scan(&d.SessionID, &d.AgentID, &d.ScopeKey, &d.RuntimeMode, &d.PreviousStatus); err != nil {
+				return fmt.Errorf("scan sqlite session reset summary: %w", err)
+			}
+			d.TerminationReason = runtimesessions.TerminationReasonOrphaned.String()
+			d.TerminationDetail = source
+			summary.OrphanedSessions = append(summary.OrphanedSessions, d)
+		}
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("read sqlite session reset summary: %w", err)
+		}
+		updateArgs := append([]any{}, args...)
+		if _, err := tx.ExecContext(txctx, `
+			UPDATE agent_sessions
+			SET status = 'terminated',
+			    termination_reason = ?,
+			    termination_detail = ?,
+			    terminated_at = COALESCE(terminated_at, ?),
+			    lease_holder = NULL,
+			    lease_expires_at = NULL,
+			    updated_at = ?
+			WHERE `+where, updateArgs...); err != nil {
+			return fmt.Errorf("reset sqlite sessions: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return runtimesessions.ResetSummary{}, err
 	}
 	return summary, nil
 }

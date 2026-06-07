@@ -23,6 +23,8 @@ type SQLiteSchemaStore struct {
 	schemaCapsBound bool
 }
 
+const sqliteDriverBusyTimeoutMillis = 50
+
 func NewSQLiteSchemaStore(path string) (*SQLiteSchemaStore, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
@@ -63,7 +65,7 @@ func sqliteFileDSN(path string) string {
 	u := url.URL{Scheme: "file", Opaque: path}
 	q := u.Query()
 	q.Add("_pragma", "foreign_keys(ON)")
-	q.Add("_pragma", "busy_timeout(5000)")
+	q.Add("_pragma", fmt.Sprintf("busy_timeout(%d)", sqliteDriverBusyTimeoutMillis))
 	q.Add("_pragma", "journal_mode(WAL)")
 	u.RawQuery = q.Encode()
 	return u.String()
@@ -102,7 +104,7 @@ func (s *SQLiteSchemaStore) configure(ctx context.Context) error {
 	if _, err := s.DB.ExecContext(ctx, `PRAGMA foreign_keys = ON`); err != nil {
 		return fmt.Errorf("enable sqlite foreign keys: %w", err)
 	}
-	if _, err := s.DB.ExecContext(ctx, `PRAGMA busy_timeout = 5000`); err != nil {
+	if _, err := s.DB.ExecContext(ctx, fmt.Sprintf(`PRAGMA busy_timeout = %d`, sqliteDriverBusyTimeoutMillis)); err != nil {
 		return fmt.Errorf("configure sqlite busy timeout: %w", err)
 	}
 	return s.DB.PingContext(ctx)

@@ -34,6 +34,7 @@ type SQLiteRuntimeStore struct {
 
 	eventPayloadValidator EventPayloadValidator
 	startupMu             sync.Mutex
+	mutationMu            sync.Mutex
 	sessionMu             sync.Mutex
 	replayMu              sync.Mutex
 	startupOwner          string
@@ -136,7 +137,9 @@ func (s *SQLiteRuntimeStore) CanonicalEventReceiptsCapability(ctx context.Contex
 }
 
 func (s *SQLiteRuntimeStore) AppendEvent(ctx context.Context, evt events.Event) error {
-	return s.AppendEventTx(ctx, nil, evt)
+	return s.runRuntimeMutation(ctx, "sqlite append event", func(txctx context.Context, tx *sql.Tx) error {
+		return s.AppendEventTx(txctx, tx, evt)
+	})
 }
 
 func (s *SQLiteRuntimeStore) BeginEventTx(ctx context.Context) (*sql.Tx, error) {
@@ -147,6 +150,11 @@ func (s *SQLiteRuntimeStore) BeginEventTx(ctx context.Context) (*sql.Tx, error) 
 }
 
 func (s *SQLiteRuntimeStore) AppendEventTx(ctx context.Context, tx *sql.Tx, evt events.Event) error {
+	if tx == nil {
+		return s.runRuntimeMutation(ctx, "sqlite append event", func(txctx context.Context, tx *sql.Tx) error {
+			return s.AppendEventTx(txctx, tx, evt)
+		})
+	}
 	caps, err := s.schemaCapabilities(ctx)
 	if err != nil {
 		return err
@@ -169,19 +177,6 @@ func (s *SQLiteRuntimeStore) AppendEventTx(ctx context.Context, tx *sql.Tx, evt 
 	if eventHasRouteIdentity(evt) && !caps.Events.LogRouteIdentity {
 		return fmt.Errorf("events source_route/target_route/target_set columns required for routed event")
 	}
-	ownedTx := tx == nil
-	if ownedTx {
-		tx, err = s.DB.BeginTx(ctx, nil)
-		if err != nil {
-			return fmt.Errorf("begin sqlite event tx: %w", err)
-		}
-	}
-	committed := false
-	defer func() {
-		if ownedTx && !committed {
-			_ = tx.Rollback()
-		}
-	}()
 	if caps.Events.LogRunID {
 		if err := sqliteEnsureRunRow(ctx, tx, runID, id, name, createdAt); err != nil {
 			return err
@@ -197,12 +192,6 @@ func (s *SQLiteRuntimeStore) AppendEventTx(ctx context.Context, tx *sql.Tx, evt 
 		scope, string(payload), chainDepth, sqliteNullString(producedBy), producedByType, sqliteNullUUID(sourceEventID), createdAt.UTC())
 	if err != nil {
 		return fmt.Errorf("append sqlite event: %w", err)
-	}
-	if ownedTx {
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("commit sqlite event tx: %w", err)
-		}
-		committed = true
 	}
 	return nil
 }
@@ -265,24 +254,15 @@ func (s *SQLiteRuntimeStore) InsertEventDeliveriesTx(ctx context.Context, tx *sq
 	if eventID == "" || len(agentIDs) == 0 {
 		return nil
 	}
+	if tx == nil {
+		return s.runRuntimeMutation(ctx, "sqlite delivery manifest", func(txctx context.Context, tx *sql.Tx) error {
+			return s.InsertEventDeliveriesTx(txctx, tx, eventID, agentIDs)
+		})
+	}
 	var runID sql.NullString
 	if err := chooseRowQueryer(s.DB, tx).QueryRowContext(ctx, `SELECT run_id FROM events WHERE event_id = ?`, eventID).Scan(&runID); err != nil {
 		return fmt.Errorf("load event run for sqlite delivery manifest: %w", err)
 	}
-	ownedTx := tx == nil
-	var err error
-	if ownedTx {
-		tx, err = s.DB.BeginTx(ctx, nil)
-		if err != nil {
-			return fmt.Errorf("begin sqlite delivery manifest tx: %w", err)
-		}
-	}
-	committed := false
-	defer func() {
-		if ownedTx && !committed {
-			_ = tx.Rollback()
-		}
-	}()
 	for _, agentID := range agentIDs {
 		agentID = strings.TrimSpace(agentID)
 		if agentID == "" {
@@ -296,12 +276,6 @@ func (s *SQLiteRuntimeStore) InsertEventDeliveriesTx(ctx context.Context, tx *sq
 		`, uuid.NewString(), sqliteNullString(runID.String), eventID, agentID, time.Now().UTC()); err != nil {
 			return fmt.Errorf("insert sqlite event delivery: %w", err)
 		}
-	}
-	if ownedTx {
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("commit sqlite delivery manifest tx: %w", err)
-		}
-		committed = true
 	}
 	return nil
 }
@@ -357,38 +331,36 @@ func (s *SQLiteRuntimeStore) UpsertAgent(ctx context.Context, rec runtimemanager
 	if startedAt.IsZero() {
 		startedAt = time.Now().UTC()
 	}
-	q := execQueryer(s.DB)
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok {
-		q = tx
-	}
-	_, err = q.ExecContext(ctx, `
-		INSERT INTO agents (
-			agent_id, flow_instance, role, model, llm_backend, conversation_mode,
-			parent_agent_id, entity_id, config, subscriptions, emit_events, tools, permissions,
-			runtime_descriptor, status, turn_count, last_active_at, created_at
-		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
-		ON CONFLICT(agent_id) DO UPDATE SET
-			flow_instance = excluded.flow_instance,
-			role = excluded.role,
-			model = excluded.model,
-			llm_backend = excluded.llm_backend,
-			conversation_mode = excluded.conversation_mode,
-			parent_agent_id = excluded.parent_agent_id,
-			entity_id = excluded.entity_id,
-			config = excluded.config,
-			subscriptions = excluded.subscriptions,
-			emit_events = excluded.emit_events,
-			tools = excluded.tools,
-			permissions = excluded.permissions,
-			runtime_descriptor = excluded.runtime_descriptor,
-			status = excluded.status,
-			last_active_at = excluded.last_active_at
-	`, projection.AgentID, sqliteNullString(projection.FlowInstance), projection.Role, projection.Model, projection.LLMBackend, projection.ConversationMode,
-		sqliteNullString(projection.ParentAgentID), sqliteNullUUID(projection.EntityID), string(projection.ConfigJSON), string(projection.SubscriptionsJSON),
-		string(projection.EmitEventsJSON), string(projection.ToolsJSON), string(projection.PermissionsJSON), string(projection.RuntimeDescriptor),
-		agentPersistedStatus(rec.Status), time.Now().UTC(), startedAt.UTC())
-	if err != nil {
+	if err := s.runRuntimeMutation(ctx, "sqlite agent upsert", func(txctx context.Context, tx *sql.Tx) error {
+		_, err := tx.ExecContext(txctx, `
+			INSERT INTO agents (
+				agent_id, flow_instance, role, model, llm_backend, conversation_mode,
+				parent_agent_id, entity_id, config, subscriptions, emit_events, tools, permissions,
+				runtime_descriptor, status, turn_count, last_active_at, created_at
+			)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+			ON CONFLICT(agent_id) DO UPDATE SET
+				flow_instance = excluded.flow_instance,
+				role = excluded.role,
+				model = excluded.model,
+				llm_backend = excluded.llm_backend,
+				conversation_mode = excluded.conversation_mode,
+				parent_agent_id = excluded.parent_agent_id,
+				entity_id = excluded.entity_id,
+				config = excluded.config,
+				subscriptions = excluded.subscriptions,
+				emit_events = excluded.emit_events,
+				tools = excluded.tools,
+				permissions = excluded.permissions,
+				runtime_descriptor = excluded.runtime_descriptor,
+				status = excluded.status,
+				last_active_at = excluded.last_active_at
+		`, projection.AgentID, sqliteNullString(projection.FlowInstance), projection.Role, projection.Model, projection.LLMBackend, projection.ConversationMode,
+			sqliteNullString(projection.ParentAgentID), sqliteNullUUID(projection.EntityID), string(projection.ConfigJSON), string(projection.SubscriptionsJSON),
+			string(projection.EmitEventsJSON), string(projection.ToolsJSON), string(projection.PermissionsJSON), string(projection.RuntimeDescriptor),
+			agentPersistedStatus(rec.Status), time.Now().UTC(), startedAt.UTC())
+		return err
+	}); err != nil {
 		return fmt.Errorf("upsert sqlite agent: %w", err)
 	}
 	return nil
@@ -444,51 +416,42 @@ func (s *SQLiteRuntimeStore) MarkAgentTerminated(ctx context.Context, agentID st
 	}
 	s.sessionMu.Lock()
 	defer s.sessionMu.Unlock()
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin sqlite mark agent terminated tx: %w", err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
 	now := s.now()
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE agents
-		SET status = 'terminated',
-		    last_active_at = ?
-		WHERE agent_id = ?
-	`, now, agentID); err != nil {
+	if err := s.runRuntimeMutation(ctx, "sqlite mark agent terminated", func(txctx context.Context, tx *sql.Tx) error {
+		if _, err := tx.ExecContext(txctx, `
+			UPDATE agents
+			SET status = 'terminated',
+			    last_active_at = ?
+			WHERE agent_id = ?
+		`, now, agentID); err != nil {
+			return fmt.Errorf("mark sqlite agent terminated: %w", err)
+		}
+		if _, err := tx.ExecContext(txctx, `
+			UPDATE agent_sessions
+			SET status = 'terminated',
+			    termination_reason = 'cancelled',
+			    terminated_at = COALESCE(terminated_at, ?),
+			    lease_holder = NULL,
+			    lease_expires_at = NULL,
+			    updated_at = ?
+			WHERE agent_id = ?
+			  AND status IN ('active', 'suspended')
+		`, now, now, agentID); err != nil {
+			return fmt.Errorf("mark sqlite agent terminated sessions: %w", err)
+		}
+		if _, err := tx.ExecContext(txctx, `
+			UPDATE agent_conversation_audits
+			SET status = 'terminated',
+			    updated_at = ?
+			WHERE agent_id = ?
+			  AND status = 'active'
+		`, now, agentID); err != nil {
+			return fmt.Errorf("mark sqlite agent terminated conversation audits: %w", err)
+		}
+		return nil
+	}); err != nil {
 		return fmt.Errorf("mark sqlite agent terminated: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE agent_sessions
-		SET status = 'terminated',
-		    termination_reason = 'cancelled',
-		    terminated_at = COALESCE(terminated_at, ?),
-		    lease_holder = NULL,
-		    lease_expires_at = NULL,
-		    updated_at = ?
-		WHERE agent_id = ?
-		  AND status IN ('active', 'suspended')
-	`, now, now, agentID); err != nil {
-		return fmt.Errorf("mark sqlite agent terminated sessions: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE agent_conversation_audits
-		SET status = 'terminated',
-		    updated_at = ?
-		WHERE agent_id = ?
-		  AND status = 'active'
-	`, now, agentID); err != nil {
-		return fmt.Errorf("mark sqlite agent terminated conversation audits: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit sqlite mark agent terminated tx: %w", err)
-	}
-	committed = true
 	return nil
 }
 
@@ -522,10 +485,13 @@ func (s *SQLiteRuntimeStore) EnsureRuntimeIngressState(ctx context.Context, now 
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
-	if _, err := s.DB.ExecContext(ctx, `
-		INSERT OR IGNORE INTO runtime_ingress_state (id, status, controlled_by, updated_at)
-		VALUES (1, 'running', 'runtime', ?)
-	`, now.UTC()); err != nil {
+	if err := s.runRuntimeMutation(ctx, "sqlite runtime ingress ensure", func(txctx context.Context, tx *sql.Tx) error {
+		_, err := tx.ExecContext(txctx, `
+			INSERT OR IGNORE INTO runtime_ingress_state (id, status, controlled_by, updated_at)
+			VALUES (1, 'running', 'runtime', ?)
+		`, now.UTC())
+		return err
+	}); err != nil {
 		return runtimeingress.State{}, fmt.Errorf("ensure sqlite runtime ingress state: %w", err)
 	}
 	return s.LoadRuntimeIngressState(ctx)
@@ -553,29 +519,52 @@ func (s *SQLiteRuntimeStore) TransitionRuntimeIngressState(ctx context.Context, 
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
-	if _, err := s.EnsureRuntimeIngressState(ctx, now); err != nil {
-		return runtimeingress.State{}, false, err
-	}
-	current, err := s.LoadRuntimeIngressState(ctx)
-	if err != nil {
-		return runtimeingress.State{}, false, err
-	}
-	if current.Status == target {
-		return current, false, nil
-	}
 	if controlledBy = strings.TrimSpace(controlledBy); controlledBy == "" {
 		controlledBy = "runtime"
 	}
-	_, err = s.DB.ExecContext(ctx, `
-		UPDATE runtime_ingress_state
-		SET status = ?, reason = ?, controlled_by = ?, transition_event_id = NULL, updated_at = ?
-		WHERE id = 1
-	`, string(target), sqliteNullString(reason), controlledBy, now.UTC())
-	if err != nil {
-		return runtimeingress.State{}, false, fmt.Errorf("update sqlite runtime ingress state: %w", err)
+	var state runtimeingress.State
+	changed := false
+	if err := s.runRuntimeMutation(ctx, "sqlite runtime ingress transition", func(txctx context.Context, tx *sql.Tx) error {
+		if _, err := tx.ExecContext(txctx, `
+			INSERT OR IGNORE INTO runtime_ingress_state (id, status, controlled_by, updated_at)
+			VALUES (1, 'running', 'runtime', ?)
+		`, now.UTC()); err != nil {
+			return fmt.Errorf("ensure sqlite runtime ingress state: %w", err)
+		}
+		current, err := scanRuntimeIngressState(tx.QueryRowContext(txctx, `
+			SELECT status, COALESCE(reason, ''), controlled_by, COALESCE(transition_event_id, ''), updated_at
+			FROM runtime_ingress_state
+			WHERE id = 1
+		`))
+		if err != nil {
+			return fmt.Errorf("load sqlite runtime ingress state: %w", err)
+		}
+		if current.Status == target {
+			state = current
+			changed = false
+			return nil
+		}
+		if _, err := tx.ExecContext(txctx, `
+			UPDATE runtime_ingress_state
+			SET status = ?, reason = ?, controlled_by = ?, transition_event_id = NULL, updated_at = ?
+			WHERE id = 1
+		`, string(target), sqliteNullString(reason), controlledBy, now.UTC()); err != nil {
+			return fmt.Errorf("update sqlite runtime ingress state: %w", err)
+		}
+		state, err = scanRuntimeIngressState(tx.QueryRowContext(txctx, `
+			SELECT status, COALESCE(reason, ''), controlled_by, COALESCE(transition_event_id, ''), updated_at
+			FROM runtime_ingress_state
+			WHERE id = 1
+		`))
+		if err != nil {
+			return fmt.Errorf("load updated sqlite runtime ingress state: %w", err)
+		}
+		changed = true
+		return nil
+	}); err != nil {
+		return runtimeingress.State{}, false, err
 	}
-	state, err := s.LoadRuntimeIngressState(ctx)
-	return state, true, err
+	return state, changed, nil
 }
 
 func (s *SQLiteRuntimeStore) SetRuntimeIngressTransitionEvent(ctx context.Context, target runtimeingress.Status, eventID string, transitionAt time.Time) (bool, error) {
@@ -583,18 +572,28 @@ func (s *SQLiteRuntimeStore) SetRuntimeIngressTransitionEvent(ctx context.Contex
 	if eventID == "" {
 		return false, nil
 	}
-	res, err := s.DB.ExecContext(ctx, `
-		UPDATE runtime_ingress_state
-		SET transition_event_id = ?, updated_at = ?
-		WHERE id = 1
-		  AND status = ?
-		  AND updated_at = ?
-	`, eventID, transitionAt.UTC(), string(target), transitionAt.UTC())
-	if err != nil {
+	updated := false
+	if err := s.runRuntimeMutation(ctx, "sqlite runtime ingress transition event", func(txctx context.Context, tx *sql.Tx) error {
+		res, err := tx.ExecContext(txctx, `
+			UPDATE runtime_ingress_state
+			SET transition_event_id = ?, updated_at = ?
+			WHERE id = 1
+			  AND status = ?
+			  AND updated_at = ?
+		`, eventID, transitionAt.UTC(), string(target), transitionAt.UTC())
+		if err != nil {
+			return err
+		}
+		rows, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		updated = rows > 0
+		return nil
+	}); err != nil {
 		return false, fmt.Errorf("set sqlite runtime ingress transition event: %w", err)
 	}
-	rows, err := res.RowsAffected()
-	return rows > 0, err
+	return updated, nil
 }
 
 func (s *SQLiteRuntimeStore) StopRunControl(ctx context.Context, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.State, error) {
@@ -640,37 +639,27 @@ func (s *SQLiteRuntimeStore) sqliteRunControlTransition(ctx context.Context, req
 	if req.ControlledBy = strings.TrimSpace(req.ControlledBy); req.ControlledBy == "" {
 		req.ControlledBy = "api.v1"
 	}
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return runtimeruncontrol.State{}, fmt.Errorf("begin sqlite run control transition: %w", err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
+	var state runtimeruncontrol.State
+	if err := s.runRuntimeMutation(ctx, "sqlite run control transition", func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		state, err = sqliteLoadRunControlState(txctx, tx, runID)
+		if err != nil {
+			return err
 		}
-	}()
-	state, err := sqliteLoadRunControlState(ctx, tx, runID)
-	if err != nil {
+		switch action {
+		case "pause":
+			state, err = sqlitePauseRunControl(txctx, tx, state, req)
+		case "continue":
+			state, err = sqliteContinueRunControl(txctx, tx, state, req)
+		case "stop":
+			state, err = sqliteStopRunControl(txctx, tx, state, req)
+		default:
+			err = fmt.Errorf("unsupported run control action %q", action)
+		}
+		return err
+	}); err != nil {
 		return runtimeruncontrol.State{}, err
 	}
-	switch action {
-	case "pause":
-		state, err = sqlitePauseRunControl(ctx, tx, state, req)
-	case "continue":
-		state, err = sqliteContinueRunControl(ctx, tx, state, req)
-	case "stop":
-		state, err = sqliteStopRunControl(ctx, tx, state, req)
-	default:
-		err = fmt.Errorf("unsupported run control action %q", action)
-	}
-	if err != nil {
-		return runtimeruncontrol.State{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return runtimeruncontrol.State{}, fmt.Errorf("commit sqlite run control transition: %w", err)
-	}
-	committed = true
 	return state, nil
 }
 
@@ -707,11 +696,16 @@ func (s *SQLiteRuntimeStore) WithAPIIdempotency(ctx context.Context, req APIIdem
 	lock.Lock()
 	defer lock.Unlock()
 
-	if err := purgeExpiredSQLiteAPIIdempotency(ctx, s.DB, req.Now); err != nil {
-		return APIIdempotencyCompletion{}, false, err
-	}
-	existing, ok, err := sqliteLoadAPIIdempotency(ctx, s.DB, req)
-	if err != nil {
+	var existing apiIdempotencyRecord
+	var ok bool
+	if err := s.runRuntimeMutation(ctx, "sqlite api idempotency lookup", func(txctx context.Context, tx *sql.Tx) error {
+		if err := purgeExpiredSQLiteAPIIdempotency(txctx, tx, req.Now); err != nil {
+			return err
+		}
+		var err error
+		existing, ok, err = sqliteLoadAPIIdempotency(txctx, tx, req)
+		return err
+	}); err != nil {
 		return APIIdempotencyCompletion{}, false, err
 	}
 	if ok {
@@ -738,7 +732,9 @@ func (s *SQLiteRuntimeStore) WithAPIIdempotency(ctx context.Context, req APIIdem
 	if strings.TrimSpace(completion.ResourceID) == "" {
 		completion.ResourceID = req.ResourceID
 	}
-	if err := sqliteStoreAPIIdempotency(ctx, s.DB, req, completion); err != nil {
+	if err := s.runRuntimeMutation(ctx, "sqlite api idempotency completion", func(txctx context.Context, tx *sql.Tx) error {
+		return sqliteStoreAPIIdempotency(txctx, tx, req, completion)
+	}); err != nil {
 		return APIIdempotencyCompletion{}, false, err
 	}
 	return completion, false, nil

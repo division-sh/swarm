@@ -42,24 +42,10 @@ func (s *SQLiteRuntimeStore) MarkRunTerminal(ctx context.Context, runID, status,
 	if s == nil || s.DB == nil {
 		return fmt.Errorf("sqlite runtime store is required")
 	}
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin sqlite mark run terminal tx: %w", err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
-	if _, err := s.sqliteMarkRunTerminalTx(ctx, tx, runID, status, errorSummary, endedAt); err != nil {
+	return s.runRuntimeMutation(ctx, "sqlite mark run terminal", func(txctx context.Context, tx *sql.Tx) error {
+		_, err := s.sqliteMarkRunTerminalTx(txctx, tx, runID, status, errorSummary, endedAt)
 		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit sqlite mark run terminal tx: %w", err)
-	}
-	committed = true
-	return nil
+	})
 }
 
 func (s *SQLiteRuntimeStore) ConvergeStandaloneRuntimePlatformRun(ctx context.Context, evt events.Event) error {
@@ -70,49 +56,24 @@ func (s *SQLiteRuntimeStore) ConvergeStandaloneRuntimePlatformRun(ctx context.Co
 	if eventID == "" {
 		return nil
 	}
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin sqlite standalone platform run convergence tx: %w", err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
-	rec, found, err := sqliteLoadStandaloneRuntimePlatformRunRecord(ctx, tx, eventID)
-	if err != nil || !found || !isStandaloneRuntimePlatformRunRecord(rec) {
-		return err
-	}
-	switch strings.TrimSpace(rec.RunStatus) {
-	case "completed":
-		committed = true
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("commit sqlite standalone platform run convergence noop tx: %w", err)
-		}
-		return nil
-	case "failed", "cancelled", "forked":
-		return fmt.Errorf("standalone runtime platform run %s already terminal with status %s", rec.RunID, strings.TrimSpace(rec.RunStatus))
-	}
-	active, err := sqliteHasActiveRunDeliveries(ctx, tx, rec.RunID)
-	if err != nil || active {
-		if err != nil {
+	return s.runRuntimeMutation(ctx, "sqlite standalone platform run convergence", func(txctx context.Context, tx *sql.Tx) error {
+		rec, found, err := sqliteLoadStandaloneRuntimePlatformRunRecord(txctx, tx, eventID)
+		if err != nil || !found || !isStandaloneRuntimePlatformRunRecord(rec) {
 			return err
 		}
-		committed = true
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("commit sqlite standalone platform active-delivery noop tx: %w", err)
+		switch strings.TrimSpace(rec.RunStatus) {
+		case "completed":
+			return nil
+		case "failed", "cancelled", "forked":
+			return fmt.Errorf("standalone runtime platform run %s already terminal with status %s", rec.RunID, strings.TrimSpace(rec.RunStatus))
 		}
-		return nil
-	}
-	if _, err := s.sqliteMarkRunTerminalTx(ctx, tx, rec.RunID, "completed", "", s.now()); err != nil {
+		active, err := sqliteHasActiveRunDeliveries(txctx, tx, rec.RunID)
+		if err != nil || active {
+			return err
+		}
+		_, err = s.sqliteMarkRunTerminalTx(txctx, tx, rec.RunID, "completed", "", s.now())
 		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit sqlite standalone platform run convergence tx: %w", err)
-	}
-	committed = true
-	return nil
+	})
 }
 
 func (s *SQLiteRuntimeStore) ConvergeNormalRunCompletion(ctx context.Context, eventID string, workflowTerminalStates []string, flowTerminalStates map[string][]string) error {
@@ -135,63 +96,30 @@ func (s *SQLiteRuntimeStore) ConvergeNormalRunCompletion(ctx context.Context, ev
 	if !normalRunCompletionSupported(caps) {
 		return nil
 	}
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin sqlite normal run completion tx: %w", err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
-	candidate, found, err := sqliteNormalRunCompletionCandidateTx(ctx, tx, eventID)
-	if err != nil || !found {
-		return err
-	}
-	switch candidate.Status {
-	case "completed":
-		committed = true
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("commit sqlite normal run completion noop tx: %w", err)
-		}
-		return nil
-	case "running":
-	default:
-		committed = true
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("commit sqlite normal run completion non-running noop tx: %w", err)
-		}
-		return nil
-	}
-	if platformRec, platformFound, err := sqliteLoadStandaloneRuntimePlatformRunRecord(ctx, tx, eventID); err != nil {
-		return err
-	} else if platformFound && isStandaloneRuntimePlatformRunRecord(platformRec) {
-		committed = true
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("commit sqlite normal run completion platform noop tx: %w", err)
-		}
-		return nil
-	}
-	ready, err := s.sqliteNormalRunCompletionRunReadyTx(ctx, tx, candidate.RunID, workflowTerminals, flowTerminals)
-	if err != nil || !ready {
-		if err != nil {
+	return s.runRuntimeMutation(ctx, "sqlite normal run completion", func(txctx context.Context, tx *sql.Tx) error {
+		candidate, found, err := sqliteNormalRunCompletionCandidateTx(txctx, tx, eventID)
+		if err != nil || !found {
 			return err
 		}
-		committed = true
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("commit sqlite normal run completion not-ready noop tx: %w", err)
+		switch candidate.Status {
+		case "completed":
+			return nil
+		case "running":
+		default:
+			return nil
 		}
-		return nil
-	}
-	if _, err := s.sqliteMarkRunTerminalTx(ctx, tx, candidate.RunID, "completed", "", s.now()); err != nil {
+		if platformRec, platformFound, err := sqliteLoadStandaloneRuntimePlatformRunRecord(txctx, tx, eventID); err != nil {
+			return err
+		} else if platformFound && isStandaloneRuntimePlatformRunRecord(platformRec) {
+			return nil
+		}
+		ready, err := s.sqliteNormalRunCompletionRunReadyTx(txctx, tx, candidate.RunID, workflowTerminals, flowTerminals)
+		if err != nil || !ready {
+			return err
+		}
+		_, err = s.sqliteMarkRunTerminalTx(txctx, tx, candidate.RunID, "completed", "", s.now())
 		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit sqlite normal run completion tx: %w", err)
-	}
-	committed = true
-	return nil
+	})
 }
 
 func (s *SQLiteRuntimeStore) sqliteLoadRunLifecycleSnapshot(ctx context.Context, q execQueryer, runID string) (storerunlifecycle.Snapshot, error) {

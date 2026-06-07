@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -153,16 +154,18 @@ func (s *SQLiteRuntimeStore) PersistRuntimeLog(ctx context.Context, record runti
 	if strings.TrimSpace(record.RunID) != "" {
 		return s.AppendEvent(ctx, evt)
 	}
-	_, err = s.DB.ExecContext(ctx, `
-		INSERT OR IGNORE INTO events (
-			event_id, run_id, event_name, entity_id, flow_instance, source_route, target_route, target_set,
-			scope, payload, chain_depth, produced_by, produced_by_type, source_event_id, created_at
-		)
-		VALUES (?, NULL, 'platform.runtime_log', NULL, NULL, '{}', '{}', '[]',
-			'global', ?, 0, 'runtime', 'platform', ?, ?)
-	`, evt.ID(), string(evt.Payload()), sqliteNullUUID(evt.ParentEventID()), evt.CreatedAt())
-	if err != nil {
-		return fmt.Errorf("persist sqlite runtime log: %w", err)
-	}
-	return nil
+	return s.runRuntimeMutation(ctx, "sqlite runtime log", func(txctx context.Context, tx *sql.Tx) error {
+		_, err := tx.ExecContext(txctx, `
+			INSERT OR IGNORE INTO events (
+				event_id, run_id, event_name, entity_id, flow_instance, source_route, target_route, target_set,
+				scope, payload, chain_depth, produced_by, produced_by_type, source_event_id, created_at
+			)
+			VALUES (?, NULL, 'platform.runtime_log', NULL, NULL, '{}', '{}', '[]',
+				'global', ?, 0, 'runtime', 'platform', ?, ?)
+		`, evt.ID(), string(evt.Payload()), sqliteNullUUID(evt.ParentEventID()), evt.CreatedAt())
+		if err != nil {
+			return fmt.Errorf("persist sqlite runtime log: %w", err)
+		}
+		return nil
+	})
 }

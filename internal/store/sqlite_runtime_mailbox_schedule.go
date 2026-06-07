@@ -41,17 +41,19 @@ func (s *SQLiteRuntimeStore) InsertMailboxItem(ctx context.Context, item runtime
 		scope = "entity"
 	}
 	status, decision := mailboxStateForStoredStatus(item.Status, item.Decision)
-	_, err := s.DB.ExecContext(ctx, `
-		INSERT INTO mailbox (
-			item_id, entity_id, flow_instance, scope, item_type, source_event_id,
-			from_agent, severity, summary, payload, status, decision, decision_notes,
-			notified, expires_at, created_at
-		)
-		VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, item.ID, sqliteNullUUID(coalesceMailboxEntityID(item)), scope, item.Type, sqliteNullUUID(item.EventID),
-		sqliteNullString(item.FromAgent), normalizeMailboxSeverity(item.Priority), sqliteNullString(item.Summary), string(item.Context),
-		status, sqliteNullString(decision), sqliteNullString(item.DecisionNotes), item.Notified, sqliteNullTime(item.TimeoutAt), time.Now().UTC())
-	if err != nil {
+	if err := s.runRuntimeMutation(ctx, "sqlite mailbox insert", func(txctx context.Context, tx *sql.Tx) error {
+		_, err := tx.ExecContext(txctx, `
+			INSERT INTO mailbox (
+				item_id, entity_id, flow_instance, scope, item_type, source_event_id,
+				from_agent, severity, summary, payload, status, decision, decision_notes,
+				notified, expires_at, created_at
+			)
+			VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, item.ID, sqliteNullUUID(coalesceMailboxEntityID(item)), scope, item.Type, sqliteNullUUID(item.EventID),
+			sqliteNullString(item.FromAgent), normalizeMailboxSeverity(item.Priority), sqliteNullString(item.Summary), string(item.Context),
+			status, sqliteNullString(decision), sqliteNullString(item.DecisionNotes), item.Notified, sqliteNullTime(item.TimeoutAt), time.Now().UTC())
+		return err
+	}); err != nil {
 		return "", fmt.Errorf("insert sqlite mailbox item: %w", err)
 	}
 	return item.ID, nil
@@ -121,15 +123,22 @@ func (s *SQLiteRuntimeStore) DecideMailboxItem(ctx context.Context, id, status, 
 		return err
 	}
 	rowStatus, rowDecision := mailboxDecisionState(status, decision)
-	res, err := s.DB.ExecContext(ctx, `
-		UPDATE mailbox
-		SET status = ?, decision = ?, decision_notes = ?, decided_at = ?
-		WHERE item_id = ? AND status = 'pending'
-	`, rowStatus, rowDecision, sqliteNullString(notes), time.Now().UTC(), id)
-	if err != nil {
+	var rows int64
+	if err := s.runRuntimeMutation(ctx, "sqlite mailbox decision", func(txctx context.Context, tx *sql.Tx) error {
+		res, err := tx.ExecContext(txctx, `
+			UPDATE mailbox
+			SET status = ?, decision = ?, decision_notes = ?, decided_at = ?
+			WHERE item_id = ? AND status = 'pending'
+		`, rowStatus, rowDecision, sqliteNullString(notes), time.Now().UTC(), id)
+		if err != nil {
+			return err
+		}
+		rows, _ = res.RowsAffected()
+		return nil
+	}); err != nil {
 		return fmt.Errorf("decide sqlite mailbox item: %w", err)
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
+	if rows == 0 {
 		return fmt.Errorf("mailbox item is not pending or not found: %s", id)
 	}
 	return nil
@@ -139,31 +148,37 @@ func (s *SQLiteRuntimeStore) ExpireMailboxItems(ctx context.Context, limit int) 
 	if limit <= 0 {
 		limit = 200
 	}
-	rows, err := s.DB.QueryContext(ctx, sqliteMailboxSelectSQL(`status = 'pending' AND expires_at IS NOT NULL AND expires_at <= ?`)+` ORDER BY expires_at ASC LIMIT ?`, time.Now().UTC(), limit)
-	if err != nil {
-		return nil, fmt.Errorf("query expiring sqlite mailbox items: %w", err)
-	}
-	items, err := scanSpecMailboxItems(rows)
-	rows.Close()
-	if err != nil {
+	var items []runtimetools.MailboxItem
+	if err := s.runRuntimeMutation(ctx, "sqlite mailbox expiry", func(txctx context.Context, tx *sql.Tx) error {
+		rows, err := tx.QueryContext(txctx, sqliteMailboxSelectSQL(`status = 'pending' AND expires_at IS NOT NULL AND expires_at <= ?`)+` ORDER BY expires_at ASC LIMIT ?`, time.Now().UTC(), limit)
+		if err != nil {
+			return fmt.Errorf("query expiring sqlite mailbox items: %w", err)
+		}
+		items, err = scanSpecMailboxItems(rows)
+		rows.Close()
+		if err != nil {
+			return err
+		}
+		now := time.Now().UTC()
+		for i, item := range items {
+			if _, err := tx.ExecContext(txctx, `
+				UPDATE mailbox
+				SET status = 'expired',
+				    decision = COALESCE(NULLIF(decision, ''), ''),
+				    decision_notes = COALESCE(NULLIF(decision_notes, ''), 'Timed out without human decision'),
+				    decided_at = COALESCE(decided_at, ?)
+				WHERE item_id = ? AND status = 'pending'
+			`, now, item.ID); err != nil {
+				return fmt.Errorf("expire sqlite mailbox item: %w", err)
+			}
+			items[i].Status = "expired"
+			if strings.TrimSpace(items[i].DecisionNotes) == "" {
+				items[i].DecisionNotes = "Timed out without human decision"
+			}
+		}
+		return nil
+	}); err != nil {
 		return nil, err
-	}
-	now := time.Now().UTC()
-	for i, item := range items {
-		if _, err := s.DB.ExecContext(ctx, `
-			UPDATE mailbox
-			SET status = 'expired',
-			    decision = COALESCE(NULLIF(decision, ''), ''),
-			    decision_notes = COALESCE(NULLIF(decision_notes, ''), 'Timed out without human decision'),
-			    decided_at = COALESCE(decided_at, ?)
-			WHERE item_id = ? AND status = 'pending'
-		`, now, item.ID); err != nil {
-			return nil, fmt.Errorf("expire sqlite mailbox item: %w", err)
-		}
-		items[i].Status = "expired"
-		if strings.TrimSpace(items[i].DecisionNotes) == "" {
-			items[i].DecisionNotes = "Timed out without human decision"
-		}
 	}
 	return items, nil
 }
@@ -188,7 +203,10 @@ func (s *SQLiteRuntimeStore) MarkMailboxItemNotified(ctx context.Context, id str
 	if id == "" {
 		return fmt.Errorf("mailbox id is required")
 	}
-	if _, err := s.DB.ExecContext(ctx, `UPDATE mailbox SET notified = true WHERE item_id = ?`, id); err != nil {
+	if err := s.runRuntimeMutation(ctx, "sqlite mailbox notified", func(txctx context.Context, tx *sql.Tx) error {
+		_, err := tx.ExecContext(txctx, `UPDATE mailbox SET notified = true WHERE item_id = ?`, id)
+		return err
+	}); err != nil {
 		return fmt.Errorf("mark sqlite mailbox item notified: %w", err)
 	}
 	return nil
@@ -215,9 +233,6 @@ func (s *SQLiteRuntimeStore) UpsertSchedule(ctx context.Context, sc runtimepipel
 	sc.NormalizeRunID()
 	sc.NormalizeEntityID()
 	sc.NormalizeFlowInstance()
-	if err := s.CancelScheduleExact(ctx, sc); err != nil {
-		return err
-	}
 	fireAt := sc.At
 	if fireAt.IsZero() {
 		fireAt = time.Now().UTC()
@@ -234,16 +249,21 @@ func (s *SQLiteRuntimeStore) UpsertSchedule(ctx context.Context, sc runtimepipel
 	if timerName == "" {
 		timerName = strings.TrimSpace(sc.EventType)
 	}
-	exec := sqliteScheduleDBExecutor(ctx, s.DB)
-	_, err := exec.ExecContext(ctx, `
-		INSERT INTO timers (
-			timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
-			fire_at, recurring, recurrence_cron, owner_agent, task_type, status, created_at
-		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
-	`, uuid.NewString(), sqliteNullUUID(sc.RunID), timerName, sqliteNullUUID(sc.EntityID), sqliteNullString(sc.FlowInstance),
-		sc.EventType, string(persistedSchedulePayload(sc)), fireAt.UTC(), recurring, sqliteNullString(sc.Cron), sc.AgentID, taskType, time.Now().UTC())
-	if err != nil {
+	if err := s.runRuntimeMutation(ctx, "sqlite schedule upsert", func(txctx context.Context, tx *sql.Tx) error {
+		if err := s.CancelScheduleExact(txctx, sc); err != nil {
+			return err
+		}
+		exec := sqliteScheduleDBExecutor(txctx, s.DB)
+		_, err := exec.ExecContext(txctx, `
+			INSERT INTO timers (
+				timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
+				fire_at, recurring, recurrence_cron, owner_agent, task_type, status, created_at
+			)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
+		`, uuid.NewString(), sqliteNullUUID(sc.RunID), timerName, sqliteNullUUID(sc.EntityID), sqliteNullString(sc.FlowInstance),
+			sc.EventType, string(persistedSchedulePayload(sc)), fireAt.UTC(), recurring, sqliteNullString(sc.Cron), sc.AgentID, taskType, time.Now().UTC())
+		return err
+	}); err != nil {
 		return fmt.Errorf("insert sqlite timer: %w", err)
 	}
 	return nil
@@ -254,19 +274,21 @@ func (s *SQLiteRuntimeStore) CancelScheduleExact(ctx context.Context, sc runtime
 	sc.NormalizeRunID()
 	sc.NormalizeEntityID()
 	sc.NormalizeFlowInstance()
-	exec := sqliteScheduleDBExecutor(ctx, s.DB)
-	_, err := exec.ExecContext(ctx, `
-		UPDATE timers
-		SET status = 'cancelled'
-		WHERE COALESCE(run_id, '') = COALESCE(?, '')
-		  AND owner_agent = ?
-		  AND fire_event = ?
-		  AND COALESCE(entity_id, '') = COALESCE(?, '')
-		  AND COALESCE(flow_instance, '') = COALESCE(?, '')
-		  AND COALESCE(json_extract(fire_payload, '$.__schedule_task_id'), '') = ?
-		  AND status = 'active'
-	`, sqliteNullUUID(sc.RunID), sc.AgentID, sc.EventType, sqliteNullUUID(sc.EntityID), sqliteNullString(sc.FlowInstance), strings.TrimSpace(sc.TaskID))
-	if err != nil {
+	if err := s.runRuntimeMutation(ctx, "sqlite schedule cancel", func(txctx context.Context, tx *sql.Tx) error {
+		exec := sqliteScheduleDBExecutor(txctx, s.DB)
+		_, err := exec.ExecContext(txctx, `
+			UPDATE timers
+			SET status = 'cancelled'
+			WHERE COALESCE(run_id, '') = COALESCE(?, '')
+			  AND owner_agent = ?
+			  AND fire_event = ?
+			  AND COALESCE(entity_id, '') = COALESCE(?, '')
+			  AND COALESCE(flow_instance, '') = COALESCE(?, '')
+			  AND COALESCE(json_extract(fire_payload, '$.__schedule_task_id'), '') = ?
+			  AND status = 'active'
+		`, sqliteNullUUID(sc.RunID), sc.AgentID, sc.EventType, sqliteNullUUID(sc.EntityID), sqliteNullString(sc.FlowInstance), strings.TrimSpace(sc.TaskID))
+		return err
+	}); err != nil {
 		return fmt.Errorf("cancel sqlite timer exact: %w", err)
 	}
 	return nil
@@ -319,19 +341,21 @@ func (s *SQLiteRuntimeStore) MarkScheduleFiredExact(ctx context.Context, sc runt
 	sc.NormalizeRunID()
 	sc.NormalizeEntityID()
 	sc.NormalizeFlowInstance()
-	exec := sqliteScheduleDBExecutor(ctx, s.DB)
-	_, err := exec.ExecContext(ctx, `
-		UPDATE timers
-		SET status = 'fired', fired_at = ?
-		WHERE COALESCE(run_id, '') = COALESCE(?, '')
-		  AND owner_agent = ?
-		  AND fire_event = ?
-		  AND COALESCE(entity_id, '') = COALESCE(?, '')
-		  AND COALESCE(flow_instance, '') = COALESCE(?, '')
-		  AND COALESCE(json_extract(fire_payload, '$.__schedule_task_id'), '') = ?
-		  AND status = 'active'
-	`, time.Now().UTC(), sqliteNullUUID(sc.RunID), sc.AgentID, sc.EventType, sqliteNullUUID(sc.EntityID), sqliteNullString(sc.FlowInstance), strings.TrimSpace(sc.TaskID))
-	if err != nil {
+	if err := s.runRuntimeMutation(ctx, "sqlite schedule fired", func(txctx context.Context, tx *sql.Tx) error {
+		exec := sqliteScheduleDBExecutor(txctx, s.DB)
+		_, err := exec.ExecContext(txctx, `
+			UPDATE timers
+			SET status = 'fired', fired_at = ?
+			WHERE COALESCE(run_id, '') = COALESCE(?, '')
+			  AND owner_agent = ?
+			  AND fire_event = ?
+			  AND COALESCE(entity_id, '') = COALESCE(?, '')
+			  AND COALESCE(flow_instance, '') = COALESCE(?, '')
+			  AND COALESCE(json_extract(fire_payload, '$.__schedule_task_id'), '') = ?
+			  AND status = 'active'
+		`, time.Now().UTC(), sqliteNullUUID(sc.RunID), sc.AgentID, sc.EventType, sqliteNullUUID(sc.EntityID), sqliteNullString(sc.FlowInstance), strings.TrimSpace(sc.TaskID))
+		return err
+	}); err != nil {
 		return fmt.Errorf("mark sqlite timer fired exact: %w", err)
 	}
 	return nil

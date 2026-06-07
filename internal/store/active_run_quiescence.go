@@ -242,103 +242,99 @@ func (s *SQLiteRuntimeStore) ApplyActiveRunQuiescence(ctx context.Context, req r
 		deliveryNote = out.ReasonCode
 	}
 
-	runIDs := normalizeQuiescenceRunIDs(req.RunIDs)
-	if len(runIDs) == 0 && !req.AllActiveRuns {
+	requestedRunIDs := normalizeQuiescenceRunIDs(req.RunIDs)
+	if len(requestedRunIDs) == 0 && !req.AllActiveRuns {
 		return out, nil
 	}
 
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return runtimerunquiescence.Result{}, fmt.Errorf("begin sqlite active run quiescence tx: %w", err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
+	baseOut := out
+	if err := s.runRuntimeMutation(ctx, "sqlite active run quiescence", func(txctx context.Context, tx *sql.Tx) error {
+		attemptOut := baseOut
+		var runs []runtimerunquiescence.QuiescedRun
+		var err error
+		if req.AllActiveRuns {
+			runs, err = sqliteLockAllActiveQuiescenceRunsTx(txctx, tx)
+		} else {
+			runs, err = sqliteLockActiveQuiescenceRunsTx(txctx, tx, requestedRunIDs)
 		}
-	}()
+		if err != nil {
+			return err
+		}
+		attemptRunIDs := quiescenceRunIDs(runs)
+		if len(attemptRunIDs) == 0 {
+			out = attemptOut
+			return nil
+		}
+		deliveries, err := sqliteLockActiveRunQuiescenceDeliveriesTx(txctx, tx, attemptRunIDs)
+		if err != nil {
+			return err
+		}
+		for _, delivery := range deliveries {
+			attemptOut.Deliveries = append(attemptOut.Deliveries, runtimerunquiescence.QuiescedDelivery{
+				DeliveryID:      delivery.DeliveryID,
+				RunID:           delivery.RunID,
+				EventID:         delivery.EventID,
+				SubscriberType:  delivery.SubscriberType,
+				SubscriberID:    delivery.SubscriberID,
+				PreviousStatus:  delivery.Status,
+				Status:          "dead_letter",
+				ReasonCode:      attemptOut.ReasonCode,
+				PreviousReason:  delivery.ReasonCode,
+				ActiveSessionID: delivery.ActiveSessionID,
+				Changed:         delivery.Status != "dead_letter" || delivery.ReasonCode != attemptOut.ReasonCode,
+			})
+		}
+		for _, run := range runs {
+			nextStatus := run.Status
+			changed := false
+			if activeRunQuiescenceRunStatusActive(run.Status) {
+				nextStatus = "cancelled"
+				changed = true
+			}
+			attemptOut.Runs = append(attemptOut.Runs, runtimerunquiescence.QuiescedRun{
+				RunID:          run.RunID,
+				PreviousStatus: run.Status,
+				Status:         nextStatus,
+				ReasonCode:     attemptOut.ReasonCode,
+				Changed:        changed,
+			})
+		}
+		if req.DryRun {
+			out = attemptOut
+			return nil
+		}
 
-	var runs []runtimerunquiescence.QuiescedRun
-	if req.AllActiveRuns {
-		runs, err = sqliteLockAllActiveQuiescenceRunsTx(ctx, tx)
-	} else {
-		runs, err = sqliteLockActiveQuiescenceRunsTx(ctx, tx, runIDs)
-	}
-	if err != nil {
+		eventIDs := map[string]struct{}{}
+		for _, delivery := range deliveries {
+			if err := sqliteTerminalizeActiveRunQuiescenceDeliveryTx(txctx, tx, delivery, attemptOut.ReasonCode, deliveryNote, now); err != nil {
+				return err
+			}
+			if delivery.EventID != "" {
+				eventIDs[delivery.EventID] = struct{}{}
+			}
+		}
+		for eventID := range eventIDs {
+			if err := sqliteUpsertActiveRunQuiescencePipelineReceiptTx(txctx, tx, eventID, attemptOut.ReasonCode, deliveryNote, now); err != nil {
+				return err
+			}
+			attemptOut.PipelineReceiptCount++
+		}
+		for _, run := range runs {
+			if !activeRunQuiescenceRunStatusActive(run.Status) {
+				continue
+			}
+			if err := sqliteMarkActiveRunQuiescenceRunTerminalTx(txctx, tx, run.RunID, now); err != nil {
+				return err
+			}
+			if err := sqliteUpsertActiveRunQuiescenceRunControlTx(txctx, tx, run.RunID, attemptOut.ReasonCode, attemptOut.ControlledBy, now); err != nil {
+				return err
+			}
+		}
+		out = attemptOut
+		return nil
+	}); err != nil {
 		return runtimerunquiescence.Result{}, err
 	}
-	runIDs = quiescenceRunIDs(runs)
-	if len(runIDs) == 0 {
-		return out, nil
-	}
-	deliveries, err := sqliteLockActiveRunQuiescenceDeliveriesTx(ctx, tx, runIDs)
-	if err != nil {
-		return runtimerunquiescence.Result{}, err
-	}
-	for _, delivery := range deliveries {
-		out.Deliveries = append(out.Deliveries, runtimerunquiescence.QuiescedDelivery{
-			DeliveryID:      delivery.DeliveryID,
-			RunID:           delivery.RunID,
-			EventID:         delivery.EventID,
-			SubscriberType:  delivery.SubscriberType,
-			SubscriberID:    delivery.SubscriberID,
-			PreviousStatus:  delivery.Status,
-			Status:          "dead_letter",
-			ReasonCode:      out.ReasonCode,
-			PreviousReason:  delivery.ReasonCode,
-			ActiveSessionID: delivery.ActiveSessionID,
-			Changed:         delivery.Status != "dead_letter" || delivery.ReasonCode != out.ReasonCode,
-		})
-	}
-	for _, run := range runs {
-		nextStatus := run.Status
-		changed := false
-		if activeRunQuiescenceRunStatusActive(run.Status) {
-			nextStatus = "cancelled"
-			changed = true
-		}
-		out.Runs = append(out.Runs, runtimerunquiescence.QuiescedRun{
-			RunID:          run.RunID,
-			PreviousStatus: run.Status,
-			Status:         nextStatus,
-			ReasonCode:     out.ReasonCode,
-			Changed:        changed,
-		})
-	}
-	if req.DryRun {
-		return out, nil
-	}
-
-	eventIDs := map[string]struct{}{}
-	for _, delivery := range deliveries {
-		if err := sqliteTerminalizeActiveRunQuiescenceDeliveryTx(ctx, tx, delivery, out.ReasonCode, deliveryNote, now); err != nil {
-			return runtimerunquiescence.Result{}, err
-		}
-		if delivery.EventID != "" {
-			eventIDs[delivery.EventID] = struct{}{}
-		}
-	}
-	for eventID := range eventIDs {
-		if err := sqliteUpsertActiveRunQuiescencePipelineReceiptTx(ctx, tx, eventID, out.ReasonCode, deliveryNote, now); err != nil {
-			return runtimerunquiescence.Result{}, err
-		}
-		out.PipelineReceiptCount++
-	}
-	for _, run := range runs {
-		if !activeRunQuiescenceRunStatusActive(run.Status) {
-			continue
-		}
-		if err := sqliteMarkActiveRunQuiescenceRunTerminalTx(ctx, tx, run.RunID, now); err != nil {
-			return runtimerunquiescence.Result{}, err
-		}
-		if err := sqliteUpsertActiveRunQuiescenceRunControlTx(ctx, tx, run.RunID, out.ReasonCode, out.ControlledBy, now); err != nil {
-			return runtimerunquiescence.Result{}, err
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return runtimerunquiescence.Result{}, fmt.Errorf("commit sqlite active run quiescence tx: %w", err)
-	}
-	committed = true
 	return out, nil
 }
 

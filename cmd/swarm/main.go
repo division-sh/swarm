@@ -2474,7 +2474,7 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 			RuntimeLogStore:     sqliteStore,
 			SchemaBootstrapper:  sqliteStore,
 			EventStore:          sqliteStore,
-			PipelineStore:       runtimepipeline.NewSQLiteWorkflowInstanceStore(sqliteStore.DB),
+			PipelineStore:       runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(sqliteStore.DB, sqliteStore),
 			SessionRegistry:     sqliteStore,
 			ConversationStore:   sqliteStore,
 			ManagerStore:        sqliteStore,
