@@ -2549,10 +2549,13 @@ engine:
       scope: >
         SQLite supports explicit local-dev pipeline coordination for workflow instance state, pipeline engine transaction/query
         persistence, background-node receipt settlement, pipeline receipt replay, process-local replay claims, and committed
-        replay scope consumption. Postgres remains authoritative for production cross-runtime transaction and claim semantics.
+        replay scope consumption. SQLite pipeline transactions own process-local serialization plus bounded SQLITE_BUSY /
+        database-locked retry at WorkflowInstanceStore.RunInPipelineTransaction, so pipeline producers do not branch on
+        backend write contention. Postgres remains authoritative for production cross-runtime transaction and claim semantics.
       excludes:
       - tool executor entity and human-task persistence owned by runtime_tool_entity_and_human_task_rows
       - runtime diagnostics/logging owned by #1150
+      - broader runtime mutation-store write serialization outside WorkflowInstanceStore owned by #1388
     - name: runtime_budget_spend_rows
       owner: internal/runtime/budgetspend.Store consumed through runtime.Stores.BudgetSpendStore and internal/runtime.BudgetTracker
       sqlite_owner: internal/store.SQLiteRuntimeStore budget/spend methods over spend_ledger and entity_state

@@ -116,7 +116,13 @@ const (
 
 var workflowInstancePathNamespace = uuid.MustParse("5e7507c8-bd4f-46e0-a098-b016dc31df23")
 
-const workflowInstanceTimerOwnerNode = "workflow_instance_store"
+const (
+	workflowInstanceTimerOwnerNode = "workflow_instance_store"
+
+	sqlitePipelineTransactionMaxAttempts = 100
+	sqlitePipelineTransactionBaseDelay   = 10 * time.Millisecond
+	sqlitePipelineTransactionMaxDelay    = 100 * time.Millisecond
+)
 
 type workflowCreateEntityInitialValuesContextKey struct{}
 
@@ -408,11 +414,61 @@ func (s *WorkflowInstanceStore) RunInPipelineTransaction(ctx context.Context, fn
 	if fn == nil {
 		return nil
 	}
-	if s == nil || s.db == nil {
-		return fn(ctx, nil)
-	}
 	if tx, ok := sqlTxFromContext(ctx); ok && tx != nil {
 		return fn(ctx, tx)
+	}
+	if s.isSQLite() {
+		return s.runInSQLitePipelineTransaction(ctx, fn)
+	}
+	return s.runInPipelineTransactionOnce(ctx, fn)
+}
+
+func (s *WorkflowInstanceStore) runInSQLitePipelineTransaction(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
+	var lastErr error
+	for attempt := 0; attempt < sqlitePipelineTransactionMaxAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		err := s.runInPipelineTransactionOnce(ctx, fn)
+		if err == nil || !sqlitePipelineBusyError(err) {
+			return err
+		}
+		lastErr = err
+		delay := sqlitePipelineTransactionRetryDelay(attempt)
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return lastErr
+}
+
+func sqlitePipelineTransactionRetryDelay(attempt int) time.Duration {
+	delay := time.Duration(attempt+1) * sqlitePipelineTransactionBaseDelay
+	if delay > sqlitePipelineTransactionMaxDelay {
+		return sqlitePipelineTransactionMaxDelay
+	}
+	return delay
+}
+
+func sqlitePipelineBusyError(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.ToLower(err.Error())
+	return strings.Contains(text, "sqlite_busy") ||
+		strings.Contains(text, "sqlite_locked") ||
+		strings.Contains(text, "database is locked") ||
+		strings.Contains(text, "database table is locked") ||
+		strings.Contains(text, "database is busy")
+}
+
+func (s *WorkflowInstanceStore) runInPipelineTransactionOnce(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
+	if s == nil || s.db == nil {
+		return fn(ctx, nil)
 	}
 	// SQLite has a single writer. Keep the local-dev pipeline transaction
 	// boundary authoritative instead of letting sibling handler activations
