@@ -415,7 +415,7 @@ func (s *WorkflowInstanceStore) RunInPipelineTransaction(ctx context.Context, fn
 }
 
 func (s *WorkflowInstanceStore) runInSQLitePipelineTransaction(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
-	const maxAttempts = 25
+	const maxAttempts = 100
 	var lastErr error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		err := s.runInPipelineTransactionOnce(ctx, fn)
@@ -427,6 +427,9 @@ func (s *WorkflowInstanceStore) runInSQLitePipelineTransaction(ctx context.Conte
 		// owner is between short write transactions. Retry the whole pipeline
 		// transaction so partial writes are rolled back before the next attempt.
 		delay := time.Duration(attempt+1) * 10 * time.Millisecond
+		if delay > 100*time.Millisecond {
+			delay = 100 * time.Millisecond
+		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
