@@ -35,16 +35,27 @@ type Signal struct {
 	At             time.Time
 }
 
+type Cursor struct {
+	nextSequence uint64
+}
+
 type Probe struct {
-	mu      sync.Mutex
-	history []Signal
-	waiters map[uint64]waiter
-	nextID  uint64
+	mu           sync.Mutex
+	history      []recordedSignal
+	waiters      map[uint64]waiter
+	nextID       uint64
+	nextSequence uint64
 }
 
 type waiter struct {
-	want Signal
-	ch   chan Signal
+	after uint64
+	want  Signal
+	ch    chan recordedSignal
+}
+
+type recordedSignal struct {
+	sequence uint64
+	signal   Signal
 }
 
 const maxHistory = 4096
@@ -65,14 +76,19 @@ func (p *Probe) NotifyLifecycle(_ context.Context, signal Signal) {
 		signal.At = time.Now().UTC()
 	}
 	p.mu.Lock()
-	p.history = append(p.history, signal)
+	p.nextSequence++
+	record := recordedSignal{
+		sequence: p.nextSequence,
+		signal:   signal,
+	}
+	p.history = append(p.history, record)
 	if len(p.history) > maxHistory {
-		p.history = append([]Signal(nil), p.history[len(p.history)-maxHistory:]...)
+		p.history = append([]recordedSignal(nil), p.history[len(p.history)-maxHistory:]...)
 	}
 	for id, waiting := range p.waiters {
-		if signalMatches(waiting.want, signal) {
+		if record.sequence >= waiting.after && signalMatches(waiting.want, signal) {
 			delete(p.waiters, id)
-			waiting.ch <- signal
+			waiting.ch <- record
 			close(waiting.ch)
 		}
 	}
@@ -80,43 +96,52 @@ func (p *Probe) NotifyLifecycle(_ context.Context, signal Signal) {
 }
 
 func (p *Probe) Wait(ctx context.Context, want Signal) (Signal, error) {
+	signal, _, err := p.WaitAfter(ctx, Cursor{}, want)
+	return signal, err
+}
+
+func (p *Probe) WaitAfter(ctx context.Context, cursor Cursor, want Signal) (Signal, Cursor, error) {
 	if p == nil {
-		return Signal{}, errors.New("lifecycle probe is nil")
+		return Signal{}, Cursor{}, errors.New("lifecycle probe is nil")
 	}
 	want = want.Normalized()
 	if want.Kind == "" {
-		return Signal{}, errors.New("lifecycle probe wait kind is required")
+		return Signal{}, Cursor{}, errors.New("lifecycle probe wait kind is required")
 	}
 	if want.EventID == "" {
-		return Signal{}, errors.New("lifecycle probe wait event_id is required")
+		return Signal{}, Cursor{}, errors.New("lifecycle probe wait event_id is required")
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	after := cursor.nextSequence
+	if after == 0 {
+		after = 1
+	}
 	p.mu.Lock()
-	for _, signal := range p.history {
-		if signalMatches(want, signal) {
+	for _, record := range p.history {
+		if record.sequence >= after && signalMatches(want, record.signal) {
 			p.mu.Unlock()
-			return signal, nil
+			return record.signal, Cursor{nextSequence: record.sequence + 1}, nil
 		}
 	}
 	p.nextID++
 	id := p.nextID
-	ch := make(chan Signal, 1)
+	ch := make(chan recordedSignal, 1)
 	if p.waiters == nil {
 		p.waiters = make(map[uint64]waiter)
 	}
-	p.waiters[id] = waiter{want: want, ch: ch}
+	p.waiters[id] = waiter{after: after, want: want, ch: ch}
 	p.mu.Unlock()
 
 	select {
-	case signal := <-ch:
-		return signal, nil
+	case record := <-ch:
+		return record.signal, Cursor{nextSequence: record.sequence + 1}, nil
 	case <-ctx.Done():
 		p.mu.Lock()
 		delete(p.waiters, id)
 		p.mu.Unlock()
-		return Signal{}, fmt.Errorf("wait for lifecycle %s event %s: %w", want.Kind, want.EventID, ctx.Err())
+		return Signal{}, Cursor{}, fmt.Errorf("wait for lifecycle %s event %s: %w", want.Kind, want.EventID, ctx.Err())
 	}
 }
 
