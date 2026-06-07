@@ -3445,7 +3445,6 @@ func TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite(t *test
 		}
 		return stores, err
 	}
-	t.Cleanup(func() { buildStoresForServe = oldBuildStores })
 	endpoint, _ := startServedEventPublishFollowUpRuntime(t, serveOptions{
 		ConfigPath:              writeServeRuntimeTestConfig(t),
 		ContractsPath:           contractsPath,
@@ -4112,7 +4111,7 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	waitForServedEventPublishNodeDeliveryLifecycle(t, db, backend, runID, followUpEventID, probe)
 	requireServedEventPublishEntityState(t, db, backend, runID, entityID, "done")
 	requireServedEntityReadback(t, endpoint, runID, entityID, "done")
-	requireServedRunStatus(t, endpoint, db, backend, runID, "completed")
+	requireServedRunStatus(t, endpoint, runID, "completed")
 	requireServedEventReadback(t, endpoint, followUpEventID, runID, entityID, "validation/thing.reviewed", "entity-writer")
 	requireServedTraceReadback(t, endpoint, runID, followUpEventID, "validation/thing.reviewed", "entity-writer")
 
@@ -4265,7 +4264,7 @@ func requestServedJSONRPC(t *testing.T, endpoint, method string, params map[stri
 	return envelope
 }
 
-func requireServedRunStatus(t *testing.T, endpoint string, db *sql.DB, backend, runID, want string) {
+func requireServedRunStatus(t *testing.T, endpoint, runID, want string) {
 	t.Helper()
 	var last string
 	deadline := time.Now().Add(5 * time.Second)
@@ -4283,7 +4282,7 @@ func requireServedRunStatus(t *testing.T, endpoint string, db *sql.DB, backend, 
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	t.Fatalf("run.get status for %s = %q, want %q\n%s", runID, last, want, servedEventPublishDebugSummary(t, db, backend, runID))
+	t.Fatalf("run.get status for %s = %q, want %q", runID, last, want)
 }
 
 func requireServedStatusCLIReadback(t *testing.T, endpoint, runID, want string) {
