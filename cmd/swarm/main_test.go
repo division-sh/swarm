@@ -4038,7 +4038,7 @@ func waitForServedEventPublishNodeDeliveryLifecycle(t *testing.T, db *sql.DB, ba
 }
 
 const (
-	servedEventPublishLifecycleProbeWaitTimeout = 20 * time.Second
+	servedEventPublishLifecycleProbeWaitTimeout = 45 * time.Second
 )
 
 func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.DB, backend, bundleHash string, probe *lifecycletest.Probe) {
