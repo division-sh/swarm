@@ -32,7 +32,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
-	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
+	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -3435,7 +3435,7 @@ func TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite(t *test
 	t.Setenv(storebackend.EnvSQLitePath, sqlitePath)
 	contractsPath := writeServedEventPublishFollowUpFixture(t)
 	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
-	probe := runtimelifecycleprobe.New()
+	probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
 	oldBuildStores := buildStoresForServe
 	var servedDB *sql.DB
 	buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (storeBundle, error) {
@@ -3472,7 +3472,7 @@ func TestRunServeRuntimeEventPublishRunIDFollowUpServedPathPostgres(t *testing.T
 	})
 	contractsPath := writeServedEventPublishFollowUpFixture(t)
 	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
-	probe := runtimelifecycleprobe.New()
+	probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
 	endpoint, _ := startServedEventPublishFollowUpRuntime(t, serveOptions{
 		ConfigPath:              writeServeRuntimeTestConfig(t),
 		ContractsPath:           contractsPath,
@@ -4018,76 +4018,30 @@ func assertServedEventPublishDeliveriesContainStatus(t *testing.T, deliveries []
 	t.Fatalf("event.publish deliveries = %#v, want %s/%s status in %v", deliveries, subscriberType, subscriberID, statuses)
 }
 
-func waitForServedEventPublishNodeDeliveryLifecycle(t *testing.T, db *sql.DB, backend, runID, eventID string, probe *runtimelifecycleprobe.Probe) {
+func waitForServedEventPublishNodeDeliveryLifecycle(t *testing.T, db *sql.DB, backend, runID, eventID string, probe *lifecycletest.Probe) {
 	t.Helper()
-	waitForServedEventPublishPostCommitDispatch(t, probe, backend, eventID)
-	waitForServedEventPublishLifecycleDeliveryStatus(t, probe, backend, eventID, "entity-writer", "pending")
-	waitForServedEventPublishHandlerStarted(t, db, probe, backend, runID, eventID, "entity-writer")
-	waitForServedEventPublishHandlerCompleted(t, probe, backend, eventID, "entity-writer")
-	waitForServedEventPublishLifecycleDeliveryStatus(t, probe, backend, eventID, "entity-writer", "delivered")
+	if probe == nil {
+		t.Fatalf("%s lifecycle probe is required for event %s", backend, eventID)
+	}
+	probe.RequireNodePending(eventID, "entity-writer")
+	probe.Expect(eventID).
+		PostCommitDispatchStarted().
+		NodeInProgress("entity-writer").
+		HandlerStarted("entity-writer").
+		HandlerCompleted("entity-writer").
+		NodeDelivered("entity-writer").
+		PostCommitDispatchCompleted().
+		Within(servedEventPublishLifecycleProbeWaitTimeout)
+	if count := servedEventPublishNodeDeliveryCount(t, db, backend, runID, eventID, "entity-writer"); count != 1 {
+		t.Fatalf("%s node/entity-writer delivery count for event %s = %d, want 1\n%s", backend, eventID, count, servedEventPublishDebugSummary(t, db, backend, runID))
+	}
 }
 
 const (
 	servedEventPublishLifecycleProbeWaitTimeout = 20 * time.Second
 )
 
-func waitForServedEventPublishPostCommitDispatch(t *testing.T, probe *runtimelifecycleprobe.Probe, backend, eventID string) {
-	t.Helper()
-	if probe == nil {
-		t.Fatalf("%s lifecycle probe is required for post-commit dispatch on event %s", backend, eventID)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), servedEventPublishLifecycleProbeWaitTimeout)
-	defer cancel()
-	if _, err := probe.WaitForPostCommitDispatchStarted(ctx, eventID); err != nil {
-		t.Fatalf("%s post-commit dispatch started for event %s: %v", backend, eventID, err)
-	}
-	if _, err := probe.WaitForPostCommitDispatchCompleted(ctx, eventID); err != nil {
-		t.Fatalf("%s post-commit dispatch completed for event %s: %v", backend, eventID, err)
-	}
-}
-
-func waitForServedEventPublishLifecycleDeliveryStatus(t *testing.T, probe *runtimelifecycleprobe.Probe, backend, eventID, nodeID, status string) {
-	t.Helper()
-	if probe == nil {
-		t.Fatalf("%s lifecycle probe is required for node delivery %s on event %s", backend, status, eventID)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), servedEventPublishLifecycleProbeWaitTimeout)
-	defer cancel()
-	if _, err := probe.WaitForDeliveryStatus(ctx, eventID, "node", nodeID, status); err != nil {
-		t.Fatalf("%s node/%s delivery %s for event %s: %v", backend, nodeID, status, eventID, err)
-	}
-}
-
-func waitForServedEventPublishHandlerStarted(t *testing.T, db *sql.DB, probe *runtimelifecycleprobe.Probe, backend, runID, eventID, nodeID string) {
-	t.Helper()
-	if probe == nil {
-		t.Fatalf("%s lifecycle probe is required for handler start on event %s", backend, eventID)
-	}
-	if err := waitForServedEventPublishHandlerStartedSignal(probe, eventID, nodeID, servedEventPublishLifecycleProbeWaitTimeout); err != nil {
-		t.Fatalf("%s node/%s handler started for event %s: %v\n%s", backend, nodeID, eventID, err, servedEventPublishDebugSummary(t, db, backend, runID))
-	}
-}
-
-func waitForServedEventPublishHandlerStartedSignal(probe *runtimelifecycleprobe.Probe, eventID, nodeID string, timeout time.Duration) error {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	_, err := probe.WaitForHandlerStarted(ctx, eventID, nodeID)
-	return err
-}
-
-func waitForServedEventPublishHandlerCompleted(t *testing.T, probe *runtimelifecycleprobe.Probe, backend, eventID, nodeID string) {
-	t.Helper()
-	if probe == nil {
-		t.Fatalf("%s lifecycle probe is required for handler completion on event %s", backend, eventID)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), servedEventPublishLifecycleProbeWaitTimeout)
-	defer cancel()
-	if _, err := probe.WaitForHandlerCompleted(ctx, eventID, nodeID); err != nil {
-		t.Fatalf("%s node/%s handler completed for event %s: %v", backend, nodeID, eventID, err)
-	}
-}
-
-func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.DB, backend, bundleHash string, probe *runtimelifecycleprobe.Probe) {
+func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.DB, backend, bundleHash string, probe *lifecycletest.Probe) {
 	t.Helper()
 	beforeCreateRejectEvents := servedEventPublishScalarCount(t, db, backend, "events_all", "", "")
 	beforeCreateRejectIdempotency := servedEventPublishScalarCount(t, db, backend, "api_idempotency_all", "", "")
