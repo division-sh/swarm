@@ -765,11 +765,23 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		rt.emitBootProgress(8, "pipeline_maintenance", "skipped", "pipeline unavailable")
 	}
 	systemNodeCount := 0
+	var systemNodeReadyWG sync.WaitGroup
 	for _, node := range rt.SystemNodes {
 		if node != nil {
+			if readyHook, ok := node.(interface{ SetOnSubscribeHook(func()) }); ok {
+				systemNodeReadyWG.Add(1)
+				var readyOnce sync.Once
+				readyHook.SetOnSubscribeHook(func() {
+					readyOnce.Do(systemNodeReadyWG.Done)
+				})
+			}
 			go node.Run(startCtx)
 			systemNodeCount++
 		}
+	}
+	if err := waitForSystemNodeSubscriptionsReady(ctx, &systemNodeReadyWG); err != nil {
+		rt.emitBootProgress(9, "system_nodes_start", "FAILED", err.Error())
+		return err
 	}
 	rt.emitBootProgress(9, "system_nodes_start", "ok", fmt.Sprintf("%d nodes started", systemNodeCount))
 	if skipPersistentStartupRecovery {
@@ -986,6 +998,25 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	}
 	started = true
 	return nil
+}
+
+func waitForSystemNodeSubscriptionsReady(ctx context.Context, wg *sync.WaitGroup) error {
+	if wg == nil {
+		return nil
+	}
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(5 * time.Second):
+		return fmt.Errorf("timed out waiting for system node subscription readiness")
+	}
 }
 
 func (rt *Runtime) Shutdown() error {
