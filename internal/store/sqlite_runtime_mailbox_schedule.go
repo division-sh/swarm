@@ -253,8 +253,7 @@ func (s *SQLiteRuntimeStore) UpsertSchedule(ctx context.Context, sc runtimepipel
 		if err := s.CancelScheduleExact(txctx, sc); err != nil {
 			return err
 		}
-		exec := sqliteScheduleDBExecutor(txctx, s.DB)
-		_, err := exec.ExecContext(txctx, `
+		_, err := tx.ExecContext(txctx, `
 			INSERT INTO timers (
 				timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
 				fire_at, recurring, recurrence_cron, owner_agent, task_type, status, created_at
@@ -275,8 +274,7 @@ func (s *SQLiteRuntimeStore) CancelScheduleExact(ctx context.Context, sc runtime
 	sc.NormalizeEntityID()
 	sc.NormalizeFlowInstance()
 	if err := s.runRuntimeMutation(ctx, "sqlite schedule cancel", func(txctx context.Context, tx *sql.Tx) error {
-		exec := sqliteScheduleDBExecutor(txctx, s.DB)
-		_, err := exec.ExecContext(txctx, `
+		_, err := tx.ExecContext(txctx, `
 			UPDATE timers
 			SET status = 'cancelled'
 			WHERE COALESCE(run_id, '') = COALESCE(?, '')
@@ -342,8 +340,7 @@ func (s *SQLiteRuntimeStore) MarkScheduleFiredExact(ctx context.Context, sc runt
 	sc.NormalizeEntityID()
 	sc.NormalizeFlowInstance()
 	if err := s.runRuntimeMutation(ctx, "sqlite schedule fired", func(txctx context.Context, tx *sql.Tx) error {
-		exec := sqliteScheduleDBExecutor(txctx, s.DB)
-		_, err := exec.ExecContext(txctx, `
+		_, err := tx.ExecContext(txctx, `
 			UPDATE timers
 			SET status = 'fired', fired_at = ?
 			WHERE COALESCE(run_id, '') = COALESCE(?, '')
