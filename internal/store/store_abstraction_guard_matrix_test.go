@@ -111,6 +111,14 @@ func TestSelectedStoreAbstractionGuardMatrixRejectsStaleProofRefs(t *testing.T) 
 			},
 			want: "default_sqlite_required_smoke workflow proof_ref missing-sqlite-local-dev-job missing from .github/workflows/ci.yml",
 		},
+		{
+			name: "workflow proof path must be repo relative",
+			mutate: func(matrix *selectedStoreAbstractionGuardMatrix) {
+				row := selectedStoreAbstractionRowByID(t, matrix, "default_sqlite_required_smoke")
+				row.ProofRefs[0].Path = "../../etc/passwd"
+			},
+			want: "default_sqlite_required_smoke workflow proof_ref path ../../etc/passwd must be repo-relative",
+		},
 	}
 
 	for _, tc := range tests {
@@ -273,6 +281,10 @@ func validateSelectedStoreAbstractionProofRefs(root, rowID string, refs []select
 		case "workflow":
 			if strings.TrimSpace(ref.Path) == "" || strings.TrimSpace(ref.Name) == "" {
 				problems = append(problems, fmt.Sprintf("%s workflow proof_ref requires path and name", rowID))
+				continue
+			}
+			if filepath.IsAbs(ref.Path) || strings.HasPrefix(filepath.Clean(ref.Path), "..") {
+				problems = append(problems, fmt.Sprintf("%s workflow proof_ref path %s must be repo-relative", rowID, ref.Path))
 				continue
 			}
 			raw, err := os.ReadFile(filepath.Join(root, filepath.Clean(ref.Path)))
