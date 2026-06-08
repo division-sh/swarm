@@ -33,21 +33,27 @@ const (
 )
 
 type runtimeWriterCallSite struct {
-	Path                      string
-	Line                      int
-	Function                  string
-	Receiver                  string
-	Primitive                 string
-	Kind                      runtimeWriterPrimitiveKind
-	CallsRuntimeMutation      bool
-	CallsEventTransaction     bool
-	CallsPipelineTransaction  bool
-	UsesPipelineTxFromContext bool
-	FunctionContainsWrite     bool
-	FunctionContainsBegin     bool
-	FunctionContainsRead      bool
-	FunctionContainsBoundary  bool
-	FunctionSourceDescription string
+	Path                          string
+	Line                          int
+	Function                      string
+	Receiver                      string
+	ReceiverVariable              string
+	Primitive                     string
+	Kind                          runtimeWriterPrimitiveKind
+	CallReceiver                  string
+	CallsRuntimeMutation          bool
+	CallsEventTransaction         bool
+	CallsPipelineTransaction      bool
+	UsesPipelineTxFromContext     bool
+	InRuntimeMutationCallback     bool
+	InEventTransactionCallback    bool
+	InPipelineTransactionCallback bool
+	UsesBoundaryCallbackTx        bool
+	FunctionContainsWrite         bool
+	FunctionContainsBegin         bool
+	FunctionContainsRead          bool
+	FunctionContainsBoundary      bool
+	FunctionSourceDescription     string
 }
 
 type runtimeWriterAuditRow struct {
@@ -64,6 +70,15 @@ type runtimeWriterRule struct {
 	kinds          map[runtimeWriterPrimitiveKind]bool
 	classification runtimeWriterClassification
 	reason         string
+}
+
+type runtimeWriterBoundaryCallbackScope struct {
+	start       token.Pos
+	end         token.Pos
+	runtime     bool
+	event       bool
+	pipeline    bool
+	txParamName map[string]bool
 }
 
 func TestSelectedSQLiteRuntimeWriterBoundaryAudit(t *testing.T) {
@@ -125,6 +140,42 @@ func (s *SQLiteRuntimeStore) BadBypass(ctx context.Context) error {
 	}
 	if !strings.Contains(strings.Join(failures, "\n"), "BadBypass") {
 		t.Fatalf("expected failure to name BadBypass, got:\n%s", strings.Join(failures, "\n"))
+	}
+}
+
+func TestRuntimeWriterBoundaryGuardRejectsSameFunctionSQLiteBypassFixture(t *testing.T) {
+	const src = `package store
+
+import (
+	"context"
+	"database/sql"
+)
+
+type SQLiteRuntimeStore struct {
+	DB *sql.DB
+}
+
+func (store *SQLiteRuntimeStore) BadMixedBypass(ctx context.Context) error {
+	if err := store.runRuntimeMutation(ctx, "valid write", func(txctx context.Context, tx *sql.Tx) error {
+		_, err := tx.ExecContext(txctx, "INSERT INTO events(event_id) VALUES (?)", "inside")
+		return err
+	}); err != nil {
+		return err
+	}
+	_, err := store.DB.ExecContext(ctx, "INSERT INTO events(event_id) VALUES (?)", "outside")
+	return err
+}
+`
+	sites, err := collectRuntimeWriterCallSitesFromSource("internal/store/fixture_mixed_bypass.go", src)
+	if err != nil {
+		t.Fatalf("collect fixture call sites: %v", err)
+	}
+	_, failures := classifyRuntimeWriterCallSites(sites)
+	if len(failures) == 0 {
+		t.Fatal("expected selected SQLite same-function direct write bypass fixture to fail classification")
+	}
+	if !strings.Contains(strings.Join(failures, "\n"), "BadMixedBypass") {
+		t.Fatalf("expected failure to name BadMixedBypass, got:\n%s", strings.Join(failures, "\n"))
 	}
 }
 
@@ -232,9 +283,10 @@ func collectRuntimeWriterCallSitesFromSource(path, src string) ([]runtimeWriterC
 			continue
 		}
 		info := runtimeWriterFunctionInfo{
-			path:     filepath.ToSlash(path),
-			function: fn.Name.Name,
-			receiver: runtimeWriterReceiverName(fn),
+			path:             filepath.ToSlash(path),
+			function:         fn.Name.Name,
+			receiver:         runtimeWriterReceiverName(fn),
+			receiverVariable: runtimeWriterReceiverVariableName(fn),
 		}
 		ast.Inspect(fn.Body, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
@@ -269,6 +321,7 @@ func collectRuntimeWriterCallSitesFromSource(path, src string) ([]runtimeWriterC
 			}
 			return true
 		})
+		scopes := collectRuntimeWriterBoundaryCallbackScopes(fn.Body)
 		ast.Inspect(fn.Body, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
 			if !ok {
@@ -278,23 +331,31 @@ func collectRuntimeWriterCallSitesFromSource(path, src string) ([]runtimeWriterC
 			if !ok {
 				return true
 			}
+			callReceiver := runtimeWriterCallReceiver(call.Fun)
+			scope, inScope := innermostRuntimeWriterBoundaryCallbackScope(scopes, call.Pos())
 			pos := fset.Position(call.Pos())
 			out = append(out, runtimeWriterCallSite{
-				Path:                      info.path,
-				Line:                      pos.Line,
-				Function:                  info.function,
-				Receiver:                  info.receiver,
-				Primitive:                 primitive,
-				Kind:                      kind,
-				CallsRuntimeMutation:      info.callsRuntimeMutation,
-				CallsEventTransaction:     info.callsEventTransaction,
-				CallsPipelineTransaction:  info.callsPipelineTransaction,
-				UsesPipelineTxFromContext: info.usesPipelineTxFromContext,
-				FunctionContainsWrite:     info.containsWrite,
-				FunctionContainsBegin:     info.containsBegin,
-				FunctionContainsRead:      info.containsRead,
-				FunctionContainsBoundary:  info.containsBoundary,
-				FunctionSourceDescription: fmt.Sprintf("%s.%s", info.receiver, info.function),
+				Path:                          info.path,
+				Line:                          pos.Line,
+				Function:                      info.function,
+				Receiver:                      info.receiver,
+				ReceiverVariable:              info.receiverVariable,
+				Primitive:                     primitive,
+				Kind:                          kind,
+				CallReceiver:                  callReceiver,
+				CallsRuntimeMutation:          info.callsRuntimeMutation,
+				CallsEventTransaction:         info.callsEventTransaction,
+				CallsPipelineTransaction:      info.callsPipelineTransaction,
+				UsesPipelineTxFromContext:     info.usesPipelineTxFromContext,
+				InRuntimeMutationCallback:     inScope && scope.runtime,
+				InEventTransactionCallback:    inScope && scope.event,
+				InPipelineTransactionCallback: inScope && scope.pipeline,
+				UsesBoundaryCallbackTx:        inScope && scope.txParamName[callReceiver],
+				FunctionContainsWrite:         info.containsWrite,
+				FunctionContainsBegin:         info.containsBegin,
+				FunctionContainsRead:          info.containsRead,
+				FunctionContainsBoundary:      info.containsBoundary,
+				FunctionSourceDescription:     fmt.Sprintf("%s.%s", info.receiver, info.function),
 			})
 			return true
 		})
@@ -307,6 +368,7 @@ type runtimeWriterFunctionInfo struct {
 	path                      string
 	function                  string
 	receiver                  string
+	receiverVariable          string
 	callsRuntimeMutation      bool
 	callsEventTransaction     bool
 	callsPipelineTransaction  bool
@@ -333,12 +395,122 @@ func runtimeWriterPrimitive(call *ast.CallExpr) (string, runtimeWriterPrimitiveK
 	}
 }
 
+func collectRuntimeWriterBoundaryCallbackScopes(body ast.Node) []runtimeWriterBoundaryCallbackScope {
+	var scopes []runtimeWriterBoundaryCallbackScope
+	ast.Inspect(body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		primitive, _, ok := runtimeWriterPrimitive(call)
+		if !ok {
+			return true
+		}
+		scope := runtimeWriterBoundaryCallbackScope{}
+		switch primitive {
+		case "RunRuntimeMutation", "runRuntimeMutation":
+			scope.runtime = true
+		case "RunEventTransaction":
+			scope.event = true
+		case "RunInPipelineTransaction":
+			scope.pipeline = true
+		default:
+			return true
+		}
+		for _, arg := range call.Args {
+			lit, ok := arg.(*ast.FuncLit)
+			if !ok || lit.Body == nil {
+				continue
+			}
+			next := scope
+			next.start = lit.Body.Pos()
+			next.end = lit.Body.End()
+			next.txParamName = runtimeWriterCallbackTxParamNames(lit)
+			scopes = append(scopes, next)
+		}
+		return true
+	})
+	return scopes
+}
+
+func innermostRuntimeWriterBoundaryCallbackScope(scopes []runtimeWriterBoundaryCallbackScope, pos token.Pos) (runtimeWriterBoundaryCallbackScope, bool) {
+	var out runtimeWriterBoundaryCallbackScope
+	found := false
+	for _, scope := range scopes {
+		if pos < scope.start || pos > scope.end {
+			continue
+		}
+		if !found || (scope.end-scope.start) < (out.end-out.start) {
+			out = scope
+			found = true
+		}
+	}
+	return out, found
+}
+
+func runtimeWriterCallbackTxParamNames(lit *ast.FuncLit) map[string]bool {
+	out := map[string]bool{}
+	if lit == nil || lit.Type == nil || lit.Type.Params == nil {
+		return out
+	}
+	for _, field := range lit.Type.Params.List {
+		if !runtimeWriterExprLooksSQLTx(field.Type) {
+			continue
+		}
+		for _, name := range field.Names {
+			if name == nil || name.Name == "" || name.Name == "_" {
+				continue
+			}
+			out[name.Name] = true
+		}
+	}
+	return out
+}
+
+func runtimeWriterExprLooksSQLTx(expr ast.Expr) bool {
+	switch e := expr.(type) {
+	case *ast.StarExpr:
+		return runtimeWriterExprLooksSQLTx(e.X)
+	case *ast.SelectorExpr:
+		return e.Sel.Name == "Tx"
+	case *ast.Ident:
+		return e.Name == "Tx"
+	case *ast.ParenExpr:
+		return runtimeWriterExprLooksSQLTx(e.X)
+	default:
+		return false
+	}
+}
+
 func runtimeWriterCallName(expr ast.Expr) string {
 	switch e := expr.(type) {
 	case *ast.Ident:
 		return e.Name
 	case *ast.SelectorExpr:
 		return e.Sel.Name
+	default:
+		return ""
+	}
+}
+
+func runtimeWriterCallReceiver(expr ast.Expr) string {
+	sel, ok := expr.(*ast.SelectorExpr)
+	if !ok {
+		return ""
+	}
+	return runtimeWriterRootIdent(sel.X)
+}
+
+func runtimeWriterRootIdent(expr ast.Expr) string {
+	switch e := expr.(type) {
+	case *ast.Ident:
+		return e.Name
+	case *ast.SelectorExpr:
+		return runtimeWriterRootIdent(e.X)
+	case *ast.ParenExpr:
+		return runtimeWriterRootIdent(e.X)
+	case *ast.StarExpr:
+		return runtimeWriterRootIdent(e.X)
 	default:
 		return ""
 	}
@@ -417,8 +589,8 @@ func classifySQLiteRuntimeStoreCallSite(site runtimeWriterCallSite) (runtimeWrit
 		}
 	}
 	if site.Kind == primitiveWrite || site.Kind == primitiveBegin {
-		if site.CallsRuntimeMutation || site.CallsEventTransaction {
-			return classConsumesCanonical, "SQLiteRuntimeStore selected writer enters RunRuntimeMutation before executing SQL", true
+		if (site.InRuntimeMutationCallback || site.InEventTransactionCallback) && site.UsesBoundaryCallbackTx {
+			return classConsumesCanonical, "SQLiteRuntimeStore selected writer executes through the callback transaction", true
 		}
 		if sqliteActiveTxHelper(site) {
 			return classActiveTxHelper, "SQLite helper writes only through caller-provided canonical transaction", true
@@ -426,7 +598,7 @@ func classifySQLiteRuntimeStoreCallSite(site runtimeWriterCallSite) (runtimeWrit
 		return "", "", false
 	}
 	if site.Kind == primitiveRead {
-		if site.CallsRuntimeMutation || sqliteActiveTxHelper(site) {
+		if ((site.InRuntimeMutationCallback || site.InEventTransactionCallback) && site.UsesBoundaryCallbackTx) || sqliteActiveTxHelper(site) {
 			return classActiveTxHelper, "read/query inside canonical SQLite mutation helper", true
 		}
 		return classDifferentConcept, "SQLiteRuntimeStore read/capability surface; not mutation authority", true
@@ -435,6 +607,9 @@ func classifySQLiteRuntimeStoreCallSite(site runtimeWriterCallSite) (runtimeWrit
 }
 
 func sqliteActiveTxHelper(site runtimeWriterCallSite) bool {
+	if site.Receiver == "SQLiteRuntimeStore" && site.ReceiverVariable != "" && site.CallReceiver == site.ReceiverVariable {
+		return false
+	}
 	if site.Receiver == "" && strings.HasPrefix(site.Path, "internal/store/") && strings.Contains(site.Function, "Tx") && site.Kind != primitiveBegin {
 		return true
 	}
@@ -627,6 +802,16 @@ func runtimeWriterReceiverName(fn *ast.FuncDecl) string {
 		return expr.Name
 	}
 	return ""
+}
+
+func runtimeWriterReceiverVariableName(fn *ast.FuncDecl) string {
+	if fn == nil || fn.Recv == nil || len(fn.Recv.List) == 0 {
+		return ""
+	}
+	if len(fn.Recv.List[0].Names) == 0 || fn.Recv.List[0].Names[0] == nil {
+		return ""
+	}
+	return fn.Recv.List[0].Names[0].Name
 }
 
 func repoRootForRuntimeWriterGuard(t *testing.T) string {
