@@ -99,6 +99,40 @@ func TestSQLiteWorkflowInstanceStore_PreservesParentRouteControlMetadata(t *test
 	}
 }
 
+func TestSQLiteWorkflowInstanceStore_MarkTerminatedUsesRuntimeMutationRunner(t *testing.T) {
+	db := newSQLiteWorkflowInstanceStoreTestDB(t)
+	runner := &recordingRuntimeMutationRunner{db: db}
+	store := NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, runner)
+	storageRef := "root/terminated"
+	terminatedAt := time.Now().UTC().Truncate(time.Millisecond)
+	if _, err := db.Exec(`
+		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
+		VALUES (?, 'root', 'workflow', '{}', 'running', ?)
+	`, storageRef, time.Now().UTC()); err != nil {
+		t.Fatalf("seed flow instance: %v", err)
+	}
+
+	if err := store.MarkTerminated(context.Background(), storageRef, terminatedAt); err != nil {
+		t.Fatalf("MarkTerminated: %v", err)
+	}
+	if got := atomic.LoadInt32(&runner.calls); got != 1 {
+		t.Fatalf("runtime mutation calls = %d, want 1", got)
+	}
+
+	var status string
+	var hasTerminatedAt int
+	if err := db.QueryRow(`
+		SELECT COALESCE(status, ''), terminated_at IS NOT NULL
+		FROM flow_instances
+		WHERE instance_id = ?
+	`, storageRef).Scan(&status, &hasTerminatedAt); err != nil {
+		t.Fatalf("load terminated flow instance: %v", err)
+	}
+	if status != "terminated" || hasTerminatedAt != 1 {
+		t.Fatalf("flow instance status=%q hasTerminatedAt=%d, want terminated/1", status, hasTerminatedAt)
+	}
+}
+
 func TestSQLiteWorkflowInstanceStore_RunInPipelineTransactionRetriesBusyAndFlushesPostCommitOnce(t *testing.T) {
 	db, lockDB := newSQLiteWorkflowInstanceStoreBusyTestDBs(t)
 	store := NewSQLiteWorkflowInstanceStore(db)
@@ -303,6 +337,34 @@ func TestWorkflowInstanceStore_RunInPipelineTransactionDoesNotRetryPostgresDiale
 	if got := atomic.LoadInt32(&attempts); got != 1 {
 		t.Fatalf("attempts = %d, want no retry for postgres dialect", got)
 	}
+}
+
+type recordingRuntimeMutationRunner struct {
+	db    *sql.DB
+	calls int32
+}
+
+func (r *recordingRuntimeMutationRunner) RunRuntimeMutation(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
+	atomic.AddInt32(&r.calls, 1)
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	txctx := WithPipelineSQLTxContext(ctx, tx)
+	if err := fn(txctx, tx); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	committed = true
+	return nil
 }
 
 func newSQLiteWorkflowInstanceStoreTestDB(t *testing.T) *sql.DB {

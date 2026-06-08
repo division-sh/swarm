@@ -49,6 +49,7 @@ type runtimeWriterCallSite struct {
 	InEventTransactionCallback    bool
 	InPipelineTransactionCallback bool
 	UsesBoundaryCallbackTx        bool
+	UsesReceiverDBArgument        bool
 	FunctionContainsWrite         bool
 	FunctionContainsBegin         bool
 	FunctionContainsRead          bool
@@ -176,6 +177,36 @@ func (store *SQLiteRuntimeStore) BadMixedBypass(ctx context.Context) error {
 	}
 	if !strings.Contains(strings.Join(failures, "\n"), "BadMixedBypass") {
 		t.Fatalf("expected failure to name BadMixedBypass, got:\n%s", strings.Join(failures, "\n"))
+	}
+}
+
+func TestRuntimeWriterBoundaryGuardRejectsPipelineSQLiteDBHelperBypassFixture(t *testing.T) {
+	const src = `package pipeline
+
+import (
+	"context"
+	"database/sql"
+)
+
+type WorkflowInstanceStore struct {
+	db *sql.DB
+}
+
+func (s *WorkflowInstanceStore) BadPipelineBypass(ctx context.Context) error {
+	_, err := dbExecContext(ctx, s.db, "UPDATE flow_instances SET status = 'terminated'")
+	return err
+}
+`
+	sites, err := collectRuntimeWriterCallSitesFromSource("internal/runtime/pipeline/workflow_instance_store_sqlite.go", src)
+	if err != nil {
+		t.Fatalf("collect fixture call sites: %v", err)
+	}
+	_, failures := classifyRuntimeWriterCallSites(sites)
+	if len(failures) == 0 {
+		t.Fatal("expected selected SQLite pipeline helper-mediated write bypass fixture to fail classification")
+	}
+	if !strings.Contains(strings.Join(failures, "\n"), "BadPipelineBypass") {
+		t.Fatalf("expected failure to name BadPipelineBypass, got:\n%s", strings.Join(failures, "\n"))
 	}
 }
 
@@ -351,6 +382,7 @@ func collectRuntimeWriterCallSitesFromSource(path, src string) ([]runtimeWriterC
 				InEventTransactionCallback:    inScope && scope.event,
 				InPipelineTransactionCallback: inScope && scope.pipeline,
 				UsesBoundaryCallbackTx:        inScope && scope.txParamName[callReceiver],
+				UsesReceiverDBArgument:        runtimeWriterCallUsesReceiverDBArgument(call, info.receiverVariable),
 				FunctionContainsWrite:         info.containsWrite,
 				FunctionContainsBegin:         info.containsBegin,
 				FunctionContainsRead:          info.containsRead,
@@ -385,6 +417,8 @@ func runtimeWriterPrimitive(call *ast.CallExpr) (string, runtimeWriterPrimitiveK
 	case "Begin", "BeginTx", "BeginTxx":
 		return name, primitiveBegin, true
 	case "Exec", "ExecContext":
+		return name, primitiveWrite, true
+	case "dbExecContext":
 		return name, primitiveWrite, true
 	case "Query", "QueryContext", "QueryRow", "QueryRowContext", "Prepare", "PrepareContext":
 		return name, primitiveRead, true
@@ -501,6 +535,23 @@ func runtimeWriterCallReceiver(expr ast.Expr) string {
 	return runtimeWriterRootIdent(sel.X)
 }
 
+func runtimeWriterCallUsesReceiverDBArgument(call *ast.CallExpr, receiverVariable string) bool {
+	receiverVariable = strings.TrimSpace(receiverVariable)
+	if call == nil || receiverVariable == "" {
+		return false
+	}
+	for _, arg := range call.Args {
+		sel, ok := arg.(*ast.SelectorExpr)
+		if !ok || sel.Sel.Name != "db" && sel.Sel.Name != "DB" {
+			continue
+		}
+		if runtimeWriterRootIdent(sel.X) == receiverVariable {
+			return true
+		}
+	}
+	return false
+}
+
 func runtimeWriterRootIdent(expr ast.Expr) string {
 	switch e := expr.(type) {
 	case *ast.Ident:
@@ -562,6 +613,14 @@ func classifyRuntimeWriterCallSite(site runtimeWriterCallSite) (runtimeWriterCla
 	if site.Receiver == "SQLiteRuntimeStore" {
 		return classifySQLiteRuntimeStoreCallSite(site)
 	}
+	if site.Receiver == "WorkflowInstanceStore" {
+		if classification, reason, ok := classifyWorkflowInstanceStoreCallSite(site); ok {
+			return classification, reason, true
+		}
+		if workflowInstanceStoreSQLiteBypassCandidate(site) {
+			return "", "", false
+		}
+	}
 	if sqliteActiveTxHelper(site) {
 		return classActiveTxHelper, "helper writes only through caller-provided canonical transaction", true
 	}
@@ -577,6 +636,39 @@ func classifyRuntimeWriterCallSite(site runtimeWriterCallSite) (runtimeWriterCla
 		return classDifferentConcept, "read-only projection/query surface; not selected SQLite mutation authority", true
 	}
 	return "", "", false
+}
+
+func classifyWorkflowInstanceStoreCallSite(site runtimeWriterCallSite) (runtimeWriterClassification, string, bool) {
+	if site.Kind != primitiveWrite && site.Kind != primitiveBegin {
+		return "", "", false
+	}
+	if (site.InPipelineTransactionCallback || site.InRuntimeMutationCallback) && site.UsesBoundaryCallbackTx {
+		return classConsumesCanonical, "WorkflowInstanceStore selected writer executes through the callback transaction", true
+	}
+	if site.Primitive == "dbExecContext" && site.UsesReceiverDBArgument {
+		if site.InPipelineTransactionCallback || site.InRuntimeMutationCallback {
+			return classConsumesCanonical, "WorkflowInstanceStore helper-mediated write executes inside canonical transaction context", true
+		}
+		return "", "", false
+	}
+	if site.Path == "internal/runtime/pipeline/workflow_instance_store_sqlite.go" &&
+		site.ReceiverVariable != "" &&
+		site.CallReceiver == site.ReceiverVariable {
+		return "", "", false
+	}
+	return "", "", false
+}
+
+func workflowInstanceStoreSQLiteBypassCandidate(site runtimeWriterCallSite) bool {
+	if site.Kind != primitiveWrite && site.Kind != primitiveBegin {
+		return false
+	}
+	if site.Primitive == "dbExecContext" && site.UsesReceiverDBArgument {
+		return true
+	}
+	return site.Path == "internal/runtime/pipeline/workflow_instance_store_sqlite.go" &&
+		site.ReceiverVariable != "" &&
+		site.CallReceiver == site.ReceiverVariable
 }
 
 func classifySQLiteRuntimeStoreCallSite(site runtimeWriterCallSite) (runtimeWriterClassification, string, bool) {

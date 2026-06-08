@@ -352,9 +352,9 @@ func (s *WorkflowInstanceStore) MarkTerminated(ctx context.Context, storageRef s
 		return nil
 	}
 	if s.isSQLite() {
-		unlock := s.lockSQLitePipelineOperation(ctx)
-		defer unlock()
-		return s.markTerminatedSQLite(ctx, storageRef, terminatedAt)
+		return s.RunInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+			return s.markTerminatedSQLiteTx(txctx, tx, storageRef, terminatedAt)
+		})
 	}
 	storageRef = strings.TrimSpace(storageRef)
 	if storageRef == "" {
