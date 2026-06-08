@@ -160,7 +160,7 @@ func (r *SQLObservabilityReader) resolveCapabilities(ctx context.Context) (store
 }
 
 func (r *SQLObservabilityReader) ListEvents(ctx context.Context, filter EventFilter, limit int) ([]eventRecord, error) {
-	if r == nil || r.owner == nil {
+	if r == nil {
 		return []eventRecord{}, nil
 	}
 	caps, err := r.resolveCapabilities(ctx)
@@ -169,6 +169,9 @@ func (r *SQLObservabilityReader) ListEvents(ctx context.Context, filter EventFil
 	}
 	if err := requireObservabilityEventCapabilities(caps); err != nil {
 		return nil, err
+	}
+	if r.owner == nil {
+		return []eventRecord{}, nil
 	}
 	result, err := r.owner.ListOperatorEvents(ctx, store.OperatorEventListOptions{
 		Filter: store.OperatorEventListFilter{
@@ -193,7 +196,7 @@ func (r *SQLObservabilityReader) ListEvents(ctx context.Context, filter EventFil
 }
 
 func (r *SQLObservabilityReader) GetEvent(ctx context.Context, id string) (eventRecord, bool, error) {
-	if r == nil || r.owner == nil {
+	if r == nil {
 		return eventRecord{}, false, nil
 	}
 	caps, err := r.resolveCapabilities(ctx)
@@ -202,6 +205,9 @@ func (r *SQLObservabilityReader) GetEvent(ctx context.Context, id string) (event
 	}
 	if err := requireObservabilityEventCapabilities(caps); err != nil {
 		return eventRecord{}, false, err
+	}
+	if r.owner == nil {
+		return eventRecord{}, false, nil
 	}
 	id = strings.TrimSpace(id)
 	if id == "" {
@@ -218,7 +224,7 @@ func (r *SQLObservabilityReader) GetEvent(ctx context.Context, id string) (event
 }
 
 func (r *SQLObservabilityReader) ListRuntimeLogs(ctx context.Context, filter RuntimeLogFilter, limit int) ([]runtimeLogRecord, error) {
-	if r == nil || r.owner == nil {
+	if r == nil {
 		return []runtimeLogRecord{}, nil
 	}
 	caps, err := r.resolveCapabilities(ctx)
@@ -227,6 +233,9 @@ func (r *SQLObservabilityReader) ListRuntimeLogs(ctx context.Context, filter Run
 	}
 	if err := requireObservabilityRuntimeLogCapabilities(caps); err != nil {
 		return nil, err
+	}
+	if r.owner == nil {
+		return []runtimeLogRecord{}, nil
 	}
 	result, err := r.owner.ListOperatorRuntimeLogs(ctx, store.OperatorRuntimeLogListOptions{
 		EntityID:          filter.EntityID,
@@ -250,7 +259,7 @@ func (r *SQLObservabilityReader) ListRuntimeLogs(ctx context.Context, filter Run
 }
 
 func (r *SQLObservabilityReader) ListIncidents(ctx context.Context, filter IncidentFilter) ([]incidentRecord, error) {
-	if r == nil || r.owner == nil {
+	if r == nil {
 		return []incidentRecord{}, nil
 	}
 	caps, err := r.resolveCapabilities(ctx)
@@ -259,6 +268,9 @@ func (r *SQLObservabilityReader) ListIncidents(ctx context.Context, filter Incid
 	}
 	if err := requireObservabilityRuntimeLogCapabilities(caps); err != nil {
 		return nil, err
+	}
+	if r.owner == nil {
+		return []incidentRecord{}, nil
 	}
 	result, err := r.owner.ListOperatorRuntimeIncidents(ctx, store.OperatorRuntimeIncidentListOptions{
 		SinceHours: filter.SinceHours,
