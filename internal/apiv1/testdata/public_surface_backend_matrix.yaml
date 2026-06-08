@@ -271,6 +271,34 @@ rows:
       advances the system-node flow state, persists event/delivery evidence,
       and reads back through public event, trace, status, and entity surfaces.
 
+  - id: event_publish_dynamic_auto_emit_served_lifecycle
+    surface: /v1/rpc event.publish served dynamic auto_emit_on_create lifecycle parity
+    classification: add_to_matrix
+    tier: required_smoke
+    backends: [default_sqlite, explicit_postgres]
+    api_methods: [event.publish]
+    openrpc_matrix_methods: [event.publish]
+    store_owners:
+      - /v1/rpc event.publish
+      - runtimebus.EventStore
+      - runtimepipeline.WorkflowInstanceStore
+      - runtime manager auto_emit_on_create owner
+      - event_deliveries readback owner
+    proof_dimensions: [selected_store, real_v1_handler, real_runtime_startup, canonical_store_owner, openrpc_publication]
+    proof_refs:
+      - kind: go_test
+        name: TestRunServeRuntimeEventPublishDynamicAutoEmitServedPathDefaultSQLite
+      - kind: go_test
+        name: TestRunServeRuntimeEventPublishDynamicAutoEmitServedPathPostgres
+    notes: >
+      #1384 adds the served dynamic auto_emit_on_create parity row missing from
+      the simpler existing-run follow-up proof. The proof runs the same fixture
+      and lifecycle assertions against default SQLite and explicit Postgres,
+      including parent workflow-node delivery terminalization, dynamic child
+      dispatch/readback, trace/status/diagnose surfaces, and durable
+      event.publish acceptance. This row does not claim full #1386 structural
+      lifecycle parity enforcement.
+
   - id: mailbox_read_api_after_mailbox_write
     surface: mailbox.list and mailbox.get after handler-level mailbox_write on selected stores
     classification: already_covered_by_existing_proof
