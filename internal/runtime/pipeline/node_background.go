@@ -66,10 +66,14 @@ func (n *backgroundWorkflowNode) SetOverrideHandleForTest(fn func(context.Contex
 }
 
 func (n *backgroundWorkflowNode) SetOnSubscribeForTest(fn func()) {
+	n.AddSubscriptionReadyHook(fn)
+}
+
+func (n *backgroundWorkflowNode) AddSubscriptionReadyHook(fn func()) {
 	if n == nil || n.runner == nil {
 		return
 	}
-	n.runner.SetOnSubscribeForTest(fn)
+	n.runner.AddSubscriptionReadyHook(fn)
 }
 
 func (n *backgroundWorkflowNode) SetTestLifecycleProbe(probe runtimelifecycleprobe.Observer) {

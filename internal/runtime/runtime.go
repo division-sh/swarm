@@ -764,14 +764,12 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	} else {
 		rt.emitBootProgress(8, "pipeline_maintenance", "skipped", "pipeline unavailable")
 	}
-	systemNodeCount := 0
-	for _, node := range rt.SystemNodes {
-		if node != nil {
-			go node.Run(startCtx)
-			systemNodeCount++
-		}
+	systemNodeCount, err := rt.startSystemNodesAndWaitForSubscriptions(ctx, startCtx)
+	if err != nil {
+		rt.emitBootProgress(9, "system_nodes_start", "FAILED", err.Error())
+		return err
 	}
-	rt.emitBootProgress(9, "system_nodes_start", "ok", fmt.Sprintf("%d nodes started", systemNodeCount))
+	rt.emitBootProgress(9, "system_nodes_start", "ok", fmt.Sprintf("%d nodes subscribed", systemNodeCount))
 	if skipPersistentStartupRecovery {
 		rt.emitBootProgress(10, "schedule_restoration", "skipped", "persistent startup recovery disabled")
 	} else if rt.Scheduler != nil && rt.Stores.ScheduleStore != nil {
@@ -986,6 +984,56 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	}
 	started = true
 	return nil
+}
+
+func (rt *Runtime) startSystemNodesAndWaitForSubscriptions(ctx context.Context, startCtx context.Context) (int, error) {
+	if rt == nil {
+		return 0, fmt.Errorf("runtime is nil")
+	}
+	nodes := make([]runtimepipeline.BackgroundNode, 0, len(rt.SystemNodes))
+	readiness := make(chan string, len(rt.SystemNodes))
+	for _, node := range rt.SystemNodes {
+		if node == nil {
+			continue
+		}
+		readyNode, ok := node.(runtimepipeline.SubscriptionReadyBackgroundNode)
+		if !ok {
+			return 0, fmt.Errorf("system node %s cannot report subscription readiness", runtimeBackgroundNodeName(node))
+		}
+		nodeName := runtimeBackgroundNodeName(node)
+		var once sync.Once
+		readyNode.AddSubscriptionReadyHook(func() {
+			once.Do(func() {
+				readiness <- nodeName
+			})
+		})
+		nodes = append(nodes, node)
+	}
+	for _, node := range nodes {
+		go node.Run(startCtx)
+	}
+	for subscribed := 0; subscribed < len(nodes); subscribed++ {
+		select {
+		case <-ctx.Done():
+			return len(nodes), fmt.Errorf("wait for system node subscriptions: %w", ctx.Err())
+		case <-startCtx.Done():
+			return len(nodes), fmt.Errorf("wait for system node subscriptions: %w", startCtx.Err())
+		case <-readiness:
+		}
+	}
+	return len(nodes), nil
+}
+
+func runtimeBackgroundNodeName(node runtimepipeline.BackgroundNode) string {
+	if node == nil {
+		return "<nil>"
+	}
+	if named, ok := node.(fmt.Stringer); ok {
+		if name := strings.TrimSpace(named.String()); name != "" {
+			return name
+		}
+	}
+	return fmt.Sprintf("%T", node)
 }
 
 func (rt *Runtime) Shutdown() error {

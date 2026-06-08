@@ -42,7 +42,8 @@ type systemNodeRunner struct {
 	subscriptionsFn         func() []events.EventType
 	handleFn                func(context.Context, events.Event) error
 	overrideHandle          func(context.Context, events.Event) error
-	onSubscribe             func()
+	subscribeHookMu         sync.Mutex
+	onSubscribeHooks        []func()
 	eventReceiptsCapability func(context.Context) (bool, error)
 	testLifecycleProbe      runtimelifecycleprobe.Observer
 
@@ -89,9 +90,7 @@ func (n *systemNodeRunner) Run(ctx context.Context) {
 		return
 	}
 	ch := n.subscribe()
-	if n.onSubscribe != nil {
-		n.onSubscribe()
-	}
+	n.notifySubscribed()
 	for {
 		select {
 		case <-ctx.Done():
@@ -99,9 +98,7 @@ func (n *systemNodeRunner) Run(ctx context.Context) {
 		case evt, ok := <-ch:
 			if !ok {
 				ch = n.subscribe()
-				if n.onSubscribe != nil {
-					n.onSubscribe()
-				}
+				n.notifySubscribed()
 				continue
 			}
 			n.ProcessEventForTest(ctx, evt)
@@ -195,10 +192,33 @@ func (n *systemNodeRunner) SetOverrideHandleForTest(fn func(context.Context, eve
 }
 
 func (n *systemNodeRunner) SetOnSubscribeForTest(fn func()) {
+	n.AddSubscriptionReadyHook(fn)
+}
+
+func (n *systemNodeRunner) AddSubscriptionReadyHook(fn func()) {
 	if n == nil {
 		return
 	}
-	n.onSubscribe = fn
+	if fn == nil {
+		return
+	}
+	n.subscribeHookMu.Lock()
+	n.onSubscribeHooks = append(n.onSubscribeHooks, fn)
+	n.subscribeHookMu.Unlock()
+}
+
+func (n *systemNodeRunner) notifySubscribed() {
+	if n == nil {
+		return
+	}
+	n.subscribeHookMu.Lock()
+	hooks := append([]func(){}, n.onSubscribeHooks...)
+	n.subscribeHookMu.Unlock()
+	for _, hook := range hooks {
+		if hook != nil {
+			hook()
+		}
+	}
 }
 
 func (n *systemNodeRunner) SetTestLifecycleProbe(probe runtimelifecycleprobe.Observer) {

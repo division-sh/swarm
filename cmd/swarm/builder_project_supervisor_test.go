@@ -103,6 +103,74 @@ func TestRuntimeProjectSupervisorReplaceCurrentRuntime_ClearsReadinessBeforeShut
 	}
 }
 
+func TestRuntimeProjectSupervisorReplaceCurrentRuntime_WaitsForRuntimeStartBeforeReady(t *testing.T) {
+	oldRT := &runtimepkg.Runtime{}
+	newRT := &runtimepkg.Runtime{}
+	var ready atomic.Bool
+	ready.Store(true)
+	started := make(chan struct{})
+	releaseStart := make(chan struct{})
+
+	supervisor := &runtimeProjectSupervisor{
+		ready:         &ready,
+		currentRoot:   "/tmp/old-project",
+		currentBundle: &runtimecontracts.WorkflowContractBundle{},
+		currentSource: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+		currentRT:     oldRT,
+	}
+	supervisor.shutdownRuntime = func(context.Context, *runtimepkg.Runtime, runtimepkg.ShutdownOptions) error {
+		return nil
+	}
+	supervisor.startRuntime = func(ctx context.Context, rt *runtimepkg.Runtime) error {
+		if rt != newRT {
+			t.Fatalf("start runtime = %p, want new runtime %p", rt, newRT)
+		}
+		close(started)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-releaseStart:
+			return nil
+		}
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := supervisor.replaceCurrentRuntime(
+			context.Background(),
+			"/tmp/new-project",
+			semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+			&runtimecontracts.WorkflowContractBundle{},
+			newRT,
+		)
+		done <- err
+	}()
+
+	select {
+	case <-started:
+	case err := <-done:
+		t.Fatalf("replaceCurrentRuntime returned before runtime start blocked: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for runtime start")
+	}
+	if ready.Load() {
+		t.Fatal("ready flag became true before runtime start completed")
+	}
+
+	close(releaseStart)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("replaceCurrentRuntime after start release: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for replaceCurrentRuntime")
+	}
+	if !ready.Load() {
+		t.Fatal("ready flag = false after runtime start completed")
+	}
+}
+
 func TestRuntimeProjectSupervisorCloseProjectWithShutdownOptionsUsesConfiguredGrace(t *testing.T) {
 	oldRT := &runtimepkg.Runtime{}
 	var ready atomic.Bool

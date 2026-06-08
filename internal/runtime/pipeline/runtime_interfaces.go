@@ -39,6 +39,11 @@ type BackgroundNode interface {
 	Run(context.Context)
 }
 
+type SubscriptionReadyBackgroundNode interface {
+	BackgroundNode
+	AddSubscriptionReadyHook(func())
+}
+
 type BackgroundWorkflowExecutorProvider interface {
 	BackgroundWorkflowExecutor() WorkflowNodeExecutor
 }
