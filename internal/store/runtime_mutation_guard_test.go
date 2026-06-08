@@ -49,6 +49,7 @@ type runtimeWriterCallSite struct {
 	InEventTransactionCallback    bool
 	InPipelineTransactionCallback bool
 	UsesBoundaryCallbackTx        bool
+	UsesFunctionTxParam           bool
 	UsesReceiverDBArgument        bool
 	FunctionContainsWrite         bool
 	FunctionContainsBegin         bool
@@ -210,6 +211,32 @@ func (s *WorkflowInstanceStore) BadPipelineBypass(ctx context.Context) error {
 	}
 }
 
+func TestRuntimeWriterBoundaryGuardRejectsPipelineSQLiteRawDBHelperFixture(t *testing.T) {
+	const src = `package pipeline
+
+import (
+	"context"
+	"database/sql"
+)
+
+func badSQLitePipelineHelper(ctx context.Context, db *sql.DB) error {
+	_, err := db.ExecContext(ctx, "UPDATE flow_instances SET status = 'terminated'")
+	return err
+}
+`
+	sites, err := collectRuntimeWriterCallSitesFromSource("internal/runtime/pipeline/workflow_instance_store_sqlite.go", src)
+	if err != nil {
+		t.Fatalf("collect fixture call sites: %v", err)
+	}
+	_, failures := classifyRuntimeWriterCallSites(sites)
+	if len(failures) == 0 {
+		t.Fatal("expected receiverless SQLite pipeline raw DB helper bypass fixture to fail classification")
+	}
+	if !strings.Contains(strings.Join(failures, "\n"), "badSQLitePipelineHelper") {
+		t.Fatalf("expected failure to name badSQLitePipelineHelper, got:\n%s", strings.Join(failures, "\n"))
+	}
+}
+
 func TestSelectedSQLiteRuntimeConstructionConsumesMutationBoundary(t *testing.T) {
 	root := repoRootForRuntimeWriterGuard(t)
 	mainData, err := os.ReadFile(filepath.Join(root, "cmd", "swarm", "main.go"))
@@ -318,6 +345,7 @@ func collectRuntimeWriterCallSitesFromSource(path, src string) ([]runtimeWriterC
 			function:         fn.Name.Name,
 			receiver:         runtimeWriterReceiverName(fn),
 			receiverVariable: runtimeWriterReceiverVariableName(fn),
+			txParamNames:     runtimeWriterFunctionTxParamNames(fn),
 		}
 		ast.Inspect(fn.Body, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
@@ -382,6 +410,7 @@ func collectRuntimeWriterCallSitesFromSource(path, src string) ([]runtimeWriterC
 				InEventTransactionCallback:    inScope && scope.event,
 				InPipelineTransactionCallback: inScope && scope.pipeline,
 				UsesBoundaryCallbackTx:        inScope && scope.txParamName[callReceiver],
+				UsesFunctionTxParam:           info.txParamNames[callReceiver],
 				UsesReceiverDBArgument:        runtimeWriterCallUsesReceiverDBArgument(call, info.receiverVariable),
 				FunctionContainsWrite:         info.containsWrite,
 				FunctionContainsBegin:         info.containsBegin,
@@ -405,6 +434,7 @@ type runtimeWriterFunctionInfo struct {
 	callsEventTransaction     bool
 	callsPipelineTransaction  bool
 	usesPipelineTxFromContext bool
+	txParamNames              map[string]bool
 	containsWrite             bool
 	containsBegin             bool
 	containsRead              bool
@@ -483,11 +513,25 @@ func innermostRuntimeWriterBoundaryCallbackScope(scopes []runtimeWriterBoundaryC
 }
 
 func runtimeWriterCallbackTxParamNames(lit *ast.FuncLit) map[string]bool {
-	out := map[string]bool{}
 	if lit == nil || lit.Type == nil || lit.Type.Params == nil {
+		return map[string]bool{}
+	}
+	return runtimeWriterTxParamNames(lit.Type.Params)
+}
+
+func runtimeWriterFunctionTxParamNames(fn *ast.FuncDecl) map[string]bool {
+	if fn == nil || fn.Type == nil || fn.Type.Params == nil {
+		return map[string]bool{}
+	}
+	return runtimeWriterTxParamNames(fn.Type.Params)
+}
+
+func runtimeWriterTxParamNames(params *ast.FieldList) map[string]bool {
+	out := map[string]bool{}
+	if params == nil {
 		return out
 	}
-	for _, field := range lit.Type.Params.List {
+	for _, field := range params.List {
 		if !runtimeWriterExprLooksSQLTx(field.Type) {
 			continue
 		}
@@ -621,6 +665,12 @@ func classifyRuntimeWriterCallSite(site runtimeWriterCallSite) (runtimeWriterCla
 			return "", "", false
 		}
 	}
+	if classification, reason, ok := classifyWorkflowInstanceStoreSpecCallSite(site); ok {
+		return classification, reason, true
+	}
+	if sqlitePipelineTxHelper(site) {
+		return classActiveTxHelper, "SQLite pipeline helper uses caller-provided *sql.Tx instead of raw *sql.DB", true
+	}
 	if sqliteActiveTxHelper(site) {
 		return classActiveTxHelper, "helper writes only through caller-provided canonical transaction", true
 	}
@@ -645,6 +695,12 @@ func classifyWorkflowInstanceStoreCallSite(site runtimeWriterCallSite) (runtimeW
 	if (site.InPipelineTransactionCallback || site.InRuntimeMutationCallback) && site.UsesBoundaryCallbackTx {
 		return classConsumesCanonical, "WorkflowInstanceStore selected writer executes through the callback transaction", true
 	}
+	if sqlitePipelineTxHelper(site) {
+		return classActiveTxHelper, "SQLite WorkflowInstanceStore helper uses caller-provided *sql.Tx", true
+	}
+	if classification, reason, ok := classifyWorkflowInstanceStoreSpecCallSite(site); ok {
+		return classification, reason, true
+	}
 	if site.Primitive == "dbExecContext" && site.UsesReceiverDBArgument {
 		if site.InPipelineTransactionCallback || site.InRuntimeMutationCallback {
 			return classConsumesCanonical, "WorkflowInstanceStore helper-mediated write executes inside canonical transaction context", true
@@ -655,6 +711,32 @@ func classifyWorkflowInstanceStoreCallSite(site runtimeWriterCallSite) (runtimeW
 		site.ReceiverVariable != "" &&
 		site.CallReceiver == site.ReceiverVariable {
 		return "", "", false
+	}
+	return "", "", false
+}
+
+func classifyWorkflowInstanceStoreSpecCallSite(site runtimeWriterCallSite) (runtimeWriterClassification, string, bool) {
+	if site.Path != "internal/runtime/pipeline/workflow_instance_store.go" {
+		return "", "", false
+	}
+	switch site.Function {
+	case "runInPipelineTransactionOnce":
+		if site.Kind == primitiveBegin {
+			return classSplitLegacy, "named pipeline transaction owner opens a transaction before invoking the callback", true
+		}
+	case "workflowInstanceStoreTx":
+		if site.Kind == primitiveBegin {
+			return classSplitLegacy, "named old fallback helper opens a transaction when no active pipeline tx exists", true
+		}
+	case "MarkTerminated", "upsertSpec", "createSpec":
+		if site.CallReceiver == "tx" {
+			return classDifferentConcept, "named Postgres/spec workflow instance writer uses a local transaction after SQLite has delegated to the canonical path", true
+		}
+	case "workflowInstanceCreateTargetExists", "lockWorkflowInstanceMutation",
+		"insertWorkflowCreateEntityInitialValueMutations", "loadTrackedEntityStateProjection":
+		if site.UsesFunctionTxParam {
+			return classDifferentConcept, "named Postgres/spec helper uses caller-provided *sql.Tx", true
+		}
 	}
 	return "", "", false
 }
@@ -696,6 +778,22 @@ func classifySQLiteRuntimeStoreCallSite(site runtimeWriterCallSite) (runtimeWrit
 		return classDifferentConcept, "SQLiteRuntimeStore read/capability surface; not mutation authority", true
 	}
 	return "", "", false
+}
+
+func sqlitePipelineTxHelper(site runtimeWriterCallSite) bool {
+	if site.Kind == primitiveBegin || site.Kind == primitiveBoundary {
+		return false
+	}
+	if !site.UsesFunctionTxParam {
+		return false
+	}
+	switch site.Path {
+	case "internal/runtime/pipeline/workflow_instance_store_sqlite.go",
+		"internal/runtime/pipeline/system_node_receipt_store.go":
+		return true
+	default:
+		return false
+	}
 }
 
 func sqliteActiveTxHelper(site runtimeWriterCallSite) bool {
@@ -783,20 +881,6 @@ func runtimeWriterRules() []runtimeWriterRule {
 			kinds:          allPrimitiveKinds(),
 			classification: classDifferentConcept,
 			reason:         "Postgres session registry implementation; SQLite session rows are owned by SQLiteRuntimeStore",
-		},
-		{
-			name:           "pipeline sqlite active tx helpers",
-			path:           rx(`^internal/runtime/pipeline/(workflow_instance_store_sqlite|system_node_receipt_store)\.go$`),
-			kinds:          allPrimitiveKinds(),
-			classification: classActiveTxHelper,
-			reason:         "SQLite pipeline helper executes inside WorkflowInstanceStore.RunInPipelineTransaction",
-		},
-		{
-			name:           "pipeline transaction owner and old fallback",
-			path:           rx(`^internal/runtime/pipeline/workflow_instance_store\.go$`),
-			kinds:          allPrimitiveKinds(),
-			classification: classSplitLegacy,
-			reason:         "WorkflowInstanceStore owns Postgres/spec txs and legacy SQLite fallback; production SQLite construction injects RunRuntimeMutation",
 		},
 		{
 			name:           "pipeline postgres raw sql helpers",
