@@ -130,16 +130,26 @@ type incidentRecord struct {
 	LastSeen   string   `json:"last_seen,omitempty"`
 }
 
+type dashboardObservabilityReadOwner interface {
+	ListOperatorEvents(context.Context, store.OperatorEventListOptions) (store.OperatorEventListResult, error)
+	LoadOperatorEvent(context.Context, string) (store.OperatorEventFull, error)
+	ListOperatorRuntimeLogs(context.Context, store.OperatorRuntimeLogListOptions) (store.OperatorRuntimeLogListResult, error)
+	ListOperatorRuntimeIncidents(context.Context, store.OperatorRuntimeIncidentListOptions) (store.OperatorRuntimeIncidentListResult, error)
+}
+
 type SQLObservabilityReader struct {
-	db        *sql.DB
 	capSource schemaCapabilitySource
+	owner     dashboardObservabilityReadOwner
 }
 
 func NewSQLObservabilityReader(db *sql.DB, capSource schemaCapabilitySource) *SQLObservabilityReader {
 	if db == nil {
 		return nil
 	}
-	return &SQLObservabilityReader{db: db, capSource: capSource}
+	return &SQLObservabilityReader{
+		capSource: capSource,
+		owner:     store.NewOperatorObservabilityReadSurface(db, capSource),
+	}
 }
 
 func (r *SQLObservabilityReader) resolveCapabilities(ctx context.Context) (store.StoreSchemaCapabilities, error) {
@@ -150,7 +160,7 @@ func (r *SQLObservabilityReader) resolveCapabilities(ctx context.Context) (store
 }
 
 func (r *SQLObservabilityReader) ListEvents(ctx context.Context, filter EventFilter, limit int) ([]eventRecord, error) {
-	if r == nil || r.db == nil {
+	if r == nil || r.owner == nil {
 		return []eventRecord{}, nil
 	}
 	caps, err := r.resolveCapabilities(ctx)
@@ -160,8 +170,7 @@ func (r *SQLObservabilityReader) ListEvents(ctx context.Context, filter EventFil
 	if err := requireObservabilityEventCapabilities(caps); err != nil {
 		return nil, err
 	}
-	owner := &store.PostgresStore{DB: r.db}
-	result, err := owner.ListOperatorEvents(ctx, store.OperatorEventListOptions{
+	result, err := r.owner.ListOperatorEvents(ctx, store.OperatorEventListOptions{
 		Filter: store.OperatorEventListFilter{
 			EntityID:       filter.EntityID,
 			EventName:      filter.Type,
@@ -184,7 +193,7 @@ func (r *SQLObservabilityReader) ListEvents(ctx context.Context, filter EventFil
 }
 
 func (r *SQLObservabilityReader) GetEvent(ctx context.Context, id string) (eventRecord, bool, error) {
-	if r == nil || r.db == nil {
+	if r == nil || r.owner == nil {
 		return eventRecord{}, false, nil
 	}
 	caps, err := r.resolveCapabilities(ctx)
@@ -198,8 +207,7 @@ func (r *SQLObservabilityReader) GetEvent(ctx context.Context, id string) (event
 	if id == "" {
 		return eventRecord{}, false, nil
 	}
-	owner := &store.PostgresStore{DB: r.db}
-	event, err := owner.LoadOperatorEvent(ctx, id)
+	event, err := r.owner.LoadOperatorEvent(ctx, id)
 	if err == store.ErrEventNotFound {
 		return eventRecord{}, false, nil
 	}
@@ -210,7 +218,7 @@ func (r *SQLObservabilityReader) GetEvent(ctx context.Context, id string) (event
 }
 
 func (r *SQLObservabilityReader) ListRuntimeLogs(ctx context.Context, filter RuntimeLogFilter, limit int) ([]runtimeLogRecord, error) {
-	if r == nil || r.db == nil {
+	if r == nil || r.owner == nil {
 		return []runtimeLogRecord{}, nil
 	}
 	caps, err := r.resolveCapabilities(ctx)
@@ -220,8 +228,7 @@ func (r *SQLObservabilityReader) ListRuntimeLogs(ctx context.Context, filter Run
 	if err := requireObservabilityRuntimeLogCapabilities(caps); err != nil {
 		return nil, err
 	}
-	owner := &store.PostgresStore{DB: r.db}
-	result, err := owner.ListOperatorRuntimeLogs(ctx, store.OperatorRuntimeLogListOptions{
+	result, err := r.owner.ListOperatorRuntimeLogs(ctx, store.OperatorRuntimeLogListOptions{
 		EntityID:          filter.EntityID,
 		Component:         filter.Component,
 		Level:             filter.Level,
@@ -243,7 +250,7 @@ func (r *SQLObservabilityReader) ListRuntimeLogs(ctx context.Context, filter Run
 }
 
 func (r *SQLObservabilityReader) ListIncidents(ctx context.Context, filter IncidentFilter) ([]incidentRecord, error) {
-	if r == nil || r.db == nil {
+	if r == nil || r.owner == nil {
 		return []incidentRecord{}, nil
 	}
 	caps, err := r.resolveCapabilities(ctx)
@@ -253,8 +260,7 @@ func (r *SQLObservabilityReader) ListIncidents(ctx context.Context, filter Incid
 	if err := requireObservabilityRuntimeLogCapabilities(caps); err != nil {
 		return nil, err
 	}
-	owner := &store.PostgresStore{DB: r.db}
-	result, err := owner.ListOperatorRuntimeIncidents(ctx, store.OperatorRuntimeIncidentListOptions{
+	result, err := r.owner.ListOperatorRuntimeIncidents(ctx, store.OperatorRuntimeIncidentListOptions{
 		SinceHours: filter.SinceHours,
 		Component:  filter.Component,
 		Level:      filter.Level,

@@ -40,7 +40,6 @@ import (
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store"
@@ -3031,11 +3030,12 @@ func TestLoadServeRuntimeBundleFromCatalogLoadsPersistedRuntimeSource(t *testing
 	}); err != nil {
 		t.Fatalf("UpsertBundleCatalog: %v", err)
 	}
-	if _, err := loadServeRuntimeBundleFromCatalog(ctx, repoRoot(), storeBundle{}, projection.BundleHash); err == nil || !strings.Contains(err.Error(), "requires postgres bundle catalog store") {
-		t.Fatalf("loadServeRuntimeBundleFromCatalog without Postgres err = %v, want Postgres-only failure", err)
+	if _, err := loadServeRuntimeBundleFromCatalog(ctx, repoRoot(), storeBundle{}, projection.BundleHash); err == nil || !strings.Contains(err.Error(), "requires selected bundle catalog store") {
+		t.Fatalf("loadServeRuntimeBundleFromCatalog without selected catalog err = %v, want selected-owner failure", err)
 	}
 
-	loaded, err := loadServeRuntimeBundleFromCatalog(ctx, repoRoot(), storeBundle{Postgres: pg}, projection.BundleHash)
+	stores := selectedPostgresStoreBundle(pg, &config.Config{})
+	loaded, err := loadServeRuntimeBundleFromCatalog(ctx, repoRoot(), stores, projection.BundleHash)
 	if err != nil {
 		t.Fatalf("loadServeRuntimeBundleFromCatalog: %v", err)
 	}
@@ -3062,14 +3062,14 @@ func TestLoadServeRuntimeBundleFromCatalogLoadsPersistedRuntimeSource(t *testing
 	if _, err := os.Stat(filepath.Join(loaded.contractsRoot, "flows", "support", "data", "exclusions.yaml")); err != nil {
 		t.Fatalf("DB-loaded source missing reconstructed data file: %v", err)
 	}
-	prepared, err := prepareLoadedServeBundleSource(ctx, storeBundle{Postgres: pg}, loaded, false)
+	prepared, err := prepareLoadedServeBundleSource(ctx, stores, loaded, false)
 	if err != nil {
 		t.Fatalf("prepareLoadedServeBundleSource: %v", err)
 	}
 	if prepared.BundleHash != projection.BundleHash || prepared.BundleSource != storerunlifecycle.BundleSourcePersisted {
 		t.Fatalf("prepared source fact = %#v, want persisted %s", prepared, projection.BundleHash)
 	}
-	if _, err := prepareLoadedServeBundleSource(ctx, storeBundle{Postgres: pg}, loaded, true); err == nil || !strings.Contains(err.Error(), "--bundle-hash is mutually exclusive with --dev") {
+	if _, err := prepareLoadedServeBundleSource(ctx, stores, loaded, true); err == nil || !strings.Contains(err.Error(), "--bundle-hash is mutually exclusive with --dev") {
 		t.Fatalf("prepareLoadedServeBundleSource dev error = %v", err)
 	}
 }
@@ -5648,26 +5648,7 @@ func installServeRuntimePostgresTestStoresForDatabase(t *testing.T, workspaceFac
 		if _, err := runtimePG.BindSchemaCapabilities(ctx); err != nil {
 			return storeBundle{}, err
 		}
-		return storeBundle{
-			Postgres:            runtimePG,
-			SQLDB:               runtimePG.DB,
-			RuntimeSQLDB:        runtimePG.DB,
-			RuntimeLogStore:     runtimePG,
-			SchemaBootstrapper:  runtimePG,
-			EventStore:          runtimePG,
-			PipelineStore:       runtimepipeline.NewWorkflowInstanceStore(runtimePG.DB),
-			SessionRegistry:     sessions.NewPostgresRegistry(runtimePG.DB, cfg.LLM.Session.LockTTL),
-			ConversationStore:   runtimePG,
-			ManagerStore:        runtimePG,
-			ScheduleStore:       runtimePG,
-			MailboxStore:        runtimePG,
-			MailboxAPIStore:     runtimePG,
-			ObservabilityStore:  runtimePG,
-			RuntimeIngressStore: runtimePG,
-			IdempotencyStore:    runtimePG,
-			TurnStore:           runtimePG,
-			RunQuiescenceStore:  runtimePG,
-		}, nil
+		return selectedPostgresStoreBundle(runtimePG, cfg), nil
 	}
 	configuredWorkspaceLifecycleForServe = func(_ *sql.DB, _ string, _ semanticview.Source, mountSources workspaceMountSources, _ workspaceBackendSelection) (serveWorkspaceLifecycle, error) {
 		return workspaceFactory(mountSources), nil
@@ -5832,7 +5813,7 @@ func TestPrepareServeBundleSourcePersistsCatalogForContractsServe(t *testing.T) 
 		t.Fatalf("BootBundleIdentity: %v", err)
 	}
 
-	fact, err := prepareServeBundleSource(ctx, storeBundle{Postgres: pg}, bundle, identity.Fingerprint, false)
+	fact, err := prepareServeBundleSource(ctx, selectedPostgresStoreBundle(pg, &config.Config{}), bundle, identity.Fingerprint, false)
 	if err != nil {
 		t.Fatalf("prepareServeBundleSource: %v", err)
 	}
@@ -5858,7 +5839,7 @@ func TestPrepareServeBundleSourceDevStampsEphemeralWithoutCatalogRow(t *testing.
 		t.Fatalf("BootBundleIdentity: %v", err)
 	}
 
-	fact, err := prepareServeBundleSource(ctx, storeBundle{Postgres: pg}, bundle, identity.Fingerprint, true)
+	fact, err := prepareServeBundleSource(ctx, selectedPostgresStoreBundle(pg, &config.Config{}), bundle, identity.Fingerprint, true)
 	if err != nil {
 		t.Fatalf("prepareServeBundleSource(dev): %v", err)
 	}
@@ -9080,7 +9061,7 @@ func TestInitializeStateStoresPostgresDoesNotCreateGeneratedEntityTables(t *test
 		}
 	})
 
-	if _, err := initializeStateStores(ctx, storeBundle{Postgres: pg, SchemaBootstrapper: pg}, bundle, false); err != nil {
+	if _, err := initializeStateStores(ctx, selectedPostgresStoreBundle(pg, &config.Config{}), bundle, false); err != nil {
 		t.Fatalf("initializeStateStores(postgres): %v", err)
 	}
 	if !postgresMainTestTableExists(t, db, "entity_state") {
@@ -9232,21 +9213,7 @@ func TestRunServeRuntimeVerboseEmitsPlatformSpecBootSequence(t *testing.T) {
 		if _, err := runtimePG.BindSchemaCapabilities(ctx); err != nil {
 			return storeBundle{}, err
 		}
-		return storeBundle{
-			Postgres:           runtimePG,
-			SQLDB:              runtimePG.DB,
-			RuntimeSQLDB:       runtimePG.DB,
-			RuntimeLogStore:    runtimePG,
-			SchemaBootstrapper: runtimePG,
-			EventStore:         runtimePG,
-			PipelineStore:      runtimepipeline.NewWorkflowInstanceStore(runtimePG.DB),
-			SessionRegistry:    sessions.NewPostgresRegistry(runtimePG.DB, cfg.LLM.Session.LockTTL),
-			ConversationStore:  runtimePG,
-			ManagerStore:       runtimePG,
-			ScheduleStore:      runtimePG,
-			TurnStore:          runtimePG,
-			RunQuiescenceStore: runtimePG,
-		}, nil
+		return selectedPostgresStoreBundle(runtimePG, cfg), nil
 	}
 	configuredWorkspaceLifecycleForServe = func(*sql.DB, string, semanticview.Source, workspaceMountSources, workspaceBackendSelection) (serveWorkspaceLifecycle, error) {
 		return serveRuntimeWorkspaceStub{}, nil
@@ -9319,21 +9286,7 @@ func TestRunServeRuntimeListenerBindFailuresExitBeforeReadiness(t *testing.T) {
 				if _, err := runtimePG.BindSchemaCapabilities(ctx); err != nil {
 					return storeBundle{}, err
 				}
-				return storeBundle{
-					Postgres:           runtimePG,
-					SQLDB:              runtimePG.DB,
-					RuntimeSQLDB:       runtimePG.DB,
-					RuntimeLogStore:    runtimePG,
-					SchemaBootstrapper: runtimePG,
-					EventStore:         runtimePG,
-					PipelineStore:      runtimepipeline.NewWorkflowInstanceStore(runtimePG.DB),
-					SessionRegistry:    sessions.NewPostgresRegistry(runtimePG.DB, cfg.LLM.Session.LockTTL),
-					ConversationStore:  runtimePG,
-					ManagerStore:       runtimePG,
-					ScheduleStore:      runtimePG,
-					TurnStore:          runtimePG,
-					RunQuiescenceStore: runtimePG,
-				}, nil
+				return selectedPostgresStoreBundle(runtimePG, cfg), nil
 			}
 			configuredWorkspaceLifecycleForServe = func(*sql.DB, string, semanticview.Source, workspaceMountSources, workspaceBackendSelection) (serveWorkspaceLifecycle, error) {
 				return serveRuntimeWorkspaceStub{}, nil
@@ -9488,21 +9441,7 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 		if _, err := runtimePG.BindSchemaCapabilities(ctx); err != nil {
 			return storeBundle{}, err
 		}
-		return storeBundle{
-			Postgres:           runtimePG,
-			SQLDB:              runtimePG.DB,
-			RuntimeSQLDB:       runtimePG.DB,
-			RuntimeLogStore:    runtimePG,
-			SchemaBootstrapper: runtimePG,
-			EventStore:         runtimePG,
-			PipelineStore:      runtimepipeline.NewWorkflowInstanceStore(runtimePG.DB),
-			SessionRegistry:    sessions.NewPostgresRegistry(runtimePG.DB, cfg.LLM.Session.LockTTL),
-			ConversationStore:  runtimePG,
-			ManagerStore:       runtimePG,
-			ScheduleStore:      runtimePG,
-			TurnStore:          runtimePG,
-			RunQuiescenceStore: runtimePG,
-		}, nil
+		return selectedPostgresStoreBundle(runtimePG, cfg), nil
 	}
 	configuredWorkspaceLifecycleForServe = func(*sql.DB, string, semanticview.Source, workspaceMountSources, workspaceBackendSelection) (serveWorkspaceLifecycle, error) {
 		return serveRuntimeWorkspaceStub{}, nil

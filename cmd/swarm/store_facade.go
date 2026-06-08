@@ -8,10 +8,7 @@ import (
 	apiv1 "github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/runtime"
-	runtimebundledelete "github.com/division-sh/swarm/internal/runtime/bundledelete"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
-	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
-	runtimerunforkadmission "github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartuprecovery "github.com/division-sh/swarm/internal/runtime/startuprecovery"
@@ -76,8 +73,17 @@ type selectedAPICapabilityRequest struct {
 	Credentials      runtimecredentials.Store
 }
 
+type selectedAPIOptionalCapabilityBuilder func(selectedAPICapabilityRequest) (selectedAPICapabilities, error)
+
 type selectedRunForkRuntimeOwner struct {
-	store *store.PostgresStore
+	activateFunc    func(context.Context, runtimerunforkexecution.SelectedContractActivationGateRequest) (runtimerunforkexecution.SelectedContractActivationGateResult, error)
+	materializeFunc func(context.Context, store.RunForkMaterializeRequest) (store.RunForkMaterialization, error)
+	executeFunc     func(context.Context, runtimerunforkexecution.SelectedContractExecutionRequest) (runtimerunforkexecution.SelectedContractExecutionResult, error)
+	planFunc        func(context.Context, store.RunForkPlanRequest) (store.RunForkPlan, error)
+}
+
+func (o selectedRunForkRuntimeOwner) configured() bool {
+	return o.activateFunc != nil && o.materializeFunc != nil && o.executeFunc != nil && o.planFunc != nil
 }
 
 func (s storeBundle) facade() selectedRuntimeStoreFacade {
@@ -116,64 +122,31 @@ func (f selectedRuntimeStoreFacade) workspaceDB() *sql.DB {
 }
 
 func (f selectedRuntimeStoreFacade) pinger() apiv1.Pinger {
-	if f.stores.Postgres != nil {
-		return f.stores.Postgres
-	}
-	if f.stores.SQLDB != nil {
-		return sqlDBPinger{db: f.stores.SQLDB}
-	}
-	return nil
+	return f.stores.Database
 }
 
 func (f selectedRuntimeStoreFacade) apiRunBundleContextStore() apiv1.RunBundleContextStore {
-	if f.stores.Postgres != nil {
-		return f.stores.Postgres
-	}
-	runBundleContext, _ := f.stores.ObservabilityStore.(apiv1.RunBundleContextStore)
-	return runBundleContext
+	return f.stores.RunBundleContextStore
 }
 
 func (f selectedRuntimeStoreFacade) apiReadStores() (apiv1.RunReadStore, apiv1.EntityReadStore, apiv1.AgentConversationReadStore, apiv1.ObservabilityReadStore) {
-	if f.stores.Postgres != nil {
-		return f.stores.Postgres, f.stores.Postgres, f.stores.Postgres, f.stores.Postgres
-	}
-	var runs apiv1.RunReadStore
-	var entities apiv1.EntityReadStore
-	if runStore, ok := f.stores.ObservabilityStore.(apiv1.RunReadStore); ok {
-		runs = runStore
-	}
-	if entityStore, ok := f.stores.ObservabilityStore.(apiv1.EntityReadStore); ok {
-		entities = entityStore
-	}
-	return runs, entities, nil, f.stores.ObservabilityStore
+	return f.stores.RunReadStore, f.stores.EntityReadStore, f.stores.AgentConversationReadStore, f.stores.ObservabilityStore
 }
 
 func (f selectedRuntimeStoreFacade) bundleRuntimeCatalogStore() selectedBundleRuntimeCatalogStore {
-	if f.stores.Postgres == nil {
-		return nil
-	}
-	return f.stores.Postgres
+	return f.stores.BundleRuntimeCatalogStore
 }
 
 func (f selectedRuntimeStoreFacade) bundleSourceCatalogStore() selectedBundleSourceCatalogStore {
-	if f.stores.Postgres == nil {
-		return nil
-	}
-	return f.stores.Postgres
+	return f.stores.BundleSourceCatalogStore
 }
 
 func (f selectedRuntimeStoreFacade) runBundleAvailabilityStore() selectedRunBundleAvailabilityStore {
-	if f.stores.Postgres == nil {
-		return nil
-	}
-	return f.stores.Postgres
+	return f.stores.RunBundleAvailabilityStore
 }
 
 func (f selectedRuntimeStoreFacade) startupRecoveryStore() selectedStartupRecoveryStore {
-	if f.stores.Postgres == nil {
-		return nil
-	}
-	return f.stores.Postgres
+	return f.stores.StartupRecoveryStore
 }
 
 func (f selectedRuntimeStoreFacade) schemaCapabilityBinder() selectedSchemaCapabilityBinder {
@@ -182,11 +155,7 @@ func (f selectedRuntimeStoreFacade) schemaCapabilityBinder() selectedSchemaCapab
 }
 
 func (f selectedRuntimeStoreFacade) runStalledReader() runStalledReadStore {
-	if f.stores.Postgres != nil {
-		return f.stores.Postgres
-	}
-	readStore, _ := f.stores.ObservabilityStore.(runStalledReadStore)
-	return readStore
+	return f.stores.RunStalledReader
 }
 
 func (f selectedRuntimeStoreFacade) apiCapabilities(req selectedAPICapabilityRequest) (selectedAPICapabilities, error) {
@@ -199,100 +168,56 @@ func (f selectedRuntimeStoreFacade) apiCapabilities(req selectedAPICapabilityReq
 		Observability:      observability,
 		RunBundleContext:   f.apiRunBundleContextStore(),
 	}
-	if f.stores.Postgres == nil {
+	if f.stores.APIOptionalCapabilityBuilder == nil {
 		return caps, nil
 	}
-	resetPlanner := runtimedestructivereset.InventoryPlanner{
-		Reader: runtimedestructivereset.CompositeInventoryReader{
-			Reader:     f.stores.Postgres,
-			Containers: req.Workspaces,
-		},
-	}
-	runForkSourceLoader := runtimerunforkexecution.SelectedContractSourceLoader(runtimerunforkexecution.ContractBundleSourceLoader{
-		RepoRoot:         req.RepoRoot,
-		PlatformSpecPath: req.PlatformSpecPath,
-	})
-	if req.LoadedBundle.dbLoaded {
-		runForkSourceLoader = runtimerunforkexecution.BundleCatalogSelectedContractSourceLoader{
-			RepoRoot: req.RepoRoot,
-			Store:    f.stores.Postgres,
-		}
-	}
-	apiRuntimeContexts, err := serveRuntimeContextManager(f.stores.Postgres, req.RuntimeContexts)
+	optional, err := f.stores.APIOptionalCapabilityBuilder(req)
 	if err != nil {
 		return selectedAPICapabilities{}, err
 	}
-	caps.BundleCatalog = f.stores.Postgres
-	caps.BundleDelete = &runtimebundledelete.Coordinator{
-		Planner:            f.stores.Postgres,
-		Cleaner:            f.stores.Postgres,
-		Finalizer:          f.stores.Postgres,
-		Locks:              f.stores.Postgres,
-		ContainerInventory: req.Workspaces,
-		Containers:         runtimedestructivereset.ManagedContainerStopper{Runtime: req.Workspaces},
-	}
-	caps.ConversationForks = f.stores.Postgres
-	caps.RunForkAvailability = f.stores.Postgres
-	caps.RunFork = apiv1.SelectedContractRunForkExecutor{
-		Store:             f.stores.Postgres,
-		SourceLoader:      runForkSourceLoader,
-		ContractSelection: runtimerunforkadmission.SelectedContractSelection(req.Source, req.ContractsRoot),
-		AgentRuntime: runtimerunforkexecution.SelectedContractAgentRuntimeOptions{
-			Config:            req.Config,
-			EntityStore:       f.stores.ToolEntityStore,
-			HumanTaskStore:    f.stores.HumanTaskStore,
-			SessionRegistry:   f.stores.SessionRegistry,
-			ConversationStore: f.stores.ConversationStore,
-			TurnStore:         f.stores.TurnStore,
-			ScheduleStore:     f.stores.ScheduleStore,
-			MailboxStore:      f.stores.MailboxStore,
-			Workspace:         req.Workspaces,
-			Credentials:       req.Credentials,
-		},
-	}
-	caps.RuntimeContexts = apiRuntimeContexts
-	caps.ResetCoordinator = &runtimedestructivereset.Coordinator{
-		Planner: resetPlanner,
-		Locks:   f.stores.Postgres,
-	}
-	caps.ResetQuiescer = runtimedestructivereset.Quiescer{Store: f.stores.Postgres}
-	caps.ResetCleaner = runtimedestructivereset.Cleaner{Store: f.stores.Postgres}
+	caps.BundleCatalog = optional.BundleCatalog
+	caps.BundleDelete = optional.BundleDelete
+	caps.ConversationForks = optional.ConversationForks
+	caps.RunForkAvailability = optional.RunForkAvailability
+	caps.RunFork = optional.RunFork
+	caps.RuntimeContexts = optional.RuntimeContexts
+	caps.ResetCoordinator = optional.ResetCoordinator
+	caps.ResetQuiescer = optional.ResetQuiescer
+	caps.ResetCleaner = optional.ResetCleaner
 	return caps, nil
 }
 
 func (f selectedRuntimeStoreFacade) runForkRuntimeOwner() (selectedRunForkRuntimeOwner, bool) {
-	if f.stores.Postgres == nil {
+	if !f.stores.RunForkRuntimeOwner.configured() {
 		return selectedRunForkRuntimeOwner{}, false
 	}
-	return selectedRunForkRuntimeOwner{store: f.stores.Postgres}, true
+	return f.stores.RunForkRuntimeOwner, true
 }
 
 func (o selectedRunForkRuntimeOwner) activate(ctx context.Context, req runtimerunforkexecution.SelectedContractActivationGateRequest) (runtimerunforkexecution.SelectedContractActivationGateResult, error) {
-	if o.store == nil {
-		return runtimerunforkexecution.SelectedContractActivationGateResult{}, fmt.Errorf("postgres store required")
+	if o.activateFunc == nil {
+		return runtimerunforkexecution.SelectedContractActivationGateResult{}, fmt.Errorf("selected run.fork runtime owner is required")
 	}
-	req.Store = o.store
-	return runtimerunforkexecution.ActivateSelectedContractRunFork(ctx, req)
+	return o.activateFunc(ctx, req)
 }
 
 func (o selectedRunForkRuntimeOwner) materialize(ctx context.Context, req store.RunForkMaterializeRequest) (store.RunForkMaterialization, error) {
-	if o.store == nil {
-		return store.RunForkMaterialization{}, fmt.Errorf("postgres store required")
+	if o.materializeFunc == nil {
+		return store.RunForkMaterialization{}, fmt.Errorf("selected run.fork runtime owner is required")
 	}
-	return o.store.MaterializeRunFork(ctx, req)
+	return o.materializeFunc(ctx, req)
 }
 
 func (o selectedRunForkRuntimeOwner) execute(ctx context.Context, req runtimerunforkexecution.SelectedContractExecutionRequest) (runtimerunforkexecution.SelectedContractExecutionResult, error) {
-	if o.store == nil {
-		return runtimerunforkexecution.SelectedContractExecutionResult{}, fmt.Errorf("postgres store required")
+	if o.executeFunc == nil {
+		return runtimerunforkexecution.SelectedContractExecutionResult{}, fmt.Errorf("selected run.fork runtime owner is required")
 	}
-	req.Store = o.store
-	return runtimerunforkexecution.ExecuteSelectedContractRunFork(ctx, req)
+	return o.executeFunc(ctx, req)
 }
 
 func (o selectedRunForkRuntimeOwner) plan(ctx context.Context, req store.RunForkPlanRequest) (store.RunForkPlan, error) {
-	if o.store == nil {
-		return store.RunForkPlan{}, fmt.Errorf("postgres store required")
+	if o.planFunc == nil {
+		return store.RunForkPlan{}, fmt.Errorf("selected run.fork runtime owner is required")
 	}
-	return o.store.PlanRunFork(ctx, req)
+	return o.planFunc(ctx, req)
 }
