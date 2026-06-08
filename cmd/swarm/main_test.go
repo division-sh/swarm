@@ -3503,7 +3503,6 @@ func TestRunServeRuntimeEventPublishDynamicAutoEmitServedPathDefaultSQLite(t *te
 	blocked := make(chan servedEventPublishPreHandlerProof, 1)
 	release := make(chan struct{})
 	var releaseOnce sync.Once
-	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
 	oldBuildStores := buildStoresForServe
 	t.Cleanup(func() {
 		buildStoresForServe = oldBuildStores
@@ -3548,6 +3547,7 @@ func TestRunServeRuntimeEventPublishDynamicAutoEmitServedPathDefaultSQLite(t *te
 			return h(ctx, nodeID, evt)
 		},
 	})
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
 	if servedDB == nil {
 		t.Fatal("served sqlite SQLDB is required for dynamic event.publish proof")
 	}
