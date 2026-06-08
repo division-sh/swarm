@@ -162,6 +162,22 @@ func TestPublicSurfaceBackendMatrixRejectsStaleReferences(t *testing.T) {
 			},
 			want: "bundle_hash_catalog_boot_postgres_only fail-closed row requires at least one go_test proof_ref",
 		},
+		{
+			name: "api idempotency row requires run.start proof",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				row := publicSurfaceMatrixRowByID(t, matrix, "api_idempotency_selected_store")
+				row.ProofRefs = publicSurfaceProofRefsExcept(row.ProofRefs, "TestOperatorRunStartHandlersPersistRootEventAndReplayIdempotency")
+			},
+			want: "api_idempotency_selected_store missing #1402 proof_ref TestOperatorRunStartHandlersPersistRootEventAndReplayIdempotency",
+		},
+		{
+			name: "runtime log readback row requires sqlite proof",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				row := publicSurfaceMatrixRowByID(t, matrix, "runtime_log_readback_api")
+				row.ProofRefs = publicSurfaceProofRefsExcept(row.ProofRefs, "TestSQLiteRuntimeLogPersistenceWritesLoggerRowsForObservability")
+			},
+			want: "runtime_log_readback_api missing #1402 proof_ref TestSQLiteRuntimeLogPersistenceWritesLoggerRowsForObservability",
+		},
 	}
 
 	for _, tc := range tests {
@@ -316,6 +332,30 @@ func validatePublicSurfaceBackendMatrix(root string, matrix publicSurfaceBackend
 		} {
 			if !publicSurfaceHasGoTestProof(row.ProofRefs, proof) {
 				problems = append(problems, fmt.Sprintf("status_run_get_entity_count missing post-#1254 proof_ref %s", proof))
+			}
+		}
+	}
+	if row, ok := rowsByID["api_idempotency_selected_store"]; ok {
+		for _, proof := range []string{
+			"TestOperatorRunStartHandlersPersistRootEventAndReplayIdempotency",
+			"TestOperatorEventPublishSQLiteIdempotentFirstEventPublishesWithoutLock",
+			"TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempotency",
+		} {
+			if !publicSurfaceHasGoTestProof(row.ProofRefs, proof) {
+				problems = append(problems, fmt.Sprintf("api_idempotency_selected_store missing #1402 proof_ref %s", proof))
+			}
+		}
+	}
+	if row, ok := rowsByID["runtime_log_readback_api"]; ok {
+		for _, proof := range []string{
+			"TestSQLiteRuntimeLogPersistenceWritesLoggerRowsForObservability",
+			"TestPostgresRuntimeLogPersistencePreservesRunSourceAndLineage",
+			"TestOpenRPCWebSocketRuntimeProbes",
+			"TestHandlerWebSocketRuntimeSubscribeLogsUsesOwnerFiltersAndReplay",
+			"TestHandlerWebSocketRunSubscribeTraceUsesOwnerReplayAndRunNotFound",
+		} {
+			if !publicSurfaceHasGoTestProof(row.ProofRefs, proof) {
+				problems = append(problems, fmt.Sprintf("runtime_log_readback_api missing #1402 proof_ref %s", proof))
 			}
 		}
 	}
@@ -641,6 +681,17 @@ func publicSurfaceHasGoTestProof(refs []publicSurfaceProofRef, want string) bool
 	return false
 }
 
+func publicSurfaceProofRefsExcept(refs []publicSurfaceProofRef, name string) []publicSurfaceProofRef {
+	out := refs[:0]
+	for _, ref := range refs {
+		if ref.Kind == "go_test" && ref.Name == name {
+			continue
+		}
+		out = append(out, ref)
+	}
+	return out
+}
+
 func requiredPublicSurfaceRows() map[string]struct{} {
 	return complianceStringSet([]string{
 		"serve_contracts_default_sqlite",
@@ -651,8 +702,10 @@ func requiredPublicSurfaceRows() map[string]struct{} {
 		"entity_read_cli",
 		"status_run_get_entity_count",
 		"event_publish_api",
+		"api_idempotency_selected_store",
 		"event_publish_cli",
 		"event_publish_existing_run_followup_served_path",
+		"runtime_log_readback_api",
 		"mailbox_read_api_after_mailbox_write",
 		"mailbox_read_cli",
 		"serve_dev_abandon_active_runs",

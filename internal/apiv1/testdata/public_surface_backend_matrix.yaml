@@ -214,6 +214,31 @@ rows:
       served follow-up state advance is covered by the dedicated served-path
       row below.
 
+  - id: api_idempotency_selected_store
+    surface: selected-store API idempotency rows for mutating public methods
+    classification: already_covered_by_existing_proof
+    tier: required_smoke
+    backends: [default_sqlite, explicit_postgres]
+    api_methods: [event.publish, run.start]
+    openrpc_matrix_methods: [event.publish, run.start]
+    store_owners:
+      - selectedRuntimeStoreFacade.apiCapabilities
+      - apiv1.APIIdempotencyStore
+      - internal/store API idempotency persistence
+    proof_dimensions: [selected_store, real_v1_handler, canonical_store_owner, openrpc_publication]
+    proof_refs:
+      - kind: go_test
+        name: TestOperatorRunStartHandlersPersistRootEventAndReplayIdempotency
+      - kind: go_test
+        name: TestOperatorEventPublishSQLiteIdempotentFirstEventPublishesWithoutLock
+      - kind: go_test
+        name: TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempotency
+    notes: >
+      #1402 promotes API idempotency to first-class selected-store accounting.
+      The row proves representative mutating public methods consume selected
+      store idempotency owners without duplicating every idempotent OpenRPC
+      method across both backends.
+
   - id: event_publish_cli
     surface: swarm event publish create-new publication and exact v1 RPC command shape
     classification: already_covered_by_existing_proof
@@ -298,6 +323,34 @@ rows:
       dispatch/readback, trace/status/diagnose surfaces, and durable
       event.publish acceptance. This row does not claim full #1386 structural
       lifecycle parity enforcement.
+
+  - id: runtime_log_readback_api
+    surface: runtime logs, log subscription, and run trace readback over selected stores
+    classification: already_covered_by_existing_proof
+    tier: required_smoke
+    backends: [default_sqlite, explicit_postgres]
+    api_methods: [runtime.logs, runtime.subscribe_logs, run.trace]
+    openrpc_matrix_methods: [runtime.logs, runtime.subscribe_logs, run.trace]
+    store_owners:
+      - runtime.Stores.RuntimeLogStore
+      - apiv1.ObservabilityReadStore
+      - internal/store runtime log persistence
+    proof_dimensions: [selected_store, real_v1_handler, canonical_store_owner, openrpc_publication]
+    proof_refs:
+      - kind: go_test
+        name: TestSQLiteRuntimeLogPersistenceWritesLoggerRowsForObservability
+      - kind: go_test
+        name: TestPostgresRuntimeLogPersistencePreservesRunSourceAndLineage
+      - kind: go_test
+        name: TestOpenRPCWebSocketRuntimeProbes
+      - kind: go_test
+        name: TestHandlerWebSocketRuntimeSubscribeLogsUsesOwnerFiltersAndReplay
+      - kind: go_test
+        name: TestHandlerWebSocketRunSubscribeTraceUsesOwnerReplayAndRunNotFound
+    notes: >
+      #1402 promotes runtime-log/readback to first-class selected-store
+      accounting. Dashboard SQL readers are adjacent read-model consumers; this
+      row owns public API selected-store proof only.
 
   - id: mailbox_read_api_after_mailbox_write
     surface: mailbox.list and mailbox.get after handler-level mailbox_write on selected stores
