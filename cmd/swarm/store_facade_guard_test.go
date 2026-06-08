@@ -10,13 +10,16 @@ import (
 func TestSelectedStoreFacadeOwnsProducerBackendBranching(t *testing.T) {
 	allowed := map[string][]string{
 		filepath.Join("cmd", "swarm", "main.go"): {
-			"Postgres            *store.PostgresStore",
-			"RuntimeSQLDB        *sql.DB",
-			"pg, err := store.NewPostgresStore(dsn)",
-			"RuntimeSQLDB:        pg.DB",
-			"sqliteStore, err := store.NewSQLiteRuntimeStore(selection.SQLitePath)",
+			"*store.PostgresStore",
+			"RuntimeSQLDB",
+			"store.NewPostgresStore",
+			"store.NewSQLiteRuntimeStore",
 		},
-		filepath.Join("cmd", "swarm", "store_facade.go"): {"*"},
+		filepath.Join("cmd", "swarm", "store_facade.go"): {
+			"SQLDB:               s.RuntimeSQLDB",
+			"closeDB(f.stores.SQLDB)",
+			"return f.stores.SQLDB",
+		},
 	}
 	forbidden := []string{
 		"stores.Postgres",

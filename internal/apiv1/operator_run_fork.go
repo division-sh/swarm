@@ -42,27 +42,28 @@ type RunForkExecutionResult struct {
 	ExecutedEventCount int    `json:"executed_event_count"`
 }
 
+type SelectedContractRunForkExecutionFunc func(context.Context, runtimerunforkexecution.SelectedContractExecutionRequest) (runtimerunforkexecution.SelectedContractExecutionResult, error)
+
 type SelectedContractRunForkExecutor struct {
-	Store             *store.PostgresStore
-	SourceLoader      runtimerunforkexecution.SelectedContractSourceLoader
-	ContractSelection store.RunForkContractSelection
-	AgentRuntime      runtimerunforkexecution.SelectedContractAgentRuntimeOptions
+	ExecuteSelectedContractRunFork SelectedContractRunForkExecutionFunc
+	SourceLoader                   runtimerunforkexecution.SelectedContractSourceLoader
+	ContractSelection              store.RunForkContractSelection
+	AgentRuntime                   runtimerunforkexecution.SelectedContractAgentRuntimeOptions
 }
 
 func (e SelectedContractRunForkExecutor) ExecuteRunFork(ctx context.Context, req RunForkExecutionRequest) (RunForkExecutionResult, error) {
-	if e.Store == nil {
-		return RunForkExecutionResult{}, fmt.Errorf("run.fork requires selected-contract store")
+	if e.ExecuteSelectedContractRunFork == nil {
+		return RunForkExecutionResult{}, fmt.Errorf("run.fork requires selected-contract executor")
 	}
 	selection := req.ContractSelection
 	if strings.TrimSpace(selection.Mode) == "" {
 		selection = e.ContractSelection
 	}
-	result, err := runtimerunforkexecution.ExecuteSelectedContractRunFork(ctx, runtimerunforkexecution.SelectedContractExecutionRequest{
+	result, err := e.ExecuteSelectedContractRunFork(ctx, runtimerunforkexecution.SelectedContractExecutionRequest{
 		SourceRunID:       strings.TrimSpace(req.SourceRunID),
 		At:                strings.TrimSpace(req.ForkEventID),
 		BundleHash:        strings.TrimSpace(req.BundleHash),
 		BundleSource:      storerunlifecycle.BundleSourcePersisted,
-		Store:             e.Store,
 		SourceLoader:      e.SourceLoader,
 		ContractSelection: selection,
 		AgentRuntime:      e.AgentRuntime,

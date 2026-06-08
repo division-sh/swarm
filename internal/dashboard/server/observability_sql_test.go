@@ -27,9 +27,11 @@ func (s stubObservabilityCaps) ResolveSchemaCapabilities(context.Context) (store
 func canonicalObservabilityCaps() store.StoreSchemaCapabilities {
 	return store.StoreSchemaCapabilities{
 		Events: store.EventSchemaCapabilities{
-			Log:        store.SchemaFlavorCanonical,
-			Deliveries: store.SchemaFlavorCanonical,
-			Receipts:   store.SchemaFlavorCanonical,
+			Log:           store.SchemaFlavorCanonical,
+			Deliveries:    store.SchemaFlavorCanonical,
+			Receipts:      store.SchemaFlavorCanonical,
+			LogRunID:      true,
+			DeliveryRunID: true,
 		},
 	}
 }

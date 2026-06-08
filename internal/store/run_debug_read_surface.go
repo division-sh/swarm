@@ -731,7 +731,7 @@ func (s *PostgresStore) loadRunDebugFailureDeliveries(ctx context.Context, runID
 		item.FinishedAt = nullTimePtr(finishedAt)
 		normalizeRunDebugFailureDelivery(&item)
 		if item.Status == "dead_letter" {
-			deadLetters, err := s.loadOperatorEventDeadLetters(ctx, item.EventID)
+			deadLetters, err := s.operatorObservabilityReadSurface().loadOperatorEventDeadLetters(ctx, item.EventID)
 			if err != nil {
 				return nil, err
 			}

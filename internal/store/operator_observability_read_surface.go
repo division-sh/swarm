@@ -157,11 +157,53 @@ type observabilityPositionCursor struct {
 	LastSeen  string `json:"last_seen,omitempty"`
 }
 
-func (s *PostgresStore) requireOperatorObservabilityCapabilities(ctx context.Context) error {
-	if s == nil || s.DB == nil {
-		return fmt.Errorf("postgres store is required")
+type OperatorObservabilityCapabilitySource interface {
+	ResolveSchemaCapabilities(ctx context.Context) (StoreSchemaCapabilities, error)
+}
+
+type OperatorObservabilityReadSurface struct {
+	db        *sql.DB
+	capSource OperatorObservabilityCapabilitySource
+}
+
+func NewOperatorObservabilityReadSurface(db *sql.DB, capSource OperatorObservabilityCapabilitySource) *OperatorObservabilityReadSurface {
+	if db == nil || capSource == nil {
+		return nil
 	}
-	caps, err := s.schemaCapabilities(ctx)
+	return &OperatorObservabilityReadSurface{db: db, capSource: capSource}
+}
+
+func (s *PostgresStore) operatorObservabilityReadSurface() *OperatorObservabilityReadSurface {
+	if s == nil {
+		return nil
+	}
+	return NewOperatorObservabilityReadSurface(s.DB, s)
+}
+
+func (s *PostgresStore) ListOperatorEvents(ctx context.Context, opts OperatorEventListOptions) (OperatorEventListResult, error) {
+	return s.operatorObservabilityReadSurface().ListOperatorEvents(ctx, opts)
+}
+
+func (s *PostgresStore) LoadOperatorEvent(ctx context.Context, eventID string) (OperatorEventFull, error) {
+	return s.operatorObservabilityReadSurface().LoadOperatorEvent(ctx, eventID)
+}
+
+func (s *PostgresStore) ListOperatorRuntimeLogs(ctx context.Context, opts OperatorRuntimeLogListOptions) (OperatorRuntimeLogListResult, error) {
+	return s.operatorObservabilityReadSurface().ListOperatorRuntimeLogs(ctx, opts)
+}
+
+func (s *PostgresStore) ListOperatorRuntimeIncidents(ctx context.Context, opts OperatorRuntimeIncidentListOptions) (OperatorRuntimeIncidentListResult, error) {
+	return s.operatorObservabilityReadSurface().ListOperatorRuntimeIncidents(ctx, opts)
+}
+
+func (r *OperatorObservabilityReadSurface) requireOperatorObservabilityCapabilities(ctx context.Context) error {
+	if r == nil || r.db == nil {
+		return fmt.Errorf("operator observability read surface is required")
+	}
+	if r.capSource == nil {
+		return fmt.Errorf("operator observability read surface requires schema capabilities")
+	}
+	caps, err := r.capSource.ResolveSchemaCapabilities(ctx)
 	if err != nil {
 		return err
 	}
@@ -175,7 +217,7 @@ func (s *PostgresStore) requireOperatorObservabilityCapabilities(ctx context.Con
 	case !caps.Events.DeliveryRunID:
 		return fmt.Errorf("operator observability read surface requires canonical event_deliveries.run_id")
 	}
-	catalog, err := loadSchemaColumnCatalog(ctx, s.DB)
+	catalog, err := loadSchemaColumnCatalog(ctx, r.db)
 	if err != nil {
 		return err
 	}
@@ -205,8 +247,8 @@ func (s *PostgresStore) requireOperatorObservabilityCapabilities(ctx context.Con
 	return nil
 }
 
-func (s *PostgresStore) ListOperatorEvents(ctx context.Context, opts OperatorEventListOptions) (OperatorEventListResult, error) {
-	if err := s.requireOperatorObservabilityCapabilities(ctx); err != nil {
+func (r *OperatorObservabilityReadSurface) ListOperatorEvents(ctx context.Context, opts OperatorEventListOptions) (OperatorEventListResult, error) {
+	if err := r.requireOperatorObservabilityCapabilities(ctx); err != nil {
 		return OperatorEventListResult{}, err
 	}
 	opts = defaultOperatorEventListOptions(opts)
@@ -301,7 +343,7 @@ func (s *PostgresStore) ListOperatorEvents(ctx context.Context, opts OperatorEve
 	if opts.Order == "asc" {
 		orderSQL = "ASC"
 	}
-	rows, err := s.DB.QueryContext(ctx, `
+	rows, err := r.db.QueryContext(ctx, `
 		SELECT e.event_id::text
 		FROM events e
 		WHERE `+strings.Join(where, " AND ")+fmt.Sprintf(`
@@ -325,7 +367,7 @@ func (s *PostgresStore) ListOperatorEvents(ctx context.Context, opts OperatorEve
 	}
 	events := make([]OperatorEventFull, 0, minInt(len(ids), opts.Limit))
 	for _, id := range ids {
-		event, err := s.LoadOperatorEvent(ctx, id)
+		event, err := r.LoadOperatorEvent(ctx, id)
 		if err != nil {
 			return OperatorEventListResult{}, err
 		}
@@ -348,15 +390,15 @@ func (s *PostgresStore) ListOperatorEvents(ctx context.Context, opts OperatorEve
 	return OperatorEventListResult{Events: events, NextCursor: nextCursor}, nil
 }
 
-func (s *PostgresStore) LoadOperatorEvent(ctx context.Context, eventID string) (OperatorEventFull, error) {
-	if err := s.requireOperatorObservabilityCapabilities(ctx); err != nil {
+func (r *OperatorObservabilityReadSurface) LoadOperatorEvent(ctx context.Context, eventID string) (OperatorEventFull, error) {
+	if err := r.requireOperatorObservabilityCapabilities(ctx); err != nil {
 		return OperatorEventFull{}, err
 	}
 	eventID = strings.TrimSpace(eventID)
 	if eventID == "" {
 		return OperatorEventFull{}, ErrEventNotFound
 	}
-	row := s.DB.QueryRowContext(ctx, `
+	row := r.db.QueryRowContext(ctx, `
 		SELECT
 			e.event_id::text,
 			COALESCE(e.event_name, ''),
@@ -387,11 +429,11 @@ func (s *PostgresStore) LoadOperatorEvent(ctx context.Context, eventID string) (
 		return OperatorEventFull{}, fmt.Errorf("decode operator event payload: %w", err)
 	}
 	event.Payload = payload
-	deadLetters, err := s.loadOperatorEventDeadLetters(ctx, event.EventID)
+	deadLetters, err := r.loadOperatorEventDeadLetters(ctx, event.EventID)
 	if err != nil {
 		return OperatorEventFull{}, err
 	}
-	deliveries, err := s.loadOperatorEventDeliveries(ctx, event.EventID)
+	deliveries, err := r.loadOperatorEventDeliveries(ctx, event.EventID)
 	if err != nil {
 		return OperatorEventFull{}, err
 	}
@@ -406,8 +448,8 @@ func (s *PostgresStore) LoadOperatorEvent(ctx context.Context, eventID string) (
 	return event, nil
 }
 
-func (s *PostgresStore) loadOperatorEventDeliveries(ctx context.Context, eventID string) ([]OperatorEventDelivery, error) {
-	rows, err := s.DB.QueryContext(ctx, `
+func (r *OperatorObservabilityReadSurface) loadOperatorEventDeliveries(ctx context.Context, eventID string) ([]OperatorEventDelivery, error) {
+	rows, err := r.db.QueryContext(ctx, `
 		SELECT
 			d.delivery_id::text,
 			COALESCE(d.subscriber_type, ''),
@@ -497,8 +539,8 @@ func nullTimePtr(value sql.NullTime) *time.Time {
 	return &at
 }
 
-func (s *PostgresStore) loadOperatorEventDeadLetters(ctx context.Context, eventID string) ([]OperatorDeadLetterRecord, error) {
-	rows, err := s.DB.QueryContext(ctx, `
+func (r *OperatorObservabilityReadSurface) loadOperatorEventDeadLetters(ctx context.Context, eventID string) ([]OperatorDeadLetterRecord, error) {
+	rows, err := r.db.QueryContext(ctx, `
 		SELECT
 			dl.dead_letter_id::text,
 			COALESCE(dl.failure_type, ''),
@@ -529,8 +571,8 @@ func (s *PostgresStore) loadOperatorEventDeadLetters(ctx context.Context, eventI
 	return out, nil
 }
 
-func (s *PostgresStore) ListOperatorRuntimeLogs(ctx context.Context, opts OperatorRuntimeLogListOptions) (OperatorRuntimeLogListResult, error) {
-	if err := s.requireOperatorObservabilityCapabilities(ctx); err != nil {
+func (r *OperatorObservabilityReadSurface) ListOperatorRuntimeLogs(ctx context.Context, opts OperatorRuntimeLogListOptions) (OperatorRuntimeLogListResult, error) {
+	if err := r.requireOperatorObservabilityCapabilities(ctx); err != nil {
 		return OperatorRuntimeLogListResult{}, err
 	}
 	opts = defaultOperatorRuntimeLogListOptions(opts)
@@ -570,7 +612,7 @@ func (s *PostgresStore) ListOperatorRuntimeLogs(ctx context.Context, opts Operat
 		compareOrder = "ASC"
 	}
 	args = append(args, opts.Limit+1)
-	rows, err := s.DB.QueryContext(ctx, fmt.Sprintf(`
+	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`
 		SELECT
 			e.event_id::text,
 			COALESCE(e.run_id::text, ''),
@@ -641,13 +683,13 @@ func (s *PostgresStore) ListOperatorRuntimeLogs(ctx context.Context, opts Operat
 	return OperatorRuntimeLogListResult{Logs: logs, NextCursor: nextCursor}, nil
 }
 
-func (s *PostgresStore) ListOperatorRuntimeIncidents(ctx context.Context, opts OperatorRuntimeIncidentListOptions) (OperatorRuntimeIncidentListResult, error) {
-	if err := s.requireOperatorObservabilityCapabilities(ctx); err != nil {
+func (r *OperatorObservabilityReadSurface) ListOperatorRuntimeIncidents(ctx context.Context, opts OperatorRuntimeIncidentListOptions) (OperatorRuntimeIncidentListResult, error) {
+	if err := r.requireOperatorObservabilityCapabilities(ctx); err != nil {
 		return OperatorRuntimeIncidentListResult{}, err
 	}
 	opts = defaultOperatorRuntimeIncidentListOptions(opts)
 	cutoff := time.Now().UTC().Add(-time.Duration(opts.SinceHours) * time.Hour)
-	rows, err := s.DB.QueryContext(ctx, `
+	rows, err := r.db.QueryContext(ctx, `
 		SELECT
 			e.event_id::text,
 			COALESCE(e.run_id::text, ''),

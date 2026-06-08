@@ -32,6 +32,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
+	runtimebundledelete "github.com/division-sh/swarm/internal/runtime/bundledelete"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -124,31 +125,43 @@ type previousEnv struct {
 }
 
 type storeBundle struct {
-	Postgres            *store.PostgresStore
-	SQLDB               *sql.DB
-	RuntimeSQLDB        *sql.DB
-	RuntimeLogStore     runtime.RuntimeLogPersistence
-	RuntimeBlocker      string
-	SchemaBootstrapper  store.SchemaBootstrapper
-	EventStore          runtimebus.EventStore
-	PipelineStore       *runtimepipeline.WorkflowInstanceStore
-	SessionRegistry     sessions.Registry
-	ConversationStore   runtimellm.ConversationPersistence
-	ManagerStore        runtimemanager.ManagerPersistence
-	ScheduleStore       runtimepipeline.SchedulePersistence
-	MailboxMaterializer runtimepipeline.MailboxWriteMaterializationStore
-	MailboxStore        runtimetools.MailboxPersistence
-	ToolEntityStore     runtimetools.EntityPersistence
-	HumanTaskStore      runtimetools.HumanTaskPersistence
-	BudgetSpendStore    budgetspend.Store
-	MailboxAPIStore     apiv1.MailboxAPIStore
-	ObservabilityStore  apiv1.ObservabilityReadStore
-	AgentUsageStore     apiv1.AgentUsageReadStore
-	RuntimeIngressStore runtimeingress.Store
-	IdempotencyStore    apiv1.APIIdempotencyStore
-	TurnStore           runtimellm.TurnPersistence
-	StartupOwnership    runtimestartupownership.Store
-	RunQuiescenceStore  runtimerunquiescence.ServeAbandonStore
+	Postgres                     *store.PostgresStore
+	SQLDB                        *sql.DB
+	RuntimeSQLDB                 *sql.DB
+	Database                     apiv1.Pinger
+	RuntimeLogStore              runtime.RuntimeLogPersistence
+	RuntimeBlocker               string
+	SchemaBootstrapper           store.SchemaBootstrapper
+	EventStore                   runtimebus.EventStore
+	PipelineStore                *runtimepipeline.WorkflowInstanceStore
+	SessionRegistry              sessions.Registry
+	ConversationStore            runtimellm.ConversationPersistence
+	ManagerStore                 runtimemanager.ManagerPersistence
+	ScheduleStore                runtimepipeline.SchedulePersistence
+	MailboxMaterializer          runtimepipeline.MailboxWriteMaterializationStore
+	MailboxStore                 runtimetools.MailboxPersistence
+	ToolEntityStore              runtimetools.EntityPersistence
+	HumanTaskStore               runtimetools.HumanTaskPersistence
+	BudgetSpendStore             budgetspend.Store
+	MailboxAPIStore              apiv1.MailboxAPIStore
+	ObservabilityStore           apiv1.ObservabilityReadStore
+	AgentUsageStore              apiv1.AgentUsageReadStore
+	RuntimeIngressStore          runtimeingress.Store
+	IdempotencyStore             apiv1.APIIdempotencyStore
+	TurnStore                    runtimellm.TurnPersistence
+	StartupOwnership             runtimestartupownership.Store
+	RunQuiescenceStore           runtimerunquiescence.ServeAbandonStore
+	RunReadStore                 apiv1.RunReadStore
+	EntityReadStore              apiv1.EntityReadStore
+	AgentConversationReadStore   apiv1.AgentConversationReadStore
+	RunBundleContextStore        apiv1.RunBundleContextStore
+	BundleRuntimeCatalogStore    selectedBundleRuntimeCatalogStore
+	BundleSourceCatalogStore     selectedBundleSourceCatalogStore
+	RunBundleAvailabilityStore   selectedRunBundleAvailabilityStore
+	StartupRecoveryStore         selectedStartupRecoveryStore
+	RunStalledReader             runStalledReadStore
+	APIOptionalCapabilityBuilder selectedAPIOptionalCapabilityBuilder
+	RunForkRuntimeOwner          selectedRunForkRuntimeOwner
 }
 
 type sqlDBPinger struct {
@@ -160,6 +173,144 @@ func (p sqlDBPinger) Ping(ctx context.Context) error {
 		return errors.New("sql database is not configured")
 	}
 	return p.db.PingContext(ctx)
+}
+
+func selectedPostgresAPIOptionalCapabilityBuilder(pg *store.PostgresStore, stores storeBundle) selectedAPIOptionalCapabilityBuilder {
+	if pg == nil {
+		return nil
+	}
+	return func(req selectedAPICapabilityRequest) (selectedAPICapabilities, error) {
+		resetPlanner := runtimedestructivereset.InventoryPlanner{
+			Reader: runtimedestructivereset.CompositeInventoryReader{
+				Reader:     pg,
+				Containers: req.Workspaces,
+			},
+		}
+		runForkSourceLoader := runtimerunforkexecution.SelectedContractSourceLoader(runtimerunforkexecution.ContractBundleSourceLoader{
+			RepoRoot:         req.RepoRoot,
+			PlatformSpecPath: req.PlatformSpecPath,
+		})
+		if req.LoadedBundle.dbLoaded {
+			runForkSourceLoader = runtimerunforkexecution.BundleCatalogSelectedContractSourceLoader{
+				RepoRoot: req.RepoRoot,
+				Store:    pg,
+			}
+		}
+		apiRuntimeContexts, err := serveRuntimeContextManager(pg, req.RuntimeContexts)
+		if err != nil {
+			return selectedAPICapabilities{}, err
+		}
+		return selectedAPICapabilities{
+			BundleCatalog: pg,
+			BundleDelete: &runtimebundledelete.Coordinator{
+				Planner:            pg,
+				Cleaner:            pg,
+				Finalizer:          pg,
+				Locks:              pg,
+				ContainerInventory: req.Workspaces,
+				Containers:         runtimedestructivereset.ManagedContainerStopper{Runtime: req.Workspaces},
+			},
+			ConversationForks:   pg,
+			RunForkAvailability: pg,
+			RunFork: apiv1.SelectedContractRunForkExecutor{
+				ExecuteSelectedContractRunFork: selectedPostgresRunForkExecutionFunc(pg),
+				SourceLoader:                   runForkSourceLoader,
+				ContractSelection:              runtimerunforkadmission.SelectedContractSelection(req.Source, req.ContractsRoot),
+				AgentRuntime: runtimerunforkexecution.SelectedContractAgentRuntimeOptions{
+					Config:            req.Config,
+					EntityStore:       stores.ToolEntityStore,
+					HumanTaskStore:    stores.HumanTaskStore,
+					SessionRegistry:   stores.SessionRegistry,
+					ConversationStore: stores.ConversationStore,
+					TurnStore:         stores.TurnStore,
+					ScheduleStore:     stores.ScheduleStore,
+					MailboxStore:      stores.MailboxStore,
+					Workspace:         req.Workspaces,
+					Credentials:       req.Credentials,
+				},
+			},
+			RuntimeContexts:  apiRuntimeContexts,
+			ResetCoordinator: &runtimedestructivereset.Coordinator{Planner: resetPlanner, Locks: pg},
+			ResetQuiescer:    runtimedestructivereset.Quiescer{Store: pg},
+			ResetCleaner:     runtimedestructivereset.Cleaner{Store: pg},
+		}, nil
+	}
+}
+
+func selectedPostgresRunForkExecutionFunc(pg *store.PostgresStore) apiv1.SelectedContractRunForkExecutionFunc {
+	if pg == nil {
+		return nil
+	}
+	return func(ctx context.Context, req runtimerunforkexecution.SelectedContractExecutionRequest) (runtimerunforkexecution.SelectedContractExecutionResult, error) {
+		req.Store = pg
+		return runtimerunforkexecution.ExecuteSelectedContractRunFork(ctx, req)
+	}
+}
+
+func selectedPostgresRunForkRuntimeOwner(pg *store.PostgresStore) selectedRunForkRuntimeOwner {
+	if pg == nil {
+		return selectedRunForkRuntimeOwner{}
+	}
+	return selectedRunForkRuntimeOwner{
+		activateFunc: func(ctx context.Context, req runtimerunforkexecution.SelectedContractActivationGateRequest) (runtimerunforkexecution.SelectedContractActivationGateResult, error) {
+			req.Store = pg
+			return runtimerunforkexecution.ActivateSelectedContractRunFork(ctx, req)
+		},
+		materializeFunc: pg.MaterializeRunFork,
+		executeFunc: func(ctx context.Context, req runtimerunforkexecution.SelectedContractExecutionRequest) (runtimerunforkexecution.SelectedContractExecutionResult, error) {
+			req.Store = pg
+			return runtimerunforkexecution.ExecuteSelectedContractRunFork(ctx, req)
+		},
+		planFunc: pg.PlanRunFork,
+	}
+}
+
+func selectedPostgresStoreBundle(pg *store.PostgresStore, cfg *config.Config) storeBundle {
+	if pg == nil {
+		return storeBundle{}
+	}
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+	bundle := storeBundle{
+		Postgres:                   pg,
+		SQLDB:                      pg.DB,
+		RuntimeSQLDB:               pg.DB,
+		Database:                   pg,
+		RuntimeLogStore:            pg,
+		SchemaBootstrapper:         pg,
+		EventStore:                 pg,
+		PipelineStore:              runtimepipeline.NewWorkflowInstanceStore(pg.DB),
+		SessionRegistry:            sessions.NewPostgresRegistry(pg.DB, cfg.LLM.Session.LockTTL),
+		ConversationStore:          pg,
+		ManagerStore:               pg,
+		ScheduleStore:              pg,
+		MailboxMaterializer:        pg,
+		MailboxStore:               pg,
+		ToolEntityStore:            pg,
+		HumanTaskStore:             pg,
+		BudgetSpendStore:           pg,
+		MailboxAPIStore:            pg,
+		ObservabilityStore:         pg,
+		AgentUsageStore:            pg,
+		RuntimeIngressStore:        pg,
+		IdempotencyStore:           pg,
+		TurnStore:                  pg,
+		StartupOwnership:           pg,
+		RunQuiescenceStore:         pg,
+		RunReadStore:               pg,
+		EntityReadStore:            pg,
+		AgentConversationReadStore: pg,
+		RunBundleContextStore:      pg,
+		BundleRuntimeCatalogStore:  pg,
+		BundleSourceCatalogStore:   pg,
+		RunBundleAvailabilityStore: pg,
+		StartupRecoveryStore:       pg,
+		RunStalledReader:           pg,
+		RunForkRuntimeOwner:        selectedPostgresRunForkRuntimeOwner(pg),
+	}
+	bundle.APIOptionalCapabilityBuilder = selectedPostgresAPIOptionalCapabilityBuilder(pg, bundle)
+	return bundle
 }
 
 func (s storeBundle) runtimeStores() runtime.Stores {
@@ -419,7 +570,7 @@ func loadServeRuntimeBundle(ctx context.Context, repo string, stores storeBundle
 func loadServeRuntimeBundleFromCatalog(ctx context.Context, repo string, stores storeBundle, bundleHash string) (serveRuntimeBundle, error) {
 	catalog := stores.facade().bundleRuntimeCatalogStore()
 	if catalog == nil {
-		return serveRuntimeBundle{}, fmt.Errorf("BUNDLE_UNAVAILABLE: swarm serve --bundle-hash requires postgres bundle catalog store")
+		return serveRuntimeBundle{}, fmt.Errorf("BUNDLE_UNAVAILABLE: swarm serve --bundle-hash requires selected bundle catalog store")
 	}
 	if err := runtimecontracts.ValidateBundleHash(bundleHash); err != nil {
 		return serveRuntimeBundle{}, err
@@ -2353,32 +2504,7 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 		if _, err := pg.BindSchemaCapabilities(ctx); err != nil {
 			return storeBundle{}, err
 		}
-		return storeBundle{
-			Postgres:            pg,
-			SQLDB:               pg.DB,
-			RuntimeSQLDB:        pg.DB,
-			RuntimeLogStore:     pg,
-			SchemaBootstrapper:  pg,
-			EventStore:          pg,
-			PipelineStore:       runtimepipeline.NewWorkflowInstanceStore(pg.DB),
-			SessionRegistry:     sessions.NewPostgresRegistry(pg.DB, cfg.LLM.Session.LockTTL),
-			ConversationStore:   pg,
-			ManagerStore:        pg,
-			ScheduleStore:       pg,
-			MailboxMaterializer: pg,
-			MailboxStore:        pg,
-			ToolEntityStore:     pg,
-			HumanTaskStore:      pg,
-			BudgetSpendStore:    pg,
-			MailboxAPIStore:     pg,
-			ObservabilityStore:  pg,
-			AgentUsageStore:     pg,
-			RuntimeIngressStore: pg,
-			IdempotencyStore:    pg,
-			TurnStore:           pg,
-			StartupOwnership:    pg,
-			RunQuiescenceStore:  pg,
-		}, nil
+		return selectedPostgresStoreBundle(pg, cfg), nil
 	case storebackend.BackendSQLite:
 		sqliteStore, err := store.NewSQLiteRuntimeStore(selection.SQLitePath)
 		if err != nil {
@@ -2394,28 +2520,33 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 		}
 		sqliteStore.SetSessionLockTTL(cfg.LLM.Session.LockTTL)
 		return storeBundle{
-			SQLDB:               sqliteStore.DB,
-			RuntimeLogStore:     sqliteStore,
-			SchemaBootstrapper:  sqliteStore,
-			EventStore:          sqliteStore,
-			PipelineStore:       runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(sqliteStore.DB, sqliteStore),
-			SessionRegistry:     sqliteStore,
-			ConversationStore:   sqliteStore,
-			ManagerStore:        sqliteStore,
-			ScheduleStore:       sqliteStore,
-			MailboxMaterializer: sqliteStore,
-			MailboxStore:        sqliteStore,
-			ToolEntityStore:     sqliteStore,
-			HumanTaskStore:      sqliteStore,
-			BudgetSpendStore:    sqliteStore,
-			MailboxAPIStore:     sqliteStore,
-			ObservabilityStore:  sqliteStore,
-			AgentUsageStore:     sqliteStore,
-			RuntimeIngressStore: sqliteStore,
-			IdempotencyStore:    sqliteStore,
-			TurnStore:           sqliteStore,
-			StartupOwnership:    sqliteStore,
-			RunQuiescenceStore:  sqliteStore,
+			SQLDB:                 sqliteStore.DB,
+			Database:              sqlDBPinger{db: sqliteStore.DB},
+			RuntimeLogStore:       sqliteStore,
+			SchemaBootstrapper:    sqliteStore,
+			EventStore:            sqliteStore,
+			PipelineStore:         runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(sqliteStore.DB, sqliteStore),
+			SessionRegistry:       sqliteStore,
+			ConversationStore:     sqliteStore,
+			ManagerStore:          sqliteStore,
+			ScheduleStore:         sqliteStore,
+			MailboxMaterializer:   sqliteStore,
+			MailboxStore:          sqliteStore,
+			ToolEntityStore:       sqliteStore,
+			HumanTaskStore:        sqliteStore,
+			BudgetSpendStore:      sqliteStore,
+			MailboxAPIStore:       sqliteStore,
+			ObservabilityStore:    sqliteStore,
+			AgentUsageStore:       sqliteStore,
+			RuntimeIngressStore:   sqliteStore,
+			IdempotencyStore:      sqliteStore,
+			TurnStore:             sqliteStore,
+			StartupOwnership:      sqliteStore,
+			RunQuiescenceStore:    sqliteStore,
+			RunReadStore:          sqliteStore,
+			EntityReadStore:       sqliteStore,
+			RunBundleContextStore: sqliteStore,
+			RunStalledReader:      sqliteStore,
 		}, nil
 	default:
 		return storeBundle{}, fmt.Errorf("store backend selection is required; supported backends: %s, %s", storebackend.BackendPostgres, storebackend.BackendSQLite)
