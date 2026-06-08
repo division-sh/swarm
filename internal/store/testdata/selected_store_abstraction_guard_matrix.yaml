@@ -1,0 +1,250 @@
+version: 1
+kind: selected_runtime_store_abstraction_guard_matrix
+issue: 1402
+parent_issue: 1400
+policy:
+  closure_level: matrix_guard_child_complete
+  claims_parent_closure: false
+  required_smoke_policy: >
+    Required PR smoke is the named guard/matrix validation plus the focused
+    proof refs listed here. The matrix composes selected-store guard owners and
+    public-surface accounting; it must not expand into a SQLite/Postgres
+    Cartesian suite.
+  named_fast_command: >
+    go test ./internal/store ./cmd/swarm ./internal/apiv1 -run
+    'TestSelectedStoreAbstractionGuardMatrix|TestSelectedStoreFacadeOwnsProducerBackendBranching|TestSelectedStoreFacadeBackendBranchingGuardRejectsProducerFixture|TestSelectedSQLiteRuntimeWriterBoundaryAudit|TestRuntimeWriterBoundaryGuardRejects|TestSelectedSQLiteRuntimeConstructionConsumesMutationBoundary|TestPublicSurfaceBackendMatrixCoversSelectedBackendRows|TestPublicSurfaceBackendMatrixRejectsStaleReferences' -count=1
+  named_full_conformance_command: go test ./internal/runtime/cataloge2e -count=1
+rows:
+  - id: public_surface_backend_matrix_accounting
+    classification: matrix_owner
+    tier: required_smoke
+    concepts:
+      - selected backend public API and CLI proof accounting
+      - default SQLite and explicit Postgres row classification
+    owners:
+      - internal/apiv1/testdata/public_surface_backend_matrix.yaml
+      - internal/apiv1 TestPublicSurfaceBackendMatrixCoversSelectedBackendRows
+    proof_refs:
+      - kind: artifact
+        path: internal/apiv1/testdata/public_surface_backend_matrix.yaml
+      - kind: go_test
+        name: TestPublicSurfaceBackendMatrixCoversSelectedBackendRows
+      - kind: go_test
+        name: TestPublicSurfaceBackendMatrixRejectsStaleReferences
+    guard_proof_refs:
+      - kind: go_test
+        name: TestPublicSurfaceBackendMatrixRejectsStaleReferences
+    notes: >
+      #1402 consumes the existing public-surface backend matrix instead of
+      replacing OpenRPC method/schema ownership.
+
+  - id: producer_backend_branching_guard
+    classification: guard
+    tier: required_smoke
+    concepts:
+      - producer-side backend branching after construction
+    owners:
+      - cmd/swarm/store_facade_guard_test.go
+      - selectedRuntimeStoreFacade
+    proof_refs:
+      - kind: go_test
+        name: TestSelectedStoreFacadeOwnsProducerBackendBranching
+    guard_proof_refs:
+      - kind: go_test
+        name: TestSelectedStoreFacadeBackendBranchingGuardRejectsProducerFixture
+    notes: >
+      Producer/public-surface assembly must not infer capability availability
+      from concrete Postgres/SQLite fields after store construction.
+
+  - id: raw_selected_runtime_writer_boundary_guard
+    classification: guard
+    tier: required_smoke
+    concepts:
+      - raw selected-runtime SQL writer and transaction bypasses
+    owners:
+      - internal/store/runtime_mutation_guard_test.go
+      - backend_neutral_runtime_mutation_write_boundary
+    proof_refs:
+      - kind: go_test
+        name: TestSelectedSQLiteRuntimeWriterBoundaryAudit
+    guard_proof_refs:
+      - kind: go_test
+        name: TestRuntimeWriterBoundaryGuardRejectsSelectedSQLiteBypassFixture
+      - kind: go_test
+        name: TestRuntimeWriterBoundaryGuardRejectsSameFunctionSQLiteBypassFixture
+      - kind: go_test
+        name: TestRuntimeWriterBoundaryGuardRejectsPipelineSQLiteDBHelperBypassFixture
+      - kind: go_test
+        name: TestRuntimeWriterBoundaryGuardRejectsPipelineSQLiteRawDBHelperFixture
+    split_issues: [1403, 1405]
+    notes: >
+      This row guards the boundary. Behavior-changing mutation UoW migration
+      remains #1403 and SQLite busy/serialization policy remains #1405.
+
+  - id: sqlite_runtime_sqldb_omission_guard
+    classification: guard
+    tier: required_smoke
+    concepts:
+      - raw SQLite runtime SQLDB exposure to producers
+    owners:
+      - cmd/swarm buildStores
+      - runtime.Stores.SQLDB
+      - raw_sql_runtime_consumer_boundary_for_sqlite
+    proof_refs:
+      - kind: go_test
+        name: TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore
+      - kind: go_test
+        name: TestBuildStoresSQLiteRuntimeNoLongerFailsClosedOnMailboxMaterializationOwner
+      - kind: go_test
+        name: TestSelectedSQLiteRuntimeConstructionConsumesMutationBoundary
+    guard_proof_refs:
+      - kind: go_test
+        name: TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore
+      - kind: go_test
+        name: TestBuildStoresSQLiteRuntimeNoLongerFailsClosedOnMailboxMaterializationOwner
+    notes: >
+      SQLite construction must keep runtime.Stores.SQLDB nil; promoted stores
+      consume typed selected owners instead.
+
+  - id: postgres_not_forced_through_sqlite_serialization_guard
+    classification: guard
+    tier: required_smoke
+    concepts:
+      - Postgres must not inherit SQLite global serialization or retry policy
+    owners:
+      - internal/store.PostgresStore transaction methods
+      - internal/runtime/pipeline.WorkflowInstanceStore Postgres dialect
+    proof_refs:
+      - kind: go_test
+        name: TestPostgresStore_RunEventTransactionDoesNotSerializeCallbacks
+      - kind: go_test
+        name: TestWorkflowInstanceStore_RunInPipelineTransactionDoesNotRetryPostgresDialect
+    guard_proof_refs:
+      - kind: go_test
+        name: TestPostgresStore_RunEventTransactionDoesNotSerializeCallbacks
+      - kind: go_test
+        name: TestWorkflowInstanceStore_RunInPipelineTransactionDoesNotRetryPostgresDialect
+    notes: >
+      SQLite-local busy handling is a store-internal backend policy; Postgres
+      keeps normal transaction behavior.
+
+  - id: default_sqlite_required_smoke
+    classification: required_smoke
+    tier: required_smoke
+    concepts:
+      - default SQLite serve/run public path
+    owners:
+      - .github/workflows/ci.yml sqlite-local-dev
+      - internal/store/backendselection
+      - cmd/swarm buildStores
+    proof_refs:
+      - kind: workflow
+        path: .github/workflows/ci.yml
+        name: sqlite-local-dev
+      - kind: go_test
+        name: TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore
+      - kind: go_test
+        name: TestRunCommandLocalForegroundConsumesServeOwnerAndV1API
+    notes: >
+      Default SQLite proof stays fast and representative. It must not duplicate
+      every public surface across both backends.
+
+  - id: explicit_postgres_required_smoke
+    classification: required_smoke
+    tier: required_smoke
+    concepts:
+      - explicit Postgres opt-in public path
+    owners:
+      - .github/workflows/ci.yml Prove explicit Postgres opt-in selector
+      - internal/store/backendselection
+      - cmd/swarm buildStores
+    proof_refs:
+      - kind: workflow
+        path: .github/workflows/ci.yml
+        name: Prove explicit Postgres opt-in selector
+      - kind: go_test
+        name: TestRunServeRuntimeConsumesCanonicalStoreSelectionBeforeStoreConstruction
+      - kind: go_test
+        name: TestRunServeRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDiskContractsServe
+    notes: >
+      Explicit Postgres remains a required counterpart without forcing a
+      complete SQLite/Postgres Cartesian suite.
+
+  - id: api_idempotency_public_surface_accounting
+    classification: public_surface_accounting
+    tier: required_smoke
+    concepts:
+      - API idempotency through selected store capabilities
+    owners:
+      - internal/apiv1 APIIdempotencyStore
+      - internal/apiv1/testdata/public_surface_backend_matrix.yaml
+    proof_refs:
+      - kind: artifact
+        path: internal/apiv1/testdata/public_surface_backend_matrix.yaml
+      - kind: go_test
+        name: TestOperatorRunStartHandlersPersistRootEventAndReplayIdempotency
+      - kind: go_test
+        name: TestOperatorEventPublishSQLiteIdempotentFirstEventPublishesWithoutLock
+      - kind: go_test
+        name: TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempotency
+    notes: >
+      First-class #1402 row required by gate. OpenRPC method-catalog and schema
+      proof remain adjacent owners.
+
+  - id: runtime_log_readback_public_surface_accounting
+    classification: public_surface_accounting
+    tier: required_smoke
+    concepts:
+      - runtime log and trace readback through selected store capabilities
+    owners:
+      - runtime.Stores.RuntimeLogStore
+      - apiv1.ObservabilityReadStore
+      - internal/apiv1/testdata/public_surface_backend_matrix.yaml
+    proof_refs:
+      - kind: artifact
+        path: internal/apiv1/testdata/public_surface_backend_matrix.yaml
+      - kind: go_test
+        name: TestSQLiteRuntimeLogPersistenceWritesLoggerRowsForObservability
+      - kind: go_test
+        name: TestPostgresRuntimeLogPersistencePreservesRunSourceAndLineage
+      - kind: go_test
+        name: TestOpenRPCWebSocketRuntimeProbes
+      - kind: go_test
+        name: TestHandlerWebSocketRuntimeSubscribeLogsUsesOwnerFiltersAndReplay
+      - kind: go_test
+        name: TestHandlerWebSocketRunSubscribeTraceUsesOwnerReplayAndRunNotFound
+    notes: >
+      First-class #1402 row required by gate. Dashboard SQL readers remain
+      adjacent read-model consumers and do not own selected runtime persistence.
+
+  - id: mutation_uow_behavior_split
+    classification: split_to_existing_issue
+    tier: split_open
+    concepts:
+      - typed backend-neutral runtime mutation unit of work
+    owners:
+      - backend_neutral_runtime_mutation_write_boundary
+      - future #1403 typed unit-of-work owner
+    split_issues: [1403]
+    proof_refs:
+      - kind: artifact
+        path: platform-spec.yaml
+    notes: >
+      #1402 may guard/account for this seam, but production mutation behavior
+      migration belongs to #1403.
+
+  - id: sqlite_busy_serialization_behavior_split
+    classification: split_to_existing_issue
+    tier: split_open
+    concepts:
+      - SQLite write serialization and SQLITE_BUSY policy
+    owners:
+      - internal/store.SQLiteRuntimeStore mutation executor
+      - future #1405 store-internal busy policy owner
+    split_issues: [1405]
+    proof_refs:
+      - kind: artifact
+        path: platform-spec.yaml
+    notes: >
+      #1402 may prove producers do not own SQLite busy policy. Moving the policy
+      fully below the store boundary remains #1405.
