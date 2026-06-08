@@ -2527,16 +2527,125 @@ engine:
     - name: selected_runtime_store_facade
       owner: cmd/swarm storeBundle selectedRuntimeStoreFacade
       promoted_by: '#1395'
+      model_defined_by: '#1404'
+      producer_facing_model_name: selected_runtime_store_capability_model
       scope: >
         After backendselection resolves the selected runtime backend and buildStores constructs concrete stores, producer
         and public-surface assembly code must consume named selected capability interfaces from the selected runtime store
         facade. Concrete PostgresStore / SQLiteRuntimeStore identity, raw SQL handles, and backend dialect flags are not
         producer-side authority for selected runtime behavior.
+      model: >
+        The selected runtime store capability model is the public producer-facing store contract after backend selection.
+        It is a typed capability graph, not a backend tag. Producers may ask for a named capability and receive either a
+        concrete typed owner for the selected backend or an absent/fail-closed capability result. Producers must not infer
+        capability availability from PostgresStore, SQLiteRuntimeStore, raw *sql.DB, dialect strings, or backend ids once
+        construction has completed.
+      capability_groups:
+      - name: construction_only_backend_owner
+        owner: internal/store/backendselection plus cmd/swarm buildStores and backend-specific store constructors
+        allowed_consumers:
+        - backend selector/config parsing
+        - schema/bootstrap construction
+        - storeBundle population before selectedRuntimeStoreFacade consumption
+        - backend-specific store implementations
+        rule: Concrete backend identity and raw database handles are authoritative only inside this construction boundary.
+      - name: core_runtime_stores
+        owner: selectedRuntimeStoreFacade.runtimeStores returning runtime.Stores
+        capabilities:
+        - EventStore
+        - RuntimeLogStore
+        - PipelineStore
+        - SessionRegistry
+        - ConversationStore
+        - ManagerStore
+        - ScheduleStore
+        - MailboxMaterializer
+        - MailboxStore
+        - ToolEntityStore
+        - HumanTaskStore
+        - BudgetSpendStore
+        - RuntimeIngressStore
+        - TurnStore
+        - StartupOwnership
+        rule: Runtime construction consumes typed selected stores. It must fail closed when a required selected owner is missing.
+      - name: public_api_read_and_control_capabilities
+        owner: selectedRuntimeStoreFacade.apiCapabilities and apiv1.OperatorReadOptions
+        capabilities:
+        - health ping
+        - run reads
+        - entity reads
+        - observability/event/log/trace reads
+        - agent conversation reads
+        - agent usage reads
+        - mailbox API
+        - API idempotency
+        - event publisher
+        - run control
+        - runtime ingress
+        rule: API handlers consume named interfaces. A method is registered only when its required typed owners are present.
+      - name: optional_product_capabilities
+        owner: selectedRuntimeStoreFacade selected optional capability accessors
+        capabilities:
+        - bundle catalog read/write
+        - run bundle availability
+        - selected-contract run.fork
+        - bundle delete
+        - destructive reset
+        - startup recovery
+        - run-stalled read
+        - runtime contexts
+        rule: Optional or not-yet-promoted feature families are represented as absent typed capabilities or explicit fail-closed diagnostics, not as producer-side backend checks.
+      - name: workspace_and_process_db_capabilities
+        owner: cmd/swarm workspace lifecycle and process health construction
+        capabilities:
+        - workspace lifecycle SQL handle
+        - process DB close
+        - selected DB ping
+        rule: These raw database consumers are adjacent process/workspace capabilities, not selected runtime persistence authority. They must stay named and must not be reused as runtime store fallbacks.
+      - name: selected_runtime_mutation_unit_of_work
+        owner: backend_neutral_runtime_mutation_write_boundary and future typed unit-of-work owner under '#1403'
+        rule: Mutation writers must consume a semantic mutation owner. SQLite serialization/retry policy is owned below the store boundary and remains split to #1405.
+      raw_sql_policy:
+        allowed:
+        - boundary: backend selection, store construction, schema/bootstrap, and backend-specific store implementations
+          reason: These layers create or implement the selected backend and may own raw DB/TX mechanics.
+        - boundary: workspace lifecycle and process DB health/close capabilities
+          reason: These are explicitly adjacent process/workspace capabilities and are not selected runtime persistence owners.
+        - boundary: Postgres-only runtime raw SQL consumers that are still explicitly tracked by the raw_sql_runtime_consumer_boundary_for_sqlite split
+          reason: SQLite construction must omit runtime.Stores.SQLDB until each raw-SQL consumer has a separately gated backend-neutral owner.
+        forbidden:
+        - Producer-side runtime behavior must not use raw *sql.DB, *sql.Tx, concrete store type, backend id, or dialect string as capability authority.
+        - SQLite selected runtime construction must not pass a raw runtime SQL handle to Postgres-only runtime consumers.
+        - Runtime construction must not reconstruct selected pipeline persistence from raw SQL when buildStores failed to provide PipelineStore.
+      dependency_classifications:
+      - dependency: internal/store/backendselection and selector parsing
+        classification: legitimate backend-selection/construction boundary
+      - dependency: cmd/swarm buildStores concrete backend switch
+        classification: legitimate backend-selection/construction boundary
+      - dependency: cmd/swarm storeBundle concrete/raw fields
+        classification: construction payload only; producer-facing use is invalid and must migrate under #1401/#1402
+      - dependency: selectedRuntimeStoreFacade methods
+        classification: canonical selected capability composer
+      - dependency: runtime.Stores typed fields
+        classification: selected core runtime capability consumers
+      - dependency: runtime.Stores.SQLDB and RuntimeSQLDB
+        classification: raw SQL exception; Postgres-only until split owners promote replacements, SQLite runtime handle omitted
+      - dependency: apiv1.OperatorReadOptions and API method options
+        classification: typed public-surface capability consumers
+      - dependency: dashboard SQL readers and local PostgresStore wrappers
+        classification: producer-facing raw/concrete escapes to classify and migrate under #1401/#1402 unless independently gated
+      - dependency: selected-contract run.fork PostgresStore internals
+        classification: optional product capability with current concrete escape; migrate under #1401/#1403 or a run-fork child
+      - dependency: RunRuntimeMutation, RunEventTransaction, RunInPipelineTransaction, and direct transaction helpers
+        classification: mutation/unit-of-work sibling class under #1403/#1405
+      - dependency: route planning, event admission/defaulting, delivery authority, startup readiness
+        classification: different semantic concepts; explicitly split unless a later gate widens
       rules:
       - Concrete backend selection remains confined to backendselection/config parsing, buildStores construction, and backend-specific store implementations.
       - Serve/API/CLI/runtime producers must consume typed selected capabilities such as runtime stores, API read stores, bundle catalog capabilities, run-fork capabilities, destructive reset capabilities, startup recovery capabilities, and run-stalled read capabilities.
       - Unsupported or not-yet-promoted feature families are represented as absent typed optional capabilities rather than inferred by checking concrete backend identity at the producer.
       - Runtime construction must not reconstruct selected pipeline persistence from a raw SQL handle when buildStores failed to provide the selected PipelineStore owner.
+      - Child issues must consume this model without redefining ownership: #1401 removes producer-side backend branching, #1403 promotes typed runtime mutation unit-of-work, #1405 hides SQLite busy/serialization policy, and #1402 adds guard/proof durability.
       excludes:
       - backend selector precedence and CLI/config parsing
       - SQLite feature parity for bundle catalog, selected-contract run.fork, destructive reset, preservation cleanup, and startup recovery
