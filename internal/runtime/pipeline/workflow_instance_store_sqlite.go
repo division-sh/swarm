@@ -188,15 +188,18 @@ func (s *WorkflowInstanceStore) mutateSQLite(ctx context.Context, instanceID str
 	})
 }
 
-func (s *WorkflowInstanceStore) markTerminatedSQLite(ctx context.Context, storageRef string, terminatedAt time.Time) error {
+func (s *WorkflowInstanceStore) markTerminatedSQLiteTx(ctx context.Context, tx *sql.Tx, storageRef string, terminatedAt time.Time) error {
 	storageRef = strings.TrimSpace(storageRef)
 	if storageRef == "" {
 		return fmt.Errorf("workflow instance storage_ref is required")
 	}
+	if tx == nil {
+		return fmt.Errorf("sqlite workflow instance transaction is required")
+	}
 	if terminatedAt.IsZero() {
 		terminatedAt = time.Now().UTC()
 	}
-	res, err := dbExecContext(ctx, s.db, `
+	res, err := tx.ExecContext(ctx, `
 		UPDATE flow_instances
 		SET status = 'terminated',
 		    terminated_at = COALESCE(terminated_at, ?)
