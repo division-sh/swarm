@@ -3493,7 +3493,68 @@ func TestRunServeRuntimeEventPublishRunIDFollowUpServedPathPostgres(t *testing.T
 	runServedEventPublishFollowUpProof(t, endpoint, db, "postgres", bundleHash, probe)
 }
 
-func TestRunServeRuntimeEventPublishDynamicAutoEmitReturnsDurableAckAndDispatchesChild(t *testing.T) {
+func TestRunServeRuntimeEventPublishDynamicAutoEmitServedPathDefaultSQLite(t *testing.T) {
+	unsetStoreSelectorEnv(t)
+	stubServeRuntimeWorkspaceLifecycle(t)
+	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
+	t.Setenv(storebackend.EnvSQLitePath, sqlitePath)
+	contractsPath := writeServedDynamicAutoEmitFixture(t)
+	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+	blocked := make(chan servedEventPublishPreHandlerProof, 1)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+	oldBuildStores := buildStoresForServe
+	t.Cleanup(func() {
+		buildStoresForServe = oldBuildStores
+	})
+	var servedDB *sql.DB
+	buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (storeBundle, error) {
+		stores, err := oldBuildStores(ctx, selection, cfg)
+		if err == nil {
+			servedDB = stores.SQLDB
+		}
+		return stores, err
+	}
+	var (
+		hookMu sync.Mutex
+		hook   runtimepipeline.WorkflowNodeHandlerStartHook
+	)
+	endpoint, _ := startServedEventPublishFollowUpRuntime(t, serveOptions{
+		ConfigPath:              writeServeRuntimeTestConfig(t),
+		ContractsPath:           contractsPath,
+		PlatformSpecPath:        defaultPlatformSpecPath,
+		APIListenAddr:           "127.0.0.1:0",
+		MCPListenAddr:           "127.0.0.1:0",
+		SelfCheck:               true,
+		RequireBundleMatch:      false,
+		NoRequireBundleMatch:    true,
+		Verbose:                 true,
+		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
+		TestWorkflowNodeHandlerStartHook: func(ctx context.Context, nodeID string, evt events.Event) error {
+			if !servedEventPublishMatchesNodeEvent(nodeID, evt, "portfolio-node", "opco.spinup_requested") {
+				return nil
+			}
+			hookMu.Lock()
+			if hook == nil {
+				if servedDB == nil {
+					hookMu.Unlock()
+					return fmt.Errorf("served sqlite SQLDB is required for dynamic event.publish proof")
+				}
+				hook = servedEventPublishBlockingHandlerAuthorityHook(servedDB, "sqlite", "portfolio-node", "opco.spinup_requested", blocked, release)
+			}
+			h := hook
+			hookMu.Unlock()
+			return h(ctx, nodeID, evt)
+		},
+	})
+	if servedDB == nil {
+		t.Fatal("served sqlite SQLDB is required for dynamic event.publish proof")
+	}
+	runServedDynamicAutoEmitProof(t, endpoint, servedDB, "sqlite", bundleHash, blocked, release, &releaseOnce)
+}
+
+func TestRunServeRuntimeEventPublishDynamicAutoEmitServedPathPostgres(t *testing.T) {
 	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() serveWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
@@ -3514,20 +3575,26 @@ func TestRunServeRuntimeEventPublishDynamicAutoEmitReturnsDurableAckAndDispatche
 		RequireBundleMatch:               false,
 		Verbose:                          true,
 		TestWorkflowNodeHandlerStartHook: servedEventPublishBlockingHandlerAuthorityHook(db, "postgres", "portfolio-node", "opco.spinup_requested", blocked, release),
+		TestOutboxSweeperConfig:          servedEventPublishProofOutboxSweeperConfig(),
 	})
 	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
 
+	runServedDynamicAutoEmitProof(t, endpoint, db, "postgres", bundleHash, blocked, release, &releaseOnce)
+}
+
+func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, backend, bundleHash string, blocked <-chan servedEventPublishPreHandlerProof, release chan struct{}, releaseOnce *sync.Once) {
+	t.Helper()
 	bootstrap := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
 		"event_name":      "portfolio/opco.bootstrap_requested",
 		"bundle_hash":     bundleHash,
 		"payload":         map[string]any{"owner": "operator"},
-		"idempotency_key": "issue-1367-bootstrap",
+		"idempotency_key": "issue-1384-" + backend + "-bootstrap",
 	})
 	if !bootstrap.NewRunCreated || bootstrap.EventID == "" || bootstrap.RunID == "" {
 		t.Fatalf("bootstrap event.publish result = %#v, want new run and event id", bootstrap)
 	}
 	runID := bootstrap.RunID
-	parentEntityID := requireServedEventPublishEntityState(t, db, "postgres", runID, "", "waiting")
+	parentEntityID := requireServedEventPublishEntityState(t, db, backend, runID, "", "waiting")
 
 	instanceID := "11111111-1111-4111-8111-111111111111"
 	start := time.Now()
@@ -3540,7 +3607,7 @@ func TestRunServeRuntimeEventPublishDynamicAutoEmitReturnsDurableAckAndDispatche
 			"instance_id": instanceID,
 			"product_id":  "product-1",
 		},
-		"idempotency_key": "issue-1367-spinup",
+		"idempotency_key": "issue-1384-" + backend + "-spinup",
 	})
 	elapsed := time.Since(start)
 	if spinupEnvelope.Error != nil {
@@ -3556,63 +3623,51 @@ func TestRunServeRuntimeEventPublishDynamicAutoEmitReturnsDurableAckAndDispatche
 	if spinup.RunID != runID || spinup.SourceEventID != bootstrap.EventID || spinup.NewRunCreated || spinup.EventID == "" {
 		t.Fatalf("spinup event.publish result = %#v, want existing run with source lineage", spinup)
 	}
-	requireServedEventPublishPreHandlerProof(t, db, "postgres", blocked, runID, spinup.EventID, "portfolio-node")
+	requireServedEventPublishPreHandlerProof(t, db, backend, blocked, runID, spinup.EventID, "portfolio-node")
 	assertServedEventPublishDeliveriesContainStatus(t, spinup.Deliveries, "node", "portfolio-node", "pending", "in_progress")
-	assertServedPostgresCount(t, db, `
-		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'portfolio-node' AND status = 'in_progress'
-	`, 1, spinup.EventID)
-	assertServedPostgresCount(t, db, `
-		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = '__runtime_replay_scope__'
-	`, 1, spinup.EventID)
-	assertServedPostgresCount(t, db, `
-		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_id = 'workflow-runtime'
-	`, 0, spinup.EventID)
-	requireServedReplayNoDeliveryHistoryNoMutation(t, endpoint, db, spinup.EventID, "issue-1367-replay-pending-parent")
+	if got := servedEventPublishDeliveryStatusCount(t, db, backend, spinup.EventID, "node", "portfolio-node", "in_progress"); got != 1 {
+		t.Fatalf("%s parent delivery in_progress count = %d, want 1\n%s", backend, got, servedEventPublishDebugSummary(t, db, backend, runID))
+	}
+	if got := servedEventPublishDeliveryStatusCount(t, db, backend, spinup.EventID, "node", "__runtime_replay_scope__"); got != 1 {
+		t.Fatalf("%s parent replay-scope delivery count = %d, want 1\n%s", backend, got, servedEventPublishDebugSummary(t, db, backend, runID))
+	}
+	if got := servedEventPublishDeliveryStatusCount(t, db, backend, spinup.EventID, "", "workflow-runtime"); got != 0 {
+		t.Fatalf("%s parent workflow-runtime delivery count = %d, want 0\n%s", backend, got, servedEventPublishDebugSummary(t, db, backend, runID))
+	}
+	requireServedReplayNoDeliveryHistoryNoMutation(t, endpoint, db, backend, spinup.EventID, "issue-1384-"+backend+"-replay-pending-parent")
 
 	releaseOnce.Do(func() { close(release) })
-	waitServedPostgresCount(t, db, `
-		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'portfolio-node' AND status = 'delivered'
-	`, 1, spinup.EventID)
-	waitServedPostgresCount(t, db, `
-		SELECT COUNT(*) FROM event_receipts
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'portfolio-node' AND outcome = 'no_op'
-	`, 1, spinup.EventID)
+	waitServedEventPublishDeliveryStatusCount(t, db, backend, spinup.EventID, "node", "portfolio-node", "delivered", 1)
+	waitServedEventPublishReceiptOutcomeCount(t, db, backend, spinup.EventID, "node", "portfolio-node", "no_op", 1)
+	requireServedEventReadback(t, endpoint, spinup.EventID, runID, parentEntityID, "portfolio/opco.spinup_requested", "portfolio-node")
+	requireServedTraceReadback(t, endpoint, runID, spinup.EventID, "portfolio/opco.spinup_requested", "portfolio-node")
 
 	autoEventName := "operating/" + instanceID + "/opco.product_initialization_requested"
-	autoEventID := waitServedPostgresEventID(t, db, `
-		SELECT event_id::text FROM events
-		WHERE run_id = $1::uuid AND event_name = $2
-	`, runID, autoEventName)
-	autoEntityID := servedPostgresEventEntityID(t, db, autoEventID)
-	assertServedDynamicAutoEmitPayloadProductOnly(t, db, autoEventID)
+	autoEventID := waitServedEventPublishEventID(t, db, backend, runID, autoEventName)
+	autoEntityID := servedEventPublishEventEntityID(t, db, backend, autoEventID)
+	assertServedDynamicAutoEmitPayloadProductOnly(t, db, backend, autoEventID)
 	requireServedEventReadback(t, endpoint, autoEventID, runID, autoEntityID, autoEventName, "lifecycle-orchestrator")
-	waitServedPostgresCount(t, db, `
-		SELECT COUNT(*) FROM event_receipts
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'lifecycle-orchestrator' AND outcome = 'no_op'
-	`, 1, autoEventID)
-	assertServedPostgresCount(t, db, `
-		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = '__runtime_replay_scope__'
-	`, 1, autoEventID)
-	assertServedPostgresCount(t, db, `
-		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_id = 'workflow-runtime'
-	`, 0, autoEventID)
-	assertServedPostgresCount(t, db, `
-		SELECT COUNT(*) FROM event_receipts
-		WHERE event_id = $1::uuid AND subscriber_id IN ('workflow-runtime', '__runtime_replay_scope__')
-	`, 0, autoEventID)
+	requireServedTraceReadback(t, endpoint, runID, autoEventID, autoEventName, "lifecycle-orchestrator")
+	waitServedEventPublishReceiptOutcomeCount(t, db, backend, autoEventID, "node", "lifecycle-orchestrator", "no_op", 1)
+	if got := servedEventPublishDeliveryStatusCount(t, db, backend, autoEventID, "node", "__runtime_replay_scope__"); got != 1 {
+		t.Fatalf("%s child replay-scope delivery count = %d, want 1\n%s", backend, got, servedEventPublishDebugSummary(t, db, backend, runID))
+	}
+	if got := servedEventPublishDeliveryStatusCount(t, db, backend, autoEventID, "", "workflow-runtime"); got != 0 {
+		t.Fatalf("%s child workflow-runtime delivery count = %d, want 0\n%s", backend, got, servedEventPublishDebugSummary(t, db, backend, runID))
+	}
+	if got := servedEventPublishReceiptCountBySubscribers(t, db, backend, autoEventID, "workflow-runtime", "__runtime_replay_scope__"); got != 0 {
+		t.Fatalf("%s child runtime/replay receipt count = %d, want 0\n%s", backend, got, servedEventPublishDebugSummary(t, db, backend, runID))
+	}
 
-	componentEventID := waitServedPostgresEventID(t, db, `
-		SELECT event_id::text FROM events
-		WHERE run_id = $1::uuid AND event_name = 'operating/component_scaffold.spawn_requested'
-	`, runID)
-	assertServedDynamicAutoEmitPayloadProductOnly(t, db, componentEventID)
-	requireServedReplayNoDeliveryHistoryNoMutation(t, endpoint, db, autoEventID, "issue-1367-replay-child-node-only")
+	componentEventID := waitServedEventPublishEventID(t, db, backend, runID, "operating/component_scaffold.spawn_requested")
+	assertServedDynamicAutoEmitPayloadProductOnly(t, db, backend, componentEventID)
+	componentEntityID := servedEventPublishEventEntityID(t, db, backend, componentEventID)
+	requireServedEventReadback(t, endpoint, componentEventID, runID, componentEntityID, "operating/component_scaffold.spawn_requested", "component-scaffold")
+	requireServedTraceReadback(t, endpoint, runID, componentEventID, "operating/component_scaffold.spawn_requested", "component-scaffold")
+	requireServedRunStatus(t, endpoint, runID, "completed")
+	requireServedRunDiagnoseOperationalState(t, endpoint, runID, "completed")
+	requireServedStatusCLIReadback(t, endpoint, runID, "status=completed")
+	requireServedReplayNoDeliveryHistoryNoMutation(t, endpoint, db, backend, autoEventID, "issue-1384-"+backend+"-replay-child-node-only")
 }
 
 func writeServedEventPublishFollowUpFixture(t *testing.T) string {
@@ -3925,11 +3980,7 @@ func servedEventPublishBlockingHandlerAuthorityHook(
 	wantNodeID = strings.TrimSpace(wantNodeID)
 	wantEventSuffix = strings.Trim(strings.TrimSpace(wantEventSuffix), "/")
 	return func(ctx context.Context, nodeID string, evt events.Event) error {
-		if strings.TrimSpace(nodeID) != wantNodeID {
-			return nil
-		}
-		eventType := strings.Trim(strings.TrimSpace(string(evt.Type())), "/")
-		if eventType != wantEventSuffix && !strings.HasSuffix(eventType, "/"+wantEventSuffix) {
+		if !servedEventPublishMatchesNodeEvent(nodeID, evt, wantNodeID, wantEventSuffix) {
 			return nil
 		}
 		once.Do(func() {
@@ -3954,6 +4005,16 @@ func servedEventPublishBlockingHandlerAuthorityHook(
 		})
 		return nil
 	}
+}
+
+func servedEventPublishMatchesNodeEvent(nodeID string, evt events.Event, wantNodeID, wantEventSuffix string) bool {
+	wantNodeID = strings.TrimSpace(wantNodeID)
+	wantEventSuffix = strings.Trim(strings.TrimSpace(wantEventSuffix), "/")
+	if strings.TrimSpace(nodeID) != wantNodeID {
+		return false
+	}
+	eventType := strings.Trim(strings.TrimSpace(string(evt.Type())), "/")
+	return eventType == wantEventSuffix || strings.HasSuffix(eventType, "/"+wantEventSuffix)
 }
 
 func requireServedEventPublishPreHandlerProof(t *testing.T, db *sql.DB, backend string, proofs <-chan servedEventPublishPreHandlerProof, runID, eventID, nodeID string) {
@@ -4288,6 +4349,29 @@ func requireServedRunStatus(t *testing.T, endpoint, runID, want string) {
 	t.Fatalf("run.get status for %s = %q, want %q", runID, last, want)
 }
 
+func requireServedRunDiagnoseOperationalState(t *testing.T, endpoint, runID, want string) {
+	t.Helper()
+	type servedRunDiagnose struct {
+		OperationalState string `json:"operational_state"`
+		Run              struct {
+			RunID  string `json:"run_id"`
+			Status string `json:"status"`
+		} `json:"run"`
+	}
+	var last servedRunDiagnose
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		var result servedRunDiagnose
+		requireServedJSONRPCResult(t, endpoint, "run.diagnose", map[string]any{"run_id": runID}, &result)
+		last = result
+		if result.Run.RunID == runID && result.Run.Status == want && result.OperationalState == want {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("run.diagnose for %s = %#v, want run/status and operational_state %q", runID, last, want)
+}
+
 func requireServedStatusCLIReadback(t *testing.T, endpoint, runID, want string) {
 	t.Helper()
 	var lastStdout, lastStderr string
@@ -4587,39 +4671,149 @@ func servedEventPublishAPIIdempotencyCount(t *testing.T, db *sql.DB, backend, me
 	return count
 }
 
-func waitServedPostgresCount(t *testing.T, db *sql.DB, query string, want int, args ...any) {
+func waitServedEventPublishDeliveryStatusCount(t *testing.T, db *sql.DB, backend, eventID, subscriberType, subscriberID, status string, want int) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
-	for {
-		got := servedPostgresCount(t, db, query, args...)
+	var got int
+	for time.Now().Before(deadline) {
+		got = servedEventPublishDeliveryStatusCount(t, db, backend, eventID, subscriberType, subscriberID, status)
 		if got == want {
 			return
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("postgres count = %d, want %d for query %s", got, want, strings.TrimSpace(query))
-		}
 		time.Sleep(25 * time.Millisecond)
 	}
+	t.Fatalf("%s delivery count for event=%s subscriber=%s/%s status=%q = %d, want %d", backend, eventID, subscriberType, subscriberID, status, got, want)
 }
 
-func assertServedPostgresCount(t *testing.T, db *sql.DB, query string, want int, args ...any) {
+func servedEventPublishDeliveryStatusCount(t *testing.T, db *sql.DB, backend, eventID, subscriberType, subscriberID string, statuses ...string) int {
 	t.Helper()
-	if got := servedPostgresCount(t, db, query, args...); got != want {
-		t.Fatalf("postgres count = %d, want %d for query %s", got, want, strings.TrimSpace(query))
+	where := []string{}
+	args := []any{}
+	switch backend {
+	case "postgres":
+		where = append(where, fmt.Sprintf("event_id = $%d::uuid", len(args)+1))
+		args = append(args, eventID)
+		if strings.TrimSpace(subscriberType) != "" {
+			where = append(where, fmt.Sprintf("subscriber_type = $%d", len(args)+1))
+			args = append(args, subscriberType)
+		}
+		where = append(where, fmt.Sprintf("subscriber_id = $%d", len(args)+1))
+		args = append(args, subscriberID)
+		for _, status := range statuses {
+			if strings.TrimSpace(status) == "" {
+				continue
+			}
+			where = append(where, fmt.Sprintf("status = $%d", len(args)+1))
+			args = append(args, status)
+		}
+	case "sqlite":
+		where = append(where, "event_id = ?")
+		args = append(args, eventID)
+		if strings.TrimSpace(subscriberType) != "" {
+			where = append(where, "subscriber_type = ?")
+			args = append(args, subscriberType)
+		}
+		where = append(where, "subscriber_id = ?")
+		args = append(args, subscriberID)
+		for _, status := range statuses {
+			if strings.TrimSpace(status) == "" {
+				continue
+			}
+			where = append(where, "status = ?")
+			args = append(args, status)
+		}
+	default:
+		t.Fatalf("unknown proof backend %q", backend)
 	}
-}
-
-func servedPostgresCount(t *testing.T, db *sql.DB, query string, args ...any) int {
-	t.Helper()
+	query := "SELECT COUNT(*) FROM event_deliveries WHERE " + strings.Join(where, " AND ")
 	var count int
 	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&count); err != nil {
-		t.Fatalf("postgres count query failed: %v\n%s", err, strings.TrimSpace(query))
+		t.Fatalf("%s delivery count query failed: %v\n%s", backend, err, query)
 	}
 	return count
 }
 
-func waitServedPostgresEventID(t *testing.T, db *sql.DB, query string, args ...any) string {
+func waitServedEventPublishReceiptOutcomeCount(t *testing.T, db *sql.DB, backend, eventID, subscriberType, subscriberID, outcome string, want int) {
 	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	var got int
+	for time.Now().Before(deadline) {
+		got = servedEventPublishReceiptOutcomeCount(t, db, backend, eventID, subscriberType, subscriberID, outcome)
+		if got == want {
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("%s receipt count for event=%s subscriber=%s/%s outcome=%q = %d, want %d", backend, eventID, subscriberType, subscriberID, outcome, got, want)
+}
+
+func servedEventPublishReceiptOutcomeCount(t *testing.T, db *sql.DB, backend, eventID, subscriberType, subscriberID, outcome string) int {
+	t.Helper()
+	var query string
+	var args []any
+	switch backend {
+	case "postgres":
+		query = `SELECT COUNT(*) FROM event_receipts WHERE event_id = $1::uuid AND subscriber_type = $2 AND subscriber_id = $3 AND outcome = $4`
+		args = []any{eventID, subscriberType, subscriberID, outcome}
+	case "sqlite":
+		query = `SELECT COUNT(*) FROM event_receipts WHERE event_id = ? AND subscriber_type = ? AND subscriber_id = ? AND outcome = ?`
+		args = []any{eventID, subscriberType, subscriberID, outcome}
+	default:
+		t.Fatalf("unknown proof backend %q", backend)
+	}
+	var count int
+	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&count); err != nil {
+		t.Fatalf("%s receipt count query failed: %v\n%s", backend, err, query)
+	}
+	return count
+}
+
+func servedEventPublishReceiptCountBySubscribers(t *testing.T, db *sql.DB, backend, eventID string, subscriberIDs ...string) int {
+	t.Helper()
+	if len(subscriberIDs) == 0 {
+		t.Fatal("subscriberIDs is required")
+	}
+	var query string
+	args := []any{eventID}
+	switch backend {
+	case "postgres":
+		placeholders := make([]string, 0, len(subscriberIDs))
+		for _, subscriberID := range subscriberIDs {
+			placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)+1))
+			args = append(args, subscriberID)
+		}
+		query = `SELECT COUNT(*) FROM event_receipts WHERE event_id = $1::uuid AND subscriber_id IN (` + strings.Join(placeholders, ", ") + `)`
+	case "sqlite":
+		placeholders := make([]string, 0, len(subscriberIDs))
+		for _, subscriberID := range subscriberIDs {
+			placeholders = append(placeholders, "?")
+			args = append(args, subscriberID)
+		}
+		query = `SELECT COUNT(*) FROM event_receipts WHERE event_id = ? AND subscriber_id IN (` + strings.Join(placeholders, ", ") + `)`
+	default:
+		t.Fatalf("unknown proof backend %q", backend)
+	}
+	var count int
+	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&count); err != nil {
+		t.Fatalf("%s receipt subscriber count query failed: %v\n%s", backend, err, query)
+	}
+	return count
+}
+
+func waitServedEventPublishEventID(t *testing.T, db *sql.DB, backend, runID, eventName string) string {
+	t.Helper()
+	var query string
+	var args []any
+	switch backend {
+	case "postgres":
+		query = `SELECT event_id::text FROM events WHERE run_id = $1::uuid AND event_name = $2`
+		args = []any{runID, eventName}
+	case "sqlite":
+		query = `SELECT event_id FROM events WHERE run_id = ? AND event_name = ?`
+		args = []any{runID, eventName}
+	default:
+		t.Fatalf("unknown proof backend %q", backend)
+	}
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		var eventID string
@@ -4628,35 +4822,53 @@ func waitServedPostgresEventID(t *testing.T, db *sql.DB, query string, args ...a
 			return strings.TrimSpace(eventID)
 		}
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			t.Fatalf("postgres event id query failed: %v\n%s", err, strings.TrimSpace(query))
+			t.Fatalf("%s event id query failed: %v\n%s", backend, err, query)
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for event id from query %s", strings.TrimSpace(query))
+			t.Fatalf("%s timed out waiting for event %q in run %s\n%s", backend, eventName, runID, servedEventPublishDebugSummary(t, db, backend, runID))
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
 }
 
-func servedPostgresEventEntityID(t *testing.T, db *sql.DB, eventID string) string {
+func servedEventPublishEventEntityID(t *testing.T, db *sql.DB, backend, eventID string) string {
 	t.Helper()
+	var query string
+	var args []any
+	switch backend {
+	case "postgres":
+		query = `SELECT COALESCE(entity_id::text, '') FROM events WHERE event_id = $1::uuid`
+		args = []any{eventID}
+	case "sqlite":
+		query = `SELECT COALESCE(entity_id, '') FROM events WHERE event_id = ?`
+		args = []any{eventID}
+	default:
+		t.Fatalf("unknown proof backend %q", backend)
+	}
 	var entityID string
-	if err := db.QueryRowContext(context.Background(), `
-		SELECT COALESCE(entity_id::text, '') FROM events
-		WHERE event_id = $1::uuid
-	`, eventID).Scan(&entityID); err != nil {
-		t.Fatalf("load event entity_id %s: %v", eventID, err)
+	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&entityID); err != nil {
+		t.Fatalf("%s load event entity_id %s: %v", backend, eventID, err)
 	}
 	return strings.TrimSpace(entityID)
 }
 
-func assertServedDynamicAutoEmitPayloadProductOnly(t *testing.T, db *sql.DB, eventID string) {
+func assertServedDynamicAutoEmitPayloadProductOnly(t *testing.T, db *sql.DB, backend, eventID string) {
 	t.Helper()
 	var raw string
-	if err := db.QueryRowContext(context.Background(), `
-		SELECT payload::text FROM events
-		WHERE event_id = $1::uuid
-	`, eventID).Scan(&raw); err != nil {
-		t.Fatalf("load event payload %s: %v", eventID, err)
+	var query string
+	var args []any
+	switch backend {
+	case "postgres":
+		query = `SELECT payload::text FROM events WHERE event_id = $1::uuid`
+		args = []any{eventID}
+	case "sqlite":
+		query = `SELECT payload FROM events WHERE event_id = ?`
+		args = []any{eventID}
+	default:
+		t.Fatalf("unknown proof backend %q", backend)
+	}
+	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&raw); err != nil {
+		t.Fatalf("%s load event payload %s: %v", backend, eventID, err)
 	}
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
@@ -4672,9 +4884,9 @@ func assertServedDynamicAutoEmitPayloadProductOnly(t *testing.T, db *sql.DB, eve
 	}
 }
 
-func requireServedReplayNoDeliveryHistoryNoMutation(t *testing.T, endpoint string, db *sql.DB, eventID, idempotencyKey string) {
+func requireServedReplayNoDeliveryHistoryNoMutation(t *testing.T, endpoint string, db *sql.DB, backend, eventID, idempotencyKey string) {
 	t.Helper()
-	beforeSourcedEvents := servedPostgresCount(t, db, `SELECT COUNT(*) FROM events WHERE source_event_id = $1::uuid`, eventID)
+	beforeSourcedEvents := servedEventPublishSourcedEventCount(t, db, backend, eventID)
 	errResp := requireServedJSONRPCError(t, endpoint, "event.replay", map[string]any{
 		"event_id":        eventID,
 		"idempotency_key": idempotencyKey,
@@ -4682,12 +4894,33 @@ func requireServedReplayNoDeliveryHistoryNoMutation(t *testing.T, endpoint strin
 	if errResp.Data["code"] != apiv1.EventReplayNoDeliveryHistoryCode {
 		t.Fatalf("event.replay data = %#v, want %s", errResp.Data, apiv1.EventReplayNoDeliveryHistoryCode)
 	}
-	if got := servedPostgresCount(t, db, `SELECT COUNT(*) FROM events WHERE source_event_id = $1::uuid`, eventID); got != beforeSourcedEvents {
-		t.Fatalf("events sourced from rejected node-only replay target = %d, want %d", got, beforeSourcedEvents)
+	if got := servedEventPublishSourcedEventCount(t, db, backend, eventID); got != beforeSourcedEvents {
+		t.Fatalf("%s events sourced from rejected node-only replay target = %d, want %d", backend, got, beforeSourcedEvents)
 	}
-	if got := servedEventPublishAPIIdempotencyCount(t, db, "postgres", "event.replay", idempotencyKey); got != 0 {
-		t.Fatalf("api_idempotency rows for rejected node-only replay = %d, want 0", got)
+	if got := servedEventPublishAPIIdempotencyCount(t, db, backend, "event.replay", idempotencyKey); got != 0 {
+		t.Fatalf("%s api_idempotency rows for rejected node-only replay = %d, want 0", backend, got)
 	}
+}
+
+func servedEventPublishSourcedEventCount(t *testing.T, db *sql.DB, backend, sourceEventID string) int {
+	t.Helper()
+	var query string
+	var args []any
+	switch backend {
+	case "postgres":
+		query = `SELECT COUNT(*) FROM events WHERE source_event_id = $1::uuid`
+		args = []any{sourceEventID}
+	case "sqlite":
+		query = `SELECT COUNT(*) FROM events WHERE source_event_id = ?`
+		args = []any{sourceEventID}
+	default:
+		t.Fatalf("unknown proof backend %q", backend)
+	}
+	var count int
+	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&count); err != nil {
+		t.Fatalf("%s sourced event count query failed: %v\n%s", backend, err, query)
+	}
+	return count
 }
 
 func servedEventPublishNodeDeliveryCount(t *testing.T, db *sql.DB, backend, runID, eventID, subscriberID string) int {
