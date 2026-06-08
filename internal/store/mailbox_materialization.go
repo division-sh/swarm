@@ -64,19 +64,21 @@ func (s *SQLiteRuntimeStore) MaterializeMailboxWrite(ctx context.Context, item r
 	if err != nil {
 		return err
 	}
-	exec := mailboxMaterializationDBExecutor(ctx, s.DB)
-	_, err = exec.ExecContext(ctx, `
-		INSERT INTO mailbox (
-			item_id, entity_id, flow_instance, scope, item_type, source_event_id,
-			from_agent, severity, summary, payload, status, notified, created_at
-		)
-		VALUES (?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, NULLIF(?, ''), ?, 'pending', 0, ?)
-		ON CONFLICT(item_id) DO NOTHING
-	`, item.ItemID, item.EntityID, item.FlowInstance, item.Scope, item.ItemType, item.SourceEventID, item.FromAgent, item.Severity, item.Summary, string(item.Payload), time.Now().UTC())
-	if err != nil {
-		return fmt.Errorf("materialize sqlite mailbox_write: %w", err)
-	}
-	return nil
+	now := time.Now().UTC()
+	return s.runRuntimeMutation(ctx, "sqlite mailbox_write materialization", func(txctx context.Context, tx *sql.Tx) error {
+		_, err := tx.ExecContext(txctx, `
+			INSERT INTO mailbox (
+				item_id, entity_id, flow_instance, scope, item_type, source_event_id,
+				from_agent, severity, summary, payload, status, notified, created_at
+			)
+			VALUES (?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, NULLIF(?, ''), ?, 'pending', 0, ?)
+			ON CONFLICT(item_id) DO NOTHING
+		`, item.ItemID, item.EntityID, item.FlowInstance, item.Scope, item.ItemType, item.SourceEventID, item.FromAgent, item.Severity, item.Summary, string(item.Payload), now)
+		if err != nil {
+			return fmt.Errorf("materialize sqlite mailbox_write: %w", err)
+		}
+		return nil
+	})
 }
 
 func mailboxMaterializationDBExecutor(ctx context.Context, db *sql.DB) mailboxMaterializationExecutor {
