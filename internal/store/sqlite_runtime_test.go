@@ -298,7 +298,7 @@ func TestSQLiteRuntimeStoreUpsertAgentConsumesActivePipelineTransaction(t *testi
 func TestSQLiteDynamicFlowActivationRequiredAgentsUsePipelineTransaction(t *testing.T) {
 	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStore(sqliteStore.DB)
+	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(sqliteStore.DB, sqliteStore)
 	bus := &sqliteFlowActivationBus{}
 	manager := runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		WorkflowInstances: workflowStore,
@@ -337,7 +337,7 @@ func TestSQLiteDynamicFlowActivationRequiredAgentsUsePipelineTransaction(t *test
 func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T) {
 	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStore(sqliteStore.DB)
+	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(sqliteStore.DB, sqliteStore)
 	bus := &sqliteFlowActivationBus{}
 	manager := runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		WorkflowInstances: workflowStore,
@@ -843,7 +843,7 @@ func TestSQLiteRuntimeStorePipelineWorkflowInstanceOwner(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
-	owner := runtimepipeline.NewSQLiteWorkflowInstanceStore(store.DB)
+	owner := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(store.DB, store)
 	entityID := runtimepipeline.FlowInstanceEntityID("root/acme")
 	if err := owner.Create(ctx, runtimepipeline.WorkflowInstance{
 		InstanceID:      "acme",
@@ -908,7 +908,7 @@ func TestSQLiteRuntimeStoreSystemNodeReceiptOwnerSettlesDelivery(t *testing.T) {
 	if err := store.InsertEventDeliveryRoutes(ctx, eventID, []events.DeliveryRoute{{SubscriberType: "node", SubscriberID: "background-node"}}); err != nil {
 		t.Fatalf("InsertEventDeliveryRoutes: %v", err)
 	}
-	owner := runtimepipeline.NewSQLiteWorkflowInstanceStore(store.DB)
+	owner := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(store.DB, store)
 	if processed, err := owner.SystemNodeProcessed(ctx, "background-node", eventID); err != nil || processed {
 		t.Fatalf("SystemNodeProcessed before mark = %v err=%v, want false nil", processed, err)
 	}
@@ -971,7 +971,7 @@ func TestSQLiteRuntimeStoreSystemNodeReceiptOwnerDeadLettersDelivery(t *testing.
 	if err := store.InsertEventDeliveryRoutes(ctx, eventID, []events.DeliveryRoute{{SubscriberType: "node", SubscriberID: "background-node"}}); err != nil {
 		t.Fatalf("InsertEventDeliveryRoutes: %v", err)
 	}
-	owner := runtimepipeline.NewSQLiteWorkflowInstanceStore(store.DB)
+	owner := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(store.DB, store)
 	if err := owner.MarkSystemNodeDeliveryInProgress(ctx, "background-node", eventID, runtimepipeline.DefaultSystemNodeRetryLimit); err != nil {
 		t.Fatalf("MarkSystemNodeDeliveryInProgress: %v", err)
 	}
@@ -1019,7 +1019,7 @@ func TestSQLiteRuntimeStoreSystemNodeReceiptOwnerFailsWithoutDeliveryAuthority(t
 	if err := store.AppendEvent(ctx, evt); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
-	owner := runtimepipeline.NewSQLiteWorkflowInstanceStore(store.DB)
+	owner := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(store.DB, store)
 	err := owner.MarkSystemNodeProcessedAndSettleDelivery(ctx, "background-node", eventID, `{"idempotency_key":"test"}`)
 	if !errors.Is(err, runtimepipeline.ErrSystemNodeDeliveryAuthorityMissing) {
 		t.Fatalf("MarkSystemNodeProcessedAndSettleDelivery error = %v, want ErrSystemNodeDeliveryAuthorityMissing", err)
@@ -1079,7 +1079,7 @@ func TestSQLiteRuntimeStoreSystemNodeReceiptOwnerFailsWithTerminalDeliveryAuthor
 			`, uuid.NewString(), runID, eventID, tc.status, tc.retryCount, time.Now().UTC()); err != nil {
 				t.Fatalf("seed sqlite terminal node delivery: %v", err)
 			}
-			owner := runtimepipeline.NewSQLiteWorkflowInstanceStore(store.DB)
+			owner := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(store.DB, store)
 			err := owner.MarkSystemNodeProcessedAndSettleDelivery(ctx, "background-node", eventID, `{"idempotency_key":"test"}`)
 			if !errors.Is(err, runtimepipeline.ErrSystemNodeDeliveryAuthorityMissing) {
 				t.Fatalf("MarkSystemNodeProcessedAndSettleDelivery error = %v, want ErrSystemNodeDeliveryAuthorityMissing", err)

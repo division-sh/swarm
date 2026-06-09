@@ -5,10 +5,10 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -95,10 +95,9 @@ type workflowInstancePersistedControl struct {
 }
 
 type WorkflowInstanceStore struct {
-	db                 *sql.DB
-	dialect            workflowStoreDialect
-	sqlitePipelineTxMu sync.Mutex
-	runtimeMutation    RuntimeMutationRunner
+	db              *sql.DB
+	dialect         workflowStoreDialect
+	runtimeMutation RuntimeMutationRunner
 }
 
 type RuntimeMutationRunner interface {
@@ -121,13 +120,9 @@ const (
 
 var workflowInstancePathNamespace = uuid.MustParse("5e7507c8-bd4f-46e0-a098-b016dc31df23")
 
-const (
-	workflowInstanceTimerOwnerNode = "workflow_instance_store"
+const workflowInstanceTimerOwnerNode = "workflow_instance_store"
 
-	sqlitePipelineTransactionRetryBudget = 5 * time.Second
-	sqlitePipelineTransactionBaseDelay   = 10 * time.Millisecond
-	sqlitePipelineTransactionMaxDelay    = 100 * time.Millisecond
-)
+var errSQLiteWorkflowInstanceStoreRuntimeMutationRunnerRequired = errors.New("sqlite workflow instance store requires runtime mutation runner")
 
 type workflowCreateEntityInitialValuesContextKey struct{}
 
@@ -178,8 +173,6 @@ func (s *WorkflowInstanceStore) Load(ctx context.Context, instanceID string) (Wo
 		return WorkflowInstance{}, false, nil
 	}
 	if s.isSQLite() {
-		unlock := s.lockSQLitePipelineOperation(ctx)
-		defer unlock()
 		return s.loadSQLite(ctx, instanceID)
 	}
 	keys := workflowInstanceLookupKeys(instanceID)
@@ -194,8 +187,6 @@ func (s *WorkflowInstanceStore) List(ctx context.Context) ([]WorkflowInstance, e
 		return nil, nil
 	}
 	if s.isSQLite() {
-		unlock := s.lockSQLitePipelineOperation(ctx)
-		defer unlock()
 		return s.listSQLite(ctx)
 	}
 	return s.listSpec(ctx)
@@ -210,8 +201,6 @@ func (s *WorkflowInstanceStore) SelectActiveByFields(ctx context.Context, scopeK
 		return nil, nil
 	}
 	if s.isSQLite() {
-		unlock := s.lockSQLitePipelineOperation(ctx)
-		defer unlock()
 		return s.selectActiveByFieldsSQLite(ctx, scopeKey, selectors, excludedStates)
 	}
 	return s.selectActiveByFieldsSpec(ctx, scopeKey, selectors, excludedStates)
@@ -408,17 +397,6 @@ func (s *WorkflowInstanceStore) isSQLite() bool {
 	return s != nil && s.dialect == workflowStoreDialectSQLite
 }
 
-func (s *WorkflowInstanceStore) lockSQLitePipelineOperation(ctx context.Context) func() {
-	if !s.isSQLite() {
-		return func() {}
-	}
-	if tx, ok := sqlTxFromContext(ctx); ok && tx != nil {
-		return func() {}
-	}
-	s.sqlitePipelineTxMu.Lock()
-	return s.sqlitePipelineTxMu.Unlock
-}
-
 func (s *WorkflowInstanceStore) RunInPipelineTransaction(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
 	if fn == nil {
 		return nil
@@ -430,120 +408,15 @@ func (s *WorkflowInstanceStore) RunInPipelineTransaction(ctx context.Context, fn
 		if s.runtimeMutation != nil {
 			return s.runtimeMutation.RunRuntimeMutation(ctx, fn)
 		}
-		return s.runInSQLitePipelineTransaction(ctx, fn)
+		return errSQLiteWorkflowInstanceStoreRuntimeMutationRunnerRequired
 	}
 	return s.runInPipelineTransactionOnce(ctx, fn)
-}
-
-func (s *WorkflowInstanceStore) runInSQLitePipelineTransaction(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
-	return s.runInSQLitePipelineTransactionWithBudget(ctx, fn, sqlitePipelineTransactionRetryBudget)
-}
-
-func (s *WorkflowInstanceStore) runInSQLitePipelineTransactionWithBudget(ctx context.Context, fn func(context.Context, *sql.Tx) error, retryBudget time.Duration) error {
-	if retryBudget <= 0 {
-		retryBudget = sqlitePipelineTransactionRetryBudget
-	}
-	retryDeadline := time.Now().Add(retryBudget)
-	retryDeadlineOwnedByBudget := true
-	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(retryDeadline) {
-		retryDeadline = ctxDeadline
-		retryDeadlineOwnedByBudget = false
-	}
-	var lastErr error
-	for attempt := 0; ; attempt++ {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if time.Until(retryDeadline) <= 0 {
-			if !retryDeadlineOwnedByBudget {
-				if err := ctx.Err(); err != nil {
-					return err
-				}
-				return context.DeadlineExceeded
-			}
-			return sqlitePipelineTransactionRetryBudgetError(retryBudget, lastErr)
-		}
-		attemptCtx, cancel := context.WithDeadline(ctx, retryDeadline)
-		err := s.runInPipelineTransactionOnce(attemptCtx, fn)
-		attemptErr := attemptCtx.Err()
-		cancel()
-		if err == nil {
-			if attemptErr != nil {
-				if err := ctx.Err(); err != nil {
-					return err
-				}
-				return sqlitePipelineTransactionRetryBudgetError(retryBudget, lastErr)
-			}
-			return nil
-		}
-		if attemptErr != nil {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			return sqlitePipelineTransactionRetryBudgetError(retryBudget, lastErr)
-		}
-		if !sqlitePipelineBusyError(err) {
-			return err
-		}
-		lastErr = err
-		delay := sqlitePipelineTransactionRetryDelay(attempt)
-		if remaining := time.Until(retryDeadline); remaining <= 0 {
-			if !retryDeadlineOwnedByBudget {
-				if err := ctx.Err(); err != nil {
-					return err
-				}
-				return context.DeadlineExceeded
-			}
-			return sqlitePipelineTransactionRetryBudgetError(retryBudget, lastErr)
-		} else if delay > remaining {
-			delay = remaining
-		}
-		timer := time.NewTimer(delay)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return ctx.Err()
-		case <-timer.C:
-		}
-	}
-}
-
-func sqlitePipelineTransactionRetryBudgetError(retryBudget time.Duration, lastErr error) error {
-	if lastErr == nil {
-		return fmt.Errorf("sqlite pipeline transaction retry budget %s exceeded: %w", retryBudget, context.DeadlineExceeded)
-	}
-	return fmt.Errorf("sqlite pipeline transaction retry budget %s exceeded: %w", retryBudget, lastErr)
-}
-
-func sqlitePipelineTransactionRetryDelay(attempt int) time.Duration {
-	delay := time.Duration(attempt+1) * sqlitePipelineTransactionBaseDelay
-	if delay > sqlitePipelineTransactionMaxDelay {
-		return sqlitePipelineTransactionMaxDelay
-	}
-	return delay
-}
-
-func sqlitePipelineBusyError(err error) bool {
-	if err == nil {
-		return false
-	}
-	text := strings.ToLower(err.Error())
-	return strings.Contains(text, "sqlite_busy") ||
-		strings.Contains(text, "sqlite_locked") ||
-		strings.Contains(text, "database is locked") ||
-		strings.Contains(text, "database table is locked") ||
-		strings.Contains(text, "database is busy")
 }
 
 func (s *WorkflowInstanceStore) runInPipelineTransactionOnce(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
 	if s == nil || s.db == nil {
 		return fn(ctx, nil)
 	}
-	// SQLite has a single writer. Keep the local-dev pipeline transaction
-	// boundary authoritative instead of letting sibling handler activations
-	// race into SQLITE_BUSY at the first persisted row.
-	unlock := s.lockSQLitePipelineOperation(ctx)
-	defer unlock()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -566,8 +439,6 @@ func (s *WorkflowInstanceStore) QueryEntityCount(ctx context.Context, runID stri
 		return 0, nil
 	}
 	if s.isSQLite() {
-		unlock := s.lockSQLitePipelineOperation(ctx)
-		defer unlock()
 		return s.queryEntityStateCountSQLite(ctx, runID, source, contract, predicate)
 	}
 	return queryEntityStateCount(runID, s.db, source, contract, predicate)

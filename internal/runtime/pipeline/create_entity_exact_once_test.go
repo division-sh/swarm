@@ -25,7 +25,7 @@ func TestCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutations(t *testing.T
 			setup: func(t *testing.T) (*PipelineCoordinator, context.Context, *recordingPipelineBus, *recordingScheduleStore, *recordingMailboxWriteMaterializer) {
 				db := newSQLiteWorkflowInstanceStoreTestDB(t)
 				ctx := sqliteExactOnceRunContext(t, db)
-				return newExactOnceCoordinator(t, db, NewSQLiteWorkflowInstanceStore(db)), ctx, nil, nil, nil
+				return newExactOnceCoordinator(t, db, newSQLiteWorkflowInstanceStoreForTest(t, db)), ctx, nil, nil, nil
 			},
 		},
 		{
@@ -120,7 +120,7 @@ func TestDispatchWorkflowNodeEventSkipsAlreadyProcessedCreateEntityHandler(t *te
 			name: "sqlite",
 			setup: func(t *testing.T) (*PipelineCoordinator, context.Context) {
 				db := newSQLiteWorkflowInstanceStoreTestDB(t)
-				pc := newExactOnceCoordinator(t, db, NewSQLiteWorkflowInstanceStore(db))
+				pc := newExactOnceCoordinator(t, db, newSQLiteWorkflowInstanceStoreForTest(t, db))
 				return pc, sqliteExactOnceRunContext(t, db)
 			},
 		},

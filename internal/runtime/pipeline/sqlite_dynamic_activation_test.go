@@ -17,7 +17,7 @@ import (
 
 func TestSQLiteFanOutCreateFlowInstanceDeliveriesPersistWithoutDeadLetter(t *testing.T) {
 	db := newSQLiteWorkflowInstanceStoreTestDB(t)
-	workflowStore := NewSQLiteWorkflowInstanceStore(db)
+	workflowStore := newSQLiteWorkflowInstanceStoreForTest(t, db)
 	ctx := sqliteExactOnceRunContext(t, db)
 	pc, bus := newSQLiteDynamicActivationCoordinator(t, db, workflowStore)
 

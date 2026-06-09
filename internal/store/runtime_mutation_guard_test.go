@@ -271,6 +271,25 @@ func TestSelectedSQLiteRuntimeConstructionConsumesMutationBoundary(t *testing.T)
 	if !strings.Contains(string(publishData), ".RunEventTransaction(ctx,") {
 		t.Fatal("event publish must consume EventTransactionRunner.RunEventTransaction when available")
 	}
+
+	pipelineData, err := os.ReadFile(filepath.Join(root, "internal", "runtime", "pipeline", "workflow_instance_store.go"))
+	if err != nil {
+		t.Fatalf("read internal/runtime/pipeline/workflow_instance_store.go: %v", err)
+	}
+	pipelineText := string(pipelineData)
+	for _, forbidden := range []string{
+		"runInSQLitePipelineTransaction",
+		"sqlitePipelineBusyError",
+		"sqlitePipelineTransactionRetry",
+		"lockSQLitePipelineOperation",
+	} {
+		if strings.Contains(pipelineText, forbidden) {
+			t.Fatalf("SQLite pipeline store must not own busy/retry policy through %s", forbidden)
+		}
+	}
+	if !strings.Contains(pipelineText, "errSQLiteWorkflowInstanceStoreRuntimeMutationRunnerRequired") {
+		t.Fatal("SQLite pipeline writes must fail closed when no RuntimeMutationRunner is injected")
+	}
 }
 
 func collectRuntimeWriterCallSites(root string) ([]runtimeWriterCallSite, error) {
@@ -722,11 +741,11 @@ func classifyWorkflowInstanceStoreSpecCallSite(site runtimeWriterCallSite) (runt
 	switch site.Function {
 	case "runInPipelineTransactionOnce":
 		if site.Kind == primitiveBegin {
-			return classSplitLegacy, "named pipeline transaction owner opens a transaction before invoking the callback", true
+			return classDifferentConcept, "Postgres workflow pipeline transaction owner; SQLite requires the selected runtime mutation boundary before this path", true
 		}
 	case "workflowInstanceStoreTx":
 		if site.Kind == primitiveBegin {
-			return classSplitLegacy, "named old fallback helper opens a transaction when no active pipeline tx exists", true
+			return classDifferentConcept, "Postgres workflow instance helper opens a local transaction; SQLite writes consume the selected runtime mutation boundary", true
 		}
 	case "MarkTerminated", "upsertSpec", "createSpec":
 		if site.CallReceiver == "tx" {
