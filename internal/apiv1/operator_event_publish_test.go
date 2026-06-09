@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
@@ -1472,6 +1473,64 @@ func (s *failStandalonePipelineReceiptOnceStore) UpsertPipelineReceiptTx(ctx con
 type failCommittedReplayScopeStore struct {
 	*store.PostgresStore
 	err error
+}
+
+type failCommittedReplayScopeMutation struct {
+	ctx   context.Context
+	tx    *sql.Tx
+	store *failCommittedReplayScopeStore
+}
+
+func (s *failCommittedReplayScopeStore) RunEventMutation(ctx context.Context, fn func(runtimebus.EventMutation) error) error {
+	if fn == nil {
+		return nil
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	postCommit := make([]func(), 0, 4)
+	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
+	txctx = runtimepipeline.WithPipelinePostCommitActions(txctx, &postCommit)
+	mutation := &failCommittedReplayScopeMutation{tx: tx, store: s}
+	mutation.ctx = runtimebus.WithEventMutationContext(txctx, mutation)
+	if err := fn(mutation); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
+	return nil
+}
+
+func (m *failCommittedReplayScopeMutation) Context() context.Context {
+	return m.ctx
+}
+
+func (m *failCommittedReplayScopeMutation) AppendEvent(ctx context.Context, evt events.Event) error {
+	return m.store.AppendEventTx(ctx, m.tx, evt)
+}
+
+func (m *failCommittedReplayScopeMutation) InsertEventDeliveries(ctx context.Context, eventID string, agentIDs []string) error {
+	return m.store.InsertEventDeliveriesTx(ctx, m.tx, eventID, agentIDs)
+}
+
+func (m *failCommittedReplayScopeMutation) InsertEventDeliveriesWithTargets(ctx context.Context, eventID string, agentIDs []string, deliveryTargets map[string]events.RouteIdentity) error {
+	return m.store.InsertEventDeliveriesWithTargetsTx(ctx, m.tx, eventID, agentIDs, deliveryTargets)
+}
+
+func (m *failCommittedReplayScopeMutation) InsertEventDeliveryRoutes(ctx context.Context, eventID string, routes []events.DeliveryRoute) error {
+	return m.store.InsertEventDeliveryRoutesTx(ctx, m.tx, eventID, routes)
+}
+
+func (m *failCommittedReplayScopeMutation) UpsertCommittedReplayScope(ctx context.Context, eventID string, scope runtimereplayclaim.CommittedReplayScope) error {
+	return m.store.UpsertCommittedReplayScopeTx(ctx, m.tx, eventID, scope)
+}
+
+func (m *failCommittedReplayScopeMutation) UpsertPipelineReceipt(ctx context.Context, eventID, status, errText string) error {
+	return m.store.UpsertPipelineReceiptTx(ctx, m.tx, eventID, status, errText)
 }
 
 func (s *failCommittedReplayScopeStore) UpsertCommittedReplayScopeTx(ctx context.Context, tx *sql.Tx, eventID string, scope runtimereplayclaim.CommittedReplayScope) error {

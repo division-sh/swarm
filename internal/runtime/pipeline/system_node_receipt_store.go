@@ -181,7 +181,7 @@ func (s *WorkflowInstanceStore) MarkSystemNodeDeliveryDeadLetter(ctx context.Con
 }
 
 func (s *WorkflowInstanceStore) markSQLiteSystemNodeProcessedAndSettleDelivery(ctx context.Context, nodeID, eventID, sideEffects string) error {
-	return s.RunInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	return s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		retryLimit := normalizeSystemNodeRetryLimit(DefaultSystemNodeRetryLimit)
 		authorized, err := sqliteSystemNodeDeliveryAuthorizedTx(txctx, tx, nodeID, eventID, retryLimit)
 		if err != nil {
@@ -245,7 +245,7 @@ func (s *WorkflowInstanceStore) markSQLiteSystemNodeProcessedAndSettleDelivery(c
 
 func (s *WorkflowInstanceStore) markSQLiteSystemNodeDeliveryInProgress(ctx context.Context, nodeID, eventID string, retryLimit int) error {
 	retryLimit = normalizeSystemNodeRetryLimit(retryLimit)
-	return s.RunInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	return s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		authorized, err := sqliteSystemNodeDeliveryAuthorizedTx(txctx, tx, nodeID, eventID, retryLimit)
 		if err != nil {
 			return fmt.Errorf("query sqlite system node delivery authority: %w", err)
@@ -282,7 +282,7 @@ func (s *WorkflowInstanceStore) markSQLiteSystemNodeDeliveryInProgress(ctx conte
 
 func (s *WorkflowInstanceStore) markSQLiteSystemNodeDeliveryFailed(ctx context.Context, nodeID, eventID, reasonCode, errText string, retryCount, retryLimit int) error {
 	retryLimit = normalizeSystemNodeRetryLimit(retryLimit)
-	return s.RunInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	return s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		authorized, err := sqliteSystemNodeDeliveryAuthorizedTx(txctx, tx, nodeID, eventID, retryLimit)
 		if err != nil {
 			return fmt.Errorf("query sqlite system node delivery authority: %w", err)
@@ -317,7 +317,7 @@ func (s *WorkflowInstanceStore) markSQLiteSystemNodeDeliveryFailed(ctx context.C
 }
 
 func (s *WorkflowInstanceStore) markSQLiteSystemNodeDeliveryDeadLetter(ctx context.Context, nodeID, eventID, reasonCode, errText string, retryCount int, sideEffects string) error {
-	return s.RunInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	return s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		exists, err := sqliteSystemNodeDeliveryRowExistsTx(txctx, tx, nodeID, eventID)
 		if err != nil {
 			return fmt.Errorf("query sqlite system node delivery row: %w", err)

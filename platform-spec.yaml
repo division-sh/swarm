@@ -2603,8 +2603,16 @@ engine:
         - selected DB ping
         rule: These raw database consumers are adjacent process/workspace capabilities, not selected runtime persistence authority. They must stay named and must not be reused as runtime store fallbacks.
       - name: selected_runtime_mutation_unit_of_work
-        owner: backend_neutral_runtime_mutation_write_boundary and future typed unit-of-work owner under '#1403'
-        rule: Mutation writers must consume a semantic mutation owner. SQLite serialization/retry policy is owned below the store boundary and remains split to #1405.
+        owner: backend_neutral_runtime_mutation_write_boundary plus typed producer-visible unit-of-work entrypoints under '#1414'
+        promoted_first_slice_by: '#1414'
+        typed_entrypoint_owners:
+        - runtimebus.EventMutationRunner and runtimebus.EventMutation for selected event publish/outbox atomic mutation groups
+        - runtimepipeline.Store.RunPipelineMutation for selected workflow pipeline mutation groups
+        rule: >
+          Mutation writers must consume a semantic mutation owner. Event publish/outbox and workflow pipeline producers
+          must not construct raw `func(context.Context, *sql.Tx) error` callbacks as their selected-runtime mutation
+          authority. Backend-specific SQL transaction mechanics may remain inside store implementations. SQLite
+          serialization/retry policy is owned below the store boundary and remains split to #1405.
       raw_sql_policy:
         allowed:
         - boundary: backend selection, store construction, schema/bootstrap, and backend-specific store implementations
@@ -2673,8 +2681,8 @@ engine:
       - Active pipeline transactions are already inside the selected mutation boundary and must be reused rather than nested.
       - Schema/bootstrap, bundle catalog, destructive reset, preservation cleanup, fork-specific mutation/recovery, and read-only projections remain separate concepts unless independently gated.
       consumers:
-      - runtimebus transactional publish through EventTransactionRunner
-      - runtimepipeline.WorkflowInstanceStore production SQLite construction through NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner
+      - runtimebus transactional publish through EventMutationRunner
+      - runtimepipeline.WorkflowInstanceStore production SQLite construction through NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner and RunPipelineMutation
       - SQLiteRuntimeStore selected runtime mutation methods for the named row families
     - name: event_append_and_run_lifecycle_rows
       owner: runtimebus.EventStore

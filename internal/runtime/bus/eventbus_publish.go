@@ -188,12 +188,15 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 	defer func() {
 		runtimepipeline.FlushPipelineAfterPublishActions(afterPublishActions)
 	}()
-	if txStore, ok := eb.store.(TransactionalEventStore); ok {
-		if err := eb.publishTransactional(ictx, evt, start, &deferredTransitions, txStore); err != nil {
+	if mutationRunner, ok := eb.store.(EventMutationRunner); ok && mutationRunner != nil {
+		if err := eb.publishTransactional(ictx, evt, start, &deferredTransitions, mutationRunner); err != nil {
 			return err
 		}
 		eb.recordCommittedPublishConvergence(ictx, evt)
 		return nil
+	}
+	if _, ok := eb.store.(TransactionalEventStore); ok {
+		return errors.New("typed event mutation runner is required for transactional publish")
 	}
 
 	persisted := false
@@ -289,8 +292,11 @@ func (eb *EventBus) PublishAcknowledged(ctx context.Context, evt events.Event) e
 		return err
 	}
 
-	if txStore, ok := eb.store.(TransactionalEventStore); ok {
-		return eb.publishAcknowledgedTransactional(ictx, evt, start, txStore)
+	if mutationRunner, ok := eb.store.(EventMutationRunner); ok && mutationRunner != nil {
+		return eb.publishAcknowledgedTransactional(ictx, evt, start, mutationRunner)
+	}
+	if _, ok := eb.store.(TransactionalEventStore); ok {
+		return errors.New("typed event mutation runner is required for transactional acknowledged publish")
 	}
 
 	receiptOverride := &runtimepipeline.PipelineReceiptOverride{}
@@ -321,8 +327,8 @@ func (eb *EventBus) PublishAcknowledged(ctx context.Context, evt events.Event) e
 }
 
 // PublishTx persists the canonical event record and recipient manifest in a
-// caller-owned transaction. Callers use this when another persisted state
-// transition must commit atomically with event emission.
+// caller-owned transaction. This is a split legacy/public API hook; selected
+// event/pipeline producers use EventMutationRunner and EventMutation instead.
 func (eb *EventBus) PublishTx(ctx context.Context, tx *sql.Tx, evt events.Event) error {
 	ctx = WithCurrentRuntimeEpoch(ctx)
 	if err := ensurePublishEpoch(ctx); err != nil {
@@ -518,150 +524,20 @@ func (eb *EventBus) publishTransactional(
 	evt events.Event,
 	start time.Time,
 	deferredTransitions *[]runtimepipeline.DeferredPipelineTransition,
-	txStore TransactionalEventStore,
+	runner EventMutationRunner,
 ) error {
 	ctx = WithCurrentRuntimeEpoch(ctx)
 	if err := ensurePublishEpoch(ctx); err != nil {
 		return err
 	}
-	if runner, ok := txStore.(EventTransactionRunner); ok && runner != nil {
-		return eb.publishTransactionalWithRunner(ctx, evt, start, deferredTransitions, txStore, runner)
-	}
-	tx, err := txStore.BeginEventTx(ctx)
-	if err != nil {
-		return fmt.Errorf("begin publish tx: %w", err)
-	}
-	txPostCommitActions := make([]func(), 0, 8)
-	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
-	txctx = runtimepipeline.WithPipelinePostCommitActions(txctx, &txPostCommitActions)
-	receiptOverride := &runtimepipeline.PipelineReceiptOverride{}
-	txctx = runtimepipeline.WithPipelineReceiptOverride(txctx, receiptOverride)
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
-
-	if err := txStore.AppendEventTx(txctx, tx, evt); err != nil {
-		return fmt.Errorf("persist event: %w", err)
-	}
-
-	inboundPlan, err := eb.planSubscribedRoutePlan(txctx, evt, true)
-	if err != nil {
-		return err
-	}
-	if inboundPlan.HasPersistentDeliveries() {
-		if err := eb.insertEventDeliveriesTx(txctx, txStore, tx, evt.ID(), inboundPlan.PersistedRecipientIDs(), inboundPlan.DeliveryTargets(), inboundPlan.DeliveryRoutes()); err != nil {
-			return fmt.Errorf("persist event deliveries: %w", err)
-		}
-	}
-	if scopeWriter, ok := eb.store.(TransactionalEventReplayScopePersistence); ok && scopeWriter != nil {
-		if err := scopeWriter.UpsertCommittedReplayScopeTx(txctx, tx, evt.ID(), runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
-			return fmt.Errorf("persist committed replay scope: %w", err)
-		}
-	} else if replayScopePersistenceRequired(eb.store) {
-		return fmt.Errorf("persist committed replay scope: %w", runtimereplayclaim.ErrMissingCommittedReplayScope)
-	}
-	if inboundPlan.TargetFailure != "" {
-		applyTargetDeliveryFailureReceipt(receiptOverride, inboundPlan.TargetFailure)
-		status, errText := pipelineReceiptStatus(txctx, nil)
-		if err := txStore.UpsertPipelineReceiptTx(txctx, tx, evt.ID(), status, errText); err != nil {
-			return fmt.Errorf("persist pipeline receipt: %w", err)
-		}
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("commit publish tx: %w", err)
-		}
-		committed = true
-		runtimepipeline.FlushPipelinePostCommitActions(txPostCommitActions)
-		eb.notifyTestPublishPersisted(ctx, evt, inboundPlan)
-		eb.recordTargetDeliveryFailure(ctx, evt, inboundPlan)
-		eb.logPublished(ctx, evt, int(time.Since(start)/time.Microsecond))
-		return nil
-	}
-
-	if reason, err := eb.dispatchQueueReason(txctx, evt); err != nil {
-		return err
-	} else if reason != "" {
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("commit publish tx: %w", err)
-		}
-		committed = true
-		eb.notifyTestPublishPersisted(ctx, evt, inboundPlan)
-		eb.logDispatchQueued(ctx, reason, evt, len(inboundPlan.RecipientIDs()), false, false)
-		eb.logPublished(ctx, evt, int(time.Since(start)/time.Microsecond))
-		return nil
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit publish tx: %w", err)
-	}
-	committed = true
-	runtimepipeline.FlushPipelinePostCommitActions(txPostCommitActions)
-	eb.notifyTestPublishPersisted(ctx, evt, inboundPlan)
-
-	postCommitActions := make([]func(), 0, 8)
-	dispatchCtx := runtimepipeline.WithoutPipelineSQLTxContext(ctx)
-	dispatchCtx = runtimepipeline.WithPipelinePostCommitActions(dispatchCtx, &postCommitActions)
-	dispatchCtx = runtimepipeline.WithPipelineReceiptOverride(dispatchCtx, receiptOverride)
-	passthrough, deferred, err := eb.runInterceptors(dispatchCtx, evt)
-	if err != nil {
-		eb.recordCommittedPublishReceipt(dispatchCtx, evt, err)
-		return err
-	}
-	runtimepipeline.FlushPipelinePostCommitActions(postCommitActions)
-	if deferredTransitions != nil {
-		runtimepipeline.FlushDeferredPipelineTransitions(dispatchCtx, *deferredTransitions)
-	}
-
-	if passthrough {
-		recipients := inboundPlan.RecipientIDs()
-		if len(recipients) > 0 {
-			eb.logQueuedDeliveries(dispatchCtx, evt, inboundPlan.PersistedRecipientIDs(), "matched_agent_subscription", inboundPlan.ExtraDetail)
-			if err := eb.deliverToRecipientsWithRoutes(dispatchCtx, evt, recipients, inboundPlan.DeliveryRoutes()); err != nil {
-				eb.recordCommittedPublishReceipt(dispatchCtx, evt, err)
-				return nil
-			}
-			eb.logDelivery(dispatchCtx, evt, recipients, inboundPlan.ExtraDetail)
-		}
-		if inboundPlan.BlockedByCycle && inboundPlan.CycleEscalation != nil {
-			if err := eb.publishDeferred(dispatchCtx, *inboundPlan.CycleEscalation); err != nil {
-				eb.recordCommittedPublishReceipt(dispatchCtx, evt, err)
-				return nil
-			}
-		}
-		if strings.TrimSpace(inboundPlan.ContradictionReason) != "" {
-			_ = eb.emitContradiction(dispatchCtx, evt, inboundPlan.ContradictionReason)
-		}
-	}
-	eb.logPublished(dispatchCtx, evt, int(time.Since(start)/time.Microsecond))
-
-	for _, d := range deferred {
-		if err := eb.publishDeferred(dispatchCtx, d); err != nil {
-			eb.recordCommittedPublishReceipt(dispatchCtx, evt, err)
-			return nil
-		}
-	}
-	eb.recordCommittedPublishReceipt(dispatchCtx, evt, nil)
-	return nil
-}
-
-func (eb *EventBus) publishTransactionalWithRunner(
-	ctx context.Context,
-	evt events.Event,
-	start time.Time,
-	deferredTransitions *[]runtimepipeline.DeferredPipelineTransition,
-	txStore TransactionalEventStore,
-	runner EventTransactionRunner,
-) error {
 	var inboundPlan RoutePlan
 	receiptOverride := &runtimepipeline.PipelineReceiptOverride{}
 	targetFailure := false
 	dispatchQueued := false
 	queueReason := ""
-	if err := runner.RunEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		txctx = runtimepipeline.WithPipelineReceiptOverride(txctx, receiptOverride)
-		if err := txStore.AppendEventTx(txctx, tx, evt); err != nil {
+	if err := runner.RunEventMutation(ctx, func(mutation EventMutation) error {
+		txctx := runtimepipeline.WithPipelineReceiptOverride(mutation.Context(), receiptOverride)
+		if err := mutation.AppendEvent(txctx, evt); err != nil {
 			return fmt.Errorf("persist event: %w", err)
 		}
 		plan, err := eb.planSubscribedRoutePlan(txctx, evt, true)
@@ -670,21 +546,17 @@ func (eb *EventBus) publishTransactionalWithRunner(
 		}
 		inboundPlan = plan
 		if inboundPlan.HasPersistentDeliveries() {
-			if err := eb.insertEventDeliveriesTx(txctx, txStore, tx, evt.ID(), inboundPlan.PersistedRecipientIDs(), inboundPlan.DeliveryTargets(), inboundPlan.DeliveryRoutes()); err != nil {
+			if err := eb.insertEventDeliveriesMutation(txctx, mutation, evt.ID(), inboundPlan.PersistedRecipientIDs(), inboundPlan.DeliveryTargets(), inboundPlan.DeliveryRoutes()); err != nil {
 				return fmt.Errorf("persist event deliveries: %w", err)
 			}
 		}
-		if scopeWriter, ok := eb.store.(TransactionalEventReplayScopePersistence); ok && scopeWriter != nil {
-			if err := scopeWriter.UpsertCommittedReplayScopeTx(txctx, tx, evt.ID(), runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
-				return fmt.Errorf("persist committed replay scope: %w", err)
-			}
-		} else if replayScopePersistenceRequired(eb.store) {
-			return fmt.Errorf("persist committed replay scope: %w", runtimereplayclaim.ErrMissingCommittedReplayScope)
+		if err := eb.upsertCommittedReplayScopeMutation(txctx, mutation, evt.ID(), runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
+			return err
 		}
 		if inboundPlan.TargetFailure != "" {
 			applyTargetDeliveryFailureReceipt(receiptOverride, inboundPlan.TargetFailure)
 			status, errText := pipelineReceiptStatus(txctx, nil)
-			if err := txStore.UpsertPipelineReceiptTx(txctx, tx, evt.ID(), status, errText); err != nil {
+			if err := mutation.UpsertPipelineReceipt(txctx, evt.ID(), status, errText); err != nil {
 				return fmt.Errorf("persist pipeline receipt: %w", err)
 			}
 			targetFailure = true
@@ -763,106 +635,20 @@ func (eb *EventBus) publishAcknowledgedTransactional(
 	ctx context.Context,
 	evt events.Event,
 	start time.Time,
-	txStore TransactionalEventStore,
+	runner EventMutationRunner,
 ) error {
 	ctx = WithCurrentRuntimeEpoch(ctx)
 	if err := ensurePublishEpoch(ctx); err != nil {
 		return err
 	}
-	if runner, ok := txStore.(EventTransactionRunner); ok && runner != nil {
-		return eb.publishAcknowledgedTransactionalWithRunner(ctx, evt, start, txStore, runner)
-	}
-	tx, err := txStore.BeginEventTx(ctx)
-	if err != nil {
-		return fmt.Errorf("begin publish tx: %w", err)
-	}
-	txPostCommitActions := make([]func(), 0, 8)
-	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
-	txctx = runtimepipeline.WithPipelinePostCommitActions(txctx, &txPostCommitActions)
-	receiptOverride := &runtimepipeline.PipelineReceiptOverride{}
-	txctx = runtimepipeline.WithPipelineReceiptOverride(txctx, receiptOverride)
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
-
-	if err := txStore.AppendEventTx(txctx, tx, evt); err != nil {
-		return fmt.Errorf("persist event: %w", err)
-	}
-	inboundPlan, err := eb.planSubscribedRoutePlan(txctx, evt, true)
-	if err != nil {
-		return err
-	}
-	if inboundPlan.HasPersistentDeliveries() {
-		if err := eb.insertEventDeliveriesTx(txctx, txStore, tx, evt.ID(), inboundPlan.PersistedRecipientIDs(), inboundPlan.DeliveryTargets(), inboundPlan.DeliveryRoutes()); err != nil {
-			return fmt.Errorf("persist event deliveries: %w", err)
-		}
-	}
-	if scopeWriter, ok := eb.store.(TransactionalEventReplayScopePersistence); ok && scopeWriter != nil {
-		if err := scopeWriter.UpsertCommittedReplayScopeTx(txctx, tx, evt.ID(), runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
-			return fmt.Errorf("persist committed replay scope: %w", err)
-		}
-	} else if replayScopePersistenceRequired(eb.store) {
-		return fmt.Errorf("persist committed replay scope: %w", runtimereplayclaim.ErrMissingCommittedReplayScope)
-	}
-	if inboundPlan.TargetFailure != "" {
-		applyTargetDeliveryFailureReceipt(receiptOverride, inboundPlan.TargetFailure)
-		status, errText := pipelineReceiptStatus(txctx, nil)
-		if err := txStore.UpsertPipelineReceiptTx(txctx, tx, evt.ID(), status, errText); err != nil {
-			return fmt.Errorf("persist pipeline receipt: %w", err)
-		}
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("commit publish tx: %w", err)
-		}
-		committed = true
-		runtimepipeline.FlushPipelinePostCommitActions(txPostCommitActions)
-		eb.notifyTestPublishPersisted(ctx, evt, inboundPlan)
-		eb.recordTargetDeliveryFailure(ctx, evt, inboundPlan)
-		eb.logPublished(ctx, evt, int(time.Since(start)/time.Microsecond))
-		eb.recordCommittedPublishConvergence(ctx, evt)
-		return nil
-	}
-	if reason, err := eb.dispatchQueueReason(txctx, evt); err != nil {
-		return err
-	} else if reason != "" {
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("commit publish tx: %w", err)
-		}
-		committed = true
-		runtimepipeline.FlushPipelinePostCommitActions(txPostCommitActions)
-		eb.notifyTestPublishPersisted(ctx, evt, inboundPlan)
-		eb.logDispatchQueued(ctx, reason, evt, len(inboundPlan.RecipientIDs()), false, true)
-		eb.logPublished(ctx, evt, int(time.Since(start)/time.Microsecond))
-		eb.recordCommittedPublishConvergence(ctx, evt)
-		return nil
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit publish tx: %w", err)
-	}
-	committed = true
-	runtimepipeline.FlushPipelinePostCommitActions(txPostCommitActions)
-	eb.notifyTestPublishPersisted(ctx, evt, inboundPlan)
-	eb.dispatchCommittedPublishAsync(ctx, evt, inboundPlan)
-	return nil
-}
-
-func (eb *EventBus) publishAcknowledgedTransactionalWithRunner(
-	ctx context.Context,
-	evt events.Event,
-	start time.Time,
-	txStore TransactionalEventStore,
-	runner EventTransactionRunner,
-) error {
 	var inboundPlan RoutePlan
 	receiptOverride := &runtimepipeline.PipelineReceiptOverride{}
 	targetFailure := false
 	dispatchQueued := false
 	queueReason := ""
-	if err := runner.RunEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		txctx = runtimepipeline.WithPipelineReceiptOverride(txctx, receiptOverride)
-		if err := txStore.AppendEventTx(txctx, tx, evt); err != nil {
+	if err := runner.RunEventMutation(ctx, func(mutation EventMutation) error {
+		txctx := runtimepipeline.WithPipelineReceiptOverride(mutation.Context(), receiptOverride)
+		if err := mutation.AppendEvent(txctx, evt); err != nil {
 			return fmt.Errorf("persist event: %w", err)
 		}
 		plan, err := eb.planSubscribedRoutePlan(txctx, evt, true)
@@ -871,21 +657,17 @@ func (eb *EventBus) publishAcknowledgedTransactionalWithRunner(
 		}
 		inboundPlan = plan
 		if inboundPlan.HasPersistentDeliveries() {
-			if err := eb.insertEventDeliveriesTx(txctx, txStore, tx, evt.ID(), inboundPlan.PersistedRecipientIDs(), inboundPlan.DeliveryTargets(), inboundPlan.DeliveryRoutes()); err != nil {
+			if err := eb.insertEventDeliveriesMutation(txctx, mutation, evt.ID(), inboundPlan.PersistedRecipientIDs(), inboundPlan.DeliveryTargets(), inboundPlan.DeliveryRoutes()); err != nil {
 				return fmt.Errorf("persist event deliveries: %w", err)
 			}
 		}
-		if scopeWriter, ok := eb.store.(TransactionalEventReplayScopePersistence); ok && scopeWriter != nil {
-			if err := scopeWriter.UpsertCommittedReplayScopeTx(txctx, tx, evt.ID(), runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
-				return fmt.Errorf("persist committed replay scope: %w", err)
-			}
-		} else if replayScopePersistenceRequired(eb.store) {
-			return fmt.Errorf("persist committed replay scope: %w", runtimereplayclaim.ErrMissingCommittedReplayScope)
+		if err := eb.upsertCommittedReplayScopeMutation(txctx, mutation, evt.ID(), runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
+			return err
 		}
 		if inboundPlan.TargetFailure != "" {
 			applyTargetDeliveryFailureReceipt(receiptOverride, inboundPlan.TargetFailure)
 			status, errText := pipelineReceiptStatus(txctx, nil)
-			if err := txStore.UpsertPipelineReceiptTx(txctx, tx, evt.ID(), status, errText); err != nil {
+			if err := mutation.UpsertPipelineReceipt(txctx, evt.ID(), status, errText); err != nil {
 				return fmt.Errorf("persist pipeline receipt: %w", err)
 			}
 			targetFailure = true
@@ -1364,6 +1146,52 @@ func (eb *EventBus) insertEventDeliveriesTx(
 		return store.InsertEventDeliveriesWithTargetsTx(ctx, tx, eventID, recipients, deliveryTargets)
 	}
 	return txStore.InsertEventDeliveriesTx(ctx, tx, eventID, recipients)
+}
+
+func (eb *EventBus) insertEventDeliveriesMutation(
+	ctx context.Context,
+	mutation EventMutation,
+	eventID string,
+	recipients []string,
+	deliveryTargets map[string]events.RouteIdentity,
+	deliveryRoutes []events.DeliveryRoute,
+) error {
+	deliveryRoutes = events.NormalizeDeliveryRoutes(deliveryRoutes)
+	if len(deliveryRoutes) > 0 {
+		if err := mutation.InsertEventDeliveryRoutes(ctx, eventID, deliveryRoutes); err != nil {
+			return err
+		}
+		return nil
+	}
+	if deliveryRouteSetPersistenceRequired(deliveryRoutes) {
+		return errMissingEventDeliveryRouteSetPersistence
+	}
+	if len(deliveryTargets) > 0 {
+		return mutation.InsertEventDeliveriesWithTargets(ctx, eventID, recipients, deliveryTargets)
+	}
+	return mutation.InsertEventDeliveries(ctx, eventID, recipients)
+}
+
+func (eb *EventBus) upsertCommittedReplayScopeMutation(ctx context.Context, mutation EventMutation, eventID string, scope runtimereplayclaim.CommittedReplayScope) error {
+	err := mutation.UpsertCommittedReplayScope(ctx, eventID, scope)
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, runtimereplayclaim.ErrMissingCommittedReplayScope) && !replayScopePersistenceRequired(eb.store) {
+		return nil
+	}
+	return fmt.Errorf("persist committed replay scope: %w", err)
+}
+
+func (eb *EventBus) eventMutationFromContext(ctx context.Context) (EventMutation, bool) {
+	if mutation, ok := EventMutationFromContext(ctx); ok {
+		return mutation, true
+	}
+	provider, ok := eb.store.(EventMutationContextProvider)
+	if !ok || provider == nil {
+		return nil, false
+	}
+	return provider.EventMutationFromContext(ctx)
 }
 
 var errMissingEventDeliveryRouteSetPersistence = errors.New("event store does not support typed delivery route persistence")

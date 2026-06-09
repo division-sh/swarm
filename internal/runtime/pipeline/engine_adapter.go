@@ -70,7 +70,6 @@ func (e pipelineEngineEvaluator) EvalValue(string, runtimeengine.BaseContext) (a
 
 type pipelineEngineTx struct {
 	ctx context.Context
-	tx  *sql.Tx
 }
 
 func (t pipelineEngineTx) Context() context.Context { return t.ctx }
@@ -83,8 +82,8 @@ func (r pipelineEngineTxRunner) Run(ctx context.Context, fn func(runtimeengine.T
 	if r.store == nil || !r.store.Enabled() {
 		return fn(pipelineEngineTx{ctx: ctx})
 	}
-	return r.store.RunInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		return fn(pipelineEngineTx{ctx: txctx, tx: tx})
+	return r.store.RunPipelineMutation(ctx, func(txctx context.Context) error {
+		return fn(pipelineEngineTx{ctx: txctx})
 	})
 }
 

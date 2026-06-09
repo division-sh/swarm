@@ -2,7 +2,6 @@ package manager
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1366,7 +1365,7 @@ func TestDeactivateFlowInstanceModel_PostCommitSideEffectsFollowTerminalCommit(t
 	if err := am.ActivateFlowInstance(ctx, req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
-	if err := store.RunInPipelineTransaction(ctx, func(txctx context.Context, _ *sql.Tx) error {
+	if err := store.RunPipelineMutation(ctx, func(txctx context.Context) error {
 		if err := store.Mutate(txctx, req.Instance.EntityID, func(instance *runtimepipeline.WorkflowInstance) {
 			instance.CurrentState = "completed"
 		}); err != nil {
@@ -1401,7 +1400,7 @@ func TestDeactivateFlowInstanceModel_PostCommitSideEffectsFollowTerminalCommit(t
 		}
 		return nil
 	}); err != nil {
-		t.Fatalf("RunInPipelineTransaction: %v", err)
+		t.Fatalf("RunPipelineMutation: %v", err)
 	}
 
 	var status string

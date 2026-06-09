@@ -78,9 +78,10 @@ rows:
         name: TestRuntimeWriterBoundaryGuardRejectsPipelineSQLiteRawDBHelperFixture
     split_issues: [1403]
     notes: >
-      This row guards the boundary. Behavior-changing mutation UoW migration
-      remains #1403; SQLite busy/serialization policy is guarded by the #1405
-      row in this matrix.
+      This row guards the boundary. #1414 promotes the first typed event/pipeline
+      mutation UoW entrypoint slice; the broader row-family typed UoW migration
+      remains #1403. SQLite busy/serialization policy is guarded by the #1405 row
+      in this matrix.
 
   - id: sqlite_runtime_sqldb_omission_guard
     classification: guard
@@ -119,12 +120,12 @@ rows:
       - kind: go_test
         name: TestPostgresStore_RunEventTransactionDoesNotSerializeCallbacks
       - kind: go_test
-        name: TestWorkflowInstanceStore_RunInPipelineTransactionDoesNotRetryPostgresDialect
+        name: TestWorkflowInstanceStore_RunPipelineMutationDoesNotRetryPostgresDialect
     guard_proof_refs:
       - kind: go_test
         name: TestPostgresStore_RunEventTransactionDoesNotSerializeCallbacks
       - kind: go_test
-        name: TestWorkflowInstanceStore_RunInPipelineTransactionDoesNotRetryPostgresDialect
+        name: TestWorkflowInstanceStore_RunPipelineMutationDoesNotRetryPostgresDialect
     notes: >
       SQLite-local busy handling is a store-internal backend policy; Postgres
       keeps normal transaction behavior.
@@ -225,14 +226,15 @@ rows:
       - typed backend-neutral runtime mutation unit of work
     owners:
       - backend_neutral_runtime_mutation_write_boundary
-      - future #1403 typed unit-of-work owner
+      - '#1414 typed event/pipeline producer-visible unit-of-work entrypoints'
+      - 'remaining #1403 typed unit-of-work row-family owner'
     split_issues: [1403]
     proof_refs:
       - kind: artifact
         path: platform-spec.yaml
     notes: >
-      #1402 may guard/account for this seam, but production mutation behavior
-      migration belongs to #1403.
+      #1414 closes the producer-visible event/pipeline raw callback entrypoint
+      slice. Full production mutation behavior migration remains #1403.
 
   - id: sqlite_busy_serialization_behavior_guard
     classification: guard
@@ -255,16 +257,16 @@ rows:
       - kind: go_test
         name: TestSQLiteRuntimeStore_RunRuntimeMutationDoesNotRetryActiveTransaction
       - kind: go_test
-        name: TestSQLiteWorkflowInstanceStore_RunInPipelineTransactionRequiresRuntimeMutationRunner
+        name: TestSQLiteWorkflowInstanceStore_RunPipelineMutationRequiresRuntimeMutationRunner
       - kind: go_test
-        name: TestSQLiteWorkflowInstanceStore_RunInPipelineTransactionUsesRuntimeMutationRunner
+        name: TestSQLiteWorkflowInstanceStore_RunPipelineMutationUsesRuntimeMutationRunner
       - kind: go_test
         name: TestPostgresStore_RunEventTransactionDoesNotSerializeCallbacks
     guard_proof_refs:
       - kind: go_test
         name: TestSelectedSQLiteRuntimeConstructionConsumesMutationBoundary
       - kind: go_test
-        name: TestSQLiteWorkflowInstanceStore_RunInPipelineTransactionRequiresRuntimeMutationRunner
+        name: TestSQLiteWorkflowInstanceStore_RunPipelineMutationRequiresRuntimeMutationRunner
     notes: >
       SQLite busy/retry policy belongs below the store boundary. Pipeline writes
       require an injected RuntimeMutationRunner and must not own a fallback

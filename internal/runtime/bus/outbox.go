@@ -40,14 +40,11 @@ func (o engineOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.E
 	if o.bus == nil || len(intents) == 0 {
 		return nil
 	}
-	tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx)
-	if !ok || tx == nil {
+	mutation, ok := o.bus.eventMutationFromContext(ctx)
+	if !ok || mutation == nil {
 		return nil
 	}
-	txStore, ok := o.bus.store.(TransactionalEventStore)
-	if !ok {
-		return fmt.Errorf("event bus store does not support transactional outbox")
-	}
+	ctx = mutation.Context()
 	for i := range intents {
 		intent := &intents[i]
 		if strings.TrimSpace(string(intent.Event.Type())) == "" {
@@ -62,21 +59,17 @@ func (o engineOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.E
 		if err != nil {
 			return err
 		}
-		if err := txStore.AppendEventTx(ctx, tx, intent.Event); err != nil {
+		if err := mutation.AppendEvent(ctx, intent.Event); err != nil {
 			return fmt.Errorf("persist event: %w", err)
 		}
-		if err := o.bus.insertEventDeliveriesTx(ctx, txStore, tx, intent.Event.ID(), plan.PersistedRecipientIDs(), plan.DeliveryTargets(), plan.DeliveryRoutes()); err != nil {
+		if err := o.bus.insertEventDeliveriesMutation(ctx, mutation, intent.Event.ID(), plan.PersistedRecipientIDs(), plan.DeliveryTargets(), plan.DeliveryRoutes()); err != nil {
 			return fmt.Errorf("persist event deliveries: %w", err)
 		}
-		if scopeWriter, ok := o.bus.store.(TransactionalEventReplayScopePersistence); ok && scopeWriter != nil {
-			if err := scopeWriter.UpsertCommittedReplayScopeTx(ctx, tx, intent.Event.ID(), replayScopeForEmitIntent(*intent)); err != nil {
-				return fmt.Errorf("persist committed replay scope: %w", err)
-			}
-		} else if replayScopePersistenceRequired(o.bus.store) {
-			return fmt.Errorf("persist committed replay scope: %w", runtimereplayclaim.ErrMissingCommittedReplayScope)
+		if err := o.bus.upsertCommittedReplayScopeMutation(ctx, mutation, intent.Event.ID(), replayScopeForEmitIntent(*intent)); err != nil {
+			return err
 		}
 		if plan.TargetFailure != "" {
-			if err := txStore.UpsertPipelineReceiptTx(ctx, tx, intent.Event.ID(), "dead_letter", targetDeliveryFailureMessage(plan.TargetFailure)); err != nil {
+			if err := mutation.UpsertPipelineReceipt(ctx, intent.Event.ID(), "dead_letter", targetDeliveryFailureMessage(plan.TargetFailure)); err != nil {
 				return fmt.Errorf("persist pipeline receipt: %w", err)
 			}
 			failedEvent := intent.Event

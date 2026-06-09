@@ -24,6 +24,15 @@ func (s *SQLiteRuntimeStore) RunRuntimeMutation(ctx context.Context, fn func(con
 	return s.runRuntimeMutation(ctx, "sqlite runtime mutation", fn)
 }
 
+func (s *SQLiteRuntimeStore) RunRuntimeMutationContext(ctx context.Context, fn func(context.Context) error) error {
+	if fn == nil {
+		return nil
+	}
+	return s.runRuntimeMutation(ctx, "sqlite runtime mutation", func(txctx context.Context, _ *sql.Tx) error {
+		return fn(txctx)
+	})
+}
+
 func (s *SQLiteRuntimeStore) RunEventTransaction(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
 	return s.runRuntimeMutation(ctx, "sqlite event transaction", fn)
 }

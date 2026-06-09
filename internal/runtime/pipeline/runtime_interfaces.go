@@ -2,7 +2,6 @@ package pipeline
 
 import (
 	"context"
-	"database/sql"
 	"strings"
 	"time"
 
@@ -73,7 +72,7 @@ type SystemNodeReceiptPersistence interface {
 type Store interface {
 	WorkflowInstancePersistence
 	SystemNodeReceiptPersistence
-	RunInPipelineTransaction(ctx context.Context, fn func(context.Context, *sql.Tx) error) error
+	RunPipelineMutation(ctx context.Context, fn func(context.Context) error) error
 }
 
 type TransitionEvaluator interface {
