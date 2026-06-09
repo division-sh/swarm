@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"os"
@@ -307,7 +306,7 @@ func TestSQLiteDynamicFlowActivationRequiredAgentsUsePipelineTransaction(t *test
 	bundle := sqliteFlowActivationBundle()
 
 	req := sqliteFlowActivationRequest(bundle, "review", "inst-1", "parent-ent", "review/inst-1")
-	if err := workflowStore.RunInPipelineTransaction(ctx, func(txctx context.Context, _ *sql.Tx) error {
+	if err := workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
 		return manager.ActivateFlowInstance(txctx, req)
 	}); err != nil {
 		t.Fatalf("ActivateFlowInstance inside sqlite pipeline transaction: %v", err)
@@ -355,7 +354,7 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 			defer wg.Done()
 			<-start
 			req := sqliteFlowActivationRequest(bundle, "review", instanceID, "parent-ent", "review/"+instanceID)
-			errs <- workflowStore.RunInPipelineTransaction(ctx, func(txctx context.Context, _ *sql.Tx) error {
+			errs <- workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
 				return manager.ActivateFlowInstance(txctx, req)
 			})
 		}()

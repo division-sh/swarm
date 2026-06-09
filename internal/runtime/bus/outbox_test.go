@@ -13,6 +13,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/google/uuid"
 )
 
@@ -27,6 +28,11 @@ type directRecipientTransactionalStore struct {
 	events      []events.Event
 	deliveries  map[string][]string
 	routes      map[string][]events.DeliveryRoute
+}
+
+type directRecipientEventMutation struct {
+	ctx   context.Context
+	store *directRecipientTransactionalStore
 }
 
 func (s *recordingEventStore) AppendEvent(_ context.Context, evt events.Event) error {
@@ -80,6 +86,46 @@ func (s *directRecipientTransactionalStore) ListActiveAgentDescriptors(context.C
 
 func (*directRecipientTransactionalStore) BeginEventTx(context.Context) (*sql.Tx, error) {
 	return nil, nil
+}
+
+func (s *directRecipientTransactionalStore) EventMutationFromContext(ctx context.Context) (runtimebus.EventMutation, bool) {
+	if _, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); !ok {
+		return nil, false
+	}
+	mutation := &directRecipientEventMutation{store: s}
+	mutation.ctx = runtimebus.WithEventMutationContext(ctx, mutation)
+	return mutation, true
+}
+
+func (m *directRecipientEventMutation) Context() context.Context {
+	if m == nil || m.ctx == nil {
+		return context.Background()
+	}
+	return m.ctx
+}
+
+func (m *directRecipientEventMutation) AppendEvent(ctx context.Context, evt events.Event) error {
+	return m.store.AppendEventTx(ctx, nil, evt)
+}
+
+func (m *directRecipientEventMutation) InsertEventDeliveries(ctx context.Context, eventID string, agentIDs []string) error {
+	return m.store.InsertEventDeliveriesTx(ctx, nil, eventID, agentIDs)
+}
+
+func (m *directRecipientEventMutation) InsertEventDeliveriesWithTargets(ctx context.Context, eventID string, agentIDs []string, _ map[string]events.RouteIdentity) error {
+	return m.store.InsertEventDeliveriesTx(ctx, nil, eventID, agentIDs)
+}
+
+func (m *directRecipientEventMutation) InsertEventDeliveryRoutes(ctx context.Context, eventID string, routes []events.DeliveryRoute) error {
+	return m.store.InsertEventDeliveryRoutesTx(ctx, nil, eventID, routes)
+}
+
+func (*directRecipientEventMutation) UpsertCommittedReplayScope(context.Context, string, runtimereplayclaim.CommittedReplayScope) error {
+	return nil
+}
+
+func (m *directRecipientEventMutation) UpsertPipelineReceipt(ctx context.Context, eventID, status, errText string) error {
+	return m.store.UpsertPipelineReceiptTx(ctx, nil, eventID, status, errText)
 }
 
 func (s *directRecipientTransactionalStore) AppendEventTx(_ context.Context, _ *sql.Tx, evt events.Event) error {

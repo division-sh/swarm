@@ -127,13 +127,53 @@ type EventReplayScopePersistence interface {
 	UpsertCommittedReplayScope(ctx context.Context, eventID string, scope runtimereplayclaim.CommittedReplayScope) error
 }
 
+type eventMutationContextKey struct{}
+
+// EventMutation is the typed event-publish unit of work consumed by runtime
+// producers. Backend SQL transaction details stay below this semantic boundary.
+type EventMutation interface {
+	Context() context.Context
+	AppendEvent(ctx context.Context, evt events.Event) error
+	InsertEventDeliveries(ctx context.Context, eventID string, agentIDs []string) error
+	InsertEventDeliveriesWithTargets(ctx context.Context, eventID string, agentIDs []string, deliveryTargets map[string]events.RouteIdentity) error
+	InsertEventDeliveryRoutes(ctx context.Context, eventID string, deliveryRoutes []events.DeliveryRoute) error
+	UpsertCommittedReplayScope(ctx context.Context, eventID string, scope runtimereplayclaim.CommittedReplayScope) error
+	UpsertPipelineReceipt(ctx context.Context, eventID, status, errText string) error
+}
+
+type EventMutationRunner interface {
+	RunEventMutation(ctx context.Context, fn func(EventMutation) error) error
+}
+
+type EventMutationContextProvider interface {
+	EventMutationFromContext(ctx context.Context) (EventMutation, bool)
+}
+
+func WithEventMutationContext(ctx context.Context, mutation EventMutation) context.Context {
+	if mutation == nil {
+		return ctx
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, eventMutationContextKey{}, mutation)
+}
+
+func EventMutationFromContext(ctx context.Context) (EventMutation, bool) {
+	if ctx == nil {
+		return nil, false
+	}
+	mutation, ok := ctx.Value(eventMutationContextKey{}).(EventMutation)
+	return mutation, ok && mutation != nil
+}
+
 type TransactionalEventReplayScopePersistence interface {
 	UpsertCommittedReplayScopeTx(ctx context.Context, tx *sql.Tx, eventID string, scope runtimereplayclaim.CommittedReplayScope) error
 }
 
-// TransactionalEventStore is an optional capability for full publish-time
-// transactional semantics: interceptor state writes + event persistence +
-// deferred event persistence in one DB transaction.
+// TransactionalEventStore is the legacy raw-SQL transaction helper behind
+// split callers such as PublishTx and store implementations. Selected
+// event/pipeline mutation producers consume EventMutationRunner instead.
 type TransactionalEventStore interface {
 	BeginEventTx(ctx context.Context) (*sql.Tx, error)
 	AppendEventTx(ctx context.Context, tx *sql.Tx, evt events.Event) error

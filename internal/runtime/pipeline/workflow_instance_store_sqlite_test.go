@@ -131,33 +131,34 @@ func TestSQLiteWorkflowInstanceStore_MarkTerminatedUsesRuntimeMutationRunner(t *
 	}
 }
 
-func TestSQLiteWorkflowInstanceStore_RunInPipelineTransactionRequiresRuntimeMutationRunner(t *testing.T) {
+func TestSQLiteWorkflowInstanceStore_RunPipelineMutationRequiresRuntimeMutationRunner(t *testing.T) {
 	db := newSQLiteWorkflowInstanceStoreTestDB(t)
 	store := NewSQLiteWorkflowInstanceStore(db)
 	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
 	called := false
 
-	err := store.RunInPipelineTransaction(ctx, func(context.Context, *sql.Tx) error {
+	err := store.RunPipelineMutation(ctx, func(context.Context) error {
 		called = true
 		return nil
 	})
 	if !errors.Is(err, errSQLiteWorkflowInstanceStoreRuntimeMutationRunnerRequired) {
-		t.Fatalf("RunInPipelineTransaction error = %v, want runtime mutation runner required", err)
+		t.Fatalf("RunPipelineMutation error = %v, want runtime mutation runner required", err)
 	}
 	if called {
-		t.Fatal("RunInPipelineTransaction callback ran without runtime mutation runner")
+		t.Fatal("RunPipelineMutation callback ran without runtime mutation runner")
 	}
 }
 
-func TestSQLiteWorkflowInstanceStore_RunInPipelineTransactionUsesRuntimeMutationRunner(t *testing.T) {
+func TestSQLiteWorkflowInstanceStore_RunPipelineMutationUsesRuntimeMutationRunner(t *testing.T) {
 	db := newSQLiteWorkflowInstanceStoreTestDB(t)
 	runner := &recordingRuntimeMutationRunner{db: db}
 	store := NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, runner)
 	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
 	var postCommitActions int32
 
-	err := store.RunInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		if tx == nil {
+	err := store.RunPipelineMutation(ctx, func(txctx context.Context) error {
+		tx, ok := PipelineSQLTxFromContext(txctx)
+		if !ok || tx == nil {
 			return errors.New("pipeline transaction is required")
 		}
 		if !QueuePipelinePostCommitAction(txctx, func() {
@@ -172,7 +173,7 @@ func TestSQLiteWorkflowInstanceStore_RunInPipelineTransactionUsesRuntimeMutation
 		return err
 	})
 	if err != nil {
-		t.Fatalf("RunInPipelineTransaction with runtime mutation runner: %v", err)
+		t.Fatalf("RunPipelineMutation with runtime mutation runner: %v", err)
 	}
 	if got := atomic.LoadInt32(&runner.calls); got != 1 {
 		t.Fatalf("runtime mutation calls = %d, want 1", got)
@@ -182,7 +183,7 @@ func TestSQLiteWorkflowInstanceStore_RunInPipelineTransactionUsesRuntimeMutation
 	}
 }
 
-func TestSQLiteWorkflowInstanceStore_RunInPipelineTransactionDoesNotRetryActiveTransaction(t *testing.T) {
+func TestSQLiteWorkflowInstanceStore_RunPipelineMutationDoesNotRetryActiveTransaction(t *testing.T) {
 	db := newSQLiteWorkflowInstanceStoreTestDB(t)
 	store := NewSQLiteWorkflowInstanceStore(db)
 	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
@@ -194,34 +195,38 @@ func TestSQLiteWorkflowInstanceStore_RunInPipelineTransactionDoesNotRetryActiveT
 
 	busyErr := errors.New("SQLITE_BUSY: database is locked")
 	var attempts int32
-	err = store.RunInPipelineTransaction(WithPipelineSQLTxContext(ctx, tx), func(txctx context.Context, gotTx *sql.Tx) error {
+	err = store.RunPipelineMutation(WithPipelineSQLTxContext(ctx, tx), func(txctx context.Context) error {
 		atomic.AddInt32(&attempts, 1)
+		gotTx, ok := PipelineSQLTxFromContext(txctx)
+		if !ok {
+			t.Fatal("active transaction missing from pipeline mutation context")
+		}
 		if gotTx != tx {
 			t.Fatalf("transaction = %#v, want active transaction", gotTx)
 		}
 		return busyErr
 	})
 	if !errors.Is(err, busyErr) {
-		t.Fatalf("RunInPipelineTransaction error = %v, want sentinel busy error", err)
+		t.Fatalf("RunPipelineMutation error = %v, want sentinel busy error", err)
 	}
 	if got := atomic.LoadInt32(&attempts); got != 1 {
 		t.Fatalf("attempts = %d, want no retry inside active transaction", got)
 	}
 }
 
-func TestWorkflowInstanceStore_RunInPipelineTransactionDoesNotRetryPostgresDialect(t *testing.T) {
+func TestWorkflowInstanceStore_RunPipelineMutationDoesNotRetryPostgresDialect(t *testing.T) {
 	db := newSQLiteWorkflowInstanceStoreTestDB(t)
 	store := NewWorkflowInstanceStore(db)
 	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
 	busyErr := errors.New("SQLITE_BUSY: database is locked")
 	var attempts int32
 
-	err := store.RunInPipelineTransaction(ctx, func(context.Context, *sql.Tx) error {
+	err := store.RunPipelineMutation(ctx, func(context.Context) error {
 		atomic.AddInt32(&attempts, 1)
 		return busyErr
 	})
 	if !errors.Is(err, busyErr) {
-		t.Fatalf("RunInPipelineTransaction error = %v, want sentinel busy error", err)
+		t.Fatalf("RunPipelineMutation error = %v, want sentinel busy error", err)
 	}
 	if got := atomic.LoadInt32(&attempts); got != 1 {
 		t.Fatalf("attempts = %d, want no retry for postgres dialect", got)
@@ -234,7 +239,7 @@ type recordingRuntimeMutationRunner struct {
 	calls int32
 }
 
-func (r *recordingRuntimeMutationRunner) RunRuntimeMutation(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
+func (r *recordingRuntimeMutationRunner) RunRuntimeMutationContext(ctx context.Context, fn func(context.Context) error) error {
 	atomic.AddInt32(&r.calls, 1)
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -250,7 +255,7 @@ func (r *recordingRuntimeMutationRunner) RunRuntimeMutation(ctx context.Context,
 	}()
 	postCommit := make([]func(), 0, 4)
 	txctx := withPipelinePostCommitActions(WithPipelineSQLTxContext(ctx, tx), &postCommit)
-	if err := fn(txctx, tx); err != nil {
+	if err := fn(txctx); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {

@@ -101,7 +101,7 @@ type WorkflowInstanceStore struct {
 }
 
 type RuntimeMutationRunner interface {
-	RunRuntimeMutation(ctx context.Context, fn func(context.Context, *sql.Tx) error) error
+	RunRuntimeMutationContext(ctx context.Context, fn func(context.Context) error) error
 }
 
 type WorkflowInstanceFieldSelector struct {
@@ -341,7 +341,7 @@ func (s *WorkflowInstanceStore) MarkTerminated(ctx context.Context, storageRef s
 		return nil
 	}
 	if s.isSQLite() {
-		return s.RunInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		return s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 			return s.markTerminatedSQLiteTx(txctx, tx, storageRef, terminatedAt)
 		})
 	}
@@ -397,7 +397,16 @@ func (s *WorkflowInstanceStore) isSQLite() bool {
 	return s != nil && s.dialect == workflowStoreDialectSQLite
 }
 
-func (s *WorkflowInstanceStore) RunInPipelineTransaction(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
+func (s *WorkflowInstanceStore) RunPipelineMutation(ctx context.Context, fn func(context.Context) error) error {
+	if fn == nil {
+		return nil
+	}
+	return s.runInPipelineTransaction(ctx, func(txctx context.Context, _ *sql.Tx) error {
+		return fn(txctx)
+	})
+}
+
+func (s *WorkflowInstanceStore) runInPipelineTransaction(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
 	if fn == nil {
 		return nil
 	}
@@ -406,7 +415,13 @@ func (s *WorkflowInstanceStore) RunInPipelineTransaction(ctx context.Context, fn
 	}
 	if s.isSQLite() {
 		if s.runtimeMutation != nil {
-			return s.runtimeMutation.RunRuntimeMutation(ctx, fn)
+			return s.runtimeMutation.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
+				tx, ok := sqlTxFromContext(txctx)
+				if !ok || tx == nil {
+					return fmt.Errorf("sqlite runtime mutation did not provide pipeline transaction")
+				}
+				return fn(txctx, tx)
+			})
 		}
 		return errSQLiteWorkflowInstanceStoreRuntimeMutationRunnerRequired
 	}

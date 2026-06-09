@@ -268,8 +268,8 @@ func TestSelectedSQLiteRuntimeConstructionConsumesMutationBoundary(t *testing.T)
 	if err != nil {
 		t.Fatalf("read internal/runtime/bus/eventbus_publish.go: %v", err)
 	}
-	if !strings.Contains(string(publishData), ".RunEventTransaction(ctx,") {
-		t.Fatal("event publish must consume EventTransactionRunner.RunEventTransaction when available")
+	if !strings.Contains(string(publishData), ".RunEventMutation(ctx,") {
+		t.Fatal("event publish must consume EventMutationRunner.RunEventMutation when available")
 	}
 
 	pipelineData, err := os.ReadFile(filepath.Join(root, "internal", "runtime", "pipeline", "workflow_instance_store.go"))
@@ -376,13 +376,13 @@ func collectRuntimeWriterCallSitesFromSource(path, src string) ([]runtimeWriterC
 				return true
 			}
 			switch primitive {
-			case "RunRuntimeMutation":
+			case "RunRuntimeMutation", "RunRuntimeMutationContext":
 				info.callsRuntimeMutation = true
 			case "runRuntimeMutation":
 				info.callsRuntimeMutation = true
-			case "RunEventTransaction":
+			case "RunEventTransaction", "RunEventMutation":
 				info.callsEventTransaction = true
-			case "RunInPipelineTransaction":
+			case "RunPipelineMutation", "runInPipelineTransaction":
 				info.callsPipelineTransaction = true
 			case "PipelineSQLTxFromContext", "sqlTxFromContext":
 				info.usesPipelineTxFromContext = true
@@ -471,7 +471,7 @@ func runtimeWriterPrimitive(call *ast.CallExpr) (string, runtimeWriterPrimitiveK
 		return name, primitiveWrite, true
 	case "Query", "QueryContext", "QueryRow", "QueryRowContext", "Prepare", "PrepareContext":
 		return name, primitiveRead, true
-	case "RunInPipelineTransaction", "RunRuntimeMutation", "runRuntimeMutation", "RunEventTransaction", "PipelineSQLTxFromContext", "sqlTxFromContext":
+	case "RunPipelineMutation", "runInPipelineTransaction", "RunRuntimeMutation", "RunRuntimeMutationContext", "runRuntimeMutation", "RunEventTransaction", "RunEventMutation", "PipelineSQLTxFromContext", "sqlTxFromContext":
 		return name, primitiveBoundary, true
 	default:
 		return "", "", false
@@ -491,11 +491,11 @@ func collectRuntimeWriterBoundaryCallbackScopes(body ast.Node) []runtimeWriterBo
 		}
 		scope := runtimeWriterBoundaryCallbackScope{}
 		switch primitive {
-		case "RunRuntimeMutation", "runRuntimeMutation":
+		case "RunRuntimeMutation", "RunRuntimeMutationContext", "runRuntimeMutation":
 			scope.runtime = true
-		case "RunEventTransaction":
+		case "RunEventTransaction", "RunEventMutation":
 			scope.event = true
-		case "RunInPipelineTransaction":
+		case "RunPipelineMutation", "runInPipelineTransaction":
 			scope.pipeline = true
 		default:
 			return true
@@ -664,10 +664,10 @@ func classifyRuntimeWriterCallSites(sites []runtimeWriterCallSite) ([]runtimeWri
 func classifyRuntimeWriterCallSite(site runtimeWriterCallSite) (runtimeWriterClassification, string, bool) {
 	if site.Kind == primitiveBoundary {
 		switch site.Primitive {
-		case "RunRuntimeMutation", "runRuntimeMutation", "RunEventTransaction":
+		case "RunRuntimeMutation", "RunRuntimeMutationContext", "runRuntimeMutation", "RunEventTransaction", "RunEventMutation":
 			return classConsumesCanonical, "canonical runtime mutation/event transaction boundary", true
-		case "RunInPipelineTransaction":
-			return classConsumesCanonical, "pipeline transaction owner delegates production SQLite writes to RunRuntimeMutation", true
+		case "RunPipelineMutation", "runInPipelineTransaction":
+			return classConsumesCanonical, "pipeline mutation owner delegates production SQLite writes to RunRuntimeMutationContext", true
 		case "PipelineSQLTxFromContext", "sqlTxFromContext":
 			return classActiveTxHelper, "active transaction context probe; not a writer by itself", true
 		}
@@ -774,11 +774,11 @@ func workflowInstanceStoreSQLiteBypassCandidate(site runtimeWriterCallSite) bool
 
 func classifySQLiteRuntimeStoreCallSite(site runtimeWriterCallSite) (runtimeWriterClassification, string, bool) {
 	switch site.Function {
-	case "RunRuntimeMutation", "RunEventTransaction", "runRuntimeMutation", "runRuntimeMutationOnce", "runRuntimeMutationOnceLocked":
+	case "RunRuntimeMutation", "RunRuntimeMutationContext", "RunEventTransaction", "RunEventMutation", "runRuntimeMutation", "runRuntimeMutationOnce", "runRuntimeMutationOnceLocked":
 		return classConsumesCanonical, "canonical SQLite runtime mutation owner", true
 	case "BeginEventTx":
 		if site.Kind == primitiveBegin {
-			return classSplitLegacy, "legacy TransactionalEventStore fallback; production SQLite publish uses RunEventTransaction", true
+			return classSplitLegacy, "legacy TransactionalEventStore fallback; production SQLite publish uses RunEventMutation", true
 		}
 	}
 	if site.Kind == primitiveWrite || site.Kind == primitiveBegin {

@@ -175,7 +175,7 @@ func (s *WorkflowInstanceStore) createSQLite(ctx context.Context, instance Workf
 }
 
 func (s *WorkflowInstanceStore) mutateSQLite(ctx context.Context, instanceID string, fn func(*WorkflowInstance)) error {
-	return s.RunInPipelineTransaction(ctx, func(txctx context.Context, _ *sql.Tx) error {
+	return s.runInPipelineTransaction(ctx, func(txctx context.Context, _ *sql.Tx) error {
 		instance, ok, err := s.loadSQLite(txctx, instanceID)
 		if err != nil {
 			return err
@@ -219,7 +219,7 @@ func (s *WorkflowInstanceStore) writeSQLite(ctx context.Context, rowID, storageR
 	if err != nil {
 		return err
 	}
-	return s.RunInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	return s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		if createOnly {
 			exists, err := workflowInstanceSQLiteCreateTargetExists(txctx, tx, runID, rowID, storageRef)
 			if err != nil {
