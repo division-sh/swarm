@@ -171,12 +171,54 @@ func TestPublicSurfaceBackendMatrixRejectsStaleReferences(t *testing.T) {
 			want: "api_idempotency_selected_store missing #1402 proof_ref TestOperatorRunStartHandlersPersistRootEventAndReplayIdempotency",
 		},
 		{
+			name: "api idempotency row classification is pinned",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				row := publicSurfaceMatrixRowByID(t, matrix, "api_idempotency_selected_store")
+				row.Classification = "different_semantic_concept_with_proof"
+			},
+			want: "api_idempotency_selected_store classification = \"different_semantic_concept_with_proof\", want \"already_covered_by_existing_proof\"",
+		},
+		{
+			name: "api idempotency row keeps both selected backends",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				row := publicSurfaceMatrixRowByID(t, matrix, "api_idempotency_selected_store")
+				row.Backends = []string{"explicit_postgres"}
+			},
+			want: "api_idempotency_selected_store backends = [explicit_postgres], want [default_sqlite explicit_postgres]",
+		},
+		{
+			name: "api idempotency row keeps run.start method dimensions",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				row := publicSurfaceMatrixRowByID(t, matrix, "api_idempotency_selected_store")
+				row.APIMethods = []string{"event.publish"}
+				row.OpenRPCMatrixMethods = []string{"event.publish"}
+			},
+			want: "api_idempotency_selected_store api_methods = [event.publish], want [event.publish run.start]",
+		},
+		{
 			name: "runtime log readback row requires sqlite proof",
 			mutate: func(matrix *publicSurfaceBackendMatrix) {
 				row := publicSurfaceMatrixRowByID(t, matrix, "runtime_log_readback_api")
 				row.ProofRefs = publicSurfaceProofRefsExcept(row.ProofRefs, "TestSQLiteRuntimeLogPersistenceWritesLoggerRowsForObservability")
 			},
 			want: "runtime_log_readback_api missing #1402 proof_ref TestSQLiteRuntimeLogPersistenceWritesLoggerRowsForObservability",
+		},
+		{
+			name: "runtime log readback row keeps subscribe logs method",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				row := publicSurfaceMatrixRowByID(t, matrix, "runtime_log_readback_api")
+				row.APIMethods = publicSurfaceStringsExcept(row.APIMethods, "runtime.subscribe_logs")
+				row.OpenRPCMatrixMethods = publicSurfaceStringsExcept(row.OpenRPCMatrixMethods, "runtime.subscribe_logs")
+			},
+			want: "runtime_log_readback_api api_methods = [run.trace runtime.logs], want [run.trace runtime.logs runtime.subscribe_logs]",
+		},
+		{
+			name: "runtime log readback row keeps selected store dimension",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				row := publicSurfaceMatrixRowByID(t, matrix, "runtime_log_readback_api")
+				row.ProofDimensions = publicSurfaceStringsExcept(row.ProofDimensions, "selected_store")
+			},
+			want: "runtime_log_readback_api proof_dimensions = [canonical_store_owner openrpc_publication real_v1_handler], want [canonical_store_owner openrpc_publication real_v1_handler selected_store]",
 		},
 	}
 
@@ -359,8 +401,68 @@ func validatePublicSurfaceBackendMatrix(root string, matrix publicSurfaceBackend
 			}
 		}
 	}
+	problems = append(problems, validatePublicSurfaceExpectedRowShapes(rowsByID)...)
 	sort.Strings(problems)
 	return problems
+}
+
+type publicSurfaceExpectedRowShape struct {
+	Classification       string
+	Tier                 string
+	Backends             []string
+	APIMethods           []string
+	OpenRPCMatrixMethods []string
+	ProofDimensions      []string
+}
+
+func validatePublicSurfaceExpectedRowShapes(rowsByID map[string]publicSurfaceMatrixRow) []string {
+	var problems []string
+	for id, want := range expectedPublicSurfaceRowShapes() {
+		row, ok := rowsByID[id]
+		if !ok {
+			continue
+		}
+		if row.Classification != want.Classification {
+			problems = append(problems, fmt.Sprintf("%s classification = %q, want %q", id, row.Classification, want.Classification))
+		}
+		if row.Tier != want.Tier {
+			problems = append(problems, fmt.Sprintf("%s tier = %q, want %q", id, row.Tier, want.Tier))
+		}
+		if !publicSurfaceSameStringSet(row.Backends, want.Backends) {
+			problems = append(problems, fmt.Sprintf("%s backends = %v, want %v", id, publicSurfaceSortedStrings(row.Backends), publicSurfaceSortedStrings(want.Backends)))
+		}
+		if !publicSurfaceSameStringSet(row.APIMethods, want.APIMethods) {
+			problems = append(problems, fmt.Sprintf("%s api_methods = %v, want %v", id, publicSurfaceSortedStrings(row.APIMethods), publicSurfaceSortedStrings(want.APIMethods)))
+		}
+		if !publicSurfaceSameStringSet(row.OpenRPCMatrixMethods, want.OpenRPCMatrixMethods) {
+			problems = append(problems, fmt.Sprintf("%s openrpc_matrix_methods = %v, want %v", id, publicSurfaceSortedStrings(row.OpenRPCMatrixMethods), publicSurfaceSortedStrings(want.OpenRPCMatrixMethods)))
+		}
+		if !publicSurfaceSameStringSet(row.ProofDimensions, want.ProofDimensions) {
+			problems = append(problems, fmt.Sprintf("%s proof_dimensions = %v, want %v", id, publicSurfaceSortedStrings(row.ProofDimensions), publicSurfaceSortedStrings(want.ProofDimensions)))
+		}
+	}
+	return problems
+}
+
+func expectedPublicSurfaceRowShapes() map[string]publicSurfaceExpectedRowShape {
+	return map[string]publicSurfaceExpectedRowShape{
+		"api_idempotency_selected_store": {
+			Classification:       "already_covered_by_existing_proof",
+			Tier:                 "required_smoke",
+			Backends:             []string{"default_sqlite", "explicit_postgres"},
+			APIMethods:           []string{"event.publish", "run.start"},
+			OpenRPCMatrixMethods: []string{"event.publish", "run.start"},
+			ProofDimensions:      []string{"canonical_store_owner", "openrpc_publication", "real_v1_handler", "selected_store"},
+		},
+		"runtime_log_readback_api": {
+			Classification:       "already_covered_by_existing_proof",
+			Tier:                 "required_smoke",
+			Backends:             []string{"default_sqlite", "explicit_postgres"},
+			APIMethods:           []string{"runtime.logs", "runtime.subscribe_logs", "run.trace"},
+			OpenRPCMatrixMethods: []string{"runtime.logs", "runtime.subscribe_logs", "run.trace"},
+			ProofDimensions:      []string{"canonical_store_owner", "openrpc_publication", "real_v1_handler", "selected_store"},
+		},
+	}
 }
 
 func validatePublicSurfaceSources(root string, source publicSurfaceMatrixSource) []string {
@@ -689,6 +791,37 @@ func publicSurfaceProofRefsExcept(refs []publicSurfaceProofRef, name string) []p
 		}
 		out = append(out, ref)
 	}
+	return out
+}
+
+func publicSurfaceStringsExcept(values []string, remove string) []string {
+	out := values[:0]
+	for _, value := range values {
+		if value == remove {
+			continue
+		}
+		out = append(out, value)
+	}
+	return out
+}
+
+func publicSurfaceSameStringSet(actual, want []string) bool {
+	actualSorted := publicSurfaceSortedStrings(actual)
+	wantSorted := publicSurfaceSortedStrings(want)
+	if len(actualSorted) != len(wantSorted) {
+		return false
+	}
+	for i := range actualSorted {
+		if actualSorted[i] != wantSorted[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func publicSurfaceSortedStrings(values []string) []string {
+	out := append([]string(nil), values...)
+	sort.Strings(out)
 	return out
 }
 

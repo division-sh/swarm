@@ -90,6 +90,31 @@ func TestSelectedStoreAbstractionGuardMatrixRejectsStaleProofRefs(t *testing.T) 
 			want: "raw_selected_runtime_writer_boundary_guard guard row missing guard_proof_refs",
 		},
 		{
+			name: "guard row classification is pinned",
+			mutate: func(matrix *selectedStoreAbstractionGuardMatrix) {
+				row := selectedStoreAbstractionRowByID(t, matrix, "producer_backend_branching_guard")
+				row.Classification = "matrix_owner"
+			},
+			want: "producer_backend_branching_guard classification = \"matrix_owner\", want \"guard\"",
+		},
+		{
+			name: "split row classification is pinned",
+			mutate: func(matrix *selectedStoreAbstractionGuardMatrix) {
+				row := selectedStoreAbstractionRowByID(t, matrix, "sqlite_busy_serialization_behavior_split")
+				row.Classification = "guard"
+				row.Tier = "required_smoke"
+			},
+			want: "sqlite_busy_serialization_behavior_split classification = \"guard\", want \"split_to_existing_issue\"",
+		},
+		{
+			name: "split row issue set is pinned",
+			mutate: func(matrix *selectedStoreAbstractionGuardMatrix) {
+				row := selectedStoreAbstractionRowByID(t, matrix, "mutation_uow_behavior_split")
+				row.SplitIssues = nil
+			},
+			want: "mutation_uow_behavior_split split_issues = [], want [1403]",
+		},
+		{
 			name: "public idempotency row is required",
 			mutate: func(matrix *selectedStoreAbstractionGuardMatrix) {
 				matrix.Rows = selectedStoreAbstractionRowsExcept(matrix.Rows, "api_idempotency_public_surface_accounting")
@@ -189,6 +214,7 @@ func validateSelectedStoreAbstractionGuardMatrix(root string, matrix selectedSto
 			problems = append(problems, fmt.Sprintf("matrix missing required row %s", rowID))
 		}
 	}
+	problems = append(problems, validateSelectedStoreAbstractionRequiredRowShapes(rowsByID)...)
 	sort.Strings(problems)
 	return problems
 }
@@ -211,6 +237,93 @@ func validateSelectedStoreAbstractionPolicy(policy selectedStoreAbstractionGuard
 		problems = append(problems, fmt.Sprintf("policy named_full_conformance_command = %q, want cataloge2e go test command", policy.NamedFullConformanceCommand))
 	}
 	return problems
+}
+
+type selectedStoreAbstractionExpectedRowShape struct {
+	Classification         string
+	Tier                   string
+	SplitIssues            []int
+	RequiresGuardProofRefs bool
+}
+
+func validateSelectedStoreAbstractionRequiredRowShapes(rowsByID map[string]selectedStoreAbstractionGuardMatrixRow) []string {
+	var problems []string
+	for id, want := range expectedSelectedStoreAbstractionRowShapes() {
+		row, ok := rowsByID[id]
+		if !ok {
+			continue
+		}
+		if row.Classification != want.Classification {
+			problems = append(problems, fmt.Sprintf("%s classification = %q, want %q", id, row.Classification, want.Classification))
+		}
+		if row.Tier != want.Tier {
+			problems = append(problems, fmt.Sprintf("%s tier = %q, want %q", id, row.Tier, want.Tier))
+		}
+		if !selectedStoreAbstractionSameIntSet(row.SplitIssues, want.SplitIssues) {
+			problems = append(problems, fmt.Sprintf("%s split_issues = %v, want %v", id, selectedStoreAbstractionSortedInts(row.SplitIssues), selectedStoreAbstractionSortedInts(want.SplitIssues)))
+		}
+		if want.RequiresGuardProofRefs && len(row.GuardProofRefs) == 0 {
+			problems = append(problems, fmt.Sprintf("%s required row missing guard_proof_refs", id))
+		}
+	}
+	return problems
+}
+
+func expectedSelectedStoreAbstractionRowShapes() map[string]selectedStoreAbstractionExpectedRowShape {
+	return map[string]selectedStoreAbstractionExpectedRowShape{
+		"public_surface_backend_matrix_accounting": {
+			Classification:         "matrix_owner",
+			Tier:                   "required_smoke",
+			RequiresGuardProofRefs: true,
+		},
+		"producer_backend_branching_guard": {
+			Classification:         "guard",
+			Tier:                   "required_smoke",
+			RequiresGuardProofRefs: true,
+		},
+		"raw_selected_runtime_writer_boundary_guard": {
+			Classification:         "guard",
+			Tier:                   "required_smoke",
+			SplitIssues:            []int{1403, 1405},
+			RequiresGuardProofRefs: true,
+		},
+		"sqlite_runtime_sqldb_omission_guard": {
+			Classification:         "guard",
+			Tier:                   "required_smoke",
+			RequiresGuardProofRefs: true,
+		},
+		"postgres_not_forced_through_sqlite_serialization_guard": {
+			Classification:         "guard",
+			Tier:                   "required_smoke",
+			RequiresGuardProofRefs: true,
+		},
+		"default_sqlite_required_smoke": {
+			Classification: "required_smoke",
+			Tier:           "required_smoke",
+		},
+		"explicit_postgres_required_smoke": {
+			Classification: "required_smoke",
+			Tier:           "required_smoke",
+		},
+		"api_idempotency_public_surface_accounting": {
+			Classification: "public_surface_accounting",
+			Tier:           "required_smoke",
+		},
+		"runtime_log_readback_public_surface_accounting": {
+			Classification: "public_surface_accounting",
+			Tier:           "required_smoke",
+		},
+		"mutation_uow_behavior_split": {
+			Classification: "split_to_existing_issue",
+			Tier:           "split_open",
+			SplitIssues:    []int{1403},
+		},
+		"sqlite_busy_serialization_behavior_split": {
+			Classification: "split_to_existing_issue",
+			Tier:           "split_open",
+			SplitIssues:    []int{1405},
+		},
+	}
 }
 
 func validateSelectedStoreAbstractionRow(root string, row selectedStoreAbstractionGuardMatrixRow, ctx selectedStoreAbstractionValidationContext) []string {
@@ -416,6 +529,26 @@ func selectedStoreAbstractionStringSet(values []string) map[string]struct{} {
 	for _, value := range values {
 		out[value] = struct{}{}
 	}
+	return out
+}
+
+func selectedStoreAbstractionSameIntSet(actual, want []int) bool {
+	actualSorted := selectedStoreAbstractionSortedInts(actual)
+	wantSorted := selectedStoreAbstractionSortedInts(want)
+	if len(actualSorted) != len(wantSorted) {
+		return false
+	}
+	for i := range actualSorted {
+		if actualSorted[i] != wantSorted[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func selectedStoreAbstractionSortedInts(values []int) []int {
+	out := append([]int(nil), values...)
+	sort.Ints(out)
 	return out
 }
 
