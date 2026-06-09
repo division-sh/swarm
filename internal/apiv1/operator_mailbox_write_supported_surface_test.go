@@ -206,8 +206,8 @@ func newMailboxWriteSupportedSurfaceHandler(
 	}
 	module := newRunCompletionSystemNodeModule(t, source)
 	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
-	if _, ok := persistence.(*store.SQLiteRuntimeStore); ok {
-		workflowStore = runtimepipeline.NewSQLiteWorkflowInstanceStore(db)
+	if sqliteStore, ok := persistence.(*store.SQLiteRuntimeStore); ok {
+		workflowStore = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, sqliteStore)
 	}
 	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
 		Module:                  module,

@@ -2666,6 +2666,7 @@ engine:
         serialization or retry behavior.
       rules:
       - SQLite runtime mutation producers must not implement local SQLITE_BUSY retry loops or open independent write transactions when a selected runtime store boundary is available.
+      - SQLite workflow/pipeline mutation methods must consume the selected RuntimeMutationRunner and must fail closed instead of opening a local fallback transaction when that runner is absent.
       - SQLite driver busy_timeout must stay short; elapsed retry budget, cancellation, and backoff are owned by the selected mutation boundary rather than by long driver-level waits.
       - SQLite post-commit action flushing must happen after the selected mutation boundary releases its process-local write serialization lock, so post-commit callbacks can safely re-enter selected runtime mutation APIs.
       - SQLite API idempotency callback execution must stay outside the idempotency row write transaction; failed callbacks must not persist completion.
@@ -2702,7 +2703,9 @@ engine:
         persistence, background-node receipt settlement, pipeline receipt replay, process-local replay claims, and committed
         replay scope consumption. Production SQLite pipeline writes consume the backend_neutral_runtime_mutation_write_boundary
         instead of owning a separate local retry/serialization policy, so pipeline producers do not branch on backend write
-        contention. Postgres remains authoritative for production cross-runtime transaction and claim semantics.
+        contention. A SQLite WorkflowInstanceStore constructed without the selected RuntimeMutationRunner is not selected
+        runtime write authority and must fail closed for pipeline mutation entry points. Postgres remains authoritative for
+        production cross-runtime transaction and claim semantics.
       excludes:
       - tool executor entity and human-task persistence owned by runtime_tool_entity_and_human_task_rows
       - runtime diagnostics/logging owned by #1150

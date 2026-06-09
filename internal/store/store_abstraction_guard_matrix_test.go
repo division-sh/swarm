@@ -100,11 +100,11 @@ func TestSelectedStoreAbstractionGuardMatrixRejectsStaleProofRefs(t *testing.T) 
 		{
 			name: "split row classification is pinned",
 			mutate: func(matrix *selectedStoreAbstractionGuardMatrix) {
-				row := selectedStoreAbstractionRowByID(t, matrix, "sqlite_busy_serialization_behavior_split")
+				row := selectedStoreAbstractionRowByID(t, matrix, "mutation_uow_behavior_split")
 				row.Classification = "guard"
 				row.Tier = "required_smoke"
 			},
-			want: "sqlite_busy_serialization_behavior_split classification = \"guard\", want \"split_to_existing_issue\"",
+			want: "mutation_uow_behavior_split classification = \"guard\", want \"split_to_existing_issue\"",
 		},
 		{
 			name: "split row issue set is pinned",
@@ -284,7 +284,7 @@ func expectedSelectedStoreAbstractionRowShapes() map[string]selectedStoreAbstrac
 		"raw_selected_runtime_writer_boundary_guard": {
 			Classification:         "guard",
 			Tier:                   "required_smoke",
-			SplitIssues:            []int{1403, 1405},
+			SplitIssues:            []int{1403},
 			RequiresGuardProofRefs: true,
 		},
 		"sqlite_runtime_sqldb_omission_guard": {
@@ -318,10 +318,10 @@ func expectedSelectedStoreAbstractionRowShapes() map[string]selectedStoreAbstrac
 			Tier:           "split_open",
 			SplitIssues:    []int{1403},
 		},
-		"sqlite_busy_serialization_behavior_split": {
-			Classification: "split_to_existing_issue",
-			Tier:           "split_open",
-			SplitIssues:    []int{1405},
+		"sqlite_busy_serialization_behavior_guard": {
+			Classification:         "guard",
+			Tier:                   "required_smoke",
+			RequiresGuardProofRefs: true,
 		},
 	}
 }
@@ -495,7 +495,7 @@ func requiredSelectedStoreAbstractionRows() map[string]struct{} {
 		"api_idempotency_public_surface_accounting",
 		"runtime_log_readback_public_surface_accounting",
 		"mutation_uow_behavior_split",
-		"sqlite_busy_serialization_behavior_split",
+		"sqlite_busy_serialization_behavior_guard",
 	})
 }
 

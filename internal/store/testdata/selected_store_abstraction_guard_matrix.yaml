@@ -76,10 +76,11 @@ rows:
         name: TestRuntimeWriterBoundaryGuardRejectsPipelineSQLiteDBHelperBypassFixture
       - kind: go_test
         name: TestRuntimeWriterBoundaryGuardRejectsPipelineSQLiteRawDBHelperFixture
-    split_issues: [1403, 1405]
+    split_issues: [1403]
     notes: >
       This row guards the boundary. Behavior-changing mutation UoW migration
-      remains #1403 and SQLite busy/serialization policy remains #1405.
+      remains #1403; SQLite busy/serialization policy is guarded by the #1405
+      row in this matrix.
 
   - id: sqlite_runtime_sqldb_omission_guard
     classification: guard
@@ -233,18 +234,38 @@ rows:
       #1402 may guard/account for this seam, but production mutation behavior
       migration belongs to #1403.
 
-  - id: sqlite_busy_serialization_behavior_split
-    classification: split_to_existing_issue
-    tier: split_open
+  - id: sqlite_busy_serialization_behavior_guard
+    classification: guard
+    tier: required_smoke
     concepts:
       - SQLite write serialization and SQLITE_BUSY policy
     owners:
       - internal/store.SQLiteRuntimeStore mutation executor
-      - future #1405 store-internal busy policy owner
-    split_issues: [1405]
+      - internal/runtime/pipeline.WorkflowInstanceStore RuntimeMutationRunner requirement
+      - internal/store/runtime_mutation_guard_test.go
     proof_refs:
       - kind: artifact
         path: platform-spec.yaml
+      - kind: go_test
+        name: TestSQLiteRuntimeStore_RunRuntimeMutationRetriesBusyAndFlushesPostCommitOnce
+      - kind: go_test
+        name: TestSQLiteRuntimeStore_RunRuntimeMutationStopsRetryOnContextDeadline
+      - kind: go_test
+        name: TestSQLiteRuntimeStore_RunRuntimeMutationContextDeadlineCapsDriverBusyTimeout
+      - kind: go_test
+        name: TestSQLiteRuntimeStore_RunRuntimeMutationDoesNotRetryActiveTransaction
+      - kind: go_test
+        name: TestSQLiteWorkflowInstanceStore_RunInPipelineTransactionRequiresRuntimeMutationRunner
+      - kind: go_test
+        name: TestSQLiteWorkflowInstanceStore_RunInPipelineTransactionUsesRuntimeMutationRunner
+      - kind: go_test
+        name: TestPostgresStore_RunEventTransactionDoesNotSerializeCallbacks
+    guard_proof_refs:
+      - kind: go_test
+        name: TestSelectedSQLiteRuntimeConstructionConsumesMutationBoundary
+      - kind: go_test
+        name: TestSQLiteWorkflowInstanceStore_RunInPipelineTransactionRequiresRuntimeMutationRunner
     notes: >
-      #1402 may prove producers do not own SQLite busy policy. Moving the policy
-      fully below the store boundary remains #1405.
+      SQLite busy/retry policy belongs below the store boundary. Pipeline writes
+      require an injected RuntimeMutationRunner and must not own a fallback
+      SQLite retry classifier or queue.
