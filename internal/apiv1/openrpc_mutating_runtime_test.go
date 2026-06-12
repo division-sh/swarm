@@ -3,7 +3,6 @@ package apiv1
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -1060,7 +1059,7 @@ func (p *mutatingProbeEventPublisher) WithBundleFingerprint(ctx context.Context)
 	return runtimecorrelation.WithBundleSourceFact(ctx, runStartTestBundleSourceFact())
 }
 
-func (p *mutatingProbeEventPublisher) PublishTx(ctx context.Context, _ *sql.Tx, evt events.Event) error {
+func (p *mutatingProbeEventPublisher) PublishInMutation(ctx context.Context, evt events.Event) error {
 	return p.Publish(ctx, evt)
 }
 
@@ -1293,7 +1292,7 @@ func (s *mutatingProbeMailboxStore) DecideV1MailboxItem(ctx context.Context, dec
 			MailboxDecisionID: "decision-" + strings.TrimSpace(decision.Action),
 			Status:            status,
 		}
-		if decision.Action == "approved" && strings.TrimSpace(decision.ApprovalEventType) != "" && decision.ApprovalEventTx != nil {
+		if decision.Action == "approved" && strings.TrimSpace(decision.ApprovalEventType) != "" && decision.ApprovalEventPublish != nil {
 			eventID := "mailbox-event-1"
 			result.DownstreamEventID = eventID
 			result.DownstreamEventName = strings.TrimSpace(decision.ApprovalEventType)
@@ -1303,7 +1302,7 @@ func (s *mutatingProbeMailboxStore) DecideV1MailboxItem(ctx context.Context, dec
 			}
 			result.DownstreamSubscribers = &subscribers
 			result.DownstreamSubscriberSource = strings.TrimSpace(decision.ApprovalEventSubscriberSource)
-			if err := decision.ApprovalEventTx(ctx, nil, events.NewProjectionEvent(eventID,
+			if err := decision.ApprovalEventPublish(ctx, events.NewProjectionEvent(eventID,
 				events.EventType(decision.ApprovalEventType),
 				"mailbox", "", json.RawMessage(`{"mailbox_id":"mailbox-1"}`), 0, "", "", events.EventEnvelope{}, decision.Now),
 			); err != nil {
@@ -1494,7 +1493,7 @@ func sortedMutatingProbeFixtureMethods(fixtures map[string]mutatingHTTPRuntimeFi
 
 var _ APIIdempotencyStore = (*mutatingProbeIdempotencyStore)(nil)
 var _ EventPublisher = (*mutatingProbeEventPublisher)(nil)
-var _ TransactionalEventPublisher = (*mutatingProbeEventPublisher)(nil)
+var _ EventMutationPublisher = (*mutatingProbeEventPublisher)(nil)
 var _ eventReplayPublisher = (*mutatingProbeEventPublisher)(nil)
 var _ RunControlController = (*mutatingProbeRunControl)(nil)
 var _ AgentControlController = (*mutatingProbeAgentControl)(nil)

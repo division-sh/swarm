@@ -650,7 +650,7 @@ contract_formats:
           split_owner: '#1345 owns the public/operator readback projection for delivery_id, subscriber_type, and subscriber_id; route-target public exposure remains split.'
         split_children:
           runtime_model: '#1343 owns the canonical internal EventBus RoutePlan model.'
-          publish_consumers: '#1344 owns Publish, PublishTx, deferred/outbox publish, and CheckPublishRecipientPlan consumption of one RoutePlan authority.'
+          publish_consumers: '#1344 owns Publish, PublishInMutation, deferred/outbox publish, and CheckPublishRecipientPlan consumption of one RoutePlan authority.'
           readback: '#1345 owns API/CLI/OpenRPC/readback consumption and any public subscriber_type exposure.'
           conformance: '#1346 owns the route-authority proof matrix.'
           execution_admission: '#1293 owns workflow-node execution admission against committed delivery authority.'
@@ -2603,16 +2603,21 @@ engine:
         - selected DB ping
         rule: These raw database consumers are adjacent process/workspace capabilities, not selected runtime persistence authority. They must stay named and must not be reused as runtime store fallbacks.
       - name: selected_runtime_mutation_unit_of_work
-        owner: backend_neutral_runtime_mutation_write_boundary plus typed producer-visible unit-of-work entrypoints under '#1414'
+        owner: backend_neutral_runtime_mutation_write_boundary plus typed selected-runtime row-family unit-of-work entrypoints under '#1403'
+        promoted_by: '#1403'
         promoted_first_slice_by: '#1414'
         typed_entrypoint_owners:
-        - runtimebus.EventMutationRunner and runtimebus.EventMutation for selected event publish/outbox atomic mutation groups
+        - runtimebus.EventMutationRunner and runtimebus.EventMutation for selected event publish, PublishInMutation, mailbox approval publish, and outbox atomic mutation groups
         - runtimepipeline.Store.RunPipelineMutation for selected workflow pipeline mutation groups
+        - internal/store.SQLiteRuntimeStore.RunRuntimeMutation for selected SQLite runtime row-family mutations
+        - internal/store.PostgresStore normal transaction methods for selected Postgres runtime row-family mutations
         rule: >
-          Mutation writers must consume a semantic mutation owner. Event publish/outbox and workflow pipeline producers
-          must not construct raw `func(context.Context, *sql.Tx) error` callbacks as their selected-runtime mutation
-          authority. Backend-specific SQL transaction mechanics may remain inside store implementations. SQLite
-          serialization/retry policy is owned below the store boundary and remains split to #1405.
+          Mutation writers must consume a semantic mutation owner. Event publish/outbox, mailbox approval publication,
+          workflow pipeline producers, and selected runtime row-family producers must not construct raw
+          `func(context.Context, *sql.Tx) error` callbacks, pass raw `*sql.Tx`, or branch on SQLite/Postgres transaction
+          mechanics as their selected-runtime mutation authority. Backend-specific SQL transaction mechanics may remain
+          inside store implementations and backend-local `*Tx` helpers. SQLite serialization/retry policy is owned below
+          the store boundary and remains guarded by #1405.
       raw_sql_policy:
         allowed:
         - boundary: backend selection, store construction, schema/bootstrap, and backend-specific store implementations
@@ -2644,8 +2649,8 @@ engine:
         classification: producer-facing raw/concrete escapes to classify and migrate under #1401/#1402 unless independently gated
       - dependency: selected-contract run.fork PostgresStore internals
         classification: optional product capability with current concrete escape; migrate under #1401/#1403 or a run-fork child
-      - dependency: RunRuntimeMutation, RunEventTransaction, RunInPipelineTransaction, and direct transaction helpers
-        classification: mutation/unit-of-work sibling class under #1403/#1405
+      - dependency: RunRuntimeMutation, RunEventMutation, RunPipelineMutation, and backend-local direct transaction helpers
+        classification: mutation/unit-of-work owner class under #1403/#1405; producers consume the typed entrypoints while raw helpers stay below store implementations
       - dependency: route planning, event admission/defaulting, delivery authority, startup readiness
         classification: different semantic concepts; explicitly split unless a later gate widens
       rules:
@@ -2856,7 +2861,7 @@ engine:
         SQLite startup ownership prevents competing runtimes inside the local process boundary. It is not a production
         multi-writer lock substitute.
     - name: event_delivery_receipt_and_replay_rows
-      owner: runtimebus.EventStore, runtimebus.TransactionalEventStore, runtimemanager.ManagerPersistence, and runtimereplayclaim committed replay contracts
+      owner: runtimebus.EventStore, runtimebus.EventMutationRunner/EventMutation, backend store implementations, runtimemanager.ManagerPersistence, and runtimereplayclaim committed replay contracts
       sqlite_owner: internal/store.SQLiteRuntimeStore delivery, receipt, pipeline receipt, committed replay scope, and replay-claim methods
       postgres_owner: internal/store.PostgresStore delivery, receipt, pipeline receipt, committed replay scope, and replay-claim methods
       scope: >

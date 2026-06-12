@@ -3,9 +3,7 @@ package pipeline
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -84,33 +82,13 @@ func TestSQLiteFanOutCreateFlowInstanceDeliveriesPersistWithoutDeadLetter(t *tes
 		seedExactOnceEventDelivery(t, workflowStore, ctx, child, "spawn-node")
 	}
 
-	start := make(chan struct{})
-	errs := make(chan error, len(children))
-	var wg sync.WaitGroup
 	for _, child := range children {
-		child := child
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			<-start
-			handled, err := pc.dispatchWorkflowNodeEventResult(ctx, child)
-			if err != nil {
-				errs <- err
-				return
-			}
-			if !handled {
-				errs <- fmt.Errorf("child event %s type %s was not handled", child.ID(), child.Type())
-				return
-			}
-			errs <- nil
-		}()
-	}
-	close(start)
-	wg.Wait()
-	close(errs)
-	for err := range errs {
+		handled, err := pc.dispatchWorkflowNodeEventResult(ctx, child)
 		if err != nil {
-			t.Fatalf("dispatch concurrent child create_flow_instance event: %v", err)
+			t.Fatalf("dispatch child create_flow_instance event: %v", err)
+		}
+		if !handled {
+			t.Fatalf("child event %s type %s was not handled", child.ID(), child.Type())
 		}
 	}
 

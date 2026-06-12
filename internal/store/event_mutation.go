@@ -7,9 +7,14 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 )
+
+type eventMutationDeadLetterTxRecorder interface {
+	RecordDeadLetterTx(context.Context, *sql.Tx, runtimedeadletters.Record) error
+}
 
 type sqlEventMutation struct {
 	ctx     context.Context
@@ -92,6 +97,17 @@ func (m *sqlEventMutation) UpsertPipelineReceipt(ctx context.Context, eventID, s
 		return fmt.Errorf("event mutation store is required")
 	}
 	return m.txStore.UpsertPipelineReceiptTx(m.operationContext(ctx), m.tx, eventID, status, errText)
+}
+
+func (m *sqlEventMutation) RecordDeadLetter(ctx context.Context, rec runtimedeadletters.Record) error {
+	if m == nil {
+		return nil
+	}
+	recorder, ok := m.store.(eventMutationDeadLetterTxRecorder)
+	if !ok || recorder == nil {
+		return nil
+	}
+	return recorder.RecordDeadLetterTx(m.operationContext(ctx), m.tx, rec)
 }
 
 func (s *SQLiteRuntimeStore) RunEventMutation(ctx context.Context, fn func(runtimebus.EventMutation) error) error {

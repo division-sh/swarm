@@ -358,7 +358,7 @@ func TestEventBusPublish_NodeOnlyRouteDoesNotRequireAgentChannel(t *testing.T) {
 	}
 }
 
-func TestEventBusPublishTxDispatch_NodeOnlyRouteDoesNotRequireAgentChannel(t *testing.T) {
+func TestEventBusCommittedPublishDispatch_NodeOnlyRouteDoesNotRequireAgentChannel(t *testing.T) {
 	store := newTargetRouteMemoryStore()
 	eb, err := NewEventBus(store)
 	if err != nil {
@@ -367,7 +367,7 @@ func TestEventBusPublishTxDispatch_NodeOnlyRouteDoesNotRequireAgentChannel(t *te
 	evt := events.NewProjectionEvent(uuid.NewString(),
 		events.EventType("custom.node_only_tx"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
-	eb.completePublishTxDispatch(context.Background(), evt, nodeOnlyDeliveryPlan(evt, "workflow-node"))
+	eb.completeCommittedPublishDispatch(context.Background(), evt, nodeOnlyDeliveryPlan(evt, "workflow-node"))
 
 	if got := store.receipts[evt.ID()]; got != "processed" {
 		t.Fatalf("pipeline receipt = %q err=%q, want processed", got, store.receiptErrs[evt.ID()])

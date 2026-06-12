@@ -60,7 +60,7 @@ rows:
       persisted event_deliveries, not reconstruct recipient authority locally.
 
   - id: publish_preflight_deferred_outbox_consumers
-    concept: Publish, PublishTx, preflight, deferred publish, and outbox paths consume one RoutePlan authority.
+    concept: Publish, PublishInMutation, preflight, deferred publish, and outbox paths consume one RoutePlan authority.
     classification: already_covered_by_existing_proof
     tier: required_pr_smoke
     proof_dimensions: [route_plan_model, persistence_authority, required_pr_smoke]
@@ -71,7 +71,7 @@ rows:
     proof_refs:
       - {kind: pr, pr: 1349}
       - {kind: go_test, name: TestEventBusCheckPublishRecipientPlanReportsSubscribedPublishWithoutDelivery}
-      - {kind: go_test, name: TestEventBusPublishTxDispatch_NodeOnlyRouteDoesNotRequireAgentChannel}
+      - {kind: go_test, name: TestEventBusCommittedPublishDispatch_NodeOnlyRouteDoesNotRequireAgentChannel}
       - {kind: go_test, name: TestEngineOutboxSubscribedIntentConsumesCanonicalMaterializedRoutePlan}
     notes: >
       Closed #1344 owns these publish-side consumer rows. They are required

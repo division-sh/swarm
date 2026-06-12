@@ -457,7 +457,7 @@ func TestOperatorMailboxApprovePublishFailureLeavesItemRetryable(t *testing.T) {
 			Ready:    func() bool { return true },
 			Database: fakePinger{},
 			Mailbox:  pg,
-			Events:   failingTxPublisher{},
+			Events:   failingMutationPublisher{},
 			MailboxApprovalRoutes: map[string]string{
 				"review_request": "mailbox.item_decided",
 			},
@@ -965,13 +965,13 @@ func assertMailboxItemDecidedPayloadShape(t *testing.T, payload map[string]any, 
 	}
 }
 
-type failingTxPublisher struct{}
+type failingMutationPublisher struct{}
 
-func (failingTxPublisher) Publish(context.Context, events.Event) error {
+func (failingMutationPublisher) Publish(context.Context, events.Event) error {
 	return nil
 }
 
-func (failingTxPublisher) PublishTx(context.Context, *sql.Tx, events.Event) error {
+func (failingMutationPublisher) PublishInMutation(context.Context, events.Event) error {
 	return errors.New("publish failed")
 }
 
