@@ -98,21 +98,22 @@ func TestSelectedStoreAbstractionGuardMatrixRejectsStaleProofRefs(t *testing.T) 
 			want: "producer_backend_branching_guard classification = \"matrix_owner\", want \"guard\"",
 		},
 		{
-			name: "split row classification is pinned",
+			name: "typed uow guard classification is pinned closed",
 			mutate: func(matrix *selectedStoreAbstractionGuardMatrix) {
-				row := selectedStoreAbstractionRowByID(t, matrix, "mutation_uow_behavior_split")
-				row.Classification = "guard"
-				row.Tier = "required_smoke"
+				row := selectedStoreAbstractionRowByID(t, matrix, "typed_runtime_mutation_uow_guard")
+				row.Classification = "split_to_existing_issue"
+				row.Tier = "split_open"
+				row.SplitIssues = []int{1403}
 			},
-			want: "mutation_uow_behavior_split classification = \"guard\", want \"split_to_existing_issue\"",
+			want: "typed_runtime_mutation_uow_guard classification = \"split_to_existing_issue\", want \"guard\"",
 		},
 		{
-			name: "split row issue set is pinned",
+			name: "typed uow guard split issue set is pinned closed",
 			mutate: func(matrix *selectedStoreAbstractionGuardMatrix) {
-				row := selectedStoreAbstractionRowByID(t, matrix, "mutation_uow_behavior_split")
-				row.SplitIssues = nil
+				row := selectedStoreAbstractionRowByID(t, matrix, "typed_runtime_mutation_uow_guard")
+				row.SplitIssues = []int{1403}
 			},
-			want: "mutation_uow_behavior_split split_issues = [], want [1403]",
+			want: "typed_runtime_mutation_uow_guard split_issues = [1403], want []",
 		},
 		{
 			name: "public idempotency row is required",
@@ -284,7 +285,6 @@ func expectedSelectedStoreAbstractionRowShapes() map[string]selectedStoreAbstrac
 		"raw_selected_runtime_writer_boundary_guard": {
 			Classification:         "guard",
 			Tier:                   "required_smoke",
-			SplitIssues:            []int{1403},
 			RequiresGuardProofRefs: true,
 		},
 		"sqlite_runtime_sqldb_omission_guard": {
@@ -313,10 +313,10 @@ func expectedSelectedStoreAbstractionRowShapes() map[string]selectedStoreAbstrac
 			Classification: "public_surface_accounting",
 			Tier:           "required_smoke",
 		},
-		"mutation_uow_behavior_split": {
-			Classification: "split_to_existing_issue",
-			Tier:           "split_open",
-			SplitIssues:    []int{1403},
+		"typed_runtime_mutation_uow_guard": {
+			Classification:         "guard",
+			Tier:                   "required_smoke",
+			RequiresGuardProofRefs: true,
 		},
 		"sqlite_busy_serialization_behavior_guard": {
 			Classification:         "guard",
@@ -494,7 +494,7 @@ func requiredSelectedStoreAbstractionRows() map[string]struct{} {
 		"explicit_postgres_required_smoke",
 		"api_idempotency_public_surface_accounting",
 		"runtime_log_readback_public_surface_accounting",
-		"mutation_uow_behavior_split",
+		"typed_runtime_mutation_uow_guard",
 		"sqlite_busy_serialization_behavior_guard",
 	})
 }

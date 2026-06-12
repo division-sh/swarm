@@ -2,7 +2,6 @@ package bus
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,10 +24,6 @@ type pipelineTransitionSchemaCapabilityProvider interface {
 
 type targetFailureDeadLetterRecorder interface {
 	RecordDeadLetter(context.Context, runtimedeadletters.Record) error
-}
-
-type targetFailureDeadLetterTxRecorder interface {
-	RecordDeadLetterTx(context.Context, *sql.Tx, runtimedeadletters.Record) error
 }
 
 func shouldPersistPipelineReceipt(persisted bool, publishErr error) bool {
@@ -326,18 +321,16 @@ func (eb *EventBus) PublishAcknowledged(ctx context.Context, evt events.Event) e
 	return nil
 }
 
-// PublishTx persists the canonical event record and recipient manifest in a
-// caller-owned transaction. This is a split legacy/public API hook; selected
-// event/pipeline producers use EventMutationRunner and EventMutation instead.
-func (eb *EventBus) PublishTx(ctx context.Context, tx *sql.Tx, evt events.Event) error {
+// PublishInMutation persists the canonical event record and recipient manifest
+// through the active typed event mutation. Callers supply only the context that
+// carries the mutation; backend SQL transaction details stay below the store
+// boundary.
+func (eb *EventBus) PublishInMutation(ctx context.Context, evt events.Event) error {
 	ctx = WithCurrentRuntimeEpoch(ctx)
 	if err := ensurePublishEpoch(ctx); err != nil {
 		return err
 	}
 	ctx = eb.withBundleFingerprint(ctx)
-	if tx == nil {
-		return errors.New("publish tx is required")
-	}
 	if evt.Type() == "" {
 		return errors.New("event type is required")
 	}
@@ -353,12 +346,14 @@ func (eb *EventBus) PublishTx(ctx context.Context, tx *sql.Tx, evt events.Event)
 	if err != nil {
 		return err
 	}
-	txStore, ok := eb.store.(TransactionalEventStore)
-	if !ok || txStore == nil {
-		return errors.New("transactional event store is required")
+	mutation, ok := eb.eventMutationFromContext(ictx)
+	if !ok || mutation == nil {
+		return errors.New("typed event mutation context is required")
 	}
-	txctx := runtimepipeline.WithPipelineSQLTxContext(ictx, tx)
-	if err := txStore.AppendEventTx(txctx, tx, evt); err != nil {
+	txctx := WithEventMutationContext(ictx, mutation)
+	receiptOverride := &runtimepipeline.PipelineReceiptOverride{}
+	txctx = runtimepipeline.WithPipelineReceiptOverride(txctx, receiptOverride)
+	if err := mutation.AppendEvent(txctx, evt); err != nil {
 		return fmt.Errorf("persist event: %w", err)
 	}
 	inboundPlan, err := eb.planSubscribedRoutePlan(txctx, evt, true)
@@ -366,7 +361,7 @@ func (eb *EventBus) PublishTx(ctx context.Context, tx *sql.Tx, evt events.Event)
 		return err
 	}
 	if inboundPlan.HasPersistentDeliveries() {
-		if err := eb.insertEventDeliveriesTx(txctx, txStore, tx, evt.ID(), inboundPlan.PersistedRecipientIDs(), inboundPlan.DeliveryTargets(), inboundPlan.DeliveryRoutes()); err != nil {
+		if err := eb.insertEventDeliveriesMutation(txctx, mutation, evt.ID(), inboundPlan.PersistedRecipientIDs(), inboundPlan.DeliveryTargets(), inboundPlan.DeliveryRoutes()); err != nil {
 			return fmt.Errorf("persist event deliveries: %w", err)
 		}
 	}
@@ -375,18 +370,16 @@ func (eb *EventBus) PublishTx(ctx context.Context, tx *sql.Tx, evt events.Event)
 			eb.notifyTestPublishPersisted(context.WithoutCancel(txctx), evt, inboundPlan)
 		})
 	}
-	if scopeWriter, ok := eb.store.(TransactionalEventReplayScopePersistence); ok && scopeWriter != nil {
-		if err := scopeWriter.UpsertCommittedReplayScopeTx(txctx, tx, evt.ID(), runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
-			return fmt.Errorf("persist committed replay scope: %w", err)
-		}
-	} else if replayScopePersistenceRequired(eb.store) {
-		return fmt.Errorf("persist committed replay scope: %w", runtimereplayclaim.ErrMissingCommittedReplayScope)
+	if err := eb.upsertCommittedReplayScopeMutation(txctx, mutation, evt.ID(), runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
+		return err
 	}
 	if inboundPlan.TargetFailure != "" {
-		if err := txStore.UpsertPipelineReceiptTx(txctx, tx, evt.ID(), "dead_letter", targetDeliveryFailureMessage(inboundPlan.TargetFailure)); err != nil {
+		applyTargetDeliveryFailureReceipt(receiptOverride, inboundPlan.TargetFailure)
+		status, errText := pipelineReceiptStatus(txctx, nil)
+		if err := mutation.UpsertPipelineReceipt(txctx, evt.ID(), status, errText); err != nil {
 			return fmt.Errorf("persist pipeline receipt: %w", err)
 		}
-		eb.recordTargetDeliveryFailureTx(txctx, tx, evt, inboundPlan)
+		eb.recordTargetDeliveryFailureMutation(txctx, mutation, evt, inboundPlan)
 		return nil
 	}
 	if reason, err := eb.dispatchQueueReason(txctx, evt); err != nil {
@@ -396,9 +389,9 @@ func (eb *EventBus) PublishTx(ctx context.Context, tx *sql.Tx, evt events.Event)
 		return nil
 	}
 	if !runtimepipeline.QueuePipelinePostCommitAction(txctx, func() {
-		eb.completePublishTxDispatch(runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(txctx)), evt, inboundPlan)
+		eb.completeCommittedPublishDispatch(runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(txctx)), evt, inboundPlan)
 	}) {
-		return errors.New("transactional publish post-commit actions are required")
+		return errors.New("event mutation post-commit actions are required")
 	}
 	return nil
 }
@@ -411,11 +404,11 @@ func (eb *EventBus) dispatchCommittedPublishAsync(ctx context.Context, evt event
 	eb.inFlightPublishes.Add(1)
 	go func() {
 		defer eb.inFlightPublishes.Add(-1)
-		eb.completePublishTxDispatch(dispatchCtx, evt, inboundPlan)
+		eb.completeCommittedPublishDispatch(dispatchCtx, evt, inboundPlan)
 	}()
 }
 
-func (eb *EventBus) completePublishTxDispatch(ctx context.Context, evt events.Event, inboundPlan RoutePlan) {
+func (eb *EventBus) completeCommittedPublishDispatch(ctx context.Context, evt events.Event, inboundPlan RoutePlan) {
 	eb.notifyTestPostCommitDispatchStarted(ctx, evt)
 	defer eb.notifyTestPostCommitDispatchCompleted(ctx, evt)
 
@@ -559,6 +552,7 @@ func (eb *EventBus) publishTransactional(
 			if err := mutation.UpsertPipelineReceipt(txctx, evt.ID(), status, errText); err != nil {
 				return fmt.Errorf("persist pipeline receipt: %w", err)
 			}
+			eb.recordTargetDeliveryFailureMutation(txctx, mutation, evt, inboundPlan)
 			targetFailure = true
 			return nil
 		}
@@ -575,7 +569,6 @@ func (eb *EventBus) publishTransactional(
 	}
 	eb.notifyTestPublishPersisted(ctx, evt, inboundPlan)
 	if targetFailure {
-		eb.recordTargetDeliveryFailure(ctx, evt, inboundPlan)
 		eb.logPublished(ctx, evt, int(time.Since(start)/time.Microsecond))
 		return nil
 	}
@@ -670,6 +663,7 @@ func (eb *EventBus) publishAcknowledgedTransactional(
 			if err := mutation.UpsertPipelineReceipt(txctx, evt.ID(), status, errText); err != nil {
 				return fmt.Errorf("persist pipeline receipt: %w", err)
 			}
+			eb.recordTargetDeliveryFailureMutation(txctx, mutation, evt, inboundPlan)
 			targetFailure = true
 			return nil
 		}
@@ -686,7 +680,6 @@ func (eb *EventBus) publishAcknowledgedTransactional(
 	}
 	eb.notifyTestPublishPersisted(ctx, evt, inboundPlan)
 	if targetFailure {
-		eb.recordTargetDeliveryFailure(ctx, evt, inboundPlan)
 		eb.logPublished(ctx, evt, int(time.Since(start)/time.Microsecond))
 		eb.recordCommittedPublishConvergence(ctx, evt)
 		return nil
@@ -713,17 +706,6 @@ func (eb *EventBus) recordCommittedPublishConvergence(ctx context.Context, evt e
 			"error": err.Error(),
 		}, err.Error(), 0)
 	}
-}
-
-func txTableExists(ctx context.Context, tx *sql.Tx, table string) bool {
-	if tx == nil || strings.TrimSpace(table) == "" {
-		return false
-	}
-	var ok bool
-	if err := tx.QueryRowContext(ctx, `SELECT to_regclass($1) IS NOT NULL`, "public."+strings.TrimSpace(table)).Scan(&ok); err != nil {
-		return false
-	}
-	return ok
 }
 
 func (eb *EventBus) runInterceptors(ctx context.Context, evt events.Event) (bool, []events.Event, error) {
@@ -1124,28 +1106,6 @@ func (eb *EventBus) insertEventDeliveries(ctx context.Context, eventID string, r
 		return store.InsertEventDeliveriesWithTargets(ctx, eventID, recipients, deliveryTargets)
 	}
 	return eb.store.InsertEventDeliveries(ctx, eventID, recipients)
-}
-
-func (eb *EventBus) insertEventDeliveriesTx(
-	ctx context.Context,
-	txStore TransactionalEventStore,
-	tx *sql.Tx,
-	eventID string,
-	recipients []string,
-	deliveryTargets map[string]events.RouteIdentity,
-	deliveryRoutes []events.DeliveryRoute,
-) error {
-	deliveryRoutes = events.NormalizeDeliveryRoutes(deliveryRoutes)
-	if store, ok := txStore.(TransactionalEventDeliveryRouteSetPersistence); ok && store != nil && len(deliveryRoutes) > 0 {
-		return store.InsertEventDeliveryRoutesTx(ctx, tx, eventID, deliveryRoutes)
-	}
-	if deliveryRouteSetPersistenceRequired(deliveryRoutes) {
-		return errMissingEventDeliveryRouteSetPersistence
-	}
-	if store, ok := txStore.(TransactionalEventDeliveryRoutePersistence); ok && store != nil {
-		return store.InsertEventDeliveriesWithTargetsTx(ctx, tx, eventID, recipients, deliveryTargets)
-	}
-	return txStore.InsertEventDeliveriesTx(ctx, tx, eventID, recipients)
 }
 
 func (eb *EventBus) insertEventDeliveriesMutation(
@@ -1654,19 +1614,15 @@ func (eb *EventBus) recordTargetDeliveryFailure(ctx context.Context, evt events.
 	}
 }
 
-func (eb *EventBus) recordTargetDeliveryFailureTx(ctx context.Context, tx *sql.Tx, evt events.Event, plan RoutePlan) {
+func (eb *EventBus) recordTargetDeliveryFailureMutation(ctx context.Context, mutation EventMutation, evt events.Event, plan RoutePlan) {
 	failure := runtimepinrouting.TargetFailure(strings.TrimSpace(string(plan.TargetFailure)))
-	if failure == "" {
+	if failure == "" || mutation == nil {
 		return
 	}
 	message, detail, record := targetDeliveryFailureRecord(evt, plan, failure)
 	eb.logRuntime(ctx, "warn", "Pin routing target delivery failed", "eventbus", "target_resolution_failed", evt.ID(), string(evt.Type()), evt.SourceAgent(), evt.EntityID(), "", nil, detail, message, 0)
 
-	recorder, ok := eb.store.(targetFailureDeadLetterTxRecorder)
-	if !ok || recorder == nil {
-		return
-	}
-	if err := recorder.RecordDeadLetterTx(ctx, tx, record); err != nil {
+	if err := mutation.RecordDeadLetter(ctx, record); err != nil {
 		eb.logRuntime(ctx, "warn", "Pin routing target failure dead-letter record failed", "eventbus", "target_resolution_failed_dead_letter_failed", evt.ID(), string(evt.Type()), evt.SourceAgent(), evt.EntityID(), "", nil, detail, err.Error(), 0)
 	}
 }

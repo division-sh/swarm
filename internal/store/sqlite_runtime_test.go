@@ -789,7 +789,7 @@ func TestSQLiteRuntimeStoreAppendEventTxEnsuresFreshRunRow(t *testing.T) {
 	assertSQLiteRuntimeCount(t, store, `SELECT COUNT(*) FROM events WHERE event_id = ?`, 1, eventID)
 }
 
-func TestSQLiteRuntimeStoreRuntimeIngressReadDuringPublishTxDoesNotReenterWrite(t *testing.T) {
+func TestSQLiteRuntimeStoreRuntimeIngressReadDuringPublishDoesNotReenterWrite(t *testing.T) {
 	ctx := context.Background()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	runID := uuid.NewString()

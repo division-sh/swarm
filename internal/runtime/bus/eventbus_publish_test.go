@@ -1312,7 +1312,7 @@ func TestEventBusPublishTransactional_ReturnsPostCommitInterceptorErrorAndRecord
 	}
 }
 
-func TestEventBusPublishTxRunsInterceptorsAfterCallerCommit(t *testing.T) {
+func TestEventBusPublishInMutationRunsInterceptorsAfterMutationCommit(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	ctx := eventBusTestRunContext(t, db)
@@ -1330,43 +1330,29 @@ func TestEventBusPublishTxRunsInterceptorsAfterCallerCommit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("BeginTx: %v", err)
+	if err := pg.RunEventMutation(ctx, func(mutation runtimebus.EventMutation) error {
+		if err := eb.PublishInMutation(mutation.Context(), events.NewProjectionEvent(eventID,
+			events.EventType("custom.publish_mutation_post_commit"),
+			"api.v1", "", []byte(`{"entity_id":"11111111-1111-1111-1111-111111111113"}`), 0, eventBusTestRunID, "", events.EventEnvelope{}, time.Now().UTC()).
+			WithEntityID("11111111-1111-1111-1111-111111111113")); err != nil {
+			return err
+		}
+		select {
+		case <-called:
+			t.Fatal("interceptor ran before mutation committed")
+		default:
+		}
+		ok, err := pg.EventExists(ctx, eventID)
+		if err != nil {
+			t.Fatalf("EventExists before commit: %v", err)
+		}
+		if ok {
+			t.Fatal("event visible outside mutation before commit")
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("RunEventMutation: %v", err)
 	}
-	postCommitActions := make([]func(), 0, 1)
-	txctx := runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommitActions)
-	if err := eb.PublishTx(txctx, tx, events.NewProjectionEvent(eventID,
-
-		events.EventType("custom.publish_tx_post_commit"),
-		"api.v1", "", []byte(`{"entity_id":"11111111-1111-1111-1111-111111111113"}`), 0, eventBusTestRunID, "", events.EventEnvelope{}, time.Now().UTC()).
-		WithEntityID("11111111-1111-1111-1111-111111111113")); err != nil {
-		_ = tx.Rollback()
-		t.Fatalf("PublishTx: %v", err)
-	}
-	select {
-	case <-called:
-		_ = tx.Rollback()
-		t.Fatal("interceptor ran before caller committed")
-	default:
-	}
-	if len(postCommitActions) != 1 {
-		_ = tx.Rollback()
-		t.Fatalf("post-commit actions = %d, want 1", len(postCommitActions))
-	}
-	ok, err := pg.EventExists(ctx, eventID)
-	if err != nil {
-		_ = tx.Rollback()
-		t.Fatalf("EventExists before commit: %v", err)
-	}
-	if ok {
-		_ = tx.Rollback()
-		t.Fatal("event visible outside caller transaction before commit")
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("Commit: %v", err)
-	}
-	runtimepipeline.FlushPipelinePostCommitActions(postCommitActions)
 	requireSignalBefore(t, called, time.Second, "post-commit interceptor")
 	if got := countPipelineReceiptsForEvent(t, ctx, db, eventID); got != 1 {
 		t.Fatalf("pipeline receipts = %d, want 1", got)
@@ -1381,20 +1367,13 @@ func TestEventBusPublishTransactional_RecordsTargetFailureDeadLetter(t *testing.
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	ctx := context.Background()
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("BeginTx: %v", err)
-	}
 	eventID := uuid.NewString()
 	targetEntityID := uuid.NewString()
-	err = eb.PublishTx(ctx, tx, (events.NewRootIngressEvent(eventID,
-		events.EventType("child/output.done"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())).WithTargetRoute(events.RouteIdentity{EntityID: targetEntityID, FlowInstance: "missing-flow"}))
-	if err != nil {
-		_ = tx.Rollback()
-		t.Fatalf("PublishTx: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("Commit: %v", err)
+	if err := pg.RunEventMutation(ctx, func(mutation runtimebus.EventMutation) error {
+		return eb.PublishInMutation(mutation.Context(), (events.NewRootIngressEvent(eventID,
+			events.EventType("child/output.done"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())).WithTargetRoute(events.RouteIdentity{EntityID: targetEntityID, FlowInstance: "missing-flow"}))
+	}); err != nil {
+		t.Fatalf("PublishInMutation: %v", err)
 	}
 
 	var reason, targetContext string

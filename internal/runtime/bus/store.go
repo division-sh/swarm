@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 )
 
@@ -139,6 +140,7 @@ type EventMutation interface {
 	InsertEventDeliveryRoutes(ctx context.Context, eventID string, deliveryRoutes []events.DeliveryRoute) error
 	UpsertCommittedReplayScope(ctx context.Context, eventID string, scope runtimereplayclaim.CommittedReplayScope) error
 	UpsertPipelineReceipt(ctx context.Context, eventID, status, errText string) error
+	RecordDeadLetter(ctx context.Context, rec runtimedeadletters.Record) error
 }
 
 type EventMutationRunner interface {
@@ -171,9 +173,9 @@ type TransactionalEventReplayScopePersistence interface {
 	UpsertCommittedReplayScopeTx(ctx context.Context, tx *sql.Tx, eventID string, scope runtimereplayclaim.CommittedReplayScope) error
 }
 
-// TransactionalEventStore is the legacy raw-SQL transaction helper behind
-// split callers such as PublishTx and store implementations. Selected
-// event/pipeline mutation producers consume EventMutationRunner instead.
+// TransactionalEventStore is the backend-local raw-SQL helper used below
+// EventMutation implementations. Selected runtime producers consume
+// EventMutationRunner/EventMutation instead of this raw transaction shape.
 type TransactionalEventStore interface {
 	BeginEventTx(ctx context.Context) (*sql.Tx, error)
 	AppendEventTx(ctx context.Context, tx *sql.Tx, evt events.Event) error

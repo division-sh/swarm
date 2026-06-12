@@ -2,7 +2,6 @@ package apiv1
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"sort"
@@ -32,8 +31,8 @@ type EventPublisher interface {
 	Publish(context.Context, events.Event) error
 }
 
-type TransactionalEventPublisher interface {
-	PublishTx(context.Context, *sql.Tx, events.Event) error
+type EventMutationPublisher interface {
+	PublishInMutation(context.Context, events.Event) error
 }
 
 type mailboxListResult struct {
@@ -210,11 +209,11 @@ func executeMailboxDecision(ctx context.Context, req Request, opts OperatorReadO
 		if multiRuntimeContextMode(opts) {
 			return nil, runtimeContextRequiredError(req.Method, "mailbox approval event publishing is ambiguous in multi-context DB-loaded mode; per-context mailbox approval routing is split to #1176")
 		}
-		txPublisher, ok := opts.Events.(TransactionalEventPublisher)
-		if !ok || txPublisher == nil {
-			return nil, errors.New("transactional event publisher is required for mailbox approval")
+		mutationPublisher, ok := opts.Events.(EventMutationPublisher)
+		if !ok || mutationPublisher == nil {
+			return nil, errors.New("event mutation publisher is required for mailbox approval")
 		}
-		decision.ApprovalEventTx = txPublisher.PublishTx
+		decision.ApprovalEventPublish = mutationPublisher.PublishInMutation
 	}
 	if strings.TrimSpace(idempotencyKey) != "" {
 		decision.Idempotency = &store.APIIdempotencyRequest{

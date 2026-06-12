@@ -268,8 +268,26 @@ func TestSelectedSQLiteRuntimeConstructionConsumesMutationBoundary(t *testing.T)
 	if err != nil {
 		t.Fatalf("read internal/runtime/bus/eventbus_publish.go: %v", err)
 	}
-	if !strings.Contains(string(publishData), ".RunEventMutation(ctx,") {
+	publishText := string(publishData)
+	if !strings.Contains(publishText, ".RunEventMutation(ctx,") {
 		t.Fatal("event publish must consume EventMutationRunner.RunEventMutation when available")
+	}
+	if strings.Contains(publishText, "PublishTx") {
+		t.Fatal("event publish must not expose a producer-facing PublishTx raw transaction hook")
+	}
+
+	operatorMailboxData, err := os.ReadFile(filepath.Join(root, "internal", "apiv1", "operator_mailbox.go"))
+	if err != nil {
+		t.Fatalf("read internal/apiv1/operator_mailbox.go: %v", err)
+	}
+	operatorMailboxText := string(operatorMailboxData)
+	for _, forbidden := range []string{"TransactionalEventPublisher", "ApprovalEventTx", "*sql.Tx"} {
+		if strings.Contains(operatorMailboxText, forbidden) {
+			t.Fatalf("operator mailbox approval publish must consume typed event mutation API, found %s", forbidden)
+		}
+	}
+	if !strings.Contains(operatorMailboxText, "PublishInMutation") {
+		t.Fatal("operator mailbox approval publish must consume EventBus.PublishInMutation")
 	}
 
 	pipelineData, err := os.ReadFile(filepath.Join(root, "internal", "runtime", "pipeline", "workflow_instance_store.go"))
