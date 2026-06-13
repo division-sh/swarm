@@ -26,6 +26,7 @@ import (
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -1391,6 +1392,83 @@ func TestEventBusPublishTransactional_RecordsTargetFailureDeadLetter(t *testing.
 	}
 	if !strings.Contains(targetContext, "missing-flow") {
 		t.Fatalf("target context = %s, want missing-flow", targetContext)
+	}
+}
+
+func TestEventBusPublishInMutationSQLiteRecordsTargetFailureDeadLetter(t *testing.T) {
+	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
+	eb, err := runtimebus.NewEventBusWithOptions(sqliteStore, runtimebus.EventBusOptions{})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	eb.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{
+		AgentID:      "live-other",
+		EntityID:     uuid.NewString(),
+		FlowInstance: "other-flow",
+	})
+	ctx := context.Background()
+	descriptors, err := eb.PinRoutingDescriptors(ctx)
+	if err != nil {
+		t.Fatalf("PinRoutingDescriptors: %v", err)
+	}
+	if len(descriptors) == 0 {
+		t.Fatal("PinRoutingDescriptors returned no runtime descriptors")
+	}
+	if descriptors[0].ID != "live-other" {
+		t.Fatalf("PinRoutingDescriptors[0].ID = %q, want live-other", descriptors[0].ID)
+	}
+	_ = eb.Subscribe("live-other", events.EventType("task.completed"))
+	if got := eb.ResolveSubscribedRecipients("task.completed"); !slices.Equal(got, []string{"live-other"}) {
+		t.Fatalf("ResolveSubscribedRecipients = %#v, want live-other", got)
+	}
+	eventID := uuid.NewString()
+	targetEntityID := uuid.NewString()
+	evt := (events.NewRootIngressEvent(eventID,
+		events.EventType("task.completed"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())).WithTargetRoute(events.RouteIdentity{EntityID: targetEntityID, FlowInstance: "missing-flow"})
+	if !evt.HasTargetRoute() {
+		t.Fatalf("event target route missing after construction: envelope=%#v", evt.NormalizedEnvelope())
+	}
+	plan, err := eb.CheckPublishRecipientPlan(ctx, evt)
+	if err != nil {
+		t.Fatalf("CheckPublishRecipientPlan: %v", err)
+	}
+	if plan.TargetFailure != "target_unreachable_terminated" {
+		t.Fatalf("target failure = %q, want target_unreachable_terminated: plan=%#v", plan.TargetFailure, plan)
+	}
+	if err := sqliteStore.RunEventMutation(ctx, func(mutation runtimebus.EventMutation) error {
+		return eb.PublishInMutation(mutation.Context(), evt)
+	}); err != nil {
+		t.Fatalf("PublishInMutation: %v", err)
+	}
+
+	var reason, targetContext string
+	if err := sqliteStore.DB.QueryRowContext(ctx, `
+		SELECT COALESCE(target_failure_reason, ''), COALESCE(target_context, '')
+		FROM dead_letters
+		WHERE original_event_id = ?
+		  AND failure_type = 'target_resolution_failed'
+		  AND handler_node = 'pin_routing'
+	`, eventID).Scan(&reason, &targetContext); err != nil {
+		t.Fatalf("query sqlite dead_letters: %v", err)
+	}
+	if reason != "target_unreachable_terminated" {
+		t.Fatalf("target failure reason = %q, want target_unreachable_terminated", reason)
+	}
+	if !strings.Contains(targetContext, "missing-flow") {
+		t.Fatalf("target context = %s, want missing-flow", targetContext)
+	}
+	var pipelineReceipts int
+	if err := sqliteStore.DB.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_receipts
+		WHERE event_id = ?
+		  AND subscriber_type = 'platform'
+		  AND subscriber_id = 'pipeline'
+	`, eventID).Scan(&pipelineReceipts); err != nil {
+		t.Fatalf("query sqlite pipeline receipt: %v", err)
+	}
+	if pipelineReceipts != 1 {
+		t.Fatalf("sqlite pipeline receipts = %d, want 1", pipelineReceipts)
 	}
 }
 

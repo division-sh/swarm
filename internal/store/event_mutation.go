@@ -101,11 +101,11 @@ func (m *sqlEventMutation) UpsertPipelineReceipt(ctx context.Context, eventID, s
 
 func (m *sqlEventMutation) RecordDeadLetter(ctx context.Context, rec runtimedeadletters.Record) error {
 	if m == nil {
-		return nil
+		return fmt.Errorf("event mutation store is required")
 	}
 	recorder, ok := m.store.(eventMutationDeadLetterTxRecorder)
 	if !ok || recorder == nil {
-		return nil
+		return fmt.Errorf("event mutation store %T does not support dead letters", m.store)
 	}
 	return recorder.RecordDeadLetterTx(m.operationContext(ctx), m.tx, rec)
 }

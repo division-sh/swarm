@@ -379,7 +379,9 @@ func (eb *EventBus) PublishInMutation(ctx context.Context, evt events.Event) err
 		if err := mutation.UpsertPipelineReceipt(txctx, evt.ID(), status, errText); err != nil {
 			return fmt.Errorf("persist pipeline receipt: %w", err)
 		}
-		eb.recordTargetDeliveryFailureMutation(txctx, mutation, evt, inboundPlan)
+		if err := eb.recordTargetDeliveryFailureMutation(txctx, mutation, evt, inboundPlan); err != nil {
+			return err
+		}
 		return nil
 	}
 	if reason, err := eb.dispatchQueueReason(txctx, evt); err != nil {
@@ -552,7 +554,9 @@ func (eb *EventBus) publishTransactional(
 			if err := mutation.UpsertPipelineReceipt(txctx, evt.ID(), status, errText); err != nil {
 				return fmt.Errorf("persist pipeline receipt: %w", err)
 			}
-			eb.recordTargetDeliveryFailureMutation(txctx, mutation, evt, inboundPlan)
+			if err := eb.recordTargetDeliveryFailureMutation(txctx, mutation, evt, inboundPlan); err != nil {
+				return err
+			}
 			targetFailure = true
 			return nil
 		}
@@ -663,7 +667,9 @@ func (eb *EventBus) publishAcknowledgedTransactional(
 			if err := mutation.UpsertPipelineReceipt(txctx, evt.ID(), status, errText); err != nil {
 				return fmt.Errorf("persist pipeline receipt: %w", err)
 			}
-			eb.recordTargetDeliveryFailureMutation(txctx, mutation, evt, inboundPlan)
+			if err := eb.recordTargetDeliveryFailureMutation(txctx, mutation, evt, inboundPlan); err != nil {
+				return err
+			}
 			targetFailure = true
 			return nil
 		}
@@ -1614,17 +1620,19 @@ func (eb *EventBus) recordTargetDeliveryFailure(ctx context.Context, evt events.
 	}
 }
 
-func (eb *EventBus) recordTargetDeliveryFailureMutation(ctx context.Context, mutation EventMutation, evt events.Event, plan RoutePlan) {
+func (eb *EventBus) recordTargetDeliveryFailureMutation(ctx context.Context, mutation EventMutation, evt events.Event, plan RoutePlan) error {
 	failure := runtimepinrouting.TargetFailure(strings.TrimSpace(string(plan.TargetFailure)))
 	if failure == "" || mutation == nil {
-		return
+		return nil
 	}
 	message, detail, record := targetDeliveryFailureRecord(evt, plan, failure)
 	eb.logRuntime(ctx, "warn", "Pin routing target delivery failed", "eventbus", "target_resolution_failed", evt.ID(), string(evt.Type()), evt.SourceAgent(), evt.EntityID(), "", nil, detail, message, 0)
 
 	if err := mutation.RecordDeadLetter(ctx, record); err != nil {
 		eb.logRuntime(ctx, "warn", "Pin routing target failure dead-letter record failed", "eventbus", "target_resolution_failed_dead_letter_failed", evt.ID(), string(evt.Type()), evt.SourceAgent(), evt.EntityID(), "", nil, detail, err.Error(), 0)
+		return fmt.Errorf("persist target failure dead letter: %w", err)
 	}
+	return nil
 }
 
 func targetDeliveryFailureRecord(evt events.Event, plan RoutePlan, failure runtimepinrouting.TargetFailure) (string, map[string]any, runtimedeadletters.Record) {
