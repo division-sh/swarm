@@ -252,11 +252,13 @@ func (s *SQLiteRuntimeStore) DecideV1MailboxItem(ctx context.Context, input Mail
 			}
 		}
 		if outcome.ApprovalEvent != nil {
-			publishTx := input.ApprovalEventTx
-			if publishTx == nil {
-				publishTx = s.appendSQLiteMailboxV1ApprovalEventTx
+			publish := input.ApprovalEventPublish
+			if publish == nil {
+				publish = func(ctx context.Context, evt events.Event) error {
+					return s.appendSQLiteMailboxV1ApprovalEventTx(ctx, tx, evt)
+				}
 			}
-			if err := publishTx(txctx, tx, *outcome.ApprovalEvent); err != nil {
+			if err := publish(txctx, *outcome.ApprovalEvent); err != nil {
 				return fmt.Errorf("publish sqlite v1 mailbox approval event: %w", err)
 			}
 		}

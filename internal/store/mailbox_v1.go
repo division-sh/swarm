@@ -90,7 +90,7 @@ type MailboxV1DecisionRequest struct {
 	ApprovalEventType             string
 	ApprovalEventSubscribers      []string
 	ApprovalEventSubscriberSource string
-	ApprovalEventTx               func(context.Context, *sql.Tx, events.Event) error
+	ApprovalEventPublish          func(context.Context, events.Event) error
 	Idempotency                   *APIIdempotencyRequest
 }
 
@@ -273,7 +273,8 @@ func (s *PostgresStore) DecideV1MailboxItem(ctx context.Context, input MailboxV1
 		return MailboxV1DecisionOutcome{}, fmt.Errorf("begin v1 mailbox decision tx: %w", err)
 	}
 	postCommitActions := make([]func(), 0, 4)
-	txctx := runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommitActions)
+	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
+	txctx = runtimepipeline.WithPipelinePostCommitActions(txctx, &postCommitActions)
 	committed := false
 	defer func() {
 		if !committed {
@@ -286,13 +287,13 @@ func (s *PostgresStore) DecideV1MailboxItem(ctx context.Context, input MailboxV1
 		return MailboxV1DecisionOutcome{}, err
 	}
 	if hasIdempotency {
-		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, apiIdempotencyLockKey(idempotencyReq.Method, idempotencyReq.ActorTokenID, idempotencyReq.IdempotencyKey)); err != nil {
+		if _, err := tx.ExecContext(txctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, apiIdempotencyLockKey(idempotencyReq.Method, idempotencyReq.ActorTokenID, idempotencyReq.IdempotencyKey)); err != nil {
 			return MailboxV1DecisionOutcome{}, fmt.Errorf("lock api idempotency key: %w", err)
 		}
-		if err := purgeExpiredAPIIdempotency(ctx, tx, idempotencyReq.Now); err != nil {
+		if err := purgeExpiredAPIIdempotency(txctx, tx, idempotencyReq.Now); err != nil {
 			return MailboxV1DecisionOutcome{}, err
 		}
-		existing, ok, err := loadAPIIdempotency(ctx, tx, idempotencyReq)
+		existing, ok, err := loadAPIIdempotency(txctx, tx, idempotencyReq)
 		if err != nil {
 			return MailboxV1DecisionOutcome{}, err
 		}
@@ -309,7 +310,7 @@ func (s *PostgresStore) DecideV1MailboxItem(ctx context.Context, input MailboxV1
 			if err := json.Unmarshal(existing.Response, &result); err != nil {
 				return MailboxV1DecisionOutcome{}, fmt.Errorf("decode api idempotency mailbox response: %w", err)
 			}
-			if err := normalizeMailboxV1DecisionReplayResult(ctx, tx, &result); err != nil {
+			if err := normalizeMailboxV1DecisionReplayResult(txctx, tx, &result); err != nil {
 				return MailboxV1DecisionOutcome{}, err
 			}
 			if err := tx.Commit(); err != nil {
@@ -323,7 +324,7 @@ func (s *PostgresStore) DecideV1MailboxItem(ctx context.Context, input MailboxV1
 		return MailboxV1DecisionOutcome{}, &MailboxV1InvalidDeferUntilError{Reason: "in_past"}
 	}
 
-	row, err := s.loadMailboxV1RowTx(ctx, tx, input.MailboxID, true)
+	row, err := s.loadMailboxV1RowTx(txctx, tx, input.MailboxID, true)
 	if err != nil {
 		return MailboxV1DecisionOutcome{}, err
 	}
@@ -374,7 +375,7 @@ func (s *PostgresStore) DecideV1MailboxItem(ctx context.Context, input MailboxV1
 		outcome.Result.DownstreamSubscriberSource = subscriberSource
 		outcome.ApprovalEvent = &evt
 	}
-	res, err := tx.ExecContext(ctx, `
+	res, err := tx.ExecContext(txctx, `
 		UPDATE mailbox
 		SET status = 'decided',
 		    decision = $2,
@@ -389,7 +390,7 @@ func (s *PostgresStore) DecideV1MailboxItem(ctx context.Context, input MailboxV1
 		return MailboxV1DecisionOutcome{}, fmt.Errorf("decide v1 mailbox item: %w", err)
 	}
 	if rows, _ := res.RowsAffected(); rows == 0 {
-		latest, latestErr := s.loadMailboxV1RowTx(ctx, tx, row.ID, false)
+		latest, latestErr := s.loadMailboxV1RowTx(txctx, tx, row.ID, false)
 		if latestErr != nil {
 			return MailboxV1DecisionOutcome{}, latestErr
 		}
@@ -400,11 +401,13 @@ func (s *PostgresStore) DecideV1MailboxItem(ctx context.Context, input MailboxV1
 		}
 	}
 	if outcome.ApprovalEvent != nil {
-		publishTx := input.ApprovalEventTx
-		if publishTx == nil {
-			publishTx = s.appendMailboxV1ApprovalEventTx
+		publish := input.ApprovalEventPublish
+		if publish == nil {
+			publish = func(ctx context.Context, evt events.Event) error {
+				return s.appendMailboxV1ApprovalEventTx(ctx, tx, evt)
+			}
 		}
-		if err := publishTx(txctx, tx, *outcome.ApprovalEvent); err != nil {
+		if err := publish(txctx, *outcome.ApprovalEvent); err != nil {
 			return MailboxV1DecisionOutcome{}, fmt.Errorf("publish v1 mailbox approval event: %w", err)
 		}
 	}
@@ -413,7 +416,7 @@ func (s *PostgresStore) DecideV1MailboxItem(ctx context.Context, input MailboxV1
 		if err != nil {
 			return MailboxV1DecisionOutcome{}, err
 		}
-		if err := storeAPIIdempotency(ctx, tx, idempotencyReq, APIIdempotencyCompletion{
+		if err := storeAPIIdempotency(txctx, tx, idempotencyReq, APIIdempotencyCompletion{
 			ResourceID: row.ID,
 			Response:   raw,
 		}); err != nil {

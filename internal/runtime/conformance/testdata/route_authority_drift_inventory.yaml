@@ -211,7 +211,7 @@ search_dimensions:
       - internal/runtime/pipeline/workflow_node_delivery_authority_test.go
     canonical_layer: execution_admission
   - id: publish_plan_consumers
-    pattern: 'CheckPublishRecipientPlan|PublishRecipientPlanMaterializer|PublishTx|publishDeferred'
+    pattern: 'CheckPublishRecipientPlan|PublishRecipientPlanMaterializer|PublishInMutation|publishDeferred'
     minimum_matching_files: 7
     required_paths:
       - internal/runtime/bus/eventbus.go

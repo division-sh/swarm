@@ -16,6 +16,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
@@ -1531,6 +1532,10 @@ func (m *failCommittedReplayScopeMutation) UpsertCommittedReplayScope(ctx contex
 
 func (m *failCommittedReplayScopeMutation) UpsertPipelineReceipt(ctx context.Context, eventID, status, errText string) error {
 	return m.store.UpsertPipelineReceiptTx(ctx, m.tx, eventID, status, errText)
+}
+
+func (m *failCommittedReplayScopeMutation) RecordDeadLetter(ctx context.Context, rec runtimedeadletters.Record) error {
+	return m.store.RecordDeadLetterTx(ctx, m.tx, rec)
 }
 
 func (s *failCommittedReplayScopeStore) UpsertCommittedReplayScopeTx(ctx context.Context, tx *sql.Tx, eventID string, scope runtimereplayclaim.CommittedReplayScope) error {
