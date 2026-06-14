@@ -7,6 +7,8 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 )
 
+var _ runtimebus.ActiveFlowInstanceDescriptorLister = (*PostgresStore)(nil)
+
 // ListActiveAgentDescriptors implements runtime.ActiveAgentDescriptorLister for
 // explicit runtime delivery planning against persisted agent metadata.
 func (s *PostgresStore) ListActiveAgentDescriptors(ctx context.Context) ([]runtimebus.ActiveAgentDescriptor, error) {

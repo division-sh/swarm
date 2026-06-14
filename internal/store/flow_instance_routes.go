@@ -177,3 +177,77 @@ func (s *PostgresStore) ListFlowInstanceRoutes(ctx context.Context) ([]runtimefl
 	}
 	return out, nil
 }
+
+func (s *PostgresStore) ListActiveFlowInstanceDescriptors(ctx context.Context) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
+	if s == nil || s.DB == nil {
+		return nil, fmt.Errorf("postgres store is required for active flow instance descriptors")
+	}
+	rows, err := s.DB.QueryContext(ctx, `
+		SELECT
+			COALESCE(instance_id, ''),
+			COALESCE(flow_template, '')
+		FROM flow_instances
+		WHERE COALESCE(status, '') = 'active'
+		  AND COALESCE(mode, '') = 'template'
+		  AND COALESCE(instance_id, '') <> ''
+		ORDER BY instance_id ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list active flow instance descriptors: %w", err)
+	}
+	defer rows.Close()
+
+	out := []runtimebus.ActiveFlowInstanceDescriptor{}
+	for rows.Next() {
+		var descriptor runtimebus.ActiveFlowInstanceDescriptor
+		if err := rows.Scan(&descriptor.FlowInstance, &descriptor.FlowTemplate); err != nil {
+			return nil, fmt.Errorf("scan active flow instance descriptor: %w", err)
+		}
+		descriptor = descriptor.Normalized()
+		if descriptor.FlowInstance == "" {
+			continue
+		}
+		out = append(out, descriptor)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate active flow instance descriptors: %w", err)
+	}
+	return out, nil
+}
+
+func (s *SQLiteRuntimeStore) ListActiveFlowInstanceDescriptors(ctx context.Context) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
+	if s == nil || s.DB == nil {
+		return nil, fmt.Errorf("sqlite runtime store is required for active flow instance descriptors")
+	}
+	rows, err := s.DB.QueryContext(ctx, `
+		SELECT
+			COALESCE(instance_id, ''),
+			COALESCE(flow_template, '')
+		FROM flow_instances
+		WHERE COALESCE(status, '') = 'active'
+		  AND COALESCE(mode, '') = 'template'
+		  AND COALESCE(instance_id, '') <> ''
+		ORDER BY instance_id ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list sqlite active flow instance descriptors: %w", err)
+	}
+	defer rows.Close()
+
+	out := []runtimebus.ActiveFlowInstanceDescriptor{}
+	for rows.Next() {
+		var descriptor runtimebus.ActiveFlowInstanceDescriptor
+		if err := rows.Scan(&descriptor.FlowInstance, &descriptor.FlowTemplate); err != nil {
+			return nil, fmt.Errorf("scan sqlite active flow instance descriptor: %w", err)
+		}
+		descriptor = descriptor.Normalized()
+		if descriptor.FlowInstance == "" {
+			continue
+		}
+		out = append(out, descriptor)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate sqlite active flow instance descriptors: %w", err)
+	}
+	return out, nil
+}

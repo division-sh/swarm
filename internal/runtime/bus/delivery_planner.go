@@ -64,7 +64,8 @@ type deliveryRecipientManifest struct {
 }
 
 type deliveryRecipientPolicy struct {
-	loadActiveAgentDescriptors func(context.Context) (map[string]ActiveAgentDescriptor, bool, error)
+	loadActiveAgentDescriptors  func(context.Context) (map[string]ActiveAgentDescriptor, bool, error)
+	loadActiveTargetDescriptors func(context.Context) ([]ActiveTargetDescriptor, bool, error)
 }
 
 func (p deliveryRecipientPolicy) Evaluate(ctx context.Context, evt events.Event, recipients []deliveryRecipientCandidate) (deliveryRecipientManifest, error) {
@@ -72,15 +73,31 @@ func (p deliveryRecipientPolicy) Evaluate(ctx context.Context, evt events.Event,
 	if err != nil {
 		return deliveryRecipientManifest{}, err
 	}
+	targetDescriptors := activeTargetDescriptorsFromAgents(descriptors)
+	targetDescriptorsOK := ok || len(targetDescriptors) > 0
+	if p.loadActiveTargetDescriptors != nil {
+		loaded, loadedOK, err := p.loadActiveTargetDescriptors(ctx)
+		if err != nil {
+			return deliveryRecipientManifest{}, err
+		}
+		if loadedOK {
+			targetDescriptors = loaded
+			targetDescriptorsOK = true
+		}
+	}
 	if !ok {
-		return deliveryRecipientManifest{
+		manifest := deliveryRecipientManifest{
 			Recipients:          deliveryRecipientIDs(recipients),
 			PersistedRecipients: persistedDeliveryRecipientIDs(recipients),
 			DeliveryTargets:     deliveryTargetsForManifest(evt, persistedDeliveryRecipientIDs(recipients), nil),
 			DeliveryRoutes:      agentDeliveryRoutesForRecipients(persistedDeliveryRecipientIDs(recipients), deliveryTargetsForManifest(evt, persistedDeliveryRecipientIDs(recipients), nil)),
-		}, nil
+		}
+		if targetDescriptorsOK && len(eventDeliveryTargetRoutes(evt)) > 0 && len(manifest.Recipients) == 0 {
+			manifest.TargetFailure = targetDeliveryFailure(evt, targetDescriptors)
+		}
+		return manifest, nil
 	}
-	return filterDeliveryRecipientCandidates(evt, recipients, descriptors), nil
+	return filterDeliveryRecipientCandidates(evt, recipients, descriptors, targetDescriptors), nil
 }
 
 type deliveryPlanner struct {
@@ -175,7 +192,8 @@ func (eb *EventBus) newEventBusDeliveryPlanner() deliveryPlanner {
 			describeSubscribersForEvent:         eb.describeSubscribersForEvent,
 		},
 		deliveryRecipientPolicy{
-			loadActiveAgentDescriptors: eb.activeAgentDescriptors,
+			loadActiveAgentDescriptors:  eb.activeAgentDescriptors,
+			loadActiveTargetDescriptors: eb.activeTargetDescriptors,
 		},
 	)
 }
@@ -312,13 +330,13 @@ func persistedDeliveryRecipientIDs(in []deliveryRecipientCandidate) []string {
 	return uniqueStrings(out)
 }
 
-func filterDeliveryRecipientCandidates(evt events.Event, recipients []deliveryRecipientCandidate, descriptors map[string]ActiveAgentDescriptor) deliveryRecipientManifest {
+func filterDeliveryRecipientCandidates(evt events.Event, recipients []deliveryRecipientCandidate, descriptors map[string]ActiveAgentDescriptor, targetDescriptors []ActiveTargetDescriptor) deliveryRecipientManifest {
 	recipients = normalizeDeliveryRecipientCandidates(recipients)
 	eventEntityID := strings.TrimSpace(evt.EntityID())
 	targets := eventDeliveryTargetRoutes(evt)
 	if len(recipients) == 0 {
 		return deliveryRecipientManifest{
-			TargetFailure: targetDeliveryFailure(evt, descriptors),
+			TargetFailure: targetDeliveryFailure(evt, targetDescriptors),
 		}
 	}
 	singularTarget := evt.TargetRoute()
@@ -365,7 +383,7 @@ func filterDeliveryRecipientCandidates(evt events.Event, recipients []deliveryRe
 		DeliveryRoutes:      events.NormalizeDeliveryRoutes(deliveryRoutes),
 	}
 	if len(targets) > 0 && len(manifest.Recipients) == 0 {
-		manifest.TargetFailure = targetDeliveryFailure(evt, descriptors)
+		manifest.TargetFailure = targetDeliveryFailure(evt, targetDescriptors)
 	}
 	return manifest
 }
@@ -932,7 +950,7 @@ func routeMatchesInternalSubscriber(route events.RouteIdentity, subscriber Subsc
 	return route.FlowInstance != "" && route.FlowInstance == path
 }
 
-func targetDeliveryFailure(evt events.Event, descriptors map[string]ActiveAgentDescriptor) runtimepinrouting.TargetFailure {
+func targetDeliveryFailure(evt events.Event, descriptors []ActiveTargetDescriptor) runtimepinrouting.TargetFailure {
 	targets := eventDeliveryTargetRoutes(evt)
 	if len(targets) == 0 {
 		return ""
@@ -950,7 +968,7 @@ func eventDeliveryTargetRoutes(evt events.Event) []events.RouteIdentity {
 	return evt.TargetRoutes()
 }
 
-func allTargetsHaveLiveDescriptor(targets []events.RouteIdentity, descriptors map[string]ActiveAgentDescriptor) bool {
+func allTargetsHaveLiveDescriptor(targets []events.RouteIdentity, descriptors []ActiveTargetDescriptor) bool {
 	if len(targets) == 0 {
 		return true
 	}
@@ -960,7 +978,7 @@ func allTargetsHaveLiveDescriptor(targets []events.RouteIdentity, descriptors ma
 	for _, target := range targets {
 		found := false
 		for _, descriptor := range descriptors {
-			if routeMatchesDescriptor(target, descriptor) {
+			if routeMatchesTargetDescriptor(target, descriptor) {
 				found = true
 				break
 			}
@@ -975,29 +993,43 @@ func allTargetsHaveLiveDescriptor(targets []events.RouteIdentity, descriptors ma
 func deliveryTargetForDescriptor(descriptor ActiveAgentDescriptor, singular events.RouteIdentity, targets []events.RouteIdentity) (events.RouteIdentity, bool) {
 	descriptor = descriptor.Normalized()
 	if !singular.Empty() {
-		return singular, routeMatchesDescriptor(singular, descriptor)
+		return singular, routeMatchesAgentDescriptor(singular, descriptor)
 	}
 	if len(targets) == 0 {
 		return events.RouteIdentity{}, true
 	}
 	for _, target := range targets {
-		if routeMatchesDescriptor(target, descriptor) {
+		if routeMatchesAgentDescriptor(target, descriptor) {
 			return target.Normalized(), true
 		}
 	}
 	return events.RouteIdentity{}, false
 }
 
-func routeMatchesDescriptor(route events.RouteIdentity, descriptor ActiveAgentDescriptor) bool {
+func routeMatchesAgentDescriptor(route events.RouteIdentity, descriptor ActiveAgentDescriptor) bool {
+	return routeMatchesTargetDescriptor(route, descriptor.TargetDescriptor())
+}
+
+func routeMatchesTargetDescriptor(route events.RouteIdentity, descriptor ActiveTargetDescriptor) bool {
 	route = route.Normalized()
 	descriptor = descriptor.Normalized()
-	if route.EntityID != "" && descriptor.EntityID != "" && route.EntityID != descriptor.EntityID {
+	if descriptor.EntityID == "" && descriptor.FlowInstance == "" {
 		return false
 	}
-	if route.FlowInstance != "" && descriptor.FlowInstance != "" && route.FlowInstance != descriptor.FlowInstance {
-		return false
+	matched := false
+	if route.EntityID != "" {
+		if descriptor.EntityID != route.EntityID {
+			return false
+		}
+		matched = true
 	}
-	return route.EntityID != "" || route.FlowInstance != ""
+	if route.FlowInstance != "" {
+		if descriptor.FlowInstance != route.FlowInstance {
+			return false
+		}
+		matched = true
+	}
+	return matched
 }
 
 func deliveryTargetsForManifest(evt events.Event, recipients []string, existing map[string]events.RouteIdentity) map[string]events.RouteIdentity {

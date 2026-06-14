@@ -50,10 +50,82 @@ func (d ActiveAgentDescriptor) Normalized() ActiveAgentDescriptor {
 	}
 }
 
+func (d ActiveAgentDescriptor) TargetDescriptor() ActiveTargetDescriptor {
+	d = d.Normalized()
+	return ActiveTargetDescriptor{
+		ID:           d.AgentID,
+		EntityID:     d.EntityID,
+		FlowInstance: d.FlowInstance,
+	}.Normalized()
+}
+
 // ActiveAgentDescriptorLister is an optional capability for runtime delivery
 // planning. PostgresStore implements this; InMemoryEventStore does not.
 type ActiveAgentDescriptorLister interface {
 	ListActiveAgentDescriptors(ctx context.Context) ([]ActiveAgentDescriptor, error)
+}
+
+type ActiveFlowInstanceDescriptor struct {
+	InstanceID   string
+	EntityID     string
+	FlowInstance string
+	FlowTemplate string
+}
+
+func (d ActiveFlowInstanceDescriptor) Normalized() ActiveFlowInstanceDescriptor {
+	flowInstance := strings.Trim(strings.TrimSpace(d.FlowInstance), "/")
+	instanceID := strings.TrimSpace(d.InstanceID)
+	if flowInstance == "" {
+		flowInstance = strings.Trim(strings.TrimSpace(instanceID), "/")
+	}
+	if instanceID == "" && flowInstance != "" {
+		instanceID = runtimeflowidentity.LogicalInstanceID(flowInstance)
+	}
+	entityID := strings.TrimSpace(d.EntityID)
+	if entityID == "" && flowInstance != "" {
+		entityID = runtimeflowidentity.EntityID(flowInstance)
+	}
+	return ActiveFlowInstanceDescriptor{
+		InstanceID:   instanceID,
+		EntityID:     entityID,
+		FlowInstance: flowInstance,
+		FlowTemplate: strings.TrimSpace(d.FlowTemplate),
+	}
+}
+
+func (d ActiveFlowInstanceDescriptor) TargetDescriptor() ActiveTargetDescriptor {
+	d = d.Normalized()
+	return ActiveTargetDescriptor{
+		ID:           d.InstanceID,
+		EntityID:     d.EntityID,
+		FlowInstance: d.FlowInstance,
+	}.Normalized()
+}
+
+// ActiveFlowInstanceDescriptorLister exposes active dynamic flow instances as
+// routable target descriptors. Stores implement this from persisted flow
+// instance state, not from live subscriptions or readback.
+type ActiveFlowInstanceDescriptorLister interface {
+	ListActiveFlowInstanceDescriptors(ctx context.Context) ([]ActiveFlowInstanceDescriptor, error)
+}
+
+type ActiveTargetDescriptor struct {
+	ID           string
+	EntityID     string
+	FlowInstance string
+}
+
+func (d ActiveTargetDescriptor) Normalized() ActiveTargetDescriptor {
+	flowInstance := strings.Trim(strings.TrimSpace(d.FlowInstance), "/")
+	entityID := strings.TrimSpace(d.EntityID)
+	if entityID == "" && flowInstance != "" {
+		entityID = runtimeflowidentity.EntityID(flowInstance)
+	}
+	return ActiveTargetDescriptor{
+		ID:           strings.TrimSpace(d.ID),
+		EntityID:     entityID,
+		FlowInstance: flowInstance,
+	}
 }
 
 // PipelineReceiptPersistence is an optional capability for marking whether
