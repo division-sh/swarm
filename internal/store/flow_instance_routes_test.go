@@ -9,6 +9,7 @@ import (
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
@@ -329,5 +330,32 @@ func TestPostgresStoreListActiveFlowInstanceDescriptorsFiltersToActiveTemplates(
 	}
 	if got.FlowTemplate != "component-scaffold" {
 		t.Fatalf("FlowTemplate = %q, want component-scaffold", got.FlowTemplate)
+	}
+}
+
+func TestPostgresStoreListActiveFlowInstanceDescriptorsReadsPipelineTransaction(t *testing.T) {
+	ctx := context.Background()
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ensureFlowInstanceRouteTables(t, ctx, db)
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
+		VALUES ('component-scaffold/uncommitted', 'component-scaffold', 'template', '{}'::jsonb, 'active', NOW())
+	`); err != nil {
+		t.Fatalf("seed flow_instances in tx: %v", err)
+	}
+
+	descriptors, err := pg.ListActiveFlowInstanceDescriptors(runtimepipeline.WithPipelineSQLTxContext(ctx, tx))
+	if err != nil {
+		t.Fatalf("ListActiveFlowInstanceDescriptors: %v", err)
+	}
+	if len(descriptors) != 1 || descriptors[0].FlowInstance != "component-scaffold/uncommitted" {
+		t.Fatalf("descriptors = %#v, want uncommitted tx flow instance", descriptors)
 	}
 }
