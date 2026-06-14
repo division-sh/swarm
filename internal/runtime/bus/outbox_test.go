@@ -3,6 +3,7 @@ package bus_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -24,11 +25,12 @@ type recordingEventStore struct {
 }
 
 type directRecipientTransactionalStore struct {
-	mu          sync.Mutex
-	descriptors []runtimebus.ActiveAgentDescriptor
-	events      []events.Event
-	deliveries  map[string][]string
-	routes      map[string][]events.DeliveryRoute
+	mu            sync.Mutex
+	descriptors   []runtimebus.ActiveAgentDescriptor
+	events        []events.Event
+	deliveries    map[string][]string
+	routes        map[string][]events.DeliveryRoute
+	deadLetterErr error
 }
 
 type directRecipientEventMutation struct {
@@ -125,8 +127,11 @@ func (*directRecipientEventMutation) UpsertCommittedReplayScope(context.Context,
 	return nil
 }
 
-func (*directRecipientEventMutation) RecordDeadLetter(context.Context, runtimedeadletters.Record) error {
-	return nil
+func (m *directRecipientEventMutation) RecordDeadLetter(context.Context, runtimedeadletters.Record) error {
+	if m == nil || m.store == nil {
+		return nil
+	}
+	return m.store.deadLetterErr
 }
 
 func (m *directRecipientEventMutation) UpsertPipelineReceipt(ctx context.Context, eventID, status, errText string) error {
@@ -636,6 +641,45 @@ func TestEngineOutboxAndDispatcher_UseCanonicalDirectRecipientManifest(t *testin
 	}
 	requireNoBusEvent(t, otherCh, "direct intent delivery to filtered recipient")
 
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestEngineOutbox_TargetFailureDeadLetterErrorFailsClosed(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectBegin()
+	mock.ExpectRollback()
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	deadLetterErr := errors.New("dead letter recorder unavailable")
+	store := &directRecipientTransactionalStore{deadLetterErr: deadLetterErr}
+	eb, err := runtimebus.NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+
+	intent := runtimeengine.EmitIntent{
+		Event: events.NewProjectionEvent("evt-outbox-target-failure",
+			events.EventType("child/output.done"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()).
+			WithTargetRoute(events.RouteIdentity{EntityID: "missing-entity", FlowInstance: "missing-flow"}),
+	}
+	ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
+	err = eb.EngineOutbox().WriteOutbox(ctx, []runtimeengine.EmitIntent{intent})
+	if !errors.Is(err, deadLetterErr) {
+		t.Fatalf("WriteOutbox error = %v, want dead-letter persistence failure", err)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)
 	}

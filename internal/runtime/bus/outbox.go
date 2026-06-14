@@ -72,7 +72,9 @@ func (o engineOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.E
 			if err := mutation.UpsertPipelineReceipt(ctx, intent.Event.ID(), "dead_letter", targetDeliveryFailureMessage(plan.TargetFailure)); err != nil {
 				return fmt.Errorf("persist pipeline receipt: %w", err)
 			}
-			o.bus.recordTargetDeliveryFailureMutation(ctx, mutation, intent.Event, plan)
+			if err := o.bus.recordTargetDeliveryFailureMutation(ctx, mutation, intent.Event, plan); err != nil {
+				return err
+			}
 		}
 		if o.bus.testLifecycleProbe != nil {
 			event := intent.Event
