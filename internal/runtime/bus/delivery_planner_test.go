@@ -162,6 +162,63 @@ func TestDeliveryRecipientPolicy_TargetedEventFailsWhenTargetDoesNotSubscribe(t 
 	}
 }
 
+func TestDeliveryRecipientPolicy_TargetedFlowInstanceWithoutSubscriberIsNotSubscribed(t *testing.T) {
+	policy := deliveryRecipientPolicy{
+		loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
+			return map[string]ActiveAgentDescriptor{}, true, nil
+		},
+		loadActiveTargetDescriptors: func(context.Context) ([]ActiveTargetDescriptor, bool, error) {
+			return []ActiveTargetDescriptor{{
+				FlowInstance: "component-scaffold/aaaaaaaa-1111-4111-8111-aaaaaaaa1111",
+			}}, true, nil
+		},
+	}
+	target := ActiveTargetDescriptor{FlowInstance: "component-scaffold/aaaaaaaa-1111-4111-8111-aaaaaaaa1111"}.Normalized()
+
+	manifest, err := policy.Evaluate(
+		context.Background(),
+		(events.NewProjectionEvent("", "component.service.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})).WithTargetRoute(events.RouteIdentity{
+			EntityID:     target.EntityID,
+			FlowInstance: target.FlowInstance,
+		}),
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("Evaluate: %v", err)
+	}
+	if manifest.TargetFailure != runtimepinrouting.FailureTargetNotSubscribed {
+		t.Fatalf("target failure = %q, want %q", manifest.TargetFailure, runtimepinrouting.FailureTargetNotSubscribed)
+	}
+}
+
+func TestDeliveryRecipientPolicy_TargetedFlowInstanceMissingIsUnreachableTerminated(t *testing.T) {
+	policy := deliveryRecipientPolicy{
+		loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
+			return map[string]ActiveAgentDescriptor{}, true, nil
+		},
+		loadActiveTargetDescriptors: func(context.Context) ([]ActiveTargetDescriptor, bool, error) {
+			return []ActiveTargetDescriptor{{
+				FlowInstance: "component-scaffold/live",
+			}}, true, nil
+		},
+	}
+
+	manifest, err := policy.Evaluate(
+		context.Background(),
+		(events.NewProjectionEvent("", "component.service.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})).WithTargetRoute(events.RouteIdentity{
+			EntityID:     ActiveTargetDescriptor{FlowInstance: "component-scaffold/missing"}.Normalized().EntityID,
+			FlowInstance: "component-scaffold/missing",
+		}),
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("Evaluate: %v", err)
+	}
+	if manifest.TargetFailure != runtimepinrouting.FailureTargetUnreachableTerminated {
+		t.Fatalf("target failure = %q, want %q", manifest.TargetFailure, runtimepinrouting.FailureTargetUnreachableTerminated)
+	}
+}
+
 func TestDeliveryPlanner_ComposesRoutingPolicyAndManifest(t *testing.T) {
 	planner := newDeliveryPlanner(
 		deliveryRouteResolver{

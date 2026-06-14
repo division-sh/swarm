@@ -45,6 +45,7 @@ type SQLiteRuntimeStore struct {
 
 var _ SchemaBootstrapper = (*SQLiteRuntimeStore)(nil)
 var _ runtimebus.EventStore = (*SQLiteRuntimeStore)(nil)
+var _ runtimebus.ActiveFlowInstanceDescriptorLister = (*SQLiteRuntimeStore)(nil)
 var _ runtimebus.RunLifecyclePersistence = (*SQLiteRuntimeStore)(nil)
 var _ runtimebus.RunLifecycleReadPersistence = (*SQLiteRuntimeStore)(nil)
 var _ runtimebus.StandaloneRuntimePlatformRunConvergencePersistence = (*SQLiteRuntimeStore)(nil)

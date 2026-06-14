@@ -44,23 +44,76 @@ func (eb *EventBus) activeAgentDescriptors(ctx context.Context) (map[string]Acti
 }
 
 func (eb *EventBus) PinRoutingDescriptors(ctx context.Context) ([]runtimepinrouting.Descriptor, error) {
-	descriptors, _, err := eb.activeAgentDescriptors(ctx)
+	descriptors, _, err := eb.activeTargetDescriptors(ctx)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]runtimepinrouting.Descriptor, 0, len(descriptors))
 	for _, descriptor := range descriptors {
 		descriptor = descriptor.Normalized()
-		if descriptor.AgentID == "" {
+		if descriptor.FlowInstance == "" && descriptor.EntityID == "" {
 			continue
 		}
 		out = append(out, runtimepinrouting.Descriptor{
-			ID:           descriptor.AgentID,
+			ID:           descriptor.ID,
 			EntityID:     descriptor.EntityID,
 			FlowInstance: descriptor.FlowInstance,
 		})
 	}
 	return out, nil
+}
+
+func (eb *EventBus) activeTargetDescriptors(ctx context.Context) ([]ActiveTargetDescriptor, bool, error) {
+	agentDescriptors, agentsOK, err := eb.activeAgentDescriptors(ctx)
+	if err != nil {
+		return nil, true, err
+	}
+	out := activeTargetDescriptorsFromAgents(agentDescriptors)
+	lister, flowOK := eb.store.(ActiveFlowInstanceDescriptorLister)
+	if !flowOK {
+		return out, agentsOK || len(out) > 0, nil
+	}
+	flowDescriptors, err := lister.ListActiveFlowInstanceDescriptors(ctx)
+	if err != nil {
+		return nil, true, err
+	}
+	out = appendActiveFlowInstanceTargetDescriptors(out, flowDescriptors)
+	return out, true, nil
+}
+
+func activeTargetDescriptorsFromAgents(descriptors map[string]ActiveAgentDescriptor) []ActiveTargetDescriptor {
+	if len(descriptors) == 0 {
+		return nil
+	}
+	out := make([]ActiveTargetDescriptor, 0, len(descriptors))
+	for _, descriptor := range descriptors {
+		out = appendActiveTargetDescriptor(out, descriptor.TargetDescriptor())
+	}
+	return out
+}
+
+func appendActiveFlowInstanceTargetDescriptors(out []ActiveTargetDescriptor, descriptors []ActiveFlowInstanceDescriptor) []ActiveTargetDescriptor {
+	if len(descriptors) == 0 {
+		return out
+	}
+	for _, descriptor := range descriptors {
+		out = appendActiveTargetDescriptor(out, descriptor.TargetDescriptor())
+	}
+	return out
+}
+
+func appendActiveTargetDescriptor(out []ActiveTargetDescriptor, descriptor ActiveTargetDescriptor) []ActiveTargetDescriptor {
+	descriptor = descriptor.Normalized()
+	if descriptor.FlowInstance == "" && descriptor.EntityID == "" {
+		return out
+	}
+	for _, existing := range out {
+		existing = existing.Normalized()
+		if existing.ID == descriptor.ID && existing.EntityID == descriptor.EntityID && existing.FlowInstance == descriptor.FlowInstance {
+			return out
+		}
+	}
+	return append(out, descriptor)
 }
 
 // RegisterRuntimeActiveAgentDescriptor adds in-memory active-agent metadata for

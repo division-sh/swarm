@@ -293,3 +293,41 @@ func TestPostgresStoreListFlowInstanceRoutesFiltersTerminatedInstances(t *testin
 		t.Fatalf("listed routes = %#v, want only active flow-instance route", routes)
 	}
 }
+
+func TestPostgresStoreListActiveFlowInstanceDescriptorsFiltersToActiveTemplates(t *testing.T) {
+	ctx := context.Background()
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ensureFlowInstanceRouteTables(t, ctx, db)
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
+		VALUES
+			('component-scaffold/active', 'component-scaffold', 'template', '{}'::jsonb, 'active', NOW()),
+			('component-scaffold/terminated', 'component-scaffold', 'template', '{}'::jsonb, 'terminated', NOW()),
+			('service-owner', 'service-owner', 'static', '{}'::jsonb, 'active', NOW())
+	`); err != nil {
+		t.Fatalf("seed flow_instances: %v", err)
+	}
+
+	descriptors, err := pg.ListActiveFlowInstanceDescriptors(ctx)
+	if err != nil {
+		t.Fatalf("ListActiveFlowInstanceDescriptors: %v", err)
+	}
+	if len(descriptors) != 1 {
+		t.Fatalf("descriptors = %#v, want exactly active template descriptor", descriptors)
+	}
+	got := descriptors[0]
+	if got.FlowInstance != "component-scaffold/active" {
+		t.Fatalf("FlowInstance = %q, want component-scaffold/active", got.FlowInstance)
+	}
+	if got.InstanceID != "active" {
+		t.Fatalf("InstanceID = %q, want active", got.InstanceID)
+	}
+	if got.EntityID != runtimeflowidentity.EntityID("component-scaffold/active") {
+		t.Fatalf("EntityID = %q, want derived flow instance entity id", got.EntityID)
+	}
+	if got.FlowTemplate != "component-scaffold" {
+		t.Fatalf("FlowTemplate = %q, want component-scaffold", got.FlowTemplate)
+	}
+}
