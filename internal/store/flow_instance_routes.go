@@ -9,7 +9,12 @@ import (
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
+
+type flowInstanceDescriptorQueryer interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
 
 func (s *PostgresStore) UpsertFlowInstanceRoute(ctx context.Context, route runtimebus.FlowInstanceRouteRecord) error {
 	if s == nil || s.DB == nil {
@@ -182,7 +187,11 @@ func (s *PostgresStore) ListActiveFlowInstanceDescriptors(ctx context.Context) (
 	if s == nil || s.DB == nil {
 		return nil, fmt.Errorf("postgres store is required for active flow instance descriptors")
 	}
-	rows, err := s.DB.QueryContext(ctx, `
+	q := flowInstanceDescriptorQueryer(s.DB)
+	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		q = tx
+	}
+	rows, err := q.QueryContext(ctx, `
 		SELECT
 			COALESCE(instance_id, ''),
 			COALESCE(flow_template, '')
@@ -219,7 +228,11 @@ func (s *SQLiteRuntimeStore) ListActiveFlowInstanceDescriptors(ctx context.Conte
 	if s == nil || s.DB == nil {
 		return nil, fmt.Errorf("sqlite runtime store is required for active flow instance descriptors")
 	}
-	rows, err := s.DB.QueryContext(ctx, `
+	q := flowInstanceDescriptorQueryer(s.DB)
+	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		q = tx
+	}
+	rows, err := q.QueryContext(ctx, `
 		SELECT
 			COALESCE(instance_id, ''),
 			COALESCE(flow_template, '')

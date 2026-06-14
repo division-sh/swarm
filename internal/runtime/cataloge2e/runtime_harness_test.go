@@ -211,6 +211,7 @@ func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHar
 			t.Fatalf("runtime.Start: %v", err)
 		}
 	}
+	startedAt := catalogHarnessDBTime(t, db)
 	t.Cleanup(func() { _ = rt.Shutdown() })
 
 	return &runtimeHarness{
@@ -224,12 +225,21 @@ func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHar
 		llm:            llmRuntime,
 		bundle:         bundle,
 		initialState:   strings.TrimSpace(rootSchema.InitialState),
-		startedAt:      time.Now().UTC(),
+		startedAt:      startedAt,
 		publishedIDs:   map[string]struct{}{},
 		publishedOrder: []string{},
 		eventEntityIDs: map[string]string{},
 		previews:       map[string]runtimepipeline.HandlerPreview{},
 	}
+}
+
+func catalogHarnessDBTime(t testing.TB, db *sql.DB) time.Time {
+	t.Helper()
+	var out time.Time
+	if err := db.QueryRowContext(context.Background(), `SELECT NOW()`).Scan(&out); err != nil {
+		t.Fatalf("query catalog harness db time: %v", err)
+	}
+	return out.UTC()
 }
 
 func loadAgentFixtures(t testing.TB, fixtureRoot string, llmRuntime *scriptedLLMRuntime) {
