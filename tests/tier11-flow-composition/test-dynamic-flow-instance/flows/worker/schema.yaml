@@ -3,10 +3,11 @@ namespace: worker
 initial_state: idle
 terminal_states: [complete]
 states: [idle, working, complete]
-auto_emit_on_create:
-  event: worker.ready
+instance_variables:
+  worker_id: string
+  task_label: string
 pins:
   inputs:
     events: [work.assign]
   outputs:
-    events: [worker.ready, work.done]
+    events: [work.done]

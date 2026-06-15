@@ -1,6 +1,4 @@
-worker.ready:
-  entity_id: string
 work.assign:
-  entity_id: string
+  task_label: string
 work.done:
-  entity_id: string
+  task_label: string

@@ -5,8 +5,9 @@ task-handler:
   produces: [work.done]
   event_handlers:
     work.assign:
-      create_entity: true
       advances_to: working
       emit:
         event: work.done
         broadcast: true
+        fields:
+          task_label: payload.task_label
