@@ -129,6 +129,7 @@ func (p deliveryPlanner) Plan(ctx context.Context, evt events.Event) (eventDeliv
 	routePlan.AddDeliveryIntents(routedRootInputFlowNodeDeliveryIntentsForNoTargetEvent(evt, routing.RoutedRecipients)...)
 	routePlan.AddDeliveryIntents(routedNodeDeliveryIntentsForNoRecipientFlowInstanceEvent(evt, routing.RoutedRecipients, recipients, persisted)...)
 	routePlan.AddDeliveryIntents(routedNodeDeliveryIntentsForNoTargetEvent(evt, routing.RoutedRecipients, recipients, persisted)...)
+	routePlan.AddDeliveryIntents(targetedRoutedNodeDeliveryIntents(evt, routing.RoutedRecipients)...)
 	routePlan.AddDeliveryIntents(internalDeliveryIntentsForPlan(evt, recipients, persisted, routing.RoutedRecipients)...)
 	if routePlan.TargetFailure != "" && hasInternalRoutedSubscriberForTarget(evt, routing.RoutedRecipients) {
 		routePlan.TargetFailure = ""
@@ -261,6 +262,37 @@ func routedEventKeysForPlan(evt events.Event) []string {
 	out := []string{eventType}
 	if concrete := concreteFlowInstanceEventKey(evt); concrete != "" {
 		out = append(out, concrete)
+	}
+	out = append(out, targetedConcreteEventKeysForPlan(evt)...)
+	return uniqueStrings(out)
+}
+
+func targetedConcreteEventKeysForPlan(evt events.Event) []string {
+	eventType := strings.Trim(strings.TrimSpace(string(evt.Type())), "/")
+	if eventType == "" {
+		return nil
+	}
+	targets := eventDeliveryTargetRoutes(evt)
+	if len(targets) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(targets))
+	for _, target := range targets {
+		target = target.Normalized()
+		flowInstance := strings.Trim(strings.TrimSpace(target.FlowInstance), "/")
+		if flowInstance == "" {
+			continue
+		}
+		staticScope := runtimeflowidentity.SemanticScopeFromInstancePath(flowInstance)
+		if staticScope == "" {
+			continue
+		}
+		localEvent := eventContextLocalEventForFlowInstance(eventType, staticScope)
+		if localEvent == "" {
+			continue
+		}
+		out = append(out, flowInstance+"/"+localEvent)
+		out = append(out, localEvent)
 	}
 	return uniqueStrings(out)
 }
@@ -424,6 +456,43 @@ func internalDeliveryIntentsForPlan(evt events.Event, recipients, persisted []st
 		}
 	}
 	return routePlanDeliveryIntentsFromRoutes(out, routePlanSourceInternalTarget, routePlanReasonInternalCarrier)
+}
+
+func targetedRoutedNodeDeliveryIntents(evt events.Event, routed []Subscriber) []RoutePlanDeliveryIntent {
+	routes := targetedRoutedNodeDeliveryRoutes(evt, routed)
+	if len(routes) == 0 {
+		return nil
+	}
+	return routePlanDeliveryIntentsFromRoutes(routes, routePlanSourceInternalTarget, routePlanReasonRouteTableNode)
+}
+
+func targetedRoutedNodeDeliveryRoutes(evt events.Event, routed []Subscriber) []events.DeliveryRoute {
+	targets := eventDeliveryTargetRoutes(evt)
+	if len(targets) == 0 || len(routed) == 0 {
+		return nil
+	}
+	out := make([]events.DeliveryRoute, 0, len(targets)*len(routed))
+	for _, target := range targets {
+		target = target.Normalized()
+		if target.Empty() {
+			continue
+		}
+		for _, subscriber := range routed {
+			subscriberID := strings.TrimSpace(subscriber.ID)
+			if subscriberID == "" || strings.TrimSpace(subscriber.Type) != "node" {
+				continue
+			}
+			if !routeMatchesInternalSubscriber(target, subscriber) {
+				continue
+			}
+			out = append(out, events.DeliveryRoute{
+				SubscriberType: "node",
+				SubscriberID:   subscriberID,
+				Target:         target,
+			})
+		}
+	}
+	return events.NormalizeDeliveryRoutes(out)
 }
 
 func routedNodeDeliveryIntentsForNoTargetEvent(evt events.Event, routed []Subscriber, recipients, persisted []string) []RoutePlanDeliveryIntent {
