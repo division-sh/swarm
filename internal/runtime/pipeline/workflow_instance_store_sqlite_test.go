@@ -378,6 +378,7 @@ func createSQLiteWorkflowInstanceStoreTestSchema(t *testing.T, db *sql.DB) {
 			event_id TEXT,
 			subscriber_type TEXT,
 			subscriber_id TEXT,
+			delivery_target_route TEXT,
 			status TEXT,
 			retry_count INTEGER,
 			reason_code TEXT,

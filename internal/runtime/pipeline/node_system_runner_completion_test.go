@@ -167,6 +167,162 @@ func TestSystemNodeRunner_TargetSetSameNodeSettlesEachTargetDelivery(t *testing.
 	}
 }
 
+func TestSystemNodeRunner_TargetSetSameNodeFailureKeepsSiblingPending(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	ctx := context.Background()
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	entityID := uuid.NewString()
+	seedSystemNodeCompletionEventWithoutDelivery(t, db, runID, eventID, entityID)
+	targetOne := events.RouteIdentity{FlowInstance: "worker/w-001", EntityID: "worker/w-001"}
+	targetTwo := events.RouteIdentity{FlowInstance: "worker/w-002", EntityID: "worker/w-002"}
+	seedSystemNodeCompletionTargetDelivery(t, db, runID, eventID, "task-handler", targetOne)
+	seedSystemNodeCompletionTargetDelivery(t, db, runID, eventID, "task-handler", targetTwo)
+
+	attempts := 0
+	runner := newSystemNodeRunner("task-handler", &systemNodeCompletionBus{}, db, func() []events.EventType {
+		return []events.EventType{"worker/work.assign"}
+	}, func(context.Context, events.Event) error {
+		attempts++
+		if attempts == 1 {
+			return errors.New("temporary target failure")
+		}
+		return nil
+	}, func(context.Context) (bool, error) { return true, nil })
+	runner.SetRetryPolicyForTest(2, func(int) time.Duration {
+		targetOneDelivery := loadSystemNodeCompletionTargetDelivery(t, db, eventID, "task-handler", targetOne)
+		if targetOneDelivery.Status != "failed" || targetOneDelivery.Reason != "handler_error" || targetOneDelivery.RetryCount != 1 || targetOneDelivery.LastError == "" {
+			t.Fatalf("target one retry delivery = %+v, want failed/handler_error retry=1 with error", targetOneDelivery)
+		}
+		if got := loadSystemNodeCompletionTargetDeliveryStatus(t, db, eventID, "task-handler", targetTwo); got != "pending" {
+			t.Fatalf("target two status during target one retry = %q, want pending", got)
+		}
+		return 0
+	})
+
+	base := events.NewProjectionEvent(eventID,
+		"worker/work.assign", "", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
+	runner.ProcessEventForTest(ctx, base.WithTargetRoute(targetOne))
+
+	if attempts != 2 {
+		t.Fatalf("attempts = %d, want 2", attempts)
+	}
+	if got := loadSystemNodeCompletionTargetDeliveryStatus(t, db, eventID, "task-handler", targetOne); got != "delivered" {
+		t.Fatalf("target one final status = %q, want delivered", got)
+	}
+	if got := loadSystemNodeCompletionTargetDeliveryStatus(t, db, eventID, "task-handler", targetTwo); got != "pending" {
+		t.Fatalf("target two final status = %q, want pending", got)
+	}
+}
+
+func TestSystemNodeRunner_TargetSetSameNodeDeadLetterKeepsSiblingExecutable(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	ctx := context.Background()
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	entityID := uuid.NewString()
+	seedSystemNodeCompletionEventWithoutDelivery(t, db, runID, eventID, entityID)
+	targetOne := events.RouteIdentity{FlowInstance: "worker/w-001", EntityID: "worker/w-001"}
+	targetTwo := events.RouteIdentity{FlowInstance: "worker/w-002", EntityID: "worker/w-002"}
+	seedSystemNodeCompletionTargetDelivery(t, db, runID, eventID, "task-handler", targetOne)
+	seedSystemNodeCompletionTargetDelivery(t, db, runID, eventID, "task-handler", targetTwo)
+
+	failingRunner := newSystemNodeRunner("task-handler", &systemNodeCompletionBus{}, db, func() []events.EventType {
+		return []events.EventType{"worker/work.assign"}
+	}, func(context.Context, events.Event) error {
+		return errors.New("permanent target failure")
+	}, func(context.Context) (bool, error) { return true, nil })
+	failingRunner.SetRetryPolicyForTest(1, func(int) time.Duration { return 0 })
+
+	base := events.NewProjectionEvent(eventID,
+		"worker/work.assign", "", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
+	failingRunner.ProcessEventForTest(ctx, base.WithTargetRoute(targetOne))
+
+	targetOneDelivery := loadSystemNodeCompletionTargetDelivery(t, db, eventID, "task-handler", targetOne)
+	if targetOneDelivery.Status != "dead_letter" || targetOneDelivery.Reason != "retry_exhausted" || targetOneDelivery.RetryCount != 1 || targetOneDelivery.LastError == "" {
+		t.Fatalf("target one dead-letter delivery = %+v, want dead_letter/retry_exhausted retry=1 with error", targetOneDelivery)
+	}
+	if got := loadSystemNodeCompletionTargetDeliveryStatus(t, db, eventID, "task-handler", targetTwo); got != "pending" {
+		t.Fatalf("target two status after target one dead-letter = %q, want pending", got)
+	}
+
+	successRunner := newSystemNodeRunner("task-handler", &systemNodeCompletionBus{}, db, func() []events.EventType {
+		return []events.EventType{"worker/work.assign"}
+	}, func(context.Context, events.Event) error {
+		return nil
+	}, func(context.Context) (bool, error) { return true, nil })
+	successRunner.ProcessEventForTest(ctx, base.WithTargetRoute(targetTwo))
+	if got := loadSystemNodeCompletionTargetDeliveryStatus(t, db, eventID, "task-handler", targetTwo); got != "delivered" {
+		t.Fatalf("target two status after target one dead-letter = %q, want delivered", got)
+	}
+}
+
+func TestSQLiteSystemNodeTargetSetSameNodeTransitionsAreTargetScoped(t *testing.T) {
+	db := newSQLiteWorkflowInstanceStoreTestDB(t)
+	store := newSQLiteWorkflowInstanceStoreForTest(t, db)
+	ctx := context.Background()
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	entityID := uuid.NewString()
+	seedSQLiteSystemNodeCompletionEventWithoutDelivery(t, db, runID, eventID, entityID)
+	targetOne := events.RouteIdentity{FlowInstance: "worker/w-001", EntityID: "worker/w-001"}
+	targetTwo := events.RouteIdentity{FlowInstance: "worker/w-002", EntityID: "worker/w-002"}
+	seedSQLiteSystemNodeCompletionTargetDelivery(t, db, runID, eventID, "task-handler", targetOne)
+	seedSQLiteSystemNodeCompletionTargetDelivery(t, db, runID, eventID, "task-handler", targetTwo)
+
+	authorized, err := store.SystemNodeDeliveryAuthorizedForTarget(ctx, "task-handler", eventID, targetOne, DefaultSystemNodeRetryLimit)
+	if err != nil {
+		t.Fatalf("SystemNodeDeliveryAuthorizedForTarget target one: %v", err)
+	}
+	if !authorized {
+		t.Fatal("target one authorized = false, want true")
+	}
+	if err := store.MarkSystemNodeDeliveryInProgressForTarget(ctx, "task-handler", eventID, targetOne, DefaultSystemNodeRetryLimit); err != nil {
+		t.Fatalf("MarkSystemNodeDeliveryInProgressForTarget target one: %v", err)
+	}
+	if got := loadSQLiteSystemNodeCompletionTargetDeliveryStatus(t, db, eventID, "task-handler", targetOne); got != "in_progress" {
+		t.Fatalf("target one sqlite status = %q, want in_progress", got)
+	}
+	if got := loadSQLiteSystemNodeCompletionTargetDeliveryStatus(t, db, eventID, "task-handler", targetTwo); got != "pending" {
+		t.Fatalf("target two sqlite status after target one in-progress = %q, want pending", got)
+	}
+
+	if err := store.MarkSystemNodeDeliveryFailedForTarget(ctx, "task-handler", eventID, targetOne, "handler_error", "temporary target failure", 1, DefaultSystemNodeRetryLimit); err != nil {
+		t.Fatalf("MarkSystemNodeDeliveryFailedForTarget target one: %v", err)
+	}
+	targetOneDelivery := loadSQLiteSystemNodeCompletionTargetDelivery(t, db, eventID, "task-handler", targetOne)
+	if targetOneDelivery.Status != "failed" || targetOneDelivery.Reason != "handler_error" || targetOneDelivery.RetryCount != 1 || targetOneDelivery.LastError == "" {
+		t.Fatalf("target one sqlite failed delivery = %+v, want failed/handler_error retry=1 with error", targetOneDelivery)
+	}
+	if got := loadSQLiteSystemNodeCompletionTargetDeliveryStatus(t, db, eventID, "task-handler", targetTwo); got != "pending" {
+		t.Fatalf("target two sqlite status after target one failed = %q, want pending", got)
+	}
+
+	sideEffects := systemNodeDeadLetterReceiptSideEffects("task-handler", eventID, "retry_exhausted", "temporary target failure", DefaultSystemNodeRetryLimit, targetOne)
+	if err := store.MarkSystemNodeDeliveryDeadLetterForTarget(ctx, "task-handler", eventID, targetOne, "retry_exhausted", "temporary target failure", DefaultSystemNodeRetryLimit, sideEffects); err != nil {
+		t.Fatalf("MarkSystemNodeDeliveryDeadLetterForTarget target one: %v", err)
+	}
+	targetOneDelivery = loadSQLiteSystemNodeCompletionTargetDelivery(t, db, eventID, "task-handler", targetOne)
+	if targetOneDelivery.Status != "dead_letter" || targetOneDelivery.Reason != "retry_exhausted" || targetOneDelivery.RetryCount != DefaultSystemNodeRetryLimit || targetOneDelivery.LastError == "" {
+		t.Fatalf("target one sqlite dead-letter delivery = %+v, want dead_letter/retry_exhausted retry=%d with error", targetOneDelivery, DefaultSystemNodeRetryLimit)
+	}
+	targetTwoProcessed, err := store.SystemNodeProcessedForTarget(ctx, "task-handler", eventID, targetTwo)
+	if err != nil {
+		t.Fatalf("SystemNodeProcessedForTarget target two: %v", err)
+	}
+	if targetTwoProcessed {
+		t.Fatal("target two processed = true after target one dead-letter, want false")
+	}
+
+	sideEffects = systemNodeProcessedReceiptSideEffects("task-handler", eventID, targetTwo)
+	if err := store.MarkSystemNodeProcessedAndSettleDeliveryForTarget(ctx, "task-handler", eventID, targetTwo, sideEffects); err != nil {
+		t.Fatalf("MarkSystemNodeProcessedAndSettleDeliveryForTarget target two: %v", err)
+	}
+	if got := loadSQLiteSystemNodeCompletionTargetDeliveryStatus(t, db, eventID, "task-handler", targetTwo); got != "delivered" {
+		t.Fatalf("target two sqlite status after target one dead-letter = %q, want delivered", got)
+	}
+}
+
 func TestSystemNodeRunnerLifecycleProbeEmitsHandlerBoundaries(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := context.Background()
@@ -531,6 +687,13 @@ func TestSystemNodeProcessedSettlementFailsWithTerminalNodeDeliveryAuthority(t *
 	}
 }
 
+type systemNodeCompletionTargetDelivery struct {
+	Status     string
+	Reason     string
+	RetryCount int
+	LastError  string
+}
+
 func seedSystemNodeCompletionRun(t *testing.T, db *sql.DB, runID, eventID, entityID string, nodeIDs ...string) {
 	t.Helper()
 	nodeID := "terminal-node"
@@ -549,6 +712,29 @@ func seedSystemNodeCompletionRun(t *testing.T, db *sql.DB, runID, eventID, entit
 	}
 }
 
+func seedSQLiteSystemNodeCompletionEventWithoutDelivery(t *testing.T, db *sql.DB, runID, eventID, entityID string) {
+	t.Helper()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, started_at)
+		VALUES (?, 'running', ?)
+	`, runID, now); err != nil {
+		t.Fatalf("seed sqlite run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			event_id, run_id, event_name, entity_id, flow_instance, scope, payload,
+			chain_depth, produced_by_type, created_at
+		) VALUES (
+			?, ?, 'worker/work.assign', ?, 'example', 'entity', '{}',
+			0, 'external', ?
+		)
+	`, eventID, runID, entityID, now); err != nil {
+		t.Fatalf("seed sqlite event: %v", err)
+	}
+}
+
 func seedSystemNodeCompletionTargetDelivery(t *testing.T, db *sql.DB, runID, eventID, nodeID string, target events.RouteIdentity) {
 	t.Helper()
 	if _, err := db.ExecContext(context.Background(), `
@@ -562,20 +748,59 @@ func seedSystemNodeCompletionTargetDelivery(t *testing.T, db *sql.DB, runID, eve
 	}
 }
 
+func seedSQLiteSystemNodeCompletionTargetDelivery(t *testing.T, db *sql.DB, runID, eventID, nodeID string, target events.RouteIdentity) {
+	t.Helper()
+	if _, err := db.ExecContext(context.Background(), `
+		INSERT INTO event_deliveries (
+			delivery_id, run_id, event_id, subscriber_type, subscriber_id, delivery_target_route, status, retry_count, reason_code, created_at
+		) VALUES (
+			?, ?, ?, 'node', ?, ?, 'pending', 0, 'matched_node_subscription', ?
+		)
+	`, uuid.NewString(), runID, eventID, nodeID, systemNodeRouteIdentityJSON(target), time.Now().UTC()); err != nil {
+		t.Fatalf("seed sqlite targeted node delivery: %v", err)
+	}
+}
+
 func loadSystemNodeCompletionTargetDeliveryStatus(t *testing.T, db *sql.DB, eventID, nodeID string, target events.RouteIdentity) string {
 	t.Helper()
-	var status string
+	return loadSystemNodeCompletionTargetDelivery(t, db, eventID, nodeID, target).Status
+}
+
+func loadSystemNodeCompletionTargetDelivery(t *testing.T, db *sql.DB, eventID, nodeID string, target events.RouteIdentity) systemNodeCompletionTargetDelivery {
+	t.Helper()
+	var delivery systemNodeCompletionTargetDelivery
 	if err := db.QueryRowContext(context.Background(), `
-		SELECT COALESCE(status, '')
+		SELECT COALESCE(status, ''), COALESCE(reason_code, ''), COALESCE(retry_count, 0), COALESCE(last_error, '')
 		FROM event_deliveries
 		WHERE event_id = $1::uuid
 		  AND subscriber_type = 'node'
 		  AND subscriber_id = $2
 		  AND delivery_target_route = $3::jsonb
-	`, eventID, nodeID, systemNodeRouteIdentityJSON(target)).Scan(&status); err != nil {
+	`, eventID, nodeID, systemNodeRouteIdentityJSON(target)).Scan(&delivery.Status, &delivery.Reason, &delivery.RetryCount, &delivery.LastError); err != nil {
 		t.Fatalf("load targeted node delivery: %v", err)
 	}
-	return status
+	return delivery
+}
+
+func loadSQLiteSystemNodeCompletionTargetDeliveryStatus(t *testing.T, db *sql.DB, eventID, nodeID string, target events.RouteIdentity) string {
+	t.Helper()
+	return loadSQLiteSystemNodeCompletionTargetDelivery(t, db, eventID, nodeID, target).Status
+}
+
+func loadSQLiteSystemNodeCompletionTargetDelivery(t *testing.T, db *sql.DB, eventID, nodeID string, target events.RouteIdentity) systemNodeCompletionTargetDelivery {
+	t.Helper()
+	var delivery systemNodeCompletionTargetDelivery
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT COALESCE(status, ''), COALESCE(reason_code, ''), COALESCE(retry_count, 0), COALESCE(last_error, '')
+		FROM event_deliveries
+		WHERE event_id = ?
+		  AND subscriber_type = 'node'
+		  AND subscriber_id = ?
+		  AND COALESCE(delivery_target_route, '{}') = ?
+	`, eventID, nodeID, systemNodeRouteIdentityJSON(target)).Scan(&delivery.Status, &delivery.Reason, &delivery.RetryCount, &delivery.LastError); err != nil {
+		t.Fatalf("load sqlite targeted node delivery: %v", err)
+	}
+	return delivery
 }
 
 func seedSystemNodeCompletionEventWithoutDelivery(t *testing.T, db *sql.DB, runID, eventID, entityID string) {
