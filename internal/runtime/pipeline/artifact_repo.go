@@ -259,6 +259,18 @@ func (pc *PipelineCoordinator) queueArtifactRepoResultEvent(ctx context.Context,
 		normalizedArtifactRepoFlowInstance(asString(execCtx.Request.State.StateCarrier.Metadata["flow_path"])),
 		normalizedArtifactRepoFlowInstance(execCtx.Request.Event.FlowInstance()),
 	)
+	sourceRoute := events.RouteIdentity{
+		FlowID:       strings.TrimSpace(execCtx.Request.FlowID.String()),
+		FlowInstance: flowInstance,
+		EntityID:     entityID,
+	}.Normalized()
+	envelope := events.EventEnvelope{
+		EntityID:     entityID,
+		FlowInstance: flowInstance,
+	}
+	if !sourceRoute.Empty() {
+		envelope = events.EnvelopeForSourceRoute(envelope, sourceRoute)
+	}
 	evt := events.NewChildEvent(
 		uuid.NewString(),
 		events.EventType(eventType),
@@ -267,10 +279,7 @@ func (pc *PipelineCoordinator) queueArtifactRepoResultEvent(ctx context.Context,
 		mustJSON(payload),
 		chainDepth,
 		execCtx.Request.Event,
-		events.EventEnvelope{
-			EntityID:     entityID,
-			FlowInstance: flowInstance,
-		},
+		envelope,
 		time.Now().UTC(),
 	)
 	return runtimeengine.QueueActionEmitIntent(ctx, runtimeengine.EmitIntent{
