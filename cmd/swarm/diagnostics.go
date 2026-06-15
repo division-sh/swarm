@@ -33,6 +33,7 @@ type diagnosticTraceOptions struct {
 	apiOptions       rootCommandOptions
 	follow           bool
 	noRetry          bool
+	deliveryDetail   bool
 	since            string
 	until            string
 	limit            int
@@ -111,12 +112,16 @@ type diagnosticRunTraceRow struct {
 	EventName             string `json:"event_name"`
 	EventCreatedAt        string `json:"event_created_at"`
 	EntityID              string `json:"entity_id,omitempty"`
+	DeliveryID            string `json:"delivery_id,omitempty"`
 	DeliveryStatus        string `json:"delivery_status,omitempty"`
 	DeliveryReasonCode    string `json:"delivery_reason_code,omitempty"`
 	DeliveryLastError     string `json:"delivery_last_error,omitempty"`
 	DeliveryRetryCount    int    `json:"delivery_retry_count,omitempty"`
 	DeliveryRetryEligible bool   `json:"delivery_retry_eligible,omitempty"`
 	DeliveryTerminal      bool   `json:"delivery_terminal,omitempty"`
+	DeliveryCreatedAt     string `json:"delivery_created_at,omitempty"`
+	DeliveryStartedAt     string `json:"delivery_started_at,omitempty"`
+	DeliveryDeliveredAt   string `json:"delivery_delivered_at,omitempty"`
 	SubscriberType        string `json:"subscriber_type,omitempty"`
 	SubscriberID          string `json:"subscriber_id,omitempty"`
 	SessionID             string `json:"session_id,omitempty"`
@@ -260,6 +265,7 @@ func newTraceCommand(opts rootCommandOptions) *cobra.Command {
 	}
 	cmd.Flags().BoolVarP(&traceOpts.follow, "follow", "f", false, "Follow live trace rows through /v1/ws run.subscribe_trace")
 	cmd.Flags().BoolVar(&traceOpts.noRetry, "no-retry", false, "Disable trace follow reconnect/recovery retries")
+	cmd.Flags().BoolVar(&traceOpts.deliveryDetail, "delivery-detail", false, "Show snapshot delivery lifecycle fields from RunTraceRow")
 	cmd.Flags().StringVar(&traceOpts.since, "since", "", "Snapshot-only RFC3339 trace materialization watermark")
 	cmd.Flags().StringVar(&traceOpts.until, "until", "", "Snapshot-only inclusive RFC3339 trace materialization upper bound")
 	cmd.Flags().IntVar(&traceOpts.limit, "limit", 0, "Snapshot-only page size, 1-2000")
@@ -485,7 +491,7 @@ func runDiagnosticTraceCommand(ctx context.Context, out, errOut io.Writer, opts 
 	if err := validateDiagnosticRunTraceResult(result); err != nil {
 		return returnCLIAPIError(errOut, err, diagnosticRunAPIErrorClassifier())
 	}
-	writeDiagnosticRunTrace(out, runID, result)
+	writeDiagnosticRunTrace(out, runID, result, opts.deliveryDetail)
 	return nil
 }
 
@@ -556,6 +562,7 @@ func (o diagnosticTraceOptions) followParams() (map[string]any, error) {
 		{name: "--until", set: o.untilSet},
 		{name: "--limit", set: o.limitSet},
 		{name: "--cursor", set: o.cursorSet},
+		{name: "--delivery-detail", set: o.deliveryDetail},
 	} {
 		if flag.set {
 			return nil, fmt.Errorf("%s is not supported with --follow", flag.name)
@@ -1047,6 +1054,18 @@ func validateDiagnosticRunTraceResult(result diagnosticRunTraceResult) error {
 		if err := validateRequiredTimestamp(fmt.Sprintf("trace[%d].event_created_at", i), row.EventCreatedAt); err != nil {
 			return err
 		}
+		for _, field := range []struct {
+			name  string
+			value string
+		}{
+			{name: "delivery_created_at", value: row.DeliveryCreatedAt},
+			{name: "delivery_started_at", value: row.DeliveryStartedAt},
+			{name: "delivery_delivered_at", value: row.DeliveryDeliveredAt},
+		} {
+			if err := validateOptionalTimestamp(fmt.Sprintf("trace[%d].%s", i, field.name), field.value); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -1123,6 +1142,17 @@ func validateRequiredTimestamp(field, value string) error {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return fmt.Errorf("malformed result: %s is required", field)
+	}
+	if _, err := time.Parse(time.RFC3339Nano, value); err != nil {
+		return fmt.Errorf("malformed result: %s must be an RFC3339 timestamp: %w", field, err)
+	}
+	return nil
+}
+
+func validateOptionalTimestamp(field, value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
 	}
 	if _, err := time.Parse(time.RFC3339Nano, value); err != nil {
 		return fmt.Errorf("malformed result: %s must be an RFC3339 timestamp: %w", field, err)
@@ -1219,13 +1249,15 @@ func writeDiagnosticRunDiagnosis(out io.Writer, result diagnosticRunDiagnosisRes
 	}
 }
 
-func writeDiagnosticRunTrace(out io.Writer, runID string, result diagnosticRunTraceResult) {
+func writeDiagnosticRunTrace(out io.Writer, runID string, result diagnosticRunTraceResult, deliveryDetail bool) {
 	if out == nil {
 		return
 	}
 	fmt.Fprintf(out, "run trace: run_id=%s\n", runID)
 	if len(result.Trace) == 0 {
 		fmt.Fprintln(out, "no trace rows")
+	} else if deliveryDetail {
+		writeDiagnosticRunTraceDeliveryDetail(out, result.Trace)
 	} else {
 		fmt.Fprintln(out, "EVENT AT\tEVENT\tEVENT ID\tDELIVERY\tSUBSCRIBER\tSESSION\tTURN")
 		for _, row := range result.Trace {
@@ -1244,6 +1276,46 @@ func writeDiagnosticRunTrace(out io.Writer, runID string, result diagnosticRunTr
 	if result.NextCursor != "" {
 		fmt.Fprintf(out, "next_cursor=%s\n", result.NextCursor)
 	}
+}
+
+func writeDiagnosticRunTraceDeliveryDetail(out io.Writer, rows []diagnosticRunTraceRow) {
+	fmt.Fprintln(out, "EVENT AT\tEVENT\tEVENT ID\tDELIVERY ID\tSUBSCRIBER\tSTATUS\tREASON\tDELIVERY CREATED\tDELIVERY STARTED\tDELIVERY DELIVERED\tQUEUE WAIT\tEXECUTION TIME\tSESSION\tTURN")
+	for _, row := range rows {
+		fmt.Fprintf(out, "%s\t%s\t%s\t%s\t%s/%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			row.EventCreatedAt,
+			row.EventName,
+			row.EventID,
+			emptyDash(row.DeliveryID),
+			emptyDash(row.SubscriberType),
+			emptyDash(row.SubscriberID),
+			emptyDash(row.DeliveryStatus),
+			emptyDash(row.DeliveryReasonCode),
+			emptyDash(row.DeliveryCreatedAt),
+			emptyDash(row.DeliveryStartedAt),
+			emptyDash(row.DeliveryDeliveredAt),
+			traceDuration(row.DeliveryCreatedAt, row.DeliveryStartedAt),
+			traceDuration(row.DeliveryStartedAt, row.DeliveryDeliveredAt),
+			emptyDash(row.SessionID),
+			emptyDash(firstNonEmpty(row.TurnID, row.TurnTriggerEventType)),
+		)
+	}
+}
+
+func traceDuration(start, end string) string {
+	start = strings.TrimSpace(start)
+	end = strings.TrimSpace(end)
+	if start == "" || end == "" {
+		return "-"
+	}
+	startAt, err := time.Parse(time.RFC3339Nano, start)
+	if err != nil {
+		return "-"
+	}
+	endAt, err := time.Parse(time.RFC3339Nano, end)
+	if err != nil {
+		return "-"
+	}
+	return endAt.Sub(startAt).Round(time.Millisecond).String()
 }
 
 func writeDiagnosticHealth(out io.Writer, result diagnosticHealthCheckResult) {

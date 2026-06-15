@@ -424,6 +424,65 @@ func TestTraceUsesRunTraceSnapshot(t *testing.T) {
 	}
 }
 
+func TestTraceDeliveryDetailRendersRunTraceLifecycleFields(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	server, requests := newDiagnosticSuccessServer(t, func(req jsonRPCRequest, _ int) map[string]any {
+		if req.Method != "run.trace" {
+			t.Fatalf("method = %q, want run.trace", req.Method)
+		}
+		wantParams := map[string]any{"run_id": "run-1", "limit": float64(1)}
+		if !reflect.DeepEqual(req.Params, wantParams) {
+			t.Fatalf("params = %#v, want %#v", req.Params, wantParams)
+		}
+		return map[string]any{
+			"trace": []any{map[string]any{
+				"event_id":              "event-1",
+				"event_name":            "scan.requested",
+				"event_created_at":      "2026-05-13T10:00:01Z",
+				"delivery_id":           "delivery-1",
+				"delivery_status":       "delivered",
+				"delivery_reason_code":  "node_processed",
+				"delivery_created_at":   "2026-05-13T10:00:02Z",
+				"delivery_started_at":   "2026-05-13T10:00:04Z",
+				"delivery_delivered_at": "2026-05-13T10:00:09Z",
+				"subscriber_type":       "agent",
+				"subscriber_id":         "agent-1",
+				"session_id":            "session-1",
+				"turn_id":               "turn-1",
+			}},
+		}
+	})
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"trace", "run-1", "--delivery-detail", "--limit", "1"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if len(*requests) != 1 {
+		t.Fatalf("requests = %d, want 1", len(*requests))
+	}
+	for _, want := range []string{
+		"DELIVERY ID",
+		"delivery-1",
+		"agent/agent-1",
+		"delivered",
+		"node_processed",
+		"2026-05-13T10:00:02Z",
+		"2026-05-13T10:00:04Z",
+		"2026-05-13T10:00:09Z",
+		"2s",
+		"5s",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
+		}
+	}
+	if strings.TrimSpace(stderr.String()) != "" {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
 func wantFullTraceFilterParams() map[string]any {
 	return map[string]any{
 		"event_name":      []any{"scan.requested", "scan.completed"},
@@ -579,6 +638,9 @@ func TestTraceHelpPromotesNoRetryWithoutReplaySince(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "--until") {
 		t.Fatalf("help missing --until:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "--delivery-detail") {
+		t.Fatalf("help missing --delivery-detail:\n%s", stdout.String())
 	}
 	if strings.Contains(stdout.String(), "--replay-since") {
 		t.Fatalf("help exposed unpromoted --replay-since:\n%s", stdout.String())
@@ -983,6 +1045,7 @@ func TestDiagnosticsRejectInvalidInputBeforeRequest(t *testing.T) {
 		{name: "trace follow rejects cursor", args: []string{"trace", "run-1", "--follow", "--cursor", "cur"}, wantStderr: "--cursor is not supported with --follow"},
 		{name: "trace follow rejects since", args: []string{"trace", "run-1", "--follow", "--since", "2026-05-13T10:00:00Z"}, wantStderr: "--since is not supported with --follow"},
 		{name: "trace follow rejects until", args: []string{"trace", "run-1", "--follow", "--until", "2026-05-13T10:05:00Z"}, wantStderr: "--until is not supported with --follow"},
+		{name: "trace follow rejects delivery detail", args: []string{"trace", "run-1", "--follow", "--delivery-detail"}, wantStderr: "--delivery-detail is not supported with --follow"},
 		{name: "trace shorthand follow rejects limit", args: []string{"trace", "run-1", "-f", "--limit", "5"}, wantStderr: "--limit is not supported with --follow"},
 		{name: "trace shorthand follow rejects cursor", args: []string{"trace", "run-1", "-f", "--cursor", "cur"}, wantStderr: "--cursor is not supported with --follow"},
 		{name: "trace shorthand follow rejects since", args: []string{"trace", "run-1", "-f", "--since", "2026-05-13T10:00:00Z"}, wantStderr: "--since is not supported with --follow"},
@@ -1025,6 +1088,7 @@ func TestDiagnosticsRequireAPITokenBeforeRequest(t *testing.T) {
 		{"runs"},
 		{"trace", "run-1"},
 		{"trace", "run-1", "--limit", "2", "--cursor", "cur", "--since", "2026-05-13T10:00:00Z", "--until", "2026-05-13T10:05:00Z"},
+		{"trace", "run-1", "--delivery-detail"},
 		{"trace", "run-1", "--event-name", "scan.requested", "--entity-id", "entity-1", "--delivery-status", "delivered", "--subscriber-id", "agent-1", "--subscriber-type", "agent"},
 		{"trace", "run-1", "--follow"},
 		{"trace", "run-1", "-f"},
@@ -1259,6 +1323,24 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 			},
 			wantCode:   3,
 			wantStderr: "trace is required",
+		},
+		{
+			name: "trace invalid delivery timestamp",
+			args: []string{"trace", "run-1", "--delivery-detail"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				writeJSONRPCResult(t, w, req.ID, map[string]any{
+					"trace": []any{map[string]any{
+						"event_id":            "event-1",
+						"event_name":          "scan.requested",
+						"event_created_at":    "2026-05-13T10:00:01Z",
+						"delivery_created_at": "yesterday",
+					}},
+				})
+			},
+			wantCode:   3,
+			wantStderr: "trace[0].delivery_created_at must be an RFC3339 timestamp",
 		},
 		{
 			name: "health missing bundle fingerprint",

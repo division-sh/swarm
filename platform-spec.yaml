@@ -10170,7 +10170,7 @@ cli_specification:
       defaulting: If run-id is omitted, resolve the target through run.list with active-run preference.
       behavior: Run-scoped operational status projection. This is the v2 replacement for `swarm investigate run`.
     trace:
-      command: swarm trace [<run-id>] [--since <timestamp>] [--until <timestamp>] [--limit <n>] [--cursor <cursor>] [--event-name <name> ...] [--entity-id <entity-id> ...] [--delivery-status <pending|in_progress|delivered|failed|dead_letter> ...] [--subscriber-id <id> ...] [--subscriber-type <node|agent> ...] [--follow|-f] [--no-retry]
+      command: swarm trace [<run-id>] [--delivery-detail] [--since <timestamp>] [--until <timestamp>] [--limit <n>] [--cursor <cursor>] [--event-name <name> ...] [--entity-id <entity-id> ...] [--delivery-status <pending|in_progress|delivered|failed|dead_letter> ...] [--subscriber-id <id> ...] [--subscriber-type <node|agent> ...] [--follow|-f] [--no-retry]
       tier: must_have
       implementation_status: implemented
       owners: /v1/rpc run.trace for snapshot; /v1/ws run.subscribe_trace for --follow/-f
@@ -10211,11 +10211,16 @@ cli_specification:
           `/v1/rpc run.trace`. Follow `swarm trace --follow` / `swarm trace -f` consumes the same typed filter flags
           by sending `filter` to `/v1/ws run.subscribe_trace`; fixed-window snapshot controls `--since`, `--until`,
           `--limit`, and `--cursor` remain invalid with follow and must fail before any API or WebSocket request.
+          Snapshot `--delivery-detail` is a CLI-only rendering modifier over the same `/v1/rpc run.trace` response:
+          it renders delivery identity, subscriber identity, delivery status/reason, delivery lifecycle timestamps, and
+          queue/execution durations derived only from same-row RunTraceRow timestamps. `--delivery-detail` is invalid
+          with `--follow` and does not introduce a new API/store/runtime owner.
         proof_expectations:
         - exact /v1/rpc run.trace params for explicit run ids and omitted-run resolution through run.list
         - repeatable filter flags serialize as RunTraceFilter arrays under the single `filter` param and compose with since/until/limit/cursor
         - follow-mode repeatable filter flags serialize as RunTraceFilter arrays under the single `filter` param and are preserved across recovery requests
         - invalid --since, invalid --until, since-after-until, out-of-range --limit, blank --cursor, blank/invalid typed filters, and fixed-window snapshot controls combined with --follow fail before API/WS calls
+        - --delivery-detail renders only existing RunTraceRow delivery lifecycle facts and rejects --follow before API/WS calls
         - missing token fails before API calls through the shared CLI API client
         - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api, /rpc, /ws, or fallback token paths
       promoted_trace_follow_recovery_contract:
