@@ -108,6 +108,65 @@ func TestSystemNodeRunner_MarkProcessedSettlesNodeDeliveryAndTriggersNormalRunCo
 	}
 }
 
+func TestSystemNodeRunner_TargetSetSameNodeSettlesEachTargetDelivery(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	ctx := context.Background()
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	entityID := uuid.NewString()
+	seedSystemNodeCompletionEventWithoutDelivery(t, db, runID, eventID, entityID)
+	targetOne := events.RouteIdentity{FlowInstance: "worker/w-001", EntityID: "worker/w-001"}
+	targetTwo := events.RouteIdentity{FlowInstance: "worker/w-002", EntityID: "worker/w-002"}
+	seedSystemNodeCompletionTargetDelivery(t, db, runID, eventID, "task-handler", targetOne)
+	seedSystemNodeCompletionTargetDelivery(t, db, runID, eventID, "task-handler", targetTwo)
+
+	var handledTargets []string
+	runner := newSystemNodeRunner("task-handler", &systemNodeCompletionBus{}, db, func() []events.EventType {
+		return []events.EventType{"worker/work.assign"}
+	}, func(ctx context.Context, evt events.Event) error {
+		target := evt.TargetRoute()
+		handledTargets = append(handledTargets, target.FlowInstance)
+		status := loadSystemNodeCompletionTargetDeliveryStatus(t, db, eventID, "task-handler", target)
+		if status != "in_progress" {
+			t.Fatalf("target %s handler observed status = %q, want in_progress", target.FlowInstance, status)
+		}
+		return nil
+	}, func(context.Context) (bool, error) { return true, nil })
+
+	base := events.NewProjectionEvent(eventID,
+		"worker/work.assign", "", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
+	runner.ProcessEventForTest(ctx, base.WithTargetRoute(targetOne))
+	if got := loadSystemNodeCompletionTargetDeliveryStatus(t, db, eventID, "task-handler", targetOne); got != "delivered" {
+		t.Fatalf("target one status = %q, want delivered", got)
+	}
+	if got := loadSystemNodeCompletionTargetDeliveryStatus(t, db, eventID, "task-handler", targetTwo); got != "pending" {
+		t.Fatalf("target two status after first delivery = %q, want pending", got)
+	}
+
+	runner.ProcessEventForTest(ctx, base.WithTargetRoute(targetTwo))
+	if got := loadSystemNodeCompletionTargetDeliveryStatus(t, db, eventID, "task-handler", targetTwo); got != "delivered" {
+		t.Fatalf("target two status = %q, want delivered", got)
+	}
+	if len(handledTargets) != 2 || handledTargets[0] != "worker/w-001" || handledTargets[1] != "worker/w-002" {
+		t.Fatalf("handled targets = %#v, want both worker targets in order", handledTargets)
+	}
+	var deliveredRows int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_deliveries
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'node'
+		  AND subscriber_id = 'task-handler'
+		  AND status = 'delivered'
+		  AND reason_code = 'node_processed'
+	`, eventID).Scan(&deliveredRows); err != nil {
+		t.Fatalf("count delivered target rows: %v", err)
+	}
+	if deliveredRows != 2 {
+		t.Fatalf("delivered target rows = %d, want 2", deliveredRows)
+	}
+}
+
 func TestSystemNodeRunnerLifecycleProbeEmitsHandlerBoundaries(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := context.Background()
@@ -488,6 +547,35 @@ func seedSystemNodeCompletionRun(t *testing.T, db *sql.DB, runID, eventID, entit
 	`, runID, eventID, nodeID); err != nil {
 		t.Fatalf("seed node delivery: %v", err)
 	}
+}
+
+func seedSystemNodeCompletionTargetDelivery(t *testing.T, db *sql.DB, runID, eventID, nodeID string, target events.RouteIdentity) {
+	t.Helper()
+	if _, err := db.ExecContext(context.Background(), `
+		INSERT INTO event_deliveries (
+			run_id, event_id, subscriber_type, subscriber_id, delivery_target_route, status, reason_code, created_at
+		) VALUES (
+			$1::uuid, $2::uuid, 'node', $3, $4::jsonb, 'pending', 'matched_node_subscription', now()
+		)
+	`, runID, eventID, nodeID, systemNodeRouteIdentityJSON(target)); err != nil {
+		t.Fatalf("seed targeted node delivery: %v", err)
+	}
+}
+
+func loadSystemNodeCompletionTargetDeliveryStatus(t *testing.T, db *sql.DB, eventID, nodeID string, target events.RouteIdentity) string {
+	t.Helper()
+	var status string
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT COALESCE(status, '')
+		FROM event_deliveries
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'node'
+		  AND subscriber_id = $2
+		  AND delivery_target_route = $3::jsonb
+	`, eventID, nodeID, systemNodeRouteIdentityJSON(target)).Scan(&status); err != nil {
+		t.Fatalf("load targeted node delivery: %v", err)
+	}
+	return status
 }
 
 func seedSystemNodeCompletionEventWithoutDelivery(t *testing.T, db *sql.DB, runID, eventID, entityID string) {

@@ -3,7 +3,6 @@ package bus
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
@@ -17,8 +16,6 @@ type deliveryRoutingResult struct {
 	SubscribedRecipients []string
 	ExtraDetail          map[string]any
 }
-
-var errAmbiguousTargetedNodeDelivery = errors.New("ambiguous targeted node delivery")
 
 type deliveryRecipientCandidate struct {
 	ID                string
@@ -132,11 +129,7 @@ func (p deliveryPlanner) Plan(ctx context.Context, evt events.Event) (eventDeliv
 	routePlan.AddDeliveryIntents(routedRootInputFlowNodeDeliveryIntentsForNoTargetEvent(evt, routing.RoutedRecipients)...)
 	routePlan.AddDeliveryIntents(routedNodeDeliveryIntentsForNoRecipientFlowInstanceEvent(evt, routing.RoutedRecipients, recipients, persisted)...)
 	routePlan.AddDeliveryIntents(routedNodeDeliveryIntentsForNoTargetEvent(evt, routing.RoutedRecipients, recipients, persisted)...)
-	targetedIntents, err := targetedRoutedNodeDeliveryIntents(evt, routing.RoutedRecipients)
-	if err != nil {
-		return eventDeliveryPlan{}, err
-	}
-	routePlan.AddDeliveryIntents(targetedIntents...)
+	routePlan.AddDeliveryIntents(targetedRoutedNodeDeliveryIntents(evt, routing.RoutedRecipients)...)
 	routePlan.AddDeliveryIntents(internalDeliveryIntentsForPlan(evt, recipients, persisted, routing.RoutedRecipients)...)
 	if routePlan.TargetFailure != "" && hasInternalRoutedSubscriberForTarget(evt, routing.RoutedRecipients) {
 		routePlan.TargetFailure = ""
@@ -465,21 +458,18 @@ func internalDeliveryIntentsForPlan(evt events.Event, recipients, persisted []st
 	return routePlanDeliveryIntentsFromRoutes(out, routePlanSourceInternalTarget, routePlanReasonInternalCarrier)
 }
 
-func targetedRoutedNodeDeliveryIntents(evt events.Event, routed []Subscriber) ([]RoutePlanDeliveryIntent, error) {
-	routes, err := targetedRoutedNodeDeliveryRoutes(evt, routed)
-	if err != nil {
-		return nil, err
-	}
+func targetedRoutedNodeDeliveryIntents(evt events.Event, routed []Subscriber) []RoutePlanDeliveryIntent {
+	routes := targetedRoutedNodeDeliveryRoutes(evt, routed)
 	if len(routes) == 0 {
-		return nil, nil
+		return nil
 	}
-	return routePlanDeliveryIntentsFromRoutes(routes, routePlanSourceInternalTarget, routePlanReasonRouteTableNode), nil
+	return routePlanDeliveryIntentsFromRoutes(routes, routePlanSourceInternalTarget, routePlanReasonRouteTableNode)
 }
 
-func targetedRoutedNodeDeliveryRoutes(evt events.Event, routed []Subscriber) ([]events.DeliveryRoute, error) {
+func targetedRoutedNodeDeliveryRoutes(evt events.Event, routed []Subscriber) []events.DeliveryRoute {
 	targets := eventDeliveryTargetRoutes(evt)
 	if len(targets) == 0 || len(routed) == 0 {
-		return nil, nil
+		return nil
 	}
 	out := make([]events.DeliveryRoute, 0, len(targets)*len(routed))
 	for _, target := range targets {
@@ -502,33 +492,7 @@ func targetedRoutedNodeDeliveryRoutes(evt events.Event, routed []Subscriber) ([]
 			})
 		}
 	}
-	out = events.NormalizeDeliveryRoutes(out)
-	if err := rejectAmbiguousTargetedNodeDeliveryRoutes(out); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func rejectAmbiguousTargetedNodeDeliveryRoutes(routes []events.DeliveryRoute) error {
-	if len(routes) < 2 {
-		return nil
-	}
-	seen := make(map[string]events.RouteIdentity, len(routes))
-	for _, route := range routes {
-		if route.SubscriberType != "node" {
-			continue
-		}
-		key := strings.TrimSpace(route.SubscriberType) + "\x00" + strings.TrimSpace(route.SubscriberID)
-		if key == "\x00" {
-			continue
-		}
-		target := route.Target.Normalized()
-		if previous, ok := seen[key]; ok && previous != target {
-			return fmt.Errorf("%w: node %q has multiple target routes for one event", errAmbiguousTargetedNodeDelivery, route.SubscriberID)
-		}
-		seen[key] = target
-	}
-	return nil
+	return events.NormalizeDeliveryRoutes(out)
 }
 
 func routedNodeDeliveryIntentsForNoTargetEvent(evt events.Event, routed []Subscriber, recipients, persisted []string) []RoutePlanDeliveryIntent {

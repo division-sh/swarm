@@ -450,7 +450,7 @@ func TestDeliveryPlanner_ExpandsTargetSetForInternalWorkflowRecipient(t *testing
 	}
 }
 
-func TestDeliveryPlanner_RejectsAmbiguousTargetSetForSameSemanticNode(t *testing.T) {
+func TestDeliveryPlanner_ExpandsTargetSetForSameSemanticNode(t *testing.T) {
 	planner := newDeliveryPlanner(
 		deliveryRouteResolver{
 			resolveRoutedSubscribers: func(events.Event) []Subscriber {
@@ -473,12 +473,26 @@ func TestDeliveryPlanner_RejectsAmbiguousTargetSetForSameSemanticNode(t *testing
 		},
 	)
 
-	_, err := planner.Plan(context.Background(), (events.NewProjectionEvent("", "worker/work.assign", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})).WithTargetSet([]events.RouteIdentity{
+	plan, err := planner.Plan(context.Background(), (events.NewProjectionEvent("", "worker/work.assign", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})).WithTargetSet([]events.RouteIdentity{
 		{FlowInstance: "worker/w-001", EntityID: "worker/w-001"},
 		{FlowInstance: "worker/w-002", EntityID: "worker/w-002"},
 	}))
-	if !errors.Is(err, errAmbiguousTargetedNodeDelivery) {
-		t.Fatalf("Plan error = %v, want ambiguous targeted node delivery", err)
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	wantRoutes := []events.DeliveryRoute{
+		{SubscriberType: "node", SubscriberID: "task-handler", Target: events.RouteIdentity{FlowInstance: "worker/w-001", EntityID: "worker/w-001"}},
+		{SubscriberType: "node", SubscriberID: "task-handler", Target: events.RouteIdentity{FlowInstance: "worker/w-002", EntityID: "worker/w-002"}},
+		{SubscriberType: "node", SubscriberID: "workflow-runtime", Target: events.RouteIdentity{FlowInstance: "worker/w-001", EntityID: "worker/w-001"}},
+		{SubscriberType: "node", SubscriberID: "workflow-runtime", Target: events.RouteIdentity{FlowInstance: "worker/w-002", EntityID: "worker/w-002"}},
+	}
+	if got := len(plan.DeliveryRoutes); got != len(wantRoutes) {
+		t.Fatalf("delivery routes = %#v, want %d same-node target routes", plan.DeliveryRoutes, len(wantRoutes))
+	}
+	for _, wantRoute := range wantRoutes {
+		if !deliveryPlannerRoutesContain(plan.DeliveryRoutes, wantRoute) {
+			t.Fatalf("delivery routes = %#v, missing %#v", plan.DeliveryRoutes, wantRoute)
+		}
 	}
 }
 
