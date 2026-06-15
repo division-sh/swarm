@@ -2,6 +2,7 @@ package bus
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -506,6 +507,50 @@ func TestEventBusPublish_TargetSetInternalDeliveryUsesPerTargetRoutes(t *testing
 		t.Fatalf("PublishPersistedRecipients: %v", err)
 	}
 	assertTargetRouteDeliveries(t, ch, "ent-a", "ent-b")
+}
+
+func TestEventBusPublish_RejectsAmbiguousTargetSetForSameSemanticNode(t *testing.T) {
+	store := newTargetRouteMemoryStore()
+	eb, err := NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	eb.deliveryPlanner = newDeliveryPlanner(
+		deliveryRouteResolver{
+			resolveRoutedSubscribers: func(events.Event) []Subscriber {
+				return []Subscriber{
+					{ID: "task-handler", Type: "node", Path: "worker/w-001"},
+					{ID: "task-handler", Type: "node", Path: "worker/w-002"},
+				}
+			},
+			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
+				return []deliveryRecipientCandidate{{ID: "workflow-runtime", PersistAsDelivery: false}}
+			},
+			describeSubscribersForEvent: func(string, []Subscriber) []PublishDiagnosticRecipient {
+				return nil
+			},
+		},
+		deliveryRecipientPolicy{
+			loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
+				return map[string]ActiveAgentDescriptor{}, true, nil
+			},
+		},
+	)
+
+	evt := (events.NewProjectionEvent(uuid.NewString(),
+		events.EventType("worker/work.assign"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())).WithTargetSet([]events.RouteIdentity{
+		{FlowInstance: "worker/w-001", EntityID: "worker/w-001"},
+		{FlowInstance: "worker/w-002", EntityID: "worker/w-002"},
+	})
+	if err := eb.Publish(context.Background(), evt); !errors.Is(err, errAmbiguousTargetedNodeDelivery) {
+		t.Fatalf("Publish error = %v, want ambiguous targeted node delivery", err)
+	}
+	if _, ok := store.events[evt.ID()]; ok {
+		t.Fatalf("event %q persisted despite ambiguous targeted node delivery", evt.ID())
+	}
+	if routes := store.routes[evt.ID()]; len(routes) != 0 {
+		t.Fatalf("persisted delivery routes = %#v, want none for ambiguous targeted node delivery", routes)
+	}
 }
 
 func TestEventBusPublish_TargetedRouteTableNodePersistsSemanticNodeRoute(t *testing.T) {
