@@ -8,9 +8,31 @@ orchestrator:
       action: create_flow_instance
       template: worker
       instance_id_from: payload.worker_id
+      config_from:
+        worker_id: payload.worker_id
+        task_label: payload.task_label
       emit:
         event: spawn.confirmed
         broadcast: true
-      advances_to: done
+        fields:
+          worker_id: payload.worker_id
+      advances_to: spawned
   permissions:
   - create_flow_instance
+
+assigner:
+  id: assigner
+  execution_type: system_node
+  subscribes_to: [assign.requested]
+  produces: [worker/work.assign]
+  event_handlers:
+    assign.requested:
+      emit:
+        event: worker/work.assign
+        fields:
+          task_label: payload.task_label
+        target:
+          flow: worker
+          match:
+            instance_id: payload.worker_id
+      advances_to: done

@@ -2,9 +2,9 @@ name: test-dynamic-flow-instance
 namespace: test-dynamic-flow-instance
 initial_state: pending
 terminal_states: [done]
-states: [pending, done]
+states: [pending, spawned, done]
 pins:
   inputs:
-    events: [spawn.requested]
+    events: [spawn.requested, assign.requested]
   outputs:
-    events: [spawn.confirmed]
+    events: [spawn.confirmed, worker/work.assign]

@@ -1,11 +1,14 @@
 spawn.requested:
   entity_id: string
   worker_id: string
+  task_label: string
 spawn.confirmed:
+  worker_id: string
+assign.requested:
   entity_id: string
-worker/worker.ready:
-  entity_id: string
+  worker_id: string
+  task_label: string
 worker/work.assign:
-  entity_id: string
+  task_label: string
 worker/work.done:
-  entity_id: string
+  task_label: string
