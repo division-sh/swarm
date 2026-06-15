@@ -2,7 +2,6 @@ package bus
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -509,7 +508,7 @@ func TestEventBusPublish_TargetSetInternalDeliveryUsesPerTargetRoutes(t *testing
 	assertTargetRouteDeliveries(t, ch, "ent-a", "ent-b")
 }
 
-func TestEventBusPublish_RejectsAmbiguousTargetSetForSameSemanticNode(t *testing.T) {
+func TestEventBusPublish_TargetSetSameSemanticNodePersistsPerTargetRoutes(t *testing.T) {
 	store := newTargetRouteMemoryStore()
 	eb, err := NewEventBus(store)
 	if err != nil {
@@ -537,19 +536,29 @@ func TestEventBusPublish_RejectsAmbiguousTargetSetForSameSemanticNode(t *testing
 		},
 	)
 
+	ch := eb.SubscribeInternal("workflow-runtime", events.EventType("worker/work.assign"))
 	evt := (events.NewProjectionEvent(uuid.NewString(),
 		events.EventType("worker/work.assign"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())).WithTargetSet([]events.RouteIdentity{
 		{FlowInstance: "worker/w-001", EntityID: "worker/w-001"},
 		{FlowInstance: "worker/w-002", EntityID: "worker/w-002"},
 	})
-	if err := eb.Publish(context.Background(), evt); !errors.Is(err, errAmbiguousTargetedNodeDelivery) {
-		t.Fatalf("Publish error = %v, want ambiguous targeted node delivery", err)
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
 	}
-	if _, ok := store.events[evt.ID()]; ok {
-		t.Fatalf("event %q persisted despite ambiguous targeted node delivery", evt.ID())
+	assertTargetRouteDeliveries(t, ch, "worker/w-001", "worker/w-002")
+	wantRoutes := []events.DeliveryRoute{
+		{SubscriberType: "node", SubscriberID: "task-handler", Target: events.RouteIdentity{FlowInstance: "worker/w-001", EntityID: "worker/w-001"}},
+		{SubscriberType: "node", SubscriberID: "task-handler", Target: events.RouteIdentity{FlowInstance: "worker/w-002", EntityID: "worker/w-002"}},
+		{SubscriberType: "node", SubscriberID: "workflow-runtime", Target: events.RouteIdentity{FlowInstance: "worker/w-001", EntityID: "worker/w-001"}},
+		{SubscriberType: "node", SubscriberID: "workflow-runtime", Target: events.RouteIdentity{FlowInstance: "worker/w-002", EntityID: "worker/w-002"}},
 	}
-	if routes := store.routes[evt.ID()]; len(routes) != 0 {
-		t.Fatalf("persisted delivery routes = %#v, want none for ambiguous targeted node delivery", routes)
+	if got := len(store.routes[evt.ID()]); got != len(wantRoutes) {
+		t.Fatalf("persisted delivery routes = %#v, want %d same-node target routes", store.routes[evt.ID()], len(wantRoutes))
+	}
+	for _, wantRoute := range wantRoutes {
+		if !deliveryRoutesContain(store.routes[evt.ID()], wantRoute) {
+			t.Fatalf("persisted delivery routes = %#v, missing %#v", store.routes[evt.ID()], wantRoute)
+		}
 	}
 }
 

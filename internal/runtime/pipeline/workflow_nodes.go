@@ -837,8 +837,15 @@ func (pc *PipelineCoordinator) markWorkflowNodeProcessed(ctx context.Context, no
 	if !pc.eventReceiptsAvailable(ctx) {
 		return
 	}
-	sideEffects := systemNodeProcessedReceiptSideEffects(nodeID, eventID)
-	if err := pc.workflowStore.MarkSystemNodeProcessedAndSettleDelivery(ctx, nodeID, eventID, sideEffects); err != nil {
+	target := systemNodeDeliveryTarget(evt)
+	sideEffects := systemNodeProcessedReceiptSideEffects(nodeID, eventID, target)
+	var err error
+	if !target.Empty() {
+		err = pc.workflowStore.MarkSystemNodeProcessedAndSettleDeliveryForTarget(ctx, nodeID, eventID, target, sideEffects)
+	} else {
+		err = pc.workflowStore.MarkSystemNodeProcessedAndSettleDelivery(ctx, nodeID, eventID, sideEffects)
+	}
+	if err != nil {
 		if logger, ok := pc.bus.(systemNodeRuntimeLogger); ok && logger != nil {
 			logger.LogRuntime(ctx, RuntimeLogEntry{
 				Level:     "error",
@@ -869,6 +876,14 @@ func (pc *PipelineCoordinator) markWorkflowNodeDeliveryInProgress(ctx context.Co
 	if !pc.eventReceiptsAvailable(ctx) {
 		return false
 	}
+	if target := systemNodeDeliveryTarget(evt); !target.Empty() {
+		if err := pc.workflowStore.MarkSystemNodeDeliveryInProgressForTarget(ctx, nodeID, eventID, target, DefaultSystemNodeRetryLimit); err != nil {
+			pc.logWorkflowNodeDeliveryTransitionError(ctx, nodeID, evt, "mark_delivery_in_progress_failed", "Marking the targeted workflow node delivery in progress failed", err)
+			return false
+		}
+		pc.notifyTestLifecycleDeliveryStatus(ctx, nodeID, evt, "in_progress")
+		return true
+	}
 	if err := pc.workflowStore.MarkSystemNodeDeliveryInProgress(ctx, nodeID, eventID, DefaultSystemNodeRetryLimit); err != nil {
 		pc.logWorkflowNodeDeliveryTransitionError(ctx, nodeID, evt, "mark_delivery_in_progress_failed", "Marking the workflow node delivery in progress failed", err)
 		return false
@@ -893,8 +908,15 @@ func (pc *PipelineCoordinator) markWorkflowNodeDeliveryDeadLetter(ctx context.Co
 	if cause != nil {
 		errText = strings.TrimSpace(cause.Error())
 	}
-	sideEffects := systemNodeDeadLetterReceiptSideEffects(nodeID, eventID, reasonCode, errText, retryCount)
-	if err := pc.workflowStore.MarkSystemNodeDeliveryDeadLetter(ctx, nodeID, eventID, reasonCode, errText, retryCount, sideEffects); err != nil {
+	target := systemNodeDeliveryTarget(evt)
+	sideEffects := systemNodeDeadLetterReceiptSideEffects(nodeID, eventID, reasonCode, errText, retryCount, target)
+	var err error
+	if !target.Empty() {
+		err = pc.workflowStore.MarkSystemNodeDeliveryDeadLetterForTarget(ctx, nodeID, eventID, target, reasonCode, errText, retryCount, sideEffects)
+	} else {
+		err = pc.workflowStore.MarkSystemNodeDeliveryDeadLetter(ctx, nodeID, eventID, reasonCode, errText, retryCount, sideEffects)
+	}
+	if err != nil {
 		pc.logWorkflowNodeDeliveryTransitionError(ctx, nodeID, evt, "mark_delivery_dead_letter_failed", "Marking the workflow node delivery as dead_letter failed", err)
 		return
 	}
@@ -937,6 +959,38 @@ func (pc *PipelineCoordinator) workflowNodeDeliveryAuthorized(ctx context.Contex
 	eventID := strings.TrimSpace(evt.ID())
 	if eventID == "" {
 		return false
+	}
+	if target := systemNodeDeliveryTarget(evt); !target.Empty() {
+		ok, err := pc.workflowStore.SystemNodeDeliveryAuthorizedForTarget(ctx, nodeID, eventID, target, DefaultSystemNodeRetryLimit)
+		if err != nil {
+			if logger, logOK := pc.bus.(systemNodeRuntimeLogger); logOK && logger != nil {
+				logger.LogRuntime(ctx, RuntimeLogEntry{
+					Level:     "error",
+					Message:   "Checking targeted workflow node delivery authority failed",
+					Component: nodeID,
+					Action:    "delivery_authority_check_failed",
+					EventID:   eventID,
+					EventType: strings.TrimSpace(string(evt.Type())),
+					EntityID:  workflowEventEntityID(evt),
+					Error:     strings.TrimSpace(err.Error()),
+				})
+			}
+			return false
+		}
+		if !ok {
+			if logger, logOK := pc.bus.(systemNodeRuntimeLogger); logOK && logger != nil {
+				logger.LogRuntime(ctx, RuntimeLogEntry{
+					Level:     "error",
+					Message:   "Targeted workflow node delivery authority is missing; handler execution skipped",
+					Component: nodeID,
+					Action:    "delivery_authority_missing",
+					EventID:   eventID,
+					EventType: strings.TrimSpace(string(evt.Type())),
+					EntityID:  workflowEventEntityID(evt),
+				})
+			}
+		}
+		return ok
 	}
 	ok, err := pc.workflowStore.SystemNodeDeliveryAuthorized(ctx, nodeID, eventID, DefaultSystemNodeRetryLimit)
 	if err != nil {
@@ -981,6 +1035,10 @@ func (pc *PipelineCoordinator) workflowNodeEventProcessed(ctx context.Context, n
 	}
 	if !pc.eventReceiptsAvailable(ctx) {
 		return false
+	}
+	if target := systemNodeDeliveryTarget(evt); !target.Empty() {
+		ok, err := pc.workflowStore.SystemNodeProcessedForTarget(ctx, nodeID, eventID, target)
+		return err == nil && ok
 	}
 	ok, err := pc.workflowStore.SystemNodeProcessed(ctx, nodeID, eventID)
 	return err == nil && ok
