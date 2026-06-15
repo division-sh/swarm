@@ -450,6 +450,38 @@ func TestDeliveryPlanner_ExpandsTargetSetForInternalWorkflowRecipient(t *testing
 	}
 }
 
+func TestDeliveryPlanner_RejectsAmbiguousTargetSetForSameSemanticNode(t *testing.T) {
+	planner := newDeliveryPlanner(
+		deliveryRouteResolver{
+			resolveRoutedSubscribers: func(events.Event) []Subscriber {
+				return []Subscriber{
+					{ID: "task-handler", Type: "node", Path: "worker/w-001"},
+					{ID: "task-handler", Type: "node", Path: "worker/w-002"},
+				}
+			},
+			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
+				return []deliveryRecipientCandidate{{ID: "workflow-runtime", PersistAsDelivery: false}}
+			},
+			describeSubscribersForEvent: func(string, []Subscriber) []PublishDiagnosticRecipient {
+				return nil
+			},
+		},
+		deliveryRecipientPolicy{
+			loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
+				return map[string]ActiveAgentDescriptor{}, true, nil
+			},
+		},
+	)
+
+	_, err := planner.Plan(context.Background(), (events.NewProjectionEvent("", "worker/work.assign", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})).WithTargetSet([]events.RouteIdentity{
+		{FlowInstance: "worker/w-001", EntityID: "worker/w-001"},
+		{FlowInstance: "worker/w-002", EntityID: "worker/w-002"},
+	}))
+	if !errors.Is(err, errAmbiguousTargetedNodeDelivery) {
+		t.Fatalf("Plan error = %v, want ambiguous targeted node delivery", err)
+	}
+}
+
 func TestDeliveryPlanner_NoTargetConcreteRoutedNodePersistsSemanticNodeRoute(t *testing.T) {
 	planner := newDeliveryPlanner(
 		deliveryRouteResolver{
