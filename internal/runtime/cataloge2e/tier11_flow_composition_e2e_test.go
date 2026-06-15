@@ -106,21 +106,22 @@ func TestTier11DynamicFlowInstanceFlowMatchTarget_RealRuntime(t *testing.T) {
 	var expected catalogExpectedDocument
 	loadYAML(t, filepath.Join(fixtureRoot, "expected.yaml"), &expected)
 
-	h := newRuntimeHarness(t, fixtureRoot, false)
+	h := newRuntimeHarness(t, fixtureRoot, true)
 	h.seedEntityFields(expected)
 	for _, step := range expected.triggerSequence() {
 		h.publishAndWait(step, catalogRuntimePublishTimeout)
 	}
 	assertCatalogRuntimeOutcome(t, h, expected)
-	assertDynamicFlowInstanceFlowMatchDescriptorResolution(t, h, "worker/work.assign", "worker/w-001")
+	assertDynamicFlowInstanceFlowMatchTargetedNodeDelivery(t, h, "worker/work.assign", "worker/w-001", "task-handler")
 }
 
-func assertDynamicFlowInstanceFlowMatchDescriptorResolution(t testing.TB, h *runtimeHarness, eventName, flowInstance string) {
+func assertDynamicFlowInstanceFlowMatchTargetedNodeDelivery(t testing.TB, h *runtimeHarness, eventName, flowInstance, nodeID string) {
 	t.Helper()
 	if h == nil || h.db == nil {
 		t.Fatal("runtime harness database is required")
 	}
 	flowInstance = strings.Trim(strings.TrimSpace(flowInstance), "/")
+	nodeID = strings.TrimSpace(nodeID)
 	wantEntityID := runtimeflowidentity.EntityID(flowInstance)
 	var eventID, targetFlowInstance, targetEntityID, targetSet string
 	err := h.db.QueryRowContext(context.Background(), `
@@ -143,39 +144,89 @@ func assertDynamicFlowInstanceFlowMatchDescriptorResolution(t testing.TB, h *run
 		t.Fatalf("targeted event route = flow_instance:%q entity_id:%q target_set:%s, want flow_instance:%q entity_id:%q", targetFlowInstance, targetEntityID, targetSet, flowInstance, wantEntityID)
 	}
 
+	var deliveryStatus, reasonCode, deliveryFlowInstance, deliveryEntityID string
+	if err := h.db.QueryRowContext(context.Background(), `
+		SELECT COALESCE(status, ''),
+		       COALESCE(reason_code, ''),
+		       COALESCE(delivery_target_route->>'flow_instance', ''),
+		       COALESCE(delivery_target_route->>'entity_id', '')
+		FROM event_deliveries
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'node'
+		  AND subscriber_id = $2
+		  AND COALESCE(delivery_target_route->>'flow_instance', '') = $3
+		  AND COALESCE(delivery_target_route->>'entity_id', '') = $4
+		ORDER BY created_at DESC, delivery_id DESC
+		LIMIT 1
+	`, eventID, nodeID, flowInstance, wantEntityID).Scan(&deliveryStatus, &reasonCode, &deliveryFlowInstance, &deliveryEntityID); err == sql.ErrNoRows {
+		t.Fatalf("targeted event %s did not persist node delivery for %s route %s/%s; deliveries=%s", eventID, nodeID, flowInstance, wantEntityID, dumpEventDeliveries(t, h.db, eventID))
+	} else if err != nil {
+		t.Fatalf("query targeted event delivery: %v", err)
+	}
+	if deliveryStatus != "delivered" || reasonCode != "node_processed" || deliveryFlowInstance != flowInstance || deliveryEntityID != wantEntityID {
+		t.Fatalf("targeted event delivery = status:%q reason:%q route:%q/%q, want delivered node_processed for %q/%q", deliveryStatus, reasonCode, deliveryFlowInstance, deliveryEntityID, flowInstance, wantEntityID)
+	}
+
 	var deliveryCount int
 	if err := h.db.QueryRowContext(context.Background(), `
 		SELECT COUNT(*)
 		FROM event_deliveries
 		WHERE event_id = $1::uuid
 		  AND subscriber_type = 'node'
-		  AND COALESCE(delivery_target_route->>'flow_instance', '') = $2
-		  AND COALESCE(delivery_target_route->>'entity_id', '') = $3
-	`, eventID, flowInstance, wantEntityID).Scan(&deliveryCount); err != nil {
+		  AND subscriber_id = $2
+		  AND COALESCE(delivery_target_route->>'flow_instance', '') = $3
+		  AND COALESCE(delivery_target_route->>'entity_id', '') = $4
+	`, eventID, nodeID, flowInstance, wantEntityID).Scan(&deliveryCount); err != nil {
 		t.Fatalf("query targeted event deliveries: %v", err)
 	}
-	if deliveryCount != 0 {
-		t.Fatalf("targeted event %s node delivery count = %d, want 0 while #1410 owns targeted internal-node delivery row materialization", eventID, deliveryCount)
+	if deliveryCount != 1 {
+		t.Fatalf("targeted event %s node delivery count = %d, want exactly one %s semantic node delivery", eventID, deliveryCount, nodeID)
 	}
 
-	var failureReason, failureFlowInstance, failureEntityID string
-	err = h.db.QueryRowContext(context.Background(), `
-		SELECT COALESCE(target_failure_reason, ''),
-		       COALESCE(target_context->'target'->>'flow_instance', ''),
-		       COALESCE(target_context->'target'->>'entity_id', '')
+	var deadLetterCount int
+	if err := h.db.QueryRowContext(context.Background(), `
+		SELECT COUNT(*)
 		FROM dead_letters
 		WHERE original_event_id = $1::uuid
 		  AND failure_type = 'target_resolution_failed'
-		ORDER BY created_at DESC
-		LIMIT 1
-	`, eventID).Scan(&failureReason, &failureFlowInstance, &failureEntityID)
-	if err == sql.ErrNoRows {
-		t.Fatalf("targeted event %s did not record #1410 split delivery-planning dead letter", eventID)
+	`, eventID).Scan(&deadLetterCount); err != nil {
+		t.Fatalf("query targeted event dead letters: %v", err)
 	}
+	if deadLetterCount != 0 {
+		t.Fatalf("targeted event %s target_resolution_failed dead letters = %d, want none", eventID, deadLetterCount)
+	}
+}
+
+func dumpEventDeliveries(t testing.TB, db *sql.DB, eventID string) string {
+	t.Helper()
+	rows, err := db.QueryContext(context.Background(), `
+		SELECT COALESCE(subscriber_type, ''),
+		       COALESCE(subscriber_id, ''),
+		       COALESCE(status, ''),
+		       COALESCE(reason_code, ''),
+		       COALESCE(delivery_target_route->>'flow_instance', ''),
+		       COALESCE(delivery_target_route->>'entity_id', '')
+		FROM event_deliveries
+		WHERE event_id = $1::uuid
+		ORDER BY created_at ASC, delivery_id ASC
+	`, eventID)
 	if err != nil {
-		t.Fatalf("query targeted event dead letter: %v", err)
+		return "query_error:" + err.Error()
 	}
-	if failureReason != "target_not_subscribed" || failureFlowInstance != flowInstance || failureEntityID != wantEntityID {
-		t.Fatalf("targeted event dead letter reason=%q route=%q/%q, want target_not_subscribed for %q/%q", failureReason, failureFlowInstance, failureEntityID, flowInstance, wantEntityID)
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var subscriberType, subscriberID, status, reason, flowInstance, entityID string
+		if err := rows.Scan(&subscriberType, &subscriberID, &status, &reason, &flowInstance, &entityID); err != nil {
+			return "scan_error:" + err.Error()
+		}
+		out = append(out, subscriberType+"/"+subscriberID+" status="+status+" reason="+reason+" route="+flowInstance+"/"+entityID)
 	}
+	if err := rows.Err(); err != nil {
+		return "rows_error:" + err.Error()
+	}
+	if len(out) == 0 {
+		return "<none>"
+	}
+	return strings.Join(out, "; ")
 }

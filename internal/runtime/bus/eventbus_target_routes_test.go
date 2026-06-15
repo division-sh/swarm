@@ -487,15 +487,18 @@ func TestEventBusPublish_TargetSetInternalDeliveryUsesPerTargetRoutes(t *testing
 	if got := persisted.FlowInstance(); got != "" {
 		t.Fatalf("persisted FlowInstance() = %q, want empty target_set projection", got)
 	}
-	if got := store.routes[evt.ID()]; len(got) != 2 {
-		t.Fatalf("persisted delivery routes = %#v, want 2", got)
+	if got := store.routes[evt.ID()]; len(got) != 4 {
+		t.Fatalf("persisted delivery routes = %#v, want 4", got)
 	}
-	for _, route := range store.routes[evt.ID()] {
-		if route.SubscriberType != "node" || route.SubscriberID != "workflow-runtime" {
-			t.Fatalf("delivery route = %#v, want node/workflow-runtime", route)
-		}
-		if route.Target.Empty() {
-			t.Fatalf("delivery route target is empty: %#v", route)
+	wantRoutes := []events.DeliveryRoute{
+		{SubscriberType: "node", SubscriberID: "child-a-listener", Target: events.RouteIdentity{FlowInstance: "child-a/inst-1", EntityID: "ent-a"}},
+		{SubscriberType: "node", SubscriberID: "child-b-listener", Target: events.RouteIdentity{FlowInstance: "child-b/inst-1", EntityID: "ent-b"}},
+		{SubscriberType: "node", SubscriberID: "workflow-runtime", Target: events.RouteIdentity{FlowInstance: "child-a/inst-1", EntityID: "ent-a"}},
+		{SubscriberType: "node", SubscriberID: "workflow-runtime", Target: events.RouteIdentity{FlowInstance: "child-b/inst-1", EntityID: "ent-b"}},
+	}
+	for _, wantRoute := range wantRoutes {
+		if !deliveryRoutesContain(store.routes[evt.ID()], wantRoute) {
+			t.Fatalf("persisted delivery routes = %#v, missing %#v", store.routes[evt.ID()], wantRoute)
 		}
 	}
 
@@ -503,6 +506,145 @@ func TestEventBusPublish_TargetSetInternalDeliveryUsesPerTargetRoutes(t *testing
 		t.Fatalf("PublishPersistedRecipients: %v", err)
 	}
 	assertTargetRouteDeliveries(t, ch, "ent-a", "ent-b")
+}
+
+func TestEventBusPublish_TargetedRouteTableNodePersistsSemanticNodeRoute(t *testing.T) {
+	store := newTargetRouteMemoryStore()
+	eb, err := NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	eb.deliveryPlanner = newDeliveryPlanner(
+		deliveryRouteResolver{
+			resolveRoutedSubscribers: func(events.Event) []Subscriber {
+				return []Subscriber{{ID: "task-handler", Type: "node", Path: "worker/w-001"}}
+			},
+			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate { return nil },
+			describeSubscribersForEvent: func(string, []Subscriber) []PublishDiagnosticRecipient {
+				return []PublishDiagnosticRecipient{{ID: "task-handler", Type: "node", Path: "worker/w-001"}}
+			},
+		},
+		deliveryRecipientPolicy{
+			loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
+				return map[string]ActiveAgentDescriptor{}, true, nil
+			},
+		},
+	)
+	evt := (events.NewProjectionEvent(uuid.NewString(),
+		events.EventType("worker/work.assign"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())).
+		WithTargetRoute(events.RouteIdentity{FlowInstance: "worker/w-001", EntityID: "worker/w-001"})
+
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	wantRoute := events.DeliveryRoute{
+		SubscriberType: "node",
+		SubscriberID:   "task-handler",
+		Target:         events.RouteIdentity{FlowInstance: "worker/w-001", EntityID: "worker/w-001"},
+	}
+	if got := store.routes[evt.ID()]; len(got) != 1 || !deliveryRoutesContain(got, wantRoute) {
+		t.Fatalf("persisted delivery routes = %#v, want semantic node route %#v", got, wantRoute)
+	}
+}
+
+func TestEventBusPublish_TargetedTemplateInstanceRouteTableNodePersistsSemanticNodeRoute(t *testing.T) {
+	store := newTargetRouteMemoryStore()
+	source := semanticview.Wrap(routedNodeTemplateBundle())
+	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("operating", "inst-1")}); err != nil {
+		t.Fatalf("AddFlowInstanceRoute: %v", err)
+	}
+	evt := (events.NewProjectionEvent(uuid.NewString(),
+		events.EventType("operating/opco.product_initialization_requested"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())).
+		WithTargetRoute(events.RouteIdentity{FlowInstance: "operating/inst-1", EntityID: "ent-operating"})
+
+	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("CheckPublishRecipientPlan: %v", err)
+	}
+	if len(plan.RoutedRecipients) != 1 || plan.RoutedRecipients[0].ID != "lifecycle-orchestrator" || plan.RoutedRecipients[0].Path != "operating/inst-1" {
+		t.Fatalf("routed recipients = %#v, want targeted lifecycle-orchestrator concrete instance route", plan.RoutedRecipients)
+	}
+	wantRoute := events.DeliveryRoute{
+		SubscriberType: "node",
+		SubscriberID:   "lifecycle-orchestrator",
+		Target: events.RouteIdentity{
+			FlowInstance: "operating/inst-1",
+			EntityID:     "ent-operating",
+		},
+	}
+	if len(plan.DeliveryRoutes) != 1 || !deliveryRoutesContain(plan.DeliveryRoutes, wantRoute) {
+		t.Fatalf("plan delivery routes = %#v, want semantic node route %#v", plan.DeliveryRoutes, wantRoute)
+	}
+
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if got := store.routes[evt.ID()]; len(got) != 1 || !deliveryRoutesContain(got, wantRoute) {
+		t.Fatalf("persisted delivery routes = %#v, want semantic node route %#v", got, wantRoute)
+	}
+}
+
+func TestEventBusPublish_TargetedDynamicFlowFixtureRouteTableNodePersistsSemanticNodeRoute(t *testing.T) {
+	store := newTargetRouteMemoryStore()
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-dynamic-flow-instance")
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
+	if err != nil {
+		t.Fatalf("load fixture bundle: %v", err)
+	}
+	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: semanticview.Wrap(bundle)})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("worker", "w-001")}); err != nil {
+		t.Fatalf("AddFlowInstanceRoute: %v", err)
+	}
+	materialized := eb.RouteTable().MaterializedRoutes(runtimeflowidentity.DeriveRoute("worker", "w-001"))
+	if len(materialized) != 1 || materialized[0].EventPattern != "work.assign" || materialized[0].SubscriberID != "task-handler" {
+		t.Fatalf("materialized routes = %#v, want task-handler local work.assign route; node entries=%v", materialized, sortedStringKeys(bundle.NodeEntries()))
+	}
+	target := events.RouteIdentity{
+		FlowInstance: "worker/w-001",
+		EntityID:     runtimeflowidentity.EntityID("worker/w-001"),
+	}
+	evt := (events.NewProjectionEvent(uuid.NewString(),
+		events.EventType("worker/work.assign"), "", "", []byte(`{"task_label":"route-me"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())).
+		WithTargetRoute(target)
+
+	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("CheckPublishRecipientPlan: %v", err)
+	}
+	foundConcreteSubscriber := false
+	for _, recipient := range plan.RoutedRecipients {
+		if recipient.ID == "task-handler" && recipient.Path == "worker/w-001" {
+			foundConcreteSubscriber = true
+			break
+		}
+	}
+	if !foundConcreteSubscriber {
+		t.Fatalf("routed recipients = %#v, want targeted task-handler concrete worker route", plan.RoutedRecipients)
+	}
+	wantRoute := events.DeliveryRoute{
+		SubscriberType: "node",
+		SubscriberID:   "task-handler",
+		Target:         target,
+	}
+	if len(plan.DeliveryRoutes) != 1 || !deliveryRoutesContain(plan.DeliveryRoutes, wantRoute) {
+		t.Fatalf("plan delivery routes = %#v, want semantic node route %#v", plan.DeliveryRoutes, wantRoute)
+	}
+
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if got := store.routes[evt.ID()]; len(got) != 1 || !deliveryRoutesContain(got, wantRoute) {
+		t.Fatalf("persisted delivery routes = %#v, want semantic node route %#v", got, wantRoute)
+	}
 }
 
 func TestEventBusPublish_NoTargetConcreteRoutedNodePersistsSemanticNodeRoute(t *testing.T) {
