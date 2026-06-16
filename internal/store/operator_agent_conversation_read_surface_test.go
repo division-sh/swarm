@@ -871,6 +871,241 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsDoesNotRequireConve
 	}
 }
 
+func TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres(t *testing.T) {
+	dsn, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	pg, err := NewPostgresStore(dsn)
+	if err != nil {
+		t.Fatalf("NewPostgresStore: %v", err)
+	}
+	t.Cleanup(func() { _ = pg.DB.Close() })
+
+	ctx := context.Background()
+	for _, agent := range []struct {
+		id   string
+		role string
+	}{
+		{"agent-1", "researcher"},
+		{"agent-2", "reviewer"},
+	} {
+		if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+			Config: runtimeactors.AgentConfig{
+				ID:               agent.id,
+				Role:             agent.role,
+				Type:             "managed",
+				Model:            "cheap",
+				ConversationMode: runtimesessions.RuntimeModeTask.String(),
+				Config:           json.RawMessage(`{"system_prompt":"lifecycle"}`),
+			},
+			Status:    "active",
+			StartedAt: time.Now().UTC(),
+		}); err != nil {
+			t.Fatalf("UpsertAgent %s: %v", agent.id, err)
+		}
+	}
+
+	base := time.Date(2026, 5, 21, 10, 0, 0, 0, time.UTC)
+	runID := uuid.NewString()
+	otherRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running'), ($2::uuid, 'running')`, runID, otherRunID); err != nil {
+		t.Fatalf("seed runs: %v", err)
+	}
+	pendingEventID := uuid.NewString()
+	deliveredEventID := uuid.NewString()
+	failedOtherRunEventID := uuid.NewString()
+	otherAgentEventID := uuid.NewString()
+	for _, event := range []struct {
+		id    string
+		runID string
+		name  string
+	}{
+		{pendingEventID, runID, "task.pending"},
+		{deliveredEventID, runID, "task.delivered"},
+		{failedOtherRunEventID, otherRunID, "task.failed"},
+		{otherAgentEventID, runID, "task.other_agent"},
+	} {
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO events (
+				event_id, run_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at
+			) VALUES (
+				$1::uuid, $2::uuid, $3, $4::uuid, 'global', '{}'::jsonb, 'runtime', 'agent', $5
+			)
+		`, event.id, event.runID, event.name, entityID, base.Add(-10*time.Minute)); err != nil {
+			t.Fatalf("seed event %s: %v", event.name, err)
+		}
+	}
+	pendingDeliveryID := uuid.NewString()
+	deliveredDeliveryID := uuid.NewString()
+	failedOtherRunDeliveryID := uuid.NewString()
+	otherAgentDeliveryID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, last_error, started_at, delivered_at, created_at
+		) VALUES
+			($1::uuid, $2::uuid, $3::uuid, 'agent', 'agent-1', 'pending', 1, 'retry_scheduled', 'temporary', NULL, NULL, $4),
+			($5::uuid, $2::uuid, $6::uuid, 'agent', 'agent-1', 'delivered', 0, NULL, NULL, $7, $8, $9),
+			($10::uuid, $11::uuid, $12::uuid, 'agent', 'agent-1', 'failed', 2, 'handler_error', 'boom', $13, $14, $15),
+			($16::uuid, $2::uuid, $17::uuid, 'agent', 'agent-2', 'delivered', 0, NULL, NULL, $7, $8, $9)
+	`, pendingDeliveryID, runID, pendingEventID, base.Add(-2*time.Minute),
+		deliveredDeliveryID, deliveredEventID, base.Add(-90*time.Second), base.Add(-80*time.Second), base.Add(-1*time.Minute),
+		failedOtherRunDeliveryID, otherRunID, failedOtherRunEventID, base.Add(-4*time.Minute), base.Add(-3*time.Minute), base.Add(-3*time.Minute),
+		otherAgentDeliveryID, otherAgentEventID); err != nil {
+		t.Fatalf("seed deliveries: %v", err)
+	}
+
+	first, err := pg.LoadOperatorAgentDeliveryLifecycle(ctx, "agent-1", OperatorAgentDeliveryLifecycleOptions{
+		RunID:    runID,
+		Statuses: []string{"pending", "delivered"},
+		Limit:    1,
+	})
+	if err != nil {
+		t.Fatalf("LoadOperatorAgentDeliveryLifecycle first page: %v", err)
+	}
+	if first.AgentID != "agent-1" || len(first.Deliveries) != 1 || first.Deliveries[0].DeliveryID != deliveredDeliveryID {
+		t.Fatalf("first page = %#v, want delivered row only", first)
+	}
+	if first.Deliveries[0].EventName != "task.delivered" || first.Deliveries[0].RunID != runID || first.Deliveries[0].EntityID != entityID || first.Deliveries[0].Status != "delivered" {
+		t.Fatalf("delivered row = %#v", first.Deliveries[0])
+	}
+	if first.Deliveries[0].DeliveryStartedAt == nil || first.Deliveries[0].DeliveryDeliveredAt == nil {
+		t.Fatalf("delivered timestamps = %#v", first.Deliveries[0])
+	}
+	if first.NextCursor == "" {
+		t.Fatal("next_cursor empty, want second page")
+	}
+
+	second, err := pg.LoadOperatorAgentDeliveryLifecycle(ctx, "agent-1", OperatorAgentDeliveryLifecycleOptions{
+		RunID:    runID,
+		Statuses: []string{"pending", "delivered"},
+		Limit:    1,
+		Cursor:   first.NextCursor,
+	})
+	if err != nil {
+		t.Fatalf("LoadOperatorAgentDeliveryLifecycle second page: %v", err)
+	}
+	if len(second.Deliveries) != 1 || second.Deliveries[0].DeliveryID != pendingDeliveryID || second.Deliveries[0].Status != "pending" {
+		t.Fatalf("second page = %#v, want pending row", second)
+	}
+	if second.NextCursor != "" {
+		t.Fatalf("second next_cursor = %q, want empty", second.NextCursor)
+	}
+}
+
+func TestSQLiteRuntimeStoreLoadAgentDeliveryLifecycle(t *testing.T) {
+	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx := context.Background()
+	if err := sqliteStore.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+		Config: runtimeactors.AgentConfig{
+			ID:               "agent-1",
+			Role:             "researcher",
+			Type:             "managed",
+			Model:            "cheap",
+			ConversationMode: runtimesessions.RuntimeModeTask.String(),
+			Config:           json.RawMessage(`{"system_prompt":"lifecycle"}`),
+		},
+		Status:    "active",
+		StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("UpsertAgent: %v", err)
+	}
+	if err := sqliteStore.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+		Config: runtimeactors.AgentConfig{
+			ID:               "agent-2",
+			Role:             "reviewer",
+			Type:             "managed",
+			Model:            "cheap",
+			ConversationMode: runtimesessions.RuntimeModeTask.String(),
+			Config:           json.RawMessage(`{"system_prompt":"lifecycle"}`),
+		},
+		Status:    "active",
+		StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("UpsertAgent agent-2: %v", err)
+	}
+
+	base := time.Date(2026, 5, 21, 10, 0, 0, 0, time.UTC)
+	runID := uuid.NewString()
+	otherRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES (?, 'running'), (?, 'running')`, runID, otherRunID); err != nil {
+		t.Fatalf("seed runs: %v", err)
+	}
+	pendingEventID := uuid.NewString()
+	deliveredEventID := uuid.NewString()
+	failedOtherRunEventID := uuid.NewString()
+	otherAgentEventID := uuid.NewString()
+	for _, event := range []struct {
+		id    string
+		runID string
+		name  string
+	}{
+		{pendingEventID, runID, "task.pending"},
+		{deliveredEventID, runID, "task.delivered"},
+		{failedOtherRunEventID, otherRunID, "task.failed"},
+		{otherAgentEventID, runID, "task.other_agent"},
+	} {
+		if _, err := sqliteStore.DB.ExecContext(ctx, `
+			INSERT INTO events (
+				event_id, run_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at
+			) VALUES (
+				?, ?, ?, ?, 'global', '{}', 'runtime', 'agent', ?
+			)
+		`, event.id, event.runID, event.name, entityID, base.Add(-10*time.Minute)); err != nil {
+			t.Fatalf("seed sqlite event %s: %v", event.name, err)
+		}
+	}
+	pendingDeliveryID := uuid.NewString()
+	deliveredDeliveryID := uuid.NewString()
+	failedOtherRunDeliveryID := uuid.NewString()
+	otherAgentDeliveryID := uuid.NewString()
+	if _, err := sqliteStore.DB.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, last_error, started_at, delivered_at, created_at
+		) VALUES
+			(?, ?, ?, 'agent', 'agent-1', 'pending', 1, 'retry_scheduled', 'temporary', NULL, NULL, ?),
+			(?, ?, ?, 'agent', 'agent-1', 'delivered', 0, NULL, NULL, ?, ?, ?),
+			(?, ?, ?, 'agent', 'agent-1', 'failed', 2, 'handler_error', 'boom', ?, ?, ?),
+			(?, ?, ?, 'agent', 'agent-2', 'delivered', 0, NULL, NULL, ?, ?, ?)
+	`, pendingDeliveryID, runID, pendingEventID, base.Add(-2*time.Minute),
+		deliveredDeliveryID, runID, deliveredEventID, base.Add(-90*time.Second), base.Add(-80*time.Second), base.Add(-1*time.Minute),
+		failedOtherRunDeliveryID, otherRunID, failedOtherRunEventID, base.Add(-4*time.Minute), base.Add(-3*time.Minute), base.Add(-3*time.Minute),
+		otherAgentDeliveryID, runID, otherAgentEventID, base.Add(-90*time.Second), base.Add(-80*time.Second), base.Add(-1*time.Minute)); err != nil {
+		t.Fatalf("seed sqlite deliveries: %v", err)
+	}
+
+	first, err := sqliteStore.LoadOperatorAgentDeliveryLifecycle(ctx, "agent-1", OperatorAgentDeliveryLifecycleOptions{
+		RunID:    runID,
+		Statuses: []string{"pending", "delivered"},
+		Limit:    1,
+	})
+	if err != nil {
+		t.Fatalf("LoadOperatorAgentDeliveryLifecycle first page: %v", err)
+	}
+	if first.AgentID != "agent-1" || len(first.Deliveries) != 1 || first.Deliveries[0].DeliveryID != deliveredDeliveryID {
+		t.Fatalf("first page = %#v, want delivered row only", first)
+	}
+	if first.Deliveries[0].DeliveryStartedAt == nil || first.Deliveries[0].DeliveryDeliveredAt == nil {
+		t.Fatalf("delivered timestamps = %#v", first.Deliveries[0])
+	}
+	if first.NextCursor == "" {
+		t.Fatal("next_cursor empty, want second page")
+	}
+
+	second, err := sqliteStore.LoadOperatorAgentDeliveryLifecycle(ctx, "agent-1", OperatorAgentDeliveryLifecycleOptions{
+		RunID:    runID,
+		Statuses: []string{"pending", "delivered"},
+		Limit:    1,
+		Cursor:   first.NextCursor,
+	})
+	if err != nil {
+		t.Fatalf("LoadOperatorAgentDeliveryLifecycle second page: %v", err)
+	}
+	if len(second.Deliveries) != 1 || second.Deliveries[0].DeliveryID != pendingDeliveryID || second.Deliveries[0].Status != "pending" {
+		t.Fatalf("second page = %#v, want pending row", second)
+	}
+}
+
 func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsFailsClosedOnDeadLetterMismatch(t *testing.T) {
 	dsn, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)

@@ -13361,6 +13361,76 @@ api_specification:
           blocking_layer:
             type: string
             minLength: 1
+      AgentDeliveryLifecycleRow:
+        type: object
+        additionalProperties: false
+        description: |
+          Agent-scoped delivery lifecycle row sourced only from canonical
+          event_deliveries rows joined to the minimum canonical event identity
+          fields needed for display. This schema is the public row type for
+          agent.delivery_lifecycle and is distinct from the narrow
+          AgentDeliveryLifecycle hint embedded in agent.diagnose. It must not
+          contain dead-letter record details, failure aggregates, retry-policy
+          recommendations, route-target interpretation, status hints, dashboard
+          projections, or trace/event rendering.
+        required:
+        - delivery_id
+        - event_id
+        - event_name
+        - status
+        - retry_count
+        - delivery_created_at
+        properties:
+          delivery_id:
+            $ref: '#/components/schemas/OpaqueId'
+          event_id:
+            $ref: '#/components/schemas/OpaqueId'
+          event_name:
+            type: string
+            minLength: 1
+          run_id:
+            $ref: '#/components/schemas/OpaqueId'
+            description: Canonical delivery/event run identity, read as COALESCE(event_deliveries.run_id, events.run_id).
+          entity_id:
+            $ref: '#/components/schemas/OpaqueId'
+          status:
+            $ref: '#/components/schemas/DeliveryStatus'
+            description: Canonical event_deliveries.status lifecycle value.
+          retry_count:
+            type: integer
+            minimum: 0
+            description: Canonical event_deliveries.retry_count; the API must not add one or infer retries from receipts.
+          reason_code:
+            type: string
+            description: Canonical event_deliveries.reason_code summary. Rich terminal evidence remains owned by agent.delivery_diagnostics.
+          last_error:
+            type: string
+            description: Canonical event_deliveries.last_error summary. Rich terminal evidence remains owned by agent.delivery_diagnostics.
+          delivery_created_at:
+            $ref: '#/components/schemas/Timestamp'
+            description: Canonical ordering watermark from event_deliveries.created_at.
+          delivery_started_at:
+            $ref: '#/components/schemas/Timestamp'
+            description: Canonical event_deliveries.started_at when handler execution has started.
+          delivery_delivered_at:
+            $ref: '#/components/schemas/Timestamp'
+            description: Canonical event_deliveries.delivered_at when the delivery was settled.
+      AgentDeliveryLifecycleList:
+        type: object
+        additionalProperties: false
+        required:
+        - agent_id
+        - deliveries
+        properties:
+          agent_id:
+            $ref: '#/components/schemas/OpaqueId'
+          deliveries:
+            type: array
+            description: Retained canonical lifecycle rows ordered by delivery_created_at DESC then delivery_id DESC.
+            items:
+              $ref: '#/components/schemas/AgentDeliveryLifecycleRow'
+          next_cursor:
+            $ref: '#/components/schemas/Cursor'
       AgentDiagnosisWatchdog:
         type: object
         additionalProperties: false
@@ -16450,6 +16520,80 @@ api_specification:
         required: true
         schema:
           $ref: '#/components/schemas/AgentDiagnosis'
+      errors:
+      - AGENT_NOT_FOUND
+    agent.delivery_lifecycle:
+      tier: should_have
+      description: |
+        Read the owner-backed per-agent delivery lifecycle rows across the
+        canonical event_deliveries lifecycle states. This method is the
+        canonical agent-scoped lifecycle read owner for pending, in_progress,
+        delivered, failed, and dead_letter delivery rows. It is a separate
+        owner from agent.diagnose and agent.delivery_diagnostics: AgentDiagnosis
+        remains lean, and rich failed/dead-letter evidence remains owned by
+        agent.delivery_diagnostics.
+
+        The API handler validates agent_id, optional run_id, optional
+        delivery_status filters, list bounds, cursor, and unknown params, then
+        consumes one named persisted delivery lifecycle read owner. The owner
+        reads only canonical event_deliveries rows for subscriber_type agent
+        joined to the minimum canonical event identity fields needed for
+        display: event_id, event_name, run_id, and entity_id. It must not
+        reconstruct lifecycle rows from run.trace, event.get, event.list,
+        agent.diagnose, agent.delivery_diagnostics, event_receipts,
+        dead_letters, logs, dashboard/Builder helpers, CLI state, EventBus
+        memory, runtime memory, or direct DB/store readers outside this owner.
+
+        Rows are ordered by event_deliveries.created_at DESC, then delivery_id
+        DESC. cursor is an opaque cursor over that ordering. run_id filters use
+        the canonical delivery/event run identity, currently
+        COALESCE(event_deliveries.run_id, events.run_id), and return only rows
+        matching the supplied run. delivery_status filters are exact
+        event_deliveries.status values. Empty lists are represented as empty
+        arrays. The method reports only lifecycle summaries
+        (status/timestamps/retry_count/reason_code/last_error); it does not
+        include dead-letter records, route target details, retry-policy
+        recommendations, status hints, trace reconstruction, event rendering,
+        or CLI/dashboard presentation semantics.
+      scope:
+        required:
+        - read:agents
+        - read:events
+      params:
+      - name: agent_id
+        required: true
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      - name: run_id
+        required: false
+        description: Optional run filter over COALESCE(event_deliveries.run_id, events.run_id).
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      - name: delivery_status
+        required: false
+        description: Optional exact lifecycle-status filter. When supplied, only these canonical event_deliveries.status values are returned.
+        schema:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeliveryStatus'
+      - name: limit
+        required: false
+        description: Max lifecycle rows to return.
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 50
+      - name: cursor
+        required: false
+        description: Opaque cursor returned by next_cursor for the next lifecycle page.
+        schema:
+          $ref: '#/components/schemas/Cursor'
+      result:
+        name: result
+        required: true
+        schema:
+          $ref: '#/components/schemas/AgentDeliveryLifecycleList'
       errors:
       - AGENT_NOT_FOUND
     agent.usage:

@@ -17,11 +17,11 @@ func TestPlatformAPISpecValidationCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Validate() error = %v", err)
 	}
-	if report.MethodCount != 56 {
-		t.Fatalf("method count = %d, want 56", report.MethodCount)
+	if report.MethodCount != 57 {
+		t.Fatalf("method count = %d, want 57", report.MethodCount)
 	}
-	if report.SchemaCount != 105 {
-		t.Fatalf("schema count = %d, want 105", report.SchemaCount)
+	if report.SchemaCount != 107 {
+		t.Fatalf("schema count = %d, want 107", report.SchemaCount)
 	}
 	if report.ErrorCodeCount != 39 {
 		t.Fatalf("error code count = %d, want 39", report.ErrorCodeCount)
@@ -80,11 +80,11 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	if err := json.Unmarshal(artifact, &doc); err != nil {
 		t.Fatalf("unmarshal openrpc artifact: %v", err)
 	}
-	if len(doc.Methods) != 56 {
-		t.Fatalf("generated OpenRPC methods = %d, want 56", len(doc.Methods))
+	if len(doc.Methods) != 57 {
+		t.Fatalf("generated OpenRPC methods = %d, want 57", len(doc.Methods))
 	}
-	if len(doc.Components.Schemas) != 105 {
-		t.Fatalf("generated OpenRPC schemas = %d, want 105", len(doc.Components.Schemas))
+	if len(doc.Components.Schemas) != 107 {
+		t.Fatalf("generated OpenRPC schemas = %d, want 107", len(doc.Components.Schemas))
 	}
 	if len(doc.Components.Errors) != 39 {
 		t.Fatalf("generated OpenRPC errors = %d, want 39", len(doc.Components.Errors))
@@ -112,6 +112,9 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	}
 	if _, ok := methods["agent.delivery_diagnostics"]; !ok {
 		t.Fatal("generated OpenRPC missing agent.delivery_diagnostics")
+	}
+	if _, ok := methods["agent.delivery_lifecycle"]; !ok {
+		t.Fatal("generated OpenRPC missing agent.delivery_lifecycle")
 	}
 	for _, methodName := range []string{"bundle.list", "bundle.get", "bundle.agents", "bundle.register", "bundle.delete"} {
 		if _, ok := methods[methodName]; !ok {
@@ -146,7 +149,7 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	if _, ok := doc.Components.Schemas["AgentDiagnosisLastToolOutcome"]; !ok {
 		t.Fatal("generated OpenRPC missing AgentDiagnosisLastToolOutcome")
 	}
-	for _, schemaName := range []string{"AgentDeliveryDiagnostics", "AgentDeliveryDiagnosticsSummary", "AgentDeliveryFailure", "AgentDeadLetterDelivery"} {
+	for _, schemaName := range []string{"AgentDeliveryDiagnostics", "AgentDeliveryDiagnosticsSummary", "AgentDeliveryFailure", "AgentDeadLetterDelivery", "AgentDeliveryLifecycleList", "AgentDeliveryLifecycleRow"} {
 		if _, ok := doc.Components.Schemas[schemaName]; !ok {
 			t.Fatalf("generated OpenRPC missing %s", schemaName)
 		}
