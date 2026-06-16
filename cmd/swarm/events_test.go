@@ -603,7 +603,21 @@ func TestEventsMapFailureExitCodes(t *testing.T) {
 			wantStderr: "terminal is required",
 		},
 		{
-			name: "malformed view delivery timestamp exits three",
+			name: "malformed view delivery created timestamp exits three",
+			args: []string{"event", "view", "event-1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				event := validEventObservationEvent("event-1")
+				delivery := event["deliveries"].([]any)[0].(map[string]any)
+				delivery["created_at"] = "not-a-timestamp"
+				writeJSONRPCResult(t, w, req.ID, event)
+			},
+			wantCode:   3,
+			wantStderr: "created_at must be an RFC3339 timestamp",
+		},
+		{
+			name: "malformed view delivery started timestamp exits three",
 			args: []string{"event", "view", "event-1"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
@@ -615,6 +629,20 @@ func TestEventsMapFailureExitCodes(t *testing.T) {
 			},
 			wantCode:   3,
 			wantStderr: "started_at must be an RFC3339 timestamp",
+		},
+		{
+			name: "malformed view delivery finished timestamp exits three",
+			args: []string{"event", "view", "event-1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				event := validEventObservationEvent("event-1")
+				delivery := event["deliveries"].([]any)[0].(map[string]any)
+				delivery["finished_at"] = "not-a-timestamp"
+				writeJSONRPCResult(t, w, req.ID, event)
+			},
+			wantCode:   3,
+			wantStderr: "finished_at must be an RFC3339 timestamp",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
