@@ -912,7 +912,10 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres(t *testing.T
 		t.Fatalf("seed runs: %v", err)
 	}
 	pendingEventID := uuid.NewString()
+	inProgressEventID := uuid.NewString()
 	deliveredEventID := uuid.NewString()
+	failedEventID := uuid.NewString()
+	deadLetterEventID := uuid.NewString()
 	failedOtherRunEventID := uuid.NewString()
 	otherAgentEventID := uuid.NewString()
 	for _, event := range []struct {
@@ -921,7 +924,10 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres(t *testing.T
 		name  string
 	}{
 		{pendingEventID, runID, "task.pending"},
+		{inProgressEventID, runID, "task.in_progress"},
 		{deliveredEventID, runID, "task.delivered"},
+		{failedEventID, runID, "task.failed"},
+		{deadLetterEventID, runID, "task.dead_letter"},
 		{failedOtherRunEventID, otherRunID, "task.failed"},
 		{otherAgentEventID, runID, "task.other_agent"},
 	} {
@@ -936,7 +942,10 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres(t *testing.T
 		}
 	}
 	pendingDeliveryID := uuid.NewString()
+	inProgressDeliveryID := uuid.NewString()
 	deliveredDeliveryID := uuid.NewString()
+	failedDeliveryID := uuid.NewString()
+	deadLetterDeliveryID := uuid.NewString()
 	failedOtherRunDeliveryID := uuid.NewString()
 	otherAgentDeliveryID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
@@ -944,32 +953,32 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres(t *testing.T
 			delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, last_error, started_at, delivered_at, created_at
 		) VALUES
 			($1::uuid, $2::uuid, $3::uuid, 'agent', 'agent-1', 'pending', 1, 'retry_scheduled', 'temporary', NULL, NULL, $4),
-			($5::uuid, $2::uuid, $6::uuid, 'agent', 'agent-1', 'delivered', 0, NULL, NULL, $7, $8, $9),
-			($10::uuid, $11::uuid, $12::uuid, 'agent', 'agent-1', 'failed', 2, 'handler_error', 'boom', $13, $14, $15),
-			($16::uuid, $2::uuid, $17::uuid, 'agent', 'agent-2', 'delivered', 0, NULL, NULL, $7, $8, $9)
-	`, pendingDeliveryID, runID, pendingEventID, base.Add(-2*time.Minute),
-		deliveredDeliveryID, deliveredEventID, base.Add(-90*time.Second), base.Add(-80*time.Second), base.Add(-1*time.Minute),
-		failedOtherRunDeliveryID, otherRunID, failedOtherRunEventID, base.Add(-4*time.Minute), base.Add(-3*time.Minute), base.Add(-3*time.Minute),
+			($5::uuid, $2::uuid, $6::uuid, 'agent', 'agent-1', 'in_progress', 2, 'handler_started', '', $7, NULL, $8),
+			($9::uuid, $2::uuid, $10::uuid, 'agent', 'agent-1', 'delivered', 0, NULL, NULL, $11, $12, $13),
+			($14::uuid, $2::uuid, $15::uuid, 'agent', 'agent-1', 'failed', 3, 'handler_error', 'boom', $16, $17, $18),
+			($19::uuid, $2::uuid, $20::uuid, 'agent', 'agent-1', 'dead_letter', 4, 'retry_exhausted', 'terminal', $21, $22, $23),
+			($24::uuid, $25::uuid, $26::uuid, 'agent', 'agent-1', 'failed', 2, 'handler_error', 'other run boom', $27, $28, $29),
+			($30::uuid, $2::uuid, $31::uuid, 'agent', 'agent-2', 'delivered', 0, NULL, NULL, $11, $12, $13)
+	`, pendingDeliveryID, runID, pendingEventID, base.Add(-4*time.Minute),
+		inProgressDeliveryID, inProgressEventID, base.Add(-3*time.Minute-50*time.Second), base.Add(-3*time.Minute),
+		deliveredDeliveryID, deliveredEventID, base.Add(-2*time.Minute-50*time.Second), base.Add(-2*time.Minute-40*time.Second), base.Add(-2*time.Minute),
+		failedDeliveryID, failedEventID, base.Add(-1*time.Minute-50*time.Second), base.Add(-1*time.Minute-40*time.Second), base.Add(-1*time.Minute),
+		deadLetterDeliveryID, deadLetterEventID, base.Add(-50*time.Second), base.Add(-40*time.Second), base,
+		failedOtherRunDeliveryID, otherRunID, failedOtherRunEventID, base.Add(-5*time.Minute-50*time.Second), base.Add(-5*time.Minute-40*time.Second), base.Add(-5*time.Minute),
 		otherAgentDeliveryID, otherAgentEventID); err != nil {
 		t.Fatalf("seed deliveries: %v", err)
 	}
 
 	first, err := pg.LoadOperatorAgentDeliveryLifecycle(ctx, "agent-1", OperatorAgentDeliveryLifecycleOptions{
 		RunID:    runID,
-		Statuses: []string{"pending", "delivered"},
-		Limit:    1,
+		Statuses: []string{"pending", "in_progress", "delivered", "failed", "dead_letter"},
+		Limit:    3,
 	})
 	if err != nil {
 		t.Fatalf("LoadOperatorAgentDeliveryLifecycle first page: %v", err)
 	}
-	if first.AgentID != "agent-1" || len(first.Deliveries) != 1 || first.Deliveries[0].DeliveryID != deliveredDeliveryID {
-		t.Fatalf("first page = %#v, want delivered row only", first)
-	}
-	if first.Deliveries[0].EventName != "task.delivered" || first.Deliveries[0].RunID != runID || first.Deliveries[0].EntityID != entityID || first.Deliveries[0].Status != "delivered" {
-		t.Fatalf("delivered row = %#v", first.Deliveries[0])
-	}
-	if first.Deliveries[0].DeliveryStartedAt == nil || first.Deliveries[0].DeliveryDeliveredAt == nil {
-		t.Fatalf("delivered timestamps = %#v", first.Deliveries[0])
+	if first.AgentID != "agent-1" || len(first.Deliveries) != 3 {
+		t.Fatalf("first page = %#v, want three rows", first)
 	}
 	if first.NextCursor == "" {
 		t.Fatal("next_cursor empty, want second page")
@@ -977,19 +986,85 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres(t *testing.T
 
 	second, err := pg.LoadOperatorAgentDeliveryLifecycle(ctx, "agent-1", OperatorAgentDeliveryLifecycleOptions{
 		RunID:    runID,
-		Statuses: []string{"pending", "delivered"},
-		Limit:    1,
+		Statuses: []string{"pending", "in_progress", "delivered", "failed", "dead_letter"},
+		Limit:    3,
 		Cursor:   first.NextCursor,
 	})
 	if err != nil {
 		t.Fatalf("LoadOperatorAgentDeliveryLifecycle second page: %v", err)
 	}
-	if len(second.Deliveries) != 1 || second.Deliveries[0].DeliveryID != pendingDeliveryID || second.Deliveries[0].Status != "pending" {
-		t.Fatalf("second page = %#v, want pending row", second)
+	if len(second.Deliveries) != 2 {
+		t.Fatalf("second page = %#v, want two rows", second)
 	}
 	if second.NextCursor != "" {
 		t.Fatalf("second next_cursor = %q, want empty", second.NextCursor)
 	}
+	assertAgentDeliveryLifecycleRows(t, append(first.Deliveries, second.Deliveries...), []expectedAgentDeliveryLifecycleRow{
+		{
+			deliveryID:  deadLetterDeliveryID,
+			eventID:     deadLetterEventID,
+			eventName:   "task.dead_letter",
+			runID:       runID,
+			entityID:    entityID,
+			status:      "dead_letter",
+			retryCount:  4,
+			reasonCode:  "retry_exhausted",
+			lastError:   "terminal",
+			createdAt:   base,
+			wantStarted: true,
+			wantDone:    true,
+		},
+		{
+			deliveryID:  failedDeliveryID,
+			eventID:     failedEventID,
+			eventName:   "task.failed",
+			runID:       runID,
+			entityID:    entityID,
+			status:      "failed",
+			retryCount:  3,
+			reasonCode:  "handler_error",
+			lastError:   "boom",
+			createdAt:   base.Add(-1 * time.Minute),
+			wantStarted: true,
+			wantDone:    true,
+		},
+		{
+			deliveryID:  deliveredDeliveryID,
+			eventID:     deliveredEventID,
+			eventName:   "task.delivered",
+			runID:       runID,
+			entityID:    entityID,
+			status:      "delivered",
+			retryCount:  0,
+			createdAt:   base.Add(-2 * time.Minute),
+			wantStarted: true,
+			wantDone:    true,
+		},
+		{
+			deliveryID:  inProgressDeliveryID,
+			eventID:     inProgressEventID,
+			eventName:   "task.in_progress",
+			runID:       runID,
+			entityID:    entityID,
+			status:      "in_progress",
+			retryCount:  2,
+			reasonCode:  "handler_started",
+			createdAt:   base.Add(-3 * time.Minute),
+			wantStarted: true,
+		},
+		{
+			deliveryID: pendingDeliveryID,
+			eventID:    pendingEventID,
+			eventName:  "task.pending",
+			runID:      runID,
+			entityID:   entityID,
+			status:     "pending",
+			retryCount: 1,
+			reasonCode: "retry_scheduled",
+			lastError:  "temporary",
+			createdAt:  base.Add(-4 * time.Minute),
+		},
+	})
 }
 
 func TestSQLiteRuntimeStoreLoadAgentDeliveryLifecycle(t *testing.T) {
@@ -1032,7 +1107,10 @@ func TestSQLiteRuntimeStoreLoadAgentDeliveryLifecycle(t *testing.T) {
 		t.Fatalf("seed runs: %v", err)
 	}
 	pendingEventID := uuid.NewString()
+	inProgressEventID := uuid.NewString()
 	deliveredEventID := uuid.NewString()
+	failedEventID := uuid.NewString()
+	deadLetterEventID := uuid.NewString()
 	failedOtherRunEventID := uuid.NewString()
 	otherAgentEventID := uuid.NewString()
 	for _, event := range []struct {
@@ -1041,7 +1119,10 @@ func TestSQLiteRuntimeStoreLoadAgentDeliveryLifecycle(t *testing.T) {
 		name  string
 	}{
 		{pendingEventID, runID, "task.pending"},
+		{inProgressEventID, runID, "task.in_progress"},
 		{deliveredEventID, runID, "task.delivered"},
+		{failedEventID, runID, "task.failed"},
+		{deadLetterEventID, runID, "task.dead_letter"},
 		{failedOtherRunEventID, otherRunID, "task.failed"},
 		{otherAgentEventID, runID, "task.other_agent"},
 	} {
@@ -1056,7 +1137,10 @@ func TestSQLiteRuntimeStoreLoadAgentDeliveryLifecycle(t *testing.T) {
 		}
 	}
 	pendingDeliveryID := uuid.NewString()
+	inProgressDeliveryID := uuid.NewString()
 	deliveredDeliveryID := uuid.NewString()
+	failedDeliveryID := uuid.NewString()
+	deadLetterDeliveryID := uuid.NewString()
 	failedOtherRunDeliveryID := uuid.NewString()
 	otherAgentDeliveryID := uuid.NewString()
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
@@ -1064,29 +1148,32 @@ func TestSQLiteRuntimeStoreLoadAgentDeliveryLifecycle(t *testing.T) {
 			delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, last_error, started_at, delivered_at, created_at
 		) VALUES
 			(?, ?, ?, 'agent', 'agent-1', 'pending', 1, 'retry_scheduled', 'temporary', NULL, NULL, ?),
+			(?, ?, ?, 'agent', 'agent-1', 'in_progress', 2, 'handler_started', '', ?, NULL, ?),
 			(?, ?, ?, 'agent', 'agent-1', 'delivered', 0, NULL, NULL, ?, ?, ?),
-			(?, ?, ?, 'agent', 'agent-1', 'failed', 2, 'handler_error', 'boom', ?, ?, ?),
+			(?, ?, ?, 'agent', 'agent-1', 'failed', 3, 'handler_error', 'boom', ?, ?, ?),
+			(?, ?, ?, 'agent', 'agent-1', 'dead_letter', 4, 'retry_exhausted', 'terminal', ?, ?, ?),
+			(?, ?, ?, 'agent', 'agent-1', 'failed', 2, 'handler_error', 'other run boom', ?, ?, ?),
 			(?, ?, ?, 'agent', 'agent-2', 'delivered', 0, NULL, NULL, ?, ?, ?)
-	`, pendingDeliveryID, runID, pendingEventID, base.Add(-2*time.Minute),
-		deliveredDeliveryID, runID, deliveredEventID, base.Add(-90*time.Second), base.Add(-80*time.Second), base.Add(-1*time.Minute),
-		failedOtherRunDeliveryID, otherRunID, failedOtherRunEventID, base.Add(-4*time.Minute), base.Add(-3*time.Minute), base.Add(-3*time.Minute),
-		otherAgentDeliveryID, runID, otherAgentEventID, base.Add(-90*time.Second), base.Add(-80*time.Second), base.Add(-1*time.Minute)); err != nil {
+	`, pendingDeliveryID, runID, pendingEventID, base.Add(-4*time.Minute),
+		inProgressDeliveryID, runID, inProgressEventID, base.Add(-3*time.Minute-50*time.Second), base.Add(-3*time.Minute),
+		deliveredDeliveryID, runID, deliveredEventID, base.Add(-2*time.Minute-50*time.Second), base.Add(-2*time.Minute-40*time.Second), base.Add(-2*time.Minute),
+		failedDeliveryID, runID, failedEventID, base.Add(-1*time.Minute-50*time.Second), base.Add(-1*time.Minute-40*time.Second), base.Add(-1*time.Minute),
+		deadLetterDeliveryID, runID, deadLetterEventID, base.Add(-50*time.Second), base.Add(-40*time.Second), base,
+		failedOtherRunDeliveryID, otherRunID, failedOtherRunEventID, base.Add(-5*time.Minute-50*time.Second), base.Add(-5*time.Minute-40*time.Second), base.Add(-5*time.Minute),
+		otherAgentDeliveryID, runID, otherAgentEventID, base.Add(-2*time.Minute-50*time.Second), base.Add(-2*time.Minute-40*time.Second), base.Add(-2*time.Minute)); err != nil {
 		t.Fatalf("seed sqlite deliveries: %v", err)
 	}
 
 	first, err := sqliteStore.LoadOperatorAgentDeliveryLifecycle(ctx, "agent-1", OperatorAgentDeliveryLifecycleOptions{
 		RunID:    runID,
-		Statuses: []string{"pending", "delivered"},
-		Limit:    1,
+		Statuses: []string{"pending", "in_progress", "delivered", "failed", "dead_letter"},
+		Limit:    3,
 	})
 	if err != nil {
 		t.Fatalf("LoadOperatorAgentDeliveryLifecycle first page: %v", err)
 	}
-	if first.AgentID != "agent-1" || len(first.Deliveries) != 1 || first.Deliveries[0].DeliveryID != deliveredDeliveryID {
-		t.Fatalf("first page = %#v, want delivered row only", first)
-	}
-	if first.Deliveries[0].DeliveryStartedAt == nil || first.Deliveries[0].DeliveryDeliveredAt == nil {
-		t.Fatalf("delivered timestamps = %#v", first.Deliveries[0])
+	if first.AgentID != "agent-1" || len(first.Deliveries) != 3 {
+		t.Fatalf("first page = %#v, want three rows", first)
 	}
 	if first.NextCursor == "" {
 		t.Fatal("next_cursor empty, want second page")
@@ -1094,15 +1181,133 @@ func TestSQLiteRuntimeStoreLoadAgentDeliveryLifecycle(t *testing.T) {
 
 	second, err := sqliteStore.LoadOperatorAgentDeliveryLifecycle(ctx, "agent-1", OperatorAgentDeliveryLifecycleOptions{
 		RunID:    runID,
-		Statuses: []string{"pending", "delivered"},
-		Limit:    1,
+		Statuses: []string{"pending", "in_progress", "delivered", "failed", "dead_letter"},
+		Limit:    3,
 		Cursor:   first.NextCursor,
 	})
 	if err != nil {
 		t.Fatalf("LoadOperatorAgentDeliveryLifecycle second page: %v", err)
 	}
-	if len(second.Deliveries) != 1 || second.Deliveries[0].DeliveryID != pendingDeliveryID || second.Deliveries[0].Status != "pending" {
-		t.Fatalf("second page = %#v, want pending row", second)
+	if len(second.Deliveries) != 2 {
+		t.Fatalf("second page = %#v, want two rows", second)
+	}
+	if second.NextCursor != "" {
+		t.Fatalf("second next_cursor = %q, want empty", second.NextCursor)
+	}
+	assertAgentDeliveryLifecycleRows(t, append(first.Deliveries, second.Deliveries...), []expectedAgentDeliveryLifecycleRow{
+		{
+			deliveryID:  deadLetterDeliveryID,
+			eventID:     deadLetterEventID,
+			eventName:   "task.dead_letter",
+			runID:       runID,
+			entityID:    entityID,
+			status:      "dead_letter",
+			retryCount:  4,
+			reasonCode:  "retry_exhausted",
+			lastError:   "terminal",
+			createdAt:   base,
+			wantStarted: true,
+			wantDone:    true,
+		},
+		{
+			deliveryID:  failedDeliveryID,
+			eventID:     failedEventID,
+			eventName:   "task.failed",
+			runID:       runID,
+			entityID:    entityID,
+			status:      "failed",
+			retryCount:  3,
+			reasonCode:  "handler_error",
+			lastError:   "boom",
+			createdAt:   base.Add(-1 * time.Minute),
+			wantStarted: true,
+			wantDone:    true,
+		},
+		{
+			deliveryID:  deliveredDeliveryID,
+			eventID:     deliveredEventID,
+			eventName:   "task.delivered",
+			runID:       runID,
+			entityID:    entityID,
+			status:      "delivered",
+			retryCount:  0,
+			createdAt:   base.Add(-2 * time.Minute),
+			wantStarted: true,
+			wantDone:    true,
+		},
+		{
+			deliveryID:  inProgressDeliveryID,
+			eventID:     inProgressEventID,
+			eventName:   "task.in_progress",
+			runID:       runID,
+			entityID:    entityID,
+			status:      "in_progress",
+			retryCount:  2,
+			reasonCode:  "handler_started",
+			createdAt:   base.Add(-3 * time.Minute),
+			wantStarted: true,
+		},
+		{
+			deliveryID: pendingDeliveryID,
+			eventID:    pendingEventID,
+			eventName:  "task.pending",
+			runID:      runID,
+			entityID:   entityID,
+			status:     "pending",
+			retryCount: 1,
+			reasonCode: "retry_scheduled",
+			lastError:  "temporary",
+			createdAt:  base.Add(-4 * time.Minute),
+		},
+	})
+}
+
+type expectedAgentDeliveryLifecycleRow struct {
+	deliveryID  string
+	eventID     string
+	eventName   string
+	runID       string
+	entityID    string
+	status      string
+	retryCount  int
+	reasonCode  string
+	lastError   string
+	createdAt   time.Time
+	wantStarted bool
+	wantDone    bool
+}
+
+func assertAgentDeliveryLifecycleRows(t *testing.T, got []OperatorAgentDeliveryLifecycleRow, want []expectedAgentDeliveryLifecycleRow) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("delivery lifecycle rows = %#v, want %d rows", got, len(want))
+	}
+	for i, row := range got {
+		expected := want[i]
+		if row.DeliveryID != expected.deliveryID ||
+			row.EventID != expected.eventID ||
+			row.EventName != expected.eventName ||
+			row.RunID != expected.runID ||
+			row.EntityID != expected.entityID ||
+			row.Status != expected.status ||
+			row.RetryCount != expected.retryCount ||
+			row.ReasonCode != expected.reasonCode ||
+			row.LastError != expected.lastError ||
+			!row.DeliveryCreatedAt.Equal(expected.createdAt) {
+			t.Fatalf("delivery lifecycle row[%d] = %#v, want %#v", i, row, expected)
+		}
+		if expected.wantStarted && row.DeliveryStartedAt == nil {
+			t.Fatalf("delivery lifecycle row[%d] missing started timestamp: %#v", i, row)
+		}
+		if !expected.wantStarted && row.DeliveryStartedAt != nil {
+			t.Fatalf("delivery lifecycle row[%d] started timestamp = %s, want nil", i, row.DeliveryStartedAt.Format(time.RFC3339Nano))
+		}
+		if expected.wantDone && row.DeliveryDeliveredAt == nil {
+			t.Fatalf("delivery lifecycle row[%d] missing delivered timestamp: %#v", i, row)
+		}
+		if !expected.wantDone && row.DeliveryDeliveredAt != nil {
+			t.Fatalf("delivery lifecycle row[%d] delivered timestamp = %s, want nil", i, row.DeliveryDeliveredAt.Format(time.RFC3339Nano))
+		}
 	}
 }
 
