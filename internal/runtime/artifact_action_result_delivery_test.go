@@ -157,6 +157,8 @@ func TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery(
 		mvpYAML         string
 		resultEventName string
 		resultKind      string
+		requestFlowPath string
+		wantFlowPath    string
 	}{
 		{
 			name:            "success",
@@ -165,6 +167,8 @@ func TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery(
 			mvpYAML:         "name: Demo\n",
 			resultEventName: "repo_scaffold.repo_commit_succeeded",
 			resultKind:      "ready",
+			requestFlowPath: "repo-scaffold",
+			wantFlowPath:    "repo-scaffold",
 		},
 		{
 			name:            "failure",
@@ -173,6 +177,28 @@ func TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery(
 			mvpYAML:         "title: Demo\n",
 			resultEventName: "repo_scaffold.repo_commit_failed",
 			resultKind:      "failed",
+			requestFlowPath: "repo-scaffold",
+			wantFlowPath:    "repo-scaffold",
+		},
+		{
+			name:            "wildcard_child_inbound_success",
+			requestEventID:  "99999999-9999-4999-8999-999999999963",
+			requestID:       "99999999-9999-4999-8999-999999999973",
+			mvpYAML:         "name: Demo\n",
+			resultEventName: "repo_scaffold.repo_commit_succeeded",
+			resultKind:      "ready",
+			requestFlowPath: "repo-scaffold/child-1",
+			wantFlowPath:    "repo-scaffold",
+		},
+		{
+			name:            "wildcard_child_inbound_failure",
+			requestEventID:  "99999999-9999-4999-8999-999999999964",
+			requestID:       "99999999-9999-4999-8999-999999999974",
+			mvpYAML:         "title: Demo\n",
+			resultEventName: "repo_scaffold.repo_commit_failed",
+			resultKind:      "failed",
+			requestFlowPath: "repo-scaffold/child-1",
+			wantFlowPath:    "repo-scaffold",
 		},
 	}
 	for _, tc := range tests {
@@ -240,7 +266,7 @@ func TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery(
 				"",
 				events.EventEnvelope{},
 				time.Now().UTC(),
-			).WithEntityID(artifactActionResultEntityID).WithFlowInstance("repo-scaffold")
+			).WithEntityID(artifactActionResultEntityID).WithFlowInstance(tc.requestFlowPath)
 			if err := bus.Publish(ctx, requestEvent); err != nil {
 				t.Fatalf("Publish request event: %v", err)
 			}
@@ -250,8 +276,8 @@ func TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery(
 				FROM events
 				WHERE event_name = $1 AND source_event_id = $2::uuid
 			`, []any{resultEventType, tc.requestEventID})
-			assertArtifactActionResultEventContext(t, ctx, db, resultEventID, tc.resultKind, "repo-scaffold")
-			assertArtifactActionResultNodeRoute(t, ctx, db, resultEventID, "repo-scaffold")
+			assertArtifactActionResultEventContext(t, ctx, db, resultEventID, tc.resultKind, tc.wantFlowPath)
+			assertArtifactActionResultNodeRoute(t, ctx, db, resultEventID, tc.wantFlowPath)
 			waitArtifactActionResultHandlerStarted(t, resultHandlerStarted, resultEventID)
 			waitArtifactActionResultDBCount(t, ctx, db, `
 				SELECT COUNT(*)
@@ -263,7 +289,7 @@ func TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery(
 				  AND reason_code = 'node_processed'
 				  AND delivered_at IS NOT NULL
 				  AND delivery_target_route @> $2::jsonb
-			`, 1, resultEventID, artifactActionResultDeliveryTargetRouteJSON("repo-scaffold"))
+			`, 1, resultEventID, artifactActionResultDeliveryTargetRouteJSON(tc.wantFlowPath))
 			waitArtifactActionResultDBCount(t, ctx, db, `
 				SELECT COUNT(*)
 				FROM event_receipts
@@ -273,7 +299,7 @@ func TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery(
 				  AND entity_id = $2::uuid
 				  AND flow_instance = $3
 				  AND outcome = 'no_op'
-			`, 1, resultEventID, artifactActionResultEntityID, "repo-scaffold")
+			`, 1, resultEventID, artifactActionResultEntityID, tc.wantFlowPath)
 		})
 	}
 }

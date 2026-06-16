@@ -20,12 +20,12 @@ func actionResultProducerRoute(source semanticview.Source, flowID, entityID stri
 			FlowInstance: asString(state.StateCarrier.Metadata["flow_path"]),
 			EntityID:     entityID,
 		},
+		staticActionResultProducerRoute(source, flowID, entityID),
 		{
 			FlowID:       flowID,
 			FlowInstance: evt.FlowInstance(),
 			EntityID:     entityID,
 		},
-		staticActionResultProducerRoute(source, flowID, entityID),
 	}
 	for _, candidate := range candidates {
 		if route, ok := normalizeActionResultProducerRouteCandidate(source, flowID, entityID, candidate); ok {
@@ -96,7 +96,24 @@ func actionResultFlowInstanceBelongsToFlow(source semanticview.Source, flowID, f
 	if flowPath == "" {
 		return source == nil
 	}
-	return flowInstance == flowPath || strings.HasPrefix(flowInstance, flowPath+"/")
+	if flowInstance == flowPath {
+		return true
+	}
+	if !actionResultFlowAllowsDescendantInstances(source, flowID) {
+		return false
+	}
+	return strings.HasPrefix(flowInstance, flowPath+"/")
+}
+
+func actionResultFlowAllowsDescendantInstances(source semanticview.Source, flowID string) bool {
+	if source == nil {
+		return true
+	}
+	scope, ok := source.FlowScopeByID(strings.TrimSpace(flowID))
+	if !ok {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(scope.Mode), "template")
 }
 
 func actionResultFlowPath(source semanticview.Source, flowID string) string {
