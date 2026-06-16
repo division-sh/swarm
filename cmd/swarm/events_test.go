@@ -114,11 +114,23 @@ func TestEventViewUsesEventGetV1RPC(t *testing.T) {
 		"source_event_id=source-event-1",
 		"payload={\"priority\":\"high\"}",
 		"delivery_id=delivery-1",
+		"created_at=2026-05-13T10:00:02Z",
+		"started_at=2026-05-13T10:00:03Z",
+		"finished_at=2026-05-13T10:00:05Z",
+		"reason_code=retry_exhausted",
+		"last_error=boom",
+		"retry_count=2",
+		"retry_eligible=false",
+		"terminal=true",
+		"delivery_dead_letter dead_letter_id=delivery-dead-1",
 		"dead_letter_id=dead-1",
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
 		}
+	}
+	if strings.Contains(stdout.String(), "delivery_target_route") {
+		t.Fatalf("stdout exposed internal route target:\n%s", stdout.String())
 	}
 	if strings.TrimSpace(stderr.String()) != "" {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
@@ -548,6 +560,62 @@ func TestEventsMapFailureExitCodes(t *testing.T) {
 			wantCode:   3,
 			wantStderr: "event_id is required",
 		},
+		{
+			name: "malformed view delivery retry count exits three",
+			args: []string{"event", "view", "event-1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				event := validEventObservationEvent("event-1")
+				delivery := event["deliveries"].([]any)[0].(map[string]any)
+				delete(delivery, "retry_count")
+				writeJSONRPCResult(t, w, req.ID, event)
+			},
+			wantCode:   3,
+			wantStderr: "retry_count is required",
+		},
+		{
+			name: "malformed view delivery retry eligible exits three",
+			args: []string{"event", "view", "event-1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				event := validEventObservationEvent("event-1")
+				delivery := event["deliveries"].([]any)[0].(map[string]any)
+				delete(delivery, "retry_eligible")
+				writeJSONRPCResult(t, w, req.ID, event)
+			},
+			wantCode:   3,
+			wantStderr: "retry_eligible is required",
+		},
+		{
+			name: "malformed view delivery terminal exits three",
+			args: []string{"event", "view", "event-1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				event := validEventObservationEvent("event-1")
+				delivery := event["deliveries"].([]any)[0].(map[string]any)
+				delete(delivery, "terminal")
+				writeJSONRPCResult(t, w, req.ID, event)
+			},
+			wantCode:   3,
+			wantStderr: "terminal is required",
+		},
+		{
+			name: "malformed view delivery timestamp exits three",
+			args: []string{"event", "view", "event-1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				event := validEventObservationEvent("event-1")
+				delivery := event["deliveries"].([]any)[0].(map[string]any)
+				delivery["started_at"] = "not-a-timestamp"
+				writeJSONRPCResult(t, w, req.ID, event)
+			},
+			wantCode:   3,
+			wantStderr: "started_at must be an RFC3339 timestamp",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("SWARM_API_TOKEN", "test-token")
@@ -733,8 +801,27 @@ func validEventObservationEvent(eventID string) map[string]any {
 				"delivery_id":     "delivery-1",
 				"subscriber_type": "agent",
 				"subscriber_id":   "agent-1",
-				"status":          "delivered",
+				"status":          "dead_letter",
 				"session_id":      "session-1",
+				"reason_code":     "retry_exhausted",
+				"last_error":      "boom",
+				"retry_count":     2,
+				"retry_eligible":  false,
+				"terminal":        true,
+				"created_at":      "2026-05-13T10:00:02Z",
+				"started_at":      "2026-05-13T10:00:03Z",
+				"finished_at":     "2026-05-13T10:00:05Z",
+				"dead_letters": []any{
+					map[string]any{
+						"dead_letter_id": "delivery-dead-1",
+						"failure_type":   "retry_exhausted",
+						"retry_count":    2,
+						"chain_depth":    3,
+						"created_at":     "2026-05-13T10:00:05Z",
+						"handler_node":   "agent-1",
+						"error_message":  "boom",
+					},
+				},
 			},
 		},
 		"dead_letters": []any{

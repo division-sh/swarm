@@ -88,9 +88,9 @@ type eventDelivery struct {
 	SessionID      string            `json:"session_id,omitempty"`
 	ReasonCode     string            `json:"reason_code,omitempty"`
 	LastError      string            `json:"last_error,omitempty"`
-	RetryCount     int               `json:"retry_count"`
-	RetryEligible  bool              `json:"retry_eligible"`
-	Terminal       bool              `json:"terminal"`
+	RetryCount     *int              `json:"retry_count"`
+	RetryEligible  *bool             `json:"retry_eligible"`
+	Terminal       *bool             `json:"terminal"`
 	CreatedAt      string            `json:"created_at,omitempty"`
 	StartedAt      string            `json:"started_at,omitempty"`
 	FinishedAt     string            `json:"finished_at,omitempty"`
@@ -592,8 +592,29 @@ func validateEventDelivery(prefix string, delivery eventDelivery) error {
 	if _, ok := eventObservationValidDeliveryStatuses[strings.TrimSpace(delivery.Status)]; !ok {
 		return fmt.Errorf("malformed %s: status=%q is not a valid DeliveryStatus", prefix, delivery.Status)
 	}
-	if delivery.RetryCount < 0 {
+	if delivery.RetryCount == nil {
+		return fmt.Errorf("malformed %s: retry_count is required", prefix)
+	}
+	if *delivery.RetryCount < 0 {
 		return fmt.Errorf("malformed %s: retry_count must be >= 0", prefix)
+	}
+	if delivery.RetryEligible == nil {
+		return fmt.Errorf("malformed %s: retry_eligible is required", prefix)
+	}
+	if delivery.Terminal == nil {
+		return fmt.Errorf("malformed %s: terminal is required", prefix)
+	}
+	for _, field := range []struct {
+		name  string
+		value string
+	}{
+		{name: "created_at", value: delivery.CreatedAt},
+		{name: "started_at", value: delivery.StartedAt},
+		{name: "finished_at", value: delivery.FinishedAt},
+	} {
+		if err := validateOptionalTimestamp(prefix+"."+field.name, field.value); err != nil {
+			return err
+		}
 	}
 	for i, deadLetter := range delivery.DeadLetters {
 		if err := validateEventDeadLetter(fmt.Sprintf("%s.dead_letters[%d]", prefix, i), deadLetter); err != nil {
@@ -874,19 +895,25 @@ func writeEventDetailResult(out io.Writer, event eventFull) {
 	} else {
 		fmt.Fprintln(out, "deliveries:")
 		for _, delivery := range event.Deliveries {
-			fmt.Fprintf(out, "  delivery_id=%s subscriber=%s/%s status=%s session_id=%s reason_code=%s last_error=%s retry_count=%d retry_eligible=%t terminal=%t dead_letters=%d\n",
+			fmt.Fprintf(out, "  delivery_id=%s subscriber=%s/%s status=%s session_id=%s created_at=%s started_at=%s finished_at=%s reason_code=%s last_error=%s retry_count=%d retry_eligible=%t terminal=%t dead_letters=%d\n",
 				delivery.DeliveryID,
 				delivery.SubscriberType,
 				delivery.SubscriberID,
 				delivery.Status,
 				eventObservationDash(delivery.SessionID),
+				eventObservationDash(delivery.CreatedAt),
+				eventObservationDash(delivery.StartedAt),
+				eventObservationDash(delivery.FinishedAt),
 				eventObservationDash(delivery.ReasonCode),
 				eventObservationDash(delivery.LastError),
-				delivery.RetryCount,
-				delivery.RetryEligible,
-				delivery.Terminal,
+				*delivery.RetryCount,
+				*delivery.RetryEligible,
+				*delivery.Terminal,
 				len(delivery.DeadLetters),
 			)
+			for _, deadLetter := range delivery.DeadLetters {
+				writeEventDeadLetterLine(out, "    delivery_dead_letter", deadLetter)
+			}
 		}
 	}
 	if len(event.DeadLetters) == 0 {
@@ -894,17 +921,22 @@ func writeEventDetailResult(out io.Writer, event eventFull) {
 	} else {
 		fmt.Fprintln(out, "dead_letters:")
 		for _, deadLetter := range event.DeadLetters {
-			fmt.Fprintf(out, "  dead_letter_id=%s failure_type=%s retry_count=%d chain_depth=%d created_at=%s handler_node=%s error=%s\n",
-				deadLetter.DeadLetterID,
-				deadLetter.FailureType,
-				*deadLetter.RetryCount,
-				*deadLetter.ChainDepth,
-				deadLetter.CreatedAt,
-				eventObservationDash(deadLetter.HandlerNode),
-				eventObservationDash(deadLetter.ErrorMessage),
-			)
+			writeEventDeadLetterLine(out, "  dead_letter", deadLetter)
 		}
 	}
+}
+
+func writeEventDeadLetterLine(out io.Writer, prefix string, deadLetter eventDeadLetter) {
+	fmt.Fprintf(out, "%s dead_letter_id=%s failure_type=%s retry_count=%d chain_depth=%d created_at=%s handler_node=%s error=%s\n",
+		prefix,
+		deadLetter.DeadLetterID,
+		deadLetter.FailureType,
+		*deadLetter.RetryCount,
+		*deadLetter.ChainDepth,
+		deadLetter.CreatedAt,
+		eventObservationDash(deadLetter.HandlerNode),
+		eventObservationDash(deadLetter.ErrorMessage),
+	)
 }
 
 func writeEventFollowEvent(out io.Writer, event eventFull) {
