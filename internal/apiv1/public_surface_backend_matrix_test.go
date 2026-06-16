@@ -305,7 +305,7 @@ func TestPublicSurfaceBackendMatrixRejectsStaleReferences(t *testing.T) {
 				row := publicSurfaceMatrixRowByID(t, matrix, "event_publish_dynamic_auto_emit_served_lifecycle")
 				row.ProofRefs = publicSurfaceProofRefsExcept(row.ProofRefs, "TestRunServeRuntimeEventPublishDynamicAutoEmitServedPathDefaultSQLite")
 			},
-			want: "event_publish_dynamic_auto_emit_served_lifecycle missing default SQLite served-runtime go_test proof_ref",
+			want: "event_publish_dynamic_auto_emit_served_lifecycle missing default SQLite served-runtime go_test proof_ref for api_method event.publish",
 		},
 		{
 			name: "served lifecycle row keeps postgres served proof",
@@ -313,7 +313,18 @@ func TestPublicSurfaceBackendMatrixRejectsStaleReferences(t *testing.T) {
 				row := publicSurfaceMatrixRowByID(t, matrix, "event_publish_dynamic_auto_emit_served_lifecycle")
 				row.ProofRefs = publicSurfaceProofRefsExcept(row.ProofRefs, "TestRunServeRuntimeEventPublishDynamicAutoEmitServedPathPostgres")
 			},
-			want: "event_publish_dynamic_auto_emit_served_lifecycle missing explicit Postgres served-runtime go_test proof_ref",
+			want: "event_publish_dynamic_auto_emit_served_lifecycle missing explicit Postgres served-runtime go_test proof_ref for api_method event.publish",
+		},
+		{
+			name: "served lifecycle row rejects unrelated serve boot proofs",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				row := publicSurfaceMatrixRowByID(t, matrix, "event_publish_dynamic_auto_emit_served_lifecycle")
+				row.ProofRefs = []publicSurfaceProofRef{
+					{Kind: "go_test", Name: "TestRunServeRuntimeFreshEmptySQLiteBootsWithDevAbandon"},
+					{Kind: "go_test", Name: "TestRunServeRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDevAbandon"},
+				}
+			},
+			want: "event_publish_dynamic_auto_emit_served_lifecycle missing default SQLite served-runtime go_test proof_ref for api_method event.publish",
 		},
 		{
 			name: "future served lifecycle row must opt into guarded class",
@@ -597,11 +608,13 @@ func validatePublicSurfaceServedMutatingLifecycleRows(rowsByID map[string]public
 				problems = append(problems, fmt.Sprintf("%s served mutating lifecycle row missing %s proof_dimension", id, dimension))
 			}
 		}
-		if !publicSurfaceHasServedRuntimeBackendProof(row.ProofRefs, "SQLite") {
-			problems = append(problems, fmt.Sprintf("%s missing default SQLite served-runtime go_test proof_ref", id))
-		}
-		if !publicSurfaceHasServedRuntimeBackendProof(row.ProofRefs, "Postgres") {
-			problems = append(problems, fmt.Sprintf("%s missing explicit Postgres served-runtime go_test proof_ref", id))
+		for method, proofToken := range publicSurfaceServedMutatingLifecycleProofTokens(row.APIMethods) {
+			if !publicSurfaceHasServedRuntimeBackendProof(row.ProofRefs, proofToken, "SQLite") {
+				problems = append(problems, fmt.Sprintf("%s missing default SQLite served-runtime go_test proof_ref for api_method %s", id, method))
+			}
+			if !publicSurfaceHasServedRuntimeBackendProof(row.ProofRefs, proofToken, "Postgres") {
+				problems = append(problems, fmt.Sprintf("%s missing explicit Postgres served-runtime go_test proof_ref for api_method %s", id, method))
+			}
 		}
 	}
 	return problems
@@ -992,9 +1005,40 @@ func publicSurfaceServedMutatingLifecycleMethods() map[string]struct{} {
 	})
 }
 
-func publicSurfaceHasServedRuntimeBackendProof(refs []publicSurfaceProofRef, backend string) bool {
+func publicSurfaceServedMutatingLifecycleProofTokens(methods []string) map[string]string {
+	out := map[string]string{}
+	for _, method := range methods {
+		method = strings.TrimSpace(method)
+		if _, ok := publicSurfaceServedMutatingLifecycleMethods()[method]; !ok {
+			continue
+		}
+		out[method] = publicSurfaceAPIMethodProofToken(method)
+	}
+	return out
+}
+
+func publicSurfaceAPIMethodProofToken(method string) string {
+	var out strings.Builder
+	for _, part := range strings.FieldsFunc(method, func(r rune) bool {
+		return r == '.' || r == '_' || r == '-'
+	}) {
+		if part == "" {
+			continue
+		}
+		out.WriteString(strings.ToUpper(part[:1]))
+		if len(part) > 1 {
+			out.WriteString(part[1:])
+		}
+	}
+	return out.String()
+}
+
+func publicSurfaceHasServedRuntimeBackendProof(refs []publicSurfaceProofRef, methodToken, backend string) bool {
 	for _, ref := range refs {
-		if ref.Kind == "go_test" && strings.Contains(ref.Name, "ServeRuntime") && strings.Contains(ref.Name, backend) {
+		if ref.Kind == "go_test" &&
+			strings.Contains(ref.Name, "ServeRuntime") &&
+			strings.Contains(ref.Name, methodToken) &&
+			strings.Contains(ref.Name, backend) {
 			return true
 		}
 	}
