@@ -1219,12 +1219,10 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsAgentVisibleArtifac
 	}
 	action, execCtx := testArtifactRepoActionAndContext(entityID, initial, "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444", "name: Demo\n")
 
-	ok, err := pipelineEngineActionRunner{coordinator: pc}.ExecuteAction(ctx, action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx)
-	if !ok {
-		t.Fatal("expected artifact_repo_commit action to be claimed")
-	}
-	if err == nil || !strings.Contains(err.Error(), "agent-visible mount /data") {
-		t.Fatalf("ExecuteAction error = %v, want invalid /data artifact root", err)
+	var intents []runtimeengine.EmitIntent
+	ok, err := pipelineEngineActionRunner{coordinator: pc}.ExecuteAction(runtimeengine.WithActionEmitIntentCollector(ctx, &intents), action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx)
+	if !ok || err != nil {
+		t.Fatalf("ExecuteAction ok=%v err=%v, want handled failure result", ok, err)
 	}
 	instance, _, err := store.Load(ctx, entityID)
 	if err != nil {
@@ -1239,11 +1237,9 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsAgentVisibleArtifac
 	if _, exists := instance.Metadata["current_ref"]; exists {
 		t.Fatalf("current_ref should not be persisted on invalid artifact root: %#v", instance.Metadata["current_ref"])
 	}
-	if got := bus.publishedCount(); got != 1 {
-		t.Fatalf("failure event count = %d, want 1", got)
-	}
-	if got := string(bus.publishedEvent(0).Type()); got != "artifact_repo.commit_failed" {
-		t.Fatalf("failure event type = %q", got)
+	assertArtifactRepoQueuedIntent(t, intents, 0, "artifact_repo.commit_failed")
+	if got := bus.publishedCount(); got != 0 {
+		t.Fatalf("fallback published event count = %d, want 0", got)
 	}
 }
 
@@ -1298,12 +1294,10 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsUnusableArtifactRoo
 			}
 			action, execCtx := testArtifactRepoActionAndContext(entityID, initial, "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444", "name: Demo\n")
 
-			ok, err := pipelineEngineActionRunner{coordinator: pc}.ExecuteAction(ctx, action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx)
-			if !ok {
-				t.Fatal("expected artifact_repo_commit action to be claimed")
-			}
-			if err == nil || !strings.Contains(err.Error(), "not writable by the runtime process") || !strings.Contains(err.Error(), "SWARM_ARTIFACT_ROOT=<writable runtime-private absolute path>") {
-				t.Fatalf("ExecuteAction error = %v, want unusable root remediation", err)
+			var intents []runtimeengine.EmitIntent
+			ok, err := pipelineEngineActionRunner{coordinator: pc}.ExecuteAction(runtimeengine.WithActionEmitIntentCollector(ctx, &intents), action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx)
+			if !ok || err != nil {
+				t.Fatalf("ExecuteAction ok=%v err=%v, want handled failure result", ok, err)
 			}
 			instance, _, err := store.Load(ctx, entityID)
 			if err != nil {
@@ -1315,14 +1309,15 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsUnusableArtifactRoo
 			if got := strings.TrimSpace(asString(instance.Metadata["failure_reason"])); !strings.Contains(got, wantDetail) || !strings.Contains(got, "not writable by the runtime process") {
 				t.Fatalf("failure_reason = %q, want unusable root detail %q", got, wantDetail)
 			}
-			if got := bus.publishedCount(); got != 1 {
-				t.Fatalf("failure event count = %d, want 1", got)
+			assertArtifactRepoQueuedIntent(t, intents, 0, "artifact_repo.commit_failed")
+			if got := bus.publishedCount(); got != 0 {
+				t.Fatalf("fallback published event count = %d, want 0", got)
 			}
 		})
 	}
 }
 
-func TestPipelineEngineActionRunner_ArtifactRepoCommitPublishesSuccessResultEvent(t *testing.T) {
+func TestPipelineEngineActionRunner_ArtifactRepoCommitQueuesSuccessResultEvent(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
 	store := NewWorkflowInstanceStore(db)
@@ -1359,18 +1354,15 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitPublishesSuccessResultEven
 		"result_kind": runtimecontracts.LiteralExpression("ready"),
 	}
 
-	ok, err := pipelineEngineActionRunner{coordinator: pc}.ExecuteAction(ctx, action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx)
+	var intents []runtimeengine.EmitIntent
+	actionCtx := runtimeengine.WithActionEmitIntentCollector(ctx, &intents)
+	ok, err := pipelineEngineActionRunner{coordinator: pc}.ExecuteAction(actionCtx, action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx)
 	if !ok || err != nil {
 		t.Fatalf("ExecuteAction ok=%v err=%v", ok, err)
 	}
-	if got := bus.publishedCount(); got != 1 {
-		t.Fatalf("success event count = %d, want 1", got)
-	}
-	if got := string(bus.publishedEvent(0).Type()); got != "artifact_repo.commit_completed" {
-		t.Fatalf("success event type = %q", got)
-	}
+	resultEvent := assertArtifactRepoQueuedIntent(t, intents, 0, "artifact_repo.commit_completed")
 	var payload map[string]any
-	if err := json.Unmarshal(bus.publishedEvent(0).Payload(), &payload); err != nil {
+	if err := json.Unmarshal(resultEvent.Payload(), &payload); err != nil {
 		t.Fatalf("success event payload: %v", err)
 	}
 	if got := strings.TrimSpace(asString(payload["repo_id"])); got != initial["repo_id"].(string) {
@@ -1395,11 +1387,11 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitPublishesSuccessResultEven
 
 	replayCtx := execCtx
 	replayCtx.Request.State.StateCarrier.Metadata = cloneStringAnyMap(committed.Metadata)
-	if _, err := (pipelineEngineActionRunner{coordinator: pc}).ExecuteAction(ctx, action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, replayCtx); err != nil {
+	if _, err := (pipelineEngineActionRunner{coordinator: pc}).ExecuteAction(actionCtx, action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, replayCtx); err != nil {
 		t.Fatalf("same-source replay ExecuteAction: %v", err)
 	}
-	if got := bus.publishedCount(); got != 1 {
-		t.Fatalf("same-source replay success event count = %d, want 1", got)
+	if got := len(intents); got != 1 {
+		t.Fatalf("same-source replay queued success event count = %d, want 1", got)
 	}
 
 	if err := store.Upsert(ctx, WorkflowInstance{
@@ -1415,11 +1407,14 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitPublishesSuccessResultEven
 	repairAction, repairCtx := testArtifactRepoActionAndContext(entityID, initial, "55555555-5555-5555-5555-555555555555", "44444444-4444-4444-4444-444444444444", "name: Demo\n")
 	repairAction.ArtifactRepo.SuccessEvent = action.ArtifactRepo.SuccessEvent
 	repairAction.ArtifactRepo.SuccessPayload = action.ArtifactRepo.SuccessPayload
-	if _, err := (pipelineEngineActionRunner{coordinator: pc}).ExecuteAction(ctx, repairAction, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, repairCtx); err != nil {
+	if _, err := (pipelineEngineActionRunner{coordinator: pc}).ExecuteAction(actionCtx, repairAction, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, repairCtx); err != nil {
 		t.Fatalf("history repair ExecuteAction: %v", err)
 	}
-	if got := bus.publishedCount(); got != 2 {
-		t.Fatalf("history repair success event count = %d, want 2", got)
+	if got := len(intents); got != 2 {
+		t.Fatalf("history repair queued success event count = %d, want 2", got)
+	}
+	if got := bus.publishedCount(); got != 0 {
+		t.Fatalf("fallback published event count = %d, want 0", got)
 	}
 }
 
@@ -1654,11 +1649,11 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitFailureResultOutboxFailureR
 	}
 }
 
-func TestPipelineEngineActionRunner_ArtifactRepoCommitRetriesSuccessEventAfterPublishFailure(t *testing.T) {
+func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedWithoutResultEventCollector(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
 	store := NewWorkflowInstanceStore(db)
-	bus := &recordingPipelineBus{publishErr: errors.New("transient publish failure")}
+	bus := &recordingPipelineBus{publishErr: errors.New("direct publish must not be used")}
 	source := testArtifactRepoResultEventSource(t)
 	bundle, ok := semanticview.Bundle(source)
 	if !ok {
@@ -1694,41 +1689,21 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRetriesSuccessEventAfterPu
 	if !ok {
 		t.Fatal("expected artifact_repo_commit action to be claimed")
 	}
-	if err == nil || !strings.Contains(err.Error(), "transient publish failure") {
-		t.Fatalf("ExecuteAction error = %v, want transient publish failure", err)
+	if err == nil || !strings.Contains(err.Error(), errArtifactRepoResultEmitCollectorMissing.Error()) {
+		t.Fatalf("ExecuteAction error = %v, want missing result collector", err)
 	}
-	partiallyCommitted, _, err := store.Load(ctx, entityID)
+	instance, _, err := store.Load(ctx, entityID)
 	if err != nil {
-		t.Fatalf("load partially committed workflow instance: %v", err)
+		t.Fatalf("load workflow instance: %v", err)
 	}
-	if got := strings.TrimSpace(asString(partiallyCommitted.Metadata["status"])); got != "committed" {
-		t.Fatalf("status = %q, want committed", got)
+	if got := strings.TrimSpace(asString(instance.Metadata["status"])); got != "" {
+		t.Fatalf("status = %q, want unchanged without result collector", got)
 	}
-	if got := strings.TrimSpace(asString(partiallyCommitted.Metadata["current_ref"])); len(got) != 40 {
-		t.Fatalf("current_ref = %q, want committed ref", got)
-	}
-	if got := strings.TrimSpace(asString(partiallyCommitted.Metadata["last_source_event_id"])); got == execCtx.Request.Event.ID() {
-		t.Fatalf("last_source_event_id = %q; publish failure must not mark replay complete", got)
+	if _, exists := instance.Metadata["current_ref"]; exists {
+		t.Fatalf("current_ref should not be persisted without result collector: %#v", instance.Metadata["current_ref"])
 	}
 	if got := bus.publishedCount(); got != 0 {
-		t.Fatalf("success event count after failed publish = %d, want 0", got)
-	}
-
-	bus.publishErr = nil
-	retryCtx := execCtx
-	retryCtx.Request.State.StateCarrier.Metadata = cloneStringAnyMap(partiallyCommitted.Metadata)
-	if _, err := (pipelineEngineActionRunner{coordinator: pc}).ExecuteAction(ctx, action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, retryCtx); err != nil {
-		t.Fatalf("retry ExecuteAction: %v", err)
-	}
-	if got := bus.publishedCount(); got != 1 {
-		t.Fatalf("success event count after retry = %d, want 1", got)
-	}
-	completed, _, err := store.Load(ctx, entityID)
-	if err != nil {
-		t.Fatalf("load completed workflow instance: %v", err)
-	}
-	if got := strings.TrimSpace(asString(completed.Metadata["last_source_event_id"])); got != execCtx.Request.Event.ID() {
-		t.Fatalf("last_source_event_id = %q, want %q", got, execCtx.Request.Event.ID())
+		t.Fatalf("fallback published event count = %d, want 0", got)
 	}
 }
 
@@ -1765,12 +1740,10 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnInvalidSucces
 	action, execCtx := testArtifactRepoActionAndContext(entityID, initial, "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444", "name: Demo\n")
 	action.ArtifactRepo.SuccessEvent = "artifact_repo.commit_completed"
 
-	ok, err := pipelineEngineActionRunner{coordinator: pc}.ExecuteAction(ctx, action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx)
-	if !ok {
-		t.Fatal("expected artifact_repo_commit action to be claimed")
-	}
-	if err == nil || !strings.Contains(err.Error(), "payload violates schema") {
-		t.Fatalf("ExecuteAction error = %v, want success schema violation", err)
+	var intents []runtimeengine.EmitIntent
+	ok, err := pipelineEngineActionRunner{coordinator: pc}.ExecuteAction(runtimeengine.WithActionEmitIntentCollector(ctx, &intents), action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx)
+	if !ok || err != nil {
+		t.Fatalf("ExecuteAction ok=%v err=%v, want handled failure result", ok, err)
 	}
 	instance, _, err := store.Load(ctx, entityID)
 	if err != nil {
@@ -1782,11 +1755,12 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnInvalidSucces
 	if got := strings.TrimSpace(asString(instance.Metadata["status"])); got != "failed" {
 		t.Fatalf("status = %q, want failed", got)
 	}
-	if got := bus.publishedCount(); got != 1 {
-		t.Fatalf("failure event count = %d, want 1", got)
+	if got := strings.TrimSpace(asString(instance.Metadata["failure_reason"])); !strings.Contains(got, "payload violates schema") {
+		t.Fatalf("failure_reason = %q, want schema violation detail", got)
 	}
-	if got := string(bus.publishedEvent(0).Type()); got != "artifact_repo.commit_failed" {
-		t.Fatalf("published event type = %q, want failure event", got)
+	assertArtifactRepoQueuedIntent(t, intents, 0, "artifact_repo.commit_failed")
+	if got := bus.publishedCount(); got != 0 {
+		t.Fatalf("fallback published event count = %d, want 0", got)
 	}
 }
 
@@ -1812,12 +1786,10 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnPathOutsideAl
 	action, execCtx := testArtifactRepoActionAndContext(entityID, initial, "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444", "name: Demo\n")
 	action.ArtifactRepo.Files[0].Path = runtimecontracts.LiteralExpression("../escape.yaml")
 
-	ok, err := pipelineEngineActionRunner{coordinator: pc}.ExecuteAction(ctx, action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx)
-	if !ok {
-		t.Fatal("expected artifact_repo_commit action to be claimed")
-	}
-	if err == nil || !strings.Contains(err.Error(), "path traversal is not allowed") {
-		t.Fatalf("ExecuteAction error = %v, want path traversal", err)
+	var intents []runtimeengine.EmitIntent
+	ok, err := pipelineEngineActionRunner{coordinator: pc}.ExecuteAction(runtimeengine.WithActionEmitIntentCollector(ctx, &intents), action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx)
+	if !ok || err != nil {
+		t.Fatalf("ExecuteAction ok=%v err=%v, want handled failure result", ok, err)
 	}
 	instance, _, err := store.Load(ctx, entityID)
 	if err != nil {
@@ -1832,14 +1804,9 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnPathOutsideAl
 	if got := strings.TrimSpace(asString(instance.Metadata["failure_reason"])); !strings.Contains(got, "path traversal is not allowed") {
 		t.Fatalf("failure_reason = %q, want traversal detail", got)
 	}
-	if got := bus.publishedCount(); got != 1 {
-		t.Fatalf("failure event count = %d, want 1", got)
-	}
-	if got := string(bus.publishedEvent(0).Type()); got != "artifact_repo.commit_failed" {
-		t.Fatalf("failure event type = %q", got)
-	}
+	failureEvent := assertArtifactRepoQueuedIntent(t, intents, 0, "artifact_repo.commit_failed")
 	var payload map[string]any
-	if err := json.Unmarshal(bus.publishedEvent(0).Payload(), &payload); err != nil {
+	if err := json.Unmarshal(failureEvent.Payload(), &payload); err != nil {
 		t.Fatalf("failure event payload: %v", err)
 	}
 	if got := strings.TrimSpace(asString(payload["namespace"])); got != initial["namespace"].(string) {
@@ -1854,6 +1821,9 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnPathOutsideAl
 	}
 	if got := strings.TrimSpace(asString(provenance["source_record_id"])); got != initial["source_record_id"].(string) {
 		t.Fatalf("failure payload provenance source_record_id = %q", got)
+	}
+	if got := bus.publishedCount(); got != 0 {
+		t.Fatalf("fallback published event count = %d, want 0", got)
 	}
 }
 
@@ -1878,12 +1848,10 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnYAMLSchemaMis
 	}
 	action, execCtx := testArtifactRepoActionAndContext(entityID, initial, "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444", "rank: 2\n")
 
-	ok, err := pipelineEngineActionRunner{coordinator: pc}.ExecuteAction(ctx, action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx)
-	if !ok {
-		t.Fatal("expected artifact_repo_commit action to be claimed")
-	}
-	if err == nil || !strings.Contains(err.Error(), "missing required field name") {
-		t.Fatalf("ExecuteAction error = %v, want schema mismatch", err)
+	var intents []runtimeengine.EmitIntent
+	ok, err := pipelineEngineActionRunner{coordinator: pc}.ExecuteAction(runtimeengine.WithActionEmitIntentCollector(ctx, &intents), action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx)
+	if !ok || err != nil {
+		t.Fatalf("ExecuteAction ok=%v err=%v, want handled failure result", ok, err)
 	}
 	instance, _, err := store.Load(ctx, entityID)
 	if err != nil {
@@ -1895,6 +1863,10 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnYAMLSchemaMis
 	if _, exists := instance.Metadata["current_ref"]; exists {
 		t.Fatalf("current_ref should not be persisted on failed commit: %#v", instance.Metadata["current_ref"])
 	}
+	if got := strings.TrimSpace(asString(instance.Metadata["failure_reason"])); !strings.Contains(got, "missing required field name") {
+		t.Fatalf("failure_reason = %q, want schema mismatch detail", got)
+	}
+	assertArtifactRepoQueuedIntent(t, intents, 0, "artifact_repo.commit_failed")
 }
 
 func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsRequestIDContentConflict(t *testing.T) {
@@ -1936,13 +1908,12 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsRequestIDContentCon
 	afterNext.Metadata["display_slug"] = "Renamed Artifact"
 
 	conflictAction, conflictCtx := testArtifactRepoActionAndContext(entityID, afterNext.Metadata, "77777777-7777-7777-7777-777777777777", "44444444-4444-4444-4444-444444444444", "name: Changed\n")
-	ok, err := pipelineEngineActionRunner{coordinator: pc}.ExecuteAction(ctx, conflictAction, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, conflictCtx)
-	if !ok {
-		t.Fatal("expected artifact_repo_commit action to be claimed")
+	var conflictIntents []runtimeengine.EmitIntent
+	ok, err := pipelineEngineActionRunner{coordinator: pc}.ExecuteAction(runtimeengine.WithActionEmitIntentCollector(ctx, &conflictIntents), conflictAction, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, conflictCtx)
+	if !ok || err != nil {
+		t.Fatalf("ExecuteAction ok=%v err=%v, want handled failure result", ok, err)
 	}
-	if err == nil || !strings.Contains(err.Error(), "conflicts with previously committed tree") {
-		t.Fatalf("ExecuteAction error = %v, want request conflict", err)
-	}
+	assertArtifactRepoQueuedIntent(t, conflictIntents, 0, "artifact_repo.commit_failed")
 }
 
 func TestPipelineEngineActionRunner_ArtifactRepoCommitRecordsNoDiffRequestHistory(t *testing.T) {
@@ -2008,18 +1979,14 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRecordsNoDiffRequestHistor
 	}
 
 	conflictAction, conflictCtx := testArtifactRepoActionAndContext(entityID, afterNext.Metadata, "99999999-9999-9999-9999-999999999999", "66666666-6666-6666-6666-666666666666", "name: Changed\n")
-	ok, err := pipelineEngineActionRunner{coordinator: pc}.ExecuteAction(ctx, conflictAction, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, conflictCtx)
-	if !ok {
-		t.Fatal("expected artifact_repo_commit action to be claimed")
+	var conflictIntents []runtimeengine.EmitIntent
+	ok, err := pipelineEngineActionRunner{coordinator: pc}.ExecuteAction(runtimeengine.WithActionEmitIntentCollector(ctx, &conflictIntents), conflictAction, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, conflictCtx)
+	if !ok || err != nil {
+		t.Fatalf("ExecuteAction ok=%v err=%v, want handled failure result", ok, err)
 	}
-	if err == nil || !strings.Contains(err.Error(), "conflicts with previously committed tree") {
-		t.Fatalf("ExecuteAction error = %v, want same-tree request history conflict", err)
-	}
-	if got := bus.publishedCount(); got != 1 {
-		t.Fatalf("conflict failure event count = %d, want 1", got)
-	}
-	if got := string(bus.publishedEvent(0).Type()); got != "artifact_repo.commit_failed" {
-		t.Fatalf("conflict published event type = %q, want failure event", got)
+	assertArtifactRepoQueuedIntent(t, conflictIntents, 0, "artifact_repo.commit_failed")
+	if got := bus.publishedCount(); got != 0 {
+		t.Fatalf("fallback published event count = %d, want 0", got)
 	}
 }
 
@@ -2114,13 +2081,12 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitEnforcesProjectedRepoSize(
 		ContentType: "text",
 	}}
 	nextAction.ArtifactRepo.Limits.MaxRepoBytes = 30
-	ok, err := pipelineEngineActionRunner{coordinator: pc}.ExecuteAction(ctx, nextAction, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, nextCtx)
-	if !ok {
-		t.Fatal("expected artifact_repo_commit action to be claimed")
+	var intents []runtimeengine.EmitIntent
+	ok, err := pipelineEngineActionRunner{coordinator: pc}.ExecuteAction(runtimeengine.WithActionEmitIntentCollector(ctx, &intents), nextAction, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, nextCtx)
+	if !ok || err != nil {
+		t.Fatalf("ExecuteAction ok=%v err=%v, want handled failure result", ok, err)
 	}
-	if err == nil || !strings.Contains(err.Error(), "repository tree exceeds max repo bytes") {
-		t.Fatalf("ExecuteAction error = %v, want projected repo size failure", err)
-	}
+	assertArtifactRepoQueuedIntent(t, intents, 0, "artifact_repo.commit_failed")
 }
 
 func TestWriteArtifactRepoFilesRejectsSymlinkEscape(t *testing.T) {
@@ -2161,6 +2127,21 @@ func testProjectionEventWithSourceAgent(evt events.Event, sourceAgent string) ev
 		evt.Envelope(),
 		evt.CreatedAt(),
 	)
+}
+
+func assertArtifactRepoQueuedIntent(t *testing.T, intents []runtimeengine.EmitIntent, index int, eventType string) events.Event {
+	t.Helper()
+	if len(intents) <= index {
+		t.Fatalf("queued artifact result intents = %d, want index %d for %s", len(intents), index, eventType)
+	}
+	evt := intents[index].Event
+	if got := strings.TrimSpace(string(evt.Type())); got != eventType {
+		t.Fatalf("queued artifact result event type = %q, want %q", got, eventType)
+	}
+	if got := strings.TrimSpace(intents[index].ParentEventID); got == "" {
+		t.Fatalf("queued artifact result parent_event_id is empty for %s", eventType)
+	}
+	return evt
 }
 
 func testArtifactRepoResultEventSource(t *testing.T) semanticview.Source {
