@@ -327,6 +327,28 @@ func TestPublicSurfaceBackendMatrixRejectsStaleReferences(t *testing.T) {
 			want: "event_publish_dynamic_auto_emit_served_lifecycle missing default SQLite served-runtime go_test proof_ref for api_method event.publish",
 		},
 		{
+			name: "dynamic served lifecycle row rejects existing run proof substitution",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				row := publicSurfaceMatrixRowByID(t, matrix, "event_publish_dynamic_auto_emit_served_lifecycle")
+				row.ProofRefs = []publicSurfaceProofRef{
+					{Kind: "go_test", Name: "TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite"},
+					{Kind: "go_test", Name: "TestRunServeRuntimeEventPublishRunIDFollowUpServedPathPostgres"},
+				}
+			},
+			want: "event_publish_dynamic_auto_emit_served_lifecycle missing required go_test proof_ref TestRunServeRuntimeEventPublishDynamicAutoEmitServedPathDefaultSQLite",
+		},
+		{
+			name: "existing run served lifecycle row rejects dynamic proof substitution",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				row := publicSurfaceMatrixRowByID(t, matrix, "event_publish_existing_run_followup_served_path")
+				row.ProofRefs = []publicSurfaceProofRef{
+					{Kind: "go_test", Name: "TestRunServeRuntimeEventPublishDynamicAutoEmitServedPathDefaultSQLite"},
+					{Kind: "go_test", Name: "TestRunServeRuntimeEventPublishDynamicAutoEmitServedPathPostgres"},
+				}
+			},
+			want: "event_publish_existing_run_followup_served_path missing required go_test proof_ref TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite",
+		},
+		{
 			name: "future served lifecycle row must opt into guarded class",
 			mutate: func(matrix *publicSurfaceBackendMatrix) {
 				row := *publicSurfaceMatrixRowByID(t, matrix, "event_publish_dynamic_auto_emit_served_lifecycle")
@@ -530,6 +552,7 @@ type publicSurfaceExpectedRowShape struct {
 	APIMethods           []string
 	OpenRPCMatrixMethods []string
 	ProofDimensions      []string
+	GoTestProofRefs      []string
 }
 
 func validatePublicSurfaceExpectedRowShapes(rowsByID map[string]publicSurfaceMatrixRow) []string {
@@ -556,6 +579,11 @@ func validatePublicSurfaceExpectedRowShapes(rowsByID map[string]publicSurfaceMat
 		}
 		if !publicSurfaceSameStringSet(row.ProofDimensions, want.ProofDimensions) {
 			problems = append(problems, fmt.Sprintf("%s proof_dimensions = %v, want %v", id, publicSurfaceSortedStrings(row.ProofDimensions), publicSurfaceSortedStrings(want.ProofDimensions)))
+		}
+		for _, proof := range want.GoTestProofRefs {
+			if !publicSurfaceHasGoTestProof(row.ProofRefs, proof) {
+				problems = append(problems, fmt.Sprintf("%s missing required go_test proof_ref %s", id, proof))
+			}
 		}
 	}
 	return problems
@@ -645,6 +673,10 @@ func expectedPublicSurfaceRowShapes() map[string]publicSurfaceExpectedRowShape {
 			APIMethods:           []string{"event.publish"},
 			OpenRPCMatrixMethods: []string{"event.publish"},
 			ProofDimensions:      []string{"canonical_store_owner", "cli_v1_path", "openrpc_publication", "real_runtime_startup", "real_v1_handler", "selected_store", "served_mutating_lifecycle"},
+			GoTestProofRefs: []string{
+				"TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite",
+				"TestRunServeRuntimeEventPublishRunIDFollowUpServedPathPostgres",
+			},
 		},
 		"event_publish_dynamic_auto_emit_served_lifecycle": {
 			Classification:       "add_to_matrix",
@@ -653,6 +685,10 @@ func expectedPublicSurfaceRowShapes() map[string]publicSurfaceExpectedRowShape {
 			APIMethods:           []string{"event.publish"},
 			OpenRPCMatrixMethods: []string{"event.publish"},
 			ProofDimensions:      []string{"canonical_store_owner", "openrpc_publication", "real_runtime_startup", "real_v1_handler", "selected_store", "served_mutating_lifecycle"},
+			GoTestProofRefs: []string{
+				"TestRunServeRuntimeEventPublishDynamicAutoEmitServedPathDefaultSQLite",
+				"TestRunServeRuntimeEventPublishDynamicAutoEmitServedPathPostgres",
+			},
 		},
 	}
 }
