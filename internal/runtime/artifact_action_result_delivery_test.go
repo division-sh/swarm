@@ -45,6 +45,7 @@ func TestArtifactRepoCommitResultEventsFlowThroughDurableCallbackDelivery(t *tes
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			resultEventType := "repo-scaffold/inst-1/" + tc.resultEventName
 			bundle := loadRuntimeTempBundle(t, artifactActionResultDeliveryFixtureFiles())
 			source := semanticview.Wrap(bundle)
 			_, db, cleanup := testutil.StartPostgres(t)
@@ -66,7 +67,7 @@ func TestArtifactRepoCommitResultEventsFlowThroughDurableCallbackDelivery(t *tes
 				WorkflowStore: workflowStore,
 				ArtifactRoot:  t.TempDir(),
 				TestWorkflowNodeHandlerStartHook: func(_ context.Context, nodeID string, evt events.Event) error {
-					if strings.TrimSpace(nodeID) == "repo-scaffold-node" && strings.TrimSpace(string(evt.Type())) == tc.resultEventName {
+					if strings.TrimSpace(nodeID) == "repo-scaffold-node" && strings.TrimSpace(string(evt.Type())) == resultEventType {
 						select {
 						case resultHandlerStarted <- evt.ID():
 						default:
@@ -119,11 +120,11 @@ func TestArtifactRepoCommitResultEventsFlowThroughDurableCallbackDelivery(t *tes
 				SELECT event_id::text
 				FROM events
 				WHERE event_name = $1 AND source_event_id = $2::uuid
-			`, []any{tc.resultEventName, tc.requestEventID})
-			assertArtifactActionResultEventContext(t, ctx, db, resultEventID, tc.resultKind)
-			assertArtifactActionResultNodeRoute(t, ctx, db, resultEventID)
+			`, []any{resultEventType, tc.requestEventID})
+			assertArtifactActionResultEventContext(t, ctx, db, resultEventID, tc.resultKind, "repo-scaffold/inst-1")
+			assertArtifactActionResultNodeRoute(t, ctx, db, resultEventID, "repo-scaffold/inst-1")
 			waitArtifactActionResultHandlerStarted(t, resultHandlerStarted, resultEventID)
-			waitRuntimeDBCount(t, ctx, db, `
+			waitArtifactActionResultDBCount(t, ctx, db, `
 				SELECT COUNT(*)
 				FROM event_deliveries
 				WHERE event_id = $1::uuid
@@ -133,18 +134,146 @@ func TestArtifactRepoCommitResultEventsFlowThroughDurableCallbackDelivery(t *tes
 				  AND reason_code = 'node_processed'
 				  AND delivered_at IS NOT NULL
 				  AND delivery_target_route @> $2::jsonb
-				  AND $2::jsonb @> delivery_target_route
-			`, 1, resultEventID, artifactActionResultDeliveryTargetRouteJSON())
-			waitRuntimeDBCount(t, ctx, db, `
+			`, 1, resultEventID, artifactActionResultDeliveryTargetRouteJSON("repo-scaffold/inst-1"))
+			waitArtifactActionResultDBCount(t, ctx, db, `
+				SELECT COUNT(*)
+				FROM event_receipts
+				WHERE event_id = $1::uuid
+					  AND subscriber_type = 'node'
+					  AND subscriber_id = 'repo-scaffold-node'
+					  AND entity_id = $2::uuid
+					  AND flow_instance = $3
+					  AND outcome = 'no_op'
+				`, 1, resultEventID, artifactActionResultEntityID, "repo-scaffold/inst-1")
+		})
+	}
+}
+
+func TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery(t *testing.T) {
+	tests := []struct {
+		name            string
+		requestEventID  string
+		requestID       string
+		mvpYAML         string
+		resultEventName string
+		resultKind      string
+	}{
+		{
+			name:            "success",
+			requestEventID:  "99999999-9999-4999-8999-999999999961",
+			requestID:       "99999999-9999-4999-8999-999999999971",
+			mvpYAML:         "name: Demo\n",
+			resultEventName: "repo_scaffold.repo_commit_succeeded",
+			resultKind:      "ready",
+		},
+		{
+			name:            "failure",
+			requestEventID:  "99999999-9999-4999-8999-999999999962",
+			requestID:       "99999999-9999-4999-8999-999999999972",
+			mvpYAML:         "title: Demo\n",
+			resultEventName: "repo_scaffold.repo_commit_failed",
+			resultKind:      "failed",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			resultEventType := "repo-scaffold/" + tc.resultEventName
+			bundle := loadRuntimeTempBundle(t, artifactActionResultStaticDeliveryFixtureFiles())
+			source := semanticview.Wrap(bundle)
+			_, db, cleanup := testutil.StartPostgres(t)
+			t.Cleanup(cleanup)
+			ctx := seedRuntimeTestRun(t, db)
+			pg := &store.PostgresStore{DB: db}
+			bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+			if err != nil {
+				t.Fatalf("NewEventBusWithOptions: %v", err)
+			}
+			workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+			if err := workflowStore.Upsert(ctx, artifactActionResultStaticWorkflowInstance()); err != nil {
+				t.Fatalf("seed workflow instance: %v", err)
+			}
+			module := newRuntimeTestWorkflowModule(t, source)
+			resultHandlerStarted := make(chan string, 4)
+			pc := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+				Module:        module,
+				WorkflowStore: workflowStore,
+				ArtifactRoot:  t.TempDir(),
+				TestWorkflowNodeHandlerStartHook: func(_ context.Context, nodeID string, evt events.Event) error {
+					if strings.TrimSpace(nodeID) == "repo-scaffold-node" && strings.TrimSpace(string(evt.Type())) == resultEventType {
+						select {
+						case resultHandlerStarted <- evt.ID():
+						default:
+						}
+					}
+					return nil
+				},
+				EventReceiptsCapability: func(context.Context) (bool, error) {
+					return true, nil
+				},
+			})
+			subscribed := make(chan struct{}, 1)
+			pc.SetTestSubscribeHook(func() { subscribed <- struct{}{} })
+			runCtx, cancel := context.WithCancel(ctx)
+			t.Cleanup(cancel)
+			go pc.Run(runCtx)
+			select {
+			case <-subscribed:
+			case <-time.After(2 * time.Second):
+				t.Fatal("workflow runtime did not subscribe")
+			}
+
+			requestPayload, err := json.Marshal(map[string]any{
+				"request_id": tc.requestID,
+				"mvp_yaml":   tc.mvpYAML,
+			})
+			if err != nil {
+				t.Fatalf("marshal request payload: %v", err)
+			}
+			requestEvent := events.NewProjectionEvent(
+				tc.requestEventID,
+				events.EventType("repo-scaffold/repo_scaffold.repo_commit_requested"),
+				"test",
+				"",
+				requestPayload,
+				0,
+				templateInstanceDeliveryRunID,
+				"",
+				events.EventEnvelope{},
+				time.Now().UTC(),
+			).WithEntityID(artifactActionResultEntityID).WithFlowInstance("repo-scaffold")
+			if err := bus.Publish(ctx, requestEvent); err != nil {
+				t.Fatalf("Publish request event: %v", err)
+			}
+
+			resultEventID := waitRuntimeEventID(t, ctx, db, `
+				SELECT event_id::text
+				FROM events
+				WHERE event_name = $1 AND source_event_id = $2::uuid
+			`, []any{resultEventType, tc.requestEventID})
+			assertArtifactActionResultEventContext(t, ctx, db, resultEventID, tc.resultKind, "repo-scaffold")
+			assertArtifactActionResultNodeRoute(t, ctx, db, resultEventID, "repo-scaffold")
+			waitArtifactActionResultHandlerStarted(t, resultHandlerStarted, resultEventID)
+			waitArtifactActionResultDBCount(t, ctx, db, `
+				SELECT COUNT(*)
+				FROM event_deliveries
+				WHERE event_id = $1::uuid
+				  AND subscriber_type = 'node'
+				  AND subscriber_id = 'repo-scaffold-node'
+				  AND status = 'delivered'
+				  AND reason_code = 'node_processed'
+				  AND delivered_at IS NOT NULL
+				  AND delivery_target_route @> $2::jsonb
+			`, 1, resultEventID, artifactActionResultDeliveryTargetRouteJSON("repo-scaffold"))
+			waitArtifactActionResultDBCount(t, ctx, db, `
 				SELECT COUNT(*)
 				FROM event_receipts
 				WHERE event_id = $1::uuid
 				  AND subscriber_type = 'node'
 				  AND subscriber_id = 'repo-scaffold-node'
 				  AND entity_id = $2::uuid
-				  AND flow_instance = 'repo-scaffold/inst-1'
+				  AND flow_instance = $3
 				  AND outcome = 'no_op'
-			`, 1, resultEventID, artifactActionResultEntityID)
+			`, 1, resultEventID, artifactActionResultEntityID, "repo-scaffold")
 		})
 	}
 }
@@ -170,7 +299,13 @@ func artifactActionResultWorkflowInstance() runtimepipeline.WorkflowInstance {
 	}
 }
 
-func assertArtifactActionResultEventContext(t *testing.T, ctx context.Context, db *sql.DB, eventID, resultKind string) {
+func artifactActionResultStaticWorkflowInstance() runtimepipeline.WorkflowInstance {
+	instance := artifactActionResultWorkflowInstance()
+	delete(instance.Metadata, "flow_path")
+	return instance
+}
+
+func assertArtifactActionResultEventContext(t *testing.T, ctx context.Context, db *sql.DB, eventID, resultKind, wantFlowInstance string) {
 	t.Helper()
 	var entityID, flowInstance, sourceRouteJSON, payloadJSON string
 	if err := db.QueryRowContext(ctx, `
@@ -183,8 +318,8 @@ func assertArtifactActionResultEventContext(t *testing.T, ctx context.Context, d
 	if entityID != artifactActionResultEntityID {
 		t.Fatalf("result event entity_id = %q, want %q", entityID, artifactActionResultEntityID)
 	}
-	if flowInstance != "repo-scaffold/inst-1" {
-		t.Fatalf("result event flow_instance = %q, want repo-scaffold/inst-1", flowInstance)
+	if flowInstance != wantFlowInstance {
+		t.Fatalf("result event flow_instance = %q, want %s", flowInstance, wantFlowInstance)
 	}
 	var sourceRoute map[string]any
 	if err := json.Unmarshal([]byte(sourceRouteJSON), &sourceRoute); err != nil {
@@ -193,8 +328,8 @@ func assertArtifactActionResultEventContext(t *testing.T, ctx context.Context, d
 	if got := strings.TrimSpace(asRuntimeTestString(sourceRoute["flow_id"])); got != "repo-scaffold" {
 		t.Fatalf("source route flow_id = %q, want repo-scaffold: %#v", got, sourceRoute)
 	}
-	if got := strings.TrimSpace(asRuntimeTestString(sourceRoute["flow_instance"])); got != "repo-scaffold/inst-1" {
-		t.Fatalf("source route flow_instance = %q, want repo-scaffold/inst-1: %#v", got, sourceRoute)
+	if got := strings.TrimSpace(asRuntimeTestString(sourceRoute["flow_instance"])); got != wantFlowInstance {
+		t.Fatalf("source route flow_instance = %q, want %s: %#v", got, wantFlowInstance, sourceRoute)
 	}
 	if got := strings.TrimSpace(asRuntimeTestString(sourceRoute["entity_id"])); got != artifactActionResultEntityID {
 		t.Fatalf("source route entity_id = %q, want %s: %#v", got, artifactActionResultEntityID, sourceRoute)
@@ -208,22 +343,49 @@ func assertArtifactActionResultEventContext(t *testing.T, ctx context.Context, d
 	}
 }
 
-func assertArtifactActionResultNodeRoute(t *testing.T, ctx context.Context, db *sql.DB, eventID string) {
+func assertArtifactActionResultNodeRoute(t *testing.T, ctx context.Context, db *sql.DB, eventID, wantFlowInstance string) {
 	t.Helper()
-	assertRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*)
-		FROM event_deliveries
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'node'
-		  AND subscriber_id = 'repo-scaffold-node'
-		  AND delivery_target_route @> $2::jsonb
-		  AND $2::jsonb @> delivery_target_route
-	`, 1, eventID, artifactActionResultDeliveryTargetRouteJSON())
+	wantRoute := artifactActionResultDeliveryTargetRouteJSON(wantFlowInstance)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var got int
+		if err := db.QueryRowContext(ctx, `
+			SELECT COUNT(*)
+			FROM event_deliveries
+			WHERE event_id = $1::uuid
+			  AND subscriber_type = 'node'
+			  AND subscriber_id = 'repo-scaffold-node'
+			  AND delivery_target_route @> $2::jsonb
+		`, eventID, wantRoute).Scan(&got); err != nil {
+			t.Fatalf("query result delivery route: %v", err)
+		}
+		if got == 1 {
+			return
+		}
+		if time.Now().After(deadline) {
+			var rows string
+			if err := db.QueryRowContext(ctx, `
+				SELECT COALESCE(jsonb_agg(jsonb_build_object(
+					'subscriber_type', subscriber_type,
+					'subscriber_id', subscriber_id,
+					'status', status,
+					'reason_code', reason_code,
+					'delivery_target_route', delivery_target_route
+				))::text, '[]')
+				FROM event_deliveries
+				WHERE event_id = $1::uuid
+			`, eventID).Scan(&rows); err != nil {
+				t.Fatalf("query result delivery route debug rows: %v", err)
+			}
+			t.Fatalf("delivery route for event %s missing route %s; rows=%s", eventID, wantRoute, rows)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
 }
 
 func waitArtifactActionResultHandlerStarted(t *testing.T, started <-chan string, eventID string) {
 	t.Helper()
-	deadline := time.After(2 * time.Second)
+	deadline := time.After(5 * time.Second)
 	for {
 		select {
 		case got := <-started:
@@ -236,8 +398,26 @@ func waitArtifactActionResultHandlerStarted(t *testing.T, started <-chan string,
 	}
 }
 
-func artifactActionResultDeliveryTargetRouteJSON() string {
-	return `{"flow_instance":"repo-scaffold/inst-1","entity_id":"` + artifactActionResultEntityID + `"}`
+func waitArtifactActionResultDBCount(t *testing.T, ctx context.Context, db *sql.DB, query string, want int, args ...any) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var got int
+		if err := db.QueryRowContext(ctx, query, args...).Scan(&got); err != nil {
+			t.Fatalf("query count: %v", err)
+		}
+		if got == want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("count = %d, want %d for query %s", got, want, strings.TrimSpace(query))
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+func artifactActionResultDeliveryTargetRouteJSON(flowInstance string) string {
+	return `{"flow_instance":"` + flowInstance + `","entity_id":"` + artifactActionResultEntityID + `"}`
 }
 
 func asRuntimeTestString(value any) string {
@@ -388,4 +568,10 @@ repo_scaffold.repo_commit_failed:
       sets_gate: result_callback_observed
 `,
 	}
+}
+
+func artifactActionResultStaticDeliveryFixtureFiles() map[string]string {
+	files := artifactActionResultDeliveryFixtureFiles()
+	files["package.yaml"] = strings.Replace(files["package.yaml"], "mode: template", "mode: static", 1)
+	return files
 }

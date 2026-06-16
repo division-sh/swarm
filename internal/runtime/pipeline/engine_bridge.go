@@ -235,11 +235,13 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	if err != nil {
 		return contractHandlerExecutionResult{}, err
 	}
+	producerRoute := actionResultProducerRoute(source, flowID, entityID, triggerCtx.Event, stateSnapshot, triggerCtx.Event.TargetRoute())
 	result, err := exec.Execute(ctx, runtimeengine.ExecutionRequest{
 		EntityID:        identity.NormalizeEntityID(entityID),
 		NodeID:          identity.NormalizeNodeID(nodeID),
 		FlowID:          identity.NormalizeFlowID(flowID),
 		Event:           triggerCtx.Event,
+		ProducerRoute:   producerRoute,
 		HandlerEventKey: handlerEventKey,
 		ChainDepth:      triggerCtx.Event.ChainDepth(),
 		Handler:         handler,

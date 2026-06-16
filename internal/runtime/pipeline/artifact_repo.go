@@ -36,6 +36,8 @@ const (
 	defaultRepoMaxBytes          = 50 << 20
 )
 
+var errArtifactRepoResultEmitCollectorMissing = errors.New("artifact_repo_commit result event requires transactional action emit collector")
+
 var invalidArtifactRootMounts = []string{"/workspace", "/data", "/opt/swarm/contracts"}
 
 type artifactRepoPreparedFile struct {
@@ -196,13 +198,7 @@ func (pc *PipelineCoordinator) persistAndPublishArtifactRepoFailure(ctx context.
 		}
 		return nil
 	}
-	if persistErr := pc.persistArtifactRepoResult(ctx, execCtx, spec, fields); persistErr != nil {
-		return errors.Join(cause, fmt.Errorf("artifact_repo_commit failed to persist failure state: %w", persistErr))
-	}
-	if publishErr := pc.publish(ctx, failureEvent, execCtx.Request.EntityID.String(), payload); publishErr != nil {
-		return errors.Join(cause, publishErr)
-	}
-	return cause
+	return errors.Join(cause, errArtifactRepoResultEmitCollectorMissing)
 }
 
 func (pc *PipelineCoordinator) persistAndPublishArtifactRepoSuccess(ctx context.Context, execCtx runtimeengine.ExecutionContext, spec *runtimecontracts.ArtifactRepoSpec, repoURL, ref string, manifest map[string]any, requestID, sourceEventID string, successPayload map[string]any) error {
@@ -225,14 +221,7 @@ func (pc *PipelineCoordinator) persistAndPublishArtifactRepoSuccess(ctx context.
 		fields[spec.Output.LastSourceEventID] = sourceEventID
 		return pc.persistArtifactRepoResult(ctx, execCtx, spec, fields)
 	}
-	if err := pc.persistArtifactRepoResult(ctx, execCtx, spec, fields); err != nil {
-		return err
-	}
-	if err := pc.publish(ctx, successEvent, execCtx.Request.EntityID.String(), successPayload); err != nil {
-		return err
-	}
-	fields[spec.Output.LastSourceEventID] = sourceEventID
-	return pc.persistArtifactRepoResult(ctx, execCtx, spec, fields)
+	return errArtifactRepoResultEmitCollectorMissing
 }
 
 func (pc *PipelineCoordinator) queueArtifactRepoResultEvent(ctx context.Context, execCtx runtimeengine.ExecutionContext, eventType string, payload map[string]any) (bool, error) {
@@ -254,16 +243,10 @@ func (pc *PipelineCoordinator) queueArtifactRepoResultEvent(ctx context.Context,
 	if chainDepth <= 0 {
 		chainDepth = 1
 	}
-	entityID := strings.TrimSpace(execCtx.Request.EntityID.String())
-	flowInstance := firstNonEmptyString(
-		normalizedArtifactRepoFlowInstance(asString(execCtx.Request.State.StateCarrier.Metadata["flow_path"])),
-		normalizedArtifactRepoFlowInstance(execCtx.Request.Event.FlowInstance()),
-	)
-	sourceRoute := events.RouteIdentity{
-		FlowID:       strings.TrimSpace(execCtx.Request.FlowID.String()),
-		FlowInstance: flowInstance,
-		EntityID:     entityID,
-	}.Normalized()
+	sourceRoute := pc.artifactRepoResultProducerRoute(execCtx)
+	eventType = actionResultEventType(pc.SemanticSource(), execCtx.Request.FlowID.String(), eventType, sourceRoute)
+	entityID := sourceRoute.EntityID
+	flowInstance := sourceRoute.FlowInstance
 	envelope := events.EventEnvelope{
 		EntityID:     entityID,
 		FlowInstance: flowInstance,
@@ -289,8 +272,15 @@ func (pc *PipelineCoordinator) queueArtifactRepoResultEvent(ctx context.Context,
 	}), nil
 }
 
-func normalizedArtifactRepoFlowInstance(value string) string {
-	return strings.Trim(strings.TrimSpace(value), "/")
+func (pc *PipelineCoordinator) artifactRepoResultProducerRoute(execCtx runtimeengine.ExecutionContext) events.RouteIdentity {
+	return actionResultProducerRoute(
+		pc.SemanticSource(),
+		execCtx.Request.FlowID.String(),
+		execCtx.Request.EntityID.String(),
+		execCtx.Request.Event,
+		execCtx.Request.State,
+		execCtx.Request.ProducerRoute,
+	)
 }
 
 func (pc *PipelineCoordinator) artifactRepoRoot() (string, error) {
