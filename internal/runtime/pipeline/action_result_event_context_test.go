@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func TestArtifactRepoResultEventPreservesScopedProducerSourceRoute(t *testing.T) {
@@ -162,31 +163,110 @@ func TestArtifactRepoResultEventPreservesScopedProducerSourceRoute(t *testing.T)
 	}
 }
 
-func TestActionResultEventTypeResolvesAgainstProducerRoute(t *testing.T) {
-	source := loadWorkflowTempSource(t, map[string]string{
-		"package.yaml": `name: action-result-event-type
-version: 1.0.0
-flows:
-  - id: repo-scaffold
-    flow: repo-scaffold
-    mode: template
-`,
-		"flows/repo-scaffold/schema.yaml": `name: repo-scaffold
-initial_state: ready
-terminal_states: [done]
-states: [ready, done]
-`,
-		"flows/repo-scaffold/events.yaml": `repo_scaffold.repo_commit_succeeded: {}
-repo_scaffold.repo_commit_failed: {}
-`,
-	})
+func TestActionResultProducerRouteCoversCurrentRouteShapes(t *testing.T) {
+	staticSource := actionResultRouteSource(t, "static")
+	templateSource := actionResultRouteSource(t, "template")
 	cases := []struct {
 		name          string
+		source        semanticview.Source
+		stateFlowPath string
+		eventFlowPath string
+		targetSet     []events.RouteIdentity
+		wantFlowPath  string
+	}{
+		{
+			name:          "static service ignores child inbound without admitted route",
+			source:        staticSource,
+			eventFlowPath: "repo-scaffold/child-1",
+			wantFlowPath:  "repo-scaffold",
+		},
+		{
+			name:         "static root input with no route uses service owner",
+			source:       staticSource,
+			wantFlowPath: "repo-scaffold",
+		},
+		{
+			name:   "static target set receiver does not become producer route",
+			source: staticSource,
+			targetSet: []events.RouteIdentity{{
+				FlowID:       "repo-scaffold",
+				FlowInstance: "repo-scaffold/child-1",
+				EntityID:     "child-ent",
+			}},
+			wantFlowPath: "repo-scaffold",
+		},
+		{
+			name:          "template nested state route remains concrete producer",
+			source:        templateSource,
+			stateFlowPath: "repo-scaffold/parent/child",
+			wantFlowPath:  "repo-scaffold/parent/child",
+		},
+		{
+			name:          "template nested inbound fallback remains concrete producer",
+			source:        templateSource,
+			eventFlowPath: "repo-scaffold/parent/child",
+			wantFlowPath:  "repo-scaffold/parent/child",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			evt := events.NewProjectionEvent(
+				"evt-parent",
+				"repo_scaffold.repo_commit_requested",
+				"workflow-runtime",
+				"",
+				json.RawMessage(`{"request_id":"req-1"}`),
+				0,
+				"run-1",
+				"",
+				events.EventEnvelope{},
+				time.Unix(1_700_000_000, 0).UTC(),
+			)
+			if tc.eventFlowPath != "" {
+				evt = evt.WithFlowInstance(tc.eventFlowPath)
+			}
+			if len(tc.targetSet) > 0 {
+				evt = evt.WithTargetSet(tc.targetSet)
+			}
+			stateMetadata := map[string]any{}
+			if tc.stateFlowPath != "" {
+				stateMetadata["flow_path"] = tc.stateFlowPath
+			}
+			route := actionResultProducerRoute(
+				tc.source,
+				"repo-scaffold",
+				"ent-repo",
+				evt,
+				runtimeengine.StateSnapshot{
+					EntityID:     identity.NormalizeEntityID("ent-repo"),
+					StateCarrier: runtimeengine.NewStateCarrier(stateMetadata, nil, nil),
+				},
+				events.RouteIdentity{},
+			)
+			wantRoute := events.RouteIdentity{
+				FlowID:       "repo-scaffold",
+				FlowInstance: tc.wantFlowPath,
+				EntityID:     "ent-repo",
+			}.Normalized()
+			if route != wantRoute {
+				t.Fatalf("producer route = %#v, want %#v", route, wantRoute)
+			}
+		})
+	}
+}
+
+func TestActionResultEventTypeResolvesAgainstProducerRoute(t *testing.T) {
+	templateSource := actionResultRouteSource(t, "template")
+	staticSource := actionResultRouteSource(t, "static")
+	cases := []struct {
+		name          string
+		source        semanticview.Source
 		eventType     string
 		producerRoute events.RouteIdentity
 		want          string
 	}{
 		{
+			source:    templateSource,
 			name:      "template instance local success event",
 			eventType: "repo_scaffold.repo_commit_succeeded",
 			producerRoute: events.RouteIdentity{
@@ -197,6 +277,7 @@ repo_scaffold.repo_commit_failed: {}
 			want: "repo-scaffold/inst-1/repo_scaffold.repo_commit_succeeded",
 		},
 		{
+			source:    staticSource,
 			name:      "static service local failure event",
 			eventType: "repo_scaffold.repo_commit_failed",
 			producerRoute: events.RouteIdentity{
@@ -207,6 +288,7 @@ repo_scaffold.repo_commit_failed: {}
 			want: "repo-scaffold/repo_scaffold.repo_commit_failed",
 		},
 		{
+			source:    templateSource,
 			name:      "already scoped event is preserved",
 			eventType: "repo-scaffold/inst-1/repo_scaffold.repo_commit_succeeded",
 			producerRoute: events.RouteIdentity{
@@ -216,15 +298,48 @@ repo_scaffold.repo_commit_failed: {}
 			},
 			want: "repo-scaffold/inst-1/repo_scaffold.repo_commit_succeeded",
 		},
+		{
+			source:    staticSource,
+			name:      "static manual prefix stays service scoped",
+			eventType: "repo-scaffold/repo_scaffold.repo_commit_failed",
+			producerRoute: events.RouteIdentity{
+				FlowID:       "repo-scaffold",
+				FlowInstance: "repo-scaffold",
+				EntityID:     "ent-repo",
+			},
+			want: "repo-scaffold/repo_scaffold.repo_commit_failed",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := actionResultEventType(source, "repo-scaffold", tc.eventType, tc.producerRoute)
+			got := actionResultEventType(tc.source, "repo-scaffold", tc.eventType, tc.producerRoute)
 			if got != tc.want {
 				t.Fatalf("actionResultEventType() = %q, want %q", got, tc.want)
 			}
 		})
 	}
+}
+
+func actionResultRouteSource(t *testing.T, mode string) semanticview.Source {
+	t.Helper()
+	return loadWorkflowTempSource(t, map[string]string{
+		"package.yaml": `name: action-result-event-type
+version: 1.0.0
+flows:
+  - id: repo-scaffold
+    flow: repo-scaffold
+    mode: ` + mode + `
+`,
+		"flows/repo-scaffold/schema.yaml": `name: repo-scaffold
+initial_state: ready
+terminal_states: [done]
+states: [ready, done]
+`,
+		"flows/repo-scaffold/events.yaml": `repo_scaffold.repo_commit_requested: {}
+repo_scaffold.repo_commit_succeeded: {}
+repo_scaffold.repo_commit_failed: {}
+`,
+	})
 }
 
 func TestRuntimeActionResultEventProducerInventoryOnlyArtifactRepoQueuesResultEvents(t *testing.T) {
