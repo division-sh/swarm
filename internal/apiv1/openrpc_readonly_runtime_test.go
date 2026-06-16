@@ -325,7 +325,7 @@ func readOnlyHTTPRuntimeErrorProbes() []readOnlyHTTPRuntimeErrorProbe {
 			Code:   AgentNotFoundCode,
 			Options: func(t *testing.T) OperatorReadOptions {
 				opts := readOnlyRuntimeProbeOptions(t)
-				opts.AgentConversations = &fakeAgentConversationReadStore{agentDeliveryLifecycleErr: store.ErrAgentNotFound}
+				opts.AgentDeliveryLifecycle = &fakeAgentConversationReadStore{agentDeliveryLifecycleErr: store.ErrAgentNotFound}
 				return opts
 			},
 		},
@@ -837,6 +837,23 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 			currentConversationResult: &store.OperatorConversationDetail{
 				Conversation: store.OperatorConversationSummary{SessionID: sessionID, AgentID: "agent-1", RunID: runID, StartedAt: now, Status: "active"},
 				Turns:        []store.OperatorConversationTurn{{TurnIndex: 1, TurnID: "turn-current-1", TriggerEventID: eventID, TriggerEventType: "scan.requested", ParseOK: true}},
+			},
+		},
+		AgentDeliveryLifecycle: &fakeAgentConversationReadStore{
+			agentDeliveryLifecycleResult: store.OperatorAgentDeliveryLifecycleList{
+				AgentID: "agent-1",
+				Deliveries: []store.OperatorAgentDeliveryLifecycleRow{{
+					DeliveryID:        "delivery-lifecycle-1",
+					EventID:           "event-lifecycle-1",
+					EventName:         "task.ready",
+					RunID:             runID,
+					EntityID:          "entity-1",
+					Status:            "pending",
+					ReasonCode:        "retry_scheduled",
+					LastError:         "temporary",
+					RetryCount:        1,
+					DeliveryCreatedAt: now.Add(-3 * time.Minute),
+				}},
 			},
 		},
 		AgentUsage: &fakeAgentConversationReadStore{

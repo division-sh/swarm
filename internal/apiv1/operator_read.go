@@ -45,12 +45,15 @@ type AgentConversationReadStore interface {
 	ListOperatorAgents(context.Context, store.OperatorAgentListOptions) (store.OperatorAgentListResult, error)
 	LoadOperatorAgent(context.Context, string) (store.OperatorAgentDetail, error)
 	LoadOperatorAgentDiagnosis(context.Context, string, store.OperatorAgentDiagnosisOptions) (store.OperatorAgentDiagnosis, error)
-	LoadOperatorAgentDeliveryLifecycle(context.Context, string, store.OperatorAgentDeliveryLifecycleOptions) (store.OperatorAgentDeliveryLifecycleList, error)
 	LoadOperatorAgentDeliveryDiagnostics(context.Context, string, store.OperatorAgentDeliveryDiagnosticsOptions) (store.OperatorAgentDeliveryDiagnostics, error)
 	ListOperatorConversations(context.Context, store.OperatorConversationListOptions) (store.OperatorConversationListResult, error)
 	LoadOperatorConversation(context.Context, string) (store.OperatorConversationDetail, error)
 	LoadOperatorConversationTurn(context.Context, string, int) (store.OperatorConversationTurnDetail, error)
 	LoadCurrentOperatorConversationForAgent(context.Context, string) (*store.OperatorConversationDetail, error)
+}
+
+type AgentDeliveryLifecycleReadStore interface {
+	LoadOperatorAgentDeliveryLifecycle(context.Context, string, store.OperatorAgentDeliveryLifecycleOptions) (store.OperatorAgentDeliveryLifecycleList, error)
 }
 
 type AgentUsageReadStore interface {
@@ -68,37 +71,38 @@ type BundleDeleteExecutor interface {
 }
 
 type OperatorReadOptions struct {
-	Now                   func() time.Time
-	Ready                 func() bool
-	RepoRoot              string
-	PlatformSpecPath      string
-	Database              Pinger
-	Runs                  RunReadStore
-	Observability         ObservabilityReadStore
-	Entities              EntityReadStore
-	AgentConversations    AgentConversationReadStore
-	AgentUsage            AgentUsageReadStore
-	BundleCatalog         BundleCatalogReadStore
-	BundleDelete          BundleDeleteExecutor
-	ConversationForks     ConversationForkLifecycleStore
-	ForkChatExecutor      ForkChatExecutor
-	RunBundleContext      RunBundleContextStore
-	RunForkAvailability   RunForkAvailabilityStore
-	RunFork               RunForkExecutor
-	AgentControl          AgentControlController
-	Mailbox               MailboxAPIStore
-	Idempotency           APIIdempotencyStore
-	Events                EventPublisher
-	RunControl            RunControlController
-	RuntimeIngress        RuntimeIngressController
-	RuntimeContexts       *swruntime.RuntimeContextManager
-	ResetCoordinator      DestructiveResetCoordinator
-	ResetQuiescer         DestructiveResetQuiescer
-	ResetCleaner          DestructiveResetCleaner
-	ResetContainers       DestructiveResetContainerStopper
-	Source                semanticview.Source
-	MailboxApprovalRoutes map[string]string
-	Bundle                runtimecontracts.BundleIdentity
+	Now                    func() time.Time
+	Ready                  func() bool
+	RepoRoot               string
+	PlatformSpecPath       string
+	Database               Pinger
+	Runs                   RunReadStore
+	Observability          ObservabilityReadStore
+	Entities               EntityReadStore
+	AgentConversations     AgentConversationReadStore
+	AgentDeliveryLifecycle AgentDeliveryLifecycleReadStore
+	AgentUsage             AgentUsageReadStore
+	BundleCatalog          BundleCatalogReadStore
+	BundleDelete           BundleDeleteExecutor
+	ConversationForks      ConversationForkLifecycleStore
+	ForkChatExecutor       ForkChatExecutor
+	RunBundleContext       RunBundleContextStore
+	RunForkAvailability    RunForkAvailabilityStore
+	RunFork                RunForkExecutor
+	AgentControl           AgentControlController
+	Mailbox                MailboxAPIStore
+	Idempotency            APIIdempotencyStore
+	Events                 EventPublisher
+	RunControl             RunControlController
+	RuntimeIngress         RuntimeIngressController
+	RuntimeContexts        *swruntime.RuntimeContextManager
+	ResetCoordinator       DestructiveResetCoordinator
+	ResetQuiescer          DestructiveResetQuiescer
+	ResetCleaner           DestructiveResetCleaner
+	ResetContainers        DestructiveResetContainerStopper
+	Source                 semanticview.Source
+	MailboxApprovalRoutes  map[string]string
+	Bundle                 runtimecontracts.BundleIdentity
 }
 
 type healthPingResult struct {
@@ -312,6 +316,13 @@ func requireAgentConversationReadStore(reads AgentConversationReadStore) (AgentC
 	return reads, nil
 }
 
+func requireAgentDeliveryLifecycleReadStore(reads AgentDeliveryLifecycleReadStore) (AgentDeliveryLifecycleReadStore, error) {
+	if reads == nil {
+		return nil, fmt.Errorf("agent delivery lifecycle read store is required")
+	}
+	return reads, nil
+}
+
 func requireAgentUsageReadStore(reads AgentUsageReadStore) (AgentUsageReadStore, error) {
 	if reads == nil {
 		return nil, fmt.Errorf("agent usage read store is required")
@@ -415,6 +426,65 @@ func OperatorAgentConversationHandlers(opts OperatorReadOptions) map[string]Meth
 		}
 		return result, nil
 	}
+	lifecycleHandler := func(ctx context.Context, req Request) (any, error) {
+		reads, err := requireAgentDeliveryLifecycleReadStore(opts.AgentDeliveryLifecycle)
+		if err != nil {
+			return nil, err
+		}
+		agentID, err := requiredStringParam(req.Params, "agent_id")
+		if err != nil {
+			return nil, err
+		}
+		runID, _, err := optionalStringParam(req.Params, "run_id")
+		if err != nil {
+			return nil, err
+		}
+		if runID != "" && !opaqueIDPattern.MatchString(runID) {
+			return nil, NewInvalidParamsError(map[string]any{"field": "run_id", "reason": "must match OpaqueId pattern"})
+		}
+		statuses, _, err := optionalStringListParam(req.Params, "delivery_status")
+		if err != nil {
+			return nil, err
+		}
+		for _, status := range statuses {
+			if _, ok := eventListDeliveryStatuses[status]; !ok {
+				return nil, NewInvalidParamsError(map[string]any{"field": "delivery_status", "reason": "must contain only valid DeliveryStatus values"})
+			}
+		}
+		limit, err := boundedIntegerParam(req.Params, "limit", 1, store.MaxAgentDeliveryLifecycleLimit)
+		if err != nil {
+			return nil, err
+		}
+		cursor, _, err := optionalStringParam(req.Params, "cursor")
+		if err != nil {
+			return nil, err
+		}
+		result, err := reads.LoadOperatorAgentDeliveryLifecycle(ctx, agentID, store.OperatorAgentDeliveryLifecycleOptions{
+			RunID:    runID,
+			Statuses: statuses,
+			Limit:    limit,
+			Cursor:   cursor,
+		})
+		if errors.Is(err, store.ErrAgentNotFound) {
+			return nil, NewApplicationError(AgentNotFoundCode, false, map[string]any{"agent_id": agentID})
+		}
+		if errors.Is(err, store.ErrInvalidAgentDeliveryLifecycleCursor) {
+			return nil, NewInvalidParamsError(map[string]any{"field": "cursor", "reason": "invalid agent.delivery_lifecycle cursor"})
+		}
+		if errors.Is(err, store.ErrInvalidAgentDeliveryLifecycleStatus) {
+			return nil, NewInvalidParamsError(map[string]any{"field": "delivery_status", "reason": "must contain only valid DeliveryStatus values"})
+		}
+		if err != nil {
+			return nil, err
+		}
+		if err := validateAgentDeliveryLifecycleListResult(result); err != nil {
+			return nil, err
+		}
+		return result, nil
+	}
+	if opts.AgentDeliveryLifecycle != nil {
+		handlers["agent.delivery_lifecycle"] = lifecycleHandler
+	}
 	if opts.AgentConversations != nil {
 		for name, handler := range map[string]MethodHandler{
 			"agent.list": func(ctx context.Context, req Request) (any, error) {
@@ -481,62 +551,6 @@ func OperatorAgentConversationHandlers(opts OperatorReadOptions) map[string]Meth
 					return nil, err
 				}
 				if err := validateAgentDiagnosisResult(result); err != nil {
-					return nil, err
-				}
-				return result, nil
-			},
-			"agent.delivery_lifecycle": func(ctx context.Context, req Request) (any, error) {
-				reads, err := requireAgentConversationReadStore(opts.AgentConversations)
-				if err != nil {
-					return nil, err
-				}
-				agentID, err := requiredStringParam(req.Params, "agent_id")
-				if err != nil {
-					return nil, err
-				}
-				runID, _, err := optionalStringParam(req.Params, "run_id")
-				if err != nil {
-					return nil, err
-				}
-				if runID != "" && !opaqueIDPattern.MatchString(runID) {
-					return nil, NewInvalidParamsError(map[string]any{"field": "run_id", "reason": "must match OpaqueId pattern"})
-				}
-				statuses, _, err := optionalStringListParam(req.Params, "delivery_status")
-				if err != nil {
-					return nil, err
-				}
-				for _, status := range statuses {
-					if _, ok := eventListDeliveryStatuses[status]; !ok {
-						return nil, NewInvalidParamsError(map[string]any{"field": "delivery_status", "reason": "must contain only valid DeliveryStatus values"})
-					}
-				}
-				limit, err := boundedIntegerParam(req.Params, "limit", 1, store.MaxAgentDeliveryLifecycleLimit)
-				if err != nil {
-					return nil, err
-				}
-				cursor, _, err := optionalStringParam(req.Params, "cursor")
-				if err != nil {
-					return nil, err
-				}
-				result, err := reads.LoadOperatorAgentDeliveryLifecycle(ctx, agentID, store.OperatorAgentDeliveryLifecycleOptions{
-					RunID:    runID,
-					Statuses: statuses,
-					Limit:    limit,
-					Cursor:   cursor,
-				})
-				if errors.Is(err, store.ErrAgentNotFound) {
-					return nil, NewApplicationError(AgentNotFoundCode, false, map[string]any{"agent_id": agentID})
-				}
-				if errors.Is(err, store.ErrInvalidAgentDeliveryLifecycleCursor) {
-					return nil, NewInvalidParamsError(map[string]any{"field": "cursor", "reason": "invalid agent.delivery_lifecycle cursor"})
-				}
-				if errors.Is(err, store.ErrInvalidAgentDeliveryLifecycleStatus) {
-					return nil, NewInvalidParamsError(map[string]any{"field": "delivery_status", "reason": "must contain only valid DeliveryStatus values"})
-				}
-				if err != nil {
-					return nil, err
-				}
-				if err := validateAgentDeliveryLifecycleListResult(result); err != nil {
 					return nil, err
 				}
 				return result, nil
