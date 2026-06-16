@@ -45,6 +45,7 @@ type AgentConversationReadStore interface {
 	ListOperatorAgents(context.Context, store.OperatorAgentListOptions) (store.OperatorAgentListResult, error)
 	LoadOperatorAgent(context.Context, string) (store.OperatorAgentDetail, error)
 	LoadOperatorAgentDiagnosis(context.Context, string, store.OperatorAgentDiagnosisOptions) (store.OperatorAgentDiagnosis, error)
+	LoadOperatorAgentDeliveryLifecycle(context.Context, string, store.OperatorAgentDeliveryLifecycleOptions) (store.OperatorAgentDeliveryLifecycleList, error)
 	LoadOperatorAgentDeliveryDiagnostics(context.Context, string, store.OperatorAgentDeliveryDiagnosticsOptions) (store.OperatorAgentDeliveryDiagnostics, error)
 	ListOperatorConversations(context.Context, store.OperatorConversationListOptions) (store.OperatorConversationListResult, error)
 	LoadOperatorConversation(context.Context, string) (store.OperatorConversationDetail, error)
@@ -484,6 +485,62 @@ func OperatorAgentConversationHandlers(opts OperatorReadOptions) map[string]Meth
 				}
 				return result, nil
 			},
+			"agent.delivery_lifecycle": func(ctx context.Context, req Request) (any, error) {
+				reads, err := requireAgentConversationReadStore(opts.AgentConversations)
+				if err != nil {
+					return nil, err
+				}
+				agentID, err := requiredStringParam(req.Params, "agent_id")
+				if err != nil {
+					return nil, err
+				}
+				runID, _, err := optionalStringParam(req.Params, "run_id")
+				if err != nil {
+					return nil, err
+				}
+				if runID != "" && !opaqueIDPattern.MatchString(runID) {
+					return nil, NewInvalidParamsError(map[string]any{"field": "run_id", "reason": "must match OpaqueId pattern"})
+				}
+				statuses, _, err := optionalStringListParam(req.Params, "delivery_status")
+				if err != nil {
+					return nil, err
+				}
+				for _, status := range statuses {
+					if _, ok := eventListDeliveryStatuses[status]; !ok {
+						return nil, NewInvalidParamsError(map[string]any{"field": "delivery_status", "reason": "must contain only valid DeliveryStatus values"})
+					}
+				}
+				limit, err := boundedIntegerParam(req.Params, "limit", 1, store.MaxAgentDeliveryLifecycleLimit)
+				if err != nil {
+					return nil, err
+				}
+				cursor, _, err := optionalStringParam(req.Params, "cursor")
+				if err != nil {
+					return nil, err
+				}
+				result, err := reads.LoadOperatorAgentDeliveryLifecycle(ctx, agentID, store.OperatorAgentDeliveryLifecycleOptions{
+					RunID:    runID,
+					Statuses: statuses,
+					Limit:    limit,
+					Cursor:   cursor,
+				})
+				if errors.Is(err, store.ErrAgentNotFound) {
+					return nil, NewApplicationError(AgentNotFoundCode, false, map[string]any{"agent_id": agentID})
+				}
+				if errors.Is(err, store.ErrInvalidAgentDeliveryLifecycleCursor) {
+					return nil, NewInvalidParamsError(map[string]any{"field": "cursor", "reason": "invalid agent.delivery_lifecycle cursor"})
+				}
+				if errors.Is(err, store.ErrInvalidAgentDeliveryLifecycleStatus) {
+					return nil, NewInvalidParamsError(map[string]any{"field": "delivery_status", "reason": "must contain only valid DeliveryStatus values"})
+				}
+				if err != nil {
+					return nil, err
+				}
+				if err := validateAgentDeliveryLifecycleListResult(result); err != nil {
+					return nil, err
+				}
+				return result, nil
+			},
 			"agent.delivery_diagnostics": func(ctx context.Context, req Request) (any, error) {
 				reads, err := requireAgentConversationReadStore(opts.AgentConversations)
 				if err != nil {
@@ -742,6 +799,44 @@ func validateAgentDeliveryDiagnosticsResult(item store.OperatorAgentDeliveryDiag
 		if err := validateAgentDeadLetterDeliveryResult(deadLetter, i); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func validateAgentDeliveryLifecycleListResult(item store.OperatorAgentDeliveryLifecycleList) error {
+	if strings.TrimSpace(item.AgentID) == "" {
+		return fmt.Errorf("agent.delivery_lifecycle owner returned malformed result: agent_id is required")
+	}
+	if item.Deliveries == nil {
+		return fmt.Errorf("agent.delivery_lifecycle owner returned malformed result: deliveries must be an array")
+	}
+	for i, delivery := range item.Deliveries {
+		if err := validateAgentDeliveryLifecycleRowResult(delivery, i); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateAgentDeliveryLifecycleRowResult(item store.OperatorAgentDeliveryLifecycleRow, index int) error {
+	prefix := fmt.Sprintf("agent.delivery_lifecycle owner returned malformed result: deliveries[%d]", index)
+	if strings.TrimSpace(item.DeliveryID) == "" {
+		return fmt.Errorf("%s.delivery_id is required", prefix)
+	}
+	if strings.TrimSpace(item.EventID) == "" {
+		return fmt.Errorf("%s.event_id is required", prefix)
+	}
+	if strings.TrimSpace(item.EventName) == "" {
+		return fmt.Errorf("%s.event_name is required", prefix)
+	}
+	if _, ok := eventListDeliveryStatuses[strings.TrimSpace(item.Status)]; !ok {
+		return fmt.Errorf("%s.status=%q is not a valid DeliveryStatus", prefix, item.Status)
+	}
+	if item.RetryCount < 0 {
+		return fmt.Errorf("%s.retry_count must be non-negative", prefix)
+	}
+	if item.DeliveryCreatedAt.IsZero() {
+		return fmt.Errorf("%s.delivery_created_at is required", prefix)
 	}
 	return nil
 }

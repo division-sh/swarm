@@ -240,6 +240,7 @@ func readOnlyHTTPRuntimeMethods(t *testing.T, api *apispec.APISpecification, ope
 func approvedReadOnlyHTTPRuntimeMethods() []string {
 	return []string{
 		"agent.delivery_diagnostics",
+		"agent.delivery_lifecycle",
 		"agent.diagnose",
 		"agent.get",
 		"agent.list",
@@ -274,6 +275,7 @@ func approvedReadOnlyHTTPRuntimeMethods() []string {
 func readOnlyHTTPRuntimeFixtures() map[string]readOnlyHTTPRuntimeFixture {
 	return map[string]readOnlyHTTPRuntimeFixture{
 		"agent.delivery_diagnostics":     {Params: map[string]any{"agent_id": "agent-1"}, ResultKeys: []string{"agent_id", "summary", "failures", "dead_letters"}},
+		"agent.delivery_lifecycle":       {Params: map[string]any{"agent_id": "agent-1"}, ResultKeys: []string{"agent_id", "deliveries"}},
 		"agent.diagnose":                 {Params: map[string]any{"agent_id": "agent-1"}, ResultKeys: []string{"agent_id", "status", "queue", "runtime_state", "active", "last_tool_outcome"}},
 		"agent.get":                      {Params: map[string]any{"agent_id": "agent-1"}, ResultKeys: []string{"agent"}},
 		"agent.list":                     {Params: map[string]any{}, ResultKeys: []string{"agents"}},
@@ -314,6 +316,16 @@ func readOnlyHTTPRuntimeErrorProbes() []readOnlyHTTPRuntimeErrorProbe {
 			Options: func(t *testing.T) OperatorReadOptions {
 				opts := readOnlyRuntimeProbeOptions(t)
 				opts.AgentConversations = &fakeAgentConversationReadStore{agentDeliveryDiagnosticsErr: store.ErrAgentNotFound}
+				return opts
+			},
+		},
+		{
+			Method: "agent.delivery_lifecycle",
+			Params: map[string]any{"agent_id": "missing"},
+			Code:   AgentNotFoundCode,
+			Options: func(t *testing.T) OperatorReadOptions {
+				opts := readOnlyRuntimeProbeOptions(t)
+				opts.AgentConversations = &fakeAgentConversationReadStore{agentDeliveryLifecycleErr: store.ErrAgentNotFound}
 				return opts
 			},
 		},
@@ -738,6 +750,21 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 					},
 				}},
 			},
+			agentDeliveryLifecycleResult: store.OperatorAgentDeliveryLifecycleList{
+				AgentID: "agent-1",
+				Deliveries: []store.OperatorAgentDeliveryLifecycleRow{{
+					DeliveryID:        "delivery-lifecycle-1",
+					EventID:           "event-lifecycle-1",
+					EventName:         "task.ready",
+					RunID:             runID,
+					EntityID:          "entity-1",
+					Status:            "pending",
+					ReasonCode:        "retry_scheduled",
+					LastError:         "temporary",
+					RetryCount:        1,
+					DeliveryCreatedAt: now.Add(-3 * time.Minute),
+				}},
+			},
 			agentDeliveryDiagnosticsResult: store.OperatorAgentDeliveryDiagnostics{
 				AgentID: "agent-1",
 				Summary: store.OperatorAgentDeliveryDiagnosticsSummary{
@@ -960,6 +987,21 @@ func assertReadOnlyProbeSuccess(t *testing.T, methodName string, resp rpcRespons
 		}
 		if got := asMap(t, turns[0])["turn_index"]; got != float64(1) {
 			t.Fatalf("%s first turn_index = %#v, want 1", methodName, got)
+		}
+	}
+	if methodName == "agent.delivery_lifecycle" {
+		deliveries, ok := result["deliveries"].([]any)
+		if !ok || len(deliveries) != 1 {
+			t.Fatalf("agent.delivery_lifecycle deliveries = %#v", result["deliveries"])
+		}
+		delivery := asMap(t, deliveries[0])
+		if delivery["delivery_id"] != "delivery-lifecycle-1" || delivery["status"] != "pending" || delivery["retry_count"] != float64(1) {
+			t.Fatalf("agent.delivery_lifecycle delivery = %#v", delivery)
+		}
+		for _, forbidden := range []string{"dead_letter_records", "failures", "dead_letters", "summary"} {
+			if _, ok := delivery[forbidden]; ok {
+				t.Fatalf("agent.delivery_lifecycle exposed diagnostics field %q: %#v", forbidden, delivery)
+			}
 		}
 	}
 	if methodName == "agent.delivery_diagnostics" {

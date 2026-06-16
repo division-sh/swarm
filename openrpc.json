@@ -111,6 +111,104 @@
       ]
     },
     {
+      "name": "agent.delivery_lifecycle",
+      "description": "Read the owner-backed per-agent delivery lifecycle rows across the\ncanonical event_deliveries lifecycle states. This method is the\ncanonical agent-scoped lifecycle read owner for pending, in_progress,\ndelivered, failed, and dead_letter delivery rows. It is a separate\nowner from agent.diagnose and agent.delivery_diagnostics: AgentDiagnosis\nremains lean, and rich failed/dead-letter evidence remains owned by\nagent.delivery_diagnostics.\n\nThe API handler validates agent_id, optional run_id, optional\ndelivery_status filters, list bounds, cursor, and unknown params, then\nconsumes one named persisted delivery lifecycle read owner. The owner\nreads only canonical event_deliveries rows for subscriber_type agent\njoined to the minimum canonical event identity fields needed for\ndisplay: event_id, event_name, run_id, and entity_id. It must not\nreconstruct lifecycle rows from run.trace, event.get, event.list,\nagent.diagnose, agent.delivery_diagnostics, event_receipts,\ndead_letters, logs, dashboard/Builder helpers, CLI state, EventBus\nmemory, runtime memory, or direct DB/store readers outside this owner.\n\nRows are ordered by event_deliveries.created_at DESC, then delivery_id\nDESC. cursor is an opaque cursor over that ordering. run_id filters use\nthe canonical delivery/event run identity, currently\nCOALESCE(event_deliveries.run_id, events.run_id), and return only rows\nmatching the supplied run. delivery_status filters are exact\nevent_deliveries.status values. Empty lists are represented as empty\narrays. The method reports only lifecycle summaries\n(status/timestamps/retry_count/reason_code/last_error); it does not\ninclude dead-letter records, route target details, retry-policy\nrecommendations, status hints, trace reconstruction, event rendering,\nor CLI/dashboard presentation semantics.\n",
+      "params": [
+        {
+          "name": "agent_id",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "run_id",
+          "required": false,
+          "description": "Optional run filter over COALESCE(event_deliveries.run_id, events.run_id).",
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "delivery_status",
+          "required": false,
+          "description": "Optional exact lifecycle-status filter. When supplied, only these canonical event_deliveries.status values are returned.",
+          "schema": {
+            "items": {
+              "$ref": "#/components/schemas/DeliveryStatus"
+            },
+            "type": "array"
+          }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "description": "Max lifecycle rows to return.",
+          "schema": {
+            "default": 50,
+            "maximum": 200,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        {
+          "name": "cursor",
+          "required": false,
+          "description": "Opaque cursor returned by next_cursor for the next lifecycle page.",
+          "schema": {
+            "$ref": "#/components/schemas/Cursor"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/AgentDeliveryLifecycleList"
+        }
+      },
+      "errors": [
+        {
+          "code": -32000,
+          "message": "Application error: AGENT_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "AGENT_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "agent_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "agent_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
       "name": "agent.diagnose",
       "description": "Read the owner-backed diagnosis slice for one agent. This method is\nlimited to agent identity/status refs, current/last conversation refs,\npending-delivery queue summary/detail evidence, and optional delivery\nlifecycle evidence. It may also return runtime_state.watchdog as a\nnarrow projection of the canonical active session watchdog descriptor,\nactive as selected active-session latest-turn refs, and\nlast_tool_outcome as compact selected active-session latest-turn\ncanonical tool-result evidence. active is omitted when no active live\nsession is selected or the selected session has no latest turn.\nactive.turn_id is required when active is present; active.task_id and\nactive.entity_id are omitted when empty or absent. active.entity_id is\nthe latest selected agent_turns.entity_id dispatch entity and must not\nfall back to the agent configured/effective entity, task target entity,\nrole-scoped current-entity tool context, dashboard projection,\nconversation API response, or stale session evidence.\nlast_tool_outcome is omitted when no active live session is selected,\nno latest turn exists, no canonical turn summary exists, or the\ncanonical summary has no tool result. last_tool_outcome.ok is the\nselected turn parse_ok value and is not a per-tool execution status;\nricher per-tool status, latency, completed_at, and error diagnostics\nremain split.\nruntime_state.watchdog is omitted when no active live session or no\nactive-session watchdog evidence exists, and malformed watchdog data\nfails closed. Queue details are paged with queue_limit and\nqueue_cursor, ordered by events.created_at ASC then events.event_id ASC.\nAgentPendingDelivery.enqueued_at uses the same timestamp owner as\noldest_pending_age_seconds. AgentPendingDelivery.attempts is the\ncanonical recorded retry counter from event_deliveries.retry_count, with\nno API-layer +1 or status arithmetic. The API handler consumes the\ncanonical agent diagnosis read owner directly, including its\nwatchdog-backed runtime_state sub-owner, selected-turn active sub-owner,\nand selected-turn last_tool_outcome sub-owner. It must not locally join\nconversation, run, trace, token, CLI, or dashboard owners, and it must\nnot expose the full runtime_state\nenum, top-level watchdog, run_id, bundle_version, actual in-flight\nactive work, configured/effective current entity, task target entity,\nrole-scoped current entity, token usage, recent failures, or dead\nletters.\n",
       "params": [
@@ -7698,6 +7796,90 @@
         "required": [
           "state",
           "blocking_layer"
+        ],
+        "type": "object"
+      },
+      "AgentDeliveryLifecycleList": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "deliveries": {
+            "description": "Retained canonical lifecycle rows ordered by delivery_created_at DESC then delivery_id DESC.",
+            "items": {
+              "$ref": "#/components/schemas/AgentDeliveryLifecycleRow"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "$ref": "#/components/schemas/Cursor"
+          }
+        },
+        "required": [
+          "agent_id",
+          "deliveries"
+        ],
+        "type": "object"
+      },
+      "AgentDeliveryLifecycleRow": {
+        "additionalProperties": false,
+        "description": "Agent-scoped delivery lifecycle row sourced only from canonical\nevent_deliveries rows joined to the minimum canonical event identity\nfields needed for display. This schema is the public row type for\nagent.delivery_lifecycle and is distinct from the narrow\nAgentDeliveryLifecycle hint embedded in agent.diagnose. It must not\ncontain dead-letter record details, failure aggregates, retry-policy\nrecommendations, route-target interpretation, status hints, dashboard\nprojections, or trace/event rendering.\n",
+        "properties": {
+          "delivery_created_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "Canonical ordering watermark from event_deliveries.created_at."
+          },
+          "delivery_delivered_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "Canonical event_deliveries.delivered_at when the delivery was settled."
+          },
+          "delivery_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "delivery_started_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "Canonical event_deliveries.started_at when handler execution has started."
+          },
+          "entity_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "event_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "event_name": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "last_error": {
+            "description": "Canonical event_deliveries.last_error summary. Rich terminal evidence remains owned by agent.delivery_diagnostics.",
+            "type": "string"
+          },
+          "reason_code": {
+            "description": "Canonical event_deliveries.reason_code summary. Rich terminal evidence remains owned by agent.delivery_diagnostics.",
+            "type": "string"
+          },
+          "retry_count": {
+            "description": "Canonical event_deliveries.retry_count; the API must not add one or infer retries from receipts.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "run_id": {
+            "$ref": "#/components/schemas/OpaqueId",
+            "description": "Canonical delivery/event run identity, read as COALESCE(event_deliveries.run_id, events.run_id)."
+          },
+          "status": {
+            "$ref": "#/components/schemas/DeliveryStatus",
+            "description": "Canonical event_deliveries.status lifecycle value."
+          }
+        },
+        "required": [
+          "delivery_id",
+          "event_id",
+          "event_name",
+          "status",
+          "retry_count",
+          "delivery_created_at"
         ],
         "type": "object"
       },
