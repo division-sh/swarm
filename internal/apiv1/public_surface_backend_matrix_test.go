@@ -220,6 +220,111 @@ func TestPublicSurfaceBackendMatrixRejectsStaleReferences(t *testing.T) {
 			},
 			want: "runtime_log_readback_api proof_dimensions = [canonical_store_owner openrpc_publication real_v1_handler], want [canonical_store_owner openrpc_publication real_v1_handler selected_store]",
 		},
+		{
+			name: "served lifecycle row is required",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				matrix.Rows = publicSurfaceMatrixRowsExcept(matrix.Rows, "event_publish_dynamic_auto_emit_served_lifecycle")
+			},
+			want: "matrix missing required row event_publish_dynamic_auto_emit_served_lifecycle",
+		},
+		{
+			name: "served lifecycle row keeps default sqlite backend",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				row := publicSurfaceMatrixRowByID(t, matrix, "event_publish_dynamic_auto_emit_served_lifecycle")
+				row.Backends = publicSurfaceStringsExcept(row.Backends, "default_sqlite")
+			},
+			want: "event_publish_dynamic_auto_emit_served_lifecycle served mutating lifecycle row missing default_sqlite backend",
+		},
+		{
+			name: "served lifecycle row keeps explicit postgres backend",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				row := publicSurfaceMatrixRowByID(t, matrix, "event_publish_dynamic_auto_emit_served_lifecycle")
+				row.Backends = publicSurfaceStringsExcept(row.Backends, "explicit_postgres")
+			},
+			want: "event_publish_dynamic_auto_emit_served_lifecycle served mutating lifecycle row missing explicit_postgres backend",
+		},
+		{
+			name: "served lifecycle row keeps runtime startup dimension",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				row := publicSurfaceMatrixRowByID(t, matrix, "event_publish_dynamic_auto_emit_served_lifecycle")
+				row.ProofDimensions = publicSurfaceStringsExcept(row.ProofDimensions, "real_runtime_startup")
+			},
+			want: "event_publish_dynamic_auto_emit_served_lifecycle served mutating lifecycle row missing real_runtime_startup proof_dimension",
+		},
+		{
+			name: "served lifecycle row keeps real v1 handler dimension",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				row := publicSurfaceMatrixRowByID(t, matrix, "event_publish_dynamic_auto_emit_served_lifecycle")
+				row.ProofDimensions = publicSurfaceStringsExcept(row.ProofDimensions, "real_v1_handler")
+			},
+			want: "event_publish_dynamic_auto_emit_served_lifecycle served mutating lifecycle row missing real_v1_handler proof_dimension",
+		},
+		{
+			name: "served lifecycle row keeps selected store dimension",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				row := publicSurfaceMatrixRowByID(t, matrix, "event_publish_dynamic_auto_emit_served_lifecycle")
+				row.ProofDimensions = publicSurfaceStringsExcept(row.ProofDimensions, "selected_store")
+			},
+			want: "event_publish_dynamic_auto_emit_served_lifecycle served mutating lifecycle row missing selected_store proof_dimension",
+		},
+		{
+			name: "served lifecycle row keeps canonical store owner dimension",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				row := publicSurfaceMatrixRowByID(t, matrix, "event_publish_dynamic_auto_emit_served_lifecycle")
+				row.ProofDimensions = publicSurfaceStringsExcept(row.ProofDimensions, "canonical_store_owner")
+			},
+			want: "event_publish_dynamic_auto_emit_served_lifecycle served mutating lifecycle row missing canonical_store_owner proof_dimension",
+		},
+		{
+			name: "served lifecycle row keeps openrpc publication dimension",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				row := publicSurfaceMatrixRowByID(t, matrix, "event_publish_dynamic_auto_emit_served_lifecycle")
+				row.ProofDimensions = publicSurfaceStringsExcept(row.ProofDimensions, "openrpc_publication")
+			},
+			want: "event_publish_dynamic_auto_emit_served_lifecycle served mutating lifecycle row missing openrpc_publication proof_dimension",
+		},
+		{
+			name: "served lifecycle row keeps mutating api method",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				row := publicSurfaceMatrixRowByID(t, matrix, "event_publish_dynamic_auto_emit_served_lifecycle")
+				row.APIMethods = nil
+			},
+			want: "event_publish_dynamic_auto_emit_served_lifecycle served mutating lifecycle row missing mutating lifecycle api_method",
+		},
+		{
+			name: "served lifecycle row keeps matching openrpc matrix method",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				row := publicSurfaceMatrixRowByID(t, matrix, "event_publish_dynamic_auto_emit_served_lifecycle")
+				row.OpenRPCMatrixMethods = nil
+			},
+			want: "event_publish_dynamic_auto_emit_served_lifecycle served mutating lifecycle row api_method event.publish missing from openrpc_matrix_methods",
+		},
+		{
+			name: "served lifecycle row keeps sqlite served proof",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				row := publicSurfaceMatrixRowByID(t, matrix, "event_publish_dynamic_auto_emit_served_lifecycle")
+				row.ProofRefs = publicSurfaceProofRefsExcept(row.ProofRefs, "TestRunServeRuntimeEventPublishDynamicAutoEmitServedPathDefaultSQLite")
+			},
+			want: "event_publish_dynamic_auto_emit_served_lifecycle missing default SQLite served-runtime go_test proof_ref",
+		},
+		{
+			name: "served lifecycle row keeps postgres served proof",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				row := publicSurfaceMatrixRowByID(t, matrix, "event_publish_dynamic_auto_emit_served_lifecycle")
+				row.ProofRefs = publicSurfaceProofRefsExcept(row.ProofRefs, "TestRunServeRuntimeEventPublishDynamicAutoEmitServedPathPostgres")
+			},
+			want: "event_publish_dynamic_auto_emit_served_lifecycle missing explicit Postgres served-runtime go_test proof_ref",
+		},
+		{
+			name: "future served lifecycle row must opt into guarded class",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				row := *publicSurfaceMatrixRowByID(t, matrix, "event_publish_dynamic_auto_emit_served_lifecycle")
+				row.ID = "future_served_event_publish_lifecycle_row"
+				row.ProofDimensions = publicSurfaceStringsExcept(append([]string(nil), row.ProofDimensions...), "served_mutating_lifecycle")
+				matrix.Rows = append(matrix.Rows, row)
+			},
+			want: "future_served_event_publish_lifecycle_row served mutating lifecycle row missing served_mutating_lifecycle proof_dimension",
+		},
 	}
 
 	for _, tc := range tests {
@@ -401,6 +506,7 @@ func validatePublicSurfaceBackendMatrix(root string, matrix publicSurfaceBackend
 			}
 		}
 	}
+	problems = append(problems, validatePublicSurfaceServedMutatingLifecycleRows(rowsByID, activeTrackers)...)
 	problems = append(problems, validatePublicSurfaceExpectedRowShapes(rowsByID)...)
 	sort.Strings(problems)
 	return problems
@@ -444,6 +550,63 @@ func validatePublicSurfaceExpectedRowShapes(rowsByID map[string]publicSurfaceMat
 	return problems
 }
 
+func validatePublicSurfaceServedMutatingLifecycleRows(rowsByID map[string]publicSurfaceMatrixRow, activeTrackers map[string]struct{}) []string {
+	var problems []string
+	for id, row := range rowsByID {
+		guarded := publicSurfaceHasValue(row.ProofDimensions, "served_mutating_lifecycle")
+		if publicSurfaceLooksLikeServedMutatingLifecycle(row) && !guarded {
+			problems = append(problems, fmt.Sprintf("%s served mutating lifecycle row missing served_mutating_lifecycle proof_dimension", id))
+		}
+		if !guarded {
+			continue
+		}
+
+		if publicSurfaceExplicitServedLifecycleSplit(row) {
+			if !publicSurfaceHasActiveTrackerProof(row.ProofRefs, activeTrackers) {
+				problems = append(problems, fmt.Sprintf("%s served mutating lifecycle split/postgres-only row missing active tracker proof_ref", id))
+			}
+			continue
+		}
+		if !publicSurfaceSupported(row) {
+			problems = append(problems, fmt.Sprintf("%s served mutating lifecycle row classification %q must be supported or an explicit split/postgres-only row", id, row.Classification))
+			continue
+		}
+		if !publicSurfaceHasServedMutatingLifecycleMethod(row.APIMethods) {
+			problems = append(problems, fmt.Sprintf("%s served mutating lifecycle row missing mutating lifecycle api_method", id))
+		}
+		for _, method := range row.APIMethods {
+			method = strings.TrimSpace(method)
+			if _, ok := publicSurfaceServedMutatingLifecycleMethods()[method]; ok && !publicSurfaceHasValue(row.OpenRPCMatrixMethods, method) {
+				problems = append(problems, fmt.Sprintf("%s served mutating lifecycle row api_method %s missing from openrpc_matrix_methods", id, method))
+			}
+		}
+		for _, backend := range []string{"default_sqlite", "explicit_postgres"} {
+			if !publicSurfaceHasValue(row.Backends, backend) {
+				problems = append(problems, fmt.Sprintf("%s served mutating lifecycle row missing %s backend", id, backend))
+			}
+		}
+		for _, dimension := range []string{
+			"served_mutating_lifecycle",
+			"real_runtime_startup",
+			"real_v1_handler",
+			"selected_store",
+			"canonical_store_owner",
+			"openrpc_publication",
+		} {
+			if !publicSurfaceHasValue(row.ProofDimensions, dimension) {
+				problems = append(problems, fmt.Sprintf("%s served mutating lifecycle row missing %s proof_dimension", id, dimension))
+			}
+		}
+		if !publicSurfaceHasServedRuntimeBackendProof(row.ProofRefs, "SQLite") {
+			problems = append(problems, fmt.Sprintf("%s missing default SQLite served-runtime go_test proof_ref", id))
+		}
+		if !publicSurfaceHasServedRuntimeBackendProof(row.ProofRefs, "Postgres") {
+			problems = append(problems, fmt.Sprintf("%s missing explicit Postgres served-runtime go_test proof_ref", id))
+		}
+	}
+	return problems
+}
+
 func expectedPublicSurfaceRowShapes() map[string]publicSurfaceExpectedRowShape {
 	return map[string]publicSurfaceExpectedRowShape{
 		"api_idempotency_selected_store": {
@@ -461,6 +624,22 @@ func expectedPublicSurfaceRowShapes() map[string]publicSurfaceExpectedRowShape {
 			APIMethods:           []string{"runtime.logs", "runtime.subscribe_logs", "run.trace"},
 			OpenRPCMatrixMethods: []string{"runtime.logs", "runtime.subscribe_logs", "run.trace"},
 			ProofDimensions:      []string{"canonical_store_owner", "openrpc_publication", "real_v1_handler", "selected_store"},
+		},
+		"event_publish_existing_run_followup_served_path": {
+			Classification:       "already_covered_by_existing_proof",
+			Tier:                 "required_smoke",
+			Backends:             []string{"default_sqlite", "explicit_postgres"},
+			APIMethods:           []string{"event.publish"},
+			OpenRPCMatrixMethods: []string{"event.publish"},
+			ProofDimensions:      []string{"canonical_store_owner", "cli_v1_path", "openrpc_publication", "real_runtime_startup", "real_v1_handler", "selected_store", "served_mutating_lifecycle"},
+		},
+		"event_publish_dynamic_auto_emit_served_lifecycle": {
+			Classification:       "add_to_matrix",
+			Tier:                 "required_smoke",
+			Backends:             []string{"default_sqlite", "explicit_postgres"},
+			APIMethods:           []string{"event.publish"},
+			OpenRPCMatrixMethods: []string{"event.publish"},
+			ProofDimensions:      []string{"canonical_store_owner", "openrpc_publication", "real_runtime_startup", "real_v1_handler", "selected_store", "served_mutating_lifecycle"},
 		},
 	}
 }
@@ -765,6 +944,75 @@ func publicSurfaceFailClosedRow(row publicSurfaceMatrixRow) bool {
 	return row.Tier == "postgres_only_fail_closed" || publicSurfaceHasValue(row.ProofDimensions, "fail_closed")
 }
 
+func publicSurfaceLooksLikeServedMutatingLifecycle(row publicSurfaceMatrixRow) bool {
+	if !publicSurfaceSupported(row) && !publicSurfaceExplicitServedLifecycleSplit(row) {
+		return false
+	}
+	if !publicSurfaceHasServedMutatingLifecycleMethod(row.APIMethods) {
+		return false
+	}
+	if strings.Contains(strings.ToLower(row.Surface), "served") {
+		return true
+	}
+	return publicSurfaceHasValue(row.ProofDimensions, "real_runtime_startup") &&
+		publicSurfaceHasValue(row.ProofDimensions, "real_v1_handler")
+}
+
+func publicSurfaceExplicitServedLifecycleSplit(row publicSurfaceMatrixRow) bool {
+	return row.Classification == "split_to_existing_issue" ||
+		row.Tier == "postgres_only_fail_closed" ||
+		publicSurfaceHasValue(row.Backends, "postgres_only")
+}
+
+func publicSurfaceHasServedMutatingLifecycleMethod(methods []string) bool {
+	for _, method := range methods {
+		if _, ok := publicSurfaceServedMutatingLifecycleMethods()[strings.TrimSpace(method)]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func publicSurfaceServedMutatingLifecycleMethods() map[string]struct{} {
+	return complianceStringSet([]string{
+		"bundle.delete",
+		"event.publish",
+		"event.replay",
+		"mailbox.approve",
+		"mailbox.defer",
+		"mailbox.reject",
+		"run.continue",
+		"run.fork",
+		"run.pause",
+		"run.start",
+		"run.stop",
+		"runtime.nuke",
+		"runtime.pause",
+		"runtime.resume",
+	})
+}
+
+func publicSurfaceHasServedRuntimeBackendProof(refs []publicSurfaceProofRef, backend string) bool {
+	for _, ref := range refs {
+		if ref.Kind == "go_test" && strings.Contains(ref.Name, "ServeRuntime") && strings.Contains(ref.Name, backend) {
+			return true
+		}
+	}
+	return false
+}
+
+func publicSurfaceHasActiveTrackerProof(refs []publicSurfaceProofRef, activeTrackers map[string]struct{}) bool {
+	for _, ref := range refs {
+		if ref.Kind != "tracker" {
+			continue
+		}
+		if _, ok := activeTrackers[trackerKey(ref.Issue, ref.Watchlist)]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 func publicSurfaceHasValue(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {
@@ -805,6 +1053,17 @@ func publicSurfaceStringsExcept(values []string, remove string) []string {
 	return out
 }
 
+func publicSurfaceMatrixRowsExcept(rows []publicSurfaceMatrixRow, remove string) []publicSurfaceMatrixRow {
+	out := rows[:0]
+	for _, row := range rows {
+		if row.ID == remove {
+			continue
+		}
+		out = append(out, row)
+	}
+	return out
+}
+
 func publicSurfaceSameStringSet(actual, want []string) bool {
 	actualSorted := publicSurfaceSortedStrings(actual)
 	wantSorted := publicSurfaceSortedStrings(want)
@@ -838,6 +1097,7 @@ func requiredPublicSurfaceRows() map[string]struct{} {
 		"api_idempotency_selected_store",
 		"event_publish_cli",
 		"event_publish_existing_run_followup_served_path",
+		"event_publish_dynamic_auto_emit_served_lifecycle",
 		"runtime_log_readback_api",
 		"mailbox_read_api_after_mailbox_write",
 		"mailbox_read_cli",
@@ -886,6 +1146,7 @@ func allowedPublicSurfaceProofDimensions() map[string]struct{} {
 		"real_runtime_startup",
 		"real_v1_handler",
 		"selected_store",
+		"served_mutating_lifecycle",
 		"split_tracker",
 	})
 }

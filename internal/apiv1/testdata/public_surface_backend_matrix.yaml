@@ -278,7 +278,7 @@ rows:
       - apiv1.RunBundleContextStore
       - runtimebus.EventStore
       - event_deliveries readback owner
-    proof_dimensions: [selected_store, real_v1_handler, cli_v1_path, real_runtime_startup, canonical_store_owner, openrpc_publication]
+    proof_dimensions: [selected_store, real_v1_handler, cli_v1_path, real_runtime_startup, canonical_store_owner, openrpc_publication, served_mutating_lifecycle]
     proof_refs:
       - kind: go_test
         name: TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite
@@ -309,7 +309,7 @@ rows:
       - runtimepipeline.WorkflowInstanceStore
       - runtime manager auto_emit_on_create owner
       - event_deliveries readback owner
-    proof_dimensions: [selected_store, real_v1_handler, real_runtime_startup, canonical_store_owner, openrpc_publication]
+    proof_dimensions: [selected_store, real_v1_handler, real_runtime_startup, canonical_store_owner, openrpc_publication, served_mutating_lifecycle]
     proof_refs:
       - kind: go_test
         name: TestRunServeRuntimeEventPublishDynamicAutoEmitServedPathDefaultSQLite
