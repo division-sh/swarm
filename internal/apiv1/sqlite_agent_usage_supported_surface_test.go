@@ -12,6 +12,7 @@ import (
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	storepkg "github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/google/uuid"
 )
 
 func TestSQLiteAgentUsageOwnerBacksSupportedAPISurface(t *testing.T) {
@@ -65,6 +66,62 @@ func TestSQLiteAgentUsageOwnerBacksSupportedAPISurface(t *testing.T) {
 		if _, ok := result[forbidden]; ok {
 			t.Fatalf("agent.usage exposed forbidden field %q: %#v", forbidden, result)
 		}
+	}
+}
+
+func TestSQLiteAgentDeliveryLifecycleOwnerBacksSupportedAPISurface(t *testing.T) {
+	ctx := context.Background()
+	sqliteStore := newSQLiteAgentUsageStoreFixture(t, ctx)
+	seedSQLiteAgentUsageAgent(t, ctx, sqliteStore, "agent-1")
+
+	now := time.Date(2026, 5, 21, 10, 0, 0, 0, time.UTC)
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	entityID := uuid.NewString()
+	deliveryID := uuid.NewString()
+	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES (?, 'running')`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := sqliteStore.DB.ExecContext(ctx, `
+		INSERT INTO events (
+			event_id, run_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at
+		) VALUES (
+			?, ?, 'task.ready', ?, 'global', '{}', 'runtime', 'agent', ?
+		)
+	`, eventID, runID, entityID, now.Add(-time.Minute)); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+	if _, err := sqliteStore.DB.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, last_error, created_at
+		) VALUES (
+			?, ?, ?, 'agent', 'agent-1', 'pending', 1, 'retry_scheduled', 'temporary', ?
+		)
+	`, deliveryID, runID, eventID, now); err != nil {
+		t.Fatalf("seed delivery: %v", err)
+	}
+
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			AgentDeliveryLifecycle: sqliteStore,
+		}),
+	})
+	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"lifecycle","method":"agent.delivery_lifecycle","params":{"agent_id":"agent-1","run_id":"`+runID+`","limit":10}}`)
+	if resp.Error != nil {
+		t.Fatalf("agent.delivery_lifecycle error = %#v", resp.Error)
+	}
+	result := asMap(t, resp.Result)
+	if result["agent_id"] != "agent-1" {
+		t.Fatalf("agent_id = %#v", result["agent_id"])
+	}
+	deliveries, ok := result["deliveries"].([]any)
+	if !ok || len(deliveries) != 1 {
+		t.Fatalf("deliveries = %#v", result["deliveries"])
+	}
+	delivery := asMap(t, deliveries[0])
+	if delivery["delivery_id"] != deliveryID || delivery["event_id"] != eventID || delivery["run_id"] != runID || delivery["entity_id"] != entityID || delivery["status"] != "pending" || delivery["retry_count"] != float64(1) {
+		t.Fatalf("delivery = %#v", delivery)
 	}
 }
 

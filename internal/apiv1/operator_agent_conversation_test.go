@@ -328,8 +328,9 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: OperatorReadHandlers(OperatorReadOptions{
-			AgentConversations: reads,
-			AgentUsage:         reads,
+			AgentConversations:     reads,
+			AgentDeliveryLifecycle: reads,
+			AgentUsage:             reads,
 		}),
 	})
 
@@ -865,8 +866,9 @@ func TestOperatorAgentConversationHandlersTypedErrors(t *testing.T) {
 			handler := testHandler(t, Options{
 				AuthTokens: []string{testToken},
 				Handlers: OperatorReadHandlers(OperatorReadOptions{
-					AgentConversations: tc.reads,
-					AgentUsage:         tc.reads,
+					AgentConversations:     tc.reads,
+					AgentDeliveryLifecycle: tc.reads,
+					AgentUsage:             tc.reads,
 				}),
 			})
 			resp := rpcCall(t, handler, tc.body)
@@ -1009,7 +1011,7 @@ func TestOperatorAgentDeliveryLifecycleFailsClosedOnMalformedOwnerData(t *testin
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: OperatorReadHandlers(OperatorReadOptions{
-			AgentConversations: reads,
+			AgentDeliveryLifecycle: reads,
 		}),
 	})
 
@@ -1240,7 +1242,7 @@ func TestOperatorAgentDeliveryLifecycleRejectsBadCursorAndStatuses(t *testing.T)
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: OperatorReadHandlers(OperatorReadOptions{
-			AgentConversations: &fakeAgentConversationReadStore{agentDeliveryLifecycleErr: store.AgentDeliveryLifecycleCursorError{}},
+			AgentDeliveryLifecycle: &fakeAgentConversationReadStore{agentDeliveryLifecycleErr: store.AgentDeliveryLifecycleCursorError{}},
 		}),
 	})
 
