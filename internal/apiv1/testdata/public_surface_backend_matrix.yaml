@@ -285,6 +285,10 @@ rows:
       - kind: go_test
         name: TestRunServeRuntimeEventPublishRunIDFollowUpServedPathPostgres
       - kind: go_test
+        name: TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathDefaultSQLite
+      - kind: go_test
+        name: TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathPostgres
+      - kind: go_test
         name: TestBuildStoresSQLiteSelectsRunBundleContextForServedEventPublish
       - kind: go_test
         name: TestOperatorEventPublishSQLiteExplicitRunFollowUpUsesSelectedRun
@@ -295,6 +299,9 @@ rows:
       Postgres: `swarm event publish --run-id` publishes into the selected run,
       advances the system-node flow state, persists event/delivery evidence,
       and reads back through public event, trace, status, and entity surfaces.
+      #1434 extends this row with active-load liveness proof: existing-run
+      entity-targeted `event.publish` must ACK or fail closed while unrelated
+      delivery work remains in progress, without waiting for agent/handler completion.
 
   - id: event_publish_dynamic_auto_emit_served_lifecycle
     surface: /v1/rpc event.publish served dynamic auto_emit_on_create lifecycle parity

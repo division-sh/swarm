@@ -351,6 +351,7 @@ type serveOptions struct {
 	TestEntityStateHook              func(entityID, state string)
 	TestWorkflowNodeHandlerStartHook runtimepipeline.WorkflowNodeHandlerStartHook
 	TestLifecycleProbe               runtimelifecycleprobe.Observer
+	TestLLMRuntime                   runtimellm.Runtime
 	TestOutboxSweeperConfig          runtimebus.OutboxSweeperConfig
 	TestRuntimeReadyHook             func(*runtime.Runtime)
 }
@@ -707,6 +708,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 			TestEntityStateHook:              req.Options.TestEntityStateHook,
 			TestWorkflowNodeHandlerStartHook: req.Options.TestWorkflowNodeHandlerStartHook,
 			TestLifecycleProbe:               req.Options.TestLifecycleProbe,
+			LLMRuntime:                       req.Options.TestLLMRuntime,
 			TestOutboxSweeperConfig:          req.Options.TestOutboxSweeperConfig,
 		},
 	})
