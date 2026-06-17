@@ -94,6 +94,93 @@ func TestSQLiteObservabilityOwnerBacksSupportedAPISurfaces(t *testing.T) {
 	})
 }
 
+func TestSQLiteRunTraceAPISurfacePaginatesAndUsesMaterializationWindow(t *testing.T) {
+	ctx := context.Background()
+	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+	base := time.Unix(1700003100, 0).UTC()
+	runID := "00000000-0000-0000-0000-000000001429"
+	eventOnlyID := "00000000-0000-0000-0000-000000001401"
+	lateDeliveryID := "00000000-0000-0000-0000-000000001402"
+	secondDeliveryID := "00000000-0000-0000-0000-000000001403"
+	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, base.Add(-time.Minute)); err != nil {
+		t.Fatalf("seed sqlite run: %v", err)
+	}
+	if _, err := sqliteStore.DB.ExecContext(ctx, `
+		INSERT INTO events (run_id, event_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at)
+		VALUES
+			(?, ?, 'trace.event_only', NULL, 'global', '{}', 'runtime', 'platform', ?),
+			(?, ?, 'trace.late_delivery', NULL, 'global', '{}', 'runtime', 'platform', ?),
+			(?, ?, 'trace.second_delivery', NULL, 'global', '{}', 'runtime', 'platform', ?)
+	`, runID, eventOnlyID, base, runID, lateDeliveryID, base, runID, secondDeliveryID, base.Add(time.Second)); err != nil {
+		t.Fatalf("seed sqlite events: %v", err)
+	}
+	if _, err := sqliteStore.DB.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, reason_code, created_at, started_at, delivered_at
+		) VALUES
+			('00000000-0000-0000-0000-000000001411', ?, ?, 'agent', 'agent-late', 'delivered', 'ok', ?, ?, ?),
+			('00000000-0000-0000-0000-000000001412', ?, ?, 'agent', 'agent-second', 'delivered', 'ok', ?, ?, ?)
+	`, runID, lateDeliveryID, base.Add(time.Second), base.Add(2*time.Second), base.Add(3*time.Second),
+		runID, secondDeliveryID, base.Add(2*time.Second), base.Add(3*time.Second), base.Add(4*time.Second)); err != nil {
+		t.Fatalf("seed sqlite deliveries: %v", err)
+	}
+
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			Now:           func() time.Time { return base.Add(time.Minute) },
+			Observability: sqliteStore,
+		}),
+	})
+	page1 := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"page1","method":"run.trace","params":{"run_id":%q,"limit":1,"filter":{"delivery_status":["delivered"]}}}`, runID))
+	if page1.Error != nil {
+		t.Fatalf("run.trace page1 error = %#v", page1.Error)
+	}
+	page1Result := asMap(t, page1.Result)
+	page1Rows, _ := page1Result["trace"].([]any)
+	nextCursor, _ := page1Result["next_cursor"].(string)
+	if len(page1Rows) != 1 || asMap(t, page1Rows[0])["event_id"] != lateDeliveryID || nextCursor == "" {
+		t.Fatalf("run.trace page1 result = %#v, want late delivery plus next_cursor", page1Result)
+	}
+	page2 := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"page2","method":"run.trace","params":{"run_id":%q,"limit":1,"cursor":%q,"filter":{"delivery_status":["delivered"]}}}`, runID, nextCursor))
+	if page2.Error != nil {
+		t.Fatalf("run.trace page2 error = %#v", page2.Error)
+	}
+	page2Result := asMap(t, page2.Result)
+	page2Rows, _ := page2Result["trace"].([]any)
+	if len(page2Rows) != 1 || asMap(t, page2Rows[0])["event_id"] != secondDeliveryID || page2Result["next_cursor"] != nil {
+		t.Fatalf("run.trace page2 result = %#v, want second delivery and no next_cursor", page2Result)
+	}
+
+	since := base.Format(time.RFC3339Nano)
+	sinceResp := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"since","method":"run.trace","params":{"run_id":%q,"limit":10,"since":%q}}`, runID, since))
+	if sinceResp.Error != nil {
+		t.Fatalf("run.trace since error = %#v", sinceResp.Error)
+	}
+	sinceRows, _ := asMap(t, sinceResp.Result)["trace"].([]any)
+	if len(sinceRows) != 2 || asMap(t, sinceRows[0])["event_id"] != lateDeliveryID || asMap(t, sinceRows[1])["event_id"] != secondDeliveryID {
+		t.Fatalf("run.trace since rows = %#v, want delivery-materialized rows only", sinceRows)
+	}
+	until := base.Add(2500 * time.Millisecond).Format(time.RFC3339Nano)
+	untilResp := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"until","method":"run.trace","params":{"run_id":%q,"limit":10,"until":%q}}`, runID, until))
+	if untilResp.Error != nil {
+		t.Fatalf("run.trace until error = %#v", untilResp.Error)
+	}
+	untilRows, _ := asMap(t, untilResp.Result)["trace"].([]any)
+	if len(untilRows) != 1 || asMap(t, untilRows[0])["event_id"] != eventOnlyID {
+		t.Fatalf("run.trace until rows = %#v, want only event-only row before delivery materialization", untilRows)
+	}
+
+	invalid := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"bad-cursor","method":"run.trace","params":{"run_id":%q,"cursor":"not-a-cursor"}}`, runID))
+	if invalid.Error == nil {
+		t.Fatal("run.trace invalid cursor error = nil")
+	}
+	details := asMap(t, invalid.Error.Data)
+	if nested := asMap(t, details["details"]); nested["field"] != "cursor" {
+		t.Fatalf("run.trace invalid cursor details = %#v, want cursor field", details)
+	}
+}
+
 type sqliteObservabilitySurfaceFixture struct {
 	store   *storepkg.SQLiteRuntimeStore
 	runID   string
