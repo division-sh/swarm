@@ -515,6 +515,103 @@ opco.ceo_ready:
 	}
 }
 
+func TestTemplateInstanceRecordEvidenceUsesLocalizedHandlerEvidenceTarget(t *testing.T) {
+	source := loadWorkflowTempSource(t, map[string]string{
+		"package.yaml": `name: test
+version: 1.0.0
+flows:
+  - id: operating
+    flow: operating
+    mode: template
+`,
+		"flows/operating/schema.yaml": `name: operating
+initial_state: initializing
+terminal_states: [ready]
+states: [initializing, ready]
+`,
+		"flows/operating/events.yaml": `build_progress:
+  entity_id: string
+  summary: string
+`,
+		"flows/operating/nodes.yaml": `build-orchestrator:
+  id: build-orchestrator
+  execution_type: system_node
+  subscribes_to: [build_progress]
+  event_handlers:
+    build_progress:
+      action: record_evidence
+      evidence_target: build_evidence
+`,
+	})
+	const entityID = "11111111-1111-1111-1111-111111111111"
+	evt := events.NewProjectionEvent(uuid.NewString(),
+		events.EventType("operating/inst-1/build_progress"), "", "", mustJSON(map[string]any{"entity_id": entityID, "summary": "compile complete"}), 0, "", "", events.EventEnvelope{}, time.Time{}).
+		WithEntityID(entityID).
+		WithFlowInstance("operating/inst-1")
+	if _, ok := source.NodeEventHandler("build-orchestrator", string(evt.Type())); ok {
+		t.Fatal("raw bundle handler lookup unexpectedly matched concrete instance event without delivery localization")
+	}
+	resolved := workflowNodeEventHandlerResolutionForDelivery(source, "build-orchestrator", evt)
+	if !resolved.Matched {
+		t.Fatal("expected concrete instance event to resolve to local build-orchestrator handler")
+	}
+	if got := resolved.HandlerEventKey; got != "build_progress" {
+		t.Fatalf("handler event key = %q, want build_progress", got)
+	}
+	if got := strings.TrimSpace(resolved.Handler.EvidenceTarget); got != "build_evidence" {
+		t.Fatalf("resolved evidence target = %q, want build_evidence", got)
+	}
+
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	workflowStore := NewWorkflowInstanceStore(db)
+	pc := &PipelineCoordinator{
+		bus:                     &recordingPipelineBus{},
+		db:                      db,
+		workflowStore:           workflowStore,
+		expressionEval:          newWorkflowExpressionEvaluator(),
+		entityLocks:             map[string]*sync.Mutex{},
+		module:                  staticSemanticWorkflowModule{source: source},
+		eventReceiptsCapability: eventReceiptsCapabilityStub{enabled: true}.resolve,
+	}
+	ctx := testPipelineCoordinatorRunContext(t, pc)
+	if err := workflowStore.Upsert(ctx, WorkflowInstance{
+		InstanceID:      entityID,
+		StorageRef:      entityID,
+		WorkflowName:    "operating",
+		WorkflowVersion: "1.0.0",
+		CurrentState:    "initializing",
+		Metadata:        map[string]any{},
+		StateBuckets:    map[string]any{},
+	}); err != nil {
+		t.Fatalf("seed workflow instance: %v", err)
+	}
+	seedPipelineNodeDeliveryAuthority(t, db, evt, "build-orchestrator")
+
+	handled, err := pc.executeNodeHandlerPlanResult(ctx, "build-orchestrator", evt)
+	if err != nil {
+		t.Fatalf("executeNodeHandlerPlanResult: %v", err)
+	}
+	if !handled {
+		t.Fatal("executeNodeHandlerPlanResult handled = false, want true")
+	}
+
+	instance, ok, err := workflowStore.Load(ctx, entityID)
+	if err != nil {
+		t.Fatalf("load workflow instance: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected workflow instance to exist")
+	}
+	entries := workflowEvidenceEntries(t, instance, "build_evidence")
+	if len(entries) != 1 {
+		t.Fatalf("build_evidence entries = %d, want 1", len(entries))
+	}
+	if got := entries[0]["summary"]; got != "compile complete" {
+		t.Fatalf("evidence summary = %#v, want compile complete", got)
+	}
+}
+
 func loadWorkflowFixtureSource(t *testing.T, fixture string) semanticview.Source {
 	t.Helper()
 	return semanticview.Wrap(loadWorkflowFixtureBundle(t, fixture))
