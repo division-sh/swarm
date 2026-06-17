@@ -87,6 +87,25 @@ func (s *SQLiteRuntimeStore) LoadRunDebugTracePage(ctx context.Context, runID st
 	appendIn("COALESCE(d.subscriber_type, '')", opts.Filter.SubscriberTypes)
 	args = append(args, opts.Limit+1)
 	rows, err := s.DB.QueryContext(ctx, `
+		WITH trace_sessions AS (
+			SELECT
+				session_id,
+				run_id,
+				'live_session' AS session_kind,
+				COALESCE(runtime_mode, '') AS runtime_mode,
+				COALESCE(status, '') AS status,
+				updated_at
+			FROM agent_sessions
+			UNION ALL
+			SELECT
+				session_id,
+				run_id,
+				'turn_audit' AS session_kind,
+				COALESCE(runtime_mode, '') AS runtime_mode,
+				COALESCE(status, '') AS status,
+				updated_at
+			FROM agent_conversation_audits
+		)
 		SELECT
 			e.event_id, e.event_name, COALESCE(e.source_event_id, ''), COALESCE(e.entity_id, ''),
 			COALESCE(e.produced_by, ''), COALESCE(e.produced_by_type, ''), e.created_at,
@@ -94,7 +113,7 @@ func (s *SQLiteRuntimeStore) LoadRunDebugTracePage(ctx context.Context, runID st
 				COALESCE(d.status, ''), COALESCE(d.reason_code, ''), COALESCE(d.last_error, ''), COALESCE(d.retry_count, 0),
 				COALESCE(d.active_session_id, ''),
 				d.created_at, d.started_at, d.delivered_at,
-			COALESCE(ses.session_id, ''), COALESCE(ses.scope, ''), COALESCE(ses.runtime_mode, ''),
+			COALESCE(ses.session_id, ''), COALESCE(ses.session_kind, ''), COALESCE(ses.runtime_mode, ''),
 			COALESCE(ses.status, ''), ses.updated_at,
 			COALESCE(t.turn_id, ''), COALESCE(t.trigger_event_id, ''), COALESCE(t.trigger_event_type, ''),
 			COALESCE(t.runtime_mode, ''), COALESCE(t.scope_key, ''), COALESCE(t.entity_id, ''),
@@ -113,7 +132,7 @@ func (s *SQLiteRuntimeStore) LoadRunDebugTracePage(ctx context.Context, runID st
 					AND t.agent_id = d.subscriber_id
 				)
 		   )
-		LEFT JOIN agent_sessions ses
+		LEFT JOIN trace_sessions ses
 			ON ses.session_id = COALESCE(t.session_id, d.active_session_id)
 		   AND (
 				ses.run_id = e.run_id
