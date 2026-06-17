@@ -14,9 +14,7 @@ func (s *SQLiteRuntimeStore) LoadRunDebugTracePage(ctx context.Context, runID st
 	if runID == "" {
 		return nil, "", ErrRunNotFound
 	}
-	if opts.Cursor != "" {
-		return nil, "", ErrInvalidObservabilityCursor
-	}
+	opts = defaultRunDebugTraceQueryOptions(opts)
 	var exists bool
 	if err := s.DB.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM runs WHERE run_id = ?)`, runID).Scan(&exists); err != nil {
 		return nil, "", fmt.Errorf("load sqlite run trace run existence: %w", err)
@@ -24,15 +22,51 @@ func (s *SQLiteRuntimeStore) LoadRunDebugTracePage(ctx context.Context, runID st
 	if !exists {
 		return nil, "", ErrRunNotFound
 	}
-	opts = defaultRunDebugTraceQueryOptions(opts)
 	where := []string{"e.run_id = ?", "NOT (COALESCE(d.subscriber_type, '') = ? AND COALESCE(d.subscriber_id, '') = ?)"}
 	args := []any{runID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID}
+	if opts.Cursor != "" {
+		cursor, err := decodeRunDebugTraceCursor(opts.Cursor)
+		if err != nil {
+			return nil, "", err
+		}
+		eventCreatedAt, err := sqliteRunTraceCursorTime(cursor.EventCreatedAt)
+		if err != nil {
+			return nil, "", err
+		}
+		eventID := strings.TrimSpace(cursor.EventID)
+		deliveryCreatedAt, err := sqliteRunTraceCursorOptionalTime(cursor.DeliveryCreatedAt)
+		if err != nil {
+			return nil, "", err
+		}
+		deliveryID := strings.TrimSpace(cursor.DeliveryID)
+		turnCreatedAt, err := sqliteRunTraceCursorOptionalTime(cursor.TurnCreatedAt)
+		if err != nil {
+			return nil, "", err
+		}
+		turnID := strings.TrimSpace(cursor.TurnID)
+		where = append(where, `(
+			e.created_at > ?
+			OR (e.created_at = ? AND e.event_id > ?)
+			OR (e.created_at = ? AND e.event_id = ? AND COALESCE(d.created_at, ?) > ?)
+			OR (e.created_at = ? AND e.event_id = ? AND COALESCE(d.created_at, ?) = ? AND COALESCE(d.delivery_id, '') > ?)
+			OR (e.created_at = ? AND e.event_id = ? AND COALESCE(d.created_at, ?) = ? AND COALESCE(d.delivery_id, '') = ? AND COALESCE(t.created_at, ?) > ?)
+			OR (e.created_at = ? AND e.event_id = ? AND COALESCE(d.created_at, ?) = ? AND COALESCE(d.delivery_id, '') = ? AND COALESCE(t.created_at, ?) = ? AND COALESCE(t.turn_id, '') > ?)
+		)`)
+		args = append(args,
+			eventCreatedAt,
+			eventCreatedAt, eventID,
+			eventCreatedAt, eventID, sqliteRunTraceCursorFloorTime(), deliveryCreatedAt,
+			eventCreatedAt, eventID, sqliteRunTraceCursorFloorTime(), deliveryCreatedAt, deliveryID,
+			eventCreatedAt, eventID, sqliteRunTraceCursorFloorTime(), deliveryCreatedAt, deliveryID, sqliteRunTraceCursorFloorTime(), turnCreatedAt,
+			eventCreatedAt, eventID, sqliteRunTraceCursorFloorTime(), deliveryCreatedAt, deliveryID, sqliteRunTraceCursorFloorTime(), turnCreatedAt, turnID,
+		)
+	}
 	if opts.Since != nil {
-		where = append(where, "e.created_at >= ?")
+		where = append(where, sqliteRunTraceWatermarkExpression()+" > ?")
 		args = append(args, opts.Since.UTC())
 	}
 	if opts.Until != nil {
-		where = append(where, "e.created_at <= ?")
+		where = append(where, sqliteRunTraceWatermarkExpression()+" <= ?")
 		args = append(args, opts.Until.UTC())
 	}
 	appendIn := func(column string, values []string) {
@@ -51,7 +85,7 @@ func (s *SQLiteRuntimeStore) LoadRunDebugTracePage(ctx context.Context, runID st
 	appendIn("COALESCE(d.status, '')", opts.Filter.DeliveryStatuses)
 	appendIn("COALESCE(d.subscriber_id, '')", opts.Filter.SubscriberIDs)
 	appendIn("COALESCE(d.subscriber_type, '')", opts.Filter.SubscriberTypes)
-	args = append(args, opts.Limit)
+	args = append(args, opts.Limit+1)
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT
 			e.event_id, e.event_name, COALESCE(e.source_event_id, ''), COALESCE(e.entity_id, ''),
@@ -68,17 +102,32 @@ func (s *SQLiteRuntimeStore) LoadRunDebugTracePage(ctx context.Context, runID st
 			COALESCE(t.error, ''), t.created_at
 		FROM events e
 		LEFT JOIN event_deliveries d ON d.event_id = e.event_id
-		LEFT JOIN agent_sessions ses ON ses.session_id = d.active_session_id
-		LEFT JOIN agent_turns t ON t.trigger_event_id = e.event_id
+		LEFT JOIN agent_turns t
+			ON t.run_id = e.run_id
+		   AND t.trigger_event_id = e.event_id
+		   AND (
+				d.delivery_id IS NULL
+				OR (
+					COALESCE(d.subscriber_type, '') = 'agent'
+					AND COALESCE(d.subscriber_id, '') <> ''
+					AND t.agent_id = d.subscriber_id
+				)
+		   )
+		LEFT JOIN agent_sessions ses
+			ON ses.session_id = COALESCE(t.session_id, d.active_session_id)
+		   AND (
+				ses.run_id = e.run_id
+				OR ses.run_id IS NULL
+		   )
 		WHERE `+strings.Join(where, " AND ")+`
-		ORDER BY e.created_at ASC, e.event_id ASC, d.created_at ASC, d.delivery_id ASC
+		ORDER BY e.created_at ASC, e.event_id ASC, d.created_at ASC, d.delivery_id ASC, t.created_at ASC, t.turn_id ASC
 		LIMIT ?
 	`, args...)
 	if err != nil {
 		return nil, "", fmt.Errorf("query sqlite run trace: %w", err)
 	}
 	defer rows.Close()
-	out := make([]RunDebugTraceRow, 0, opts.Limit)
+	out := make([]RunDebugTraceRow, 0, opts.Limit+1)
 	for rows.Next() {
 		var row RunDebugTraceRow
 		var eventCreatedRaw, deliveryCreatedRaw, deliveryStartedRaw, deliveryDeliveredRaw, sessionUpdatedRaw, turnCreatedRaw any
@@ -114,7 +163,49 @@ func (s *SQLiteRuntimeStore) LoadRunDebugTracePage(ctx context.Context, runID st
 	if err := rows.Err(); err != nil {
 		return nil, "", fmt.Errorf("read sqlite run trace: %w", err)
 	}
-	return out, "", nil
+	nextCursor := ""
+	if len(out) > opts.Limit {
+		out = out[:opts.Limit]
+		nextCursor = encodeRunDebugTraceCursor(out[len(out)-1])
+	}
+	return out, nextCursor, nil
+}
+
+const sqliteRunTraceCursorFloor = "0001-01-01T00:00:00Z"
+
+func sqliteRunTraceCursorFloorTime() time.Time {
+	return time.Date(1, 1, 1, 0, 0, 0, 0, time.UTC)
+}
+
+func sqliteRunTraceCursorTime(raw string) (time.Time, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, ErrInvalidObservabilityCursor
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil {
+		return time.Time{}, ErrInvalidObservabilityCursor
+	}
+	return parsed.UTC(), nil
+}
+
+func sqliteRunTraceCursorOptionalTime(raw string) (time.Time, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return sqliteRunTraceCursorFloorTime(), nil
+	}
+	return sqliteRunTraceCursorTime(raw)
+}
+
+func sqliteRunTraceWatermarkExpression() string {
+	return `max(
+		e.created_at,
+		COALESCE(d.created_at, '` + sqliteRunTraceCursorFloor + `'),
+		COALESCE(d.started_at, '` + sqliteRunTraceCursorFloor + `'),
+		COALESCE(d.delivered_at, '` + sqliteRunTraceCursorFloor + `'),
+		COALESCE(ses.updated_at, '` + sqliteRunTraceCursorFloor + `'),
+		COALESCE(t.created_at, '` + sqliteRunTraceCursorFloor + `')
+	)`
 }
 
 func (s *SQLiteRuntimeStore) ListOperatorEvents(ctx context.Context, opts OperatorEventListOptions) (OperatorEventListResult, error) {
