@@ -741,9 +741,9 @@ func (r pipelineEngineActionRunner) ExecuteAction(ctx context.Context, action ru
 	switch actionID {
 	case "record_evidence":
 		payload := parsePayloadMap(execCtx.Request.Event.Payload())
-		bucketID := pc.evidenceTargetForHandler(execCtx.Request.NodeID.String(), string(execCtx.Request.Event.Type()))
+		bucketID := recordEvidenceTarget(execCtx.Request)
 		if bucketID == "" {
-			return true, fmt.Errorf("node %s handler %s record_evidence is missing evidence_target", execCtx.Request.NodeID.String(), strings.TrimSpace(string(execCtx.Request.Event.Type())))
+			return true, fmt.Errorf("node %s handler %s record_evidence is missing evidence_target", execCtx.Request.NodeID.String(), recordEvidenceHandlerLabel(execCtx.Request))
 		}
 		if err := pc.recordWorkflowEvidence(ctx, execCtx.Request.EntityID.String(), bucketID, payload); err != nil {
 			return true, err
@@ -778,19 +778,15 @@ func (r pipelineEngineActionRunner) ExecuteAction(ctx context.Context, action ru
 	}
 }
 
-func (pc *PipelineCoordinator) evidenceTargetForHandler(nodeID, eventType string) string {
-	if pc == nil {
-		return ""
+func recordEvidenceTarget(req runtimeengine.ExecutionRequest) string {
+	return strings.TrimSpace(req.Handler.EvidenceTarget)
+}
+
+func recordEvidenceHandlerLabel(req runtimeengine.ExecutionRequest) string {
+	if handlerKey := strings.TrimSpace(req.HandlerEventKey); handlerKey != "" {
+		return handlerKey
 	}
-	source := pc.SemanticSource()
-	if source == nil {
-		return ""
-	}
-	handler, ok := source.NodeEventHandler(strings.TrimSpace(nodeID), strings.TrimSpace(eventType))
-	if !ok {
-		return ""
-	}
-	return strings.TrimSpace(handler.EvidenceTarget)
+	return strings.TrimSpace(string(req.Event.Type()))
 }
 
 type pipelineEnginePayloadShaper struct {

@@ -711,9 +711,14 @@ func TestPipelineEngineActionRunner_RecordEvidenceReturnsMutationError(t *testin
 	runner := pipelineEngineActionRunner{coordinator: pc}
 	ok, err := runner.ExecuteAction(context.Background(), runtimecontracts.ActionSpec{ID: "record_evidence"}, runtimeregistry.ActionInstruction{Builtin: "record_evidence"}, runtimeengine.ExecutionContext{
 		Request: runtimeengine.ExecutionRequest{
-			EntityID: identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
-			NodeID:   identity.NormalizeNodeID("node-a"),
-			Event:    (events.NewProjectionEvent("", "research.completed", "", "", []byte(`{"summary":"done"}`), 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID("11111111-1111-1111-1111-111111111111"),
+			EntityID:        identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
+			NodeID:          identity.NormalizeNodeID("node-a"),
+			Event:           (events.NewProjectionEvent("", "research.completed", "", "", []byte(`{"summary":"done"}`), 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID("11111111-1111-1111-1111-111111111111"),
+			HandlerEventKey: "research.completed",
+			Handler: runtimecontracts.SystemNodeEventHandler{
+				Action:         runtimecontracts.ActionSpec{ID: "record_evidence"},
+				EvidenceTarget: "research",
+			},
 		},
 	})
 	if !ok {
@@ -721,6 +726,104 @@ func TestPipelineEngineActionRunner_RecordEvidenceReturnsMutationError(t *testin
 	}
 	if err == nil {
 		t.Fatal("expected record_evidence action to return mutation error")
+	}
+}
+
+func TestPipelineEngineActionRunner_RecordEvidenceUsesMatchedHandlerEvidenceTargetForConcreteEvents(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	store := NewWorkflowInstanceStore(db)
+	pc := &PipelineCoordinator{workflowStore: store}
+	runner := pipelineEngineActionRunner{coordinator: pc}
+
+	tests := []struct {
+		name            string
+		entityID        string
+		concreteEvent   events.EventType
+		handlerEventKey string
+		action          runtimecontracts.ActionSpec
+		handler         runtimecontracts.SystemNodeEventHandler
+		wantBucket      string
+		wantSummary     string
+	}{
+		{
+			name:            "handler action",
+			entityID:        "11111111-1111-1111-1111-111111111111",
+			concreteEvent:   "operating/instance-1/build_progress",
+			handlerEventKey: "build_progress",
+			action:          runtimecontracts.ActionSpec{ID: "record_evidence"},
+			handler: runtimecontracts.SystemNodeEventHandler{
+				Action:         runtimecontracts.ActionSpec{ID: "record_evidence"},
+				EvidenceTarget: "build_evidence",
+			},
+			wantBucket:  "build_evidence",
+			wantSummary: "compile complete",
+		},
+		{
+			name:            "selected rule action",
+			entityID:        "22222222-2222-2222-2222-222222222222",
+			concreteEvent:   "operating/instance-2/build_progress",
+			handlerEventKey: "build_progress",
+			action:          runtimecontracts.ActionSpec{ID: "record_evidence"},
+			handler: runtimecontracts.SystemNodeEventHandler{
+				Rules: []runtimecontracts.HandlerRuleEntry{{
+					ID:     "capture-progress",
+					Action: runtimecontracts.ActionSpec{ID: "record_evidence"},
+				}},
+				EvidenceTarget: "rule_evidence",
+			},
+			wantBucket:  "rule_evidence",
+			wantSummary: "rule branch complete",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := testWorkflowStoreRunContext(t, store)
+			if err := store.Upsert(ctx, WorkflowInstance{
+				InstanceID:      tt.entityID,
+				StorageRef:      tt.entityID,
+				WorkflowName:    "operating",
+				WorkflowVersion: "1.0.0",
+				CurrentState:    "initializing",
+				Metadata:        map[string]any{},
+				StateBuckets:    map[string]any{},
+			}); err != nil {
+				t.Fatalf("seed workflow instance: %v", err)
+			}
+
+			ok, err := runner.ExecuteAction(ctx, tt.action, runtimeregistry.ActionInstruction{Builtin: "record_evidence"}, runtimeengine.ExecutionContext{
+				Request: runtimeengine.ExecutionRequest{
+					EntityID:        identity.NormalizeEntityID(tt.entityID),
+					NodeID:          identity.NormalizeNodeID("build-orchestrator"),
+					Event:           events.NewProjectionEvent("", tt.concreteEvent, "", "", mustJSON(map[string]any{"summary": tt.wantSummary}), 0, "", "", events.EventEnvelope{}, time.Time{}).WithEntityID(tt.entityID),
+					HandlerEventKey: tt.handlerEventKey,
+					Handler:         tt.handler,
+				},
+			})
+			if !ok {
+				t.Fatal("expected record_evidence action to be claimed")
+			}
+			if err != nil {
+				t.Fatalf("ExecuteAction: %v", err)
+			}
+
+			instance, exists, err := store.Load(ctx, tt.entityID)
+			if err != nil {
+				t.Fatalf("load workflow instance: %v", err)
+			}
+			if !exists {
+				t.Fatal("expected workflow instance to exist")
+			}
+			entries := workflowEvidenceEntries(t, instance, tt.wantBucket)
+			if len(entries) != 1 {
+				t.Fatalf("evidence entries = %d, want 1", len(entries))
+			}
+			if got := entries[0]["summary"]; got != tt.wantSummary {
+				t.Fatalf("evidence summary = %#v, want %q", got, tt.wantSummary)
+			}
+		})
 	}
 }
 
