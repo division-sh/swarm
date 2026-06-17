@@ -33,6 +33,7 @@ import (
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -55,6 +56,11 @@ type delayedRunStatusAgent struct {
 	subscriptions []events.EventType
 	started       chan struct{}
 	release       chan struct{}
+}
+
+type servedEventPublishBlockingLLMRuntime struct {
+	started chan<- struct{}
+	release <-chan struct{}
 }
 
 func chdirForTest(t *testing.T, dir string) {
@@ -106,6 +112,37 @@ func (a delayedRunStatusAgent) OnEvent(ctx context.Context, evt events.Event) ([
 		events.EventType("scan.completed"),
 		a.id, "", []byte(`{}`), 0, evt.RunID(), "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID(evt.EntityID())
 	return []events.Event{out}, nil
+}
+
+func (r servedEventPublishBlockingLLMRuntime) StartSession(_ context.Context, agentID string, systemPrompt string, tools []runtimellm.ToolDefinition) (*runtimellm.Session, error) {
+	return &runtimellm.Session{
+		ID:           uuid.NewString(),
+		AgentID:      agentID,
+		SystemPrompt: systemPrompt,
+		Tools:        append([]runtimellm.ToolDefinition(nil), tools...),
+	}, nil
+}
+
+func (r servedEventPublishBlockingLLMRuntime) ContinueSession(ctx context.Context, session *runtimellm.Session, message runtimellm.Message) (*runtimellm.Response, error) {
+	if r.started != nil {
+		select {
+		case r.started <- struct{}{}:
+		default:
+		}
+	}
+	select {
+	case <-r.release:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	sessionID := ""
+	if session != nil {
+		sessionID = session.ID
+	}
+	return &runtimellm.Response{
+		Message:   runtimellm.Message{Role: "assistant", Content: "acknowledged"},
+		SessionID: sessionID,
+	}, nil
 }
 
 func publishRunStatusRootEvent(t *testing.T, bus *runtimebus.EventBus, runID, entityID string) {
@@ -3493,6 +3530,80 @@ func TestRunServeRuntimeEventPublishRunIDFollowUpServedPathPostgres(t *testing.T
 	runServedEventPublishFollowUpProof(t, endpoint, db, "postgres", bundleHash, probe)
 }
 
+func TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathDefaultSQLite(t *testing.T) {
+	unsetStoreSelectorEnv(t)
+	stubServeRuntimeWorkspaceLifecycle(t)
+	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
+	t.Setenv(storebackend.EnvSQLitePath, sqlitePath)
+	contractsPath := writeServedEventPublishActiveLoadFixture(t)
+	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+	probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
+	agentStarted := make(chan struct{}, 1)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	oldBuildStores := buildStoresForServe
+	t.Cleanup(func() {
+		buildStoresForServe = oldBuildStores
+	})
+	var servedDB *sql.DB
+	buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (storeBundle, error) {
+		stores, err := oldBuildStores(ctx, selection, cfg)
+		if err == nil {
+			servedDB = stores.SQLDB
+		}
+		return stores, err
+	}
+	endpoint, _ := startServedEventPublishFollowUpRuntime(t, serveOptions{
+		ConfigPath:              writeServeRuntimeTestConfig(t),
+		ContractsPath:           contractsPath,
+		PlatformSpecPath:        defaultPlatformSpecPath,
+		APIListenAddr:           "127.0.0.1:0",
+		MCPListenAddr:           "127.0.0.1:0",
+		SelfCheck:               true,
+		RequireBundleMatch:      false,
+		NoRequireBundleMatch:    true,
+		Verbose:                 true,
+		TestLifecycleProbe:      probe,
+		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
+		TestLLMRuntime:          servedEventPublishBlockingLLMRuntime{started: agentStarted, release: release},
+	})
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+	if servedDB == nil {
+		t.Fatal("served sqlite SQLDB is required for active-load event.publish proof")
+	}
+	runServedEventPublishActiveLoadProof(t, endpoint, servedDB, "sqlite", bundleHash, probe, agentStarted, release, &releaseOnce)
+}
+
+func TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathPostgres(t *testing.T) {
+	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() serveWorkspaceLifecycle {
+		return serveRuntimeWorkspaceStub{}
+	})
+	contractsPath := writeServedEventPublishActiveLoadFixture(t)
+	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+	probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
+	agentStarted := make(chan struct{}, 1)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	endpoint, _ := startServedEventPublishFollowUpRuntime(t, serveOptions{
+		ConfigPath:              writeServeRuntimeTestConfig(t),
+		ContractsPath:           contractsPath,
+		PlatformSpecPath:        defaultPlatformSpecPath,
+		StoreMode:               "postgres",
+		StoreModeSet:            true,
+		APIListenAddr:           "127.0.0.1:0",
+		MCPListenAddr:           "127.0.0.1:0",
+		SelfCheck:               true,
+		RequireBundleMatch:      false,
+		Verbose:                 true,
+		TestLifecycleProbe:      probe,
+		TestLLMRuntime:          servedEventPublishBlockingLLMRuntime{started: agentStarted, release: release},
+		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
+	})
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+
+	runServedEventPublishActiveLoadProof(t, endpoint, db, "postgres", bundleHash, probe, agentStarted, release, &releaseOnce)
+}
+
 func TestRunServeRuntimeEventPublishDynamicAutoEmitServedPathDefaultSQLite(t *testing.T) {
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
@@ -3731,6 +3842,14 @@ thing.reviewed:
   required:
     - entity_id
 
+thing.agent_hold:
+  swarm:
+    source: external
+  entity_id: string
+  note: text
+  required:
+    - entity_id
+
 thing.unhandled:
   swarm:
     source: external
@@ -3766,6 +3885,25 @@ entity-writer:
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "validation", "policy.yaml"), `{}`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "validation", "tools.yaml"), `{}`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "validation", "agents.yaml"), `{}`)
+	return root
+}
+
+func writeServedEventPublishActiveLoadFixture(t *testing.T) string {
+	t.Helper()
+	root := writeServedEventPublishFollowUpFixture(t)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "validation", "agents.yaml"), `
+load-agent:
+  id: load-agent
+  role: load_agent
+  prompt_ref: load-agent
+  model: regular
+  conversation_mode: task
+  subscriptions:
+    - thing.agent_hold
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "validation", "prompts", "load-agent.md"), `
+Handle the active-load event and wait for test release.
+`)
 	return root
 }
 
@@ -4233,6 +4371,135 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	if got := servedEventPublishAPIIdempotencyCount(t, db, backend, "event.publish", unhandledIdempotencyKey); got != 0 {
 		t.Fatalf("%s idempotency rows for rejected follow-up = %d, want 0", backend, got)
 	}
+}
+
+func runServedEventPublishActiveLoadProof(
+	t *testing.T,
+	endpoint string,
+	db *sql.DB,
+	backend string,
+	bundleHash string,
+	probe *lifecycletest.Probe,
+	agentStarted <-chan struct{},
+	release chan struct{},
+	releaseOnce *sync.Once,
+) {
+	t.Helper()
+	initial := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
+		"event_name":      "thing.created",
+		"bundle_hash":     bundleHash,
+		"payload":         map[string]any{"amount": 7, "who": "operator"},
+		"idempotency_key": "issue-1434-" + backend + "-initial",
+	})
+	runID := initial.RunID
+	initialEventID := initial.EventID
+	if !initial.NewRunCreated || runID == "" || initialEventID == "" {
+		t.Fatalf("%s initial event.publish result = %#v, want new run", backend, initial)
+	}
+	waitForServedEventPublishNodeDeliveryLifecycle(t, db, backend, runID, initialEventID, probe)
+	entityID := requireServedEventPublishEntityState(t, db, backend, runID, "", "waiting")
+
+	holdStart := time.Now()
+	holdEnvelope := requestServedJSONRPC(t, endpoint, "event.publish", map[string]any{
+		"event_name":      "validation/thing.agent_hold",
+		"run_id":          runID,
+		"source_event_id": initialEventID,
+		"payload":         map[string]any{"entity_id": entityID, "note": "hold active agent delivery"},
+		"idempotency_key": "issue-1434-" + backend + "-agent-hold",
+	})
+	holdElapsed := time.Since(holdStart)
+	if holdEnvelope.Error != nil {
+		t.Fatalf("%s agent-hold event.publish error = %#v", backend, holdEnvelope.Error)
+	}
+	if holdElapsed > time.Second {
+		t.Fatalf("%s agent-hold event.publish returned after %s, want durable ACK before held agent completes", backend, holdElapsed)
+	}
+	var hold servedEventPublishRPCResult
+	if err := json.Unmarshal(holdEnvelope.Result, &hold); err != nil {
+		t.Fatalf("%s decode agent-hold event.publish result: %v\n%s", backend, err, string(holdEnvelope.Result))
+	}
+	if hold.RunID != runID || hold.SourceEventID != initialEventID || hold.NewRunCreated || hold.EventID == "" {
+		t.Fatalf("%s agent-hold event.publish result = %#v, want existing run with source lineage", backend, hold)
+	}
+	if got := servedEventPublishScalarCount(t, db, backend, "event_deliveries", runID, hold.EventID); got == 0 {
+		t.Fatalf("%s agent-hold deliveries = %d, want persisted delivery authority\n%s", backend, got, servedEventPublishDebugSummary(t, db, backend, runID))
+	}
+	assertServedEventPublishDeliveriesContainStatus(t, hold.Deliveries, "agent", "load-agent", "pending", "in_progress")
+	select {
+	case <-agentStarted:
+	case <-time.After(servedEventPublishLifecycleProbeWaitTimeout):
+		t.Fatalf("%s timed out waiting for active-load agent to start\n%s", backend, servedEventPublishDebugSummary(t, db, backend, runID))
+	}
+	if got := servedEventPublishDeliveryStatusCount(t, db, backend, hold.EventID, "agent", "load-agent", "in_progress"); got != 1 {
+		t.Fatalf("%s agent-hold delivery in_progress count = %d, want active agent load before follow-up\n%s", backend, got, servedEventPublishDebugSummary(t, db, backend, runID))
+	}
+
+	unhandledKey := "issue-1434-" + backend + "-unhandled-active"
+	unhandledStart := time.Now()
+	unhandledEnvelope := requestServedJSONRPC(t, endpoint, "event.publish", map[string]any{
+		"event_name":      "validation/thing.unhandled",
+		"run_id":          runID,
+		"source_event_id": hold.EventID,
+		"payload":         map[string]any{"entity_id": entityID, "note": "unhandled under active load"},
+		"idempotency_key": unhandledKey,
+	})
+	unhandledElapsed := time.Since(unhandledStart)
+	if unhandledEnvelope.Error == nil {
+		t.Fatalf("%s unhandled event.publish error = nil, result=%s", backend, string(unhandledEnvelope.Result))
+	}
+	if unhandledElapsed > time.Second {
+		t.Fatalf("%s unhandled event.publish returned after %s, want typed fail-closed error before client timeout", backend, unhandledElapsed)
+	}
+	if unhandledEnvelope.Error.Data["code"] != apiv1.EventNotDeclaredCode {
+		t.Fatalf("%s unhandled event.publish error data = %#v, want %s", backend, unhandledEnvelope.Error.Data, apiv1.EventNotDeclaredCode)
+	}
+	if got := servedEventPublishEventCountByIdempotencyKey(t, db, backend, unhandledKey); got != 0 {
+		t.Fatalf("%s event rows for unhandled active-load idempotency key = %d, want 0", backend, got)
+	}
+	if got := servedEventPublishAPIIdempotencyCount(t, db, backend, "event.publish", unhandledKey); got != 0 {
+		t.Fatalf("%s idempotency rows for unhandled active-load publish = %d, want 0", backend, got)
+	}
+	if got := servedEventPublishDeliveryStatusCount(t, db, backend, hold.EventID, "agent", "load-agent", "in_progress"); got != 1 {
+		t.Fatalf("%s agent-hold delivery in_progress after fail-closed publish = %d, want still active\n%s", backend, got, servedEventPublishDebugSummary(t, db, backend, runID))
+	}
+
+	followStart := time.Now()
+	followEnvelope := requestServedJSONRPC(t, endpoint, "event.publish", map[string]any{
+		"event_name":      "validation/thing.reviewed",
+		"run_id":          runID,
+		"source_event_id": hold.EventID,
+		"payload":         map[string]any{"entity_id": entityID, "note": "approved under active load"},
+		"idempotency_key": "issue-1434-" + backend + "-follow-up",
+	})
+	followElapsed := time.Since(followStart)
+	if followEnvelope.Error != nil {
+		t.Fatalf("%s follow-up event.publish error = %#v", backend, followEnvelope.Error)
+	}
+	if followElapsed > time.Second {
+		t.Fatalf("%s follow-up event.publish returned after %s, want durable ACK while unrelated delivery remains active", backend, followElapsed)
+	}
+	var followUp servedEventPublishRPCResult
+	if err := json.Unmarshal(followEnvelope.Result, &followUp); err != nil {
+		t.Fatalf("%s decode follow-up event.publish result: %v\n%s", backend, err, string(followEnvelope.Result))
+	}
+	if followUp.RunID != runID || followUp.SourceEventID != hold.EventID || followUp.NewRunCreated || followUp.EventID == "" {
+		t.Fatalf("%s follow-up event.publish result = %#v, want existing run with hold event source lineage", backend, followUp)
+	}
+	if got := servedEventPublishScalarCount(t, db, backend, "event_deliveries", runID, followUp.EventID); got == 0 {
+		t.Fatalf("%s follow-up deliveries = %d, want persisted delivery authority\n%s", backend, got, servedEventPublishDebugSummary(t, db, backend, runID))
+	}
+	assertServedEventPublishDeliveriesContainStatus(t, followUp.Deliveries, "node", "entity-writer", "pending", "in_progress", "delivered")
+	if got := servedEventPublishDeliveryStatusCount(t, db, backend, hold.EventID, "agent", "load-agent", "in_progress"); got != 1 {
+		t.Fatalf("%s agent-hold delivery in_progress after follow-up ACK = %d, want ACK before unrelated agent delivery release\n%s", backend, got, servedEventPublishDebugSummary(t, db, backend, runID))
+	}
+	requireServedEventReadback(t, endpoint, followUp.EventID, runID, entityID, "validation/thing.reviewed", "entity-writer")
+
+	releaseOnce.Do(func() { close(release) })
+	waitServedEventPublishDeliveryStatusCount(t, db, backend, hold.EventID, "agent", "load-agent", "delivered", 1)
+	waitForServedEventPublishNodeDeliveryLifecycle(t, db, backend, runID, followUp.EventID, probe)
+	requireServedEventPublishEntityState(t, db, backend, runID, entityID, "done")
+	requireServedRunStatus(t, endpoint, runID, "completed")
+	requireServedTraceReadback(t, endpoint, runID, followUp.EventID, "validation/thing.reviewed", "entity-writer")
 }
 
 func runServedCLICommand(t *testing.T, endpoint string, args []string) (string, string, int) {

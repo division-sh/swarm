@@ -676,6 +676,8 @@ func expectedPublicSurfaceRowShapes() map[string]publicSurfaceExpectedRowShape {
 			GoTestProofRefs: []string{
 				"TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite",
 				"TestRunServeRuntimeEventPublishRunIDFollowUpServedPathPostgres",
+				"TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathDefaultSQLite",
+				"TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathPostgres",
 			},
 		},
 		"event_publish_dynamic_auto_emit_served_lifecycle": {
