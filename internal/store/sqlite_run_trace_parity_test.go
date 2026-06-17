@@ -128,6 +128,82 @@ func TestSQLiteRunDebugTracePageDeterministicDeliveryAndTurnTiePaging(t *testing
 	}
 }
 
+func TestSQLiteRunDebugTracePageIncludesTaskAuditSessionsInWatermark(t *testing.T) {
+	ctx := context.Background()
+	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	base := time.Unix(1700003200, 0).UTC()
+	runID := "00000000-0000-0000-0000-000000001430"
+	eventID := "00000000-0000-0000-0000-000000001431"
+	deliveryID := "00000000-0000-0000-0000-000000001432"
+	sessionID := "00000000-0000-0000-0000-000000001433"
+	turnID := "00000000-0000-0000-0000-000000001434"
+	agentID := "agent-task"
+
+	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, base.Add(-time.Minute)); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := sqliteStore.DB.ExecContext(ctx, `
+		INSERT INTO events (run_id, event_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at)
+		VALUES (?, ?, 'trace.task_audit', NULL, 'global', '{}', 'runtime', 'platform', ?)
+	`, runID, eventID, base); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+	seedSQLiteTraceAgent(t, ctx, sqliteStore, agentID, base)
+	if _, err := sqliteStore.DB.ExecContext(ctx, `
+		INSERT INTO agent_conversation_audits (
+			session_id, run_id, agent_id, entity_id, flow_instance, scope_key, scope,
+			conversation, turn_count, runtime_mode, runtime_state, status, created_at, updated_at
+		) VALUES (
+			?, ?, ?, NULL, 'flow-a', 'global', 'global',
+			'[]', 1, 'task', '{}', 'active', ?, ?
+		)
+	`, sessionID, runID, agentID, base.Add(time.Second), base.Add(5*time.Second)); err != nil {
+		t.Fatalf("seed task audit: %v", err)
+	}
+	if _, err := sqliteStore.DB.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, reason_code, created_at, started_at, delivered_at
+		) VALUES (
+			?, ?, ?, 'agent', ?, 'delivered', 'ok', ?, ?, ?
+		)
+	`, deliveryID, runID, eventID, agentID, base.Add(time.Second), base.Add(time.Second), base.Add(2*time.Second)); err != nil {
+		t.Fatalf("seed delivery: %v", err)
+	}
+	insertSQLiteTraceTurnWithMode(t, ctx, sqliteStore, turnID, runID, agentID, sessionID, eventID, "trace.task_audit", "task", base.Add(2*time.Second))
+
+	rows, _, err := sqliteStore.LoadRunDebugTracePage(ctx, runID, RunDebugTraceQueryOptions{Limit: 10})
+	if err != nil {
+		t.Fatalf("LoadRunDebugTracePage: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows = %#v, want one task audit trace row", rows)
+	}
+	row := rows[0]
+	if row.SessionID != sessionID || row.SessionKind != "turn_audit" || row.SessionRuntimeMode != "task" {
+		t.Fatalf("task audit session fields = %#v, want turn_audit task session %s", row, sessionID)
+	}
+	if row.SessionUpdatedAt == nil || !row.SessionUpdatedAt.Equal(base.Add(5*time.Second)) {
+		t.Fatalf("task audit session updated_at = %#v, want %s", row.SessionUpdatedAt, base.Add(5*time.Second))
+	}
+
+	since := base.Add(4 * time.Second)
+	sinceRows, _, err := sqliteStore.LoadRunDebugTracePage(ctx, runID, RunDebugTraceQueryOptions{Limit: 10, Since: &since})
+	if err != nil {
+		t.Fatalf("LoadRunDebugTracePage since: %v", err)
+	}
+	if len(sinceRows) != 1 || sinceRows[0].EventID != eventID {
+		t.Fatalf("since rows = %#v, want task row included by audit updated_at watermark", sinceRows)
+	}
+	until := base.Add(4 * time.Second)
+	untilRows, _, err := sqliteStore.LoadRunDebugTracePage(ctx, runID, RunDebugTraceQueryOptions{Limit: 10, Until: &until})
+	if err != nil {
+		t.Fatalf("LoadRunDebugTracePage until: %v", err)
+	}
+	if len(untilRows) != 0 {
+		t.Fatalf("until rows = %#v, want task row excluded by audit updated_at watermark", untilRows)
+	}
+}
+
 type sqliteRunTraceParityFixture struct {
 	runID             string
 	eventOnlyID       string
@@ -246,6 +322,11 @@ func insertSQLiteTraceSession(t *testing.T, ctx context.Context, sqliteStore *SQ
 
 func insertSQLiteTraceTurn(t *testing.T, ctx context.Context, sqliteStore *SQLiteRuntimeStore, turnID, runID, agentID, sessionID, eventID, eventName string, createdAt time.Time) {
 	t.Helper()
+	insertSQLiteTraceTurnWithMode(t, ctx, sqliteStore, turnID, runID, agentID, sessionID, eventID, eventName, "session", createdAt)
+}
+
+func insertSQLiteTraceTurnWithMode(t *testing.T, ctx context.Context, sqliteStore *SQLiteRuntimeStore, turnID, runID, agentID, sessionID, eventID, eventName, runtimeMode string, createdAt time.Time) {
+	t.Helper()
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
 		INSERT INTO agent_turns (
 			turn_id, run_id, agent_id, session_id, runtime_mode, scope_key, entity_id,
@@ -253,12 +334,12 @@ func insertSQLiteTraceTurn(t *testing.T, ctx context.Context, sqliteStore *SQLit
 			emitted_events, mcp_servers, mcp_tools_listed, mcp_tools_visible,
 			request_payload, response_payload, turn_blocks, parse_ok, latency_ms, retry_count, error, created_at
 		) VALUES (
-			?, ?, ?, ?, 'session', 'global', NULL,
+			?, ?, ?, ?, ?, 'global', NULL,
 			?, ?, 'task-1', '[]', '[]',
 			'[]', '{}', '[]', '[]',
 			'{}', '{}', '[]', 1, 0, 0, '', ?
 		)
-	`, turnID, runID, agentID, sessionID, eventID, eventName, createdAt); err != nil {
+	`, turnID, runID, agentID, sessionID, runtimeMode, eventID, eventName, createdAt); err != nil {
 		t.Fatalf("seed turn %s/%s: %v", agentID, turnID, err)
 	}
 }
