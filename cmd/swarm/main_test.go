@@ -4424,6 +4424,7 @@ func runServedEventPublishActiveLoadProof(
 	if got := servedEventPublishScalarCount(t, db, backend, "event_deliveries", runID, hold.EventID); got == 0 {
 		t.Fatalf("%s agent-hold deliveries = %d, want persisted delivery authority\n%s", backend, got, servedEventPublishDebugSummary(t, db, backend, runID))
 	}
+	requireServedEventPublishCommittedReplayScope(t, db, backend, runID, hold.EventID, "subscribed")
 	assertServedEventPublishDeliveriesContainStatus(t, hold.Deliveries, "agent", "load-agent", "pending", "in_progress")
 	select {
 	case <-agentStarted:
@@ -4488,6 +4489,7 @@ func runServedEventPublishActiveLoadProof(
 	if got := servedEventPublishScalarCount(t, db, backend, "event_deliveries", runID, followUp.EventID); got == 0 {
 		t.Fatalf("%s follow-up deliveries = %d, want persisted delivery authority\n%s", backend, got, servedEventPublishDebugSummary(t, db, backend, runID))
 	}
+	requireServedEventPublishCommittedReplayScope(t, db, backend, runID, followUp.EventID, "subscribed")
 	assertServedEventPublishDeliveriesContainStatus(t, followUp.Deliveries, "node", "entity-writer", "pending", "in_progress", "delivered")
 	if got := servedEventPublishDeliveryStatusCount(t, db, backend, hold.EventID, "agent", "load-agent", "in_progress"); got != 1 {
 		t.Fatalf("%s agent-hold delivery in_progress after follow-up ACK = %d, want ACK before unrelated agent delivery release\n%s", backend, got, servedEventPublishDebugSummary(t, db, backend, runID))
@@ -4998,6 +5000,52 @@ func servedEventPublishDeliveryStatusCount(t *testing.T, db *sql.DB, backend, ev
 		t.Fatalf("%s delivery count query failed: %v\n%s", backend, err, query)
 	}
 	return count
+}
+
+func requireServedEventPublishCommittedReplayScope(t *testing.T, db *sql.DB, backend, runID, eventID, wantScope string) {
+	t.Helper()
+	wantReason := "replay_scope_" + strings.TrimSpace(wantScope)
+	var (
+		query string
+		args  []any
+	)
+	switch backend {
+	case "postgres":
+		query = `
+			SELECT COUNT(*)
+			FROM event_deliveries
+			WHERE run_id = $1::uuid
+			  AND event_id = $2::uuid
+			  AND subscriber_type = 'node'
+			  AND subscriber_id = '__runtime_replay_scope__'
+			  AND status = 'delivered'
+			  AND reason_code = $3
+			  AND delivered_at IS NOT NULL
+		`
+		args = []any{runID, eventID, wantReason}
+	case "sqlite":
+		query = `
+			SELECT COUNT(*)
+			FROM event_deliveries
+			WHERE run_id = ?
+			  AND event_id = ?
+			  AND subscriber_type = 'node'
+			  AND subscriber_id = '__runtime_replay_scope__'
+			  AND status = 'delivered'
+			  AND reason_code = ?
+			  AND delivered_at IS NOT NULL
+		`
+		args = []any{runID, eventID, wantReason}
+	default:
+		t.Fatalf("unknown proof backend %q", backend)
+	}
+	var count int
+	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&count); err != nil {
+		t.Fatalf("%s committed replay scope query failed: %v\n%s", backend, err, query)
+	}
+	if count != 1 {
+		t.Fatalf("%s committed replay scope rows for run=%s event=%s reason=%q = %d, want 1\n%s", backend, runID, eventID, wantReason, count, servedEventPublishDebugSummary(t, db, backend, runID))
+	}
 }
 
 func waitServedEventPublishReceiptOutcomeCount(t *testing.T, db *sql.DB, backend, eventID, subscriberType, subscriberID, outcome string, want int) {
