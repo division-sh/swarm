@@ -483,6 +483,176 @@ func TestTraceDeliveryDetailRendersRunTraceLifecycleFields(t *testing.T) {
 	}
 }
 
+func TestTraceDeliverySummaryExhaustsRunTracePages(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	server, requests := newDiagnosticSuccessServer(t, func(req jsonRPCRequest, callIndex int) map[string]any {
+		if req.Method != "run.trace" {
+			t.Fatalf("method[%d] = %q, want run.trace", callIndex, req.Method)
+		}
+		baseParams := map[string]any{
+			"run_id": "run-1",
+			"limit":  float64(1),
+			"since":  "2026-05-13T10:00:00Z",
+			"until":  "2026-05-13T10:05:00Z",
+			"filter": map[string]any{
+				"delivery_status": []any{"in_progress", "delivered", "failed"},
+				"subscriber_type": []any{"agent", "node"},
+			},
+		}
+		switch callIndex {
+		case 0:
+			baseParams["cursor"] = "start-cur"
+			if !reflect.DeepEqual(req.Params, baseParams) {
+				t.Fatalf("params[%d] = %#v, want %#v", callIndex, req.Params, baseParams)
+			}
+			return map[string]any{
+				"trace": []any{
+					map[string]any{
+						"event_id":         "event-only",
+						"event_name":       "scan.created",
+						"event_created_at": "2026-05-13T10:00:00Z",
+					},
+					map[string]any{
+						"event_id":            "event-1",
+						"event_name":          "scan.requested",
+						"event_created_at":    "2026-05-13T10:00:01Z",
+						"delivery_id":         "delivery-1",
+						"delivery_status":     "in_progress",
+						"delivery_created_at": "2026-05-13T10:00:01Z",
+						"delivery_started_at": "2026-05-13T10:00:04Z",
+						"subscriber_type":     "agent",
+						"subscriber_id":       "agent-1",
+					},
+				},
+				"next_cursor": "page-2",
+			}
+		case 1:
+			baseParams["cursor"] = "page-2"
+			if !reflect.DeepEqual(req.Params, baseParams) {
+				t.Fatalf("params[%d] = %#v, want %#v", callIndex, req.Params, baseParams)
+			}
+			return map[string]any{
+				"trace": []any{
+					map[string]any{
+						"event_id":              "event-2",
+						"event_name":            "scan.completed",
+						"event_created_at":      "2026-05-13T10:00:05Z",
+						"delivery_id":           "delivery-2",
+						"delivery_status":       "delivered",
+						"delivery_created_at":   "2026-05-13T10:00:05Z",
+						"delivery_started_at":   "2026-05-13T10:00:07Z",
+						"delivery_delivered_at": "2026-05-13T10:00:12Z",
+						"subscriber_type":       "agent",
+						"subscriber_id":         "agent-1",
+					},
+					map[string]any{
+						"event_id":            "event-3",
+						"event_name":          "scan.failed",
+						"event_created_at":    "2026-05-13T10:00:06Z",
+						"delivery_id":         "delivery-3",
+						"delivery_status":     "failed",
+						"delivery_created_at": "2026-05-13T10:00:06Z",
+						"subscriber_type":     "node",
+						"subscriber_id":       "node-1",
+					},
+				},
+			}
+		default:
+			t.Fatalf("unexpected request[%d]: %#v", callIndex, req)
+		}
+		return nil
+	})
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{
+		"trace", "run-1",
+		"--delivery-summary",
+		"--limit", "1",
+		"--cursor", "start-cur",
+		"--since", "2026-05-13T10:00:00Z",
+		"--until", "2026-05-13T10:05:00Z",
+		"--delivery-status", "in_progress",
+		"--delivery-status", "delivered",
+		"--delivery-status", "failed",
+		"--subscriber-type", "agent",
+		"--subscriber-type", "node",
+	}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if len(*requests) != 2 {
+		t.Fatalf("requests = %d, want 2 paged run.trace calls", len(*requests))
+	}
+	for _, want := range []string{
+		"run trace delivery summary: run_id=run-1 snapshot=point-in-time trace_rows=4 delivery_rows=3 non_delivery_rows=1",
+		"SUBSCRIBER\tPENDING\tIN_PROGRESS\tDELIVERED\tFAILED\tDEAD_LETTER",
+		"agent/agent-1\t0\t1\t1\t0\t0\t2.5s\t3s\t5s\t5s\t0\t1",
+		"node/node-1\t0\t0\t0\t1\t0\t-\t-\t-\t-\t1\t1",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
+		}
+	}
+	if strings.Contains(stdout.String(), "next_cursor=") {
+		t.Fatalf("stdout = %q, want summary to exhaust pages instead of printing next_cursor", stdout.String())
+	}
+	if strings.TrimSpace(stderr.String()) != "" {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestTraceDeliverySummaryUsesOmittedRunResolver(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	server, requests := newDiagnosticSuccessServer(t, func(req jsonRPCRequest, callIndex int) map[string]any {
+		switch callIndex {
+		case 0:
+			if req.Method != "run.list" {
+				t.Fatalf("method[%d] = %q, want run.list", callIndex, req.Method)
+			}
+			return map[string]any{"runs": []any{validDiagnosticRunHeaderWithStatus("active-run", "running")}}
+		case 1:
+			if req.Method != "run.trace" {
+				t.Fatalf("method[%d] = %q, want run.trace", callIndex, req.Method)
+			}
+			if !reflect.DeepEqual(req.Params, map[string]any{"run_id": "active-run"}) {
+				t.Fatalf("params[%d] = %#v, want active run trace", callIndex, req.Params)
+			}
+			return map[string]any{"trace": []any{map[string]any{
+				"event_id":              "event-1",
+				"event_name":            "scan.completed",
+				"event_created_at":      "2026-05-13T10:00:00Z",
+				"delivery_id":           "delivery-1",
+				"delivery_status":       "delivered",
+				"delivery_created_at":   "2026-05-13T10:00:00Z",
+				"delivery_started_at":   "2026-05-13T10:00:01Z",
+				"delivery_delivered_at": "2026-05-13T10:00:03Z",
+				"subscriber_type":       "agent",
+				"subscriber_id":         "agent-1",
+			}}}
+		default:
+			t.Fatalf("unexpected request[%d]: %#v", callIndex, req)
+		}
+		return nil
+	})
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"trace", "--delivery-summary"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if len(*requests) != 2 {
+		t.Fatalf("requests = %d, want run.list then run.trace", len(*requests))
+	}
+	if !strings.Contains(stdout.String(), "run trace delivery summary: run_id=active-run snapshot=point-in-time") {
+		t.Fatalf("stdout = %q, want resolved active-run summary", stdout.String())
+	}
+	if strings.TrimSpace(stderr.String()) != "" {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
 func wantFullTraceFilterParams() map[string]any {
 	return map[string]any{
 		"event_name":      []any{"scan.requested", "scan.completed"},
@@ -641,6 +811,9 @@ func TestTraceHelpPromotesNoRetryWithoutReplaySince(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "--delivery-detail") {
 		t.Fatalf("help missing --delivery-detail:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "--delivery-summary") {
+		t.Fatalf("help missing --delivery-summary:\n%s", stdout.String())
 	}
 	if strings.Contains(stdout.String(), "--replay-since") {
 		t.Fatalf("help exposed unpromoted --replay-since:\n%s", stdout.String())
@@ -1041,11 +1214,13 @@ func TestDiagnosticsRejectInvalidInputBeforeRequest(t *testing.T) {
 		{name: "trace since after until", args: []string{"trace", "run-1", "--since", "2026-05-13T10:05:00Z", "--until", "2026-05-13T10:00:00Z"}, wantStderr: "--until must be at or after --since"},
 		{name: "trace blank cursor", args: []string{"trace", "run-1", "--cursor", " "}, wantStderr: "--cursor must not be empty"},
 		{name: "trace no retry requires follow", args: []string{"trace", "run-1", "--no-retry"}, wantStderr: "--no-retry requires --follow"},
+		{name: "trace delivery detail and summary are mutually exclusive", args: []string{"trace", "run-1", "--delivery-detail", "--delivery-summary"}, wantStderr: "--delivery-detail and --delivery-summary are mutually exclusive"},
 		{name: "trace follow rejects limit", args: []string{"trace", "run-1", "--follow", "--limit", "5"}, wantStderr: "--limit is not supported with --follow"},
 		{name: "trace follow rejects cursor", args: []string{"trace", "run-1", "--follow", "--cursor", "cur"}, wantStderr: "--cursor is not supported with --follow"},
 		{name: "trace follow rejects since", args: []string{"trace", "run-1", "--follow", "--since", "2026-05-13T10:00:00Z"}, wantStderr: "--since is not supported with --follow"},
 		{name: "trace follow rejects until", args: []string{"trace", "run-1", "--follow", "--until", "2026-05-13T10:05:00Z"}, wantStderr: "--until is not supported with --follow"},
 		{name: "trace follow rejects delivery detail", args: []string{"trace", "run-1", "--follow", "--delivery-detail"}, wantStderr: "--delivery-detail is not supported with --follow"},
+		{name: "trace follow rejects delivery summary", args: []string{"trace", "run-1", "--follow", "--delivery-summary"}, wantStderr: "--delivery-summary is not supported with --follow"},
 		{name: "trace shorthand follow rejects limit", args: []string{"trace", "run-1", "-f", "--limit", "5"}, wantStderr: "--limit is not supported with --follow"},
 		{name: "trace shorthand follow rejects cursor", args: []string{"trace", "run-1", "-f", "--cursor", "cur"}, wantStderr: "--cursor is not supported with --follow"},
 		{name: "trace shorthand follow rejects since", args: []string{"trace", "run-1", "-f", "--since", "2026-05-13T10:00:00Z"}, wantStderr: "--since is not supported with --follow"},
@@ -1089,6 +1264,7 @@ func TestDiagnosticsRequireAPITokenBeforeRequest(t *testing.T) {
 		{"trace", "run-1"},
 		{"trace", "run-1", "--limit", "2", "--cursor", "cur", "--since", "2026-05-13T10:00:00Z", "--until", "2026-05-13T10:05:00Z"},
 		{"trace", "run-1", "--delivery-detail"},
+		{"trace", "run-1", "--delivery-summary"},
 		{"trace", "run-1", "--event-name", "scan.requested", "--entity-id", "entity-1", "--delivery-status", "delivered", "--subscriber-id", "agent-1", "--subscriber-type", "agent"},
 		{"trace", "run-1", "--follow"},
 		{"trace", "run-1", "-f"},
@@ -1341,6 +1517,39 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 			},
 			wantCode:   3,
 			wantStderr: "trace[0].delivery_created_at must be an RFC3339 timestamp",
+		},
+		{
+			name: "trace summary repeated cursor",
+			args: []string{"trace", "run-1", "--delivery-summary", "--cursor", "same-cur"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				writeJSONRPCResult(t, w, req.ID, map[string]any{
+					"trace":       []any{},
+					"next_cursor": "same-cur",
+				})
+			},
+			wantCode:   3,
+			wantStderr: `repeated next_cursor "same-cur"`,
+		},
+		{
+			name: "trace summary delivery row missing subscriber",
+			args: []string{"trace", "run-1", "--delivery-summary"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				writeJSONRPCResult(t, w, req.ID, map[string]any{
+					"trace": []any{map[string]any{
+						"event_id":         "event-1",
+						"event_name":       "scan.requested",
+						"event_created_at": "2026-05-13T10:00:01Z",
+						"delivery_id":      "delivery-1",
+						"delivery_status":  "delivered",
+					}},
+				})
+			},
+			wantCode:   3,
+			wantStderr: "trace[0].subscriber_type is required when delivery_id is present",
 		},
 		{
 			name: "health missing bundle fingerprint",
