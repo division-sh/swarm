@@ -90,6 +90,13 @@ type diagnosticRunTraceSummaryResult struct {
 	Groups          []diagnosticRunTraceSummaryGroup
 }
 
+type diagnosticRunTraceSummaryAccumulator struct {
+	traceRows       int
+	deliveryRows    int
+	nonDeliveryRows int
+	groups          map[string]*diagnosticRunTraceSummaryGroup
+}
+
 type diagnosticRunTraceSummaryGroup struct {
 	SubscriberType   string
 	SubscriberID     string
@@ -513,6 +520,9 @@ func runDiagnosticTraceCommand(ctx context.Context, out, errOut io.Writer, opts 
 	}
 	traceParams["run_id"] = runID
 	if opts.deliverySummary {
+		if !opts.untilSet {
+			traceParams["until"] = time.Now().UTC().Format(time.RFC3339Nano)
+		}
 		result, err := fetchDiagnosticRunTraceSummary(ctx, client, traceParams)
 		if err != nil {
 			return returnCLIAPIError(errOut, err, diagnosticRunAPIErrorClassifier())
@@ -675,7 +685,7 @@ func fetchDiagnosticRunTraceSummary(ctx context.Context, client *cliAPIClient, p
 			seenCursors[cursor] = struct{}{}
 		}
 	}
-	var rows []diagnosticRunTraceRow
+	summary := newDiagnosticRunTraceSummaryAccumulator()
 	for {
 		var page diagnosticRunTraceResult
 		if err := client.call(ctx, "run.trace", pageParams, &page); err != nil {
@@ -687,7 +697,7 @@ func fetchDiagnosticRunTraceSummary(ctx context.Context, client *cliAPIClient, p
 		if err := validateDiagnosticRunTraceSummaryRows(page.Trace); err != nil {
 			return diagnosticRunTraceSummaryResult{}, err
 		}
-		rows = append(rows, page.Trace...)
+		summary.AddRows(page.Trace)
 		if page.NextCursor == "" {
 			break
 		}
@@ -701,7 +711,7 @@ func fetchDiagnosticRunTraceSummary(ctx context.Context, client *cliAPIClient, p
 		seenCursors[nextCursor] = struct{}{}
 		pageParams["cursor"] = nextCursor
 	}
-	return summarizeDiagnosticRunTraceRows(rows), nil
+	return summary.Result(), nil
 }
 
 func cloneDiagnosticTraceParams(params map[string]any) map[string]any {
@@ -736,26 +746,29 @@ func validateDiagnosticRunTraceSummaryRows(rows []diagnosticRunTraceRow) error {
 	return nil
 }
 
-func summarizeDiagnosticRunTraceRows(rows []diagnosticRunTraceRow) diagnosticRunTraceSummaryResult {
-	result := diagnosticRunTraceSummaryResult{TraceRows: len(rows)}
-	groups := map[string]*diagnosticRunTraceSummaryGroup{}
+func newDiagnosticRunTraceSummaryAccumulator() *diagnosticRunTraceSummaryAccumulator {
+	return &diagnosticRunTraceSummaryAccumulator{groups: map[string]*diagnosticRunTraceSummaryGroup{}}
+}
+
+func (s *diagnosticRunTraceSummaryAccumulator) AddRows(rows []diagnosticRunTraceRow) {
 	for _, row := range rows {
+		s.traceRows++
 		if strings.TrimSpace(row.DeliveryID) == "" {
-			result.NonDeliveryRows++
+			s.nonDeliveryRows++
 			continue
 		}
-		result.DeliveryRows++
+		s.deliveryRows++
 		subscriberType := strings.TrimSpace(row.SubscriberType)
 		subscriberID := strings.TrimSpace(row.SubscriberID)
 		key := subscriberType + "\x00" + subscriberID
-		group, ok := groups[key]
+		group, ok := s.groups[key]
 		if !ok {
 			group = &diagnosticRunTraceSummaryGroup{
 				SubscriberType: subscriberType,
 				SubscriberID:   subscriberID,
 				StatusCounts:   make(map[string]int, len(traceDeliverySummaryStatuses)),
 			}
-			groups[key] = group
+			s.groups[key] = group
 		}
 		group.StatusCounts[strings.TrimSpace(row.DeliveryStatus)]++
 		if duration, ok := traceDurationValue(row.DeliveryCreatedAt, row.DeliveryStartedAt); ok {
@@ -769,8 +782,16 @@ func summarizeDiagnosticRunTraceRows(rows []diagnosticRunTraceRow) diagnosticRun
 			group.UnavailableExec++
 		}
 	}
-	result.Groups = make([]diagnosticRunTraceSummaryGroup, 0, len(groups))
-	for _, group := range groups {
+}
+
+func (s *diagnosticRunTraceSummaryAccumulator) Result() diagnosticRunTraceSummaryResult {
+	result := diagnosticRunTraceSummaryResult{
+		TraceRows:       s.traceRows,
+		DeliveryRows:    s.deliveryRows,
+		NonDeliveryRows: s.nonDeliveryRows,
+		Groups:          make([]diagnosticRunTraceSummaryGroup, 0, len(s.groups)),
+	}
+	for _, group := range s.groups {
 		result.Groups = append(result.Groups, *group)
 	}
 	sort.Slice(result.Groups, func(i, j int) bool {

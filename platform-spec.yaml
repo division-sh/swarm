@@ -10217,7 +10217,8 @@ cli_specification:
           with `--follow` and does not introduce a new API/store/runtime owner.
           Snapshot `--delivery-summary` is a CLI-only exhaustive projection over `/v1/rpc run.trace`: it follows
           returned `next_cursor` values until none remain, preserving run_id, since, until, filter, and page-size
-          limit while advancing only cursor. It groups rows that carry delivery_id by subscriber_type/subscriber_id
+          limit while advancing only cursor. If the caller omits `--until`, the CLI captures one RFC3339Nano
+          point-in-time upper bound before the first request and reuses that `until` value for every page. It groups rows that carry delivery_id by subscriber_type/subscriber_id
           and delivery_status, derives queue and execution timing only from same-row RunTraceRow timestamps, treats
           event-only rows as non-delivery trace rows, and renders point-in-time snapshot wording. `--delivery-summary`
           is invalid with `--follow` and is mutually exclusive with `--delivery-detail`.
@@ -10227,7 +10228,7 @@ cli_specification:
         - follow-mode repeatable filter flags serialize as RunTraceFilter arrays under the single `filter` param and are preserved across recovery requests
         - invalid --since, invalid --until, since-after-until, out-of-range --limit, blank --cursor, blank/invalid typed filters, and fixed-window snapshot controls combined with --follow fail before API/WS calls
         - --delivery-detail renders only existing RunTraceRow delivery lifecycle facts and rejects --follow before API/WS calls
-        - --delivery-summary exhausts /v1/rpc run.trace pagination across returned next_cursor values, treats --limit as page size rather than a total cap, rejects --follow and --delivery-detail before API/WS calls, fails closed on repeated/non-advancing cursors or malformed delivery rows, and renders only aggregate facts derived from existing RunTraceRow delivery fields
+        - --delivery-summary exhausts /v1/rpc run.trace pagination across returned next_cursor values, captures and reuses a fixed until bound when the caller omits --until, treats --limit as page size rather than a total cap, rejects --follow and --delivery-detail before API/WS calls, fails closed on repeated/non-advancing cursors or malformed delivery rows, and renders only aggregate facts derived from existing RunTraceRow delivery fields
         - missing token fails before API calls through the shared CLI API client
         - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api, /rpc, /ws, or fallback token paths
       promoted_trace_follow_recovery_contract:

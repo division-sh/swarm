@@ -604,6 +604,7 @@ func TestTraceDeliverySummaryExhaustsRunTracePages(t *testing.T) {
 
 func TestTraceDeliverySummaryUsesOmittedRunResolver(t *testing.T) {
 	t.Setenv("SWARM_API_TOKEN", "test-token")
+	var capturedUntil string
 	server, requests := newDiagnosticSuccessServer(t, func(req jsonRPCRequest, callIndex int) map[string]any {
 		switch callIndex {
 		case 0:
@@ -615,9 +616,20 @@ func TestTraceDeliverySummaryUsesOmittedRunResolver(t *testing.T) {
 			if req.Method != "run.trace" {
 				t.Fatalf("method[%d] = %q, want run.trace", callIndex, req.Method)
 			}
-			if !reflect.DeepEqual(req.Params, map[string]any{"run_id": "active-run"}) {
+			if req.Params["run_id"] != "active-run" {
 				t.Fatalf("params[%d] = %#v, want active run trace", callIndex, req.Params)
 			}
+			until, ok := req.Params["until"].(string)
+			if !ok || strings.TrimSpace(until) == "" {
+				t.Fatalf("params[%d] = %#v, want captured until bound", callIndex, req.Params)
+			}
+			if _, err := time.Parse(time.RFC3339Nano, until); err != nil {
+				t.Fatalf("until = %q, want RFC3339Nano: %v", until, err)
+			}
+			if _, ok := req.Params["cursor"]; ok {
+				t.Fatalf("params[%d] = %#v, want no cursor on first summary page", callIndex, req.Params)
+			}
+			capturedUntil = until
 			return map[string]any{"trace": []any{map[string]any{
 				"event_id":              "event-1",
 				"event_name":            "scan.completed",
@@ -629,7 +641,15 @@ func TestTraceDeliverySummaryUsesOmittedRunResolver(t *testing.T) {
 				"delivery_delivered_at": "2026-05-13T10:00:03Z",
 				"subscriber_type":       "agent",
 				"subscriber_id":         "agent-1",
-			}}}
+			}}, "next_cursor": "page-2"}
+		case 2:
+			if req.Method != "run.trace" {
+				t.Fatalf("method[%d] = %q, want run.trace", callIndex, req.Method)
+			}
+			if req.Params["run_id"] != "active-run" || req.Params["cursor"] != "page-2" || req.Params["until"] != capturedUntil {
+				t.Fatalf("params[%d] = %#v, want same captured until and advanced cursor", callIndex, req.Params)
+			}
+			return map[string]any{"trace": []any{}}
 		default:
 			t.Fatalf("unexpected request[%d]: %#v", callIndex, req)
 		}
@@ -642,8 +662,8 @@ func TestTraceDeliverySummaryUsesOmittedRunResolver(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	if len(*requests) != 2 {
-		t.Fatalf("requests = %d, want run.list then run.trace", len(*requests))
+	if len(*requests) != 3 {
+		t.Fatalf("requests = %d, want run.list then two run.trace pages", len(*requests))
 	}
 	if !strings.Contains(stdout.String(), "run trace delivery summary: run_id=active-run snapshot=point-in-time") {
 		t.Fatalf("stdout = %q, want resolved active-run summary", stdout.String())
