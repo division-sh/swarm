@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"time"
 
@@ -17,6 +18,8 @@ const (
 	traceFollowMaximumBackoff   = time.Second
 	traceFollowRetryableReadErr = "read run.subscribe_trace notification:"
 )
+
+var traceDeliverySummaryStatuses = []string{"pending", "in_progress", "delivered", "failed", "dead_letter"}
 
 type diagnosticRunListOptions struct {
 	apiOptions rootCommandOptions
@@ -34,6 +37,7 @@ type diagnosticTraceOptions struct {
 	follow           bool
 	noRetry          bool
 	deliveryDetail   bool
+	deliverySummary  bool
 	since            string
 	until            string
 	limit            int
@@ -77,6 +81,29 @@ type diagnosticRunDiagnosisResult struct {
 type diagnosticRunTraceResult struct {
 	Trace      []diagnosticRunTraceRow `json:"trace"`
 	NextCursor string                  `json:"next_cursor,omitempty"`
+}
+
+type diagnosticRunTraceSummaryResult struct {
+	TraceRows       int
+	DeliveryRows    int
+	NonDeliveryRows int
+	Groups          []diagnosticRunTraceSummaryGroup
+}
+
+type diagnosticRunTraceSummaryGroup struct {
+	SubscriberType   string
+	SubscriberID     string
+	StatusCounts     map[string]int
+	QueueWait        diagnosticTraceDurationStats
+	ExecutionTime    diagnosticTraceDurationStats
+	UnavailableQueue int
+	UnavailableExec  int
+}
+
+type diagnosticTraceDurationStats struct {
+	Count int
+	Sum   time.Duration
+	Max   time.Duration
 }
 
 type diagnosticHealthCheckResult struct {
@@ -266,6 +293,7 @@ func newTraceCommand(opts rootCommandOptions) *cobra.Command {
 	cmd.Flags().BoolVarP(&traceOpts.follow, "follow", "f", false, "Follow live trace rows through /v1/ws run.subscribe_trace")
 	cmd.Flags().BoolVar(&traceOpts.noRetry, "no-retry", false, "Disable trace follow reconnect/recovery retries")
 	cmd.Flags().BoolVar(&traceOpts.deliveryDetail, "delivery-detail", false, "Show snapshot delivery lifecycle fields from RunTraceRow")
+	cmd.Flags().BoolVar(&traceOpts.deliverySummary, "delivery-summary", false, "Summarize snapshot delivery lifecycle fields from all RunTraceRow pages")
 	cmd.Flags().StringVar(&traceOpts.since, "since", "", "Snapshot-only RFC3339 trace materialization watermark")
 	cmd.Flags().StringVar(&traceOpts.until, "until", "", "Snapshot-only inclusive RFC3339 trace materialization upper bound")
 	cmd.Flags().IntVar(&traceOpts.limit, "limit", 0, "Snapshot-only page size, 1-2000")
@@ -484,6 +512,14 @@ func runDiagnosticTraceCommand(ctx context.Context, out, errOut io.Writer, opts 
 		return followDiagnosticTraceCommand(ctx, out, errOut, client, runID, opts, traceParams)
 	}
 	traceParams["run_id"] = runID
+	if opts.deliverySummary {
+		result, err := fetchDiagnosticRunTraceSummary(ctx, client, traceParams)
+		if err != nil {
+			return returnCLIAPIError(errOut, err, diagnosticRunAPIErrorClassifier())
+		}
+		writeDiagnosticRunTraceDeliverySummary(out, runID, result)
+		return nil
+	}
 	var result diagnosticRunTraceResult
 	if err := client.call(ctx, "run.trace", traceParams, &result); err != nil {
 		return returnCLIAPIError(errOut, err, diagnosticRunAPIErrorClassifier())
@@ -505,6 +541,9 @@ func (o diagnosticTraceOptions) traceParams() (map[string]any, error) {
 func (o diagnosticTraceOptions) snapshotParams() (map[string]any, error) {
 	if o.noRetry {
 		return nil, fmt.Errorf("--no-retry requires --follow")
+	}
+	if o.deliveryDetail && o.deliverySummary {
+		return nil, fmt.Errorf("--delivery-detail and --delivery-summary are mutually exclusive")
 	}
 	params := map[string]any{}
 	if o.limitSet {
@@ -563,6 +602,7 @@ func (o diagnosticTraceOptions) followParams() (map[string]any, error) {
 		{name: "--limit", set: o.limitSet},
 		{name: "--cursor", set: o.cursorSet},
 		{name: "--delivery-detail", set: o.deliveryDetail},
+		{name: "--delivery-summary", set: o.deliverySummary},
 	} {
 		if flag.set {
 			return nil, fmt.Errorf("%s is not supported with --follow", flag.name)
@@ -624,6 +664,130 @@ func (o diagnosticTraceOptions) traceFilter() (map[string]any, error) {
 		filter["subscriber_type"] = subscriberTypes
 	}
 	return filter, nil
+}
+
+func fetchDiagnosticRunTraceSummary(ctx context.Context, client *cliAPIClient, params map[string]any) (diagnosticRunTraceSummaryResult, error) {
+	pageParams := cloneDiagnosticTraceParams(params)
+	seenCursors := map[string]struct{}{}
+	if cursor, ok := pageParams["cursor"].(string); ok {
+		cursor = strings.TrimSpace(cursor)
+		if cursor != "" {
+			seenCursors[cursor] = struct{}{}
+		}
+	}
+	var rows []diagnosticRunTraceRow
+	for {
+		var page diagnosticRunTraceResult
+		if err := client.call(ctx, "run.trace", pageParams, &page); err != nil {
+			return diagnosticRunTraceSummaryResult{}, err
+		}
+		if err := validateDiagnosticRunTraceResult(page); err != nil {
+			return diagnosticRunTraceSummaryResult{}, err
+		}
+		if err := validateDiagnosticRunTraceSummaryRows(page.Trace); err != nil {
+			return diagnosticRunTraceSummaryResult{}, err
+		}
+		rows = append(rows, page.Trace...)
+		if page.NextCursor == "" {
+			break
+		}
+		nextCursor := strings.TrimSpace(page.NextCursor)
+		if nextCursor == "" {
+			return diagnosticRunTraceSummaryResult{}, fmt.Errorf("malformed run.trace result: next_cursor must not be empty")
+		}
+		if _, ok := seenCursors[nextCursor]; ok {
+			return diagnosticRunTraceSummaryResult{}, fmt.Errorf("malformed run.trace result: repeated next_cursor %q", nextCursor)
+		}
+		seenCursors[nextCursor] = struct{}{}
+		pageParams["cursor"] = nextCursor
+	}
+	return summarizeDiagnosticRunTraceRows(rows), nil
+}
+
+func cloneDiagnosticTraceParams(params map[string]any) map[string]any {
+	out := make(map[string]any, len(params))
+	for key, value := range params {
+		out[key] = value
+	}
+	return out
+}
+
+func validateDiagnosticRunTraceSummaryRows(rows []diagnosticRunTraceRow) error {
+	for i, row := range rows {
+		if strings.TrimSpace(row.DeliveryID) == "" {
+			continue
+		}
+		if strings.TrimSpace(row.SubscriberType) == "" {
+			return fmt.Errorf("malformed run.trace result: trace[%d].subscriber_type is required when delivery_id is present", i)
+		}
+		if _, ok := eventObservationValidSubscriberTypes[strings.TrimSpace(row.SubscriberType)]; !ok {
+			return fmt.Errorf("malformed run.trace result: trace[%d].subscriber_type=%q is not a valid SubscriberType", i, row.SubscriberType)
+		}
+		if strings.TrimSpace(row.SubscriberID) == "" {
+			return fmt.Errorf("malformed run.trace result: trace[%d].subscriber_id is required when delivery_id is present", i)
+		}
+		if strings.TrimSpace(row.DeliveryStatus) == "" {
+			return fmt.Errorf("malformed run.trace result: trace[%d].delivery_status is required when delivery_id is present", i)
+		}
+		if _, ok := eventObservationValidDeliveryStatuses[strings.TrimSpace(row.DeliveryStatus)]; !ok {
+			return fmt.Errorf("malformed run.trace result: trace[%d].delivery_status=%q is not a valid DeliveryStatus", i, row.DeliveryStatus)
+		}
+	}
+	return nil
+}
+
+func summarizeDiagnosticRunTraceRows(rows []diagnosticRunTraceRow) diagnosticRunTraceSummaryResult {
+	result := diagnosticRunTraceSummaryResult{TraceRows: len(rows)}
+	groups := map[string]*diagnosticRunTraceSummaryGroup{}
+	for _, row := range rows {
+		if strings.TrimSpace(row.DeliveryID) == "" {
+			result.NonDeliveryRows++
+			continue
+		}
+		result.DeliveryRows++
+		subscriberType := strings.TrimSpace(row.SubscriberType)
+		subscriberID := strings.TrimSpace(row.SubscriberID)
+		key := subscriberType + "\x00" + subscriberID
+		group, ok := groups[key]
+		if !ok {
+			group = &diagnosticRunTraceSummaryGroup{
+				SubscriberType: subscriberType,
+				SubscriberID:   subscriberID,
+				StatusCounts:   make(map[string]int, len(traceDeliverySummaryStatuses)),
+			}
+			groups[key] = group
+		}
+		group.StatusCounts[strings.TrimSpace(row.DeliveryStatus)]++
+		if duration, ok := traceDurationValue(row.DeliveryCreatedAt, row.DeliveryStartedAt); ok {
+			group.QueueWait.Add(duration)
+		} else {
+			group.UnavailableQueue++
+		}
+		if duration, ok := traceDurationValue(row.DeliveryStartedAt, row.DeliveryDeliveredAt); ok {
+			group.ExecutionTime.Add(duration)
+		} else {
+			group.UnavailableExec++
+		}
+	}
+	result.Groups = make([]diagnosticRunTraceSummaryGroup, 0, len(groups))
+	for _, group := range groups {
+		result.Groups = append(result.Groups, *group)
+	}
+	sort.Slice(result.Groups, func(i, j int) bool {
+		if result.Groups[i].SubscriberType == result.Groups[j].SubscriberType {
+			return result.Groups[i].SubscriberID < result.Groups[j].SubscriberID
+		}
+		return result.Groups[i].SubscriberType < result.Groups[j].SubscriberType
+	})
+	return result
+}
+
+func (s *diagnosticTraceDurationStats) Add(value time.Duration) {
+	s.Count++
+	s.Sum += value
+	if s.Count == 1 || value > s.Max {
+		s.Max = value
+	}
 }
 
 func traceStringList(flag string, values []string) ([]string, error) {
@@ -1278,6 +1442,40 @@ func writeDiagnosticRunTrace(out io.Writer, runID string, result diagnosticRunTr
 	}
 }
 
+func writeDiagnosticRunTraceDeliverySummary(out io.Writer, runID string, result diagnosticRunTraceSummaryResult) {
+	if out == nil {
+		return
+	}
+	fmt.Fprintf(out, "run trace delivery summary: run_id=%s snapshot=point-in-time trace_rows=%d delivery_rows=%d non_delivery_rows=%d\n",
+		runID,
+		result.TraceRows,
+		result.DeliveryRows,
+		result.NonDeliveryRows,
+	)
+	if len(result.Groups) == 0 {
+		fmt.Fprintln(out, "no delivery rows")
+		return
+	}
+	fmt.Fprintln(out, "SUBSCRIBER\tPENDING\tIN_PROGRESS\tDELIVERED\tFAILED\tDEAD_LETTER\tAVG_QUEUE_WAIT\tMAX_QUEUE_WAIT\tAVG_EXECUTION_TIME\tMAX_EXECUTION_TIME\tQUEUE_UNAVAILABLE\tEXECUTION_UNAVAILABLE")
+	for _, group := range result.Groups {
+		fmt.Fprintf(out, "%s/%s\t%d\t%d\t%d\t%d\t%d\t%s\t%s\t%s\t%s\t%d\t%d\n",
+			group.SubscriberType,
+			group.SubscriberID,
+			group.StatusCounts["pending"],
+			group.StatusCounts["in_progress"],
+			group.StatusCounts["delivered"],
+			group.StatusCounts["failed"],
+			group.StatusCounts["dead_letter"],
+			traceDurationAverage(group.QueueWait),
+			traceDurationMax(group.QueueWait),
+			traceDurationAverage(group.ExecutionTime),
+			traceDurationMax(group.ExecutionTime),
+			group.UnavailableQueue,
+			group.UnavailableExec,
+		)
+	}
+}
+
 func writeDiagnosticRunTraceDeliveryDetail(out io.Writer, rows []diagnosticRunTraceRow) {
 	fmt.Fprintln(out, "EVENT AT\tEVENT\tEVENT ID\tDELIVERY ID\tSUBSCRIBER\tSTATUS\tREASON\tDELIVERY CREATED\tDELIVERY STARTED\tDELIVERY DELIVERED\tQUEUE WAIT\tEXECUTION TIME\tSESSION\tTURN")
 	for _, row := range rows {
@@ -1301,21 +1499,43 @@ func writeDiagnosticRunTraceDeliveryDetail(out io.Writer, rows []diagnosticRunTr
 	}
 }
 
+func traceDurationAverage(stats diagnosticTraceDurationStats) string {
+	if stats.Count == 0 {
+		return "-"
+	}
+	return (stats.Sum / time.Duration(stats.Count)).Round(time.Millisecond).String()
+}
+
+func traceDurationMax(stats diagnosticTraceDurationStats) string {
+	if stats.Count == 0 {
+		return "-"
+	}
+	return stats.Max.Round(time.Millisecond).String()
+}
+
 func traceDuration(start, end string) string {
+	duration, ok := traceDurationValue(start, end)
+	if !ok {
+		return "-"
+	}
+	return duration.Round(time.Millisecond).String()
+}
+
+func traceDurationValue(start, end string) (time.Duration, bool) {
 	start = strings.TrimSpace(start)
 	end = strings.TrimSpace(end)
 	if start == "" || end == "" {
-		return "-"
+		return 0, false
 	}
 	startAt, err := time.Parse(time.RFC3339Nano, start)
 	if err != nil {
-		return "-"
+		return 0, false
 	}
 	endAt, err := time.Parse(time.RFC3339Nano, end)
 	if err != nil {
-		return "-"
+		return 0, false
 	}
-	return endAt.Sub(startAt).Round(time.Millisecond).String()
+	return endAt.Sub(startAt), true
 }
 
 func writeDiagnosticHealth(out io.Writer, result diagnosticHealthCheckResult) {

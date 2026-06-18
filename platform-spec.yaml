@@ -10170,7 +10170,7 @@ cli_specification:
       defaulting: If run-id is omitted, resolve the target through run.list with active-run preference.
       behavior: Run-scoped operational status projection. This is the v2 replacement for `swarm investigate run`.
     trace:
-      command: swarm trace [<run-id>] [--delivery-detail] [--since <timestamp>] [--until <timestamp>] [--limit <n>] [--cursor <cursor>] [--event-name <name> ...] [--entity-id <entity-id> ...] [--delivery-status <pending|in_progress|delivered|failed|dead_letter> ...] [--subscriber-id <id> ...] [--subscriber-type <node|agent> ...] [--follow|-f] [--no-retry]
+      command: swarm trace [<run-id>] [--delivery-detail|--delivery-summary] [--since <timestamp>] [--until <timestamp>] [--limit <n>] [--cursor <cursor>] [--event-name <name> ...] [--entity-id <entity-id> ...] [--delivery-status <pending|in_progress|delivered|failed|dead_letter> ...] [--subscriber-id <id> ...] [--subscriber-type <node|agent> ...] [--follow|-f] [--no-retry]
       tier: must_have
       implementation_status: implemented
       owners: /v1/rpc run.trace for snapshot; /v1/ws run.subscribe_trace for --follow/-f
@@ -10215,12 +10215,19 @@ cli_specification:
           it renders delivery identity, subscriber identity, delivery status/reason, delivery lifecycle timestamps, and
           queue/execution durations derived only from same-row RunTraceRow timestamps. `--delivery-detail` is invalid
           with `--follow` and does not introduce a new API/store/runtime owner.
+          Snapshot `--delivery-summary` is a CLI-only exhaustive projection over `/v1/rpc run.trace`: it follows
+          returned `next_cursor` values until none remain, preserving run_id, since, until, filter, and page-size
+          limit while advancing only cursor. It groups rows that carry delivery_id by subscriber_type/subscriber_id
+          and delivery_status, derives queue and execution timing only from same-row RunTraceRow timestamps, treats
+          event-only rows as non-delivery trace rows, and renders point-in-time snapshot wording. `--delivery-summary`
+          is invalid with `--follow` and is mutually exclusive with `--delivery-detail`.
         proof_expectations:
         - exact /v1/rpc run.trace params for explicit run ids and omitted-run resolution through run.list
         - repeatable filter flags serialize as RunTraceFilter arrays under the single `filter` param and compose with since/until/limit/cursor
         - follow-mode repeatable filter flags serialize as RunTraceFilter arrays under the single `filter` param and are preserved across recovery requests
         - invalid --since, invalid --until, since-after-until, out-of-range --limit, blank --cursor, blank/invalid typed filters, and fixed-window snapshot controls combined with --follow fail before API/WS calls
         - --delivery-detail renders only existing RunTraceRow delivery lifecycle facts and rejects --follow before API/WS calls
+        - --delivery-summary exhausts /v1/rpc run.trace pagination across returned next_cursor values, treats --limit as page size rather than a total cap, rejects --follow and --delivery-detail before API/WS calls, fails closed on repeated/non-advancing cursors or malformed delivery rows, and renders only aggregate facts derived from existing RunTraceRow delivery fields
         - missing token fails before API calls through the shared CLI API client
         - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api, /rpc, /ws, or fallback token paths
       promoted_trace_follow_recovery_contract:
