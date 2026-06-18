@@ -28,6 +28,19 @@ type agentDiagnoseCommandOptions struct {
 	queueCursorSet bool
 }
 
+type agentDeliveriesCommandOptions struct {
+	apiOptions       rootCommandOptions
+	runID            string
+	deliveryStatuses []string
+	limit            int
+	cursor           string
+	asJSON           bool
+
+	runIDSet  bool
+	limitSet  bool
+	cursorSet bool
+}
+
 type agentListResult struct {
 	Agents []agentSummary `json:"agents"`
 }
@@ -48,6 +61,27 @@ type agentDiagnosisResult struct {
 	RuntimeState      *agentDiagnosisRuntimeState      `json:"runtime_state,omitempty"`
 	Active            *agentDiagnosisActive            `json:"active,omitempty"`
 	LastToolOutcome   *agentDiagnosisLastToolOutcome   `json:"last_tool_outcome,omitempty"`
+}
+
+type agentDeliveryLifecycleListResult struct {
+	AgentID    string                      `json:"agent_id"`
+	Deliveries []agentDeliveryLifecycleRow `json:"deliveries"`
+	NextCursor *string                     `json:"next_cursor,omitempty"`
+}
+
+type agentDeliveryLifecycleRow struct {
+	DeliveryID          string  `json:"delivery_id"`
+	EventID             string  `json:"event_id"`
+	EventName           string  `json:"event_name"`
+	RunID               *string `json:"run_id,omitempty"`
+	EntityID            *string `json:"entity_id,omitempty"`
+	Status              string  `json:"status"`
+	RetryCount          *int    `json:"retry_count"`
+	ReasonCode          string  `json:"reason_code,omitempty"`
+	LastError           string  `json:"last_error,omitempty"`
+	DeliveryCreatedAt   string  `json:"delivery_created_at"`
+	DeliveryStartedAt   *string `json:"delivery_started_at,omitempty"`
+	DeliveryDeliveredAt *string `json:"delivery_delivered_at,omitempty"`
 }
 
 type agentDiagnosisQueue struct {
@@ -163,11 +197,34 @@ func newAgentCommand(opts rootCommandOptions) *cobra.Command {
 	cmd.AddCommand(
 		newAgentViewCommand(opts),
 		newAgentDiagnoseCommand(opts),
+		newAgentDeliveriesCommand(opts),
 		newAgentRestartCommand(opts),
 		newAgentReplayCommand(opts),
 		newAgentReplayBacklogCommand(opts),
 		newAgentDirectiveCommand(opts),
 	)
+	return cmd
+}
+
+func newAgentDeliveriesCommand(opts rootCommandOptions) *cobra.Command {
+	deliveryOpts := agentDeliveriesCommandOptions{apiOptions: opts}
+	cmd := &cobra.Command{
+		Use:   "deliveries <agent-id>",
+		Short: "List one agent's delivery lifecycle rows through v1 RPC.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			deliveryOpts.runIDSet = cmd.Flags().Changed("run-id")
+			deliveryOpts.limitSet = cmd.Flags().Changed("limit")
+			deliveryOpts.cursorSet = cmd.Flags().Changed("cursor")
+			return runAgentDeliveriesCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), deliveryOpts, args[0])
+		},
+	}
+	cmd.Flags().StringVar(&deliveryOpts.runID, "run-id", "", "Filter by run id")
+	cmd.Flags().StringArrayVar(&deliveryOpts.deliveryStatuses, "delivery-status", nil, "Delivery status filter; repeat to match any")
+	cmd.Flags().IntVar(&deliveryOpts.limit, "limit", 0, "Max lifecycle rows to return (1-200)")
+	cmd.Flags().StringVar(&deliveryOpts.cursor, "cursor", "", "Opaque cursor returned by the previous lifecycle result")
+	cmd.Flags().BoolVar(&deliveryOpts.asJSON, "json", false, cliOutputJSONFlagHelp)
+	bindCLIAPIConnectionFlags(cmd, &deliveryOpts.apiOptions)
 	return cmd
 }
 
@@ -257,6 +314,32 @@ func runAgentViewCommand(ctx context.Context, out, errOut io.Writer, opts rootCo
 	return nil
 }
 
+func runAgentDeliveriesCommand(ctx context.Context, out, errOut io.Writer, opts agentDeliveriesCommandOptions, agentID string) error {
+	params, err := opts.params(agentID)
+	if err != nil {
+		return returnCLIValidationError(errOut, err)
+	}
+	client, err := newCLIAPIClient(opts.apiOptions)
+	if err != nil {
+		return returnCLIAPIError(errOut, err, agentDeliveryLifecycleAPIErrorClassifier())
+	}
+	var result agentDeliveryLifecycleListResult
+	if err := client.call(ctx, "agent.delivery_lifecycle", params, &result); err != nil {
+		return returnCLIAPIError(errOut, err, agentDeliveryLifecycleAPIErrorClassifier())
+	}
+	if err := validateAgentDeliveryLifecycleListResult(result); err != nil {
+		return returnCLIAPIError(errOut, err, agentDeliveryLifecycleAPIErrorClassifier())
+	}
+	if opts.asJSON {
+		if err := json.NewEncoder(out).Encode(result); err != nil {
+			return returnCLIValidationError(errOut, fmt.Errorf("render json output: %w", err))
+		}
+		return nil
+	}
+	writeAgentDeliveryLifecycleListResult(out, result)
+	return nil
+}
+
 func runAgentDiagnoseCommand(ctx context.Context, out, errOut io.Writer, opts agentDiagnoseCommandOptions, agentID string) error {
 	params, err := opts.params(agentID)
 	if err != nil {
@@ -295,6 +378,10 @@ func agentDiagnoseAPIErrorClassifier() cliAPIErrorClassifier {
 	return cliAPIErrorClassifier{notFoundCodes: []string{"AGENT_NOT_FOUND"}}
 }
 
+func agentDeliveryLifecycleAPIErrorClassifier() cliAPIErrorClassifier {
+	return cliAPIErrorClassifier{notFoundCodes: []string{"AGENT_NOT_FOUND"}}
+}
+
 func (opts agentListCommandOptions) params() map[string]any {
 	params := map[string]any{}
 	if flow := strings.TrimSpace(opts.flow); flow != "" {
@@ -324,6 +411,48 @@ func (opts agentDiagnoseCommandOptions) params(agentID string) (map[string]any, 
 			return nil, fmt.Errorf("--queue-cursor is required when provided")
 		}
 		params["queue_cursor"] = cursor
+	}
+	return params, nil
+}
+
+func (opts agentDeliveriesCommandOptions) params(agentID string) (map[string]any, error) {
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		return nil, fmt.Errorf("agent id is required")
+	}
+	if err := validateEntityOpaqueIDArg("agent id", agentID); err != nil {
+		return nil, err
+	}
+	params := map[string]any{"agent_id": agentID}
+	if opts.runIDSet {
+		runID := strings.TrimSpace(opts.runID)
+		if runID == "" {
+			return nil, fmt.Errorf("--run-id is required when provided")
+		}
+		if err := validateEntityOpaqueIDArg("--run-id", runID); err != nil {
+			return nil, err
+		}
+		params["run_id"] = runID
+	}
+	statuses, err := traceEnumList("--delivery-status", opts.deliveryStatuses, eventObservationValidDeliveryStatuses, "pending, in_progress, delivered, failed, dead_letter")
+	if err != nil {
+		return nil, err
+	}
+	if len(statuses) > 0 {
+		params["delivery_status"] = statuses
+	}
+	if opts.limitSet {
+		if opts.limit < 1 || opts.limit > 200 {
+			return nil, fmt.Errorf("--limit must be between 1 and 200")
+		}
+		params["limit"] = opts.limit
+	}
+	if opts.cursorSet {
+		cursor := strings.TrimSpace(opts.cursor)
+		if cursor == "" {
+			return nil, fmt.Errorf("--cursor is required when provided")
+		}
+		params["cursor"] = cursor
 	}
 	return params, nil
 }
@@ -445,6 +574,88 @@ func validateAgentDiagnosisResult(result agentDiagnosisResult) error {
 		}
 		if strings.TrimSpace(outcome.TurnID) != strings.TrimSpace(result.Active.TurnID) {
 			return fmt.Errorf("malformed agent.diagnose result: last_tool_outcome.turn_id %q must match active.turn_id %q", outcome.TurnID, result.Active.TurnID)
+		}
+	}
+	return nil
+}
+
+func validateAgentDeliveryLifecycleListResult(result agentDeliveryLifecycleListResult) error {
+	if strings.TrimSpace(result.AgentID) == "" {
+		return fmt.Errorf("malformed agent.delivery_lifecycle result: agent_id is required")
+	}
+	if err := validateEntityOpaqueIDArg("agent.delivery_lifecycle result.agent_id", result.AgentID); err != nil {
+		return fmt.Errorf("malformed agent.delivery_lifecycle result: %w", err)
+	}
+	if result.Deliveries == nil {
+		return fmt.Errorf("malformed agent.delivery_lifecycle result: deliveries is required")
+	}
+	if result.NextCursor != nil && strings.TrimSpace(*result.NextCursor) == "" {
+		return fmt.Errorf("malformed agent.delivery_lifecycle result: next_cursor is empty")
+	}
+	for i, delivery := range result.Deliveries {
+		if err := validateAgentDeliveryLifecycleRow(delivery, i); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateAgentDeliveryLifecycleRow(row agentDeliveryLifecycleRow, index int) error {
+	prefix := fmt.Sprintf("deliveries[%d]", index)
+	requiredOpaque := []struct {
+		field string
+		value string
+	}{
+		{field: "delivery_id", value: row.DeliveryID},
+		{field: "event_id", value: row.EventID},
+	}
+	for _, item := range requiredOpaque {
+		if strings.TrimSpace(item.value) == "" {
+			return fmt.Errorf("malformed agent.delivery_lifecycle result: %s.%s is required", prefix, item.field)
+		}
+		if err := validateEntityOpaqueIDArg("agent.delivery_lifecycle result."+prefix+"."+item.field, item.value); err != nil {
+			return fmt.Errorf("malformed agent.delivery_lifecycle result: %w", err)
+		}
+	}
+	if strings.TrimSpace(row.EventName) == "" {
+		return fmt.Errorf("malformed agent.delivery_lifecycle result: %s.event_name is required", prefix)
+	}
+	if optional := row.RunID; optional != nil {
+		if strings.TrimSpace(*optional) == "" {
+			return fmt.Errorf("malformed agent.delivery_lifecycle result: %s.run_id is empty", prefix)
+		}
+		if err := validateEntityOpaqueIDArg("agent.delivery_lifecycle result."+prefix+".run_id", *optional); err != nil {
+			return fmt.Errorf("malformed agent.delivery_lifecycle result: %w", err)
+		}
+	}
+	if optional := row.EntityID; optional != nil {
+		if strings.TrimSpace(*optional) == "" {
+			return fmt.Errorf("malformed agent.delivery_lifecycle result: %s.entity_id is empty", prefix)
+		}
+		if err := validateEntityOpaqueIDArg("agent.delivery_lifecycle result."+prefix+".entity_id", *optional); err != nil {
+			return fmt.Errorf("malformed agent.delivery_lifecycle result: %w", err)
+		}
+	}
+	if _, ok := eventObservationValidDeliveryStatuses[strings.TrimSpace(row.Status)]; !ok {
+		return fmt.Errorf("malformed agent.delivery_lifecycle result: %s.status=%q is not a valid DeliveryStatus", prefix, row.Status)
+	}
+	if row.RetryCount == nil {
+		return fmt.Errorf("malformed agent.delivery_lifecycle result: %s.retry_count is required", prefix)
+	}
+	if *row.RetryCount < 0 {
+		return fmt.Errorf("malformed agent.delivery_lifecycle result: %s.retry_count must be non-negative", prefix)
+	}
+	if err := validateAgentDeliveryLifecycleTimestamp(prefix+".delivery_created_at", row.DeliveryCreatedAt); err != nil {
+		return err
+	}
+	if timestamp := row.DeliveryStartedAt; timestamp != nil {
+		if err := validateAgentDeliveryLifecycleTimestamp(prefix+".delivery_started_at", *timestamp); err != nil {
+			return err
+		}
+	}
+	if timestamp := row.DeliveryDeliveredAt; timestamp != nil {
+		if err := validateAgentDeliveryLifecycleTimestamp(prefix+".delivery_delivered_at", *timestamp); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -574,6 +785,17 @@ func validateAgentSummary(agent agentSummary) error {
 	return nil
 }
 
+func validateAgentDeliveryLifecycleTimestamp(field, value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fmt.Errorf("malformed agent.delivery_lifecycle result: %s is required", field)
+	}
+	if _, err := time.Parse(time.RFC3339Nano, value); err != nil {
+		return fmt.Errorf("malformed agent.delivery_lifecycle result: %s must be an RFC3339 timestamp: %w", field, err)
+	}
+	return nil
+}
+
 func validateAgentDiagnosisTimestamp(field, value string) error {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -615,6 +837,36 @@ func writeAgentListResult(out io.Writer, result agentListResult) {
 			agent.ConversationMode,
 			agent.SessionScope,
 		)
+	}
+}
+
+func writeAgentDeliveryLifecycleListResult(out io.Writer, result agentDeliveryLifecycleListResult) {
+	if out == nil {
+		return
+	}
+	fmt.Fprintf(out, "Agent %s deliveries\n", result.AgentID)
+	if len(result.Deliveries) == 0 {
+		fmt.Fprintln(out, "No deliveries match the filter.")
+	} else {
+		for _, delivery := range result.Deliveries {
+			fmt.Fprintf(out, "delivery: delivery_id=%s event_name=%s event_id=%s run_id=%s entity_id=%s status=%s delivery_created_at=%s delivery_started_at=%s delivery_delivered_at=%s retry_count=%d reason_code=%s last_error=%s\n",
+				delivery.DeliveryID,
+				delivery.EventName,
+				delivery.EventID,
+				agentOptionalStringDash(delivery.RunID),
+				agentOptionalStringDash(delivery.EntityID),
+				delivery.Status,
+				delivery.DeliveryCreatedAt,
+				agentOptionalStringDash(delivery.DeliveryStartedAt),
+				agentOptionalStringDash(delivery.DeliveryDeliveredAt),
+				*delivery.RetryCount,
+				agentDash(delivery.ReasonCode),
+				agentDash(delivery.LastError),
+			)
+		}
+	}
+	if result.NextCursor != nil {
+		fmt.Fprintf(out, "next_cursor=%s\n", strings.TrimSpace(*result.NextCursor))
 	}
 }
 

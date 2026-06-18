@@ -10607,6 +10607,47 @@ cli_specification:
       - --json preserves the AgentDiagnosis result shape without adding token usage, failures, dead letters, full runtime_state enum, top-level watchdog, run_id, bundle_version, dashboard state, or richer per-tool diagnostics
       - AGENT_NOT_FOUND, invalid params, HTTP failures, and malformed AgentDiagnosis responses fail closed with tested exit codes
       - no direct DB/store/runtime/EventBus/agentcontrol/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, conversation, run, trace, agent.get, or agent.list method usage
+    agent_deliveries:
+      command: swarm agent deliveries <agent-id> [--run-id <run-id>] [--delivery-status <pending|in_progress|delivered|failed|dead_letter> ...] [--limit <n>] [--cursor <cursor>] [--json]
+      tier: should_have
+      implementation_status: implemented
+      owner: /v1/rpc agent.delivery_lifecycle
+      behavior: >
+        Read-only single-agent delivery lifecycle CLI consumer. The CLI sends only
+        agent_id, optional run_id, optional repeated delivery_status, optional
+        limit, and optional cursor to /v1/rpc agent.delivery_lifecycle. Pagination
+        is caller-driven one-page list semantics: the CLI renders the returned
+        next_cursor when present but does not exhaust pages or aggregate rows.
+        Human output renders only AgentDeliveryLifecycleList / AgentDeliveryLifecycleRow
+        facts returned by the API owner. --json emits the AgentDeliveryLifecycleList
+        result shape exactly with no CLI wrapper and no reconstructed fields.
+        The CLI MUST NOT synthesize lifecycle rows from run.trace, event.get,
+        event.list, agent.diagnose, agent.delivery_diagnostics, DB/store reads,
+        runtime memory, EventBus state, dashboard/Builder helpers, logs, receipts,
+        or CLI-local state.
+      output:
+        header: Agent <agent-id> deliveries
+        empty: No deliveries match the filter.
+        row_fields: delivery_id, event_name, event_id, run_id, entity_id, status, delivery_created_at, delivery_started_at, delivery_delivered_at, retry_count, reason_code, last_error
+        pagination: next_cursor=<cursor> when the owner returns a cursor
+        json: --json emits AgentDeliveryLifecycleList exactly, with no CLI wrapper
+      exit_codes:
+        success: 0
+        cli_validation: 2
+        transport_or_malformed_response: 3
+        auth_or_missing_token: 4
+        not_found: 5
+      not_found_errors:
+      - AGENT_NOT_FOUND
+      proof_expectations:
+      - exact /v1/rpc agent.delivery_lifecycle call with agent_id plus run_id, delivery_status, limit, and cursor only when explicitly provided
+      - repeated --delivery-status serializes as the canonical delivery_status array and rejects values outside pending, in_progress, delivered, failed, and dead_letter before any API request
+      - --run-id, --limit, and --cursor validate before any API request; --limit must be in the API-owned 1..200 range and an explicitly blank cursor or run id is invalid
+      - human output renders only API-owned AgentDeliveryLifecycleRow facts, including optional fields as dash placeholders and next_cursor when present
+      - empty results render an explicit no-match line
+      - --json preserves the AgentDeliveryLifecycleList result shape without adding wrappers, aggregates, route-targets, dead-letter records, retry-policy recommendations, status hints, or reconstructed fields
+      - AGENT_NOT_FOUND, invalid params, HTTP failures, and malformed AgentDeliveryLifecycleList / AgentDeliveryLifecycleRow responses fail closed with tested exit codes
+      - no direct DB/store/runtime/EventBus/agentcontrol/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, run.trace, event.get, event.list, agent.diagnose, or agent.delivery_diagnostics method usage
     agent_restart:
       command: swarm agent restart <agent-id> [--idempotency-key <key>]
       tier: should_have
