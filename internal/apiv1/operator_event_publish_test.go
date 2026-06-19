@@ -931,6 +931,54 @@ func TestOperatorEventPublishExistingRunTargetRouteValidatesAndPersistsCanonical
 	}
 }
 
+func TestOperatorEventPublishRootEventTemplateInputNameCollisionDoesNotRequireTarget(t *testing.T) {
+	ctx := context.Background()
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	source := semanticview.Wrap(eventPublishRootTemplateCollisionTestBundle())
+	bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "root-orchestrator")
+	ch := bus.Subscribe("root-orchestrator", events.EventType("review.requested"))
+	defer bus.Unsubscribe("root-orchestrator")
+	handler := eventPublishTestHandler(t, pg, bus, source)
+
+	initial := rpcCall(t, handler, eventPublishBody("", runStartTestFingerprint, "review.requested", `{"topic":"first"}`, "", "idem-root-template-collision-initial"))
+	if initial.Error != nil {
+		t.Fatalf("initial event.publish error = %#v", initial.Error)
+	}
+	runID := stringValue(t, asMap(t, initial.Result)["run_id"], "run_id")
+	requireAPIV1RuntimeBusEvent(t, ch, "initial root/template collision delivery")
+
+	flowInstance := "operating/inst-1"
+	entityID := runtimeflowidentity.EntityID(flowInstance)
+	seedEventPublishEntityState(t, db, runID, entityID, flowInstance, "waiting")
+
+	followUp := rpcCall(t, handler, eventPublishBody(runID, runStartTestFingerprint, "review.requested", fmt.Sprintf(`{"entity_id":%q,"topic":"root-follow-up"}`, entityID), "operator-test", "idem-root-template-collision-follow-up"))
+	if followUp.Error != nil {
+		t.Fatalf("root/template collision follow-up event.publish error = %#v", followUp.Error)
+	}
+	eventID := stringValue(t, asMap(t, followUp.Result)["event_id"], "event_id")
+	requireAPIV1RuntimeBusEvent(t, ch, "follow-up root/template collision delivery")
+
+	var gotEventName, gotEntityID, gotFlowInstance, gotTargetRoute string
+	if err := db.QueryRow(`
+		SELECT event_name, COALESCE(entity_id::text, ''), COALESCE(flow_instance, ''), COALESCE(target_route::text, '{}')
+		FROM events
+		WHERE event_id = $1::uuid
+	`, eventID).Scan(&gotEventName, &gotEntityID, &gotFlowInstance, &gotTargetRoute); err != nil {
+		t.Fatalf("load root/template collision event row: %v", err)
+	}
+	if gotEventName != "review.requested" || gotEntityID != entityID || gotFlowInstance != flowInstance {
+		t.Fatalf("event row = name:%q entity:%q flow:%q, want review.requested/%s/%s", gotEventName, gotEntityID, gotFlowInstance, entityID, flowInstance)
+	}
+	if gotTargetRoute != "{}" {
+		t.Fatalf("event target_route = %s, want empty non-target route", gotTargetRoute)
+	}
+}
+
 func TestOperatorEventPublishExistingRunTargetRouteRejectsInvalidTargetBeforePersistence(t *testing.T) {
 	ctx := context.Background()
 	_, db, _ := testutil.StartPostgres(t)
@@ -1998,6 +2046,59 @@ func eventPublishTargetRouteTestBundle() *runtimecontracts.WorkflowContractBundl
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{Events: []string{bootstrapEvent}},
+			},
+		},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
+			"operating": operating.Schema,
+		},
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"operating": &root.Children[0],
+			},
+		},
+	}
+}
+
+func eventPublishRootTemplateCollisionTestBundle() *runtimecontracts.WorkflowContractBundle {
+	eventName := "review.requested"
+	rootNode := runtimecontracts.SystemNodeContract{
+		ID:           "root-orchestrator",
+		SubscribesTo: []string{eventName},
+	}
+	operating := runtimecontracts.FlowContractView{
+		Path:  "operating",
+		Paths: runtimecontracts.FlowContractPaths{ID: "operating", Flow: "operating", Mode: "template"},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Mode: "template",
+			Pins: runtimecontracts.FlowPins{
+				Inputs: runtimecontracts.FlowInputPins{Events: []string{eventName}},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			eventName: {},
+		},
+	}
+	root := runtimecontracts.FlowContractView{
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			eventName: {},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"root-orchestrator": rootNode,
+		},
+		Children: []runtimecontracts.FlowContractView{operating},
+	}
+	return &runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{Name: "review", Version: "1.0.0"},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			eventName: {},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"root-orchestrator": rootNode,
+		},
+		RootSchema: &runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{
+				Inputs: runtimecontracts.FlowInputPins{Events: []string{eventName}},
 			},
 		},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{

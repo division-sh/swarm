@@ -45,23 +45,24 @@ type eventPublishDelivery struct {
 }
 
 type eventPublicationParams struct {
-	BundleHash        string
-	BundleSource      string
-	BundleFingerprint string
-	EventID           string
-	EventName         string
-	Payload           json.RawMessage
-	EntityID          string
-	EntityIDProvided  bool
-	FlowInstance      string
-	TargetRoute       events.RouteIdentity
-	TargetRouteSet    bool
-	RunID             string
-	SourceEventID     string
-	IdempotencyKey    string
-	Emitter           string
-	NewRunCreated     bool
-	RunIDProvided     bool
+	BundleHash          string
+	BundleSource        string
+	BundleFingerprint   string
+	EventID             string
+	EventName           string
+	Payload             json.RawMessage
+	EntityID            string
+	EntityIDProvided    bool
+	FlowInstance        string
+	TargetRoute         events.RouteIdentity
+	TargetRouteSet      bool
+	TargetRouteRequired bool
+	RunID               string
+	SourceEventID       string
+	IdempotencyKey      string
+	Emitter             string
+	NewRunCreated       bool
+	RunIDProvided       bool
 }
 
 type eventPublicationConfig struct {
@@ -200,11 +201,13 @@ func executeOperatorEventPublication(
 			return store.APIIdempotencyCompletion{}, err
 		}
 		if !cfg.rootInputOnly {
+			requestedEventName := params.EventName
 			resolvedEventName, err := resolveEventPublicationEventName(selectedOpts.Source, params.EventName)
 			if err != nil {
 				return store.APIIdempotencyCompletion{}, err
 			}
 			params.EventName = resolvedEventName
+			params.TargetRouteRequired = eventPublicationSelectsTemplateInputEvent(selectedOpts.Source, requestedEventName, resolvedEventName)
 		}
 		params, err = validateEventPublication(ctx, selectedOpts, params, cfg)
 		if err != nil {
@@ -522,7 +525,7 @@ func enrichExistingRunEventPublicationRoute(ctx context.Context, opts OperatorRe
 	if params.TargetRouteSet {
 		return enrichExistingRunEventPublicationTargetRoute(ctx, opts, params)
 	}
-	if params.EntityIDProvided && eventPublicationRequiresExplicitTargetRoute(opts.Source, params.EventName) {
+	if params.EntityIDProvided && params.TargetRouteRequired {
 		return params, NewApplicationError(EventNotDeclaredCode, false, map[string]any{
 			"event_name":      params.EventName,
 			"run_id":          params.RunID,
@@ -555,20 +558,46 @@ func enrichExistingRunEventPublicationRoute(ctx context.Context, opts OperatorRe
 	return params, nil
 }
 
-func eventPublicationRequiresExplicitTargetRoute(source semanticview.Source, eventName string) bool {
+func eventPublicationSelectsTemplateInputEvent(source semanticview.Source, requestedEventName, resolvedEventName string) bool {
 	if source == nil {
 		return false
 	}
-	eventName = runtimeeventidentity.Normalize(eventName)
-	if eventName == "" {
+	requestedEventName = runtimeeventidentity.Normalize(requestedEventName)
+	resolvedEventName = runtimeeventidentity.Normalize(resolvedEventName)
+	if requestedEventName == "" || resolvedEventName == "" {
 		return false
+	}
+	scoped := strings.Contains(requestedEventName, "/")
+	if !scoped {
+		if _, ok := source.EventEntry(requestedEventName); ok && requestedEventName == resolvedEventName {
+			return false
+		}
 	}
 	for _, scope := range source.FlowScopes() {
 		if !strings.EqualFold(strings.TrimSpace(scope.Mode), "template") {
 			continue
 		}
-		if source.FlowHasInputEvent(scope.ID, eventName) {
-			return true
+		for localEventName := range scope.Events {
+			localEventName = runtimeeventidentity.Normalize(localEventName)
+			if localEventName == "" {
+				continue
+			}
+			canonical := canonicalFlowEventName(source, scope, localEventName)
+			if canonical != resolvedEventName {
+				continue
+			}
+			if !source.FlowHasInputEvent(scope.ID, localEventName) && !source.FlowHasInputEvent(scope.ID, canonical) {
+				continue
+			}
+			if scoped {
+				if flowScopedEventNameMatches(requestedEventName, scope, localEventName, canonical) {
+					return true
+				}
+				continue
+			}
+			if localEventName == requestedEventName {
+				return true
+			}
 		}
 	}
 	return false
