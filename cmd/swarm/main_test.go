@@ -3530,6 +3530,71 @@ func TestRunServeRuntimeEventPublishRunIDFollowUpServedPathPostgres(t *testing.T
 	runServedEventPublishFollowUpProof(t, endpoint, db, "postgres", bundleHash, probe)
 }
 
+func TestRunServeRuntimeEventPublishTargetRouteServedPathDefaultSQLite(t *testing.T) {
+	unsetStoreSelectorEnv(t)
+	stubServeRuntimeWorkspaceLifecycle(t)
+	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
+	t.Setenv(storebackend.EnvSQLitePath, sqlitePath)
+	contractsPath := writeServedEventPublishTargetRouteFixture(t)
+	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+	probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
+	oldBuildStores := buildStoresForServe
+	t.Cleanup(func() {
+		buildStoresForServe = oldBuildStores
+	})
+	var servedDB *sql.DB
+	buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (storeBundle, error) {
+		stores, err := oldBuildStores(ctx, selection, cfg)
+		if err == nil {
+			servedDB = stores.SQLDB
+		}
+		return stores, err
+	}
+	endpoint, _ := startServedEventPublishFollowUpRuntime(t, serveOptions{
+		ConfigPath:              writeServeRuntimeTestConfig(t),
+		ContractsPath:           contractsPath,
+		PlatformSpecPath:        defaultPlatformSpecPath,
+		APIListenAddr:           "127.0.0.1:0",
+		MCPListenAddr:           "127.0.0.1:0",
+		SelfCheck:               true,
+		RequireBundleMatch:      false,
+		NoRequireBundleMatch:    true,
+		Verbose:                 true,
+		TestLifecycleProbe:      probe,
+		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
+	})
+
+	if servedDB == nil {
+		t.Fatal("served sqlite SQLDB is required for event.publish target-route proof")
+	}
+	runServedEventPublishTargetRouteProof(t, endpoint, servedDB, "sqlite", bundleHash, probe)
+}
+
+func TestRunServeRuntimeEventPublishTargetRouteServedPathPostgres(t *testing.T) {
+	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() serveWorkspaceLifecycle {
+		return serveRuntimeWorkspaceStub{}
+	})
+	contractsPath := writeServedEventPublishTargetRouteFixture(t)
+	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+	probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
+	endpoint, _ := startServedEventPublishFollowUpRuntime(t, serveOptions{
+		ConfigPath:              writeServeRuntimeTestConfig(t),
+		ContractsPath:           contractsPath,
+		PlatformSpecPath:        defaultPlatformSpecPath,
+		StoreMode:               "postgres",
+		StoreModeSet:            true,
+		APIListenAddr:           "127.0.0.1:0",
+		MCPListenAddr:           "127.0.0.1:0",
+		SelfCheck:               true,
+		RequireBundleMatch:      false,
+		Verbose:                 true,
+		TestLifecycleProbe:      probe,
+		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
+	})
+
+	runServedEventPublishTargetRouteProof(t, endpoint, db, "postgres", bundleHash, probe)
+}
+
 func TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathDefaultSQLite(t *testing.T) {
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
@@ -3839,8 +3904,6 @@ thing.reviewed:
     source: external
   entity_id: string
   note: text
-  required:
-    - entity_id
 
 thing.agent_hold:
   swarm:
@@ -3885,6 +3948,144 @@ entity-writer:
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "validation", "policy.yaml"), `{}`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "validation", "tools.yaml"), `{}`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "validation", "agents.yaml"), `{}`)
+	return root
+}
+
+func writeServedEventPublishTargetRouteFixture(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: served-event-publish-target-route
+version: "1.0.0"
+platform_version: ">=1.6.0"
+flows:
+  - id: portfolio
+    flow: portfolio
+    mode: static
+  - id: operating
+    flow: operating
+    mode: template
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: served-event-publish-target-route`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "portfolio", "schema.yaml"), `
+name: portfolio
+mode: static
+initial_state: new
+terminal_states: [done]
+states: [new, waiting, done]
+pins:
+  inputs:
+    events: [opco.bootstrap_requested]
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "portfolio", "entities.yaml"), `
+portfolio:
+  owner: text
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "portfolio", "events.yaml"), `
+opco.bootstrap_requested:
+  swarm:
+    source: external
+  owner: text
+
+opco.spinup_requested:
+  swarm:
+    source: external
+  entity_id: string
+  instance_id: string
+  product_id: string
+  required:
+    - entity_id
+    - instance_id
+    - product_id
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "portfolio", "nodes.yaml"), `
+portfolio-bootstrap:
+  id: portfolio-bootstrap
+  execution_type: system_node
+  subscribes_to: [opco.bootstrap_requested]
+  event_handlers:
+    opco.bootstrap_requested:
+      create_entity: true
+      data_accumulation:
+        source_event: opco.bootstrap_requested
+        writes:
+          - source_field: owner
+            target_field: owner
+      advances_to: waiting
+portfolio-node:
+  id: portfolio-node
+  execution_type: system_node
+  subscribes_to: [opco.spinup_requested]
+  event_handlers:
+    opco.spinup_requested:
+      action: create_flow_instance
+      template: operating
+      instance_id_from: payload.instance_id
+      config_from:
+        product_id: payload.product_id
+      advances_to: done
+  permissions:
+    - create_flow_instance
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "portfolio", "policy.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "portfolio", "tools.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "portfolio", "agents.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "schema.yaml"), `
+name: operating
+mode: template
+initial_state: initializing
+terminal_states: [ready]
+states: [initializing, waiting, ready]
+pins:
+  inputs:
+    events: [opco.product_initialization_requested, opco.product_review_requested]
+auto_emit_on_create:
+  event: opco.product_initialization_requested
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "entities.yaml"), `
+product:
+  product_id: text
+  note: text
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "events.yaml"), `
+opco.product_initialization_requested:
+  swarm:
+    source: external
+  product_id: string
+opco.product_review_requested:
+  swarm:
+    source: external
+  note: string
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "nodes.yaml"), `
+lifecycle-orchestrator:
+  id: lifecycle-orchestrator
+  execution_type: system_node
+  subscribes_to: [opco.product_initialization_requested, opco.product_review_requested]
+  event_handlers:
+    opco.product_initialization_requested:
+      data_accumulation:
+        source_event: opco.product_initialization_requested
+        writes:
+          - source_field: product_id
+            target_field: product_id
+      advances_to: waiting
+    opco.product_review_requested:
+      data_accumulation:
+        source_event: opco.product_review_requested
+        writes:
+          - source_field: note
+            target_field: note
+      advances_to: ready
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "policy.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "tools.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "agents.yaml"), `{}`)
 	return root
 }
 
@@ -4221,20 +4422,25 @@ func assertServedEventPublishDeliveriesContainStatus(t *testing.T, deliveries []
 
 func waitForServedEventPublishNodeDeliveryLifecycle(t *testing.T, db *sql.DB, backend, runID, eventID string, probe *lifecycletest.Probe) {
 	t.Helper()
+	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, backend, runID, eventID, "entity-writer", probe)
+}
+
+func waitForServedEventPublishNodeDeliveryLifecycleForNode(t *testing.T, db *sql.DB, backend, runID, eventID, nodeID string, probe *lifecycletest.Probe) {
+	t.Helper()
 	if probe == nil {
 		t.Fatalf("%s lifecycle probe is required for event %s", backend, eventID)
 	}
-	probe.RequireNodePending(eventID, "entity-writer")
+	probe.RequireNodePending(eventID, nodeID)
 	probe.Expect(eventID).
 		PostCommitDispatchStarted().
-		NodeInProgress("entity-writer").
-		HandlerStarted("entity-writer").
-		HandlerCompleted("entity-writer").
-		NodeDelivered("entity-writer").
+		NodeInProgress(nodeID).
+		HandlerStarted(nodeID).
+		HandlerCompleted(nodeID).
+		NodeDelivered(nodeID).
 		PostCommitDispatchCompleted().
 		Within(servedEventPublishLifecycleProbeWaitTimeout)
-	if count := servedEventPublishNodeDeliveryCount(t, db, backend, runID, eventID, "entity-writer"); count != 1 {
-		t.Fatalf("%s node/entity-writer delivery count for event %s = %d, want 1\n%s", backend, eventID, count, servedEventPublishDebugSummary(t, db, backend, runID))
+	if count := servedEventPublishNodeDeliveryCount(t, db, backend, runID, eventID, nodeID); count != 1 {
+		t.Fatalf("%s node/%s delivery count for event %s = %d, want 1\n%s", backend, nodeID, eventID, count, servedEventPublishDebugSummary(t, db, backend, runID))
 	}
 }
 
@@ -4370,6 +4576,84 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	}
 	if got := servedEventPublishAPIIdempotencyCount(t, db, backend, "event.publish", unhandledIdempotencyKey); got != 0 {
 		t.Fatalf("%s idempotency rows for rejected follow-up = %d, want 0", backend, got)
+	}
+}
+
+func runServedEventPublishTargetRouteProof(t *testing.T, endpoint string, db *sql.DB, backend, bundleHash string, probe *lifecycletest.Probe) {
+	t.Helper()
+	bootstrapStdout, bootstrapStderr, code := runServedCLICommand(t, endpoint, []string{
+		"event", "publish", "portfolio/opco.bootstrap_requested",
+		"--bundle-hash", bundleHash,
+		"--payload-json", `{"owner":"operator"}`,
+		"--idempotency-key", "issue-1438-" + backend + "-bootstrap",
+	})
+	if code != 0 {
+		t.Fatalf("bootstrap target-route event publish code=%d stderr=%s stdout=%s", code, bootstrapStderr, bootstrapStdout)
+	}
+	bootstrap := parseServedEventPublishOutput(t, bootstrapStdout)
+	runID := bootstrap["run_id"]
+	bootstrapEventID := bootstrap["event_id"]
+	if bootstrap["new_run_created"] != "true" || bootstrap["deliveries"] == "0" || runID == "" || bootstrapEventID == "" {
+		t.Fatalf("bootstrap target-route event publish fields = %#v, want new run with delivery", bootstrap)
+	}
+	parentEntityID := requireServedEventPublishEntityState(t, db, backend, runID, "", "waiting")
+
+	instanceID := "11111111-1111-4111-8111-111111111111"
+	spinupStdout, spinupStderr, code := runServedCLICommand(t, endpoint, []string{
+		"event", "publish", "portfolio/opco.spinup_requested",
+		"--run-id", runID,
+		"--source-event-id", bootstrapEventID,
+		"--payload-json", fmt.Sprintf(`{"entity_id":%q,"instance_id":%q,"product_id":"product-1"}`, parentEntityID, instanceID),
+		"--idempotency-key", "issue-1438-" + backend + "-spinup",
+	})
+	if code != 0 {
+		t.Fatalf("spinup target-route event publish code=%d stderr=%s stdout=%s", code, spinupStderr, spinupStdout)
+	}
+	spinup := parseServedEventPublishOutput(t, spinupStdout)
+	spinupEventID := spinup["event_id"]
+	if spinup["run_id"] != runID || spinup["new_run_created"] != "false" || spinup["deliveries"] == "0" || spinupEventID == "" {
+		t.Fatalf("spinup target-route event publish fields = %#v, want selected existing run with delivery", spinup)
+	}
+	waitServedEventPublishDeliveryStatusCount(t, db, backend, spinupEventID, "node", "portfolio-node", "delivered", 1)
+
+	autoEventName := "operating/" + instanceID + "/opco.product_initialization_requested"
+	autoEventID := waitServedEventPublishEventID(t, db, backend, runID, autoEventName)
+	waitServedEventPublishDeliveryStatusCount(t, db, backend, autoEventID, "node", "lifecycle-orchestrator", "delivered", 1)
+	entityID := servedEventPublishEventEntityID(t, db, backend, autoEventID)
+	if entityID == "" {
+		t.Fatalf("%s child auto event %s has no entity_id\n%s", backend, autoEventID, servedEventPublishDebugSummary(t, db, backend, runID))
+	}
+	requireServedEventPublishEntityState(t, db, backend, runID, entityID, "waiting")
+	targetFlowInstance := requireServedEventPublishEntityFlowInstance(t, db, backend, runID, entityID)
+
+	targetStdout, targetStderr, code := runServedCLICommand(t, endpoint, []string{
+		"event", "publish", "operating/opco.product_review_requested",
+		"--run-id", runID,
+		"--source-event-id", autoEventID,
+		"--target-flow-instance", targetFlowInstance,
+		"--target-entity-id", entityID,
+		"--payload-json", `{"note":"approved-target"}`,
+		"--idempotency-key", "issue-1438-" + backend + "-target",
+	})
+	if code != 0 {
+		t.Fatalf("target-route event publish code=%d stderr=%s stdout=%s", code, targetStderr, targetStdout)
+	}
+	targeted := parseServedEventPublishOutput(t, targetStdout)
+	targetEventID := targeted["event_id"]
+	if targeted["run_id"] != runID || targeted["new_run_created"] != "false" || targeted["deliveries"] == "0" || targetEventID == "" {
+		t.Fatalf("target-route event publish fields = %#v, want selected existing run with delivery", targeted)
+	}
+	requireServedEventPublishTargetRouteRow(t, db, backend, targetEventID, "operating/opco.product_review_requested", targetFlowInstance, entityID)
+	requireServedEventPublishDeliveryTargetRoute(t, db, backend, targetEventID, "node", "lifecycle-orchestrator", targetFlowInstance, entityID)
+	waitServedEventPublishDeliveryStatusCount(t, db, backend, targetEventID, "node", "lifecycle-orchestrator", "delivered", 1)
+	requireServedEventPublishEntityState(t, db, backend, runID, entityID, "ready")
+	requireServedEntityReadback(t, endpoint, runID, entityID, "ready")
+	requireServedRunStatus(t, endpoint, runID, "completed")
+	requireServedEventReadback(t, endpoint, targetEventID, runID, entityID, "operating/opco.product_review_requested", "lifecycle-orchestrator")
+	requireServedTraceReadback(t, endpoint, runID, targetEventID, "operating/opco.product_review_requested", "lifecycle-orchestrator")
+
+	if got := servedEventPublishAPIIdempotencyCount(t, db, backend, "event.publish", "issue-1438-"+backend+"-target"); got != 1 {
+		t.Fatalf("%s target-route idempotency rows = %d, want 1", backend, got)
 	}
 }
 
@@ -4755,6 +5039,118 @@ func requireServedEventPublishEntityState(t *testing.T, db *sql.DB, backend, run
 	}
 	t.Fatalf("%s entity_state for run %s entity %q = %q (entity %q), want %q\n%s", backend, runID, entityID, lastState, lastEntityID, wantState, servedEventPublishDebugSummary(t, db, backend, runID))
 	return ""
+}
+
+func requireServedEventPublishEntityFlowInstance(t *testing.T, db *sql.DB, backend, runID, entityID string) string {
+	t.Helper()
+	var (
+		query        string
+		flowInstance string
+		args         []any
+	)
+	switch backend {
+	case "postgres":
+		query = `SELECT COALESCE(flow_instance, '') FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid`
+		args = []any{runID, entityID}
+	case "sqlite":
+		query = `SELECT COALESCE(flow_instance, '') FROM entity_state WHERE run_id = ? AND entity_id = ?`
+		args = []any{runID, entityID}
+	default:
+		t.Fatalf("unknown proof backend %q", backend)
+	}
+	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&flowInstance); err != nil {
+		t.Fatalf("%s load entity flow_instance run=%s entity=%s: %v", backend, runID, entityID, err)
+	}
+	flowInstance = strings.Trim(strings.TrimSpace(flowInstance), "/")
+	if flowInstance == "" {
+		t.Fatalf("%s entity flow_instance for run=%s entity=%s is empty", backend, runID, entityID)
+	}
+	return flowInstance
+}
+
+func requireServedEventPublishTargetRouteRow(t *testing.T, db *sql.DB, backend, eventID, eventName, flowInstance, entityID string) {
+	t.Helper()
+	var (
+		query           string
+		gotEventName    string
+		gotEntityID     string
+		gotFlowInstance string
+		targetRoute     string
+		args            []any
+	)
+	switch backend {
+	case "postgres":
+		query = `
+			SELECT event_name, COALESCE(entity_id::text, ''), COALESCE(flow_instance, ''), COALESCE(target_route::text, '{}')
+			FROM events
+			WHERE event_id = $1::uuid
+		`
+		args = []any{eventID}
+	case "sqlite":
+		query = `
+			SELECT event_name, COALESCE(entity_id, ''), COALESCE(flow_instance, ''), COALESCE(target_route, '{}')
+			FROM events
+			WHERE event_id = ?
+		`
+		args = []any{eventID}
+	default:
+		t.Fatalf("unknown proof backend %q", backend)
+	}
+	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&gotEventName, &gotEntityID, &gotFlowInstance, &targetRoute); err != nil {
+		t.Fatalf("%s load target-route event row: %v", backend, err)
+	}
+	if gotEventName != eventName || gotEntityID != entityID || gotFlowInstance != flowInstance {
+		t.Fatalf("%s target event row = event:%q entity:%q flow:%q, want %q/%q/%q", backend, gotEventName, gotEntityID, gotFlowInstance, eventName, entityID, flowInstance)
+	}
+	requireServedEventPublishRouteJSON(t, backend, "event.target_route", targetRoute, flowInstance, entityID)
+}
+
+func requireServedEventPublishDeliveryTargetRoute(t *testing.T, db *sql.DB, backend, eventID, subscriberType, subscriberID, flowInstance, entityID string) {
+	t.Helper()
+	var (
+		query       string
+		targetRoute string
+		args        []any
+	)
+	switch backend {
+	case "postgres":
+		query = `
+			SELECT COALESCE(delivery_target_route::text, '{}')
+			FROM event_deliveries
+			WHERE event_id = $1::uuid
+			  AND subscriber_type = $2
+			  AND subscriber_id = $3
+			LIMIT 1
+		`
+		args = []any{eventID, subscriberType, subscriberID}
+	case "sqlite":
+		query = `
+			SELECT COALESCE(delivery_target_route, '{}')
+			FROM event_deliveries
+			WHERE event_id = ?
+			  AND subscriber_type = ?
+			  AND subscriber_id = ?
+			LIMIT 1
+		`
+		args = []any{eventID, subscriberType, subscriberID}
+	default:
+		t.Fatalf("unknown proof backend %q", backend)
+	}
+	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&targetRoute); err != nil {
+		t.Fatalf("%s load delivery target route: %v", backend, err)
+	}
+	requireServedEventPublishRouteJSON(t, backend, "event_deliveries.delivery_target_route", targetRoute, flowInstance, entityID)
+}
+
+func requireServedEventPublishRouteJSON(t *testing.T, backend, field, raw, flowInstance, entityID string) {
+	t.Helper()
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+		t.Fatalf("%s decode %s route JSON %q: %v", backend, field, raw, err)
+	}
+	if decoded["flow_instance"] != flowInstance || decoded["entity_id"] != entityID {
+		t.Fatalf("%s %s route = %#v, want flow/entity %s/%s", backend, field, decoded, flowInstance, entityID)
+	}
 }
 
 func servedEventPublishDebugSummary(t *testing.T, db *sql.DB, backend, runID string) string {

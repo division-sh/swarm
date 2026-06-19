@@ -10895,13 +10895,13 @@ cli_specification:
       - EVENT_NOT_FOUND, replay conflict errors, auth/HTTP/RPC failures, and malformed EventReplayResult values fail closed with tested exit codes
       - no direct DB/store/runtime/EventBus/dashboard/Builder reads or writes and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, run.start, event.publish, agent.replay, or agent.replay_backlog usage
     event_publish:
-      command: swarm event publish <event-name> --payload-json <json-object> [--run-id <run-id>] [--source-event-id <event-id>] [--bundle-hash <bundle-v1:sha256:...>] [--bundle-fingerprint <sha256:...>] [--emitter <source>] [--idempotency-key <key>]
+      command: swarm event publish <event-name> --payload-json <json-object> [--run-id <run-id>] [--source-event-id <event-id>] [--target-flow-instance <flow-instance>] [--target-entity-id <entity-id>] [--bundle-hash <bundle-v1:sha256:...>] [--bundle-fingerprint <sha256:...>] [--emitter <source>] [--idempotency-key <key>]
       tier: should_have
       implementation_status: implemented
       owner: /v1/rpc event.publish
       behavior: >-
         Mutating event publication CLI consumer. The CLI validates the event name, required JSON object payload, optional run
-        target, optional same-run source event id, optional canonical bundle_hash assertion or deprecated legacy bundle
+        target, optional same-run source event id, optional singular receiver target route identity, optional canonical bundle_hash assertion or deprecated legacy bundle
         fingerprint alias, optional emitter, and optional
         idempotency key, then sends exactly those params to /v1/rpc event.publish through the shared v1 API client. The server
         remains the event-publication owner:
@@ -10916,7 +10916,10 @@ cli_specification:
         flow/event combinations and ambiguous unscoped leaf names fail closed with EVENT_NOT_DECLARED. When --run-id selects
         an existing run, the server preflights the selected runtime EventBus recipient plan and rejects declared-but-unroutable
         follow-up events before event/idempotency persistence; the CLI must render that server EVENT_NOT_DECLARED rejection
-        rather than reporting a successful publish with zero deliveries. Caller-supplied payload.entity_id is not target or
+        rather than reporting a successful publish with zero deliveries. When both --target-flow-instance and --target-entity-id
+        are supplied with --run-id, the CLI serializes them as `target: {flow_instance, entity_id}` and the server validates
+        the selected-run entity, entity_state.flow_instance equality, event routability for that concrete receiver route,
+        and source-event same-run lineage before persistence. Caller-supplied payload.entity_id is not target or
         entity authority. If the selected handler uses create_entity, /v1/rpc event.publish rejects payload.entity_id with
         PAYLOAD_VALIDATION_FAILED because create_entity mints the platform entity identity.
       flags:
@@ -10930,6 +10933,12 @@ cli_specification:
       - name: --source-event-id <event-id>
         maps_to: source_event_id
         behavior: Optional parent/source event id for explicit checkpoint lineage. Must be used with --run-id and must name an event from the same run.
+      - name: --target-flow-instance <flow-instance>
+        maps_to: target.flow_instance
+        behavior: Optional existing-run receiver target flow instance. Must be used with --run-id and --target-entity-id.
+      - name: --target-entity-id <entity-id>
+        maps_to: target.entity_id
+        behavior: Optional existing-run receiver target entity id. Must be used with --run-id and --target-flow-instance.
       - name: --bundle-hash <bundle-v1:sha256:...>
         maps_to: bundle_hash
         behavior: Canonical bundle scope. Required by the server when --run-id is omitted; optional with --run-id as a same-run bundle assertion. Cannot be combined with --bundle-fingerprint.
@@ -10970,11 +10979,12 @@ cli_specification:
         - RUN_ALREADY_TERMINAL
         - IDEMPOTENCY_CONFLICT
       proof_expectations:
-      - exact /v1/rpc event.publish call with event_name, required payload, optional run_id, optional source_event_id, optional canonical bundle_hash or deprecated legacy bundle_ref.fingerprint, optional emitter, and optional idempotency_key params only; missing create-new-work bundle scope maps to server BUNDLE_SCOPE_REQUIRED and valid non-routable hashes map to BUNDLE_UNAVAILABLE
+      - exact /v1/rpc event.publish call with event_name, required payload, optional run_id, optional source_event_id, optional target object from --target-flow-instance plus --target-entity-id, optional canonical bundle_hash or deprecated legacy bundle_ref.fingerprint, optional emitter, and optional idempotency_key params only; missing create-new-work bundle scope maps to server BUNDLE_SCOPE_REQUIRED and valid non-routable hashes map to BUNDLE_UNAVAILABLE
       - flow-scoped event names are passed through exactly by the CLI and resolved only by the server-owned /v1/rpc event.publish contract-catalog resolver; unknown scoped references and ambiguous unscoped leaf names produce EVENT_NOT_DECLARED without mutation or idempotency completion
       - existing-run follow-up publish with no selected persisted delivery recipient or delivery route produces server EVENT_NOT_DECLARED before event/idempotency persistence; the CLI exits through publish_rejected and never reports deliveries=0 as success for that path
+      - explicit target route publish persists event.target and one delivery_target_route through the server-owned event.publish/EventBus path; nonexistent entity, mismatched entity/flow ownership, not-routable target flow, missing/terminal run, source lineage mismatch, blank/malformed target params, and payload-only entity_id/flow_instance non-authority fail closed before event/idempotency persistence
       - payload.entity_id on a create_entity event produces server PAYLOAD_VALIDATION_FAILED before event/idempotency persistence; the CLI exits through publish_rejected and does not treat payload.entity_id as target/entity routing authority
-      - missing/blank event name, invalid or non-object --payload-json, blank optional flags, malformed bundle_hash, malformed bundle fingerprint, both bundle identity flags together, invalid args, and missing explicit token for non-loopback API targets make zero API calls
+      - missing/blank event name, invalid or non-object --payload-json, blank optional flags, partial target route flags, target route flags without --run-id, malformed bundle_hash, malformed bundle fingerprint, both bundle identity flags together, invalid args, and missing explicit token for non-loopback API targets make zero API calls
       - success output renders only server-owned EventPublishResult event_id, run_id, source_event_id when present, new_run_created, and typed persisted delivery rows
       - RUN_NOT_FOUND, EVENT_NOT_FOUND, publish rejection errors, auth/HTTP/RPC failures, and malformed EventPublishResult values fail closed with tested exit codes
       - no direct DB/store/runtime/EventBus/dashboard/Builder reads or writes and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, run.start, event.replay, agent.replay, or agent.replay_backlog usage
@@ -12772,6 +12782,24 @@ api_specification:
             type: array
             items:
               $ref: '#/components/schemas/DeadLetterRecord'
+      EventPublishTargetRoute:
+        type: object
+        additionalProperties: false
+        required:
+        - flow_instance
+        - entity_id
+        properties:
+          flow_instance:
+            type: string
+            minLength: 1
+            description: Concrete receiver flow instance for existing-run event.publish target route identity.
+          entity_id:
+            $ref: '#/components/schemas/OpaqueId'
+            description: Concrete receiver entity id for existing-run event.publish target route identity.
+        description: >-
+          Singular receiver route identity accepted by /v1/rpc event.publish when run_id is supplied.
+          The API validates the entity belongs to the selected run and flow_instance before persistence.
+          Selector target forms, fan-out target_set, and payload-derived target identity are not part of this schema.
       EventPublishDelivery:
         type: object
         additionalProperties: false
@@ -15521,7 +15549,10 @@ api_specification:
         \ the selected runtime EventBus recipient plan before event/idempotency persistence. A declared event with no selected\
         \ persisted delivery recipient or delivery route for that run fails closed with EVENT_NOT_DECLARED and must not return\
         \ success with deliveries=0. Target resolution failures in the selected plan also fail closed with EVENT_NOT_DECLARED.\
-        \ The API must not infer an entity target from run_id or payload.entity_id.\n\nCheckpoint/source-authority policy:\
+        \ Existing-run publication may provide `target` as the singular receiver route identity (`flow_instance` plus `entity_id`).\
+        \ When present, `target` is route authority and the server validates that the entity exists in the selected run,\
+        \ belongs to the selected target flow instance, and has a selected delivery route for the requested event before\
+        \ event/idempotency persistence. The API must not infer an entity target from run_id or payload.entity_id.\n\nCheckpoint/source-authority policy:\
         \ callers that need causal proof\nMUST provide source_event_id together with run_id. The source event\nmust exist\
         \ in the same run_id and the server persists it as\nevents.source_event_id / ParentEventID. Omitted source_event_id\n\
         means the published event is unparented; it is valid low-level\ningress but MUST NOT be presented as proof that an\
@@ -15597,6 +15628,15 @@ api_specification:
         description: Optional parent/source event id for explicit checkpoint lineage. Requires run_id and must identify an event in the same run.
         schema:
           $ref: '#/components/schemas/OpaqueId'
+      - name: target
+        required: false
+        description: >-
+          Optional singular receiver route identity for existing-run publication. Requires run_id and carries the concrete
+          target flow_instance plus entity_id that the server persists as event.target before EventBus recipient planning.
+          This field is route authority; payload.entity_id and run_id are not target authority. Fan-out target_set and
+          selector-style target forms are not part of the v1 event.publish public surface in this slice.
+        schema:
+          $ref: '#/components/schemas/EventPublishTargetRoute'
       - name: emitter
         required: false
         description: Optional producer identifier. Defaults to cli-publish:<actor_token_id>.

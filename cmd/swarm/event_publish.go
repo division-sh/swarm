@@ -20,21 +20,25 @@ const (
 )
 
 type eventPublishCommandOptions struct {
-	apiOptions           rootCommandOptions
-	payloadJSON          string
-	runID                string
-	sourceEventID        string
-	bundleHash           string
-	bundleFingerprint    string
-	emitter              string
-	idempotencyKey       string
-	payloadJSONSet       bool
-	runIDSet             bool
-	sourceEventIDSet     bool
-	bundleHashSet        bool
-	bundleFingerprintSet bool
-	emitterSet           bool
-	idempotencyKeySet    bool
+	apiOptions            rootCommandOptions
+	payloadJSON           string
+	runID                 string
+	sourceEventID         string
+	targetFlowInstance    string
+	targetEntityID        string
+	bundleHash            string
+	bundleFingerprint     string
+	emitter               string
+	idempotencyKey        string
+	payloadJSONSet        bool
+	runIDSet              bool
+	sourceEventIDSet      bool
+	targetFlowInstanceSet bool
+	targetEntityIDSet     bool
+	bundleHashSet         bool
+	bundleFingerprintSet  bool
+	emitterSet            bool
+	idempotencyKeySet     bool
 }
 
 type eventPublishResult struct {
@@ -73,6 +77,8 @@ func newEventPublishCommand(opts rootCommandOptions) *cobra.Command {
 			publishOpts.payloadJSONSet = cmd.Flags().Changed("payload-json")
 			publishOpts.runIDSet = cmd.Flags().Changed("run-id")
 			publishOpts.sourceEventIDSet = cmd.Flags().Changed("source-event-id")
+			publishOpts.targetFlowInstanceSet = cmd.Flags().Changed("target-flow-instance")
+			publishOpts.targetEntityIDSet = cmd.Flags().Changed("target-entity-id")
 			publishOpts.bundleHashSet = cmd.Flags().Changed("bundle-hash")
 			publishOpts.bundleFingerprintSet = cmd.Flags().Changed("bundle-fingerprint")
 			publishOpts.emitterSet = cmd.Flags().Changed("emitter")
@@ -83,6 +89,8 @@ func newEventPublishCommand(opts rootCommandOptions) *cobra.Command {
 	cmd.Flags().StringVar(&publishOpts.payloadJSON, "payload-json", "", "Required JSON object payload")
 	cmd.Flags().StringVar(&publishOpts.runID, "run-id", "", "Optional existing nonterminal run id to inject into")
 	cmd.Flags().StringVar(&publishOpts.sourceEventID, "source-event-id", "", "Optional same-run parent event id for checkpoint lineage")
+	cmd.Flags().StringVar(&publishOpts.targetFlowInstance, "target-flow-instance", "", "Optional existing-run receiver target flow instance")
+	cmd.Flags().StringVar(&publishOpts.targetEntityID, "target-entity-id", "", "Optional existing-run receiver target entity id")
 	cmd.Flags().StringVar(&publishOpts.bundleHash, "bundle-hash", "", "Optional expected server canonical bundle hash")
 	cmd.Flags().StringVar(&publishOpts.bundleFingerprint, "bundle-fingerprint", "", "Optional expected server bundle fingerprint")
 	cmd.Flags().StringVar(&publishOpts.emitter, "emitter", "", "Optional producer identifier")
@@ -149,6 +157,29 @@ func (opts eventPublishCommandOptions) params(args []string) (string, map[string
 			return "", nil, fmt.Errorf("--source-event-id requires --run-id")
 		}
 		params["source_event_id"] = sourceEventID
+	}
+	targetFlowInstance, err := optionalNonEmptyFlag("--target-flow-instance", opts.targetFlowInstance, opts.targetFlowInstanceSet)
+	if err != nil {
+		return "", nil, err
+	}
+	targetEntityID, err := optionalNonEmptyFlag("--target-entity-id", opts.targetEntityID, opts.targetEntityIDSet)
+	if err != nil {
+		return "", nil, err
+	}
+	if targetFlowInstance != "" || targetEntityID != "" {
+		if runID == "" {
+			return "", nil, fmt.Errorf("target route flags require --run-id")
+		}
+		if targetFlowInstance == "" {
+			return "", nil, fmt.Errorf("--target-entity-id requires --target-flow-instance")
+		}
+		if targetEntityID == "" {
+			return "", nil, fmt.Errorf("--target-flow-instance requires --target-entity-id")
+		}
+		params["target"] = map[string]any{
+			"flow_instance": strings.Trim(strings.TrimSpace(targetFlowInstance), "/"),
+			"entity_id":     targetEntityID,
+		}
 	}
 	bundleHash, err := optionalNonEmptyFlag("--bundle-hash", opts.bundleHash, opts.bundleHashSet)
 	if err != nil {

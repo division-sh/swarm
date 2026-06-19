@@ -54,6 +54,8 @@ type eventPublicationParams struct {
 	EntityID          string
 	EntityIDProvided  bool
 	FlowInstance      string
+	TargetRoute       events.RouteIdentity
+	TargetRouteSet    bool
 	RunID             string
 	SourceEventID     string
 	IdempotencyKey    string
@@ -65,6 +67,7 @@ type eventPublicationParams struct {
 type eventPublicationConfig struct {
 	sourceAgent                    func(Request) string
 	allowEmitterParam              bool
+	allowExplicitTargetRoute       bool
 	rootInputOnly                  bool
 	requireExistingExplicitRun     bool
 	injectRunIDEntityIDWhenMissing bool
@@ -101,6 +104,7 @@ func executeEventPublish(ctx context.Context, req Request, opts OperatorReadOpti
 	cfg := eventPublicationConfig{
 		sourceAgent:                    eventPublishSourceAgent,
 		allowEmitterParam:              true,
+		allowExplicitTargetRoute:       true,
 		requireExistingExplicitRun:     true,
 		injectRunIDEntityIDWhenMissing: true,
 		injectRunIDEntityIDOnlyNewRun:  true,
@@ -255,6 +259,13 @@ func eventPublicationParamsFromRequest(req Request, cfg eventPublicationConfig) 
 	if err != nil {
 		return eventPublicationParams{}, bundleIdentityParam{}, err
 	}
+	targetRoute, targetRouteSet, err := eventPublicationTargetRouteParam(req.Params)
+	if err != nil {
+		return eventPublicationParams{}, bundleIdentityParam{}, err
+	}
+	if targetRouteSet && !cfg.allowExplicitTargetRoute {
+		return eventPublicationParams{}, bundleIdentityParam{}, NewInvalidParamsError(map[string]any{"field": "target", "reason": "is not supported for this method"})
+	}
 	if sourceEventIDSet {
 		if sourceEventID == "" {
 			return eventPublicationParams{}, bundleIdentityParam{}, NewInvalidParamsError(map[string]any{"field": "source_event_id", "reason": "must be a UUID"})
@@ -267,6 +278,9 @@ func eventPublicationParamsFromRequest(req Request, cfg eventPublicationConfig) 
 	}
 	if sourceEventID != "" && runID == "" {
 		return eventPublicationParams{}, bundleIdentityParam{}, NewInvalidParamsError(map[string]any{"field": "run_id", "reason": "is required when source_event_id is provided"})
+	}
+	if targetRouteSet && runID == "" {
+		return eventPublicationParams{}, bundleIdentityParam{}, NewInvalidParamsError(map[string]any{"field": "run_id", "reason": "is required when target is provided"})
 	}
 	newRun := false
 	if runID == "" {
@@ -303,6 +317,8 @@ func eventPublicationParamsFromRequest(req Request, cfg eventPublicationConfig) 
 		Payload:           payload,
 		EntityID:          entityID,
 		EntityIDProvided:  entityIDProvided,
+		TargetRoute:       targetRoute,
+		TargetRouteSet:    targetRouteSet,
 		RunID:             runID,
 		SourceEventID:     sourceEventID,
 		IdempotencyKey:    idempotencyKey,
@@ -310,6 +326,66 @@ func eventPublicationParamsFromRequest(req Request, cfg eventPublicationConfig) 
 		NewRunCreated:     newRun,
 		RunIDProvided:     runIDProvided,
 	}, bundleIdentity, nil
+}
+
+func eventPublicationTargetRouteParam(params map[string]any) (events.RouteIdentity, bool, error) {
+	if params == nil {
+		return events.RouteIdentity{}, false, nil
+	}
+	raw, ok := params["target"]
+	if !ok {
+		return events.RouteIdentity{}, false, nil
+	}
+	if isEmptyParam(raw) {
+		return events.RouteIdentity{}, true, NewInvalidParamsError(map[string]any{"field": "target", "reason": "must be an object"})
+	}
+	target, ok := raw.(map[string]any)
+	if !ok {
+		return events.RouteIdentity{}, true, NewInvalidParamsError(map[string]any{"field": "target", "reason": "must be an object"})
+	}
+	for key := range target {
+		switch key {
+		case "flow_instance", "entity_id":
+		default:
+			return events.RouteIdentity{}, true, NewInvalidParamsError(map[string]any{"field": "target." + key, "reason": "unknown field"})
+		}
+	}
+	flowInstance, err := requiredTargetStringParam(target, "target.flow_instance", "flow_instance")
+	if err != nil {
+		return events.RouteIdentity{}, true, err
+	}
+	entityID, err := requiredTargetStringParam(target, "target.entity_id", "entity_id")
+	if err != nil {
+		return events.RouteIdentity{}, true, err
+	}
+	parsedEntityID, err := uuid.Parse(entityID)
+	if err != nil {
+		return events.RouteIdentity{}, true, NewInvalidParamsError(map[string]any{"field": "target.entity_id", "reason": "must be a UUID"})
+	}
+	route := events.RouteIdentity{
+		FlowInstance: strings.Trim(strings.TrimSpace(flowInstance), "/"),
+		EntityID:     parsedEntityID.String(),
+	}.Normalized()
+	if route.FlowInstance == "" {
+		return events.RouteIdentity{}, true, NewInvalidParamsError(map[string]any{"field": "target.flow_instance", "reason": "is required"})
+	}
+	return route, true, nil
+}
+
+func requiredTargetStringParam(params map[string]any, field, key string) (string, error) {
+	value, ok := params[key]
+	if !ok || isEmptyParam(value) {
+		return "", NewInvalidParamsError(map[string]any{"field": field, "reason": "is required"})
+	}
+	text, ok := value.(string)
+	if !ok {
+		return "", NewInvalidParamsError(map[string]any{"field": field, "reason": "must be a string"})
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return "", NewInvalidParamsError(map[string]any{"field": field, "reason": "is required"})
+	}
+	return text, nil
 }
 
 func eventPublicationPayload(params map[string]any, runID string, injectRunIDEntityID bool) (json.RawMessage, string, bool, error) {
@@ -351,6 +427,9 @@ func eventPublicationEvent(params eventPublicationParams, createdAt time.Time) e
 	if flowInstance := strings.Trim(strings.TrimSpace(params.FlowInstance), "/"); flowInstance != "" {
 		envelope.FlowInstance = flowInstance
 	}
+	if params.TargetRouteSet {
+		envelope = events.EnvelopeForTargetRoute(envelope, params.TargetRoute)
+	}
 	return events.NewRootIngressEvent(params.EventID, events.EventType(params.EventName), params.Emitter, "", params.Payload, 0, params.RunID, params.SourceEventID, envelope, createdAt)
 }
 
@@ -374,6 +453,16 @@ func validateEventPublication(ctx context.Context, opts OperatorReadOptions, par
 				"field_path": "$.entity_id",
 				"rule":       "create_entity_mints_entity_id",
 				"message":    "caller-supplied entity_id is not allowed for create-entity event.publish",
+			}},
+			"event_name": params.EventName,
+		})
+	}
+	if params.TargetRouteSet && eventPublicationHasCreateEntityHandler(opts.Source, params.EventName) {
+		return params, NewApplicationError(PayloadValidationFailedCode, false, map[string]any{
+			"violations": []map[string]any{{
+				"field_path": "$.target.entity_id",
+				"rule":       "create_entity_mints_entity_id",
+				"message":    "caller-supplied target entity_id is not allowed for create-entity event.publish",
 			}},
 			"event_name": params.EventName,
 		})
@@ -430,6 +519,18 @@ func validateEventPublication(ctx context.Context, opts OperatorReadOptions, par
 }
 
 func enrichExistingRunEventPublicationRoute(ctx context.Context, opts OperatorReadOptions, params eventPublicationParams) (eventPublicationParams, error) {
+	if params.TargetRouteSet {
+		return enrichExistingRunEventPublicationTargetRoute(ctx, opts, params)
+	}
+	if params.EntityIDProvided && eventPublicationRequiresExplicitTargetRoute(opts.Source, params.EventName) {
+		return params, NewApplicationError(EventNotDeclaredCode, false, map[string]any{
+			"event_name":      params.EventName,
+			"run_id":          params.RunID,
+			"entity_id":       params.EntityID,
+			"declared_events": declaredEventNames(opts.Source),
+			"reason":          "selected_run_target_required",
+		})
+	}
 	if strings.TrimSpace(params.EntityID) == "" {
 		return params, nil
 	}
@@ -451,6 +552,66 @@ func enrichExistingRunEventPublicationRoute(ctx context.Context, opts OperatorRe
 		return params, err
 	}
 	params.FlowInstance = strings.Trim(strings.TrimSpace(entity.Entity.FlowInstance), "/")
+	return params, nil
+}
+
+func eventPublicationRequiresExplicitTargetRoute(source semanticview.Source, eventName string) bool {
+	if source == nil {
+		return false
+	}
+	eventName = runtimeeventidentity.Normalize(eventName)
+	if eventName == "" {
+		return false
+	}
+	for _, scope := range source.FlowScopes() {
+		if !strings.EqualFold(strings.TrimSpace(scope.Mode), "template") {
+			continue
+		}
+		if source.FlowHasInputEvent(scope.ID, eventName) {
+			return true
+		}
+	}
+	return false
+}
+
+func enrichExistingRunEventPublicationTargetRoute(ctx context.Context, opts OperatorReadOptions, params eventPublicationParams) (eventPublicationParams, error) {
+	target := params.TargetRoute.Normalized()
+	if target.EntityID == "" || target.FlowInstance == "" {
+		return params, NewInvalidParamsError(map[string]any{"field": "target", "reason": "flow_instance and entity_id are required"})
+	}
+	entities, err := requireEntityReadStore(opts.Entities)
+	if err != nil {
+		return params, err
+	}
+	entity, err := entities.LoadOperatorEntity(ctx, target.EntityID, params.RunID)
+	if errors.Is(err, store.ErrEntityNotFound) {
+		return params, NewApplicationError(EventNotDeclaredCode, false, map[string]any{
+			"event_name":      params.EventName,
+			"run_id":          params.RunID,
+			"entity_id":       target.EntityID,
+			"flow_instance":   target.FlowInstance,
+			"declared_events": declaredEventNames(opts.Source),
+			"reason":          "selected_target_entity_not_found",
+		})
+	}
+	if err != nil {
+		return params, err
+	}
+	storedFlowInstance := strings.Trim(strings.TrimSpace(entity.Entity.FlowInstance), "/")
+	if storedFlowInstance != target.FlowInstance {
+		return params, NewApplicationError(EventNotDeclaredCode, false, map[string]any{
+			"event_name":           params.EventName,
+			"run_id":               params.RunID,
+			"entity_id":            target.EntityID,
+			"flow_instance":        target.FlowInstance,
+			"stored_flow_instance": storedFlowInstance,
+			"declared_events":      declaredEventNames(opts.Source),
+			"reason":               "selected_target_flow_instance_mismatch",
+		})
+	}
+	params.TargetRoute = target
+	params.EntityID = target.EntityID
+	params.FlowInstance = target.FlowInstance
 	return params, nil
 }
 

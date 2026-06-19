@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
@@ -871,6 +872,169 @@ func TestOperatorEventPublishExplicitRunFollowUpRequiresRecipientBeforePersisten
 	}
 }
 
+func TestOperatorEventPublishExistingRunTargetRouteValidatesAndPersistsCanonicalTarget(t *testing.T) {
+	ctx := context.Background()
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	source := semanticview.Wrap(eventPublishTargetRouteTestBundle())
+	bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "bootstrap-node")
+	initialCh := bus.Subscribe("bootstrap-node", events.EventType("bootstrap.requested"))
+	defer bus.Unsubscribe("bootstrap-node")
+	handler := eventPublishTestHandler(t, pg, bus, source)
+
+	initial := rpcCall(t, handler, eventPublishBody("", runStartTestFingerprint, "bootstrap.requested", `{"topic":"first"}`, "", "idem-target-route-initial"))
+	if initial.Error != nil {
+		t.Fatalf("initial event.publish error = %#v", initial.Error)
+	}
+	runID := stringValue(t, asMap(t, initial.Result)["run_id"], "run_id")
+	requireAPIV1RuntimeBusEvent(t, initialCh, "initial delivery")
+
+	targetFlowInstance := "operating/inst-1"
+	targetEntityID := runtimeflowidentity.EntityID(targetFlowInstance)
+	seedEventPublishEntityState(t, db, runID, targetEntityID, targetFlowInstance, "waiting")
+	if err := bus.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("operating", "inst-1")}); err != nil {
+		t.Fatalf("AddFlowInstanceRoute: %v", err)
+	}
+
+	targeted := rpcCall(t, handler, eventPublishBodyWithTarget(runID, "", runStartTestFingerprint, "operating/opco.product_initialization_requested", `{"topic":"targeted"}`, "operator-test", "idem-target-route-positive", targetFlowInstance, targetEntityID))
+	if targeted.Error != nil {
+		t.Fatalf("targeted event.publish error = %#v", targeted.Error)
+	}
+	result := asMap(t, targeted.Result)
+	eventID := stringValue(t, result["event_id"], "event_id")
+	if result["run_id"] != runID || result["new_run_created"] != false {
+		t.Fatalf("targeted result = %#v, want selected existing run", result)
+	}
+	assertEventPublishTargetRouteRow(t, db, runID, eventID, "operating/opco.product_initialization_requested", targetFlowInstance, targetEntityID)
+	assertEventPublishDeliveryTargetRoute(t, db, eventID, "node", "lifecycle-orchestrator", targetFlowInstance, targetEntityID)
+	if got := countEventRowsByRunID(t, db, runID); got != 2 {
+		t.Fatalf("events for selected run after targeted publish = %d, want 2", got)
+	}
+	if got := countAPIIdempotencyRows(t, db); got != 2 {
+		t.Fatalf("api_idempotency rows after targeted publish = %d, want 2", got)
+	}
+
+	payloadOnly := rpcCall(t, handler, eventPublishBody(runID, runStartTestFingerprint, "operating/opco.product_initialization_requested", fmt.Sprintf(`{"entity_id":%q,"topic":"payload-only"}`, targetEntityID), "operator-test", "idem-target-route-payload-only"))
+	if payloadOnly.Error == nil {
+		t.Fatal("payload-only target route event.publish error = nil")
+	}
+	payloadOnlyData := asMap(t, payloadOnly.Error.Data)
+	if payloadOnlyData["code"] != EventNotDeclaredCode {
+		t.Fatalf("payload-only target route data = %#v, want %s", payloadOnlyData, EventNotDeclaredCode)
+	}
+	if got := countEventRowsByRunID(t, db, runID); got != 2 {
+		t.Fatalf("events for selected run after payload-only target = %d, want 2", got)
+	}
+}
+
+func TestOperatorEventPublishExistingRunTargetRouteRejectsInvalidTargetBeforePersistence(t *testing.T) {
+	ctx := context.Background()
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	source := semanticview.Wrap(eventPublishTargetRouteTestBundle())
+	bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "bootstrap-node")
+	initialCh := bus.Subscribe("bootstrap-node", events.EventType("bootstrap.requested"))
+	defer bus.Unsubscribe("bootstrap-node")
+	handler := eventPublishTestHandler(t, pg, bus, source)
+
+	initial := rpcCall(t, handler, eventPublishBody("", runStartTestFingerprint, "bootstrap.requested", `{"topic":"first"}`, "", "idem-target-route-invalid-initial"))
+	if initial.Error != nil {
+		t.Fatalf("initial event.publish error = %#v", initial.Error)
+	}
+	runID := stringValue(t, asMap(t, initial.Result)["run_id"], "run_id")
+	requireAPIV1RuntimeBusEvent(t, initialCh, "initial delivery")
+
+	targetFlowInstance := "operating/inst-1"
+	targetEntityID := runtimeflowidentity.EntityID(targetFlowInstance)
+	seedEventPublishEntityState(t, db, runID, targetEntityID, targetFlowInstance, "waiting")
+	if err := bus.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("operating", "inst-1")}); err != nil {
+		t.Fatalf("AddFlowInstanceRoute: %v", err)
+	}
+	mismatchEntityID := uuid.NewString()
+	seedEventPublishEntityState(t, db, runID, mismatchEntityID, "operating/other", "waiting")
+	unroutableEntityID := uuid.NewString()
+	seedEventPublishEntityState(t, db, runID, unroutableEntityID, "orphan/inst-1", "waiting")
+
+	tests := []struct {
+		name       string
+		body       string
+		wantCode   string
+		wantReason string
+	}{
+		{
+			name:     "blank target requires object",
+			body:     fmt.Sprintf(`{"jsonrpc":"2.0","id":"publish","method":"event.publish","params":{"bundle_hash":%q,"event_name":"operating/opco.product_initialization_requested","payload":{},"run_id":%q,"target":null,"idempotency_key":"idem-target-null"}}`, runStartTestBundleHash, runID),
+			wantCode: "INVALID_PARAMS",
+		},
+		{
+			name:     "missing flow instance",
+			body:     fmt.Sprintf(`{"jsonrpc":"2.0","id":"publish","method":"event.publish","params":{"bundle_hash":%q,"event_name":"operating/opco.product_initialization_requested","payload":{},"run_id":%q,"target":{"entity_id":%q},"idempotency_key":"idem-target-missing-flow"}}`, runStartTestBundleHash, runID, targetEntityID),
+			wantCode: "INVALID_PARAMS",
+		},
+		{
+			name:     "bad target entity uuid",
+			body:     fmt.Sprintf(`{"jsonrpc":"2.0","id":"publish","method":"event.publish","params":{"bundle_hash":%q,"event_name":"operating/opco.product_initialization_requested","payload":{},"run_id":%q,"target":{"flow_instance":"operating/inst-1","entity_id":"not-a-uuid"},"idempotency_key":"idem-target-bad-uuid"}}`, runStartTestBundleHash, runID),
+			wantCode: "INVALID_PARAMS",
+		},
+		{
+			name:       "nonexistent entity",
+			body:       eventPublishBodyWithTarget(runID, "", runStartTestFingerprint, "operating/opco.product_initialization_requested", `{"topic":"missing-entity"}`, "operator-test", "idem-target-missing-entity", targetFlowInstance, uuid.NewString()),
+			wantCode:   EventNotDeclaredCode,
+			wantReason: "selected_target_entity_not_found",
+		},
+		{
+			name:       "mismatched entity flow",
+			body:       eventPublishBodyWithTarget(runID, "", runStartTestFingerprint, "operating/opco.product_initialization_requested", `{"topic":"mismatch"}`, "operator-test", "idem-target-mismatch", targetFlowInstance, mismatchEntityID),
+			wantCode:   EventNotDeclaredCode,
+			wantReason: "selected_target_flow_instance_mismatch",
+		},
+		{
+			name:       "event not routable for target flow",
+			body:       eventPublishBodyWithTarget(runID, "", runStartTestFingerprint, "operating/opco.product_initialization_requested", `{"topic":"unroutable"}`, "operator-test", "idem-target-unroutable", "orphan/inst-1", unroutableEntityID),
+			wantCode:   EventNotDeclaredCode,
+			wantReason: "selected_run_target_not_routable",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := rpcCall(t, handler, tc.body)
+			if resp.Error == nil {
+				t.Fatal("event.publish error = nil")
+			}
+			if tc.wantCode == "INVALID_PARAMS" {
+				if resp.Error.Code != codeInvalidParams {
+					t.Fatalf("error code = %d, want %d; data=%#v", resp.Error.Code, codeInvalidParams, resp.Error.Data)
+				}
+				return
+			}
+			data := asMap(t, resp.Error.Data)
+			if data["code"] != tc.wantCode {
+				t.Fatalf("error data = %#v, want code %s", data, tc.wantCode)
+			}
+			if tc.wantReason != "" {
+				details := asMap(t, data["details"])
+				if details["reason"] != tc.wantReason {
+					t.Fatalf("error details = %#v, want reason %s", details, tc.wantReason)
+				}
+			}
+			if got := countEventRowsByRunID(t, db, runID); got != 1 {
+				t.Fatalf("events for selected run after rejected target = %d, want 1", got)
+			}
+			if got := countAPIIdempotencyRows(t, db); got != 1 {
+				t.Fatalf("api_idempotency rows after rejected target = %d, want 1", got)
+			}
+		})
+	}
+}
+
 func TestOperatorEventPublishExplicitRunRequiresRecipientPlanCheckerBeforePersistence(t *testing.T) {
 	ctx := context.Background()
 	_, db, _ := testutil.StartPostgres(t)
@@ -1410,6 +1574,7 @@ func eventPublishTestHandlerWithObservability(t *testing.T, pg *store.PostgresSt
 func eventPublishTestHandlerWithStores(t *testing.T, runs RunReadStore, observability ObservabilityReadStore, idempotency APIIdempotencyStore, publisher EventPublisher, source semanticview.Source) *Handler {
 	t.Helper()
 	runBundleContext, _ := runs.(RunBundleContextStore)
+	entities, _ := runs.(EntityReadStore)
 	return testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: OperatorReadHandlers(OperatorReadOptions{
@@ -1418,6 +1583,7 @@ func eventPublishTestHandlerWithStores(t *testing.T, runs RunReadStore, observab
 			Database:         fakePinger{},
 			Runs:             runs,
 			Observability:    observability,
+			Entities:         entities,
 			Idempotency:      idempotency,
 			Events:           publisher,
 			Source:           source,
@@ -1639,6 +1805,26 @@ func eventPublishBodyWithSource(runID, sourceEventID, fingerprint, eventName, pa
 	return fmt.Sprintf(`{"jsonrpc":"2.0","id":"publish","method":"event.publish","params":{%s}}`, strings.Join(parts, ","))
 }
 
+func eventPublishBodyWithTarget(runID, sourceEventID, fingerprint, eventName, payload, emitter, idempotencyKey, flowInstance, entityID string) string {
+	parts := []string{
+		fmt.Sprintf(`"bundle_hash":%q`, runStartTestBundleHashForFingerprint(fingerprint)),
+		fmt.Sprintf(`"event_name":%q`, eventName),
+		fmt.Sprintf(`"payload":%s`, payload),
+		fmt.Sprintf(`"idempotency_key":%q`, idempotencyKey),
+		fmt.Sprintf(`"target":{"flow_instance":%q,"entity_id":%q}`, flowInstance, entityID),
+	}
+	if strings.TrimSpace(runID) != "" {
+		parts = append(parts, fmt.Sprintf(`"run_id":%q`, runID))
+	}
+	if strings.TrimSpace(sourceEventID) != "" {
+		parts = append(parts, fmt.Sprintf(`"source_event_id":%q`, sourceEventID))
+	}
+	if strings.TrimSpace(emitter) != "" {
+		parts = append(parts, fmt.Sprintf(`"emitter":%q`, emitter))
+	}
+	return fmt.Sprintf(`{"jsonrpc":"2.0","id":"publish","method":"event.publish","params":{%s}}`, strings.Join(parts, ","))
+}
+
 func eventPublishBodyWithLegacyFingerprint(runID, fingerprint, eventName, payload, emitter, idempotencyKey string) string {
 	parts := []string{
 		fmt.Sprintf(`"bundle_ref":{"fingerprint":%q}`, fingerprint),
@@ -1761,6 +1947,71 @@ func eventPublishFollowUpTestBundle() *runtimecontracts.WorkflowContractBundle {
 	}
 }
 
+func eventPublishTargetRouteTestBundle() *runtimecontracts.WorkflowContractBundle {
+	bootstrapEvent := "bootstrap.requested"
+	targetEvent := "opco.product_initialization_requested"
+	bootstrapNode := runtimecontracts.SystemNodeContract{
+		ID:           "bootstrap-node",
+		SubscribesTo: []string{bootstrapEvent},
+	}
+	operatingNode := runtimecontracts.SystemNodeContract{
+		ID:            "lifecycle-orchestrator",
+		ExecutionType: "system_node",
+		SubscribesTo:  []string{targetEvent},
+		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+			targetEvent: {},
+		},
+	}
+	operating := runtimecontracts.FlowContractView{
+		Path:  "operating",
+		Paths: runtimecontracts.FlowContractPaths{ID: "operating", Flow: "operating", Mode: "template"},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Mode: "template",
+			Pins: runtimecontracts.FlowPins{
+				Inputs: runtimecontracts.FlowInputPins{Events: []string{targetEvent}},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			targetEvent: {},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"lifecycle-orchestrator": operatingNode,
+		},
+	}
+	root := runtimecontracts.FlowContractView{
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			bootstrapEvent: {},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"bootstrap-node": bootstrapNode,
+		},
+		Children: []runtimecontracts.FlowContractView{operating},
+	}
+	return &runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{Name: "review", Version: "1.0.0"},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			bootstrapEvent: {},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"bootstrap-node": bootstrapNode,
+		},
+		RootSchema: &runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{
+				Inputs: runtimecontracts.FlowInputPins{Events: []string{bootstrapEvent}},
+			},
+		},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
+			"operating": operating.Schema,
+		},
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"operating": &root.Children[0],
+			},
+		},
+	}
+}
+
 func eventPublishCreateEntityTestBundle() *runtimecontracts.WorkflowContractBundle {
 	const eventName = "thing.created"
 	handler := runtimecontracts.SystemNodeEventHandler{CreateEntity: true}
@@ -1820,6 +2071,21 @@ func eventPublishCreateEntityTestBundle() *runtimecontracts.WorkflowContractBund
 	}
 }
 
+func seedEventPublishEntityState(t *testing.T, db *sql.DB, runID, entityID, flowInstance, currentState string) {
+	t.Helper()
+	if _, err := db.Exec(`
+		INSERT INTO entity_state (
+			run_id, entity_id, flow_instance, entity_type, current_state,
+			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
+		) VALUES (
+			$1::uuid, $2::uuid, $3, 'widget', $4,
+			'{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, now(), now(), now()
+		)
+	`, runID, entityID, flowInstance, currentState); err != nil {
+		t.Fatalf("seed entity_state: %v", err)
+	}
+}
+
 func assertEventPublishEventRow(t *testing.T, db *sql.DB, runID, eventID, eventName, producedBy string) {
 	t.Helper()
 	var gotRunID, gotEventName, gotProducedBy, gotEntityID string
@@ -1835,6 +2101,50 @@ func assertEventPublishEventRow(t *testing.T, db *sql.DB, runID, eventID, eventN
 	}
 	if gotEntityID != "" {
 		t.Fatalf("event row entity_id = %q, want empty stateful-context inference for follow-up", gotEntityID)
+	}
+}
+
+func assertEventPublishTargetRouteRow(t *testing.T, db *sql.DB, runID, eventID, eventName, flowInstance, entityID string) {
+	t.Helper()
+	var gotRunID, gotEventName, gotEntityID, gotFlowInstance, targetRoute string
+	if err := db.QueryRow(`
+		SELECT run_id::text, event_name, COALESCE(entity_id::text, ''), COALESCE(flow_instance, ''), COALESCE(target_route::text, '{}')
+		FROM events
+		WHERE event_id = $1::uuid
+	`, eventID).Scan(&gotRunID, &gotEventName, &gotEntityID, &gotFlowInstance, &targetRoute); err != nil {
+		t.Fatalf("load target event row: %v", err)
+	}
+	if gotRunID != runID || gotEventName != eventName || gotEntityID != entityID || gotFlowInstance != flowInstance {
+		t.Fatalf("target event row = run:%q event:%q entity:%q flow:%q, want %q/%q/%q/%q", gotRunID, gotEventName, gotEntityID, gotFlowInstance, runID, eventName, entityID, flowInstance)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(targetRoute), &decoded); err != nil {
+		t.Fatalf("decode event target_route: %v", err)
+	}
+	if decoded["flow_instance"] != flowInstance || decoded["entity_id"] != entityID {
+		t.Fatalf("event target_route = %#v, want flow/entity %s/%s", decoded, flowInstance, entityID)
+	}
+}
+
+func assertEventPublishDeliveryTargetRoute(t *testing.T, db *sql.DB, eventID, subscriberType, subscriberID, flowInstance, entityID string) {
+	t.Helper()
+	var targetRoute string
+	if err := db.QueryRow(`
+		SELECT COALESCE(delivery_target_route::text, '{}')
+		FROM event_deliveries
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = $2
+		  AND subscriber_id = $3
+		LIMIT 1
+	`, eventID, subscriberType, subscriberID).Scan(&targetRoute); err != nil {
+		t.Fatalf("load delivery target route: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(targetRoute), &decoded); err != nil {
+		t.Fatalf("decode delivery target_route: %v", err)
+	}
+	if decoded["flow_instance"] != flowInstance || decoded["entity_id"] != entityID {
+		t.Fatalf("delivery target_route = %#v, want flow/entity %s/%s", decoded, flowInstance, entityID)
 	}
 }
 
