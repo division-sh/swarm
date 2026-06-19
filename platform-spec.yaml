@@ -10637,8 +10637,8 @@ cli_specification:
         transport_or_malformed_response: 3
         auth_or_missing_token: 4
         not_found: 5
-      not_found_errors:
-      - AGENT_NOT_FOUND
+        not_found_errors:
+        - AGENT_NOT_FOUND
       proof_expectations:
       - exact /v1/rpc agent.delivery_lifecycle call with agent_id plus run_id, delivery_status, limit, and cursor only when explicitly provided
       - repeated --delivery-status serializes as the canonical delivery_status array and rejects values outside pending, in_progress, delivered, failed, and dead_letter before any API request
