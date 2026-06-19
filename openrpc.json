@@ -3203,7 +3203,7 @@
     },
     {
       "name": "event.publish",
-      "description": "Canonical low-level event publication and workflow-creation primitive.\nPublishes one declared event into the runtime bus. If run_id is omitted,\nthe server allocates a new run_id, persists the event as that run's\ntrigger, and returns new_run_created=true. If run_id is provided,\nit must identify an existing nonterminal run; missing or terminal\nruns fail closed with RUN_NOT_FOUND or RUN_ALREADY_TERMINAL. Existing-run publication must preflight the selected runtime EventBus recipient plan before event/idempotency persistence. A declared event with no selected persisted delivery recipient or delivery route for that run fails closed with EVENT_NOT_DECLARED and must not return success with deliveries=0. Target resolution failures in the selected plan also fail closed with EVENT_NOT_DECLARED. The API must not infer an entity target from run_id or payload.entity_id.\n\nCheckpoint/source-authority policy: callers that need causal proof\nMUST provide source_event_id together with run_id. The source event\nmust exist in the same run_id and the server persists it as\nevents.source_event_id / ParentEventID. Omitted source_event_id\nmeans the published event is unparented; it is valid low-level\ningress but MUST NOT be presented as proof that an internal\napproval/checkpoint path occurred. source_event_id without run_id,\nmalformed source_event_id, or a source event from another run fails\nclosed before event or idempotency completion persistence. A missing\nsource event fails closed with EVENT_NOT_FOUND.\n\nThe method consumes the same canonical EventBus/store event-publication\nowner used by runtime dispatch. Delivery results are read back from the\npersisted event_deliveries owner; the API layer must not re-plan\nsubscribers. A successful event.publish response is a durable acceptance acknowledgment for the event record, selected delivery manifest, and committed replay scope; it MUST NOT wait for system-node handler completion, dynamic auto_emit_on_create side effects, agent processing, downstream event delivery, or downstream receipts. Delivery statuses in the response are a persisted snapshot and may remain pending. Post-commit runtime dispatch/recovery owns downstream completion. This is the canonical primitive; run.start remains only\nas a deprecated wrapper for older callers.\n\n`event_name` is a contract event reference. Callers may pass a root/unambiguous leaf event name or a flow-scoped reference such as `flow_id/local_event` or `flow-path/local-event`. The server resolves flow-scoped references through the loaded contract catalog before declaration validation, payload validation, EventBus publish, and idempotency completion persistence. Unknown flow/event combinations and ambiguous unscoped leaf names fail closed with EVENT_NOT_DECLARED and no mutation.\n\nCreate-entity ownership: handler create_entity is the only authority that mints a new entity identity. Caller-supplied payload.entity_id on an event whose selected handler declares create_entity fails closed with PAYLOAD_VALIDATION_FAILED before event/idempotency persistence. select_entity/select_or_create_entity use their declared payload-key bindings only; payload.entity_id is not target or stateful-context authority.\n",
+      "description": "Canonical low-level event publication and workflow-creation primitive.\nPublishes one declared event into the runtime bus. If run_id is omitted,\nthe server allocates a new run_id, persists the event as that run's\ntrigger, and returns new_run_created=true. If run_id is provided,\nit must identify an existing nonterminal run; missing or terminal\nruns fail closed with RUN_NOT_FOUND or RUN_ALREADY_TERMINAL. Existing-run publication must preflight the selected runtime EventBus recipient plan before event/idempotency persistence. A declared event with no selected persisted delivery recipient or delivery route for that run fails closed with EVENT_NOT_DECLARED and must not return success with deliveries=0. Target resolution failures in the selected plan also fail closed with EVENT_NOT_DECLARED. Existing-run publication may provide `target` as the singular receiver route identity (`flow_instance` plus `entity_id`). When present, `target` is route authority and the server validates that the entity exists in the selected run, belongs to the selected target flow instance, and has a selected delivery route for the requested event before event/idempotency persistence. The API must not infer an entity target from run_id or payload.entity_id.\n\nCheckpoint/source-authority policy: callers that need causal proof\nMUST provide source_event_id together with run_id. The source event\nmust exist in the same run_id and the server persists it as\nevents.source_event_id / ParentEventID. Omitted source_event_id\nmeans the published event is unparented; it is valid low-level\ningress but MUST NOT be presented as proof that an internal\napproval/checkpoint path occurred. source_event_id without run_id,\nmalformed source_event_id, or a source event from another run fails\nclosed before event or idempotency completion persistence. A missing\nsource event fails closed with EVENT_NOT_FOUND.\n\nThe method consumes the same canonical EventBus/store event-publication\nowner used by runtime dispatch. Delivery results are read back from the\npersisted event_deliveries owner; the API layer must not re-plan\nsubscribers. A successful event.publish response is a durable acceptance acknowledgment for the event record, selected delivery manifest, and committed replay scope; it MUST NOT wait for system-node handler completion, dynamic auto_emit_on_create side effects, agent processing, downstream event delivery, or downstream receipts. Delivery statuses in the response are a persisted snapshot and may remain pending. Post-commit runtime dispatch/recovery owns downstream completion. This is the canonical primitive; run.start remains only\nas a deprecated wrapper for older callers.\n\n`event_name` is a contract event reference. Callers may pass a root/unambiguous leaf event name or a flow-scoped reference such as `flow_id/local_event` or `flow-path/local-event`. The server resolves flow-scoped references through the loaded contract catalog before declaration validation, payload validation, EventBus publish, and idempotency completion persistence. Unknown flow/event combinations and ambiguous unscoped leaf names fail closed with EVENT_NOT_DECLARED and no mutation.\n\nCreate-entity ownership: handler create_entity is the only authority that mints a new entity identity. Caller-supplied payload.entity_id on an event whose selected handler declares create_entity fails closed with PAYLOAD_VALIDATION_FAILED before event/idempotency persistence. select_entity/select_or_create_entity use their declared payload-key bindings only; payload.entity_id is not target or stateful-context authority.\n",
       "params": [
         {
           "name": "bundle_hash",
@@ -3252,6 +3252,14 @@
           "description": "Optional parent/source event id for explicit checkpoint lineage. Requires run_id and must identify an event in the same run.",
           "schema": {
             "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "target",
+          "required": false,
+          "description": "Optional singular receiver route identity for existing-run publication. Requires run_id and carries the concrete target flow_instance plus entity_id that the server persists as event.target before EventBus recipient planning. This field is route authority; payload.entity_id and run_id are not target authority. Fan-out target_set and selector-style target forms are not part of the v1 event.publish public surface in this slice.",
+          "schema": {
+            "$ref": "#/components/schemas/EventPublishTargetRoute"
           }
         },
         {
@@ -9846,6 +9854,26 @@
           "run_id",
           "new_run_created",
           "deliveries"
+        ],
+        "type": "object"
+      },
+      "EventPublishTargetRoute": {
+        "additionalProperties": false,
+        "description": "Singular receiver route identity accepted by /v1/rpc event.publish when run_id is supplied. The API validates the entity belongs to the selected run and flow_instance before persistence. Selector target forms, fan-out target_set, and payload-derived target identity are not part of this schema.",
+        "properties": {
+          "entity_id": {
+            "$ref": "#/components/schemas/OpaqueId",
+            "description": "Concrete receiver entity id for existing-run event.publish target route identity."
+          },
+          "flow_instance": {
+            "description": "Concrete receiver flow instance for existing-run event.publish target route identity.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "flow_instance",
+          "entity_id"
         ],
         "type": "object"
       },

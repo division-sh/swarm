@@ -82,6 +82,49 @@ func TestEventPublishUsesEventPublishV1RPCWithBoundParams(t *testing.T) {
 	}
 }
 
+func TestEventPublishSerializesTargetRouteParam(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	var captured jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		writeJSONRPCResult(t, w, captured.ID, eventPublishTestResult(false))
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{
+		"event", "publish", "validation/thing.reviewed",
+		"--payload-json", `{"note":"approved"}`,
+		"--run-id", "11111111-1111-4111-8111-111111111111",
+		"--target-flow-instance", "/validation/inst-1/",
+		"--target-entity-id", "22222222-2222-4222-8222-222222222222",
+		"--idempotency-key", "idem-target-route",
+	}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	wantParams := map[string]any{
+		"event_name": "validation/thing.reviewed",
+		"payload": map[string]any{
+			"note": "approved",
+		},
+		"run_id": "11111111-1111-4111-8111-111111111111",
+		"target": map[string]any{
+			"flow_instance": "validation/inst-1",
+			"entity_id":     "22222222-2222-4222-8222-222222222222",
+		},
+		"idempotency_key": "idem-target-route",
+	}
+	if !reflect.DeepEqual(captured.Params, wantParams) {
+		t.Fatalf("params = %#v, want %#v", captured.Params, wantParams)
+	}
+	if strings.TrimSpace(stderr.String()) != "" {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
 func TestEventPublishPassesFlowScopedEventNameToV1RPC(t *testing.T) {
 	t.Setenv("SWARM_API_TOKEN", "test-token")
 	var captured jsonRPCRequest
@@ -282,6 +325,11 @@ func TestEventPublishRejectsInvalidInputBeforeRequest(t *testing.T) {
 		{name: "blank run id", args: []string{"event", "publish", "scan.requested", "--payload-json", "{}", "--run-id", "  "}, wantStderr: "--run-id must be non-empty"},
 		{name: "blank source event id", args: []string{"event", "publish", "scan.requested", "--payload-json", "{}", "--source-event-id", "  "}, wantStderr: "--source-event-id must be non-empty"},
 		{name: "source event without run id", args: []string{"event", "publish", "scan.requested", "--payload-json", "{}", "--source-event-id", "event-parent-1"}, wantStderr: "--source-event-id requires --run-id"},
+		{name: "blank target flow instance", args: []string{"event", "publish", "scan.requested", "--payload-json", "{}", "--run-id", "run-1", "--target-flow-instance", "  ", "--target-entity-id", "entity-1"}, wantStderr: "--target-flow-instance must be non-empty"},
+		{name: "blank target entity id", args: []string{"event", "publish", "scan.requested", "--payload-json", "{}", "--run-id", "run-1", "--target-flow-instance", "flow/inst-1", "--target-entity-id", "  "}, wantStderr: "--target-entity-id must be non-empty"},
+		{name: "target flow without entity id", args: []string{"event", "publish", "scan.requested", "--payload-json", "{}", "--run-id", "run-1", "--target-flow-instance", "flow/inst-1"}, wantStderr: "--target-flow-instance requires --target-entity-id"},
+		{name: "target entity without flow instance", args: []string{"event", "publish", "scan.requested", "--payload-json", "{}", "--run-id", "run-1", "--target-entity-id", "entity-1"}, wantStderr: "--target-entity-id requires --target-flow-instance"},
+		{name: "target without run id", args: []string{"event", "publish", "scan.requested", "--payload-json", "{}", "--target-flow-instance", "flow/inst-1", "--target-entity-id", "entity-1"}, wantStderr: "target route flags require --run-id"},
 		{name: "blank bundle hash", args: []string{"event", "publish", "scan.requested", "--payload-json", "{}", "--bundle-hash", "  "}, wantStderr: "--bundle-hash must be non-empty"},
 		{name: "invalid bundle hash", args: []string{"event", "publish", "scan.requested", "--payload-json", "{}", "--bundle-hash", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, wantStderr: "--bundle-hash must be bundle-v1:sha256:<64 lowercase hex>"},
 		{name: "blank bundle fingerprint", args: []string{"event", "publish", "scan.requested", "--payload-json", "{}", "--bundle-fingerprint", "  "}, wantStderr: "--bundle-fingerprint must be non-empty"},

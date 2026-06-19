@@ -303,6 +303,39 @@ rows:
       entity-targeted `event.publish` must ACK or fail closed while unrelated
       delivery work remains in progress, without waiting for agent/handler completion.
 
+  - id: event_publish_existing_run_target_route_served_path
+    surface: default SQLite and Postgres served swarm event publish --run-id explicit target route identity
+    classification: add_to_matrix
+    tier: required_smoke
+    backends: [default_sqlite, explicit_postgres]
+    cli_commands: [event_publish]
+    api_methods: [event.publish]
+    openrpc_matrix_methods: [event.publish]
+    store_owners:
+      - cmd/swarm event publish CLI
+      - /v1/rpc event.publish
+      - runtimebus.EventStore
+      - event.target canonical route identity
+      - event_deliveries delivery_target_route owner
+    proof_dimensions: [selected_store, real_v1_handler, cli_v1_path, real_runtime_startup, canonical_store_owner, openrpc_publication, served_mutating_lifecycle]
+    proof_refs:
+      - kind: go_test
+        name: TestEventPublishSerializesTargetRouteParam
+      - kind: go_test
+        name: TestOperatorEventPublishExistingRunTargetRouteValidatesAndPersistsCanonicalTarget
+      - kind: go_test
+        name: TestOperatorEventPublishExistingRunTargetRouteRejectsInvalidTargetBeforePersistence
+      - kind: go_test
+        name: TestRunServeRuntimeEventPublishTargetRouteServedPathDefaultSQLite
+      - kind: go_test
+        name: TestRunServeRuntimeEventPublishTargetRouteServedPathPostgres
+    notes: >
+      #1438 adds the explicit target-route public surface for existing-run
+      event.publish. The proof covers typed CLI serialization, API validation
+      and persistence of event.target plus delivery_target_route, payload-only
+      non-authority, and served SQLite/Postgres state advance/readback through
+      the canonical event.publish/EventBus path.
+
   - id: event_publish_dynamic_auto_emit_served_lifecycle
     surface: /v1/rpc event.publish served dynamic auto_emit_on_create lifecycle parity
     classification: add_to_matrix
