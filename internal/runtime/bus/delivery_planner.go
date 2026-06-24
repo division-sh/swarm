@@ -853,6 +853,9 @@ func routedRootNodeMatchesNoTargetEvent(evt events.Event, subscriber Subscriber)
 	if !strings.Contains(eventType, "/") {
 		return true
 	}
+	if strings.TrimSpace(subscriber.RouteSource) == "pin_bind_output_alias" {
+		return true
+	}
 	matchPattern := strings.Trim(strings.TrimSpace(subscriber.MatchPattern), "/")
 	return matchPattern != "" && !strings.Contains(matchPattern, "*") && eventType == matchPattern
 }

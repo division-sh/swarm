@@ -103,6 +103,52 @@ func ImportBoundaryInputAliases(source Source, targetFlowID, eventType string) [
 	return out
 }
 
+func ImportBoundaryInputAliasesForParentEvent(source Source, targetFlowID, parentEvent string) []ImportBoundaryPinAlias {
+	targetFlowID = strings.TrimSpace(targetFlowID)
+	parentEvent = eventidentity.Normalize(parentEvent)
+	if source == nil || targetFlowID == "" || parentEvent == "" {
+		return nil
+	}
+	var out []ImportBoundaryPinAlias
+	for _, alias := range importBoundaryPinAliases(source) {
+		if alias.Direction != ImportBoundaryAliasInput {
+			continue
+		}
+		if strings.TrimSpace(alias.FlowID) != targetFlowID {
+			continue
+		}
+		if eventidentity.Normalize(alias.ParentEvent) != parentEvent && eventidentity.Normalize(alias.EventPattern) != parentEvent {
+			continue
+		}
+		out = append(out, alias)
+	}
+	sortImportBoundaryAliases(out)
+	return out
+}
+
+func ImportBoundaryOutputAliasesForParent(source Source, parentPackageKey, parentFlowID string) []ImportBoundaryPinAlias {
+	parentPackageKey = normalizeImportPackageKey(parentPackageKey)
+	parentFlowID = strings.TrimSpace(parentFlowID)
+	if source == nil {
+		return nil
+	}
+	var out []ImportBoundaryPinAlias
+	for _, alias := range importBoundaryPinAliases(source) {
+		if alias.Direction != ImportBoundaryAliasOutput {
+			continue
+		}
+		if parentPackageKey != "" && normalizeImportPackageKey(alias.ParentPackageKey) != parentPackageKey {
+			continue
+		}
+		if parentFlowID != "" && !importBoundaryParentFlowMayConsume(source, parentFlowID, alias.ParentPackageKey) {
+			continue
+		}
+		out = append(out, alias)
+	}
+	sortImportBoundaryAliases(out)
+	return out
+}
+
 func ImportBoundaryOutputAliasesForParentEvent(source Source, parentPackageKey, parentFlowID, eventType string) []ImportBoundaryPinAlias {
 	parentPackageKey = normalizeImportPackageKey(parentPackageKey)
 	parentFlowID = strings.TrimSpace(parentFlowID)

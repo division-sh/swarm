@@ -93,6 +93,47 @@ func TestImportBoundaryOutputAliasRoutesPackageOutputToParentEvent(t *testing.T)
 	}
 }
 
+func TestImportBoundaryOutputAliasRoutesPackageOutputToWildcardParentSubscriber(t *testing.T) {
+	source := loadBusImportBoundaryAliasWildcardOutputSource(t)
+	rt, err := runtimebus.DeriveRouteTable(source)
+	if err != nil {
+		t.Fatalf("DeriveRouteTable: %v", err)
+	}
+	routes := rt.Resolve("worker/work.completed")
+	if len(routes) != 1 || routes[0].ID != "parent-listener" {
+		t.Fatalf("Resolve(worker/work.completed) = %#v, want parent-listener", routes)
+	}
+	if got := routes[0].MatchPattern; got != "parent.*" {
+		t.Fatalf("match pattern = %q, want parent.*", got)
+	}
+	if got := routes[0].LocalizedEvent; got != "parent.lead_enriched" {
+		t.Fatalf("localized event = %q, want parent.lead_enriched", got)
+	}
+
+	store := &routePersistenceTestStore{}
+	eb, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	evt := events.NewProjectionEvent("evt-output-alias-wildcard", "worker/work.completed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("CheckPublishRecipientPlan: %v", err)
+	}
+	if len(plan.RoutedRecipients) != 1 || plan.RoutedRecipients[0].ID != "parent-listener" {
+		t.Fatalf("routed recipients = %#v, want parent-listener", plan.RoutedRecipients)
+	}
+	if got := plan.RoutedRecipients[0].LocalizedEvent; got != "parent.lead_enriched" {
+		t.Fatalf("plan localized event = %q, want parent.lead_enriched", got)
+	}
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if got := store.deliveries["evt-output-alias-wildcard"]; len(got) != 1 || got[0] != "parent-listener" {
+		t.Fatalf("persisted deliveries = %#v, want parent-listener", got)
+	}
+}
+
 func TestImportBoundaryInputAliasMaterializesTemplateRoute(t *testing.T) {
 	source := loadBusImportBoundaryAliasTemplateSource(t)
 	rt, err := runtimebus.DeriveRouteTable(source)
@@ -151,6 +192,21 @@ func loadBusImportBoundaryAliasSource(t *testing.T) semanticview.Source {
 	return semanticview.Wrap(bundle)
 }
 
+func loadBusImportBoundaryAliasWildcardOutputSource(t *testing.T) semanticview.Source {
+	t.Helper()
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
+	root := writeBusImportBoundaryAliasFixtureWithParentSubscription(t, "parent.*")
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return semanticview.Wrap(bundle)
+}
+
 func loadBusImportBoundaryAliasTemplateSource(t *testing.T) semanticview.Source {
 	t.Helper()
 	repoRoot, err := os.Getwd()
@@ -167,6 +223,10 @@ func loadBusImportBoundaryAliasTemplateSource(t *testing.T) semanticview.Source 
 }
 
 func writeBusImportBoundaryAliasFixture(t *testing.T) string {
+	return writeBusImportBoundaryAliasFixtureWithParentSubscription(t, "parent.lead_enriched")
+}
+
+func writeBusImportBoundaryAliasFixtureWithParentSubscription(t *testing.T, parentSubscription string) string {
 	t.Helper()
 	root := t.TempDir()
 	writeBusImportBoundaryFixtureFile(t, filepath.Join(root, "package.yaml"), `
@@ -195,7 +255,7 @@ parent.lead_enriched: {}
 parent-listener:
   id: parent-listener
   execution_type: system_node
-  subscribes_to: [parent.lead_enriched]
+  subscribes_to: [`+parentSubscription+`]
   event_handlers:
     parent.lead_enriched: {}
 `)

@@ -203,6 +203,14 @@ func TestLoadWorkflowNodes_UsesImportBoundaryInputAlias(t *testing.T) {
 	if workflowNodeHasSubscriptionForTest(*worker, "work.requested") || workflowNodeHasSubscriptionForTest(*worker, "worker/work.requested") {
 		t.Fatalf("worker-node subscriptions = %#v, should not preserve raw required-import input fallback", worker.Subscriptions)
 	}
+	evt := events.NewProjectionEvent("", "parent.lead_captured", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
+	resolved := workflowNodeEventHandlerResolutionForDelivery(source, "worker-node", evt)
+	if !resolved.Matched {
+		t.Fatal("expected worker-node handler to resolve through input alias")
+	}
+	if got := resolved.HandlerEventKey; got != "work.requested" {
+		t.Fatalf("handler event key = %q, want work.requested", got)
+	}
 }
 
 func TestLoadWorkflowNodes_UsesImportBoundaryOutputAliasForParentHandler(t *testing.T) {

@@ -55,6 +55,7 @@ type routeSubscriberTemplate struct {
 
 type routeResolvedPattern struct {
 	EventPattern   string
+	MatchPattern   string
 	RouteSource    string
 	LocalizedEvent string
 }
@@ -513,6 +514,9 @@ func (rt *RouteTable) addNodePatternsLocked(source semanticview.Source, packageK
 func routeApplyResolvedPattern(subscriber Subscriber, resolved routeResolvedPattern) Subscriber {
 	subscriber.RouteSource = strings.TrimSpace(resolved.RouteSource)
 	subscriber.LocalizedEvent = eventidentity.Normalize(resolved.LocalizedEvent)
+	if matchPattern := eventidentity.Normalize(resolved.MatchPattern); matchPattern != "" {
+		subscriber.MatchPattern = matchPattern
+	}
 	return subscriber
 }
 
@@ -542,14 +546,18 @@ func (rt *RouteTable) rebuildLocked() {
 			for _, eventType := range eventTypes {
 				if RouteMatches(pattern.EventPattern, eventType) {
 					subscriber := pattern.Subscriber
-					subscriber.MatchPattern = pattern.EventPattern
+					if strings.TrimSpace(subscriber.MatchPattern) == "" {
+						subscriber.MatchPattern = pattern.EventPattern
+					}
 					rt.routes[eventType] = appendUniqueSubscriber(rt.routes[eventType], subscriber)
 				}
 			}
 			continue
 		}
 		subscriber := pattern.Subscriber
-		subscriber.MatchPattern = pattern.EventPattern
+		if strings.TrimSpace(subscriber.MatchPattern) == "" {
+			subscriber.MatchPattern = pattern.EventPattern
+		}
 		rt.routes[pattern.EventPattern] = appendUniqueSubscriber(rt.routes[pattern.EventPattern], subscriber)
 	}
 }
@@ -737,6 +745,26 @@ func routeResolveSubscriberPatterns(source semanticview.Source, packageKey, flow
 					EventPattern:   pattern,
 					RouteSource:    "pin_bind_output_alias",
 					LocalizedEvent: raw,
+				})
+			}
+			if len(out) > 0 {
+				return out
+			}
+		}
+		if strings.Contains(raw, "*") {
+			outputAliases := semanticview.ImportBoundaryOutputAliasesForParent(source, packageKey, flowID)
+			out := make([]routeResolvedPattern, 0, len(outputAliases))
+			for _, alias := range outputAliases {
+				parentEvent := eventidentity.Normalize(alias.ParentEvent)
+				pattern := eventidentity.Normalize(alias.EventPattern)
+				if parentEvent == "" || pattern == "" || !RouteMatches(raw, parentEvent) {
+					continue
+				}
+				out = append(out, routeResolvedPattern{
+					EventPattern:   pattern,
+					MatchPattern:   raw,
+					RouteSource:    "pin_bind_output_alias",
+					LocalizedEvent: parentEvent,
 				})
 			}
 			if len(out) > 0 {

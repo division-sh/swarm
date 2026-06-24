@@ -155,6 +155,9 @@ func workflowNodeEventHandlerResolutionForDelivery(source semanticview.Source, n
 	if resolved := workflowNodeEventHandlerResolutionForEventType(source, nodeID, rawEventType); resolved.Matched {
 		return resolved
 	}
+	if resolved := workflowNodeInputAliasEventHandlerResolution(source, nodeID, rawEventType); resolved.Matched {
+		return resolved
+	}
 	localizedEventType := workflowNodeConcreteInstanceLocalEventType(source, nodeID, evt)
 	if localizedEventType == "" || localizedEventType == rawEventType {
 		return workflowNodeOutputAliasEventHandlerResolution(source, nodeID, rawEventType)
@@ -219,6 +222,22 @@ func workflowNodeMatchedHandlerEventKey(source semanticview.Source, nodeID, even
 		}
 	}
 	return eventType
+}
+
+func workflowNodeInputAliasEventHandlerResolution(source semanticview.Source, nodeID, rawEventType string) workflowNodeEventHandlerResolution {
+	if source == nil {
+		return workflowNodeEventHandlerResolution{}
+	}
+	contractSource, ok := source.NodeContractSource(nodeID)
+	if !ok {
+		return workflowNodeEventHandlerResolution{}
+	}
+	for _, alias := range semanticview.ImportBoundaryInputAliasesForParentEvent(source, strings.TrimSpace(contractSource.FlowID), rawEventType) {
+		if resolved := workflowNodeEventHandlerResolutionForEventType(source, nodeID, alias.Pin); resolved.Matched {
+			return resolved
+		}
+	}
+	return workflowNodeEventHandlerResolution{}
 }
 
 func workflowNodeHandlerEventKeyForExecution(source semanticview.Source, nodeID string, evt events.Event) string {
