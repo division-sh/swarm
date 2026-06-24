@@ -124,6 +124,9 @@ type checkerContext struct {
 	nodeStateSchemaLoaded   bool
 	nodeStateSchemaFindings []Finding
 
+	flowPackageImportLoaded   bool
+	flowPackageImportFindings []Finding
+
 	accumulatorProjectionLoaded   bool
 	accumulatorProjectionFindings []Finding
 
@@ -241,6 +244,7 @@ var bootCheckRegistry = []Check{
 	{ID: "timer_validation", Severity: "error", Run: checkTimerValidation},
 	{ID: "write_pin_ownership_validation", Severity: "error", Run: checkWritePinOwnershipValidation},
 	{ID: "gate_schema_validation", Severity: "error", Run: checkGateSchemaValidation},
+	{ID: "flow_package_import_completeness", Severity: SeverityHardInvalidity, Run: checkFlowPackageImportCompleteness},
 	{ID: "input_pin_wiring", Severity: "warning", Run: checkInputPinWiring},
 	{ID: "pin_target_resolution", Severity: "error", Run: checkPinTargetResolution},
 	{ID: "redundant_in_topology_select_entity", Severity: "warning", Run: checkRedundantInTopologySelectEntity},

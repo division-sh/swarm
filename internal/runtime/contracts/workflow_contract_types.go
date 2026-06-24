@@ -578,6 +578,7 @@ type ProjectPackageDocument struct {
 	PlatformVersion string              `yaml:"platform_version"`
 	Author          string              `yaml:"author"`
 	Description     string              `yaml:"description"`
+	Requires        FlowPackageRequires `yaml:"requires"`
 	Flows           []ProjectFlowRef    `yaml:"flows"`
 	Packages        []ProjectPackageRef `yaml:"packages"`
 	Children        []ProjectPackageRef `yaml:"children"`
@@ -629,16 +630,31 @@ type EntityFieldDecl struct {
 	UnusedReaderReason string         `yaml:"_unused_reader_reason"`
 }
 type ProjectPackageRef struct {
-	ID      string `yaml:"id"`
-	Path    string `yaml:"path"`
-	Package string `yaml:"package"`
-	Dir     string `yaml:"dir"`
+	ID      string          `yaml:"id"`
+	Path    string          `yaml:"path"`
+	Package string          `yaml:"package"`
+	Dir     string          `yaml:"dir"`
+	Bind    FlowPackageBind `yaml:"bind"`
 }
 type ProjectFlowRef struct {
-	ID        string `yaml:"id"`
-	Flow      string `yaml:"flow"`
-	Namespace string `yaml:"namespace"`
-	Mode      string `yaml:"mode"`
+	ID        string          `yaml:"id"`
+	Flow      string          `yaml:"flow"`
+	Namespace string          `yaml:"namespace"`
+	Mode      string          `yaml:"mode"`
+	Bind      FlowPackageBind `yaml:"bind"`
+}
+type FlowPackageRequires struct {
+	Inputs          []string `yaml:"inputs"`
+	Outputs         []string `yaml:"outputs"`
+	Policy          []string `yaml:"policy"`
+	Credentials     []string `yaml:"credentials"`
+	PlatformVersion string   `yaml:"platform_version"`
+}
+type FlowPackageBind struct {
+	Inputs      map[string]string `yaml:"inputs"`
+	Outputs     map[string]string `yaml:"outputs"`
+	Policy      map[string]string `yaml:"policy"`
+	Credentials map[string]string `yaml:"credentials"`
 }
 type ProjectHandoff struct {
 	Event       string `yaml:"event"`
