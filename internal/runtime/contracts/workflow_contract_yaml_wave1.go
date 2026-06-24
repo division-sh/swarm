@@ -29,6 +29,7 @@ func (p *ProjectPackageDocument) UnmarshalYAML(node *yaml.Node) error {
 		PlatformVersion string              `yaml:"platform_version"`
 		Author          string              `yaml:"author"`
 		Description     string              `yaml:"description"`
+		Requires        FlowPackageRequires `yaml:"requires"`
 		Flows           []ProjectFlowRef    `yaml:"flows"`
 		Packages        []ProjectPackageRef `yaml:"packages"`
 		Children        []ProjectPackageRef `yaml:"children"`
@@ -45,6 +46,7 @@ func (p *ProjectPackageDocument) UnmarshalYAML(node *yaml.Node) error {
 		PlatformVersion: aux.PlatformVersion,
 		Author:          aux.Author,
 		Description:     aux.Description,
+		Requires:        aux.Requires.normalized(),
 		Flows:           append([]ProjectFlowRef(nil), aux.Flows...),
 		Packages:        append([]ProjectPackageRef(nil), aux.Packages...),
 		Children:        append([]ProjectPackageRef(nil), aux.Children...),
@@ -53,6 +55,132 @@ func (p *ProjectPackageDocument) UnmarshalYAML(node *yaml.Node) error {
 		EntitySchema:    aux.EntitySchema,
 	}
 	return nil
+}
+
+func (r *FlowPackageRequires) UnmarshalYAML(node *yaml.Node) error {
+	if r == nil {
+		return nil
+	}
+	if node == nil || node.Kind == 0 {
+		*r = FlowPackageRequires{}
+		return nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("requires must be a mapping")
+	}
+	var out FlowPackageRequires
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		value := node.Content[i+1]
+		switch key {
+		case "":
+			continue
+		case "inputs":
+			if err := value.Decode(&out.Inputs); err != nil {
+				return fmt.Errorf("requires.inputs: %w", err)
+			}
+		case "outputs":
+			if err := value.Decode(&out.Outputs); err != nil {
+				return fmt.Errorf("requires.outputs: %w", err)
+			}
+		case "policy":
+			if err := value.Decode(&out.Policy); err != nil {
+				return fmt.Errorf("requires.policy: %w", err)
+			}
+		case "credentials":
+			if err := value.Decode(&out.Credentials); err != nil {
+				return fmt.Errorf("requires.credentials: %w", err)
+			}
+		case "platform_version":
+			if err := value.Decode(&out.PlatformVersion); err != nil {
+				return fmt.Errorf("requires.platform_version: %w", err)
+			}
+		default:
+			return fmt.Errorf("UNDEFINED-FIELD: requires field %q not in platform spec", key)
+		}
+	}
+	*r = out.normalized()
+	return nil
+}
+
+func (b *FlowPackageBind) UnmarshalYAML(node *yaml.Node) error {
+	if b == nil {
+		return nil
+	}
+	if node == nil || node.Kind == 0 {
+		*b = FlowPackageBind{}
+		return nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("bind must be a mapping")
+	}
+	var out FlowPackageBind
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		value := node.Content[i+1]
+		switch key {
+		case "":
+			continue
+		case "inputs":
+			if err := value.Decode(&out.Inputs); err != nil {
+				return fmt.Errorf("bind.inputs: %w", err)
+			}
+		case "outputs":
+			if err := value.Decode(&out.Outputs); err != nil {
+				return fmt.Errorf("bind.outputs: %w", err)
+			}
+		case "policy":
+			if err := value.Decode(&out.Policy); err != nil {
+				return fmt.Errorf("bind.policy: %w", err)
+			}
+		case "credentials":
+			if err := value.Decode(&out.Credentials); err != nil {
+				return fmt.Errorf("bind.credentials: %w", err)
+			}
+		default:
+			return fmt.Errorf("UNDEFINED-FIELD: bind field %q not in platform spec", key)
+		}
+	}
+	*b = out.normalized()
+	return nil
+}
+
+func (r FlowPackageRequires) normalized() FlowPackageRequires {
+	return FlowPackageRequires{
+		Inputs:          normalizeStrings(r.Inputs),
+		Outputs:         normalizeStrings(r.Outputs),
+		Policy:          normalizeStrings(r.Policy),
+		Credentials:     normalizeStrings(r.Credentials),
+		PlatformVersion: strings.TrimSpace(r.PlatformVersion),
+	}
+}
+
+func (b FlowPackageBind) normalized() FlowPackageBind {
+	return FlowPackageBind{
+		Inputs:      normalizeStringMap(b.Inputs),
+		Outputs:     normalizeStringMap(b.Outputs),
+		Policy:      normalizeStringMap(b.Policy),
+		Credentials: normalizeStringMap(b.Credentials),
+	}
+}
+
+func normalizeStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for key, value := range in {
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if key == "" || value == "" {
+			continue
+		}
+		out[key] = value
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func (d *TypeCatalogDocument) UnmarshalYAML(node *yaml.Node) error {

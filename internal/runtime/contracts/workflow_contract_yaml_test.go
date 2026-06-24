@@ -8,6 +8,126 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+func TestProjectPackageDocumentDecode_PreservesRequiresAndImportBinds(t *testing.T) {
+	var doc ProjectPackageDocument
+	if err := yaml.Unmarshal([]byte(`
+name: package-boundary
+version: "1.0.0"
+platform_version: ">=1.0.0"
+requires:
+  inputs: [work.requested]
+  outputs: [work.completed]
+  policy: [provider.threshold]
+  credentials: [provider_token]
+  platform_version: ">=1.6.0"
+flows:
+  - id: worker
+    flow: worker
+    bind:
+      inputs:
+        work.requested: parent.work_requested
+      outputs:
+        work.completed: parent.work_completed
+      policy:
+        provider.threshold: parent.policy.threshold
+      credentials:
+        provider_token: parent_provider_token
+packages:
+  - path: packages/child
+    bind:
+      inputs:
+        child.requested: parent.child_requested
+      outputs:
+        child.completed: parent.child_completed
+      policy:
+        child.policy: parent.policy.child
+      credentials:
+        child_token: parent_child_token
+`), &doc); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if got := strings.Join(doc.Requires.Inputs, ","); got != "work.requested" {
+		t.Fatalf("Requires.Inputs = %q", got)
+	}
+	if got := strings.Join(doc.Requires.Outputs, ","); got != "work.completed" {
+		t.Fatalf("Requires.Outputs = %q", got)
+	}
+	if got := strings.Join(doc.Requires.Policy, ","); got != "provider.threshold" {
+		t.Fatalf("Requires.Policy = %q", got)
+	}
+	if got := strings.Join(doc.Requires.Credentials, ","); got != "provider_token" {
+		t.Fatalf("Requires.Credentials = %q", got)
+	}
+	if got := doc.Requires.PlatformVersion; got != ">=1.6.0" {
+		t.Fatalf("Requires.PlatformVersion = %q", got)
+	}
+	if got := doc.Flows[0].Bind.Inputs["work.requested"]; got != "parent.work_requested" {
+		t.Fatalf("flow bind input = %q", got)
+	}
+	if got := doc.Flows[0].Bind.Outputs["work.completed"]; got != "parent.work_completed" {
+		t.Fatalf("flow bind output = %q", got)
+	}
+	if got := doc.Flows[0].Bind.Policy["provider.threshold"]; got != "parent.policy.threshold" {
+		t.Fatalf("flow bind policy = %q", got)
+	}
+	if got := doc.Flows[0].Bind.Credentials["provider_token"]; got != "parent_provider_token" {
+		t.Fatalf("flow bind credential = %q", got)
+	}
+	if got := doc.Packages[0].Bind.Inputs["child.requested"]; got != "parent.child_requested" {
+		t.Fatalf("package bind input = %q", got)
+	}
+}
+
+func TestProjectPackageDocumentDecode_RejectsMalformedRequiresAndBindShape(t *testing.T) {
+	tests := []struct {
+		name    string
+		body    string
+		wantErr string
+	}{
+		{
+			name: "unknown requires field",
+			body: `
+name: invalid
+requires:
+  inputz: [work.requested]
+`,
+			wantErr: "UNDEFINED-FIELD",
+		},
+		{
+			name: "bind inputs must be mapping",
+			body: `
+name: invalid
+flows:
+  - id: worker
+    flow: worker
+    bind:
+      inputs: [work.requested]
+`,
+			wantErr: "bind.inputs",
+		},
+		{
+			name: "unknown bind field",
+			body: `
+name: invalid
+packages:
+  - path: packages/child
+    bind:
+      credential: {}
+`,
+			wantErr: "UNDEFINED-FIELD",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var doc ProjectPackageDocument
+			err := yaml.Unmarshal([]byte(tc.body), &doc)
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestHandlerRuleEntryDecode_RejectsLegacyComputeExpressionShorthand(t *testing.T) {
 	var rule HandlerRuleEntry
 	err := yaml.Unmarshal([]byte(`

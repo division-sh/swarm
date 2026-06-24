@@ -4547,6 +4547,51 @@ flow_model:
       policy.yaml: Flow-specific config (optional — inherits root)
       prompts/: Agent prompt files (optional)
       flows/: Child flows (optional)
+    import_boundary:
+      description: >
+        Imported flow packages declare their required public interface and dependency surface in their own package.yaml
+        `requires` block. The parent import site in package.yaml must satisfy those declarations with an explicit `bind`
+        block on the corresponding `flows[]`, `packages[]`, `children[]`, or `subpackages[]` entry. This is the canonical
+        source authority for import-boundary completeness; raw same-name pins, ambient parent policy inheritance, flat
+        credential names, and wildcard reachability are not proof that a declared import requirement is satisfied.
+      requires_manifest:
+        owner: Imported package package.yaml `requires`
+        fields:
+          inputs: List of package-local input event pin names the importing parent must bind.
+          outputs: List of package-local output event pin names the importing parent must bind when the imported package
+            exposes them as required public outputs.
+          policy: List of package-local policy dependency names the importing parent must bind.
+          credentials: List of package-local credential dependency names the importing parent must bind.
+          platform_version: Optional imported package platform-version constraint. The current first slice preserves and
+            exposes this value; existing top-level `platform_version` remains the package load/admission constraint until
+            a later source-authority change promotes different runtime semantics.
+      import_site_bind:
+        owner: Parent package.yaml import site `bind`
+        locations:
+        - flows[]
+        - packages[]
+        - children[]
+        - subpackages[]
+        fields:
+          inputs: Map keyed by imported package `requires.inputs` item. Each value names the parent-facing event binding.
+          outputs: Map keyed by imported package `requires.outputs` item. Each value names the parent-facing event binding.
+          policy: Map keyed by imported package `requires.policy` item. Each value names the parent policy reference that
+            will satisfy that package-local dependency.
+          credentials: Map keyed by imported package `requires.credentials` item. Each value names the parent/deployment
+            credential reference that will satisfy that package-local dependency.
+      fail_closed_minimal_verify:
+        rule: >
+          If an imported package declares any item under `requires.inputs`, `requires.outputs`, `requires.policy`, or
+          `requires.credentials`, boot/verify must report a hard invalidity unless the parent import site provides a
+          non-empty `bind` entry for that exact item in the matching field. This first slice verifies binding presence
+          only; it does not execute runtime pin alias delivery or runtime policy/credential resolution.
+        unsupported_shapes: Unknown `requires` or `bind` fields, non-list `requires` fields, and non-map `bind` fields are
+          malformed contract input and must fail closed during contract parsing.
+      split_runtime_semantics:
+        pin_alias_delivery: Runtime delivery through `bind.inputs` / `bind.outputs` is tracked separately by #1452.
+        policy_credential_resolution: Runtime per-import policy and credential resolution is tracked separately by #1453.
+        wildcard_grants: Wildcard subtree and cross-tree grant behavior is tracked separately by #1454.
+        final_e2e_package_proof: Final multi-package marketplace-style runtime proof is tracked separately by #1455.
   nesting:
     description: 'Flows nest recursively. A flow''s package.yaml declares child flows in its flows: list. Each child is a
       directory under flows/ with the same structure. There is no depth limit. The platform discovers flows by walking the
