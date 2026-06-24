@@ -1471,7 +1471,8 @@ handler_specification:
           MUST materialize event.target_set as the complete concrete recipient route list, leave singular event.target absent
           on the persisted event, and persist one delivery target per recipient route. It must not silently collapse to one target.
       target_failures:
-        target_required_missing: Pin-declared output has no target, no structural ParentRoute, and no broadcast:true.
+        target_required_missing: Pin-declared output has no lowered parent connect route, no explicit target escape hatch,
+          no structural ParentRoute, and no broadcast:true.
         target_invalid_syntax: Target form is malformed or has invalid literal fields.
         target_unknown_flow: target.flow names a flow outside the loaded registry.
         target_sender_no_inbound: target:sender is used where no inbound event source can exist.
@@ -1974,7 +1975,8 @@ engine:
         no_target: Existing no-target event-type fan-out semantics.
     target_resolution_failure_taxonomy:
       boot_verify:
-        target_required_missing: Pin-declared output emit with no target, no structural binding, and no broadcast:true.
+        target_required_missing: Pin-declared output emit with no lowered parent connect route, no explicit target escape
+          hatch, no structural binding, and no broadcast:true.
         target_invalid_syntax: Literal target spec is malformed or incomplete.
         target_unknown_flow: target.flow does not exist in the loaded flow registry.
         target_sender_no_inbound: target:sender appears on a handler whose only triggers cannot supply inbound source.
@@ -3963,16 +3965,17 @@ engine:
       severity: warning
       scope: per-flow
       trigger: 'A flow''s required input event pin (from schema.yaml pins.inputs.events) has no satisfiable authored producer
-        path on the static verify surface. The warning checks only sibling flow output pins, root agent emit_events, root
-        node handler emit sites, exact platform_events catalog matches, swarm.source values starting with external, and same-flow
-        timer declarations. It does not use produces or swarm.status: planned as input-pin proof.'
+        path on the static verify surface. The warning checks parent package.yaml connect entries, safe same-name sibling
+        flow output-pin inference, root agent emit_events, root node handler emit sites, exact platform_events catalog matches,
+        swarm.source values starting with external, and same-flow timer declarations. It does not use produces or swarm.status:
+        planned as input-pin proof.'
       when: boot-only
     - id: pin_target_resolution
       severity: error
       scope: per-emit-site
-      trigger: A pin-declared output emit lacks an explicit target, structural ParentRoute eligibility, or broadcast:true; has
-        malformed target syntax; references an unknown target.flow; uses target:sender where no inbound source can exist; or
-        uses target:sender only on external-sourced inputs with empty source.
+      trigger: A pin-declared output emit lacks a lowered parent connect route, explicit target escape hatch, structural
+        ParentRoute eligibility, or broadcast:true; has malformed target syntax; references an unknown target.flow; uses
+        target:sender where no inbound source can exist; or uses target:sender only on external-sourced inputs with empty source.
       when: boot-only
     - id: redundant_in_topology_select_entity
       severity: warning
@@ -8333,7 +8336,8 @@ static_analyzer:
       explicit_broadcast:
         rule: broadcast:true is a deliberate opt-out and is the only no-target form accepted for a pin-declared output.
     static_failure_reasons:
-      target_required_missing: No explicit target, no structural ParentRoute eligibility, and no broadcast:true.
+      target_required_missing: No lowered parent connect route, no explicit target escape hatch, no structural ParentRoute
+        eligibility, and no broadcast:true.
       target_invalid_syntax: Literal target spec is malformed or incomplete.
       target_unknown_flow: target.flow is not present in the loaded flow registry.
       target_sender_no_inbound: target:sender is used from a handler whose only triggers cannot supply inbound event.source.
