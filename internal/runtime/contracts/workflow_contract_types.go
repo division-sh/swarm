@@ -88,8 +88,11 @@ type WorkflowSemanticView struct {
 	FlowRules              map[string]string
 	FlowInputs             map[string][]string
 	FlowOutputs            map[string][]string
+	FlowInputEventPins     map[string][]FlowInputEventPin
+	FlowOutputEventPins    map[string][]FlowOutputEventPin
 	FlowReads              map[string][]string
 	FlowWrites             map[string][]string
+	CompositionConnects    []FlowPackageConnect
 	FlowAgents             map[string][]FlowRequiredAgent
 	WritePinOwners         map[string][]string
 	NodeHandlers           map[string]map[string]SystemNodeEventHandler
@@ -573,18 +576,19 @@ type FlowContractPaths struct {
 	PromptsDir   string
 }
 type ProjectPackageDocument struct {
-	Name            string              `yaml:"name"`
-	Version         string              `yaml:"version"`
-	PlatformVersion string              `yaml:"platform_version"`
-	Author          string              `yaml:"author"`
-	Description     string              `yaml:"description"`
-	Requires        FlowPackageRequires `yaml:"requires"`
-	Flows           []ProjectFlowRef    `yaml:"flows"`
-	Packages        []ProjectPackageRef `yaml:"packages"`
-	Children        []ProjectPackageRef `yaml:"children"`
-	Subpackages     []ProjectPackageRef `yaml:"subpackages"`
-	Handoffs        []ProjectHandoff    `yaml:"handoffs"`
-	EntitySchema    EntitySchema        `yaml:"entity_schema"`
+	Name            string               `yaml:"name"`
+	Version         string               `yaml:"version"`
+	PlatformVersion string               `yaml:"platform_version"`
+	Author          string               `yaml:"author"`
+	Description     string               `yaml:"description"`
+	Requires        FlowPackageRequires  `yaml:"requires"`
+	Flows           []ProjectFlowRef     `yaml:"flows"`
+	Packages        []ProjectPackageRef  `yaml:"packages"`
+	Children        []ProjectPackageRef  `yaml:"children"`
+	Subpackages     []ProjectPackageRef  `yaml:"subpackages"`
+	Connect         []FlowPackageConnect `yaml:"connect"`
+	Handoffs        []ProjectHandoff     `yaml:"handoffs"`
+	EntitySchema    EntitySchema         `yaml:"entity_schema"`
 }
 
 type TypeCatalogDocument struct {
@@ -721,12 +725,47 @@ type FlowPins struct {
 	Outputs FlowOutputPins `yaml:"outputs"`
 }
 type FlowInputPins struct {
-	Events []string `yaml:"events"`
-	Reads  []string `yaml:"reads"`
+	Events    []string            `yaml:"events"`
+	EventPins []FlowInputEventPin `yaml:"-"`
+	Reads     []string            `yaml:"reads"`
 }
 type FlowOutputPins struct {
-	Events []string `yaml:"events"`
-	Writes []string `yaml:"writes"`
+	Events    []string             `yaml:"events"`
+	EventPins []FlowOutputEventPin `yaml:"-"`
+	Writes    []string             `yaml:"writes"`
+}
+type FlowInputEventPin struct {
+	Name    string               `yaml:"name"`
+	Event   string               `yaml:"event"`
+	Address *FlowInputPinAddress `yaml:"address"`
+}
+type FlowOutputEventPin struct {
+	Name  string `yaml:"name"`
+	Event string `yaml:"event"`
+}
+type FlowInputPinAddress struct {
+	By          string `yaml:"by"`
+	Source      string `yaml:"source"`
+	Target      string `yaml:"target"`
+	Cardinality string `yaml:"cardinality"`
+	Mode        string `yaml:"mode"`
+}
+type FlowPackageConnect struct {
+	PackageKey string                           `yaml:"-"`
+	From       string                           `yaml:"from"`
+	To         string                           `yaml:"to"`
+	Adapter    string                           `yaml:"adapter"`
+	Map        map[string]FlowPackageConnectMap `yaml:"map"`
+	Delivery   string                           `yaml:"delivery"`
+	Reply      map[string]string                `yaml:"reply"`
+}
+type FlowPackageConnectMap struct {
+	Source string `yaml:"source"`
+	Target string `yaml:"target"`
+}
+type FlowPackagePinRef struct {
+	FlowID string
+	Pin    string
 }
 type FlowRequiredAgent struct {
 	Role         string   `yaml:"role"`

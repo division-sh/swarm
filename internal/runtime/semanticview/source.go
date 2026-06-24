@@ -31,6 +31,13 @@ type Source interface {
 	FlowPath(flowID string) string
 	FlowInputEvents(flowID string) []string
 	FlowOutputEvents(flowID string) []string
+	FlowInputEventPins(flowID string) []runtimecontracts.FlowInputEventPin
+	FlowOutputEventPins(flowID string) []runtimecontracts.FlowOutputEventPin
+	FlowInputEventPin(flowID, pinName string) (runtimecontracts.FlowInputEventPin, bool)
+	FlowOutputEventPin(flowID, pinName string) (runtimecontracts.FlowOutputEventPin, bool)
+	CompositionConnects() []runtimecontracts.FlowPackageConnect
+	CompositionConnectsTo(flowID, pinName string) []runtimecontracts.FlowPackageConnect
+	CompositionConnectsFrom(flowID, pinName string) []runtimecontracts.FlowPackageConnect
 	FlowWritePins(flowID string) []string
 	WritePinOwners(pin string) []string
 	FlowHasInputEvent(flowID, eventType string) bool

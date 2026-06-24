@@ -23,6 +23,8 @@ type deadEventSchemaUsage struct {
 	autoEmitOnCreate   bool
 	externalSource     bool
 	externalConsumer   bool
+	connectOutputs     int
+	connectInputs      int
 }
 
 func (u deadEventSchemaUsage) hasAny() bool {
@@ -34,7 +36,9 @@ func (u deadEventSchemaUsage) hasAny() bool {
 		u.fanOutEmit > 0 ||
 		u.autoEmitOnCreate ||
 		u.externalSource ||
-		u.externalConsumer
+		u.externalConsumer ||
+		u.connectOutputs > 0 ||
+		u.connectInputs > 0
 }
 
 func (c *checkerContext) deadEventSchema() []Finding {
@@ -58,7 +62,7 @@ func (c *checkerContext) deadEventSchema() []Finding {
 			CheckID:  "semantic_drift_dead_event_schema",
 			Severity: "warning",
 			Message: fmt.Sprintf(
-				"Event %s declared in %s has no active role in the authored bundle.\n\nChecked usage sites:\n- Handler emits: %d\n- Handler subscribes: %d\n- Agent emit_events: %d\n- Agent subscriptions: %d\n- Timer fire/start/cancel references: %d\n- External source metadata (swarm.source): %s\n- External consumer metadata (swarm.consumer): %s\n- Fan-out emit: %d\n- Auto-emit-on-create: %s\n\nIf this event is no longer used, remove it from %s.\nIf it is used by an external system, add swarm.source: external or swarm.consumer: ... to document the external role.",
+				"Event %s declared in %s has no active role in the authored bundle.\n\nChecked usage sites:\n- Handler emits: %d\n- Handler subscribes: %d\n- Agent emit_events: %d\n- Agent subscriptions: %d\n- Timer fire/start/cancel references: %d\n- External source metadata (swarm.source): %s\n- External consumer metadata (swarm.consumer): %s\n- Fan-out emit: %d\n- Auto-emit-on-create: %s\n- Parent connect outputs: %d\n- Parent connect inputs: %d\n\nIf this event is no longer used, remove it from %s.\nIf it is used by an external system, add swarm.source: external or swarm.consumer: ... to document the external role.",
 				decl.Canonical,
 				fileLabel,
 				usage.handlerEmits,
@@ -70,6 +74,8 @@ func (c *checkerContext) deadEventSchema() []Finding {
 				yesNoLocal(usage.externalConsumer),
 				usage.fanOutEmit,
 				yesNoLocal(usage.autoEmitOnCreate),
+				usage.connectOutputs,
+				usage.connectInputs,
 				fileLabel,
 			),
 			Location: decl.Canonical,
@@ -260,6 +266,20 @@ func (c *checkerContext) deadEventSchemaUsageFor(decl deadEventDeclaration) dead
 		for _, eventType := range deadEventTimerReferences(timer) {
 			if deadEventRoleMatches(c.source, decl, timerFlowID, eventType) {
 				usage.timerReferences++
+			}
+		}
+	}
+	for _, connect := range c.source.CompositionConnects() {
+		from, fromErr := connect.FromRef()
+		if fromErr == nil {
+			if outputPin, ok := c.source.FlowOutputEventPin(from.FlowID, from.Pin); ok && deadEventRoleMatches(c.source, decl, from.FlowID, outputPin.EventType()) {
+				usage.connectOutputs++
+			}
+		}
+		to, toErr := connect.ToRef()
+		if toErr == nil {
+			if inputPin, ok := c.source.FlowInputEventPin(to.FlowID, to.Pin); ok && deadEventRoleMatches(c.source, decl, to.FlowID, inputPin.EventType()) {
+				usage.connectInputs++
 			}
 		}
 	}
