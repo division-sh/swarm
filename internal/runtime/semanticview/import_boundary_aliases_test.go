@@ -18,6 +18,13 @@ func TestImportBoundaryPinAliasesResolveInputAndOutputBindings(t *testing.T) {
 	if !ImportBoundaryInputAliasRequired(source, "worker", "work.requested") {
 		t.Fatal("expected work.requested to require import-boundary input alias")
 	}
+	inputs := ImportBoundaryInputAliasesForParentEvent(source, "worker", "parent.lead_captured")
+	if len(inputs) != 1 {
+		t.Fatalf("input aliases for parent event = %#v, want one", inputs)
+	}
+	if got, want := inputs[0].Pin, "work.requested"; got != want {
+		t.Fatalf("input alias pin = %q, want %q", got, want)
+	}
 
 	outputs := ImportBoundaryOutputAliasesForParentEvent(source, ".", "", "parent.lead_enriched")
 	if len(outputs) != 1 {
@@ -25,6 +32,10 @@ func TestImportBoundaryPinAliasesResolveInputAndOutputBindings(t *testing.T) {
 	}
 	if got, want := outputs[0].EventPattern, "worker/work.completed"; got != want {
 		t.Fatalf("output event pattern = %q, want %q", got, want)
+	}
+	scopedOutputs := ImportBoundaryOutputAliasesForParent(source, ".", "")
+	if len(scopedOutputs) != 1 {
+		t.Fatalf("scoped output aliases = %#v, want one", scopedOutputs)
 	}
 
 	parentEvents := ImportBoundaryOutputParentEventsForEvent(source, ".", "", "worker/work.completed")
