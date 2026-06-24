@@ -224,10 +224,10 @@ func (s bundleSource) FlowHasOutputEvent(flowID, eventType string) bool {
 	return s.bundle.FlowHasOutputEvent(flowID, eventType)
 }
 func (s bundleSource) ResolveFlowInputAutoWire(flowID, eventType string) runtimecontracts.FlowInputAutoWireResolution {
-	return s.bundle.ResolveFlowInputAutoWire(flowID, eventType)
+	return ResolveFlowInputAutoWire(s, flowID, eventType)
 }
 func (s bundleSource) FlowInputProducerPatterns(flowID, eventType string) []string {
-	return s.bundle.FlowInputProducerPatterns(flowID, eventType)
+	return FlowInputProducerPatterns(s, flowID, eventType)
 }
 func (s bundleSource) ResolveFlowEventReference(flowID, eventType string) string {
 	return s.bundle.ResolveFlowEventReference(flowID, eventType)

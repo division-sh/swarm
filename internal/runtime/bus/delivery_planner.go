@@ -806,7 +806,9 @@ func routedRootInputFlowNodeMatchesNoTargetEvent(evt events.Event, subscriber Su
 	if strings.TrimSpace(subscriber.ID) == "" || strings.TrimSpace(subscriber.Type) != "node" {
 		return false
 	}
-	if strings.TrimSpace(subscriber.RouteSource) != "root_input_flow" {
+	switch strings.TrimSpace(subscriber.RouteSource) {
+	case "root_input_flow", "pin_bind_input_alias":
+	default:
 		return false
 	}
 	if strings.Trim(strings.TrimSpace(subscriber.Path), "/") == "" {

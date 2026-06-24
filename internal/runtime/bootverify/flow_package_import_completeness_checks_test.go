@@ -100,6 +100,62 @@ func TestRun_FlowPackageImportCompletenessIgnoresImportsWithoutRequires(t *testi
 	}
 }
 
+func TestRun_FlowPackagePinBindAliasValidationAcceptsValidAliases(t *testing.T) {
+	source := loadFlowPackageAliasValidationSource(t, flowPackageAliasValidationOptions{})
+
+	report := Run(context.Background(), source, Options{})
+
+	if got := report.HardInvalidities(); reportContains(got, "flow_package_pin_bind_alias_validation", "invalid") {
+		t.Fatalf("unexpected flow_package_pin_bind_alias_validation invalidity: %#v", got)
+	}
+	if reportContains(report.Warnings(), "input_pin_wiring", "work.requested") {
+		t.Fatalf("input alias should satisfy input pin wiring, got warnings %#v", report.Warnings())
+	}
+}
+
+func TestRun_FlowPackagePinBindAliasValidationFailsClosed(t *testing.T) {
+	tests := []struct {
+		name        string
+		opts        flowPackageAliasValidationOptions
+		wantMessage string
+	}{
+		{
+			name: "unknown package input pin",
+			opts: flowPackageAliasValidationOptions{
+				extraInputBind: "unknown.pin: parent.lead_captured",
+			},
+			wantMessage: "bind key is not declared",
+		},
+		{
+			name: "unknown parent event",
+			opts: flowPackageAliasValidationOptions{
+				inputBind: "parent.missing_event",
+			},
+			wantMessage: "does not resolve to a parent-facing event",
+		},
+		{
+			name: "ambiguous parent event",
+			opts: flowPackageAliasValidationOptions{
+				inputBind:        "shared.ready",
+				producerOutput:   "shared.ready",
+				secondProducerID: "producer_b",
+			},
+			wantMessage: "multiple parent-facing event producers",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			source := loadFlowPackageAliasValidationSource(t, tc.opts)
+
+			report := Run(context.Background(), source, Options{})
+
+			if !reportContains(report.HardInvalidities(), "flow_package_pin_bind_alias_validation", tc.wantMessage) {
+				t.Fatalf("expected flow_package_pin_bind_alias_validation %q, got %#v", tc.wantMessage, report.HardInvalidities())
+			}
+		})
+	}
+}
+
 type flowPackageImportFixtureOptions struct {
 	importKind string
 	bind       string
@@ -174,4 +230,118 @@ func allFlowPackageBindingsYAML() string {
       credentials:
         provider_token: parent_provider_token
 `
+}
+
+type flowPackageAliasValidationOptions struct {
+	inputBind        string
+	outputBind       string
+	extraInputBind   string
+	producerOutput   string
+	secondProducerID string
+}
+
+func loadFlowPackageAliasValidationSource(t *testing.T, opts flowPackageAliasValidationOptions) semanticview.Source {
+	t.Helper()
+	root := writeFlowPackageAliasValidationFixture(t, opts)
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+	return semanticview.Wrap(bundle)
+}
+
+func writeFlowPackageAliasValidationFixture(t *testing.T, opts flowPackageAliasValidationOptions) string {
+	t.Helper()
+	if opts.inputBind == "" {
+		opts.inputBind = "parent.lead_captured"
+	}
+	if opts.outputBind == "" {
+		opts.outputBind = "parent.lead_enriched"
+	}
+	root := t.TempDir()
+	flows := ""
+	if opts.producerOutput != "" {
+		flows += `  - id: producer
+    flow: producer
+    mode: static
+`
+	}
+	if opts.secondProducerID != "" {
+		flows += `  - id: ` + opts.secondProducerID + `
+    flow: ` + opts.secondProducerID + `
+    mode: static
+`
+	}
+	flows += `  - id: worker
+    flow: worker
+    mode: static
+    bind:
+      inputs:
+        work.requested: ` + opts.inputBind + `
+`
+	if opts.extraInputBind != "" {
+		flows += `        ` + opts.extraInputBind + `
+`
+	}
+	flows += `      outputs:
+        work.completed: ` + opts.outputBind + `
+`
+	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: flow-package-alias-validation
+version: "1.0.0"
+platform_version: ">=1.6.0"
+flows:
+`+flows)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: flow-package-alias-validation\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), `
+parent.lead_captured: {}
+parent.lead_enriched: {}
+`)
+	writeFlowPackageAliasValidationFlow(t, root, "worker", `
+pins:
+  inputs:
+    events: [work.requested]
+  outputs:
+    events: [work.completed]
+`, "")
+	if opts.producerOutput != "" {
+		writeFlowPackageAliasValidationFlow(t, root, "producer", `
+pins:
+  outputs:
+    events: [`+opts.producerOutput+`]
+`, opts.producerOutput)
+	}
+	if opts.secondProducerID != "" {
+		writeFlowPackageAliasValidationFlow(t, root, opts.secondProducerID, `
+pins:
+  outputs:
+    events: [`+opts.producerOutput+`]
+`, opts.producerOutput)
+	}
+	return root
+}
+
+func writeFlowPackageAliasValidationFlow(t *testing.T, root, flowID, schemaTail, outputEvent string) {
+	t.Helper()
+	requires := "requires:\n  inputs: []\n  outputs: []\n"
+	if flowID == "worker" {
+		requires = "requires:\n  inputs: [work.requested]\n  outputs: [work.completed]\n"
+	}
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "package.yaml"), `
+name: `+flowID+`
+version: "1.0.0"
+`+requires)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "schema.yaml"), `
+name: `+flowID+`
+mode: static
+`+schemaTail)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "policy.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "agents.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "nodes.yaml"), "{}\n")
+	if outputEvent == "" {
+		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "events.yaml"), "{}\n")
+		return
+	}
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "events.yaml"), outputEvent+": {}\n")
 }

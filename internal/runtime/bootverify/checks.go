@@ -245,6 +245,7 @@ var bootCheckRegistry = []Check{
 	{ID: "write_pin_ownership_validation", Severity: "error", Run: checkWritePinOwnershipValidation},
 	{ID: "gate_schema_validation", Severity: "error", Run: checkGateSchemaValidation},
 	{ID: "flow_package_import_completeness", Severity: SeverityHardInvalidity, Run: checkFlowPackageImportCompleteness},
+	{ID: "flow_package_pin_bind_alias_validation", Severity: SeverityHardInvalidity, Run: checkFlowPackagePinBindAliasValidation},
 	{ID: "input_pin_wiring", Severity: "warning", Run: checkInputPinWiring},
 	{ID: "pin_target_resolution", Severity: "error", Run: checkPinTargetResolution},
 	{ID: "redundant_in_topology_select_entity", Severity: "warning", Run: checkRedundantInTopologySelectEntity},

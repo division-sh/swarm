@@ -1283,6 +1283,9 @@ func (eb *EventBus) localizedSubscriberEvent(eventType string, subscriber Subscr
 	if strings.TrimSpace(subscriber.Type) != "node" {
 		return ""
 	}
+	if localized := eventidentity.Normalize(subscriber.LocalizedEvent); localized != "" {
+		return localized
+	}
 	candidates := []string{eventType, subscriber.MatchPattern}
 	if eb != nil && eb.semanticSource != nil {
 		flowID := strings.TrimSpace(routeFlowIDForPath(eb.semanticSource, subscriber.Path))

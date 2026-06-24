@@ -13,11 +13,12 @@ import (
 )
 
 type Subscriber struct {
-	ID           string
-	Type         string
-	Path         string
-	MatchPattern string
-	RouteSource  string
+	ID             string
+	Type           string
+	Path           string
+	MatchPattern   string
+	RouteSource    string
+	LocalizedEvent string
 }
 
 type RouteTable struct {
@@ -39,6 +40,7 @@ type routePattern struct {
 }
 
 type routeFlowTemplate struct {
+	PackageKey  string
 	FlowID      string
 	InputEvents []string
 	LocalEvents map[string]struct{}
@@ -52,8 +54,9 @@ type routeSubscriberTemplate struct {
 }
 
 type routeResolvedPattern struct {
-	EventPattern string
-	RouteSource  string
+	EventPattern   string
+	RouteSource    string
+	LocalizedEvent string
 }
 
 func DeriveRouteTable(source semanticview.Source) (*RouteTable, error) {
@@ -64,9 +67,22 @@ func DeriveRouteTable(source semanticview.Source) (*RouteTable, error) {
 
 	for _, scope := range semanticview.ProjectScopes(source) {
 		localEvents := routeProjectLocalEventSet(scope)
-		rt.addEventPathsLocked("", localEvents)
-		rt.addAgentPatternsLocked(source, "", nil, "", localEvents, scope.Agents)
-		rt.addNodePatternsLocked(source, "", nil, "", localEvents, scope.Nodes)
+		owningFlowID := ""
+		basePath := ""
+		var inputEvents []string
+		if routeProjectScopeRequiresPinAliases(scope) {
+			owningFlowID = strings.TrimSpace(scope.OwningFlowID)
+		}
+		if owningFlowID != "" {
+			inputEvents = source.FlowInputEvents(owningFlowID)
+			basePath = routeFlowPath(source, owningFlowID)
+		}
+		if routeProjectScopeOwnedByTemplateFlow(source, owningFlowID) {
+			continue
+		}
+		rt.addEventPathsLocked(basePath, localEvents)
+		rt.addAgentPatternsLocked(source, scope.Key, owningFlowID, inputEvents, basePath, localEvents, scope.Agents)
+		rt.addNodePatternsLocked(source, scope.Key, owningFlowID, inputEvents, basePath, localEvents, scope.Nodes)
 	}
 
 	for _, scope := range semanticview.FlowScopes(source) {
@@ -74,6 +90,7 @@ func DeriveRouteTable(source semanticview.Source) (*RouteTable, error) {
 		localEvents := routeFlowLocalEventSet(source, scope)
 		if strings.EqualFold(scope.Mode, "template") {
 			rt.templates[flowPath] = routeFlowTemplate{
+				PackageKey:  scope.PackageKey,
 				FlowID:      scope.ID,
 				InputEvents: append([]string{}, scope.InputEvents...),
 				LocalEvents: cloneStringSet(localEvents),
@@ -82,14 +99,27 @@ func DeriveRouteTable(source semanticview.Source) (*RouteTable, error) {
 			continue
 		}
 		rt.addEventPathsLocked(flowPath, localEvents)
-		rt.addAgentPatternsLocked(source, scope.ID, scope.InputEvents, flowPath, localEvents, scope.Agents)
-		rt.addNodePatternsLocked(source, scope.ID, scope.InputEvents, flowPath, localEvents, scope.Nodes)
+		rt.addAgentPatternsLocked(source, scope.PackageKey, scope.ID, scope.InputEvents, flowPath, localEvents, scope.Agents)
+		rt.addNodePatternsLocked(source, scope.PackageKey, scope.ID, scope.InputEvents, flowPath, localEvents, scope.Nodes)
 	}
 
 	rt.addTopLevelRootInputNodeRoutesLocked(source)
 	rt.addRootInputFlowNodeRoutesLocked(source)
 	rt.rebuildLocked()
 	return rt, nil
+}
+
+func routeProjectScopeRequiresPinAliases(scope semanticview.ProjectScope) bool {
+	return len(scope.Manifest.Requires.Inputs) > 0 || len(scope.Manifest.Requires.Outputs) > 0
+}
+
+func routeProjectScopeOwnedByTemplateFlow(source semanticview.Source, flowID string) bool {
+	flowID = strings.TrimSpace(flowID)
+	if source == nil || flowID == "" {
+		return false
+	}
+	scope, ok := source.FlowScopeByID(flowID)
+	return ok && strings.EqualFold(scope.Mode, "template")
 }
 
 func (rt *RouteTable) Resolve(eventType string) []Subscriber {
@@ -155,14 +185,14 @@ func (rt *RouteTable) AddFlowInstanceRoute(req FlowInstanceRouteMaterializationR
 				Path: instancePath,
 			}
 			for _, rawPattern := range subscriberTemplate.RawPatterns {
-				for _, resolved := range routeResolveSubscriberPatterns(rt.source, templateDef.FlowID, templateDef.InputEvents, instancePath, templateDef.LocalEvents, rawPattern) {
+				for _, resolved := range routeResolveSubscriberPatterns(rt.source, templateDef.PackageKey, templateDef.FlowID, templateDef.InputEvents, instancePath, templateDef.LocalEvents, rawPattern) {
 					if strings.TrimSpace(resolved.EventPattern) == "" {
 						continue
 					}
-					subscriber.RouteSource = resolved.RouteSource
+					resolvedSubscriber := routeApplyResolvedPattern(subscriber, resolved)
 					rt.patterns = append(rt.patterns, routePattern{
 						EventPattern: resolved.EventPattern,
-						Subscriber:   subscriber,
+						Subscriber:   resolvedSubscriber,
 						InstancePath: instancePath,
 					})
 				}
@@ -187,14 +217,14 @@ func (rt *RouteTable) AddFlowInstanceRoute(req FlowInstanceRouteMaterializationR
 		Path: instancePath,
 	}
 	for _, rawPattern := range normalizeStringList(req.Template.SubscribesTo) {
-		for _, resolved := range routeResolveSubscriberPatterns(rt.source, templateID, nil, instancePath, localEvents, rawPattern) {
+		for _, resolved := range routeResolveSubscriberPatterns(rt.source, "", templateID, nil, instancePath, localEvents, rawPattern) {
 			if strings.TrimSpace(resolved.EventPattern) == "" {
 				continue
 			}
-			subscriber.RouteSource = resolved.RouteSource
+			resolvedSubscriber := routeApplyResolvedPattern(subscriber, resolved)
 			rt.patterns = append(rt.patterns, routePattern{
 				EventPattern: resolved.EventPattern,
-				Subscriber:   subscriber,
+				Subscriber:   resolvedSubscriber,
 				InstancePath: instancePath,
 			})
 		}
@@ -416,7 +446,7 @@ func (rt *RouteTable) addEventPathsLocked(basePath string, localEvents map[strin
 	return added
 }
 
-func (rt *RouteTable) addAgentPatternsLocked(source semanticview.Source, flowID string, inputEvents []string, basePath string, localEvents map[string]struct{}, agents map[string]runtimecontracts.AgentRegistryEntry) {
+func (rt *RouteTable) addAgentPatternsLocked(source semanticview.Source, packageKey, flowID string, inputEvents []string, basePath string, localEvents map[string]struct{}, agents map[string]runtimecontracts.AgentRegistryEntry) {
 	for _, key := range sortedStringKeys(agents) {
 		entry := agents[key]
 		subscriber := Subscriber{
@@ -425,21 +455,21 @@ func (rt *RouteTable) addAgentPatternsLocked(source semanticview.Source, flowID 
 			Path: strings.Trim(strings.TrimSpace(basePath), "/"),
 		}
 		for _, rawPattern := range normalizeStringList(entry.Subscriptions) {
-			for _, resolved := range routeResolveSubscriberPatterns(source, flowID, inputEvents, basePath, localEvents, rawPattern) {
+			for _, resolved := range routeResolveSubscriberPatterns(source, packageKey, flowID, inputEvents, basePath, localEvents, rawPattern) {
 				if strings.TrimSpace(resolved.EventPattern) == "" {
 					continue
 				}
-				subscriber.RouteSource = resolved.RouteSource
+				resolvedSubscriber := routeApplyResolvedPattern(subscriber, resolved)
 				rt.patterns = append(rt.patterns, routePattern{
 					EventPattern: resolved.EventPattern,
-					Subscriber:   subscriber,
+					Subscriber:   resolvedSubscriber,
 				})
 			}
 		}
 	}
 }
 
-func (rt *RouteTable) addNodePatternsLocked(source semanticview.Source, flowID string, inputEvents []string, basePath string, localEvents map[string]struct{}, nodes map[string]runtimecontracts.SystemNodeContract) {
+func (rt *RouteTable) addNodePatternsLocked(source semanticview.Source, packageKey, flowID string, inputEvents []string, basePath string, localEvents map[string]struct{}, nodes map[string]runtimecontracts.SystemNodeContract) {
 	for _, key := range sortedStringKeys(nodes) {
 		entry := nodes[key]
 		nodeID := strings.TrimSpace(entry.ID)
@@ -456,25 +486,34 @@ func (rt *RouteTable) addNodePatternsLocked(source semanticview.Source, flowID s
 			patterns = source.NodeRuntimeSubscriptions(nodeID)
 		}
 		for _, rawPattern := range patterns {
-			for _, resolved := range routeResolveSubscriberPatterns(source, flowID, inputEvents, basePath, localEvents, rawPattern) {
+			for _, resolved := range routeResolveSubscriberPatterns(source, packageKey, flowID, inputEvents, basePath, localEvents, rawPattern) {
 				if strings.TrimSpace(resolved.EventPattern) == "" {
 					continue
 				}
-				subscriber.RouteSource = resolved.RouteSource
+				resolvedSubscriber := routeApplyResolvedPattern(subscriber, resolved)
 				rt.patterns = append(rt.patterns, routePattern{
 					EventPattern: resolved.EventPattern,
-					Subscriber:   subscriber,
+					Subscriber:   resolvedSubscriber,
 				})
 			}
+			if routeInputAliasRequiresExclusivePatterns(source, flowID, rawPattern) {
+				continue
+			}
 			if resolved := routeResolveNodeCanonicalPattern(source, basePath, nodeID, rawPattern); strings.TrimSpace(resolved.EventPattern) != "" {
-				subscriber.RouteSource = resolved.RouteSource
+				resolvedSubscriber := routeApplyResolvedPattern(subscriber, resolved)
 				rt.patterns = append(rt.patterns, routePattern{
 					EventPattern: resolved.EventPattern,
-					Subscriber:   subscriber,
+					Subscriber:   resolvedSubscriber,
 				})
 			}
 		}
 	}
+}
+
+func routeApplyResolvedPattern(subscriber Subscriber, resolved routeResolvedPattern) Subscriber {
+	subscriber.RouteSource = strings.TrimSpace(resolved.RouteSource)
+	subscriber.LocalizedEvent = eventidentity.Normalize(resolved.LocalizedEvent)
+	return subscriber
 }
 
 func routeResolveNodeCanonicalPattern(source semanticview.Source, basePath, nodeID, rawPattern string) routeResolvedPattern {
@@ -545,7 +584,21 @@ func routeFlowInputHasExternalProducer(source semanticview.Source, flowID, event
 	if source == nil {
 		return false
 	}
+	if semanticview.ImportBoundaryInputAliasRequired(source, flowID, eventType) {
+		return true
+	}
 	return len(source.ResolveFlowInputAutoWire(flowID, eventType).Patterns) > 0
+}
+
+func routeInputAliasRequiresExclusivePatterns(source semanticview.Source, flowID, eventType string) bool {
+	if source == nil || strings.TrimSpace(flowID) == "" {
+		return false
+	}
+	eventType = eventidentity.Normalize(eventType)
+	if eventType == "" || !source.FlowHasInputEvent(flowID, eventType) {
+		return false
+	}
+	return semanticview.ImportBoundaryInputAliasRequired(source, flowID, eventType)
 }
 
 func routeNodeLocalEventSet(node runtimecontracts.SystemNodeContract) map[string]struct{} {
@@ -642,15 +695,15 @@ func routeFlowIDForPath(source semanticview.Source, flowPath string) string {
 	return ""
 }
 
-func routeResolvedPatternsForList(source semanticview.Source, flowID string, inputEvents []string, basePath string, localEvents map[string]struct{}, patterns []string) []routeResolvedPattern {
+func routeResolvedPatternsForList(source semanticview.Source, packageKey, flowID string, inputEvents []string, basePath string, localEvents map[string]struct{}, patterns []string) []routeResolvedPattern {
 	out := make([]routeResolvedPattern, 0, len(patterns))
 	for _, raw := range patterns {
-		out = append(out, routeResolveSubscriberPatterns(source, flowID, inputEvents, basePath, localEvents, raw)...)
+		out = append(out, routeResolveSubscriberPatterns(source, packageKey, flowID, inputEvents, basePath, localEvents, raw)...)
 	}
 	return out
 }
 
-func routeResolveSubscriberPatterns(source semanticview.Source, flowID string, inputEvents []string, basePath string, localEvents map[string]struct{}, raw string) []routeResolvedPattern {
+func routeResolveSubscriberPatterns(source semanticview.Source, packageKey, flowID string, inputEvents []string, basePath string, localEvents map[string]struct{}, raw string) []routeResolvedPattern {
 	raw = eventidentity.Normalize(raw)
 	flowID = strings.TrimSpace(flowID)
 	if raw == "" {
@@ -659,7 +712,36 @@ func routeResolveSubscriberPatterns(source semanticview.Source, flowID string, i
 	if flowID != "" && source != nil && source.FlowHasInputEvent(flowID, raw) {
 		patterns := routeInputProducerPatterns(source.ResolveFlowInputAutoWire(flowID, raw))
 		if len(patterns) > 0 {
+			if len(semanticview.ImportBoundaryInputAliases(source, flowID, raw)) > 0 {
+				for i := range patterns {
+					patterns[i].RouteSource = "pin_bind_input_alias"
+					patterns[i].LocalizedEvent = raw
+				}
+			}
 			return patterns
+		}
+		if semanticview.ImportBoundaryInputAliasRequired(source, flowID, raw) {
+			return nil
+		}
+	}
+	if source != nil {
+		outputAliases := semanticview.ImportBoundaryOutputAliasesForParentEvent(source, packageKey, flowID, raw)
+		if len(outputAliases) > 0 {
+			out := make([]routeResolvedPattern, 0, len(outputAliases))
+			for _, alias := range outputAliases {
+				pattern := eventidentity.Normalize(alias.EventPattern)
+				if pattern == "" {
+					continue
+				}
+				out = append(out, routeResolvedPattern{
+					EventPattern:   pattern,
+					RouteSource:    "pin_bind_output_alias",
+					LocalizedEvent: raw,
+				})
+			}
+			if len(out) > 0 {
+				return out
+			}
 		}
 	}
 	scope := routeEventIdentityScope(basePath, localEvents, inputEvents)
