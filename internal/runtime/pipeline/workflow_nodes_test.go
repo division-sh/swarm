@@ -3,7 +3,9 @@ package pipeline
 import (
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -183,4 +185,138 @@ func TestLoadWorkflowNodes_UsesHandlerKeysForCrossFlowPinAutoWire(t *testing.T) 
 		}
 	}
 	t.Fatalf("Subscriptions = %#v, want producer/scan.requested", nodes[0].Subscriptions)
+}
+
+func TestLoadWorkflowNodes_UsesImportBoundaryInputAlias(t *testing.T) {
+	source := loadPipelineImportBoundaryAliasSource(t)
+	nodes, err := LoadWorkflowNodes(source)
+	if err != nil {
+		t.Fatalf("LoadWorkflowNodes: %v", err)
+	}
+	worker := workflowNodeByIDForTest(nodes, "worker-node")
+	if worker == nil {
+		t.Fatalf("worker-node missing from %#v", nodes)
+	}
+	if !workflowNodeHasSubscriptionForTest(*worker, "parent.lead_captured") {
+		t.Fatalf("worker-node subscriptions = %#v, want parent.lead_captured", worker.Subscriptions)
+	}
+	if workflowNodeHasSubscriptionForTest(*worker, "work.requested") || workflowNodeHasSubscriptionForTest(*worker, "worker/work.requested") {
+		t.Fatalf("worker-node subscriptions = %#v, should not preserve raw required-import input fallback", worker.Subscriptions)
+	}
+}
+
+func TestLoadWorkflowNodes_UsesImportBoundaryOutputAliasForParentHandler(t *testing.T) {
+	source := loadPipelineImportBoundaryAliasSource(t)
+	nodes, err := LoadWorkflowNodes(source)
+	if err != nil {
+		t.Fatalf("LoadWorkflowNodes: %v", err)
+	}
+	parent := workflowNodeByIDForTest(nodes, "parent-listener")
+	if parent == nil {
+		t.Fatalf("parent-listener missing from %#v", nodes)
+	}
+	if !workflowNodeHasSubscriptionForTest(*parent, "worker/work.completed") {
+		t.Fatalf("parent-listener subscriptions = %#v, want worker/work.completed output alias", parent.Subscriptions)
+	}
+	evt := events.NewProjectionEvent("", "worker/work.completed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
+	resolved := workflowNodeEventHandlerResolutionForDelivery(source, "parent-listener", evt)
+	if !resolved.Matched {
+		t.Fatal("expected parent-listener handler to resolve through output alias")
+	}
+	if got := resolved.HandlerEventKey; got != "parent.lead_enriched" {
+		t.Fatalf("handler event key = %q, want parent.lead_enriched", got)
+	}
+}
+
+func loadPipelineImportBoundaryAliasSource(t *testing.T) semanticview.Source {
+	t.Helper()
+	root := writePipelineImportBoundaryAliasFixture(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(contractComplianceRepoRoot(t), root, runtimecontracts.DefaultPlatformSpecFile(contractComplianceRepoRoot(t)))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return semanticview.Wrap(bundle)
+}
+
+func writePipelineImportBoundaryAliasFixture(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	writePipelineFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: pipeline-import-boundary-alias
+version: "1.0.0"
+platform_version: ">=1.6.0"
+flows:
+  - id: worker
+    flow: worker
+    mode: static
+    bind:
+      inputs:
+        work.requested: parent.lead_captured
+      outputs:
+        work.completed: parent.lead_enriched
+`)
+	writePipelineFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: pipeline-import-boundary-alias\n")
+	writePipelineFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writePipelineFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writePipelineFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writePipelineFixtureFile(t, filepath.Join(root, "events.yaml"), `
+parent.lead_captured: {}
+parent.lead_enriched: {}
+`)
+	writePipelineFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
+parent-listener:
+  id: parent-listener
+  execution_type: system_node
+  subscribes_to: [parent.lead_enriched]
+  event_handlers:
+    parent.lead_enriched: {}
+`)
+	writePipelineFixtureFile(t, filepath.Join(root, "flows", "worker", "package.yaml"), `
+name: worker
+version: "1.0.0"
+requires:
+  inputs: [work.requested]
+  outputs: [work.completed]
+`)
+	writePipelineFixtureFile(t, filepath.Join(root, "flows", "worker", "schema.yaml"), `
+name: worker
+mode: static
+pins:
+  inputs:
+    events: [work.requested]
+  outputs:
+    events: [work.completed]
+`)
+	writePipelineFixtureFile(t, filepath.Join(root, "flows", "worker", "policy.yaml"), "{}\n")
+	writePipelineFixtureFile(t, filepath.Join(root, "flows", "worker", "agents.yaml"), "{}\n")
+	writePipelineFixtureFile(t, filepath.Join(root, "flows", "worker", "events.yaml"), "work.completed: {}\n")
+	writePipelineFixtureFile(t, filepath.Join(root, "flows", "worker", "nodes.yaml"), `
+worker-node:
+  id: worker-node
+  execution_type: system_node
+  subscribes_to: [work.requested]
+  produces: [work.completed]
+  event_handlers:
+    work.requested:
+      emit: work.completed
+`)
+	return root
+}
+
+func workflowNodeByIDForTest(nodes []WorkflowNode, id string) *WorkflowNode {
+	for i := range nodes {
+		if nodes[i].ID == id {
+			return &nodes[i]
+		}
+	}
+	return nil
+}
+
+func workflowNodeHasSubscriptionForTest(node WorkflowNode, eventType string) bool {
+	for _, subscription := range node.Subscriptions {
+		if string(subscription) == eventType {
+			return true
+		}
+	}
+	return false
 }

@@ -2,6 +2,7 @@ package bootverify
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -171,6 +172,22 @@ func (c *checkerContext) inputPinProducerPaths(flowID, eventType string, flowSco
 }
 
 func (c *checkerContext) inputPinSiblingFlowOutputPath(flowID, localEvent string) string {
+	aliases := semanticview.ImportBoundaryInputAliases(c.source, flowID, localEvent)
+	if len(aliases) > 0 {
+		patterns := make([]string, 0, len(aliases))
+		for _, alias := range aliases {
+			if pattern := eventidentity.Normalize(alias.EventPattern); pattern != "" {
+				patterns = append(patterns, pattern)
+			}
+		}
+		sort.Strings(patterns)
+		if len(patterns) > 0 {
+			return fmt.Sprintf("found via %s", strings.Join(patterns, ", "))
+		}
+	}
+	if semanticview.ImportBoundaryInputAliasRequired(c.source, flowID, localEvent) {
+		return "not found"
+	}
 	matches := map[string]struct{}{}
 	for otherFlowID := range c.source.FlowSchemaEntries() {
 		otherFlowID = strings.TrimSpace(otherFlowID)

@@ -4583,12 +4583,32 @@ flow_model:
         rule: >
           If an imported package declares any item under `requires.inputs`, `requires.outputs`, `requires.policy`, or
           `requires.credentials`, boot/verify must report a hard invalidity unless the parent import site provides a
-          non-empty `bind` entry for that exact item in the matching field. This first slice verifies binding presence
-          only; it does not execute runtime pin alias delivery or runtime policy/credential resolution.
+          non-empty `bind` entry for that exact item in the matching field. For `requires.inputs` and
+          `requires.outputs`, boot/verify must also fail closed when a `bind` key is not declared by the imported
+          package public pin list, when the package-local pin is not declared by an imported flow schema, or when the
+          parent-facing event binding is unknown or ambiguous.
         unsupported_shapes: Unknown `requires` or `bind` fields, non-list `requires` fields, and non-map `bind` fields are
           malformed contract input and must fail closed during contract parsing.
+      pin_alias_delivery:
+        owner: Runtime import-boundary pin alias resolver over semanticview ProjectScopes and FlowScopes.
+        inputs: >
+          For an imported package with a declared `requires.inputs` pin, the parent import-site `bind.inputs` value is
+          the canonical producer pattern consumed by flow input auto-wire, boot/verify input pin wiring, RouteTable
+          static/template derivation, EventBus recipient planning/persistence, and workflow-node materialization.
+          The child handler still consumes the package-local input pin name as its localized event. Raw same-name
+          local input fallback is forbidden for declared imported package input pins; same-name fallback remains valid
+          only for authored/local flows or imports that do not declare the input requirement.
+        outputs: >
+          For an imported package with a declared `requires.outputs` pin, the emitted/persisted event identity remains
+          the child flow output event pattern. Parent-facing subscribers consume the parent import-site `bind.outputs`
+          event name through the same runtime alias resolver. Delivery/readback localized event for the parent consumer
+          is the parent-facing event name; the source event identity, replay scope, target routing metadata, broadcast
+          semantics, correlation, and cardinality are not rewritten by the alias.
+        fail_closed: >
+          Runtime consumers must use the shared import-boundary alias resolver; local helpers must not independently
+          reinterpret package-local pins, parent event names, or raw same-name fallback for declared imported package
+          pins.
       split_runtime_semantics:
-        pin_alias_delivery: Runtime delivery through `bind.inputs` / `bind.outputs` is tracked separately by #1452.
         policy_credential_resolution: Runtime per-import policy and credential resolution is tracked separately by #1453.
         wildcard_grants: Wildcard subtree and cross-tree grant behavior is tracked separately by #1454.
         final_e2e_package_proof: Final multi-package marketplace-style runtime proof is tracked separately by #1455.

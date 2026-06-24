@@ -19,6 +19,39 @@ func checkFlowPackageImportCompleteness(c *checkerContext) []Finding {
 	return c.flowPackageImportFindings
 }
 
+func checkFlowPackagePinBindAliasValidation(c *checkerContext) []Finding {
+	var findings []Finding
+	for _, issue := range semanticview.ImportBoundaryPinAliasIssues(c.source) {
+		findings = append(findings, Finding{
+			CheckID:  "flow_package_pin_bind_alias_validation",
+			Severity: SeverityHardInvalidity,
+			Message:  flowPackagePinBindAliasMessage(issue),
+			Location: strings.TrimSpace(issue.ChildPackageKey),
+		})
+	}
+	return findings
+}
+
+func flowPackagePinBindAliasMessage(issue semanticview.ImportBoundaryPinAliasIssue) string {
+	direction := strings.TrimSpace(issue.Direction)
+	if direction == "" {
+		direction = "pin"
+	}
+	pin := strings.TrimSpace(issue.Pin)
+	if pin == "" {
+		pin = "<empty>"
+	}
+	parentEvent := strings.TrimSpace(issue.ParentEvent)
+	if parentEvent == "" {
+		parentEvent = "<empty>"
+	}
+	detail := strings.TrimSpace(issue.Message)
+	if detail == "" {
+		detail = strings.TrimSpace(issue.Kind)
+	}
+	return fmt.Sprintf("imported package %s %s bind for pin %s to parent event %s is invalid: %s", strings.TrimSpace(issue.ChildPackageKey), direction, pin, parentEvent, detail)
+}
+
 func flowPackageImportCompleteness(source semanticview.Source) []Finding {
 	scopes := source.ProjectScopes()
 	if len(scopes) == 0 {
