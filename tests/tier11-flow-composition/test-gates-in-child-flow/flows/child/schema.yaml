@@ -8,11 +8,9 @@ pins:
   inputs:
     events:
       - name: validate.start
-        required: false
     reads: []
   outputs:
     events:
       - name: validation.done
-        required: false
     writes: []
 name: child

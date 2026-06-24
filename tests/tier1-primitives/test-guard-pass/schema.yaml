@@ -8,10 +8,8 @@ pins:
   inputs:
     events:
       - name: check.requested
-        required: false
     reads: []
   outputs:
     events:
       - name: check.passed
-        required: false
     writes: []

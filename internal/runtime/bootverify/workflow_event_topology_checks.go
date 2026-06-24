@@ -143,6 +143,7 @@ func (c *checkerContext) eventWarnings() []Finding {
 			}
 		}
 	}
+	addCompositionConnectEventProofsLocal(c.source, emittedRefs, subscribedRefs)
 	for _, key := range sortedSetKeysLocal(emittedRefs) {
 		ref := emittedRefs[key]
 		if !ref.HasSchema {
@@ -189,6 +190,30 @@ func (c *checkerContext) eventWarnings() []Finding {
 		})
 	}
 	return c.eventWarningFindings
+}
+
+func addCompositionConnectEventProofsLocal(source semanticview.Source, emittedRefs, subscribedRefs map[string]semanticview.FlowEventProof) {
+	if source == nil {
+		return
+	}
+	for _, connect := range source.CompositionConnects() {
+		from, fromErr := connect.FromRef()
+		to, toErr := connect.ToRef()
+		if fromErr == nil {
+			if outputPin, ok := source.FlowOutputEventPin(from.FlowID, from.Pin); ok {
+				eventType := outputPin.EventType()
+				addEventProofLocal(emittedRefs, source, from.FlowID, eventType)
+				addEventProofLocal(subscribedRefs, source, from.FlowID, eventType)
+			}
+		}
+		if toErr == nil {
+			if inputPin, ok := source.FlowInputEventPin(to.FlowID, to.Pin); ok {
+				eventType := inputPin.EventType()
+				addEventProofLocal(emittedRefs, source, to.FlowID, eventType)
+				addEventProofLocal(subscribedRefs, source, to.FlowID, eventType)
+			}
+		}
+	}
 }
 
 type eventPatternLocal struct {

@@ -407,6 +407,98 @@ func (b *WorkflowContractBundle) FlowOutputEvents(flowID string) []string {
 	}
 	return append([]string{}, b.Semantics.FlowOutputs[strings.TrimSpace(flowID)]...)
 }
+func (b *WorkflowContractBundle) FlowInputEventPins(flowID string) []FlowInputEventPin {
+	if b == nil {
+		return nil
+	}
+	flowID = strings.TrimSpace(flowID)
+	if pins := b.Semantics.FlowInputEventPins[flowID]; len(pins) > 0 {
+		return cloneFlowInputEventPins(pins)
+	}
+	if schema, ok := b.FlowSchemas[flowID]; ok {
+		return semanticInputEventPins(schema.Pins.Inputs)
+	}
+	return inputEventPinsFromEvents(b.Semantics.FlowInputs[flowID])
+}
+func (b *WorkflowContractBundle) FlowOutputEventPins(flowID string) []FlowOutputEventPin {
+	if b == nil {
+		return nil
+	}
+	flowID = strings.TrimSpace(flowID)
+	if pins := b.Semantics.FlowOutputEventPins[flowID]; len(pins) > 0 {
+		return cloneFlowOutputEventPins(pins)
+	}
+	if schema, ok := b.FlowSchemas[flowID]; ok {
+		return semanticOutputEventPins(schema.Pins.Outputs)
+	}
+	return outputEventPinsFromEvents(b.Semantics.FlowOutputs[flowID])
+}
+func (b *WorkflowContractBundle) FlowInputEventPin(flowID, pinName string) (FlowInputEventPin, bool) {
+	pinName = strings.TrimSpace(pinName)
+	if pinName == "" {
+		return FlowInputEventPin{}, false
+	}
+	for _, pin := range b.FlowInputEventPins(flowID) {
+		if strings.TrimSpace(pin.Name) == pinName {
+			return pin, true
+		}
+	}
+	return FlowInputEventPin{}, false
+}
+func (b *WorkflowContractBundle) FlowOutputEventPin(flowID, pinName string) (FlowOutputEventPin, bool) {
+	pinName = strings.TrimSpace(pinName)
+	if pinName == "" {
+		return FlowOutputEventPin{}, false
+	}
+	for _, pin := range b.FlowOutputEventPins(flowID) {
+		if strings.TrimSpace(pin.Name) == pinName {
+			return pin, true
+		}
+	}
+	return FlowOutputEventPin{}, false
+}
+func (b *WorkflowContractBundle) CompositionConnects() []FlowPackageConnect {
+	if b == nil {
+		return nil
+	}
+	return cloneFlowPackageConnects(b.Semantics.CompositionConnects)
+}
+func (b *WorkflowContractBundle) CompositionConnectsTo(flowID, pinName string) []FlowPackageConnect {
+	flowID = strings.TrimSpace(flowID)
+	pinName = strings.TrimSpace(pinName)
+	if b == nil || flowID == "" || pinName == "" {
+		return nil
+	}
+	var out []FlowPackageConnect
+	for _, connect := range b.CompositionConnects() {
+		ref, err := connect.ToRef()
+		if err != nil {
+			continue
+		}
+		if ref.FlowID == flowID && ref.Pin == pinName {
+			out = append(out, connect)
+		}
+	}
+	return out
+}
+func (b *WorkflowContractBundle) CompositionConnectsFrom(flowID, pinName string) []FlowPackageConnect {
+	flowID = strings.TrimSpace(flowID)
+	pinName = strings.TrimSpace(pinName)
+	if b == nil || flowID == "" || pinName == "" {
+		return nil
+	}
+	var out []FlowPackageConnect
+	for _, connect := range b.CompositionConnects() {
+		ref, err := connect.FromRef()
+		if err != nil {
+			continue
+		}
+		if ref.FlowID == flowID && ref.Pin == pinName {
+			out = append(out, connect)
+		}
+	}
+	return out
+}
 func (b *WorkflowContractBundle) FlowReadPins(flowID string) []string {
 	if b == nil {
 		return nil

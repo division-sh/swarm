@@ -1,0 +1,194 @@
+package contracts
+
+import (
+	"fmt"
+	"sort"
+	"strings"
+)
+
+func (p FlowInputEventPin) PinName() string {
+	return strings.TrimSpace(p.Name)
+}
+
+func (p FlowInputEventPin) EventType() string {
+	if eventType := strings.TrimSpace(p.Event); eventType != "" {
+		return eventType
+	}
+	return strings.TrimSpace(p.Name)
+}
+
+func (p FlowInputEventPin) normalized() FlowInputEventPin {
+	out := FlowInputEventPin{
+		Name:  strings.TrimSpace(p.Name),
+		Event: strings.TrimSpace(p.Event),
+	}
+	if out.Event == "" {
+		out.Event = out.Name
+	}
+	if p.Address != nil {
+		address := p.Address.normalized()
+		out.Address = &address
+	}
+	return out
+}
+
+func (p FlowOutputEventPin) PinName() string {
+	return strings.TrimSpace(p.Name)
+}
+
+func (p FlowOutputEventPin) EventType() string {
+	if eventType := strings.TrimSpace(p.Event); eventType != "" {
+		return eventType
+	}
+	return strings.TrimSpace(p.Name)
+}
+
+func (p FlowOutputEventPin) normalized() FlowOutputEventPin {
+	out := FlowOutputEventPin{
+		Name:  strings.TrimSpace(p.Name),
+		Event: strings.TrimSpace(p.Event),
+	}
+	if out.Event == "" {
+		out.Event = out.Name
+	}
+	return out
+}
+
+func (a FlowInputPinAddress) normalized() FlowInputPinAddress {
+	return FlowInputPinAddress{
+		By:          strings.TrimSpace(a.By),
+		Source:      strings.TrimSpace(a.Source),
+		Target:      strings.TrimSpace(a.Target),
+		Cardinality: strings.TrimSpace(a.Cardinality),
+		Mode:        strings.TrimSpace(a.Mode),
+	}
+}
+
+func (c FlowPackageConnect) FromRef() (FlowPackagePinRef, error) {
+	return parseFlowPackagePinRef(c.From)
+}
+
+func (c FlowPackageConnect) ToRef() (FlowPackagePinRef, error) {
+	return parseFlowPackagePinRef(c.To)
+}
+
+func (c FlowPackageConnect) WithPackageKey(packageKey string) FlowPackageConnect {
+	out := c.normalized()
+	out.PackageKey = strings.TrimSpace(packageKey)
+	return out
+}
+
+func (c FlowPackageConnect) normalized() FlowPackageConnect {
+	return FlowPackageConnect{
+		PackageKey: strings.TrimSpace(c.PackageKey),
+		From:       strings.TrimSpace(c.From),
+		To:         strings.TrimSpace(c.To),
+		Adapter:    strings.TrimSpace(c.Adapter),
+		Map:        cloneFlowPackageConnectMap(c.Map),
+		Delivery:   strings.TrimSpace(c.Delivery),
+		Reply:      normalizeStringMap(c.Reply),
+	}
+}
+
+func parseFlowPackagePinRef(raw string) (FlowPackagePinRef, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return FlowPackagePinRef{}, fmt.Errorf("pin reference is required")
+	}
+	idx := strings.Index(raw, ".")
+	if idx <= 0 || idx >= len(raw)-1 {
+		return FlowPackagePinRef{}, fmt.Errorf("pin reference %q must use {flow_id}.{pin_name}", raw)
+	}
+	ref := FlowPackagePinRef{
+		FlowID: strings.TrimSpace(raw[:idx]),
+		Pin:    strings.TrimSpace(raw[idx+1:]),
+	}
+	if ref.FlowID == "" || ref.Pin == "" {
+		return FlowPackagePinRef{}, fmt.Errorf("pin reference %q must use non-empty flow and pin names", raw)
+	}
+	return ref, nil
+}
+
+func inputEventPinsFromEvents(events []string) []FlowInputEventPin {
+	out := make([]FlowInputEventPin, 0, len(events))
+	for _, eventType := range events {
+		eventType = strings.TrimSpace(eventType)
+		if eventType == "" {
+			continue
+		}
+		out = append(out, FlowInputEventPin{Name: eventType, Event: eventType})
+	}
+	return out
+}
+
+func outputEventPinsFromEvents(events []string) []FlowOutputEventPin {
+	out := make([]FlowOutputEventPin, 0, len(events))
+	for _, eventType := range events {
+		eventType = strings.TrimSpace(eventType)
+		if eventType == "" {
+			continue
+		}
+		out = append(out, FlowOutputEventPin{Name: eventType, Event: eventType})
+	}
+	return out
+}
+
+func cloneFlowInputEventPins(in []FlowInputEventPin) []FlowInputEventPin {
+	out := make([]FlowInputEventPin, 0, len(in))
+	for _, pin := range in {
+		normalized := pin.normalized()
+		if normalized.PinName() == "" {
+			continue
+		}
+		out = append(out, normalized)
+	}
+	return out
+}
+
+func cloneFlowOutputEventPins(in []FlowOutputEventPin) []FlowOutputEventPin {
+	out := make([]FlowOutputEventPin, 0, len(in))
+	for _, pin := range in {
+		normalized := pin.normalized()
+		if normalized.PinName() == "" {
+			continue
+		}
+		out = append(out, normalized)
+	}
+	return out
+}
+
+func cloneFlowPackageConnects(in []FlowPackageConnect) []FlowPackageConnect {
+	out := make([]FlowPackageConnect, 0, len(in))
+	for _, connect := range in {
+		normalized := connect.normalized()
+		out = append(out, normalized)
+	}
+	return out
+}
+
+func cloneFlowPackageConnectMap(in map[string]FlowPackageConnectMap) map[string]FlowPackageConnectMap {
+	if len(in) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(in))
+	for key := range in {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	out := make(map[string]FlowPackageConnectMap, len(in))
+	for _, key := range keys {
+		normalizedKey := strings.TrimSpace(key)
+		if normalizedKey == "" {
+			continue
+		}
+		entry := in[key]
+		out[normalizedKey] = FlowPackageConnectMap{
+			Source: strings.TrimSpace(entry.Source),
+			Target: strings.TrimSpace(entry.Target),
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}

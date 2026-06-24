@@ -68,7 +68,7 @@ func (p *FlowInputPins) UnmarshalYAML(node *yaml.Node) error {
 	if err := node.Decode(&aux); err != nil {
 		return err
 	}
-	events, err := decodeFlowPinEventsNode(&aux.Events)
+	events, eventPins, err := decodeFlowInputPinEventsNode(&aux.Events)
 	if err != nil {
 		return err
 	}
@@ -77,8 +77,9 @@ func (p *FlowInputPins) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 	*p = FlowInputPins{
-		Events: events,
-		Reads:  reads,
+		Events:    events,
+		EventPins: eventPins,
+		Reads:     reads,
 	}
 	return nil
 }
@@ -94,7 +95,7 @@ func (p *FlowOutputPins) UnmarshalYAML(node *yaml.Node) error {
 	if err := node.Decode(&aux); err != nil {
 		return err
 	}
-	events, err := decodeFlowPinEventsNode(&aux.Events)
+	events, eventPins, err := decodeFlowOutputPinEventsNode(&aux.Events)
 	if err != nil {
 		return err
 	}
@@ -103,36 +104,185 @@ func (p *FlowOutputPins) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 	*p = FlowOutputPins{
-		Events: events,
-		Writes: writes,
+		Events:    events,
+		EventPins: eventPins,
+		Writes:    writes,
 	}
 	return nil
 }
 
-func decodeFlowPinEventsNode(node *yaml.Node) ([]string, error) {
+func decodeFlowInputPinEventsNode(node *yaml.Node) ([]string, []FlowInputEventPin, error) {
 	if node == nil || node.Kind == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
-	var legacy []string
-	if err := node.Decode(&legacy); err == nil {
-		return append([]string{}, legacy...), nil
+	if node.Kind != yaml.SequenceNode {
+		return nil, nil, fmt.Errorf("flow pin events must be a sequence")
 	}
-
-	var structured []struct {
-		Name string `yaml:"name"`
-	}
-	if err := node.Decode(&structured); err != nil {
-		return nil, err
-	}
-	events := make([]string, 0, len(structured))
-	for _, entry := range structured {
-		name := strings.TrimSpace(entry.Name)
-		if name == "" {
+	events := make([]string, 0, len(node.Content))
+	pins := make([]FlowInputEventPin, 0, len(node.Content))
+	for _, entry := range node.Content {
+		pin, err := decodeFlowInputPinEventNode(entry)
+		if err != nil {
+			return nil, nil, err
+		}
+		pin = pin.normalized()
+		if pin.PinName() == "" {
 			continue
 		}
-		events = append(events, name)
+		events = append(events, pin.EventType())
+		pins = append(pins, pin)
 	}
-	return events, nil
+	return events, pins, nil
+}
+
+func decodeFlowOutputPinEventsNode(node *yaml.Node) ([]string, []FlowOutputEventPin, error) {
+	if node == nil || node.Kind == 0 {
+		return nil, nil, nil
+	}
+	if node.Kind != yaml.SequenceNode {
+		return nil, nil, fmt.Errorf("flow pin events must be a sequence")
+	}
+	events := make([]string, 0, len(node.Content))
+	pins := make([]FlowOutputEventPin, 0, len(node.Content))
+	for _, entry := range node.Content {
+		pin, err := decodeFlowOutputPinEventNode(entry)
+		if err != nil {
+			return nil, nil, err
+		}
+		pin = pin.normalized()
+		if pin.PinName() == "" {
+			continue
+		}
+		events = append(events, pin.EventType())
+		pins = append(pins, pin)
+	}
+	return events, pins, nil
+}
+
+func decodeFlowInputPinEventNode(node *yaml.Node) (FlowInputEventPin, error) {
+	if node == nil || node.Kind == 0 {
+		return FlowInputEventPin{}, nil
+	}
+	if node.Kind == yaml.ScalarNode {
+		value := strings.TrimSpace(node.Value)
+		return FlowInputEventPin{Name: value, Event: value}, nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return FlowInputEventPin{}, fmt.Errorf("flow input event pin must be a string or mapping")
+	}
+	var out FlowInputEventPin
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		value := node.Content[i+1]
+		switch key {
+		case "":
+			continue
+		case "name":
+			if err := value.Decode(&out.Name); err != nil {
+				return FlowInputEventPin{}, fmt.Errorf("input event pin name: %w", err)
+			}
+		case "event":
+			if err := value.Decode(&out.Event); err != nil {
+				return FlowInputEventPin{}, fmt.Errorf("input event pin event: %w", err)
+			}
+		case "address":
+			var address FlowInputPinAddress
+			if err := value.Decode(&address); err != nil {
+				return FlowInputEventPin{}, fmt.Errorf("input event pin address: %w", err)
+			}
+			out.Address = &address
+		default:
+			return FlowInputEventPin{}, fmt.Errorf("UNDEFINED-FIELD: input event pin field %q not in platform spec", key)
+		}
+	}
+	out = out.normalized()
+	if out.PinName() == "" {
+		return FlowInputEventPin{}, fmt.Errorf("input event pin name is required")
+	}
+	return out, nil
+}
+
+func decodeFlowOutputPinEventNode(node *yaml.Node) (FlowOutputEventPin, error) {
+	if node == nil || node.Kind == 0 {
+		return FlowOutputEventPin{}, nil
+	}
+	if node.Kind == yaml.ScalarNode {
+		value := strings.TrimSpace(node.Value)
+		return FlowOutputEventPin{Name: value, Event: value}, nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return FlowOutputEventPin{}, fmt.Errorf("flow output event pin must be a string or mapping")
+	}
+	var out FlowOutputEventPin
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		value := node.Content[i+1]
+		switch key {
+		case "":
+			continue
+		case "name":
+			if err := value.Decode(&out.Name); err != nil {
+				return FlowOutputEventPin{}, fmt.Errorf("output event pin name: %w", err)
+			}
+		case "event":
+			if err := value.Decode(&out.Event); err != nil {
+				return FlowOutputEventPin{}, fmt.Errorf("output event pin event: %w", err)
+			}
+		default:
+			return FlowOutputEventPin{}, fmt.Errorf("UNDEFINED-FIELD: output event pin field %q not in platform spec", key)
+		}
+	}
+	out = out.normalized()
+	if out.PinName() == "" {
+		return FlowOutputEventPin{}, fmt.Errorf("output event pin name is required")
+	}
+	return out, nil
+}
+
+func (a *FlowInputPinAddress) UnmarshalYAML(node *yaml.Node) error {
+	if a == nil {
+		return nil
+	}
+	if node == nil || node.Kind == 0 {
+		*a = FlowInputPinAddress{}
+		return nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("input event pin address must be a mapping")
+	}
+	var out FlowInputPinAddress
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		value := node.Content[i+1]
+		switch key {
+		case "":
+			continue
+		case "by":
+			if err := value.Decode(&out.By); err != nil {
+				return fmt.Errorf("address.by: %w", err)
+			}
+		case "source":
+			if err := value.Decode(&out.Source); err != nil {
+				return fmt.Errorf("address.source: %w", err)
+			}
+		case "target":
+			if err := value.Decode(&out.Target); err != nil {
+				return fmt.Errorf("address.target: %w", err)
+			}
+		case "cardinality":
+			if err := value.Decode(&out.Cardinality); err != nil {
+				return fmt.Errorf("address.cardinality: %w", err)
+			}
+		case "mode":
+			if err := value.Decode(&out.Mode); err != nil {
+				return fmt.Errorf("address.mode: %w", err)
+			}
+		default:
+			return fmt.Errorf("UNDEFINED-FIELD: input event pin address field %q not in platform spec", key)
+		}
+	}
+	*a = out.normalized()
+	return nil
 }
 
 func decodeFlowPinFieldNamesNode(node *yaml.Node) ([]string, error) {

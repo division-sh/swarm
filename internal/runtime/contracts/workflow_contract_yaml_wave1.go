@@ -24,18 +24,19 @@ func (p *ProjectPackageDocument) UnmarshalYAML(node *yaml.Node) error {
 		return fmt.Errorf("RETIRED: package.yaml entity_schema is no longer supported; migrate to entities.yaml")
 	}
 	var aux struct {
-		Name            string              `yaml:"name"`
-		Version         string              `yaml:"version"`
-		PlatformVersion string              `yaml:"platform_version"`
-		Author          string              `yaml:"author"`
-		Description     string              `yaml:"description"`
-		Requires        FlowPackageRequires `yaml:"requires"`
-		Flows           []ProjectFlowRef    `yaml:"flows"`
-		Packages        []ProjectPackageRef `yaml:"packages"`
-		Children        []ProjectPackageRef `yaml:"children"`
-		Subpackages     []ProjectPackageRef `yaml:"subpackages"`
-		Handoffs        []ProjectHandoff    `yaml:"handoffs"`
-		EntitySchema    EntitySchema        `yaml:"entity_schema"`
+		Name            string               `yaml:"name"`
+		Version         string               `yaml:"version"`
+		PlatformVersion string               `yaml:"platform_version"`
+		Author          string               `yaml:"author"`
+		Description     string               `yaml:"description"`
+		Requires        FlowPackageRequires  `yaml:"requires"`
+		Flows           []ProjectFlowRef     `yaml:"flows"`
+		Packages        []ProjectPackageRef  `yaml:"packages"`
+		Children        []ProjectPackageRef  `yaml:"children"`
+		Subpackages     []ProjectPackageRef  `yaml:"subpackages"`
+		Connect         []FlowPackageConnect `yaml:"connect"`
+		Handoffs        []ProjectHandoff     `yaml:"handoffs"`
+		EntitySchema    EntitySchema         `yaml:"entity_schema"`
 	}
 	if err := node.Decode(&aux); err != nil {
 		return err
@@ -51,6 +52,7 @@ func (p *ProjectPackageDocument) UnmarshalYAML(node *yaml.Node) error {
 		Packages:        append([]ProjectPackageRef(nil), aux.Packages...),
 		Children:        append([]ProjectPackageRef(nil), aux.Children...),
 		Subpackages:     append([]ProjectPackageRef(nil), aux.Subpackages...),
+		Connect:         cloneFlowPackageConnects(aux.Connect),
 		Handoffs:        append([]ProjectHandoff(nil), aux.Handoffs...),
 		EntitySchema:    aux.EntitySchema,
 	}
@@ -162,6 +164,93 @@ func (b FlowPackageBind) normalized() FlowPackageBind {
 		Policy:      normalizeStringMap(b.Policy),
 		Credentials: normalizeStringMap(b.Credentials),
 	}
+}
+
+func (c *FlowPackageConnect) UnmarshalYAML(node *yaml.Node) error {
+	if c == nil {
+		return nil
+	}
+	if node == nil || node.Kind == 0 {
+		*c = FlowPackageConnect{}
+		return nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("connect entry must be a mapping")
+	}
+	var out FlowPackageConnect
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		value := node.Content[i+1]
+		switch key {
+		case "":
+			continue
+		case "from":
+			if err := value.Decode(&out.From); err != nil {
+				return fmt.Errorf("connect.from: %w", err)
+			}
+		case "to":
+			if err := value.Decode(&out.To); err != nil {
+				return fmt.Errorf("connect.to: %w", err)
+			}
+		case "adapter":
+			if err := value.Decode(&out.Adapter); err != nil {
+				return fmt.Errorf("connect.adapter: %w", err)
+			}
+		case "map":
+			if err := value.Decode(&out.Map); err != nil {
+				return fmt.Errorf("connect.map: %w", err)
+			}
+		case "delivery":
+			if err := value.Decode(&out.Delivery); err != nil {
+				return fmt.Errorf("connect.delivery: %w", err)
+			}
+		case "reply":
+			if err := value.Decode(&out.Reply); err != nil {
+				return fmt.Errorf("connect.reply: %w", err)
+			}
+		default:
+			return fmt.Errorf("UNDEFINED-FIELD: connect field %q not in platform spec", key)
+		}
+	}
+	*c = out.normalized()
+	return nil
+}
+
+func (m *FlowPackageConnectMap) UnmarshalYAML(node *yaml.Node) error {
+	if m == nil {
+		return nil
+	}
+	if node == nil || node.Kind == 0 {
+		*m = FlowPackageConnectMap{}
+		return nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("connect map entry must be a mapping")
+	}
+	var out FlowPackageConnectMap
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		value := node.Content[i+1]
+		switch key {
+		case "":
+			continue
+		case "source":
+			if err := value.Decode(&out.Source); err != nil {
+				return fmt.Errorf("connect map source: %w", err)
+			}
+		case "target":
+			if err := value.Decode(&out.Target); err != nil {
+				return fmt.Errorf("connect map target: %w", err)
+			}
+		default:
+			return fmt.Errorf("UNDEFINED-FIELD: connect map field %q not in platform spec", key)
+		}
+	}
+	*m = FlowPackageConnectMap{
+		Source: strings.TrimSpace(out.Source),
+		Target: strings.TrimSpace(out.Target),
+	}
+	return nil
 }
 
 func normalizeStringMap(in map[string]string) map[string]string {

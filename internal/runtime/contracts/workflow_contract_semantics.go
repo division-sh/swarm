@@ -34,8 +34,11 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 		FlowRules:              map[string]string{},
 		FlowInputs:             map[string][]string{},
 		FlowOutputs:            map[string][]string{},
+		FlowInputEventPins:     map[string][]FlowInputEventPin{},
+		FlowOutputEventPins:    map[string][]FlowOutputEventPin{},
 		FlowReads:              map[string][]string{},
 		FlowWrites:             map[string][]string{},
+		CompositionConnects:    nil,
 		FlowAgents:             map[string][]FlowRequiredAgent{},
 		WritePinOwners:         map[string][]string{},
 		NodeHandlers:           map[string]map[string]SystemNodeEventHandler{},
@@ -71,6 +74,8 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 		semantics.FlowRules[flowID] = strings.TrimSpace(schema.NamespaceRule)
 		semantics.FlowInputs[flowID] = append([]string{}, schema.Pins.Inputs.Events...)
 		semantics.FlowOutputs[flowID] = append([]string{}, schema.Pins.Outputs.Events...)
+		semantics.FlowInputEventPins[flowID] = semanticInputEventPins(schema.Pins.Inputs)
+		semantics.FlowOutputEventPins[flowID] = semanticOutputEventPins(schema.Pins.Outputs)
 		semantics.FlowReads[flowID] = append([]string{}, schema.Pins.Inputs.Reads...)
 		semantics.FlowWrites[flowID] = append([]string{}, schema.Pins.Outputs.Writes...)
 		semantics.FlowAgents[flowID] = append([]FlowRequiredAgent{}, schema.RequiredAgents...)
@@ -80,6 +85,11 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 				continue
 			}
 			semantics.WritePinOwners[writePin] = appendIfMissingString(semantics.WritePinOwners[writePin], flowID)
+		}
+	}
+	for _, pkg := range bundle.PackageTree {
+		for _, connect := range pkg.Manifest.Connect {
+			semantics.CompositionConnects = append(semantics.CompositionConnects, connect.WithPackageKey(pkg.Key))
 		}
 	}
 	for nodeID, node := range bundle.Nodes {
@@ -145,6 +155,20 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 		semantics.NodeHandlers[nodeID] = handlers
 	}
 	bundle.Semantics = semantics
+}
+
+func semanticInputEventPins(pins FlowInputPins) []FlowInputEventPin {
+	if len(pins.EventPins) > 0 {
+		return cloneFlowInputEventPins(pins.EventPins)
+	}
+	return inputEventPinsFromEvents(pins.Events)
+}
+
+func semanticOutputEventPins(pins FlowOutputPins) []FlowOutputEventPin {
+	if len(pins.EventPins) > 0 {
+		return cloneFlowOutputEventPins(pins.EventPins)
+	}
+	return outputEventPinsFromEvents(pins.Events)
 }
 
 func legacyWorkflowEntitySchema(bundle *WorkflowContractBundle) EntitySchema {

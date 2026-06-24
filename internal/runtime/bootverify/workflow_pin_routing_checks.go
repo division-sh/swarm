@@ -15,6 +15,9 @@ func checkPinTargetResolution(c *checkerContext) []Finding {
 		if !runtimepinrouting.PinDeclaredOutput(c.source, site.FlowID, site.Spec.EventType()) {
 			continue
 		}
+		if compositionConnectsFromOutputEvent(c.source, site.FlowID, site.Spec.EventType()) {
+			continue
+		}
 		structuralParent := pinRoutingStructuralParentRouteEligible(c.source, site.FlowID)
 		if failure := runtimepinrouting.ValidateTargetSpec(c.source, site.FlowID, site.Spec, structuralParent); failure != "" {
 			findings = append(findings, pinTargetFinding(site, string(failure)))

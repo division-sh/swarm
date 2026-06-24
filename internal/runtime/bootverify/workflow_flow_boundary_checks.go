@@ -92,6 +92,7 @@ func (c *checkerContext) inputPinWiring() []Finding {
 }
 
 type inputPinProducerPaths struct {
+	parentConnect        string
 	siblingFlowOutputPin string
 	rootAgentEmit        string
 	rootNodeHandlerEmit  string
@@ -102,6 +103,7 @@ type inputPinProducerPaths struct {
 
 func (p inputPinProducerPaths) hasAny() bool {
 	for _, detail := range []string{
+		p.parentConnect,
 		p.siblingFlowOutputPin,
 		p.rootAgentEmit,
 		p.rootNodeHandlerEmit,
@@ -120,9 +122,10 @@ func (p inputPinProducerPaths) message(flowID, eventType string) string {
 	flowID = strings.TrimSpace(flowID)
 	eventType = strings.TrimSpace(eventType)
 	return fmt.Sprintf(
-		"Flow %s declares input pin event %s but no producer path was found in the authored bundle.\n\nChecked producer paths:\n- Sibling flow output pin: %s\n- Root agent emit_events: %s\n- Root node handler emits: %s\n- Platform event catalog: %s\n- External source metadata (swarm.source): %s\n- Same-flow timer declaration: %s\n\nFix one of:\n- Add %s to a producing flow's pins.outputs.events\n- Add %s to a root agent's emit_events\n- Add swarm.source: external to %s's events.yaml entry if produced externally",
+		"Flow %s declares input pin event %s but no producer path was found in the authored bundle.\n\nChecked producer paths:\n- Parent connect: %s\n- Sibling flow output pin: %s\n- Root agent emit_events: %s\n- Root node handler emits: %s\n- Platform event catalog: %s\n- External source metadata (swarm.source): %s\n- Same-flow timer declaration: %s\n\nFix one of:\n- Add a parent package.yaml connect entry to this input pin\n- Add %s to a producing flow's pins.outputs.events\n- Add %s to a root agent's emit_events\n- Add swarm.source: external to %s's events.yaml entry if produced externally",
 		flowID,
 		eventType,
+		p.parentConnect,
 		p.siblingFlowOutputPin,
 		p.rootAgentEmit,
 		p.rootNodeHandlerEmit,
@@ -162,6 +165,7 @@ func (c *checkerContext) inputPinProducerPaths(flowID, eventType string, flowSco
 	localEvent := eventidentity.Normalize(eventType)
 	canonicalEvent := eventidentity.Normalize(c.source.ResolveFlowEventReference(flowID, eventType))
 	return inputPinProducerPaths{
+		parentConnect:        c.inputPinParentConnectPath(flowID, localEvent),
 		siblingFlowOutputPin: c.inputPinSiblingFlowOutputPath(flowID, localEvent),
 		rootAgentEmit:        c.inputPinRootAgentPath(localEvent, canonicalEvent, flowScopedAgents),
 		rootNodeHandlerEmit:  c.inputPinRootNodeHandlerPath(localEvent, canonicalEvent, flowScopedNodes),
@@ -169,6 +173,25 @@ func (c *checkerContext) inputPinProducerPaths(flowID, eventType string, flowSco
 		externalSource:       c.inputPinExternalSourcePath(flowID, eventType),
 		sameFlowTimer:        c.inputPinSameFlowTimerPath(flowID, eventType, canonicalEvent),
 	}
+}
+
+func (c *checkerContext) inputPinParentConnectPath(flowID, localEvent string) string {
+	for _, pin := range c.source.FlowInputEventPins(flowID) {
+		if eventidentity.Normalize(pin.EventType()) != localEvent && eventidentity.Normalize(pin.PinName()) != localEvent {
+			continue
+		}
+		connects := c.source.CompositionConnectsTo(flowID, pin.PinName())
+		if len(connects) == 0 {
+			return "not found"
+		}
+		refs := make([]string, 0, len(connects))
+		for _, connect := range connects {
+			refs = append(refs, strings.TrimSpace(connect.From))
+		}
+		sort.Strings(refs)
+		return fmt.Sprintf("found via parent connect from %s", strings.Join(refs, ", "))
+	}
+	return "not found"
 }
 
 func (c *checkerContext) inputPinSiblingFlowOutputPath(flowID, localEvent string) string {
@@ -394,6 +417,9 @@ func (c *checkerContext) crossFlowPinAmbiguityValidation() []Finding {
 			}
 			producers := c.source.ResolveFlowInputAutoWire(flowID, eventType).ProducerFlows
 			if len(producers) <= 1 {
+				continue
+			}
+			if compositionConnectsToInput(c.source, flowID, eventType) {
 				continue
 			}
 			if flowHasScopedInputEscapeHatch(c.source, flowID, eventType) {

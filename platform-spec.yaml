@@ -8377,6 +8377,53 @@ static_analyzer:
       - target_sender_empty_source_runtime
     rule: Emit hard invalidity for every statically detectable missing or malformed accepted pin route source. Runtime failure
       reasons cover the cases boot verification cannot prove; no case may silently fall back to broadcast.
+  slice_3a1_composition_connect_validation:
+    id: composition_connect_validation
+    domain: semantic_validity
+    authority: hard_invalidity
+    severity: error
+    canonical_owner: internal/runtime/bootverify
+    supported_surface: cmd/swarm verify
+    spec_basis:
+    - flow_model.flow_package.composition_routing
+    - flow_model.flow_package.import_boundary.pin_alias_delivery
+    - engine.cross_flow_routing
+    scope:
+      description: Validate parser/model/semantic-view consumption of parent package.yaml connect entries and receiver
+        addressed input pins before runtime route-plan lowering. This check proves authored composition facts are present,
+        typed, and lowerable as semantic route facts, but it does not execute EventBus/RouteTable delivery.
+      applies_to:
+      - parent package.yaml connect entries
+      - schema.yaml pins.inputs.events addressed input pin objects
+      - schema.yaml pins.outputs.events structured output pin objects
+      - import-boundary requires/bind aliases used as lower-level name adaptation
+      excludes:
+      - runtime RoutePlan artifact lowering
+      - EventBus or RouteTable publish execution
+      - persisted delivery rows, receipts, readback, or replay
+      - agent/node parity for connected output pins
+      - retiring producer emit.target or broadcast escape hatches
+    validation_requirements:
+      producer_flow_exists: connect.from flow id must exist in the loaded flow registry.
+      producer_output_pin_exists: connect.from pin must exist in the producer schema output event pins.
+      receiver_flow_exists: connect.to flow id must exist in the loaded flow registry.
+      receiver_input_pin_exists: connect.to pin must exist in the receiver schema input event pins.
+      event_alias_or_adapter_valid: Differing producer and receiver event identities require an explicit adapter or an
+        import-boundary alias from requires/bind on either the producer output side or receiver input side; alias/bind
+        adapts names only and does not own topology.
+      output_carries_address_key: The producer output event payload or explicit connect.map source must carry every receiver
+        address key needed by the input pin.
+      receiver_address_rule_present: Template or instance-addressed receivers must declare an addressed input pin unless
+        delivery is an explicit broadcast.
+      key_types_compatible: Payload/config/entity/instance source and target key types must be compatible before lowering.
+      delivery_topology_valid: Delivery must be one, many, broadcast, or reply and must match addressed input cardinality;
+        fan-out delivery such as many or broadcast is invalid for a singular addressed input pin.
+      reply_lineage_usable: reply delivery must declare usable reply lineage; missing lineage fails closed.
+      event_topology_roles_consume_connect: Verify-time producer/consumer and dead-event schema checks must treat valid
+        connect output/input facts as authored event roles so parent topology does not require runtime reconstruction to
+        silence missing producer, missing consumer, or dead-schema diagnostics.
+      no_runtime_reconstruction: Accepted verify-time facts must not require EventBus/RouteTable or workflow-node materialization
+        to reconstruct missing connect topology.
   slice_3b_select_entity_pin_coexistence:
     id: select_entity_pin_coexistence
     domain: semantic_drift

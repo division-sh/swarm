@@ -43,6 +43,14 @@ packages:
         child.policy: parent.policy.child
       credentials:
         child_token: parent_child_token
+connect:
+  - from: worker.work.completed
+    to: worker.work.requested
+    delivery: one
+    map:
+      work_id:
+        source: payload.work_id
+        target: entity.work_id
 `), &doc); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
@@ -75,6 +83,15 @@ packages:
 	}
 	if got := doc.Packages[0].Bind.Inputs["child.requested"]; got != "parent.child_requested" {
 		t.Fatalf("package bind input = %q", got)
+	}
+	if len(doc.Connect) != 1 {
+		t.Fatalf("Connect len = %d, want 1", len(doc.Connect))
+	}
+	if got, want := doc.Connect[0].From, "worker.work.completed"; got != want {
+		t.Fatalf("Connect[0].From = %q, want %q", got, want)
+	}
+	if got, want := doc.Connect[0].Map["work_id"].Target, "entity.work_id"; got != want {
+		t.Fatalf("Connect[0].Map[work_id].Target = %q, want %q", got, want)
 	}
 }
 
@@ -116,6 +133,17 @@ packages:
 `,
 			wantErr: "UNDEFINED-FIELD",
 		},
+		{
+			name: "unknown connect field",
+			body: `
+name: invalid
+connect:
+  - from: producer.ready
+    to: consumer.ready
+    topic: unsupported
+`,
+			wantErr: "UNDEFINED-FIELD",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -125,6 +153,74 @@ packages:
 				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, tc.wantErr)
 			}
 		})
+	}
+}
+
+func TestFlowSchemaDocumentDecode_PreservesAddressedInputPins(t *testing.T) {
+	var doc FlowSchemaDocument
+	if err := yaml.Unmarshal([]byte(`
+name: addressed-pins
+pins:
+  inputs:
+    events:
+      - work.started
+      - name: deploy_completed
+        event: deploy.completed
+        address:
+          by: vertical_id
+          source: payload.vertical_id
+          target: entity.vertical_id
+          cardinality: one
+          mode: select_existing
+  outputs:
+    events:
+      - name: deploy_done
+        event: deploy.done
+`), &doc); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if got, want := strings.Join(doc.Pins.Inputs.Events, ","), "work.started,deploy.completed"; got != want {
+		t.Fatalf("input Events = %q, want %q", got, want)
+	}
+	if len(doc.Pins.Inputs.EventPins) != 2 {
+		t.Fatalf("input EventPins len = %d, want 2", len(doc.Pins.Inputs.EventPins))
+	}
+	addressed := doc.Pins.Inputs.EventPins[1]
+	if got, want := addressed.PinName(), "deploy_completed"; got != want {
+		t.Fatalf("addressed PinName = %q, want %q", got, want)
+	}
+	if got, want := addressed.EventType(), "deploy.completed"; got != want {
+		t.Fatalf("addressed EventType = %q, want %q", got, want)
+	}
+	if addressed.Address == nil {
+		t.Fatal("expected addressed input pin address")
+	}
+	if got, want := addressed.Address.Target, "entity.vertical_id"; got != want {
+		t.Fatalf("Address.Target = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(doc.Pins.Outputs.Events, ","), "deploy.done"; got != want {
+		t.Fatalf("output Events = %q, want %q", got, want)
+	}
+	if got, want := doc.Pins.Outputs.EventPins[0].PinName(), "deploy_done"; got != want {
+		t.Fatalf("output PinName = %q, want %q", got, want)
+	}
+}
+
+func TestFlowSchemaDocumentDecode_RejectsUnsupportedAddressedPinFields(t *testing.T) {
+	var doc FlowSchemaDocument
+	err := yaml.Unmarshal([]byte(`
+name: invalid-pins
+pins:
+  inputs:
+    events:
+      - name: deploy_completed
+        event: deploy.completed
+        address:
+          by: vertical_id
+          unsupported: nope
+`), &doc)
+	if err == nil || !strings.Contains(err.Error(), "UNDEFINED-FIELD") {
+		t.Fatalf("yaml.Unmarshal error = %v, want UNDEFINED-FIELD", err)
 	}
 }
 
@@ -281,15 +377,15 @@ terminal_states: []
 pins:
   inputs:
     events:
-      - name: check.requested
-        required: false
+      - name: check_requested
+        event: check.requested
     reads:
       - field: entity.score
         type: number
   outputs:
     events:
-      - name: check.passed
-        required: false
+      - name: check_passed
+        event: check.passed
     writes:
       - field: entity.status
         type: string
@@ -302,8 +398,14 @@ pins:
 	if got := schema.Pins.Inputs.Events[0]; got != "check.requested" {
 		t.Fatalf("Inputs.Events[0] = %q", got)
 	}
+	if got := schema.Pins.Inputs.EventPins[0].PinName(); got != "check_requested" {
+		t.Fatalf("Inputs.EventPins[0].PinName() = %q", got)
+	}
 	if got := schema.Pins.Outputs.Events[0]; got != "check.passed" {
 		t.Fatalf("Outputs.Events[0] = %q", got)
+	}
+	if got := schema.Pins.Outputs.EventPins[0].PinName(); got != "check_passed" {
+		t.Fatalf("Outputs.EventPins[0].PinName() = %q", got)
 	}
 	if got := schema.Pins.Inputs.Reads[0]; got != "entity.score" {
 		t.Fatalf("Inputs.Reads[0] = %q", got)
