@@ -1,8 +1,11 @@
 package apispec
 
 import (
+	"os"
+	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/platform"
 	"gopkg.in/yaml.v3"
 )
 
@@ -88,20 +91,31 @@ func TestPlatformSpecCompositionRoutingDemotesProducerTargetAuthority(t *testing
 	if !sequenceContainsScalar(mustYAMLPath(t, crossFlow, "target_resolution", "precedence"), "lowered parent connect route plan") {
 		t.Fatal("cross_flow_routing target precedence must start from lowered parent connect route plan")
 	}
-	assertScalarContains(t, mustYAMLPath(t, crossFlow, "target_resolution", "explicit_target_wins"), "exceptional dynamic-routing escape hatch")
+	assertScalarContains(t, mustYAMLPath(t, crossFlow, "target_resolution", "explicit_target_escape_hatch"), "exceptional dynamic-routing escape hatch")
+	assertScalarContains(t, mustYAMLPath(t, crossFlow, "target_resolution", "explicit_target_escape_hatch"), "must not replace lowered parent connect")
 	assertScalarContains(t, mustYAMLPath(t, crossFlow, "target_resolution", "fail_closed"), "no lowered parent connect route")
 	assertScalarContains(t, mustYAMLPath(t, crossFlow, "auto_wiring", "description"), "only as an inference candidate")
+	assertScalarContains(t, mustYAMLPath(t, crossFlow, "activation", "rule"), "valid lowered parent connect route")
+	assertScalarContains(t, mustYAMLPath(t, crossFlow, "auto_wiring", "template_pairs"), "lowered parent connect route facts")
 
 	assertScalarContains(t, mustYAMLPath(t, crossFlow, "target_forms", "flow_match_allow_fanout"), "explicit dynamic fan-out escape hatch")
 	assertScalarContains(t, mustYAMLPath(t, crossFlow, "target_forms", "broadcast"), "producer-authored explicit opt-out escape hatch")
+	assertScalarContains(t, mustYAMLPath(t, crossFlow, "structural_binding", "precedence_guard"), "lower precedence than lowered parent connect")
+	assertScalarContains(t, mustYAMLPath(t, crossFlow, "structural_binding", "child_to_parent"), "no lowered parent connect route")
+	assertScalarContains(t, mustYAMLPath(t, crossFlow, "structural_binding", "static_child_no_instance"), "without a lowered parent connect route")
+	assertScalarContains(t, mustYAMLPath(t, crossFlow, "parent_route", "read_rule"), "no lowered parent connect route applies")
 
 	pinAuthority := mustYAMLPath(t, root, "flow_model", "pins", "routing_authority")
 	assertScalarContains(t, pinAuthority, "Parent package connect entries own common inter-flow topology")
 	assertScalarContains(t, pinAuthority, "flow_model.flow_package.composition_routing")
+	assertScalarContains(t, mustYAMLPath(t, root, "flow_model", "pins", "output_event_pins", "description"), "no lowered connect route applies")
 
 	pinTargetResolution := mustYAMLPath(t, root, "static_analyzer", "slice_3a_pin_target_resolution")
 	assertScalarValue(t, mustMappingValue(t, pinTargetResolution, "canonical_replacement"), "flow_model.flow_package.composition_routing.analyzer_verify_requirements")
 	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "accepted_target_mechanisms", "lowered_parent_connect", "rule"), "Parent connect")
+	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "accepted_target_mechanisms", "structural_parent_route", "rule"), "no lowered parent connect route applies")
+	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "scope", "description"), "no lowered connect route applies")
+	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "scope", "description"), "eligible static child delivery-entity")
 }
 
 func TestPlatformSpecCompositionRoutingCatalogSurfacesConsumeConnectAuthority(t *testing.T) {
@@ -115,6 +129,7 @@ func TestPlatformSpecCompositionRoutingCatalogSurfacesConsumeConnectAuthority(t 
 		assertScalarContains(t, node, "lowered parent connect")
 		assertScalarContains(t, node, "explicit target")
 		assertScalarContains(t, node, "broadcast:true")
+		assertScalarContains(t, node, "eligible static child delivery-entity route")
 	}
 
 	checks := mustYAMLPath(t, root, "engine", "boot_verification", "checks")
@@ -125,6 +140,38 @@ func TestPlatformSpecCompositionRoutingCatalogSurfacesConsumeConnectAuthority(t 
 	pinTargetResolution := mustSequenceMappingByScalarField(t, checks, "id", "pin_target_resolution")
 	assertScalarContains(t, mustMappingValue(t, pinTargetResolution, "trigger"), "lowered parent connect route")
 	assertScalarContains(t, mustMappingValue(t, pinTargetResolution, "trigger"), "explicit target escape hatch")
+	assertScalarContains(t, mustMappingValue(t, pinTargetResolution, "trigger"), "eligible static child delivery-entity route")
+
+	bootSteps := mustYAMLPath(t, root, "engine", "boot_sequence", "steps")
+	validatePins := mustSequenceMappingByScalarField(t, bootSteps, "name", "validate_pins")
+	assertScalarContains(t, mustMappingValue(t, validatePins, "action"), "flow_model.flow_package.composition_routing")
+	assertScalarContains(t, mustMappingValue(t, validatePins, "action"), "lowered parent connect supplies singular event.target")
+	assertScalarContains(t, mustMappingValue(t, validatePins, "action"), "event.target_set route facts")
+	assertScalarContains(t, mustMappingValue(t, validatePins, "action"), "when no lowered connect route applies")
+	assertScalarContains(t, mustMappingValue(t, validatePins, "action"), "broadcast:true is the explicit no-target opt-out")
+}
+
+func TestPlatformSpecCompositionRoutingRejectsStaleParentRouteAuthorityPhrases(t *testing.T) {
+	specPath := platform.DefaultPlatformSpecFile(repoRoot(t))
+	raw, err := os.ReadFile(specPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", specPath, err)
+	}
+	text := string(raw)
+	for _, phrase := range []string{
+		"without explicit target route to the recorded ParentRoute",
+		"writes event.target when no explicit target exists",
+		"must have a target mechanism or broadcast:true",
+		"Pin-declared output has no target, no structural ParentRoute",
+		"No explicit target, no structural ParentRoute",
+		"checks only sibling flow output pins",
+		"pin target mechanism",
+		"explicit_target_wins",
+	} {
+		if strings.Contains(text, phrase) {
+			t.Fatalf("platform-spec.yaml still contains stale composition-routing authority phrase %q", phrase)
+		}
+	}
 }
 
 func mustYAMLPath(t *testing.T, node *yaml.Node, keys ...string) *yaml.Node {

@@ -306,7 +306,10 @@ contract_formats:
           fields:
           - flow_instance
           - entity_id
-          rule: Pin-declared output emits MUST either resolve a singular target from lowered parent connect topology, resolve target_set from lowered fan-out topology, use the explicit producer target escape hatch, use a structural ParentRoute target, or explicitly opt out with broadcast:true.
+          rule: Pin-declared output emits MUST either resolve a singular target from lowered parent connect topology,
+            resolve target_set from lowered fan-out topology, use the explicit producer target escape hatch, use a structural
+            ParentRoute target only when no lowered connect target applies, use an eligible static child delivery-entity route,
+            or explicitly opt out with broadcast:true.
           absent_means: event.target is absent when event.target_set is present, when broadcast:true is used, or when uncontrolled external ingress has not yet been receiver-bound.
           mutual_exclusion: event.target and event.target_set MUST NOT both be populated on the persisted event.
         target_set:
@@ -513,6 +516,7 @@ contract_formats:
             - event.target
             - event.target_set
             - delivery_target_route
+            - lowered connect route-plan facts
             - explicit target routes
             - structural ParentRoute
             - flow_instance
@@ -1217,10 +1221,12 @@ handler_specification:
           guard, data_accumulation, emit.fields, action, and state transition processing.
       pin_routing_interaction:
         receiver_context_order: 'For pin-routed events, handler entity context resolves in this order: event.target when set;
-          otherwise select_or_create_entity late binding when declared; otherwise event.source.'
+          otherwise current delivery target from event.target_set when present; otherwise select_or_create_entity late binding
+          when declared; otherwise event.source.'
         canonical_uses: External or mixed-provenance events where the receiving service owns the entity identity and may need
           to mint the entity on zero-match.
-        non_canonical_use: In-topology pin routing where the producer or structural binding already supplies event.target.
+        non_canonical_use: In-topology pin routing where lowered parent connect, the explicit target escape hatch, structural
+          fallback, or target_set delivery already supplies the receiver route context.
       restrictions:
         lifecycle_scope: Valid only on stateful static-flow input-pin handlers. Stateless flows do not have stateful entity
           acquisition. Template flows acquire entities through create_flow_instance.
@@ -1460,9 +1466,10 @@ handler_specification:
           facts, use the explicit target escape hatch, use structural child-to-parent ParentRoute binding, use the static
           no-instance child-flow delivery-entity route where eligible, or declare broadcast:true. No silent fallback to
           event-type broadcast is allowed.
-        explicit_target_precedence: Producer target is an exceptional override over structural binding and lowered connect
-          topology. Structural binding writes event.target only when the emit site has no explicit target, no lowered connect
-          target applies, and broadcast:true is absent.
+        explicit_target_precedence: Producer target is an exceptional dynamic-routing escape hatch, not the common route
+          owner for parent-composed topology. Lowered parent connect remains the common source authority for connected pins;
+          structural binding writes event.target only when the emit site has no explicit target, no lowered connect target
+          applies, and broadcast:true is absent.
       target_forms:
         sender: Copy inbound event.source into the new event.target. Sender is the immediate inbound sender, not a chain ancestor.
         instance_id: Resolve a target instance in the addressed child/template scope using the instance_id known to the producer.
@@ -1472,7 +1479,7 @@ handler_specification:
           on the persisted event, and persist one delivery target per recipient route. It must not silently collapse to one target.
       target_failures:
         target_required_missing: Pin-declared output has no lowered parent connect route, no explicit target escape hatch,
-          no structural ParentRoute, and no broadcast:true.
+          no structural ParentRoute, no eligible static child delivery-entity route, and no broadcast:true.
         target_invalid_syntax: Target form is malformed or has invalid literal fields.
         target_unknown_flow: target.flow names a flow outside the loaded registry.
         target_sender_no_inbound: target:sender is used where no inbound event source can exist.
@@ -1874,8 +1881,9 @@ engine:
     implementation_status: source_authority_promoted_runtime_migration_pending
     activation:
       rule: Pin routing activates when the emitter flow declares the emitted event in schema.yaml pins.outputs.events and the
-        event is admitted through a valid parent connect, structural ParentRoute, explicit dynamic target escape hatch, or
-        explicit broadcast escape hatch.
+        event is admitted through a valid lowered parent connect route, explicit dynamic target escape hatch, structural
+        ParentRoute fallback when no lowered connect route applies, eligible static child delivery-entity route, or explicit
+        broadcast escape hatch.
       no_separate_flag: The output pin declaration is the activation switch.
       ad_hoc_emits: Events not declared in the emitter flow's output pins remain ordinary event-loop emits.
       aggressive_day_one: Pin routing is the default for pin-declared outputs; implicit event-type broadcast is not a compatibility mode.
@@ -1893,8 +1901,9 @@ engine:
         unless the parent connect, alias/adapter, scoped subscription escape hatch, or explicit target escape hatch
         disambiguates the route.'
       static_pairs: Static-to-static pairs may resolve to a single instance pair at boot.
-      template_pairs: Template or dynamic-instance pairs require receiver address resolution from the addressed input pin or
-        explicit dynamic target escape hatch at emit/publish time unless structural binding supplies ParentRoute.
+      template_pairs: Template or dynamic-instance pairs require lowered parent connect route facts from the addressed input
+        pin, or an explicit dynamic target escape hatch at emit/publish time. Structural ParentRoute binding is only a
+        child-to-parent fallback when no lowered connect target applies.
     target_resolution:
       precedence:
       - lowered parent connect route plan
@@ -1902,10 +1911,11 @@ engine:
       - structural ParentRoute for child-to-parent pin outputs
       - receiver-side select_entity/select_or_create_entity late binding for external or mixed-provenance no-target events
       - source fallback for explicit broadcast or legacy external paths
-      explicit_target_wins: Producer target wins only as an exceptional dynamic-routing escape hatch. It must not be treated
-        as the common parent-composed routing owner.
+      explicit_target_escape_hatch: Producer target is only an exceptional dynamic-routing escape hatch. It must not be
+        treated as the common parent-composed routing owner and must not replace lowered parent connect as the common source
+        authority for connected pins.
       fail_closed: A pin-declared output that has no lowered parent connect route, no explicit target escape hatch, no structural
-        ParentRoute, and no broadcast:true is invalid.
+        ParentRoute, no eligible static child delivery-entity route, and no broadcast:true is invalid.
       no_silent_broadcast_fallback: Missing, malformed, ambiguous, or unreachable targets must fail with a typed reason.
     target_forms:
       sender: |
@@ -1928,18 +1938,22 @@ engine:
         event.target absent and uses the ordinary no-target event-type delivery path. Parent-authored broadcast/fan-out should
         use connect topology and lower to concrete route-plan facts.
     structural_binding:
-      child_to_parent: A child flow instance has exactly one parent in v1. Child pin-declared outputs without explicit target
-        route to the recorded ParentRoute of the instance that created the child.
+      precedence_guard: Structural binding is lower precedence than lowered parent connect and the explicit target escape
+        hatch. It may write event.target only for a child-to-parent pin output when no lowered parent connect target applies,
+        no explicit target is present, and broadcast:true is absent.
+      child_to_parent: A child flow instance has exactly one parent in v1. A child pin-declared output routes to the recorded
+        ParentRoute of the instance that created the child only when the emit has no lowered parent connect route and no
+        explicit target.
       static_child_no_instance: Nested static child flows that are not template/dynamic instances have no persisted ParentRoute
-        row. When such a child emits a pin-declared output without explicit target or broadcast:true, the runtime may target
-        only the current delivery entity route. Eligibility requires the resolved flow scope path to be nested. This exception
-        must not read inbound event.source as structural parent authority and does not satisfy ParentRoute metadata for
-        template/dynamic instances.
+        row. When such a child emits a pin-declared output without a lowered parent connect route, without explicit target,
+        and without broadcast:true, the runtime may target only the current delivery entity route. Eligibility requires the
+        resolved flow scope path to be nested. This exception must not read inbound event.source as structural parent authority
+        and does not satisfy ParentRoute metadata for template/dynamic instances.
       parent_to_child: Parent-to-child routing is never inferred structurally in v1. The parent must use target:{instance_id}
         or the canonical parent connect topology with addressed receiver input pins.
       grandchildren: A grandchild's structural pin output routes to its immediate parent only. Multi-level retargeting is v2.
-      multiple_parents: Per-child multi-parent routing is v2. A parent that needs multi-consumer fan-out consumes first and
-        re-emits with explicit target forms.
+      multiple_parents: Per-child multi-parent structural routing is v2. Parent-authored multi-consumer fan-out uses connect
+        topology and lowers to target_set route-plan facts; explicit target forms remain only the dynamic escape hatch.
     parent_route:
       description: Full parent route identity recorded at create_flow_instance time.
       fields:
@@ -1947,7 +1961,8 @@ engine:
         parent_entity_id: parent entity id
         parent_flow_id: parent flow id, defensive and derivable from path
       exposed_type: 'ParentRoute { FlowInstance, EntityID, FlowID }'
-      read_rule: Child pin-output emit reads ParentRoute from local instance metadata and writes event.target when no explicit target exists.
+      read_rule: Child pin-output emit reads ParentRoute from local instance metadata and writes event.target only when no
+        lowered parent connect route applies, no explicit target exists, and broadcast:true is absent.
       stale_instance_policy: Pre-existing children with only parent_entity_id and no complete ParentRoute fail closed with parent_route_incomplete.
     delivery_filter:
       rule: Filter once at publish-time recipient construction, persist the narrowed recipient list, and make all downstream
@@ -1976,7 +1991,7 @@ engine:
     target_resolution_failure_taxonomy:
       boot_verify:
         target_required_missing: Pin-declared output emit with no lowered parent connect route, no explicit target escape
-          hatch, no structural binding, and no broadcast:true.
+          hatch, no structural binding, no eligible static child delivery-entity route, and no broadcast:true.
         target_invalid_syntax: Literal target spec is malformed or incomplete.
         target_unknown_flow: target.flow does not exist in the loaded flow registry.
         target_sender_no_inbound: target:sender appears on a handler whose only triggers cannot supply inbound source.
@@ -2115,7 +2130,8 @@ engine:
           parent_flow_instance: Parent flow instance path from the calling handler context.
           parent_entity_id: Parent entity id from the calling handler context.
           parent_flow_id: Parent flow id, defensively recorded even when derivable from parent_flow_instance.
-        required_for: Child-to-parent pin-declared output emits when the emit site has no explicit target and no broadcast:true.
+        required_for: Child-to-parent pin-declared output emits when the emit site has no lowered parent connect route, no
+          explicit target, and no broadcast:true.
         incomplete_policy: A child instance with incomplete ParentRoute metadata MUST fail closed with parent_route_incomplete
           before emitting a structurally routed pin output.
         single_parent_v1: Each child has exactly one ParentRoute in v1. Multiple parents are v2.
@@ -2176,9 +2192,13 @@ engine:
         as absolute from root. Wildcards expand to matching paths.
     - step: 7
       name: validate_pins
-      action: 'For each flow: required input event pins must be wired (some other flow emits them), pin-declared output emits
-        must have a target mechanism or broadcast:true, target specs must be well formed, and no two flows may write the same
-        entity field (write conflict = boot error).'
+      action: 'For each flow: required input event pins must be satisfied by parent connect topology, safe unambiguous inference,
+        explicit external source metadata, or another accepted producer path. Pin-declared output emits consume
+        flow_model.flow_package.composition_routing: lowered parent connect supplies singular event.target or fan-out
+        event.target_set route facts; explicit target is only the dynamic escape hatch; structural ParentRoute and eligible
+        static-child delivery-entity routing are fallback paths when no lowered connect route applies; broadcast:true is the
+        explicit no-target opt-out. Target specs must be well formed, and no two flows may write the same entity field (write
+        conflict = boot error).'
     - step: 8
       name: validate_required_agents
       action: Every flow's required_agents roles must be fulfilled by agents in that flow's agents.yaml.
@@ -3974,7 +3994,8 @@ engine:
       severity: error
       scope: per-emit-site
       trigger: A pin-declared output emit lacks a lowered parent connect route, explicit target escape hatch, structural
-        ParentRoute eligibility, or broadcast:true; has malformed target syntax; references an unknown target.flow; uses
+        ParentRoute eligibility, eligible static child delivery-entity route, or broadcast:true; has malformed target syntax;
+        references an unknown target.flow; uses
         target:sender where no inbound source can exist; or uses target:sender only on external-sourced inputs with empty source.
       when: boot-only
     - id: redundant_in_topology_select_entity
@@ -4809,8 +4830,9 @@ flow_model:
       required: true
     output_event_pins:
       description: Events the flow emits across its public interface. Optional, but when an emit site emits one of these
-        events, pin routing is active and routing must be supplied by parent connect lowering, structural ParentRoute,
-        explicit dynamic target escape hatch, or explicit broadcast escape hatch.
+        events, pin routing is active and routing must be supplied by parent connect lowering, explicit dynamic target escape
+        hatch, structural ParentRoute fallback when no lowered connect route applies, an eligible static child delivery-entity
+        route, or explicit broadcast escape hatch.
       required: false
     input_data_pins:
       description: Entity fields the flow reads. Required pins must be written by a prior flow or initial data.
@@ -8300,8 +8322,9 @@ static_analyzer:
     scope:
       description: For every system-node emit site whose emitted event is declared in the emitter flow's pins.outputs.events,
         verify that the authored contract supplies lowered parent connect topology, a valid target escape hatch, structural
-        binding, or explicit broadcast opt-out. Current runtime implementation may still enforce the pre-connect target
-        surface until the composition-routing migration child lands; this slice is not the canonical parent-composed route owner.
+        binding only when no lowered connect route applies, eligible static child delivery-entity routing, or explicit broadcast
+        opt-out. Current runtime implementation may still enforce the pre-connect target surface until the composition-routing
+        migration child lands; this slice is not the canonical parent-composed route owner.
       applies_to:
       - handler top-level single-emit
       - rules entries
@@ -8327,8 +8350,8 @@ static_analyzer:
         rule: flow_match_allow_fanout resolves to event.target_set, not singular event.target. The runtime must persist concrete
           target_set route identities and one delivery target per recipient; it must not persist only the authored selector.
       structural_parent_route:
-        rule: Child-to-parent structural binding is valid only for child/template instances that will record full ParentRoute
-          at create_flow_instance time.
+        rule: Child-to-parent structural binding is valid only when no lowered parent connect route applies and only for
+          child/template instances that will record full ParentRoute at create_flow_instance time.
       static_child_delivery_entity:
         rule: Nested static child flows without a materialized instance row may use the current delivery entity as the only
           implicit target route for pin-declared outputs; root static flows still require an explicit target or broadcast:true.
@@ -8337,7 +8360,7 @@ static_analyzer:
         rule: broadcast:true is a deliberate opt-out and is the only no-target form accepted for a pin-declared output.
     static_failure_reasons:
       target_required_missing: No lowered parent connect route, no explicit target escape hatch, no structural ParentRoute
-        eligibility, and no broadcast:true.
+        eligibility, no eligible static child delivery-entity route, and no broadcast:true.
       target_invalid_syntax: Literal target spec is malformed or incomplete.
       target_unknown_flow: target.flow is not present in the loaded flow registry.
       target_sender_no_inbound: target:sender is used from a handler whose only triggers cannot supply inbound event.source.
@@ -8352,8 +8375,8 @@ static_analyzer:
       emit_time_tool_error:
       - target_sender_no_inbound_runtime
       - target_sender_empty_source_runtime
-    rule: Emit hard invalidity for every statically detectable missing or malformed pin target mechanism. Runtime failure reasons
-      cover the cases boot verification cannot prove; no case may silently fall back to broadcast.
+    rule: Emit hard invalidity for every statically detectable missing or malformed accepted pin route source. Runtime failure
+      reasons cover the cases boot verification cannot prove; no case may silently fall back to broadcast.
   slice_3b_select_entity_pin_coexistence:
     id: select_entity_pin_coexistence
     domain: semantic_drift
