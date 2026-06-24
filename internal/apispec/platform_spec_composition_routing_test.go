@@ -104,6 +104,29 @@ func TestPlatformSpecCompositionRoutingDemotesProducerTargetAuthority(t *testing
 	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "accepted_target_mechanisms", "lowered_parent_connect", "rule"), "Parent connect")
 }
 
+func TestPlatformSpecCompositionRoutingCatalogSurfacesConsumeConnectAuthority(t *testing.T) {
+	root := loadPlatformSpecYAMLNode(t)
+
+	targetRequiredMissing := collectMappingValuesByKey(root, "target_required_missing")
+	if len(targetRequiredMissing) == 0 {
+		t.Fatal("expected at least one target_required_missing spec surface")
+	}
+	for _, node := range targetRequiredMissing {
+		assertScalarContains(t, node, "lowered parent connect")
+		assertScalarContains(t, node, "explicit target")
+		assertScalarContains(t, node, "broadcast:true")
+	}
+
+	checks := mustYAMLPath(t, root, "engine", "boot_verification", "checks")
+	inputPinWiring := mustSequenceMappingByScalarField(t, checks, "id", "input_pin_wiring")
+	assertScalarContains(t, mustMappingValue(t, inputPinWiring, "trigger"), "parent package.yaml connect entries")
+	assertScalarContains(t, mustMappingValue(t, inputPinWiring, "trigger"), "safe same-name sibling")
+
+	pinTargetResolution := mustSequenceMappingByScalarField(t, checks, "id", "pin_target_resolution")
+	assertScalarContains(t, mustMappingValue(t, pinTargetResolution, "trigger"), "lowered parent connect route")
+	assertScalarContains(t, mustMappingValue(t, pinTargetResolution, "trigger"), "explicit target escape hatch")
+}
+
 func mustYAMLPath(t *testing.T, node *yaml.Node, keys ...string) *yaml.Node {
 	t.Helper()
 	current := node
@@ -111,4 +134,45 @@ func mustYAMLPath(t *testing.T, node *yaml.Node, keys ...string) *yaml.Node {
 		current = mustMappingValue(t, current, key)
 	}
 	return current
+}
+
+func mustSequenceMappingByScalarField(t *testing.T, node *yaml.Node, field, value string) *yaml.Node {
+	t.Helper()
+	if node == nil || node.Kind != yaml.SequenceNode {
+		t.Fatalf("node is kind %v, want sequence", nodeKind(node))
+	}
+	for _, item := range node.Content {
+		if scalarValue(mappingValue(item, field)) == value {
+			return item
+		}
+	}
+	t.Fatalf("sequence mapping with %s=%q not found", field, value)
+	return nil
+}
+
+func collectMappingValuesByKey(node *yaml.Node, key string) []*yaml.Node {
+	if node == nil {
+		return nil
+	}
+	var out []*yaml.Node
+	if node.Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			if node.Content[i].Value == key {
+				out = append(out, node.Content[i+1])
+			}
+			out = append(out, collectMappingValuesByKey(node.Content[i+1], key)...)
+		}
+		return out
+	}
+	for _, child := range node.Content {
+		out = append(out, collectMappingValuesByKey(child, key)...)
+	}
+	return out
+}
+
+func nodeKind(node *yaml.Node) yaml.Kind {
+	if node == nil {
+		return 0
+	}
+	return node.Kind
 }
