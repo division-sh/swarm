@@ -236,9 +236,37 @@ func TestLoadWorkflowNodes_UsesImportBoundaryOutputAliasForParentHandler(t *test
 	}
 }
 
+func TestLoadWorkflowNodes_UsesImportBoundaryOutputAliasForWildcardParentSubscription(t *testing.T) {
+	source := loadPipelineImportBoundaryAliasSourceWithParentSubscription(t, "parent.*")
+	nodes, err := LoadWorkflowNodes(source)
+	if err != nil {
+		t.Fatalf("LoadWorkflowNodes: %v", err)
+	}
+	parent := workflowNodeByIDForTest(nodes, "parent-listener")
+	if parent == nil {
+		t.Fatalf("parent-listener missing from %#v", nodes)
+	}
+	if !workflowNodeHasSubscriptionForTest(*parent, "worker/work.completed") {
+		t.Fatalf("parent-listener subscriptions = %#v, want worker/work.completed output alias for wildcard parent subscription", parent.Subscriptions)
+	}
+	evt := events.NewProjectionEvent("", "worker/work.completed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
+	resolved := workflowNodeEventHandlerResolutionForDelivery(source, "parent-listener", evt)
+	if !resolved.Matched {
+		t.Fatal("expected parent-listener handler to resolve through output alias")
+	}
+	if got := resolved.HandlerEventKey; got != "parent.lead_enriched" {
+		t.Fatalf("handler event key = %q, want parent.lead_enriched", got)
+	}
+}
+
 func loadPipelineImportBoundaryAliasSource(t *testing.T) semanticview.Source {
 	t.Helper()
-	root := writePipelineImportBoundaryAliasFixture(t)
+	return loadPipelineImportBoundaryAliasSourceWithParentSubscription(t, "parent.lead_enriched")
+}
+
+func loadPipelineImportBoundaryAliasSourceWithParentSubscription(t *testing.T, parentSubscription string) semanticview.Source {
+	t.Helper()
+	root := writePipelineImportBoundaryAliasFixture(t, parentSubscription)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(contractComplianceRepoRoot(t), root, runtimecontracts.DefaultPlatformSpecFile(contractComplianceRepoRoot(t)))
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
@@ -246,7 +274,7 @@ func loadPipelineImportBoundaryAliasSource(t *testing.T) semanticview.Source {
 	return semanticview.Wrap(bundle)
 }
 
-func writePipelineImportBoundaryAliasFixture(t *testing.T) string {
+func writePipelineImportBoundaryAliasFixture(t *testing.T, parentSubscription string) string {
 	t.Helper()
 	root := t.TempDir()
 	writePipelineFixtureFile(t, filepath.Join(root, "package.yaml"), `
@@ -275,7 +303,7 @@ parent.lead_enriched: {}
 parent-listener:
   id: parent-listener
   execution_type: system_node
-  subscribes_to: [parent.lead_enriched]
+  subscribes_to: [`+parentSubscription+`]
   event_handlers:
     parent.lead_enriched: {}
 `)
