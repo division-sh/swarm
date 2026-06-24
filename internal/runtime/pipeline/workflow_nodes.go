@@ -440,6 +440,15 @@ func workflowNodeSubscriptionAliases(source semanticview.Source, nodeID, eventTy
 	for _, alias := range semanticview.ImportBoundaryOutputAliasesForParentEvent(source, contractSource.PackageKey, flowID, eventType) {
 		appendAlias(alias.EventPattern)
 	}
+	if strings.Contains(eventType, "*") {
+		for _, alias := range semanticview.ImportBoundaryOutputAliasesForParent(source, contractSource.PackageKey, flowID) {
+			parentEvent := eventidentity.Normalize(alias.ParentEvent)
+			if parentEvent == "" || !eventidentity.MatchPattern(eventType, parentEvent) {
+				continue
+			}
+			appendAlias(alias.EventPattern)
+		}
+	}
 	if flowID == "" {
 		appendAlias(source.ResolveNodeEventReference(nodeID, eventType))
 		return out
