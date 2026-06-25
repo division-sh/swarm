@@ -197,6 +197,9 @@ func (rt *RouteTable) AddFlowInstanceRoute(req FlowInstanceRouteMaterializationR
 						InstancePath: instancePath,
 					})
 				}
+				if !routeFlowInputHasLoweredConnectReceiver(rt.source, templateDef.FlowID, rawPattern) {
+					continue
+				}
 				for _, resolved := range routeReceiverCarrierSubscriberPatterns(templateDef.InputEvents, instancePath, rawPattern) {
 					resolvedSubscriber := routeApplyResolvedPattern(subscriber, resolved)
 					rt.patterns = append(rt.patterns, routePattern{
@@ -464,6 +467,9 @@ func (rt *RouteTable) addAgentPatternsLocked(source semanticview.Source, package
 			Path: strings.Trim(strings.TrimSpace(basePath), "/"),
 		}
 		for _, rawPattern := range normalizeStringList(entry.Subscriptions) {
+			if routeFlowInputHasLoweredConnectReceiver(source, flowID, rawPattern) && !routeInputAliasRequiresExclusivePatterns(source, flowID, rawPattern) {
+				rt.addReceiverCarrierPatternsLocked(inputEvents, basePath, subscriber, rawPattern)
+			}
 			for _, resolved := range routeResolveSubscriberPatterns(source, packageKey, flowID, inputEvents, basePath, localEvents, rawPattern) {
 				if strings.TrimSpace(resolved.EventPattern) == "" {
 					continue
@@ -495,6 +501,9 @@ func (rt *RouteTable) addNodePatternsLocked(source semanticview.Source, packageK
 			patterns = source.NodeRuntimeSubscriptions(nodeID)
 		}
 		for _, rawPattern := range patterns {
+			if routeFlowInputHasLoweredConnectReceiver(source, flowID, rawPattern) && !routeInputAliasRequiresExclusivePatterns(source, flowID, rawPattern) {
+				rt.addReceiverCarrierPatternsLocked(inputEvents, basePath, subscriber, rawPattern)
+			}
 			for _, resolved := range routeResolveSubscriberPatterns(source, packageKey, flowID, inputEvents, basePath, localEvents, rawPattern) {
 				if strings.TrimSpace(resolved.EventPattern) == "" {
 					continue
@@ -516,6 +525,16 @@ func (rt *RouteTable) addNodePatternsLocked(source semanticview.Source, packageK
 				})
 			}
 		}
+	}
+}
+
+func (rt *RouteTable) addReceiverCarrierPatternsLocked(inputEvents []string, basePath string, subscriber Subscriber, rawPattern string) {
+	for _, resolved := range routeReceiverCarrierSubscriberPatterns(inputEvents, basePath, rawPattern) {
+		resolvedSubscriber := routeApplyResolvedPattern(subscriber, resolved)
+		rt.patterns = append(rt.patterns, routePattern{
+			EventPattern: resolved.EventPattern,
+			Subscriber:   resolvedSubscriber,
+		})
 	}
 }
 
@@ -604,6 +623,30 @@ func routeFlowInputHasExternalProducer(source semanticview.Source, flowID, event
 		return true
 	}
 	return len(source.ResolveFlowInputAutoWire(flowID, eventType).Patterns) > 0
+}
+
+func routeFlowInputHasLoweredConnectReceiver(source semanticview.Source, flowID, eventType string) bool {
+	if source == nil || strings.TrimSpace(flowID) == "" {
+		return false
+	}
+	eventType = eventidentity.Normalize(eventType)
+	if eventType == "" {
+		return false
+	}
+	for _, connect := range source.CompositionConnects() {
+		to, err := connect.ToRef()
+		if err != nil || strings.TrimSpace(to.FlowID) != strings.TrimSpace(flowID) {
+			continue
+		}
+		inputPin, ok := source.FlowInputEventPin(to.FlowID, to.Pin)
+		if !ok {
+			continue
+		}
+		if eventidentity.Normalize(inputPin.EventType()) == eventType {
+			return true
+		}
+	}
+	return false
 }
 
 func routeInputAliasRequiresExclusivePatterns(source semanticview.Source, flowID, eventType string) bool {
