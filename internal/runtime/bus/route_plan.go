@@ -400,10 +400,12 @@ func routePlanDeliveryIntentsFromRoutes(routes []events.DeliveryRoute, source, r
 
 func routePlanFromManifest(evt events.Event, manifest deliveryRecipientManifest, source, reason string) RoutePlan {
 	plan := newRoutePlan(evt)
-	plan.MarkLowerPrecedenceRouteProduction(source)
 	plan.AddLiveRecipients(routePlanLiveRecipientsFromManifest(manifest, source, reason)...)
 	plan.AddDeliveryIntents(routePlanDeliveryIntentsFromRoutes(manifest.DeliveryRoutes, source, reason)...)
 	plan.TargetFailure = manifest.TargetFailure
+	if len(plan.LiveRecipients) > 0 || len(plan.DeliveryIntents) > 0 || plan.TargetFailure != "" {
+		plan.MarkLowerPrecedenceRouteProduction(source)
+	}
 	return plan.Normalized()
 }
 
