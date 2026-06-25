@@ -122,6 +122,13 @@ func (p deliveryPlanner) Plan(ctx context.Context, evt events.Event) (eventDeliv
 	if evt.Type() == events.EventType("platform.runtime_log") {
 		return routePlan.EventDeliveryPlan(), nil
 	}
+	connectPlan, err := p.connectPlanner.Plan(ctx, evt)
+	if err != nil {
+		return eventDeliveryPlan{}, err
+	}
+	if connectPlan.Matched {
+		return eventDeliveryPlanFromConnectRouteDispatch(evt, connectPlan), nil
+	}
 	routing := p.routeResolver.Resolve(evt)
 	manifest, err := p.recipientPolicy.Evaluate(ctx, evt, routing.Recipients)
 	if err != nil {
@@ -137,45 +144,26 @@ func (p deliveryPlanner) Plan(ctx context.Context, evt events.Event) (eventDeliv
 	routePlan.AddDeliveryIntents(targetedRoutedNodeDeliveryIntents(evt, routing.RoutedRecipients)...)
 	routePlan.AddDeliveryIntents(internalDeliveryIntentsForPlan(evt, recipients, persisted, routing.RoutedRecipients)...)
 	extraDetail := cloneAnyMap(routing.ExtraDetail)
-	connectPlan, err := p.connectPlanner.Plan(ctx, evt)
-	if err != nil {
-		return eventDeliveryPlan{}, err
-	}
-	connectFailure := false
-	if connectPlan.Matched {
-		extraDetail = map[string]any{}
-		routing.SubscribedRecipients = nil
-		if connectPlan.Failure != "" {
-			connectFailure = true
-			routePlan = newRoutePlan(evt)
-			routePlan.TargetFailure = connectPlan.Failure
-			routing.RoutedRecipients = nil
-			routing.SubscribedRecipients = nil
-			for key, value := range connectPlan.ExtraDetail {
-				extraDetail[key] = value
-			}
-		} else {
-			routePlan = newRoutePlan(evt)
-			routePlan.AddLiveRecipients(connectPlan.LiveRecipients...)
-			routePlan.AddDeliveryIntents(connectPlan.DeliveryIntents...)
-			if len(connectPlan.RoutedRecipients) > 0 {
-				routing.RoutedRecipients = dedupeSubscribers(connectPlan.RoutedRecipients)
-			}
-			for key, value := range connectPlan.ExtraDetail {
-				extraDetail[key] = value
-			}
-			if len(connectPlan.DeliveryIntents) > 0 {
-				routePlan.TargetFailure = ""
-			}
-		}
-	}
-	if !connectFailure && routePlan.TargetFailure != "" && hasInternalRoutedSubscriberForTarget(evt, routing.RoutedRecipients) {
+	if routePlan.TargetFailure != "" && hasInternalRoutedSubscriberForTarget(evt, routing.RoutedRecipients) {
 		routePlan.TargetFailure = ""
 	}
 	routePlan.RoutedRecipients = routing.RoutedRecipients
 	routePlan.SubscribedRecipients = routing.SubscribedRecipients
 	routePlan.ExtraDetail = extraDetail
 	return routePlan.EventDeliveryPlan(), nil
+}
+
+func eventDeliveryPlanFromConnectRouteDispatch(evt events.Event, connectPlan connectRoutePlanDispatch) eventDeliveryPlan {
+	routePlan := newRoutePlan(evt)
+	if connectPlan.Failure != "" {
+		routePlan.TargetFailure = connectPlan.Failure
+	} else {
+		routePlan.AddLiveRecipients(connectPlan.LiveRecipients...)
+		routePlan.AddDeliveryIntents(connectPlan.DeliveryIntents...)
+	}
+	routePlan.RoutedRecipients = dedupeSubscribers(connectPlan.RoutedRecipients)
+	routePlan.ExtraDetail = cloneAnyMap(connectPlan.ExtraDetail)
+	return routePlan.EventDeliveryPlan()
 }
 
 func (p deliveryPlanner) PlanDirect(ctx context.Context, evt events.Event, recipients []string) (eventDeliveryPlan, error) {
