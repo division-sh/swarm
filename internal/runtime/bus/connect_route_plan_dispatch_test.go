@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
@@ -123,6 +124,17 @@ func TestEventBusPublish_ConnectRoutePlanPersistsSingularTargetWithoutLiveSubscr
 		},
 	}
 
+	routePlan, err := eb.planSubscribedRoutePlan(context.Background(), evt, false)
+	if err != nil {
+		t.Fatalf("planSubscribedRoutePlan: %v", err)
+	}
+	if routePlan.AuthorityState != RoutePlanAuthorityCanonicalMatched || routePlan.AuthorityOwner != routePlanSourceConnectRoutePlan {
+		t.Fatalf("route plan authority = %q/%q, want matched connect route plan", routePlan.AuthorityState, routePlan.AuthorityOwner)
+	}
+	if !deliveryRoutesContain(routePlan.DeliveryRoutes(), want) {
+		t.Fatalf("route plan delivery routes = %#v, want %#v", routePlan.DeliveryRoutes(), want)
+	}
+
 	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 	if err != nil {
 		t.Fatalf("CheckPublishRecipientPlan: %v", err)
@@ -178,6 +190,13 @@ func TestEventBusCheckPublishRecipientPlan_ConnectRoutePlanPrecedesLegacyDescrip
 	}
 	if plan.TargetFailure != "" {
 		t.Fatalf("target failure = %q, want none", plan.TargetFailure)
+	}
+	routePlan, err := eb.planSubscribedRoutePlan(context.Background(), evt, false)
+	if err != nil {
+		t.Fatalf("planSubscribedRoutePlan: %v", err)
+	}
+	if routePlan.AuthorityState != RoutePlanAuthorityCanonicalMatched || routePlan.AuthorityOwner != routePlanSourceConnectRoutePlan {
+		t.Fatalf("route plan authority = %q/%q, want matched connect route plan", routePlan.AuthorityState, routePlan.AuthorityOwner)
 	}
 	if !deliveryRoutesContain(plan.DeliveryRoutes, connectRoutePlanStaticDeliveryRoute()) {
 		t.Fatalf("preflight delivery routes = %#v, want static connect route", plan.DeliveryRoutes)
@@ -441,6 +460,20 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForInvalidLoweredPlan(t *tes
 	evt := events.NewProjectionEvent(uuid.NewString(),
 		events.EventType("producer/deploy.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
+	routePlan, err := eb.planSubscribedRoutePlan(context.Background(), evt, false)
+	if err != nil {
+		t.Fatalf("planSubscribedRoutePlan: %v", err)
+	}
+	if routePlan.AuthorityState != RoutePlanAuthorityCanonicalFailedClosed || routePlan.AuthorityOwner != routePlanSourceConnectRoutePlan {
+		t.Fatalf("route plan authority = %q/%q, want fail-closed connect route plan", routePlan.AuthorityState, routePlan.AuthorityOwner)
+	}
+	if got, want := routePlan.TargetFailure, runtimepinrouting.TargetFailure("receiver_input_pin_missing"); got != want {
+		t.Fatalf("target failure = %q, want %q", got, want)
+	}
+	if len(routePlan.LiveRecipients) != 0 || len(routePlan.DeliveryIntents) != 0 || len(routePlan.DeliveryRoutes()) != 0 {
+		t.Fatalf("fail-closed plan has executable routes: live=%#v intents=%#v routes=%#v", routePlan.LiveRecipients, routePlan.DeliveryIntents, routePlan.DeliveryRoutes())
+	}
+
 	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 	if err != nil {
 		t.Fatalf("CheckPublishRecipientPlan: %v", err)
@@ -491,6 +524,20 @@ func TestEventBusPublish_ConnectRoutePlanFailureSkipsRecipientPlanMaterializer(t
 	evt := events.NewProjectionEvent(uuid.NewString(),
 		events.EventType("producer/deploy.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
+	routePlan, err := eb.planSubscribedRoutePlan(context.Background(), evt, false)
+	if err != nil {
+		t.Fatalf("planSubscribedRoutePlan: %v", err)
+	}
+	if materializerCalled {
+		t.Fatalf("recipient plan materializer was called for matched lowered connect failure")
+	}
+	if routePlan.AuthorityState != RoutePlanAuthorityCanonicalFailedClosed || routePlan.AuthorityOwner != routePlanSourceConnectRoutePlan {
+		t.Fatalf("route plan authority = %q/%q, want fail-closed connect route plan", routePlan.AuthorityState, routePlan.AuthorityOwner)
+	}
+	if len(routePlan.LiveRecipients) != 0 || len(routePlan.DeliveryIntents) != 0 || len(routePlan.DeliveryRoutes()) != 0 {
+		t.Fatalf("fail-closed plan has executable routes: live=%#v intents=%#v routes=%#v", routePlan.LiveRecipients, routePlan.DeliveryIntents, routePlan.DeliveryRoutes())
+	}
+
 	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 	if err != nil {
 		t.Fatalf("CheckPublishRecipientPlan: %v", err)
@@ -503,6 +550,66 @@ func TestEventBusPublish_ConnectRoutePlanFailureSkipsRecipientPlanMaterializer(t
 	}
 	if len(plan.DeliveryRoutes) != 0 {
 		t.Fatalf("delivery routes = %#v, want none when matched lowered plan fails", plan.DeliveryRoutes)
+	}
+}
+
+func TestEventBusPlan_UnmatchedCanonicalRouteUsesLowerPrecedenceFallback(t *testing.T) {
+	eb, err := NewEventBus(InMemoryEventStore{})
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	ch := eb.Subscribe("legacy-agent", events.EventType("legacy.event"))
+	defer eb.Unsubscribe("legacy-agent")
+	evt := events.NewProjectionEvent(uuid.NewString(),
+		events.EventType("legacy.event"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+
+	routePlan, err := eb.planSubscribedRoutePlan(context.Background(), evt, false)
+	if err != nil {
+		t.Fatalf("planSubscribedRoutePlan: %v", err)
+	}
+	if routePlan.AuthorityState != RoutePlanAuthorityLowerPrecedence || routePlan.AuthorityOwner != routePlanSourceAgentPolicy {
+		t.Fatalf("route plan authority = %q/%q, want lower-precedence agent policy", routePlan.AuthorityState, routePlan.AuthorityOwner)
+	}
+	if !containsString(routePlan.RecipientIDs(), "legacy-agent") {
+		t.Fatalf("route plan recipients = %#v, want legacy-agent", routePlan.RecipientIDs())
+	}
+
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	requireBusEvent(t, ch, "legacy fallback delivery")
+}
+
+func TestRoutePlanCanonicalFailClosedDropsExecutableRoutes(t *testing.T) {
+	evt := events.NewProjectionEvent(uuid.NewString(),
+		events.EventType("producer/deploy.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+	routePlan := newRoutePlan(evt)
+	routePlan.MarkCanonicalRouteFailedClosed(routePlanSourceConnectRoutePlan, runtimepinrouting.FailureTargetNotSubscribed)
+	routePlan.AddLiveRecipients(RoutePlanLiveRecipient{
+		RecipientID:       "bogus-node",
+		SubscriberType:    "node",
+		PersistAsDelivery: true,
+		Source:            routePlanSourceRecipientMaterializer,
+		Reason:            routePlanReasonMaterializedRoute,
+	})
+	routePlan.AddDeliveryIntents(RoutePlanDeliveryIntent{
+		SubscriberType: "node",
+		SubscriberID:   "bogus-node",
+		Target:         events.RouteIdentity{FlowID: "bogus", FlowInstance: "bogus", EntityID: "bogus"},
+		Source:         routePlanSourceRecipientMaterializer,
+		Reason:         routePlanReasonMaterializedRoute,
+		Persist:        true,
+	})
+
+	got := routePlan.Normalized()
+	if got.AuthorityState != RoutePlanAuthorityCanonicalFailedClosed || got.AuthorityOwner != routePlanSourceConnectRoutePlan {
+		t.Fatalf("route plan authority = %q/%q, want fail-closed connect route plan", got.AuthorityState, got.AuthorityOwner)
+	}
+	if got.TargetFailure != runtimepinrouting.FailureTargetNotSubscribed {
+		t.Fatalf("target failure = %q, want %q", got.TargetFailure, runtimepinrouting.FailureTargetNotSubscribed)
+	}
+	if len(got.LiveRecipients) != 0 || len(got.DeliveryIntents) != 0 || len(got.DeliveryRoutes()) != 0 || len(got.PersistedRecipientIDs()) != 0 {
+		t.Fatalf("fail-closed plan exposed executable routes: live=%#v intents=%#v routes=%#v persisted=%#v", got.LiveRecipients, got.DeliveryIntents, got.DeliveryRoutes(), got.PersistedRecipientIDs())
 	}
 }
 
