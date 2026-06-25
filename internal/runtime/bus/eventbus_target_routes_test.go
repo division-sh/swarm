@@ -666,8 +666,16 @@ func TestEventBusPublish_TargetedDynamicFlowFixtureRouteTableNodePersistsSemanti
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 	materialized := eb.RouteTable().MaterializedRoutes(runtimeflowidentity.DeriveRoute("worker", "w-001"))
-	if len(materialized) != 1 || materialized[0].EventPattern != "work.assign" || materialized[0].SubscriberID != "task-handler" {
-		t.Fatalf("materialized routes = %#v, want task-handler local work.assign route; node entries=%v", materialized, sortedStringKeys(bundle.NodeEntries()))
+	hasRoute := func(eventPattern string) bool {
+		for _, route := range materialized {
+			if route.EventPattern == eventPattern && route.SubscriberID == "task-handler" {
+				return true
+			}
+		}
+		return false
+	}
+	if !hasRoute("work.assign") || !hasRoute("worker/w-001/work.assign") {
+		t.Fatalf("materialized routes = %#v, want task-handler local and selected receiver-carrier work.assign routes; node entries=%v", materialized, sortedStringKeys(bundle.NodeEntries()))
 	}
 	target := events.RouteIdentity{
 		FlowInstance: "worker/w-001",

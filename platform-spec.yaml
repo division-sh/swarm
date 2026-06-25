@@ -534,6 +534,32 @@ contract_formats:
             by post-planning recipient materialization hooks. #1482 promotes this matched decision into explicit
             RoutePlan authority state so materializer eligibility and fail-closed zero-route behavior are structural rather
             than inferred from connect-route metadata.
+          receiver_carrier_lookup_boundary:
+            status: merge_bearing_runtime_behavior
+            implementation_slice: '#1485'
+            canonical_code_owner: internal/runtime/bus.connectReceiverCarrierRouteKeys
+            rule: |
+              For a matched lowered ConnectRoutePlan, RouteTable lookup is a
+              concrete receiver-carrier lookup only. Lookup keys MUST be derived
+              from the selected materialized receiver target identity and the
+              receiver endpoint. They MUST NOT include the producer/source
+              endpoint, raw producer event name, source-scoped event name, live
+              subscriber fallback keys, or any other lower-precedence route
+              interpretation. If the selected receiver identity cannot locate a
+              concrete receiver carrier, the matched plan fails closed instead
+              of recovering through source/raw/legacy subscriber routes.
+          descriptor_evidence_boundary:
+            status: merge_bearing_runtime_behavior
+            implementation_slice: '#1485'
+            canonical_code_owner: internal/runtime/bus.connectRoutePlanResolver.descriptorsForPlans
+            rule: |
+              Descriptor loading during lowered-connect EventBus planning is
+              evidence for supported runtime-resolution target forms only.
+              Static lowered ConnectRoutePlan matches MUST NOT load or depend on
+              legacy active-agent recipient-policy descriptors. Runtime
+              descriptor evidence MUST NOT promote unsupported arbitrary
+              business-field targets; those remain fail-closed until a separate
+              typed descriptor/index owner is promoted.
           supported_surface:
           - static receiver singular delivery
           - identity-style template/dynamic receiver fanout through supported descriptor targets
@@ -4922,6 +4948,30 @@ flow_model:
           - singular target, target_set fanout, and reply metadata are covered
           - unsupported business-field descriptor targets remain fail-closed and split to #1479
           - '#1473 does not close #1474, #1475, selected-contract runfork readiness, or #1466 parent closure'
+        implementation_slice_1485:
+          status: merge_bearing_runtime_behavior
+          canonical_code_owner: internal/runtime/bus.connectRoutePlanResolver with connectReceiverCarrierRouteKeys
+          rule: |
+            Lower-precedence route interpreters are separated from matched
+            lowered-connect RoutePlan authority. RouteTable may locate concrete
+            receiver carriers only after the lowered plan has selected a
+            receiver target identity; source endpoint keys, raw producer event
+            names, live subscriber fallback, and legacy route/subscriber
+            interpretations are not carrier lookup inputs for a matched lowered
+            plan. Descriptor loading in the EventBus connect resolver is
+            limited to matched plans whose supported target form requires
+            runtime descriptor evidence.
+          does_not_close:
+          - legacy eventDeliveryPlan compatibility collapse or removal
+          - direct-recipient publish policy
+          - positive arbitrary business-field descriptor/index support
+          - selected-contract runfork route/readiness mutation
+          - broad composition-first routing parent closure
+          proof_obligations:
+          - matched connect receiver carrier lookup excludes source/raw fallback keys
+          - static matched connect plans do not load descriptors
+          - descriptor-backed matched connect plans load only supported descriptor evidence
+          - Publish, PublishInMutation, CheckPublishRecipientPlan, and engineOutbox preserve the corrected RoutePlan path where relevant
         invalid_outputs:
         - raw same-name pin match used as final topology authority
         - live subscription list used to invent missing connect topology
