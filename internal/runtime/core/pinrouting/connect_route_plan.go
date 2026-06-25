@@ -215,6 +215,9 @@ func MaterializeConnectRoutePlan(plan ConnectRoutePlan, input ConnectRoutePlanMa
 	if len(plan.TargetSet) > 0 {
 		return ConnectRoutePlanMaterialization{TargetSet: append([]events.RouteIdentity{}, plan.TargetSet...)}
 	}
+	if plan.TargetKind == ConnectTargetKindTargetSet && plan.Delivery == ConnectDeliveryBroadcast && plan.Address == nil {
+		return materializeBroadcastConnectRoutePlan(plan, input.Descriptors)
+	}
 	if plan.Address == nil {
 		return ConnectRoutePlanMaterialization{Failure: ConnectFailureReceiverAddressRuleMissing}
 	}
@@ -245,6 +248,22 @@ func MaterializeConnectRoutePlan(plan ConnectRoutePlan, input ConnectRoutePlanMa
 	default:
 		return ConnectRoutePlanMaterialization{Failure: ConnectFailureDeliveryTopologyInvalid}
 	}
+}
+
+func materializeBroadcastConnectRoutePlan(plan ConnectRoutePlan, descriptors []Descriptor) ConnectRoutePlanMaterialization {
+	routes := make([]events.RouteIdentity, 0, len(descriptors))
+	for _, descriptor := range descriptors {
+		route := descriptorRouteForReceiver(plan, descriptor)
+		if route.Empty() {
+			continue
+		}
+		routes = append(routes, route)
+	}
+	routes = uniqueRoutes(routes)
+	if len(routes) == 0 {
+		return ConnectRoutePlanMaterialization{Failure: ConnectFailureTargetUnresolved}
+	}
+	return ConnectRoutePlanMaterialization{TargetSet: routes}
 }
 
 func connectDelivery(connect runtimecontracts.FlowPackageConnect, inputPin runtimecontracts.FlowInputEventPin) (ConnectRoutePlanDelivery, ConnectRoutePlanFailure) {
@@ -393,11 +412,8 @@ func materializeConnectRoutes(plan ConnectRoutePlan, targetExpr, value string, d
 	}
 	var routes []events.RouteIdentity
 	for _, descriptor := range descriptors {
-		route := descriptorRoute(nil, plan.Receiver.FlowID, descriptor)
+		route := descriptorRouteForReceiver(plan, descriptor)
 		if route.Empty() {
-			continue
-		}
-		if route.FlowID != "" && plan.Receiver.FlowID != "" && route.FlowID != plan.Receiver.FlowID {
 			continue
 		}
 		matches := connectDescriptorMatches(targetExpr, value, descriptor, route)
@@ -421,6 +437,25 @@ func connectDescriptorMatches(targetExpr, value string, descriptor Descriptor, r
 	default:
 		return false
 	}
+}
+
+func descriptorRouteForReceiver(plan ConnectRoutePlan, descriptor Descriptor) events.RouteIdentity {
+	if !descriptorBelongsToReceiver(plan, descriptor) {
+		return events.RouteIdentity{}
+	}
+	return descriptorRoute(nil, plan.Receiver.FlowID, descriptor)
+}
+
+func descriptorBelongsToReceiver(plan ConnectRoutePlan, descriptor Descriptor) bool {
+	flowInstance := strings.Trim(strings.TrimSpace(descriptor.FlowInstance), "/")
+	if flowInstance == "" {
+		return false
+	}
+	receiverPath := strings.Trim(strings.TrimSpace(plan.Receiver.FlowPath), "/")
+	if receiverPath == "" {
+		receiverPath = strings.Trim(strings.TrimSpace(plan.Receiver.FlowID), "/")
+	}
+	return receiverPath != "" && (flowInstance == receiverPath || strings.HasPrefix(flowInstance, receiverPath+"/"))
 }
 
 func addressTargetSupported(expr string) bool {

@@ -4798,7 +4798,8 @@ flow_model:
             runtime_resolution_flag: Template or dynamic receivers keep an explicit runtime-resolution requirement instead of fabricating concrete delivery rows.
           materialization_boundary:
             static_receivers: Static receivers can materialize target route facts during lowering because the receiver flow path is concrete.
-            template_receivers: Template/dynamic receivers may materialize route facts only from explicit addressed-input keys and runtime descriptors; descriptor materialization remains pre-dispatch route evidence, not delivery execution.
+            template_receivers: Template/dynamic receivers may materialize route facts only from explicit addressed-input keys and runtime descriptors, or for delivery:broadcast by enumerating receiver-scope descriptors; descriptor materialization remains pre-dispatch route evidence, not delivery execution.
+            descriptor_scope: Descriptor materialization MUST reject descriptors whose flow_instance is not the receiver semantic flow path or a child instance under that path before stamping the receiver flow id onto the route.
             supported_descriptor_targets:
             - entity_id / entity.entity_id
             - flow_instance / instance.flow_instance

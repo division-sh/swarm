@@ -178,6 +178,7 @@ func TestMaterializeConnectRoutePlanFanoutForTemplateDescriptors(t *testing.T) {
 		Descriptors: []Descriptor{
 			{EntityID: "team-a", FlowInstance: "worker/alpha"},
 			{EntityID: "team-a", FlowInstance: "worker/beta"},
+			{EntityID: "team-a", FlowInstance: "other/alpha"},
 			{EntityID: "team-b", FlowInstance: "worker/gamma"},
 		},
 	})
@@ -189,6 +190,55 @@ func TestMaterializeConnectRoutePlanFanoutForTemplateDescriptors(t *testing.T) {
 	}
 	if materialized.TargetSet[0].FlowInstance != "worker/alpha" || materialized.TargetSet[1].FlowInstance != "worker/beta" {
 		t.Fatalf("TargetSet = %#v, want deterministic worker alpha/beta routes", materialized.TargetSet)
+	}
+}
+
+func TestMaterializeConnectRoutePlanBroadcastsAddresslessTemplateDescriptors(t *testing.T) {
+	source := testConnectRoutePlanSource([]connectRoutePlanFlow{
+		{
+			id:   "producer",
+			mode: "static",
+			outputs: []runtimecontracts.FlowOutputEventPin{{
+				Name:  "notice_ready",
+				Event: "notice.ready",
+			}},
+		},
+		{
+			id:   "worker",
+			mode: "template",
+			inputs: []runtimecontracts.FlowInputEventPin{{
+				Name:  "notice_ready",
+				Event: "notice.ready",
+			}},
+		},
+	}, []runtimecontracts.FlowPackageConnect{{
+		From:     "producer.notice_ready",
+		To:       "worker.notice_ready",
+		Delivery: "broadcast",
+	}})
+
+	plans, issues := LowerCompositionConnectRoutePlans(source)
+	if len(issues) != 0 {
+		t.Fatalf("issues = %#v, want none", issues)
+	}
+	if len(plans) != 1 {
+		t.Fatalf("plans = %#v, want one", plans)
+	}
+	materialized := MaterializeConnectRoutePlan(plans[0], ConnectRoutePlanMaterializationInput{
+		Descriptors: []Descriptor{
+			{FlowInstance: "worker/alpha"},
+			{FlowInstance: "other/alpha"},
+			{FlowInstance: "worker/beta"},
+		},
+	})
+	if materialized.Failure != "" {
+		t.Fatalf("Failure = %q, want empty", materialized.Failure)
+	}
+	if len(materialized.TargetSet) != 2 {
+		t.Fatalf("TargetSet = %#v, want two worker routes", materialized.TargetSet)
+	}
+	if materialized.TargetSet[0].FlowInstance != "worker/alpha" || materialized.TargetSet[1].FlowInstance != "worker/beta" {
+		t.Fatalf("TargetSet = %#v, want receiver-scoped worker routes only", materialized.TargetSet)
 	}
 }
 
