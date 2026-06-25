@@ -254,6 +254,17 @@ func TestEngineOutbox_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T) {
 		events.EventType("producer/deploy.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 	want := connectRoutePlanStaticDeliveryRoute()
 
+	planned, err := (engineOutbox{bus: eb}).deliveryPlanForIntent(context.Background(), runtimeengine.EmitIntent{Event: evt})
+	if err != nil {
+		t.Fatalf("deliveryPlanForIntent: %v", err)
+	}
+	if planned.AuthorityState != RoutePlanAuthorityCanonicalMatched || planned.AuthorityOwner != routePlanSourceConnectRoutePlan {
+		t.Fatalf("outbox route plan authority = %q/%q, want matched connect route plan", planned.AuthorityState, planned.AuthorityOwner)
+	}
+	if !deliveryRoutesContain(planned.DeliveryRoutes(), want) {
+		t.Fatalf("outbox route plan delivery routes = %#v, want %#v", planned.DeliveryRoutes(), want)
+	}
+
 	if err := store.RunEventMutation(context.Background(), func(mutation EventMutation) error {
 		return eb.EngineOutbox().WriteOutbox(mutation.Context(), []runtimeengine.EmitIntent{{Event: evt}})
 	}); err != nil {
@@ -610,6 +621,35 @@ func TestRoutePlanCanonicalFailClosedDropsExecutableRoutes(t *testing.T) {
 	}
 	if len(got.LiveRecipients) != 0 || len(got.DeliveryIntents) != 0 || len(got.DeliveryRoutes()) != 0 || len(got.PersistedRecipientIDs()) != 0 {
 		t.Fatalf("fail-closed plan exposed executable routes: live=%#v intents=%#v routes=%#v persisted=%#v", got.LiveRecipients, got.DeliveryIntents, got.DeliveryRoutes(), got.PersistedRecipientIDs())
+	}
+}
+
+func TestRoutePlanProjectionPreservesAuthorityState(t *testing.T) {
+	evt := events.NewProjectionEvent(uuid.NewString(),
+		events.EventType("producer/deploy.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+	routePlan := newRoutePlan(evt)
+	routePlan.MarkCanonicalRouteMatched(routePlanSourceConnectRoutePlan)
+	routePlan.AddDeliveryIntents(RoutePlanDeliveryIntent{
+		SubscriberType: "node",
+		SubscriberID:   "consumer-node",
+		Target:         connectRoutePlanStaticDeliveryRoute().Target,
+		Source:         routePlanSourceConnectRoutePlan,
+		Reason:         routePlanReasonLoweredConnectRoutePlan,
+		Persist:        true,
+	})
+
+	projected := routePlan.EventDeliveryPlan()
+	canonical := projected.CanonicalRoutePlan()
+	if canonical.AuthorityState != RoutePlanAuthorityCanonicalMatched || canonical.AuthorityOwner != routePlanSourceConnectRoutePlan {
+		t.Fatalf("canonical route plan authority = %q/%q, want matched connect route plan", canonical.AuthorityState, canonical.AuthorityOwner)
+	}
+
+	replaced := projected.WithCanonicalRoutePlan(routePlan).CanonicalRoutePlan()
+	if replaced.AuthorityState != RoutePlanAuthorityCanonicalMatched || replaced.AuthorityOwner != routePlanSourceConnectRoutePlan {
+		t.Fatalf("replaced route plan authority = %q/%q, want matched connect route plan", replaced.AuthorityState, replaced.AuthorityOwner)
+	}
+	if !deliveryRoutesContain(replaced.DeliveryRoutes(), connectRoutePlanStaticDeliveryRoute()) {
+		t.Fatalf("replaced route plan delivery routes = %#v, want static connect route", replaced.DeliveryRoutes())
 	}
 }
 
