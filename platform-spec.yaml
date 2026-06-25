@@ -494,8 +494,11 @@ contract_formats:
           - fail-closed TargetFailure values for missing, invalid, unsupported, unresolved, or unsubscribed lowered plans
           rule: |
             Supported EventBus subscribed publish planning MUST prefer a matched lowered ConnectRoutePlan over lower-precedence
-            RouteTable/subscriber, raw event-name, producer target, producer broadcast, or structural fallback routing.
+            RouteTable/subscriber, raw event-name, producer target, producer broadcast, legacy recipient-policy/descriptor,
+            or structural fallback routing.
             Publish, PublishInMutation, CheckPublishRecipientPlan, and engineOutbox MUST share this RoutePlan authority path.
+            Static lowered ConnectRoutePlan matches MUST NOT require or be blocked by legacy active-agent descriptor lookup;
+            descriptor loading is limited to lowered plans whose supported target form requires runtime resolution.
             When a lowered plan matches but cannot materialize or resolve to supported concrete receiver routes, planning MUST
             fail closed and MUST NOT preserve previously inferred live-subscriber fallback recipients. RouteTable may be used
             only as a consumer that locates the concrete receiver handler/carrier for the already-selected target route identity.
@@ -4870,8 +4873,9 @@ flow_model:
           rule: |
             Supported EventBus publish/preflight/outbox dispatch consumes lowered ConnectRoutePlan artifacts as the
             publish-time route authority. A matched lowered plan replaces lower-precedence RouteTable/live-subscriber/raw-name
-            inference for the publish operation. Singular, fanout, and reply plans materialize into typed RoutePlan delivery
-            intents before persistence; matching lowered-plan failures hard-cut legacy fallback delivery.
+            inference and legacy recipient-policy/descriptor evaluation for the publish operation. Singular, fanout, and reply
+            plans materialize into typed RoutePlan delivery intents before persistence; matching lowered-plan failures hard-cut
+            legacy fallback delivery.
           consumes:
           - implementation_slice_1472 typed ConnectRoutePlan artifacts
           - supported descriptor materialization targets from implementation_slice_1472

@@ -3,6 +3,7 @@ package bus
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -29,6 +30,10 @@ type connectRoutePlanTestFlow struct {
 type connectRoutePlanDescriptorStore struct {
 	*targetRouteMemoryStore
 	flowInstances []ActiveFlowInstanceDescriptor
+}
+
+type connectRoutePlanFailingAgentDescriptorStore struct {
+	*targetRouteMemoryStore
 }
 
 type connectRoutePlanMutationStore struct {
@@ -90,6 +95,10 @@ func (s *connectRoutePlanDescriptorStore) ListActiveFlowInstanceDescriptors(cont
 	return append([]ActiveFlowInstanceDescriptor(nil), s.flowInstances...), nil
 }
 
+func (s *connectRoutePlanFailingAgentDescriptorStore) ListActiveAgentDescriptors(context.Context) ([]ActiveAgentDescriptor, error) {
+	return nil, errors.New("legacy active-agent descriptor path should not run for static connect route plans")
+}
+
 func TestEventBusPublish_ConnectRoutePlanPersistsSingularTargetWithoutLiveSubscriber(t *testing.T) {
 	source := connectRoutePlanStaticSource(runtimecontracts.FlowPackageConnect{
 		From:     "producer.deploy_done",
@@ -146,6 +155,32 @@ func TestEventBusPublish_ConnectRoutePlanPersistsSingularTargetWithoutLiveSubscr
 	}
 	if !deliveryRoutesContain(replayRoutes, want) {
 		t.Fatalf("replay delivery routes = %#v, want %#v", replayRoutes, want)
+	}
+}
+
+func TestEventBusCheckPublishRecipientPlan_ConnectRoutePlanPrecedesLegacyDescriptorPolicy(t *testing.T) {
+	source := connectRoutePlanStaticSource(runtimecontracts.FlowPackageConnect{
+		From:     "producer.deploy_done",
+		To:       "consumer.deploy_completed",
+		Delivery: "one",
+	})
+	store := &connectRoutePlanFailingAgentDescriptorStore{targetRouteMemoryStore: newTargetRouteMemoryStore()}
+	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	evt := events.NewProjectionEvent(uuid.NewString(),
+		events.EventType("producer/deploy.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+
+	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("CheckPublishRecipientPlan: %v", err)
+	}
+	if plan.TargetFailure != "" {
+		t.Fatalf("target failure = %q, want none", plan.TargetFailure)
+	}
+	if !deliveryRoutesContain(plan.DeliveryRoutes, connectRoutePlanStaticDeliveryRoute()) {
+		t.Fatalf("preflight delivery routes = %#v, want static connect route", plan.DeliveryRoutes)
 	}
 }
 
