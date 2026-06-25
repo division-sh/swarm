@@ -79,7 +79,12 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 
 	assertScalarContains(t, mustYAMLPath(t, composition, "pin_alias_delivery_composition", "owner_consumed"), "pin_alias_delivery")
 	assertScalarContains(t, mustYAMLPath(t, composition, "emit_target_escape_hatch", "role"), "not a compatibility path")
-	assertScalarContains(t, mustYAMLPath(t, composition, "split_boundaries", "runtime_route_consumption"), "does not claim runtime behavior closure")
+	assertScalarContains(t, mustYAMLPath(t, composition, "split_boundaries", "runtime_route_consumption"), "#1473 closes supported EventBus publish/preflight/outbox")
+	assertScalarContains(t, mustYAMLPath(t, composition, "split_boundaries", "runtime_route_consumption"), "selected-contract runfork readiness")
+	slice1473 := mustYAMLPath(t, composition, "route_plan_lowering", "implementation_slice_1473")
+	assertScalarValue(t, mustMappingValue(t, slice1473, "status"), "merge_bearing_runtime_behavior")
+	assertScalarContains(t, mustMappingValue(t, slice1473, "canonical_code_owner"), "internal/runtime/bus.RoutePlan")
+	assertScalarContains(t, mustMappingValue(t, slice1473, "rule"), "Supported EventBus publish/preflight/outbox dispatch consumes lowered ConnectRoutePlan")
 }
 
 func TestPlatformSpecCompositionRoutingDemotesProducerTargetAuthority(t *testing.T) {
@@ -87,7 +92,7 @@ func TestPlatformSpecCompositionRoutingDemotesProducerTargetAuthority(t *testing
 
 	crossFlow := mustYAMLPath(t, root, "engine", "cross_flow_routing")
 	assertScalarValue(t, mustMappingValue(t, crossFlow, "canonical_owner"), "platform-spec.yaml#flow_model.flow_package.composition_routing")
-	assertScalarValue(t, mustMappingValue(t, crossFlow, "implementation_status"), "source_authority_promoted_runtime_migration_pending")
+	assertScalarValue(t, mustMappingValue(t, crossFlow, "implementation_status"), "source_authority_promoted_eventbus_dispatch_partial")
 	if !sequenceContainsScalar(mustYAMLPath(t, crossFlow, "target_resolution", "precedence"), "lowered parent connect route plan") {
 		t.Fatal("cross_flow_routing target precedence must start from lowered parent connect route plan")
 	}

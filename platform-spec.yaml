@@ -476,6 +476,40 @@ contract_formats:
           descriptor lookup, live carriers, and interceptors consume or observe
           RoutePlan results; they MUST NOT create, replace, or repair missing
           route authority.
+        lowered_connect_route_plan_consumption:
+          status: merge_bearing_runtime_behavior
+          implementation_slice: '#1473'
+          canonical_code_owner: internal/runtime/bus.RoutePlan via deliveryPlanner.Plan and connectRoutePlanResolver
+          consumes:
+          - internal/runtime/core/pinrouting.ConnectRoutePlan
+          - lowered connect-route failure issues from route_plan_lowering
+          - EventBus semantic source selected for the publish operation
+          - RouteTable concrete receiver subscribers only after a lowered plan selects the receiver route identity
+          - active flow-instance descriptors for supported identity-style addressed template targets
+          produces:
+          - typed RoutePlanDeliveryIntent rows with source=connect_route_plan and reason=lowered_connect_route_plan
+          - concrete delivery_target_route values for supported singular event.target delivery
+          - concrete delivery_target_route values for each supported event.target_set fanout member
+          - reply-lineage route metadata on the RoutePlan when delivery=reply carries reply context
+          - fail-closed TargetFailure values for missing, invalid, unsupported, unresolved, or unsubscribed lowered plans
+          rule: |
+            Supported EventBus subscribed publish planning MUST prefer a matched lowered ConnectRoutePlan over lower-precedence
+            RouteTable/subscriber, raw event-name, producer target, producer broadcast, or structural fallback routing.
+            Publish, PublishInMutation, CheckPublishRecipientPlan, and engineOutbox MUST share this RoutePlan authority path.
+            When a lowered plan matches but cannot materialize or resolve to supported concrete receiver routes, planning MUST
+            fail closed and MUST NOT preserve previously inferred live-subscriber fallback recipients. RouteTable may be used
+            only as a consumer that locates the concrete receiver handler/carrier for the already-selected target route identity.
+          supported_surface:
+          - static receiver singular delivery
+          - identity-style template/dynamic receiver fanout through supported descriptor targets
+          - reply delivery metadata preservation
+          - persisted delivery rows, pipeline receipts, and committed replay scope as separate owners
+          unsupported_or_split:
+            business_field_descriptor_targets: '#1479 owns typed descriptor/index materialization for targets such as entity.vertical_id.'
+            agent_node_emitter_parity: '#1474 remains open.'
+            producer_target_broadcast_retirement: '#1475 remains open.'
+            selected_contract_runfork_readiness: 'Tracked under #1466/watchlist; not closed by #1473.'
+            parent_composition_routing_closure: '#1466 remains open.'
         inputs:
           event_identity:
             fields:
@@ -1878,7 +1912,7 @@ engine:
       concrete route-plan facts. For pin-declared outputs, the platform routes by resolved source/target
       identity, not by unconstrained event-type broadcast.'
     canonical_owner: platform-spec.yaml#flow_model.flow_package.composition_routing
-    implementation_status: source_authority_promoted_runtime_migration_pending
+    implementation_status: source_authority_promoted_eventbus_dispatch_partial
     activation:
       rule: Pin routing activates when the emitter flow declares the emitted event in schema.yaml pins.outputs.events and the
         event is admitted through a valid lowered parent connect route, explicit dynamic target escape hatch, structural
@@ -4830,6 +4864,28 @@ flow_model:
             - recovery or retry work
             - agent/node delivery parity
             - producer target/broadcast retirement
+        implementation_slice_1473:
+          status: merge_bearing_runtime_behavior
+          canonical_code_owner: internal/runtime/bus.RoutePlan via deliveryPlanner.Plan and connectRoutePlanResolver
+          rule: |
+            Supported EventBus publish/preflight/outbox dispatch consumes lowered ConnectRoutePlan artifacts as the
+            publish-time route authority. A matched lowered plan replaces lower-precedence RouteTable/live-subscriber/raw-name
+            inference for the publish operation. Singular, fanout, and reply plans materialize into typed RoutePlan delivery
+            intents before persistence; matching lowered-plan failures hard-cut legacy fallback delivery.
+          consumes:
+          - implementation_slice_1472 typed ConnectRoutePlan artifacts
+          - supported descriptor materialization targets from implementation_slice_1472
+          - RouteTable concrete receiver subscribers only after target route identity selection
+          produces:
+          - persisted event_deliveries delivery_target_route rows for supported connected outputs
+          - pipeline receipt settlement through normal EventBus delivery consumers
+          - committed replay-scope rows separate from executable delivery rows
+          - fail-closed target diagnostics for unsupported or invalid lowered route plans
+          proof_obligations:
+          - Publish, PublishInMutation, CheckPublishRecipientPlan, and engineOutbox use the same corrected planner
+          - singular target, target_set fanout, and reply metadata are covered
+          - unsupported business-field descriptor targets remain fail-closed and split to #1479
+          - '#1473 does not close #1474, #1475, selected-contract runfork readiness, or #1466 parent closure'
         invalid_outputs:
         - raw same-name pin match used as final topology authority
         - live subscription list used to invent missing connect topology
@@ -4852,7 +4908,7 @@ flow_model:
         - Must not satisfy parent connect requirements for imported package public pins.
         - Must not be introduced as a producer route-default surface.
       split_boundaries:
-        runtime_route_consumption: Runtime RouteTable/EventBus/RoutePlan migration is a follow-up implementation child; this source-authority section does not claim runtime behavior closure.
+        runtime_route_consumption: '#1473 closes supported EventBus publish/preflight/outbox consumption of lowered ConnectRoutePlan artifacts only; selected-contract runfork readiness, full agent/node parity, producer target/broadcast retirement, and parent #1466 closure remain separate tracked work.'
         parser_model_support: Parser/model support beyond source-authority fixtures is follow-up unless an implementation gate explicitly widens.
         policy_credential_resolution: '#1453 remains separate.'
         wildcard_scoping: '#1454 remains separate.'

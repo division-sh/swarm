@@ -36,6 +36,7 @@ type EventBus struct {
 	pendingInternalByID         map[string][]events.DeliveryRoute
 	routeTable                  *RouteTable
 	runtimeAgentDescriptors     map[string]ActiveAgentDescriptor
+	connectRoutePlanner         connectRoutePlanResolver
 	deliveryPlanner             deliveryPlanner
 	interceptors                []EventInterceptor
 	interceptorProvider         func() []EventInterceptor
@@ -173,6 +174,7 @@ func NewEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 		bundleSourceFact:            opts.BundleSourceFact.Normalized(),
 		testLifecycleProbe:          opts.TestLifecycleProbe,
 	}
+	eb.connectRoutePlanner = newConnectRoutePlanResolver(semanticSource, routeTable, eb.PinRoutingDescriptors)
 	eb.deliveryPlanner = eb.newEventBusDeliveryPlanner()
 	return eb, nil
 }
