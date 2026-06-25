@@ -207,8 +207,12 @@ func TestEventBusRecipientPlanMaterializerNormalizesIntoCanonicalRoutePlan(t *te
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	evt := events.NewProjectionEvent(uuid.NewString(), events.EventType("review/inst-1/task.started"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
+	emptyAgentPolicyPlan := routePlanFromManifest(evt, deliveryRecipientManifest{}, routePlanSourceAgentPolicy, routePlanReasonMatchedAgentSubscription)
+	if emptyAgentPolicyPlan.AuthorityState != RoutePlanAuthorityNoCanonicalMatch || emptyAgentPolicyPlan.AuthorityOwner != "" {
+		t.Fatalf("empty agent-policy route plan authority = %q/%q, want no canonical match", emptyAgentPolicyPlan.AuthorityState, emptyAgentPolicyPlan.AuthorityOwner)
+	}
 
-	plan, err := eb.materializePublishRecipientPlan(context.Background(), evt, newRoutePlan(evt).EventDeliveryPlan())
+	plan, err := eb.materializePublishRecipientPlan(context.Background(), evt, emptyAgentPolicyPlan.EventDeliveryPlan())
 	if err != nil {
 		t.Fatalf("materializePublishRecipientPlan: %v", err)
 	}
