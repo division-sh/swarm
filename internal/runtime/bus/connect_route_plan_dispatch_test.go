@@ -246,40 +246,7 @@ func TestEventBusPlan_ConnectRoutePlanPreservesReplyLineage(t *testing.T) {
 }
 
 func TestEventBusPublish_ConnectRoutePlanPersistsTargetSetFanout(t *testing.T) {
-	source := semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{
-		{
-			id:   "producer",
-			mode: "static",
-			outputs: []runtimecontracts.FlowOutputEventPin{{
-				Name:  "ticket_ready",
-				Event: "ticket.ready",
-			}},
-		},
-		{
-			id:   "worker",
-			mode: "template",
-			inputs: []runtimecontracts.FlowInputEventPin{{
-				Name:  "ticket_ready",
-				Event: "ticket.ready",
-				Address: &runtimecontracts.FlowInputPinAddress{
-					By:          "team_entity",
-					Source:      "payload.team_entity",
-					Target:      "entity.entity_id",
-					Cardinality: "many",
-				},
-			}},
-			nodes: map[string]runtimecontracts.SystemNodeContract{
-				"worker-node": {
-					ID:            "worker-{instance_id}",
-					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"ticket.ready": {}},
-				},
-			},
-		},
-	}, []runtimecontracts.FlowPackageConnect{{
-		From:     "producer.ticket_ready",
-		To:       "worker.ticket_ready",
-		Delivery: "many",
-	}}))
+	source := connectRoutePlanFanoutSource()
 	store := &connectRoutePlanDescriptorStore{
 		targetRouteMemoryStore: newTargetRouteMemoryStore(),
 		flowInstances: []ActiveFlowInstanceDescriptor{
@@ -314,6 +281,49 @@ func TestEventBusPublish_ConnectRoutePlanPersistsTargetSetFanout(t *testing.T) {
 	}
 	if len(routes) != 2 {
 		t.Fatalf("persisted delivery routes = %#v, want exactly two team-a fanout routes", routes)
+	}
+}
+
+func TestEventBusResetInMemoryStateRefreshesConnectRoutePlanner(t *testing.T) {
+	source := connectRoutePlanFanoutSource()
+	store := &connectRoutePlanDescriptorStore{
+		targetRouteMemoryStore: newTargetRouteMemoryStore(),
+		flowInstances:          []ActiveFlowInstanceDescriptor{{InstanceID: "alpha", EntityID: "team-a", FlowInstance: "worker/alpha"}},
+	}
+	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{
+		Identity: runtimeflowidentity.DeriveRoute("worker", "alpha"),
+	}); err != nil {
+		t.Fatalf("AddFlowInstanceRoute(alpha): %v", err)
+	}
+
+	if err := eb.ResetInMemoryState(); err != nil {
+		t.Fatalf("ResetInMemoryState: %v", err)
+	}
+	store.flowInstances = []ActiveFlowInstanceDescriptor{{InstanceID: "beta", EntityID: "team-a", FlowInstance: "worker/beta"}}
+	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{
+		Identity: runtimeflowidentity.DeriveRoute("worker", "beta"),
+	}); err != nil {
+		t.Fatalf("AddFlowInstanceRoute(beta): %v", err)
+	}
+
+	eventID := uuid.NewString()
+	evt := events.NewProjectionEvent(eventID,
+		events.EventType("producer/ticket.ready"), "", "", json.RawMessage(`{"team_entity":"team-a"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+	wantBeta := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "worker-beta", Target: events.RouteIdentity{FlowID: "worker", FlowInstance: "worker/beta", EntityID: "team-a"}}
+
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish after reset: %v", err)
+	}
+	routes := store.routes[eventID]
+	if !deliveryRoutesContain(routes, wantBeta) {
+		t.Fatalf("persisted delivery routes = %#v, want refreshed beta route", routes)
+	}
+	if len(routes) != 1 {
+		t.Fatalf("persisted delivery routes = %#v, want only refreshed beta route", routes)
 	}
 }
 
@@ -445,6 +455,43 @@ func connectRoutePlanStaticDeliveryRoute() events.DeliveryRoute {
 			EntityID:     runtimeflowidentity.EntityID("consumer"),
 		},
 	}
+}
+
+func connectRoutePlanFanoutSource() semanticview.Source {
+	return semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{
+		{
+			id:   "producer",
+			mode: "static",
+			outputs: []runtimecontracts.FlowOutputEventPin{{
+				Name:  "ticket_ready",
+				Event: "ticket.ready",
+			}},
+		},
+		{
+			id:   "worker",
+			mode: "template",
+			inputs: []runtimecontracts.FlowInputEventPin{{
+				Name:  "ticket_ready",
+				Event: "ticket.ready",
+				Address: &runtimecontracts.FlowInputPinAddress{
+					By:          "team_entity",
+					Source:      "payload.team_entity",
+					Target:      "entity.entity_id",
+					Cardinality: "many",
+				},
+			}},
+			nodes: map[string]runtimecontracts.SystemNodeContract{
+				"worker-node": {
+					ID:            "worker-{instance_id}",
+					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"ticket.ready": {}},
+				},
+			},
+		},
+	}, []runtimecontracts.FlowPackageConnect{{
+		From:     "producer.ticket_ready",
+		To:       "worker.ticket_ready",
+		Delivery: "many",
+	}}))
 }
 
 func connectRoutePlanTestBundle(flows []connectRoutePlanTestFlow, connects []runtimecontracts.FlowPackageConnect) *runtimecontracts.WorkflowContractBundle {
