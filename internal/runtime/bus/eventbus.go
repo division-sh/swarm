@@ -174,9 +174,16 @@ func NewEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 		bundleSourceFact:            opts.BundleSourceFact.Normalized(),
 		testLifecycleProbe:          opts.TestLifecycleProbe,
 	}
-	eb.connectRoutePlanner = newConnectRoutePlanResolver(semanticSource, routeTable, eb.PinRoutingDescriptors)
-	eb.deliveryPlanner = eb.newEventBusDeliveryPlanner()
+	eb.rebuildRoutePlanners()
 	return eb, nil
+}
+
+func (eb *EventBus) rebuildRoutePlanners() {
+	if eb == nil {
+		return
+	}
+	eb.connectRoutePlanner = newConnectRoutePlanResolver(eb.semanticSource, eb.routeTable, eb.PinRoutingDescriptors)
+	eb.deliveryPlanner = eb.newEventBusDeliveryPlanner()
 }
 
 func (eb *EventBus) SetRunDispatchGate(gate RunDispatchGate) {
@@ -331,6 +338,7 @@ func (eb *EventBus) ResetInMemoryState() error {
 		return err
 	}
 	eb.routeTable = routeTable
+	eb.rebuildRoutePlanners()
 	eb.inFlightPublishes.Store(0)
 	return nil
 }
