@@ -548,6 +548,10 @@ contract_formats:
               interpretation. If the selected receiver identity cannot locate a
               concrete receiver carrier, the matched plan fails closed instead
               of recovering through source/raw/legacy subscriber routes.
+              Static and template lowered-connect receiver subscribers for
+              concrete flow input events MUST materialize receiver-carrier
+              evidence at the selected receiver path, except where
+              import-boundary alias policy requires exclusive alias patterns.
           descriptor_evidence_boundary:
             status: merge_bearing_runtime_behavior
             implementation_slice: '#1485'
@@ -4960,7 +4964,10 @@ flow_model:
             interpretations are not carrier lookup inputs for a matched lowered
             plan. Descriptor loading in the EventBus connect resolver is
             limited to matched plans whose supported target form requires
-            runtime descriptor evidence.
+            runtime descriptor evidence. Static and template lowered-connect
+            receiver subscribers for concrete flow input events materialize
+            receiver carrier evidence at the selected receiver path rather than
+            relying on producer-key subscription projection.
           does_not_close:
           - legacy eventDeliveryPlan compatibility collapse or removal
           - direct-recipient publish policy
@@ -4969,6 +4976,7 @@ flow_model:
           - broad composition-first routing parent closure
           proof_obligations:
           - matched connect receiver carrier lookup excludes source/raw fallback keys
+          - static and template lowered-connect receiver input subscribers materialize selected receiver-carrier keys
           - static matched connect plans do not load descriptors
           - descriptor-backed matched connect plans load only supported descriptor evidence
           - Publish, PublishInMutation, CheckPublishRecipientPlan, and engineOutbox preserve the corrected RoutePlan path where relevant

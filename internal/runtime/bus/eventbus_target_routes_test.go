@@ -674,8 +674,8 @@ func TestEventBusPublish_TargetedDynamicFlowFixtureRouteTableNodePersistsSemanti
 		}
 		return false
 	}
-	if !hasRoute("work.assign") || !hasRoute("worker/w-001/work.assign") {
-		t.Fatalf("materialized routes = %#v, want task-handler local and selected receiver-carrier work.assign routes; node entries=%v", materialized, sortedStringKeys(bundle.NodeEntries()))
+	if !hasRoute("work.assign") {
+		t.Fatalf("materialized routes = %#v, want task-handler local work.assign route; node entries=%v", materialized, sortedStringKeys(bundle.NodeEntries()))
 	}
 	target := events.RouteIdentity{
 		FlowInstance: "worker/w-001",

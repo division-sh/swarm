@@ -121,6 +121,10 @@ func TestEventBusPublish_ConnectRoutePlanPersistsSingularTargetWithoutLiveSubscr
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	receiverCarriers := eb.RouteTable().Resolve("consumer/deploy.completed")
+	if !subscriberListContainsRouteSource(receiverCarriers, "consumer-node", "consumer", "receiver_carrier") {
+		t.Fatalf("receiver carrier route consumer/deploy.completed = %#v, want consumer-node receiver_carrier", receiverCarriers)
+	}
 	eventID := uuid.NewString()
 	evt := events.NewProjectionEvent(eventID,
 		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"ignored":"yes"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
@@ -1029,6 +1033,15 @@ func requireNoConnectRoutePlanBusEvent(t testing.TB, ch <-chan events.Event, con
 func subscriberListContains(in []Subscriber, id, path string) bool {
 	for _, subscriber := range in {
 		if subscriber.ID == id && subscriber.Path == path {
+			return true
+		}
+	}
+	return false
+}
+
+func subscriberListContainsRouteSource(in []Subscriber, id, path, routeSource string) bool {
+	for _, subscriber := range in {
+		if subscriber.ID == id && subscriber.Path == path && subscriber.RouteSource == routeSource {
 			return true
 		}
 	}
