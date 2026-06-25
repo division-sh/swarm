@@ -945,39 +945,20 @@ func (eb *EventBus) materializePublishRecipientPlan(ctx context.Context, evt eve
 	if eb == nil || eb.recipientPlanMaterializer == nil {
 		return plan, nil
 	}
-	if eventDeliveryPlanUsesConnectRoutePlan(plan) {
+	routePlan := plan.CanonicalRoutePlan()
+	if !routePlan.AllowsLowerPrecedenceRouteProduction() {
 		return plan, nil
 	}
-	routes, err := eb.recipientPlanMaterializer(ctx, evt, eb.publishRecipientPlan(evt, plan.CanonicalRoutePlan()))
+	routes, err := eb.recipientPlanMaterializer(ctx, evt, eb.publishRecipientPlan(evt, routePlan))
 	if err != nil {
 		return eventDeliveryPlan{}, err
 	}
 	if len(routes) == 0 {
 		return plan, nil
 	}
-	routePlan := plan.CanonicalRoutePlan()
+	routePlan.MarkLowerPrecedenceRouteProduction(routePlanSourceRecipientMaterializer)
 	routePlan.AddDeliveryIntents(routePlanDeliveryIntentsFromRoutes(routes, routePlanSourceRecipientMaterializer, routePlanReasonMaterializedRoute)...)
 	return plan.WithCanonicalRoutePlan(routePlan), nil
-}
-
-func eventDeliveryPlanUsesConnectRoutePlan(plan eventDeliveryPlan) bool {
-	routePlan := plan.CanonicalRoutePlan().Normalized()
-	for _, intent := range routePlan.DeliveryIntents {
-		if intent.Source == routePlanSourceConnectRoutePlan || intent.Reason == routePlanReasonLoweredConnectRoutePlan {
-			return true
-		}
-	}
-	for _, recipient := range routePlan.LiveRecipients {
-		if recipient.Source == routePlanSourceConnectRoutePlan || recipient.Reason == routePlanReasonLoweredConnectRoutePlan {
-			return true
-		}
-	}
-	for key := range routePlan.ExtraDetail {
-		if strings.HasPrefix(key, "connect_route_plan") || strings.HasPrefix(key, "connect_route_plans") {
-			return true
-		}
-	}
-	return false
 }
 
 func (eb *EventBus) authorizePublishRecipientPlan(ctx context.Context, evt events.Event, plan eventDeliveryPlan) error {

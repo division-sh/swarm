@@ -156,8 +156,9 @@ func (p deliveryPlanner) Plan(ctx context.Context, evt events.Event) (eventDeliv
 func eventDeliveryPlanFromConnectRouteDispatch(evt events.Event, connectPlan connectRoutePlanDispatch) eventDeliveryPlan {
 	routePlan := newRoutePlan(evt)
 	if connectPlan.Failure != "" {
-		routePlan.TargetFailure = connectPlan.Failure
+		routePlan.MarkCanonicalRouteFailedClosed(routePlanSourceConnectRoutePlan, connectPlan.Failure)
 	} else {
+		routePlan.MarkCanonicalRouteMatched(routePlanSourceConnectRoutePlan)
 		routePlan.AddLiveRecipients(connectPlan.LiveRecipients...)
 		routePlan.AddDeliveryIntents(connectPlan.DeliveryIntents...)
 	}

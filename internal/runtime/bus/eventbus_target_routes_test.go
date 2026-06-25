@@ -215,6 +215,9 @@ func TestEventBusRecipientPlanMaterializerNormalizesIntoCanonicalRoutePlan(t *te
 	if got, wantLen := len(plan.RoutePlan.DeliveryIntents), 1; got != wantLen {
 		t.Fatalf("route plan delivery intents = %d, want %d", got, wantLen)
 	}
+	if plan.RoutePlan.AuthorityState != RoutePlanAuthorityLowerPrecedence || plan.RoutePlan.AuthorityOwner != routePlanSourceRecipientMaterializer {
+		t.Fatalf("route plan authority = %q/%q, want lower-precedence materializer", plan.RoutePlan.AuthorityState, plan.RoutePlan.AuthorityOwner)
+	}
 	intent := plan.RoutePlan.DeliveryIntents[0]
 	if intent.SubscriberType != want.SubscriberType || intent.SubscriberID != want.SubscriberID || intent.Target != want.Target {
 		t.Fatalf("route plan delivery intent = %#v, want route %#v", intent, want)

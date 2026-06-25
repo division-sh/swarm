@@ -476,6 +476,34 @@ contract_formats:
           descriptor lookup, live carriers, and interceptors consume or observe
           RoutePlan results; they MUST NOT create, replace, or repair missing
           route authority.
+        decision_state:
+          status: merge_bearing_runtime_behavior
+          implementation_slice: '#1482'
+          canonical_code_owner: internal/runtime/bus.RoutePlan.AuthorityState
+          states:
+          - no_canonical_match
+          - canonical_matched
+          - canonical_failed_closed
+          - lower_precedence
+          rule: |
+            RoutePlan authority decisions MUST be represented by first-class
+            runtime state, not reconstructed from ExtraDetail, TargetFailure,
+            Source, Reason, or prose diagnostics. no_canonical_match means no
+            canonical route owner matched the publish operation and lower-
+            precedence route production may run. canonical_matched means a
+            canonical route owner matched and produced executable recipients;
+            lower-precedence producers such as legacy recipient materializers
+            MUST NOT add, replace, or repair routes afterward.
+            canonical_failed_closed means a canonical route owner matched and
+            failed closed; the final RoutePlan MUST expose zero executable
+            LiveRecipients, DeliveryIntents, DeliveryRoutes, and persisted
+            recipients unless a later spec explicitly defines partial-delivery
+            semantics. lower_precedence means legacy or compatibility route
+            production was used only after no canonical owner matched.
+            Publish, PublishInMutation, CheckPublishRecipientPlan, and
+            engineOutbox MUST preserve this decision state across RoutePlan
+            projection, materialization, diagnostics, persistence, and delivery
+            consumers.
         lowered_connect_route_plan_consumption:
           status: merge_bearing_runtime_behavior
           implementation_slice: '#1473'
@@ -503,7 +531,9 @@ contract_formats:
             fail closed and MUST NOT preserve previously inferred live-subscriber fallback recipients. RouteTable may be used
             only as a consumer that locates the concrete receiver handler/carrier for the already-selected target route identity.
             A matched lowered ConnectRoutePlan decision, including fail-closed diagnostics, MUST NOT be repaired or augmented
-            by post-planning recipient materialization hooks.
+            by post-planning recipient materialization hooks. #1482 promotes this matched decision into explicit
+            RoutePlan authority state so materializer eligibility and fail-closed zero-route behavior are structural rather
+            than inferred from connect-route metadata.
           supported_surface:
           - static receiver singular delivery
           - identity-style template/dynamic receiver fanout through supported descriptor targets
