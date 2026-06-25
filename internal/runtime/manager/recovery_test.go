@@ -205,12 +205,40 @@ func TestRecoverRestoresSelectedContractRouteRecoveriesFromForkLocalOwner(t *tes
 	if len(snapshot) != 1 {
 		t.Fatalf("selected route recovery snapshot len = %d, want 1", len(snapshot))
 	}
-	if got := snapshot[forkRunID]; got.Record.Owner != SelectedContractRoutePersistenceOwner ||
+	got := snapshot[forkRunID]
+	if got.Record.Owner != SelectedContractRoutePersistenceOwner ||
 		got.Record.RuntimeRecoveryOwner != SelectedContractRouteRecoveryOwner ||
 		got.RouteTopology.Owner != selectedContractRouteTopologyOwner ||
 		got.RecipientPlanning.Owner != selectedContractRecipientPlanningOwner ||
 		len(got.RecipientPlanning.RecipientPlanEvents) != 1 {
 		t.Fatalf("selected route recovery truth = %#v, want canonical recovered topology and recipient planning", got)
+	}
+	classification := struct {
+		consumer       string
+		owner          string
+		classification string
+		consumedOwners []string
+	}{
+		consumer:       "internal/runtime/manager.restoreSelectedContractRouteRecoveries/SelectedContractRouteRecoveryRecipientGuard",
+		owner:          got.Record.RuntimeRecoveryOwner,
+		classification: "carrier_readiness_consumer",
+		consumedOwners: []string{
+			got.Record.Owner,
+			got.Record.RouteTopologyOwner,
+			got.Record.RecipientPlanningOwner,
+			got.RecipientPlanning.RouteTopologyOwner,
+		},
+	}
+	if strings.TrimSpace(classification.owner) == "" {
+		t.Fatalf("%s has empty owner in classification row %#v", classification.consumer, classification)
+	}
+	if classification.classification == "route_authority" {
+		t.Fatalf("%s incorrectly classified as live EventBus route authority", classification.consumer)
+	}
+	for _, owner := range classification.consumedOwners {
+		if strings.TrimSpace(owner) == "" {
+			t.Fatalf("%s has empty consumed owner in classification row %#v", classification.consumer, classification)
+		}
 	}
 	guard, ok := am.SelectedContractRouteRecoveryRecipientGuard(forkRunID)
 	if !ok {
