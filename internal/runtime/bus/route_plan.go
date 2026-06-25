@@ -19,6 +19,7 @@ const (
 	routePlanSourceRootNodeRoute         = "root_node_route"
 	routePlanSourceRootInputFlowNode     = "root_input_flow_node_route"
 	routePlanSourceRecipientMaterializer = "recipient_plan_materializer"
+	routePlanSourceConnectRoutePlan      = "connect_route_plan"
 	routePlanSourceLegacyProjection      = "legacy_projection"
 
 	routePlanReasonMatchedAgentSubscription = "matched_agent_subscription"
@@ -26,6 +27,7 @@ const (
 	routePlanReasonInternalCarrier          = "internal_carrier"
 	routePlanReasonRouteTableNode           = "route_table_node"
 	routePlanReasonMaterializedRoute        = "materialized_route"
+	routePlanReasonLoweredConnectRoutePlan  = "lowered_connect_route_plan"
 )
 
 // RoutePlan is the EventBus-owned publish-time route authority. It records the
