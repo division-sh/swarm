@@ -453,6 +453,59 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForInvalidLoweredPlan(t *tes
 	}
 }
 
+func TestEventBusPublish_ConnectRoutePlanFailureSkipsRecipientPlanMaterializer(t *testing.T) {
+	source := semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{
+		{
+			id:   "producer",
+			mode: "static",
+			outputs: []runtimecontracts.FlowOutputEventPin{{
+				Name:  "deploy_done",
+				Event: "deploy.done",
+			}},
+		},
+		{
+			id:     "consumer",
+			mode:   "static",
+			inputs: []runtimecontracts.FlowInputEventPin{{Name: "deploy_completed", Event: "deploy.completed"}},
+		},
+	}, []runtimecontracts.FlowPackageConnect{{
+		From:     "producer.deploy_done",
+		To:       "consumer.missing_input",
+		Delivery: "one",
+	}}))
+	materializerCalled := false
+	eb, err := NewEventBusWithOptions(newTargetRouteMemoryStore(), EventBusOptions{
+		ContractBundle: source,
+		RecipientPlanMaterializer: func(context.Context, events.Event, PublishRecipientPlan) ([]events.DeliveryRoute, error) {
+			materializerCalled = true
+			return []events.DeliveryRoute{{
+				SubscriberType: "node",
+				SubscriberID:   "bogus-node",
+				Target:         events.RouteIdentity{FlowID: "bogus", FlowInstance: "bogus", EntityID: "bogus"},
+			}}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	evt := events.NewProjectionEvent(uuid.NewString(),
+		events.EventType("producer/deploy.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+
+	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("CheckPublishRecipientPlan: %v", err)
+	}
+	if materializerCalled {
+		t.Fatalf("recipient plan materializer was called for matched lowered connect failure")
+	}
+	if got, want := plan.TargetFailure, "receiver_input_pin_missing"; got != want {
+		t.Fatalf("target failure = %q, want %q", got, want)
+	}
+	if len(plan.DeliveryRoutes) != 0 {
+		t.Fatalf("delivery routes = %#v, want none when matched lowered plan fails", plan.DeliveryRoutes)
+	}
+}
+
 func connectRoutePlanStaticSource(connect runtimecontracts.FlowPackageConnect) semanticview.Source {
 	return semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{
 		{
