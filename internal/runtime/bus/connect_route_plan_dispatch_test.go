@@ -411,8 +411,8 @@ func TestEventBusPublish_ConnectRoutePlanPersistsTargetSetFanout(t *testing.T) {
 		}
 	}
 	resolvedAlpha := eb.RouteTable().Resolve("worker/alpha/ticket.ready")
-	if !subscriberListContains(resolvedAlpha, "worker-alpha", "worker/alpha") {
-		t.Fatalf("receiver carrier route worker/alpha/ticket.ready = %#v, want worker-alpha", resolvedAlpha)
+	if !subscriberListContainsRouteSource(resolvedAlpha, "worker-alpha", "worker/alpha", "receiver_carrier") {
+		t.Fatalf("receiver carrier route worker/alpha/ticket.ready = %#v, want worker-alpha receiver_carrier", resolvedAlpha)
 	}
 	eventID := uuid.NewString()
 	evt := events.NewProjectionEvent(eventID,

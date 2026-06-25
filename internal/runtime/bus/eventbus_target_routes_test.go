@@ -677,6 +677,12 @@ func TestEventBusPublish_TargetedDynamicFlowFixtureRouteTableNodePersistsSemanti
 	if !hasRoute("work.assign") {
 		t.Fatalf("materialized routes = %#v, want task-handler local work.assign route; node entries=%v", materialized, sortedStringKeys(bundle.NodeEntries()))
 	}
+	if hasRoute("worker/w-001/work.assign") {
+		t.Fatalf("materialized routes = %#v, want no selected receiver-carrier route for unrelated target-route fixture", materialized)
+	}
+	if resolved := eb.RouteTable().Resolve("worker/w-001/work.assign"); subscriberListContainsRouteSource(resolved, "task-handler", "worker/w-001", "receiver_carrier") {
+		t.Fatalf("Resolve(worker/w-001/work.assign) = %#v, want no receiver_carrier route for unrelated target-route fixture", resolved)
+	}
 	target := events.RouteIdentity{
 		FlowInstance: "worker/w-001",
 		EntityID:     runtimeflowidentity.EntityID("worker/w-001"),
