@@ -197,6 +197,14 @@ func (rt *RouteTable) AddFlowInstanceRoute(req FlowInstanceRouteMaterializationR
 						InstancePath: instancePath,
 					})
 				}
+				for _, resolved := range routeReceiverCarrierSubscriberPatterns(templateDef.InputEvents, instancePath, rawPattern) {
+					resolvedSubscriber := routeApplyResolvedPattern(subscriber, resolved)
+					rt.patterns = append(rt.patterns, routePattern{
+						EventPattern: resolved.EventPattern,
+						Subscriber:   resolvedSubscriber,
+						InstancePath: instancePath,
+					})
+				}
 			}
 		}
 		rt.rebuildLocked()
@@ -778,6 +786,23 @@ func routeResolveSubscriberPatterns(source semanticview.Source, packageKey, flow
 		return nil
 	}
 	return []routeResolvedPattern{{EventPattern: pattern, RouteSource: "subscription"}}
+}
+
+func routeReceiverCarrierSubscriberPatterns(inputEvents []string, instancePath, raw string) []routeResolvedPattern {
+	raw = eventidentity.Normalize(raw)
+	instancePath = strings.Trim(strings.TrimSpace(instancePath), "/")
+	if raw == "" || strings.Contains(raw, "*") || instancePath == "" {
+		return nil
+	}
+	if !routeFlowHasInputEvent(inputEvents, raw) {
+		return nil
+	}
+	return []routeResolvedPattern{{
+		EventPattern:   instancePath + "/" + raw,
+		MatchPattern:   raw,
+		RouteSource:    "receiver_carrier",
+		LocalizedEvent: raw,
+	}}
 }
 
 func routeFlowHasInputEvent(inputEvents []string, eventType string) bool {

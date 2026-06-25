@@ -30,7 +30,8 @@ type connectRoutePlanTestFlow struct {
 
 type connectRoutePlanDescriptorStore struct {
 	*targetRouteMemoryStore
-	flowInstances []ActiveFlowInstanceDescriptor
+	flowInstances               []ActiveFlowInstanceDescriptor
+	flowInstanceDescriptorCalls int
 }
 
 type connectRoutePlanFailingAgentDescriptorStore struct {
@@ -93,6 +94,7 @@ func (*targetRouteMemoryEventMutation) RecordDeadLetter(context.Context, runtime
 }
 
 func (s *connectRoutePlanDescriptorStore) ListActiveFlowInstanceDescriptors(context.Context) ([]ActiveFlowInstanceDescriptor, error) {
+	s.flowInstanceDescriptorCalls++
 	return append([]ActiveFlowInstanceDescriptor(nil), s.flowInstances...), nil
 }
 
@@ -208,6 +210,71 @@ func TestEventBusCheckPublishRecipientPlan_ConnectRoutePlanPrecedesLegacyDescrip
 	}
 	if !deliveryRoutesContain(plan.DeliveryRoutes, connectRoutePlanStaticDeliveryRoute()) {
 		t.Fatalf("preflight delivery routes = %#v, want static connect route", plan.DeliveryRoutes)
+	}
+}
+
+func TestConnectRoutePlanReceiverCarrierKeysUseSelectedReceiverIdentity(t *testing.T) {
+	plan := runtimepinrouting.ConnectRoutePlan{
+		Source: runtimepinrouting.ConnectRoutePlanEndpoint{
+			FlowID:        "producer",
+			FlowPath:      "producer",
+			Event:         "deploy.done",
+			ResolvedEvent: "producer/deploy.done",
+		},
+		Receiver: runtimepinrouting.ConnectRoutePlanEndpoint{
+			FlowID:        "consumer",
+			FlowPath:      "consumer",
+			Event:         "deploy.completed",
+			ResolvedEvent: "consumer/deploy.completed",
+		},
+	}
+	target := events.RouteIdentity{
+		FlowID:       "consumer",
+		FlowInstance: "consumer/alpha",
+		EntityID:     "entity-alpha",
+	}
+
+	keys := connectReceiverCarrierRouteKeys(plan, target)
+	for _, want := range []string{"consumer/alpha/deploy.completed", "consumer/deploy.completed"} {
+		if !containsString(keys, want) {
+			t.Fatalf("carrier keys = %#v, want selected receiver key %q", keys, want)
+		}
+	}
+	for _, forbidden := range []string{"producer/deploy.done", "deploy.done"} {
+		if containsString(keys, forbidden) {
+			t.Fatalf("carrier keys = %#v, must not include source endpoint key %q", keys, forbidden)
+		}
+	}
+	if got, want := len(keys), len(uniqueStrings(keys)); got != want {
+		t.Fatalf("carrier keys = %#v, want unique selected receiver keys", keys)
+	}
+}
+
+func TestConnectRoutePlanDescriptorsLoadOnlyForRuntimeResolution(t *testing.T) {
+	calls := 0
+	resolver := connectRoutePlanResolver{
+		loadDescriptors: func(context.Context) ([]runtimepinrouting.Descriptor, error) {
+			calls++
+			return []runtimepinrouting.Descriptor{{ID: "alpha", EntityID: "team-a", FlowInstance: "worker/alpha"}}, nil
+		},
+	}
+
+	if _, err := resolver.descriptorsForPlans(context.Background(), []runtimepinrouting.ConnectRoutePlan{{
+		RequiresRuntimeResolution: false,
+	}}); err != nil {
+		t.Fatalf("descriptorsForPlans static: %v", err)
+	}
+	if calls != 0 {
+		t.Fatalf("descriptor loader calls after static plan = %d, want 0", calls)
+	}
+
+	if _, err := resolver.descriptorsForPlans(context.Background(), []runtimepinrouting.ConnectRoutePlan{{
+		RequiresRuntimeResolution: true,
+	}}); err != nil {
+		t.Fatalf("descriptorsForPlans runtime: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("descriptor loader calls after runtime-resolution plan = %d, want 1", calls)
 	}
 }
 
@@ -339,6 +406,10 @@ func TestEventBusPublish_ConnectRoutePlanPersistsTargetSetFanout(t *testing.T) {
 			t.Fatalf("AddFlowInstanceRoute(%s): %v", instanceID, err)
 		}
 	}
+	resolvedAlpha := eb.RouteTable().Resolve("worker/alpha/ticket.ready")
+	if !subscriberListContains(resolvedAlpha, "worker-alpha", "worker/alpha") {
+		t.Fatalf("receiver carrier route worker/alpha/ticket.ready = %#v, want worker-alpha", resolvedAlpha)
+	}
 	eventID := uuid.NewString()
 	evt := events.NewProjectionEvent(eventID,
 		events.EventType("producer/ticket.ready"), "", "", json.RawMessage(`{"team_entity":"team-a"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
@@ -347,6 +418,9 @@ func TestEventBusPublish_ConnectRoutePlanPersistsTargetSetFanout(t *testing.T) {
 
 	if err := eb.Publish(context.Background(), evt); err != nil {
 		t.Fatalf("Publish: %v", err)
+	}
+	if store.flowInstanceDescriptorCalls == 0 {
+		t.Fatalf("flow-instance descriptor loader was not called for descriptor-backed connect fanout")
 	}
 	routes := store.routes[eventID]
 	if !deliveryRoutesContain(routes, wantAlpha) || !deliveryRoutesContain(routes, wantBeta) {
@@ -950,4 +1024,13 @@ func requireNoConnectRoutePlanBusEvent(t testing.TB, ch <-chan events.Event, con
 		t.Fatalf("%s: unexpected lower-precedence bus event: %#v", context, evt)
 	default:
 	}
+}
+
+func subscriberListContains(in []Subscriber, id, path string) bool {
+	for _, subscriber := range in {
+		if subscriber.ID == id && subscriber.Path == path {
+			return true
+		}
+	}
+	return false
 }

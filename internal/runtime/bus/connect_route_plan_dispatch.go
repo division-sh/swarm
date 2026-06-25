@@ -146,7 +146,7 @@ func (r connectRoutePlanResolver) deliveryRoutesForMaterialization(plan runtimep
 	subscribers := make([]Subscriber, 0, len(targets))
 	for _, target := range targets {
 		target = target.Normalized()
-		matchedSubscribers := r.resolveReceiverSubscribers(plan, target)
+		matchedSubscribers := r.resolveSelectedReceiverCarriers(plan, target)
 		if len(matchedSubscribers) == 0 {
 			return nil, nil
 		}
@@ -166,11 +166,11 @@ func (r connectRoutePlanResolver) deliveryRoutesForMaterialization(plan runtimep
 	return events.NormalizeDeliveryRoutes(routes), dedupeSubscribers(subscribers)
 }
 
-func (r connectRoutePlanResolver) resolveReceiverSubscribers(plan runtimepinrouting.ConnectRoutePlan, target events.RouteIdentity) []Subscriber {
+func (r connectRoutePlanResolver) resolveSelectedReceiverCarriers(plan runtimepinrouting.ConnectRoutePlan, target events.RouteIdentity) []Subscriber {
 	if r.routeTable == nil {
 		return nil
 	}
-	keys := connectReceiverRouteKeys(plan, target)
+	keys := connectReceiverCarrierRouteKeys(plan, target)
 	out := make([]Subscriber, 0, len(keys))
 	for _, key := range keys {
 		for _, subscriber := range r.routeTable.Resolve(key) {
@@ -260,23 +260,13 @@ func connectMaterializedTargets(materialized runtimepinrouting.ConnectRoutePlanM
 	return uniqueRouteIdentities(materialized.TargetSet)
 }
 
-func connectReceiverRouteKeys(plan runtimepinrouting.ConnectRoutePlan, target events.RouteIdentity) []string {
+func connectReceiverCarrierRouteKeys(plan runtimepinrouting.ConnectRoutePlan, target events.RouteIdentity) []string {
 	target = target.Normalized()
 	local := strings.Trim(strings.TrimSpace(plan.Receiver.Event), "/")
 	resolved := strings.Trim(strings.TrimSpace(plan.Receiver.ResolvedEvent), "/")
 	receiverPath := strings.Trim(strings.TrimSpace(plan.Receiver.FlowPath), "/")
 	if receiverPath == "" {
 		receiverPath = strings.Trim(strings.TrimSpace(plan.Receiver.FlowID), "/")
-	}
-	sourceLocal := strings.Trim(strings.TrimSpace(plan.Source.Event), "/")
-	sourceResolved := strings.Trim(strings.TrimSpace(plan.Source.ResolvedEvent), "/")
-	sourcePath := strings.Trim(strings.TrimSpace(plan.Source.FlowPath), "/")
-	if sourcePath == "" {
-		sourcePath = strings.Trim(strings.TrimSpace(plan.Source.FlowID), "/")
-	}
-	sourceScoped := sourceLocal
-	if sourcePath != "" && sourceLocal != "" {
-		sourceScoped = sourcePath + "/" + sourceLocal
 	}
 	out := make([]string, 0, 6)
 	if target.FlowInstance != "" && local != "" {
@@ -286,7 +276,6 @@ func connectReceiverRouteKeys(plan runtimepinrouting.ConnectRoutePlan, target ev
 		out = append(out, receiverPath+"/"+local)
 	}
 	out = append(out, resolved)
-	out = append(out, sourceResolved, sourceScoped)
 	if receiverPath == "" {
 		out = append(out, local)
 	}
