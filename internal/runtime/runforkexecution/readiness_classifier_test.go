@@ -91,6 +91,174 @@ func TestBuildSelectedContractReadinessClassifierEmitsCompleteOwnerMatrix(t *tes
 	}
 }
 
+func TestSelectedContractRunForkRouteConsumersAreClassifiedOutsideEventBusRouteAuthority(t *testing.T) {
+	frontier := store.RunForkContractFrontierAdmission{
+		Owner:                        store.RunForkContractFrontierAdmissionOwner,
+		NonMutating:                  true,
+		HistoricalExecutionSupported: false,
+		ContractSelection: store.RunForkContractSelection{
+			Mode:            "selected_contracts",
+			ContractsRoot:   "/tmp/contracts",
+			WorkflowName:    "workflow",
+			WorkflowVersion: "v1",
+		},
+		FrontierEventCount: 1,
+		FrontierEvents: []store.RunForkContractFrontierEvent{{
+			SourceEventID: "source-event",
+			EventName:     "work.begin",
+			DerivedRecipients: []store.RunForkContractFrontierRecipient{{
+				SubscriberType: "node",
+				SubscriberID:   "worker",
+				Path:           "flow-a/worker",
+				RouteSource:    "selected_contracts",
+			}},
+		}},
+	}
+	routeAdmission := testSelectedContractRouteAdmission(frontier)
+	routeTopology := testSelectedContractRouteTopologyFromAdmission(t, frontier, routeAdmission)
+	recipientPlanning, err := BuildSelectedContractRecipientPlanning(SelectedContractRecipientPlanningRequest{
+		Admission:      frontier,
+		RouteAdmission: routeAdmission,
+		RouteTopology:  routeTopology,
+	})
+	if err != nil {
+		t.Fatalf("BuildSelectedContractRecipientPlanning: %v", err)
+	}
+	model, err := BuildSelectedContractExecutionModel(SelectedContractExecutionModelRequest{
+		Admission:      frontier,
+		RouteAdmission: routeAdmission,
+		RouteTopology:  routeTopology,
+	})
+	if err != nil {
+		t.Fatalf("BuildSelectedContractExecutionModel: %v", err)
+	}
+	readiness, err := BuildSelectedContractReadinessClassifier(SelectedContractReadinessClassifierRequest{
+		Plan: store.RunForkPlan{
+			ReplayResumeAdmission: store.RunForkReplayResumeAdmission{Owner: store.RunForkReplayResumeAdmissionOwner},
+		},
+		ContractFrontierAdmission: frontier,
+		SelectedContractExecution: model,
+	})
+	if err != nil {
+		t.Fatalf("BuildSelectedContractReadinessClassifier: %v", err)
+	}
+	selectedAdmission := testContractSwapSelectedExecutionAdmission(frontier.ContractSelection)
+	routeRecovery := testContractSwapRouteRecovery(selectedAdmission)
+
+	const (
+		routeAuthorityClass           = "route_authority"
+		separateOwnerClass            = "separate_owner"
+		carrierReadinessConsumerClass = "carrier_readiness_consumer"
+		diagnosticObserverClass       = "diagnostic_observer"
+	)
+	rows := []struct {
+		consumer       string
+		owner          string
+		classification string
+	}{
+		{
+			consumer:       "internal/runtime/runforkadmission.AdmitSelectedContractRouteHistory",
+			owner:          routeAdmission.Owner,
+			classification: separateOwnerClass,
+		},
+		{
+			consumer:       "internal/runtime/runforkexecution.BuildSelectedContractRouteTopology",
+			owner:          routeTopology.Owner,
+			classification: separateOwnerClass,
+		},
+		{
+			consumer:       "internal/runtime/runforkexecution.BuildSelectedContractRecipientPlanning",
+			owner:          recipientPlanning.Owner,
+			classification: separateOwnerClass,
+		},
+		{
+			consumer:       "selected_contract_recipient_planning.eventbus_publish_recipient_guard",
+			owner:          runForkBoundaryOwner(t, recipientPlanning.RequiredConsumers, "eventbus_publish_recipient_guard"),
+			classification: carrierReadinessConsumerClass,
+		},
+		{
+			consumer:       "internal/runtime/runforkexecution.BuildSelectedContractExecutionModel",
+			owner:          model.Owner,
+			classification: carrierReadinessConsumerClass,
+		},
+		{
+			consumer:       "internal/runtime/runforkexecution.BuildSelectedContractExecutionAdmission",
+			owner:          selectedAdmission.Owner,
+			classification: carrierReadinessConsumerClass,
+		},
+		{
+			consumer:       "store.RecordRunForkSelectedContractRouteRecovery",
+			owner:          routeRecovery.Owner,
+			classification: separateOwnerClass,
+		},
+		{
+			consumer:       "internal/runtime/runforkexecution.RecoverSelectedContractRouteTruth",
+			owner:          routeRecovery.RuntimeRecoveryOwner,
+			classification: carrierReadinessConsumerClass,
+		},
+		{
+			consumer:       "internal/runtime/runforkexecution.BuildSelectedContractReadinessClassifier",
+			owner:          readiness.Owner,
+			classification: diagnosticObserverClass,
+		},
+		{
+			consumer:       "internal/runtime/runforkexecution.ActivateSelectedContractRunFork",
+			owner:          store.RunForkSelectedContractExecutionActivationGateOwner,
+			classification: carrierReadinessConsumerClass,
+		},
+		{
+			consumer:       "internal/runtime/runforkexecution.selectedContractForkLocalRuntimeContainer",
+			owner:          store.RunForkSelectedContractForkLocalRuntimeContainerOwner,
+			classification: carrierReadinessConsumerClass,
+		},
+		{
+			consumer:       "internal/runtime/runforkexecution.RequireSelectedContractAgentDeliveryMaterialization",
+			owner:          store.RunForkSelectedContractAuthoritativeAgentDeliveryMaterializationOwner,
+			classification: carrierReadinessConsumerClass,
+		},
+		{
+			consumer:       "runtime.run_fork.selected_contract_execution",
+			owner:          model.FutureExecutionOwner,
+			classification: carrierReadinessConsumerClass,
+		},
+	}
+	if len(rows) != 13 {
+		t.Fatalf("classification rows = %d, want 13 current route/readiness consumers", len(rows))
+	}
+	allowed := map[string]struct{}{
+		routeAuthorityClass:           {},
+		separateOwnerClass:            {},
+		carrierReadinessConsumerClass: {},
+		diagnosticObserverClass:       {},
+	}
+	for _, row := range rows {
+		if strings.TrimSpace(row.owner) == "" {
+			t.Fatalf("%s has empty owner in classification row %#v", row.consumer, row)
+		}
+		if _, ok := allowed[row.classification]; !ok {
+			t.Fatalf("%s classification = %q, want supported classification", row.consumer, row.classification)
+		}
+		if row.classification == routeAuthorityClass {
+			t.Fatalf("%s incorrectly classified as live EventBus route authority", row.consumer)
+		}
+	}
+
+	if !model.NonMutating || model.ExecutionSupported {
+		t.Fatalf("selected execution model mutation flags = non_mutating:%v execution:%v", model.NonMutating, model.ExecutionSupported)
+	}
+	if !recipientPlanning.NonMutating || recipientPlanning.DeliveryWritesSupported {
+		t.Fatalf("recipient planning mutation flags = non_mutating:%v delivery_writes:%v", recipientPlanning.NonMutating, recipientPlanning.DeliveryWritesSupported)
+	}
+	if readiness.RouteTopologyOwner != store.RunForkSelectedContractRouteTopologyOwner ||
+		readiness.RecipientPlanningOwner != store.RunForkSelectedContractRecipientPlanningOwner ||
+		readiness.SelectedExecutionModelOwner != store.RunForkSelectedContractExecutionModelOwner {
+		t.Fatalf("readiness owner consumption = %#v", readiness)
+	}
+	if !executionBoundaryHas(recipientPlanning.InvalidPaths, "delivery_planner_as_canonical_owner", store.RunForkSelectedContractDispositionInvalid) {
+		t.Fatalf("recipient planning invalid paths = %#v, want generic delivery planner invalid as canonical owner", recipientPlanning.InvalidPaths)
+	}
+}
+
 func TestBuildSelectedContractReadinessClassifierRejectsLocalExecutionModel(t *testing.T) {
 	_, err := BuildSelectedContractReadinessClassifier(SelectedContractReadinessClassifierRequest{
 		Plan: store.RunForkPlan{
@@ -159,4 +327,15 @@ func assertReadinessFact(t *testing.T, facts []store.RunForkSelectedContractRead
 		}
 	}
 	t.Fatalf("readiness fact %s missing from %#v", fact, facts)
+}
+
+func runForkBoundaryOwner(t *testing.T, items []store.RunForkSelectedContractExecutionBoundary, concept string) string {
+	t.Helper()
+	for _, item := range items {
+		if item.Concept == concept {
+			return item.Owner
+		}
+	}
+	t.Fatalf("boundary %s missing from %#v", concept, items)
+	return ""
 }
