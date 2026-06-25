@@ -173,14 +173,6 @@ The static analyzer's refusal to boot on a half-finished contract is a feature i
 - **High-volume parallel entities.** Orders, tickets, leads, claims. Per-entity workspaces let hundreds flow through the same contract without interfering.
 - **Cost-controlled deployments.** Live budget tracking with throttle and emergency states is built in, not a future add-on.
 
-### Weak fit
-
-- **One-shot LLM calls.** Use the provider SDK directly. No runtime needed.
-- **Conversational chatbots.** Short interactions where the value is in the conversation. The YAML overhead does not pay for itself.
-- **Exploratory prototyping where the workflow changes every hour.** The static analyzer refusing to boot a half-finished contract is exactly the wrong friction during design. Sketch loose first; port to Swarm once the workflow stabilizes.
-- **LLM-managed routing at runtime.** Swarm explicitly refuses this. If "the model decides what happens next" is the point of your system, this is the wrong tool.
-- **Sunday-afternoon prototypes.** The local/dev path is now zero-service SQLite, but Swarm still expects a declared contract bundle, the current workspace runtime (Docker by default), and deterministic execution. Use a lighter tool if even that structure is too much.
-
 ---
 
 ## Project status
@@ -192,15 +184,14 @@ The static analyzer's refusal to boot on a half-finished contract is a feature i
 - Conformance suite: **12 tiers, 200+ distinct test contract bundles** spanning primitives, accumulation, atomic event-loop semantics, composition, boot verification, runtime fork, and policy patterns. The suite runs against an internal scripted harness, so it doesn't cost LLM tokens to exercise the engine. A user-selectable scripted backend is on the roadmap.
 - Used internally to power autonomous multi-agent workflows. External use at your own risk.
 
-The trajectory points at running whole company divisions as autonomous flows. The shipped surface today covers a much smaller scope: deterministic multi-agent orchestration with human-in-the-loop, on a single deployment. Distributed execution, multi-tenant isolation, and a flow marketplace are not yet in scope.
+The trajectory points at running whole company divisions as autonomous flows. 
 
 ---
 
 ## Documentation
 
-Public documentation is intentionally minimal and root-level. The `docs/`
-directory is local/private maintainer space and is not part of the public
-source contract.
+Public documentation is at [docs.division.sh](http://docs.division.sh).
+Available in this repo too:
 
 | Document | Read this when… |
 |---|---|
