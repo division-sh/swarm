@@ -68,7 +68,7 @@ rows:
       - {kind: spec_ref, path: platform-spec.yaml, ref: route_plan_authority}
     proof_refs:
       - {kind: pr, pr: 1348}
-      - {kind: go_test, name: TestEventBusRecipientPlanMaterializerNormalizesIntoCanonicalRoutePlan}
+      - {kind: go_test, name: TestEventBusRecipientPlanMaterializerNormalizesRoutePlanDirectly}
       - {kind: go_test, name: TestRouteTableRootInputFlowNodeResolvesRootInputRoute}
     notes: >
       Closed #1343 owns the runtime model row. Consumers must cite RoutePlan or
@@ -413,33 +413,35 @@ rows:
       Descriptor evidence remains limited to supported identity-style targets.
       Arbitrary business-field descriptor/index support stays split to #1479.
 
-  - id: event_delivery_plan_compatibility_split
-    concept: eventDeliveryPlan and legacy CanonicalRoutePlan projection are compatibility adapters around RoutePlan, not a second authority owner.
-    classification: split_to_existing_issue
-    tier: split_open
-    split_issue: 1496
-    proof_dimensions: [compatibility_adapter, route_plan_model, split_tracker]
+  - id: event_delivery_plan_compatibility_removed
+    concept: Legacy eventDeliveryPlan and CanonicalRoutePlan compatibility projection are invalid old authority paths removed behind RoutePlan.
+    classification: already_covered_by_existing_proof
+    tier: required_pr_smoke
+    proof_dimensions: [compatibility_adapter, route_plan_model, negative_authority, required_pr_smoke]
     invalid_authority:
       - legacy eventDeliveryPlan as final authority
       - CanonicalRoutePlan fallback from legacy projection
       - routePlanFromLegacyEventDeliveryPlan as new producer
     owner_refs:
       - {kind: artifact, path: internal/runtime/bus/route_plan.go}
+      - {kind: artifact, path: internal/runtime/bus/route_plan_test.go}
       - {kind: artifact, path: internal/runtime/bus/eventbus_publish.go}
-      - {kind: spec_ref, path: platform-spec.yaml, ref: route_authority_drift_guardrails}
+      - {kind: spec_ref, path: platform-spec.yaml, ref: legacy_event_delivery_plan_collapse}
     proof_refs:
-      - {kind: tracker, issue: 1496, watchlist: runtime_operations.delivery_and_replay_ownership}
-      - {kind: issue, issue: 1494}
+      - {kind: issue, issue: 1496}
+      - {kind: go_test, name: TestRoutePlanDoesNotExposeLegacyEventDeliveryPlanCompatibility}
+      - {kind: go_test, name: TestRoutePlanNormalizationPreservesAuthorityState}
+      - {kind: go_test, name: TestEventBusRecipientPlanMaterializerNormalizesRoutePlanDirectly}
     notes: >
-      #1494 classifies and guards the adapter surface. #1496 owns behavior work
-      to collapse or isolate compatibility paths if runtime migration is needed.
+      #1496 removes the live compatibility adapter and fallback interpreter so
+      subscribed and direct planning return RoutePlan directly. The guard test
+      fails if production bus files reintroduce the old adapter names.
 
-  - id: direct_delivery_path_split
-    concept: Direct delivery and operator replay direct publish are explicitly classified route paths, not subscribed RoutePlan authority.
-    classification: split_to_existing_issue
-    tier: split_open
-    split_issue: 1496
-    proof_dimensions: [direct_delivery, route_plan_model, split_tracker]
+  - id: direct_delivery_route_plan_consumption
+    concept: Direct delivery and operator replay direct publish are explicit direct RoutePlan consumers, not subscribed RoutePlan authority.
+    classification: already_covered_by_existing_proof
+    tier: required_pr_smoke
+    proof_dimensions: [direct_delivery, route_plan_model, negative_authority, required_pr_smoke]
     invalid_authority:
       - caller-supplied direct recipient list as subscribed route authority
       - operator replay direct path as fresh route planner
@@ -447,14 +449,18 @@ rows:
       - {kind: artifact, path: internal/runtime/bus/delivery_planner.go}
       - {kind: artifact, path: internal/runtime/bus/eventbus_publish.go}
       - {kind: artifact, path: internal/apiv1/operator_event_replay.go}
-      - {kind: spec_ref, path: platform-spec.yaml, ref: route_authority_drift_guardrails}
+      - {kind: spec_ref, path: platform-spec.yaml, ref: direct_delivery_route_plan_consumption}
     proof_refs:
-      - {kind: tracker, issue: 1496, watchlist: runtime_operations.delivery_and_replay_ownership}
-      - {kind: issue, issue: 1494}
+      - {kind: issue, issue: 1496}
+      - {kind: go_test, name: TestEventBusPublishDirect_PersistsButDoesNotMarkDeliveredBeforeRealFanOut}
+      - {kind: go_test, name: TestEventBusPublishDirect_FiltersEntityScopedRecipientsByExplicitMetadata}
+      - {kind: go_test, name: TestEngineOutboxAndDispatcher_UseCanonicalDirectRecipientManifest}
+      - {kind: go_test, name: TestOperatorEventReplayPublishesDistinctReplayEventAuditAndIdempotency}
+      - {kind: go_test, name: TestOperatorEventReplaySubsetAndFailClosedCases}
     notes: >
-      Direct delivery stays classified as a separate path in this child. #1496
-      owns further compatibility isolation so #1494 does not silently migrate
-      direct-recipient behavior.
+      Direct delivery stays public and explicit, but PlanDirect now produces a
+      RoutePlan directly and direct publish/replay/outbox consumers use that
+      RoutePlan path instead of a compatibility projection.
 
   - id: route_plan_source_reason_constants
     concept: RoutePlan source/reason constants and authority state are carried by the typed EventBus route-intent producer model.

@@ -837,7 +837,7 @@ func TestRoutePlanCanonicalFailClosedDropsExecutableRoutes(t *testing.T) {
 	}
 }
 
-func TestRoutePlanProjectionPreservesAuthorityState(t *testing.T) {
+func TestRoutePlanNormalizationPreservesAuthorityState(t *testing.T) {
 	evt := events.NewProjectionEvent(uuid.NewString(),
 		events.EventType("producer/deploy.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 	routePlan := newRoutePlan(evt)
@@ -850,18 +850,12 @@ func TestRoutePlanProjectionPreservesAuthorityState(t *testing.T) {
 		Persist:        true,
 	})
 
-	projected := routePlan.EventDeliveryPlan()
-	canonical := projected.CanonicalRoutePlan()
-	if canonical.AuthorityState != RoutePlanAuthorityCanonicalMatched || canonical.AuthorityOwner != routePlanSourceConnectRoutePlan {
-		t.Fatalf("canonical route plan authority = %q/%q, want matched connect route plan", canonical.AuthorityState, canonical.AuthorityOwner)
+	got := routePlan.Normalized()
+	if got.AuthorityState != RoutePlanAuthorityCanonicalMatched || got.AuthorityOwner != routePlanSourceConnectRoutePlan {
+		t.Fatalf("normalized route plan authority = %q/%q, want matched connect route plan", got.AuthorityState, got.AuthorityOwner)
 	}
-
-	replaced := projected.WithCanonicalRoutePlan(routePlan).CanonicalRoutePlan()
-	if replaced.AuthorityState != RoutePlanAuthorityCanonicalMatched || replaced.AuthorityOwner != routePlanSourceConnectRoutePlan {
-		t.Fatalf("replaced route plan authority = %q/%q, want matched connect route plan", replaced.AuthorityState, replaced.AuthorityOwner)
-	}
-	if !deliveryRoutesContain(replaced.DeliveryRoutes(), connectRoutePlanStaticDeliveryRoute()) {
-		t.Fatalf("replaced route plan delivery routes = %#v, want static connect route", replaced.DeliveryRoutes())
+	if !deliveryRoutesContain(got.DeliveryRoutes(), connectRoutePlanStaticDeliveryRoute()) {
+		t.Fatalf("normalized route plan delivery routes = %#v, want static connect route", got.DeliveryRoutes())
 	}
 }
 

@@ -535,9 +535,40 @@ contract_formats:
             Connect-route producer roles, lower-precedence agent/subscription
             roles, internal-target roles, concrete/scoped/root node roles,
             root-input roles, and recipient-materializer roles MUST be produced
-            through the typed model. The legacy eventDeliveryPlan and direct
-            delivery compatibility paths remain explicitly split until their
-            own approved migration removes or isolates them.
+            through the typed model. #1496 removes the legacy EventBus
+            eventDeliveryPlan compatibility projection as a live route
+            interpreter; direct delivery remains an explicit direct-recipient
+            RoutePlan-backed producer/consumer path.
+        legacy_event_delivery_plan_collapse:
+          status: merge_bearing_runtime_behavior
+          implementation_slice: '#1496'
+          canonical_code_owner: internal/runtime/bus.RoutePlan via deliveryPlanner.Plan and deliveryPlanner.PlanDirect
+          rule: |
+            EventBus subscribed and direct planning MUST return and consume
+            RoutePlan directly. The runtime MUST NOT expose an eventDeliveryPlan
+            compatibility adapter, CanonicalRoutePlan projection,
+            WithCanonicalRoutePlan replacement helper, or
+            routePlanFromLegacyEventDeliveryPlan fallback that can reconstruct
+            route authority from legacy recipient fields after planning. Publish
+            materialization, publish authorization, preflight, transactional
+            publish, deferred outbox, direct publish, and replay direct publish
+            MUST consume the same RoutePlan model instead of crossing a
+            post-plan compatibility interpreter.
+        direct_delivery_route_plan_consumption:
+          status: merge_bearing_runtime_behavior
+          implementation_slice: '#1496'
+          canonical_code_owner: internal/runtime/bus.EventBus.PublishDirect and internal/runtime/bus.EventBus.CheckDirectRecipients
+          rule: |
+            Direct delivery is a distinct public delivery semantic, not
+            subscribed route authority. PublishDirect and CheckDirectRecipients
+            MUST use deliveryPlanner.PlanDirect to produce a typed RoutePlan
+            with the direct_policy/direct_publish producer role, persist direct
+            delivery rows with CommittedReplayScopeDirect, and preserve explicit
+            requested-recipient filtering metadata. Operator replay, pipeline,
+            tools, manager, and outbox direct paths are consumers of this
+            direct RoutePlan path and MUST NOT reinterpret caller-supplied
+            recipients as subscribed RoutePlan authority or rebuild subscribed
+            routing from replay/readback evidence.
         lowered_connect_route_plan_consumption:
           status: merge_bearing_runtime_behavior
           implementation_slice: '#1473'
@@ -612,10 +643,10 @@ contract_formats:
               instead of creating parallel inventories. Guardrails MUST classify
               route-like seams by role before they can be treated as approved:
               canonical RoutePlan/ConnectRoutePlan production, RouteTable
-              carrier lookup, descriptor evidence, eventDeliveryPlan
-              compatibility, direct delivery, durable persistence sinks,
-              replay/readback consumers, diagnostics, or explicitly split
-              concepts.
+              carrier lookup, descriptor evidence, removed legacy
+              eventDeliveryPlan compatibility, direct delivery, durable
+              persistence sinks, replay/readback consumers, diagnostics, or
+              explicitly split concepts.
               New route-like producers, compatibility interpreters, source/reason
               owners, or carrier/descriptor/direct-delivery seams MUST fail CI
               until they are added to the conformance inventory with a named
@@ -5027,8 +5058,6 @@ flow_model:
             receiver carrier evidence at the selected receiver path rather than
             relying on producer-key subscription projection.
           does_not_close:
-          - legacy eventDeliveryPlan compatibility collapse or removal
-          - direct-recipient publish policy
           - positive arbitrary business-field descriptor/index support
           - selected-contract runfork route/readiness mutation
           - broad composition-first routing parent closure
@@ -5038,6 +5067,29 @@ flow_model:
           - static matched connect plans do not load descriptors
           - descriptor-backed matched connect plans load only supported descriptor evidence
           - Publish, PublishInMutation, CheckPublishRecipientPlan, and engineOutbox preserve the corrected RoutePlan path where relevant
+        implementation_slice_1496:
+          status: merge_bearing_runtime_behavior
+          canonical_code_owner: internal/runtime/bus.RoutePlan via deliveryPlanner.Plan, deliveryPlanner.PlanDirect, EventBus.PublishDirect, and EventBus.CheckDirectRecipients
+          rule: |
+            Subscribed publish planning, direct publish planning, recipient-plan
+            materialization, authorization guards, engine outbox, operator replay
+            direct publish, and direct-recipient preflight consume RoutePlan
+            directly. The legacy eventDeliveryPlan compatibility adapter and
+            CanonicalRoutePlan fallback are invalid old authority paths and
+            must not reappear as live runtime producers or readers.
+            Direct-recipient public behavior remains explicit direct-delivery
+            semantics backed by PlanDirect RoutePlan production, not subscribed
+            route-authority reconstruction.
+          does_not_close:
+          - positive arbitrary business-field descriptor/index support
+          - selected-contract runfork route/readiness mutation
+          - broad composition-first routing parent closure
+          proof_obligations:
+          - production bus files contain no eventDeliveryPlan compatibility adapter, CanonicalRoutePlan fallback, or routePlanFromLegacyEventDeliveryPlan interpreter
+          - deliveryPlanner.Plan and deliveryPlanner.PlanDirect return RoutePlan directly
+          - Publish, PublishInMutation, CheckPublishRecipientPlan, and engineOutbox preserve RoutePlan authority after materialization and guard checks
+          - PublishDirect and CheckDirectRecipients preserve direct RoutePlan behavior and CommittedReplayScopeDirect persistence
+          - operator event.replay proves direct-recipient preflight and direct publish through the same RoutePlan-backed path
         invalid_outputs:
         - raw same-name pin match used as final topology authority
         - live subscription list used to invent missing connect topology

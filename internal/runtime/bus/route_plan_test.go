@@ -60,3 +60,35 @@ func TestRoutePlanProducerHelpersRequireTypedProducer(t *testing.T) {
 		}
 	}
 }
+
+func TestRoutePlanDoesNotExposeLegacyEventDeliveryPlanCompatibility(t *testing.T) {
+	_, testFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime caller unavailable")
+	}
+	dir := filepath.Dir(testFile)
+	files := []string{
+		"eventbus.go",
+		"route_plan.go",
+		"delivery_planner.go",
+		"eventbus_publish.go",
+	}
+	for _, file := range files {
+		raw, err := os.ReadFile(filepath.Join(dir, file))
+		if err != nil {
+			t.Fatalf("read %s: %v", file, err)
+		}
+		source := string(raw)
+		for _, forbidden := range []string{
+			"type eventDeliveryPlan struct",
+			"func (p RoutePlan) EventDeliveryPlan()",
+			"CanonicalRoutePlan(",
+			"WithCanonicalRoutePlan(",
+			"routePlanFromLegacyEventDeliveryPlan",
+		} {
+			if strings.Contains(source, forbidden) {
+				t.Fatalf("%s still exposes legacy eventDeliveryPlan compatibility %q", file, forbidden)
+			}
+		}
+	}
+}
