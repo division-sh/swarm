@@ -23,6 +23,21 @@ active_trackers:
   - kind: github_issue
     issue: 1340
     watchlist: runtime_operations.delivery_and_replay_ownership
+  - kind: github_issue
+    issue: 1481
+    watchlist: runtime_operations.delivery_and_replay_ownership
+  - kind: github_issue
+    issue: 1493
+    watchlist: runtime_operations.delivery_and_replay_ownership
+  - kind: github_issue
+    issue: 1494
+    watchlist: runtime_operations.delivery_and_replay_ownership
+  - kind: github_issue
+    issue: 1495
+    watchlist: runtime_operations.delivery_and_replay_ownership
+  - kind: github_issue
+    issue: 1496
+    watchlist: runtime_operations.delivery_and_replay_ownership
 rows:
   - id: route_plan_spec_contract
     concept: RoutePlan is the publish-time typed authority and event_deliveries is the durable authority sink.
@@ -283,6 +298,181 @@ rows:
       normalizes them to repo-scaffold/<id>/<local_event>, RoutePlan produces
       typed node recipients, and event_deliveries persists node authority
       before workflow-runtime carrier dispatch or #1293 execution admission.
+
+  - id: route_authority_drift_guardrail_inventory
+    concept: The #1364 route-authority drift inventory/matrix is promoted for #1494 as the conformance guardrail owner.
+    classification: already_covered_by_existing_proof
+    tier: required_pr_smoke
+    proof_dimensions: [guardrail_inventory, source_authority, required_pr_smoke]
+    owner_refs:
+      - {kind: artifact, path: internal/runtime/conformance/testdata/route_authority_drift_inventory.yaml}
+      - {kind: artifact, path: internal/runtime/conformance/route_authority_drift_inventory_test.go}
+      - {kind: artifact, path: internal/runtime/conformance/testdata/route_authority_matrix.yaml}
+      - {kind: spec_ref, path: platform-spec.yaml, ref: route_authority_drift_guardrails}
+    proof_refs:
+      - {kind: issue, issue: 1494}
+      - {kind: go_test, name: TestRouteAuthorityDriftInventoryCoversRepoWideSearchDimensions}
+      - {kind: go_test, name: TestRouteAuthorityDriftInventoryRejectsUnclassifiedRouteLikeProducer}
+      - {kind: go_test, name: TestRouteAuthorityMatrixCoversApprovedRows}
+    notes: >
+      #1494 reuses and hardens the existing #1364 conformance owner instead of
+      creating a parallel route-seam inventory. The inventory now has
+      CI-visible classified-path guards for route-like producers/interpreters.
+
+  - id: lowered_connect_route_plan_authority_input
+    concept: Lowered ConnectRoutePlan artifacts are route-intent authority inputs consumed by EventBus RoutePlan production.
+    classification: already_covered_by_existing_proof
+    tier: required_pr_smoke
+    proof_dimensions: [connect_route_plan, route_plan_model, source_authority, required_pr_smoke]
+    owner_refs:
+      - {kind: spec_ref, path: platform-spec.yaml, ref: route_plan_lowering}
+      - {kind: spec_ref, path: platform-spec.yaml, ref: lowered_connect_route_plan_consumption}
+      - {kind: artifact, path: internal/runtime/core/pinrouting/connect_route_plan.go}
+      - {kind: artifact, path: internal/runtime/bus/connect_route_plan_dispatch.go}
+    proof_refs:
+      - {kind: issue, issue: 1472}
+      - {kind: issue, issue: 1473}
+      - {kind: issue, issue: 1494}
+      - {kind: go_test, name: TestLowerCompositionConnectRoutePlanDoesNotDependOnRawPinNamesOrProducerTargets}
+      - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanPersistsSingularTargetWithoutLiveSubscriber}
+      - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanFailsClosedForUnsupportedBusinessFieldTarget}
+    notes: >
+      ConnectRoutePlan is a typed route-intent input, not an untracked string
+      fallback. #1495 owns additional typed producer migration after this
+      guardrail is in place.
+
+  - id: route_table_resolve_role_separation
+    concept: RouteTable.Resolve usages must be classified by role instead of treated as generic route authority.
+    classification: already_covered_by_existing_proof
+    tier: required_pr_smoke
+    proof_dimensions: [route_table_resolve, connect_route_plan, split_tracker, required_pr_smoke]
+    owner_refs:
+      - {kind: artifact, path: internal/runtime/bus/connect_route_plan_dispatch.go}
+      - {kind: artifact, path: internal/runtime/runforkadmission/contract_frontier.go}
+      - {kind: artifact, path: internal/runtime/runforkadmission/selected_route_history.go}
+      - {kind: artifact, path: internal/runtime/runstart/root_inputs.go}
+      - {kind: spec_ref, path: platform-spec.yaml, ref: receiver_carrier_lookup_boundary}
+    proof_refs:
+      - {kind: issue, issue: 1485}
+      - {kind: issue, issue: 1494}
+      - {kind: go_test, name: TestConnectRoutePlanReceiverCarrierKeysUseSelectedReceiverIdentity}
+      - {kind: go_test, name: TestSelectedContractRunForkRouteConsumersAreClassifiedOutsideEventBusRouteAuthority}
+      - {kind: go_test, name: TestDeriveRootInputSetRequiresDeclaredAndRoutableRootInput}
+    notes: >
+      EventBus connect dispatch uses RouteTable only as selected receiver-carrier
+      lookup. Runstart/runfork use RouteTable for split admission/readiness
+      route facts, not EventBus publish-time authority.
+
+  - id: receiver_carrier_lookup_not_authority
+    concept: Receiver-carrier lookup is post-identity carrier evidence and cannot repair a matched ConnectRoutePlan decision.
+    classification: already_covered_by_existing_proof
+    tier: required_pr_smoke
+    proof_dimensions: [connect_route_plan, route_table_resolve, negative_authority, required_pr_smoke]
+    invalid_authority:
+      - producer/source endpoint keys
+      - raw producer event names
+      - live subscriber fallback keys
+      - legacy route/subscriber interpretations after matched ConnectRoutePlan
+    owner_refs:
+      - {kind: spec_ref, path: platform-spec.yaml, ref: receiver_carrier_lookup_boundary}
+      - {kind: artifact, path: internal/runtime/bus/connect_route_plan_dispatch.go}
+      - {kind: artifact, path: internal/runtime/bus/routing_derivation.go}
+    proof_refs:
+      - {kind: issue, issue: 1485}
+      - {kind: go_test, name: TestConnectRoutePlanReceiverCarrierKeysUseSelectedReceiverIdentity}
+      - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanWithOnlySourceAndRawSubscribersFailsClosed}
+      - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanFailureSkipsRecipientPlanMaterializer}
+    notes: >
+      Receiver carriers may locate the concrete runtime handler after selected
+      route identity exists. They are invalid authority for source/raw fallback
+      and cannot revive a failed matched ConnectRoutePlan.
+
+  - id: descriptor_evidence_not_authority
+    concept: Descriptor evidence may support approved runtime target materialization but is not route authority.
+    classification: add_to_matrix
+    tier: required_pr_smoke
+    proof_dimensions: [descriptor_evidence, negative_authority, split_tracker, required_pr_smoke]
+    invalid_authority:
+      - active-agent descriptor lookup
+      - active target descriptors
+      - handler descriptor lookup
+      - unsupported business-field descriptor targets
+    owner_refs:
+      - {kind: spec_ref, path: platform-spec.yaml, ref: descriptor_evidence_boundary}
+      - {kind: spec_ref, path: platform-spec.yaml, ref: supported_descriptor_targets}
+      - {kind: artifact, path: internal/runtime/bus/connect_route_plan_dispatch.go}
+      - {kind: artifact, path: internal/runtime/bus/eventbus.go}
+      - {kind: artifact, path: internal/runtime/engine/interfaces.go}
+    proof_refs:
+      - {kind: issue, issue: 1479}
+      - {kind: issue, issue: 1494}
+      - {kind: go_test, name: TestConnectRoutePlanDescriptorsLoadOnlyForRuntimeResolution}
+      - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanFailsClosedForUnsupportedBusinessFieldTarget}
+      - {kind: go_test, name: TestEventBusPinRoutingDescriptorsIncludeActiveDynamicFlowInstances}
+    notes: >
+      Descriptor evidence remains limited to supported identity-style targets.
+      Arbitrary business-field descriptor/index support stays split to #1479.
+
+  - id: event_delivery_plan_compatibility_split
+    concept: eventDeliveryPlan and legacy CanonicalRoutePlan projection are compatibility adapters around RoutePlan, not a second authority owner.
+    classification: split_to_existing_issue
+    tier: split_open
+    split_issue: 1496
+    proof_dimensions: [compatibility_adapter, route_plan_model, split_tracker]
+    invalid_authority:
+      - legacy eventDeliveryPlan as final authority
+      - CanonicalRoutePlan fallback from legacy projection
+      - routePlanFromLegacyEventDeliveryPlan as new producer
+    owner_refs:
+      - {kind: artifact, path: internal/runtime/bus/route_plan.go}
+      - {kind: artifact, path: internal/runtime/bus/eventbus_publish.go}
+      - {kind: spec_ref, path: platform-spec.yaml, ref: route_authority_drift_guardrails}
+    proof_refs:
+      - {kind: tracker, issue: 1496, watchlist: runtime_operations.delivery_and_replay_ownership}
+      - {kind: issue, issue: 1494}
+    notes: >
+      #1494 classifies and guards the adapter surface. #1496 owns behavior work
+      to collapse or isolate compatibility paths if runtime migration is needed.
+
+  - id: direct_delivery_path_split
+    concept: Direct delivery and operator replay direct publish are explicitly classified route paths, not subscribed RoutePlan authority.
+    classification: split_to_existing_issue
+    tier: split_open
+    split_issue: 1496
+    proof_dimensions: [direct_delivery, route_plan_model, split_tracker]
+    invalid_authority:
+      - caller-supplied direct recipient list as subscribed route authority
+      - operator replay direct path as fresh route planner
+    owner_refs:
+      - {kind: artifact, path: internal/runtime/bus/delivery_planner.go}
+      - {kind: artifact, path: internal/runtime/bus/eventbus_publish.go}
+      - {kind: artifact, path: internal/apiv1/operator_event_replay.go}
+      - {kind: spec_ref, path: platform-spec.yaml, ref: route_authority_drift_guardrails}
+    proof_refs:
+      - {kind: tracker, issue: 1496, watchlist: runtime_operations.delivery_and_replay_ownership}
+      - {kind: issue, issue: 1494}
+    notes: >
+      Direct delivery stays classified as a separate path in this child. #1496
+      owns further compatibility isolation so #1494 does not silently migrate
+      direct-recipient behavior.
+
+  - id: route_plan_source_reason_constants
+    concept: RoutePlan source/reason constants and authority state carry the current route-intent decision metadata.
+    classification: already_covered_by_existing_proof
+    tier: required_pr_smoke
+    proof_dimensions: [source_reason_constants, route_plan_model, guardrail_inventory, required_pr_smoke]
+    owner_refs:
+      - {kind: artifact, path: internal/runtime/bus/route_plan.go}
+      - {kind: artifact, path: internal/runtime/conformance/testdata/route_authority_drift_inventory.yaml}
+      - {kind: spec_ref, path: platform-spec.yaml, ref: decision_state}
+    proof_refs:
+      - {kind: issue, issue: 1494}
+      - {kind: go_test, name: TestRoutePlanCanonicalFailClosedDropsExecutableRoutes}
+      - {kind: go_test, name: TestRouteAuthorityDriftInventoryCoversRepoWideSearchDimensions}
+      - {kind: go_test, name: TestRouteAuthorityDriftInventoryRejectsUnclassifiedRouteLikeProducer}
+    notes: >
+      The current source/reason constants remain the typed metadata owner until
+      #1495 promotes a broader typed route-intent model.
 
   - id: live_carriers_handler_lookup_descriptors_not_authority
     concept: Live carriers, interceptors, handler lookup, and active descriptors are consumers or observations only.

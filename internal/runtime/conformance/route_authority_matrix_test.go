@@ -213,7 +213,7 @@ func validateRouteAuthorityMatrix(root string, matrix routeAuthorityMatrix, ctx 
 		}
 		activeTrackers[key] = struct{}{}
 	}
-	for _, issue := range []int{1340} {
+	for _, issue := range []int{1340, 1481, 1493, 1494, 1495, 1496} {
 		key := routeAuthorityTrackerKey(issue, "runtime_operations.delivery_and_replay_ownership")
 		if _, ok := activeTrackers[key]; !ok {
 			problems = append(problems, fmt.Sprintf("active_trackers missing #%d runtime_operations.delivery_and_replay_ownership", issue))
@@ -469,6 +469,14 @@ func requiredRouteAuthorityRows() []string {
 		"workflow_node_execution_admission",
 		"wildcard_static_service_route_production",
 		"runtime_callback_flow_instance_localization",
+		"route_authority_drift_guardrail_inventory",
+		"lowered_connect_route_plan_authority_input",
+		"route_table_resolve_role_separation",
+		"receiver_carrier_lookup_not_authority",
+		"descriptor_evidence_not_authority",
+		"event_delivery_plan_compatibility_split",
+		"direct_delivery_path_split",
+		"route_plan_source_reason_constants",
 		"live_carriers_handler_lookup_descriptors_not_authority",
 		"receipts_settlement_backfill_not_authority",
 		"replay_markers_not_authority",
@@ -481,7 +489,10 @@ func requiredRouteAuthorityRows() []string {
 }
 
 func requiredRouteAuthoritySplitRows() map[string]int {
-	return nil
+	return map[string]int{
+		"event_delivery_plan_compatibility_split": 1496,
+		"direct_delivery_path_split":              1496,
+	}
 }
 
 func requiredRouteAuthorityCoveredRows() map[string]string {
@@ -493,6 +504,8 @@ func requiredRouteAuthorityCoveredRows() map[string]string {
 func requiredRouteAuthorityNegativeRows() []string {
 	return []string{
 		"live_carriers_handler_lookup_descriptors_not_authority",
+		"receiver_carrier_lookup_not_authority",
+		"descriptor_evidence_not_authority",
 		"receipts_settlement_backfill_not_authority",
 		"replay_markers_not_authority",
 		"readback_not_authority",
@@ -521,22 +534,29 @@ func allowedRouteAuthorityTiers() map[string]struct{} {
 
 func allowedRouteAuthorityProofDimensions() map[string]struct{} {
 	return map[string]struct{}{
-		"catalog_tiering":       {},
-		"cli_v1_path":           {},
-		"default_sqlite":        {},
-		"explicit_postgres":     {},
-		"full_conformance":      {},
-		"negative_authority":    {},
-		"openrpc_publication":   {},
-		"obsolete_duplicate":    {},
-		"persistence_authority": {},
-		"public_projection":     {},
-		"real_v1_handler":       {},
-		"replay_recovery":       {},
-		"required_pr_smoke":     {},
-		"route_plan_model":      {},
-		"source_authority":      {},
-		"split_tracker":         {},
+		"catalog_tiering":         {},
+		"cli_v1_path":             {},
+		"compatibility_adapter":   {},
+		"connect_route_plan":      {},
+		"direct_delivery":         {},
+		"default_sqlite":          {},
+		"descriptor_evidence":     {},
+		"explicit_postgres":       {},
+		"full_conformance":        {},
+		"guardrail_inventory":     {},
+		"negative_authority":      {},
+		"openrpc_publication":     {},
+		"obsolete_duplicate":      {},
+		"persistence_authority":   {},
+		"public_projection":       {},
+		"real_v1_handler":         {},
+		"replay_recovery":         {},
+		"required_pr_smoke":       {},
+		"route_plan_model":        {},
+		"route_table_resolve":     {},
+		"source_authority":        {},
+		"source_reason_constants": {},
+		"split_tracker":           {},
 	}
 }
 

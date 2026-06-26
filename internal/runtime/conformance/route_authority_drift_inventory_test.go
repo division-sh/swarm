@@ -15,17 +15,18 @@ import (
 const routeAuthorityDriftInventoryPath = "internal/runtime/conformance/testdata/route_authority_drift_inventory.yaml"
 
 type routeAuthorityDriftInventory struct {
-	Version            int                                  `yaml:"version"`
-	Kind               string                               `yaml:"kind"`
-	Issue              int                                  `yaml:"issue"`
-	ParentIssues       []int                                `yaml:"parent_issues"`
-	Watchlist          string                               `yaml:"watchlist"`
-	Policy             routeAuthorityDriftInventoryPolicy   `yaml:"policy"`
-	Sources            routeAuthorityDriftInventorySources  `yaml:"sources"`
-	SearchDimensions   []routeAuthorityDriftSearchDimension `yaml:"search_dimensions"`
-	SeamFamilies       []routeAuthorityDriftSeamFamily      `yaml:"seam_families"`
-	GuardrailProposals []routeAuthorityDriftGuardrail       `yaml:"guardrail_proposals"`
-	FollowUpDecision   routeAuthorityDriftFollowUpDecision  `yaml:"follow_up_decision"`
+	Version              int                                  `yaml:"version"`
+	Kind                 string                               `yaml:"kind"`
+	Issue                int                                  `yaml:"issue"`
+	ImplementationIssues []int                                `yaml:"implementation_issues"`
+	ParentIssues         []int                                `yaml:"parent_issues"`
+	Watchlist            string                               `yaml:"watchlist"`
+	Policy               routeAuthorityDriftInventoryPolicy   `yaml:"policy"`
+	Sources              routeAuthorityDriftInventorySources  `yaml:"sources"`
+	SearchDimensions     []routeAuthorityDriftSearchDimension `yaml:"search_dimensions"`
+	SeamFamilies         []routeAuthorityDriftSeamFamily      `yaml:"seam_families"`
+	GuardrailProposals   []routeAuthorityDriftGuardrail       `yaml:"guardrail_proposals"`
+	FollowUpDecision     routeAuthorityDriftFollowUpDecision  `yaml:"follow_up_decision"`
 }
 
 type routeAuthorityDriftInventoryPolicy struct {
@@ -45,11 +46,12 @@ type routeAuthorityDriftInventorySources struct {
 }
 
 type routeAuthorityDriftSearchDimension struct {
-	ID                   string   `yaml:"id"`
-	Pattern              string   `yaml:"pattern"`
-	MinimumMatchingFiles int      `yaml:"minimum_matching_files"`
-	RequiredPaths        []string `yaml:"required_paths"`
-	CanonicalLayer       string   `yaml:"canonical_layer"`
+	ID                      string   `yaml:"id"`
+	Pattern                 string   `yaml:"pattern"`
+	MinimumMatchingFiles    int      `yaml:"minimum_matching_files"`
+	RequiredPaths           []string `yaml:"required_paths"`
+	CanonicalLayer          string   `yaml:"canonical_layer"`
+	ClassifiedPathsRequired bool     `yaml:"classified_paths_required"`
 }
 
 type routeAuthorityDriftSeamFamily struct {
@@ -136,6 +138,13 @@ func TestRouteAuthorityDriftInventoryRejectsNarrowOrStaleAudit(t *testing.T) {
 			},
 			want: "policy claims_runtime_behavior_closure = true, want false",
 		},
+		{
+			name: "current child issue must stay visible",
+			mutate: func(inventory *routeAuthorityDriftInventory) {
+				inventory.ImplementationIssues = []int{1364}
+			},
+			want: "inventory implementation_issues missing #1494",
+		},
 	}
 
 	for _, tc := range tests {
@@ -150,6 +159,22 @@ func TestRouteAuthorityDriftInventoryRejectsNarrowOrStaleAudit(t *testing.T) {
 				t.Fatalf("validation problems missing %q:\n- %s", tc.want, strings.Join(problems, "\n- "))
 			}
 		})
+	}
+}
+
+func TestRouteAuthorityDriftInventoryRejectsUnclassifiedRouteLikeProducer(t *testing.T) {
+	root := conformanceRepoRoot(t)
+	inventory := loadRouteAuthorityDriftInventory(t, root)
+	corpus := routeAuthorityDriftNewValidationCorpus(root)
+	corpus.Files = append(corpus.Files, routeAuthorityDriftRepoFile{
+		Path: "internal/runtime/bus/untracked_route_authority.go",
+		Raw:  []byte("package bus\n\nfunc untracked(plan ConnectRoutePlan) { _ = plan }\n"),
+	})
+
+	problems := validateRouteAuthorityDriftInventoryWithCorpus(root, corpus, inventory)
+	want := "connect_route_plan matched unclassified path internal/runtime/bus/untracked_route_authority.go"
+	if !routeAuthorityProblemsContain(problems, want) {
+		t.Fatalf("validation problems missing %q:\n- %s", want, strings.Join(problems, "\n- "))
 	}
 }
 
@@ -182,7 +207,12 @@ func validateRouteAuthorityDriftInventoryWithCorpus(root string, corpus *routeAu
 	if inventory.Issue != 1364 {
 		problems = append(problems, fmt.Sprintf("inventory issue = #%d, want #1364", inventory.Issue))
 	}
-	for _, issue := range []int{1340, 1353} {
+	for _, issue := range []int{1364, 1494} {
+		if !routeAuthorityDriftHasInt(inventory.ImplementationIssues, issue) {
+			problems = append(problems, fmt.Sprintf("inventory implementation_issues missing #%d", issue))
+		}
+	}
+	for _, issue := range []int{1340, 1353, 1481, 1493} {
 		if !routeAuthorityDriftHasInt(inventory.ParentIssues, issue) {
 			problems = append(problems, fmt.Sprintf("inventory parent_issues missing #%d", issue))
 		}
@@ -230,6 +260,7 @@ func validateRouteAuthorityDriftInventoryWithCorpus(root string, corpus *routeAu
 			problems = append(problems, fmt.Sprintf("missing required seam_family %s", id))
 		}
 	}
+	problems = append(problems, validateRouteAuthorityDriftClassifiedMatches(root, corpus, dimensionsByID, familiesByID)...)
 	problems = append(problems, validateRouteAuthorityDriftGuardrails(root, inventory.GuardrailProposals)...)
 	if inventory.FollowUpDecision.NewChildRequiredBeforeCoding {
 		problems = append(problems, "follow_up_decision new_child_required_before_coding = true, want false for approved audit slice")
@@ -247,10 +278,39 @@ func validateRouteAuthorityDriftInventoryWithCorpus(root string, corpus *routeAu
 	return problems
 }
 
+func validateRouteAuthorityDriftClassifiedMatches(root string, corpus *routeAuthorityDriftValidationCorpus, dimensions map[string]routeAuthorityDriftSearchDimension, families map[string]routeAuthorityDriftSeamFamily) []string {
+	var problems []string
+	classifiedPaths := map[string]struct{}{}
+	for _, family := range families {
+		for _, path := range family.Paths {
+			classifiedPaths[filepath.ToSlash(filepath.Clean(path))] = struct{}{}
+		}
+	}
+	for _, dimension := range dimensions {
+		if !dimension.ClassifiedPathsRequired {
+			continue
+		}
+		re, err := regexp.Compile(strings.TrimSpace(dimension.Pattern))
+		if err != nil {
+			continue
+		}
+		for _, path := range routeAuthorityDriftMatchingFiles(corpus, dimension.Pattern, re) {
+			path = filepath.ToSlash(filepath.Clean(path))
+			if routeAuthorityDriftSelfAuditFile(path) {
+				continue
+			}
+			if _, ok := classifiedPaths[path]; !ok {
+				problems = append(problems, fmt.Sprintf("%s matched unclassified path %s", dimension.ID, path))
+			}
+		}
+	}
+	return problems
+}
+
 func validateRouteAuthorityDriftPolicy(policy routeAuthorityDriftInventoryPolicy) []string {
 	var problems []string
-	if policy.ClosureLevel != "repo_wide_inventory_and_guardrail_proposal" {
-		problems = append(problems, fmt.Sprintf("policy closure_level = %q, want repo_wide_inventory_and_guardrail_proposal", policy.ClosureLevel))
+	if policy.ClosureLevel != "route_authority_seam_inventory_guardrail_first_slice" {
+		problems = append(problems, fmt.Sprintf("policy closure_level = %q, want route_authority_seam_inventory_guardrail_first_slice", policy.ClosureLevel))
 	}
 	if policy.ClaimsParentClosure {
 		problems = append(problems, "policy claims_parent_closure = true, want false")
@@ -519,6 +579,13 @@ func requiredRouteAuthorityDriftSearchDimensions() []string {
 		"event_deliveries",
 		"delivery_route_model",
 		"route_plan",
+		"connect_route_plan",
+		"route_table_resolve",
+		"receiver_carrier",
+		"descriptor_evidence",
+		"event_delivery_plan_compatibility",
+		"direct_delivery_path",
+		"route_plan_source_reason",
 		"flow_instance",
 		"event_name_type",
 		"semantic_scope",
@@ -547,6 +614,13 @@ func requiredRouteAuthorityDriftSeamFamilies() []string {
 		"event_context_inputs",
 		"route_topology_and_table",
 		"eventbus_route_plan_authority",
+		"lowered_connect_route_intent_authority",
+		"route_table_resolve_role_separation",
+		"receiver_carrier_evidence",
+		"descriptor_evidence_non_authority",
+		"event_delivery_plan_compatibility_adapter",
+		"direct_delivery_path_classification",
+		"route_plan_source_reason_constants",
 		"durable_delivery_authority_writers",
 		"workflow_node_execution_admission",
 		"live_carriers_internal_subscriptions",
@@ -561,20 +635,22 @@ func requiredRouteAuthorityDriftSeamFamilies() []string {
 
 func allowedRouteAuthorityDriftLayers() map[string]struct{} {
 	return map[string]struct{}{
-		"spec_authority":                    {},
-		"event_context":                     {},
-		"route_topology":                    {},
-		"route_plan_authority":              {},
-		"route_plan_consumers":              {},
-		"durable_delivery_authority":        {},
-		"execution_admission":               {},
-		"live_dispatch_non_authority":       {},
-		"completion_evidence_non_authority": {},
-		"replay_recovery_consumers":         {},
-		"public_projection_non_authority":   {},
-		"invalid_old_authority":             {},
-		"test_fixture_semantics":            {},
-		"conformance_guardrails":            {},
+		"spec_authority":                      {},
+		"event_context":                       {},
+		"route_topology":                      {},
+		"route_plan_authority":                {},
+		"route_plan_consumers":                {},
+		"descriptor_evidence_non_authority":   {},
+		"compatibility_adapter_non_authority": {},
+		"durable_delivery_authority":          {},
+		"execution_admission":                 {},
+		"live_dispatch_non_authority":         {},
+		"completion_evidence_non_authority":   {},
+		"replay_recovery_consumers":           {},
+		"public_projection_non_authority":     {},
+		"invalid_old_authority":               {},
+		"test_fixture_semantics":              {},
+		"conformance_guardrails":              {},
 	}
 }
 
