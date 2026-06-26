@@ -220,6 +220,9 @@ func validateCompositionConnectAddress(source semanticview.Source, connect runti
 	if err != nil {
 		return []Finding{compositionConnectFinding(connect, "receiver_address_rule_invalid", err.Error(), receiverFlowID)}
 	}
+	if err := compositionConnectTargetIndexed(source, receiverFlowID, targetExpr); err != nil {
+		return []Finding{compositionConnectFinding(connect, "receiver_address_rule_invalid", err.Error(), receiverFlowID)}
+	}
 	if !compositionConnectTypesCompatible(sourceType, targetType) {
 		return []Finding{compositionConnectFinding(connect, "key_types_incompatible", fmt.Sprintf("source %s type %s is incompatible with target %s type %s", sourceExpr, sourceType, targetExpr, targetType), receiverFlowID)}
 	}
@@ -295,6 +298,42 @@ func compositionConnectTargetType(source semanticview.Source, flowID, expr strin
 		return "string", nil
 	}
 	return "", fmt.Errorf("target expression %q must be entity.*, config.*, or instance.*", expr)
+}
+
+func compositionConnectTargetIndexed(source semanticview.Source, flowID, expr string) error {
+	expr = strings.TrimSpace(expr)
+	switch {
+	case strings.HasPrefix(expr, "entity."):
+		fieldPath := strings.TrimSpace(strings.TrimPrefix(expr, "entity."))
+		switch fieldPath {
+		case "", "entity_id":
+			return nil
+		}
+		contract, ok := entityruntime.ResolveForFlow(source, flowID)
+		if !ok {
+			return fmt.Errorf("receiver flow %s has no entity contract for %s", flowID, expr)
+		}
+		field, err := entityruntime.ResolveLeafField(contract, fieldPath)
+		if err != nil {
+			return fmt.Errorf("receiver target %s is invalid: %v", expr, err)
+		}
+		if !field.FieldDecl.Indexed {
+			return fmt.Errorf("receiver target %s must declare indexed: true before it can be used as descriptor/index route evidence", expr)
+		}
+		return nil
+	case strings.HasPrefix(expr, "config."):
+		return fmt.Errorf("receiver target %s has no typed descriptor/index owner; use an indexed entity field or an identity descriptor target", expr)
+	case strings.HasPrefix(expr, "instance."):
+		fieldPath := strings.TrimSpace(strings.TrimPrefix(expr, "instance."))
+		switch fieldPath {
+		case "flow_instance", "instance_id":
+			return nil
+		default:
+			return fmt.Errorf("receiver target %s has no typed descriptor/index owner; use an indexed entity field or an identity descriptor target", expr)
+		}
+	default:
+		return nil
+	}
 }
 
 func compositionConnectTypesCompatible(sourceType, targetType string) bool {

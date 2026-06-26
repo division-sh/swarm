@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -66,6 +67,7 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 	if len(matched) == 0 {
 		return connectRoutePlanDispatch{}, nil
 	}
+	ctx = runtimecorrelation.WithInboundEvent(ctx, evt)
 	descriptors, err := r.descriptorsForPlans(ctx, matched)
 	if err != nil {
 		return connectRoutePlanDispatch{}, err
@@ -79,8 +81,9 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 	}
 	for _, plan := range matched {
 		materialized := runtimepinrouting.MaterializeConnectRoutePlan(plan, runtimepinrouting.ConnectRoutePlanMaterializationInput{
-			MatchValues: values,
-			Descriptors: descriptors,
+			MatchValues:             values,
+			Descriptors:             descriptors,
+			SupportedAddressTargets: runtimepinrouting.SupportedConnectAddressTargets(r.source, plan),
 		})
 		if materialized.Failure != "" {
 			out.Failure = connectRoutePlanTargetFailure(materialized.Failure)

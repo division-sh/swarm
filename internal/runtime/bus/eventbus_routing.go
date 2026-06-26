@@ -55,9 +55,10 @@ func (eb *EventBus) PinRoutingDescriptors(ctx context.Context) ([]runtimepinrout
 			continue
 		}
 		out = append(out, runtimepinrouting.Descriptor{
-			ID:           descriptor.ID,
-			EntityID:     descriptor.EntityID,
-			FlowInstance: descriptor.FlowInstance,
+			ID:            descriptor.ID,
+			EntityID:      descriptor.EntityID,
+			FlowInstance:  descriptor.FlowInstance,
+			AddressFields: normalizeDescriptorAddressFields(descriptor.AddressFields),
 		})
 	}
 	return out, nil

@@ -620,16 +620,19 @@ contract_formats:
               import-boundary alias policy requires exclusive alias patterns.
           descriptor_evidence_boundary:
             status: merge_bearing_runtime_behavior
-            implementation_slice: '#1485'
-            canonical_code_owner: internal/runtime/bus.connectRoutePlanResolver.descriptorsForPlans
+            implementation_slice: '#1485/#1479'
+            canonical_code_owner: internal/runtime/bus.connectRoutePlanResolver.descriptorsForPlans and internal/runtime/core/pinrouting.MaterializeConnectRoutePlan
             rule: |
               Descriptor loading during lowered-connect EventBus planning is
               evidence for supported runtime-resolution target forms only.
               Static lowered ConnectRoutePlan matches MUST NOT load or depend on
               legacy active-agent recipient-policy descriptors. Runtime
-              descriptor evidence MUST NOT promote unsupported arbitrary
-              business-field targets; those remain fail-closed until a separate
-              typed descriptor/index owner is promoted.
+              descriptor evidence may materialize identity-style targets and
+              declared receiver entity fields marked `indexed: true`. Descriptor
+              evidence MUST NOT promote unsupported arbitrary business fields,
+              unindexed entity fields, config fields, instance fields, delivery
+              rows, receipts, replay/readback, RouteTable state, live
+              subscriptions, or handler lookup into route topology authority.
           route_authority_drift_guardrails:
             status: merge_bearing_conformance_guardrail
             implementation_slice: '#1494'
@@ -660,7 +663,7 @@ contract_formats:
           - reply delivery metadata preservation
           - persisted delivery rows, pipeline receipts, and committed replay scope as separate owners
           unsupported_or_split:
-            business_field_descriptor_targets: '#1479 owns typed descriptor/index materialization for targets such as entity.vertical_id.'
+            business_field_descriptor_targets: 'Declared receiver entity fields with indexed: true are implemented by #1479; arbitrary, undeclared, unindexed, config, and instance business-field descriptor targets remain split to #1466 or later gated children.'
             agent_node_emitter_parity: '#1474 remains open.'
             producer_target_broadcast_retirement: '#1475 remains open.'
             selected_contract_runfork_readiness: 'Tracked under #1466/watchlist; not closed by #1473.'
@@ -1056,6 +1059,7 @@ entity_contracts:
           type: <type>
           initial: <value>
           immutable: <bool>
+          indexed: <bool>
           description: <text>
           materialize_from: <node_id>.<accumulator_name>
           project:
@@ -1073,7 +1077,22 @@ entity_contracts:
     - '`_unused_reader_reason` documents that a field is intentionally read only outside platform-visible internal handlers.
       It suppresses only the informational `entity_reader_coverage` slice; it does not count as writer coverage, authorize
       runtime/API reads, or change persistence semantics.'
+    - '`indexed: true` declares a field as addressable descriptor/index evidence for supported runtime receiver selection.
+      It does not make the field route topology authority, dynamically index arbitrary payload fields, or authorize
+      undeclared business-field routing.'
     - 'A `materialize_from` field is runtime-owned and not agent-writable.'
+  routing_indexes:
+    status: merge_bearing_runtime_behavior
+    implementation_slice: '#1479'
+    rule: |
+      A receiver entity field with `indexed: true` may be used as descriptor
+      evidence for a composition-routing addressed input target such as
+      `entity.vertical_id`. The receiver input pin and parent connect entry
+      still own the route topology. The indexed entity field only authorizes
+      runtime descriptor/index materialization to answer which active receiver
+      instance has the declared field value. Missing, unindexed, undeclared,
+      ambiguous, unsupported, or wrong-scope targets fail closed and produce no
+      executable routes.
   accumulator_entity_projection:
     description: |
       `materialize_from` declares a downstream typed entity-field copy of a
@@ -4993,7 +5012,8 @@ flow_model:
             - entity_id / entity.entity_id
             - flow_instance / instance.flow_instance
             - instance_id / instance.instance_id
-            unsupported_descriptor_targets: Arbitrary business fields such as entity.vertical_id remain fail-closed until a later gate promotes a typed descriptor/index owner for those fields.
+            - entity.<field> when the receiver entity contract declares that field with indexed: true
+            unsupported_descriptor_targets: Undeclared or unindexed entity fields, config.<field>, instance.<field>, and other arbitrary business fields remain fail-closed unless a later approved spec+runtime child promotes a typed descriptor/index owner for those forms.
           failure_reasons:
           - source_missing
           - connect_pin_ref_invalid
@@ -5040,7 +5060,7 @@ flow_model:
           proof_obligations:
           - Publish, PublishInMutation, CheckPublishRecipientPlan, and engineOutbox use the same corrected planner
           - singular target, target_set fanout, and reply metadata are covered
-          - unsupported business-field descriptor targets remain fail-closed and split to #1479
+          - unsupported or unindexed business-field descriptor targets remain fail-closed and split to #1466 or later gated children
           - '#1473 does not close #1474, #1475, selected-contract runfork readiness, or #1466 parent closure'
         implementation_slice_1485:
           status: merge_bearing_runtime_behavior
@@ -5059,7 +5079,7 @@ flow_model:
             receiver carrier evidence at the selected receiver path rather than
             relying on producer-key subscription projection.
           does_not_close:
-          - positive arbitrary business-field descriptor/index support
+          - arbitrary business-field descriptor/index support outside declared indexed receiver entity fields
           - selected-contract runfork route/readiness mutation
           - broad composition-first routing parent closure
           proof_obligations:
@@ -5082,7 +5102,7 @@ flow_model:
             semantics backed by PlanDirect RoutePlan production, not subscribed
             route-authority reconstruction.
           does_not_close:
-          - positive arbitrary business-field descriptor/index support
+          - arbitrary business-field descriptor/index support outside declared indexed receiver entity fields
           - selected-contract runfork route/readiness mutation
           - broad composition-first routing parent closure
           proof_obligations:
@@ -5091,6 +5111,45 @@ flow_model:
           - Publish, PublishInMutation, CheckPublishRecipientPlan, and engineOutbox preserve RoutePlan authority after materialization and guard checks
           - PublishDirect and CheckDirectRecipients preserve direct RoutePlan behavior and CommittedReplayScopeDirect persistence
           - operator event.replay proves direct-recipient preflight and direct publish through the same RoutePlan-backed path
+        implementation_slice_1479:
+          status: merge_bearing_runtime_behavior
+          canonical_code_owner: internal/runtime/core/pinrouting.MaterializeConnectRoutePlan with internal/runtime/bus.connectRoutePlanResolver
+          rule: |
+            Supported receiver business-field descriptor/index materialization is
+            limited to addressed input targets whose receiver entity contract
+            declares the target field with `indexed: true`. Bootverify MUST
+            reject unsupported or unindexed non-identity targets before runtime.
+            Runtime planning MUST pass the supported target list from the
+            loaded semantic source into `MaterializeConnectRoutePlan`; the
+            materializer MUST compare event source values only with descriptor
+            evidence for those supported targets. Singular cardinality produces
+            exactly one concrete target route; cardinality many produces a
+            target_set/fanout over all matching receiver-scope descriptors.
+            Missing source values, no matches, ambiguous cardinality-one
+            matches, unsupported/unindexed targets, and wrong receiver scope
+            fail closed with zero executable routes.
+          consumes:
+          - receiver addressed input pin address.target
+          - parent connect map target expression
+          - receiver entity contract field indexed: true
+          - active flow-instance descriptor address fields loaded from current run entity_state
+          - lowered ConnectRoutePlan runtime-resolution requirements
+          produces:
+          - concrete target route for supported singular business-field receiver selection
+          - concrete target_set routes for supported many business-field receiver selection
+          - fail-closed target diagnostics for unsupported, missing, unresolved, ambiguous, or wrong-scope descriptor evidence
+          does_not_close:
+          - arbitrary config.<field> or instance.<field> descriptor/index authority
+          - dynamic indexing of arbitrary payload/entity fields
+          - select_entity/select_or_create_entity receiver-local mutation semantics
+          - selected-contract runfork route/readiness mutation
+          - broad #1466 composition-first routing parent closure
+          proof_obligations:
+          - bootverify rejects unindexed receiver business-field address targets
+          - EventBus publish proves indexed singular entity business-field target materializes one concrete delivery route
+          - EventBus publish proves indexed many entity business-field target materializes target_set fanout
+          - negative proof covers missing source, no match, ambiguous one, unsupported/unindexed, and wrong receiver scope with zero executable routes
+          - SQLite and Postgres active descriptor loading preserve run-scoped indexed entity address fields
         invalid_outputs:
         - raw same-name pin match used as final topology authority
         - live subscription list used to invent missing connect topology

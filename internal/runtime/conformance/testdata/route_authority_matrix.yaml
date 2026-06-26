@@ -384,7 +384,7 @@ rows:
       - active-agent descriptor lookup
       - active target descriptors
       - handler descriptor lookup
-      - unsupported business-field descriptor targets
+      - unsupported or unindexed business-field descriptor targets
     owner_refs:
       - {kind: spec_ref, path: platform-spec.yaml, ref: descriptor_evidence_boundary}
       - {kind: spec_ref, path: platform-spec.yaml, ref: supported_descriptor_targets}
@@ -395,11 +395,20 @@ rows:
       - {kind: issue, issue: 1479}
       - {kind: issue, issue: 1494}
       - {kind: go_test, name: TestConnectRoutePlanDescriptorsLoadOnlyForRuntimeResolution}
+      - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanPersistsIndexedBusinessFieldTarget}
+      - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanPersistsIndexedBusinessFieldTargetSet}
+      - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanFailsClosedForBusinessFieldDescriptorGaps}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanFailsClosedForUnsupportedBusinessFieldTarget}
       - {kind: go_test, name: TestEventBusPinRoutingDescriptorsIncludeActiveDynamicFlowInstances}
+      - {kind: go_test, name: TestPostgresStoreListActiveFlowInstanceDescriptorsFiltersToActiveTemplates}
+      - {kind: go_test, name: TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsFiltersToActiveTemplates}
     notes: >
-      Descriptor evidence remains limited to supported identity-style targets.
-      Arbitrary business-field descriptor/index support stays split to #1479.
+      Descriptor evidence remains limited to identity-style targets and
+      receiver entity fields explicitly declared with indexed: true. It is
+      evidence for ConnectRoutePlan materialization, not topology authority.
+      Arbitrary, undeclared, unindexed, config, and instance business-field
+      descriptor/index authority remains split to #1466 or later gated
+      children.
 
   - id: event_delivery_plan_compatibility_removed
     concept: Legacy eventDeliveryPlan and CanonicalRoutePlan compatibility projection are invalid old authority paths removed behind RoutePlan.

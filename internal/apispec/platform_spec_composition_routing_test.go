@@ -85,6 +85,16 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	assertScalarValue(t, mustMappingValue(t, slice1473, "status"), "merge_bearing_runtime_behavior")
 	assertScalarContains(t, mustMappingValue(t, slice1473, "canonical_code_owner"), "internal/runtime/bus.RoutePlan")
 	assertScalarContains(t, mustMappingValue(t, slice1473, "rule"), "Supported EventBus publish/preflight/outbox dispatch consumes lowered ConnectRoutePlan")
+
+	entityContracts := mustYAMLPath(t, root, "entity_contracts")
+	assertScalarContains(t, mustYAMLPath(t, entityContracts, "routing_indexes", "rule"), "indexed: true")
+	assertScalarContains(t, mustYAMLPath(t, entityContracts, "routing_indexes", "rule"), "descriptor/index materialization")
+
+	slice1479 := mustYAMLPath(t, composition, "route_plan_lowering", "implementation_slice_1479")
+	assertScalarValue(t, mustMappingValue(t, slice1479, "status"), "merge_bearing_runtime_behavior")
+	assertScalarContains(t, mustMappingValue(t, slice1479, "canonical_code_owner"), "MaterializeConnectRoutePlan")
+	assertScalarContains(t, mustMappingValue(t, slice1479, "rule"), "indexed: true")
+	assertScalarContains(t, mustMappingValue(t, slice1479, "rule"), "zero executable routes")
 }
 
 func TestPlatformSpecCompositionRoutingDemotesProducerTargetAuthority(t *testing.T) {

@@ -1324,6 +1324,19 @@ project:
 	}
 }
 
+func TestEntityFieldDeclDecode_PreservesIndexed(t *testing.T) {
+	var field EntityFieldDecl
+	if err := yaml.Unmarshal([]byte(`
+type: text
+indexed: true
+`), &field); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if !field.Indexed {
+		t.Fatal("Indexed = false, want true")
+	}
+}
+
 func TestEntityFieldDeclDecode_PreservesUnusedReaderReason(t *testing.T) {
 	var field EntityFieldDecl
 	if err := yaml.Unmarshal([]byte(`
