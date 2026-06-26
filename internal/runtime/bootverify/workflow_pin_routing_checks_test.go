@@ -121,6 +121,45 @@ func TestPinTargetResolution_AllowsDynamicFlowMatchWhenNotPackageComposition(t *
 	}
 }
 
+func TestPinTargetResolution_DoesNotLeafMatchDistinctQualifiedEvents(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		body string
+	}{
+		{
+			name: "broadcast",
+			body: `
+      emit:
+        event: billing/order.completed
+        fields:
+          entity_id: payload.entity_id
+        broadcast: true
+`,
+		},
+		{
+			name: "target_flow_match",
+			body: `
+      emit:
+        event: billing/order.completed
+        fields:
+          entity_id: payload.entity_id
+        target:
+          flow: consumer
+          match:
+            entity_id: payload.entity_id
+`,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			bundle := loadPinRoutingProducerRouteBundleForEvents(t, "billing/order.completed", "shipping/order.completed", tt.body)
+			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+			if reportContains(report.Errors(), "pin_target_resolution", "producer_") {
+				t.Fatalf("unexpected producer common-path failure for distinct qualified events: %#v", report.Errors())
+			}
+		})
+	}
+}
+
 func TestPinTargetResolution_FailsClosedForRootPinOutputWithoutTargetMechanism(t *testing.T) {
 	bundle := loadPinRoutingVerifySourceFixture(t, pinRoutingVerifySourceFixture{
 		rootNodes: pinRoutingVerifyNodeYAML("root-node", "root.start", "root.ready", false),
@@ -268,6 +307,14 @@ worker-node:
 }
 
 func loadPinRoutingProducerRouteBundle(t *testing.T, producerHandlerBody string, consumerConsumesSharedReady bool, connectBlocks ...string) *runtimecontracts.WorkflowContractBundle {
+	consumerInputEvent := "consumer.start"
+	if consumerConsumesSharedReady {
+		consumerInputEvent = "shared.ready"
+	}
+	return loadPinRoutingProducerRouteBundleForEvents(t, "shared.ready", consumerInputEvent, producerHandlerBody, connectBlocks...)
+}
+
+func loadPinRoutingProducerRouteBundleForEvents(t *testing.T, producerOutputEvent, consumerInputEvent, producerHandlerBody string, connectBlocks ...string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	root := t.TempDir()
 	writePinRoutingVerifyFile(t, filepath.Join(root, "package.yaml"), `
@@ -297,12 +344,12 @@ pins:
   inputs:
     events: [producer.start]
   outputs:
-    events: [shared.ready]
+    events: [`+producerOutputEvent+`]
 `)
 	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "producer", "events.yaml"), `
 producer.start:
   entity_id: text
-shared.ready:
+`+producerOutputEvent+`:
   entity_id: text
 `)
 	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "producer", "entities.yaml"), `
@@ -317,10 +364,6 @@ producer-node:
     producer.start:
 `+producerHandlerBody+`
 `)
-	consumerInput := "events: [consumer.start]"
-	if consumerConsumesSharedReady {
-		consumerInput = "events: [shared.ready]"
-	}
 	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "schema.yaml"), `
 name: consumer
 initial_state: pending
@@ -328,18 +371,23 @@ states: [pending, done]
 terminal_states: [done]
 pins:
   inputs:
-    `+consumerInput+`
+    events: [`+consumerInputEvent+`]
   outputs:
     events: [consumer.done]
 `)
-	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "events.yaml"), `
+	consumerEvents := `
 consumer.start:
   entity_id: text
-shared.ready:
+`
+	if consumerInputEvent != "consumer.start" {
+		consumerEvents += consumerInputEvent + `:
   entity_id: text
-consumer.done:
+`
+	}
+	consumerEvents += `consumer.done:
   entity_id: text
-`)
+`
+	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "events.yaml"), consumerEvents)
 	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "entities.yaml"), `
 consumer:
   entity_id: text
