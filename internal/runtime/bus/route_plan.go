@@ -25,7 +25,6 @@ const (
 	routePlanSourceRootInputFlowNode     routePlanSource = "root_input_flow_node_route"
 	routePlanSourceRecipientMaterializer routePlanSource = "recipient_plan_materializer"
 	routePlanSourceConnectRoutePlan      routePlanSource = "connect_route_plan"
-	routePlanSourceLegacyProjection      routePlanSource = "legacy_projection"
 
 	routePlanReasonMatchedAgentSubscription routePlanReason = "matched_agent_subscription"
 	routePlanReasonDirectPublish            routePlanReason = "direct_publish"
@@ -33,7 +32,6 @@ const (
 	routePlanReasonRouteTableNode           routePlanReason = "route_table_node"
 	routePlanReasonMaterializedRoute        routePlanReason = "materialized_route"
 	routePlanReasonLoweredConnectRoutePlan  routePlanReason = "lowered_connect_route_plan"
-	routePlanReasonLegacyProjection         routePlanReason = "legacy_projection"
 )
 
 type routeIntentProducer uint8
@@ -50,7 +48,6 @@ const (
 	routeIntentProducerRootInputFlowNode
 	routeIntentProducerRecipientMaterializer
 	routeIntentProducerConnectRoutePlan
-	routeIntentProducerLegacyProjection
 )
 
 func (p routeIntentProducer) Normalized() routeIntentProducer {
@@ -64,8 +61,7 @@ func (p routeIntentProducer) Normalized() routeIntentProducer {
 		routeIntentProducerRootNodeRoute,
 		routeIntentProducerRootInputFlowNode,
 		routeIntentProducerRecipientMaterializer,
-		routeIntentProducerConnectRoutePlan,
-		routeIntentProducerLegacyProjection:
+		routeIntentProducerConnectRoutePlan:
 		return p
 	default:
 		return routeIntentProducerUnknown
@@ -92,8 +88,6 @@ func (p routeIntentProducer) Source() routePlanSource {
 		return routePlanSourceRecipientMaterializer
 	case routeIntentProducerConnectRoutePlan:
 		return routePlanSourceConnectRoutePlan
-	case routeIntentProducerLegacyProjection:
-		return routePlanSourceLegacyProjection
 	default:
 		return ""
 	}
@@ -117,8 +111,6 @@ func (p routeIntentProducer) Reason() routePlanReason {
 		return routePlanReasonMaterializedRoute
 	case routeIntentProducerConnectRoutePlan:
 		return routePlanReasonLoweredConnectRoutePlan
-	case routeIntentProducerLegacyProjection:
-		return routePlanReasonLegacyProjection
 	default:
 		return ""
 	}
