@@ -93,6 +93,14 @@ func TestRun_FailsClosedForInvalidParentCompositionConnect(t *testing.T) {
 			wantExtra: "indexed: true",
 		},
 		{
+			name: "nested business-field target",
+			opts: compositionConnectFixtureOptions{
+				mapTarget: "entity.profile.vertical_id",
+			},
+			want:      "receiver_address_rule_invalid",
+			wantExtra: "top-level indexed entity fields",
+		},
+		{
 			name: "invalid delivery topology",
 			opts: compositionConnectFixtureOptions{
 				delivery: "many",

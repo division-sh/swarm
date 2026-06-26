@@ -89,11 +89,14 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	entityContracts := mustYAMLPath(t, root, "entity_contracts")
 	assertScalarContains(t, mustYAMLPath(t, entityContracts, "routing_indexes", "rule"), "indexed: true")
 	assertScalarContains(t, mustYAMLPath(t, entityContracts, "routing_indexes", "rule"), "descriptor/index materialization")
+	assertScalarContains(t, mustYAMLPath(t, entityContracts, "routing_indexes", "rule"), "top-level")
+	assertScalarContains(t, mustYAMLPath(t, entityContracts, "routing_indexes", "rule"), "Nested entity paths")
 
 	slice1479 := mustYAMLPath(t, composition, "route_plan_lowering", "implementation_slice_1479")
 	assertScalarValue(t, mustMappingValue(t, slice1479, "status"), "merge_bearing_runtime_behavior")
 	assertScalarContains(t, mustMappingValue(t, slice1479, "canonical_code_owner"), "MaterializeConnectRoutePlan")
 	assertScalarContains(t, mustMappingValue(t, slice1479, "rule"), "indexed: true")
+	assertScalarContains(t, mustMappingValue(t, slice1479, "rule"), "nested")
 	assertScalarContains(t, mustMappingValue(t, slice1479, "rule"), "zero executable routes")
 }
 
