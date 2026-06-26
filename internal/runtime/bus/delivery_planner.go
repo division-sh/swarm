@@ -134,7 +134,7 @@ func (p deliveryPlanner) Plan(ctx context.Context, evt events.Event) (eventDeliv
 	if err != nil {
 		return eventDeliveryPlan{}, err
 	}
-	routePlan = routePlanFromManifest(evt, manifest, routePlanSourceAgentPolicy, routePlanReasonMatchedAgentSubscription)
+	routePlan = routePlanFromManifest(evt, manifest, routeIntentProducerAgentPolicy)
 	recipients := routePlan.RecipientIDs()
 	persisted := routePlan.PersistedRecipientIDs()
 	routePlan.AddDeliveryIntents(routedRootNodeDeliveryIntentsForNoTargetEvent(evt, routing.RoutedRecipients)...)
@@ -156,9 +156,9 @@ func (p deliveryPlanner) Plan(ctx context.Context, evt events.Event) (eventDeliv
 func eventDeliveryPlanFromConnectRouteDispatch(evt events.Event, connectPlan connectRoutePlanDispatch) eventDeliveryPlan {
 	routePlan := newRoutePlan(evt)
 	if connectPlan.Failure != "" {
-		routePlan.MarkCanonicalRouteFailedClosed(routePlanSourceConnectRoutePlan, connectPlan.Failure)
+		routePlan.MarkCanonicalRouteFailedClosed(routeIntentProducerConnectRoutePlan, connectPlan.Failure)
 	} else {
-		routePlan.MarkCanonicalRouteMatched(routePlanSourceConnectRoutePlan)
+		routePlan.MarkCanonicalRouteMatched(routeIntentProducerConnectRoutePlan)
 		routePlan.AddLiveRecipients(connectPlan.LiveRecipients...)
 		routePlan.AddDeliveryIntents(connectPlan.DeliveryIntents...)
 	}
@@ -180,7 +180,7 @@ func (p deliveryPlanner) PlanDirect(ctx context.Context, evt events.Event, recip
 	if err != nil {
 		return eventDeliveryPlan{}, err
 	}
-	routePlan = routePlanFromManifest(evt, manifest, routePlanSourceDirectPolicy, routePlanReasonDirectPublish)
+	routePlan = routePlanFromManifest(evt, manifest, routeIntentProducerDirectPolicy)
 	routePlan.ExtraDetail = map[string]any{
 		"direct":                     true,
 		"requested_recipients":       append([]string(nil), requested...),
@@ -491,7 +491,7 @@ func internalDeliveryIntentsForPlan(evt events.Event, recipients, persisted []st
 			})
 		}
 	}
-	return routePlanDeliveryIntentsFromRoutes(out, routePlanSourceInternalTarget, routePlanReasonInternalCarrier)
+	return routePlanDeliveryIntentsFromRoutes(out, routeIntentProducerInternalTargetCarrier)
 }
 
 func targetedRoutedNodeDeliveryIntents(evt events.Event, routed []Subscriber) []RoutePlanDeliveryIntent {
@@ -499,7 +499,7 @@ func targetedRoutedNodeDeliveryIntents(evt events.Event, routed []Subscriber) []
 	if len(routes) == 0 {
 		return nil
 	}
-	return routePlanDeliveryIntentsFromRoutes(routes, routePlanSourceInternalTarget, routePlanReasonRouteTableNode)
+	return routePlanDeliveryIntentsFromRoutes(routes, routeIntentProducerInternalTargetRoute)
 }
 
 func targetedRoutedNodeDeliveryRoutes(evt events.Event, routed []Subscriber) []events.DeliveryRoute {
@@ -537,13 +537,13 @@ func routedNodeDeliveryIntentsForNoTargetEvent(evt events.Event, routed []Subscr
 	}
 	var intents []RoutePlanDeliveryIntent
 	if routes := routedConcreteNoTargetNodeDeliveryRoutes(evt, routed); len(routes) > 0 {
-		intents = append(intents, routePlanDeliveryIntentsFromRoutes(routes, routePlanSourceConcreteNodeRoute, routePlanReasonRouteTableNode)...)
+		intents = append(intents, routePlanDeliveryIntentsFromRoutes(routes, routeIntentProducerConcreteNodeRoute)...)
 	}
 	if routes := routedScopedNoTargetNodeDeliveryRoutes(evt, routed); len(routes) > 0 {
-		intents = append(intents, routePlanDeliveryIntentsFromRoutes(routes, routePlanSourceScopedNodeRoute, routePlanReasonRouteTableNode)...)
+		intents = append(intents, routePlanDeliveryIntentsFromRoutes(routes, routeIntentProducerScopedNodeRoute)...)
 	}
 	if routes := routedWildcardStaticServiceNoTargetNodeDeliveryRoutes(evt, routed); len(routes) > 0 {
-		intents = append(intents, routePlanDeliveryIntentsFromRoutes(routes, routePlanSourceScopedNodeRoute, routePlanReasonRouteTableNode)...)
+		intents = append(intents, routePlanDeliveryIntentsFromRoutes(routes, routeIntentProducerScopedNodeRoute)...)
 	}
 	if len(intents) > 0 {
 		return intents
@@ -579,7 +579,7 @@ func routedNodeDeliveryIntentsForNoTargetEvent(evt events.Event, routed []Subscr
 			},
 		})
 	}
-	return routePlanDeliveryIntentsFromRoutes(out, routePlanSourceConcreteNodeRoute, routePlanReasonRouteTableNode)
+	return routePlanDeliveryIntentsFromRoutes(out, routeIntentProducerConcreteNodeRoute)
 }
 
 func routedConcreteNoTargetNodeDeliveryRoutes(evt events.Event, routed []Subscriber) []events.DeliveryRoute {
@@ -786,7 +786,7 @@ func routedNodeDeliveryIntentsForNoRecipientFlowInstanceEvent(evt events.Event, 
 			},
 		})
 	}
-	return routePlanDeliveryIntentsFromRoutes(out, routePlanSourceConcreteNodeRoute, routePlanReasonRouteTableNode)
+	return routePlanDeliveryIntentsFromRoutes(out, routeIntentProducerConcreteNodeRoute)
 }
 
 func routedRootNodeDeliveryIntentsForNoTargetEvent(evt events.Event, routed []Subscriber) []RoutePlanDeliveryIntent {
@@ -804,7 +804,7 @@ func routedRootNodeDeliveryIntentsForNoTargetEvent(evt events.Event, routed []Su
 			SubscriberID:   recipient,
 		})
 	}
-	return routePlanDeliveryIntentsFromRoutes(out, routePlanSourceRootNodeRoute, routePlanReasonRouteTableNode)
+	return routePlanDeliveryIntentsFromRoutes(out, routeIntentProducerRootNodeRoute)
 }
 
 func routedRootInputFlowNodeDeliveryIntentsForNoTargetEvent(evt events.Event, routed []Subscriber) []RoutePlanDeliveryIntent {
@@ -835,7 +835,7 @@ func routedRootInputFlowNodeDeliveryIntentsForNoTargetEvent(evt events.Event, ro
 			SubscriberID:   recipient,
 		})
 	}
-	return routePlanDeliveryIntentsFromRoutes(out, routePlanSourceRootInputFlowNode, routePlanReasonRouteTableNode)
+	return routePlanDeliveryIntentsFromRoutes(out, routeIntentProducerRootInputFlowNode)
 }
 
 func routedRootInputFlowNodeMatchesNoTargetEvent(evt events.Event, subscriber Subscriber) bool {

@@ -97,7 +97,7 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 			out.ExtraDetail["connect_route_plan_receiver_event"] = plan.Receiver.ResolvedEvent
 			return out, nil
 		}
-		out.DeliveryIntents = append(out.DeliveryIntents, routePlanDeliveryIntentsFromRoutes(routes, routePlanSourceConnectRoutePlan, routePlanReasonLoweredConnectRoutePlan)...)
+		out.DeliveryIntents = append(out.DeliveryIntents, routePlanDeliveryIntentsFromRoutes(routes, routeIntentProducerConnectRoutePlan)...)
 		out.LiveRecipients = append(out.LiveRecipients, connectRoutePlanLiveRecipients(routes)...)
 		out.RoutedRecipients = append(out.RoutedRecipients, subscribers...)
 		if len(plan.Reply) > 0 {
@@ -312,8 +312,7 @@ func connectRoutePlanLiveRecipients(routes []events.DeliveryRoute) []RoutePlanLi
 			RecipientID:       subscriberID,
 			SubscriberType:    subscriberType,
 			PersistAsDelivery: subscriberType == routePlanSubscriberAgent,
-			Source:            routePlanSourceConnectRoutePlan,
-			Reason:            routePlanReasonLoweredConnectRoutePlan,
+			Producer:          routeIntentProducerConnectRoutePlan,
 		})
 	}
 	return normalizeRoutePlanLiveRecipients(out)

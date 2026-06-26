@@ -207,7 +207,7 @@ func TestEventBusRecipientPlanMaterializerNormalizesIntoCanonicalRoutePlan(t *te
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	evt := events.NewProjectionEvent(uuid.NewString(), events.EventType("review/inst-1/task.started"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
-	emptyAgentPolicyPlan := routePlanFromManifest(evt, deliveryRecipientManifest{}, routePlanSourceAgentPolicy, routePlanReasonMatchedAgentSubscription)
+	emptyAgentPolicyPlan := routePlanFromManifest(evt, deliveryRecipientManifest{}, routeIntentProducerAgentPolicy)
 	if emptyAgentPolicyPlan.AuthorityState != RoutePlanAuthorityNoCanonicalMatch || emptyAgentPolicyPlan.AuthorityOwner != "" {
 		t.Fatalf("empty agent-policy route plan authority = %q/%q, want no canonical match", emptyAgentPolicyPlan.AuthorityState, emptyAgentPolicyPlan.AuthorityOwner)
 	}
@@ -226,8 +226,8 @@ func TestEventBusRecipientPlanMaterializerNormalizesIntoCanonicalRoutePlan(t *te
 	if intent.SubscriberType != want.SubscriberType || intent.SubscriberID != want.SubscriberID || intent.Target != want.Target {
 		t.Fatalf("route plan delivery intent = %#v, want route %#v", intent, want)
 	}
-	if intent.Source != routePlanSourceRecipientMaterializer || intent.Reason != routePlanReasonMaterializedRoute {
-		t.Fatalf("route plan materializer source/reason = %q/%q, want materializer route", intent.Source, intent.Reason)
+	if intent.Producer != routeIntentProducerRecipientMaterializer {
+		t.Fatalf("route plan materializer producer = %s, want materializer route", intent.Producer)
 	}
 	projected := eb.publishRecipientPlan(evt, plan.CanonicalRoutePlan())
 	if !deliveryRoutesContain(projected.DeliveryRoutes, want) {
@@ -331,14 +331,12 @@ func nodeOnlyDeliveryPlan(evt events.Event, nodeID string) RoutePlan {
 		RecipientID:       nodeID,
 		SubscriberType:    routePlanSubscriberInternal,
 		PersistAsDelivery: false,
-		Source:            "test",
-		Reason:            "test",
+		Producer:          routeIntentProducerInternalTargetCarrier,
 	})
 	plan.AddDeliveryIntents(RoutePlanDeliveryIntent{
 		SubscriberType: "node",
 		SubscriberID:   nodeID,
-		Source:         "test",
-		Reason:         "test",
+		Producer:       routeIntentProducerInternalTargetCarrier,
 		Persist:        true,
 	})
 	return plan.Normalized()

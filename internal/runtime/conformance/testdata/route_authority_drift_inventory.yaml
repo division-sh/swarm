@@ -1,7 +1,7 @@
 version: 1
 kind: route_authority_drift_inventory
 issue: 1364
-implementation_issues: [1364, 1494]
+implementation_issues: [1364, 1494, 1495]
 parent_issues: [1340, 1353, 1481, 1493]
 watchlist: runtime_operations.delivery_and_replay_ownership
 policy:
@@ -124,7 +124,7 @@ search_dimensions:
     canonical_layer: route_plan_consumers
     classified_paths_required: true
   - id: route_plan_source_reason
-    pattern: 'routePlanSource|routePlanReason|RoutePlanAuthorityState|RoutePlanDeliveryIntent'
+    pattern: 'routePlanSource|routePlanReason|routeIntentProducer|RoutePlanAuthorityState|RoutePlanDeliveryIntent|RoutePlanLiveRecipient'
     minimum_matching_files: 7
     required_paths:
       - internal/runtime/bus/route_plan.go
@@ -510,14 +510,16 @@ seam_families:
       - internal/runtime/bus/delivery_planner_test.go
       - internal/runtime/bus/connect_route_plan_dispatch.go
       - internal/runtime/bus/connect_route_plan_dispatch_test.go
+      - internal/runtime/bus/route_plan_test.go
       - internal/runtime/bus/eventbus_publish.go
       - internal/runtime/bus/eventbus_target_routes_test.go
       - internal/runtime/conformance/testdata/route_authority_matrix.yaml
     search_dimensions: [route_plan_source_reason, route_plan]
     notes: >
-      RoutePlan source/reason/authority-state constants are the current typed
-      route-intent metadata owner. #1494 guards their use until #1495 promotes
-      the broader typed route-intent model.
+      RoutePlan source/reason/authority-state constants are now carried through
+      the #1495 typed route-intent producer model. #1494 guards their use and
+      #1495 removes broad raw string producer helper entry points for EventBus
+      RoutePlan production.
   - id: durable_delivery_authority_writers
     layer: durable_delivery_authority
     classification: canonical_owner
@@ -693,7 +695,7 @@ guardrail_proposals:
       - direct SQL tests from asserting delivery counts without typed semantic subscriber identity
       - store fixtures from becoming undocumented route-authority interpreters
 follow_up_decision:
-  tracker_state: "#1494 extends the closed #1364 inventory owner under #1493; #1495/#1496/#1479/#1466/#1481 remain open for behavior or broader architecture work."
+  tracker_state: "#1494 extends the closed #1364 inventory owner under #1493; #1495 promotes typed EventBus route-intent producer ownership; #1496/#1479/#1466/#1481 remain open for compatibility, descriptor, or broader architecture work."
   new_child_required_before_coding: false
   runtime_behavior_child_required_now: false
   notes: >
