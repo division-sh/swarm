@@ -178,6 +178,41 @@ func TestRouteAuthorityDriftInventoryRejectsUnclassifiedRouteLikeProducer(t *tes
 	}
 }
 
+func TestRouteAuthorityDriftInventoryRejectsDimensionMismatchClassification(t *testing.T) {
+	root := conformanceRepoRoot(t)
+	inventory := loadRouteAuthorityDriftInventory(t, root)
+	corpus := routeAuthorityDriftNewValidationCorpus(root)
+	const path = "internal/runtime/bus/misclassified_route_authority.go"
+	corpus.Files = append(corpus.Files, routeAuthorityDriftRepoFile{
+		Path: path,
+		Raw:  []byte("package bus\n\nfunc misclassified(plan ConnectRoutePlan) { _ = plan }\n"),
+	})
+	family := routeAuthorityDriftSeamFamilyByID(t, &inventory, "event_context_inputs")
+	family.Paths = append(family.Paths, path)
+
+	problems := validateRouteAuthorityDriftInventoryWithCorpus(root, corpus, inventory)
+	want := "connect_route_plan matched unclassified path internal/runtime/bus/misclassified_route_authority.go"
+	if !routeAuthorityProblemsContain(problems, want) {
+		t.Fatalf("validation problems missing %q:\n- %s", want, strings.Join(problems, "\n- "))
+	}
+}
+
+func TestRouteAuthorityDriftInventoryRejectsUnclassifiedDirectDeliveryPath(t *testing.T) {
+	root := conformanceRepoRoot(t)
+	inventory := loadRouteAuthorityDriftInventory(t, root)
+	corpus := routeAuthorityDriftNewValidationCorpus(root)
+	corpus.Files = append(corpus.Files, routeAuthorityDriftRepoFile{
+		Path: "internal/runtime/bus/untracked_direct_delivery.go",
+		Raw:  []byte("package bus\n\nfunc (b *bus) PublishDirect(ctx context.Context, evt events.Event, recipients []string) error { return nil }\n"),
+	})
+
+	problems := validateRouteAuthorityDriftInventoryWithCorpus(root, corpus, inventory)
+	want := "direct_delivery_path matched unclassified path internal/runtime/bus/untracked_direct_delivery.go"
+	if !routeAuthorityProblemsContain(problems, want) {
+		t.Fatalf("validation problems missing %q:\n- %s", want, strings.Join(problems, "\n- "))
+	}
+}
+
 func loadRouteAuthorityDriftInventory(t *testing.T, root string) routeAuthorityDriftInventory {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(root, routeAuthorityDriftInventoryPath))
@@ -280,16 +315,11 @@ func validateRouteAuthorityDriftInventoryWithCorpus(root string, corpus *routeAu
 
 func validateRouteAuthorityDriftClassifiedMatches(root string, corpus *routeAuthorityDriftValidationCorpus, dimensions map[string]routeAuthorityDriftSearchDimension, families map[string]routeAuthorityDriftSeamFamily) []string {
 	var problems []string
-	classifiedPaths := map[string]struct{}{}
-	for _, family := range families {
-		for _, path := range family.Paths {
-			classifiedPaths[filepath.ToSlash(filepath.Clean(path))] = struct{}{}
-		}
-	}
 	for _, dimension := range dimensions {
 		if !dimension.ClassifiedPathsRequired {
 			continue
 		}
+		classifiedPaths := routeAuthorityDriftClassifiedPathsForDimension(dimension.ID, families)
 		re, err := regexp.Compile(strings.TrimSpace(dimension.Pattern))
 		if err != nil {
 			continue
@@ -305,6 +335,28 @@ func validateRouteAuthorityDriftClassifiedMatches(root string, corpus *routeAuth
 		}
 	}
 	return problems
+}
+
+func routeAuthorityDriftClassifiedPathsForDimension(dimensionID string, families map[string]routeAuthorityDriftSeamFamily) map[string]struct{} {
+	classifiedPaths := map[string]struct{}{}
+	for _, family := range families {
+		if !routeAuthorityDriftFamilyReferencesDimension(family, dimensionID) {
+			continue
+		}
+		for _, path := range family.Paths {
+			classifiedPaths[filepath.ToSlash(filepath.Clean(path))] = struct{}{}
+		}
+	}
+	return classifiedPaths
+}
+
+func routeAuthorityDriftFamilyReferencesDimension(family routeAuthorityDriftSeamFamily, dimensionID string) bool {
+	for _, dimension := range family.SearchDimensions {
+		if dimension == dimensionID {
+			return true
+		}
+	}
+	return false
 }
 
 func validateRouteAuthorityDriftPolicy(policy routeAuthorityDriftInventoryPolicy) []string {
@@ -476,7 +528,7 @@ func routeAuthorityDriftRepoFiles(root string) []routeAuthorityDriftRepoFile {
 		}
 		if entry.IsDir() {
 			switch entry.Name() {
-			case ".git", "vendor", "node_modules", "tmp":
+			case ".git", "vendor", "node_modules", "tmp", "test-results":
 				return filepath.SkipDir
 			}
 			return nil
@@ -552,6 +604,17 @@ func routeAuthorityDriftSearchDimensionByID(t *testing.T, inventory *routeAuthor
 		}
 	}
 	t.Fatalf("search dimension %s not found", id)
+	return nil
+}
+
+func routeAuthorityDriftSeamFamilyByID(t *testing.T, inventory *routeAuthorityDriftInventory, id string) *routeAuthorityDriftSeamFamily {
+	t.Helper()
+	for i := range inventory.SeamFamilies {
+		if inventory.SeamFamilies[i].ID == id {
+			return &inventory.SeamFamilies[i]
+		}
+	}
+	t.Fatalf("seam family %s not found", id)
 	return nil
 }
 
