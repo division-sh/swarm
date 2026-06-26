@@ -424,6 +424,8 @@ seam_families:
       - internal/runtime/engine/interfaces.go
       - internal/runtime/pipeline/engine_adapter.go
       - internal/runtime/conformance/testdata/route_authority_matrix.yaml
+      - internal/store/flow_instance_descriptors_sqlite_test.go
+      - internal/store/flow_instance_routes_test.go
     search_dimensions: [descriptor_evidence, connect_route_plan]
     invalid_authority:
       - active-agent descriptor lookup

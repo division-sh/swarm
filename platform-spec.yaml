@@ -5122,9 +5122,11 @@ flow_model:
             Runtime planning MUST pass the supported target list from the
             loaded semantic source into `MaterializeConnectRoutePlan`; the
             materializer MUST compare event source values only with descriptor
-            evidence for those supported targets. Singular cardinality produces
-            exactly one concrete target route; cardinality many produces a
-            target_set/fanout over all matching receiver-scope descriptors.
+            evidence for those supported targets. Runtime descriptor loaders
+            MUST omit run-scoped entity address fields when no run id is
+            available rather than selecting entity state across runs. Singular
+            cardinality produces exactly one concrete target route; cardinality
+            many produces a target_set/fanout over all matching receiver-scope descriptors.
             Missing source values, no matches, ambiguous cardinality-one
             matches, unsupported/unindexed targets, and wrong receiver scope
             fail closed with zero executable routes.
