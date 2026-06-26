@@ -12,3 +12,13 @@ flows:
   - id: delivery
     flow: delivery
     mode: template
+connect:
+  - from: intake.item.review_requested
+    to: processing.item.review_requested
+  - from: intake.item.rejected
+    to: processing.item.rejected
+  - from: processing.item.completed
+    to: delivery.item.completed
+    delivery: broadcast
+  - from: processing.item.rejected
+    to: intake.item.rejected

@@ -27,6 +27,100 @@ func TestPinTargetResolution_AllowsExplicitBroadcastOptOut(t *testing.T) {
 	}
 }
 
+func TestPinTargetResolution_FailsClosedForProducerTargetCommonCompositionPath(t *testing.T) {
+	bundle := loadPinRoutingProducerRouteBundle(t, `
+      emit:
+        event: shared.ready
+        fields:
+          entity_id: payload.entity_id
+        target:
+          flow: consumer
+          match:
+            entity_id: payload.entity_id
+`, true)
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	if !reportContains(report.Errors(), "pin_target_resolution", "producer_target_common_path_forbidden") {
+		t.Fatalf("expected producer_target_common_path_forbidden, got %#v", report.Errors())
+	}
+}
+
+func TestPinTargetResolution_FailsClosedForProducerBroadcastCommonCompositionPath(t *testing.T) {
+	bundle := loadPinRoutingProducerRouteBundle(t, `
+      emit:
+        event: shared.ready
+        fields:
+          entity_id: payload.entity_id
+        broadcast: true
+`, true)
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	if !reportContains(report.Errors(), "pin_target_resolution", "producer_broadcast_common_path_forbidden") {
+		t.Fatalf("expected producer_broadcast_common_path_forbidden, got %#v", report.Errors())
+	}
+}
+
+func TestPinTargetResolution_FailsClosedForProducerTargetCommonPathEvenWithParentConnect(t *testing.T) {
+	bundle := loadPinRoutingProducerRouteBundle(t, `
+      emit:
+        event: shared.ready
+        fields:
+          entity_id: payload.entity_id
+        target:
+          flow: consumer
+          match:
+            entity_id: payload.entity_id
+`, true, pinRoutingProducerRouteConnect())
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	if !reportContains(report.Errors(), "pin_target_resolution", "producer_target_common_path_forbidden") {
+		t.Fatalf("expected producer_target_common_path_forbidden with parent connect, got %#v", report.Errors())
+	}
+}
+
+func TestPinTargetResolution_AllowsExplicitTargetEscapeHatches(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		emitBlock string
+	}{
+		{
+			name:      "sender",
+			emitBlock: "emit:\n        event: result.ready\n        target: sender\n",
+		},
+		{
+			name:      "instance_id",
+			emitBlock: "emit:\n        event: result.ready\n        target:\n          instance_id: worker-001\n",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			bundle := loadPinRoutingVerifyBundle(t, tt.emitBlock)
+			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+			if reportContains(report.Errors(), "pin_target_resolution", "") {
+				t.Fatalf("unexpected pin_target_resolution error: %#v", report.Errors())
+			}
+		})
+	}
+}
+
+func TestPinTargetResolution_AllowsDynamicFlowMatchWhenNotPackageComposition(t *testing.T) {
+	bundle := loadPinRoutingProducerRouteBundle(t, `
+      emit:
+        event: shared.ready
+        fields:
+          entity_id: payload.entity_id
+        target:
+          flow: consumer
+          match:
+            entity_id: payload.entity_id
+          allow_fanout: true
+`, false)
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	if reportContains(report.Errors(), "pin_target_resolution", "producer_target_common_path_forbidden") {
+		t.Fatalf("unexpected producer_target_common_path_forbidden for non-receiver dynamic target: %#v", report.Errors())
+	}
+}
+
 func TestPinTargetResolution_FailsClosedForRootPinOutputWithoutTargetMechanism(t *testing.T) {
 	bundle := loadPinRoutingVerifySourceFixture(t, pinRoutingVerifySourceFixture{
 		rootNodes: pinRoutingVerifyNodeYAML("root-node", "root.start", "root.ready", false),
@@ -171,6 +265,100 @@ worker-node:
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
 	return bundle
+}
+
+func loadPinRoutingProducerRouteBundle(t *testing.T, producerHandlerBody string, consumerConsumesSharedReady bool, connectBlocks ...string) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	root := t.TempDir()
+	writePinRoutingVerifyFile(t, filepath.Join(root, "package.yaml"), `
+name: pin-routing-producer-route
+version: "1.0.0"
+platform_version: ">=1.6.0"
+flows:
+  - id: producer
+    flow: producer
+    mode: static
+  - id: consumer
+    flow: consumer
+    mode: static
+`+strings.Join(connectBlocks, ""))
+	writePinRoutingVerifyFile(t, filepath.Join(root, "schema.yaml"), "name: pin-routing-producer-route\n")
+	writePinRoutingVerifyFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writePinRoutingVerifyFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writePinRoutingVerifyFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writePinRoutingVerifyFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+	writePinRoutingVerifyFile(t, filepath.Join(root, "entities.yaml"), "{}\n")
+	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "producer", "schema.yaml"), `
+name: producer
+initial_state: pending
+states: [pending, done]
+terminal_states: [done]
+pins:
+  inputs:
+    events: [producer.start]
+  outputs:
+    events: [shared.ready]
+`)
+	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "producer", "events.yaml"), `
+producer.start:
+  entity_id: text
+shared.ready:
+  entity_id: text
+`)
+	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "producer", "entities.yaml"), `
+producer:
+  entity_id: text
+`)
+	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "producer", "nodes.yaml"), `
+producer-node:
+  id: producer-node
+  execution_type: system_node
+  event_handlers:
+    producer.start:
+`+producerHandlerBody+`
+`)
+	consumerInput := "events: [consumer.start]"
+	if consumerConsumesSharedReady {
+		consumerInput = "events: [shared.ready]"
+	}
+	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "schema.yaml"), `
+name: consumer
+initial_state: pending
+states: [pending, done]
+terminal_states: [done]
+pins:
+  inputs:
+    `+consumerInput+`
+  outputs:
+    events: [consumer.done]
+`)
+	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "events.yaml"), `
+consumer.start:
+  entity_id: text
+shared.ready:
+  entity_id: text
+consumer.done:
+  entity_id: text
+`)
+	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "entities.yaml"), `
+consumer:
+  entity_id: text
+`)
+	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "nodes.yaml"), "{}\n")
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return bundle
+}
+
+func pinRoutingProducerRouteConnect() string {
+	return `
+connect:
+  - from: producer.shared.ready
+    to: consumer.shared.ready
+`
 }
 
 type pinRoutingVerifySourceFixture struct {

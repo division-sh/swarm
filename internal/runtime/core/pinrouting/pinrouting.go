@@ -26,6 +26,8 @@ const (
 	FailureTargetUnknownFlow              TargetFailure = "target_unknown_flow"
 	FailureTargetSenderNoInboundRuntime   TargetFailure = "target_sender_no_inbound_runtime"
 	FailureTargetSenderEmptySourceRuntime TargetFailure = "target_sender_empty_source_runtime"
+	FailureProducerTargetCommonPath       TargetFailure = "producer_target_common_path_forbidden"
+	FailureProducerBroadcastCommonPath    TargetFailure = "producer_broadcast_common_path_forbidden"
 )
 
 type AuthoredTarget struct {
@@ -95,6 +97,142 @@ func PinDeclaredOutput(source semanticview.Source, flowID, eventType string) boo
 	return false
 }
 
+func ProducerRouteCommonPathFailure(source semanticview.Source, flowID, eventType string, spec runtimecontracts.EmitSpec) TargetFailure {
+	flowID = strings.TrimSpace(flowID)
+	eventType = eventidentity.Normalize(eventType)
+	if source == nil || eventType == "" || !PinDeclaredOutput(source, flowID, eventType) {
+		return ""
+	}
+	if flowID == "" {
+		return ""
+	}
+	if _, ok := source.FlowScopeByID(flowID); !ok {
+		return ""
+	}
+	if spec.Broadcast {
+		if producerRouteKnownReceiverConsumesOutput(source, flowID, eventType, "") {
+			return FailureProducerBroadcastCommonPath
+		}
+		return ""
+	}
+	target := spec.Target.Normalized()
+	if target.Empty() {
+		return ""
+	}
+	switch target.Kind {
+	case runtimecontracts.EmitTargetKindSender, runtimecontracts.EmitTargetKindInstanceID:
+		return ""
+	case runtimecontracts.EmitTargetKindFlowMatch:
+		if producerRouteKnownReceiverConsumesOutput(source, flowID, eventType, target.Flow) {
+			return FailureProducerTargetCommonPath
+		}
+	}
+	return ""
+}
+
+func compositionConnectsFromOutputEvent(source semanticview.Source, flowID, eventType string) bool {
+	if source == nil {
+		return false
+	}
+	for _, pin := range outputPinsForEvent(source, flowID, eventType) {
+		if len(source.CompositionConnectsFrom(flowID, pin.PinName())) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func outputPinsForEvent(source semanticview.Source, flowID, eventType string) []runtimecontracts.FlowOutputEventPin {
+	if source == nil {
+		return nil
+	}
+	candidates := eventReferenceCandidates(source, flowID, eventType)
+	out := []runtimecontracts.FlowOutputEventPin{}
+	for _, pin := range source.FlowOutputEventPins(flowID) {
+		if eventCandidatesContain(candidates, pin.PinName()) ||
+			eventCandidatesContain(candidates, pin.EventType()) ||
+			eventCandidatesContain(candidates, source.ResolveFlowEventReference(flowID, pin.EventType())) {
+			out = append(out, pin)
+		}
+	}
+	return out
+}
+
+func producerRouteKnownReceiverConsumesOutput(source semanticview.Source, producerFlowID, eventType, targetFlowID string) bool {
+	if source == nil {
+		return false
+	}
+	producerFlowID = strings.TrimSpace(producerFlowID)
+	targetFlowID = strings.TrimSpace(targetFlowID)
+	if targetFlowID != "" {
+		if _, ok := source.FlowScopeByID(targetFlowID); !ok {
+			return false
+		}
+		return targetFlowID != producerFlowID && flowInputConsumesOutput(source, producerFlowID, eventType, targetFlowID)
+	}
+	for _, scope := range source.FlowScopes() {
+		receiverFlowID := strings.TrimSpace(scope.ID)
+		if receiverFlowID == "" || receiverFlowID == producerFlowID {
+			continue
+		}
+		if flowInputConsumesOutput(source, producerFlowID, eventType, receiverFlowID) {
+			return true
+		}
+	}
+	return false
+}
+
+func flowInputConsumesOutput(source semanticview.Source, producerFlowID, eventType, receiverFlowID string) bool {
+	if source == nil {
+		return false
+	}
+	outputCandidates := eventReferenceCandidates(source, producerFlowID, eventType)
+	for _, pin := range source.FlowInputEventPins(receiverFlowID) {
+		if eventCandidatesContain(outputCandidates, pin.PinName()) ||
+			eventCandidatesContain(outputCandidates, pin.EventType()) ||
+			eventCandidatesContain(outputCandidates, source.ResolveFlowEventReference(receiverFlowID, pin.EventType())) {
+			return true
+		}
+	}
+	return false
+}
+
+func eventReferenceCandidates(source semanticview.Source, flowID, eventType string) map[string]struct{} {
+	candidates := map[string]struct{}{}
+	addEventCandidate(candidates, eventType)
+	if source != nil {
+		addEventCandidate(candidates, source.ResolveFlowEventReference(flowID, eventType))
+	}
+	return candidates
+}
+
+func addEventCandidate(candidates map[string]struct{}, eventType string) {
+	eventType = eventidentity.Normalize(eventType)
+	if eventType == "" {
+		return
+	}
+	candidates[eventType] = struct{}{}
+	if leaf := eventidentity.LeafName(eventType); leaf != "" {
+		candidates[leaf] = struct{}{}
+	}
+}
+
+func eventCandidatesContain(candidates map[string]struct{}, eventType string) bool {
+	eventType = eventidentity.Normalize(eventType)
+	if eventType == "" {
+		return false
+	}
+	if _, ok := candidates[eventType]; ok {
+		return true
+	}
+	leaf := eventidentity.LeafName(eventType)
+	if leaf == "" {
+		return false
+	}
+	_, ok := candidates[leaf]
+	return ok
+}
+
 func rootPinDeclaredOutput(source semanticview.Source, eventType string) bool {
 	bundle, ok := semanticview.Bundle(source)
 	if !ok || bundle == nil || bundle.RootSchema == nil {
@@ -148,6 +286,12 @@ func ResolveEnvelope(input ResolutionInput, envelope events.EventEnvelope) Resol
 		envelope = events.EnvelopeForSourceRoute(envelope, input.SourceRoute)
 	}
 	if !PinDeclaredOutput(input.Source, input.FlowID, input.EventType) {
+		return Resolution{Envelope: envelope.Normalized()}
+	}
+	if failure := ProducerRouteCommonPathFailure(input.Source, input.FlowID, input.EventType, input.Emit); failure != "" {
+		return Resolution{Envelope: envelope.Normalized(), Failure: failure}
+	}
+	if compositionConnectsFromOutputEvent(input.Source, input.FlowID, input.EventType) {
 		return Resolution{Envelope: envelope.Normalized()}
 	}
 	if input.Emit.Broadcast {

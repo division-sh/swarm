@@ -9,3 +9,7 @@ flows:
   - id: flow-b
     flow: flow-b
     mode: static
+connect:
+  - from: flow-b.order.completed
+    to: flow-a.flow-b/order.completed
+    adapter: flow-b-order-completed
