@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
@@ -201,23 +202,28 @@ func (s *PostgresStore) ListActiveFlowInstanceDescriptors(ctx context.Context) (
 		SELECT
 			COALESCE(fi.instance_id, ''),
 			COALESCE(fi.flow_template, ''),
-			COALESCE(es.fields, '{}'::jsonb)
+`
+	args := []any{}
+	if hasRunID {
+		query += `			COALESCE(es.fields, '{}'::jsonb)
 		FROM flow_instances fi
 		LEFT JOIN LATERAL (
 			SELECT fields
 			FROM entity_state es
 			WHERE es.flow_instance = fi.instance_id
-`
-	args := []any{}
-	if hasRunID {
-		query += `			  AND es.run_id = $1::uuid
+			  AND es.run_id = $1::uuid
 `
 		args = append(args, runID)
-	}
-	query += `			ORDER BY es.updated_at DESC, es.created_at DESC, es.entity_id::text ASC
+		query += `			ORDER BY es.updated_at DESC, es.created_at DESC, es.entity_id::text ASC
 			LIMIT 1
 		) es ON true
-		WHERE COALESCE(fi.status, '') = 'active'
+`
+	} else {
+		query += `			'{}'::jsonb
+		FROM flow_instances fi
+`
+	}
+	query += `		WHERE COALESCE(fi.status, '') = 'active'
 		  AND COALESCE(fi.mode, '') = 'template'
 		  AND COALESCE(fi.instance_id, '') <> ''
 		ORDER BY fi.instance_id ASC
@@ -260,25 +266,26 @@ func (s *SQLiteRuntimeStore) ListActiveFlowInstanceDescriptors(ctx context.Conte
 	if err != nil {
 		return nil, err
 	}
-	fieldsSubquery := `
+	args := []any{}
+	fieldsExpr := `'{}'`
+	if hasRunID {
+		fieldsSubquery := `
 			SELECT es.fields
 			FROM entity_state es
 			WHERE es.flow_instance = fi.instance_id
-`
-	args := []any{}
-	if hasRunID {
-		fieldsSubquery += `			  AND es.run_id = ?
+			  AND es.run_id = ?
 `
 		args = append(args, runID)
-	}
-	fieldsSubquery += `			ORDER BY es.updated_at DESC, es.created_at DESC, es.entity_id ASC
+		fieldsSubquery += `			ORDER BY es.updated_at DESC, es.created_at DESC, es.entity_id ASC
 			LIMIT 1
 `
+		fieldsExpr = `COALESCE((` + fieldsSubquery + `), '{}')`
+	}
 	rows, err := q.QueryContext(ctx, `
 		SELECT
 			COALESCE(fi.instance_id, ''),
 			COALESCE(fi.flow_template, ''),
-			COALESCE((`+fieldsSubquery+`), '{}')
+			`+fieldsExpr+`
 		FROM flow_instances fi
 		WHERE COALESCE(fi.status, '') = 'active'
 		  AND COALESCE(fi.mode, '') = 'template'
@@ -370,7 +377,7 @@ func descriptorScalarString(value any) (string, bool) {
 		}
 		return "false", true
 	case float64:
-		return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%f", typed), "0"), "."), true
+		return strconv.FormatFloat(typed, 'g', -1, 64), true
 	case json.Number:
 		return typed.String(), true
 	default:
