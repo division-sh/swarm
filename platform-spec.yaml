@@ -664,7 +664,7 @@ contract_formats:
           - persisted delivery rows, pipeline receipts, and committed replay scope as separate owners
           unsupported_or_split:
             business_field_descriptor_targets: 'Declared top-level receiver entity fields with indexed: true are implemented by #1479; nested entity paths, arbitrary, undeclared, unindexed, config, and instance business-field descriptor targets remain split to #1466 or later gated children.'
-            agent_node_emitter_parity: '#1474 remains open.'
+            agent_node_emitter_parity: 'Closed by #1474: generated agent emit tools and node/system emits for supported connected output pins consume the same EventBus RoutePlan authority from lowered parent connect facts. Producer target/broadcast retirement remains split to #1475; broader composition-first closure remains #1466.'
             producer_target_broadcast_retirement: '#1475 remains open.'
             selected_contract_runfork_readiness: 'Tracked under #1466/watchlist; not closed by #1473.'
             parent_composition_routing_closure: '#1466 remains open.'
@@ -3521,8 +3521,18 @@ engine:
         tools in tools.
       naming: 'emit_{event_name} where dots are replaced with underscores. Example: emit_events: [score.dimension_complete]
         → tool: emit_score_dimension_complete'
-      behavior: Each emit tool accepts a payload object matching the event's schema in events.yaml. The platform validates
+      behavior: |
+        Each emit tool accepts a payload object matching the event's schema in events.yaml. The platform validates
         the payload, attaches sender context, and publishes the event.
+        For pin-declared output events, generated agent emit tools MUST consume the same publish-time RoutePlan
+        authority as node/system emits. If EventBus preflight reports a canonical lowered parent-connect route
+        decision, the tool MUST admit the event to Publish so that EventBus persists and dispatches the typed
+        RoutePlan delivery intents; if that canonical decision failed closed, the tool MUST fail closed before
+        publish with zero executable route rows. Raw event-name subscribers, RouteTable fallback, live subscriptions,
+        materializer repair, or producer target/broadcast escape hatches MUST NOT rescue a matched canonical
+        failure. When no canonical lowered route applies, retained explicit target, structural ParentRoute,
+        static child-flow delivery-entity, and broadcast escape behavior remains governed by handler_specification.handler_fields.emit
+        and engine.cross_flow_routing.
       universal_tools: 'The following tools are auto-granted to all agents without explicit tools listing: agent_message
         and mailbox_send. Generated emit tools are derived from emit_events. Entity tools are governed by
         contract_formats.persistence_model.role_scoped_entity_tools and tool_model.agent_tool_filtering, not by prompt prose.'
@@ -5064,6 +5074,33 @@ flow_model:
           - singular target, target_set fanout, and reply metadata are covered
           - unsupported or unindexed business-field descriptor targets remain fail-closed and split to #1466 or later gated children
           - '#1473 does not close #1474, #1475, selected-contract runfork readiness, or #1466 parent closure'
+        implementation_slice_1474:
+          status: merge_bearing_runtime_behavior
+          canonical_code_owner: internal/runtime/bus.RoutePlan via CheckPublishRecipientPlan and Publish, consumed by internal/runtime/tools.Executor.handleEmitTool
+          rule: |
+            Generated agent emit tools for pin-declared output events MUST NOT
+            reject connected output-pin emits before EventBus can evaluate the
+            lowered parent-connect RoutePlan authority. The tool may preflight
+            EventBus planning only to distinguish canonical lowered-route
+            decisions from lower-precedence subscriber/materializer fallback:
+            canonical matched plans are admitted to Publish; canonical
+            fail-closed plans fail before publish with zero executable routes;
+            lower-precedence or no-canonical plans continue through retained
+            explicit target, structural ParentRoute, static child delivery-entity,
+            and broadcast escape handling. Node/system emits remain consumers of
+            the same RoutePlan authority through engine outbox/dispatcher paths.
+          consumes:
+          - implementation_slice_1473 EventBus RoutePlan publish authority
+          - implementation_slice_1472 lowered ConnectRoutePlan artifacts
+          - agent sender/source route context from generated emit tool execution
+          produces:
+          - no-relay generated-agent delivery for supported connected output pins
+          - node/system output-pin parity through the same persisted RoutePlan sink
+          - fail-closed unresolved connected output pins with no raw subscriber fallback
+          does_not_close:
+          - '#1475 producer target/broadcast retirement'
+          - '#1466 composition-first parent closure'
+          - '#1444 final turnkey composition behavior'
         implementation_slice_1485:
           status: merge_bearing_runtime_behavior
           canonical_code_owner: internal/runtime/bus.connectRoutePlanResolver with connectReceiverCarrierRouteKeys

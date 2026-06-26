@@ -62,6 +62,7 @@ type PublishRecipientPlan struct {
 	SubscriptionRecipients []string
 	DeliveryRoutes         []events.DeliveryRoute
 	TargetFailure          string
+	canonicalAuthority     bool
 }
 
 type DirectRecipientStatus struct {
