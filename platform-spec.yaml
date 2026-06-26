@@ -519,7 +519,6 @@ contract_formats:
           - root_input_flow_node_route / route_table_node
           - recipient_plan_materializer / materialized_route
           - connect_route_plan / lowered_connect_route_plan
-          - legacy_projection / legacy_projection
           rule: |
             EventBus RoutePlan producer identity MUST be represented by a closed
             typed route-intent producer role, not by broad helper APIs accepting
@@ -537,8 +536,10 @@ contract_formats:
             root-input roles, and recipient-materializer roles MUST be produced
             through the typed model. #1496 removes the legacy EventBus
             eventDeliveryPlan compatibility projection as a live route
-            interpreter; direct delivery remains an explicit direct-recipient
-            RoutePlan-backed producer/consumer path.
+            interpreter, and #1493 removes the obsolete legacy projection
+            producer vocabulary left behind after that collapse. Direct delivery
+            remains an explicit direct-recipient RoutePlan-backed
+            producer/consumer path.
         legacy_event_delivery_plan_collapse:
           status: merge_bearing_runtime_behavior
           implementation_slice: '#1496'

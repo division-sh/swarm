@@ -689,10 +689,11 @@ guardrail_proposals:
       - direct SQL tests from asserting delivery counts without typed semantic subscriber identity
       - store fixtures from becoming undocumented route-authority interpreters
 follow_up_decision:
-  tracker_state: "#1494 extends the closed #1364 inventory owner under #1493; #1495 promotes typed EventBus route-intent producer ownership; #1496/#1479/#1466/#1481 remain open for compatibility, descriptor, or broader architecture work."
+  tracker_state: "#1494, #1495, and #1496 are closed capped children under #1493; #1479/#1466/#1481 remain open for descriptor, composition-first architecture, or broader route-authority work."
   new_child_required_before_coding: false
   runtime_behavior_child_required_now: false
   notes: >
-    No runtime behavior is selected in #1494. Concrete bypasses discovered
-    after this inventory must open or update a child issue and receive an
-    independent implementation gate before coding.
+    #1493 owns the parent-tail closeout after the capped route-authority
+    children. Concrete bypasses discovered after this inventory must open or
+    update a child issue and receive an independent implementation gate before
+    coding.
