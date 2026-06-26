@@ -625,6 +625,18 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForBusinessFieldDescriptorGa
 			wantFailure: runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureTargetUnsupported),
 		},
 		{
+			name:    "unsupported nested target",
+			source:  connectRoutePlanBusinessFieldSourceWithTarget("one", true, "entity.profile.vertical_id"),
+			payload: `{"vertical_id":"v-1"}`,
+			flowInstances: []ActiveFlowInstanceDescriptor{{
+				InstanceID:    "one",
+				EntityID:      "ent-1",
+				FlowInstance:  "consumer/one",
+				AddressFields: map[string]string{"entity.profile.vertical_id": "v-1"},
+			}},
+			wantFailure: runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureTargetUnsupported),
+		},
+		{
 			name:    "wrong receiver scope",
 			source:  connectRoutePlanBusinessFieldSource("one", true),
 			payload: `{"vertical_id":"v-1"}`,
@@ -1083,6 +1095,10 @@ func connectRoutePlanFanoutSource() semanticview.Source {
 }
 
 func connectRoutePlanBusinessFieldSource(cardinality string, indexed bool) semanticview.Source {
+	return connectRoutePlanBusinessFieldSourceWithTarget(cardinality, indexed, "entity.vertical_id")
+}
+
+func connectRoutePlanBusinessFieldSourceWithTarget(cardinality string, indexed bool, target string) semanticview.Source {
 	return semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{
 		{
 			id:   "producer",
@@ -1101,7 +1117,7 @@ func connectRoutePlanBusinessFieldSource(cardinality string, indexed bool) seman
 				Address: &runtimecontracts.FlowInputPinAddress{
 					By:          "vertical_id",
 					Source:      "payload.vertical_id",
-					Target:      "entity.vertical_id",
+					Target:      target,
 					Cardinality: cardinality,
 				},
 			}},

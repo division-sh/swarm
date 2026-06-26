@@ -431,13 +431,14 @@ seam_families:
       - active-agent descriptor lookup
       - active target descriptors
       - handler descriptor lookup
-      - unsupported or unindexed business-field descriptor target
+      - unsupported, nested, or unindexed business-field descriptor target
     notes: >
       Descriptor evidence may support explicitly approved target materialization
-      but is not delivery authority. #1479 implements declared indexed receiver
-      entity fields as supported descriptor evidence; arbitrary, undeclared,
-      unindexed, config, and instance business-field descriptor/index authority
-      remains split to #1466 or later gated children.
+      but is not delivery authority. #1479 implements declared indexed
+      top-level receiver entity fields as supported descriptor evidence;
+      nested, arbitrary, undeclared, unindexed, config, and instance
+      business-field descriptor/index authority remains split to #1466 or
+      later gated children.
   - id: event_delivery_plan_compatibility_adapter
     layer: invalid_old_authority
     classification: invalid_old_authority_path

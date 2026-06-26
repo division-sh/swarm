@@ -384,7 +384,7 @@ rows:
       - active-agent descriptor lookup
       - active target descriptors
       - handler descriptor lookup
-      - unsupported or unindexed business-field descriptor targets
+      - unsupported, nested, or unindexed business-field descriptor targets
     owner_refs:
       - {kind: spec_ref, path: platform-spec.yaml, ref: descriptor_evidence_boundary}
       - {kind: spec_ref, path: platform-spec.yaml, ref: supported_descriptor_targets}
@@ -404,11 +404,11 @@ rows:
       - {kind: go_test, name: TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsFiltersToActiveTemplates}
     notes: >
       Descriptor evidence remains limited to identity-style targets and
-      receiver entity fields explicitly declared with indexed: true. It is
-      evidence for ConnectRoutePlan materialization, not topology authority.
-      Arbitrary, undeclared, unindexed, config, and instance business-field
-      descriptor/index authority remains split to #1466 or later gated
-      children.
+      top-level receiver entity fields explicitly declared with indexed: true.
+      It is evidence for ConnectRoutePlan materialization, not topology
+      authority. Nested, arbitrary, undeclared, unindexed, config, and instance
+      business-field descriptor/index authority remains split to #1466 or later
+      gated children.
 
   - id: event_delivery_plan_compatibility_removed
     concept: Legacy eventDeliveryPlan and CanonicalRoutePlan compatibility projection are invalid old authority paths removed behind RoutePlan.

@@ -525,7 +525,8 @@ func SupportedConnectAddressTargets(source semanticview.Source, plan ConnectRout
 		return nil
 	}
 	fieldPath, ok := strings.CutPrefix(target, "entity.")
-	if !ok || strings.TrimSpace(fieldPath) == "" {
+	fieldPath = strings.TrimSpace(fieldPath)
+	if !ok || fieldPath == "" || strings.Contains(fieldPath, ".") {
 		return nil
 	}
 	contract, ok := entityruntime.ResolveForFlow(source, plan.Receiver.FlowID)

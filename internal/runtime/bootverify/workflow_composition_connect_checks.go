@@ -216,11 +216,11 @@ func validateCompositionConnectAddress(source semanticview.Source, connect runti
 	if err != nil {
 		return []Finding{compositionConnectFinding(connect, "output_carries_address_key", err.Error(), producerFlowID)}
 	}
-	targetType, err := compositionConnectTargetType(source, receiverFlowID, targetExpr)
-	if err != nil {
+	if err := compositionConnectTargetIndexed(source, receiverFlowID, targetExpr); err != nil {
 		return []Finding{compositionConnectFinding(connect, "receiver_address_rule_invalid", err.Error(), receiverFlowID)}
 	}
-	if err := compositionConnectTargetIndexed(source, receiverFlowID, targetExpr); err != nil {
+	targetType, err := compositionConnectTargetType(source, receiverFlowID, targetExpr)
+	if err != nil {
 		return []Finding{compositionConnectFinding(connect, "receiver_address_rule_invalid", err.Error(), receiverFlowID)}
 	}
 	if !compositionConnectTypesCompatible(sourceType, targetType) {
@@ -308,6 +308,9 @@ func compositionConnectTargetIndexed(source semanticview.Source, flowID, expr st
 		switch fieldPath {
 		case "", "entity_id":
 			return nil
+		}
+		if strings.Contains(fieldPath, ".") {
+			return fmt.Errorf("receiver target %s uses a nested entity path; #1479 supports only top-level indexed entity fields as descriptor/index route evidence", expr)
 		}
 		contract, ok := entityruntime.ResolveForFlow(source, flowID)
 		if !ok {

@@ -628,7 +628,7 @@ contract_formats:
               Static lowered ConnectRoutePlan matches MUST NOT load or depend on
               legacy active-agent recipient-policy descriptors. Runtime
               descriptor evidence may materialize identity-style targets and
-              declared receiver entity fields marked `indexed: true`. Descriptor
+              declared top-level receiver entity fields marked `indexed: true`. Descriptor
               evidence MUST NOT promote unsupported arbitrary business fields,
               unindexed entity fields, config fields, instance fields, delivery
               rows, receipts, replay/readback, RouteTable state, live
@@ -663,7 +663,7 @@ contract_formats:
           - reply delivery metadata preservation
           - persisted delivery rows, pipeline receipts, and committed replay scope as separate owners
           unsupported_or_split:
-            business_field_descriptor_targets: 'Declared receiver entity fields with indexed: true are implemented by #1479; arbitrary, undeclared, unindexed, config, and instance business-field descriptor targets remain split to #1466 or later gated children.'
+            business_field_descriptor_targets: 'Declared top-level receiver entity fields with indexed: true are implemented by #1479; nested entity paths, arbitrary, undeclared, unindexed, config, and instance business-field descriptor targets remain split to #1466 or later gated children.'
             agent_node_emitter_parity: '#1474 remains open.'
             producer_target_broadcast_retirement: '#1475 remains open.'
             selected_contract_runfork_readiness: 'Tracked under #1466/watchlist; not closed by #1473.'
@@ -1077,22 +1077,24 @@ entity_contracts:
     - '`_unused_reader_reason` documents that a field is intentionally read only outside platform-visible internal handlers.
       It suppresses only the informational `entity_reader_coverage` slice; it does not count as writer coverage, authorize
       runtime/API reads, or change persistence semantics.'
-    - '`indexed: true` declares a field as addressable descriptor/index evidence for supported runtime receiver selection.
+    - '`indexed: true` declares a top-level entity field as addressable descriptor/index evidence for supported runtime receiver selection.
       It does not make the field route topology authority, dynamically index arbitrary payload fields, or authorize
-      undeclared business-field routing.'
+      undeclared or nested business-field routing.'
     - 'A `materialize_from` field is runtime-owned and not agent-writable.'
   routing_indexes:
     status: merge_bearing_runtime_behavior
     implementation_slice: '#1479'
     rule: |
-      A receiver entity field with `indexed: true` may be used as descriptor
+      A top-level receiver entity field with `indexed: true` may be used as descriptor
       evidence for a composition-routing addressed input target such as
       `entity.vertical_id`. The receiver input pin and parent connect entry
       still own the route topology. The indexed entity field only authorizes
       runtime descriptor/index materialization to answer which active receiver
-      instance has the declared field value. Missing, unindexed, undeclared,
-      ambiguous, unsupported, or wrong-scope targets fail closed and produce no
-      executable routes.
+      instance has the declared top-level field value. Nested entity paths such
+      as `entity.profile.vertical_id` are unsupported in the #1479 slice because
+      runtime descriptor evidence is emitted only for top-level scalar entity
+      fields. Missing, unindexed, undeclared, nested, ambiguous, unsupported, or
+      wrong-scope targets fail closed and produce no executable routes.
   accumulator_entity_projection:
     description: |
       `materialize_from` declares a downstream typed entity-field copy of a
@@ -5012,8 +5014,8 @@ flow_model:
             - entity_id / entity.entity_id
             - flow_instance / instance.flow_instance
             - instance_id / instance.instance_id
-            - entity.<field> when the receiver entity contract declares that field with indexed: true
-            unsupported_descriptor_targets: Undeclared or unindexed entity fields, config.<field>, instance.<field>, and other arbitrary business fields remain fail-closed unless a later approved spec+runtime child promotes a typed descriptor/index owner for those forms.
+            - entity.<field> when the receiver entity contract declares that top-level field with indexed: true
+            unsupported_descriptor_targets: Nested entity paths, undeclared or unindexed entity fields, config.<field>, instance.<field>, and other arbitrary business fields remain fail-closed unless a later approved spec+runtime child promotes a typed descriptor/index owner for those forms.
           failure_reasons:
           - source_missing
           - connect_pin_ref_invalid
@@ -5117,8 +5119,9 @@ flow_model:
           rule: |
             Supported receiver business-field descriptor/index materialization is
             limited to addressed input targets whose receiver entity contract
-            declares the target field with `indexed: true`. Bootverify MUST
-            reject unsupported or unindexed non-identity targets before runtime.
+            declares the top-level target field with `indexed: true`.
+            Bootverify MUST reject unsupported, nested, or unindexed
+            non-identity targets before runtime.
             Runtime planning MUST pass the supported target list from the
             loaded semantic source into `MaterializeConnectRoutePlan`; the
             materializer MUST compare event source values only with descriptor
@@ -5128,12 +5131,12 @@ flow_model:
             cardinality produces exactly one concrete target route; cardinality
             many produces a target_set/fanout over all matching receiver-scope descriptors.
             Missing source values, no matches, ambiguous cardinality-one
-            matches, unsupported/unindexed targets, and wrong receiver scope
-            fail closed with zero executable routes.
+            matches, unsupported/unindexed/nested targets, and wrong receiver
+            scope fail closed with zero executable routes.
           consumes:
           - receiver addressed input pin address.target
           - parent connect map target expression
-          - receiver entity contract field indexed: true
+          - receiver entity contract top-level field indexed: true
           - active flow-instance descriptor address fields loaded from current run entity_state
           - lowered ConnectRoutePlan runtime-resolution requirements
           produces:
@@ -5142,6 +5145,7 @@ flow_model:
           - fail-closed target diagnostics for unsupported, missing, unresolved, ambiguous, or wrong-scope descriptor evidence
           does_not_close:
           - arbitrary config.<field> or instance.<field> descriptor/index authority
+          - nested entity path descriptor/index authority
           - dynamic indexing of arbitrary payload/entity fields
           - select_entity/select_or_create_entity receiver-local mutation semantics
           - selected-contract runfork route/readiness mutation
