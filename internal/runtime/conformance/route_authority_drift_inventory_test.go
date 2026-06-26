@@ -249,7 +249,7 @@ func validateRouteAuthorityDriftInventoryWithCorpus(root string, corpus *routeAu
 	if inventory.Issue != 1364 {
 		problems = append(problems, fmt.Sprintf("inventory issue = #%d, want #1364", inventory.Issue))
 	}
-	for _, issue := range []int{1364, 1494, 1495} {
+	for _, issue := range []int{1364, 1494, 1495, 1496} {
 		if !routeAuthorityDriftHasInt(inventory.ImplementationIssues, issue) {
 			problems = append(problems, fmt.Sprintf("inventory implementation_issues missing #%d", issue))
 		}

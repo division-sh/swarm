@@ -1,7 +1,7 @@
 version: 1
 kind: route_authority_drift_inventory
 issue: 1364
-implementation_issues: [1364, 1494, 1495]
+implementation_issues: [1364, 1494, 1495, 1496]
 parent_issues: [1340, 1353, 1481, 1493]
 watchlist: runtime_operations.delivery_and_replay_ownership
 policy:
@@ -16,9 +16,9 @@ policy:
     It explicitly covers event name/type, semantic scope, entity/run/source
     event context, route/event-key derivation helpers, lowered ConnectRoutePlan
     artifacts, RouteTable.Resolve role boundaries, receiver-carrier evidence,
-    descriptor evidence, direct-delivery paths, legacy eventDeliveryPlan
-    compatibility, and RoutePlan source/reason constants. It must not be used
-    as proof that runtime behavior changed.
+    descriptor evidence, direct-delivery paths, removed legacy
+    eventDeliveryPlan compatibility, and RoutePlan source/reason constants.
+    It must not be used by itself as proof that runtime behavior changed.
 sources:
   platform_spec: platform-spec.yaml
   route_authority_matrix: internal/runtime/conformance/testdata/route_authority_matrix.yaml
@@ -101,15 +101,12 @@ search_dimensions:
     classified_paths_required: true
   - id: event_delivery_plan_compatibility
     pattern: 'eventDeliveryPlan|CanonicalRoutePlan|routePlanFromLegacyEventDeliveryPlan'
-    minimum_matching_files: 6
+    minimum_matching_files: 3
     required_paths:
-      - internal/runtime/bus/route_plan.go
-      - internal/runtime/bus/delivery_planner.go
-      - internal/runtime/bus/eventbus.go
-      - internal/runtime/bus/eventbus_publish.go
-      - internal/runtime/bus/connect_route_plan_dispatch_test.go
-      - internal/runtime/bus/eventbus_target_routes_test.go
-    canonical_layer: compatibility_adapter_non_authority
+      - platform-spec.yaml
+      - internal/runtime/bus/route_plan_test.go
+      - internal/runtime/conformance/testdata/route_authority_matrix.yaml
+    canonical_layer: invalid_old_authority
     classified_paths_required: true
   - id: direct_delivery_path
     pattern: '\bPlanDirect\b|\bPublishDirect\(|\bCheckDirectRecipients\('
@@ -438,16 +435,11 @@ seam_families:
       but is not delivery authority. Business-field descriptor/index support
       remains split to #1479.
   - id: event_delivery_plan_compatibility_adapter
-    layer: compatibility_adapter_non_authority
-    classification: split_open_sibling
+    layer: invalid_old_authority
+    classification: invalid_old_authority_path
     paths:
       - platform-spec.yaml
-      - internal/runtime/bus/route_plan.go
-      - internal/runtime/bus/delivery_planner.go
-      - internal/runtime/bus/eventbus.go
-      - internal/runtime/bus/eventbus_publish.go
-      - internal/runtime/bus/connect_route_plan_dispatch_test.go
-      - internal/runtime/bus/eventbus_target_routes_test.go
+      - internal/runtime/bus/route_plan_test.go
       - internal/runtime/conformance/testdata/route_authority_matrix.yaml
     search_dimensions: [event_delivery_plan_compatibility, route_plan]
     invalid_authority:
@@ -455,13 +447,15 @@ seam_families:
       - CanonicalRoutePlan fallback from legacy projection
       - routePlanFromLegacyEventDeliveryPlan as new producer
     notes: >
-      eventDeliveryPlan remains a compatibility projection around RoutePlan.
-      #1494 classifies and guards it; #1496 owns compatibility collapse or
-      isolation if behavior changes are needed.
+      #1496 removes eventDeliveryPlan, CanonicalRoutePlan, WithCanonicalRoutePlan,
+      and routePlanFromLegacyEventDeliveryPlan from production EventBus code.
+      Remaining mentions are source-authority/proof text plus a production-code
+      guard that fails if the legacy adapter reappears.
   - id: direct_delivery_path_classification
     layer: route_plan_consumers
-    classification: split_open_sibling
+    classification: valid_consumer
     paths:
+      - platform-spec.yaml
       - internal/apiv1/openrpc_mutating_runtime_test.go
       - internal/apiv1/operator_event_replay.go
       - internal/apiv1/operator_event_replay_test.go
@@ -499,8 +493,8 @@ seam_families:
       - operator replay direct path as fresh publish-time route planner
     notes: >
       Direct delivery uses explicit caller recipients and delivery policy. It is
-      classified now so it cannot masquerade as subscribed RoutePlan authority;
-      #1496 owns further direct-delivery compatibility isolation.
+      a direct RoutePlan-backed producer/consumer path, not subscribed RoutePlan
+      authority; #1496 removes its old eventDeliveryPlan compatibility crossing.
   - id: route_plan_source_reason_constants
     layer: route_plan_authority
     classification: canonical_owner

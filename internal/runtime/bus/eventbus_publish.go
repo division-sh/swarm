@@ -927,7 +927,7 @@ func (eb *EventBus) planSubscribedRoutePlan(ctx context.Context, evt events.Even
 	if err := eb.authorizePublishRecipientPlan(ctx, evt, plan); err != nil {
 		return RoutePlan{}, err
 	}
-	routePlan := plan.CanonicalRoutePlan()
+	routePlan := plan.Normalized()
 	if recordDiagnostic {
 		eb.recordPublishDiagnostic(ctx, evt, routePlan)
 	}
@@ -941,31 +941,31 @@ func (eb *EventBus) authorizePublishRecipientPlanning(ctx context.Context, evt e
 	return eb.recipientPlanAdmissionGuard(ctx, evt)
 }
 
-func (eb *EventBus) materializePublishRecipientPlan(ctx context.Context, evt events.Event, plan eventDeliveryPlan) (eventDeliveryPlan, error) {
+func (eb *EventBus) materializePublishRecipientPlan(ctx context.Context, evt events.Event, routePlan RoutePlan) (RoutePlan, error) {
+	routePlan = routePlan.Normalized()
 	if eb == nil || eb.recipientPlanMaterializer == nil {
-		return plan, nil
+		return routePlan, nil
 	}
-	routePlan := plan.CanonicalRoutePlan()
 	if !routePlan.AllowsLowerPrecedenceRouteProduction() {
-		return plan, nil
+		return routePlan, nil
 	}
 	routes, err := eb.recipientPlanMaterializer(ctx, evt, eb.publishRecipientPlan(evt, routePlan))
 	if err != nil {
-		return eventDeliveryPlan{}, err
+		return RoutePlan{}, err
 	}
 	if len(routes) == 0 {
-		return plan, nil
+		return routePlan, nil
 	}
 	routePlan.MarkLowerPrecedenceRouteProduction(routeIntentProducerRecipientMaterializer)
 	routePlan.AddDeliveryIntents(routePlanDeliveryIntentsFromRoutes(routes, routeIntentProducerRecipientMaterializer)...)
-	return plan.WithCanonicalRoutePlan(routePlan), nil
+	return routePlan.Normalized(), nil
 }
 
-func (eb *EventBus) authorizePublishRecipientPlan(ctx context.Context, evt events.Event, plan eventDeliveryPlan) error {
+func (eb *EventBus) authorizePublishRecipientPlan(ctx context.Context, evt events.Event, routePlan RoutePlan) error {
 	if eb == nil || eb.recipientPlanGuard == nil {
 		return nil
 	}
-	return eb.recipientPlanGuard(ctx, evt, eb.publishRecipientPlan(evt, plan.CanonicalRoutePlan()))
+	return eb.recipientPlanGuard(ctx, evt, eb.publishRecipientPlan(evt, routePlan))
 }
 
 func (eb *EventBus) publishRecipientPlan(evt events.Event, routePlan RoutePlan) PublishRecipientPlan {
@@ -1335,7 +1335,7 @@ func (eb *EventBus) planDirectRoutePlan(ctx context.Context, evt events.Event, r
 	if err != nil {
 		return RoutePlan{}, err
 	}
-	return plan.CanonicalRoutePlan(), nil
+	return plan.Normalized(), nil
 }
 
 // PublishDirect persists an event and delivers it to an explicit caller-supplied

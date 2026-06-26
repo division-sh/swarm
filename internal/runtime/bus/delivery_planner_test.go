@@ -246,23 +246,23 @@ func TestDeliveryPlanner_ComposesRoutingPolicyAndManifest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
 	}
-	if got, want := len(plan.Recipients), 2; got != want {
+	if got, want := len(plan.RecipientIDs()), 2; got != want {
 		t.Fatalf("plan recipients = %d, want %d", got, want)
 	}
-	if got, want := len(plan.PersistedRecipients), 1; got != want {
+	if got, want := len(plan.PersistedRecipientIDs()), 1; got != want {
 		t.Fatalf("persisted recipients = %d, want %d", got, want)
 	}
-	if got := plan.PersistedRecipients[0]; got != "observer" {
+	if got := plan.PersistedRecipientIDs()[0]; got != "observer" {
 		t.Fatalf("persisted recipient = %q, want observer", got)
 	}
-	if got, want := len(plan.RoutePlan.LiveRecipients), 2; got != want {
+	if got, want := len(plan.LiveRecipients), 2; got != want {
 		t.Fatalf("route plan live recipients = %d, want %d", got, want)
 	}
-	if got, want := len(plan.RoutePlan.DeliveryIntents), 2; got != want {
+	if got, want := len(plan.DeliveryIntents), 2; got != want {
 		t.Fatalf("route plan delivery intents = %d, want %d", got, want)
 	}
 	var sawObserverAgent, sawWorkerNode bool
-	for _, intent := range plan.RoutePlan.DeliveryIntents {
+	for _, intent := range plan.DeliveryIntents {
 		if intent.SubscriberType == "agent" && intent.SubscriberID == "observer" && intent.Producer == routeIntentProducerAgentPolicy {
 			sawObserverAgent = true
 		}
@@ -271,7 +271,7 @@ func TestDeliveryPlanner_ComposesRoutingPolicyAndManifest(t *testing.T) {
 		}
 	}
 	if !sawObserverAgent || !sawWorkerNode {
-		t.Fatalf("route plan delivery intents = %#v, want observer agent policy and worker node route intents", plan.RoutePlan.DeliveryIntents)
+		t.Fatalf("route plan delivery intents = %#v, want observer agent policy and worker node route intents", plan.DeliveryIntents)
 	}
 	if got := plan.ExtraDetail["routed_recipients_count"]; got != 1 {
 		t.Fatalf("routed_recipients_count = %#v, want 1", got)
@@ -308,13 +308,13 @@ func TestDeliveryPlanner_DoesNotDeadLetterTargetedWorkflowNodeSubscriber(t *test
 		SubscriberID:   "parent-listener",
 		Target:         events.RouteIdentity{EntityID: "ent-1"},
 	}
-	if len(plan.DeliveryRoutes) != 1 || !deliveryPlannerRoutesContain(plan.DeliveryRoutes, wantRoute) {
-		t.Fatalf("delivery routes = %#v, want semantic node route %#v", plan.DeliveryRoutes, wantRoute)
+	if len(plan.DeliveryRoutes()) != 1 || !deliveryPlannerRoutesContain(plan.DeliveryRoutes(), wantRoute) {
+		t.Fatalf("delivery routes = %#v, want semantic node route %#v", plan.DeliveryRoutes(), wantRoute)
 	}
-	if got, want := len(plan.RoutePlan.DeliveryIntents), 1; got != want {
+	if got, want := len(plan.DeliveryIntents), 1; got != want {
 		t.Fatalf("route plan delivery intents = %d, want %d", got, want)
 	}
-	intent := plan.RoutePlan.DeliveryIntents[0]
+	intent := plan.DeliveryIntents[0]
 	if intent.Producer != routeIntentProducerInternalTargetRoute {
 		t.Fatalf("route plan delivery intent = %#v, want internal targeted route-table node authority", intent)
 	}
@@ -351,8 +351,8 @@ func TestDeliveryPlanner_TargetedParentRoutePersistsSemanticNodeRoute(t *testing
 		SubscriberID:   "parent-collector",
 		Target:         parentRoute,
 	}
-	if len(plan.DeliveryRoutes) != 1 || !deliveryPlannerRoutesContain(plan.DeliveryRoutes, wantRoute) {
-		t.Fatalf("delivery routes = %#v, want ParentRoute semantic node route %#v", plan.DeliveryRoutes, wantRoute)
+	if len(plan.DeliveryRoutes()) != 1 || !deliveryPlannerRoutesContain(plan.DeliveryRoutes(), wantRoute) {
+		t.Fatalf("delivery routes = %#v, want ParentRoute semantic node route %#v", plan.DeliveryRoutes(), wantRoute)
 	}
 }
 
@@ -416,10 +416,10 @@ func TestDeliveryPlanner_ExpandsTargetSetForInternalWorkflowRecipient(t *testing
 	if plan.TargetFailure != "" {
 		t.Fatalf("target failure = %q, want none for target-routed workflow nodes", plan.TargetFailure)
 	}
-	if got := plan.Recipients; len(got) != 1 || got[0] != "workflow-runtime" {
+	if got := plan.RecipientIDs(); len(got) != 1 || got[0] != "workflow-runtime" {
 		t.Fatalf("recipients = %#v, want [workflow-runtime]", got)
 	}
-	if got := plan.DeliveryRoutes; len(got) != 4 {
+	if got := plan.DeliveryRoutes(); len(got) != 4 {
 		t.Fatalf("delivery routes = %#v, want 4 target routes", got)
 	}
 	wantRoutes := []events.DeliveryRoute{
@@ -429,15 +429,15 @@ func TestDeliveryPlanner_ExpandsTargetSetForInternalWorkflowRecipient(t *testing
 		{SubscriberType: "node", SubscriberID: "workflow-runtime", Target: events.RouteIdentity{FlowInstance: "child-b/inst-1", EntityID: "ent-b"}},
 	}
 	for _, wantRoute := range wantRoutes {
-		if !deliveryPlannerRoutesContain(plan.DeliveryRoutes, wantRoute) {
-			t.Fatalf("delivery routes = %#v, missing %#v", plan.DeliveryRoutes, wantRoute)
+		if !deliveryPlannerRoutesContain(plan.DeliveryRoutes(), wantRoute) {
+			t.Fatalf("delivery routes = %#v, missing %#v", plan.DeliveryRoutes(), wantRoute)
 		}
 	}
-	if got, want := len(plan.RoutePlan.DeliveryIntents), 4; got != want {
+	if got, want := len(plan.DeliveryIntents), 4; got != want {
 		t.Fatalf("route plan delivery intents = %d, want %d", got, want)
 	}
 	var semanticNodeRoutes, carrierRoutes int
-	for _, intent := range plan.RoutePlan.DeliveryIntents {
+	for _, intent := range plan.DeliveryIntents {
 		if intent.Producer == routeIntentProducerInternalTargetRoute && (intent.SubscriberID == "child-a-listener" || intent.SubscriberID == "child-b-listener") {
 			semanticNodeRoutes++
 		}
@@ -446,7 +446,7 @@ func TestDeliveryPlanner_ExpandsTargetSetForInternalWorkflowRecipient(t *testing
 		}
 	}
 	if semanticNodeRoutes != 2 || carrierRoutes != 2 {
-		t.Fatalf("route plan delivery intents = %#v, want 2 semantic node routes and 2 internal carrier routes", plan.RoutePlan.DeliveryIntents)
+		t.Fatalf("route plan delivery intents = %#v, want 2 semantic node routes and 2 internal carrier routes", plan.DeliveryIntents)
 	}
 }
 
@@ -486,12 +486,12 @@ func TestDeliveryPlanner_ExpandsTargetSetForSameSemanticNode(t *testing.T) {
 		{SubscriberType: "node", SubscriberID: "workflow-runtime", Target: events.RouteIdentity{FlowInstance: "worker/w-001", EntityID: "worker/w-001"}},
 		{SubscriberType: "node", SubscriberID: "workflow-runtime", Target: events.RouteIdentity{FlowInstance: "worker/w-002", EntityID: "worker/w-002"}},
 	}
-	if got := len(plan.DeliveryRoutes); got != len(wantRoutes) {
-		t.Fatalf("delivery routes = %#v, want %d same-node target routes", plan.DeliveryRoutes, len(wantRoutes))
+	if got := len(plan.DeliveryRoutes()); got != len(wantRoutes) {
+		t.Fatalf("delivery routes = %#v, want %d same-node target routes", plan.DeliveryRoutes(), len(wantRoutes))
 	}
 	for _, wantRoute := range wantRoutes {
-		if !deliveryPlannerRoutesContain(plan.DeliveryRoutes, wantRoute) {
-			t.Fatalf("delivery routes = %#v, missing %#v", plan.DeliveryRoutes, wantRoute)
+		if !deliveryPlannerRoutesContain(plan.DeliveryRoutes(), wantRoute) {
+			t.Fatalf("delivery routes = %#v, missing %#v", plan.DeliveryRoutes(), wantRoute)
 		}
 	}
 }
@@ -525,16 +525,16 @@ func TestDeliveryPlanner_NoTargetConcreteRoutedNodePersistsSemanticNodeRoute(t *
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
 	}
-	if got := plan.Recipients; len(got) != 1 || got[0] != "workflow-runtime" {
+	if got := plan.RecipientIDs(); len(got) != 1 || got[0] != "workflow-runtime" {
 		t.Fatalf("recipients = %#v, want [workflow-runtime]", got)
 	}
-	if len(plan.PersistedRecipients) != 0 {
-		t.Fatalf("persisted recipients = %#v, want none for internal carrier", plan.PersistedRecipients)
+	if len(plan.PersistedRecipientIDs()) != 0 {
+		t.Fatalf("persisted recipients = %#v, want none for internal carrier", plan.PersistedRecipientIDs())
 	}
-	if got := plan.DeliveryRoutes; len(got) != 1 {
+	if got := plan.DeliveryRoutes(); len(got) != 1 {
 		t.Fatalf("delivery routes = %#v, want lifecycle-orchestrator semantic node route", got)
 	}
-	route := plan.DeliveryRoutes[0]
+	route := plan.DeliveryRoutes()[0]
 	if route.SubscriberType != "node" || route.SubscriberID != "lifecycle-orchestrator" {
 		t.Fatalf("delivery route = %#v, want node/lifecycle-orchestrator semantic authority", route)
 	}
@@ -544,10 +544,10 @@ func TestDeliveryPlanner_NoTargetConcreteRoutedNodePersistsSemanticNodeRoute(t *
 	if plan.TargetFailure != "" {
 		t.Fatalf("target failure = %q, want none", plan.TargetFailure)
 	}
-	if got, want := len(plan.RoutePlan.DeliveryIntents), 1; got != want {
+	if got, want := len(plan.DeliveryIntents), 1; got != want {
 		t.Fatalf("route plan delivery intents = %d, want %d", got, want)
 	}
-	intent := plan.RoutePlan.DeliveryIntents[0]
+	intent := plan.DeliveryIntents[0]
 	if intent.Producer != routeIntentProducerConcreteNodeRoute {
 		t.Fatalf("route plan delivery intent = %#v, want concrete route-table semantic node source", intent)
 	}
@@ -697,16 +697,16 @@ func TestDeliveryPlanner_NoTargetRootRoutedNodeUsesSemanticNodeDeliveryRoute(t *
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
 	}
-	if got := plan.Recipients; len(got) != 0 {
+	if got := plan.RecipientIDs(); len(got) != 0 {
 		t.Fatalf("recipients = %#v, want none without an internal carrier", got)
 	}
-	if len(plan.PersistedRecipients) != 0 {
-		t.Fatalf("persisted recipients = %#v, want none for internal node", plan.PersistedRecipients)
+	if len(plan.PersistedRecipientIDs()) != 0 {
+		t.Fatalf("persisted recipients = %#v, want none for internal node", plan.PersistedRecipientIDs())
 	}
-	if got := plan.DeliveryRoutes; len(got) != 1 {
+	if got := plan.DeliveryRoutes(); len(got) != 1 {
 		t.Fatalf("delivery routes = %#v, want semantic root node route", got)
 	}
-	route := plan.DeliveryRoutes[0]
+	route := plan.DeliveryRoutes()[0]
 	if route.SubscriberType != "node" || route.SubscriberID != "portfolio-node" {
 		t.Fatalf("delivery route = %#v, want node/portfolio-node", route)
 	}
@@ -749,26 +749,26 @@ func TestDeliveryPlanner_NoTargetRootLocalEventWithFlowInstanceUsesRootNodeRoute
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
 	}
-	if got := plan.Recipients; len(got) != 1 || got[0] != "workflow-runtime" {
+	if got := plan.RecipientIDs(); len(got) != 1 || got[0] != "workflow-runtime" {
 		t.Fatalf("recipients = %#v, want workflow-runtime live carrier", got)
 	}
-	if len(plan.PersistedRecipients) != 0 {
-		t.Fatalf("persisted recipients = %#v, want none for internal carrier", plan.PersistedRecipients)
+	if len(plan.PersistedRecipientIDs()) != 0 {
+		t.Fatalf("persisted recipients = %#v, want none for internal carrier", plan.PersistedRecipientIDs())
 	}
-	if got := plan.DeliveryRoutes; len(got) != 1 {
+	if got := plan.DeliveryRoutes(); len(got) != 1 {
 		t.Fatalf("delivery routes = %#v, want test-node root node route", got)
 	}
-	route := plan.DeliveryRoutes[0]
+	route := plan.DeliveryRoutes()[0]
 	if route.SubscriberType != "node" || route.SubscriberID != "test-node" {
 		t.Fatalf("delivery route = %#v, want node/test-node", route)
 	}
 	if !route.Target.Empty() {
 		t.Fatalf("delivery target = %#v, want empty root target", route.Target)
 	}
-	if got, want := len(plan.RoutePlan.DeliveryIntents), 1; got != want {
+	if got, want := len(plan.DeliveryIntents), 1; got != want {
 		t.Fatalf("route plan delivery intents = %d, want %d", got, want)
 	}
-	intent := plan.RoutePlan.DeliveryIntents[0]
+	intent := plan.DeliveryIntents[0]
 	if intent.Producer != routeIntentProducerRootNodeRoute {
 		t.Fatalf("route plan delivery intent = %#v, want root route-table node source", intent)
 	}
@@ -807,26 +807,26 @@ func TestDeliveryPlanner_NoTargetScopedRoutedNodeUsesSemanticNodeDeliveryRoute(t
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
 	}
-	if got := plan.Recipients; len(got) != 1 || got[0] != "workflow-runtime" {
+	if got := plan.RecipientIDs(); len(got) != 1 || got[0] != "workflow-runtime" {
 		t.Fatalf("recipients = %#v, want workflow-runtime live carrier", got)
 	}
-	if len(plan.PersistedRecipients) != 0 {
-		t.Fatalf("persisted recipients = %#v, want none for internal carrier", plan.PersistedRecipients)
+	if len(plan.PersistedRecipientIDs()) != 0 {
+		t.Fatalf("persisted recipients = %#v, want none for internal carrier", plan.PersistedRecipientIDs())
 	}
-	if got := plan.DeliveryRoutes; len(got) != 1 {
+	if got := plan.DeliveryRoutes(); len(got) != 1 {
 		t.Fatalf("delivery routes = %#v, want child-intake semantic node route", got)
 	}
-	route := plan.DeliveryRoutes[0]
+	route := plan.DeliveryRoutes()[0]
 	if route.SubscriberType != "node" || route.SubscriberID != "child-intake" {
 		t.Fatalf("delivery route = %#v, want node/child-intake", route)
 	}
 	if route.Target.FlowInstance != "child" || route.Target.EntityID != "ent-child" {
 		t.Fatalf("delivery target = %#v, want child ent-child", route.Target)
 	}
-	if got, want := len(plan.RoutePlan.DeliveryIntents), 1; got != want {
+	if got, want := len(plan.DeliveryIntents), 1; got != want {
 		t.Fatalf("route plan delivery intents = %d, want %d", got, want)
 	}
-	intent := plan.RoutePlan.DeliveryIntents[0]
+	intent := plan.DeliveryIntents[0]
 	if intent.Producer != routeIntentProducerScopedNodeRoute {
 		t.Fatalf("route plan delivery intent = %#v, want scoped route-table node source", intent)
 	}
@@ -873,14 +873,14 @@ func TestDeliveryPlanner_NoTargetScopedEventPreservesPathlessRoutedNodeRoute(t *
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
 	}
-	if got := plan.Recipients; len(got) != 1 || got[0] != "workflow-runtime" {
+	if got := plan.RecipientIDs(); len(got) != 1 || got[0] != "workflow-runtime" {
 		t.Fatalf("recipients = %#v, want workflow-runtime live carrier", got)
 	}
-	if got := plan.DeliveryRoutes; len(got) != 2 {
+	if got := plan.DeliveryRoutes(); len(got) != 2 {
 		t.Fatalf("delivery routes = %#v, want project-observer and child-intake semantic node routes", got)
 	}
 	routes := map[string]events.RouteIdentity{}
-	for _, route := range plan.DeliveryRoutes {
+	for _, route := range plan.DeliveryRoutes() {
 		if route.SubscriberType != "node" {
 			t.Fatalf("delivery route = %#v, want node route", route)
 		}
@@ -892,7 +892,7 @@ func TestDeliveryPlanner_NoTargetScopedEventPreservesPathlessRoutedNodeRoute(t *
 	if target, ok := routes["child-intake"]; !ok || target.FlowInstance != "child" || target.EntityID != "ent-child" {
 		t.Fatalf("child-intake target = %#v, ok=%v; want child ent-child", target, ok)
 	}
-	if got, want := len(plan.RoutePlan.DeliveryIntents), 2; got != want {
+	if got, want := len(plan.DeliveryIntents), 2; got != want {
 		t.Fatalf("route plan delivery intents = %d, want %d", got, want)
 	}
 }
@@ -930,26 +930,26 @@ func TestDeliveryPlanner_NoTargetCrossFlowStaticRoutedNodeUsesSubscriberScope(t 
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
 	}
-	if got := plan.Recipients; len(got) != 1 || got[0] != "workflow-runtime" {
+	if got := plan.RecipientIDs(); len(got) != 1 || got[0] != "workflow-runtime" {
 		t.Fatalf("recipients = %#v, want workflow-runtime live carrier", got)
 	}
-	if len(plan.PersistedRecipients) != 0 {
-		t.Fatalf("persisted recipients = %#v, want none for internal carrier", plan.PersistedRecipients)
+	if len(plan.PersistedRecipientIDs()) != 0 {
+		t.Fatalf("persisted recipients = %#v, want none for internal carrier", plan.PersistedRecipientIDs())
 	}
-	if got := plan.DeliveryRoutes; len(got) != 1 {
+	if got := plan.DeliveryRoutes(); len(got) != 1 {
 		t.Fatalf("delivery routes = %#v, want flow-a-node semantic node route", got)
 	}
-	route := plan.DeliveryRoutes[0]
+	route := plan.DeliveryRoutes()[0]
 	if route.SubscriberType != "node" || route.SubscriberID != "flow-a-node" {
 		t.Fatalf("delivery route = %#v, want node/flow-a-node", route)
 	}
 	if route.Target.FlowInstance != "flow-a" || route.Target.EntityID != "ent-flow-b" {
 		t.Fatalf("delivery target = %#v, want flow-a ent-flow-b", route.Target)
 	}
-	if got, want := len(plan.RoutePlan.DeliveryIntents), 1; got != want {
+	if got, want := len(plan.DeliveryIntents), 1; got != want {
 		t.Fatalf("route plan delivery intents = %d, want %d", got, want)
 	}
-	intent := plan.RoutePlan.DeliveryIntents[0]
+	intent := plan.DeliveryIntents[0]
 	if intent.Producer != routeIntentProducerScopedNodeRoute {
 		t.Fatalf("route plan delivery intent = %#v, want scoped route-table node source", intent)
 	}
@@ -988,26 +988,26 @@ func TestDeliveryPlanner_NoTargetWildcardStaticServiceRoutedNodeUsesSubscriberSc
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
 	}
-	if got := plan.Recipients; len(got) != 1 || got[0] != "workflow-runtime" {
+	if got := plan.RecipientIDs(); len(got) != 1 || got[0] != "workflow-runtime" {
 		t.Fatalf("recipients = %#v, want workflow-runtime live carrier", got)
 	}
-	if len(plan.PersistedRecipients) != 0 {
-		t.Fatalf("persisted recipients = %#v, want none for internal carrier", plan.PersistedRecipients)
+	if len(plan.PersistedRecipientIDs()) != 0 {
+		t.Fatalf("persisted recipients = %#v, want none for internal carrier", plan.PersistedRecipientIDs())
 	}
-	if got := plan.DeliveryRoutes; len(got) != 1 {
+	if got := plan.DeliveryRoutes(); len(got) != 1 {
 		t.Fatalf("delivery routes = %#v, want repo-scaffold-node wildcard static-service node route", got)
 	}
-	route := plan.DeliveryRoutes[0]
+	route := plan.DeliveryRoutes()[0]
 	if route.SubscriberType != "node" || route.SubscriberID != "repo-scaffold-node" {
 		t.Fatalf("delivery route = %#v, want node/repo-scaffold-node", route)
 	}
 	if route.Target.FlowInstance != "repo-scaffold" || route.Target.EntityID != "ent-component" {
 		t.Fatalf("delivery target = %#v, want repo-scaffold ent-component", route.Target)
 	}
-	if got, want := len(plan.RoutePlan.DeliveryIntents), 1; got != want {
+	if got, want := len(plan.DeliveryIntents), 1; got != want {
 		t.Fatalf("route plan delivery intents = %d, want %d", got, want)
 	}
-	intent := plan.RoutePlan.DeliveryIntents[0]
+	intent := plan.DeliveryIntents[0]
 	if intent.Producer != routeIntentProducerScopedNodeRoute {
 		t.Fatalf("route plan delivery intent = %#v, want scoped route-table node source", intent)
 	}
@@ -1046,26 +1046,26 @@ func TestDeliveryPlanner_NoTargetDescendantScopedRoutedNodeUsesParentInstanceRou
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
 	}
-	if got := plan.Recipients; len(got) != 1 || got[0] != "workflow-runtime" {
+	if got := plan.RecipientIDs(); len(got) != 1 || got[0] != "workflow-runtime" {
 		t.Fatalf("recipients = %#v, want workflow-runtime live carrier", got)
 	}
-	if len(plan.PersistedRecipients) != 0 {
-		t.Fatalf("persisted recipients = %#v, want none for internal carrier", plan.PersistedRecipients)
+	if len(plan.PersistedRecipientIDs()) != 0 {
+		t.Fatalf("persisted recipients = %#v, want none for internal carrier", plan.PersistedRecipientIDs())
 	}
-	if got := plan.DeliveryRoutes; len(got) != 1 {
+	if got := plan.DeliveryRoutes(); len(got) != 1 {
 		t.Fatalf("delivery routes = %#v, want grandchild-worker semantic node route", got)
 	}
-	route := plan.DeliveryRoutes[0]
+	route := plan.DeliveryRoutes()[0]
 	if route.SubscriberType != "node" || route.SubscriberID != "grandchild-worker" {
 		t.Fatalf("delivery route = %#v, want node/grandchild-worker", route)
 	}
 	if route.Target.FlowInstance != "child/inst-1/grandchild" || route.Target.EntityID != "ent-child" {
 		t.Fatalf("delivery target = %#v, want child/inst-1/grandchild ent-child", route.Target)
 	}
-	if got, want := len(plan.RoutePlan.DeliveryIntents), 1; got != want {
+	if got, want := len(plan.DeliveryIntents), 1; got != want {
 		t.Fatalf("route plan delivery intents = %d, want %d", got, want)
 	}
-	intent := plan.RoutePlan.DeliveryIntents[0]
+	intent := plan.DeliveryIntents[0]
 	if intent.Producer != routeIntentProducerScopedNodeRoute {
 		t.Fatalf("route plan delivery intent = %#v, want scoped route-table node source", intent)
 	}

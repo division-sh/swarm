@@ -184,7 +184,7 @@ func TestEventBusRecipientPlanMaterializerPersistsRoutesBeforeInterceptors(t *te
 	}
 }
 
-func TestEventBusRecipientPlanMaterializerNormalizesIntoCanonicalRoutePlan(t *testing.T) {
+func TestEventBusRecipientPlanMaterializerNormalizesRoutePlanDirectly(t *testing.T) {
 	want := events.DeliveryRoute{
 		SubscriberType: "node",
 		SubscriberID:   "target-node",
@@ -212,24 +212,24 @@ func TestEventBusRecipientPlanMaterializerNormalizesIntoCanonicalRoutePlan(t *te
 		t.Fatalf("empty agent-policy route plan authority = %q/%q, want no canonical match", emptyAgentPolicyPlan.AuthorityState, emptyAgentPolicyPlan.AuthorityOwner)
 	}
 
-	plan, err := eb.materializePublishRecipientPlan(context.Background(), evt, emptyAgentPolicyPlan.EventDeliveryPlan())
+	plan, err := eb.materializePublishRecipientPlan(context.Background(), evt, emptyAgentPolicyPlan)
 	if err != nil {
 		t.Fatalf("materializePublishRecipientPlan: %v", err)
 	}
-	if got, wantLen := len(plan.RoutePlan.DeliveryIntents), 1; got != wantLen {
+	if got, wantLen := len(plan.DeliveryIntents), 1; got != wantLen {
 		t.Fatalf("route plan delivery intents = %d, want %d", got, wantLen)
 	}
-	if plan.RoutePlan.AuthorityState != RoutePlanAuthorityLowerPrecedence || plan.RoutePlan.AuthorityOwner != routePlanSourceRecipientMaterializer {
-		t.Fatalf("route plan authority = %q/%q, want lower-precedence materializer", plan.RoutePlan.AuthorityState, plan.RoutePlan.AuthorityOwner)
+	if plan.AuthorityState != RoutePlanAuthorityLowerPrecedence || plan.AuthorityOwner != routePlanSourceRecipientMaterializer {
+		t.Fatalf("route plan authority = %q/%q, want lower-precedence materializer", plan.AuthorityState, plan.AuthorityOwner)
 	}
-	intent := plan.RoutePlan.DeliveryIntents[0]
+	intent := plan.DeliveryIntents[0]
 	if intent.SubscriberType != want.SubscriberType || intent.SubscriberID != want.SubscriberID || intent.Target != want.Target {
 		t.Fatalf("route plan delivery intent = %#v, want route %#v", intent, want)
 	}
 	if intent.Producer != routeIntentProducerRecipientMaterializer {
 		t.Fatalf("route plan materializer producer = %s, want materializer route", intent.Producer)
 	}
-	projected := eb.publishRecipientPlan(evt, plan.CanonicalRoutePlan())
+	projected := eb.publishRecipientPlan(evt, plan)
 	if !deliveryRoutesContain(projected.DeliveryRoutes, want) {
 		t.Fatalf("projected delivery routes = %#v, want materialized route %#v", projected.DeliveryRoutes, want)
 	}

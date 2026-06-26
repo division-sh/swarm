@@ -117,22 +117,22 @@ func newDeliveryPlanner(routeResolver deliveryRouteResolver, recipientPolicy del
 	return planner
 }
 
-func (p deliveryPlanner) Plan(ctx context.Context, evt events.Event) (eventDeliveryPlan, error) {
+func (p deliveryPlanner) Plan(ctx context.Context, evt events.Event) (RoutePlan, error) {
 	routePlan := newRoutePlan(evt)
 	if evt.Type() == events.EventType("platform.runtime_log") {
-		return routePlan.EventDeliveryPlan(), nil
+		return routePlan, nil
 	}
 	connectPlan, err := p.connectPlanner.Plan(ctx, evt)
 	if err != nil {
-		return eventDeliveryPlan{}, err
+		return RoutePlan{}, err
 	}
 	if connectPlan.Matched {
-		return eventDeliveryPlanFromConnectRouteDispatch(evt, connectPlan), nil
+		return routePlanFromConnectRouteDispatch(evt, connectPlan), nil
 	}
 	routing := p.routeResolver.Resolve(evt)
 	manifest, err := p.recipientPolicy.Evaluate(ctx, evt, routing.Recipients)
 	if err != nil {
-		return eventDeliveryPlan{}, err
+		return RoutePlan{}, err
 	}
 	routePlan = routePlanFromManifest(evt, manifest, routeIntentProducerAgentPolicy)
 	recipients := routePlan.RecipientIDs()
@@ -150,10 +150,10 @@ func (p deliveryPlanner) Plan(ctx context.Context, evt events.Event) (eventDeliv
 	routePlan.RoutedRecipients = routing.RoutedRecipients
 	routePlan.SubscribedRecipients = routing.SubscribedRecipients
 	routePlan.ExtraDetail = extraDetail
-	return routePlan.EventDeliveryPlan(), nil
+	return routePlan.Normalized(), nil
 }
 
-func eventDeliveryPlanFromConnectRouteDispatch(evt events.Event, connectPlan connectRoutePlanDispatch) eventDeliveryPlan {
+func routePlanFromConnectRouteDispatch(evt events.Event, connectPlan connectRoutePlanDispatch) RoutePlan {
 	routePlan := newRoutePlan(evt)
 	if connectPlan.Failure != "" {
 		routePlan.MarkCanonicalRouteFailedClosed(routeIntentProducerConnectRoutePlan, connectPlan.Failure)
@@ -164,21 +164,21 @@ func eventDeliveryPlanFromConnectRouteDispatch(evt events.Event, connectPlan con
 	}
 	routePlan.RoutedRecipients = dedupeSubscribers(connectPlan.RoutedRecipients)
 	routePlan.ExtraDetail = cloneAnyMap(connectPlan.ExtraDetail)
-	return routePlan.EventDeliveryPlan()
+	return routePlan.Normalized()
 }
 
-func (p deliveryPlanner) PlanDirect(ctx context.Context, evt events.Event, recipients []string) (eventDeliveryPlan, error) {
+func (p deliveryPlanner) PlanDirect(ctx context.Context, evt events.Event, recipients []string) (RoutePlan, error) {
 	routePlan := newRoutePlan(evt)
 	if evt.Type() == events.EventType("platform.runtime_log") {
-		return routePlan.EventDeliveryPlan(), nil
+		return routePlan, nil
 	}
 	requested := uniqueStrings(recipients)
 	if len(requested) == 0 {
-		return eventDeliveryPlan{}, errors.New("direct delivery recipients are required")
+		return RoutePlan{}, errors.New("direct delivery recipients are required")
 	}
 	manifest, err := p.recipientPolicy.Evaluate(ctx, evt, agentDeliveryRecipientCandidates(requested))
 	if err != nil {
-		return eventDeliveryPlan{}, err
+		return RoutePlan{}, err
 	}
 	routePlan = routePlanFromManifest(evt, manifest, routeIntentProducerDirectPolicy)
 	routePlan.ExtraDetail = map[string]any{
@@ -190,7 +190,7 @@ func (p deliveryPlanner) PlanDirect(ctx context.Context, evt events.Event, recip
 		routePlan.ExtraDetail["filtered_out_recipients"] = filtered
 		routePlan.ExtraDetail["filtered_out_recipients_count"] = len(filtered)
 	}
-	return routePlan.EventDeliveryPlan(), nil
+	return routePlan.Normalized(), nil
 }
 
 func filteredRecipients(requested, allowed []string) []string {

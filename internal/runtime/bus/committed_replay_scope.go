@@ -31,7 +31,7 @@ func (eb *EventBus) currentInternalRecipientsForCommittedEvent(ctx context.Conte
 	if err != nil {
 		return nil, err
 	}
-	return filterOutAgentIDs(plan.Recipients, plan.PersistedRecipients), nil
+	return filterOutAgentIDs(plan.RecipientIDs(), plan.PersistedRecipientIDs()), nil
 }
 
 func (eb *EventBus) replayRecipientsForCommittedEvent(

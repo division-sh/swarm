@@ -10,7 +10,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -104,22 +103,6 @@ type EventBusOptions struct {
 const deliverySendTimeout = 250 * time.Millisecond
 
 var ErrStaleRuntimeEpoch = errors.New("stale runtime epoch")
-
-type eventDeliveryPlan struct {
-	RoutePlan            RoutePlan
-	Event                events.Event
-	Recipients           []string
-	PersistedRecipients  []string
-	DeliveryTargets      map[string]events.RouteIdentity
-	DeliveryRoutes       []events.DeliveryRoute
-	RoutedRecipients     []Subscriber
-	SubscribedRecipients []string
-	ExtraDetail          map[string]any
-	TargetFailure        runtimepinrouting.TargetFailure
-	ContradictionReason  string
-	BlockedByCycle       bool
-	CycleEscalation      *events.Event
-}
 
 type inMemorySubscriberKind string
 

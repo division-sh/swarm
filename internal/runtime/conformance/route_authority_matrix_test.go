@@ -474,8 +474,8 @@ func requiredRouteAuthorityRows() []string {
 		"route_table_resolve_role_separation",
 		"receiver_carrier_lookup_not_authority",
 		"descriptor_evidence_not_authority",
-		"event_delivery_plan_compatibility_split",
-		"direct_delivery_path_split",
+		"event_delivery_plan_compatibility_removed",
+		"direct_delivery_route_plan_consumption",
 		"route_plan_source_reason_constants",
 		"live_carriers_handler_lookup_descriptors_not_authority",
 		"receipts_settlement_backfill_not_authority",
@@ -489,15 +489,14 @@ func requiredRouteAuthorityRows() []string {
 }
 
 func requiredRouteAuthoritySplitRows() map[string]int {
-	return map[string]int{
-		"event_delivery_plan_compatibility_split": 1496,
-		"direct_delivery_path_split":              1496,
-	}
+	return map[string]int{}
 }
 
 func requiredRouteAuthorityCoveredRows() map[string]string {
 	return map[string]string{
 		"runtime_callback_flow_instance_localization": "required_pr_smoke",
+		"event_delivery_plan_compatibility_removed":   "required_pr_smoke",
+		"direct_delivery_route_plan_consumption":      "required_pr_smoke",
 	}
 }
 
