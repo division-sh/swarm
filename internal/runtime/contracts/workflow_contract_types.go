@@ -626,6 +626,7 @@ type EntityContract struct {
 type EntityFieldDecl struct {
 	Type               string         `yaml:"type"`
 	Initial            any            `yaml:"initial"`
+	Indexed            bool           `yaml:"indexed"`
 	Immutable          bool           `yaml:"immutable"`
 	Description        string         `yaml:"description"`
 	MaterializeFrom    string         `yaml:"materialize_from"`

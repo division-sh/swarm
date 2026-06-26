@@ -204,6 +204,7 @@ func entityContractsToLegacyEntitySchema(entities EntityContractsDocument) Entit
 				Name:        strings.TrimSpace(fieldName),
 				Type:        strings.TrimSpace(field.Type),
 				Initial:     field.Initial,
+				Indexed:     field.Indexed,
 				Description: field.Description,
 			})
 		}

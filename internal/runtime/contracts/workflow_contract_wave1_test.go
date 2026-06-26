@@ -55,6 +55,7 @@ vertical:
   name: text
   review_count:
     type: integer
+    indexed: true
     initial: 0
 `)
 	writeFixtureFile(t, root+"/flows/scoring/events.yaml", `
@@ -92,6 +93,9 @@ vertical.shortlisted:
 	}
 	if got := entity.Fields["review_count"].Type; got != "integer" {
 		t.Fatalf("review_count type = %q", got)
+	}
+	if !entity.Fields["review_count"].Indexed {
+		t.Fatal("review_count Indexed = false, want true")
 	}
 	resolvedTypes := bundle.ResolvedTypeCatalogForFlow("scoring")
 	if _, ok := resolvedTypes.Scalars["URL"]; !ok {

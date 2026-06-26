@@ -429,11 +429,13 @@ seam_families:
       - active-agent descriptor lookup
       - active target descriptors
       - handler descriptor lookup
-      - unsupported business-field descriptor target
+      - unsupported or unindexed business-field descriptor target
     notes: >
       Descriptor evidence may support explicitly approved target materialization
-      but is not delivery authority. Business-field descriptor/index support
-      remains split to #1479.
+      but is not delivery authority. #1479 implements declared indexed receiver
+      entity fields as supported descriptor evidence; arbitrary, undeclared,
+      unindexed, config, and instance business-field descriptor/index authority
+      remains split to #1466 or later gated children.
   - id: event_delivery_plan_compatibility_adapter
     layer: invalid_old_authority
     classification: invalid_old_authority_path
@@ -689,7 +691,7 @@ guardrail_proposals:
       - direct SQL tests from asserting delivery counts without typed semantic subscriber identity
       - store fixtures from becoming undocumented route-authority interpreters
 follow_up_decision:
-  tracker_state: "#1494, #1495, and #1496 are closed capped children; #1493 is closed by #1503 after its parent-tail cleanup; #1340/#1481 remain active route-authority trackers, and #1479/#1466 remain open for descriptor or composition-first architecture work."
+  tracker_state: "#1494, #1495, and #1496 are closed capped children; #1493 is closed by #1503 after its parent-tail cleanup; #1479 implements declared indexed receiver entity-field descriptor evidence; #1466 remains open for broader composition-first architecture work, with #1340/#1481 as route-authority context."
   new_child_required_before_coding: false
   runtime_behavior_child_required_now: false
   notes: >

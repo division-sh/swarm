@@ -34,9 +34,10 @@ type AuthoredTarget struct {
 }
 
 type Descriptor struct {
-	ID           string
-	EntityID     string
-	FlowInstance string
+	ID            string
+	EntityID      string
+	FlowInstance  string
+	AddressFields map[string]string
 }
 
 type ResolutionInput struct {

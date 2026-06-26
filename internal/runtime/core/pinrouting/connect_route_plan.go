@@ -8,6 +8,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -91,8 +92,9 @@ type ConnectRoutePlanIssue struct {
 }
 
 type ConnectRoutePlanMaterializationInput struct {
-	MatchValues map[string]string
-	Descriptors []Descriptor
+	MatchValues             map[string]string
+	Descriptors             []Descriptor
+	SupportedAddressTargets []string
 }
 
 type ConnectRoutePlanMaterialization struct {
@@ -229,7 +231,7 @@ func MaterializeConnectRoutePlan(plan ConnectRoutePlan, input ConnectRoutePlanMa
 	if targetExpr == "" {
 		return ConnectRoutePlanMaterialization{Failure: ConnectFailureTargetUnsupported}
 	}
-	routes, supported := materializeConnectRoutes(plan, targetExpr, value, input.Descriptors)
+	routes, supported := materializeConnectRoutes(plan, targetExpr, value, input.Descriptors, input.SupportedAddressTargets)
 	if !supported {
 		return ConnectRoutePlanMaterialization{Failure: ConnectFailureTargetUnsupported}
 	}
@@ -406,8 +408,8 @@ func connectAddressValue(plan ConnectRoutePlan, values map[string]string) string
 	return ""
 }
 
-func materializeConnectRoutes(plan ConnectRoutePlan, targetExpr, value string, descriptors []Descriptor) ([]events.RouteIdentity, bool) {
-	if !addressTargetSupported(targetExpr) {
+func materializeConnectRoutes(plan ConnectRoutePlan, targetExpr, value string, descriptors []Descriptor, supportedTargets []string) ([]events.RouteIdentity, bool) {
+	if !addressTargetSupported(targetExpr, supportedTargets) {
 		return nil, false
 	}
 	var routes []events.RouteIdentity
@@ -435,7 +437,8 @@ func connectDescriptorMatches(targetExpr, value string, descriptor Descriptor, r
 	case "instance_id":
 		return strings.TrimSpace(descriptor.ID) == value || runtimeflowidentity.LogicalInstanceID(route.FlowInstance) == value
 	default:
-		return false
+		fieldValue, ok := descriptor.AddressFields[normalizeAddressTargetKey(targetExpr)]
+		return ok && strings.Trim(strings.TrimSpace(fieldValue), "/") == value
 	}
 }
 
@@ -458,11 +461,17 @@ func descriptorBelongsToReceiver(plan ConnectRoutePlan, descriptor Descriptor) b
 	return receiverPath != "" && (flowInstance == receiverPath || strings.HasPrefix(flowInstance, receiverPath+"/"))
 }
 
-func addressTargetSupported(expr string) bool {
+func addressTargetSupported(expr string, supportedTargets []string) bool {
 	switch normalizeAddressTarget(expr) {
 	case "entity_id", "flow_instance", "instance_id":
 		return true
 	default:
+		needle := normalizeAddressTargetKey(expr)
+		for _, supported := range supportedTargets {
+			if normalizeAddressTargetKey(supported) == needle {
+				return true
+			}
+		}
 		return false
 	}
 }
@@ -475,6 +484,59 @@ func normalizeAddressTarget(expr string) string {
 		}
 	}
 	return expr
+}
+
+func normalizeAddressTargetKey(expr string) string {
+	expr = strings.TrimSpace(expr)
+	if expr == "" {
+		return ""
+	}
+	if strings.HasPrefix(expr, "entity.") {
+		return "entity." + strings.TrimSpace(strings.TrimPrefix(expr, "entity."))
+	}
+	if strings.HasPrefix(expr, "config.") {
+		return "config." + strings.TrimSpace(strings.TrimPrefix(expr, "config."))
+	}
+	if strings.HasPrefix(expr, "instance.") {
+		return "instance." + strings.TrimSpace(strings.TrimPrefix(expr, "instance."))
+	}
+	switch normalizeAddressTarget(expr) {
+	case "entity_id":
+		return "entity.entity_id"
+	case "flow_instance":
+		return "instance.flow_instance"
+	case "instance_id":
+		return "instance.instance_id"
+	default:
+		return expr
+	}
+}
+
+func SupportedConnectAddressTargets(source semanticview.Source, plan ConnectRoutePlan) []string {
+	if plan.Address == nil {
+		return nil
+	}
+	target := normalizeAddressTargetKey(plan.Address.Target)
+	if target == "" {
+		return nil
+	}
+	switch normalizeAddressTarget(target) {
+	case "entity_id", "flow_instance", "instance_id":
+		return nil
+	}
+	fieldPath, ok := strings.CutPrefix(target, "entity.")
+	if !ok || strings.TrimSpace(fieldPath) == "" {
+		return nil
+	}
+	contract, ok := entityruntime.ResolveForFlow(source, plan.Receiver.FlowID)
+	if !ok {
+		return nil
+	}
+	field, err := entityruntime.ResolveLeafField(contract, fieldPath)
+	if err != nil || !field.FieldDecl.Indexed {
+		return nil
+	}
+	return []string{target}
 }
 
 func expressionLeaf(expr string) string {

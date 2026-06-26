@@ -21,11 +21,12 @@ import (
 )
 
 type connectRoutePlanTestFlow struct {
-	id      string
-	mode    string
-	inputs  []runtimecontracts.FlowInputEventPin
-	outputs []runtimecontracts.FlowOutputEventPin
-	nodes   map[string]runtimecontracts.SystemNodeContract
+	id           string
+	mode         string
+	inputs       []runtimecontracts.FlowInputEventPin
+	outputs      []runtimecontracts.FlowOutputEventPin
+	nodes        map[string]runtimecontracts.SystemNodeContract
+	entityFields map[string]runtimecontracts.EntityFieldDecl
 }
 
 type connectRoutePlanDescriptorStore struct {
@@ -500,38 +501,184 @@ func TestEventBusResetInMemoryStateRefreshesConnectRoutePlanner(t *testing.T) {
 	}
 }
 
-func TestEventBusPublish_ConnectRoutePlanFailsClosedForUnsupportedBusinessFieldTarget(t *testing.T) {
-	source := semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{
-		{
-			id:   "producer",
-			mode: "static",
-			outputs: []runtimecontracts.FlowOutputEventPin{{
-				Name:  "deploy_done",
-				Event: "deploy.done",
-			}},
-		},
-		{
-			id:   "consumer",
-			mode: "template",
-			inputs: []runtimecontracts.FlowInputEventPin{{
-				Name:  "deploy_completed",
-				Event: "deploy.completed",
-				Address: &runtimecontracts.FlowInputPinAddress{
-					By:          "vertical_id",
-					Source:      "payload.vertical_id",
-					Target:      "entity.vertical_id",
-					Cardinality: "one",
-				},
-			}},
-		},
-	}, []runtimecontracts.FlowPackageConnect{{
-		From:     "producer.deploy_done",
-		To:       "consumer.deploy_completed",
-		Delivery: "one",
-	}}))
+func TestEventBusPublish_ConnectRoutePlanPersistsIndexedBusinessFieldTarget(t *testing.T) {
+	source := connectRoutePlanBusinessFieldSource("one", true)
 	store := &connectRoutePlanDescriptorStore{
 		targetRouteMemoryStore: newTargetRouteMemoryStore(),
-		flowInstances:          []ActiveFlowInstanceDescriptor{{InstanceID: "one", EntityID: "ent-1", FlowInstance: "consumer/one"}},
+		flowInstances: []ActiveFlowInstanceDescriptor{{
+			InstanceID:    "one",
+			EntityID:      "ent-1",
+			FlowInstance:  "consumer/one",
+			AddressFields: map[string]string{"entity.vertical_id": "v-1"},
+		}},
+	}
+	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("consumer", "one")}); err != nil {
+		t.Fatalf("AddFlowInstanceRoute: %v", err)
+	}
+	eventID := uuid.NewString()
+	evt := events.NewProjectionEvent(eventID,
+		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+	want := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "consumer-node-one", Target: events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/one", EntityID: "ent-1"}}
+
+	routePlan, err := eb.planSubscribedRoutePlan(context.Background(), evt, false)
+	if err != nil {
+		t.Fatalf("planSubscribedRoutePlan: %v", err)
+	}
+	if routePlan.AuthorityState != RoutePlanAuthorityCanonicalMatched || routePlan.AuthorityOwner != routePlanSourceConnectRoutePlan {
+		t.Fatalf("route plan authority = %q/%q, want matched connect route plan", routePlan.AuthorityState, routePlan.AuthorityOwner)
+	}
+	if !deliveryRoutesContain(routePlan.DeliveryRoutes(), want) || len(routePlan.DeliveryRoutes()) != 1 {
+		t.Fatalf("route plan delivery routes = %#v, want indexed business-field route %#v", routePlan.DeliveryRoutes(), want)
+	}
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if !deliveryRoutesContain(store.routes[eventID], want) || len(store.routes[eventID]) != 1 {
+		t.Fatalf("persisted delivery routes = %#v, want indexed business-field route %#v", store.routes[eventID], want)
+	}
+}
+
+func TestEventBusPublish_ConnectRoutePlanPersistsIndexedBusinessFieldTargetSet(t *testing.T) {
+	source := connectRoutePlanBusinessFieldSource("many", true)
+	store := &connectRoutePlanDescriptorStore{
+		targetRouteMemoryStore: newTargetRouteMemoryStore(),
+		flowInstances: []ActiveFlowInstanceDescriptor{
+			{InstanceID: "one", EntityID: "ent-1", FlowInstance: "consumer/one", AddressFields: map[string]string{"entity.vertical_id": "v-1"}},
+			{InstanceID: "two", EntityID: "ent-2", FlowInstance: "consumer/two", AddressFields: map[string]string{"entity.vertical_id": "v-1"}},
+			{InstanceID: "other", EntityID: "ent-3", FlowInstance: "consumer/other", AddressFields: map[string]string{"entity.vertical_id": "v-2"}},
+		},
+	}
+	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	for _, id := range []string{"one", "two", "other"} {
+		if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("consumer", id)}); err != nil {
+			t.Fatalf("AddFlowInstanceRoute(%s): %v", id, err)
+		}
+	}
+	eventID := uuid.NewString()
+	evt := events.NewProjectionEvent(eventID,
+		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+	wantOne := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "consumer-node-one", Target: events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/one", EntityID: "ent-1"}}
+	wantTwo := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "consumer-node-two", Target: events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/two", EntityID: "ent-2"}}
+
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	routes := store.routes[eventID]
+	if !deliveryRoutesContain(routes, wantOne) || !deliveryRoutesContain(routes, wantTwo) || len(routes) != 2 {
+		t.Fatalf("persisted target_set delivery routes = %#v, want one/two only", routes)
+	}
+}
+
+func TestEventBusPublish_ConnectRoutePlanFailsClosedForBusinessFieldDescriptorGaps(t *testing.T) {
+	tests := []struct {
+		name          string
+		source        semanticview.Source
+		payload       string
+		flowInstances []ActiveFlowInstanceDescriptor
+		wantFailure   runtimepinrouting.TargetFailure
+	}{
+		{
+			name:        "missing source value",
+			source:      connectRoutePlanBusinessFieldSource("one", true),
+			payload:     `{}`,
+			wantFailure: runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureAddressValueMissing),
+		},
+		{
+			name:    "no descriptor match",
+			source:  connectRoutePlanBusinessFieldSource("one", true),
+			payload: `{"vertical_id":"v-1"}`,
+			flowInstances: []ActiveFlowInstanceDescriptor{{
+				InstanceID:    "one",
+				EntityID:      "ent-1",
+				FlowInstance:  "consumer/one",
+				AddressFields: map[string]string{"entity.vertical_id": "v-2"},
+			}},
+			wantFailure: runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureTargetUnresolved),
+		},
+		{
+			name:    "ambiguous singular target",
+			source:  connectRoutePlanBusinessFieldSource("one", true),
+			payload: `{"vertical_id":"v-1"}`,
+			flowInstances: []ActiveFlowInstanceDescriptor{
+				{InstanceID: "one", EntityID: "ent-1", FlowInstance: "consumer/one", AddressFields: map[string]string{"entity.vertical_id": "v-1"}},
+				{InstanceID: "two", EntityID: "ent-2", FlowInstance: "consumer/two", AddressFields: map[string]string{"entity.vertical_id": "v-1"}},
+			},
+			wantFailure: runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureTargetAmbiguous),
+		},
+		{
+			name:    "unsupported unindexed target",
+			source:  connectRoutePlanBusinessFieldSource("one", false),
+			payload: `{"vertical_id":"v-1"}`,
+			flowInstances: []ActiveFlowInstanceDescriptor{{
+				InstanceID:    "one",
+				EntityID:      "ent-1",
+				FlowInstance:  "consumer/one",
+				AddressFields: map[string]string{"entity.vertical_id": "v-1"},
+			}},
+			wantFailure: runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureTargetUnsupported),
+		},
+		{
+			name:    "wrong receiver scope",
+			source:  connectRoutePlanBusinessFieldSource("one", true),
+			payload: `{"vertical_id":"v-1"}`,
+			flowInstances: []ActiveFlowInstanceDescriptor{{
+				InstanceID:    "one",
+				EntityID:      "ent-1",
+				FlowInstance:  "other/one",
+				AddressFields: map[string]string{"entity.vertical_id": "v-1"},
+			}},
+			wantFailure: runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureTargetUnresolved),
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &connectRoutePlanDescriptorStore{
+				targetRouteMemoryStore: newTargetRouteMemoryStore(),
+				flowInstances:          tc.flowInstances,
+			}
+			eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: tc.source})
+			if err != nil {
+				t.Fatalf("NewEventBusWithOptions: %v", err)
+			}
+			evt := events.NewProjectionEvent(uuid.NewString(),
+				events.EventType("producer/deploy.done"), "", "", json.RawMessage(tc.payload), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+
+			routePlan, err := eb.planSubscribedRoutePlan(context.Background(), evt, false)
+			if err != nil {
+				t.Fatalf("planSubscribedRoutePlan: %v", err)
+			}
+			if routePlan.AuthorityState != RoutePlanAuthorityCanonicalFailedClosed || routePlan.AuthorityOwner != routePlanSourceConnectRoutePlan {
+				t.Fatalf("route plan authority = %q/%q, want fail-closed connect route plan", routePlan.AuthorityState, routePlan.AuthorityOwner)
+			}
+			if routePlan.TargetFailure != tc.wantFailure {
+				t.Fatalf("target failure = %q, want %q", routePlan.TargetFailure, tc.wantFailure)
+			}
+			if len(routePlan.LiveRecipients) != 0 || len(routePlan.DeliveryIntents) != 0 || len(routePlan.RoutedRecipients) != 0 ||
+				len(routePlan.RecipientIDs()) != 0 || len(routePlan.PersistedRecipientIDs()) != 0 || len(routePlan.DeliveryRoutes()) != 0 {
+				t.Fatalf("fail-closed business-field route exposed executable routes: live=%#v intents=%#v routed=%#v recipients=%#v persisted=%#v routes=%#v",
+					routePlan.LiveRecipients, routePlan.DeliveryIntents, routePlan.RoutedRecipients, routePlan.RecipientIDs(), routePlan.PersistedRecipientIDs(), routePlan.DeliveryRoutes())
+			}
+		})
+	}
+}
+
+func TestEventBusPublish_ConnectRoutePlanFailsClosedForUnsupportedBusinessFieldTarget(t *testing.T) {
+	source := connectRoutePlanBusinessFieldSource("one", false)
+	store := &connectRoutePlanDescriptorStore{
+		targetRouteMemoryStore: newTargetRouteMemoryStore(),
+		flowInstances: []ActiveFlowInstanceDescriptor{{
+			InstanceID:    "one",
+			EntityID:      "ent-1",
+			FlowInstance:  "consumer/one",
+			AddressFields: map[string]string{"entity.vertical_id": "v-1"},
+		}},
 	}
 	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
@@ -935,6 +1082,46 @@ func connectRoutePlanFanoutSource() semanticview.Source {
 	}}))
 }
 
+func connectRoutePlanBusinessFieldSource(cardinality string, indexed bool) semanticview.Source {
+	return semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{
+		{
+			id:   "producer",
+			mode: "static",
+			outputs: []runtimecontracts.FlowOutputEventPin{{
+				Name:  "deploy_done",
+				Event: "deploy.done",
+			}},
+		},
+		{
+			id:   "consumer",
+			mode: "template",
+			inputs: []runtimecontracts.FlowInputEventPin{{
+				Name:  "deploy_completed",
+				Event: "deploy.completed",
+				Address: &runtimecontracts.FlowInputPinAddress{
+					By:          "vertical_id",
+					Source:      "payload.vertical_id",
+					Target:      "entity.vertical_id",
+					Cardinality: cardinality,
+				},
+			}},
+			nodes: map[string]runtimecontracts.SystemNodeContract{
+				"consumer-node": {
+					ID:            "consumer-node-{instance_id}",
+					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"deploy.completed": {}},
+				},
+			},
+			entityFields: map[string]runtimecontracts.EntityFieldDecl{
+				"vertical_id": {Type: "string", Indexed: indexed},
+			},
+		},
+	}, []runtimecontracts.FlowPackageConnect{{
+		From:     "producer.deploy_done",
+		To:       "consumer.deploy_completed",
+		Delivery: cardinality,
+	}}))
+}
+
 func connectRoutePlanTestBundle(flows []connectRoutePlanTestFlow, connects []runtimecontracts.FlowPackageConnect) *runtimecontracts.WorkflowContractBundle {
 	children := make([]runtimecontracts.FlowContractView, 0, len(flows))
 	byID := make(map[string]*runtimecontracts.FlowContractView, len(flows))
@@ -944,6 +1131,8 @@ func connectRoutePlanTestBundle(flows []connectRoutePlanTestFlow, connects []run
 	flowInputPins := make(map[string][]runtimecontracts.FlowInputEventPin, len(flows))
 	flowOutputPins := make(map[string][]runtimecontracts.FlowOutputEventPin, len(flows))
 	nodeHandlers := map[string]map[string]runtimecontracts.SystemNodeEventHandler{}
+	workflowName := ""
+	rootEntities := runtimecontracts.EntityContractsDocument{}
 	for _, flow := range flows {
 		schema := runtimecontracts.FlowSchemaDocument{
 			Mode: flow.mode,
@@ -977,15 +1166,21 @@ func connectRoutePlanTestBundle(flows []connectRoutePlanTestFlow, connects []run
 				nodeHandlers[node.ID] = node.EventHandlers
 			}
 		}
+		if len(flow.entityFields) > 0 && workflowName == "" {
+			workflowName = flow.id
+			rootEntities["test_entity"] = runtimecontracts.EntityContract{Fields: flow.entityFields}
+		}
 	}
 	root := runtimecontracts.FlowContractView{Children: children}
 	return &runtimecontracts.WorkflowContractBundle{
+		RootEntities: rootEntities,
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: byID,
 		},
 		FlowSchemas: flowSchemas,
 		Semantics: runtimecontracts.WorkflowSemanticView{
+			Name:                workflowName,
 			FlowInputs:          flowInputs,
 			FlowOutputs:         flowOutputs,
 			FlowInputEventPins:  flowInputPins,

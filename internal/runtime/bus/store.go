@@ -66,10 +66,11 @@ type ActiveAgentDescriptorLister interface {
 }
 
 type ActiveFlowInstanceDescriptor struct {
-	InstanceID   string
-	EntityID     string
-	FlowInstance string
-	FlowTemplate string
+	InstanceID    string
+	EntityID      string
+	FlowInstance  string
+	FlowTemplate  string
+	AddressFields map[string]string
 }
 
 func (d ActiveFlowInstanceDescriptor) Normalized() ActiveFlowInstanceDescriptor {
@@ -86,19 +87,21 @@ func (d ActiveFlowInstanceDescriptor) Normalized() ActiveFlowInstanceDescriptor 
 		entityID = runtimeflowidentity.EntityID(flowInstance)
 	}
 	return ActiveFlowInstanceDescriptor{
-		InstanceID:   instanceID,
-		EntityID:     entityID,
-		FlowInstance: flowInstance,
-		FlowTemplate: strings.TrimSpace(d.FlowTemplate),
+		InstanceID:    instanceID,
+		EntityID:      entityID,
+		FlowInstance:  flowInstance,
+		FlowTemplate:  strings.TrimSpace(d.FlowTemplate),
+		AddressFields: normalizeDescriptorAddressFields(d.AddressFields),
 	}
 }
 
 func (d ActiveFlowInstanceDescriptor) TargetDescriptor() ActiveTargetDescriptor {
 	d = d.Normalized()
 	return ActiveTargetDescriptor{
-		ID:           d.InstanceID,
-		EntityID:     d.EntityID,
-		FlowInstance: d.FlowInstance,
+		ID:            d.InstanceID,
+		EntityID:      d.EntityID,
+		FlowInstance:  d.FlowInstance,
+		AddressFields: normalizeDescriptorAddressFields(d.AddressFields),
 	}.Normalized()
 }
 
@@ -110,9 +113,10 @@ type ActiveFlowInstanceDescriptorLister interface {
 }
 
 type ActiveTargetDescriptor struct {
-	ID           string
-	EntityID     string
-	FlowInstance string
+	ID            string
+	EntityID      string
+	FlowInstance  string
+	AddressFields map[string]string
 }
 
 func (d ActiveTargetDescriptor) Normalized() ActiveTargetDescriptor {
@@ -122,10 +126,30 @@ func (d ActiveTargetDescriptor) Normalized() ActiveTargetDescriptor {
 		entityID = runtimeflowidentity.EntityID(flowInstance)
 	}
 	return ActiveTargetDescriptor{
-		ID:           strings.TrimSpace(d.ID),
-		EntityID:     entityID,
-		FlowInstance: flowInstance,
+		ID:            strings.TrimSpace(d.ID),
+		EntityID:      entityID,
+		FlowInstance:  flowInstance,
+		AddressFields: normalizeDescriptorAddressFields(d.AddressFields),
 	}
+}
+
+func normalizeDescriptorAddressFields(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for key, value := range in {
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if key == "" || value == "" {
+			continue
+		}
+		out[key] = value
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // PipelineReceiptPersistence is an optional capability for marking whether

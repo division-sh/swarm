@@ -5,12 +5,14 @@ import (
 	"testing"
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsFiltersToActiveTemplates(t *testing.T) {
-	ctx := context.Background()
+	const runID = "11111111-1111-4111-8111-111111111111"
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
@@ -21,6 +23,20 @@ func TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsFiltersToActiveTempl
 			('service-owner', 'service-owner', 'static', '{}', 'active', CURRENT_TIMESTAMP)
 	`); err != nil {
 		t.Fatalf("seed flow_instances: %v", err)
+	}
+	if _, err := sqliteStore.DB.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status)
+		VALUES (?, 'running'), ('44444444-4444-4444-8444-444444444444', 'running')
+	`, runID); err != nil {
+		t.Fatalf("seed runs: %v", err)
+	}
+	if _, err := sqliteStore.DB.ExecContext(ctx, `
+		INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at)
+		VALUES
+			('22222222-2222-4222-8222-222222222222', ?, 'component-scaffold/active', 'component', 'ready', '{"vertical_id":"v-active"}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+			('33333333-3333-4333-8333-333333333333', '44444444-4444-4444-8444-444444444444', 'component-scaffold/active', 'component', 'ready', '{"vertical_id":"wrong-run"}', datetime('now', '+1 minute'), datetime('now', '+1 minute'))
+	`, runID); err != nil {
+		t.Fatalf("seed entity_state: %v", err)
 	}
 
 	descriptors, err := sqliteStore.ListActiveFlowInstanceDescriptors(ctx)
@@ -42,6 +58,9 @@ func TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsFiltersToActiveTempl
 	}
 	if got.FlowTemplate != "component-scaffold" {
 		t.Fatalf("FlowTemplate = %q, want component-scaffold", got.FlowTemplate)
+	}
+	if got.AddressFields["entity.vertical_id"] != "v-active" {
+		t.Fatalf("AddressFields[entity.vertical_id] = %q, want v-active", got.AddressFields["entity.vertical_id"])
 	}
 }
 

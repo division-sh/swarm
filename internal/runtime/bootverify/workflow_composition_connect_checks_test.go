@@ -85,6 +85,14 @@ func TestRun_FailsClosedForInvalidParentCompositionConnect(t *testing.T) {
 			want: "key_types_incompatible",
 		},
 		{
+			name: "unindexed business-field target",
+			opts: compositionConnectFixtureOptions{
+				consumerEntityUnindexed: true,
+			},
+			want:      "receiver_address_rule_invalid",
+			wantExtra: "indexed: true",
+		},
+		{
 			name: "invalid delivery topology",
 			opts: compositionConnectFixtureOptions{
 				delivery: "many",
@@ -205,20 +213,21 @@ func TestRun_TreatsParentCompositionConnectAsEventTopologyProof(t *testing.T) {
 }
 
 type compositionConnectFixtureOptions struct {
-	connectFrom            string
-	connectTo              string
-	delivery               string
-	noAdapter              bool
-	mapSource              string
-	mapTarget              string
-	omitMap                bool
-	consumerMode           string
-	consumerScalarInput    bool
-	consumerEntityType     string
-	consumerRequiresInput  bool
-	consumerInputBind      string
-	producerRequiresOutput bool
-	producerOutputBind     string
+	connectFrom             string
+	connectTo               string
+	delivery                string
+	noAdapter               bool
+	mapSource               string
+	mapTarget               string
+	omitMap                 bool
+	consumerMode            string
+	consumerScalarInput     bool
+	consumerEntityType      string
+	consumerEntityUnindexed bool
+	consumerRequiresInput   bool
+	consumerInputBind       string
+	producerRequiresOutput  bool
+	producerOutputBind      string
 }
 
 func writeCompositionConnectBootverifyFixture(t *testing.T, opts compositionConnectFixtureOptions) string {
@@ -442,6 +451,7 @@ deploy.completed:
 deployment:
   vertical_id:
     type: string
+    indexed: true
     _unused_reason: composition connect topology proof field
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "nodes.yaml"), "{}\n")
@@ -534,10 +544,15 @@ deploy.completed:
 `)
 	if !opts.consumerScalarInput {
 		entityType := firstTestValue(opts.consumerEntityType, "string")
+		indexed := "\n    indexed: true"
+		if opts.consumerEntityUnindexed {
+			indexed = ""
+		}
 		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "entities.yaml"), `
 deployment:
   vertical_id:
     type: `+entityType+`
+`+indexed+`
 `)
 	}
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "nodes.yaml"), `

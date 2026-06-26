@@ -3,12 +3,14 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
@@ -191,16 +193,36 @@ func (s *PostgresStore) ListActiveFlowInstanceDescriptors(ctx context.Context) (
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		q = tx
 	}
-	rows, err := q.QueryContext(ctx, `
+	runID, hasRunID, err := activeFlowInstanceDescriptorRunID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	query := `
 		SELECT
-			COALESCE(instance_id, ''),
-			COALESCE(flow_template, '')
-		FROM flow_instances
-		WHERE COALESCE(status, '') = 'active'
-		  AND COALESCE(mode, '') = 'template'
-		  AND COALESCE(instance_id, '') <> ''
-		ORDER BY instance_id ASC
-	`)
+			COALESCE(fi.instance_id, ''),
+			COALESCE(fi.flow_template, ''),
+			COALESCE(es.fields, '{}'::jsonb)
+		FROM flow_instances fi
+		LEFT JOIN LATERAL (
+			SELECT fields
+			FROM entity_state es
+			WHERE es.flow_instance = fi.instance_id
+`
+	args := []any{}
+	if hasRunID {
+		query += `			  AND es.run_id = $1::uuid
+`
+		args = append(args, runID)
+	}
+	query += `			ORDER BY es.updated_at DESC, es.created_at DESC, es.entity_id::text ASC
+			LIMIT 1
+		) es ON true
+		WHERE COALESCE(fi.status, '') = 'active'
+		  AND COALESCE(fi.mode, '') = 'template'
+		  AND COALESCE(fi.instance_id, '') <> ''
+		ORDER BY fi.instance_id ASC
+	`
+	rows, err := q.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list active flow instance descriptors: %w", err)
 	}
@@ -209,9 +231,11 @@ func (s *PostgresStore) ListActiveFlowInstanceDescriptors(ctx context.Context) (
 	out := []runtimebus.ActiveFlowInstanceDescriptor{}
 	for rows.Next() {
 		var descriptor runtimebus.ActiveFlowInstanceDescriptor
-		if err := rows.Scan(&descriptor.FlowInstance, &descriptor.FlowTemplate); err != nil {
+		var fieldsRaw any
+		if err := rows.Scan(&descriptor.FlowInstance, &descriptor.FlowTemplate, &fieldsRaw); err != nil {
 			return nil, fmt.Errorf("scan active flow instance descriptor: %w", err)
 		}
+		descriptor.AddressFields = descriptorAddressFields(fieldsRaw)
 		descriptor = descriptor.Normalized()
 		if descriptor.FlowInstance == "" {
 			continue
@@ -232,16 +256,35 @@ func (s *SQLiteRuntimeStore) ListActiveFlowInstanceDescriptors(ctx context.Conte
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		q = tx
 	}
+	runID, hasRunID, err := activeFlowInstanceDescriptorRunID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	fieldsSubquery := `
+			SELECT es.fields
+			FROM entity_state es
+			WHERE es.flow_instance = fi.instance_id
+`
+	args := []any{}
+	if hasRunID {
+		fieldsSubquery += `			  AND es.run_id = ?
+`
+		args = append(args, runID)
+	}
+	fieldsSubquery += `			ORDER BY es.updated_at DESC, es.created_at DESC, es.entity_id ASC
+			LIMIT 1
+`
 	rows, err := q.QueryContext(ctx, `
 		SELECT
-			COALESCE(instance_id, ''),
-			COALESCE(flow_template, '')
-		FROM flow_instances
-		WHERE COALESCE(status, '') = 'active'
-		  AND COALESCE(mode, '') = 'template'
-		  AND COALESCE(instance_id, '') <> ''
-		ORDER BY instance_id ASC
-	`)
+			COALESCE(fi.instance_id, ''),
+			COALESCE(fi.flow_template, ''),
+			COALESCE((`+fieldsSubquery+`), '{}')
+		FROM flow_instances fi
+		WHERE COALESCE(fi.status, '') = 'active'
+		  AND COALESCE(fi.mode, '') = 'template'
+		  AND COALESCE(fi.instance_id, '') <> ''
+		ORDER BY fi.instance_id ASC
+	`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list sqlite active flow instance descriptors: %w", err)
 	}
@@ -250,9 +293,11 @@ func (s *SQLiteRuntimeStore) ListActiveFlowInstanceDescriptors(ctx context.Conte
 	out := []runtimebus.ActiveFlowInstanceDescriptor{}
 	for rows.Next() {
 		var descriptor runtimebus.ActiveFlowInstanceDescriptor
-		if err := rows.Scan(&descriptor.FlowInstance, &descriptor.FlowTemplate); err != nil {
+		var fieldsRaw any
+		if err := rows.Scan(&descriptor.FlowInstance, &descriptor.FlowTemplate, &fieldsRaw); err != nil {
 			return nil, fmt.Errorf("scan sqlite active flow instance descriptor: %w", err)
 		}
+		descriptor.AddressFields = descriptorAddressFields(fieldsRaw)
 		descriptor = descriptor.Normalized()
 		if descriptor.FlowInstance == "" {
 			continue
@@ -263,4 +308,72 @@ func (s *SQLiteRuntimeStore) ListActiveFlowInstanceDescriptors(ctx context.Conte
 		return nil, fmt.Errorf("iterate sqlite active flow instance descriptors: %w", err)
 	}
 	return out, nil
+}
+
+func activeFlowInstanceDescriptorRunID(ctx context.Context) (string, bool, error) {
+	runID, ok, err := runtimecurrentstate.RunIDFromContext(ctx)
+	if err != nil {
+		return "", false, fmt.Errorf("active flow instance descriptor run scope: %w", err)
+	}
+	return runID, ok, nil
+}
+
+func descriptorAddressFields(fieldsRaw any) map[string]string {
+	return descriptorAddressFieldsFromJSON(fieldsRaw, "entity.")
+}
+
+func descriptorAddressFieldsFromJSON(raw any, prefix string) map[string]string {
+	values, err := decodeDescriptorJSONMap(raw)
+	if err != nil || len(values) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(values))
+	for key, value := range values {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		scalar, ok := descriptorScalarString(value)
+		if !ok || scalar == "" {
+			continue
+		}
+		out[prefix+key] = scalar
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func decodeDescriptorJSONMap(raw any) (map[string]any, error) {
+	data := jsonRawMessageValue(raw)
+	if len(data) == 0 || strings.TrimSpace(string(data)) == "" || strings.TrimSpace(string(data)) == "null" {
+		return map[string]any{}, nil
+	}
+	var out map[string]any
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil, err
+	}
+	if out == nil {
+		return map[string]any{}, nil
+	}
+	return out, nil
+}
+
+func descriptorScalarString(value any) (string, bool) {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed), true
+	case bool:
+		if typed {
+			return "true", true
+		}
+		return "false", true
+	case float64:
+		return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%f", typed), "0"), "."), true
+	case json.Number:
+		return typed.String(), true
+	default:
+		return "", false
+	}
 }

@@ -493,6 +493,7 @@ func (f *EntityFieldDecl) UnmarshalYAML(node *yaml.Node) error {
 		Context:                 "entity field",
 		AllowInitial:            true,
 		AllowImmutable:          true,
+		AllowIndexed:            true,
 		AllowUnusedReason:       true,
 		AllowUnusedReaderReason: true,
 		AllowMaterializeFrom:    true,
@@ -503,6 +504,7 @@ func (f *EntityFieldDecl) UnmarshalYAML(node *yaml.Node) error {
 	}
 	f.Type = parsed.Type
 	f.Initial = parsed.Initial
+	f.Indexed = parsed.Indexed
 	f.Immutable = parsed.Immutable
 	f.Description = parsed.Description
 	f.MaterializeFrom = parsed.MaterializeFrom
@@ -554,6 +556,9 @@ func decodeWave1FieldNode(node *yaml.Node, opts wave1FieldNodeOptions) (wave1Par
 	if opts.AllowImmutable {
 		allowed["immutable"] = struct{}{}
 	}
+	if opts.AllowIndexed {
+		allowed["indexed"] = struct{}{}
+	}
 	if opts.AllowUnusedReason {
 		allowed["_unused_reason"] = struct{}{}
 	}
@@ -586,7 +591,7 @@ func decodeWave1FieldNode(node *yaml.Node, opts wave1FieldNodeOptions) (wave1Par
 				}
 				listOf = listValue
 				continue
-			case "initial", "immutable", "_unused_reason", "_unused_reader_reason", "materialize_from", "project":
+			case "initial", "immutable", "indexed", "_unused_reason", "_unused_reader_reason", "materialize_from", "project":
 				return wave1ParsedFieldNode{}, fmt.Errorf("UNDEFINED-FIELD: %s field %q not in platform spec", opts.Context, key)
 			default:
 				return wave1ParsedFieldNode{}, fmt.Errorf("UNDEFINED-FIELD: %s field %q not in platform spec", opts.Context, key)
@@ -617,6 +622,12 @@ func decodeWave1FieldNode(node *yaml.Node, opts wave1FieldNodeOptions) (wave1Par
 				return wave1ParsedFieldNode{}, err
 			}
 			field.Immutable = immutable
+		case "indexed":
+			indexed, err := decodeBoolNode(value)
+			if err != nil {
+				return wave1ParsedFieldNode{}, err
+			}
+			field.Indexed = indexed
 		case "_unused_reason":
 			text, err := decodeScalarStringNode(value)
 			if err != nil {
@@ -759,6 +770,7 @@ type wave1FieldNodeOptions struct {
 	Context                 string
 	AllowInitial            bool
 	AllowImmutable          bool
+	AllowIndexed            bool
 	AllowUnusedReason       bool
 	AllowUnusedReaderReason bool
 	AllowMaterializeFrom    bool
@@ -768,6 +780,7 @@ type wave1FieldNodeOptions struct {
 type wave1ParsedFieldNode struct {
 	Type               string
 	Initial            any
+	Indexed            bool
 	Immutable          bool
 	Description        string
 	MaterializeFrom    string

@@ -9,6 +9,7 @@ import (
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/testutil"
 )
@@ -27,6 +28,20 @@ func ensureFlowInstanceRouteTables(t *testing.T, ctx context.Context, db *sql.DB
 		)
 	`); err != nil {
 		t.Fatalf("ensure flow_instances table: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS entity_state (
+			entity_id UUID PRIMARY KEY,
+			run_id UUID NOT NULL,
+			flow_instance TEXT NOT NULL,
+			entity_type TEXT NOT NULL DEFAULT '',
+			current_state TEXT NOT NULL DEFAULT '',
+			fields JSONB NOT NULL DEFAULT '{}'::jsonb,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)
+	`); err != nil {
+		t.Fatalf("ensure entity_state table: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS routing_rules (
@@ -296,7 +311,8 @@ func TestPostgresStoreListFlowInstanceRoutesFiltersTerminatedInstances(t *testin
 }
 
 func TestPostgresStoreListActiveFlowInstanceDescriptorsFiltersToActiveTemplates(t *testing.T) {
-	ctx := context.Background()
+	const runID = "11111111-1111-4111-8111-111111111111"
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ensureFlowInstanceRouteTables(t, ctx, db)
@@ -309,6 +325,20 @@ func TestPostgresStoreListActiveFlowInstanceDescriptorsFiltersToActiveTemplates(
 			('service-owner', 'service-owner', 'static', '{}'::jsonb, 'active', NOW())
 	`); err != nil {
 		t.Fatalf("seed flow_instances: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status)
+		VALUES ($1::uuid, 'running'), ('44444444-4444-4444-8444-444444444444'::uuid, 'running')
+	`, runID); err != nil {
+		t.Fatalf("seed runs: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at)
+		VALUES
+			('22222222-2222-4222-8222-222222222222', $1::uuid, 'component-scaffold/active', 'component', 'ready', '{"vertical_id":"v-active"}'::jsonb, NOW(), NOW()),
+			('33333333-3333-4333-8333-333333333333', '44444444-4444-4444-8444-444444444444'::uuid, 'component-scaffold/active', 'component', 'ready', '{"vertical_id":"wrong-run"}'::jsonb, NOW() + INTERVAL '1 minute', NOW() + INTERVAL '1 minute')
+	`, runID); err != nil {
+		t.Fatalf("seed entity_state: %v", err)
 	}
 
 	descriptors, err := pg.ListActiveFlowInstanceDescriptors(ctx)
@@ -330,6 +360,9 @@ func TestPostgresStoreListActiveFlowInstanceDescriptorsFiltersToActiveTemplates(
 	}
 	if got.FlowTemplate != "component-scaffold" {
 		t.Fatalf("FlowTemplate = %q, want component-scaffold", got.FlowTemplate)
+	}
+	if got.AddressFields["entity.vertical_id"] != "v-active" {
+		t.Fatalf("AddressFields[entity.vertical_id] = %q, want v-active", got.AddressFields["entity.vertical_id"])
 	}
 }
 
