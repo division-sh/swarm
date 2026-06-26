@@ -122,6 +122,7 @@ search_dimensions:
       - internal/runtime/manager/types.go
       - internal/runtime/tools/deps.go
     canonical_layer: route_plan_consumers
+    classified_paths_required: true
   - id: route_plan_source_reason
     pattern: 'routePlanSource|routePlanReason|RoutePlanAuthorityState|RoutePlanDeliveryIntent'
     minimum_matching_files: 7
@@ -377,6 +378,7 @@ seam_families:
     layer: route_topology
     classification: valid_consumer
     paths:
+      - internal/runtime/conformance/testdata/route_authority_matrix.yaml
       - internal/runtime/bus/connect_route_plan_dispatch.go
       - internal/runtime/runforkadmission/contract_frontier.go
       - internal/runtime/runforkadmission/selected_route_history.go
@@ -396,6 +398,7 @@ seam_families:
       - internal/runtime/bus/connect_route_plan_dispatch_test.go
       - internal/runtime/bus/eventbus_target_routes_test.go
       - internal/runtime/bus/routing_derivation.go
+      - internal/runtime/conformance/route_authority_matrix_test.go
       - internal/runtime/conformance/testdata/route_authority_matrix.yaml
     search_dimensions: [receiver_carrier, connect_route_plan]
     invalid_authority:
@@ -438,6 +441,7 @@ seam_families:
     layer: compatibility_adapter_non_authority
     classification: split_open_sibling
     paths:
+      - platform-spec.yaml
       - internal/runtime/bus/route_plan.go
       - internal/runtime/bus/delivery_planner.go
       - internal/runtime/bus/eventbus.go
@@ -458,13 +462,36 @@ seam_families:
     layer: route_plan_consumers
     classification: split_open_sibling
     paths:
+      - internal/apiv1/openrpc_mutating_runtime_test.go
+      - internal/apiv1/operator_event_replay.go
+      - internal/apiv1/operator_event_replay_test.go
+      - internal/runtime/agents/agent_llm_test.go
       - internal/runtime/bus/delivery_planner.go
       - internal/runtime/bus/eventbus_publish.go
-      - internal/runtime/bus/outbox.go
-      - internal/apiv1/operator_event_replay.go
-      - internal/runtime/pipeline/coordinator.go
+      - internal/runtime/bus/eventbus_publish_test.go
+      - internal/runtime/conformance/delivery_lifecycle_conformance_test.go
+      - internal/runtime/conformance/session_scope_conformance_test.go
+      - internal/runtime/manager/flow_activation_test.go
+      - internal/runtime/manager/receipts_test.go
+      - internal/runtime/manager/recovery_test.go
+      - internal/runtime/manager/runtime_chat_test.go
+      - internal/runtime/manager/runtime_reset_test.go
       - internal/runtime/manager/types.go
+      - internal/runtime/pipeline/handler_engine_transaction_test.go
+      - internal/runtime/pipeline/internal_subscription_test.go
+      - internal/runtime/pipeline/coordinator.go
+      - internal/runtime/pipeline/on_timeout_pipeline_test.go
+      - internal/runtime/pipeline/runtime_support.go
+      - internal/runtime/pipeline/workflow_conformance_test.go
+      - internal/runtime/pipeline/workflow_handler_preview.go
+      - internal/store/run_fork_selected_contract_route_recovery_test.go
+      - internal/store/sqlite_runtime_test.go
       - internal/runtime/tools/deps.go
+      - internal/runtime/tools/executor_agents.go
+      - internal/runtime/tools/executor_agents_test.go
+      - internal/runtime/tools/executor_emit_test.go
+      - internal/runtime/tools/executor_entity_test.go
+      - internal/runtime/tools/executor_telemetry_test.go
       - internal/runtime/conformance/testdata/route_authority_matrix.yaml
     search_dimensions: [direct_delivery_path, route_plan, publish_plan_consumers]
     invalid_authority:
