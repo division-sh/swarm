@@ -689,11 +689,11 @@ guardrail_proposals:
       - direct SQL tests from asserting delivery counts without typed semantic subscriber identity
       - store fixtures from becoming undocumented route-authority interpreters
 follow_up_decision:
-  tracker_state: "#1494, #1495, and #1496 are closed capped children under #1493; #1479/#1466/#1481 remain open for descriptor, composition-first architecture, or broader route-authority work."
+  tracker_state: "#1494, #1495, and #1496 are closed capped children; #1493 is closed by #1503 after its parent-tail cleanup; #1340/#1481 remain active route-authority trackers, and #1479/#1466 remain open for descriptor or composition-first architecture work."
   new_child_required_before_coding: false
   runtime_behavior_child_required_now: false
   notes: >
-    #1493 owns the parent-tail closeout after the capped route-authority
-    children. Concrete bypasses discovered after this inventory must open or
-    update a child issue and receive an independent implementation gate before
-    coding.
+    #1493 is historical closed parent-tail context after #1503 merges, not an
+    active route-authority tracker. Concrete bypasses discovered after this
+    inventory must open or update a child issue and receive an independent
+    implementation gate before coding.

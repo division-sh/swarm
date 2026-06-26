@@ -213,7 +213,7 @@ func validateRouteAuthorityMatrix(root string, matrix routeAuthorityMatrix, ctx 
 		}
 		activeTrackers[key] = struct{}{}
 	}
-	for _, issue := range []int{1340, 1481, 1493} {
+	for _, issue := range []int{1340, 1481} {
 		key := routeAuthorityTrackerKey(issue, "runtime_operations.delivery_and_replay_ownership")
 		if _, ok := activeTrackers[key]; !ok {
 			problems = append(problems, fmt.Sprintf("active_trackers missing #%d runtime_operations.delivery_and_replay_ownership", issue))
