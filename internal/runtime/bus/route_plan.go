@@ -254,6 +254,10 @@ func (p RoutePlan) AllowsLowerPrecedenceRouteProduction() bool {
 	}
 }
 
+func (p PublishRecipientPlan) UsesCanonicalRouteAuthority() bool {
+	return p.canonicalAuthority
+}
+
 func (p *RoutePlan) AddLiveRecipients(recipients ...RoutePlanLiveRecipient) {
 	if p == nil {
 		return

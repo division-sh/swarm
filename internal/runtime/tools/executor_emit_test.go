@@ -10,8 +10,11 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
+	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"time"
 )
@@ -46,6 +49,58 @@ func (l emitWorkflowInstanceLoader) Load(_ context.Context, ref string) (runtime
 	}
 	instance, ok := l.rows[strings.TrimSpace(ref)]
 	return instance, ok, nil
+}
+
+type emitRoutePlanStore struct {
+	events      map[string]events.Event
+	routes      map[string][]events.DeliveryRoute
+	scopes      map[string]runtimereplayclaim.CommittedReplayScope
+	receipts    map[string]string
+	receiptErrs map[string]string
+}
+
+func newEmitRoutePlanStore() *emitRoutePlanStore {
+	return &emitRoutePlanStore{
+		events:      map[string]events.Event{},
+		routes:      map[string][]events.DeliveryRoute{},
+		scopes:      map[string]runtimereplayclaim.CommittedReplayScope{},
+		receipts:    map[string]string{},
+		receiptErrs: map[string]string{},
+	}
+}
+
+func (s *emitRoutePlanStore) AppendEvent(_ context.Context, evt events.Event) error {
+	s.events[evt.ID()] = evt
+	return nil
+}
+
+func (s *emitRoutePlanStore) InsertEventDeliveries(_ context.Context, _ string, _ []string) error {
+	return nil
+}
+
+func (s *emitRoutePlanStore) ListEventDeliveryRecipients(_ context.Context, eventID string) ([]string, error) {
+	var out []string
+	for _, route := range s.routes[eventID] {
+		if route.SubscriberType == "agent" {
+			out = append(out, route.SubscriberID)
+		}
+	}
+	return out, nil
+}
+
+func (s *emitRoutePlanStore) SupportsPersistedReplay() bool { return true }
+
+func (s *emitRoutePlanStore) PersistEventWithDeliveryRouteSetAndScope(_ context.Context, evt events.Event, routes []events.DeliveryRoute, scope runtimereplayclaim.CommittedReplayScope) error {
+	s.events[evt.ID()] = evt
+	s.routes[evt.ID()] = events.NormalizeDeliveryRoutes(routes)
+	s.scopes[evt.ID()] = scope
+	return nil
+}
+
+func (s *emitRoutePlanStore) UpsertPipelineReceipt(_ context.Context, eventID, status, errText string) error {
+	s.receipts[eventID] = status
+	s.receiptErrs[eventID] = errText
+	return nil
 }
 
 func TestHandleEmitTool_PreservesPayloadForFlowScopedEmit(t *testing.T) {
@@ -613,6 +668,126 @@ func TestHandleEmitTool_RootSchemaPinOutputStillRequiresTarget(t *testing.T) {
 	}
 }
 
+func TestHandleEmitTool_RoutesConnectedOutputPinThroughCanonicalRouteAuthority(t *testing.T) {
+	source := emitRoutePlanStaticSource(runtimecontracts.FlowPackageConnect{
+		From:     "producer.deploy_done",
+		To:       "consumer.deploy_completed",
+		Delivery: "one",
+	})
+	store := newEmitRoutePlanStore()
+	eb, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	emitRegistry := NewEmitRegistry(source, nil)
+	actor := models.AgentConfig{
+		ID:         "producer-agent",
+		Role:       "producer",
+		Mode:       "producer",
+		FlowPath:   "producer",
+		EntityID:   "producer-entity",
+		EmitEvents: []string{"deploy.done"},
+	}
+	if tools := emitRegistry.GenerateEmitToolsForActor(actor, nil); !emitToolDefinitionsContain(tools, "emit_deploy_done") {
+		t.Fatalf("generated emit tools = %#v, want emit_deploy_done", tools)
+	}
+	exec := NewExecutorWithOptions(eb, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
+
+	ctx := runtimebus.WithInboundEvent(context.Background(), events.NewProjectionEvent(
+		"evt-parent",
+		events.EventType("producer/deploy.requested"),
+		"runtime",
+		"",
+		nil,
+		0,
+		"run-1474",
+		"",
+		events.EventEnvelope{},
+		time.Now().UTC(),
+	))
+	out, err := exec.handleEmitTool(ctx, actor, "emit_deploy_done", map[string]any{})
+	if err != nil {
+		t.Fatalf("handleEmitTool: %v", err)
+	}
+	eventID := emitToolResultString(t, out, "event_id")
+	persisted := store.events[eventID]
+	if got, want := string(persisted.Type()), "producer/deploy.done"; got != want {
+		t.Fatalf("persisted event type = %q, want %q", got, want)
+	}
+	if persisted.HasTargetRoute() {
+		t.Fatalf("persisted event target route = %#v, want no producer-authored target", persisted.TargetRoute())
+	}
+	wantRoute := events.DeliveryRoute{
+		SubscriberType: "node",
+		SubscriberID:   "consumer-node",
+		Target: events.RouteIdentity{
+			FlowID:       "consumer",
+			FlowInstance: "consumer",
+			EntityID:     runtimeflowidentity.EntityID("consumer"),
+		},
+	}
+	if !emitDeliveryRoutesContain(store.routes[eventID], wantRoute) {
+		t.Fatalf("persisted delivery routes = %#v, want %#v", store.routes[eventID], wantRoute)
+	}
+	if got := store.receipts[eventID]; got != "processed" {
+		t.Fatalf("pipeline receipt = %q, want processed", got)
+	}
+	if got := store.scopes[eventID]; got != runtimereplayclaim.CommittedReplayScopeSubscribed {
+		t.Fatalf("committed replay scope = %q, want subscribed", got)
+	}
+}
+
+func TestHandleEmitTool_FailsClosedForConnectedOutputWithoutCanonicalRouteAuthority(t *testing.T) {
+	source := emitRoutePlanSource(nil)
+	store := newEmitRoutePlanStore()
+	eb, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	raw := eb.SubscribeInternal("raw-listener", events.EventType("producer/deploy.done"), events.EventType("deploy.done"))
+	emitRegistry := NewEmitRegistry(source, nil)
+	actor := models.AgentConfig{
+		ID:         "producer-agent",
+		Role:       "producer",
+		Mode:       "producer",
+		FlowPath:   "producer",
+		EntityID:   "producer-entity",
+		EmitEvents: []string{"deploy.done"},
+	}
+	exec := NewExecutorWithOptions(eb, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
+
+	ctx := runtimebus.WithInboundEvent(context.Background(), events.NewProjectionEvent(
+		"evt-parent",
+		events.EventType("producer/deploy.requested"),
+		"runtime",
+		"",
+		nil,
+		0,
+		"run-1474",
+		"",
+		events.EventEnvelope{},
+		time.Now().UTC(),
+	))
+	_, err = exec.handleEmitTool(ctx, actor, "emit_deploy_done", map[string]any{})
+	if err == nil {
+		t.Fatal("handleEmitTool error = nil, want target_required_missing")
+	}
+	if !strings.Contains(err.Error(), "target_required_missing") {
+		t.Fatalf("handleEmitTool error = %v, want target_required_missing", err)
+	}
+	if len(store.events) != 0 {
+		t.Fatalf("persisted events = %#v, want none", store.events)
+	}
+	if len(store.routes) != 0 {
+		t.Fatalf("persisted routes = %#v, want none", store.routes)
+	}
+	select {
+	case evt := <-raw:
+		t.Fatalf("raw subscriber received %#v, want no lower-precedence rescue", evt)
+	default:
+	}
+}
+
 func TestHandleEmitTool_FailsClosedOnUndeclaredPayloadField(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Events: map[string]runtimecontracts.EventCatalogEntry{
@@ -986,4 +1161,159 @@ func TestHandleEmitTool_FailsClosedOnNamedTypeViolation(t *testing.T) {
 	if bus.count != 0 {
 		t.Fatalf("publish count = %d, want 0", bus.count)
 	}
+}
+
+type emitRoutePlanTestFlow struct {
+	id      string
+	mode    string
+	inputs  []runtimecontracts.FlowInputEventPin
+	outputs []runtimecontracts.FlowOutputEventPin
+	nodes   map[string]runtimecontracts.SystemNodeContract
+}
+
+func emitRoutePlanStaticSource(connect runtimecontracts.FlowPackageConnect) semanticview.Source {
+	return emitRoutePlanSource([]runtimecontracts.FlowPackageConnect{connect})
+}
+
+func emitRoutePlanSource(connects []runtimecontracts.FlowPackageConnect) semanticview.Source {
+	return semanticview.Wrap(emitRoutePlanTestBundle([]emitRoutePlanTestFlow{
+		{
+			id:   "producer",
+			mode: "static",
+			outputs: []runtimecontracts.FlowOutputEventPin{{
+				Name:  "deploy_done",
+				Event: "deploy.done",
+			}},
+		},
+		{
+			id:   "consumer",
+			mode: "static",
+			inputs: []runtimecontracts.FlowInputEventPin{{
+				Name:  "deploy_completed",
+				Event: "deploy.completed",
+			}},
+			nodes: map[string]runtimecontracts.SystemNodeContract{
+				"consumer-node": {
+					ID:            "consumer-node",
+					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"deploy.completed": {}},
+				},
+			},
+		},
+	}, connects))
+}
+
+func emitRoutePlanTestBundle(flows []emitRoutePlanTestFlow, connects []runtimecontracts.FlowPackageConnect) *runtimecontracts.WorkflowContractBundle {
+	children := make([]runtimecontracts.FlowContractView, 0, len(flows))
+	byID := make(map[string]*runtimecontracts.FlowContractView, len(flows))
+	flowSchemas := make(map[string]runtimecontracts.FlowSchemaDocument, len(flows))
+	flowInputs := make(map[string][]string, len(flows))
+	flowOutputs := make(map[string][]string, len(flows))
+	flowInputPins := make(map[string][]runtimecontracts.FlowInputEventPin, len(flows))
+	flowOutputPins := make(map[string][]runtimecontracts.FlowOutputEventPin, len(flows))
+	nodeHandlers := map[string]map[string]runtimecontracts.SystemNodeEventHandler{}
+	eventCatalog := map[string]runtimecontracts.EventCatalogEntry{}
+	for _, flow := range flows {
+		schema := runtimecontracts.FlowSchemaDocument{
+			Mode: flow.mode,
+			Pins: runtimecontracts.FlowPins{
+				Inputs: runtimecontracts.FlowInputPins{
+					Events:    emitRoutePlanInputEvents(flow.inputs),
+					EventPins: flow.inputs,
+				},
+				Outputs: runtimecontracts.FlowOutputPins{
+					Events:    emitRoutePlanOutputEvents(flow.outputs),
+					EventPins: flow.outputs,
+				},
+			},
+		}
+		flowEvents := map[string]runtimecontracts.EventCatalogEntry{}
+		for _, eventType := range append(schema.Pins.Inputs.Events, schema.Pins.Outputs.Events...) {
+			eventCatalog[eventType] = runtimecontracts.EventCatalogEntry{Payload: runtimecontracts.EventPayloadSpec{Type: "object"}}
+			flowEvents[eventType] = runtimecontracts.EventCatalogEntry{}
+		}
+		view := runtimecontracts.FlowContractView{
+			Paths:  runtimecontracts.FlowContractPaths{ID: flow.id, Flow: flow.id},
+			Schema: schema,
+			Events: flowEvents,
+			Path:   flow.id,
+			Nodes:  flow.nodes,
+		}
+		children = append(children, view)
+		viewCopy := view
+		byID[flow.id] = &viewCopy
+		flowSchemas[flow.id] = schema
+		flowInputs[flow.id] = append([]string(nil), schema.Pins.Inputs.Events...)
+		flowOutputs[flow.id] = append([]string(nil), schema.Pins.Outputs.Events...)
+		flowInputPins[flow.id] = append([]runtimecontracts.FlowInputEventPin(nil), flow.inputs...)
+		flowOutputPins[flow.id] = append([]runtimecontracts.FlowOutputEventPin(nil), flow.outputs...)
+		for _, node := range flow.nodes {
+			if len(node.EventHandlers) > 0 {
+				nodeHandlers[node.ID] = node.EventHandlers
+			}
+		}
+	}
+	root := runtimecontracts.FlowContractView{Children: children}
+	return &runtimecontracts.WorkflowContractBundle{
+		Events: eventCatalog,
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root,
+			ByID: byID,
+		},
+		FlowSchemas: flowSchemas,
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			FlowInputs:          flowInputs,
+			FlowOutputs:         flowOutputs,
+			FlowInputEventPins:  flowInputPins,
+			FlowOutputEventPins: flowOutputPins,
+			CompositionConnects: connects,
+			NodeHandlers:        nodeHandlers,
+		},
+	}
+}
+
+func emitRoutePlanInputEvents(pins []runtimecontracts.FlowInputEventPin) []string {
+	out := make([]string, 0, len(pins))
+	for _, pin := range pins {
+		out = append(out, pin.EventType())
+	}
+	return out
+}
+
+func emitRoutePlanOutputEvents(pins []runtimecontracts.FlowOutputEventPin) []string {
+	out := make([]string, 0, len(pins))
+	for _, pin := range pins {
+		out = append(out, pin.EventType())
+	}
+	return out
+}
+
+func emitDeliveryRoutesContain(in []events.DeliveryRoute, want events.DeliveryRoute) bool {
+	for _, route := range events.NormalizeDeliveryRoutes(in) {
+		if route == want {
+			return true
+		}
+	}
+	return false
+}
+
+func emitToolDefinitionsContain(in []llm.ToolDefinition, name string) bool {
+	for _, tool := range in {
+		if tool.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func emitToolResultString(t testing.TB, out any, key string) string {
+	t.Helper()
+	result, ok := out.(map[string]any)
+	if !ok {
+		t.Fatalf("emit tool result = %#v, want map", out)
+	}
+	value, ok := result[key].(string)
+	if !ok || value == "" {
+		t.Fatalf("emit tool result[%q] = %#v, want non-empty string", key, result[key])
+	}
+	return value
 }

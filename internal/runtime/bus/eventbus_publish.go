@@ -976,6 +976,7 @@ func (eb *EventBus) publishRecipientPlan(evt events.Event, routePlan RoutePlan) 
 		SubscriptionRecipients: uniqueStrings(routePlan.SubscribedRecipients),
 		DeliveryRoutes:         routePlan.DeliveryRoutes(),
 		TargetFailure:          strings.TrimSpace(string(routePlan.TargetFailure)),
+		canonicalAuthority:     routePlan.CanonicalRouteOwnerMatched() && routePlan.AuthorityOwner == routePlanSourceConnectRoutePlan,
 	}
 	if eb != nil {
 		out.RoutedRecipients = eb.describeSubscribersForEvent(string(evt.Type()), routePlan.RoutedRecipients)

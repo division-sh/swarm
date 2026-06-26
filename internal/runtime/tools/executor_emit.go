@@ -16,6 +16,10 @@ import (
 	"github.com/google/uuid"
 )
 
+type publishRecipientPlanner interface {
+	CheckPublishRecipientPlan(context.Context, events.Event) (runtimebus.PublishRecipientPlan, error)
+}
+
 func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig, toolName string, input any) (any, error) {
 	eventType, eventSchema, ok := e.emitRegistry.EventSchemaForActorTool(actor, toolName)
 	if !ok {
@@ -111,54 +115,88 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 		time.Now(),
 	)
 	if runtimepinrouting.PinDeclaredOutput(e.workflowSource, flowID, eventType) {
-		spec := runtimecontracts.EmitSpec{Event: eventType}
-		parentRoute, allowEntityOnlyParentRoute, err := e.emitParentRouteForActor(ctx, actor, flowID, flowInstance, inbound)
-		if err != nil {
-			wrapped := WrapRuntimeError(
-				"parent_route_lookup_failed",
-				"tool-executor",
-				"handle_emit_tool.parent_route",
-				true,
-				err,
-				"failed to resolve emit tool parent route",
-			)
-			e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, emitted, "parent_route_lookup_failed", "publish", "parent_route", wrapped)
-			return nil, wrapped
+		usePublishAuthority := false
+		if planner, ok := e.bus.(publishRecipientPlanner); ok && planner != nil {
+			plan, err := planner.CheckPublishRecipientPlan(ctx, emitted)
+			if err != nil {
+				wrapped := WrapRuntimeError(
+					"route_plan_preflight_failed",
+					"tool-executor",
+					"handle_emit_tool.route_plan_preflight",
+					true,
+					err,
+					"failed to preflight emit tool route plan",
+				)
+				e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, emitted, "route_plan_preflight_failed", "publish", "route_plan_preflight", wrapped)
+				return nil, wrapped
+			}
+			if plan.UsesCanonicalRouteAuthority() {
+				if plan.TargetFailure != "" {
+					wrapped := NewRuntimeError(
+						plan.TargetFailure,
+						"tool-executor",
+						"handle_emit_tool.route_plan_preflight",
+						false,
+						"emit tool %s attempted pin-declared output %s without supported route plan target",
+						toolName,
+						eventType,
+					)
+					e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, emitted, "route_plan_preflight_failed", "publish", "route_plan_preflight", wrapped)
+					return nil, wrapped
+				}
+				usePublishAuthority = true
+			}
 		}
-		resolution := runtimepinrouting.ResolveEnvelope(runtimepinrouting.ResolutionInput{
-			Source:                     e.workflowSource,
-			FlowID:                     flowID,
-			EventType:                  eventType,
-			Emit:                       spec,
-			SourceRoute:                sourceRoute,
-			Inbound:                    inbound,
-			ParentRoute:                parentRoute,
-			AllowEntityOnlyParentRoute: allowEntityOnlyParentRoute,
-		}, envelope)
-		if resolution.Failure != "" {
-			wrapped := NewRuntimeError(
-				string(resolution.Failure),
-				"tool-executor",
-				"handle_emit_tool.pin_target_resolution",
-				false,
-				"emit tool %s attempted pin-declared output %s without supported target mechanism",
-				toolName,
-				eventType,
+		if !usePublishAuthority {
+			spec := runtimecontracts.EmitSpec{Event: eventType}
+			parentRoute, allowEntityOnlyParentRoute, err := e.emitParentRouteForActor(ctx, actor, flowID, flowInstance, inbound)
+			if err != nil {
+				wrapped := WrapRuntimeError(
+					"parent_route_lookup_failed",
+					"tool-executor",
+					"handle_emit_tool.parent_route",
+					true,
+					err,
+					"failed to resolve emit tool parent route",
+				)
+				e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, emitted, "parent_route_lookup_failed", "publish", "parent_route", wrapped)
+				return nil, wrapped
+			}
+			resolution := runtimepinrouting.ResolveEnvelope(runtimepinrouting.ResolutionInput{
+				Source:                     e.workflowSource,
+				FlowID:                     flowID,
+				EventType:                  eventType,
+				Emit:                       spec,
+				SourceRoute:                sourceRoute,
+				Inbound:                    inbound,
+				ParentRoute:                parentRoute,
+				AllowEntityOnlyParentRoute: allowEntityOnlyParentRoute,
+			}, envelope)
+			if resolution.Failure != "" {
+				wrapped := NewRuntimeError(
+					string(resolution.Failure),
+					"tool-executor",
+					"handle_emit_tool.pin_target_resolution",
+					false,
+					"emit tool %s attempted pin-declared output %s without supported target mechanism",
+					toolName,
+					eventType,
+				)
+				e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, emitted, "pin_target_resolution_failed", "publish", "pin_target_resolution", wrapped)
+				return nil, wrapped
+			}
+			emitted = events.NewChildEvent(
+				emitted.ID(),
+				emitted.Type(),
+				emitted.SourceAgent(),
+				emitted.TaskID(),
+				emitted.Payload(),
+				emitted.ChainDepth(),
+				inbound,
+				resolution.Envelope,
+				emitted.CreatedAt(),
 			)
-			e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, emitted, "pin_target_resolution_failed", "publish", "pin_target_resolution", wrapped)
-			return nil, wrapped
 		}
-		emitted = events.NewChildEvent(
-			emitted.ID(),
-			emitted.Type(),
-			emitted.SourceAgent(),
-			emitted.TaskID(),
-			emitted.Payload(),
-			emitted.ChainDepth(),
-			inbound,
-			resolution.Envelope,
-			emitted.CreatedAt(),
-		)
 	}
 	if err := e.bus.Publish(ctx, emitted); err != nil {
 		wrapped := WrapRuntimeError(
