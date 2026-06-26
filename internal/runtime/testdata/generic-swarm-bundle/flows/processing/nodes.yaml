@@ -22,11 +22,9 @@ processing-node:
           then:
             emit:
               event: item.completed
-              broadcast: true
           else:
             emit:
               event: item.rejected
-              broadcast: true
       compute:
         operation: pick_or_average
         store_as: score
@@ -43,13 +41,11 @@ processing-node:
           advances_to: approved
           emit:
             event: item.completed
-            broadcast: true
         reject:
           condition: else
           advances_to: rejected
           emit:
             event: item.rejected
-            broadcast: true
       sets_gate: score_ready
       clear_gates:
         - intake_open

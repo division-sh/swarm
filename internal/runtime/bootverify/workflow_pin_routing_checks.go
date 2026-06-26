@@ -15,6 +15,10 @@ func checkPinTargetResolution(c *checkerContext) []Finding {
 		if !runtimepinrouting.PinDeclaredOutput(c.source, site.FlowID, site.Spec.EventType()) {
 			continue
 		}
+		if failure := runtimepinrouting.ProducerRouteCommonPathFailure(c.source, site.FlowID, site.Spec.EventType(), site.Spec); failure != "" {
+			findings = append(findings, pinTargetFinding(site, string(failure)))
+			continue
+		}
 		if compositionConnectsFromOutputEvent(c.source, site.FlowID, site.Spec.EventType()) {
 			continue
 		}
@@ -157,7 +161,8 @@ func pinRoutingAllKnownProducersTargeted(source semanticview.Source, flowID, eve
 		}
 		producers++
 		structuralParent := pinRoutingStructuralParentRouteEligible(source, site.FlowID)
-		if site.Spec.HasTarget() || (structuralParent && !site.Spec.Broadcast) {
+		if (site.Spec.HasTarget() && runtimepinrouting.ProducerRouteCommonPathFailure(source, site.FlowID, site.Spec.EventType(), site.Spec) == "") ||
+			(structuralParent && !site.Spec.Broadcast) {
 			targeted++
 		}
 	}

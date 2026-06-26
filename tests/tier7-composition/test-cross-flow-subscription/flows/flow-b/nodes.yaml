@@ -9,4 +9,3 @@ flow-b-node:
       advances_to: done
       emit:
         event: order.completed
-        broadcast: true

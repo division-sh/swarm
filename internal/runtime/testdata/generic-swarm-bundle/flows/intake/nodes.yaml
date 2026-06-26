@@ -42,7 +42,6 @@ intake-router:
           advances_to: ready
           emit:
             event: item.review_requested
-            broadcast: true
       sets_gate: intake_ready
       clear_gates:
         - needs_revision

@@ -108,6 +108,103 @@ func TestResolveFailsClosedForRootPinOutputWithoutTargetMechanism(t *testing.T) 
 	}
 }
 
+func TestResolveFailsClosedForProducerTargetCommonCompositionPath(t *testing.T) {
+	result := Resolve(ResolutionInput{
+		Source:    testProducerCommonPathSource(),
+		FlowID:    "producer",
+		EventType: "shared.ready",
+		Emit: runtimecontracts.EmitSpec{
+			Target: runtimecontracts.EmitTargetSpec{
+				Flow:  "consumer",
+				Match: map[string]runtimecontracts.ExpressionValue{"entity_id": runtimecontracts.RefExpression("payload.entity_id")},
+			},
+		},
+		MatchValues: map[string]string{"entity_id": "entity-1"},
+		Descriptors: []Descriptor{{
+			EntityID:     "entity-1",
+			FlowInstance: "consumer/inst-1",
+		}},
+	}, events.NewProjectionEvent("", "shared.ready", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+
+	if result.Failure != FailureProducerTargetCommonPath {
+		t.Fatalf("Failure = %q, want %q", result.Failure, FailureProducerTargetCommonPath)
+	}
+	if got := result.Event.TargetRoute(); !got.Empty() {
+		t.Fatalf("Event target = %#v, want empty on producer target common path", got)
+	}
+}
+
+func TestResolveFailsClosedForProducerBroadcastCommonCompositionPath(t *testing.T) {
+	result := Resolve(ResolutionInput{
+		Source:    testProducerCommonPathSource(),
+		FlowID:    "producer",
+		EventType: "shared.ready",
+		Emit: runtimecontracts.EmitSpec{
+			Broadcast: true,
+		},
+	}, events.NewProjectionEvent("", "shared.ready", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+
+	if result.Failure != FailureProducerBroadcastCommonPath {
+		t.Fatalf("Failure = %q, want %q", result.Failure, FailureProducerBroadcastCommonPath)
+	}
+	if result.Broadcast {
+		t.Fatal("Broadcast = true, want false on producer broadcast common path")
+	}
+}
+
+func TestResolveAllowsParentConnectToOwnPinDeclaredOutput(t *testing.T) {
+	result := Resolve(ResolutionInput{
+		Source:    testProducerConnectSource(),
+		FlowID:    "producer",
+		EventType: "shared.ready",
+	}, events.NewProjectionEvent("", "shared.ready", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+
+	if result.Failure != "" {
+		t.Fatalf("Failure = %q, want empty", result.Failure)
+	}
+	if got := result.Event.TargetRoute(); !got.Empty() {
+		t.Fatalf("Event target = %#v, want empty before EventBus RoutePlan", got)
+	}
+}
+
+func TestResolveAllowsExplicitInstanceTargetEscape(t *testing.T) {
+	result := Resolve(ResolutionInput{
+		Source:    testProducerCommonPathSource(),
+		FlowID:    "producer",
+		EventType: "shared.ready",
+		Emit: runtimecontracts.EmitSpec{
+			Target: runtimecontracts.EmitTargetSpec{
+				InstanceID: "producer-1",
+			},
+		},
+	}, events.NewProjectionEvent("", "shared.ready", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+
+	if result.Failure != "" {
+		t.Fatalf("Failure = %q, want empty", result.Failure)
+	}
+	if result.Target.FlowID != "producer" {
+		t.Fatalf("Target.FlowID = %q, want producer", result.Target.FlowID)
+	}
+}
+
+func TestResolveAllowsBroadcastWhenNoPackageReceiverConsumesOutput(t *testing.T) {
+	result := Resolve(ResolutionInput{
+		Source:    testPinRoutingSource(),
+		FlowID:    "child",
+		EventType: "child.done",
+		Emit: runtimecontracts.EmitSpec{
+			Broadcast: true,
+		},
+	}, events.NewProjectionEvent("", "child.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+
+	if result.Failure != "" {
+		t.Fatalf("Failure = %q, want empty", result.Failure)
+	}
+	if !result.Broadcast {
+		t.Fatal("Broadcast = false, want true")
+	}
+}
+
 func TestResolveFlowMatchTargetsActiveDynamicInstanceByInstanceID(t *testing.T) {
 	source := testFlowMatchPinRoutingSource()
 	const flowInstance = "component-scaffold/aaaaaaaa-1111-4111-8111-aaaaaaaa1111"
@@ -271,6 +368,78 @@ func testPinRoutingSource() semanticview.Source {
 			},
 			ByID: map[string]*runtimecontracts.FlowContractView{
 				"child": &child,
+			},
+		},
+	})
+}
+
+func testProducerCommonPathSource() semanticview.Source {
+	return testProducerRouteSource(nil)
+}
+
+func testProducerConnectSource() semanticview.Source {
+	return testProducerRouteSource([]runtimecontracts.FlowPackageConnect{{
+		From: "producer.shared.ready",
+		To:   "consumer.shared.ready",
+	}})
+}
+
+func testProducerRouteSource(connects []runtimecontracts.FlowPackageConnect) semanticview.Source {
+	producer := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{
+			ID:   "producer",
+			Flow: "producer",
+		},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{
+				Outputs: runtimecontracts.FlowOutputPins{
+					Events: []string{"shared.ready"},
+				},
+			},
+		},
+		Path: "producer",
+	}
+	consumer := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{
+			ID:   "consumer",
+			Flow: "consumer",
+		},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{
+				Inputs: runtimecontracts.FlowInputPins{
+					Events: []string{"shared.ready"},
+				},
+			},
+		},
+		Path: "consumer",
+	}
+	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
+			"producer": producer.Schema,
+			"consumer": consumer.Schema,
+		},
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			FlowInputs: map[string][]string{
+				"consumer": {"shared.ready"},
+			},
+			FlowOutputs: map[string][]string{
+				"producer": {"shared.ready"},
+			},
+			FlowInputEventPins: map[string][]runtimecontracts.FlowInputEventPin{
+				"consumer": {{Name: "shared.ready", Event: "shared.ready"}},
+			},
+			FlowOutputEventPins: map[string][]runtimecontracts.FlowOutputEventPin{
+				"producer": {{Name: "shared.ready", Event: "shared.ready"}},
+			},
+			CompositionConnects: connects,
+		},
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &runtimecontracts.FlowContractView{
+				Children: []runtimecontracts.FlowContractView{producer, consumer},
+			},
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"producer": &producer,
+				"consumer": &consumer,
 			},
 		},
 	})
