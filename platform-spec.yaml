@@ -564,6 +564,30 @@ contract_formats:
               descriptor evidence MUST NOT promote unsupported arbitrary
               business-field targets; those remain fail-closed until a separate
               typed descriptor/index owner is promoted.
+          route_authority_drift_guardrails:
+            status: merge_bearing_conformance_guardrail
+            implementation_slice: '#1494'
+            canonical_artifacts:
+            - internal/runtime/conformance/testdata/route_authority_drift_inventory.yaml
+            - internal/runtime/conformance/route_authority_drift_inventory_test.go
+            - internal/runtime/conformance/testdata/route_authority_matrix.yaml
+            - internal/runtime/conformance/route_authority_matrix_test.go
+            rule: |
+              Route-authority conformance guardrails MUST extend the existing
+              route_authority_drift_inventory and route_authority_matrix owners
+              instead of creating parallel inventories. Guardrails MUST classify
+              route-like seams by role before they can be treated as approved:
+              canonical RoutePlan/ConnectRoutePlan production, RouteTable
+              carrier lookup, descriptor evidence, eventDeliveryPlan
+              compatibility, direct delivery, durable persistence sinks,
+              replay/readback consumers, diagnostics, or explicitly split
+              concepts.
+              New route-like producers, compatibility interpreters, source/reason
+              owners, or carrier/descriptor/direct-delivery seams MUST fail CI
+              until they are added to the conformance inventory with a named
+              classification and tracker disposition. These guardrails are
+              source-authority checks only; they MUST NOT migrate runtime
+              behavior without a separately approved issue gate.
           supported_surface:
           - static receiver singular delivery
           - identity-style template/dynamic receiver fanout through supported descriptor targets

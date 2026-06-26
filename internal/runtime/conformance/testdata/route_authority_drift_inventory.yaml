@@ -1,10 +1,11 @@
 version: 1
 kind: route_authority_drift_inventory
 issue: 1364
-parent_issues: [1340, 1353]
+implementation_issues: [1364, 1494]
+parent_issues: [1340, 1353, 1481, 1493]
 watchlist: runtime_operations.delivery_and_replay_ownership
 policy:
-  closure_level: repo_wide_inventory_and_guardrail_proposal
+  closure_level: route_authority_seam_inventory_guardrail_first_slice
   claims_parent_closure: false
   claims_runtime_behavior_closure: false
   runtime_behavior_changes_allowed: false
@@ -13,7 +14,10 @@ policy:
     interpreters, observers, projections, replay/recovery paths, store
     readers/writers, public readback, and test fixtures across the repository.
     It explicitly covers event name/type, semantic scope, entity/run/source
-    event context, and route/event-key derivation helpers. It must not be used
+    event context, route/event-key derivation helpers, lowered ConnectRoutePlan
+    artifacts, RouteTable.Resolve role boundaries, receiver-carrier evidence,
+    descriptor evidence, direct-delivery paths, legacy eventDeliveryPlan
+    compatibility, and RoutePlan source/reason constants. It must not be used
     as proof that runtime behavior changed.
 sources:
   platform_spec: platform-spec.yaml
@@ -49,6 +53,85 @@ search_dimensions:
       - internal/runtime/bus/route_plan.go
       - internal/runtime/conformance/testdata/route_authority_matrix.yaml
     canonical_layer: route_plan_authority
+  - id: connect_route_plan
+    pattern: '\bConnectRoutePlan\b|LowerCompositionConnectRoutePlans|connect_route_plan'
+    minimum_matching_files: 7
+    required_paths:
+      - platform-spec.yaml
+      - internal/runtime/core/pinrouting/connect_route_plan.go
+      - internal/runtime/core/pinrouting/connect_route_plan_test.go
+      - internal/runtime/bus/connect_route_plan_dispatch.go
+      - internal/runtime/bus/connect_route_plan_dispatch_test.go
+      - internal/runtime/bus/route_plan.go
+      - internal/apispec/platform_spec_composition_routing_test.go
+    canonical_layer: route_plan_authority
+    classified_paths_required: true
+  - id: route_table_resolve
+    pattern: '\bRouteTable\.Resolve\b|\brouteTable\.Resolve\b'
+    minimum_matching_files: 4
+    required_paths:
+      - internal/runtime/bus/connect_route_plan_dispatch.go
+      - internal/runtime/runforkadmission/contract_frontier.go
+      - internal/runtime/runforkadmission/selected_route_history.go
+      - internal/runtime/runstart/root_inputs.go
+    canonical_layer: route_topology
+    classified_paths_required: true
+  - id: receiver_carrier
+    pattern: 'receiver_carrier|connectReceiverCarrier|resolveSelectedReceiverCarriers|receiver carrier'
+    minimum_matching_files: 5
+    required_paths:
+      - platform-spec.yaml
+      - internal/runtime/bus/connect_route_plan_dispatch.go
+      - internal/runtime/bus/connect_route_plan_dispatch_test.go
+      - internal/runtime/bus/eventbus_target_routes_test.go
+      - internal/runtime/bus/routing_derivation.go
+    canonical_layer: live_dispatch_non_authority
+    classified_paths_required: true
+  - id: descriptor_evidence
+    pattern: 'PinRoutingDescriptors|TargetDescriptors|activeTargetDescriptors|activeAgentDescriptors|descriptorsForPlans|descriptor evidence|descriptor lookup|active descriptor'
+    minimum_matching_files: 11
+    required_paths:
+      - platform-spec.yaml
+      - internal/runtime/bus/connect_route_plan_dispatch.go
+      - internal/runtime/bus/delivery_planner.go
+      - internal/runtime/bus/eventbus.go
+      - internal/runtime/engine/interfaces.go
+      - internal/runtime/pipeline/engine_adapter.go
+    canonical_layer: descriptor_evidence_non_authority
+    classified_paths_required: true
+  - id: event_delivery_plan_compatibility
+    pattern: 'eventDeliveryPlan|CanonicalRoutePlan|routePlanFromLegacyEventDeliveryPlan'
+    minimum_matching_files: 6
+    required_paths:
+      - internal/runtime/bus/route_plan.go
+      - internal/runtime/bus/delivery_planner.go
+      - internal/runtime/bus/eventbus.go
+      - internal/runtime/bus/eventbus_publish.go
+      - internal/runtime/bus/connect_route_plan_dispatch_test.go
+      - internal/runtime/bus/eventbus_target_routes_test.go
+    canonical_layer: compatibility_adapter_non_authority
+    classified_paths_required: true
+  - id: direct_delivery_path
+    pattern: '\bPlanDirect\b|\bPublishDirect\(|\bCheckDirectRecipients\('
+    minimum_matching_files: 7
+    required_paths:
+      - internal/runtime/bus/delivery_planner.go
+      - internal/runtime/bus/eventbus_publish.go
+      - internal/apiv1/operator_event_replay.go
+      - internal/runtime/pipeline/coordinator.go
+      - internal/runtime/manager/types.go
+      - internal/runtime/tools/deps.go
+    canonical_layer: route_plan_consumers
+  - id: route_plan_source_reason
+    pattern: 'routePlanSource|routePlanReason|RoutePlanAuthorityState|RoutePlanDeliveryIntent'
+    minimum_matching_files: 7
+    required_paths:
+      - internal/runtime/bus/route_plan.go
+      - internal/runtime/bus/delivery_planner.go
+      - internal/runtime/bus/connect_route_plan_dispatch.go
+      - internal/runtime/bus/eventbus_publish.go
+    canonical_layer: route_plan_authority
+    classified_paths_required: true
   - id: flow_instance
     pattern: 'flow_instance|FlowInstance|flow instance|flow-instance'
     minimum_matching_files: 282
@@ -273,6 +356,141 @@ seam_families:
       EventBus owns the canonical RoutePlan model, typed delivery intents, and
       materializers. Publish, preflight, transactional, deferred, and outbox
       paths consume this owner.
+  - id: lowered_connect_route_intent_authority
+    layer: route_plan_authority
+    classification: canonical_owner
+    paths:
+      - platform-spec.yaml
+      - internal/apispec/platform_spec_composition_routing_test.go
+      - internal/runtime/core/pinrouting/connect_route_plan.go
+      - internal/runtime/core/pinrouting/connect_route_plan_test.go
+      - internal/runtime/bus/connect_route_plan_dispatch.go
+      - internal/runtime/bus/connect_route_plan_dispatch_test.go
+      - internal/runtime/bus/route_plan.go
+      - internal/runtime/conformance/testdata/route_authority_matrix.yaml
+    search_dimensions: [connect_route_plan, route_plan, route_plan_source_reason]
+    notes: >
+      Lowered ConnectRoutePlan is the typed route-intent artifact consumed by
+      EventBus planning. #1494 classifies it as route authority input and guard
+      surface; #1495 owns broader producer migration.
+  - id: route_table_resolve_role_separation
+    layer: route_topology
+    classification: valid_consumer
+    paths:
+      - internal/runtime/bus/connect_route_plan_dispatch.go
+      - internal/runtime/runforkadmission/contract_frontier.go
+      - internal/runtime/runforkadmission/selected_route_history.go
+      - internal/runtime/runstart/root_inputs.go
+    search_dimensions: [route_table_resolve, route_event_key_derivation]
+    notes: >
+      RouteTable.Resolve must be classified by role. EventBus lowered-connect
+      use is post-identity receiver-carrier lookup; runstart/runfork uses are
+      separate admission/readiness route-fact consumers, not publish-time route
+      authority.
+  - id: receiver_carrier_evidence
+    layer: live_dispatch_non_authority
+    classification: valid_consumer
+    paths:
+      - platform-spec.yaml
+      - internal/runtime/bus/connect_route_plan_dispatch.go
+      - internal/runtime/bus/connect_route_plan_dispatch_test.go
+      - internal/runtime/bus/eventbus_target_routes_test.go
+      - internal/runtime/bus/routing_derivation.go
+      - internal/runtime/conformance/testdata/route_authority_matrix.yaml
+    search_dimensions: [receiver_carrier, connect_route_plan]
+    invalid_authority:
+      - producer/source endpoint key
+      - raw producer event name
+      - live subscriber fallback key
+      - legacy route/subscriber interpretation after matched ConnectRoutePlan
+    notes: >
+      Receiver carriers are concrete dispatch evidence after a lowered plan
+      selects target identity. They must not repair or replace the route
+      authority decision.
+  - id: descriptor_evidence_non_authority
+    layer: descriptor_evidence_non_authority
+    classification: non_authoritative_observer_projection
+    paths:
+      - platform-spec.yaml
+      - internal/runtime/bus/connect_route_plan_dispatch.go
+      - internal/runtime/bus/connect_route_plan_dispatch_test.go
+      - internal/runtime/bus/delivery_planner.go
+      - internal/runtime/bus/delivery_planner_test.go
+      - internal/runtime/bus/eventbus.go
+      - internal/runtime/bus/eventbus_flow_instance_descriptors_test.go
+      - internal/runtime/bus/eventbus_publish_test.go
+      - internal/runtime/bus/eventbus_routing.go
+      - internal/runtime/engine/executor.go
+      - internal/runtime/engine/interfaces.go
+      - internal/runtime/pipeline/engine_adapter.go
+      - internal/runtime/conformance/testdata/route_authority_matrix.yaml
+    search_dimensions: [descriptor_evidence, connect_route_plan]
+    invalid_authority:
+      - active-agent descriptor lookup
+      - active target descriptors
+      - handler descriptor lookup
+      - unsupported business-field descriptor target
+    notes: >
+      Descriptor evidence may support explicitly approved target materialization
+      but is not delivery authority. Business-field descriptor/index support
+      remains split to #1479.
+  - id: event_delivery_plan_compatibility_adapter
+    layer: compatibility_adapter_non_authority
+    classification: split_open_sibling
+    paths:
+      - internal/runtime/bus/route_plan.go
+      - internal/runtime/bus/delivery_planner.go
+      - internal/runtime/bus/eventbus.go
+      - internal/runtime/bus/eventbus_publish.go
+      - internal/runtime/bus/connect_route_plan_dispatch_test.go
+      - internal/runtime/bus/eventbus_target_routes_test.go
+      - internal/runtime/conformance/testdata/route_authority_matrix.yaml
+    search_dimensions: [event_delivery_plan_compatibility, route_plan]
+    invalid_authority:
+      - legacy eventDeliveryPlan as final authority
+      - CanonicalRoutePlan fallback from legacy projection
+      - routePlanFromLegacyEventDeliveryPlan as new producer
+    notes: >
+      eventDeliveryPlan remains a compatibility projection around RoutePlan.
+      #1494 classifies and guards it; #1496 owns compatibility collapse or
+      isolation if behavior changes are needed.
+  - id: direct_delivery_path_classification
+    layer: route_plan_consumers
+    classification: split_open_sibling
+    paths:
+      - internal/runtime/bus/delivery_planner.go
+      - internal/runtime/bus/eventbus_publish.go
+      - internal/runtime/bus/outbox.go
+      - internal/apiv1/operator_event_replay.go
+      - internal/runtime/pipeline/coordinator.go
+      - internal/runtime/manager/types.go
+      - internal/runtime/tools/deps.go
+      - internal/runtime/conformance/testdata/route_authority_matrix.yaml
+    search_dimensions: [direct_delivery_path, route_plan, publish_plan_consumers]
+    invalid_authority:
+      - caller-supplied direct recipient list as subscribed route authority
+      - operator replay direct path as fresh publish-time route planner
+    notes: >
+      Direct delivery uses explicit caller recipients and delivery policy. It is
+      classified now so it cannot masquerade as subscribed RoutePlan authority;
+      #1496 owns further direct-delivery compatibility isolation.
+  - id: route_plan_source_reason_constants
+    layer: route_plan_authority
+    classification: canonical_owner
+    paths:
+      - internal/runtime/bus/route_plan.go
+      - internal/runtime/bus/delivery_planner.go
+      - internal/runtime/bus/delivery_planner_test.go
+      - internal/runtime/bus/connect_route_plan_dispatch.go
+      - internal/runtime/bus/connect_route_plan_dispatch_test.go
+      - internal/runtime/bus/eventbus_publish.go
+      - internal/runtime/bus/eventbus_target_routes_test.go
+      - internal/runtime/conformance/testdata/route_authority_matrix.yaml
+    search_dimensions: [route_plan_source_reason, route_plan]
+    notes: >
+      RoutePlan source/reason/authority-state constants are the current typed
+      route-intent metadata owner. #1494 guards their use until #1495 promotes
+      the broader typed route-intent model.
   - id: durable_delivery_authority_writers
     layer: durable_delivery_authority
     classification: canonical_owner
@@ -415,7 +633,7 @@ seam_families:
       - internal/runtime/conformance/testdata/route_authority_matrix.yaml
       - internal/runtime/conformance/route_authority_matrix_test.go
       - internal/runtime/conformance/testdata/route_authority_drift_inventory.yaml
-    search_dimensions: [route_plan, event_deliveries, workflow_runtime_carrier]
+    search_dimensions: [route_plan, event_deliveries, workflow_runtime_carrier, connect_route_plan, event_delivery_plan_compatibility]
     notes: >
       The matrix proves selected route-authority rows. This inventory proves
       the repo-wide drift audit boundary and identifies guardrails that should
@@ -435,11 +653,12 @@ guardrail_proposals:
       - marking parent route-authority closure while #1364-class drift inventory remains open
       - covering rows without a matrix or inventory proof reference
   - id: negative_authority_static_scan
-    implementation_state: ready_for_followup
-    target: internal/runtime/conformance
+    implementation_state: implemented_in_this_pr
+    target: internal/runtime/conformance/route_authority_drift_inventory_test.go
     prevents:
       - workflow-runtime carriers, live subscriptions, receipts, replay markers, or readback from becoming execution authority
       - new helper names that imply route authority outside EventContext or RoutePlan owners
+      - new ConnectRoutePlan, RouteTable.Resolve, eventDeliveryPlan, descriptor, receiver-carrier, or route source/reason paths from appearing without seam-family classification
   - id: direct_sql_fixture_classification_guard
     implementation_state: ready_for_followup
     target: internal/runtime/conformance
@@ -447,10 +666,10 @@ guardrail_proposals:
       - direct SQL tests from asserting delivery counts without typed semantic subscriber identity
       - store fixtures from becoming undocumented route-authority interpreters
 follow_up_decision:
-  tracker_state: "#1340 and #1353 remain sufficient parent trackers."
+  tracker_state: "#1494 extends the closed #1364 inventory owner under #1493; #1495/#1496/#1479/#1466/#1481 remain open for behavior or broader architecture work."
   new_child_required_before_coding: false
   runtime_behavior_child_required_now: false
   notes: >
-    No runtime behavior is selected in #1364. Concrete bypasses discovered
+    No runtime behavior is selected in #1494. Concrete bypasses discovered
     after this inventory must open or update a child issue and receive an
     independent implementation gate before coding.
