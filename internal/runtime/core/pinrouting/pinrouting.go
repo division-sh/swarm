@@ -146,12 +146,9 @@ func outputPinsForEvent(source semanticview.Source, flowID, eventType string) []
 	if source == nil {
 		return nil
 	}
-	candidates := eventReferenceCandidates(source, flowID, eventType)
 	out := []runtimecontracts.FlowOutputEventPin{}
 	for _, pin := range source.FlowOutputEventPins(flowID) {
-		if eventCandidatesContain(candidates, pin.PinName()) ||
-			eventCandidatesContain(candidates, pin.EventType()) ||
-			eventCandidatesContain(candidates, source.ResolveFlowEventReference(flowID, pin.EventType())) {
+		if eventReferencesOverlap(source, flowID, []string{eventType}, flowID, []string{pin.PinName(), pin.EventType()}) {
 			out = append(out, pin)
 		}
 	}
@@ -186,51 +183,65 @@ func flowInputConsumesOutput(source semanticview.Source, producerFlowID, eventTy
 	if source == nil {
 		return false
 	}
-	outputCandidates := eventReferenceCandidates(source, producerFlowID, eventType)
 	for _, pin := range source.FlowInputEventPins(receiverFlowID) {
-		if eventCandidatesContain(outputCandidates, pin.PinName()) ||
-			eventCandidatesContain(outputCandidates, pin.EventType()) ||
-			eventCandidatesContain(outputCandidates, source.ResolveFlowEventReference(receiverFlowID, pin.EventType())) {
+		if eventReferencesOverlap(source, producerFlowID, []string{eventType}, receiverFlowID, []string{pin.PinName(), pin.EventType()}) {
 			return true
 		}
 	}
 	return false
 }
 
-func eventReferenceCandidates(source semanticview.Source, flowID, eventType string) map[string]struct{} {
-	candidates := map[string]struct{}{}
-	addEventCandidate(candidates, eventType)
-	if source != nil {
-		addEventCandidate(candidates, source.ResolveFlowEventReference(flowID, eventType))
+func eventReferencesOverlap(source semanticview.Source, leftFlowID string, leftEvents []string, rightFlowID string, rightEvents []string) bool {
+	leftRefs := eventReferences(source, leftFlowID, leftEvents...)
+	rightRefs := eventReferences(source, rightFlowID, rightEvents...)
+	for _, left := range leftRefs {
+		for _, right := range rightRefs {
+			if eventReferencesMatch(left, right) {
+				return true
+			}
+		}
 	}
-	return candidates
+	return false
 }
 
-func addEventCandidate(candidates map[string]struct{}, eventType string) {
-	eventType = eventidentity.Normalize(eventType)
-	if eventType == "" {
-		return
+func eventReferences(source semanticview.Source, flowID string, eventTypes ...string) []string {
+	out := []string{}
+	seen := map[string]struct{}{}
+	add := func(eventType string) {
+		eventType = eventidentity.Normalize(eventType)
+		if eventType == "" {
+			return
+		}
+		if _, ok := seen[eventType]; ok {
+			return
+		}
+		seen[eventType] = struct{}{}
+		out = append(out, eventType)
 	}
-	candidates[eventType] = struct{}{}
-	if leaf := eventidentity.LeafName(eventType); leaf != "" {
-		candidates[leaf] = struct{}{}
+	for _, eventType := range eventTypes {
+		add(eventType)
+		if source != nil {
+			add(source.ResolveFlowEventReference(flowID, eventType))
+		}
 	}
+	return out
 }
 
-func eventCandidatesContain(candidates map[string]struct{}, eventType string) bool {
-	eventType = eventidentity.Normalize(eventType)
-	if eventType == "" {
+func eventReferencesMatch(left, right string) bool {
+	left = eventidentity.Normalize(left)
+	right = eventidentity.Normalize(right)
+	if left == "" || right == "" {
 		return false
 	}
-	if _, ok := candidates[eventType]; ok {
+	if left == right {
 		return true
 	}
-	leaf := eventidentity.LeafName(eventType)
-	if leaf == "" {
+	leftQualified := strings.Contains(left, "/")
+	rightQualified := strings.Contains(right, "/")
+	if leftQualified == rightQualified {
 		return false
 	}
-	_, ok := candidates[leaf]
-	return ok
+	return eventidentity.LeafName(left) == eventidentity.LeafName(right)
 }
 
 func rootPinDeclaredOutput(source semanticview.Source, eventType string) bool {

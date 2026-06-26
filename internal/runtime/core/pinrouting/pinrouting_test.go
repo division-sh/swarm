@@ -152,6 +152,35 @@ func TestResolveFailsClosedForProducerBroadcastCommonCompositionPath(t *testing.
 	}
 }
 
+func TestProducerRouteCommonPathDoesNotLeafMatchDistinctQualifiedEvents(t *testing.T) {
+	source := testProducerQualifiedMismatchSource()
+	for _, tt := range []struct {
+		name string
+		emit runtimecontracts.EmitSpec
+	}{
+		{
+			name: "broadcast",
+			emit: runtimecontracts.EmitSpec{Broadcast: true},
+		},
+		{
+			name: "target_flow_match",
+			emit: runtimecontracts.EmitSpec{
+				Target: runtimecontracts.EmitTargetSpec{
+					Flow:  "consumer",
+					Match: map[string]runtimecontracts.ExpressionValue{"entity_id": runtimecontracts.RefExpression("payload.entity_id")},
+				},
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			failure := ProducerRouteCommonPathFailure(source, "producer", "billing/order.completed", tt.emit)
+			if failure != "" {
+				t.Fatalf("ProducerRouteCommonPathFailure = %q, want empty for distinct qualified receiver event", failure)
+			}
+		})
+	}
+}
+
 func TestResolveAllowsParentConnectToOwnPinDeclaredOutput(t *testing.T) {
 	result := Resolve(ResolutionInput{
 		Source:    testProducerConnectSource(),
@@ -384,7 +413,15 @@ func testProducerConnectSource() semanticview.Source {
 	}})
 }
 
+func testProducerQualifiedMismatchSource() semanticview.Source {
+	return testProducerRouteSourceWithEvents("billing/order.completed", "shipping/order.completed", nil)
+}
+
 func testProducerRouteSource(connects []runtimecontracts.FlowPackageConnect) semanticview.Source {
+	return testProducerRouteSourceWithEvents("shared.ready", "shared.ready", connects)
+}
+
+func testProducerRouteSourceWithEvents(outputEvent, inputEvent string, connects []runtimecontracts.FlowPackageConnect) semanticview.Source {
 	producer := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{
 			ID:   "producer",
@@ -393,7 +430,7 @@ func testProducerRouteSource(connects []runtimecontracts.FlowPackageConnect) sem
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Outputs: runtimecontracts.FlowOutputPins{
-					Events: []string{"shared.ready"},
+					Events: []string{outputEvent},
 				},
 			},
 		},
@@ -407,7 +444,7 @@ func testProducerRouteSource(connects []runtimecontracts.FlowPackageConnect) sem
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{
-					Events: []string{"shared.ready"},
+					Events: []string{inputEvent},
 				},
 			},
 		},
@@ -420,16 +457,16 @@ func testProducerRouteSource(connects []runtimecontracts.FlowPackageConnect) sem
 		},
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			FlowInputs: map[string][]string{
-				"consumer": {"shared.ready"},
+				"consumer": {inputEvent},
 			},
 			FlowOutputs: map[string][]string{
-				"producer": {"shared.ready"},
+				"producer": {outputEvent},
 			},
 			FlowInputEventPins: map[string][]runtimecontracts.FlowInputEventPin{
-				"consumer": {{Name: "shared.ready", Event: "shared.ready"}},
+				"consumer": {{Name: inputEvent, Event: inputEvent}},
 			},
 			FlowOutputEventPins: map[string][]runtimecontracts.FlowOutputEventPin{
-				"producer": {{Name: "shared.ready", Event: "shared.ready"}},
+				"producer": {{Name: outputEvent, Event: outputEvent}},
 			},
 			CompositionConnects: connects,
 		},
