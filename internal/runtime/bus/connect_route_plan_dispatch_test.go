@@ -810,20 +810,18 @@ func TestRoutePlanCanonicalFailClosedDropsExecutableRoutes(t *testing.T) {
 	evt := events.NewProjectionEvent(uuid.NewString(),
 		events.EventType("producer/deploy.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 	routePlan := newRoutePlan(evt)
-	routePlan.MarkCanonicalRouteFailedClosed(routePlanSourceConnectRoutePlan, runtimepinrouting.FailureTargetNotSubscribed)
+	routePlan.MarkCanonicalRouteFailedClosed(routeIntentProducerConnectRoutePlan, runtimepinrouting.FailureTargetNotSubscribed)
 	routePlan.AddLiveRecipients(RoutePlanLiveRecipient{
 		RecipientID:       "bogus-node",
 		SubscriberType:    "node",
 		PersistAsDelivery: true,
-		Source:            routePlanSourceRecipientMaterializer,
-		Reason:            routePlanReasonMaterializedRoute,
+		Producer:          routeIntentProducerRecipientMaterializer,
 	})
 	routePlan.AddDeliveryIntents(RoutePlanDeliveryIntent{
 		SubscriberType: "node",
 		SubscriberID:   "bogus-node",
 		Target:         events.RouteIdentity{FlowID: "bogus", FlowInstance: "bogus", EntityID: "bogus"},
-		Source:         routePlanSourceRecipientMaterializer,
-		Reason:         routePlanReasonMaterializedRoute,
+		Producer:       routeIntentProducerRecipientMaterializer,
 		Persist:        true,
 	})
 
@@ -843,13 +841,12 @@ func TestRoutePlanProjectionPreservesAuthorityState(t *testing.T) {
 	evt := events.NewProjectionEvent(uuid.NewString(),
 		events.EventType("producer/deploy.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 	routePlan := newRoutePlan(evt)
-	routePlan.MarkCanonicalRouteMatched(routePlanSourceConnectRoutePlan)
+	routePlan.MarkCanonicalRouteMatched(routeIntentProducerConnectRoutePlan)
 	routePlan.AddDeliveryIntents(RoutePlanDeliveryIntent{
 		SubscriberType: "node",
 		SubscriberID:   "consumer-node",
 		Target:         connectRoutePlanStaticDeliveryRoute().Target,
-		Source:         routePlanSourceConnectRoutePlan,
-		Reason:         routePlanReasonLoweredConnectRoutePlan,
+		Producer:       routeIntentProducerConnectRoutePlan,
 		Persist:        true,
 	})
 

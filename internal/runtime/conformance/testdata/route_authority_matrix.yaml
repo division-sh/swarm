@@ -457,7 +457,7 @@ rows:
       direct-recipient behavior.
 
   - id: route_plan_source_reason_constants
-    concept: RoutePlan source/reason constants and authority state carry the current route-intent decision metadata.
+    concept: RoutePlan source/reason constants and authority state are carried by the typed EventBus route-intent producer model.
     classification: already_covered_by_existing_proof
     tier: required_pr_smoke
     proof_dimensions: [source_reason_constants, route_plan_model, guardrail_inventory, required_pr_smoke]
@@ -465,14 +465,19 @@ rows:
       - {kind: artifact, path: internal/runtime/bus/route_plan.go}
       - {kind: artifact, path: internal/runtime/conformance/testdata/route_authority_drift_inventory.yaml}
       - {kind: spec_ref, path: platform-spec.yaml, ref: decision_state}
+      - {kind: spec_ref, path: platform-spec.yaml, ref: route_intent_producer_model}
     proof_refs:
       - {kind: issue, issue: 1494}
+      - {kind: issue, issue: 1495}
       - {kind: go_test, name: TestRoutePlanCanonicalFailClosedDropsExecutableRoutes}
+      - {kind: go_test, name: TestRoutePlanDeliveryIntentsCarryTypedProducer}
+      - {kind: go_test, name: TestRoutePlanProducerHelpersRequireTypedProducer}
       - {kind: go_test, name: TestRouteAuthorityDriftInventoryCoversRepoWideSearchDimensions}
       - {kind: go_test, name: TestRouteAuthorityDriftInventoryRejectsUnclassifiedRouteLikeProducer}
     notes: >
-      The current source/reason constants remain the typed metadata owner until
-      #1495 promotes a broader typed route-intent model.
+      #1495 promotes source/reason metadata into a typed route-intent producer
+      model so EventBus RoutePlan producers no longer call broad helper APIs with
+      independent raw source/reason strings.
 
   - id: live_carriers_handler_lookup_descriptors_not_authority
     concept: Live carriers, interceptors, handler lookup, and active descriptors are consumers or observations only.

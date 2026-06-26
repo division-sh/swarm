@@ -504,6 +504,40 @@ contract_formats:
             engineOutbox MUST preserve this decision state across RoutePlan
             projection, materialization, diagnostics, persistence, and delivery
             consumers.
+        route_intent_producer_model:
+          status: merge_bearing_runtime_behavior
+          implementation_slice: '#1495'
+          canonical_code_owner: internal/runtime/bus.routeIntentProducer
+          producers:
+          - agent_policy / matched_agent_subscription
+          - direct_policy / direct_publish
+          - internal_target_route / internal_carrier
+          - internal_target_route / route_table_node
+          - concrete_node_route / route_table_node
+          - scoped_node_route / route_table_node
+          - root_node_route / route_table_node
+          - root_input_flow_node_route / route_table_node
+          - recipient_plan_materializer / materialized_route
+          - connect_route_plan / lowered_connect_route_plan
+          - legacy_projection / legacy_projection
+          rule: |
+            EventBus RoutePlan producer identity MUST be represented by a closed
+            typed route-intent producer role, not by broad helper APIs accepting
+            raw source/reason strings and not by a producer-local pair of
+            independently assigned source and reason values. RoutePlan
+            live-recipient and delivery-intent metadata MUST carry the same typed
+            producer role so source and reason are derived from one role and
+            cannot drift independently across producers.
+            The typed producer model is metadata and ownership proof; it does
+            not by itself create delivery authority, override
+            RoutePlanAuthorityState, or permit lower-precedence repair after a
+            canonical matched or canonical failed-closed route decision.
+            Connect-route producer roles, lower-precedence agent/subscription
+            roles, internal-target roles, concrete/scoped/root node roles,
+            root-input roles, and recipient-materializer roles MUST be produced
+            through the typed model. The legacy eventDeliveryPlan and direct
+            delivery compatibility paths remain explicitly split until their
+            own approved migration removes or isolates them.
         lowered_connect_route_plan_consumption:
           status: merge_bearing_runtime_behavior
           implementation_slice: '#1473'

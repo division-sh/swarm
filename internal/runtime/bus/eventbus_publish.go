@@ -956,8 +956,8 @@ func (eb *EventBus) materializePublishRecipientPlan(ctx context.Context, evt eve
 	if len(routes) == 0 {
 		return plan, nil
 	}
-	routePlan.MarkLowerPrecedenceRouteProduction(routePlanSourceRecipientMaterializer)
-	routePlan.AddDeliveryIntents(routePlanDeliveryIntentsFromRoutes(routes, routePlanSourceRecipientMaterializer, routePlanReasonMaterializedRoute)...)
+	routePlan.MarkLowerPrecedenceRouteProduction(routeIntentProducerRecipientMaterializer)
+	routePlan.AddDeliveryIntents(routePlanDeliveryIntentsFromRoutes(routes, routeIntentProducerRecipientMaterializer)...)
 	return plan.WithCanonicalRoutePlan(routePlan), nil
 }
 

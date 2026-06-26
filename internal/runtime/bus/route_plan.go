@@ -10,25 +10,136 @@ import (
 const (
 	routePlanSubscriberAgent    = "agent"
 	routePlanSubscriberInternal = "internal"
-
-	routePlanSourceAgentPolicy           = "agent_policy"
-	routePlanSourceDirectPolicy          = "direct_policy"
-	routePlanSourceInternalTarget        = "internal_target_route"
-	routePlanSourceConcreteNodeRoute     = "concrete_node_route"
-	routePlanSourceScopedNodeRoute       = "scoped_node_route"
-	routePlanSourceRootNodeRoute         = "root_node_route"
-	routePlanSourceRootInputFlowNode     = "root_input_flow_node_route"
-	routePlanSourceRecipientMaterializer = "recipient_plan_materializer"
-	routePlanSourceConnectRoutePlan      = "connect_route_plan"
-	routePlanSourceLegacyProjection      = "legacy_projection"
-
-	routePlanReasonMatchedAgentSubscription = "matched_agent_subscription"
-	routePlanReasonDirectPublish            = "direct_publish"
-	routePlanReasonInternalCarrier          = "internal_carrier"
-	routePlanReasonRouteTableNode           = "route_table_node"
-	routePlanReasonMaterializedRoute        = "materialized_route"
-	routePlanReasonLoweredConnectRoutePlan  = "lowered_connect_route_plan"
 )
+
+type routePlanSource string
+type routePlanReason string
+
+const (
+	routePlanSourceAgentPolicy           routePlanSource = "agent_policy"
+	routePlanSourceDirectPolicy          routePlanSource = "direct_policy"
+	routePlanSourceInternalTarget        routePlanSource = "internal_target_route"
+	routePlanSourceConcreteNodeRoute     routePlanSource = "concrete_node_route"
+	routePlanSourceScopedNodeRoute       routePlanSource = "scoped_node_route"
+	routePlanSourceRootNodeRoute         routePlanSource = "root_node_route"
+	routePlanSourceRootInputFlowNode     routePlanSource = "root_input_flow_node_route"
+	routePlanSourceRecipientMaterializer routePlanSource = "recipient_plan_materializer"
+	routePlanSourceConnectRoutePlan      routePlanSource = "connect_route_plan"
+	routePlanSourceLegacyProjection      routePlanSource = "legacy_projection"
+
+	routePlanReasonMatchedAgentSubscription routePlanReason = "matched_agent_subscription"
+	routePlanReasonDirectPublish            routePlanReason = "direct_publish"
+	routePlanReasonInternalCarrier          routePlanReason = "internal_carrier"
+	routePlanReasonRouteTableNode           routePlanReason = "route_table_node"
+	routePlanReasonMaterializedRoute        routePlanReason = "materialized_route"
+	routePlanReasonLoweredConnectRoutePlan  routePlanReason = "lowered_connect_route_plan"
+	routePlanReasonLegacyProjection         routePlanReason = "legacy_projection"
+)
+
+type routeIntentProducer uint8
+
+const (
+	routeIntentProducerUnknown routeIntentProducer = iota
+	routeIntentProducerAgentPolicy
+	routeIntentProducerDirectPolicy
+	routeIntentProducerInternalTargetCarrier
+	routeIntentProducerInternalTargetRoute
+	routeIntentProducerConcreteNodeRoute
+	routeIntentProducerScopedNodeRoute
+	routeIntentProducerRootNodeRoute
+	routeIntentProducerRootInputFlowNode
+	routeIntentProducerRecipientMaterializer
+	routeIntentProducerConnectRoutePlan
+	routeIntentProducerLegacyProjection
+)
+
+func (p routeIntentProducer) Normalized() routeIntentProducer {
+	switch p {
+	case routeIntentProducerAgentPolicy,
+		routeIntentProducerDirectPolicy,
+		routeIntentProducerInternalTargetCarrier,
+		routeIntentProducerInternalTargetRoute,
+		routeIntentProducerConcreteNodeRoute,
+		routeIntentProducerScopedNodeRoute,
+		routeIntentProducerRootNodeRoute,
+		routeIntentProducerRootInputFlowNode,
+		routeIntentProducerRecipientMaterializer,
+		routeIntentProducerConnectRoutePlan,
+		routeIntentProducerLegacyProjection:
+		return p
+	default:
+		return routeIntentProducerUnknown
+	}
+}
+
+func (p routeIntentProducer) Source() routePlanSource {
+	switch p.Normalized() {
+	case routeIntentProducerAgentPolicy:
+		return routePlanSourceAgentPolicy
+	case routeIntentProducerDirectPolicy:
+		return routePlanSourceDirectPolicy
+	case routeIntentProducerInternalTargetCarrier, routeIntentProducerInternalTargetRoute:
+		return routePlanSourceInternalTarget
+	case routeIntentProducerConcreteNodeRoute:
+		return routePlanSourceConcreteNodeRoute
+	case routeIntentProducerScopedNodeRoute:
+		return routePlanSourceScopedNodeRoute
+	case routeIntentProducerRootNodeRoute:
+		return routePlanSourceRootNodeRoute
+	case routeIntentProducerRootInputFlowNode:
+		return routePlanSourceRootInputFlowNode
+	case routeIntentProducerRecipientMaterializer:
+		return routePlanSourceRecipientMaterializer
+	case routeIntentProducerConnectRoutePlan:
+		return routePlanSourceConnectRoutePlan
+	case routeIntentProducerLegacyProjection:
+		return routePlanSourceLegacyProjection
+	default:
+		return ""
+	}
+}
+
+func (p routeIntentProducer) Reason() routePlanReason {
+	switch p.Normalized() {
+	case routeIntentProducerAgentPolicy:
+		return routePlanReasonMatchedAgentSubscription
+	case routeIntentProducerDirectPolicy:
+		return routePlanReasonDirectPublish
+	case routeIntentProducerInternalTargetCarrier:
+		return routePlanReasonInternalCarrier
+	case routeIntentProducerInternalTargetRoute,
+		routeIntentProducerConcreteNodeRoute,
+		routeIntentProducerScopedNodeRoute,
+		routeIntentProducerRootNodeRoute,
+		routeIntentProducerRootInputFlowNode:
+		return routePlanReasonRouteTableNode
+	case routeIntentProducerRecipientMaterializer:
+		return routePlanReasonMaterializedRoute
+	case routeIntentProducerConnectRoutePlan:
+		return routePlanReasonLoweredConnectRoutePlan
+	case routeIntentProducerLegacyProjection:
+		return routePlanReasonLegacyProjection
+	default:
+		return ""
+	}
+}
+
+func (p routeIntentProducer) Empty() bool {
+	return p.Normalized() == routeIntentProducerUnknown
+}
+
+func (p routeIntentProducer) String() string {
+	p = p.Normalized()
+	source := p.Source()
+	reason := p.Reason()
+	if source == "" {
+		return string(reason)
+	}
+	if reason == "" {
+		return string(source)
+	}
+	return string(source) + "/" + string(reason)
+}
 
 type RoutePlanAuthorityState string
 
@@ -45,7 +156,7 @@ const (
 type RoutePlan struct {
 	Event                events.Event
 	AuthorityState       RoutePlanAuthorityState
-	AuthorityOwner       string
+	AuthorityOwner       routePlanSource
 	LiveRecipients       []RoutePlanLiveRecipient
 	DeliveryIntents      []RoutePlanDeliveryIntent
 	RoutedRecipients     []Subscriber
@@ -61,16 +172,14 @@ type RoutePlanLiveRecipient struct {
 	RecipientID       string
 	SubscriberType    string
 	PersistAsDelivery bool
-	Source            string
-	Reason            string
+	Producer          routeIntentProducer
 }
 
 type RoutePlanDeliveryIntent struct {
 	SubscriberType string
 	SubscriberID   string
 	Target         events.RouteIdentity
-	Source         string
-	Reason         string
+	Producer       routeIntentProducer
 	Persist        bool
 }
 
@@ -80,7 +189,7 @@ func newRoutePlan(evt events.Event) RoutePlan {
 
 func (p RoutePlan) Normalized() RoutePlan {
 	p.AuthorityState = normalizeRoutePlanAuthorityState(p.AuthorityState)
-	p.AuthorityOwner = strings.TrimSpace(p.AuthorityOwner)
+	p.AuthorityOwner = normalizeRoutePlanSource(p.AuthorityOwner)
 	p.LiveRecipients = normalizeRoutePlanLiveRecipients(p.LiveRecipients)
 	p.DeliveryIntents = normalizeRoutePlanDeliveryIntents(p.DeliveryIntents)
 	p.RoutedRecipients = append([]Subscriber(nil), p.RoutedRecipients...)
@@ -104,20 +213,20 @@ func (p RoutePlan) Normalized() RoutePlan {
 	return p
 }
 
-func (p *RoutePlan) MarkCanonicalRouteMatched(owner string) {
+func (p *RoutePlan) MarkCanonicalRouteMatched(producer routeIntentProducer) {
 	if p == nil {
 		return
 	}
 	p.AuthorityState = RoutePlanAuthorityCanonicalMatched
-	p.AuthorityOwner = strings.TrimSpace(owner)
+	p.AuthorityOwner = producer.Source()
 }
 
-func (p *RoutePlan) MarkCanonicalRouteFailedClosed(owner string, failure runtimepinrouting.TargetFailure) {
+func (p *RoutePlan) MarkCanonicalRouteFailedClosed(producer routeIntentProducer, failure runtimepinrouting.TargetFailure) {
 	if p == nil {
 		return
 	}
 	p.AuthorityState = RoutePlanAuthorityCanonicalFailedClosed
-	p.AuthorityOwner = strings.TrimSpace(owner)
+	p.AuthorityOwner = producer.Source()
 	p.TargetFailure = runtimepinrouting.TargetFailure(strings.TrimSpace(string(failure)))
 	p.LiveRecipients = nil
 	p.DeliveryIntents = nil
@@ -125,13 +234,13 @@ func (p *RoutePlan) MarkCanonicalRouteFailedClosed(owner string, failure runtime
 	p.SubscribedRecipients = nil
 }
 
-func (p *RoutePlan) MarkLowerPrecedenceRouteProduction(owner string) {
+func (p *RoutePlan) MarkLowerPrecedenceRouteProduction(producer routeIntentProducer) {
 	if p == nil || p.CanonicalRouteOwnerMatched() {
 		return
 	}
 	p.AuthorityState = RoutePlanAuthorityLowerPrecedence
-	if strings.TrimSpace(p.AuthorityOwner) == "" {
-		p.AuthorityOwner = strings.TrimSpace(owner)
+	if p.AuthorityOwner == "" {
+		p.AuthorityOwner = producer.Source()
 	}
 }
 
@@ -310,7 +419,7 @@ func (p eventDeliveryPlan) WithCanonicalRoutePlan(routePlan RoutePlan) eventDeli
 func routePlanFromLegacyEventDeliveryPlan(plan eventDeliveryPlan) RoutePlan {
 	out := newRoutePlan(plan.Event)
 	if len(plan.Recipients) > 0 || len(plan.PersistedRecipients) > 0 || len(plan.DeliveryRoutes) > 0 || plan.TargetFailure != "" {
-		out.MarkLowerPrecedenceRouteProduction(routePlanSourceLegacyProjection)
+		out.MarkLowerPrecedenceRouteProduction(routeIntentProducerLegacyProjection)
 	}
 	persisted := make(map[string]struct{}, len(plan.PersistedRecipients))
 	for _, recipient := range uniqueStrings(plan.PersistedRecipients) {
@@ -327,8 +436,7 @@ func routePlanFromLegacyEventDeliveryPlan(plan eventDeliveryPlan) RoutePlan {
 			RecipientID:       recipient,
 			SubscriberType:    subscriberType,
 			PersistAsDelivery: persist,
-			Source:            routePlanSourceLegacyProjection,
-			Reason:            routePlanSourceLegacyProjection,
+			Producer:          routeIntentProducerLegacyProjection,
 		})
 	}
 	for recipient := range persisted {
@@ -339,11 +447,10 @@ func routePlanFromLegacyEventDeliveryPlan(plan eventDeliveryPlan) RoutePlan {
 			RecipientID:       recipient,
 			SubscriberType:    routePlanSubscriberAgent,
 			PersistAsDelivery: true,
-			Source:            routePlanSourceLegacyProjection,
-			Reason:            routePlanSourceLegacyProjection,
+			Producer:          routeIntentProducerLegacyProjection,
 		})
 	}
-	out.AddDeliveryIntents(routePlanDeliveryIntentsFromRoutes(plan.DeliveryRoutes, routePlanSourceLegacyProjection, routePlanSourceLegacyProjection)...)
+	out.AddDeliveryIntents(routePlanDeliveryIntentsFromRoutes(plan.DeliveryRoutes, routeIntentProducerLegacyProjection)...)
 	out.RoutedRecipients = append([]Subscriber(nil), plan.RoutedRecipients...)
 	out.SubscribedRecipients = uniqueStrings(plan.SubscribedRecipients)
 	out.ExtraDetail = cloneStringAnyMap(plan.ExtraDetail)
@@ -354,7 +461,7 @@ func routePlanFromLegacyEventDeliveryPlan(plan eventDeliveryPlan) RoutePlan {
 	return out.Normalized()
 }
 
-func routePlanLiveRecipientsFromManifest(manifest deliveryRecipientManifest, source, reason string) []RoutePlanLiveRecipient {
+func routePlanLiveRecipientsFromManifest(manifest deliveryRecipientManifest, producer routeIntentProducer) []RoutePlanLiveRecipient {
 	persisted := make(map[string]struct{}, len(manifest.PersistedRecipients))
 	for _, recipient := range uniqueStrings(manifest.PersistedRecipients) {
 		persisted[recipient] = struct{}{}
@@ -372,14 +479,13 @@ func routePlanLiveRecipientsFromManifest(manifest deliveryRecipientManifest, sou
 			RecipientID:       recipient,
 			SubscriberType:    subscriberType,
 			PersistAsDelivery: persist,
-			Source:            source,
-			Reason:            reason,
+			Producer:          producer,
 		})
 	}
 	return normalizeRoutePlanLiveRecipients(out)
 }
 
-func routePlanDeliveryIntentsFromRoutes(routes []events.DeliveryRoute, source, reason string) []RoutePlanDeliveryIntent {
+func routePlanDeliveryIntentsFromRoutes(routes []events.DeliveryRoute, producer routeIntentProducer) []RoutePlanDeliveryIntent {
 	routes = events.NormalizeDeliveryRoutes(routes)
 	if len(routes) == 0 {
 		return nil
@@ -390,21 +496,20 @@ func routePlanDeliveryIntentsFromRoutes(routes []events.DeliveryRoute, source, r
 			SubscriberType: route.SubscriberType,
 			SubscriberID:   route.SubscriberID,
 			Target:         route.Target,
-			Source:         source,
-			Reason:         reason,
+			Producer:       producer,
 			Persist:        true,
 		})
 	}
 	return normalizeRoutePlanDeliveryIntents(out)
 }
 
-func routePlanFromManifest(evt events.Event, manifest deliveryRecipientManifest, source, reason string) RoutePlan {
+func routePlanFromManifest(evt events.Event, manifest deliveryRecipientManifest, producer routeIntentProducer) RoutePlan {
 	plan := newRoutePlan(evt)
-	plan.AddLiveRecipients(routePlanLiveRecipientsFromManifest(manifest, source, reason)...)
-	plan.AddDeliveryIntents(routePlanDeliveryIntentsFromRoutes(manifest.DeliveryRoutes, source, reason)...)
+	plan.AddLiveRecipients(routePlanLiveRecipientsFromManifest(manifest, producer)...)
+	plan.AddDeliveryIntents(routePlanDeliveryIntentsFromRoutes(manifest.DeliveryRoutes, producer)...)
 	plan.TargetFailure = manifest.TargetFailure
 	if len(plan.LiveRecipients) > 0 || len(plan.DeliveryIntents) > 0 || plan.TargetFailure != "" {
-		plan.MarkLowerPrecedenceRouteProduction(source)
+		plan.MarkLowerPrecedenceRouteProduction(producer)
 	}
 	return plan.Normalized()
 }
@@ -422,6 +527,10 @@ func normalizeRoutePlanAuthorityState(state RoutePlanAuthorityState) RoutePlanAu
 	}
 }
 
+func normalizeRoutePlanSource(source routePlanSource) routePlanSource {
+	return routePlanSource(strings.TrimSpace(string(source)))
+}
+
 func normalizeRoutePlanLiveRecipients(in []RoutePlanLiveRecipient) []RoutePlanLiveRecipient {
 	if len(in) == 0 {
 		return nil
@@ -431,8 +540,7 @@ func normalizeRoutePlanLiveRecipients(in []RoutePlanLiveRecipient) []RoutePlanLi
 	for _, recipient := range in {
 		recipient.RecipientID = strings.TrimSpace(recipient.RecipientID)
 		recipient.SubscriberType = strings.TrimSpace(recipient.SubscriberType)
-		recipient.Source = strings.TrimSpace(recipient.Source)
-		recipient.Reason = strings.TrimSpace(recipient.Reason)
+		recipient.Producer = recipient.Producer.Normalized()
 		if recipient.RecipientID == "" {
 			continue
 		}
@@ -446,11 +554,8 @@ func normalizeRoutePlanLiveRecipients(in []RoutePlanLiveRecipient) []RoutePlanLi
 		key := strings.Join([]string{recipient.SubscriberType, recipient.RecipientID}, "\x00")
 		if idx, ok := indexByKey[key]; ok {
 			out[idx].PersistAsDelivery = out[idx].PersistAsDelivery || recipient.PersistAsDelivery
-			if out[idx].Source == "" {
-				out[idx].Source = recipient.Source
-			}
-			if out[idx].Reason == "" {
-				out[idx].Reason = recipient.Reason
+			if out[idx].Producer.Empty() {
+				out[idx].Producer = recipient.Producer
 			}
 			continue
 		}
@@ -470,19 +575,15 @@ func normalizeRoutePlanDeliveryIntents(in []RoutePlanDeliveryIntent) []RoutePlan
 		intent.SubscriberType = strings.TrimSpace(intent.SubscriberType)
 		intent.SubscriberID = strings.TrimSpace(intent.SubscriberID)
 		intent.Target = intent.Target.Normalized()
-		intent.Source = strings.TrimSpace(intent.Source)
-		intent.Reason = strings.TrimSpace(intent.Reason)
+		intent.Producer = intent.Producer.Normalized()
 		if intent.SubscriberType == "" || intent.SubscriberID == "" {
 			continue
 		}
 		key := strings.Join([]string{intent.SubscriberType, intent.SubscriberID, intent.Target.FlowID, intent.Target.FlowInstance, intent.Target.EntityID}, "\x00")
 		if idx, ok := indexByKey[key]; ok {
 			out[idx].Persist = out[idx].Persist || intent.Persist
-			if out[idx].Source == "" {
-				out[idx].Source = intent.Source
-			}
-			if out[idx].Reason == "" {
-				out[idx].Reason = intent.Reason
+			if out[idx].Producer.Empty() {
+				out[idx].Producer = intent.Producer
 			}
 			continue
 		}

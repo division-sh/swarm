@@ -263,10 +263,10 @@ func TestDeliveryPlanner_ComposesRoutingPolicyAndManifest(t *testing.T) {
 	}
 	var sawObserverAgent, sawWorkerNode bool
 	for _, intent := range plan.RoutePlan.DeliveryIntents {
-		if intent.SubscriberType == "agent" && intent.SubscriberID == "observer" && intent.Source == routePlanSourceAgentPolicy && intent.Reason == routePlanReasonMatchedAgentSubscription {
+		if intent.SubscriberType == "agent" && intent.SubscriberID == "observer" && intent.Producer == routeIntentProducerAgentPolicy {
 			sawObserverAgent = true
 		}
-		if intent.SubscriberType == "node" && intent.SubscriberID == "worker" && intent.Source == routePlanSourceRootNodeRoute && intent.Reason == routePlanReasonRouteTableNode {
+		if intent.SubscriberType == "node" && intent.SubscriberID == "worker" && intent.Producer == routeIntentProducerRootNodeRoute {
 			sawWorkerNode = true
 		}
 	}
@@ -315,7 +315,7 @@ func TestDeliveryPlanner_DoesNotDeadLetterTargetedWorkflowNodeSubscriber(t *test
 		t.Fatalf("route plan delivery intents = %d, want %d", got, want)
 	}
 	intent := plan.RoutePlan.DeliveryIntents[0]
-	if intent.Source != routePlanSourceInternalTarget || intent.Reason != routePlanReasonRouteTableNode {
+	if intent.Producer != routeIntentProducerInternalTargetRoute {
 		t.Fatalf("route plan delivery intent = %#v, want internal targeted route-table node authority", intent)
 	}
 }
@@ -438,10 +438,10 @@ func TestDeliveryPlanner_ExpandsTargetSetForInternalWorkflowRecipient(t *testing
 	}
 	var semanticNodeRoutes, carrierRoutes int
 	for _, intent := range plan.RoutePlan.DeliveryIntents {
-		if intent.Source == routePlanSourceInternalTarget && intent.Reason == routePlanReasonRouteTableNode && (intent.SubscriberID == "child-a-listener" || intent.SubscriberID == "child-b-listener") {
+		if intent.Producer == routeIntentProducerInternalTargetRoute && (intent.SubscriberID == "child-a-listener" || intent.SubscriberID == "child-b-listener") {
 			semanticNodeRoutes++
 		}
-		if intent.Source == routePlanSourceInternalTarget && intent.Reason == routePlanReasonInternalCarrier && intent.SubscriberID == "workflow-runtime" {
+		if intent.Producer == routeIntentProducerInternalTargetCarrier && intent.SubscriberID == "workflow-runtime" {
 			carrierRoutes++
 		}
 	}
@@ -548,7 +548,7 @@ func TestDeliveryPlanner_NoTargetConcreteRoutedNodePersistsSemanticNodeRoute(t *
 		t.Fatalf("route plan delivery intents = %d, want %d", got, want)
 	}
 	intent := plan.RoutePlan.DeliveryIntents[0]
-	if intent.Source != routePlanSourceConcreteNodeRoute || intent.Reason != routePlanReasonRouteTableNode {
+	if intent.Producer != routeIntentProducerConcreteNodeRoute {
 		t.Fatalf("route plan delivery intent = %#v, want concrete route-table semantic node source", intent)
 	}
 }
@@ -769,7 +769,7 @@ func TestDeliveryPlanner_NoTargetRootLocalEventWithFlowInstanceUsesRootNodeRoute
 		t.Fatalf("route plan delivery intents = %d, want %d", got, want)
 	}
 	intent := plan.RoutePlan.DeliveryIntents[0]
-	if intent.Source != routePlanSourceRootNodeRoute || intent.Reason != routePlanReasonRouteTableNode {
+	if intent.Producer != routeIntentProducerRootNodeRoute {
 		t.Fatalf("route plan delivery intent = %#v, want root route-table node source", intent)
 	}
 }
@@ -827,7 +827,7 @@ func TestDeliveryPlanner_NoTargetScopedRoutedNodeUsesSemanticNodeDeliveryRoute(t
 		t.Fatalf("route plan delivery intents = %d, want %d", got, want)
 	}
 	intent := plan.RoutePlan.DeliveryIntents[0]
-	if intent.Source != routePlanSourceScopedNodeRoute || intent.Reason != routePlanReasonRouteTableNode {
+	if intent.Producer != routeIntentProducerScopedNodeRoute {
 		t.Fatalf("route plan delivery intent = %#v, want scoped route-table node source", intent)
 	}
 }
@@ -950,7 +950,7 @@ func TestDeliveryPlanner_NoTargetCrossFlowStaticRoutedNodeUsesSubscriberScope(t 
 		t.Fatalf("route plan delivery intents = %d, want %d", got, want)
 	}
 	intent := plan.RoutePlan.DeliveryIntents[0]
-	if intent.Source != routePlanSourceScopedNodeRoute || intent.Reason != routePlanReasonRouteTableNode {
+	if intent.Producer != routeIntentProducerScopedNodeRoute {
 		t.Fatalf("route plan delivery intent = %#v, want scoped route-table node source", intent)
 	}
 }
@@ -1008,7 +1008,7 @@ func TestDeliveryPlanner_NoTargetWildcardStaticServiceRoutedNodeUsesSubscriberSc
 		t.Fatalf("route plan delivery intents = %d, want %d", got, want)
 	}
 	intent := plan.RoutePlan.DeliveryIntents[0]
-	if intent.Source != routePlanSourceScopedNodeRoute || intent.Reason != routePlanReasonRouteTableNode {
+	if intent.Producer != routeIntentProducerScopedNodeRoute {
 		t.Fatalf("route plan delivery intent = %#v, want scoped route-table node source", intent)
 	}
 }
@@ -1066,7 +1066,7 @@ func TestDeliveryPlanner_NoTargetDescendantScopedRoutedNodeUsesParentInstanceRou
 		t.Fatalf("route plan delivery intents = %d, want %d", got, want)
 	}
 	intent := plan.RoutePlan.DeliveryIntents[0]
-	if intent.Source != routePlanSourceScopedNodeRoute || intent.Reason != routePlanReasonRouteTableNode {
+	if intent.Producer != routeIntentProducerScopedNodeRoute {
 		t.Fatalf("route plan delivery intent = %#v, want scoped route-table node source", intent)
 	}
 }

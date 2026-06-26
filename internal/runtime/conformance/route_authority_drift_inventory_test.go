@@ -139,11 +139,18 @@ func TestRouteAuthorityDriftInventoryRejectsNarrowOrStaleAudit(t *testing.T) {
 			want: "policy claims_runtime_behavior_closure = true, want false",
 		},
 		{
-			name: "current child issue must stay visible",
+			name: "guardrail child issue must stay visible",
 			mutate: func(inventory *routeAuthorityDriftInventory) {
 				inventory.ImplementationIssues = []int{1364}
 			},
 			want: "inventory implementation_issues missing #1494",
+		},
+		{
+			name: "typed producer child issue must stay visible",
+			mutate: func(inventory *routeAuthorityDriftInventory) {
+				inventory.ImplementationIssues = []int{1364, 1494}
+			},
+			want: "inventory implementation_issues missing #1495",
 		},
 	}
 
@@ -242,7 +249,7 @@ func validateRouteAuthorityDriftInventoryWithCorpus(root string, corpus *routeAu
 	if inventory.Issue != 1364 {
 		problems = append(problems, fmt.Sprintf("inventory issue = #%d, want #1364", inventory.Issue))
 	}
-	for _, issue := range []int{1364, 1494} {
+	for _, issue := range []int{1364, 1494, 1495} {
 		if !routeAuthorityDriftHasInt(inventory.ImplementationIssues, issue) {
 			problems = append(problems, fmt.Sprintf("inventory implementation_issues missing #%d", issue))
 		}
