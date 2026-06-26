@@ -26,9 +26,6 @@ active_trackers:
   - kind: github_issue
     issue: 1481
     watchlist: runtime_operations.delivery_and_replay_ownership
-  - kind: github_issue
-    issue: 1493
-    watchlist: runtime_operations.delivery_and_replay_ownership
 rows:
   - id: route_plan_spec_contract
     concept: RoutePlan is the publish-time typed authority and event_deliveries is the durable authority sink.
