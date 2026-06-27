@@ -121,6 +121,9 @@ func (e *Executor) execHTTPRequestOnce(ctx context.Context, method, url string, 
 			req.Header.Add(key, value)
 		}
 	}
+	if err := e.admitExternalDispatch(ctx, e.httpToolExternalDispatchPolicy(tool)); err != nil {
+		return nil, err
+	}
 	resp, err := e.httpClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -150,6 +153,13 @@ func (e *Executor) execHTTPRequestOnce(ctx context.Context, method, url string, 
 func (e *Executor) execMCPTool(ctx context.Context, actor models.AgentConfig, tool RegisteredTool, input any) (any, error) {
 	if e.mcpClient == nil {
 		return nil, fmt.Errorf("mcp client is not configured")
+	}
+	policy, err := e.mcpToolExternalDispatchPolicy(tool)
+	if err != nil {
+		return nil, err
+	}
+	if err := e.admitExternalDispatch(ctx, policy); err != nil {
+		return nil, err
 	}
 	e.mu.RLock()
 	source := e.workflowSource

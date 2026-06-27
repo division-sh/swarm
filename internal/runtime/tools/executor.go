@@ -47,6 +47,7 @@ type Executor struct {
 	authorizer                     *ToolAuthorizer
 	validator                      *ToolInputValidator
 	dispatcher                     *ToolDispatcher
+	externalDispatchAdmission      *externalDispatchAdmissionController
 	allowInternalLegacyEntityTools bool
 	execWorkspaceFn                func(ctx context.Context, target workspace.ExecutionTarget, timeout time.Duration, stdin string, args ...string) ([]byte, []byte, int, error)
 	oneShotMu                      sync.Mutex
@@ -83,6 +84,7 @@ func NewExecutorWithOptions(bus EventPublisher, scheduler Scheduler, opts Execut
 		workflowSource:                 opts.WorkflowSource,
 		workspaces:                     opts.WorkspaceResolver,
 		authority:                      runtimeauthority.ProviderOrNoop(opts.AuthorityProvider),
+		externalDispatchAdmission:      newExternalDispatchAdmissionController(),
 		allowInternalLegacyEntityTools: opts.AllowInternalLegacyEntityTools,
 		oneShotEmits:                   make(map[string]struct{}),
 	}
@@ -374,11 +376,12 @@ func (e *Executor) Execute(ctx context.Context, name string, input any) (any, er
 	}
 	input = normalizeRuntimeToolInput(name, input)
 	start := time.Now()
-	out, err := e.dispatchTool(ctx, actor, name, input)
+	dispatchCtx := withExternalDispatchAdmissionCollector(ctx)
+	out, err := e.dispatchTool(dispatchCtx, actor, name, input)
 	if isEmitToolName(name) {
 		return out, err
 	}
-	e.emitToolExecutionEvent(ctx, actor, name, input, out, err, time.Since(start), "dispatch")
+	e.emitToolExecutionEvent(dispatchCtx, actor, name, input, out, err, time.Since(start), "dispatch")
 	return out, err
 }
 
@@ -574,6 +577,11 @@ func toolExecutionDiagnosticDetail(ctx context.Context, toolName string, input a
 			detail["runtime_error_component"] = v
 		}
 		detail["retryable"] = runtimeErr.Retryable
+	}
+	if rateLimitDetail, ok := externalDispatchAdmissionDiagnosticDetail(ctx); ok {
+		for key, value := range rateLimitDetail {
+			detail[key] = value
+		}
 	}
 	return detail
 }

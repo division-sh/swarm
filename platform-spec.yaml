@@ -3811,6 +3811,13 @@ engine:
               unlock, or downgrade native_tools.web_search. If the configured CLI runtime cannot expose provider-native web_search,
               startup/runtime validation must fail closed. Non-CLI runtimes may still use fallback-aware validation outside
               this CLI-specific rule.
+            platform_provider_rate_limit: >
+              Non-CLI platform-executed web_search_provider dispatch may declare `rate_limit` and
+              `rate_limit_max_wait` alongside the provider configuration. These fields are owned by the
+              external tool-provider dispatch admission model and apply only to platform-owned HTTP
+              provider requests for hardcoded Brave/Serper/Tavily providers and custom provider.http
+              requests. Provider-native CLI web_search and LLM-provider API calls do not consume this
+              bucket.
         file_io:
           description: Read and write files within workspace mounts. On the shipped CLI runtime, file_io is provider-native
             and maps to callable read_file/write_file operations on the same turn. /workspace is read-write, /data is read-only,
@@ -3893,6 +3900,8 @@ engine:
         - If any enabled native capability is unsupported by a CLI-native-strict runtime's provider-native capability set, startup/runtime
           validation fails closed. policy.web_search_provider is not part of CLI native_tools validation or authorization. Non-CLI
           runtimes may still use fallback-aware validation outside this CLI-specific rule.
+        - policy.web_search_provider `rate_limit` and `rate_limit_max_wait`, when present for a platform-executed provider,
+          must satisfy the external tool-provider dispatch grammar. They do not make CLI native_tools.web_search valid.
   timer_model:
     description: Timers are durable delayed events. The platform schedules them and fires them as regular events entering
       the event loop. Timers are declared in nodes.yaml.
@@ -4125,9 +4134,11 @@ engine:
       when: boot-only
     - id: invalid_field_detection
       severity: error
-      scope: per-node
-      trigger: A node declaration uses a top-level field not in the defined node_fields set (id, execution_type, description,
-        subscribes_to, event_handlers, state_schema, state_table, timers, gate_state, permissions, produces).
+      scope: contract
+      trigger: A declaration uses an unsupported or malformed field in a fail-closed contract surface. This includes node
+        top-level fields outside the defined node_fields set (id, execution_type, description, subscribes_to, event_handlers,
+        state_schema, state_table, timers, gate_state, permissions, produces) and malformed external tool-provider dispatch
+        rate-limit declarations on HTTP tools, MCP servers, or policy.web_search_provider.
       when: boot-only
     - id: policy_conflict_detection
       severity: warning
@@ -4669,6 +4680,10 @@ tool_model:
             args: list — command arguments (for stdio transport)
             prefix: string — namespace prefix for this server's tools. Required. Must be unique across all registered servers.
             credentials_key: string — optional reference to credential store entry for server authentication
+            rate_limit: string — optional external dispatch rate limit, format N/period, shared by all runtime tools/call
+              dispatches to this MCP server.
+            rate_limit_max_wait: string — required when rate_limit is present; maximum per-call admission wait before
+              returning typed rate_limited.
       example: "mcp_servers:\n  postgres:\n    description: PostgreSQL database access\n    transport: http\n    url: \"{{postgres_mcp_url}}\"\
         \n    prefix: pg\n    credentials_key: postgres_mcp\n  sendgrid:\n    description: Email delivery via SendGrid\n   \
         \ transport: stdio\n    command: npx\n    args: [\"@sendgrid/mcp-server\"]\n    prefix: email"
@@ -4688,6 +4703,26 @@ tool_model:
     lifecycle:
       http: Connection maintained for platform lifetime. Reconnect on failure with exponential backoff (1s, 2s, 4s, max 30s).
       stdio: Process spawned at boot, killed on platform shutdown. If process exits unexpectedly, respawn with backoff.
+    external_provider_dispatch_rate_limit:
+      description: >
+        `rate_limit` on an MCP server declares process-local admission for runtime `tools/call` dispatches to that server.
+        The bucket is shared by all discovered tools from the server, across direct Executor.Execute, /tools/{name}, and
+        /mcp tools/call entry points. It applies to both HTTP and stdio MCP transports after discovery. MCP boot discovery
+        (`tools/list`, initialize, startup probes) is not part of this admission bucket.
+      grammar:
+        rate_limit: >
+          `N/period`, where N is a positive integer and period is an integer duration with unit ms, s, m, h, or d.
+          The short form `N/s` means `N/1s`. Whitespace is invalid.
+        rate_limit_max_wait: >
+          Integer duration with unit ms, s, m, h, or d. `0s` is valid and means fail immediately rather than queue.
+          This field is required when rate_limit is present; no hidden default wait is applied.
+      behavior:
+      - Absence of both fields means no admission limit.
+      - Providing only one field is a boot/runtime validation error.
+      - Excess calls wait FIFO within the process-local bucket until they can be admitted or until rate_limit_max_wait is exceeded.
+      - On max-wait timeout the tool call fails with typed runtime error code `rate_limited`, component `tool-executor`,
+        operation `external_dispatch_admission`, retryable true, before any outbound provider dispatch occurs.
+      - Durable cross-process/fleet-wide admission, global priority, and deadline policy remain outside this owner.
   http_tool_definition:
     description: Tools defined as HTTP request templates in tools.yaml. The platform ships a generic HTTP executor that reads
       the template, resolves variables, makes the HTTP call, and maps the response. This is the primary mechanism for products
@@ -4719,6 +4754,9 @@ tool_model:
           returned as the tool result.
         credentials: list of strings — credential store key names this tool needs. The platform resolves them from the credential
           store at call time and makes them available as {{credentials.key}} in templates.
+        rate_limit: string — optional external dispatch rate limit, format N/period.
+        rate_limit_max_wait: string — required when rate_limit is present; maximum per-call admission wait before
+          returning typed rate_limited.
     template_resolution:
       description: Template variables in url, headers, body, and response_mapping are resolved at tool call time. URL
         template resolution is context-aware and performs URL-component percent-encoding for embedded substitutions;
@@ -4730,6 +4768,27 @@ tool_model:
           {{response.headers.header_name}}.
       missing_variable: If a required template variable cannot be resolved (missing input field, missing credential), the tool
         call fails with an error returned to the agent. The platform does not make the HTTP request.
+    external_provider_dispatch_rate_limit:
+      description: >
+        `rate_limit` on an HTTP tool declares process-local admission for outbound HTTP provider dispatch by that tool.
+        The bucket is per workflow source and tool name, and it is consumed by direct Executor.Execute, /tools/{name},
+        and /mcp tools/call entry points. Every retry attempt consumes the same bucket before making another outbound
+        HTTP request; retry/backoff cannot bypass admission.
+      grammar:
+        rate_limit: >
+          `N/period`, where N is a positive integer and period is an integer duration with unit ms, s, m, h, or d.
+          The short form `N/s` means `N/1s`. Whitespace is invalid.
+        rate_limit_max_wait: >
+          Integer duration with unit ms, s, m, h, or d. `0s` is valid and means fail immediately rather than queue.
+          This field is required when rate_limit is present; no hidden default wait is applied.
+      behavior:
+      - Absence of both fields means no admission limit.
+      - Providing only one field, malformed grammar, zero/non-positive count, or use on non-HTTP tool handler declarations
+        is a fail-closed validation error.
+      - Excess calls wait FIFO within the process-local bucket until they can be admitted or until rate_limit_max_wait is exceeded.
+      - On max-wait timeout the tool call fails with typed runtime error code `rate_limited`, component `tool-executor`,
+        operation `external_dispatch_admission`, retryable true, before any outbound provider dispatch occurs.
+      - Successful or waited admissions and timeouts are reflected in platform.runtime_log tool-execution details.
     example: "check_domain:\n  description: Check if a domain name is available for registration\n  handler_type: http\n  input_schema:\n\
       \    type: object\n    required: [domain]\n    properties:\n      domain:\n        type: string\n        description:\
       \ Domain to check (e.g., example.com)\n  http:\n    method: GET\n    url: \"https://api.domainr.com/v2/status?domain={{input.domain}}\"\
@@ -4830,6 +4889,8 @@ tool_model:
       http: object — HTTP request template (see http_tool_definition.schema.http_block)
       response_mapping: object — maps response fields to output fields
       credentials: list of strings — credential store keys
+      rate_limit: string — optional external dispatch admission rate, supported only when handler_type resolves to http.
+      rate_limit_max_wait: string — required when rate_limit is present.
     not_accepted:
       endpoint: NOT a valid field. Use http.url instead.
       type: NOT a valid field. Use handler_type instead.
@@ -6242,6 +6303,11 @@ platform_tables:
       - component and action live in details, not as top-level runtime_log fields
       - error text lives in details.error; message may summarize the failure but is not the raw error string
       - readers and debug UIs should filter and render structured runtime diagnostics from details
+      - >
+        Tool-execution entries that consume external tool-provider dispatch admission include machine-readable
+        details fields `rate_limit_scope`, `rate_limit_bucket_hash`, `rate_limit_limit`, `rate_limit_period_ms`,
+        `rate_limit_max_wait_ms`, `rate_limit_wait_ms`, `rate_limit_outcome`, and `rate_limit_attempts`. If admission
+        times out, details also include `error_code: rate_limited` and `retryable: true`.
       note: 'Queryable via: SELECT * FROM events WHERE event_name = "platform.runtime_log" AND payload->>log_level = "error"'
     pipeline_transition_encoding:
       table: event_receipts

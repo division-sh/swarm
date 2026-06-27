@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -32,6 +33,7 @@ type RegisteredTool struct {
 	HTTP               *runtimecontracts.HTTPToolSpec
 	ResponseMapping    map[string]any
 	Credentials        []string
+	RateLimit          externalDispatchRateLimitConfig
 	MCPServerName      string
 	MCPRemoteName      string
 }
@@ -207,6 +209,13 @@ func registeredToolFromContract(name string, entry runtimecontracts.ToolSchemaEn
 	if handlerType == "" {
 		return RegisteredTool{}, false, nil
 	}
+	rateLimit, enabled, err := parseExternalDispatchRateLimit(entry.RateLimit, entry.RateLimitMaxWait)
+	if err != nil {
+		return RegisteredTool{}, false, err
+	}
+	if enabled && handlerType != implementationHTTP {
+		return RegisteredTool{}, false, fmt.Errorf("tool %s rate_limit is only supported for handler_type http", strings.TrimSpace(name))
+	}
 	inputSchema, err := schemaToMap(entry.InputSchema)
 	if err != nil {
 		return RegisteredTool{}, false, err
@@ -227,6 +236,7 @@ func registeredToolFromContract(name string, entry runtimecontracts.ToolSchemaEn
 		HTTP:               entry.HTTP,
 		ResponseMapping:    deepCloneMap(entry.ResponseMapping),
 		Credentials:        append([]string{}, entry.Credentials...),
+		RateLimit:          rateLimit,
 	}, true, nil
 }
 

@@ -21,14 +21,16 @@ import (
 )
 
 type ServerConfig struct {
-	Name           string
-	Description    string
-	Transport      string
-	URL            string
-	Command        string
-	Args           []string
-	Prefix         string
-	CredentialsKey string
+	Name             string
+	Description      string
+	Transport        string
+	URL              string
+	Command          string
+	Args             []string
+	Prefix           string
+	CredentialsKey   string
+	RateLimit        string
+	RateLimitMaxWait string
 }
 
 type DiscoveredTool struct {
@@ -132,6 +134,23 @@ func (c *Client) DiscoveredTools() map[string]DiscoveredTool {
 		out[key] = value
 	}
 	return out
+}
+
+func (c *Client) ServerConfig(name string) (ServerConfig, bool) {
+	if c == nil {
+		return ServerConfig{}, false
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ServerConfig{}, false
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	server := c.servers[name]
+	if server == nil {
+		return ServerConfig{}, false
+	}
+	return server.cfg, true
 }
 
 func (c *Client) Call(ctx context.Context, prefixedName string, arguments any) (any, error) {
@@ -436,14 +455,16 @@ func parseServerConfigs(source semanticview.Source) ([]ServerConfig, error) {
 			return nil, fmt.Errorf("mcp_servers.%s must be a mapping", name)
 		}
 		cfg := ServerConfig{
-			Name:           name,
-			Description:    strings.TrimSpace(anyString(item["description"])),
-			Transport:      strings.ToLower(strings.TrimSpace(anyString(item["transport"]))),
-			URL:            strings.TrimSpace(renderPolicyTemplate(anyString(item["url"]), policyVars)),
-			Command:        strings.TrimSpace(renderPolicyTemplate(anyString(item["command"]), policyVars)),
-			Prefix:         strings.TrimSpace(anyString(item["prefix"])),
-			CredentialsKey: strings.TrimSpace(anyString(item["credentials_key"])),
-			Args:           renderPolicyStringSlice(stringSlice(item["args"]), policyVars),
+			Name:             name,
+			Description:      strings.TrimSpace(anyString(item["description"])),
+			Transport:        strings.ToLower(strings.TrimSpace(anyString(item["transport"]))),
+			URL:              strings.TrimSpace(renderPolicyTemplate(anyString(item["url"]), policyVars)),
+			Command:          strings.TrimSpace(renderPolicyTemplate(anyString(item["command"]), policyVars)),
+			Prefix:           strings.TrimSpace(anyString(item["prefix"])),
+			CredentialsKey:   strings.TrimSpace(anyString(item["credentials_key"])),
+			RateLimit:        anyString(item["rate_limit"]),
+			RateLimitMaxWait: anyString(item["rate_limit_max_wait"]),
+			Args:             renderPolicyStringSlice(stringSlice(item["args"]), policyVars),
 		}
 		if cfg.Transport == "" {
 			cfg.Transport = "http"
