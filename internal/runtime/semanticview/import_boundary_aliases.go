@@ -44,6 +44,26 @@ type importBoundarySite struct {
 	Bind       runtimecontracts.FlowPackageBind
 }
 
+type ImportBoundaryFlowSite struct {
+	PackageKey string
+	FlowID     string
+}
+
+func ImportBoundaryFlowSites(scope ProjectScope) []ImportBoundaryFlowSite {
+	sites := importBoundarySites(scope)
+	out := make([]ImportBoundaryFlowSite, 0, len(sites))
+	for _, site := range sites {
+		if strings.TrimSpace(site.FlowID) == "" {
+			continue
+		}
+		out = append(out, ImportBoundaryFlowSite{
+			PackageKey: site.PackageKey,
+			FlowID:     site.FlowID,
+		})
+	}
+	return out
+}
+
 func ResolveFlowInputAutoWire(source Source, targetFlowID, eventType string) runtimecontracts.FlowInputAutoWireResolution {
 	targetFlowID = strings.TrimSpace(targetFlowID)
 	eventType = eventidentity.Normalize(eventType)

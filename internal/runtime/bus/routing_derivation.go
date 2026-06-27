@@ -58,6 +58,7 @@ type routeResolvedPattern struct {
 	MatchPattern   string
 	RouteSource    string
 	LocalizedEvent string
+	RoutePath      string
 }
 
 func DeriveRouteTable(source semanticview.Source) (*RouteTable, error) {
@@ -73,6 +74,9 @@ func DeriveRouteTable(source semanticview.Source) (*RouteTable, error) {
 		var inputEvents []string
 		if routeProjectScopeRequiresPinAliases(scope) {
 			owningFlowID = strings.TrimSpace(scope.OwningFlowID)
+		}
+		if importedFlowID := routeProjectScopeImportedFlowID(source, scope); importedFlowID != "" && routeProjectScopeOwnedByTemplateFlow(source, importedFlowID) {
+			continue
 		}
 		if owningFlowID != "" {
 			inputEvents = source.FlowInputEvents(owningFlowID)
@@ -108,6 +112,24 @@ func DeriveRouteTable(source semanticview.Source) (*RouteTable, error) {
 	rt.addRootInputFlowNodeRoutesLocked(source)
 	rt.rebuildLocked()
 	return rt, nil
+}
+
+func routeProjectScopeImportedFlowID(source semanticview.Source, scope semanticview.ProjectScope) string {
+	if source == nil {
+		return ""
+	}
+	key := strings.Trim(strings.TrimSpace(scope.Key), "/")
+	if key == "" {
+		key = "."
+	}
+	for _, parent := range semanticview.ProjectScopes(source) {
+		for _, site := range semanticview.ImportBoundaryFlowSites(parent) {
+			if strings.Trim(strings.TrimSpace(site.PackageKey), "/") == key {
+				return strings.TrimSpace(site.FlowID)
+			}
+		}
+	}
+	return ""
 }
 
 func routeProjectScopeRequiresPinAliases(scope semanticview.ProjectScope) bool {
@@ -544,7 +566,30 @@ func routeApplyResolvedPattern(subscriber Subscriber, resolved routeResolvedPatt
 	if matchPattern := eventidentity.Normalize(resolved.MatchPattern); matchPattern != "" {
 		subscriber.MatchPattern = matchPattern
 	}
+	if subscriber.Path == "" {
+		if routePath := eventidentity.Normalize(resolved.RoutePath); routePath != "" {
+			subscriber.Path = routePath
+		} else if strings.HasPrefix(subscriber.RouteSource, "import_boundary_wildcard") {
+			subscriber.Path = routeStaticPrefixBeforeWildcard(resolved.EventPattern)
+		}
+	}
 	return subscriber
+}
+
+func routeStaticPrefixBeforeWildcard(pattern string) string {
+	pattern = eventidentity.Normalize(pattern)
+	if pattern == "" || !strings.Contains(pattern, "*") {
+		return ""
+	}
+	segments := strings.Split(pattern, "/")
+	prefix := make([]string, 0, len(segments))
+	for _, segment := range segments {
+		if strings.Contains(segment, "*") {
+			break
+		}
+		prefix = append(prefix, segment)
+	}
+	return strings.Join(prefix, "/")
 }
 
 func routeResolveNodeCanonicalPattern(source semanticview.Source, basePath, nodeID, rawPattern string) routeResolvedPattern {
@@ -822,13 +867,65 @@ func routeResolveSubscriberPatterns(source semanticview.Source, packageKey, flow
 				return out
 			}
 		}
+		if strings.Contains(raw, "*") {
+			resolution := semanticview.ResolveImportBoundaryWildcardSubscription(source, packageKey, flowID, basePath, localEvents, raw)
+			if resolution.Scoped {
+				out := make([]routeResolvedPattern, 0, len(resolution.Patterns))
+				for _, pattern := range resolution.Patterns {
+					eventPattern := eventidentity.Normalize(pattern.EventPattern)
+					if eventPattern == "" {
+						continue
+					}
+					out = append(out, routeResolvedPattern{
+						EventPattern:   eventPattern,
+						MatchPattern:   pattern.MatchPattern,
+						RouteSource:    pattern.RouteSource,
+						LocalizedEvent: pattern.LocalizedEvent,
+						RoutePath:      routeImportBoundarySubscriberPath(source, packageKey, flowID, basePath),
+					})
+				}
+				return out
+			}
+		}
 	}
 	scope := routeEventIdentityScope(basePath, localEvents, inputEvents)
 	pattern := scope.ResolveSubscriptionPattern(raw, routeDescendantScopes(source, flowID))
+	if pattern == raw && !strings.Contains(raw, "/") && strings.Trim(strings.TrimSpace(basePath), "/") != "" {
+		for localEvent := range localEvents {
+			if eventidentity.MatchPattern(raw, localEvent) {
+				pattern = eventidentity.Normalize(strings.Trim(strings.TrimSpace(basePath), "/") + "/" + raw)
+				break
+			}
+		}
+	}
 	if pattern == "" {
 		return nil
 	}
 	return []routeResolvedPattern{{EventPattern: pattern, RouteSource: "subscription"}}
+}
+
+func routeImportBoundarySubscriberPath(source semanticview.Source, packageKey, flowID, basePath string) string {
+	if path := eventidentity.Normalize(basePath); path != "" {
+		return path
+	}
+	if flowID = strings.TrimSpace(flowID); flowID != "" {
+		return routeFlowPath(source, flowID)
+	}
+	packageKey = strings.Trim(strings.TrimSpace(packageKey), "/")
+	if packageKey == "" {
+		packageKey = "."
+	}
+	if source == nil {
+		return ""
+	}
+	for _, parent := range semanticview.ProjectScopes(source) {
+		for _, site := range semanticview.ImportBoundaryFlowSites(parent) {
+			if strings.Trim(strings.TrimSpace(site.PackageKey), "/") == packageKey {
+				return routeFlowPath(source, site.FlowID)
+			}
+		}
+	}
+	return ""
 }
 
 func routeReceiverCarrierSubscriberPatterns(inputEvents []string, instancePath, raw string) []routeResolvedPattern {

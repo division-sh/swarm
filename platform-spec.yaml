@@ -4985,8 +4985,53 @@ flow_model:
           Runtime consumers must use the shared import-boundary alias resolver; local helpers must not independently
           reinterpret package-local pins, parent event names, or raw same-name fallback for declared imported package
           pins.
+      wildcard_subscription_scope:
+        owner: Runtime import-boundary wildcard scope/grant resolver over semanticview ProjectScopes, FlowScopes, and
+          parent import-site `bind.observe` grants.
+        default_scope: >
+          A wildcard subscription authored inside an imported package is scoped to that imported package subtree by
+          default. The candidate set includes events from the imported package's own flow/package subtree, including
+          materialized template instances for that imported package. The candidate set does not include sibling package
+          events merely because the raw event name matches `*`, `**`, or an unqualified local wildcard such as
+          `task.*`.
+        import_site_grants:
+          field: bind.observe
+          shape: >
+            `bind.observe` is a list of narrow observation grants on the parent package.yaml import-site entry. Each
+            grant MUST name a parent-visible typed `source` and an `events` list. `source` resolves to exactly one
+            parent-visible flow import ID or package key. Each event pattern is evaluated relative to that source and
+            intersected with the imported package's authored wildcard subscription before the event becomes a route
+            candidate.
+          example: |
+            flows:
+              - id: observer
+                flow: observer
+                bind:
+                  observe:
+                    - source: producer
+                      events: [task.done]
+              - id: producer
+                flow: producer
+          forbidden_compatibility_shapes: >
+            Broad compatibility grants such as observe-all, all-siblings, global/root observation, or raw path-prefix
+            fallbacks are not valid authority. A grant source must resolve through import/flow/package metadata, not
+            through string prefix matching alone.
+        fail_closed: >
+          Verify/boot and runtime route derivation must use the shared import-boundary wildcard resolver. A grant with
+          an empty, unknown, ambiguous, root/global, or non-parent-visible source is hard invalid. A grant with an empty,
+          unknown, malformed, or unbounded event pattern such as `*` or `**` is hard invalid. An imported package
+          wildcard subscription that has no package-subtree candidate and no matching explicit observe grant is hard
+          invalid and must not fall back to global wildcard matching.
+        runtime_parity: >
+          RouteTable static derivation, template-instance route materialization, EventBus recipient planning/persistence,
+          runtime owner lookup, workflow-node handler lookup, and boot verification must consume this same resolver.
+          Low-level event identity wildcard matching remains only the primitive matcher inside the candidate set supplied
+          by this resolver; it is not package-boundary authority.
+        non_import_behavior: >
+          Root and non-imported flow wildcard subscriptions keep their existing wildcard route behavior. Target and
+          target_set delivery narrowing still applies after the scoped wildcard candidate is produced; wildcard grants
+          do not override delivery target filtering.
       split_runtime_semantics:
-        wildcard_grants: Wildcard subtree and cross-tree grant behavior is tracked separately by #1454.
         final_e2e_package_proof: Final multi-package marketplace-style runtime proof is tracked separately by #1455.
     composition_routing:
       status: source_authority_promoted_runtime_migration_pending

@@ -45,6 +45,43 @@ func checkFlowPackageDependencyBinding(c *checkerContext) []Finding {
 	return findings
 }
 
+func checkFlowPackageWildcardObserveGrant(c *checkerContext) []Finding {
+	var findings []Finding
+	for _, issue := range semanticview.ImportBoundaryWildcardGrantIssues(c.source) {
+		findings = append(findings, Finding{
+			CheckID:  "flow_package_wildcard_observe_grant",
+			Severity: SeverityHardInvalidity,
+			Message:  flowPackageWildcardObserveGrantMessage(issue),
+			Location: strings.TrimSpace(issue.ChildPackageKey),
+		})
+	}
+	for _, issue := range semanticview.ImportBoundaryWildcardSubscriptionIssues(c.source) {
+		findings = append(findings, Finding{
+			CheckID:  "flow_package_wildcard_observe_grant",
+			Severity: SeverityHardInvalidity,
+			Message:  flowPackageWildcardObserveGrantMessage(issue),
+			Location: strings.TrimSpace(issue.ChildPackageKey),
+		})
+	}
+	return findings
+}
+
+func flowPackageWildcardObserveGrantMessage(issue semanticview.ImportBoundaryWildcardIssue) string {
+	source := strings.TrimSpace(issue.Source)
+	if source == "" {
+		source = "<empty>"
+	}
+	eventPattern := strings.TrimSpace(issue.EventPattern)
+	if eventPattern == "" {
+		eventPattern = "<empty>"
+	}
+	detail := strings.TrimSpace(issue.Message)
+	if detail == "" {
+		detail = strings.TrimSpace(issue.Kind)
+	}
+	return fmt.Sprintf("imported package %s observe grant from %s event %s via %s is invalid: %s", strings.TrimSpace(issue.ChildPackageKey), source, eventPattern, strings.TrimSpace(issue.ImportLabel), detail)
+}
+
 func flowPackageDependencyBindingMessage(issue semanticview.ImportBoundaryDependencyIssue) string {
 	dependency := strings.TrimSpace(issue.Dependency)
 	if dependency == "" {

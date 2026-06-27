@@ -254,9 +254,33 @@ func (s bundleSource) ResolveFlowEventReference(flowID, eventType string) string
 	return s.bundle.ResolveFlowEventReference(flowID, eventType)
 }
 func (s bundleSource) ResolveFlowEventPattern(flowID, pattern string) string {
+	if resolution := ResolveImportBoundaryWildcardSubscription(
+		s,
+		"",
+		flowID,
+		s.FlowPath(flowID),
+		flowLocalEventSetForWildcardSource(s, flowID),
+		pattern,
+	); resolution.Scoped {
+		if len(resolution.Patterns) == 1 {
+			return resolution.Patterns[0].EventPattern
+		}
+		return ""
+	}
 	return s.bundle.ResolveFlowEventPattern(flowID, pattern)
 }
 func (s bundleSource) FlowEventMatches(flowID, subscription, eventType string) bool {
+	if matched, scoped := ImportBoundaryWildcardSubscriptionMatches(
+		s,
+		"",
+		flowID,
+		s.FlowPath(flowID),
+		flowLocalEventSetForWildcardSource(s, flowID),
+		subscription,
+		eventType,
+	); scoped {
+		return matched
+	}
 	return s.bundle.FlowEventMatches(flowID, subscription, eventType)
 }
 func (s bundleSource) RequiredAgents() []runtimecontracts.FlowRequiredAgent {
@@ -281,7 +305,7 @@ func (s bundleSource) DerivedHandlerTransitions() []runtimecontracts.HandlerTran
 	return s.bundle.DerivedHandlerTransitions()
 }
 func (s bundleSource) RuntimeEventOwners(eventType string) []string {
-	return s.bundle.RuntimeEventOwners(eventType)
+	return RuntimeEventOwners(s, eventType)
 }
 func (s bundleSource) NodeContractSource(nodeID string) (runtimecontracts.ContractItemSource, bool) {
 	return s.bundle.NodeContractSource(nodeID)
@@ -302,6 +326,20 @@ func (s bundleSource) NodeEventHandlers(nodeID string) map[string]runtimecontrac
 	return s.bundle.NodeEventHandlers(nodeID)
 }
 func (s bundleSource) NodeEventHandler(nodeID, eventType string) (runtimecontracts.SystemNodeEventHandler, bool) {
+	nodeID = strings.TrimSpace(nodeID)
+	eventType = strings.TrimSpace(eventType)
+	for pattern := range s.bundle.NodeEventHandlers(nodeID) {
+		if !strings.Contains(pattern, "*") {
+			continue
+		}
+		matched, scoped := ImportBoundaryWildcardSubscriptionMatchesNode(s, nodeID, pattern, eventType)
+		if !scoped {
+			continue
+		}
+		if matched {
+			return s.bundle.NodeEventHandler(nodeID, pattern)
+		}
+	}
 	return s.bundle.NodeEventHandler(nodeID, eventType)
 }
 func (s bundleSource) NodeEntries() map[string]runtimecontracts.SystemNodeContract {
@@ -321,4 +359,16 @@ func (s bundleSource) ToolEntries() map[string]runtimecontracts.ToolSchemaEntry 
 }
 func (s bundleSource) ToolEntryForAgent(agentID, toolID string) (runtimecontracts.ToolSchemaEntry, bool) {
 	return s.bundle.ToolEntryForAgent(agentID, toolID)
+}
+
+func flowLocalEventSetForWildcardSource(source Source, flowID string) map[string]struct{} {
+	flowID = strings.TrimSpace(flowID)
+	if source == nil || flowID == "" {
+		return nil
+	}
+	scope, ok := source.FlowScopeByID(flowID)
+	if !ok {
+		return nil
+	}
+	return importBoundaryFlowLocalEventSet(source, scope)
 }

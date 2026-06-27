@@ -51,7 +51,7 @@ func (c *checkerContext) eventWarnings() []Finding {
 				continue
 			}
 			if strings.Contains(eventType, "*") {
-				addEventPatternLocal(subscriptionPatterns, scope.ID, eventType)
+				addEventPatternLocal(subscriptionPatterns, scope.PackageKey, scope.ID, eventType)
 			} else {
 				addEventProofLocal(subscribedRefs, c.source, scope.ID, eventType)
 			}
@@ -66,7 +66,7 @@ func (c *checkerContext) eventWarnings() []Finding {
 					continue
 				}
 				if strings.Contains(eventType, "*") {
-					addEventPatternLocal(subscriptionPatterns, scope.ID, eventType)
+					addEventPatternLocal(subscriptionPatterns, scope.PackageKey, scope.ID, eventType)
 				} else {
 					addEventProofLocal(subscribedRefs, c.source, scope.ID, eventType)
 				}
@@ -83,7 +83,7 @@ func (c *checkerContext) eventWarnings() []Finding {
 				continue
 			}
 			if strings.Contains(eventType, "*") {
-				addEventPatternLocal(subscriptionPatterns, "", eventType)
+				addEventPatternLocal(subscriptionPatterns, "", "", eventType)
 			} else {
 				addEventProofLocal(subscribedRefs, c.source, "", eventType)
 			}
@@ -98,7 +98,7 @@ func (c *checkerContext) eventWarnings() []Finding {
 				continue
 			}
 			if strings.Contains(eventType, "*") {
-				addEventPatternLocal(subscriptionPatterns, flowID, eventType)
+				addEventPatternLocal(subscriptionPatterns, nodeSource.PackageKey, flowID, eventType)
 			} else {
 				addEventProofLocal(subscribedRefs, c.source, flowID, eventType)
 			}
@@ -109,7 +109,7 @@ func (c *checkerContext) eventWarnings() []Finding {
 				continue
 			}
 			if strings.Contains(eventType, "*") {
-				addEventPatternLocal(subscriptionPatterns, flowID, eventType)
+				addEventPatternLocal(subscriptionPatterns, nodeSource.PackageKey, flowID, eventType)
 			} else {
 				addEventProofLocal(subscribedRefs, c.source, flowID, eventType)
 			}
@@ -137,7 +137,7 @@ func (c *checkerContext) eventWarnings() []Finding {
 				continue
 			}
 			if strings.Contains(eventType, "*") {
-				addEventPatternLocal(subscriptionPatterns, flowID, eventType)
+				addEventPatternLocal(subscriptionPatterns, agentSource.PackageKey, flowID, eventType)
 			} else {
 				addEventProofLocal(subscribedRefs, c.source, flowID, eventType)
 			}
@@ -217,8 +217,9 @@ func addCompositionConnectEventProofsLocal(source semanticview.Source, emittedRe
 }
 
 type eventPatternLocal struct {
-	FlowID string
-	Base   string
+	PackageKey string
+	FlowID     string
+	Base       string
 }
 
 func addEventProofLocal(refs map[string]semanticview.FlowEventProof, source semanticview.Source, flowID, eventType string) {
@@ -230,13 +231,17 @@ func addEventProofLocal(refs map[string]semanticview.FlowEventProof, source sema
 	refs[key] = ref
 }
 
-func addEventPatternLocal(refs map[string]eventPatternLocal, flowID, eventType string) {
+func addEventPatternLocal(refs map[string]eventPatternLocal, packageKey, flowID, eventType string) {
 	eventType = strings.TrimSpace(eventType)
 	if eventType == "" {
 		return
 	}
-	ref := eventPatternLocal{Base: eventType, FlowID: strings.TrimSpace(flowID)}
-	key := ref.FlowID + "::" + ref.Base
+	ref := eventPatternLocal{
+		PackageKey: strings.TrimSpace(packageKey),
+		FlowID:     strings.TrimSpace(flowID),
+		Base:       eventType,
+	}
+	key := ref.PackageKey + "::" + ref.FlowID + "::" + ref.Base
 	refs[key] = ref
 }
 
@@ -247,6 +252,12 @@ func eventRefConsumedLocal(source semanticview.Source, eventType string, subscri
 		}
 	}
 	for _, pattern := range patterns {
+		if matched, scoped := semanticview.ImportBoundaryWildcardSubscriptionMatches(source, pattern.PackageKey, pattern.FlowID, "", nil, pattern.Base, eventType); scoped {
+			if matched {
+				return true
+			}
+			continue
+		}
 		if source.FlowEventMatches(pattern.FlowID, pattern.Base, eventType) {
 			return true
 		}
