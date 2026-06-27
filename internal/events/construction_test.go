@@ -331,12 +331,18 @@ func checkTestEventFixtureFile(t *testing.T, repoRoot, path string) {
 		if isNewRouteProbeEventCall(call, eventAliases) {
 			t.Fatalf("%s:%d calls events.NewRouteProbeEvent directly in a test; use internal/events/eventtest.RouteProbe or add a narrow internal/events unit-test allowlist", relativePath, fset.Position(call.Pos()).Line)
 		}
+		if constructor, ok := testEventConstructorCallName(call, eventAliases); ok {
+			t.Fatalf("%s:%d calls events.%s directly in a test; use the matching internal/events/eventtest fixture builder outside internal/events constructor unit tests", relativePath, fset.Position(call.Pos()).Line, constructor)
+		}
+		if isEventtestProjectionCall(call, eventtestAliases) {
+			t.Fatalf("%s:%d calls eventtest.Projection in a test; choose eventtest.RootIngress, eventtest.ChildWithLineage, eventtest.Replay, runtime diagnostic/control helpers, or eventtest.PersistedProjection for persisted/readback fixtures", relativePath, fset.Position(call.Pos()).Line)
+		}
 		sel, ok := call.Fun.(*ast.SelectorExpr)
 		if !ok || !isEventProjectionMethod(sel.Sel.Name) {
 			return true
 		}
 		if isPackageIdent(sel.X, eventtestAliases) {
-			return true
+			t.Fatalf("%s:%d calls eventtest.%s in a test; pass the final EventEnvelope/route context to the typed fixture constructor", relativePath, fset.Position(sel.Pos()).Line, sel.Sel.Name)
 		}
 		if isPackageIdent(sel.X, packageAliases) {
 			return true
@@ -411,6 +417,30 @@ func isNewProjectionEventCall(call *ast.CallExpr, eventAliases map[string]struct
 func isNewRouteProbeEventCall(call *ast.CallExpr, eventAliases map[string]struct{}) bool {
 	selector, ok := call.Fun.(*ast.SelectorExpr)
 	return ok && selector.Sel.Name == "NewRouteProbeEvent" && isEventsPackageIdent(selector.X, eventAliases)
+}
+
+func testEventConstructorCallName(call *ast.CallExpr, eventAliases map[string]struct{}) (string, bool) {
+	selector, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok || !isEventsPackageIdent(selector.X, eventAliases) {
+		return "", false
+	}
+	switch selector.Sel.Name {
+	case "NewRootIngressEvent",
+		"NewRuntimeControlEvent",
+		"NewRuntimeDiagnosticEvent",
+		"NewDiagnosticDirectEvent",
+		"NewChildEvent",
+		"NewChildEventWithLineage",
+		"NewReplayEvent":
+		return selector.Sel.Name, true
+	default:
+		return "", false
+	}
+}
+
+func isEventtestProjectionCall(call *ast.CallExpr, eventtestAliases map[string]struct{}) bool {
+	selector, ok := call.Fun.(*ast.SelectorExpr)
+	return ok && selector.Sel.Name == "Projection" && isPackageIdent(selector.X, eventtestAliases)
 }
 
 func productionFunctionScope(fn *ast.FuncDecl) string {

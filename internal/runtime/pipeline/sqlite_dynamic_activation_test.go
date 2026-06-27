@@ -20,15 +20,23 @@ func TestSQLiteFanOutCreateFlowInstanceDeliveriesPersistWithoutDeadLetter(t *tes
 	ctx := sqliteExactOnceRunContext(t, db)
 	pc, bus := newSQLiteDynamicActivationCoordinator(t, db, workflowStore)
 
-	parent := eventtest.WithFlowInstance(eventtest.WithEntityID(eventtest.Projection(uuid.NewString(),
-		events.EventType("component_scaffold.batch_requested"), "", "", mustJSON(map[string]any{
+	parent := eventtest.RootIngress(
+		uuid.NewString(),
+		events.EventType("component_scaffold.batch_requested"),
+		"",
+		"",
+		mustJSON(map[string]any{
 			"components": []any{
 				map[string]any{"component_id": "component-a"},
 				map[string]any{"component_id": "component-b"},
 			},
-		}), 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EventEnvelope{}, time.Now().UTC()),
-		"parent-ent"),
-		"root/parent")
+		}),
+		0,
+		runtimecorrelation.RunIDFromContext(ctx),
+		"",
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, "parent-ent"), "root/parent"),
+		time.Now().UTC(),
+	)
 
 	if err := workflowStore.Create(ctx, WorkflowInstance{
 		InstanceID:      "parent-ent",
@@ -69,7 +77,7 @@ func TestSQLiteFanOutCreateFlowInstanceDeliveriesPersistWithoutDeadLetter(t *tes
 		if childRunID == "" {
 			childRunID = runtimecorrelation.RunIDFromContext(ctx)
 		}
-		child = eventtest.Projection(
+		child = eventtest.RootIngress(
 			childID,
 			child.Type(),
 			child.SourceAgent(),

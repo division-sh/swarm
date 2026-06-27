@@ -19,9 +19,18 @@ func TestRecordDeadLetter_PersistsAndDedupes(t *testing.T) {
 	ctx := context.Background()
 
 	entityID := uuid.NewString()
-	evt := eventtest.WithEntityID((eventtest.Projection(uuid.NewString(),
+	evt := eventtest.PersistedProjection(
+		uuid.NewString(),
 		"deadletter.test",
-		"runtime", "", []byte(`{"x":1}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())), entityID)
+		"runtime",
+		"",
+		[]byte(`{"x":1}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
+		time.Now().UTC(),
+	)
 
 	if err := pg.AppendEvent(ctx, evt); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
@@ -65,7 +74,7 @@ func TestRecordDeadLetter_AllowsNonUUIDEntityIDViaSourceEventPayload(t *testing.
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
-	evt := eventtest.Projection(uuid.NewString(),
+	evt := eventtest.PersistedProjection(uuid.NewString(),
 		"deadletter.test",
 		"runtime", "", []byte(`{"entity_id":"ent-001","x":1}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
@@ -107,9 +116,18 @@ func TestRecordDeadLetter_PersistsTargetResolutionFailureContext(t *testing.T) {
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
-	evt := eventtest.WithTargetRoute((eventtest.Projection(uuid.NewString(),
+	evt := eventtest.PersistedProjection(
+		uuid.NewString(),
 		"pin.output",
-		"runtime", "", []byte(`{"x":1}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())), events.RouteIdentity{EntityID: uuid.NewString(), FlowInstance: "flow/target"})
+		"runtime",
+		"",
+		[]byte(`{"x":1}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{EntityID: uuid.NewString(), FlowInstance: "flow/target"}),
+		time.Now().UTC(),
+	)
 
 	if err := pg.AppendEvent(ctx, evt); err != nil {
 		t.Fatalf("AppendEvent: %v", err)

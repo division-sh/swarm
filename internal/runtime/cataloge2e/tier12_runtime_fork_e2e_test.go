@@ -433,13 +433,13 @@ func publishCatalogTriggerAtFuture(t testing.TB, h *runtimeHarness, step catalog
 	if future <= time.Second {
 		future = time.Second
 	}
-	evt := eventtest.Projection(eventID,
-		events.EventType(strings.TrimSpace(step.Event)),
-		"cataloge2e", "", raw, 0, catalogRuntimeRunID, "", events.EventEnvelope{}, time.Now().UTC().Add(future))
-
+	eventEnvelope := events.EventEnvelope{}
 	if entityID := triggerPayloadEntityID(payload); entityID != "" {
-		evt = eventtest.WithEntityID(evt, entityID)
+		eventEnvelope = events.EnvelopeForEntityID(eventEnvelope, entityID)
 	}
+	evt := eventtest.RootIngress(eventID,
+		events.EventType(strings.TrimSpace(step.Event)),
+		"cataloge2e", "", raw, 0, catalogRuntimeRunID, "", eventEnvelope, time.Now().UTC().Add(future))
 	ctx, cancel := context.WithTimeout(h.ctx, timeout)
 	defer cancel()
 	if err := h.publishBusEvent(ctx, evt); err != nil {

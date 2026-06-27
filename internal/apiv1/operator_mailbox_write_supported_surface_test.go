@@ -381,7 +381,7 @@ func loadMailboxWritePersistedEvent(t *testing.T, db *sql.DB, backend, eventID s
 	); err != nil {
 		t.Fatalf("%s load event %s: %v", backend, eventID, err)
 	}
-	return eventtest.Projection(
+	return eventtest.PersistedProjection(
 		id,
 		events.EventType(eventName),
 		producedBy,

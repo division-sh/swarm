@@ -28,8 +28,18 @@ func TestExecuteNodeContractHandlerSelectEntityUpdatesTargetOwnedEntity(t *testi
 	budgetEntityID := seedSelectEntityBudget(t, pc.workflowStore, ctx, source, "vertical-1", 0)
 
 	result, err := pc.executeNodeContractHandler(ctx, "treasury-orchestrator", selectEntitySpendHandler(), workflowTriggerContext{
-		Event: eventtest.WithEntityID(eventtest.Projection("", events.EventType("opco.spend_recorded"), "", "", mustJSON(map[string]any{"vertical_id": "vertical-1", "amount_usd": 42}), 0, "", "", events.EventEnvelope{}, time.Time{}),
-			"22222222-2222-2222-2222-222222222222"),
+		Event: eventtest.RootIngress(
+			"",
+			events.EventType("opco.spend_recorded"),
+			"",
+			"",
+			mustJSON(map[string]any{"vertical_id": "vertical-1", "amount_usd": 42}),
+			0,
+			"",
+			"",
+			events.EnvelopeForEntityID(events.EventEnvelope{}, "22222222-2222-2222-2222-222222222222"),
+			time.Time{},
+		),
 
 		State: WorkflowState{},
 	}, false)
@@ -66,8 +76,18 @@ func TestExecuteNodeContractHandlerSelectEntityReplayUsesSameTargetEntity(t *tes
 
 	for _, amount := range []int{42, 99} {
 		result, err := pc.executeNodeContractHandler(ctx, "treasury-orchestrator", selectEntitySpendHandler(), workflowTriggerContext{
-			Event: eventtest.WithEntityID(eventtest.Projection("", events.EventType("opco.spend_recorded"), "", "", mustJSON(map[string]any{"vertical_id": "vertical-1", "amount_usd": amount}), 0, "", "", events.EventEnvelope{}, time.Time{}),
-				"22222222-2222-2222-2222-222222222222"),
+			Event: eventtest.RootIngress(
+				"",
+				events.EventType("opco.spend_recorded"),
+				"",
+				"",
+				mustJSON(map[string]any{"vertical_id": "vertical-1", "amount_usd": amount}),
+				0,
+				"",
+				"",
+				events.EnvelopeForEntityID(events.EventEnvelope{}, "22222222-2222-2222-2222-222222222222"),
+				time.Time{},
+			),
 
 			State: WorkflowState{},
 		}, false)
@@ -132,8 +152,18 @@ func TestExecuteNodeContractHandlerSelectEntityMatchesTypedStatusField(t *testin
 			}},
 		},
 	}, workflowTriggerContext{
-		Event: eventtest.WithEntityID(eventtest.Projection("", events.EventType("opco.spend_recorded"), "", "", mustJSON(map[string]any{"vertical_id": "vertical-1", "status": "pending", "amount_usd": 42}), 0, "", "", events.EventEnvelope{}, time.Time{}),
-			"22222222-2222-2222-2222-222222222222"),
+		Event: eventtest.RootIngress(
+			"",
+			events.EventType("opco.spend_recorded"),
+			"",
+			"",
+			mustJSON(map[string]any{"vertical_id": "vertical-1", "status": "pending", "amount_usd": 42}),
+			0,
+			"",
+			"",
+			events.EnvelopeForEntityID(events.EventEnvelope{}, "22222222-2222-2222-2222-222222222222"),
+			time.Time{},
+		),
 
 		State: WorkflowState{},
 	}, false)
@@ -169,7 +199,7 @@ func TestExecuteNodeContractHandlerSelectOrCreateEntityCreatesTargetOwnedEntity(
 	ctx := testPipelineCoordinatorRunContext(t, pc)
 
 	result, err := pc.executeNodeContractHandler(ctx, "treasury-orchestrator", selectOrCreateEntitySpendHandler(), workflowTriggerContext{
-		Event: eventtest.Projection("", events.EventType("opco.spend_recorded"), "", "", mustJSON(map[string]any{"vertical_id": "vertical-1", "amount_usd": 42}), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event: eventtest.RootIngress("", events.EventType("opco.spend_recorded"), "", "", mustJSON(map[string]any{"vertical_id": "vertical-1", "amount_usd": 42}), 0, "", "", events.EventEnvelope{}, time.Time{}),
 
 		State: WorkflowState{},
 	}, false)
@@ -335,7 +365,7 @@ func TestExecuteNodeContractHandlerSelectOrCreateEntityReplayUsesSameDeclaredKey
 
 	for _, amount := range []int{42, 99} {
 		result, err := pc.executeNodeContractHandler(ctx, "treasury-orchestrator", selectOrCreateEntitySpendHandler(), workflowTriggerContext{
-			Event: eventtest.Projection("", events.EventType("opco.spend_recorded"), "", "", mustJSON(map[string]any{"vertical_id": "vertical-1", "amount_usd": amount}), 0, "", "", events.EventEnvelope{}, time.Time{}),
+			Event: eventtest.RootIngress("", events.EventType("opco.spend_recorded"), "", "", mustJSON(map[string]any{"vertical_id": "vertical-1", "amount_usd": amount}), 0, "", "", events.EventEnvelope{}, time.Time{}),
 
 			State: WorkflowState{},
 		}, false)
@@ -364,7 +394,7 @@ func TestExecuteNodeContractHandlerSelectOrCreateEntityFailsClosedOnAmbiguousMat
 	seedSelectEntityBudgetWithInstance(t, pc.workflowStore, ctx, source, "budget-2", "vertical-1", 0)
 
 	_, err := pc.executeNodeContractHandler(ctx, "treasury-orchestrator", selectOrCreateEntitySpendHandler(), workflowTriggerContext{
-		Event: eventtest.Projection("", events.EventType("opco.spend_recorded"), "", "", mustJSON(map[string]any{"vertical_id": "vertical-1", "amount_usd": 42}), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event: eventtest.RootIngress("", events.EventType("opco.spend_recorded"), "", "", mustJSON(map[string]any{"vertical_id": "vertical-1", "amount_usd": 42}), 0, "", "", events.EventEnvelope{}, time.Time{}),
 	}, false)
 	if err == nil || !strings.Contains(err.Error(), "select_or_create_entity_ambiguous") {
 		t.Fatalf("executeNodeContractHandler error = %v, want select_or_create_entity_ambiguous", err)
@@ -400,7 +430,7 @@ func TestExecuteNodeContractHandlerSelectOrCreateEntityFailsClosedOnDeterministi
 	}
 
 	_, err = pc.executeNodeContractHandler(ctx, "treasury-orchestrator", selectOrCreateEntitySpendHandler(), workflowTriggerContext{
-		Event: eventtest.Projection("", events.EventType("opco.spend_recorded"), "", "", mustJSON(map[string]any{"vertical_id": "vertical-1", "amount_usd": 42}), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event: eventtest.RootIngress("", events.EventType("opco.spend_recorded"), "", "", mustJSON(map[string]any{"vertical_id": "vertical-1", "amount_usd": 42}), 0, "", "", events.EventEnvelope{}, time.Time{}),
 	}, false)
 	if err == nil || !strings.Contains(err.Error(), "select_or_create_entity_conflict") {
 		t.Fatalf("executeNodeContractHandler error = %v, want select_or_create_entity_conflict", err)
@@ -420,7 +450,7 @@ func TestExecuteNodeContractHandlerSelectOrCreateEntityConcurrentDuplicateCreate
 		go func() {
 			defer wg.Done()
 			result, err := pc.executeNodeContractHandler(ctx, "treasury-orchestrator", selectOrCreateEntitySpendHandler(), workflowTriggerContext{
-				Event: eventtest.Projection("", events.EventType("opco.spend_recorded"), "", "", mustJSON(map[string]any{"vertical_id": "vertical-1", "amount_usd": 42}), 0, "", "", events.EventEnvelope{}, time.Time{}),
+				Event: eventtest.RootIngress("", events.EventType("opco.spend_recorded"), "", "", mustJSON(map[string]any{"vertical_id": "vertical-1", "amount_usd": 42}), 0, "", "", events.EventEnvelope{}, time.Time{}),
 
 				State: WorkflowState{},
 			}, false)
@@ -495,7 +525,7 @@ func TestExecuteNodeContractHandlerSelectOrCreateEntityFeedsEntityIDToArtifactRe
 	}
 
 	result, err := pc.executeNodeContractHandler(ctx, "treasury-orchestrator", selectOrCreateArtifactRepoCommitHandler(), workflowTriggerContext{
-		Event: eventtest.Projection(sourceEventID,
+		Event: eventtest.RootIngress(sourceEventID,
 			events.EventType("spec_repo.commit_requested"), "", "", mustJSON(payload), 0, testPipelineRunID, "", events.EventEnvelope{}, time.Unix(1_700_000_000, 0).UTC()),
 
 		State: WorkflowState{},
@@ -586,7 +616,7 @@ func TestExecuteNodeContractHandlerSelectEntityIgnoresTerminalAndTerminatedMatch
 	}
 
 	result, err := pc.executeNodeContractHandler(ctx, "treasury-orchestrator", selectEntitySpendHandler(), workflowTriggerContext{
-		Event: eventtest.Projection("", events.EventType("opco.spend_recorded"), "", "", mustJSON(map[string]any{"vertical_id": "vertical-1", "amount_usd": 42}), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event: eventtest.RootIngress("", events.EventType("opco.spend_recorded"), "", "", mustJSON(map[string]any{"vertical_id": "vertical-1", "amount_usd": 42}), 0, "", "", events.EventEnvelope{}, time.Time{}),
 
 		State: WorkflowState{},
 	}, false)
@@ -639,7 +669,7 @@ func TestExecuteNodeContractHandlerSelectEntityFailsClosedOnNoMatch(t *testing.T
 	seedSelectEntityBudget(t, pc.workflowStore, ctx, source, "vertical-1", 0)
 
 	_, err := pc.executeNodeContractHandler(ctx, "treasury-orchestrator", selectEntitySpendHandler(), workflowTriggerContext{
-		Event: eventtest.Projection("", events.EventType("opco.spend_recorded"), "", "", mustJSON(map[string]any{"vertical_id": "missing", "amount_usd": 42}), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event: eventtest.RootIngress("", events.EventType("opco.spend_recorded"), "", "", mustJSON(map[string]any{"vertical_id": "missing", "amount_usd": 42}), 0, "", "", events.EventEnvelope{}, time.Time{}),
 	}, false)
 	if err == nil || !strings.Contains(err.Error(), "select_entity_no_match") {
 		t.Fatalf("executeNodeContractHandler error = %v, want select_entity_no_match", err)
@@ -655,7 +685,7 @@ func TestExecuteNodeContractHandlerSelectEntityFailsClosedOnMissingPayloadRef(t 
 	seedSelectEntityBudget(t, pc.workflowStore, ctx, source, "vertical-1", 0)
 
 	_, err := pc.executeNodeContractHandler(ctx, "treasury-orchestrator", selectEntitySpendHandler(), workflowTriggerContext{
-		Event: eventtest.Projection("", events.EventType("opco.spend_recorded"), "", "", mustJSON(map[string]any{"amount_usd": 42}), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event: eventtest.RootIngress("", events.EventType("opco.spend_recorded"), "", "", mustJSON(map[string]any{"amount_usd": 42}), 0, "", "", events.EventEnvelope{}, time.Time{}),
 	}, false)
 	if err == nil || !strings.Contains(err.Error(), "missing required payload ref") {
 		t.Fatalf("executeNodeContractHandler error = %v, want missing payload ref", err)
@@ -672,7 +702,7 @@ func TestExecuteNodeContractHandlerSelectEntityFailsClosedOnAmbiguousMatch(t *te
 	seedSelectEntityBudgetWithInstance(t, pc.workflowStore, ctx, source, "budget-2", "vertical-1", 0)
 
 	_, err := pc.executeNodeContractHandler(ctx, "treasury-orchestrator", selectEntitySpendHandler(), workflowTriggerContext{
-		Event: eventtest.Projection("", events.EventType("opco.spend_recorded"), "", "", mustJSON(map[string]any{"vertical_id": "vertical-1", "amount_usd": 42}), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event: eventtest.RootIngress("", events.EventType("opco.spend_recorded"), "", "", mustJSON(map[string]any{"vertical_id": "vertical-1", "amount_usd": 42}), 0, "", "", events.EventEnvelope{}, time.Time{}),
 	}, false)
 	if err == nil || !strings.Contains(err.Error(), "select_entity_ambiguous") {
 		t.Fatalf("executeNodeContractHandler error = %v, want select_entity_ambiguous", err)
@@ -917,9 +947,18 @@ func loadSelectOrCreateBudgetByKey(t *testing.T, store *WorkflowInstanceStore, c
 func seedSelectEntitySpendEvent(t *testing.T, db *sql.DB, ctx context.Context, payload map[string]any) events.Event {
 	t.Helper()
 	entityID := uuid.NewString()
-	evt := eventtest.WithEntityID((eventtest.Projection(uuid.NewString(),
+	evt := eventtest.RootIngress(
+		uuid.NewString(),
 		events.EventType("opco.spend_recorded"),
-		"opco", "", mustJSON(payload), 0, "", "", events.EventEnvelope{}, time.Now().UTC())), entityID)
+		"opco",
+		"",
+		mustJSON(payload),
+		0,
+		"",
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
+		time.Now().UTC(),
+	)
 
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO events (event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)

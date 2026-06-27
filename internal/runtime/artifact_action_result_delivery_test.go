@@ -101,7 +101,7 @@ func TestArtifactRepoCommitResultEventsFlowThroughDurableCallbackDelivery(t *tes
 			if err != nil {
 				t.Fatalf("marshal request payload: %v", err)
 			}
-			requestEvent := eventtest.WithFlowInstance(eventtest.WithEntityID(eventtest.Projection(
+			requestEvent := eventtest.RootIngress(
 				tc.requestEventID,
 				events.EventType("repo-scaffold/inst-1/repo_scaffold.repo_commit_requested"),
 				"test",
@@ -110,10 +110,9 @@ func TestArtifactRepoCommitResultEventsFlowThroughDurableCallbackDelivery(t *tes
 				0,
 				templateInstanceDeliveryRunID,
 				"",
-				events.EventEnvelope{},
-				time.Now().UTC()),
-				artifactActionResultEntityID),
-				"repo-scaffold/inst-1")
+				events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, artifactActionResultEntityID), "repo-scaffold/inst-1"),
+				time.Now().UTC(),
+			)
 
 			if err := bus.Publish(ctx, requestEvent); err != nil {
 				t.Fatalf("Publish request event: %v", err)
@@ -258,7 +257,7 @@ func TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery(
 			if err != nil {
 				t.Fatalf("marshal request payload: %v", err)
 			}
-			requestEvent := eventtest.WithFlowInstance(eventtest.WithEntityID(eventtest.Projection(
+			requestEvent := eventtest.RootIngress(
 				tc.requestEventID,
 				events.EventType("repo-scaffold/repo_scaffold.repo_commit_requested"),
 				"test",
@@ -267,10 +266,9 @@ func TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery(
 				0,
 				templateInstanceDeliveryRunID,
 				"",
-				events.EventEnvelope{},
-				time.Now().UTC()),
-				artifactActionResultEntityID),
-				tc.requestFlowPath)
+				events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, artifactActionResultEntityID), tc.requestFlowPath),
+				time.Now().UTC(),
+			)
 
 			if err := bus.Publish(ctx, requestEvent); err != nil {
 				t.Fatalf("Publish request event: %v", err)

@@ -61,9 +61,18 @@ func selectedForkToolContext(actor models.AgentConfig) context.Context {
 		Classification:      runtimecorrelation.RuntimeLineageClassificationForkLocal,
 		SelectedForkContext: true,
 	})
-	return runtimebus.WithInboundEvent(ctx, eventtest.WithEntityID(eventtest.Projection(eventID,
-		events.EventType("validation/validation.package_ready"), "", "", []byte(`{"entity_id":"entity-typed-lineage"}`), 0, runID, "", events.EventEnvelope{}, testTime()),
-		"entity-typed-lineage"))
+	return runtimebus.WithInboundEvent(ctx, eventtest.RootIngress(
+		eventID,
+		events.EventType("validation/validation.package_ready"),
+		"",
+		"",
+		[]byte(`{"entity_id":"entity-typed-lineage"}`),
+		0,
+		runID,
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "entity-typed-lineage"),
+		testTime(),
+	))
 }
 
 func assertToolExecutorDiagnosticLineage(t *testing.T, bus *telemetryBusStub, index int) {
@@ -359,10 +368,18 @@ func TestExecutorTelemetry_EmitToolLogsStructuredPublishedOutcome(t *testing.T) 
 			"category.assessed",
 		},
 	})
-	ctx = runtimebus.WithInboundEvent(ctx, eventtest.WithEntityID(eventtest.Projection("evt-inbound",
-		events.EventType("trigger.input"), "", "task-inbound",
-		[]byte(`{"entity_id":"entity-inbound"}`), 0, "", "", events.EventEnvelope{}, testTime()),
-		"entity-inbound"))
+	ctx = runtimebus.WithInboundEvent(ctx, eventtest.RootIngress(
+		"evt-inbound",
+		events.EventType("trigger.input"),
+		"",
+		"task-inbound",
+		[]byte(`{"entity_id":"entity-inbound"}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "entity-inbound"),
+		testTime(),
+	))
 
 	if _, err := exec.Execute(ctx, "emit_category_assessed", map[string]any{"category": "AP automation"}); err != nil {
 		t.Fatalf("Execute(emit): %v", err)
@@ -505,10 +522,18 @@ func TestExecutorTelemetry_EmitToolLogsUndeclaredFieldSchemaValidationFailure(t 
 			"category.assessed",
 		},
 	})
-	ctx = runtimebus.WithInboundEvent(ctx, eventtest.WithEntityID(eventtest.Projection("evt-inbound",
-		events.EventType("trigger.input"), "", "task-inbound",
-		[]byte(`{"entity_id":"entity-inbound"}`), 0, "", "", events.EventEnvelope{}, testTime()),
-		"entity-inbound"))
+	ctx = runtimebus.WithInboundEvent(ctx, eventtest.RootIngress(
+		"evt-inbound",
+		events.EventType("trigger.input"),
+		"",
+		"task-inbound",
+		[]byte(`{"entity_id":"entity-inbound"}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "entity-inbound"),
+		testTime(),
+	))
 
 	if _, err := exec.Execute(ctx, "emit_category_assessed", map[string]any{
 		"category":   "AP automation",

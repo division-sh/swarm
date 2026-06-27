@@ -123,7 +123,7 @@ func (deferredChainInterceptor) Intercept(_ context.Context, evt events.Event) (
 	default:
 		return true, nil, nil
 	}
-	return false, []events.Event{eventtest.WithEntityID((eventtest.Projection("", events.EventType(next), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())), evt.EntityID())}, nil
+	return false, []events.Event{eventtest.RootIngress("", events.EventType(next), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, evt.EntityID()), time.Now().UTC())}, nil
 }
 
 type singleDeferredInterceptor struct{}
@@ -132,7 +132,18 @@ func (singleDeferredInterceptor) Intercept(_ context.Context, evt events.Event) 
 	if evt.Type() != events.EventType("custom.root") {
 		return true, nil, nil
 	}
-	return false, []events.Event{eventtest.WithEntityID((eventtest.Projection("", events.EventType("custom.middle"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())), evt.EntityID())}, nil
+	return false, []events.Event{eventtest.RootIngress(
+		"",
+		events.EventType("custom.middle"),
+		"",
+		"",
+		nil,
+		0,
+		"",
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, evt.EntityID()),
+		time.Now().UTC(),
+	)}, nil
 }
 
 type nonTransactionalPersistedBeforeInterceptor struct {
@@ -231,7 +242,7 @@ func (i deferredEventVisibleInterceptor) Intercept(ctx context.Context, evt even
 	i.t.Helper()
 	if evt.Type() == events.EventType("custom.root") {
 		return false, []events.Event{
-			eventtest.Projection(i.eventID, i.checkFor, "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
+			eventtest.RootIngress(i.eventID, i.checkFor, "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 		}, nil
 	}
 	if evt.Type() != i.checkFor {
@@ -468,11 +479,18 @@ func TestEventBusPublishTransactionalPostCommitReceiptFailureIsRecoverable(t *te
 	ch := eb.Subscribe(agentID, events.EventType("custom.receipt_failure"))
 	defer eb.Unsubscribe(agentID)
 
-	if err := eb.Publish(ctx, eventtest.WithEntityID(eventtest.Projection(eventID,
-
+	if err := eb.Publish(ctx, eventtest.RootIngress(
+		eventID,
 		events.EventType("custom.receipt_failure"),
-		"api.v1", "", []byte(`{"entity_id":"21000000-0000-0000-0000-000000000012"}`), 0, eventBusTestRunID, "", events.EventEnvelope{}, time.Now().UTC()),
-		"21000000-0000-0000-0000-000000000012")); err != nil {
+		"api.v1",
+		"",
+		[]byte(`{"entity_id":"21000000-0000-0000-0000-000000000012"}`),
+		0,
+		eventBusTestRunID,
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "21000000-0000-0000-0000-000000000012"),
+		time.Now().UTC(),
+	)); err != nil {
 		t.Fatalf("Publish with post-commit receipt failure: %v", err)
 	}
 	ok, err := pg.EventExists(ctx, eventID)
@@ -526,11 +544,18 @@ func TestEventBusPublishTransactionalPostCommitCompletionFailureIsRecoverable(t 
 	ch := eb.Subscribe(agentID, events.EventType("custom.completion_failure"))
 	defer eb.Unsubscribe(agentID)
 
-	if err := eb.Publish(ctx, eventtest.WithEntityID(eventtest.Projection(eventID,
-
+	if err := eb.Publish(ctx, eventtest.RootIngress(
+		eventID,
 		events.EventType("custom.completion_failure"),
-		"api.v1", "", []byte(`{"entity_id":"21000000-0000-0000-0000-000000000022"}`), 0, eventBusTestRunID, "", events.EventEnvelope{}, time.Now().UTC()),
-		"21000000-0000-0000-0000-000000000022")); err != nil {
+		"api.v1",
+		"",
+		[]byte(`{"entity_id":"21000000-0000-0000-0000-000000000022"}`),
+		0,
+		eventBusTestRunID,
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "21000000-0000-0000-0000-000000000022"),
+		time.Now().UTC(),
+	)); err != nil {
 		t.Fatalf("Publish with post-commit completion failure: %v", err)
 	}
 	ok, err := pg.EventExists(ctx, eventID)
@@ -642,9 +667,18 @@ func TestEventBusPublish_LogsQueuedDeliveryLifecycleTransition(t *testing.T) {
 	}
 	ch := bus.Subscribe("agent-1", events.EventType("task.requested"))
 
-	evt := eventtest.WithEntityID(eventtest.Projection(uuid.NewString(),
-		events.EventType("task.requested"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
-		"ent-1")
+	evt := eventtest.RootIngress(
+		uuid.NewString(),
+		events.EventType("task.requested"),
+		"",
+		"",
+		[]byte(`{"entity_id":"ent-1"}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
+		time.Now().UTC(),
+	)
 
 	if err := bus.Publish(context.Background(), evt); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -688,9 +722,18 @@ func TestEventBusPublish_AttachesTypedRuntimeDiagnosticLineage(t *testing.T) {
 	})
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 
-	if err := bus.Publish(ctx, eventtest.WithEntityID(eventtest.Projection(eventID,
-		events.EventType("task.requested"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC()),
-		"ent-1")); err != nil {
+	if err := bus.Publish(ctx, eventtest.RootIngress(
+		eventID,
+		events.EventType("task.requested"),
+		"",
+		"",
+		[]byte(`{"entity_id":"ent-1"}`),
+		0,
+		runID,
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
+		time.Now().UTC(),
+	)); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 
@@ -728,9 +771,18 @@ func TestEventBusPublish_AttachesBundleSourceFactToRuntimeLogs(t *testing.T) {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	ch := bus.Subscribe("agent-1", events.EventType("task.requested"))
-	if err := bus.Publish(context.Background(), eventtest.WithEntityID(eventtest.Projection(uuid.NewString(),
-		events.EventType("task.requested"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC()),
-		"ent-1")); err != nil {
+	if err := bus.Publish(context.Background(), eventtest.RootIngress(
+		uuid.NewString(),
+		events.EventType("task.requested"),
+		"",
+		"",
+		[]byte(`{"entity_id":"ent-1"}`),
+		0,
+		uuid.NewString(),
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
+		time.Now().UTC(),
+	)); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	_ = requireBusEvent(t, ch, "bundle source fact delivery")
@@ -757,7 +809,7 @@ func TestEventBusPublish_UsesPayloadValidator(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.Publish(context.Background(), eventtest.Projection("", "task.completed", "", "", []byte(`{"ok":true}`), 0, "", "", events.EventEnvelope{}, time.Time{})); err != nil {
+	if err := eb.Publish(context.Background(), eventtest.RootIngress("", "task.completed", "", "", []byte(`{"ok":true}`), 0, "", "", events.EventEnvelope{}, time.Time{})); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 }
@@ -771,7 +823,7 @@ func TestEventBusPublish_PayloadValidatorFailureAbortsPublish(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	err = eb.Publish(context.Background(), eventtest.Projection("", "task.completed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}))
+	err = eb.Publish(context.Background(), eventtest.RootIngress("", "task.completed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}))
 	if err == nil || !errors.Is(err, runtimebus.ErrPayloadValidation) {
 		t.Fatalf("expected payload validator failure, got %v", err)
 	}
@@ -785,7 +837,7 @@ func TestEventBusPublish_FailsClosedWhenReplayCapableAtomicStoreOmitsCommittedRe
 	}
 	eb.Subscribe("agent-a", events.EventType("custom.replay.checked"))
 
-	err = eb.Publish(context.Background(), eventtest.Projection(uuid.NewString(),
+	err = eb.Publish(context.Background(), eventtest.RootIngress(uuid.NewString(),
 		events.EventType("custom.replay.checked"), "", "", []byte(`{"ok":true}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()))
 	if !errors.Is(err, runtimereplayclaim.ErrMissingCommittedReplayScope) {
 		t.Fatalf("Publish error = %v, want missing committed replay scope", err)
@@ -801,7 +853,7 @@ func TestEventBusPublishDirect_PayloadValidatorFailureAbortsPublish(t *testing.T
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	err = eb.PublishDirect(context.Background(), eventtest.Projection("", "task.completed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}), []string{"agent-a"})
+	err = eb.PublishDirect(context.Background(), eventtest.RootIngress("", "task.completed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}), []string{"agent-a"})
 	if err == nil || !errors.Is(err, runtimebus.ErrPayloadValidation) {
 		t.Fatalf("expected payload validator failure, got %v", err)
 	}
@@ -817,7 +869,7 @@ func TestEventBusCheckDirectRecipients_PayloadValidatorFailureAbortsBeforeRecipi
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 
-	status, err := eb.CheckDirectRecipients(context.Background(), eventtest.Projection("", "task.completed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}), []string{"agent-a"})
+	status, err := eb.CheckDirectRecipients(context.Background(), eventtest.RootIngress("", "task.completed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}), []string{"agent-a"})
 	if err == nil || !errors.Is(err, runtimebus.ErrPayloadValidation) {
 		t.Fatalf("expected payload validator failure, got %v", err)
 	}
@@ -836,7 +888,7 @@ func TestEventBusCheckPublishRecipientPlanReportsSubscribedPublishWithoutDeliver
 	}
 	ch := eb.Subscribe("agent-a", events.EventType("task.completed"))
 
-	plan, err := eb.CheckPublishRecipientPlan(context.Background(), eventtest.Projection("", "task.completed", "", "", []byte(`{"ok":true}`), 0, "", "", events.EventEnvelope{}, time.Time{}))
+	plan, err := eb.CheckPublishRecipientPlan(context.Background(), eventtest.RootIngress("", "task.completed", "", "", []byte(`{"ok":true}`), 0, "", "", events.EventEnvelope{}, time.Time{}))
 	if err != nil {
 		t.Fatalf("CheckPublishRecipientPlan: %v", err)
 	}
@@ -867,8 +919,18 @@ func TestEventBusPublishDirect_PersistsButDoesNotMarkDeliveredBeforeRealFanOut(t
 		t.Fatalf("NewEventBus: %v", err)
 	}
 
-	err = eb.PublishDirect(context.Background(), eventtest.WithEntityID((eventtest.Projection(uuid.NewString(),
-		events.EventType("custom.direct"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())), "ent-1"),
+	err = eb.PublishDirect(context.Background(), eventtest.RootIngress(
+		uuid.NewString(),
+		events.EventType("custom.direct"),
+		"",
+		"",
+		[]byte(`{"entity_id":"ent-1"}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
+		time.Now().UTC(),
+	),
 		[]string{"agent-a"})
 	if err == nil || !strings.Contains(err.Error(), "authoritative delivery incomplete") {
 		t.Fatalf("PublishDirect missing recipient error = %v, want authoritative delivery incomplete", err)
@@ -892,8 +954,18 @@ func TestEventBusPublishDirect_FiltersEntityScopedRecipientsByExplicitMetadata(t
 	matchCh := eb.Subscribe("reviewer-ent-1")
 	otherCh := eb.Subscribe("reviewer-ent-2")
 
-	err = eb.PublishDirect(context.Background(), eventtest.WithEntityID(eventtest.Projection("", events.EventType("custom.direct"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
-		"ent-1"),
+	err = eb.PublishDirect(context.Background(), eventtest.RootIngress(
+		"",
+		events.EventType("custom.direct"),
+		"",
+		"",
+		[]byte(`{"entity_id":"ent-1"}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
+		time.Now().UTC(),
+	),
 		[]string{"control-plane", "reviewer-ent-1", "reviewer-ent-2", "missing-agent"})
 	if err != nil {
 		t.Fatalf("PublishDirect: %v", err)
@@ -928,8 +1000,18 @@ func TestEventBusPublish_FiltersEntityScopedRecipientsByExplicitMetadata(t *test
 	matchCh := eb.Subscribe("reviewer-ent-1", events.EventType("custom.trigger"))
 	otherCh := eb.Subscribe("reviewer-ent-2", events.EventType("custom.trigger"))
 
-	if err := eb.Publish(context.Background(), eventtest.WithEntityID(eventtest.Projection("", events.EventType("custom.trigger"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
-		"ent-1")); err != nil {
+	if err := eb.Publish(context.Background(), eventtest.RootIngress(
+		"",
+		events.EventType("custom.trigger"),
+		"",
+		"",
+		[]byte(`{"entity_id":"ent-1"}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
+		time.Now().UTC(),
+	)); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 
@@ -960,7 +1042,18 @@ func TestEventBusPublish_FiltersEntityScopedRecipientsByTypedEnvelopeNotPayload(
 	matchCh := eb.Subscribe("reviewer-ent-1", events.EventType("custom.trigger"))
 	otherCh := eb.Subscribe("reviewer-ent-2", events.EventType("custom.trigger"))
 
-	err = eb.Publish(context.Background(), eventtest.WithEnvelope((eventtest.Projection("", events.EventType("custom.trigger"), "", "", []byte(`{"entity_id":"ent-2"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())), events.EventEnvelope{EntityID: "ent-1"}))
+	err = eb.Publish(context.Background(), eventtest.RootIngress(
+		"",
+		events.EventType("custom.trigger"),
+		"",
+		"",
+		[]byte(`{"entity_id":"ent-2"}`),
+		0,
+		"",
+		"",
+		events.EventEnvelope{EntityID: "ent-1"},
+		time.Now().UTC(),
+	))
 	if err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
@@ -986,8 +1079,18 @@ func TestEventBusPublish_DropsRecipientsMissingExplicitDescriptor(t *testing.T) 
 	controlCh := eb.Subscribe("control-plane", events.EventType("custom.trigger"))
 	missingCh := eb.Subscribe("reviewer-ent-1", events.EventType("custom.trigger"))
 
-	if err := eb.Publish(context.Background(), eventtest.WithEntityID(eventtest.Projection("", events.EventType("custom.trigger"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
-		"ent-1")); err != nil {
+	if err := eb.Publish(context.Background(), eventtest.RootIngress(
+		"",
+		events.EventType("custom.trigger"),
+		"",
+		"",
+		[]byte(`{"entity_id":"ent-1"}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
+		time.Now().UTC(),
+	)); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 
@@ -1012,8 +1115,18 @@ func TestEventBusPublish_KeepsInternalSubscribersLiveOnlyUnderDescriptorPlanning
 	agentCh := eb.Subscribe("agent-a", events.EventType("custom.trigger"))
 	missingCh := eb.Subscribe("agent-missing", events.EventType("custom.trigger"))
 
-	if err := eb.Publish(context.Background(), eventtest.WithEntityID(eventtest.Projection("", events.EventType("custom.trigger"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
-		"ent-1")); err != nil {
+	if err := eb.Publish(context.Background(), eventtest.RootIngress(
+		"",
+		events.EventType("custom.trigger"),
+		"",
+		"",
+		[]byte(`{"entity_id":"ent-1"}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
+		time.Now().UTC(),
+	)); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 
@@ -1051,7 +1164,18 @@ func TestEventBusPublishDeferred_UsesCanonicalSubscribedRecipientFiltering(t *te
 	agentCh := eb.Subscribe("agent-a", events.EventType("custom.middle"))
 	otherCh := eb.Subscribe("agent-b", events.EventType("custom.middle"))
 
-	if err := eb.Publish(context.Background(), eventtest.WithEntityID((eventtest.Projection("", events.EventType("custom.root"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())), "ent-1")); err != nil {
+	if err := eb.Publish(context.Background(), eventtest.RootIngress(
+		"",
+		events.EventType("custom.root"),
+		"",
+		"",
+		[]byte(`{"entity_id":"ent-1"}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
+		time.Now().UTC(),
+	)); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 
@@ -1078,8 +1202,18 @@ func TestEventBusPublish_FailsClosedWhenDescriptorLookupFails(t *testing.T) {
 	}
 	ch := eb.Subscribe("reviewer-ent-1", events.EventType("custom.trigger"))
 
-	err = eb.Publish(context.Background(), eventtest.WithEntityID(eventtest.Projection("", events.EventType("custom.trigger"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
-		"ent-1"))
+	err = eb.Publish(context.Background(), eventtest.RootIngress(
+		"",
+		events.EventType("custom.trigger"),
+		"",
+		"",
+		[]byte(`{"entity_id":"ent-1"}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
+		time.Now().UTC(),
+	))
 	if err == nil || !strings.Contains(err.Error(), "descriptor lookup failed") {
 		t.Fatalf("Publish error = %v, want descriptor lookup failure", err)
 	}
@@ -1101,7 +1235,7 @@ func TestEventBusWaitForQuiescenceWaitsForPublishCompletion(t *testing.T) {
 
 	publishDone := make(chan error, 1)
 	go func() {
-		publishDone <- eb.Publish(context.Background(), eventtest.Projection("", "task.completed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}))
+		publishDone <- eb.Publish(context.Background(), eventtest.RootIngress("", "task.completed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}))
 	}()
 
 	requireSignalBefore(t, started, 500*time.Millisecond, "interceptor start")
@@ -1145,7 +1279,7 @@ func TestEventBusPublishAcknowledgedReturnsBeforePostCommitDispatchCompletes(t *
 
 	publishDone := make(chan error, 1)
 	go func() {
-		publishDone <- eb.PublishAcknowledged(ctx, eventtest.Projection(
+		publishDone <- eb.PublishAcknowledged(ctx, eventtest.RootIngress(
 			eventID,
 			events.EventType("task.completed"),
 			"api.v1",
@@ -1216,7 +1350,7 @@ func TestEventBusPublish_InterceptsMultiHopDeferredChains(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.Publish(context.Background(), eventtest.WithEntityID((eventtest.Projection("", events.EventType("custom.root"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())), "ent-1")); err != nil {
+	if err := eb.Publish(context.Background(), eventtest.RootIngress("", events.EventType("custom.root"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Now().UTC())); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	if got := store.eventTypes(); len(got) < 4 || got[0] != "custom.root" || got[1] != "custom.middle" || got[2] != "custom.leaf" || got[3] != "custom.final" {
@@ -1232,7 +1366,18 @@ func TestEventBusPublishNonTransactional_PersistsBeforeInterceptorsRun(t *testin
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.Publish(context.Background(), eventtest.WithEntityID((eventtest.Projection("", events.EventType("custom.non_transactional"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())), "ent-1")); err != nil {
+	if err := eb.Publish(context.Background(), eventtest.RootIngress(
+		"",
+		events.EventType("custom.non_transactional"),
+		"",
+		"",
+		nil,
+		0,
+		"",
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
+		time.Now().UTC(),
+	)); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 }
@@ -1261,11 +1406,18 @@ func TestEventBusPublishTransactional_RunsInterceptorsAfterCommit(t *testing.T) 
 	}
 	ch := eb.Subscribe(agentID, events.EventType("task.completed"))
 	defer eb.Unsubscribe(agentID)
-	if err := eb.Publish(ctx, eventtest.WithEntityID(eventtest.Projection(eventID,
-
+	if err := eb.Publish(ctx, eventtest.RootIngress(
+		eventID,
 		events.EventType("task.completed"),
-		"api.v1", "", []byte(`{"entity_id":"11111111-1111-1111-1111-111111111114"}`), 0, eventBusTestRunID, "", events.EventEnvelope{}, time.Now().UTC()),
-		"11111111-1111-1111-1111-111111111114")); err != nil {
+		"api.v1",
+		"",
+		[]byte(`{"entity_id":"11111111-1111-1111-1111-111111111114"}`),
+		0,
+		eventBusTestRunID,
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "11111111-1111-1111-1111-111111111114"),
+		time.Now().UTC(),
+	)); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	requireSignalBefore(t, called, time.Second, "post-commit interceptor")
@@ -1293,10 +1445,18 @@ func TestEventBusPublishTransactional_ReturnsPostCommitInterceptorErrorAndRecord
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	err = eb.Publish(ctx, eventtest.WithEntityID(eventtest.Projection(eventID,
-
-		events.EventType("task.failed"), "", "", []byte(`{"entity_id":"11111111-1111-1111-1111-111111111114"}`), 0, eventBusTestRunID, "", events.EventEnvelope{}, time.Now().UTC()),
-		"11111111-1111-1111-1111-111111111114"))
+	err = eb.Publish(ctx, eventtest.RootIngress(
+		eventID,
+		events.EventType("task.failed"),
+		"",
+		"",
+		[]byte(`{"entity_id":"11111111-1111-1111-1111-111111111114"}`),
+		0,
+		eventBusTestRunID,
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "11111111-1111-1111-1111-111111111114"),
+		time.Now().UTC(),
+	))
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("Publish error = %v, want %v", err, wantErr)
 	}
@@ -1334,10 +1494,18 @@ func TestEventBusPublishInMutationRunsInterceptorsAfterMutationCommit(t *testing
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	if err := pg.RunEventMutation(ctx, func(mutation runtimebus.EventMutation) error {
-		if err := eb.PublishInMutation(mutation.Context(), eventtest.WithEntityID(eventtest.Projection(eventID,
+		if err := eb.PublishInMutation(mutation.Context(), eventtest.RootIngress(
+			eventID,
 			events.EventType("custom.publish_mutation_post_commit"),
-			"api.v1", "", []byte(`{"entity_id":"11111111-1111-1111-1111-111111111113"}`), 0, eventBusTestRunID, "", events.EventEnvelope{}, time.Now().UTC()),
-			"11111111-1111-1111-1111-111111111113")); err != nil {
+			"api.v1",
+			"",
+			[]byte(`{"entity_id":"11111111-1111-1111-1111-111111111113"}`),
+			0,
+			eventBusTestRunID,
+			"",
+			events.EnvelopeForEntityID(events.EventEnvelope{}, "11111111-1111-1111-1111-111111111113"),
+			time.Now().UTC(),
+		)); err != nil {
 			return err
 		}
 		select {
@@ -1373,8 +1541,18 @@ func TestEventBusPublishTransactional_RecordsTargetFailureDeadLetter(t *testing.
 	eventID := uuid.NewString()
 	targetEntityID := uuid.NewString()
 	if err := pg.RunEventMutation(ctx, func(mutation runtimebus.EventMutation) error {
-		return eb.PublishInMutation(mutation.Context(), eventtest.WithTargetRoute((events.NewRootIngressEvent(eventID,
-			events.EventType("child/output.done"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())), events.RouteIdentity{EntityID: targetEntityID, FlowInstance: "missing-flow"}))
+		return eb.PublishInMutation(mutation.Context(), eventtest.RootIngress(
+			eventID,
+			events.EventType("child/output.done"),
+			"",
+			"",
+			[]byte(`{}`),
+			0,
+			"",
+			"",
+			events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{EntityID: targetEntityID, FlowInstance: "missing-flow"}),
+			time.Now().UTC(),
+		))
 	}); err != nil {
 		t.Fatalf("PublishInMutation: %v", err)
 	}
@@ -1425,8 +1603,18 @@ func TestEventBusPublishInMutationSQLiteRecordsTargetFailureDeadLetter(t *testin
 	}
 	eventID := uuid.NewString()
 	targetEntityID := uuid.NewString()
-	evt := eventtest.WithTargetRoute((events.NewRootIngressEvent(eventID,
-		events.EventType("task.completed"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())), events.RouteIdentity{EntityID: targetEntityID, FlowInstance: "missing-flow"})
+	evt := eventtest.RootIngress(
+		eventID,
+		events.EventType("task.completed"),
+		"",
+		"",
+		[]byte(`{}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{EntityID: targetEntityID, FlowInstance: "missing-flow"}),
+		time.Now().UTC(),
+	)
 
 	if !evt.HasTargetRoute() {
 		t.Fatalf("event target route missing after construction: envelope=%#v", evt.NormalizedEnvelope())
@@ -1486,7 +1674,7 @@ func TestEventBusPublish_ClassifiesRunBundleSourceThroughRunLifecycleOwner(t *te
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.Publish(context.Background(), eventtest.Projection(uuid.NewString(),
+	if err := eb.Publish(context.Background(), eventtest.RootIngress(uuid.NewString(),
 
 		events.EventType("scan.requested"),
 		"test", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
@@ -1526,7 +1714,7 @@ func TestEventBusPublishDirect_StampsBundleSourceFactOnRunRow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.PublishDirect(context.Background(), eventtest.Projection(uuid.NewString(),
+	if err := eb.PublishDirect(context.Background(), eventtest.RootIngress(uuid.NewString(),
 
 		events.EventType("scan.requested"),
 		"test", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC()),
@@ -1562,7 +1750,7 @@ func TestEventBusPublishDeferred_RunsInterceptorsAfterDeferredEventCommit(t *tes
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.Publish(context.Background(), events.NewRootIngressEvent("11111111-1111-1111-1111-111111111111",
+	if err := eb.Publish(context.Background(), eventtest.RootIngress("11111111-1111-1111-1111-111111111111",
 		events.EventType("custom.root"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 	); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -1575,9 +1763,9 @@ func TestEventBusPublish_InheritsRunAndParentFromInboundContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	ctx := runtimecorrelation.WithInboundEvent(context.Background(), eventtest.Projection("evt-parent",
+	ctx := runtimecorrelation.WithInboundEvent(context.Background(), eventtest.RootIngress("evt-parent",
 		events.EventType("task.started"), "", "", nil, 0, "run-abc", "", events.EventEnvelope{}, time.Time{}))
-	if err := eb.Publish(ctx, eventtest.Projection("evt-child",
+	if err := eb.Publish(ctx, eventtest.RootIngress("evt-child",
 		events.EventType("task.completed"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
@@ -1614,7 +1802,7 @@ func TestEventBusPublish_ZeroRecipientsDoesNotEmitContradiction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	if err := eb.Publish(context.Background(), eventtest.Projection("evt-zero",
+	if err := eb.Publish(context.Background(), eventtest.RootIngress("evt-zero",
 		events.EventType("custom.no_subscribers"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
@@ -1630,7 +1818,7 @@ func TestEventBusPublish_RuntimeLogBypassesContradictionRouting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	if err := eb.Publish(context.Background(), eventtest.Projection("evt-log",
+	if err := eb.Publish(context.Background(), eventtest.RootIngress("evt-log",
 		events.EventType("platform.runtime_log"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
@@ -1662,7 +1850,7 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeWithoutPersis
 			eventID:   "10000000-0000-0000-0000-000000000001",
 			eventType: events.EventType("platform.boot"),
 			event: func(id string, eventType events.EventType) events.Event {
-				return events.NewRuntimeControlEvent(id, eventType, "runtime", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+				return eventtest.RuntimeControl(id, eventType, "runtime", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 			},
 		},
 		{
@@ -1670,7 +1858,7 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeWithoutPersis
 			eventID:   "10000000-0000-0000-0000-000000000002",
 			eventType: events.EventType("platform.recovery_failed"),
 			event: func(id string, eventType events.EventType) events.Event {
-				return events.NewRuntimeDiagnosticEvent(id, eventType, "runtime", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+				return eventtest.RuntimeDiagnostic(id, eventType, "runtime", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 			},
 		},
 	}
@@ -1731,7 +1919,7 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeAfterFinalRec
 			eventID:   "20000000-0000-0000-0000-000000000001",
 			eventType: events.EventType("platform.agent_failed"),
 			event: func(id string, eventType events.EventType) events.Event {
-				return events.NewRuntimeDiagnosticEvent(id, eventType, "runtime", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+				return eventtest.RuntimeDiagnostic(id, eventType, "runtime", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 			},
 		},
 		{
@@ -1739,7 +1927,7 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeAfterFinalRec
 			eventID:   "20000000-0000-0000-0000-000000000002",
 			eventType: events.EventType("platform.paused"),
 			event: func(id string, eventType events.EventType) events.Event {
-				return events.NewRuntimeControlEvent(id, eventType, "runtime", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+				return eventtest.RuntimeControl(id, eventType, "runtime", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 			},
 		},
 		{
@@ -1747,7 +1935,7 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeAfterFinalRec
 			eventID:   "20000000-0000-0000-0000-000000000003",
 			eventType: events.EventType("platform.budget_threshold_crossed"),
 			event: func(id string, eventType events.EventType) events.Event {
-				return events.NewRuntimeDiagnosticEvent(id, eventType, "runtime", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+				return eventtest.RuntimeDiagnostic(id, eventType, "runtime", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 			},
 		},
 		{
@@ -1755,7 +1943,7 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeAfterFinalRec
 			eventID:   "20000000-0000-0000-0000-000000000004",
 			eventType: events.EventType("platform.run_stalled"),
 			event: func(id string, eventType events.EventType) events.Event {
-				return events.NewRuntimeDiagnosticEvent(id, eventType, "runtime", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+				return eventtest.RuntimeDiagnostic(id, eventType, "runtime", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 			},
 		},
 	}
@@ -1824,11 +2012,18 @@ func TestEventBusRuntimeIngressPauseQueuesAndResumeReleases(t *testing.T) {
 	}
 
 	eventID := "21000000-0000-0000-0000-000000000001"
-	if err := eb.Publish(ctx, eventtest.WithEntityID(eventtest.Projection(eventID,
-
+	if err := eb.Publish(ctx, eventtest.RootIngress(
+		eventID,
 		eventType,
-		"api.v1", "", []byte(`{"entity_id":"21000000-0000-0000-0000-000000000002"}`), 0, eventBusTestRunID, "", events.EventEnvelope{}, time.Now().UTC()),
-		"21000000-0000-0000-0000-000000000002")); err != nil {
+		"api.v1",
+		"",
+		[]byte(`{"entity_id":"21000000-0000-0000-0000-000000000002"}`),
+		0,
+		eventBusTestRunID,
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "21000000-0000-0000-0000-000000000002"),
+		time.Now().UTC(),
+	)); err != nil {
 		t.Fatalf("Publish while paused: %v", err)
 	}
 
@@ -1867,7 +2062,7 @@ func TestEventBusPublish_HumanTaskEventsRouteBySubscriptionOnly(t *testing.T) {
 	ch := eb.Subscribe("requester")
 	defer eb.Unsubscribe("requester")
 
-	if err := eb.Publish(context.Background(), eventtest.Projection("", events.EventType("human_task.approved"), "", "", []byte(`{"requesting_agent":"requester"}`), 0, "", "", events.EventEnvelope{}, time.Time{})); err != nil {
+	if err := eb.Publish(context.Background(), eventtest.RootIngress("", events.EventType("human_task.approved"), "", "", []byte(`{"requesting_agent":"requester"}`), 0, "", "", events.EventEnvelope{}, time.Time{})); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 
@@ -1922,7 +2117,7 @@ func TestEventBusPublish_LogsRoutedAndSubscribedRecipientsSeparately(t *testing.
 	defer eb.Unsubscribe("direct-agent")
 	defer eb.Unsubscribe("scan-orchestrator")
 
-	if err := eb.Publish(context.Background(), eventtest.Projection("", events.EventType("producer/scan.requested"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})); err != nil {
+	if err := eb.Publish(context.Background(), eventtest.RootIngress("", events.EventType("producer/scan.requested"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 
@@ -2024,7 +2219,7 @@ func TestEventBusPublish_RecordsPublishDiagnosticsInTurnRecorder(t *testing.T) {
 	defer eb.Unsubscribe("scan-orchestrator")
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx := runtimebus.WithEmittedEventsRecorder(context.Background(), recorder)
-	if err := eb.Publish(ctx, eventtest.WithEntityID((eventtest.Projection("", "producer/scan.requested", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})), "ent-1")); err != nil {
+	if err := eb.Publish(ctx, eventtest.RootIngress("", "producer/scan.requested", "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Time{})); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	diags := recorder.SnapshotPublishes()
@@ -2125,9 +2320,18 @@ func TestEventBusPublish_NestedDescendantCompletionDoesNotEmitChildContinuation(
 		}
 	}
 
-	if err := eb.Publish(ctx, eventtest.WithEntityID((eventtest.Projection("11111111-2222-3333-4444-555555555555",
+	if err := eb.Publish(ctx, eventtest.RootIngress(
+		"11111111-2222-3333-4444-555555555555",
 		events.EventType("child/grandchild/micro.done"),
-		"cataloge2e", "", []byte(`{"entity_id":"`+grandchildEntityID+`"}`), 0, eventBusTestRunID, "", events.EventEnvelope{}, time.Now().UTC())), grandchildEntityID)); err != nil {
+		"cataloge2e",
+		"",
+		[]byte(`{"entity_id":"`+grandchildEntityID+`"}`),
+		0,
+		eventBusTestRunID,
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, grandchildEntityID),
+		time.Now().UTC(),
+	)); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	if err := eb.WaitForQuiescence(ctx); err != nil {
@@ -2235,9 +2439,18 @@ func TestEventBusPublish_NestedThreeLevelChain_FromRootStartCompletesWithoutChil
 		t.Fatalf("seed root instance: %v", err)
 	}
 
-	if err := eb.Publish(ctx, eventtest.WithEntityID((eventtest.Projection("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+	if err := eb.Publish(ctx, eventtest.RootIngress(
+		"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
 		events.EventType("pipeline.start"),
-		"cataloge2e", "", []byte(`{"entity_id":"`+rootEntityID+`"}`), 0, eventBusTestRunID, "", events.EventEnvelope{}, time.Now().UTC())), rootEntityID)); err != nil {
+		"cataloge2e",
+		"",
+		[]byte(`{"entity_id":"`+rootEntityID+`"}`),
+		0,
+		eventBusTestRunID,
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, rootEntityID),
+		time.Now().UTC(),
+	)); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	if err := eb.WaitForQuiescence(ctx); err != nil {
@@ -2363,9 +2576,18 @@ func TestEventBusPublish_GatedChildFlowCompletionAdvancesRoot(t *testing.T) {
 		t.Fatalf("seed root instance: %v", err)
 	}
 
-	if err := eb.Publish(ctx, eventtest.WithEntityID((eventtest.Projection("11111111-2222-3333-4444-555555555555",
+	if err := eb.Publish(ctx, eventtest.RootIngress(
+		"11111111-2222-3333-4444-555555555555",
 		events.EventType("validate.requested"),
-		"cataloge2e", "", []byte(`{"entity_id":"`+rootEntityID+`"}`), 0, eventBusTestRunID, "", events.EventEnvelope{}, time.Now().UTC())), rootEntityID)); err != nil {
+		"cataloge2e",
+		"",
+		[]byte(`{"entity_id":"`+rootEntityID+`"}`),
+		0,
+		eventBusTestRunID,
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, rootEntityID),
+		time.Now().UTC(),
+	)); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	if err := eb.WaitForQuiescence(ctx); err != nil {
@@ -2445,7 +2667,7 @@ func TestEventBusPublish_RecordsNestedDescendantLocalizedEvent(t *testing.T) {
 	defer eb.Unsubscribe("child-aggregator")
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx := runtimebus.WithEmittedEventsRecorder(context.Background(), recorder)
-	if err := eb.Publish(ctx, eventtest.WithEntityID((eventtest.Projection("", "child/grandchild/micro.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})), "ent-grandchild")); err != nil {
+	if err := eb.Publish(ctx, eventtest.RootIngress("", "child/grandchild/micro.done", "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-grandchild"), time.Time{})); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	diags := recorder.SnapshotPublishes()
@@ -2502,7 +2724,18 @@ func TestEventBusPublish_RecordsNestedTemplateInstanceLocalizedEvent(t *testing.
 	defer eb.Unsubscribe("worker-inst-1")
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx := runtimebus.WithEmittedEventsRecorder(context.Background(), recorder)
-	if err := eb.Publish(ctx, eventtest.WithEntityID((eventtest.Projection("", "child/grandchild/inst-1/micro.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})), "ent-grandchild")); err != nil {
+	if err := eb.Publish(ctx, eventtest.RootIngress(
+		"",
+		"child/grandchild/inst-1/micro.done",
+		"",
+		"",
+		nil,
+		0,
+		"",
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-grandchild"),
+		time.Time{},
+	)); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	diags := recorder.SnapshotPublishes()

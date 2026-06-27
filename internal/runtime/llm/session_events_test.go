@@ -768,7 +768,7 @@ func TestAnthropicAPIRuntime_ContinueSessionReMarksInboundDeliveryForReusedSessi
 
 	ctx := runtimeactors.WithActor(
 		runtimebus.WithInboundEvent(
-			sessions.WithScope(context.Background(), sessions.RuntimeModeSession.String(), sessions.SessionScopeFlow.String(), "support/inst-1"), eventtest.Projection("evt-1", events.EventType(""), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+			sessions.WithScope(context.Background(), sessions.RuntimeModeSession.String(), sessions.SessionScopeFlow.String(), "support/inst-1"), eventtest.RootIngress("evt-1", events.EventType(""), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		),
 		runtimeactors.AgentConfig{
 			ID:           "agent-1",
@@ -809,7 +809,7 @@ func TestAnthropicAPIRuntime_ContinueSessionFailsClosedWhenDeliveryRestampFails(
 	}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, publisher)
 	ctx := runtimeactors.WithActor(
 		runtimebus.WithInboundEvent(
-			sessions.WithScope(context.Background(), sessions.RuntimeModeSession.String(), sessions.SessionScopeFlow.String(), "support/inst-1"), eventtest.Projection("evt-1", events.EventType(""), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+			sessions.WithScope(context.Background(), sessions.RuntimeModeSession.String(), sessions.SessionScopeFlow.String(), "support/inst-1"), eventtest.RootIngress("evt-1", events.EventType(""), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		),
 		runtimeactors.AgentConfig{
 			ID:           "agent-1",
@@ -843,7 +843,7 @@ func TestClaudeCLIRuntime_ContinueSessionFailsClosedWhenDeliveryRestampFails(t *
 	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil, publisher)
 	ctx := runtimeactors.WithActor(
 		runtimebus.WithInboundEvent(
-			sessions.WithScope(context.Background(), sessions.RuntimeModeSession.String(), sessions.SessionScopeFlow.String(), "support/inst-1"), eventtest.Projection("evt-1", events.EventType(""), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+			sessions.WithScope(context.Background(), sessions.RuntimeModeSession.String(), sessions.SessionScopeFlow.String(), "support/inst-1"), eventtest.RootIngress("evt-1", events.EventType(""), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		),
 		runtimeactors.AgentConfig{
 			ID:           "agent-1",
@@ -874,13 +874,22 @@ func TestClaudeCLIRuntime_ContinueSessionFailsClosedWhenDeliveryRestampFails(t *
 
 func TestEnrichTurnRecordIncludesTriggerToolsAndEmits(t *testing.T) {
 	ctx := runtimecorrelation.WithRunID(context.Background(), "run-123")
-	ctx = runtimebus.WithInboundEvent(ctx, eventtest.WithEnvelope((eventtest.Projection("11111111-1111-1111-1111-111111111111",
-
-		events.EventType("scan.requested"), "", "", []byte(`{"entity_id":"22222222-2222-2222-2222-222222222222"}`), 0, "run-123", "", events.EventEnvelope{}, time.Time{})), events.EventEnvelope{EntityID: "22222222-2222-2222-2222-222222222222"}))
+	ctx = runtimebus.WithInboundEvent(ctx, eventtest.RootIngress(
+		"11111111-1111-1111-1111-111111111111",
+		events.EventType("scan.requested"),
+		"",
+		"",
+		[]byte(`{"entity_id":"22222222-2222-2222-2222-222222222222"}`),
+		0,
+		"run-123",
+		"",
+		events.EventEnvelope{EntityID: "22222222-2222-2222-2222-222222222222"},
+		time.Time{},
+	))
 	recorder := runtimebus.NewEmittedEventsRecorder()
-	recorder.Append(eventtest.Projection("", events.EventType("discovery/category.assessed"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
-	recorder.Append(eventtest.Projection("", events.EventType("discovery/category.assessed"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
-	recorder.Append(eventtest.Projection("", events.EventType("discovery/scan_complete"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	recorder.Append(eventtest.RootIngress("", events.EventType("discovery/category.assessed"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	recorder.Append(eventtest.RootIngress("", events.EventType("discovery/category.assessed"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	recorder.Append(eventtest.RootIngress("", events.EventType("discovery/scan_complete"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 	recorder.AppendPublish(runtimebus.PublishDiagnostic{
 		EventID:   "44444444-4444-4444-4444-444444444444",
 		EventType: "discovery/category.assessed",

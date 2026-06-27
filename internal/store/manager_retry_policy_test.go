@@ -345,7 +345,7 @@ func TestUpsertEventReceipt_ConcurrentTerminalReceiptsConvergeStandaloneRuntimeR
 		t.Fatalf("seed second agent: %v", err)
 	}
 	payload, _ := json.Marshal(map[string]any{"k": "v"})
-	evt := events.NewRuntimeControlEvent(
+	evt := eventtest.RuntimeControl(
 		uuid.NewString(),
 		events.EventType("platform.paused"),
 		"runtime",
@@ -1140,9 +1140,18 @@ func seedEvent(t *testing.T, ctx context.Context, pg *store.PostgresStore, entit
 	t.Helper()
 
 	payload, _ := json.Marshal(map[string]any{"k": "v"})
-	evt := eventtest.WithEntityID((eventtest.Projection(uuid.NewString(),
+	evt := eventtest.PersistedProjection(
+		uuid.NewString(),
 		events.EventType(eventType),
-		"store-test", "", payload, 0, "", "", events.EventEnvelope{}, time.Now().Add(-1*time.Hour))), entityID)
+		"store-test",
+		"",
+		payload,
+		0,
+		"",
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
+		time.Now().Add(-1*time.Hour),
+	)
 
 	if err := pg.AppendEvent(ctx, evt); err != nil {
 		t.Fatalf("append event: %v", err)

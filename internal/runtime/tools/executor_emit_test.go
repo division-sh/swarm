@@ -216,7 +216,18 @@ func TestHandleEmitTool_PreservesInboundChildFlowOwnerWithinActorScope(t *testin
 		FlowPath:   "validation",
 		EmitEvents: []string{"research.completed"},
 	}
-	inbound := eventtest.WithFlowInstance(eventtest.WithEntityID((eventtest.Projection("", events.EventType("validation/validation.started"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})), "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), "validation/inst-1")
+	inbound := eventtest.RootIngress(
+		"",
+		events.EventType("validation/validation.started"),
+		"",
+		"",
+		nil,
+		0,
+		"",
+		"",
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), "validation/inst-1"),
+		time.Time{},
+	)
 	ctx := runtimebus.WithInboundEvent(context.Background(), inbound)
 
 	_, err := exec.handleEmitTool(ctx, actor, "emit_research_completed", map[string]any{
@@ -273,7 +284,18 @@ func TestHandleEmitTool_DoesNotAdoptForeignInboundFlowOwner(t *testing.T) {
 		FlowPath:   "validation",
 		EmitEvents: []string{"research.completed"},
 	}
-	inbound := eventtest.WithFlowInstance(eventtest.WithEntityID((eventtest.Projection("", events.EventType("scoring/vertical.shortlisted"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})), "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), "scoring/inst-1")
+	inbound := eventtest.RootIngress(
+		"",
+		events.EventType("scoring/vertical.shortlisted"),
+		"",
+		"",
+		nil,
+		0,
+		"",
+		"",
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), "scoring/inst-1"),
+		time.Time{},
+	)
 	ctx := runtimebus.WithInboundEvent(context.Background(), inbound)
 
 	_, err := exec.handleEmitTool(ctx, actor, "emit_research_completed", map[string]any{
@@ -423,7 +445,18 @@ func TestHandleEmitTool_TargetsParentRouteForChildPinOutput(t *testing.T) {
 		FlowInstance: "wrong-root",
 		EntityID:     "33333333-3333-3333-3333-333333333333",
 	}
-	inbound := eventtest.WithTargetRoute(eventtest.WithSourceRoute((eventtest.Projection("", events.EventType("analyzer-flow/analysis.requested"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})), wrongInboundParent), childRoute)
+	inbound := eventtest.RootIngress(
+		"",
+		events.EventType("analyzer-flow/analysis.requested"),
+		"",
+		"",
+		nil,
+		0,
+		"",
+		"",
+		events.EnvelopeForTargetRoute(events.EnvelopeForSourceRoute(events.EventEnvelope{}, wrongInboundParent), childRoute),
+		time.Time{},
+	)
 	ctx := runtimebus.WithInboundEvent(context.Background(), inbound)
 
 	_, err := exec.handleEmitTool(ctx, actor, "emit_analysis_done", map[string]any{})
@@ -495,7 +528,7 @@ func TestHandleEmitTool_FailsClosedOnIncompleteStoredParentRoute(t *testing.T) {
 		EntityID:   "22222222-2222-2222-2222-222222222222",
 		EmitEvents: []string{"analyzer-flow/analysis.done"},
 	}
-	ctx := runtimebus.WithInboundEvent(context.Background(), eventtest.Projection("", events.EventType("analyzer-flow/analysis.requested"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	ctx := runtimebus.WithInboundEvent(context.Background(), eventtest.RootIngress("", events.EventType("analyzer-flow/analysis.requested"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 
 	_, err := exec.handleEmitTool(ctx, actor, "emit_analysis_done", map[string]any{})
 	if err == nil {
@@ -554,11 +587,22 @@ func TestHandleEmitTool_StaticChildPinOutputTargetsDeliveryEntity(t *testing.T) 
 		FlowPath:   "root/analyzer-flow",
 		EmitEvents: []string{"analyzer-flow/analysis.done"},
 	}
-	inbound := eventtest.WithSourceRoute(eventtest.WithEntityID((eventtest.Projection("", events.EventType("analyzer-flow/analysis.requested"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})), "11111111-1111-1111-1111-111111111111"), events.RouteIdentity{
-		FlowID:       "wrong-root",
-		FlowInstance: "wrong-root",
-		EntityID:     "33333333-3333-3333-3333-333333333333",
-	})
+	inbound := eventtest.RootIngress(
+		"",
+		events.EventType("analyzer-flow/analysis.requested"),
+		"",
+		"",
+		nil,
+		0,
+		"",
+		"",
+		events.EnvelopeForSourceRoute(events.EnvelopeForEntityID(events.EventEnvelope{}, "11111111-1111-1111-1111-111111111111"), events.RouteIdentity{
+			FlowID:       "wrong-root",
+			FlowInstance: "wrong-root",
+			EntityID:     "33333333-3333-3333-3333-333333333333",
+		}),
+		time.Time{},
+	)
 
 	ctx := runtimebus.WithInboundEvent(context.Background(), inbound)
 
@@ -617,7 +661,18 @@ func TestHandleEmitTool_RootStaticPinOutputStillRequiresTarget(t *testing.T) {
 		FlowPath:   "analyzer-flow",
 		EmitEvents: []string{"analyzer-flow/analysis.done"},
 	}
-	inbound := eventtest.WithEntityID((eventtest.Projection("", events.EventType("analyzer-flow/analysis.requested"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})), "11111111-1111-1111-1111-111111111111")
+	inbound := eventtest.RootIngress(
+		"",
+		events.EventType("analyzer-flow/analysis.requested"),
+		"",
+		"",
+		nil,
+		0,
+		"",
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "11111111-1111-1111-1111-111111111111"),
+		time.Time{},
+	)
 	ctx := runtimebus.WithInboundEvent(context.Background(), inbound)
 
 	_, err := exec.handleEmitTool(ctx, actor, "emit_analysis_done", map[string]any{})
@@ -695,7 +750,7 @@ func TestHandleEmitTool_RoutesConnectedOutputPinThroughCanonicalRouteAuthority(t
 	}
 	exec := NewExecutorWithOptions(eb, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
 
-	ctx := runtimebus.WithInboundEvent(context.Background(), eventtest.Projection(
+	ctx := runtimebus.WithInboundEvent(context.Background(), eventtest.RootIngress(
 		"evt-parent",
 		events.EventType("producer/deploy.requested"),
 		"runtime",
@@ -757,7 +812,7 @@ func TestHandleEmitTool_FailsClosedForConnectedOutputWithoutCanonicalRouteAuthor
 	}
 	exec := NewExecutorWithOptions(eb, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
 
-	ctx := runtimebus.WithInboundEvent(context.Background(), eventtest.Projection(
+	ctx := runtimebus.WithInboundEvent(context.Background(), eventtest.RootIngress(
 		"evt-parent",
 		events.EventType("producer/deploy.requested"),
 		"runtime",

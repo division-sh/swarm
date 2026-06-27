@@ -75,7 +75,7 @@ func TestDeclarativeNode_HandleResolvesHandlerFromSemanticSource(t *testing.T) {
 	result, err := node.Handle(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		FlowID:   "flow-1",
-		Event:    eventtest.Projection("evt-1", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:    eventtest.RootIngress("evt-1", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		State:    StateSnapshot{CurrentState: "pending"},
 	})
 	if err != nil {
@@ -101,7 +101,7 @@ func TestDeclarativeNode_HandleRequiresHandlerWhenNotResolvable(t *testing.T) {
 	node := NewDeclarativeNode("node-a", exec)
 	_, err = node.Handle(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		Event:    eventtest.Projection("", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:    eventtest.RootIngress("", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 	})
 	if err != ErrMissingNodeHandler {
 		t.Fatalf("Handle error = %v, want %v", err, ErrMissingNodeHandler)
@@ -123,7 +123,7 @@ func TestDeclarativeNode_HandleUsesExplicitHandlerWithoutLookup(t *testing.T) {
 	node := NewDeclarativeNode("node-a", exec)
 	result, err := node.Handle(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		Event:    eventtest.Projection("", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:    eventtest.RootIngress("", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler:  runtimecontracts.SystemNodeEventHandler{ClearGates: []string{"gate_a"}},
 		State:    StateSnapshot{StateCarrier: NewStateCarrier(nil, map[string]bool{"gate_a": true}, nil)},
 	})

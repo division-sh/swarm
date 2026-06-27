@@ -15,7 +15,7 @@ func requireBusEvent(t testing.TB, ch <-chan events.Event, context string) event
 		return evt
 	default:
 		t.Fatalf("%s: expected queued bus event", context)
-		return eventtest.Projection("", events.EventType(""), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
+		return eventtest.RootIngress("", events.EventType(""), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
 	}
 }
 

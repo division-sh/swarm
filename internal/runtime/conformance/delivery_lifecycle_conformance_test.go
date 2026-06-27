@@ -262,9 +262,18 @@ func (fx *deliveryLifecycleFixture) publishDirectEvent(t *testing.T, ctx context
 	ch := fx.bus.Subscribe(fx.agentID)
 	defer fx.bus.Unsubscribe(fx.agentID)
 
-	evt := eventtest.WithEntityID((events.NewRootIngressEvent(eventID,
+	evt := eventtest.RootIngress(
+		eventID,
 		events.EventType("review.requested"),
-		"runtime", "", []byte(`{"ok":true}`), 0, "", "", events.EventEnvelope{}, time.Now().Add(-2*time.Hour).UTC())), uuid.NewString())
+		"runtime",
+		"",
+		[]byte(`{"ok":true}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, uuid.NewString()),
+		time.Now().Add(-2*time.Hour).UTC(),
+	)
 
 	if err := fx.bus.PublishDirect(ctx, evt, []string{fx.agentID}); err != nil {
 		t.Fatalf("PublishDirect: %v", err)

@@ -108,10 +108,18 @@ func (a delayedRunStatusAgent) OnEvent(ctx context.Context, evt events.Event) ([
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
-	out := eventtest.WithEntityID((eventtest.Projection(uuid.NewString(),
-
+	out := eventtest.RootIngress(
+		uuid.NewString(),
 		events.EventType("scan.completed"),
-		a.id, "", []byte(`{}`), 0, evt.RunID(), "", events.EventEnvelope{}, time.Now().UTC())), evt.EntityID())
+		a.id,
+		"",
+		[]byte(`{}`),
+		0,
+		evt.RunID(),
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, evt.EntityID()),
+		time.Now().UTC(),
+	)
 
 	return []events.Event{out}, nil
 }
@@ -149,10 +157,18 @@ func (r servedEventPublishBlockingLLMRuntime) ContinueSession(ctx context.Contex
 
 func publishRunStatusRootEvent(t *testing.T, bus *runtimebus.EventBus, runID, entityID string) {
 	t.Helper()
-	if err := bus.Publish(context.Background(), eventtest.WithEntityID((eventtest.Projection(uuid.NewString(),
-
+	if err := bus.Publish(context.Background(), eventtest.RootIngress(
+		uuid.NewString(),
 		events.EventType("scan.requested"),
-		"api.v1", "", []byte(`{"topic":"sample"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())), entityID)); err != nil {
+		"api.v1",
+		"",
+		[]byte(`{"topic":"sample"}`),
+		0,
+		runID,
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
+		time.Now().UTC(),
+	)); err != nil {
 		t.Fatalf("publish root event: %v", err)
 	}
 }

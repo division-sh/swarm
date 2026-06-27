@@ -285,7 +285,7 @@ func TestPostgresStore_BundleDeleteFinalMutationBlocksPostDeletePersistedSourceR
 		BundleSource:      storerunlifecycle.BundleSourcePersisted,
 		BundleFingerprint: testBootBundleFingerprint,
 	})
-	err = pg.AppendEvent(publishCtx, eventtest.Projection(eventID,
+	err = pg.AppendEvent(publishCtx, eventtest.PersistedProjection(eventID,
 
 		"scan.requested",
 		"api.v1", "", []byte(`{"topic":"medicine"}`), 0, runID, "", events.EventEnvelope{}, time.Date(2026, 5, 31, 12, 1, 0, 0, time.UTC)))

@@ -17,12 +17,21 @@ func TestPostgresStore_EventDeliveryRoutesPersistNodeTargetRows(t *testing.T) {
 
 	ctx := context.Background()
 	pg := &PostgresStore{DB: db}
-	evt := eventtest.WithTargetSet(eventtest.Projection(uuid.NewString(),
-		events.EventType("child/output.done"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
-		[]events.RouteIdentity{
+	evt := eventtest.PersistedProjection(
+		uuid.NewString(),
+		events.EventType("child/output.done"),
+		"",
+		"",
+		[]byte(`{}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForTargetSet(events.EventEnvelope{}, []events.RouteIdentity{
 			{EntityID: "ent-a", FlowInstance: "child-a/inst-1"},
 			{EntityID: "ent-b", FlowInstance: "child-b/inst-1"},
-		})
+		}),
+		time.Now().UTC(),
+	)
 
 	if err := pg.AppendEvent(ctx, evt); err != nil {
 		t.Fatalf("AppendEvent: %v", err)

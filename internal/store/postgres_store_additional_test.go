@@ -301,11 +301,18 @@ func TestPostgresRunLifecycleFailsClosedWhenEntityStateCountSourceUnavailable(t 
 		t.Fatalf("seed run: %v", err)
 	}
 
-	evt := eventtest.WithEntityID(eventtest.Projection(uuid.NewString(),
-
+	evt := eventtest.PersistedProjection(
+		uuid.NewString(),
 		events.EventType("scan.requested"),
-		"agent-1", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC()),
-		entityID)
+		"agent-1",
+		"",
+		[]byte(`{}`),
+		0,
+		runID,
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
+		time.Now().UTC(),
+	)
 
 	if err := pg.AppendEvent(ctx, evt); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
@@ -344,11 +351,18 @@ func TestPostgresStore_AppendEvent_ReopensPrematureCompletedRunAndSyncsCounters(
 	}
 	seedPostgresEntityStateRows(t, db, ctx, runID, entityID)
 
-	evt := eventtest.WithEntityID(eventtest.Projection(uuid.NewString(),
-
+	evt := eventtest.PersistedProjection(
+		uuid.NewString(),
 		events.EventType("scan.completed"),
-		"agent-1", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC()),
-		entityID)
+		"agent-1",
+		"",
+		[]byte(`{}`),
+		0,
+		runID,
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
+		time.Now().UTC(),
+	)
 
 	if err := pg.AppendEvent(ctx, evt); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
@@ -407,11 +421,18 @@ func TestPostgresStore_AppendEvent_DuplicateDoesNotReopenCompletedRun(t *testing
 	}
 	seedPostgresEntityStateRows(t, db, ctx, runID, entityID)
 
-	evt := eventtest.WithEntityID(eventtest.Projection(eventID,
-
+	evt := eventtest.PersistedProjection(
+		eventID,
 		events.EventType("scan.completed"),
-		"agent-1", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC()),
-		entityID)
+		"agent-1",
+		"",
+		[]byte(`{}`),
+		0,
+		runID,
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
+		time.Now().UTC(),
+	)
 
 	if err := pg.AppendEvent(ctx, evt); err != nil {
 		t.Fatalf("AppendEvent(duplicate): %v", err)
@@ -484,11 +505,18 @@ func TestPostgresStore_AppendEvent_AllowsRunsWithoutTriggerColumns(t *testing.T)
 
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
-	evt := eventtest.WithEntityID(eventtest.Projection(uuid.NewString(),
-
+	evt := eventtest.PersistedProjection(
+		uuid.NewString(),
 		events.EventType("scan.requested"),
-		"builder", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC()),
-		entityID)
+		"builder",
+		"",
+		[]byte(`{}`),
+		0,
+		runID,
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
+		time.Now().UTC(),
+	)
 
 	if err := pg.AppendEvent(ctx, evt); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
@@ -1517,11 +1545,18 @@ func TestPostgresStore_AppendEvent_EntityIDBoundaryContract(t *testing.T) {
 
 	validEntityID := uuid.NewString()
 	validEventID := uuid.NewString()
-	if err := pg.AppendEvent(ctx, eventtest.WithEntityID((eventtest.Projection(validEventID,
+	if err := pg.AppendEvent(ctx, eventtest.PersistedProjection(
+		validEventID,
 		events.EventType("review.requested"),
 		"control-plane",
 		"legacy-task-key",
-		[]byte(`{"name":"Telemedicine Platform"}`), 0, "", "", events.EventEnvelope{}, time.Now())), validEntityID)); err != nil {
+		[]byte(`{"name":"Telemedicine Platform"}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, validEntityID),
+		time.Now(),
+	)); err != nil {
 		t.Fatalf("AppendEvent(valid entity_id): %v", err)
 	}
 
@@ -1544,7 +1579,7 @@ func TestPostgresStore_AppendEvent_EntityIDBoundaryContract(t *testing.T) {
 	}
 
 	emptyEventID := uuid.NewString()
-	if err := pg.AppendEvent(ctx, eventtest.Projection(emptyEventID,
+	if err := pg.AppendEvent(ctx, eventtest.PersistedProjection(emptyEventID,
 		events.EventType("review.requested"),
 		"control-plane", "", []byte(`{"name":"Telemedicine Platform"}`), 0, "", "", events.EventEnvelope{}, time.Now())); err != nil {
 		t.Fatalf("AppendEvent(empty entity_id): %v", err)
@@ -1564,9 +1599,18 @@ func TestPostgresStore_AppendEvent_EntityIDBoundaryContract(t *testing.T) {
 	}
 
 	invalidEventID := uuid.NewString()
-	err := pg.AppendEvent(ctx, eventtest.WithEntityID((eventtest.Projection(invalidEventID,
+	err := pg.AppendEvent(ctx, eventtest.PersistedProjection(
+		invalidEventID,
 		events.EventType("review.requested"),
-		"control-plane", "", []byte(`{"name":"Telemedicine Platform"}`), 0, "", "", events.EventEnvelope{}, time.Now())), "pry_hc_telemedicine_001"))
+		"control-plane",
+		"",
+		[]byte(`{"name":"Telemedicine Platform"}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "pry_hc_telemedicine_001"),
+		time.Now(),
+	))
 	if err == nil {
 		t.Fatal("expected AppendEvent to fail on non-UUID entity_id")
 	}
@@ -1593,9 +1637,18 @@ func TestPostgresStore_PersistEventWithDeliveries_RejectsInvalidEntityID(t *test
 	ctx := context.Background()
 
 	eventID := uuid.NewString()
-	err := pg.PersistEventWithDeliveries(ctx, eventtest.WithEntityID((eventtest.Projection(eventID,
+	err := pg.PersistEventWithDeliveries(ctx, eventtest.PersistedProjection(
+		eventID,
 		events.EventType("review.requested"),
-		"human", "", []byte(`{"directive":"Telemedicine Platform"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())), "pry_hc_telemedicine_001"),
+		"human",
+		"",
+		[]byte(`{"directive":"Telemedicine Platform"}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "pry_hc_telemedicine_001"),
+		time.Now().UTC(),
+	),
 
 		[]string{"control-plane"})
 	if err == nil {
@@ -1639,7 +1692,7 @@ func TestPostgresStore_AppendEvent_RejectsPayloadValidatorFailureBeforePersisten
 	ctx := context.Background()
 	eventID := uuid.NewString()
 
-	err := pg.AppendEvent(ctx, eventtest.Projection(eventID,
+	err := pg.AppendEvent(ctx, eventtest.PersistedProjection(eventID,
 		events.EventType("task.completed"),
 		"control-plane", "", []byte(`{"ok":"bad"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()))
 	if err == nil {
@@ -1761,9 +1814,7 @@ func TestPostgresStore_GetEventReceipt_FallsBackToPersistedReceiptForNonTerminal
 	entityID := uuid.NewString()
 	seedSpecAgent(t, ctx, pg, "a1", "", "*")
 	eventID := uuid.NewString()
-	if err := pg.AppendEvent(ctx, eventtest.WithEntityID((eventtest.Projection(eventID,
-		"system.started",
-		"runtime", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now())), entityID)); err != nil {
+	if err := pg.AppendEvent(ctx, eventtest.PersistedProjection(eventID, "system.started", "runtime", "", []byte(`{}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now())); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
 	if err := pg.InsertEventDeliveries(ctx, eventID, []string{"a1"}); err != nil {
@@ -1844,13 +1895,13 @@ func TestPostgresStore_AppendEvent_InheritsParentRunID(t *testing.T) {
 
 	parentID := uuid.NewString()
 	childID := uuid.NewString()
-	if err := pg.AppendEvent(ctx, eventtest.Projection(parentID,
+	if err := pg.AppendEvent(ctx, eventtest.PersistedProjection(parentID,
 
 		events.EventType("parent.event"),
 		"root", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
 		t.Fatalf("AppendEvent(parent): %v", err)
 	}
-	if err := pg.AppendEvent(context.Background(), events.NewChildEventWithLineage(childID,
+	if err := pg.AppendEvent(context.Background(), eventtest.ChildWithLineage(childID,
 		events.EventType("child.event"),
 		"child", "", []byte(`{}`), 0, events.EventLineage{ParentEventID: parentID}, events.EventEnvelope{}, time.Now().UTC()),
 	); err != nil {
@@ -2351,13 +2402,21 @@ func TestPostgresStore_ListPendingEventsForAgent_UsesTypedEnvelopeMetadata(t *te
 	seedSpecAgent(t, ctx, pg, "analysis-agent", "", "scoring.requested")
 
 	eventID := uuid.NewString()
-	evt := eventtest.WithEnvelope(eventtest.Projection(eventID,
+	evt := eventtest.PersistedProjection(
+		eventID,
 		events.EventType("scoring.requested"),
-		"runtime", "", []byte(`{"entity_id":"payload-ent","flow_instance":"payload-flow"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
+		"runtime",
+		"",
+		[]byte(`{"entity_id":"payload-ent","flow_instance":"payload-flow"}`),
+		0,
+		"",
+		"",
 		events.EventEnvelope{
 			EntityID:     entityID,
 			FlowInstance: flowInstance,
-		})
+		},
+		time.Now().UTC(),
+	)
 
 	if err := pg.AppendEvent(ctx, evt); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
@@ -2391,11 +2450,11 @@ func TestPostgresStore_PipelineReceipts_MissingEventsQuery(t *testing.T) {
 
 	runID := uuid.NewString()
 	parentID := uuid.NewString()
-	eventProcessed := eventtest.Projection(uuid.NewString(),
+	eventProcessed := eventtest.PersistedProjection(uuid.NewString(),
 		events.EventType("system.started"),
 		"runtime", "", []byte(`{"ok":true}`), 0, "", "", events.EventEnvelope{}, time.Now().Add(-2*time.Minute))
 
-	eventMissing := eventtest.Projection(uuid.NewString(),
+	eventMissing := eventtest.PersistedProjection(uuid.NewString(),
 		events.EventType("system.directive"),
 		"human", "", []byte(`{"directive":"x"}`), 0, runID,
 		parentID, events.EventEnvelope{}, time.Now().Add(-1*time.Minute))
@@ -2403,7 +2462,7 @@ func TestPostgresStore_PipelineReceipts_MissingEventsQuery(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running') ON CONFLICT (run_id) DO NOTHING`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if err := pg.AppendEvent(ctx, eventtest.Projection(parentID,
+	if err := pg.AppendEvent(ctx, eventtest.PersistedProjection(parentID,
 		events.EventType("system.parent"),
 		"runtime", "", []byte(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().Add(-3*time.Minute))); err != nil {
 		t.Fatalf("append parent event: %v", err)
@@ -2453,7 +2512,7 @@ func TestPostgresStore_PipelineReceipts_MissingEventsQuery_QuarantinesNoRunIDCap
 	pg := &PostgresStore{DB: db}
 	eventID := uuid.NewString()
 	parentID := uuid.NewString()
-	evt := eventtest.Projection(eventID,
+	evt := eventtest.PersistedProjection(eventID,
 		events.EventType("system.directive"),
 		"runtime", "", []byte(`{"directive":"x"}`), 0, "", parentID, events.EventEnvelope{}, time.Now().Add(-time.Minute).UTC())
 
@@ -2493,7 +2552,7 @@ func TestPostgresStore_BeginEventTx_AppendAndDeliveriesTx(t *testing.T) {
 	}
 
 	eventID := uuid.NewString()
-	evt := eventtest.Projection(eventID,
+	evt := eventtest.PersistedProjection(eventID,
 		events.EventType("system.started"),
 		"runtime", "", []byte(`{"ok":true}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
@@ -2527,7 +2586,7 @@ func TestPostgresStore_PersistEventWithDeliveries_SuccessAndRollbackOnFailure(t 
 	ctx := context.Background()
 
 	eventID := uuid.NewString()
-	if err := pg.PersistEventWithDeliveries(ctx, eventtest.Projection(eventID,
+	if err := pg.PersistEventWithDeliveries(ctx, eventtest.PersistedProjection(eventID,
 		events.EventType("system.directive"),
 		"human", "", []byte(`{"directive":"SaaS in Argentina"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 
@@ -2547,7 +2606,7 @@ func TestPostgresStore_PersistEventWithDeliveries_SuccessAndRollbackOnFailure(t 
 	}
 
 	failedEventID := uuid.NewString()
-	err := pg.PersistEventWithDeliveries(ctx, eventtest.Projection(failedEventID,
+	err := pg.PersistEventWithDeliveries(ctx, eventtest.PersistedProjection(failedEventID,
 		events.EventType("system.directive"),
 		"human", "", []byte(`{"directive":"fail path"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 
@@ -3598,9 +3657,7 @@ func TestEventReceipts_RetryToDeadLetter_AndPendingQueries(t *testing.T) {
 	entityID := uuid.NewString()
 	seedSpecAgent(t, ctx, pg, "a1", "", "inbound.*")
 	eventID := uuid.NewString()
-	if err := pg.AppendEvent(ctx, eventtest.WithEntityID((eventtest.Projection(eventID,
-		"inbound.test",
-		"inbound", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now())), entityID)); err != nil {
+	if err := pg.AppendEvent(ctx, eventtest.PersistedProjection(eventID, "inbound.test", "inbound", "", []byte(`{}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now())); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
 	if err := pg.InsertEventDeliveries(ctx, eventID, []string{"a1"}); err != nil {
@@ -3658,7 +3715,7 @@ func TestListPendingSubscribedEvents_RespectsDirectDeliveryScope(t *testing.T) {
 	directSelfID := uuid.NewString()
 	noDeliveryID := uuid.NewString()
 	for idx, id := range []string{broadcastID, directOtherID, directSelfID, noDeliveryID} {
-		if err := pg.AppendEvent(ctx, eventtest.Projection(id,
+		if err := pg.AppendEvent(ctx, eventtest.PersistedProjection(id,
 			"inbound.alert",
 			"runtime", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().Add(time.Duration(-3+idx)*time.Minute))); err != nil {
 			t.Fatalf("seed events: %v", err)
@@ -3711,14 +3768,14 @@ func TestPendingEventQueries_PreserveParentCorrelation(t *testing.T) {
 	seedSpecAgent(t, ctx, pg, "a1", "", "inbound.*")
 
 	parentID := uuid.NewString()
-	if err := pg.AppendEvent(ctx, eventtest.Projection(parentID,
+	if err := pg.AppendEvent(ctx, eventtest.PersistedProjection(parentID,
 		"inbound.root",
 		"runtime", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().Add(-2*time.Minute))); err != nil {
 		t.Fatalf("AppendEvent(parent): %v", err)
 	}
 
 	childID := uuid.NewString()
-	if err := pg.AppendEvent(ctx, eventtest.Projection(childID,
+	if err := pg.AppendEvent(ctx, eventtest.PersistedProjection(childID,
 		"inbound.child",
 		"runtime", "", []byte(`{}`), 0, "", parentID, events.EventEnvelope{}, time.Now().Add(-1*time.Minute))); err != nil {
 		t.Fatalf("AppendEvent(child): %v", err)
@@ -3767,9 +3824,7 @@ func TestManagerStore_EventReceiptBranches(t *testing.T) {
 	entityID := uuid.NewString()
 	seedSpecAgent(t, ctx, pg, "a1", "", "*")
 	eventID := uuid.NewString()
-	if err := pg.AppendEvent(ctx, eventtest.WithEntityID((eventtest.Projection(eventID,
-		"system.started",
-		"runtime", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now())), entityID)); err != nil {
+	if err := pg.AppendEvent(ctx, eventtest.PersistedProjection(eventID, "system.started", "runtime", "", []byte(`{}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now())); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
 
@@ -3804,9 +3859,7 @@ func TestManagerStore_GetEventReceipt_FailsClosedOnMalformedSideEffects(t *testi
 	entityID := uuid.NewString()
 	seedSpecAgent(t, ctx, pg, "a1", "", "*")
 	eventID := uuid.NewString()
-	if err := pg.AppendEvent(ctx, eventtest.WithEntityID((eventtest.Projection(eventID,
-		"system.started",
-		"runtime", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now())), entityID)); err != nil {
+	if err := pg.AppendEvent(ctx, eventtest.PersistedProjection(eventID, "system.started", "runtime", "", []byte(`{}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now())); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
 
@@ -6214,9 +6267,18 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 		t.Fatalf("DeactivateRoutingRulesByEntity: %v", err)
 	}
 
-	evt := eventtest.WithEntityID((eventtest.Projection(uuid.NewString(),
+	evt := eventtest.PersistedProjection(
+		uuid.NewString(),
 		"review.requested",
-		"human", "", json.RawMessage(`{"x":1}`), 0, "", "", events.EventEnvelope{}, time.Now().Add(-2*time.Hour))), entityID)
+		"human",
+		"",
+		json.RawMessage(`{"x":1}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
+		time.Now().Add(-2*time.Hour),
+	)
 
 	if err := pg.AppendEvent(ctx, evt); err != nil {
 		t.Fatalf("AppendEvent: %v", err)

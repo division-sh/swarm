@@ -113,9 +113,18 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	}
 
 	// Events + deliveries + receipts.
-	evt := eventtest.WithEntityID((eventtest.Projection(uuid.NewString(),
+	evt := eventtest.PersistedProjection(
+		uuid.NewString(),
 		events.EventType("review.requested"),
-		"dashboard", "", json.RawMessage(`{"message":"hi"}`), 0, "", "", events.EventEnvelope{}, time.Now())), entityID)
+		"dashboard",
+		"",
+		json.RawMessage(`{"message":"hi"}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
+		time.Now(),
+	)
 
 	if err := pg.AppendEvent(ctx, evt); err != nil {
 		t.Fatalf("append event: %v", err)

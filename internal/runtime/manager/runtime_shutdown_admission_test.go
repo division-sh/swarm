@@ -145,7 +145,7 @@ func TestResetRuntimeState_KeepsManagerAdmissionClosedDuringManagerLocalShutdown
 	}
 
 	am.Run(context.Background())
-	if err := bus.Publish(context.Background(), eventtest.Projection("evt-in-1",
+	if err := bus.Publish(context.Background(), eventtest.RootIngress("evt-in-1",
 		events.EventType("test.in"),
 		"tester", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -224,7 +224,7 @@ func TestAuthBreakerShutdown_KeepsManagerAdmissionClosedDuringManagerLocalShutdo
 	}
 
 	am.Run(context.Background())
-	if err := bus.Publish(context.Background(), eventtest.Projection("evt-in-1",
+	if err := bus.Publish(context.Background(), eventtest.RootIngress("evt-in-1",
 		events.EventType("test.in"),
 		"tester", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
 		t.Fatalf("Publish: %v", err)

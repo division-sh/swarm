@@ -22,7 +22,7 @@ func TestSQLiteRuntimeLogPersistenceWritesLoggerRowsForObservability(t *testing.
 	runID := uuid.NewString()
 	subjectEventID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
-	if err := store.AppendEvent(ctx, eventtest.Projection(subjectEventID,
+	if err := store.AppendEvent(ctx, eventtest.PersistedProjection(subjectEventID,
 
 		events.EventType("validation/validation.package_ready"),
 		"agent-1", "", json.RawMessage(`{"ready":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
@@ -206,7 +206,7 @@ func TestPostgresRuntimeLogPersistencePreservesRunSourceAndLineage(t *testing.T)
 	}
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	ctx = runtimecorrelation.WithBundleSourceFact(ctx, sourceFact)
-	if err := pg.AppendEvent(ctx, eventtest.Projection(subjectEventID,
+	if err := pg.AppendEvent(ctx, eventtest.PersistedProjection(subjectEventID,
 
 		events.EventType("validation/validation.package_ready"),
 		"agent-1", "", json.RawMessage(`{"ready":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())); err != nil {

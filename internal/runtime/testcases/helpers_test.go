@@ -89,9 +89,18 @@ func previewHandler(t testing.TB, bundle *runtimecontracts.WorkflowContractBundl
 	if err != nil {
 		t.Fatalf("marshal payload: %v", err)
 	}
-	preview, err := runtimepipeline.PreviewContractHandlerExecution(context.Background(), bundle, nodeID, eventtest.WithEntityID((eventtest.Projection("evt-"+strings.ReplaceAll(eventType, ".", "-"),
+	preview, err := runtimepipeline.PreviewContractHandlerExecution(context.Background(), bundle, nodeID, eventtest.RootIngress(
+		"evt-"+strings.ReplaceAll(eventType, ".", "-"),
 		events.EventType(eventType),
-		"test-driver", "", rawPayload, 0, "", "", events.EventEnvelope{}, time.Now().UTC())), "item-123"),
+		"test-driver",
+		"",
+		rawPayload,
+		0,
+		"",
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "item-123"),
+		time.Now().UTC(),
+	),
 
 		state, policyOverrides)
 	if err != nil {
