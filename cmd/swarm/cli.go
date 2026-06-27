@@ -77,6 +77,7 @@ func newRootCommandWithOptions(ctx context.Context, repo string, out, errOut io.
 		newServeCommand(ctx, repo, opts.runServe),
 		newRunCommand(repo, opts),
 		newVerifyCommand(ctx, repo),
+		newSecretsCommand(ctx, repo),
 		newVersionCommand(opts),
 		newCompletionCommand(),
 		newRunsCommand(opts),

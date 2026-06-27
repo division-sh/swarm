@@ -64,15 +64,17 @@ func (s *FileStore) Set(_ context.Context, key, value string) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	doc, err := s.loadLocked()
-	if err != nil {
-		return err
-	}
-	doc.Entries[key] = fileCredentialItem{
-		Value:     value,
-		UpdatedAt: time.Now().UTC(),
-	}
-	return s.saveLocked(doc)
+	return s.withWriteLockLocked(func() error {
+		doc, err := s.loadLocked()
+		if err != nil {
+			return err
+		}
+		doc.Entries[key] = fileCredentialItem{
+			Value:     value,
+			UpdatedAt: time.Now().UTC(),
+		}
+		return s.saveLocked(doc)
+	})
 }
 
 func (s *FileStore) List(_ context.Context) ([]string, error) {
@@ -100,12 +102,14 @@ func (s *FileStore) Delete(_ context.Context, key string) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	doc, err := s.loadLocked()
-	if err != nil {
-		return err
-	}
-	delete(doc.Entries, key)
-	return s.saveLocked(doc)
+	return s.withWriteLockLocked(func() error {
+		doc, err := s.loadLocked()
+		if err != nil {
+			return err
+		}
+		delete(doc.Entries, key)
+		return s.saveLocked(doc)
+	})
 }
 
 func (s *FileStore) Inspect(_ context.Context, key string) (Metadata, error) {
@@ -150,6 +154,19 @@ func (s *FileStore) loadLocked() (fileCredentialSet, error) {
 		doc.Entries = map[string]fileCredentialItem{}
 	}
 	return doc, nil
+}
+
+func (s *FileStore) withWriteLockLocked(fn func() error) error {
+	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
+		return fmt.Errorf("create credential dir: %w", err)
+	}
+	lockPath := s.path + ".lock"
+	unlock, err := lockCredentialFile(lockPath)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return fn()
 }
 
 func (s *FileStore) saveLocked(doc fileCredentialSet) error {

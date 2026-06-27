@@ -83,6 +83,17 @@ func (s *OverlayStore) Inspect(ctx context.Context, key string) (Metadata, error
 	if key == "" {
 		return Metadata{}, nil
 	}
+	var writableMeta Metadata
+	var writableInspected bool
+	if inspector, ok := s.writable.(Inspector); ok && inspector != nil {
+		meta, err := inspector.Inspect(ctx, key)
+		if err != nil {
+			return Metadata{}, err
+		}
+		meta.Writable = true
+		writableMeta = meta
+		writableInspected = true
+	}
 	if inspector, ok := s.primary.(Inspector); ok && inspector != nil {
 		meta, err := inspector.Inspect(ctx, key)
 		if err != nil {
@@ -90,16 +101,12 @@ func (s *OverlayStore) Inspect(ctx context.Context, key string) (Metadata, error
 		}
 		if meta.Present {
 			meta.Writable = false
+			meta.Shadowed = writableInspected && writableMeta.Present
 			return meta, nil
 		}
 	}
-	if inspector, ok := s.writable.(Inspector); ok && inspector != nil {
-		meta, err := inspector.Inspect(ctx, key)
-		if err != nil {
-			return Metadata{}, err
-		}
-		meta.Writable = true
-		return meta, nil
+	if writableInspected {
+		return writableMeta, nil
 	}
 	_, present, err := s.Get(ctx, key)
 	if err != nil {

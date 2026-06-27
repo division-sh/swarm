@@ -22,11 +22,14 @@ type Descriptor struct {
 	Present    bool
 	Source     string
 	Writable   bool
+	Shadowed   bool
 	UpdatedAt  *time.Time
 	RequiredBy []Requirement
 }
 
 var ErrNotWritable = fmt.Errorf("credential store is not writable")
+
+var ErrStoreLocked = fmt.Errorf("credential store is locked")
 
 func BuildRequirementIndex(source semanticview.Source) map[string][]Requirement {
 	index := map[string][]Requirement{}
@@ -118,6 +121,7 @@ func Describe(ctx context.Context, store Store, source semanticview.Source, key 
 		Present:    meta.Present,
 		Source:     meta.Source,
 		Writable:   meta.Writable,
+		Shadowed:   meta.Shadowed,
 		UpdatedAt:  meta.UpdatedAt,
 		RequiredBy: append([]Requirement{}, index[key]...),
 	}, nil

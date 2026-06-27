@@ -71,7 +71,7 @@ func (h *handler) runFullValidation(_ context.Context) ValidationResult {
 			Message:  finding.Message,
 		}
 		if finding.CheckID == "credential_key_exists" && finding.Severity == "warning" {
-			issue.Suggestion = "set the credential with credentials.set before executing dependent tools"
+			issue.Suggestion = "set the secret with swarm secrets set before executing dependent tools"
 		}
 		if finding.Severity == "warning" {
 			result.Warnings = append(result.Warnings, issue)
