@@ -152,6 +152,50 @@ func TestResolveFailsClosedForProducerBroadcastCommonCompositionPath(t *testing.
 	}
 }
 
+func TestResolveFailsClosedForProducerTargetAdaptedConnectCommonPath(t *testing.T) {
+	result := Resolve(ResolutionInput{
+		Source:    testProducerAdaptedConnectSource(),
+		FlowID:    "producer",
+		EventType: "shared.ready",
+		Emit: runtimecontracts.EmitSpec{
+			Target: runtimecontracts.EmitTargetSpec{
+				Flow:  "consumer",
+				Match: map[string]runtimecontracts.ExpressionValue{"entity_id": runtimecontracts.RefExpression("payload.entity_id")},
+			},
+		},
+		MatchValues: map[string]string{"entity_id": "entity-1"},
+		Descriptors: []Descriptor{{
+			EntityID:     "entity-1",
+			FlowInstance: "consumer/inst-1",
+		}},
+	}, events.NewProjectionEvent("", "shared.ready", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+
+	if result.Failure != FailureProducerTargetCommonPath {
+		t.Fatalf("Failure = %q, want %q", result.Failure, FailureProducerTargetCommonPath)
+	}
+	if got := result.Event.TargetRoute(); !got.Empty() {
+		t.Fatalf("Event target = %#v, want empty on adapted producer target common path", got)
+	}
+}
+
+func TestResolveFailsClosedForProducerBroadcastAdaptedConnectCommonPath(t *testing.T) {
+	result := Resolve(ResolutionInput{
+		Source:    testProducerAdaptedConnectSource(),
+		FlowID:    "producer",
+		EventType: "shared.ready",
+		Emit: runtimecontracts.EmitSpec{
+			Broadcast: true,
+		},
+	}, events.NewProjectionEvent("", "shared.ready", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+
+	if result.Failure != FailureProducerBroadcastCommonPath {
+		t.Fatalf("Failure = %q, want %q", result.Failure, FailureProducerBroadcastCommonPath)
+	}
+	if result.Broadcast {
+		t.Fatal("Broadcast = true, want false on adapted producer broadcast common path")
+	}
+}
+
 func TestProducerRouteCommonPathDoesNotLeafMatchDistinctQualifiedEvents(t *testing.T) {
 	source := testProducerQualifiedMismatchSource()
 	for _, tt := range []struct {
@@ -432,6 +476,14 @@ func testProducerConnectSource() semanticview.Source {
 	return testProducerRouteSource([]runtimecontracts.FlowPackageConnect{{
 		From: "producer.shared.ready",
 		To:   "consumer.shared.ready",
+	}})
+}
+
+func testProducerAdaptedConnectSource() semanticview.Source {
+	return testProducerRouteSourceWithEvents("shared.ready", "consumer.ready", []runtimecontracts.FlowPackageConnect{{
+		From:    "producer.shared.ready",
+		To:      "consumer.consumer.ready",
+		Adapter: "producer-shared-to-consumer-ready",
 	}})
 }
 

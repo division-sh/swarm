@@ -60,6 +60,39 @@ func TestPinTargetResolution_FailsClosedForProducerBroadcastCommonCompositionPat
 	}
 }
 
+func TestPinTargetResolution_FailsClosedForProducerTargetAdaptedConnectCommonPath(t *testing.T) {
+	bundle := loadPinRoutingProducerRouteBundleForEvents(t, "shared.ready", "consumer.ready", `
+      emit:
+        event: shared.ready
+        fields:
+          entity_id: payload.entity_id
+        target:
+          flow: consumer
+          match:
+            entity_id: payload.entity_id
+`, pinRoutingProducerRouteAdaptedConnect())
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	if !reportContains(report.Errors(), "pin_target_resolution", "producer_target_common_path_forbidden") {
+		t.Fatalf("expected producer_target_common_path_forbidden for adapted connect, got %#v", report.Errors())
+	}
+}
+
+func TestPinTargetResolution_FailsClosedForProducerBroadcastAdaptedConnectCommonPath(t *testing.T) {
+	bundle := loadPinRoutingProducerRouteBundleForEvents(t, "shared.ready", "consumer.ready", `
+      emit:
+        event: shared.ready
+        fields:
+          entity_id: payload.entity_id
+        broadcast: true
+`, pinRoutingProducerRouteAdaptedConnect())
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	if !reportContains(report.Errors(), "pin_target_resolution", "producer_broadcast_common_path_forbidden") {
+		t.Fatalf("expected producer_broadcast_common_path_forbidden for adapted connect, got %#v", report.Errors())
+	}
+}
+
 func TestPinTargetResolution_FailsClosedForProducerTargetCommonPathEvenWithParentConnect(t *testing.T) {
 	bundle := loadPinRoutingProducerRouteBundle(t, `
       emit:
@@ -424,6 +457,15 @@ func pinRoutingProducerRouteConnect() string {
 connect:
   - from: producer.shared.ready
     to: consumer.shared.ready
+`
+}
+
+func pinRoutingProducerRouteAdaptedConnect() string {
+	return `
+connect:
+  - from: producer.shared.ready
+    to: consumer.consumer.ready
+    adapter: producer-shared-to-consumer-ready
 `
 }
 
