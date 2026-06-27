@@ -366,12 +366,18 @@ worker-node:
 
 func loadPipelineImportBoundaryWildcardSource(t *testing.T, observeGrant string) semanticview.Source {
 	t.Helper()
+	bundle := loadPipelineImportBoundaryWildcardBundle(t, observeGrant)
+	return semanticview.Wrap(bundle)
+}
+
+func loadPipelineImportBoundaryWildcardBundle(t *testing.T, observeGrant string) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
 	root := writePipelineImportBoundaryWildcardFixture(t, observeGrant)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(contractComplianceRepoRoot(t), root, runtimecontracts.DefaultPlatformSpecFile(contractComplianceRepoRoot(t)))
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
-	return semanticview.Wrap(bundle)
+	return bundle
 }
 
 func writePipelineImportBoundaryWildcardFixture(t *testing.T, observeGrant string) string {
