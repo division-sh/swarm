@@ -646,14 +646,17 @@ seam_families:
       - internal/runtime/cataloge2e/runtime_harness_test.go
       - internal/runtime/cataloge2e/tier11_flow_composition_e2e_test.go
       - internal/runtime/cataloge2e/tier12_runtime_fork_e2e_test.go
+      - internal/runtime/bus/sealed_flow_package_fixture_test.go
       - internal/runtime/swarmflowtest/catalog_runner_test.go
       - tests/tier11-flow-composition/test-dynamic-flow-instance/expected.yaml
       - tests/tier5-flow-lifecycle/test-create-flow-instance/expected.yaml
-    search_dimensions: [flow_instance, event_deliveries, replay_scope]
+    search_dimensions: [flow_instance, event_deliveries, replay_scope, connect_route_plan, receiver_carrier]
     notes: >
       Catalog and fixture proofs are broader behavior consumers. Required PR
       smoke must cite focused rows; full route behavior stays in named full
-      conformance/catalog tiers.
+      conformance/catalog tiers. The sealed package fixture consumes lowered
+      connect route plans and receiver-carrier evidence as runtime proof; it
+      does not introduce or replace route authority.
   - id: route_authority_conformance_artifacts
     layer: conformance_guardrails
     classification: canonical_owner
