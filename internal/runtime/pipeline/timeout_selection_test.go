@@ -109,7 +109,7 @@ func TestDeclarativeNodeHandleEvent_DeniesImportBoundaryWildcardRawFallback(t *t
 	engine := &recordingExecutionEngine{}
 	node := NewNode(entry, source, engine, nil)
 
-	handled := node.Handle(context.Background(), events.NewProjectionEvent("", "producer/task.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	handled := node.Handle(context.Background(), eventtest.RootIngress("", "producer/task.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 	if handled {
 		t.Fatal("expected ungranted sibling event not to be handled")
 	}
@@ -124,7 +124,7 @@ func TestDeclarativeNodeHandleEvent_AllowsGrantedImportBoundaryWildcard(t *testi
 	engine := &recordingExecutionEngine{}
 	node := NewNode(entry, source, engine, nil)
 
-	handled := node.Handle(context.Background(), events.NewProjectionEvent("", "producer/task.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	handled := node.Handle(context.Background(), eventtest.RootIngress("", "producer/task.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 	if !handled {
 		t.Fatal("expected granted sibling event to be handled")
 	}
