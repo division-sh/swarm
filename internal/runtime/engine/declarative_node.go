@@ -76,29 +76,27 @@ func resolvedExecutionHandler(source semanticview.Source, nodeID, eventType stri
 	if source == nil {
 		return executionHandlerResolution{}
 	}
+	if handler, ok := source.NodeEventHandler(nodeID, eventType); ok {
+		return executionHandlerResolution{
+			handler:         handler,
+			handlerEventKey: matchedHandlerEventKeyFromHandlers(source.NodeEventHandlers(nodeID), eventType),
+			matched:         true,
+		}
+	}
+	if semanticview.ImportBoundaryWildcardHandlerFallbackDenied(source, nodeID, eventType) {
+		return executionHandlerResolution{}
+	}
 	if bundle, ok := semanticview.Bundle(source); ok {
 		resolved := bundle.ResolveNodeEventHandler(nodeID, eventType)
 		if resolved.Matched {
-			handler, ok := source.NodeEventHandler(nodeID, eventType)
-			if !ok {
-				handler = resolved.Handler
-			}
 			return executionHandlerResolution{
-				handler:         handler,
+				handler:         resolved.Handler,
 				handlerEventKey: strings.TrimSpace(resolved.AuthoredEventType),
 				matched:         true,
 			}
 		}
 	}
-	handler, ok := source.NodeEventHandler(nodeID, eventType)
-	if !ok {
-		return executionHandlerResolution{}
-	}
-	return executionHandlerResolution{
-		handler:         handler,
-		handlerEventKey: matchedHandlerEventKeyFromHandlers(source.NodeEventHandlers(nodeID), eventType),
-		matched:         true,
-	}
+	return executionHandlerResolution{}
 }
 
 func matchedHandlerEventKeyFromHandlers(handlers map[string]runtimecontracts.SystemNodeEventHandler, eventType string) string {

@@ -135,6 +135,55 @@ func ImportBoundaryWildcardSubscriptionMatchesNode(source Source, nodeID, raw, e
 	return false, true
 }
 
+func ImportBoundaryWildcardHandlerFallbackDenied(source Source, nodeID, eventType string) bool {
+	if source == nil {
+		return false
+	}
+	bundle, ok := Bundle(source)
+	if !ok || bundle == nil {
+		return false
+	}
+	resolved := bundle.ResolveNodeEventHandler(nodeID, eventType)
+	authoredEventType := eventidentity.Normalize(resolved.AuthoredEventType)
+	if !resolved.Matched || authoredEventType == "" || !strings.Contains(authoredEventType, "*") {
+		return false
+	}
+
+	scoped := false
+	for _, candidate := range importBoundaryHandlerResolutionEventCandidates(resolved, eventType) {
+		matched, candidateScoped := ImportBoundaryWildcardSubscriptionMatchesNode(source, nodeID, authoredEventType, candidate)
+		if !candidateScoped {
+			continue
+		}
+		scoped = true
+		if matched {
+			return false
+		}
+	}
+	return scoped
+}
+
+func importBoundaryHandlerResolutionEventCandidates(resolved runtimecontracts.NodeEventHandlerResolution, eventType string) []string {
+	seen := map[string]struct{}{}
+	var out []string
+	appendCandidate := func(candidate string) {
+		candidate = eventidentity.Normalize(candidate)
+		if candidate == "" {
+			return
+		}
+		if _, ok := seen[candidate]; ok {
+			return
+		}
+		seen[candidate] = struct{}{}
+		out = append(out, candidate)
+	}
+	appendCandidate(eventType)
+	appendCandidate(resolved.RawEventType)
+	appendCandidate(resolved.LocalizedEventType)
+	appendCandidate(resolved.CanonicalEventType)
+	return out
+}
+
 func ImportBoundaryWildcardGrantIssues(source Source) []ImportBoundaryWildcardIssue {
 	if source == nil {
 		return nil

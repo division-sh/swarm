@@ -31,6 +31,9 @@ func TestImportBoundaryWildcardScopesImportedPackageToOwnSubtreeByDefault(t *tes
 	if owners := source.RuntimeEventOwners("producer/task.done"); len(owners) != 0 {
 		t.Fatalf("RuntimeEventOwners(producer/task.done) = %#v, want no sibling owner without grant", owners)
 	}
+	if _, ok := source.NodeEventHandler("worker-listener", "producer/task.done"); ok {
+		t.Fatal("NodeEventHandler(worker-listener, producer/task.done) matched ungranted sibling event")
+	}
 
 	store := &routePersistenceTestStore{}
 	eb, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{ContractBundle: source})
