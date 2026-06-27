@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -178,8 +179,17 @@ func assertSealedFlowPackageRuntimeDelivery(t *testing.T, source semanticview.So
 			EntityID:     runtimeflowidentity.EntityID("consumer"),
 		},
 	}
-	evt := events.NewProjectionEvent("evt-sealed-connect",
-		events.EventType("producer/shared.done"), "", "", json.RawMessage(`{"flow_instance":"consumer"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+	evt := eventtest.ChildWithLineage(
+		"evt-sealed-connect",
+		events.EventType("producer/shared.done"),
+		"producer",
+		"",
+		json.RawMessage(`{"flow_instance":"consumer"}`),
+		1,
+		events.EventLineage{RunID: "run-sealed-package", ParentEventID: "evt-sealed-parent", TaskID: "producer-node"},
+		events.EventEnvelope{},
+		time.Now().UTC(),
+	)
 
 	preflight, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 	if err != nil {
@@ -198,8 +208,17 @@ func assertSealedFlowPackageRuntimeDelivery(t *testing.T, source semanticview.So
 		t.Fatalf("persisted delivery routes = %#v, want only %#v", routes, wantRoute)
 	}
 
-	sibling := events.NewProjectionEvent("evt-sealed-sibling-wildcard",
-		events.EventType("producer/audit.seen"), "", "", json.RawMessage(`{"flow_instance":"consumer"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+	sibling := eventtest.ChildWithLineage(
+		"evt-sealed-sibling-wildcard",
+		events.EventType("producer/audit.seen"),
+		"producer",
+		"",
+		json.RawMessage(`{"flow_instance":"consumer"}`),
+		1,
+		events.EventLineage{RunID: "run-sealed-package", ParentEventID: "evt-sealed-parent", TaskID: "producer-node"},
+		events.EventEnvelope{},
+		time.Now().UTC(),
+	)
 	siblingPlan, err := eb.CheckPublishRecipientPlan(context.Background(), sibling)
 	if err != nil {
 		t.Fatalf("CheckPublishRecipientPlan sibling wildcard: %v", err)
