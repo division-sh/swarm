@@ -1224,6 +1224,8 @@ type ToolSchemaEntry struct {
 	HandlerType        string          `yaml:"handler_type"`
 	Permission         string          `yaml:"permission"`
 	RequiredPermission string          `yaml:"required_permission"`
+	RateLimit          string          `yaml:"rate_limit"`
+	RateLimitMaxWait   string          `yaml:"rate_limit_max_wait"`
 	InputSchema        ToolInputSchema `yaml:"input_schema"`
 	OutputSchema       ToolInputSchema `yaml:"output_schema"`
 	HTTP               *HTTPToolSpec   `yaml:"http"`

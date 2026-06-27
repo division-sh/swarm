@@ -288,7 +288,11 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 					retryable = rv
 				}
 			}
-			err = g.newRuntimeError(ErrCodeToolExecFailed, "mcp.tools.call.execute", retryable, execErr, "tool execution failed: %s", toolName)
+			if runtimeErr, ok := runtimerterr.AsRuntimeError(execErr); ok && strings.TrimSpace(runtimeErr.Code) == "rate_limited" {
+				err = execErr
+			} else {
+				err = g.newRuntimeError(ErrCodeToolExecFailed, "mcp.tools.call.execute", retryable, execErr, "tool execution failed: %s", toolName)
+			}
 			g.logMCP(r, "warn", "mcp.tools.call.exec_error", err, map[string]any{
 				"method":    "tools/call",
 				"tool_name": toolName,

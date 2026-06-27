@@ -618,6 +618,14 @@ func (c *checkerContext) invalidFieldDetection() []Finding {
 		return c.invalidFindings
 	}
 	c.invalidLoaded = true
+	for _, err := range runtimetools.ValidateExternalDispatchRateLimitDeclarations(c.source) {
+		c.invalidFindings = append(c.invalidFindings, Finding{
+			CheckID:  "invalid_field_detection",
+			Severity: "error",
+			Message:  err.Error(),
+			Location: "rate_limit",
+		})
+	}
 	for _, scope := range c.source.ProjectScopes() {
 		scopeLabel := projectScopeLabel(scope.Key, scope.Manifest.Name)
 		if strings.TrimSpace(scope.Manifest.Name) == "" {

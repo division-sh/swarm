@@ -51,6 +51,23 @@ func TestRun_DoesNotWarnForBuiltinRuntimeToolReference(t *testing.T) {
 	}
 }
 
+func TestRun_FailsClosedForInvalidExternalDispatchRateLimit(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{
+			"bad_http": {
+				HandlerType: "http",
+				HTTP:        &runtimecontracts.HTTPToolSpec{Method: "GET", URL: "https://example.test"},
+				RateLimit:   "1/s",
+			},
+		},
+	})
+
+	report := Run(context.Background(), source, Options{})
+	if !reportContains(report.Errors(), "invalid_field_detection", "rate_limit requires rate_limit_max_wait") {
+		t.Fatalf("expected invalid rate_limit hard invalidity, got %#v", report.Errors())
+	}
+}
+
 func TestRun_MapsMissingDiscoveredMCPToolToToolResolutionWarning(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req map[string]any
