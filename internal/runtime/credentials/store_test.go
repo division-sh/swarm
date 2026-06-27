@@ -183,6 +183,94 @@ call_provider:
 	}
 }
 
+func TestMissingRequired_IndexesImportedNativeWebSearchCredentialBinding(t *testing.T) {
+	ctx := context.Background()
+	store, err := NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	if err := store.Set(ctx, "provider_key", "raw-secret"); err != nil {
+		t.Fatalf("Set provider_key: %v", err)
+	}
+
+	repoRoot := credentialsRepoRootForTest(t)
+	root := t.TempDir()
+	writeCredentialsFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: native-web-search-credential-binding
+version: "1.0.0"
+flows:
+  - id: worker
+    flow: worker
+    mode: static
+    bind:
+      credentials:
+        provider_key: tenant_provider_key
+`)
+	writeCredentialsFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: native-web-search-credential-binding\n")
+	writeCredentialsFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeCredentialsFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeCredentialsFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeCredentialsFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+	writeCredentialsFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
+	writeCredentialsFixtureFile(t, filepath.Join(root, "flows", "worker", "package.yaml"), `
+name: worker-package
+version: "1.0.0"
+requires:
+  credentials: [provider_key]
+`)
+	writeCredentialsFixtureFile(t, filepath.Join(root, "flows", "worker", "schema.yaml"), "name: worker\nmode: static\n")
+	writeCredentialsFixtureFile(t, filepath.Join(root, "flows", "worker", "policy.yaml"), `
+web_search_provider:
+  provider: brave
+  credentials_key: provider_key
+`)
+	writeCredentialsFixtureFile(t, filepath.Join(root, "flows", "worker", "tools.yaml"), "{}\n")
+	writeCredentialsFixtureFile(t, filepath.Join(root, "flows", "worker", "agents.yaml"), `
+worker-agent:
+  id: worker-agent
+  model: regular
+  native_tools:
+    web_search: true
+`)
+	writeCredentialsFixtureFile(t, filepath.Join(root, "flows", "worker", "events.yaml"), "{}\n")
+
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	source := semanticview.Wrap(bundle)
+	index := BuildRequirementIndex(source)
+	if refs := index["provider_key"]; len(refs) != 0 {
+		t.Fatalf("raw provider_key refs = %#v, want none", refs)
+	}
+	if refs := index["tenant_provider_key"]; len(refs) != 1 || refs[0].Kind != "web_search_provider" || refs[0].Name != "brave" {
+		t.Fatalf("tenant_provider_key refs = %#v, want brave web_search_provider", refs)
+	}
+
+	missing, err := MissingRequired(ctx, store, source)
+	if err != nil {
+		t.Fatalf("MissingRequired: %v", err)
+	}
+	if len(missing) != 1 || missing[0].Key != "tenant_provider_key" {
+		t.Fatalf("MissingRequired = %#v, want only tenant_provider_key", missing)
+	}
+	if len(missing[0].RequiredBy) != 1 || missing[0].RequiredBy[0].Kind != "web_search_provider" || missing[0].RequiredBy[0].Name != "brave" {
+		t.Fatalf("tenant_provider_key RequiredBy = %#v, want brave web_search_provider", missing[0].RequiredBy)
+	}
+
+	descriptors, err := ListDescriptors(ctx, store, source)
+	if err != nil {
+		t.Fatalf("ListDescriptors: %v", err)
+	}
+	byKey := map[string]Descriptor{}
+	for _, desc := range descriptors {
+		byKey[desc.Key] = desc
+	}
+	if got := byKey["provider_key"]; !got.Present || len(got.RequiredBy) != 0 {
+		t.Fatalf("raw provider_key descriptor = %+v, want present with no requirement", got)
+	}
+}
+
 func TestDefaultFilePath_UsesSwarmConfigDir(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)

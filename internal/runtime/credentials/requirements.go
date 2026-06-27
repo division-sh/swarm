@@ -40,23 +40,9 @@ func BuildRequirementIndex(source semanticview.Source) map[string][]Requirement 
 	for _, scope := range source.FlowScopes() {
 		appendToolRequirements(index, source, strings.TrimSpace(scope.ID), scope.Tools)
 	}
-	if value, ok := semanticview.PolicyValueForFlow(source, "", "mcp_servers"); ok {
-		for name, key := range parseMCPServerCredentialKeys(value.Value) {
-			key = strings.TrimSpace(key)
-			if key == "" {
-				continue
-			}
-			index[key] = append(index[key], Requirement{Kind: "mcp_server", Name: name})
-		}
-	}
-	if value, ok := semanticview.PolicyValueForFlow(source, "", "web_search_provider"); ok {
-		for name, key := range parseWebSearchProviderCredentialKeys(value.Value) {
-			key = strings.TrimSpace(key)
-			if key == "" {
-				continue
-			}
-			index[key] = append(index[key], Requirement{Kind: "web_search_provider", Name: name})
-		}
+	appendPolicyCredentialRequirements(index, source, "")
+	for _, scope := range source.FlowScopes() {
+		appendPolicyCredentialRequirements(index, source, strings.TrimSpace(scope.ID))
 	}
 	for key, refs := range index {
 		index[key] = normalizeRequirements(refs)
@@ -86,6 +72,35 @@ func appendToolRequirements(index map[string][]Requirement, source semanticview.
 			index[storeKey] = append(index[storeKey], Requirement{Kind: "tool", Name: name})
 		}
 	}
+}
+
+func appendPolicyCredentialRequirements(index map[string][]Requirement, source semanticview.Source, flowID string) {
+	if value, ok := semanticview.PolicyValueForFlow(source, flowID, "mcp_servers"); ok {
+		for name, key := range parseMCPServerCredentialKeys(value.Value) {
+			appendPolicyCredentialRequirement(index, source, flowID, key, Requirement{Kind: "mcp_server", Name: name})
+		}
+	}
+	if value, ok := semanticview.PolicyValueForFlow(source, flowID, "web_search_provider"); ok {
+		for name, key := range parseWebSearchProviderCredentialKeys(value.Value) {
+			appendPolicyCredentialRequirement(index, source, flowID, key, Requirement{Kind: "web_search_provider", Name: name})
+		}
+	}
+}
+
+func appendPolicyCredentialRequirement(index map[string][]Requirement, source semanticview.Source, flowID, key string, ref Requirement) {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return
+	}
+	storeKey, mapped := semanticview.CredentialStoreKeyForFlow(source, flowID, key)
+	if mapped && strings.TrimSpace(storeKey) == "" {
+		return
+	}
+	storeKey = strings.TrimSpace(storeKey)
+	if storeKey == "" {
+		return
+	}
+	index[storeKey] = append(index[storeKey], ref)
 }
 
 func Describe(ctx context.Context, store Store, source semanticview.Source, key string) (Descriptor, error) {

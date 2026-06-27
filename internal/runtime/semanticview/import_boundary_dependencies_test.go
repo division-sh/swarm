@@ -34,6 +34,20 @@ func TestImportBoundaryPolicyResolutionUsesBindingThenPackageDefault(t *testing.
 	}
 }
 
+func TestImportBoundaryPolicyResolutionUsesResolvedParentPolicyForNestedBinding(t *testing.T) {
+	source := loadNestedImportBoundaryPolicyFixture(t)
+
+	if got, ok := PolicyValueForFlow(source, "child", "threshold"); !ok || got.Value != 70 {
+		t.Fatalf("child threshold = (%#v, %v), want bound root value 70", got.Value, ok)
+	}
+	if got, ok := PolicyValueForFlow(source, "grandchild", "threshold"); !ok || got.Value != 70 {
+		t.Fatalf("grandchild threshold = (%#v, %v), want child resolved parent value 70", got.Value, ok)
+	}
+	if issues := ImportBoundaryDependencyIssues(source); len(issues) != 0 {
+		t.Fatalf("ImportBoundaryDependencyIssues = %#v, want none", issues)
+	}
+}
+
 func TestImportBoundaryPolicyResolutionFailsClosedWithoutBindingOrDefaultEvenWithParentSameName(t *testing.T) {
 	source := loadImportBoundaryDependencyFixture(t, importBoundaryDependencyFixtureOptions{
 		policyRequires:     "  policy: [provider.threshold]\n",
@@ -202,6 +216,71 @@ provider:
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "worker", "tools.yaml"), "{}\n")
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "worker", "agents.yaml"), "{}\n")
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "worker", "events.yaml"), "{}\n")
+
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return Wrap(bundle)
+}
+
+func loadNestedImportBoundaryPolicyFixture(t *testing.T) Source {
+	t.Helper()
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
+	root := t.TempDir()
+
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: nested-import-policy
+version: "1.0.0"
+flows:
+  - id: child
+    flow: child
+    mode: static
+    bind:
+      policy:
+        threshold: parent.policy.root_threshold
+`)
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: nested-import-policy\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "policy.yaml"), "root_threshold: 70\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
+
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "child", "package.yaml"), `
+name: child-package
+version: "1.0.0"
+requires:
+  policy: [threshold]
+flows:
+  - id: grandchild
+    flow: grandchild
+    mode: static
+    bind:
+      policy:
+        threshold: parent.policy.threshold
+`)
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "child", "schema.yaml"), "name: child\nmode: static\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "child", "policy.yaml"), "{}\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "child", "tools.yaml"), "{}\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "child", "agents.yaml"), "{}\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "child", "events.yaml"), "{}\n")
+
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "child", "flows", "grandchild", "package.yaml"), `
+name: grandchild-package
+version: "1.0.0"
+requires:
+  policy: [threshold]
+`)
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "child", "flows", "grandchild", "schema.yaml"), "name: grandchild\nmode: static\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "child", "flows", "grandchild", "policy.yaml"), "{}\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "child", "flows", "grandchild", "tools.yaml"), "{}\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "child", "flows", "grandchild", "agents.yaml"), "{}\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "child", "flows", "grandchild", "events.yaml"), "{}\n")
 
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {

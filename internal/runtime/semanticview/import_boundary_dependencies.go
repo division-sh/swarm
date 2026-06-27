@@ -105,7 +105,7 @@ func resolvePolicyForFlowWithRaw(source Source, flowID string, raw func(string) 
 	}
 	doc := localPolicyForImportedFlow(source, deps.child, flowID)
 	parentFlowID := strings.TrimSpace(deps.parent.OwningFlowID)
-	parentPolicy := clonePolicyDocument(raw(parentFlowID))
+	parentPolicy := ResolvePolicyForFlow(source, parentFlowID)
 	for _, key := range deps.child.Manifest.Requires.Policy {
 		key = strings.TrimSpace(key)
 		if key == "" {
