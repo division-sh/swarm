@@ -30,8 +30,15 @@ type PromptFileResolution struct {
 type BundlePromptResolver struct {
 	bundle            *WorkflowContractBundle
 	repoRoot          string
+	policyResolver    PromptPolicyResolver
 	promptVariablesMu sync.RWMutex
 	promptVariables   map[string]map[string]any
+}
+
+type PromptPolicyResolver func(source ContractItemSource) PolicyDocument
+
+type BundlePromptResolverOptions struct {
+	PolicyResolver PromptPolicyResolver
 }
 
 var (
@@ -40,9 +47,14 @@ var (
 )
 
 func NewBundlePromptResolver(bundle *WorkflowContractBundle) *BundlePromptResolver {
+	return NewBundlePromptResolverWithOptions(bundle, BundlePromptResolverOptions{})
+}
+
+func NewBundlePromptResolverWithOptions(bundle *WorkflowContractBundle, opts BundlePromptResolverOptions) *BundlePromptResolver {
 	return &BundlePromptResolver{
 		bundle:          bundle,
 		repoRoot:        promptContractsRepoRoot(),
+		policyResolver:  opts.PolicyResolver,
 		promptVariables: map[string]map[string]any{},
 	}
 }
@@ -73,7 +85,7 @@ func (r *BundlePromptResolver) ResolvePromptFileForAgent(cfg models.AgentConfig,
 	for _, agentID := range candidates {
 		record := bundleAgentRecord{}
 		if bundle != nil {
-			record, _ = bundleAgentRecordByLogicalID(bundle, agentID)
+			record, _ = bundlePromptAgentRecordByLogicalID(bundle, agentID)
 		}
 		resolution, found, err := resolvePromptFileInDirs(dirs[agentID], agentID, record.Entry, record.Source, mode)
 		if err != nil {
@@ -84,6 +96,23 @@ func (r *BundlePromptResolver) ResolvePromptFileForAgent(cfg models.AgentConfig,
 		}
 	}
 	return PromptFileResolution{}, false, nil
+}
+
+func bundlePromptAgentRecordByLogicalID(bundle *WorkflowContractBundle, logicalID string) (bundleAgentRecord, bool) {
+	record, found := bundleAgentRecordByLogicalID(bundle, logicalID)
+	if bundle == nil {
+		return record, found
+	}
+	source, sourceOK := bundle.AgentContractSource(logicalID)
+	entry, entryOK := bundle.AgentEntry(logicalID)
+	if !sourceOK || !entryOK {
+		return record, found
+	}
+	return bundleAgentRecord{
+		LogicalID: strings.TrimSpace(logicalID),
+		Entry:     entry,
+		Source:    source,
+	}, true
 }
 
 func ResolvePromptFileForContractAgent(bundle *WorkflowContractBundle, logicalID string, entry AgentRegistryEntry, source ContractItemSource, mode string) (PromptFileResolution, bool, error) {
@@ -470,12 +499,19 @@ func (r *BundlePromptResolver) promptRuntimeVariables(repoRoot string, source Co
 	}
 	r.promptVariablesMu.RUnlock()
 
-	vars := promptVariableValues(bundle, source, cfg)
+	vars := promptVariableValuesWithPolicy(bundle, source, cfg, r.promptPolicy(source))
 
 	r.promptVariablesMu.Lock()
 	r.promptVariables[scopeKey] = clonePromptVariables(vars)
 	r.promptVariablesMu.Unlock()
 	return vars, nil
+}
+
+func (r *BundlePromptResolver) promptPolicy(source ContractItemSource) PolicyDocument {
+	if r != nil && r.policyResolver != nil {
+		return r.policyResolver(source)
+	}
+	return promptResolvedPolicy(r.workflowBundle(), source)
 }
 
 func promptVariableScopeKey(source ContractItemSource, cfg models.AgentConfig) string {
@@ -516,11 +552,14 @@ func promptResolvedPolicy(bundle *WorkflowContractBundle, source ContractItemSou
 }
 
 func promptVariableValues(bundle *WorkflowContractBundle, source ContractItemSource, cfg models.AgentConfig) map[string]any {
+	return promptVariableValuesWithPolicy(bundle, source, cfg, promptResolvedPolicy(bundle, source))
+}
+
+func promptVariableValuesWithPolicy(bundle *WorkflowContractBundle, source ContractItemSource, cfg models.AgentConfig, policy PolicyDocument) map[string]any {
 	vars := promptRuntimeTokens(cfg)
 	for key, value := range promptEntityStateFields(cfg.Config) {
 		vars[key] = value
 	}
-	policy := promptResolvedPolicy(bundle, source)
 	for key, value := range policy.Values {
 		key = strings.TrimSpace(key)
 		if key == "" {

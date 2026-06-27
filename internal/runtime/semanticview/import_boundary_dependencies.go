@@ -145,6 +145,8 @@ func importBoundaryDependencyContext(source Source, flowID string) (importBounda
 	flowPackageKey := normalizeImportPackageKey(flow.PackageKey)
 	var bestPackage importBoundaryDependencyCtx
 	bestPackageLen := -1
+	var bestPackageWithRequires importBoundaryDependencyCtx
+	bestPackageWithRequiresLen := -1
 	for _, deps := range importBoundaryDependencyContexts(source) {
 		siteFlowID := strings.TrimSpace(deps.site.FlowID)
 		if siteFlowID != "" {
@@ -159,11 +161,20 @@ func importBoundaryDependencyContext(source Source, flowID string) (importBounda
 				bestPackage = deps
 				bestPackageLen = keyLen
 			}
+			if !importRequiresEmpty(deps.child.Manifest.Requires) {
+				if keyLen := len(childKey); keyLen > bestPackageWithRequiresLen {
+					bestPackageWithRequires = deps
+					bestPackageWithRequiresLen = keyLen
+				}
+			}
 			continue
 		}
 		if strings.TrimSpace(deps.child.OwningFlowID) == flowID {
 			return deps, true
 		}
+	}
+	if bestPackageWithRequiresLen >= 0 {
+		return bestPackageWithRequires, true
 	}
 	if bestPackageLen >= 0 {
 		return bestPackage, true
@@ -187,7 +198,7 @@ func importBoundaryDependencyContexts(source Source) []importBoundaryDependencyC
 		parent.Key = normalizeImportPackageKey(parent.Key)
 		for _, site := range importBoundarySites(parent) {
 			child, ok := projectByKey[site.PackageKey]
-			if !ok || importRequiresEmpty(child.Manifest.Requires) {
+			if !ok {
 				continue
 			}
 			out = append(out, importBoundaryDependencyCtx{parent: parent, child: child, site: site})

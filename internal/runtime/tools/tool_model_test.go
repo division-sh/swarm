@@ -185,6 +185,35 @@ func TestExecutor_HTTPToolFailsClosedWhenImportedCredentialBindingMissing(t *tes
 	}
 }
 
+func TestExecutor_HTTPToolFailsClosedWhenImportedCredentialRequiresMissing(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("HTTP server should not be called when imported credential dependency is undeclared")
+	}))
+	defer server.Close()
+
+	source := loadToolImportDependencySource(t, toolImportDependencyOptions{
+		serverURL:              server.URL,
+		omitCredentialRequires: true,
+	})
+	store, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	if err := store.Set(context.Background(), "provider_key", "ambient-secret"); err != nil {
+		t.Fatalf("Set provider_key: %v", err)
+	}
+	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source, Credentials: store})
+	ctx := models.WithActor(context.Background(), models.AgentConfig{
+		ID:    "worker-agent",
+		Tools: []string{"send_provider"},
+	})
+
+	_, err = exec.Execute(ctx, "send_provider", map[string]any{})
+	if err == nil || !strings.Contains(err.Error(), "not declared and bound") {
+		t.Fatalf("Execute(send_provider) err = %v, want undeclared credential fail-closed", err)
+	}
+}
+
 func TestExecutor_NativeWebSearchUsesImportedPolicyAndCredentialBinding(t *testing.T) {
 	source := loadToolImportDependencySource(t, toolImportDependencyOptions{
 		credentialBind: "        provider_key: tenant_provider_key\n",
@@ -404,9 +433,10 @@ func mustToolConfigJSON(t *testing.T, value any) json.RawMessage {
 }
 
 type toolImportDependencyOptions struct {
-	serverURL      string
-	credentialBind string
-	policyRequires string
+	serverURL              string
+	credentialBind         string
+	policyRequires         string
+	omitCredentialRequires bool
 }
 
 func loadToolImportDependencySource(t *testing.T, opts toolImportDependencyOptions) semanticview.Source {
@@ -420,6 +450,10 @@ func loadToolImportDependencySource(t *testing.T, opts toolImportDependencyOptio
 	policyRequires := opts.policyRequires
 	if strings.TrimSpace(policyRequires) == "" {
 		policyRequires = "  policy: [web_search_provider]\n"
+	}
+	credentialRequires := "  credentials: [provider_key]\n"
+	if opts.omitCredentialRequires {
+		credentialRequires = ""
 	}
 	serverURL := strings.TrimSpace(opts.serverURL)
 	if serverURL == "" {
@@ -448,7 +482,7 @@ web_search_provider:
 name: worker-package
 version: "1.0.0"
 requires:
-`+policyRequires+`  credentials: [provider_key]
+`+policyRequires+credentialRequires+`
 `)
 	writeToolFixtureFile(t, filepath.Join(root, "flows", "worker", "schema.yaml"), "name: worker\nmode: static\n")
 	writeToolFixtureFile(t, filepath.Join(root, "flows", "worker", "policy.yaml"), "{}\n")

@@ -368,7 +368,14 @@ func selectedContractPromptResolver(source semanticview.Source) (runtimecontract
 	if !ok {
 		return nil, nil
 	}
-	return runtimecontracts.NewBundlePromptResolver(bundle), nil
+	return runtimecontracts.NewBundlePromptResolverWithOptions(bundle, runtimecontracts.BundlePromptResolverOptions{
+		PolicyResolver: func(itemSource runtimecontracts.ContractItemSource) runtimecontracts.PolicyDocument {
+			if flowID := strings.TrimSpace(itemSource.FlowID); flowID != "" {
+				return semanticview.ResolvePolicyForFlow(source, flowID)
+			}
+			return semanticview.ResolvePolicyForFlow(source, "")
+		},
+	}), nil
 }
 
 func (r *selectedContractAgentRuntime) Shutdown() error {

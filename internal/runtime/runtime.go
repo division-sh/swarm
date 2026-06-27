@@ -278,7 +278,14 @@ func newRuntimePromptResolver(source semanticview.Source) (runtimecontracts.Prom
 	if !ok {
 		return nil, fmt.Errorf("bundle-backed semantic source is required for contract prompt resolution")
 	}
-	return runtimecontracts.NewBundlePromptResolver(bundle), nil
+	return runtimecontracts.NewBundlePromptResolverWithOptions(bundle, runtimecontracts.BundlePromptResolverOptions{
+		PolicyResolver: func(itemSource runtimecontracts.ContractItemSource) runtimecontracts.PolicyDocument {
+			if flowID := strings.TrimSpace(itemSource.FlowID); flowID != "" {
+				return semanticview.ResolvePolicyForFlow(source, flowID)
+			}
+			return semanticview.ResolvePolicyForFlow(source, "")
+		},
+	}), nil
 }
 
 // Validate checks the NewRuntime boot dependency graph without constructing a runtime.
