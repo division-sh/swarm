@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -159,15 +160,14 @@ func assertSealedPackageConformancePublishPreflight(t *testing.T, source semanti
 			EntityID:     runtimeflowidentity.EntityID("consumer"),
 		},
 	}
-	evt := events.NewProjectionEvent(
+	evt := eventtest.ChildWithLineage(
 		"evt-sealed-conformance-connect",
 		events.EventType("producer/shared.done"),
-		"",
+		"producer",
 		"",
 		json.RawMessage(`{"flow_instance":"consumer"}`),
-		0,
-		"",
-		"",
+		1,
+		events.EventLineage{RunID: "run-sealed-package-conformance", ParentEventID: "evt-sealed-parent", TaskID: "producer-node"},
 		events.EventEnvelope{},
 		time.Now().UTC(),
 	)
@@ -182,15 +182,14 @@ func assertSealedPackageConformancePublishPreflight(t *testing.T, source semanti
 		t.Fatalf("preflight delivery routes = %#v, want only %#v", plan.DeliveryRoutes, want)
 	}
 
-	sibling := events.NewProjectionEvent(
+	sibling := eventtest.ChildWithLineage(
 		"evt-sealed-conformance-sibling",
 		events.EventType("producer/audit.seen"),
-		"",
+		"producer",
 		"",
 		json.RawMessage(`{"flow_instance":"consumer"}`),
-		0,
-		"",
-		"",
+		1,
+		events.EventLineage{RunID: "run-sealed-package-conformance", ParentEventID: "evt-sealed-parent", TaskID: "producer-node"},
 		events.EventEnvelope{},
 		time.Now().UTC(),
 	)
