@@ -31,6 +31,8 @@ var ErrNotWritable = fmt.Errorf("credential store is not writable")
 
 var ErrStoreLocked = fmt.Errorf("credential store is locked")
 
+var ErrStoreLockUnsupported = fmt.Errorf("credential store locking is unsupported on this platform")
+
 func BuildRequirementIndex(source semanticview.Source) map[string][]Requirement {
 	index := map[string][]Requirement{}
 	if source == nil {
