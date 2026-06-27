@@ -199,6 +199,7 @@ func (r connectRoutePlanResolver) connectIssueMatchesEvent(issue runtimepinrouti
 		return false
 	}
 	endpoint := runtimepinrouting.ConnectRoutePlanEndpoint{
+		Root:          from.Root,
 		FlowID:        strings.TrimSpace(from.FlowID),
 		FlowPath:      strings.Trim(strings.TrimSpace(routeFlowPath(r.source, from.FlowID)), "/"),
 		Pin:           strings.TrimSpace(from.Pin),

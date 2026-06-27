@@ -765,6 +765,7 @@ type FlowPackageConnectMap struct {
 	Target string `yaml:"target"`
 }
 type FlowPackagePinRef struct {
+	Root   bool
 	FlowID string
 	Pin    string
 }

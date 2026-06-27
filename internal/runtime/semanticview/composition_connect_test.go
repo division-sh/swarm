@@ -61,6 +61,43 @@ func TestCompositionConnectFactsExposeTypedPinsAndParentConnect(t *testing.T) {
 	}
 }
 
+func TestCompositionConnectFactsExposeRootProducerEndpoint(t *testing.T) {
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
+	root := writeRootCompositionConnectSemanticFixture(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	source := Wrap(bundle)
+
+	outputPins := source.FlowOutputEventPins("")
+	if len(outputPins) != 1 {
+		t.Fatalf("root FlowOutputEventPins = %#v, want one", outputPins)
+	}
+	if got, want := outputPins[0].PinName(), "root_ready"; got != want {
+		t.Fatalf("root output pin name = %q, want %q", got, want)
+	}
+
+	connects := source.CompositionConnects()
+	if len(connects) != 1 {
+		t.Fatalf("CompositionConnects = %#v, want one", connects)
+	}
+	from, err := connects[0].FromRef()
+	if err != nil {
+		t.Fatalf("FromRef: %v", err)
+	}
+	if !from.Root || from.FlowID != "" || from.Pin != "root_ready" {
+		t.Fatalf("FromRef = %#v, want root root_ready", from)
+	}
+	if got, want := source.CompositionConnectsFrom("", "root_ready"), connects; len(got) != len(want) || got[0].From != want[0].From {
+		t.Fatalf("CompositionConnectsFrom root = %#v, want %#v", got, want)
+	}
+}
+
 func writeCompositionConnectSemanticFixture(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -113,6 +150,45 @@ deployment:
   vertical_id:
     type: string
 `)
+	return root
+}
+
+func writeRootCompositionConnectSemanticFixture(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: root-composition-connect-semantic
+version: "1.0.0"
+platform_version: ">=1.6.0"
+flows:
+  - id: consumer
+    flow: consumer
+    mode: static
+connect:
+  - from: .root_ready
+    to: consumer.ready
+    delivery: one
+`)
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "schema.yaml"), `
+name: root-composition-connect-semantic
+pins:
+  outputs:
+    events:
+      - name: root_ready
+        event: root.ready
+`)
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "events.yaml"), "root.ready: {}\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
+	writeCompositionConnectFlow(t, root, "consumer", `
+pins:
+  inputs:
+    events:
+      - name: ready
+        event: root.ready
+`, "root.ready: {}\n", "{}\n")
 	return root
 }
 

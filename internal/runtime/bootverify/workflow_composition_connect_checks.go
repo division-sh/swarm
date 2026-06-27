@@ -35,8 +35,14 @@ func validateCompositionConnect(source semanticview.Source, connect runtimecontr
 		return findings
 	}
 
-	if _, ok := source.FlowSchemaByID(from.FlowID); !ok {
-		findings = append(findings, compositionConnectFinding(connect, "producer_flow_missing", fmt.Sprintf("producer flow %s does not exist", from.FlowID), from.FlowID))
+	if !from.Root {
+		if _, ok := source.FlowSchemaByID(from.FlowID); !ok {
+			findings = append(findings, compositionConnectFinding(connect, "producer_flow_missing", fmt.Sprintf("producer flow %s does not exist", from.FlowID), from.FlowID))
+			return findings
+		}
+	}
+	if to.Root {
+		findings = append(findings, compositionConnectFinding(connect, "receiver_root_unsupported", "root receiver endpoints are not supported by this composition-routing slice", "root"))
 		return findings
 	}
 	receiverSchema, ok := source.FlowSchemaByID(to.FlowID)
@@ -47,7 +53,13 @@ func validateCompositionConnect(source semanticview.Source, connect runtimecontr
 
 	outputPin, ok := source.FlowOutputEventPin(from.FlowID, from.Pin)
 	if !ok {
-		findings = append(findings, compositionConnectFinding(connect, "producer_output_pin_missing", fmt.Sprintf("producer flow %s does not declare output pin %s", from.FlowID, from.Pin), from.FlowID))
+		location := from.FlowID
+		producerLabel := fmt.Sprintf("producer flow %s", from.FlowID)
+		if from.Root {
+			location = "root"
+			producerLabel = "root schema"
+		}
+		findings = append(findings, compositionConnectFinding(connect, "producer_output_pin_missing", fmt.Sprintf("%s does not declare output pin %s", producerLabel, from.Pin), location))
 		return findings
 	}
 	inputPin, ok := source.FlowInputEventPin(to.FlowID, to.Pin)

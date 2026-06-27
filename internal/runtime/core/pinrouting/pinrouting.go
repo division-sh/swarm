@@ -103,15 +103,16 @@ func ProducerRouteCommonPathFailure(source semanticview.Source, flowID, eventTyp
 	if source == nil || eventType == "" || !PinDeclaredOutput(source, flowID, eventType) {
 		return ""
 	}
-	if flowID == "" {
-		return ""
-	}
-	if _, ok := source.FlowScopeByID(flowID); !ok {
+	if flowID != "" {
+		if _, ok := source.FlowScopeByID(flowID); !ok {
+			return ""
+		}
+	} else if !compositionConnectsFromOutputEvent(source, flowID, eventType) {
 		return ""
 	}
 	if spec.Broadcast {
 		if compositionConnectsFromOutputEvent(source, flowID, eventType) ||
-			producerRouteKnownReceiverConsumesOutput(source, flowID, eventType, "") {
+			(flowID != "" && producerRouteKnownReceiverConsumesOutput(source, flowID, eventType, "")) {
 			return FailureProducerBroadcastCommonPath
 		}
 		return ""
@@ -125,7 +126,7 @@ func ProducerRouteCommonPathFailure(source semanticview.Source, flowID, eventTyp
 		return ""
 	case runtimecontracts.EmitTargetKindFlowMatch:
 		if compositionConnectsFromOutputEventToFlow(source, flowID, eventType, target.Flow) ||
-			producerRouteKnownReceiverConsumesOutput(source, flowID, eventType, target.Flow) {
+			(flowID != "" && producerRouteKnownReceiverConsumesOutput(source, flowID, eventType, target.Flow)) {
 			return FailureProducerTargetCommonPath
 		}
 	}
@@ -269,16 +270,15 @@ func eventReferencesMatch(left, right string) bool {
 }
 
 func rootPinDeclaredOutput(source semanticview.Source, eventType string) bool {
-	bundle, ok := semanticview.Bundle(source)
-	if !ok || bundle == nil || bundle.RootSchema == nil {
+	if source == nil {
 		return false
 	}
 	eventType = eventidentity.Normalize(eventType)
 	if eventType == "" {
 		return false
 	}
-	for _, output := range bundle.RootSchema.Pins.Outputs.Events {
-		output = eventidentity.Normalize(output)
+	for _, pin := range source.FlowOutputEventPins("") {
+		output := eventidentity.Normalize(pin.EventType())
 		if output == "" {
 			continue
 		}

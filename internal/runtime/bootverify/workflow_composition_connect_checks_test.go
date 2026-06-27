@@ -27,6 +27,20 @@ func TestRun_AllowsParentCompositionConnectAsVerifyRouteProof(t *testing.T) {
 	}
 }
 
+func TestRun_AllowsRootProducerCompositionConnectAsRouteProof(t *testing.T) {
+	root := writeRootCompositionConnectBootverifyFixture(t)
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Errors(), "composition_connect_validation", "") {
+		t.Fatalf("unexpected composition_connect_validation error: %#v", report.Errors())
+	}
+	if reportContains(report.Errors(), "pin_target_resolution", "root.ready") {
+		t.Fatalf("root connect should satisfy root output pin target proof, got %#v", report.Errors())
+	}
+}
+
 func TestRun_FailsClosedForInvalidParentCompositionConnect(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -61,6 +75,13 @@ func TestRun_FailsClosedForInvalidParentCompositionConnect(t *testing.T) {
 				connectTo: "consumer.missing_pin",
 			},
 			want: "receiver_input_pin_missing",
+		},
+		{
+			name: "root receiver unsupported",
+			opts: compositionConnectFixtureOptions{
+				connectTo: ".deploy_completed",
+			},
+			want: "receiver_root_unsupported",
 		},
 		{
 			name: "event names differ without adapter",
@@ -303,6 +324,72 @@ connect:
 	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
 	writeCompositionConnectProducerFlow(t, root, opts)
 	writeCompositionConnectConsumerFlow(t, root, opts)
+	return root
+}
+
+func writeRootCompositionConnectBootverifyFixture(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: root-composition-connect-bootverify
+version: "1.0.0"
+platform_version: ">=1.6.0"
+flows:
+  - id: consumer
+    flow: consumer
+    mode: static
+connect:
+  - from: .root_ready
+    to: consumer.ready
+    delivery: one
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), `
+name: root-composition-connect-bootverify
+pins:
+  inputs:
+    events: [root.start]
+  outputs:
+    events:
+      - name: root_ready
+        event: root.ready
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), `
+root.start:
+  entity_id: text
+root.ready:
+  entity_id: text
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
+root-node:
+  id: root-node
+  execution_type: system_node
+  event_handlers:
+    root.start:
+      emit:
+        event: root.ready
+        fields:
+          entity_id: payload.entity_id
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "schema.yaml"), `
+name: consumer
+mode: static
+pins:
+  inputs:
+    events:
+      - name: ready
+        event: root.ready
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "policy.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "agents.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "events.yaml"), `
+root.ready:
+  entity_id: text
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "entities.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "nodes.yaml"), "{}\n")
 	return root
 }
 
