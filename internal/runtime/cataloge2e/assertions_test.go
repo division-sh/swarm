@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
@@ -55,20 +56,20 @@ func TestCatalogCausalEntityIDs_FollowsSourceEventIDChain(t *testing.T) {
 	rootEventID := uuid.NewString()
 	childEventID := uuid.NewString()
 	grandchildEventID := uuid.NewString()
-	if err := pg.AppendEvent(context.Background(), (events.NewProjectionEvent(rootEventID,
-		"root.started", "", "", []byte(`{"entity_id":"`+rootID+`"}`), 0, catalogRuntimeRunID, "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID(rootID)); err != nil {
+	if err := pg.AppendEvent(context.Background(), eventtest.WithEntityID((eventtest.Projection(rootEventID,
+		"root.started", "", "", []byte(`{"entity_id":"`+rootID+`"}`), 0, catalogRuntimeRunID, "", events.EventEnvelope{}, time.Now().UTC())), rootID)); err != nil {
 		t.Fatalf("append root event: %v", err)
 	}
-	if err := pg.AppendEvent(context.Background(), (events.NewProjectionEvent(childEventID,
+	if err := pg.AppendEvent(context.Background(), eventtest.WithEntityID((eventtest.Projection(childEventID,
 		"child.started", "", "", []byte(`{"entity_id":"`+childID+`"}`), 0, catalogRuntimeRunID,
 
-		rootEventID, events.EventEnvelope{}, time.Now().UTC())).WithEntityID(childID)); err != nil {
+		rootEventID, events.EventEnvelope{}, time.Now().UTC())), childID)); err != nil {
 		t.Fatalf("append child event: %v", err)
 	}
-	if err := pg.AppendEvent(context.Background(), (events.NewProjectionEvent(grandchildEventID,
+	if err := pg.AppendEvent(context.Background(), eventtest.WithEntityID((eventtest.Projection(grandchildEventID,
 		"grandchild.done", "", "", []byte(`{"entity_id":"`+grandchildID+`"}`), 0, catalogRuntimeRunID,
 
-		childEventID, events.EventEnvelope{}, time.Now().UTC())).WithEntityID(grandchildID)); err != nil {
+		childEventID, events.EventEnvelope{}, time.Now().UTC())), grandchildID)); err != nil {
 		t.Fatalf("append grandchild event: %v", err)
 	}
 
@@ -186,9 +187,9 @@ func TestAssertEmittedEvents_AcceptsCrossFlowInheritDispatcherEmission(t *testin
 	h.bundle = bundle
 
 	insertCatalogAssertionEntityState(t, h, entityID, "dispatched")
-	if err := h.pg.AppendEvent(context.Background(), (events.NewProjectionEvent(uuid.NewString(),
+	if err := h.pg.AppendEvent(context.Background(), eventtest.WithEntityID((eventtest.Projection(uuid.NewString(),
 		"score.requested",
-		"runtime", "", []byte(`{"entity_id":"`+entityID+`"}`), 0, catalogRuntimeRunID, "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID(entityID)); err != nil {
+		"runtime", "", []byte(`{"entity_id":"`+entityID+`"}`), 0, catalogRuntimeRunID, "", events.EventEnvelope{}, time.Now().UTC())), entityID)); err != nil {
 		t.Fatalf("append score.requested event: %v", err)
 	}
 
@@ -239,9 +240,9 @@ func insertCatalogAssertionEntityState(t *testing.T, h *runtimeHarness, entityID
 
 func insertCatalogAssertionDeadLetterEvent(t *testing.T, h *runtimeHarness, entityID string) {
 	t.Helper()
-	if err := h.pg.AppendEvent(context.Background(), (events.NewProjectionEvent(uuid.NewString(),
+	if err := h.pg.AppendEvent(context.Background(), eventtest.WithEntityID((eventtest.Projection(uuid.NewString(),
 		"platform.dead_letter",
-		"runtime", "", []byte(`{"entity_id":"`+entityID+`"}`), 0, catalogRuntimeRunID, "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID(entityID)); err != nil {
+		"runtime", "", []byte(`{"entity_id":"`+entityID+`"}`), 0, catalogRuntimeRunID, "", events.EventEnvelope{}, time.Now().UTC())), entityID)); err != nil {
 		t.Fatalf("append platform.dead_letter event: %v", err)
 	}
 }

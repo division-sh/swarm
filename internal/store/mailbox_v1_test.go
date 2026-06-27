@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -22,9 +23,10 @@ func TestPostgresStore_V1MailboxReadDecisionAndIdempotencyOwners(t *testing.T) {
 	entityID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	runID := uuid.NewString()
-	if err := s.AppendEvent(ctx, events.NewRootIngressEvent(sourceEventID,
-		"review.requested", "", "", json.RawMessage(`{"request":true}`), 0, runID, "", events.EventEnvelope{}, time.Time{}).
-		WithEntityID(entityID).WithFlowInstance("main/review")); err != nil {
+	if err := s.AppendEvent(ctx, eventtest.WithFlowInstance(eventtest.WithEntityID(events.NewRootIngressEvent(sourceEventID,
+		"review.requested", "", "", json.RawMessage(`{"request":true}`), 0, runID, "", events.EventEnvelope{}, time.Time{}),
+		entityID),
+		"main/review")); err != nil {
 		t.Fatalf("append source event: %v", err)
 	}
 

@@ -160,6 +160,37 @@ func TestProductionEventConstructionUsesPublicAPI(t *testing.T) {
 	assertExactConstructorAllowlist(t, "NewRouteProbeEvent", productionRouteProbeEventAllowlist, routeProbeCallCounts)
 }
 
+func TestTestEventFixturesUseFixtureBuilders(t *testing.T) {
+	repoRoot := repositoryRoot(t)
+	for _, dir := range []string{"internal", "cmd"} {
+		root := filepath.Join(repoRoot, dir)
+		if _, err := os.Stat(root); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			t.Fatalf("stat %s: %v", root, err)
+		}
+		if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.IsDir() {
+				if path == filepath.Join(repoRoot, "internal", "events") {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if !strings.HasSuffix(path, "_test.go") {
+				return nil
+			}
+			checkTestEventFixtureFile(t, repoRoot, path)
+			return nil
+		}); err != nil {
+			t.Fatalf("walk %s: %v", root, err)
+		}
+	}
+}
+
 func assertExactConstructorAllowlist(t *testing.T, constructor string, allowlist map[eventConstructorCallsite]int, counts map[eventConstructorCallsite]int) {
 	t.Helper()
 	for site, want := range allowlist {
@@ -190,11 +221,14 @@ func checkProductionEventConstructionFile(t *testing.T, repoRoot, path string, p
 	if err != nil {
 		t.Fatalf("parse %s: %v", path, err)
 	}
+	relativePath := slashPath(repoRoot, path)
+	if importsPath(file, "github.com/division-sh/swarm/internal/events/eventtest") {
+		t.Fatalf("%s imports internal/events/eventtest from production code; test fixture builders are test-only", relativePath)
+	}
 	eventAliases, dotImported := eventImportAliases(file)
 	if len(eventAliases) == 0 {
 		return
 	}
-	relativePath := slashPath(repoRoot, path)
 	if dotImported {
 		t.Fatalf("%s dot-imports internal/events; use a named import so the production construction guard can classify constructor calls", relativePath)
 	}
@@ -272,24 +306,101 @@ func checkProductionEventConstructionFile(t *testing.T, repoRoot, path string, p
 	}
 }
 
+func checkTestEventFixtureFile(t *testing.T, repoRoot, path string) {
+	t.Helper()
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, path, nil, 0)
+	if err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+	relativePath := slashPath(repoRoot, path)
+	eventAliases, dotImported := eventImportAliases(file)
+	if dotImported {
+		t.Fatalf("%s dot-imports internal/events; use a named import so the test fixture guard can classify constructor calls", relativePath)
+	}
+	eventtestAliases := importAliases(file, "github.com/division-sh/swarm/internal/events/eventtest")
+	packageAliases := allImportAliases(file)
+	ast.Inspect(file, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		if isNewProjectionEventCall(call, eventAliases) {
+			t.Fatalf("%s:%d calls events.NewProjectionEvent directly in a test; use internal/events/eventtest fixture builders or add a narrow internal/events unit-test allowlist", relativePath, fset.Position(call.Pos()).Line)
+		}
+		if isNewRouteProbeEventCall(call, eventAliases) {
+			t.Fatalf("%s:%d calls events.NewRouteProbeEvent directly in a test; use internal/events/eventtest.RouteProbe or add a narrow internal/events unit-test allowlist", relativePath, fset.Position(call.Pos()).Line)
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || !isEventProjectionMethod(sel.Sel.Name) {
+			return true
+		}
+		if isPackageIdent(sel.X, eventtestAliases) {
+			return true
+		}
+		if isPackageIdent(sel.X, packageAliases) {
+			return true
+		}
+		t.Fatalf("%s:%d calls %s directly in a test; route fixture event patching through internal/events/eventtest", relativePath, fset.Position(sel.Pos()).Line, sel.Sel.Name)
+		return false
+	})
+}
+
 func eventImportAliases(file *ast.File) (map[string]struct{}, bool) {
-	aliases := map[string]struct{}{}
+	aliases := importAliases(file, "github.com/division-sh/swarm/internal/events")
 	dotImported := false
 	for _, imp := range file.Imports {
 		if strings.Trim(imp.Path.Value, `"`) != "github.com/division-sh/swarm/internal/events" {
 			continue
 		}
 		switch {
-		case imp.Name == nil:
-			aliases["events"] = struct{}{}
-		case imp.Name.Name == ".":
+		case imp.Name != nil && imp.Name.Name == ".":
 			dotImported = true
-			aliases["events"] = struct{}{}
+		}
+	}
+	return aliases, dotImported
+}
+
+func importAliases(file *ast.File, importPath string) map[string]struct{} {
+	aliases := map[string]struct{}{}
+	for _, imp := range file.Imports {
+		if strings.Trim(imp.Path.Value, `"`) != importPath {
+			continue
+		}
+		switch {
+		case imp.Name == nil:
+			aliases[filepath.Base(importPath)] = struct{}{}
+		case imp.Name.Name == ".":
+			aliases[filepath.Base(importPath)] = struct{}{}
 		case imp.Name.Name != "_":
 			aliases[imp.Name.Name] = struct{}{}
 		}
 	}
-	return aliases, dotImported
+	return aliases
+}
+
+func allImportAliases(file *ast.File) map[string]struct{} {
+	aliases := map[string]struct{}{}
+	for _, imp := range file.Imports {
+		if imp.Name != nil {
+			if imp.Name.Name != "." && imp.Name.Name != "_" {
+				aliases[imp.Name.Name] = struct{}{}
+			}
+			continue
+		}
+		importPath := strings.Trim(imp.Path.Value, `"`)
+		aliases[filepath.Base(importPath)] = struct{}{}
+	}
+	return aliases
+}
+
+func importsPath(file *ast.File, importPath string) bool {
+	for _, imp := range file.Imports {
+		if strings.Trim(imp.Path.Value, `"`) == importPath {
+			return true
+		}
+	}
+	return false
 }
 
 func isNewProjectionEventCall(call *ast.CallExpr, eventAliases map[string]struct{}) bool {
@@ -379,11 +490,15 @@ func isEventsEventType(expr ast.Expr, eventAliases map[string]struct{}) bool {
 }
 
 func isEventsPackageIdent(expr ast.Expr, eventAliases map[string]struct{}) bool {
+	return isPackageIdent(expr, eventAliases)
+}
+
+func isPackageIdent(expr ast.Expr, aliases map[string]struct{}) bool {
 	ident, ok := expr.(*ast.Ident)
 	if !ok {
 		return false
 	}
-	_, ok = eventAliases[ident.Name]
+	_, ok = aliases[ident.Name]
 	return ok
 }
 

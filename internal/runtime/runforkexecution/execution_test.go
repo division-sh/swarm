@@ -15,6 +15,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -1672,24 +1673,25 @@ func TestSelectedContractRecipientPlanPublishGuardAuthorizesCanonicalPlan(t *tes
 	}
 	guard.ExpectForkEvent("fork-event", sourceEventID)
 
-	err = guard.AuthorizeEvent(context.Background(), events.NewProjectionEvent("fork-event",
+	err = guard.AuthorizeEvent(context.Background(), eventtest.Projection("fork-event",
 		"work.begin",
-		store.RunForkSelectedContractExecutionOwner, "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
-	)
+		store.RunForkSelectedContractExecutionOwner, "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 	if err != nil {
 		t.Fatalf("AuthorizeEvent canonical recipient plan: %v", err)
 	}
 
-	err = guard.Authorize(context.Background(), events.NewProjectionEvent("fork-event",
+	err = guard.Authorize(context.Background(), eventtest.Projection("fork-event",
 		"work.begin",
-		store.RunForkSelectedContractExecutionOwner, "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), bus.PublishRecipientPlan{
-		RoutedRecipients: []bus.PublishDiagnosticRecipient{{
-			Type:        "node",
-			ID:          "alpha-intake",
-			Path:        "flow-a/alpha-intake",
-			RouteSource: "selected_contracts",
-		}},
-	})
+		store.RunForkSelectedContractExecutionOwner, "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+
+		bus.PublishRecipientPlan{
+			RoutedRecipients: []bus.PublishDiagnosticRecipient{{
+				Type:        "node",
+				ID:          "alpha-intake",
+				Path:        "flow-a/alpha-intake",
+				RouteSource: "selected_contracts",
+			}},
+		})
 	if err != nil {
 		t.Fatalf("Authorize canonical recipient plan: %v", err)
 	}
@@ -1726,22 +1728,24 @@ func TestSelectedContractRecipientPlanPublishGuardMaterializesTargetNodeDelivery
 	}
 	guard.ExpectForkEvent("fork-event", "source-event")
 
-	routes, err := guard.MaterializeNodeDeliveryRoutes(context.Background(), events.NewProjectionEvent("fork-event",
+	routes, err := guard.MaterializeNodeDeliveryRoutes(context.Background(), eventtest.Projection("fork-event",
 		"item.received",
-		store.RunForkSelectedContractExecutionOwner, "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), bus.PublishRecipientPlan{
-		RoutedRecipients: []bus.PublishDiagnosticRecipient{
-			{
-				Type:        "agent",
-				ID:          "target-agent",
-				RouteSource: "selected_contracts",
+		store.RunForkSelectedContractExecutionOwner, "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+
+		bus.PublishRecipientPlan{
+			RoutedRecipients: []bus.PublishDiagnosticRecipient{
+				{
+					Type:        "agent",
+					ID:          "target-agent",
+					RouteSource: "selected_contracts",
+				},
+				{
+					Type:        "node",
+					ID:          "test-node",
+					RouteSource: "selected_contracts",
+				},
 			},
-			{
-				Type:        "node",
-				ID:          "test-node",
-				RouteSource: "selected_contracts",
-			},
-		},
-	})
+		})
 	if err != nil {
 		t.Fatalf("MaterializeNodeDeliveryRoutes: %v", err)
 	}
@@ -1772,16 +1776,18 @@ func TestSelectedContractRecipientPlanPublishGuardAuthorizesContractSwapOwner(t 
 	}
 	guard.ExpectForkEvent("fork-event", sourceEventID)
 
-	err = guard.Authorize(context.Background(), events.NewProjectionEvent("fork-event",
+	err = guard.Authorize(context.Background(), eventtest.Projection("fork-event",
 		"work.begin",
-		store.RunForkHistoricalReplayContractSwapBootResumeOwner, "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), bus.PublishRecipientPlan{
-		RoutedRecipients: []bus.PublishDiagnosticRecipient{{
-			Type:        "node",
-			ID:          "alpha-intake",
-			Path:        "flow-a/alpha-intake",
-			RouteSource: "selected_contracts",
-		}},
-	})
+		store.RunForkHistoricalReplayContractSwapBootResumeOwner, "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+
+		bus.PublishRecipientPlan{
+			RoutedRecipients: []bus.PublishDiagnosticRecipient{{
+				Type:        "node",
+				ID:          "alpha-intake",
+				Path:        "flow-a/alpha-intake",
+				RouteSource: "selected_contracts",
+			}},
+		})
 	if err != nil {
 		t.Fatalf("Authorize contract-swap owner recipient plan: %v", err)
 	}
@@ -1805,47 +1811,53 @@ func TestSelectedContractRecipientPlanPublishGuardRejectsBypassAndSubscriptions(
 		t.Fatalf("newSelectedContractRecipientPlanPublishGuard: %v", err)
 	}
 
-	err = guard.Authorize(context.Background(), events.NewProjectionEvent("fork-event",
+	err = guard.Authorize(context.Background(), eventtest.Projection("fork-event",
 		"work.begin",
-		store.RunForkSelectedContractExecutionOwner, "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), bus.PublishRecipientPlan{
-		RoutedRecipients: []bus.PublishDiagnosticRecipient{{
-			Type:        "node",
-			ID:          "alpha-intake",
-			Path:        "flow-a/alpha-intake",
-			RouteSource: "selected_contracts",
-		}},
-	})
+		store.RunForkSelectedContractExecutionOwner, "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+
+		bus.PublishRecipientPlan{
+			RoutedRecipients: []bus.PublishDiagnosticRecipient{{
+				Type:        "node",
+				ID:          "alpha-intake",
+				Path:        "flow-a/alpha-intake",
+				RouteSource: "selected_contracts",
+			}},
+		})
 	if err == nil || !strings.Contains(err.Error(), store.RunForkSelectedContractRecipientPlanningOwner) {
 		t.Fatalf("Authorize without expectation error = %v, want recipient-planning evidence failure", err)
 	}
 
 	guard.ExpectForkEvent("fork-event-subscription", sourceEventID)
-	err = guard.Authorize(context.Background(), events.NewProjectionEvent("fork-event-subscription",
+	err = guard.Authorize(context.Background(), eventtest.Projection("fork-event-subscription",
 		"work.begin",
-		store.RunForkSelectedContractExecutionOwner, "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), bus.PublishRecipientPlan{
-		RoutedRecipients: []bus.PublishDiagnosticRecipient{{
-			Type:        "node",
-			ID:          "alpha-intake",
-			Path:        "flow-a/alpha-intake",
-			RouteSource: "selected_contracts",
-		}},
-		SubscriptionRecipients: []string{"legacy-subscription"},
-	})
+		store.RunForkSelectedContractExecutionOwner, "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+
+		bus.PublishRecipientPlan{
+			RoutedRecipients: []bus.PublishDiagnosticRecipient{{
+				Type:        "node",
+				ID:          "alpha-intake",
+				Path:        "flow-a/alpha-intake",
+				RouteSource: "selected_contracts",
+			}},
+			SubscriptionRecipients: []string{"legacy-subscription"},
+		})
 	if err == nil || !strings.Contains(err.Error(), "live subscription") {
 		t.Fatalf("Authorize subscription recipient error = %v, want live subscription rejection", err)
 	}
 
 	guard.ExpectForkEvent("fork-event-wrong-recipient", sourceEventID)
-	err = guard.Authorize(context.Background(), events.NewProjectionEvent("fork-event-wrong-recipient",
+	err = guard.Authorize(context.Background(), eventtest.Projection("fork-event-wrong-recipient",
 		"work.begin",
-		store.RunForkSelectedContractExecutionOwner, "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), bus.PublishRecipientPlan{
-		RoutedRecipients: []bus.PublishDiagnosticRecipient{{
-			Type:        "node",
-			ID:          "other-node",
-			Path:        "flow-a/other-node",
-			RouteSource: "selected_contracts",
-		}},
-	})
+		store.RunForkSelectedContractExecutionOwner, "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+
+		bus.PublishRecipientPlan{
+			RoutedRecipients: []bus.PublishDiagnosticRecipient{{
+				Type:        "node",
+				ID:          "other-node",
+				Path:        "flow-a/other-node",
+				RouteSource: "selected_contracts",
+			}},
+		})
 	if err == nil || !strings.Contains(err.Error(), "routed recipients do not match") {
 		t.Fatalf("Authorize wrong recipient error = %v, want recipient-plan mismatch", err)
 	}
@@ -1982,7 +1994,7 @@ func (a *selectedContractForkTestAgent) OnEvent(ctx context.Context, evt events.
 	a.mu.Unlock()
 
 	return []events.Event{
-		events.NewProjectionEvent("", events.EventType("task.completed"), agentID, "", json.RawMessage(`{}`), 0, evt.RunID(), evt.ID(), evt.NormalizedEnvelope(), time.Now().UTC()),
+		eventtest.Projection("", events.EventType("task.completed"), agentID, "", json.RawMessage(`{}`), 0, evt.RunID(), evt.ID(), evt.NormalizedEnvelope(), time.Now().UTC()),
 	}, nil
 }
 

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 )
 
 func TestFlowInstanceIdentity_DistinguishesScopeKeyInstancePathAndEntityID(t *testing.T) {
@@ -186,5 +187,5 @@ func TestWorkflowInstanceOwnedByFlow_UsesExactSemanticScope(t *testing.T) {
 }
 
 func mustEvent(eventType, entityID string) Event {
-	return events.NewProjectionEvent("", events.EventType(eventType), "", "", nil, 0, "", "", events.EventEnvelope{EntityID: entityID}, time.Time{})
+	return eventtest.Projection("", events.EventType(eventType), "", "", nil, 0, "", "", events.EventEnvelope{EntityID: entityID}, time.Time{})
 }

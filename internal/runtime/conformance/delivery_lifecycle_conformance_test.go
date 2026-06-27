@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -261,9 +262,10 @@ func (fx *deliveryLifecycleFixture) publishDirectEvent(t *testing.T, ctx context
 	ch := fx.bus.Subscribe(fx.agentID)
 	defer fx.bus.Unsubscribe(fx.agentID)
 
-	evt := (events.NewRootIngressEvent(eventID,
+	evt := eventtest.WithEntityID((events.NewRootIngressEvent(eventID,
 		events.EventType("review.requested"),
-		"runtime", "", []byte(`{"ok":true}`), 0, "", "", events.EventEnvelope{}, time.Now().Add(-2*time.Hour).UTC())).WithEntityID(uuid.NewString())
+		"runtime", "", []byte(`{"ok":true}`), 0, "", "", events.EventEnvelope{}, time.Now().Add(-2*time.Hour).UTC())), uuid.NewString())
+
 	if err := fx.bus.PublishDirect(ctx, evt, []string{fx.agentID}); err != nil {
 		t.Fatalf("PublishDirect: %v", err)
 	}

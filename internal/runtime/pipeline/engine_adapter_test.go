@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -248,7 +249,7 @@ func assertMutationParentRoutePinOutputFailure(t *testing.T, metadata map[string
 			FlowInstance: route.FlowInstance,
 			EntityID:     route.EntityID,
 		},
-	}, events.NewProjectionEvent("", events.EventType("child.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	}, eventtest.Projection("", events.EventType("child.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 	if result.Failure != want {
 		t.Fatalf("pin output failure = %q, want %q (metadata=%#v)", result.Failure, want, metadata)
 	}
@@ -713,7 +714,7 @@ func TestPipelineEngineActionRunner_RecordEvidenceReturnsMutationError(t *testin
 		Request: runtimeengine.ExecutionRequest{
 			EntityID:        identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
 			NodeID:          identity.NormalizeNodeID("node-a"),
-			Event:           (events.NewProjectionEvent("", "research.completed", "", "", []byte(`{"summary":"done"}`), 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID("11111111-1111-1111-1111-111111111111"),
+			Event:           eventtest.WithEntityID((eventtest.Projection("", "research.completed", "", "", []byte(`{"summary":"done"}`), 0, "", "", events.EventEnvelope{}, time.Time{})), "11111111-1111-1111-1111-111111111111"),
 			HandlerEventKey: "research.completed",
 			Handler: runtimecontracts.SystemNodeEventHandler{
 				Action:         runtimecontracts.ActionSpec{ID: "record_evidence"},
@@ -797,7 +798,7 @@ func TestPipelineEngineActionRunner_RecordEvidenceUsesMatchedHandlerEvidenceTarg
 				Request: runtimeengine.ExecutionRequest{
 					EntityID:        identity.NormalizeEntityID(tt.entityID),
 					NodeID:          identity.NormalizeNodeID("build-orchestrator"),
-					Event:           events.NewProjectionEvent("", tt.concreteEvent, "", "", mustJSON(map[string]any{"summary": tt.wantSummary}), 0, "", "", events.EventEnvelope{}, time.Time{}).WithEntityID(tt.entityID),
+					Event:           eventtest.WithEntityID(eventtest.Projection("", tt.concreteEvent, "", "", mustJSON(map[string]any{"summary": tt.wantSummary}), 0, "", "", events.EventEnvelope{}, time.Time{}), tt.entityID),
 					HandlerEventKey: tt.handlerEventKey,
 					Handler:         tt.handler,
 				},
@@ -836,8 +837,8 @@ func TestPipelineEngineActionRunner_CreateFlowInstanceUsesExecutionBaseContextFo
 		},
 	}
 	runner := pipelineEngineActionRunner{coordinator: pc}
-	evt := (events.NewProjectionEvent("evt-123",
-		"spawn.requested", "", "", []byte(`{"instance_id":"inst-42","name":"alpha","template_id":"application-basic-v1"}`), 0, "", "source-evt-1", events.EventEnvelope{}, time.Time{})).WithEnvelope(events.EventEnvelope{
+	evt := eventtest.WithEnvelope((eventtest.Projection("evt-123",
+		"spawn.requested", "", "", []byte(`{"instance_id":"inst-42","name":"alpha","template_id":"application-basic-v1"}`), 0, "", "source-evt-1", events.EventEnvelope{}, time.Time{})), events.EventEnvelope{
 		EntityID: "ent-1",
 		Source: events.RouteIdentity{
 			FlowID:       "parent-flow",
@@ -845,6 +846,7 @@ func TestPipelineEngineActionRunner_CreateFlowInstanceUsesExecutionBaseContextFo
 			EntityID:     "ent-parent",
 		},
 	})
+
 	base := values.NewContext()
 	base.Event = values.Wrap(evt.ContextMap("ready"))
 	base.Payload = values.Wrap(parsePayloadMap(evt.Payload()))
@@ -916,12 +918,13 @@ func TestPipelineEngineActionRunner_MailboxWriteMaterializesIdempotentRow(t *tes
 			},
 		},
 	}
-	evt := (events.NewProjectionEvent(eventID,
-		"mailbox.review_requested", "", "", []byte(`{"review_kind":"validation"}`), 0, "", "", events.EventEnvelope{}, time.Time{})).WithEnvelope(events.EventEnvelope{
+	evt := eventtest.WithEnvelope((eventtest.Projection(eventID,
+		"mailbox.review_requested", "", "", []byte(`{"review_kind":"validation"}`), 0, "", "", events.EventEnvelope{}, time.Time{})), events.EventEnvelope{
 		EntityID:     entityID,
 		FlowInstance: "validation/case-1",
 		Scope:        events.EventScopeEntity,
 	})
+
 	base := values.NewContext()
 	base.Event = values.Wrap(evt.ContextMap(""))
 	base.Payload = values.Wrap(parsePayloadMap(evt.Payload()))
@@ -983,7 +986,7 @@ func TestPipelineEngineActionRunner_MailboxWriteFailsClosedOnMissingRequiredExpr
 			Summary:  runtimecontracts.RefExpression("payload.missing_summary"),
 		},
 	}
-	evt := events.NewProjectionEvent(eventID, "mailbox.review_requested", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{})
+	evt := eventtest.Projection(eventID, "mailbox.review_requested", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{})
 	base := values.NewContext()
 	base.Event = values.Wrap(evt.ContextMap(""))
 	base.Payload = values.Wrap(parsePayloadMap(evt.Payload()))
@@ -2218,7 +2221,7 @@ func TestArtifactRepoPathRejectsUnsafeGenericSegments(t *testing.T) {
 }
 
 func testProjectionEventWithSourceAgent(evt events.Event, sourceAgent string) events.Event {
-	return events.NewProjectionEvent(
+	return eventtest.Projection(
 		evt.ID(),
 		evt.Type(),
 		sourceAgent,
@@ -2228,8 +2231,8 @@ func testProjectionEventWithSourceAgent(evt events.Event, sourceAgent string) ev
 		evt.RunID(),
 		evt.ParentEventID(),
 		evt.Envelope(),
-		evt.CreatedAt(),
-	)
+		evt.CreatedAt())
+
 }
 
 func assertArtifactRepoQueuedIntent(t *testing.T, intents []runtimeengine.EmitIntent, index int, eventType string) events.Event {
@@ -2322,9 +2325,10 @@ func testArtifactRepoActionAndContext(entityID string, entity map[string]any, ev
 		"mvp_yaml":   content,
 	}
 	payloadBytes, _ := json.Marshal(payload)
-	evt := events.NewProjectionEvent(eventID,
-		"artifact_repo.commit_requested", "", "", payloadBytes, 0, testPipelineRunID, "", events.EventEnvelope{}, time.Unix(1_700_000_000, 0).UTC()).
-		WithEnvelope(events.EventEnvelope{EntityID: entityID})
+	evt := eventtest.WithEnvelope(eventtest.Projection(eventID,
+		"artifact_repo.commit_requested", "", "", payloadBytes, 0, testPipelineRunID, "", events.EventEnvelope{}, time.Unix(1_700_000_000, 0).UTC()),
+		events.EventEnvelope{EntityID: entityID})
+
 	base := values.NewContext()
 	base.Event = values.Wrap(evt.ContextMap("ready"))
 	base.Payload = values.Wrap(payload)
@@ -2456,8 +2460,9 @@ func TestPipelineEnginePayloadShaper_UsesParentEntityForCrossFlowOutputs(t *test
 	req := runtimeengine.ExecutionRequest{
 		EntityID: identity.NormalizeEntityID("ent-child"),
 		FlowID:   identity.NormalizeFlowID("child"),
-		Event: events.NewProjectionEvent("", events.EventType("child/child.internal"), "", "", json.RawMessage(`{"entity_id":"ent-child","step":"done"}`), 0, "", "", events.EventEnvelope{}, time.Time{}).
-			WithEntityID("ent-child"),
+		Event: eventtest.WithEntityID(eventtest.Projection("", events.EventType("child/child.internal"), "", "", json.RawMessage(`{"entity_id":"ent-child","step":"done"}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+			"ent-child"),
+
 		State: runtimeengine.StateSnapshot{
 			EntityID:     identity.NormalizeEntityID("ent-child"),
 			StateCarrier: runtimeengine.NewStateCarrier(map[string]any{"flow_path": "child/inst-1", "subject_id": "ent-parent", "parent_entity_id": "ent-parent"}, nil, nil),
@@ -2499,8 +2504,9 @@ func TestPipelineEnginePayloadShaper_RejectsUndeclaredFieldsAcrossCrossFlowOutpu
 	req := runtimeengine.ExecutionRequest{
 		EntityID: identity.NormalizeEntityID("ent-child"),
 		FlowID:   identity.NormalizeFlowID("child"),
-		Event: events.NewProjectionEvent("", events.EventType("child/child.internal"), "", "", json.RawMessage(`{"entity_id":"ent-child"}`), 0, "", "", events.EventEnvelope{}, time.Time{}).
-			WithEntityID("ent-child"),
+		Event: eventtest.WithEntityID(eventtest.Projection("", events.EventType("child/child.internal"), "", "", json.RawMessage(`{"entity_id":"ent-child"}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+			"ent-child"),
+
 		State: runtimeengine.StateSnapshot{
 			EntityID:     identity.NormalizeEntityID("ent-child"),
 			StateCarrier: runtimeengine.NewStateCarrier(map[string]any{"flow_path": "child/inst-1", "subject_id": "ent-parent", "parent_entity_id": "ent-parent"}, nil, nil),
@@ -2536,8 +2542,9 @@ func TestPipelineEnginePayloadShaper_AllowsDeclaredPayloadOnActionSurface(t *tes
 	req := runtimeengine.ExecutionRequest{
 		EntityID: identity.NormalizeEntityID("ent-child"),
 		FlowID:   identity.NormalizeFlowID("child"),
-		Event: events.NewProjectionEvent("", events.EventType("child/child.internal"), "", "", json.RawMessage(`{"entity_id":"ent-child","step":"done"}`), 0, "", "", events.EventEnvelope{}, time.Time{}).
-			WithEntityID("ent-child"),
+		Event: eventtest.WithEntityID(eventtest.Projection("", events.EventType("child/child.internal"), "", "", json.RawMessage(`{"entity_id":"ent-child","step":"done"}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+			"ent-child"),
+
 		State: runtimeengine.StateSnapshot{
 			EntityID:     identity.NormalizeEntityID("ent-child"),
 			StateCarrier: runtimeengine.NewStateCarrier(map[string]any{"flow_path": "child/inst-1", "subject_id": "ent-parent", "parent_entity_id": "ent-parent"}, nil, nil),
@@ -2578,8 +2585,9 @@ func TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsOnActionSurface
 	req := runtimeengine.ExecutionRequest{
 		EntityID: identity.NormalizeEntityID("ent-child"),
 		FlowID:   identity.NormalizeFlowID("child"),
-		Event: events.NewProjectionEvent("", events.EventType("child/child.start"), "", "", json.RawMessage(`{"entity_id":"ent-child"}`), 0, "", "", events.EventEnvelope{}, time.Time{}).
-			WithEntityID("ent-child"),
+		Event: eventtest.WithEntityID(eventtest.Projection("", events.EventType("child/child.start"), "", "", json.RawMessage(`{"entity_id":"ent-child"}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+			"ent-child"),
+
 		State: runtimeengine.StateSnapshot{
 			EntityID:     identity.NormalizeEntityID("ent-child"),
 			StateCarrier: runtimeengine.NewStateCarrier(map[string]any{"flow_path": "child/inst-1", "subject_id": "ent-parent", "parent_entity_id": "ent-parent"}, nil, nil),
@@ -2622,8 +2630,9 @@ func TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsForConcreteTemp
 	req := runtimeengine.ExecutionRequest{
 		EntityID: identity.NormalizeEntityID("ent-child"),
 		FlowID:   identity.NormalizeFlowID("child"),
-		Event: events.NewProjectionEvent("", events.EventType("child/child.start"), "", "", json.RawMessage(`{"entity_id":"ent-child"}`), 0, "", "", events.EventEnvelope{}, time.Time{}).
-			WithEntityID("ent-child"),
+		Event: eventtest.WithEntityID(eventtest.Projection("", events.EventType("child/child.start"), "", "", json.RawMessage(`{"entity_id":"ent-child"}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+			"ent-child"),
+
 		State: runtimeengine.StateSnapshot{
 			EntityID:     identity.NormalizeEntityID("ent-child"),
 			StateCarrier: runtimeengine.NewStateCarrier(map[string]any{"flow_path": "child/inst-1", "subject_id": "ent-parent", "parent_entity_id": "ent-parent"}, nil, nil),
@@ -2667,8 +2676,9 @@ func TestPipelineEnginePayloadShaper_RejectsEnvelopeOnlyRequiredFieldOnActionSur
 	req := runtimeengine.ExecutionRequest{
 		EntityID: identity.NormalizeEntityID("ent-child"),
 		FlowID:   identity.NormalizeFlowID("child"),
-		Event: events.NewProjectionEvent("", events.EventType("child/child.start"), "", "", json.RawMessage(`{"entity_id":"ent-child"}`), 0, "", "", events.EventEnvelope{}, time.Time{}).
-			WithEntityID("ent-child"),
+		Event: eventtest.WithEntityID(eventtest.Projection("", events.EventType("child/child.start"), "", "", json.RawMessage(`{"entity_id":"ent-child"}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+			"ent-child"),
+
 		State: runtimeengine.StateSnapshot{
 			EntityID:     identity.NormalizeEntityID("ent-child"),
 			StateCarrier: runtimeengine.NewStateCarrier(map[string]any{"flow_path": "child/inst-1", "subject_id": "ent-parent", "parent_entity_id": "ent-parent"}, nil, nil),
@@ -2733,8 +2743,9 @@ func TestPipelineEnginePayloadShaper_UsesRootNamedTypeSchemaForChildOutput(t *te
 	req := runtimeengine.ExecutionRequest{
 		EntityID: identity.NormalizeEntityID("ent-child"),
 		FlowID:   identity.NormalizeFlowID("child"),
-		Event: events.NewProjectionEvent("", events.EventType("child/child.internal"), "", "", json.RawMessage(`{"entity_id":"ent-child"}`), 0, "", "", events.EventEnvelope{}, time.Time{}).
-			WithEntityID("ent-child"),
+		Event: eventtest.WithEntityID(eventtest.Projection("", events.EventType("child/child.internal"), "", "", json.RawMessage(`{"entity_id":"ent-child"}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+			"ent-child"),
+
 		State: runtimeengine.StateSnapshot{
 			EntityID:     identity.NormalizeEntityID("ent-child"),
 			StateCarrier: runtimeengine.NewStateCarrier(map[string]any{"flow_path": "child/inst-1"}, nil, nil),
@@ -2787,8 +2798,9 @@ func TestPipelineEnginePayloadShaper_RejectsUndeclaredFieldsOnActionSurface(t *t
 	req := runtimeengine.ExecutionRequest{
 		EntityID: identity.NormalizeEntityID("ent-child"),
 		FlowID:   identity.NormalizeFlowID("child"),
-		Event: events.NewProjectionEvent("", events.EventType("child/child.internal"), "", "", json.RawMessage(`{"entity_id":"ent-child","step":"done"}`), 0, "", "", events.EventEnvelope{}, time.Time{}).
-			WithEntityID("ent-child"),
+		Event: eventtest.WithEntityID(eventtest.Projection("", events.EventType("child/child.internal"), "", "", json.RawMessage(`{"entity_id":"ent-child","step":"done"}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+			"ent-child"),
+
 		State: runtimeengine.StateSnapshot{
 			EntityID:     identity.NormalizeEntityID("ent-child"),
 			StateCarrier: runtimeengine.NewStateCarrier(map[string]any{"flow_path": "child/inst-1", "subject_id": "ent-parent", "parent_entity_id": "ent-parent"}, nil, nil),

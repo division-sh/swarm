@@ -5,18 +5,18 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"time"
 )
 
 func TestCorrelateEvent_InheritsRunAndParentWithoutGeneratingTrace(t *testing.T) {
-	inbound := events.NewProjectionEvent("evt-parent",
+	inbound := eventtest.Projection("evt-parent",
 		events.EventType("task.started"), "", "", nil, 0, "run-123", "", events.EventEnvelope{}, time.Time{})
 
 	ctx := WithInboundEvent(context.Background(), inbound)
 
-	ctx, child := CorrelateEvent(ctx, events.NewProjectionEvent("evt-child",
-		events.EventType("task.completed"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
-	)
+	ctx, child := CorrelateEvent(ctx, eventtest.Projection("evt-child",
+		events.EventType("task.completed"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 
 	if got := child.RunID(); got != "run-123" {
 		t.Fatalf("child run_id = %q, want run-123", got)
@@ -30,9 +30,8 @@ func TestCorrelateEvent_InheritsRunAndParentWithoutGeneratingTrace(t *testing.T)
 }
 
 func TestCorrelateEvent_DoesNotGenerateRunWithoutAdmission(t *testing.T) {
-	ctx, evt := CorrelateEvent(context.Background(), events.NewProjectionEvent("evt-root",
-		events.EventType("task.started"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
-	)
+	ctx, evt := CorrelateEvent(context.Background(), eventtest.Projection("evt-root",
+		events.EventType("task.started"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 	if evt.RunID() != "" {
 		t.Fatalf("run_id = %q, want empty before admission", evt.RunID())
 	}
@@ -45,9 +44,8 @@ func TestCorrelateEvent_DoesNotGenerateRunWithoutAdmission(t *testing.T) {
 }
 
 func TestCorrelateEvent_PreservesExplicitEventRunID(t *testing.T) {
-	ctx, evt := CorrelateEvent(context.Background(), events.NewProjectionEvent("evt-child",
-		events.EventType("task.started"), "", "", nil, 0, "run-explicit", "", events.EventEnvelope{}, time.Time{}),
-	)
+	ctx, evt := CorrelateEvent(context.Background(), eventtest.Projection("evt-child",
+		events.EventType("task.started"), "", "", nil, 0, "run-explicit", "", events.EventEnvelope{}, time.Time{}))
 	if got := evt.RunID(); got != "run-explicit" {
 		t.Fatalf("event run_id = %q, want run-explicit", got)
 	}
@@ -69,9 +67,8 @@ func TestCorrelateEvent_UsesTypedRuntimeLineageParent(t *testing.T) {
 		SelectedForkContext: true,
 	})
 
-	_, child := CorrelateEvent(ctx, events.NewProjectionEvent("evt-child",
-		events.EventType("task.completed"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
-	)
+	_, child := CorrelateEvent(ctx, eventtest.Projection("evt-child",
+		events.EventType("task.completed"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 
 	if got := child.RunID(); got != "run-fork" {
 		t.Fatalf("child run_id = %q, want run-fork", got)
@@ -88,9 +85,8 @@ func TestCorrelateEvent_DoesNotSelfParentTypedRuntimeLineageSubject(t *testing.T
 		ParentEventID:  "evt-selected",
 	})
 
-	_, selected := CorrelateEvent(ctx, events.NewProjectionEvent("evt-selected",
-		events.EventType("validation/validation.package_ready"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
-	)
+	_, selected := CorrelateEvent(ctx, eventtest.Projection("evt-selected",
+		events.EventType("validation/validation.package_ready"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 
 	if got := selected.RunID(); got != "run-fork" {
 		t.Fatalf("selected run_id = %q, want run-fork", got)
@@ -106,9 +102,8 @@ func TestWithInboundEvent_RefinesTypedRuntimeLineageSubject(t *testing.T) {
 		RunID:               "run-fork",
 		SelectedForkContext: true,
 	})
-	ctx = WithInboundEvent(ctx, events.NewProjectionEvent("evt-selected",
-		events.EventType("task.assigned"), "", "", nil, 0, "run-fork", "", events.EventEnvelope{}, time.Time{}),
-	)
+	ctx = WithInboundEvent(ctx, eventtest.Projection("evt-selected",
+		events.EventType("task.assigned"), "", "", nil, 0, "run-fork", "", events.EventEnvelope{}, time.Time{}))
 
 	lineage, ok := RuntimeLineageFromContext(ctx)
 	if !ok {

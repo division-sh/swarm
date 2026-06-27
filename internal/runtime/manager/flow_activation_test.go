@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -383,7 +384,7 @@ func testActivationRequest(bundle *runtimecontracts.WorkflowContractBundle, temp
 }
 
 func testFlowActivationTriggerEvent(eventID string) events.Event {
-	return events.NewProjectionEvent(strings.TrimSpace(eventID),
+	return eventtest.Projection(strings.TrimSpace(eventID),
 		events.EventType("spawn.requested"),
 		"spawner", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
@@ -409,7 +410,7 @@ func findPublishedFlowActivationEvent(t *testing.T, bus *flowActivationTestBus, 
 		}
 	}
 	t.Fatalf("published events = %#v, want %s", bus.published, eventType)
-	return events.NewProjectionEvent("", events.EventType(""), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
+	return eventtest.Projection("", events.EventType(""), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
 }
 
 func TestActivateFlowInstanceAddsDerivedRouteTableInstance(t *testing.T) {

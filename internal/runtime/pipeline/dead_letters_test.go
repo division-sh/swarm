@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimerterr "github.com/division-sh/swarm/internal/runtime/rterrors"
@@ -78,7 +79,7 @@ func TestSystemNodeRunner_RecordsDeadLetterRow(t *testing.T) {
 	}, eventReceiptsCapabilityStub{enabled: true}.resolve)
 	runner.SetRetryPolicyForTest(2, func(int) time.Duration { return 0 })
 
-	evt := events.NewProjectionEvent(uuid.NewString(),
+	evt := eventtest.Projection(uuid.NewString(),
 		"source.evt",
 		"src", "", []byte(`{"entity_id":"`+uuid.NewString()+`"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
@@ -143,11 +144,12 @@ func TestCoordinator_RecordsChainDepthDeadLetterRow(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := context.Background()
 	entityID := uuid.NewString()
-	evt := (events.NewProjectionEvent(uuid.NewString(),
+	evt := eventtest.WithEntityID((eventtest.Projection(uuid.NewString(),
 		"chain.start",
 		"src", "", []byte(`{}`),
 
-		5, testPipelineRunID, "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID(entityID)
+		5, testPipelineRunID, "", events.EventEnvelope{}, time.Now().UTC())), entityID)
+
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO events (event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
 		VALUES ($1::uuid, $2, $3::uuid, 'runtime', 'entity', $4::jsonb, 'src', 'agent', now())
@@ -230,7 +232,7 @@ func TestSystemNodeRunner_SkipsQuiescedDestructiveResetDelivery(t *testing.T) {
 		return errors.New("should not run")
 	})
 
-	runner.ProcessEventForTest(ctx, events.NewProjectionEvent(eventID, "source.evt", "", "", []byte(`{}`), 0, testPipelineRunID, "", events.EventEnvelope{}, time.Now().UTC()))
+	runner.ProcessEventForTest(ctx, eventtest.Projection(eventID, "source.evt", "", "", []byte(`{}`), 0, testPipelineRunID, "", events.EventEnvelope{}, time.Now().UTC()))
 
 	if handled != 0 {
 		t.Fatalf("handler calls = %d, want 0 for quiesced delivery", handled)
@@ -257,7 +259,7 @@ func TestSystemNodeRunner_NonRetryableRuntimeErrorDeadLettersImmediately(t *test
 	}, 0, eventReceiptsCapabilityStub{enabled: true}.resolve)
 	runner.SetRetryPolicyForTest(5, func(int) time.Duration { return 0 })
 
-	evt := events.NewProjectionEvent(uuid.NewString(),
+	evt := eventtest.Projection(uuid.NewString(),
 		"source.evt",
 		"src", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
@@ -292,9 +294,10 @@ func TestSystemNodeRunner_FailsClosedWithoutCanonicalEventReceiptsCapability(t *
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := context.Background()
 	entityID := uuid.NewString()
-	evt := (events.NewProjectionEvent(uuid.NewString(),
+	evt := eventtest.WithEntityID((eventtest.Projection(uuid.NewString(),
 		"source.evt",
-		"src", "", []byte(`{"entity_id":"`+entityID+`"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID(entityID)
+		"src", "", []byte(`{"entity_id":"`+entityID+`"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())), entityID)
+
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO events (event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
 		VALUES ($1::uuid, $2, $3::uuid, 'runtime', 'entity', $4::jsonb, 'src', 'agent', now())
@@ -325,9 +328,10 @@ func TestSystemNodeRunner_UsesCanonicalEventReceiptsCapabilityForIdempotency(t *
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := context.Background()
 	entityID := uuid.NewString()
-	evt := (events.NewProjectionEvent(uuid.NewString(),
+	evt := eventtest.WithEntityID((eventtest.Projection(uuid.NewString(),
 		"source.evt",
-		"src", "", []byte(`{"entity_id":"`+entityID+`"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID(entityID)
+		"src", "", []byte(`{"entity_id":"`+entityID+`"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())), entityID)
+
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO events (event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
 		VALUES ($1::uuid, $2, $3::uuid, 'runtime', 'entity', $4::jsonb, 'src', 'agent', now())
@@ -365,9 +369,10 @@ func TestSystemNodeRunner_SkipsWithoutPersistedNodeDeliveryAuthority(t *testing.
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := context.Background()
 	entityID := uuid.NewString()
-	evt := (events.NewProjectionEvent(uuid.NewString(),
+	evt := eventtest.WithEntityID((eventtest.Projection(uuid.NewString(),
 		"source.evt",
-		"src", "", []byte(`{"entity_id":"`+entityID+`"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID(entityID)
+		"src", "", []byte(`{"entity_id":"`+entityID+`"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())), entityID)
+
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO events (event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
 		VALUES ($1::uuid, $2, $3::uuid, 'runtime', 'entity', $4::jsonb, 'src', 'agent', now())
@@ -413,7 +418,7 @@ func TestSystemNodeRunner_UsesTypedReceiptOwnerWithoutRawDB(t *testing.T) {
 		attempts++
 		return nil
 	}, 0, eventReceiptsCapabilityStub{enabled: true}.resolve)
-	evt := events.NewProjectionEvent(uuid.NewString(),
+	evt := eventtest.Projection(uuid.NewString(),
 		"source.evt", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
 	runner.ProcessEventForTest(ctx, evt)
@@ -456,9 +461,10 @@ func TestCoordinator_InterceptHandlerErrorDoesNotSilentlyFallback(t *testing.T) 
 		},
 		EventReceiptsCapability: eventReceiptsCapabilityStub{enabled: true}.resolve,
 	})
-	evt := (events.NewProjectionEvent(uuid.NewString(),
+	evt := eventtest.WithEntityID((eventtest.Projection(uuid.NewString(),
 		events.EventType("score.dimension_complete"),
-		"analysis-agent", "", []byte(`{"entity_id":"`+uuid.NewString()+`","dimension":"expansion_potential","score":74,"tier":3}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID(uuid.NewString())
+		"analysis-agent", "", []byte(`{"entity_id":"`+uuid.NewString()+`","dimension":"expansion_potential","score":74,"tier":3}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())), uuid.NewString())
+
 	if _, err := db.ExecContext(context.Background(), `
 		INSERT INTO events (event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
 		VALUES ($1::uuid, $2, NULLIF($3,'')::uuid, 'runtime', 'entity', $4::jsonb, 'analysis-agent', 'agent', now())

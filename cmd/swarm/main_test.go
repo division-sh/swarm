@@ -25,6 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -107,10 +108,11 @@ func (a delayedRunStatusAgent) OnEvent(ctx context.Context, evt events.Event) ([
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
-	out := (events.NewProjectionEvent(uuid.NewString(),
+	out := eventtest.WithEntityID((eventtest.Projection(uuid.NewString(),
 
 		events.EventType("scan.completed"),
-		a.id, "", []byte(`{}`), 0, evt.RunID(), "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID(evt.EntityID())
+		a.id, "", []byte(`{}`), 0, evt.RunID(), "", events.EventEnvelope{}, time.Now().UTC())), evt.EntityID())
+
 	return []events.Event{out}, nil
 }
 
@@ -147,10 +149,10 @@ func (r servedEventPublishBlockingLLMRuntime) ContinueSession(ctx context.Contex
 
 func publishRunStatusRootEvent(t *testing.T, bus *runtimebus.EventBus, runID, entityID string) {
 	t.Helper()
-	if err := bus.Publish(context.Background(), (events.NewProjectionEvent(uuid.NewString(),
+	if err := bus.Publish(context.Background(), eventtest.WithEntityID((eventtest.Projection(uuid.NewString(),
 
 		events.EventType("scan.requested"),
-		"api.v1", "", []byte(`{"topic":"sample"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID(entityID)); err != nil {
+		"api.v1", "", []byte(`{"topic":"sample"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())), entityID)); err != nil {
 		t.Fatalf("publish root event: %v", err)
 	}
 }

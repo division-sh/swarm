@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	storepkg "github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -19,9 +20,10 @@ func TestOperatorMailboxHandlersSQLiteReadsMaterializedMailboxWrite(t *testing.T
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	entityID := uuid.NewString()
-	if err := sqliteStore.AppendEvent(ctx, (events.NewProjectionEvent(eventID,
+	if err := sqliteStore.AppendEvent(ctx, eventtest.WithFlowInstance(eventtest.WithEntityID((eventtest.Projection(eventID,
 
-		"mailbox.review_requested", "", "", json.RawMessage(`{"kind":"review"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID(entityID).WithFlowInstance("validation/case-1")); err != nil {
+		"mailbox.review_requested", "", "", json.RawMessage(`{"kind":"review"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())), entityID),
+		"validation/case-1")); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
 	itemID := uuid.NewString()

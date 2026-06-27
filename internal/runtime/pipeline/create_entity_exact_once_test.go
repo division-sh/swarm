@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -44,7 +45,7 @@ func TestCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutations(t *testing.T
 			schedules := pc.timerScheduleStore.(*recordingScheduleStore)
 			mailbox := pc.mailboxMaterializer.(*recordingMailboxWriteMaterializer)
 			eventID := uuid.NewString()
-			evt := events.NewProjectionEvent(eventID,
+			evt := eventtest.Projection(eventID,
 				events.EventType("thing.created"), "", "", mustJSON(map[string]any{"amount": 250, "who": "alice"}), 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EventEnvelope{}, time.Now().UTC())
 
 			seedExactOnceEvent(t, pc.workflowStore, ctx, evt)
@@ -139,7 +140,7 @@ func TestDispatchWorkflowNodeEventSkipsAlreadyProcessedCreateEntityHandler(t *te
 			bus := pc.bus.(*recordingPipelineBus)
 			mailbox := pc.mailboxMaterializer.(*recordingMailboxWriteMaterializer)
 			eventID := uuid.NewString()
-			evt := events.NewProjectionEvent(eventID,
+			evt := eventtest.Projection(eventID,
 				events.EventType("thing.created"), "", "", mustJSON(map[string]any{"amount": 250, "who": "alice"}), 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EventEnvelope{}, time.Now().UTC())
 
 			seedExactOnceEventDelivery(t, pc.workflowStore, ctx, evt, "w-node")

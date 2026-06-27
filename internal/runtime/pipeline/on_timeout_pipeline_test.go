@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -71,7 +72,7 @@ func TestExecuteAuthoritativeNodeHandler_OnTimeoutAdvancesPartial(t *testing.T) 
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 
-	timeoutEvt := events.NewProjectionEvent("timeout-1",
+	timeoutEvt := eventtest.WithEntityID(eventtest.Projection("timeout-1",
 		events.EventType("accumulate.timeout"), "", "", mustJSON(map[string]any{
 			"timer_handle": map[string]any{
 				"kind": "accumulation_timeout",
@@ -80,8 +81,9 @@ func TestExecuteAuthoritativeNodeHandler_OnTimeoutAdvancesPartial(t *testing.T) 
 					"event_type": "item.arrived",
 				},
 			},
-		}), 0, "", "", events.EventEnvelope{}, time.Now().UTC()).
-		WithEntityID("ent-001")
+		}), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
+		"ent-001")
+
 	result, err := pc.executeAuthoritativeNodeHandler(testPipelineCoordinatorRunContext(t, pc), timeoutEvt, workflowTriggerContext{
 		Event: timeoutEvt,
 		State: pc.currentWorkflowState(testPipelineCoordinatorRunContext(t, pc), "ent-001"),

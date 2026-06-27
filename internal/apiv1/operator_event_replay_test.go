@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -289,7 +290,7 @@ func TestOperatorEventReplaySubsetAndFailClosedCases(t *testing.T) {
 		pg := &store.PostgresStore{DB: db}
 		eventID := uuid.NewString()
 		runID := uuid.NewString()
-		if err := pg.AppendEvent(ctx, events.NewProjectionEvent(
+		if err := pg.AppendEvent(ctx, eventtest.Projection(
 			eventID,
 			events.EventType("scan.requested"),
 			"workflow-runtime",
@@ -299,8 +300,7 @@ func TestOperatorEventReplaySubsetAndFailClosedCases(t *testing.T) {
 			runID,
 			"",
 			events.EventEnvelope{EntityID: runID},
-			time.Now().UTC(),
-		)); err != nil {
+			time.Now().UTC())); err != nil {
 			t.Fatalf("AppendEvent: %v", err)
 		}
 		if _, err := db.ExecContext(ctx, `
@@ -663,10 +663,10 @@ func seedReplayableOperatorEvent(t *testing.T, ctx context.Context, pg *store.Po
 	t.Helper()
 	eventID := uuid.NewString()
 	runID := uuid.NewString()
-	if err := pg.AppendEvent(ctx, (events.NewProjectionEvent(eventID,
+	if err := pg.AppendEvent(ctx, eventtest.WithEntityID((eventtest.Projection(eventID,
 
 		events.EventType(eventName),
-		"origin-agent", "", []byte(`{"topic":"medicine"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID(runID)); err != nil {
+		"origin-agent", "", []byte(`{"topic":"medicine"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())), runID)); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
 	if err := pg.InsertEventDeliveries(ctx, eventID, subscribers); err != nil {

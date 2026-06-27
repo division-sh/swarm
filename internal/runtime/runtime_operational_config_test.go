@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -166,7 +167,7 @@ func TestRuntimeStart_AllowsRecoveryDisabledWithManagerSnapshotWork(t *testing.T
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	eventStore := &recoveryGuardEventStore{
 		missing: []events.PersistedReplayEvent{{
-			Event: events.NewProjectionEvent("evt-1",
+			Event: eventtest.Projection("evt-1",
 				"support.item_created", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		}},
 		routes: []runtimeflowidentity.Route{

@@ -15,6 +15,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/apispec"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	"github.com/division-sh/swarm/internal/runtime/bundledelete"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
@@ -1302,10 +1303,9 @@ func (s *mutatingProbeMailboxStore) DecideV1MailboxItem(ctx context.Context, dec
 			}
 			result.DownstreamSubscribers = &subscribers
 			result.DownstreamSubscriberSource = strings.TrimSpace(decision.ApprovalEventSubscriberSource)
-			if err := decision.ApprovalEventPublish(ctx, events.NewProjectionEvent(eventID,
+			if err := decision.ApprovalEventPublish(ctx, eventtest.Projection(eventID,
 				events.EventType(decision.ApprovalEventType),
-				"mailbox", "", json.RawMessage(`{"mailbox_id":"mailbox-1"}`), 0, "", "", events.EventEnvelope{}, decision.Now),
-			); err != nil {
+				"mailbox", "", json.RawMessage(`{"mailbox_id":"mailbox-1"}`), 0, "", "", events.EventEnvelope{}, decision.Now)); err != nil {
 				return store.APIIdempotencyCompletion{}, err
 			}
 		}

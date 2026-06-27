@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"time"
 )
 
@@ -144,7 +145,7 @@ func TestEventBusPublish_UsesRouteTableWildcardSubscriberResolution(t *testing.T
 	recorder := NewEmittedEventsRecorder()
 	ctx := WithEmittedEventsRecorder(context.Background(), recorder)
 
-	if err := eb.Publish(ctx, events.NewProjectionEvent("", eventType, "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})); err != nil {
+	if err := eb.Publish(ctx, eventtest.Projection("", eventType, "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	evt := requireBusEvent(t, ch, "routed wildcard delivery")

@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -203,9 +204,10 @@ func TestRoleScopedEntityTools_SQLiteCurrentEntityPersistence(t *testing.T) {
 		WorkflowSource:    semanticview.Wrap(bundle),
 		AuthorityProvider: allowHumanTaskAuthority{},
 	})
-	currentCtx := runtimetools.WithActor(runtimebus.WithInboundEvent(ctx, events.NewProjectionEvent("evt-current",
-		events.EventType("validation.started"), "", "", nil, 0, entityToolTestRunID, "", events.EventEnvelope{}, time.Time{}).
-		WithEntityID(entityID).WithFlowInstance("validation/inst-1")), actor)
+	currentCtx := runtimetools.WithActor(runtimebus.WithInboundEvent(ctx, eventtest.WithFlowInstance(eventtest.WithEntityID(eventtest.Projection("evt-current",
+		events.EventType("validation.started"), "", "", nil, 0, entityToolTestRunID, "", events.EventEnvelope{}, time.Time{}),
+		entityID),
+		"validation/inst-1")), actor)
 
 	names := roleScopedToolDefinitionMap(exec.ToolDefinitionsForActorInContext(currentCtx, actor))
 	if _, ok := names["read_validation_case"]; !ok {

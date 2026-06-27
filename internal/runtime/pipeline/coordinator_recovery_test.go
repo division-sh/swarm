@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
@@ -187,11 +188,11 @@ func TestRecoveryManager_ReplaysPersistedCorrelationEnvelope(t *testing.T) {
 	parentID := uuid.NewString()
 	childID := uuid.NewString()
 
-	parent := events.NewProjectionEvent(parentID,
+	parent := eventtest.Projection(parentID,
 		events.EventType("system.parent"),
 		"runtime", "", []byte(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC())
 
-	child := events.NewProjectionEvent(childID,
+	child := eventtest.Projection(childID,
 		events.EventType("system.recover"),
 		"runtime", "", []byte(`{"ok":true}`), 0, runID,
 		parentID, events.EventEnvelope{}, time.Now().Add(-1*time.Minute).UTC())
@@ -452,17 +453,15 @@ func TestRecoveryManager_QuarantinesMissingPersistedRunIDAndContinues(t *testing
 	`, badEventID); err != nil {
 		t.Fatalf("seed malformed event: %v", err)
 	}
-	if err := pg.AppendEvent(ctx, events.NewProjectionEvent(goodParentID,
+	if err := pg.AppendEvent(ctx, eventtest.Projection(goodParentID,
 		events.EventType("system.parent"),
-		"runtime", "", []byte(`{"ok":true}`), 0, goodRunID, "", events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC()),
-	); err != nil {
+		"runtime", "", []byte(`{"ok":true}`), 0, goodRunID, "", events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC())); err != nil {
 		t.Fatalf("AppendEvent(good parent): %v", err)
 	}
-	if err := pg.AppendEvent(ctx, events.NewProjectionEvent(goodEventID,
+	if err := pg.AppendEvent(ctx, eventtest.Projection(goodEventID,
 		events.EventType("system.recover.good"),
 		"runtime", "", []byte(`{"ok":true}`), 0, goodRunID,
-		goodParentID, events.EventEnvelope{}, time.Now().Add(-1*time.Minute).UTC()),
-	); err != nil {
+		goodParentID, events.EventEnvelope{}, time.Now().Add(-1*time.Minute).UTC())); err != nil {
 		t.Fatalf("AppendEvent(good child): %v", err)
 	}
 	if err := pg.InsertEventDeliveries(ctx, goodEventID, []string{goodRecipientID}); err != nil {
@@ -536,10 +535,9 @@ func TestRecoveryManager_QuarantinesMissingRunIDSchemaCapability(t *testing.T) {
 
 	eventID := uuid.NewString()
 	parentID := uuid.NewString()
-	if err := pg.AppendEvent(ctx, events.NewProjectionEvent(eventID,
+	if err := pg.AppendEvent(ctx, eventtest.Projection(eventID,
 		events.EventType("system.recover.no-run-id"),
-		"runtime", "", []byte(`{"ok":true}`), 0, "", parentID, events.EventEnvelope{}, time.Now().Add(-time.Minute).UTC()),
-	); err != nil {
+		"runtime", "", []byte(`{"ok":true}`), 0, "", parentID, events.EventEnvelope{}, time.Now().Add(-time.Minute).UTC())); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
 
@@ -583,17 +581,15 @@ func TestRecoveryManager_ClaimsReplayOwnershipUnderOverlap(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if err := pg1.AppendEvent(ctx, events.NewProjectionEvent(parentID,
+	if err := pg1.AppendEvent(ctx, eventtest.Projection(parentID,
 		events.EventType("system.parent"),
-		"runtime", "", []byte(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC()),
-	); err != nil {
+		"runtime", "", []byte(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC())); err != nil {
 		t.Fatalf("AppendEvent(parent): %v", err)
 	}
-	if err := pg1.AppendEvent(ctx, events.NewProjectionEvent(childID,
+	if err := pg1.AppendEvent(ctx, eventtest.Projection(childID,
 		events.EventType("system.recover"),
 		"runtime", "", []byte(`{"ok":true}`), 0, runID,
-		parentID, events.EventEnvelope{}, time.Now().Add(-time.Minute).UTC()),
-	); err != nil {
+		parentID, events.EventEnvelope{}, time.Now().Add(-time.Minute).UTC())); err != nil {
 		t.Fatalf("AppendEvent(child): %v", err)
 	}
 	if err := pg1.InsertEventDeliveries(ctx, childID, []string{"agent-recovery"}); err != nil {
@@ -669,11 +665,11 @@ func TestRecoveryManager_ExplicitlySkipsReplayWithoutPersistedRecipients(t *test
 	parentID := uuid.NewString()
 	childID := uuid.NewString()
 
-	parent := events.NewProjectionEvent(parentID,
+	parent := eventtest.Projection(parentID,
 		events.EventType("system.parent"),
 		"runtime", "", []byte(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC())
 
-	child := events.NewProjectionEvent(childID,
+	child := eventtest.Projection(childID,
 		events.EventType("system.recover.no_recipients"),
 		"runtime", "", []byte(`{"ok":true}`), 0, runID,
 		parentID, events.EventEnvelope{}, time.Now().Add(-1*time.Minute).UTC())
@@ -775,19 +771,20 @@ func TestRecoveryManager_UsesPersistedDeliveryRecipientsInsteadOfCurrentSubscrip
 	eventID := uuid.NewString()
 	entityID := uuid.NewString()
 
-	if err := pg.AppendEvent(ctx, events.NewProjectionEvent(parentID,
+	if err := pg.AppendEvent(ctx, eventtest.WithEntityID(eventtest.Projection(parentID,
 		events.EventType("system.parent"),
-		"runtime", "", []byte(`{"entity_id":"`+entityID+`"}`), 0, runID, "", events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC()).
-		WithEntityID(entityID)); err != nil {
+		"runtime", "", []byte(`{"entity_id":"`+entityID+`"}`), 0, runID, "", events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC()),
+		entityID)); err != nil {
 		t.Fatalf("AppendEvent(parent): %v", err)
 	}
 	if err := pg.UpsertPipelineReceipt(ctx, parentID, "processed", ""); err != nil {
 		t.Fatalf("UpsertPipelineReceipt(parent): %v", err)
 	}
-	child := (events.NewProjectionEvent(eventID,
+	child := eventtest.WithEntityID((eventtest.Projection(eventID,
 		events.EventType("system.recover.explicit"),
 		"runtime", "", []byte(`{"entity_id":"`+entityID+`"}`), 0, runID,
-		parentID, events.EventEnvelope{}, time.Now().Add(-time.Minute).UTC())).WithEntityID(entityID)
+		parentID, events.EventEnvelope{}, time.Now().Add(-time.Minute).UTC())), entityID)
+
 	if err := pg.AppendEvent(ctx, child); err != nil {
 		t.Fatalf("AppendEvent(child): %v", err)
 	}
@@ -851,20 +848,18 @@ func TestRecoveryManager_ReplaysSubscribedInternalOnlyUsingCommittedReplayScope(
 	parentID := uuid.NewString()
 	eventID := uuid.NewString()
 
-	if err := pg.AppendEvent(ctx, events.NewProjectionEvent(parentID,
+	if err := pg.AppendEvent(ctx, eventtest.Projection(parentID,
 		events.EventType("system.parent"),
-		"runtime", "", []byte(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC()),
-	); err != nil {
+		"runtime", "", []byte(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC())); err != nil {
 		t.Fatalf("AppendEvent(parent): %v", err)
 	}
 	if err := pg.UpsertPipelineReceipt(ctx, parentID, "processed", ""); err != nil {
 		t.Fatalf("UpsertPipelineReceipt(parent): %v", err)
 	}
-	if err := pg.AppendEvent(ctx, events.NewProjectionEvent(eventID,
+	if err := pg.AppendEvent(ctx, eventtest.Projection(eventID,
 		events.EventType("system.recover.internal"),
 		"runtime", "", []byte(`{"ok":true}`), 0, runID,
-		parentID, events.EventEnvelope{}, time.Now().Add(-time.Minute).UTC()),
-	); err != nil {
+		parentID, events.EventEnvelope{}, time.Now().Add(-time.Minute).UTC())); err != nil {
 		t.Fatalf("AppendEvent(child): %v", err)
 	}
 	persistCommittedReplayScope(t, ctx, pg, eventID, runtimereplayclaim.CommittedReplayScopeSubscribed)
@@ -904,20 +899,18 @@ func TestRecoveryManager_DirectEmptyManifestDoesNotBroadenToCurrentInternalSubsc
 	parentID := uuid.NewString()
 	eventID := uuid.NewString()
 
-	if err := pg.AppendEvent(ctx, events.NewProjectionEvent(parentID,
+	if err := pg.AppendEvent(ctx, eventtest.Projection(parentID,
 		events.EventType("system.parent"),
-		"runtime", "", []byte(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC()),
-	); err != nil {
+		"runtime", "", []byte(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC())); err != nil {
 		t.Fatalf("AppendEvent(parent): %v", err)
 	}
 	if err := pg.UpsertPipelineReceipt(ctx, parentID, "processed", ""); err != nil {
 		t.Fatalf("UpsertPipelineReceipt(parent): %v", err)
 	}
-	if err := pg.AppendEvent(ctx, events.NewProjectionEvent(eventID,
+	if err := pg.AppendEvent(ctx, eventtest.Projection(eventID,
 		events.EventType("system.recover.direct_empty"),
 		"runtime", "", []byte(`{"ok":true}`), 0, runID,
-		parentID, events.EventEnvelope{}, time.Now().Add(-time.Minute).UTC()),
-	); err != nil {
+		parentID, events.EventEnvelope{}, time.Now().Add(-time.Minute).UTC())); err != nil {
 		t.Fatalf("AppendEvent(child): %v", err)
 	}
 	persistCommittedReplayScope(t, ctx, pg, eventID, runtimereplayclaim.CommittedReplayScopeDirect)
@@ -942,9 +935,8 @@ func TestRecoveryManager_DirectEmptyManifestDoesNotBroadenToCurrentInternalSubsc
 func TestRecoveryManager_FailsClosedWithoutReplayClaimOwner(t *testing.T) {
 	store := &recoveryMissingClaimStore{
 		events: []events.PersistedReplayEvent{
-			{Event: events.NewProjectionEvent("evt-missing-claim",
-				events.EventType("system.recover"), "", "", []byte(`{"ok":true}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
-			},
+			{Event: eventtest.Projection("evt-missing-claim",
+				events.EventType("system.recover"), "", "", []byte(`{"ok":true}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())},
 		},
 		deliveries: map[string][]string{"evt-missing-claim": {"agent-a"}},
 	}

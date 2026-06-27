@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
@@ -879,18 +880,20 @@ func TestGatewayMCPToolsForRequest_FiltersRoleScopedToolsByTurnEntityEligibility
 	actor := models.AgentConfig{ID: "market-research-agent", Role: "market_research"}
 	putTestTurnContext(t, registry, "ctx-invalid-current-entity", TurnContext{
 		Actor: actor,
-		Inbound: events.NewProjectionEvent("evt-root",
-			events.EventType("discovery/market_research.corpus_file_assigned"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}).
-			WithEntityID("root-run-id"),
+		Inbound: eventtest.WithEntityID(eventtest.Projection("evt-root",
+			events.EventType("discovery/market_research.corpus_file_assigned"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+			"root-run-id"),
+
 		HasInbound: true,
 		CreatedAt:  time.Now().UTC(),
 		ExpiresAt:  time.Now().UTC().Add(time.Hour),
 	})
 	putTestTurnContext(t, registry, "ctx-valid-current-entity", TurnContext{
 		Actor: actor,
-		Inbound: events.NewProjectionEvent("evt-scan",
-			events.EventType("discovery/market_research.corpus_file_assigned"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}).
-			WithEntityID("valid-scan-campaign-id"),
+		Inbound: eventtest.WithEntityID(eventtest.Projection("evt-scan",
+			events.EventType("discovery/market_research.corpus_file_assigned"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+			"valid-scan-campaign-id"),
+
 		HasInbound: true,
 		CreatedAt:  time.Now().UTC(),
 		ExpiresAt:  time.Now().UTC().Add(time.Hour),
@@ -1820,7 +1823,7 @@ func TestGatewayExecutionContext_UsesInboundTraceNotRequestTraceOnResolvedTurn(t
 	})
 	putTestTurnContext(t, registry, "ctx-trace", TurnContext{
 		Actor:      models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
-		Inbound:    events.NewProjectionEvent("evt-1", events.EventType(""), "", "", nil, 0, "run-1", "", events.EventEnvelope{}, time.Time{}),
+		Inbound:    eventtest.Projection("evt-1", events.EventType(""), "", "", nil, 0, "run-1", "", events.EventEnvelope{}, time.Time{}),
 		HasInbound: true,
 		CreatedAt:  time.Now().UTC(),
 		ExpiresAt:  time.Now().UTC().Add(time.Hour),
@@ -1843,7 +1846,7 @@ func TestGatewayExecutionContext_RestoresTypedRuntimeLineageOnResolvedTurn(t *te
 	})
 	putTestTurnContext(t, registry, "ctx-lineage", TurnContext{
 		Actor: models.AgentConfig{ID: "validation-coordinator", Role: "validation"},
-		Inbound: events.NewProjectionEvent("3134bdf0-2ce0-4260-93bd-f0a45371b7d7",
+		Inbound: eventtest.Projection("3134bdf0-2ce0-4260-93bd-f0a45371b7d7",
 			events.EventType("validation/validation.package_ready"), "", "", nil, 0, "a6f6861a-d154-4d38-a2d6-1388f5bb6daf", "", events.EventEnvelope{}, time.Time{}),
 
 		HasInbound: true,

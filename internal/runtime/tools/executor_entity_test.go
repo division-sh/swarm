@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -66,9 +67,9 @@ func selectedForkEntityToolRuntimeContext(actor models.AgentConfig) context.Cont
 		Classification:      runtimecorrelation.RuntimeLineageClassificationForkLocal,
 		SelectedForkContext: true,
 	})
-	return runtimebus.WithInboundEvent(ctx, events.NewProjectionEvent(eventID,
-		events.EventType("validation/validation.package_ready"), "", "", []byte(`{"entity_id":"entity-typed-lineage"}`), 0, entityToolTestRunID, "", events.EventEnvelope{}, time.Unix(1700000000, 0).UTC()).
-		WithEntityID("entity-typed-lineage"))
+	return runtimebus.WithInboundEvent(ctx, eventtest.WithEntityID(eventtest.Projection(eventID,
+		events.EventType("validation/validation.package_ready"), "", "", []byte(`{"entity_id":"entity-typed-lineage"}`), 0, entityToolTestRunID, "", events.EventEnvelope{}, time.Unix(1700000000, 0).UTC()),
+		"entity-typed-lineage"))
 }
 
 func assertEntityToolDiagnosticLineage(t *testing.T, bus *entityToolRuntimeLogBus, index int) {
@@ -417,12 +418,14 @@ func TestRoleScopedEntityTools_CurrentEntityEligibilityFiltersTurnSurface(t *tes
 		"status": "root",
 	}, time.Now().UTC())
 
-	validCtx := runtimebus.WithInboundEvent(ctx, events.NewProjectionEvent("evt-current",
-		events.EventType("validation.started"), "", "", nil, 0, entityToolTestRunID, "", events.EventEnvelope{}, time.Time{}).
-		WithEntityID(currentID).WithFlowInstance("validation/inst-1"))
-	invalidCtx := runtimebus.WithInboundEvent(ctx, events.NewProjectionEvent("evt-root",
-		events.EventType("validation.started"), "", "", nil, 0, entityToolTestRunID, "", events.EventEnvelope{}, time.Time{}).
-		WithEntityID(foreignID).WithFlowInstance("run-root"))
+	validCtx := runtimebus.WithInboundEvent(ctx, eventtest.WithFlowInstance(eventtest.WithEntityID(eventtest.Projection("evt-current",
+		events.EventType("validation.started"), "", "", nil, 0, entityToolTestRunID, "", events.EventEnvelope{}, time.Time{}),
+		currentID),
+		"validation/inst-1"))
+	invalidCtx := runtimebus.WithInboundEvent(ctx, eventtest.WithFlowInstance(eventtest.WithEntityID(eventtest.Projection("evt-root",
+		events.EventType("validation.started"), "", "", nil, 0, entityToolTestRunID, "", events.EventEnvelope{}, time.Time{}),
+		foreignID),
+		"run-root"))
 
 	validNames := roleScopedToolDefinitionMap(exec.ToolDefinitionsForActorInContext(validCtx, actor))
 	for _, name := range []string{"read_validation_case", "read_validation_case_status", "save_validation_case_business_brief", "update_validation_case_business_brief_summary"} {
@@ -476,9 +479,10 @@ func TestRoleScopedEntityTools_GeneratedSchemasAreClosedAndRuntimeRejectsExtras(
 		"status":         "open",
 		"business_brief": map[string]any{"summary": "before", "confidence": 1},
 	}, time.Now().UTC())
-	currentCtx := runtimebus.WithInboundEvent(ctx, events.NewProjectionEvent("evt-current",
-		events.EventType("validation.started"), "", "", nil, 0, entityToolTestRunID, "", events.EventEnvelope{}, time.Time{}).
-		WithEntityID(entityID).WithFlowInstance("validation/inst-1"))
+	currentCtx := runtimebus.WithInboundEvent(ctx, eventtest.WithFlowInstance(eventtest.WithEntityID(eventtest.Projection("evt-current",
+		events.EventType("validation.started"), "", "", nil, 0, entityToolTestRunID, "", events.EventEnvelope{}, time.Time{}),
+		entityID),
+		"validation/inst-1"))
 	if _, err := exec.Execute(currentCtx, "save_validation_case_business_brief", map[string]any{
 		"value": map[string]any{
 			"summary":    "after",
@@ -532,9 +536,10 @@ func TestRoleScopedEntityTools_CurrentEntityBindingAndBypassRejection(t *testing
 	seedEntityStateRow(t, db, foreignID, "", "other/inst-1", "other_case", "queued", map[string]any{
 		"status": "foreign",
 	}, time.Now().UTC())
-	currentCtx := runtimebus.WithInboundEvent(ctx, events.NewProjectionEvent("evt-current",
-		events.EventType("validation.started"), "", "", nil, 0, entityToolTestRunID, "", events.EventEnvelope{}, time.Time{}).
-		WithEntityID(currentID).WithFlowInstance("validation/inst-1"))
+	currentCtx := runtimebus.WithInboundEvent(ctx, eventtest.WithFlowInstance(eventtest.WithEntityID(eventtest.Projection("evt-current",
+		events.EventType("validation.started"), "", "", nil, 0, entityToolTestRunID, "", events.EventEnvelope{}, time.Time{}),
+		currentID),
+		"validation/inst-1"))
 
 	if _, err := exec.Execute(currentCtx, "save_validation_case_business_brief", map[string]any{
 		"value": map[string]any{"summary": "after", "confidence": 9},
@@ -559,9 +564,10 @@ func TestRoleScopedEntityTools_CurrentEntityBindingAndBypassRejection(t *testing
 	if _, err := exec.Execute(ctx, "read_validation_case", map[string]any{}); err == nil {
 		t.Fatalf("read_validation_case succeeded without current inbound entity")
 	}
-	foreignCtx := runtimebus.WithInboundEvent(ctx, events.NewProjectionEvent("evt-foreign",
-		events.EventType("other.started"), "", "", nil, 0, entityToolTestRunID, "", events.EventEnvelope{}, time.Time{}).
-		WithEntityID(foreignID).WithFlowInstance("other/inst-1"))
+	foreignCtx := runtimebus.WithInboundEvent(ctx, eventtest.WithFlowInstance(eventtest.WithEntityID(eventtest.Projection("evt-foreign",
+		events.EventType("other.started"), "", "", nil, 0, entityToolTestRunID, "", events.EventEnvelope{}, time.Time{}),
+		foreignID),
+		"other/inst-1"))
 	if _, err := exec.Execute(foreignCtx, "read_validation_case", map[string]any{}); err == nil {
 		t.Fatalf("read_validation_case accepted foreign current entity")
 	}
@@ -591,9 +597,10 @@ func TestRoleScopedEntityTools_ReadsLargeValidationCaseWithoutLoss(t *testing.T)
 			"technical_approach": specApproach,
 		},
 	}, time.Now().UTC())
-	currentCtx := runtimebus.WithInboundEvent(ctx, events.NewProjectionEvent("evt-current",
-		events.EventType("validation.started"), "", "", nil, 0, entityToolTestRunID, "", events.EventEnvelope{}, time.Time{}).
-		WithEntityID(entityID).WithFlowInstance("validation/inst-1"))
+	currentCtx := runtimebus.WithInboundEvent(ctx, eventtest.WithFlowInstance(eventtest.WithEntityID(eventtest.Projection("evt-current",
+		events.EventType("validation.started"), "", "", nil, 0, entityToolTestRunID, "", events.EventEnvelope{}, time.Time{}),
+		entityID),
+		"validation/inst-1"))
 
 	whole, err := exec.Execute(currentCtx, "read_validation_case", map[string]any{})
 	if err != nil {

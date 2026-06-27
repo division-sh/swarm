@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
@@ -52,7 +53,7 @@ func TestPostgresEventAdmissionRejectsProjectionDirectAppendWithoutAuthoritative
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
-	err := pg.AppendEvent(ctx, events.NewProjectionEvent(
+	err := pg.AppendEvent(ctx, eventtest.Projection(
 		"",
 		events.EventType("task.completed"),
 		"agent-1",
@@ -62,8 +63,7 @@ func TestPostgresEventAdmissionRejectsProjectionDirectAppendWithoutAuthoritative
 		"",
 		"",
 		events.EventEnvelope{},
-		time.Time{},
-	))
+		time.Time{}))
 	if err == nil {
 		t.Fatal("expected malformed projection event to fail admission")
 	}
@@ -73,7 +73,7 @@ func TestPostgresEventAdmissionRejectsProjectionDirectAppendWithoutAuthoritative
 
 	err = pg.AppendEvent(runtimecorrelation.WithRuntimeLineage(ctx, runtimecorrelation.RuntimeLineage{
 		RunID: uuid.NewString(),
-	}), events.NewProjectionEvent(
+	}), eventtest.Projection(
 		uuid.NewString(),
 		events.EventType("task.completed"),
 		"agent-1",
@@ -83,8 +83,8 @@ func TestPostgresEventAdmissionRejectsProjectionDirectAppendWithoutAuthoritative
 		"",
 		"",
 		events.EventEnvelope{},
-		time.Date(2026, 6, 6, 10, 11, 12, 0, time.UTC),
-	))
+		time.Date(2026, 6, 6, 10, 11, 12, 0, time.UTC)),
+	)
 	if err == nil {
 		t.Fatal("expected projection event missing own run_id to fail admission")
 	}
@@ -136,7 +136,7 @@ func TestSQLiteEventAdmissionRejectsProjectionDirectAppendWithoutAuthoritativeFa
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	ctx := context.Background()
 
-	err := sqliteStore.AppendEvent(ctx, events.NewProjectionEvent(
+	err := sqliteStore.AppendEvent(ctx, eventtest.Projection(
 		"",
 		events.EventType("task.completed"),
 		"agent-1",
@@ -146,8 +146,7 @@ func TestSQLiteEventAdmissionRejectsProjectionDirectAppendWithoutAuthoritativeFa
 		"",
 		"",
 		events.EventEnvelope{},
-		time.Time{},
-	))
+		time.Time{}))
 	if err == nil {
 		t.Fatal("expected malformed projection event to fail admission")
 	}
@@ -157,7 +156,7 @@ func TestSQLiteEventAdmissionRejectsProjectionDirectAppendWithoutAuthoritativeFa
 
 	err = sqliteStore.AppendEvent(runtimecorrelation.WithRuntimeLineage(ctx, runtimecorrelation.RuntimeLineage{
 		RunID: uuid.NewString(),
-	}), events.NewProjectionEvent(
+	}), eventtest.Projection(
 		uuid.NewString(),
 		events.EventType("task.completed"),
 		"agent-1",
@@ -167,8 +166,8 @@ func TestSQLiteEventAdmissionRejectsProjectionDirectAppendWithoutAuthoritativeFa
 		"",
 		"",
 		events.EventEnvelope{},
-		time.Date(2026, 6, 6, 10, 11, 12, 0, time.UTC),
-	))
+		time.Date(2026, 6, 6, 10, 11, 12, 0, time.UTC)),
+	)
 	if err == nil {
 		t.Fatal("expected projection event missing own run_id to fail admission")
 	}

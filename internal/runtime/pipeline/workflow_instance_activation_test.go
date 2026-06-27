@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/core/values"
@@ -35,7 +36,7 @@ func TestCreateFlowInstanceResolvesInstanceIDFromPayloadPath(t *testing.T) {
 			return nil
 		},
 	}
-	trigger := (events.NewProjectionEvent("", events.EventType("custom.triggered"), "", "", []byte(`{"entity_id":"ent-1","desired_instance_id":"inst-42","name":"alpha"}`), 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID("ent-1")
+	trigger := eventtest.WithEntityID((eventtest.Projection("", events.EventType("custom.triggered"), "", "", []byte(`{"entity_id":"ent-1","desired_instance_id":"inst-42","name":"alpha"}`), 0, "", "", events.EventEnvelope{}, time.Time{})), "ent-1")
 	triggerCtx := workflowTriggerContext{Event: trigger}
 
 	ok := pc.createFlowInstance(context.Background(), triggerCtx, handlerExecutionPlan{
@@ -70,7 +71,7 @@ func TestCreateFlowInstanceResolvesConfigFromBindings(t *testing.T) {
 			return nil
 		},
 	}
-	trigger := (events.NewProjectionEvent("", events.EventType("spawn.requested"), "", "", []byte(`{"entity_id":"ent-1","instance_id":"inst-42","name":"alpha","priority":1}`), 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID("ent-1")
+	trigger := eventtest.WithEntityID((eventtest.Projection("", events.EventType("spawn.requested"), "", "", []byte(`{"entity_id":"ent-1","instance_id":"inst-42","name":"alpha","priority":1}`), 0, "", "", events.EventEnvelope{}, time.Time{})), "ent-1")
 	triggerCtx := workflowTriggerContext{Event: trigger}
 
 	err := pc.createFlowInstance(context.Background(), triggerCtx, handlerExecutionPlan{
@@ -106,7 +107,7 @@ func TestCreateFlowInstancePreservesNullConfigFromValues(t *testing.T) {
 			return nil
 		},
 	}
-	trigger := (events.NewProjectionEvent("", events.EventType("spawn.requested"), "", "", []byte(`{"entity_id":"ent-1","instance_id":"inst-42","optional_setting":null}`), 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID("ent-1")
+	trigger := eventtest.WithEntityID((eventtest.Projection("", events.EventType("spawn.requested"), "", "", []byte(`{"entity_id":"ent-1","instance_id":"inst-42","optional_setting":null}`), 0, "", "", events.EventEnvelope{}, time.Time{})), "ent-1")
 	triggerCtx := workflowTriggerContext{Event: trigger}
 
 	err := pc.createFlowInstance(context.Background(), triggerCtx, handlerExecutionPlan{
@@ -142,8 +143,8 @@ func TestCreateFlowInstanceResolvesConfigFromHandlerEventContext(t *testing.T) {
 			return nil
 		},
 	}
-	trigger := (events.NewProjectionEvent("evt-123",
-		events.EventType("spawn.requested"), "", "", []byte(`{"entity_id":"ent-1","instance_id":"inst-42","name":"alpha"}`), 0, "", "source-evt-1", events.EventEnvelope{}, time.Time{})).WithEnvelope(events.EventEnvelope{
+	trigger := eventtest.WithEnvelope((eventtest.Projection("evt-123",
+		events.EventType("spawn.requested"), "", "", []byte(`{"entity_id":"ent-1","instance_id":"inst-42","name":"alpha"}`), 0, "", "source-evt-1", events.EventEnvelope{}, time.Time{})), events.EventEnvelope{
 		EntityID: "ent-1",
 		Source: events.RouteIdentity{
 			FlowID:       "parent-flow",
@@ -151,6 +152,7 @@ func TestCreateFlowInstanceResolvesConfigFromHandlerEventContext(t *testing.T) {
 			EntityID:     "ent-parent",
 		},
 	})
+
 	triggerCtx := workflowTriggerContext{Event: trigger}
 
 	err := pc.createFlowInstance(context.Background(), triggerCtx, handlerExecutionPlan{
@@ -192,8 +194,9 @@ func TestCreateFlowInstanceRejectsUnknownEventConfigRef(t *testing.T) {
 			return nil
 		},
 	}
-	trigger := (events.NewProjectionEvent("evt-123",
-		events.EventType("spawn.requested"), "", "", []byte(`{"entity_id":"ent-1","instance_id":"inst-42"}`), 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID("ent-1")
+	trigger := eventtest.WithEntityID((eventtest.Projection("evt-123",
+		events.EventType("spawn.requested"), "", "", []byte(`{"entity_id":"ent-1","instance_id":"inst-42"}`), 0, "", "", events.EventEnvelope{}, time.Time{})), "ent-1")
+
 	triggerCtx := workflowTriggerContext{Event: trigger}
 
 	err := pc.createFlowInstance(context.Background(), triggerCtx, handlerExecutionPlan{
@@ -224,8 +227,9 @@ func TestCreateFlowInstanceRejectsUnsupportedConfigRefRoot(t *testing.T) {
 			return nil
 		},
 	}
-	trigger := (events.NewProjectionEvent("evt-123",
-		events.EventType("spawn.requested"), "", "", []byte(`{"entity_id":"ent-1","instance_id":"inst-42"}`), 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID("ent-1")
+	trigger := eventtest.WithEntityID((eventtest.Projection("evt-123",
+		events.EventType("spawn.requested"), "", "", []byte(`{"entity_id":"ent-1","instance_id":"inst-42"}`), 0, "", "", events.EventEnvelope{}, time.Time{})), "ent-1")
+
 	triggerCtx := workflowTriggerContext{Event: trigger}
 
 	err := pc.createFlowInstance(context.Background(), triggerCtx, handlerExecutionPlan{
@@ -256,8 +260,9 @@ func TestCreateFlowInstanceDoesNotResolveInstanceIDFromEventRef(t *testing.T) {
 			return nil
 		},
 	}
-	trigger := (events.NewProjectionEvent("evt-123",
-		events.EventType("spawn.requested"), "", "", []byte(`{"entity_id":"ent-1","name":"alpha"}`), 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID("ent-1")
+	trigger := eventtest.WithEntityID((eventtest.Projection("evt-123",
+		events.EventType("spawn.requested"), "", "", []byte(`{"entity_id":"ent-1","name":"alpha"}`), 0, "", "", events.EventEnvelope{}, time.Time{})), "ent-1")
+
 	triggerCtx := workflowTriggerContext{Event: trigger}
 
 	err := pc.createFlowInstance(context.Background(), triggerCtx, handlerExecutionPlan{
@@ -282,7 +287,7 @@ func TestCreateFlowInstanceRejectsMissingRequiredSiblingFields(t *testing.T) {
 			return nil
 		},
 	}
-	trigger := (events.NewProjectionEvent("", events.EventType("spawn.requested"), "", "", []byte(`{"entity_id":"ent-1","instance_id":"inst-42","name":"alpha"}`), 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID("ent-1")
+	trigger := eventtest.WithEntityID((eventtest.Projection("", events.EventType("spawn.requested"), "", "", []byte(`{"entity_id":"ent-1","instance_id":"inst-42","name":"alpha"}`), 0, "", "", events.EventEnvelope{}, time.Time{})), "ent-1")
 	triggerCtx := workflowTriggerContext{Event: trigger}
 
 	err := pc.createFlowInstance(context.Background(), triggerCtx, handlerExecutionPlan{
@@ -300,7 +305,7 @@ func TestCreateFlowInstanceRejectsGeneratedFallbackWithoutInstanceIDFrom(t *test
 			return nil
 		},
 	}
-	trigger := (events.NewProjectionEvent("", events.EventType("spawn.requested"), "", "", []byte(`{"entity_id":"ent-1","instance_id":"inst-42","name":"alpha"}`), 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID("ent-1")
+	trigger := eventtest.WithEntityID((eventtest.Projection("", events.EventType("spawn.requested"), "", "", []byte(`{"entity_id":"ent-1","instance_id":"inst-42","name":"alpha"}`), 0, "", "", events.EventEnvelope{}, time.Time{})), "ent-1")
 	triggerCtx := workflowTriggerContext{Event: trigger}
 
 	err := pc.createFlowInstance(context.Background(), triggerCtx, handlerExecutionPlan{
@@ -323,7 +328,7 @@ func TestCreateFlowInstanceRejectsEmptyConfigFromBindings(t *testing.T) {
 			return nil
 		},
 	}
-	trigger := (events.NewProjectionEvent("", events.EventType("spawn.requested"), "", "", []byte(`{"entity_id":"ent-1","desired_instance_id":"inst-42"}`), 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID("ent-1")
+	trigger := eventtest.WithEntityID((eventtest.Projection("", events.EventType("spawn.requested"), "", "", []byte(`{"entity_id":"ent-1","desired_instance_id":"inst-42"}`), 0, "", "", events.EventEnvelope{}, time.Time{})), "ent-1")
 	triggerCtx := workflowTriggerContext{Event: trigger}
 
 	err := pc.createFlowInstance(context.Background(), triggerCtx, handlerExecutionPlan{
@@ -346,7 +351,7 @@ func TestCreateFlowInstanceRejectsEmptyResolvedConfig(t *testing.T) {
 			return nil
 		},
 	}
-	trigger := (events.NewProjectionEvent("", events.EventType("spawn.requested"), "", "", []byte(`{"entity_id":"ent-1","desired_instance_id":"inst-42"}`), 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID("ent-1")
+	trigger := eventtest.WithEntityID((eventtest.Projection("", events.EventType("spawn.requested"), "", "", []byte(`{"entity_id":"ent-1","desired_instance_id":"inst-42"}`), 0, "", "", events.EventEnvelope{}, time.Time{})), "ent-1")
 	triggerCtx := workflowTriggerContext{Event: trigger}
 
 	err := pc.createFlowInstance(context.Background(), triggerCtx, handlerExecutionPlan{
@@ -372,8 +377,9 @@ func TestHandlerEmitEnvelope_KeepsLocalEntityAcrossOutputBoundaries(t *testing.T
 	}
 	pc := &PipelineCoordinator{module: module}
 	trigger := workflowTriggerContext{
-		Event: events.NewProjectionEvent("", events.EventType("child/child.start"), "", "", []byte(`{"entity_id":"ent-child"}`), 0, "", "", events.EventEnvelope{}, time.Time{}).
-			WithEntityID("ent-child"),
+		Event: eventtest.WithEntityID(eventtest.Projection("", events.EventType("child/child.start"), "", "", []byte(`{"entity_id":"ent-child"}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+			"ent-child"),
+
 		State: WorkflowState{
 			EntityID: "ent-child",
 			Metadata: map[string]any{
@@ -428,8 +434,9 @@ pins:
 	})
 	pc := &PipelineCoordinator{module: staticSemanticWorkflowModule{source: source}}
 	trigger := workflowTriggerContext{
-		Event: events.NewProjectionEvent("", events.EventType("vertical.discovered"), "", "", []byte(`{"entity_id":"ent-root"}`), 0, "", "", events.EventEnvelope{}, time.Time{}).
-			WithEntityID("ent-root"),
+		Event: eventtest.WithEntityID(eventtest.Projection("", events.EventType("vertical.discovered"), "", "", []byte(`{"entity_id":"ent-root"}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+			"ent-root"),
+
 		State: WorkflowState{
 			EntityID: "ent-child",
 			Metadata: map[string]any{
@@ -475,8 +482,10 @@ opco.ceo_ready:
       emit: opco.ceo_ready
 `,
 	})
-	evt := (events.NewProjectionEvent(uuid.NewString(),
-		events.EventType("operating/inst-1/opco.product_initialization_requested"), "", "", []byte(`{"entity_id":"ent-operating"}`), 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID("ent-operating").WithFlowInstance("operating/inst-1")
+	evt := eventtest.WithFlowInstance(eventtest.WithEntityID((eventtest.Projection(uuid.NewString(),
+		events.EventType("operating/inst-1/opco.product_initialization_requested"), "", "", []byte(`{"entity_id":"ent-operating"}`), 0, "", "", events.EventEnvelope{}, time.Time{})), "ent-operating"),
+		"operating/inst-1")
+
 	if _, ok := source.NodeEventHandler("lifecycle-orchestrator", string(evt.Type())); ok {
 		t.Fatal("raw bundle handler lookup unexpectedly matched concrete instance event without delivery localization")
 	}
@@ -544,10 +553,11 @@ states: [initializing, ready]
 `,
 	})
 	const entityID = "11111111-1111-1111-1111-111111111111"
-	evt := events.NewProjectionEvent(uuid.NewString(),
-		events.EventType("operating/inst-1/build_progress"), "", "", mustJSON(map[string]any{"entity_id": entityID, "summary": "compile complete"}), 0, "", "", events.EventEnvelope{}, time.Time{}).
-		WithEntityID(entityID).
-		WithFlowInstance("operating/inst-1")
+	evt := eventtest.WithFlowInstance(eventtest.WithEntityID(eventtest.Projection(uuid.NewString(),
+		events.EventType("operating/inst-1/build_progress"), "", "", mustJSON(map[string]any{"entity_id": entityID, "summary": "compile complete"}), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		entityID),
+		"operating/inst-1")
+
 	if _, ok := source.NodeEventHandler("build-orchestrator", string(evt.Type())); ok {
 		t.Fatal("raw bundle handler lookup unexpectedly matched concrete instance event without delivery localization")
 	}

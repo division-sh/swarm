@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -60,9 +61,9 @@ func selectedForkToolContext(actor models.AgentConfig) context.Context {
 		Classification:      runtimecorrelation.RuntimeLineageClassificationForkLocal,
 		SelectedForkContext: true,
 	})
-	return runtimebus.WithInboundEvent(ctx, events.NewProjectionEvent(eventID,
-		events.EventType("validation/validation.package_ready"), "", "", []byte(`{"entity_id":"entity-typed-lineage"}`), 0, runID, "", events.EventEnvelope{}, testTime()).
-		WithEntityID("entity-typed-lineage"))
+	return runtimebus.WithInboundEvent(ctx, eventtest.WithEntityID(eventtest.Projection(eventID,
+		events.EventType("validation/validation.package_ready"), "", "", []byte(`{"entity_id":"entity-typed-lineage"}`), 0, runID, "", events.EventEnvelope{}, testTime()),
+		"entity-typed-lineage"))
 }
 
 func assertToolExecutorDiagnosticLineage(t *testing.T, bus *telemetryBusStub, index int) {
@@ -358,10 +359,10 @@ func TestExecutorTelemetry_EmitToolLogsStructuredPublishedOutcome(t *testing.T) 
 			"category.assessed",
 		},
 	})
-	ctx = runtimebus.WithInboundEvent(ctx, events.NewProjectionEvent("evt-inbound",
+	ctx = runtimebus.WithInboundEvent(ctx, eventtest.WithEntityID(eventtest.Projection("evt-inbound",
 		events.EventType("trigger.input"), "", "task-inbound",
-		[]byte(`{"entity_id":"entity-inbound"}`), 0, "", "", events.EventEnvelope{}, testTime()).
-		WithEntityID("entity-inbound"))
+		[]byte(`{"entity_id":"entity-inbound"}`), 0, "", "", events.EventEnvelope{}, testTime()),
+		"entity-inbound"))
 
 	if _, err := exec.Execute(ctx, "emit_category_assessed", map[string]any{"category": "AP automation"}); err != nil {
 		t.Fatalf("Execute(emit): %v", err)
@@ -504,10 +505,10 @@ func TestExecutorTelemetry_EmitToolLogsUndeclaredFieldSchemaValidationFailure(t 
 			"category.assessed",
 		},
 	})
-	ctx = runtimebus.WithInboundEvent(ctx, events.NewProjectionEvent("evt-inbound",
+	ctx = runtimebus.WithInboundEvent(ctx, eventtest.WithEntityID(eventtest.Projection("evt-inbound",
 		events.EventType("trigger.input"), "", "task-inbound",
-		[]byte(`{"entity_id":"entity-inbound"}`), 0, "", "", events.EventEnvelope{}, testTime()).
-		WithEntityID("entity-inbound"))
+		[]byte(`{"entity_id":"entity-inbound"}`), 0, "", "", events.EventEnvelope{}, testTime()),
+		"entity-inbound"))
 
 	if _, err := exec.Execute(ctx, "emit_category_assessed", map[string]any{
 		"category":   "AP automation",

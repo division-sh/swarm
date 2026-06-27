@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
@@ -127,8 +128,9 @@ func TestEventBusPublish_ConnectRoutePlanPersistsSingularTargetWithoutLiveSubscr
 		t.Fatalf("receiver carrier route consumer/deploy.completed = %#v, want consumer-node receiver_carrier", receiverCarriers)
 	}
 	eventID := uuid.NewString()
-	evt := events.NewProjectionEvent(eventID,
+	evt := eventtest.Projection(eventID,
 		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"ignored":"yes"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+
 	want := events.DeliveryRoute{
 		SubscriberType: "node",
 		SubscriberID:   "consumer-node",
@@ -197,8 +199,9 @@ func TestEventBusPublish_RootConnectRoutePlanPersistsSingularTarget(t *testing.T
 		t.Fatalf("receiver carrier route consumer/root.ready = %#v, want consumer-node receiver_carrier", receiverCarriers)
 	}
 	eventID := uuid.NewString()
-	evt := events.NewProjectionEvent(eventID,
+	evt := eventtest.Projection(eventID,
 		events.EventType("root.ready"), "", "", json.RawMessage(`{"entity_id":"entity-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+
 	want := events.DeliveryRoute{
 		SubscriberType: "node",
 		SubscriberID:   "consumer-node",
@@ -253,9 +256,10 @@ func TestEventBusPublish_RootConnectRoutePlanDoesNotCaptureChildScopedSameNameEv
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	eventID := uuid.NewString()
-	evt := events.NewProjectionEvent(eventID,
-		events.EventType("root.ready"), "", "", json.RawMessage(`{"entity_id":"entity-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()).
-		WithFlowInstance("producer/child-1")
+	evt := eventtest.WithFlowInstance(eventtest.Projection(eventID,
+		events.EventType("root.ready"), "", "", json.RawMessage(`{"entity_id":"entity-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
+		"producer/child-1")
+
 	forbidden := events.DeliveryRoute{
 		SubscriberType: "node",
 		SubscriberID:   "consumer-node",
@@ -297,7 +301,7 @@ func TestEventBusCheckPublishRecipientPlan_ConnectRoutePlanPrecedesLegacyDescrip
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	evt := events.NewProjectionEvent(uuid.NewString(),
+	evt := eventtest.Projection(uuid.NewString(),
 		events.EventType("producer/deploy.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
 	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
@@ -396,8 +400,9 @@ func TestEventBusPublishInMutation_ConnectRoutePlanPersistsSharedRoutePlan(t *te
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	eventID := uuid.NewString()
-	evt := events.NewProjectionEvent(eventID,
+	evt := eventtest.Projection(eventID,
 		events.EventType("producer/deploy.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+
 	want := connectRoutePlanStaticDeliveryRoute()
 	postCommitActions := make([]func(), 0, 1)
 	ctx := runtimepipeline.WithPipelinePostCommitActions(context.Background(), &postCommitActions)
@@ -431,8 +436,9 @@ func TestEngineOutbox_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T) {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	eventID := uuid.NewString()
-	evt := events.NewProjectionEvent(eventID,
+	evt := eventtest.Projection(eventID,
 		events.EventType("producer/deploy.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+
 	want := connectRoutePlanStaticDeliveryRoute()
 
 	planned, err := (engineOutbox{bus: eb}).deliveryPlanForIntent(context.Background(), runtimeengine.EmitIntent{Event: evt})
@@ -472,7 +478,7 @@ func TestEventBusPlan_ConnectRoutePlanPreservesReplyLineage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	evt := events.NewProjectionEvent(uuid.NewString(),
+	evt := eventtest.Projection(uuid.NewString(),
 		events.EventType("producer/deploy.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
 	plan, err := eb.planSubscribedRoutePlan(context.Background(), evt, false)
@@ -517,8 +523,9 @@ func TestEventBusPublish_ConnectRoutePlanPersistsTargetSetFanout(t *testing.T) {
 		t.Fatalf("receiver carrier route worker/alpha/ticket.ready = %#v, want worker-alpha receiver_carrier", resolvedAlpha)
 	}
 	eventID := uuid.NewString()
-	evt := events.NewProjectionEvent(eventID,
+	evt := eventtest.Projection(eventID,
 		events.EventType("producer/ticket.ready"), "", "", json.RawMessage(`{"team_entity":"team-a"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+
 	wantAlpha := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "worker-alpha", Target: events.RouteIdentity{FlowID: "worker", FlowInstance: "worker/alpha", EntityID: "team-a"}}
 	wantBeta := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "worker-beta", Target: events.RouteIdentity{FlowID: "worker", FlowInstance: "worker/beta", EntityID: "team-a"}}
 
@@ -564,8 +571,9 @@ func TestEventBusResetInMemoryStateRefreshesConnectRoutePlanner(t *testing.T) {
 	}
 
 	eventID := uuid.NewString()
-	evt := events.NewProjectionEvent(eventID,
+	evt := eventtest.Projection(eventID,
 		events.EventType("producer/ticket.ready"), "", "", json.RawMessage(`{"team_entity":"team-a"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+
 	wantBeta := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "worker-beta", Target: events.RouteIdentity{FlowID: "worker", FlowInstance: "worker/beta", EntityID: "team-a"}}
 
 	routePlan, err := eb.planSubscribedRoutePlan(context.Background(), evt, false)
@@ -621,8 +629,9 @@ func TestEventBusPublish_ConnectRoutePlanPersistsIndexedBusinessFieldTarget(t *t
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 	eventID := uuid.NewString()
-	evt := events.NewProjectionEvent(eventID,
+	evt := eventtest.Projection(eventID,
 		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+
 	want := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "consumer-node-one", Target: events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/one", EntityID: "ent-1"}}
 
 	routePlan, err := eb.planSubscribedRoutePlan(context.Background(), evt, false)
@@ -663,8 +672,9 @@ func TestEventBusPublish_ConnectRoutePlanPersistsIndexedBusinessFieldTargetSet(t
 		}
 	}
 	eventID := uuid.NewString()
-	evt := events.NewProjectionEvent(eventID,
+	evt := eventtest.Projection(eventID,
 		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+
 	wantOne := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "consumer-node-one", Target: events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/one", EntityID: "ent-1"}}
 	wantTwo := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "consumer-node-two", Target: events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/two", EntityID: "ent-2"}}
 
@@ -760,7 +770,7 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForBusinessFieldDescriptorGa
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
-			evt := events.NewProjectionEvent(uuid.NewString(),
+			evt := eventtest.Projection(uuid.NewString(),
 				events.EventType("producer/deploy.done"), "", "", json.RawMessage(tc.payload), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
 			routePlan, err := eb.planSubscribedRoutePlan(context.Background(), evt, false)
@@ -797,7 +807,7 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForUnsupportedBusinessFieldT
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	evt := events.NewProjectionEvent(uuid.NewString(),
+	evt := eventtest.Projection(uuid.NewString(),
 		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
 	routePlan, err := eb.planSubscribedRoutePlan(context.Background(), evt, false)
@@ -867,7 +877,7 @@ func TestEventBusPublish_ConnectRoutePlanWithOnlySourceAndRawSubscribersFailsClo
 	sourceCh := eb.Subscribe("source-raw-listener", events.EventType("producer/deploy.done"), events.EventType("deploy.done"))
 	defer eb.Unsubscribe("source-raw-listener")
 	eventID := uuid.NewString()
-	evt := events.NewProjectionEvent(eventID,
+	evt := eventtest.Projection(eventID,
 		events.EventType("producer/deploy.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
 	routePlan, err := eb.planSubscribedRoutePlan(context.Background(), evt, false)
@@ -943,7 +953,7 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForInvalidLoweredPlan(t *tes
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	evt := events.NewProjectionEvent(uuid.NewString(),
+	evt := eventtest.Projection(uuid.NewString(),
 		events.EventType("producer/deploy.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
 	routePlan, err := eb.planSubscribedRoutePlan(context.Background(), evt, false)
@@ -1007,7 +1017,7 @@ func TestEventBusPublish_ConnectRoutePlanFailureSkipsRecipientPlanMaterializer(t
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	evt := events.NewProjectionEvent(uuid.NewString(),
+	evt := eventtest.Projection(uuid.NewString(),
 		events.EventType("producer/deploy.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
 	routePlan, err := eb.planSubscribedRoutePlan(context.Background(), evt, false)
@@ -1046,7 +1056,7 @@ func TestEventBusPlan_UnmatchedCanonicalRouteUsesLowerPrecedenceFallback(t *test
 	}
 	ch := eb.Subscribe("legacy-agent", events.EventType("legacy.event"))
 	defer eb.Unsubscribe("legacy-agent")
-	evt := events.NewProjectionEvent(uuid.NewString(),
+	evt := eventtest.Projection(uuid.NewString(),
 		events.EventType("legacy.event"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
 	routePlan, err := eb.planSubscribedRoutePlan(context.Background(), evt, false)
@@ -1067,8 +1077,9 @@ func TestEventBusPlan_UnmatchedCanonicalRouteUsesLowerPrecedenceFallback(t *test
 }
 
 func TestRoutePlanCanonicalFailClosedDropsExecutableRoutes(t *testing.T) {
-	evt := events.NewProjectionEvent(uuid.NewString(),
+	evt := eventtest.Projection(uuid.NewString(),
 		events.EventType("producer/deploy.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+
 	routePlan := newRoutePlan(evt)
 	routePlan.MarkCanonicalRouteFailedClosed(routeIntentProducerConnectRoutePlan, runtimepinrouting.FailureTargetNotSubscribed)
 	routePlan.AddLiveRecipients(RoutePlanLiveRecipient{
@@ -1098,8 +1109,9 @@ func TestRoutePlanCanonicalFailClosedDropsExecutableRoutes(t *testing.T) {
 }
 
 func TestRoutePlanNormalizationPreservesAuthorityState(t *testing.T) {
-	evt := events.NewProjectionEvent(uuid.NewString(),
+	evt := eventtest.Projection(uuid.NewString(),
 		events.EventType("producer/deploy.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+
 	routePlan := newRoutePlan(evt)
 	routePlan.MarkCanonicalRouteMatched(routeIntentProducerConnectRoutePlan)
 	routePlan.AddDeliveryIntents(RoutePlanDeliveryIntent{

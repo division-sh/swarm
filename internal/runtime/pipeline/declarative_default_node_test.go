@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"time"
@@ -23,7 +24,7 @@ func TestCoordinatorHandlerExecutionEngineUsesRuntimeEnginePath(t *testing.T) {
 	}
 	outcome, err := engine.ExecuteHandlerSteps(context.Background(), runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted"},
-	}, events.NewProjectionEvent("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}).WithEntityID("ent-1"), "custom.trigger")
+	}, eventtest.WithEntityID(eventtest.Projection("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), "ent-1"), "custom.trigger")
 	if err != nil {
 		t.Fatalf("ExecuteHandlerSteps: %v", err)
 	}
@@ -70,7 +71,7 @@ func TestEnsureHandlerEntityIDMintsForEntityMaterializingHandler(t *testing.T) {
 		},
 	}
 
-	entityID, evt := ensureHandlerEntityID(source, "", handler, "", events.NewProjectionEvent("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	entityID, evt := ensureHandlerEntityID(source, "", handler, "", eventtest.Projection("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 
 	if entityID == "" {
 		t.Fatal("expected minted entity_id")
@@ -82,7 +83,7 @@ func TestEnsureHandlerEntityIDMintsForEntityMaterializingHandler(t *testing.T) {
 
 func TestEnsureHandlerEntityIDCreateEntityKeepsInboundEventReference(t *testing.T) {
 	handler := runtimecontracts.SystemNodeEventHandler{CreateEntity: true}
-	inbound := events.NewProjectionEvent("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}).WithEntityID("ent-parent")
+	inbound := eventtest.WithEntityID(eventtest.Projection("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), "ent-parent")
 
 	entityID, evt := ensureHandlerEntityID(nil, "", handler, "ent-parent", inbound)
 

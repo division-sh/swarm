@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	storepkg "github.com/division-sh/swarm/internal/store"
@@ -196,10 +197,12 @@ func newSQLiteObservabilitySurfaceFixture(t *testing.T, ctx context.Context) sql
 	now := time.Unix(1700002000, 0).UTC()
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
-	if err := sqliteStore.PersistEventWithDeliveries(ctx, events.NewProjectionEvent(eventID,
+	if err := sqliteStore.PersistEventWithDeliveries(ctx, eventtest.Projection(eventID,
 
 		events.EventType("trace.visible"),
-		"agent-1", "", json.RawMessage(`{"trace":true}`), 0, runID, "", events.EventEnvelope{}, now), []string{"agent-1"}); err != nil {
+		"agent-1", "", json.RawMessage(`{"trace":true}`), 0, runID, "", events.EventEnvelope{}, now),
+
+		[]string{"agent-1"}); err != nil {
 		t.Fatalf("PersistEventWithDeliveries: %v", err)
 	}
 	if err := sqliteStore.MarkEventDeliveryInProgress(ctx, eventID, "agent-1", "session-1"); err != nil {

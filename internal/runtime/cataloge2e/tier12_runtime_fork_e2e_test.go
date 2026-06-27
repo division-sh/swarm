@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
@@ -432,12 +433,12 @@ func publishCatalogTriggerAtFuture(t testing.TB, h *runtimeHarness, step catalog
 	if future <= time.Second {
 		future = time.Second
 	}
-	evt := events.NewProjectionEvent(eventID,
+	evt := eventtest.Projection(eventID,
 		events.EventType(strings.TrimSpace(step.Event)),
 		"cataloge2e", "", raw, 0, catalogRuntimeRunID, "", events.EventEnvelope{}, time.Now().UTC().Add(future))
 
 	if entityID := triggerPayloadEntityID(payload); entityID != "" {
-		evt = evt.WithEntityID(entityID)
+		evt = eventtest.WithEntityID(evt, entityID)
 	}
 	ctx, cancel := context.WithTimeout(h.ctx, timeout)
 	defer cancel()

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -380,7 +381,7 @@ func loadMailboxWritePersistedEvent(t *testing.T, db *sql.DB, backend, eventID s
 	); err != nil {
 		t.Fatalf("%s load event %s: %v", backend, eventID, err)
 	}
-	return events.NewProjectionEvent(
+	return eventtest.Projection(
 		id,
 		events.EventType(eventName),
 		producedBy,
@@ -390,8 +391,8 @@ func loadMailboxWritePersistedEvent(t *testing.T, db *sql.DB, backend, eventID s
 		runID,
 		sourceEventID,
 		mailboxWriteDBEnvelope(t, entityID, flowInstance, scope, sourceRouteRaw, targetRouteRaw, targetSetRaw),
-		mailboxWriteDBTime(createdAtRaw),
-	)
+		mailboxWriteDBTime(createdAtRaw))
+
 }
 
 func mailboxWriteDBEnvelope(t *testing.T, entityID, flowInstance, scope string, sourceRouteRaw, targetRouteRaw, targetSetRaw any) events.EventEnvelope {
