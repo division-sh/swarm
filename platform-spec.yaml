@@ -5036,7 +5036,8 @@ flow_model:
       split_runtime_semantics:
         final_e2e_package_proof: >
           Final multi-package marketplace-style runtime proof is tracked by #1455 and guarded by
-          internal/runtime/bus/sealed_flow_package_fixture_test.go. This is a proof artifact for the
+          internal/runtime/bus/sealed_flow_package_fixture_test.go plus
+          internal/runtime/conformance/sealed_flow_package_conformance_test.go. This is proof coverage for the
           existing import-boundary, dependency, wildcard, and composition-routing rules, not an
           additional semantic owner.
     composition_routing:
@@ -5452,7 +5453,7 @@ flow_model:
         parser_model_support: Parser/model support beyond source-authority fixtures is follow-up unless an implementation gate explicitly widens.
         policy_credential_resolution: '#1453 remains separate.'
         wildcard_scoping: '#1454 remains separate.'
-        final_e2e_package_proof: '#1455 proof lives in internal/runtime/bus/sealed_flow_package_fixture_test.go.'
+        final_e2e_package_proof: '#1455 proof lives in internal/runtime/bus/sealed_flow_package_fixture_test.go and internal/runtime/conformance/sealed_flow_package_conformance_test.go.'
         route_explain_describe: '#1442 tooling remains separate.'
         agent_output_pin_static_verify: '#1444 closes static bootverify coverage for agent emit_events under composition-first route authority; runtime generated-agent route-plan admission closed by #1474.'
   nesting:
