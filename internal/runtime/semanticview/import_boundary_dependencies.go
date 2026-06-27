@@ -49,7 +49,7 @@ func CredentialStoreKeyForFlow(source Source, flowID, key string) (string, bool)
 		return key, false
 	}
 	deps, ok := importBoundaryDependencyContext(source, flowID)
-	if !ok || len(deps.child.Manifest.Requires.Credentials) == 0 {
+	if !ok {
 		return key, false
 	}
 	required := normalizeDependencySet(deps.child.Manifest.Requires.Credentials)
@@ -61,9 +61,17 @@ func CredentialStoreKeyForFlow(source Source, flowID, key string) (string, bool)
 }
 
 func CredentialStoreKeyForActor(source Source, actorID, key string) (string, bool) {
+	return CredentialStoreKeyForActorFlow(source, actorID, "", key)
+}
+
+func CredentialStoreKeyForActorFlow(source Source, actorID, flowID, key string) (string, bool) {
 	actorID = strings.TrimSpace(actorID)
-	if source == nil || actorID == "" {
+	flowID = strings.TrimSpace(flowID)
+	if source == nil {
 		return strings.TrimSpace(key), false
+	}
+	if flowID != "" {
+		return CredentialStoreKeyForFlow(source, flowID, key)
 	}
 	if agentSource, ok := source.AgentContractSource(actorID); ok {
 		return CredentialStoreKeyForFlow(source, agentSource.FlowID, key)
@@ -135,6 +143,8 @@ func importBoundaryDependencyContext(source Source, flowID string) (importBounda
 		return importBoundaryDependencyCtx{}, false
 	}
 	flowPackageKey := normalizeImportPackageKey(flow.PackageKey)
+	var bestPackage importBoundaryDependencyCtx
+	bestPackageLen := -1
 	for _, deps := range importBoundaryDependencyContexts(source) {
 		siteFlowID := strings.TrimSpace(deps.site.FlowID)
 		if siteFlowID != "" {
@@ -144,14 +154,30 @@ func importBoundaryDependencyContext(source Source, flowID string) (importBounda
 			continue
 		}
 		childKey := normalizeImportPackageKey(deps.child.Key)
-		if flowPackageKey != "" && flowPackageKey != "." && childKey == flowPackageKey {
-			return deps, true
+		if importBoundaryPackageKeyContains(childKey, flowPackageKey) {
+			if keyLen := len(childKey); keyLen > bestPackageLen {
+				bestPackage = deps
+				bestPackageLen = keyLen
+			}
+			continue
 		}
 		if strings.TrimSpace(deps.child.OwningFlowID) == flowID {
 			return deps, true
 		}
 	}
+	if bestPackageLen >= 0 {
+		return bestPackage, true
+	}
 	return importBoundaryDependencyCtx{}, false
+}
+
+func importBoundaryPackageKeyContains(parentKey, flowPackageKey string) bool {
+	parentKey = normalizeImportPackageKey(parentKey)
+	flowPackageKey = normalizeImportPackageKey(flowPackageKey)
+	if parentKey == "" || parentKey == "." || flowPackageKey == "" || flowPackageKey == "." {
+		return false
+	}
+	return flowPackageKey == parentKey || strings.HasPrefix(flowPackageKey, parentKey+"/")
 }
 
 func importBoundaryDependencyContexts(source Source) []importBoundaryDependencyCtx {
