@@ -214,6 +214,9 @@ func connectEndpointMatchesEvent(endpoint runtimepinrouting.ConnectRoutePlanEndp
 	if eventType == "" {
 		return false
 	}
+	if endpoint.Root && !eventFlowInstanceMatchesSourcePath(evt.FlowInstance(), "") {
+		return false
+	}
 	sourceLocal := strings.Trim(strings.TrimSpace(endpoint.Event), "/")
 	sourceResolved := strings.Trim(strings.TrimSpace(endpoint.ResolvedEvent), "/")
 	sourcePath := strings.Trim(strings.TrimSpace(endpoint.FlowPath), "/")

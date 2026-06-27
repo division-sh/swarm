@@ -245,6 +245,47 @@ func TestEventBusPublish_RootConnectRoutePlanPersistsSingularTarget(t *testing.T
 	}
 }
 
+func TestEventBusPublish_RootConnectRoutePlanDoesNotCaptureChildScopedSameNameEvent(t *testing.T) {
+	source := connectRoutePlanRootProducerStaticSource()
+	store := newTargetRouteMemoryStore()
+	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	eventID := uuid.NewString()
+	evt := events.NewProjectionEvent(eventID,
+		events.EventType("root.ready"), "", "", json.RawMessage(`{"entity_id":"entity-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()).
+		WithFlowInstance("producer/child-1")
+	forbidden := events.DeliveryRoute{
+		SubscriberType: "node",
+		SubscriberID:   "consumer-node",
+		Target: events.RouteIdentity{
+			FlowID:       "consumer",
+			FlowInstance: "consumer",
+			EntityID:     runtimeflowidentity.EntityID("consumer"),
+		},
+	}
+
+	routePlan, err := eb.planSubscribedRoutePlan(context.Background(), evt, false)
+	if err != nil {
+		t.Fatalf("planSubscribedRoutePlan: %v", err)
+	}
+	if routePlan.AuthorityOwner == routePlanSourceConnectRoutePlan || routePlan.AuthorityState == RoutePlanAuthorityCanonicalMatched {
+		t.Fatalf("route plan authority = %q/%q, root connect must not match child-scoped same-name event", routePlan.AuthorityState, routePlan.AuthorityOwner)
+	}
+	if deliveryRoutesContain(routePlan.DeliveryRoutes(), forbidden) {
+		t.Fatalf("route plan delivery routes = %#v, must not include root-connect receiver for child-scoped same-name event", routePlan.DeliveryRoutes())
+	}
+
+	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("CheckPublishRecipientPlan: %v", err)
+	}
+	if deliveryRoutesContain(plan.DeliveryRoutes, forbidden) {
+		t.Fatalf("preflight delivery routes = %#v, must not include root-connect receiver for child-scoped same-name event", plan.DeliveryRoutes)
+	}
+}
+
 func TestEventBusCheckPublishRecipientPlan_ConnectRoutePlanPrecedesLegacyDescriptorPolicy(t *testing.T) {
 	source := connectRoutePlanStaticSource(runtimecontracts.FlowPackageConnect{
 		From:     "producer.deploy_done",
