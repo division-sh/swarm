@@ -25,6 +25,7 @@ type Metadata struct {
 	Present   bool
 	Source    string
 	Writable  bool
+	Shadowed  bool
 	UpdatedAt *time.Time
 }
 

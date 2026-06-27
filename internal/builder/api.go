@@ -134,6 +134,7 @@ type CredentialRecord struct {
 	Present    bool                    `json:"present"`
 	Source     string                  `json:"source,omitempty"`
 	Writable   bool                    `json:"writable"`
+	Shadowed   bool                    `json:"shadowed"`
 	UpdatedAt  string                  `json:"updated_at,omitempty"`
 	RequiredBy []CredentialRequirement `json:"required_by,omitempty"`
 }

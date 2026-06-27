@@ -62,7 +62,7 @@ func TestOverlayStore_EnvOverridesFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Inspect: %v", err)
 	}
-	if !meta.Present || meta.Source != SourceEnv || meta.Writable {
+	if !meta.Present || meta.Source != SourceEnv || meta.Writable || !meta.Shadowed {
 		t.Fatalf("Inspect => %+v", meta)
 	}
 }

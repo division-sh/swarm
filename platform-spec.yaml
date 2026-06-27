@@ -4711,7 +4711,8 @@ tool_model:
     interface:
       get: Retrieve a credential value by key. Runtime-only — never exposed via builder API.
       set: Store a credential value by key to the writable store layer.
-      list: List credential keys with metadata (source, writable, present, updated_at). Never returns values.
+      list: List credential keys with metadata (source, writable, shadowed, present, updated_at, required_by where
+        source context is available). Never returns values.
       delete: Remove a credential by key from the writable store layer. Cannot delete env-sourced credentials.
     resolution_model:
       description: Credentials are resolved through a two-tier overlay. Environment variables take precedence over the local
@@ -4719,19 +4720,23 @@ tool_model:
       tiers:
       - tier: env
         description: Environment variables. Read-only. Highest precedence. Used for CI, Docker, and production deployments.
-          Credential key "sendgrid_api_key" resolves by trying the raw key name, then the uppercased variant
-          (SENDGRID_API_KEY). No prefix required — env var names match the credential key directly.
+          Credential key "sendgrid_api_key" resolves by trying the raw key name, then the normalized key with ".", "-", and
+          spaces mapped to "_", then the uppercased normalized variant (SENDGRID_API_KEY). No prefix required — env var
+          names match the credential key directly.
         writable: false
         precedence: 1 (highest)
       - tier: file
-        description: Local file store. Writable. Used for local development and builder-managed credentials. Stored at
-          ~/.config/swarm/credentials.json with mode 0600. Atomic writes. Per-entry updated_at timestamp.
+        description: Local file store. Writable. Used for local development. Stored at
+          os.UserConfigDir()/swarm/credentials.json with mode 0600. Atomic writes. Per-entry updated_at timestamp.
+          `SWARM_CREDENTIALS_FILE` overrides this path. Examples are `~/Library/Application Support/swarm/credentials.json`
+          on macOS and usually `~/.config/swarm/credentials.json` on Linux.
         writable: true
         precedence: 2
       resolution_rule: On get, check env tier first. If present, return env value. Otherwise, check file tier. If present,
         return file value. Otherwise, credential is missing.
       list_rule: List returns merged keys from both tiers. Each entry includes the source tier (env or file) and whether
-        it is writable (env = false, file = true). If a key exists in both tiers, source shows "env" (effective source).
+        it is writable (env = false, file = true). If a key exists in both tiers, source shows "env" (effective source)
+        and shadowed is true to show that a file-tier value exists but is ignored by env precedence.
     metadata:
       description: The list interface returns metadata about each credential, never the value itself. This is what the builder
         displays.
@@ -4739,14 +4744,37 @@ tool_model:
         key: string — credential key name
         source: string — env | file (which tier the effective value comes from)
         writable: boolean — true if the credential can be modified (false for env-sourced)
+        shadowed: boolean — true when the effective value comes from env but a file-tier value also exists
         present: boolean — true if the credential has a value in any tier
         updated_at: string — ISO 8601 timestamp of last write (file-sourced only, null for env)
+        required_by: list — optional references to tools, MCP servers, or native web-search providers that require the key
     storage_backends:
-      local_dev: JSON file at ~/.config/swarm/credentials.json, mode 0600, atomic writes. Plaintext for simplicity — encryption
-        is a future enhancement. File contains a map of key → value with per-entry updated_at.
+      local_dev: JSON file at os.UserConfigDir()/swarm/credentials.json, mode 0600, atomic writes, overridden by
+        `SWARM_CREDENTIALS_FILE` when set. Plaintext for simplicity — encryption is a future enhancement. File contains a
+        map of key → value with per-entry updated_at.
       docker: Environment variables (env tier). File store optionally mounted as a volume for builder access.
       production: Environment variables for secrets, or external secrets manager (Vault, AWS Secrets Manager) via a custom
         store tier implementation. The overlay model supports additional tiers — the platform resolves top-down.
+    write_coordination:
+      rule: Local file-tier writes through the supported CLI acquire a cross-process advisory lock before read/modify/write.
+        Atomic replace still protects partial writes; the advisory lock protects against lost updates across concurrent CLI
+        processes. Lock contention fails closed with a clear error. The CLI is the only supported local writer; manual JSON
+        edits are unsupported and may race.
+    local_cli_surface:
+      command: swarm secrets set|list|check|rm
+      owner: internal/runtime/credentials credential store
+      rule: >
+        `swarm secrets` is the supported local operator CLI over the credential store. `set` writes only the file tier and
+        reads the value from hidden TTY prompt or stdin/--stdin; plaintext argv values and --value are forbidden. `list`
+        renders metadata only and never values, including env/file shadowing. `check` validates required credentials from
+        contract/source context and exits non-zero when required keys are missing. `rm` removes only the file-tier value;
+        env-sourced effective values remain present and read-only.
+      split_scope:
+      - /v1/rpc credentials.* or secrets.* API promotion
+      - retired Builder credentials RPC transport
+      - OAuth or managed credential lifecycle
+      - external vault/team secret management
+      - boot-check severity policy
     contract_reference: Tools, MCP servers, and native web-search provider configuration reference credentials by key name,
       never by value. The key name appears in tools.yaml (credentials field), policy.yaml (mcp_servers.*.credentials_key),
       and policy.yaml (web_search_provider.credentials_key). The platform resolves the key to the secret value at call time
@@ -4755,8 +4783,8 @@ tool_model:
       web-search provider configuration exists in the credential store (any tier). Missing keys log a warning — the tool may
       be unconfigured in this deployment.
     platform_guarantee: The platform never logs, indexes, or persists credential values in the event store, dead letters, or
-      any platform table. Credentials exist only in the credential store and in-flight tool requests. The builder API never
-      returns credential values after write — only metadata.
+      any platform table. Credentials exist only in the credential store and in-flight tool requests. Supported operator
+      surfaces never return credential values after write — only metadata.
   custom_tool_schema:
     description: Accepted fields for tool definitions in tools.yaml. This is the union of fields across all implementation
       classes.
@@ -10519,6 +10547,54 @@ cli_specification:
           - remote server commit
           - remote server build date
           - server-local bundle path
+    secrets:
+      command: swarm secrets set|list|check|rm
+      tier: must_have
+      implementation_status: implemented
+      owner: tool_model.credential_store
+      behavior: >
+        Local operator CLI for the existing credential store. The command is intentionally CLI-local and MUST NOT add
+        `/v1/rpc credentials.*`, `/v1/rpc secrets.*`, or legacy Builder credentials transport reachability. The public noun
+        is `secrets`; `credentials` is not a supported alias.
+      subcommands:
+        set:
+          command: swarm secrets set <key> [--stdin]
+          behavior: >
+            Writes only the local file tier. If stdin is a TTY, prompt for the secret value with hidden input and
+            confirmation. If stdin is not a TTY, read the value from stdin. `--stdin` explicitly forces stdin mode.
+            Plaintext positional values and `--value` are forbidden because argv values leak through shell history and
+            process listings. Output is metadata-only and never echoes the secret value.
+        list:
+          command: swarm secrets list [--json] [--missing] [--present] [--source env|file] [--contracts <path>]
+          behavior: >
+            Lists metadata only: key, source, writable, shadowed, present, updated_at, and required_by where contract source
+            context is available. Env/file shadowing must be visible as source=env and shadowed=true when a file-tier value
+            exists behind the effective env value.
+        check:
+          command: swarm secrets check [--contracts <path>] [--json]
+          behavior: >
+            Consumes the same required-credential owner as verify/boot. Exits 0 when all required secrets are present and
+            non-zero when any required key is missing. JSON output is supported for CI.
+        rm:
+          command: swarm secrets rm <key>
+          behavior: >
+            Removes only the file-tier value. If env still supplies the key, the effective secret remains present,
+            non-writable, and source=env.
+      storage_path:
+        default: os.UserConfigDir()/swarm/credentials.json
+        override: SWARM_CREDENTIALS_FILE
+        examples:
+          macos: ~/Library/Application Support/swarm/credentials.json
+          linux: ~/.config/swarm/credentials.json
+      write_coordination: Cross-process advisory lock around file-tier set/rm, plus atomic replace. Lock contention fails
+        closed instead of risking lost updates.
+      split_scope:
+      - "`/v1/rpc credentials.*` or `/v1/rpc secrets.*`"
+      - retired Builder credentials RPC
+      - managed/OAuth credentials
+      - external vault/team secret management
+      - package credential binding semantics
+      - boot-check severity policy
     serve:
       command: swarm serve [flags]
       tier: must_have

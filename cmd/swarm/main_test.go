@@ -1845,6 +1845,119 @@ func TestResolveWorkspaceBackendRejectsEmptyConfigBeforeEnvFallback(t *testing.T
 	}
 }
 
+func TestPlatformSpecSecretsCLISurfacePromoted(t *testing.T) {
+	var spec struct {
+		ToolModel struct {
+			CredentialStore struct {
+				Interface struct {
+					List string `yaml:"list"`
+				} `yaml:"interface"`
+				ResolutionModel struct {
+					Tiers []struct {
+						Tier        string `yaml:"tier"`
+						Description string `yaml:"description"`
+					} `yaml:"tiers"`
+					ListRule string `yaml:"list_rule"`
+				} `yaml:"resolution_model"`
+				Metadata struct {
+					Fields map[string]string `yaml:"fields"`
+				} `yaml:"metadata"`
+				StorageBackends struct {
+					LocalDev string `yaml:"local_dev"`
+				} `yaml:"storage_backends"`
+				WriteCoordination struct {
+					Rule string `yaml:"rule"`
+				} `yaml:"write_coordination"`
+				LocalCLISurface struct {
+					Command string   `yaml:"command"`
+					Rule    string   `yaml:"rule"`
+					Split   []string `yaml:"split_scope"`
+				} `yaml:"local_cli_surface"`
+			} `yaml:"credential_store"`
+		} `yaml:"tool_model"`
+		CLISpecification struct {
+			CommandCatalog struct {
+				Secrets struct {
+					Command     string `yaml:"command"`
+					Status      string `yaml:"implementation_status"`
+					Owner       string `yaml:"owner"`
+					StoragePath struct {
+						Default  string `yaml:"default"`
+						Override string `yaml:"override"`
+						Examples struct {
+							MacOS string `yaml:"macos"`
+							Linux string `yaml:"linux"`
+						} `yaml:"examples"`
+					} `yaml:"storage_path"`
+					Subcommands map[string]struct {
+						Command  string `yaml:"command"`
+						Behavior string `yaml:"behavior"`
+					} `yaml:"subcommands"`
+				} `yaml:"secrets"`
+			} `yaml:"command_catalog"`
+		} `yaml:"cli_specification"`
+	}
+	data, err := os.ReadFile(filepath.Join(repoRoot(), defaultPlatformSpecPath))
+	if err != nil {
+		t.Fatalf("read platform spec: %v", err)
+	}
+	if err := yaml.Unmarshal(data, &spec); err != nil {
+		t.Fatalf("parse platform spec: %v", err)
+	}
+	store := spec.ToolModel.CredentialStore
+	for _, want := range []string{"shadowed", "required_by"} {
+		if !strings.Contains(store.Interface.List, want) {
+			t.Fatalf("credential store list interface missing %q: %q", want, store.Interface.List)
+		}
+		if _, ok := store.Metadata.Fields[want]; !ok {
+			t.Fatalf("credential store metadata missing %q: %#v", want, store.Metadata.Fields)
+		}
+	}
+	if !strings.Contains(store.ResolutionModel.ListRule, "shadowed") {
+		t.Fatalf("credential store list rule missing shadowing: %q", store.ResolutionModel.ListRule)
+	}
+	joinedTierDescriptions := ""
+	for _, tier := range store.ResolutionModel.Tiers {
+		joinedTierDescriptions += tier.Tier + " " + tier.Description + "\n"
+	}
+	for _, want := range []string{"os.UserConfigDir()/swarm/credentials.json", "SWARM_CREDENTIALS_FILE", "Library/Application Support", ".config/swarm/credentials.json", "uppercased normalized"} {
+		if !strings.Contains(joinedTierDescriptions+store.StorageBackends.LocalDev, want) {
+			t.Fatalf("credential store path/env docs missing %q:\n%s\n%s", want, joinedTierDescriptions, store.StorageBackends.LocalDev)
+		}
+	}
+	for _, want := range []string{"advisory lock", "Lock contention fails closed", "CLI is the only supported local writer"} {
+		if !strings.Contains(store.WriteCoordination.Rule, want) {
+			t.Fatalf("credential store write coordination missing %q: %q", want, store.WriteCoordination.Rule)
+		}
+	}
+	if store.LocalCLISurface.Command != "swarm secrets set|list|check|rm" || !strings.Contains(store.LocalCLISurface.Rule, "plaintext argv values") || !strings.Contains(store.LocalCLISurface.Rule, "rm") {
+		t.Fatalf("credential store local CLI surface = %#v", store.LocalCLISurface)
+	}
+
+	secrets := spec.CLISpecification.CommandCatalog.Secrets
+	if secrets.Command != "swarm secrets set|list|check|rm" || secrets.Status != "implemented" || secrets.Owner != "tool_model.credential_store" {
+		t.Fatalf("secrets command catalog = %#v", secrets)
+	}
+	if secrets.StoragePath.Default != "os.UserConfigDir()/swarm/credentials.json" || secrets.StoragePath.Override != "SWARM_CREDENTIALS_FILE" {
+		t.Fatalf("secrets storage path = %#v", secrets.StoragePath)
+	}
+	if !strings.Contains(secrets.StoragePath.Examples.MacOS, "Library/Application Support") || !strings.Contains(secrets.StoragePath.Examples.Linux, ".config/swarm/credentials.json") {
+		t.Fatalf("secrets storage examples = %#v", secrets.StoragePath.Examples)
+	}
+	for _, name := range []string{"set", "list", "check", "rm"} {
+		sub, ok := secrets.Subcommands[name]
+		if !ok {
+			t.Fatalf("secrets command missing subcommand %q: %#v", name, secrets.Subcommands)
+		}
+		if !strings.Contains(sub.Command, "swarm secrets "+name) {
+			t.Fatalf("secrets subcommand %q = %#v", name, sub)
+		}
+	}
+	if !strings.Contains(secrets.Subcommands["set"].Behavior, "Plaintext positional values") || !strings.Contains(secrets.Subcommands["set"].Behavior, "--value") {
+		t.Fatalf("secrets set behavior = %q", secrets.Subcommands["set"].Behavior)
+	}
+}
+
 func TestPlatformSpecWorkspaceDataSourceAuthorityPromoted(t *testing.T) {
 	var spec struct {
 		WorkspaceModel struct {

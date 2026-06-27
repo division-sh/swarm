@@ -77,6 +77,7 @@ func credentialRecord(item runtimecredentials.Descriptor) CredentialRecord {
 		Present:  item.Present,
 		Source:   item.Source,
 		Writable: item.Writable,
+		Shadowed: item.Shadowed,
 	}
 	if item.UpdatedAt != nil && !item.UpdatedAt.IsZero() {
 		record.UpdatedAt = item.UpdatedAt.UTC().Format(time.RFC3339)
