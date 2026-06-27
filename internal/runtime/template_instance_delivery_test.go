@@ -59,10 +59,18 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScope
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 	eventID := "99999999-9999-4999-8999-999999999902"
-	evt := eventtest.WithFlowInstance(eventtest.WithEntityID((eventtest.Projection(eventID,
-
-		events.EventType("operating/inst-1/opco.product_initialization_requested"), "", "", []byte(`{"entity_id":"11111111-1111-4111-8111-111111111111"}`), 0, templateInstanceDeliveryRunID, "", events.EventEnvelope{}, time.Now().UTC())), "11111111-1111-4111-8111-111111111111"),
-		"operating/inst-1")
+	evt := eventtest.RootIngress(
+		eventID,
+		events.EventType("operating/inst-1/opco.product_initialization_requested"),
+		"",
+		"",
+		[]byte(`{"entity_id":"11111111-1111-4111-8111-111111111111"}`),
+		0,
+		templateInstanceDeliveryRunID,
+		"",
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, "11111111-1111-4111-8111-111111111111"), "operating/inst-1"),
+		time.Now().UTC(),
+	)
 
 	if err := bus.Publish(ctx, evt); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -106,10 +114,18 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsAuthorityBeforeHandle
 	}
 	ch := bus.SubscribeInternal("workflow-runtime", events.EventType("operating/opco.product_initialization_requested"))
 	eventID := "99999999-9999-4999-8999-999999999903"
-	evt := eventtest.WithFlowInstance(eventtest.WithEntityID((eventtest.Projection(eventID,
-
-		events.EventType("operating/inst-1/opco.product_initialization_requested"), "", "", []byte(`{"entity_id":"11111111-1111-4111-8111-111111111111"}`), 0, templateInstanceDeliveryRunID, "", events.EventEnvelope{}, time.Now().UTC())), "11111111-1111-4111-8111-111111111111"),
-		"operating/inst-1")
+	evt := eventtest.RootIngress(
+		eventID,
+		events.EventType("operating/inst-1/opco.product_initialization_requested"),
+		"",
+		"",
+		[]byte(`{"entity_id":"11111111-1111-4111-8111-111111111111"}`),
+		0,
+		templateInstanceDeliveryRunID,
+		"",
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, "11111111-1111-4111-8111-111111111111"), "operating/inst-1"),
+		time.Now().UTC(),
+	)
 
 	if err := bus.Publish(ctx, evt); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -162,9 +178,18 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 	})
 	bus.SetInterceptors(pc)
 
-	spinup := eventtest.WithEntityID((eventtest.Projection("99999999-9999-4999-8999-999999999910",
-
-		events.EventType("opco.spinup_requested"), "", "", []byte(`{"entity_id":"22222222-2222-4222-8222-222222222222","instance_id":"11111111-1111-4111-8111-111111111111","product_id":"product-1"}`), 0, templateInstanceDeliveryRunID, "", events.EventEnvelope{}, time.Now().UTC())), "22222222-2222-4222-8222-222222222222")
+	spinup := eventtest.RootIngress(
+		"99999999-9999-4999-8999-999999999910",
+		events.EventType("opco.spinup_requested"),
+		"",
+		"",
+		[]byte(`{"entity_id":"22222222-2222-4222-8222-222222222222","instance_id":"11111111-1111-4111-8111-111111111111","product_id":"product-1"}`),
+		0,
+		templateInstanceDeliveryRunID,
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "22222222-2222-4222-8222-222222222222"),
+		time.Now().UTC(),
+	)
 
 	if err := bus.Publish(ctx, spinup); err != nil {
 		t.Fatalf("Publish spinup: %v", err)
@@ -245,9 +270,18 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 	})
 	bus.SetInterceptors(pc)
 
-	spinup := eventtest.WithEntityID((eventtest.Projection("99999999-9999-4999-8999-999999999930",
-
-		events.EventType("opco.spinup_requested"), "", "", []byte(`{"entity_id":"22222222-2222-4222-8222-222222222222","instance_id":"11111111-1111-4111-8111-111111111111","product_id":"product-1"}`), 0, templateInstanceDeliveryRunID, "", events.EventEnvelope{}, time.Now().UTC())), "22222222-2222-4222-8222-222222222222")
+	spinup := eventtest.RootIngress(
+		"99999999-9999-4999-8999-999999999930",
+		events.EventType("opco.spinup_requested"),
+		"",
+		"",
+		[]byte(`{"entity_id":"22222222-2222-4222-8222-222222222222","instance_id":"11111111-1111-4111-8111-111111111111","product_id":"product-1"}`),
+		0,
+		templateInstanceDeliveryRunID,
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "22222222-2222-4222-8222-222222222222"),
+		time.Now().UTC(),
+	)
 
 	if err := bus.Publish(ctx, spinup); err != nil {
 		t.Fatalf("Publish spinup: %v", err)
@@ -317,7 +351,7 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 		},
 	})
 
-	mailbox := eventtest.Projection(
+	mailbox := eventtest.RootIngress(
 		"99999999-9999-4999-8999-999999999913",
 		events.EventType("mailbox.item_decided"),
 		"",
@@ -436,9 +470,18 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 		t.Fatal("workflow runtime did not subscribe")
 	}
 
-	mailbox := eventtest.WithEntityID((eventtest.Projection("99999999-9999-4999-8999-999999999912",
-
-		events.EventType("mailbox.item_decided"), "", "", []byte(`{"entity_id":"22222222-2222-4222-8222-222222222222","instance_id":"11111111-1111-4111-8111-111111111111","product_id":"product-1"}`), 0, templateInstanceDeliveryRunID, "", events.EventEnvelope{}, time.Now().UTC())), "22222222-2222-4222-8222-222222222222")
+	mailbox := eventtest.RootIngress(
+		"99999999-9999-4999-8999-999999999912",
+		events.EventType("mailbox.item_decided"),
+		"",
+		"",
+		[]byte(`{"entity_id":"22222222-2222-4222-8222-222222222222","instance_id":"11111111-1111-4111-8111-111111111111","product_id":"product-1"}`),
+		0,
+		templateInstanceDeliveryRunID,
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "22222222-2222-4222-8222-222222222222"),
+		time.Now().UTC(),
+	)
 
 	if err := bus.Publish(ctx, mailbox); err != nil {
 		t.Fatalf("Publish mailbox: %v", err)

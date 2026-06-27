@@ -21,16 +21,10 @@ func TestPostgresEventAdmissionRejectsMalformedChildDirectAppend(t *testing.T) {
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
-	err := pg.AppendEvent(ctx, events.NewChildEventWithLineage(
-		"",
+	err := pg.AppendEvent(ctx, eventtest.MalformedChildWithoutLineage(
 		events.EventType("task.completed"),
 		"agent-1",
-		"",
 		json.RawMessage(`{"ok":true}`),
-		0,
-		events.EventLineage{},
-		events.EventEnvelope{},
-		time.Time{},
 	))
 	if err == nil {
 		t.Fatal("expected malformed child event to fail admission")
@@ -53,17 +47,11 @@ func TestPostgresEventAdmissionRejectsProjectionDirectAppendWithoutAuthoritative
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
-	err := pg.AppendEvent(ctx, eventtest.Projection(
-		"",
+	err := pg.AppendEvent(ctx, eventtest.MalformedProjectionWithoutAuthoritativeFacts(
 		events.EventType("task.completed"),
 		"agent-1",
-		"",
 		json.RawMessage(`{"ok":true}`),
-		0,
-		"",
-		"",
-		events.EventEnvelope{},
-		time.Time{}))
+	))
 	if err == nil {
 		t.Fatal("expected malformed projection event to fail admission")
 	}
@@ -73,16 +61,11 @@ func TestPostgresEventAdmissionRejectsProjectionDirectAppendWithoutAuthoritative
 
 	err = pg.AppendEvent(runtimecorrelation.WithRuntimeLineage(ctx, runtimecorrelation.RuntimeLineage{
 		RunID: uuid.NewString(),
-	}), eventtest.Projection(
+	}), eventtest.MalformedProjectionWithoutAuthoritativeRun(
 		uuid.NewString(),
 		events.EventType("task.completed"),
 		"agent-1",
-		"",
 		json.RawMessage(`{"ok":true}`),
-		0,
-		"",
-		"",
-		events.EventEnvelope{},
 		time.Date(2026, 6, 6, 10, 11, 12, 0, time.UTC)),
 	)
 	if err == nil {
@@ -105,16 +88,10 @@ func TestSQLiteEventAdmissionRejectsMalformedChildDirectAppend(t *testing.T) {
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	ctx := context.Background()
 
-	err := sqliteStore.AppendEvent(ctx, events.NewChildEventWithLineage(
-		"",
+	err := sqliteStore.AppendEvent(ctx, eventtest.MalformedChildWithoutLineage(
 		events.EventType("task.completed"),
 		"agent-1",
-		"",
 		json.RawMessage(`{"ok":true}`),
-		0,
-		events.EventLineage{},
-		events.EventEnvelope{},
-		time.Time{},
 	))
 	if err == nil {
 		t.Fatal("expected malformed child event to fail admission")
@@ -136,17 +113,11 @@ func TestSQLiteEventAdmissionRejectsProjectionDirectAppendWithoutAuthoritativeFa
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	ctx := context.Background()
 
-	err := sqliteStore.AppendEvent(ctx, eventtest.Projection(
-		"",
+	err := sqliteStore.AppendEvent(ctx, eventtest.MalformedProjectionWithoutAuthoritativeFacts(
 		events.EventType("task.completed"),
 		"agent-1",
-		"",
 		json.RawMessage(`{"ok":true}`),
-		0,
-		"",
-		"",
-		events.EventEnvelope{},
-		time.Time{}))
+	))
 	if err == nil {
 		t.Fatal("expected malformed projection event to fail admission")
 	}
@@ -156,16 +127,11 @@ func TestSQLiteEventAdmissionRejectsProjectionDirectAppendWithoutAuthoritativeFa
 
 	err = sqliteStore.AppendEvent(runtimecorrelation.WithRuntimeLineage(ctx, runtimecorrelation.RuntimeLineage{
 		RunID: uuid.NewString(),
-	}), eventtest.Projection(
+	}), eventtest.MalformedProjectionWithoutAuthoritativeRun(
 		uuid.NewString(),
 		events.EventType("task.completed"),
 		"agent-1",
-		"",
 		json.RawMessage(`{"ok":true}`),
-		0,
-		"",
-		"",
-		events.EventEnvelope{},
 		time.Date(2026, 6, 6, 10, 11, 12, 0, time.UTC)),
 	)
 	if err == nil {

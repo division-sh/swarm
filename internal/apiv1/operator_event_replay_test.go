@@ -290,7 +290,7 @@ func TestOperatorEventReplaySubsetAndFailClosedCases(t *testing.T) {
 		pg := &store.PostgresStore{DB: db}
 		eventID := uuid.NewString()
 		runID := uuid.NewString()
-		if err := pg.AppendEvent(ctx, eventtest.Projection(
+		if err := pg.AppendEvent(ctx, eventtest.PersistedProjection(
 			eventID,
 			events.EventType("scan.requested"),
 			"workflow-runtime",
@@ -663,10 +663,18 @@ func seedReplayableOperatorEvent(t *testing.T, ctx context.Context, pg *store.Po
 	t.Helper()
 	eventID := uuid.NewString()
 	runID := uuid.NewString()
-	if err := pg.AppendEvent(ctx, eventtest.WithEntityID((eventtest.Projection(eventID,
-
+	if err := pg.AppendEvent(ctx, eventtest.PersistedProjection(
+		eventID,
 		events.EventType(eventName),
-		"origin-agent", "", []byte(`{"topic":"medicine"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())), runID)); err != nil {
+		"origin-agent",
+		"",
+		[]byte(`{"topic":"medicine"}`),
+		0,
+		runID,
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, runID),
+		time.Now().UTC(),
+	)); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
 	if err := pg.InsertEventDeliveries(ctx, eventID, subscribers); err != nil {
@@ -721,7 +729,7 @@ func assertNoReplayEvent(t *testing.T, ch <-chan events.Event) {
 func fillAgentChannel(t *testing.T, ctx context.Context, bus *runtimebus.EventBus, agentID string, count int) {
 	t.Helper()
 	for i := 0; i < count; i++ {
-		err := bus.PublishDirect(ctx, events.NewRootIngressEvent(uuid.NewString(),
+		err := bus.PublishDirect(ctx, eventtest.RootIngress(uuid.NewString(),
 			events.EventType("filler.event"), "", "", []byte(`{"ok":true}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()), []string{agentID})
 		if err != nil {
 			t.Fatalf("fill agent channel publish %d: %v", i, err)

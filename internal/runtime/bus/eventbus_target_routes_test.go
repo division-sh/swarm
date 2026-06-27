@@ -175,7 +175,7 @@ func TestEventBusRecipientPlanMaterializerPersistsRoutesBeforeInterceptors(t *te
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.Publish(context.Background(), eventtest.Projection(eventID,
+	if err := eb.Publish(context.Background(), eventtest.RootIngress(eventID,
 		events.EventType("review/inst-1/task.started"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
@@ -206,7 +206,7 @@ func TestEventBusRecipientPlanMaterializerNormalizesRoutePlanDirectly(t *testing
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	evt := eventtest.Projection(uuid.NewString(), events.EventType("review/inst-1/task.started"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
+	evt := eventtest.RootIngress(uuid.NewString(), events.EventType("review/inst-1/task.started"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
 	emptyAgentPolicyPlan := routePlanFromManifest(evt, deliveryRecipientManifest{}, routeIntentProducerAgentPolicy)
 	if emptyAgentPolicyPlan.AuthorityState != RoutePlanAuthorityNoCanonicalMatch || emptyAgentPolicyPlan.AuthorityOwner != "" {
 		t.Fatalf("empty agent-policy route plan authority = %q/%q, want no canonical match", emptyAgentPolicyPlan.AuthorityState, emptyAgentPolicyPlan.AuthorityOwner)
@@ -244,7 +244,7 @@ func TestEventBusAgentDispatchIgnoresSameIDNodeRouteTargets(t *testing.T) {
 	ch := eb.Subscribe("shared-subscriber", events.EventType("review/inst-1/task.started"))
 	defer eb.Unsubscribe("shared-subscriber")
 
-	evt := eventtest.Projection(uuid.NewString(),
+	evt := eventtest.RootIngress(uuid.NewString(),
 		events.EventType("review/inst-1/task.started"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
 	if err := eb.deliverToRecipientsWithRoutes(context.Background(), evt, []string{"shared-subscriber"}, []events.DeliveryRoute{{
@@ -349,7 +349,7 @@ func TestEventBusPublish_NodeOnlyRouteDoesNotRequireAgentChannel(t *testing.T) {
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	eb.deliveryPlanner = nodeOnlyDeliveryPlanner("workflow-node")
-	evt := eventtest.Projection(uuid.NewString(),
+	evt := eventtest.RootIngress(uuid.NewString(),
 		events.EventType("custom.node_only"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
 	if err := eb.Publish(context.Background(), evt); err != nil {
@@ -369,7 +369,7 @@ func TestEventBusCommittedPublishDispatch_NodeOnlyRouteDoesNotRequireAgentChanne
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	evt := eventtest.Projection(uuid.NewString(),
+	evt := eventtest.RootIngress(uuid.NewString(),
 		events.EventType("custom.node_only_tx"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
 	eb.completeCommittedPublishDispatch(context.Background(), evt, nodeOnlyDeliveryPlan(evt, "workflow-node"))
@@ -385,7 +385,7 @@ func TestEngineDispatcher_NodeOnlyRouteDoesNotRequireAgentChannel(t *testing.T) 
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	evt := eventtest.Projection(uuid.NewString(),
+	evt := eventtest.RootIngress(uuid.NewString(),
 		events.EventType("custom.node_only_outbox"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
 	store.events[evt.ID()] = evt
@@ -401,7 +401,7 @@ func TestEngineDispatcher_NodeOnlyRouteDoesNotRequireAgentChannel(t *testing.T) 
 
 func TestSweepUndispatched_NodeOnlyRouteDoesNotRequireAgentChannel(t *testing.T) {
 	store := newTargetRouteMemoryStore()
-	evt := eventtest.Projection(uuid.NewString(),
+	evt := eventtest.RootIngress(uuid.NewString(),
 		events.EventType("custom.node_only_sweep"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
 	store.events[evt.ID()] = evt
@@ -433,7 +433,7 @@ func TestEventBusPublish_MixedNodeAgentRouteStillRequiresAgentChannel(t *testing
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	eb.deliveryPlanner = mixedNodeAgentDeliveryPlanner("workflow-node", "agent-missing")
-	evt := eventtest.Projection(uuid.NewString(),
+	evt := eventtest.RootIngress(uuid.NewString(),
 		events.EventType("custom.mixed_node_agent"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
 	err = eb.Publish(context.Background(), evt)
@@ -474,11 +474,21 @@ func TestEventBusPublish_TargetSetInternalDeliveryUsesPerTargetRoutes(t *testing
 	)
 
 	ch := eb.SubscribeInternal("workflow-runtime", events.EventType("child/output.done"))
-	evt := eventtest.WithTargetSet((eventtest.Projection(uuid.NewString(),
-		events.EventType("child/output.done"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())), []events.RouteIdentity{
-		{FlowInstance: "child-a/inst-1", EntityID: "ent-a"},
-		{FlowInstance: "child-b/inst-1", EntityID: "ent-b"},
-	})
+	evt := eventtest.RootIngress(
+		uuid.NewString(),
+		events.EventType("child/output.done"),
+		"",
+		"",
+		[]byte(`{}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForTargetSet(events.EventEnvelope{}, []events.RouteIdentity{
+			{FlowInstance: "child-a/inst-1", EntityID: "ent-a"},
+			{FlowInstance: "child-b/inst-1", EntityID: "ent-b"},
+		}),
+		time.Now().UTC(),
+	)
 
 	if err := eb.Publish(context.Background(), evt); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -542,11 +552,21 @@ func TestEventBusPublish_TargetSetSameSemanticNodePersistsPerTargetRoutes(t *tes
 	)
 
 	ch := eb.SubscribeInternal("workflow-runtime", events.EventType("worker/work.assign"))
-	evt := eventtest.WithTargetSet((eventtest.Projection(uuid.NewString(),
-		events.EventType("worker/work.assign"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())), []events.RouteIdentity{
-		{FlowInstance: "worker/w-001", EntityID: "worker/w-001"},
-		{FlowInstance: "worker/w-002", EntityID: "worker/w-002"},
-	})
+	evt := eventtest.RootIngress(
+		uuid.NewString(),
+		events.EventType("worker/work.assign"),
+		"",
+		"",
+		[]byte(`{}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForTargetSet(events.EventEnvelope{}, []events.RouteIdentity{
+			{FlowInstance: "worker/w-001", EntityID: "worker/w-001"},
+			{FlowInstance: "worker/w-002", EntityID: "worker/w-002"},
+		}),
+		time.Now().UTC(),
+	)
 
 	if err := eb.Publish(context.Background(), evt); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -590,9 +610,18 @@ func TestEventBusPublish_TargetedRouteTableNodePersistsSemanticNodeRoute(t *test
 			},
 		},
 	)
-	evt := eventtest.WithTargetRoute((eventtest.Projection(uuid.NewString(),
-		events.EventType("worker/work.assign"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())),
-		events.RouteIdentity{FlowInstance: "worker/w-001", EntityID: "worker/w-001"})
+	evt := eventtest.RootIngress(
+		uuid.NewString(),
+		events.EventType("worker/work.assign"),
+		"",
+		"",
+		[]byte(`{}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowInstance: "worker/w-001", EntityID: "worker/w-001"}),
+		time.Now().UTC(),
+	)
 
 	if err := eb.Publish(context.Background(), evt); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -617,9 +646,18 @@ func TestEventBusPublish_TargetedTemplateInstanceRouteTableNodePersistsSemanticN
 	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("operating", "inst-1")}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
-	evt := eventtest.WithTargetRoute((eventtest.Projection(uuid.NewString(),
-		events.EventType("operating/opco.product_initialization_requested"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())),
-		events.RouteIdentity{FlowInstance: "operating/inst-1", EntityID: "ent-operating"})
+	evt := eventtest.RootIngress(
+		uuid.NewString(),
+		events.EventType("operating/opco.product_initialization_requested"),
+		"",
+		"",
+		[]byte(`{}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowInstance: "operating/inst-1", EntityID: "ent-operating"}),
+		time.Now().UTC(),
+	)
 
 	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 	if err != nil {
@@ -686,9 +724,18 @@ func TestEventBusPublish_TargetedDynamicFlowFixtureRouteTableNodePersistsSemanti
 		FlowInstance: "worker/w-001",
 		EntityID:     runtimeflowidentity.EntityID("worker/w-001"),
 	}
-	evt := eventtest.WithTargetRoute((eventtest.Projection(uuid.NewString(),
-		events.EventType("worker/work.assign"), "", "", []byte(`{"task_label":"route-me"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())),
-		target)
+	evt := eventtest.RootIngress(
+		uuid.NewString(),
+		events.EventType("worker/work.assign"),
+		"",
+		"",
+		[]byte(`{"task_label":"route-me"}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForTargetRoute(events.EventEnvelope{}, target),
+		time.Now().UTC(),
+	)
 
 	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 	if err != nil {
@@ -732,9 +779,18 @@ func TestEventBusPublish_NoTargetConcreteRoutedNodePersistsSemanticNodeRoute(t *
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 	ch := eb.SubscribeInternal("workflow-runtime", events.EventType("operating/opco.product_initialization_requested"))
-	evt := eventtest.WithFlowInstance(eventtest.WithEntityID((eventtest.Projection(uuid.NewString(),
-		events.EventType("operating/inst-1/opco.product_initialization_requested"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())), "ent-operating"),
-		"operating/inst-1")
+	evt := eventtest.RootIngress(
+		uuid.NewString(),
+		events.EventType("operating/inst-1/opco.product_initialization_requested"),
+		"",
+		"",
+		[]byte(`{}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-operating"), "operating/inst-1"),
+		time.Now().UTC(),
+	)
 
 	if err := eb.Publish(context.Background(), evt); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -795,9 +851,18 @@ func TestEventBusPublish_SemanticScopeFlowInstanceResolvesConcreteRoute(t *testi
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 	ch := eb.SubscribeInternal("workflow-runtime", events.EventType("operating/opco.product_initialization_requested"))
-	evt := eventtest.WithFlowInstance(eventtest.WithEntityID((eventtest.Projection(uuid.NewString(),
-		events.EventType("operating/opco.product_initialization_requested"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())), "ent-operating"),
-		"operating/inst-1")
+	evt := eventtest.RootIngress(
+		uuid.NewString(),
+		events.EventType("operating/opco.product_initialization_requested"),
+		"",
+		"",
+		[]byte(`{}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-operating"), "operating/inst-1"),
+		time.Now().UTC(),
+	)
 
 	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 	if err != nil {
@@ -861,10 +926,18 @@ func TestEventBusPublish_RuntimeCallbackLocalEventPersistsSameFlowNodeRouteBefor
 			concreteEventType := "repo-scaffold/inst-1/" + tc.eventType
 			ch := eb.SubscribeInternal("workflow-runtime", events.EventType(concreteEventType))
 			defer eb.Unsubscribe("workflow-runtime")
-			evt := eventtest.WithFlowInstance(eventtest.WithEntityID((eventtest.Projection(eventID,
+			evt := eventtest.RootIngress(
+				eventID,
 				events.EventType(tc.eventType),
-				"workflow-runtime", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())), "ent-repo"),
-				"repo-scaffold/inst-1")
+				"workflow-runtime",
+				"",
+				[]byte(`{}`),
+				0,
+				"",
+				"",
+				events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-repo"), "repo-scaffold/inst-1"),
+				time.Now().UTC(),
+			)
 
 			plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 			if err != nil {
@@ -907,9 +980,18 @@ func TestEventBusCheckPublishRecipientPlan_SemanticScopeFlowInstanceMaterializes
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	ch := eb.SubscribeInternal("workflow-runtime", events.EventType("validation/thing.reviewed"))
-	evt := eventtest.WithFlowInstance(eventtest.WithEntityID((eventtest.Projection(uuid.NewString(),
-		events.EventType("validation/thing.reviewed"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())), "ent-validation"),
-		"validation/inst-1")
+	evt := eventtest.RootIngress(
+		uuid.NewString(),
+		events.EventType("validation/thing.reviewed"),
+		"",
+		"",
+		[]byte(`{}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-validation"), "validation/inst-1"),
+		time.Now().UTC(),
+	)
 
 	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 	if err != nil {
@@ -953,9 +1035,18 @@ func TestEventBusCheckPublishRecipientPlan_SemanticScopeFlowInstanceMaterializes
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	evt := eventtest.WithFlowInstance(eventtest.WithEntityID((eventtest.Projection(uuid.NewString(),
-		events.EventType("validation/thing.reviewed"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())), "ent-validation"),
-		"validation/inst-1")
+	evt := eventtest.RootIngress(
+		uuid.NewString(),
+		events.EventType("validation/thing.reviewed"),
+		"",
+		"",
+		[]byte(`{}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-validation"), "validation/inst-1"),
+		time.Now().UTC(),
+	)
 
 	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 	if err != nil {
@@ -996,8 +1087,18 @@ func TestEventBusPublish_NoTargetScopedRoutedNodePersistsSemanticRouteBeforeInte
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	ch := eb.SubscribeInternal("workflow-runtime", events.EventType("child/child.start"))
-	evt := eventtest.WithEntityID((eventtest.Projection(uuid.NewString(),
-		events.EventType("child/child.start"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())), "ent-child")
+	evt := eventtest.RootIngress(
+		uuid.NewString(),
+		events.EventType("child/child.start"),
+		"",
+		"",
+		[]byte(`{}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-child"),
+		time.Now().UTC(),
+	)
 
 	want := events.DeliveryRoute{
 		SubscriberType: "node",
@@ -1099,9 +1200,18 @@ func TestEventBusPublish_WildcardStaticServiceNodePersistsRouteBeforeInternalCar
 	}
 	ch := eb.SubscribeInternal("workflow-runtime", events.EventType(eventType))
 	defer eb.Unsubscribe("workflow-runtime")
-	evt := eventtest.WithFlowInstance(eventtest.WithEntityID((eventtest.Projection(eventID,
-		events.EventType(eventType), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())), "ent-component"),
-		"component-scaffold/component-a")
+	evt := eventtest.RootIngress(
+		eventID,
+		events.EventType(eventType),
+		"",
+		"",
+		[]byte(`{}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-component"), "component-scaffold/component-a"),
+		time.Now().UTC(),
+	)
 
 	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 	if err != nil {
@@ -1179,8 +1289,18 @@ func TestEventBusPublish_RootInputFlowNodePersistsRouteBeforeDispatch(t *testing
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	ch := eb.SubscribeInternal("workflow-runtime", events.EventType("thing.created"))
-	evt := eventtest.WithEntityID((eventtest.Projection(eventID,
-		events.EventType("thing.created"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())), "ent-root-input")
+	evt := eventtest.RootIngress(
+		eventID,
+		events.EventType("thing.created"),
+		"",
+		"",
+		[]byte(`{}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-root-input"),
+		time.Now().UTC(),
+	)
 
 	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 	if err != nil {
@@ -1231,8 +1351,18 @@ func TestEventBusPublish_RootInputFlowNodePersistsRouteBeforeInterceptorWithoutI
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	evt := eventtest.WithEntityID((eventtest.Projection(eventID,
-		events.EventType("thing.created"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())), "ent-root-input")
+	evt := eventtest.RootIngress(
+		eventID,
+		events.EventType("thing.created"),
+		"",
+		"",
+		[]byte(`{}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-root-input"),
+		time.Now().UTC(),
+	)
 
 	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 	if err != nil {
@@ -1289,8 +1419,18 @@ func TestEventBusPublish_LoadedRootInputProjectEventPersistsRouteBeforeDispatch(
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	ch := eb.SubscribeInternal("workflow-runtime", events.EventType("thing.created"))
-	evt := eventtest.WithEntityID((eventtest.Projection(eventID,
-		events.EventType("thing.created"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())), "ent-loaded-root-input")
+	evt := eventtest.RootIngress(
+		eventID,
+		events.EventType("thing.created"),
+		"",
+		"",
+		[]byte(`{}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-loaded-root-input"),
+		time.Now().UTC(),
+	)
 
 	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 	if err != nil {
@@ -1326,8 +1466,18 @@ func TestEventBusPublish_NoTargetRootRoutedNodeUsesSemanticNodeDeliveryRoute(t *
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	ch := eb.SubscribeInternal("portfolio-node", events.EventType("opco.spinup_requested"))
-	evt := eventtest.WithEntityID((eventtest.Projection(uuid.NewString(),
-		events.EventType("opco.spinup_requested"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())), "ent-root")
+	evt := eventtest.RootIngress(
+		uuid.NewString(),
+		events.EventType("opco.spinup_requested"),
+		"",
+		"",
+		[]byte(`{}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-root"),
+		time.Now().UTC(),
+	)
 
 	if err := eb.Publish(context.Background(), evt); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -1379,8 +1529,18 @@ func TestEventBusPublish_NoTargetRootRoutedNodePersistsSemanticRouteWithoutInter
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	evt := eventtest.WithEntityID((eventtest.Projection(uuid.NewString(),
-		events.EventType("opco.spinup_requested"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())), "ent-root")
+	evt := eventtest.RootIngress(
+		uuid.NewString(),
+		events.EventType("opco.spinup_requested"),
+		"",
+		"",
+		[]byte(`{}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-root"),
+		time.Now().UTC(),
+	)
 
 	if err := eb.Publish(context.Background(), evt); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -1456,8 +1616,18 @@ func TestEventBusPublish_TopLevelProjectNodePersistsRouteBeforeInterceptor(t *te
 	}
 	eb.RegisterRuntimeActiveAgentDescriptor(ActiveAgentDescriptor{AgentID: "workflow-runtime"})
 	ch := eb.Subscribe("workflow-runtime", events.EventType("thing.created"))
-	evt := eventtest.WithEntityID((eventtest.Projection(eventID,
-		events.EventType("thing.created"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())), "ent-project")
+	evt := eventtest.RootIngress(
+		eventID,
+		events.EventType("thing.created"),
+		"",
+		"",
+		[]byte(`{}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-project"),
+		time.Now().UTC(),
+	)
 
 	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 	if err != nil {
@@ -1489,7 +1659,7 @@ func TestEventBusPublish_NodeRouteFailsClosedWithoutRouteSetPersistence(t *testi
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.Publish(context.Background(), eventtest.Projection(uuid.NewString(),
+	if err := eb.Publish(context.Background(), eventtest.RootIngress(uuid.NewString(),
 		events.EventType("thing.created"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())); err == nil || !strings.Contains(err.Error(), "typed delivery route persistence") {
 		t.Fatalf("Publish error = %v, want typed delivery route persistence failure", err)
 	}

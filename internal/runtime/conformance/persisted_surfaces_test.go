@@ -225,12 +225,12 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 		t.Fatalf("seed run: %v", err)
 	}
 
-	event1 := eventtest.Projection(uuid.NewString(),
+	event1 := eventtest.PersistedProjection(uuid.NewString(),
 
 		events.EventType("review.requested"),
 		"runtime", "", []byte(`{"turn":1}`), 0, runID, "", events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC())
 
-	event2 := eventtest.Projection(uuid.NewString(),
+	event2 := eventtest.PersistedProjection(uuid.NewString(),
 
 		events.EventType("review.requested"),
 		"runtime", "", []byte(`{"turn":2}`), 0, runID, "", events.EventEnvelope{}, time.Now().Add(-1*time.Minute).UTC())
@@ -382,7 +382,7 @@ func TestRotatedLiveSessionRebindsDeliveryFrontierToSuccessorSession(t *testing.
 	}
 
 	eventID := uuid.NewString()
-	evt := eventtest.Projection(eventID,
+	evt := eventtest.PersistedProjection(eventID,
 
 		events.EventType("review.requested"),
 		"runtime", "", []byte(`{"turn":1}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
@@ -810,8 +810,18 @@ func TestAccumulatorCompletionOutcomeSurface_RoundTripsThroughObservabilityReade
 		if err != nil {
 			t.Fatalf("marshal payload: %v", err)
 		}
-		if err := rt.Bus.Publish(ctx, eventtest.WithEntityID((eventtest.Projection(uuid.NewString(),
-			events.EventType("score.received"), "", "", payload, 0, "", "", events.EventEnvelope{}, time.Now().UTC().Add(time.Duration(idx)*time.Millisecond))), entityID)); err != nil {
+		if err := rt.Bus.Publish(ctx, eventtest.PersistedProjection(
+			uuid.NewString(),
+			events.EventType("score.received"),
+			"",
+			"",
+			payload,
+			0,
+			"",
+			"",
+			events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
+			time.Now().UTC().Add(time.Duration(idx)*time.Millisecond),
+		)); err != nil {
 			t.Fatalf("Publish(%d): %v", idx, err)
 		}
 	}
@@ -1230,7 +1240,7 @@ func TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWitho
 	eventStore := conformanceRecoveryFailureEventStore{
 		store: pg,
 		missing: []events.PersistedReplayEvent{{
-			Event: eventtest.Projection(uuid.NewString(),
+			Event: eventtest.PersistedProjection(uuid.NewString(),
 				events.EventType("support.item_created"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().Add(-time.Minute).UTC()),
 		}},
 		claimErr: errors.New("claim failed"),
@@ -1594,10 +1604,10 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 		}},
 		pending: map[string][]events.Event{
 			"agent-a": {
-				eventtest.Projection("evt-replay", events.EventType("support.replay.ok"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().Add(-4*time.Minute).UTC()),
-				eventtest.Projection("evt-skip", events.EventType("support.replay.skip"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().Add(-3*time.Minute).UTC()),
-				eventtest.Projection("evt-leased", events.EventType("support.replay.leased"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC()),
-				eventtest.Projection("evt-drop", events.EventType("support.replay.drop"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().Add(-time.Minute).UTC()),
+				eventtest.PersistedProjection("evt-replay", events.EventType("support.replay.ok"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().Add(-4*time.Minute).UTC()),
+				eventtest.PersistedProjection("evt-skip", events.EventType("support.replay.skip"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().Add(-3*time.Minute).UTC()),
+				eventtest.PersistedProjection("evt-leased", events.EventType("support.replay.leased"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC()),
+				eventtest.PersistedProjection("evt-drop", events.EventType("support.replay.drop"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().Add(-time.Minute).UTC()),
 			},
 		},
 		receipts: map[string]runtimemanager.EventReceipt{
@@ -1730,12 +1740,12 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 	replayRunID := uuid.NewString()
 	replayParentID := uuid.NewString()
 	replayChildID := uuid.NewString()
-	if err := pg.AppendEvent(ctx, eventtest.Projection(replayParentID,
+	if err := pg.AppendEvent(ctx, eventtest.PersistedProjection(replayParentID,
 		events.EventType("system.parent"),
 		"runtime", "", []byte(`{"ok":true}`), 0, replayRunID, "", events.EventEnvelope{}, time.Now().Add(-3*time.Minute).UTC())); err != nil {
 		t.Fatalf("AppendEvent(replay parent): %v", err)
 	}
-	if err := pg.AppendEvent(ctx, eventtest.Projection(replayChildID,
+	if err := pg.AppendEvent(ctx, eventtest.PersistedProjection(replayChildID,
 		events.EventType("system.recover.replay"),
 		"runtime", "", []byte(`{"ok":true}`), 0, replayRunID,
 		replayParentID, events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC())); err != nil {
@@ -1754,12 +1764,12 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 	skipRunID := uuid.NewString()
 	skipParentID := uuid.NewString()
 	skipChildID := uuid.NewString()
-	if err := pg.AppendEvent(ctx, eventtest.Projection(skipParentID,
+	if err := pg.AppendEvent(ctx, eventtest.PersistedProjection(skipParentID,
 		events.EventType("system.parent"),
 		"runtime", "", []byte(`{"ok":true}`), 0, skipRunID, "", events.EventEnvelope{}, time.Now().Add(-3*time.Minute).UTC())); err != nil {
 		t.Fatalf("AppendEvent(skip parent): %v", err)
 	}
-	if err := pg.AppendEvent(ctx, eventtest.Projection(skipChildID,
+	if err := pg.AppendEvent(ctx, eventtest.PersistedProjection(skipChildID,
 		events.EventType("system.recover.skip"),
 		"runtime", "", []byte(`{"ok":true}`), 0, skipRunID,
 		skipParentID, events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC())); err != nil {

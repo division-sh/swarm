@@ -71,7 +71,20 @@ func TestArtifactRepoResultEventPreservesScopedProducerSourceRoute(t *testing.T)
 		t.Run(tc.name, func(t *testing.T) {
 			entityID := "ent-repo"
 			parentEnvelope := events.EventEnvelope{EntityID: "upstream-ent", FlowInstance: tc.inboundFlowPath}
-			parent := eventtest.Projection(
+			if tc.stateFlowPath != "" || !tc.producerRoute.Empty() || !tc.targetRoute.Empty() {
+				parentEnvelope = events.EnvelopeForSourceRoute(parentEnvelope, events.RouteIdentity{
+					FlowID:       "upstream",
+					FlowInstance: "upstream/inst-0",
+					EntityID:     "upstream-ent",
+				})
+
+			}
+			if !tc.targetRoute.Empty() {
+				parentEnvelope = events.EnvelopeForTargetRoute(parentEnvelope, tc.targetRoute)
+			} else if tc.inboundFlowPath != "" {
+				parentEnvelope = events.EnvelopeForFlowInstance(parentEnvelope, tc.inboundFlowPath)
+			}
+			parent := eventtest.RootIngress(
 				"evt-parent",
 				"repo_scaffold.repo_commit_requested",
 				"workflow-runtime",
@@ -82,20 +95,6 @@ func TestArtifactRepoResultEventPreservesScopedProducerSourceRoute(t *testing.T)
 				"",
 				parentEnvelope,
 				time.Unix(1_700_000_000, 0).UTC())
-
-			if tc.stateFlowPath != "" || !tc.producerRoute.Empty() || !tc.targetRoute.Empty() {
-				parent = eventtest.WithSourceRoute(parent, events.RouteIdentity{
-					FlowID:       "upstream",
-					FlowInstance: "upstream/inst-0",
-					EntityID:     "upstream-ent",
-				})
-
-			}
-			if !tc.targetRoute.Empty() {
-				parent = eventtest.WithTargetRoute(parent, tc.targetRoute)
-			} else if tc.inboundFlowPath != "" {
-				parent = eventtest.WithFlowInstance(parent, tc.inboundFlowPath)
-			}
 			stateMetadata := map[string]any{}
 			if tc.stateFlowPath != "" {
 				stateMetadata["flow_path"] = tc.stateFlowPath
@@ -212,7 +211,14 @@ func TestActionResultProducerRouteCoversCurrentRouteShapes(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			evt := eventtest.Projection(
+			eventEnvelope := events.EventEnvelope{}
+			if tc.eventFlowPath != "" {
+				eventEnvelope = events.EnvelopeForFlowInstance(eventEnvelope, tc.eventFlowPath)
+			}
+			if len(tc.targetSet) > 0 {
+				eventEnvelope = events.EnvelopeForTargetSet(eventEnvelope, tc.targetSet)
+			}
+			evt := eventtest.RootIngress(
 				"evt-parent",
 				"repo_scaffold.repo_commit_requested",
 				"workflow-runtime",
@@ -221,15 +227,8 @@ func TestActionResultProducerRouteCoversCurrentRouteShapes(t *testing.T) {
 				0,
 				"run-1",
 				"",
-				events.EventEnvelope{},
+				eventEnvelope,
 				time.Unix(1_700_000_000, 0).UTC())
-
-			if tc.eventFlowPath != "" {
-				evt = eventtest.WithFlowInstance(evt, tc.eventFlowPath)
-			}
-			if len(tc.targetSet) > 0 {
-				evt = eventtest.WithTargetSet(evt, tc.targetSet)
-			}
 			stateMetadata := map[string]any{}
 			if tc.stateFlowPath != "" {
 				stateMetadata["flow_path"] = tc.stateFlowPath

@@ -79,7 +79,7 @@ func TestSystemNodeRunner_RecordsDeadLetterRow(t *testing.T) {
 	}, eventReceiptsCapabilityStub{enabled: true}.resolve)
 	runner.SetRetryPolicyForTest(2, func(int) time.Duration { return 0 })
 
-	evt := eventtest.Projection(uuid.NewString(),
+	evt := eventtest.RootIngress(uuid.NewString(),
 		"source.evt",
 		"src", "", []byte(`{"entity_id":"`+uuid.NewString()+`"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
@@ -144,11 +144,18 @@ func TestCoordinator_RecordsChainDepthDeadLetterRow(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := context.Background()
 	entityID := uuid.NewString()
-	evt := eventtest.WithEntityID((eventtest.Projection(uuid.NewString(),
+	evt := eventtest.RootIngress(
+		uuid.NewString(),
 		"chain.start",
-		"src", "", []byte(`{}`),
-
-		5, testPipelineRunID, "", events.EventEnvelope{}, time.Now().UTC())), entityID)
+		"src",
+		"",
+		[]byte(`{}`),
+		5,
+		testPipelineRunID,
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
+		time.Now().UTC(),
+	)
 
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO events (event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
@@ -232,7 +239,7 @@ func TestSystemNodeRunner_SkipsQuiescedDestructiveResetDelivery(t *testing.T) {
 		return errors.New("should not run")
 	})
 
-	runner.ProcessEventForTest(ctx, eventtest.Projection(eventID, "source.evt", "", "", []byte(`{}`), 0, testPipelineRunID, "", events.EventEnvelope{}, time.Now().UTC()))
+	runner.ProcessEventForTest(ctx, eventtest.RootIngress(eventID, "source.evt", "", "", []byte(`{}`), 0, testPipelineRunID, "", events.EventEnvelope{}, time.Now().UTC()))
 
 	if handled != 0 {
 		t.Fatalf("handler calls = %d, want 0 for quiesced delivery", handled)
@@ -259,7 +266,7 @@ func TestSystemNodeRunner_NonRetryableRuntimeErrorDeadLettersImmediately(t *test
 	}, 0, eventReceiptsCapabilityStub{enabled: true}.resolve)
 	runner.SetRetryPolicyForTest(5, func(int) time.Duration { return 0 })
 
-	evt := eventtest.Projection(uuid.NewString(),
+	evt := eventtest.RootIngress(uuid.NewString(),
 		"source.evt",
 		"src", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
@@ -294,9 +301,18 @@ func TestSystemNodeRunner_FailsClosedWithoutCanonicalEventReceiptsCapability(t *
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := context.Background()
 	entityID := uuid.NewString()
-	evt := eventtest.WithEntityID((eventtest.Projection(uuid.NewString(),
+	evt := eventtest.RootIngress(
+		uuid.NewString(),
 		"source.evt",
-		"src", "", []byte(`{"entity_id":"`+entityID+`"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())), entityID)
+		"src",
+		"",
+		[]byte(`{"entity_id":"`+entityID+`"}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
+		time.Now().UTC(),
+	)
 
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO events (event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
@@ -328,9 +344,18 @@ func TestSystemNodeRunner_UsesCanonicalEventReceiptsCapabilityForIdempotency(t *
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := context.Background()
 	entityID := uuid.NewString()
-	evt := eventtest.WithEntityID((eventtest.Projection(uuid.NewString(),
+	evt := eventtest.RootIngress(
+		uuid.NewString(),
 		"source.evt",
-		"src", "", []byte(`{"entity_id":"`+entityID+`"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())), entityID)
+		"src",
+		"",
+		[]byte(`{"entity_id":"`+entityID+`"}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
+		time.Now().UTC(),
+	)
 
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO events (event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
@@ -369,9 +394,18 @@ func TestSystemNodeRunner_SkipsWithoutPersistedNodeDeliveryAuthority(t *testing.
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := context.Background()
 	entityID := uuid.NewString()
-	evt := eventtest.WithEntityID((eventtest.Projection(uuid.NewString(),
+	evt := eventtest.RootIngress(
+		uuid.NewString(),
 		"source.evt",
-		"src", "", []byte(`{"entity_id":"`+entityID+`"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())), entityID)
+		"src",
+		"",
+		[]byte(`{"entity_id":"`+entityID+`"}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
+		time.Now().UTC(),
+	)
 
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO events (event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
@@ -418,7 +452,7 @@ func TestSystemNodeRunner_UsesTypedReceiptOwnerWithoutRawDB(t *testing.T) {
 		attempts++
 		return nil
 	}, 0, eventReceiptsCapabilityStub{enabled: true}.resolve)
-	evt := eventtest.Projection(uuid.NewString(),
+	evt := eventtest.RootIngress(uuid.NewString(),
 		"source.evt", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
 	runner.ProcessEventForTest(ctx, evt)
@@ -461,9 +495,18 @@ func TestCoordinator_InterceptHandlerErrorDoesNotSilentlyFallback(t *testing.T) 
 		},
 		EventReceiptsCapability: eventReceiptsCapabilityStub{enabled: true}.resolve,
 	})
-	evt := eventtest.WithEntityID((eventtest.Projection(uuid.NewString(),
+	evt := eventtest.RootIngress(
+		uuid.NewString(),
 		events.EventType("score.dimension_complete"),
-		"analysis-agent", "", []byte(`{"entity_id":"`+uuid.NewString()+`","dimension":"expansion_potential","score":74,"tier":3}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())), uuid.NewString())
+		"analysis-agent",
+		"",
+		[]byte(`{"entity_id":"`+uuid.NewString()+`","dimension":"expansion_potential","score":74,"tier":3}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, uuid.NewString()),
+		time.Now().UTC(),
+	)
 
 	if _, err := db.ExecContext(context.Background(), `
 		INSERT INTO events (event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)

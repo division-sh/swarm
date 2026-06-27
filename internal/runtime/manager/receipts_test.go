@@ -158,7 +158,7 @@ func (a *outputRecordingAgent) Subscriptions() []events.EventType { return nil }
 func (a *outputRecordingAgent) OnEvent(context.Context, events.Event) ([]events.Event, error) {
 	a.calls++
 	return []events.Event{
-		eventtest.Projection("out-1", events.EventType("task.done"), "agent-a", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		eventtest.RootIngress("out-1", events.EventType("task.done"), "agent-a", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 	}, nil
 }
 
@@ -177,7 +177,7 @@ func TestMaybeTripAuthCircuitBreaker_PublishesFlowScopedAuthRequired(t *testing.
 	am := NewAgentManagerWithOptions(bus, nil, AgentManagerOptions{
 		RuntimeIngressSafetyPause: func(ctx context.Context, reason string) error {
 			pauseCalls++
-			return bus.Publish(ctx, eventtest.Projection("", events.EventType("platform.paused"),
+			return bus.Publish(ctx, eventtest.RootIngress("", events.EventType("platform.paused"),
 				"runtime", "", mustJSON(map[string]any{
 					"reason":    reason,
 					"paused_by": "runtime",
@@ -191,7 +191,7 @@ func TestMaybeTripAuthCircuitBreaker_PublishesFlowScopedAuthRequired(t *testing.
 		FlowPath: "review/inst-1",
 	}
 
-	inbound := eventtest.Projection("evt-1",
+	inbound := eventtest.RootIngress("evt-1",
 		events.EventType("work.requested"), "", "", nil, 0, "run-1", "", events.EventEnvelope{}, time.Time{})
 
 	ctx := runtimecorrelation.WithInboundEvent(context.Background(), inbound)
@@ -247,7 +247,7 @@ func TestMaybeTripAuthCircuitBreaker_PreservesCanceledEventLineage(t *testing.T)
 	bus := &recordingReceiptBus{}
 	am := NewAgentManager(bus, nil)
 
-	inbound := eventtest.Projection("evt-canceled",
+	inbound := eventtest.RootIngress("evt-canceled",
 		events.EventType("work.requested"), "", "", nil, 0, "run-canceled", "", events.EventEnvelope{}, time.Time{})
 
 	ctx := runtimecorrelation.WithInboundEvent(context.Background(), inbound)
@@ -434,7 +434,7 @@ func TestRecordPoisonQuarantine_RequiresDistinctEntities(t *testing.T) {
 func TestProcessEvent_PropagatesInboundParentWithoutTraceSeeding(t *testing.T) {
 	agent := &traceRecordingAgent{}
 	am := NewAgentManager(nil, nil)
-	evt := eventtest.Projection("evt-123",
+	evt := eventtest.RootIngress("evt-123",
 		events.EventType("discovery/market_research.scan_assigned"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
 
 	if err := am.processEvent(context.Background(), agent, evt); err != nil {
@@ -470,7 +470,7 @@ func TestProcessEvent_LogsLaunchingDeliveryLifecycleTransition(t *testing.T) {
 	bus := &recordingReceiptBus{}
 	store := &deliveryLifecycleStoreStub{}
 	am := NewAgentManager(bus, nil, store)
-	evt := eventtest.Projection("evt-1", events.EventType("task.started"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
+	evt := eventtest.RootIngress("evt-1", events.EventType("task.started"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
 	agent := traceRecordingAgent{parent: ""}
 
 	if err := am.processEvent(context.Background(), &agent, evt); err != nil {
@@ -498,7 +498,7 @@ func TestProcessEvent_SkipsLateOutputAndReceiptAfterDestructiveResetQuiescence(t
 	am := NewAgentManager(bus, nil, store)
 	agent := &outputRecordingAgent{}
 
-	result := am.processEventDetailed(context.Background(), agent, eventtest.Projection(uuid.NewString(), events.EventType("task.started"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	result := am.processEventDetailed(context.Background(), agent, eventtest.RootIngress(uuid.NewString(), events.EventType("task.started"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 	if result.err != nil {
 		t.Fatalf("processEventDetailed error = %v", result.err)
 	}

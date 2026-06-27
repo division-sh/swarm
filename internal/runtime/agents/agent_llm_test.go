@@ -29,7 +29,7 @@ import (
 func testBoardDirective(text string) runtimeagentcontrol.BoardDirective {
 	return runtimeagentcontrol.BoardDirective{
 		Directive: text,
-		Event: eventtest.Projection("00000000-0000-0000-0000-000000000101",
+		Event: eventtest.RootIngress("00000000-0000-0000-0000-000000000101",
 			events.EventType(runtimeagentcontrol.DirectiveEventType),
 			"runtime", "", []byte(`{"directive_text":"`+text+`","mode":"directive","run_id":"00000000-0000-0000-0000-000000000201","run_id_resolution":"new_run_allocated","source":"test"}`), 0, "00000000-0000-0000-0000-000000000201", "", events.EventEnvelope{}, time.Time{}),
 
@@ -45,11 +45,18 @@ func TestFormatEventForAgent_UsesPostCompositionToolSurface(t *testing.T) {
 		Mode:  "task",
 		Tools: []string{"schedule", "get_entity", "emit_example"},
 	}
-	evt := eventtest.WithEntityID((eventtest.Projection("evt-1",
+	evt := eventtest.RootIngress(
+		"evt-1",
 		"item.created",
 		"runtime",
 		"task-1",
-		[]byte(`{"item_id":"x"}`), 0, "", "", events.EventEnvelope{}, time.Time{})), "entity-1")
+		[]byte(`{"item_id":"x"}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "entity-1"),
+		time.Time{},
+	)
 
 	formatted := formatEventForAgent(cfg, evt, []llm.ToolDefinition{
 		{Name: "get_entity"},
@@ -90,11 +97,18 @@ func TestFormatEventForAgent_UsesCanonicalNativeBuiltinNames(t *testing.T) {
 			Bash:   true,
 		},
 	}
-	evt := eventtest.WithEntityID((eventtest.Projection("evt-1",
+	evt := eventtest.RootIngress(
+		"evt-1",
 		"item.created",
 		"runtime",
 		"task-1",
-		[]byte(`{"item_id":"x"}`), 0, "", "", events.EventEnvelope{}, time.Time{})), "entity-1")
+		[]byte(`{"item_id":"x"}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "entity-1"),
+		time.Time{},
+	)
 
 	formatted := formatEventForAgent(cfg, evt, []llm.ToolDefinition{
 		{Name: "query_entities"},
@@ -114,11 +128,18 @@ func TestFormatEventForAgent_DoesNotAdvertiseCLIOnlyControlTools(t *testing.T) {
 		Role: "operator",
 		Mode: "task",
 	}
-	evt := eventtest.WithEntityID((eventtest.Projection("evt-1",
+	evt := eventtest.RootIngress(
+		"evt-1",
 		"item.created",
 		"runtime",
 		"task-1",
-		[]byte(`{"item_id":"x"}`), 0, "", "", events.EventEnvelope{}, time.Time{})), "entity-1")
+		[]byte(`{"item_id":"x"}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "entity-1"),
+		time.Time{},
+	)
 
 	formatted := formatEventForAgent(cfg, evt, []llm.ToolDefinition{
 		{Name: "query_entities"},
@@ -479,9 +500,18 @@ func TestLLMAgent_OnEvent_UsesSinglePostStepExecutionPath(t *testing.T) {
 		nil,
 	)
 
-	evt := eventtest.WithEntityID((eventtest.Projection("evt-1",
+	evt := eventtest.RootIngress(
+		"evt-1",
 		"analysis/requested",
-		"runtime", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EventEnvelope{}, time.Time{})), "ent-1")
+		"runtime",
+		"",
+		[]byte(`{"entity_id":"ent-1"}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
+		time.Time{},
+	)
 
 	if _, err := agent.OnEvent(context.Background(), evt); err != nil {
 		t.Fatalf("OnEvent: %v", err)
@@ -495,7 +525,7 @@ type boardEmitExecutor struct{}
 
 func (boardEmitExecutor) Execute(ctx context.Context, name string, input any) (any, error) {
 	if rec, ok := runtimebus.EmittedEventsRecorderFromContext(ctx); ok && rec != nil {
-		rec.Append(eventtest.Projection("", events.EventType(strings.TrimPrefix(name, "emit_")), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+		rec.Append(eventtest.RootIngress("", events.EventType(strings.TrimPrefix(name, "emit_")), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 	}
 	return map[string]any{"ok": true, "name": name, "input": input}, nil
 }
@@ -707,9 +737,18 @@ func TestLLMAgentOnEvent_FiltersRoleScopedToolsByTurnEntityEligibility(t *testin
 		t.Fatalf("factory: %v", err)
 	}
 	llmAgent := agent.(*LLMAgent)
-	evt := eventtest.WithEntityID(eventtest.Projection("evt-root",
-		events.EventType("discovery/market_research.corpus_file_assigned"), "", "", []byte(`{"assignment":{"scan_id":"root-run-id","geography":"US"}}`), 0, "run-1", "", events.EventEnvelope{}, time.Time{}),
-		"root-run-id")
+	evt := eventtest.RootIngress(
+		"evt-root",
+		events.EventType("discovery/market_research.corpus_file_assigned"),
+		"",
+		"",
+		[]byte(`{"assignment":{"scan_id":"root-run-id","geography":"US"}}`),
+		0,
+		"run-1",
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "root-run-id"),
+		time.Time{},
+	)
 
 	if _, err := llmAgent.OnEvent(context.Background(), evt); err != nil {
 		t.Fatalf("OnEvent: %v", err)
@@ -959,9 +998,18 @@ func TestLLMAgent_TaskScopedFatalCLIErrorResetsConversationAndRetries(t *testing
 		nil,
 	)
 
-	evt := eventtest.WithEntityID((eventtest.Projection("evt-1",
+	evt := eventtest.RootIngress(
+		"evt-1",
 		"validation/spec_review.requested",
-		"runtime", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EventEnvelope{}, time.Time{})), "ent-1")
+		"runtime",
+		"",
+		[]byte(`{"entity_id":"ent-1"}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
+		time.Time{},
+	)
 
 	if _, err := agent.OnEvent(context.Background(), evt); err != nil {
 		t.Fatalf("OnEvent: %v", err)
@@ -1002,10 +1050,18 @@ func TestLLMAgent_OnEvent_SeedsRunIDIntoConversationContext(t *testing.T) {
 		nil,
 	)
 
-	evt := eventtest.WithEntityID((eventtest.Projection("evt-1",
-
+	evt := eventtest.RootIngress(
+		"evt-1",
 		"scoring/scoring.requested",
-		"runtime", "", []byte(`{"entity_id":"ent-1"}`), 0, "run-123", "", events.EventEnvelope{}, time.Time{})), "ent-1")
+		"runtime",
+		"",
+		[]byte(`{"entity_id":"ent-1"}`),
+		0,
+		"run-123",
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
+		time.Time{},
+	)
 
 	if _, err := agent.OnEvent(context.Background(), evt); err != nil {
 		t.Fatalf("OnEvent: %v", err)

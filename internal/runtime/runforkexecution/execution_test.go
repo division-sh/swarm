@@ -1673,14 +1673,14 @@ func TestSelectedContractRecipientPlanPublishGuardAuthorizesCanonicalPlan(t *tes
 	}
 	guard.ExpectForkEvent("fork-event", sourceEventID)
 
-	err = guard.AuthorizeEvent(context.Background(), eventtest.Projection("fork-event",
+	err = guard.AuthorizeEvent(context.Background(), eventtest.RootIngress("fork-event",
 		"work.begin",
 		store.RunForkSelectedContractExecutionOwner, "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 	if err != nil {
 		t.Fatalf("AuthorizeEvent canonical recipient plan: %v", err)
 	}
 
-	err = guard.Authorize(context.Background(), eventtest.Projection("fork-event",
+	err = guard.Authorize(context.Background(), eventtest.RootIngress("fork-event",
 		"work.begin",
 		store.RunForkSelectedContractExecutionOwner, "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 
@@ -1728,7 +1728,7 @@ func TestSelectedContractRecipientPlanPublishGuardMaterializesTargetNodeDelivery
 	}
 	guard.ExpectForkEvent("fork-event", "source-event")
 
-	routes, err := guard.MaterializeNodeDeliveryRoutes(context.Background(), eventtest.Projection("fork-event",
+	routes, err := guard.MaterializeNodeDeliveryRoutes(context.Background(), eventtest.RootIngress("fork-event",
 		"item.received",
 		store.RunForkSelectedContractExecutionOwner, "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 
@@ -1776,7 +1776,7 @@ func TestSelectedContractRecipientPlanPublishGuardAuthorizesContractSwapOwner(t 
 	}
 	guard.ExpectForkEvent("fork-event", sourceEventID)
 
-	err = guard.Authorize(context.Background(), eventtest.Projection("fork-event",
+	err = guard.Authorize(context.Background(), eventtest.RootIngress("fork-event",
 		"work.begin",
 		store.RunForkHistoricalReplayContractSwapBootResumeOwner, "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 
@@ -1811,7 +1811,7 @@ func TestSelectedContractRecipientPlanPublishGuardRejectsBypassAndSubscriptions(
 		t.Fatalf("newSelectedContractRecipientPlanPublishGuard: %v", err)
 	}
 
-	err = guard.Authorize(context.Background(), eventtest.Projection("fork-event",
+	err = guard.Authorize(context.Background(), eventtest.RootIngress("fork-event",
 		"work.begin",
 		store.RunForkSelectedContractExecutionOwner, "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 
@@ -1828,7 +1828,7 @@ func TestSelectedContractRecipientPlanPublishGuardRejectsBypassAndSubscriptions(
 	}
 
 	guard.ExpectForkEvent("fork-event-subscription", sourceEventID)
-	err = guard.Authorize(context.Background(), eventtest.Projection("fork-event-subscription",
+	err = guard.Authorize(context.Background(), eventtest.RootIngress("fork-event-subscription",
 		"work.begin",
 		store.RunForkSelectedContractExecutionOwner, "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 
@@ -1846,7 +1846,7 @@ func TestSelectedContractRecipientPlanPublishGuardRejectsBypassAndSubscriptions(
 	}
 
 	guard.ExpectForkEvent("fork-event-wrong-recipient", sourceEventID)
-	err = guard.Authorize(context.Background(), eventtest.Projection("fork-event-wrong-recipient",
+	err = guard.Authorize(context.Background(), eventtest.RootIngress("fork-event-wrong-recipient",
 		"work.begin",
 		store.RunForkSelectedContractExecutionOwner, "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 
@@ -1994,7 +1994,7 @@ func (a *selectedContractForkTestAgent) OnEvent(ctx context.Context, evt events.
 	a.mu.Unlock()
 
 	return []events.Event{
-		eventtest.Projection("", events.EventType("task.completed"), agentID, "", json.RawMessage(`{}`), 0, evt.RunID(), evt.ID(), evt.NormalizedEnvelope(), time.Now().UTC()),
+		eventtest.RootIngress("", events.EventType("task.completed"), agentID, "", json.RawMessage(`{}`), 0, evt.RunID(), evt.ID(), evt.NormalizedEnvelope(), time.Now().UTC()),
 	}, nil
 }
 

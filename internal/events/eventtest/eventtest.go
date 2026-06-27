@@ -48,10 +48,11 @@ func Replay(id string, eventType events.EventType, sourceAgent, taskID string, p
 	return events.NewReplayEvent(id, eventType, sourceAgent, taskID, payload, chainDepth, lineage, envelope, createdAt)
 }
 
-// Projection builds a persisted projection/readback fixture from authoritative
-// event facts. Prefer the runtime-intent helpers above when a test fixture is
-// modeling a producer-created event.
-func Projection(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope events.EventEnvelope, createdAt time.Time) events.Event {
+// PersistedProjection builds a persisted projection/readback fixture from
+// authoritative event facts. Runtime producer fixtures should use RootIngress,
+// ChildWithLineage, Replay, RuntimeControl, RuntimeDiagnostic, or
+// DiagnosticDirect instead.
+func PersistedProjection(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope events.EventEnvelope, createdAt time.Time) events.Event {
 	return events.NewProjectionEvent(id, eventType, sourceAgent, taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
 }
 
@@ -60,38 +61,54 @@ func RouteProbe(eventType events.EventType) events.Event {
 	return events.NewRouteProbeEvent(eventType)
 }
 
-// WithEnvelope keeps legacy fixture migration behind this test-only owner.
-// Prefer passing the envelope to the semantic fixture constructor when possible.
-func WithEnvelope(evt events.Event, envelope events.EventEnvelope) events.Event {
-	return evt.WithEnvelope(envelope)
+// MalformedChildWithoutLineage builds the explicit negative fixture for
+// admission tests that assert child events without lineage are rejected.
+func MalformedChildWithoutLineage(eventType events.EventType, sourceAgent string, payload json.RawMessage) events.Event {
+	return events.NewChildEventWithLineage(
+		"",
+		eventType,
+		sourceAgent,
+		"",
+		payload,
+		0,
+		events.EventLineage{},
+		events.EventEnvelope{},
+		time.Time{},
+	)
 }
 
-// WithEntityID keeps legacy fixture migration behind this test-only owner.
-// Prefer passing EntityID through EventEnvelope at construction when possible.
-func WithEntityID(evt events.Event, entityID string) events.Event {
-	return evt.WithEntityID(entityID)
+// MalformedProjectionWithoutAuthoritativeFacts builds the explicit negative
+// fixture for projection persistence tests that assert authoritative facts are
+// required.
+func MalformedProjectionWithoutAuthoritativeFacts(eventType events.EventType, sourceAgent string, payload json.RawMessage) events.Event {
+	return events.NewProjectionEvent(
+		"",
+		eventType,
+		sourceAgent,
+		"",
+		payload,
+		0,
+		"",
+		"",
+		events.EventEnvelope{},
+		time.Time{},
+	)
 }
 
-// WithFlowInstance keeps legacy fixture migration behind this test-only owner.
-// Prefer passing FlowInstance through EventEnvelope at construction when possible.
-func WithFlowInstance(evt events.Event, flowInstance string) events.Event {
-	return evt.WithFlowInstance(flowInstance)
-}
-
-// WithSourceRoute keeps route-context fixture patching behind this test-only
-// owner while route identity remains the concept under test.
-func WithSourceRoute(evt events.Event, route events.RouteIdentity) events.Event {
-	return evt.WithSourceRoute(route)
-}
-
-// WithTargetRoute keeps route-context fixture patching behind this test-only
-// owner while route identity remains the concept under test.
-func WithTargetRoute(evt events.Event, route events.RouteIdentity) events.Event {
-	return evt.WithTargetRoute(route)
-}
-
-// WithTargetSet keeps route-context fixture patching behind this test-only owner
-// while route identity remains the concept under test.
-func WithTargetSet(evt events.Event, routes []events.RouteIdentity) events.Event {
-	return evt.WithTargetSet(routes)
+// MalformedProjectionWithoutAuthoritativeRun builds the explicit negative
+// fixture for projection persistence tests where an event id and timestamp are
+// present but run lineage is intentionally absent.
+func MalformedProjectionWithoutAuthoritativeRun(id string, eventType events.EventType, sourceAgent string, payload json.RawMessage, createdAt time.Time) events.Event {
+	return events.NewProjectionEvent(
+		id,
+		eventType,
+		sourceAgent,
+		"",
+		payload,
+		0,
+		"",
+		"",
+		events.EventEnvelope{},
+		createdAt,
+	)
 }

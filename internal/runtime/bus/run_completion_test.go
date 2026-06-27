@@ -54,7 +54,7 @@ func TestEventBusStandalonePlatformConvergenceAlsoProbesNormalRunCompletion(t *t
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	evt := eventtest.Projection("event-2", events.EventType("platform.boot"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
+	evt := eventtest.RootIngress("event-2", events.EventType("platform.boot"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
 	if err := eb.convergeStandaloneRuntimePlatformRun(context.Background(), evt); err != nil {
 		t.Fatalf("convergeStandaloneRuntimePlatformRun: %v", err)
 	}

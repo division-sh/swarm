@@ -36,7 +36,7 @@ func (e *firstTurnWorkflowToolExec) Execute(ctx context.Context, name string, in
 		return e.readPayload, nil
 	case "emit_category_assessed":
 		if recorder, ok := runtimebus.EmittedEventsRecorderFromContext(ctx); ok {
-			recorder.Append(eventtest.Projection("", events.EventType("discovery/category.assessed"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+			recorder.Append(eventtest.RootIngress("", events.EventType("discovery/category.assessed"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 		}
 		return map[string]any{"emitted": true, "input": input}, nil
 	default:

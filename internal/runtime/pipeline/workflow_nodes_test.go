@@ -205,7 +205,7 @@ func TestLoadWorkflowNodes_UsesImportBoundaryInputAlias(t *testing.T) {
 	if workflowNodeHasSubscriptionForTest(*worker, "work.requested") || workflowNodeHasSubscriptionForTest(*worker, "worker/work.requested") {
 		t.Fatalf("worker-node subscriptions = %#v, should not preserve raw required-import input fallback", worker.Subscriptions)
 	}
-	evt := eventtest.Projection("", "parent.lead_captured", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
+	evt := eventtest.RootIngress("", "parent.lead_captured", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
 	resolved := workflowNodeEventHandlerResolutionForDelivery(source, "worker-node", evt)
 	if !resolved.Matched {
 		t.Fatal("expected worker-node handler to resolve through input alias")
@@ -228,7 +228,7 @@ func TestLoadWorkflowNodes_UsesImportBoundaryOutputAliasForParentHandler(t *test
 	if !workflowNodeHasSubscriptionForTest(*parent, "worker/work.completed") {
 		t.Fatalf("parent-listener subscriptions = %#v, want worker/work.completed output alias", parent.Subscriptions)
 	}
-	evt := eventtest.Projection("", "worker/work.completed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
+	evt := eventtest.RootIngress("", "worker/work.completed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
 	resolved := workflowNodeEventHandlerResolutionForDelivery(source, "parent-listener", evt)
 	if !resolved.Matched {
 		t.Fatal("expected parent-listener handler to resolve through output alias")
@@ -251,7 +251,7 @@ func TestLoadWorkflowNodes_UsesImportBoundaryOutputAliasForWildcardParentSubscri
 	if !workflowNodeHasSubscriptionForTest(*parent, "worker/work.completed") {
 		t.Fatalf("parent-listener subscriptions = %#v, want worker/work.completed output alias for wildcard parent subscription", parent.Subscriptions)
 	}
-	evt := eventtest.Projection("", "worker/work.completed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
+	evt := eventtest.RootIngress("", "worker/work.completed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
 	resolved := workflowNodeEventHandlerResolutionForDelivery(source, "parent-listener", evt)
 	if !resolved.Matched {
 		t.Fatal("expected parent-listener handler to resolve through output alias")

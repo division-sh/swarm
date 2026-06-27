@@ -325,13 +325,13 @@ func (h *runtimeHarness) publishConcurrentAndWait(steps []catalogTriggerStep, ti
 		if err != nil {
 			h.t.Fatalf("marshal concurrent trigger payload: %v", err)
 		}
-		evt := eventtest.Projection(uuid.NewString(),
-			events.EventType(strings.TrimSpace(step.Event)),
-			"cataloge2e", "", raw, 0, catalogRuntimeRunID, "", events.EventEnvelope{}, time.Now().UTC())
-
+		eventEnvelope := events.EventEnvelope{}
 		if entityID := triggerPayloadEntityID(payload); entityID != "" {
-			evt = eventtest.WithEntityID(evt, entityID)
+			eventEnvelope = events.EnvelopeForEntityID(eventEnvelope, entityID)
 		}
+		evt := eventtest.RootIngress(uuid.NewString(),
+			events.EventType(strings.TrimSpace(step.Event)),
+			"cataloge2e", "", raw, 0, catalogRuntimeRunID, "", eventEnvelope, time.Now().UTC())
 		if preview, ok := h.previewHandlerOutcome(evt); ok {
 			h.mu.Lock()
 			h.previews[evt.ID()] = preview
@@ -383,13 +383,13 @@ func (h *runtimeHarness) publishRuntimeEventResult(eventType, sourceAgent string
 	if err != nil {
 		return err
 	}
-	evt := eventtest.Projection(uuid.NewString(),
-		events.EventType(strings.TrimSpace(eventType)),
-		strings.TrimSpace(sourceAgent), "", raw, 0, catalogRuntimeRunID, "", events.EventEnvelope{}, time.Now().UTC())
-
+	eventEnvelope := events.EventEnvelope{}
 	if entityID := triggerPayloadEntityID(payload); entityID != "" {
-		evt = eventtest.WithEntityID(evt, entityID)
+		eventEnvelope = events.EnvelopeForEntityID(eventEnvelope, entityID)
 	}
+	evt := eventtest.RootIngress(uuid.NewString(),
+		events.EventType(strings.TrimSpace(eventType)),
+		strings.TrimSpace(sourceAgent), "", raw, 0, catalogRuntimeRunID, "", eventEnvelope, time.Now().UTC())
 	if recordOutcome {
 		if preview, ok := h.previewHandlerOutcome(evt); ok {
 			h.mu.Lock()

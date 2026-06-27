@@ -880,9 +880,18 @@ func TestGatewayMCPToolsForRequest_FiltersRoleScopedToolsByTurnEntityEligibility
 	actor := models.AgentConfig{ID: "market-research-agent", Role: "market_research"}
 	putTestTurnContext(t, registry, "ctx-invalid-current-entity", TurnContext{
 		Actor: actor,
-		Inbound: eventtest.WithEntityID(eventtest.Projection("evt-root",
-			events.EventType("discovery/market_research.corpus_file_assigned"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
-			"root-run-id"),
+		Inbound: eventtest.RootIngress(
+			"evt-root",
+			events.EventType("discovery/market_research.corpus_file_assigned"),
+			"",
+			"",
+			nil,
+			0,
+			"",
+			"",
+			events.EnvelopeForEntityID(events.EventEnvelope{}, "root-run-id"),
+			time.Time{},
+		),
 
 		HasInbound: true,
 		CreatedAt:  time.Now().UTC(),
@@ -890,9 +899,18 @@ func TestGatewayMCPToolsForRequest_FiltersRoleScopedToolsByTurnEntityEligibility
 	})
 	putTestTurnContext(t, registry, "ctx-valid-current-entity", TurnContext{
 		Actor: actor,
-		Inbound: eventtest.WithEntityID(eventtest.Projection("evt-scan",
-			events.EventType("discovery/market_research.corpus_file_assigned"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
-			"valid-scan-campaign-id"),
+		Inbound: eventtest.RootIngress(
+			"evt-scan",
+			events.EventType("discovery/market_research.corpus_file_assigned"),
+			"",
+			"",
+			nil,
+			0,
+			"",
+			"",
+			events.EnvelopeForEntityID(events.EventEnvelope{}, "valid-scan-campaign-id"),
+			time.Time{},
+		),
 
 		HasInbound: true,
 		CreatedAt:  time.Now().UTC(),
@@ -1823,7 +1841,7 @@ func TestGatewayExecutionContext_UsesInboundTraceNotRequestTraceOnResolvedTurn(t
 	})
 	putTestTurnContext(t, registry, "ctx-trace", TurnContext{
 		Actor:      models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
-		Inbound:    eventtest.Projection("evt-1", events.EventType(""), "", "", nil, 0, "run-1", "", events.EventEnvelope{}, time.Time{}),
+		Inbound:    eventtest.RootIngress("evt-1", events.EventType(""), "", "", nil, 0, "run-1", "", events.EventEnvelope{}, time.Time{}),
 		HasInbound: true,
 		CreatedAt:  time.Now().UTC(),
 		ExpiresAt:  time.Now().UTC().Add(time.Hour),
@@ -1846,7 +1864,7 @@ func TestGatewayExecutionContext_RestoresTypedRuntimeLineageOnResolvedTurn(t *te
 	})
 	putTestTurnContext(t, registry, "ctx-lineage", TurnContext{
 		Actor: models.AgentConfig{ID: "validation-coordinator", Role: "validation"},
-		Inbound: eventtest.Projection("3134bdf0-2ce0-4260-93bd-f0a45371b7d7",
+		Inbound: eventtest.RootIngress("3134bdf0-2ce0-4260-93bd-f0a45371b7d7",
 			events.EventType("validation/validation.package_ready"), "", "", nil, 0, "a6f6861a-d154-4d38-a2d6-1388f5bb6daf", "", events.EventEnvelope{}, time.Time{}),
 
 		HasInbound: true,

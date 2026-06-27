@@ -384,7 +384,7 @@ func testActivationRequest(bundle *runtimecontracts.WorkflowContractBundle, temp
 }
 
 func testFlowActivationTriggerEvent(eventID string) events.Event {
-	return eventtest.Projection(strings.TrimSpace(eventID),
+	return eventtest.RootIngress(strings.TrimSpace(eventID),
 		events.EventType("spawn.requested"),
 		"spawner", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
@@ -410,7 +410,7 @@ func findPublishedFlowActivationEvent(t *testing.T, bus *flowActivationTestBus, 
 		}
 	}
 	t.Fatalf("published events = %#v, want %s", bus.published, eventType)
-	return eventtest.Projection("", events.EventType(""), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
+	return eventtest.RootIngress("", events.EventType(""), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
 }
 
 func TestActivateFlowInstanceAddsDerivedRouteTableInstance(t *testing.T) {

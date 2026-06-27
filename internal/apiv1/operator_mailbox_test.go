@@ -54,10 +54,18 @@ func TestOperatorMailboxHandlersSupportedRPCPath(t *testing.T) {
 	`, runID, entityID, base); err != nil {
 		t.Fatalf("seed entity_state: %v", err)
 	}
-	if err := pg.AppendEvent(ctx, eventtest.WithFlowInstance(eventtest.WithEntityID(events.NewRootIngressEvent(sourceEventID,
-		"review.requested", "", "", json.RawMessage(`{"request":true}`), 0, runID, "", events.EventEnvelope{}, time.Time{}),
-		entityID),
-		"empire/review")); err != nil {
+	if err := pg.AppendEvent(ctx, eventtest.RootIngress(
+		sourceEventID,
+		"review.requested",
+		"",
+		"",
+		json.RawMessage(`{"request":true}`),
+		0,
+		runID,
+		"",
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "empire/review"),
+		time.Time{},
+	)); err != nil {
 		t.Fatalf("append source event: %v", err)
 	}
 	mailboxID, err := pg.InsertMailboxItem(ctx, runtimetools.MailboxItem{
@@ -373,9 +381,18 @@ func TestOperatorMailboxApproveRejectsUndeclaredMailboxPayloadSchemaAndRollsBack
 	ctx := context.Background()
 	sourceEventID := uuid.NewString()
 	entityID := uuid.NewString()
-	if err := pg.AppendEvent(ctx, eventtest.WithEntityID(events.NewRootIngressEvent(sourceEventID,
-		"review.requested", "", "", json.RawMessage(`{"request":true}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Time{}),
-		entityID)); err != nil {
+	if err := pg.AppendEvent(ctx, eventtest.RootIngress(
+		sourceEventID,
+		"review.requested",
+		"",
+		"",
+		json.RawMessage(`{"request":true}`),
+		0,
+		uuid.NewString(),
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
+		time.Time{},
+	)); err != nil {
 		t.Fatalf("append source event: %v", err)
 	}
 	mailboxID, err := pg.InsertMailboxItem(ctx, runtimetools.MailboxItem{
@@ -436,9 +453,18 @@ func TestOperatorMailboxApprovePublishFailureLeavesItemRetryable(t *testing.T) {
 	ctx := context.Background()
 	sourceEventID := uuid.NewString()
 	entityID := uuid.NewString()
-	if err := pg.AppendEvent(ctx, eventtest.WithEntityID(events.NewRootIngressEvent(sourceEventID,
-		"review.requested", "", "", json.RawMessage(`{"request":true}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Time{}),
-		entityID)); err != nil {
+	if err := pg.AppendEvent(ctx, eventtest.RootIngress(
+		sourceEventID,
+		"review.requested",
+		"",
+		"",
+		json.RawMessage(`{"request":true}`),
+		0,
+		uuid.NewString(),
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
+		time.Time{},
+	)); err != nil {
 		t.Fatalf("append source event: %v", err)
 	}
 	mailboxID, err := pg.InsertMailboxItem(ctx, runtimetools.MailboxItem{
@@ -550,10 +576,18 @@ func TestOperatorMailboxApproveQueuesTransactionalPublishWhileRuntimePaused(t *t
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
 	sourceEventID := uuid.NewString()
-	if err := pg.AppendEvent(ctx, eventtest.WithFlowInstance(eventtest.WithEntityID(events.NewRootIngressEvent(sourceEventID,
-		"review.requested", "", "", json.RawMessage(`{"request":true}`), 0, runID, "", events.EventEnvelope{}, time.Time{}),
-		entityID),
-		"empire/review")); err != nil {
+	if err := pg.AppendEvent(ctx, eventtest.RootIngress(
+		sourceEventID,
+		"review.requested",
+		"",
+		"",
+		json.RawMessage(`{"request":true}`),
+		0,
+		runID,
+		"",
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "empire/review"),
+		time.Time{},
+	)); err != nil {
 		t.Fatalf("append source event: %v", err)
 	}
 	mailboxID, err := pg.InsertMailboxItem(ctx, runtimetools.MailboxItem{
@@ -667,10 +701,18 @@ func TestOperatorMailboxApproveRunsPublishDispatchAfterDecisionCommit(t *testing
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
 	sourceEventID := uuid.NewString()
-	if err := pg.AppendEvent(ctx, eventtest.WithFlowInstance(eventtest.WithEntityID(events.NewRootIngressEvent(sourceEventID,
-		"review.requested", "", "", json.RawMessage(`{"request":true}`), 0, runID, "", events.EventEnvelope{}, time.Time{}),
-		entityID),
-		"empire/review")); err != nil {
+	if err := pg.AppendEvent(ctx, eventtest.RootIngress(
+		sourceEventID,
+		"review.requested",
+		"",
+		"",
+		json.RawMessage(`{"request":true}`),
+		0,
+		runID,
+		"",
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "empire/review"),
+		time.Time{},
+	)); err != nil {
 		t.Fatalf("append source event: %v", err)
 	}
 	mailboxID, err := pg.InsertMailboxItem(ctx, runtimetools.MailboxItem{

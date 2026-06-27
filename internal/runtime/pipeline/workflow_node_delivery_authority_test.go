@@ -218,10 +218,18 @@ func newDeliveryAuthorityCoordinatorWithReceipts(t *testing.T, db *sql.DB, recei
 func seedDeliveryAuthorityEvent(t *testing.T, db *sql.DB, ctx context.Context) events.Event {
 	t.Helper()
 	entityID := uuid.NewString()
-	evt := eventtest.WithEntityID((eventtest.Projection(uuid.NewString(),
-
+	evt := eventtest.RootIngress(
+		uuid.NewString(),
 		events.EventType("source.evt"),
-		"src", "", []byte(`{"entity_id":"`+entityID+`"}`), 0, testPipelineRunID, "", events.EventEnvelope{}, time.Now().UTC())), entityID)
+		"src",
+		"",
+		[]byte(`{"entity_id":"`+entityID+`"}`),
+		0,
+		testPipelineRunID,
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
+		time.Now().UTC(),
+	)
 
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO events (

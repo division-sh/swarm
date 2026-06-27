@@ -197,7 +197,7 @@ func newSQLiteObservabilitySurfaceFixture(t *testing.T, ctx context.Context) sql
 	now := time.Unix(1700002000, 0).UTC()
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
-	if err := sqliteStore.PersistEventWithDeliveries(ctx, eventtest.Projection(eventID,
+	if err := sqliteStore.PersistEventWithDeliveries(ctx, eventtest.PersistedProjection(eventID,
 
 		events.EventType("trace.visible"),
 		"agent-1", "", json.RawMessage(`{"trace":true}`), 0, runID, "", events.EventEnvelope{}, now),

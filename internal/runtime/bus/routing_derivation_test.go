@@ -186,7 +186,7 @@ func TestEventBusFlowInstanceRoutePersistsAndDeliversRenderedActivationConfigSub
 
 	eb.Subscribe("ceo-11111111-1111-4111-8111-111111111111")
 	defer eb.Unsubscribe("ceo-11111111-1111-4111-8111-111111111111")
-	evt := eventtest.Projection("event-rendered-route-delivery",
+	evt := eventtest.RootIngress("event-rendered-route-delivery",
 		events.EventType("operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
 
 	if err := eb.Publish(context.Background(), evt); err != nil {

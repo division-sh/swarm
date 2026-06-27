@@ -24,10 +24,18 @@ func TestPostgresStore_MaterializeMailboxWriteUsesTransactionAndV1ReadOwner(t *t
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	entityID := uuid.NewString()
-	if err := store.AppendEvent(ctx, eventtest.WithFlowInstance(eventtest.WithEntityID((eventtest.Projection(eventID,
-
-		"mailbox.review_requested", "", "", json.RawMessage(`{"kind":"review"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())), entityID),
-		"validation/case-1")); err != nil {
+	if err := store.AppendEvent(ctx, eventtest.PersistedProjection(
+		eventID,
+		"mailbox.review_requested",
+		"",
+		"",
+		json.RawMessage(`{"kind":"review"}`),
+		0,
+		runID,
+		"",
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "validation/case-1"),
+		time.Now().UTC(),
+	)); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
 	item := runtimepipeline.MailboxWriteMaterialization{
@@ -79,10 +87,18 @@ func TestSQLiteRuntimeStore_MaterializeMailboxWriteUsesTransactionAndV1ReadOwner
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	entityID := uuid.NewString()
-	if err := store.AppendEvent(ctx, eventtest.WithFlowInstance(eventtest.WithEntityID((eventtest.Projection(eventID,
-
-		"mailbox.review_requested", "", "", json.RawMessage(`{"kind":"review"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())), entityID),
-		"validation/case-1")); err != nil {
+	if err := store.AppendEvent(ctx, eventtest.PersistedProjection(
+		eventID,
+		"mailbox.review_requested",
+		"",
+		"",
+		json.RawMessage(`{"kind":"review"}`),
+		0,
+		runID,
+		"",
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "validation/case-1"),
+		time.Now().UTC(),
+	)); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
 	item := runtimepipeline.MailboxWriteMaterialization{
