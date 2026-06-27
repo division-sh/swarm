@@ -6,3 +6,6 @@ flows:
 - id: grandchild
   flow: grandchild
   mode: static
+  bind:
+    policy:
+      threshold: parent.policy.threshold

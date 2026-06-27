@@ -83,6 +83,20 @@ func TestImportBoundaryCredentialStoreKeyRequiresDeclaredBinding(t *testing.T) {
 	}
 }
 
+func TestImportBoundaryDependencyContextWithoutRequiresStillFailsClosed(t *testing.T) {
+	source := loadImportBoundaryDependencyFixture(t, importBoundaryDependencyFixtureOptions{})
+
+	if _, ok := PolicyValueForFlow(source, "worker", "provider.parent_only"); ok {
+		t.Fatal("imported flow with empty requires inherited parent-only policy key")
+	}
+	if got, ok := PolicyValueForFlow(source, "worker", "provider.package_only"); !ok || got.Value != "visible" {
+		t.Fatalf("provider.package_only = (%#v, %v), want child local package policy", got.Value, ok)
+	}
+	if got, mapped := CredentialStoreKeyForFlow(source, "worker", "provider_key"); !mapped || got != "" {
+		t.Fatalf("CredentialStoreKeyForFlow(provider_key) with empty requires = (%q, %v), want empty mapped fail-closed", got, mapped)
+	}
+}
+
 func TestImportBoundaryCredentialStoreKeyUsesExplicitActorFlowContext(t *testing.T) {
 	source := loadImportBoundaryDependencyFixture(t, importBoundaryDependencyFixtureOptions{
 		policyRequires:     "  policy: [provider.threshold]\n",

@@ -4910,9 +4910,10 @@ flow_model:
         owner: Runtime import-boundary dependency resolver over semanticview ProjectScopes, FlowScopes, and import-site binds.
         policy: >
           Imported package policy dependencies resolve exactly in this order: explicit import-site `bind.policy` reference
-          to parent policy, then declared non-secret package default, then hard verify/runtime error. Once an imported
-          package declares any import-boundary dependency, its runtime policy context is package-local policy plus declared
-          resolved dependency slots; ambient parent/root policy inheritance is disabled for that imported package context.
+          to parent policy, then declared non-secret package default, then hard verify/runtime error. For every imported
+          package context, runtime policy is package-local policy plus declared resolved dependency slots; ambient
+          parent/root policy inheritance is disabled for that imported package context, even when `requires.policy` is
+          empty.
           Declared dependency paths are removed from the child-local policy document before resolution is applied, so
           child-local policy at the same path, same-name parent/root policy inheritance, and ambient contract-merger fallback
           are not proof that the dependency is satisfied. Existing root/non-imported flow policy inheritance remains a
@@ -4926,7 +4927,9 @@ flow_model:
           resolver never exposes or persists credential values.
         fail_closed: >
           Runtime and verify consumers must use the shared import-boundary dependency resolver. A remaining same-concept
-          helper that independently interprets imported package policy or credential handles is non-authoritative.
+          helper that independently interprets imported package policy or credential handles is non-authoritative. Imported
+          package credential use with no declared `requires.credentials` item must resolve as an import-boundary miss, not
+          as a raw deployment credential key.
       pin_alias_delivery:
         owner: Runtime import-boundary pin alias resolver over semanticview ProjectScopes and FlowScopes.
         inputs: >
