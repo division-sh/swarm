@@ -4679,7 +4679,11 @@ tool_model:
       http_block:
         required:
           method: string — GET | POST | PUT | PATCH | DELETE
-          url: string — URL template. Supports {{input.field_name}} substitution.
+          url: string — URL template. Supports {{input.field_name}} substitution. Embedded substitutions inside the
+            URL are percent-encoded as URL components by the runtime before request construction. Query-component
+            substitutions encode spaces as `%20`, not `+`; path-component substitutions are escaped as path segments.
+            If the full url value is exactly one template variable, for example `{{input.url}}`, the resolved value is
+            treated as a complete URL and is not component-encoded.
         optional:
           headers: object — header name to value template. Supports {{credentials.key}} and {{input.field_name}} substitution.
           body: object — request body template. Same substitution. Sent as JSON.
@@ -4692,7 +4696,9 @@ tool_model:
         credentials: list of strings — credential store key names this tool needs. The platform resolves them from the credential
           store at call time and makes them available as {{credentials.key}} in templates.
     template_resolution:
-      description: Template variables in url, headers, body, and response_mapping are resolved at tool call time.
+      description: Template variables in url, headers, body, and response_mapping are resolved at tool call time. URL
+        template resolution is context-aware and performs URL-component percent-encoding for embedded substitutions;
+        headers, body, and response_mapping resolve raw semantic values.
       variables:
         input: Tool call arguments from the agent. Accessed as {{input.field_name}}.
         credentials: Values from the credential store for keys listed in the tool's credentials field. Accessed as {{credentials.key_name}}.

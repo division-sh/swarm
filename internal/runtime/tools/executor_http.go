@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -38,11 +39,11 @@ func (e *Executor) execHTTPTool(ctx context.Context, actor models.AgentConfig, t
 		"credentials": credentials,
 	}
 
-	urlValue, err := resolveTemplateValue(tool.HTTP.URL, templateEnv)
+	resolvedURL, err := resolveHTTPURLTemplate(tool.HTTP.URL, templateEnv)
 	if err != nil {
 		return nil, err
 	}
-	url := strings.TrimSpace(asString(urlValue))
+	url := strings.TrimSpace(resolvedURL)
 	if url == "" {
 		return nil, fmt.Errorf("http tool %s resolved an empty url", tool.Name)
 	}
@@ -263,6 +264,51 @@ func resolveTemplateValue(raw string, env map[string]any) (any, error) {
 	}
 	builder.WriteString(raw[last:])
 	return builder.String(), nil
+}
+
+func resolveHTTPURLTemplate(raw string, env map[string]any) (string, error) {
+	matches := toolTemplatePattern.FindAllStringSubmatchIndex(raw, -1)
+	if len(matches) == 0 {
+		return raw, nil
+	}
+	if len(matches) == 1 && matches[0][0] == 0 && matches[0][1] == len(raw) {
+		path := strings.TrimSpace(raw[matches[0][2]:matches[0][3]])
+		value, err := lookupTemplatePath(env, path)
+		if err != nil {
+			return "", err
+		}
+		return asString(value), nil
+	}
+	var builder strings.Builder
+	last := 0
+	for _, match := range matches {
+		builder.WriteString(raw[last:match[0]])
+		path := strings.TrimSpace(raw[match[2]:match[3]])
+		value, err := lookupTemplatePath(env, path)
+		if err != nil {
+			return "", err
+		}
+		builder.WriteString(escapeHTTPURLTemplateComponent(raw, match[0], asString(value)))
+		last = match[1]
+	}
+	builder.WriteString(raw[last:])
+	return builder.String(), nil
+}
+
+func escapeHTTPURLTemplateComponent(raw string, offset int, value string) string {
+	if httpURLTemplateOffsetInQuery(raw, offset) {
+		return strings.ReplaceAll(url.QueryEscape(value), "+", "%20")
+	}
+	return url.PathEscape(value)
+}
+
+func httpURLTemplateOffsetInQuery(raw string, offset int) bool {
+	queryStart := strings.Index(raw, "?")
+	if queryStart < 0 || queryStart > offset {
+		return false
+	}
+	fragmentStart := strings.Index(raw, "#")
+	return fragmentStart < 0 || offset < fragmentStart
 }
 
 func lookupTemplatePath(env map[string]any, path string) (any, error) {
