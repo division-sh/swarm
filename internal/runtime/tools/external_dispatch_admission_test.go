@@ -159,6 +159,61 @@ func TestExecutor_HTTPRetryAttemptsTraverseSameRateLimitBucket(t *testing.T) {
 	recorder.requireGapAtLeast(t, 1050*time.Millisecond)
 }
 
+func TestExecutor_HTTPTimeoutStartsAfterAdmissionWait(t *testing.T) {
+	var recorder dispatchTimeRecorder
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		recorder.record()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	}))
+	defer server.Close()
+
+	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{})
+	tool := RegisteredTool{
+		Name: "check_domain",
+		HTTP: &runtimecontracts.HTTPToolSpec{Method: "GET", URL: server.URL},
+		RateLimit: externalDispatchRateLimitConfig{
+			Enabled: true,
+			Limit:   1,
+			Period:  60 * time.Millisecond,
+			MaxWait: 500 * time.Millisecond,
+		},
+	}
+	if _, err := exec.execHTTPRequestOnce(context.Background(), http.MethodGet, server.URL, http.Header{}, nil, 20*time.Millisecond, tool); err != nil {
+		t.Fatalf("initial execHTTPRequestOnce: %v", err)
+	}
+	if _, err := exec.execHTTPRequestOnce(context.Background(), http.MethodGet, server.URL, http.Header{}, nil, 20*time.Millisecond, tool); err != nil {
+		t.Fatalf("second execHTTPRequestOnce after admission wait: %v", err)
+	}
+	recorder.requireGapAtLeast(t, 45*time.Millisecond)
+}
+
+func TestExecutor_HTTPRateLimitTimeoutDoesNotRetry(t *testing.T) {
+	var recorder dispatchTimeRecorder
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		recorder.record()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	}))
+	defer server.Close()
+
+	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+		WorkflowSource: rateLimitedHTTPToolSource(server.URL, "1/s", "0s", 1),
+	})
+	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "agent-1", Tools: []string{"check_domain"}})
+	if _, err := exec.Execute(ctx, "check_domain", map[string]any{}); err != nil {
+		t.Fatalf("initial Execute: %v", err)
+	}
+	_, err := exec.Execute(ctx, "check_domain", map[string]any{})
+	runtimeErr, ok := AsRuntimeError(err)
+	if !ok || runtimeErr == nil || runtimeErr.Code != externalDispatchRateLimitedCode {
+		t.Fatalf("second Execute err = %v, want rate_limited runtime error", err)
+	}
+	if got := len(recorder.timesSnapshot()); got != 1 {
+		t.Fatalf("outbound requests = %d, want no retry dispatch after admission timeout", got)
+	}
+}
+
 func TestExecutor_MCPServerRateLimitIsSharedAcrossTools(t *testing.T) {
 	var recorder dispatchTimeRecorder
 	server := newRateLimitedMCPTestServer(t, &recorder, []string{"ping", "pong"})

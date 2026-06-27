@@ -187,6 +187,11 @@ func (e *Executor) admitExternalDispatch(ctx context.Context, policy externalDis
 	return err
 }
 
+func isExternalDispatchRateLimited(err error) bool {
+	runtimeErr, ok := AsRuntimeError(err)
+	return ok && runtimeErr != nil && runtimeErr.Code == externalDispatchRateLimitedCode
+}
+
 func (e *Executor) httpToolExternalDispatchPolicy(tool RegisteredTool) externalDispatchAdmissionPolicy {
 	if !tool.RateLimit.Enabled {
 		return externalDispatchAdmissionPolicy{}
