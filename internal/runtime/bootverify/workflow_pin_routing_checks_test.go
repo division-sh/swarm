@@ -78,6 +78,24 @@ func TestPinTargetResolution_FailsClosedForProducerTargetCommonPathEvenWithParen
 	}
 }
 
+func TestPinTargetResolution_FailsClosedForUnknownProducerTargetFlowEvenWithParentConnect(t *testing.T) {
+	bundle := loadPinRoutingProducerRouteBundle(t, `
+      emit:
+        event: shared.ready
+        fields:
+          entity_id: payload.entity_id
+        target:
+          flow: missing-consumer
+          match:
+            entity_id: payload.entity_id
+`, true, pinRoutingProducerRouteConnect())
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	if !reportContains(report.Errors(), "pin_target_resolution", "target_unknown_flow") {
+		t.Fatalf("expected target_unknown_flow with parent connect, got %#v", report.Errors())
+	}
+}
+
 func TestPinTargetResolution_AllowsExplicitTargetEscapeHatches(t *testing.T) {
 	for _, tt := range []struct {
 		name      string

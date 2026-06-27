@@ -303,6 +303,9 @@ func ResolveEnvelope(input ResolutionInput, envelope events.EventEnvelope) Resol
 		return Resolution{Envelope: envelope.Normalized(), Failure: failure}
 	}
 	if compositionConnectsFromOutputEvent(input.Source, input.FlowID, input.EventType) {
+		if failure := ValidateTargetSpec(input.Source, input.FlowID, input.Emit, true); failure != "" {
+			return Resolution{Envelope: envelope.Normalized(), Failure: failure}
+		}
 		return Resolution{Envelope: envelope.Normalized()}
 	}
 	if input.Emit.Broadcast {
