@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/bundledelete"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/preservationcleanup"
@@ -284,11 +285,10 @@ func TestPostgresStore_BundleDeleteFinalMutationBlocksPostDeletePersistedSourceR
 		BundleSource:      storerunlifecycle.BundleSourcePersisted,
 		BundleFingerprint: testBootBundleFingerprint,
 	})
-	err = pg.AppendEvent(publishCtx, events.NewProjectionEvent(eventID,
+	err = pg.AppendEvent(publishCtx, eventtest.Projection(eventID,
 
 		"scan.requested",
-		"api.v1", "", []byte(`{"topic":"medicine"}`), 0, runID, "", events.EventEnvelope{}, time.Date(2026, 5, 31, 12, 1, 0, 0, time.UTC)),
-	)
+		"api.v1", "", []byte(`{"topic":"medicine"}`), 0, runID, "", events.EventEnvelope{}, time.Date(2026, 5, 31, 12, 1, 0, 0, time.UTC)))
 	if !errors.Is(err, storerunlifecycle.ErrPersistedBundleUnavailable) {
 		t.Fatalf("AppendEvent after delete error = %v, want ErrPersistedBundleUnavailable", err)
 	}

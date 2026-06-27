@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -412,7 +413,7 @@ func TestRuntimeStart_RecoveryDisabledAllowsAndLogsManagerSnapshotWork(t *testin
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	eventStore := &startupRecoveryEventStore{
 		missing: []events.PersistedReplayEvent{{
-			Event: events.NewProjectionEvent("evt-1", "support.item_created", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+			Event: eventtest.Projection("evt-1", "support.item_created", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		}},
 		routes: []runtimeflowidentity.Route{
 			runtimeflowidentity.DeriveRoute("child", "inst-1"),
@@ -702,10 +703,10 @@ func TestRuntimeStart_RecoveryEnabledEmitsManagerReplayAftermathAndSummary(t *te
 		}},
 		pending: map[string][]events.Event{
 			"agent-a": {
-				events.NewProjectionEvent("evt-replay", events.EventType("support.replay.ok"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().Add(-4*time.Minute).UTC()),
-				events.NewProjectionEvent("evt-skip", events.EventType("support.replay.skip"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().Add(-3*time.Minute).UTC()),
-				events.NewProjectionEvent("evt-leased", events.EventType("support.replay.leased"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC()),
-				events.NewProjectionEvent("evt-drop", events.EventType("support.replay.drop"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().Add(-time.Minute).UTC()),
+				eventtest.Projection("evt-replay", events.EventType("support.replay.ok"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().Add(-4*time.Minute).UTC()),
+				eventtest.Projection("evt-skip", events.EventType("support.replay.skip"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().Add(-3*time.Minute).UTC()),
+				eventtest.Projection("evt-leased", events.EventType("support.replay.leased"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().Add(-2*time.Minute).UTC()),
+				eventtest.Projection("evt-drop", events.EventType("support.replay.drop"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().Add(-time.Minute).UTC()),
 			},
 		},
 		receipts: map[string]runtimemanager.EventReceipt{
@@ -813,7 +814,7 @@ func TestRuntimeStart_RecoveryFailureEmitsDegradedDecisionSummary(t *testing.T) 
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	eventStore := &startupRecoveryEventStore{
 		missing: []events.PersistedReplayEvent{{
-			Event: events.NewProjectionEvent("evt-1", "support.item_created", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+			Event: eventtest.Projection("evt-1", "support.item_created", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		}},
 		claimErr: errors.New("claim failed"),
 	}

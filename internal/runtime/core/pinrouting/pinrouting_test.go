@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
@@ -24,7 +25,7 @@ func TestResolveTargetsCompleteParentRouteForPinDeclaredOutput(t *testing.T) {
 		FlowID:      "child",
 		EventType:   "child.done",
 		ParentRoute: parent,
-	}, events.NewProjectionEvent("", "child.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	}, eventtest.Projection("", "child.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 
 	if result.Failure != "" {
 		t.Fatalf("Failure = %q, want empty", result.Failure)
@@ -46,7 +47,7 @@ func TestResolveFailsClosedOnIncompleteParentRouteForPinDeclaredOutput(t *testin
 			FlowID:   "root",
 			EntityID: "parent-ent",
 		},
-	}, events.NewProjectionEvent("", "child.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	}, eventtest.Projection("", "child.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 
 	if result.Failure != FailureParentRouteIncomplete {
 		t.Fatalf("Failure = %q, want %q", result.Failure, FailureParentRouteIncomplete)
@@ -63,7 +64,7 @@ func TestResolveAllowsEntityOnlyParentRouteOnlyWhenExplicitlyAllowed(t *testing.
 		FlowID:      "child",
 		EventType:   "child.done",
 		ParentRoute: parent,
-	}, events.NewProjectionEvent("", "child.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	}, eventtest.Projection("", "child.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 	if blocked.Failure != FailureParentRouteIncomplete {
 		t.Fatalf("blocked Failure = %q, want %q", blocked.Failure, FailureParentRouteIncomplete)
 	}
@@ -74,7 +75,7 @@ func TestResolveAllowsEntityOnlyParentRouteOnlyWhenExplicitlyAllowed(t *testing.
 		EventType:                  "child.done",
 		ParentRoute:                parent,
 		AllowEntityOnlyParentRoute: true,
-	}, events.NewProjectionEvent("", "child.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	}, eventtest.Projection("", "child.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 	if allowed.Failure != "" {
 		t.Fatalf("allowed Failure = %q, want empty", allowed.Failure)
 	}
@@ -98,7 +99,7 @@ func TestResolveFailsClosedForRootPinOutputWithoutTargetMechanism(t *testing.T) 
 	result := Resolve(ResolutionInput{
 		Source:    testRootPinRoutingSource(),
 		EventType: "root.ready",
-	}, events.NewProjectionEvent("", "root.ready", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	}, eventtest.Projection("", "root.ready", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 
 	if result.Failure != FailureTargetRequiredMissing {
 		t.Fatalf("Failure = %q, want %q", result.Failure, FailureTargetRequiredMissing)
@@ -112,7 +113,7 @@ func TestResolveAllowsRootPinOutputWithRootConnectAuthority(t *testing.T) {
 	result := Resolve(ResolutionInput{
 		Source:    testRootConnectPinRoutingSource(),
 		EventType: "root.ready",
-	}, events.NewProjectionEvent("", "root.ready", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	}, eventtest.Projection("", "root.ready", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 
 	if result.Failure != "" {
 		t.Fatalf("Failure = %q, want empty", result.Failure)
@@ -132,7 +133,7 @@ func TestResolveFailsClosedForRootProducerBroadcastCommonCompositionPath(t *test
 		Emit: runtimecontracts.EmitSpec{
 			Broadcast: true,
 		},
-	}, events.NewProjectionEvent("", "root.ready", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	}, eventtest.Projection("", "root.ready", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 
 	if result.Failure != FailureProducerBroadcastCommonPath {
 		t.Fatalf("Failure = %q, want %q", result.Failure, FailureProducerBroadcastCommonPath)
@@ -152,7 +153,7 @@ func TestResolveFailsClosedForRootProducerTargetCommonCompositionPath(t *testing
 				Match: map[string]runtimecontracts.ExpressionValue{"entity_id": runtimecontracts.RefExpression("payload.entity_id")},
 			},
 		},
-	}, events.NewProjectionEvent("", "root.ready", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	}, eventtest.Projection("", "root.ready", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 
 	if result.Failure != FailureProducerTargetCommonPath {
 		t.Fatalf("Failure = %q, want %q", result.Failure, FailureProducerTargetCommonPath)
@@ -178,7 +179,7 @@ func TestResolveFailsClosedForProducerTargetCommonCompositionPath(t *testing.T) 
 			EntityID:     "entity-1",
 			FlowInstance: "consumer/inst-1",
 		}},
-	}, events.NewProjectionEvent("", "shared.ready", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	}, eventtest.Projection("", "shared.ready", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 
 	if result.Failure != FailureProducerTargetCommonPath {
 		t.Fatalf("Failure = %q, want %q", result.Failure, FailureProducerTargetCommonPath)
@@ -196,7 +197,7 @@ func TestResolveFailsClosedForProducerBroadcastCommonCompositionPath(t *testing.
 		Emit: runtimecontracts.EmitSpec{
 			Broadcast: true,
 		},
-	}, events.NewProjectionEvent("", "shared.ready", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	}, eventtest.Projection("", "shared.ready", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 
 	if result.Failure != FailureProducerBroadcastCommonPath {
 		t.Fatalf("Failure = %q, want %q", result.Failure, FailureProducerBroadcastCommonPath)
@@ -222,7 +223,7 @@ func TestResolveFailsClosedForProducerTargetAdaptedConnectCommonPath(t *testing.
 			EntityID:     "entity-1",
 			FlowInstance: "consumer/inst-1",
 		}},
-	}, events.NewProjectionEvent("", "shared.ready", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	}, eventtest.Projection("", "shared.ready", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 
 	if result.Failure != FailureProducerTargetCommonPath {
 		t.Fatalf("Failure = %q, want %q", result.Failure, FailureProducerTargetCommonPath)
@@ -240,7 +241,7 @@ func TestResolveFailsClosedForProducerBroadcastAdaptedConnectCommonPath(t *testi
 		Emit: runtimecontracts.EmitSpec{
 			Broadcast: true,
 		},
-	}, events.NewProjectionEvent("", "shared.ready", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	}, eventtest.Projection("", "shared.ready", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 
 	if result.Failure != FailureProducerBroadcastCommonPath {
 		t.Fatalf("Failure = %q, want %q", result.Failure, FailureProducerBroadcastCommonPath)
@@ -284,7 +285,7 @@ func TestResolveAllowsParentConnectToOwnPinDeclaredOutput(t *testing.T) {
 		Source:    testProducerConnectSource(),
 		FlowID:    "producer",
 		EventType: "shared.ready",
-	}, events.NewProjectionEvent("", "shared.ready", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	}, eventtest.Projection("", "shared.ready", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 
 	if result.Failure != "" {
 		t.Fatalf("Failure = %q, want empty", result.Failure)
@@ -306,7 +307,7 @@ func TestResolveFailsClosedForUnknownProducerTargetFlowEvenWithParentConnect(t *
 			},
 		},
 		MatchValues: map[string]string{"entity_id": "entity-1"},
-	}, events.NewProjectionEvent("", "shared.ready", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	}, eventtest.Projection("", "shared.ready", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 
 	if result.Failure != FailureTargetUnknownFlow {
 		t.Fatalf("Failure = %q, want %q", result.Failure, FailureTargetUnknownFlow)
@@ -326,7 +327,7 @@ func TestResolveAllowsExplicitInstanceTargetEscape(t *testing.T) {
 				InstanceID: "producer-1",
 			},
 		},
-	}, events.NewProjectionEvent("", "shared.ready", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	}, eventtest.Projection("", "shared.ready", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 
 	if result.Failure != "" {
 		t.Fatalf("Failure = %q, want empty", result.Failure)
@@ -344,7 +345,7 @@ func TestResolveAllowsBroadcastWhenNoPackageReceiverConsumesOutput(t *testing.T)
 		Emit: runtimecontracts.EmitSpec{
 			Broadcast: true,
 		},
-	}, events.NewProjectionEvent("", "child.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	}, eventtest.Projection("", "child.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 
 	if result.Failure != "" {
 		t.Fatalf("Failure = %q, want empty", result.Failure)
@@ -372,7 +373,7 @@ func TestResolveFlowMatchTargetsActiveDynamicInstanceByInstanceID(t *testing.T) 
 		Descriptors: []Descriptor{{
 			FlowInstance: flowInstance,
 		}},
-	}, events.NewProjectionEvent("", "component.service.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	}, eventtest.Projection("", "component.service.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 
 	if result.Failure != "" {
 		t.Fatalf("Failure = %q, want empty", result.Failure)
@@ -422,7 +423,7 @@ func TestResolveFlowMatchTargetsActiveDynamicInstanceByFlowInstanceAndEntityID(t
 				},
 				MatchValues: map[string]string{tt.matchKey: tt.matchValue},
 				Descriptors: []Descriptor{tt.descriptor},
-			}, events.NewProjectionEvent("", "component.service.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+			}, eventtest.Projection("", "component.service.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 
 			if result.Failure != "" {
 				t.Fatalf("Failure = %q, want empty", result.Failure)
@@ -455,7 +456,7 @@ func TestResolveFlowMatchFailsClosedOnAmbiguousActiveDynamicInstances(t *testing
 			{EntityID: "shared-entity", FlowInstance: "component-scaffold/a"},
 			{EntityID: "shared-entity", FlowInstance: "component-scaffold/b"},
 		},
-	}, events.NewProjectionEvent("", "component.service.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	}, eventtest.Projection("", "component.service.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 
 	if result.Failure != FailureTargetAmbiguous {
 		t.Fatalf("Failure = %q, want %q", result.Failure, FailureTargetAmbiguous)
@@ -482,7 +483,7 @@ func TestResolveFlowMatchFailsClosedWhenDynamicInstanceDescriptorMissing(t *test
 		Descriptors: []Descriptor{{
 			FlowInstance: "component-scaffold/live",
 		}},
-	}, events.NewProjectionEvent("", "component.service.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	}, eventtest.Projection("", "component.service.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 
 	if result.Failure != FailureTargetUnreachableNoSub {
 		t.Fatalf("Failure = %q, want %q", result.Failure, FailureTargetUnreachableNoSub)

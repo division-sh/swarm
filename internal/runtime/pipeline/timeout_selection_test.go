@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -59,7 +60,7 @@ func TestDeclarativeNodeHandleEvent_SelectsOnTimeoutAccumulatorHandler(t *testin
 	entry := bundle.NodeEntries()["test-node"]
 	engine := &recordingExecutionEngine{}
 	node := NewNode(entry, semanticview.Wrap(bundle), engine, nil)
-	handled := node.Handle(context.Background(), events.NewProjectionEvent("", "accumulate.timeout", "", "", mustJSON(map[string]any{
+	handled := node.Handle(context.Background(), eventtest.Projection("", "accumulate.timeout", "", "", mustJSON(map[string]any{
 		"timer_handle": map[string]any{
 			"kind": "accumulation_timeout",
 			"bucket": map[string]any{
@@ -67,8 +68,7 @@ func TestDeclarativeNodeHandleEvent_SelectsOnTimeoutAccumulatorHandler(t *testin
 				"event_type": "item.arrived",
 			},
 		},
-	}), 0, "", "", events.EventEnvelope{}, time.Time{}),
-	)
+	}), 0, "", "", events.EventEnvelope{}, time.Time{}))
 	if !handled {
 		t.Fatal("expected timeout event to be handled")
 	}
@@ -91,7 +91,7 @@ func TestDeclarativeNodeHandleEvent_MatchesWildcardHandler(t *testing.T) {
 	entry := bundle.NodeEntries()["test-node"]
 	engine := &recordingExecutionEngine{}
 	node := NewNode(entry, semanticview.Wrap(bundle), engine, nil)
-	handled := node.Handle(context.Background(), events.NewProjectionEvent("", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}).WithEntityID("ent-1"))
+	handled := node.Handle(context.Background(), eventtest.WithEntityID(eventtest.Projection("", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), "ent-1"))
 	if !handled {
 		t.Fatal("expected wildcard event to be handled")
 	}
@@ -168,7 +168,7 @@ func TestDeclarativeNodeHandleEvent_MatchesDeepWildcardChildFlowHandler(t *testi
 	entry := bundle.NodeEntries()["collector"]
 	engine := &recordingExecutionEngine{}
 	node := NewNode(entry, semanticview.Wrap(bundle), engine, nil)
-	handled := node.Handle(context.Background(), events.NewProjectionEvent("", "child/grandchild/task.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}).WithEntityID("ent-1"))
+	handled := node.Handle(context.Background(), eventtest.WithEntityID(eventtest.Projection("", "child/grandchild/task.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), "ent-1"))
 	if !handled {
 		t.Fatal("expected deep wildcard event to be handled")
 	}

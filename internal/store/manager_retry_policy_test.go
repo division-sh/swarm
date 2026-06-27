@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -1139,9 +1140,10 @@ func seedEvent(t *testing.T, ctx context.Context, pg *store.PostgresStore, entit
 	t.Helper()
 
 	payload, _ := json.Marshal(map[string]any{"k": "v"})
-	evt := (events.NewProjectionEvent(uuid.NewString(),
+	evt := eventtest.WithEntityID((eventtest.Projection(uuid.NewString(),
 		events.EventType(eventType),
-		"store-test", "", payload, 0, "", "", events.EventEnvelope{}, time.Now().Add(-1*time.Hour))).WithEntityID(entityID)
+		"store-test", "", payload, 0, "", "", events.EventEnvelope{}, time.Now().Add(-1*time.Hour))), entityID)
+
 	if err := pg.AppendEvent(ctx, evt); err != nil {
 		t.Fatalf("append event: %v", err)
 	}

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/google/uuid"
@@ -19,14 +20,16 @@ func TestSQLiteFanOutCreateFlowInstanceDeliveriesPersistWithoutDeadLetter(t *tes
 	ctx := sqliteExactOnceRunContext(t, db)
 	pc, bus := newSQLiteDynamicActivationCoordinator(t, db, workflowStore)
 
-	parent := events.NewProjectionEvent(uuid.NewString(),
+	parent := eventtest.WithFlowInstance(eventtest.WithEntityID(eventtest.Projection(uuid.NewString(),
 		events.EventType("component_scaffold.batch_requested"), "", "", mustJSON(map[string]any{
 			"components": []any{
 				map[string]any{"component_id": "component-a"},
 				map[string]any{"component_id": "component-b"},
 			},
-		}), 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EventEnvelope{}, time.Now().UTC()).
-		WithEntityID("parent-ent").WithFlowInstance("root/parent")
+		}), 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EventEnvelope{}, time.Now().UTC()),
+		"parent-ent"),
+		"root/parent")
+
 	if err := workflowStore.Create(ctx, WorkflowInstance{
 		InstanceID:      "parent-ent",
 		StorageRef:      "parent-ent",
@@ -66,7 +69,7 @@ func TestSQLiteFanOutCreateFlowInstanceDeliveriesPersistWithoutDeadLetter(t *tes
 		if childRunID == "" {
 			childRunID = runtimecorrelation.RunIDFromContext(ctx)
 		}
-		child = events.NewProjectionEvent(
+		child = eventtest.Projection(
 			childID,
 			child.Type(),
 			child.SourceAgent(),
@@ -76,8 +79,8 @@ func TestSQLiteFanOutCreateFlowInstanceDeliveriesPersistWithoutDeadLetter(t *tes
 			childRunID,
 			child.ParentEventID(),
 			child.Envelope(),
-			child.CreatedAt(),
-		)
+			child.CreatedAt())
+
 		children[idx] = child
 		seedExactOnceEventDelivery(t, workflowStore, ctx, child, "spawn-node")
 	}

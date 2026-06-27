@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/store/runbundle"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
@@ -27,21 +28,19 @@ func TestPostgresStore_RunBundleSourceClassifiesCurrentWritersAsLegacyAndKeepsSe
 	ctx := runtimecorrelation.WithBundleFingerprint(context.Background(), testBootBundleFingerprint)
 	runID := uuid.NewString()
 
-	if err := pg.AppendEvent(ctx, events.NewProjectionEvent(uuid.NewString(),
+	if err := pg.AppendEvent(ctx, eventtest.Projection(uuid.NewString(),
 
 		"scan.requested",
-		"test", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC()),
-	); err != nil {
+		"test", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
 		t.Fatalf("AppendEvent(first): %v", err)
 	}
 	assertRunBundleIdentity(t, db, runID, "", storerunlifecycle.BundleSourceLegacy, testBootBundleFingerprint)
 
 	changedCtx := runtimecorrelation.WithBundleFingerprint(context.Background(), testOtherBundleFingerprint)
-	if err := pg.AppendEvent(changedCtx, events.NewProjectionEvent(uuid.NewString(),
+	if err := pg.AppendEvent(changedCtx, eventtest.Projection(uuid.NewString(),
 
 		"scan.followup",
-		"test", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC()),
-	); err != nil {
+		"test", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
 		t.Fatalf("AppendEvent(second): %v", err)
 	}
 	assertRunBundleIdentity(t, db, runID, "", storerunlifecycle.BundleSourceLegacy, testBootBundleFingerprint)
@@ -63,11 +62,10 @@ func TestPostgresStore_RunBundleSourceConsumesCanonicalSourceFact(t *testing.T) 
 		BundleFingerprint: testBootBundleFingerprint,
 	})
 
-	if err := pg.AppendEvent(ctx, events.NewProjectionEvent(uuid.NewString(),
+	if err := pg.AppendEvent(ctx, eventtest.Projection(uuid.NewString(),
 
 		"scan.requested",
-		"test", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC()),
-	); err != nil {
+		"test", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
 		t.Fatalf("AppendEvent(persisted): %v", err)
 	}
 	assertRunBundleIdentity(t, db, runID, testCanonicalBundleHash, storerunlifecycle.BundleSourcePersisted, testBootBundleFingerprint)
@@ -79,11 +77,10 @@ func TestPostgresStore_RunBundleSourceConsumesCanonicalSourceFact(t *testing.T) 
 		BundleSource:      storerunlifecycle.BundleSourceEphemeral,
 		BundleFingerprint: testOtherBundleFingerprint,
 	})
-	if err := pg.AppendEvent(ephemeralCtx, events.NewProjectionEvent(uuid.NewString(),
+	if err := pg.AppendEvent(ephemeralCtx, eventtest.Projection(uuid.NewString(),
 
 		"scan.dev",
-		"test", "", []byte(`{}`), 0, ephemeralRunID, "", events.EventEnvelope{}, time.Now().UTC()),
-	); err != nil {
+		"test", "", []byte(`{}`), 0, ephemeralRunID, "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
 		t.Fatalf("AppendEvent(ephemeral): %v", err)
 	}
 	assertRunBundleIdentity(t, db, ephemeralRunID, ephemeralHash, storerunlifecycle.BundleSourceEphemeral, testOtherBundleFingerprint)
@@ -94,11 +91,10 @@ func TestPostgresStore_RunBundleSourceAllowsUnknownLegacyRows(t *testing.T) {
 	pg := &PostgresStore{DB: db}
 	runID := uuid.NewString()
 
-	if err := pg.AppendEvent(context.Background(), events.NewProjectionEvent(uuid.NewString(),
+	if err := pg.AppendEvent(context.Background(), eventtest.Projection(uuid.NewString(),
 
 		"legacy.requested",
-		"test", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC()),
-	); err != nil {
+		"test", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
 	assertRunBundleIdentity(t, db, runID, "", storerunlifecycle.BundleSourceLegacy, "")
@@ -118,21 +114,19 @@ func TestPostgresStore_RunBundleSourceDoesNotPromoteLegacyFingerprintIntoBundleH
 	}
 
 	bootCtx := runtimecorrelation.WithBundleFingerprint(ctx, testBootBundleFingerprint)
-	if err := pg.AppendEvent(bootCtx, events.NewProjectionEvent(uuid.NewString(),
+	if err := pg.AppendEvent(bootCtx, eventtest.Projection(uuid.NewString(),
 
 		"legacy.filled",
-		"test", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC()),
-	); err != nil {
+		"test", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
 		t.Fatalf("AppendEvent(fill): %v", err)
 	}
 	assertRunBundleIdentity(t, db, runID, "", storerunlifecycle.BundleSourceLegacy, testBootBundleFingerprint)
 
 	changedCtx := runtimecorrelation.WithBundleFingerprint(ctx, testOtherBundleFingerprint)
-	if err := pg.AppendEvent(changedCtx, events.NewProjectionEvent(uuid.NewString(),
+	if err := pg.AppendEvent(changedCtx, eventtest.Projection(uuid.NewString(),
 
 		"legacy.followup",
-		"test", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC()),
-	); err != nil {
+		"test", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
 		t.Fatalf("AppendEvent(followup): %v", err)
 	}
 	assertRunBundleIdentity(t, db, runID, "", storerunlifecycle.BundleSourceLegacy, testBootBundleFingerprint)

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -153,7 +154,7 @@ func TestExecuteNodeContractHandlerFlushesCollectedEventsToParentCollector(t *te
 	result, err := pc.executeNodeContractHandler(ctx, "node-a", runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted"},
 	}, workflowTriggerContext{
-		Event: events.NewProjectionEvent("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}).WithEntityID("ent-1"),
+		Event: eventtest.WithEntityID(eventtest.Projection("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), "ent-1"),
 		State: WorkflowState{Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
 	}, false)
 	if err != nil {
@@ -184,7 +185,7 @@ func TestExecuteNodeContractHandlerPublishesCollectedEventsWithoutParentCollecto
 	result, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), "node-a", runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted"},
 	}, workflowTriggerContext{
-		Event: events.NewProjectionEvent("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}).WithEntityID("ent-1"),
+		Event: eventtest.WithEntityID(eventtest.Projection("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), "ent-1"),
 		State: WorkflowState{Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
 	}, false)
 	if err != nil {
@@ -209,7 +210,7 @@ func TestExecuteNodeContractHandlerUsesTypedEnvelopeIdentityOverPayload(t *testi
 	result, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), "node-a", runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted"},
 	}, workflowTriggerContext{
-		Event: (events.NewProjectionEvent("", events.EventType("custom.trigger"), "", "", []byte(`{"entity_id":"payload-ent"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())).WithEnvelope(events.EventEnvelope{EntityID: "env-ent"}),
+		Event: eventtest.WithEnvelope((eventtest.Projection("", events.EventType("custom.trigger"), "", "", []byte(`{"entity_id":"payload-ent"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())), events.EventEnvelope{EntityID: "env-ent"}),
 		State: WorkflowState{Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
 	}, false)
 	if err != nil {
@@ -283,7 +284,7 @@ node-a:
 		},
 		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted"},
 	}, workflowTriggerContext{
-		Event: events.NewProjectionEvent("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event: eventtest.Projection("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		State: WorkflowState{Stage: WorkflowStateID(""), Metadata: map[string]any{}},
 	}, false)
 	if err != nil {
@@ -327,8 +328,9 @@ func TestExecuteNodeContractHandlerRejectsEmitWhenPersistencePrerequisiteFieldIs
 		Emit:       runtimecontracts.EmitSpec{Event: "spec.requested"},
 		AdvancesTo: "mvp_speccing",
 	}, workflowTriggerContext{
-		Event: events.NewProjectionEvent("", events.EventType("research.completed"), "", "", mustJSON(map[string]any{}), 0, "", "", events.EventEnvelope{}, time.Time{}).
-			WithEntityID(entityID),
+		Event: eventtest.WithEntityID(eventtest.Projection("", events.EventType("research.completed"), "", "", mustJSON(map[string]any{}), 0, "", "", events.EventEnvelope{}, time.Time{}),
+			entityID),
+
 		State: WorkflowState{
 			EntityID: entityID,
 			Stage:    WorkflowStateID("researching"),
@@ -384,10 +386,11 @@ func TestExecuteNodeContractHandlerPublishesAfterPersistencePrerequisiteFieldSuc
 		Emit:       runtimecontracts.EmitSpec{Event: "spec.requested"},
 		AdvancesTo: "mvp_speccing",
 	}, workflowTriggerContext{
-		Event: events.NewProjectionEvent("", events.EventType("research.completed"), "", "", mustJSON(map[string]any{
+		Event: eventtest.WithEntityID(eventtest.Projection("", events.EventType("research.completed"), "", "", mustJSON(map[string]any{
 			"business_brief": map[string]any{"summary": "validated"},
-		}), 0, "", "", events.EventEnvelope{}, time.Time{}).
-			WithEntityID(entityID),
+		}), 0, "", "", events.EventEnvelope{}, time.Time{}),
+			entityID),
+
 		State: WorkflowState{
 			EntityID: entityID,
 			Stage:    WorkflowStateID("researching"),
@@ -461,8 +464,9 @@ func TestExecuteNodeContractHandlerLogsAccumulatorCompletionCommittedOutcome(t *
 			payload["business_brief"] = map[string]any{"summary": "validated"}
 		}
 		result, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), "node-a", handler, workflowTriggerContext{
-			Event: events.NewProjectionEvent("", events.EventType("research.completed"), "", "", mustJSON(payload), 0, "", "", events.EventEnvelope{}, time.Time{}).
-				WithEntityID(entityID),
+			Event: eventtest.WithEntityID(eventtest.Projection("", events.EventType("research.completed"), "", "", mustJSON(payload), 0, "", "", events.EventEnvelope{}, time.Time{}),
+				entityID),
+
 			State: pc.currentWorkflowState(testPipelineCoordinatorRunContext(t, pc), entityID),
 		}, false)
 		if err != nil {
@@ -532,8 +536,9 @@ func TestExecuteNodeContractHandlerLogsAccumulatorCompletionEvaluationFailure(t 
 			{ID: "bad", Condition: `entity.branch_target == "go"`, AdvancesTo: "mvp_speccing"},
 		},
 	}, workflowTriggerContext{
-		Event: events.NewProjectionEvent("", events.EventType("research.completed"), "", "", mustJSON(map[string]any{"item_id": 1}), 0, "", "", events.EventEnvelope{}, time.Time{}).
-			WithEntityID(entityID),
+		Event: eventtest.WithEntityID(eventtest.Projection("", events.EventType("research.completed"), "", "", mustJSON(map[string]any{"item_id": 1}), 0, "", "", events.EventEnvelope{}, time.Time{}),
+			entityID),
+
 		State: pc.currentWorkflowState(testPipelineCoordinatorRunContext(t, pc), entityID),
 	}, false)
 	if err == nil {
@@ -595,8 +600,9 @@ func TestExecuteNodeContractHandlerLogsAccumulatorCompletionCommitFailure(t *tes
 			{ID: "complete", Condition: "true", AdvancesTo: "mvp_speccing", Emit: runtimecontracts.EmitSpec{Event: "spec.requested"}},
 		},
 	}, workflowTriggerContext{
-		Event: events.NewProjectionEvent("", events.EventType("research.completed"), "", "", mustJSON(map[string]any{"item_id": 1}), 0, "", "", events.EventEnvelope{}, time.Time{}).
-			WithEntityID(entityID),
+		Event: eventtest.WithEntityID(eventtest.Projection("", events.EventType("research.completed"), "", "", mustJSON(map[string]any{"item_id": 1}), 0, "", "", events.EventEnvelope{}, time.Time{}),
+			entityID),
+
 		State: pc.currentWorkflowState(testPipelineCoordinatorRunContext(t, pc), entityID),
 	}, false)
 	if !errors.Is(err, runtimeengine.ErrEmitPersistencePrerequisite) {
@@ -670,7 +676,7 @@ func TestExecuteNodeContractHandlerPersistsArithmeticDataAccumulationExpression(
 			},
 		},
 	}, workflowTriggerContext{
-		Event: events.NewProjectionEvent("", events.EventType("validation.spec_requested"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}).WithEntityID(entityID),
+		Event: eventtest.WithEntityID(eventtest.Projection("", events.EventType("validation.spec_requested"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), entityID),
 		State: pc.currentWorkflowState(testPipelineCoordinatorRunContext(t, pc), entityID),
 	}, false)
 	if err != nil {
@@ -739,7 +745,7 @@ func TestExecuteNodeContractHandlerFailsClosedOnDataAccumulationCELRuntimeError(
 			},
 		},
 	}, workflowTriggerContext{
-		Event: events.NewProjectionEvent("", events.EventType("validation.spec_requested"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}).WithEntityID(entityID),
+		Event: eventtest.WithEntityID(eventtest.Projection("", events.EventType("validation.spec_requested"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), entityID),
 		State: pc.currentWorkflowState(testPipelineCoordinatorRunContext(t, pc), entityID),
 	}, false)
 	if err == nil {
@@ -803,7 +809,7 @@ func TestExecuteNodeContractHandlerPersistsNullPresenceCheckDataAccumulationExpr
 			},
 		},
 	}, workflowTriggerContext{
-		Event: events.NewProjectionEvent("", events.EventType("validation.spec_requested"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}).WithEntityID(entityID),
+		Event: eventtest.WithEntityID(eventtest.Projection("", events.EventType("validation.spec_requested"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), entityID),
 		State: pc.currentWorkflowState(testPipelineCoordinatorRunContext(t, pc), entityID),
 	}, false)
 	if err != nil {
@@ -847,8 +853,9 @@ func TestResolveHandlerEntityIDForFlowKeepsSameFlowEntity(t *testing.T) {
 	const entityID = "ent-1"
 	state := WorkflowState{EntityID: entityID}
 
-	gotID, gotEvt := resolveHandlerEntityIDForFlow(source, "scoring", handler, entityID, events.NewProjectionEvent("", events.EventType("vertical.discovered"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}).
-		WithEntityID(entityID), &state)
+	gotID, gotEvt := resolveHandlerEntityIDForFlow(source, "scoring", handler, entityID, eventtest.WithEntityID(eventtest.Projection("", events.EventType("vertical.discovered"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+		entityID),
+		&state)
 
 	if gotID != entityID {
 		t.Fatalf("entityID = %q, want %q", gotID, entityID)
@@ -985,8 +992,9 @@ func TestResolveHandlerEntityIDForFlowPreservesCrossFlowEntityWithoutCreateEntit
 	const incomingEntityID = "ent-discovery"
 	state := WorkflowState{EntityID: incomingEntityID}
 
-	gotID, gotEvt := resolveHandlerEntityIDForFlow(source, "scoring", handler, incomingEntityID, events.NewProjectionEvent("", events.EventType("vertical.discovered"), "", "", mustJSON(map[string]any{"entity_id": incomingEntityID}), 0, "", "", events.EventEnvelope{}, time.Time{}).
-		WithEnvelope(events.EventEnvelope{EntityID: incomingEntityID}), &state)
+	gotID, gotEvt := resolveHandlerEntityIDForFlow(source, "scoring", handler, incomingEntityID, eventtest.WithEnvelope(eventtest.Projection("", events.EventType("vertical.discovered"), "", "", mustJSON(map[string]any{"entity_id": incomingEntityID}), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		events.EventEnvelope{EntityID: incomingEntityID}),
+		&state)
 
 	if gotID != incomingEntityID {
 		t.Fatalf("entityID = %q, want preserved %q", gotID, incomingEntityID)
@@ -1009,8 +1017,9 @@ func TestResolveHandlerEntityIDForRootKeepsFlowScopedInboundEntity(t *testing.T)
 		Metadata: map[string]any{},
 	}
 
-	gotID, gotEvt := resolveHandlerEntityIDForFlow(nil, "", handler, inboundEntityID, events.NewProjectionEvent("", events.EventType("child/grandchild/task.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}).
-		WithEntityID(inboundEntityID), &state)
+	gotID, gotEvt := resolveHandlerEntityIDForFlow(nil, "", handler, inboundEntityID, eventtest.WithEntityID(eventtest.Projection("", events.EventType("child/grandchild/task.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+		inboundEntityID),
+		&state)
 
 	if gotID != inboundEntityID {
 		t.Fatalf("entityID = %q, want inbound %q", gotID, inboundEntityID)
@@ -1037,8 +1046,9 @@ func TestResolveHandlerEntityIDForFlowKeepsInboundEntityForDescendantScopedInbou
 		},
 	}
 
-	gotID, gotEvt := resolveHandlerEntityIDForFlow(nil, "child", handler, inboundEntityID, events.NewProjectionEvent("", events.EventType("child/grandchild/micro.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}).
-		WithEntityID(inboundEntityID), &state)
+	gotID, gotEvt := resolveHandlerEntityIDForFlow(nil, "child", handler, inboundEntityID, eventtest.WithEntityID(eventtest.Projection("", events.EventType("child/grandchild/micro.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+		inboundEntityID),
+		&state)
 
 	if gotID != inboundEntityID {
 		t.Fatalf("entityID = %q, want inbound %q", gotID, inboundEntityID)
@@ -1067,8 +1077,9 @@ func TestResolveHandlerEntityIDForFlowDoesNotRetargetSameFlowInstancePath(t *tes
 		},
 	}
 
-	gotID, gotEvt := resolveHandlerEntityIDForFlow(nil, "child", handler, entityID, events.NewProjectionEvent("", events.EventType("child/grandchild/micro.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}).
-		WithEntityID(entityID), &state)
+	gotID, gotEvt := resolveHandlerEntityIDForFlow(nil, "child", handler, entityID, eventtest.WithEntityID(eventtest.Projection("", events.EventType("child/grandchild/micro.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+		entityID),
+		&state)
 
 	if gotID != entityID {
 		t.Fatalf("entityID = %q, want %q", gotID, entityID)
@@ -1117,8 +1128,8 @@ vertical:
 		Status:   "active",
 		Metadata: map[string]any{"name": "Parent"},
 	}
-	inbound := events.NewProjectionEvent("", events.EventType("vertical.discovered"), "", "", mustJSON(map[string]any{"entity_id": inboundEntityID, "name": "Parent"}), 0, "", "", events.EventEnvelope{}, time.Time{}).
-		WithEnvelope(events.EventEnvelope{EntityID: inboundEntityID})
+	inbound := eventtest.WithEnvelope(eventtest.Projection("", events.EventType("vertical.discovered"), "", "", mustJSON(map[string]any{"entity_id": inboundEntityID, "name": "Parent"}), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		events.EventEnvelope{EntityID: inboundEntityID})
 
 	gotID, gotEvt := resolveHandlerEntityIDForFlow(source, "scoring", handler, inboundEntityID, inbound, &state)
 
@@ -1214,7 +1225,7 @@ func TestExecuteNodeContractHandlerRejectsMalformedPersistedGateShape(t *testing
 	}
 
 	_, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), "node-a", runtimecontracts.SystemNodeEventHandler{}, workflowTriggerContext{
-		Event: events.NewProjectionEvent("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}).WithEntityID("ent-1"),
+		Event: eventtest.WithEntityID(eventtest.Projection("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), "ent-1"),
 		State: WorkflowState{
 			Stage:    WorkflowStateID("queued"),
 			Metadata: map[string]any{"gates": "invalid"},
@@ -1232,7 +1243,7 @@ func TestResolveHandlerEntityIDForFlowCreateEntityDoesNotSeedSubjectID(t *testin
 	handler := runtimecontracts.SystemNodeEventHandler{CreateEntity: true}
 	state := WorkflowState{}
 
-	gotID, _ := resolveHandlerEntityIDForFlow(nil, "scoring", handler, "", events.NewProjectionEvent("", events.EventType("vertical.discovered"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), &state)
+	gotID, _ := resolveHandlerEntityIDForFlow(nil, "scoring", handler, "", eventtest.Projection("", events.EventType("vertical.discovered"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), &state)
 
 	if gotID == "" {
 		t.Fatal("expected fresh entity id")
@@ -1308,7 +1319,7 @@ node-a:
 			},
 		},
 	}, workflowTriggerContext{
-		Event: events.NewProjectionEvent("", events.EventType("candidate.discovered"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event: eventtest.Projection("", events.EventType("candidate.discovered"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		State: WorkflowState{},
 	}, false)
 	if err != nil {
@@ -1450,9 +1461,10 @@ node-a:
 	}
 	runHandler := func(entityID, requestID string) error {
 		_, err := pc.executeNodeContractHandler(ctx, "node-a", handler, workflowTriggerContext{
-			Event: events.NewProjectionEvent("evt-"+requestID,
-				events.EventType("request.received"), "", "", mustJSON(map[string]any{"request_id": requestID}), 0, testPipelineRunID, "", events.EventEnvelope{}, time.Time{}).
-				WithEntityID(entityID),
+			Event: eventtest.WithEntityID(eventtest.Projection("evt-"+requestID,
+				events.EventType("request.received"), "", "", mustJSON(map[string]any{"request_id": requestID}), 0, testPipelineRunID, "", events.EventEnvelope{}, time.Time{}),
+				entityID),
+
 			State: WorkflowState{EntityID: entityID, Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
 		}, false)
 		return err
@@ -1554,7 +1566,7 @@ node-a:
 			},
 		},
 	}, workflowTriggerContext{
-		Event: events.NewProjectionEvent("", events.EventType("candidate.ready"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event: eventtest.Projection("", events.EventType("candidate.ready"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		State: WorkflowState{},
 	}, false)
 	if err != nil {
@@ -1676,7 +1688,7 @@ node-a:
 		Clear:        &runtimecontracts.ClearSpec{Target: "entity.revision_count"},
 		Emit:         runtimecontracts.EmitSpec{Event: "entity.created"},
 	}, workflowTriggerContext{
-		Event: events.NewProjectionEvent("", events.EventType("candidate.discovered"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event: eventtest.Projection("", events.EventType("candidate.discovered"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		State: WorkflowState{},
 	}, false)
 	if err != nil {
@@ -1777,7 +1789,7 @@ node-a:
 		t.Fatal("expected temp workflow bundle")
 	}
 
-	preview, err := PreviewContractHandlerExecution(context.Background(), bundle, "node-a", events.NewProjectionEvent("", events.EventType("candidate.discovered"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), WorkflowState{}, nil)
+	preview, err := PreviewContractHandlerExecution(context.Background(), bundle, "node-a", eventtest.Projection("", events.EventType("candidate.discovered"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), WorkflowState{}, nil)
 	if err != nil {
 		t.Fatalf("PreviewContractHandlerExecution: %v", err)
 	}
@@ -1834,7 +1846,7 @@ func TestExecuteNodeContractHandlerReturnsTerminalRejectForTerminalEntity(t *tes
 	}
 
 	result, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), "node-a", runtimecontracts.SystemNodeEventHandler{}, workflowTriggerContext{
-		Event: events.NewProjectionEvent("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}).WithEntityID("ent-1"),
+		Event: eventtest.WithEntityID(eventtest.Projection("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), "ent-1"),
 		State: WorkflowState{Stage: WorkflowStateID("done"), Metadata: map[string]any{}},
 	}, false)
 	if err != nil {
@@ -1867,8 +1879,9 @@ func TestExecuteNodeContractHandlerAppliesEmitFieldsToEmittedEvent(t *testing.T)
 			},
 		},
 	}, workflowTriggerContext{
-		Event: events.NewProjectionEvent("", events.EventType("custom.trigger"), "", "", mustJSON(map[string]any{"entity_id": "ent-1"}), 0, "", "", events.EventEnvelope{}, time.Time{}).
-			WithEntityID("ent-1"),
+		Event: eventtest.WithEntityID(eventtest.Projection("", events.EventType("custom.trigger"), "", "", mustJSON(map[string]any{"entity_id": "ent-1"}), 0, "", "", events.EventEnvelope{}, time.Time{}),
+			"ent-1"),
+
 		State: WorkflowState{Stage: WorkflowStateID("queued"), Metadata: map[string]any{"stage": "queued"}},
 	}, false)
 	if err != nil {
@@ -1916,8 +1929,9 @@ func TestExecuteNodeContractHandlerAppliesEmitFieldsSparseFieldPresenceCheck(t *
 			},
 		},
 	}, workflowTriggerContext{
-		Event: events.NewProjectionEvent("", events.EventType("custom.trigger"), "", "", mustJSON(map[string]any{"entity_id": "ent-1"}), 0, "", "", events.EventEnvelope{}, time.Time{}).
-			WithEntityID("ent-1"),
+		Event: eventtest.WithEntityID(eventtest.Projection("", events.EventType("custom.trigger"), "", "", mustJSON(map[string]any{"entity_id": "ent-1"}), 0, "", "", events.EventEnvelope{}, time.Time{}),
+			"ent-1"),
+
 		State: WorkflowState{Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
 	}, false)
 	if err != nil {
@@ -1987,7 +2001,7 @@ node-a:
 			},
 		},
 	}, workflowTriggerContext{
-		Event: events.NewProjectionEvent("", events.EventType("custom.trigger"), "", "", mustJSON(map[string]any{"reason": "active"}), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event: eventtest.Projection("", events.EventType("custom.trigger"), "", "", mustJSON(map[string]any{"reason": "active"}), 0, "", "", events.EventEnvelope{}, time.Time{}),
 
 		State: WorkflowState{Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
 	}, false)
@@ -2067,13 +2081,14 @@ func TestExecuteNodeHandlerPlanResult_NestedDescendantCompletionDoesNotBackPropa
 	}); err != nil {
 		t.Fatalf("seed grandchild instance: %v", err)
 	}
-	if consume, handled := pc.workflowNodeInterceptPolicy("child/grandchild/micro.done", (events.NewProjectionEvent("", events.EventType("child/grandchild/micro.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})).WithEntityID(grandchildEntityID)); !handled {
+	if consume, handled := pc.workflowNodeInterceptPolicy("child/grandchild/micro.done", eventtest.WithEntityID((eventtest.Projection("", events.EventType("child/grandchild/micro.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})), grandchildEntityID)); !handled {
 		t.Fatalf("workflowNodeInterceptPolicy handled = %v, consume = %v, want handled", handled, consume)
 	}
 
-	evt := events.NewProjectionEvent(uuid.NewString(),
-		events.EventType("child/grandchild/micro.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}).
-		WithEntityID(grandchildEntityID)
+	evt := eventtest.WithEntityID(eventtest.Projection(uuid.NewString(),
+		events.EventType("child/grandchild/micro.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+		grandchildEntityID)
+
 	seedPipelineNodeDeliveryAuthority(t, db, evt, "root-collector")
 	handled, err := pc.dispatchWorkflowNodeEventResult(testWorkflowStoreRunContext(t, store), evt)
 	if err != nil {
@@ -2111,8 +2126,9 @@ func TestExecuteNodeContractHandlerRejectsAmbiguousHandlerTopLevelEmitWithRules(
 			{ID: "pick-rule", Condition: "true", Emit: runtimecontracts.EmitSpec{Event: "rule.emitted"}},
 		},
 	}, workflowTriggerContext{
-		Event: events.NewProjectionEvent("", events.EventType("custom.trigger"), "", "", mustJSON(map[string]any{"entity_id": "ent-1"}), 0, "", "", events.EventEnvelope{}, time.Time{}).
-			WithEntityID("ent-1"),
+		Event: eventtest.WithEntityID(eventtest.Projection("", events.EventType("custom.trigger"), "", "", mustJSON(map[string]any{"entity_id": "ent-1"}), 0, "", "", events.EventEnvelope{}, time.Time{}),
+			"ent-1"),
+
 		State: WorkflowState{Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
 	}, false)
 	if err == nil {
@@ -2137,8 +2153,9 @@ func TestExecuteNodeContractHandlerRejectsAmbiguousHandlerTopLevelEmitWithRulesW
 			{ID: "pick-rule", Condition: "true", AdvancesTo: "done"},
 		},
 	}, workflowTriggerContext{
-		Event: events.NewProjectionEvent("", events.EventType("custom.trigger"), "", "", mustJSON(map[string]any{"entity_id": "ent-1"}), 0, "", "", events.EventEnvelope{}, time.Time{}).
-			WithEntityID("ent-1"),
+		Event: eventtest.WithEntityID(eventtest.Projection("", events.EventType("custom.trigger"), "", "", mustJSON(map[string]any{"entity_id": "ent-1"}), 0, "", "", events.EventEnvelope{}, time.Time{}),
+			"ent-1"),
+
 		State: WorkflowState{Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
 	}, false)
 	if err == nil {
@@ -2167,8 +2184,9 @@ func TestExecuteNodeContractHandlerOnCompleteDoesNotSeeCurrentHandlerTopLevelWri
 			{ID: "too-early", Condition: `"branch_target" in entity && entity.branch_target == "handler"`, Emit: runtimecontracts.EmitSpec{Event: "branch.selected"}},
 		},
 	}, workflowTriggerContext{
-		Event: events.NewProjectionEvent("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}).
-			WithEntityID("ent-1"),
+		Event: eventtest.WithEntityID(eventtest.Projection("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+			"ent-1"),
+
 		State: WorkflowState{EntityID: "ent-1", Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
 	}, false)
 	if err == nil {
@@ -2189,7 +2207,7 @@ func TestExecuteNodeContractHandlerExecutesEmitInsideEngine(t *testing.T) {
 	result, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), "node-a", runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted"},
 	}, workflowTriggerContext{
-		Event: events.NewProjectionEvent("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}).WithEntityID(entityID),
+		Event: eventtest.WithEntityID(eventtest.Projection("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), entityID),
 		State: WorkflowState{Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
 	}, false)
 	if err != nil {
@@ -2254,8 +2272,9 @@ func TestExecuteNodeContractHandler_UsesEmitFieldsAsOnlyBusinessPayloadSource(t 
 			},
 		},
 	}, workflowTriggerContext{
-		Event: events.NewProjectionEvent("", events.EventType("custom.trigger"), "", "", mustJSON(map[string]any{"entity_id": "ent-1", "legacy": "should-not-pass"}), 0, "", "", events.EventEnvelope{}, time.Time{}).
-			WithEntityID("ent-1"),
+		Event: eventtest.WithEntityID(eventtest.Projection("", events.EventType("custom.trigger"), "", "", mustJSON(map[string]any{"entity_id": "ent-1", "legacy": "should-not-pass"}), 0, "", "", events.EventEnvelope{}, time.Time{}),
+			"ent-1"),
+
 		State: WorkflowState{EntityID: "ent-1", Stage: WorkflowStateID("queued"), Metadata: map[string]any{"legacy_entity": "should-not-pass"}},
 	}, false)
 	if err != nil {
@@ -2305,8 +2324,9 @@ func TestExecuteNodeContractHandler_GuardEscalateUsesOnlyRuntimeOwnedEnvelope(t 
 			OnFail: "escalate:guard.failed",
 		},
 	}, workflowTriggerContext{
-		Event: events.NewProjectionEvent("", events.EventType("custom.trigger"), "", "", mustJSON(map[string]any{"entity_id": "ent-1", "score": 50, "legacy": "should-not-pass"}), 0, "", "", events.EventEnvelope{}, time.Time{}).
-			WithEntityID("ent-1"),
+		Event: eventtest.WithEntityID(eventtest.Projection("", events.EventType("custom.trigger"), "", "", mustJSON(map[string]any{"entity_id": "ent-1", "score": 50, "legacy": "should-not-pass"}), 0, "", "", events.EventEnvelope{}, time.Time{}),
+			"ent-1"),
+
 		State: WorkflowState{EntityID: "ent-1", Stage: WorkflowStateID("queued"), Metadata: map[string]any{"legacy_entity": "should-not-pass"}},
 	}, false)
 	if err != nil {
@@ -2351,7 +2371,7 @@ func TestExecuteNodeContractHandler_RejectsUndeclaredBusinessPayloadAcrossSuppor
 	}{
 		{
 			name:  "handler top level",
-			event: events.NewProjectionEvent("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}).WithEntityID("ent-1"),
+			event: eventtest.WithEntityID(eventtest.Projection("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), "ent-1"),
 			state: WorkflowState{EntityID: "ent-1", Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
 			handler: runtimecontracts.SystemNodeEventHandler{
 				Emit: runtimecontracts.EmitSpec{
@@ -2365,7 +2385,7 @@ func TestExecuteNodeContractHandler_RejectsUndeclaredBusinessPayloadAcrossSuppor
 		},
 		{
 			name:  "rules",
-			event: events.NewProjectionEvent("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}).WithEntityID("ent-1"),
+			event: eventtest.WithEntityID(eventtest.Projection("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), "ent-1"),
 			state: WorkflowState{EntityID: "ent-1", Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
 			handler: runtimecontracts.SystemNodeEventHandler{
 				Rules: []runtimecontracts.HandlerRuleEntry{{
@@ -2383,7 +2403,7 @@ func TestExecuteNodeContractHandler_RejectsUndeclaredBusinessPayloadAcrossSuppor
 		},
 		{
 			name:  "on_complete",
-			event: events.NewProjectionEvent("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}).WithEntityID("ent-1"),
+			event: eventtest.WithEntityID(eventtest.Projection("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), "ent-1"),
 			state: WorkflowState{EntityID: "ent-1", Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
 			handler: runtimecontracts.SystemNodeEventHandler{
 				OnComplete: []runtimecontracts.HandlerRuleEntry{{
@@ -2401,7 +2421,7 @@ func TestExecuteNodeContractHandler_RejectsUndeclaredBusinessPayloadAcrossSuppor
 		},
 		{
 			name: "accumulate.on_timeout",
-			event: events.NewProjectionEvent("", events.EventType("accumulate.timeout"), "", "", mustJSON(map[string]any{
+			event: eventtest.WithEntityID(eventtest.Projection("", events.EventType("accumulate.timeout"), "", "", mustJSON(map[string]any{
 				"timer_handle": map[string]any{
 					"kind": "accumulation_timeout",
 					"bucket": map[string]any{
@@ -2409,8 +2429,9 @@ func TestExecuteNodeContractHandler_RejectsUndeclaredBusinessPayloadAcrossSuppor
 						"event_type": "item.arrived",
 					},
 				},
-			}), 0, "", "", events.EventEnvelope{}, time.Time{}).
-				WithEntityID("ent-1"),
+			}), 0, "", "", events.EventEnvelope{}, time.Time{}),
+				"ent-1"),
+
 			state: WorkflowState{EntityID: "ent-1", Stage: WorkflowStateID("collecting"), Metadata: map[string]any{"expected_count": 2}},
 			handler: runtimecontracts.SystemNodeEventHandler{
 				Accumulate: &runtimecontracts.AccumulateSpec{
@@ -2432,8 +2453,9 @@ func TestExecuteNodeContractHandler_RejectsUndeclaredBusinessPayloadAcrossSuppor
 		},
 		{
 			name: "fan_out",
-			event: events.NewProjectionEvent("", events.EventType("batch.submitted"), "", "", mustJSON(map[string]any{"items": []any{map[string]any{"label": "x"}}}), 0, "", "", events.EventEnvelope{}, time.Time{}).
-				WithEntityID("ent-1"),
+			event: eventtest.WithEntityID(eventtest.Projection("", events.EventType("batch.submitted"), "", "", mustJSON(map[string]any{"items": []any{map[string]any{"label": "x"}}}), 0, "", "", events.EventEnvelope{}, time.Time{}),
+				"ent-1"),
+
 			state: WorkflowState{EntityID: "ent-1", Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
 			handler: runtimecontracts.SystemNodeEventHandler{
 				FanOut: &runtimecontracts.FanOutSpec{

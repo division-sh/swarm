@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtime "github.com/division-sh/swarm/internal/runtime"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -324,12 +325,12 @@ func (h *runtimeHarness) publishConcurrentAndWait(steps []catalogTriggerStep, ti
 		if err != nil {
 			h.t.Fatalf("marshal concurrent trigger payload: %v", err)
 		}
-		evt := events.NewProjectionEvent(uuid.NewString(),
+		evt := eventtest.Projection(uuid.NewString(),
 			events.EventType(strings.TrimSpace(step.Event)),
 			"cataloge2e", "", raw, 0, catalogRuntimeRunID, "", events.EventEnvelope{}, time.Now().UTC())
 
 		if entityID := triggerPayloadEntityID(payload); entityID != "" {
-			evt = evt.WithEntityID(entityID)
+			evt = eventtest.WithEntityID(evt, entityID)
 		}
 		if preview, ok := h.previewHandlerOutcome(evt); ok {
 			h.mu.Lock()
@@ -382,12 +383,12 @@ func (h *runtimeHarness) publishRuntimeEventResult(eventType, sourceAgent string
 	if err != nil {
 		return err
 	}
-	evt := events.NewProjectionEvent(uuid.NewString(),
+	evt := eventtest.Projection(uuid.NewString(),
 		events.EventType(strings.TrimSpace(eventType)),
 		strings.TrimSpace(sourceAgent), "", raw, 0, catalogRuntimeRunID, "", events.EventEnvelope{}, time.Now().UTC())
 
 	if entityID := triggerPayloadEntityID(payload); entityID != "" {
-		evt = evt.WithEntityID(entityID)
+		evt = eventtest.WithEntityID(evt, entityID)
 	}
 	if recordOutcome {
 		if preview, ok := h.previewHandlerOutcome(evt); ok {

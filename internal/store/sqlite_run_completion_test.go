@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/google/uuid"
 )
 
@@ -24,11 +25,11 @@ func seedSQLiteNormalRunCompletionFixture(t *testing.T, store *SQLiteRuntimeStor
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	entityID := uuid.NewString()
-	if err := store.AppendEvent(ctx, events.NewProjectionEvent(eventID,
+	if err := store.AppendEvent(ctx, eventtest.WithEntityID(eventtest.Projection(eventID,
 
 		events.EventType("example.started"),
-		"test", "", json.RawMessage(`{"example":true}`), 0, runID, "", events.EventEnvelope{}, now).
-		WithEntityID(entityID)); err != nil {
+		"test", "", json.RawMessage(`{"example":true}`), 0, runID, "", events.EventEnvelope{}, now),
+		entityID)); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
 	if _, err := store.DB.ExecContext(ctx, `

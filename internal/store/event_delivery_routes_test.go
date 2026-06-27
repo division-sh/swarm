@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -16,12 +17,13 @@ func TestPostgresStore_EventDeliveryRoutesPersistNodeTargetRows(t *testing.T) {
 
 	ctx := context.Background()
 	pg := &PostgresStore{DB: db}
-	evt := events.NewProjectionEvent(uuid.NewString(),
-		events.EventType("child/output.done"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()).
-		WithTargetSet([]events.RouteIdentity{
+	evt := eventtest.WithTargetSet(eventtest.Projection(uuid.NewString(),
+		events.EventType("child/output.done"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
+		[]events.RouteIdentity{
 			{EntityID: "ent-a", FlowInstance: "child-a/inst-1"},
 			{EntityID: "ent-b", FlowInstance: "child-b/inst-1"},
 		})
+
 	if err := pg.AppendEvent(ctx, evt); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}

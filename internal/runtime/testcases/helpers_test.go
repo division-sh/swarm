@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -88,9 +89,11 @@ func previewHandler(t testing.TB, bundle *runtimecontracts.WorkflowContractBundl
 	if err != nil {
 		t.Fatalf("marshal payload: %v", err)
 	}
-	preview, err := runtimepipeline.PreviewContractHandlerExecution(context.Background(), bundle, nodeID, (events.NewProjectionEvent("evt-"+strings.ReplaceAll(eventType, ".", "-"),
+	preview, err := runtimepipeline.PreviewContractHandlerExecution(context.Background(), bundle, nodeID, eventtest.WithEntityID((eventtest.Projection("evt-"+strings.ReplaceAll(eventType, ".", "-"),
 		events.EventType(eventType),
-		"test-driver", "", rawPayload, 0, "", "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID("item-123"), state, policyOverrides)
+		"test-driver", "", rawPayload, 0, "", "", events.EventEnvelope{}, time.Now().UTC())), "item-123"),
+
+		state, policyOverrides)
 	if err != nil {
 		t.Fatalf("preview handler %s/%s: %v", nodeID, eventType, err)
 	}

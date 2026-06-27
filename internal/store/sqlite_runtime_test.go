@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -37,7 +38,7 @@ func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 
 	evtID := uuid.NewString()
-	evt := events.NewProjectionEvent(evtID,
+	evt := eventtest.Projection(evtID,
 
 		events.EventType("test.started"),
 		"agent-1", "", json.RawMessage(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
@@ -584,10 +585,10 @@ func TestSQLiteRuntimeStoreAPIIdempotencyAllowsNestedEventBusPublish(t *testing.
 	publishCalls := 0
 	publish := func(ctx context.Context) (APIIdempotencyCompletion, error) {
 		publishCalls++
-		if err := bus.Publish(ctx, (events.NewProjectionEvent(eventID,
+		if err := bus.Publish(ctx, eventtest.WithEntityID((eventtest.Projection(eventID,
 
 			events.EventType("item.received"),
-			"api.v1", "", json.RawMessage(`{"entity_id":"11111111-1111-1111-1111-111111111111","topic":"medicine"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID(entityID)); err != nil {
+			"api.v1", "", json.RawMessage(`{"entity_id":"11111111-1111-1111-1111-111111111111","topic":"medicine"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())), entityID)); err != nil {
 			return APIIdempotencyCompletion{}, err
 		}
 		response, err := json.Marshal(map[string]string{"event_id": eventID, "run_id": runID})
@@ -652,10 +653,10 @@ func TestSQLiteRuntimeStoreAPIIdempotencyFailedNestedPublishLeavesNoCompletionOr
 		Now:            time.Now().UTC(),
 	}
 	completion, replayed, err := store.WithAPIIdempotency(ctx, req, func(ctx context.Context) (APIIdempotencyCompletion, error) {
-		err := bus.Publish(ctx, (events.NewProjectionEvent(eventID,
+		err := bus.Publish(ctx, eventtest.WithEntityID((eventtest.Projection(eventID,
 
 			events.EventType("item.failed"),
-			"api.v1", "", json.RawMessage(`{"entity_id":"22222222-2222-2222-2222-222222222222"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID("22222222-2222-2222-2222-222222222222"))
+			"api.v1", "", json.RawMessage(`{"entity_id":"22222222-2222-2222-2222-222222222222"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())), "22222222-2222-2222-2222-222222222222"))
 		if err != nil {
 			return APIIdempotencyCompletion{}, err
 		}
@@ -774,10 +775,10 @@ func TestSQLiteRuntimeStoreAppendEventTxEnsuresFreshRunRow(t *testing.T) {
 
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
-	if err := store.AppendEventTx(ctx, tx, (events.NewProjectionEvent(eventID,
+	if err := store.AppendEventTx(ctx, tx, eventtest.WithEntityID((eventtest.Projection(eventID,
 
 		events.EventType("item.received"),
-		"api.v1", "", json.RawMessage(`{"entity_id":"33333333-3333-3333-3333-333333333333"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID("33333333-3333-3333-3333-333333333333")); err != nil {
+		"api.v1", "", json.RawMessage(`{"entity_id":"33333333-3333-3333-3333-333333333333"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())), "33333333-3333-3333-3333-333333333333")); err != nil {
 		t.Fatalf("AppendEventTx: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -810,10 +811,10 @@ func TestSQLiteRuntimeStoreRuntimeIngressReadDuringPublishDoesNotReenterWrite(t 
 	bus.SetRuntimeIngressDispatchGate(controller)
 
 	eventID := uuid.NewString()
-	err = bus.Publish(ctx, (events.NewProjectionEvent(eventID,
+	err = bus.Publish(ctx, eventtest.WithEntityID((eventtest.Projection(eventID,
 
 		events.EventType("item.received"),
-		"api.v1", "", []byte(`{"entity_id":"11111111-1111-1111-1111-111111111111"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID("11111111-1111-1111-1111-111111111111"))
+		"api.v1", "", []byte(`{"entity_id":"11111111-1111-1111-1111-111111111111"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())), "11111111-1111-1111-1111-111111111111"))
 	if err != nil {
 		t.Fatalf("Publish with runtime ingress gate: %v", err)
 	}
@@ -896,7 +897,7 @@ func TestSQLiteRuntimeStoreSystemNodeReceiptOwnerSettlesDelivery(t *testing.T) {
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	eventID := uuid.NewString()
-	evt := events.NewProjectionEvent(eventID,
+	evt := eventtest.Projection(eventID,
 
 		events.EventType("company.scanned"),
 		"agent-1", "", json.RawMessage(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
@@ -960,7 +961,7 @@ func TestSQLiteRuntimeStoreSystemNodeReceiptOwnerDeadLettersDelivery(t *testing.
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	eventID := uuid.NewString()
-	evt := events.NewProjectionEvent(eventID,
+	evt := eventtest.Projection(eventID,
 		events.EventType("company.scanned"),
 		"agent-1", "", json.RawMessage(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
 
@@ -1010,7 +1011,7 @@ func TestSQLiteRuntimeStoreSystemNodeReceiptOwnerFailsWithoutDeliveryAuthority(t
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	eventID := uuid.NewString()
-	evt := events.NewProjectionEvent(eventID,
+	evt := eventtest.Projection(eventID,
 
 		events.EventType("company.scanned"),
 		"agent-1", "", json.RawMessage(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
@@ -1061,7 +1062,7 @@ func TestSQLiteRuntimeStoreSystemNodeReceiptOwnerFailsWithTerminalDeliveryAuthor
 			runID := uuid.NewString()
 			ctx = runtimecorrelation.WithRunID(ctx, runID)
 			eventID := uuid.NewString()
-			evt := events.NewProjectionEvent(eventID,
+			evt := eventtest.Projection(eventID,
 
 				events.EventType("company.scanned"),
 				"agent-1", "", json.RawMessage(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
@@ -1119,7 +1120,7 @@ func TestSQLiteRuntimeStoreDeliveryReplayAndReceiptSemantics(t *testing.T) {
 	store.SetNowFnForTest(func() time.Time { return now })
 
 	eventID := uuid.NewString()
-	evt := events.NewProjectionEvent(eventID,
+	evt := eventtest.Projection(eventID,
 
 		events.EventType("test.delivery_requested"),
 		"runtime", "", json.RawMessage(`{"delivery":true}`), 0, runID, "", events.EventEnvelope{}, now)
@@ -1209,7 +1210,7 @@ func TestSQLiteRuntimeStoreDeliveryReplayAndReceiptSemantics(t *testing.T) {
 	subOtherID := uuid.NewString()
 	subNoDeliveryID := uuid.NewString()
 	subEvt := func(id string, offset time.Duration) events.Event {
-		return events.NewProjectionEvent(id,
+		return eventtest.Projection(id,
 
 			events.EventType("subscription.visible"),
 			"runtime", "", json.RawMessage(`{"subscription":true}`), 0, runID, "", events.EventEnvelope{}, now.Add(offset))
@@ -1321,10 +1322,12 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	eventID := uuid.NewString()
-	if err := store.PersistEventWithDeliveries(ctx, events.NewProjectionEvent(eventID,
+	if err := store.PersistEventWithDeliveries(ctx, eventtest.Projection(eventID,
 
 		events.EventType("trace.visible"),
-		"agent-1", "", json.RawMessage(`{"trace":true}`), 0, runID, "", events.EventEnvelope{}, now), []string{"agent-1"}); err != nil {
+		"agent-1", "", json.RawMessage(`{"trace":true}`), 0, runID, "", events.EventEnvelope{}, now),
+
+		[]string{"agent-1"}); err != nil {
 		t.Fatalf("PersistEventWithDeliveries trace event: %v", err)
 	}
 	if err := store.MarkEventDeliveryInProgress(ctx, eventID, "agent-1", lease.SessionID); err != nil {
@@ -1360,11 +1363,10 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 	}
 
 	logID := uuid.NewString()
-	if err := store.AppendEvent(ctx, events.NewProjectionEvent(logID,
+	if err := store.AppendEvent(ctx, eventtest.Projection(logID,
 
 		events.EventType("platform.runtime_log"),
-		"runtime", "", json.RawMessage(`{"log_level":"warn","message":"runtime warning","details":{"component":"scheduler","action":"session_warning","session_id":"`+lease.SessionID+`"}}`), 0, runID, "", events.EventEnvelope{}, now.Add(time.Second)),
-	); err != nil {
+		"runtime", "", json.RawMessage(`{"log_level":"warn","message":"runtime warning","details":{"component":"scheduler","action":"session_warning","session_id":"`+lease.SessionID+`"}}`), 0, runID, "", events.EventEnvelope{}, now.Add(time.Second))); err != nil {
 		t.Fatalf("AppendEvent runtime log: %v", err)
 	}
 	logs, err := store.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{RunID: runID, Level: "warn", Component: "scheduler", Limit: 10})
@@ -1504,11 +1506,10 @@ func TestSQLiteRuntimeStoreV1MailboxAPISelectedOwner(t *testing.T) {
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	eventID := uuid.NewString()
-	if err := store.AppendEvent(ctx, events.NewProjectionEvent(eventID,
+	if err := store.AppendEvent(ctx, eventtest.Projection(eventID,
 
 		events.EventType("mailbox.requested"),
-		"agent-1", "", json.RawMessage(`{"request":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC()),
-	); err != nil {
+		"agent-1", "", json.RawMessage(`{"request":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
 		t.Fatalf("AppendEvent source: %v", err)
 	}
 	entityID := uuid.NewString()

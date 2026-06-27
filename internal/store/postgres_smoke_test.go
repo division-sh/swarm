@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -112,9 +113,10 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	}
 
 	// Events + deliveries + receipts.
-	evt := (events.NewProjectionEvent(uuid.NewString(),
+	evt := eventtest.WithEntityID((eventtest.Projection(uuid.NewString(),
 		events.EventType("review.requested"),
-		"dashboard", "", json.RawMessage(`{"message":"hi"}`), 0, "", "", events.EventEnvelope{}, time.Now())).WithEntityID(entityID)
+		"dashboard", "", json.RawMessage(`{"message":"hi"}`), 0, "", "", events.EventEnvelope{}, time.Now())), entityID)
+
 	if err := pg.AppendEvent(ctx, evt); err != nil {
 		t.Fatalf("append event: %v", err)
 	}

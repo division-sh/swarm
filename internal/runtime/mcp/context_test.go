@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -54,9 +55,8 @@ func TestTurnContextRegistry_PreservesTypedRuntimeLineage(t *testing.T) {
 		Classification:      runtimecorrelation.RuntimeLineageClassificationForkLocal,
 		SelectedForkContext: true,
 	})
-	ctx = runtimebus.WithInboundEvent(ctx, events.NewProjectionEvent("4078d35c-3a8a-40ea-a5f5-01b35a9ff59a",
-		events.EventType("validation/validation.package_ready"), "", "", nil, 0, "9b06692c-353c-4479-8e92-70927f5e4937", "", events.EventEnvelope{}, time.Time{}),
-	)
+	ctx = runtimebus.WithInboundEvent(ctx, eventtest.Projection("4078d35c-3a8a-40ea-a5f5-01b35a9ff59a",
+		events.EventType("validation/validation.package_ready"), "", "", nil, 0, "9b06692c-353c-4479-8e92-70927f5e4937", "", events.EventEnvelope{}, time.Time{}))
 
 	token := registry.RegisterTurnContext(ctx)
 	if token == "" {

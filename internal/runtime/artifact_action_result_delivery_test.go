@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -100,7 +101,7 @@ func TestArtifactRepoCommitResultEventsFlowThroughDurableCallbackDelivery(t *tes
 			if err != nil {
 				t.Fatalf("marshal request payload: %v", err)
 			}
-			requestEvent := events.NewProjectionEvent(
+			requestEvent := eventtest.WithFlowInstance(eventtest.WithEntityID(eventtest.Projection(
 				tc.requestEventID,
 				events.EventType("repo-scaffold/inst-1/repo_scaffold.repo_commit_requested"),
 				"test",
@@ -110,8 +111,10 @@ func TestArtifactRepoCommitResultEventsFlowThroughDurableCallbackDelivery(t *tes
 				templateInstanceDeliveryRunID,
 				"",
 				events.EventEnvelope{},
-				time.Now().UTC(),
-			).WithEntityID(artifactActionResultEntityID).WithFlowInstance("repo-scaffold/inst-1")
+				time.Now().UTC()),
+				artifactActionResultEntityID),
+				"repo-scaffold/inst-1")
+
 			if err := bus.Publish(ctx, requestEvent); err != nil {
 				t.Fatalf("Publish request event: %v", err)
 			}
@@ -255,7 +258,7 @@ func TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery(
 			if err != nil {
 				t.Fatalf("marshal request payload: %v", err)
 			}
-			requestEvent := events.NewProjectionEvent(
+			requestEvent := eventtest.WithFlowInstance(eventtest.WithEntityID(eventtest.Projection(
 				tc.requestEventID,
 				events.EventType("repo-scaffold/repo_scaffold.repo_commit_requested"),
 				"test",
@@ -265,8 +268,10 @@ func TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery(
 				templateInstanceDeliveryRunID,
 				"",
 				events.EventEnvelope{},
-				time.Now().UTC(),
-			).WithEntityID(artifactActionResultEntityID).WithFlowInstance(tc.requestFlowPath)
+				time.Now().UTC()),
+				artifactActionResultEntityID),
+				tc.requestFlowPath)
+
 			if err := bus.Publish(ctx, requestEvent); err != nil {
 				t.Fatalf("Publish request event: %v", err)
 			}

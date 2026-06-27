@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"time"
 )
 
@@ -53,7 +54,7 @@ func TestEventBusStandalonePlatformConvergenceAlsoProbesNormalRunCompletion(t *t
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	evt := events.NewProjectionEvent("event-2", events.EventType("platform.boot"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
+	evt := eventtest.Projection("event-2", events.EventType("platform.boot"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
 	if err := eb.convergeStandaloneRuntimePlatformRun(context.Background(), evt); err != nil {
 		t.Fatalf("convergeStandaloneRuntimePlatformRun: %v", err)
 	}

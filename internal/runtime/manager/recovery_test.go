@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -245,7 +246,7 @@ func TestRecoverRestoresSelectedContractRouteRecoveriesFromForkLocalOwner(t *tes
 		t.Fatalf("missing selected route recovery recipient guard for %s", forkRunID)
 	}
 	guard.ExpectForkEvent("fork-event-1", "source-event-1")
-	evt := events.NewProjectionEvent("fork-event-1",
+	evt := eventtest.Projection("fork-event-1",
 		events.EventType("work.ready"),
 		selectedContractExecutionOwner, "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
 
@@ -504,7 +505,7 @@ func TestRecover_UsesCanonicalPipelineReplayAftermathDiagnostics(t *testing.T) {
 	parentID := "evt-parent"
 	bus := &recoveryTestBus{
 		replayable: []events.PersistedReplayEvent{{
-			Event: events.NewProjectionEvent(childID,
+			Event: eventtest.Projection(childID,
 				events.EventType("system.recover"), "", "", nil, 0, "run-1",
 				parentID, events.EventEnvelope{}, time.Now().UTC()),
 		}},
@@ -541,11 +542,11 @@ func TestRecoverWithStartupReplayDiagnostics_LogsCanonicalManagerReplayAftermath
 		},
 		pending: map[string][]events.Event{
 			"agent-a": {
-				events.NewProjectionEvent("evt-replay", events.EventType("system.recover.ok"), "", "", nil, 0, "", "", events.EventEnvelope{}, now.Add(-5*time.Minute)),
-				events.NewProjectionEvent("evt-receipt", events.EventType("system.recover.receipt"), "", "", nil, 0, "", "", events.EventEnvelope{}, now.Add(-4*time.Minute)),
-				events.NewProjectionEvent("evt-inflight", events.EventType("system.recover.inflight"), "", "", nil, 0, "", "", events.EventEnvelope{}, now.Add(-3*time.Minute)),
-				events.NewProjectionEvent("evt-leased", events.EventType("system.recover.leased"), "", "", nil, 0, "", "", events.EventEnvelope{}, now.Add(-2*time.Minute)),
-				events.NewProjectionEvent("evt-drop", events.EventType("system.recover.drop"), "", "", nil, 0, "", "", events.EventEnvelope{}, now.Add(-time.Minute)),
+				eventtest.Projection("evt-replay", events.EventType("system.recover.ok"), "", "", nil, 0, "", "", events.EventEnvelope{}, now.Add(-5*time.Minute)),
+				eventtest.Projection("evt-receipt", events.EventType("system.recover.receipt"), "", "", nil, 0, "", "", events.EventEnvelope{}, now.Add(-4*time.Minute)),
+				eventtest.Projection("evt-inflight", events.EventType("system.recover.inflight"), "", "", nil, 0, "", "", events.EventEnvelope{}, now.Add(-3*time.Minute)),
+				eventtest.Projection("evt-leased", events.EventType("system.recover.leased"), "", "", nil, 0, "", "", events.EventEnvelope{}, now.Add(-2*time.Minute)),
+				eventtest.Projection("evt-drop", events.EventType("system.recover.drop"), "", "", nil, 0, "", "", events.EventEnvelope{}, now.Add(-time.Minute)),
 			},
 		},
 		receipts: map[string]EventReceipt{
@@ -612,7 +613,7 @@ func TestReplayAgentBacklog_DoesNotEmitStartupAftermathOutsideStartupRecovery(t 
 	store := &startupReplayTestStore{
 		pending: map[string][]events.Event{
 			"agent-a": {
-				events.NewProjectionEvent("evt-drop", events.EventType("system.recover.drop"), "", "", nil, 0, "", "", events.EventEnvelope{}, now.Add(-time.Minute)),
+				eventtest.Projection("evt-drop", events.EventType("system.recover.drop"), "", "", nil, 0, "", "", events.EventEnvelope{}, now.Add(-time.Minute)),
 			},
 		},
 	}
@@ -648,8 +649,8 @@ func TestReplayBacklogReportsDirectReplayCount(t *testing.T) {
 	store := &startupReplayTestStore{
 		pending: map[string][]events.Event{
 			"agent-a": {
-				events.NewProjectionEvent("evt-1", events.EventType("system.recover.ok"), "", "", nil, 0, "", "", events.EventEnvelope{}, now.Add(-2*time.Minute)),
-				events.NewProjectionEvent("evt-2", events.EventType("system.recover.ok"), "", "", nil, 0, "", "", events.EventEnvelope{}, now.Add(-time.Minute)),
+				eventtest.Projection("evt-1", events.EventType("system.recover.ok"), "", "", nil, 0, "", "", events.EventEnvelope{}, now.Add(-2*time.Minute)),
+				eventtest.Projection("evt-2", events.EventType("system.recover.ok"), "", "", nil, 0, "", "", events.EventEnvelope{}, now.Add(-time.Minute)),
 			},
 		},
 	}

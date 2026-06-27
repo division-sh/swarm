@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -209,7 +210,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughJS
 		t.Fatalf("missing recovered recipient guard for fork %s", forkRunID)
 	}
 	guard.ExpectForkEvent("00000000-0000-0000-0000-000000000991", eventID)
-	evt := events.NewProjectionEvent("00000000-0000-0000-0000-000000000991",
+	evt := eventtest.Projection("00000000-0000-0000-0000-000000000991",
 		events.EventType("item.received"),
 		RunForkSelectedContractExecutionOwner, "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
 
@@ -276,7 +277,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughBu
 		t.Fatalf("missing recovered recipient guard for fork %s", forkRunID)
 	}
 	guard.ExpectForkEvent("00000000-0000-0000-0000-000000000992", eventID)
-	evt := events.NewProjectionEvent("00000000-0000-0000-0000-000000000992",
+	evt := eventtest.Projection("00000000-0000-0000-0000-000000000992",
 		events.EventType("item.received"),
 		RunForkSelectedContractExecutionOwner, "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
 

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	"github.com/division-sh/swarm/internal/testutil"
 )
@@ -34,10 +35,9 @@ func TestRuntimeIngressStatePersistsTypedTransitions(t *testing.T) {
 	}
 	pausedAt := state.UpdatedAt
 	pausedEventID := "11111111-1111-1111-1111-111111111111"
-	if err := pg.AppendEvent(ctx, events.NewProjectionEvent(pausedEventID,
+	if err := pg.AppendEvent(ctx, eventtest.Projection(pausedEventID,
 		events.EventType("platform.paused"),
-		"runtime", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, pausedAt),
-	); err != nil {
+		"runtime", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, pausedAt)); err != nil {
 		t.Fatalf("AppendEvent(paused): %v", err)
 	}
 	if ok, err := pg.SetRuntimeIngressTransitionEvent(ctx, runtimeingress.StatusPaused, pausedEventID, pausedAt); err != nil {
@@ -79,10 +79,9 @@ func TestRuntimeIngressStatePersistsTypedTransitions(t *testing.T) {
 		t.Fatalf("state after stale event update = %#v", state)
 	}
 	runningEventID := "33333333-3333-3333-3333-333333333333"
-	if err := pg.AppendEvent(ctx, events.NewProjectionEvent(runningEventID,
+	if err := pg.AppendEvent(ctx, eventtest.Projection(runningEventID,
 		events.EventType("platform.resumed"),
-		"runtime", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, runningAt),
-	); err != nil {
+		"runtime", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, runningAt)); err != nil {
 		t.Fatalf("AppendEvent(running): %v", err)
 	}
 	if ok, err := pg.SetRuntimeIngressTransitionEvent(ctx, runtimeingress.StatusRunning, runningEventID, runningAt); err != nil {

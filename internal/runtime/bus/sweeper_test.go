@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
@@ -108,8 +109,8 @@ func (l sweeperClaimLease) Release(context.Context) error {
 func TestSweepUndispatchedUsesPersistedDeliveryRecipients(t *testing.T) {
 	store := &sweeperTestStore{
 		events: []events.PersistedReplayEvent{
-			{Event: (events.NewProjectionEvent("evt-1",
-				events.EventType("custom.emitted"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID("ent-1")},
+			{Event: eventtest.WithEntityID((eventtest.Projection("evt-1",
+				events.EventType("custom.emitted"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())), "ent-1")},
 		},
 		deliveries: map[string][]string{"evt-1": {"agent-a"}},
 		scopes:     map[string]runtimereplayclaim.CommittedReplayScope{"evt-1": runtimereplayclaim.CommittedReplayScopeSubscribed},
@@ -139,8 +140,8 @@ func TestSweepUndispatchedUsesPersistedDeliveryRecipients(t *testing.T) {
 func TestSweepUndispatched_UsesAuthoritativeEmptyFanOutWithoutSubscribedFallback(t *testing.T) {
 	store := &sweeperTestStore{
 		events: []events.PersistedReplayEvent{
-			{Event: (events.NewProjectionEvent("evt-2",
-				events.EventType("custom.routed"), "", "", []byte(`{"entity_id":"ent-2"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID("ent-2")},
+			{Event: eventtest.WithEntityID((eventtest.Projection("evt-2",
+				events.EventType("custom.routed"), "", "", []byte(`{"entity_id":"ent-2"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())), "ent-2")},
 		},
 		deliveries: map[string][]string{},
 		scopes:     map[string]runtimereplayclaim.CommittedReplayScope{"evt-2": runtimereplayclaim.CommittedReplayScopeDirect},
@@ -167,8 +168,8 @@ func TestSweepUndispatched_UsesAuthoritativeEmptyFanOutWithoutSubscribedFallback
 func TestSweepUndispatched_ReplaysSubscribedInternalOnlyUsingReplayScope(t *testing.T) {
 	store := &sweeperTestStore{
 		events: []events.PersistedReplayEvent{
-			{Event: (events.NewProjectionEvent("evt-internal-only",
-				events.EventType("custom.internal"), "", "", []byte(`{"entity_id":"ent-internal"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID("ent-internal")},
+			{Event: eventtest.WithEntityID((eventtest.Projection("evt-internal-only",
+				events.EventType("custom.internal"), "", "", []byte(`{"entity_id":"ent-internal"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())), "ent-internal")},
 		},
 		deliveries: map[string][]string{},
 		scopes:     map[string]runtimereplayclaim.CommittedReplayScope{"evt-internal-only": runtimereplayclaim.CommittedReplayScopeSubscribed},
@@ -198,8 +199,8 @@ func TestSweepUndispatched_ReplaysSubscribedInternalOnlyUsingReplayScope(t *test
 func TestSweepUndispatched_ReplaysSubscribedMixedRecipientsUsingReplayScope(t *testing.T) {
 	store := &sweeperTestStore{
 		events: []events.PersistedReplayEvent{
-			{Event: (events.NewProjectionEvent("evt-mixed",
-				events.EventType("custom.mixed"), "", "", []byte(`{"entity_id":"ent-mixed"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID("ent-mixed")},
+			{Event: eventtest.WithEntityID((eventtest.Projection("evt-mixed",
+				events.EventType("custom.mixed"), "", "", []byte(`{"entity_id":"ent-mixed"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())), "ent-mixed")},
 		},
 		deliveries: map[string][]string{"evt-mixed": {"agent-a"}},
 		scopes:     map[string]runtimereplayclaim.CommittedReplayScope{"evt-mixed": runtimereplayclaim.CommittedReplayScopeSubscribed},
@@ -231,8 +232,8 @@ func TestSweepUndispatched_ReplaysSubscribedMixedRecipientsUsingReplayScope(t *t
 func TestSweepUndispatched_DirectScopeDoesNotBroadenToCurrentInternalSubscribers(t *testing.T) {
 	store := &sweeperTestStore{
 		events: []events.PersistedReplayEvent{
-			{Event: (events.NewProjectionEvent("evt-direct-mixed",
-				events.EventType("custom.direct"), "", "", []byte(`{"entity_id":"ent-direct"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID("ent-direct")},
+			{Event: eventtest.WithEntityID((eventtest.Projection("evt-direct-mixed",
+				events.EventType("custom.direct"), "", "", []byte(`{"entity_id":"ent-direct"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())), "ent-direct")},
 		},
 		deliveries: map[string][]string{"evt-direct-mixed": {"agent-a"}},
 		scopes: map[string]runtimereplayclaim.CommittedReplayScope{
@@ -263,8 +264,8 @@ func TestSweepUndispatched_DirectScopeDoesNotBroadenToCurrentInternalSubscribers
 func TestSweepUndispatched_DirectEmptyManifestDoesNotBroadenToCurrentInternalSubscribers(t *testing.T) {
 	store := &sweeperTestStore{
 		events: []events.PersistedReplayEvent{
-			{Event: (events.NewProjectionEvent("evt-direct-empty",
-				events.EventType("custom.direct.empty"), "", "", []byte(`{"entity_id":"ent-direct-empty"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID("ent-direct-empty")},
+			{Event: eventtest.WithEntityID((eventtest.Projection("evt-direct-empty",
+				events.EventType("custom.direct.empty"), "", "", []byte(`{"entity_id":"ent-direct-empty"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())), "ent-direct-empty")},
 		},
 		deliveries: map[string][]string{},
 		scopes: map[string]runtimereplayclaim.CommittedReplayScope{
@@ -294,14 +295,14 @@ func TestSweepUndispatched_SkipsMalformedReplayRowsAndContinues(t *testing.T) {
 	store := &sweeperTestStore{
 		events: []events.PersistedReplayEvent{
 			{
-				Event: events.NewProjectionEvent("evt-bad",
+				Event: eventtest.Projection("evt-bad",
 					events.EventType("custom.bad"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 
 				ReplayError: "missing canonical run_id",
 			},
 			{
-				Event: (events.NewProjectionEvent("evt-good",
-					events.EventType("custom.good"), "", "", []byte(`{"entity_id":"ent-good"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID("ent-good"),
+				Event: eventtest.WithEntityID((eventtest.Projection("evt-good",
+					events.EventType("custom.good"), "", "", []byte(`{"entity_id":"ent-good"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())), "ent-good"),
 			},
 		},
 		deliveries: map[string][]string{"evt-good": {"agent-good"}},
@@ -338,12 +339,10 @@ func TestSweepUndispatched_SkipsMalformedReplayRowsAndContinues(t *testing.T) {
 func TestSweepUndispatched_TerminallyMarksMissingCommittedReplayScopeAndContinues(t *testing.T) {
 	store := &sweeperTestStore{
 		events: []events.PersistedReplayEvent{
-			{Event: events.NewProjectionEvent("evt-markerless",
-				events.EventType("custom.markerless"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
-			},
-			{Event: events.NewProjectionEvent("evt-good-after-markerless",
-				events.EventType("custom.good"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
-			},
+			{Event: eventtest.Projection("evt-markerless",
+				events.EventType("custom.markerless"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())},
+			{Event: eventtest.Projection("evt-good-after-markerless",
+				events.EventType("custom.good"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())},
 		},
 		deliveries: map[string][]string{
 			"evt-markerless":            {"agent-missing"},
@@ -399,8 +398,8 @@ func TestSweepUndispatched_TerminallyMarksMissingCommittedReplayScopeAndContinue
 func TestSweepUndispatched_ClaimsReplayOwnershipBeforeDispatch(t *testing.T) {
 	store := &sweeperTestStore{
 		events: []events.PersistedReplayEvent{
-			{Event: (events.NewProjectionEvent("evt-claim",
-				events.EventType("custom.claimed"), "", "", []byte(`{"entity_id":"ent-claim"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID("ent-claim")},
+			{Event: eventtest.WithEntityID((eventtest.Projection("evt-claim",
+				events.EventType("custom.claimed"), "", "", []byte(`{"entity_id":"ent-claim"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())), "ent-claim")},
 		},
 		deliveries:  map[string][]string{"evt-claim": {"agent-claim"}},
 		scopes:      map[string]runtimereplayclaim.CommittedReplayScope{"evt-claim": runtimereplayclaim.CommittedReplayScopeSubscribed},
@@ -444,9 +443,8 @@ func TestSweepUndispatched_ClaimsReplayOwnershipBeforeDispatch(t *testing.T) {
 func TestSweepUndispatched_FailsClosedWithoutReplayClaimOwner(t *testing.T) {
 	store := &sweeperMissingClaimStore{
 		events: []events.PersistedReplayEvent{
-			{Event: events.NewProjectionEvent("evt-claim-missing",
-				events.EventType("custom.claimed"), "", "", []byte(`{"entity_id":"ent-claim"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
-			},
+			{Event: eventtest.Projection("evt-claim-missing",
+				events.EventType("custom.claimed"), "", "", []byte(`{"entity_id":"ent-claim"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())},
 		},
 		deliveries: map[string][]string{"evt-claim-missing": {"agent-a"}},
 	}

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -70,7 +71,7 @@ func TestArtifactRepoResultEventPreservesScopedProducerSourceRoute(t *testing.T)
 		t.Run(tc.name, func(t *testing.T) {
 			entityID := "ent-repo"
 			parentEnvelope := events.EventEnvelope{EntityID: "upstream-ent", FlowInstance: tc.inboundFlowPath}
-			parent := events.NewProjectionEvent(
+			parent := eventtest.Projection(
 				"evt-parent",
 				"repo_scaffold.repo_commit_requested",
 				"workflow-runtime",
@@ -80,19 +81,20 @@ func TestArtifactRepoResultEventPreservesScopedProducerSourceRoute(t *testing.T)
 				"run-1",
 				"",
 				parentEnvelope,
-				time.Unix(1_700_000_000, 0).UTC(),
-			)
+				time.Unix(1_700_000_000, 0).UTC())
+
 			if tc.stateFlowPath != "" || !tc.producerRoute.Empty() || !tc.targetRoute.Empty() {
-				parent = parent.WithSourceRoute(events.RouteIdentity{
+				parent = eventtest.WithSourceRoute(parent, events.RouteIdentity{
 					FlowID:       "upstream",
 					FlowInstance: "upstream/inst-0",
 					EntityID:     "upstream-ent",
 				})
+
 			}
 			if !tc.targetRoute.Empty() {
-				parent = parent.WithTargetRoute(tc.targetRoute)
+				parent = eventtest.WithTargetRoute(parent, tc.targetRoute)
 			} else if tc.inboundFlowPath != "" {
-				parent = parent.WithFlowInstance(tc.inboundFlowPath)
+				parent = eventtest.WithFlowInstance(parent, tc.inboundFlowPath)
 			}
 			stateMetadata := map[string]any{}
 			if tc.stateFlowPath != "" {
@@ -210,7 +212,7 @@ func TestActionResultProducerRouteCoversCurrentRouteShapes(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			evt := events.NewProjectionEvent(
+			evt := eventtest.Projection(
 				"evt-parent",
 				"repo_scaffold.repo_commit_requested",
 				"workflow-runtime",
@@ -220,13 +222,13 @@ func TestActionResultProducerRouteCoversCurrentRouteShapes(t *testing.T) {
 				"run-1",
 				"",
 				events.EventEnvelope{},
-				time.Unix(1_700_000_000, 0).UTC(),
-			)
+				time.Unix(1_700_000_000, 0).UTC())
+
 			if tc.eventFlowPath != "" {
-				evt = evt.WithFlowInstance(tc.eventFlowPath)
+				evt = eventtest.WithFlowInstance(evt, tc.eventFlowPath)
 			}
 			if len(tc.targetSet) > 0 {
-				evt = evt.WithTargetSet(tc.targetSet)
+				evt = eventtest.WithTargetSet(evt, tc.targetSet)
 			}
 			stateMetadata := map[string]any{}
 			if tc.stateFlowPath != "" {

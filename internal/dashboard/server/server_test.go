@@ -16,6 +16,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	builderpkg "github.com/division-sh/swarm/internal/builder"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimeagents "github.com/division-sh/swarm/internal/runtime/agents"
@@ -1081,7 +1082,7 @@ func (e *directiveSurfaceToolExecutor) Execute(ctx context.Context, name string,
 	e.executed = append(e.executed, strings.TrimSpace(name))
 	if strings.HasPrefix(strings.TrimSpace(name), "emit_") {
 		if rec, ok := runtimebus.EmittedEventsRecorderFromContext(ctx); ok && rec != nil {
-			rec.Append(events.NewProjectionEvent("", events.EventType(strings.TrimPrefix(strings.TrimSpace(name), "emit_")), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+			rec.Append(eventtest.Projection("", events.EventType(strings.TrimPrefix(strings.TrimSpace(name), "emit_")), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 		}
 		return map[string]any{"status": "published"}, nil
 	}
@@ -3878,14 +3879,15 @@ func TestHandler_RunEventReplayUsesCanonicalPersistedRunDebugOwner(t *testing.T)
 	t.Skip("legacy dashboard/Builder operator endpoint retired under #731; canonical v1 owner tests cover this behavior")
 	now := time.Unix(1700000000, 0).UTC()
 	runID := "run_replay_001"
-	rootEvent := (events.NewProjectionEvent("evt-root",
+	rootEvent := eventtest.WithEntityID((eventtest.Projection("evt-root",
 
 		events.EventType("scan.requested"),
-		"builder", "", json.RawMessage(`{"topic":"sample"}`), 0, runID, "", events.EventEnvelope{}, now)).WithEntityID(runID)
+		"builder", "", json.RawMessage(`{"topic":"sample"}`), 0, runID, "", events.EventEnvelope{}, now)), runID)
+
 	storeStub := &stubBuilderRunStore{
 		events: []events.Event{
 			rootEvent,
-			events.NewProjectionEvent("evt-log", events.EventType("platform.runtime_log"), "runtime", "", json.RawMessage(`{"log_level":"warn","message":"runtime log","details":{"component":"scheduler","action":"checkpoint","error":"boom"}}`), 0, runID, "", events.EventEnvelope{}, now.Add(2*time.Second)),
+			eventtest.Projection("evt-log", events.EventType("platform.runtime_log"), "runtime", "", json.RawMessage(`{"log_level":"warn","message":"runtime log","details":{"component":"scheduler","action":"checkpoint","error":"boom"}}`), 0, runID, "", events.EventEnvelope{}, now.Add(2*time.Second)),
 		},
 		snapshots: map[string]runtimebus.RunLifecycleSnapshot{
 			runID: {
@@ -4117,11 +4119,10 @@ func TestHandler_RunEventStreamPreservesCanonicalRuntimeLogWithoutEntityID(t *te
 	}
 
 	logPayload := json.RawMessage(`{"log_level":"warn","message":"runtime log","details":{"component":"scheduler","action":"canonical-owner","error":"boom"}}`)
-	if err := storeStub.AppendEvent(context.Background(), events.NewProjectionEvent("evt-runtime-log",
+	if err := storeStub.AppendEvent(context.Background(), eventtest.Projection("evt-runtime-log",
 
 		events.EventType("platform.runtime_log"),
-		"runtime", "", logPayload, 0, runID, "", events.EventEnvelope{}, now),
-	); err != nil {
+		"runtime", "", logPayload, 0, runID, "", events.EventEnvelope{}, now)); err != nil {
 		t.Fatalf("append canonical runtime log: %v", err)
 	}
 

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -18,9 +19,10 @@ func TestRecordDeadLetter_PersistsAndDedupes(t *testing.T) {
 	ctx := context.Background()
 
 	entityID := uuid.NewString()
-	evt := (events.NewProjectionEvent(uuid.NewString(),
+	evt := eventtest.WithEntityID((eventtest.Projection(uuid.NewString(),
 		"deadletter.test",
-		"runtime", "", []byte(`{"x":1}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID(entityID)
+		"runtime", "", []byte(`{"x":1}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())), entityID)
+
 	if err := pg.AppendEvent(ctx, evt); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
@@ -63,7 +65,7 @@ func TestRecordDeadLetter_AllowsNonUUIDEntityIDViaSourceEventPayload(t *testing.
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
-	evt := events.NewProjectionEvent(uuid.NewString(),
+	evt := eventtest.Projection(uuid.NewString(),
 		"deadletter.test",
 		"runtime", "", []byte(`{"entity_id":"ent-001","x":1}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
@@ -105,9 +107,10 @@ func TestRecordDeadLetter_PersistsTargetResolutionFailureContext(t *testing.T) {
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
-	evt := (events.NewProjectionEvent(uuid.NewString(),
+	evt := eventtest.WithTargetRoute((eventtest.Projection(uuid.NewString(),
 		"pin.output",
-		"runtime", "", []byte(`{"x":1}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())).WithTargetRoute(events.RouteIdentity{EntityID: uuid.NewString(), FlowInstance: "flow/target"})
+		"runtime", "", []byte(`{"x":1}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())), events.RouteIdentity{EntityID: uuid.NewString(), FlowInstance: "flow/target"})
+
 	if err := pg.AppendEvent(ctx, evt); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}

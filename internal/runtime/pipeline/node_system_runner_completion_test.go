@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -64,8 +65,8 @@ func TestSystemNodeRunner_MarkProcessedSettlesNodeDeliveryAndTriggersNormalRunCo
 		return nil
 	}, func(context.Context) (bool, error) { return true, nil })
 
-	runner.ProcessEventForTest(ctx, (events.NewProjectionEvent(eventID,
-		"example.started", "", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID(entityID))
+	runner.ProcessEventForTest(ctx, eventtest.WithEntityID((eventtest.Projection(eventID,
+		"example.started", "", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())), entityID))
 
 	if !handlerCalled {
 		t.Fatal("handler was not called")
@@ -133,9 +134,10 @@ func TestSystemNodeRunner_TargetSetSameNodeSettlesEachTargetDelivery(t *testing.
 		return nil
 	}, func(context.Context) (bool, error) { return true, nil })
 
-	base := events.NewProjectionEvent(eventID,
+	base := eventtest.Projection(eventID,
 		"worker/work.assign", "", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
-	runner.ProcessEventForTest(ctx, base.WithTargetRoute(targetOne))
+
+	runner.ProcessEventForTest(ctx, eventtest.WithTargetRoute(base, targetOne))
 	if got := loadSystemNodeCompletionTargetDeliveryStatus(t, db, eventID, "task-handler", targetOne); got != "delivered" {
 		t.Fatalf("target one status = %q, want delivered", got)
 	}
@@ -143,7 +145,7 @@ func TestSystemNodeRunner_TargetSetSameNodeSettlesEachTargetDelivery(t *testing.
 		t.Fatalf("target two status after first delivery = %q, want pending", got)
 	}
 
-	runner.ProcessEventForTest(ctx, base.WithTargetRoute(targetTwo))
+	runner.ProcessEventForTest(ctx, eventtest.WithTargetRoute(base, targetTwo))
 	if got := loadSystemNodeCompletionTargetDeliveryStatus(t, db, eventID, "task-handler", targetTwo); got != "delivered" {
 		t.Fatalf("target two status = %q, want delivered", got)
 	}
@@ -200,9 +202,10 @@ func TestSystemNodeRunner_TargetSetSameNodeFailureKeepsSiblingPending(t *testing
 		return 0
 	})
 
-	base := events.NewProjectionEvent(eventID,
+	base := eventtest.Projection(eventID,
 		"worker/work.assign", "", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
-	runner.ProcessEventForTest(ctx, base.WithTargetRoute(targetOne))
+
+	runner.ProcessEventForTest(ctx, eventtest.WithTargetRoute(base, targetOne))
 
 	if attempts != 2 {
 		t.Fatalf("attempts = %d, want 2", attempts)
@@ -234,9 +237,10 @@ func TestSystemNodeRunner_TargetSetSameNodeDeadLetterKeepsSiblingExecutable(t *t
 	}, func(context.Context) (bool, error) { return true, nil })
 	failingRunner.SetRetryPolicyForTest(1, func(int) time.Duration { return 0 })
 
-	base := events.NewProjectionEvent(eventID,
+	base := eventtest.Projection(eventID,
 		"worker/work.assign", "", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
-	failingRunner.ProcessEventForTest(ctx, base.WithTargetRoute(targetOne))
+
+	failingRunner.ProcessEventForTest(ctx, eventtest.WithTargetRoute(base, targetOne))
 
 	targetOneDelivery := loadSystemNodeCompletionTargetDelivery(t, db, eventID, "task-handler", targetOne)
 	if targetOneDelivery.Status != "dead_letter" || targetOneDelivery.Reason != "retry_exhausted" || targetOneDelivery.RetryCount != 1 || targetOneDelivery.LastError == "" {
@@ -251,7 +255,7 @@ func TestSystemNodeRunner_TargetSetSameNodeDeadLetterKeepsSiblingExecutable(t *t
 	}, func(context.Context, events.Event) error {
 		return nil
 	}, func(context.Context) (bool, error) { return true, nil })
-	successRunner.ProcessEventForTest(ctx, base.WithTargetRoute(targetTwo))
+	successRunner.ProcessEventForTest(ctx, eventtest.WithTargetRoute(base, targetTwo))
 	if got := loadSystemNodeCompletionTargetDeliveryStatus(t, db, eventID, "task-handler", targetTwo); got != "delivered" {
 		t.Fatalf("target two status after target one dead-letter = %q, want delivered", got)
 	}
@@ -364,8 +368,8 @@ func TestSystemNodeRunnerLifecycleProbeEmitsHandlerBoundaries(t *testing.T) {
 	}, func(context.Context) (bool, error) { return true, nil })
 	runner.SetTestLifecycleProbe(probe)
 
-	runner.ProcessEventForTest(ctx, (events.NewProjectionEvent(eventID,
-		"example.started", "", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID(entityID))
+	runner.ProcessEventForTest(ctx, eventtest.WithEntityID((eventtest.Projection(eventID,
+		"example.started", "", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())), entityID))
 
 	waitCtx, cancelWait := context.WithTimeout(ctx, time.Second)
 	defer cancelWait()
@@ -450,8 +454,8 @@ func TestSystemNodeRunner_RetryableFailureWritesFailedBeforeRetry(t *testing.T) 
 		return 0
 	})
 
-	runner.ProcessEventForTest(ctx, (events.NewProjectionEvent(eventID,
-		"example.started", "", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID(entityID))
+	runner.ProcessEventForTest(ctx, eventtest.WithEntityID((eventtest.Projection(eventID,
+		"example.started", "", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())), entityID))
 
 	if attempts != 2 {
 		t.Fatalf("attempts = %d, want 2", attempts)
@@ -491,8 +495,8 @@ func TestSystemNodeRunner_RetryableFailureExhaustsConfiguredRetryLimit(t *testin
 	}, func(context.Context) (bool, error) { return true, nil })
 	runner.SetRetryPolicyForTest(DefaultSystemNodeRetryLimit, func(int) time.Duration { return 0 })
 
-	runner.ProcessEventForTest(ctx, (events.NewProjectionEvent(eventID,
-		"example.started", "", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())).WithEntityID(entityID))
+	runner.ProcessEventForTest(ctx, eventtest.WithEntityID((eventtest.Projection(eventID,
+		"example.started", "", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())), entityID))
 
 	if attempts != DefaultSystemNodeRetryLimit {
 		t.Fatalf("attempts = %d, want configured retry limit %d", attempts, DefaultSystemNodeRetryLimit)

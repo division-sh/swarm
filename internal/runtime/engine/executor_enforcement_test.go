@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
@@ -108,7 +109,7 @@ func TestExecutor_RejectsInvalidAdvancesToTransition(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    events.NewProjectionEvent("evt-1", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
+		Event:    eventtest.Projection("evt-1", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			AdvancesTo: "unreachable_state",
 		},
@@ -155,7 +156,7 @@ func TestExecutor_GuardBlocksTransitionForTerminalState(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    events.NewProjectionEvent("evt-1", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
+		Event:    eventtest.Projection("evt-1", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Guard:      &runtimecontracts.GuardSpec{ID: "not_in_terminal_state"},
 			AdvancesTo: "reopened",
@@ -195,7 +196,7 @@ func TestExecutor_CELGuardEvaluatesAgainstEntityState(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    events.NewProjectionEvent("evt-1", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
+		Event:    eventtest.Projection("evt-1", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Guard: &runtimecontracts.GuardSpec{
 				Check:  "entity.score >= 75",
@@ -215,7 +216,7 @@ func TestExecutor_CELGuardEvaluatesAgainstEntityState(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    events.NewProjectionEvent("evt-2", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
+		Event:    eventtest.Projection("evt-2", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Guard: &runtimecontracts.GuardSpec{
 				Check:  "entity.score >= 75",
@@ -271,7 +272,7 @@ func TestExecutor_AccumulateOnTimeoutAppliesRule(t *testing.T) {
 	result, err := exec.Execute(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
-		Event: events.NewProjectionEvent("timeout-1",
+		Event: eventtest.Projection("timeout-1",
 			events.EventType("accumulate.timeout"), "", "", mustEncodeJSON(t, map[string]any{
 				"timer_handle": map[string]any{
 					"kind": "accumulation_timeout",
@@ -341,7 +342,7 @@ func TestExecutor_OnCompleteRuleComputeAppliesValue(t *testing.T) {
 	result, err := exec.Execute(context.Background(), ExecutionRequest{
 		EntityID: "ent-1",
 		NodeID:   "node-1",
-		Event: events.NewProjectionEvent("evt-1",
+		Event: eventtest.Projection("evt-1",
 			"item.evaluated", "", "", json.RawMessage(`{"entity_id":"ent-1","score":80}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 
 		Handler: runtimecontracts.SystemNodeEventHandler{
@@ -404,7 +405,7 @@ func TestExecutor_AccumulationDeduplicatesRepeatedEvent(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event: events.NewProjectionEvent("evt-1",
+		Event: eventtest.Projection("evt-1",
 			"task.completed", "", "", json.RawMessage(`{"item_id":"item-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 
 		Handler: runtimecontracts.SystemNodeEventHandler{

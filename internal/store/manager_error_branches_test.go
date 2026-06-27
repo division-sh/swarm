@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -77,10 +78,9 @@ func TestPostgresStore_Manager_ErrorBranches(t *testing.T) {
 		Status: "active", HiredBy: "t", StartedAt: time.Now(),
 	})
 	evtID := uuid.NewString()
-	if err := pg.AppendEvent(ctx, events.NewProjectionEvent(evtID,
+	if err := pg.AppendEvent(ctx, eventtest.Projection(evtID,
 		"test.event",
-		"tester", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now()),
-	); err != nil {
+		"tester", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now())); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
 	if err := pg.InsertEventDeliveries(ctx, evtID, []string{aid}); err != nil {
