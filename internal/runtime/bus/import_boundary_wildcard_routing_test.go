@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -40,14 +41,14 @@ func TestImportBoundaryWildcardScopesImportedPackageToOwnSubtreeByDefault(t *tes
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	local := events.NewProjectionEvent("evt-worker-local", "worker/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+	local := eventtest.RootIngress("evt-worker-local", "worker/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 	if err := eb.Publish(context.Background(), local); err != nil {
 		t.Fatalf("Publish local: %v", err)
 	}
 	if got := store.deliveries["evt-worker-local"]; len(got) != 1 || got[0] != "worker-listener" {
 		t.Fatalf("local persisted deliveries = %#v, want worker-listener", got)
 	}
-	sibling := events.NewProjectionEvent("evt-producer-sibling", "producer/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+	sibling := eventtest.RootIngress("evt-producer-sibling", "producer/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 	if err := eb.Publish(context.Background(), sibling); err != nil {
 		t.Fatalf("Publish sibling: %v", err)
 	}
@@ -79,7 +80,7 @@ func TestImportBoundaryWildcardObserveGrantAddsNarrowSiblingCandidate(t *testing
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	evt := events.NewProjectionEvent("evt-granted-sibling", "producer/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+	evt := eventtest.RootIngress("evt-granted-sibling", "producer/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 	if err != nil {
 		t.Fatalf("CheckPublishRecipientPlan: %v", err)

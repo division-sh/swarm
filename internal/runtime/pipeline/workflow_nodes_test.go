@@ -263,7 +263,7 @@ func TestLoadWorkflowNodes_UsesImportBoundaryOutputAliasForWildcardParentSubscri
 
 func TestWorkflowNodeHandlerResolution_DeniesImportBoundaryWildcardRawFallback(t *testing.T) {
 	source := loadPipelineImportBoundaryWildcardSource(t, "")
-	evt := events.NewProjectionEvent("", "producer/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
+	evt := eventtest.RootIngress("", "producer/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
 	resolved := workflowNodeEventHandlerResolutionForDelivery(source, "worker-listener", evt)
 	if resolved.Matched {
 		t.Fatalf("worker-listener matched ungranted sibling event through raw wildcard fallback: %#v", resolved)
@@ -275,7 +275,7 @@ func TestWorkflowNodeHandlerResolution_DeniesImportBoundaryWildcardRawFallback(t
 
 func TestWorkflowNodeHandlerResolution_AllowsGrantedImportBoundaryWildcard(t *testing.T) {
 	source := loadPipelineImportBoundaryWildcardSource(t, "      observe:\n        - source: producer\n          events: [task.done]\n")
-	evt := events.NewProjectionEvent("", "producer/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
+	evt := eventtest.RootIngress("", "producer/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
 	resolved := workflowNodeEventHandlerResolutionForDelivery(source, "worker-listener", evt)
 	if !resolved.Matched {
 		t.Fatal("worker-listener did not match granted sibling event")

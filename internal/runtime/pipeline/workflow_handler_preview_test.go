@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 )
 
 func TestPreviewContractHandlerExecution_DeniesImportBoundaryWildcardRawFallback(t *testing.T) {
@@ -15,7 +16,7 @@ func TestPreviewContractHandlerExecution_DeniesImportBoundaryWildcardRawFallback
 		context.Background(),
 		bundle,
 		"worker-listener",
-		events.NewProjectionEvent("", "producer/task.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+		eventtest.RootIngress("", "producer/task.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		WorkflowState{},
 		nil,
 	)
@@ -33,7 +34,7 @@ func TestPreviewContractHandlerExecution_AllowsGrantedImportBoundaryWildcard(t *
 		context.Background(),
 		bundle,
 		"worker-listener",
-		events.NewProjectionEvent("", "producer/task.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+		eventtest.RootIngress("", "producer/task.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		WorkflowState{},
 		nil,
 	)
