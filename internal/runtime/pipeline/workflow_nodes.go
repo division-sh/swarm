@@ -183,6 +183,9 @@ func workflowNodeEventHandlerResolutionForEventType(source semanticview.Source, 
 			Matched:         true,
 		}
 	}
+	if semanticview.ImportBoundaryWildcardHandlerFallbackDenied(source, nodeID, eventType) {
+		return workflowNodeEventHandlerResolution{}
+	}
 	if bundle, ok := semanticview.Bundle(source); ok {
 		resolved := bundle.ResolveNodeEventHandler(nodeID, eventType)
 		if resolved.Matched {

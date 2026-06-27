@@ -103,6 +103,39 @@ func TestDeclarativeNodeHandleEvent_MatchesWildcardHandler(t *testing.T) {
 	}
 }
 
+func TestDeclarativeNodeHandleEvent_DeniesImportBoundaryWildcardRawFallback(t *testing.T) {
+	source := loadPipelineImportBoundaryWildcardSource(t, "")
+	entry := source.NodeEntries()["worker-listener"]
+	engine := &recordingExecutionEngine{}
+	node := NewNode(entry, source, engine, nil)
+
+	handled := node.Handle(context.Background(), events.NewProjectionEvent("", "producer/task.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	if handled {
+		t.Fatal("expected ungranted sibling event not to be handled")
+	}
+	if engine.called {
+		t.Fatal("execution engine was called through raw wildcard fallback")
+	}
+}
+
+func TestDeclarativeNodeHandleEvent_AllowsGrantedImportBoundaryWildcard(t *testing.T) {
+	source := loadPipelineImportBoundaryWildcardSource(t, "      observe:\n        - source: producer\n          events: [task.done]\n")
+	entry := source.NodeEntries()["worker-listener"]
+	engine := &recordingExecutionEngine{}
+	node := NewNode(entry, source, engine, nil)
+
+	handled := node.Handle(context.Background(), events.NewProjectionEvent("", "producer/task.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	if !handled {
+		t.Fatal("expected granted sibling event to be handled")
+	}
+	if !engine.called {
+		t.Fatal("expected execution engine to be called")
+	}
+	if got := engine.handlerEventKey; got != "**/task.done" {
+		t.Fatalf("handler event key = %q, want **/task.done", got)
+	}
+}
+
 func TestWorkflowNodeEventPolicy_MatchesWildcardSubscription(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier5-flow-lifecycle", "test-wildcard-subscription")

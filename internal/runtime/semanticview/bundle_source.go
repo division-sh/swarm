@@ -340,6 +340,9 @@ func (s bundleSource) NodeEventHandler(nodeID, eventType string) (runtimecontrac
 			return s.bundle.NodeEventHandler(nodeID, pattern)
 		}
 	}
+	if ImportBoundaryWildcardHandlerFallbackDenied(s, nodeID, eventType) {
+		return runtimecontracts.SystemNodeEventHandler{}, false
+	}
 	return s.bundle.NodeEventHandler(nodeID, eventType)
 }
 func (s bundleSource) NodeEntries() map[string]runtimecontracts.SystemNodeContract {

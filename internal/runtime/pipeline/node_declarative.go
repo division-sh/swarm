@@ -176,13 +176,16 @@ func (n *DeclarativeNode) HandleEvent(ctx context.Context, evt Event) (*HandlerO
 	eventType := strings.TrimSpace(string(evt.Type()))
 	handlerEventKey := eventType
 	handler, ok := n.resolvedHandlerForDelivery(evt)
+	denyRawHandlerFallback := n.source != nil && semanticview.ImportBoundaryWildcardHandlerFallbackDenied(n.source, n.NodeID(), eventType)
 	if !ok {
-		handler, ok = n.contract.EventHandlers[eventType]
+		if !denyRawHandlerFallback {
+			handler, ok = n.contract.EventHandlers[eventType]
+		}
 	}
 	if ok {
 		handlerEventKey = workflowNodeHandlerEventKeyForExecution(n.source, n.NodeID(), evt)
 	}
-	if !ok {
+	if !ok && !denyRawHandlerFallback {
 		for pattern, candidate := range n.contract.EventHandlers {
 			if strings.TrimSpace(pattern) == eventType {
 				continue

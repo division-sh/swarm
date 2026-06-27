@@ -4998,7 +4998,9 @@ flow_model:
           RouteTable static derivation, template-instance route materialization, EventBus recipient planning/persistence,
           runtime owner lookup, workflow-node handler lookup, and boot verification must consume this same resolver.
           Low-level event identity wildcard matching remains only the primitive matcher inside the candidate set supplied
-          by this resolver; it is not package-boundary authority.
+          by this resolver; it is not package-boundary authority. If this resolver scopes an imported-package wildcard
+          handler and denies a concrete event, raw bundle/contract handler fallback must not resurrect that handler for
+          delivery, replay, direct execution, preview/admission, or accumulator metadata.
         non_import_behavior: >
           Root and non-imported flow wildcard subscriptions keep their existing wildcard route behavior. Target and
           target_set delivery narrowing still applies after the scoped wildcard candidate is produced; wildcard grants

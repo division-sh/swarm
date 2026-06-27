@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -259,6 +260,30 @@ func TestLoadWorkflowNodes_UsesImportBoundaryOutputAliasForWildcardParentSubscri
 	}
 }
 
+func TestWorkflowNodeHandlerResolution_DeniesImportBoundaryWildcardRawFallback(t *testing.T) {
+	source := loadPipelineImportBoundaryWildcardSource(t, "")
+	evt := events.NewProjectionEvent("", "producer/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
+	resolved := workflowNodeEventHandlerResolutionForDelivery(source, "worker-listener", evt)
+	if resolved.Matched {
+		t.Fatalf("worker-listener matched ungranted sibling event through raw wildcard fallback: %#v", resolved)
+	}
+	if _, ok := source.NodeEventHandler("worker-listener", "producer/task.done"); ok {
+		t.Fatal("semantic source NodeEventHandler matched ungranted sibling event")
+	}
+}
+
+func TestWorkflowNodeHandlerResolution_AllowsGrantedImportBoundaryWildcard(t *testing.T) {
+	source := loadPipelineImportBoundaryWildcardSource(t, "      observe:\n        - source: producer\n          events: [task.done]\n")
+	evt := events.NewProjectionEvent("", "producer/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
+	resolved := workflowNodeEventHandlerResolutionForDelivery(source, "worker-listener", evt)
+	if !resolved.Matched {
+		t.Fatal("worker-listener did not match granted sibling event")
+	}
+	if got := resolved.HandlerEventKey; got != "**/task.done" {
+		t.Fatalf("handler event key = %q, want **/task.done", got)
+	}
+}
+
 func loadPipelineImportBoundaryAliasSource(t *testing.T) semanticview.Source {
 	t.Helper()
 	return loadPipelineImportBoundaryAliasSourceWithParentSubscription(t, "parent.lead_enriched")
@@ -336,6 +361,82 @@ worker-node:
     work.requested:
       emit: work.completed
 `)
+	return root
+}
+
+func loadPipelineImportBoundaryWildcardSource(t *testing.T, observeGrant string) semanticview.Source {
+	t.Helper()
+	root := writePipelineImportBoundaryWildcardFixture(t, observeGrant)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(contractComplianceRepoRoot(t), root, runtimecontracts.DefaultPlatformSpecFile(contractComplianceRepoRoot(t)))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return semanticview.Wrap(bundle)
+}
+
+func writePipelineImportBoundaryWildcardFixture(t *testing.T, observeGrant string) string {
+	t.Helper()
+	root := t.TempDir()
+	workerBind := ""
+	if strings.TrimSpace(observeGrant) != "" {
+		workerBind = "    bind:\n" + observeGrant
+	}
+	writePipelineFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: pipeline-import-boundary-wildcard
+version: "1.0.0"
+platform_version: ">=1.6.0"
+flows:
+  - id: worker
+    flow: worker
+    mode: static
+`+workerBind+`  - id: producer
+    flow: producer
+    mode: static
+`)
+	writePipelineFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: pipeline-import-boundary-wildcard\n")
+	writePipelineFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writePipelineFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writePipelineFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writePipelineFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+	writePipelineFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
+	writePipelineFixtureFile(t, filepath.Join(root, "flows", "worker", "package.yaml"), "name: worker\nversion: \"1.0.0\"\n")
+	writePipelineFixtureFile(t, filepath.Join(root, "flows", "worker", "schema.yaml"), `
+name: worker
+mode: static
+initial_state: active
+terminal_states: [done]
+states: [active, done]
+pins:
+  outputs:
+    events: [task.done]
+`)
+	writePipelineFixtureFile(t, filepath.Join(root, "flows", "worker", "policy.yaml"), "{}\n")
+	writePipelineFixtureFile(t, filepath.Join(root, "flows", "worker", "agents.yaml"), "{}\n")
+	writePipelineFixtureFile(t, filepath.Join(root, "flows", "worker", "events.yaml"), "task.done: {}\n")
+	writePipelineFixtureFile(t, filepath.Join(root, "flows", "worker", "nodes.yaml"), `
+worker-listener:
+  id: worker-listener
+  execution_type: system_node
+  subscribes_to: ["**/task.done"]
+  event_handlers:
+    "**/task.done":
+      clear_gates: [sibling_gate]
+`)
+	writePipelineFixtureFile(t, filepath.Join(root, "flows", "producer", "package.yaml"), "name: producer\nversion: \"1.0.0\"\n")
+	writePipelineFixtureFile(t, filepath.Join(root, "flows", "producer", "schema.yaml"), `
+name: producer
+mode: static
+initial_state: active
+terminal_states: [done]
+states: [active, done]
+pins:
+  outputs:
+    events: [task.done]
+`)
+	writePipelineFixtureFile(t, filepath.Join(root, "flows", "producer", "policy.yaml"), "{}\n")
+	writePipelineFixtureFile(t, filepath.Join(root, "flows", "producer", "agents.yaml"), "{}\n")
+	writePipelineFixtureFile(t, filepath.Join(root, "flows", "producer", "events.yaml"), "task.done: {}\n")
+	writePipelineFixtureFile(t, filepath.Join(root, "flows", "producer", "nodes.yaml"), "{}\n")
 	return root
 }
 
