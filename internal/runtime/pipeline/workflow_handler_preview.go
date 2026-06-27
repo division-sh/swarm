@@ -88,17 +88,17 @@ func PreviewContractHandlerExecution(ctx context.Context, bundle *runtimecontrac
 	if nodeID == "" {
 		return HandlerPreview{}, fmt.Errorf("node id is required")
 	}
-	handler, ok := bundle.NodeEventHandler(nodeID, strings.TrimSpace(string(evt.Type())))
+	previewBundle := semanticview.CloneBundleForPreview(bundle, policyOverrides)
+	source := semanticview.Wrap(previewBundle)
+	handler, ok := source.NodeEventHandler(nodeID, strings.TrimSpace(string(evt.Type())))
 	if !ok {
 		return HandlerPreview{}, fmt.Errorf("missing handler %s/%s", nodeID, evt.Type())
 	}
-
-	previewBundle := semanticview.CloneBundleForPreview(bundle, policyOverrides)
-	workflow, err := LoadWorkflowDefinition(semanticview.Wrap(previewBundle))
+	workflow, err := LoadWorkflowDefinition(source)
 	if err != nil {
 		return HandlerPreview{}, err
 	}
-	nodes, err := LoadWorkflowNodes(semanticview.Wrap(previewBundle))
+	nodes, err := LoadWorkflowNodes(source)
 	if err != nil {
 		return HandlerPreview{}, err
 	}
@@ -106,8 +106,8 @@ func PreviewContractHandlerExecution(ctx context.Context, bundle *runtimecontrac
 		bundle:         previewBundle,
 		workflow:       workflow,
 		workflowNodes:  nodes,
-		guardRegistry:  NewContractGuardRegistry(semanticview.Wrap(previewBundle)),
-		actionRegistry: NewContractActionRegistry(semanticview.Wrap(previewBundle)),
+		guardRegistry:  NewContractGuardRegistry(source),
+		actionRegistry: NewContractActionRegistry(source),
 	}
 	pc := NewPipelineCoordinatorWithOptions(previewBus{}, nil, PipelineCoordinatorOptions{Module: module})
 	if pc == nil {
