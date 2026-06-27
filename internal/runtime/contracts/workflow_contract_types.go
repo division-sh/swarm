@@ -657,10 +657,15 @@ type FlowPackageRequires struct {
 	PlatformVersion string                 `yaml:"platform_version"`
 }
 type FlowPackageBind struct {
-	Inputs      map[string]string `yaml:"inputs"`
-	Outputs     map[string]string `yaml:"outputs"`
-	Policy      map[string]string `yaml:"policy"`
-	Credentials map[string]string `yaml:"credentials"`
+	Inputs      map[string]string         `yaml:"inputs"`
+	Outputs     map[string]string         `yaml:"outputs"`
+	Policy      map[string]string         `yaml:"policy"`
+	Credentials map[string]string         `yaml:"credentials"`
+	Observe     []FlowPackageObserveGrant `yaml:"observe"`
+}
+type FlowPackageObserveGrant struct {
+	Source string   `yaml:"source"`
+	Events []string `yaml:"events"`
 }
 type ProjectHandoff struct {
 	Event       string `yaml:"event"`

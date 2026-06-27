@@ -176,29 +176,24 @@ func workflowNodeEventHandlerResolutionForEventType(source semanticview.Source, 
 	if eventType == "" {
 		return workflowNodeEventHandlerResolution{}
 	}
+	if handler, ok := source.NodeEventHandler(nodeID, eventType); ok {
+		return workflowNodeEventHandlerResolution{
+			Handler:         handler,
+			HandlerEventKey: workflowNodeMatchedHandlerEventKey(source, nodeID, eventType),
+			Matched:         true,
+		}
+	}
 	if bundle, ok := semanticview.Bundle(source); ok {
 		resolved := bundle.ResolveNodeEventHandler(nodeID, eventType)
 		if resolved.Matched {
-			handler, ok := source.NodeEventHandler(nodeID, eventType)
-			if !ok {
-				handler = resolved.Handler
-			}
 			return workflowNodeEventHandlerResolution{
-				Handler:         handler,
+				Handler:         resolved.Handler,
 				HandlerEventKey: strings.TrimSpace(resolved.AuthoredEventType),
 				Matched:         true,
 			}
 		}
 	}
-	handler, ok := source.NodeEventHandler(nodeID, eventType)
-	if !ok {
-		return workflowNodeEventHandlerResolution{}
-	}
-	return workflowNodeEventHandlerResolution{
-		Handler:         handler,
-		HandlerEventKey: workflowNodeMatchedHandlerEventKey(source, nodeID, eventType),
-		Matched:         true,
-	}
+	return workflowNodeEventHandlerResolution{}
 }
 
 func workflowNodeMatchedHandlerEventKey(source semanticview.Source, nodeID, eventType string) string {
@@ -441,6 +436,12 @@ func workflowNodeSubscriptionAliases(source semanticview.Source, nodeID, eventTy
 		appendAlias(alias.EventPattern)
 	}
 	if strings.Contains(eventType, "*") {
+		if resolution := semanticview.ResolveImportBoundaryWildcardSubscriptionForNode(source, nodeID, eventType); resolution.Scoped {
+			for _, pattern := range resolution.Patterns {
+				appendAlias(pattern.EventPattern)
+			}
+			return out
+		}
 		for _, alias := range semanticview.ImportBoundaryOutputAliasesForParent(source, contractSource.PackageKey, flowID) {
 			parentEvent := eventidentity.Normalize(alias.ParentEvent)
 			if parentEvent == "" || !eventidentity.MatchPattern(eventType, parentEvent) {

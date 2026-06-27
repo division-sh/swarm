@@ -142,6 +142,10 @@ func (b *FlowPackageBind) UnmarshalYAML(node *yaml.Node) error {
 			if err := value.Decode(&out.Credentials); err != nil {
 				return fmt.Errorf("bind.credentials: %w", err)
 			}
+		case "observe":
+			if err := value.Decode(&out.Observe); err != nil {
+				return fmt.Errorf("bind.observe: %w", err)
+			}
 		default:
 			return fmt.Errorf("UNDEFINED-FIELD: bind field %q not in platform spec", key)
 		}
@@ -255,7 +259,30 @@ func (b FlowPackageBind) normalized() FlowPackageBind {
 		Outputs:     normalizeStringMap(b.Outputs),
 		Policy:      normalizeStringMap(b.Policy),
 		Credentials: normalizeStringMap(b.Credentials),
+		Observe:     normalizeFlowPackageObserveGrants(b.Observe),
 	}
+}
+
+func normalizeFlowPackageObserveGrants(in []FlowPackageObserveGrant) []FlowPackageObserveGrant {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]FlowPackageObserveGrant, 0, len(in))
+	for _, grant := range in {
+		source := strings.TrimSpace(grant.Source)
+		events := normalizeStrings(grant.Events)
+		if source == "" && len(events) == 0 {
+			continue
+		}
+		out = append(out, FlowPackageObserveGrant{
+			Source: source,
+			Events: events,
+		})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func (c *FlowPackageConnect) UnmarshalYAML(node *yaml.Node) error {
