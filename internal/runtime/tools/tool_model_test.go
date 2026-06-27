@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -79,6 +80,140 @@ func TestExecutor_HTTPToolExecutesTemplateAndResponseMapping(t *testing.T) {
 	}
 	if got, ok := result["status"].(int); !ok || got != 200 {
 		t.Fatalf("status = %#v, want 200", result["status"])
+	}
+}
+
+func TestExecutor_HTTPToolEncodesURLTemplateComponentsAndPreservesRawHeaderBody(t *testing.T) {
+	query := `to:karpathy (agent OR "agentic")`
+	var sawEscapedPath string
+	var sawRawQuery string
+	var sawHeader string
+	var sawBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawEscapedPath = r.URL.EscapedPath()
+		sawRawQuery = r.URL.RawQuery
+		sawHeader = r.Header.Get("X-Search-Query")
+		rawBody, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("ReadAll body: %v", err)
+		}
+		if err := json.Unmarshal(rawBody, &sawBody); err != nil {
+			t.Fatalf("Unmarshal body %s: %v", rawBody, err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	}))
+	defer server.Close()
+
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{
+			"x_search_tweets": {
+				Description: "Search X tweets",
+				HandlerType: "http",
+				InputSchema: runtimecontracts.ToolInputSchema{
+					Type:     "object",
+					Required: []string{"segment", "query", "cursor"},
+					Properties: map[string]runtimecontracts.ToolInputSchema{
+						"segment": {Type: "string"},
+						"query":   {Type: "string"},
+						"cursor":  {Type: "string"},
+					},
+				},
+				HTTP: &runtimecontracts.HTTPToolSpec{
+					Method: "POST",
+					URL:    server.URL + "/profiles/{{input.segment}}/search?q={{input.query}}&cursor={{input.cursor}}",
+					Headers: map[string]string{
+						"X-Search-Query": "raw {{input.query}}",
+					},
+					Body: map[string]any{
+						"query": "{{input.query}}",
+					},
+				},
+			},
+		},
+	})
+
+	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source})
+	ctx := models.WithActor(context.Background(), models.AgentConfig{
+		ID:    "agent-1",
+		Tools: []string{"x_search_tweets"},
+	})
+	if _, err := exec.Execute(ctx, "x_search_tweets", map[string]any{
+		"segment": "team/a b",
+		"query":   query,
+		"cursor":  "page 1",
+	}); err != nil {
+		t.Fatalf("Execute(x_search_tweets): %v", err)
+	}
+	if want := "/profiles/team%2Fa%20b/search"; sawEscapedPath != want {
+		t.Fatalf("escaped path = %q, want %q", sawEscapedPath, want)
+	}
+	if want := "q=to%3Akarpathy%20%28agent%20OR%20%22agentic%22%29&cursor=page%201"; sawRawQuery != want {
+		t.Fatalf("raw query = %q, want %q", sawRawQuery, want)
+	}
+	if want := "raw " + query; sawHeader != want {
+		t.Fatalf("header = %q, want %q", sawHeader, want)
+	}
+	if got := sawBody["query"]; got != query {
+		t.Fatalf("body query = %#v, want %q", got, query)
+	}
+}
+
+func TestResolveHTTPURLTemplatePreservesCompleteURL(t *testing.T) {
+	want := "https://example.test/search?q=to%3Akarpathy%20%28agent%29"
+	got, err := resolveHTTPURLTemplate("{{input.url}}", map[string]any{
+		"input": map[string]any{
+			"url": want,
+		},
+	})
+	if err != nil {
+		t.Fatalf("resolveHTTPURLTemplate: %v", err)
+	}
+	if got != want {
+		t.Fatalf("resolved URL = %q, want %q", got, want)
+	}
+}
+
+func TestExecutor_CustomWebSearchEncodesHTTPURLTemplateComponents(t *testing.T) {
+	query := `to:karpathy (agent OR "agentic")`
+	var sawEscapedPath string
+	var sawRawQuery string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawEscapedPath = r.URL.EscapedPath()
+		sawRawQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"results": []map[string]any{
+				{"title": "hit", "url": "https://example.test/hit", "snippet": "body"},
+			},
+		})
+	}))
+	defer server.Close()
+
+	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{})
+	results, err := exec.executeCustomWebSearch(context.Background(), webSearchProviderConfig{
+		HTTP: &runtimecontracts.HTTPToolSpec{
+			Method: "GET",
+			URL:    server.URL + "/search/{{input.max_results}}?q={{input.query}}",
+		},
+		ResponsePath: "results",
+		FieldMapping: map[string]string{
+			"title":   "title",
+			"url":     "url",
+			"snippet": "snippet",
+		},
+	}, query, 20, "")
+	if err != nil {
+		t.Fatalf("executeCustomWebSearch: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("results = %#v, want one result", results)
+	}
+	if want := "/search/20"; sawEscapedPath != want {
+		t.Fatalf("escaped path = %q, want %q", sawEscapedPath, want)
+	}
+	if want := "q=to%3Akarpathy%20%28agent%20OR%20%22agentic%22%29"; sawRawQuery != want {
+		t.Fatalf("raw query = %q, want %q", sawRawQuery, want)
 	}
 }
 

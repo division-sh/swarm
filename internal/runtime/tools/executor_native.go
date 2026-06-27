@@ -225,11 +225,11 @@ func (e *Executor) executeCustomWebSearch(ctx context.Context, cfg webSearchProv
 		},
 		"credentials": credentials,
 	}
-	urlValue, err := resolveTemplateValue(cfg.HTTP.URL, templateEnv)
+	resolvedURL, err := resolveHTTPURLTemplate(cfg.HTTP.URL, templateEnv)
 	if err != nil {
 		return nil, err
 	}
-	url := strings.TrimSpace(asString(urlValue))
+	url := strings.TrimSpace(resolvedURL)
 	headers := make(http.Header, len(cfg.HTTP.Headers))
 	for key, value := range cfg.HTTP.Headers {
 		resolved, err := resolveTemplateValue(value, templateEnv)
