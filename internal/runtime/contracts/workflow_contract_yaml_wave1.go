@@ -86,9 +86,12 @@ func (r *FlowPackageRequires) UnmarshalYAML(node *yaml.Node) error {
 				return fmt.Errorf("requires.outputs: %w", err)
 			}
 		case "policy":
-			if err := value.Decode(&out.Policy); err != nil {
+			policy, defaults, err := decodeFlowPackagePolicyRequires(value)
+			if err != nil {
 				return fmt.Errorf("requires.policy: %w", err)
 			}
+			out.Policy = policy
+			out.PolicyDefaults = defaults
 		case "credentials":
 			if err := value.Decode(&out.Credentials); err != nil {
 				return fmt.Errorf("requires.credentials: %w", err)
@@ -152,9 +155,98 @@ func (r FlowPackageRequires) normalized() FlowPackageRequires {
 		Inputs:          normalizeStrings(r.Inputs),
 		Outputs:         normalizeStrings(r.Outputs),
 		Policy:          normalizeStrings(r.Policy),
+		PolicyDefaults:  normalizePolicyDefaults(r.PolicyDefaults),
 		Credentials:     normalizeStrings(r.Credentials),
 		PlatformVersion: strings.TrimSpace(r.PlatformVersion),
 	}
+}
+
+func decodeFlowPackagePolicyRequires(node *yaml.Node) ([]string, map[string]PolicyValue, error) {
+	if node == nil || node.Kind == 0 {
+		return nil, nil, nil
+	}
+	switch node.Kind {
+	case yaml.SequenceNode:
+		var values []string
+		if err := node.Decode(&values); err != nil {
+			return nil, nil, err
+		}
+		return values, nil, nil
+	case yaml.MappingNode:
+		var policy []string
+		defaults := map[string]PolicyValue{}
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			key := strings.TrimSpace(node.Content[i].Value)
+			if key == "" {
+				continue
+			}
+			policy = append(policy, key)
+			defaultValue, ok, err := decodeFlowPackagePolicyDefault(node.Content[i+1])
+			if err != nil {
+				return nil, nil, fmt.Errorf("%s: %w", key, err)
+			}
+			if ok {
+				defaults[key] = PolicyValue{Value: defaultValue}
+			}
+		}
+		if len(defaults) == 0 {
+			defaults = nil
+		}
+		return policy, defaults, nil
+	default:
+		return nil, nil, fmt.Errorf("must be a list of policy keys or a mapping of policy keys to requirement objects")
+	}
+}
+
+func decodeFlowPackagePolicyDefault(node *yaml.Node) (any, bool, error) {
+	if node == nil || node.Kind == 0 {
+		return nil, false, nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return nil, false, fmt.Errorf("policy requirement must be a mapping with optional default")
+	}
+	var out any
+	hasDefault := false
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		value := node.Content[i+1]
+		switch key {
+		case "":
+			continue
+		case "default":
+			if err := value.Decode(&out); err != nil {
+				return nil, false, fmt.Errorf("default: %w", err)
+			}
+			hasDefault = true
+		case "type", "description", "required":
+			continue
+		default:
+			return nil, false, fmt.Errorf("UNDEFINED-FIELD: requires.policy option %q not in platform spec", key)
+		}
+	}
+	return out, hasDefault, nil
+}
+
+func normalizePolicyDefaults(in map[string]PolicyValue) map[string]PolicyValue {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]PolicyValue, len(in))
+	for key, value := range in {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		out[key] = PolicyValue{
+			Value:       value.Value,
+			Description: strings.TrimSpace(value.Description),
+			Override:    value.Override,
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func (b FlowPackageBind) normalized() FlowPackageBind {

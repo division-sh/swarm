@@ -266,10 +266,10 @@ func (s bundleSource) FlowRequiredAgents(flowID string) []runtimecontracts.FlowR
 	return s.bundle.FlowRequiredAgents(flowID)
 }
 func (s bundleSource) ResolvedPolicyForFlow(flowID string) runtimecontracts.PolicyDocument {
-	return s.bundle.ResolvedPolicyForFlow(flowID)
+	return ResolvePolicyForFlow(s, flowID)
 }
 func (s bundleSource) ResolvedPolicyForNode(nodeID string) runtimecontracts.PolicyDocument {
-	return s.bundle.ResolvedPolicyForNode(nodeID)
+	return ResolvePolicyForNode(s, nodeID)
 }
 func (s bundleSource) ResolvedEventCatalog() map[string]runtimecontracts.EventCatalogEntry {
 	return s.bundle.ResolvedEventCatalog()

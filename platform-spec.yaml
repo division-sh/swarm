@@ -4868,7 +4868,13 @@ flow_model:
           inputs: List of package-local input event pin names the importing parent must bind.
           outputs: List of package-local output event pin names the importing parent must bind when the imported package
             exposes them as required public outputs.
-          policy: List of package-local policy dependency names the importing parent must bind.
+          policy: >
+            Package-local policy dependency declarations. The list shorthand declares required policy keys with no default.
+            The mapping form is keyed by package-local policy path and accepts a requirement object with optional
+            non-secret `default`; `type`, `description`, and `required` are accepted as descriptive annotations/reserved
+            metadata and do not change runtime resolution. Unknown requirement-object fields fail closed during contract
+            parsing. A declared policy dependency is an externally supplied slot and is not satisfied by same-name
+            child-local policy or parent ambient inheritance.
           credentials: List of package-local credential dependency names the importing parent must bind.
           platform_version: Optional imported package platform-version constraint. The current first slice preserves and
             exposes this value; existing top-level `platform_version` remains the package load/admission constraint until
@@ -4884,19 +4890,43 @@ flow_model:
           inputs: Map keyed by imported package `requires.inputs` item. Each value names the parent-facing event binding.
           outputs: Map keyed by imported package `requires.outputs` item. Each value names the parent-facing event binding.
           policy: Map keyed by imported package `requires.policy` item. Each value names the parent policy reference that
-            will satisfy that package-local dependency.
+            will satisfy that package-local dependency. Supported references are `parent.policy.<path>` and `policy.<path>`.
           credentials: Map keyed by imported package `requires.credentials` item. Each value names the parent/deployment
             credential reference that will satisfy that package-local dependency.
       fail_closed_minimal_verify:
         rule: >
           If an imported package declares any item under `requires.inputs`, `requires.outputs`, `requires.policy`, or
           `requires.credentials`, boot/verify must report a hard invalidity unless the parent import site provides a
-          non-empty `bind` entry for that exact item in the matching field. For `requires.inputs` and
+          non-empty `bind` entry for that exact item in the matching field. `requires.policy` may instead be satisfied by
+          an explicit declared package default. For `requires.inputs` and
           `requires.outputs`, boot/verify must also fail closed when a `bind` key is not declared by the imported
           package public pin list, when the package-local pin is not declared by an imported flow schema, or when the
           parent-facing event binding is unknown or ambiguous.
-        unsupported_shapes: Unknown `requires` or `bind` fields, non-list `requires` fields, and non-map `bind` fields are
-          malformed contract input and must fail closed during contract parsing.
+        unsupported_shapes: >
+          Unknown `requires` or `bind` fields, malformed non-list/non-map `requires.policy` shapes, non-list
+          `requires.inputs` / `requires.outputs` / `requires.credentials` fields, and non-map `bind` fields are malformed
+          contract input and must fail closed during contract parsing.
+      dependency_resolution:
+        owner: Runtime import-boundary dependency resolver over semanticview ProjectScopes, FlowScopes, and import-site binds.
+        policy: >
+          Imported package policy dependencies resolve exactly in this order: explicit import-site `bind.policy` reference
+          to parent policy, then declared non-secret package default, then hard verify/runtime error. Once an imported
+          package declares any import-boundary dependency, its runtime policy context is package-local policy plus declared
+          resolved dependency slots; ambient parent/root policy inheritance is disabled for that imported package context.
+          Declared dependency paths are removed from the child-local policy document before resolution is applied, so
+          child-local policy at the same path, same-name parent/root policy inheritance, and ambient contract-merger fallback
+          are not proof that the dependency is satisfied. Existing root/non-imported flow policy inheritance remains a
+          different semantic concept and must not be used as an import compatibility shim.
+        credentials: >
+          Imported package credential dependencies resolve exactly in this order: package-local credential handle,
+          import-site `bind.credentials` value, deployment credential-store key, credential-store value at call time.
+          Credentials have no package defaults and no same-name raw-key fallback. Tool, MCP, native web-search, bootverify,
+          and credential metadata consumers must map package handles through this resolver before reading or indexing
+          deployment credential keys. The credential store remains the only owner of secret values; the import-boundary
+          resolver never exposes or persists credential values.
+        fail_closed: >
+          Runtime and verify consumers must use the shared import-boundary dependency resolver. A remaining same-concept
+          helper that independently interprets imported package policy or credential handles is non-authoritative.
       pin_alias_delivery:
         owner: Runtime import-boundary pin alias resolver over semanticview ProjectScopes and FlowScopes.
         inputs: >
@@ -4917,7 +4947,6 @@ flow_model:
           reinterpret package-local pins, parent event names, or raw same-name fallback for declared imported package
           pins.
       split_runtime_semantics:
-        policy_credential_resolution: Runtime per-import policy and credential resolution is tracked separately by #1453.
         wildcard_grants: Wildcard subtree and cross-tree grant behavior is tracked separately by #1454.
         final_e2e_package_proof: Final multi-package marketplace-style runtime proof is tracked separately by #1455.
     composition_routing:

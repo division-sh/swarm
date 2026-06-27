@@ -649,11 +649,12 @@ type ProjectFlowRef struct {
 	Bind      FlowPackageBind `yaml:"bind"`
 }
 type FlowPackageRequires struct {
-	Inputs          []string `yaml:"inputs"`
-	Outputs         []string `yaml:"outputs"`
-	Policy          []string `yaml:"policy"`
-	Credentials     []string `yaml:"credentials"`
-	PlatformVersion string   `yaml:"platform_version"`
+	Inputs          []string               `yaml:"inputs"`
+	Outputs         []string               `yaml:"outputs"`
+	Policy          []string               `yaml:"policy"`
+	PolicyDefaults  map[string]PolicyValue `yaml:"-"`
+	Credentials     []string               `yaml:"credentials"`
+	PlatformVersion string                 `yaml:"platform_version"`
 }
 type FlowPackageBind struct {
 	Inputs      map[string]string `yaml:"inputs"`

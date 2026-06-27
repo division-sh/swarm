@@ -49,6 +49,8 @@ type Client struct {
 	tools   map[string]DiscoveredTool
 }
 
+type CredentialKeyResolver func(string) (string, error)
+
 type registeredServer struct {
 	cfg   ServerConfig
 	stdio *stdioRPCClient
@@ -133,6 +135,10 @@ func (c *Client) DiscoveredTools() map[string]DiscoveredTool {
 }
 
 func (c *Client) Call(ctx context.Context, prefixedName string, arguments any) (any, error) {
+	return c.CallWithCredentialKeyResolver(ctx, prefixedName, arguments, nil)
+}
+
+func (c *Client) CallWithCredentialKeyResolver(ctx context.Context, prefixedName string, arguments any, resolver CredentialKeyResolver) (any, error) {
 	if c == nil {
 		return nil, fmt.Errorf("mcp client is not configured")
 	}
@@ -156,7 +162,7 @@ func (c *Client) Call(ctx context.Context, prefixedName string, arguments any) (
 		},
 		ID: prefixedName + "-call",
 	}
-	resp, err := c.callServer(ctx, server, req)
+	resp, err := c.callServerWithCredentialKeyResolver(ctx, server, req, resolver)
 	if err != nil {
 		return nil, err
 	}
@@ -243,6 +249,10 @@ func (c *Client) discoverServerTools(ctx context.Context, source semanticview.So
 }
 
 func (c *Client) callServer(ctx context.Context, server *registeredServer, req RPCRequest) (RPCResponse, error) {
+	return c.callServerWithCredentialKeyResolver(ctx, server, req, nil)
+}
+
+func (c *Client) callServerWithCredentialKeyResolver(ctx context.Context, server *registeredServer, req RPCRequest, resolver CredentialKeyResolver) (RPCResponse, error) {
 	switch strings.ToLower(strings.TrimSpace(server.cfg.Transport)) {
 	case "stdio":
 		if server.stdio == nil {
@@ -250,13 +260,17 @@ func (c *Client) callServer(ctx context.Context, server *registeredServer, req R
 		}
 		return server.stdio.Call(ctx, req)
 	case "http", "":
-		return c.callHTTPServer(ctx, server.cfg, req)
+		return c.callHTTPServerWithCredentialKeyResolver(ctx, server.cfg, req, resolver)
 	default:
 		return RPCResponse{}, fmt.Errorf("unsupported mcp transport %q", server.cfg.Transport)
 	}
 }
 
 func (c *Client) callHTTPServer(ctx context.Context, cfg ServerConfig, req RPCRequest) (RPCResponse, error) {
+	return c.callHTTPServerWithCredentialKeyResolver(ctx, cfg, req, nil)
+}
+
+func (c *Client) callHTTPServerWithCredentialKeyResolver(ctx context.Context, cfg ServerConfig, req RPCRequest, resolver CredentialKeyResolver) (RPCResponse, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
 		return RPCResponse{}, err
@@ -267,7 +281,15 @@ func (c *Client) callHTTPServer(ctx context.Context, cfg ServerConfig, req RPCRe
 	}
 	httpReq.Header.Set("content-type", "application/json")
 	httpReq.Header.Set("mcp-protocol-version", "2025-03-26")
-	if token, ok, err := c.credentialValue(ctx, cfg.CredentialsKey); err != nil {
+	credentialKey := strings.TrimSpace(cfg.CredentialsKey)
+	if resolver != nil && credentialKey != "" {
+		resolved, err := resolver(credentialKey)
+		if err != nil {
+			return RPCResponse{}, err
+		}
+		credentialKey = strings.TrimSpace(resolved)
+	}
+	if token, ok, err := c.credentialValue(ctx, credentialKey); err != nil {
 		return RPCResponse{}, err
 	} else if ok && strings.TrimSpace(token) != "" {
 		httpReq.Header.Set("authorization", "Bearer "+strings.TrimSpace(token))
