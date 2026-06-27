@@ -110,7 +110,8 @@ func ProducerRouteCommonPathFailure(source semanticview.Source, flowID, eventTyp
 		return ""
 	}
 	if spec.Broadcast {
-		if producerRouteKnownReceiverConsumesOutput(source, flowID, eventType, "") {
+		if compositionConnectsFromOutputEvent(source, flowID, eventType) ||
+			producerRouteKnownReceiverConsumesOutput(source, flowID, eventType, "") {
 			return FailureProducerBroadcastCommonPath
 		}
 		return ""
@@ -123,7 +124,8 @@ func ProducerRouteCommonPathFailure(source semanticview.Source, flowID, eventTyp
 	case runtimecontracts.EmitTargetKindSender, runtimecontracts.EmitTargetKindInstanceID:
 		return ""
 	case runtimecontracts.EmitTargetKindFlowMatch:
-		if producerRouteKnownReceiverConsumesOutput(source, flowID, eventType, target.Flow) {
+		if compositionConnectsFromOutputEventToFlow(source, flowID, eventType, target.Flow) ||
+			producerRouteKnownReceiverConsumesOutput(source, flowID, eventType, target.Flow) {
 			return FailureProducerTargetCommonPath
 		}
 	}
@@ -137,6 +139,28 @@ func compositionConnectsFromOutputEvent(source semanticview.Source, flowID, even
 	for _, pin := range outputPinsForEvent(source, flowID, eventType) {
 		if len(source.CompositionConnectsFrom(flowID, pin.PinName())) > 0 {
 			return true
+		}
+	}
+	return false
+}
+
+func compositionConnectsFromOutputEventToFlow(source semanticview.Source, flowID, eventType, targetFlowID string) bool {
+	if source == nil {
+		return false
+	}
+	targetFlowID = strings.TrimSpace(targetFlowID)
+	if targetFlowID == "" {
+		return false
+	}
+	if _, ok := source.FlowScopeByID(targetFlowID); !ok {
+		return false
+	}
+	for _, pin := range outputPinsForEvent(source, flowID, eventType) {
+		for _, connect := range source.CompositionConnectsFrom(flowID, pin.PinName()) {
+			to, err := connect.ToRef()
+			if err == nil && strings.TrimSpace(to.FlowID) == targetFlowID {
+				return true
+			}
 		}
 	}
 	return false

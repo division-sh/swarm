@@ -91,6 +91,10 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	assertScalarContains(t, mustMappingValue(t, slice1475, "canonical_code_owner"), "ProducerRouteCommonPathFailure")
 	assertScalarContains(t, mustMappingValue(t, slice1475, "rule"), "not valid common-path")
 	assertScalarContains(t, mustMappingValue(t, slice1475, "rule"), "does not grandfather")
+	assertScalarContains(t, mustMappingValue(t, slice1475, "rule"), "alias/adapter connect")
+	if !sequenceContainsScalar(mustMappingValue(t, slice1475, "consumes"), "loaded package receiver input pins and parent connect graph edges, including alias/adapter connects") {
+		t.Fatal("implementation_slice_1475 missing connected adapter proof surface")
+	}
 	if !sequenceContainsScalar(mustMappingValue(t, slice1475, "produces"), "producer_target_common_path_forbidden for loaded flow-scope target.flow/match common-path composition") {
 		t.Fatal("implementation_slice_1475 missing producer_target_common_path_forbidden proof surface")
 	}
