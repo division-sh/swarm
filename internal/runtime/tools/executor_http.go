@@ -94,6 +94,9 @@ func (e *Executor) execHTTPTool(ctx context.Context, actor models.AgentConfig, t
 			return result, nil
 		}
 		lastErr = err
+		if isExternalDispatchRateLimited(err) {
+			break
+		}
 		if attempt == maxRetries {
 			break
 		}
@@ -110,6 +113,9 @@ func (e *Executor) execHTTPTool(ctx context.Context, actor models.AgentConfig, t
 }
 
 func (e *Executor) execHTTPRequestOnce(ctx context.Context, method, url string, headers http.Header, body io.Reader, timeout time.Duration, tool RegisteredTool) (any, error) {
+	if err := e.admitExternalDispatch(ctx, e.httpToolExternalDispatchPolicy(tool)); err != nil {
+		return nil, err
+	}
 	reqCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(reqCtx, method, url, body)
@@ -120,9 +126,6 @@ func (e *Executor) execHTTPRequestOnce(ctx context.Context, method, url string, 
 		for _, value := range values {
 			req.Header.Add(key, value)
 		}
-	}
-	if err := e.admitExternalDispatch(ctx, e.httpToolExternalDispatchPolicy(tool)); err != nil {
-		return nil, err
 	}
 	resp, err := e.httpClient.Do(req)
 	if err != nil {
