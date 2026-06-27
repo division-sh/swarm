@@ -320,10 +320,18 @@ func checkTestEventFixtureFile(t *testing.T, repoRoot, path string) {
 	}
 	eventtestAliases := importAliases(file, "github.com/division-sh/swarm/internal/events/eventtest")
 	packageAliases := allImportAliases(file)
+	persistedProjectionVars := testPersistedProjectionVars(file, eventtestAliases)
 	ast.Inspect(file, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
 		if !ok {
 			return true
+		}
+		if isPublishSurfaceCall(call) {
+			for _, arg := range call.Args {
+				if exprContainsEventtestPersistedProjection(arg, eventtestAliases, persistedProjectionVars) {
+					t.Fatalf("%s:%d passes eventtest.PersistedProjection to a publish/runtime producer API; use a runtime-intent fixture such as eventtest.RootIngress", relativePath, fset.Position(call.Pos()).Line)
+				}
+			}
 		}
 		if isNewProjectionEventCall(call, eventAliases) {
 			t.Fatalf("%s:%d calls events.NewProjectionEvent directly in a test; use internal/events/eventtest fixture builders or add a narrow internal/events unit-test allowlist", relativePath, fset.Position(call.Pos()).Line)
@@ -350,6 +358,34 @@ func checkTestEventFixtureFile(t *testing.T, repoRoot, path string) {
 		t.Fatalf("%s:%d calls %s directly in a test; route fixture event patching through internal/events/eventtest", relativePath, fset.Position(sel.Pos()).Line, sel.Sel.Name)
 		return false
 	})
+}
+
+func testPersistedProjectionVars(file *ast.File, eventtestAliases map[string]struct{}) map[string]struct{} {
+	vars := map[string]struct{}{}
+	ast.Inspect(file, func(n ast.Node) bool {
+		switch node := n.(type) {
+		case *ast.AssignStmt:
+			for idx, rhs := range node.Rhs {
+				if !exprContainsEventtestPersistedProjection(rhs, eventtestAliases, nil) || idx >= len(node.Lhs) {
+					continue
+				}
+				if ident, ok := node.Lhs[idx].(*ast.Ident); ok && ident.Name != "_" {
+					vars[ident.Name] = struct{}{}
+				}
+			}
+		case *ast.ValueSpec:
+			for idx, value := range node.Values {
+				if !exprContainsEventtestPersistedProjection(value, eventtestAliases, nil) || idx >= len(node.Names) {
+					continue
+				}
+				if name := node.Names[idx].Name; name != "_" {
+					vars[name] = struct{}{}
+				}
+			}
+		}
+		return true
+	})
+	return vars
 }
 
 func eventImportAliases(file *ast.File) (map[string]struct{}, bool) {
@@ -441,6 +477,47 @@ func testEventConstructorCallName(call *ast.CallExpr, eventAliases map[string]st
 func isEventtestProjectionCall(call *ast.CallExpr, eventtestAliases map[string]struct{}) bool {
 	selector, ok := call.Fun.(*ast.SelectorExpr)
 	return ok && selector.Sel.Name == "Projection" && isPackageIdent(selector.X, eventtestAliases)
+}
+
+func isEventtestPersistedProjectionCall(call *ast.CallExpr, eventtestAliases map[string]struct{}) bool {
+	selector, ok := call.Fun.(*ast.SelectorExpr)
+	return ok && selector.Sel.Name == "PersistedProjection" && isPackageIdent(selector.X, eventtestAliases)
+}
+
+func isPublishSurfaceCall(call *ast.CallExpr) bool {
+	selector, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	switch selector.Sel.Name {
+	case "Publish", "PublishDirect", "PublishInMutation", "ApprovalEventPublish":
+		return true
+	default:
+		return false
+	}
+}
+
+func exprContainsEventtestPersistedProjection(expr ast.Expr, eventtestAliases map[string]struct{}, persistedProjectionVars map[string]struct{}) bool {
+	found := false
+	ast.Inspect(expr, func(n ast.Node) bool {
+		if found {
+			return false
+		}
+		switch node := n.(type) {
+		case *ast.CallExpr:
+			if isEventtestPersistedProjectionCall(node, eventtestAliases) {
+				found = true
+				return false
+			}
+		case *ast.Ident:
+			if _, ok := persistedProjectionVars[node.Name]; ok {
+				found = true
+				return false
+			}
+		}
+		return true
+	})
+	return found
 }
 
 func productionFunctionScope(fn *ast.FuncDecl) string {

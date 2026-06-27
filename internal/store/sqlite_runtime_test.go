@@ -585,7 +585,7 @@ func TestSQLiteRuntimeStoreAPIIdempotencyAllowsNestedEventBusPublish(t *testing.
 	publishCalls := 0
 	publish := func(ctx context.Context) (APIIdempotencyCompletion, error) {
 		publishCalls++
-		if err := bus.Publish(ctx, eventtest.PersistedProjection(
+		if err := bus.Publish(ctx, eventtest.RootIngress(
 			eventID,
 			events.EventType("item.received"),
 			"api.v1",
@@ -661,7 +661,7 @@ func TestSQLiteRuntimeStoreAPIIdempotencyFailedNestedPublishLeavesNoCompletionOr
 		Now:            time.Now().UTC(),
 	}
 	completion, replayed, err := store.WithAPIIdempotency(ctx, req, func(ctx context.Context) (APIIdempotencyCompletion, error) {
-		err := bus.Publish(ctx, eventtest.PersistedProjection(
+		err := bus.Publish(ctx, eventtest.RootIngress(
 			eventID,
 			events.EventType("item.failed"),
 			"api.v1",
@@ -835,7 +835,7 @@ func TestSQLiteRuntimeStoreRuntimeIngressReadDuringPublishDoesNotReenterWrite(t 
 	bus.SetRuntimeIngressDispatchGate(controller)
 
 	eventID := uuid.NewString()
-	err = bus.Publish(ctx, eventtest.PersistedProjection(
+	err = bus.Publish(ctx, eventtest.RootIngress(
 		eventID,
 		events.EventType("item.received"),
 		"api.v1",

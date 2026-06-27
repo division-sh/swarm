@@ -1303,7 +1303,7 @@ func (s *mutatingProbeMailboxStore) DecideV1MailboxItem(ctx context.Context, dec
 			}
 			result.DownstreamSubscribers = &subscribers
 			result.DownstreamSubscriberSource = strings.TrimSpace(decision.ApprovalEventSubscriberSource)
-			if err := decision.ApprovalEventPublish(ctx, eventtest.PersistedProjection(eventID,
+			if err := decision.ApprovalEventPublish(ctx, eventtest.RootIngress(eventID,
 				events.EventType(decision.ApprovalEventType),
 				"mailbox", "", json.RawMessage(`{"mailbox_id":"mailbox-1"}`), 0, "", "", events.EventEnvelope{}, decision.Now)); err != nil {
 				return store.APIIdempotencyCompletion{}, err

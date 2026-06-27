@@ -810,7 +810,7 @@ func TestAccumulatorCompletionOutcomeSurface_RoundTripsThroughObservabilityReade
 		if err != nil {
 			t.Fatalf("marshal payload: %v", err)
 		}
-		if err := rt.Bus.Publish(ctx, eventtest.PersistedProjection(
+		if err := rt.Bus.Publish(ctx, eventtest.RootIngress(
 			uuid.NewString(),
 			events.EventType("score.received"),
 			"",
