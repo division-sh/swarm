@@ -196,6 +196,28 @@ func TestResolveAllowsParentConnectToOwnPinDeclaredOutput(t *testing.T) {
 	}
 }
 
+func TestResolveFailsClosedForUnknownProducerTargetFlowEvenWithParentConnect(t *testing.T) {
+	result := Resolve(ResolutionInput{
+		Source:    testProducerConnectSource(),
+		FlowID:    "producer",
+		EventType: "shared.ready",
+		Emit: runtimecontracts.EmitSpec{
+			Target: runtimecontracts.EmitTargetSpec{
+				Flow:  "missing-consumer",
+				Match: map[string]runtimecontracts.ExpressionValue{"entity_id": runtimecontracts.RefExpression("payload.entity_id")},
+			},
+		},
+		MatchValues: map[string]string{"entity_id": "entity-1"},
+	}, events.NewProjectionEvent("", "shared.ready", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+
+	if result.Failure != FailureTargetUnknownFlow {
+		t.Fatalf("Failure = %q, want %q", result.Failure, FailureTargetUnknownFlow)
+	}
+	if got := result.Event.TargetRoute(); !got.Empty() {
+		t.Fatalf("Event target = %#v, want empty on unknown producer target flow", got)
+	}
+}
+
 func TestResolveAllowsExplicitInstanceTargetEscape(t *testing.T) {
 	result := Resolve(ResolutionInput{
 		Source:    testProducerCommonPathSource(),
