@@ -174,6 +174,50 @@ func TestResolveHTTPURLTemplatePreservesCompleteURL(t *testing.T) {
 	}
 }
 
+func TestResolveHTTPURLTemplatePreservesURLBaseAndAuthorityPlaceholders(t *testing.T) {
+	env := map[string]any{
+		"credentials": map[string]any{
+			"base_url": "https://api.example.com:8443",
+		},
+		"input": map[string]any{
+			"scheme": "https",
+			"host":   "api.example.com:8443",
+			"query":  "agentic orchestration",
+		},
+	}
+	for _, tt := range []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{
+			name: "base URL placeholder with fixed path",
+			raw:  "{{credentials.base_url}}/v1/search?q={{input.query}}",
+			want: "https://api.example.com:8443/v1/search?q=agentic%20orchestration",
+		},
+		{
+			name: "scheme placeholder",
+			raw:  "{{input.scheme}}://api.example.com/v1/search?q={{input.query}}",
+			want: "https://api.example.com/v1/search?q=agentic%20orchestration",
+		},
+		{
+			name: "authority placeholder",
+			raw:  "https://{{input.host}}/v1/search?q={{input.query}}",
+			want: "https://api.example.com:8443/v1/search?q=agentic%20orchestration",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolveHTTPURLTemplate(tt.raw, env)
+			if err != nil {
+				t.Fatalf("resolveHTTPURLTemplate: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("resolved URL = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestExecutor_CustomWebSearchEncodesHTTPURLTemplateComponents(t *testing.T) {
 	query := `to:karpathy (agent OR "agentic")`
 	var sawEscapedPath string

@@ -4682,6 +4682,8 @@ tool_model:
           url: string — URL template. Supports {{input.field_name}} substitution. Embedded substitutions inside the
             URL are percent-encoded as URL components by the runtime before request construction. Query-component
             substitutions encode spaces as `%20`, not `+`; path-component substitutions are escaped as path segments.
+            Substitutions that provide the URL scheme, authority, or an absolute base URL are preserved as URL syntax rather
+            than path-escaped.
             If the full url value is exactly one template variable, for example `{{input.url}}`, the resolved value is
             treated as a complete URL and is not component-encoded.
         optional:

@@ -288,16 +288,19 @@ func resolveHTTPURLTemplate(raw string, env map[string]any) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		builder.WriteString(escapeHTTPURLTemplateComponent(raw, match[0], asString(value)))
+		builder.WriteString(escapeHTTPURLTemplateComponent(raw, match[0], match[1], asString(value)))
 		last = match[1]
 	}
 	builder.WriteString(raw[last:])
 	return builder.String(), nil
 }
 
-func escapeHTTPURLTemplateComponent(raw string, offset int, value string) string {
-	if httpURLTemplateOffsetInQuery(raw, offset) {
+func escapeHTTPURLTemplateComponent(raw string, start, end int, value string) string {
+	if httpURLTemplateOffsetInQuery(raw, start) {
 		return strings.ReplaceAll(url.QueryEscape(value), "+", "%20")
+	}
+	if httpURLTemplatePlaceholderInURLBaseOrAuthority(raw, start, end, value) {
+		return value
 	}
 	return url.PathEscape(value)
 }
@@ -309,6 +312,31 @@ func httpURLTemplateOffsetInQuery(raw string, offset int) bool {
 	}
 	fragmentStart := strings.Index(raw, "#")
 	return fragmentStart < 0 || offset < fragmentStart
+}
+
+func httpURLTemplatePlaceholderInURLBaseOrAuthority(raw string, start, end int, value string) bool {
+	prefix := raw[:start]
+	suffix := raw[end:]
+	if strings.HasPrefix(suffix, "://") {
+		return true
+	}
+	if strings.HasSuffix(prefix, "://") {
+		return true
+	}
+	schemeIndex := strings.LastIndex(prefix, "://")
+	if schemeIndex >= 0 {
+		authorityPrefix := prefix[schemeIndex+len("://"):]
+		return !strings.ContainsAny(authorityPrefix, "/?#")
+	}
+	if start == 0 {
+		return httpURLTemplateValueHasSchemeAuthority(value)
+	}
+	return false
+}
+
+func httpURLTemplateValueHasSchemeAuthority(value string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	return err == nil && parsed.Scheme != "" && parsed.Host != ""
 }
 
 func lookupTemplatePath(env map[string]any, path string) (any, error) {
