@@ -120,6 +120,45 @@ func TestExecutor_HTTPToolUsesImportedPackageCredentialBinding(t *testing.T) {
 	}
 }
 
+func TestExecutor_HTTPToolUsesImportedPackageCredentialBindingForRenderedActorID(t *testing.T) {
+	var sawAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawAuth = r.Header.Get("Authorization")
+		if want := "Bearer tenant-secret"; sawAuth != want {
+			t.Fatalf("Authorization = %q, want %q", sawAuth, want)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	}))
+	defer server.Close()
+
+	source := loadToolImportDependencySource(t, toolImportDependencyOptions{
+		serverURL:      server.URL,
+		credentialBind: "        provider_key: tenant_provider_key\n",
+	})
+	store, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	if err := store.Set(context.Background(), "tenant_provider_key", "tenant-secret"); err != nil {
+		t.Fatalf("Set tenant_provider_key: %v", err)
+	}
+	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source, Credentials: store})
+	ctx := models.WithActor(context.Background(), models.AgentConfig{
+		ID:       "worker-agent-rendered",
+		FlowPath: "worker/instance-1",
+		Tools:    []string{"send_provider"},
+	})
+
+	out, err := exec.Execute(ctx, "send_provider", map[string]any{})
+	if err != nil {
+		t.Fatalf("Execute(send_provider): %v", err)
+	}
+	if got := out.(map[string]any)["ok"]; got != true {
+		t.Fatalf("result ok = %#v, want true", got)
+	}
+}
+
 func TestExecutor_HTTPToolFailsClosedWhenImportedCredentialBindingMissing(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		t.Fatal("HTTP server should not be called when imported credential binding is missing")
@@ -165,7 +204,7 @@ func TestExecutor_NativeWebSearchUsesImportedPolicyAndCredentialBinding(t *testi
 		t.Fatalf("Set tenant_provider_key: %v", err)
 	}
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source, Credentials: store})
-	actor := models.AgentConfig{ID: "worker-agent", NativeTools: models.NativeToolConfig{WebSearch: true}}
+	actor := models.AgentConfig{ID: "worker-agent-rendered", FlowPath: "worker/instance-1", NativeTools: models.NativeToolConfig{WebSearch: true}}
 
 	cfg, err := exec.resolveWebSearchProviderConfig(actor)
 	if err != nil {

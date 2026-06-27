@@ -441,12 +441,7 @@ func (e *Executor) resolveWebSearchProviderConfig(actor models.AgentConfig) (web
 	e.mu.RLock()
 	source := e.workflowSource
 	e.mu.RUnlock()
-	flowID := ""
-	if source != nil && strings.TrimSpace(actor.ID) != "" {
-		if agentSource, ok := source.AgentContractSource(actor.ID); ok {
-			flowID = strings.TrimSpace(agentSource.FlowID)
-		}
-	}
+	flowID := emitActorFlowID(source, actor, "")
 	return resolveWebSearchProviderConfigFromSourceForFlow(source, flowID)
 }
 

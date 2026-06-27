@@ -83,6 +83,43 @@ func TestImportBoundaryCredentialStoreKeyRequiresDeclaredBinding(t *testing.T) {
 	}
 }
 
+func TestImportBoundaryCredentialStoreKeyUsesExplicitActorFlowContext(t *testing.T) {
+	source := loadImportBoundaryDependencyFixture(t, importBoundaryDependencyFixtureOptions{
+		policyRequires:     "  policy: [provider.threshold]\n",
+		policyBind:         "        provider.threshold: parent.policy.provider.threshold\n",
+		credentialRequires: "  credentials: [provider_key]\n",
+		credentialBind:     "        provider_key: tenant_provider_key\n",
+	})
+
+	if got, mapped := CredentialStoreKeyForActorFlow(source, "worker-agent-instance", "worker", "provider_key"); !mapped || got != "tenant_provider_key" {
+		t.Fatalf("CredentialStoreKeyForActorFlow(provider_key) = (%q, %v), want tenant_provider_key, mapped", got, mapped)
+	}
+	if got, mapped := CredentialStoreKeyForActor(source, "worker-agent-instance", "provider_key"); mapped || got != "provider_key" {
+		t.Fatalf("CredentialStoreKeyForActor without flow context = (%q, %v), want raw unmapped key", got, mapped)
+	}
+}
+
+func TestImportBoundaryDependencyContextMatchesDescendantPackageFlow(t *testing.T) {
+	source := loadImportBoundaryDescendantPackageDependencyFixture(t)
+	flow, ok := source.FlowScopeByID("worker")
+	if !ok {
+		t.Fatal("worker flow scope missing")
+	}
+	if got := filepath.ToSlash(flow.PackageKey); got != "packages/vendor/subpkg" {
+		t.Fatalf("worker PackageKey = %q, want descendant packages/vendor/subpkg", flow.PackageKey)
+	}
+
+	if got, ok := PolicyValueForFlow(source, "worker", "provider.threshold"); !ok || got.Value != 0.91 {
+		t.Fatalf("descendant provider.threshold = (%#v, %v), want bound parent value 0.91", got.Value, ok)
+	}
+	if got, mapped := CredentialStoreKeyForFlow(source, "worker", "provider_key"); !mapped || got != "tenant_provider_key" {
+		t.Fatalf("descendant CredentialStoreKeyForFlow(provider_key) = (%q, %v), want tenant_provider_key, mapped", got, mapped)
+	}
+	if got, mapped := CredentialStoreKeyForFlow(source, "worker", "undeclared_key"); !mapped || got != "" {
+		t.Fatalf("descendant CredentialStoreKeyForFlow(undeclared_key) = (%q, %v), want empty mapped fail-closed", got, mapped)
+	}
+}
+
 func importBoundaryDependencyIssueContains(issues []ImportBoundaryDependencyIssue, kind, dependency string) bool {
 	for _, issue := range issues {
 		if issue.Kind == kind && issue.Dependency == dependency {
@@ -151,6 +188,66 @@ provider:
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "worker", "tools.yaml"), "{}\n")
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "worker", "agents.yaml"), "{}\n")
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "worker", "events.yaml"), "{}\n")
+
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return Wrap(bundle)
+}
+
+func loadImportBoundaryDescendantPackageDependencyFixture(t *testing.T) Source {
+	t.Helper()
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
+	root := t.TempDir()
+
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: import-boundary-descendant-dependencies
+version: "1.0.0"
+packages:
+  - path: packages/vendor
+    bind:
+      policy:
+        provider.threshold: parent.policy.provider.threshold
+      credentials:
+        provider_key: tenant_provider_key
+`)
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: import-boundary-descendant-dependencies\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "policy.yaml"), `
+provider:
+  threshold: 0.91
+`)
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
+
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "packages", "vendor", "package.yaml"), `
+name: vendor-package
+version: "1.0.0"
+requires:
+  policy: [provider.threshold]
+  credentials: [provider_key]
+packages:
+  - path: subpkg
+`)
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "packages", "vendor", "subpkg", "package.yaml"), `
+name: vendor-subpackage
+version: "1.0.0"
+flows:
+  - id: worker
+    flow: worker
+    mode: static
+`)
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "packages", "vendor", "subpkg", "flows", "worker", "schema.yaml"), "name: worker\nmode: static\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "packages", "vendor", "subpkg", "flows", "worker", "policy.yaml"), "{}\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "packages", "vendor", "subpkg", "flows", "worker", "tools.yaml"), "{}\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "packages", "vendor", "subpkg", "flows", "worker", "agents.yaml"), "{}\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "packages", "vendor", "subpkg", "flows", "worker", "events.yaml"), "{}\n")
 
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
